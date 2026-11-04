@@ -24,10 +24,14 @@ import type { EngraveJob } from '@/types/engraveJob';
 import type { Mount } from '@/engine/cnc/setups/types';
 import type { FixtureEnvelope } from '@/engine/cnc/setup';
 import type { ObstacleBox } from '@/engine/cnc/setup';
-import type { CycleTerms, ToolpathIR } from '@/engine/cnc/cam/ir';
-import type { FeatureSource, FeatureTree, SetupFrame } from './features';
+import type { Tool } from '@/engine/cnc/tool';
+import { concatToolpathIR, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import type { OffsetFn } from '@/engine/cnc/cam/pocket';
+import type { FeatureSource, FeatureTree, PocketNode, SetupFrame } from './features';
+import { regionRefs } from './features';
 import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances } from './types';
 import type { CutterCandidates, PlannedOpKind } from './sequence';
+import { pocket } from './ops/pocket';
 
 /** One ring (outer boundary or a hole); `pocket.ts`'s `Polygons` is `Polygon[]`. NEW — no existing equivalent. */
 export type Polygon = [number, number][];
@@ -185,4 +189,78 @@ export interface PlanModelCamOptions {
 
 export async function planModelCam(_input: ModelPlanInput, _opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
   throw new Error('cam/model/plan: planModelCam() not implemented (#956 skeleton — #957/#959/#960 fill it in)');
+}
+
+const allPockets = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [n, ...allPockets(n.children)]);
+
+export interface PlanPocketsOptions {
+  /** The real Clipper2 offset, or a test fake — `pocketLoops`' own contract, carried through unchanged. */
+  offset: OffsetFn;
+  /** House cutters, largest first; this is NOT #961's real picker (see this function's own note). */
+  houseFlats: readonly Tool[];
+  stepDownMm: number;
+  feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
+  rapid: RapidEstimate;
+  spindleRpm: number;
+  air: boolean;
+}
+
+export interface PlanPocketsResult {
+  ops: PlannedOp[];
+  /** One program per cutter actually used, in `ops` order, concatenated. */
+  programs: Map<string, ToolpathIR>;
+  /** A node too narrow for every cutter in `houseFlats`, as a stated finding naming the limiting number. */
+  skipped: string[];
+}
+
+/**
+ * Every non-through floored `PocketNode` in a `FeatureTree`, cut with the largest `houseFlats`
+ * entry that fits (by `node.narrowest`). **This is a placeholder for #961's real cutter sequence**
+ * (`sequence.ts`'s `chooseSequence`), not a re-implementation of it: C's picker assigns ONE
+ * primary (+ rest) cutter to every pocket feature in one `SequenceDemand`, which cannot serve a
+ * part whose features span a range too wide for any single primary + rest pair (E's 6621584766 —
+ * the tray's six ~1 mm features alongside its 6+ mm ones). Resolving that is #961's own call
+ * (raised on #956/#961), not decided here by adding smaller cutters speculatively.
+ *
+ * Moved here from the acceptance spec (`opsAcceptance959.spec.ts`) so the product, not the test
+ * harness, is what gets measured — the spec now calls this directly.
+ */
+export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions): PlanPocketsResult {
+  const refs = regionRefs(tree);
+  const ops: PlannedOp[] = [];
+  const programs = new Map<string, ToolpathIR>();
+  const skipped: string[] = [];
+  const sorted = [...opts.houseFlats].sort((a, b) => (b.diameter ?? 0) - (a.diameter ?? 0));
+
+  for (const node of allPockets(tree.pockets)) {
+    if (node.through || node.floors.length === 0) continue;
+    const ref = refs.find((r) => r.id === node.id);
+    if (ref === undefined) { skipped.push(`${node.id}: no RegionRef`); continue; }
+    const cutter = sorted.find((t) => node.narrowest >= (t.diameter ?? 0));
+    if (cutter === undefined) {
+      skipped.push(`${node.id}: not cut — needs a cutter ≤ ${node.narrowest.toFixed(2)} mm (house offers ${sorted.map((t) => `⌀${t.diameter}`).join(', ')})`);
+      continue;
+    }
+    const diameter = cutter.diameter ?? 1;
+    const outcome = pocket({
+      cutter,
+      node,
+      region: { ...ref, obstacles: [], regionClearanceZ: tree.frame.partTop + 5 },
+      stepOverMm: Math.min(diameter / 4, diameter / 2),
+      stepDownMm: opts.stepDownMm,
+      feeds: opts.feeds,
+      offset: opts.offset,
+      safeZMm: tree.frame.partTop + 10,
+      hopZMm: tree.frame.partTop + 3,
+      toolNumber: cutter.number ?? 1,
+      spindleRpm: opts.spindleRpm,
+      air: opts.air,
+      rapid: opts.rapid,
+    });
+    ops.push({ kind: 'pocket', region: { ...ref, obstacles: [], regionClearanceZ: tree.frame.partTop + 5 }, outcome });
+    const key = outcome.cutter;
+    const existing = programs.get(key);
+    programs.set(key, existing === undefined ? outcome.ir : concatToolpathIR(existing, outcome.ir));
+  }
+  return { ops, programs, skipped };
 }
