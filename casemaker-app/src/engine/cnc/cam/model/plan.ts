@@ -871,3 +871,50 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   );
   return { ops, notes };
 }
+
+/**
+ * #959/#966's ONE INTERFACE — a whole `FeatureTree` planned and posted through this engine:
+ * pockets and through-holes by the costed chain, the curved remainder by the ruling's pipeline,
+ * the rims by the V. The programs come back per cutter, concatenated in EXECUTION order.
+ *
+ * THE FREEING CUT STAYS LAST. `planPocketsForTree` already posts the contour after its own
+ * pockets; the curved stages must therefore run BEFORE it, not after — a rest or finish cutting a
+ * part the contour has just freed is the defect #959's ruling 1 names. So the pocket result's ops
+ * are split around the contour and the tree's order is: pockets, curved, rims, freeing contour.
+ */
+export interface PlanTreeOptions {
+  pockets: Omit<PlanPocketsOptions, 'offset'>;
+  curved: Omit<PlanCurvedOptions, 'offset'>;
+  offset: OffsetFn;
+}
+
+export interface PlanTreeResult {
+  ops: PlannedOp[];
+  /** One program per cutter, in the order the cutters are first posted. */
+  programs: Map<string, ToolpathIR>;
+  unreachable: string[];
+  notes: string[];
+}
+
+export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): PlanTreeResult {
+  const pocketResult = planPocketsForTree(tree, { ...opts.pockets, offset: opts.offset });
+  const curvedResult = planCurvedForTree(tree, { ...opts.curved, offset: opts.offset });
+  const freeing = pocketResult.ops.filter((op) => op.kind === 'contour');
+  const ops: PlannedOp[] = [
+    ...pocketResult.ops.filter((op) => op.kind !== 'contour'),
+    ...curvedResult.ops,
+    ...freeing,
+  ];
+  const programs = new Map<string, ToolpathIR>();
+  for (const op of ops) {
+    const key = op.outcome.cutter;
+    const existing = programs.get(key);
+    programs.set(key, existing === undefined ? op.outcome.ir : concatToolpathIR(existing, op.outcome.ir));
+  }
+  return {
+    ops,
+    programs,
+    unreachable: pocketResult.unreachable,
+    notes: [...pocketResult.notes, ...curvedResult.notes],
+  };
+}

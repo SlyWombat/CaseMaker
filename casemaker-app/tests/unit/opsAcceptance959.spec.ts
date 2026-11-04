@@ -61,7 +61,7 @@ import { measurePostedProgram, combinePostedFacts } from '../tools/postedFacts';
 import { scoreSevenLines, type CutIntoScore, type ProgramScore, type SevenLineCard } from '../tools/sevenLines';
 import { makerablesRoot, readMakerablesManifest, resolveMakerablesCard } from '../tools/makerables';
 import { measureVendorCard } from '../tools/cardMeasurement';
-import { planPocketsForTree, type PlanPocketsResult, type SetupPlan } from '@/engine/cnc/cam/model/plan';
+import { planPocketsForTree, planTreePrograms, type PlanPocketsResult, type SetupPlan } from '@/engine/cnc/cam/model/plan';
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
@@ -911,6 +911,63 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
 
 const TRAY = process.env.CM_959_TRAY_STEP;
 const ORGANIZER = process.env.CM_959_ORGANIZER_STEP;
+
+describe.skipIf(TRAY === undefined)('#959 acceptance — tool tray 70, the WHOLE tree through the one interface', () => {
+  it('plans pockets, the curved remainder and rims together, with the freeing contour last and every program posted', async () => {
+    const { tree, mesh } = await placedTree(TRAY!, [110, 140], -1.2);
+    let min: [number, number, number] = [Infinity, Infinity, Infinity];
+    let max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+    for (let v = 0; v < mesh.positions.length; v += 3) {
+      for (let a = 0; a < 3; a++) {
+        min[a] = Math.min(min[a]!, mesh.positions[v + a] as number);
+        max[a] = Math.max(max[a]!, mesh.positions[v + a] as number);
+      }
+    }
+    const geometry = { triangles: { positions: mesh.positions, indices: mesh.indices, triangleCount: mesh.indices.length / 3, bbox: { min, max } } };
+    const flat = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+    const ball = flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6', shape: 'ball', typeText: 'Ball End' });
+    const vbit = flatEndMill(3.175, { number: 3, id: 'v90', name: '91 chamfer', shape: 'chamfer', typeText: 'Chamfer', angle: 90, halfAngle: 45, tipDiameter: 0.1 });
+    const result = planTreePrograms(tree, {
+      offset: makeClipperOffset(tl),
+      pockets: {
+        houseFlats: [flat, flatEndMill(3.175, { number: 4, id: 'flat-3.175', name: 'flat-3.175' })],
+        stepDownMm: 1.5,
+        feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
+        rapid: Z1.rapidEstimate,
+        toolChangeSeconds: TOOL_CHANGE_SECONDS,
+        spindleRpm: 12000,
+        air: true,
+      },
+      curved: {
+        geometry, flat, ball, vbit,
+        stepDownMm: 1.5, bandMm: 0.3, stepOverMm: 3,
+        feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
+        rapid: Z1.rapidEstimate, spindleRpm: 12000, air: true,
+        safeZMm: 12, hopZMm: 3,
+        edgeBreak: { legMm: 0.5 },
+        toolNumberFor: (t: Tool) => t.number ?? 1,
+      },
+    });
+    const kinds = result.ops.map((op) => op.kind);
+    expect(kinds, `unreachable: ${result.unreachable.join('; ')}`).toContain('pocket');
+    expect(kinds).toContain('rough');
+    expect(kinds).toContain('finish');
+    if (tree.rims.length > 0) expect(kinds).toContain('chamfer');
+    // THE FREEING CUT IS LAST: nothing cuts a part the contour has just released.
+    expect(kinds[kinds.length - 1]).toBe('contour');
+    expect(result.programs.size).toBeGreaterThan(0);
+    const ctx: PostContext = {
+      jobName: 'tray-tree', stock: { length: 110, width: 140, thickness: 27.2 },
+      materialName: 'hardwood', zDatum: 'probed-top-face', origin: 'topFrontLeft',
+      camVersion: 'test-959', toolKey: 'multi',
+    };
+    for (const [key, ir] of result.programs) {
+      const text = postedTextFor(key, ir, ctx);
+      expect(text.length, `${key} posted no text`).toBeGreaterThan(100);
+    }
+    console.log(`whole tree: ${result.ops.length} ops (${[...new Set(kinds)].join(', ')}), ${result.programs.size} programs, rims ${tree.rims.length}, remainder ${tree.remainder.length}`);
+  }, 900_000);
+});
 
 describe.skipIf(TRAY === undefined)('#959 acceptance — tool tray 70, pocket + contour', () => {
   it('plans and posts every non-through floored pocket and the outer contour, cycle/air/rapids/cutters measured from the posted text', async () => {
