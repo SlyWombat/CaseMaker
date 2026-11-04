@@ -937,3 +937,72 @@ describe.skipIf(TRAY !== undefined || ORGANIZER !== undefined)('#959 acceptance 
     expect(TRAY ?? ORGANIZER).toBeUndefined();
   });
 });
+
+// #959 integration — THE CURVED PIPELINE'S EVERY OP, entered here in the same commit that wired it
+// into `plan.ts` (the manager's rule after E's a46f0358 run). A ramp is the remainder region: the
+// flat roughs it, the ball runs one final level, the pencil follows its (nonexistent) creases
+// without posting a cut, the V breaks the tree's rim — and with a rest flat offered, the rest pass
+// joins before the ball.
+describe('#959 acceptance — the curved pipeline (every op entered)', () => {
+  /** A plane z = slope * x over the region, margin-extended so the drop-cutter sees no edge. */
+  function rampGeometry(slope: number): { geometry: { triangles: { positions: Float32Array; indices: Uint32Array; triangleCount: number; bbox: { min: [number, number, number]; max: [number, number, number] } } }; footprint: Polygons } {
+    const x0 = -10, x1 = 50, y0 = -20, y1 = 20;
+    const z0 = slope * x0, z1 = slope * x1;
+    return {
+      geometry: {
+        triangles: {
+          positions: Float32Array.from([x0, y0, z0, x1, y0, z1, x1, y1, z1, x0, y0, z0, x1, y1, z1, x0, y1, z0]),
+          indices: Uint32Array.from([0, 1, 2, 3, 4, 5]),
+          triangleCount: 2,
+          bbox: { min: [x0, y0, Math.min(z0, z1)], max: [x1, y1, Math.max(z0, z1)] },
+        },
+      },
+      footprint: [[[2, -12], [42, -12], [42, 12], [2, 12]]],
+    };
+  }
+
+  it('roughs, optionally rests, finishes one level, pencils, and breaks the rim', async () => {
+    const { planCurvedForTree } = await import('@/engine/cnc/cam/model/plan');
+    const { geometry, footprint } = rampGeometry(-0.2);
+    const rim = { id: 'rim-1', polyline: [[[2, -12], [42, -12], [42, 12], [2, 12], [2, -12]] as [number, number][]][0]!, z: 0, of: 'contour' as const, kind: 'sharp' as const };
+    const tree: FeatureTree = {
+      frame: { up: [0, 0, 1], stockTop: 0, partTop: 0, partBottom: -8 },
+      levels: [-8],
+      top: { z: 0, floors: [], area: 0 },
+      contour: { outline: footprint, area: 800, zTo: -8, frees: true, shoulders: [] },
+      pockets: [],
+      rims: [rim],
+      remainder: [{
+        id: 'scoop', footprint, area: 800, zTop: 0, zBottom: -8,
+        triangles: new Uint32Array(), slopeDeg: [0, 12], slopeMedianDeg: 11, in: 'top',
+      }],
+      unreachable: [],
+      report: { source: 'mesh', patches: 1, planarArea: 800, remainderArea: 800, tolerances: {} as never, slivers: [], notes: [] },
+    };
+    const flat = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+    const ball = flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6', shape: 'ball', typeText: 'Ball End' });
+    const small = flatEndMill(3.175, { number: 3, id: 'flat-3.175', name: 'flat-3.175' });
+    const vbit = flatEndMill(3.175, { number: 4, id: 'v90', name: '90 chamfer', shape: 'chamfer', typeText: 'Chamfer', angle: 90, halfAngle: 45, tipDiameter: 0.1 });
+    const base = {
+      geometry, offset: makeClipperOffset(tl),
+      flat, ball, vbit,
+      stepDownMm: 1.5, bandMm: 0.3, stepOverMm: 3,
+      feeds: { feedMmPerMin: 900, plungeFeedMmPerMin: 250 },
+      rapid: Z1.rapidEstimate, spindleRpm: 12000, air: true, safeZMm: 10, hopZMm: 3,
+      edgeBreak: { legMm: 0.5 },
+      toolNumberFor: (t: Tool) => (t.number ?? 1),
+    };
+    const noRest = planCurvedForTree(tree, base);
+    expect(noRest.ops.map((o) => o.kind)).toEqual(['rough', 'finish', 'pencil', 'chamfer']);
+    for (const op of noRest.ops) {
+      if (op.kind === 'pencil') continue; // the ramp has no crease: stated by an empty pass, not a cut
+      expect(op.outcome.ir.operations[0]!.moves.length, `${op.kind} posted no moves`).toBeGreaterThan(0);
+    }
+    const chamferZ = noRest.ops.find((o) => o.kind === 'chamfer')!.outcome.ir.operations[0]!.moves.filter((m) => m.kind === 'feed').map((m) => m.z);
+    expect(Math.min(...chamferZ)).toBeCloseTo(-0.5, 6);
+
+    const withRest = planCurvedForTree(tree, { ...base, restFlat: small });
+    expect(withRest.ops.map((o) => o.kind)).toEqual(['rough', 'rest', 'finish', 'pencil', 'chamfer']);
+    expect(withRest.notes.join(' ')).toContain('curved pipeline follows the ruling');
+  }, 120_000);
+});
