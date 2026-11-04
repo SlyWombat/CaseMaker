@@ -2,14 +2,15 @@
  * #961 — THE CUTTER SEQUENCE, CHOSEN BY COST.
  *
  * The vendor's shape on the tray reference (plan v2 §1, #955): the LARGEST FLAT that fits the part
- * roughs what it enters, each next SMALLER flat is added only for what the previous cannot reach
- * (a tighter corner, a narrower opening — the op's "needs a cutter ≤ N mm" report) while it pays
- * and the cutter budget allows, a ball finishes the curved remainder at the stated scallop, and a
- * chamfer breaks the rims. Makera runs 4 cutters in 47.6 min on that part; the sequence this
- * module returns must stay at or under the vendor's count + 1 and its price at or under 2× the
- * vendor's cycle (plan v2 §3). A pocket no cutter in that budget enters is STATED
+ * roughs what it enters, each next SMALLER flat is added for what the previous cannot reach (a
+ * tighter corner, a narrower opening — the op's "needs a cutter ≤ N mm" report) while a cutter in
+ * the set can cover it and the cutter budget allows, a ball finishes the curved remainder at the
+ * stated scallop, and a chamfer breaks the rims. Makera runs 4 cutters in 47.6 min on that part;
+ * the sequence this module returns must stay at or under the vendor's count + 1 and its price at
+ * or under 2× the vendor's cycle (plan v2 §3). A pocket no cutter in the budget enters is STATED
  * (`unreachable`), never allowed to shrink the primary — E measured the vendor leaving the tray's
- * ~1 mm features too.
+ * ~1 mm features too — and never counted against a chain (`leftBehind`): every chain would carry
+ * it, so counting it lets price leave cuttable pockets uncut.
  *
  * THE METHOD, and where it comes from (prior-art note on #961; Kiri:Moto, FreeCAD Path and
  * OpenCamLib are LOCAL REFERENCES only — the methods are re-implemented from their descriptions,
@@ -121,6 +122,14 @@ export interface CandidateSequence {
    * complete chain, and a demand whose every chain leaves one names it.
    */
   unreachable: string[];
+  /**
+   * Of `unreachable`, how many a cutter in the candidate set COULD have covered — this chain left
+   * them. Ranked before price: an uncut cuttable pocket is a different part, not a cheaper plan
+   * (E's organizer run on ec77465a: 16 pockets no house flat can enter made every candidate
+   * "incomplete", so the complete-first rule tied and price left 27 cuttable pockets uncut).
+   * Zero is a complete plan; the pockets no cutter can reach are the part's, not the chain's.
+   */
+  leftBehind: number;
 }
 
 /**
@@ -172,8 +181,10 @@ export interface SequenceOptions {
 export interface ConsideredSequence {
   steps: { kind: PlannedOpKind; cutterKey: string }[];
   cost: number | null;
-  /** How many demanded pockets this candidate left uncut (0 = complete). */
+  /** How many demanded pockets this candidate left uncut, including the part's own unreachable ones. */
   unreachable: number;
+  /** Of those, how many a cutter in the set could have covered — what the rank compares. */
+  leftBehind: number;
   reason: string;
 }
 
@@ -325,7 +336,9 @@ interface ChainLink {
  * cutter ≤ N mm" report), and it is added while the budget allows. EVERY prefix is a candidate, so
  * one more cutter has to earn its change on price; a pocket no flat in the candidate set can cover
  * is STATED in `unreachable` and never shrinks the primary (E measured the vendor leaving the
- * tray's ~1 mm features: only the chamfer tip reaches them).
+ * tray's ~1 mm features: only the chamfer tip reaches them). Such a pocket is the part's own
+ * limitation, so it does not count as this chain's incompleteness (`leftBehind`): the tie it used
+ * to create made every candidate equal and price chose the primary alone over a cuttable rest.
  *
  * Every candidate is crossed with each usable ball (when the part is curved) and each usable
  * chamfer (when it has rims), and pruned on geometry alone before any IR is built.
@@ -356,11 +369,20 @@ export function candidateSequences(
   const reachesCurved = (c: CandidateCutter): boolean => curvedFeatures.every((f) => reachesFeature(c.tool, f));
   const canRoughPocket = (c: CandidateCutter): boolean =>
     pocketFeatures.some((f) => entersFeature(c.tool, f) && reachesFeature(c.tool, f));
-  const primaries = flatsDesc.filter((c) => reachesCurved(c) && (pocketFeatures.length === 0 || canRoughPocket(c)));
+  // The LARGEST cutter that can rough the part is the ONE primary — "largest flat roughs what it
+  // enters; next smaller for what the previous cannot reach" (the #961 ruling). A smaller flat
+  // that also roughs a pocket is a REST, never a second primary: without this the ⌀3.175 chain is
+  // complete on the organizer too (it covers the 27 the ⌀6 cannot enter), ties on `leftBehind`
+  // and, being cheaper, wins — shrinking the whole job, 26.8 mm contour included, to a 3 mm cutter.
+  const maximal = (cs: CandidateCutter[]): CandidateCutter[] => {
+    const top = Math.max(...cs.map((c) => diameterOf(c.tool) ?? 0));
+    return cs.filter((c) => (diameterOf(c.tool) ?? 0) >= top - EPS);
+  };
+  const primaries = maximal(flatsDesc.filter((c) => reachesCurved(c) && (pocketFeatures.length === 0 || canRoughPocket(c))));
   // A part with pockets needs SOME round tool; a ball is the fallback only when no flat can.
   const roughs: CandidateCutter[] = primaries.length > 0
     ? primaries
-    : ballsAll.filter((c) => reachesCurved(c) && (pocketFeatures.length === 0 || canRoughPocket(c)));
+    : maximal(ballsAll.filter((c) => reachesCurved(c) && (pocketFeatures.length === 0 || canRoughPocket(c))));
 
   if (pocketFeatures.length > 0 && roughs.length === 0) return [];
   if (curvedFeatures.length > 0 && balls.length === 0) return [];
@@ -369,6 +391,14 @@ export function candidateSequences(
   const ballChoices: (CandidateCutter | null)[] = curvedFeatures.length > 0 ? balls : [null];
   const chamferChoices: (CandidateCutter | null)[] = rimFeatures.length > 0 ? chamfers : [null];
 
+  // The pockets SOME cutter in this part's chain could cover. A pocket outside this set is the
+  // part's own limitation (the organizer's 16 sub-3.175 holes) and must not count against any
+  // candidate — every chain carries it, so counting it made completeness a tie every time.
+  const chainCutters = [...flatsDesc, ...roughs];
+  const coverable = new Set(
+    pocketFeatures.filter((f) => chainCutters.some((c) => coversFeature(c.tool, f))).map((f) => f.id),
+  );
+
   const out: CandidateSequence[] = [];
   const seen = new Set<string>();
   const add = (steps: SequenceStep[], unreachable: string[]): void => {
@@ -376,7 +406,7 @@ export function candidateSequences(
     const signature = steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
     if (seen.has(signature)) return;
     seen.add(signature);
-    out.push({ steps, unreachable });
+    out.push({ steps, unreachable, leftBehind: unreachable.filter((id) => coverable.has(id)).length });
   };
 
   /** The chain from one primary: each link names the pockets that cutter is needed for. */
@@ -525,9 +555,11 @@ export function priceSequence(
 /** The rank: house before catalogue, rowed feeds before fallback, then the price, then the key. */
 function rankOf(sequence: CandidateSequence, cost: SequenceCost): readonly [number, number, number, number, string] {
   // A COMPLETE chain beats an incomplete one first: an uncut pocket is not a cheaper plan, it is a
-  // different part. Within that, the old order stands (house before catalogue, rowed before
-  // fallback, then price).
-  const incomplete = sequence.unreachable.length > 0 ? 1 : 0;
+  // different part. "Complete" means every pocket a cutter in the set COULD cover is covered —
+  // `leftBehind`, not `unreachable`, or the pockets no cutter can reach would tie every candidate
+  // and price would decide (E's organizer run on ec77465a left 27 cuttable pockets that way).
+  // Within that, the old order stands (house before catalogue, rowed before fallback, then price).
+  const incomplete = sequence.leftBehind;
   const catalogue = sequence.steps.filter((s) => !s.cutter.house).length;
   const fallback = sequence.steps.filter((s) => s.cutter.feeds === 'fallback').length;
   const signature = sequence.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
@@ -569,6 +601,7 @@ export function chooseSequence(
     steps: sequence.steps.map((s) => ({ kind: s.kind, cutterKey: s.cutter.key })),
     cost: cost === null ? null : cost.totalSeconds,
     unreachable: sequence.unreachable.length,
+    leftBehind: sequence.leftBehind,
     reason: cost === null ? 'an op in this sequence could not be planned' : '',
   }));
 
