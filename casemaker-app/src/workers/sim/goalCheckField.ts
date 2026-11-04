@@ -71,30 +71,40 @@ export function goalHeightfieldFor(target: GoalCheckTarget): GoalHeightfield {
 
 /**
  * The goal check an oracle call gets, from the plain input the main thread sent: the sampled
- * heightfield paired with the LIVE session's swept top. When either half is missing the call says
- * so through `unchecked` — a rotary sweep has no flat top, an exact-engine one has no grid, and a
- * target whose bytes are gone cannot be sampled. Never a silent pass.
+ * heightfield paired with the LIVE session's top. When no read exists at all the call says so
+ * through `unchecked` — a rotary sweep keeps its radii in the map frame, a refused sweep owns no
+ * material, and a target whose bytes are gone cannot be sampled. Never a silent pass.
+ *
+ * #964 — THE STAMP IS ROUTE-INDEPENDENT. A flat job the EXACT sweeper took (the tray/organizer
+ * class: many moves, few Z levels) has no column grid, so `sweptTop()` is null; it still has the
+ * program's own timeline, and the page's stamp (`sweptFieldExact`) answers on it exactly as it
+ * does on a flat column. Such a job is CHECKED from the stamp alone — the conservative column
+ * diagnostic is stated absent — rather than reading `unchecked` on the jobs the gate judges.
  */
 export function goalInputFor(live: SimSession, goal: SimGoalCheck): GoalCheckInput {
   if ('unchecked' in goal) return { unchecked: goal.unchecked };
-  // The sweep first: when it has no flat top there is nothing to compare, and the goal does not
-  // need sampling at all (a rotary job's heightfield is never paid for).
-  const sweptTop = live.sweptTop();
-  if (sweptTop === null) {
+  // The sweep's capability first, before paying for the goal's sampling: a rotary or refused
+  // session cannot stamp it at all (a flat column and an exact sweep both can).
+  if (!live.canStampGoal()) {
     return {
       unchecked:
-        'the live sweep has no flat top to compare with — a rotary column grid holds radii and an exact-engine sweep holds no grid at all',
+        'the live sweep cannot stamp the goal — a rotary column grid holds radii in the map frame and a refused sweep owns no material',
     };
   }
+  const sweptTop = live.sweptTop();
   let heightfield: GoalHeightfield;
   try {
     heightfield = goalHeightfieldFor(goal.target);
   } catch (e) {
     return { unchecked: `the goal could not be sampled (${e instanceof Error ? e.message : String(e)})` };
   }
-  // #948 — the page's own read of the same sweep, stamped onto the goal's grid, for the leftover
-  // bands and the pass line. The conservative `sweptTop` stays the cut-into judge.
+  // #948 — the page's own read of the same program, stamped onto the goal's grid: the verdict for
+  // cut-into and the bands alike (since #945). On a flat column it sits beside the conservative
+  // `sweptTop`; on an exact sweep it is the only read there is.
   const field = live.sweptFieldExact(heightfield);
+  if (sweptTop === null && field === null) {
+    return { unchecked: 'the live sweep produced no cut to stamp the goal with — no tool or no cutting move' };
+  }
   const sweptTopExact =
     field === null
       ? null
@@ -106,7 +116,7 @@ export function goalInputFor(live: SimSession, goal: SimGoalCheck): GoalCheckInp
         };
   return {
     heightfield,
-    sweptTop,
+    ...(sweptTop === null ? {} : { sweptTop }),
     ...(sweptTopExact === null ? {} : { sweptTopExact }),
     ...(goal.opts === undefined ? {} : { opts: goal.opts }),
   };

@@ -55,6 +55,8 @@ import { clearTargetObjectMeshCache, readTargetObjectFile } from '@/engine/impor
 import { Z1 } from '@/engine/cnc/machine';
 import type { Tool } from '@/engine/cnc/tool';
 import { createSimSession, type SimSession } from '@/workers/sim/session';
+import { buildTimeline, parseGcode } from '@/engine/cnc';
+import { exactSweptField } from '@/workers/sim/sweptPoint';
 import { clearGoalFieldCache, goalInputFor, GOAL_CHECK_MAX_CELLS, GOAL_CHECK_PITCH_MM } from '@/workers/sim/goalCheckField';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 
@@ -141,8 +143,8 @@ describe('#948 the goal check’s plain input', () => {
     expect(goalCheckForProgram(job, false)).toBeUndefined();
   });
 
-  it('reads a goal with no flat swept top as unchecked, in the report’s own words', () => {
-    const live = { sweptTop: () => null } as unknown as SimSession;
+  it('reads a sweep that cannot stamp the goal at all as unchecked, in the report’s own words', () => {
+    const live = { sweptTop: () => null, canStampGoal: () => false } as unknown as SimSession;
     const check = goalCheckForProgram(
       goalJob(
         { id: 'x', name: 'x.stl', sha256: 'x', format: 'stl', size: { x: 1, y: 1, z: 1 }, position: { x: 0, y: 0, z: 0 }, rotation: 0, enabled: true, role: 'goal' },
@@ -154,7 +156,7 @@ describe('#948 the goal check’s plain input', () => {
     const input = goalInputFor(live, check as SimGoalCheck);
     expect('unchecked' in input).toBe(true);
     if ('unchecked' in input) {
-      expect(input.unchecked).toContain('no flat top');
+      expect(input.unchecked).toContain('cannot stamp the goal');
       const report = goalCutIntoUnchecked(input.unchecked);
       expect(report.ran).toBe(false);
       expect(report.ok).toBe(true); // never a failure — a stated gap
@@ -165,7 +167,7 @@ describe('#948 the goal check’s plain input', () => {
   });
 
   it('reads a target whose bytes are gone as unchecked too', () => {
-    const live = { sweptTop: () => () => 0 } as unknown as SimSession;
+    const live = { sweptTop: () => () => 0, canStampGoal: () => true } as unknown as SimSession;
     const input = goalInputFor(live, {
       target: {
         sha256: 'gone',
@@ -446,6 +448,66 @@ describe('#948 the live session’s swept top', () => {
       session.dispose();
     }
   });
+
+  it('a FLAT job on the exact engine is CHECKED from its own timeline, not unchecked (#964)', async () => {
+    // A flat program under the dense limit routes to the EXACT engine — the tray/organizer class
+    // (many moves, few Z levels). That sweep keeps no column grid: `sweptTop()` is null, and
+    // before #964 the goal check could only say `unchecked` on exactly the jobs the gate judges.
+    // The stamp is route-independent (`exactSweptField` reads the program's own timeline), so the
+    // check must run and carry the page's numbers.
+    const stock = { length: 80, width: 50, thickness: 20 };
+    const imported = await read('relief-plate.stl');
+    const target = targetOf(imported, stock);
+    const job = goalJob(target, stock);
+    const tool = flatEndMill(1, { name: '1 mm flat', fluteLength: 10 });
+    const nc: string[] = ['G21 G90', 'S1000 M3', 'G0 Z5'];
+    for (let row = 0; row < 40; row++) {
+      const y = 12 + row * 0.5;
+      const left = row % 2 === 0;
+      nc.push(`G0 X${left ? 12 : 68} Y${y}`, 'G1 Z-1 F200', `G1 X${left ? 68 : 12} Y${y} F400`);
+    }
+    nc.push('G0 Z5', 'M05', 'M2');
+    const program = nc.join('\n');
+
+    const session = createSimSession(tl);
+    try {
+      const setup = toSetup(job, Z1);
+      const load = session.load(program, setup, tool, Z1.id);
+      expect(load.ok).toBe(true);
+      if (!load.ok) return;
+      // The exact engine: no column grid to read.
+      expect(session.sweptTop()).toBeNull();
+
+      const check = goalCheckForProgram(job, true) as SimGoalCheck;
+      const input = goalInputFor(session, check);
+      expect('heightfield' in input).toBe(true); // RED on a28b78ba: `unchecked` — no flat top
+      if (!('heightfield' in input)) return;
+      expect(input.sweptTop).toBeUndefined();
+
+      // The session's stamp is the page's own read of the SAME program timeline (F's path).
+      const timeline = buildTimeline(parseGcode(program), setup, Z1);
+      const direct = exactSweptField(input.heightfield, timeline, tool);
+      expect(direct).not.toBeNull();
+      const field = session.sweptFieldExact(input.heightfield);
+      expect(field).not.toBeNull(); // RED on a28b78ba: null — the exact live had no stamp
+      const a = field as Float32Array;
+      const b = direct as Float32Array;
+      for (let k = 0; k < b.length; k += 97) expect(a[k]).toBeCloseTo(b[k]!, 6);
+
+      // The oracle runs the check on that stamp and reports the page's numbers, not `unchecked`.
+      const report = session.oracle([], null, undefined, input);
+      expect(report.goalCutInto?.ran).toBe(true);
+      expect(report.goalCutInto?.reason).toBeNull();
+      const directReport = checkGoalCutInto(input.heightfield, null, { leftoverTop: input.sweptTopExact! });
+      expect(report.goalCutInto?.goalCells).toBe(directReport.goalCells);
+      expect(report.goalCutInto?.coverageFraction).toBe(directReport.coverageFraction);
+      expect(report.goalCutInto?.cutIntoFraction).toBe(directReport.cutIntoFraction);
+      // No column read exists on this engine, so the diagnostic is stated absent, not faked.
+      expect(report.goalCutInto?.columnCutInto).toBeUndefined();
+    } finally {
+      session.dispose();
+    }
+  }, 240_000);
 
   it('a corpus goal’s report carries the goal check the page’s checker computes', async () => {
     const stock = { length: 80, width: 50, thickness: 20 };

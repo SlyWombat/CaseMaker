@@ -19,6 +19,9 @@
  * (`k = ⌈(length + |Δz|)/0.05⌉` equal steps, samples below 0.05 mm only) and each sample's disc
  * stamped cell by cell. No move index, no retained geometry — the cost is the stamping loop and
  * the memory is the goal grid's own.
+ *
+ * #964 — the footprint's edge is STRICT (`distance < radius − 1e-6`): a cell centred exactly on
+ * the disc's edge is not charged. See {@link EDGE_EPS_MM}.
  */
 
 import type { Timeline } from '@/engine/cnc/emulator/timeline';
@@ -28,6 +31,16 @@ import type { Tool } from '@/engine/cnc/tool';
 const SAMPLE_MM = 0.05;
 /** Samples above this Z are not stamped (the page's `q[:,2] < 0.05`). */
 const STAMP_Z = 0.05;
+/**
+ * #964 — THE FOOTPRINT'S EDGE. A cell is cut only where its centre lies STRICTLY inside the
+ * cutter's disc: `distance < radius − this`. Counting `distance <= radius` charged the cells whose
+ * centres sat exactly on the disc edge — and the part's contour is posted with the tool centre
+ * offset by the radius, so its disc edge is tangent to the outline and every goal cell centred on
+ * the outline read the full cutting depth (E's 134 phantom cells on #959; the Makera tray card
+ * shows the same class). Zero-measure contact is not a cut. `goal_check.py` applies this same
+ * rule, so the page and the app keep agreeing cell for cell.
+ */
+const EDGE_EPS_MM = 1e-6;
 
 interface StampProfile {
   /** The cutting radius the disc stamps at, mm. */
@@ -79,7 +92,8 @@ export function exactSweptField(
   const { nx, ny, x0, y0, pitch } = goal;
   const field = new Float32Array(nx * ny);
   const R = stamp.radius;
-  const R2 = R * R;
+  const Rin = Math.max(R - EDGE_EPS_MM, 0);
+  const Rin2 = Rin * Rin;
   let stamped = 0;
   for (const cp of timeline.checkpoints) {
     for (let m = 0; m < cp.steps.length; m++) {
@@ -111,7 +125,7 @@ export function exactSweptField(
           for (let i2 = iLo; i2 <= iHi; i2++) {
             const ddx = x0 + i2 * pitch - qx;
             const d2 = ddx * ddx + ddy * ddy;
-            if (d2 > R2) continue;
+            if (d2 >= Rin2) continue;
             const v = z + stamp.profile(Math.sqrt(d2));
             const k = rowBase + i2;
             if (v < field[k]!) field[k] = v;
