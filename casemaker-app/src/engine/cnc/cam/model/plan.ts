@@ -696,7 +696,9 @@ export interface PlanCurvedOptions {
   /** The three tools the curved pipeline uses: the flat roughs, the ball finishes, the V breaks rims. */
   flat: Tool;
   ball: Tool;
-  vbit: Tool;
+  /** The V. Absent is allowed when the job states no edge break — the rim stage is then not planned at
+   * all (the property specs' house holds no V and asks for none). */
+  vbit?: Tool;
   /** An optional smaller flat for the rest pass by CL difference. */
   restFlat?: Tool;
   stepDownMm: number;
@@ -849,18 +851,34 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   }
 
   // 5. EVERY RIM the tree found, broken by the V at the job's stated edge break.
-  for (const rim of tree.rims) {
-    const ref = regionRefOf(rim.id, 'rim', [[...rim.polyline]], rim.z, rim.z);
-    const out = chamfer({
-      cutter: opts.vbit,
-      rim,
-      region: ref,
-      edgeBreak: opts.edgeBreak,
-      offset: opts.offset,
-      params: cuts,
-      rapid: opts.rapid,
-    });
-    ops.push({ kind: 'chamfer', region: ref, outcome: out });
+  //
+  // THE PROPERTY SPECS FOUND THIS: an edge break of ZERO — every rectilinear card, and the curved
+  // seeds that state none — is not a refusal, it is a job that asks for no bevel. `chamfer()`
+  // rightly refuses a zero-depth cut (a scratch is not a bevel), so reaching the stage at all
+  // threw a refusal at a job the tree said was fine. The stage is skipped WHOLE, and the note says
+  // the rims stay sharp rather than leaving the reader to infer it.
+  if (opts.edgeBreak.legMm > 0) {
+    if (opts.vbit === undefined) {
+      throw new Error(
+        `cam/model/plan: the job states a ${opts.edgeBreak.legMm} mm edge break but the call states no V cutter for the rim stage`,
+      );
+    }
+    const vbit = opts.vbit;
+    for (const rim of tree.rims) {
+      const ref = regionRefOf(rim.id, 'rim', [[...rim.polyline]], rim.z, rim.z);
+      const out = chamfer({
+        cutter: vbit,
+        rim,
+        region: ref,
+        edgeBreak: opts.edgeBreak,
+        offset: opts.offset,
+        params: cuts,
+        rapid: opts.rapid,
+      });
+      ops.push({ kind: 'chamfer', region: ref, outcome: out });
+    }
+  } else if (tree.rims.length > 0) {
+    notes.push(`the job states no edge break — ${tree.rims.length} rim(s) stay sharp`);
   }
 
   if (tree.remainder.length === 0) notes.push('no curved remainder regions — the rough/rest/finish/pencil stages have nothing to plan');
