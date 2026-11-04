@@ -41,7 +41,19 @@ let vectors = [];
 const closedPaths = (o.paths ?? []).filter((p) => p.closed && p.points.length >= 3);
 if ((o.contours ?? []).length > 0 && (o.paths ?? []).length === 0) {
   // #968 — one vector per band contour, so the design check measures each stroke's band on its own.
-  vectors = o.contours.map((ring, i) => toVectorShape(
+  // `dropLargest` leaves out the drawing's own frame: its path carries a scale-1 matrix, so its band
+  // is not the same width as the strokes', and the vendor cuts that rim as a contour, not as engraving.
+  let bands = o.contours;
+  if (spec.dropLargest && bands.length > 1) {
+    const box = (ring: [number, number][]) => {
+      const xs = ring.map((p) => p[0]), ys = ring.map((p) => p[1]);
+      return (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+    };
+    let worst = 0;
+    bands.forEach((ring, i) => { if (box(ring) > box(bands[worst]!)) worst = i; });
+    bands = bands.filter((_r, i) => i !== worst);
+  }
+  vectors = bands.map((ring, i) => toVectorShape(
     { ...o, contours: [ring] },
     { id: `svg-band-${i + 1}`, position: { x: cx, y: cy }, depth: spec.depth, name: `band ${i + 1}` },
   )).map((v) => ({ ...v, contours: scaled(v.contours) }));

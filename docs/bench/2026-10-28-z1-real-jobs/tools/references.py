@@ -74,15 +74,19 @@ REFS = [
          # The published original is an SVG. The job is built from it at build time (#968 import):
          # stroke bands as regions, fitted to Studio's own engraving footprint.
          svg=('321-mrxcrxhw.svg', '42b7bb962f52635e5e39a03314f9ee22e199b48b336e841b6d66a45b3b211544'),
-         strokeWidth=0.5, scale=0.90, depth=0.8,
+         # #968's fix reads the 49 strokes' 0.5003 mm bands from their transform. The drawing's own
+         # rounded frame carries a scale-1 matrix, so its band is 1 mm: it is INCLUDED at its stated
+         # width (Studio engraves it in the same T2 pass; at scale 0.90 it lands within 0.3 mm²).
+         scale=0.90, depth=0.8,
          nc=('20260723180036-mrxcrnx2.nc',
              '5ea9732c7b57ca47dbedac45c428d64107d03a2d6aebd8ef4f73f618060e7d74'),
          job='ref-coasters.json',
          note='Studio’s engraver (T2) clears the strokes’ painted band at Z −0.8; its T4 contour frees '
               'the disc and its T6 chamfer breaks the rim, so the design comparison scores T2 only. '
-              'The band is 0.5 mm: the drawing’s 1-unit default sits inside a 0.5-scale element '
-              'matrix — the app’s importer at db907716 reads that default as 1 mm unscaled (found by '
-              'this card), so the job states stroke-width 0.5 explicitly and the card says so.'),
+              'The 49 strokes are 0.5003 mm bands, read from their 0.5-scale element matrix by the '
+              'app’s own importer (#968). The drawing’s rounded frame carries a scale-1 matrix, so its '
+              'band is 1 mm wide — twice the strokes’ — and it is INCLUDED at that stated width; its '
+              'share of the design is one item of 50, and Studio engraves it in the same T2 pass.'),
     dict(id='ref-badge',
          title='Makera Badge 2D Pattern — the closed rings as regions, two-colour engraving',
          maker='Makera', licence='CC0 1.0',
