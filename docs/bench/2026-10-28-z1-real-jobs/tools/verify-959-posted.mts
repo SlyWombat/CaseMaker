@@ -18,6 +18,8 @@ const { Z1 } = await import(appDir + '/src/engine/cnc/machine.ts');
 const { flatEndMill } = await import(appDir + '/src/engine/cnc/tool.ts');
 const { HOP_Z } = await import(appDir + '/src/engine/cnc/cam/ir.ts');
 const { toSetup } = await import(appDir + '/src/engine/cnc/engrave/jobSetup.ts');
+// The same measurement the spec uses for its combined facts, per program.
+const { measurePostedProgram } = await import(appDir + '/tests/tools/postedFacts.ts');
 
 const [L, W, T] = stockArg.split('x').map(Number);
 const plan = JSON.parse(readFileSync(planPath, 'utf8'));
@@ -58,6 +60,8 @@ for (let i = 0; i < programs.length; i++) {
   const errs = r.findings.filter((f) => f.severity === 'error').length;
   const warns = r.findings.length - errs;
   console.log(`${key}: ${nc}`);
+  const f = measurePostedProgram(posted.text);
+  console.log(`  cycle ${f.cycleSeconds.toFixed(1)} s (header ${f.headerTimeSeconds}), air ${(f.airFraction * 100).toFixed(2)} %, rapids/1k ${f.rapidsPer1000FeedLines.toFixed(2)} (${f.rapidMoves}/${f.feedMoves})`);
   console.log(`  verify ok=${r.ok} — ${errs} error, ${warns} warning; ${r.stats.cuttingMoves} cutting moves, deepest Z ${r.stats.deepestZ.toFixed(2)}`);
   for (const f of r.findings) {
     console.log(`  ${f.severity === 'error' ? 'ERR ' : 'warn'} ${f.code}${f.line === null ? '' : ` (line ${f.line})`}: ${f.message}`);
