@@ -518,6 +518,10 @@ def seven_lines(c):
                  f"(max {v.get('edgeBreakMaxMm')} mm), wall cells {v.get('wallNotScoredPct')} %, "
                  f"wall shadow {v.get('shadowNotScoredPct')} %; raw cut-into below 0.01 mm {v.get('cutIntoInclEdgePct')} %. "
                  f"The same rule scores both columns.</p>")
+        if (v.get('cutInto0p1Pct') or 0) > 0:
+            allow += (f"<p class=\"notes\">Makera’s own program misses the cut-into line on this part "
+                      f"({v['cutInto0p1Pct']} % of cells, max {v.get('maxCutIntoMm')} mm): its number is printed as a "
+                      f"fact beside the line, and the line is not the vendor’s floor — it is not lowered to it.</p>")
     return (f"<details open><summary>The seven lines, ours and Makera’s</summary>"
             f"<div class=\"tablewrap\"><table><tr><th>line</th><th>Makera Studio</th><th>Case Maker</th></tr>{body}</table></div>"
             f"{allow}</details>")

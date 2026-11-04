@@ -69,10 +69,14 @@ REFS = [
 # Parked with the reason, so the section says what it cannot yet put beside ours.
 PARKED = [
     ('ref-coasters', 'Traditional Mandala Wooden Coasters (CC BY 4.0)',
-     'the published original is an SVG, not a mesh: Makera’s 2D V-carve program is judged on the '
-     'design side, which needs a Case Maker job built from the maker’s SVG (next slice)'),
+     'our SVG import reads the drawing’s stroke paths as centre lines (50 traces), while Studio’s '
+     '2D区域清理 clears the strokes’ painted bands (a 0.15 mm raster at Z −0.8). Our line job posts '
+     '(4 min 3 s vs Studio’s 4.1 min) and matches its own design 50/50, but scored against it '
+     'Studio’s own program leaves up to 0.44 mm on every stroke and cuts 224 mm² outside the design: '
+     'the comparable job needs the stroke bands as regions — an import-fidelity gap to file first'),
     ('ref-badge', 'Makera Badge 2D Pattern (CC0 1.0)',
-     'the published original is a zipped 2D image: same design-side comparison as the coasters'),
+     'the published original is a zipped 2D image: the same design-side comparison as the coasters, '
+     'with the raster trace in place of the SVG stroke bands'),
 ]
 
 # The app's Z1 rapid profile (machine.ts): 5000 mm/min XY, 1000 mm/min Z. Used for the vendor
