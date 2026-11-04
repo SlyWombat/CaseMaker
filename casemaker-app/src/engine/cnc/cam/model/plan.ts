@@ -884,7 +884,15 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
  */
 export interface PlanTreeOptions {
   pockets: Omit<PlanPocketsOptions, 'offset'>;
-  curved: Omit<PlanCurvedOptions, 'offset'>;
+  /**
+   * The curved stages' options MINUS the retract heights. THE REAL TRAY FOUND THIS: the pocket
+   * ops and `generateProfile`'s contour both retract at `SAFE_Z`/`HOP_Z` (`ir.ts`) and
+   * `concatToolpathIR` refuses two programs that disagree — the whole-tree run threw 5 vs 12 the
+   * moment the curved stages took their own. A tree posts ONE program per cutter, so it has ONE
+   * program-wide retract; the type says so instead of letting a caller choose a height that
+   * cannot concatenate.
+   */
+  curved: Omit<PlanCurvedOptions, 'offset' | 'safeZMm' | 'hopZMm'>;
   offset: OffsetFn;
 }
 
@@ -898,7 +906,12 @@ export interface PlanTreeResult {
 
 export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): PlanTreeResult {
   const pocketResult = planPocketsForTree(tree, { ...opts.pockets, offset: opts.offset });
-  const curvedResult = planCurvedForTree(tree, { ...opts.curved, offset: opts.offset });
+  const curvedResult = planCurvedForTree(tree, {
+    ...opts.curved,
+    offset: opts.offset,
+    safeZMm: SAFE_Z,
+    hopZMm: HOP_Z,
+  });
   const freeing = pocketResult.ops.filter((op) => op.kind === 'contour');
   const ops: PlannedOp[] = [
     ...pocketResult.ops.filter((op) => op.kind !== 'contour'),
