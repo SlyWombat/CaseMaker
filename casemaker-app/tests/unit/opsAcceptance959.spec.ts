@@ -100,7 +100,7 @@ function postedTextFor(cutterKey: string, merged: ToolpathIR, ctx: PostContext):
 }
 
 function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsResult): void {
-  const { ops, programs, sequence, unreachable } = result;
+  const { ops, programs, sequence, unreachable, notes } = result;
 
   const ctx: PostContext = {
     jobName: `${name}-959`,
@@ -127,7 +127,8 @@ function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsRes
       `(pocket + contour ONLY — not comparable to Makera's full cycle): cycle ` +
       `${facts.cycleSeconds.toFixed(1)} s, air ${(facts.airFraction * 100).toFixed(1)} %, ` +
       `rapids/1000 ${facts.rapidsPer1000FeedLines.toFixed(0)}, cutters ${facts.cutters.length}. ` +
-      `Coverage/cut-into: not measured here — needs the simulator sweep (next integration point).`,
+      `Coverage/cut-into: not measured here — needs the simulator sweep (next integration point).` +
+      (notes.length > 0 ? ` Notes: ${notes.join('; ')}` : ''),
   );
 
   const out = process.env.CM_959_OUT;
@@ -151,7 +152,7 @@ function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsRes
   fs.writeFileSync(path.join(out, `${name}-plan.json`), JSON.stringify(plan));
   fs.writeFileSync(
     path.join(out, `${name}-posted-facts.json`),
-    JSON.stringify({ unreachable, cutterKeys: [...programs.keys()], pocketOps, contourOps, ...facts }),
+    JSON.stringify({ unreachable, notes, cutterKeys: [...programs.keys()], pocketOps, contourOps, ...facts }),
   );
 }
 

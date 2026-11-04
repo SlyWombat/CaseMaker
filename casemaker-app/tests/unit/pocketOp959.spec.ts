@@ -201,4 +201,35 @@ describe('#959 pocket()', () => {
     expect(firstCleared).toBeLessThan(wholeRegion - 1e-6); // NOT the whole region after ring 1
     expect(lastCleared).toBeGreaterThanOrEqual(firstCleared); // grows (or stays, never shrinks)
   });
+
+  // Advisor's review on 9e976f0b: `open`'s own field reports the WHOLE node as reachable with no
+  // notion of "not yet, at this depth" — handing `link()` the full 3D jump between levels let its
+  // short-hop branch read a same-XY descent as a clear FEED at the cutting rate (a plunge with no
+  // plunge feed at all, or a ramp at the cutting feed into an unstarted level).
+  it('a level change never descends at the cutting feed — the vertical leg is always a plain feed at plungeFeed', () => {
+    // A 4 mm slot: ⌀3.175 (radius 1.5875) leaves only one ring (4 - 2 x 1.5875 = 0.825 mm wide;
+    // the next step-over would close it), so every level change is a plain plunge at the SAME XY
+    // — exactly the case `link()`'s short-hop branch misread.
+    const flat3175: Tool = { ...flat6, id: 'flat-3.175', name: 'flat-3.175', diameter: 3.175, handleDiameter: 3.175 };
+    const slot: PocketNode = { ...node(-4, 0), region: rect(4, 20), narrowest: 4 };
+    const slotRegion: RegionRef = { ...region(), bounds: { min: [0, 0], max: [4, 20] } };
+    const out = pocket({
+      cutter: flat3175, node: slot, region: slotRegion,
+      stepOverMm: 3.175 / 4, stepDownMm: 2,
+      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
+      offset: fakeRectOffset, safeZMm: 10, hopZMm: 3,
+      toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+    });
+    const moves = out.ir.operations[0]!.moves;
+    let descents = 0;
+    for (let i = 1; i < moves.length; i++) {
+      const prev = moves[i - 1]!;
+      const cur = moves[i]!;
+      if (cur.kind === 'feed' && cur.z < prev.z - 1e-9) {
+        descents++;
+        expect(cur.f, `move ${i}: a descending feed ran at ${cur.f} mm/min, not the 300 mm/min plunge rate`).toBe(300);
+      }
+    }
+    expect(descents).toBeGreaterThan(0); // the fixture actually exercises a level change
+  });
 });

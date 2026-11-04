@@ -205,10 +205,24 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
           // The very first ring of the whole op: rapid up, then plunge down.
           moves.push({ kind: 'rapid', x: start[0], y: start[1], z: opts.hopZMm });
           moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
-        } else {
+        } else if (prevExit[2] === z) {
+          // Same level: `open`'s own field is accurate everywhere on it (the whole op's footprint
+          // is the same at every Z), so `link()` alone decides feed vs. retract.
           const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
           const to: LinkPoint = { x: start[0], y: start[1], z };
           moves.push(...link(from, to, linkOptions));
+        } else {
+          // A level change (advisor's review on 9e976f0b): `open` reports every point in the
+          // node's footprint as reachable, with no notion of "not yet, at THIS depth" — handing
+          // `link()` the full 3D jump lets its short-hop branch read a same-XY descent as a clear
+          // feed at the CUTTING rate, a plunge/ramp with no plunge feed at all. The horizontal
+          // part of the move is linked at the level JUST FINISHED, where `open` is honestly
+          // accurate (everything in it has actually been swept by now); the vertical part is
+          // always a plain feed at plungeFeed, never left to `link()`'s own feed rate.
+          const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
+          const landing: LinkPoint = { x: start[0], y: start[1], z: prevExit[2] };
+          moves.push(...link(from, landing, linkOptions));
+          moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
         }
         moves.push(...traceRing(ring, z, opts.feeds.feedMmPerMin));
         const entry: [number, number, number] = [start[0], start[1], z];

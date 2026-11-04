@@ -272,7 +272,18 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   const rebase = (z: number): number => z - z0;
 
   const refs = regionRefs(tree);
-  const refById = new Map(refs.map((r) => [r.id, { ...r, obstacles: [], regionClearanceZ: rebase(tree.frame.partTop) + 5 }]));
+  // `regionRefs` reads `topZ`/`bottomZ` straight off the tree (mesh-absolute) — rebased here too,
+  // so a `RegionRef` never mixes the mesh's own axis with the stock-relative one every op uses.
+  const refById = new Map(refs.map((r) => [r.id, {
+    ...r,
+    topZ: rebase(r.topZ),
+    bottomZ: rebase(r.bottomZ),
+    obstacles: [],
+    // The skin above an OPEN node (a shoulder) is cut by this plan; above anything else (an
+    // island's own cap, say) it is not, and stays at the stock's own top (rebased, 0) — never
+    // below it, or a clearance plane under 5 mm above a thick, uncut skin would not clear it.
+    regionClearanceZ: Math.max(0, rebase(tree.frame.partTop)) + 5,
+  }]));
 
   // A's review 6622610124, finding 2: a ROOT node's mouth is the STOCK's own top, not the
   // recognised part top — the tray's top land sits 1.2 mm below the stock surface, and without
