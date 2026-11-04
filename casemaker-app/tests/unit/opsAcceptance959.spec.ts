@@ -168,18 +168,20 @@ function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsRes
     toolKey: 'multi',
   };
 
-  const factsByCutter = [...programs.entries()].map(([cutterKey, merged]) => ({
-    cutterKey,
-    merged,
-    text: postedTextFor(cutterKey, merged, ctx),
+  // One posted text per RUN (not per cutter key — advisor's review on ab6b2827: a cutter #961
+  // returns to for the freeing cut posts as its OWN run, never merged into its first one).
+  const factsByRun = programs.map((run) => ({
+    cutterKey: run.cutterKey,
+    merged: run.ir,
+    text: postedTextFor(run.cutterKey, run.ir, ctx),
   }));
-  const facts = combinePostedFacts(factsByCutter.map((f) => measurePostedProgram(f.text)));
+  const facts = combinePostedFacts(factsByRun.map((f) => measurePostedProgram(f.text)));
 
   const pocketOps = ops.filter((op) => op.kind === 'pocket').length;
   const contourOps = ops.filter((op) => op.kind === 'contour').length;
   console.log(
     `#959 ${name}: ${pocketOps} pocket + ${contourOps} contour op(s) planned (${unreachable.length} ` +
-      `unreachable: ${unreachable.join('; ') || 'none'}), ${programs.size} cutter(s). Posted-text facts ` +
+      `unreachable: ${unreachable.join('; ') || 'none'}), ${programs.length} run(s) on ${new Set(programs.map((p) => p.cutterKey)).size} cutter(s). Posted-text facts ` +
       `(pocket + contour ONLY — not comparable to Makera's full cycle): cycle ` +
       `${facts.cycleSeconds.toFixed(1)} s, air ${(facts.airFraction * 100).toFixed(1)} %, ` +
       `rapids/1000 ${facts.rapidsPer1000FeedLines.toFixed(0)}, cutters ${facts.cutters.length}. ` +
@@ -200,7 +202,7 @@ function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsRes
         ops,
         sequence,
         linking: { rapidsCount: 0, hopsCount: 0, airFractionPct: facts.airFraction * 100 },
-        programs: factsByCutter.map((f) => f.merged),
+        programs: factsByRun.map((f) => f.merged),
         totalCostSeconds: facts.cycleSeconds,
       },
     ],
@@ -208,7 +210,7 @@ function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsRes
   fs.writeFileSync(path.join(out, `${name}-plan.json`), JSON.stringify(plan));
   fs.writeFileSync(
     path.join(out, `${name}-posted-facts.json`),
-    JSON.stringify({ unreachable, notes, cutterKeys: [...programs.keys()], pocketOps, contourOps, ...facts }),
+    JSON.stringify({ unreachable, notes, cutterKeys: programs.map((p) => p.cutterKey), pocketOps, contourOps, ...facts }),
   );
 }
 
@@ -479,19 +481,20 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
     expect(result.ops).toHaveLength(3); // a, b, contour
     expect(result.ops.at(-1)!.kind).toBe('contour');
     expect(result.ops.slice(0, -1).some((op) => op.kind === 'contour')).toBe(false);
-    // The contour's own cutter program ends with the contour operation, after whatever that
-    // cutter already posted.
     const contourOp = result.ops.at(-1)!;
-    const program = result.programs.get(contourOp.outcome.cutter)!;
-    expect(program.operations.at(-1)!.labelId).toBe('contour');
-    // #961 now prices the freeing cutter choice itself (a RETURN to an earlier cutter, charged
-    // its own tool change, vs. the chain's last cutter taking the profile) and may legitimately
-    // pick either — `ops` (built in `choice.steps` order, contour always last) is the authoritative
-    // execution-order record either way; `programs`' per-cutter grouping is not, and does not need
-    // the contour's cutter to be its last KEY (advisor's review on 9a5cc607 assumed plan.ts always
-    // had to force the last cutter — #961's own pricing now makes that call instead). A return is
-    // only ever silent when it was NOT the cheaper option; confirm `choice.freeing` agrees with
-    // which cutter actually got the contour.
+    // Advisor's review on ab6b2827: #961 may legitimately RETURN to an earlier cutter for the
+    // freeing cut (cheaper than its last cutter taking the profile) — `programs` is grouped by
+    // RUN, not by cutter key, so a return posts as its OWN last entry, never merged into that
+    // cutter's first run (which would free the part before the step in between it ever ran).
+    expect(result.programs.length, `programs: ${JSON.stringify(result.programs.map((p) => p.cutterKey))}`).toBeGreaterThan(1);
+    const lastRun = result.programs.at(-1)!;
+    expect(lastRun.cutterKey).toBe(contourOp.outcome.cutter);
+    expect(lastRun.ir.operations.at(-1)!.labelId).toBe('contour');
+    for (const run of result.programs.slice(0, -1)) {
+      expect(run.ir.operations.some((o) => o.labelId === 'contour'), `an earlier run (${run.cutterKey}) already posts the contour`).toBe(false);
+    }
+    // #961 prices the freeing cutter choice itself; confirm `choice.freeing` agrees with which
+    // cutter actually got it, and that a priced return is stated as a note.
     expect(result.choice.freeing).not.toBeNull();
     expect(result.choice.freeing!.cutterKey).toBe(contourOp.outcome.cutter);
     if (result.choice.freeing!.extraToolChange) {

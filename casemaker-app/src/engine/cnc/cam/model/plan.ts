@@ -177,7 +177,13 @@ export interface SetupPlan {
   ops: PlannedOp[];
   sequence: SequencedCutter[];
   linking: { rapidsCount: number; hopsCount: number; airFractionPct: number };
-  /** One program per `cutterKey` in `sequence`, in sequence order — the #419 answer ("one program per tool"). */
+  /**
+   * One program per RUN, in execution order — #419's "one program per tool" still holds for a
+   * job with no cutter revisit; a cutter #961 returns to for the freeing cut (cheaper than its
+   * last cutter taking the profile) posts as a SECOND, separate entry here, never merged with
+   * its first (advisor's review on ab6b2827 — merging them posts a file that frees the part
+   * before the step in between it ever ran).
+   */
   programs: ToolpathIR[];
   totalCostSeconds: number;
 }
@@ -242,8 +248,16 @@ export const DEFAULT_RELEASE_TABS = { count: 4, width: 6, height: 1 };
 
 export interface PlanPocketsResult {
   ops: PlannedOp[];
-  /** One program per cutter actually used, in `ops` order, concatenated. */
-  programs: Map<string, ToolpathIR>;
+  /**
+   * One program per RUN, in execution order — NOT one per cutter key (advisor's review on
+   * ab6b2827): #961 may legitimately return to an earlier cutter for the freeing cut (cheaper
+   * than the chain's last cutter taking the profile itself), and a `Map<cutterKey, …>` merges
+   * that cutter's two non-contiguous visits into ONE file — which, read in that file's own
+   * order, frees the part before the rest step in between ever ran. A run starts whenever a
+   * step's cutter differs from the previous step's; the SAME cutter key can appear in more than
+   * one run.
+   */
+  programs: { cutterKey: string; ir: ToolpathIR }[];
   /**
    * `SetupPlan.sequence`'s own shape — `terms` computed HERE, from each cutter's concatenated
    * posted `ToolpathIR` via #927's `estimateCycleTerms` (§3.0.1), not reused from `choice.cost`'s
@@ -528,7 +542,13 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   });
 
   const ops: PlannedOp[] = [];
-  const programs = new Map<string, ToolpathIR>();
+  // Advisor's review on ab6b2827: grouped by cutter KEY (a Map), a return visit merges into the
+  // SAME file as that cutter's first visit — which, read in that file's own order, frees the
+  // part (the contour, appended at the end) before whatever ran in between on the OTHER cutter
+  // ever did. Grouped by RUN instead: a new entry starts the moment the step's cutter changes,
+  // so the SAME cutter key can appear more than once, in the right place each time.
+  const programs: { cutterKey: string; ir: ToolpathIR }[] = [];
+  let currentRun: { cutterKey: string; ir: ToolpathIR } | null = null;
   // The manager's #959 ruling: the part's freeing cut (the outer contour) is posted LAST, after
   // every rest/finish/chamfer step that still touches the part. #961 now owns this directly: the
   // contour is its own step, always last in `choice.steps`, and its cutter is priced like any
@@ -538,16 +558,21 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   for (const step of choice.steps) {
     const outcomes = outcomeCache.get(stepSignature(step));
     if (outcomes === undefined || outcomes === null) continue; // chooseSequence only chose postable steps
+    if (currentRun === null || currentRun.cutterKey !== step.cutter.key) {
+      if (currentRun !== null) programs.push(currentRun);
+      currentRun = null;
+    }
     for (const { id, outcome } of outcomes) {
       const ref = refById.get(id)!;
       // A through hole is cleared like a pocket now (ruling 2), profile-only only when it is too
       // narrow for that to mean anything — 'pocket' either way describes what it does.
       ops.push({ kind: id === 'contour' ? 'contour' : 'pocket', region: ref, outcome });
-      const key = outcome.cutter;
-      const existing = programs.get(key);
-      programs.set(key, existing === undefined ? outcome.ir : concatToolpathIR(existing, outcome.ir));
+      currentRun = currentRun === null
+        ? { cutterKey: step.cutter.key, ir: outcome.ir }
+        : { cutterKey: currentRun.cutterKey, ir: concatToolpathIR(currentRun.ir, outcome.ir) };
     }
   }
+  if (currentRun !== null) programs.push(currentRun);
 
   const offered = [...opts.houseFlats].map((t) => `⌀${cuttingDiameter(t)}`).join(', ');
   // A's review 6622610124, finding 4: a through node's own limiting number was lost (the lookup
@@ -574,7 +599,11 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   }
 
   const sequence: SequencedCutter[] = choice.cost.entries.map((entry) => {
-    const ir = programs.get(entry.cutterKey);
+    // #927's terms summed over every RUN this cutter appears in (almost always one; a return
+    // visit for the freeing cut is two) — concatenating them for `estimateCycleTerms` is only
+    // for this one estimate, not a claim they post as a single file (`programs` above is that).
+    const cutterRuns = programs.filter((p) => p.cutterKey === entry.cutterKey).map((p) => p.ir);
+    const ir = cutterRuns.length === 0 ? undefined : cutterRuns.reduce((a, b) => concatToolpathIR(a, b));
     const terms: CycleTerms = ir === undefined
       ? { movesSeconds: 0, entrySeconds: 0, spinUpSeconds: 0, totalSeconds: 0 }
       : estimateCycleTerms(ir, opts.rapid);
