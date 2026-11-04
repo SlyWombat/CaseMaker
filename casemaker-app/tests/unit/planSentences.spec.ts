@@ -7,19 +7,9 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import {
-  featureSentence,
-  linkingSentence,
-  sequenceSentence,
-  setupSentence,
-} from '@/engine/cnc/engrave/planWords';
-import { freeingSentence, unplannedSentences } from '@/engine/cnc/engrave/planNotes';
-import {
-  goalCoverageWords,
-  goalRawWords,
-  goalReachWords,
-  goalVerdictWords,
-} from '@/engine/cnc/engrave/goalCheckWords';
+import { featureSentence, linkingSentence, setupSentence } from '@/engine/cnc/engrave/planWords';
+import { freeingSentence } from '@/engine/cnc/engrave/planNotes';
+import { goalVerdictWords } from '@/engine/cnc/engrave/goalCheckWords';
 import { fixtureSetupPlan } from './fixtures/setupPlan';
 import { fixtureGoalReport } from './fixtures/goalReport';
 

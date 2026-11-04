@@ -300,10 +300,9 @@ DXF for flat vector work if you set its document units to millimetres first.
 ### Common questions
 
 **Why was my Generate refused?** The app checks the planned cut against the stock, the cutter's
-reach, the holding, and a planning budget before it will call a job ready — the message names
-which of those it failed. A detailed goal can be refused for being too big to plan at its current
-resolution; the message then offers named presses to fix it — coarser detail, thicker layers, or
-splitting the goal into two setups.
+reach and the holding before it will call a job ready — the message names which of those it
+failed. A goal the engine cannot plan is stated as such, with the reason; there is no resolution
+to trade away.
 
 **My imported part looks right but won't carve correctly — why?** Check that the side you want
 cut is facing +Z, and that the unit Case Maker reports on import matches what you actually
