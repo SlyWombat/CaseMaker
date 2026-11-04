@@ -1,8 +1,9 @@
 // A Case Maker job from a maker's SVG outline, through the app's own importer (#955, reference cards).
 // usage: cd <repo>/casemaker-app && npx tsx --tsconfig tsconfig.app.json <this> \
 //          <appDir> <outline.svg> <out.job.json> <stock.json>
-// The stock JSON: {length,width,thickness,material,toolKey,hold:{...}}. The SVG's stroke paths become
-// `line` traces at the stated depth, which is how Studio engraves a mandala: cut along the drawing.
+// The stock JSON: {length,width,thickness,material,toolKey,hold:{...}}.
+// #968 — a stroke with a width imports as its painted BAND (a region): each band contour becomes one
+// `vector` item. A zero/hairline stroke keeps the #664/#678 reading and becomes `line` traces.
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const [appDir, svgPath, outPath, stockPath] = process.argv.slice(2);
@@ -14,25 +15,50 @@ await import(appDir + '/scripts/lib/casemaker/nodeTarget.ts');
 // The app's SVG reader uses DOMParser (browser); Node needs the dev dependency's implementation.
 const { JSDOM } = await import(appDir + '/node_modules/jsdom/lib/api.js');
 (globalThis as unknown as { DOMParser: unknown }).DOMParser = new JSDOM().window.DOMParser;
-const { parseSvgOutline } = await import(appDir + '/src/engine/import/outlineImport.ts');
-const { toLineTraces } = await import(appDir + '/src/engine/import/outlineImport.ts');
+const imp = await import(appDir + '/src/engine/import/outlineImport.ts');
+const { parseSvgOutline, toLineTraces, toVectorShape } = imp;
 
 const text = readFileSync(svgPath, 'utf8');
-const parsed = parseSvgOutline(text, svgPath.split('/').pop());
+const spec = JSON.parse(readFileSync(stockPath, 'utf8'));
+// An explicit stroke width on the root, for a drawing whose own default the importer and the vendor
+// read differently (stated on the card). Absent in the spec = the file's own.
+const svgText = spec.strokeWidth === undefined ? text
+  : text.replace(/<svg\b([^>]*)>/, (_m, attrs) => `<svg${attrs.replace(/\sstroke-width="[^"]*"/g, '')} stroke-width="${spec.strokeWidth}">`);
+const parsed = parseSvgOutline(svgText, svgPath.split('/').pop());
 if (!parsed.ok) {
   console.error('the app refused the SVG:', JSON.stringify(parsed));
   process.exit(1);
 }
 const o = parsed.outline;
-const spec = JSON.parse(readFileSync(stockPath, 'utf8'));
 const cx = spec.length / 2, cy = spec.width / 2;
-const traces = toLineTraces(o, {
-  position: { x: cx, y: cy }, depth: spec.depth, idFor: (i) => `svg-line-${i + 1}`, name: 'makera-outline',
-});
 // A maker's drawing is not always cut at the drawing's own size: `scale` fits it to the vendor's
 // own cut (stated on the card), keeping the centred frame.
 const s = Number(spec.scale ?? 1);
-if (s !== 1) for (const t of traces) t.points = t.points.map(([x, y]) => [x * s, y * s] as [number, number]);
+const scaled = (rings: [number, number][][]) =>
+  s === 1 ? rings : rings.map((r) => r.map(([x, y]) => [x * s, y * s] as [number, number]));
+let traces = [];
+let vectors = [];
+const closedPaths = (o.paths ?? []).filter((p) => p.closed && p.points.length >= 3);
+if ((o.contours ?? []).length > 0 && (o.paths ?? []).length === 0) {
+  // #968 — one vector per band contour, so the design check measures each stroke's band on its own.
+  vectors = o.contours.map((ring, i) => toVectorShape(
+    { ...o, contours: [ring] },
+    { id: `svg-band-${i + 1}`, position: { x: cx, y: cy }, depth: spec.depth, name: `band ${i + 1}` },
+  )).map((v) => ({ ...v, contours: scaled(v.contours) }));
+} else if (spec.regions && closedPaths.length === (o.paths ?? []).length) {
+  // `regions` — a drawing of closed rings with a hairline stroke is the OUTLINE of areas (the badge's
+  // two-colour pattern): the rings become ONE region read EvenOdd, so a ring inside another is a hole,
+  // exactly as the vendor's 2D pocket sees it. One vector, one design item.
+  vectors = [toVectorShape(
+    { ...o, contours: closedPaths.map((p) => p.points as [number, number][]), fillRule: 'EvenOdd' },
+    { id: 'svg-regions', position: { x: cx, y: cy }, depth: spec.depth, name: 'the drawn areas' },
+  )].map((v) => ({ ...v, contours: scaled(v.contours), fillRule: 'EvenOdd' as const }));
+} else {
+  traces = toLineTraces(o, {
+    position: { x: cx, y: cy }, depth: spec.depth, idFor: (i) => `svg-line-${i + 1}`, name: 'makera-outline',
+  });
+  if (s !== 1) for (const t of traces) t.points = t.points.map(([x, y]) => [x * s, y * s] as [number, number]);
+}
 const job = {
   schemaVersion: 3,
   name: spec.name ?? 'SVG outline reference',
@@ -47,11 +73,12 @@ const job = {
   breakthrough: 0.3,
   jawClearance: 1,
   shapes: [],
-  traces,
+  ...(vectors.length ? { vectors } : {}),
+  ...(traces.length ? { traces } : {}),
   workholding: spec.hold,
   targetObject: undefined as unknown,
 };
 delete (job as Record<string, unknown>).targetObject;
 writeFileSync(outPath, JSON.stringify(job, null, 1));
 console.log(JSON.stringify({ contours: o.contours.length, paths: (o.paths ?? []).length, traces: traces.length,
-  width: o.width, height: o.height, notes: o.notes }));
+  vectors: vectors.length, width: o.width, height: o.height, notes: o.notes }));

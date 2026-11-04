@@ -434,11 +434,11 @@ def main():
         if it['through']:
             left = float(np.mean(vals > -T + TOL))
             deep = float(np.mean(vals < -T - 0.35))  # breakthrough depth is ~T + 0.3
-            report['items'].append({'id': it['id'], 'kind': it['kind'], 'through': True, 'left': round(left, 4), 'deepPastBreak': round(deep, 4), 'maxZ': round(float(vals.max()), 3)})
+            report['items'].append({'id': it['id'], 'kind': it['kind'], 'through': True, 'left': round(left, 4), 'deepPastBreak': round(deep, 4), 'maxZ': round(float(vals.max()), 3), 'areaMm2': round(float(mask.sum()) * g.res * g.res, 2)})
         else:
             left = float(np.mean(vals > want + TOL))
             deep = float(np.mean(vals < want - TOL))
-            report['items'].append({'id': it['id'], 'kind': it['kind'], 'depth': it['depth'], 'left': round(left, 4), 'deep': round(deep, 4), 'p05': round(float(np.percentile(vals - want, 5)), 3), 'maxZ': round(float(vals.max()), 3)})
+            report['items'].append({'id': it['id'], 'kind': it['kind'], 'depth': it['depth'], 'left': round(left, 4), 'deep': round(deep, 4), 'p05': round(float(np.percentile(vals - want, 5)), 3), 'maxZ': round(float(vals.max()), 3), 'areaMm2': round(float(mask.sum()) * g.res * g.res, 2)})
     # Outside: material removed where the design expects stock. On a part cut free by a cut-out,
     # the stock AROUND the part is design waste, so the question is a gouge INTO the part, away
     # from every cut it asks for. Without a part, it is any cut away from the design (labels and a

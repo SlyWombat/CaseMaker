@@ -52,6 +52,8 @@ def arg_parse():
     p.add_argument('--makerables', default=os.environ.get('CM_MAKERABLES', ''),
                    help='the Makerables evaluation downloads (dl/<slug>/): vendor NCs and models, '
                         'matched by name and sha256, never committed')
+    p.add_argument('--candidate', action='store_true',
+                   help='the app sha is a candidate branch, not main: the page says so')
     p.add_argument('--only', help='comma-separated card ids (debug)')
     p.add_argument('--timeout', type=int, default=1800, help='seconds per job (default 1800)')
     return p.parse_args()
@@ -127,6 +129,34 @@ def our_cutters(ncs):
             if m:
                 keys.add(m.group(1).strip())
     return keys
+
+
+def design_numbers(dc):
+    """Area-weighted coverage and the outside cut from a design check's report (2.5D cards)."""
+    items = [i for i in (dc or {}).get('items', []) if 'left' in i]
+    tot = sum(i.get('areaMm2') or 0 for i in items)
+    cov = (1 - sum(i['left'] * (i.get('areaMm2') or 0) for i in items) / tot) if tot else None
+    out = (dc or {}).get('outside') or {}
+    return {'coveragePct': round(cov * 100, 2) if cov is not None else None,
+            'items': len(items), 'areaMm2': round(tot, 1),
+            'maxLeftPct': round(100 * max((i['left'] for i in items), default=0.0), 2),
+            'outsideMm2': out.get('areaMm2'), 'deepestOutsideMm': out.get('deepestMm')}
+
+
+def vendor_section(nc, tool, out):
+    """One tool's block of the vendor program (header comments kept): a design-side comparison must
+    score the same operation ours does — the maker's contour and chamfer are a different one."""
+    active = None; lines = []
+    for line in open(nc, errors='replace'):
+        if line.startswith(';'):
+            lines.append(line.rstrip()); continue
+        m = re.search(r'\bT(\d+)\b', line)
+        if m and re.search(r'\bM6\b', line):
+            active = int(m.group(1)); continue
+        if active == tool:
+            lines.append(line.rstrip())
+    open(out, 'w').write('\n'.join(lines) + '\n')
+    return out
 
 
 def materialise_job(job_path, rundir, meshes, args=None):
@@ -312,8 +342,30 @@ def run_card(c, args, sha, cat):
     loc, loc_doc = card_location(c, args)
     os.environ['CM_LOCATION'] = loc
     c = dict(c, locationName=str(loc_doc.get('name')), locationCutters=len(loc_doc.get('inventory') or []))
-    job = os.path.join(JOBS, c['job'])
     rundir = os.path.join(args.out, 'runs', sha, rid)
+    job = os.path.join(JOBS, c['job'])
+    ref0 = REF_BY_ID.get(c.get('vendor') or '')
+    if ref0 and ref0.get('svg'):
+        # A drawn reference's job is built at build time through the app's own importer (#968): the
+        # SVG itself is the vendor's evaluation-only input and is never committed.
+        svg = makerable(args, ref0['svg'][0], ref0['svg'][1])
+        job = os.path.join(rundir, 'job.json')
+        if svg and not os.path.exists(job):
+            os.makedirs(rundir, exist_ok=True)
+            L, W, T = ref0['stock']
+            spec = {'name': c['title'], 'length': L, 'width': W, 'thickness': T,
+                    'material': c['material'], 'depth': ref0.get('depth', 0.8),
+                    'toolKey': ref0.get('toolKey', ''), 'strokeWidth': ref0.get('strokeWidth'),
+                    'scale': ref0.get('scale'), 'regions': ref0.get('regions'),
+                    'hold': {'kind': 'bracket', 'bracket': {'anchor': 1, 'variant': 'thin',
+                             'clamps': [{'edge': 'back', 'at': W / 2}, {'edge': 'right', 'at': L / 2}],
+                             'source': 'default'}}}
+            spec_path = os.path.join(rundir, 'spec.json')
+            json.dump(spec, open(spec_path, 'w'))
+            app = os.path.join(args.repo, 'casemaker-app')
+            subprocess.run(['npx', '--no-install', 'tsx', '--tsconfig', 'tsconfig.app.json',
+                            os.path.join(HERE, 'svg-design-job.mts'), app, svg, job, spec_path],
+                           cwd=app, capture_output=True, text=True, timeout=300)
     assets = os.path.join(rundir, 'assets')
     os.makedirs(assets, exist_ok=True)
     receipt_path = os.path.join(rundir, 'receipt.json')
@@ -432,10 +484,38 @@ def run_card(c, args, sha, cat):
                                 inline_img(os.path.join(rundir, 'overlay.png'))))
         card['verdict'], card['sentence'], card['numbers'] = design_verdict(rc, dc)
         card['design'] = dc
+        card['oursDesign'] = design_numbers(dc)
 
-    # #955 — the vendor's own program beside ours: the same goal heightfield, the same checker.
+    # #955 — the vendor's own program beside ours: the same reference, the same checker.
     ref = REF_BY_ID.get(c.get('vendor')) if c.get('vendor') else None
-    if ref:
+    if ref and kind == 'design':
+        card['vendor'] = {'ref': ref}
+        nc = makerable(args, ref['nc'][0], ref['nc'][1])
+        if nc is None:
+            card['vendor']['missing'] = True
+        else:
+            vdir = os.path.join(rundir, 'vendor')
+            os.makedirs(vdir, exist_ok=True)
+            sec = os.path.join(vdir, 'vendor-tool.nc')
+            if not os.path.exists(sec):
+                vendor_section(nc, ref.get('tool'), sec)
+            rep = os.path.join(vdir, 'design.json')
+            if not os.path.exists(rep):                      # cached like the receipt
+                p = subprocess.run([sys.executable, os.path.join(HERE, 'design_check.py'),
+                                    '--location', loc, job, vdir, sec], capture_output=True, text=True)
+                open(rep, 'w').write(p.stdout.strip().splitlines()[-1] if p.stdout.strip() else '{}')
+            dv = read_json(rep)
+            sys.path.insert(0, HERE)
+            from goal_check import mkr_time                 # noqa: E402
+            if dv:
+                card['vendor'].update({'numbers': design_numbers(dv), 'nc': ref['nc'][0],
+                                       'seconds': mkr_time(nc),
+                                       'stats': vendor_stats(sec, mkr_time(nc))})
+                card['figures'].append((f"Makera Studio’s own program · its T{ref.get('tool')} pass on our design",
+                                        inline_img(os.path.join(vdir, 'overlay.png'))))
+            else:
+                card['vendor']['failed'] = True
+    if ref and kind == 'goal':
         card['vendor'] = {'ref': ref}
         nc = makerable(args, ref['nc'][0], ref['nc'][1])
         if nc is None or not os.path.exists(prefix + '.bin'):
@@ -485,16 +565,44 @@ def job_stock(job_path):
 
 
 def seven_lines(c):
-    """The plan-v2 §3 lines side by side: Makera Studio's own program and ours on the same goal.
+    """The plan-v2 §3 lines side by side: Makera Studio's own program and ours on the same reference.
     Every number is printed as measured; a line ours cannot state reads 'refused', not a guess."""
     v = (c.get('vendor') or {}).get('numbers') or {}
     st = (c.get('vendor') or {}).get('stats') or {}
     n = c.get('numbers') or {}
     o = c.get('ours') or {}
+    design = 'coveragePct' in v and 'cutInto0p1Pct' not in v   # 2.5D: the design check's report
+    od = c.get('oursDesign') or {}
     def pct(x):
         return '—' if x is None else f'{x * 100:.1f} %'
     def f(x, d=1, unit=''):
         return '—' if x is None else f'{x:.{d}f}{unit}'
+    if design:
+        vsecs = (c.get('vendor') or {}).get('seconds')
+        rows = [
+            ('coverage of the design', f"{f(v.get('coveragePct'), 2)} % of the drawn band" if v else 'not scored',
+             f"{f(od.get('coveragePct'), 2)} % of the drawn band" if od else 'refused — no program to score'),
+            ('cut outside the design', f"{f(v.get('outsideMm2'), 1)} mm² (max {f(v.get('deepestOutsideMm'), 2)} mm)" if v else 'not scored',
+             f"{f(od.get('outsideMm2'), 1)} mm² (max {f(od.get('deepestOutsideMm'), 2)} mm)" if od else 'refused — no program to score'),
+            ('cycle time', f"{f((vsecs or 0) / 60, 1)} min (its whole NC: engrave + contour + chamfer)" if vsecs else '—',
+             f(o['cycleSeconds'] / 3600, 2, ' h') if o.get('cycleSeconds') else (c.get('time') or 'refused — no program to score')),
+            ('air fraction', pct(st.get('airFraction')), pct(o.get('airFraction'))),
+            ('rapids per 1,000 feed moves', f(st.get('rapidsPer1k')), f(o.get('rapidsPer1k'))),
+            ('cutters', '3 (engraver, ⌀3.175 flat, chamfer)' if v else '—', str(o.get('cutters') or '—')),
+            ('posts as filed', 'yes — its own stock and holding' if v else '—',
+             {'match': 'yes', 'deviates': 'yes'}.get(str(c.get('verdict')), html.escape(str(c.get('verdict') or '—')))),
+        ]
+        allow = ('<p class="notes">Both columns are scored against the same design (our job’s own drawn band) '
+                 'and by the same design check; the vendor column is its engraving pass, the operation our job '
+                 'performs — its contour and chamfer are a different one and are left out of the design comparison.</p>')
+        if v and v.get('outsideMm2') is not None:
+            allow += (f"<p class=\"notes\">The vendor’s engraving leaves {f(100 - v.get('coveragePct'), 1)} % of the drawn "
+                      f"band above the floor: a 0.3 mm engraver clears a groove inside a band wider than itself — a "
+                      f"property of a V-engraving, printed as a fact.</p>")
+        body = ''.join(f'<tr><td>{k}</td><td>{a}</td><td>{b}</td></tr>' for k, a, b in rows)
+        return (f"<details open><summary>The seven lines, ours and Makera’s</summary>"
+                f"<div class=\"tablewrap\"><table><tr><th>line</th><th>Makera Studio</th><th>Case Maker</th></tr>{body}</table></div>"
+                f"{allow}</details>")
     ours_cut = (f"{n['cutIntoPct']} % · max {n['maxCutIntoMm']} mm" if 'cutIntoPct' in n
                 else 'refused — no program to score')
     vend_cut = (f"{v['cutInto0p1Pct']} % · max {v['maxCutIntoMm']} mm" if v else 'not scored')
@@ -528,6 +636,9 @@ def seven_lines(c):
 
 
 def page(cards, args, sha, loc, cat):
+    def vof(c):
+        v = c.get('vendor')
+        return v if isinstance(v, dict) else {}
     k3 = read_json(args.k3_location) or {}
     # The gate table keeps computed verdicts only; a card the interim check cannot measure waits in
     # its own appendix until #924's oracle can say something about it.
@@ -555,7 +666,7 @@ def page(cards, args, sha, loc, cat):
   the job’s own design (outline overlay and under/over numbers), the app’s goal heightfield (deviation map and
   coverage), or a reference program swept the same way. No maker’s photo decides a verdict; the source line is
   provenance only.</p>
-  <p class="meta">Case Maker main <b>{html.escape(sha)}</b> · demo cards on {html.escape(str(loc.get('id')))} “{html.escape(str(loc.get('name')))}”
+  <p class="meta">Case Maker {('candidate' if getattr(args, 'candidate', False) else 'main')} <b>{html.escape(sha)}</b>{' — a candidate branch, not main: these cards were built before it landed' if getattr(args, 'candidate', False) else ''} · demo cards on {html.escape(str(loc.get('id')))} “{html.escape(str(loc.get('name')))}”
   ({len(loc.get('inventory') or [])} cutters) · sample cards on “{html.escape(str(k3.get('name')))}” ({len(k3.get('inventory') or [])} owned cutters, the k3 export) ·
   catalogue {len(cat.get('tools') or [])} cutters / {len(cat.get('feeds') or [])} feed rows,
   synced {html.escape(str(cat.get('syncedAt')))} · built {datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · no machine was used</p>
@@ -595,7 +706,7 @@ def page(cards, args, sha, loc, cat):
   project, its author and its licence; the vendor’s files are evaluation-only downloads and are never
   committed — the build finds them by sha256 when they are on this machine, and a card whose inputs are
   absent says so instead of guessing.</p>
-  <p>Not yet beside ours: {'; '.join(f'<b>{html.escape(t)}</b> — {html.escape(w)}' for _i, t, w in PARKED)}.</p>
+  {('<p>Not yet beside ours: ' + '; '.join(f'<b>{html.escape(t)}</b> — {html.escape(w)}' for _i, t, w in PARKED) + '.</p>') if PARKED else ''}
 </div></section>
 <section class="panel"><h2>All cards</h2><div class="tablewrap"><table>
 <tr><th>id</th><th>job</th><th>check</th><th>verdict</th><th>what the check says</th></tr>
@@ -640,14 +751,15 @@ def page(cards, args, sha, loc, cat):
                       f"<tr><th>item</th><th>kind</th><th>depth mm</th><th>left</th><th>deep/over</th><th>reach</th></tr>{irows}</table></div></details>")
         body.append(f'''<article class="job" id="{html.escape(c['id'])}">
   <div class="job-head">
-    <p class="eyebrow">{html.escape(c['material'])} · {html.escape(c['kind'])} check · {html.escape(c['job'])}{' · local-input' if c.get('input') == 'local' else ''}{(' · Makera Studio’s own NC · ' + html.escape((c.get('vendor') or {}).get('ref', {}).get('licence', ''))) if c.get('vendor') else ''} · {html.escape(str(c.get('locationName', '')))} ({c.get('locationCutters', 0)} cutters)</p>
+    <p class="eyebrow">{html.escape(c['material'])} · {html.escape(c['kind'])} check · {html.escape(c['job'])}{' · local-input' if c.get('input') == 'local' else ''}{(' · Makera Studio’s own NC · ' + html.escape(vof(c).get('ref', {}).get('licence', ''))) if vof(c) else ''} · {html.escape(str(c.get('locationName', '')))} ({c.get('locationCutters', 0)} cutters)</p>
     <h2>{html.escape(c['title'])}</h2>
     <p class="src">{html.escape(c['id'])} · source: {html.escape(c.get('source', ''))}</p>
+    {('<p class="notes">' + html.escape(vof(c).get('ref', {}).get('note', '')) + '</p>') if vof(c) and vof(c).get('ref', {}).get('note') else ''}
   </div>
   <p><span class="pill {pill_cls}">{pill_txt}</span> <span class="notes">{html.escape(c.get('sentence') or '')}</span></p>
   <div class="frames">{figs}</div>
   <dl class="facts">{facts_html}</dl>
-  {seven_lines(c) if (c.get('vendor') or {}).get('numbers') else ''}
+  {seven_lines(c) if vof(c).get('numbers') else ''}
   {detail}
 </article>''')
     body.append('''<footer>Job files, the tools that build this page and its manifest are in
@@ -689,7 +801,7 @@ def main():
         out_cards.append(card)
     page_path = os.path.join(args.out, 'page.html')
     open(page_path, 'w').write(page(out_cards, args, sha, loc, cat))
-    manifest = {'sha': sha, 'builtAt': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
+    manifest = {'sha': sha, 'candidate': bool(getattr(args, 'candidate', False)), 'builtAt': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
                 'location': {'path': args.location, 'id': loc.get('id'), 'name': loc.get('name'),
                              'cutters': len(loc.get('inventory') or [])},
                 'k3Location': {'path': args.k3_location,

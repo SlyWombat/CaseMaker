@@ -64,20 +64,45 @@ REFS = [
          job='ref-halfclamp.json',
          note='Same handling as the full clamp: laid flat from the published side-on STL, placed at '
               'the NC’s own footprint (part x 7.75–40.25, y 8–28), ⌀3.175 flat, 10.3 min.'),
+    dict(id='ref-coasters',
+         title='Traditional Mandala Wooden Coasters — the painted band, V-engraved',
+         maker='Makerables maker', licence='CC BY 4.0',
+         url='https://www.makerables.com/project/traditional-mandala-pattern-wooden-coasters',
+         slug='traditional-mandala-pattern-wooden-coasters',
+         material='hardwood', stock=(100.0, 100.0, 5.0), dz=0.0, tool=2,
+         toolKey='inv:kz-engrave-30-0-3',
+         # The published original is an SVG. The job is built from it at build time (#968 import):
+         # stroke bands as regions, fitted to Studio's own engraving footprint.
+         svg=('321-mrxcrxhw.svg', '42b7bb962f52635e5e39a03314f9ee22e199b48b336e841b6d66a45b3b211544'),
+         strokeWidth=0.5, scale=0.90, depth=0.8,
+         nc=('20260723180036-mrxcrnx2.nc',
+             '5ea9732c7b57ca47dbedac45c428d64107d03a2d6aebd8ef4f73f618060e7d74'),
+         job='ref-coasters.json',
+         note='Studio’s engraver (T2) clears the strokes’ painted band at Z −0.8; its T4 contour frees '
+              'the disc and its T6 chamfer breaks the rim, so the design comparison scores T2 only. '
+              'The band is 0.5 mm: the drawing’s 1-unit default sits inside a 0.5-scale element '
+              'matrix — the app’s importer at db907716 reads that default as 1 mm unscaled (found by '
+              'this card), so the job states stroke-width 0.5 explicitly and the card says so.'),
+    dict(id='ref-badge',
+         title='Makera Badge 2D Pattern — the closed rings as regions, two-colour engraving',
+         maker='Makera', licence='CC0 1.0',
+         url='https://www.makerables.com/project/makera-badge-2d-patten',
+         slug='makera-badge-2d-patten',
+         material='abs', stock=(100.0, 100.0, 1.3), dz=0.0, tool=2,
+         toolKey='inv:kz-engrave-30-0-3',
+         # The zipped original's SVG: 173 closed rings at a hairline stroke — the outlines of the
+         # areas Studio pockets for the second colour. `regions` fills each ring.
+         svg=('MakeraBadge.svg', '09d5b467b89ac235987e602bd9045ab0b991b7dda500f83e45bc31ad8acd3431'),
+         regions=True, depth=0.1,
+         nc=('MakeraBadge-mqqoiinw.nc',
+             '616fdca6b9f3a7f15ef355a8cd9e21f37d16f8632464d4fd9422599110605b93'),
+         job='ref-badge.json',
+         note='Studio’s T2 2D Pocket reveals the second colour at Z −0.1; its T1 flat then pockets '
+              'deeper (0.5–1.5) and frees the badge. The design comparison scores the T2 pass, which '
+              'is the operation our job performs, at the same 0.1 mm depth.'),
 ]
-
-# Parked with the reason, so the section says what it cannot yet put beside ours.
-PARKED = [
-    ('ref-coasters', 'Traditional Mandala Wooden Coasters (CC BY 4.0)',
-     'our SVG import reads the drawing’s stroke paths as centre lines (50 traces), while Studio’s '
-     '2D区域清理 clears the strokes’ painted bands (a 0.15 mm raster at Z −0.8). Our line job posts '
-     '(4 min 3 s vs Studio’s 4.1 min) and matches its own design 50/50, but scored against it '
-     'Studio’s own program leaves up to 0.44 mm on every stroke and cuts 224 mm² outside the design: '
-     'the comparable job needs the stroke bands as regions — an import-fidelity gap to file first'),
-    ('ref-badge', 'Makera Badge 2D Pattern (CC0 1.0)',
-     'the published original is a zipped 2D image: the same design-side comparison as the coasters, '
-     'with the raster trace in place of the SVG stroke bands'),
-]
+# Parked with the reason, so the section says what it cannot yet put beside ours. Empty today.
+PARKED = []
 
 # The app's Z1 rapid profile (machine.ts): 5000 mm/min XY, 1000 mm/min Z. Used for the vendor
 # file's air-fraction estimate until #964's scorer (which owns the shared implementation) lands.

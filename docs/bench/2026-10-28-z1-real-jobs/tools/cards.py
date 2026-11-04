@@ -145,4 +145,12 @@ CARDS = [
     dict(id='ref-halfclamp', title='Reference: half-length top clamp — Makera Studio’s program beside ours',
          job='ref-halfclamp.json', kind='goal', input='local', material='aluminium-6061', vendor='ref-halfclamp',
          source='Makerables — Half-Length Top Clamp (CC0 1.0); Makera Studio’s own NC'),
+    # A drawn reference (#968): the job is built at build time from the maker's SVG, its stroke bands
+    # as regions, and both programs are scored against that one design.
+    dict(id='ref-coasters', title='Reference: mandala coasters — the painted band, V-engraved',
+         job='ref-coasters.json', kind='design', input='local', material='hardwood', vendor='ref-coasters',
+         source='Makerables — Traditional Mandala Wooden Coasters (CC BY 4.0); Makera Studio’s own NC'),
+    dict(id='ref-badge', title='Reference: Makera badge — the drawn areas, two-colour engraving',
+         job='ref-badge.json', kind='design', input='local', material='abs', vendor='ref-badge',
+         source='Makerables — Makera Badge 2D Pattern (CC0 1.0); Makera Studio’s own NC'),
 ]
