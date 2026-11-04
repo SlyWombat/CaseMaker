@@ -1014,7 +1014,6 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
 
     // 2. REST BY CL DIFFERENCE, when the caller offers a smaller flat: the band the previous
     //    cutter left standing, where the smaller one can reach.
-    let finishCl = clFlat;
     if (opts.restFlat !== undefined) {
       const restCl = clSurface(opts.geometry, region, opts.restFlat, cuts.stepOver);
       noteGrid(opts.restFlat, restCl);
@@ -1038,16 +1037,24 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
       });
       ops.push({ kind: 'rest', region: ref, outcome: restOut });
-      finishCl = restCl;
     }
 
     // 3. THE BALL'S ONE FINAL LEVEL: a single pass at the region's depth takes the band.
+    //
+    // THE CURVED PROPERTY SEEDS FOUND THIS: the ball was dropped onto `finishCl` — the FLAT's CL
+    // surface (or the rest flat's) — so it rode the rough's own clearance instead of the design.
+    // On the sloped seed a flat ⌀6 held tangent to an 11° ramp stands tan(11°)·3 ≈ 0.58 mm above
+    // the surface at its downhill edge, and the ball followed that: 0.58 mm of material left over
+    // the whole pocket. The finish and the pencil follow the BALL'S OWN CL surface; the flat's
+    // stays the rough's (and the rest pass's) reference, which is what that CL difference is.
+    const clBall = clSurface(opts.geometry, region, ball, cuts.stepOver);
+    noteGrid(ball, clBall);
     const depth = Math.max(opts.stepDownMm, region.zTop - region.zBottom);
     const finishOut = finish({
       cutter: ball,
       region,
       regionRef: ref,
-      clSurface: finishCl,
+      clSurface: clBall,
       kind: 'ball-scallop',
       scallopMm: opts.finishScallopMm ?? opts.bandMm,
       stepDownMm: depth,
@@ -1066,7 +1073,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       cutter: ball,
       region,
       regionRef: ref,
-      clSurface: finishCl,
+      clSurface: clBall,
       feeds: opts.feeds,
       safeZMm: opts.safeZMm,
       hopZMm: opts.hopZMm,
