@@ -4,39 +4,44 @@
  * The gate must judge the CAM without using the CAM's own geometry (#924's B1: "the app's own
  * check passes because it compares the simulation with the app's plan"). A direct-import rule
  * cannot see the coupling that matters: `designCheck.ts` imports helpers from `oracle.ts`, and
- * `oracle.ts` imports the CAM's cone (`vProfile.ts`) and its sweep (`partPlan.ts`) — so the gate
- * grades the CAM with the CAM's math while every direct import looks innocent. This spec follows
- * VALUE imports transitively and treats type-only imports as erased (they are), and forbids, in
- * each gate root's closure:
+ * `oracle.ts` imports the CAM's cone (`vProfile.ts`) and sweep (`engrave/partPlan.ts`) — so the
+ * gate grades the CAM with the CAM's math while every direct import looks innocent. This spec
+ * follows imports transitively and forbids, in each gate root's closure:
  *
  *   - `engine/cnc/cam/**` (including the rebuilt `cam/model/**`);
  *   - `engine/cnc/vProfile.ts` (the CAM's cone);
- *   - `engine/cnc/partPlan.ts` (the CAM's sweep).
+ *   - `engine/cnc/engrave/partPlan.ts` (the CAM's sweep).
  *
  * GATE ROOTS (A's R1, #956): `goalCheckField.ts`, `designCheck.ts`, `goalCoverage.ts`,
  * `goalCheckInput.ts`, and the heightfield module when #967 extracts it. NOT `oracle.ts` — its
  * area comparison is the CAM-predicted check by design and is labelled as that.
  *
- * THE ALLOWLIST is a TRUST BOUNDARY, not a hole in the walk's data: a shared module on the list
- * is the definition the gate is allowed to use — placement of the goal (`targetPlace`,
- * `jobSetup`, `targetScale`), the simulator the gate reads the posted NC through
- * (`columnEngine`/`sweep`), the Manifold toplevel (`evaluateOp`), `arcResolution`, and the app's
- * types. The walk records that it reached one and does not enter it; the list is asserted below,
- * so widening it is a reviewed act. Without the boundary the rule would be vacuous: the placement
- * module itself reaches the job model, which knows the CAM.
+ * THE WALK ENTERS EVERY MODULE — there is no allowlist. A's measurement on #956 showed why a
+ * trust boundary is not acceptable: `jobSetup.ts` is "placement, allowed", yet its closure reaches
+ * TEN forbidden files (`vCone` via `vProfile`, `partPlan`, `cam/relief`, `primitiveSurface` →
+ * `cam/surface3d`, …). The gate uses only `pureGoalObject` from it, so the fix is to move that
+ * helper into `jobKind.ts`, not to stop at the module. An exemption, if one is ever needed, is a
+ * single named edge, never a subtree.
  *
- * TODAY (main aba577f9, 2026-11-04) the rule fails on two roots, both expected and both owned:
- *   - `goalCheckField.ts` imports `sampleGoalHeightfield`/`isMold`/`moldHeightfield` as VALUES
- *     from `cam/surface3d.ts` — the extraction is #967 (C, lands before #966);
- *   - `designCheck.ts` reaches `oracle.ts`, which reaches `vProfile.ts` (and, through
- *     `rotary/wrap` and `stockStart`, `cam/ir.ts` and `cam/tabSettings.ts`) — A splits the
- *     helpers into `oracleTypes.ts` in the #924 candidate.
- * Both cases are `it.fails` so main stays green: the change that fixes each one flips its case to
+ * TYPE-ONLY IMPORTS: under `verbatimModuleSyntax: true` (tsconfig.app.json), only a
+ * DECLARATION-level `import type { … }` / `export type { … } from` is erased. An inline
+ * `import { type X }` still emits a module load, so it is followed as a value edge. The fixture
+ * pair under `fixtures/importGraph/` pins that distinction.
+ *
+ * TODAY (main aba577f9, 2026-11-04) the rule fails on THREE roots, each owned:
+ *   - `goalCheckField.ts` — 9 forbidden files, first hop a value import of `cam/surface3d` (#967,
+ *     C's extraction);
+ *   - `designCheck.ts` — 4 forbidden files via `oracle.ts`: `vProfile`, `engrave/partPlan`,
+ *     `cam/ir` (through `rotary/wrap`) and `cam/tabSettings` (through `stockStart` →
+ *     `defaultsClient`) — A's `oracleTypes.ts` split (#924);
+ *   - `goalCheckInput.ts` — 10 forbidden files via `jobSetup.ts` — A's `pureGoalObject` →
+ *     `jobKind.ts` move.
+ * `goalCoverage.ts` is clean (its only CAM touch is a declaration-level `import type`).
+ * Each failing case is `it.fails` so main stays green; the change that fixes one flips it to
  * `it`, and this spec then guards it.
  *
- * One more rule from A's R1, kept here: `cam/model/**` must NEVER import the extracted heightfield
- * module — the rebuild's whole point is that the engine stops planning on the field the gate
- * measures with.
+ * One more rule from A's R1: `cam/model/**` must NEVER import the extracted heightfield module —
+ * the rebuild's point is that the engine stops planning on the field the gate measures with.
  */
 
 import { existsSync, readdirSync } from 'node:fs';
@@ -50,6 +55,7 @@ import { readImports, valueImportClosure, type ClosureEntry } from '../tools/imp
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '..', '..');
 const SRC = join(APP, 'src');
+const IMPORT_FIXTURES = join(HERE, 'fixtures', 'importGraph');
 
 /** A's R1 gate roots. The heightfield module is conditional until #967 extracts it. */
 const GATE_ROOTS = [
@@ -62,19 +68,8 @@ const GATE_ROOTS = [
 /** #967's destination for `GoalHeightfield`, `sampleGoalHeightfield`, `isMold`, `moldHeightfield`. */
 const HEIGHTFIELD_MODULE = 'engine/cnc/engrave/goalHeightfield.ts';
 
-/** The shared-module allowlist: definitions the gate may use; the walk does not enter them. */
-const ALLOWED_SHARED = new Set([
-  'engine/compiler/arcResolution.ts',
-  'workers/geometry/evaluateOp.ts', // the Manifold toplevel
-  'workers/geometry/columnEngine.ts', // the simulator
-  'workers/geometry/sweep.ts', // the simulator
-  'engine/cnc/engrave/jobSetup.ts', // placement: the goal is defined, not judged, here
-  'engine/cnc/engrave/targetPlace.ts', // placement
-  'engine/cnc/engrave/targetScale.ts', // placement
-]);
-
 const isForbidden = (file: string): boolean =>
-  file.startsWith('engine/cnc/cam/') || file === 'engine/cnc/vProfile.ts' || file === 'engine/cnc/partPlan.ts';
+  file.startsWith('engine/cnc/cam/') || file === 'engine/cnc/vProfile.ts' || file === 'engine/cnc/engrave/partPlan.ts';
 
 const forbiddenIn = (closure: { files: Map<string, ClosureEntry> }): ClosureEntry[] =>
   [...closure.files.values()].filter((entry) => isForbidden(entry.file));
@@ -82,66 +77,73 @@ const forbiddenIn = (closure: { files: Map<string, ClosureEntry> }): ClosureEntr
 const reportOf = (entries: readonly ClosureEntry[]): string =>
   entries.map((entry) => `${entry.file}  ←  ${entry.chain.join(' -> ')}`).join('\n');
 
-describe('#964 the gate roots and the allowlist', () => {
+const closureOf = (root: string): ReturnType<typeof valueImportClosure> => valueImportClosure([root], SRC);
+
+describe('#964 the gate roots and the graph’s rules', () => {
   it('names gate roots that exist', () => {
     for (const root of GATE_ROOTS) expect(existsSync(join(SRC, root))).toBe(true);
   });
 
-  it('keeps the allowlist to the shared definitions A ruled on', () => {
-    expect([...ALLOWED_SHARED].sort()).toEqual([
-      'engine/cnc/engrave/jobSetup.ts',
-      'engine/cnc/engrave/targetPlace.ts',
-      'engine/cnc/engrave/targetScale.ts',
-      'engine/compiler/arcResolution.ts',
-      'workers/geometry/columnEngine.ts',
-      'workers/geometry/evaluateOp.ts',
-      'workers/geometry/sweep.ts',
-    ]);
+  it('the graph reads value imports and skips declaration-level type imports', () => {
+    // designCheck → oracle is a VALUE import and must be in the closure.
+    expect(closureOf('engine/cnc/engrave/designCheck.ts').files.has('engine/cnc/engrave/oracle.ts')).toBe(true);
+    // goalCoverage imports only `import type { GoalHeightfield }` from cam/surface3d; it must not be.
+    expect(closureOf('engine/cnc/engrave/goalCoverage.ts').files.has('engine/cnc/cam/surface3d.ts')).toBe(false);
   });
 
-  it('the graph reads value imports and skips type-only ones', () => {
-    // designCheck → oracle is a VALUE import and must be in the closure.
-    const design = valueImportClosure(['engine/cnc/engrave/designCheck.ts'], SRC, ALLOWED_SHARED);
-    expect(design.files.has('engine/cnc/engrave/oracle.ts')).toBe(true);
-    // goalCoverage imports only the GoalHeightfield TYPE from cam/surface3d; it must not be.
-    const coverage = valueImportClosure(['engine/cnc/engrave/goalCoverage.ts'], SRC, ALLOWED_SHARED);
-    expect(coverage.files.has('engine/cnc/cam/surface3d.ts')).toBe(false);
+  it('an INLINE `{ type X }` import is a value edge; a declared `import type` is erased', () => {
+    const inline = readImports(join(IMPORT_FIXTURES, 'inline.ts'), IMPORT_FIXTURES);
+    expect(inline).toHaveLength(1);
+    expect(inline[0]!.typeOnly).toBe(false);
+    expect(inline[0]!.to).toBe('target.ts');
+
+    const declared = readImports(join(IMPORT_FIXTURES, 'declared.ts'), IMPORT_FIXTURES);
+    expect(declared).toHaveLength(1);
+    expect(declared[0]!.typeOnly).toBe(true);
+
+    const viaInline = valueImportClosure(['inline.ts'], IMPORT_FIXTURES);
+    expect(viaInline.files.has('target.ts')).toBe(true);
+    const viaDeclared = valueImportClosure(['declared.ts'], IMPORT_FIXTURES);
+    expect(viaDeclared.files.has('target.ts')).toBe(false);
+  });
+
+  it('enters every module — the walk does not stop at placement', () => {
+    // This is A's finding: `jobSetup` is where the gate gets `pureGoalObject`, and its closure
+    // reaches the CAM. A stop-at-allowlist rule would hide exactly that.
+    const closure = closureOf('engine/cnc/engrave/goalCheckInput.ts');
+    expect(closure.files.has('engine/cnc/engrave/jobSetup.ts')).toBe(true);
+    expect(closure.files.has('engine/cnc/cam/surface3d.ts')).toBe(true);
   });
 });
 
 describe('#964 the gate’s value-import closure carries no CAM', () => {
-  // RED-FIRST: these two are the slices that make the rule true. Flip each to `it` in the change
+  // RED-FIRST: these three are the cuts that make the rule true. Flip each to `it` in the change
   // that lands its fix (the failure message then names anything that regresses).
   it.fails('goalCheckField — clean once #967 extracts the heightfield module', () => {
-    const closure = valueImportClosure(['workers/sim/goalCheckField.ts'], SRC, ALLOWED_SHARED);
-    const bad = forbiddenIn(closure);
-    expect(bad, `forbidden CAM imports:\n${reportOf(bad)}`).toEqual([]);
+    const bad = forbiddenIn(closureOf('workers/sim/goalCheckField.ts'));
+    expect(bad.length, `forbidden CAM imports:\n${reportOf(bad)}`).toBe(0);
   });
 
   it.fails('designCheck — clean once A’s oracleTypes split lands (#924)', () => {
-    const closure = valueImportClosure(['engine/cnc/engrave/designCheck.ts'], SRC, ALLOWED_SHARED);
-    const bad = forbiddenIn(closure);
-    expect(bad, `forbidden CAM imports:\n${reportOf(bad)}`).toEqual([]);
+    const bad = forbiddenIn(closureOf('engine/cnc/engrave/designCheck.ts'));
+    expect(bad.length, `forbidden CAM imports:\n${reportOf(bad)}`).toBe(0);
   });
 
-  it('goalCoverage — clean today (the heightfield is a type import)', () => {
-    const closure = valueImportClosure(['engine/cnc/engrave/goalCoverage.ts'], SRC, ALLOWED_SHARED);
-    const bad = forbiddenIn(closure);
-    expect(bad, `forbidden CAM imports:\n${reportOf(bad)}`).toEqual([]);
+  it.fails('goalCheckInput — clean once pureGoalObject moves to jobKind.ts (A)', () => {
+    const bad = forbiddenIn(closureOf('engine/cnc/engrave/goalCheckInput.ts'));
+    expect(bad.length, `forbidden CAM imports:\n${reportOf(bad)}`).toBe(0);
   });
 
-  it('goalCheckInput — clean today (placement is allowlisted)', () => {
-    const closure = valueImportClosure(['engine/cnc/engrave/goalCheckInput.ts'], SRC, ALLOWED_SHARED);
-    const bad = forbiddenIn(closure);
-    expect(bad, `forbidden CAM imports:\n${reportOf(bad)}`).toEqual([]);
+  it('goalCoverage — clean today (the heightfield is a declaration-level type import)', () => {
+    const bad = forbiddenIn(closureOf('engine/cnc/engrave/goalCoverage.ts'));
+    expect(bad.length, `forbidden CAM imports:\n${reportOf(bad)}`).toBe(0);
   });
 
   it.skipIf(!existsSync(join(SRC, HEIGHTFIELD_MODULE)))(
     'the extracted heightfield module (#967) joins the gate roots and stays clean',
     () => {
-      const closure = valueImportClosure([HEIGHTFIELD_MODULE], SRC, ALLOWED_SHARED);
-      const bad = forbiddenIn(closure);
-      expect(bad, `forbidden CAM imports:\n${reportOf(bad)}`).toEqual([]);
+      const bad = forbiddenIn(closureOf(HEIGHTFIELD_MODULE));
+      expect(bad.length, `forbidden CAM imports:\n${reportOf(bad)}`).toBe(0);
     },
   );
 });

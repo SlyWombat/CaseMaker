@@ -65,15 +65,13 @@ export function resolveSpecifier(fromFile: string, specifier: string, srcRoot: s
   return null;
 }
 
-const hasValueBinding = (clause: ts.ImportClause | undefined): boolean => {
-  if (clause === undefined) return true; // `import 'x'` — a side-effect import
-  if (clause.isTypeOnly) return false;
-  if (clause.name !== undefined) return true; // default import
-  const bindings = clause.namedBindings;
-  if (bindings === undefined) return false;
-  if (ts.isNamespaceImport(bindings)) return true; // `import * as ns`
-  return bindings.elements.some((element) => !element.isTypeOnly);
-};
+/**
+ * Is this import declaration erased at compile time? Under `verbatimModuleSyntax` only a
+ * DECLARATION-level `import type { … }` is guaranteed erased: an inline `import { type X }` still
+ * emits a module load (`import {} from '…'`), so it must be followed as a value edge. The same
+ * applies to `export type { … } from`, which is the only erased re-export form.
+ */
+const isErasedImport = (clause: ts.ImportClause | undefined): boolean => clause !== undefined && clause.isTypeOnly;
 
 /**
  * Every import/export-from/dynamic-import/require in one source file, with its type-only flag.
@@ -105,7 +103,7 @@ export function readImports(filePath: string, srcRoot: string): ImportEdge[] {
 
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
-      add(node, node.moduleSpecifier.text, !hasValueBinding(node.importClause));
+      add(node, node.moduleSpecifier.text, isErasedImport(node.importClause));
     } else if (ts.isExportDeclaration(node)) {
       // `export type * from './x'` is erased; a plain re-export carries values.
       if (node.moduleSpecifier !== undefined && ts.isStringLiteral(node.moduleSpecifier)) {
@@ -142,8 +140,6 @@ export interface ImportClosure {
   edges: ImportEdge[];
   /** Roots that do not exist on disk. */
   missingRoots: string[];
-  /** Allowlisted modules the walk reached and deliberately did not enter. */
-  stoppedAt: Set<string>;
 }
 
 /**
@@ -151,21 +147,15 @@ export interface ImportClosure {
  * Type-only imports are recorded as edges but not followed: they are erased, so they cannot make
  * the gate run the CAM's code.
  *
- * `stopAt` is the shared-modules allowlist: a module ON the list is trusted as a definition (the
- * placement of the goal, the simulator the gate reads the NC through, the Manifold toplevel) and
- * the walk does not enter it. Without that trust the allowlist would be meaningless — the
- * placement module itself imports the job model, which knows the CAM. The list is deliberately
- * small and is asserted by the spec, so widening it is a reviewed act.
+ * The walk enters EVERY module: there is no allowlist. A trust boundary at a shared module
+ * would hide the CAM behind it — `jobSetup.ts` (placement, and the gate uses only its
+ * `pureGoalObject`) reaches ten forbidden files — so an exemption, if one is ever needed, must be
+ * a single named edge, never a subtree.
  */
-export function valueImportClosure(
-  roots: readonly string[],
-  srcRoot: string,
-  stopAt: ReadonlySet<string> = new Set(),
-): ImportClosure {
+export function valueImportClosure(roots: readonly string[], srcRoot: string): ImportClosure {
   const files = new Map<string, ClosureEntry>();
   const edges: ImportEdge[] = [];
   const missingRoots: string[] = [];
-  const stoppedAt = new Set<string>();
   const queue: { file: string; chain: string[]; via: ImportEdge | null }[] = [];
 
   for (const root of roots) {
@@ -190,10 +180,6 @@ export function valueImportClosure(
     edges.push(...imports);
     for (const edge of imports) {
       if (edge.typeOnly || edge.to === null) continue;
-      if (stopAt.has(edge.to)) {
-        stoppedAt.add(edge.to);
-        continue;
-      }
       if (files.has(edge.to)) continue;
       const entry: ClosureEntry = {
         file: edge.to,
@@ -204,5 +190,5 @@ export function valueImportClosure(
       queue.push({ file: edge.to, chain: entry.chain, via: edge });
     }
   }
-  return { files, edges, missingRoots, stoppedAt };
+  return { files, edges, missingRoots };
 }
