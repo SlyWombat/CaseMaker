@@ -943,7 +943,6 @@ describe.skipIf(TRAY === undefined)('#959 acceptance — tool tray 70, the WHOLE
         stepDownMm: 1.5, bandMm: 0.3, stepOverMm: 3,
         feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
         rapid: Z1.rapidEstimate, spindleRpm: 12000, air: true,
-        safeZMm: 12, hopZMm: 3,
         edgeBreak: { legMm: 0.5 },
         toolNumberFor: (t: Tool) => t.number ?? 1,
       },
