@@ -100,11 +100,17 @@ function traceRing(ring: readonly [number, number][], z: number, feedMmPerMin: n
  * ordering ACROSS steps would interleave inner and outer rings and turn some of them into
  * full-width slots (ring i+1 is only safe to feed into directly when it is truly one step-over
  * inside ring i, which only holds within a single `pocketLoops` offset step).
+ *
+ * `from` is wherever the tool actually is before this step starts (the manager's own follow-up
+ * to the per-ring rotation above) — `tourNearest`'s own default of `[0, 0]` ignored it, so a
+ * multi-lobe step (several disconnected rings at the same offset, common on the organizer) could
+ * visit its FARTHEST ring first and its nearest one last, however good the per-ring entry seam
+ * then is.
  */
-function orderedRings(loops: readonly [number, number][][]): [number, number][][] {
+function orderedRings(loops: readonly [number, number][][], from: readonly [number, number]): [number, number][][] {
   if (loops.length <= 1) return loops as [number, number][][];
   const points = loops.map((r) => r[0]! as readonly [number, number]);
-  return tourNearest(points).map((i) => loops[i]!);
+  return tourNearest(points, from).map((i) => loops[i]!);
 }
 
 /** Index of `ring`'s vertex nearest `target`; ties to the lower index — same rule `tour.ts`
@@ -224,19 +230,22 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
   // onward — the very first ring of the whole op has no "from" position, just its own plunge.
   let prevExit: [number, number, number] | null = null;
 
+  // Wherever the tool actually is right now — `opts.startFrom` (the work origin by default)
+  // before the very first ring of the whole op, the previous ring's own exit (always its own
+  // entry — it closes on itself) after that. Shared by the step tour (which ring to visit next)
+  // and the per-ring entry rotation (where in that ring to start) below.
+  const comingFrom = (): readonly [number, number] => (prevExit === null ? (opts.startFrom ?? [0, 0]) : [prevExit[0], prevExit[1]]);
+
   for (const z of levels) {
     const steps = pocketLoops(region, toolRadius, opts.stepOverMm, opts.offset);
     for (const [stepIndex, step] of steps.entries()) {
-      const loops = orderedRings(step);
+      const loops = orderedRings(step, comingFrom());
       for (const loop of loops) {
-        // Rotated to the vertex nearest wherever the tool is COMING FROM — `opts.startFrom`
-        // (the work origin by default) for the very first ring of the whole op, the previous
-        // ring's own exit (which is always its own start — it closes on itself) after that. This
-        // is the lever toward Makera's own rapids/1,000: `ring[0]` used to be whichever vertex
-        // Clipper happened to emit first, so the link into this ring often had most of its own
-        // perimeter to cross before `link()` ever got a choice between a short hop and a retract.
-        const target: readonly [number, number] = prevExit === null ? (opts.startFrom ?? [0, 0]) : [prevExit[0], prevExit[1]];
-        const ring = rotatedToEntry(loop, target);
+        // This is the lever toward Makera's own rapids/1,000: `ring[0]` used to be whichever
+        // vertex Clipper happened to emit first, so the link into this ring often had most of its
+        // own perimeter to cross before `link()` ever got a choice between a short hop and a
+        // retract.
+        const ring = rotatedToEntry(loop, comingFrom());
         const start = ring[0]!;
         if (prevExit === null) {
           // The very first ring of the whole op: rapid up, then plunge down.

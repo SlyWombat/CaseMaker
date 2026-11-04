@@ -35,6 +35,25 @@ function fakeRectOffset(region: Polygons, delta: number): Polygons {
   return [[[minX - delta, minY - delta], [maxX + delta, minY - delta], [maxX + delta, maxY + delta], [minX - delta, maxY + delta]]];
 }
 
+// Same formula as `fakeRectOffset`, but applied to EACH input ring independently — a region of
+// several disjoint rectangles (a multi-lobe step) stays several separate rings after offsetting,
+// instead of being flattened into one bounding box.
+function fakeMultiRectOffset(region: Polygons, delta: number): Polygons {
+  const out: Polygons = [];
+  for (const c of region) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const [x, y] of c) {
+      minX = Math.min(minX, x); minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+    }
+    const w = maxX - minX + 2 * delta;
+    const h = maxY - minY + 2 * delta;
+    if (w <= 0 || h <= 0) continue;
+    out.push([[minX - delta, minY - delta], [maxX + delta, minY - delta], [maxX + delta, maxY + delta], [minX - delta, maxY + delta]]);
+  }
+  return out;
+}
+
 const flat6: Tool = {
   number: 1, id: 'flat-6', name: 'flat-6', typeText: 'flat', shape: 'flat',
   handleDiameter: 6, tipDiameter: null, diameter: 6, cornerRadius: null,
@@ -269,5 +288,33 @@ describe('#959 pocket()', () => {
       }
       from = entry;
     }
+  });
+
+  // The manager's own follow-up to the per-ring rotation above (E's run on 2441401d: "still worth
+  // doing for the tray's 15.9 vs Makera's 5.9"): a multi-lobe step — several disconnected rings at
+  // the SAME offset, common on the organizer's own geometry — used to tour from a fixed [0, 0],
+  // so it could visit its farthest ring first and its nearest one last, however good each ring's
+  // own entry seam then was.
+  it('a multi-lobe step visits the ring nearest wherever the tool is coming from FIRST, not whichever `tourNearest` would pick from [0, 0]', () => {
+    // Two 10x10 rectangles, 90 mm apart — far enough that no fake offset step merges them, and
+    // far enough from the origin that a [0, 0]-anchored tour unambiguously prefers the NEAR one.
+    const twoLobes: Polygons = [
+      [[0, 0], [10, 0], [10, 10], [0, 10]],
+      [[100, 0], [110, 0], [110, 10], [100, 10]],
+    ];
+    const far: PocketNode = { ...node(-1, 0), region: twoLobes };
+    const farRegion: RegionRef = { ...region(), bounds: { min: [0, 0], max: [110, 10] } };
+    const out = pocket({
+      cutter: flat6, node: far, region: farRegion,
+      stepOverMm: 1.2, stepDownMm: 1,
+      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
+      offset: fakeMultiRectOffset, safeZMm: 10, hopZMm: 3,
+      toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+      startFrom: [105, 5], // inside the FAR lobe
+    });
+    expect(out.passes.length).toBeGreaterThanOrEqual(2); // a ring from each lobe, same step
+    // The first-visited ring (this op's own opening plunge) must be the FAR lobe's — its own x is
+    // well above the near lobe's (0-10) and well below the far lobe's rotated entry being <= 110.
+    expect(out.passes[0]!.entry[0], `visited ${JSON.stringify(out.passes.map((p) => p.entry))} first`).toBeGreaterThan(50);
   });
 });
