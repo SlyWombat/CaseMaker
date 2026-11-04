@@ -12,14 +12,22 @@
  * ~1 mm features too — and never counted against a chain (`leftBehind`): every chain would carry
  * it, so counting it lets price leave cuttable pockets uncut.
  *
+ * THE FREEING CUT is its own LAST step (#959 ruling: the part stays held through every other cut).
+ * Its cutter is one already in the chain: the first link that covers the profile (usually the
+ * primary — coming back to it after the rests costs a RETURN tool change, which `priceSequence`
+ * charges), or the chain's last cutter when it can take the profile (stated flute ≥ depth, stated
+ * shape; already loaded, so no return). Both are offered and the cheaper wins; `freeing` says
+ * which. A cutter that comes back after another ran is charged the second change — counting one
+ * change per cutter key, the older model, under-priced exactly that return.
+ *
  * THE METHOD, and where it comes from (prior-art note on #961; Kiri:Moto, FreeCAD Path and
  * OpenCamLib are LOCAL REFERENCES only — the methods are re-implemented from their descriptions,
  * no code is copied or linked):
  *  - neither Kiri:Moto nor FreeCAD Path picks a sequence — both leave the ordered op list and its
  *    tools to the operator. The picker is ours to add.
  *  - the price is the app's own #927 estimate on the POSTED moves (`estimateCycleTerms`: moves +
- *    inter-op entries + spin-up) plus the shop's `toolChange.seconds` for every change after the
- *    loaded first cutter — the same model #858 uses (`planCostSeconds` in `smartPick.ts`), not a
+ *    inter-op entries + spin-up) plus the shop's `toolChange.seconds` for every change between
+ *    CONSECUTIVE steps — the same model #858 uses (`planCostSeconds` in `smartPick.ts`), not a
  *    second time model.
  *  - candidates are pruned on GEOMETRY before any move is built (a flat that cannot enter the
  *    feature's opening/corner, a flute shorter than the cut), so the expensive planner only sees
@@ -195,6 +203,13 @@ export interface SequenceChoice {
   considered: ConsideredSequence[];
   /** The chosen chain's uncovered pockets, by feature id; empty when every pocket is covered. */
   unreachable: string[];
+  /**
+   * The demand's freeing contour (its own step, always LAST), when the chain posts one: which
+   * cutter takes it, whether that costs a RETURN tool change after the last pocket/rest step, and
+   * whether the chain's last cutter could have taken the profile at all. The plan's note states
+   * which way the pick fell.
+   */
+  freeing: { cutterKey: string; extraToolChange: boolean; lastCutterEligible: boolean } | null;
 }
 
 const EPS = 1e-9;
@@ -340,8 +355,9 @@ interface ChainLink {
  * limitation, so it does not count as this chain's incompleteness (`leftBehind`): the tie it used
  * to create made every candidate equal and price chose the primary alone over a cuttable rest.
  *
- * Every candidate is crossed with each usable ball (when the part is curved) and each usable
- * chamfer (when it has rims), and pruned on geometry alone before any IR is built.
+ * Every candidate is crossed with each usable ball (when the part is curved), each usable chamfer
+ * (when it has rims) and the freeing-step cutter choices (the covering chain link, or the chain's
+ * last link when it can take the profile), and pruned on geometry alone before any IR is built.
  */
 export function candidateSequences(
   demand: SequenceDemand,
@@ -349,7 +365,12 @@ export function candidateSequences(
   opts?: Pick<SequenceOptions, 'feedsKind' | 'maxCutters'>,
 ): CandidateSequence[] {
   const features = demand.features;
-  const pocketFeatures = features.filter((f) => f.kind === 'pocket' || f.kind === 'contour');
+  // The part's freeing cut (the outer contour) is NOT a pocket and is not folded into a pocket
+  // step: it is posted LAST, after every rough/rest/finish/chamfer, so the part stays held
+  // through all of them (#959 ruling). It gets its own final step, and its cutter is a choice
+  // this module prices — see the free-step construction below.
+  const contourFeatures = features.filter((f) => f.kind === 'contour');
+  const pocketFeatures = features.filter((f) => f.kind === 'pocket');
   const curvedFeatures = features.filter((f) => f.kind === 'curved');
   const rimFeatures = features.filter((f) => f.kind === 'rim');
   const pinned = cutters.pinned ?? {};
@@ -369,6 +390,14 @@ export function candidateSequences(
   const reachesCurved = (c: CandidateCutter): boolean => curvedFeatures.every((f) => reachesFeature(c.tool, f));
   const canRoughPocket = (c: CandidateCutter): boolean =>
     pocketFeatures.some((f) => entersFeature(c.tool, f) && reachesFeature(c.tool, f));
+  // A primary must have SOMETHING to cut: a pocket it can rough, or the freeing profile. A part
+  // whose only pocket is too narrow for every flat still needs its contour cut (the pocket is
+  // stated, not silently dropped) — before the contour had its own step this was satisfied by the
+  // contour being one of the "pocket" features; now it is said explicitly.
+  const canCutSomething = (c: CandidateCutter): boolean =>
+    canRoughPocket(c)
+    || contourFeatures.some((f) => coversFeature(c.tool, f))
+    || (pocketFeatures.length === 0 && contourFeatures.length === 0);
   // The LARGEST cutter that can rough the part is the ONE primary — "largest flat roughs what it
   // enters; next smaller for what the previous cannot reach" (the #961 ruling). A smaller flat
   // that also roughs a pocket is a REST, never a second primary: without this the ⌀3.175 chain is
@@ -378,11 +407,11 @@ export function candidateSequences(
     const top = Math.max(...cs.map((c) => diameterOf(c.tool) ?? 0));
     return cs.filter((c) => (diameterOf(c.tool) ?? 0) >= top - EPS);
   };
-  const primaries = maximal(flatsDesc.filter((c) => reachesCurved(c) && (pocketFeatures.length === 0 || canRoughPocket(c))));
+  const primaries = maximal(flatsDesc.filter((c) => reachesCurved(c) && canCutSomething(c)));
   // A part with pockets needs SOME round tool; a ball is the fallback only when no flat can.
   const roughs: CandidateCutter[] = primaries.length > 0
     ? primaries
-    : maximal(ballsAll.filter((c) => reachesCurved(c) && (pocketFeatures.length === 0 || canRoughPocket(c))));
+    : maximal(ballsAll.filter((c) => reachesCurved(c) && canCutSomething(c)));
 
   if (pocketFeatures.length > 0 && roughs.length === 0) return [];
   if (curvedFeatures.length > 0 && balls.length === 0) return [];
@@ -391,22 +420,23 @@ export function candidateSequences(
   const ballChoices: (CandidateCutter | null)[] = curvedFeatures.length > 0 ? balls : [null];
   const chamferChoices: (CandidateCutter | null)[] = rimFeatures.length > 0 ? chamfers : [null];
 
-  // The pockets SOME cutter in this part's chain could cover. A pocket outside this set is the
-  // part's own limitation (the organizer's 16 sub-3.175 holes) and must not count against any
-  // candidate — every chain carries it, so counting it made completeness a tie every time.
-  const chainCutters = [...flatsDesc, ...roughs];
-  const coverable = new Set(
-    pocketFeatures.filter((f) => chainCutters.some((c) => coversFeature(c.tool, f))).map((f) => f.id),
-  );
-
-  const out: CandidateSequence[] = [];
+  // Candidates are built with the features each one COVERS; `leftBehind` is filled in after the
+  // search, against what ANY candidate can cover. A feature no candidate reaches is the part's
+  // own limitation (the organizer's 16 sub-3.175 holes) and must not count against a chain —
+  // every chain carries it, so counting it made completeness a tie every time.
+  interface Built {
+    steps: SequenceStep[];
+    unreachable: string[];
+    covered: Set<string>;
+  }
+  const out: Built[] = [];
   const seen = new Set<string>();
-  const add = (steps: SequenceStep[], unreachable: string[]): void => {
+  const add = (steps: SequenceStep[], unreachable: string[], covered: Set<string>): void => {
     if (steps.length === 0 || !honoursPins(steps, pinned)) return;
     const signature = steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
     if (seen.has(signature)) return;
     seen.add(signature);
-    out.push({ steps, unreachable, leftBehind: unreachable.filter((id) => coverable.has(id)).length });
+    out.push({ steps, unreachable, covered });
   };
 
   /** The chain from one primary: each link names the pockets that cutter is needed for. */
@@ -448,6 +478,18 @@ export function candidateSequences(
     return chain;
   };
 
+  // The freeing step's cutter is a CHAIN cutter, never a new one: the chain was sized for the
+  // pockets. `coversContour` is the geometry check a pocket gets (floor reach, stated opening and
+  // corner). Moving it to the chain's LAST cutter (so no return change) needs more — the flute
+  // must be STATED to reach the profile's floor: an unstated flute is unknown, and the freeing
+  // cut is the one cut that must not be guessed (a rest cutter one flute-length short would rub
+  // its shank through the part on the last pass).
+  const coversContour = (c: CandidateCutter): boolean => contourFeatures.every((f) => coversFeature(c.tool, f));
+  const canFreeLast = (c: CandidateCutter): boolean =>
+    contourFeatures.every((f) =>
+      coversFeature(c.tool, f)
+      && !(f.depthMm > 0 && (c.tool.fluteLength === null || c.tool.fluteLength + EPS < f.depthMm)));
+
   for (const primary of roughs) {
     const chain = chainFrom(primary);
     const primaryLink = chain[0]!;
@@ -483,38 +525,80 @@ export function candidateSequences(
       for (const link of links) {
         for (const f of pocketFeatures) if (coversFeature(link.cutter.tool, f)) coveredNow.add(f.id);
       }
-      const unreachable = pocketFeatures.filter((f) => !coveredNow.has(f.id)).map((f) => f.id);
+      const unreachablePockets = pocketFeatures.filter((f) => !coveredNow.has(f.id)).map((f) => f.id);
+      // The freeing cut, posted LAST. Its cutter is the first chain link that covers the profile
+      // (the largest — usually the primary; coming back to it after the rests costs a RETURN tool
+      // change, which `priceSequence` now charges), or the chain's last cutter when it can take
+      // the profile (it is already loaded, so no return). Both are offered and the cheaper wins.
+      const lastLink = links[links.length - 1]!;
+      const freeLinks: ChainLink[] = [];
+      const coverLink = links.find((l) => coversContour(l.cutter));
+      if (coverLink !== undefined) {
+        freeLinks.push(coverLink);
+        if (lastLink !== coverLink && canFreeLast(lastLink.cutter)) freeLinks.push(lastLink);
+      }
+      const freeChoices: (ChainLink | null)[] = contourFeatures.length === 0
+        ? [null]
+        : freeLinks.length > 0 ? freeLinks : [null];
       for (const ball of ballChoices) {
         for (const chamfer of chamferChoices) {
-          const steps = base.slice();
-          if (ball !== null) {
-            steps.push({
-              kind: 'finish',
-              role: 'ball',
-              cutter: choiceOf(ball, pinned.finish === ball.key),
-              regionIds: curvedFeatures.map((f) => f.id),
-            });
+          for (const free of freeChoices) {
+            const steps = base.slice();
+            if (ball !== null) {
+              steps.push({
+                kind: 'finish',
+                role: 'ball',
+                cutter: choiceOf(ball, pinned.finish === ball.key),
+                regionIds: curvedFeatures.map((f) => f.id),
+              });
+            }
+            if (chamfer !== null) {
+              steps.push({
+                kind: 'chamfer',
+                role: 'chamfer',
+                cutter: choiceOf(chamfer, pinned.chamfer === chamfer.key),
+                regionIds: rimFeatures.map((f) => f.id),
+              });
+            }
+            if (free !== null) {
+              steps.push({
+                kind: 'contour',
+                role: 'flat',
+                cutter: choiceOf(free.cutter, pinned.contour === free.cutter.key),
+                regionIds: contourFeatures.map((f) => f.id),
+              });
+            }
+            const unreachable = free !== null || contourFeatures.length === 0
+              ? unreachablePockets
+              : [...unreachablePockets, ...contourFeatures.map((f) => f.id)];
+            const covered = new Set(coveredNow);
+            if (free !== null) for (const f of contourFeatures) covered.add(f.id);
+            add(steps, unreachable, covered);
           }
-          if (chamfer !== null) {
-            steps.push({
-              kind: 'chamfer',
-              role: 'chamfer',
-              cutter: choiceOf(chamfer, pinned.chamfer === chamfer.key),
-              regionIds: rimFeatures.map((f) => f.id),
-            });
-          }
-          add(steps, unreachable);
         }
       }
     }
   }
 
-  return out;
+  // Completeness against what the search could actually cover: a feature no candidate reaches is
+  // the part's own limitation, not this chain's — see the `Built` note above.
+  const coverableAny = new Set<string>();
+  for (const candidate of out) for (const id of candidate.covered) coverableAny.add(id);
+  return out.map((candidate) => ({
+    steps: candidate.steps,
+    unreachable: candidate.unreachable,
+    leftBehind: candidate.unreachable.filter((id) => coverableAny.has(id)).length,
+  }));
 }
 
 /**
  * Price one candidate by #927's terms on its posted moves + the shop's allowance per change. Null
  * when any step cannot be planned — an unpostable candidate is not a cheap one.
+ *
+ * A change is charged when the step's cutter DIFFERS from the previous step's: the first step's
+ * cutter is loaded, and a cutter that comes BACK after another ran (the deferred freeing contour
+ * returning to the primary, when the chain chose that) costs a second change to load it again.
+ * Counting one change per cutter key — the older model — under-priced exactly that return.
  */
 export function priceSequence(
   sequence: CandidateSequence,
@@ -522,17 +606,22 @@ export function priceSequence(
 ): SequenceCost | null {
   const seconds = new Map<string, number>();
   const order: string[] = [];
+  const changes = new Map<string, number>();
+  let previous: string | null = null;
   for (const step of sequence.steps) {
     const ir = opts.planStep(step);
     if (ir === null) return null;
+    const key = step.cutter.key;
     const total = estimateCycleTerms(ir, opts.rapid).totalSeconds;
-    seconds.set(step.cutter.key, (seconds.get(step.cutter.key) ?? 0) + total);
-    if (!order.includes(step.cutter.key)) order.push(step.cutter.key);
+    seconds.set(key, (seconds.get(key) ?? 0) + total);
+    if (!order.includes(key)) order.push(key);
+    if (previous !== null && previous !== key) changes.set(key, (changes.get(key) ?? 0) + 1);
+    previous = key;
   }
   if (order.length === 0) return null;
-  const entries: CycleCost[] = order.map((key, i) => {
+  const entries: CycleCost[] = order.map((key) => {
     const estimateSeconds = seconds.get(key) ?? 0;
-    const toolChanges = i === 0 ? 0 : 1;
+    const toolChanges = changes.get(key) ?? 0;
     return {
       cutterKey: key,
       estimateSeconds,
@@ -597,6 +686,9 @@ export function chooseSequence(
   }
 
   const priced = candidates.map((sequence) => ({ sequence, cost: priceSequence(sequence, opts) }));
+  // No local threshold between the two freeing-cut options: both are priced on the real steps
+  // (the return change included) and the cheaper wins. plan v2's 3× stop rule is a package-vs-
+  // vendor line on the reference card, not a per-profile gate here.
   const considered: ConsideredSequence[] = priced.map(({ sequence, cost }) => ({
     steps: sequence.steps.map((s) => ({ kind: s.kind, cutterKey: s.cutter.key })),
     cost: cost === null ? null : cost.totalSeconds,
@@ -617,5 +709,30 @@ export function chooseSequence(
   }
 
   const best = feasible[0]!;
-  return { steps: best.sequence.steps, cost: best.cost, considered, unreachable: best.sequence.unreachable };
+  const steps = best.sequence.steps;
+  const last = steps[steps.length - 1];
+  const beforeLast = steps[steps.length - 2];
+  const contourFeatures = demand.features.filter((f) => f.kind === 'contour');
+  // The same capability gate `canFreeLast` applies in the search, for the note: a cutter can take
+  // the freeing profile only with a STATED flute reaching the floor and the profile's own shape.
+  const canFree = (tool: Tool): boolean =>
+    contourFeatures.length > 0 && contourFeatures.every((f) =>
+      coversFeature(tool, f)
+      && !(f.depthMm > 0 && (tool.fluteLength === null || tool.fluteLength + EPS < f.depthMm)));
+  const freeing = last === undefined || last.kind !== 'contour'
+    ? null
+    : {
+        cutterKey: last.cutter.key,
+        extraToolChange: beforeLast !== undefined && beforeLast.cutter.key !== last.cutter.key,
+        lastCutterEligible: beforeLast === undefined
+          ? true
+          : beforeLast.cutter.key === last.cutter.key || canFree(beforeLast.cutter.tool),
+      };
+  return {
+    steps,
+    cost: best.cost,
+    considered,
+    unreachable: best.sequence.unreachable,
+    freeing,
+  };
 }

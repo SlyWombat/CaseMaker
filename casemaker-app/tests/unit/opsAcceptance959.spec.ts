@@ -484,13 +484,19 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
     const contourOp = result.ops.at(-1)!;
     const program = result.programs.get(contourOp.outcome.cutter)!;
     expect(program.operations.at(-1)!.labelId).toBe('contour');
-    // Advisor's review on 9a5cc607: appending the contour's moves onto an EARLIER cutter's
-    // program (the primary's, say) does not make it run last — `programs`' Map order is each
-    // key's FIRST appearance, so that cutter's whole file, contour included, still runs before
-    // a later cutter's own file. The contour's cutter must actually be the LAST key in
-    // `programs` (and the last entry in `sequence`), not just last within its own file.
-    expect(contourOp.outcome.cutter, `programs: ${[...result.programs.keys()].join(', ')}`).toBe([...result.programs.keys()].at(-1));
-    expect(contourOp.outcome.cutter, `sequence: ${result.sequence.map((s) => s.cutterKey).join(', ')}`).toBe(result.sequence.at(-1)!.cutterKey);
+    // #961 now prices the freeing cutter choice itself (a RETURN to an earlier cutter, charged
+    // its own tool change, vs. the chain's last cutter taking the profile) and may legitimately
+    // pick either — `ops` (built in `choice.steps` order, contour always last) is the authoritative
+    // execution-order record either way; `programs`' per-cutter grouping is not, and does not need
+    // the contour's cutter to be its last KEY (advisor's review on 9a5cc607 assumed plan.ts always
+    // had to force the last cutter — #961's own pricing now makes that call instead). A return is
+    // only ever silent when it was NOT the cheaper option; confirm `choice.freeing` agrees with
+    // which cutter actually got the contour.
+    expect(result.choice.freeing).not.toBeNull();
+    expect(result.choice.freeing!.cutterKey).toBe(contourOp.outcome.cutter);
+    if (result.choice.freeing!.extraToolChange) {
+      expect(result.notes.some((n) => n.includes('RETURN tool change')), `notes: ${result.notes.join('; ')}`).toBe(true);
+    }
   });
 
   // The manager's #959 ruling 2.

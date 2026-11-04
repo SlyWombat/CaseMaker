@@ -530,65 +530,23 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   const ops: PlannedOp[] = [];
   const programs = new Map<string, ToolpathIR>();
   // The manager's #959 ruling: the part's freeing cut (the outer contour) is posted LAST, after
-  // every rest/finish/chamfer step that still touches the part — #961's own chain assigns it to
-  // whichever cutter covers it (almost always the primary, since the contour feature's own
-  // minOpeningMm/cornerRadiusMm are unconstrained), which puts it in that cutter's FIRST step; a
-  // rest cutter running afterwards would then be milling a part no longer held to the stock.
-  // Deferred here, not re-sequenced in `sequence.ts`: it is an ASSEMBLY-order question (which
-  // operation is posted last), not a cutter-choice one, and the 4x6x1 default tabs stay on top of
-  // it regardless (belt and suspenders, per the ruling).
-  let deferredContour: OpOutcome | null = null;
+  // every rest/finish/chamfer step that still touches the part. #961 now owns this directly: the
+  // contour is its own step, always last in `choice.steps`, and its cutter is priced like any
+  // other choice (a RETURN to an earlier cutter is charged a tool change in `choice.cost`, same
+  // as the chain's last cutter taking the profile itself when that is cheaper) — nothing to defer
+  // or re-plan here, every step (contour included) goes through the SAME loop.
   for (const step of choice.steps) {
     const outcomes = outcomeCache.get(stepSignature(step));
     if (outcomes === undefined || outcomes === null) continue; // chooseSequence only chose postable steps
     for (const { id, outcome } of outcomes) {
-      if (id === 'contour') { deferredContour = outcome; continue; }
       const ref = refById.get(id)!;
       // A through hole is cleared like a pocket now (ruling 2), profile-only only when it is too
       // narrow for that to mean anything — 'pocket' either way describes what it does.
-      ops.push({ kind: 'pocket', region: ref, outcome });
+      ops.push({ kind: id === 'contour' ? 'contour' : 'pocket', region: ref, outcome });
       const key = outcome.cutter;
       const existing = programs.get(key);
       programs.set(key, existing === undefined ? outcome.ir : concatToolpathIR(existing, outcome.ir));
     }
-  }
-  const notes: string[] = [];
-  if (deferredContour !== null) {
-    // Advisor's review on 9a5cc607: deferring the contour's OWN moves to the end of whatever
-    // cutter it was already assigned does NOT make it post last — `programs` keeps that cutter's
-    // position at its FIRST appearance (a Map key's insertion order never moves on a later
-    // `.set`), so a rest/finish/chamfer cutter after the primary still runs on an already-freed
-    // part; the tabs were doing all the actual holding. The real fix re-plans the contour with
-    // the LAST step's own cutter — a cutter already scheduled to run last stays last, no reorder
-    // needed and no extra tool change either, as long as its flute reaches the cut.
-    const lastStep = choice.steps.at(-1);
-    if (lastStep !== undefined && lastStep.cutter.key !== deferredContour.cutter) {
-      const lastTool = lastStep.cutter.tool;
-      const reaches = lastTool.fluteLength === null || lastTool.fluteLength >= contourDepthMm;
-      if (reaches) {
-        try {
-          const replanned = planRegion('contour', lastTool);
-          if (replanned !== null) {
-            deferredContour = replanned;
-            // `sequence[]` below reprices from the actual posted IR per cutter, so it is correct;
-            // `choice.cost` (sequence.ts's own internal breakdown) still prices the contour under
-            // its ORIGINAL cutter — stated, not silently left to disagree.
-            notes.push(`the freeing cut is posted with the LAST cutter (${lastStep.cutter.key}), not #961's own choice (${choice.cost.entries[0]?.cutterKey ?? 'unknown'}) — choice.cost's own breakdown still prices it under the original cutter`);
-          } else {
-            notes.push(`the freeing cut could not be re-planned with the LAST cutter (${lastStep.cutter.key}); posted with ${deferredContour.cutter} instead — it may not actually be the last thing this program cuts`);
-          }
-        } catch (err) {
-          notes.push(`the freeing cut could not be re-planned with the LAST cutter (${lastStep.cutter.key}: ${err instanceof Error ? err.message : String(err)}); posted with ${deferredContour.cutter} instead — it may not actually be the last thing this program cuts`);
-        }
-      } else {
-        notes.push(`the last cutter (${lastStep.cutter.key}) cannot reach the freeing cut's ${contourDepthMm.toFixed(2)} mm depth; posted with ${deferredContour.cutter} instead — it may not actually be the last thing this program cuts (route to the manager/C: a trailing revisit of ${deferredContour.cutter} is the only other option, and it breaks #419's one-program-per-cutter)`);
-      }
-    }
-    const ref = refById.get('contour')!;
-    ops.push({ kind: 'contour', region: ref, outcome: deferredContour });
-    const key = deferredContour.cutter;
-    const existing = programs.get(key);
-    programs.set(key, existing === undefined ? deferredContour.ir : concatToolpathIR(existing, deferredContour.ir));
   }
 
   const offered = [...opts.houseFlats].map((t) => `⌀${cuttingDiameter(t)}`).join(', ');
@@ -601,7 +559,19 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       : `${id}: not cut — needs a cutter ≤ ${node.narrowest.toFixed(2)} mm (house offers ${offered})`;
   });
 
+  const notes: string[] = [];
   for (const [id, message] of regionFailures) notes.push(`${id}: not cut — planning failed (${message})`);
+  // #961's own pick between the two freeing-cut options (a return to the covering cutter, or the
+  // chain's last cutter taking the profile itself) is priced in `choice.cost` either way; stated
+  // here only when it actually cost something — a plain "no extra change" pick is not a finding.
+  if (choice.freeing !== null && choice.freeing.extraToolChange) {
+    const lastChainCutter = [...choice.steps].reverse().find((s) => s.kind !== 'contour')?.cutter.key ?? 'the last step';
+    notes.push(
+      choice.freeing.lastCutterEligible
+        ? `the freeing cut (contour) is posted LAST on ${choice.freeing.cutterKey} — a RETURN tool change back to it after ${lastChainCutter}, priced in the cycle (taking the profile with ${lastChainCutter} was dearer)`
+        : `the freeing cut (contour) is posted LAST on ${choice.freeing.cutterKey} — a RETURN tool change back to it after ${lastChainCutter}, priced in the cycle; ${lastChainCutter} cannot take the profile (flute or stated shape)`,
+    );
+  }
 
   const sequence: SequencedCutter[] = choice.cost.entries.map((entry) => {
     const ir = programs.get(entry.cutterKey);
