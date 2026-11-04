@@ -20,12 +20,43 @@
  * this is just "the highest point within the footprint"; for a ball it reduces to the known
  * `R(secθ − 1)` rise on a plane; the same one formula covers all four shapes.
  *
- * PER-TRIANGLE EVALUATION is by dense barycentric sampling plus the exact vertex/edge extremes, not
- * a closed-form per-facet solve: correctness first, on meshes small enough that this is accurate
- * well inside the parity fixtures' one-grid-cell tolerance. A true spatial index (kd-tree) and an
- * exact analytic per-facet solve are the documented follow-up once real meshes (hundreds of
- * triangles, not the fixtures' one or two) make the brute-force mesh walk a real cost — this file's
- * mesh loop below is already isolated behind `reachableTriangles` so that swap is one function.
+ * PER-TRIANGLE EVALUATION is the EXACT closed-form contact, for all four shapes, not dense
+ * sampling (advisor's review on #960's row-dropper slice, which first surfaced this, and again on
+ * this slice: one earlier version of this fix covered only flat/ball, leaving bull/cone on the old
+ * grid). The dense barycentric sampling the parity fixtures were first checked against is a FINITE
+ * grid (48 divisions), and on a large facet most queries have no sampled point within the cutter's
+ * own reach at all — the true max is then missed, ALWAYS on the low side (every miss under-reports
+ * the surface, never over), by as much as the grid's own spacing allows. Confirmed directly: a
+ * ball dropped on a single 70x40 mm sloped triangle read 0.02-0.1 mm low; F's own re-check against
+ * the real references (not the old ±1 mm comparator a5cc4597 was measured against — THAT claim is
+ * withdrawn) found 20 of 21 comparisons failing at the fixtures' real 0.001 mm tolerance.
+ *
+ * ONE METHOD covers flat, ball, bull and cone/V, because `heightAt` is convex and non-decreasing
+ * for all four: the required tip height at a point `p`, `f(p) = p.z − heightAt(|p − axis|)`, is
+ * therefore concave along any straight line through the query axis — in particular along a
+ * facet's own UPHILL ray (direction `(a,b)/g`, `g = √(a²+b²)` the facet's slope magnitude) and
+ * along any EDGE (whose points are `heightAt` of a distance that is itself convex in the edge's
+ * own parameter). A concave function of one variable has exactly one maximum, found exactly:
+ *
+ *   - FACET (`z = a·x+b·y+c`, `L = √(1+a²+b²)`): the maximiser, as a radius ρ* from the axis along
+ *     the uphill ray, has a closed form per shape (`facetRhoStar`) — flat: `R`; ball: `R·g/L`;
+ *     bull: `ρ0 + r·g/L` (`ρ0 = flatRadiusMm`, `r = curveRadiusMm`); cone: `ρ0` when `g·tanφ < 1`,
+ *     else `R`. The contact point is `axis + ρ*·(a,b)/g` (or the axis itself when `g ≈ 0` — a
+ *     horizontal facet's own contact is trivially `z = c` for every shape, `heightAt(anything
+ *     within flatRadiusMm) = 0` and the concave max past it is never higher). Valid only when that
+ *     point is actually on the triangle (`insideTriangleXY`); `z = plane(contact) − heightAt(ρ*)`.
+ *   - EDGE: `f` restricted to one edge, parametrised by its own `s ∈ [0, 1]`, is still concave (the
+ *     same convexity argument), so a GOLDEN-SECTION search (`edgeContactMax`) finds its one maximum
+ *     exactly over the part of the edge actually within reach (`edgeReachInterval`, a quadratic in
+ *     `s` for the circle-line intersection, same structure `facetRhoStar`'s own derivation used) —
+ *     checked against the two endpoints explicitly too, since a FLAT's own `f` is linear along an
+ *     edge (no interior maximum for golden-section to converge toward) and must land exactly on
+ *     one. A zero-length-in-XY (vertical) edge is skipped: `ρ` is constant along it, so whichever
+ *     vertex is higher already binds and is already exact.
+ *   - VERTICES are always exact (any single point is, for every shape) — kept as the base case.
+ *
+ * A true spatial index (kd-tree) over the mesh, not the brute-force bbox prune `reachableTriangles`
+ * still does, is the next documented performance follow-up — this slice is correctness only.
  */
 
 import type { Tool } from '@/engine/cnc/tool';
@@ -132,7 +163,152 @@ export function reachableTriangles(mesh: DropCutterMesh, x: number, y: number, r
 
 const EPS = 1e-9;
 
-/** One triangle's contribution to the drop-cutter max at (x, y) — the highest `p.z - heightAt(rho)` over the triangle's points within `profile.radiusMm`. */
+/** `z = a*x + b*y + c`; `L = sqrt(1 + a^2 + b^2)` — the slope-length factor the ball/flat exact
+ * contact formulas both use. `null` for a triangle whose own projection onto XY is degenerate
+ * (a vertical facet, or three collinear points) — no `a*x+b*y+c` plane states its height there. */
+interface Plane {
+  a: number;
+  b: number;
+  c: number;
+  L: number;
+}
+
+function planeOf(tri: Tri): Plane | null {
+  const ux = tri.bx - tri.ax, uy = tri.by - tri.ay, uz = tri.bz - tri.az;
+  const vx = tri.cx - tri.ax, vy = tri.cy - tri.ay, vz = tri.cz - tri.az;
+  let nx = uy * vz - uz * vy;
+  let ny = uz * vx - ux * vz;
+  let nz = ux * vy - uy * vx;
+  if (Math.abs(nz) < EPS) return null;
+  if (nz < 0) {
+    nx = -nx;
+    ny = -ny;
+    nz = -nz;
+  }
+  const a = -nx / nz;
+  const b = -ny / nz;
+  const c = tri.az - a * tri.ax - b * tri.ay;
+  return { a, b, c, L: Math.sqrt(1 + a * a + b * b) };
+}
+
+/** Whether `(px, py)` lies within the triangle's own XY projection (on the boundary counts), by
+ * the sign of its three edge cross-products — independent of winding. */
+function insideTriangleXY(tri: Tri, px: number, py: number): boolean {
+  const cross = (ox: number, oy: number, ax: number, ay: number, bx: number, by: number): number =>
+    (ax - ox) * (by - oy) - (ay - oy) * (bx - ox);
+  const d1 = cross(tri.ax, tri.ay, tri.bx, tri.by, px, py);
+  const d2 = cross(tri.bx, tri.by, tri.cx, tri.cy, px, py);
+  const d3 = cross(tri.cx, tri.cy, tri.ax, tri.ay, px, py);
+  const hasNeg = d1 < -EPS || d2 < -EPS || d3 < -EPS;
+  const hasPos = d1 > EPS || d2 > EPS || d3 > EPS;
+  return !(hasNeg && hasPos);
+}
+
+/**
+ * The facet-interior maximiser ρ* (header's own derivation) — the radius from the axis, along the
+ * facet's own uphill ray, where `f(ρ) = g·ρ − heightAt(ρ)` peaks. `g` is the facet's own slope
+ * magnitude, `L` its slope-length factor (`√(1+a²+b²)`, both from the same `Plane`).
+ */
+function facetRhoStar(profile: CutterProfile, g: number, L: number): number {
+  const R = profile.radiusMm;
+  if (profile.kind === 'flat') return R;
+  if (profile.kind === 'cone') {
+    const tanPhi = profile.tanHalfAngle ?? 1;
+    return g * tanPhi < 1 ? profile.flatRadiusMm : R;
+  }
+  const r = profile.curveRadiusMm ?? 0; // 'arc': ball (flatRadiusMm 0) or bull (flatRadiusMm R-r)
+  return profile.flatRadiusMm + (r * g) / L;
+}
+
+/** The facet's own exact contact — `z = plane(contact) − heightAt(ρ*)`, valid only when the
+ * contact point this function returns is actually on the triangle (`insideTriangleXY`). */
+function facetContact(plane: Plane, profile: CutterProfile, x: number, y: number): { px: number; py: number; z: number } {
+  const g = Math.hypot(plane.a, plane.b);
+  const rhoStar = facetRhoStar(profile, g, plane.L);
+  const [px, py] = g < EPS ? [x, y] : [x + (rhoStar * plane.a) / g, y + (rhoStar * plane.b) / g];
+  const z = plane.a * px + plane.b * py + plane.c - heightAt(profile, rhoStar);
+  return { px, py, z };
+}
+
+/**
+ * The `s ∈ [0, 1]` sub-interval of the edge from `(x0,y0)` to `(x1,y1)` whose points lie within
+ * `R` of `(cx, cy)` — the same quadratic `facetRhoStar`'s own derivation used, here for a line
+ * segment's distance instead of a facet's radius. `null` when the edge is degenerate in XY (a
+ * vertical edge — `ρ` is constant along it, so whichever vertex is higher already binds) or
+ * entirely out of reach.
+ */
+function edgeReachInterval(x0: number, y0: number, x1: number, y1: number, cx: number, cy: number, R: number): [number, number] | null {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const a = dx * dx + dy * dy;
+  if (a < EPS) return null;
+  const fx = x0 - cx;
+  const fy = y0 - cy;
+  const b = 2 * (fx * dx + fy * dy);
+  const c = fx * fx + fy * fy - R * R;
+  const disc = b * b - 4 * a * c;
+  let lo: number;
+  let hi: number;
+  if (disc < 0) {
+    if (c > 0) return null; // the whole line stays outside the circle
+    lo = 0;
+    hi = 1; // no real crossing and inside at s=0: the whole [0,1] segment is within reach
+  } else {
+    const sq = Math.sqrt(disc);
+    lo = Math.max(0, (-b - sq) / (2 * a));
+    hi = Math.min(1, (-b + sq) / (2 * a));
+  }
+  return lo > hi + EPS ? null : [Math.max(0, lo), Math.min(1, hi)];
+}
+
+/**
+ * The exact maximum of `f(s) = p(s).z − heightAt(|p(s) − (x,y)|)` over the part of one edge within
+ * reach — concave (header's own argument), found by golden-section search to well past the
+ * fixtures' own 0.001 mm Z tolerance, with both endpoints checked explicitly so a FLAT's own
+ * linear `f` (no interior maximum to converge toward) lands exactly on one. `null` when the edge
+ * never comes within reach at all.
+ */
+function edgeContactMax(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, x: number, y: number, profile: CutterProfile): number | null {
+  const interval = edgeReachInterval(x0, y0, x1, y1, x, y, profile.radiusMm);
+  if (interval === null) return null;
+  const [lo, hi] = interval;
+  const f = (s: number): number => {
+    const px = x0 + s * (x1 - x0);
+    const py = y0 + s * (y1 - y0);
+    const pz = z0 + s * (z1 - z0);
+    const rho = Math.min(Math.hypot(px - x, py - y), profile.radiusMm);
+    return pz - heightAt(profile, rho);
+  };
+  const GOLDEN = (Math.sqrt(5) - 1) / 2;
+  let a = lo;
+  let b = hi;
+  let c = b - GOLDEN * (b - a);
+  let d = a + GOLDEN * (b - a);
+  let fc = f(c);
+  let fd = f(d);
+  for (let i = 0; i < 80 && b - a > 1e-12; i++) {
+    if (fc > fd) {
+      b = d;
+      d = c;
+      fd = fc;
+      c = b - GOLDEN * (b - a);
+      fc = f(c);
+    } else {
+      a = c;
+      c = d;
+      fc = fd;
+      d = a + GOLDEN * (b - a);
+      fd = f(d);
+    }
+  }
+  return Math.max(f(lo), f(hi), f((a + b) / 2));
+}
+
+/**
+ * One triangle's contribution to the drop-cutter max at (x, y) — the highest `p.z - heightAt(rho)`
+ * over every point of the triangle within `profile.radiusMm`, EXACT for every shape (this file's
+ * own header: vertices, the one facet-interior maximiser, and a golden-section edge search).
+ */
 function triangleContribution(tri: Tri, profile: CutterProfile, x: number, y: number): number | null {
   const R = profile.radiusMm;
   let best: number | null = null;
@@ -142,26 +318,30 @@ function triangleContribution(tri: Tri, profile: CutterProfile, x: number, y: nu
     const z = pz - heightAt(profile, rho);
     if (best === null || z > best) best = z;
   };
+  const considerExact = (z: number): void => {
+    if (best === null || z > best) best = z;
+  };
 
-  // Vertices.
+  // Vertices — always exact, every profile.
   consider(tri.ax, tri.ay, tri.az);
   consider(tri.bx, tri.by, tri.bz);
   consider(tri.cx, tri.cy, tri.cz);
 
-  // Dense interior sampling (barycentric grid) — correctness-first, see this file's header.
-  const N = 48;
-  for (let i = 0; i <= N; i++) {
-    for (let j = 0; j <= N - i; j++) {
-      const u = i / N;
-      const v = j / N;
-      const w = 1 - u - v;
-      const px = u * tri.ax + v * tri.bx + w * tri.cx;
-      const py = u * tri.ay + v * tri.by + w * tri.cy;
-      const pz = u * tri.az + v * tri.bz + w * tri.cz;
-      consider(px, py, pz);
-    }
-  }
+  const plane = planeOf(tri);
+  if (plane === null) return best; // a degenerate (vertical) facet: vertices are all there is
 
+  const facet = facetContact(plane, profile, x, y);
+  if (insideTriangleXY(tri, facet.px, facet.py)) considerExact(facet.z);
+
+  const edges: [number, number, number, number, number, number][] = [
+    [tri.ax, tri.ay, tri.az, tri.bx, tri.by, tri.bz],
+    [tri.bx, tri.by, tri.bz, tri.cx, tri.cy, tri.cz],
+    [tri.cx, tri.cy, tri.cz, tri.ax, tri.ay, tri.az],
+  ];
+  for (const [ex0, ey0, ez0, ex1, ey1, ez1] of edges) {
+    const z = edgeContactMax(ex0, ey0, ez0, ex1, ey1, ez1, x, y, profile);
+    if (z !== null) considerExact(z);
+  }
   return best;
 }
 

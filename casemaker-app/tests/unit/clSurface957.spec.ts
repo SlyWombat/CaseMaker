@@ -185,3 +185,81 @@ describe('#959 clSurface()', () => {
     expect(() => clSurface(geometry, regionWithFootprint(10), drill, 3)).toThrow(/no drop-cutter profile/);
   });
 });
+
+// Advisor's review: the dense barycentric grid (48 divisions) `dropCutterHeight` used to fall
+// back on reads LOW on any facet larger than the grid's own spacing, for EVERY shape, not just
+// ball/flat — a5cc4597's own "36 cases within one grid cell" claim is withdrawn; that comparator
+// was +-1 mm, which hid exactly this. A single LARGE (300x300 mm) sloped triangle — far bigger
+// than the parity fixtures' own meshes — stresses that gap directly, checked against the unified
+// closed-form oracle (this file's own header: `z = plane(axis) + rho0*g + r*(L-1)` for flat/ball/
+// bull, `plane(axis) + max(r0*g, R*g - (R-r0)/tanPhi)` for cone/V) at points well inside the
+// facet (so the FACET-INTERIOR contact governs, not an edge or a vertex).
+describe('#960 the unified facet contact, all four shapes, on one large sloped triangle', () => {
+  const SIZE = 300;
+  const A = 0.3;
+  const B = 0.2;
+  function slopedMesh(): DropCutterMesh {
+    const z = (px: number, py: number): number => A * px + B * py;
+    return {
+      positions: [0, 0, z(0, 0), SIZE, 0, z(SIZE, 0), SIZE, SIZE, z(SIZE, SIZE), 0, 0, z(0, 0), SIZE, SIZE, z(SIZE, SIZE), 0, SIZE, z(0, SIZE)],
+      indices: [0, 1, 2, 3, 4, 5],
+      triangleCount: 2,
+    };
+  }
+  const mesh = slopedMesh();
+  const g = Math.hypot(A, B);
+  const L = Math.sqrt(1 + A * A + B * B);
+  const plane = (x: number, y: number): number => A * x + B * y;
+
+  function oracle(profile: ReturnType<typeof profileOf>, x: number, y: number): number {
+    const p = profile!;
+    if (p.kind === 'cone') {
+      const tanPhi = p.tanHalfAngle ?? 1;
+      return plane(x, y) + Math.max(p.flatRadiusMm * g, p.radiusMm * g - (p.radiusMm - p.flatRadiusMm) / tanPhi);
+    }
+    const r = p.curveRadiusMm ?? 0;
+    return plane(x, y) + p.flatRadiusMm * g + r * (L - 1);
+  }
+
+  const points: [number, number][] = [[100, 100], [150, 120], [80, 200]];
+
+  it('flat (R=6)', () => {
+    const profile = profileOf(flatEndMill(12, { number: 1, id: 'flat', name: 'flat' }));
+    for (const [x, y] of points) expect(dropCutterHeight(profile!, mesh, x, y)).toBeCloseTo(oracle(profile, x, y), 6);
+  });
+
+  it('ball (R=6)', () => {
+    const ball: Tool = { ...flatEndMill(12, { number: 1, id: 'ball', name: 'ball' }), shape: 'ball' };
+    const profile = profileOf(ball);
+    for (const [x, y] of points) expect(dropCutterHeight(profile!, mesh, x, y)).toBeCloseTo(oracle(profile, x, y), 6);
+  });
+
+  it('bull (R=6, corner 2)', () => {
+    const bull: Tool = { ...flatEndMill(12, { number: 1, id: 'bull', name: 'bull' }), shape: 'bull', cornerRadius: 2 };
+    const profile = profileOf(bull);
+    for (const [x, y] of points) expect(dropCutterHeight(profile!, mesh, x, y)).toBeCloseTo(oracle(profile, x, y), 6);
+  });
+
+  it('cone (90° V, sharp tip) — the shallow branch, apex binds (g*tanPhi < 1)', () => {
+    const v90: Tool = {
+      ...flatEndMill(12, { number: 1, id: 'v90', name: 'v90' }),
+      typeText: 'V-Bit', shape: 'chamfer', tipDiameter: 0, angle: 90, halfAngle: 45,
+    };
+    const profile = profileOf(v90);
+    expect((profile!.tanHalfAngle ?? 1) * g).toBeLessThan(1); // confirms this is the apex branch
+    for (const [x, y] of points) expect(dropCutterHeight(profile!, mesh, x, y)).toBeCloseTo(oracle(profile, x, y), 6);
+  });
+
+  it('cone (80° half-angle, sharp tip — a WIDE, shallow-flanked cone) — the steep branch, the rim binds (g*tanPhi >= 1)', () => {
+    // A narrow V (small half-angle) is the OTHER (apex-binds) branch above — this needs a cone
+    // whose own flank is SHALLOWER than the plane's slope, which is a WIDE half-angle, not a
+    // narrow one (a flat disc, half-angle 90 deg, is this same branch's own limit).
+    const vWide: Tool = {
+      ...flatEndMill(12, { number: 1, id: 'v-wide', name: 'v-wide' }),
+      typeText: 'V-Bit', shape: 'chamfer', tipDiameter: 0, angle: 160, halfAngle: 80,
+    };
+    const profile = profileOf(vWide);
+    expect((profile!.tanHalfAngle ?? 1) * g).toBeGreaterThanOrEqual(1); // confirms the rim branch
+    for (const [x, y] of points) expect(dropCutterHeight(profile!, mesh, x, y)).toBeCloseTo(oracle(profile, x, y), 6);
+  });
+});
