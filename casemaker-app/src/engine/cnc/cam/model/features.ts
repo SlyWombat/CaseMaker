@@ -1,15 +1,44 @@
 /**
- * cam/model/features.ts — planar-face/patch recognition (#958, A), feature recognition §1 of
- * `docs/design/cam-model-engine.md`.
+ * cam/model/features.ts — feature recognition (#958, A), §1 of `docs/design/cam-model-engine.md`.
  *
- * Shapes are A's own #958 comment (2026-11-03) §4, adopted as-is, plus `Rim.id` from A's N1
- * amendment. This file does not implement A's method (patches → levels → sections → booleans) —
- * `recogniseFeatures` is a stub for the skeleton; A's slice fills it in.
+ * Method (A's #958 note, as adopted, with D1/D2 from 6620460283):
+ *   patches (features/patches.ts) → floor levels → sections at each level → the tree by booleans
+ *   on those sections (features/tree.ts).
+ *
+ * Shapes are A's #958 §4 as adopted in the skeleton, plus these additions (each named on #958):
+ *   - `Rim.id`, `regionRefs(tree)` (N1, 6620070868)
+ *   - `PocketNode.through`, `report.slivers` (D2, 6620460283)
+ *   - `PocketNode.floors`: the floor parts inside a node. One node's region can hold several
+ *     separate floors (the tray's channel floors at 3.00 connect through the slots), so the
+ *     acceptance compares floors, not nodes.
+ *   - `FeatureTree.top`: the top land.
+ *   - `RemainderRegion.area`, `.slopeMedianDeg`
+ *   - `SetupFrame.stockBottom?`: needed to say whether the contour frees the part.
+ *   - `FeatureTolerances`: the skeleton's placeholder replaced by the method's own numbers.
+ *   - The kernel (Manifold) is a parameter: this module never loads wasm.
+ * `PocketNode.narrowest` is the largest cutter diameter that can enter the region (twice the
+ * region's largest inscribed radius), which is what "the largest flat that fits" (#961) reads.
  */
 
 import type { ParsedMesh } from '@/engine/import/stlParser';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
+import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import type { RegionRef } from './plan';
+
+import {
+  DEFAULT_FEATURE_TOLERANCES,
+  classifyPatches,
+  patchesFromFaces,
+  patchesFromMesh,
+  remainderSurfaces,
+  triangleAdjacency,
+  type FeatureTolerances,
+  type FrameMesh,
+} from './features/patches';
+import { findRims } from './features/rims';
+import { buildTree, type TreeFloor, type TreeSliver } from './features/tree';
+
+export { DEFAULT_FEATURE_TOLERANCES, type FeatureTolerances };
 
 export interface FeatureSource {
   triangles: ParsedMesh;
@@ -20,17 +49,8 @@ export interface FeatureSource {
 export interface SetupFrame {
   up: [number, number, number];
   stockTop: number;
-}
-
-/**
- * Patch/plane/mesh tolerances A's method reads (her §3: `tolPlane = 0.005 mm`, `tolAngle = 0.5°`
- * triangle-cluster growth, the STEP mesh read's `linearDeflection`). NEW — A's comment names these as
- * numbers in prose, not as a shape; this interface is this note's placeholder for them, A's to adjust.
- */
-export interface FeatureTolerances {
-  planarityMm: number;
-  clusterAngleDeg: number;
-  deflectionMm: number;
+  /** The stock's bottom in the setup frame, mm. Without it `contour.frees` is assumed true. */
+  stockBottom?: number;
 }
 
 export interface PocketNode {
@@ -38,13 +58,17 @@ export interface PocketNode {
   floorZ: number;
   mouthZ: number;
   open: boolean;
+  /** A hole of the part's silhouette: no material at any height (D2). `floorZ` is the part bottom. */
+  through: boolean;
   /** Cleared area at `floorZ`, islands as holes. May extend below `floorZ` where remainder continues (A's N2) — the pocket op must not assume the whole region is floor. */
   region: Polygons;
+  /** The floor patches inside this node at `floorZ`, as separate parts. Empty for a through node. */
+  floors: TreeFloor[];
   islands: { outline: Polygons; topZ: number }[];
   children: PocketNode[];
   /** `RemainderRegion.id`s that continue below this node, per A's N2. */
   remainder: string[];
-  /** Narrowest width, so the cutter-sequence cost model (#961) can pick the largest flat that fits. */
+  /** The largest cutter diameter that can enter the region, mm. */
   narrowest: number;
   /**
    * True for a pocket component at the model's bottom inside the silhouette (A's #958 D2, interface
@@ -57,10 +81,12 @@ export interface PocketNode {
 export interface RemainderRegion {
   id: string;
   footprint: Polygons;
+  area: number;
   zTop: number;
   zBottom: number;
   triangles: Uint32Array;
   slopeDeg: [number, number];
+  slopeMedianDeg: number;
   in: string | 'top';
 }
 
@@ -78,7 +104,8 @@ export interface FeatureTree {
   frame: SetupFrame & { partTop: number; partBottom: number };
   /** Floor Z levels, descending. */
   levels: number[];
-  contour: { outline: Polygons; zTo: number; frees: boolean; shoulders: string[] };
+  top: { z: number; floors: TreeFloor[]; area: number };
+  contour: { outline: Polygons; area: number; zTo: number; frees: boolean; shoulders: string[] };
   pockets: PocketNode[];
   rims: Rim[];
   remainder: RemainderRegion[];
@@ -89,6 +116,7 @@ export interface FeatureTree {
     planarArea: number;
     remainderArea: number;
     tolerances: FeatureTolerances;
+    slivers: TreeSliver[];
     notes: string[];
     /**
      * A's #958 D2 (comment 6620460283): a would-be floor patch whose largest inscribed circle is
@@ -99,21 +127,139 @@ export interface FeatureTree {
   };
 }
 
-/**
- * Patches → levels → sections → booleans (A's #958 method). Stub for the skeleton — #958 fills
- * this in; every slice downstream of it can compile and be exercised against a hand-built
- * `FeatureTree` fixture until then.
- */
-export function recogniseFeatures(_src: FeatureSource, _frame: SetupFrame, _tol?: Partial<FeatureTolerances>): FeatureTree {
-  throw new Error('cam/model/features: recogniseFeatures() not implemented (#958)');
+/** Rotate the source into the setup frame: `up` becomes +Z (Rodrigues). Triangle order is kept. */
+export function toSetupFrame(mesh: ParsedMesh, up: readonly [number, number, number]): FrameMesh {
+  const len = Math.hypot(up[0], up[1], up[2]);
+  if (!(len > 0)) throw new Error('cam/model/features: the setup frame has a zero up vector');
+  const u = [up[0] / len, up[1] / len, up[2] / len] as const;
+  const positions = Float64Array.from(mesh.positions);
+  // Axis k = u × ẑ, angle θ with cos θ = u·ẑ.
+  const kx = u[1];
+  const ky = -u[0];
+  const s = Math.hypot(kx, ky);
+  const c = u[2];
+  if (s > 1e-12) {
+    const ax = kx / s;
+    const ay = ky / s;
+    for (let i = 0; i < positions.length; i += 3) {
+      const x = positions[i]!;
+      const y = positions[i + 1]!;
+      const z = positions[i + 2]!;
+      // v' = v cosθ + (k × v) sinθ + k (k·v)(1 − cosθ), with k = (ax, ay, 0).
+      const kdotv = ax * x + ay * y;
+      positions[i] = x * c + ay * z * s + ax * kdotv * (1 - c);
+      positions[i + 1] = y * c - ax * z * s + ay * kdotv * (1 - c);
+      positions[i + 2] = z * c + (ax * y - ay * x) * s;
+    }
+  } else if (c < 0) {
+    // Up is −Z: a half turn about X.
+    for (let i = 0; i < positions.length; i += 3) {
+      positions[i + 1] = -positions[i + 1]!;
+      positions[i + 2] = -positions[i + 2]!;
+    }
+  }
+  return { positions, indices: mesh.indices };
 }
+
+/**
+ * Patches → levels → sections → booleans (#958). `kernel` is the Manifold toplevel; the caller owns
+ * loading it.
+ */
+export function recogniseFeatures(
+  src: FeatureSource,
+  frame: SetupFrame,
+  kernel: ManifoldToplevel,
+  tolIn?: Partial<FeatureTolerances>,
+): FeatureTree {
+  const tol: FeatureTolerances = { ...DEFAULT_FEATURE_TOLERANCES, ...tolIn };
+  const mesh = toSetupFrame(src.triangles, frame.up);
+  const triCount = mesh.indices.length / 3;
+  if (src.faceId !== undefined && src.faceId.length !== triCount) {
+    throw new Error(`cam/model/features: faceId has ${src.faceId.length} entries for ${triCount} triangles`);
+  }
+  const path = src.faceId !== undefined ? 'step' : 'mesh';
+  const patches = path === 'step' ? patchesFromFaces(mesh, src.faceId!, tol) : patchesFromMesh(mesh, tol);
+
+  let partBottom = Infinity;
+  for (let i = 2; i < mesh.positions.length; i += 3) partBottom = Math.min(partBottom, mesh.positions[i]!);
+  classifyPatches(mesh, patches, partBottom, tol);
+  const adj = triangleAdjacency(mesh, tol.weldMm);
+  const { surfaces, demoted } = remainderSurfaces(mesh, patches, adj, tol, path);
+
+  const rawRims = findRims(mesh, patches, adj, tol.levelMergeMm);
+  const built = buildTree(kernel, mesh, patches, surfaces, tol, rawRims);
+  const notes = [...built.notes];
+  if (demoted.length > 0) notes.push(`${demoted.length} near-flat tangent cap(s) merged into the curved remainder (D2)`);
+  if (built.slivers.length > 0) notes.push(`${built.slivers.length} floor sliver(s) under ${tol.minFloorWidthMm} mm wide listed, not cut as pockets (D2)`);
+
+  const shoulders: string[] = [];
+  const walk = (nodes: PocketNode[]): void => {
+    for (const n of nodes) {
+      if (n.open) shoulders.push(n.id);
+      walk(n.children);
+    }
+  };
+  walk(built.pockets);
+
+  let planarArea = 0;
+  for (const patch of patches) if (patch.planar) planarArea += patch.area;
+  const frees = frame.stockBottom === undefined ? true : Math.abs(built.partBottom - frame.stockBottom) <= tol.levelMergeMm;
+
+  return {
+    frame: { ...frame, partTop: built.partTop, partBottom: built.partBottom },
+    levels: built.levels,
+    top: built.top,
+    contour: { ...built.contour, frees, shoulders },
+    pockets: built.pockets,
+    rims: built.rims.map((r) => ({ id: r.id, polyline: r.polyline, z: r.z, of: r.of, kind: r.kind, ...(r.legs ? { legs: r.legs } : {}) })),
+    remainder: built.remainder,
+    unreachable: built.unreachable,
+    report: {
+      source: path,
+      patches: patches.length,
+      planarArea,
+      remainderArea: built.remainder.reduce((s, r) => s + r.area, 0),
+      tolerances: tol,
+      slivers: built.slivers,
+      notes,
+    },
+  };
+}
+
+const boundsOf = (polys: Polygons): { min: [number, number]; max: [number, number] } => {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const ring of polys) {
+    for (const [x, y] of ring) {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  return { min: [minX, minY], max: [maxX, maxY] };
+};
 
 /**
  * `RegionRef`s derived from a `FeatureTree` — A's N1: so #961/#962 read bounds/`topZ`/`bottomZ` from
  * the tree instead of re-deriving them. `obstacles` and `regionClearanceZ` are filled in by
- * `plan.ts` from the resolved fixture envelope (§3.0's `ModelPlanInput.fixture`), not by this
- * function, which has no fixture data.
+ * `plan.ts` from the resolved fixture envelope, not by this function, which has no fixture data.
  */
-export function regionRefs(_tree: FeatureTree): Omit<RegionRef, 'obstacles' | 'regionClearanceZ'>[] {
-  throw new Error('cam/model/features: regionRefs() not implemented (#958)');
+export function regionRefs(tree: FeatureTree): Omit<RegionRef, 'obstacles' | 'regionClearanceZ'>[] {
+  const out: Omit<RegionRef, 'obstacles' | 'regionClearanceZ'>[] = [];
+  const walk = (nodes: PocketNode[]): void => {
+    for (const n of nodes) {
+      out.push({ id: n.id, kind: 'pocket', bounds: boundsOf(n.region), topZ: n.mouthZ, bottomZ: n.floorZ });
+      walk(n.children);
+    }
+  };
+  walk(tree.pockets);
+  for (const r of tree.remainder) out.push({ id: r.id, kind: 'curved', bounds: boundsOf(r.footprint), topZ: r.zTop, bottomZ: r.zBottom });
+  out.push({ id: 'contour', kind: 'contour', bounds: boundsOf(tree.contour.outline), topZ: tree.frame.partTop, bottomZ: tree.contour.zTo });
+  for (const rim of tree.rims) {
+    out.push({ id: rim.id, kind: 'rim', bounds: boundsOf([rim.polyline]), topZ: rim.z, bottomZ: rim.z - (rim.legs?.[1] ?? 0) });
+  }
+  return out;
 }
