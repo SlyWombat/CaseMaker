@@ -175,6 +175,28 @@ describe('#958 the feature tree', () => {
     }
   });
 
+  it('an island rising to the top is the pocket’s island, not top land; a plateau above a ledge is land', () => {
+    // A 40 × 30 × 10 block with a 10 × 10 × 3 pocket whose 2 × 2 island stands to the top (z 10).
+    const pinned = tl.Manifold.cube([40, 30, 10])
+      .subtract(tl.Manifold.cube([10, 10, 3]).translate([5, 5, 7]))
+      .add(tl.Manifold.cube([2, 2, 3]).translate([9, 9, 7]));
+    const tree = recogniseFeatures({ triangles: parsed(pinned) }, { up: [0, 0, 1], stockTop: 10 }, tl);
+    expect(tree.top.floors).toHaveLength(1);
+    close(tree.top.area, 1200 - 100, 1e-6);
+    const pocket = all(tree.pockets)[0]!;
+    expect(pocket.islands).toHaveLength(1);
+    close(pocket.islands[0]!.topZ, 10, 1e-6);
+
+    // A 30 × 30 plateau 2 mm above a ledge running round it (an open shoulder at z 8): the plateau
+    // is the top land, not an island of the shoulder.
+    const plateau = tl.Manifold.cube([40, 40, 8]).add(tl.Manifold.cube([30, 30, 2]).translate([5, 5, 8]));
+    const t2 = recogniseFeatures({ triangles: parsed(plateau) }, { up: [0, 0, 1], stockTop: 10 }, tl);
+    close(t2.top.area, 900, 1e-6);
+    const ledge = all(t2.pockets);
+    expect(ledge).toHaveLength(1);
+    expect(ledge[0]!.open).toBe(true);
+  });
+
   it('regionRefs names every node, remainder and the contour', () => {
     const tree = block();
     const refs = regionRefs(tree);

@@ -16,8 +16,11 @@
  * stock frame. With CM_958_OUT set, the remainder regions are written as JSON for E's relation
  * checks (1–4) against the heightfield masks.
  *
- * Tolerances (6620460283): depth ±0.01; area |Δ| ≤ max(1 %, 0.05 mm × perimeter); centroid
- * 0.2 mm; bbox 0.2 mm.
+ * Tolerances (6620460283): depth ±0.01 INCLUSIVE (E's window is ±0.01 about Makera's level, so a
+ * plane exactly 0.01 away is inside it); area |Δ| ≤ max(1 %, 0.05 mm × perimeter); centroid 0.2 mm;
+ * bbox 0.2 mm. After E's second run (6621355983), one more allowance, ONE-SIDED: E's ±0.01 window
+ * also takes in the tangent band where a filleted floor meets its wall (√(2r·0.01), 0.2 mm at r 2,
+ * 0.25 at r 3), so E's area may exceed the plane's by up to 0.25 mm × perimeter, never the reverse.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,6 +31,7 @@ import { tl } from './helpers/manifoldExec';
 import { stepToMesh } from '@/engine/import/stepMesh';
 import { recogniseFeatures, type FeatureTree, type PocketNode } from '@/engine/cnc/cam/model/features';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
+import { DEFAULT_FEATURE_TOLERANCES, classifyPatches, patchesFromFaces, type FrameMesh } from '@/engine/cnc/cam/model/features/patches';
 
 interface Part {
   area: number;
@@ -64,6 +68,12 @@ function partOf(polys: Polygons, area: number): Part {
 }
 
 const all = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [n, ...all(n.children)]);
+/** Float dust on a comparison against a stated tolerance (E's fourth run: 0.2 read 0.20000000000000284). */
+const EPS = 1e-9;
+/** E's window, inclusive, plus float noise. */
+const LEVEL_TOL = 0.01 + 1e-6;
+/** The tangent band E's window takes in beyond a filleted floor's edge, mm (one-sided). */
+const TANGENT_BAND_MM = 0.25;
 const areaTol = (p: Part): number => Math.max(0.01 * p.area, 0.05 * p.perimeter);
 
 /** One expected floor part: a centroid (either coordinate may be unknown), an area range, a size. */
@@ -77,7 +87,10 @@ interface Want {
 /** Greedy match by centroid distance on the known coordinates; then the area range and size. */
 const describeParts = (got: Part[]): string =>
   got
-    .map((p) => `    ${p.area.toFixed(2)} mm² @ (${p.centroid[0].toFixed(2)}, ${p.centroid[1].toFixed(2)}) ${p.size[0].toFixed(2)} × ${p.size[1].toFixed(2)}`)
+    .map(
+      (p) =>
+        `    ${p.area.toFixed(2)} mm² @ (${p.centroid[0].toFixed(2)}, ${p.centroid[1].toFixed(2)}) ${p.size[0].toFixed(2)} × ${p.size[1].toFixed(2)}, mean width 2A/P ${((2 * p.area) / p.perimeter).toFixed(3)} mm`,
+    )
     .join('\n');
 
 function expectParts(label: string, got: Part[], want: Want[]): void {
@@ -85,16 +98,23 @@ function expectParts(label: string, got: Part[], want: Want[]): void {
   const free = [...got];
   for (const w of want) {
     const dist = (p: Part): number => Math.hypot(w.x === undefined ? 0 : p.centroid[0] - w.x, w.y === undefined ? 0 : p.centroid[1] - w.y);
-    free.sort((a, b) => dist(a) - dist(b));
+    // Distance first; area breaks ties (the tray's 3.00 ledge and its middle channel floor share
+    // the centroid (55, 70)).
+    const mid = (w.area[0] + w.area[1]) / 2;
+    const key = (p: Part): number => dist(p) + Math.abs(Math.log(Math.max(p.area, 1e-9) / mid));
+    free.sort((a, b) => key(a) - key(b));
     const p = free.shift()!;
     const where = `${label} @ (${w.x ?? '?'}, ${w.y ?? '?'}) got (${p.centroid[0].toFixed(2)}, ${p.centroid[1].toFixed(2)}) ${p.area.toFixed(2)} mm²`;
-    expect(dist(p), where).toBeLessThanOrEqual(0.2);
+    expect(dist(p), where).toBeLessThanOrEqual(0.2 + EPS);
     const tol = areaTol(p);
-    expect(p.area, where).toBeGreaterThanOrEqual(w.area[0] - tol);
+    expect(p.area, where).toBeGreaterThanOrEqual(w.area[0] - tol - TANGENT_BAND_MM * p.perimeter);
     expect(p.area, where).toBeLessThanOrEqual(w.area[1] + tol);
     if (w.size !== undefined) {
-      expect(Math.abs(p.size[0] - w.size[0]), where).toBeLessThanOrEqual(0.2);
-      expect(Math.abs(p.size[1] - w.size[1]), where).toBeLessThanOrEqual(0.2);
+      // One-sided like the area: E's window widens each filleted edge by up to the tangent band.
+      for (const k of [0, 1] as const) {
+        expect(p.size[k] - w.size[k], where).toBeLessThanOrEqual(0.2 + EPS);
+        expect(w.size[k] - p.size[k], where).toBeLessThanOrEqual(0.2 + 2 * TANGENT_BAND_MM + EPS);
+      }
     }
   }
 }
@@ -108,19 +128,24 @@ function expectParts(label: string, got: Part[], want: Want[]): void {
  * The levels E flagged as slope crossings must stay absent.
  */
 const TRAY_CONFIRMED_EXTRA_DEPTHS: number[] = [];
-const ORGANIZER_CONFIRMED_EXTRA_DEPTHS: number[] = [];
+/**
+ * E's second run (6621355983): 0.60 (82.8 mm² in 15 flats) and 14.00 (59.5 mm², two flats) read
+ * flat. 8.00: E's heightfield reads 85.9 mm² flat there; the third run's plane fit (6621468987)
+ * shows one STEP face, 66.00 mm², deviation 0, normal spread 0°: a modelled 1 mm flat, admitted.
+ */
+const ORGANIZER_CONFIRMED_EXTRA_DEPTHS: number[] = [0.6, 8, 14];
 
 function expectLevels(tree: FeatureTree, modelTop: number, want: number[], confirmed: number[], absent: number[]): void {
   const depths = tree.levels.map((z) => modelTop - z);
   const shown = depths.map((d) => d.toFixed(3)).join(', ');
-  for (const d of want) expect(depths.some((x) => Math.abs(x - d) <= 0.01), `level ${d} missing; levels ${shown}`).toBe(true);
-  for (const d of absent) expect(depths.some((x) => Math.abs(x - d) <= 0.01), `level ${d} must be absent; levels ${shown}`).toBe(false);
-  const extra = depths.filter((x) => !want.some((d) => Math.abs(x - d) <= 0.01));
-  const unconfirmed = extra.filter((x) => !confirmed.some((d) => Math.abs(x - d) <= 0.01));
+  for (const d of want) expect(depths.some((x) => Math.abs(x - d) <= LEVEL_TOL), `level ${d} missing; levels ${shown}`).toBe(true);
+  for (const d of absent) expect(depths.some((x) => Math.abs(x - d) <= LEVEL_TOL), `level ${d} must be absent; levels ${shown}`).toBe(false);
+  const extra = depths.filter((x) => !want.some((d) => Math.abs(x - d) <= LEVEL_TOL));
+  const unconfirmed = extra.filter((x) => !confirmed.some((d) => Math.abs(x - d) <= LEVEL_TOL));
   expect(unconfirmed.map((d) => d.toFixed(3)), `levels not in E's list and not yet confirmed flat by E; levels ${shown}`).toEqual([]);
 }
 
-const placedMeshes = new Map<FeatureTree, { positions: Float32Array; indices: Uint32Array }>();
+const placedMeshes = new Map<FeatureTree, { positions: Float32Array; indices: Uint32Array; faceId?: Uint32Array }>();
 
 async function placedTree(file: string, stock: [number, number], modelTop: number): Promise<FeatureTree> {
   const bytes = fs.readFileSync(file);
@@ -137,7 +162,7 @@ async function placedTree(file: string, stock: [number, number], modelTop: numbe
   }
   const mesh = { ...read.mesh, positions };
   const tree = recogniseFeatures({ triangles: mesh, faceId: read.faceId }, { up: [0, 0, 1], stockTop: 0 }, tl);
-  placedMeshes.set(tree, { positions, indices: read.mesh.indices });
+  placedMeshes.set(tree, { positions, indices: read.mesh.indices, ...(read.faceId ? { faceId: read.faceId } : {}) });
   return tree;
 }
 
@@ -146,7 +171,7 @@ function floorsAt(tree: FeatureTree, modelTop: number, depth: number): Part[] {
   const z = modelTop - depth;
   if (Math.abs(depth) < 1e-9) return tree.top.floors.map((f) => partOf(f.polygons, f.area));
   return all(tree.pockets)
-    .filter((n) => !n.through && Math.abs(n.floorZ - z) <= 0.01)
+    .filter((n) => !n.through && Math.abs(n.floorZ - z) <= LEVEL_TOL)
     .flatMap((n) => n.floors.map((f) => partOf(f.polygons, f.area)));
 }
 
@@ -186,11 +211,47 @@ function writeForE(tree: FeatureTree, name: string, modelTop: number, mesh: { po
   fs.writeFileSync(path.join(out, `${name}-floors.json`), JSON.stringify({ frame: 'stock', levels, slivers: tree.report.slivers }));
 }
 
+/**
+ * The plane-fit evidence for every floor patch at a level E does not list: its largest vertex
+ * deviation from the fitted plane and the spread of its triangles' normals. A planar B-rep face
+ * reads ~0 on both; a cylinder of R over a width w reads ≈ w²/(16R) and ≈ w/(2R) rad, which fails
+ * the 0.005 mm / 0.5° tests (#958 §3.1). Printed so a disputed level is settled by the geometry.
+ */
+function logExtraLevelFits(
+  tree: FeatureTree,
+  name: string,
+  modelTop: number,
+  mesh: FrameMesh,
+  faceId: Uint32Array | undefined,
+  listed: number[],
+  alsoAt: number[] = [],
+): void {
+  if (faceId === undefined) return;
+  const tol = DEFAULT_FEATURE_TOLERANCES;
+  const patches = patchesFromFaces(mesh, faceId, tol);
+  classifyPatches(mesh, patches, tree.frame.partBottom, tol);
+  const extra = tree.levels.filter(
+    (z) => !listed.some((d) => Math.abs(modelTop - z - d) <= LEVEL_TOL) || alsoAt.some((d) => Math.abs(modelTop - z - d) <= LEVEL_TOL),
+  );
+  const lines: string[] = [];
+  for (const z of extra) {
+    for (const patch of patches) {
+      if (patch.kind !== 'floor' || Math.abs((patch.zMin + patch.zMax) / 2 - z) > 0.01) continue;
+      lines.push(
+        `  depth ${(modelTop - z).toFixed(3)}: face patch ${patch.id}, ${patch.area.toFixed(2)} mm², ${patch.triangles.length} tris, plane dev ${patch.planeDevMm.toExponential(2)} mm, normal spread ${patch.normalSpreadDeg.toFixed(4)}°`,
+      );
+    }
+  }
+  console.log(`#958 ${name}: plane fits of the floor faces at levels E does not list\n${lines.join('\n')}`);
+}
+
 /** Every level with its floor parts, printed so a red run says what the tree found. */
 function logLevels(tree: FeatureTree, name: string, modelTop: number): void {
   const lines = tree.levels.map((z) => {
     const parts = Math.abs(z - tree.top.z) < 1e-9 ? tree.top.floors : all(tree.pockets).filter((n) => !n.through && Math.abs(n.floorZ - z) <= 0.01).flatMap((n) => n.floors);
-    return `  depth ${(modelTop - z).toFixed(3)} (z ${z.toFixed(3)}): ${parts.length} parts\n${describeParts(parts.map((f) => partOf(f.polygons, f.area)))}`;
+    const nodes = all(tree.pockets).filter((n) => !n.through && Math.abs(n.floorZ - z) <= LEVEL_TOL);
+    const nodeLine = nodes.map((n) => `${n.id}${n.open ? ' (open)' : ''} enters ⌀${n.narrowest.toFixed(2)}, ${n.floors.length} floor part(s)`).join('; ');
+    return `  depth ${(modelTop - z).toFixed(3)} (z ${z.toFixed(3)}): ${parts.length} parts${nodeLine ? ` — nodes: ${nodeLine}` : ''}\n${describeParts(parts.map((f) => partOf(f.polygons, f.area)))}`;
   });
   console.log(`#958 ${name}: partTop ${tree.frame.partTop.toFixed(3)} partBottom ${tree.frame.partBottom.toFixed(3)}\n${lines.join('\n')}`);
 }
@@ -206,6 +267,9 @@ describe.skipIf(TRAY === undefined)('#958 acceptance — tool tray 70, top setup
     const t = await tree();
     logLevels(t, 'tray', TOP);
     writeForE(t, 'tray', TOP, placedMeshes.get(t)!);
+    const placed = placedMeshes.get(t)!;
+    // 3.00 too: the ledge's own face fit, the geometry behind pinning it (6621605514 reply).
+    logExtraLevelFits(t, 'tray', TOP, placed, placed.faceId, [0, 0.6, 3, 6], [3]);
     expectLevels(t, TOP, [0, 0.6, 3, 6], TRAY_CONFIRMED_EXTRA_DEPTHS, []);
   });
 
@@ -215,19 +279,29 @@ describe.skipIf(TRAY === undefined)('#958 acceptance — tool tray 70, top setup
       { x: 90.7, y: 70.0, area: [3069.1, 3069.1] },
       { x: 19.4, y: 70.2, area: [3006.6, 3006.6] },
     ]);
-    expectParts('0.60', floorsAt(t, TOP, 0.6), [
-      { x: 12.2, y: 18.3, area: [10.6, 10.6] },
-      { x: 12.2, y: 39.1, area: [9.4, 9.4] },
-      { x: 12.2, y: 59.6, area: [9.9, 9.9] },
-      { x: 12.2, y: 80.3, area: [9.0, 9.0] },
-      { x: 12.2, y: 100.7, area: [8.6, 8.6] },
-      { x: 12.2, y: 121.2, area: [7.3, 7.3] },
+    // E gives these six only as "x ≈ 12.2" with a y each (6620425916), so y is pinned to 0.2 mm
+    // and x to E's stated precision, 0.5 mm (third run: (12.57, 59.65) for the island pocket).
+    const sixty = floorsAt(t, TOP, 0.6);
+    expectParts('0.60', sixty, [
+      { y: 18.3, area: [10.6, 10.6] },
+      { y: 39.1, area: [9.4, 9.4] },
+      { y: 59.6, area: [9.9, 9.9] },
+      { y: 80.3, area: [9.0, 9.0] },
+      { y: 100.7, area: [8.6, 8.6] },
+      { y: 121.2, area: [7.3, 7.3] },
     ]);
-    expectParts(
-      '3.00',
-      floorsAt(t, TOP, 3),
-      [28.8, 49.5, 70.0, 90.6, 111.2].map((y) => ({ x: 55.0, y, area: [27.8, 28.1] as [number, number], size: [3.6, 7.5] as [number, number] })),
-    );
+    for (const p of sixty) expect(Math.abs(p.centroid[0] - 12.2), `0.60 x ${p.centroid[0].toFixed(2)}`).toBeLessThanOrEqual(0.5);
+    // The 1,456.4 mm² rim-shaped component E flagged at −4.20 (6620425916) is pinned as a part:
+    // E's own area is ~3 mm × the outline's perimeter (2A/P ≈ 3.07 mm on ours), not the 0.1–0.2 mm
+    // fillet sliver first guessed, so it is the outer ledge, an OPEN shoulder (#958 6621605514 reply).
+    expectParts('3.00', floorsAt(t, TOP, 3), [
+      { x: 55.0, y: 70.0, area: [1456.4, 1456.4], size: [106, 136] },
+      ...[28.8, 49.5, 70.0, 90.6, 111.2].map((y) => ({ x: 55.0, y, area: [27.8, 28.1] as [number, number], size: [3.6, 7.5] as [number, number] })),
+    ]);
+    const ledge = all(t.pockets).find((n) => !n.through && Math.abs(n.floorZ - (TOP - 3)) <= LEVEL_TOL && n.floors.some((f) => f.area > 1000));
+    expect(ledge?.open, 'the 3.00 ledge is an open shoulder').toBe(true);
+    // x 55.0 is the midpoint of E's bbox x 19.8–90.2, not a centroid E gave; the slots are
+    // symmetric end to end, so the two coincide.
     expectParts(
       '6.00',
       floorsAt(t, TOP, 6),
@@ -269,12 +343,15 @@ describe.skipIf(ORGANIZER === undefined)('#958 acceptance — tool organizer, to
     const t = await tree();
     logLevels(t, 'organizer', TOP);
     writeForE(t, 'organizer', TOP, placedMeshes.get(t)!);
+    const placed = placedMeshes.get(t)!;
+    logExtraLevelFits(t, 'organizer', TOP, placed, placed.faceId, [0, 3, 4, 4.99, 6, 10, 22]);
     expectLevels(t, TOP, [0, 3, 4, 4.99, 6, 10, 22], ORGANIZER_CONFIRMED_EXTRA_DEPTHS, [3.83, 7.98]);
   });
 
   it('the floors at each level match E’s parts', async () => {
     const t = await tree();
-    expectParts('0', floorsAt(t, TOP, 0), [{ x: 85, y: 85, area: [10568.5, 10568.5] }]);
+    // E gives the land's area and count only, no centroid (6620425916).
+    expectParts('0', floorsAt(t, TOP, 0), [{ area: [10568.5, 10568.5] }]);
     expectParts('3', floorsAt(t, TOP, 3), [
       { x: 41.0, y: 129.0, area: [2487.7, 2487.7], size: [100.8, 100.8] },
       ...[73.2, 99.8, 45.9, 127.1].map((x) => ({ x, y: 87.5, area: [1182.6, 1278.9] as [number, number], size: [21.2, 65.8] as [number, number] })),
@@ -285,7 +362,10 @@ describe.skipIf(ORGANIZER === undefined)('#958 acceptance — tool organizer, to
       [102.4, 117.9, 133.4].map((x) => ({ x, y: 27.0, area: [13.1, 13.1] as [number, number], size: [4, 4] as [number, number] })),
     );
     expectParts('4.99', floorsAt(t, TOP, 4.99), [
-      ...[22.5, 59.9, 86.5, 113.1].map((x) => ({ x, y: 87.5, area: [118.8, 123.1] as [number, number] })),
+      // E's table grouped x 22.5 with the y 87.5 row; E confirmed its centroid is (22.5, 101.0)
+      // on the third run (#958, manager 2026-11-04).
+      ...[59.9, 86.5, 113.1].map((x) => ({ x, y: 87.5, area: [118.8, 123.1] as [number, number] })),
+      { x: 22.5, y: 101.0, area: [118.8, 123.1] },
       { x: 69.0, y: 147.5, area: [118.8, 123.1] },
       ...[
         [143.5, 11.5],

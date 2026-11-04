@@ -64,6 +64,10 @@ export interface Patch {
   zMin: number;
   zMax: number;
   kind: PatchKind;
+  /** The plane fit's largest vertex deviation, mm: the evidence for `planar`. */
+  planeDevMm: number;
+  /** The largest angle between a triangle's normal and the fitted plane's, degrees. */
+  normalSpreadDeg: number;
 }
 
 /** A triangle soup in the setup frame: positions xyz triplets, indices three per triangle. */
@@ -250,7 +254,7 @@ export function patchesFromFaces(mesh: FrameMesh, faceId: Uint32Array, tol: Feat
     const fit = fitPlane(mesh, info, tris);
     if (fit.area <= 0) continue;
     const planar = fit.dev <= tol.planeMm && fit.minDot >= cosTol;
-    out.push({ id: out.length, triangles: tris, planar, normal: fit.normal, d: fit.d, area: fit.area, zMin: fit.zMin, zMax: fit.zMax, kind: 'remainder' });
+    out.push({ id: out.length, triangles: tris, planar, normal: fit.normal, d: fit.d, area: fit.area, zMin: fit.zMin, zMax: fit.zMax, kind: 'remainder', planeDevMm: fit.dev, normalSpreadDeg: (Math.acos(Math.min(1, fit.minDot)) * 180) / Math.PI, });
   }
   return out;
 }
@@ -324,7 +328,7 @@ export function patchesFromMesh(mesh: FrameMesh, tol: FeatureTolerances): Patch[
     const fit = fitPlane(mesh, info, tris);
     const planar = fit.dev <= tol.planeMm && fit.minDot >= cosTol && (tris.length > 1 || horizontalOrVertical(fit.normal));
     if (planar) {
-      out.push({ id: out.length, triangles: tris, planar: true, normal: fit.normal, d: fit.d, area: fit.area, zMin: fit.zMin, zMax: fit.zMax, kind: 'remainder' });
+      out.push({ id: out.length, triangles: tris, planar: true, normal: fit.normal, d: fit.d, area: fit.area, zMin: fit.zMin, zMax: fit.zMax, kind: 'remainder', planeDevMm: fit.dev, normalSpreadDeg: (Math.acos(Math.min(1, fit.minDot)) * 180) / Math.PI, });
     } else {
       for (const t of tris) curvedPool[t] = 1;
     }
@@ -348,7 +352,7 @@ export function patchesFromMesh(mesh: FrameMesh, tol: FeatureTolerances): Patch[
       }
     }
     const fit = fitPlane(mesh, info, tris);
-    out.push({ id: out.length, triangles: tris, planar: false, normal: fit.normal, d: fit.d, area: fit.area, zMin: fit.zMin, zMax: fit.zMax, kind: 'remainder' });
+    out.push({ id: out.length, triangles: tris, planar: false, normal: fit.normal, d: fit.d, area: fit.area, zMin: fit.zMin, zMax: fit.zMax, kind: 'remainder', planeDevMm: fit.dev, normalSpreadDeg: (Math.acos(Math.min(1, fit.minDot)) * 180) / Math.PI, });
   }
   return out;
 }
