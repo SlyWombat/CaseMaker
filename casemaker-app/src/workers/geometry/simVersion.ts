@@ -14,5 +14,6 @@
  */
 // 1 — #925 introduced the version.
 // 2 — #947 opens boundary slivers before counting; #924 folds the design check into `ok`.
-// 3 — #924 judges the raw outline with the cutter's own radius, at every level above the floor.
+// 3 — #948 judges goal cut-into on the page's own stamp; #924 judges the raw outline with the
+//     cutter's own radius, at every level above the floor (one bump: no package between them).
 export const SIMULATOR_VERSION = 3;
