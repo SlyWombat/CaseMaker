@@ -407,22 +407,35 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // `chooseSequence` calls `planStep` once per candidate it prices (not just the chosen one); a
   // step's own signature (kind + cutter + regionIds) is stable across those calls, so the SAME
   // step, priced more than once, is only ever planned once.
-  const outcomeCache = new Map<string, OpOutcome[] | null>();
+  const outcomeCache = new Map<string, { id: string; outcome: OpOutcome }[] | null>();
   const stepSignature = (step: SequenceStep): string => `${step.kind}:${step.cutter.key}:${step.regionIds.join(',')}`;
+
+  // The manager's ruling on #959: a throwing region must not crash the whole plan. `sequence.ts`
+  // prunes candidates on GEOMETRY alone (an opening, a corner, a flute length) — it has no notion
+  // of a region that passes that pruning but fails when actually planned (a Clipper failure on an
+  // extended open shoulder, a degenerate through hole), so this is the one place that can catch
+  // it. Caught per region, not per step: the OTHER regions in the same step still plan and post.
+  const regionFailures = new Map<string, string>();
 
   const planStep: SequenceOptions['planStep'] = (step) => {
     let outcomes = outcomeCache.get(stepSignature(step));
     if (outcomes === undefined) {
       outcomes = [];
       for (const id of step.regionIds) {
-        const outcome = planRegion(id, step.cutter.tool);
-        if (outcome === null) { outcomes = null; break; }
-        outcomes.push(outcome);
+        let outcome: OpOutcome | null;
+        try {
+          outcome = planRegion(id, step.cutter.tool);
+        } catch (err) {
+          if (!regionFailures.has(id)) regionFailures.set(id, err instanceof Error ? err.message : String(err));
+          continue;
+        }
+        if (outcome === null) continue;
+        outcomes.push({ id, outcome });
       }
       outcomeCache.set(stepSignature(step), outcomes);
     }
     if (outcomes === null || outcomes.length === 0) return null;
-    return outcomes.map((o) => o.ir).reduce((a, b) => concatToolpathIR(a, b));
+    return outcomes.map((o) => o.outcome.ir).reduce((a, b) => concatToolpathIR(a, b));
   };
 
   const choice = chooseSequence(demand, cutters, {
@@ -437,9 +450,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   for (const step of choice.steps) {
     const outcomes = outcomeCache.get(stepSignature(step));
     if (outcomes === undefined || outcomes === null) continue; // chooseSequence only chose postable steps
-    for (let i = 0; i < step.regionIds.length; i++) {
-      const id = step.regionIds[i]!;
-      const outcome = outcomes[i]!;
+    for (const { id, outcome } of outcomes) {
       const ref = refById.get(id)!;
       ops.push({ kind: id === 'contour' || throughById.has(id) ? 'contour' : 'pocket', region: ref, outcome });
       const key = outcome.cutter;
@@ -464,6 +475,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       `a ${Math.abs(tree.frame.partTop - z0).toFixed(2)} mm skin sits above the part; this plan faces it only where a root pocket's own first pass already engages it — the top land OUTSIDE every pocket's footprint is not faced here (no separate facing op yet)`,
     );
   }
+  for (const [id, message] of regionFailures) notes.push(`${id}: not cut — planning failed (${message})`);
 
   const sequence: SequencedCutter[] = choice.cost.entries.map((entry) => {
     const ir = programs.get(entry.cutterKey);

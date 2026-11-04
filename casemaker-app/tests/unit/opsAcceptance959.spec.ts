@@ -211,7 +211,70 @@ function syntheticTreeWithSkin(skinMm: number): FeatureTree {
   };
 }
 
+/** Two pockets and an outline; `region` distinguishes them by width so a wrapped offset can throw
+ * for one specific region on demand (below) — the manager's #959 ruling: a region that fails to
+ * plan must not crash the whole plan. */
+function syntheticTreeTwoPockets(): FeatureTree {
+  const rectOk: [number, number][][] = [[[0, 0], [20, 0], [20, 10], [0, 10]]];
+  const rectBad: [number, number][][] = [[[30, 0], [37, 0], [37, 7], [30, 7]]];
+  const outline: [number, number][][] = [[[0, 0], [37, 0], [37, 10], [0, 10]]];
+  const ok: PocketNode = {
+    id: 'ok-1', floorZ: -3, mouthZ: 0, open: false, through: false,
+    region: rectOk, floors: [{ polygons: rectOk, area: 200 }],
+    islands: [], children: [], remainder: [], narrowest: 10,
+  };
+  const bad: PocketNode = {
+    id: 'bad-1', floorZ: -3, mouthZ: 0, open: false, through: false,
+    region: rectBad, floors: [{ polygons: rectBad, area: 49 }],
+    islands: [], children: [], remainder: [], narrowest: 7,
+  };
+  return {
+    frame: { up: [0, 0, 1], stockTop: 0, partTop: 0, partBottom: -3 },
+    levels: [-3],
+    top: { z: 0, floors: [], area: 0 },
+    contour: { outline, area: 370, zTo: -3, frees: true, shoulders: [] },
+    pockets: [ok, bad],
+    rims: [],
+    remainder: [],
+    unreachable: [],
+    report: { source: 'mesh', patches: 1, planarArea: 370, remainderArea: 0, tolerances: {} as never, slivers: [], notes: [] },
+  };
+}
+
+/** Wraps a real offset to throw for any region whose bounding width is `badWidth` — a stand-in
+ * for a real Clipper failure on a specific region (an extended open shoulder, a degenerate
+ * through hole), without needing a fixture that actually breaks Clipper. */
+function offsetThrowingFor(badWidth: number, real: ReturnType<typeof makeClipperOffset>): ReturnType<typeof makeClipperOffset> {
+  return (region, delta) => {
+    let minX = Infinity, maxX = -Infinity;
+    for (const ring of region) for (const [x] of ring) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); }
+    if (Math.abs(maxX - minX - badWidth) < 1e-6) throw new Error('synthetic Clipper failure for test');
+    return real(region, delta);
+  };
+}
+
 describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
+  it('a region that fails to plan does not crash the whole plan — it is a named finding, the rest still posts', () => {
+    const tree = syntheticTreeTwoPockets();
+    const result = planPocketsForTree(tree, {
+      offset: offsetThrowingFor(7, makeClipperOffset(tl)),
+      houseFlats: VENDOR_SET,
+      stepDownMm: 1.5,
+      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
+      rapid: RAPID,
+      toolChangeSeconds: TOOL_CHANGE_SECONDS,
+      spindleRpm: 12000,
+      air: true,
+      maxCutters: VENDOR_SET.length + 1,
+      boolean: { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) },
+    });
+    expect(result.ops.some((op) => op.region.id === 'ok-1'), 'the OTHER pocket still plans').toBe(true);
+    expect(result.ops.some((op) => op.kind === 'contour'), 'the contour still plans').toBe(true);
+    expect(result.ops.some((op) => op.region.id === 'bad-1'), 'the failing region is not planned').toBe(false);
+    expect(result.notes.some((n) => n.startsWith('bad-1:') && n.includes('not cut')), `notes: ${result.notes.join('; ')}`).toBe(true);
+  });
+
+
   it('a skin between the stock top and the part top is faced by the pocket, and the contour still reaches the full depth down from the STOCK top', () => {
     const tree = syntheticTreeWithSkin(1.2);
     const result = planTray(tree);
