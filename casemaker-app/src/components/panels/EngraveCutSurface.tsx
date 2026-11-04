@@ -437,7 +437,9 @@ function goalLine(report: GoalCutIntoReport | undefined): GoalLine | null {
   // coverage failing, not a cut into the part: the cut-into branch would name a 0 mm cut that never
   // happened. State the coverage the check measured against the line it judged, or the report's own
   // sentence when the leftover band is missing.
-  if (report.maxCutIntoMm === 0) {
+  // #964 — the card names the cell the pass JUDGED, not the raw deepest one: with the wall and
+  // wall-shadow (and any edge break) exclusions the deepest raw cell can be unadjudicable.
+  if (report.adjudicatedMaxMm === 0) {
     const coveragePct = goalCoveragePct(report);
     return {
       text:
@@ -447,12 +449,12 @@ function goalLine(report: GoalCutIntoReport | undefined): GoalLine | null {
       state: 'coverage',
     };
   }
-  const at = report.maxCutIntoAt;
+  const at = report.adjudicatedMaxAt;
   return {
     text:
       at === null
-        ? `Cuts ${goalMm(report.maxCutIntoMm)} mm into the design`
-        : `Cuts ${goalMm(report.maxCutIntoMm)} mm into the design at ${goalMm(at.x)}, ${goalMm(at.y)}`,
+        ? `Cuts ${goalMm(report.adjudicatedMaxMm)} mm into the design`
+        : `Cuts ${goalMm(report.adjudicatedMaxMm)} mm into the design at ${goalMm(at.x)}, ${goalMm(at.y)}`,
     state: 'cut-into',
   };
 }
@@ -473,6 +475,21 @@ function goalLine(report: GoalCutIntoReport | undefined): GoalLine | null {
  * saying "not stated" on every goal run would be noise, not a fact; it gets one HERE when the
  * report carries a reach field.)
  */
+/**
+ * #964 — THE RAW READING, printed BESIDE the adjudicated one and never as the pass: every cell the
+ * sweep left below the goal before the wall, wall-shadow (and, when the job states one, edge-break)
+ * exclusions, with the page's own formats. One line, muted, under the judged line — the page prints
+ * its raw line beside its `cutInto0p1` figure the same way, and the two readings differ exactly by
+ * the unadjudicable cells. Null when the comparison did not run (there is no raw reading to state).
+ */
+function goalRawFact(report: GoalCutIntoReport): string | null {
+  if (!report.ran) return null;
+  const pct = Number((report.cutIntoFraction * 100).toFixed(2));
+  const at = report.maxCutIntoAt;
+  const where = at === null ? '' : ` at ${goalMm(at.x)}, ${goalMm(at.y)}`;
+  return `raw, before exclusions: ${pct} % cut-into, max ${goalMm(report.maxCutIntoMm)} mm${where}`;
+}
+
 function goalCoverageFact(report: GoalCutIntoReport): string | null {
   const coveragePct = goalCoveragePct(report);
   if (coveragePct === null) return null;
@@ -973,6 +990,12 @@ export function EngraveCutSurface({
   // touched): a pass, the worst cut-into with its location, or why the check did not run — then the
   // page's two coverage facts for a report the comparison actually produced.
   const goal = goalLine(runOracle?.goalCutInto);
+  // #964 — the RAW reading beside the judged line (never the pass), stated only for a report the
+  // comparison ran on.
+  const goalRaw =
+    runOracle?.goalCutInto !== undefined && runOracle.goalCutInto.ran
+      ? goalRawFact(runOracle.goalCutInto)
+      : null;
   const goalCoverage =
     runOracle?.goalCutInto !== undefined && runOracle.goalCutInto.ran
       ? goalCoverageFact(runOracle.goalCutInto)
@@ -1205,6 +1228,14 @@ export function EngraveCutSurface({
             data-state={goal.state}
           >
             {goal.text}
+          </p>
+        )}
+        {/* #964 — the RAW goal reading beside the judged line: one muted fact, labelled, never the
+            verdict. The page prints its raw line beside `cutInto0p1` the same way; the difference
+            between them is exactly the unadjudicable cells (wall, wall shadow, stated edge break). */}
+        {goalRaw !== null && (
+          <p style={MUTED} data-testid="engrave-cut-goal-raw">
+            {goalRaw}
           </p>
         )}
         {/* #948 — the page's top-surface coverage fact, under the goal line. Only a report the

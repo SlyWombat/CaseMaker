@@ -69,7 +69,9 @@ describe('#955/V2-2 the goal check edge-break allowance', () => {
     expect(r.cutIntoFraction).toBeGreaterThan(0); // the raw figure still says it was cut
     expect(r.edgeBreakFraction).toBeGreaterThan(0);
     expect(r.adjudicatedFraction).toBe(0);
-    expect(r.maxCutIntoMm).toBe(0);
+    // #964 — the raw maximum is stated raw; the adjudicated maximum is the judged one.
+    expect(r.maxCutIntoMm).toBeCloseTo(0.5, 6);
+    expect(r.adjudicatedMaxMm).toBe(0);
     expect(r.ok).toBe(true);
     expect(r.sentence).toContain('edge break');
   });
@@ -103,14 +105,19 @@ describe('#955/V2-2 the goal check edge-break allowance', () => {
     expect(r.shadowNotScoredFraction).toBeGreaterThan(0);
   });
 
-  it('with no edgeBreak option the check is the pre-V2-2 reading to the bit', () => {
+  it('with no edgeBreak option the wall cells are still excluded — the gate’s rule, not an allowance', () => {
+    // #964 — the edge-break ALLOWANCE is what a job opts into; wall cells (and the wall shadow,
+    // when a radius is given) are unadjudicable in every goal job. The gouge spans the wall row
+    // and its neighbours: the wall cells are excluded, the rest still judged.
     const top = swept(STEP, (x) => (Math.abs(x - 5) <= 1 ? 0.5 : null));
     const r = checkGoalCutInto(STEP, top);
     expect(r.edgeBreakFraction).toBe(0);
-    expect(r.wallNotScoredFraction).toBe(0);
-    expect(r.shadowNotScoredFraction).toBe(0);
-    expect(r.adjudicatedFraction).toBe(r.cutIntoFraction);
-    expect(r.maxCutIntoMm).toBeCloseTo(0.5, 6);
+    expect(r.wallNotScoredFraction).toBeGreaterThan(0);
+    expect(r.shadowNotScoredFraction).toBe(0); // no shadow radius given
+    expect(r.adjudicatedFraction).toBeGreaterThan(0);
+    expect(r.adjudicatedFraction).toBeLessThan(r.cutIntoFraction);
+    expect(r.maxCutIntoMm).toBeCloseTo(0.5, 6); // raw
+    expect(r.adjudicatedMaxMm).toBeCloseTo(0.5, 6); // non-wall gouge cells remain
     expect(r.ok).toBe(false);
   });
 });

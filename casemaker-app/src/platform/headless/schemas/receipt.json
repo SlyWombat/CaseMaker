@@ -103,7 +103,11 @@
               "description": "The run’s combined goal check, for a goal job; omitted otherwise.",
               "properties": {
                 "adjudicatedFraction": {
-                  "description": "Share of covered cells at the 0.1 mm floor AFTER edge break, wall cells and wall shadow are excluded, 0–1 — the pass line’s judged number.",
+                  "description": "Share of covered cells at the 0.1 mm floor AFTER edge break, wall cells and wall shadow are excluded, 0–1 — the pass line’s judged number. Wall cells and the wall shadow are excluded in every goal job; edge break only when the job states one.",
+                  "type": "number"
+                },
+                "adjudicatedMaxMm": {
+                  "description": "The deepest cut among the ADJUDICATED cells, mm — after the wall, wall-shadow and (when the job states one) edge-break exclusions; 0 when none. The raw deepest cut is `maxCutIntoMm`.",
                   "type": "number"
                 },
                 "columnCutInto": {
@@ -195,7 +199,7 @@
                       "type": "null"
                     }
                   ],
-                  "description": "Where the deepest cut is, in the work frame, or null when nothing was cut into. When the edge-break allowance applies this is the deepest ADJUDICATED cut (after the exclusions)."
+                  "description": "Where the RAW deepest cut is, in the work frame, or null when nothing was cut into — before any exclusion; `adjudicatedMaxMm` is the deepest cell the pass judges."
                 },
                 "maxCutIntoMm": {
                   "description": "The deepest cut into the goal, mm.",
@@ -313,6 +317,7 @@
                 "maxCutIntoMm",
                 "maxCutIntoAt",
                 "adjudicatedFraction",
+                "adjudicatedMaxMm",
                 "edgeBreakFraction",
                 "wallNotScoredFraction",
                 "shadowNotScoredFraction",
@@ -664,7 +669,11 @@
                         "description": "The goal check’s report.",
                         "properties": {
                           "adjudicatedFraction": {
-                            "description": "Share of covered cells at the 0.1 mm floor AFTER edge break, wall cells and wall shadow are excluded, 0–1 — the pass line’s judged number.",
+                            "description": "Share of covered cells at the 0.1 mm floor AFTER edge break, wall cells and wall shadow are excluded, 0–1 — the pass line’s judged number. Wall cells and the wall shadow are excluded in every goal job; edge break only when the job states one.",
+                            "type": "number"
+                          },
+                          "adjudicatedMaxMm": {
+                            "description": "The deepest cut among the ADJUDICATED cells, mm — after the wall, wall-shadow and (when the job states one) edge-break exclusions; 0 when none. The raw deepest cut is `maxCutIntoMm`.",
                             "type": "number"
                           },
                           "columnCutInto": {
@@ -756,7 +765,7 @@
                                 "type": "null"
                               }
                             ],
-                            "description": "Where the deepest cut is, in the work frame, or null when nothing was cut into. When the edge-break allowance applies this is the deepest ADJUDICATED cut (after the exclusions)."
+                            "description": "Where the RAW deepest cut is, in the work frame, or null when nothing was cut into — before any exclusion; `adjudicatedMaxMm` is the deepest cell the pass judges."
                           },
                           "maxCutIntoMm": {
                             "description": "The deepest cut into the goal, mm.",
@@ -874,6 +883,7 @@
                           "maxCutIntoMm",
                           "maxCutIntoAt",
                           "adjudicatedFraction",
+                          "adjudicatedMaxMm",
                           "edgeBreakFraction",
                           "wallNotScoredFraction",
                           "shadowNotScoredFraction",

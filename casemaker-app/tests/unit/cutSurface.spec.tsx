@@ -1438,6 +1438,10 @@ describe('#948 the goal check’s line', () => {
     cutIntoAreaMm2: 0,
     cutIntoVolumeMm3: 0,
     maxCutIntoMm: 0,
+    // #964 — the card names the cell the pass judged; the raw fields ride beside it.
+    adjudicatedFraction: 0,
+    adjudicatedMaxMm: 0,
+    adjudicatedMaxAt: null,
     leftoverFractions: [0, 0, 0],
     leftoverVolumeMm3: 0,
     maxLeftoverMm: 0,
@@ -1474,11 +1478,43 @@ describe('#948 the goal check’s line', () => {
       band: 0.016,
       levels: [],
       worst: { underCut: 0, overCut: 0 },
-      goalCutInto: goal({ ok: false, cutIntoFraction: 0.0008, maxCutIntoMm: 0.243, maxCutIntoAt: { x: 12.35, y: 8.1 } }),
+      goalCutInto: goal({
+        ok: false,
+        cutIntoFraction: 0.0008,
+        maxCutIntoMm: 0.243,
+        maxCutIntoAt: { x: 12.35, y: 8.1 },
+        adjudicatedFraction: 0.0008,
+        adjudicatedMaxMm: 0.243,
+        adjudicatedMaxAt: { x: 12.35, y: 8.1 },
+      }),
     });
     const line = screen.getByTestId('engrave-cut-goal');
     expect(line.textContent).toBe('Cuts 0.243 mm into the design at 12.35, 8.1');
     expect(line.dataset.state).toBe('cut-into');
+  });
+
+  it('prints the RAW reading beside the judged one — its own line, never the pass (#964)', () => {
+    drawWithOracle({
+      ...OK_ORACLE,
+      goalCutInto: goal({
+        ok: false,
+        // The top clamp's shape: 1.98 % raw, judged 0.05 % at a 0.165 mm maximum after the
+        // wall/shadow exclusions.
+        cutIntoFraction: 0.0198,
+        maxCutIntoMm: 2.448,
+        maxCutIntoAt: { x: 10, y: 10 },
+        adjudicatedFraction: 0.0005,
+        adjudicatedMaxMm: 0.165,
+        adjudicatedMaxAt: { x: 10, y: 10 },
+      }),
+    });
+    const judged = screen.getByTestId('engrave-cut-goal');
+    expect(judged.textContent).toBe('Cuts 0.165 mm into the design at 10, 10');
+    expect(judged.dataset.state).toBe('cut-into');
+    const raw = screen.getByTestId('engrave-cut-goal-raw');
+    expect(raw.textContent).toBe('raw, before exclusions: 1.98 % cut-into, max 2.448 mm at 10, 10');
+    // Never as the pass: the raw line is the muted fact, and the verdict line carries the state.
+    expect(raw.dataset.state).toBeUndefined();
   });
 
   it('a check that did not run says why — never a silent pass', () => {

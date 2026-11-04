@@ -771,17 +771,23 @@ export interface GoalCutIntoReport {
   goalCells: number;
   pitchMm: number;
   cutIntoFloorMm: number;
-  /** Share of covered cells cut more than the floor below the goal, 0-1. */
+  /** Share of covered cells cut more than the floor below the goal, 0-1 — the RAW figure, before
+   *  any exclusion (the page's raw line; E compares it cell for cell, #964). */
   cutIntoFraction: number;
+  /** The RAW cut's area, mm²: every cut-into cell before any exclusion. */
   cutIntoAreaMm2: number;
-  /** `sum(max(0, goalTop - sweptTop)) * cellArea` over cut-into cells — volume over-cut into the part, mm³. */
+  /** `sum(max(0, goalTop - sweptTop)) * cellArea` over the RAW cut-into cells — the volume the
+   *  sweep left over-cut, before any exclusion, mm³. */
   cutIntoVolumeMm3: number;
+  /** The RAW deepest cut, mm, before any exclusion — wall cells included. */
   maxCutIntoMm: number;
   /**
-   * #948 — WHERE the deepest cut-into cell is, in the work frame (the goal cell's own sample
+   * #948 — WHERE the RAW deepest cut-into cell is, in the work frame (the goal cell's own sample
    * point), so the Cut card can say "Cuts 0.42 mm into the design at 41.2, 25.3" rather than only
    * how deep. Null when nothing was cut into — and null on an unchecked report, where there is no
-   * cell to name.
+   * cell to name. Before #964 this was the adjudicated cell when an edge break applied; the raw
+   * figure is the page's own and is what the report now states, with the adjudicated maximum
+   * beside it ({@link adjudicatedMaxMm}).
    */
   maxCutIntoAt: { x: number; y: number } | null;
   /**
@@ -812,8 +818,15 @@ export interface GoalCutIntoReport {
   wallNotScoredFraction: number;
   /** #955 — share excluded as WALL SHADOW (behind a wall, beyond the sweep's reach), 0-1. */
   shadowNotScoredFraction: number;
-  /** #955 — the 0.1 mm-floor share AFTER the exclusions: the pass line's judged number, 0-1. */
+  /** #955/#964 — the 0.1 mm-floor share AFTER the exclusions (wall and wall shadow always; edge
+   *  break when the job states one): the pass line's judged number, 0-1. */
   adjudicatedFraction: number;
+  /** #964 — the deepest cut among the ADJUDICATED cells, mm (0 when none): the number the page's
+   *  `cutInto0p1` max states, beside the raw {@link maxCutIntoMm}. */
+  adjudicatedMaxMm: number;
+  /** #964 — WHERE the adjudicated deepest cell is, in the work frame; null when the adjudicated
+   *  set is empty. The card names a cell the pass actually judged, not an excluded one. */
+  adjudicatedMaxAt: { x: number; y: number } | null;
   medianDeltaMm: number;
   sentence: string;
 }
@@ -961,74 +974,89 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   }
 
   const n = Math.max(covered, 1);
-  // THE RAW CUT (before any exclusion) — the figure the report has always carried.
+  // THE RAW CUT (before any exclusion) — the figure the report has always carried, and the one
+  // the page's own raw line states: every cell below the floor, wall cells and all.
   let rawCutCells = 0;
-  for (let k = 0; k < cells; k++) {
-    if (sampled[k] === 1 && dOf[k]! < -cutIntoFloorMm) rawCutCells++;
-  }
-
-  // #955/V2-2 — the allowance, only when the job states an edge break (no option = no exclusions).
-  let excluded: Uint8Array | null = null;
-  let edgeBreakCells = 0;
-  let wallNotScoredCells = 0;
-  let shadowNotScoredCells = 0;
-  const allowance = opts.edgeBreak;
-  if (allowance !== undefined && allowance.reachMm > 0 && allowance.legMm > 0) {
-    const wall = designEdgeCells(goal);
-    const band = dilateCells(wall, nx, ny, goal.pitch, allowance.reachMm);
-    const shadowRadius = opts.wallShadowRadiusMm;
-    const shadow =
-      shadowRadius !== undefined && shadowRadius > 0
-        ? dilateCells(wall, nx, ny, goal.pitch, shadowRadius)
-        : null;
-    excluded = new Uint8Array(cells);
-    for (let k = 0; k < cells; k++) {
+  let rawVolumeMm3 = 0;
+  let rawMaxCutInto = 0;
+  let rawMaxCutIntoAt: { x: number; y: number } | null = null;
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const k = j * nx + i;
       if (sampled[k] !== 1 || dOf[k]! >= -cutIntoFloorMm) continue;
+      rawCutCells++;
       const depth = -dOf[k]!;
-      if (band[k] === 1 && depth <= allowance.legMm + 1e-9) {
-        excluded[k] = 1;
-        edgeBreakCells++;
-        continue;
-      }
-      if (wall[k] === 1) {
-        excluded[k] = 1;
-        wallNotScoredCells++;
-        continue;
-      }
-      if (shadow !== null && shadow[k] === 1 && wall[k] !== 1) {
-        excluded[k] = 1;
-        shadowNotScoredCells++;
+      rawVolumeMm3 += depth * cellArea;
+      if (depth > rawMaxCutInto) {
+        rawMaxCutInto = depth;
+        rawMaxCutIntoAt = { x: goal.x0 + i * goal.pitch, y: goal.y0 + j * goal.pitch };
       }
     }
   }
 
-  // THE ADJUDICATED SET — what the pass and the sentence judge.
-  let cutIntoCells = 0;
-  let cutIntoVolumeMm3 = 0;
-  let maxCutInto = 0;
-  let maxCutIntoAt: { x: number; y: number } | null = null;
-  let adjudicated0p1Cells = 0;
+  // #955/#964 — THE GATE'S UNADJUDICABLE CELLS, IN EVERY GOAL JOB. Wall cells (a step deeper than
+  // 0.2 mm between neighbouring goal cells) and the wall shadow (the heightfield cannot adjudicate
+  // behind them) are excluded from the ADJUDICATED reading whatever the job states. Only the rim
+  // EDGE-BREAK allowance depends on the job's own `edgeBreak` (a stated V bit's reach and leg).
+  const wall = designEdgeCells(goal);
+  const shadowRadius = opts.wallShadowRadiusMm;
+  const shadow =
+    shadowRadius !== undefined && shadowRadius > 0
+      ? dilateCells(wall, nx, ny, goal.pitch, shadowRadius)
+      : null;
+  const allowance = opts.edgeBreak;
+  const allowanceActive = allowance !== undefined && allowance.reachMm > 0 && allowance.legMm > 0;
+  const band = allowanceActive ? dilateCells(wall, nx, ny, goal.pitch, allowance.reachMm) : null;
+  const excluded = new Uint8Array(cells);
+  let edgeBreakCells = 0;
+  let wallNotScoredCells = 0;
+  let shadowNotScoredCells = 0;
+  for (let k = 0; k < cells; k++) {
+    if (sampled[k] !== 1 || dOf[k]! >= -cutIntoFloorMm) continue;
+    const depth = -dOf[k]!;
+    if (band !== null && band[k] === 1 && depth <= allowance!.legMm + 1e-9) {
+      excluded[k] = 1;
+      edgeBreakCells++;
+      continue;
+    }
+    if (wall[k] === 1) {
+      excluded[k] = 1;
+      wallNotScoredCells++;
+      continue;
+    }
+    if (shadow !== null && shadow[k] === 1 && wall[k] !== 1) {
+      excluded[k] = 1;
+      shadowNotScoredCells++;
+    }
+  }
+
+  // THE ADJUDICATED SET — the gate's reading, and what the pass and the sentence judge, in every
+  // goal job: the 0.1 mm floor after the unadjudicable cells are excluded (and the edge break,
+  // when the job states one).
+  let adjudicatedCells = 0;
+  let adjudicatedVolumeMm3 = 0;
+  let adjudicatedMaxMm = 0;
+  let adjudicatedMaxAt: { x: number; y: number } | null = null;
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
       const k = j * nx + i;
       if (sampled[k] !== 1) continue;
-      if (dOf[k]! >= -cutIntoFloorMm) continue;
-      if (excluded !== null && excluded[k] === 1) continue;
-      cutIntoCells++;
+      if (dOf[k]! >= -0.1) continue;
+      if (excluded[k] === 1) continue;
+      adjudicatedCells++;
       const depth = -dOf[k]!;
-      cutIntoVolumeMm3 += depth * cellArea;
-      if (depth > maxCutInto) {
-        maxCutInto = depth;
-        maxCutIntoAt = { x: goal.x0 + i * goal.pitch, y: goal.y0 + j * goal.pitch };
+      adjudicatedVolumeMm3 += depth * cellArea;
+      if (depth > adjudicatedMaxMm) {
+        adjudicatedMaxMm = depth;
+        adjudicatedMaxAt = { x: goal.x0 + i * goal.pitch, y: goal.y0 + j * goal.pitch };
       }
-      if (depth > 0.1) adjudicated0p1Cells++;
     }
   }
 
   deltas.sort((a, b) => a - b);
   const medianDeltaMm = deltas.length === 0 ? 0 : deltas[Math.floor(deltas.length / 2)]!;
   const cutIntoFraction = rawCutCells / n;
-  const adjudicatedFraction = adjudicated0p1Cells / n;
+  const adjudicatedFraction = adjudicatedCells / n;
   const edgeBreakFraction = edgeBreakCells / n;
   const wallNotScoredFraction = wallNotScoredCells / n;
   const shadowNotScoredFraction = shadowNotScoredCells / n;
@@ -1043,24 +1071,21 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   const passPct = Number((passCoverage * 100).toFixed(2));
   const surfacePct = Number((surfaceCoverage * 100).toFixed(2));
   const coverageOk = surfaceCoverage + 1e-9 >= passCoverage;
-  // #955/V2-2 — WITH AN EDGE BREAK THE PASS IS THE PAGE'S LINE: zero at the 0.1 mm floor after the
-  // three exclusions (E's `cutInto0p1Pct`; F's scorer line 2). Without one the pre-V2-2 reading
-  // stands exactly: zero at the check's own floor (0.01 mm by default). The 0.01 residue a V bit
-  // leaves inside the 0.1 band is the advisory figure, never the verdict.
-  const allowanceActive = allowance !== undefined && allowance.reachMm > 0 && allowance.legMm > 0;
-  const judgedCells = allowanceActive ? adjudicated0p1Cells : cutIntoCells;
-  const judgedFloor = allowanceActive ? 0.1 : cutIntoFloorMm;
+  // #955/#964 — THE PASS IS THE PAGE'S LINE IN EVERY GOAL JOB: zero at the 0.1 mm floor after the
+  // unadjudicable cells are excluded (E's `cutInto0p1Pct`; F's scorer line 2). Wall cells and the
+  // wall shadow are the gate's rule whatever the job states; the edge-break allowance adds the
+  // rim cells only when the job states one.
+  const judgedCells = adjudicatedCells;
   const ok = judgedCells === 0 && coverageOk;
   const excludedNote =
     edgeBreakCells + wallNotScoredCells + shadowNotScoredCells > 0
       ? ` (the rim edge break${edgeBreakCells > 0 ? `, ${(edgeBreakFraction * 100).toFixed(2)} % of the goal,` : ''} and ${(wallNotScoredFraction * 100 + shadowNotScoredFraction * 100).toFixed(2)} % of cells the heightfield cannot adjudicate are not counted)`
       : '';
-  const adjudicatedCutFraction = cutIntoCells / n;
   const sentence =
     judgedCells > 0
-      ? `goal check: ${(adjudicatedCutFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(cutIntoCells, cellArea).toFixed(1)} mm²) cut into by up to ${maxCutInto.toFixed(3)} mm — ${cutIntoVolumeMm3.toFixed(1)} mm³ over-cut.`
+      ? `goal check: ${(adjudicatedFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(adjudicatedCells, cellArea).toFixed(1)} mm²) cut into by up to ${adjudicatedMaxMm.toFixed(3)} mm — ${adjudicatedVolumeMm3.toFixed(1)} mm³ over-cut${excludedNote}.`
       : coverageOk
-        ? `goal check: no cell cut more than ${judgedFloor} mm into the goal${excludedNote} (${(coverageFraction * 100).toFixed(1)} % of the goal within ${cutIntoFloorMm} mm).`
+        ? `goal check: no cell cut more than 0.1 mm into the goal${excludedNote} (${(coverageFraction * 100).toFixed(1)} % of the goal within ${cutIntoFloorMm} mm).`
         : `goal check: coverage ${surfacePct} % of the goal's top surface — the pass line asks ${passPct} % (${((1 - surfaceCoverage) * 100).toFixed(2)} % stands more than ${GOAL_LEFTOVER_BANDS_MM[0]} mm above the goal).`;
 
   return {
@@ -1071,10 +1096,10 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     pitchMm: goal.pitch,
     cutIntoFloorMm,
     cutIntoFraction,
-    cutIntoAreaMm2: cutIntoAreaMm2(cutIntoCells, cellArea),
-    cutIntoVolumeMm3,
-    maxCutIntoMm: maxCutInto,
-    maxCutIntoAt,
+    cutIntoAreaMm2: cutIntoAreaMm2(rawCutCells, cellArea),
+    cutIntoVolumeMm3: rawVolumeMm3,
+    maxCutIntoMm: rawMaxCutInto,
+    maxCutIntoAt: rawMaxCutIntoAt,
     ...(opts.leftoverTop === undefined || sweptTop === null
       ? {}
       : { columnCutInto: { fraction: columnCells / n, maxMm: columnMax, at: columnAt } }),
@@ -1088,6 +1113,8 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     wallNotScoredFraction,
     shadowNotScoredFraction,
     adjudicatedFraction,
+    adjudicatedMaxMm,
+    adjudicatedMaxAt,
     sentence,
   };
 }
@@ -1125,6 +1152,8 @@ export function goalCutIntoUnchecked(reason: string, passCoverage: number = GOAL
     wallNotScoredFraction: 0,
     shadowNotScoredFraction: 0,
     adjudicatedFraction: 0,
+    adjudicatedMaxMm: 0,
+    adjudicatedMaxAt: null,
     sentence: `goal check: not run — ${reason}. Nothing was compared against the goal here, so this is not a pass.`,
   };
 }

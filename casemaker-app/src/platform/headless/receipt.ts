@@ -182,10 +182,13 @@ export const engraveGoalSchema = z
     maxCutIntoAt: z
       .object({ x: z.number().describe('Work-frame X of the deepest cut, mm.'), y: z.number().describe('Work-frame Y of the deepest cut, mm.') })
       .nullable()
-      .describe('Where the deepest cut is, in the work frame, or null when nothing was cut into. When the edge-break allowance applies this is the deepest ADJUDICATED cut (after the exclusions).'),
+      .describe('Where the RAW deepest cut is, in the work frame, or null when nothing was cut into — before any exclusion; `adjudicatedMaxMm` is the deepest cell the pass judges.'),
     adjudicatedFraction: z
       .number()
-      .describe('Share of covered cells at the 0.1 mm floor AFTER edge break, wall cells and wall shadow are excluded, 0–1 — the pass line’s judged number.'),
+      .describe('Share of covered cells at the 0.1 mm floor AFTER edge break, wall cells and wall shadow are excluded, 0–1 — the pass line’s judged number. Wall cells and the wall shadow are excluded in every goal job; edge break only when the job states one.'),
+    adjudicatedMaxMm: z
+      .number()
+      .describe('The deepest cut among the ADJUDICATED cells, mm — after the wall, wall-shadow and (when the job states one) edge-break exclusions; 0 when none. The raw deepest cut is `maxCutIntoMm`.'),
     edgeBreakFraction: z
       .number()
       .describe('Share of covered cells excluded as EDGE BREAK (a V bit within its reach of a design edge, no deeper than its leg), 0–1.'),
@@ -639,6 +642,7 @@ export function goalBlockFromReport(report: GoalCutIntoReport): EngraveGoal {
     maxCutIntoMm: report.maxCutIntoMm,
     maxCutIntoAt: report.maxCutIntoAt,
     adjudicatedFraction: report.adjudicatedFraction,
+    adjudicatedMaxMm: report.adjudicatedMaxMm,
     edgeBreakFraction: report.edgeBreakFraction,
     wallNotScoredFraction: report.wallNotScoredFraction,
     shadowNotScoredFraction: report.shadowNotScoredFraction,
