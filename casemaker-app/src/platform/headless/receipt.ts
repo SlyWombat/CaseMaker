@@ -180,7 +180,7 @@ export const engraveGoalSchema = z
     cutIntoFraction: z.number().describe('Share of the goal’s covered cells cut below it by more than the floor, 0–1.'),
     maxCutIntoMm: z.number().describe('The deepest cut into the goal, mm.'),
     maxCutIntoAt: z
-      .object({ x: z.number(), y: z.number() })
+      .object({ x: z.number().describe('Work-frame X of the deepest cut, mm.'), y: z.number().describe('Work-frame Y of the deepest cut, mm.') })
       .nullable()
       .describe('Where the deepest cut is, in the work frame, or null when nothing was cut into.'),
     leftoverFractions: z
@@ -204,7 +204,10 @@ export const engraveGoalSchema = z
       .object({
         fraction: z.number().describe('The conservative column read’s cut-into share — the one-column-lenient diagnostic.'),
         maxMm: z.number().describe('The conservative column read’s deepest cut into the goal, mm.'),
-        at: z.object({ x: z.number(), y: z.number() }).nullable().describe('Where that deepest read is; null when none.'),
+        at: z
+          .object({ x: z.number().describe('Work-frame X of that deepest read, mm.'), y: z.number().describe('Work-frame Y of that deepest read, mm.') })
+          .nullable()
+          .describe('Where that deepest read is; null when none.'),
       })
       .nullable()
       .describe('The conservative column read beside the verdict, as a stated diagnostic; null when not taken.'),
