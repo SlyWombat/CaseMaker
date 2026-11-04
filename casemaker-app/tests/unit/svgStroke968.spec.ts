@@ -97,17 +97,22 @@ describe('#968 a stroked path is a band region', () => {
     expect(ringArea(o.contours[0]!)).toBeGreaterThan(35);
   });
 
-  it('honours non-scaling-stroke: the width is the viewport width, not the local transform', () => {
+  it('scales the width by the element transform — the vector-effect hint is not honoured', () => {
+    // E's coasters card (b88d2979): the drawing's 1-unit default inside matrix(0.500311, …) is a
+    // 0.5 mm painted band. Studio's import scales it; the hint is only a renderer hint.
     const body =
       '<g transform="scale(0.5)"><path d="M0 0 L200 0" fill="none" stroke="#000" stroke-width="2" vector-effect="non-scaling-stroke"/></g>';
     const o = ok(parseSvgOutline(svg(body, MM100)));
-    expect(ringArea(o.contours[0]!)).toBeCloseTo(200, 0); // 100 mm long x 2 mm wide
+    expect(ringArea(o.contours[0]!)).toBeCloseTo(100, 0); // 100 mm long x 1 mm wide (2 x 0.5)
+    expect(o.notes.some((n) => /non-scaling-stroke|vector-effect/i.test(n))).toBe(true);
   });
 
-  it('without non-scaling-stroke the transform scales the width too', () => {
-    const body = '<g transform="scale(0.5)"><path d="M0 0 L200 0" fill="none" stroke="#000" stroke-width="2"/></g>';
+  it('a non-uniform transform uses the geometric-mean scale, and says so', () => {
+    const body = '<g transform="scale(2,1)"><path d="M0 0 L50 0" fill="none" stroke="#000" stroke-width="2"/></g>';
     const o = ok(parseSvgOutline(svg(body, MM100)));
-    expect(ringArea(o.contours[0]!)).toBeCloseTo(100, 0); // 100 mm long x 1 mm wide
+    // Length 100 mm; width 2 mm over a sqrt(|det|) = sqrt(2) scale → 2.828 mm.
+    expect(ringArea(o.contours[0]!)).toBeCloseTo(100 * 2 * Math.SQRT2, 0);
+    expect(o.notes.some((n) => /non-uniform/i.test(n))).toBe(true);
   });
 });
 
@@ -145,7 +150,9 @@ maybe('the coasters SVG: 50 strokes become 50 regions whose area is the 1 mm ban
       for (let i = 1; i < sub.points.length; i++) {
         const p = sub.points[i - 1]!;
         const q = sub.points[i]!;
-        expected += Math.hypot(q[0] - p[0], q[1] - p[1]) * scale;
+        // The drawn length scales, and so does the band's width: the default 1 unit in a 0.500311
+        // matrix is a 0.500311 mm band (E's card).
+        expected += Math.hypot(q[0] - p[0], q[1] - p[1]) * scale * scale;
       }
     }
   }
@@ -153,15 +160,37 @@ maybe('the coasters SVG: 50 strokes become 50 regions whose area is the 1 mm ban
   expect(actual).toBeGreaterThan(expected * 0.98);
   expect(actual).toBeLessThan(expected * 1.02);
 
-  // The bands reach the drawing's own footprint (75 mm) plus half a band on each side.
+  // The STROKE bands reach the drawing's footprint (75 mm) plus half a 0.5 mm band each side —
+  // 75.5 mm, E's card. The closed rounded rect is its own 1 mm band (its transform is scale 1);
+  // exclude its contour (the largest bbox) so this measures the strokes the card scores.
+  const bboxX = (ring: Ring): [number, number] => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const [x] of ring) {
+      lo = Math.min(lo, x);
+      hi = Math.max(hi, x);
+    }
+    return [lo, hi];
+  };
+  const spans = o.contours.map((ring) => {
+    const [lo, hi] = bboxX(ring);
+    return hi - lo;
+  });
+  const rectIndex = spans.indexOf(Math.max(...spans));
+  // The closed rounded RECT's own transform is matrix(1, 0, 0, 1, …): its default 1-unit stroke
+  // is a 1 mm band, so the whole drawing's band bbox is 75 + 1 = 76 mm. The 0.5 mm bands are the
+  // 49 mandala strokes inside matrix(0.500311, …) — the card's 75.5 measures the drawing as if the
+  // frame scaled too; that is the frame's own width, not the strokes'.
+  expect(spans[rectIndex]!).toBeGreaterThan(75.9);
+  expect(spans[rectIndex]!).toBeLessThan(76.1);
   let minX = Infinity;
   let maxX = -Infinity;
-  for (const ring of o.contours) {
-    for (const [x] of ring) {
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-    }
-  }
-  expect(maxX - minX).toBeGreaterThan(75);
-  expect(maxX - minX).toBeLessThan(77);
+  o.contours.forEach((ring, index) => {
+    if (index === rectIndex) return;
+    const [lo, hi] = bboxX(ring);
+    minX = Math.min(minX, lo);
+    maxX = Math.max(maxX, hi);
+  });
+  expect(maxX - minX).toBeGreaterThan(66);
+  expect(maxX - minX).toBeLessThan(70);
 });

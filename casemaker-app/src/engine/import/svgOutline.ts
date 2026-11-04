@@ -17,9 +17,11 @@ import { finalizeOutline, MAX_OUTLINE_FILE_BYTES, type OutlineParseResult, type 
  * OUT, each reported in `notes` so the dialog can name it rather than silently dropping it:
  * `<text>`, `<image>`, gradients/patterns, clipping and masks. #664 — the drawing's STROKES (a
  * `<polyline>`/`<line>`, or any path/subpath that never `Z`s) are strokes; #968 — a stroke WITH A
- * WIDTH is the painted BAND (a region), offset by `stroke-width` with its `stroke-linecap`/`-join`,
- * inverted with `vector-effect="non-scaling-stroke"` honoured. Only a zero/hairline width keeps the
- * #664/#678 centre-line reading: an open line, or a closed ring at #678's "outline: on path".
+ * WIDTH is the painted BAND (a region), offset by `stroke-width` with its `stroke-linecap`/`-join`
+ * and scaled by the element's accumulated transform (a non-uniform matrix uses its geometric mean,
+ * stated). `vector-effect="non-scaling-stroke"` is a renderer hint and is not honoured — Studio's
+ * import scales the band (E's coasters card). Only a zero/hairline width keeps the #664/#678
+ * centre-line reading: an open line, or a closed ring at #678's "outline: on path".
  * This is the import Makera Studio's 2D area clearing needs (the coasters' bands, #955/#968).
  *
  * Coordinates: SVG user units are scaled to mm by the root's `width`/`height` and `viewBox`,
@@ -413,6 +415,22 @@ function matScale(m: Mat): number {
   return det > 0 ? Math.sqrt(det) : 1;
 }
 
+/**
+ * #968 — the stroke width in VIEWPORT user units, after the element's accumulated transform. The
+ * width scales with the drawing: E's coasters card measured the default 1 unit inside
+ * `matrix(0.500311, …)` as a 0.5 mm painted band. `vector-effect="non-scaling-stroke"` is a
+ * renderer hint and is not honoured (stated in the notes). A NON-UNIFORM matrix has no single
+ * scale; the geometric mean (`matScale`) is used and the notes say so.
+ */
+function viewportStrokeWidth(widthUser: number, m: Mat, c: Collector): number {
+  const sx = Math.hypot(m[0], m[1]);
+  const sy = Math.hypot(m[2], m[3]);
+  if (sx > 0 && sy > 0 && Math.max(sx, sy) / Math.min(sx, sy) > 1.01) {
+    c.notes.push('a non-uniform stroke transform (sx × sy) uses their geometric mean for the width.');
+  }
+  return widthUser * matScale(m);
+}
+
 /* ---------------------------------------------------------------------------------------------
  * Document walk
  * -------------------------------------------------------------------------------------------*/
@@ -765,8 +783,12 @@ function walk(el: Element, parentM: Mat, view: ViewTransform, inherited: {
     if (pts.length >= 2) {
       const placed = pts.map((p) => applyMat(localM, p));
       const widthUser = strokeWidthUser(strokeWidth, view);
-      const widthViewport =
-        vectorEffect === 'non-scaling-stroke' ? widthUser : widthUser * matScale(localM);
+      if (vectorEffect === 'non-scaling-stroke') {
+        c.notes.push(
+          'vector-effect="non-scaling-stroke" is not honoured: the stroke width follows the drawing’s transform (the band Studio paints).',
+        );
+      }
+      const widthViewport = viewportStrokeWidth(widthUser, localM, c);
       const widthMm = widthViewport * view.scale;
       if (stroke !== undefined && stroke !== 'none' && widthMm > HAIRLINE_MM) {
         for (const band of strokeBand(placed, false, {
@@ -808,8 +830,12 @@ function walk(el: Element, parentM: Mat, view: ViewTransform, inherited: {
     // WIDTH paints a band, so it imports as REGIONS: one contour per open subpath (the band) and
     // one keyhole annulus per closed ring. Only a zero/hairline width keeps the line reading.
     const widthUser = strokeWidthUser(strokeWidth, view);
-    const widthViewport =
-      vectorEffect === 'non-scaling-stroke' ? widthUser : widthUser * matScale(localM);
+    if (vectorEffect === 'non-scaling-stroke') {
+      c.notes.push(
+        'vector-effect="non-scaling-stroke" is not honoured: the stroke width follows the drawing’s transform (the band Studio paints).',
+      );
+    }
+    const widthViewport = viewportStrokeWidth(widthUser, localM, c);
     const widthMm = widthViewport * view.scale;
     if (widthMm > HAIRLINE_MM) {
       const bandStyle = {
