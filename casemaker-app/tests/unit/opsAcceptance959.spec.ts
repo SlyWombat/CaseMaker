@@ -69,12 +69,26 @@ const FLAT3175 = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3
 
 const RAPID = Z1.rapidEstimate;
 
+/** A conventional roughing step-over: half the cutter's radius, never past `pocketLoops`' own ceiling (the full radius). */
+function stepOverFor(cutter: { diameter: number | null; tipDiameter: number | null }): number {
+  const diameter = cutter.diameter ?? cutter.tipDiameter ?? 0;
+  const radius = diameter / 2;
+  return Math.min(radius * 0.5, radius);
+}
+
 /**
  * Every non-through floored pocket, cut with #961's own rule (the largest flat that fits, a
  * smaller one only when a node's narrowest corner needs it — simplified here to "fits or not",
  * since #961's real picker is C's `sequence.ts`, not re-implemented in this spec).
+ *
+ * E's run on 9421a64b found two defects here, both fixed: (1) a fixed `stepOverMm` was handed to
+ * every cutter regardless of its own radius — ⌀3.175's 1.5875 mm radius crashed on a step-over
+ * sized for ⌀6. The step-over is now `stepOverFor(cutter)`, computed from the cutter actually
+ * assigned. (2) A node too narrow for every candidate cutter was a silent array push; it is now a
+ * stated finding in the exact words E asked for, so a reader (or #961's real sequencing, later)
+ * knows the limiting number, not just that something was skipped.
  */
-function planPockets(tree: FeatureTree, stepOverMm: number, stepDownMm: number): { plans: { node: PocketNode; outcome: ReturnType<typeof pocket> }[]; skipped: string[] } {
+function planPockets(tree: FeatureTree, stepDownMm: number): { plans: { node: PocketNode; outcome: ReturnType<typeof pocket> }[]; skipped: string[] } {
   const offset = makeClipperOffset(tl);
   const refs = regionRefs(tree);
   const plans: { node: PocketNode; outcome: ReturnType<typeof pocket> }[] = [];
@@ -84,12 +98,17 @@ function planPockets(tree: FeatureTree, stepOverMm: number, stepDownMm: number):
     const ref = refs.find((r) => r.id === node.id);
     if (ref === undefined) { skipped.push(`${node.id}: no RegionRef`); continue; }
     const cutter = node.narrowest >= 6 ? FLAT6 : node.narrowest >= 3.175 ? FLAT3175 : null;
-    if (cutter === null) { skipped.push(`${node.id}: narrowest ${node.narrowest.toFixed(2)} mm fits neither house flat`); continue; }
+    if (cutter === null) {
+      // The finding #961's real sequencing reads: a smaller flat, in the house or the catalogue
+      // (A's R5), is what resolves this — not this spec's job to invent one.
+      skipped.push(`${node.id}: not cut — needs a cutter ≤ ${node.narrowest.toFixed(2)} mm (house offers ⌀6, ⌀3.175)`);
+      continue;
+    }
     const outcome = pocket({
       cutter,
       node,
       region: { ...ref, obstacles: [], regionClearanceZ: tree.frame.partTop + 5 },
-      stepOverMm,
+      stepOverMm: stepOverFor(cutter),
       stepDownMm,
       feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
       offset,
@@ -182,12 +201,12 @@ function writeAcceptance(name: string, tree: FeatureTree, plans: { node: PocketN
  * post → measure plumbing itself, independent of the licensed Makerables parts this file otherwise
  * needs. A failure here means this spec is broken; a failure on the real tray/organizer means the
  * geometry is. */
-function syntheticTree(): FeatureTree {
+function syntheticTree(narrowest = 10): FeatureTree {
   const rect: [number, number][][] = [[[0, 0], [20, 0], [20, 10], [0, 10]]];
   const node: PocketNode = {
     id: 'synthetic-1', floorZ: -3, mouthZ: 0, open: false, through: false,
     region: rect, floors: [{ polygons: rect, area: 200 }],
-    islands: [], children: [], remainder: [], narrowest: 10,
+    islands: [], children: [], remainder: [], narrowest,
   };
   return {
     frame: { up: [0, 0, 1], stockTop: 0, partTop: 0, partBottom: -3 },
@@ -205,10 +224,31 @@ function syntheticTree(): FeatureTree {
 describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
   it('plans, posts and measures a synthetic one-pocket tree end to end', () => {
     const tree = syntheticTree();
-    const { plans, skipped } = planPockets(tree, 1.2, 1.5);
+    const { plans, skipped } = planPockets(tree, 1.5);
     expect(skipped).toEqual([]);
     expect(plans).toHaveLength(1);
     writeAcceptance('synthetic', tree, plans, skipped);
+  });
+
+  // E's run on 9421a64b, regression 1: a node that only the SMALLER house flat fits used to crash
+  // (stepOverFor was fixed at a value sized for ⌀6, handed to ⌀3.175 too).
+  it('a node too narrow for the ⌀6 flat is cut with ⌀3.175, step-over scaled to ITS radius, not ⌀6’s', () => {
+    const tree = syntheticTree(4); // < 6, so FLAT6 is excluded; ≥ 3.175, so FLAT3175 fits
+    const { plans, skipped } = planPockets(tree, 1.5);
+    expect(skipped).toEqual([]);
+    expect(plans).toHaveLength(1);
+    expect(plans[0]!.outcome.cutter).toBe('flat-3.175');
+  });
+
+  // E's run on 9421a64b, regression 2: a node too narrow for every house cutter is a stated
+  // finding naming the limiting number, not a silent skip.
+  it('a node too narrow for every house flat is a stated finding, not a silent skip', () => {
+    const tree = syntheticTree(0.95);
+    const { plans, skipped } = planPockets(tree, 1.5);
+    expect(plans).toHaveLength(0);
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0]).toContain('not cut');
+    expect(skipped[0]).toContain('0.95');
   });
 });
 
@@ -218,7 +258,7 @@ const ORGANIZER = process.env.CM_959_ORGANIZER_STEP;
 describe.skipIf(TRAY === undefined)('#959 acceptance — tool tray 70, pocket op only', () => {
   it('plans and posts every non-through floored pocket, cycle/air/rapids/cutters measured from the posted text', async () => {
     const { tree } = await placedTree(TRAY!, [110, 140], -1.2);
-    const { plans, skipped } = planPockets(tree, 3, 1.5);
+    const { plans, skipped } = planPockets(tree, 1.5);
     expect(plans.length, `skipped: ${skipped.join('; ')}`).toBeGreaterThan(0);
     writeAcceptance('tray', tree, plans, skipped);
   });
@@ -227,7 +267,7 @@ describe.skipIf(TRAY === undefined)('#959 acceptance — tool tray 70, pocket op
 describe.skipIf(ORGANIZER === undefined)('#959 acceptance — tool organizer, pocket op only', () => {
   it('plans and posts every non-through floored pocket, cycle/air/rapids/cutters measured from the posted text', async () => {
     const { tree } = await placedTree(ORGANIZER!, [170, 170], -0.8);
-    const { plans, skipped } = planPockets(tree, 3, 1.5);
+    const { plans, skipped } = planPockets(tree, 1.5);
     expect(plans.length, `skipped: ${skipped.join('; ')}`).toBeGreaterThan(0);
     writeAcceptance('organizer', tree, plans, skipped);
   });
