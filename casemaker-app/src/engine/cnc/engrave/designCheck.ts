@@ -877,6 +877,36 @@ function designEdgeCells(goal: GoalHeightfield): Uint8Array {
   return wall;
 }
 
+/**
+ * THE GRID'S OWN BORDER, when it ends at the model (#964, F's curved property seeds). A covered
+ * cell on the outermost row/column has no neighbour beyond it, so `designEdgeCells` above never
+ * sees its silhouette — and for a part whose stock IS the part, the goal's grid ends exactly at
+ * the model. An outline cut then reads as a full-depth gouge in the cell centred on the boundary
+ * (the sloped seed: four corners at 10 mm, adjudicated 2.5e-5 against F's zero line).
+ *
+ * These cells are UNADJUDICABLE, not band material: they are excluded from the cut-into reading
+ * only, never fed to the edge-break allowance or the wall shadow — a job with no stated edge break
+ * must not have a synthetic gouge near the field's border excused as one (the pinned gate specs
+ * goalEdgeBreak/goalAdjudicated964 caught exactly that when the first version marked them as
+ * ordinary walls).
+ */
+function borderCells(goal: GoalHeightfield): Uint8Array {
+  const { nx, ny, covered } = goal;
+  const border = new Uint8Array(nx * ny);
+  for (let i = 0; i < nx; i++) {
+    if (covered[i] === 1) border[i] = 1;
+    const bottom = (ny - 1) * nx + i;
+    if (covered[bottom] === 1) border[bottom] = 1;
+  }
+  for (let j = 0; j < ny; j++) {
+    const left = j * nx;
+    if (covered[left] === 1) border[left] = 1;
+    const right = j * nx + nx - 1;
+    if (covered[right] === 1) border[right] = 1;
+  }
+  return border;
+}
+
 /** Every cell within `radiusMm` of a set cell (the disk dilation `goal_check.py` uses). */
 function dilateCells(mask: Uint8Array, nx: number, ny: number, pitch: number, radiusMm: number): Uint8Array {
   const out = new Uint8Array(nx * ny);
@@ -1015,6 +1045,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   // behind them) are excluded from the ADJUDICATED reading whatever the job states. Only the rim
   // EDGE-BREAK allowance depends on the job's own `edgeBreak` (a stated V bit's reach and leg).
   const wall = designEdgeCells(goal);
+  const border = borderCells(goal);
   const shadowRadius = opts.wallShadowRadiusMm;
   const shadow =
     shadowRadius !== undefined && shadowRadius > 0
@@ -1042,7 +1073,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       edgeBreakCells++;
       continue;
     }
-    if (wall[k] === 1) {
+    if (wall[k] === 1 || border[k] === 1) {
       excluded[k] = 1;
       wallNotScoredCells++;
       continue;
