@@ -107,6 +107,35 @@ function orderedRings(loops: readonly [number, number][][]): [number, number][][
   return tourNearest(points).map((i) => loops[i]!);
 }
 
+/** Index of `ring`'s vertex nearest `target`; ties to the lower index — same rule `tour.ts`
+ * itself uses, so the same input always rotates the same way. */
+function nearestVertexIndex(ring: readonly [number, number][], target: readonly [number, number]): number {
+  let best = 0;
+  let bestDistance = Infinity;
+  for (let i = 0; i < ring.length; i++) {
+    const [x, y] = ring[i]!;
+    const distance = (x - target[0]) ** 2 + (y - target[1]) ** 2;
+    if (distance < bestDistance - 1e-9) {
+      bestDistance = distance;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/**
+ * `ring`, rotated so its own vertex nearest `target` is first — same points, same winding, just a
+ * different seam. The manager's own named lever toward Makera's 5.9 rapids/1,000: `ring[0]` used
+ * to be whichever vertex Clipper happened to emit first, so a same-level or level-change link into
+ * this ring often had most of its own perimeter to cross before `link()` even got a choice between
+ * a short hop and a retract — the SAME pattern `engraveJob.ts`'s own `entryOn` already fixed for
+ * engrave regions (no reversal here: a pocket ring's winding is already the cutting one).
+ */
+function rotatedToEntry(ring: readonly [number, number][], target: readonly [number, number]): [number, number][] {
+  const start = nearestVertexIndex(ring, target);
+  return start === 0 ? (ring as [number, number][]) : [...ring.slice(start), ...ring.slice(0, start)];
+}
+
 /**
  * What a round tool of radius `toolRadius`, centred ANYWHERE inside `node.region`'s valid
  * centre-space, can ever reach — `dilate(erode(region, r), r)`, the morphological OPENING (A's
@@ -199,7 +228,15 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
     const steps = pocketLoops(region, toolRadius, opts.stepOverMm, opts.offset);
     for (const [stepIndex, step] of steps.entries()) {
       const loops = orderedRings(step);
-      for (const ring of loops) {
+      for (const loop of loops) {
+        // Rotated to the vertex nearest wherever the tool is COMING FROM — `opts.startFrom`
+        // (the work origin by default) for the very first ring of the whole op, the previous
+        // ring's own exit (which is always its own start — it closes on itself) after that. This
+        // is the lever toward Makera's own rapids/1,000: `ring[0]` used to be whichever vertex
+        // Clipper happened to emit first, so the link into this ring often had most of its own
+        // perimeter to cross before `link()` ever got a choice between a short hop and a retract.
+        const target: readonly [number, number] = prevExit === null ? (opts.startFrom ?? [0, 0]) : [prevExit[0], prevExit[1]];
+        const ring = rotatedToEntry(loop, target);
         const start = ring[0]!;
         if (prevExit === null) {
           // The very first ring of the whole op: rapid up, then plunge down.

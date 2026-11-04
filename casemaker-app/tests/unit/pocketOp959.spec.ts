@@ -232,4 +232,42 @@ describe('#959 pocket()', () => {
     }
     expect(descents).toBeGreaterThan(0); // the fixture actually exercises a level change
   });
+
+  // The manager's own named lever toward Makera's 5.9 rapids/1,000 (E's run on faf7ad78 noted it
+  // as still pending): `ring[0]` used to be whichever vertex the offset happened to emit first,
+  // so a same-level or level-change link into a ring often had most of its own perimeter to cross
+  // before ever reaching its own cut. Every ring must now enter at ITS OWN vertex nearest wherever
+  // the tool is coming from — `startFrom` for the very first ring of the whole op, the previous
+  // ring's own exit (always its own entry — it closes on itself) after that.
+  it('each ring enters at its own vertex nearest wherever the tool is coming from, not whatever vertex the offset emitted first', () => {
+    const out = pocket({
+      cutter: flat6, node: node(-2.5, 0), region: region(),
+      stepOverMm: 1.2, stepDownMm: 2.5,
+      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
+      offset: fakeRectOffset, safeZMm: 10, hopZMm: 3,
+      toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+      // Near the far corner from the origin — `fakeRectOffset`'s own rings always start at their
+      // bottom-left corner, so a real rotation (not a no-op that happens to agree) needs a
+      // `startFrom` nowhere near that corner.
+      startFrom: [14, 4],
+    });
+    // One LEVEL (floorZ -2.5, one stepDownMm 2.5 pass), two offset STEPS within it — same fixture
+    // as "rings of the same level are joined by..." above, so this is the SAME-LEVEL (`prevExit`)
+    // branch, not a level change.
+    expect(out.passes.length).toBeGreaterThanOrEqual(2);
+    let from: readonly [number, number] = [14, 4];
+    const d2 = (p: readonly [number, number], q: readonly [number, number]): number => (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2;
+    for (const pass of out.passes) {
+      const ring = pass.boundary[0]!;
+      const entry: [number, number] = [pass.entry[0], pass.entry[1]];
+      const entryDistance = d2(entry, from);
+      for (const v of ring) {
+        expect(
+          entryDistance,
+          `entry ${JSON.stringify(entry)} from ${JSON.stringify(from)} is not the nearest of ring ${JSON.stringify(ring)}`,
+        ).toBeLessThanOrEqual(d2(v, from) + 1e-9);
+      }
+      from = entry;
+    }
+  });
 });
