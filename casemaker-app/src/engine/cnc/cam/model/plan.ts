@@ -27,7 +27,7 @@ import type { ObstacleBox } from '@/engine/cnc/setup';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { CutParams } from '@/engine/cnc/feeds';
-import type { OffsetFn } from '@/engine/cnc/cam/pocket';
+import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, SetupFrame } from './features';
 import { regionRefs } from './features';
@@ -196,6 +196,17 @@ export async function planModelCam(_input: ModelPlanInput, _opts: PlanModelCamOp
 
 const allPockets = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [n, ...allPockets(n.children)]);
 
+/** The `facing` region's own `Box2` — there is no `PocketNode`/`regionRefs` entry for it (it is
+ * not a recognised feature, it is this plan's own synthesis of `FeatureTree.top.floors`). */
+function boundsOfPolygons(polygons: Polygons): Box2 {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const ring of polygons) for (const [x, y] of ring) {
+    minX = Math.min(minX, x); minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+  }
+  return { min: [minX, minY], max: [maxX, maxY] };
+}
+
 export interface PlanPocketsOptions {
   /** The real Clipper2 offset, or a test fake — `pocketLoops`' own contract, carried through unchanged. */
   offset: OffsetFn;
@@ -306,7 +317,19 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // never actually freed. These are magnitudes, already stock-top-relative — no `rebase` needed.
   const contourDepthMm = z0 - tree.contour.zTo;
 
+  // The manager's #959 ruling: the top land OUTSIDE every pocket's footprint — `tree.top.floors`
+  // is already that land (features/tree.ts's own "top land" step excludes a closed pocket's own
+  // outline from it already), faced by whichever flat covers it, through the SAME `pocket()` op
+  // and `link()` safety every other region uses — not a new op. Skipped when there is nothing to
+  // face: no land at all, or no skin above it worth a separate pass (the common stockTop ==
+  // partTop case this engine has run on so far).
+  const facingRegion: Polygons = tree.top.floors.flatMap((f) => f.polygons);
+  const facingDepthMm = z0 - tree.top.z;
+  const hasFacing = facingRegion.length > 0 && facingDepthMm > 1e-6;
+  if (hasFacing) refById.set('facing', { id: 'facing', kind: 'pocket', bounds: boundsOfPolygons(facingRegion), topZ: rebase(z0), bottomZ: rebase(tree.top.z), obstacles: [], regionClearanceZ: Math.max(0, rebase(tree.frame.partTop)) + 5 });
+
   const features: SequenceFeature[] = [];
+  if (hasFacing) features.push({ id: 'facing', kind: 'pocket', depthMm: facingDepthMm });
   for (const node of pocketNodes) {
     features.push({
       id: node.id,
@@ -358,6 +381,27 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         tabs: opts.tabs ?? DEFAULT_RELEASE_TABS,
         offset: opts.offset,
         params: cutParamsFor(cutter),
+        rapid: opts.rapid,
+      });
+    }
+    if (id === 'facing') {
+      const diameter = cuttingDiameter(cutter) ?? 1;
+      return pocket({
+        cutter,
+        node: {
+          id: 'facing', floorZ: rebase(tree.top.z), mouthZ: rebase(z0), open: false, through: false,
+          region: facingRegion, floors: [], islands: [], children: [], remainder: [], narrowest: Infinity,
+        },
+        region: ref,
+        stepOverMm: diameter / 4,
+        stepDownMm: opts.stepDownMm,
+        feeds: opts.feeds,
+        offset: opts.offset,
+        safeZMm: SAFE_Z,
+        hopZMm: HOP_Z,
+        toolNumber: cutter.number ?? 1,
+        spindleRpm: opts.spindleRpm,
+        air: opts.air,
         rapid: opts.rapid,
       });
     }
@@ -512,11 +556,6 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   });
 
   const notes: string[] = [];
-  if (pocketNodes.some((n) => rootIds.has(n.id)) && Math.abs(tree.frame.partTop - z0) > 1e-6) {
-    notes.push(
-      `a ${Math.abs(tree.frame.partTop - z0).toFixed(2)} mm skin sits above the part; this plan faces it only where a root pocket's own first pass already engages it — the top land OUTSIDE every pocket's footprint is not faced here (no separate facing op yet)`,
-    );
-  }
   for (const [id, message] of regionFailures) notes.push(`${id}: not cut — planning failed (${message})`);
   if (deferredContour !== null && choice.steps.length > 1) {
     notes.push(

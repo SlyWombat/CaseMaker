@@ -211,6 +211,34 @@ function syntheticTreeWithSkin(skinMm: number): FeatureTree {
   };
 }
 
+/** A 30x20 part with a 10x10 pocket in one corner and a skin above it — the L-shaped land left
+ * over (`top.floors`, already excluding the pocket's own outline, per features/tree.ts's "top
+ * land" step) is what the FACING op must face; the pocket's own footprint is not in it, so facing
+ * and the pocket never double-cut the same material. */
+function syntheticTreeWithLand(skinMm: number): FeatureTree {
+  const outline: [number, number][][] = [[[0, 0], [30, 0], [30, 20], [0, 20]]];
+  const pocketRect: [number, number][][] = [[[0, 0], [10, 0], [10, 10], [0, 10]]];
+  const landRect: [number, number][][] = [[[10, 0], [30, 0], [30, 20], [0, 20], [0, 10], [10, 10]]];
+  const partTop = -skinMm;
+  const floorZ = partTop - 3;
+  const node: PocketNode = {
+    id: 'p', floorZ, mouthZ: partTop, open: false, through: false,
+    region: pocketRect, floors: [{ polygons: pocketRect, area: 100 }],
+    islands: [], children: [], remainder: [], narrowest: 10,
+  };
+  return {
+    frame: { up: [0, 0, 1], stockTop: 0, partTop, partBottom: floorZ },
+    levels: [floorZ],
+    top: { z: partTop, floors: [{ polygons: landRect, area: 500 }], area: 500 },
+    contour: { outline, area: 600, zTo: floorZ, frees: true, shoulders: [] },
+    pockets: [node],
+    rims: [],
+    remainder: [],
+    unreachable: [],
+    report: { source: 'mesh', patches: 1, planarArea: 600, remainderArea: 0, tolerances: {} as never, slivers: [], notes: [] },
+  };
+}
+
 /** Two pockets and an outline; `region` distinguishes them by width so a wrapped offset can throw
  * for one specific region on demand (below) — the manager's #959 ruling: a region that fails to
  * plan must not crash the whole plan. */
@@ -398,6 +426,27 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
     expect(() => writeAcceptance('skin', tree, result)).not.toThrow();
   });
 
+  // The manager's #959 ruling: the facing op clears the top land outside every pocket's
+  // footprint — the other coverage gap E's run named (the tray's 1.2 mm skin, the organizer's
+  // 0.8 mm, never cut outside the pockets that happen to engage it as a side effect).
+  it('facing clears the top land outside every pocket — a separate op, never double-cutting the pocket itself', () => {
+    const tree = syntheticTreeWithLand(1.2);
+    const result = planTray(tree);
+    expect(result.unreachable).toEqual([]);
+    const facing = result.ops.find((op) => op.region.id === 'facing');
+    expect(facing, `ops: ${result.ops.map((op) => op.region.id).join(', ')}`).toBeDefined();
+    // depth = stockTop(0) - top.z(-1.2) = 1.2 — just the skin, not the pocket's own 4.2 mm.
+    expect(facing!.outcome.ir.operations[0]!.depth).toBeCloseTo(1.2, 6);
+    const pocketOp = result.ops.find((op) => op.region.id === 'p')!;
+    expect(pocketOp.outcome.ir.operations[0]!.depth).toBeCloseTo(4.2, 6);
+    // The facing moves stay inside the L-shaped land — never inside the pocket's own 10x10
+    // footprint, confirming the two regions do not overlap and double-cut the same material.
+    const facingXs = facing!.outcome.ir.operations[0]!.moves.map((m) => m.x);
+    const facingYs = facing!.outcome.ir.operations[0]!.moves.map((m) => m.y);
+    const insidePocket = facingXs.some((x, i) => x !== undefined && x < 10 && facingYs[i]! < 10);
+    expect(insidePocket, 'a facing move landed inside the pocket footprint').toBe(false);
+    expect(() => writeAcceptance('land', tree, result)).not.toThrow();
+  });
 
   it('plans, posts and measures a synthetic one-pocket tree end to end — the pocket AND the contour', () => {
     const tree = syntheticTree();
