@@ -50,7 +50,7 @@ import {
   releaseFileName,
   type ReleaseSource,
 } from '@/engine/cnc/engrave/release';
-import type { GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
+import { goalCoverageWords, goalRawWords, goalVerdictWords } from '@/engine/cnc/engrave/goalCheckWords';
 import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 import { DRY_RUN_SAFE_Z, dryRunProgramFor, type DryRunLevel } from '@/engine/cnc/engrave/dryRun';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -401,101 +401,10 @@ type CutVerdict =
  * run is not wrong), and a green pass mark must never stand for a check that never happened — the
  * neutral "not checked" state is what an unchecked goal renders.
  */
-interface GoalLine {
-  text: string;
-  state: 'match' | 'cut-into' | 'coverage' | 'not-checked';
-}
-
-/** mm, up to three decimals with trailing zeros dropped — the page's own depth format. */
-const goalMm = (n: number): string => String(Number(n.toFixed(3)));
-
-/** The page's percentage rounding: two decimals, trailing zeros dropped. */
-const goalPct = (fraction: number): number => Math.round(fraction * 10000) / 100;
-
 /**
- * The MEASURED top-surface coverage, in per cent — the page checker's own arithmetic on the
- * report's `leftoverFractions[0]` (`round(100 − round(100 × leftover > 0.1 mm, 2), 2)`), or null
- * when the report carries no leftover band. `passCoverage` is NOT this number: it is the shop's
- * pass line the check judged against.
+ * #963 — the goal check's words live in `goalCheckWords.ts` so the Cut card and the run sheet print
+ * the SAME lines. This module owns only the card's mark for them (`goalVerdictWords` states both).
  */
-function goalCoveragePct(report: GoalCutIntoReport): number | null {
-  const leftover = report.leftoverFractions[0];
-  if (leftover === undefined) return null;
-  return Math.round((100 - goalPct(leftover)) * 100) / 100;
-}
-
-function goalLine(report: GoalCutIntoReport | undefined): GoalLine | null {
-  if (report === undefined) return null;
-  if (!report.ran) {
-    return {
-      text: `Goal not checked: ${report.reason ?? 'the check did not run for this program'}`,
-      state: 'not-checked',
-    };
-  }
-  if (report.ok) return { text: 'Matches the design (goal)', state: 'match' };
-  // #948 — THE REPORT'S OWN FAILURE. `ok` false with NO cut-into cells is the pass line's
-  // coverage failing, not a cut into the part: the cut-into branch would name a 0 mm cut that never
-  // happened. State the coverage the check measured against the line it judged, or the report's own
-  // sentence when the leftover band is missing.
-  // #964 — the card names the cell the pass JUDGED, not the raw deepest one: with the wall and
-  // wall-shadow (and any edge break) exclusions the deepest raw cell can be unadjudicable.
-  if (report.adjudicatedMaxMm === 0) {
-    const coveragePct = goalCoveragePct(report);
-    return {
-      text:
-        coveragePct === null
-          ? report.sentence
-          : `Covers ${coveragePct} % of the design’s top surface (the pass line is ${goalPct(report.passCoverage)} %)`,
-      state: 'coverage',
-    };
-  }
-  const at = report.adjudicatedMaxAt;
-  return {
-    text:
-      at === null
-        ? `Cuts ${goalMm(report.adjudicatedMaxMm)} mm into the design`
-        : `Cuts ${goalMm(report.adjudicatedMaxMm)} mm into the design at ${goalMm(at.x)}, ${goalMm(at.y)}`,
-    state: 'cut-into',
-  };
-}
-
-/**
- * #948 — THE PAGE'S TOP-SURFACE COVERAGE FACT, in its own words. The demo page's goal cards print
- * it beside the cut-into verdict: the share of the goal's top surface the sweep leaves within 0.1 mm
- * of it — the number the card's 95 % pass line judges. The Cut card states the same one, so the app
- * is the gate and the page its mirror.
- *
- * The MEASURED coverage is the page checker's own arithmetic on the report's
- * `leftoverFractions[0]` (its `coveragePct` = 100 − 100 × leftover > 0.1 mm, rounded as it
- * rounds), because `passCoverage` is NOT the measurement: it is the number the check judged
- * AGAINST — the shop's `goal.passCoverage` default. Both are printed, so the fact states the
- * measurement and the line it is measured against rather than passing the threshold off as the
- * reading. (The page's second coverage fact, the whole-surface reach, has no field in
- * `GoalCutIntoReport`: it is the page's reading of the app's `goal-unreached` warning. A line
- * saying "not stated" on every goal run would be noise, not a fact; it gets one HERE when the
- * report carries a reach field.)
- */
-/**
- * #964 — THE RAW READING, printed BESIDE the adjudicated one and never as the pass: every cell the
- * sweep left below the goal before the wall, wall-shadow (and, when the job states one, edge-break)
- * exclusions, with the page's own formats. One line, muted, under the judged line — the page prints
- * its raw line beside its `cutInto0p1` figure the same way, and the two readings differ exactly by
- * the unadjudicable cells. Null when the comparison did not run (there is no raw reading to state).
- */
-function goalRawFact(report: GoalCutIntoReport): string | null {
-  if (!report.ran) return null;
-  const pct = Number((report.cutIntoFraction * 100).toFixed(2));
-  const at = report.maxCutIntoAt;
-  const where = at === null ? '' : ` at ${goalMm(at.x)}, ${goalMm(at.y)}`;
-  return `raw, before exclusions: ${pct} % cut-into, max ${goalMm(report.maxCutIntoMm)} mm${where}`;
-}
-
-function goalCoverageFact(report: GoalCutIntoReport): string | null {
-  const coveragePct = goalCoveragePct(report);
-  if (coveragePct === null) return null;
-  return `Top-surface coverage: ${coveragePct} % (the pass line is ${goalPct(report.passCoverage)} %)`;
-}
-
 function cutVerdict(v: {
   hasProgram: boolean;
   packageCurrent: boolean;
@@ -989,16 +898,16 @@ export function EngraveCutSurface({
   // #948 — the goal check's line, under the gate's verdict (the cutVerdict three-state is not
   // touched): a pass, the worst cut-into with its location, or why the check did not run — then the
   // page's two coverage facts for a report the comparison actually produced.
-  const goal = goalLine(runOracle?.goalCutInto);
+  const goal = runOracle?.goalCutInto === undefined ? null : goalVerdictWords(runOracle.goalCutInto);
   // #964 — the RAW reading beside the judged line (never the pass), stated only for a report the
   // comparison ran on.
   const goalRaw =
     runOracle?.goalCutInto !== undefined && runOracle.goalCutInto.ran
-      ? goalRawFact(runOracle.goalCutInto)
+      ? goalRawWords(runOracle.goalCutInto)
       : null;
   const goalCoverage =
     runOracle?.goalCutInto !== undefined && runOracle.goalCutInto.ran
-      ? goalCoverageFact(runOracle.goalCutInto)
+      ? goalCoverageWords(runOracle.goalCutInto)
       : null;
   const verdictFix = verdict === 'failed' && firstError !== null ? findingFix(firstError) : null;
   // The press does what the fix names: a wizard step opens where the fix lives; every other target

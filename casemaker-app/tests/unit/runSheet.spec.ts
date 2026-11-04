@@ -32,6 +32,7 @@ import {
 } from '@/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { fixtureSetupPlan } from './fixtures/setupPlan';
+import { fixtureGoalReport } from './fixtures/goalReport';
 
 // #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
 // These engine tests need the job to name its cutter, so `dj()` applies that recommendation.
@@ -2577,5 +2578,40 @@ describe('#963 the plan on the sheet', () => {
 
   it('says nothing about a plan when the run carries none', () => {
     expect(allText(dj(), null)).not.toContain('The model engine recognised');
+  });
+});
+
+// #963 — WHAT THE CHECK SAYS: the Cut card's own words on paper, in a section of its own, beside
+// the program they judge. A sheet that omits the check reads as a pass on paper.
+describe('#963 the sheet’s check section', () => {
+  const withReport = (
+    report: ReturnType<typeof fixtureGoalReport> | null,
+    extra: RunSheetGenerated['findings'] = [],
+  ): RunSheet => {
+    const job = dj();
+    const generated = { ...stubGenerated(job), findings: [...stubGenerated(job).findings, ...extra] };
+    return buildRunSheet(job, generated, { diagnostics: [], goalCutInto: report }, NOW);
+  };
+  const checkSteps = (sheet: RunSheet): string[] =>
+    sheet.sections.find((sec) => sec.id === 'check')?.steps.map((step) => step.text) ?? [];
+
+  it('prints the judged line, the raw reading beside it and the top-surface coverage', () => {
+    const steps = checkSteps(withReport(fixtureGoalReport()));
+    expect(steps).toContain('Cuts 0.24 mm into the design at 18.7, 60.1.');
+    expect(steps).toContain('raw, before exclusions: 2 % cut-into, max 0.42 mm at 41.2, 25.3.');
+    expect(steps).toContain('Top-surface coverage: 98.8 % (the pass line is 95 %).');
+  });
+
+  it('prints the whole-surface reach when the run states one', () => {
+    const steps = checkSteps(
+      withReport(fixtureGoalReport(), [
+        { code: 'goal-unreached', severity: 'warning', message: 'the top setup reproduces 62 %', goalReachedFraction: 0.62 } as RunSheetGenerated['findings'][number],
+      ]),
+    );
+    expect(steps).toContain('Whole-surface reach: 62 % from this setup (the remainder: under-faces and undercuts).');
+  });
+
+  it('has no check section at all when the run carries no goal report', () => {
+    expect(checkSteps(withReport(null))).toEqual([]);
   });
 });

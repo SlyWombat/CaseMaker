@@ -113,7 +113,8 @@ import type { VerifyReport } from '@/engine/cnc/verify';
 // re-worded, so the sheet and the panel cannot disagree about what the sweep did not see.
 import { coverageDisclaimer, type SimCoverageInput, type SimRunOutcome } from '@/components/panels/simCoverage';
 import type { CopperTopologyReport } from '@/engine/cnc/engrave/pcbTopology';
-import type { DesignCheckReport } from '@/engine/cnc/engrave/designCheck';
+import type { DesignCheckReport, GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
+import { goalCoverageWords, goalRawWords, goalReachWords, goalVerdictWords } from '@/engine/cnc/engrave/goalCheckWords';
 // #737 — the neck's facts are the ROTARY module's (the span, the saw line and the floor, from
 // `rotaryFreeSpan`): the coverage sentence the sheet and the panel print quotes them, never a
 // second reading of the job.
@@ -686,6 +687,12 @@ export interface RunSheetSim {
    * an older stored run) gets exactly the single-file sheet it got before.
    */
   programs?: readonly ProgramSweepSummary[];
+  /**
+   * #963 — the goal check's own report (`OracleReport.goalCutInto`), for the check section: the
+   * judged cut-into line, the raw reading beside it, and the top-surface coverage. Omitted on a
+   * 2.5D run and on an older stored result, whose sheet then has no check section.
+   */
+  goalCutInto?: GoalCutIntoReport | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -3157,6 +3164,24 @@ function drillPeckSteps(job: EngraveJob, feedsPeck: number | null): RunSheetStep
  * cutter). Every number is `surface3d`'s, printed rather than re-derived here.
  */
 /**
+ * #963 — WHAT THE CHECK SAYS, in the Cut card's own words (`goalCheckWords.ts`): the judged
+ * cut-into line, the raw reading beside it (never as the pass), the top-surface coverage against
+ * the pass line, and the whole-surface reach when the run states one. A check that did not run
+ * prints its reason, never nothing: a sheet that omits the check reads as a pass on paper.
+ */
+function goalCheckSteps(report: GoalCutIntoReport, findings: readonly JobFinding[]): RunSheetStep[] {
+  const verdict = goalVerdictWords(report);
+  const steps: RunSheetStep[] = [{ text: `${verdict.text}.`, value: verdict.text }];
+  const raw = goalRawWords(report);
+  if (raw !== null) steps.push({ text: `${raw}.`, value: raw });
+  const coverage = goalCoverageWords(report);
+  if (coverage !== null) steps.push({ text: `${coverage}.`, value: coverage });
+  const reach = goalReachWords(findings.find((f) => f.code === 'goal-unreached')?.goalReachedFraction);
+  if (reach !== null) steps.push({ text: `${reach}.`, value: reach });
+  return steps;
+}
+
+/**
  * #963 — THE PLAN IN THE OPERATOR'S WORDS: what the model engine recognised, the cutter sequence
  * it priced, and how the passes are joined. The same sentences the panel prints, from one builder
  * (`planWords.ts`), so the screen and the paper cannot disagree.
@@ -5113,6 +5138,9 @@ export function buildRunSheet(
     // the origin on the blank as clamped, the skim removes the finish error, the re-touch that ends
     // these steps moves Z0 onto the faced surface, and the Cut section is the first to assume it.
     ...facingSection,
+    ...(sim?.goalCutInto == null
+      ? []
+      : [{ id: 'check', title: 'What the check says', steps: goalCheckSteps(sim.goalCutInto, generated.findings) }]),
     { id: 'cut', title: 'Cut', steps: cutSteps },
     // #419 — each later program's own Cut section, in run order. Program 1 is `cut` above.
     ...programSections,

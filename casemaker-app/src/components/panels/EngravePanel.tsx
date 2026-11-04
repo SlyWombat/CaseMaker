@@ -2650,6 +2650,8 @@ export function EngravePanel(): JSX.Element {
           // #924/#947 gate 5 — the design check's own numbers, so its folded verdict is explained.
           ...(run.oracle?.designCheck === undefined ? {} : { designCheck: run.oracle.designCheck }),
           ...(run.oracle?.copper === undefined ? {} : { copper: run.oracle.copper }),
+          // #963 — the goal check's own lines, in the Cut card's words.
+          goalCutInto: state.oracle?.goalCutInto ?? null,
           programs: run.simPrograms,
         },
         new Date(),
