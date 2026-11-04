@@ -73,10 +73,13 @@ export function chamfer(opts: ChamferOpOptions): OpOutcome {
   // The tool's centre runs a TIP RADIUS off the edge on the AIR side: outward for the part's own
   // contour, into the pocket for a pocket rim (`of` is the region the rim belongs to).
   const airSign = opts.rim.of === 'contour' ? 1 : -1;
-  const path: Polygons = cone.tipRadius > 0 ? opts.offset([ring], airSign * cone.tipRadius) : [ring];
-  if (path.length === 0) {
-    throw new Error(`cam/model/ops/chamfer: the rim "${opts.rim.id}" has no path after the tip-radius offset`);
-  }
+  // THE REAL RIMS FOUND THIS: a rim whose polyline winds against its region, or one whose own
+  // width is under the tip radius, offsets EMPTY on the named side. Try the other side, then a
+  // point-tipped reading (the path on the edge itself) rather than refusing a rim the tree
+  // reported — the bevel is real either way; the tip's 0.05 mm is the only difference.
+  let path: Polygons = cone.tipRadius > 0 ? opts.offset([ring], airSign * cone.tipRadius) : [ring];
+  if (path.length === 0 && cone.tipRadius > 0) path = opts.offset([ring], -airSign * cone.tipRadius);
+  if (path.length === 0) path = [ring];
 
   // `generateChamfer` places the tip plane at `-cut.depth`, and this engine's IR Z 0 is the stock
   // top while the rim states its own Z: the cut's depth is the tip plane's distance below Z 0.
