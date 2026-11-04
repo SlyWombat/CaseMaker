@@ -54,7 +54,8 @@ for (let i = 0; i < programs.length; i++) {
     worst = 1;
     continue;
   }
-  const nc = join(outDir, `959-${key}.nc`);
+  // Ordered runs: a cutter can appear twice, so the run index is part of the name.
+  const nc = join(outDir, `959-${String(i + 1).padStart(2, '0')}-${key}.nc`);
   writeFileSync(nc, posted.text);
   const r = verifyProgram(posted.text, { setup, machine: Z1, tool, depthLimit, minRapidZ: HOP_Z });
   const errs = r.findings.filter((f) => f.severity === 'error').length;
