@@ -363,6 +363,29 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     }
     const throughNode = throughById.get(id);
     if (throughNode !== undefined) {
+      const diameter = cuttingDiameter(cutter) ?? 1;
+      // The manager's #959 ruling 2: a through hole is CLEARED, not just profiled — a profile cut
+      // alone leaves an uncut slug in the middle of anything wider than about two cutter
+      // diameters (through-the-material, nothing holds it, nowhere for the chips of it to go).
+      // Narrower than that, the slug a profile cut would leave is negligible next to the kerf
+      // itself, and the real pocket op's own Z-level stepping/linking would be wasted on it.
+      if (throughNode.narrowest >= 2 * diameter) {
+        return pocket({
+          cutter,
+          node: { ...throughNode, mouthZ: rebase(z0), floorZ: rebase(throughNode.floorZ) },
+          region: ref,
+          stepOverMm: diameter / 4,
+          stepDownMm: opts.stepDownMm,
+          feeds: opts.feeds,
+          offset: opts.offset,
+          safeZMm: SAFE_Z,
+          hopZMm: HOP_Z,
+          toolNumber: cutter.number ?? 1,
+          spindleRpm: opts.spindleRpm,
+          air: opts.air,
+          rapid: opts.rapid,
+        });
+      }
       return throughHole({
         cutter,
         id,
@@ -462,7 +485,9 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     for (const { id, outcome } of outcomes) {
       if (id === 'contour') { deferredContour = outcome; continue; }
       const ref = refById.get(id)!;
-      ops.push({ kind: throughById.has(id) ? 'contour' : 'pocket', region: ref, outcome });
+      // A through hole is cleared like a pocket now (ruling 2), profile-only only when it is too
+      // narrow for that to mean anything — 'pocket' either way describes what it does.
+      ops.push({ kind: 'pocket', region: ref, outcome });
       const key = outcome.cutter;
       const existing = programs.get(key);
       programs.set(key, existing === undefined ? outcome.ir : concatToolpathIR(existing, outcome.ir));

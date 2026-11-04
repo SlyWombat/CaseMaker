@@ -245,6 +245,34 @@ function syntheticTreeTwoPockets(): FeatureTree {
  * does not and needs the ⌀3.175 rest cutter — so the primary (⌀6) covers 'a' and the contour,
  * the rest (⌀3.175) covers 'b', exactly the shape where the OLD contour-rides-in-the-primary
  * ordering would free the part before 'b' was even cut. */
+/** A root pocket plus one through hole, sized by `holeSide` — ruling 2: a through hole wider than
+ * ~2 cutter diameters is CLEARED like a pocket (no slug), profile-only when it is not. */
+function syntheticTreeWithThroughHole(holeSide: number): FeatureTree {
+  const rectPocket: [number, number][][] = [[[0, 0], [20, 0], [20, 10], [0, 10]]];
+  const rectHole: [number, number][][] = [[[30, 0], [30 + holeSide, 0], [30 + holeSide, holeSide], [30, holeSide]]];
+  const outline: [number, number][][] = [[[0, 0], [30 + holeSide, 0], [30 + holeSide, 10], [0, 10]]];
+  const pocketNode: PocketNode = {
+    id: 'p', floorZ: -3, mouthZ: 0, open: false, through: false,
+    region: rectPocket, floors: [{ polygons: rectPocket, area: 200 }],
+    islands: [], children: [], remainder: [], narrowest: 10,
+  };
+  const hole: PocketNode = {
+    id: 'hole', floorZ: -5, mouthZ: 0, open: false, through: true,
+    region: rectHole, floors: [], islands: [], children: [], remainder: [], narrowest: holeSide,
+  };
+  return {
+    frame: { up: [0, 0, 1], stockTop: 0, partTop: 0, partBottom: -5 },
+    levels: [-3, -5],
+    top: { z: 0, floors: [], area: 0 },
+    contour: { outline, area: (30 + holeSide) * 10, zTo: -5, frees: true, shoulders: [] },
+    pockets: [pocketNode, hole],
+    rims: [],
+    remainder: [],
+    unreachable: [],
+    report: { source: 'mesh', patches: 1, planarArea: (30 + holeSide) * 10, remainderArea: 0, tolerances: {} as never, slivers: [], notes: [] },
+  };
+}
+
 function syntheticTreeRestChain(): FeatureTree {
   // 'a' is large enough that FLAT3175 roughing it alone costs far more than FLAT6 roughing it
   // plus a tool change to FLAT3175 for 'b' — the chain's own cost ranking must pick the two-cutter
@@ -325,6 +353,27 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
     const contourOp = result.ops.at(-1)!;
     const program = result.programs.get(contourOp.outcome.cutter)!;
     expect(program.operations.at(-1)!.labelId).toBe('contour');
+  });
+
+  // The manager's #959 ruling 2.
+  it('a through hole wider than ~2 cutter diameters is CLEARED like a pocket, not left with a slug', () => {
+    const tree = syntheticTreeWithThroughHole(20); // ⌀6: narrowest 20 >= 2 x 6 = 12
+    const result = planTray(tree);
+    const hole = result.ops.find((op) => op.region.id === 'hole')!;
+    expect(hole, 'the hole is planned').toBeDefined();
+    const levels = new Set(hole.outcome.passes.map((p) => p.z)).size;
+    // A cleared pocket traces MORE than one ring per level (concentric step-over rings); a bare
+    // profile cut traces exactly one ring per level.
+    expect(hole.outcome.passes.length, `${hole.outcome.passes.length} passes over ${levels} level(s)`).toBeGreaterThan(levels);
+  });
+
+  it('a through hole narrower than ~2 cutter diameters stays profile-only', () => {
+    const tree = syntheticTreeWithThroughHole(8); // ⌀6: narrowest 8 < 2 x 6 = 12
+    const result = planTray(tree);
+    const hole = result.ops.find((op) => op.region.id === 'hole')!;
+    expect(hole, 'the hole is planned').toBeDefined();
+    const levels = new Set(hole.outcome.passes.map((p) => p.z)).size;
+    expect(hole.outcome.passes.length, `${hole.outcome.passes.length} passes over ${levels} level(s)`).toBe(levels);
   });
 
 
