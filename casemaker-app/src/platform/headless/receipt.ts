@@ -18,6 +18,7 @@
  */
 
 import { z } from 'zod';
+import type { GoalCutIntoReport } from '../../engine/cnc/engrave/designCheck';
 
 /**
  * The receipt document's own version. A changed SHAPE bumps it; a new optional field does not.
@@ -166,6 +167,66 @@ export const engraveSimSchema = z
   .describe('The simulation summary for one program.');
 
 /** One program's written files and pipeline result. */
+/**
+ * #953 — THE GOAL CHECK, AS THE RECEIPT CARRIES IT. The same report the Cut card prints: the
+ * verdict read is the page's own stamp of the posted program at the goal's cell centres, and the
+ * conservative column read rides beside it as the stated diagnostic (`columnCutInto`). A job with
+ * no goal carries nulls, never an invented verdict.
+ */
+export const engraveGoalSchema = z
+  .object({
+    ran: z.boolean().describe('Whether the comparison ran; false is a stated gap (see `reason`), not a pass.'),
+    reason: z.string().nullable().describe('Why the comparison could not run, or null when it did.'),
+    cutIntoFraction: z.number().describe('Share of the goal’s covered cells cut below it by more than the floor, 0–1.'),
+    maxCutIntoMm: z.number().describe('The deepest cut into the goal, mm.'),
+    maxCutIntoAt: z
+      .object({ x: z.number().describe('Work-frame X of the deepest cut, mm.'), y: z.number().describe('Work-frame Y of the deepest cut, mm.') })
+      .nullable()
+      .describe('Where the deepest cut is, in the work frame, or null when nothing was cut into. When the edge-break allowance applies this is the deepest ADJUDICATED cut (after the exclusions).'),
+    adjudicatedFraction: z
+      .number()
+      .describe('Share of covered cells at the 0.1 mm floor AFTER edge break, wall cells and wall shadow are excluded, 0–1 — the pass line’s judged number.'),
+    edgeBreakFraction: z
+      .number()
+      .describe('Share of covered cells excluded as EDGE BREAK (a V bit within its reach of a design edge, no deeper than its leg), 0–1.'),
+    wallNotScoredFraction: z
+      .number()
+      .describe('Share of covered cells excluded as WALL CELLS (a cell straddling a wall step), 0–1.'),
+    shadowNotScoredFraction: z
+      .number()
+      .describe('Share of covered cells excluded as WALL SHADOW (behind a wall, beyond the sweep’s reach), 0–1.'),
+    leftoverFractions: z
+      .array(z.number())
+      .describe('Share of the covered cells standing more than each leftover band (0.1 / 0.3 / 1 mm) above the goal.'),
+    passCoverage: z.number().describe('The coverage the pass line asks for, 0–1 — the shop’s own `goal.passCoverage`.'),
+    wholeSurface: z
+      .object({
+        fraction: z.number().describe('Share of the goal’s whole surface reproduced after every proposed setup, 0–1.'),
+        reachedCells: z.number().int().nonnegative().describe('Reached cells over the document grid, after the union.'),
+        cells: z.number().int().nonnegative().describe('The denominator: covered cells less the named excluded underside.'),
+        coveredCells: z.number().int().nonnegative().describe('Covered goal cells before the exclusion.'),
+        excludedCells: z.number().int().nonnegative().describe('Excluded underside cells; 0 when no setup names one.'),
+        excludedAreaMm2: z.number().describe('The excluded face’s stated area, mm²; 0 when none.'),
+        excludedFace: z.string().nullable().describe('The excluded face, named; null when none.'),
+        setups: z.number().int().nonnegative().describe('How many proposed setups contributed.'),
+      })
+      .nullable()
+      .describe('The whole-surface reach after every proposed setup, or null when no union was formed.'),
+    columnCutInto: z
+      .object({
+        fraction: z.number().describe('The conservative column read’s cut-into share — the one-column-lenient diagnostic.'),
+        maxMm: z.number().describe('The conservative column read’s deepest cut into the goal, mm.'),
+        at: z
+          .object({ x: z.number().describe('Work-frame X of that deepest read, mm.'), y: z.number().describe('Work-frame Y of that deepest read, mm.') })
+          .nullable()
+          .describe('Where that deepest read is; null when none.'),
+      })
+      .nullable()
+      .describe('The conservative column read beside the verdict, as a stated diagnostic; null when not taken.'),
+    sentence: z.string().min(1).describe('The report’s own sentence, as the Cut card prints it.'),
+  })
+  .describe('The goal check’s report.');
+
 export const engraveProgramSchema = z
   .object({
     name: z.string().min(1).describe('The job name the program was written under.'),
@@ -186,6 +247,8 @@ export const engraveProgramSchema = z
       .describe('The run sheet written for this program, or null when none was.'),
     previews: z.array(z.string()).describe('Preview SVG file names written for this program.'),
     images: z.array(z.string()).describe('Preview PNG file names rendered for this program.'),
+    // #953 — present only for a goal job (a job with no goal writes the pre-#953 entry, byte for byte).
+    goal: engraveGoalSchema.nullable().optional().describe('This program’s own goal check, or null for a job with no goal.'),
   })
   .describe('One program a run wrote.');
 
@@ -224,6 +287,9 @@ export const engraveDetailsSchema = z
     kind: z.enum(['job', 'design', 'coupon']).describe('Which input built the run: a job, a 3MF design, or a coupon spec.'),
     outDir: z.string().describe('The directory the files were written into.'),
     programs: z.array(engraveProgramSchema).describe('Every program the run wrote, in the order written.'),
+    // #953 — the RUN's goal read (every program's stamp folded together), the number the Cut card
+    // shows. Omitted for a job with no goal, so those receipts stay byte-identical.
+    goal: engraveGoalSchema.optional().describe('The run’s combined goal check, for a goal job; omitted otherwise.'),
     coupon: engraveCouponSchema.nullable().describe('The coupon summary, or null for a job or design run.'),
     pair: engravePairSchema.nullable().describe('The two-program summary, or null when only one program ran.'),
     bed: z
@@ -553,6 +619,36 @@ export type ReceiptProvenance = z.infer<typeof receiptProvenanceSchema>;
 export type ReceiptRefusal = z.infer<typeof receiptRefusalSchema>;
 export type EngraveDetails = z.infer<typeof engraveDetailsSchema>;
 export type EngraveProgram = z.infer<typeof engraveProgramSchema>;
+export type EngraveGoal = z.infer<typeof engraveGoalSchema>;
+
+/**
+ * #953 — THE APP'S GOAL REPORT, AS THE RECEIPT CARRIES IT. The same numbers the Cut card prints:
+ * `checkGoalCutInto`'s report mapped field for field. `wholeSurface` and `columnCutInto` ride only
+ * when the report carries them (the whole-surface union wave and the conservative column read);
+ * absent means null, never an invented number.
+ */
+export function goalBlockFromReport(report: GoalCutIntoReport): EngraveGoal {
+  const extended = report as GoalCutIntoReport & {
+    wholeSurface?: EngraveGoal['wholeSurface'];
+    columnCutInto?: EngraveGoal['columnCutInto'];
+  };
+  return {
+    ran: report.ran,
+    reason: report.reason,
+    cutIntoFraction: report.cutIntoFraction,
+    maxCutIntoMm: report.maxCutIntoMm,
+    maxCutIntoAt: report.maxCutIntoAt,
+    adjudicatedFraction: report.adjudicatedFraction,
+    edgeBreakFraction: report.edgeBreakFraction,
+    wallNotScoredFraction: report.wallNotScoredFraction,
+    shadowNotScoredFraction: report.shadowNotScoredFraction,
+    leftoverFractions: [...report.leftoverFractions],
+    passCoverage: report.passCoverage,
+    wholeSurface: extended.wholeSurface ?? null,
+    columnCutInto: extended.columnCutInto ?? null,
+    sentence: report.sentence,
+  };
+}
 export type ExportDetails = z.infer<typeof exportDetailsSchema>;
 export type LocationDetails = z.infer<typeof locationDetailsSchema>;
 export type ReadbackDetails = z.infer<typeof readbackDetailsSchema>;

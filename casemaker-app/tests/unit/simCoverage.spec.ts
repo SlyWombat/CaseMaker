@@ -51,9 +51,11 @@ describe('coverageDisclaimer', () => {
       ok,
       band: 0.016,
       gridNote: 'a 0.1 mm grid',
+      pitchMm: 0.1,
       levels: [],
       worst: { unreached: 0.42, tooFar: 0.03 },
       areaFloor: 0.001,
+      sentence: '',
     });
     const failed = text({ oracleBand: 0.016, designCheck: check(false) });
     expect(failed).toContain('The design-side check failed');

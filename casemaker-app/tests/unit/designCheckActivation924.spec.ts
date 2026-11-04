@@ -5,7 +5,8 @@
  * (`EngraveRegions` → `OneProgram` → `programOf`/`withOwnDesignItems`).
  *
  * This spec proves the WIRING on real jobs, not the check functions themselves —
- * `designCheck924.spec.ts` already proves `checkDesignReach`/`checkVolumeAgreement`'s own math
+ * `designCheck924.spec.ts` proves `checkDesignReach`/`checkVolumeAgreement`'s own math, and
+ * `designCheckRaw924.spec.ts` the #741 flank on the real badge;
  * against independent quadrature and the issue's documented numbers, with hand-built fixtures.
  * Here the `designItems` come from the real `engraveGenerate` output on real job files, and the
  * design check runs through the real `session.oracle()` call, the same one `engraveGolden.spec.ts`
@@ -19,7 +20,6 @@ import { describe, expect, it } from 'vitest';
 
 import { generate } from './helpers/engravePipeline';
 import { tl } from './helpers/manifoldExec';
-import { checkDesignReach } from '@/engine/cnc/engrave/designCheck';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { Z1 } from '@/engine/cnc/machine';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -127,44 +127,5 @@ describe('#924 activation — real jobs reach the design check through the real 
     } finally {
       session.dispose();
     }
-  });
-
-  it('the #741 defect class (a flank widened past the shank) fails checkDesignReach, fed the REAL badge designItems and a REAL simulated slice', () => {
-    // #741's engine bug was the swept removal reaching WIDER than the design's own outline allows
-    // for the cutter's radius — not a synthetic shape, a real sweep disagreeing with the design.
-    // Reproducing the historical trigger live needs the bench's own catalogue/location (the j11
-    // regression jobs resolve no tool against the bare pipeline — confirmed by probing them here
-    // before writing this spec; they need `pipelineIdentity.spec.ts`'s house-catalogue rig, out of
-    // this commit's scope). So this proves the REAL wiring end to end instead: the badge's REAL
-    // `designItems` (from `engraveGenerate`, the exact object `session.oracle` above is handed) and
-    // the badge's REAL simulated cross-section (`session.levelCut`, the exact slice `checkDesignReach`
-    // reads inside `session.oracle`) — with the slice grown past `r + band` the way a widened-flank
-    // sweep would leave it, standing in for the swept-geometry defect `designCheck924.spec.ts`
-    // already proves this function catches with hand-built/independent numbers.
-    const job = jobFrom(join(HERE, 'fixtures', 'badge-2026-10-24-vbit.job.json'));
-    return generateOrThrow(job).then((gen) => {
-      const tool = jobTool(job);
-      if (tool === null) throw new Error(`${job.name}: no resolvable cutter`);
-      const session = createSimSession(tl);
-      try {
-        const loaded = session.load(gen.nc!, toSetup(job, Z1), tool, Z1.id);
-        if (!loaded.ok) throw new Error(`${job.name}: the sim refused the program: ${JSON.stringify(loaded.diagnostics)}`);
-        const items = gen.designItems;
-        expect(items.length).toBeGreaterThan(0);
-        const item = items[0]!;
-        const widenPastShankMm = item.r + 1; // #741's excess was 20-60%; this is a clear, unmissable over-cut.
-        const sliceAt = (z: number) => {
-          const cut = session.levelCut(z);
-          if (cut === null || cut.region === null) return null;
-          return cut.region.offset(widenPastShankMm, 'Round', 2, 16);
-        };
-        const report = checkDesignReach(tl, items, sliceAt, {});
-        expect(report.ok).toBe(false);
-        expect(report.worst.tooFar).toBeGreaterThan(report.areaFloor);
-        expect(report.worst.tooFarAt?.itemId).toBe(item.itemId);
-      } finally {
-        session.dispose();
-      }
-    });
   });
 });

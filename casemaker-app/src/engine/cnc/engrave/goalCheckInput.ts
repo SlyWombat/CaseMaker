@@ -14,7 +14,7 @@
  */
 
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import { pureGoalObject } from './jobSetup';
+import { pureGoalObject } from './jobKind';
 import type { GoalCutIntoOptions } from './designCheck';
 
 /**

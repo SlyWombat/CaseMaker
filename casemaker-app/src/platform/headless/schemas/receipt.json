@@ -99,6 +99,231 @@
               ],
               "description": "The coupon summary, or null for a job or design run."
             },
+            "goal": {
+              "description": "The run’s combined goal check, for a goal job; omitted otherwise.",
+              "properties": {
+                "adjudicatedFraction": {
+                  "description": "Share of covered cells at the 0.1 mm floor AFTER edge break, wall cells and wall shadow are excluded, 0–1 — the pass line’s judged number.",
+                  "type": "number"
+                },
+                "columnCutInto": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "at": {
+                          "anyOf": [
+                            {
+                              "properties": {
+                                "x": {
+                                  "description": "Work-frame X of that deepest read, mm.",
+                                  "type": "number"
+                                },
+                                "y": {
+                                  "description": "Work-frame Y of that deepest read, mm.",
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "x",
+                                "y"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Where that deepest read is; null when none."
+                        },
+                        "fraction": {
+                          "description": "The conservative column read’s cut-into share — the one-column-lenient diagnostic.",
+                          "type": "number"
+                        },
+                        "maxMm": {
+                          "description": "The conservative column read’s deepest cut into the goal, mm.",
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "fraction",
+                        "maxMm",
+                        "at"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The conservative column read beside the verdict, as a stated diagnostic; null when not taken."
+                },
+                "cutIntoFraction": {
+                  "description": "Share of the goal’s covered cells cut below it by more than the floor, 0–1.",
+                  "type": "number"
+                },
+                "edgeBreakFraction": {
+                  "description": "Share of covered cells excluded as EDGE BREAK (a V bit within its reach of a design edge, no deeper than its leg), 0–1.",
+                  "type": "number"
+                },
+                "leftoverFractions": {
+                  "description": "Share of the covered cells standing more than each leftover band (0.1 / 0.3 / 1 mm) above the goal.",
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "maxCutIntoAt": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "x": {
+                          "description": "Work-frame X of the deepest cut, mm.",
+                          "type": "number"
+                        },
+                        "y": {
+                          "description": "Work-frame Y of the deepest cut, mm.",
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Where the deepest cut is, in the work frame, or null when nothing was cut into. When the edge-break allowance applies this is the deepest ADJUDICATED cut (after the exclusions)."
+                },
+                "maxCutIntoMm": {
+                  "description": "The deepest cut into the goal, mm.",
+                  "type": "number"
+                },
+                "passCoverage": {
+                  "description": "The coverage the pass line asks for, 0–1 — the shop’s own `goal.passCoverage`.",
+                  "type": "number"
+                },
+                "ran": {
+                  "description": "Whether the comparison ran; false is a stated gap (see `reason`), not a pass.",
+                  "type": "boolean"
+                },
+                "reason": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Why the comparison could not run, or null when it did."
+                },
+                "sentence": {
+                  "description": "The report’s own sentence, as the Cut card prints it.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "shadowNotScoredFraction": {
+                  "description": "Share of covered cells excluded as WALL SHADOW (behind a wall, beyond the sweep’s reach), 0–1.",
+                  "type": "number"
+                },
+                "wallNotScoredFraction": {
+                  "description": "Share of covered cells excluded as WALL CELLS (a cell straddling a wall step), 0–1.",
+                  "type": "number"
+                },
+                "wholeSurface": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "cells": {
+                          "description": "The denominator: covered cells less the named excluded underside.",
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "coveredCells": {
+                          "description": "Covered goal cells before the exclusion.",
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "excludedAreaMm2": {
+                          "description": "The excluded face’s stated area, mm²; 0 when none.",
+                          "type": "number"
+                        },
+                        "excludedCells": {
+                          "description": "Excluded underside cells; 0 when no setup names one.",
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "excludedFace": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The excluded face, named; null when none."
+                        },
+                        "fraction": {
+                          "description": "Share of the goal’s whole surface reproduced after every proposed setup, 0–1.",
+                          "type": "number"
+                        },
+                        "reachedCells": {
+                          "description": "Reached cells over the document grid, after the union.",
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "setups": {
+                          "description": "How many proposed setups contributed.",
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "fraction",
+                        "reachedCells",
+                        "cells",
+                        "coveredCells",
+                        "excludedCells",
+                        "excludedAreaMm2",
+                        "excludedFace",
+                        "setups"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The whole-surface reach after every proposed setup, or null when no union was formed."
+                }
+              },
+              "required": [
+                "ran",
+                "reason",
+                "cutIntoFraction",
+                "maxCutIntoMm",
+                "maxCutIntoAt",
+                "adjudicatedFraction",
+                "edgeBreakFraction",
+                "wallNotScoredFraction",
+                "shadowNotScoredFraction",
+                "leftoverFractions",
+                "passCoverage",
+                "wholeSurface",
+                "columnCutInto",
+                "sentence"
+              ],
+              "type": "object"
+            },
             "kind": {
               "description": "Which input built the run: a job, a 3MF design, or a coupon spec.",
               "enum": [
@@ -432,6 +657,239 @@
                       }
                     ],
                     "description": "The frame `.nc` file name, or null when none was written."
+                  },
+                  "goal": {
+                    "anyOf": [
+                      {
+                        "description": "The goal check’s report.",
+                        "properties": {
+                          "adjudicatedFraction": {
+                            "description": "Share of covered cells at the 0.1 mm floor AFTER edge break, wall cells and wall shadow are excluded, 0–1 — the pass line’s judged number.",
+                            "type": "number"
+                          },
+                          "columnCutInto": {
+                            "anyOf": [
+                              {
+                                "properties": {
+                                  "at": {
+                                    "anyOf": [
+                                      {
+                                        "properties": {
+                                          "x": {
+                                            "description": "Work-frame X of that deepest read, mm.",
+                                            "type": "number"
+                                          },
+                                          "y": {
+                                            "description": "Work-frame Y of that deepest read, mm.",
+                                            "type": "number"
+                                          }
+                                        },
+                                        "required": [
+                                          "x",
+                                          "y"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "Where that deepest read is; null when none."
+                                  },
+                                  "fraction": {
+                                    "description": "The conservative column read’s cut-into share — the one-column-lenient diagnostic.",
+                                    "type": "number"
+                                  },
+                                  "maxMm": {
+                                    "description": "The conservative column read’s deepest cut into the goal, mm.",
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "fraction",
+                                  "maxMm",
+                                  "at"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The conservative column read beside the verdict, as a stated diagnostic; null when not taken."
+                          },
+                          "cutIntoFraction": {
+                            "description": "Share of the goal’s covered cells cut below it by more than the floor, 0–1.",
+                            "type": "number"
+                          },
+                          "edgeBreakFraction": {
+                            "description": "Share of covered cells excluded as EDGE BREAK (a V bit within its reach of a design edge, no deeper than its leg), 0–1.",
+                            "type": "number"
+                          },
+                          "leftoverFractions": {
+                            "description": "Share of the covered cells standing more than each leftover band (0.1 / 0.3 / 1 mm) above the goal.",
+                            "items": {
+                              "type": "number"
+                            },
+                            "type": "array"
+                          },
+                          "maxCutIntoAt": {
+                            "anyOf": [
+                              {
+                                "properties": {
+                                  "x": {
+                                    "description": "Work-frame X of the deepest cut, mm.",
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "description": "Work-frame Y of the deepest cut, mm.",
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "x",
+                                  "y"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Where the deepest cut is, in the work frame, or null when nothing was cut into. When the edge-break allowance applies this is the deepest ADJUDICATED cut (after the exclusions)."
+                          },
+                          "maxCutIntoMm": {
+                            "description": "The deepest cut into the goal, mm.",
+                            "type": "number"
+                          },
+                          "passCoverage": {
+                            "description": "The coverage the pass line asks for, 0–1 — the shop’s own `goal.passCoverage`.",
+                            "type": "number"
+                          },
+                          "ran": {
+                            "description": "Whether the comparison ran; false is a stated gap (see `reason`), not a pass.",
+                            "type": "boolean"
+                          },
+                          "reason": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Why the comparison could not run, or null when it did."
+                          },
+                          "sentence": {
+                            "description": "The report’s own sentence, as the Cut card prints it.",
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "shadowNotScoredFraction": {
+                            "description": "Share of covered cells excluded as WALL SHADOW (behind a wall, beyond the sweep’s reach), 0–1.",
+                            "type": "number"
+                          },
+                          "wallNotScoredFraction": {
+                            "description": "Share of covered cells excluded as WALL CELLS (a cell straddling a wall step), 0–1.",
+                            "type": "number"
+                          },
+                          "wholeSurface": {
+                            "anyOf": [
+                              {
+                                "properties": {
+                                  "cells": {
+                                    "description": "The denominator: covered cells less the named excluded underside.",
+                                    "maximum": 9007199254740991,
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "coveredCells": {
+                                    "description": "Covered goal cells before the exclusion.",
+                                    "maximum": 9007199254740991,
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "excludedAreaMm2": {
+                                    "description": "The excluded face’s stated area, mm²; 0 when none.",
+                                    "type": "number"
+                                  },
+                                  "excludedCells": {
+                                    "description": "Excluded underside cells; 0 when no setup names one.",
+                                    "maximum": 9007199254740991,
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "excludedFace": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "The excluded face, named; null when none."
+                                  },
+                                  "fraction": {
+                                    "description": "Share of the goal’s whole surface reproduced after every proposed setup, 0–1.",
+                                    "type": "number"
+                                  },
+                                  "reachedCells": {
+                                    "description": "Reached cells over the document grid, after the union.",
+                                    "maximum": 9007199254740991,
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "setups": {
+                                    "description": "How many proposed setups contributed.",
+                                    "maximum": 9007199254740991,
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "fraction",
+                                  "reachedCells",
+                                  "cells",
+                                  "coveredCells",
+                                  "excludedCells",
+                                  "excludedAreaMm2",
+                                  "excludedFace",
+                                  "setups"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The whole-surface reach after every proposed setup, or null when no union was formed."
+                          }
+                        },
+                        "required": [
+                          "ran",
+                          "reason",
+                          "cutIntoFraction",
+                          "maxCutIntoMm",
+                          "maxCutIntoAt",
+                          "adjudicatedFraction",
+                          "edgeBreakFraction",
+                          "wallNotScoredFraction",
+                          "shadowNotScoredFraction",
+                          "leftoverFractions",
+                          "passCoverage",
+                          "wholeSurface",
+                          "columnCutInto",
+                          "sentence"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "This program’s own goal check, or null for a job with no goal."
                   },
                   "images": {
                     "description": "Preview PNG file names rendered for this program.",

@@ -477,9 +477,12 @@ export function denseFlatRoutesToColumn(timeline: Timeline, tool: Tool, opts?: S
 export type GoalCheckInput =
   | {
       heightfield: GoalHeightfield;
-      /** The conservative read — cut-into is judged on it (#948's max-of-four column read). */
+      /**
+       * The conservative column read — the STATED DIAGNOSTIC since #945 (one column lenient, and
+       * it carries the half-cell slope bias). The verdict is the exact stamp below.
+       */
       sweptTop: ResultTop;
-      /** #948 — the page's own point read of the same sweep, for the leftover bands. */
+      /** #948/#945 — the page's own point read: the verdict for cut-into and the bands alike. */
       sweptTopExact?: ResultTop;
       opts?: GoalCutIntoOptions;
     }
@@ -527,19 +530,22 @@ export interface SimSession {
     goal?: GoalCheckInput,
   ): OracleReport;
   /**
-   * #948 — THE LIVE SWEEP'S TOP, as a work-frame sampler the goal check reads: the highest column
-   * touching the queried point on the FLAT grid (the same grid `SimLoadOk.flatField` exposes),
-   * null outside it, and NULL when the live sweep has no flat top at all — an exact-engine sweep,
-   * or a rotary column whose grid is the map frame. A caller then states the goal check as
-   * UNCHECKED with a reason (`goalCutIntoUnchecked`); it never reports a silent pass.
+   * #948 — THE LIVE SWEEP'S TOP, as a work-frame sampler: the highest column touching the queried
+   * point on the FLAT grid (the same grid `SimLoadOk.flatField` exposes), null outside it, and
+   * NULL when the live sweep has no flat top at all — an exact-engine sweep, or a rotary column
+   * whose grid is the map frame. A caller then states the goal check as UNCHECKED with a reason
+   * (`goalCutIntoUnchecked`); it never reports a silent pass. Since #945 this is the goal check's
+   * stated DIAGNOSTIC (one column lenient, half-cell slope bias); the verdict is
+   * {@link sweptFieldExact}.
    */
   sweptTop(): ResultTop | null;
   /**
-   * #948 — THE PAGE'S OWN READ of the live sweep, as a field on the GOAL's grid: the cutter
-   * stamped along the program's cutting moves, exactly as `goal_check.py` computes it (the
-   * leftover bands and the pass line are judged on this; cut-into stays on {@link sweptTop},
-   * which is conservative). Null for a sweep the goal check does not run on (a rotary or
-   * exact-engine sweep), and when the session holds no tool to name the cutter.
+   * #948/#945 — THE PAGE'S OWN READ of the live sweep, as a field on the GOAL's grid: the cutter
+   * stamped along the program's cutting moves, exactly as `goal_check.py` computes it. Since #945
+   * the VERDICT — cut-into, the leftover bands and the pass line — is this field, so the app and
+   * the page cannot disagree about a cell; {@link sweptTop} is its stated conservative diagnostic.
+   * Null for a sweep the goal check does not run on (a rotary or exact-engine sweep), and when
+   * the session holds no tool to name the cutter.
    */
   sweptFieldExact(goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): Float32Array | null;
   /**

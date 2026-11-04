@@ -289,6 +289,8 @@ describe('engraveRunStore (#206)', () => {
       levels: [],
       worst: { unreached: ok ? 0 : 1, tooFar: 0 },
       areaFloor: 0.001,
+      pitchMm: 0.02,
+      sentence: '',
     });
 
     it('carries the sliver width from the last program that ran the comparison', () => {
@@ -320,7 +322,7 @@ describe('engraveRunStore (#206)', () => {
       itemId,
       design: [[[0, 0], [5, 0], [5, 5], [0, 5]]],
       depth: 0.5,
-      r: 1,
+      cutter: { tipRadius: 1, tanHalf: 0, maxRadius: 1 },
     });
     const PRED = (itemId: string) => ({ depth: 0.5, itemId, polygons: [] });
 
