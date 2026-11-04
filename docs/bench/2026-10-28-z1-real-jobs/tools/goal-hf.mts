@@ -8,7 +8,10 @@ if (!appDir || !jobPath || !out) {
   process.exit(2);
 }
 await import(appDir + '/scripts/lib/casemaker/nodeTarget.ts');
-const { sampleGoalHeightfield } = await import(appDir + '/src/engine/cnc/cam/surface3d.ts');
+// #967 moved the sampler out of cam/surface3d.ts; try the new home first, then the old, so this
+// tool runs on either side of the extraction.
+const { sampleGoalHeightfield } = await import(appDir + '/src/engine/cnc/engrave/goalHeightfield.ts')
+  .catch(() => import(appDir + '/src/engine/cnc/cam/surface3d.ts'));
 
 const job = JSON.parse(readFileSync(jobPath, 'utf8'));
 const t = job.targetObject ?? (job.targetObjects ?? [])[0];

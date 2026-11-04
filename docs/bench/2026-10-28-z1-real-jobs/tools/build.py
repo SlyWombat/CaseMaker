@@ -211,6 +211,11 @@ def load_receipt(rundir):
     out['hops'] = sum(int(e.get('hopCount') or 0) for e in eff)
     out['feedMoves'] = sum(int((p.get('cam') or {}).get('cuttingMoves') or 0) for p in out['programs'])
     out['rapidsPer1k'] = round(out['hops'] / out['feedMoves'] * 1000, 1) if out['feedMoves'] else None
+    # #953 — the app's own goal report rides the receipt: details.goal (the run's) and each
+    # program's details.programs[i].goal (the evidence). Preferred over our recomputation.
+    det = (r or {}).get('details') or {}
+    out['goal'] = det.get('goal')
+    out['programGoals'] = [p.get('goal') for p in out['programs'] if p.get('goal')]
     times = [((p.get('sheet') or {}).get('estimatedTime')) for p in out['programs']]
     out['time'] = ' + '.join(t for t in times if t) or None
     return out
@@ -259,6 +264,21 @@ def design_verdict(rc, dc):
         more = f'; and {len(problems) - 3} more item(s)' if len(problems) > 3 else ''
         return 'deviates', '; '.join(problems[:3]) + more, numbers
     return 'match', f"verifier 0 errors; {measured} measured item(s) at their floor; no cut outside the design", numbers
+
+
+def app_goal_numbers(g):
+    """The app's own goal report (#953 details.goal), in the card's number shape: coverage is its
+    first leftover band, cut-into its own 0.01 mm floor fraction."""
+    lo = list(g.get('leftoverFractions') or [0.0, 0.0, 0.0])
+    ws = g.get('wholeSurface') or {}
+    return {'coveragePct': round(100 * (1 - lo[0]), 2),
+            'cutIntoPct': round(100 * float(g.get('cutIntoFraction') or 0), 2),
+            'maxCutIntoMm': g.get('maxCutIntoMm'), 'cutIntoAreaMm2': None,
+            'leftover0p1Pct': round(100 * lo[0], 2), 'leftover0p3Pct': round(100 * lo[1], 2),
+            'leftover1Pct': round(100 * lo[2], 2),
+            'passCoveragePct': round(100 * float(g.get('passCoverage') or 0.95), 2),
+            'wholeSurfacePct': round(100 * float(ws['fraction']), 2) if ws.get('fraction') is not None else None,
+            'source': 'receipt'}
 
 
 def goal_verdict(rc, gc):
@@ -450,17 +470,45 @@ def run_card(c, args, sha, cat):
             card['verdict'], card['sentence'] = 'error', 'the goal heightfield could not be sampled (not a mesh goal?)'
             return card
         if ncs and gc is not None:
-            card['verdict'], card['sentence'], card['numbers'] = goal_verdict(rc, gc)
+            # #953 — THE APP'S OWN GOAL REPORT WINS. details.goal rides the receipt; when it is there
+            # the card prints and judges exactly what the app does, and tools/goal_check.py is kept
+            # only for the deviation map and the edge-break/wall/shadow shares (the vendor table's
+            # allowances). Without it the card falls back to this tool's recomputation, and says so.
+            appg = rc.get('goal') if isinstance(rc.get('goal'), dict) else None
+            if appg and appg.get('ran'):
+                card['goalSource'] = 'receipt'
+                card['numbers'] = app_goal_numbers(appg)
+                lo = (appg.get('leftoverFractions') or [1.0])[0]
+                covers = 100.0 * (1.0 - float(lo))
+                passp = 100.0 * float(appg.get('passCoverage') or 0.95)
+                cut = float(appg.get('cutIntoFraction') or 0.0)
+                problems = []
+                if cut > 0:
+                    problems.append(f"cut into the goal on {round(100 * cut, 2)} % of the surface")
+                if covers < passp:
+                    problems.append(f"coverage {round(covers, 2)} % of the goal's top surface (the app's pass line asks {round(passp):g} %)")
+                card['verdict'] = 'deviates' if problems else 'match'
+                card['sentence'] = appg.get('sentence') or '; '.join(problems) or \
+                    f"the app's own goal check: zero cut-into; coverage {round(covers, 2)} %"
+                # The page's own allowance analysis rides along under page* names: the app has no
+                # edge-break/wall/shadow fields, and cutIntoPct must NOT be overwritten by ours.
+                card['numbers'].update({f'page{k[0].upper()}{k[1:]}': gc[k] for k in
+                                        ('edgeBreakPct', 'wallNotScoredPct', 'shadowNotScoredPct',
+                                         'cutIntoInclEdgePct', 'cutInto0p1Pct')})
+            else:
+                card['goalSource'] = 'recomputed'
+                card['verdict'], card['sentence'], card['numbers'] = goal_verdict(rc, gc)
             # The app's own second coverage number, from its `goal-unreached` warning: the share of
             # the WHOLE goal surface this setup reproduces (top-facing and reachable), as against this
             # card's top-heightfield coverage. Read from the receipt, never re-derived here.
-            reach = None
-            for w in rc['warnings']:
-                m = re.search(r"reproduces (\d+(?:\.\d+)?) % of the goal's surface", w)
-                if m:
-                    reach = float(m.group(1))
-                    break
-            card['numbers']['wholeSurfacePct'] = reach
+            if card['numbers'].get('wholeSurfacePct') is None:
+                reach = None
+                for w in rc['warnings']:
+                    m = re.search(r"reproduces (\d+(?:\.\d+)?) % of the goal's surface", w)
+                    if m:
+                        reach = float(m.group(1))
+                        break
+                card['numbers']['wholeSurfacePct'] = reach
             if len(rc['programs']) > 1:
                 card['sentence'] += ' (goal check: side 1 only)'
         else:
@@ -609,7 +657,8 @@ def seven_lines(c):
     rows = [
         ('coverage, top surface', f"{f(100 - v['leftover0p1Pct'], 2)} %" if v else 'not scored',
          f"{f(n['coveragePct'], 2)} %" if 'coveragePct' in n else 'refused — no program to score'),
-        ('cut-into &gt; 0.1 mm (allowances stated below)', vend_cut, ours_cut),
+        ('cut-into' + (" (the app\u2019s own goal check, 0.01 mm floor)" if n.get('source') == 'receipt'
+                                else ' &gt; 0.1 mm (allowances stated below)'), vend_cut, ours_cut),
         ('cycle time', f"{f((v.get('vendorSeconds') or 0) / 60, 1)} min (the NC header)" if v else '—',
          f(o['cycleSeconds'] / 3600, 1, ' h') if o.get('cycleSeconds') else (c.get('time') or 'refused — no program to score')),
         ('air fraction', pct(st.get('airFraction')), pct(o.get('airFraction'))),
@@ -721,12 +770,21 @@ def page(cards, args, sha, loc, cat):
         if c['kind'] == 'goal':
             if 'coveragePct' in n:
                 facts += [('Goal surface', f"{c.get('goalSize', {}).get('x', '?')} × {c.get('goalSize', {}).get('y', '?')} mm"),
-                          ('Cut into the goal', f"{n['cutIntoPct']} % · {n['cutIntoAreaMm2']} mm² · max {n['maxCutIntoMm']} mm"),
+                          ('Goal check', "the app’s own report (details.goal)"
+                           if c.get('goalSource') == 'receipt'
+                           else 'recomputed by tools/goal_check.py — the receipt carried no goal report'),
+                          ('Cut into the goal', f"{n['cutIntoPct']} %"
+                           + (f" · {n['cutIntoAreaMm2']} mm²" if n.get('cutIntoAreaMm2') is not None else '')
+                           + f" · max {n['maxCutIntoMm']} mm"),
                           ('Top-surface coverage', f"{n['coveragePct']} % (the card’s pass line)"),
                           ('Whole-surface reach', f"{n['wholeSurfacePct']} % from this setup (the remainder: under-faces and undercuts)"
                            if n.get('wholeSurfacePct') is not None else 'not stated by the app for this setup'),
-                          ('Leftover', f"{n['leftover0p1Pct']} % > 0.1 mm · {n['leftover0p3Pct']} % > 0.3 mm"),
-                          ('Smallest cutter', f"⌀{n['idealCutterMm']} mm")]
+                          ('Leftover', f"{n['leftover0p1Pct']} % > 0.1 mm · {n['leftover0p3Pct']} % > 0.3 mm")]
+                if n.get('idealCutterMm') is not None:
+                    facts.append(('Smallest cutter', f"⌀{n['idealCutterMm']} mm"))
+                if n.get('pageCutIntoInclEdgePct') is not None:
+                    facts.append(('Page sweep, independent', f"{n['pageCutIntoInclEdgePct']} % below the goal at 0.01 mm · "
+                                  f"{n['pageCutInto0p1Pct']} % at 0.1 mm after the allowances (tools/goal_check.py)"))
         else:
             if 'measuredItems' in n:
                 facts += [('Measured items', str(n['measuredItems'])),
