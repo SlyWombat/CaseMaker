@@ -28,9 +28,6 @@ import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } fr
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
 import { engraveGenerate as runEngraveGenerate, supportingFloors, type EngraveGenerated, type EngraveProgress, type EngraveShopOpts } from './sim/engraveGenerate';
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
-import { portLevelPlanner } from './sim/levelPlannerPort';
-import type { PoolSizing } from '@/engine/jobs/poolSizing';
-import type { LevelPlanner } from '@/engine/cnc/cam/rough3d';
 import { runSmartPick, type EngravePickSummary } from './sim/smartPickRun';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
@@ -41,17 +38,6 @@ import { sha256Hex } from '@/engine/import/meshStock';
 import { designJobFor, type DesignJobPatch, type DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
 
 let session: SimSession | null = null;
-/**
- * #881 — the roughing level pool, as this worker sees it: a port to the main thread's planners.
- * Set once per worker lifetime by `setLevelPlanner`; absent, every level is planned here.
- */
-let levelPlanner: LevelPlanner | null = null;
-/**
- * #881 — how many planners the last budgeted batch was allowed, as the pool stated it. The
- * worker cannot apply the core rule itself (no `matchMedia` here), so it reports the pool's own
- * answer — the run's Technical line quotes it.
- */
-let levelPoolSizing: PoolSizing | null = null;
 async function getSession(): Promise<SimSession> {
   session ??= createSimSession(await getToplevel());
   return session;
@@ -96,20 +82,6 @@ function buffersOf(meshes: (NodeMeshOutput | null | undefined)[]): Transferable[
 }
 
 const api = {
-  /**
-   * #881 — take the roughing level pool's channel. The main thread owns the workers; this end
-   * only sends level requests down it. The port is TRANSFERRED (Comlink.transfer on the caller's
-   * side), so no copy is made and the channel dies with this worker.
-   */
-  setLevelPlanner(port: MessagePort): void {
-    levelPlanner = portLevelPlanner(port, (sizing) => {
-      levelPoolSizing = sizing;
-    });
-  },
-  /** #881 — how many planners the last budgeted batch allowed; null before one has run. */
-  levelPoolSizing(): PoolSizing | null {
-    return levelPoolSizing;
-  },
   /**
    * Disposes any existing session first. A refused load leaves none — except when the runner
    * succeeded and only the sweep refused, in which case the session is PATH-ONLY: `toolPath`
@@ -296,8 +268,7 @@ const api = {
     // #896 — every stage report names this worker's heap too (see `workerMemoryMb`).
     const withMemory =
       onProgress === undefined ? undefined : (progress: EngraveProgress): void => onProgress({ ...progress, memoryMB: workerMemoryMb() });
-    // #881 — the pipeline is async now: the adaptive rough's levels can be planned by a pool.
-    return await runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop, withMemory, levelPlanner ?? undefined);
+    return await runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop, withMemory);
   },
   /**
    * The volumetric oracle (#206 §3) against the program CURRENTLY loaded in the session. The

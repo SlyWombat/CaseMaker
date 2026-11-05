@@ -19,8 +19,6 @@ import { stepAtLine } from '@/engine/cnc/playbackClock';
 import { EngraveCutSurface } from './EngraveCutSurface';
 import { saveEngraveProgram, saveText } from '@/engine/exportTrigger';
 import { buildSimStallReport, simStallReportFileName } from '@/engine/jobs/simStallReport';
-import { lastPoolSizing } from '@/engine/jobs/adaptivePool';
-import { PoolTechnicalLine } from './PoolTechnicalLine';
 import { flightCrumbs } from '@/platform/flightRecorder';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
@@ -2461,11 +2459,6 @@ export function EngravePanel(): JSX.Element {
   // ---- the run (#206) ----------------------------------------------------------------------
 
   const run = useEngraveRunStore();
-  // #881 — THE LEVEL POOL'S SIZE, as the pool itself stated it when it sized for this run. It is
-  // read on each render (the run's progress updates re-render the panel while planning), and it is
-  // absent until a budgeted run has planned — a raster job never states one. The run store clears
-  // it when a generate starts, so it cannot outlive the program it describes.
-  const poolSizing = run.generated !== null ? lastPoolSizing() : null;
   const simEnabled = featureSim;
   const running = run.phase === 'generating' || run.phase === 'simulating' || run.phase === 'checking';
 
@@ -4849,8 +4842,6 @@ export function EngravePanel(): JSX.Element {
             )}
           </div>
         </div>
-        {/* #881 — the level pool's own number, beside the margins it planned within. */}
-        <PoolTechnicalLine sizing={poolSizing} />
       </details>
       </Group>
 

@@ -63,7 +63,6 @@ import { threadMillIR, threadSettings, type ThreadMillPlan, type ThreadSettingsR
 import { drillBitIR, drillSettings, type DrillBitPlan, type DrillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
-import type { LevelPlanner } from '@/engine/cnc/cam/rough3d';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { itemLeftUncutMessage, vCone, vDepthLimit, vDepthRefusal, vDepthShortfall, vFluteLength, vTraceDepthRefusal, vTraceDepthWarning, type VCone } from '@/engine/cnc/vProfile';
@@ -84,7 +83,7 @@ import { goalReachFindings } from '@/engine/cnc/engrave/goalReach';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
-import { primitiveHeightfield, surfacePrimitiveWord, surfacePrimitivesOf, type SurfacePrimitive } from '@/engine/cnc/engrave/primitiveSurface';
+import { surfacePrimitivesOf } from '@/engine/cnc/engrave/primitiveSurface';
 import { closeOpenSheet } from '@/engine/cnc/engrave/closeSheet';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import {
@@ -160,20 +159,10 @@ import type { BedUnderFacts } from '@/engine/cnc/engrave/jobSetup';
 import { generateChamfer, type ChamferCut } from '@/engine/cnc/cam/chamfer';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, efficiencyOf, estimateCycleSeconds, estimateCycleTerms, HOP_Z, SAFE_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStatsOf, type CamMove, type CamOperation, type CamPassStep, type CycleTerms, type ProgramEfficiency, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
-// #966 — only `generateSurface3dIR` survives here: the goal-mesh planning path
-// (`generateSurface3dForGoal` and the rest-pass/residual/estimate helpers below it) was only ever
-// reached from the retired `USE_MODEL_CAM_ENGINE`-off dispatch. `generateSurface3dIR` itself is
-// NOT retired — `generateSurfacePrimitiveProgram` (cone/sphere primitives, #786 slice 4a-2, out
-// of #966's scope entirely) calls it directly, independent of goal objects or the model-CAM
-// engine.
-import {
-  generateSurface3dIR,
-  type Surface3dResult,
-} from '@/engine/cnc/cam/surface3d';
 import { DEFAULT_STOCK_TO_LEAVE_MM, type SurfaceFeeds } from '@/engine/cnc/cam/surfaceFinishTipField';
 import { type PostContext, type PostResult, type VacuumSpan } from '@/engine/cnc/post/z1';
 import { postFor, postKey, postOriginFor } from '@/engine/cnc/post';
-import { appendThumbnail, heightfieldTopViewPng, planViewPng, simulationTopViewPng } from '@/engine/cnc/post/thumbnail';
+import { appendThumbnail, planViewPng, simulationTopViewPng } from '@/engine/cnc/post/thumbnail';
 import { applySurfaceLift, maxSurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 // #966 — `GoalSurfaceFacts` pure-moved here from surface3d.ts: it outlives that file's own
 // retirement because `generateRotaryGoalProgram` below (rotary relief, out of #966's scope)
@@ -3570,28 +3559,6 @@ export function depthLimitReason(stack: StackDepthLimit, job: EngraveJob, x: Mm,
  * One program's result, before the list is assembled. `generateOneProgram`'s return shape.
  */
 /**
- * #786 slice 4a-2 — the job's work BESIDES its cone/sphere surfaces. A surface program is its own
- * file (one check per program), so a sub-job of only surfaces goes to the 3D CAM and everything
- * else goes to the region pipeline.
- */
-function jobHasNonSurfaceWork(job: EngraveJob): boolean {
-  const on = <T extends { enabled: boolean; construction?: boolean }>(list: readonly T[] | undefined): boolean =>
-    (list ?? []).some((i) => i.enabled && i.construction !== true);
-  return (
-    on(job.labels) ||
-    on(job.shapes) ||
-    on(job.combined) ||
-    on(job.vectors) ||
-    on(job.traces) ||
-    on(job.drills) ||
-    on(job.threads) ||
-    on(job.cutouts) ||
-    on(job.chamfers) ||
-    (job.primitives ?? []).some((p) => p.enabled && (p.kind === 'box' || p.kind === 'cylinder'))
-  );
-}
-
-/**
  * #737/#849 — whether a program leaves the neck for parting: `false`, `true` (appended as its last
  * operations, in the same file), or `{ apart }` — cut by the same CAM but posted as a neck-only
  * file of its own, with `apart` as that file's share of the run's vacuum words.
@@ -5419,6 +5386,48 @@ export async function generateGoalProgram(
 }
 
 /**
+ * #723 P2-1b — a goal job cut from several sides: ONE program per side, in setup order. Each side
+ * is surfaced by the single-goal path unchanged (same cutter, feeds, document findings and its own
+ * `validateGoalObject`), then adapted into the job's program list with that setup's index and id.
+ * The top-level fields describe the first program, exactly as every multi-program result does.
+ * A side that fails stops the run and is returned with the programs generated before it.
+ */
+async function generateGoalPrograms(
+  job: EngraveJob,
+  sides: readonly GoalSide[],
+  tool: Tool | null,
+  calibration: MachineCalibration | null,
+  shop: EngraveShopOpts,
+): Promise<EngraveGenerated> {
+  // A goal program's check is its `surfaceCheck` (there is no verifier report), and the single-goal
+  // path already builds each program with it — so each side's programs are those programs with the
+  // side's setup on them, never a field-by-field copy that could drop the check. A side can be
+  // more than one program (#847's rest pass, #869's flat rough, the chamfer), so the side's whole
+  // list carries over; each keeps its own cutter key.
+  const sidePrograms = (one: EngraveGenerated, side: GoalSide): EngraveProgram[] | null => {
+    if (!(one.ok && one.nc !== null) || one.programs.length === 0) return null;
+    return one.programs.map((program) => ({
+      ...program,
+      setupIndex: side.setupIndex + 1,
+      setupId: side.setup.id,
+    }));
+  };
+
+  const firstSide = sides[0]!;
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop });
+  const firstPrograms = sidePrograms(first, firstSide);
+  if (firstPrograms === null) return { ...first, programs: [] };
+  const programs: EngraveProgram[] = [...firstPrograms];
+  for (const side of sides.slice(1)) {
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop });
+    const sideList = sidePrograms(one, side);
+    if (sideList === null) return { ...one, programs };
+    programs.push(...sideList);
+  }
+  return { ...first, programs };
+}
+
+/**
  * The XY extent of a program's positioned moves, for the console's laser frame (#535). The
  * verifier's report normally carries this bbox; a surface program has no report, and its check
  * carries the same fact so the frame is still the program's own outline.
@@ -6006,12 +6015,6 @@ export async function engraveGenerate(
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
   shop: EngraveShopOpts = {},
   onProgress?: EngraveProgressFn,
-  /**
-   * #881 — WHERE THE ROUGHING LEVELS ARE PLANNED. A pool when the app runs (its workers live on
-   * the main thread, reached over a MessagePort); absent, every level is planned in this thread,
-   * exactly as before. The plans and the assembly are the same either way.
-   */
-  planner?: LevelPlanner,
 ): Promise<EngraveGenerated> {
   onProgress?.({ stage: 'prepare', label: 'reading the job' });
   // #786 slice 4c-2 — the same catalogue fill as `engraveRegions`, applied HERE as well so the
@@ -6203,19 +6206,6 @@ export async function engraveGenerate(
   const documentFloors = supportingFloors(tl, toPartPlan(job));
   onProgress?.({ stage: 'items', label: 'cutting the items' });
   if (job.setups === undefined) {
-    // #786 slice 4a-2 — A CONE OR SPHERE (OR SEVERAL) IS A SURFACE PROGRAM OF ITS OWN. On a legacy
-    // document the surfaces are generated here, in document order, BEFORE the item program: the
-    // item program cuts its cut-outs last (they release the part), so a surface after it would be
-    // cut on a part held only by its tabs. A document whose only work is surfaces returns them as
-    // the whole run; one with both returns the surfaces first, then the item program.
-    const legacySurfaces = surfacePrimitivesOf(job);
-    const itemWork = jobHasNonSurfaceWork(job);
-    const surfaceOnes: OneProgram[] =
-      tool === null || legacySurfaces.length === 0
-        ? []
-        : await Promise.all(
-            legacySurfaces.map((p) => generateSurfacePrimitiveProgram(job, p, tool, catalogue, calibration, shop, 'whole', planner)),
-          );
     // #836 — A LEGACY MIXED JOB (no `setups[]`, map items AND faces): the wrapped program is cut
     // as it always was, then the face program after it, in the same mounting. The vacuum words
     // split across the files.
@@ -6238,26 +6228,21 @@ export async function engraveGenerate(
       const into = faceIntoNeckFinding(job, faceTool);
       if (into !== null) return neckRefusal(into);
     }
-    // #786 slice 4a-2 — a document whose only work is surfaces takes the first surface program as
-    // its one program (the rest are appended below); one with item work cuts its item program.
-    const one =
-      itemWork || legacySurfaces.length === 0
-        ? await generateOneProgram(
-            tl,
-            job,
-            tool,
-            catalogue,
-            calibration,
-            margins,
-            shop,
-            mixedFaces ? 'first' : 'whole',
-            true,
-            'rough-and-finish',
-            neckLast ? { apart: 'last' } : !mixedFaces,
-            undefined,
-            documentFloors,
-          )
-        : surfaceOnes[0]!;
+    const one = await generateOneProgram(
+      tl,
+      job,
+      tool,
+      catalogue,
+      calibration,
+      margins,
+      shop,
+      mixedFaces ? 'first' : 'whole',
+      true,
+      'rough-and-finish',
+      neckLast ? { apart: 'last' } : !mixedFaces,
+      undefined,
+      documentFloors,
+    );
     // #677 — a legacy document names ONE cutter, so a variable carve's core cannot be cleared: it
     // stands, and the warning says what to add. A job that has setups gets the same sentence from
     // the loop below, with the setup's number on it.
@@ -6269,14 +6254,8 @@ export async function engraveGenerate(
       toolKey: job.toolKey,
       itemIds: [],
     };
-    const surfacePrograms = surfaceOnes
-      .filter((s) => s.ok && s.nc !== null && s.surfaceCheck != null)
-      .map((s) => programOf(s, ref));
-    // A surface-only document has no item program to face or engrave; the surfaces ARE the run.
-    const itemProgramHere = itemWork || legacySurfaces.length === 0;
-    const facingFile = itemProgramHere ? facingProgramOf(oneReady, ref) : null;
-    const engraved =
-      itemProgramHere && oneReady.ok && oneReady.nc !== null && oneReady.verify !== null ? [programOf(oneReady, ref)] : [];
+    const facingFile = facingProgramOf(oneReady, ref);
+    const engraved = oneReady.ok && oneReady.nc !== null && oneReady.verify !== null ? [programOf(oneReady, ref)] : [];
     // #836 — the face program, cut after the map work with the setup's face cutter.
     if (faceRef !== null) {
       const faceOne = await generateFaceProgram(
@@ -6313,11 +6292,11 @@ export async function engraveGenerate(
           ...faceOne.findings,
           ...(neckFile.length === 0 ? [] : [neckAfterFacesFinding()]),
         ]),
-        programs: [...surfacePrograms, ...(facingFile === null ? [] : [facingFile]), ...engraved, ...facePrograms, ...neckFile],
+        programs: [...(facingFile === null ? [] : [facingFile]), ...engraved, ...facePrograms, ...neckFile],
       };
     }
     // #623 — the frame the programs were posted against; the panel loads the simulation with it.
-    return { ...oneReady, surface: shop.surface ?? null, programs: [...surfacePrograms, ...(facingFile === null ? [] : [facingFile]), ...engraved] };
+    return { ...oneReady, surface: shop.surface ?? null, programs: [...(facingFile === null ? [] : [facingFile]), ...engraved] };
   }
 
   // A setup that cannot become exactly one program is refused BEFORE anything is cut: the panel's
@@ -6833,27 +6812,6 @@ async function generateOneProgram(
    */
   raisedCoFlat?: Tool | null,
 ): Promise<OneProgram> {
-  // #786 slice 4a-2 — A CONE OR SPHERE IS ITS OWN SURFACE PROGRAM. `setupPrograms` splits the
-  // primitive out of its owner's ordinary ref, so a sub-job whose only work is surfaces lands
-  // here; the region pipeline has nothing to plan for a sloped wall or a curved floor.
-  const surfacePrimitives = surfacePrimitivesOf(job);
-  if (surfacePrimitives.length > 0 && !jobHasNonSurfaceWork(job)) {
-    const only = surfacePrimitives[0]!;
-    if (tool === null) {
-      return {
-        ...emptyGoalResult(),
-        ok: false,
-        stage: 'feeds',
-        findings: [],
-        feeds: null,
-        cam: null,
-        nc: null,
-        verify: null,
-        errors: [{ stage: 'feeds', message: 'the job has no usable cutter' }],
-      };
-    }
-    return generateSurfacePrimitiveProgram(job, only, tool, catalogue, calibration, shop, span);
-  }
   // #347 — the JOB's machine, not the app's only one: the envelope, the spindle ceiling and the
   // frame below are read off the profile the document names. The POST is still `postZ1`'s dialect,
   // which is the only post this app has; a second mill is a second post, and this line is where a

@@ -35,7 +35,6 @@ import { pureGoalObject } from '@/engine/cnc/engrave/jobKind';
 import { goalEdgeBreakOptions } from '@/engine/cnc/engrave/edgeBreak';
 import { goalPassCoverage } from '@/platform/defaultsClient';
 import type { ProgramOracle } from './engraveRunGate';
-import { forgetPoolSizing } from '@/engine/jobs/adaptivePool';
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { SimStatus } from './simStore';
@@ -630,9 +629,6 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         }
       };
       try {
-        // #881 — a new run forgets the last pool decision; the pool states its own size again
-        // only if this program's planning is budgeted.
-        forgetPoolSizing();
         generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop, onProgress);
       } finally {
         clearStall();
