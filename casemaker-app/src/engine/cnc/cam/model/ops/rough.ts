@@ -61,6 +61,42 @@ export interface RoughOpOptions {
   rapid: RapidEstimate;
   /** Where the tool starts, for the first ring's tour — the work origin by default. */
   startFrom?: readonly [number, number];
+  /**
+   * #962 — THE DESIGN'S TOP AT (x, y), in this op's datum, for the material field where the
+   * sampled grid has no answer. The linker's tests and B's disc-aware down-leg floor read the
+   * field up to a cutter radius past the grid's own edge, where the region's own top is NOT an
+   * upper bound — a wall or land beside it can stand higher. Absent → the field states nothing
+   * past the grid, exactly as before.
+   */
+  materialTopAt?: (x: number, y: number) => number | null;
+  /** The stock top in this op's datum — the last-resort bound past the grid (see above). */
+  stockTopZMm?: number;
+}
+
+/**
+ * #962 — THE MATERIAL FIELD OVER A SAMPLED GRID, with a true upper bound past it.
+ *
+ * `core` answers where the grid does (null outside its own reach). Past it the field answers the
+ * DESIGN's top there (`materialTopAt`, the plan's goal/mesh heightfield), the stock top where even
+ * the design is silent, and `+Infinity` only when the caller supplies neither — the safe old
+ * default. The fallbacks exist because both readers of the field reach past the grid's edge —
+ * the down-leg's disc-aware floor (B's 61ea3dd6) and `linkIsClear` — and an answer of +Infinity
+ * costs the rapid-to-floor split, while the region's own top would be an UNDER-estimate wherever
+ * a taller neighbour stands beside it.
+ */
+export function gridMaterial(
+  core: (x: number, y: number) => number | null,
+  opts: Pick<RoughOpOptions, 'materialTopAt' | 'stockTopZMm'>,
+): MaterialField {
+  return {
+    topAt: (x, y) => {
+      const v = core(x, y);
+      if (v !== null) return v;
+      const design = opts.materialTopAt?.(x, y);
+      if (design !== null && design !== undefined) return design;
+      return opts.stockTopZMm ?? Number.POSITIVE_INFINITY;
+    },
+  };
 }
 
 /** The Z passes from `zTop` down to `zBottom`, each `stepDownMm` apart (the last one shorter). */
@@ -211,20 +247,17 @@ export function rough(opts: RoughOpOptions): OpOutcome {
     if (i < 0 || j < 0 || i >= nx || j >= ny) return Number.NaN;
     return target[j * nx + i]!;
   };
-  /** The material the CURRENT level z has not removed: the target where it stands above z, else z. */
-  const materialFor = (_levelZ: number): MaterialField => ({
-    // ITEM 7 — the field reports the STANDING SURFACE (the target grid), never a level floor under
-    // it. `math.max(levelZ, target)` was honest only for a link travelling at that same level's
-    // own z: at any other travel height it claims a floor that pass never left, and the skim's
-    // first link() routing trusted it and fed THROUGH standing material (the organizer's rough
-    // measured 10,063 s -> 18,645 s before this fix). The level loop's own links are unchanged by
-    // it: at travel z == levelZ, cleared cells read target < z (clear either way) and uncut cells
-    // read target > z (hop either way).
-    topAt: (x, y) => {
+  // ITEM 7 — the field reports the STANDING SURFACE (the target grid), never a level floor under
+  // it. `math.max(levelZ, target)` was honest only for a link travelling at that same level's
+  // own z: at any other travel height it claims a floor that pass never left, and the skim's
+  // first link() routing trusted it and fed THROUGH standing material (the organizer's rough
+  // measured 10,063 s -> 18,645 s before this fix). Past the grid, #962's true upper bound (the
+  // goal/mesh top, else the stock top) — see `gridMaterial`.
+  const materialFor = (_levelZ: number): MaterialField =>
+    gridMaterial((x, y) => {
       const t = targetAt(x, y);
-      return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
-    },
-  });
+      return Number.isFinite(t) ? t : null;
+    }, opts);
 
   const moves: ToolpathIR['operations'][number]['moves'] = [];
   const passes: PassRef[] = [];
@@ -300,9 +333,13 @@ export function rough(opts: RoughOpOptions): OpOutcome {
     return cl < opts.region.zTop && cl >= skimFirstLevel ? cl : null;
   };
   let skimRuns = 0;
-  const skimRun = (i0: number, i1: number, j: number): void => {
+  const skimRun = (i0: number, i1: number, j: number, reverse: boolean): void => {
     const points: [number, number, number][] = [];
-    for (let i = i0; i <= i1; i++) points.push([min[0] + i * pitch, min[1] + j * pitch, skimTarget(i, j) as number]);
+    if (reverse) {
+      for (let i = i1; i >= i0; i--) points.push([min[0] + i * pitch, min[1] + j * pitch, skimTarget(i, j) as number]);
+    } else {
+      for (let i = i0; i <= i1; i++) points.push([min[0] + i * pitch, min[1] + j * pitch, skimTarget(i, j) as number]);
+    }
     if (points.length < 2) return;
     const start = points[0]!;
     // Between skim runs the cutter joins through #962's `link()` — the same rule the Z-level loop
@@ -338,16 +375,25 @@ export function rough(opts: RoughOpOptions): OpOutcome {
     prevLevelZ = zMin;
     skimRuns++;
   };
+  // #962 — THE SKIM'S ROWS ALTERNATE DIRECTION. Every row used to be traced low-i to high-i, so
+  // each row finished at the far side of the region and the join to the next row's start raced the
+  // whole width back: the organizer's curved-0 measured 645 returns, 104.1 m of rapid, ~87 min for
+  // 2.2 m of cutting. Odd rows now run high-i to low-i (and their runs right to left), so
+  // consecutive rows meet end-to-end — the same shape as the finish's tour.
   for (let j = 0; j < ny; j++) {
+    const reverse = j % 2 === 1;
+    const runs: [number, number][] = [];
     let i0 = -1;
     for (let i = 0; i <= nx; i++) {
       const inRun = i < nx && skimTarget(i, j) !== null;
       if (inRun && i0 < 0) i0 = i;
       if (!inRun && i0 >= 0) {
-        skimRun(i0, i - 1, j);
+        runs.push([i0, i - 1]);
         i0 = -1;
       }
     }
+    if (reverse) runs.reverse();
+    for (const [a, b] of runs) skimRun(a, b, j, reverse);
   }
 
   const lastMove = moves[moves.length - 1];
@@ -428,6 +474,10 @@ export interface SkinOpOptions {
   air: boolean;
   rapid: RapidEstimate;
   startFrom?: readonly [number, number];
+  /** #962 — the design's top past the grid, for the material field (see `gridMaterial`). */
+  materialTopAt?: (x: number, y: number) => number | null;
+  /** #962 — the stock top in this op's datum, the last-resort bound (see `gridMaterial`). */
+  stockTopZMm?: number;
 }
 
 export function skin(opts: SkinOpOptions): OpOutcome {
@@ -489,15 +539,13 @@ export function skin(opts: SkinOpOptions): OpOutcome {
     }
   }
 
-  const standing: MaterialField = {
-    topAt: (x, y) => {
-      const i = Math.round((x - min[0]) / pitch);
-      const j = Math.round((y - min[1]) / pitch);
-      if (i < 0 || j < 0 || i >= nx || j >= ny) return Number.POSITIVE_INFINITY;
-      const t = target[j * nx + i]!;
-      return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
-    },
-  };
+  const standing: MaterialField = gridMaterial((x, y) => {
+    const i = Math.round((x - min[0]) / pitch);
+    const j = Math.round((y - min[1]) / pitch);
+    if (i < 0 || j < 0 || i >= nx || j >= ny) return null;
+    const t = target[j * nx + i]!;
+    return Number.isFinite(t) ? t : null;
+  }, opts);
   const linkOptionsFor: LinkOptions = {
     tool: { radiusMm: toolRadius },
     feeds: { feed: opts.feeds.feedMmPerMin, plungeFeed: opts.feeds.plungeFeedMmPerMin },

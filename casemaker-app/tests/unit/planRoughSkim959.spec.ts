@@ -127,4 +127,29 @@ describe('#959 review — the rough splits shallow from steep', () => {
     const levels = new Set(feeds.map((m) => m.z.toFixed(3)));
     expect(levels.size).toBeGreaterThanOrEqual(3);
   }, 120_000);
+
+  it("#962 — the skim's rows alternate: each row joins the NEXT row's start, not a full-width return", () => {
+    // The skim's raster rows run along x across the region's 40 mm width. Every row used to be
+    // traced low-x to high-x, so the join to the next row raced the full width back: the
+    // organizer's curved-0 measured 645 such returns, 104.1 m of rapid, ~87 min. Odd rows now run
+    // high-x to low-x, and the join crosses one grid pitch (0.5 mm).
+    const result = plan(-0.6, -1.0);
+    const roughOp = result.ops.find((op) => op.kind === 'rough');
+    expect(roughOp, `ops: ${result.ops.map((o) => o.kind).join(', ')}`).toBeDefined();
+    const moves = roughOp!.outcome.ir.operations.flatMap((o) => o.moves);
+    // The ACROSS leg of a join is the rapid with no Z change; the up and down legs hold XY.
+    let joins = 0;
+    let widest = 0;
+    for (let i = 1; i < moves.length; i++) {
+      const a = moves[i - 1]!;
+      const b = moves[i]!;
+      if (b.kind !== 'rapid' || Math.abs(b.z - a.z) > 1e-9) continue;
+      const lateral = Math.hypot(b.x - a.x, b.y - a.y);
+      if (lateral <= 0.2) continue;
+      joins++;
+      widest = Math.max(widest, lateral);
+    }
+    expect(joins, 'no join between skim rows was posted — the fixture does not exercise the skip').toBeGreaterThan(3);
+    expect(widest, 'a join crossed the row width — the skim rows do not alternate').toBeLessThan(2);
+  }, 120_000);
 });
