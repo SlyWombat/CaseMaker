@@ -310,4 +310,38 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     }
     expect(legs, `same-level retract rapids:\n${legs.slice(0, 8).join('\n')}`).toEqual([]);
   });
+
+  // #962 — THE CALLER'S RAPID PLANE (the manager's finding on 01f6f020): the op-level test, not the
+  // route unit test — no lateral G0 in a pocket op may sit below the level it just cut + 1 mm. Red
+  // if pocket.ts passes rapidZMm = levelZ to the route.
+  it('(7) no lateral G0 in a pocket op sits below its level floor + 1 mm', () => {
+    const s = tl.Manifold.cube([40, 40, 10])
+      .subtract(tl.Manifold.cube([30, 30, 4]).translate([5, 5, 6]))
+      .add(tl.Manifold.cube([5, 5, 4]).translate([11, 11, 6]))
+      .add(tl.Manifold.cube([5, 5, 4]).translate([24, 24, 6]));
+    const tree = treeOf(s, 10);
+    const result = plan(tree, [flat(6, 1)]);
+    const bad: string[] = [];
+    for (const op of result.ops.filter((o) => o.kind === 'pocket')) {
+      for (const o of op.outcome.ir.operations) {
+        let lastFeedZ: number | null = null;
+        let prev: { x: number; y: number; z: number } | null = null;
+        for (const m of o.moves) {
+          if (m.x === undefined || m.y === undefined || m.z === undefined) continue;
+          if (m.kind === 'feed') lastFeedZ = m.z;
+          if (
+            m.kind === 'rapid' &&
+            prev !== null &&
+            Math.hypot(m.x - prev.x, m.y - prev.y) > 0.05 &&
+            lastFeedZ !== null &&
+            m.z < lastFeedZ + 1 - 1e-6
+          ) {
+            bad.push(`lateral G0 at z ${m.z.toFixed(2)} after a feed at ${lastFeedZ.toFixed(2)}`);
+          }
+          prev = { x: m.x, y: m.y, z: m.z };
+        }
+      }
+    }
+    expect(bad, bad.slice(0, 6).join('\n')).toEqual([]);
+  });
 });
