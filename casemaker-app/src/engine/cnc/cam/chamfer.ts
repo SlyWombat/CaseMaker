@@ -23,10 +23,18 @@
  * NO TABS, NO PASSES, NO CUTTER-RADIUS COMPENSATION: the bevel IS the cutter's envelope, and one
  * pass cuts it because a wider bevel than the cone reaches is refused before this point
  * (`chamfer-too-wide`), not approximated here.
+ *
+ * LINKING between rings and between cuts goes through #962's `link()` (the review's item 6): this
+ * op has no material field of its own (a V bit tracing a rim's edge does not clear the stay-down
+ * short hop's own territory the way a flat's pocketing does), so every transition retracts — but
+ * through `link()`'s own `retract()`, whose vertical legs are FEEDS at `plungeFeed`, never a
+ * rapid (#956 §5, Review B's F8). The op's own first form (every one of the three legs a rapid,
+ * including the two pure-vertical ones) violated that; only the final, whole-op SAFE_Z retreat
+ * stays a plain rapid, the same convention every op in this engine posts.
  */
 
 import type { CutParams } from '../feeds';
-import type { Tool } from '../tool';
+import { cuttingDiameter, type Tool } from '../tool';
 import { vCone } from '../vProfile';
 import {
   estimateCycleSeconds,
@@ -38,6 +46,7 @@ import {
   type RapidEstimate,
   type ToolpathIR,
 } from './ir';
+import { link, type LinkOptions, type LinkPoint } from './model/linking';
 import type { Polygons } from './pocket';
 
 /** One chamfer pass, with the centre path the caller has already offset by the tip radius. */
@@ -77,21 +86,36 @@ export function generateChamfer(
   }
   const toolNumber = toolNumberFor(tool);
   const operations: CamOperation[] = [];
+  // No material field of its own (see the header): every link retracts, through `link()`'s own
+  // `retract()` so the two vertical legs are feeds at `plungeFeed`, never a rapid.
+  const toolRadius = (cuttingDiameter(tool) ?? 0) / 2;
+  const linkOptions: LinkOptions = {
+    material: { topAt: () => Number.POSITIVE_INFINITY },
+    clearanceZ: HOP_Z,
+    tool: { radiusMm: toolRadius },
+    feeds: { feed: params.feed, plungeFeed: params.plungeFeed },
+  };
 
   for (const cut of cuts) {
     const z = -cut.depth;
     const moves: CamMove[] = [];
+    let prevExit: LinkPoint | null = null;
     for (const contour of cut.path) {
       const start = contour[0];
       if (start === undefined) continue;
-      // Down at the ring's first point in the air, then a FEED to the tip plane: the plunge cuts
-      // the bevel's entry and must never be a rapid below the top face.
-      moves.push({ kind: 'rapid', x: start[0], y: start[1], z: HOP_Z });
-      moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: params.plungeFeed });
+      const entry: LinkPoint = { x: start[0], y: start[1], z };
+      if (prevExit === null) {
+        // Down at the ring's first point in the air, then a FEED to the tip plane: the plunge
+        // cuts the bevel's entry and must never be a rapid below the top face.
+        moves.push({ kind: 'rapid', x: start[0], y: start[1], z: HOP_Z });
+        moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: params.plungeFeed });
+      } else {
+        moves.push(...link(prevExit, entry, linkOptions));
+      }
       for (const p of contour.slice(1)) moves.push({ kind: 'feed', x: p[0], y: p[1], z, f: params.feed });
       // Close the ring, so the bevel's last corner is cut by the same pass as its first.
       moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: params.feed });
-      moves.push({ kind: 'rapid', x: start[0], y: start[1], z: HOP_Z });
+      prevExit = entry;
     }
     const last = moves[moves.length - 1];
     if (last) moves.push({ kind: 'rapid', x: last.x, y: last.y, z: SAFE_Z });

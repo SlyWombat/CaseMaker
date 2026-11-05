@@ -16,18 +16,22 @@
  * cutting `max(trueCL, levelZ)` — never deeper than the level's own target, whatever the true
  * surface asks for — so only the LAST level (the region's own floor) reaches the true CL exactly.
  *
- * LINKING is the plain retract/rapid/plunge every op used before `link()` was wired in (#962's own
- * stay-down integration is named, not assumed, here — the manager's ruling on footprint vs links
- * is #960's own next wiring step, read `rowDropper.ts`'s own header first): correct, never a
- * cutting move across unplanned ground, but not yet stay-down between rows or footprint intervals.
+ * LINKING between rows (and between levels) goes through #962's `link()` (the review's item 6):
+ * the same material-aware stay-down-or-retract call every other op uses, against a field honest
+ * about only the level just FINISHED — a row's own first feed is still a plunge when `link()`
+ * itself has to retract (its vertical legs are at `plungeFeed`, never the cutting feed), but two
+ * rows close enough and already at or below the finished level's own target link as one cutting
+ * feed instead of the three-rapid retract every row used to pay for unconditionally.
  */
 
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
+import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import type { RemainderRegion } from '../features';
 import type { ClSurface } from '../clsurface';
 import { profileOf } from '../dropcutter';
+import { link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
 import { dropRow, type DroppedPoint } from '../rowDropper';
 import { cutterKeyOf } from '../sequence';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
@@ -164,10 +168,30 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   const levels = depthLevels(opts.region.zTop, opts.region.zBottom, opts.stepDownMm);
   const { min, max } = opts.regionRef.bounds;
 
+  // The field is honest about only the level just FINISHED (rough.ts's own reasoning): capped at
+  // that level's own Z, never the level about to start, so a link is never approved through a
+  // deeper target this op has not actually reached yet. Outside the footprint the field states
+  // nothing (`+Infinity`), so a link endpoint off the region's own edge always retracts.
+  const materialFor = (levelZ: number): MaterialField => ({
+    topAt: (x, y) => {
+      if (!pointInPolygons(opts.region.footprint, x, y)) return Number.POSITIVE_INFINITY;
+      const cl = opts.clSurface.dropCutter(x, y);
+      if (cl === null) return Number.POSITIVE_INFINITY;
+      return Math.max(levelZ, cl);
+    },
+  });
+  const linkOptionsFor = (levelZ: number): LinkOptions => ({
+    material: materialFor(levelZ),
+    clearanceZ: opts.regionRef.regionClearanceZ,
+    tool: { radiusMm: toolRadius },
+    feeds: { feed: opts.feeds.feedMmPerMin, plungeFeed: opts.feeds.plungeFeedMmPerMin },
+  });
+
   const moves: ToolpathIR['operations'][number]['moves'] = [];
   const passes: PassRef[] = [];
   const cleared: RegionAtZ[] = [];
   let prevExit: DroppedPoint | null = null;
+  let prevLevelZ: number | null = null;
   let rowParity = 0;
 
   // A raster row COLLINEAR with a polygon edge is the even-odd tracer's own blind spot: a vertical
@@ -194,23 +218,16 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         const row = dropRow(opts.clSurface, [x, insetY0], [x, insetY1]);
         const clamped = row.map((p) => ({ ...p, z: Math.max(p.z, levelZ) }));
 
+        const entryPoint: LinkPoint = { x: clamped[0]!.x, y: clamped[0]!.y, z: clamped[0]!.z };
         if (prevExit === null) {
-          moves.push({ kind: 'rapid', x: clamped[0]!.x, y: clamped[0]!.y, z: opts.hopZMm });
+          // The row's own FIRST feed is a PLUNGE (straight down from the hop height into
+          // material), never at the cutting feed — the same bug 9e976f0b fixed in `ops/pocket.ts`.
+          moves.push({ kind: 'rapid', x: entryPoint.x, y: entryPoint.y, z: opts.hopZMm });
+          moves.push({ kind: 'feed', x: entryPoint.x, y: entryPoint.y, z: entryPoint.z, f: opts.feeds.plungeFeedMmPerMin });
         } else {
-          // Retract to the REGION's own clearance plane, not a bare `hopZMm` — C's point 3
-          // ruling (`RegionRef.regionClearanceZ`'s own doc) is the height that clears every
-          // obstacle THIS region's own fixture reaches, same convention `ops/pocket.ts` uses.
-          // Retract to the REGION's own clearance plane, not a bare `hopZMm` — C's point 3
-          // ruling (`RegionRef.regionClearanceZ`'s own doc) is the height that clears every
-          // obstacle THIS region's own fixture reaches, same convention `ops/pocket.ts` uses.
-          moves.push({ kind: 'rapid', x: prevExit.x, y: prevExit.y, z: opts.regionRef.regionClearanceZ });
-          moves.push({ kind: 'rapid', x: clamped[0]!.x, y: clamped[0]!.y, z: opts.regionRef.regionClearanceZ });
-          moves.push({ kind: 'rapid', x: clamped[0]!.x, y: clamped[0]!.y, z: opts.hopZMm });
+          const from: LinkPoint = { x: prevExit.x, y: prevExit.y, z: prevExit.z };
+          moves.push(...link(from, entryPoint, linkOptionsFor(prevLevelZ ?? prevExit.z)));
         }
-        // The row's own FIRST feed is a PLUNGE (straight down from the hop height into material),
-        // never at the cutting feed — the same bug 9e976f0b fixed in `ops/pocket.ts`; every move
-        // after it is lateral, at the ordinary cutting feed.
-        moves.push({ kind: 'feed', x: clamped[0]!.x, y: clamped[0]!.y, z: clamped[0]!.z, f: opts.feeds.plungeFeedMmPerMin });
         for (let i = 1; i < clamped.length; i++) {
           moves.push({ kind: 'feed', x: clamped[i]!.x, y: clamped[i]!.y, z: clamped[i]!.z, f: opts.feeds.feedMmPerMin });
         }
@@ -226,6 +243,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         });
         levelCleared.push([[x, Math.min(rawY0, rawY1)], [x, Math.max(rawY0, rawY1)]]);
         prevExit = exitPoint;
+        prevLevelZ = levelZ;
         rowParity++;
       }
     }
