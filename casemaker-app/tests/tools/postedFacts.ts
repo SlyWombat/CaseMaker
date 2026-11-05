@@ -56,6 +56,12 @@ export interface PostedFacts {
   /** `rapidMoves / feedMoves × 1000`; 0 for a program that feeds nothing. */
   rapidsPer1000FeedLines: number;
   cutters: CutterUse[];
+  /**
+   * Manual bit changes INSIDE this file: every tool change after the first (the first tool is
+   * loaded before play, so the file's opening `T… M6` is not a change). A card that runs several
+   * files adds the changes BETWEEN them itself — that count is the card's, not the file's.
+   */
+  toolChanges: number;
   /** The vendor's own `;@MKR|TIME|seconds=`, when the file carries one. */
   headerTimeSeconds: number | null;
   spindleRpm: number;
@@ -137,8 +143,10 @@ export function measurePostedProgram(text: string, opts: MeasureOptions = {}): P
   const ops: RawOp[] = [];
   let current: RawOp = { tool: 0, moves: [], feedMoves: 0 };
   let at: Tracked = { x: 0, y: 0, z: 0 };
+  let toolChangeEvents = 0;
   for (const ev of parse.events) {
     if (ev.kind === 'tool-change') {
+      toolChangeEvents++;
       if (current.moves.length > 0) ops.push(current);
       current = { tool: ev.tool, moves: [], feedMoves: 0 };
       continue;
@@ -206,6 +214,7 @@ export function measurePostedProgram(text: string, opts: MeasureOptions = {}): P
     feedMoves,
     rapidsPer1000FeedLines: feedMoves > 0 ? (rapidCount / feedMoves) * 1000 : rapidCount > 0 ? Number.POSITIVE_INFINITY : 0,
     cutters: [...cutters.values()].sort((a, b) => b.feedMoves - a.feedMoves),
+    toolChanges: Math.max(0, toolChangeEvents - 1),
     headerTimeSeconds: headerTime(parse),
     spindleRpm,
     parseErrors: parse.diagnostics.filter((d) => d.severity === 'error').length,
@@ -225,6 +234,7 @@ export function combinePostedFacts(parts: readonly PostedFacts[]): PostedFacts {
   let spinUpSeconds = 0;
   let rapidMoves = 0;
   let feedMoves = 0;
+  let toolChanges = 0;
   let headerTimeSeconds: number | null = null;
   let spindleRpm = 0;
   let parseErrors = 0;
@@ -235,6 +245,7 @@ export function combinePostedFacts(parts: readonly PostedFacts[]): PostedFacts {
     spinUpSeconds += p.spinUpSeconds;
     rapidMoves += p.rapidMoves;
     feedMoves += p.feedMoves;
+    toolChanges += p.toolChanges;
     if (p.headerTimeSeconds !== null) headerTimeSeconds = (headerTimeSeconds ?? 0) + p.headerTimeSeconds;
     spindleRpm = Math.max(spindleRpm, p.spindleRpm);
     parseErrors += p.parseErrors;
@@ -255,6 +266,7 @@ export function combinePostedFacts(parts: readonly PostedFacts[]): PostedFacts {
     feedMoves,
     rapidsPer1000FeedLines: feedMoves > 0 ? (rapidMoves / feedMoves) * 1000 : rapidMoves > 0 ? Number.POSITIVE_INFINITY : 0,
     cutters: [...cutters.values()].sort((a, b) => b.feedMoves - a.feedMoves),
+    toolChanges,
     headerTimeSeconds,
     spindleRpm,
     parseErrors,

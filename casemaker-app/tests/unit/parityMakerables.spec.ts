@@ -186,6 +186,9 @@ for (const ours of manifest.ours) {
         coverage: coverageFromPage(goalcheck),
         cutInto: cutIntoFromPage(goalcheck),
         cycleSeconds: facts.cycleSeconds,
+        // The card's posted files are separate runs; a bit change is needed between them.
+        toolChanges: Math.max(0, oursFiles.length - 1),
+        headerTimeSeconds: null,
         airFraction: facts.airFraction,
         rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
         cutters: facts.cutters.length,

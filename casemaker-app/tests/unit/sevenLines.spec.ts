@@ -24,6 +24,8 @@ const VENDOR = (over: Partial<ProgramScore> = {}): ProgramScore => ({
     maxMm: 0.45,
   },
   cycleSeconds: 47.6 * 60,
+  toolChanges: 0,
+  headerTimeSeconds: 47.6 * 60,
   airFraction: 0.15,
   rapidsPer1000FeedLines: 8,
   cutters: 4,
@@ -44,6 +46,8 @@ const OURS = (over: Partial<ProgramScore> = {}): ProgramScore => ({
     maxMm: 0.05,
   },
   cycleSeconds: 45 * 60,
+  toolChanges: 0,
+  headerTimeSeconds: null,
   airFraction: 0.2,
   rapidsPer1000FeedLines: 10,
   cutters: 3,
@@ -203,6 +207,29 @@ describe('#964 line 3 — cycle ≤ 2× the vendor’s, goal 1.25×', () => {
     const card = score(OURS({ cycleSeconds: 1.25 * VENDOR().cycleSeconds }));
     expect(line(card, 'cycle').goalMet).toBe(true);
     expect(line(card, 'cycle').note).toContain('goal');
+  });
+
+  it('counts manual bit changes as real machine time on both sides', () => {
+    // Equal cutting time; ours needs 40 changes, the vendor none — the changes take it past 2×.
+    const card = score(OURS({ toolChanges: 40 }), VENDOR({ cycleSeconds: 45 * 60, toolChanges: 0 }));
+    const cycle = line(card, 'cycle');
+    expect(cycle.state).toBe('fail');
+    expect(cycle.oursValue).toBe(45 * 60 + 40 * 91.4);
+    expect(cycle.note).toContain('bit changes');
+    // The same change count on both sides leaves the comparison unchanged.
+    const level = score(OURS({ toolChanges: 40 }), VENDOR({ cycleSeconds: 45 * 60, toolChanges: 40 }));
+    expect(line(level, 'cycle').state).toBe('pass');
+  });
+
+  it('never uses Makera’s header TIME as the reference — it is a printed fact', () => {
+    // The vendor's own file costs 60 min under our estimator but its header claims 10 min.
+    // Our 60 min cutting is level with the file; judged against the header it would be 6×.
+    const card = score(OURS({ cycleSeconds: 60 * 60 }), VENDOR({ cycleSeconds: 60 * 60, headerTimeSeconds: 10 * 60 }));
+    const cycle = line(card, 'cycle');
+    expect(cycle.state).toBe('pass');
+    expect(cycle.vendorValue).toBe(60 * 60);
+    expect(cycle.note).toContain('header TIME');
+    expect(cycle.note).toContain('10.0 min');
   });
 });
 

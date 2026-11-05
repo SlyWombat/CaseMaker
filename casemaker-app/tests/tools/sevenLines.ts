@@ -19,6 +19,8 @@
  * default.
  */
 
+import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
+
 /** The seven lines' identifiers, in plan v2 §3's order. */
 export type SevenLineKey =
   | 'coverage'
@@ -103,8 +105,22 @@ export interface ProgramScore {
    */
   coverage: number | null;
   cutInto: CutIntoScore;
-  /** #927's estimate on the POSTED file (ours); the vendor NC's own `;@MKR|TIME` (vendor). */
+  /**
+   * #927's CUTTING estimate on the posted file — ours and the vendor's, through the SAME model.
+   * Bit changes are NOT in this number: the scorer adds them, so a card cannot compare a time with
+   * changes against one without. Makera's header `TIME` never enters this field.
+   */
   cycleSeconds: number;
+  /**
+   * Manual bit changes the card's program set needs, beyond the first tool (which is loaded before
+   * play). Ours: one per program after the first; the vendor: every tool change inside its NC.
+   */
+  toolChanges: number;
+  /**
+   * The vendor NC's own `;@MKR|TIME`, a FACT printed beside the cycle line — never the reference.
+   * Null for our side and for a card with no such record.
+   */
+  headerTimeSeconds?: number | null;
   /** Rapid seconds / cycle seconds, from the same estimate on the posted file. */
   airFraction: number;
   /** `summary.rapids / summary.cuts × 1000` from `parseGcode` on the posted file. */
@@ -133,6 +149,11 @@ export interface SevenLineRules {
   cycleMultiple: number;
   /** The goal multiple, printed but not a pass condition (plan: 1.25). */
   cycleGoalMultiple: number;
+  /**
+   * Real machine time each manual bit change costs, s — the shop's `toolChange.seconds` (cutter
+   * fit plus the M491 touch). The cycle line judges cutting time PLUS changes on both sides.
+   */
+  toolChangeSeconds: number;
   /** Air fraction may exceed the vendor's by this many points (plan: +10). */
   airSlackPoints: number;
   /** Rapids per 1,000 feed lines may be this multiple of the vendor's (plan: 2). */
@@ -151,6 +172,7 @@ export const PLAN_V2_RULES: SevenLineRules = {
   coverageSlackPoints: 1,
   cycleMultiple: 2,
   cycleGoalMultiple: 1.25,
+  toolChangeSeconds: TOOL_CHANGE_SECONDS,
   airSlackPoints: 10,
   rapidsMultiple: 2,
   cutterSlack: 1,
@@ -291,25 +313,39 @@ export function scoreSevenLines(input: ScoreInput): SevenLineCard {
     });
   }
 
-  // 3 — cycle ≤ 2× vendor's; the 1.25× goal is printed, not required.
+  // 3 — cycle ≤ 2× vendor's; the 1.25× goal is printed, not required. LIKE FOR LIKE: both sides
+  // are #927's cutting time on their own posted file PLUS their manual bit changes at the shop's
+  // own seconds. Makera's header TIME is printed as a fact in the note, never used as the reference.
   {
-    const ok = vendor !== null && ours.cycleSeconds <= vendor.cycleSeconds * r.cycleMultiple * (1 + r.epsilon);
-    const goalMet = vendor !== null && ours.cycleSeconds <= vendor.cycleSeconds * r.cycleGoalMultiple * (1 + r.epsilon);
+    const changeSeconds = r.toolChangeSeconds;
+    const oursTotal = ours.cycleSeconds + ours.toolChanges * changeSeconds;
+    const vendorTotal =
+      vendor === null ? null : vendor.cycleSeconds + vendor.toolChanges * changeSeconds;
+    const ok =
+      vendorTotal !== null && oursTotal <= vendorTotal * r.cycleMultiple * (1 + r.epsilon);
+    const goalMet =
+      vendorTotal !== null && oursTotal <= vendorTotal * r.cycleGoalMultiple * (1 + r.epsilon);
+    const split = (cutting: number, changes: number, total: number): string =>
+      changes === 0
+        ? minutes(total)
+        : `${minutes(total)} (${minutes(cutting)} cutting + ${changes} × ${changeSeconds} s bit changes)`;
+    const header = vendor?.headerTimeSeconds ?? null;
+    const headerFact =
+      header === null
+        ? ''
+        : ` Makera's header TIME states ${minutes(header)} — a CAM estimate without bit changes, printed as a fact, not the reference.`;
     add({
       key: 'cycle',
-      rule: `≤ ${r.cycleMultiple}× the vendor's (goal ${r.cycleGoalMultiple}×)`,
-      oursValue: ours.cycleSeconds,
-      vendorValue: vendor?.cycleSeconds ?? null,
-      ours: minutes(ours.cycleSeconds),
-      vendor: vendor === null ? null : minutes(vendor.cycleSeconds),
+      rule: `≤ ${r.cycleMultiple}× the vendor's (goal ${r.cycleGoalMultiple}×), cutting time plus bit changes at ${changeSeconds} s each`,
+      oursValue: oursTotal,
+      vendorValue: vendorTotal,
+      ours: minutes(oursTotal),
+      vendor: vendorTotal === null ? null : minutes(vendorTotal),
       state: !referenced ? 'stated' : ok ? 'pass' : 'fail',
-      note: !referenced
-        ? 'no vendor program beside it'
-        : ok
-          ? goalMet
-            ? `meets the ${r.cycleGoalMultiple}× goal`
-            : `within the ${r.cycleMultiple}× line but above the ${r.cycleGoalMultiple}× goal`
-          : `${(ours.cycleSeconds / vendor.cycleSeconds).toFixed(2)}× the vendor's time`,
+      note:
+        vendor === null || vendorTotal === null
+          ? 'no vendor program beside it'
+          : `${ok ? (goalMet ? `meets the ${r.cycleGoalMultiple}× goal` : `within the ${r.cycleMultiple}× line but above the ${r.cycleGoalMultiple}× goal`) : `${(oursTotal / vendorTotal).toFixed(2)}× the vendor's time`} — ours ${split(ours.cycleSeconds, ours.toolChanges, oursTotal)}; vendor ${split(vendor.cycleSeconds, vendor.toolChanges, vendorTotal)}.${headerFact}`,
       goalMet,
     });
   }
