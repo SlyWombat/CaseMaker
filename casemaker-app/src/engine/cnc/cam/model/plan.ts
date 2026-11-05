@@ -1022,6 +1022,25 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       maxSpacingMm: surface.maxSpacingMm,
     });
   };
+  // THE REVIEW'S FINDING (plan.ts:1033, rough.ts:241, finish.ts:164, chamfer.ts:86): the curved
+  // half took the tree's MESH-ABSOLUTE Z values straight through, while `planPocketsForTree`
+  // rebases every Z it hands an op by -stockTop. On a part recognised at a non-zero stockTop every
+  // curved and rim move posted that far off the stock — silently, because the IR was internally
+  // consistent (the red-first spec at stockTop 10 measured feeds at z = 15). ONE datum here too:
+  // IR Z 0 is the STOCK top, which the post's `probed-top-face` convention and safeZ/hopZ assume.
+  const z0 = tree.frame.stockTop;
+  const rebaseZ = (z: number): number => z - z0;
+  // The CL heights come from the MESH, so they are mesh-absolute too — the drop ANSWER is shifted
+  // here, at the plan's own datum, rather than teaching every op a stockTop it would each have to
+  // apply the same way. (The red-first spec's first fix moved feeds to z = 10.66: the region's Z
+  // was rebased but the surface the ball followed was not.)
+  const shiftSurface = (surface: ReturnType<typeof clSurface>): ReturnType<typeof clSurface> => ({
+    ...surface,
+    dropCutter: (x: number, y: number) => {
+      const z = surface.dropCutter(x, y);
+      return z === null ? null : z - z0;
+    },
+  });
   const cuts: CutParams = {
     rpm: opts.spindleRpm,
     feed: opts.feeds.feedMmPerMin,
@@ -1039,7 +1058,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         `cam/model/plan: the remainder region "${region.id}" needs a ball nose to finish and the call states none`,
       );
     }
-    const ref = regionRefOf(region.id, 'curved', region.footprint, region.zTop, region.zBottom);
+    const base = { ...region, zTop: rebaseZ(region.zTop), zBottom: rebaseZ(region.zBottom) };
+    const ref = regionRefOf(region.id, 'curved', base.footprint, base.zTop, base.zBottom);
     // THE REVIEW'S SAFETY FINDING: the finish's outer footprint is grown by the ball's radius, and
     // nothing roughed that ring — the ball would take a full-width, full-depth bite of stock that
     // no rough had touched. The flat roughs the SAME grown region first (its own drop-cutter rests
@@ -1056,11 +1076,11 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const isOuterSurface =
       ballRadius0 > 0 && contourRing > 0 && Math.abs(outerMost(region.footprint) - contourRing) <= 0.01 * contourRing;
     const grownFootprint = isOuterSurface ? opts.offset(region.footprint, ballRadius0) : [];
-    const roughRegion = grownFootprint.length > 0 ? { ...region, footprint: grownFootprint } : region;
-    const roughRef = roughRegion === region
+    const roughRegion = grownFootprint.length > 0 ? { ...base, footprint: grownFootprint } : base;
+    const roughRef = roughRegion === base
       ? ref
-      : regionRefOf(region.id, 'curved', roughRegion.footprint, region.zTop, region.zBottom);
-    const clFlat = clSurface(opts.geometry, roughRegion, opts.flat, cuts.stepOver);
+      : regionRefOf(region.id, 'curved', roughRegion.footprint, base.zTop, base.zBottom);
+    const clFlat = shiftSurface(clSurface(opts.geometry, roughRegion, opts.flat, cuts.stepOver));
     noteGrid(opts.flat, clFlat);
     // 1. The FLAT Z-steps the region to its own CL, leaving the band.
     const roughOut = rough({
@@ -1131,9 +1151,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // from OUTSIDE it, so the finish runs on the same region the rough just cleared (grown, when
     // the region is the part's own outer surface). The CL surface is sampled on it too — dropping
     // a row against a surface that does not reach its own endpoints is what `dropRow` refuses.
-    const clBall = clSurface(opts.geometry, roughRegion, ball, cuts.stepOver);
+    const clBall = shiftSurface(clSurface(opts.geometry, roughRegion, ball, cuts.stepOver));
     noteGrid(ball, clBall);
-    const depth = Math.max(opts.stepDownMm, region.zTop - region.zBottom);
+    const depth = Math.max(opts.stepDownMm, base.zTop - base.zBottom);
     const finishOut = finish({
       cutter: ball,
       region: roughRegion,
@@ -1184,10 +1204,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     }
     const vbit = opts.vbit;
     for (const rim of tree.rims) {
-      const ref = regionRefOf(rim.id, 'rim', [[...rim.polyline]], rim.z, rim.z);
+      // The rim's own Z is mesh-absolute too — rebased before the op sizes its bevel from it.
+      const rebasedRim = { ...rim, z: rebaseZ(rim.z) };
+      const ref = regionRefOf(rim.id, 'rim', [[...rim.polyline]], rebasedRim.z, rebasedRim.z);
       const out = chamfer({
         cutter: vbit,
-        rim,
+        rim: rebasedRim,
         region: ref,
         edgeBreak: opts.edgeBreak,
         offset: opts.offset,
