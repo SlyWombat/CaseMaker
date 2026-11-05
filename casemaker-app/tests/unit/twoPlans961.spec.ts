@@ -118,6 +118,10 @@ const SCORE = (over: Partial<ProgramScore> = {}): ProgramScore => ({
   cycleSeconds: 600,
   airFraction: 0.1,
   rapidsPer1000FeedLines: 5,
+  // Line 5 (the #943 rapid-time rule) is neutral here — ours equals the vendor's, so these
+  // fixtures keep testing only the tradeoff line, not line 5's own verdict.
+  rapidSeconds: 100,
+  rapidMoves: 50,
   cutters: 3,
   cuttersOwned: true,
   postsAsFiled: { ok: true, holding: 'vise', pitchMm: 0.1 },
