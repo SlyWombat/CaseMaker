@@ -137,19 +137,21 @@ describe('#959 review — the rough splits shallow from steep', () => {
     const roughOp = result.ops.find((op) => op.kind === 'rough');
     expect(roughOp, `ops: ${result.ops.map((o) => o.kind).join(', ')}`).toBeDefined();
     const moves = roughOp!.outcome.ir.operations.flatMap((o) => o.moves);
-    // The ACROSS leg of a join is the rapid with no Z change; the up and down legs hold XY.
-    let joins = 0;
+    // The TURN between rows is any near-level lateral move (whatever its kind — a retract's
+    // across leg at constant z, or, with the skim's own field, one stay-down feed): its length is
+    // what the alternation is for. Before, every turn crossed the 40 mm row width.
+    let turns = 0;
     let widest = 0;
     for (let i = 1; i < moves.length; i++) {
       const a = moves[i - 1]!;
       const b = moves[i]!;
-      if (b.kind !== 'rapid' || Math.abs(b.z - a.z) > 1e-9) continue;
+      if (Math.abs(b.z - a.z) > 0.5) continue; // a vertical leg, not a turn
       const lateral = Math.hypot(b.x - a.x, b.y - a.y);
       if (lateral <= 0.2) continue;
-      joins++;
+      turns++;
       widest = Math.max(widest, lateral);
     }
-    expect(joins, 'no join between skim rows was posted — the fixture does not exercise the skip').toBeGreaterThan(3);
-    expect(widest, 'a join crossed the row width — the skim rows do not alternate').toBeLessThan(2);
+    expect(turns, 'no turn between skim rows was posted — the fixture does not exercise the skip').toBeGreaterThan(3);
+    expect(widest, 'a turn crossed the row width — the skim rows do not alternate').toBeLessThan(2);
   }, 120_000);
 });

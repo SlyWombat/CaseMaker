@@ -332,6 +332,27 @@ export function rough(opts: RoughOpOptions): OpOutcome {
     const cl = z - skimLeave;
     return cl < opts.region.zTop && cl >= skimFirstLevel ? cl : null;
   };
+  // #962 — THE SKIM'S OWN STANDING SURFACE, the field its joins read. `materialFor` reports the
+  // rough's TARGET (cl + band) everywhere: the material the Z-levels are to LEAVE. But the skim
+  // does not leave it — it cuts the band down to the CL wherever it may cut (the gentle cells,
+  // the same mask its own rows use). Reporting the target to a skim join therefore says 0.3 mm of
+  // material stands above the tool at EVERY point of the join, including the row the skim has
+  // just cut, and `linkIsClear` refuses it at the first disc sample: the organizer's 804 joins per
+  // pass cost 3,097 s of up-across-down for 0.5 mm steps. This field reports the skim's own cut
+  // surface (the CL) where the skim cuts, the target everywhere else — so a join between two
+  // skimmed rows rides down, and a join whose disc reaches a cell the skim does not cut (steep,
+  // or outside its band) still retracts.
+  const skimStanding = gridMaterial((x, y) => {
+    const i = Math.round((x - min[0]) / pitch);
+    const j = Math.round((y - min[1]) / pitch);
+    if (i < 0 || j < 0 || i >= nx || j >= ny) return null;
+    const t = target[j * nx + i]!;
+    if (!Number.isFinite(t)) return null;
+    const cl = t - skimLeave;
+    // The rough's skim has no slope gate (that belongs to the skin op): it cuts every cell of its
+    // band, so every band cell reports its own cut surface here.
+    return cl < opts.region.zTop && cl >= skimFirstLevel ? cl : t;
+  }, opts);
   let skimRuns = 0;
   const skimRun = (i0: number, i1: number, j: number, reverse: boolean): void => {
     const points: [number, number, number][] = [];
@@ -353,12 +374,49 @@ export function rough(opts: RoughOpOptions): OpOutcome {
     if (prevExit !== null) {
       const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
       const to: LinkPoint = { x: start[0], y: start[1], z: start[2] };
-      // THE TRANSIT HEIGHT IS THE OP'S OWN HOP PLANE, the height this join flew at before it went
-      // through `link()` — the skim visits only cells within one step-down of the region top, and
-      // the material beside them stands at that top, which `hopZMm` clears by the same margin the
-      // op's own first entry already trusts. The region's clearance plane (+5 over the part top)
-      // cost the organizer 619 s of rapid travel on these joins for margin it does not need.
-      moves.push(...link(from, to, { ...linkOptionsFor(prevLevelZ ?? start[2]), clearanceZ: opts.hopZMm }));
+      // #962 — THE SKIM'S JOIN RIDES ITS OWN TARGET. The field alone does not unlock these joins:
+      // `linkIsClear` tests the whole cutter DISC, and a 0.5 mm join's disc necessarily reaches
+      // cells the skim has not cut yet, which stand at the target (cl + band) above the link's z —
+      // refused, even when the field reports the skim's own cut surface (measured: the field fix
+      // alone is worth 23 s). But the join cuts the band exactly as the rows either side of it do;
+      // what must be proved is that it does not cut BELOW the skim's own target. So sample the
+      // link at its centre and require z >= the skim target there — the finish's `ridesTheCl`,
+      // against this op's own grid. A join over a cell outside the band still retracts.
+      const rides = ((): boolean => {
+        const length = Math.hypot(to.x - from.x, to.y - from.y);
+        const steps = Math.max(1, Math.ceil(length / Math.max(pitch, 1e-9)));
+        for (let s = 0; s <= steps; s++) {
+          const t = s / steps;
+          const x = from.x + (to.x - from.x) * t;
+          const y = from.y + (to.y - from.y) * t;
+          // BAND CELLS ONLY: a join whose path leaves the skim's band crosses ground this op is
+          // not cutting, and stays a retract. Measured: allowing the deeper cells as well (their
+          // material stands below the link) converted more joins but made the plan SLOWER —
+          // 13,290.6 -> 13,068.8 s against this version's 12,982.2 — because the longer stay-down
+          // feeds at the cutting rate lose to the rapid they replace.
+          const cell = skimTarget(Math.round((x - min[0]) / pitch), Math.round((y - min[1]) / pitch));
+          if (cell === null) return false;
+          const z = from.z + (to.z - from.z) * t;
+          if (z < cell - opts.clSurface.toleranceMm) return false;
+        }
+        return true;
+      })();
+      if (rides) {
+        const f = to.z < from.z - 1e-9 ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
+        moves.push({ kind: 'feed', x: to.x, y: to.y, z: to.z, f });
+      } else {
+        // THE TRANSIT HEIGHT IS THE OP'S OWN HOP PLANE, the height this join flew at before it
+        // went through `link()` — the skim visits only cells within one step-down of the region
+        // top, and the material beside them stands at that top, which `hopZMm` clears by the same
+        // margin the op's own first entry already trusts. The region's clearance plane (+5 over
+        // the part top) cost the organizer 619 s of rapid travel on these joins for margin it does
+        // not need.
+        moves.push(...link(from, to, {
+          ...linkOptionsFor(prevLevelZ ?? start[2]),
+          material: skimStanding,
+          clearanceZ: opts.hopZMm,
+        }));
+      }
     } else {
       moves.push({ kind: 'rapid', x: start[0], y: start[1], z: opts.hopZMm });
       moves.push({ kind: 'feed', x: start[0], y: start[1], z: start[2], f: opts.feeds.plungeFeedMmPerMin });
