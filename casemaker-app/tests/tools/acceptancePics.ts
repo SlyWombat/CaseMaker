@@ -38,6 +38,7 @@ import { GOAL_LEFTOVER_BANDS_MM, checkGoalCutInto } from '@/engine/cnc/engrave/d
 import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { Z1 } from '@/engine/cnc/machine';
+import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 
@@ -61,6 +62,10 @@ interface Args {
   plan: string;
   pics: string;
   out: string;
+  /** The vendor's NC: its stamp answers "does Makera's program cut this leftover cell, with which T". */
+  vendor?: string;
+  /** The coverage line the gap is measured against (the seven-line line, e.g. 98.52 % = 0.9852). */
+  line?: number;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -70,9 +75,15 @@ function parseArgs(argv: readonly string[]): Args {
   const pics = args.pics;
   const out = args.out;
   if (plan === undefined || pics === undefined || out === undefined) {
-    throw new Error('usage: acceptancePics.ts --plan <plan.json> --pics <pics.json> --out <dir>');
+    throw new Error('usage: acceptancePics.ts --plan <plan.json> --pics <pics.json> --out <dir> [--vendor <nc>] [--line <fraction>]');
   }
-  return { plan, pics, out };
+  return {
+    plan,
+    pics,
+    out,
+    ...(args.vendor === undefined ? {} : { vendor: args.vendor }),
+    ...(args.line === undefined ? {} : { line: Number(args.line) }),
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -792,12 +803,366 @@ function renderSection(
 }
 
 // ---------------------------------------------------------------------------------------------
+// #959 — COVERAGE ATTRIBUTION: which op should have cut each leftover cell, the three biggest
+// patches, and whether the vendor's own NC cuts them. Measurement only; the maps are drawn from
+// the same posted stamp the goal check used.
+// ---------------------------------------------------------------------------------------------
+
+interface PlanOpLike {
+  kind: string;
+  region?: { id?: string; kind?: string };
+  outcome: { ir: ToolpathIR; cutter: string };
+}
+
+interface Attribution {
+  goalCells: number;
+  leftoverCells: number;
+  leftoverMm2: number;
+  coverageFraction: number;
+  /** The cells that must be recovered to reach the line (coverage >= lineFraction), and mm². */
+  gap: { lineFraction: number; cells: number; mm2: number };
+  ops: { key: string; kind: string; region: string; cutter: string; radius: number; cells: number; mm2: number }[];
+  unassigned: { cells: number; mm2: number };
+  /** The vendor's stamp over the SAME goal grid: the share of covered cells within the band
+   * (the page's own coverage number is 99.52 % on this card). */
+  vendorOverall: { cutCells: number; cutFraction: number } | null;
+  patches: PatchAttribution[];
+}
+
+interface PatchAttribution {
+  rank: number;
+  cells: number;
+  mm2: number;
+  bbox: [number, number, number, number];
+  worst: { x: number; y: number; depth: number };
+  ops: { key: string; cells: number; mm2: number }[];
+  vendor: { cutFraction: number; tools: { t: number; name: string; cells: number }[] } | null;
+}
+
+/** Feed-path sample points per op, bucketed on a coarse XY grid for the nearest-op query. */
+function opPathIndex(ops: readonly PlanOpLike[], bucketMm = 2): {
+  buckets: Map<string, { op: number; x: number; y: number }[]>;
+  info: { key: string; kind: string; region: string; cutter: string; radius: number }[];
+} {
+  const buckets = new Map<string, { op: number; x: number; y: number }[]>();
+  const info: { key: string; kind: string; region: string; cutter: string; radius: number }[] = [];
+  const put = (op: number, x: number, y: number): void => {
+    const k = `${Math.floor(x / bucketMm)},${Math.floor(y / bucketMm)}`;
+    const list = buckets.get(k);
+    if (list === undefined) buckets.set(k, [{ op, x, y }]);
+    else list.push({ op, x, y });
+  };
+  ops.forEach((op, index) => {
+    const tool = op.outcome.ir.tool;
+    const radius = (cuttingDiameter(tool) ?? 0) / 2;
+    info.push({ key: `${op.kind}:${op.outcome.cutter}`, kind: op.kind, region: op.region?.id ?? '', cutter: op.outcome.cutter, radius });
+    for (const operation of op.outcome.ir.operations) {
+      let last: CamMove | null = null;
+      for (const m of operation.moves) {
+        if (last !== null && m.kind === 'feed') {
+          const d = Math.hypot(m.x - last.x, m.y - last.y);
+          const steps = Math.max(1, Math.ceil(d / 0.5));
+          for (let i = 0; i <= steps; i++) put(index, last.x + ((m.x - last.x) * i) / steps, last.y + ((m.y - last.y) * i) / steps);
+        }
+        last = m;
+      }
+    }
+  });
+  return { buckets, info };
+}
+
+/** The nearest op path to a cell, as (distance − the cutter's radius): <= reach means the op's
+ * footprint could have touched the cell; beyond it the cell is outside every op's own reach. */
+function nearestOp(
+  index: ReturnType<typeof opPathIndex>,
+  x: number,
+  y: number,
+  bucketMm = 2,
+): { op: number; reach: number } | null {
+  const bx = Math.floor(x / bucketMm);
+  const by = Math.floor(y / bucketMm);
+  let best = Number.POSITIVE_INFINITY;
+  let bestOp = -1;
+  for (let dx = -2; dx <= 2; dx++) {
+    for (let dy = -2; dy <= 2; dy++) {
+      for (const p of index.buckets.get(`${bx + dx},${by + dy}`) ?? []) {
+        const reach = Math.hypot(p.x - x, p.y - y) - index.info[p.op]!.radius;
+        if (reach < best) {
+          best = reach;
+          bestOp = p.op;
+        }
+      }
+    }
+  }
+  return bestOp < 0 ? null : { op: bestOp, reach: best };
+}
+
+/** The vendor's stamp: its NC parsed and stamped, with the tool identity of every checkpoint. */
+function vendorStamp(ncPath: string, goal: GoalHeightfield, sample: PostedRun): { top: ResultTop; who: (x: number, y: number) => number | null; names: Map<number, string> } {
+  const text = readFileSync(ncPath, 'utf8');
+  const names = new Map<number, string>();
+  const tools = new Map<number, Tool>();
+  for (const line of text.split('\n')) {
+    if (!line.startsWith(';@MKR|TOOL|')) continue;
+    const f: Record<string, string> = {};
+    for (const part of line.replace(';@MKR|TOOL|', '').split('|')) {
+      const at = part.indexOf('=');
+      if (at > 0) f[part.slice(0, at).toLowerCase()] = part.slice(at + 1);
+    }
+    const number = Number(f['number']);
+    const type = f['type'] ?? '';
+    const shape = type.includes('Ball') ? 'ball' : type.includes('V-Bit') ? 'chamfer' : 'flat';
+    // The vendor's records state a ball as diameter + cornerradius with tipdiameter=0; the stamp's
+    // cutting diameter for a ball is its diameter, not that zero (a 0 radius stamps nothing).
+    const diameter = f['diameter'] === undefined ? null : Number(f['diameter']);
+    const statedTip = f['tipdiameter'] === undefined ? null : Number(f['tipdiameter']);
+    const tipDiameter = shape === 'ball' ? diameter : statedTip;
+    const tool: Tool = {
+      number,
+      id: f['id'] ?? null,
+      name: f['name'] ?? `T${number}`,
+      typeText: type,
+      shape,
+      handleDiameter: f['handlediameter'] === undefined ? null : Number(f['handlediameter']),
+      tipDiameter,
+      diameter,
+      cornerRadius: f['cornerradius'] === undefined ? null : Number(f['cornerradius']),
+      angle: f['angle'] === undefined ? null : Number(f['angle']),
+      halfAngle: f['halfangle'] === undefined ? null : Number(f['halfangle']),
+      fluteLength: f['flutelength'] === undefined ? null : Number(f['flutelength']),
+      shoulderLength: f['shoulderlength'] === undefined ? null : Number(f['shoulderlength']),
+      stickout: null,
+      centreCutting: true,
+    } as Tool;
+    tools.set(number, tool);
+    names.set(number, tool.name);
+  }
+  const parsedSample = parseGcode(sample.text);
+  const part = setupFromHeader(parsedSample.header).patch.part;
+  if (part === undefined || part.kind !== 'prism' || part.outline.kind !== 'p-rect') throw new Error('#959: the posted program carries no rectangular stock header to size the vendor setup');
+  const setup = stubSetup(part, { kind: 'tape-down', contact: part.outline }, { startingTool: 1 }, Z1);
+  const timeline = buildTimeline(parseGcode(text), setup, Z1);
+  const stamp = exactSweptFieldTooled(goal, timeline, (state) => tools.get(state as number) ?? null);
+  if (stamp === null) throw new Error(`#959: the vendor NC ${ncPath} produced no stamp`);
+  const field = stamp.field;
+  const who = stamp.who;
+  return {
+    top: (x, y) => {
+      const i = Math.round((x - goal.x0) / goal.pitch);
+      const j = Math.round((y - goal.y0) / goal.pitch);
+      if (i < 0 || j < 0 || i >= goal.nx || j >= goal.ny) return null;
+      return field[j * goal.nx + i]!;
+    },
+    who: (x, y) => {
+      const i = Math.round((x - goal.x0) / goal.pitch);
+      const j = Math.round((y - goal.y0) / goal.pitch);
+      if (i < 0 || j < 0 || i >= goal.nx || j >= goal.ny) return null;
+      return who[j * goal.nx + i]!;
+    },
+    names,
+  };
+}
+
+/** The attribution pass: leftover cells → the nearest op, contiguous patches, vendor coverage. */
+function attributeCoverage(
+  goal: GoalHeightfield,
+  top: ResultTop,
+  ops: readonly PlanOpLike[],
+  lineFraction: number,
+  vendor: { top: ResultTop; who: (x: number, y: number) => number | null; names: Map<number, string> } | null,
+): { attribution: Attribution; opOf: Int32Array } {
+  const index = opPathIndex(ops);
+  const cells = goal.nx * goal.ny;
+  const opOf = new Int32Array(cells).fill(-1);
+  const leftover = new Uint8Array(cells);
+  const depth = new Float32Array(cells);
+  let covered = 0;
+  let leftoverCells = 0;
+  let vendorCutCells = 0;
+  for (let j = 0; j < goal.ny; j++) {
+    for (let i = 0; i < goal.nx; i++) {
+      const k = j * goal.nx + i;
+      if (goal.covered[k] !== 1) continue;
+      covered++;
+      if (vendor !== null) {
+        const v = vendor.top(goal.x0 + i * goal.pitch, goal.y0 + j * goal.pitch);
+        if (v !== null && v - (goal.z[k] as number) <= GOAL_LEFTOVER_BANDS_MM[0]!) vendorCutCells++;
+      }
+      const t = top(goal.x0 + i * goal.pitch, goal.y0 + j * goal.pitch);
+      if (t === null) continue;
+      const d = t - (goal.z[k] as number);
+      if (d > GOAL_LEFTOVER_BANDS_MM[0]!) {
+        leftover[k] = 1;
+        depth[k] = d;
+        leftoverCells++;
+        const near = nearestOp(index, goal.x0 + i * goal.pitch, goal.y0 + j * goal.pitch);
+        if (near !== null && near.reach <= Math.max(1.5, index.info[near.op]!.radius)) opOf[k] = near.op;
+      }
+    }
+  }
+  const cellArea = goal.pitch * goal.pitch;
+  const opCells = new Map<number, number>();
+  let unassigned = 0;
+  for (let k = 0; k < cells; k++) {
+    if (leftover[k] !== 1) continue;
+    if (opOf[k]! >= 0) opCells.set(opOf[k]!, (opCells.get(opOf[k]!) ?? 0) + 1);
+    else unassigned++;
+  }
+  const opsOut = [...opCells.entries()]
+    .map(([op, n]) => ({ ...index.info[op]!, cells: n, mm2: n * cellArea }))
+    .sort((a, b) => b.cells - a.cells);
+  const coverageFraction = covered === 0 ? 0 : 1 - leftoverCells / covered;
+  const gapCells = Math.max(0, Math.ceil((lineFraction - coverageFraction) * covered));
+  // Contiguous patches, 8-connected, biggest first.
+  const seen = new Uint8Array(cells);
+  const patches: { cells: number[]; depth: number }[] = [];
+  for (let k0 = 0; k0 < cells; k0++) {
+    if (leftover[k0] !== 1 || seen[k0] === 1) continue;
+    const stack = [k0];
+    seen[k0] = 1;
+    const members: number[] = [];
+    while (stack.length > 0) {
+      const k = stack.pop()!;
+      members.push(k);
+      const i = k % goal.nx;
+      const j = (k - i) / goal.nx;
+      for (let dj = -1; dj <= 1; dj++) {
+        for (let di = -1; di <= 1; di++) {
+          const ii = i + di;
+          const jj = j + dj;
+          if (ii < 0 || jj < 0 || ii >= goal.nx || jj >= goal.ny) continue;
+          const kk = jj * goal.nx + ii;
+          if (leftover[kk] === 1 && seen[kk] === 0) {
+            seen[kk] = 1;
+            stack.push(kk);
+          }
+        }
+      }
+    }
+    patches.push({ cells: members, depth: Math.max(...members.map((k) => depth[k]!)) });
+  }
+  patches.sort((a, b) => b.cells.length - a.cells.length);
+  const patchOut: PatchAttribution[] = patches.slice(0, 3).map((patch, rank) => {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let worstK = patch.cells[0]!;
+    const counts = new Map<number, number>();
+    const vendorWho = new Map<number, number>();
+    let vendorCut = 0;
+    for (const k of patch.cells) {
+      const i = k % goal.nx;
+      const j = (k - i) / goal.nx;
+      const x = goal.x0 + i * goal.pitch;
+      const y = goal.y0 + j * goal.pitch;
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      if (depth[k]! > depth[worstK]!) worstK = k;
+      const op = opOf[k]!;
+      if (op >= 0) counts.set(op, (counts.get(op) ?? 0) + 1);
+      if (vendor !== null) {
+        const v = vendor.top(x, y);
+        if (v !== null && v - (goal.z[k] as number) <= GOAL_LEFTOVER_BANDS_MM[0]!) {
+          vendorCut++;
+          const t = vendor.who(x, y);
+          if (t !== null && t > 0) vendorWho.set(t, (vendorWho.get(t) ?? 0) + 1);
+        }
+      }
+    }
+    const wi = worstK % goal.nx;
+    const wj = (worstK - wi) / goal.nx;
+    return {
+      rank: rank + 1,
+      cells: patch.cells.length,
+      mm2: patch.cells.length * cellArea,
+      bbox: [minX, minY, maxX, maxY],
+      worst: { x: goal.x0 + wi * goal.pitch, y: goal.y0 + wj * goal.pitch, depth: depth[worstK]! },
+      ops: [...counts.entries()].map(([op, n]) => ({ key: index.info[op]!.key, cells: n, mm2: n * cellArea })).sort((a, b) => b.cells - a.cells),
+      vendor:
+        vendor === null
+          ? null
+          : {
+              cutFraction: patch.cells.length === 0 ? 0 : vendorCut / patch.cells.length,
+              tools: [...vendorWho.entries()].map(([t, n]) => ({ t, name: vendor.names.get(t) ?? `T${t}`, cells: n })).sort((a, b) => b.cells - a.cells),
+            },
+    };
+  });
+  return {
+    attribution: {
+      goalCells: covered,
+      leftoverCells,
+      leftoverMm2: leftoverCells * cellArea,
+      coverageFraction,
+      gap: { lineFraction, cells: gapCells, mm2: gapCells * cellArea },
+      ops: opsOut,
+      unassigned: { cells: unassigned, mm2: unassigned * cellArea },
+      vendorOverall: vendor === null ? null : { cutCells: vendorCutCells, cutFraction: covered === 0 ? 0 : vendorCutCells / covered },
+      patches: patchOut,
+    },
+    opOf,
+  };
+}
+
+/** The top-view map: each leftover cell coloured by the op whose path is nearest (its kind and
+ * cutter), unassigned cells black — the region-boundary / reach gaps. */
+function renderLeftoverByOp(
+  goal: GoalHeightfield,
+  cells: Cells,
+  opOf: Int32Array,
+  index: ReturnType<typeof opPathIndex>,
+  attribution: Attribution,
+  title: string,
+  outDir: string,
+): { svg: string; png: string } {
+  const step = Math.max(1, Math.ceil(Math.max(goal.nx, goal.ny) / 760));
+  const w = Math.ceil(goal.nx / step);
+  const h = Math.ceil(goal.ny / step);
+  const canvas = { x: 28, y: 44, w: 640, h: 420 };
+  const fit = fitRect({ x0: goal.x0, x1: goal.x0 + (goal.nx - 1) * goal.pitch, y0: goal.y0, y1: goal.y0 + (goal.ny - 1) * goal.pitch }, canvas);
+  const shade = hillshade(goal);
+  // One colour per (kind:cutter), assigned in order of the attribution's own table.
+  const palette = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#a65628', '#f781bf', '#17becf'];
+  const keys = [...new Set(attribution.ops.map((o) => o.key))];
+  const colorOfKey = new Map(keys.map((k, i) => [k, palette[i % palette.length]!]));
+  const opKey = (op: number): string => index.info[op]!.key;
+  const rgb = (hex: string): [number, number, number] => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+  const png = pngBase64(w, h, (px, py) => {
+    const i = Math.min(goal.nx - 1, px * step);
+    const j = Math.min(goal.ny - 1, (h - 1 - py) * step);
+    const k = j * goal.nx + i;
+    if (goal.covered[k] !== 1) return UNCOVERED;
+    if (cells.leftover[k]! <= GOAL_LEFTOVER_BANDS_MM[0]!) return shade(i, j);
+    const op = opOf[k]!;
+    if (op < 0) return [20, 20, 20];
+    return rgb(colorOfKey.get(opKey(op))!);
+  });
+  const legendRows = keys.map((key, i) => {
+    const n = attribution.ops.filter((o) => o.key === key).reduce((sum, o) => sum + o.cells, 0);
+    return `<rect x="${700}" y="${canvas.y + 70 + i * 18}" width="10" height="10" fill="${palette[i % palette.length]}"/>` +
+      `<text x="716" y="${canvas.y + 79 + i * 18}" font-family="sans-serif" font-size="10" fill="#1a202c">${esc(key)} — ${n} cells (${(n * goal.pitch * goal.pitch).toFixed(1)} mm²)</text>`;
+  });
+  const body =
+    `<text x="28" y="22" font-family="sans-serif" font-size="14" font-weight="700" fill="#1a202c">${esc(title)} — leftover above the 0.1 mm band, by the op whose path is nearest</text>` +
+    `<text x="28" y="40" font-family="sans-serif" font-size="10" fill="#4a5568">coloured = leftover cells (one colour per op kind:cutter); black = no op's reach covers the cell (region boundary / reach); pale = within the band</text>` +
+    `<rect x="${fit.x}" y="${fit.y}" width="${fit.w}" height="${fit.h}" fill="none" stroke="#4a5568"/>` +
+    `<image x="${fit.x}" y="${fit.y}" width="${fit.w}" height="${fit.h}" href="data:image/png;base64,${png}" image-rendering="pixelated"/>` +
+    `<text x="700" y="${canvas.y + 14}" font-family="sans-serif" font-size="11" font-weight="700" fill="#1a202c">coverage ${(attribution.coverageFraction * 100).toFixed(2)} %</text>` +
+    `<text x="700" y="${canvas.y + 32}" font-family="sans-serif" font-size="10" fill="#4a5568">leftover ${attribution.leftoverCells} cells = ${attribution.leftoverMm2.toFixed(1)} mm²</text>` +
+    `<text x="700" y="${canvas.y + 48}" font-family="sans-serif" font-size="10" fill="#4a5568">to reach ${(attribution.gap.lineFraction * 100).toFixed(2)} %: ${attribution.gap.cells} cells = ${attribution.gap.mm2.toFixed(1)} mm²</text>` +
+    legendRows.join('') +
+    `<rect x="700" y="${canvas.y + 70 + keys.length * 18}" width="10" height="10" fill="#141414"/>` +
+    `<text x="716" y="${canvas.y + 79 + keys.length * 18}" font-family="sans-serif" font-size="10" fill="#1a202c">none — ${attribution.unassigned.cells} cells (${attribution.unassigned.mm2.toFixed(1)} mm²)</text>`;
+  const svg = svgDoc(1000, 520, body);
+  const svgPath = path.join(outDir, '06-leftover-by-op.svg');
+  writeFileSync(svgPath, svg);
+  return { svg: svgPath, png: path.join(outDir, '06-leftover-by-op.png') };
+}
+
+// ---------------------------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------------------------
 
 function main(): void {
   const args = parseArgs(process.argv.slice(2));
-  const plan = JSON.parse(readFileSync(args.plan, 'utf8')) as { perSetup: { programs: ToolpathIR[] }[] };
+  const plan = JSON.parse(readFileSync(args.plan, 'utf8')) as { perSetup: { programs: ToolpathIR[]; ops?: PlanOpLike[] }[] };
   const doc = JSON.parse(readFileSync(args.pics, 'utf8')) as PicsDoc;
   const programs = plan.perSetup[0]?.programs ?? [];
   if (programs.length === 0) throw new Error(`${args.plan}: no programs in perSetup[0]`);
@@ -822,6 +1187,24 @@ function main(): void {
   const worstLeft = worstCell(cells, goal, 'left');
   if (worstCut !== null) files.push(renderSection(goal, runs, doc, top, worstCut, 'cut', title, '04-section-worst-cut-into', args.out));
   if (worstLeft !== null) files.push(renderSection(goal, runs, doc, top, worstLeft, 'left', title, '05-section-worst-leftover', args.out));
+  // #959 — the coverage attribution (needs the plan's ops; the vendor stamp needs --vendor).
+  const ops = plan.perSetup[0]?.ops;
+  if (ops !== undefined && ops.length > 0) {
+    const vendor = args.vendor === undefined ? null : vendorStamp(args.vendor, goal, runs[0]!);
+    const lineFraction = args.line ?? doc.cutIntoOptions.passCoverage ?? 0.95;
+    const { attribution, opOf } = attributeCoverage(goal, top, ops, lineFraction, vendor);
+    const index = opPathIndex(ops);
+    files.push(renderLeftoverByOp(goal, cells, opOf, index, attribution, title, args.out));
+    attribution.patches.forEach((patch, i) => {
+      const at = { x: patch.worst.x, y: patch.worst.y, value: patch.worst.depth, cls: 'covered' as CellClass };
+      files.push(renderSection(goal, runs, doc, top, at, 'left', `${title} — leftover patch ${patch.rank}`, `07-patch-${patch.rank}-section`, args.out));
+      void i;
+    });
+    writeFileSync(
+      path.join(args.out, `${doc.card}-coverage-attribution.json`),
+      JSON.stringify({ card: doc.card, ...attribution }, null, 1),
+    );
+  }
   // Render every SVG to PNG with the maintainer's Playwright tool.
   for (const f of files) {
     execFileSync(process.execPath, [path.join(process.env.HOME ?? '', 'projects', 'cm-gate2', 'casemaker-app', 'svg2png.tmp.mjs'), f.svg, f.png], { stdio: 'pipe' });

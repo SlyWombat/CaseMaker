@@ -506,7 +506,56 @@ export function buildTree(
         of = any.sort((x, y) => y.floorZ - x.floorZ)[0]?.id ?? 'top';
       }
       sq.delete();
-      rims.push({ ...raw, id: `rim-${i}`, of });
+      // #974 — AN OPEN POCKET RIM FALLS BACK TO THE NODE'S OWN MOUTH REGION. The sharp-edge
+      // chain can leave a pocket's mouth open where the tessellation interrupts the wall's top
+      // edge (rim-5 on the organizer, 77.2 mm). A pocket encloses a cavity, so its mouth IS a
+      // closed region — the node's own `region`, already built by the booleans, is that boundary
+      // on the model's own geometry; substituting it closes the rim without inventing a point.
+      // The contour keeps its chain (its outline may legitimately be open), and a rim assigned
+      // to 'top' has no node to ask.
+      let polyline = raw.polyline;
+      let rawz = raw.z;
+      const first = polyline[0];
+      const last = polyline[polyline.length - 1];
+      const open = first !== undefined && last !== undefined && Math.hypot(first[0] - last[0], first[1] - last[1]) > 0.01;
+      const openNode = open && of !== 'contour' && of !== 'top' ? nodes.find((n) => n.id === of) : undefined;
+      if (openNode !== undefined) {
+        let best: [number, number][] | null = null;
+        let bestArea = 0;
+        for (const ring of openNode.region) {
+          let area = 0;
+          for (let q = 0, r = ring.length - 1; q < ring.length; r = q++) {
+            area += (ring[r]![0] - ring[q]![0]) * (ring[r]![1] + ring[q]![1]);
+          }
+          area = Math.abs(area / 2);
+          if (area > bestArea) {
+            bestArea = area;
+            best = ring;
+          }
+        }
+        if (best !== null && best.length >= 3) {
+          polyline = best.map((q) => [q[0], q[1]] as [number, number]);
+          if (polyline[0]![0] !== polyline[polyline.length - 1]![0] || polyline[0]![1] !== polyline[polyline.length - 1]![1]) {
+            polyline.push(polyline[0]!);
+          }
+          // #974 follow-up (the manager's 2026-11-05 fix; E's finding): THE RIM'S OWN TOP. The
+          // substituted mouth ring would otherwise keep the CHAIN's z — for a NESTED pocket that
+          // is the PARENT'S FLOOR (the tray's pocket-7 states -4.2, inside pocket-6 whose mouth is
+          // the land at -1.2). The V then legs 0.5 below -4.2 and cuts 3.49 mm through the land
+          // above: E's feed at (19.800, 12.050, -4.692). The rim's top is the TOP SURFACE its edge
+          // sits under — the ROOT ancestor's mouth (a root pocket is its own) — so the bevel is cut
+          // at the level the material actually stands at.
+          let topNode = openNode;
+          for (;;) {
+            const node: typeof topNode = topNode;
+            const parent = nodes.find((n) => n.children.some((c) => c.id === node.id));
+            if (parent === undefined) break;
+            topNode = parent;
+          }
+          rawz = topNode.mouthZ;
+        }
+      }
+      rims.push({ ...raw, polyline, z: rawz, id: `rim-${i}`, of });
     });
 
     const strip = (n: TreeNode & { cs: CrossSection }): TreeNode => {

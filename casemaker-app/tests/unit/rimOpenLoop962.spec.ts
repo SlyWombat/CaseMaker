@@ -33,7 +33,7 @@ import { describe, expect, it } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { makeClipperOffset } from '../../src/engine/cnc/cam/engraveJob';
 import { planCurvedForTree } from '../../src/engine/cnc/cam/model/plan';
-import type { FeatureTree, Rim } from '../../src/engine/cnc/cam/model/features';
+import type { FeatureTree, PocketNode, Rim } from '../../src/engine/cnc/cam/model/features';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import type { RapidEstimate } from '../../src/engine/cnc/cam/ir';
 import type { Polygons } from '../../src/engine/cnc/cam/pocket';
@@ -250,6 +250,84 @@ function chamferEdgeViolations(ops: readonly { kind: string; region: { id: strin
   return violations;
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// #974 — B's #962 guard, extended from POSITION to DEPTH (the manager's 2026-11-05 item): every
+// posted chamfer FEED must be no deeper than the rim's own TOP minus the job's edge-break leg.
+// The rim's top is the TOP SURFACE its edge sits under — for a NESTED pocket that is the ROOT
+// ancestor's mouth, not the node's own mouth: the tray's pocket-7 lives inside pocket-6 (the land
+// at -1.2), while its own mouth states the parent floor (-4.2). E's finding at 597d4824: a feed
+// at (19.800, 12.050, -4.692), 3.49 mm into the land against the V's own 1.54 mm leg. The 0.05
+// position guard cannot see it — the path IS on the rim; only the depth is wrong.
+// ---------------------------------------------------------------------------------------------
+
+interface DepthViolation {
+  rimId: string;
+  of: string;
+  at: [number, number];
+  z: number;
+  /** The deepest z a feed may reach: the rim's own top minus the job's edge-break leg. */
+  limit: number;
+}
+
+function allPocketNodes(ns: readonly PocketNode[]): PocketNode[] {
+  const out: PocketNode[] = [];
+  for (const n of ns) {
+    out.push(n);
+    out.push(...allPocketNodes(n.children));
+  }
+  return out;
+}
+
+/** The rim's own TOP: the mouth of the node's ROOT ancestor (the top surface its edge sits
+ * under). The contour's is the part's top; a 'top'-assigned rim has no node and is not checked. */
+function rimTopOf(tree: FeatureTree, of: string): number | null {
+  // Only a POCKET mouth rim is judged: a pocket's mouth can sit at a parent's floor while the
+  // material above it is the parent's own top. The contour's rim is its own outer edge, stated at
+  // the edge's own z (its bevel is the design's edge break, and the gate already adjudicates it).
+  if (of === 'contour' || of === 'top') return null;
+  const all = allPocketNodes(tree.pockets);
+  const start = all.find((n) => n.id === of);
+  if (start === undefined) return null;
+  let cur: PocketNode = start;
+  for (;;) {
+    const node: PocketNode = cur;
+    const parent: PocketNode | undefined = all.find((n) => n.children.some((c) => c.id === node.id));
+    if (parent === undefined) break;
+    cur = parent;
+  }
+  return cur.mouthZ;
+}
+
+/** The depth guard's tolerance, mm: the rim polyline's own z jitters by the mesh's tessellation
+ * (a legitimate feed lands at rimTop − leg ± the edge's own z noise, measured here at ≤ 0.001 mm);
+ * 0.05 is two orders below the 3.49 mm defect and a tenth of the 0.5 mm leg. */
+const DEPTH_TOL_MM = 0.05;
+
+/** Every chamfer FEED deeper than its rim's top minus the job's edge-break leg (tolerance above). */
+function chamferDepthViolations(
+  ops: readonly { kind: string; region: { id: string }; outcome: { ir: { operations: readonly { moves: readonly CamMove[] }[] } } }[],
+  tree: FeatureTree,
+  legMm: number,
+): DepthViolation[] {
+  const out: DepthViolation[] = [];
+  for (const op of ops) {
+    if (op.kind !== 'chamfer') continue;
+    const rim = tree.rims.find((r) => r.id === op.region.id);
+    if (rim === undefined) continue;
+    const top = rimTopOf(tree, rim.of);
+    if (top === null) continue;
+    const limit = top - legMm;
+    for (const operation of op.outcome.ir.operations) {
+      for (const m of operation.moves) {
+        if (m.kind !== 'feed' || !('z' in m)) continue;
+        if (m.z! < limit - DEPTH_TOL_MM) out.push({ rimId: rim.id, of: rim.of, at: [m.x!, m.y!], z: m.z!, limit });
+      }
+    }
+  }
+  return out;
+}
+
 describe('#962 guard — every posted chamfer feed lies on a real rim edge, not a synthetic bridge', () => {
   for (const kind of RIM_KINDS) {
     for (const seed of RIM_SEEDS) {
@@ -285,7 +363,7 @@ const CHAMFER3175: Tool = {
   typeText: 'V-Bit', shape: 'chamfer', tipDiameter: 0.1, diameter: 3.175, cornerRadius: 0, angle: 90, halfAngle: 45,
 };
 
-async function realPartViolations(stepPath: string, centre: [number, number], topZ: number, stockWH: [number, number]): Promise<EdgeViolation[]> {
+async function realPartViolations(stepPath: string, centre: [number, number], topZ: number, stockWH: [number, number]): Promise<{ edge: EdgeViolation[]; depth: DepthViolation[] }> {
   const bytes = fs.readFileSync(stepPath);
   const read = await stepToMesh(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 'recognition');
   const lo: [number, number, number] = [Infinity, Infinity, Infinity];
@@ -323,25 +401,39 @@ async function realPartViolations(stepPath: string, centre: [number, number], to
   };
   const setup = (await planModelCam(input)).perSetup[0]!;
   const tree = recogniseFeatures({ triangles, ...(read.faceId === undefined ? {} : { faceId: read.faceId }) }, { up: [0, 0, 1], stockTop: 0 }, tl);
-  return chamferEdgeViolations(setup.ops, tree.rims);
+  return {
+    edge: chamferEdgeViolations(setup.ops, tree.rims),
+    depth: chamferDepthViolations(setup.ops, tree, input.edgeBreak.legMm),
+  };
 }
 
 describe.skipIf(TRAY_STEP === undefined)('#962 guard — the real tray', () => {
-  it('no posted chamfer feed bridges across a rim that is not its own', async () => {
-    const violations = await realPartViolations(TRAY_STEP!, [55, 70], -1.2, [110, 140]);
-    const onPocket = violations.filter((v) => v.of !== 'contour');
+  it('no posted chamfer feed bridges across a rim that is not its own, and none cuts deeper than its rim\'s top minus the leg', async () => {
+    const { edge, depth } = await realPartViolations(TRAY_STEP!, [55, 70], -1.2, [110, 140]);
+    const onPocket = edge.filter((v) => v.of !== 'contour');
     expect(onPocket, `pocket violations: ${JSON.stringify(onPocket)}`).toHaveLength(0);
-    const onContour = violations.filter((v) => v.of === 'contour');
+    const onContour = edge.filter((v) => v.of === 'contour');
     for (const v of onContour) expect(v.dist, JSON.stringify(v)).toBeLessThan(20);
+    expect(depth, `depth violations: ${JSON.stringify(depth.slice(0, 6))}`).toHaveLength(0);
+  }, 1_800_000);
+
+  // RED FIRST (#974, the manager's item 3): E's own point. On the branch before the rim-top fix
+  // this feed sits at (19.800, 12.050, -4.692) — the V below the land (-1.2) by 3.49 mm against
+  // the leg it is allowed — and this case fails on it by name.
+  it('red-first: no chamfer feed at the tray\'s (19.7, 12.0) cuts deeper than its rim\'s top minus the leg', async () => {
+    const { depth } = await realPartViolations(TRAY_STEP!, [55, 70], -1.2, [110, 140]);
+    const near = depth.filter((v) => Math.hypot(v.at[0] - 19.7, v.at[1] - 12.0) < 2);
+    expect(near, `E's gouge is still posted: ${JSON.stringify(near)}`).toHaveLength(0);
   }, 1_800_000);
 });
 
 describe.skipIf(ORGANIZER_STEP === undefined)('#962 guard — the real organizer', () => {
-  it('no posted chamfer feed bridges across a rim that is not its own (rim-5\'s own 77 mm gouge, specifically)', async () => {
-    const violations = await realPartViolations(ORGANIZER_STEP!, [85, 85], -0.8, [170, 170]);
-    const onPocket = violations.filter((v) => v.of !== 'contour');
+  it('no posted chamfer feed bridges across a rim that is not its own, and none cuts deeper than its rim\'s top minus the leg (rim-5\'s own 77 mm gouge, specifically)', async () => {
+    const { edge, depth } = await realPartViolations(ORGANIZER_STEP!, [85, 85], -0.8, [170, 170]);
+    const onPocket = edge.filter((v) => v.of !== 'contour');
     expect(onPocket, `pocket violations: ${JSON.stringify(onPocket)}`).toHaveLength(0);
-    const onContour = violations.filter((v) => v.of === 'contour');
+    const onContour = edge.filter((v) => v.of === 'contour');
     for (const v of onContour) expect(v.dist, JSON.stringify(v)).toBeLessThan(20);
+    expect(depth, `depth violations: ${JSON.stringify(depth.slice(0, 6))}`).toHaveLength(0);
   }, 1_800_000);
 });
