@@ -1255,8 +1255,9 @@ describe.skipIf(BEFORE_PICS === undefined || AFTER_PICS === undefined)('#960 —
       let worstLeftover = 0;
       let worstAt = '';
       for (let k = 0; k < before.goal.length; k++) {
-        const base = Math.max(0, before.goal[k]! - before.union[k]!);
-        const now = Math.max(0, after.goal[k]! - after.union[k]!);
+        // Leftover is the swept surface standing ABOVE the goal (designCheck's own sign: d = top - goal).
+        const base = Math.max(0, before.union[k]! - before.goal[k]!);
+        const now = Math.max(0, after.union[k]! - after.goal[k]!);
         if (now > base + 1e-6) {
           risen++;
           if (now > worstLeftover) worstLeftover = now;

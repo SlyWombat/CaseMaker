@@ -61,8 +61,9 @@ let worstRise = 0;
 let worstLeftover = 0;
 let worstAt = '';
 for (let k = 0; k < cls.length; k++) {
-  const base = Math.max(0, b.goal[k]! - b.union[k]!);
-  const now = Math.max(0, a.goal[k]! - a.union[k]!);
+  // Leftover is the swept surface standing ABOVE the goal (designCheck's own sign: d = top - goal).
+  const base = Math.max(0, b.union[k]! - b.goal[k]!);
+  const now = Math.max(0, a.union[k]! - a.goal[k]!);
   if (!(now > base + 1e-6)) continue;
   risen++;
   // 'Newly above' is the acceptance's rule: the cell was WITHIN the band and is now ABOVE it.
