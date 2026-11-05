@@ -69,6 +69,10 @@ import {
   type GoalHeightfield,
   type SampleGoalOpts,
 } from '@/engine/cnc/engrave/goalHeightfield';
+// #966 — `DEFAULT_PENCIL_CREASE_DEG`/`goalClearBand` moved to `goalSurfaceSettings.ts`, a pure
+// move: both have a real caller independent of which CAM engine runs, so they had to move before
+// this file's own planning functions could be retired.
+import { DEFAULT_PENCIL_CREASE_DEG } from '@/engine/cnc/engrave/goalSurfaceSettings';
 // #966 — `finishTipField`/`finishingMoves` and their own types/constants moved to
 // `surfaceFinishTipField.ts`, a pure move: `rotaryRelief.ts` depends on them directly and is out
 // of #966's scope, so they cannot be retired with the rest of this file's own planning functions.
@@ -90,13 +94,6 @@ import {
  * summoning a rest pass, and names the smallest concavity worth a second program.
  */
 export const REST_TOLERANCE_MM = 0.01;
-
-/**
- * #671 — the crease angle the PENCIL pass follows when the operation states none, degrees. The
- * mark is a change of slope across one grid cell sharper than this: a 90° wall's foot marks a
- * line; a cylinder, a dome and a ramp do not.
- */
-export const DEFAULT_PENCIL_CREASE_DEG = 20;
 
 /**
  * #671 — the steepest-slope crowding clamp for the SCALLOP pass. The contour spacing is the
@@ -871,31 +868,6 @@ export async function generateSurface3dIR(args: Surface3dArgs): Promise<Surface3
     roughKind: rough.kind,
     notes,
   };
-}
-
-/**
- * #764/#888 — THE CLEAR BAND A GOAL'S PROGRAM CUTS AROUND ITS FOOTPRINT, from the goal's own
- * settings. ONE reader, used by the CAM and by the top-face measure (#888), so the plan that is
- * judged and the program that is cut cannot disagree about what is cleared. `stepOverMm` widens
- * the ring as the CAM does; a caller that does not know it (the measure before a cutter is
- * resolved) passes none, which only makes the ring narrower — a top reads as surviving a little
- * more often, never less.
- */
-export function goalClearBand(
-  goal: Pick<EngraveTargetObject, 'format' | 'goalMode' | 'surface'>,
-  opts: { toolDiameterMm?: number | null; stepOverMm?: number | null } = {},
-): { clear: { kind: 'ring'; widthMm: number } | { kind: 'whole' } | null; ringWidthMm: number } {
-  const settings = goal.surface ?? {};
-  const clearAround = settings.clearAround ?? 'ring';
-  const stepOver = opts.stepOverMm !== null && opts.stepOverMm !== undefined && opts.stepOverMm > 0 ? opts.stepOverMm : 0;
-  const ringWidthMm = (opts.toolDiameterMm ?? 0) + stepOver;
-  const clear =
-    goal.format === 'png' || isMold(goal) || clearAround === 'none' || (clearAround === 'ring' && !(ringWidthMm > 0))
-      ? null
-      : clearAround === 'whole'
-        ? ({ kind: 'whole' } as const)
-        : ({ kind: 'ring', widthMm: ringWidthMm } as const);
-  return { clear, ringWidthMm };
 }
 
 /**

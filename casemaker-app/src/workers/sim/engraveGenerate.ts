@@ -180,7 +180,6 @@ import {
   REST_TOLERANCE_MM,
   planSurfaceRest,
   restResidualVisible,
-  goalClearBand,
   suggestedRestRadiusMm,
   surfaceResidual,
   surfaceToolFor,
@@ -191,6 +190,7 @@ import {
   type SurfaceRestPlan,
   type Surface3dResult,
 } from '@/engine/cnc/cam/surface3d';
+import { goalClearBand } from '@/engine/cnc/engrave/goalSurfaceSettings';
 import {
   DEFAULT_MAX_FINISH_TIP_OPS,
   DEFAULT_STOCK_TO_LEAVE_MM,
