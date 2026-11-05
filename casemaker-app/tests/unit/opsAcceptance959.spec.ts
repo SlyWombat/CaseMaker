@@ -1468,11 +1468,16 @@ describe.skipIf(TRAY === undefined)('#989 — the tray through the app path: the
       );
       expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
       // THE POINT OF #989: the rim stage planned chamfer ops at all (before the seam carried the
-      // goal's chamfer there were none), and the TOP face rims are among them.
-      expect(chamferOps.length, 'the rim stage planned no chamfer op — the seam handed it no edge break').toBeGreaterThan(0);
+      // goal's chamfer there were none), and the TOP face rims are among them. Pinned to the
+      // measured set — 40 top-face rims plus the tray's lower rim (rim-33 at z = −4.2), 41 in
+      // all at `b0500f47f` — so a regression to fewer-but-nonzero ops fails, not just to zero.
+      const TOP_RIM_OPS = 40;
+      expect(chamferOps.length, `chamfer ops: ${chamferOps.map((o) => `${o.region.id}@${o.region.topZ}`).join(', ')}`).toBe(TOP_RIM_OPS + 1);
+      const topRimOps = chamferOps.filter((o) => Math.abs(o.region.topZ - topZ) < 0.01);
+      expect(topRimOps.length, `top-face chamfer ops: ${topRimOps.map((o) => o.region.id).join(', ')}`).toBe(TOP_RIM_OPS);
       expect(
-        chamferOps.some((o) => Math.abs(o.region.topZ - topZ) < 0.01),
-        `no top-face rim was broken (chamfer ops: ${chamferOps.map((o) => `${o.region.id}@${o.region.topZ}`).join(', ')})`,
+        chamferOps.some((o) => o.region.id === 'rim-33' && Math.abs(o.region.topZ - -4.2) < 0.01),
+        'the tray’s lower rim (rim-33 at z = −4.2) is no longer broken',
       ).toBe(true);
       // The V program exists at all. Before the seam carried the goal's chamfer there was none,
       // whatever the plan did with the rest of the part.

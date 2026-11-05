@@ -607,9 +607,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0))[0];
     // #989 — THE RIM STAGE TAKES THE PINNED V when the caller names one (`pinned.chamfer`, the
     // cutterKeyOf key the goal seam derives from its own chamfer request); otherwise the first
-    // chamfer/engraving in the house, as before.
+    // chamfer/engraving in the house, as before. A pin the house cannot answer is a caller bug,
+    // never a silent fallback to another V (the cutter would not be the one the job named).
     const pinnedVKey = input.cutters.pinned?.['chamfer'];
-    const vbit = (pinnedVKey === undefined ? undefined : input.cutters.house.find((t) => cutterKeyOf(t) === pinnedVKey))
+    const pinnedV = pinnedVKey === undefined ? undefined : input.cutters.house.find((t) => cutterKeyOf(t) === pinnedVKey);
+    if (pinnedVKey !== undefined && pinnedV === undefined) {
+      throw new Error(`cam/model/plan: cutters.pinned.chamfer names "${pinnedVKey}" but the house has no cutter with that key — the rim stage cannot honour the pin`);
+    }
+    const vbit = pinnedV
       ?? input.cutters.house.find((t) => t.shape === 'chamfer')
       ?? input.cutters.house.find((t) => t.shape === 'engraving');
     if (tree.remainder.length > 0 && ball === undefined) {

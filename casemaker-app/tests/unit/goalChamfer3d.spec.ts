@@ -13,8 +13,8 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
-import { setModelCamEnabled } from '@/engine/cnc/cam/model/plan';
+import { generateGoalProgram, buildModelPlanInputForGoal } from '@/workers/sim/engraveGenerate';
+import { planModelCam, setModelCamEnabled } from '@/engine/cnc/cam/model/plan';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
@@ -269,5 +269,17 @@ describe('#989 the model engine receives the goal’s own chamfer', () => {
     const finding = out.findings.find((f) => f.code === 'goal-chamfer-no-cutter');
     expect(finding?.severity).toBe('warning');
     expect(finding?.message).toContain('not in the tool library');
+  }, 120_000);
+
+  it('a pinned V key the house lacks throws by name — never a silent fallback to another V', async () => {
+    // The seam cannot produce this state (it pins only a resolved V); any other caller that pins
+    // a key the house does not answer is a caller bug, and the rim stage must say so rather than
+    // cut with a cutter the job never named.
+    const target = goalTarget({ chamfer: { widthMm: 0.5, toolKey: VKEY } });
+    const job = goalJob(target);
+    const input = await buildModelPlanInputForGoal(job, target, BALL, SHOP);
+    await expect(
+      planModelCam({ ...input, cutters: { ...input.cutters, pinned: { chamfer: 'inv:gone' } } }),
+    ).rejects.toThrow(/pinned\.chamfer names "inv:gone" but the house has no cutter with that key/);
   }, 120_000);
 });
