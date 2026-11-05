@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { tl, type ManifoldInstance } from './helpers/manifoldExec';
 import { recogniseFeatures, regionRefs, type FeatureTree, type PocketNode } from '@/engine/cnc/cam/model/features';
 import type { ParsedMesh } from '@/engine/import/stlParser';
+import { assertFixtureMesh } from '../tools/fixtureMesh';
 
 function parsed(solid: ManifoldInstance): ParsedMesh {
   const m = solid.getMesh();
@@ -22,7 +23,9 @@ function parsed(solid: ManifoldInstance): ParsedMesh {
     b.min[k] = Math.min(b.min[k]!, positions[i]!);
     b.max[k] = Math.max(b.max[k]!, positions[i]!);
   }
-  return { positions, indices: Uint32Array.from(m.triVerts), triangleCount: m.triVerts.length / 3, bbox: b };
+  const mesh: ParsedMesh = { positions, indices: Uint32Array.from(m.triVerts), triangleCount: m.triVerts.length / 3, bbox: b };
+  assertFixtureMesh(mesh, 'featureTree958 fixture');
+  return mesh;
 }
 
 const all = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [n, ...all(n.children)]);

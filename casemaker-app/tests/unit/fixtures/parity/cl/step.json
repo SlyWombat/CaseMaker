@@ -1,6 +1,16 @@
 {
  "id": "step",
  "description": "Two levels (z = 0 for x < 0, z = \u22122 for x \u2265 0) with a vertical wall at x = 0.",
+ "licence": {
+  "statement": "OpenCamLib (LGPL-2.1/3.0) and PyCAM (GPL-3.0) outputs in this file were generated OFFLINE by the committed generator scripts named in `provenance`, at the library versions stated there; they are NUMBERS ONLY \u2014 no OpenCamLib or PyCAM source is copied or linked into the product or the tests (#943).",
+  "generatedOffline": true,
+  "generatorsCommitted": [
+   "tests/tools/gen-cl-fixtures.mjs",
+   "tests/tools/gen-pycam-fixtures.py"
+  ],
+  "numbersOnly": true,
+  "sourceCopiedOrLinked": false
+ },
  "mesh": {
   "vertices": [
    [
