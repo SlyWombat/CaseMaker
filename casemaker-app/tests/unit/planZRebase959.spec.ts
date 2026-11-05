@@ -159,12 +159,19 @@ describe('#959 review — the curved stages speak the STOCK-top datum', () => {
     // the ball's own CL can stand at most its radius above the surface.
     const highest = Math.max(...feeds.map((m) => m.z));
     expect(highest, `highest feed z is ${highest} — the curved stages were not rebased to stockTop`).toBeLessThanOrEqual(5 + 1e-6);
-    // The rim sits at the stock top by the tree's own (mesh-absolute) statement; its bevel is the
-    // job's 0.5 mm leg BELOW that — the assertion that catches an unrebased rim.
+    // THE COVERED-RIM RULE (#959, 9d8f5ef8): this fixture's mesh is margin-extended past the
+    // footprint for the finish region's own reach — the SAME reason `opsAcceptance959`'s ramp rim
+    // is skipped. The rim sits at the stock top by the tree's own (mesh-absolute) statement; its
+    // bevel would be the job's 0.5 mm leg BELOW that — the assertion that catches an unrebased
+    // rim — but only when the rim is actually broken. A real edge (the tray/organizer cases) is
+    // where the chamfer-Z assertion lives now; here it is conditional, same as its sibling.
     const chamfer = result.ops.find((op) => op.kind === 'chamfer');
-    expect(chamfer, `ops: ${result.ops.map((o) => o.kind).join(', ')}`).toBeDefined();
-    const chamferFeeds = chamfer!.outcome.ir.operations[0]!.moves.filter((m) => m.kind === 'feed');
-    expect(Math.min(...chamferFeeds.map((m) => m.z))).toBeCloseTo(-0.5, 6);
+    if (chamfer !== undefined) {
+      const chamferFeeds = chamfer.outcome.ir.operations[0]!.moves.filter((m) => m.kind === 'feed');
+      expect(Math.min(...chamferFeeds.map((m) => m.z))).toBeCloseTo(-0.5, 6);
+    } else {
+      expect(result.notes.join(' '), 'the rim was skipped without a note').toContain('rim "rim-0" not broken: covered from above');
+    }
   }, 120_000);
 
   it('the REST stage too: stockTop = 10 with a rest flat, its mask and its feeds on one datum', () => {
