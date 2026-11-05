@@ -483,6 +483,7 @@ function sequenceReceipt(
       totalSeconds: candidate.cost,
       leftoverCells: candidate.leftoverCells,
       coveredCells: candidate.coveredCells,
+      restPrice: candidate.restPrice,
       leftBehind: candidate.leftBehind,
       unreachable: candidate.unreachable,
       unplanned: candidate.unplanned,
@@ -1279,7 +1280,11 @@ describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.o
     if (setup.features.remainder.length > 0) {
       expect(setup.ops.some((op) => op.kind === 'finish'), 'the ball finish never ran on the real part').toBe(true);
     }
-    writeAcceptance('organizer', setup.features, { ops: setup.ops, programs: runs, sequence: setup.sequence, unreachable: setup.unreachable, notes: setup.notes, choice: setup.choice }, { target: placed.target, stock: { length: 170, width: 170 } });
+    const measured = writeAcceptance('organizer', setup.features, { ops: setup.ops, programs: runs, sequence: setup.sequence, unreachable: setup.unreachable, notes: setup.notes, choice: setup.choice }, { target: placed.target, stock: { length: 170, width: 170 } });
+    // #961 (the maintainer's 11-05 ruling): the organizer's coverage must stay the same or better
+    // as the picker's rule changes — 98.61 % is its recorded figure on the engine-int base.
+    expect(measured, 'the organizer measured nothing').not.toBeNull();
+    expect(measured!.coverage, 'the organizer fell below its recorded coverage').toBeGreaterThanOrEqual(0.9861);
   }, 1_800_000);
 });
 

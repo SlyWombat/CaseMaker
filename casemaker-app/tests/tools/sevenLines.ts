@@ -171,6 +171,13 @@ export interface SequenceCandidateFact {
    */
   leftoverCells: number | null;
   coveredCells: number | null;
+  /**
+   * #961 — the PRICE of the candidate's coverage rests against the best chain without one: mm²
+   * recovered, the #927 seconds they add, and the rate. Null when it carries no coverage rest (or
+   * either side could not be simulated). A rate below 0.01 mm²/s demotes the candidate below every
+   * chain that clears the line; `reason` says so.
+   */
+  restPrice: { gainMm2: number; seconds: number; mm2PerSecond: number } | null;
   /** Completeness rank: pockets a cutter in the set COULD have covered and this chain left. */
   leftBehind: number;
   /** Every pocket it leaves uncut (including the part's own unreachable features). */

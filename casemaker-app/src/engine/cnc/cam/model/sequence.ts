@@ -119,6 +119,14 @@ export interface SequenceStep {
   role: CutterRole;
   cutter: CutterChoice;
   regionIds: string[];
+  /**
+   * #961 — TRUE on a COVERAGE rest: the optional link that the primary's geometry does not need
+   * (it already covers the pocket) and that is included only because its finer pass can recover
+   * surface left above the band. It earns its place only when the coverage it buys clears
+   * {@link COVERAGE_REST_MIN_MM2_PER_SECOND}; a geometric rest carries no marker and is never
+   * priced against that line — without it a pocket is left uncut.
+   */
+  coverageRest?: true;
 }
 
 /** A candidate sequence, in execution order. */
@@ -189,8 +197,28 @@ export interface SequenceOptions {
    * over. The caller owns the goal heightfield and the stamp; fewer leftover cells is better and
    * is the rank's first key. Absent → the old pocket-count (`leftBehind`) first key, unchanged.
    */
-  coverage?: (steps: readonly SequenceStep[]) => { leftoverCells: number; coveredCells: number } | null;
+  coverage?: (steps: readonly SequenceStep[]) => {
+    leftoverCells: number;
+    coveredCells: number;
+    /** The goal field's own cell area, mm² — the unit the rest price is stated in. */
+    cellAreaMm2: number;
+  } | null;
 }
+
+/**
+ * #961 — THE COVERAGE REST'S PRICE (the manager's 11-05 follow-up): a coverage rest earns its
+ * place only when the surface it recovers pays for the #927 time it adds, measured against the
+ * chain without it. The unit is mm² of goal surface brought back inside the 0.1 mm band per
+ * second of added cycle.
+ *
+ * The threshold: **0.01 mm²/s** — one hundredth of a square millimetre of recovered top surface
+ * per second of added cutting, i.e. 36 mm² per added hour. The tray's ⌀3.175 rest clears it by
+ * ~20× (215.8 mm² for 1,097.5 s = 0.197 mm²/s — the item that made the tray's 99.34 %; it was
+ * 0.049 mm²/s before the rest became a floor-level pass, still 4.9× over); a rest that shaves one
+ * cell off a chain (0.01 mm² for the 100 s a small flat's extra pass costs, 0.0001 mm²/s) misses
+ * it by a hundredfold. Below this line the rest is floor-polishing, not coverage.
+ */
+export const COVERAGE_REST_MIN_MM2_PER_SECOND = 0.01;
 
 /** One candidate the search looked at: its steps, its price or null, and why it did not win. */
 export interface ConsideredSequence {
@@ -222,6 +250,14 @@ export interface ConsideredSequence {
    */
   leftoverCells: number | null;
   coveredCells: number | null;
+  /**
+   * #961 — the price of this candidate's coverage rests, against the best chain WITHOUT one: the
+   * surface (mm²) it buys back, the #927 seconds it adds, and the rate between them. Null when the
+   * candidate carries no coverage rest, or either side could not be simulated. A rate below
+   * {@link COVERAGE_REST_MIN_MM2_PER_SECOND} demotes the whole candidate below every chain that
+   * clears the line (`rank` order), whatever its leftover count.
+   */
+  restPrice: { gainMm2: number; seconds: number; mm2PerSecond: number } | null;
   /** Of those, how many a cutter in the set could have covered — what the rank compares. */
   leftBehind: number;
   /** Steps the ops could not plan (their regions are stated unreachable by the chosen chain). */
@@ -403,6 +439,8 @@ function coversFeature(tool: Tool, f: SequenceFeature): boolean {
 interface ChainLink {
   cutter: CandidateCutter;
   regionIds: string[];
+  /** #961 — a coverage rest (see `SequenceStep.coverageRest`): optional, priced against the line. */
+  coverage?: true;
 }
 
 /**
@@ -548,7 +586,7 @@ export function candidateSequences(
       if (!((diameterOf(c.tool) ?? 0) < (diameterOf(chain[chain.length - 1]!.cutter.tool) ?? 0) - EPS)) continue;
       const regionIds = pocketFeatures.filter((f) => coversFeature(c.tool, f)).map((f) => f.id);
       if (regionIds.length === 0) continue;
-      chain.push({ cutter: c, regionIds });
+      chain.push({ cutter: c, regionIds, coverage: true });
     }
     return chain;
   };
@@ -593,6 +631,9 @@ export function candidateSequences(
           role: 'rest',
           cutter: choiceOf(link.cutter, pinned.rest === link.cutter.key),
           regionIds: link.regionIds,
+          // #961 — a coverage rest is OPTIONAL (the primary already covers the pocket); the rank
+          // prices it against the chain without it. A geometric rest carries no marker.
+          ...(link.coverage === true ? { coverageRest: true as const } : {}),
         });
       }
       // The pockets this prefix covers; the rest are STATED for this candidate.
@@ -759,10 +800,19 @@ interface RankedSequence {
   leftBehind: number;
   /** #961 — the simulated cells left above the band; null when the caller supplied no goal. */
   coverage: number | null;
+  /** The goal field's cell area, mm² — with `coverage`, the leftover expressed in mm². */
+  cellAreaMm2: number | null;
+  /** #961 — what this candidate's coverage rests buy and cost against the chain without them. */
+  restPrice: { gainMm2: number; seconds: number; mm2PerSecond: number } | null;
+  /** FALSE when a coverage rest fails {@link COVERAGE_REST_MIN_MM2_PER_SECOND}: ranked after every chain that clears it. */
+  eligible: boolean;
 }
 
-/** The rank: the SIMULATED leftover, then pockets left behind, then failed steps, house/rowed, price. */
-function rankOf(ranked: RankedSequence): readonly [number, number, number, number, number, number, string] {
+/**
+ * The rank: a coverage rest that misses the price line ranks after every chain that clears it;
+ * then the SIMULATED leftover, then pockets left behind, then failed steps, house/rowed, price.
+ */
+function rankOf(ranked: RankedSequence): readonly [number, number, number, number, number, number, number, string] {
   // A COMPLETE chain beats an incomplete one first: an uncut pocket is not a cheaper plan, it is a
   // different part. "Complete" means every pocket a cutter in the set COULD cover is covered —
   // `leftBehind`, not `unreachable`, or the pockets no cutter can reach would tie every candidate
@@ -778,18 +828,39 @@ function rankOf(ranked: RankedSequence): readonly [number, number, number, numbe
   // not simulate ranks after every simulated one; with no goal at all every key is +∞ and the
   // old order (leftBehind first) stands unchanged.
   const leftover = ranked.coverage ?? Number.POSITIVE_INFINITY;
-  return [leftover, ranked.leftBehind, ranked.failures.length, catalogue, fallback, ranked.cost.totalSeconds, signature] as const;
+  const demoted = ranked.eligible ? 0 : 1;
+  return [demoted, leftover, ranked.leftBehind, ranked.failures.length, catalogue, fallback, ranked.cost.totalSeconds, signature] as const;
 }
 
-function compareRank(
-  a: readonly [number, number, number, number, number, number, string],
-  b: readonly [number, number, number, number, number, number, string],
+/** The rank WITHOUT the coverage keys — the order the picker used before #961, and the one the
+ *  price baseline (the best chain with no coverage rest) is chosen on. */
+function priceBaselineRank(ranked: RankedSequence): readonly [number, number, number, number, number, string] {
+  const catalogue = ranked.sequence.steps.filter((s) => !s.cutter.house).length;
+  const fallback = ranked.sequence.steps.filter((s) => s.cutter.feeds === 'fallback').length;
+  const signature = ranked.sequence.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
+  return [ranked.leftBehind, ranked.failures.length, catalogue, fallback, ranked.cost.totalSeconds, signature] as const;
+}
+
+function comparePriceBaseline(
+  a: readonly [number, number, number, number, number, string],
+  b: readonly [number, number, number, number, number, string],
 ): number {
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 5; i++) {
     if (a[i]! < b[i]!) return -1;
     if (a[i]! > b[i]!) return 1;
   }
-  return a[6]! < b[6]! ? -1 : a[6]! > b[6]! ? 1 : 0;
+  return a[5]! < b[5]! ? -1 : a[5]! > b[5]! ? 1 : 0;
+}
+
+function compareRank(
+  a: readonly [number, number, number, number, number, number, number, string],
+  b: readonly [number, number, number, number, number, number, number, string],
+): number {
+  for (let i = 0; i < 7; i++) {
+    if (a[i]! < b[i]!) return -1;
+    if (a[i]! > b[i]!) return 1;
+  }
+  return a[7]! < b[7]! ? -1 : a[7]! > b[7]! ? 1 : 0;
 }
 
 /**
@@ -827,6 +898,7 @@ export function chooseSequence(
     steps: sequence.steps.map((s) => ({ kind: s.kind, cutterKey: s.cutter.key })),
     leftoverCells: coverage === null ? null : coverage.leftoverCells,
     coveredCells: coverage === null ? null : coverage.coveredCells,
+    restPrice: null,
     cost: price === null ? null : price.cost.totalSeconds,
     estimateSeconds: price === null ? null : price.cost.estimateSeconds,
     toolChanges: price === null ? null : price.cost.toolChanges,
@@ -853,7 +925,7 @@ export function chooseSequence(
     demand.features.filter((f) => f.kind === 'pocket' || f.kind === 'contour').map((f) => f.id),
   );
   const feasible: RankedSequence[] = priced
-    .filter((p): p is { sequence: CandidateSequence; priced: PricedSequence; coverage: { leftoverCells: number; coveredCells: number } | null } => p.priced !== null)
+    .filter((p): p is { sequence: CandidateSequence; priced: PricedSequence; coverage: { leftoverCells: number; coveredCells: number; cellAreaMm2: number } | null } => p.priced !== null)
     .map(({ sequence, priced: price, coverage }) => {
       const failedFeatures = new Set(
         price.failures.flatMap((f) => f.regionIds).filter((id) => demandFeatureIds.has(id)),
@@ -865,9 +937,41 @@ export function chooseSequence(
         failures: price.failures,
         leftBehind: sequence.leftBehind + failedFeatures.size,
         coverage: coverage === null ? null : coverage.leftoverCells,
+        cellAreaMm2: coverage === null ? null : coverage.cellAreaMm2,
+        restPrice: null,
+        eligible: true,
       };
-    })
-    .sort((a, b) => compareRank(rankOf(a), rankOf(b)));
+    });
+
+  // #961 — THE COVERAGE REST'S PRICE (the manager's 11-05 follow-up). Every candidate that carries
+  // a coverage rest is measured against the best chain WITHOUT one — the chain it would otherwise
+  // be choosing between — and only keeps its place when the surface it recovers clears
+  // `COVERAGE_REST_MIN_MM2_PER_SECOND`. A rest that misses the line ranks after every chain that
+  // clears it, whatever its leftover count: coverage bought at any price is floor-polishing.
+  // Without a simulated field on both sides the price cannot be judged and the rest is left to the
+  // price order, exactly as before.
+  const carriesCoverageRest = (r: RankedSequence): boolean => r.sequence.steps.some((st) => st.coverageRest === true);
+  if (feasible.some(carriesCoverageRest)) {
+    const baseline = feasible
+      .filter((r) => !carriesCoverageRest(r))
+      .sort((a, b) => comparePriceBaseline(priceBaselineRank(a), priceBaselineRank(b)))[0];
+    if (baseline !== undefined && baseline.coverage !== null) {
+      for (const r of feasible) {
+        if (!carriesCoverageRest(r)) continue;
+        if (r.coverage === null || r.cellAreaMm2 === null) {
+          // The caller simulated the baseline but not this candidate: an unjustified rest.
+          r.eligible = false;
+          continue;
+        }
+        const gainMm2 = (baseline.coverage - r.coverage) * r.cellAreaMm2;
+        const seconds = r.cost.totalSeconds - baseline.cost.totalSeconds;
+        const mm2PerSecond = seconds > 0 ? gainMm2 / seconds : Number.POSITIVE_INFINITY;
+        r.restPrice = { gainMm2, seconds, mm2PerSecond };
+        r.eligible = gainMm2 > 0 && (seconds <= 0 || mm2PerSecond >= COVERAGE_REST_MIN_MM2_PER_SECOND);
+      }
+    }
+  }
+  feasible.sort((a, b) => compareRank(rankOf(a), rankOf(b)));
 
   if (feasible.length === 0) {
     throw new Error(
@@ -884,7 +988,16 @@ export function chooseSequence(
   for (let i = 0; i < feasible.length; i++) {
     const signature = signatureOf(feasible[i]!.sequence.steps.map((s) => ({ kind: s.kind as string, cutterKey: s.cutter.key })));
     const entry = considered.find((c) => c.rank === null && signatureOf(c.steps) === signature);
-    if (entry !== undefined) entry.rank = i + 1;
+    if (entry !== undefined) {
+      entry.rank = i + 1;
+      entry.restPrice = feasible[i]!.restPrice;
+      const price = feasible[i]!.restPrice;
+      if (!feasible[i]!.eligible && price !== null) {
+        entry.reason = price.gainMm2 <= 0
+          ? 'its coverage rest recovers no surface the chain without it does not already have'
+          : `its coverage rest recovers ${price.gainMm2.toFixed(2)} mm² for ${price.seconds.toFixed(0)} s (${price.mm2PerSecond.toFixed(4)} mm²/s), below the ${COVERAGE_REST_MIN_MM2_PER_SECOND} mm²/s price`;
+      }
+    }
   }
 
   const best = feasible[0]!;

@@ -259,13 +259,15 @@ describe('#961 the simulated outcome: completeness is the surface left above the
 
   it('the rest earns its place only when its cost buys coverage back', () => {
     // The simulation: the ⌀3.175 rest leaves 50 of the goal cells above the band, the primary
-    // alone leaves 500. The rest is deliberately dear (5000 moves a region) so the old price
-    // order would never pick it — the simulated outcome must, because fewer leftovers wins.
+    // alone leaves 500 — 4.5 mm² of surface bought. The rest is priced as any step; the rank
+    // takes it when the price clears the line (a short pass buys 4.5 mm² for a change and a
+    // little cutting: well over 0.01 mm²/s).
     const withCoverage = (leftoverRest: number, leftoverPrimary: number): SequenceOptions => ({
-      ...opts((step) => standIn(step, step.kind === 'rest' ? 5000 : 10)),
+      ...opts((step) => standIn(step, step.kind === 'rest' ? 10 : 10)),
       coverage: (steps) => ({
         leftoverCells: steps.some((s) => s.kind === 'rest') ? leftoverRest : leftoverPrimary,
         coveredCells: 1000,
+        cellAreaMm2: 0.01,
       }),
     });
     const bought = chooseSequence(ONE_POCKET, HOUSE, withCoverage(50, 500));
@@ -285,5 +287,74 @@ describe('#961 the simulated outcome: completeness is the surface left above the
     const choice = chooseSequence(ONE_POCKET, HOUSE, opts((step) => standIn(step, step.kind === 'rest' ? 5000 : 10)));
     expect(choice.steps.some((s) => s.kind === 'rest')).toBe(false);
     expect(choice.considered.every((c) => c.leftoverCells === null && c.coveredCells === null)).toBe(true);
+  });
+});
+
+describe('#961 the coverage rest pays its way — full catalogue, no maxCutters', () => {
+  // A house ⌀6 with a catalogue holding every smaller flat: with no budget the picker offers each
+  // of them as a coverage rest, so only the PRICE may prune them. The first rest buys a real
+  // surface; each further one shaves a cell and costs a long pass.
+  const FLAT2 = flatEndMill(2, { number: 3, id: 'cat-2', name: 'cat-2' });
+  const FLAT15 = flatEndMill(1.5, { number: 4, id: 'cat-1.5', name: 'cat-1.5' });
+  const FLAT1 = flatEndMill(1, { number: 5, id: 'cat-1', name: 'cat-1' });
+  const CATALOGUE_SET: CutterCandidates = { house: [FLAT6], catalogue: [FLAT3175, FLAT2, FLAT15, FLAT1] };
+  // pocket-15 is 28.5 mm wide — every flat enters it, so every smaller one is a COVERAGE rest.
+  const ONE_WIDE: SequenceDemand = {
+    features: [{ id: 'pocket-15', kind: 'pocket', minOpeningMm: 28.5, cornerRadiusMm: 14, depthMm: 4 }],
+  };
+
+  const coverageOf = (steps: readonly SequenceStep[]): { leftoverCells: number; coveredCells: number; cellAreaMm2: number } => {
+    const keys = steps.filter((s) => s.kind === 'rest').map((s) => s.cutter.key);
+    let leftover = 300; // no rest at all
+    if (keys.includes('flat-3.175')) leftover = 100; // 2 mm² bought for a short pass
+    if (keys.includes('cat-2')) leftover = 99; // one more cell, for a long one
+    if (keys.includes('cat-1.5')) leftover = 98;
+    if (keys.includes('cat-1')) leftover = 97;
+    return { leftoverCells: leftover, coveredCells: 2000, cellAreaMm2: 0.01 };
+  };
+  const optsFull = (): SequenceOptions => ({
+    rapid: RAPID,
+    toolChangeSeconds: TOOL_CHANGE_SECONDS,
+    // The ⌀3.175 rest is short; every smaller catalogue flat costs a long pass.
+    planStep: (step) => standIn(step, step.kind !== 'rest' ? 3 : step.cutter.key === 'flat-3.175' ? 3 : 300),
+    coverage: coverageOf,
+  });
+
+  it('offers every smaller catalogue flat as a rest — the budget does not prune them, the price does', () => {
+    const candidates = candidateSequences(ONE_WIDE, CATALOGUE_SET);
+    for (const key of ['flat-3.175', 'cat-2', 'cat-1.5', 'cat-1']) {
+      expect(candidates.some((c) => c.steps.some((s) => s.kind === 'rest' && s.cutter.key === key)), `${key} was never offered`).toBe(true);
+    }
+    const choice = chooseSequence(ONE_WIDE, CATALOGUE_SET, optsFull());
+    // The rest that pays: 2 mm² for the short pass (0.5 mm²/s) clears the 0.01 mm²/s line.
+    expect(choice.steps.some((s) => s.kind === 'rest' && s.cutter.key === 'flat-3.175')).toBe(true);
+    // The ones that do not: one more cell each, for hundreds of seconds.
+    for (const key of ['cat-2', 'cat-1.5', 'cat-1']) {
+      expect(choice.steps.some((s) => s.kind === 'rest' && s.cutter.key === key), `${key} was chosen`).toBe(false);
+    }
+    // Every candidate still prints its simulated outcome and its price; the demoted ones say why.
+    const withCat2 = choice.considered.find((c) => c.steps.some((s) => s.kind === 'rest' && s.cutterKey === 'cat-2'))!;
+    expect(withCat2.leftoverCells).toBe(99);
+    expect(withCat2.restPrice).not.toBeNull();
+    expect(withCat2.restPrice!.mm2PerSecond).toBeLessThan(0.01);
+    expect(withCat2.reason).toContain('below the 0.01 mm²/s price');
+    const paying = choice.considered.find((c) => c.steps.some((s) => s.kind === 'rest' && s.cutterKey === 'flat-3.175') && c.rank === 1)!;
+    expect(paying.restPrice!.mm2PerSecond).toBeGreaterThanOrEqual(0.01);
+  });
+
+  it('a rest that buys nothing is demoted even when it leaves fewer cells: the gain is against the chain without it', () => {
+    // Every chain reports the SAME leftover: no surface is bought at all.
+    const flat = () => ({ leftoverCells: 300, coveredCells: 2000, cellAreaMm2: 0.01 });
+    const choice = chooseSequence(ONE_WIDE, CATALOGUE_SET, { ...optsFull(), coverage: flat });
+    expect(choice.steps.some((s) => s.kind === 'rest')).toBe(false);
+    const rest = choice.considered.find((c) => c.steps.some((s) => s.kind === 'rest' && s.cutterKey === 'flat-3.175'))!;
+    expect(rest.restPrice!.gainMm2).toBe(0);
+    expect(rest.reason).toContain('recovers no surface');
+  });
+
+  it('with no goal supplied there is no price to judge and the old order stands', () => {
+    const choice = chooseSequence(ONE_WIDE, CATALOGUE_SET, { ...optsFull(), coverage: undefined });
+    expect(choice.steps.some((s) => s.kind === 'rest')).toBe(false);
+    expect(choice.considered.every((c) => c.restPrice === null)).toBe(true);
   });
 });

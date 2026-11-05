@@ -401,7 +401,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const goalCoverage =
     coverageGoal === undefined
       ? undefined
-      : (irs: readonly ToolpathIR[]): { leftoverCells: number; coveredCells: number } | null => {
+      : (irs: readonly ToolpathIR[]): { leftoverCells: number; coveredCells: number; cellAreaMm2: number } | null => {
           let acc: Float32Array | null = null;
           for (const ir of irs) {
             const field = stampedField(ir);
@@ -417,7 +417,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             covered++;
             if (acc[k]! - (coverageGoal.z[k] as number) > 0.1) leftover++;
           }
-          return { leftoverCells: leftover, coveredCells: covered };
+          return { leftoverCells: leftover, coveredCells: covered, cellAreaMm2: coverageGoal.pitch * coverageGoal.pitch };
         };
   const perSetup: SetupPlan[] = [];
 
@@ -712,7 +712,7 @@ export interface PlanPocketsOptions {
    * band and the covered cells, stamped by the caller (which owns the goal). Absent → the
    * picker keeps its pocket-count completeness.
    */
-  goalCoverage?: (irs: readonly ToolpathIR[]) => { leftoverCells: number; coveredCells: number } | null;
+  goalCoverage?: (irs: readonly ToolpathIR[]) => { leftoverCells: number; coveredCells: number; cellAreaMm2: number } | null;
 }
 
 /**
@@ -885,9 +885,68 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     air: opts.air,
   });
 
-  const planRegion = (id: string, cutter: Tool): OpOutcome | null => {
+  /**
+   * #961 — A REST'S OWN REGION (the manager's 11-05 finding, measured): the tray's ⌀3.175 rest was
+   * planned as a full pocket pass — every op the ⌀6 already cut, re-cut at all three levels, 4,306 s
+   * (90.2 % of its 60,266 mm of feed travelled over floor the primary had already cleared and
+   * removed nothing). The material a pocket primary leaves standing is AT THE FLOOR: the 0.58 mm
+   * lands between the tray's scoops, which the ⌀6's disc cannot span but the ⌀3.175's can. The
+   * rest is therefore ONE pass at the node's floor over the pocket's own region — not the mouth,
+   * not every level, not the facing the primary already finished.
+   *
+   * The manager's suggested criterion (`cut only where prevCl − restCl > band`) was tried first and
+   * blocked by the rest op's own rule (`ops/rest.ts`): its mask is `nextCL + stockToLeave + margin
+   * < levelZ`, so it always stops a band ABOVE its own CL — in the curved pipeline the ball finish
+   * takes that band. As a POCKET rest it cannot cut to the floor at all (at the floor level its
+   * mask is empty by construction), and the tray's lands stand at the floor. The floor-level pass
+   * is the shape that cuts what actually stands, and it keeps the coverage bit-identical.
+   */
+  const planRestRegion = (id: string, step: SequenceStep): OpOutcome | null => {
+    // The primary faced the land and cleared the through holes; nothing rests there (the primary's
+    // own pass already reached the design surface). Only a pocket's floor can hold a land.
+    if (id === 'facing') return null;
+    const node = pocketsById.get(id);
+    if (node === undefined) return null;
     const ref = refById.get(id);
     if (ref === undefined) return null;
+    const cutter = step.cutter.tool;
+    const floorZ = rebase(node.floorZ);
+    const restNode: PocketNode = {
+      ...node,
+      open: false,
+      through: false,
+      floors: [{ polygons: node.region, area: 0 }],
+      mouthZ: floorZ,
+      floorZ,
+    };
+    return pocket({
+      cutter,
+      node: restNode,
+      region: ref,
+      stepOverMm: (cuttingDiameter(cutter) ?? 1) / 4,
+      stepDownMm: opts.stepDownMm,
+      feeds: opts.feeds,
+      offset: opts.offset,
+      safeZMm: SAFE_Z,
+      hopZMm: HOP_Z,
+      toolNumber: cutter.number ?? 1,
+      spindleRpm: cutParamsFor(cutter).rpm,
+      air: opts.air,
+      rapid: opts.rapid,
+      boolean: opts.boolean,
+    });
+  };
+
+  const planRegion = (id: string, step: SequenceStep): OpOutcome | null => {
+    const ref = refById.get(id);
+    if (ref === undefined) return null;
+    const cutter = step.cutter.tool;
+    // #961 — Only a COVERAGE rest is a floor-level pass: the primary already cleared the pocket
+    // above its floor. A GEOMETRIC rest (a pocket the primary cannot enter at all) still needs the
+    // full depth pass — its material stands from the mouth down, not just at the floor.
+    if (step.kind === 'rest' && step.coverageRest === true) {
+      return planRestRegion(id, step);
+    }
     if (id === 'contour') {
       return contourOp({
         cutter,
@@ -1043,7 +1102,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       for (const id of step.regionIds) {
         let outcome: OpOutcome | null;
         try {
-          outcome = planRegion(id, step.cutter.tool);
+          outcome = planRegion(id, step);
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
           if (!regionFailures.has(id)) regionFailures.set(id, { kind: step.kind, cutterKey: step.cutter.key, regionIds: [id], reason });
