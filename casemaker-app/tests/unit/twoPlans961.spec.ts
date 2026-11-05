@@ -18,7 +18,7 @@ import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import { defaultEngraveJob } from '../../src/engine/cnc/engrave/defaults';
 import { engraveJobDocumentSchema } from '@/store/engraveJobSchema';
 import { planChoiceOf } from '@/types/engraveJob';
-import { PLAN_MATERIALITY, comparePlanOutcomes } from '../tools/tradeoff';
+import { PLAN_MATERIALITY, comparePlanOutcomes, idealWorsenings } from '../tools/tradeoff';
 import { scoreSevenLines, type ProgramScore } from '../tools/sevenLines';
 
 const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
@@ -184,5 +184,59 @@ describe('#975 the operator’s plan choice on the job', () => {
   it('refuses a value that is neither plan', () => {
     const bad = { ...doc(), planChoice: 'vcarve' };
     expect(engraveJobDocumentSchema.safeParse(bad).success).toBe(false);
+  });
+});
+
+// ── The superset rule, in its material form ─────────────────────────────────────────────────────
+/**
+ * The pre-ruling form of the superset assertion, kept ONLY here so the relaxed rule cannot go
+ * vacuous: on a fixture where the ideal IS materially worse it must still fail.
+ */
+const strictSuperset = (owned: ProgramScore, ideal: ProgramScore): boolean =>
+  ideal.coverage! >= owned.coverage! - 1e-9 &&
+  ideal.cutInto.adjudicatedFraction! <= owned.cutInto.adjudicatedFraction! + 1e-12;
+
+describe('#975 the superset rule — the ideal is never MATERIALLY worse', () => {
+  it('passes the readings the real parts show, inside the bounds (tray −0.06 points, organizer +1.2e-6 points of share)', () => {
+    const owned = SCORE({ coverage: 0.997236, cutInto: { ...SCORE().cutInto, adjudicatedFraction: 7.716e-7, maxMm: 3 } });
+    const ideal = SCORE({ coverage: 0.996611, cutInto: { ...SCORE().cutInto, adjudicatedFraction: 1.929e-6, maxMm: 3 } });
+    expect(idealWorsenings(owned, ideal).filter((w) => w.material)).toEqual([]);
+    // and the strict form is exactly what failed on them — the restatement is a real relaxation,
+    // not a test that had already passed.
+    expect(strictSuperset(owned, ideal)).toBe(false);
+  });
+
+  it('still catches a coverage loss past 0.5 points — the strict fixture the ruling keeps', () => {
+    const owned = SCORE({ coverage: 0.9972 });
+    const ideal = SCORE({ coverage: 0.9972 - 0.0051 });
+    const worse = idealWorsenings(owned, ideal).filter((w) => w.material);
+    expect(worse).toHaveLength(1);
+    expect(worse[0]).toMatchObject({ outcome: 'coverage', bound: 'coveragePoints' });
+    expect(strictSuperset(owned, ideal)).toBe(false);
+  });
+
+  it('treats the bound itself as inside — 0.5 points of coverage is not material', () => {
+    const owned = SCORE();
+    const ideal = SCORE({ coverage: 0.99 - 0.005 });
+    expect(idealWorsenings(owned, ideal).filter((w) => w.material)).toEqual([]);
+    expect(PLAN_MATERIALITY.coveragePoints).toBe(0.5);
+  });
+
+  it('catches a cut-into share past 0.5 points and a deepest cut past 0.1 mm', () => {
+    const owned = SCORE();
+    const share = SCORE({ cutInto: { ...SCORE().cutInto, adjudicatedFraction: 0.006 } });
+    expect(idealWorsenings(owned, share).filter((w) => w.material).map((w) => w.outcome)).toEqual(['cutIntoShare']);
+    const deep = SCORE({ cutInto: { ...SCORE().cutInto, maxMm: 0.31 } });
+    expect(idealWorsenings(owned, deep).filter((w) => w.material).map((w) => w.outcome)).toEqual(['deepestCut']);
+  });
+
+  it('never flags the ideal being better, and skips an outcome nobody judged', () => {
+    const owned = SCORE();
+    const better = SCORE({ coverage: 0.995, cutInto: { ...SCORE().cutInto, adjudicatedFraction: 0, maxMm: 0.1 } });
+    expect(idealWorsenings(owned, better).every((w) => w.worseBy <= 0)).toBe(true);
+    expect(idealWorsenings(owned, better).filter((w) => w.material)).toEqual([]);
+    // A null share is not judged: the row is absent, never assumed clean.
+    const unjudged = SCORE({ cutInto: { ...SCORE().cutInto, adjudicatedFraction: null } });
+    expect(idealWorsenings(owned, unjudged).map((w) => w.outcome)).toEqual(['coverage', 'deepestCut']);
   });
 });

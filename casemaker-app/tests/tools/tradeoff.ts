@@ -134,3 +134,84 @@ export function comparePlanOutcomes(
       : `the ideal plan would change the outcome: ${materialRows.map((d) => d.reading).join('; ')}`;
   return { material: materialRows.length > 0, line, differences };
 }
+
+/**
+ * #975 (the manager's ruling, 2026-11-05) — THE SUPERSET RULE, RESTATED.
+ *
+ * The ideal plan's candidate set contains the owned set, but the selector ranks candidates by
+ * COST among plans whose outcomes do not differ materially: adding a bit can change the sequence
+ * and move an outcome slightly either way. The invariant the acceptance can hold is therefore the
+ * MATERIAL one — the ideal may never be worse than the owned plan by more than `PLAN_MATERIALITY`
+ * allows. Inside those bounds the two plans are the same outcome for the operator, which is
+ * exactly why the tradeoff line above stays silent about them.
+ *
+ * Directional on purpose: `comparePlanOutcomes` asks whether the two plans differ materially AT
+ * ALL; this asks whether the ideal came off WORSE. The shares (coverage, and the adjudicated
+ * cut-into share — both shares of the surface) are bounded in points by `coveragePoints`; the
+ * deepest cut is geometry and is bounded in millimetres by `geometryMm`. An outcome either side
+ * did not judge (null) is skipped, never assumed clean.
+ */
+export interface OutcomeWorsening {
+  outcome: 'coverage' | 'cutIntoShare' | 'deepestCut';
+  /** The materiality constant that bounds this outcome. */
+  bound: TradeoffBound;
+  owned: number;
+  ideal: number;
+  /** How much WORSE the ideal is, in the bound's own units (points, or mm); negative = better. */
+  worseBy: number;
+  /** TRUE when this row alone makes the ideal materially worse. */
+  material: boolean;
+  reading: string;
+}
+
+export function idealWorsenings(
+  owned: ProgramScore,
+  ideal: ProgramScore,
+  threshold: { geometryMm: number; coveragePoints: number } = PLAN_MATERIALITY,
+): OutcomeWorsening[] {
+  const rows: OutcomeWorsening[] = [];
+  const pts = (v: number): string => `${v.toFixed(2)} points`;
+
+  if (owned.coverage !== null && ideal.coverage !== null) {
+    const worseBy = (owned.coverage - ideal.coverage) * 100;
+    rows.push({
+      outcome: 'coverage',
+      bound: 'coveragePoints',
+      owned: owned.coverage,
+      ideal: ideal.coverage,
+      worseBy,
+      material: worseBy > threshold.coveragePoints + 1e-9,
+      reading: `coverage ${pts(-worseBy)}`,
+    });
+  }
+
+  const ownedShare = owned.cutInto.adjudicatedFraction;
+  const idealShare = ideal.cutInto.adjudicatedFraction;
+  if (ownedShare !== null && idealShare !== null) {
+    const worseBy = (idealShare - ownedShare) * 100;
+    rows.push({
+      outcome: 'cutIntoShare',
+      bound: 'coveragePoints',
+      owned: ownedShare,
+      ideal: idealShare,
+      worseBy,
+      material: worseBy > threshold.coveragePoints + 1e-9,
+      reading: `cut-into share ${pts(worseBy)}`,
+    });
+  }
+
+  {
+    const worseBy = ideal.cutInto.maxMm - owned.cutInto.maxMm;
+    rows.push({
+      outcome: 'deepestCut',
+      bound: 'geometryMm',
+      owned: owned.cutInto.maxMm,
+      ideal: ideal.cutInto.maxMm,
+      worseBy,
+      material: worseBy > threshold.geometryMm + 1e-9,
+      reading: `deepest cut ${worseBy.toFixed(2)} mm`,
+    });
+  }
+
+  return rows;
+}
