@@ -216,6 +216,7 @@ export function rest(opts: RestOpOptions): OpOutcome {
     clearanceZ: opts.regionRef.regionClearanceZ,
     tool: { radiusMm: toolRadius },
     feeds: { feed: opts.feeds.feedMmPerMin, plungeFeed: opts.feeds.plungeFeedMmPerMin },
+    hopClearanceMm: opts.hopZMm,
   });
 
   let prevExit: [number, number, number] | null = null;

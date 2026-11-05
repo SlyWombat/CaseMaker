@@ -23,9 +23,15 @@
  *    Z across the whole cutter disc, sampled along the segment. If the field cannot prove it, the
  *    linker retracts: a retract is always safe, a hopeful link is not.
  *
- * VERTICAL LEGS use `plungeFeed`, not the cutting feed (#956 §5, Review B's F8): the retract up and
- * the plunge down are both G1 at the plunge rate. The horizontal traverse at the clearance plane is
- * a rapid.
+ * VERTICAL LEGS (the manager's ruling refining #956 §5, Review B's F8, after C measured ~8,800 s of
+ * feed time this cost the rough skim's own joins): the horizontal traverse at the clearance plane is
+ * always a rapid, and so now is the UP leg — retracting out of material the op just finished cutting
+ * at `from` is never hopeful, it is a known-clear G0 like Makera's own NC. The DOWN leg still earns
+ * its caution, but only down to where it is owed: it rapids from the clearance plane to the material
+ * field's own report at the LANDING (x, y) plus the hop clearance, then feeds (at `plungeFeed`) the
+ * rest of the way into unproven territory. When the field cannot prove anything there (not finite —
+ * off the footprint, or no field at all, as in `chamfer.ts`'s own V-bit transitions), the whole down
+ * leg stays a feed, exactly as before: a hopeful rapid is still not a retract.
  *
  * `tour.ts` (#487) is the region-order primitive: nearest-neighbour + 2-opt, deterministic. This
  * module lifts it from loops to passes.
@@ -39,6 +45,10 @@ export const DEFAULT_KEEP_TOOL_DOWN_RATIO = 3;
 
 /** Kiri:Moto's short hop, in cutter diameters: past this, retract even in open material. */
 export const DEFAULT_SHORT_HOP_DIAMETERS = 2;
+
+/** The down leg's rapid floor above the material field's own report, mm, when the caller states
+ * no op-specific hop height of its own; matches `ir.ts`'s `HOP_Z`, the intra-operation hop height. */
+export const DEFAULT_HOP_CLEARANCE_MM = 1;
 
 export interface LinkPoint {
   x: number;
@@ -79,6 +89,11 @@ export interface LinkOptions {
   shortHopMm?: number;
   /** Sample spacing for the material test, mm; absent → min(0.5, max(0.1, radius / 2)). */
   sampleStepMm?: number;
+  /** The down leg's rapid floor above the material field's own report at the landing (x, y), mm;
+   * absent → {@link DEFAULT_HOP_CLEARANCE_MM}. Callers that already carry their own hop height
+   * (every op's `hopZMm`) pass that value here so the down leg rapids to the same height the op's
+   * first plunge already uses. */
+  hopClearanceMm?: number;
 }
 
 /** One pass, as the linker needs it: where the tool enters and leaves, and which region it is in. */
@@ -195,15 +210,35 @@ function retract(from: LinkPoint, to: LinkPoint, opts: LinkOptions): CamMove[] {
   const transitZ = Math.max(opts.clearanceZ, from.z, to.z);
   const plunge = opts.feeds.plungeFeed;
   const moves: CamMove[] = [];
+
+  // UP — retracting out of material the op just cut at `from`: always a rapid. The op finishing
+  // there already proves that (x, y) is clear up to `from.z`; there is nothing hopeful about it.
   if (transitZ > from.z + EPS) {
-    moves.push(feedMove({ x: from.x, y: from.y, z: transitZ }, plunge));
+    moves.push(rapidMove({ x: from.x, y: from.y, z: transitZ }));
   }
   if (dist2(from, to) > EPS) {
     moves.push(rapidMove({ x: to.x, y: to.y, z: transitZ }));
   }
+
+  // DOWN — rapid to the material field's own report at the LANDING (x, y) plus the hop
+  // clearance, then feed the rest of the way; a hopeful rapid past that point is not a retract.
+  // When the field cannot prove anything there (not finite), the whole leg stays a feed, as before.
   if (transitZ > to.z + EPS) {
-    moves.push(feedMove({ x: to.x, y: to.y, z: to.z }, plunge));
+    const materialTop = opts.material.topAt(to.x, to.y);
+    if (Number.isFinite(materialTop)) {
+      const hopClearance = opts.hopClearanceMm ?? DEFAULT_HOP_CLEARANCE_MM;
+      const floor = Math.max(materialTop + hopClearance, to.z);
+      if (transitZ > floor + EPS) {
+        moves.push(rapidMove({ x: to.x, y: to.y, z: floor }));
+      }
+      if (floor > to.z + EPS) {
+        moves.push(feedMove({ x: to.x, y: to.y, z: to.z }, plunge));
+      }
+    } else {
+      moves.push(feedMove({ x: to.x, y: to.y, z: to.z }, plunge));
+    }
   }
+
   // A degenerate case (both ends already on the clearance plane and coincident in XY): a single
   // plunge at the target is still an honest link.
   if (moves.length === 0) moves.push(feedMove(to, plunge));
@@ -216,8 +251,9 @@ function retract(from: LinkPoint, to: LinkPoint, opts: LinkOptions): CamMove[] {
  *  1. A clear link within Kiri's short hop stays down: one feed at the cutting feed.
  *  2. A blocked short link may go around by a clear waypoint if FreeCAD's ratio pays for the
  *     detour; the two legs are cutting feeds.
- *  3. Otherwise retract to the region's clearance plane, traverse as a rapid, and plunge — every
- *     vertical leg at {@link LinkFeeds.plungeFeed}.
+ *  3. Otherwise retract to the region's clearance plane (a rapid up, a rapid traverse), then
+ *     rapid back down to the material field's own report at the landing plus the hop clearance,
+ *     and feed (at {@link LinkFeeds.plungeFeed}) only the part of the down leg below that.
  */
 export function link(from: LinkPoint, to: LinkPoint, opts: LinkOptions): CamMove[] {
   if (dist3(from, to) <= EPS) return [];
