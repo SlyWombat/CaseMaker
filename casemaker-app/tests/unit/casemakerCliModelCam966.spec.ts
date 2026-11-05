@@ -192,6 +192,10 @@ describe('#966 the headless CLI generate path honours CASEMAKER_MODEL_CAM end to
     // error-severity findings, not merely "the run did not throw".
     const verifyErrors = r.diagnostics.filter((d) => d.source === 'verify' && d.severity === 'error');
     expect(verifyErrors, verifyErrors.map((d) => d.message).join('\n')).toEqual([]);
+    // #966 — THE CRASH-CLASS PIN: the sweep must find NO rapid through standing material (the band
+    // skim's join used to rapid 0.739 mm below the stock top: "line 37 ... 18.347 mm³").
+    const rapidThrough = r.diagnostics.filter((d) => d.code === 'rapid-through-stock');
+    expect(rapidThrough, rapidThrough.map((d) => d.message).join('\n')).toEqual([]);
 
     if (r.command !== 'engrave') throw new Error('unreachable — checked above');
     expect(r.details.programs.length).toBeGreaterThan(0);

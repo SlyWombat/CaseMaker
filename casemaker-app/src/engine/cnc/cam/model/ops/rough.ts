@@ -349,7 +349,7 @@ export function rough(opts: RoughOpOptions): OpOutcome {
           const landing: LinkPoint = { x: start[0], y: start[1], z: prevExit[2] };
           // The horizontal part links at the level just FINISHED, where the field is honest;
           // the descent is always a plain feed at plungeFeed, never a diagonal at cutting rate.
-          moves.push(...link(from, landing, linkOptionsFor(prevLevelZ ?? prevExit[2])));
+          moves.push(...link(from, landing, { ...linkOptionsFor(prevLevelZ ?? prevExit[2]) }));
           if (z !== prevLevelZ) moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
         }
         moves.push(...traceRing(ring, z, opts.feeds.feedMmPerMin));
@@ -475,6 +475,11 @@ export function rough(opts: RoughOpOptions): OpOutcome {
           // between its samples is invisible. Prove the centre line against the CL surface itself;
           // a negative short hop forces link()'s own retract where the CL does not clear, without
           // touching the shared rule.
+          // #966 — NO `landingCut` HERE, DELIBERATELY. The landing is the NEXT skim row's start,
+          // and the skim cuts it at ITS OWN CL — ground the program has not cut yet (the row before
+          // ran at a different z). Claiming a proof here is what sent a rapid 0.739 mm below the
+          // stock top through standing stock; `link()`'s retract now descends only to the stock top
+          // plus the hop and feeds the rest for this join.
           const skimLinkOpts: LinkOptions = {
             ...linkOptionsFor(prevLevelZ ?? start[2]),
             material: skimStanding,
@@ -766,7 +771,7 @@ export function skin(opts: SkinOpOptions): OpOutcome {
           // negative short hop refuses the stay-down without touching the shared rule, so
           // link() still emits its own retract (vertical legs, hop floor) when the proof fails.
           const clClear = pathClClear(from, landing, (x, y) => opts.clSurface.dropCutter(x, y), Math.max(pitch / 4, 0.05), opts.clSurface.toleranceMm);
-          moves.push(...link(from, landing, clClear ? linkOptionsFor : { ...linkOptionsFor, shortHopMm: -1 }));
+          moves.push(...link(from, landing, { ...(clClear ? linkOptionsFor : { ...linkOptionsFor, shortHopMm: -1 }) }));
           if (z !== prevExit[2]) moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
         }
         moves.push(...traceRing(ring, z, opts.feeds.feedMmPerMin));

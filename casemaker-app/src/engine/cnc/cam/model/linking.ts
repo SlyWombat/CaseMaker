@@ -104,6 +104,20 @@ export interface LinkOptions {
    * (every op's `hopZMm`) pass that value here so the down leg rapids to the same height the op's
    * first plunge already uses. */
   hopClearanceMm?: number;
+  /**
+   * #966 — WHERE THE DOWN LEG MAY RAPID TO. `material` above is the RIDE field: the surface the
+   * cutter may travel along, which on several ops is the surface the op WILL LEAVE, not what stands
+   * at the landing when the link runs. A rapid may only descend to clearance above material that is
+   * PROVEN gone at the landing, so the caller proves it here: the landing (x, y) lies in ground it
+   * has ALREADY cut at z. Without the proof the down leg descends only to the stock top plus the
+   * hop clearance and FEEDS the rest — the crash class the band skim's join found (a rapid
+   * 0.739 mm below the stock top through uncut stock, flagged by the sweep as
+   * `rapid-through-stock`).
+   */
+  landingCut?: (x: number, y: number, z: number) => boolean;
+  /** The datum's stock top, mm — the down leg's rapid floor where the landing is not proven cut.
+   * Absent → 0: every cam/model op works in the plan's own stock-top datum. */
+  stockTopZMm?: number;
 }
 
 /** One pass, as the linker needs it: where the tool enters and leaves, and which region it is in. */
@@ -277,20 +291,31 @@ function retract(from: LinkPoint, to: LinkPoint, opts: LinkOptions): CamMove[] {
   // sweeps its radius too, and a ridge just inside it — clear of the centreline — is still in the
   // way (the manager's #962 footprint audit). When the field cannot prove anything under the disc
   // (not finite anywhere in it), the whole leg stays a feed, as before.
+  //
+  // #966 — THE FIELD ABOVE IS THE RIDE FIELD, NOT A FLOOR. On the band skim it reports the surface
+  // the skim will leave (the CL) and the design top past the grid — ground the program has NOT cut
+  // yet — so a floor taken from it sent a rapid 0.739 mm below the stock top through standing
+  // stock (`rapid-through-stock`, 18.347 mm³ on the #964 sloped fixture). The floor is now the
+  // caller's PROOF (`landingCut`) that the landing is already cut at `to.z`: where it is, nothing
+  // stands above `to.z` and any floor at or above it is safe, the ride field only lifting it
+  // higher. Where the landing is NOT proven cut, the rapid descends only to the STOCK TOP plus the
+  // hop clearance and feeds the rest — the one height provably clear of standing material.
   if (transitZ > to.z + EPS) {
     const radius = Math.max(0, opts.tool.radiusMm);
-    const materialTop = materialTopOverDisc(opts.material, to.x, to.y, radius, sampleStep(opts));
-    if (Number.isFinite(materialTop)) {
-      const hopClearance = opts.hopClearanceMm ?? DEFAULT_HOP_CLEARANCE_MM;
-      const floor = Math.max(materialTop + hopClearance, to.z);
+    const hopClearance = opts.hopClearanceMm ?? DEFAULT_HOP_CLEARANCE_MM;
+    const provenCut = opts.landingCut?.(to.x, to.y, to.z) === true;
+    const materialTop = provenCut ? materialTopOverDisc(opts.material, to.x, to.y, radius, sampleStep(opts)) : -Infinity;
+    if (provenCut && !Number.isFinite(materialTop)) {
+      moves.push(feedMove({ x: to.x, y: to.y, z: to.z }, plunge));
+    } else {
+      const stockTop = opts.stockTopZMm ?? 0;
+      const floor = provenCut ? Math.max(materialTop + hopClearance, to.z) : Math.max(stockTop + hopClearance, to.z);
       if (transitZ > floor + EPS) {
         moves.push(rapidMove({ x: to.x, y: to.y, z: floor }));
       }
       if (floor > to.z + EPS) {
         moves.push(feedMove({ x: to.x, y: to.y, z: to.z }, plunge));
       }
-    } else {
-      moves.push(feedMove({ x: to.x, y: to.y, z: to.z }, plunge));
     }
   }
 
@@ -308,7 +333,9 @@ function retract(from: LinkPoint, to: LinkPoint, opts: LinkOptions): CamMove[] {
  *     detour; the two legs are cutting feeds.
  *  3. Otherwise retract to the region's clearance plane (a rapid up, a rapid traverse), then
  *     rapid back down to the material field's own report at the landing plus the hop clearance,
- *     and feed (at {@link LinkFeeds.plungeFeed}) only the part of the down leg below that.
+ *     and feed (at {@link LinkFeeds.plungeFeed}) only the part of the down leg below that — but
+ *     only when the caller PROVES the landing is already cut at that z ({@link LinkOptions.landingCut});
+ *     otherwise the rapid stops at the stock top plus the hop and the rest is a feed (#966).
  */
 export function link(from: LinkPoint, to: LinkPoint, opts: LinkOptions): CamMove[] {
   if (dist3(from, to) <= EPS) return [];

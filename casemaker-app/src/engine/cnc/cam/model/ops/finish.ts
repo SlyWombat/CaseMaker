@@ -489,6 +489,9 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     // stay-down feed only wins inside ~25-30 mm, and this branch's joins are far shorter).
     const follow = followCutSurface(from, to, (x, y) => opts.clSurface.dropCutter(x, y), linkSampleStep, levelZ, opts.feeds, opts.rapid, opts.regionRef.regionClearanceZ);
     if (follow !== null) return follow;
+    // #966 — NO `landingCut`: a row's start is not proven cut at the row's own z. The finish's rows
+    // run at the CL surface, and on a steep flank the row before can sit above the landing's z, so
+    // the retract descends only to the stock top plus the hop and feeds the rest.
     return link(from, to, linkOptionsFor(levelZ));
   };
 
