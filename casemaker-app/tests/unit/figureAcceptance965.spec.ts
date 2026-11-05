@@ -408,6 +408,10 @@ for (const figure of FIGURES) {
         figureRun.output.perSetup.some((setup) => setup.ops.some((op) => op.kind === 'rest' && op.outcome.cutter === '161032105031')),
         '#965: the rest ball never entered the plan',
       ).toBe(true);
+      {
+        const refused = figureRun.output.perSetup.flatMap((setup) => setup.unreachable ?? []).filter((line) => line.includes('crease pass'));
+        for (const line of refused) console.log(`#965 ${figure.name}: ${line}`);
+      }
       const tradeoff = owned === null ? null : comparePlanOutcomes({ score: owned.ours, card: owned.scored }, { score: figureRun.ours, card: figureRun.scored });
       console.log(
         `#965 ${figure.name}: ${owned === null ? 'figure set' : `owned ${(owned.coverage * 100).toFixed(2)} % / ${owned.ours.cycleSeconds.toFixed(1)} s -> with the long ⌀1`} ${(figureRun.coverage * 100).toFixed(2)} % / ${figureRun.ours.cycleSeconds.toFixed(1)} s` +
