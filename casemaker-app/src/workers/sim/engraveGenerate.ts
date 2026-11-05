@@ -4833,10 +4833,10 @@ export const MOLD_DRAFT_LIMIT_DEG = 85;
  *
  * NOT yet carried over from the old path: a per-goal edge break (no `EngraveJob`/`EngraveTargetObject`
  * field states one today, so `edgeBreak.legMm` is 0 — "the job states no edge break", same sentence
- * `planCurvedForTree` already prints for a rectilinear card with none) and the old path's own
- * feeds-derived finish tolerance (`tolerances.finishMm` falls back through the goal's own stated
- * step-over, then the shop's stock-to-leave, rather than re-deriving `finishStepOverForCusp` here —
- * stated so a reviewer does not read the two paths as cutting the identical number by accident).
+ * `planCurvedForTree` already prints for a rectilinear card with none) and a finish SCALLOP: a goal
+ * job states none (`EngraveSurfaceSettings` has step-overs, an allowance and a scallop on/off, not
+ * a cusp height), so `tolerances.finishMm` is left ABSENT and the engine's 0.027 mm default applies
+ * (#965 — the old path's step-over/stock-to-leave conflation is withdrawn; see the tolerances block).
  */
 export async function buildModelPlanInputForGoal(
   job: EngraveJob,
@@ -4955,8 +4955,17 @@ export async function buildModelPlanInputForGoal(
   const house: Tool[] = [...(shop.tools ?? []).map((e) => e.tool), tool];
   const cutters: CutterCandidates = { house, catalogue: [] };
 
+  // #985 — THE SCALLOP SEAT HOLDS A CUSP, THE PITCH HAS ITS OWN SEAT. The model engine's
+  // `tolerances.finishMm` is the ball's cusp HEIGHT (the ruling makes it decide the finish), and
+  // a goal JOB states no cusp: `EngraveSurfaceSettings` carries step-overs, allowances and a
+  // scallop ON/OFF, never a cusp — so `finishMm` is left ABSENT and the engine's 0.027 mm default
+  // applies. The job's `finishStepOverMm` (the old engine's finishing raster PITCH, a width) is
+  // carried as its own tolerance and converted to a cusp in `plan.ts`, where the finishing ball is
+  // known (`cusp = R − √(R² − (s/2)²)`) — a pitch is honoured as a pitch, never read as a height
+  // (a 0.3 mm step-over read as a cusp is a 1.43 mm row on a ⌀2, 4.8× the pitch the job asked
+  // for). The shop's `finish.stockToLeaveMm` is an ALLOWANCE and feeds no tolerance here.
   const tolerances: ModelTolerances = {
-    finishMm: goal.surface?.finishStepOverMm ?? shop.finish?.stockToLeaveMm.value ?? DEFAULT_STOCK_TO_LEAVE_MM,
+    ...(goal.surface?.finishStepOverMm === undefined ? {} : { finishStepOverMm: goal.surface.finishStepOverMm }),
   };
   const edgeBreak: EdgeBreakSpec = { legMm: 0 };
 

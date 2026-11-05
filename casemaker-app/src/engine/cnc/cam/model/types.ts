@@ -18,6 +18,14 @@ export interface ModelTolerances {
    * default applies only when the job states none (`undefined`).
    */
   finishMm?: number;
+  /**
+   * #985 — THE JOB'S FINISH RASTER PITCH, mm. A WIDTH, not a height: the old engine's lateral
+   * spacing between finishing scan lines. It is carried here as its own seat and turned into a
+   * cusp height where the finishing ball is known (`plan.ts`, `cusp = R − √(R² − (s/2)²)`), so an
+   * operator's pitch is honoured AS A PITCH — it never lands in `finishMm`, whose unit is the
+   * cusp. A stated `finishMm` (a cusp) wins over a pitch; absent both, the engine's default.
+   */
+  finishStepOverMm?: number;
 }
 
 /**

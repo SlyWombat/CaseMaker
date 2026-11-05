@@ -718,6 +718,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       }
     }
 
+    const statedFinishCusp = ((): number | undefined => {
+      if (input.tolerances.finishMm !== undefined) return input.tolerances.finishMm;
+      const pitch = input.tolerances.finishStepOverMm;
+      const radiusMm = ball === undefined ? undefined : (cuttingDiameter(ball) ?? 0) / 2;
+      if (pitch === undefined || radiusMm === undefined || !(radiusMm > 0) || !(pitch > 0)) return undefined;
+      const half = pitch / 2;
+      return radiusMm - Math.sqrt(Math.max(0, radiusMm * radiusMm - half * half));
+    })();
     const result = planTreePrograms(tree, {
       offset,
       pockets: {
@@ -773,7 +781,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         // 0.027 mm (its ⌀6 ball's own 0.8 mm step-over) is the default only for a job that states
         // no tolerance at all. (The 960 merge floored the tolerance at the default, so a finer
         // tolerance could not tighten the scallop — that reading is withdrawn.)
-        finishScallopMm: input.tolerances.finishMm ?? DEFAULT_FINISH_SCALLOP_MM,
+        //
+        // #985 — AND A STATED PITCH IS A PITCH. `finishStepOverMm` is a WIDTH (the old engine's
+        // finishing raster pitch); the cusp it leaves is `R − √(R² − (s/2)²)` on the finishing
+        // ball, converted here where R is known, never fed into `finishMm`'s height seat. A
+        // stated cusp wins over a pitch; absent both, the engine's default stands.
+        finishScallopMm: statedFinishCusp ?? DEFAULT_FINISH_SCALLOP_MM,
         stepOverMm: pocketParams.stepOver,
         feeds,
         cutParamsFor,
