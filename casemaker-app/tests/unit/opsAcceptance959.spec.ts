@@ -52,7 +52,7 @@ import { tl } from './helpers/manifoldExec';
 import { stepToMesh } from '@/engine/import/stepMesh';
 import { recogniseFeatures, type FeatureTree, type PocketNode } from '@/engine/cnc/cam/model/features';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
-import { concatToolpathIR, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { Z1 } from '@/engine/cnc/machine';
 import { cuttingDiameter, flatEndMill, type Tool } from '@/engine/cnc/tool';
@@ -233,21 +233,14 @@ function planTray(tree: FeatureTree): PlanPocketsResult {
  */
 const EDGE_BREAK_LEG_MM = 0.5;
 
-/** A plan's runs in execution order — the same split `planModelCam` posts: a run starts when the cutter key changes. */
+/**
+ * A plan's runs in execution order — the plan's OWN posted programs (`SetupPlan.programs`), never a
+ * re-derivation from `setup.ops`. `ops` stays in the reporting order (region by region); since
+ * #964's `batchSameCutterRuns` the execution order groups the same cutter's ops, so deriving runs
+ * from `ops` would resurrect the very alternation the batching removes.
+ */
 function runsOf(setup: SetupPlan): { cutterKey: string; ir: ToolpathIR }[] {
-  const runs: { cutterKey: string; ir: ToolpathIR }[] = [];
-  let current: { cutterKey: string; ir: ToolpathIR } | null = null;
-  for (const op of setup.ops) {
-    if (current !== null && current.cutterKey !== op.outcome.cutter) {
-      runs.push(current);
-      current = null;
-    }
-    current = current === null
-      ? { cutterKey: op.outcome.cutter, ir: op.outcome.ir }
-      : { cutterKey: current.cutterKey, ir: concatToolpathIR(current.ir, op.outcome.ir) };
-  }
-  if (current !== null) runs.push(current);
-  return runs;
+  return setup.programs.map((ir) => ({ cutterKey: ir.tool.id ?? ir.tool.name, ir }));
 }
 
 async function planCard(
@@ -473,6 +466,21 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
     ],
   };
   fs.writeFileSync(path.join(out, `${name}-plan.json`), JSON.stringify(plan));
+  if (goal !== undefined) {
+    // #964 — the standing picture set's input: the same goal target, stock/frame and gate options
+    // this run measured, so `tests/tools/acceptancePics.ts` draws what this check saw.
+    fs.writeFileSync(
+      path.join(out, `${name}-pics.json`),
+      JSON.stringify({
+        card: name,
+        target: goal.target,
+        stock: { length: goal.stock.length, width: goal.stock.width, thickness: tree.frame.stockTop - tree.frame.partBottom },
+        frame: { stockTop: tree.frame.stockTop, partBottom: tree.frame.partBottom },
+        cutIntoOptions: { passCoverage: 0.95, ...edgeBreakAllowance() },
+        post: ctx,
+      }, null, 1),
+    );
+  }
   fs.writeFileSync(
     path.join(out, `${name}-posted-facts.json`),
     JSON.stringify({
