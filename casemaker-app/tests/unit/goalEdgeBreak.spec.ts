@@ -98,8 +98,11 @@ describe('#955/V2-2 the goal check edge-break allowance', () => {
   });
 
   it('a cut in the wall shadow is reported unadjudicable, not as a pass', () => {
-    // 1.75 mm from the wall: outside the 1.5 mm edge reach, inside a 2 mm shadow.
-    const top = swept(STEP, (x) => (Math.abs(x - 3) <= 0.125 ? 0.5 : null));
+    // 1.75 mm from the wall: outside the 1.5 mm edge reach, inside a 2 mm shadow. The cut is kept
+    // INSIDE the grid (y 2..8): since the manager's #959 sanction the part's silhouette is a
+    // design edge, and this fixture's y-edges are border cells — a cut touching them is edge
+    // break by rule, which is a different question from the one this case asks.
+    const top = swept(STEP, (x, y) => (Math.abs(x - 3) <= 0.125 && y > 2 && y < 8 ? 0.5 : null));
     const r = checkGoalCutInto(STEP, top, { ...EDGE, wallShadowRadiusMm: 2 });
     expect(r.edgeBreakFraction).toBe(0);
     expect(r.shadowNotScoredFraction).toBeGreaterThan(0);
