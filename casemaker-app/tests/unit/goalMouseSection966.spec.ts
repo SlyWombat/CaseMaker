@@ -52,6 +52,47 @@ function placedMesh(job: EngraveJob): { triangles: ParsedMesh } {
   return { triangles: { ...local, positions } };
 }
 
+/**
+ * A 10 × 10 × 4 box (top at z = 4) with its bottom face omitted: a small open shell. With
+ * `tear` the front face's second triangle is also removed, which leaves one boundary vertex with
+ * two outgoing edges — a hole the loop chaining cannot close.
+ */
+function box(tear: boolean): { triangles: ParsedMesh } {
+  const positions = new Float32Array([
+    0, 0, 0, 10, 0, 0, 10, 10, 0, 0, 10, 0,
+    0, 0, 4, 10, 0, 4, 10, 10, 4, 0, 10, 4,
+  ]);
+  const indices = [
+    // front (−Y), right (+X), back (+Y), left (−X), top (+Z); no bottom
+    0, 1, 5, 0, 5, 4,
+    1, 2, 6, 1, 6, 5,
+    2, 3, 7, 2, 7, 6,
+    3, 0, 4, 3, 4, 7,
+    4, 5, 6, 4, 6, 7,
+  ];
+  if (tear) indices.splice(3, 3); // the (0, 5, 4) triangle
+  return {
+    triangles: {
+      positions,
+      indices: Uint32Array.from(indices),
+      triangleCount: indices.length / 3,
+      bbox: { min: [0, 0, 0], max: [10, 10, 4] },
+    },
+  };
+}
+
+function boxInput(geometry: { triangles: ParsedMesh }): ModelPlanInput {
+  return {
+    geometry,
+    setups: [{ frame: { up: [0, 0, 1], stockTop: 4, stockBottom: -6 }, underside: 'flatOnStockBottom' }],
+    stock: { length: 20, width: 20, thickness: 10, material: 'pla' },
+    fixture: { mount: 'tape', envelope: null },
+    cutters: { house: [FLAT6], catalogue: [] },
+    tolerances: { finishMm: 0.3 },
+    edgeBreak: { legMm: 0 },
+  };
+}
+
 describe('#966 the mouse shell sections at all', () => {
   it('plans j27 through planModelCam instead of refusing the open mesh', async () => {
     const job = readJob();
@@ -74,4 +115,16 @@ describe('#966 the mouse shell sections at all', () => {
     expect(output.perSetup[0]!.features.remainder.length).toBeGreaterThan(0);
     expect(output.perSetup[0]!.programs.length).toBeGreaterThan(0);
   }, 300_000);
+
+  it('states the open edges it closed in the plan notes', async () => {
+    const output = await planModelCam(boxInput(box(false)));
+    const notes = output.perSetup[0]!.notes.join('\n');
+    expect(notes).toMatch(/the goal mesh had 4 open edge\(s\) and 0 degenerate triangle\(s\); the holes were closed before planning/);
+  });
+
+  it('refuses by name when a hole cannot be closed', async () => {
+    await expect(planModelCam(boxInput(box(true)))).rejects.toThrow(
+      /cam\/model\/features: the goal mesh has 7 open edge\(s\) and 0 degenerate triangle\(s\) that could not be closed into a solid/,
+    );
+  });
 });
