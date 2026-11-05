@@ -271,7 +271,10 @@ import {
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
 import { cutterKeyOf, type CutterCandidates } from '@/engine/cnc/cam/model/sequence';
 import type { EdgeBreakSpec, ModelTolerances } from '@/engine/cnc/cam/model/types';
-import type { Mount } from '@/engine/cnc/setups/types';
+// #966 — the real reach-aware top+bottom decision (#965), replacing this file's own hardcoded
+// single `top` `SetupSpec` below (`buildModelPlanInputForGoal`'s own doc on why).
+import { buildSetupSpecs } from '@/engine/cnc/cam/model/setups';
+import type { Mount, MountSpec } from '@/engine/cnc/setups/types';
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
 import type { ParsedMesh } from '@/engine/import/stlParser';
@@ -753,6 +756,16 @@ export interface EngraveGenerated {
    * — and the sheet must then say the source was not recorded rather than guess.
    */
   threadMachining?: ThreadSettingsResult | null;
+  /**
+   * #966 — THE MODEL ENGINE'S OWN PLAN, riding alongside the posted `programs`. `generateGoalProgram`'s
+   * flag-on path (`USE_MODEL_CAM_ENGINE`) sets this to `planModelCam`'s real `ModelPlanOutput` (every
+   * `SetupPlan`, one per setup) as soon as `planModelCam` returns one — even on a LATER refusal (a
+   * program that fails to post or verify after planning succeeded), because the plan itself is still
+   * the truth about what was attempted. `null`/absent on the old heightfield path (it has no
+   * `ModelPlanOutput` to carry) and on a refusal before `planModelCam` ever returned (nothing was
+   * planned yet). D's run store reads `(generated as {plan?: …}).plan?.perSetup` speculatively.
+   */
+  plan?: ModelPlanOutput | null;
   cam: EngraveCamSummary | null;
   /**
    * #250 — the rough/finish split of the program this object describes (the FIRST program for the
@@ -4560,6 +4573,7 @@ function emptyGoalResult(): Omit<EngraveGenerated, 'ok' | 'stage' | 'findings' |
   return {
     threads: null,
     threadMachining: null,
+    plan: null,
     frameNc: null,
     frameVerify: null,
     facingNc: null,
@@ -4825,6 +4839,15 @@ export function buildModelPlanInputForGoal(
   goal: EngraveTargetObject,
   tool: Tool,
   shop: EngraveShopOpts,
+  /**
+   * #966 test/e2e-only seam — overrides the real `buildSetupSpecs` decision below with a
+   * caller-supplied list, so a spec can drive `generateGoalProgram`'s real multi-setup posting
+   * path with a synthetic `ModelPlanInput.setups` without depending on a particular mesh's own
+   * flip-plan answer. `multiSetup966.spec.ts`/`camModelSeam966.spec.ts` already depend on this
+   * seam; no production caller passes it, and when present it wins unconditionally, exactly as
+   * before #966-goal-setups wired the real decision in to replace the old hardcoded fallback.
+   */
+  setupsOverride?: SetupSpec[],
 ): ModelPlanInput {
   const rawMesh = targetObjectMesh(goal);
   const placed = placeTarget(goal, rawMesh);
@@ -4858,14 +4881,51 @@ export function buildModelPlanInputForGoal(
   const underside: SetupSpec['underside'] =
     undersideKind === 'flipped-tabs' ? 'flippedTabs' : undersideKind === 'plinth' ? 'plinth' : 'flatOnStockBottom';
 
-  // The work frame's Z 0 is the stock's own top face (`zDatum: 'probed-top-face'`, this file's own
-  // `ctx` below) — the SAME convention `placeTarget` places the mesh against (`position.z` is the
-  // mesh's own top in that frame), so no second Z origin is invented here.
-  const setups: SetupSpec[] = [
-    { frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -job.stock.thickness }, underside },
-  ];
-
   const mount: Mount = jobMount(job);
+
+  // #966 — THE REAL DECISION. `buildSetupSpecs` (#965's reach-aware top+bottom call, ported from
+  // `held/914-flip-plan`) replaces the single hardcoded `top` `SetupSpec` this function used to
+  // build unconditionally — the bug #966 was opened against: a goal that geometrically needs a
+  // flip (e.g. `underside.kind: 'flipped-tabs'`, no flat face to rest the rest of the part on)
+  // used to plan and post a top-only program as `ok: true`, silently incomplete.
+  //
+  // `mount: MountSpec` follows the SAME construction the other two goal-job call sites into this
+  // same `goalFlipPlan`/`buildSetupSpecs` family already use (`goalFlipSetups.ts`'s
+  // `planFlipSetups` — `const mount: MountSpec = { kind: jobMount(job) };` — and
+  // `goalFlipFindings.ts`'s `goalSurfaceOffer`, identical) — not a new convention invented here.
+  // Neither of those two sites states `viseOpeningMm`/`board` either: this module's own
+  // `frameForFace` only ever turns `top`/`bottom` (#965's stated scope), and `orient`'s own
+  // `up === 'bottom'` branch (`setups/orient.ts`) never reads `viseOpeningMm` — only a side
+  // (`left`/`right`/`front`/`back`) setup would, and this module never offers one.
+  //
+  // REACH-AWARE SCORING (`BuildSetupsInput.reach`, #914) IS DELIBERATELY OMITTED HERE, stated
+  // rather than silently dropped: `goalSurfaceOffer` (`goalFlipFindings.ts`), the only OTHER
+  // production caller that plans a goal job's flip today, already calls `goalFlipPlan` the same
+  // geometry-only way — this keeps the new seam from disagreeing with that established finding
+  // about which sides a goal offers. More importantly, wiring reach here would let a cutter's
+  // recorded reach SILENTLY suppress a geometrically-needed second setup (`goalFlipPlan`'s `band`
+  // check removes a credited face's visibility once it reads too deep for the pool's longest
+  // reach) with no finding stating that happened — the exact shape of bug this issue fixes, one
+  // level further down. Fixing THAT needs its own stated refusal/finding wiring from
+  // `FlipPlan.stopped`/`dropped`/`beyondReachMm2` into this function's caller, which is a separate
+  // design question from "call the real decision instead of a hardcoded one" and is left to a
+  // follow-up rather than guessed at here.
+  const mountSpec: MountSpec = { kind: mount };
+  const setups: SetupSpec[] =
+    setupsOverride ??
+    buildSetupSpecs({
+      geometry,
+      underside,
+      mount: mountSpec,
+      // The stock's own size, in its own frame, mm — `buildSetupSpecs`' own vise-opening rule.
+      stockSize: { x: job.stock.length, y: job.stock.width, z: job.stock.thickness },
+      // The work frame's Z 0 is the stock's own top face (`zDatum: 'probed-top-face'`, this file's
+      // own `ctx` below) — the SAME convention `placeTarget` places the mesh against
+      // (`position.z` is the mesh's own top in that frame), stated explicitly rather than left to
+      // `buildSetupSpecs`' own `0` default so a reviewer sees the two agree on purpose.
+      stockTopZ: 0,
+    }).setups;
+
   const envelope: FixtureEnvelope | null =
     mount === 'vise'
       ? viseEnvelope(job.stock, jobVise(job), job.sacrificial)
@@ -4905,9 +4965,14 @@ export async function generateGoalProgram(
   onProgress?: EngraveProgressFn,
   /** #881 — where the adaptive rough's levels are planned; absent, in this thread. */
   planner?: LevelPlanner,
+  /** #966 test/e2e-only seam — see `buildModelPlanInputForGoal`'s own doc on this same parameter. */
+  modelSetupsOverride?: SetupSpec[],
 ): Promise<EngraveGenerated> {
   const base = emptyGoalResult();
-  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null): EngraveGenerated => ({
+  // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
+  // it returned one (a program that fails to post/verify once the plan itself is sound); every
+  // call site before `planModelCam` has run passes nothing, so `fail` defaults it to `null`.
+  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null, plan: ModelPlanOutput | null = null): EngraveGenerated => ({
     ...base,
     ok: false,
     stage,
@@ -4916,6 +4981,7 @@ export async function generateGoalProgram(
     cam: null,
     nc: null,
     verify: null,
+    plan,
     errors: [{ stage, message }],
   });
 
@@ -4990,7 +5056,7 @@ export async function generateGoalProgram(
   if (USE_MODEL_CAM_ENGINE) {
     let input: ModelPlanInput;
     try {
-      input = buildModelPlanInputForGoal(job, goal, tool, shop);
+      input = buildModelPlanInputForGoal(job, goal, tool, shop, modelSetupsOverride);
     } catch (e) {
       return fail('cam', `cam/model seam (#966): could not build a ModelPlanInput for "${goal.name}" — ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -5000,28 +5066,37 @@ export async function generateGoalProgram(
     } catch (e) {
       return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
     }
-    // #966 — THE CUTOVER (not just the seam, this round). `planModelCam` ran and returned a
-    // `SetupPlan` per setup; each setup's `programs` (one per RUN, in execution order — #963's own
-    // rule) now posts through the SAME `postFor`/`verifyProgram` pair, and the SAME `VerifyContext`
-    // shape (`toSetup`/`jobDepthLimit`/`mountCtx`), the rest of this file already builds for a
-    // goal's own setup — not a second convention (grep both call sites before touching this).
+    // #966 ROUND 3 — THE CUTOVER NOW COVERS MULTI-SETUP. `planModelCam` ran and returned a
+    // `SetupPlan` per setup (#965's registration/freeing-cl work, underneath); every setup's own
+    // `programs` (one per RUN, in execution order — #963's own rule) posts through the SAME
+    // `postFor`/`verifyProgram` pair, and the SAME `VerifyContext` shape (`toSetup`/`jobDepthLimit`/
+    // `mountCtx`), the rest of this file already builds for a goal's own setup — not a second
+    // convention (grep both call sites before touching this). Setups post IN ORDER, then that
+    // setup's own programs in order.
     //
-    // #965's flip plan can still return more than one `SetupPlan` (a multi-setup freeing-over-CL
-    // job); that side of the cutover is explicitly another session's work, so more than one setup
-    // is refused BY NAME here rather than silently posting only the first.
-    if (output.perSetup.length !== 1) {
+    // THE TURN-OVER CONVENTION — no established one existed in this file for a model-engine job,
+    // so this is stated rather than guessed: `runSheet.ts`'s own multi-setup paper
+    // (`turnOverSteps`) represents the physical remount between two setups PURELY as a change in a
+    // posted `EngraveProgram`'s `setupIndex`/`setupId` between consecutive entries — it reads the
+    // boundary off that field change, never a sentinel object inserted into the program list. This
+    // loop follows the SAME convention: `programs` stays flat, in posting order, and the setup
+    // boundary is only ever visible as `setupIndex`/`setupId` changing between two entries. The one
+    // thing that DOES reset at that boundary is the vacuum span (`post/z1.ts`'s `VacuumSpan`):
+    // vacuum cannot hold through a physical turn-over (the part is unclamped and flipped), so
+    // 'first'/'last'/'whole' are computed against EACH setup's own `programs.length`, never across
+    // the whole job's combined program count.
+    const jobSetupList = jobSetups(job);
+    const totalPrograms = output.perSetup.reduce((n, p) => n + p.programs.length, 0);
+    if (totalPrograms === 0) {
+      const perSetupNotes = output.perSetup
+        .map((p) => `setup ${p.setupIndex + 1}${p.notes.length === 0 ? '' : `: ${p.notes.join(' | ')}`}`)
+        .join(' / ');
       return fail(
         'cam',
-        `cam/model (#966): planModelCam returned ${output.perSetup.length} setup(s) for "${goal.name}" — ` +
-          "this cutover posts a single-setup goal only; a multi-setup flip plan is #965's own work",
-      );
-    }
-    const plan = output.perSetup[0]!;
-    if (plan.programs.length === 0) {
-      return fail(
-        'cam',
-        `cam/model (#966): planModelCam planned no program for "${goal.name}"` +
-          (plan.notes.length === 0 ? '' : ` — ${plan.notes.join(' | ')}`),
+        `cam/model (#966): planModelCam planned no program for "${goal.name}" across ${output.perSetup.length} setup(s)` +
+          (perSetupNotes.length === 0 ? '' : ` — ${perSetupNotes}`),
+        null,
+        output,
       );
     }
 
@@ -5038,66 +5113,90 @@ export async function generateGoalProgram(
     };
 
     const programs: EngraveProgram[] = [];
-    for (let i = 0; i < plan.programs.length; i++) {
-      const ir = plan.programs[i]!;
-      // #961's own cutter identity — `tool.id ?? tool.name` (`cam/model/sequence.ts`'s
-      // `cutterKeyOf`), the SAME string the plan's own run-grouping already keyed this program's
-      // cutter by (`SetupPlan.programs`'s own doc: "one program per RUN"). `toolKey` here is a
-      // free-text header word (`;@CM|TOOL|key=`, `post/z1.ts`) the post never reads back for
-      // machine control, so it needs no round-trip through the `shop.tools` registry.
-      const toolKey = cutterKeyOf(ir.tool);
-      const span: VacuumSpan =
-        plan.programs.length === 1 ? 'whole' : i === 0 ? 'first' : i === plan.programs.length - 1 ? 'last' : 'middle';
-      const programLabel = `program ${i + 1}/${plan.programs.length} (${toolKey})`;
-      let posted: PostResult;
-      try {
-        posted = postFor(mill)(ir, { ...ctx, toolKey }, { vacuum: span });
-      } catch (e) {
-        return fail('post', `cam/model (#966): ${programLabel}: ${e instanceof Error ? e.message : String(e)}`);
+    for (const plan of output.perSetup) {
+      // 1-based, the operator's "Setup N" (`EngraveProgram.setupIndex`'s own doc); `plan.setupIndex`
+      // is 0-based (#963's `SetupPlan`'s own convention, like `job.setups`).
+      const setupIndex = plan.setupIndex + 1;
+      // No per-setup `JobSetup` exists for a model-engine job today (`buildModelPlanInputForGoal`
+      // builds `ModelPlanInput.setups` independently of `job.setups` — a goal dispatches before the
+      // item pipeline's own setups ever apply, `jobSetup.ts`'s own #888 item 6 note). Reuse the
+      // real id when `job.setups` ever does carry one at this index (future wiring, not a guess
+      // this entry makes), else synthesize a stable, readable one off the job's own implicit id.
+      const setupId = jobSetupList[plan.setupIndex]?.id ?? `${jobSetupList[0]!.id}#${setupIndex}`;
+      if (plan.programs.length === 0) {
+        return fail(
+          'cam',
+          `cam/model (#966): planModelCam planned no program for "${goal.name}" setup ${setupIndex}` +
+            (plan.notes.length === 0 ? '' : ` — ${plan.notes.join(' | ')}`),
+          null,
+          output,
+        );
       }
-      if (!posted.ok) {
-        return fail('post', `cam/model (#966): ${programLabel}: ${posted.errors.join('; ')}`);
-      }
-      const verify = verifyProgram(posted.text, {
-        setup,
-        machine: mill,
-        tool: ir.tool,
-        dialect: postKey(mill),
-        depthLimit: limit,
-        minRapidZ: ir.hopZ,
-        ...mountCtx(shop.mount, job.jawClearance),
-      });
-      const verifyErrors = verify.findings.filter((f) => f.severity === 'error');
-      if (verifyErrors.length > 0) {
-        // #966 — a program the verifier refuses stops the run here: the programs already posted
-        // (if any) are returned as the diagnosis `programs` doc states ("a partial list, never a
-        // runnable job"), and the failing program's own text/report ride the top-level fields —
-        // the SAME shape `generateOneProgram`'s own verify-stage stop returns (grep that call site).
-        return {
-          ...base,
-          ok: false,
-          stage: 'verify',
-          findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...documentFindings()]),
-          feeds: null,
-          cam: null,
+      for (let i = 0; i < plan.programs.length; i++) {
+        const ir = plan.programs[i]!;
+        // #961's own cutter identity — `tool.id ?? tool.name` (`cam/model/sequence.ts`'s
+        // `cutterKeyOf`), the SAME string the plan's own run-grouping already keyed this program's
+        // cutter by (`SetupPlan.programs`'s own doc: "one program per RUN"). `toolKey` here is a
+        // free-text header word (`;@CM|TOOL|key=`, `post/z1.ts`) the post never reads back for
+        // machine control, so it needs no round-trip through the `shop.tools` registry.
+        const toolKey = cutterKeyOf(ir.tool);
+        // Reset per SETUP, not across the whole job (see this block's own header note on why).
+        const span: VacuumSpan =
+          plan.programs.length === 1 ? 'whole' : i === 0 ? 'first' : i === plan.programs.length - 1 ? 'last' : 'middle';
+        const programLabel = `setup ${setupIndex} program ${i + 1}/${plan.programs.length} (${toolKey})`;
+        let posted: PostResult;
+        try {
+          posted = postFor(mill)(ir, { ...ctx, toolKey }, { vacuum: span });
+        } catch (e) {
+          return fail('post', `cam/model (#966): ${programLabel}: ${e instanceof Error ? e.message : String(e)}`, null, output);
+        }
+        if (!posted.ok) {
+          return fail('post', `cam/model (#966): ${programLabel}: ${posted.errors.join('; ')}`, null, output);
+        }
+        const verify = verifyProgram(posted.text, {
+          setup,
+          machine: mill,
+          tool: ir.tool,
+          dialect: postKey(mill),
+          depthLimit: limit,
+          minRapidZ: ir.hopZ,
+          ...mountCtx(shop.mount, job.jawClearance),
+        });
+        const verifyErrors = verify.findings.filter((f) => f.severity === 'error');
+        if (verifyErrors.length > 0) {
+          // #966 — a program the verifier refuses stops the run here: the programs already posted
+          // (if any, from this or an earlier setup) are returned as the diagnosis `programs` doc
+          // states ("a partial list, never a runnable job"), and the failing program's own
+          // text/report ride the top-level fields — the SAME shape `generateOneProgram`'s own
+          // verify-stage stop returns (grep that call site). `plan` still carries the FULL
+          // `ModelPlanOutput` — the plan itself was sound, only this posted file was not.
+          return {
+            ...base,
+            ok: false,
+            stage: 'verify',
+            findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...documentFindings()]),
+            feeds: null,
+            cam: null,
+            nc: posted.text,
+            verify,
+            programs: [...programs],
+            plan: output,
+            errors: [{ stage: 'verify', message: `cam/model (#966): ${programLabel}: ${verifyErrors.length} verifier error(s)` }],
+          };
+        }
+        programs.push({
+          setupIndex,
+          setupId,
+          toolKey,
           nc: posted.text,
+          frame: ir.frame,
           verify,
-          programs: [...programs],
-          errors: [{ stage: 'verify', message: `cam/model (#966): ${programLabel}: ${verifyErrors.length} verifier error(s)` }],
-        };
+          frameNc: null,
+          frameVerify: null,
+          programHash: programHash(posted.text),
+          cam: summarize(ir, mill.rapidEstimate),
+        });
       }
-      programs.push({
-        setupIndex: 1,
-        setupId: jobSetups(job)[0]!.id,
-        toolKey,
-        nc: posted.text,
-        frame: ir.frame,
-        verify,
-        frameNc: null,
-        frameVerify: null,
-        programHash: programHash(posted.text),
-        cam: summarize(ir, mill.rapidEstimate),
-      });
     }
 
     // #419 J3 — the top-level `nc`/`verify`/`cam` describe the FIRST program, exactly as the
@@ -5114,6 +5213,7 @@ export async function generateGoalProgram(
       nc: first.nc,
       verify: first.verify,
       programs,
+      plan: output,
     };
   }
 
