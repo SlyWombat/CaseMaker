@@ -34,6 +34,7 @@ import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { RapidEstimate, CamMove } from '@/engine/cnc/cam/ir';
 import { FLAT, type ColumnCutter, type CutMove } from '@/workers/geometry/columnEngine';
 import { stubSetup, type Setup } from '@/engine/cnc/setup';
+import { planCutInto } from '../tools/planCutInto';
 import { rectProfile } from '@/engine/compiler/profile';
 
 afterEach(() => clearTargetObjectMeshCache());
@@ -230,6 +231,11 @@ describe('#721 — generate → simulate → match', () => {
     const out = await planModelCam(input);
     expect(out.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
     expect(out.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
+    // #982 follow-up (A's review) — THE OUTCOME, not just the note: the ball-only plan swept
+    // against the goal cuts into it NOWHERE. This is the check the 11.37 mm pocket-2 gouge (and
+    // the 0.953 mm skim/ride class after it) would have failed loudly instead of silently.
+    const report = planCutInto(asItem, asItem.targetObject!, out.perSetup.flatMap((s) => s.programs));
+    expect(report.adjudicated, `cut-into must be 0 — ${JSON.stringify(report)}`).toBe(0);
   }, 120_000);
 
   it('#982 pin — the mold mode plans through planModelCam with the ball-only set', async () => {
