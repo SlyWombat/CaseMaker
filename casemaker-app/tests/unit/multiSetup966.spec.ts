@@ -19,113 +19,18 @@
  * seam as a clean, named `'cam'`-stage failure — never a raw, unhandled throw.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
-import { flatEndMill, type Tool } from '@/engine/cnc/tool';
-import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import { generateGoalProgram, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
-import { setModelCamEnabled, type SetupSpec } from '@/engine/cnc/cam/model/plan';
+import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
+import { setModelCamEnabled } from '@/engine/cnc/cam/model/plan';
+// The box fixture (triangles, STL encoding, job/shop building, the two-setup `SetupSpec[]`) is
+// factored into a shared helper (#966) so `multiSetupVerify966.spec.ts` drives the SAME geometry
+// through `generateGoalProgram` rather than forking a second copy of this logic.
+import { boxTarget, jobFor, FLAT3, SHOP, twoSetups } from './helpers/twoSetupBox966';
 
 afterEach(() => {
   clearTargetObjectMeshCache();
   setModelCamEnabled(false);
 });
-
-// ── A plain box, the goal's own embedded mesh — raw local coordinates centred at (0, 0) in XY,
-// top at local Z 0 (the SAME "already centred, top at Z 0" convention `camModelSeam966.spec.ts`'s
-// random-part fixture uses), so placing it at the stock's own centre with `position.z = 0`
-// reproduces the box in the job's [0, L] × [0, W] frame with its top at the stock's own top. ────
-type V = [number, number, number];
-type Tri = [V, V, V];
-
-function quad(out: Tri[], a: V, b: V, c: V, d: V): void {
-  out.push([a, b, c], [a, c, d]);
-}
-
-/** A closed box `L × W × T`, centred in XY, top at local Z 0 — `setups965.spec.ts`'s own `box`
- * helper, re-centred. The SAME 40 × 30 × 20 dimensions `contourFreeingCl965.spec.ts`'s section C
- * already proves `planModelCam` plans end to end for a two-setup job (registration via the edge
- * datum, the freeing contour's opposite-surface clamp) — reused here so this spec's own geometry
- * is not a new, unproven shape. */
-function boxTris(l: number, w: number, t: number): Tri[] {
-  const x0 = -l / 2, x1 = l / 2, y0 = -w / 2, y1 = w / 2, z0 = -t, z1 = 0;
-  const tris: Tri[] = [];
-  quad(tris, [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]);
-  quad(tris, [x0, y1, z0], [x1, y1, z0], [x1, y0, z0], [x0, y0, z0]);
-  quad(tris, [x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]);
-  quad(tris, [x1, y1, z0], [x0, y1, z0], [x0, y1, z1], [x1, y1, z1]);
-  quad(tris, [x0, y1, z0], [x0, y0, z0], [x0, y0, z1], [x0, y1, z1]);
-  quad(tris, [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]);
-  return tris;
-}
-
-/** Binary STL encoder — `camModelSeam966.spec.ts`'s own helper, unchanged. */
-function stl(tris: Tri[]): string {
-  const buf = new ArrayBuffer(84 + tris.length * 50);
-  const dv = new DataView(buf);
-  dv.setUint32(80, tris.length, true);
-  let off = 84;
-  for (const t of tris) {
-    off += 12;
-    for (const v of t) {
-      dv.setFloat32(off, v[0], true);
-      dv.setFloat32(off + 4, v[1], true);
-      dv.setFloat32(off + 8, v[2], true);
-      off += 12;
-    }
-    off += 2;
-  }
-  return Buffer.from(new Uint8Array(buf)).toString('base64');
-}
-
-function boxTarget(id: string, l: number, w: number, t: number): EngraveTargetObject {
-  return {
-    id,
-    name: `${id}.stl`,
-    format: 'stl',
-    sha256: 'f'.repeat(64),
-    data: stl(boxTris(l, w, t)),
-    size: { x: l, y: w, z: t },
-    position: { x: l / 2, y: w / 2, z: 0 },
-    rotation: 0,
-    enabled: true,
-    role: 'goal',
-  };
-}
-
-function jobFor(target: EngraveTargetObject, l: number, w: number, t: number): EngraveJob {
-  return {
-    ...defaultEngraveJob(),
-    labels: [],
-    shapes: [],
-    stock: { ...defaultEngraveJob().stock, length: l, width: w, thickness: t },
-    targetObject: target,
-  };
-}
-
-function entry(key: string, tool: Tool): ToolLibraryEntry {
-  return { key, tool: { ...tool, id: key, number: null }, provenance: 'test fixture' };
-}
-
-// 3 mm, not 6 — hardwood's compiled fallback feeds table tops out at 3.2 mm (`feeds.ts`'s own
-// rows); the MODEL engine's `resolvedCutParams` has an explicit flat-proxy substitution for a
-// cutter outside that table (`cam/model/plan.ts`'s own header note), but the OLD heightfield path
-// this spec's "flag off" case also exercises does not, so a 6 mm cutter refuses there with no
-// feeds at all — picking a covered diameter keeps BOTH paths green on their own terms.
-const FLAT3: Tool = flatEndMill(3, { number: 1, id: 'flat-3', name: 'flat-3' });
-const SHOP: EngraveShopOpts = { tools: [entry('inv:flat-3', FLAT3)] };
-
-/** Setup 0 (top) + setup 1 (bottom, the vise flip) — the placed mesh's own top at Z 0, bottom at
- * `-T`, the SAME convention `buildModelPlanInputForGoal`'s own single-setup default uses, just
- * supplied twice (`frameForFace`'s own formula for `stockTopZ = 0`: bottom's `stockTop` is the
- * thickness, `stockBottom` is `-stockTopZ`, numerically 0). */
-function twoSetups(t: number): SetupSpec[] {
-  return [
-    { frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -t }, underside: 'flippedTabs' },
-    { frame: { up: [0, 0, -1], stockTop: t, stockBottom: -0 }, underside: 'flippedTabs' },
-  ];
-}
 
 describe('#966 ROUND 3 — generateGoalProgram posts and verifies a real multi-setup plan', () => {
   it('flag off (the default): unaffected by the override — the old heightfield engine still runs, green', async () => {
