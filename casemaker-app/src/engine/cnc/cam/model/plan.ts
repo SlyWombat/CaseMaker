@@ -36,7 +36,7 @@ import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances } from './types';
-import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep } from './sequence';
+import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { pocket } from './ops/pocket';
 import { clSurface } from './clsurface';
 import { rough } from './ops/rough';
@@ -205,6 +205,12 @@ export interface SetupPlan {
   notes: string[];
   /** Features no cutter in the chain covers, each a sentence naming the limiting number. */
   unreachable: string[];
+  /**
+   * #959 item 5 — every region/stage of THIS plan that threw or planned nothing, in `sequence.ts`'s
+   * own `SequenceStepFailure` shape (kind, cutter, regions, the reason). The rest of the plan still
+   * posts; only a primary failure refuses (`priceSequence`'s step-0 rule).
+   */
+  unplanned: SequenceStepFailure[];
 }
 
 /** Set only by specs for now (see this file's header). */
@@ -476,6 +482,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       totalCostSeconds,
       notes,
       unreachable: result.unreachable,
+      unplanned: result.unplanned,
     });
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 1 });
   }
@@ -543,9 +550,9 @@ function rimRing(polyline: readonly [number, number][]): [number, number][] {
  * mouth, not an open lip), so the break cut 0.5 mm into ground the goal never exposes. A rim is
  * breakable only where its AIR side actually drops — by the goal's own step threshold (0.2 mm,
  * `designEdgeCells`). Sampled at EVERY segment midpoint (not a stride across them — an 8-point
- * stride missed covered stretches on the tray), five distances onto the air side (0.25/0.5/1.0/
- * 1.3/1.55 mm, the V's whole footprint reach); ANY covered sample means the rim is not broken
- * whole (conservative: never break under a lip).
+ * stride missed covered stretches on the tray), seven distances onto the air side (0.25/0.5/1.0/
+ * 1.3/1.55/1.65/1.8 mm, the V's whole 1.6375 mm skirt reach plus margin); ANY covered sample means
+ * the rim is not broken whole (conservative: never break under a lip).
  */
 function rimExposedFromAbove(
   bins: TriangleBins,
@@ -572,9 +579,11 @@ function rimExposedFromAbove(
     const mx = (a[0] + b[0]) / 2;
     const my = (a[1] + b[1]) / 2;
     // The samples must cover the V's WHOLE footprint, not just the edge's neighbourhood: the
-    // cutter's skirt reaches its own outer radius from the path, so covered ground that starts
-    // ~1 mm out is still cut at 0.5 mm deep.
-    for (const d of [0.25, 0.5, 1.0, 1.3, 1.55]) {
+    // cutter's skirt reaches its own outer radius from the path (offset 0.05 on the air side plus
+    // 1.5875 of cone = 1.6375 from the rim), so covered ground that starts ~1.5 mm out is still
+    // cut at 0.5 mm deep. The organizer's 45-degree rim cut one cell at 1.6 mm — past the old last
+    // sample at 1.55 — which is why its 0.04 % survived the first filter.
+    for (const d of [0.25, 0.5, 1.0, 1.3, 1.55, 1.65, 1.8]) {
       const top = topSurfaceAt(bins, mx + nx * d, my + ny * d);
       if (top !== null && top > rim.z - stepMm) return false;
     }
@@ -657,6 +666,8 @@ export interface PlanPocketsResult {
   notes: string[];
   /** The full picker result (`considered`, `cost`) — for a caller that wants more than `ops`/`unreachable`. */
   choice: SequenceChoice;
+  /** #959 item 5 — the chosen chain's failed steps, one entry per region that threw (with its own message). */
+  unplanned: SequenceStepFailure[];
 }
 
 /**
@@ -928,7 +939,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // of a region that passes that pruning but fails when actually planned (a Clipper failure on an
   // extended open shoulder, a degenerate through hole), so this is the one place that can catch
   // it. Caught per region, not per step: the OTHER regions in the same step still plan and post.
-  const regionFailures = new Map<string, string>();
+  const regionFailures = new Map<string, SequenceStepFailure>();
+  // The same failures by step signature, so the plan states the CHOSEN chain's own (not another
+  // candidate's) in `unplanned`, each with the message its region threw.
+  const stepFailures = new Map<string, { id: string; reason: string }[]>();
 
   const planStep: SequenceOptions['planStep'] = (step) => {
     let outcomes = outcomeCache.get(stepSignature(step));
@@ -939,7 +953,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         try {
           outcome = planRegion(id, step.cutter.tool);
         } catch (err) {
-          if (!regionFailures.has(id)) regionFailures.set(id, err instanceof Error ? err.message : String(err));
+          const reason = err instanceof Error ? err.message : String(err);
+          if (!regionFailures.has(id)) regionFailures.set(id, { kind: step.kind, cutterKey: step.cutter.key, regionIds: [id], reason });
+          const signature = stepSignature(step);
+          stepFailures.set(signature, [...(stepFailures.get(signature) ?? []), { id, reason }]);
           continue;
         }
         if (outcome === null) continue;
@@ -996,13 +1013,35 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // only checked `pocketsById`) — the SAME sentence either kind of node gets.
   const unreachable = choice.unreachable.map((id) => {
     const node = pocketsById.get(id) ?? throughById.get(id);
+    const failed = regionFailures.get(id);
+    // #959 item 5: a region the chosen chain left out because its planning THREW (the chain that
+    // would have cut it ranked lower for that failure) is not a cutter-size limit — say why.
+    if (failed !== undefined) return `${id}: not cut — planning failed (${failed.reason})`;
     return node === undefined
       ? `${id}: not cut`
       : `${id}: not cut — needs a cutter ≤ ${node.narrowest.toFixed(2)} mm (house offers ${offered})`;
   });
 
+  // A step that posted with some regions thrown, and a step that failed whole (`choice.unplanned`):
+  // either way one entry per thrown region, with its own message; a step that failed without a
+  // throw (it planned nothing) keeps the sequence's own entry.
+  const unplanned: SequenceStepFailure[] = [];
+  for (const step of [...choice.steps, ...choice.unplanned]) {
+    const kind = step.kind;
+    const cutterKey = 'cutter' in step ? step.cutter.key : step.cutterKey;
+    const thrown = stepFailures.get(`${kind}:${cutterKey}:${step.regionIds.join(',')}`) ?? [];
+    for (const { id, reason } of thrown) unplanned.push({ kind, cutterKey, regionIds: [id], reason });
+    if (thrown.length === 0 && 'reason' in step) unplanned.push(step);
+  }
+  // A region the chosen chain does not cut at all because every chain that tried it threw (the
+  // chain without it then ranks first): its first failure, so its own message is stated too.
+  for (const id of choice.unreachable) {
+    const failed = regionFailures.get(id);
+    if (failed !== undefined && !unplanned.some((f) => f.regionIds.includes(id))) unplanned.push(failed);
+  }
+
   const notes: string[] = [];
-  for (const [id, message] of regionFailures) {
+  for (const [id, { reason: message }] of regionFailures) {
     notes.push(`${id}: not cut — planning failed (${message})`);
     // A root pocket's/wide through hole's own mouth assumes facing already cleared the skin
     // (above) — if facing itself is the region that failed, that assumption is now FALSE for
@@ -1050,7 +1089,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     };
   });
 
-  return { ops, programs, sequence, unreachable, notes, choice };
+  return { ops, programs, sequence, unreachable, notes, choice, unplanned };
 }
 
 /**
@@ -1127,6 +1166,8 @@ export interface PlanCurvedResult {
   notes: string[];
   /** `SetupPlan.clGrid`'s entries — every CL surface this pipeline sampled, one per cutter that built one. */
   clGrid: { cutterKey: string; toleranceMm: number; minSpacingMm: number; maxSpacingMm: number }[];
+  /** #959 item 5 — every stage that threw, per region/rim, and the stages a failed rough skipped. */
+  unplanned: SequenceStepFailure[];
 }
 
 function regionRefOf(id: string, kind: RegionKind, footprint: Polygons, topZ: number, bottomZ: number): RegionRef {
@@ -1168,6 +1209,19 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       return;
     }
     notes.push(`${kind} "${ref.id}" emitted no moves — nothing for it to cut`);
+  };
+  // #959 item 5 — A THROWING STAGE DOES NOT SINK THE PLAN: each stage (its CL surface included) is
+  // caught per region/rim and stated in `unplanned` in `sequence.ts`'s step-failure shape; the
+  // other stages and regions still plan. Returns whether the stage planned.
+  const unplanned: SequenceStepFailure[] = [];
+  const attempt = (kind: PlannedOp['kind'], cutter: Tool, ref: RegionRef, plan: () => OpOutcome): boolean => {
+    try {
+      pushStage(kind, ref, plan());
+      return true;
+    } catch (err) {
+      unplanned.push({ kind, cutterKey: cutterKeyOf(cutter), regionIds: [ref.id], reason: err instanceof Error ? err.message : String(err) });
+      return false;
+    }
   };
   const clGrid: PlanCurvedResult['clGrid'] = [];
   const noteGrid = (cutter: Tool, surface: ReturnType<typeof clSurface>): void => {
@@ -1256,65 +1310,86 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const roughRef = roughRegion === base
       ? ref
       : regionRefOf(region.id, 'curved', roughRegion.footprint, base.zTop, base.zBottom);
-    const clFlat = shiftSurface(clSurface(opts.geometry, roughRegion, opts.flat, cuts.stepOver));
-    noteGrid(opts.flat, clFlat);
     // 1. The FLAT Z-steps the region to its own CL, leaving the band.
-    const roughOut = rough({
-      cutter: opts.flat,
-      region: roughRegion,
-      regionRef: roughRef,
-      clSurface: clFlat,
-      stepDownMm: opts.stepDownMm,
-      stockToLeaveMm: opts.bandMm,
-      stepOverMm: opts.stepOverMm,
-      feeds: feedsOf(paramsFor(opts.flat)),
-      offset: opts.offset,
-      safeZMm: opts.safeZMm,
-      hopZMm: opts.hopZMm,
-      toolNumber: opts.toolNumberFor(opts.flat),
-      spindleRpm: paramsFor(opts.flat).rpm,
-      air: opts.air,
-      rapid: opts.rapid,
-      ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
+    //
+    // #959 item 5: the rough is this region's PRIMARY — a rest, finish or pencil on stock it never
+    // cleared would take a full-depth bite — so when it throws, the region's later stages are
+    // stated as skipped, not planned.
+    const flatCl: { surface?: ReturnType<typeof clSurface> } = {};
+    const roughed = attempt('rough', opts.flat, ref, () => {
+      const clFlat = shiftSurface(clSurface(opts.geometry, roughRegion, opts.flat, cuts.stepOver));
+      flatCl.surface = clFlat;
+      noteGrid(opts.flat, clFlat);
+      return rough({
+        cutter: opts.flat,
+        region: roughRegion,
+        regionRef: roughRef,
+        clSurface: clFlat,
+        stepDownMm: opts.stepDownMm,
+        stockToLeaveMm: opts.bandMm,
+        stepOverMm: opts.stepOverMm,
+        feeds: feedsOf(paramsFor(opts.flat)),
+        offset: opts.offset,
+        safeZMm: opts.safeZMm,
+        hopZMm: opts.hopZMm,
+        toolNumber: opts.toolNumberFor(opts.flat),
+        spindleRpm: paramsFor(opts.flat).rpm,
+        air: opts.air,
+        rapid: opts.rapid,
+        ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
+      });
     });
-    pushStage('rough', ref, roughOut);
+    const prevCl = flatCl.surface;
+    if (!roughed || prevCl === undefined) {
+      const skipped: [PlannedOp['kind'], Tool][] = [
+        ...(opts.restFlat === undefined ? [] : [['rest', opts.restFlat] as [PlannedOp['kind'], Tool]]),
+        ['finish', ball],
+        ['pencil', ball],
+      ];
+      for (const [kind, cutter] of skipped) {
+        unplanned.push({ kind, cutterKey: cutterKeyOf(cutter), regionIds: [region.id], reason: `not planned: the rough of "${region.id}" failed` });
+      }
+      continue;
+    }
 
     // 2. REST BY CL DIFFERENCE, when the caller offers a smaller flat: the band the previous
     //    cutter left standing, where the smaller one can reach.
-    if (opts.restFlat !== undefined) {
+    const restFlat = opts.restFlat;
+    if (restFlat !== undefined) {
       // B's review of `0461df01`: the rest stage was left on the MESH-ABSOLUTE region and an
       // unshifted surface — `depthPasses` reads `opts.region.zTop/zBottom`, so at stockTop != 0 the
       // rebased levels sat above every mesh-absolute CL value and the mask came out EMPTY (a rest
       // pass silently missing, not merely off-datum). Both go through the plan's one datum here:
       // the region is `base`, the surface is shifted like the flat's.
-      const restCl = shiftSurface(clSurface(opts.geometry, base, opts.restFlat, cuts.stepOver));
-      noteGrid(opts.restFlat, restCl);
-      const restOut = rest({
-        cutter: opts.restFlat,
-        region: base,
-        regionRef: ref,
-        prevClSurface: clFlat,
-        clSurface: restCl,
-        stepDownMm: opts.stepDownMm,
-        stockToLeaveMm: opts.bandMm,
-        // The rest flat is SMALLER than the primary: the plan-level step-over is the primary's
-        // (half a ⌀6 is 3 mm), and handing that to a ⌀3.175 rest is more than its own radius —
-        // `pocketLoops` refuses it by name ('step-over 3 mm exceeds the 1.5875 mm tool radius').
-        // The rest takes the smaller of the stated step-over and its own radius.
-        stepOverMm: opts.stepOverMm === undefined
-          ? undefined
-          : Math.min(opts.stepOverMm, (cuttingDiameter(opts.restFlat) ?? 0) / 2),
-        feeds: feedsOf(paramsFor(opts.restFlat)),
-        offset: opts.offset,
-        safeZMm: opts.safeZMm,
-        hopZMm: opts.hopZMm,
-        toolNumber: opts.toolNumberFor(opts.restFlat),
-        spindleRpm: paramsFor(opts.restFlat).rpm,
-        air: opts.air,
-        rapid: opts.rapid,
-        ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
+      attempt('rest', restFlat, ref, () => {
+        const restCl = shiftSurface(clSurface(opts.geometry, base, restFlat, cuts.stepOver));
+        noteGrid(restFlat, restCl);
+        return rest({
+          cutter: restFlat,
+          region: base,
+          regionRef: ref,
+          prevClSurface: prevCl,
+          clSurface: restCl,
+          stepDownMm: opts.stepDownMm,
+          stockToLeaveMm: opts.bandMm,
+          // The rest flat is SMALLER than the primary: the plan-level step-over is the primary's
+          // (half a ⌀6 is 3 mm), and handing that to a ⌀3.175 rest is more than its own radius —
+          // `pocketLoops` refuses it by name ('step-over 3 mm exceeds the 1.5875 mm tool radius').
+          // The rest takes the smaller of the stated step-over and its own radius.
+          stepOverMm: opts.stepOverMm === undefined
+            ? undefined
+            : Math.min(opts.stepOverMm, (cuttingDiameter(restFlat) ?? 0) / 2),
+          feeds: feedsOf(paramsFor(restFlat)),
+          offset: opts.offset,
+          safeZMm: opts.safeZMm,
+          hopZMm: opts.hopZMm,
+          toolNumber: opts.toolNumberFor(restFlat),
+          spindleRpm: paramsFor(restFlat).rpm,
+          air: opts.air,
+          rapid: opts.rapid,
+          ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
+        });
       });
-      pushStage('rest', ref, restOut);
     }
 
     // 3. THE BALL'S ONE FINAL LEVEL: a single pass at the region's depth takes the band.
@@ -1332,14 +1407,22 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // from OUTSIDE it, so the finish runs on the same region the rough just cleared (grown, when
     // the region is the part's own outer surface). The CL surface is sampled on it too — dropping
     // a row against a surface that does not reach its own endpoints is what `dropRow` refuses.
-    const clBall = shiftSurface(clSurface(opts.geometry, roughRegion, ball, cuts.stepOver));
-    noteGrid(ball, clBall);
+    // The ball's CL surface is shared by the finish and the pencil; built inside whichever stage
+    // reaches it first, so its own failure is that stage's.
+    let clBallCache: ReturnType<typeof clSurface> | undefined;
+    const clBall = (): ReturnType<typeof clSurface> => {
+      if (clBallCache === undefined) {
+        clBallCache = shiftSurface(clSurface(opts.geometry, roughRegion, ball, cuts.stepOver));
+        noteGrid(ball, clBallCache);
+      }
+      return clBallCache;
+    };
     const depth = Math.max(opts.stepDownMm, base.zTop - base.zBottom);
-    const finishOut = finish({
+    attempt('finish', ball, ref, () => finish({
       cutter: ball,
       region: roughRegion,
       regionRef: roughRef,
-      clSurface: clBall,
+      clSurface: clBall(),
       kind: 'ball-scallop',
       scallopMm: opts.finishScallopMm ?? opts.bandMm,
       stepDownMm: depth,
@@ -1350,15 +1433,14 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       spindleRpm: paramsFor(ball).rpm,
       air: opts.air,
       rapid: opts.rapid,
-    });
-    pushStage('finish', ref, finishOut);
+    }));
 
     // 4. PENCIL along the creases the ball's own CL surface leaves.
-    const pencilOut = pencil({
+    attempt('pencil', ball, ref, () => pencil({
       cutter: ball,
       region,
       regionRef: ref,
-      clSurface: clBall,
+      clSurface: clBall(),
       feeds: feedsOf(paramsFor(ball)),
       safeZMm: opts.safeZMm,
       hopZMm: opts.hopZMm,
@@ -1366,8 +1448,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       spindleRpm: paramsFor(ball).rpm,
       air: opts.air,
       rapid: opts.rapid,
-    });
-    pushStage('pencil', ref, pencilOut);
+    }));
   }
 
   // 5. EVERY RIM the tree found, broken by the V at the job's stated edge break.
@@ -1388,52 +1469,58 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // scan per rim — see `topSurfaceAt`'s own header for the perf finding this replaces).
     const rimBins = tree.rims.length > 0 ? buildTriangleBins(opts.geometry.triangles) : null;
     for (const rim of tree.rims) {
-      // THE MANAGER'S RULING from the tray's 0.5 mm cell: a rim whose air side is COVERED is not
-      // broken — see `rimExposedFromAbove` for the measurement that put this here. The test reads
-      // the mesh, so it uses the rim's MESH-ABSOLUTE z, before the rebase below.
-      if (!rimExposedFromAbove(rimBins!, rim)) {
-        notes.push(
-          `rim "${rim.id}" not broken: covered from above (its air side does not drop by 0.2 mm — the edge lies under the land)`,
-        );
-        continue;
+      try {
+        // THE MANAGER'S RULING from the tray's 0.5 mm cell: a rim whose air side is COVERED is not
+        // broken — see `rimExposedFromAbove` for the measurement that put this here. The test reads
+        // the mesh, so it uses the rim's MESH-ABSOLUTE z, before the rebase below.
+        if (!rimExposedFromAbove(rimBins!, rim)) {
+          notes.push(
+            `rim "${rim.id}" not broken: covered from above (its air side does not drop by 0.2 mm — the edge lies under the land)`,
+          );
+          continue;
+        }
+        // #962 — THE ORGANIZER'S 77 mm GROOVE FOUND THIS: `findRims`' edge-chaining can leave a
+        // POCKET rim's own loop OPEN (a branch point in the sharp floor|wall graph took the wrong
+        // one of several unused edges, per `features/rims.ts`'s `chain()`), and `chamfer()`'s own
+        // `closedRing()` does not know the difference — it closes ANY polyline whose ends don't
+        // already coincide with one more straight point, a phantom edge across whatever lies
+        // between them. That phantom edge is real material to `generateChamfer`: it feeds along
+        // it like any other edge of the ring, which is the posted gouge (E's render set, #962) —
+        // not a `link()` defect, since `link()` never emits a lateral feed; this is the RING'S
+        // OWN trace. A POCKET encloses a cavity, so its rim's own first and last point must be
+        // the SAME vertex `chain()` started and ended on — not approximately, exactly, give or
+        // take float noise from the mesh itself — so a gap past that noise floor there means the
+        // chain never closed, and bridging it is refused. A CONTOUR rim is exempt: the outer
+        // silhouette can legitimately run open to the stock's own edge (a shoulder cut to +X,
+        // `buildRandomPart`'s own fixture finds this on every synthetic kind, rim-6, 8 mm open,
+        // (20, -4)→(20, 4)) — closing that one just retraces its own two points, never a bridge
+        // across unrelated ground.
+        const first = rim.polyline[0];
+        const last = rim.polyline[rim.polyline.length - 1];
+        if (rim.of !== 'contour' && first !== undefined && last !== undefined && Math.hypot(first[0] - last[0], first[1] - last[1]) > RIM_CLOSE_TOL_MM) {
+          notes.push(
+            `rim "${rim.id}" not broken: its own loop is not closed (ends ${Math.hypot(first[0] - last[0], first[1] - last[1]).toFixed(2)} mm apart) — ` +
+              `a straight bridge there is not real geometry, so no chamfer is cut rather than gouging across it`,
+          );
+          continue;
+        }
+        // The rim's own Z is mesh-absolute too — rebased before the op sizes its bevel from it.
+        const rebasedRim = { ...rim, z: rebaseZ(rim.z) };
+        const ref = regionRefOf(rim.id, 'rim', [[...rim.polyline]], rebasedRim.z, rebasedRim.z);
+        const out = chamfer({
+          cutter: vbit,
+          rim: rebasedRim,
+          region: ref,
+          edgeBreak: opts.edgeBreak,
+          offset: opts.offset,
+          params: paramsFor(vbit),
+          rapid: opts.rapid,
+        });
+        pushStage('chamfer', ref, out);
+      } catch (err) {
+        // #959 item 5: one rim that cannot be broken (its exposure test included) is stated, not fatal.
+        unplanned.push({ kind: 'chamfer', cutterKey: cutterKeyOf(vbit), regionIds: [rim.id], reason: err instanceof Error ? err.message : String(err) });
       }
-      // #962 — THE ORGANIZER'S 77 mm GROOVE FOUND THIS: `findRims`' edge-chaining can leave a
-      // POCKET rim's own loop OPEN (a branch point in the sharp floor|wall graph took the wrong
-      // one of several unused edges, per `features/rims.ts`'s `chain()`), and `chamfer()`'s own
-      // `closedRing()` does not know the difference — it closes ANY polyline whose ends don't
-      // already coincide with one more straight point, a phantom edge across whatever lies
-      // between them. That phantom edge is real material to `generateChamfer`: it feeds along it
-      // like any other edge of the ring, which is the posted gouge (E's render set, #962) — not a
-      // `link()` defect, since `link()` never emits a lateral feed; this is the RING'S OWN trace.
-      // A POCKET encloses a cavity, so its rim's own first and last point must be the SAME vertex
-      // `chain()` started and ended on — not approximately, exactly, give or take float noise from
-      // the mesh itself — so a gap past that noise floor there means the chain never closed, and
-      // bridging it is refused. A CONTOUR rim is exempt: the outer silhouette can legitimately run
-      // open to the stock's own edge (a shoulder cut to +X, `buildRandomPart`'s own fixture finds
-      // this on every synthetic kind, rim-6, 8 mm open, (20, -4)→(20, 4)) — closing that one just
-      // retraces its own two points, never a bridge across unrelated ground.
-      const first = rim.polyline[0];
-      const last = rim.polyline[rim.polyline.length - 1];
-      if (rim.of !== 'contour' && first !== undefined && last !== undefined && Math.hypot(first[0] - last[0], first[1] - last[1]) > RIM_CLOSE_TOL_MM) {
-        notes.push(
-          `rim "${rim.id}" not broken: its own loop is not closed (ends ${Math.hypot(first[0] - last[0], first[1] - last[1]).toFixed(2)} mm apart) — ` +
-            `a straight bridge there is not real geometry, so no chamfer is cut rather than gouging across it`,
-        );
-        continue;
-      }
-      // The rim's own Z is mesh-absolute too — rebased before the op sizes its bevel from it.
-      const rebasedRim = { ...rim, z: rebaseZ(rim.z) };
-      const ref = regionRefOf(rim.id, 'rim', [[...rim.polyline]], rebasedRim.z, rebasedRim.z);
-      const out = chamfer({
-        cutter: vbit,
-        rim: rebasedRim,
-        region: ref,
-        edgeBreak: opts.edgeBreak,
-        offset: opts.offset,
-        params: paramsFor(vbit),
-        rapid: opts.rapid,
-      });
-      pushStage('chamfer', ref, out);
     }
   } else if (tree.rims.length > 0) {
     notes.push(`the job states no edge break — ${tree.rims.length} rim(s) stay sharp`);
@@ -1445,7 +1532,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     `the curved pipeline follows the ruling: the flat Z-steps each remainder region to its CL less ${opts.bandMm} mm, ` +
       `the ball runs ONE final level, the pencil follows the creases${opts.restFlat === undefined ? ', and no rest flat was offered' : ', and a rest flat clears the CL difference first'}`,
   );
-  return { ops, notes, clGrid };
+  return { ops, notes, clGrid, unplanned };
 }
 
 /**
@@ -1482,6 +1569,8 @@ export interface PlanTreeResult {
   clGrid: { cutterKey: string; toleranceMm: number; minSpacingMm: number; maxSpacingMm: number }[];
   unreachable: string[];
   notes: string[];
+  /** #959 item 5 — the pocket chain's failed steps, then the curved/rim stages'. */
+  unplanned: SequenceStepFailure[];
 }
 
 export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): PlanTreeResult {
@@ -1511,5 +1600,6 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
     clGrid: curvedResult.clGrid,
     unreachable: pocketResult.unreachable,
     notes: [...pocketResult.notes, ...curvedResult.notes],
+    unplanned: [...pocketResult.unplanned, ...curvedResult.unplanned],
   };
 }

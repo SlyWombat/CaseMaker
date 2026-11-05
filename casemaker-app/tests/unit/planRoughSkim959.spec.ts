@@ -1,0 +1,119 @@
+/**
+ * #959 review item (4b) — THE ROUGH SPLITS SHALLOW FROM STEEP. RED-FIRST.
+ *
+ * Today the rough is Z-levels only: on ground shallower than one step-down the first level is
+ * already below the CL + band target, the mask is empty, and the op emits nothing — the tray's
+ * fourteen remainder regions say exactly `rough "…" emitted no moves`. The manager's ruling: on
+ * shallow ground the FLAT skims at `CL + band` (a band step-over pass); on steep ground the rough
+ * Z-steps to the CL as it does today.
+ *
+ * Fixture: a gentle ramp (depth 0.4 mm across the region, under a 1.5 mm step-down but above the
+ * 0.3 mm band). Red here: no rough op at all. Green after: a skim whose feeds run at the CL + band
+ * surface — none deeper than it (that would cut the band the ball is promised), none above the
+ * material it may remove.
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import { tl } from './helpers/manifoldExec';
+import { makeClipperOffset } from '../../src/engine/cnc/cam/engraveJob';
+import { planCurvedForTree } from '../../src/engine/cnc/cam/model/plan';
+import type { FeatureTree } from '../../src/engine/cnc/cam/model/features';
+import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
+import type { RapidEstimate } from '../../src/engine/cnc/cam/ir';
+import type { Polygons } from '../../src/engine/cnc/cam/pocket';
+
+const RAPID: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test fixture' };
+const X0 = 2;
+const X1 = 42;
+const Y0 = -12;
+const Y1 = 12;
+const BAND = 0.3;
+
+const flat: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+const ball: Tool = { ...flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6' }), shape: 'ball', typeText: 'Ball Nose' };
+
+/** A ramp from `zHigh` at x = X0 to `zLow` at x = X1, mesh extended past the footprint. */
+function ramp(zHigh: number, zLow: number): { tree: FeatureTree; geometry: { triangles: { positions: Float32Array; indices: Uint32Array; triangleCount: number; bbox: { min: [number, number, number]; max: [number, number, number] } } } } {
+  const MX0 = -10, MX1 = 50, MY0 = -20, MY1 = 20;
+  const zAt = (x: number): number => zHigh + ((x - X0) / (X1 - X0)) * (zLow - zHigh);
+  const footprint: Polygons = [[[X0, Y0], [X1, Y0], [X1, Y1], [X0, Y1]]];
+  const geometry = {
+    triangles: {
+      positions: Float32Array.from([
+        MX0, MY0, zAt(MX0), MX1, MY0, zAt(MX1), MX1, MY1, zAt(MX1),
+        MX0, MY0, zAt(MX0), MX1, MY1, zAt(MX1), MX0, MY1, zAt(MX0),
+      ]),
+      indices: Uint32Array.from([0, 1, 2, 3, 4, 5]),
+      triangleCount: 2,
+      bbox: {
+        min: [MX0, MY0, Math.min(zAt(MX0), zAt(MX1))] as [number, number, number],
+        max: [MX1, MY1, Math.max(zAt(MX0), zAt(MX1))] as [number, number, number],
+      },
+    },
+  };
+  const tree: FeatureTree = {
+    frame: { up: [0, 0, 1], stockTop: 0, partTop: 0, partBottom: Math.min(zHigh, zLow) },
+    levels: [Math.min(zHigh, zLow)],
+    top: { z: 0, floors: [], area: 0 },
+    contour: { outline: footprint, area: (X1 - X0) * (Y1 - Y0), zTo: Math.min(zHigh, zLow), frees: true, shoulders: [] },
+    pockets: [],
+    rims: [],
+    remainder: [{
+      id: 'ramp', footprint, area: (X1 - X0) * (Y1 - Y0), zTop: 0, zBottom: Math.min(zHigh, zLow),
+      triangles: new Uint32Array(), slopeDeg: [0, 12], slopeMedianDeg: 11, in: 'top',
+    }],
+    unreachable: [],
+    report: { source: 'mesh', patches: 1, planarArea: 960, remainderArea: 960, tolerances: {} as never, slivers: [], notes: [] },
+  };
+  return { tree, geometry };
+}
+
+function plan(zHigh: number, zLow: number) {
+  const { tree, geometry } = ramp(zHigh, zLow);
+  return planCurvedForTree(tree, {
+    geometry,
+    offset: makeClipperOffset(tl),
+    flat,
+    ball,
+    stepDownMm: 1.5,
+    bandMm: BAND,
+    feeds: { feedMmPerMin: 900, plungeFeedMmPerMin: 250 },
+    rapid: RAPID,
+    spindleRpm: 12000,
+    air: true,
+    safeZMm: 5,
+    hopZMm: 1,
+    edgeBreak: { legMm: 0 },
+    toolNumberFor: (t) => t.number ?? 1,
+  });
+}
+
+describe('#959 review — the rough splits shallow from steep', () => {
+  it("a shallow ramp gets a SKIM to the flat's own CL — never deeper", () => {
+    // Depth 0.4 over the region: material above CL + band is 0.1-0.4 thick, under one 1.5 step-down.
+    const result = plan(-0.6, -1.0);
+    const roughOp = result.ops.find((op) => op.kind === 'rough');
+    expect(roughOp, `ops: ${result.ops.map((o) => o.kind).join(', ')}; notes: ${result.notes.join('; ')}`).toBeDefined();
+    const feeds = roughOp!.outcome.ir.operations.flatMap((o) => o.moves).filter((m) => m.kind === 'feed');
+    expect(feeds.length).toBeGreaterThan(10);
+    // THE RULING (ii): the skim cuts to the flat's OWN CL — exact contact, never deeper. On a
+    // plane descending in +x the flat touches at its uphill edge, so its CL stands slope x radius
+    // = 0.01 x 3 = 0.03 above the design there: the skim runs from -0.6 + 0.03 = -0.57 at the
+    // high end to -1.0 + 0.03 = -0.97 at the low end. Deeper than the CL is a gouge; shallower
+    // would leave the band this pass exists to take.
+    const zs = feeds.map((m) => m.z);
+    expect(Math.max(...zs)).toBeLessThanOrEqual(-0.57 + 0.05);
+    expect(Math.min(...zs)).toBeGreaterThanOrEqual(-0.97 - 0.05);
+  }, 120_000);
+
+  it('a steep ramp still Z-steps: several discrete levels, unchanged', () => {
+    // Depth 8 over the region: four step-downs at 1.5.
+    const result = plan(-0.5, -8.5);
+    const roughOp = result.ops.find((op) => op.kind === 'rough');
+    expect(roughOp, `ops: ${result.ops.map((o) => o.kind).join(', ')}`).toBeDefined();
+    const feeds = roughOp!.outcome.ir.operations.flatMap((o) => o.moves).filter((m) => m.kind === 'feed');
+    const levels = new Set(feeds.map((m) => m.z.toFixed(3)));
+    expect(levels.size).toBeGreaterThanOrEqual(3);
+  }, 120_000);
+});

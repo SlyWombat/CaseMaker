@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { dropRow } from '../../src/engine/cnc/cam/model/rowDropper';
-import { clSurface } from '../../src/engine/cnc/cam/model/clsurface';
+import { clSurface, type ClSurface } from '../../src/engine/cnc/cam/model/clsurface';
 import type { FeatureSource, RemainderRegion } from '../../src/engine/cnc/cam/model/features';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 
@@ -245,5 +245,33 @@ describe('#960 dropRow() — a footprint notch between two otherwise-reachable p
     expect(surface.dropCutter(25.15, 0)).not.toBeNull();
     expect(Math.hypot(25.15 - 24.85, 0)).toBeLessThan(surface.maxSpacingMm); // confirms the isolation above
     expect(() => dropRow(surface, [24.85, 0], [25.15, 0])).toThrow(/footprint notch/);
+  });
+});
+
+// #960 — the organizer's finish found this: the bisection accepted a segment when its MIDPOINT
+// alone sat on the chord, so a CL kink off-centre (here a 0.05 mm ridge a third of the way along)
+// let the chord dip under the surface. The real part measured 0.041 mm; this stub poses it exactly.
+describe('#960 dropRow() — an off-centre kink the midpoint alone cannot see', () => {
+  it('never lets the chord dip under the surface between two posted points', () => {
+    const ridge = (x: number): number => Math.max(0, 0.05 - Math.abs(x - 0.09));
+    const surface: ClSurface = {
+      dropCutter: (x) => ridge(x),
+      toleranceMm: 0.005,
+      minSpacingMm: 0.005,
+      maxSpacingMm: 0.346,
+      sampleCount: 0,
+    };
+    expect(ridge(0.15), 'the midpoint sits on the chord — the case the old rule accepted').toBe(0);
+    const row = dropRow(surface, [0, 0], [0.3, 0]);
+    let worst = 0;
+    for (let i = 0; i + 1 < row.length; i++) {
+      const a = row[i]!;
+      const b = row[i + 1]!;
+      for (let k = 1; k < 50; k++) {
+        const t = k / 50;
+        worst = Math.min(worst, a.z + (b.z - a.z) * t - ridge(a.x + (b.x - a.x) * t));
+      }
+    }
+    expect(worst).toBeGreaterThanOrEqual(-surface.toleranceMm);
   });
 });

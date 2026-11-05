@@ -18,6 +18,7 @@ import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/eng
 import { cutterKeyOf } from '../sequence';
 import type { RemainderRegion } from '../features';
 import type { ClSurface } from '../clsurface';
+import { dropRow } from '../rowDropper';
 import type { OpOutcome, PassRef, RegionRef } from '../plan';
 
 export interface PencilOpOptions {
@@ -160,9 +161,14 @@ export function pencil(opts: PencilOpOptions): OpOutcome {
     }
     moves.push({ kind: 'rapid', x: first.x, y: first.y, z: opts.hopZMm });
     moves.push({ kind: 'feed', x: first.x, y: first.y, z: first.z, f: opts.feeds.plungeFeedMmPerMin });
+    // #960 — a straight chord between two grid cells (0.5–0.7 mm apart) dipped under the CL across
+    // a crease's own cross-section (0.029 mm on the organizer): each step is dropped as a row.
     for (let p = 1; p < points.length; p++) {
+      const prev = points[p - 1]!;
       const q = points[p]!;
-      moves.push({ kind: 'feed', x: q.x, y: q.y, z: q.z, f: opts.feeds.feedMmPerMin });
+      for (const d of dropRow(opts.clSurface, [prev.x, prev.y], [q.x, q.y]).slice(1)) {
+        moves.push({ kind: 'feed', x: d.x, y: d.y, z: d.z, f: opts.feeds.feedMmPerMin });
+      }
     }
     const line = points.map((p) => [p.x, p.y] as [number, number]);
     passes.push({
