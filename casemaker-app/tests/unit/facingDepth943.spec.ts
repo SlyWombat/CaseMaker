@@ -71,7 +71,7 @@ function planFace(tree: FeatureTree, stockProbes?: StockProbes): PlanPocketsResu
   });
 }
 
-function facingOp(result: PlanPocketsResult): { depth: number; depthPasses: number; feedZs: number[] } {
+function facingOp(result: PlanPocketsResult): { depth: number; depthPasses: number | undefined; feedZs: number[] } {
   const op = result.ops.find((o) => o.region.id === 'facing');
   expect(op, `ops: ${result.ops.map((o) => o.region.id).join(', ')}`).toBeDefined();
   const operation = op!.outcome.ir.operations[0]!;
