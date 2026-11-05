@@ -225,17 +225,20 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
   // edge, not just this node's own stretch of it (advisor's review on dd150a9b) — clipped to
   // `near` (the node's own footprint, grown by the same 2r) before it is unioned in, or every
   // OTHER open node on the part gets this one's band too.
-  const region = opts.node.open && opts.openOutline !== undefined && opts.boolean !== undefined
-    ? opts.boolean.union(
-        opts.node.region,
-        (() => {
+  // The open-edge extension band alone (undefined when this node is not open) — reused below,
+  // unchanged, both to build `region` and (#970 FOLLOW-UP 2's own doc further down) to keep the
+  // shadow check's own wall erosion from eating into it: an OPEN edge is never a real wall, so
+  // unlike `opts.node.region`'s own true walls there is nothing there to double-count.
+  const openExtensionBand: Polygons | undefined =
+    opts.node.open && opts.openOutline !== undefined && opts.boolean !== undefined
+      ? (() => {
           const wholeBand = opts.boolean.subtract(opts.offset(opts.openOutline, 2 * toolRadius), opts.openOutline);
           const near = opts.offset(opts.node.region, 2 * toolRadius);
           // A ∩ B = A \ (A \ B) — the only intersection `union`/`subtract` alone can express.
           return opts.boolean.subtract(wholeBand, opts.boolean.subtract(wholeBand, near));
-        })(),
-      )
-    : opts.node.region;
+        })()
+      : undefined;
+  const region = openExtensionBand === undefined ? opts.node.region : opts.boolean!.union(opts.node.region, openExtensionBand);
 
   // #966 — THE SHADOW CHECK (`PocketOpOptions.aboveMaterial`'s own doc above): a column's real
   // "ceiling" is Z-INDEPENDENT — sampled ONCE here on a grid, never re-queried per level, exactly
@@ -276,6 +279,62 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
     const marginMm = opts.aboveMaterial.marginMm ?? ARC_CHORD_TOLERANCE_MM;
     const zOffsetMm = opts.aboveMaterial.zOffsetMm ?? 0;
     const mesh = opts.aboveMaterial.mesh;
+    // #970 FOLLOW-UP 2 (the tray/organizer real-part regression, found by E's T3 run on
+    // 966-pocket-shadow@7f915ce0 after the margin-sign fix above — real reference parts, no
+    // overhang, lost 1.10/0.62 coverage points): "a sample is only judged when it falls genuinely
+    // inside `region`" is not enough on its own. A DRAFTED (non-vertical) wall, unlike a plain
+    // vertical one, has real non-degenerate XY extent at every height along its own slope — so a
+    // zero-radius probe sampled well inside `region` but near this SAME node's own wall still
+    // legitimately hits that wall's own higher reaches (confirmed directly: the tray's own
+    // tool-slot walls, probed at points sitting exactly on `region`'s own boundary, read the
+    // slot's TOP LAND 6 mm above the slot's floor — the node's own wall, already kept off by the
+    // ordinary 2D erosion `fullyReachable`/`pocketLoops` apply below, double-counted a second time
+    // as an external shadow). The fillet case above is the SAME class of bug with a curved wall in
+    // place of a flat drafted one — "real XY extent at every height" fits both.
+    //
+    // THE FIX: judge a sample against `opts.node.region` eroded by this op's own cutter radius
+    // ALONE — where the cutter's CENTRE can ever be, not `fullyReachable`'s opening (erode THEN
+    // dilate back out). `fullyReachable` is the wrong shape for this: along a straight wall the
+    // dilate step restores the boundary to the true wall again (a round tool's own EDGE still
+    // reaches a straight wall exactly, which is the whole point of `fullyReachable` everywhere
+    // else it is used in this file) — so it supplied no margin there at all, confirmed directly
+    // against the tray (a reduction from ~3.4 % lost to ~2.9 %, not the fix). The plain erosion
+    // has no such dilate-back step: it is strictly smaller near every wall, by exactly
+    // `toolRadius`, everywhere, matching where the tool's centre can really stand while its OWN
+    // edge is what the existing 2D erosion (`fullyReachable`/`pocketLoops`, below and in
+    // `rough.ts`) already keeps off the wall — so a wall/draft/fillet/rim/scoop within one radius
+    // of the node's own TRUE boundary is correctly excluded from ever being read as a "ceiling"
+    // at all here, the SAME geometry already accounted for, not a second, independent obstruction.
+    //
+    // Eroding `opts.node.region` wholesale is not quite right either, found the hard way: an OPEN
+    // edge is not a real wall at all (the whole reason it was extended above) — there is nothing
+    // there to double-count, and the real design mesh genuinely can (and for an open shoulder,
+    // routinely does — `pocketShadow966.spec.ts`'s own table slab, whose top closes the gap right
+    // out to the part's true outer edge) carry real overhang material out to and past that edge.
+    // A first attempt re-added `openExtensionBand` AFTER eroding `opts.node.region` wholesale, but
+    // that still blinded a toolRadius-wide band of real, judgeable floor just INSIDE the true open
+    // edge near a CONVEX corner (the extension band's own rounded corner, built from `openOutline`
+    // directly, does not line up with `node.region`'s own independently-rounded eroded corner
+    // there) — so the fix is keyed off `openOutline` itself, not reconstructed from two separately
+    // offset shapes: anything within `toolRadius` of the TRUE open edge (`openOutline`, never the
+    // 2r-extended one) is restored regardless of what eroding `node.region`'s OTHER, REAL walls
+    // did to it, since there is no wall there in the first place.
+    // `pocketShadow966.spec.ts`'s existing cases, both the slab (a real overhang, including right
+    // at and past its own open corners) and the open-no-slab fixture (no overhang at all,
+    // including at its own corners), are the regression guard for this exact edge case.
+    const trueWallSafe = opts.offset(opts.node.region, -toolRadius);
+    const reachableDomain =
+      openExtensionBand === undefined
+        ? trueWallSafe
+        : (() => {
+            // The toolRadius-wide ring just inside the TRUE open outline (the outline itself less
+            // its own erosion) — never a real wall, however `node.region`'s OTHER walls round a
+            // nearby corner, so never eroded away. A ∩ B = A \ (A \ B), `union`/`subtract`'s own
+            // only way to express an intersection.
+            const nearTrueEdgeRing = opts.boolean!.subtract(opts.openOutline!, opts.offset(opts.openOutline!, -toolRadius));
+            const nearTrueEdgeInRegion = opts.boolean!.subtract(opts.node.region, opts.boolean!.subtract(opts.node.region, nearTrueEdgeRing));
+            return opts.boolean!.union(opts.boolean!.union(trueWallSafe, openExtensionBand), nearTrueEdgeInRegion);
+          })();
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const ring of region) {
       for (const [x, y] of ring) {
@@ -299,22 +358,14 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
           for (const [dx, dy] of [[0, 0], [-half, -half], [half, -half], [-half, half], [half, half]] as const) {
             const sx = x + dx;
             const sy = y + dy;
-            // Found the hard way (the SAME curved-ops regression run above — filletedFloor/sloped —
-            // still regressed the first time this sampled unconditionally, even at zero radius): a
-            // CORNER sample can stray OUTSIDE `region` into THIS SAME NODE's
-            // own wall or floor-to-wall fillet — real, non-degenerate geometry (unlike a plain
-            // vertical wall, a fillet's curved surface has true XY area, so even a zero-radius
-            // probe sees it) that sits just past the floor's own recognised boundary. A cell whose
-            // CENTRE is legitimately on the flat floor then gets the fillet's own higher reading
-            // via the max-of-5 rule, excluding a thin halo of real floor around the whole pocket's
-            // own perimeter — the node's own geometry double-counted as an external shadow, the
-            // same class of bug the zero-radius probe already fixed for a plain vertical wall, just
-            // via a surface with real area instead of a degenerate one. A sample is only judged
-            // when it falls genuinely inside `region` — never WHICH node it came from, only where
-            // it actually is: `region` is EVERY node this op may legally stand on, closed-node
-            // extension and all, so this never excludes a sample a real overhang legitimately
-            // needs caught, only one that is this node's own, already-accounted-for boundary.
-            if (!pointInPolygons(region, sx, sy)) continue;
+            // A sample is only judged when it falls inside `reachableDomain` (`region` eroded then
+            // dilated by this op's own cutter radius, FOLLOW-UP 2's own doc above) — never WHICH
+            // node it came from, only where it actually is, and never any closer to a wall than the
+            // cutter can ever really be centred: `reachableDomain` is EVERY node this op may
+            // legally stand on, closed-node extension and all, less one cutter radius at the true
+            // boundary, so this never excludes a sample a real overhang legitimately needs caught,
+            // only one that is this node's own, already-accounted-for wall/draft/fillet/rim.
+            if (!pointInPolygons(reachableDomain, sx, sy)) continue;
             const h = dropCutterHeight(POINT_PROFILE, mesh, sx, sy);
             if (h !== null && h > hi) hi = h;
           }
