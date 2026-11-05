@@ -68,7 +68,7 @@ import { planModelCam, planPocketsForTree, planTreePrograms, type ModelPlanInput
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
-import { exactSweptField } from '@/workers/sim/sweptPoint';
+import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
 import { parseGcode, setupFromHeader, stubSetup } from '@/engine/cnc';
 import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { checkGoalCutInto, type GoalCutIntoOptions, type GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
@@ -295,7 +295,15 @@ function postedTextFor(cutterKey: string, merged: ToolpathIR, ctx: PostContext):
 function edgeBreakAllowance(): Pick<GoalCutIntoOptions, 'edgeBreak' | 'wallShadowRadiusMm'> {
   const allowance = vToolAllowance(CHAMFER3175);
   if (allowance === null) throw new Error('#959: the chamfer Tool record states no cone');
-  return { edgeBreak: allowance, wallShadowRadiusMm: cuttingDiameter(FLAT6)! / 2 };
+  // #948/v4 — THE V GATE: the card's allowance names the job's own chamfer tool number, so the
+  // check excuses a band cell only where this V cut it deepest (`edgeBreak.toolNumber` + whoAt).
+  // A tool record with no number cannot carry the gate, and the self-test below fails rather than
+  // letting the card measure the geometry-only rule.
+  const toolNumber = CHAMFER3175.number;
+  return {
+    edgeBreak: { ...allowance, ...(toolNumber === null || toolNumber === undefined ? {} : { toolNumber }) },
+    wallShadowRadiusMm: cuttingDiameter(FLAT6)! / 2,
+  };
 }
 
 /**
@@ -307,8 +315,9 @@ function edgeBreakAllowance(): Pick<GoalCutIntoOptions, 'edgeBreak' | 'wallShado
 function stampedTop(
   runs: readonly { cutterKey: string; text: string; ir: ToolpathIR }[],
   goal: GoalHeightfield,
-): ResultTop {
+): { top: ResultTop; whoAt: (x: number, y: number) => number | null } {
   let acc: Float32Array | null = null;
+  let who: Uint8Array | null = null;
   for (const run of runs) {
     const parsed = parseGcode(run.text);
     const part = setupFromHeader(parsed.header).patch.part;
@@ -316,23 +325,47 @@ function stampedTop(
       throw new Error(`#959 goal check: ${run.cutterKey}'s posted text carries no rectangular stock header`);
     }
     const setup = stubSetup(part, { kind: 'tape-down', contact: part.outline }, { startingTool: 1 }, Z1);
-    // `exactSweptField` is the read `session.sweptFieldExact` calls: the posted program stamped at
-    // every goal cell centre with the Tool-record cutter. Called on the program's own timeline
-    // rather than through a session, because a dense flat job routes to the exact engine and the
-    // session then has no column grid to read — the stamp itself is route-independent.
+    // `exactSweptFieldTooled` is the read the session's stamp makes: the posted program stamped at
+    // every goal cell centre with the Tool-record cutter, carrying the per-cell identity of the
+    // lowest reach. Called on the program's own timeline rather than through a session, because a
+    // dense flat job routes to the exact engine and the session then has no column grid to read —
+    // the stamp itself is route-independent.
     const timeline = buildTimeline(parsed, setup, Z1);
-    const stamp = exactSweptField(goal, timeline, run.ir.tool);
+    const stamp = exactSweptFieldTooled(goal, timeline, () => run.ir.tool);
     if (stamp === null) throw new Error(`#959 goal check: ${run.cutterKey} produced no exact stamp`);
-    if (acc === null) acc = Float32Array.from(stamp);
-    else for (let k = 0; k < acc.length; k++) if (stamp[k]! < acc[k]!) acc[k] = stamp[k]!;
+    if (acc === null || who === null) {
+      acc = Float32Array.from(stamp.field);
+      who = Uint8Array.from(stamp.who);
+    } else {
+      // #948/v4 — the per-run who maps fold with the field, lowest reach wins (the session's own
+      // fold): the cell's cutter is the one whose stamp took it deepest, which is what the V gate
+      // reads. A tie keeps the earlier run's identity, as `session.ts`'s fold does.
+      for (let k = 0; k < acc.length; k++) {
+        if (stamp.field[k]! < acc[k]!) {
+          acc[k] = stamp.field[k]!;
+          who[k] = stamp.who[k]!;
+        }
+      }
+    }
   }
-  if (acc === null) throw new Error('#959 goal check: no programs to stamp');
+  if (acc === null || who === null) throw new Error('#959 goal check: no programs to stamp');
   const field: Float32Array = acc;
-  return (x: number, y: number) => {
+  const identity: Uint8Array = who;
+  const cell = (x: number, y: number): number | null => {
     const i = Math.round((x - goal.x0) / goal.pitch);
     const j = Math.round((y - goal.y0) / goal.pitch);
     if (i < 0 || j < 0 || i >= goal.nx || j >= goal.ny) return null;
-    return field[j * goal.nx + i]!;
+    return j * goal.nx + i;
+  };
+  return {
+    top: (x: number, y: number) => {
+      const k = cell(x, y);
+      return k === null ? null : field[k]!;
+    },
+    whoAt: (x: number, y: number) => {
+      const k = cell(x, y);
+      return k === null ? null : identity[k]!;
+    },
   };
 }
 
@@ -436,8 +469,12 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
     | null = null;
   if (goal !== undefined) {
     const field = sampleGoalHeightfield(goal.target, { pitchMm: 0.1, stockTopZ: 0 });
-    const top = stampedTop(factsByRun, field);
-    const report = checkGoalCutInto(field, top, { passCoverage: 0.95, ...edgeBreakAllowance() });
+    const stamped = stampedTop(factsByRun, field);
+    const report = checkGoalCutInto(field, stamped.top, {
+      passCoverage: 0.95,
+      ...edgeBreakAllowance(),
+      whoAt: stamped.whoAt,
+    });
     const coverage = 1 - (report.leftoverFractions[0] ?? 0);
     const cutInto: CutIntoScore = {
       adjudicatedFraction: report.adjudicatedFraction,
@@ -1165,6 +1202,21 @@ describe('#964 harness self-tests — the defects that consumed engine rounds', 
     expect(runsOf(setup).map((run) => run.cutterKey)).toEqual(['A', 'B']);
     expect(runsOf(setup)).toHaveLength(setup.programs.length);
     expect(runsOf(setup).map((run) => run.ir)).toEqual(setup.programs);
+  });
+
+  // THE V GATE (#948/v4). A card that states an edge break must hand the check an allowance that
+  // names the job's chamfer tool number; without it `checkGoalCutInto` silently takes the
+  // geometry-only path and the card measures a different rule from the one it reports. This case
+  // fails if the V bit has no number or the allowance drops it.
+  it('a card with a stated edge break never builds its allowance without the V tool number', () => {
+    expect(EDGE_BREAK_LEG_MM, 'this card states an edge break').toBeGreaterThan(0);
+    expect(CHAMFER3175.number ?? null, 'the V bit must state its tool number').not.toBeNull();
+    const allowance = edgeBreakAllowance();
+    expect(allowance.edgeBreak, 'a stated edge break must produce an allowance').toBeDefined();
+    expect(
+      allowance.edgeBreak?.toolNumber,
+      'the allowance must name the V bit — without it the v4 who gate is off and the card measures the geometry-only rule',
+    ).toBe(CHAMFER3175.number);
   });
 });
 

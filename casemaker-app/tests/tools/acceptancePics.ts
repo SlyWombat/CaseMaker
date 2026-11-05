@@ -29,7 +29,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import path from 'node:path';
 
-import { exactSweptField } from '@/workers/sim/sweptPoint';
+import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
 import { parseGcode, setupFromHeader, stubSetup } from '@/engine/cnc';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
 import type { CamMove, ToolpathIR } from '@/engine/cnc/cam/ir';
@@ -99,8 +99,12 @@ function postRuns(programs: readonly ToolpathIR[], post: PostContext): PostedRun
 
 /** Each posted program stamped at every goal cell centre, accumulated by lowest reach — the same
  * fold `opsAcceptance959`/`figureAcceptance965` use (`stampedTop`/`wholeSurfaceTop`). */
-function stampedTop(runs: readonly PostedRun[], goal: GoalHeightfield): ResultTop {
+function stampedTop(
+  runs: readonly PostedRun[],
+  goal: GoalHeightfield,
+): { top: ResultTop; whoAt: (x: number, y: number) => number | null } {
   let acc: Float32Array | null = null;
+  let who: Uint8Array | null = null;
   for (const run of runs) {
     const parsed = parseGcode(run.text);
     const part = setupFromHeader(parsed.header).patch.part;
@@ -109,18 +113,39 @@ function stampedTop(runs: readonly PostedRun[], goal: GoalHeightfield): ResultTo
     }
     const setup = stubSetup(part, { kind: 'tape-down', contact: part.outline }, { startingTool: 1 }, Z1);
     const timeline = buildTimeline(parsed, setup, Z1);
-    const stamp = exactSweptField(goal, timeline, run.ir.tool);
+    const stamp = exactSweptFieldTooled(goal, timeline, () => run.ir.tool);
     if (stamp === null) throw new Error(`program "${run.cutterKey}" produced no exact stamp`);
-    if (acc === null) acc = Float32Array.from(stamp);
-    else for (let k = 0; k < acc.length; k++) if (stamp[k]! < acc[k]!) acc[k] = stamp[k]!;
+    if (acc === null || who === null) {
+      acc = Float32Array.from(stamp.field);
+      who = Uint8Array.from(stamp.who);
+    } else {
+      // #948/v4 — the identity rides the same lowest-reach fold the session uses.
+      for (let k = 0; k < acc.length; k++) {
+        if (stamp.field[k]! < acc[k]!) {
+          acc[k] = stamp.field[k]!;
+          who[k] = stamp.who[k]!;
+        }
+      }
+    }
   }
-  if (acc === null) throw new Error('no programs to stamp');
+  if (acc === null || who === null) throw new Error('no programs to stamp');
   const field = acc;
-  return (x: number, y: number) => {
+  const identity = who;
+  const cell = (x: number, y: number): number | null => {
     const i = Math.round((x - goal.x0) / goal.pitch);
     const j = Math.round((y - goal.y0) / goal.pitch);
     if (i < 0 || j < 0 || i >= goal.nx || j >= goal.ny) return null;
-    return field[j * goal.nx + i]!;
+    return j * goal.nx + i;
+  };
+  return {
+    top: (x: number, y: number) => {
+      const k = cell(x, y);
+      return k === null ? null : field[k]!;
+    },
+    whoAt: (x: number, y: number) => {
+      const k = cell(x, y);
+      return k === null ? null : identity[k]!;
+    },
   };
 }
 
@@ -201,7 +226,13 @@ interface Cells {
 const CLASS: readonly CellClass[] = ['outside', 'covered', 'adjudicated', 'edgeBreak', 'wall', 'shadow', 'rawOnly'];
 const CLASS_INDEX = Object.fromEntries(CLASS.map((c, i) => [c, i])) as Record<CellClass, number>;
 
-function classify(goal: GoalHeightfield, top: ResultTop, report: GoalCutIntoReport, opts: GoalCutIntoOptions): Cells {
+function classify(
+  goal: GoalHeightfield,
+  top: ResultTop,
+  report: GoalCutIntoReport,
+  opts: GoalCutIntoOptions,
+  whoAt: (x: number, y: number) => number | null,
+): Cells {
   const { nx, ny, covered, z } = goal;
   const cells = nx * ny;
   const classOf = new Uint8Array(cells);
@@ -255,7 +286,11 @@ function classify(goal: GoalHeightfield, top: ResultTop, report: GoalCutIntoRepo
       }
       rawCut++;
       depth[k] = -d;
-      if (band !== null && band[k] === 1 && -d <= allowance!.legMm + 1e-9) {
+      // #948/v4 — the V gate: a band cell is edge break only where the V is its deepest cutter.
+      // With no allowance (or no stated V number) the geometry-only reading stands, as the gate's.
+      const whoOk =
+        allowance === undefined || allowance.toolNumber === undefined || whoAt(x, y) === allowance.toolNumber;
+      if (band !== null && band[k] === 1 && -d <= allowance!.legMm + 1e-9 && whoOk) {
         classOf[k] = CLASS_INDEX.edgeBreak;
         edgeBreakCells++;
         continue;
@@ -769,10 +804,15 @@ function main(): void {
   mkdirSync(args.out, { recursive: true });
   const goal = goalOf(doc);
   const runs = postRuns(programs, doc.post);
-  const top = stampedTop(runs, goal);
-  const report = checkGoalCutInto(goal, top, doc.cutIntoOptions);
+  const stamped = stampedTop(runs, goal);
+  const top = stamped.top;
+  const options: GoalCutIntoOptions =
+    doc.cutIntoOptions.edgeBreak?.toolNumber === undefined
+      ? doc.cutIntoOptions
+      : { ...doc.cutIntoOptions, whoAt: stamped.whoAt };
+  const report = checkGoalCutInto(goal, top, options);
   if (!report.ran) throw new Error(`the goal check did not run: ${report.reason}`);
-  const cells = classify(goal, top, report, doc.cutIntoOptions);
+  const cells = classify(goal, top, report, options, stamped.whoAt);
   const title = `${doc.card} — ${path.basename(path.dirname(args.plan))}`;
   const files = [
     ...renderMaps(goal, cells, report, title, args.out),
