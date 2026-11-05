@@ -510,9 +510,11 @@ function rimExposedFromAbove(
     const mx = (a[0] + b[0]) / 2;
     const my = (a[1] + b[1]) / 2;
     // The samples must cover the V's WHOLE footprint, not just the edge's neighbourhood: the
-    // cutter's skirt reaches its own outer radius from the path, so covered ground that starts
-    // ~1 mm out is still cut at 0.5 mm deep.
-    for (const d of [0.25, 0.5, 1.0, 1.3, 1.55]) {
+    // cutter's skirt reaches its own outer radius from the path (offset 0.05 on the air side plus
+    // 1.5875 of cone = 1.6375 from the rim), so covered ground that starts ~1.5 mm out is still
+    // cut at 0.5 mm deep. The organizer's 45-degree rim cut one cell at 1.6 mm — past the old last
+    // sample at 1.55 — which is why its 0.04 % survived the first filter.
+    for (const d of [0.25, 0.5, 1.0, 1.3, 1.55, 1.65, 1.8]) {
       const top = topSurfaceAt(mesh, mx + nx * d, my + ny * d);
       if (top !== null && top > rim.z - stepMm) return false;
     }
