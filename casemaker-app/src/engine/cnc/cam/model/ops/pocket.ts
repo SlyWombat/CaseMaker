@@ -41,6 +41,7 @@ import type { PocketNode } from '../features';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
 import type { DropCutterMesh } from '../dropcutter';
 import { ceilingAboveMm } from '../ceilingAbove';
+import { maxTriangleZOverSquare, triangleBinsFor } from '../triangleBins';
 import { maskLoopsFromPredicate } from './rasterMask';
 
 export interface PocketOpOptions {
@@ -323,11 +324,31 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
       // the caller's `node.floorZ`/`mouthZ` are already in (stock-top-relative, from every real
       // `plan.ts` call site) — `zOffsetMm`'s own doc above. Converting the mesh-absolute ceiling
       // into the LEVEL's frame (subtracting `zOffsetMm`), rather than the other way around, keeps
-      // the comparison in whichever frame the caller actually posts moves in. The predicate reads
-      // "safe unless the ceiling sits a margin's width or more ABOVE this level" — at a node's own
-      // floor (no downward-facing triangle anywhere above it at all, `ceiling === -Infinity`),
-      // always true; under a real overhang (`ceiling` a real, finite Z above the floor), false for
-      // every level at or below it, `pocketShadow966.spec.ts`'s slab case included.
+      // the comparison in whichever frame the caller actually posts moves in.
+      //
+      // #970, B's link audit follow-up (the elephant's 11 rim cells, review session's fix 2): the
+      // gate above is a set of POINT samples at the cell's point ± half a pitch, so its sampled
+      // footprint is [i·pitch − ½, i·pitch + ½]; `maskLoopsFromPredicate` opens the square
+      // [i·pitch, (i+1)·pitch]. The square's far half is opened by samples that never looked at
+      // it — on a rising flank narrower than the pitch, the disc reaches half a pitch past the
+      // last proven point and cuts the design. The cell's height bound is therefore read from
+      // `triangleBins`' per-cell `maxZ` over the cell's own sampled footprint — the DRAWN square
+      // UNION the half-pitch the gate's corner samples reach into ([point − ½, point + 1] in each
+      // axis; a triangle extent never misses a rise between samples; outward by at most one bin
+      // cell, which the rest and ball recover). Everywhere the old sampled rule closed, a sample
+      // was above the level at a point inside this footprint, and the triangle it hit is
+      // registered in a bin overlapping the footprint — so the bound is never looser than the
+      // rule it replaces. The gate stays as the null case: a column with no downward-facing
+      // triangle at all is this node's own floor/wall, open all the way down, whatever its height.
+      const bins = triangleBinsFor(mesh);
+      const cellBound = new Float64Array(nx * ny).fill(Number.NEGATIVE_INFINITY);
+      for (let j = 0; j < ny; j++) {
+        for (let i = 0; i < nx; i++) {
+          const bx = minX + i * pitch;
+          const by = minY + j * pitch;
+          cellBound[j * nx + i] = maxTriangleZOverSquare(bins, bx - half, by - half, bx + pitch, by + pitch);
+        }
+      }
       ceilingMaskAt = (levelZ: number): Polygons =>
         maskLoopsFromPredicate(
           nx,
@@ -335,7 +356,12 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
           minX,
           minY,
           pitch,
-          (i, j) => i >= 0 && j >= 0 && i < nx && j < ny && ceiling[j * nx + i]! - zOffsetMm - marginMm < levelZ,
+          (i, j) => {
+            if (i < 0 || j < 0 || i >= nx || j >= ny) return false;
+            const k = j * nx + i;
+            if (!Number.isFinite(ceiling[k]!)) return true; // the gate's null: no real ceiling in this column
+            return cellBound[k]! - zOffsetMm - marginMm < levelZ;
+          },
         );
     }
   }
