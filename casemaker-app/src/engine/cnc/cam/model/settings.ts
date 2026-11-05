@@ -14,9 +14,9 @@ import type { Tool } from '@/engine/cnc/tool';
  * `flatFinishMaxSlopeDeg`), so a caller may override it; this is the default every caller that
  * states none gets.
  *
- * The value is PENDING the manager's ruling on #960's picture (the equal-cusp derivation gives
- * 1.93° on a ⌀6 ball at a 0.027 mm scallop; the vendor-like reading gives 7.1°). Both ops read
- * this ONE number, so the ruling changes it here and nowhere else.
+ * The manager RULED 1.93° on 2026-11-05 (#960): the equal-cusp derivation on a ⌀6 ball at the
+ * vendor's 0.027 mm scallop. The vendor-like 7.1° reading was not taken. Both ops read this ONE
+ * number, so any further change lands here and nowhere else.
  */
 export const FLAT_SURFACE_MAX_SLOPE_DEG = 1.93;
 

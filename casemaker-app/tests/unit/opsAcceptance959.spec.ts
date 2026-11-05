@@ -999,8 +999,8 @@ afterAll(() => clearMakeraCatalogue());
 describe.skipIf(TRAY === undefined || !CATALOGUE.installed)('#959 acceptance — tool tray 70, the WHOLE tree through the one interface', () => {
   it('plans pockets, the curved remainder and rims together, with the freeing contour last and every program posted', async () => {
     const { tree, mesh } = await placedTree(TRAY!, [110, 140], -1.2);
-    let min: [number, number, number] = [Infinity, Infinity, Infinity];
-    let max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+    const min: [number, number, number] = [Infinity, Infinity, Infinity];
+    const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
     for (let v = 0; v < mesh.positions.length; v += 3) {
       for (let a = 0; a < 3; a++) {
         min[a] = Math.min(min[a]!, mesh.positions[v + a] as number);
@@ -1207,4 +1207,67 @@ describe('#959 acceptance — the curved pipeline (every op entered)', () => {
     }
     expect(withRest.notes.join(' ')).toContain('curved pipeline follows the ruling');
   }, 120_000);
+});
+
+// #960 — THE MANAGER'S ACCEPTANCE OF THE BAND-SPACING RULE (2026-11-05): each band's spacing is the
+// old region-wide step divided by a whole number from the same origin, so every old raster row is
+// kept and a finer band only ADDS rows. This measures that on the real parts instead of trusting
+// the argument: both runs' own programs stamped onto the SAME goal grid by
+// `tests/tools/acceptancePics.ts`, and every cell's leftover compared.
+//
+//   CM_960_BEFORE_PICS=<dir> CM_960_AFTER_PICS=<dir> \
+//     npx vitest run tests/unit/opsAcceptance959.spec.ts -t '#960'
+//
+// Each dir is one `acceptancePics.ts` output root (`<card>/grid.json|goal.f32|union.f32`); the
+// acceptance's own `<card>-posted-facts.json` beside the card dir (when present) adds the cycle.
+const BEFORE_PICS = process.env.CM_960_BEFORE_PICS;
+const AFTER_PICS = process.env.CM_960_AFTER_PICS;
+
+describe.skipIf(BEFORE_PICS === undefined || AFTER_PICS === undefined)('#960 — no cell’s leftover rises (the band-spacing rule, measured)', () => {
+  const readCard = (root: string, card: string) => {
+    const grid = JSON.parse(fs.readFileSync(path.join(root, card, 'grid.json'), 'utf8')) as { nx: number; ny: number; x0: number; y0: number; pitch: number };
+    const f32 = (name: string): Float32Array => {
+      const b = fs.readFileSync(path.join(root, card, name));
+      return new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+    };
+    return { grid, goal: f32('goal.f32'), union: f32('union.f32') };
+  };
+  const cycleOf = (root: string, card: string): number | null => {
+    try {
+      return (JSON.parse(fs.readFileSync(path.join(root, `${card}-posted-facts.json`), 'utf8')) as { cycleSeconds: number }).cycleSeconds;
+    } catch {
+      return null;
+    }
+  };
+  for (const card of ['tray', 'organizer']) {
+    it(`${card}: every cell's leftover is no higher than the base run's`, () => {
+      const before = readCard(BEFORE_PICS!, card);
+      const after = readCard(AFTER_PICS!, card);
+      expect(after.grid, 'the two runs were not measured on the same goal grid').toEqual(before.grid);
+      expect(after.goal, 'the goal fields differ — not the same STEP, sampler and placement').toEqual(before.goal);
+      let risen = 0;
+      let worst = 0;
+      let worstAt = '';
+      for (let k = 0; k < before.goal.length; k++) {
+        const base = Math.max(0, before.goal[k]! - before.union[k]!);
+        const now = Math.max(0, after.goal[k]! - after.union[k]!);
+        if (now > base + 1e-6) {
+          risen++;
+          if (now - base > worst) {
+            worst = now - base;
+            const i = k % before.grid.nx;
+            const j = Math.floor(k / before.grid.nx);
+            worstAt = `(${(before.grid.x0 + i * before.grid.pitch).toFixed(1)}, ${(before.grid.y0 + j * before.grid.pitch).toFixed(1)})`;
+          }
+        }
+      }
+      const beforeCycle = cycleOf(BEFORE_PICS!, card);
+      const afterCycle = cycleOf(AFTER_PICS!, card);
+      console.log(
+        `#960 ${card}: ${risen} cell(s) whose leftover rises${risen === 0 ? '' : ` — worst +${worst.toFixed(3)} mm at ${worstAt}`}` +
+          (beforeCycle !== null && afterCycle !== null ? `; cycle ${beforeCycle.toFixed(1)} s → ${afterCycle.toFixed(1)} s` : ''),
+      );
+      expect(risen, `leftover rose on ${risen} cell(s), worst +${worst.toFixed(3)} mm at ${worstAt}`).toBe(0);
+    });
+  }
 });
