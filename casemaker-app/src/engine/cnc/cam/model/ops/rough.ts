@@ -25,7 +25,8 @@ import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { pocketLoops, type OffsetFn, type Polygons } from '@/engine/cnc/cam/pocket';
 import { tourNearest } from '@/engine/cnc/cam/tour';
-import { link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
+import { DEFAULT_SHORT_HOP_DIAMETERS, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
+import { ridesCutSurface } from '../rideTest';
 import { cutterKeyOf } from '../sequence';
 import type { RemainderRegion } from '../features';
 import type { ClSurface } from '../clsurface';
@@ -456,25 +457,20 @@ export function rough(opts: RoughOpOptions): OpOutcome {
       // what must be proved is that it does not cut BELOW the skim's own target. So sample the
       // link at its centre and require z >= the skim target there — the finish's `ridesTheCl`,
       // against this op's own grid. A join over a cell outside the band still retracts.
-      const rides = ((): boolean => {
-        const length = Math.hypot(to.x - from.x, to.y - from.y);
-        const steps = Math.max(1, Math.ceil(length / Math.max(pitch, 1e-9)));
-        for (let s = 0; s <= steps; s++) {
-          const t = s / steps;
-          const x = from.x + (to.x - from.x) * t;
-          const y = from.y + (to.y - from.y) * t;
-          // BAND CELLS ONLY: a join whose path leaves the skim's band crosses ground this op is
-          // not cutting, and stays a retract. Measured: allowing the deeper cells as well (their
-          // material stands below the link) converted more joins but made the plan SLOWER —
-          // 13,290.6 -> 13,068.8 s against this version's 12,982.2 — because the longer stay-down
-          // feeds at the cutting rate lose to the rapid they replace.
-          const cell = skimTarget(Math.round((x - min[0]) / pitch), Math.round((y - min[1]) / pitch));
-          if (cell === null) return false;
-          const z = from.z + (to.z - from.z) * t;
-          if (z < cell - opts.clSurface.toleranceMm) return false;
-        }
-        return true;
-      })();
+      // BAND CELLS ONLY: a join whose path leaves the skim's band crosses ground this op is not
+      // cutting, and stays a retract. Measured: allowing the deeper cells as well (their material
+      // stands below the link) converted more joins but made the plan SLOWER — 13,290.6 ->
+      // 13,068.8 s against this version's 12,982.2 — because the longer stay-down feeds at the
+      // cutting rate lose to the rapid they replace. THE SHORT HOP (B's review of e3f25fc7): a
+      // ride longer than Kiri's 2 x diameter is a retract by rule, cap included in `ridesCutSurface`.
+      const rides = ridesCutSurface(
+        { x: from.x, y: from.y, z: from.z },
+        { x: to.x, y: to.y, z: to.z },
+        (x, y) => skimTarget(Math.round((x - min[0]) / pitch), Math.round((y - min[1]) / pitch)),
+        opts.clSurface.toleranceMm,
+        DEFAULT_SHORT_HOP_DIAMETERS * 2 * toolRadius,
+        pitch,
+      );
       if (rides) {
         const f = to.z < from.z - 1e-9 ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
         moves.push({ kind: 'feed', x: to.x, y: to.y, z: to.z, f });

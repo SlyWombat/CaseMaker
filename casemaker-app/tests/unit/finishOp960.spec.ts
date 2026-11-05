@@ -154,18 +154,22 @@ describe.each([
 
   it('retracts between rows go to the region\'s own clearance plane, not a bare hop height', () => {
     // #962's tour keeps a PLANE's links down (the chord rides the CL), so the property needs a
-    // join that must retract: a narrow rise BETWEEN the first two raster rows — the CL bulges
-    // 0.3 mm, the chord dips below it, and `joinMoves` falls back to `link()`'s retract.
+    // join that must retract. #960's finer ball step-over passes THROUGH a narrow rise — the
+    // rows follow it, which is the cut the passes exist for, so no retract is owed and none
+    // happens. This fixture therefore puts the rise in a MASKED GAP between the rows: no pass
+    // crosses it, the ONE join over the gap is a chord across it, the CL bulges 0.3 mm above
+    // that chord, and the retract must go to the region's clearance plane.
     const base = clSurface(geometry, region, cutter, 3);
     const risen: typeof base = {
       ...base,
       dropCutter: (x: number, y: number) => {
         const z = base.dropCutter(x, y);
-        return z === null ? null : x >= 0.6 && x <= 0.95 ? z + 0.3 : z;
+        return z === null ? null : x >= 7.5 && x <= 8.5 ? z + 0.3 : z;
       },
     };
     const out = finish({
       cutter, region, regionRef, clSurface: risen, kind, scallopMm: 0.1, stepDownMm: 2,
+      maskCells: (x: number) => !(x > 5 && x < 11),
       feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 }, safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
     });
     const rapids = out.ir.operations[0]!.moves.filter((m) => m.kind === 'rapid');
