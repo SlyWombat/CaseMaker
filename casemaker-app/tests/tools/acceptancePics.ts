@@ -550,7 +550,10 @@ function renderToolpaths(
         if (last !== null) {
           const d = Math.hypot(m.x - last.x, m.y - last.y);
           if (d >= 0.25 && segments < 30000) {
-            const seg = `${proj.x(last.x).toFixed(1)},${proj.y(last.y).toFixed(1)} ${proj.x(m.x).toFixed(1)},${proj.y(m.y).toFixed(1)} `;
+            // E's catch (972-render-set 263df637): ONE polyline joins the end of a segment to
+            // the start of the next and draws a diagonal that is not in the NC (the contour
+            // panels appeared to cross the part at −27 mm). Each move is its own M…L… subpath.
+            const seg = `M${proj.x(last.x).toFixed(1)},${proj.y(last.y).toFixed(1)} L${proj.x(m.x).toFixed(1)},${proj.y(m.y).toFixed(1)} `;
             if (m.kind === 'feed') feed += seg;
             else rapid += seg;
             segments++;
@@ -564,8 +567,8 @@ function renderToolpaths(
       `<text x="${canvas.x}" y="${canvas.y - 8}" font-family="sans-serif" font-size="11" font-weight="700" fill="#1a202c">${esc(label)}</text>` +
       `<rect x="${fit.x}" y="${fit.y}" width="${fit.w}" height="${fit.h}" fill="none" stroke="#4a5568"/>` +
       `<image x="${fit.x}" y="${fit.y}" width="${fit.w}" height="${fit.h}" href="data:image/png;base64,${bg}" image-rendering="pixelated"/>` +
-      (rapid === '' ? '' : `<polyline points="${rapid}" fill="none" stroke="#718096" stroke-opacity="0.5" stroke-width="0.5" stroke-dasharray="3 2"/>`) +
-      (feed === '' ? '' : `<polyline points="${feed}" fill="none" stroke="${color}" stroke-opacity="0.55" stroke-width="0.6"/>`),
+      (rapid === '' ? '' : `<path d="${rapid}" fill="none" stroke="#718096" stroke-opacity="0.5" stroke-width="0.5" stroke-dasharray="3 2"/>`) +
+      (feed === '' ? '' : `<path d="${feed}" fill="none" stroke="${color}" stroke-opacity="0.55" stroke-width="0.6"/>`),
     );
   });
   const body =
