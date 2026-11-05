@@ -58,6 +58,36 @@ function parsedOf(mesh: { positions: Float32Array; indices: Uint32Array }): Pars
   return { positions: mesh.positions, indices: mesh.indices, triangleCount: mesh.indices.length / 3, bbox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] } };
 }
 
+/**
+ * Two closed boxes, stacked so one's top face and the other's bottom face are coincident but
+ * never merged into one surface (moved here from `surface3d.spec.ts`'s old `stepTris`/`boxTris`,
+ * #966 — a genuinely unrepairable fixture, not a synthetic one built for this pin: a skirt and a
+ * bottom cap can only close ONE open sheet's own boundary, and this mesh has none — every edge is
+ * already part of two triangles within its own box, so welding finds no boundary loop to skirt at
+ * all; what it finds instead is the coincident internal faces, shared by more than two triangles).
+ */
+function stackedBoxesMesh(): { positions: Float32Array; indices: Uint32Array } {
+  const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number): [number, number, number][][] => {
+    const c: [number, number, number][] = [
+      [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
+      [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1],
+    ];
+    const quad = (a: number, b: number, q: number, d: number): [number, number, number][][] => [
+      [c[a]!, c[b]!, c[q]!],
+      [c[a]!, c[q]!, c[d]!],
+    ];
+    return [...quad(4, 5, 6, 7), ...quad(0, 3, 2, 1), ...quad(0, 1, 5, 4), ...quad(2, 3, 7, 6), ...quad(1, 2, 6, 5), ...quad(3, 0, 4, 7)];
+  };
+  // A base slab under the whole footprint, and a narrower plateau sitting exactly on its top
+  // face — the plateau's bottom face and part of the slab's top face occupy the same plane.
+  const tris = [...box(0, 20, 0, 20, -4, -2), ...box(0, 10, 0, 20, -2, 0)];
+  const positions = new Float32Array(tris.length * 9);
+  let k = 0;
+  for (const tri of tris) for (const v of tri) { positions[k++] = v[0]; positions[k++] = v[1]; positions[k++] = v[2]; }
+  const indices = Uint32Array.from({ length: tris.length * 3 }, (_, i) => i);
+  return { positions, indices };
+}
+
 /** The kernel's own check, the one `solidOf` runs — the closure must pass it. */
 function manifoldAccepts(mesh: ParsedMesh): { ok: boolean; reason: string } {
   const mm = new tl.Mesh({ numProp: 3, vertProperties: mesh.positions, triVerts: mesh.indices });
@@ -120,6 +150,24 @@ describe('#966 an open goal mesh is closed with a skirt before the manifold chec
     const message = (caught as Error).message;
     expect(message).toContain('goal-mesh-unclosable');
     expect(message).toContain('2 disconnected sheet components');
+  });
+
+  it('a genuinely degenerate mesh (coincident, un-merged internal faces) is refused by name, never a kernel stack trace', () => {
+    // No raw-kernel sanity check here, unlike the open-sheet/disconnected-sheets cases above: the
+    // kernel's own merge tolerates this one (it cancels the coincident opposite-facing faces
+    // rather than refusing), so `closeOpenSheet`'s own edge-count analysis is the ONLY thing that
+    // catches it — which is exactly the point this pin makes.
+    const mesh = parsedOf(stackedBoxesMesh());
+    let caught: unknown = null;
+    try {
+      closeOpenSheet(tl, mesh, { bottomZ: BOTTOM_Z });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught, 'the fixture must be refused, not silently closed or left to the kernel').toBeInstanceOf(UnclosableOpenMeshError);
+    const message = (caught as Error).message;
+    expect(message).toContain('goal-mesh-unclosable');
+    expect(message).toContain('edge(s) shared by more than two triangles');
   });
 
   it('the goal path closes the sheet: buildModelPlanInputForGoal hands the engine a closed mesh', async () => {
