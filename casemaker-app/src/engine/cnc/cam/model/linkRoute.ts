@@ -6,9 +6,9 @@
  * the shortest path that stays inside the cleared region ERODED BY THE CUTTER RADIUS, so the whole
  * disc stays in cleared material, with every sample over B's below-material guard. The caller
  * (link(), when the chord is refused) chooses feed at depth or a rapid at the in-pocket safe Z by
- * the time guard against the retract it replaces. Inside the cleared region any Z at or above the
- * level is free (higher levels removed the material above), so the caller may pass rapidZMm equal
- * to levelZ — the route then runs as a level rapid with no vertical legs.
+ * the time guard against the retract it replaces. `rapidZMm` is the in-pocket rapid plane — the
+ * caller must keep it ABOVE the cut level (a G0 at cutting depth is wrong; a link at depth is a
+ * feed), so the pocket passes levelZ + 1 mm clamped to its hop plane.
  *
  * The polygon is the caller's own already-eroded free space (`open` in pocket.ts: the region
  * eroded by the tool radius less a chord grace) — this module does no offsetting.

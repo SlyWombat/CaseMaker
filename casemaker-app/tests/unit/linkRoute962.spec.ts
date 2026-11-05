@@ -72,6 +72,25 @@ describe('#962 — the path-following stay-down link', () => {
     void to;
   });
 
+  it('no G0 in a routed join sits below the in-pocket plane (levelZ + 1 mm)', () => {
+    const from: LinkPoint = { x: 18, y: 12, z: levelZ };
+    const to: LinkPoint = { x: 2, y: 12, z: levelZ };
+    const opts: LinkOptions = {
+      material: { topAt: (x, y) => (x >= 0 && x <= 20 && y >= 0 && y <= 20 ? levelZ : Number.POSITIVE_INFINITY) },
+      clearanceZ: 5,
+      tool: { radiusMm: 3 },
+      feeds: { feed: 500, plungeFeed: 200 },
+      route: {
+        options: { cleared: U, levelZ, rapidZMm: levelZ + 1, materialAt: material },
+        plan: () => ({ mode: 'rapid' }),
+      },
+    };
+    const moves = link(from, to, opts);
+    const g0 = moves.filter((m) => m.kind === 'rapid');
+    expect(g0.length, 'the rapid mode emitted no G0').toBeGreaterThan(0);
+    for (const m of g0) expect(m.z, 'a G0 sits below the in-pocket plane').toBeGreaterThanOrEqual(levelZ + 1 - 1e-6);
+  });
+
   it('link() takes the route when the chord is refused and the time guard wins', () => {
     const from: LinkPoint = { x: 18, y: 12, z: levelZ };
     const to: LinkPoint = { x: 2, y: 12, z: levelZ };
