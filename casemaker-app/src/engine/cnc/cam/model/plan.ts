@@ -605,7 +605,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const ball = input.cutters.house
       .filter((t) => t.shape === 'ball' && (cuttingDiameter(t) ?? 0) > 0)
       .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0))[0];
-    const vbit = input.cutters.house.find((t) => t.shape === 'chamfer') ?? input.cutters.house.find((t) => t.shape === 'engraving');
+    // #989 — THE RIM STAGE TAKES THE PINNED V when the caller names one (`pinned.chamfer`, the
+    // cutterKeyOf key the goal seam derives from its own chamfer request); otherwise the first
+    // chamfer/engraving in the house, as before.
+    const pinnedVKey = input.cutters.pinned?.['chamfer'];
+    const vbit = (pinnedVKey === undefined ? undefined : input.cutters.house.find((t) => cutterKeyOf(t) === pinnedVKey))
+      ?? input.cutters.house.find((t) => t.shape === 'chamfer')
+      ?? input.cutters.house.find((t) => t.shape === 'engraving');
     if (tree.remainder.length > 0 && ball === undefined) {
       throw new Error('cam/model/plan: the part has curved remainder regions but the house states no ball nose — the finish stage cannot be planned');
     }

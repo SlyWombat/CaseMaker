@@ -2,16 +2,31 @@
  * #829 — A GOAL THAT CHAMFERS ITS OWN EDGES. The chamfer is a property of the goal object, so the
  * pure goal stays pure and posts a SECOND program with the V-bit after its surfacing one; when no
  * V can cut it the goal is still surfaced, and the warning says why the edges are square.
+ *
+ * #989 — THE MODEL ENGINE'S OWN PIN. `USE_MODEL_CAM_ENGINE` on: the seam carries the goal's
+ * `chamfer` as `edgeBreak.legMm = widthMm / tan(halfAngle)` of the V named by `toolKey`, pinned
+ * for the rim stage. On the box fixture it plans ONE program — the V, at z = −leg, one tip radius
+ * off the edge on the air side — never "no refusal" with zero programs. A 60° V proves the leg is
+ * derived (0.5/tan 30° = 0.866) and the PINNED V is the one that cuts, not the first chamfer in
+ * the house; no `toolKey` leaves the rims sharp with the plan's own sentence; a `toolKey` the
+ * house lacks is a named `goal-chamfer-no-cutter` finding.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
+import { setModelCamEnabled } from '@/engine/cnc/cam/model/plan';
+import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 
 type P = [number, number, number];
+
+afterEach(() => {
+  setModelCamEnabled(false);
+  clearTargetObjectMeshCache();
+});
 
 function stlBase64(tris: readonly (readonly [P, P, P])[]): string {
   const bytes = new Uint8Array(84 + tris.length * 50);
@@ -62,6 +77,9 @@ function boxBall(): string {
 }
 
 const BALL: Tool = { ...flatEndMill(2), name: '2 mm ball nose', shape: 'ball', typeText: 'Ball', diameter: 2, cornerRadius: 1 };
+// The model engine's pocket chain prices a primary FLAT even when the tree finds no pocket — a
+// real shop carries one, and the model-path blocks below plan through that same house.
+const FLAT: Tool = { ...flatEndMill(6), id: 'flat-6-989', name: 'flat-6' };
 const VBIT: Tool = {
   ...flatEndMill(3.175),
   name: '3.175mm*90º Chamfer',
@@ -74,8 +92,24 @@ const VBIT: Tool = {
   cornerRadius: null,
 };
 const VKEY = 'user:v-bit-829';
+const V60: Tool = {
+  ...flatEndMill(3.175),
+  name: '3.175mm*60º Chamfer',
+  typeText: 'Chamfer',
+  shape: 'chamfer',
+  tipDiameter: 0.1,
+  diameter: 3.175,
+  angle: 60,
+  halfAngle: null,
+  cornerRadius: null,
+};
+const V60KEY = 'user:v-bit-60-989';
 
-const ENTRIES: ToolLibraryEntry[] = [{ key: VKEY, tool: VBIT, provenance: 'test' }];
+const ENTRIES: ToolLibraryEntry[] = [
+  { key: 'inv:flat-6-989', tool: FLAT, provenance: 'test' },
+  { key: VKEY, tool: VBIT, provenance: 'test' },
+  { key: V60KEY, tool: V60, provenance: 'test' },
+];
 
 function goalTarget(over: Partial<EngraveTargetObject> = {}): EngraveTargetObject {
   return {
@@ -86,6 +120,8 @@ function goalTarget(over: Partial<EngraveTargetObject> = {}): EngraveTargetObjec
     format: 'stl',
     sha256: 'g'.repeat(64),
     data: boxBall(),
+    // `placeTarget` centres the mesh's XY bbox here and puts its TOP at this Z — the box's top
+    // face is the stock's own top, its rim the sharp edge the chamfer breaks.
     position: { x: 30, y: 20, z: 0 },
     rotation: 0,
     size: { x: 10, y: 10, z: 5 },
@@ -109,7 +145,7 @@ function goalJob(target: EngraveTargetObject): EngraveJob {
 
 const SHOP = { tools: ENTRIES, feeds: null };
 
-describe('#829 a goal chamfers its own edges', () => {
+describe('#829 a goal chamfers its own edges — the old engine, still the shipped default', () => {
   it('posts a second program with the chosen V-bit, after the surfacing one', async () => {
     const target = goalTarget({ chamfer: { widthMm: 1, toolKey: VKEY } });
     const job = goalJob(target);
@@ -150,5 +186,88 @@ describe('#829 a goal chamfers its own edges', () => {
     const tooWide = outWide.findings.find((f) => f.code === 'chamfer-too-wide');
     expect(tooWide?.severity).toBe('warning');
     expect(outWide.programs).toHaveLength(2);
+  }, 120_000);
+});
+
+/** Every feed move in the plan's own IR — the posted program's geometry, not its text. */
+function plannedFeeds(ir: EngraveProgramLike): { x: number; y: number; z: number }[] {
+  const feeds: { x: number; y: number; z: number }[] = [];
+  for (const op of ir.operations) {
+    for (const m of op.moves) if (m.kind === 'feed') feeds.push({ x: m.x, y: m.y, z: m.z });
+  }
+  return feeds;
+}
+type EngraveProgramLike = {
+  operations: { moves: { kind: string; x: number; y: number; z: number }[] }[];
+};
+
+/** The plan's own programs, by the `cutterKeyOf` key the seam labels them with. */
+function plannedPrograms(out: Awaited<ReturnType<typeof generateGoalProgram>>): { key: string; ir: EngraveProgramLike }[] {
+  const out2: { key: string; ir: EngraveProgramLike }[] = [];
+  for (const setup of out.plan?.perSetup ?? []) {
+    for (const ir of setup.programs) out2.push({ key: ir.tool.id ?? ir.tool.name, ir: ir as unknown as EngraveProgramLike });
+  }
+  return out2;
+}
+
+describe('#989 the model engine receives the goal’s own chamfer', () => {
+  // MEASURED, not assumed: on this box fixture the model plan also posts the flat's freeing
+  // contour (the block is cut out of the stock, z −5…−0.5), so the V program is the SECOND
+  // program, not the only one — the issue's "1 program" counts only the chamfer stage. The pin
+  // asserts the V program by its own tool key and drops the old path's "no refusal" bar.
+  it('width 0.5 on the 90° V: the V program posts, every feed at z = −0.5 one tip radius off the edge', async () => {
+    setModelCamEnabled(true);
+    const target = goalTarget({ chamfer: { widthMm: 0.5, toolKey: VKEY } });
+    const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
+    expect(out.errors?.map((e) => `${e.stage}: ${e.message}`).join('\n') ?? '').toBe('');
+    expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
+    const vPrograms = plannedPrograms(out).filter((p) => p.key === VBIT.name);
+    expect(vPrograms).toHaveLength(1);
+    const feeds = plannedFeeds(vPrograms[0]!.ir);
+    expect(feeds.length).toBeGreaterThan(4);
+    for (const m of feeds) {
+      // The tip plane is the bevel's bottom: −leg, and never deeper (a 90° V: leg = width).
+      expect(m.z).toBeCloseTo(-0.5, 6);
+      // One TIP RADIUS (0.05) outside the 10 × 10 box centred at (30, 20): the sides at
+      // 5 + tipRadius, the (round-join) corners on a circle of that radius about the corner.
+      const edge = Math.max(Math.abs(m.x - 30), Math.abs(m.y - 20));
+      expect(edge).toBeLessThanOrEqual(5 + 0.05 + 1e-6);
+      expect(edge).toBeGreaterThanOrEqual(5 + 0.05 * Math.SQRT1_2 - 1e-6);
+    }
+  }, 120_000);
+
+  it('a 60° V: leg = width / tan 30° = 0.866, and the PINNED V cuts — not the first chamfer in the house', async () => {
+    setModelCamEnabled(true);
+    const target = goalTarget({ chamfer: { widthMm: 0.5, toolKey: V60KEY } });
+    const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
+    expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
+    // The 90° V is in the house too; only the pinned one may post.
+    const vPrograms = plannedPrograms(out).filter((p) => p.key === V60.name || p.key === VBIT.name);
+    expect(vPrograms.map((p) => p.key)).toEqual([V60.name]);
+    const feeds = plannedFeeds(vPrograms[0]!.ir);
+    expect(feeds.length).toBeGreaterThan(4);
+    for (const m of feeds) expect(m.z).toBeCloseTo(-0.5 / Math.tan((30 * Math.PI) / 180), 6);
+  }, 120_000);
+
+  it('no toolKey: no V program, and the plan’s own sentence says the rims stay sharp', async () => {
+    setModelCamEnabled(true);
+    const target = goalTarget({ chamfer: { widthMm: 0.5 } });
+    const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
+    expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
+    expect(plannedPrograms(out).filter((p) => p.key === VBIT.name || p.key === V60.name)).toEqual([]);
+    const notes = (out.plan?.perSetup ?? []).flatMap((s) => s.notes).join('\n');
+    expect(notes).toContain('the job states no edge break');
+    expect(out.findings.find((f) => f.code === 'goal-chamfer-no-cutter')?.message).toContain('no V-bit has been chosen');
+  }, 120_000);
+
+  it('a toolKey the house lacks: no V program, and the finding names it', async () => {
+    setModelCamEnabled(true);
+    const target = goalTarget({ chamfer: { widthMm: 0.5, toolKey: 'inv:gone' } });
+    const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
+    expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
+    expect(plannedPrograms(out).filter((p) => p.key === VBIT.name || p.key === V60.name)).toEqual([]);
+    const finding = out.findings.find((f) => f.code === 'goal-chamfer-no-cutter');
+    expect(finding?.severity).toBe('warning');
+    expect(finding?.message).toContain('not in the tool library');
   }, 120_000);
 });

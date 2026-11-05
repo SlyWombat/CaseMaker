@@ -4831,12 +4831,12 @@ export const MOLD_DRAFT_LIMIT_DEG = 85;
  * bracket — never `bracketMount()` directly: that pulls the defaults client into this worker
  * realm, the boundary `EngraveShopOpts.mount`'s own doc states).
  *
- * NOT yet carried over from the old path: a per-goal edge break (no `EngraveJob`/`EngraveTargetObject`
- * field states one today, so `edgeBreak.legMm` is 0 — "the job states no edge break", same sentence
- * `planCurvedForTree` already prints for a rectilinear card with none) and a finish SCALLOP: a goal
- * job states none (`EngraveSurfaceSettings` has step-overs, an allowance and a scallop on/off, not
- * a cusp height), so `tolerances.finishMm` is left ABSENT and the engine's 0.027 mm default applies
- * (#965 — the old path's step-over/stock-to-leave conflation is withdrawn; see the tolerances block).
+ * NOT yet carried over from the old path: a finish SCALLOP — a goal job states none
+ * (`EngraveSurfaceSettings` has step-overs, an allowance and a scallop on/off, not a cusp
+ * height), so `tolerances.finishMm` is left ABSENT and the engine's 0.027 mm default applies
+ * (#965 — the old path's step-over/stock-to-leave conflation is withdrawn; see the tolerances
+ * block). The per-goal edge break IS carried: the goal's own `chamfer` (#829) states it, and the
+ * `edgeBreak` block below derives the rim op's leg from it (#989).
  */
 export async function buildModelPlanInputForGoal(
   job: EngraveJob,
@@ -4967,7 +4967,23 @@ export async function buildModelPlanInputForGoal(
   const tolerances: ModelTolerances = {
     ...(goal.surface?.finishStepOverMm === undefined ? {} : { finishStepOverMm: goal.surface.finishStepOverMm }),
   };
-  const edgeBreak: EdgeBreakSpec = { legMm: 0 };
+  // #989 — THE GOAL'S OWN CHAMFER IS THE EDGE BREAK. `EngraveTargetObject.chamfer` (#829) states
+  // the bevel: its `widthMm` on the top face and the V it was measured for. The rim op reads the
+  // DEPTH at the rim (`legMm`), so `legMm = widthMm / tan(halfAngle)` of that V (equal for the 90°
+  // V, 0.866 for a 0.5 mm width at 60°); the V is resolved through the SHOP's keys (the goal's
+  // `toolKey` is the library key, not `cutterKeyOf`) and PINNED so the rim stage takes the chosen
+  // cutter, never the first chamfer in the house. No `toolKey` — the type's own "no chamfer
+  // program is posted" case — keeps `legMm: 0`, and the run's `goal-chamfer-no-cutter` finding
+  // (the old stage's own words) explains the square edges.
+  const chamferWant = goal.chamfer;
+  const chamferEntry = chamferWant?.toolKey === undefined ? undefined : (shop.tools ?? []).find((e) => e.key === chamferWant.toolKey);
+  const chamferCone = chamferEntry === undefined ? null : vCone(chamferEntry.tool);
+  const edgeBreak: EdgeBreakSpec = {
+    legMm: chamferWant !== undefined && chamferCone !== null ? chamferWant.widthMm / chamferCone.tanHalf : 0,
+  };
+  if (chamferWant !== undefined && chamferEntry !== undefined && chamferCone !== null) {
+    cutters.pinned = { ...(cutters.pinned ?? {}), chamfer: cutterKeyOf(chamferEntry.tool) };
+  }
 
   return {
     geometry,
@@ -4997,11 +5013,11 @@ export async function generateGoalProgram(
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
   // call site before `planModelCam` has run passes nothing, so `fail` defaults it to `null`.
-  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null, plan: ModelPlanOutput | null = null): EngraveGenerated => ({
+  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null, plan: ModelPlanOutput | null = null, findings: JobFinding[] = []): EngraveGenerated => ({
     ...base,
     ok: false,
     stage,
-    findings: [],
+    findings,
     feeds,
     cam: null,
     nc: null,
@@ -5079,6 +5095,35 @@ export async function generateGoalProgram(
   // name where the new path stands today rather than crashing uninformatively or silently falling
   // back to the old engine.
   if (USE_MODEL_CAM_ENGINE) {
+    // #989 — A STATED CHAMFER THE SHOP'S V CANNOT CUT IS NAMED, never silent: the seam then
+    // leaves `edgeBreak.legMm` 0 and the plan's own note says the rims stay sharp. The old
+    // stage's own finding, in its words, so a reader sees one vocabulary whichever engine runs.
+    const chamferFindings: JobFinding[] = [];
+    const chamferWantModel = goal.chamfer;
+    if (chamferWantModel !== undefined) {
+      const who = `The part's edges (“${goal.name}”)`;
+      const entry = (shop.tools ?? []).find((e) => e.key === chamferWantModel.toolKey);
+      if (chamferWantModel.toolKey === undefined || entry === undefined) {
+        chamferFindings.push({
+          severity: 'warning',
+          code: 'goal-chamfer-no-cutter',
+          labelId: goal.id,
+          message:
+            `${who} are not chamfered: ` +
+            (chamferWantModel.toolKey === undefined
+              ? 'no V-bit has been chosen for them'
+              : `the V-bit “${chamferWantModel.toolKey}” is not in the tool library`) +
+            '.',
+        });
+      } else if (vCone(entry.tool) === null) {
+        chamferFindings.push({
+          severity: 'warning',
+          code: 'goal-chamfer-no-cutter',
+          labelId: goal.id,
+          message: `${who} are not chamfered: “${entry.tool.name}” is a ${entry.tool.shape} cutter with no cone to make a bevel.`,
+        });
+      }
+    }
     let input: ModelPlanInput;
     try {
       input = await buildModelPlanInputForGoal(job, goal, tool, shop, modelSetupsOverride);
@@ -5122,6 +5167,7 @@ export async function generateGoalProgram(
           (perSetupNotes.length === 0 ? '' : ` — ${perSetupNotes}`),
         null,
         output,
+        chamferFindings,
       );
     }
 
@@ -5199,7 +5245,7 @@ export async function generateGoalProgram(
             ...base,
             ok: false,
             stage: 'verify',
-            findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...documentFindings()]),
+            findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...documentFindings(), ...chamferFindings]),
             feeds: null,
             cam: null,
             nc: posted.text,
@@ -5232,7 +5278,7 @@ export async function generateGoalProgram(
       ...base,
       ok: true,
       stage: 'done',
-      findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...documentFindings()]),
+      findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...documentFindings(), ...chamferFindings]),
       feeds: null,
       cam: first.cam,
       nc: first.nc,

@@ -66,7 +66,7 @@ import { getTools } from '@/engine/cnc/toolRegistry';
 import { comparePlanOutcomes, idealWorsenings, type PlanTradeoff } from '../tools/tradeoff';
 import { feedRowsFor } from '../tools/feedRows';
 import { measureVendorCard } from '../tools/cardMeasurement';
-import { planModelCam, planPocketsForTree, planTreePrograms, type ModelPlanInput, type PlanPocketsResult, type SetupPlan } from '@/engine/cnc/cam/model/plan';
+import { planModelCam, planPocketsForTree, planTreePrograms, setModelCamEnabled, type ModelPlanInput, type PlanPocketsResult, type SetupPlan } from '@/engine/cnc/cam/model/plan';
 import type { SequenceChoice, SequenceStepFailure } from '@/engine/cnc/cam/model/sequence';
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
@@ -78,7 +78,9 @@ import { checkGoalCutInto, type GoalCutIntoOptions, type GoalCutIntoReport } fro
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { vToolAllowance } from '@/engine/cnc/engrave/edgeBreak';
 import { buildBinaryStl } from '@/workers/export/stlBinary';
-import type { EngraveTargetObject } from '@/types/engraveJob';
+import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { generateGoalProgram, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 
 /** Even-odd point membership over every ring (outers and holes alike) — the same rule
  * `pocketRedFirst959.spec.ts`'s own helper uses. */
@@ -1412,6 +1414,86 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     if (idealMeasured !== null) {
       const worse = idealWorsenings(measured!.ours, idealMeasured.ours).filter((w) => w.material);
       expect(worse, JSON.stringify(worse)).toEqual([]);
+    }
+  }, 1_800_000);
+});
+
+/**
+ * #989 — THE TRAY THROUGH THE APP PATH. `generateGoalProgram` is the entry the app calls for a
+ * goal job; the cards above pass `edgeBreak` to `planModelCam` directly, which is the
+ * spec-vs-app divergence #985 named. The tray target here carries its own `chamfer` (width
+ * `EDGE_BREAK_LEG_MM` on the vendor's 90° V), so the seam must derive `legMm` and pin that V —
+ * and the posted run must carry the V's chamfer program. Before #989 the seam handed
+ * `legMm: 0` and a real app tray job lost the chamfer the cards show.
+ * The #966 setups override is the card's own single setup, so this measures the seam's
+ * edge-break fields alone, not the setup decision.
+ */
+describe.skipIf(TRAY === undefined)('#989 — the tray through the app path: the goal’s chamfer reaches the rim stage', () => {
+  it('posts the pinned V’s chamfer program, every feed one leg below a tray rim, the top rim included', async () => {
+    const placed = await placedTree(TRAY!, [110, 140], -1.2);
+    const thickness = placed.tree.frame.stockTop - placed.tree.frame.partBottom;
+    // `placedTree` puts the tray's top face at `modelTop` in the work frame (Z 0 = stock top).
+    const topZ = -1.2;
+    const goal: EngraveTargetObject = {
+      ...placed.target,
+      name: 'tray-70-app-path-989',
+      chamfer: { widthMm: EDGE_BREAK_LEG_MM, toolKey: `inv:${CHAMFER3175.id}` },
+    };
+    const base = defaultEngraveJob();
+    const job: EngraveJob = {
+      ...base,
+      labels: [],
+      shapes: [],
+      name: goal.name,
+      targetObject: goal,
+      toolKey: '',
+      tool: BALL6,
+      stock: { ...base.stock, length: 110, width: 140, thickness, material: 'hardwood' },
+    };
+    const shop: EngraveShopOpts = {
+      tools: VENDOR_SET.map((t) => ({ key: `inv:${t.id}`, tool: t, provenance: 'test' })),
+      feeds: null,
+    };
+    setModelCamEnabled(true);
+    try {
+      const t0 = performance.now();
+      const out = await generateGoalProgram(job, goal, BALL6, [], null, shop, undefined, undefined, [
+        { frame: { up: [0, 0, 1], stockTop: 0 }, underside: 'flatOnStockBottom' },
+      ]);
+      // The run's own facts, printed so the acceptance comment can quote them.
+      const chamferOps = (out.plan?.perSetup ?? []).flatMap((s) => s.ops.filter((o) => o.kind === 'chamfer'));
+      console.log(
+        `#989 tray app path: ${((performance.now() - t0) / 1000).toFixed(1)} s, programs [${out.programs.map((p) => p.toolKey).join(', ')}], ` +
+          `chamfer ops [${chamferOps.map((o) => `${o.region.id}@${o.region.topZ}`).join(', ')}]`,
+      );
+      expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
+      // THE POINT OF #989: the rim stage planned chamfer ops at all (before the seam carried the
+      // goal's chamfer there were none), and the TOP face rims are among them.
+      expect(chamferOps.length, 'the rim stage planned no chamfer op — the seam handed it no edge break').toBeGreaterThan(0);
+      expect(
+        chamferOps.some((o) => Math.abs(o.region.topZ - topZ) < 0.01),
+        `no top-face rim was broken (chamfer ops: ${chamferOps.map((o) => `${o.region.id}@${o.region.topZ}`).join(', ')})`,
+      ).toBe(true);
+      // The V program exists at all. Before the seam carried the goal's chamfer there was none,
+      // whatever the plan did with the rest of the part.
+      const vKey = CHAMFER3175.id!;
+      const vPrograms = out.programs.filter((p) => p.toolKey === vKey);
+      expect(vPrograms.length, `programs: ${out.programs.map((p) => p.toolKey).join(', ')}`).toBe(1);
+      // Every feed on the V run is one leg below a rim's own z; the TOP rim's plane is `topZ`,
+      // so the V run reaches topZ − leg and never cuts above it.
+      const vFeedZs: number[] = [];
+      for (const setup of out.plan?.perSetup ?? []) {
+        for (const ir of setup.programs) {
+          if ((ir.tool.id ?? ir.tool.name) !== vKey) continue;
+          for (const op of ir.operations) for (const m of op.moves) if (m.kind === 'feed') vFeedZs.push(m.z);
+        }
+      }
+      expect(vFeedZs.length).toBeGreaterThan(4);
+      const shallowest = vFeedZs.reduce((a, z) => Math.max(a, z), -Infinity);
+      expect(shallowest).toBeCloseTo(topZ - EDGE_BREAK_LEG_MM, 6);
+      for (const z of vFeedZs) expect(z).toBeLessThanOrEqual(topZ - EDGE_BREAK_LEG_MM + 1e-6);
+    } finally {
+      setModelCamEnabled(false);
     }
   }, 1_800_000);
 });
