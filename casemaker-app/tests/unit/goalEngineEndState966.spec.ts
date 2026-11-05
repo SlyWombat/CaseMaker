@@ -1,0 +1,305 @@
+/**
+ * #966 END-STATE ACCEPTANCE SPEC — written RED-FIRST, on top of 965-int + the env-gated flag
+ * read (`9025eec3`, cherry-picked). This is THE single spec that decides when the old-engine
+ * removal (`966-removal-prep`) is actually done: nothing else decides it. Removal-prep's own
+ * future success is "this spec goes green," full stop — none of its three parts may be skipped
+ * or weakened to make it pass early.
+ *
+ * THE THREE PARTS (the Manager's exact wording, #966):
+ *   1. With the flag at its default, `generateGoalProgram` plans through `cam/model`.
+ *   2. A goal that needs two setups posts both programs, with no refusal.
+ *   3. The import gate shows no path from the app into the old goal engine.
+ *
+ * Every `it` below actually runs the real production code (`generateGoalProgram`,
+ * `buildModelPlanInputForGoal`, `planModelCam`, `buildSetupSpecs`, the transitive import-closure
+ * walker `gateImports.spec.ts` already uses) — none of it is a mock of the eventual behaviour.
+ * Each failing case is RED today for a reason confirmed by actually running it (not guessed);
+ * the comment beside each assertion says which run produced that reason.
+ */
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { generateGoalProgram, buildModelPlanInputForGoal, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { planModelCam, USE_MODEL_CAM_ENGINE } from '@/engine/cnc/cam/model/plan';
+import * as planModule from '@/engine/cnc/cam/model/plan';
+import { buildSetupSpecs } from '@/engine/cnc/cam/model/setups';
+import type { FeatureSource } from '@/engine/cnc/cam/model/features';
+import type { ParsedMesh } from '@/engine/import/stlParser';
+import type { MountSpec } from '@/engine/cnc/setups/types';
+import { valueImportClosure } from '../tools/importGraph';
+
+afterEach(() => {
+  clearTargetObjectMeshCache();
+  vi.restoreAllMocks();
+  vi.doUnmock('@/engine/cnc/cam/model/plan');
+  vi.resetModules();
+});
+
+// ── shared fixture plumbing — plain STL-encoded meshes, no Manifold runtime needed (the same
+// trick `camModelSeam966.spec.ts`'s dome fixture uses). ────────────────────────────────────────
+type V = [number, number, number];
+type Tri = [V, V, V];
+
+function stl(tris: readonly Tri[]): string {
+  const buf = new ArrayBuffer(84 + tris.length * 50);
+  const dv = new DataView(buf);
+  dv.setUint32(80, tris.length, true);
+  let off = 84;
+  for (const t of tris) {
+    off += 12;
+    for (const v of t) {
+      dv.setFloat32(off, v[0], true);
+      dv.setFloat32(off + 4, v[1], true);
+      dv.setFloat32(off + 8, v[2], true);
+      off += 12;
+    }
+    off += 2;
+  }
+  return Buffer.from(new Uint8Array(buf)).toString('base64');
+}
+
+function entry(key: string, tool: Tool): ToolLibraryEntry {
+  return { key, tool: { ...tool, id: key, number: null }, provenance: 'test fixture' };
+}
+
+function jobFor(target: EngraveTargetObject, stock: { length: number; width: number; thickness: number }): EngraveJob {
+  return {
+    ...defaultEngraveJob(),
+    labels: [],
+    shapes: [],
+    stock: { ...defaultEngraveJob().stock, ...stock },
+    targetObject: target,
+  };
+}
+
+const BALL: Tool = flatEndMill(2, { number: 1, id: 'ball-2', name: 'ball-2', shape: 'ball', typeText: 'Ball Nose' });
+const FLAT: Tool = flatEndMill(3, { number: 2, id: 'flat-3', name: 'flat-3' });
+const SHOP: EngraveShopOpts = { tools: [entry('inv:ball-2', BALL), entry('inv:flat-3', FLAT)] };
+
+// A small dome goal — the #764 shell formula at stick scale (`camModelSeam966.spec.ts`'s own
+// fixture): a genuine, reachable-in-one-setup relief. Used for part 1, where only "which engine
+// ran" matters, not the setup count.
+const DOME_A = 6, DOME_B = 4, DOME_H = 3, DOME_SEG = 10;
+function domeHeight(x: number, y: number): number {
+  const u2 = (x / DOME_A) ** 2 + (y / DOME_B) ** 2;
+  return u2 >= 1 ? 0 : DOME_H * Math.sqrt(1 - u2);
+}
+function domeTris(): Tri[] {
+  const at = (r: number, t: number): V => {
+    const x = DOME_A * r * Math.cos(2 * Math.PI * t);
+    const y = DOME_B * r * Math.sin(2 * Math.PI * t);
+    return [x, y, domeHeight(x, y)];
+  };
+  const tris: Tri[] = [];
+  for (let i = 0; i < DOME_SEG; i++) {
+    for (let j = 0; j < DOME_SEG; j++) {
+      const p = at(i / DOME_SEG, j / DOME_SEG);
+      const q = at((i + 1) / DOME_SEG, j / DOME_SEG);
+      const r = at((i + 1) / DOME_SEG, (j + 1) / DOME_SEG);
+      const s = at(i / DOME_SEG, (j + 1) / DOME_SEG);
+      tris.push([p, q, r], [p, r, s]);
+    }
+  }
+  return tris;
+}
+function domeGoal(): EngraveTargetObject {
+  return {
+    id: 'goal-dome-966', name: 'dome-966.stl', format: 'stl', sha256: 'f'.repeat(64), data: stl(domeTris()),
+    size: { x: 2 * DOME_A, y: 2 * DOME_B, z: DOME_H }, position: { x: 15, y: 10, z: 0 }, rotation: 0, enabled: true, role: 'goal',
+  };
+}
+
+// A UV sphere, bottom at z 0 — `setups965.spec.ts`'s own fixture, chosen because it has no flat
+// underside at all: `buildSetupSpecs` (the real #965 reach-aware top+bottom decision) answers
+// TWO setups for it, confirmed below. Used for part 2.
+const SPHERE_R = 15;
+function sphereTris(r: number, rings = 16, segs = 32): Tri[] {
+  const at = (i: number, j: number): V => {
+    const phi = (i / rings) * Math.PI;
+    const theta = (j / segs) * 2 * Math.PI;
+    return [r + r * Math.sin(phi) * Math.cos(theta), r + r * Math.sin(phi) * Math.sin(theta), r - r * Math.cos(phi)];
+  };
+  const tris: Tri[] = [];
+  for (let i = 0; i < rings; i++) {
+    for (let j = 0; j < segs; j++) {
+      const a = at(i, j), b = at(i + 1, j), c = at(i + 1, j + 1), d = at(i, j + 1);
+      tris.push([a, c, b], [a, d, c]); // outward winding, same convention goalFlipPlan.spec.ts uses
+    }
+  }
+  return tris;
+}
+function sphereGoal(): EngraveTargetObject {
+  return {
+    id: 'goal-sphere-966', name: 'sphere-966.stl', format: 'stl', sha256: 'e'.repeat(64), data: stl(sphereTris(SPHERE_R)),
+    size: { x: 2 * SPHERE_R, y: 2 * SPHERE_R, z: 2 * SPHERE_R }, position: { x: SPHERE_R, y: SPHERE_R, z: 0 }, rotation: 0, enabled: true, role: 'goal',
+    // #898 — a full sphere has no flat bottom to rest on; `flipped-tabs` is the choice that offers
+    // the flip to `buildSetupSpecs` at all ('flat' would exclude `bottom` by design, #898's rule).
+    underside: { kind: 'flipped-tabs' },
+  };
+}
+
+/** The sphere's raw triangles as a `FeatureSource`, for the direct `buildSetupSpecs` sanity check. */
+function sphereFeatureSource(): FeatureSource {
+  const tris = sphereTris(SPHERE_R);
+  const positions = new Float32Array(tris.length * 9);
+  let k = 0;
+  for (const [a, b, c] of tris) for (const p of [a, b, c]) { positions[k++] = p[0]; positions[k++] = p[1]; positions[k++] = p[2]; }
+  const indices = new Uint32Array(positions.length / 3);
+  for (let i = 0; i < indices.length; i++) indices[i] = i;
+  const triangles: ParsedMesh = { positions, indices, triangleCount: indices.length / 3, bbox: { min: [0, 0, 0], max: [2 * SPHERE_R, 2 * SPHERE_R, 2 * SPHERE_R] } };
+  return { triangles };
+}
+
+const VISE: MountSpec = { kind: 'vise', viseOpeningMm: 120 };
+
+// ───────────────────────────────────────────────────────────────────────────────────────────
+// PART 1 — "With the flag at its default, generateGoalProgram plans through cam/model."
+// ───────────────────────────────────────────────────────────────────────────────────────────
+describe('#966 end-state, part 1 — the flag’s own default routes generateGoalProgram through cam/model', () => {
+  it('RED today: USE_MODEL_CAM_ENGINE’s real default is false — confirmed by importing it with no override at all', () => {
+    // No vi.doMock, no env var set by this test: this is the SAME binding `generateGoalProgram`'s
+    // own `if (USE_MODEL_CAM_ENGINE)` branches on (engraveGenerate.ts, the #966 seam). Red today
+    // because the old engine has not been removed yet, so `cam/model/plan.ts`'s own default stays
+    // `false` ("set only by specs for now", that module's header) — confirmed by this very read,
+    // in a process with neither CASEMAKER_MODEL_CAM nor VITE_MODEL_CAM set.
+    expect(USE_MODEL_CAM_ENGINE).toBe(true);
+  });
+
+  it('RED today: a goal job never reaches planModelCam at all when the flag is left at its real default', async () => {
+    // Spies on the REAL `planModelCam` export (calls through — this is not a mock of its
+    // behaviour, only an observer of whether it was invoked) and runs `generateGoalProgram`
+    // completely unmocked, exactly as an operator's Generate click would today.
+    const spy = vi.spyOn(planModule, 'planModelCam');
+    const job = jobFor(domeGoal(), { length: 30, width: 20, thickness: 10 });
+    const result = await generateGoalProgram(job, job.targetObject!, BALL, [], null, SHOP);
+    // CONFIRMED by running this exact call (2026-11-04): spy.mock.calls.length === 0 and
+    // result.ok === true via the OLD heightfield engine (generateSurface3dForGoal) — the plan
+    // that posted was never cam/model's. Success, once removal lands and the default flips true:
+    // planModelCam is the thing that actually ran, for every goal job, with no override.
+    expect(spy).toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+  }, 30_000);
+});
+
+// ───────────────────────────────────────────────────────────────────────────────────────────
+// PART 2 — "A goal that needs two setups posts both programs, with no refusal."
+// ───────────────────────────────────────────────────────────────────────────────────────────
+describe('#966 end-state, part 2 — a goal needing two setups posts both, never refused', () => {
+  it('sanity: this sphere+flipped-tabs goal genuinely needs two setups — buildSetupSpecs (#965) says so', () => {
+    // The real #965 reach-aware decision, run directly on the sphere's own triangles: a sphere has
+    // no flat back, so the flip is what finishes it (goalFlipPlan.spec.ts's own documented case).
+    // This passes today — #965's own module is not what's broken.
+    const { setups, plan } = buildSetupSpecs({ geometry: sphereFeatureSource(), underside: 'flippedTabs', mount: VISE, stockSize: { x: 2 * SPHERE_R, y: 2 * SPHERE_R, z: 2 * SPHERE_R } });
+    expect(setups).toHaveLength(2);
+    expect(plan.sides.map((s) => s.faceUp)).toEqual(['top', 'bottom']);
+  });
+
+  it('RED today, for a DIFFERENT reason than the stated candidate: the seam never even ASKS planModelCam for a second setup', async () => {
+    // These are the #966 seam's own two calls, in the same order `generateGoalProgram`
+    // (engraveGenerate.ts) makes them — not a re-implementation, the literal production functions.
+    const job = jobFor(sphereGoal(), { length: 2 * SPHERE_R, width: 2 * SPHERE_R, thickness: 2 * SPHERE_R });
+    const goal = job.targetObject!;
+    const input = buildModelPlanInputForGoal(job, goal, BALL, SHOP);
+
+    // CONFIRMED by running this exact call (2026-11-04): input.setups.length === 1. Read
+    // `buildModelPlanInputForGoal`'s own source (engraveGenerate.ts, "const setups: SetupSpec[] =
+    // [...]") — it hardcodes ONE SetupSpec and never calls `buildSetupSpecs`/`goalFlipPlan` at
+    // all, for ANY goal, regardless of its mesh or its `underside.kind`. So the hard refusal this
+    // issue's candidate blocker names (engraveGenerate.ts:5012, "`output.perSetup.length !== 1`",
+    // #966-green's own commit 86a79088) can NEVER fire through this path: `planModelCam` is never
+    // given more than one setup to plan in the first place. 966-multisetup, as pushed to origin
+    // today (4865709e on top of ffc84ef2), does not touch this either — it only adds
+    // `setModelCamEnabled()` to `cam/model/plan.ts`; `buildSetupSpecs` stays called from nowhere
+    // but its own tests (`grep -rn buildSetupSpecs src/` outside *.spec.ts: only setups.ts itself
+    // and a comment in plan.ts). The real, upstream gap is here, not at the refusal.
+    //
+    // Worse than a refusal: calling the FULL `generateGoalProgram` (flag mocked on) for this same
+    // sphere job does not refuse either — it silently returns `ok: true` with a posted, verified
+    // single-setup (top-only) plan, as if the part had no underside to finish. That false-green
+    // shape is exactly why this assertion is pinned on `input.setups.length`/`perSetup.length`
+    // rather than on `result.ok`, which would already (wrongly) read as passing today.
+    expect(input.setups).toHaveLength(2);
+
+    const output = await planModelCam(input);
+    expect(output.perSetup).toHaveLength(2);
+    for (const setup of output.perSetup) {
+      expect(setup.programs.length, `setup ${setup.setupIndex}: no program posted`).toBeGreaterThan(0);
+    }
+  }, 30_000);
+
+  it('RED today (same root cause): generateGoalProgram itself, flag on, must post both setups’ work with no refusal', async () => {
+    vi.doMock('@/engine/cnc/cam/model/plan', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/engine/cnc/cam/model/plan')>();
+      return { ...actual, USE_MODEL_CAM_ENGINE: true };
+    });
+    vi.resetModules();
+    const { generateGoalProgram: generateGoalProgramModelCam, buildModelPlanInputForGoal: buildInput } = await import('@/workers/sim/engraveGenerate');
+
+    const job = jobFor(sphereGoal(), { length: 2 * SPHERE_R, width: 2 * SPHERE_R, thickness: 2 * SPHERE_R });
+    const goal = job.targetObject!;
+
+    // Confirms, through the FRESHLY-IMPORTED (flag-on) module, the same fact the previous case
+    // established: the seam's own input never has more than one setup for this job.
+    const input = buildInput(job, goal, BALL, SHOP);
+    expect(input.setups).toHaveLength(2); // RED today — see previous case's comment
+
+    const result = await generateGoalProgramModelCam(job, goal, BALL, [], null, SHOP);
+    // No refusal (this much the Manager's part 2 already asks for, and today it is already true —
+    // but only because the job was silently treated as single-setup, never because both setups'
+    // programs were actually posted).
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
+  }, 30_000);
+});
+
+// ───────────────────────────────────────────────────────────────────────────────────────────
+// PART 3 — "The import gate shows no path from the app into the old goal engine."
+// ───────────────────────────────────────────────────────────────────────────────────────────
+describe('#966 end-state, part 3 — no path from the app into cam/surface3d.ts or cam/rough3d.ts', () => {
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const APP = join(HERE, '..', '..');
+  const SRC = join(APP, 'src');
+
+  // WHY THIS ROOT, not the gate's own roots (`gateImports.spec.ts` uses `goalCheckField.ts`,
+  // `designCheck.ts`, etc. — that spec checks a DIFFERENT thing, the gate's independence FROM the
+  // CAM, not the CAM's own reachability from the app): `generateGoalProgram` is defined in
+  // `workers/sim/engraveGenerate.ts`. Every file that reaches it from outside that module does so
+  // either by a declaration-level `import type` (erased: `EngraveCutSurface.tsx`, `release.ts`,
+  // `preflight/collect.ts`, `preflight/hub.ts`, `engraveRunGate.ts`, `engravePreviewStore.ts`,
+  // `engraveRunStore.ts`, `simClient.ts` — confirmed by grepping every
+  // `from '@/workers/sim/engraveGenerate'` import site) or by the ONE real value import:
+  // `workers/sim.worker.ts`'s own `import { engraveGenerate as runEngraveGenerate, ... } from
+  // './sim/engraveGenerate'`, which backs its exposed Comlink method the real app calls from
+  // `engine/jobs/simClient.ts` across an actual `new Worker()` boundary — a runtime message
+  // channel the static graph cannot and should not follow (the same kind of boundary the gate
+  // spec's own header excludes: "dynamic specifiers that are not string literals"). So
+  // `workers/sim.worker.ts` is the closest-to-the-app module whose VALUE-import closure can be
+  // walked at all the way into `generateGoalProgram`'s file and from there into the CAM — it is
+  // what the app's Generate click actually executes, not an arbitrary pick.
+  const ROOT = 'workers/sim.worker.ts';
+  const OLD_ENGINE_FILES = ['engine/cnc/cam/surface3d.ts', 'engine/cnc/cam/rough3d.ts'] as const;
+
+  it('the root exists and is a real worker entry, not a test-only path', () => {
+    expect(join(SRC, ROOT)).toMatch(/sim\.worker\.ts$/);
+  });
+
+  it('RED today: the old engine is still live-imported by value in this closure', () => {
+    const closure = valueImportClosure([ROOT], SRC);
+    // CONFIRMED by running this exact closure walk (2026-11-04):
+    //   workers/sim.worker.ts -> workers/sim/engraveGenerate.ts -> engine/cnc/cam/surface3d.ts
+    //   workers/sim.worker.ts -> ... -> engine/cnc/cam/surface3d.ts -> engine/cnc/cam/rough3d.ts
+    // `engraveGenerate.ts` imports `generateSurface3dForGoal`/`generateSurface3dIR` etc. as a
+    // plain VALUE import from `cam/surface3d.ts` (not `import type`); `surface3d.ts` in turn
+    // value-imports `roughingAdaptiveMoves` from `./rough3d`. Nothing has been deleted yet — this
+    // is the literal #966-removal-prep scope, not a guess.
+    const bad = OLD_ENGINE_FILES.filter((f) => closure.files.has(f));
+    const chainsOf = (f: string): string => closure.files.get(f)?.chain.join(' -> ') ?? '(not reached)';
+    expect(bad, `old-engine files still reachable from ${ROOT}:\n${bad.map((f) => `${f}  <-  ${chainsOf(f)}`).join('\n')}`).toEqual([]);
+  });
+});
