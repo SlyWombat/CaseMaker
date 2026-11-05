@@ -445,7 +445,7 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
           // is the same at every Z), so `link()` alone decides feed vs. retract.
           const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
           const to: LinkPoint = { x: start[0], y: start[1], z };
-          moves.push(...link(from, to, linkOptions));
+          moves.push(...link(from, to, { ...linkOptions }));
         } else {
           // A level change (advisor's review on 9e976f0b): `open` reports every point in the
           // node's footprint as reachable, with no notion of "not yet, at THIS depth" — handing
@@ -456,7 +456,7 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
           // always a plain feed at plungeFeed, never left to `link()`'s own feed rate.
           const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
           const landing: LinkPoint = { x: start[0], y: start[1], z: prevExit[2] };
-          moves.push(...link(from, landing, linkOptions));
+          moves.push(...link(from, landing, { ...linkOptions }));
           moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
         }
         moves.push(...traceRing(ring, z, opts.feeds.feedMmPerMin));
