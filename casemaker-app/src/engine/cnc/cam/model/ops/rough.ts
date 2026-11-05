@@ -226,6 +226,7 @@ export function rough(opts: RoughOpOptions): OpOutcome {
   const linkBase = {
     tool: { radiusMm: toolRadius },
     feeds: { feed: opts.feeds.feedMmPerMin, plungeFeed: opts.feeds.plungeFeedMmPerMin },
+    hopClearanceMm: opts.hopZMm,
   } as const;
   const linkOptionsFor = (levelZ: number): LinkOptions => ({
     ...linkBase,

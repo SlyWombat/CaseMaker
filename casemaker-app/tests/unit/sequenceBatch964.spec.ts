@@ -6,7 +6,7 @@
  * machine time. `batchSameCutterRuns` (`sequence.ts`) groups same-cutter ops back together
  * wherever nothing depends on the gap between them.
  *
- * Two layers:
+ * Three layers:
  *   A. The function itself, on hand-built mock ops — the exact shape of the problem (alternating
  *      cutters across independent regions) and the two invariants the issue named: a same-region
  *      pair never reverses, and a sentinel (the freeing contour) never moves.
@@ -15,6 +15,12 @@
  *      program count without changing which moves exist (the "coverage/cut-into unchanged"
  *      check available without a real goal/STEP: the SET of posted moves, not their grouping,
  *      is what cut-into and coverage are computed from).
+ *   C. STEP-free END TO END, through `planModelCam` itself (the manager's review on comment
+ *      6650143721: composition-by-construction is fine as reasoning, but the call site deserves
+ *      its own test) — a real Manifold-recognised part (`buildRandomPart('scooped', ...)`) whose
+ *      shoulder/through-hole/contour all share the flat and whose bowl needs the ball, so the
+ *      natural `ops` order alternates flat/ball/flat before batching ever runs, and the posted
+ *      `programs` must still end with the freeing contour's own moves.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -22,11 +28,12 @@ import { describe, expect, it } from 'vitest';
 import { batchSameCutterRuns } from '../../src/engine/cnc/cam/model/sequence';
 import { tl } from './helpers/manifoldExec';
 import { makeClipperOffset } from '../../src/engine/cnc/cam/engraveJob';
-import { planCurvedForTree } from '../../src/engine/cnc/cam/model/plan';
+import { planCurvedForTree, planModelCam, type ModelPlanInput } from '../../src/engine/cnc/cam/model/plan';
 import type { FeatureTree } from '../../src/engine/cnc/cam/model/features';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import type { RapidEstimate } from '../../src/engine/cnc/cam/ir';
 import type { Polygons } from '../../src/engine/cnc/cam/pocket';
+import { buildRandomPart } from '../tools/randomParts';
 
 // ---------------------------------------------------------------------------------------------
 // A. batchSameCutterRuns() itself, on mock ops.
@@ -189,4 +196,64 @@ describe('#964 — the curved pipeline really does alternate across independent 
       expect(roughIdx, `${regionId}: rough's material removal must still precede its own finish`).toBeLessThan(finishIdx);
     }
   }, 60_000);
+});
+
+// ---------------------------------------------------------------------------------------------
+// C. STEP-free end to end, through planModelCam itself: a real Manifold-recognised part whose
+//    natural op order alternates cutters, and whose contour shares a cutter with an earlier op.
+// ---------------------------------------------------------------------------------------------
+
+const V90: Tool = { ...flatEndMill(3.175, { number: 3, id: 'chamfer-90', name: '90° chamfer' }), typeText: 'V-Bit', shape: 'chamfer', tipDiameter: 0.1, angle: 90, halfAngle: 45 };
+
+describe('#964 — end to end through planModelCam: the freeing contour still posts last after batching', () => {
+  it('a scooped part (bowl=ball, shoulder+through-hole+contour=flat): the natural ops alternate cutters, and the LAST posted program still ends in the contour\'s own moves', async () => {
+    const part = buildRandomPart(941122, 'scooped', tl);
+    const input: ModelPlanInput = {
+      geometry: { triangles: part.mesh },
+      setups: [{ frame: { up: [0, 0, 1], stockTop: 0 }, underside: 'flatOnStockBottom' }],
+      stock: { length: part.stock.length, width: part.stock.width, thickness: part.stock.thickness, material: 'hardwood' },
+      fixture: { mount: 'tape', envelope: null },
+      cutters: { house: [flat, ball, V90], catalogue: [] },
+      tolerances: { finishMm: 0.01 },
+      edgeBreak: { legMm: 0.5 },
+    };
+    const output = await planModelCam(input);
+    const setup = output.perSetup[0]!;
+
+    // The natural (unbatched) order really does alternate: setup.ops is still the pre-batch
+    // array (plan.ts's own comment on why `ops` and `programs` differ) — the bowl's ball rough/
+    // finish sits between flat ops (shoulder, through hole, contour), so there is something here
+    // for batching to actually do, not a single-cutter plan where "ends in contour" is trivial.
+    const cutterSeq = setup.ops.map((op) => op.outcome.cutter);
+    let naturalRuns = 0;
+    let last: string | null = null;
+    for (const c of cutterSeq) { if (c !== last) { naturalRuns++; last = c; } }
+    expect(naturalRuns, `ops: ${setup.ops.map((o) => `${o.kind}:${o.outcome.cutter}`).join(', ')}`).toBeGreaterThan(2);
+
+    const contourOp = setup.ops.find((op) => op.kind === 'contour');
+    expect(contourOp, 'the plan must actually post a freeing contour for this to mean anything').toBeDefined();
+    expect(setup.ops.filter((op) => op.kind === 'contour')).toHaveLength(1);
+
+    // The contour really does share its cutter with an earlier, non-contour op — the exact
+    // condition the manager asked this test to exercise: without the sentinel pin, grouping by
+    // cutter key would pull the contour backward to merge with that earlier op's own run.
+    const contourCutter = contourOp!.outcome.cutter;
+    const earlierSameCutter = setup.ops.slice(0, setup.ops.indexOf(contourOp!)).some((op) => op.outcome.cutter === contourCutter);
+    expect(earlierSameCutter, `ops: ${setup.ops.map((o) => `${o.kind}:${o.outcome.cutter}`).join(', ')}`).toBe(true);
+
+    // Batching never increases the program count, and — because the sentinel is pinned rather
+    // than merged into that earlier same-cutter run — does not reduce it here either: the one
+    // other flat op (the pocket) is not adjacent to the contour, so there is nothing else for
+    // batching to pull together on this part. The absence of a reduction IS the invariant: it
+    // confirms the sentinel was never folded into the earlier flat run.
+    expect(setup.programs.length).toBe(naturalRuns);
+
+    // The concrete, observable form of "the freeing contour stays last": the LAST posted
+    // program's own moves end with EXACTLY the contour op's own moves, move for move.
+    const contourMoves = contourOp!.outcome.ir.operations.flatMap((o) => o.moves);
+    expect(contourMoves.length).toBeGreaterThan(0);
+    const lastProgramMoves = setup.programs.at(-1)!.operations.flatMap((o) => o.moves);
+    const tail = lastProgramMoves.slice(-contourMoves.length);
+    expect(tail).toEqual(contourMoves);
+  }, 120_000);
 });

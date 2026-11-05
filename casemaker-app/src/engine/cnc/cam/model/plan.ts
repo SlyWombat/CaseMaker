@@ -235,6 +235,10 @@ export interface PlanModelCamOptions {
  */
 const MODEL_STOCK_TO_LEAVE_MM = 0.3;
 
+/** #962 — how close a rim's own first and last point must already be to count as closed; past
+ * this is a genuine gap in `findRims`' own chain, not float noise from the mesh. */
+const RIM_CLOSE_TOL_MM = 0.01;
+
 /**
  * One cutter's resolved cut numbers, through the app's one feeds resolver (the labelled fallback
  * table when no catalogue row answers).
@@ -1491,6 +1495,31 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         if (!rimExposedFromAbove(rimBins!, rim)) {
           notes.push(
             `rim "${rim.id}" not broken: covered from above (its air side does not drop by 0.2 mm — the edge lies under the land)`,
+          );
+          continue;
+        }
+        // #962 — THE ORGANIZER'S 77 mm GROOVE FOUND THIS: `findRims`' edge-chaining can leave a
+        // POCKET rim's own loop OPEN (a branch point in the sharp floor|wall graph took the wrong
+        // one of several unused edges, per `features/rims.ts`'s `chain()`), and `chamfer()`'s own
+        // `closedRing()` does not know the difference — it closes ANY polyline whose ends don't
+        // already coincide with one more straight point, a phantom edge across whatever lies
+        // between them. That phantom edge is real material to `generateChamfer`: it feeds along
+        // it like any other edge of the ring, which is the posted gouge (E's render set, #962) —
+        // not a `link()` defect, since `link()` never emits a lateral feed; this is the RING'S
+        // OWN trace. A POCKET encloses a cavity, so its rim's own first and last point must be
+        // the SAME vertex `chain()` started and ended on — not approximately, exactly, give or
+        // take float noise from the mesh itself — so a gap past that noise floor there means the
+        // chain never closed, and bridging it is refused. A CONTOUR rim is exempt: the outer
+        // silhouette can legitimately run open to the stock's own edge (a shoulder cut to +X,
+        // `buildRandomPart`'s own fixture finds this on every synthetic kind, rim-6, 8 mm open,
+        // (20, -4)→(20, 4)) — closing that one just retraces its own two points, never a bridge
+        // across unrelated ground.
+        const first = rim.polyline[0];
+        const last = rim.polyline[rim.polyline.length - 1];
+        if (rim.of !== 'contour' && first !== undefined && last !== undefined && Math.hypot(first[0] - last[0], first[1] - last[1]) > RIM_CLOSE_TOL_MM) {
+          notes.push(
+            `rim "${rim.id}" not broken: its own loop is not closed (ends ${Math.hypot(first[0] - last[0], first[1] - last[1]).toFixed(2)} mm apart) — ` +
+              `a straight bridge there is not real geometry, so no chamfer is cut rather than gouging across it`,
           );
           continue;
         }
