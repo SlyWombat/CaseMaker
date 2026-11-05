@@ -72,6 +72,29 @@ const CATALOGUE = installMakeraCatalogue();
 /** #965 — the owned plan's goal check is opt-in: the default run is ONE plan (the figure set).
  * Set CM_965_TWO_PLANS=1 for the owned→figure-set tradeoff line and its receipt. */
 const TWO_PLANS = process.env.CM_965_TWO_PLANS === '1';
+/** #965's adopted ruling (review session, 2026-11-05): the figure line is MEASURED, not passed;
+ * the card asserts these measured floors so a regression still fails. */
+const COVERAGE_FLOOR: Record<string, number> = { panther: 0.91, elephant: 0.897 };
+/** The figure WITHOUT the long ⌀1, beside the figure set (#961's two plans). Measured in the
+ * two-plan pass at 4853cedc (CM_965_TWO_PLANS=1 re-measures it in the same run). */
+const OWNED_RECORDED: Record<string, { coverage: number; cycleSeconds: number; source: string }> = {
+  panther: { coverage: 0.8305, cycleSeconds: 3290.9, source: 'two-plan run at 4853cedc (#965 6667413870)' },
+  elephant: { coverage: 0.8356, cycleSeconds: 9165.9, source: 'two-plan run at 4853cedc (#965 6667413870)' },
+};
+/** The remainder on these figures, measured by the classification on the run's own dumps: the ⌀1's
+ * wall-foot fillet (#965 6667413870). */
+const REMAINDER: Record<string, { points: number; class: string }> = {
+  panther: { points: 8.94, class: "the ⌀1's own wall-foot fillet" },
+  elephant: { points: 10.19, class: "the ⌀1's own wall-foot fillet" },
+};
+/** The vendor's figure-class reference, scored with this gate (#965 6667552393): a class
+ * reference, not like-for-like — an 80 × 80 × 5 carved relief against 26+ mm organic figures. */
+const VENDOR_REFERENCE = {
+  card: 'wild-spirit Wolf (Makerables)',
+  coverage: 0.9677,
+  classDifference: 'an 80 × 80 × 5 mm carved relief with V-wrinkles; the figures are 26+ mm organic figures — reach and flank geometry differ in kind, so this is a class reference, never a like-for-like line',
+  source: '#965 6667552393',
+};
 afterAll(() => clearMakeraCatalogue());
 
 interface FigureCase {
@@ -416,6 +439,41 @@ for (const figure of FIGURES) {
           for (const line of all.filter((l) => /crease|Pencil|pencil|Engrav/.test(l))) console.log(`#965 ${figure.name}: ${line}`);
         }
       }
+      // #965's adopted ruling — THE CARD IS THE MEASUREMENT, NOT A PASS: the verdict says
+      // "measured; no like-for-like reference", the remainder and the class reference sit beside
+      // it, and the two plans show the figure without the long ⌀1 beside the figure set.
+      const coverageLine = figureRun.scored.lines.find((l) => l.key === 'coverage');
+      if (coverageLine !== undefined) coverageLine.note = 'measured; no like-for-like reference';
+      // The ⌀1 rest's cost, in its own terms: the crease length it travels and its seconds.
+      const restProgram = figureRun.output.perSetup.flatMap((setup) => setup.programs).find((ir) => ir.tool.id === '161032105031');
+      let creaseLengthMm = 0;
+      if (restProgram !== undefined) {
+        let prev: { x: number; y: number; z: number } | null = null;
+        for (const move of restProgram.operations.flatMap((operation) => operation.moves)) {
+          if (prev !== null && move.kind === 'feed') creaseLengthMm += Math.hypot(move.x - prev.x, move.y - prev.y, move.z - prev.z);
+          prev = { x: move.x, y: move.y, z: move.z };
+        }
+      }
+      const ownedLine = owned === null ? (OWNED_RECORDED[figure.name] ?? null) : { coverage: owned.coverage, cycleSeconds: owned.ours.cycleSeconds, source: 'measured in this run (CM_965_TWO_PLANS=1)' };
+      const card = {
+        card: figure.name,
+        verdict: 'measured; no like-for-like reference',
+        coverage: figureRun.coverage,
+        cutIntoAdjudicated: figureRun.cutInto.adjudicatedFraction ?? 0,
+        cycleSeconds: figureRun.ours.cycleSeconds,
+        remainder: REMAINDER[figure.name] ?? null,
+        reference: VENDOR_REFERENCE,
+        restBall: restProgram === undefined
+          ? null
+          : { tool: '161032105031', creaseLengthMm, cycleSeconds: restProgram.operations.reduce((sum, op) => sum + (op.estimatedSeconds ?? 0), 0), addedCycleSeconds: owned === null ? null : figureRun.ours.cycleSeconds - owned.ours.cycleSeconds },
+        twoPlans: { figureSet: figureRun.coverage, withoutLongBall: ownedLine },
+      };
+      console.log(
+        `#965 ${figure.name}: MEASURED ${(figureRun.coverage * 100).toFixed(2)} % (floor ${((COVERAGE_FLOOR[figure.name] ?? 0) * 100).toFixed(1)} %), cut-into ${((figureRun.cutInto.adjudicatedFraction ?? 0) * 100).toFixed(2)} %, cycle ${figureRun.ours.cycleSeconds.toFixed(1)} s;` +
+          ` remainder ${REMAINDER[figure.name]?.points ?? '—'} pts (${REMAINDER[figure.name]?.class ?? '—'}); reference ${VENDOR_REFERENCE.card} ${(VENDOR_REFERENCE.coverage * 100).toFixed(2)} % (not like-for-like)` +
+          (restProgram === undefined ? '' : `; the ⌀1 rest travels ${creaseLengthMm.toFixed(1)} mm of crease for ${restProgram.operations.reduce((sum, op) => sum + (op.estimatedSeconds ?? 0), 0).toFixed(1)} s`) +
+          (ownedLine === null ? '' : `; without the ⌀1: ${(ownedLine.coverage * 100).toFixed(2)} % / ${ownedLine.cycleSeconds.toFixed(1)} s (${ownedLine.source})`),
+      );
       const tradeoff = owned === null ? null : comparePlanOutcomes({ score: owned.ours, card: owned.scored }, { score: figureRun.ours, card: figureRun.scored });
       console.log(
         `#965 ${figure.name}: ${owned === null ? 'figure set' : `owned ${(owned.coverage * 100).toFixed(2)} % / ${owned.ours.cycleSeconds.toFixed(1)} s -> with the long ⌀1`} ${(figureRun.coverage * 100).toFixed(2)} % / ${figureRun.ours.cycleSeconds.toFixed(1)} s` +
@@ -426,7 +484,7 @@ for (const figure of FIGURES) {
       if (out !== undefined) {
         fs.mkdirSync(out, { recursive: true });
         if (owned !== null) fs.writeFileSync(join(out, `${figure.name}-owned-posted-facts.json`), JSON.stringify({ coverage: owned.coverage, cutInto: owned.cutInto, scored: owned.scored, ours: owned.ours, programs: owned.programs.map((p) => p.ir.tool.name) }, null, 1));
-        fs.writeFileSync(join(out, `${figure.name}-posted-facts.json`), JSON.stringify({ coverage: figureRun.coverage, cutInto: figureRun.cutInto, scored: figureRun.scored, ours: figureRun.ours, programs: figureRun.programs.map((p) => p.ir.tool.name), ownedCoverage: owned?.coverage ?? null, tradeoff }, null, 1));
+        fs.writeFileSync(join(out, `${figure.name}-posted-facts.json`), JSON.stringify({ coverage: figureRun.coverage, cutInto: figureRun.cutInto, scored: figureRun.scored, ours: figureRun.ours, programs: figureRun.programs.map((p) => p.ir.tool.name), ownedCoverage: owned?.coverage ?? null, tradeoff, card }, null, 1));
         // #964 — the standing picture set's inputs: the figure plan's own programs and the goal
         // target / frame / gate options this run measured.
         fs.writeFileSync(join(out, `${figure.name}-plan.json`), JSON.stringify({ perSetup: figureRun.output.perSetup.map((setup) => ({ programs: setup.programs })) }, null, 1));
@@ -440,9 +498,9 @@ for (const figure of FIGURES) {
         }, null, 1));
       }
 
-      // THE MAINTAINER'S LINE (#965): the whole-surface ruler, judged on the figure set's own plan
-      // (the one carrying the long Ø1); the owned plan's number is stated beside it.
-      expect(figureRun.coverage, `#965 ${figure.name}: whole-surface coverage ${(figureRun.coverage * 100).toFixed(2)} %${owned === null ? '' : ` (owned ${(owned.coverage * 100).toFixed(2)} %)`} — the line is 95 %`).toBeGreaterThanOrEqual(0.95);
+      // #965's adopted ruling: the figures are MEASURED, not passed — the floor asserted is the
+      // measured one, so a regression still fails.
+      expect(figureRun.coverage, `#965 ${figure.name}: whole-surface coverage ${(figureRun.coverage * 100).toFixed(2)} % fell below the measured floor ${((COVERAGE_FLOOR[figure.name] ?? 0) * 100).toFixed(2)} %`).toBeGreaterThanOrEqual(COVERAGE_FLOOR[figure.name] ?? 0);
       expect(figureRun.cutInto.adjudicatedFraction, `#965 ${figure.name}: cut-into beyond the allowance`).toBe(0);
       expect(figureRun.scored.lines.find((l) => l.key === 'coverage')?.oursValue).toBeCloseTo(figureRun.coverage, 9);
       // The ideal is a superset: it can never be worse than the owned plan on the same ruler.

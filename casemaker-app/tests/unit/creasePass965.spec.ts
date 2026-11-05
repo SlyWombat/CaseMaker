@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import { creaseFits, reach } from '../../src/engine/cnc/cam/model/clsurface';
 import type { ClSurface } from '../../src/engine/cnc/cam/model/clsurface';
-import { pencil } from '../../src/engine/cnc/cam/model/ops/pencil';
+import { hasValley, pencil } from '../../src/engine/cnc/cam/model/ops/pencil';
 import type { RemainderRegion } from '../../src/engine/cnc/cam/model/features';
 import type { Box2, RegionRef } from '../../src/engine/cnc/cam/model/plan';
 import type { RapidEstimate } from '../../src/engine/cnc/cam/ir';
@@ -60,6 +60,16 @@ function vCl(): ClSurface {
     sampleCount: 0,
   };
 }
+
+/** The cheap pre-gate (C's review): a surface with no valley cell gets no V CL build, no pencil
+ * grid and no line at all. */
+describe('#965 the crease pre-gate — hasValley()', () => {
+  it('sees the groove as a valley and a flat plate as none', () => {
+    expect(hasValley(vCl(), bounds, 0.1)).toBe(true);
+    const flat: ClSurface = { dropCutter: (x: number) => (x >= 0 && x <= 20 ? PLATE : null), toleranceMm: 0.005, minSpacingMm: 0.005, maxSpacingMm: 0.3, sampleCount: 0 };
+    expect(hasValley(flat, bounds, 0.1)).toBe(false);
+  });
+});
 
 describe('#965 the crease admission — a V-groove reach() refuses and the crease rule admits', () => {
   it('reach() refuses the region (the face rule); creaseFits admits the crease', () => {

@@ -106,7 +106,7 @@ import { maskCellsExact } from './finishMask';
 import { FLAT_SURFACE_MAX_SLOPE_DEG, flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
 import { cellPolygons, rest } from './ops/rest';
 import { DEFAULT_FINISH_SCALLOP_MM, finish, finishKindFor } from './ops/finish';
-import { pencil } from './ops/pencil';
+import { hasValley, pencil } from './ops/pencil';
 import { chamfer } from './ops/chamfer';
 import { contour as contourOp, throughHole } from './ops/contour';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
@@ -2418,6 +2418,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // never silently skipped.
     if (opts.vbit !== undefined && (opts.vbit.shape === 'chamfer' || opts.vbit.shape === 'engraving')) {
       const vTool = opts.vbit;
+      // C's review of the crease pass (2026-11-05): PRE-GATE on a cheap valley test over the
+      // PREVIOUS cutter's own CL — a region with no crease cell gets no V CL build, no pencil
+      // grid and no line at all.
+      const vPitchGate = Math.min(0.5, Math.max(0.1, (cuttingDiameter(vTool) ?? 0) / 4));
+      const prevClGate = restBallCl ?? clBall();
+      if (hasValley(prevClGate, { min: roughRef.bounds.min, max: roughRef.bounds.max }, vPitchGate)) {
       // The V's own CL and the previous (rest ball's) CL: the leftover depth at a crease is the
       // material between them — the number the crease rule's width test is stated at.
       const vCl = shiftSurface(clSurface(opts.geometry, roughRegion, vTool, cuts.stepOver));
@@ -2462,6 +2468,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         }
         return out;
       });
+      }
     }
 
     // 4. PENCIL along the creases the ball's own CL surface leaves.

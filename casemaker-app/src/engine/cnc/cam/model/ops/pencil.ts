@@ -45,6 +45,42 @@ export interface PencilOpOptions {
   rapid: RapidEstimate;
 }
 
+/**
+ * #965 (C's review of the crease pass, 2026-11-05) — THE CHEAP VALLEY PRE-GATE: does the surface
+ * hold ANY crease cell (the pencil's own dip rule) over the region'"'"'s bounds? One scan of the
+ * caller'"'"'s OWN CL, no CL build of its own — a crease pass on a surface with no valley gets no
+ * V CL build, no pencil grid and no line at all.
+ */
+export function hasValley(
+  cl: ClSurface,
+  bounds: { min: [number, number]; max: [number, number] },
+  pitchMm: number,
+  creaseMm = 0.02,
+): boolean {
+  const { min, max } = bounds;
+  const pitch = Math.max(pitchMm, 1e-6);
+  const nx = Math.max(2, Math.floor((max[0] - min[0]) / pitch + 1e-9) + 1);
+  const ny = Math.max(2, Math.floor((max[1] - min[1]) / pitch + 1e-9) + 1);
+  const h = new Float64Array(nx * ny).fill(Number.NaN);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const z = cl.dropCutter(min[0] + i * pitch, min[1] + j * pitch);
+      if (z !== null) h[j * nx + i] = z;
+    }
+  }
+  for (let j = 1; j < ny - 1; j++) {
+    for (let i = 1; i < nx - 1; i++) {
+      const k = j * nx + i;
+      const z = h[k]!;
+      if (!Number.isFinite(z)) continue;
+      const dipX = Number.isFinite(h[k - 1]!) && Number.isFinite(h[k + 1]!) && Math.min(h[k - 1]!, h[k + 1]!) - z > creaseMm;
+      const dipY = Number.isFinite(h[k - nx]!) && Number.isFinite(h[k + nx]!) && Math.min(h[k - nx]!, h[k + nx]!) - z > creaseMm;
+      if (dipX || dipY) return true;
+    }
+  }
+  return false;
+}
+
 type Cell = { i: number; j: number; z: number };
 
 /**
