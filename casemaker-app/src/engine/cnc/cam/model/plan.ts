@@ -1242,6 +1242,17 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       return false;
     }
   };
+  // #962 — ONE bins build for the whole plan's top-surface queries (the rim filter, the 4a mask
+  // and every op's material field share it), and THE DESIGN'S TOP at (x, y) in this plan's datum:
+  // the answer the material fields need past their own sampled reach, where a wall or land beside
+  // a region can stand HIGHER than the region's own top. The mesh's top where it answers; null
+  // where it is silent (the ops then fall back to the stock top, 0 in this datum).
+  let surfaceBins: TriangleBins | null = null;
+  const binsForMask = (): TriangleBins => (surfaceBins ??= buildTriangleBins(opts.geometry.triangles));
+  const designTopAt = (x: number, y: number): number | null => {
+    const top = topSurfaceAt(binsForMask(), x, y);
+    return top === null ? null : top - z0;
+  };
   const clGrid: PlanCurvedResult['clGrid'] = [];
   const noteGrid = (cutter: Tool, surface: ReturnType<typeof clSurface>): void => {
     const key = cutterKeyOf(cutter);
@@ -1355,6 +1366,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         spindleRpm: paramsFor(opts.flat).rpm,
         air: opts.air,
         rapid: opts.rapid,
+        materialTopAt: designTopAt,
+        stockTopZMm: 0,
         ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
       });
     });
@@ -1420,10 +1433,6 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // cell (`topSurfaceAt`). The band is the finish's tolerance (the ruling), not the rough's
     // stock-to-leave.
     const finishBand = opts.finishScallopMm ?? opts.bandMm;
-    // One bins build for the whole plan's top-surface queries (the same structure the rim
-    // filter uses), not one per region.
-    let surfaceBins: TriangleBins | null = null;
-    const binsForMask = (): TriangleBins => (surfaceBins ??= buildTriangleBins(opts.geometry.triangles));
     const flatAbs = (x: number, y: number): number | null => {
       const v = prevCl.dropCutter(x, y);
       return v === null ? null : v + z0;
@@ -1496,10 +1505,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       // mesh is silent. The region's own zTop is NOT that bound — a neighbouring wall can out-top
       // it, and a rapid floored at zTop would run into the wall. In this datum (every Z rebased by
       // −stockTop) the stock top is 0.
-      materialTopAt: (x: number, y: number) => {
-        const top = topSurfaceAt(binsForMask(), x, y);
-        return top === null ? null : top - z0;
-      },
+      materialTopAt: designTopAt,
       stockTopZMm: 0,
       stepDownMm: depth,
       feeds: feedsOf(paramsFor(ball)),
@@ -1566,6 +1572,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         spindleRpm: paramsFor(opts.flat).rpm,
         air: opts.air,
         rapid: opts.rapid,
+        materialTopAt: designTopAt,
+        stockTopZMm: 0,
         ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
       });
     });
