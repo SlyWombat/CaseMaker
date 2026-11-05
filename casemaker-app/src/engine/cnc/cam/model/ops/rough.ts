@@ -345,3 +345,187 @@ export interface RestOpOptions {
 export function rest(_opts: RestOpOptions): OpOutcome {
   throw new Error('cam/model/ops/rough: rest() not implemented (#959)');
 }
+
+/**
+ * `skin()` — THE FLAT SURFACE-FOLLOWING PASS OVER THE SKIN (#959, 2026-11-05 ruling; C6's
+ * Makera T1 shape). The facing stage used to remove the stock above the part top; this pass does
+ * it Makera's way: the flat follows the CL surface over the land, capped per pass at the cutter
+ * row's own step-down (1.0 mm on the ⌀6: two passes on the tray's 1.2 mm skin, one on the
+ * organizer's 0.8), and only on cells at or under `maxSlopeDeg` — steeper cells are the rough's
+ * and the ball's, not the flat's.
+ *
+ * The machinery is the rough's own, deliberately: the target grid (CL, max over centre + corners),
+ * `maskLoops` → `pocketLoops` → rings, links through `link()` against the standing surface. The
+ * one difference is the target is the DESIGN (no stock-to-leave) — the pass cuts the skin down to
+ * where the part is.
+ */
+export interface SkinOpOptions {
+  cutter: Tool;
+  regionRef: RegionRef;
+  /** The part's outline; the pass covers `offset(outline, +2r)`, the region facing used. */
+  outline: Polygons;
+  /** The flat's CL over the whole scene, SHIFTED to the stock datum (IR Z 0 = the stock top). */
+  clSurface: ClSurface;
+  /** The skin's thickness, mm (stock top − part top). */
+  skinMm: number;
+  /** The per-pass cap (the cutter row's step-down). */
+  stepDownMm: number;
+  /** Cells steeper than this are left to the rough and the ball. */
+  maxSlopeDeg: number;
+  stepOverMm?: number;
+  gridPitchMm?: number;
+  feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
+  offset: OffsetFn;
+  safeZMm: number;
+  hopZMm: number;
+  toolNumber: number;
+  spindleRpm: number;
+  air: boolean;
+  rapid: RapidEstimate;
+  startFrom?: readonly [number, number];
+}
+
+export function skin(opts: SkinOpOptions): OpOutcome {
+  const toolRadius = (cuttingDiameter(opts.cutter) ?? 0) / 2;
+  if (!(toolRadius > 0)) {
+    throw new Error(`cam/model/ops/rough: ${opts.cutter.name || opts.cutter.shape} states no cutting diameter`);
+  }
+  const stepOver = opts.stepOverMm ?? toolRadius;
+  const pitch = opts.gridPitchMm ?? Math.min(0.5, Math.max(0.1, Math.min(stepOver, toolRadius) / 4));
+  const grown = opts.offset(opts.outline, 2 * toolRadius);
+  const foot = grown.length > 0 ? grown : opts.outline;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const ring of foot) {
+    for (const [x, y] of ring) {
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    }
+  }
+  const min: [number, number] = [minX, minY];
+  const max: [number, number] = [maxX, maxY];
+  const nx = Math.max(2, Math.floor((max[0] - min[0]) / pitch + 1e-9) + 1);
+  const ny = Math.max(2, Math.floor((max[1] - min[1]) / pitch + 1e-9) + 1);
+  const half = pitch / 2;
+
+  // The design grid: the flat's CL, max over the cell's centre and corners (a cell straddling a
+  // rise is judged by its high side, the rough's own rule).
+  const target = new Float64Array(nx * ny).fill(Number.NaN);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const x = min[0] + i * pitch;
+      const y = min[1] + j * pitch;
+      let hi = -Infinity;
+      for (const [dx, dy] of [[0, 0], [-half, -half], [half, -half], [-half, half], [half, half]] as const) {
+        const cl = opts.clSurface.dropCutter(x + dx, y + dy);
+        if (cl !== null && cl > hi) hi = cl;
+      }
+      if (hi > -Infinity) target[j * nx + i] = hi;
+    }
+  }
+
+  // THE SLOPE GATE (the shared parameter): the grid's own gradient, in degrees. A cell whose
+  // steepest neighbour departure exceeds `maxSlopeDeg` is not the flat's to take.
+  const tanMax = Math.tan((Math.max(0, opts.maxSlopeDeg) * Math.PI) / 180);
+  const gentle = new Uint8Array(nx * ny);
+  const at = (i: number, j: number): number =>
+    i < 0 || j < 0 || i >= nx || j >= ny ? Number.NaN : target[j * nx + i]!;
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const t = target[j * nx + i]!;
+      if (!Number.isFinite(t)) continue;
+      let grad = 0;
+      const left = at(i - 1, j), right = at(i + 1, j);
+      const down = at(i, j - 1), up = at(i, j + 1);
+      if (Number.isFinite(left)) grad = Math.max(grad, Math.abs(t - left) / pitch);
+      if (Number.isFinite(right)) grad = Math.max(grad, Math.abs(right - t) / pitch);
+      if (Number.isFinite(down)) grad = Math.max(grad, Math.abs(t - down) / pitch);
+      if (Number.isFinite(up)) grad = Math.max(grad, Math.abs(up - t) / pitch);
+      gentle[j * nx + i] = grad <= tanMax + 1e-9 ? 1 : 0;
+    }
+  }
+
+  const standing: MaterialField = {
+    topAt: (x, y) => {
+      const i = Math.round((x - min[0]) / pitch);
+      const j = Math.round((y - min[1]) / pitch);
+      if (i < 0 || j < 0 || i >= nx || j >= ny) return Number.POSITIVE_INFINITY;
+      const t = target[j * nx + i]!;
+      return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+    },
+  };
+  const linkOptionsFor: LinkOptions = {
+    tool: { radiusMm: toolRadius },
+    feeds: { feed: opts.feeds.feedMmPerMin, plungeFeed: opts.feeds.plungeFeedMmPerMin },
+    material: standing,
+    clearanceZ: opts.regionRef.regionClearanceZ,
+  };
+
+  const moves: ToolpathIR['operations'][number]['moves'] = [];
+  const passes: PassRef[] = [];
+  const cleared: RegionAtZ[] = [];
+  let prevExit: [number, number, number] | null = null;
+  const comingFrom = (): readonly [number, number] => (prevExit === null ? (opts.startFrom ?? [0, 0]) : [prevExit[0], prevExit[1]]);
+  let cutLevels = 0;
+  for (const z of depthPasses(0, -opts.skinMm, opts.stepDownMm)) {
+    const masked = new Float64Array(nx * ny);
+    for (let k = 0; k < target.length; k++) {
+      const t = target[k]!;
+      masked[k] = Number.isFinite(t) && gentle[k] === 1 ? t : Number.NaN;
+    }
+    // THE SKIN'S FINAL PASS MEETS THE DESIGN: maskLoops' rule is `target + margin < levelZ`, the
+    // rough's way of never cutting AT its CL — but a skin's last level sits exactly on the part
+    // top, and the whole point is to reach it. A NEGATIVE tolerance makes the comparison
+    // inclusive (`target <= levelZ`), the one place that sign is right.
+    const polygons = maskLoops(masked, nx, ny, min[0], min[1], pitch, z, -1e-6);
+    if (polygons.length === 0) continue;
+    const steps = pocketLoops(polygons, toolRadius, stepOver, opts.offset);
+    if (steps.length === 0) continue;
+    cutLevels++;
+    for (const step of steps) {
+      const loops = orderedRings(step, comingFrom());
+      for (const loop of loops) {
+        const ring = rotatedToEntry(loop, comingFrom());
+        const start = ring[0]!;
+        if (prevExit === null) {
+          moves.push({ kind: 'rapid', x: start[0], y: start[1], z: opts.hopZMm });
+          moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
+        } else {
+          const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
+          const landing: LinkPoint = { x: start[0], y: start[1], z: prevExit[2] };
+          moves.push(...link(from, landing, linkOptionsFor));
+          if (z !== prevExit[2]) moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
+        }
+        moves.push(...traceRing(ring, z, opts.feeds.feedMmPerMin));
+        const entry: [number, number, number] = [start[0], start[1], z];
+        passes.push({ z, boundary: [ring], cleared: { z, boundary: polygons }, entry, exit: entry });
+        prevExit = entry;
+      }
+    }
+    cleared.push({ z, boundary: polygons });
+  }
+
+  const lastMove = moves[moves.length - 1];
+  if (lastMove) moves.push({ kind: 'rapid', x: lastMove.x, y: lastMove.y, z: opts.safeZMm });
+  const ir: ToolpathIR = {
+    frame: 'flat',
+    tool: opts.cutter,
+    toolNumber: opts.toolNumber,
+    spindleRpm: opts.spindleRpm,
+    air: opts.air,
+    safeZ: opts.safeZMm,
+    hopZ: opts.hopZMm,
+    operations: [
+      {
+        number: 1,
+        name: `[T${opts.toolNumber}] Skin "${opts.regionRef.id}"`,
+        labelId: 'skin',
+        depth: opts.skinMm,
+        depthPasses: cutLevels,
+        passStepMm: opts.stepDownMm,
+        moves,
+        estimatedSeconds: estimateCycleSeconds(moves, opts.rapid),
+      },
+    ],
+  };
+  return { ir, cutter: cutterKeyOf(opts.cutter), passes, cleared };
+}
