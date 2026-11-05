@@ -1926,6 +1926,17 @@ export interface StockHold {
   z: PartAxis;
 }
 
+/** #961/#975 — the two plans a job may cut: the owned set (default) or the ideal (every bit). */
+export type PlanChoice = 'owned' | 'ideal';
+
+/**
+ * #961/#975 — the job's plan choice, with the ruling's default in ONE place: absent means the
+ * owned plan. The document is never rewritten to say so (the schema leaves the field optional).
+ */
+export function planChoiceOf(job: Pick<EngraveJob, 'planChoice'>): PlanChoice {
+  return job.planChoice ?? 'owned';
+}
+
 export interface EngraveJob {
   schemaVersion: 3;
   /**
@@ -2139,6 +2150,13 @@ export interface EngraveJob {
    * refuses a document that carries both forms. Absent here = the single form.
    */
   targetObjects?: EngraveTargetObject[];
+  /**
+   * #961/#975 — WHICH PLAN THE OPERATOR CHOSE (the maintainer's 2026-11-05 ruling). `'owned'` is
+   * the location's own cutters and the default; `'ideal'` is every bit the app knows, the
+   * recommendation. ABSENT means `'owned'` — read it through {@link planChoiceOf}, never by hand,
+   * so the default lives in one place.
+   */
+  planChoice?: PlanChoice;
   /**
    * The key of the cutter this job is written for — a builtin (`flat-1.0`), or a later registry
    * tier's key (`cat:`, `user:`, `inv:`). A PLAIN STRING, so no saved job has ever needed
