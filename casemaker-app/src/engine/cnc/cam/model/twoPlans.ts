@@ -62,14 +62,8 @@ export async function planTwoOutcomes(input: ModelPlanInput, opts: PlanModelCamO
   const seen = new Set(input.cutters.house.map(toolKey));
   const extra = input.cutters.catalogue.filter((tool) => !seen.has(toolKey(tool)));
   if (extra.length === 0) return { owned, ideal: null, defaultPlan: 'owned' };
-  // #986 (the review session's ruling) — THE IDEAL'S CANDIDATES ARE CAPPED AT 2× THE OWNED PLAN'S
-  // OWN CYCLE, so the rank cannot pick a plan nobody would run; the uncapped best is still measured
-  // and stated in the plan's notes. The owned plan is the baseline, so its cycle is only known once
-  // it has run — hence the cap travels in the options, not the input.
-  const cap = owned.outcome?.cycleSeconds;
-  const ideal = await planModelCam(
-    { ...input, cutters: { house: [...input.cutters.house, ...extra], catalogue: [] } },
-    cap === undefined ? opts : { ...opts, cycleCapSeconds: cap * 2 },
-  );
+  // #986 (the maintainer's ruling) — NO CYCLE CAP. The ideal is ranked on outcome alone; a longer
+  // plan is stated as its cost on the card, never used to hide a better surface.
+  const ideal = await planModelCam({ ...input, cutters: { house: [...input.cutters.house, ...extra], catalogue: [] } }, opts);
   return { owned, ideal, defaultPlan: 'owned' };
 }

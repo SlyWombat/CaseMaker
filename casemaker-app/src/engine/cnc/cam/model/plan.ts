@@ -401,13 +401,6 @@ export function setModelCamEnabled(on: boolean): void {
 export interface PlanModelCamOptions {
   signal?: AbortSignal;
   onProgress?: (p: ModelPlanProgress) => void;
-  /**
-   * #986 (the review session's ruling) — THE BALL RANK'S CYCLE CAP, seconds, measured on the
-   * candidate's own coarse finish. A candidate whose cycle exceeds it cannot win the rank, whatever
-   * its leftover; the uncapped best is still MEASURED and stated, so the operator sees what the
-   * cap cost. `planTwoOutcomes` sets it to 2× the owned plan's own cycle; absent, no cap applies.
-   */
-  cycleCapSeconds?: number;
 }
 
 /**
@@ -882,17 +875,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           (n, o) => n + o.outcome.ir.operations.reduce((k, op) => k + (op.estimatedSeconds ?? 0), 0),
           0,
         );
-        // The cap sits BEFORE the leftover key (the ruling): an over-cap candidate cannot win.
-        const capped = opts.cycleCapSeconds !== undefined && cycle > opts.cycleCapSeconds;
+        // #986 (the maintainer's ruling) — NO CYCLE CAP: a longer plan is a cost the operator is
+        // shown, not a reason to hide a better surface. Every measured candidate is stated with
+        // its leftover and its cycle, and the rank decides on outcome.
         if (uncappedBest === null || leftover < uncappedBest.leftover - 1e-9 || (Math.abs(leftover - uncappedBest.leftover) <= 1e-9 && cycle < uncappedBest.cycle)) {
           uncappedBest = { tool: candidate, leftover, cycle };
         }
         const diameterMm = cuttingDiameter(candidate) ?? 0;
-        measuredRows.push(
-          `⌀${diameterMm.toFixed(2)} mm ${candidate.name}: leftover ${(leftover * 100).toFixed(2)} %, cycle ${cycle.toFixed(0)} s` +
-            (capped ? ` — OVER the cap (${(opts.cycleCapSeconds! / 3600).toFixed(2)} h at 2× the owned plan), cannot win` : ''),
-        );
-        if (capped) continue;
+        measuredRows.push(`⌀${diameterMm.toFixed(2)} mm ${candidate.name}: leftover ${(leftover * 100).toFixed(2)} %, cycle ${cycle.toFixed(0)} s`);
         if (best === null || leftover < best.leftover - 1e-9 || (Math.abs(leftover - best.leftover) <= 1e-9 && cycle < best.cycle)) {
           best = { tool: candidate, leftover, cycle };
           continue;
@@ -902,7 +892,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       }
       if (best !== null) ball = best.tool;
       // The rank's statement: the measured candidates, the winner, and the uncapped best as a fact.
-      const chosen = best === null ? 'no candidate inside the cap — the pre-#986 pick stands' : `${best.tool.name} (leftover ${(best.leftover * 100).toFixed(2)} %, cycle ${best.cycle.toFixed(0)} s)`;
+      const chosen = best === null ? 'no candidate could plan the remainder — the pre-#986 pick stands' : `${best.tool.name} (leftover ${(best.leftover * 100).toFixed(2)} %, cycle ${best.cycle.toFixed(0)} s)`;
       ballRankNotes.push(
         `ball rank: measured ${measuredRows.length} candidate(s) — ${measuredRows.join('; ')}. Chosen: ${chosen}.` +
           (uncappedBest !== null && (best === null || uncappedBest.tool !== best.tool)

@@ -153,7 +153,7 @@ export function comparePlanOutcomes(
     const depthDiff = Math.abs(ownedDepth - idealDepth);
     differences.push({
       bound: 'geometryMm',
-      reading: `deepest cut ${ownedDepth.toFixed(2)} mm vs ${idealDepth.toFixed(2)} mm`,
+      reading: `deepest cut ${ownedDepth.toFixed(2)} → ${idealDepth.toFixed(2)} mm`,
       owned: ownedDepth,
       ideal: idealDepth,
       amount: depthDiff,
@@ -168,7 +168,7 @@ export function comparePlanOutcomes(
     const covDiff = Math.abs(ownedCov - idealCov) * 100;
     differences.push({
       bound: 'coveragePoints',
-      reading: `coverage ${pctPoints(ownedCov)} vs ${pctPoints(idealCov)}`,
+      reading: `coverage ${(ownedCov * 100).toFixed(2)} → ${(idealCov * 100).toFixed(2)} %`,
       owned: ownedCov,
       ideal: idealCov,
       amount: covDiff,
@@ -181,7 +181,7 @@ export function comparePlanOutcomes(
   const cycleDiff = slower > 0 ? Math.abs(owned.score.cycleSeconds - ideal.score.cycleSeconds) / slower : 0;
   differences.push({
     bound: 'cycleFraction',
-    reading: `cycle ${(owned.score.cycleSeconds / 60).toFixed(1)} min vs ${(ideal.score.cycleSeconds / 60).toFixed(1)} min`,
+    reading: `cycle ${(owned.score.cycleSeconds / 60).toFixed(1)} → ${(ideal.score.cycleSeconds / 60).toFixed(1)} min`,
     owned: owned.score.cycleSeconds,
     ideal: ideal.score.cycleSeconds,
     amount: cycleDiff,
@@ -192,7 +192,7 @@ export function comparePlanOutcomes(
   const line =
     materialRows.length === 0
       ? null
-      : `the ideal plan would change the outcome: ${materialRows.map((d) => d.reading).join('; ')}`;
+      : `with every bit the app knows: ${materialRows.map((d) => d.reading).join('; ')}`;
   return { material: materialRows.length > 0, line, differences };
 }
 
