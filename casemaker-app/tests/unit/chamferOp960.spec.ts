@@ -14,6 +14,7 @@ import type { Rim } from '../../src/engine/cnc/cam/model/features';
 import type { RegionRef } from '../../src/engine/cnc/cam/model/plan';
 import type { RapidEstimate } from '../../src/engine/cnc/cam/ir';
 import { makeClipperOffset } from '../../src/engine/cnc/cam/engraveJob';
+import type { OffsetFn, Polygons } from '../../src/engine/cnc/cam/pocket';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import { tl } from './helpers/manifoldExec';
 
@@ -90,5 +91,29 @@ describe('#960 chamfer — the sharp-rim box', () => {
         edgeBreak: { legMm: 0.5 }, offset: makeClipperOffset(tl), params: PARAMS, rapid: RAPID,
       }),
     ).toThrow(/not a cone/);
+  });
+});
+
+describe('#959 review — chamfer() falls back only to the point-tipped path, never the material side', () => {
+  it('when the air-side offset empties, the path is the raw ring — never an offset taken on the material side', () => {
+    // THE REAL RIMS FOUND THIS (9187f41a): a rim whose own width is under the tip radius offsets
+    // EMPTY on the air side. The first fix tried the OTHER side next — the MATERIAL side, where
+    // the tool's centre runs INTO the part, a gouge up to one tip radius deep. This fake offset
+    // simulates exactly that: empty on the air side (positive delta, `airSign` is +1 for a
+    // 'contour' rim), a detectable (and clearly WRONG) shape on the material side (negative).
+    const materialSideShape: Polygons = [[[0, 0], [1, 0], [1, 1], [0, 1]]];
+    const fallbackProneOffset: OffsetFn = (_region, delta) => (delta > 0 ? [] : materialSideShape);
+    const out = chamfer({
+      cutter: V90, rim: rimOf('sharp'), region: regionRef,
+      edgeBreak: { legMm: 0.5 }, offset: fallbackProneOffset, params: PARAMS, rapid: RAPID,
+    });
+    const feeds = out.ir.operations[0]!.moves.filter((m) => m.kind === 'feed');
+    expect(feeds.length).toBeGreaterThan(0);
+    // The ring's own vertices sit at ±HALF (10); the fake material-side shape's sit at 0/1 — easy
+    // to tell apart. The point-tipped path is the ring ITSELF (no offset at all).
+    for (const m of feeds) {
+      const edge = Math.max(Math.abs(m.x), Math.abs(m.y));
+      expect(edge, `(${m.x}, ${m.y}) looks like the material-side fallback shape, not the point-tipped ring`).toBeCloseTo(HALF, 6);
+    }
   });
 });

@@ -45,6 +45,7 @@ import { finish } from './ops/finish';
 import { pencil } from './ops/pencil';
 import { chamfer } from './ops/chamfer';
 import { contour as contourOp, throughHole } from './ops/contour';
+import { buildTriangleBins, binnedReachableTriangles, type TriangleBins } from './triangleBins';
 
 /** One ring (outer boundary or a hole); `pocket.ts`'s `Polygons` is `Polygon[]`. NEW — no existing equivalent. */
 export type Polygon = [number, number][];
@@ -260,6 +261,27 @@ function resolvedCutParams(input: ModelPlanInput, tool: Tool): { params: CutPara
   throw new Error(`cam/model/plan: no feeds for ${label} in ${input.stock.material} — ${resolved.reason}`);
 }
 
+/**
+ * THE REVIEW'S FINDING (item 8): the curved pipeline's ball and V were fed and spun at the
+ * PRIMARY FLAT's own resolved numbers — `resolvedCutParams` exists per tool, but was only ever
+ * called for the primary. Resolved the same way for a non-flat tool; if even the largest-covered-
+ * row proxy cannot answer for it (`resolvedCutParams` throws), the primary's already-resolved
+ * numbers stand in instead — stated in a note, never silently.
+ */
+function toolCutParams(input: ModelPlanInput, tool: Tool, primaryParams: CutParams): { params: CutParams; note: string | null } {
+  try {
+    const { params, substitution } = resolvedCutParams(input, tool);
+    return { params, note: substitution };
+  } catch (err) {
+    const label = tool.name || tool.id || `${tool.shape} cutter`;
+    const reason = err instanceof Error ? err.message : String(err);
+    return {
+      params: primaryParams,
+      note: `${label}: ${reason} — the primary flat's own feeds/RPM answer instead, the conservative side`,
+    };
+  }
+}
+
 /** §5's three numbers, read off the posted moves: a hop retracts to `hopZ`, a rapid to `safeZ`. */
 function linkingStats(programs: readonly ToolpathIR[]): SetupPlan['linking'] {
   let rapidsCount = 0;
@@ -334,6 +356,20 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
 
     const { params: pocketParams, substitution } = resolvedCutParams(input, primary);
     const feeds = { feedMmPerMin: pocketParams.feed, plungeFeedMmPerMin: pocketParams.plungeFeed };
+
+    // THE REVIEW'S FINDING (item 8): the ball and the V each get their OWN catalogue row — not
+    // the primary flat's, reused as every tool's numbers before this.
+    const toolSubstitutions: string[] = substitution === null ? [] : [substitution];
+    const ballParams = ball === undefined ? null : toolCutParams(input, ball, pocketParams);
+    if (ballParams?.note !== null && ballParams?.note !== undefined) toolSubstitutions.push(ballParams.note);
+    const vbitParams = vbit === undefined ? null : toolCutParams(input, vbit, pocketParams);
+    if (vbitParams?.note !== null && vbitParams?.note !== undefined) toolSubstitutions.push(vbitParams.note);
+    const cutParamsFor = (tool: Tool): CutParams => {
+      if (ball !== undefined && tool === ball && ballParams !== null) return ballParams.params;
+      if (vbit !== undefined && tool === vbit && vbitParams !== null) return vbitParams.params;
+      return pocketParams;
+    };
+
     opts.onProgress?.({ setupIndex, op: 'sequence', fraction: 0.4 });
     const result = planTreePrograms(tree, {
       offset,
@@ -357,6 +393,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         finishScallopMm: input.tolerances.finishMm,
         stepOverMm: pocketParams.stepOver,
         feeds,
+        cutParamsFor,
         rapid: Z1.rapidEstimate,
         spindleRpm: pocketParams.rpm,
         air: true,
@@ -406,7 +443,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
 
     const notes = [...result.notes, ...emptyStages];
-    if (substitution !== null) notes.push(substitution);
+    notes.push(...toolSubstitutions);
     if (input.fixture.envelope !== null) {
       notes.push(
         `the ${input.fixture.mount} fixture envelope is not yet wired into the region obstacles — this plan carries none; the posted program is still checked against the same envelope by the sweep`,
@@ -437,14 +474,25 @@ const allPockets = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [
 
 /** The `facing` region's own `Box2` — there is no `PocketNode`/`regionRefs` entry for it (it is
  * not a recognised feature, it is this plan's own synthesis of `FeatureTree.top.floors`). */
-/** The topmost mesh surface at (x, y), or null where no triangle covers the point. */
-function topSurfaceAt(mesh: { positions: Float32Array; indices: Uint32Array }, x: number, y: number): number | null {
-  const p = mesh.positions;
+/**
+ * The topmost mesh surface at (x, y), or null where no triangle covers the point.
+ *
+ * PERF FINDING (#959 review): this used to scan EVERY triangle of the whole mesh, for every one
+ * of `rims x segments x 5` samples — the same cost `triangleBins.ts`'s own header describes for
+ * `dropcutter.ts`'s pre-bins query. `binnedReachableTriangles(bins, x, y, 0)` is the exact same
+ * drop-in: a radius-0 query answers "triangle's own bbox contains (x, y)", a NECESSARY condition
+ * for the barycentric test below to ever accept it, so the candidate set it returns is a superset
+ * of the true containing triangle(s) — the barycentric filter here still does the real work, and
+ * the retained (best) result is identical to the brute-force scan's, never just close to it.
+ */
+function topSurfaceAt(bins: TriangleBins, x: number, y: number): number | null {
+  const p = bins.mesh.positions;
+  const indices = bins.mesh.indices;
   let best: number | null = null;
-  for (let t = 0; t + 2 < mesh.indices.length; t += 3) {
-    const i0 = mesh.indices[t]! * 3;
-    const i1 = mesh.indices[t + 1]! * 3;
-    const i2 = mesh.indices[t + 2]! * 3;
+  for (const t of binnedReachableTriangles(bins, x, y, 0)) {
+    const i0 = indices[t * 3]! * 3;
+    const i1 = indices[t * 3 + 1]! * 3;
+    const i2 = indices[t * 3 + 2]! * 3;
     const x0 = p[i0]!, y0 = p[i0 + 1]!, z0 = p[i0 + 2]!;
     const x1 = p[i1]!, y1 = p[i1 + 1]!, z1 = p[i1 + 2]!;
     const x2 = p[i2]!, y2 = p[i2 + 1]!, z2 = p[i2 + 2]!;
@@ -482,11 +530,13 @@ function rimRing(polyline: readonly [number, number][]): [number, number][] {
  * surface continues across the edge at the same height (the edge lies under the land — a cavity
  * mouth, not an open lip), so the break cut 0.5 mm into ground the goal never exposes. A rim is
  * breakable only where its AIR side actually drops — by the goal's own step threshold (0.2 mm,
- * `designEdgeCells`). Sampled at up to eight segment midpoints, 0.25 and 0.5 mm onto the air side;
- * ANY covered sample means the rim is not broken whole (conservative: never break under a lip).
+ * `designEdgeCells`). Sampled at EVERY segment midpoint (not a stride across them — an 8-point
+ * stride missed covered stretches on the tray), seven distances onto the air side (0.25/0.5/1.0/
+ * 1.3/1.55/1.65/1.8 mm, the V's whole 1.6375 mm skirt reach plus margin); ANY covered sample means
+ * the rim is not broken whole (conservative: never break under a lip).
  */
 function rimExposedFromAbove(
-  mesh: { positions: Float32Array; indices: Uint32Array },
+  bins: TriangleBins,
   rim: { polyline: readonly [number, number][]; z: number; of: string },
   stepMm = 0.2,
 ): boolean {
@@ -515,7 +565,7 @@ function rimExposedFromAbove(
     // cut at 0.5 mm deep. The organizer's 45-degree rim cut one cell at 1.6 mm — past the old last
     // sample at 1.55 — which is why its 0.04 % survived the first filter.
     for (const d of [0.25, 0.5, 1.0, 1.3, 1.55, 1.65, 1.8]) {
-      const top = topSurfaceAt(mesh, mx + nx * d, my + ny * d);
+      const top = topSurfaceAt(bins, mx + nx * d, my + ny * d);
       if (top !== null && top > rim.z - stepMm) return false;
     }
   }
@@ -1036,9 +1086,22 @@ export interface PlanCurvedOptions {
   finishScallopMm?: number;
   /** The rings' spacing; absent → the flat's own radius. */
   stepOverMm?: number;
+  /** `flat`'s own feed/plunge — kept as the fallback every tool used before the review's finding
+   * below named it: the ball and the V each cut at a DIFFERENT diameter and want their own
+   * catalogue row, not the flat's. */
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
   rapid: RapidEstimate;
+  /** `flat`'s own spindle RPM — see {@link feeds}. */
   spindleRpm: number;
+  /**
+   * THE REVIEW'S FINDING (item 8): every cutter in the curved pipeline — rough's flat, rest's
+   * smaller flat, the ball, the V — was fed and spun at `feeds`/`spindleRpm` ABOVE, which
+   * `planModelCam` resolves for the PRIMARY FLAT ONLY. A ball nose and a V cut at their own
+   * diameters, and the house catalogue has their own rows; absent, the resolver falls back to
+   * `feeds`/`spindleRpm` here, so every existing caller that never passes it keeps the old
+   * (flat-wide) numbers unchanged.
+   */
+  cutParamsFor?: (tool: Tool) => CutParams;
   air: boolean;
   safeZMm: number;
   hopZMm: number;
@@ -1135,6 +1198,24 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     peck: 0,
     air: opts.air,
   };
+  // THE REVIEW'S FINDING (item 8): every one of these calls used `cuts` — the FLAT's own resolved
+  // numbers — for the ball and the V too. `cutParamsFor`, when the caller supplies it, resolves
+  // each tool's OWN catalogue row; absent, this falls back to exactly `cuts`'s own shape (the flat
+  // feeding every tool, unchanged for every existing caller that never passes it).
+  const paramsFor = (tool: Tool): CutParams =>
+    opts.cutParamsFor?.(tool) ?? {
+      rpm: opts.spindleRpm,
+      feed: opts.feeds.feedMmPerMin,
+      plungeFeed: opts.feeds.plungeFeedMmPerMin,
+      stepDown: opts.stepDownMm,
+      stepOver: opts.stepOverMm ?? (cuttingDiameter(tool) ?? 1) / 2,
+      peck: 0,
+      air: opts.air,
+    };
+  const feedsOf = (p: CutParams): { feedMmPerMin: number; plungeFeedMmPerMin: number } => ({
+    feedMmPerMin: p.feed,
+    plungeFeedMmPerMin: p.plungeFeed,
+  });
 
   for (const region of tree.remainder) {
     const ball = opts.ball;
@@ -1176,12 +1257,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       stepDownMm: opts.stepDownMm,
       stockToLeaveMm: opts.bandMm,
       stepOverMm: opts.stepOverMm,
-      feeds: opts.feeds,
+      feeds: feedsOf(paramsFor(opts.flat)),
       offset: opts.offset,
       safeZMm: opts.safeZMm,
       hopZMm: opts.hopZMm,
       toolNumber: opts.toolNumberFor(opts.flat),
-      spindleRpm: opts.spindleRpm,
+      spindleRpm: paramsFor(opts.flat).rpm,
       air: opts.air,
       rapid: opts.rapid,
       ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
@@ -1213,12 +1294,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         stepOverMm: opts.stepOverMm === undefined
           ? undefined
           : Math.min(opts.stepOverMm, (cuttingDiameter(opts.restFlat) ?? 0) / 2),
-        feeds: opts.feeds,
+        feeds: feedsOf(paramsFor(opts.restFlat)),
         offset: opts.offset,
         safeZMm: opts.safeZMm,
         hopZMm: opts.hopZMm,
         toolNumber: opts.toolNumberFor(opts.restFlat),
-        spindleRpm: opts.spindleRpm,
+        spindleRpm: paramsFor(opts.restFlat).rpm,
         air: opts.air,
         rapid: opts.rapid,
         ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
@@ -1252,11 +1333,11 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       kind: 'ball-scallop',
       scallopMm: opts.finishScallopMm ?? opts.bandMm,
       stepDownMm: depth,
-      feeds: opts.feeds,
+      feeds: feedsOf(paramsFor(ball)),
       safeZMm: opts.safeZMm,
       hopZMm: opts.hopZMm,
       toolNumber: opts.toolNumberFor(ball),
-      spindleRpm: opts.spindleRpm,
+      spindleRpm: paramsFor(ball).rpm,
       air: opts.air,
       rapid: opts.rapid,
     });
@@ -1268,11 +1349,11 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       region,
       regionRef: ref,
       clSurface: clBall,
-      feeds: opts.feeds,
+      feeds: feedsOf(paramsFor(ball)),
       safeZMm: opts.safeZMm,
       hopZMm: opts.hopZMm,
       toolNumber: opts.toolNumberFor(ball),
-      spindleRpm: opts.spindleRpm,
+      spindleRpm: paramsFor(ball).rpm,
       air: opts.air,
       rapid: opts.rapid,
     });
@@ -1293,11 +1374,14 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       );
     }
     const vbit = opts.vbit;
+    // Built ONCE, reused by every rim's query below (#960's own bins, not a fresh brute-force
+    // scan per rim — see `topSurfaceAt`'s own header for the perf finding this replaces).
+    const rimBins = tree.rims.length > 0 ? buildTriangleBins(opts.geometry.triangles) : null;
     for (const rim of tree.rims) {
       // THE MANAGER'S RULING from the tray's 0.5 mm cell: a rim whose air side is COVERED is not
       // broken — see `rimExposedFromAbove` for the measurement that put this here. The test reads
       // the mesh, so it uses the rim's MESH-ABSOLUTE z, before the rebase below.
-      if (!rimExposedFromAbove(opts.geometry.triangles, rim)) {
+      if (!rimExposedFromAbove(rimBins!, rim)) {
         notes.push(
           `rim "${rim.id}" not broken: covered from above (its air side does not drop by 0.2 mm — the edge lies under the land)`,
         );
@@ -1312,7 +1396,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         region: ref,
         edgeBreak: opts.edgeBreak,
         offset: opts.offset,
-        params: cuts,
+        params: paramsFor(vbit),
         rapid: opts.rapid,
       });
       pushStage('chamfer', ref, out);
