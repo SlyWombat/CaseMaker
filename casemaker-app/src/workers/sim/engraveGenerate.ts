@@ -86,6 +86,7 @@ import { undersideClearBaseZ, undersideFloorZ } from '@/engine/cnc/engrave/goalU
 import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { primitiveHeightfield, surfacePrimitiveWord, surfacePrimitivesOf, type SurfacePrimitive } from '@/engine/cnc/engrave/primitiveSurface';
+import { closeOpenSheet } from '@/engine/cnc/engrave/closeSheet';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import {
@@ -214,6 +215,7 @@ import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
 import { unfacedBands } from '@/engine/cnc/mounts/inPath';
 import { verifyProgram, type DepthLimit, type ThroughMask, type VerifyReport } from '@/engine/cnc/verify';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
+import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
 import { executeProfile } from '@/workers/geometry/evaluateOp';
 import { circlePolygon } from '@/workers/geometry/sweep';
 import {
@@ -4836,7 +4838,7 @@ export const MOLD_DRAFT_LIMIT_DEG = 85;
  * step-over, then the shop's stock-to-leave, rather than re-deriving `finishStepOverForCusp` here —
  * stated so a reviewer does not read the two paths as cutting the identical number by accident).
  */
-export function buildModelPlanInputForGoal(
+export async function buildModelPlanInputForGoal(
   job: EngraveJob,
   goal: EngraveTargetObject,
   tool: Tool,
@@ -4850,7 +4852,7 @@ export function buildModelPlanInputForGoal(
    * before #966-goal-setups wired the real decision in to replace the old hardcoded fallback.
    */
   setupsOverride?: SetupSpec[],
-): ModelPlanInput {
+): Promise<ModelPlanInput> {
   const rawMesh = targetObjectMesh(goal);
   const placed = placeTarget(goal, rawMesh);
   const positions = new Float32Array(rawMesh.positions.length);
@@ -4874,7 +4876,15 @@ export function buildModelPlanInputForGoal(
     triangleCount: rawMesh.triangleCount,
     bbox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
   };
-  const geometry: FeatureSource = { triangles };
+  // #966 — AN OPEN GOAL SHEET IS CLOSED BEFORE THE KERNEL SEES IT. The everyday import is a
+  // surface, not a solid, and `planModelCam`'s tree is built from a Manifold solid — an open sheet
+  // used to die there as a bare "Not manifold". `closeOpenSheet` welds, analyses the boundary and
+  // (for ONE sheet whose loops are disjoint in projection) adds the skirt to the stock bottom and
+  // the bottom cap; anything else is refused by name with its count and reason, which this
+  // function lets propagate — the seam states it on the run, never as a kernel stack trace.
+  const tl = await getToplevel();
+  const closed = closeOpenSheet(tl, triangles, { bottomZ: -job.stock.thickness });
+  const geometry: FeatureSource = { triangles: closed.mesh };
 
   // #898's three choices, carried across under the new engine's own naming
   // (`flat`/`flipped-tabs`/`plinth` → `flatOnStockBottom`/`flippedTabs`/`plinth`); absent reads as
@@ -5058,7 +5068,7 @@ export async function generateGoalProgram(
   if (USE_MODEL_CAM_ENGINE) {
     let input: ModelPlanInput;
     try {
-      input = buildModelPlanInputForGoal(job, goal, tool, shop, modelSetupsOverride);
+      input = await buildModelPlanInputForGoal(job, goal, tool, shop, modelSetupsOverride);
     } catch (e) {
       return fail('cam', `cam/model seam (#966): could not build a ModelPlanInput for "${goal.name}" — ${e instanceof Error ? e.message : String(e)}`);
     }
