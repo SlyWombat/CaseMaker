@@ -4820,6 +4820,47 @@ export function generateRotaryGoalProgram(
 export const MOLD_DRAFT_LIMIT_DEG = 85;
 
 /**
+ * #869 — A GOAL'S `roughToolKey`, VALIDATED: present in the shop's library, and a flat end mill
+ * (never a replacement for either engine's own further checks — the old path's feed/station
+ * resolution is each engine's own concern, since the heightfield and model-cam paths differ there
+ * already). Shared by both engines so the one message a bad key earns is the same word for word,
+ * never retyped per caller. Absent `roughToolKey` is not an error: the goal is cut by the ball
+ * alone, and this returns `{ tool: null, finding: null }` — silent, because there is nothing to
+ * refuse.
+ */
+function validateGoalRoughTool(
+  roughToolKey: string | undefined,
+  tools: readonly ToolLibraryEntry[],
+  goalId: string,
+): { tool: Tool | null; finding: JobFinding | null } {
+  if (roughToolKey === undefined) return { tool: null, finding: null };
+  const entry = tools.find((e) => e.key === roughToolKey);
+  if (entry === undefined) {
+    return {
+      tool: null,
+      finding: {
+        severity: 'warning',
+        code: 'goal-rough-no-cutter',
+        labelId: goalId,
+        message: `The goal is cut by one cutter: the roughing cutter “${roughToolKey}” is not in the tool library — choose another, or none.`,
+      },
+    };
+  }
+  if (entry.tool.shape !== 'flat') {
+    return {
+      tool: null,
+      finding: {
+        severity: 'warning',
+        code: 'goal-rough-no-cutter',
+        labelId: goalId,
+        message: `The goal is cut by one cutter: “${entry.tool.name}” is a ${entry.tool.shape} cutter, and a goal’s rough must be a flat end mill.`,
+      },
+    };
+  }
+  return { tool: entry.tool, finding: null };
+}
+
+/**
  * #966 — THE SEAM's own `ModelPlanInput`, built from the SAME job/goal/shop facts the heightfield
  * path below reads, so the two paths disagree about the CAM engine only, never about the part.
  *
@@ -4888,7 +4929,13 @@ export async function buildModelPlanInputForGoal(
   // cut the relief loose; the skirt now stops at the sheet's own lowest boundary, so the part is
   // exactly as deep as the imported surface and no cut goes below it.
   const closed = closeOpenSheet(tl, triangles, { skirtTo: 'lowestBoundary' });
-  const geometry: FeatureSource = { triangles: closed.mesh };
+  // #987 — a skirt-closed relief's outline is the kernel's own requirement for a solid, not a
+  // design edge; `recogniseFeatures` reads this to skip the contour demand entirely (never a
+  // freeing cut around stock the design never asked to be cut away from).
+  const geometry: FeatureSource = {
+    triangles: closed.mesh,
+    ...(closed.closedBy === 'skirt' ? { outline: 'synthetic' as const } : {}),
+  };
 
   // #898's three choices, carried across under the new engine's own naming
   // (`flat`/`flipped-tabs`/`plinth` → `flatOnStockBottom`/`flippedTabs`/`plinth`); absent reads as
@@ -4951,8 +4998,18 @@ export async function buildModelPlanInputForGoal(
 
   // The same owned-tool list the reach check above already built (house cutters only — a goal's
   // CAM has never read the catalogue, `ModelPlanInput.cutters.catalogue` stays empty and
-  // `planModelCam`'s own notes say so when the caller supplies one).
-  const house: Tool[] = [...(shop.tools ?? []).map((e) => e.tool), tool];
+  // `planModelCam`'s own notes say so when the caller supplies one). De-duplicated by key: `tool`
+  // (the caller's chosen finish) is almost always ALSO in `shop.tools` under its own entry, and a
+  // repeated ball confused #869's own "is the pin the caller's tool or just the first ball"
+  // question (B's review) as much as it would confuse `planModelCam`'s own candidate search.
+  const houseSeen = new Set<string>();
+  const house: Tool[] = [];
+  for (const candidate of [...(shop.tools ?? []).map((e) => e.tool), tool]) {
+    const key = cutterKeyOf(candidate);
+    if (houseSeen.has(key)) continue;
+    houseSeen.add(key);
+    house.push(candidate);
+  }
   const cutters: CutterCandidates = { house, catalogue: [] };
 
   // #985 — THE SCALLOP SEAT HOLDS A CUSP, THE PITCH HAS ITS OWN SEAT. The model engine's
@@ -4969,6 +5026,13 @@ export async function buildModelPlanInputForGoal(
   };
   const edgeBreak: EdgeBreakSpec = { legMm: 0 };
 
+  // #869/#966 — THE CURVED PIPELINE'S OWN ROUGH, independent of whatever `planModelCam` picks as
+  // `primary` for this goal's (usually nonexistent) pockets: `goal.roughToolKey`, validated by the
+  // SAME helper the heightfield path uses (byte-identical findings, never retyped), or `null` — no
+  // rough, the ball alone — when the goal states none. The finding itself is the caller's own: it
+  // rides `generateGoalProgram`'s `findings`, computed there by the same pure call.
+  const curvedRoughTool: Tool | null = validateGoalRoughTool(goal.roughToolKey, shop.tools ?? [], goal.id).tool;
+
   return {
     geometry,
     setups,
@@ -4977,6 +5041,7 @@ export async function buildModelPlanInputForGoal(
     cutters,
     tolerances,
     edgeBreak,
+    curvedRoughTool,
   };
 }
 
@@ -5079,6 +5144,12 @@ export async function generateGoalProgram(
   // name where the new path stands today rather than crashing uninformatively or silently falling
   // back to the old engine.
   if (USE_MODEL_CAM_ENGINE) {
+    // #869 — the SAME named refusal the heightfield path states for a bad/non-flat `roughToolKey`
+    // (`validateGoalRoughTool`'s own doc): computed here too so the model path's `findings` carries
+    // it, independent of `buildModelPlanInputForGoal`'s own (pure, side-effect-free) re-validation
+    // for `ModelPlanInput.curvedRoughTool`.
+    const modelRoughFinding = validateGoalRoughTool(goal.roughToolKey, shop.tools ?? [], goal.id).finding;
+    const modelRoughFindings = modelRoughFinding === null ? [] : [modelRoughFinding];
     let input: ModelPlanInput;
     try {
       input = await buildModelPlanInputForGoal(job, goal, tool, shop, modelSetupsOverride);
@@ -5199,7 +5270,7 @@ export async function generateGoalProgram(
             ...base,
             ok: false,
             stage: 'verify',
-            findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...documentFindings()]),
+            findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...modelRoughFindings, ...documentFindings()]),
             feeds: null,
             cam: null,
             nc: posted.text,
@@ -5232,7 +5303,7 @@ export async function generateGoalProgram(
       ...base,
       ok: true,
       stage: 'done',
-      findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...documentFindings()]),
+      findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...modelRoughFindings, ...documentFindings()]),
       feeds: null,
       cam: first.cam,
       nc: first.nc,
@@ -5334,26 +5405,15 @@ export async function generateGoalProgram(
   // still made, the finish is unchanged.
   const roughFindings: JobFinding[] = [];
   const roughEntryDefined = goal.roughToolKey !== undefined;
+  const roughValidated = validateGoalRoughTool(goal.roughToolKey, shop.tools ?? [], goal.id);
   const roughEntry = roughEntryDefined ? (shop.tools ?? []).find((e) => e.key === goal.roughToolKey) : undefined;
-  const roughTool = roughEntry !== undefined && roughEntry.tool.shape === 'flat' ? roughEntry.tool : null;
+  const roughTool = roughValidated.tool;
   const roughResolved =
     roughTool === null
       ? null
       : engraveFeedsFor(shop, catalogue, job.stock.material, roughTool, mill, job.cutOverride);
-  if (roughEntryDefined && roughEntry === undefined) {
-    roughFindings.push({
-      severity: 'warning',
-      code: 'goal-rough-no-cutter',
-      labelId: goal.id,
-      message: `The goal is cut by one cutter: the roughing cutter “${goal.roughToolKey}” is not in the tool library — choose another, or none.`,
-    });
-  } else if (roughEntryDefined && roughTool === null) {
-    roughFindings.push({
-      severity: 'warning',
-      code: 'goal-rough-no-cutter',
-      labelId: goal.id,
-      message: `The goal is cut by one cutter: “${roughEntry!.tool.name}” is a ${roughEntry!.tool.shape} cutter, and a goal’s rough must be a flat end mill.`,
-    });
+  if (roughValidated.finding !== null) {
+    roughFindings.push(roughValidated.finding);
   } else if (roughEntryDefined && roughResolved !== null && !roughResolved.ok) {
     roughFindings.push({
       severity: 'warning',

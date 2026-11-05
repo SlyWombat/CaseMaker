@@ -240,6 +240,16 @@ export interface ModelPlanInput {
    * the old pocket-count completeness, unchanged.
    */
   goal?: GoalCellField;
+  /**
+   * #869/#966 — THE CURVED PIPELINE'S OWN ROUGH, independent of `primary` (the pockets' own
+   * largest flat, which a goal with no pockets picks only because the house owns one at all).
+   * Absent (every existing caller): unchanged — the curved pipeline ROUGHS with `primary`, exactly
+   * as before this field existed. `null`: no rough at all, the ball alone takes each remainder
+   * region's full depth (#869's stated default for a goal with no `roughToolKey`). A `Tool`: that
+   * tool roughs instead of `primary` (#869's `roughToolKey`, once validated by the caller — this
+   * field is not itself validated here, the same contract `cutters.house` already keeps).
+   */
+  curvedRoughTool?: Tool | null;
 }
 
 export interface ModelPlanOutput {
@@ -783,7 +793,15 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       },
       curved: {
         geometry: curvedGeometry,
-        flat: primary,
+        // #869/#966 — absent (every existing caller): `primary`, unchanged. `null` (a goal with no
+        // `roughToolKey`): no rough, ball alone. A `Tool` (a goal's validated `roughToolKey`):
+        // that tool roughs instead of `primary`, which this job's own pockets (if it has any) still
+        // use — the two are independent on purpose, see `ModelPlanInput.curvedRoughTool`'s own doc.
+        ...(input.curvedRoughTool === undefined
+          ? { flat: primary }
+          : input.curvedRoughTool === null
+            ? {}
+            : { flat: input.curvedRoughTool }),
         ...(ball === undefined ? {} : { ball }),
         ...(restBall === undefined ? {} : { restBall }),
         ...(vbit === undefined ? {} : { vbit }),
@@ -1275,7 +1293,13 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       depthMm: z0 - node.floorZ,
     });
   }
-  features.push({ id: 'contour', kind: 'contour', depthMm: contourDepthMm });
+  // #987 — a skirt-closed relief's outline is synthetic: the kernel's own requirement for a
+  // solid, not a design edge, so no contour op is demanded against it. `tree.contour.frees`
+  // stays what it always was (whether a REAL contour reaches the stock bottom, which decides
+  // tabs below) — a different question from whether a contour exists at all.
+  if (!tree.contour.synthetic) {
+    features.push({ id: 'contour', kind: 'contour', depthMm: contourDepthMm });
+  }
   const demand = { features };
 
   const cutters: CutterCandidates = { house: [...opts.houseFlats], catalogue: [] };
@@ -1609,7 +1633,16 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     return merged;
   };
 
-  const choice = chooseSequence(demand, cutters, {
+  // #987 — a demand with NOTHING in it (every pocket/through-hole is a `curved` region planned
+  // by `planCurvedForTree` instead, and the contour is synthetic or absent) is trivially
+  // satisfied: no pocket-chain cutter is needed, so none is required to exist. Without this,
+  // `candidateSequences` finds no candidate to build (every built step list is empty and `add`
+  // drops it) and `chooseSequence` threw "no cutter sequence can be planned" against a relief
+  // that in fact needs no pocket-chain cutter at all (#869's ball-alone relief, #966's open-mesh
+  // relief). Guarded here, not in `sequence.ts`, so the general-purpose chooser stays untouched.
+  const choice: SequenceChoice = demand.features.length === 0
+    ? { steps: [], cost: { entries: [], estimateSeconds: 0, toolChanges: 0, toolChangeSeconds: 0, totalSeconds: 0 }, considered: [], unreachable: [], freeing: null, unplanned: [] }
+    : chooseSequence(demand, cutters, {
     rapid: opts.rapid,
     toolChangeSeconds: opts.toolChangeSeconds,
     planStep,
@@ -1853,6 +1886,12 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #975 — the V floor's own lines: floor, wall angle, and the land per side the flanks take
   // (the V's own geometry, stated; the gate's edge-break class carries the land).
   notes.push(...vNotes);
+  // #987 — a synthetic outline (the skirt `closeOpenSheet` added to close an open relief) is not
+  // a design edge, so this plan demands no contour op against it at all: an open-surface relief —
+  // its edge is the stock beside it; nothing is freed.
+  if (tree.contour.synthetic) {
+    notes.push('an open-surface relief: its edge is the stock beside it; nothing is freed');
+  }
   // #962 — ONE STATEMENT PER CAUSE, NOT A LINE PER REGION: failed regions are grouped by their
   // kind and reason with a count; the per-region detail lives in `unplanned` (machine-readable),
   // never as a wall of operator lines.
@@ -1961,8 +2000,13 @@ export interface PlanCurvedOptions {
   geometry: FeatureSource;
   /** The real Clipper2 offset, or a test fake — the pocket op's own contract. */
   offset: OffsetFn;
-  /** The three tools the curved pipeline uses: the flat roughs, the ball finishes, the V breaks rims. */
-  flat: Tool;
+  /**
+   * The three tools the curved pipeline uses: the flat roughs, the ball finishes, the V breaks
+   * rims. Absent (#869/#966): no rough at all — the ball alone takes each remainder region's
+   * whole depth in one pass, and the skin stage (which only a flat can surface-follow) is not
+   * planned either. Every existing caller passes a flat; this keeps that path byte-identical.
+   */
+  flat?: Tool;
   /** The ball. Absent is allowed when the tree has no remainder to finish — the region loop refuses by name the moment one needs it. */
   ball?: Tool;
   /**
@@ -2136,12 +2180,16 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       return z === null ? null : z - z0;
     },
   });
+  // #869/#966 — NO ROUGH AT ALL is a real state (ball alone): the sampling pitch that would have
+  // come from the flat's own radius falls back to the ball's, so `clSurface`'s own sampling still
+  // has a sensible step when there is no flat to size it against.
+  const stepOverSizer = opts.flat ?? opts.ball;
   const cuts: CutParams = {
     rpm: opts.spindleRpm,
     feed: opts.feeds.feedMmPerMin,
     plungeFeed: opts.feeds.plungeFeedMmPerMin,
     stepDown: opts.stepDownMm,
-    stepOver: opts.stepOverMm ?? (cuttingDiameter(opts.flat) ?? 1) / 2,
+    stepOver: opts.stepOverMm ?? (stepOverSizer === undefined ? 1 : cuttingDiameter(stepOverSizer) ?? 1) / 2,
     peck: 0,
     air: opts.air,
   };
@@ -2193,55 +2241,71 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const roughRef = roughRegion === base
       ? ref
       : regionRefOf(region.id, 'curved', roughRegion.footprint, base.zTop, base.zBottom);
-    // 1. The FLAT Z-steps the region to its own CL, leaving the band.
+    // 1. THE FLAT Z-steps the region to its own CL, leaving the band — #869/#966: absent (ball
+    // alone, no rough tool chosen for this goal), there is nothing to pre-clear and no band to
+    // leave; the ball takes the region's own full depth in one pass below (step 3's `depth`
+    // already computes that when there is no rough to leave a thinner one).
     //
     // #959 item 5: the rough is this region's PRIMARY — a rest, finish or pencil on stock it never
     // cleared would take a full-depth bite — so when it throws, the region's later stages are
     // stated as skipped, not planned.
-    const flatCl: { surface?: ReturnType<typeof clSurface> } = {};
-    const roughed = attempt('rough', opts.flat, ref, () => {
-      const clFlat = shiftSurface(clSurface(opts.geometry, roughRegion, opts.flat, cuts.stepOver));
-      flatCl.surface = clFlat;
-      noteGrid(opts.flat, clFlat);
-      return rough({
-        cutter: opts.flat,
-        region: roughRegion,
-        regionRef: roughRef,
-        clSurface: clFlat,
-        stepDownMm: opts.stepDownMm,
-        stockToLeaveMm: opts.bandMm,
-        stepOverMm: opts.stepOverMm,
-        feeds: feedsOf(paramsFor(opts.flat)),
-        offset: opts.offset,
-        safeZMm: opts.safeZMm,
-        hopZMm: opts.hopZMm,
-        toolNumber: opts.toolNumberFor(opts.flat),
-        spindleRpm: paramsFor(opts.flat).rpm,
-        air: opts.air,
-        rapid: opts.rapid,
-        materialTopAt: designTopAt,
-        stockTopZMm: 0,
-        ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
+    const flat = opts.flat;
+    let prevCl: ReturnType<typeof clSurface> | undefined;
+    const restClSink: { surface?: ReturnType<typeof clSurface> } = {};
+    if (flat !== undefined) {
+      const flatCl: { surface?: ReturnType<typeof clSurface> } = {};
+      const roughed = attempt('rough', flat, ref, () => {
+        const clFlat = shiftSurface(clSurface(opts.geometry, roughRegion, flat, cuts.stepOver));
+        flatCl.surface = clFlat;
+        noteGrid(flat, clFlat);
+        return rough({
+          cutter: flat,
+          region: roughRegion,
+          regionRef: roughRef,
+          clSurface: clFlat,
+          stepDownMm: opts.stepDownMm,
+          stockToLeaveMm: opts.bandMm,
+          // #869/#966 — `opts.stepOverMm` is sized for `primary` (the pockets' own flat, the plan-
+          // level default); `flat` (this goal's own `curvedRoughTool`) can be a SMALLER tool, and
+          // handing it a step-over bigger than its own radius is exactly the defect the rest
+          // stage's own `Math.min` guard (below, the "rest flat is SMALLER than the primary" note)
+          // already exists to prevent — `pocketLoops` refuses it by name ('step-over exceeds the
+          // tool radius'). Same guard, same reason, here.
+          stepOverMm: opts.stepOverMm === undefined
+            ? undefined
+            : Math.min(opts.stepOverMm, (cuttingDiameter(flat) ?? 0) / 2),
+          feeds: feedsOf(paramsFor(flat)),
+          offset: opts.offset,
+          safeZMm: opts.safeZMm,
+          hopZMm: opts.hopZMm,
+          toolNumber: opts.toolNumberFor(flat),
+          spindleRpm: paramsFor(flat).rpm,
+          air: opts.air,
+          rapid: opts.rapid,
+          materialTopAt: designTopAt,
+          stockTopZMm: 0,
+          ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
+        });
       });
-    });
-    const prevCl = flatCl.surface;
-    if (!roughed || prevCl === undefined) {
-      const skipped: [PlannedOp['kind'], Tool][] = [
-        ...(opts.restFlat === undefined ? [] : [['rest', opts.restFlat] as [PlannedOp['kind'], Tool]]),
-        ['finish', ball],
-        ['pencil', ball],
-      ];
-      for (const [kind, cutter] of skipped) {
-        unplanned.push({ kind, cutterKey: cutterKeyOf(cutter), regionIds: [region.id], reason: `not planned: the rough of "${region.id}" failed` });
+      prevCl = flatCl.surface;
+      if (!roughed || prevCl === undefined) {
+        const skipped: [PlannedOp['kind'], Tool][] = [
+          ...(opts.restFlat === undefined ? [] : [['rest', opts.restFlat] as [PlannedOp['kind'], Tool]]),
+          ['finish', ball],
+          ['pencil', ball],
+        ];
+        for (const [kind, cutter] of skipped) {
+          unplanned.push({ kind, cutterKey: cutterKeyOf(cutter), regionIds: [region.id], reason: `not planned: the rough of "${region.id}" failed` });
+        }
+        continue;
       }
-      continue;
     }
 
     // 2. REST BY CL DIFFERENCE, when the caller offers a smaller flat: the band the previous
-    //    cutter left standing, where the smaller one can reach.
-    const restFlat = opts.restFlat;
-    const restClSink: { surface?: ReturnType<typeof clSurface> } = {};
-    if (restFlat !== undefined) {
+    //    cutter left standing, where the smaller one can reach. Never offered without a rough —
+    //    there is nothing for a rest to clean up.
+    const restFlat = flat === undefined ? undefined : opts.restFlat;
+    if (restFlat !== undefined && prevCl !== undefined) {
       // B's review of `0461df01`: the rest stage was left on the MESH-ABSOLUTE region and an
       // unshifted surface — `depthPasses` reads `opts.region.zTop/zBottom`, so at stockTop != 0 the
       // rebased levels sat above every mesh-absolute CL value and the mask came out EMPTY (a rest
@@ -2293,6 +2357,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // also made for `skin()` is untouched — that one carries its own read (#970's 6b35d6e9).
     const finishBand = opts.finishScallopMm ?? opts.bandMm;
     const flatAbs = (x: number, y: number): number | null => {
+      if (prevCl === undefined) return null;
       const v = prevCl.dropCutter(x, y);
       return v === null ? null : v + z0;
     };
@@ -2317,7 +2382,10 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       const a = (d * Math.PI) / 4;
       maskRing.push([Math.cos(a) * ballRadiusForMask, Math.sin(a) * ballRadiusForMask]);
     }
-    const maskCells = (x: number, y: number): boolean => maskCellsExact(leftoverAbove, maskRing, x, y);
+    // #869/#966 — NO ROUGH, NO MASK: with no flat ahead of it the ball has nothing to compare
+    // against, and nothing to mask against either — it takes the whole region, as `finish()`'s own
+    // `maskCells === undefined` case already means ("the plan admits every point of every row").
+    const maskCells = flat === undefined ? undefined : (x: number, y: number): boolean => maskCellsExact(leftoverAbove, maskRing, x, y);
 
     // 3. THE BALL'S ONE FINAL LEVEL: a single pass at the region's depth takes the band.
     //
@@ -2344,7 +2412,13 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       }
       return clBallCache;
     };
-    const depth = Math.max(opts.stepDownMm, base.zTop - base.zBottom);
+    // #869/#966, SAFETY (the review's finding, item 1): "the ball alone" never meant one pass at
+    // the region's own full depth into untouched stock — that is the exact full-depth bite this
+    // file's own #959 item 5 and "THE REVIEW'S SAFETY FINDING" (above) exist to prevent. WITH a
+    // rough ahead, one level is enough (it already stepped down to within the band). With NONE,
+    // the ball must step down on its OWN row, same as a rough would, over as many levels as the
+    // region's depth needs.
+    const depth = flat === undefined ? paramsFor(ball).stepDown : Math.max(opts.stepDownMm, base.zTop - base.zBottom);
     // #960 — FLAT OR BALL BY THE REGION'S OWN SLOPE, with the threshold stated on the plan; the
     // constant is a parameter (shared with C's #959 skin pass) while the picture decides 1.9° vs 7.1°.
     const finishKind = finishKindFor(roughRegion, opts.geometry.triangles, opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG);
@@ -2513,8 +2587,17 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   // its own step-down and gated by the shared slope parameter. Facing `'on'` keeps that stage
   // instead (the operator option).
   const skinMm = z0 - tree.top.z;
-  if (skinMm > 1e-6 && (opts.facing ?? 'off') !== 'on') {
-    const flatRadius = (cuttingDiameter(opts.flat) ?? 0) / 2;
+  if (skinMm > 1e-6 && (opts.facing ?? 'off') !== 'on' && opts.flat === undefined) {
+    // #869/#966 — NO FLAT, NO SKIN: the skin is a flat's own surface-following pass (`skin()`
+    // only a flat runs); a ball-alone goal states the skin standing rather than removing it with
+    // the wrong tool. `facing: 'on'` is the operator's other route to the same stock.
+    notes.push(
+      `${String(Math.round(skinMm * 1000) / 1000)} mm of skin stands above the part top — no rough tool is chosen for ` +
+        'this goal, so it is left standing rather than cleared with the ball; set a rough tool, or turn facing on, to remove it',
+    );
+  } else if (skinMm > 1e-6 && (opts.facing ?? 'off') !== 'on' && opts.flat !== undefined) {
+    const flat = opts.flat;
+    const flatRadius = (cuttingDiameter(flat) ?? 0) / 2;
     const grownSkin = flatRadius > 0 ? opts.offset(tree.contour.outline, 2 * flatRadius) : [];
     const skinFootprint = grownSkin.length > 0 ? grownSkin : tree.contour.outline;
     const skinRegion: RemainderRegion = {
@@ -2526,25 +2609,25 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // own ground is never touched — but the skin ABOVE every pocket's mouth (which the pocket op,
     // starting at that mouth, never removes) is taken here. The first attempt excluded the pocket
     // footprints and left that skin standing: the tray's coverage fell 0.77 %.
-    attempt('skin', opts.flat, skinRef, () => {
-      const skinCl = shiftSurface(clSurface(opts.geometry, skinRegion, opts.flat, cuts.stepOver));
+    attempt('skin', flat, skinRef, () => {
+      const skinCl = shiftSurface(clSurface(opts.geometry, skinRegion, flat, cuts.stepOver));
       return skin({
-        cutter: opts.flat,
+        cutter: flat,
         regionRef: skinRef,
         outline: tree.contour.outline,
         clSurface: skinCl,
         skinMm,
         // THE CAP IS THE ROW'S OWN STEP-DOWN x THE FACTOR (#959): a parameter, provisional at
         // 1.0 — two passes on the tray's 1.2 mm skin, one on the organizer's 0.8.
-        stepDownMm: paramsFor(opts.flat).stepDown * skinStepdownFactor(),
+        stepDownMm: paramsFor(flat).stepDown * skinStepdownFactor(),
         maxSlopeDeg: opts.flatSurfaceMaxSlopeDeg ?? flatSurfaceMaxSlopeDeg(),
         stepOverMm: opts.stepOverMm,
-        feeds: feedsOf(paramsFor(opts.flat)),
+        feeds: feedsOf(paramsFor(flat)),
         offset: opts.offset,
         safeZMm: opts.safeZMm,
         hopZMm: opts.hopZMm,
-        toolNumber: opts.toolNumberFor(opts.flat),
-        spindleRpm: paramsFor(opts.flat).rpm,
+        toolNumber: opts.toolNumberFor(flat),
+        spindleRpm: paramsFor(flat).rpm,
         air: opts.air,
         rapid: opts.rapid,
         materialTopAt: designTopAt,

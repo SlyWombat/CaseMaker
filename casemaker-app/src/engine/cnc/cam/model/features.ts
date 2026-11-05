@@ -44,6 +44,14 @@ export interface FeatureSource {
   triangles: ParsedMesh;
   /** Per-triangle B-rep face id — STEP only. `faceId[i]` is the face triangle `i` came from. */
   faceId?: Uint32Array;
+  /**
+   * #987 — WHOSE EDGE THE OUTLINE IS. Absent/`'design'` (every existing caller): a real design
+   * edge, as `closeOpenSheet`'s `'none'` (already closed) or a STEP/closed-mesh import reports it.
+   * `'synthetic'`: the solid was closed by `closeOpenSheet`'s skirt — the outline is the kernel's
+   * own requirement for a solid, not an edge the design drew, so no contour op is demanded against
+   * it (`recogniseFeatures` carries this onto `tree.contour.synthetic`).
+   */
+  outline?: 'design' | 'synthetic';
 }
 
 export interface SetupFrame {
@@ -103,7 +111,9 @@ export interface FeatureTree {
   /** Floor Z levels, descending. */
   levels: number[];
   top: { z: number; floors: TreeFloor[]; area: number };
-  contour: { outline: Polygons; area: number; zTo: number; frees: boolean; shoulders: string[] };
+  /** `synthetic` is absent/`false` for every existing (real design edge) tree — only
+   * `recogniseFeatures` itself sets it `true`, and only when `src.outline === 'synthetic'`. */
+  contour: { outline: Polygons; area: number; zTo: number; frees: boolean; shoulders: string[]; synthetic?: boolean };
   pockets: PocketNode[];
   rims: Rim[];
   remainder: RemainderRegion[];
@@ -203,12 +213,16 @@ export function recogniseFeatures(
   let planarArea = 0;
   for (const patch of patches) if (patch.planar) planarArea += patch.area;
   const frees = frame.stockBottom === undefined ? true : Math.abs(built.partBottom - frame.stockBottom) <= tol.levelMergeMm;
+  // #987 — a skirt-closed relief's outline is the kernel's own requirement for a solid, not a
+  // design edge; `frees` (whether the contour reaches the stock bottom) is a different question
+  // from whether a contour exists at all, so this reads `src.outline`, not `frees`.
+  const synthetic = src.outline === 'synthetic';
 
   return {
     frame: { ...frame, partTop: built.partTop, partBottom: built.partBottom },
     levels: built.levels,
     top: built.top,
-    contour: { ...built.contour, frees, shoulders },
+    contour: { ...built.contour, frees, shoulders, synthetic },
     pockets: built.pockets,
     rims: built.rims.map((r) => ({ id: r.id, polyline: r.polyline, z: r.z, of: r.of, kind: r.kind, ...(r.legs ? { legs: r.legs } : {}) })),
     remainder: built.remainder,
