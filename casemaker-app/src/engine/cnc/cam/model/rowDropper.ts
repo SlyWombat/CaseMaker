@@ -12,6 +12,19 @@
  * vertically right at whichever end is the deeper one), never a diagonal that would dip under the
  * shallow side's own true height. `rough()` and `finish()` (#959/#960) both walk rows this way —
  * this is the one function, not duplicated per op.
+ *
+ * THE GUARANTEE, STATED EXACTLY (E's finding on #957, 2026-11-05): a segment is only ever sampled
+ * at its own ends, midpoint and two quarter points — a=0, q1=0.25, m=0.5, q3=0.75, b=1 of the
+ * segment's own span. The kink guard (below) catches a slope change AT one of those five points,
+ * but a CL feature narrower than the segment's own span/4 can sit entirely between two adjacent
+ * samples and never register at any of them — neither a chord departure nor a quarter-slope
+ * change sees a bump that rises and falls again inside one quarter-segment. The bound this file
+ * can actually promise is therefore: the chord dips by no more than `toleranceMm` for any feature
+ * AT LEAST span/4 wide; a narrower feature is not bounded by tolerance at all and can dip by up to
+ * its own full height. Doubling the sample count (quarter points of quarter points) would halve
+ * the blind width at double the query cost per segment — not done here; this is a stated limit,
+ * not a silent gap. `rowDropperNonCircular957.spec.ts`'s skipped "sub-span/4 ridge" case pins the
+ * exact width this applies at.
  */
 
 import type { ClSurface } from './clsurface';

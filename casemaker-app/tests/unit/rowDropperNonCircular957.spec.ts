@@ -210,3 +210,30 @@ describe('#957 the non-circular spec — real mesh features, dense independent c
     }
   }
 });
+
+// #957 — E's finding, 2026-11-05: `rowDropper.ts`'s own guarantee only covers a feature at least
+// span/4 wide (its own header now states this exactly). SKIPPED, not a defect to fix: this names
+// the limit's own real shape rather than leaving it undemonstrated.
+describe('#957 the stated guarantee limit — a feature narrower than span/4 slips between samples', () => {
+  it.skip("a ridge narrower than one coarse segment's span/4 is not bounded by tolerance (E's finding)", () => {
+    // A coarse 0.5 mm segment samples only x = 0, 0.125, 0.25, 0.375, 0.5 (a/q1/m/q3/b). A ridge
+    // 0.02 mm wide — well under span/4 = 0.125 mm — centred at x = 0.1875, squarely inside the
+    // [0.125, 0.25] quarter and clear of every one of those five points, is never sampled: the
+    // segment is accepted as flat and smooth.
+    const RIDGE_X = 0.1875;
+    const RIDGE_WIDTH = 0.02;
+    const RIDGE_HEIGHT = 0.1; // mm — the undetected dip's own size: its own height, not tolerance
+    const surface: ClSurface = {
+      dropCutter: (x) => (Math.abs(x - RIDGE_X) < RIDGE_WIDTH / 2 ? RIDGE_HEIGHT : 0),
+      toleranceMm: 0.005,
+      minSpacingMm: 0.01,
+      maxSpacingMm: 0.5,
+      sampleCount: 0,
+    };
+    const row = dropRow(surface, [0, 0], [0.5, 0]);
+    expect(row.length, 'the whole 0.5 mm span was accepted as one smooth segment — the blind spot itself').toBe(2);
+    expect(surface.dropCutter(RIDGE_X, 0), 'the ridge is really there, just never sampled').toBe(RIDGE_HEIGHT);
+    expect(RIDGE_WIDTH, "narrower than this segment's own span/4").toBeLessThan(0.5 / 4);
+    expect(RIDGE_HEIGHT, 'the undetected dip exceeds tolerance — bounded by the ridge\'s own height, not toleranceMm').toBeGreaterThan(surface.toleranceMm);
+  });
+});
