@@ -57,6 +57,15 @@
  *
  * A true spatial index (kd-tree) over the mesh, not the brute-force bbox prune `reachableTriangles`
  * still does, is the next documented performance follow-up — this slice is correctness only.
+ *
+ * ASSUMED, NOT CHECKED HERE: the mesh is CLOSED over the top surface a cutter can reach — a
+ * degenerate (zero-area) triangle leaves no gap because its neighbours still cover the ground it
+ * sat on, but a genuinely MISSING facet does, and the max-reduction then has nothing there to beat
+ * a neighbour's own (otherwise correct) edge contact, under-reporting the true height. Not this
+ * file's problem to catch: a mesh with open edges on a reachable surface is an input-validity
+ * question, repaired or refused before planning ever sees it (the existing closed-mesh check this
+ * engine already throws on, `manifoldOfTriangles`'s `ManifoldError: Not manifold`, is the same
+ * question asked earlier, for a different reason).
  */
 
 import type { Tool } from '@/engine/cnc/tool';
