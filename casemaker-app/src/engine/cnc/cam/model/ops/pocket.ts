@@ -326,6 +326,35 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
       // `plan.ts` call site) — `zOffsetMm`'s own doc above. Converting the mesh-absolute ceiling
       // into the LEVEL's frame (subtracting `zOffsetMm`), rather than the other way around, keeps
       // the comparison in whichever frame the caller actually posts moves in.
+      //
+      // #970 FOLLOW-UP (found by tracing, not assumed, after Session A's independent re-check of
+      // this op's own full regression run flagged `curvedOpsProperty959.spec.ts`'s coverage drop
+      // as a real bug rather than fixture noise): `ceiling` at a point genuinely INSIDE this
+      // node's own floor, with nothing real above it, reads back that floor's OWN height — there
+      // is nothing else solid along that vertical line in the FINISHED design mesh to find; the
+      // floor itself is the only triangle a downward probe ever hits there. The predicate used to
+      // read `ceiling + marginMm < levelZ`, i.e. "safe only when the ceiling sits a whole margin
+      // BELOW this level" — at a node's own LAST level (`depthPasses`' own guarantee: the final
+      // entry is always exactly `floorZ`), that demands `floorZ + marginMm < floorZ`, false for
+      // any positive margin, so the deepest pass excluded its OWN floor's entire interior,
+      // everywhere, confirmed directly (a debug count on the synthetic "open gap, no slab"
+      // fixture: 37 053 of 37 249 grid cells included at every intermediate level, 13 444 — only
+      // the cells already outside the 2D region — at the final one). Two real, reproduced cases:
+      // an isolated floor near another feature (`pocketShadow966.spec.ts`'s own "#970 over-clip"
+      // case) and a nested parent/child floor-patch pair (`pocketShadowNestedFloor966.spec.ts`,
+      // the shelf/well case) both hit this independently, since `plan.ts`'s `allPockets` plans
+      // every node as its own `pocket()` call.
+      //
+      // THE FIX: give the margin BACK to the level instead of taking it from the ceiling —
+      // `ceiling - zOffsetMm - marginMm < levelZ`, i.e. "safe unless the ceiling sits a margin's
+      // width or more ABOVE this level." At a node's own floor (`ceiling === levelZ` exactly),
+      // `floorZ - marginMm < floorZ` is true for any positive margin, so the node's own floor
+      // correctly includes itself. A real overhang (the elephant's belly, this file's own slab)
+      // still excludes every level at or below its own underside: `ceiling` there is well ABOVE
+      // `levelZ - marginMm` for every level down to and including the node's own (unreachable)
+      // floor, so `pocketShadow966.spec.ts`'s existing "fixed" and "red-first" cases (the slab
+      // case) are unaffected — this only ever widens the margin IN THE SAME DIRECTION it already
+      // favoured (toward cutting a genuine floor, never toward cutting past a real obstruction).
       ceilingMaskAt = (levelZ: number): Polygons =>
         maskLoopsFromPredicate(
           nx,
@@ -333,7 +362,7 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
           minX,
           minY,
           pitch,
-          (i, j) => i >= 0 && j >= 0 && i < nx && j < ny && ceiling[j * nx + i]! - zOffsetMm + marginMm < levelZ,
+          (i, j) => i >= 0 && j >= 0 && i < nx && j < ny && ceiling[j * nx + i]! - zOffsetMm - marginMm < levelZ,
         );
     }
   }

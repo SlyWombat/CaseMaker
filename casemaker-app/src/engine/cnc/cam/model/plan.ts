@@ -525,27 +525,19 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         // straight through ~22 mm of the elephant's body, because the belly closing the gap above a
         // recognised floor was never checked).
         //
-        // KNOWN, ACCEPTED TRADE-OFF (full regression run, this branch): `curvedOpsProperty959.spec.ts`'s
-        // `sloped`/`filletedFloor` synthetic fixtures (`tests/tools/randomParts.ts`) each recognise
-        // two tiny, SPURIOUS `PocketNode`s (a ~5x8 mm sliver, a ~2.5 mm-radius circle) far from
-        // either fixture's own intended single feature — confirmed, not assumed: their own `region`
-        // polygons carry visible float-precision noise (adjacent vertices 0.002-0.003 mm apart),
-        // and a direct `dropCutterHeight` probe at points genuinely inside those regions reads back
-        // FLAT, UNTOUCHED stock (the real surface, not air) where the node claims "clear". This is
-        // a CSG-noise artefact of `slopedPocketVoid`/`filletFloorVoid`'s own large-wedge/cylinder
-        // construction, not a fault in `recogniseFeatures` applied to clean geometry, and not
-        // present in any real reference part (the tray, the organizer, the elephant/panther sticks,
-        // every `setups965`/`contourFreeingCl965`/`registration965`/`opsAcceptance959` fixture all
-        // stay green on this branch). Pre-#966, `pocket()` blindly plunged through these two slivers
-        // regardless of what was really there, which incidentally "counted" toward those two
-        // fixtures' own measured coverage; #970's own shadow check correctly refuses to — the SAME
-        // class of refusal the elephant needs, just triggered by test-fixture noise rather than a
-        // real design feature. This drops `sloped`/`filletedFloor` seeds 1-2 from ~97-98% to
-        // ~87-94% against that spec's own 95% line (its `adjudicatedFraction === 0` cut-into check
-        // is UNAFFECTED — this fix can only ever cut LESS, never gouge more, so it cannot newly
-        // violate that line). Flagged on #966/#970 for the Manager rather than patched around with
-        // an undocumented tolerance that could just as easily mask a real few-mm-scale instance of
-        // this same bug in a real job.
+        // CORRECTION (Session A, independent re-check): `curvedOpsProperty959.spec.ts`'s own
+        // `sloped`/`filletedFloor` coverage drop, first reported here as "CSG-noise artefact of
+        // `slopedPocketVoid`/`filletFloorVoid`'s own construction," was NOT that — both flagged
+        // nodes are the ordinary open-shoulder-notch and blind-hole subtraction every
+        // `randomParts.ts` kind shares, and a direct `dropCutterHeight` probe at each one's own
+        // centroid read back EXACTLY its own `floorZ`, real material, not stock top. The actual
+        // cause (confirmed by tracing and fixed in `ops/pocket.ts`'s own `ceilingMaskAt`): the
+        // per-level predicate read a node's OWN floor — the only thing a probe ever finds along a
+        // vertical line through a floor with nothing above it — as an obstruction AT that floor's
+        // own depth, excluding the node's entire LAST pass. Fixed at the source; see
+        // `ops/pocket.ts`'s own comment at the predicate and `pocketShadow966.spec.ts`'s "#970
+        // over-clip" / `pocketShadowNestedFloor966.spec.ts` cases. `curvedOpsProperty959` is back
+        // at its own 95% line, unchanged.
         shadowMesh: curvedGeometry.triangles,
         ...(tabs === undefined ? {} : { tabs }),
         ...(oppositeSafeDepthMm === undefined ? {} : { oppositeSafeDepthMm }),

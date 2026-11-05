@@ -31,7 +31,7 @@ import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engi
 import { recogniseFeatures, type FeatureTree } from '@/engine/cnc/cam/model/features';
 import { planPocketsForTree, type PlanPocketsOptions, type PlanPocketsResult } from '@/engine/cnc/cam/model/plan';
 import type { RapidEstimate } from '@/engine/cnc/cam/ir';
-import type { Tool } from '@/engine/cnc/tool';
+import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import type { ParsedMesh } from '@/engine/import/stlParser';
 
 // ───────────────────────────────────────────────────────────────────────────────────────────
@@ -190,5 +190,47 @@ describe('#966 the table — a pocket under an overhang the node itself never sa
     const pocketOps = result.ops.filter((op) => op.kind === 'pocket');
     const totalMoves = pocketOps.reduce((n, op) => n + op.outcome.ir.operations.reduce((m, o) => m + o.moves.length, 0), 0);
     expect(totalMoves).toBeGreaterThan(0);
+  });
+
+  it('#970 over-clip, FIXED: the SAME open gap is pocketed all the way to its own true floor, not left one step shy', () => {
+    // The identical fixture as the test above (an isolated floor with NO overhang anywhere above
+    // it — the honest case `aboveMaterial` must treat as a complete no-op). `ceilingMaskAt`'s own
+    // grid probes THIS SAME floor back off the mesh (there is nothing else along that vertical
+    // line to find), so `ceiling === floorZ` exactly at every interior point. Before this fix, the
+    // predicate demanded `ceiling + marginMm < levelZ` — at the node's own LAST level (`levelZ ===
+    // floorZ` exactly, `depthPasses`' own guarantee), that read `floorZ + marginMm < floorZ`,
+    // false for any positive margin, so the deepest pass was masked out EVERYWHERE, leaving the
+    // floor's own entire interior standing — the mechanism behind #970's own reported "0.6 mm
+    // short at x = -12" finding. Fixed in `ops/pocket.ts`'s own predicate (margin given back to
+    // the level, not taken from the ceiling).
+    const baseplate = tl.Manifold.cube([FOOT, FOOT, BASE_Z], false);
+    const legAt = (x: number, y: number): ManifoldInstance => tl.Manifold.cube([LEG, LEG, LEG_TOP_Z - BASE_Z], false).translate([x, y, BASE_Z]);
+    const legs = [legAt(INSET, INSET), legAt(FOOT - INSET - LEG, INSET), legAt(INSET, FOOT - INSET - LEG), legAt(FOOT - INSET - LEG, FOOT - INSET - LEG)];
+    const openSolid = legs.reduce((acc, leg) => acc.add(leg), baseplate);
+    const openMesh = parsed(openSolid);
+    const tree = recogniseFeatures({ triangles: openMesh }, { up: [0, 0, 1], stockTop: LEG_TOP_Z, stockBottom: 0 }, tl);
+    const result = planPocketsForTree(tree, { ...basePlanOptions([flat(4, 1)]), shadowMesh: openMesh });
+    const pocketOps = result.ops.filter((op) => op.kind === 'pocket');
+    // The dead centre of the gap (local (20, 20) — equidistant from all four legs, no leg there at
+    // any height) must be swept at the TRUE floor Z, not merely reached SOMEWHERE on the boundary:
+    // the actual bug (confirmed by tracing) leaves a thin boundary-artefact ring cut at the final
+    // level while the floor's own true INTERIOR is excluded, so a bare "some move reaches floor Z"
+    // check passes by accident. The nearest floor-level feed move to (20, 20) must stay inside the
+    // tool's own reach of it (`toolRadius + stepOverMm`, generously), or the centre itself was
+    // never really cut down to depth.
+    const toolRadius = (cuttingDiameter(flat(4, 1)) ?? 0) / 2;
+    let nearestAtFloor = Infinity;
+    for (const op of pocketOps) {
+      for (const operation of op.outcome.ir.operations) {
+        for (const m of operation.moves) {
+          if (m.kind !== 'feed') continue;
+          const absZ = m.z + tree.frame.stockTop;
+          if (Math.abs(absZ - BASE_Z) > 1e-3) continue;
+          const d = Math.hypot(m.x - 20, m.y - 20);
+          nearestAtFloor = Math.min(nearestAtFloor, d);
+        }
+      }
+    }
+    expect(nearestAtFloor).toBeLessThan(toolRadius + 1);
   });
 });
