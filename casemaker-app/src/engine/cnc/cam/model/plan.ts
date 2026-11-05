@@ -2419,9 +2419,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     if (opts.vbit !== undefined && (opts.vbit.shape === 'chamfer' || opts.vbit.shape === 'engraving')) {
       const vTool = opts.vbit;
       // C's review of the crease pass (2026-11-05): PRE-GATE on a cheap valley test over the
-      // PREVIOUS cutter's own CL — a region with no crease cell gets no V CL build, no pencil
-      // grid and no line at all.
-      const vPitchGate = Math.min(0.5, Math.max(0.1, (cuttingDiameter(vTool) ?? 0) / 4));
+      // PREVIOUS cutter's own CL — a region with no crease cell gets no pencil grid and no line at
+      // all. The gate samples at 0.5 mm, 25x coarser than the pencil: it exists to skip regions,
+      // not to judge cells.
+      // shortcut: a valley under ~1 mm wide is not pre-detected and its region is skipped;
+      // upgrade the gate pitch if a job's creases are finer than that.
+      const vPitchGate = Math.max(0.5, (cuttingDiameter(vTool) ?? 0) / 4);
       const prevClGate = restBallCl ?? clBall();
       if (hasValley(prevClGate, { min: roughRef.bounds.min, max: roughRef.bounds.max }, vPitchGate)) {
       // The V's own CL and the previous (rest ball's) CL: the leftover depth at a crease is the
