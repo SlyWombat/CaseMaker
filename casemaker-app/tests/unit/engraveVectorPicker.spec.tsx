@@ -38,9 +38,9 @@ const MM_SQUARE = svg('<path d="M0 0 H10 V10 H0 Z"/>', 'width="10mm" height="10m
 const PX_SQUARE = svg('<path d="M0 0 H10 V10 H0 Z"/>', 'viewBox="0 0 10 10"');
 /** A 20 × 10 mm rectangle, for the aspect-ratio check. */
 const MM_RECT = svg('<path d="M0 0 H20 V10 H0 Z"/>', 'width="20mm" height="10mm" viewBox="0 0 20 10"');
-/** A closed but STROKED path: no fill, so there is no area to cut. */
+/** A closed but STROKED path with a ZERO width: no area to paint, so it stays a line (#664). */
 const STROKE_ONLY = svg(
-  '<path d="M0 0 H10 V10 H0 Z" fill="none" stroke="#000"/>',
+  '<path d="M0 0 H10 V10 H0 Z" fill="none" stroke="#000" stroke-width="0"/>',
   'width="10mm" viewBox="0 0 10 10"',
 );
 
@@ -217,12 +217,12 @@ describe('EngravePanel — the import dialog size control (#217)', () => {
 
 describe('#664 — open paths import as Engrave (line) operations', () => {
   const OPEN_LINE = svg(
-    '<path d="M0 0 L10 0" fill="none" stroke="#000"/>',
+    '<path d="M0 0 L10 0" fill="none" stroke="#000" stroke-width="0"/>',
     'width="10mm" viewBox="0 0 10 10"',
   );
-  /** A filled square at x 0–10 and an open stroke at x 20–30: one frame, union centre x 15. */
+  /** A filled square at x 0–10 and an open zero-width stroke at x 20–30: one frame, centre x 15. */
   const MIXED = svg(
-    '<path d="M0 0 H10 V10 H0 Z"/><path d="M20 0 L30 0" fill="none" stroke="#000"/>',
+    '<path d="M0 0 H10 V10 H0 Z"/><path d="M20 0 L30 0" fill="none" stroke="#000" stroke-width="0"/>',
     'width="30mm" viewBox="0 0 30 10"',
   );
 
@@ -269,7 +269,7 @@ describe('#664 — open paths import as Engrave (line) operations', () => {
 
   it('two open paths import as two lines, each named', async () => {
     const two = svg(
-      '<path d="M0 0 L10 0" fill="none" stroke="#000"/><path d="M0 5 L10 5" fill="none" stroke="#000"/>',
+      '<path d="M0 0 L10 0" fill="none" stroke="#000" stroke-width="0"/><path d="M0 5 L10 5" fill="none" stroke="#000" stroke-width="0"/>',
       'width="10mm" height="10mm" viewBox="0 0 10 10"',
     );
     await openImport('two.svg', two);
@@ -287,7 +287,7 @@ describe('#664 — a long imported stroke stays a loadable job', () => {
     // schema refuses is a job lost to a default on the next start.
     const n = 6001;
     const d = ['M0 0', ...Array.from({ length: n - 1 }, (_, i) => `L${i + 1} 0`)].join(' ');
-    const LONG = svg(`<path d="${d}" fill="none" stroke="#000"/>`, 'width="6000mm" viewBox="0 0 6000 1"');
+    const LONG = svg(`<path d="${d}" fill="none" stroke="#000" stroke-width="0"/>`, 'width="6000mm" viewBox="0 0 6000 1"');
     await openImport('long.svg', LONG);
     expect((screen.getByTestId('engrave-import-accept') as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId('engrave-import-accept'));
@@ -407,9 +407,9 @@ describe('engraveJobStore — imported vectors (#217)', () => {
 // #678 — the dialog's count line and empty state, truthful in every mix: fills only, open lines
 // only, closed lines only, and the two together.
 describe('#678 — the import dialog counts open and closed lines separately', () => {
-  const CLOSED_RING = svg('<rect x="0" y="0" width="10" height="6" fill="none" stroke="#000"/>', 'width="10mm" viewBox="0 0 10 6"');
+  const CLOSED_RING = svg('<rect x="0" y="0" width="10" height="6" fill="none" stroke="#000" stroke-width="0"/>', 'width="10mm" viewBox="0 0 10 6"');
   const BOTH = svg(
-    '<rect x="0" y="0" width="10" height="6" fill="none" stroke="#000"/><path d="M0 8 L10 8" fill="none" stroke="#000"/>',
+    '<rect x="0" y="0" width="10" height="6" fill="none" stroke="#000" stroke-width="0"/><path d="M0 8 L10 8" fill="none" stroke="#000" stroke-width="0"/>',
     'width="10mm" viewBox="0 0 10 10"',
   );
   const TEXT_ONLY = svg('<text x="0" y="5">Hi</text>', 'width="10mm" viewBox="0 0 10 10"');
@@ -442,6 +442,18 @@ describe('#678 — the import dialog counts open and closed lines separately', (
     expect(header).toContain('1 closed shape');
     expect(header).not.toContain(' open line');
     expect(header).not.toContain(' closed line');
+  });
+
+  it('#968 — a stroked ring with a width adds a vector REGION, not a trace', async () => {
+    const ring = svg('<rect x="0" y="0" width="10" height="6" fill="none" stroke="#000"/>', 'width="10mm" viewBox="0 0 10 6"');
+    await openImport('band.svg', ring);
+    const header = screen.getByTestId('engrave-import-dialog').textContent ?? '';
+    expect(header).toContain('1 closed shape');
+    expect(header).not.toContain('closed line');
+    expect(header).toContain('stroke width');
+    fireEvent.click(screen.getByTestId('engrave-import-accept'));
+    expect(useEngraveJobStore.getState().job.vectors ?? []).toHaveLength(1);
+    expect(useEngraveJobStore.getState().job.traces ?? []).toHaveLength(0);
   });
 
   it('the empty state survives — and no longer claims a stroked ring needs a fill', async () => {

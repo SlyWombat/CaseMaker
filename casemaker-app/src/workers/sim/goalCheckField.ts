@@ -120,13 +120,25 @@ export function goalInputFor(live: SimSession, goal: SimGoalCheck): GoalCheckInp
   // geometry-only (the synthetic fixtures' reading).
   const whoAt =
     goal.opts?.edgeBreak?.toolNumber === undefined ? null : live.sweptWhoExact(heightfield);
+  // v5 (#970) — THE WALL-SHADOW RULE'S CL. The shadow class no longer excuses every cell near a
+  // wall: a cell stands excused only when the deepest stamp's cutter-location stayed at least the
+  // shadow radius from the wall (the disc-stamp artefact) or the V cut it within its leg. The CL
+  // point comes from the same folded stamp as `who`; when the session cannot answer, `clAt` is
+  // absent and any unexcused shadow cell is adjudicated — the conservative side.
+  const clAt = goal.opts?.wallShadowRadiusMm === undefined ? null : live.sweptClExact(heightfield);
+  const opts =
+    goal.opts === undefined
+      ? undefined
+      : {
+          ...goal.opts,
+          ...(whoAt === null ? {} : { whoAt }),
+          ...(clAt === null ? {} : { clAt }),
+        };
   return {
     heightfield,
     ...(sweptTop === null ? {} : { sweptTop }),
     ...(sweptTopExact === null ? {} : { sweptTopExact }),
-    ...(goal.opts === undefined
-      ? {}
-      : { opts: whoAt === null ? goal.opts : { ...goal.opts, whoAt } }),
+    ...(opts === undefined ? {} : { opts }),
   };
 }
 

@@ -81,12 +81,20 @@ export function stampProfile(tool: Tool): StampProfile {
   return { radius, profile: () => 0 };
 }
 
-/** The stamp's result: the field, and who left each cell's lowest reach (#964). */
+/** The stamp's result: the field, who left each cell's lowest reach (#964), and where. */
 export interface StampedTop {
   /** `z[j*nx+i]`, the goal's own cell centres; unstamped cells read 0 (the stock's top). */
   field: Float32Array;
   /** Per cell, the tool NUMBER of the stamp that left the lowest reach — 0 when no cut. */
   who: Uint8Array;
+  /**
+   * #970/v5 — the CUTTER-LOCATION point (the tool's centre, XY) of the stamp that left the
+   * cell's lowest reach, 0/0 when no cut. `checkGoalCutInto`'s v5 wall-shadow rule reads it:
+   * a wall-shadow cell is excused only when the deepest cutter's CL stays at least the shadow
+   * radius from the wall there (a stamp/disc artefact), or the V cut it within its leg.
+   */
+  clX: Float32Array;
+  clY: Float32Array;
 }
 
 /** The cutter active for a checkpoint, or null when there is none to stamp with. */
@@ -100,6 +108,8 @@ function stampField(
   const { nx, ny, x0, y0, pitch } = goal;
   const field = new Float32Array(nx * ny);
   const who = new Uint8Array(nx * ny);
+  const clX = new Float32Array(nx * ny);
+  const clY = new Float32Array(nx * ny);
   const profiles = new Map<Tool, { stamp: StampProfile; number: number }>();
   const profileOf = (tool: Tool): { stamp: StampProfile; number: number } => {
     let p = profiles.get(tool);
@@ -156,6 +166,8 @@ function stampField(
             if (v <= field[k]!) {
               field[k] = v;
               who[k] = number;
+              clX[k] = qx;
+              clY[k] = qy;
             }
             stamped++;
           }
@@ -163,7 +175,7 @@ function stampField(
       }
     }
   }
-  return stamped === 0 ? null : { field, who };
+  return stamped === 0 ? null : { field, who, clX, clY };
 }
 
 /**

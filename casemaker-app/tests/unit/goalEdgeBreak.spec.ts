@@ -1,9 +1,11 @@
 // #955/V2-2 — THE EDGE-BREAK ALLOWANCE in the app's goal check.
 //
 // E's `goal_check.py` rule, ported: a cell cut into by a V bit WITHIN THE BIT'S REACH of a design
-// edge, and NO DEEPER than the bit's leg, is edge break — not cut-into. Wall cells and the wall
-// shadow are reported as unadjudicable shares beside the verdict. With no `edgeBreak` option the
-// check is the pre-V2-2 reading exactly.
+// edge, and NO DEEPER than the bit's leg, is edge break — not cut-into. Wall cells are reported as
+// an unadjudicable share beside the verdict; since v5 (#970) the wall shadow joins them only on
+// the rule's proof — the V cut within its leg, or the deepest cutter's CL stated at least the
+// shadow radius from the wall. With no `edgeBreak` option the check is the pre-V2-2 reading
+// exactly.
 import { describe, expect, it } from 'vitest';
 
 import { checkGoalCutInto, type GoalCutIntoOptions } from '@/engine/cnc/engrave/designCheck';
@@ -115,15 +117,24 @@ describe('#955/V2-2 the goal check edge-break allowance', () => {
     expect(unknown.edgeBreakFraction).toBe(0);
   });
 
-  it('a cut in the wall shadow is reported unadjudicable, not as a pass', () => {
-    // 1.75 mm from the wall: outside the 1.5 mm edge reach, inside a 2 mm shadow. The cut is kept
+  it('v5 — a shadow cut with no stated CL is adjudicated; the stamp-artefact CL excuses it', () => {
+    // Just past the reach: outside the 1.5 mm edge reach, inside a 2 mm shadow. The cut is kept
     // INSIDE the grid (y 2..8): since the manager's #959 sanction the part's silhouette is a
     // design edge, and this fixture's y-edges are border cells — a cut touching them is edge
     // break by rule, which is a different question from the one this case asks.
     const top = swept(STEP, (x, y) => (Math.abs(x - 3) <= 0.125 && y > 2 && y < 8 ? 0.5 : null));
-    const r = checkGoalCutInto(STEP, top, { ...EDGE, wallShadowRadiusMm: 2 });
-    expect(r.edgeBreakFraction).toBe(0);
-    expect(r.shadowNotScoredFraction).toBeGreaterThan(0);
+    // v4 excused these cells unconditionally; v5 states no CL, so they are judged — E's 3.49 mm
+    // tray gouge was hidden by exactly this blanket class.
+    const bare = checkGoalCutInto(STEP, top, { ...EDGE, wallShadowRadiusMm: 2 });
+    expect(bare.edgeBreakFraction).toBe(0);
+    expect(bare.shadowNotScoredFraction).toBe(0);
+    expect(bare.adjudicatedFraction).toBeGreaterThan(0);
+    expect(bare.ok).toBe(false);
+    // The deepest cutter's CL stated at x = 0, ~5 mm clear of the wall: the disc's rim covered the
+    // cells, not a wall drive — excused as unadjudicable, the class v4 assumed everywhere.
+    const far = checkGoalCutInto(STEP, top, { ...EDGE, wallShadowRadiusMm: 2, clAt: () => ({ x: 0, y: 5 }) });
+    expect(far.shadowNotScoredFraction).toBeGreaterThan(0);
+    expect(far.adjudicatedFraction).toBe(0);
   });
 
   it('with no edgeBreak option the wall cells are still excluded — the gate’s rule, not an allowance', () => {
