@@ -154,6 +154,7 @@ import { engravePreviewSvg } from '../engravePreviewSvg';
 import { svgToPng } from '../svgToPng';
 import { efficiencyThresholds, goalPassCoverage, KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
 import { goalCheckForProgram, type SimGoalCheck } from '../../../src/engine/cnc/engrave/goalCheckInput';
+import { pureGoalObject } from '../../../src/engine/cnc/engrave/jobKind';
 import { goalEdgeBreakOptions } from '../../../src/engine/cnc/engrave/edgeBreak';
 import { goalInputFor } from '../../../src/workers/sim/goalCheckField';
 import type { OracleReport } from '../../../src/engine/cnc/engrave/oracle';
@@ -1052,7 +1053,11 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // #953 — THE GOAL CHECK, AS THE RECEIPT CARRIES IT. One input for the run (the goal target and
     // the shop's pass line), and each program's report taken while its own sweep is the live one —
     // the run store's rule, so the CLI and the Cut card judge the same file the same way.
-    const goalCheck = goalCheckForProgram(job, generated.surface3d != null, {
+    // #966 — the gate is the job's own shape (`pureGoalObject`), not `generated.surface3d`: the
+    // model-engine goal path posts a real `verify` with no `surface3d`, and the old proxy would
+    // have read it as an item job and dropped the goal block from the receipt silently. Mirrors
+    // the same fix in `engraveRunStore.ts`'s `afterLoad`, so the CLI and the Cut card agree.
+    const goalCheck = goalCheckForProgram(job, pureGoalObject(job) !== null, {
       passCoverage: goalPassCoverage(shopDefaults),
       // #955/V2-2 — the edge-break allowance's GATE parameters, from the job's edgeBreak and the
       // tools this run posts (never the CAM's plan, A's R3). No edge break → no allowance.

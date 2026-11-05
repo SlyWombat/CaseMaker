@@ -37,8 +37,67 @@ import type { FeatureSource, FeatureTree, PocketNode, SetupFrame } from './featu
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances } from './types';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
+import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, type SetupRegistration } from './setups';
 import { pocket } from './ops/pocket';
 import { clSurface } from './clsurface';
+import { dropCutterHeight, profileOf, type CutterProfile, type DropCutterMesh } from './dropcutter';
+import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
+
+/**
+ * #965/#898 part 2 — THE FRAME-FLIP ALGEBRA, isolated from feature recognition's own
+ * uncertainties so it has its own direct, hand-checkable test (`contourFreeingCl965.spec.ts`).
+ *
+ * `toSetupFrame`'s own half-turn-about-X for `up = [0, 0, -1]` (`features.ts`) negates Y and Z of
+ * every mesh position, with NO translation — so a non-first setup's own RAW local Z (the same
+ * axis `ContourOpOptions.depthMm`/`zPasses` already cut on, before `planPocketsForTree`'s own
+ * `-stockTop` rebase) is exactly the NEGATION of the one fixed frame `ModelPlanInput.geometry`
+ * itself sits in (the opposite, `top`, setup's own frame — `up = [0, 0, 1]`, the identity
+ * rotation — called "world" here only in that sense, not a machine coordinate). A local depth `d`
+ * below THIS setup's own stock top is raw local Z `stockTop - d`, so `worldZ(d) = d - stockTop`.
+ *
+ * The opposite setup's solid sits at or below its own `dropCutterHeight` at the SAME document
+ * (world) point (#957's drop-cutter, read off the design mesh itself — the same ground truth
+ * `rough`/`rest`/`finish` already trust for "where the final surface is," not `SetupPlan.clGrid`,
+ * which carries only `{toleranceMm, minSpacingMm, maxSpacingMm}` per cutter and no sampled height
+ * at all). This setup's cut stays safe while it never reaches past that same world height, less a
+ * numerical-noise margin (the SAME chord-tolerance bound `PROFILE_OFFSET_GUARD_MM`/
+ * `ARC_CHORD_TOLERANCE_MM` already uses elsewhere, not a new tuned number):
+ * `d <= surfaceWorldZ - margin + stockTop`.
+ *
+ * `frame` is THIS (non-first) setup's own — the ONLY supported case is its `up = [0, 0, -1]`
+ * (#965's stated scope: a vise's bottom flip, the one `frameForFace`/`documentXY` actually map);
+ * the caller (`planModelCam`) is what checks that before ever calling this, so this function
+ * itself assumes it, not re-checks it. `profile`/`mesh` are the OPPOSITE setup's own tool profile
+ * and ITS rotated mesh (`rotatedGeometryFor(input.geometry, opposite.features.frame)`).
+ *
+ * #965 REVIEW FINDING, fixed here: this function maps `(x, y)` through `documentXY` — the SAME
+ * function `mapIRToDocument` uses to place this setup's own posted moves in the document frame.
+ * It must therefore take the SAME registration `offset` `planModelCam` passes to that call, or it
+ * checks a different point than the one the cut actually lands on the instant registration finds
+ * a real (non-zero) correction — dormant until then, since every current fixture (including a
+ * genuinely two-setup `planModelCam` run) only ever produces `[0, 0]` for this module's own pure
+ * axis-through-origin flip (no caller has ever needed to exercise it before `registrationFreeingCl965.spec.ts`).
+ */
+export function oppositeSurfaceSafeDepthMm(
+  frame: SetupFrame,
+  profile: CutterProfile,
+  mesh: DropCutterMesh,
+  x: number,
+  y: number,
+  marginMm: number = ARC_CHORD_TOLERANCE_MM,
+  // #965 review finding: this MUST be the same registration offset `mapIRToDocument` is given
+  // for this setup's own posted program, and it MUST go through the same `documentXY` call — the
+  // one mapping both share — or this function checks a different point than the one the cut
+  // actually posts to. Absent → [0, 0], unchanged for every pre-existing caller (none of which
+  // pass a non-zero offset today; see this function's own header for why that case has never
+  // come up on a real job yet).
+  offset: readonly [number, number] = [0, 0],
+): number | null {
+  const [wx, wy] = documentXY(frame, x, y, offset);
+  const surfaceWorldZ = dropCutterHeight(profile, mesh, wx, wy);
+  if (surfaceWorldZ === null) return null;
+  return surfaceWorldZ + frame.stockTop - marginMm;
+}
 import { rough } from './ops/rough';
 import { rest } from './ops/rest';
 import { finish } from './ops/finish';
@@ -318,6 +377,33 @@ function linkingStats(programs: readonly ToolpathIR[]): SetupPlan['linking'] {
   return { rapidsCount, hopsCount, airFractionPct: total > 0 ? (rapidXy / total) * 100 : 0 };
 }
 
+/** `fmt3`: trims a computed mm figure to 3 decimals without carrying float noise into the note. */
+const fmt3 = (n: number): string => String(Number(n.toFixed(3)));
+
+/**
+ * #965 registration's own stated sentence — names the datum `registerSetupOrigin` found and the
+ * offset it computed, so the number in `SetupPlan.notes` is traceable to real recognised
+ * geometry, never just "trust the vise".
+ */
+function describeRegistration(setupIndex: number, registration: SetupRegistration): string {
+  const [dx, dy] = registration.offsetMm;
+  const offset = `offset [${fmt3(dx)}, ${fmt3(dy)}] mm`;
+  if (registration.datum.basis === 'two-holes') {
+    const [h1, h2] = registration.datum.holes;
+    return (
+      `setup ${setupIndex}: registered against setup 0 via two through-holes — "${h1.id}" at ` +
+      `(${fmt3(h1.x)}, ${fmt3(h1.y)}) and "${h2.id}" at (${fmt3(h2.x)}, ${fmt3(h2.y)}), ` +
+      `${fmt3(registration.datum.separationMm)} mm apart — computed ${offset} (#965 registration)`
+    );
+  }
+  const [a, b] = registration.datum.endpoints;
+  return (
+    `setup ${setupIndex}: registered against setup 0 via a single straight outline edge from ` +
+    `(${fmt3(a[0])}, ${fmt3(a[1])}) to (${fmt3(b[0])}, ${fmt3(b[1])}), ${fmt3(registration.datum.lengthMm)} mm long ` +
+    `— no through-hole pair qualified — computed ${offset} (#965 registration)`
+  );
+}
+
 /**
  * THE ENTRY (#956 §3.0, filled in on F's check suite finding it still threw). One whole job — every
  * setup, every feature the tree recognises — planned through the model engine and returned as
@@ -342,12 +428,26 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
   const toolChangeSeconds = readDefault(liveShopDefaults(), 'toolChange.seconds').value;
   const perSetup: SetupPlan[] = [];
+  // #965 registration — setup 0's own recognised tree is the document-frame ground truth every
+  // later setup's locating features are read against (`registerSetupOrigin`'s own header on
+  // `setups.ts`). Kept across loop iterations for exactly that comparison; `null` only before
+  // setup 0 has run, which no setup ever observes (setup 0 never reads it).
+  let setup0Tree: FeatureTree | null = null;
 
   for (let setupIndex = 0; setupIndex < input.setups.length; setupIndex++) {
     opts.signal?.throwIfAborted();
     const spec = input.setups[setupIndex]!;
     opts.onProgress?.({ setupIndex, op: 'features', fraction: 0 });
     const tree = recogniseFeatures(input.geometry, spec.frame, tl);
+    if (setupIndex === 0) setup0Tree = tree;
+
+    // #965 registration — computed, never assumed. `registerSetupOrigin` THROWS, by name, when
+    // this part carries neither a reliable two-hole datum nor a long straight edge (see its own
+    // header): that throw is left to propagate out of `planModelCam` rather than caught and
+    // papered over with a nominal `[0, 0]`, per the issue's own ruling ("never falls back to a
+    // guessed/nominal origin"). Only setup 0 is ever registration-free (it IS the reference).
+    const registration: SetupRegistration | null = setupIndex === 0 ? null : registerSetupOrigin(setup0Tree!, tree);
+    const registrationOffset: [number, number] = registration?.offsetMm ?? [0, 0];
 
     const flats = input.cutters.house
       .filter((t) => t.shape === 'flat' && (cuttingDiameter(t) ?? 0) > 0)
@@ -381,6 +481,97 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     };
 
     opts.onProgress?.({ setupIndex, op: 'sequence', fraction: 0.4 });
+
+    // #965 — MULTI-SETUP TABS: a job with more than one setup must stay ONE piece of stock
+    // through the turn-over, so every setup but the LAST keeps the pocket chain's own default
+    // tabs (`DEFAULT_RELEASE_TABS`) on its freeing contour, whatever `spec.underside` says — the
+    // part is not released until it has nothing left to turn INTO. The LAST setup's freeing
+    // contour is the one that actually frees the part (`{ count: 0 }`, the pocket chain's own
+    // explicit-release case). A single-setup job (today's only real caller) is untouched: `tabs`
+    // is left unset, so `planPocketsForTree` keeps its own `DEFAULT_RELEASE_TABS` default exactly
+    // as before.
+    //
+    // STATED, NOT YET DONE (#965 open item — flagged in this issue's progress comment, not
+    // guessed): the LAST setup's freeing contour is still a FLAT-Z pass to `tree.contour.zTo`,
+    // the SAME op a single-setup job posts. #898 part 2's "tabbed freeing cut ... re-planned over
+    // the CL surface" — tracking the OTHER setup's already-cut 3D surface instead of one flat Z,
+    // so the final release cannot stand on (or cut into) whatever the earlier setup already
+    // shaped on what is now the underside — is NOT implemented: `contourOp`/`ops/contour.ts` has
+    // no CL-surface input today. A multi-setup job's last-setup release is therefore only as safe
+    // as `tree.contour.zTo` being shallow enough not to reach the opposite setup's cut, which this
+    // plan does not check.
+    const tabs =
+      input.setups.length <= 1
+        ? undefined
+        : setupIndex === input.setups.length - 1
+          ? { count: 0, width: DEFAULT_RELEASE_TABS.width, height: DEFAULT_RELEASE_TABS.height }
+          : DEFAULT_RELEASE_TABS;
+
+    // #965 — the per-setup mesh the curved pipeline's `clSurface` must score against: `recogniseFeatures`
+    // (above) already rotated `input.geometry` into THIS setup's frame to build `tree`; `clSurface`
+    // is handed `ModelPlanInput.geometry` at every call site inside `planCurvedForTree` and must see
+    // the SAME rotation, or a non-identity setup's drop-cutter reads the part's OLD orientation
+    // against a tree built in the NEW one (`rotatedGeometryFor`'s own doc). Identity for `up = [0, 0, 1]`
+    // (every job today), so this changes nothing for the existing single-setup caller.
+    const curvedGeometry = rotatedGeometryFor(input.geometry, spec.frame);
+
+    // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
+    // already-finished surface (this file's own #965 open-item note, below, used to be the whole
+    // story). Only the LAST of exactly two setups has an opposite one already planned — a single-
+    // setup job's `setupIndex` is never `> 0`, so `oppositeSafeDepthMm` stays `undefined` and
+    // `contourOp` behaves exactly as before (#959/#960's regression safety); the FIRST setup's own
+    // contour has no earlier setup to read either. `buildSetupSpecs`'s own stated scope (#965
+    // header) offers only `top`/`bottom` — `perSetup[0]` IS "the opposite setup" whenever this
+    // branch runs, never a guess at which earlier entry that is.
+    //
+    // The opposite setup's "finished surface" is read straight off the SAME design mesh
+    // (`input.geometry`, rotated into ITS frame — `rotatedGeometryFor`, the same helper `curvedGeometry`
+    // above uses) via a real drop-cutter height (`dropcutter.ts`, #957) — not `clGrid` (it carries
+    // only `{toleranceMm, minSpacingMm, maxSpacingMm}` per cutter, a report of what was sampled,
+    // never the sampled heights themselves, so it cannot answer "how deep is safe at (x, y)").
+    // Re-querying the mesh directly is the SAME ground truth `rough`/`rest`/`finish` already trust
+    // for "where the final surface is," not a second, divergent source.
+    //
+    // The cutter used to read it is THIS setup's own `primary` flat — not a guess: a LARGER radius
+    // leaves MORE material standing in a tight corner than the mesh's own mathematical surface
+    // (concave corners it cannot fully enter), so reading the opposite surface through the SAME
+    // tool radius that actually cut it is the conservative direction — it never reports less
+    // material remaining there than the real cut would leave.
+    let oppositeSafeDepthMm: ((x: number, y: number) => number | null) | undefined;
+    const freeingNotes: string[] = [];
+    if (setupIndex > 0 && setupIndex === input.setups.length - 1) {
+      const opposite = perSetup[0];
+      if (opposite === undefined) {
+        throw new Error('cam/model/plan: the last setup has no earlier setup planned yet to free against (#965) — the setup loop order is broken');
+      }
+      const [ux, uy, uz] = spec.frame.up;
+      if (ux === 0 && uy === 0 && uz === -1) {
+        const oppositeGeometry = rotatedGeometryFor(input.geometry, opposite.features.frame);
+        const profile = profileOf(primary);
+        if (profile === null) {
+          freeingNotes.push(
+            `setup ${setupIndex}: the freeing contour's depth could not be checked against setup 0's finished surface — ${primary.name || primary.shape} has no drop-cutter profile (#965) — it still cuts to this setup's own flat zTo`,
+          );
+        } else {
+          const mesh: DropCutterMesh = oppositeGeometry.triangles;
+          const frameForQuery = spec.frame;
+          // #965 review finding: this setup's own `registrationOffset` — the SAME one
+          // `mapIRToDocument` below places this setup's posted moves with — or the safety check
+          // and the real cut disagree about where a point is the moment registration is ever
+          // non-zero.
+          oppositeSafeDepthMm = (x: number, y: number): number | null =>
+            oppositeSurfaceSafeDepthMm(frameForQuery, profile, mesh, x, y, ARC_CHORD_TOLERANCE_MM, registrationOffset);
+          freeingNotes.push(
+            `setup ${setupIndex}: the freeing contour's depth is bounded, at every point its path samples, by setup 0's own finished surface (#965, #898 part 2) — it will not cut deeper than that surface, read through this setup's own ${primary.name || primary.shape}`,
+          );
+        }
+      } else {
+        freeingNotes.push(
+          `setup ${setupIndex}: this setup's frame is not the stated bottom flip (#965 scope: up = [0, 0, -1]) — the freeing contour is NOT checked against setup 0's surface and still cuts to this setup's own flat zTo`,
+        );
+      }
+    }
+
     const result = planTreePrograms(tree, {
       offset,
       pockets: {
@@ -392,9 +583,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         spindleRpm: pocketParams.rpm,
         air: true,
         boolean,
+        ...(tabs === undefined ? {} : { tabs }),
+        ...(oppositeSafeDepthMm === undefined ? {} : { oppositeSafeDepthMm }),
       },
       curved: {
-        geometry: input.geometry,
+        geometry: curvedGeometry,
         flat: primary,
         ...(ball === undefined ? {} : { ball }),
         ...(vbit === undefined ? {} : { vbit }),
@@ -424,7 +617,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const emptyStages: string[] = [];
     for (const op of result.ops) {
       if (op.outcome.ir.operations.some((operation) => operation.moves.length > 0)) {
-        ops.push(op);
+        // #965 — every op's posted IR is mapped to the DOCUMENT (world) XY here, once, before it
+        // becomes part of `SetupPlan.ops`/`programs`: identity for the top setup (`up = [0, 0, 1]`,
+        // every job today), the setup→document map for a flip (`setups.ts`'s own doc on why this
+        // is required before two setups' programs can be read on one goal grid).
+        ops.push({ ...op, outcome: { ...op.outcome, ir: mapIRToDocument(op.outcome.ir, spec.frame, registrationOffset) } });
         continue;
       }
       emptyStages.push(
@@ -460,7 +657,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       if (p > 0) totalCostSeconds += toolChangeSeconds;
     }
 
-    const notes = [...result.notes, ...emptyStages];
+    const notes = [...result.notes, ...emptyStages, ...freeingNotes];
     notes.push(...toolSubstitutions);
     if (input.fixture.envelope !== null) {
       notes.push(
@@ -469,6 +666,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
     if (input.cutters.catalogue.length > 0) {
       notes.push(`${input.cutters.catalogue.length} catalogue cutter(s) are not in the pocket chain yet — the house set is what it chooses from`);
+    }
+    // #965 — registration against setup 0's own cut features is now COMPUTED
+    // (`registerSetupOrigin`, `setups.ts`), not left to the operator's fixture/jig: the note
+    // states WHICH datum was found and the offset it produced, so the number is auditable rather
+    // than asserted. (The freeing-contour gap just below is a SEPARATE, still-open #965 item —
+    // the flat-Z release pass, not the registration this function now answers.)
+    if (setupIndex > 0) {
+      notes.push(describeRegistration(setupIndex, registration!));
+      // The freeing contour's own depth IS now bounded against the opposite setup's finished
+      // surface (above, `freeingNotes`) — this is no longer a stated gap; see that note for the
+      // actual outcome (or why it could not be checked) on THIS plan.
     }
 
     perSetup.push({
@@ -627,6 +835,10 @@ export interface PlanPocketsOptions {
   tabs?: { count: number; width: number; height: number };
   /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
   boolean?: { union: BooleanFn; subtract: BooleanFn };
+  /** `ContourOpOptions.oppositeSafeDepthMm`, carried straight through to the contour op when this
+   * setup's freeing cut must stay off the opposite setup's already-finished surface (#965). Absent
+   * for every single-setup job and the first of two — `contourOp` then behaves exactly as before. */
+  oppositeSafeDepthMm?: (x: number, y: number) => number | null;
 }
 
 /**
@@ -812,6 +1024,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         offset: opts.offset,
         params: cutParamsFor(cutter),
         rapid: opts.rapid,
+        ...(opts.oppositeSafeDepthMm === undefined ? {} : { oppositeSafeDepthMm: opts.oppositeSafeDepthMm }),
       });
     }
     if (id === 'facing') {
