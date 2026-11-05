@@ -25,6 +25,7 @@ const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
 const ball6: Tool = { ...flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6' }), shape: 'ball', typeText: 'Ball Nose' };
 const v90: Tool = flatEndMill(3.175, { number: 3, id: 'v90', name: '90 chamfer', shape: 'chamfer', typeText: 'Chamfer', angle: 90, halfAngle: 45, tipDiameter: 0.1 });
 const smallFlat: Tool = flatEndMill(1, { number: 9, id: 'flat-1', name: 'flat-1' });
+const flat3175: Tool = flatEndMill(3.175, { number: 4, id: 'flat-3.175', name: 'flat-3.175' });
 
 /** The `sloped` random part (seed 1) — the same working synthetic mesh the #959 plan specs use. */
 function input(owned: Tool[], catalogue: Tool[]): ModelPlanInput {
@@ -54,6 +55,18 @@ describe('#961/#975 the two plans', () => {
     // And the owned run is `planModelCam` over the owned set alone — the catalogue never leaks in.
     const directOwned = await planModelCam({ ...planInput, cutters: { house: owned, catalogue: [] } });
     expect(JSON.stringify(two.owned)).toBe(JSON.stringify(directOwned));
+  }, 120_000);
+
+  it('never refuses where an owned tool can do the job — even when the catalogue carries a better bit', async () => {
+    // The owned set plans the sloped part's pockets (the baseline planStageCatch959 pins that);
+    // the catalogue offers a ⌀1 flat that corners better. The OWNED plan must still plan the
+    // pockets with no refusal — the ruling's point 2 — and the ideal is the reference beside it.
+    const planInput = input([flat6, flat3175, ball6], [smallFlat]);
+    const two = await planTwoOutcomes(planInput);
+    const ownedUnplanned = two.owned.perSetup.flatMap((setup) => setup.unplanned);
+    expect(ownedUnplanned, JSON.stringify(ownedUnplanned)).toEqual([]);
+    expect(two.owned.perSetup[0]!.ops.some((op) => op.kind === 'pocket')).toBe(true);
+    expect(two.ideal).not.toBeNull();
   }, 120_000);
 
   it('states no ideal when the catalogue adds no cutter the owned set did not carry', async () => {

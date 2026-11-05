@@ -62,6 +62,8 @@ import { measurePostedProgram, combinePostedFacts } from '../tools/postedFacts';
 import { scoreSevenLines, type CutIntoScore, type ProgramScore, type SequenceReceipt, type SevenLineCard } from '../tools/sevenLines';
 import { makerablesRoot, readMakerablesManifest, resolveMakerablesCard } from '../tools/makerables';
 import { clearMakeraCatalogue, installMakeraCatalogue } from '../tools/makeraCatalogue';
+import { getTools } from '@/engine/cnc/toolRegistry';
+import { comparePlanOutcomes, type PlanTradeoff } from '../tools/tradeoff';
 import { feedRowsFor } from '../tools/feedRows';
 import { measureVendorCard } from '../tools/cardMeasurement';
 import { planModelCam, planPocketsForTree, planTreePrograms, type ModelPlanInput, type PlanPocketsResult, type SetupPlan } from '@/engine/cnc/cam/model/plan';
@@ -251,6 +253,9 @@ async function planCard(
   placed: Awaited<ReturnType<typeof placedTree>>,
   stock: { length: number; width: number },
   goal?: GoalHeightfield,
+  // #975 — the plan's candidate set. The default is the card's own (the vendor's set); the
+  // two-plan run passes the owned set and the owned ∪ catalogue set through the same entry.
+  cutters: { house: Tool[]; catalogue: Tool[] } = { house: VENDOR_SET, catalogue: [] },
 ): Promise<{ setup: SetupPlan; runs: { cutterKey: string; ir: ToolpathIR }[] }> {
   const positions = placed.mesh.positions;
   const min: [number, number, number] = [Infinity, Infinity, Infinity];
@@ -276,7 +281,7 @@ async function planCard(
     setups: [{ frame: { up: [0, 0, 1], stockTop: 0 }, underside: 'flatOnStockBottom' }],
     stock: { length: stock.length, width: stock.width, thickness, material: 'hardwood' },
     fixture: { mount: 'vise', envelope: viseEnvelope({ length: stock.length, width: stock.width, thickness }, vise) },
-    cutters: { house: VENDOR_SET, catalogue: [] },
+    cutters,
     tolerances: { finishMm: 0.01 },
     edgeBreak: { legMm: EDGE_BREAK_LEG_MM },
     // #961 — THE SIMULATED OUTCOME: the picker judges a candidate's completeness by what its own
@@ -378,7 +383,9 @@ function stampedTop(
 /** The vendor card beside ours, from the local Makerables references (the page's own measurement
  * path). Absent on a machine without them: the card is then unreferenced, never guessed. */
 function vendorScoreFor(name: string): ProgramScore | null {
-  const cardId = name === 'tray' ? 'tray70-top' : name === 'organizer' ? 'organizer-top' : null;
+  // The two-plan runs post under `tray-ideal` / `organizer-ideal`: the SAME reference card, so
+  // both plans are scored against the same vendor program (the ruling compares like with like).
+  const cardId = name.startsWith('tray') ? 'tray70-top' : name.startsWith('organizer') ? 'organizer-top' : null;
   if (cardId === null) return null;
   const manifest = readMakerablesManifest();
   const entry = manifest.cards.find((c) => c.card === cardId);
@@ -518,7 +525,12 @@ function sequenceReceipt(
   };
 }
 
-function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan, goal?: AcceptanceGoal): { coverage: number; adjudicatedFraction: number } | null {
+function writeAcceptance(
+  name: string,
+  tree: FeatureTree,
+  result: AcceptancePlan,
+  goal?: AcceptanceGoal,
+): { coverage: number; adjudicatedFraction: number; ours: ProgramScore; scored: SevenLineCard } | null {
   const { ops, programs, sequence, unreachable, notes } = result;
 
   const ctx: PostContext = {
@@ -621,7 +633,10 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
       (notes.length > 0 ? ` Notes: ${notes.join('; ')}` : ''),
   );
 
-  const measuredResult = measured === null ? null : { coverage: measured.coverage, adjudicatedFraction: measured.cutInto.adjudicatedFraction ?? 0 };
+  const measuredResult =
+    measured === null
+      ? null
+      : { coverage: measured.coverage, adjudicatedFraction: measured.cutInto.adjudicatedFraction ?? 0, ours: measured.ours, scored: measured.scored };
   const out = process.env.CM_959_OUT;
   if (out === undefined) return measuredResult;
   fs.mkdirSync(out, { recursive: true });
@@ -1233,6 +1248,42 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
   }, 900_000);
 });
 
+/**
+ * #975 — EVERY BIT THE APP KNOWS, as the ideal plan's candidate set: the owned set plus every
+ * cutter the tool library carries that the owned set does not (the same key/tool identity the
+ * planner's own de-duplication uses). In this environment the library is the builtin tier, so the
+ * extra is real but small — the ⌀1 flat is the one that matters on the tray (its pockets ask for
+ * ≤ 0.96 mm cutters the owned set does not have).
+ */
+function catalogueCutters(): Tool[] {
+  const identity = (t: Tool): string => `${t.id ?? ''}|${t.number ?? ''}|${t.name}|${t.tipDiameter ?? ''}|${t.shape}`;
+  const owned = new Set(VENDOR_SET.map(identity));
+  return getTools()
+    .map((entry) => entry.tool)
+    .filter((tool) => !owned.has(identity(tool)));
+}
+
+/** Write the two-plan comparison beside the card's own receipt. */
+function writeTwoPlans(outName: string, owned: { ours: ProgramScore; scored: SevenLineCard }, ideal: { ours: ProgramScore; scored: SevenLineCard } | null): PlanTradeoff | null {
+  const tradeoff = ideal === null ? null : comparePlanOutcomes({ score: owned.ours, card: owned.scored }, { score: ideal.ours, card: ideal.scored });
+  const out = process.env.CM_959_OUT;
+  if (out !== undefined) {
+    fs.writeFileSync(
+      path.join(out, `${outName}-two-plans.json`),
+      JSON.stringify(
+        {
+          owned: { coverage: owned.ours.coverage, cutInto: owned.ours.cutInto, cycleSeconds: owned.ours.cycleSeconds, sevenLines: owned.scored },
+          ideal: ideal === null ? null : { coverage: ideal.ours.coverage, cutInto: ideal.ours.cutInto, cycleSeconds: ideal.ours.cycleSeconds, sevenLines: ideal.scored },
+          tradeoff,
+        },
+        null,
+        1,
+      ),
+    );
+  }
+  return tradeoff;
+}
+
 describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedOut))('#959 acceptance — tool tray 70, the whole plan through the one entry', () => {
   it('plans the real part through planModelCam — pockets, the curved remainder and the rims — and posts every run', async () => {
     const placed = await placedTree(TRAY!, [110, 140], -1.2);
@@ -1267,6 +1318,24 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     const chosenSignature = setup.choice.steps.map((step) => `${step.kind}:${step.cutter.key}`).join('+');
     expect(restCandidate.steps.map((step) => `${step.kind}:${step.cutterKey}`).join('+')).toBe(chosenSignature);
     expect(setup.ops.filter((op) => op.kind === 'chamfer').length, 'no rim was broken at all').toBeGreaterThan(0);
+
+    // #975 — THE IDEAL PLAN, the same entry over every bit the tool library carries beside the
+    // owned set. Both plans are planned and simulated, the card prints both, and the tradeoff
+    // line is composed from the two scored cards: present exactly when the threshold says so.
+    const extra = catalogueCutters();
+    const idealRun = extra.length === 0 ? null : await planCard(placed, { length: 110, width: 140 }, goalField, { house: [...VENDOR_SET, ...extra], catalogue: [] });
+    const idealMeasured =
+      idealRun === null
+        ? null
+        : writeAcceptance(
+            'tray-ideal',
+            idealRun.setup.features,
+            { ops: idealRun.setup.ops, programs: idealRun.runs, sequence: idealRun.setup.sequence, unreachable: idealRun.setup.unreachable, notes: idealRun.setup.notes, choice: idealRun.setup.choice },
+            { target: placed.target, stock: { length: 110, width: 140 } },
+          );
+    if (idealRun !== null) expect(idealRun.setup.ops.length, `the ideal plan produced nothing: ${idealRun.setup.unreachable.join('; ')}`).toBeGreaterThan(0);
+    const tradeoff = writeTwoPlans('tray', { ours: measured!.ours, scored: measured!.scored }, idealMeasured === null ? null : { ours: idealMeasured.ours, scored: idealMeasured.scored });
+    if (tradeoff !== null) expect(tradeoff.line !== null, JSON.stringify(tradeoff.differences)).toBe(tradeoff.material);
   }, 1_800_000);
 });
 
@@ -1285,6 +1354,23 @@ describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.o
     // as the picker's rule changes — 98.61 % is its recorded figure on the engine-int base.
     expect(measured, 'the organizer measured nothing').not.toBeNull();
     expect(measured!.coverage, 'the organizer fell below its recorded coverage').toBeGreaterThanOrEqual(0.9861);
+
+    // #975 — the ideal plan beside the owned one, both simulated; the tradeoff line follows the
+    // threshold (see the tray's case for the same shape).
+    const extra = catalogueCutters();
+    const idealRun = extra.length === 0 ? null : await planCard(placed, { length: 170, width: 170 }, goalField, { house: [...VENDOR_SET, ...extra], catalogue: [] });
+    const idealMeasured =
+      idealRun === null
+        ? null
+        : writeAcceptance(
+            'organizer-ideal',
+            idealRun.setup.features,
+            { ops: idealRun.setup.ops, programs: idealRun.runs, sequence: idealRun.setup.sequence, unreachable: idealRun.setup.unreachable, notes: idealRun.setup.notes, choice: idealRun.setup.choice },
+            { target: placed.target, stock: { length: 170, width: 170 } },
+          );
+    if (idealRun !== null) expect(idealRun.setup.ops.length, `the ideal plan produced nothing: ${idealRun.setup.unreachable.join('; ')}`).toBeGreaterThan(0);
+    const tradeoff = writeTwoPlans('organizer', { ours: measured!.ours, scored: measured!.scored }, idealMeasured === null ? null : { ours: idealMeasured.ours, scored: idealMeasured.scored });
+    if (tradeoff !== null) expect(tradeoff.line !== null, JSON.stringify(tradeoff.differences)).toBe(tradeoff.material);
   }, 1_800_000);
 });
 
