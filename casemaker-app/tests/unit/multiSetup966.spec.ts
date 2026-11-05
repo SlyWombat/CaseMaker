@@ -33,20 +33,17 @@ afterEach(() => {
 });
 
 describe('#966 ROUND 3 — generateGoalProgram posts and verifies a real multi-setup plan', () => {
-  it('flag off (the default): unaffected by the override — the old heightfield engine still runs, green', async () => {
-    const L = 40, W = 30, T = 20;
-    const job = jobFor(boxTarget('goal-966-ms-off', L, W, T), L, W, T);
-    const result = await generateGoalProgram(job, job.targetObject!, FLAT3, [], null, SHOP, undefined, undefined, twoSetups(T));
-    expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
-    expect(result.ok).toBe(true);
-    expect(result.plan ?? null).toBeNull();
-  }, 90_000);
+  // "flag off (the default): unaffected by the override — the old heightfield engine still runs,
+  // green" is deleted here, not fixed: #966 removed the USE_MODEL_CAM_ENGINE seam, so there is no
+  // more flag-off path to be unaffected on — generateGoalProgram always plans through planModelCam
+  // now, and result.plan is never null for a real run. The maintainer's ruling on #966: anything
+  // asserting a flag-off path is deleted, the premise no longer exists.
 
   it('flag on: planModelCam plans two setups, every setup\'s programs post and verify, plan carries the full ModelPlanOutput', async () => {
     setModelCamEnabled(true);
     const L = 40, W = 30, T = 20;
     const job = jobFor(boxTarget('goal-966-ms-on', L, W, T), L, W, T);
-    const result = await generateGoalProgram(job, job.targetObject!, FLAT3, [], null, SHOP, undefined, undefined, twoSetups(T));
+    const result = await generateGoalProgram(job, job.targetObject!, FLAT3, null, SHOP, twoSetups(T));
 
     expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
     expect(result.ok).toBe(true);
@@ -92,7 +89,7 @@ describe('#966 ROUND 3 — the registration refusal surfaces as a named stage fa
     // scale): `registerSetupOrigin` has nothing to anchor setup 1 against setup 0 with.
     const L = 5, W = 5, T = 3;
     const job = jobFor(boxTarget('goal-966-ms-refuse', L, W, T), L, W, T);
-    const result = await generateGoalProgram(job, job.targetObject!, FLAT3, [], null, SHOP, undefined, undefined, twoSetups(T));
+    const result = await generateGoalProgram(job, job.targetObject!, FLAT3, null, SHOP, twoSetups(T));
 
     expect(result.ok).toBe(false);
     expect(result.stage).toBe('cam');

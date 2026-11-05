@@ -27,7 +27,7 @@ import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import { buildModelPlanInputForGoal, generateGoalProgram, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { buildModelPlanInputForGoal, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import { tl } from './helpers/manifoldExec';
 import { buildRandomPart } from '../tools/randomParts';
 
@@ -131,14 +131,12 @@ const SHOP: EngraveShopOpts = {
 };
 
 describe('#966 — generateGoalProgram routes through cam/model behind USE_MODEL_CAM_ENGINE', () => {
-  it('flag off (the default): the old heightfield engine runs, green', async () => {
-    const job = jobFor(goalTarget());
-    const result = await generateGoalProgram(job, job.targetObject!, BALL, [], null, SHOP);
-    expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
-    expect(result.ok).toBe(true);
-    expect(result.stage).toBe('done');
-    expect(result.nc).not.toBeNull();
-  });
+  // "flag off (the default): the old heightfield engine runs, green" is deleted here, not fixed:
+  // #966 removed the seam this test pinned (the if/else in generateGoalProgram), so there is no
+  // more flag-off path for the old engine to run on. The maintainer's ruling on #966: anything
+  // asserting a flag-off path is deleted, the premise no longer exists. This whole describe (and
+  // its vi.doMock('USE_MODEL_CAM_ENGINE: true') below, now mocking a binding nothing reads) is
+  // part of this file's larger pending rewrite against the removed engine.
 
   it('flag on: the open dome sheet is closed with a skirt and the seam posts its program (#966 open meshes)', async () => {
     vi.doMock('@/engine/cnc/cam/model/plan', async (importOriginal) => {
@@ -149,7 +147,7 @@ describe('#966 — generateGoalProgram routes through cam/model behind USE_MODEL
     const { generateGoalProgram: generateGoalProgramModelCam } = await import('@/workers/sim/engraveGenerate');
 
     const job = jobFor(goalTarget());
-    const result = await generateGoalProgramModelCam(job, job.targetObject!, BALL, [], null, SHOP);
+    const result = await generateGoalProgramModelCam(job, job.targetObject!, BALL, null, SHOP);
 
     // #966 open-mesh repair: the dome fixture is an open sheet (a polar grid with its rim and
     // nothing under it). It used to die at the kernel as a bare "Not manifold"; the goal path now
@@ -220,14 +218,8 @@ describe('#966 ROUND 2 — generateGoalProgram flag ON posts and verifies every 
     return { job, goal, shop, tool: BALL2 };
   }
 
-  it('flag off (the default) still runs the old heightfield engine, green — the cutover changes nothing with the flag off', async () => {
-    const { job, goal, shop, tool } = randomPartJob(1);
-    const result = await generateGoalProgram(job, goal, tool, [], null, shop);
-    expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
-    expect(result.ok).toBe(true);
-    expect(result.stage).toBe('done');
-    expect(result.nc).not.toBeNull();
-  }, 60_000);
+  // "flag off (the default) still runs the old heightfield engine, green" is deleted here too,
+  // same reason as ROUND 1's above: no flag-off path left to run.
 
   it('flag on: planModelCam fully plans this job, every posted program passes verifyProgram', async () => {
     vi.doMock('@/engine/cnc/cam/model/plan', async (importOriginal) => {
@@ -238,7 +230,7 @@ describe('#966 ROUND 2 — generateGoalProgram flag ON posts and verifies every 
     const { generateGoalProgram: generateGoalProgramModelCam } = await import('@/workers/sim/engraveGenerate');
 
     const { job, goal, shop, tool } = randomPartJob(1);
-    const result = await generateGoalProgramModelCam(job, goal, tool, [], null, shop);
+    const result = await generateGoalProgramModelCam(job, goal, tool, null, shop);
 
     expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
     expect(result.ok).toBe(true);
