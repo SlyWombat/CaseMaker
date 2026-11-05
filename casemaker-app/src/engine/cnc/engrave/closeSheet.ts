@@ -26,7 +26,6 @@ import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 
 type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
 type CrossSectionInstance = InstanceType<ManifoldToplevel['CrossSection']>;
-type MeshInstance = InstanceType<ManifoldToplevel['Mesh']>;
 
 /** A goal mesh that is open and cannot be closed by the skirt rule. The message carries the code,
  * the count and the reason — callers surface it verbatim (#966: a named refusal, never a kernel
@@ -276,10 +275,9 @@ export function closeOpenSheet(tl: ManifoldToplevel, mesh: ParsedMesh, opts: Clo
 
   // THE KERNEL KEEPS ITS CHECK — the same one `solidOf` will run. Weld first (`merge`), as there.
   {
-    let mm: MeshInstance | null = null;
     let solid: ManifoldInstance | null = null;
     try {
-      mm = new tl.Mesh({ numProp: 3, vertProperties: outPositions, triVerts: outIndices });
+      const mm = new tl.Mesh({ numProp: 3, vertProperties: outPositions, triVerts: outIndices });
       mm.merge();
       solid = new tl.Manifold(mm);
     } catch (err) {
