@@ -8,9 +8,13 @@
  * `2r + stepOver + 0.25` (≈3.4 mm on the tray's ⌀3.175), and the pocket rings fill that grown
  * region — most of every ring is over cleared floor.
  *
- * The criterion pinned here: every rest feed point lies within the cutter's own radius of a cell
- * the leftover marks as standing (a cell farther than r from standing material cannot be touched
- * by the disc, so feeding there is pure air travel), and the standing strip is still cut.
+ * The criterion pinned here: every rest feed point lies within the cutter's own radius (plus the
+ * 0.25 mm margin the region carries) of a cell the leftover marks as standing — a point farther
+ * than that cannot have its disc touch standing material, so feeding there is pure air travel —
+ * and the standing strip is still cut. The dilation itself is 2r + 0.25, not r: `pocketLoops`
+ * erodes by r before it rings, and a strip grown only to r leaves a region narrower than the
+ * cutter's diameter and emits NO toolpath at all — the first fix at r lost six of the tray's
+ * seven rest passes and 0.31 points of coverage.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -77,16 +81,17 @@ describe('#962 — a coverage rest feeds only where the leftover stands', () => 
     const feeds = restFeeds(result);
     expect(feeds.length, `ops: ${result.ops.map((o) => `${o.kind}:${o.outcome.ir.tool.id ?? o.outcome.cutter}`).join(', ')}`).toBeGreaterThan(0);
     const r = 3.175 / 2;
+    const reach = r + 0.25;
     let far = 0;
     let worst = 0;
     for (const p of feeds) {
       const dx = p.x < 10 ? 10 - p.x : p.x > 14 ? p.x - 14 : 0;
       const dy = p.y < 9 ? 9 - p.y : p.y > 11 ? p.y - 11 : 0;
       const d = Math.hypot(dx, dy);
-      if (d > r + 1e-6) far++;
+      if (d > reach + 1e-6) far++;
       if (d > worst) worst = d;
     }
-    expect(far, `${far} of ${feeds.length} rest feed points are farther than r=${r} from the standing strip (worst ${worst.toFixed(2)} mm) — the rest is cutting cleared floor`).toBe(0);
+    expect(far, `${far} of ${feeds.length} rest feed points are farther than the disc's reach ${reach} from the standing strip (worst ${worst.toFixed(2)} mm) — the rest is cutting cleared floor`).toBe(0);
   });
 
   it('the standing strip is still cut: a feed point lands on or beside it', () => {

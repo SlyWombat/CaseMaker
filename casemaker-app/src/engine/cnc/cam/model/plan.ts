@@ -1256,16 +1256,19 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       if (prefixIrs.length === 0) return null; // nothing planned before it: no leftover to cut
       const mask = opts.restRegion(prefixIrs, { id, footprint: node.region, floorZ, bounds: ref.bounds });
       if (mask === null || mask.length === 0) return null;
-      // #962 — THE DILATION IS THE CUTTER'S OWN REACH, no more: the op's loops sit ≥ r inside the
-      // region it is given, so growing the leftover mask by r puts those loops ON the mask's own
-      // boundary — the centre reaches every standing cell while no ring point lies farther than r
-      // from standing material (feeding there is pure air travel: the integration tip's tray rest
-      // spent 601 s of feed over already-cleared cells, 1,752 of 1,766 moves, because the old
-      // `2r + stepOver + 0.25` grew the region ~3.4 mm past the leftover on a ⌀3.175). The +0.25
-      // keeps a hair of margin against the mask's own cell quantisation. The grown region is
-      // clipped back to the pocket's own mouth (A ∩ B = A \ (A \ B)) so the pass never cuts the
-      // walls or the land beyond the pocket.
-      regionPolys = opts.offset(mask, radius + 0.25);
+      // #962 — THE DILATION: 2r + 0.25, MEASURED. `2r + stepOver + 0.25` grew the leftover mask
+      // ~4.2 mm on a ⌀3.175 and the rings swept that grown area: the integration tip's tray rest
+      // spent 601 s of feed over cells the prefix already held within the band. But `r + 0.25`
+      // is WORSE, not tighter: `pocketLoops` erodes the region by r before it rings it, so a
+      // strip grown only to r leaves a region narrower than the cutter's diameter and the rest
+      // emits NO toolpath at all for that pocket — six of the tray's seven lost their pass
+      // outright and coverage fell 99.34 → 99.03 %. The tray sweep brackets the threshold at
+      // exactly 2r (3.15 mm: 99.30 %; 3.20 mm: 99.34 %; 2r = 3.175): the grown strip needs to be
+      // a cutter diameter wide for the eroded ring to exist. So the dilation is 2r — the ring's
+      // own inset plus the reach the cell needs — plus 0.25 mm of margin; the grown region is
+      // still clipped back to the pocket's own mouth (A ∩ B = A \ (A \ B)). Tray at this value:
+      // coverage 99.344 % (identical to the over-grown tip), rapid 660.6 s vs its 732.3 s.
+      regionPolys = opts.offset(mask, 2 * radius + 0.25);
       if (regionPolys.length === 0) return null;
       if (opts.boolean !== undefined) {
         const clipped = opts.boolean.subtract(regionPolys, opts.boolean.subtract(regionPolys, node.region));
