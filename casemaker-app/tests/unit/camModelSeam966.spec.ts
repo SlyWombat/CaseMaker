@@ -291,5 +291,27 @@ describe('#966 ROUND 2 — generateGoalProgram flag ON posts and verifies every 
     expect(withCatalogue.planTradeoff!.differences.some((d) => d.bound === 'verdicts' && d.reading.includes('not scored'))).toBe(true);
     // No catalogue → no ideal → no tradeoff to state.
     expect(without.planTradeoff ?? null).toBeNull();
+    // With no recorded choice the OWNED plan is what posts (the default).
+    expect(withCatalogue.plan).not.toBe(withCatalogue.planIdeal);
+
+    // #961 (the card slice, step 3) — THE OPERATOR'S CHOICE IS WHAT CUTS. With `planChoice:'ideal'`
+    // the ideal plan is the one carried as `plan` (what posts), and the tradeoff still reads
+    // owned-versus-ideal.
+    const chosen = await generateGoalProgramModelCam(
+      { ...job, planChoice: 'ideal' as const },
+      goal,
+      tool,
+      [],
+      null,
+      shop,
+      undefined,
+      undefined,
+      undefined,
+      [catalogueTool],
+    );
+    expect(chosen.ok, chosen.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toBe(true);
+    expect(chosen.planIdeal).not.toBeNull();
+    expect(chosen.plan).toBe(chosen.planIdeal);
+    expect(chosen.planTradeoff).not.toBeNull();
   }, 240_000);
 });

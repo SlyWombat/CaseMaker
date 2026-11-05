@@ -31,7 +31,7 @@
  *     but not for a CAM or POST refusal, and a refusal with no reason is useless in the panel.
  */
 
-import type { EngraveFaceItem, EngraveItem, EngraveJob, EngraveMargins, EngraveRectShape, EngraveShape, EngraveTargetObject } from '@/types/engraveJob';
+import { planChoiceOf, type EngraveFaceItem, type EngraveItem, type EngraveJob, type EngraveMargins, type EngraveRectShape, type EngraveShape, type EngraveTargetObject } from '@/types/engraveJob';
 import type { TextFont } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
@@ -5135,10 +5135,14 @@ export async function generateGoalProgram(
     let planTradeoff: PlanTradeoff | null = null;
     try {
       const two = await planTwoOutcomes(input);
-      output = two.owned;
+      // #961 (the card slice, step 3) — THE OPERATOR'S CHOICE IS WHAT CUTS. `planChoiceOf` reads
+      // the job's recorded choice with the OWNED plan as the default; the ideal posts only when it
+      // exists. The tradeoff below is always owned-versus-ideal, whichever one posted.
+      const chosenIdeal = planChoiceOf(job) === 'ideal' && two.ideal !== null;
+      output = chosenIdeal ? two.ideal! : two.owned;
       idealPlan = two.ideal;
-      if (idealPlan?.outcome !== undefined && output.outcome !== undefined) {
-        planTradeoff = comparePlanOutcomes({ score: output.outcome }, { score: idealPlan.outcome });
+      if (two.ideal?.outcome !== undefined && two.owned.outcome !== undefined) {
+        planTradeoff = comparePlanOutcomes({ score: two.owned.outcome }, { score: two.ideal.outcome });
       }
     } catch (e) {
       return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
