@@ -759,7 +759,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // pipeline plans with the ball (its rough, then the ball's scallop finish). The floor is
     // CLAMPED at the real design top over the opening: a spurious pocket floor below the body
     // (the 11.37 mm gouge) yields no depth, so the ball can never cut through the part.
-    let pocketFloorRegions: RemainderRegion[] = [];
+    const pocketFloorRegions: RemainderRegion[] = [];
     if (noFlatFallback) {
       const bins = buildTriangleBins(input.geometry.triangles);
       const walkPockets = (nodes: PocketNode[]): void => {
