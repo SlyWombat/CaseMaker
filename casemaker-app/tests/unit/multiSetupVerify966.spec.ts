@@ -34,19 +34,113 @@
  * `program.verify.ok === true` (equivalent to "no error-severity finding") for every posted
  * program, exactly as `multiSetup966.spec.ts`'s own ROUND 3 case already does by filtering on
  * `severity === 'error'`.
+ *
+ * THE SPHERE CASE, IMPLEMENTED (not the TODO's own guess at the shape): `966-goal-setups` has
+ * since landed `buildModelPlanInputForGoal`'s real `buildSetupSpecs`/`registerSetupOrigin`
+ * decision (`c099c5cc`) — run against a bare UV sphere, that decision correctly REFUSES (no two
+ * holes, no usable edge for the vise-flip registration to anchor on, `cam/model/setups.ts`'s own
+ * by-design correctness). So the sphere case below is a REFUSAL assertion, not a verify
+ * assertion — there is nothing posted to verify once the plan itself refuses. The claim this
+ * file's own header promises ("every program a multi-setup goal posts passes the real verifier")
+ * is instead proved on a SECOND, NEW case: the same datum-bearing shape
+ * `goalEngineEndState966.spec.ts`'s own part 2 uses (`tests/unit/helpers/datumTwoSetup966.ts`,
+ * shared rather than forked a third time) — curved all the way round like the sphere (so it
+ * genuinely needs the flip too), but carrying one real, un-mirrored locating edge
+ * `registerSetupOrigin` finds in both setups, so it posts both setups' programs instead of
+ * refusing.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
-import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
-import { setModelCamEnabled } from '@/engine/cnc/cam/model/plan';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { generateGoalProgram, buildModelPlanInputForGoal, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { planModelCam, setModelCamEnabled } from '@/engine/cnc/cam/model/plan';
 // The box fixture is `multiSetup966.spec.ts`'s own — factored into a shared helper so this spec
 // drives the SAME geometry instead of forking a second copy of the fixture logic.
 import { boxTarget, jobFor, FLAT3, SHOP, twoSetups } from './helpers/twoSetupBox966';
+// The datum fixture is `goalEngineEndState966.spec.ts`'s own part 2 helper — shared, not forked a
+// third time (this file's own header).
+import { buildDatumGoal } from './helpers/datumTwoSetup966';
 
 afterEach(() => {
   clearTargetObjectMeshCache();
   setModelCamEnabled(false);
+  vi.restoreAllMocks();
+  vi.doUnmock('@/engine/cnc/cam/model/plan');
+  vi.resetModules();
 });
+
+// ── The bare sphere — the SAME triangle construction `goalEngineEndState966.spec.ts`'s and
+// `goalSetups966.spec.ts`'s own part 2 fixtures use, reused by copy (their own established
+// convention: each #966 spec carries its own copy of this plain STL encoder rather than share a
+// module across issues that do not otherwise depend on each other). Curved all the way round, no
+// flat underside anywhere, so `buildSetupSpecs` genuinely decides it needs the flip — and, having
+// neither a through-hole pair nor a usable straight edge, `registerSetupOrigin` genuinely refuses
+// it (#965 registration), never a guessed nominal origin. ──
+type V3 = [number, number, number];
+type Tri3 = [V3, V3, V3];
+
+function sphereStl(tris: readonly Tri3[]): string {
+  const buf = new ArrayBuffer(84 + tris.length * 50);
+  const dv = new DataView(buf);
+  dv.setUint32(80, tris.length, true);
+  let off = 84;
+  for (const t of tris) {
+    off += 12;
+    for (const v of t) {
+      dv.setFloat32(off, v[0], true);
+      dv.setFloat32(off + 4, v[1], true);
+      dv.setFloat32(off + 8, v[2], true);
+      off += 12;
+    }
+    off += 2;
+  }
+  return Buffer.from(new Uint8Array(buf)).toString('base64');
+}
+
+const SPHERE_R = 15;
+function sphereTris(r: number, rings = 16, segs = 32): Tri3[] {
+  const at = (i: number, j: number): V3 => {
+    const phi = (i / rings) * Math.PI;
+    const theta = (j / segs) * 2 * Math.PI;
+    return [r + r * Math.sin(phi) * Math.cos(theta), r + r * Math.sin(phi) * Math.sin(theta), r - r * Math.cos(phi)];
+  };
+  const tris: Tri3[] = [];
+  for (let i = 0; i < rings; i++) {
+    for (let j = 0; j < segs; j++) {
+      const a = at(i, j), b = at(i + 1, j), c = at(i + 1, j + 1), d = at(i, j + 1);
+      tris.push([a, c, b], [a, d, c]);
+    }
+  }
+  return tris;
+}
+function sphereGoal(): EngraveTargetObject {
+  return {
+    id: 'goal-sphere-verify966', name: 'sphere-verify966.stl', format: 'stl', sha256: 'e'.repeat(64), data: sphereStl(sphereTris(SPHERE_R)),
+    size: { x: 2 * SPHERE_R, y: 2 * SPHERE_R, z: 2 * SPHERE_R }, position: { x: SPHERE_R, y: SPHERE_R, z: 0 }, rotation: 0, enabled: true, role: 'goal',
+    underside: { kind: 'flipped-tabs' },
+  };
+}
+
+function entry(key: string, tool: Tool): ToolLibraryEntry {
+  return { key, tool: { ...tool, id: key, number: null }, provenance: 'test fixture' };
+}
+
+function jobForGoal(target: EngraveTargetObject, stock: { length: number; width: number; thickness: number }): EngraveJob {
+  return {
+    ...defaultEngraveJob(),
+    labels: [],
+    shapes: [],
+    stock: { ...defaultEngraveJob().stock, ...stock },
+    targetObject: target,
+  };
+}
+
+const BALL: Tool = flatEndMill(2, { number: 1, id: 'ball-2', name: 'ball-2', shape: 'ball', typeText: 'Ball Nose' });
+const FLAT: Tool = flatEndMill(3, { number: 2, id: 'flat-3-datum', name: 'flat-3-datum' });
+const DATUM_SHOP: EngraveShopOpts = { tools: [entry('inv:ball-2', BALL), entry('inv:flat-3-datum', FLAT)] };
 
 describe('#966 — every program a multi-setup goal posts passes the real verifier end to end', () => {
   it('two-setup box: every posted program, both setups, carries a VerifyReport with zero error-severity findings', async () => {
@@ -79,14 +173,61 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
     }
   }, 30_000);
 
-  // TODO(#966): a sphere goal (a second, distinct analytic shape, alongside the box above) is the
-  // Manager's own next step for THIS spec — but `buildModelPlanInputForGoal` does not yet decide
-  // setups for a real goal job on its own; only the `setupsOverride`/`modelSetupsOverride` test
-  // seam reaches `planModelCam` with more than one setup today. `966-goal-setups` (a separate,
-  // parallel session) is mid-change on exactly that function right now. Enable this case once
-  // 966-goal-setups lands buildModelPlanInputForGoal's real setup decision (#966) — do not
-  // implement it before then; the fixture and assertions above are its own pattern to follow.
-  it.skip('two-setup SPHERE goal: every posted program, both setups, carries a VerifyReport with zero error-severity findings', () => {
-    // Intentionally left unimplemented — see the TODO above.
-  });
+  // IMPLEMENTED (966-goal-setups landed `buildModelPlanInputForGoal`'s real setup decision,
+  // `c099c5cc`): a bare sphere genuinely needs two setups (`buildSetupSpecs` says so, below), but
+  // carries neither a through-hole pair nor a usable straight edge for `registerSetupOrigin` to
+  // anchor the vise-flip registration on — so it REFUSES, by name, rather than posting a silent
+  // single-side `ok: true`. A refusal-assertion, not a verify-assertion: nothing is posted to
+  // verify once the plan itself refuses.
+  it('two-setup SPHERE goal: refuses BY NAME through registerSetupOrigin — never a silent single-setup ok:true', async () => {
+    const job = jobForGoal(sphereGoal(), { length: 2 * SPHERE_R, width: 2 * SPHERE_R, thickness: 2 * SPHERE_R });
+    const goal = job.targetObject!;
+    const input = buildModelPlanInputForGoal(job, goal, BALL, DATUM_SHOP);
+    // The real decision still proposes two setups — the refusal below is `registerSetupOrigin`'s
+    // own (no locating datum), never a setup-count problem.
+    expect(input.setups).toHaveLength(2);
+    await expect(planModelCam(input)).rejects.toThrow(/no locating features found for the vise flip \(#965 registration\)/);
+
+    setModelCamEnabled(true);
+    const result = await generateGoalProgram(job, goal, BALL, [], null, DATUM_SHOP);
+    expect(result.ok).toBe(false);
+    expect(
+      result.errors.some((e) => /no locating features found for the vise flip \(#965 registration\)/.test(e.message)),
+      `expected a #965 registration refusal; got: ${JSON.stringify(result.errors)}`,
+    ).toBe(true);
+    // Never the false-green shape this case guards against.
+    expect(result.programs).toEqual([]);
+  }, 30_000);
+
+  // NEW (the Manager's ruling, #966): the datum-bearing shape proves what the sphere above cannot
+  // — a goal that genuinely needs two setups, carries a real locating datum, and posts EVERY
+  // program across BOTH setups with zero error-severity findings, through the REAL
+  // `buildModelPlanInputForGoal` decision (no `modelSetupsOverride` test seam).
+  it('two-setup DATUM goal: every posted program, both setups, carries a VerifyReport with zero error-severity findings', async () => {
+    setModelCamEnabled(true);
+    const { goal, stock } = await buildDatumGoal();
+    const job = jobForGoal(goal, stock);
+    const input = buildModelPlanInputForGoal(job, goal, BALL, DATUM_SHOP);
+    expect(input.setups).toHaveLength(2);
+
+    const result = await generateGoalProgram(job, goal, BALL, [], null, DATUM_SHOP);
+
+    expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.stage).toBe('done');
+
+    // Non-vacuous: both setups actually posted programs.
+    expect(result.programs.length).toBeGreaterThan(0);
+    const setupIndexes = [...new Set(result.programs.map((p) => p.setupIndex))].sort();
+    expect(setupIndexes).toEqual([1, 2]);
+
+    for (const program of result.programs) {
+      const label = `setup ${program.setupIndex}/${program.toolKey}`;
+      expect(program.nc, `${label}: no posted text`).toBeTruthy();
+      expect(program.verify, `${label}: no verify report`).not.toBeNull();
+      const errors = program.verify!.findings.filter((f) => f.severity === 'error');
+      expect(errors, `${label}: ${errors.map((e) => e.message).join('; ')}`).toEqual([]);
+      expect(program.verify!.ok, `${label}: verify.ok should agree with "no error-severity finding"`).toBe(true);
+    }
+  }, 30_000);
 });
