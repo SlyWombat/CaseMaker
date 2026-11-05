@@ -59,6 +59,14 @@ export interface FinishOpOptions {
   spindleRpm: number;
   air: boolean;
   rapid: RapidEstimate;
+  /**
+   * ITEM 4a — WHERE THIS FINISH MAY CUT. The plan hands the cells where the flat's passes left
+   * more than the band standing (`leftover = flatSwept − design > band`, dilated by the ball's own
+   * footprint). Absent → the whole region, exactly as before. A row is split into the contiguous
+   * runs this mask admits; the gaps between runs are `link()`'s job, the same rule as the
+   * footprint's own notches.
+   */
+  maskCells?: (x: number, y: number) => boolean;
 }
 
 /**
@@ -217,8 +225,23 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         const insetY1 = rawY1 - Math.sign(rawY1 - rawY0) * FOOTPRINT_EDGE_INSET_MM;
         if (Math.abs(insetY1 - insetY0) <= 1e-9 || (insetY1 - insetY0) * (rawY1 - rawY0) < 0) continue; // the interval is narrower than the inset: nothing to cut
         const row = dropRow(opts.clSurface, [x, insetY0], [x, insetY1]);
-        const clamped = row.map((p) => ({ ...p, z: Math.max(p.z, levelZ) }));
+        const clampedAll = row.map((p) => ({ ...p, z: Math.max(p.z, levelZ) }));
 
+        // ITEM 4a — the row's points are cut only where the plan's mask admits them; each
+        // contiguous admitted run is emitted as its own cut, and the gaps go to link().
+        const runs: (typeof clampedAll)[] = [];
+        if (opts.maskCells === undefined) {
+          runs.push(clampedAll);
+        } else {
+          let current: typeof clampedAll = [];
+          for (const p of clampedAll) {
+            if (opts.maskCells(p.x, p.y)) current.push(p);
+            else if (current.length > 0) { runs.push(current); current = []; }
+          }
+          if (current.length > 0) runs.push(current);
+        }
+        for (const clamped of runs) {
+          if (clamped.length < 2) continue;
         const entryPoint: LinkPoint = { x: clamped[0]!.x, y: clamped[0]!.y, z: clamped[0]!.z };
         if (prevExit === null) {
           // The row's own FIRST feed is a PLUNGE (straight down from the hop height into
@@ -246,6 +269,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         prevExit = exitPoint;
         prevLevelZ = levelZ;
         rowParity++;
+        }
       }
     }
     cleared.push({ z: levelZ, boundary: levelCleared });
