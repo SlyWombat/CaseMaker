@@ -97,7 +97,7 @@ function plan(withRestBall: boolean) {
     safeZMm: 5,
     hopZMm: 1,
     edgeBreak: { legMm: 0 },
-    toolNumberFor: (t) => t.number ?? 1,
+    toolNumberFor: (t: Tool) => t.number ?? 1,
   } as never);
 }
 

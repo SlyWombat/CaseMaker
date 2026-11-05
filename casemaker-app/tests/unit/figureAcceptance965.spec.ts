@@ -52,7 +52,8 @@ import { checkGoalCutInto, type GoalCutIntoOptions } from '@/engine/cnc/engrave/
 import { vToolAllowance } from '@/engine/cnc/engrave/edgeBreak';
 import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { measurePostedProgram, combinePostedFacts } from '../tools/postedFacts';
-import { scoreSevenLines, type CutIntoScore, type ProgramScore } from '../tools/sevenLines';
+import { scoreSevenLines, type CutIntoScore, type ProgramScore, type SevenLineCard } from '../tools/sevenLines';
+import { comparePlanOutcomes } from '../tools/tradeoff';
 import { clearMakeraCatalogue, installMakeraCatalogue } from '../tools/makeraCatalogue';
 import { feedRowsFor } from '../tools/feedRows';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
@@ -89,6 +90,20 @@ const FLAT3175: Tool = flatEndMill(3.175, { number: 2, id: '111011313825', name:
 const BALL2: Tool = { ...flatEndMill(2, { number: 3, id: '131012203812', name: 'ball-2' }), typeText: 'Ball Nose', shape: 'ball' };
 const BALL05: Tool = { ...flatEndMill(0.5, { number: 4, id: 'ball-0.5', name: 'ball-0.5' }), typeText: 'Ball Nose', shape: 'ball' };
 const HOUSE = [FLAT6, FLAT3175, BALL2, BALL05];
+/** #965 — the catalogue's long Ø1 (6*1*30.5mm Ball Nose Engraving, 161032105031): a 1 mm ball on
+ * a 6 mm shank with a 30.5 mm flute. The review session's rest ball: the house's 0.5 and the short
+ * Ø1 fail on REACH, this one reaches the figures' relief. */
+const BALL1_LONG: Tool = {
+  ...flatEndMill(1, { number: 5, id: '161032105031', name: '6*1*30.5mm Ball Nose Engraving' }),
+  shape: 'ball',
+  typeText: 'Ball Nose Engraving',
+  handleDiameter: 6,
+  tipDiameter: 1,
+  diameter: 6,
+  cornerRadius: 0.5,
+  fluteLength: 30.5,
+  shoulderLength: 30.5,
+};
 
 /** The job's target as the goal's own door (the mesh bytes are the local file, injected by sha). */
 function targetOf(job: EngraveJob, bytes: Buffer, filePath: string): EngraveTargetObject {
@@ -150,7 +165,7 @@ function goalField(job: EngraveJob, bytes: Buffer, filePath: string): GoalHeight
 }
 
 /** The consumed programme's jobs. */
-function planInputFor(job: EngraveJob, source: { triangles: ParsedMesh }): ModelPlanInput {
+function planInputFor(job: EngraveJob, source: { triangles: ParsedMesh }, withLongBall = false): ModelPlanInput {
   return {
     geometry: source,
     setups: [{ frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -job.stock.thickness }, underside: 'flatOnStockBottom' }],
@@ -161,7 +176,7 @@ function planInputFor(job: EngraveJob, source: { triangles: ParsedMesh }): Model
       material: job.stock.material,
     },
     fixture: { mount: job.workholding.kind === 'vise' ? 'vise' : 'tape', envelope: job.workholding.kind === 'vise' ? viseEnvelope(job.stock, jobVise(job), job.sacrificial) : null },
-    cutters: { house: HOUSE, catalogue: [] },
+    cutters: { house: withLongBall ? [...HOUSE, BALL1_LONG] : HOUSE, catalogue: [] },
     tolerances: { finishMm: 0.01 },
     edgeBreak: { legMm: 0 },
   };
@@ -231,6 +246,141 @@ function wholeSurfaceTop(
   };
 }
 
+interface FigureRun {
+  output: Awaited<ReturnType<typeof planModelCam>>;
+  programs: { ir: ToolpathIR; text: string }[];
+  coverage: number;
+  cutInto: CutIntoScore;
+  ours: ProgramScore;
+  scored: SevenLineCard;
+}
+
+/** One plan's whole measurement: post, verify, stamp the goal, check, score. */
+async function runFigure(
+  figure: { name: string },
+  job: EngraveJob,
+  stlPath: string,
+  bytes: Buffer,
+  input: ModelPlanInput,
+  ctx: PostContext,
+): Promise<FigureRun> {
+  // RED TODAY: planModelCam (and its rough op) is a named stub — the failure must say so.
+  const output = await planModelCam(input);
+  expect(output.perSetup.length).toBeGreaterThanOrEqual(1);
+
+  const programs: { ir: ToolpathIR; text: string }[] = [];
+  for (const setup of output.perSetup) {
+    for (const ir of setup.programs) {
+      const posted = postZ1(ir, ctx, Z1);
+      expect(posted.ok, `#965 ${figure.name}: postZ1 refused — ${posted.ok ? '' : posted.errors.join('; ')}`).toBe(true);
+      if (!posted.ok) throw new Error(`#965 ${figure.name}: postZ1 refused — ${posted.errors.join('; ')}`);
+      const verify = verifyProgram(posted.text, {
+        setup: toSetup(job, Z1),
+        machine: Z1,
+        tool: ir.tool,
+        depthLimit: stockDepthLimit(job.stock, job.minFloor ?? 1),
+        minRapidZ: HOP_Z,
+      });
+      expect(
+        verify.findings.filter((f) => f.severity === 'error'),
+        `#965 ${figure.name}: verifier errors:\n${verify.findings.map((f) => `${f.code}: ${f.message}`).join('\n')}`,
+      ).toEqual([]);
+      programs.push({ ir, text: posted.text });
+    }
+  }
+  expect(programs.length, `#965 ${figure.name}: the plan posted no program`).toBeGreaterThan(0);
+
+  // #948/v4 — a stated edge break's allowance must name the V (the who gate); a stated break
+  // that resolves no V is legitimately no allowance, and the check then judges at the floor.
+  const breakOptions = allowance(job);
+  const statedBreak =
+    (job.targetObject as EngraveTargetObject & { edgeBreak?: unknown }).edgeBreak !== undefined;
+  expect(
+    !statedBreak || breakOptions.edgeBreak === undefined || breakOptions.edgeBreak.toolNumber !== undefined,
+    `#965 ${figure.name}: a stated edge break's allowance must carry the V's tool number — without it the v4 who gate is off`,
+  ).toBe(true);
+  const field = goalField(job, bytes, stlPath!);
+  const stamped = wholeSurfaceTop(programs, field);
+  const report = checkGoalCutInto(field, stamped.top, {
+    passCoverage: 0.95, // the maintainer's whole-surface line (#965)
+    ...allowance(job),
+    whoAt: stamped.whoAt,
+  });
+  const coverage = 1 - (report.leftoverFractions[0] ?? 0);
+  const cutInto: CutIntoScore = {
+    adjudicatedFraction: report.adjudicatedFraction,
+    edgeBreakFraction: report.edgeBreakFraction,
+    wallNotScoredFraction: report.wallNotScoredFraction,
+    shadowNotScoredFraction: report.shadowNotScoredFraction,
+    rawFraction: report.cutIntoFraction,
+    maxMm: report.maxCutIntoMm,
+  };
+  const facts = combinePostedFacts(programs.map((p) => measurePostedProgram(p.text)));
+  const ours: ProgramScore = {
+    label: figure.name,
+    coverage,
+    cutInto,
+    cycleSeconds: facts.cycleSeconds,
+    // One manual bit change between consecutive posted runs; each run here is one cutter.
+    toolChanges: Math.max(0, programs.length - 1),
+    headerTimeSeconds: null,
+    // C2 — which row fed each cutter, and the door's own state (installed, or opted out).
+    feedRows: feedRowsFor(HOUSE, job.stock.material),
+    catalogueStatus: { used: CATALOGUE.installed, note: CATALOGUE.note },
+    airFraction: facts.airFraction,
+    rapidSeconds: facts.rapidSeconds,
+    rapidMoves: facts.rapidMoves,
+    rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
+    cutters: facts.cutters.length,
+    cuttersOwned: true,
+    // #943 — 'posts as filed' means the VISE with jaw clearance. A figure is scored on its own
+    // job's holding: a vise figure states the vise and claims the line; a tape figure says
+    // 'tape' and states it cannot claim it. Never 'as filed' in the tape's own words.
+    postsAsFiled:
+      job.workholding.kind === 'vise'
+        ? {
+            ok: true,
+            holding:
+              `vise — Z1 low-profile, stock ${job.stock.length} × ${job.stock.width} × ${job.stock.thickness} mm, ` +
+              `${jobVise(job).stockProud} mm proud of the jaw tops (jaws at x = 0 / ${job.stock.length} mm)`,
+            pitchMm: 0.1,
+          }
+        : {
+            ok: false,
+            holding: 'tape',
+            pitchMm: 0.1,
+            note: "'posts as filed' means the vise with jaw clearance (#943); this figure's job is held on tape and cannot claim the line",
+          },
+  };
+  // The figures have no vendor program for the stick; the maintainer's whole-surface line is
+  // the pass rule, and the card prints the other lines' facts beside it.
+  const scored = scoreSevenLines({ card: figure.name, ours, vendor: null });
+
+  const out = process.env.CM_965_OUT;
+  if (out !== undefined) {
+    fs.mkdirSync(out, { recursive: true });
+    fs.writeFileSync(join(out, `${figure.name}-posted-facts.json`), JSON.stringify({ coverage, cutInto, scored, ours, programs: programs.map((p) => p.ir.tool.name) }, null, 1));
+    // #964 — the standing picture set's inputs: the plan's own programs and the goal target /
+    // frame / gate options this run measured.
+    fs.writeFileSync(join(out, `${figure.name}-plan.json`), JSON.stringify({ perSetup: output.perSetup.map((setup) => ({ programs: setup.programs })) }, null, 1));
+    fs.writeFileSync(join(out, `${figure.name}-pics.json`), JSON.stringify({
+      card: figure.name,
+      target: targetOf(job, bytes, stlPath!),
+      stock: job.stock,
+      frame: { stockTop: 0, partBottom: -job.stock.thickness },
+      cutIntoOptions: { passCoverage: 0.95, ...allowance(job) },
+      post: ctx,
+    }, null, 1));
+  }
+
+  // THE MAINTAINER'S LINE (#965).
+  expect(coverage, `#965 ${figure.name}: whole-surface coverage ${(coverage * 100).toFixed(2)} % — the line is 95 %`).toBeGreaterThanOrEqual(0.95);
+  expect(cutInto.adjudicatedFraction, `#965 ${figure.name}: cut-into beyond the allowance`).toBe(0);
+  expect(scored.lines.find((l) => l.key === 'coverage')?.oursValue).toBeCloseTo(coverage, 9);
+
+  return { output, programs, coverage, cutInto, ours, scored };
+}
+
 for (const figure of FIGURES) {
   const stlPath = process.env[figure.env];
   const jobPath = join(JOBS, figure.jobFile);
@@ -253,107 +403,30 @@ for (const figure of FIGURES) {
       expect(sha, `${figure.env}: the file is not the job's mesh`).toBe(job.targetObject?.sha256);
 
       const { source } = placedMesh(job, bytes);
-      const input = planInputFor(job, source);
-      // RED TODAY: planModelCam (and its rough op) is a named stub — the failure must say so.
-      const output = await planModelCam(input);
-      expect(output.perSetup.length).toBeGreaterThanOrEqual(1);
-
       const ctx = postContextFor(job, figure.name);
-      const programs: { ir: ToolpathIR; text: string }[] = [];
-      for (const setup of output.perSetup) {
-        for (const ir of setup.programs) {
-          const posted = postZ1(ir, ctx, Z1);
-          expect(posted.ok, `#965 ${figure.name}: postZ1 refused — ${posted.ok ? '' : posted.errors.join('; ')}`).toBe(true);
-          if (!posted.ok) return;
-          const verify = verifyProgram(posted.text, {
-            setup: toSetup(job, Z1),
-            machine: Z1,
-            tool: ir.tool,
-            depthLimit: stockDepthLimit(job.stock, job.minFloor ?? 1),
-            minRapidZ: HOP_Z,
-          });
-          expect(
-            verify.findings.filter((f) => f.severity === 'error'),
-            `#965 ${figure.name}: verifier errors:\n${verify.findings.map((f) => `${f.code}: ${f.message}`).join('\n')}`,
-          ).toEqual([]);
-          programs.push({ ir, text: posted.text });
-        }
-      }
-      expect(programs.length, `#965 ${figure.name}: the plan posted no program`).toBeGreaterThan(0);
-
-      // #948/v4 — a stated edge break's allowance must name the V (the who gate); a stated break
-      // that resolves no V is legitimately no allowance, and the check then judges at the floor.
-      const breakOptions = allowance(job);
-      const statedBreak =
-        (job.targetObject as EngraveTargetObject & { edgeBreak?: unknown }).edgeBreak !== undefined;
+      // #965 (the review session's ruling, item 3.1): the figure set ADMITS the catalogue's long
+      // Ø1 (161032105031) as the rest ball; the owned plan — the house set alone — is measured
+      // beside it and the tradeoff line states the difference on the card's own receipt.
+      const owned = await runFigure(figure, job, stlPath!, bytes, planInputFor(job, source), ctx);
+      const figureRun = await runFigure(figure, job, stlPath!, bytes, planInputFor(job, source, true), ctx);
       expect(
-        !statedBreak || breakOptions.edgeBreak === undefined || breakOptions.edgeBreak.toolNumber !== undefined,
-        `#965 ${figure.name}: a stated edge break's allowance must carry the V's tool number — without it the v4 who gate is off`,
+        figureRun.output.perSetup.some((setup) => setup.ops.some((op) => op.kind === 'rest' && op.outcome.cutter === '161032105031')),
+        '#965: the rest ball never entered the plan',
       ).toBe(true);
-      const field = goalField(job, bytes, stlPath!);
-      const stamped = wholeSurfaceTop(programs, field);
-      const report = checkGoalCutInto(field, stamped.top, {
-        passCoverage: 0.95, // the maintainer's whole-surface line (#965)
-        ...allowance(job),
-        whoAt: stamped.whoAt,
-      });
-      const coverage = 1 - (report.leftoverFractions[0] ?? 0);
-      const cutInto: CutIntoScore = {
-        adjudicatedFraction: report.adjudicatedFraction,
-        edgeBreakFraction: report.edgeBreakFraction,
-        wallNotScoredFraction: report.wallNotScoredFraction,
-        shadowNotScoredFraction: report.shadowNotScoredFraction,
-        rawFraction: report.cutIntoFraction,
-        maxMm: report.maxCutIntoMm,
-      };
-      const facts = combinePostedFacts(programs.map((p) => measurePostedProgram(p.text)));
-      const ours: ProgramScore = {
-        label: figure.name,
-        coverage,
-        cutInto,
-        cycleSeconds: facts.cycleSeconds,
-        // One manual bit change between consecutive posted runs; each run here is one cutter.
-        toolChanges: Math.max(0, programs.length - 1),
-        headerTimeSeconds: null,
-        // C2 — which row fed each cutter, and the door's own state (installed, or opted out).
-        feedRows: feedRowsFor(HOUSE, job.stock.material),
-        catalogueStatus: { used: CATALOGUE.installed, note: CATALOGUE.note },
-        airFraction: facts.airFraction,
-        rapidSeconds: facts.rapidSeconds,
-        rapidMoves: facts.rapidMoves,
-        rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
-        cutters: facts.cutters.length,
-        cuttersOwned: true,
-        // #943 — 'posts as filed' means the VISE with jaw clearance. A figure is scored on its own
-        // job's holding: a vise figure states the vise and claims the line; a tape figure says
-        // 'tape' and states it cannot claim it. Never 'as filed' in the tape's own words.
-        postsAsFiled:
-          job.workholding.kind === 'vise'
-            ? {
-                ok: true,
-                holding:
-                  `vise — Z1 low-profile, stock ${job.stock.length} × ${job.stock.width} × ${job.stock.thickness} mm, ` +
-                  `${jobVise(job).stockProud} mm proud of the jaw tops (jaws at x = 0 / ${job.stock.length} mm)`,
-                pitchMm: 0.1,
-              }
-            : {
-                ok: false,
-                holding: 'tape',
-                pitchMm: 0.1,
-                note: "'posts as filed' means the vise with jaw clearance (#943); this figure's job is held on tape and cannot claim the line",
-              },
-      };
-      // The figures have no vendor program for the stick; the maintainer's whole-surface line is
-      // the pass rule, and the card prints the other lines' facts beside it.
-      const scored = scoreSevenLines({ card: figure.name, ours, vendor: null });
+      const tradeoff = comparePlanOutcomes({ score: owned.ours, card: owned.scored }, { score: figureRun.ours, card: figureRun.scored });
+      console.log(
+        `#965 ${figure.name}: owned ${(owned.coverage * 100).toFixed(2)} % / ${owned.ours.cycleSeconds.toFixed(1)} s -> with the long ⌀1 ${(figureRun.coverage * 100).toFixed(2)} % / ${figureRun.ours.cycleSeconds.toFixed(1)} s` +
+          (tradeoff === null ? '' : `; tradeoff: ${tradeoff.line ?? JSON.stringify(tradeoff.differences)}`),
+      );
 
       const out = process.env.CM_965_OUT;
       if (out !== undefined) {
         fs.mkdirSync(out, { recursive: true });
-        fs.writeFileSync(join(out, `${figure.name}-posted-facts.json`), JSON.stringify({ coverage, cutInto, scored, ours, programs: programs.map((p) => p.ir.tool.name) }, null, 1));
-        // #964 — the standing picture set's inputs: the plan's own programs and the goal target /
-        // frame / gate options this run measured.
-        fs.writeFileSync(join(out, `${figure.name}-plan.json`), JSON.stringify({ perSetup: output.perSetup.map((setup) => ({ programs: setup.programs })) }, null, 1));
+        fs.writeFileSync(join(out, `${figure.name}-owned-posted-facts.json`), JSON.stringify({ coverage: owned.coverage, cutInto: owned.cutInto, scored: owned.scored, ours: owned.ours, programs: owned.programs.map((p) => p.ir.tool.name) }, null, 1));
+        fs.writeFileSync(join(out, `${figure.name}-posted-facts.json`), JSON.stringify({ coverage: figureRun.coverage, cutInto: figureRun.cutInto, scored: figureRun.scored, ours: figureRun.ours, programs: figureRun.programs.map((p) => p.ir.tool.name), ownedCoverage: owned.coverage, tradeoff }, null, 1));
+        // #964 — the standing picture set's inputs: the figure plan's own programs and the goal
+        // target / frame / gate options this run measured.
+        fs.writeFileSync(join(out, `${figure.name}-plan.json`), JSON.stringify({ perSetup: figureRun.output.perSetup.map((setup) => ({ programs: setup.programs })) }, null, 1));
         fs.writeFileSync(join(out, `${figure.name}-pics.json`), JSON.stringify({
           card: figure.name,
           target: targetOf(job, bytes, stlPath!),
@@ -364,11 +437,13 @@ for (const figure of FIGURES) {
         }, null, 1));
       }
 
-      // THE MAINTAINER'S LINE (#965).
-      expect(coverage, `#965 ${figure.name}: whole-surface coverage ${(coverage * 100).toFixed(2)} % — the line is 95 %`).toBeGreaterThanOrEqual(0.95);
-      expect(cutInto.adjudicatedFraction, `#965 ${figure.name}: cut-into beyond the allowance`).toBe(0);
-      expect(scored.lines.find((l) => l.key === 'coverage')?.oursValue).toBeCloseTo(coverage, 9);
-
+      // THE MAINTAINER'S LINE (#965): the whole-surface ruler, judged on the figure set's own plan
+      // (the one carrying the long Ø1); the owned plan's number is stated beside it.
+      expect(figureRun.coverage, `#965 ${figure.name}: whole-surface coverage ${(figureRun.coverage * 100).toFixed(2)} % (owned ${(owned.coverage * 100).toFixed(2)} %) — the line is 95 %`).toBeGreaterThanOrEqual(0.95);
+      expect(figureRun.cutInto.adjudicatedFraction, `#965 ${figure.name}: cut-into beyond the allowance`).toBe(0);
+      expect(figureRun.scored.lines.find((l) => l.key === 'coverage')?.oursValue).toBeCloseTo(figureRun.coverage, 9);
+      // The ideal is a superset: it can never be worse than the owned plan on the same ruler.
+      expect(figureRun.coverage).toBeGreaterThanOrEqual(owned.coverage - 1e-9);
     }, 600_000);
   });
 }
