@@ -2245,7 +2245,15 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           clSurface: clFlat,
           stepDownMm: opts.stepDownMm,
           stockToLeaveMm: opts.bandMm,
-          stepOverMm: opts.stepOverMm,
+          // #869/#966 — `opts.stepOverMm` is sized for `primary` (the pockets' own flat, the plan-
+          // level default); `flat` (this goal's own `curvedRoughTool`) can be a SMALLER tool, and
+          // handing it a step-over bigger than its own radius is exactly the defect the rest
+          // stage's own `Math.min` guard (below, the "rest flat is SMALLER than the primary" note)
+          // already exists to prevent — `pocketLoops` refuses it by name ('step-over exceeds the
+          // tool radius'). Same guard, same reason, here.
+          stepOverMm: opts.stepOverMm === undefined
+            ? undefined
+            : Math.min(opts.stepOverMm, (cuttingDiameter(flat) ?? 0) / 2),
           feeds: feedsOf(paramsFor(flat)),
           offset: opts.offset,
           safeZMm: opts.safeZMm,
