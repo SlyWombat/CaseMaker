@@ -297,7 +297,11 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // #960 — the band's slope is the STEEPEST within a small window: a cliff's cell lies in the next
   // bin along, and a row just off it meets the shoulder too. Without the window 2,411 tray cells
   // (0.17 %) read 0.10–0.17 mm of leftover they did not have at the old dense spacing.
-  const WINDOW_BINS = 3;
+  // #960 — THE WINDOW IS THE CUTTER'S REACH, not a fixed ±0.75 mm: a ball cuts with its flank
+  // R·sinθ from its axis (≈2.1 mm at 45° on ⌀6), so a row 1.5–2.5 mm inboard of a steep wall must
+  // read that wall's slope. A ±3-bin window is narrower than the ball's reach and let the lever
+  // space such rows at the gentle-band step (the review's finding on the organizer's 8 cells).
+  const WINDOW_BINS = Math.max(3, Math.ceil(profile.radiusMm / BIN_MM));
   const bandSlopeAt = (x: number): number => {
     const k = Math.min(binCount - 1, Math.max(0, Math.floor((x - min[0]) / BIN_MM)));
     let best = 0;
