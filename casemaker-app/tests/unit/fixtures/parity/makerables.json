@@ -35,12 +35,13 @@
           "rawFraction": 0.0685,
           "maxMm": 23.0
         },
-        "cycleSeconds": 2854.54,
+        "cycleSeconds": 4542.482645928054,
         "rapidsPer1000FeedLines": 5.892915,
-        "cutters": 4
+        "cutters": 4,
+        "headerTimeSeconds": 2854.54
       },
       "vendorEstimateSeconds": 4542.483,
-      "source": ".scratch/makerables/README.md and runs/tray70-top-dz1.2/goalcheck.json; the excluded shares and the adjudicated 0.00 % are Session E's measured contract on #955 (2026-11-03); cycle from the NC header ;@MKR|TIME"
+      "source": ".scratch/makerables/README.md and runs/tray70-top-dz1.2/goalcheck.json; the excluded shares and the adjudicated 0.00 % are Session E's measured contract on #955 (2026-11-03); headerTimeSeconds is the NC's ;@MKR|TIME; cycleSeconds is our #927 estimator on the same NC, the cycle line's basis since the #943 ruling"
     },
     {
       "card": "organizer-top",
@@ -71,12 +72,13 @@
           "rawFraction": 0.0775,
           "maxMm": 22.172
         },
-        "cycleSeconds": 2866.95,
+        "cycleSeconds": 14625.906351418947,
         "rapidsPer1000FeedLines": 2.383393,
-        "cutters": 5
+        "cutters": 5,
+        "headerTimeSeconds": 2866.95
       },
       "vendorEstimateSeconds": 14625.906,
-      "source": ".scratch/makerables/README.md and runs/organizer-top-dz0.8/goalcheck.json; the cut-into decomposition under E's new checker is not published for the organizer yet, so those fields are null (the spec compares only what both sides state); cycle from the NC header ;@MKR|TIME"
+      "source": ".scratch/makerables/README.md and runs/organizer-top-dz0.8/goalcheck.json; the cut-into decomposition under E's new checker is not published for the organizer yet, so those fields are null (the spec compares only what both sides state); headerTimeSeconds is the NC's ;@MKR|TIME; cycleSeconds is our #927 estimator on the same NC, the cycle line's basis since the #943 ruling"
     }
   ],
   "ours": [

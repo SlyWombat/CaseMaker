@@ -1,17 +1,23 @@
 /**
- * #959 review item (6), RED-FIRST: `finish()` must link row to row through #962's `link()`, whose
- * own `retract()` feeds every VERTICAL leg at the plunge rate (#956 §5, Review B's F8) — never a
- * rapid, even when the link has to retract. The op's own hand-rolled transition did the opposite:
- * all three of its moves (`rapid` to the region's clearance plane, `rapid` across, `rapid` down to
- * the hop height) were rapids, including the two pure-vertical legs — a straight-up/straight-down
- * RAPID starting right at the previous row's own cut depth, never fed, on every single row.
+ * #959 review item 6, REFINED (the manager's ruling on C's 8,800 s measurement): feeding every
+ * vertical leg of a link at `plungeFeed` is stricter than real CAM, and Makera's own NC retracts
+ * at G0. The restated rule, in `linking.ts`'s `retract()`:
+ *   - UP legs, retracting out of material the op just cut, are RAPIDS — the op finishing at
+ *     `from` already proves that XY is clear up to `from.z`, so there is nothing hopeful about
+ *     going straight up from there.
+ *   - DOWN legs rapid from the clearance plane down to the material field's own report at the
+ *     LANDING xy plus the op's hop clearance, then feed (at `plungeFeed`) the rest of the way —
+ *     a hopeful rapid past that point is not a retract, so the feed only ever starts at or below
+ *     the floor.
+ *   - When the field cannot prove anything there (not finite — outside the footprint, or no
+ *     field at all, as in `chamfer.ts`), the whole down leg stays a feed, exactly as before.
  *
- * The raster's own rows run edge to edge on the footprint's Y bound by construction, so the
- * material-aware short-hop path essentially never fires here (the cutter's disc pokes past the
- * known footprint at the row ends, and an unmodelled boundary is correctly treated as uncleared,
- * `linking.ts`'s own "a retract is always safe, a hopeful link is not") — the property that must
- * hold either way is that NO rapid is ever a pure vertical move (the same (x, y) as the move
- * immediately before it): a vertical leg is always a `feed`, at the plunge rate.
+ * The single universal check this file pins, covering every rapid in the program at once: NO
+ * RAPID MOVE EVER ENDS BELOW the material field's own `topAt` at that (x, y) plus the hop
+ * clearance — an UP leg's landing (the clearance plane) and the horizontal traverse both clear
+ * this trivially by construction; the DOWN leg's rapid segment lands EXACTLY on it. A vertical
+ * leg that is a FEED must never start above that floor either (a feed above the floor would mean
+ * the new rapid segment was skipped for no reason).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -32,6 +38,8 @@ const X1 = 30;
 const Y0 = -10;
 const Y1 = 10;
 const FLAT_Z = 0;
+const HOP_Z_MM = 3;
+const REGION_CLEARANCE_Z = 5;
 
 /** A perfectly flat surface at `FLAT_Z` over the rectangle, null outside it. */
 const flatSurface: ClSurface = {
@@ -48,34 +56,54 @@ const region: RemainderRegion = {
   triangles: new Uint32Array(), slopeDeg: [0, 0], slopeMedianDeg: 0, in: 'top',
 };
 const bounds: Box2 = { min: [X0, Y0], max: [X1, Y1] };
-const regionRef: RegionRef = { id: 'flat', kind: 'curved', bounds, topZ: FLAT_Z, bottomZ: FLAT_Z, obstacles: [], regionClearanceZ: 5 };
+const regionRef: RegionRef = { id: 'flat', kind: 'curved', bounds, topZ: FLAT_Z, bottomZ: FLAT_Z, obstacles: [], regionClearanceZ: REGION_CLEARANCE_Z };
 
-describe('#959 review — finish() feeds every vertical leg of a link, never a rapid', () => {
-  it('on a flat region swept over several rows, no rapid is ever a pure vertical move except the op\'s own final retract', () => {
+describe('#959 review item 6, refined — finish() links rapid above material, feed only below it', () => {
+  it('on a flat region swept over several rows: every rapid lands at or above topAt(x,y) + hopZMm; a feed never starts above it', () => {
     const out = finish({
       cutter: ball6, region, regionRef, clSurface: flatSurface, kind: 'ball-scallop', scallopMm: 0.1, stepDownMm: 100,
-      feeds: FEEDS, safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid: RAPID,
+      feeds: FEEDS, safeZMm: 10, hopZMm: HOP_Z_MM, toolNumber: 1, spindleRpm: 12000, air: true, rapid: RAPID,
     });
     const moves = out.ir.operations[0]!.moves;
     expect(out.passes.length, 'the fixture must actually sweep more than one row for this to mean anything').toBeGreaterThan(2);
 
-    // A "vertical leg" is any move whose (x, y) exactly matches the move before it, with a
-    // different z. Every link that has to retract climbs and descends along one of these — the
-    // op's own final safeZ retreat (the LAST move of the whole program) is the one legitimate
-    // exception every op in this codebase posts as a plain rapid.
+    // The fixture's own field (see finish.ts's materialFor): inside the footprint, at this single
+    // level, topAt(x, y) = max(levelZ, dropCutter(x, y)) = FLAT_Z everywhere. The floor every
+    // rapid must respect is therefore a single constant here.
+    const FLOOR = FLAT_Z + HOP_Z_MM;
+    const EPS = 1e-6;
+
+    let rowToRowLinksSeen = 0;
     for (let i = 1; i < moves.length - 1; i++) {
       const m = moves[i]!;
       const prev = moves[i - 1]!;
-      if (m.x !== prev.x || m.y !== prev.y || m.z === prev.z) continue;
-      // The `throw` (not an `expect`) is what narrows `m` to the 'feed' variant for the `.f` read
-      // below — `CamMove`'s 'rapid' branch carries no `f` field at all, so reading it without
-      // first ruling out 'rapid' is exactly the bug this test exists to catch, not a type cast to
-      // paper over: a vertical leg posted as 'rapid' must fail HERE, on its own kind, never fall
-      // through to compare an undefined `f` against the plunge rate.
-      if (m.kind !== 'feed') {
-        throw new Error(`move ${i}, a vertical leg from z=${prev.z} to z=${m.z}, posted as a '${m.kind}', not a feed`);
+      if (m.x !== prev.x || m.y !== prev.y || m.z === prev.z) continue; // not a vertical leg
+      rowToRowLinksSeen++;
+      if (m.kind === 'rapid') {
+        expect(m.z, `move ${i}: a rapid vertical leg landed at z=${m.z}, below the floor ${FLOOR} (topAt + hopZMm)`).toBeGreaterThanOrEqual(FLOOR - EPS);
+        continue;
       }
-      expect(m.f, `move ${i}'s vertical leg ran at ${m.f} mm/min, not the ${FEEDS.plungeFeedMmPerMin} mm/min plunge rate`).toBe(FEEDS.plungeFeedMmPerMin);
+      // `CamMove` has exactly two kinds (ir.ts) — ruling out 'rapid' above, not a cast, is what
+      // narrows `m` to 'feed' here for the `.f` read below, the same reasoning item 6 first used.
+      expect(m.f, `move ${i}'s fed vertical leg ran at ${m.f} mm/min, not the ${FEEDS.plungeFeedMmPerMin} mm/min plunge rate`).toBe(FEEDS.plungeFeedMmPerMin);
+      // A feed leg starting above the floor means the new rapid segment down to the floor was
+      // skipped for no reason — the whole point of the ruling.
+      expect(prev.z, `move ${i}'s fed vertical leg started at z=${prev.z}, above the floor ${FLOOR} — the rapid-down segment to the floor was skipped`).toBeLessThanOrEqual(FLOOR + EPS);
     }
+    expect(rowToRowLinksSeen, 'the fixture must actually produce vertical legs for this to mean anything').toBeGreaterThan(0);
+
+    // At least one DOWN leg must actually show the split (a rapid ending at the floor, followed
+    // immediately by a feed down into material) — otherwise this fixture isn't exercising the
+    // new rule at all, just re-confirming the old one by accident.
+    let sawSplitDownLeg = false;
+    for (let i = 1; i < moves.length; i++) {
+      const m = moves[i]!;
+      const prev = moves[i - 1]!;
+      if (m.kind === 'feed' && prev.kind === 'rapid' && m.x === prev.x && m.y === prev.y && m.z < prev.z && Math.abs(prev.z - FLOOR) <= EPS) {
+        sawSplitDownLeg = true;
+        break;
+      }
+    }
+    expect(sawSplitDownLeg, 'no row-to-row down leg showed the rapid-to-floor, then feed-into-material split').toBe(true);
   });
 });

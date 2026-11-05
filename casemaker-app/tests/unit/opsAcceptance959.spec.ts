@@ -55,18 +55,21 @@ import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engi
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { Z1 } from '@/engine/cnc/machine';
+import { DEFAULT_VISE, seatedVise, viseEnvelope } from '@/engine/cnc/fixture';
 import { cuttingDiameter, flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { pocket } from '@/engine/cnc/cam/model/ops/pocket';
 import { measurePostedProgram, combinePostedFacts } from '../tools/postedFacts';
-import { scoreSevenLines, type CutIntoScore, type ProgramScore, type SevenLineCard } from '../tools/sevenLines';
+import { scoreSevenLines, type CutIntoScore, type ProgramScore, type SequenceReceipt, type SevenLineCard } from '../tools/sevenLines';
 import { makerablesRoot, readMakerablesManifest, resolveMakerablesCard } from '../tools/makerables';
 import { clearMakeraCatalogue, installMakeraCatalogue } from '../tools/makeraCatalogue';
+import { feedRowsFor } from '../tools/feedRows';
 import { measureVendorCard } from '../tools/cardMeasurement';
 import { planModelCam, planPocketsForTree, planTreePrograms, type ModelPlanInput, type PlanPocketsResult, type SetupPlan } from '@/engine/cnc/cam/model/plan';
+import type { SequenceChoice } from '@/engine/cnc/cam/model/sequence';
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
-import { exactSweptField } from '@/workers/sim/sweptPoint';
+import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
 import { parseGcode, setupFromHeader, stubSetup } from '@/engine/cnc';
 import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { checkGoalCutInto, type GoalCutIntoOptions, type GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
@@ -237,7 +240,8 @@ const EDGE_BREAK_LEG_MM = 0.5;
  * A plan's runs in execution order — the plan's OWN posted programs (`SetupPlan.programs`), never a
  * re-derivation from `setup.ops`. `ops` stays in the reporting order (region by region); since
  * #964's `batchSameCutterRuns` the execution order groups the same cutter's ops, so deriving runs
- * from `ops` would resurrect the very alternation the batching removes.
+ * from `ops` would resurrect the very alternation the batching removes (30 runs on the tray instead
+ * of the 4 the plan posts).
  */
 function runsOf(setup: SetupPlan): { cutterKey: string; ir: ToolpathIR }[] {
   return setup.programs.map((ir) => ({ cutterKey: ir.tool.id ?? ir.tool.name, ir }));
@@ -246,6 +250,7 @@ function runsOf(setup: SetupPlan): { cutterKey: string; ir: ToolpathIR }[] {
 async function planCard(
   placed: Awaited<ReturnType<typeof placedTree>>,
   stock: { length: number; width: number },
+  goal?: GoalHeightfield,
 ): Promise<{ setup: SetupPlan; runs: { cutterKey: string; ir: ToolpathIR }[] }> {
   const positions = placed.mesh.positions;
   const min: [number, number, number] = [Infinity, Infinity, Infinity];
@@ -256,17 +261,28 @@ async function planCard(
       max[c] = Math.max(max[c]!, positions[i + c]!);
     }
   }
+  // #943 (the maintainer's 11-05 ruling): the real acceptance parts are planned in the VISE with
+  // jaw clearance, not on the bare bed. The envelope is the app's own call (`defaultFixture`'s
+  // `viseEnvelope(job.stock, jobVise(job))`); the plan states in its notes that the region
+  // obstacles do not consume it yet, and the gate's sweep still checks the posted program
+  // against the SAME envelope — so the holding is a fact of this run, not a silent assumption.
+  const thickness = placed.tree.frame.stockTop - placed.tree.frame.partBottom;
+  const vise = seatedVise(DEFAULT_VISE, thickness);
   const input: ModelPlanInput = {
     geometry: {
       triangles: { positions, indices: placed.mesh.indices, triangleCount: placed.mesh.indices.length / 3, bbox: { min, max } },
       ...(placed.faceId === undefined ? {} : { faceId: placed.faceId }),
     },
     setups: [{ frame: { up: [0, 0, 1], stockTop: 0 }, underside: 'flatOnStockBottom' }],
-    stock: { length: stock.length, width: stock.width, thickness: placed.tree.frame.stockTop - placed.tree.frame.partBottom, material: 'hardwood' },
-    fixture: { mount: 'tape', envelope: null },
+    stock: { length: stock.length, width: stock.width, thickness, material: 'hardwood' },
+    fixture: { mount: 'vise', envelope: viseEnvelope({ length: stock.length, width: stock.width, thickness }, vise) },
     cutters: { house: VENDOR_SET, catalogue: [] },
     tolerances: { finishMm: 0.01 },
     edgeBreak: { legMm: EDGE_BREAK_LEG_MM },
+    // #961 — THE SIMULATED OUTCOME: the picker judges a candidate's completeness by what its own
+    // sweep leaves above the 0.1 mm band, not by the pockets it declined. The goal is the same
+    // heightfield the card measures against, sampled from the placed STEP.
+    ...(goal === undefined ? {} : { goal }),
   };
   const output = await planModelCam(input);
   const setup = output.perSetup[0]!;
@@ -285,7 +301,15 @@ function postedTextFor(cutterKey: string, merged: ToolpathIR, ctx: PostContext):
 function edgeBreakAllowance(): Pick<GoalCutIntoOptions, 'edgeBreak' | 'wallShadowRadiusMm'> {
   const allowance = vToolAllowance(CHAMFER3175);
   if (allowance === null) throw new Error('#959: the chamfer Tool record states no cone');
-  return { edgeBreak: allowance, wallShadowRadiusMm: cuttingDiameter(FLAT6)! / 2 };
+  // #948/v4 — THE V GATE: the card's allowance names the job's own chamfer tool number, so the
+  // check excuses a band cell only where this V cut it deepest (`edgeBreak.toolNumber` + whoAt).
+  // A tool record with no number cannot carry the gate, and the self-test below fails rather than
+  // letting the card measure the geometry-only rule.
+  const toolNumber = CHAMFER3175.number;
+  return {
+    edgeBreak: { ...allowance, ...(toolNumber === null || toolNumber === undefined ? {} : { toolNumber }) },
+    wallShadowRadiusMm: cuttingDiameter(FLAT6)! / 2,
+  };
 }
 
 /**
@@ -297,8 +321,9 @@ function edgeBreakAllowance(): Pick<GoalCutIntoOptions, 'edgeBreak' | 'wallShado
 function stampedTop(
   runs: readonly { cutterKey: string; text: string; ir: ToolpathIR }[],
   goal: GoalHeightfield,
-): ResultTop {
+): { top: ResultTop; whoAt: (x: number, y: number) => number | null } {
   let acc: Float32Array | null = null;
+  let who: Uint8Array | null = null;
   for (const run of runs) {
     const parsed = parseGcode(run.text);
     const part = setupFromHeader(parsed.header).patch.part;
@@ -306,23 +331,47 @@ function stampedTop(
       throw new Error(`#959 goal check: ${run.cutterKey}'s posted text carries no rectangular stock header`);
     }
     const setup = stubSetup(part, { kind: 'tape-down', contact: part.outline }, { startingTool: 1 }, Z1);
-    // `exactSweptField` is the read `session.sweptFieldExact` calls: the posted program stamped at
-    // every goal cell centre with the Tool-record cutter. Called on the program's own timeline
-    // rather than through a session, because a dense flat job routes to the exact engine and the
-    // session then has no column grid to read — the stamp itself is route-independent.
+    // `exactSweptFieldTooled` is the read the session's stamp makes: the posted program stamped at
+    // every goal cell centre with the Tool-record cutter, carrying the per-cell identity of the
+    // lowest reach. Called on the program's own timeline rather than through a session, because a
+    // dense flat job routes to the exact engine and the session then has no column grid to read —
+    // the stamp itself is route-independent.
     const timeline = buildTimeline(parsed, setup, Z1);
-    const stamp = exactSweptField(goal, timeline, run.ir.tool);
+    const stamp = exactSweptFieldTooled(goal, timeline, () => run.ir.tool);
     if (stamp === null) throw new Error(`#959 goal check: ${run.cutterKey} produced no exact stamp`);
-    if (acc === null) acc = Float32Array.from(stamp);
-    else for (let k = 0; k < acc.length; k++) if (stamp[k]! < acc[k]!) acc[k] = stamp[k]!;
+    if (acc === null || who === null) {
+      acc = Float32Array.from(stamp.field);
+      who = Uint8Array.from(stamp.who);
+    } else {
+      // #948/v4 — the per-run who maps fold with the field, lowest reach wins (the session's own
+      // fold): the cell's cutter is the one whose stamp took it deepest, which is what the V gate
+      // reads. A tie keeps the earlier run's identity, as `session.ts`'s fold does.
+      for (let k = 0; k < acc.length; k++) {
+        if (stamp.field[k]! < acc[k]!) {
+          acc[k] = stamp.field[k]!;
+          who[k] = stamp.who[k]!;
+        }
+      }
+    }
   }
-  if (acc === null) throw new Error('#959 goal check: no programs to stamp');
+  if (acc === null || who === null) throw new Error('#959 goal check: no programs to stamp');
   const field: Float32Array = acc;
-  return (x: number, y: number) => {
+  const identity: Uint8Array = who;
+  const cell = (x: number, y: number): number | null => {
     const i = Math.round((x - goal.x0) / goal.pitch);
     const j = Math.round((y - goal.y0) / goal.pitch);
     if (i < 0 || j < 0 || i >= goal.nx || j >= goal.ny) return null;
-    return field[j * goal.nx + i]!;
+    return j * goal.nx + i;
+  };
+  return {
+    top: (x: number, y: number) => {
+      const k = cell(x, y);
+      return k === null ? null : field[k]!;
+    },
+    whoAt: (x: number, y: number) => {
+      const k = cell(x, y);
+      return k === null ? null : identity[k]!;
+    },
   };
 }
 
@@ -340,6 +389,8 @@ function vendorScoreFor(name: string): ProgramScore | null {
     card: cardId,
     goalcheckPath: resolved.resolved.goalcheckPath,
     ncFiles: resolved.resolved.ncFiles,
+    // The reference page's own words: the vendor cut on its bare bed (#943 prints both holdings).
+    holding: entry.holding,
   });
 }
 
@@ -350,8 +401,122 @@ interface AcceptanceGoal {
   stock: { length: number; width: number };
 }
 
+/**
+ * THE HOLDING THE CARD PRINTS (#943). The real acceptance parts are planned in the vise (see
+ * `planCard`), so their card states the vise, the stock's proud height over the jaw tops and that
+ * the pitch was not changed. The synthetic and figure cards are tapes: they say `tape` and state
+ * the line is NOT claimed — never 'as filed'. Every card carries this string into `sevenLines`
+ * (`holding.ours`), and the vendor's own stated holding is printed beside it.
+ */
+function holdingFacts(
+  tree: FeatureTree,
+  goal: AcceptanceGoal | undefined,
+): { ok: boolean; holding: string; pitchMm: number; note?: string } {
+  if (goal === undefined) {
+    return {
+      ok: false,
+      holding: 'tape',
+      pitchMm: 0.1,
+      note: "'posts as filed' means the vise with jaw clearance (#943); this card is a tape-down plan and cannot claim the line",
+    };
+  }
+  const thickness = tree.frame.stockTop - tree.frame.partBottom;
+  const vise = seatedVise(DEFAULT_VISE, thickness);
+  return {
+    ok: true,
+    holding:
+      `vise — Z1 low-profile, stock ${goal.stock.length} × ${goal.stock.width} × ${thickness.toFixed(1)} mm, ` +
+      `${vise.stockProud.toFixed(1)} mm proud of the jaw tops (jaws at x = 0 / ${goal.stock.length} mm)`,
+    pitchMm: 0.1,
+  };
+}
+
 /** What `writeAcceptance` reads from a plan — the pocket result and the one entry's SetupPlan both answer it. */
-type AcceptancePlan = Pick<PlanPocketsResult, 'ops' | 'programs' | 'sequence' | 'unreachable' | 'notes'>;
+type AcceptancePlan = Pick<PlanPocketsResult, 'ops' | 'programs' | 'sequence' | 'unreachable' | 'notes' | 'choice'>;
+
+/**
+ * #961 acceptance (the maintainer's 11-05 review) — THE CARD'S PRICED CANDIDATE SEQUENCES.
+ *
+ * The pocket chain's picker already priced every candidate (`SequenceChoice.considered`, ranked by
+ * completeness then failures then house/rowed then #927's total). This turns that into the card's
+ * receipt: each candidate's cutters, its #927 estimate (moves + spin-up + inter-op, without the
+ * changes), its total (with the shop's tool-change seconds), its completeness rank
+ * (`leftBehind`/`unreachable`/`unplanned`), and which one won. The chosen WHOLE-JOB set comes from
+ * the posted runs — the curved stage's ball and the rim chamfer are chosen outside the picker, by
+ * geometry, and the card says so rather than pretending the picker priced them.
+ */
+function sequenceReceipt(
+  choice: SequenceChoice,
+  runs: readonly { cutterKey: string; ir: ToolpathIR; text: string }[],
+): SequenceReceipt {
+  const flats = [...new Set(runs.filter((r) => r.ir.tool.shape === 'flat').map((r) => r.ir.tool))]
+    .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0));
+  const roleOf = (tool: Tool): string => {
+    if (tool.shape === 'flat') return tool === flats[0] ? 'flat' : 'rest';
+    if (tool.shape === 'ball' || tool.shape === 'tapered-ball') return 'ball';
+    if (tool.shape === 'chamfer' || tool.shape === 'engraving') return 'chamfer';
+    return tool.shape;
+  };
+  // Per cutter, in execution order, #927 on every run it posts (a return merges its runs).
+  const chosenMap = new Map<string, { cutterKey: string; role: string; estimateSeconds: number; runs: number }>();
+  for (const run of runs) {
+    const entry = chosenMap.get(run.cutterKey) ?? {
+      cutterKey: run.cutterKey,
+      role: roleOf(run.ir.tool),
+      estimateSeconds: 0,
+      runs: 0,
+    };
+    entry.estimateSeconds += measurePostedProgram(run.text).cycleSeconds;
+    entry.runs += 1;
+    chosenMap.set(run.cutterKey, entry);
+  }
+  const chosen = [...chosenMap.values()];
+  const chosenSignature = choice.steps.map((step) => `${step.kind}:${step.cutter.key}`);
+  const candidates = [...choice.considered]
+    .sort((a, b) => (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER) || (a.cost === null ? 1 : 0) - (b.cost === null ? 1 : 0))
+    .map((candidate) => ({
+      rank: candidate.rank ?? 0, // 0 = could not be priced; printed after every ranked candidate
+      steps: candidate.steps.map((step) => ({ kind: step.kind, cutterKey: step.cutterKey })),
+      cutters: [...new Set(candidate.steps.map((step) => step.cutterKey))],
+      estimateSeconds: candidate.estimateSeconds,
+      toolChanges: candidate.toolChanges,
+      totalSeconds: candidate.cost,
+      leftoverCells: candidate.leftoverCells,
+      coveredCells: candidate.coveredCells,
+      restPrice: candidate.restPrice,
+      leftBehind: candidate.leftBehind,
+      unreachable: candidate.unreachable,
+      unplanned: candidate.unplanned,
+      chosen:
+        candidate.steps.length === choice.steps.length &&
+        candidate.steps.every((step, i) => `${step.kind}:${step.cutterKey}` === chosenSignature[i]),
+      reason: candidate.reason,
+    }));
+  // The vendor's own set, in its run order, and the closest picker candidate: the chain of the
+  // vendor's FLATS (the picker prices flat chains; the ball and chamfer are the curved/rim stages').
+  const vendorKeys = VENDOR_SET.map((tool) => tool.id ?? tool.name);
+  const vendorFlats = VENDOR_SET.filter((tool) => tool.shape === 'flat').map((tool) => tool.id ?? tool.name);
+  const chosenKeys = chosen.map((entry) => entry.cutterKey);
+  const bestFlatChain = candidates.find((candidate) => {
+    const cutters = candidate.cutters;
+    return cutters.length === vendorFlats.length && cutters.every((key, i) => key === vendorFlats[i]);
+  });
+  const sameAsVendor = chosenKeys.length === vendorKeys.length && chosenKeys.every((key, i) => key === vendorKeys[i]);
+  const vendor = sameAsVendor
+    ? `chosen set = Makera's own four, in its run order (${vendorKeys.join(' → ')})`
+    : `chosen set ${chosenKeys.join(' → ')} vs Makera's four ${vendorKeys.join(' → ')}` +
+      (bestFlatChain === undefined
+        ? '; no priced candidate uses the vendor’s flat chain (T1 → T2) — the picker adds a rest flat only for a pocket the primary cannot enter, and this part has none'
+        : `; the vendor’s flat chain (T1 → T2) prices at ${bestFlatChain.totalSeconds === null ? '—' : `${bestFlatChain.totalSeconds.toFixed(1)} s`} (rank ${bestFlatChain.rank || 'unpriced'}), the chosen chain at ${choice.cost.totalSeconds.toFixed(1)} s`) +
+      '; the ball and the chamfer are chosen by the curved/rim stages, not priced as picker candidates';
+  return {
+    rule:
+      'rank: completeness first — the SIMULATED OUTCOME, the goal cells the candidate’s own sweep leaves above the 0.1 mm band (fewer wins), then pockets a cutter could cover and the chain left (leftBehind), then unplanned steps, house before catalogue, rowed before fallback, then the #927 total; rank 1 is the choice. A coverage rest must also clear 0.01 mm²/s of coverage bought against the chain without it, on the picker’s own simulated field — which includes cells the ball finish may cover later, so the price judges what the REST can reach, not a promise of final coverage (the card’s measured gain is stated separately). Candidate estimates are #927 on the picker’s planned steps; the chosen cutters’ estimates are #927 on the posted runs (the card’s cycle basis).',
+    chosen,
+    candidates,
+    vendor,
+  };
+}
 
 function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan, goal?: AcceptanceGoal): { coverage: number; adjudicatedFraction: number } | null {
   const { ops, programs, sequence, unreachable, notes } = result;
@@ -383,6 +548,7 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
     text: postedTextFor(run.cutterKey, run.ir, ctx),
   }));
   const facts = combinePostedFacts(factsByRun.map((f) => measurePostedProgram(f.text)));
+  const sequenceFacts = sequenceReceipt(result.choice, factsByRun);
 
   // THE TWO GEOMETRY LINES (plan v2 §3, red-first): the goal heightfield from the same STEP, the
   // posted programs stamped with their Tool-record cutters and accumulated, judged by the app's
@@ -394,8 +560,12 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
     | null = null;
   if (goal !== undefined) {
     const field = sampleGoalHeightfield(goal.target, { pitchMm: 0.1, stockTopZ: 0 });
-    const top = stampedTop(factsByRun, field);
-    const report = checkGoalCutInto(field, top, { passCoverage: 0.95, ...edgeBreakAllowance() });
+    const stamped = stampedTop(factsByRun, field);
+    const report = checkGoalCutInto(field, stamped.top, {
+      passCoverage: 0.95,
+      ...edgeBreakAllowance(),
+      whoAt: stamped.whoAt,
+    });
     const coverage = 1 - (report.leftoverFractions[0] ?? 0);
     const cutInto: CutIntoScore = {
       adjudicatedFraction: report.adjudicatedFraction,
@@ -417,11 +587,15 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
       // One manual bit change between consecutive posted runs; each run here is one cutter.
       toolChanges: Math.max(0, programs.length - 1),
       headerTimeSeconds: null,
+      // C2 — which row fed each cutter, and the door's own state (installed, or opted out).
+      feedRows: feedRowsFor(VENDOR_SET, 'hardwood'),
+      catalogueStatus: { used: CATALOGUE.installed, note: CATALOGUE.note },
+      sequence: sequenceFacts,
       airFraction: facts.airFraction,
       rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
       cutters: facts.cutters.length,
       cuttersOwned: null, // a simulation-only reference card prices on the vendor's own set (R5)
-      postsAsFiled: { ok: true, holding: "Makera's own: bare bed, tape-down", pitchMm: 0.1 },
+      postsAsFiled: holdingFacts(tree, goal),
     };
     measured = { coverage, cutInto, report, ours, scored: scoreSevenLines({ card: name, ours, vendor: vendorScoreFor(name) }) };
   }
@@ -436,7 +610,8 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
         `(edge break ${((measured.cutInto.edgeBreakFraction ?? 0) * 100).toFixed(2)} %, wall cells ${((measured.cutInto.wallNotScoredFraction ?? 0) * 100).toFixed(2)} %, ` +
         `wall shadow ${((measured.cutInto.shadowNotScoredFraction ?? 0) * 100).toFixed(2)} % not counted; max ${measured.cutInto.maxMm.toFixed(3)} mm` +
         `${measured.cutInto.maxAt ? ` at ${measured.cutInto.maxAt.x.toFixed(1)}, ${measured.cutInto.maxAt.y.toFixed(1)}` : ''}). ` +
-        `Seven lines: ${measured.scored.sentence}.`;
+        `Seven lines: ${measured.scored.sentence}. ` +
+        `Holding — ours: ${measured.scored.holding.ours ?? 'not stated'}; vendor: ${measured.scored.holding.vendor ?? 'not stated'}.`;
   console.log(
     `#959 ${name}: ${pocketOps} pocket + ${contourOps} contour op(s) planned (${unreachable.length} ` +
       `unreachable: ${unreachable.join('; ') || 'none'}), ${programs.length} run(s) on ${new Set(programs.map((p) => p.cutterKey)).size} cutter(s). Posted-text facts ` +
@@ -996,7 +1171,7 @@ const ORGANIZER = process.env.CM_959_ORGANIZER_STEP;
 const CATALOGUE = installMakeraCatalogue();
 afterAll(() => clearMakeraCatalogue());
 
-describe.skipIf(TRAY === undefined || !CATALOGUE.installed)('#959 acceptance — tool tray 70, the WHOLE tree through the one interface', () => {
+describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedOut))('#959 acceptance — tool tray 70, the WHOLE tree through the one interface', () => {
   it('plans pockets, the curved remainder and rims together, with the freeing contour last and every program posted', async () => {
     const { tree, mesh } = await placedTree(TRAY!, [110, 140], -1.2);
     const min: [number, number, number] = [Infinity, Infinity, Infinity];
@@ -1058,10 +1233,11 @@ describe.skipIf(TRAY === undefined || !CATALOGUE.installed)('#959 acceptance —
   }, 900_000);
 });
 
-describe.skipIf(TRAY === undefined || !CATALOGUE.installed)('#959 acceptance — tool tray 70, the whole plan through the one entry', () => {
+describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedOut))('#959 acceptance — tool tray 70, the whole plan through the one entry', () => {
   it('plans the real part through planModelCam — pockets, the curved remainder and the rims — and posts every run', async () => {
     const placed = await placedTree(TRAY!, [110, 140], -1.2);
-    const { setup, runs } = await planCard(placed, { length: 110, width: 140 });
+    const goalField = sampleGoalHeightfield(placed.target, { pitchMm: 0.1, stockTopZ: 0 });
+    const { setup, runs } = await planCard(placed, { length: 110, width: 140 }, goalField);
     expect(setup.ops.length, `unreachable: ${setup.unreachable.join('; ')}`).toBeGreaterThan(0);
     expect(setup.ops.some((op) => op.kind === 'contour'), `unreachable: ${setup.unreachable.join('; ')}`).toBe(true);
     // THE MANAGER'S FINDING: the facts level planned through the pocket chain only, so the ball
@@ -1069,28 +1245,46 @@ describe.skipIf(TRAY === undefined || !CATALOGUE.installed)('#959 acceptance —
     if (setup.features.remainder.length > 0) {
       expect(setup.ops.some((op) => op.kind === 'finish'), 'the ball finish never ran on the real part').toBe(true);
     }
-    const measured = writeAcceptance('tray', setup.features, { ops: setup.ops, programs: runs, sequence: setup.sequence, unreachable: setup.unreachable, notes: setup.notes }, { target: placed.target, stock: { length: 110, width: 140 } });
+    const measured = writeAcceptance('tray', setup.features, { ops: setup.ops, programs: runs, sequence: setup.sequence, unreachable: setup.unreachable, notes: setup.notes, choice: setup.choice }, { target: placed.target, stock: { length: 110, width: 140 } });
     // RED-FIRST (the manager's ruling): the chamfer ran a 130 mm feed along a rim whose air side
     // the goal sees as land — 0.5 mm into ground it never exposes (0.13 % adjudicated). With rims
     // covered from above skipped, that cell is not cut and the coverage that made the rebuild's
     // jump stays; the OTHER rims (real, open edges) are still broken.
     expect(measured, 'the tray measured nothing').not.toBeNull();
     expect(measured!.adjudicatedFraction, 'the chamfer cut a rim that is covered from above').toBe(0);
-    expect(measured!.coverage).toBeGreaterThanOrEqual(0.98);
+    // #961 (the maintainer's 11-05 ruling): the 1-point line is 98.52 % against the vendor's
+    // 99.52 %, and the picker must OFFER the rest that buys it — T1 → T2, priced. Before the
+    // simulated-outcome rank the tray chose the ⌀6 primary alone and measured 98.38 %.
+    expect(measured!.coverage, 'the tray is back under the 1-point line').toBeGreaterThanOrEqual(0.9852);
+    expect(setup.choice.steps.some((step) => step.kind === 'rest'), 'the tray still declines the rest cutter').toBe(true);
+    // The surface the rest bought: its candidate leaves fewer goal cells above the band than the
+    // primary alone, which is why the rank chose it.
+    const restCandidate = setup.choice.considered.find((c) => c.steps.some((step) => step.kind === 'rest'))!;
+    const aloneCandidate = setup.choice.considered.find((c) => !c.steps.some((step) => step.kind === 'rest'))!;
+    expect(restCandidate.leftoverCells).not.toBeNull();
+    expect(aloneCandidate.leftoverCells).not.toBeNull();
+    expect(restCandidate.leftoverCells!).toBeLessThan(aloneCandidate.leftoverCells!);
+    const chosenSignature = setup.choice.steps.map((step) => `${step.kind}:${step.cutter.key}`).join('+');
+    expect(restCandidate.steps.map((step) => `${step.kind}:${step.cutterKey}`).join('+')).toBe(chosenSignature);
     expect(setup.ops.filter((op) => op.kind === 'chamfer').length, 'no rim was broken at all').toBeGreaterThan(0);
   }, 1_800_000);
 });
 
-describe.skipIf(ORGANIZER === undefined || !CATALOGUE.installed)('#959 acceptance — tool organizer, the whole plan through the one entry', () => {
+describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.optedOut))('#959 acceptance — tool organizer, the whole plan through the one entry', () => {
   it('plans the real part through planModelCam — pockets, the curved remainder and the rims — and posts every run', async () => {
     const placed = await placedTree(ORGANIZER!, [170, 170], -0.8);
-    const { setup, runs } = await planCard(placed, { length: 170, width: 170 });
+    const goalField = sampleGoalHeightfield(placed.target, { pitchMm: 0.1, stockTopZ: 0 });
+    const { setup, runs } = await planCard(placed, { length: 170, width: 170 }, goalField);
     expect(setup.ops.length, `unreachable: ${setup.unreachable.join('; ')}`).toBeGreaterThan(0);
     expect(setup.ops.some((op) => op.kind === 'contour'), `unreachable: ${setup.unreachable.join('; ')}`).toBe(true);
     if (setup.features.remainder.length > 0) {
       expect(setup.ops.some((op) => op.kind === 'finish'), 'the ball finish never ran on the real part').toBe(true);
     }
-    writeAcceptance('organizer', setup.features, { ops: setup.ops, programs: runs, sequence: setup.sequence, unreachable: setup.unreachable, notes: setup.notes }, { target: placed.target, stock: { length: 170, width: 170 } });
+    const measured = writeAcceptance('organizer', setup.features, { ops: setup.ops, programs: runs, sequence: setup.sequence, unreachable: setup.unreachable, notes: setup.notes, choice: setup.choice }, { target: placed.target, stock: { length: 170, width: 170 } });
+    // #961 (the maintainer's 11-05 ruling): the organizer's coverage must stay the same or better
+    // as the picker's rule changes — 98.61 % is its recorded figure on the engine-int base.
+    expect(measured, 'the organizer measured nothing').not.toBeNull();
+    expect(measured!.coverage, 'the organizer fell below its recorded coverage').toBeGreaterThanOrEqual(0.9861);
   }, 1_800_000);
 });
 
@@ -1100,10 +1294,51 @@ describe.skipIf(TRAY !== undefined || ORGANIZER !== undefined)('#959 acceptance 
   });
 });
 
-describe.skipIf(CATALOGUE.installed)('#964 — the catalogue door (the #964 ruling)', () => {
-  it('states why: the acceptance installs the full Makera catalogue (CM_CATALOGUE or <Makerables root>/catalogue.json)', () => {
-    expect(CATALOGUE.installed).toBe(false);
-    console.log(`catalogue not installed: ${CATALOGUE.reason}`);
+describe('#964 harness self-tests — the defects that consumed engine rounds', () => {
+  // RUNSOF. The harness once re-derived "runs" from `setup.ops` (the region-by-region REPORTING
+  // order). Since `batchSameCutterRuns`, a plan's own posted programs group the same cutter's ops,
+  // so an alternating A/B/A/B reporting order posts as TWO runs. Deriving runs from `ops` counted
+  // four, inflating the bit-change count and the cycle line. `runsOf` reads `SetupPlan.programs`
+  // (the execution order) and this case fails if that ever changes back.
+  it('runsOf is the plan’s posted programs, never the un-batched reporting order', () => {
+    const ir = (cutter: string): ToolpathIR => ({ tool: { id: cutter, name: cutter } }) as unknown as ToolpathIR;
+    const alternatingOps = ['A', 'B', 'A', 'B'].map((cutter) => ({
+      kind: 'pocket',
+      outcome: { cutter },
+    }));
+    const setup = {
+      ops: alternatingOps,
+      programs: [ir('A'), ir('B')],
+    } as unknown as SetupPlan;
+    expect(runsOf(setup).map((run) => run.cutterKey)).toEqual(['A', 'B']);
+    expect(runsOf(setup)).toHaveLength(setup.programs.length);
+    expect(runsOf(setup).map((run) => run.ir)).toEqual(setup.programs);
+  });
+
+  // THE V GATE (#948/v4). A card that states an edge break must hand the check an allowance that
+  // names the job's chamfer tool number; without it `checkGoalCutInto` silently takes the
+  // geometry-only path and the card measures a different rule from the one it reports. This case
+  // fails if the V bit has no number or the allowance drops it.
+  it('a card with a stated edge break never builds its allowance without the V tool number', () => {
+    expect(EDGE_BREAK_LEG_MM, 'this card states an edge break').toBeGreaterThan(0);
+    expect(CHAMFER3175.number ?? null, 'the V bit must state its tool number').not.toBeNull();
+    const allowance = edgeBreakAllowance();
+    expect(allowance.edgeBreak, 'a stated edge break must produce an allowance').toBeDefined();
+    expect(
+      allowance.edgeBreak?.toolNumber,
+      'the allowance must name the V bit — without it the v4 who gate is off and the card measures the geometry-only rule',
+    ).toBe(CHAMFER3175.number);
+  });
+});
+
+describe.skipIf(CATALOGUE.installed || CATALOGUE.optedOut)('#964 — the catalogue default (the maintainer’s 11-05 order)', () => {
+  it('FAILS when the licensed STEPs are set and the full catalogue is missing with no opt-out', () => {
+    // The door is the DEFAULT of every acceptance run: a machine with the STEPs set must either
+    // find the catalogue or state CM_NO_CATALOGUE. Skipping the real parts here would look green.
+    if (TRAY === undefined && ORGANIZER === undefined) return; // no STEPs: the not-run case covers it
+    throw new Error(
+      `the acceptance did not run its real parts: no full Makera catalogue was found and no opt-out was stated — ${CATALOGUE.note}`,
+    );
   });
 });
 
@@ -1209,18 +1444,15 @@ describe('#959 acceptance — the curved pipeline (every op entered)', () => {
   }, 120_000);
 });
 
-// #960 — THE MANAGER'S PRICED ACCEPTANCE (2026-11-05): the ball's per-band scallop spacing, up to
-// the vendor's ~0.8 mm, with the origin row kept and the rows phased from that same origin. The
-// acceptance is the CARD'S LINES, not per-cell identity: tray coverage ≥ 98.52 %, organizer
-// ≥ 98.98 % − 1 point, cut-into no worse than the base, and any risen cell must sit WITHIN the
-// 0.1 mm band (no new cell above it). Two runs' own programs stamped onto the same goal grid by
-// `tests/tools/acceptancePics.ts`; `tests/tools/risen-cells-960.ts` draws where they rise.
+// #960 — THE CARD'S LINES FOR THE COMBINED SLICES (the manager's ruling, 2026-11-05): the ball's
+// per-band scallop spacing, up to the vendor's ~0.8 mm, with the origin row kept and the rows
+// phased from that same origin. The acceptance is the CARD'S LINES, not per-cell identity: tray
+// coverage ≥ 98.52 %, organizer ≥ 98.98 % − 1 point, cut-into no worse than the base, and any
+// risen cell must sit WITHIN the 0.1 mm band (no new cell above it). Two runs' own programs
+// stamped onto the same goal grid by `tests/tools/acceptancePics.ts`.
 //
 //   CM_960_BEFORE_PICS=<dir> CM_960_AFTER_PICS=<dir> \
 //     npx vitest run tests/unit/opsAcceptance959.spec.ts -t '#960'
-//
-// Each dir is one `acceptancePics.ts` output root (`<card>/grid.json|goal.f32|union.f32`), with the
-// acceptance's own `<card>-posted-facts.json` beside the card dir (coverage, cut-into, cycle).
 const BEFORE_PICS = process.env.CM_960_BEFORE_PICS;
 const AFTER_PICS = process.env.CM_960_AFTER_PICS;
 /** The coverage band the leftover line uses, mm — a risen cell at or under this is still "covered". */
@@ -1240,8 +1472,6 @@ describe.skipIf(BEFORE_PICS === undefined || AFTER_PICS === undefined)('#960 —
     };
     return { grid, goal: f32('goal.f32'), union: f32('union.f32'), facts };
   };
-  // The card's coverage lines: the tray must stay ≥ 98.52 %; the organizer is within one point of
-  // the vendor's 98.98 %.
   const COVERAGE_FLOOR: Record<string, number> = { tray: 0.9852, organizer: 0.9798 };
   for (const card of ['tray', 'organizer']) {
     it(`${card}: coverage ≥ ${(COVERAGE_FLOOR[card]! * 100).toFixed(2)} %, cut-into no worse, no risen cell above the band`, () => {
@@ -1266,8 +1496,7 @@ describe.skipIf(BEFORE_PICS === undefined || AFTER_PICS === undefined)('#960 —
             const j = Math.floor(k / before.grid.nx);
             worstAt = `(${(before.grid.x0 + i * before.grid.pitch).toFixed(1)}, ${(before.grid.y0 + j * before.grid.pitch).toFixed(1)})`;
           }
-          // 'Newly above' — the cell was within the band and is now above it. A pre-existing
-          // residue that rises by a hair is not the rule's failure.
+          // 'Newly above' — the cell was within the band and is now above it.
           if (now > LEFT_OVER_BAND_MM + 1e-6 && base <= LEFT_OVER_BAND_MM + 1e-6) aboveBand++;
         }
       }

@@ -30,6 +30,7 @@ import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, resolvedFeedsTabl
 import { Z1 } from '@/engine/cnc/machine';
 import { readDefault, liveShopDefaults } from '@/platform/defaultsClient';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
+import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
 import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
@@ -40,12 +41,19 @@ import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates
 import { pocket } from './ops/pocket';
 import { clSurface } from './clsurface';
 import { rough } from './ops/rough';
-import { rest } from './ops/rest';
+import { cellPolygons, rest } from './ops/rest';
 import { DEFAULT_FINISH_SCALLOP_MM, finish, finishKindFor } from './ops/finish';
 import { FLAT_SURFACE_MAX_SLOPE_DEG } from './settings';
 import { pencil } from './ops/pencil';
 import { chamfer } from './ops/chamfer';
 import { contour as contourOp, throughHole } from './ops/contour';
+import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
+import { parseGcode } from '@/engine/cnc/gcode';
+import { setupFromHeader } from '@/engine/cnc/setupFromHeader';
+import { stubSetup } from '@/engine/cnc/setup';
+import { buildTimeline } from '@/engine/cnc/emulator/timeline';
+import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
 import { buildTriangleBins, binnedReachableTriangles, type TriangleBins } from './triangleBins';
 
 /** One ring (outer boundary or a hole); `pocket.ts`'s `Polygons` is `Polygon[]`. NEW — no existing equivalent. */
@@ -153,6 +161,14 @@ export interface ModelPlanInput {
   cutters: CutterCandidates;
   tolerances: ModelTolerances;
   edgeBreak: EdgeBreakSpec;
+  /**
+   * #961 — THE GOAL, when the caller can supply it: the model's top surface on the stock frame
+   * (Z 0 = stock top, the same 0.1 mm field the goal check samples). The picker's completeness
+   * is then the SIMULATED OUTCOME — the goal cells a candidate's own sweep leaves above the
+   * 0.1 mm band (the maintainer's 11-05 ruling), not the count of pockets left behind. Absent →
+   * the old pocket-count completeness, unchanged.
+   */
+  goal?: GoalHeightfield;
 }
 
 export interface ModelPlanOutput {
@@ -215,6 +231,13 @@ export interface SetupPlan {
    * posts; only a primary failure refuses (`priceSequence`'s step-0 rule).
    */
   unplanned: SequenceStepFailure[];
+  /**
+   * #961 acceptance (the maintainer's 11-05 review) — the pocket chain's full picker result: the
+   * chosen chain's cost and EVERY candidate it priced (`considered`), so a card or the run sheet
+   * prints the candidates beside the choice instead of only the winner. The plan already computed
+   * this; before this field it was dropped at the SetupPlan seam.
+   */
+  choice: SequenceChoice;
 }
 
 /** Set only by specs for now (see this file's header). */
@@ -234,6 +257,10 @@ export interface PlanModelCamOptions {
  * goal as leftover — a finish leaving the rough's band as its own scallop reads as uncovered.
  */
 const MODEL_STOCK_TO_LEAVE_MM = 0.3;
+
+/** #962 — how close a rim's own first and last point must already be to count as closed; past
+ * this is a genuine gap in `findRims`' own chain, not float noise from the mesh. */
+const RIM_CLOSE_TOL_MM = 0.01;
 
 /**
  * One cutter's resolved cut numbers, through the app's one feeds resolver (the labelled fallback
@@ -341,6 +368,95 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const offset = makeClipperOffset(tl);
   const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
   const toolChangeSeconds = readDefault(liveShopDefaults(), 'toolChange.seconds').value;
+  // #961 — THE SIMULATED OUTCOME'S STAMP. With a goal supplied, every candidate the picker prices
+  // is posted and stamped exactly as the goal check does, and the cells its sweep leaves above the
+  // 0.1 mm band are counted — the rank's first key. The goal is the caller's (the job's target),
+  // not re-derived here.
+  const coverageGoal = input.goal;
+  const coverageCtx: PostContext = {
+    jobName: 'model-coverage',
+    stock: { length: input.stock.length, width: input.stock.width, thickness: input.stock.thickness },
+    materialName: input.stock.material,
+    zDatum: 'probed-top-face',
+    origin: 'topFrontLeft',
+    camVersion: 'model-cam',
+    toolKey: 'multi',
+  };
+  // #961 — each distinct IR is posted and stamped ONCE, however many candidates carry it (the
+  // steps' IRs are memoized in `planStep`, so identity is stable); a candidate's fold is then a
+  // walk over its own IRs' cached fields.
+  const stampCache = new WeakMap<ToolpathIR, Float32Array | null>();
+  const stampedField = (ir: ToolpathIR): Float32Array | null => {
+    const cached = stampCache.get(ir);
+    if (cached !== undefined) return cached;
+    let field: Float32Array | null = null;
+    const posted = postZ1(ir, coverageCtx, Z1);
+    if (posted.ok) {
+      const parsed = parseGcode(posted.text);
+      const part = setupFromHeader(parsed.header).patch.part;
+      if (part !== undefined && part.kind === 'prism' && part.outline.kind === 'p-rect') {
+        const setup = stubSetup(part, { kind: 'tape-down', contact: part.outline }, { startingTool: 1 }, Z1);
+        const stamp = exactSweptFieldTooled(coverageGoal!, buildTimeline(parsed, setup, Z1), () => ir.tool);
+        if (stamp !== null) field = stamp.field;
+      }
+    }
+    stampCache.set(ir, field);
+    return field;
+  };
+  // #961 follow-up — THE REST'S REGION FROM THE SIMULATED FIELD: the cells the chain so far
+  // leaves more than the 0.1 mm band above the goal, inside the pocket's own footprint, as loops
+  // (dilated by the ROUNDER in `planPocketsForTree`, which knows the cutter). A field that cannot
+  // be stamped falls back to the whole footprint — the floor pass as it was.
+  const restRegion = coverageGoal === undefined
+    ? undefined
+    : (prefixIrs: readonly ToolpathIR[], region: { id: string; footprint: Polygons; floorZ: number; bounds: { min: [number, number]; max: [number, number] } }): Polygons | null => {
+        let acc: Float32Array | null = null;
+        for (const ir of prefixIrs) {
+          const field = stampedField(ir);
+          if (field === null) continue;
+          if (acc === null) acc = Float32Array.from(field);
+          else for (let k = 0; k < acc.length; k++) if (field[k]! < acc[k]!) acc[k] = field[k]!;
+        }
+        if (acc === null) return region.footprint;
+        const goal = coverageGoal;
+        const pitch = goal.pitch;
+        const i0 = Math.max(0, Math.floor((region.bounds.min[0] - goal.x0) / pitch));
+        const i1 = Math.min(goal.nx - 1, Math.ceil((region.bounds.max[0] - goal.x0) / pitch));
+        const j0 = Math.max(0, Math.floor((region.bounds.min[1] - goal.y0) / pitch));
+        const j1 = Math.min(goal.ny - 1, Math.ceil((region.bounds.max[1] - goal.y0) / pitch));
+        if (i1 < i0 || j1 < j0) return null;
+        const cells = acc;
+        const inside = (i: number, j: number): boolean => {
+          const k = (j0 + j) * goal.nx + (i0 + i);
+          if (goal.covered[k] !== 1) return false;
+          if (!(cells[k]! - (goal.z[k] as number) > 0.1)) return false;
+          const x = goal.x0 + (i0 + i) * pitch;
+          const y = goal.y0 + (j0 + j) * pitch;
+          return pointInPolygons(region.footprint, x, y);
+        };
+        return cellPolygons(inside, i1 - i0 + 1, j1 - j0 + 1, goal.x0 + i0 * pitch, goal.y0 + j0 * pitch, pitch);
+      };
+  const goalCoverage =
+    coverageGoal === undefined
+      ? undefined
+      : (irs: readonly ToolpathIR[]): { leftoverCells: number; coveredCells: number; cellAreaMm2: number } | null => {
+          let acc: Float32Array | null = null;
+          for (const ir of irs) {
+            const field = stampedField(ir);
+            if (field === null) continue;
+            if (acc === null) acc = Float32Array.from(field);
+            else for (let k = 0; k < acc.length; k++) if (field[k]! < acc[k]!) acc[k] = field[k]!;
+          }
+          if (acc === null) return null;
+          let covered = 0;
+          let leftover = 0;
+          for (let k = 0; k < acc.length; k++) {
+            if (coverageGoal.covered[k] !== 1) continue;
+            covered++;
+            if (acc[k]! - (coverageGoal.z[k] as number) > 0.1) leftover++;
+          }
+          return { leftoverCells: leftover, coveredCells: covered, cellAreaMm2: coverageGoal.pitch * coverageGoal.pitch };
+        };
   const perSetup: SetupPlan[] = [];
 
   for (let setupIndex = 0; setupIndex < input.setups.length; setupIndex++) {
@@ -392,6 +508,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         spindleRpm: pocketParams.rpm,
         air: true,
         boolean,
+        ...(goalCoverage === undefined ? {} : { goalCoverage }),
+        ...(restRegion === undefined ? {} : { restRegion }),
       },
       curved: {
         geometry: input.geometry,
@@ -485,6 +603,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       notes,
       unreachable: result.unreachable,
       unplanned: result.unplanned,
+      choice: result.choice,
     });
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 1 });
   }
@@ -629,6 +748,21 @@ export interface PlanPocketsOptions {
   tabs?: { count: number; width: number; height: number };
   /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
   boolean?: { union: BooleanFn; subtract: BooleanFn };
+  /**
+   * #961 — the simulated outcome for a candidate's planned IRs: the goal cells left above the
+   * band and the covered cells, stamped by the caller (which owns the goal). Absent → the
+   * picker keeps its pocket-count completeness.
+   */
+  goalCoverage?: (irs: readonly ToolpathIR[]) => { leftoverCells: number; coveredCells: number; cellAreaMm2: number } | null;
+  /**
+   * #961 — a COVERAGE rest's region, from the caller's own simulated field: the cells the chain so
+   * far leaves above the band, as polygons in the plan's XY (the caller owns the goal and the
+   * stamp). Absent → the rest cuts its whole pocket floor (the pre-restriction behaviour).
+   */
+  restRegion?: (
+    prefixIrs: readonly ToolpathIR[],
+    region: { id: string; footprint: Polygons; floorZ: number; bounds: { min: [number, number]; max: [number, number] } },
+  ) => Polygons | null;
 }
 
 /**
@@ -801,9 +935,112 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     air: opts.air,
   });
 
-  const planRegion = (id: string, cutter: Tool): OpOutcome | null => {
+  /**
+   * #961 — A REST'S OWN REGION (the manager's 11-05 finding, measured): the tray's ⌀3.175 rest was
+   * planned as a full pocket pass — every op the ⌀6 already cut, re-cut at all three levels, 4,306 s
+   * (90.2 % of its 60,266 mm of feed travelled over floor the primary had already cleared and
+   * removed nothing). The material a pocket primary leaves standing is AT THE FLOOR: the 0.58 mm
+   * lands between the tray's scoops, which the ⌀6's disc cannot span but the ⌀3.175's can. The
+   * rest is therefore ONE pass at the node's floor over the pocket's own region — not the mouth,
+   * not every level, not the facing the primary already finished.
+   *
+   * The manager's suggested criterion (`cut only where prevCl − restCl > band`) was tried first and
+   * blocked by the rest op's own rule (`ops/rest.ts`): its mask is `nextCL + stockToLeave + margin
+   * < levelZ`, so it always stops a band ABOVE its own CL — in the curved pipeline the ball finish
+   * takes that band. As a POCKET rest it cannot cut to the floor at all (at the floor level its
+   * mask is empty by construction), and the tray's lands stand at the floor. The floor-level pass
+   * is the shape that cuts what actually stands, and it keeps the coverage bit-identical.
+   *
+   * #961 follow-up — THE REGION IS THE SIMULATED LEFTOVER: when the caller supplies `restRegion`
+   * (it owns the goal), the pass is confined to the cells the CHAIN SO FAR leaves above the band,
+   * dilated by the rest's radius plus its step-over so its centre can reach them. The material
+   * map showed the untrimmed floor pass still crossing cleared floor at 83 % of its feed; the
+   * spine strips and slot-wall corners are all there is to cut.
+   */
+  const planRestRegion = (id: string, step: SequenceStep, prefix: readonly SequenceStep[] | undefined): OpOutcome | null => {
+    // The primary faced the land and cleared the through holes; nothing rests there (the primary's
+    // own pass already reached the design surface). Only a pocket's floor can hold a land.
+    if (id === 'facing') return null;
+    const node = pocketsById.get(id);
+    if (node === undefined) return null;
     const ref = refById.get(id);
     if (ref === undefined) return null;
+    const cutter = step.cutter.tool;
+    const floorZ = rebase(node.floorZ);
+    const stepOverMm = (cuttingDiameter(cutter) ?? 1) / 4;
+    const radius = (cuttingDiameter(cutter) ?? 0) / 2;
+    // The chain so far, as IRs (each prefix step planned with its own prefix; all memoized).
+    const prefixIrs: ToolpathIR[] = [];
+    if (prefix !== undefined) {
+      for (let i = 0; i < prefix.length; i++) {
+        let ir: ToolpathIR | null;
+        try {
+          ir = planStep(prefix[i]!, prefix.slice(0, i));
+        } catch {
+          ir = null;
+        }
+        if (ir !== null) prefixIrs.push(ir);
+      }
+    }
+    let regionPolys = node.region;
+    if (opts.restRegion !== undefined) {
+      if (prefixIrs.length === 0) return null; // nothing planned before it: no leftover to cut
+      const mask = opts.restRegion(prefixIrs, { id, footprint: node.region, floorZ, bounds: ref.bounds });
+      if (mask === null || mask.length === 0) return null;
+      // Dilated so the cutter's CENTRE can reach every leftover cell the pocket op insets away —
+      // then clipped back to the pocket's own mouth (A ∩ B = A \ (A \ B)): the dilation exists to
+      // place the centre, never to let the pass cut the walls or the land beyond the pocket. The
+      // tray's first masked run gouged 0.08 % without this clip.
+      //
+      // The radius is counted TWICE: the op's own loops sit ≥ r inside the region's boundary, and
+      // a loop must be within r of the cell it cuts, so a cell on the mask's edge needs the region
+      // to reach 2r + the step-over past it (plus a margin). Dilating by r + step-over alone left
+      // the thin strips uncut (the tray lost 0.32 points against the floor pass).
+      regionPolys = opts.offset(mask, 2 * radius + stepOverMm + 0.25);
+      if (regionPolys.length === 0) return null;
+      if (opts.boolean !== undefined) {
+        const clipped = opts.boolean.subtract(regionPolys, opts.boolean.subtract(regionPolys, node.region));
+        if (clipped.length === 0) return null;
+        regionPolys = clipped;
+      }
+    }
+    const restNode: PocketNode = {
+      ...node,
+      open: false,
+      through: false,
+      region: regionPolys,
+      floors: [{ polygons: regionPolys, area: 0 }],
+      mouthZ: floorZ,
+      floorZ,
+    };
+    return pocket({
+      cutter,
+      node: restNode,
+      region: ref,
+      stepOverMm,
+      stepDownMm: opts.stepDownMm,
+      feeds: opts.feeds,
+      offset: opts.offset,
+      safeZMm: SAFE_Z,
+      hopZMm: HOP_Z,
+      toolNumber: cutter.number ?? 1,
+      spindleRpm: cutParamsFor(cutter).rpm,
+      air: opts.air,
+      rapid: opts.rapid,
+      boolean: opts.boolean,
+    });
+  };
+
+  const planRegion = (id: string, step: SequenceStep, prefix?: readonly SequenceStep[]): OpOutcome | null => {
+    const ref = refById.get(id);
+    if (ref === undefined) return null;
+    const cutter = step.cutter.tool;
+    // #961 — Only a COVERAGE rest is a floor-level pass: the primary already cleared the pocket
+    // above its floor. A GEOMETRIC rest (a pocket the primary cannot enter at all) still needs the
+    // full depth pass — its material stands from the mouth down, not just at the floor.
+    if (step.kind === 'rest' && step.coverageRest === true) {
+      return planRestRegion(id, step, prefix);
+    }
     if (id === 'contour') {
       return contourOp({
         cutter,
@@ -946,14 +1183,29 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // candidate's) in `unplanned`, each with the message its region threw.
   const stepFailures = new Map<string, { id: string; reason: string }[]>();
 
-  const planStep: SequenceOptions['planStep'] = (step) => {
-    let outcomes = outcomeCache.get(stepSignature(step));
+  // #961 — THE SAME STEP, PRICED BY MANY CANDIDATES, IS ONE IR: the picker stamps every priced
+  // candidate's steps, so the merge (and, in `planModelCam`, the stamp) must be done once per
+  // step, not once per candidate. Keyed by the same signature the outcome cache uses.
+  // #961 — a COVERAGE rest's IR depends on the chain so far (its region is that chain's stamped
+  // leftover), so the caches key on the prefix for a rest step; every other step is prefix-free.
+  const stepKey = (step: SequenceStep, prefix: readonly SequenceStep[] | undefined): string =>
+    step.kind === 'rest' && prefix !== undefined && prefix.length > 0
+      ? `${stepSignature(step)}|after:${prefix.map((s) => stepSignature(s)).join('>')}`
+      : stepSignature(step);
+  const irCache = new Map<string, ToolpathIR | null>();
+  const planStep: SequenceOptions['planStep'] = (step, prefix) => {
+    const signature = stepKey(step, prefix);
+    if (irCache.has(signature)) return irCache.get(signature)!;
+    // The outcome cache uses the SAME key as the IR cache (a rest's regions depend on its prefix),
+    // and the chosen chain's ops build reads it back by `stepKey` — the two must agree or a rest's
+    // ops silently drop out of the posted program.
+    let outcomes = outcomeCache.get(signature);
     if (outcomes === undefined) {
       outcomes = [];
       for (const id of step.regionIds) {
         let outcome: OpOutcome | null;
         try {
-          outcome = planRegion(id, step.cutter.tool);
+          outcome = planRegion(id, step, prefix);
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
           if (!regionFailures.has(id)) regionFailures.set(id, { kind: step.kind, cutterKey: step.cutter.key, regionIds: [id], reason });
@@ -964,10 +1216,13 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         if (outcome === null) continue;
         outcomes.push({ id, outcome });
       }
-      outcomeCache.set(stepSignature(step), outcomes);
+      outcomeCache.set(signature, outcomes);
     }
-    if (outcomes === null || outcomes.length === 0) return null;
-    return outcomes.map((o) => o.outcome.ir).reduce((a, b) => concatToolpathIR(a, b));
+    const merged = outcomes === null || outcomes.length === 0
+      ? null
+      : outcomes.map((o) => o.outcome.ir).reduce((a, b) => concatToolpathIR(a, b));
+    irCache.set(signature, merged);
+    return merged;
   };
 
   const choice = chooseSequence(demand, cutters, {
@@ -975,6 +1230,28 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     toolChangeSeconds: opts.toolChangeSeconds,
     planStep,
     maxCutters: opts.maxCutters,
+    ...(opts.goalCoverage === undefined
+      ? {}
+      : {
+          coverage: (steps: readonly SequenceStep[]) => {
+            // The candidate's PLANNED steps' IRs (cached by planStep) — what would post. A step
+            // that throws cuts nothing (`priceSequence` already caught it and stated the failure),
+            // so it contributes no IR here either: a candidate is never crashed by a simulation.
+            const irs: ToolpathIR[] = [];
+            const already: SequenceStep[] = [];
+            for (const step of steps) {
+              let ir: ToolpathIR | null;
+              try {
+                ir = planStep(step, already);
+              } catch {
+                ir = null;
+              }
+              if (ir !== null) irs.push(ir);
+              already.push(step);
+            }
+            return irs.length === 0 ? null : opts.goalCoverage!(irs);
+          },
+        }),
   });
 
   const ops: PlannedOp[] = [];
@@ -991,8 +1268,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // other choice (a RETURN to an earlier cutter is charged a tool change in `choice.cost`, same
   // as the chain's last cutter taking the profile itself when that is cheaper) — nothing to defer
   // or re-plan here, every step (contour included) goes through the SAME loop.
-  for (const step of choice.steps) {
-    const outcomes = outcomeCache.get(stepSignature(step));
+  for (let stepIndex = 0; stepIndex < choice.steps.length; stepIndex++) {
+    const step = choice.steps[stepIndex]!;
+    // The SAME key the picker priced it under — a coverage rest's IR depends on its prefix.
+    const outcomes = outcomeCache.get(stepKey(step, choice.steps.slice(0, stepIndex)));
     if (outcomes === undefined || outcomes === null) continue; // chooseSequence only chose postable steps
     if (currentRun === null || currentRun.cutterKey !== step.cutter.key) {
       if (currentRun !== null) programs.push(currentRun);
@@ -1494,6 +1773,31 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           );
           continue;
         }
+        // #962 — THE ORGANIZER'S 77 mm GROOVE FOUND THIS: `findRims`' edge-chaining can leave a
+        // POCKET rim's own loop OPEN (a branch point in the sharp floor|wall graph took the wrong
+        // one of several unused edges, per `features/rims.ts`'s `chain()`), and `chamfer()`'s own
+        // `closedRing()` does not know the difference — it closes ANY polyline whose ends don't
+        // already coincide with one more straight point, a phantom edge across whatever lies
+        // between them. That phantom edge is real material to `generateChamfer`: it feeds along
+        // it like any other edge of the ring, which is the posted gouge (E's render set, #962) —
+        // not a `link()` defect, since `link()` never emits a lateral feed; this is the RING'S
+        // OWN trace. A POCKET encloses a cavity, so its rim's own first and last point must be
+        // the SAME vertex `chain()` started and ended on — not approximately, exactly, give or
+        // take float noise from the mesh itself — so a gap past that noise floor there means the
+        // chain never closed, and bridging it is refused. A CONTOUR rim is exempt: the outer
+        // silhouette can legitimately run open to the stock's own edge (a shoulder cut to +X,
+        // `buildRandomPart`'s own fixture finds this on every synthetic kind, rim-6, 8 mm open,
+        // (20, -4)→(20, 4)) — closing that one just retraces its own two points, never a bridge
+        // across unrelated ground.
+        const first = rim.polyline[0];
+        const last = rim.polyline[rim.polyline.length - 1];
+        if (rim.of !== 'contour' && first !== undefined && last !== undefined && Math.hypot(first[0] - last[0], first[1] - last[1]) > RIM_CLOSE_TOL_MM) {
+          notes.push(
+            `rim "${rim.id}" not broken: its own loop is not closed (ends ${Math.hypot(first[0] - last[0], first[1] - last[1]).toFixed(2)} mm apart) — ` +
+              `a straight bridge there is not real geometry, so no chamfer is cut rather than gouging across it`,
+          );
+          continue;
+        }
         // The rim's own Z is mesh-absolute too — rebased before the op sizes its bevel from it.
         const rebasedRim = { ...rim, z: rebaseZ(rim.z) };
         const ref = regionRefOf(rim.id, 'rim', [[...rim.polyline]], rebasedRim.z, rebasedRim.z);
@@ -1561,6 +1865,8 @@ export interface PlanTreeResult {
   notes: string[];
   /** #959 item 5 — the pocket chain's failed steps, then the curved/rim stages'. */
   unplanned: SequenceStepFailure[];
+  /** #961 — the pocket chain's picker result, carried through for `SetupPlan.choice`. */
+  choice: SequenceChoice;
 }
 
 export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): PlanTreeResult {
@@ -1591,5 +1897,6 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
     unreachable: pocketResult.unreachable,
     notes: [...pocketResult.notes, ...curvedResult.notes],
     unplanned: [...pocketResult.unplanned, ...curvedResult.unplanned],
+    choice: pocketResult.choice,
   };
 }

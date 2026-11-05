@@ -338,6 +338,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     clearanceZ: opts.regionRef.regionClearanceZ,
     tool: { radiusMm: toolRadius },
     feeds: { feed: opts.feeds.feedMmPerMin, plungeFeed: opts.feeds.plungeFeedMmPerMin },
+    hopClearanceMm: opts.hopZMm,
   });
 
   const moves: ToolpathIR['operations'][number]['moves'] = [];

@@ -697,6 +697,8 @@ importer):
 adopted as-is; this note's only addition is the `setups[]` wrapper (§3.0), which does not change
 anything inside `FeatureTree` itself.
 
+**Ruled (maintainer, 2026-11-05, #943): no second engine.** The old heightfield engine (`surface3d.ts`'s planning functions, `rough3d.ts`, their caps and presses, the `goal-program-too-big` family and every budget constant) and all six flags (`USE_MODEL_CAM_ENGINE`, `CASEMAKER_MODEL_CAM`, `VITE_MODEL_CAM`, `setModelCamEnabled`, `window.__caseMaker`, `setupsOverride`) are retired **in the same removal commit**. The package lands with the seam calling `planModelCam` unconditionally, and nothing falls back. Figure and demo cards re-score on the new engine at whatever they read. #966's acceptance is that removal commit; it is no longer gated on the two parts passing. #967's extraction keeps the gate's sampler.
+
 ---
 
 ## 9. Licences
@@ -759,6 +761,8 @@ Apache-2.0.
 
 **FreeCAD Path** (`Path/Op/PocketShape.py`, LGPL-2.1-or-later — A's #958 §1): the source for §1's
 boolean-on-sections lesson. Description only, no source copied.
+
+**Ruled (maintainer, 2026-11-05, #943): reference numbers from GPL/LGPL programs — yes, numbers only.** OpenCamLib (LGPL-2.1) and PyCAM (GPL-3.0) reference outputs are generated offline. Their generator scripts and the program versions are committed, and only the numeric outputs are kept in the tree. No source from either program is copied or linked. Kiri:Moto stays a local reference only. The parity fixtures' header states the same rule.
 
 ---
 

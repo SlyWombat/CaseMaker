@@ -107,8 +107,8 @@ export interface ProgramScore {
   cutInto: CutIntoScore;
   /**
    * #927's CUTTING estimate on the posted file — ours and the vendor's, through the SAME model.
-   * Bit changes are NOT in this number: the scorer adds them, so a card cannot compare a time with
-   * changes against one without. Makera's header `TIME` never enters this field.
+   * This is the cycle line's BASIS (the maintainer's #943 ruling, 2026-11-05), plus the bit changes
+   * the scorer adds. Makera's header `TIME` never enters this field.
    */
   cycleSeconds: number;
   /**
@@ -121,6 +121,14 @@ export interface ProgramScore {
    * Null for our side and for a card with no such record.
    */
   headerTimeSeconds?: number | null;
+  /** Which feed row fed each of OUR cutters (C2); printed on the card, never judged. */
+  feedRows?: readonly FeedRowFact[];
+  /** The vendor's stated holding (the reference card's own words), printed beside ours. */
+  vendorHolding?: string | null;
+  /** The catalogue door's state for this run: installed (and where from), or opted out/absent. */
+  catalogueStatus?: CatalogueStatus;
+  /** #961 — the priced candidate cutter sequences and the chosen chain (printed on the card). */
+  sequence?: SequenceReceipt | null;
   /** Rapid seconds / cycle seconds, from the same estimate on the posted file. */
   airFraction: number;
   /** `summary.rapids / summary.cuts × 1000` from `parseGcode` on the posted file. */
@@ -137,6 +145,80 @@ export interface ProgramScore {
   postsAsFiled: PostsAsFiled | null;
   /** Where each number came from, in words, for the page's provenance line. */
   sources?: Partial<Record<'coverage' | 'cutInto' | 'cycle' | 'air' | 'rapids' | 'cutters', string>>;
+}
+
+/**
+ * #961 acceptance (the maintainer's 11-05 review) — THE PRICED CANDIDATE CUTTER SEQUENCES, as the
+ * card prints them. Every candidate the picker priced, its cutters, #927's estimate and total, and
+ * the completeness rank it competed on; the chosen chain and why. Printed beside the seven lines,
+ * never judged by them.
+ */
+export interface SequenceCandidateFact {
+  /** 1 = the rank the choice was made on (completeness first, then price). */
+  rank: number;
+  steps: { kind: string; cutterKey: string }[];
+  /** The distinct cutters the candidate uses, in first-use order. */
+  cutters: string[];
+  /** #927's estimate on the candidate's posted moves, s; null when it could not be priced. */
+  estimateSeconds: number | null;
+  toolChanges: number | null;
+  /** `estimateSeconds + toolChanges × toolChangeSeconds`; null when unpriced. */
+  totalSeconds: number | null;
+  /**
+   * #961 — the simulated outcome: goal cells this candidate's own sweep leaves above the 0.1 mm
+   * band, over the cells it covered. The rank's first key (fewer wins); null when no goal was
+   * supplied to the picker or the candidate could not be priced.
+   */
+  leftoverCells: number | null;
+  coveredCells: number | null;
+  /**
+   * #961 — the PRICE of the candidate's coverage rests against the best chain without one: mm²
+   * recovered, the #927 seconds they add, and the rate. Null when it carries no coverage rest (or
+   * either side could not be simulated). A rate below 0.01 mm²/s demotes the candidate below every
+   * chain that clears the line; `reason` says so.
+   */
+  restPrice: { gainMm2: number; seconds: number; mm2PerSecond: number } | null;
+  /** Completeness rank: pockets a cutter in the set COULD have covered and this chain left. */
+  leftBehind: number;
+  /** Every pocket it leaves uncut (including the part's own unreachable features). */
+  unreachable: number;
+  /** Steps its ops could not plan. */
+  unplanned: number;
+  chosen: boolean;
+  /** Why it did not win; empty for the chosen one. */
+  reason: string;
+}
+
+export interface SequenceReceipt {
+  /** The rule the rank uses, in words. */
+  rule: string;
+  /** The chosen chain, by cutter, in execution order, with each cutter's own #927 estimate and runs. */
+  chosen: { cutterKey: string; role: string; estimateSeconds: number; runs: number }[];
+  candidates: SequenceCandidateFact[];
+  /** The chosen whole-job cutter set against the vendor card's own set, in words. */
+  vendor: string;
+}
+
+/** The catalogue door's state for a run: was the full catalogue installed, and where from? */
+export interface CatalogueStatus {
+  /** TRUE when the full Makera catalogue was installed (rows answered the cutters). */
+  used: boolean;
+  /** A sentence for the card: the file/rows read, or that the run opted out / found none. */
+  note: string;
+}
+
+/** One cutter's feed-row receipt (C2): which row answered, and the four numbers it gave. */
+export interface FeedRowFact {
+  /** The cutter, as the plan keys it (`tool.name` or id). */
+  cutter: string;
+  /** The row, in words: the Makera catalogue row, or the compiled/location row. */
+  row: string;
+  feed: number;
+  plunge: number;
+  stepDown: number;
+  rpm: number;
+  /** The resolver's own provenance sentence for this cutter. */
+  provenance: string;
 }
 
 /** The pass thresholds of plan v2 §3, with the shop's own pass line supplied by the caller. */
@@ -203,6 +285,14 @@ export interface SevenLine {
 
 export interface SevenLineCard {
   card: string;
+  /** Which feed row fed each of OUR cutters (C2), printed with the card, never judged. */
+  feedRows: readonly FeedRowFact[];
+  /** The catalogue door's state: installed, or opted out/absent (printed on the card). */
+  catalogue: CatalogueStatus;
+  /** The holding each side was cut in — ours first; the vendor's when the card states one. */
+  holding: { ours: string | null; vendor: string | null };
+  /** #961 — the priced candidate cutter sequences and the chosen chain (printed, never judged). */
+  sequence: SequenceReceipt | null;
   /** FALSE when no vendor program was scored beside ours: "unreferenced", never a pass. */
   referenced: boolean;
   /** TRUE only when every judged line passes and the card is referenced. */
@@ -240,6 +330,10 @@ export function scoreSevenLines(input: ScoreInput): SevenLineCard {
   const r: SevenLineRules = { ...PLAN_V2_RULES, ...(input.rules ?? {}) };
   const { ours, vendor } = input;
   const referenced = vendor !== null;
+  const feedRows = ours.feedRows ?? [];
+  const catalogue = ours.catalogueStatus ?? { used: false, note: 'no catalogue status stated' };
+  const holding = { ours: ours.postsAsFiled?.holding ?? null, vendor: vendor?.vendorHolding ?? null };
+  const sequence = ours.sequence ?? null;
   const lines: SevenLine[] = [];
 
   const add = (line: Omit<SevenLine, 'number'>): void => {
@@ -313,9 +407,9 @@ export function scoreSevenLines(input: ScoreInput): SevenLineCard {
     });
   }
 
-  // 3 — cycle ≤ 2× vendor's; the 1.25× goal is printed, not required. LIKE FOR LIKE: both sides
-  // are #927's cutting time on their own posted file PLUS their manual bit changes at the shop's
-  // own seconds. Makera's header TIME is printed as a fact in the note, never used as the reference.
+  // 3 — cycle ≤ 2× the vendor's, on OUR estimator over both files plus the bit changes (#943
+  // ruling, 2026-11-05: the estimator is the basis). Makera's header TIME is printed beside the
+  // line as a fact, never the reference.
   {
     const changeSeconds = r.toolChangeSeconds;
     const oursTotal = ours.cycleSeconds + ours.toolChanges * changeSeconds;
@@ -332,11 +426,11 @@ export function scoreSevenLines(input: ScoreInput): SevenLineCard {
     const header = vendor?.headerTimeSeconds ?? null;
     const headerFact =
       header === null
-        ? ''
-        : ` Makera's header TIME states ${minutes(header)} — a CAM estimate without bit changes, printed as a fact, not the reference.`;
+        ? ' Makera’s header states no TIME.'
+        : ` Makera’s header TIME states ${minutes(header)} — printed as a fact beside the estimator basis, never the reference (#943).`;
     add({
       key: 'cycle',
-      rule: `≤ ${r.cycleMultiple}× the vendor's (goal ${r.cycleGoalMultiple}×), cutting time plus bit changes at ${changeSeconds} s each`,
+      rule: `≤ ${r.cycleMultiple}× the vendor’s (goal ${r.cycleGoalMultiple}×) on our #927 estimator over both files, plus bit changes at ${changeSeconds} s each (#943)`,
       oursValue: oursTotal,
       vendorValue: vendorTotal,
       ours: minutes(oursTotal),
@@ -345,7 +439,7 @@ export function scoreSevenLines(input: ScoreInput): SevenLineCard {
       note:
         vendor === null || vendorTotal === null
           ? 'no vendor program beside it'
-          : `${ok ? (goalMet ? `meets the ${r.cycleGoalMultiple}× goal` : `within the ${r.cycleMultiple}× line but above the ${r.cycleGoalMultiple}× goal`) : `${(oursTotal / vendorTotal).toFixed(2)}× the vendor's time`} — ours ${split(ours.cycleSeconds, ours.toolChanges, oursTotal)}; vendor ${split(vendor.cycleSeconds, vendor.toolChanges, vendorTotal)}.${headerFact}`,
+          : `${ok ? (goalMet ? `meets the ${r.cycleGoalMultiple}× goal` : `within the ${r.cycleMultiple}× line but above the ${r.cycleGoalMultiple}× goal`) : `${(oursTotal / vendorTotal).toFixed(2)}× the vendor's estimator time`} — ours ${split(ours.cycleSeconds, ours.toolChanges, oursTotal)}; vendor ${split(vendor.cycleSeconds, vendor.toolChanges, vendorTotal)}.${headerFact}`,
       goalMet,
     });
   }
@@ -422,17 +516,23 @@ export function scoreSevenLines(input: ScoreInput): SevenLineCard {
     });
   }
 
-  // 7 — posts as filed, in the vendor's own holding, with no operator change to the pitch.
+  // 7 — posts as filed: OUR program planned in the VISE with jaw clearance (the maintainer's #943
+  // ruling), with no operator change to the pitch. Tape cards say 'tape' and never claim this line;
+  // the card prints both holdings (ours and the vendor's stated one) beside each other.
   {
     const p = ours.postsAsFiled;
     const stated = p === null;
     const ok = p !== null && p.ok;
     add({
       key: 'postsAsFiled',
-      rule: 'posts as filed, in the vendor’s holding, without changing the pitch',
+      rule: 'posts as filed — in the vise with jaw clearance, without changing the pitch (#943)',
       oursValue: p === null ? null : p.ok,
       vendorValue: null,
-      ours: stated ? 'not stated' : p.ok ? `yes — ${p.holding}, ${p.pitchMm} mm` : `no — ${p.note ?? 'refused or changed'}`,
+      ours: stated
+        ? 'not stated'
+        : p.ok
+          ? `yes — ${p.holding}, ${p.pitchMm} mm`
+          : `no — ${p.holding}, ${p.pitchMm} mm: ${p.note ?? 'refused or changed'}`,
       vendor: null,
       state: stated ? 'stated' : ok ? 'pass' : 'fail',
       note: stated ? 'the card does not state a posted program’s holding and pitch' : ok ? null : p.note ?? null,
@@ -447,7 +547,7 @@ export function scoreSevenLines(input: ScoreInput): SevenLineCard {
       ? 'Passes the seven lines of plan v2 §3'
       : `Deviates — ${failing.map((f) => LABELS[f] ?? f).join(', ')}`;
 
-  return { card: input.card, referenced, pass, lines, failing, sentence };
+  return { card: input.card, feedRows, catalogue, holding, sequence, referenced, pass, lines, failing, sentence };
 }
 
 /** Display names for the line keys, used in the card sentence and the specs' messages. */

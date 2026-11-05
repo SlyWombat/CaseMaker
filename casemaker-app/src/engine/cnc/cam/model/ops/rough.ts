@@ -212,11 +212,17 @@ export function rough(opts: RoughOpOptions): OpOutcome {
     return target[j * nx + i]!;
   };
   /** The material the CURRENT level z has not removed: the target where it stands above z, else z. */
-  const materialFor = (levelZ: number): MaterialField => ({
+  const materialFor = (_levelZ: number): MaterialField => ({
+    // ITEM 7 — the field reports the STANDING SURFACE (the target grid), never a level floor under
+    // it. `math.max(levelZ, target)` was honest only for a link travelling at that same level's
+    // own z: at any other travel height it claims a floor that pass never left, and the skim's
+    // first link() routing trusted it and fed THROUGH standing material (the organizer's rough
+    // measured 10,063 s -> 18,645 s before this fix). The level loop's own links are unchanged by
+    // it: at travel z == levelZ, cleared cells read target < z (clear either way) and uncut cells
+    // read target > z (hop either way).
     topAt: (x, y) => {
       const t = targetAt(x, y);
-      if (!Number.isFinite(t)) return Number.POSITIVE_INFINITY;
-      return Math.max(levelZ, t);
+      return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
     },
   });
 
@@ -226,6 +232,7 @@ export function rough(opts: RoughOpOptions): OpOutcome {
   const linkBase = {
     tool: { radiusMm: toolRadius },
     feeds: { feed: opts.feeds.feedMmPerMin, plungeFeed: opts.feeds.plungeFeedMmPerMin },
+    hopClearanceMm: opts.hopZMm,
   } as const;
   const linkOptionsFor = (levelZ: number): LinkOptions => ({
     ...linkBase,
@@ -298,8 +305,15 @@ export function rough(opts: RoughOpOptions): OpOutcome {
     for (let i = i0; i <= i1; i++) points.push([min[0] + i * pitch, min[1] + j * pitch, skimTarget(i, j) as number]);
     if (points.length < 2) return;
     const start = points[0]!;
-    // Between runs: a VERTICAL lift at the current position, then travel at the hop plane — never
-    // a diagonal from cut depth (the pencil's own review finding, the same rule here).
+    // Between skim runs the cutter joins through #962's `link()` — the same rule the Z-level loop
+    // has used since its first review, and the one finish.ts took in item 6: the link reads the
+    // material field at the depth just left, stays down where the material says it may, and every
+    // VERTICAL leg runs at `plungeFeed`, never as a diagonal at the cutting feed. The previous
+    // vertical-lift-then-hop form was safe but expensive: F measured the organizer's rough at
+    // 7,676 s of rapids against 2,387 s of cut.
+    // (The link() routing for these joins is held until B's link() vertical rule lands — see the
+    // #959 queue. Until then the safe form stands: a vertical lift at the current position, then a
+    // rapid at the hop plane.)
     if (prevExit !== null) moves.push({ kind: 'rapid', x: prevExit[0], y: prevExit[1], z: opts.hopZMm });
     moves.push({ kind: 'rapid', x: start[0], y: start[1], z: opts.hopZMm });
     moves.push({ kind: 'feed', x: start[0], y: start[1], z: start[2], f: opts.feeds.plungeFeedMmPerMin });

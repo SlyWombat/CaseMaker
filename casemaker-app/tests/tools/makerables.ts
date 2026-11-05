@@ -46,8 +46,16 @@ export interface MakerablesVendorScore {
   /** Top-surface coverage, 0..1 (page `coverage0p1Pct / 100`). */
   coverage: number;
   cutInto: MakerablesVendorCutInto;
-  /** The vendor program's own `;@MKR|TIME`, s — Makera's estimate, the #955 table's number. */
+  /**
+   * OUR #927 estimator on the vendor program, s — the cycle line's BASIS since the maintainer's
+   * #943 ruling (2026-11-05). Before that ruling this field carried the page's `;@MKR|TIME`.
+   */
   cycleSeconds: number;
+  /**
+   * The vendor program's own `;@MKR|TIME`, s — Makera's estimate, printed beside the line as a
+   * fact, never the reference (#943). Null only for a card whose file states no TIME.
+   */
+  headerTimeSeconds: number | null;
   /** Rapids per 1,000 feed moves in the vendor NC, as our parser counts them. */
   rapidsPer1000FeedLines: number;
   /** Distinct cutting tools in the vendor NC. */
@@ -69,7 +77,9 @@ export interface MakerablesCard {
   /** The vendor `.nc` file(s) this side's program is scored from. */
   files: MakerablesFile[];
   vendorScore: MakerablesVendorScore;
-  /** #927 on the vendor's own file, for the page's calibration line; not the vendor's line. */
+  /** #927 on the vendor's own file, kept for the page's calibration column (3 dp). Since the
+   * maintainer's #943 ruling the same estimator is the cycle line's basis; `vendorScore.cycleSeconds`
+   * stores it at full precision. */
   vendorEstimateSeconds: number | null;
   /** Where the numbers came from, in words. */
   source: string;

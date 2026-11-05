@@ -19,6 +19,7 @@ import { tl } from './helpers/manifoldExec';
 import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ParsedMesh } from '@/engine/import/stlParser';
+import { assertFixtureMesh } from '../tools/fixtureMesh';
 
 /** PROVISIONAL — replace with 2× the measured first accepted run (see this file's header). */
 const PLAN_BUDGET_MS = 120_000;
@@ -56,12 +57,14 @@ function trayMesh(): ParsedMesh {
     minY = Math.min(minY, positions[i + 1]!); maxY = Math.max(maxY, positions[i + 1]!);
     minZ = Math.min(minZ, positions[i + 2]!); maxZ = Math.max(maxZ, positions[i + 2]!);
   }
-  return {
+  const mesh: ParsedMesh = {
     positions,
     indices,
     triangleCount: indices.length / 3,
     bbox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
   };
+  assertFixtureMesh(mesh, 'planBudget965 tray');
+  return mesh;
 }
 
 describe('#964 the rebuilt plan meets its wall-time budget (#965)', () => {

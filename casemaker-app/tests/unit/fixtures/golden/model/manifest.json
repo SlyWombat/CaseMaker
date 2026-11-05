@@ -5,21 +5,21 @@
   {
    "id": "synth-rect-a",
    "job": "synthetic:rectilinear seed 1",
-   "meshSha256": "422a4e17d2e84afdf27f6558b0a0c1b8ea4ec3a006fe8da49e82bc784bd50c3a",
+   "meshSha256": "b1c9a7c0062eb71576c661eef89fc5bce0257ae7a7490276c9b0bff8a3a38791",
    "setupIndex": 0,
    "note": "rectilinear plate, seed 1"
   },
   {
    "id": "synth-rect-b",
    "job": "synthetic:rectilinear seed 3",
-   "meshSha256": "0f54515633cd37cedf76c5a0e93cd81912f49e842ff99aa1d57cd585c863b812",
+   "meshSha256": "e70913a9c6e7c2502bf74e766cbd390feec687eebc64368098b879c9b4fc1123",
    "setupIndex": 0,
    "note": "rectilinear plate, seed 3"
   },
   {
    "id": "synth-fillet-a",
    "job": "synthetic:filleted seed 2",
-   "meshSha256": "9c87c725abefa5ef3aca38d70d3e3715ea5cbebea91f99bf34647020a1d7eae4",
+   "meshSha256": "732ddb20cddbe6c1e8015d9ef13d192b0b7026b907a2d0c237ce4e8a5ea1be8d",
    "setupIndex": 0,
    "note": "filleted pockets, seed 2"
   }

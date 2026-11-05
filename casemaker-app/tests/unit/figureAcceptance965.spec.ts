@@ -46,7 +46,7 @@ import { jobVise, viseEnvelope } from '@/engine/cnc/fixture';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { parseGcode, setupFromHeader, stubSetup } from '@/engine/cnc';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
-import { exactSweptField } from '@/workers/sim/sweptPoint';
+import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
 import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { checkGoalCutInto, type GoalCutIntoOptions } from '@/engine/cnc/engrave/designCheck';
 import { vToolAllowance } from '@/engine/cnc/engrave/edgeBreak';
@@ -54,6 +54,7 @@ import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { measurePostedProgram, combinePostedFacts } from '../tools/postedFacts';
 import { scoreSevenLines, type CutIntoScore, type ProgramScore } from '../tools/sevenLines';
 import { clearMakeraCatalogue, installMakeraCatalogue } from '../tools/makeraCatalogue';
+import { feedRowsFor } from '../tools/feedRows';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 
@@ -132,8 +133,13 @@ function allowance(job: EngraveJob): Pick<GoalCutIntoOptions, 'edgeBreak' | 'wal
   if (chamfer.edgeBreak === undefined) return { wallShadowRadiusMm: Math.max(...HOUSE.map((t) => (t.tipDiameter ?? 0) / 2)) };
   const tool = HOUSE.find((t) => t.id === chamfer.edgeBreak?.toolKey);
   const allowance = tool === undefined ? null : vToolAllowance(tool);
+  // #948/v4 — the V gate: the card's allowance names the job's own chamfer tool number; a V with
+  // no number cannot carry the gate, and the card would measure the geometry-only rule.
+  const toolNumber = tool?.number;
   return {
-    ...(allowance === null ? {} : { edgeBreak: allowance }),
+    ...(allowance === null
+      ? {}
+      : { edgeBreak: { ...allowance, ...(toolNumber === null || toolNumber === undefined ? {} : { toolNumber }) } }),
     wallShadowRadiusMm: Math.max(...HOUSE.map((t) => (t.tipDiameter ?? 0) / 2)),
   };
 }
@@ -175,8 +181,12 @@ function postContextFor(job: EngraveJob, name: string): PostContext {
 
 /** The lower envelope of every posted program's cutter at each goal cell, accumulated across
  * programs and unioned across setups (a single top setup is its own union). */
-function wholeSurfaceTop(programs: readonly { ir: ToolpathIR; text: string }[], field: GoalHeightfield): ResultTop {
+function wholeSurfaceTop(
+  programs: readonly { ir: ToolpathIR; text: string }[],
+  field: GoalHeightfield,
+): { top: ResultTop; whoAt: (x: number, y: number) => number | null } {
   let acc: Float32Array | null = null;
+  let who: Uint8Array | null = null;
   for (const program of programs) {
     const parsed = parseGcode(program.text);
     const part = setupFromHeader(parsed.header).patch.part;
@@ -184,32 +194,54 @@ function wholeSurfaceTop(programs: readonly { ir: ToolpathIR; text: string }[], 
       throw new Error('#965: a posted program carries no rectangular stock header');
     }
     const setup = stubSetup(part, { kind: 'tape-down', contact: part.outline }, { startingTool: 1 }, Z1);
-    const stamp = exactSweptField(field, buildTimeline(parsed, setup, Z1), program.ir.tool);
+    const stamp = exactSweptFieldTooled(field, buildTimeline(parsed, setup, Z1), () => program.ir.tool);
     if (stamp === null) continue;
-    if (acc === null) acc = Float32Array.from(stamp);
-    else for (let k = 0; k < acc.length; k++) if (stamp[k]! < acc[k]!) acc[k] = stamp[k]!;
+    if (acc === null || who === null) {
+      acc = Float32Array.from(stamp.field);
+      who = Uint8Array.from(stamp.who);
+    } else {
+      // #948/v4 — the per-cell identity folds with the field, lowest reach wins (the session's
+      // own fold); a tie keeps the earlier program's cutter, as `session.ts` does.
+      for (let k = 0; k < acc.length; k++) {
+        if (stamp.field[k]! < acc[k]!) {
+          acc[k] = stamp.field[k]!;
+          who[k] = stamp.who[k]!;
+        }
+      }
+    }
   }
-  if (acc === null) throw new Error('#965: no posted program removed anything');
-  const top = acc;
-  return (x, y) => {
+  if (acc === null || who === null) throw new Error('#965: no posted program removed anything');
+  const top: Float32Array = acc;
+  const identity: Uint8Array = who;
+  const cell = (x: number, y: number): number | null => {
     const i = Math.round((x - field.x0) / field.pitch);
     const j = Math.round((y - field.y0) / field.pitch);
     if (i < 0 || j < 0 || i >= field.nx || j >= field.ny) return null;
-    return top[j * field.nx + i]!;
+    return j * field.nx + i;
+  };
+  return {
+    top: (x: number, y: number) => {
+      const k = cell(x, y);
+      return k === null ? null : top[k]!;
+    },
+    whoAt: (x: number, y: number) => {
+      const k = cell(x, y);
+      return k === null ? null : identity[k]!;
+    },
   };
 }
 
 for (const figure of FIGURES) {
   const stlPath = process.env[figure.env];
   const jobPath = join(JOBS, figure.jobFile);
-  const have = stlPath !== undefined && fs.existsSync(stlPath) && fs.existsSync(jobPath) && CATALOGUE.installed;
+  const have = stlPath !== undefined && fs.existsSync(stlPath) && fs.existsSync(jobPath) && (CATALOGUE.installed || CATALOGUE.optedOut);
   const reason =
     stlPath === undefined
       ? ` — set ${figure.env} to the local mesh`
       : !fs.existsSync(stlPath)
         ? ` — missing ${stlPath}`
-        : !CATALOGUE.installed
-          ? ` — no Makera catalogue (${CATALOGUE.reason})`
+        : !CATALOGUE.installed && !CATALOGUE.optedOut
+          ? ` — no Makera catalogue and no opt-out (${CATALOGUE.note})`
           : '';
 
   describe.skipIf(!have)(`#965 the ${figure.name} at stick scale${reason}`, () => {
@@ -249,11 +281,21 @@ for (const figure of FIGURES) {
       }
       expect(programs.length, `#965 ${figure.name}: the plan posted no program`).toBeGreaterThan(0);
 
+      // #948/v4 — a stated edge break's allowance must name the V (the who gate); a stated break
+      // that resolves no V is legitimately no allowance, and the check then judges at the floor.
+      const breakOptions = allowance(job);
+      const statedBreak =
+        (job.targetObject as EngraveTargetObject & { edgeBreak?: unknown }).edgeBreak !== undefined;
+      expect(
+        !statedBreak || breakOptions.edgeBreak === undefined || breakOptions.edgeBreak.toolNumber !== undefined,
+        `#965 ${figure.name}: a stated edge break's allowance must carry the V's tool number — without it the v4 who gate is off`,
+      ).toBe(true);
       const field = goalField(job, bytes, stlPath!);
-      const top = wholeSurfaceTop(programs, field);
-      const report = checkGoalCutInto(field, top, {
+      const stamped = wholeSurfaceTop(programs, field);
+      const report = checkGoalCutInto(field, stamped.top, {
         passCoverage: 0.95, // the maintainer's whole-surface line (#965)
         ...allowance(job),
+        whoAt: stamped.whoAt,
       });
       const coverage = 1 - (report.leftoverFractions[0] ?? 0);
       const cutInto: CutIntoScore = {
@@ -273,11 +315,31 @@ for (const figure of FIGURES) {
         // One manual bit change between consecutive posted runs; each run here is one cutter.
         toolChanges: Math.max(0, programs.length - 1),
         headerTimeSeconds: null,
+        // C2 — which row fed each cutter, and the door's own state (installed, or opted out).
+        feedRows: feedRowsFor(HOUSE, job.stock.material),
+        catalogueStatus: { used: CATALOGUE.installed, note: CATALOGUE.note },
         airFraction: facts.airFraction,
         rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
         cutters: facts.cutters.length,
         cuttersOwned: true,
-        postsAsFiled: { ok: true, holding: `vise, stock proud ${jobVise(job).stockProud} mm`, pitchMm: 0.1 },
+        // #943 — 'posts as filed' means the VISE with jaw clearance. A figure is scored on its own
+        // job's holding: a vise figure states the vise and claims the line; a tape figure says
+        // 'tape' and states it cannot claim it. Never 'as filed' in the tape's own words.
+        postsAsFiled:
+          job.workholding.kind === 'vise'
+            ? {
+                ok: true,
+                holding:
+                  `vise — Z1 low-profile, stock ${job.stock.length} × ${job.stock.width} × ${job.stock.thickness} mm, ` +
+                  `${jobVise(job).stockProud} mm proud of the jaw tops (jaws at x = 0 / ${job.stock.length} mm)`,
+                pitchMm: 0.1,
+              }
+            : {
+                ok: false,
+                holding: 'tape',
+                pitchMm: 0.1,
+                note: "'posts as filed' means the vise with jaw clearance (#943); this figure's job is held on tape and cannot claim the line",
+              },
       };
       // The figures have no vendor program for the stick; the maintainer's whole-surface line is
       // the pass rule, and the card prints the other lines' facts beside it.
@@ -309,10 +371,13 @@ for (const figure of FIGURES) {
   });
 }
 
-describe.skipIf(CATALOGUE.installed)('#964 — the catalogue door (the #964 ruling)', () => {
-  it('states why: the figures plan on the full Makera catalogue (CM_CATALOGUE or <Makerables root>/catalogue.json)', () => {
-    expect(CATALOGUE.installed).toBe(false);
-    console.log(`catalogue not installed: ${CATALOGUE.reason}`);
+describe.skipIf(CATALOGUE.installed || CATALOGUE.optedOut)('#964 — the catalogue default (the maintainer’s 11-05 order)', () => {
+  it('FAILS when a figure mesh is set and the full catalogue is missing with no opt-out', () => {
+    const anyMesh = process.env.CM_ELEPHANT_STL !== undefined || process.env.CM_PANTHER_STL !== undefined;
+    if (!anyMesh) return; // no mesh set: the figure cases cannot run anyway
+    throw new Error(
+      `the figure acceptance did not run: no full Makera catalogue was found and no opt-out was stated — ${CATALOGUE.note}`,
+    );
   });
 });
 
