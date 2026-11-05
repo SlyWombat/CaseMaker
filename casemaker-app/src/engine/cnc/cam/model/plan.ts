@@ -25,6 +25,8 @@ import type { Mount } from '@/engine/cnc/setups/types';
 import type { FixtureEnvelope } from '@/engine/cnc/setup';
 import type { ObstacleBox } from '@/engine/cnc/setup';
 import { cuttingDiameter, flatEndMill, type Tool } from '@/engine/cnc/tool';
+import { coneHeight, isVShape, vCone, type VCone } from '@/engine/cnc/vProfile';
+import { vCarvePassPitch } from '@/engine/cnc/vCarveGeometry';
 import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, resolvedFeedsTable, type CutParams } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
@@ -719,6 +721,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       offset,
       pockets: {
         houseFlats: flats,
+        // #975 — the V bits are the pocket chain's last resort: a pocket no flat covers gets the
+        // narrowest V whose tip fits the stroke and whose leg reaches the floor, floor-correct.
+        houseVs: input.cutters.house.filter((t) => isVShape(t)),
+        paramsFor: cutParamsFor,
         stepDownMm: pocketParams.stepDown,
         feeds,
         rapid: Z1.rapidEstimate,
@@ -995,6 +1001,19 @@ export interface PlanPocketsOptions {
   offset: OffsetFn;
   /** House cutters, largest first is NOT required — #961's `chooseSequence` ranks by cost, not list order. */
   houseFlats: readonly Tool[];
+  /**
+   * #975 — an optional per-cutter cut-parameter resolver, so a V floor run speaks the SAME feeds
+   * and spindle speed as that cutter's other steps (the rim chamfer): the two runs merge into one
+   * program, and `concatToolpathIR` refuses a header mismatch. Absent → `feeds`/`spindleRpm`.
+   */
+  paramsFor?: (tool: Tool) => CutParams;
+  /**
+   * #975 — the V bits in the house set (engraving/chamfer shapes), as the pocket chain's LAST
+   * RESORT: a pocket no flat covers gets the narrowest V whose tip is no wider than the stroke
+   * and whose leg reaches the floor, cut as a floor-correct pocket (the maintainer's 2026-11-05
+   * ruling — "never a refusal where a tool in the set can do the job"). Absent = no V pocketing.
+   */
+  houseVs?: readonly Tool[];
   stepDownMm: number;
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
   rapid: RapidEstimate;
@@ -1559,6 +1578,99 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         }),
   });
 
+  // #975 — THE V FLOOR (the maintainer's 2026-11-05 ruling). A pocket the chosen chain leaves
+  // UNREACHABLE is not refused while a V bit in the set can do the job: the NARROWEST V whose tip
+  // is no wider than the pocket's narrowest stroke and whose leg reaches the floor cuts it as a
+  // FLOOR-CORRECT pocket — the model's floor at the model's depth, the floor plane exact (rings
+  // from the region offset by the tip's own radius, at the V-carve pass pitch, one level), the
+  // walls opening at the V's half-angle, and the land the flanks take per side (`depth·tan(half)`)
+  // STATED, never counted as a failure (the gate's edge-break class carries it: the IR's tool is
+  // the V, so `whoAt` answers it there). Planned OUTSIDE the chain's cost ranking on purpose —
+  // the V is the last resort for features nothing else covers, and a 0.05 mm floor pitch would
+  // never earn its place against a covering flat by cost. Its run posts BEFORE the freeing
+  // contour: the part must stay captured while it is cut.
+  const vCovered = new Set<string>();
+  const vOps: PlannedOp[] = [];
+  const vRuns: { cutterKey: string; ir: ToolpathIR }[] = [];
+  const vNotes: string[] = [];
+  if (opts.houseVs !== undefined && opts.houseVs.length > 0 && choice.unreachable.length > 0) {
+    const featureOf = new Map(demand.features.map((f) => [f.id, f] as const));
+    const byV = new Map<string, { tool: Tool; cone: VCone; ids: string[] }>();
+    for (const id of choice.unreachable) {
+      const node = pocketsById.get(id);
+      const feature = featureOf.get(id);
+      if (node === undefined || feature === undefined || feature.kind !== 'pocket' || throughById.has(id)) continue;
+      let pick: { tool: Tool; cone: VCone } | null = null;
+      // The V's reach is measured from the node's MOUTH, not the stock top: the cone only has to
+      // span mouth-to-floor (`SequenceFeature.depthMm` is stock-top-relative for a FLAT's flute,
+      // which would refuse the tray's digits by 0.26 mm — their mouth is the −1.2 land, their
+      // floor −1.8), and above the mouth the shank rides in air the facing already cleared.
+      const mouthZAbsV = rootIds.has(node.id) ? tree.top.z : node.mouthZ;
+      const nodeDepthMm = mouthZAbsV - node.floorZ;
+      for (const tool of opts.houseVs) {
+        const cone = vCone(tool);
+        if (cone === null) continue;
+        const tip = cone.tipRadius * 2;
+        if (feature.minOpeningMm !== null && feature.minOpeningMm !== undefined && tip > feature.minOpeningMm + 1e-9) continue;
+        const leg = coneHeight(cone);
+        if (leg === null || leg + 1e-9 < nodeDepthMm) continue;
+        if (pick === null || tip < pick.cone.tipRadius * 2) pick = { tool, cone };
+      }
+      if (pick === null) continue;
+      const key = cutterKeyOf(pick.tool);
+      const entry = byV.get(key) ?? { tool: pick.tool, cone: pick.cone, ids: [] };
+      entry.ids.push(id);
+      byV.set(key, entry);
+    }
+    for (const [key, group] of byV) {
+      const pitch = vCarvePassPitch(group.cone.tipRadius, group.cone);
+      const irs: ToolpathIR[] = [];
+      for (const id of group.ids) {
+        const node = pocketsById.get(id)!;
+        const ref = refById.get(id)!;
+        const mouthZAbs = rootIds.has(node.id) ? tree.top.z : node.mouthZ;
+        const mouthZ = rebase(mouthZAbs);
+        const floorZ = rebase(node.floorZ);
+        // The V's OWN row where the caller resolves one (its rpm/feed must match that cutter's
+        // other runs so the two merge into one program) — the plan's flat numbers otherwise.
+        const vParams = opts.paramsFor?.(group.tool);
+        const outcome = pocket({
+          cutter: group.tool,
+          node: { ...node, mouthZ, floorZ },
+          region: ref,
+          // The floor-correct pass: the tip's own radius as the boundary offset (the floor plane
+          // lands on the model's outline), the V-carve pass pitch between rings (clamped to the
+          // tip radius, so the tip's flat covers every gap and the floor is flat, not a knife
+          // line), and ONE level at the floor (`stepDown = the whole depth`).
+          stepOverMm: pitch,
+          stepDownMm: mouthZ - floorZ,
+          feeds: vParams === undefined ? opts.feeds : { feedMmPerMin: vParams.feed, plungeFeedMmPerMin: vParams.plungeFeed },
+          offset: opts.offset,
+          safeZMm: SAFE_Z,
+          hopZMm: HOP_Z,
+          toolNumber: group.tool.number ?? 1,
+          spindleRpm: vParams?.rpm ?? opts.spindleRpm,
+          air: opts.air,
+          rapid: opts.rapid,
+          boolean: opts.boolean,
+          ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh, zOffsetMm: z0 } }),
+        });
+        vOps.push({ kind: 'pocket', region: ref, outcome });
+        irs.push(outcome.ir);
+        vCovered.add(id);
+        const depth = mouthZ - floorZ;
+        const land = depth * group.cone.tanHalf;
+        const r3 = (n: number): string => String(Math.round(n * 1000) / 1000);
+        vNotes.push(
+          `${id}: cut by the ${group.tool.name || group.tool.shape} V as a floor-correct pocket — floor at the model's ` +
+            `−${r3(depth)} mm, walls at ${r3(group.cone.halfAngleDeg)}°, land ${r3(land)} mm per side (the V's own geometry: ` +
+            `depth × tan(half)); the land at the surface is the edge-break class, not cut-into`,
+        );
+      }
+      if (irs.length > 0) vRuns.push({ cutterKey: key, ir: irs.reduce((a, b) => concatToolpathIR(a, b)) });
+    }
+  }
+
   const ops: PlannedOp[] = [];
   // Advisor's review on ab6b2827: grouped by cutter KEY (a Map), a return visit merges into the
   // SAME file as that cutter's first visit — which, read in that file's own order, frees the
@@ -1575,6 +1687,16 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // or re-plan here, every step (contour included) goes through the SAME loop.
   for (let stepIndex = 0; stepIndex < choice.steps.length; stepIndex++) {
     const step = choice.steps[stepIndex]!;
+    // #975 — the V-floor run posts BEFORE the freeing contour (the part must stay captured while
+    // its narrow pockets are cut); it is flushed exactly once, at the contour step or at the end
+    // when the chain has no contour step.
+    if (step.kind === 'contour' && vRuns.length > 0) {
+      if (currentRun !== null) programs.push(currentRun);
+      currentRun = null;
+      ops.push(...vOps);
+      programs.push(...vRuns);
+      vRuns.length = 0;
+    }
     // The SAME key the picker priced it under — a coverage rest's IR depends on its prefix.
     const outcomes = outcomeCache.get(stepKey(step, choice.steps.slice(0, stepIndex)));
     if (outcomes === undefined || outcomes === null) continue; // chooseSequence only chose postable steps
@@ -1593,11 +1715,17 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     }
   }
   if (currentRun !== null) programs.push(currentRun);
+  if (vRuns.length > 0) {
+    // No contour step in the chain (a caller that states none): the V run still posts.
+    ops.push(...vOps);
+    programs.push(...vRuns);
+    vRuns.length = 0;
+  }
 
   const offered = [...opts.houseFlats].map((t) => `⌀${cuttingDiameter(t)}`).join(', ');
   // A's review 6622610124, finding 4: a through node's own limiting number was lost (the lookup
   // only checked `pocketsById`) — the SAME sentence either kind of node gets.
-  const unreachable = choice.unreachable.map((id) => {
+  const unreachable = choice.unreachable.filter((id) => !vCovered.has(id)).map((id) => {
     const node = pocketsById.get(id) ?? throughById.get(id);
     const failed = regionFailures.get(id);
     // #959 item 5: a region the chosen chain left out because its planning THREW (the chain that
@@ -1652,6 +1780,9 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       );
     }
   }
+  // #975 — the V floor's own lines: floor, wall angle, and the land per side the flanks take
+  // (the V's own geometry, stated; the gate's edge-break class carries the land).
+  notes.push(...vNotes);
   for (const [id, { reason: message }] of regionFailures) {
     notes.push(`${id}: not cut — planning failed (${message})`);
     // A root pocket's/wide through hole's own mouth assumes facing already cleared the skin
@@ -1699,6 +1830,29 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       house: stepCutter?.house ?? false,
     };
   });
+
+  // #975 — a V that only the floor run uses is not in `choice.cost.entries`; its run still prices
+  // into the cycle, so it gets its own sequence entry (one tool change in). A V already in the
+  // chain — the tray's chamfer, which also breaks the rims — needs nothing here: its entry's own
+  // terms already sum over every run of its key, the floor run included.
+  const sequenced = new Set(sequence.map((s) => s.cutterKey));
+  for (const run of programs) {
+    if (sequenced.has(run.cutterKey)) continue;
+    if (choice.steps.some((s) => s.cutter.key === run.cutterKey)) continue;
+    sequenced.add(run.cutterKey);
+    const terms = estimateCycleTerms(run.ir, opts.rapid);
+    sequence.push({
+      cutterKey: run.cutterKey,
+      cost: {
+        terms,
+        toolChangeSeconds: opts.toolChangeSeconds,
+        totalSeconds: terms.totalSeconds + opts.toolChangeSeconds,
+        toolChanges: 1,
+      },
+      pinned: false,
+      house: true,
+    });
+  }
 
   return { ops, programs, sequence, unreachable, notes, choice, unplanned };
 }
