@@ -45,6 +45,13 @@ import { finish } from './ops/finish';
 import { pencil } from './ops/pencil';
 import { chamfer } from './ops/chamfer';
 import { contour as contourOp, throughHole } from './ops/contour';
+import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
+import { parseGcode } from '@/engine/cnc/gcode';
+import { setupFromHeader } from '@/engine/cnc/setupFromHeader';
+import { stubSetup } from '@/engine/cnc/setup';
+import { buildTimeline } from '@/engine/cnc/emulator/timeline';
+import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
 import { buildTriangleBins, binnedReachableTriangles, type TriangleBins } from './triangleBins';
 
 /** One ring (outer boundary or a hole); `pocket.ts`'s `Polygons` is `Polygon[]`. NEW — no existing equivalent. */
@@ -149,6 +156,14 @@ export interface ModelPlanInput {
   cutters: CutterCandidates;
   tolerances: ModelTolerances;
   edgeBreak: EdgeBreakSpec;
+  /**
+   * #961 — THE GOAL, when the caller can supply it: the model's top surface on the stock frame
+   * (Z 0 = stock top, the same 0.1 mm field the goal check samples). The picker's completeness
+   * is then the SIMULATED OUTCOME — the goal cells a candidate's own sweep leaves above the
+   * 0.1 mm band (the maintainer's 11-05 ruling), not the count of pockets left behind. Absent →
+   * the old pocket-count completeness, unchanged.
+   */
+  goal?: GoalHeightfield;
 }
 
 export interface ModelPlanOutput {
@@ -348,6 +363,62 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const offset = makeClipperOffset(tl);
   const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
   const toolChangeSeconds = readDefault(liveShopDefaults(), 'toolChange.seconds').value;
+  // #961 — THE SIMULATED OUTCOME'S STAMP. With a goal supplied, every candidate the picker prices
+  // is posted and stamped exactly as the goal check does, and the cells its sweep leaves above the
+  // 0.1 mm band are counted — the rank's first key. The goal is the caller's (the job's target),
+  // not re-derived here.
+  const coverageGoal = input.goal;
+  const coverageCtx: PostContext = {
+    jobName: 'model-coverage',
+    stock: { length: input.stock.length, width: input.stock.width, thickness: input.stock.thickness },
+    materialName: input.stock.material,
+    zDatum: 'probed-top-face',
+    origin: 'topFrontLeft',
+    camVersion: 'model-cam',
+    toolKey: 'multi',
+  };
+  // #961 — each distinct IR is posted and stamped ONCE, however many candidates carry it (the
+  // steps' IRs are memoized in `planStep`, so identity is stable); a candidate's fold is then a
+  // walk over its own IRs' cached fields.
+  const stampCache = new WeakMap<ToolpathIR, Float32Array | null>();
+  const stampedField = (ir: ToolpathIR): Float32Array | null => {
+    const cached = stampCache.get(ir);
+    if (cached !== undefined) return cached;
+    let field: Float32Array | null = null;
+    const posted = postZ1(ir, coverageCtx, Z1);
+    if (posted.ok) {
+      const parsed = parseGcode(posted.text);
+      const part = setupFromHeader(parsed.header).patch.part;
+      if (part !== undefined && part.kind === 'prism' && part.outline.kind === 'p-rect') {
+        const setup = stubSetup(part, { kind: 'tape-down', contact: part.outline }, { startingTool: 1 }, Z1);
+        const stamp = exactSweptFieldTooled(coverageGoal!, buildTimeline(parsed, setup, Z1), () => ir.tool);
+        if (stamp !== null) field = stamp.field;
+      }
+    }
+    stampCache.set(ir, field);
+    return field;
+  };
+  const goalCoverage =
+    coverageGoal === undefined
+      ? undefined
+      : (irs: readonly ToolpathIR[]): { leftoverCells: number; coveredCells: number } | null => {
+          let acc: Float32Array | null = null;
+          for (const ir of irs) {
+            const field = stampedField(ir);
+            if (field === null) continue;
+            if (acc === null) acc = Float32Array.from(field);
+            else for (let k = 0; k < acc.length; k++) if (field[k]! < acc[k]!) acc[k] = field[k]!;
+          }
+          if (acc === null) return null;
+          let covered = 0;
+          let leftover = 0;
+          for (let k = 0; k < acc.length; k++) {
+            if (coverageGoal.covered[k] !== 1) continue;
+            covered++;
+            if (acc[k]! - (coverageGoal.z[k] as number) > 0.1) leftover++;
+          }
+          return { leftoverCells: leftover, coveredCells: covered };
+        };
   const perSetup: SetupPlan[] = [];
 
   for (let setupIndex = 0; setupIndex < input.setups.length; setupIndex++) {
@@ -399,6 +470,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         spindleRpm: pocketParams.rpm,
         air: true,
         boolean,
+        ...(goalCoverage === undefined ? {} : { goalCoverage }),
       },
       curved: {
         geometry: input.geometry,
@@ -635,6 +707,12 @@ export interface PlanPocketsOptions {
   tabs?: { count: number; width: number; height: number };
   /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
   boolean?: { union: BooleanFn; subtract: BooleanFn };
+  /**
+   * #961 — the simulated outcome for a candidate's planned IRs: the goal cells left above the
+   * band and the covered cells, stamped by the caller (which owns the goal). Absent → the
+   * picker keeps its pocket-count completeness.
+   */
+  goalCoverage?: (irs: readonly ToolpathIR[]) => { leftoverCells: number; coveredCells: number } | null;
 }
 
 /**
@@ -952,7 +1030,13 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // candidate's) in `unplanned`, each with the message its region threw.
   const stepFailures = new Map<string, { id: string; reason: string }[]>();
 
+  // #961 — THE SAME STEP, PRICED BY MANY CANDIDATES, IS ONE IR: the picker stamps every priced
+  // candidate's steps, so the merge (and, in `planModelCam`, the stamp) must be done once per
+  // step, not once per candidate. Keyed by the same signature the outcome cache uses.
+  const irCache = new Map<string, ToolpathIR | null>();
   const planStep: SequenceOptions['planStep'] = (step) => {
+    const signature = stepSignature(step);
+    if (irCache.has(signature)) return irCache.get(signature)!;
     let outcomes = outcomeCache.get(stepSignature(step));
     if (outcomes === undefined) {
       outcomes = [];
@@ -972,8 +1056,11 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       }
       outcomeCache.set(stepSignature(step), outcomes);
     }
-    if (outcomes === null || outcomes.length === 0) return null;
-    return outcomes.map((o) => o.outcome.ir).reduce((a, b) => concatToolpathIR(a, b));
+    const merged = outcomes === null || outcomes.length === 0
+      ? null
+      : outcomes.map((o) => o.outcome.ir).reduce((a, b) => concatToolpathIR(a, b));
+    irCache.set(signature, merged);
+    return merged;
   };
 
   const choice = chooseSequence(demand, cutters, {
@@ -981,6 +1068,26 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     toolChangeSeconds: opts.toolChangeSeconds,
     planStep,
     maxCutters: opts.maxCutters,
+    ...(opts.goalCoverage === undefined
+      ? {}
+      : {
+          coverage: (steps: readonly SequenceStep[]) => {
+            // The candidate's PLANNED steps' IRs (cached by planStep) — what would post. A step
+            // that throws cuts nothing (`priceSequence` already caught it and stated the failure),
+            // so it contributes no IR here either: a candidate is never crashed by a simulation.
+            const irs: ToolpathIR[] = [];
+            for (const step of steps) {
+              let ir: ToolpathIR | null;
+              try {
+                ir = planStep(step);
+              } catch {
+                ir = null;
+              }
+              if (ir !== null) irs.push(ir);
+            }
+            return irs.length === 0 ? null : opts.goalCoverage!(irs);
+          },
+        }),
   });
 
   const ops: PlannedOp[] = [];

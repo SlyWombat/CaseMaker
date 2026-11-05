@@ -250,6 +250,7 @@ function runsOf(setup: SetupPlan): { cutterKey: string; ir: ToolpathIR }[] {
 async function planCard(
   placed: Awaited<ReturnType<typeof placedTree>>,
   stock: { length: number; width: number },
+  goal?: GoalHeightfield,
 ): Promise<{ setup: SetupPlan; runs: { cutterKey: string; ir: ToolpathIR }[] }> {
   const positions = placed.mesh.positions;
   const min: [number, number, number] = [Infinity, Infinity, Infinity];
@@ -278,6 +279,10 @@ async function planCard(
     cutters: { house: VENDOR_SET, catalogue: [] },
     tolerances: { finishMm: 0.01 },
     edgeBreak: { legMm: EDGE_BREAK_LEG_MM },
+    // #961 — THE SIMULATED OUTCOME: the picker judges a candidate's completeness by what its own
+    // sweep leaves above the 0.1 mm band, not by the pockets it declined. The goal is the same
+    // heightfield the card measures against, sampled from the placed STEP.
+    ...(goal === undefined ? {} : { goal }),
   };
   const output = await planModelCam(input);
   const setup = output.perSetup[0]!;
@@ -476,6 +481,8 @@ function sequenceReceipt(
       estimateSeconds: candidate.estimateSeconds,
       toolChanges: candidate.toolChanges,
       totalSeconds: candidate.cost,
+      leftoverCells: candidate.leftoverCells,
+      coveredCells: candidate.coveredCells,
       leftBehind: candidate.leftBehind,
       unreachable: candidate.unreachable,
       unplanned: candidate.unplanned,
@@ -503,7 +510,7 @@ function sequenceReceipt(
       '; the ball and the chamfer are chosen by the curved/rim stages, not priced as picker candidates';
   return {
     rule:
-      'rank: completeness first (pockets a cutter in the set could cover and the chain left = leftBehind), then unplanned steps, then house before catalogue, rowed before fallback, then the #927 total; rank 1 is the choice. Candidate estimates are #927 on the picker’s planned steps; the chosen cutters’ estimates are #927 on the posted runs (the card’s cycle basis).',
+      'rank: completeness first — the SIMULATED OUTCOME, the goal cells the candidate’s own sweep leaves above the 0.1 mm band (fewer wins), then pockets a cutter could cover and the chain left (leftBehind), then unplanned steps, house before catalogue, rowed before fallback, then the #927 total; rank 1 is the choice. Candidate estimates are #927 on the picker’s planned steps; the chosen cutters’ estimates are #927 on the posted runs (the card’s cycle basis).',
     chosen,
     candidates,
     vendor,
@@ -1228,7 +1235,8 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
 describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedOut))('#959 acceptance — tool tray 70, the whole plan through the one entry', () => {
   it('plans the real part through planModelCam — pockets, the curved remainder and the rims — and posts every run', async () => {
     const placed = await placedTree(TRAY!, [110, 140], -1.2);
-    const { setup, runs } = await planCard(placed, { length: 110, width: 140 });
+    const goalField = sampleGoalHeightfield(placed.target, { pitchMm: 0.1, stockTopZ: 0 });
+    const { setup, runs } = await planCard(placed, { length: 110, width: 140 }, goalField);
     expect(setup.ops.length, `unreachable: ${setup.unreachable.join('; ')}`).toBeGreaterThan(0);
     expect(setup.ops.some((op) => op.kind === 'contour'), `unreachable: ${setup.unreachable.join('; ')}`).toBe(true);
     // THE MANAGER'S FINDING: the facts level planned through the pocket chain only, so the ball
@@ -1243,7 +1251,20 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     // jump stays; the OTHER rims (real, open edges) are still broken.
     expect(measured, 'the tray measured nothing').not.toBeNull();
     expect(measured!.adjudicatedFraction, 'the chamfer cut a rim that is covered from above').toBe(0);
-    expect(measured!.coverage).toBeGreaterThanOrEqual(0.98);
+    // #961 (the maintainer's 11-05 ruling): the 1-point line is 98.52 % against the vendor's
+    // 99.52 %, and the picker must OFFER the rest that buys it — T1 → T2, priced. Before the
+    // simulated-outcome rank the tray chose the ⌀6 primary alone and measured 98.38 %.
+    expect(measured!.coverage, 'the tray is back under the 1-point line').toBeGreaterThanOrEqual(0.9852);
+    expect(setup.choice.steps.some((step) => step.kind === 'rest'), 'the tray still declines the rest cutter').toBe(true);
+    // The surface the rest bought: its candidate leaves fewer goal cells above the band than the
+    // primary alone, which is why the rank chose it.
+    const restCandidate = setup.choice.considered.find((c) => c.steps.some((step) => step.kind === 'rest'))!;
+    const aloneCandidate = setup.choice.considered.find((c) => !c.steps.some((step) => step.kind === 'rest'))!;
+    expect(restCandidate.leftoverCells).not.toBeNull();
+    expect(aloneCandidate.leftoverCells).not.toBeNull();
+    expect(restCandidate.leftoverCells!).toBeLessThan(aloneCandidate.leftoverCells!);
+    const chosenSignature = setup.choice.steps.map((step) => `${step.kind}:${step.cutter.key}`).join('+');
+    expect(restCandidate.steps.map((step) => `${step.kind}:${step.cutterKey}`).join('+')).toBe(chosenSignature);
     expect(setup.ops.filter((op) => op.kind === 'chamfer').length, 'no rim was broken at all').toBeGreaterThan(0);
   }, 1_800_000);
 });
@@ -1251,7 +1272,8 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
 describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.optedOut))('#959 acceptance — tool organizer, the whole plan through the one entry', () => {
   it('plans the real part through planModelCam — pockets, the curved remainder and the rims — and posts every run', async () => {
     const placed = await placedTree(ORGANIZER!, [170, 170], -0.8);
-    const { setup, runs } = await planCard(placed, { length: 170, width: 170 });
+    const goalField = sampleGoalHeightfield(placed.target, { pitchMm: 0.1, stockTopZ: 0 });
+    const { setup, runs } = await planCard(placed, { length: 170, width: 170 }, goalField);
     expect(setup.ops.length, `unreachable: ${setup.unreachable.join('; ')}`).toBeGreaterThan(0);
     expect(setup.ops.some((op) => op.kind === 'contour'), `unreachable: ${setup.unreachable.join('; ')}`).toBe(true);
     if (setup.features.remainder.length > 0) {

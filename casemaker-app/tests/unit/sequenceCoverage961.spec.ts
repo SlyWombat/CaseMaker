@@ -242,3 +242,48 @@ describe('#961 the freeing cut is priced, not left as an unpriced return', () =>
     expect(Math.min(...incomplete.map((c) => c.cost ?? Infinity))).toBeLessThan(choice.cost.totalSeconds);
   });
 });
+
+describe('#961 the simulated outcome: completeness is the surface left above the band', () => {
+  // A demand the primary already covers physically: one 10 mm pocket. No geometric rest is needed,
+  // so a ⌀3.175 link can only be a COVERAGE rest — offered, and the caller's simulation decides.
+  const ONE_POCKET: SequenceDemand = {
+    features: [{ id: 'pocket-15', kind: 'pocket', minOpeningMm: 10, cornerRadiusMm: 5, depthMm: 4 }],
+  };
+
+  it('a smaller flat the primary already covers is still offered as a coverage rest', () => {
+    const candidates = candidateSequences(ONE_POCKET, HOUSE);
+    const primaries = candidates.filter((c) => c.steps[0]!.cutter.key === 'flat-6');
+    expect(primaries.some((c) => c.steps.some((s) => s.kind === 'rest' && s.cutter.key === 'flat-3.175'))).toBe(true);
+    expect(primaries.some((c) => !c.steps.some((s) => s.kind === 'rest'))).toBe(true);
+  });
+
+  it('the rest earns its place only when its cost buys coverage back', () => {
+    // The simulation: the ⌀3.175 rest leaves 50 of the goal cells above the band, the primary
+    // alone leaves 500. The rest is deliberately dear (5000 moves a region) so the old price
+    // order would never pick it — the simulated outcome must, because fewer leftovers wins.
+    const withCoverage = (leftoverRest: number, leftoverPrimary: number): SequenceOptions => ({
+      ...opts((step) => standIn(step, step.kind === 'rest' ? 5000 : 10)),
+      coverage: (steps) => ({
+        leftoverCells: steps.some((s) => s.kind === 'rest') ? leftoverRest : leftoverPrimary,
+        coveredCells: 1000,
+      }),
+    });
+    const bought = chooseSequence(ONE_POCKET, HOUSE, withCoverage(50, 500));
+    expect(bought.steps.some((s) => s.kind === 'rest' && s.cutter.key === 'flat-3.175')).toBe(true);
+    expect(bought.considered.find((c) => c.steps.some((s) => s.kind === 'rest'))!.leftoverCells).toBe(50);
+    expect(bought.considered.find((c) => !c.steps.some((s) => s.kind === 'rest'))!.leftoverCells).toBe(500);
+
+    // The rest buys nothing: the same cells are left with or without it, so the cheaper primary
+    // wins and the considered list still prints both candidates' simulated outcome.
+    const notBought = chooseSequence(ONE_POCKET, HOUSE, withCoverage(500, 500));
+    expect(notBought.steps.some((s) => s.kind === 'rest')).toBe(false);
+    expect(notBought.considered.every((c) => c.leftoverCells === 500)).toBe(true);
+    expect(notBought.considered.find((c) => c.steps.some((s) => s.kind === 'rest'))!.cost!).toBeGreaterThan(notBought.cost.totalSeconds);
+  });
+
+  it('with no goal supplied the old order stands: leftBehind first, then price', () => {
+    const choice = chooseSequence(ONE_POCKET, HOUSE, opts((step) => standIn(step, step.kind === 'rest' ? 5000 : 10)));
+    expect(choice.steps.some((s) => s.kind === 'rest')).toBe(false);
+    expect(choice.considered.every((c) => c.leftoverCells === null && c.coveredCells === null)).toBe(true);
+  });
+});

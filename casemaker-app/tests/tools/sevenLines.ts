@@ -164,6 +164,13 @@ export interface SequenceCandidateFact {
   toolChanges: number | null;
   /** `estimateSeconds + toolChanges × toolChangeSeconds`; null when unpriced. */
   totalSeconds: number | null;
+  /**
+   * #961 — the simulated outcome: goal cells this candidate's own sweep leaves above the 0.1 mm
+   * band, over the cells it covered. The rank's first key (fewer wins); null when no goal was
+   * supplied to the picker or the candidate could not be priced.
+   */
+  leftoverCells: number | null;
+  coveredCells: number | null;
   /** Completeness rank: pockets a cutter in the set COULD have covered and this chain left. */
   leftBehind: number;
   /** Every pocket it leaves uncut (including the part's own unreachable features). */
