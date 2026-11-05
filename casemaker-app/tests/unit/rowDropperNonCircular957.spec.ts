@@ -5,14 +5,16 @@
  * INDEPENDENT t-grid of 64 interior samples, never the planner's own 0.25 / 0.5 / 0.75.
  *
  * The claim under test is the rower's: a chord between two accepted drops departs from the TRUE
- * CL by no more than `surface.toleranceMm` (0.005 mm — ARC_CHORD_TOLERANCE_MM), and for a BALL
- * the sag is bounded by the ruling's own s²/(8R) — the CL's every upward feature is a contact
- * locus offset by R, so a local bump has curvature radius ≥ R and a chord of span s can dip at
- * most s²/(8R) below it. The rower's own max spacing IS that condition's ceiling:
- * √(8·R·tol) = 0.346 mm for the ⌀6 ball.
+ * CL by no more than `surface.toleranceMm` (0.005 mm — ARC_CHORD_TOLERANCE_MM), for ball, flat
+ * and V alike — the dense grid is what makes the check independent of the planner's own fractions.
  *
- * If a case fails here it is a finding against the rower's bound, not a test to loosen (the
- * manager's words on this item).
+ * The ruling's s²/(8R) ball bound was asserted here first and WITHDRAWN on this spec's evidence
+ * (manager, 2026-11-05): the ball's CL is an upper envelope of contact families and has upward
+ * kinks where the binding contact switches (plate and steep face on the knife edge; the CL slope
+ * jumps 0.000 → 2.415 at 0.5 µm resolution), so a chord across one sags s·Δm/4, not s²/(8R) —
+ * up to 22× the bound on the knife. The assertion is removed; the tolerance check below is the
+ * contract that remains, and it stays RED on the V's rib until B's kink-aware subdivision lands
+ * (0.005014 mm against 0.005). If a case fails it is a finding, never a test to loosen.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -22,7 +24,6 @@ import type { FeatureSource, RemainderRegion } from '../../src/engine/cnc/cam/mo
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 
 const DENSE_SAMPLES = 64; // interior samples per chord; the planner's own fractions are 0.25/0.5/0.75
-const BALL_RADIUS_MM = 3;
 
 type Tri = [number, number, number][];
 
@@ -203,19 +204,8 @@ describe('#957 the non-circular spec — real mesh features, dense independent c
             `at (${worst.chord[0].x.toFixed(3)}, ${worst.chord[0].y.toFixed(3)})→(${worst.chord[1].x.toFixed(3)}, ${worst.chord[1].y.toFixed(3)}), t=${worst.atT.toFixed(3)}`,
         ).toBeLessThanOrEqual(surface.toleranceMm + 1e-9);
 
-        if (shape === 'ball') {
-          // THE RULING'S OWN BOUND: s²/(8R) for every chord (the CL's bumps have curvature radius ≥ R).
-          for (const c of chords) {
-            const bound = (c.spanMm * c.spanMm) / (8 * BALL_RADIUS_MM);
-            expect(
-              c.worstDipMm,
-              `${feature.id} ball: chord ${c.spanMm.toFixed(4)} mm dips ${c.worstDipMm.toFixed(6)} mm, bound ${bound.toFixed(6)} mm ` +
-                `at (${c.chord[0].x.toFixed(3)}, ${c.chord[0].y.toFixed(3)})→(${c.chord[1].x.toFixed(3)}, ${c.chord[1].y.toFixed(3)}), t=${c.atT.toFixed(3)}`,
-            ).toBeLessThanOrEqual(bound + 1e-9);
-          }
-          // And the rower's max spacing never exceeds the condition's own ceiling.
-          expect(surface.maxSpacingMm).toBeLessThanOrEqual(Math.sqrt(8 * BALL_RADIUS_MM * surface.toleranceMm) + 1e-9);
-        }
+        // The s²/(8R) bound is retracted (see this file's header): the tolerance check above is
+        // the contract, for every cutter.
       });
     }
   }
