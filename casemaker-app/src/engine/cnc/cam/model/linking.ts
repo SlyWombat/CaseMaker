@@ -38,6 +38,7 @@
  */
 
 import type { CamMove } from '../ir';
+import { routeWithin, type RouteOptions } from './linkRoute';
 import { tourNearest } from '../tour';
 
 /** FreeCAD Path's `KeepToolDownRatio` default: a stay-down detour may be 3× the direct distance. */
@@ -89,6 +90,16 @@ export interface LinkOptions {
   shortHopMm?: number;
   /** Sample spacing for the material test, mm; absent → min(0.5, max(0.1, radius / 2)). */
   sampleStepMm?: number;
+  /**
+   * #962 — THE ROUTE HOOK, tried only when the straight chord (and the dogleg) is refused: a path
+   * for the cutter centre inside the caller's already-eroded cleared polygon. `plan` prices the
+   * route's length against the retract it replaces and returns the travel mode, or null to keep
+   * the retract. B reviews this hook and the API.
+   */
+  route?: {
+    options: RouteOptions;
+    plan: (lengthMm: number) => { mode: 'feed' | 'rapid' } | null;
+  };
   /** The down leg's rapid floor above the material field's own report at the landing (x, y), mm;
    * absent → {@link DEFAULT_HOP_CLEARANCE_MM}. Callers that already carry their own hop height
    * (every op's `hopZMm`) pass that value here so the down leg rapids to the same height the op's
@@ -275,6 +286,27 @@ export function link(from: LinkPoint, to: LinkPoint, opts: LinkOptions): CamMove
             feedMove(to, opts.feeds.feed),
           ];
         }
+      }
+    }
+  }
+  if (opts.route !== undefined) {
+    const route = routeWithin(from, to, opts.route.options);
+    if (route !== null) {
+      const plan = opts.route.plan(route.lengthMm);
+      if (plan !== null) {
+        const moves: CamMove[] = [];
+        if (plan.mode === 'feed') {
+          for (let i = 1; i < route.points.length; i++) {
+            const p = route.points[i]!;
+            moves.push(feedMove({ x: p.x, y: p.y, z: to.z }, opts.feeds.feed));
+          }
+          return moves;
+        }
+        const zR = opts.route.options.rapidZMm;
+        moves.push(rapidMove({ x: from.x, y: from.y, z: zR }));
+        for (const p of route.points) moves.push(rapidMove({ x: p.x, y: p.y, z: zR }));
+        moves.push(feedMove(to, opts.feeds.plungeFeed));
+        return moves;
       }
     }
   }
