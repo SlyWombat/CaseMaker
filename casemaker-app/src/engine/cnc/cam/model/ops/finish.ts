@@ -315,11 +315,57 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // OLD raster's own origin, and the row AT that origin is cut (the #960 rewrite had dropped it,
   // which is what cost the tray's 2,411 slot cells — not a phase shift).
   const flatRowStepMm = flatRasterStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1]);
+  const regionStepOverMm =
+    opts.kind === 'ball-scallop'
+      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1])
+      : flatRowStepMm;
   const bandStepOverAt = (x: number): number =>
     opts.kind === 'ball-scallop'
       ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, bandSlopeAt(x))
       : flatRowStepMm;
   let wallBandsCut = 0;
+
+  // #960 — THE ROW GUARD (the manager's rule: no cell newly above the band). The scallop step holds
+  // the band only where the CL surface is STRAIGHT across the gap. At a slot wall or a bridged
+  // mouth it is not — and a row grid on a new phase can leave a knife-edge cell that the OLD
+  // raster's row lapped (the organizer's 243 cells, all on walls at the 0.30 mm floor). There the
+  // advance snaps to the next OLD-grid row instead (`origin + k·regionStepOverMm`), so the base
+  // raster's rows stay in place; on straight stretches the vendor step stands.
+  const X_NUDGE_MM = 1e-4;
+  const originX = min[0] + X_NUDGE_MM;
+  const oldGridNext = (x: number): number =>
+    originX + (Math.floor((x - originX) / regionStepOverMm + 1e-9) + 1) * regionStepOverMm;
+  const clSafeAcross = (x0: number, x1: number): boolean => {
+    const intervals = footprintColumnIntervals(opts.region.footprint, (x0 + x1) / 2);
+    if (intervals.length === 0) return true; // nothing is cut between the two rows
+    // A KINK test, not a chord test: sample the CL densely across the gap and compare the slope
+    // of its first quarter with its last. A plane answers the same slope (any steepness) and is
+    // safe by the scallop formula; a rim, a slot wall or a bridged mouth changes slope sharply,
+    // and there a new row phase can lose the cell the old row lapped.
+    const SLOPE_JUMP = 0.5; // mm/mm (~26.6°) across one gap — a rim's kink, not surface noise
+    const SAMPLES = 16;
+    for (const [y0, y1] of intervals) {
+      for (const tY of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+        const y = y0 + (y1 - y0) * tY;
+        const pts: [number, number][] = [];
+        for (let k = 1; k < SAMPLES; k++) {
+          const x = x0 + ((x1 - x0) * k) / SAMPLES;
+          const z = opts.clSurface.dropCutter(x, y);
+          if (z !== null) pts.push([x, z]);
+        }
+        if (pts.length < 4) continue; // too few samples to judge: keep the band's own step
+        const q = Math.floor(pts.length / 4);
+        const a = pts[0]!;
+        const b = pts[q]!;
+        const c = pts[pts.length - 1 - q]!;
+        const d = pts[pts.length - 1]!;
+        const s1 = (b[1] - a[1]) / Math.max(1e-9, b[0] - a[0]);
+        const s2 = (d[1] - c[1]) / Math.max(1e-9, d[0] - c[0]);
+        if (Math.abs(s2 - s1) > SLOPE_JUMP) return false;
+      }
+    }
+    return true;
+  };
 
   // The field is honest about only the level just FINISHED (rough.ts's own reasoning): capped at
   // that level's own Z, never the level about to start, so a link is never approved through a
@@ -354,18 +400,28 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // it on the real part: its offset lands vertical edges on exactly the raster's round x values.
   // The rows start a tenth of a micron off, far below the CL tolerance (0.005 mm), and the blind
   // spot is gone.
-  const X_NUDGE_MM = 1e-4;
   for (const levelZ of levels) {
     const levelCleared: Polygons = [];
     // #960 — THE ROWS ARE PHASED FROM THE OLD RASTER'S OWN ORIGIN, and the row AT that origin is
     // cut (the #960 rewrite dropped it — 24 moves per level, and the tray's 2,411 slot cells).
-    // Each row then advances by its OWN band's scallop step: the vendor's ~0.8 mm on the gentle
-    // floor, tightening on steeper bands, floored at the cutter's radius/10 on a wall.
-    const originX = min[0] + X_NUDGE_MM;
+    // Each row then advances by its OWN band's scallop step, unless the row guard finds the
+    // stretch not straight — then it snaps to the old grid's next row.
     for (let x = originX; x <= max[0] + 1e-9; ) {
       const wallBand = opts.kind === 'ball-scallop' && bandSlopeAt(x) >= WALL_SKIP_DEG;
       if (wallBand) wallBandsCut++;
-      const stepOverMm = wallBand ? profile.radiusMm / 10 : bandStepOverAt(x);
+      let stepOverMm = wallBand ? profile.radiusMm / 10 : bandStepOverAt(x);
+      // A region whose OLD step is already the ball's radius/10 floor has no finer grid to offer:
+      // its base raster is the densest the formula allows, so a band at or under it stays ON the
+      // old grid (the organizer's rim cells live exactly there). Everywhere else a finer band may
+      // ride its own phase, and a kinked gap falls back to the old grid.
+      const flooredBase = regionStepOverMm <= profile.radiusMm / 10 + 1e-9;
+      if (flooredBase && stepOverMm <= regionStepOverMm + 1e-9) {
+        const nextOld = oldGridNext(x);
+        if (nextOld > x + 1e-6) stepOverMm = Math.min(stepOverMm, nextOld - x);
+      } else if (stepOverMm > 1e-6 && !clSafeAcross(x, x + stepOverMm)) {
+        const nextOld = oldGridNext(x);
+        if (nextOld > x + 1e-6) stepOverMm = nextOld - x;
+      }
       const intervals = footprintColumnIntervals(opts.region.footprint, x);
       const ordered = rowParity % 2 === 0 ? intervals : [...intervals].reverse();
       for (const interval of ordered) {

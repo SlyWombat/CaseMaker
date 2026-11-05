@@ -107,14 +107,17 @@ describe('#960 finishing by slope — the two levers', () => {
     };
   }
 
-  it('steps a gentle region at the vendor’s spacing — 0.8 mm, from the origin row', () => {
-    // 2° everywhere: the band's own scallop step at the 0.027 mm target is the vendor's 0.8 mm.
-    const { rows, notes } = rowsOver(2, [0, 2]);
+  it('coarsens a gentle band to the vendor’s spacing on a straight CL — 0.8 mm from the origin row', () => {
+    // A 2° ramp inside a region stated at 25°: the old region-wide step is the 25° one (~0.69 mm)
+    // and the band's own scallop step is ~0.80 mm — coarser, and the CL is straight, so the rows
+    // ride the vendor spacing, phased from the origin.
+    const cos = Math.cos((25 * Math.PI) / 180);
+    const oldStep = cos * 2 * Math.sqrt(2 * 3 * 0.027 * cos - (0.027 * cos) ** 2);
+    const { rows, notes } = rowsOver(2, [0, 25]);
     const ORIGIN = 0.5 + 1e-4; // the region's bounds min + finish's X_NUDGE_MM
     expect(rows[0]).toBeCloseTo(ORIGIN, 9); // the k = 0 row — the one the rewrite dropped
-    expect(rows.length).toBeGreaterThan(55);
-    expect(rows.length).toBeLessThan(70);
     const vendorStep = 2 * Math.sqrt(2 * 3 * DEFAULT_FINISH_SCALLOP_MM - DEFAULT_FINISH_SCALLOP_MM ** 2); // ≈ 0.803 mm
+    expect(vendorStep).toBeGreaterThan(oldStep);
     // The band's slope is read off the CL surface (1.7° here, a hair off the triangle's 2°), so
     // the spacing lands within 1 % of the closed form at the stated slope.
     for (const gap of rows.slice(1).map((x, i) => x - rows[i]!)) expect(Math.abs(gap / vendorStep - 1)).toBeLessThan(0.01);
@@ -133,9 +136,11 @@ describe('#960 finishing by slope — the two levers', () => {
     expect(notes[0]).toContain('cut, not skipped');
   });
 
-  it('steps each band by its own scallop step, phased from the origin — nothing is skipped', () => {
-    // A 64° band inside a region stated at 25°: the ball's closed form is below its radius/10
-    // floor there, so every row after the origin one advances by that floor (0.3 mm).
+  it('steps a straight finer band at its own scallop step — the guard only fires on a kinked CL', () => {
+    // A 64° band inside a region stated at 25°: the band's closed form is below its radius/10
+    // floor (0.3 mm), finer than the old ~0.69 mm step. The CL across a plane is straight, so the
+    // band rides its own 0.3 mm rows; the old-row fallback is for the gaps where the CL kinks
+    // (a rim), and the wall-band spec below pins that side.
     const { rows, notes } = rowsOver(64, [0, 25]);
     const ORIGIN = 0.5 + 1e-4;
     expect(rows[0]).toBeCloseTo(ORIGIN, 9); // the origin row is cut, always
