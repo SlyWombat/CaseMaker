@@ -28,7 +28,7 @@
  */
 
 import type { DropCutterMesh } from './dropcutter';
-import { binnedReachableTriangles, buildTriangleBins, type TriangleBins } from './triangleBins';
+import { binnedReachableTriangles, triangleBinsFor } from './triangleBins';
 
 const EPS = 1e-9;
 
@@ -76,15 +76,6 @@ function insideTriangleXY(tri: Tri, px: number, py: number): boolean {
   return !(hasNeg && hasPos);
 }
 
-const binsByMesh = new WeakMap<DropCutterMesh, TriangleBins>();
-function binsFor(mesh: DropCutterMesh): TriangleBins {
-  let bins = binsByMesh.get(mesh);
-  if (bins === undefined) {
-    bins = buildTriangleBins(mesh);
-    binsByMesh.set(mesh, bins);
-  }
-  return bins;
-}
 
 /**
  * TWO-PHASE, both over every non-near-vertical triangle the vertical line through `(x, y)`
@@ -118,7 +109,7 @@ function binsFor(mesh: DropCutterMesh): TriangleBins {
  * `-Infinity` default would silently reintroduce exactly that leak.
  */
 export function ceilingAboveMm(mesh: DropCutterMesh, x: number, y: number, minZMm: number): number | null {
-  const bins = binsFor(mesh);
+  const bins = triangleBinsFor(mesh);
   const candidates = binnedReachableTriangles(bins, x, y, 0);
   const floor = minZMm - EPS;
   let anyDownward = false;

@@ -194,8 +194,7 @@ export function buildTriangleBins(mesh: DropCutterMesh, cellMm?: number): Triang
  * cell order, not ascending; every caller (the drop-cutter's max over contributions) is
  * order-independent.
  */
-export function binnedReachableTriangles(bins: TriangleBins, x: number, y: number, radiusMm: number): number[] {
-  const { triangles, cellMm, x0, y0, nx, ny } = bins;
+export function binnedReachableTriangles(bins: TriangleBins, x: number, y: number, radiusMm: number): number[] {  const { triangles, cellMm, x0, y0, nx, ny } = bins;
   const i0 = Math.min(nx - 1, Math.max(0, Math.floor((x - radiusMm - x0) / cellMm)));
   const i1 = Math.min(nx - 1, Math.max(0, Math.floor((x + radiusMm - x0) / cellMm)));
   const j0 = Math.min(ny - 1, Math.max(0, Math.floor((y - radiusMm - y0) / cellMm)));
@@ -217,4 +216,41 @@ export function binnedReachableTriangles(bins: TriangleBins, x: number, y: numbe
     }
   }
   return out;
+}
+
+const binsByMesh = new WeakMap<DropCutterMesh, TriangleBins>();
+
+/** The bins for a mesh, built once and cached — the ceiling gate and the pocket mask's bound
+ * share them, so a plan builds each mesh's bins once, not once per query. */
+export function triangleBinsFor(mesh: DropCutterMesh): TriangleBins {
+  let bins = binsByMesh.get(mesh);
+  if (bins === undefined) {
+    bins = buildTriangleBins(mesh);
+    binsByMesh.set(mesh, bins);
+  }
+  return bins;
+}
+
+/**
+ * #970 — THE MASK CELL'S OWN BOUND: the max `cellMaxZ` over every bin cell the XY square
+ * overlaps. A triangle is registered in every bin cell its bbox covers, so this is an upper bound
+ * on ANY registered triangle's height within the square — outward by at most one bin cell, which
+ * is the price of never missing a rise between point samples (`ops/pocket.ts`'s per-level ceiling
+ * mask: a cell's five samples look at [i·pitch − ½, i·pitch + ½] while the square
+ * `maskLoopsFromPredicate` opens is [i·pitch, (i+1)·pitch]).
+ */
+export function maxTriangleZOverSquare(bins: TriangleBins, x0: number, y0: number, x1: number, y1: number): number {
+  const { cellMm, x0: bx0, y0: by0, nx, ny, cellMaxZ } = bins;
+  const i0 = Math.min(nx - 1, Math.max(0, Math.floor((x0 - bx0) / cellMm)));
+  const i1 = Math.min(nx - 1, Math.max(0, Math.floor((x1 - bx0) / cellMm)));
+  const j0 = Math.min(ny - 1, Math.max(0, Math.floor((y0 - by0) / cellMm)));
+  const j1 = Math.min(ny - 1, Math.max(0, Math.floor((y1 - by0) / cellMm)));
+  let m = -Infinity;
+  for (let j = j0; j <= j1; j++) {
+    for (let i = i0; i <= i1; i++) {
+      const z = cellMaxZ[j * nx + i]!;
+      if (z > m) m = z;
+    }
+  }
+  return m;
 }
