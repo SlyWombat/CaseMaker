@@ -90,6 +90,20 @@ describe('#962 link decisions', () => {
     expect(moves[3]).toMatchObject({ kind: 'feed', x: 5, y: 0, z: -5, f: 200 });
   });
 
+  it('the down leg rapids no lower than the material under the WHOLE disc at the landing, not just its own point (the manager\'s #962 footprint audit)', () => {
+    // The landing (10, 0) itself reads cleared to -5 — but a ridge stands at (10.5, 0) and
+    // (11, 0), both inside the ⌀3 cutter's radius of the landing. A floor computed from the
+    // landing's own point alone (-5 + 1 = -4) rapids straight through the ridge's top (0) on the
+    // way down; the floor must come from the tallest point anywhere under the disc.
+    const material = field((x, y) =>
+      x > 10.4 && x < 11.1 && Math.abs(y) < 0.3 ? 0 : -5,
+    );
+    const moves = link(P(0, 0), P(10, 0), opts({ material }));
+    expect(moves).toHaveLength(4);
+    expect(moves[2]).toMatchObject({ kind: 'rapid', x: 10, y: 0, z: 1 }); // ridge top 0 + 1 mm hop
+    expect(moves[3]).toMatchObject({ kind: 'feed', x: 10, y: 0, z: -5, f: 200 });
+  });
+
   it("Kiri's guard: a clear link longer than 2 × the cutter diameter retracts", () => {
     const moves = link(P(0, 0), P(15, 0), opts());
     expect(moves).toHaveLength(4); // rapid up, rapid across, rapid down to the floor, feed the rest
