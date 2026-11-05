@@ -1,3 +1,7 @@
+> **Superseded:** this set was produced at the merge with the over-clipping `d88a4e87`
+> ("the deepest pass excluded each pocket's own floor"). Its tray/organizer coverage numbers are
+> **invalid**; the corrected fix is `7f915ce0`, merged at `0ef7c0e5` — see the `0ef7c0e5` set.
+
 # Tool tray 70 — render set at the #970 merge `436792ab` (ca0bbabe + d88a4e87)
 
 - **Merge:** `origin/cand/engine-int` ca0bbabe + A's `966-pocket-shadow` d88a4e87 → merge commit
