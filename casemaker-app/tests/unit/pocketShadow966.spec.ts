@@ -233,4 +233,48 @@ describe('#966 the table — a pocket under an overhang the node itself never sa
     }
     expect(nearestAtFloor).toBeLessThan(toolRadius + 1);
   });
+
+  it('#970 a drafted wall stays unclipped: never falsely read as a ceiling, the floor is reachable everywhere', () => {
+    // A single pocket, floor 10 x 10 (half-width 5) at Z 5 widening to 12 x 12 (half-width 6) at
+    // the mouth, Z 20 — an ordinary ~3.8° mould-release draft, no overhang anywhere. Built as the
+    // CONVEX HULL of the eight floor/mouth corners (`tl.Manifold.hull`), not `extrude`'s own
+    // `scaleTop`: that path's own triangulation, probed directly, fans each floor corner out to
+    // TWO mouth-edge midpoints rather than the simple floor-corner-to-mouth-corner trapezoid, and
+    // those fan triangles' own footprint can cross directly over the floor's own dead centre — a
+    // triangulation artefact, not a property of the real drafted wall, that a hand-built hull
+    // avoids while keeping the same drafted geometry.
+    const floorHalf = 5;
+    const mouthHalf = 6;
+    const cx = 20, cy = 20;
+    const corner = (hw: number, sx: 1 | -1, sy: 1 | -1, z: number): [number, number, number] => [cx + sx * hw, cy + sy * hw, z];
+    const points: [number, number, number][] = [
+      corner(floorHalf, -1, -1, BASE_Z), corner(floorHalf, 1, -1, BASE_Z), corner(floorHalf, 1, 1, BASE_Z), corner(floorHalf, -1, 1, BASE_Z),
+      corner(mouthHalf, -1, -1, SLAB_TOP_Z), corner(mouthHalf, 1, -1, SLAB_TOP_Z), corner(mouthHalf, 1, 1, SLAB_TOP_Z), corner(mouthHalf, -1, 1, SLAB_TOP_Z),
+    ];
+    const block = tl.Manifold.cube([FOOT, FOOT, SLAB_TOP_Z], false);
+    const cavity = tl.Manifold.hull(points);
+    const solid = block.subtract(cavity);
+    const mesh = parsed(solid);
+    const tree = recogniseFeatures({ triangles: mesh }, { up: [0, 0, 1], stockTop: SLAB_TOP_Z, stockBottom: 0 }, tl);
+    expect(tree.pockets).toHaveLength(1);
+    const node = tree.pockets[0]!;
+    expect(node.floorZ).toBeCloseTo(BASE_Z, 3);
+    const result = planPocketsForTree(tree, { ...basePlanOptions([flat(4, 1)]), shadowMesh: mesh });
+    const pocketOps = result.ops.filter((op) => op.kind === 'pocket');
+    const toolRadius = (cuttingDiameter(flat(4, 1)) ?? 0) / 2;
+    let nearestAtFloor = Infinity;
+    for (const op of pocketOps) {
+      for (const operation of op.outcome.ir.operations) {
+        for (const m of operation.moves) {
+          if (m.kind !== 'feed') continue;
+          const absZ = m.z + tree.frame.stockTop;
+          if (Math.abs(absZ - BASE_Z) > 1e-3) continue;
+          nearestAtFloor = Math.min(nearestAtFloor, Math.hypot(m.x - cx, m.y - cy));
+        }
+      }
+    }
+    // The drafted wall must never read as a ceiling: the dead centre of the floor, same as the
+    // #970 over-clip case above, must be swept at the true floor Z, not stop one step shy.
+    expect(nearestAtFloor).toBeLessThan(toolRadius + 1);
+  });
 });

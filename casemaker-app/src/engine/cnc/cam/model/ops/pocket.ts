@@ -39,7 +39,8 @@ import { link, type LinkOptions, type LinkPoint, type MaterialField } from '../l
 import { cutterKeyOf } from '../sequence';
 import type { PocketNode } from '../features';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
-import { dropCutterHeight, type CutterProfile, type DropCutterMesh } from '../dropcutter';
+import type { DropCutterMesh } from '../dropcutter';
+import { ceilingAboveMm } from '../ceilingAbove';
 import { maskLoopsFromPredicate } from './rasterMask';
 
 export interface PocketOpOptions {
@@ -240,101 +241,46 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
       : undefined;
   const region = openExtensionBand === undefined ? opts.node.region : opts.boolean!.union(opts.node.region, openExtensionBand);
 
-  // #966 — THE SHADOW CHECK (`PocketOpOptions.aboveMaterial`'s own doc above): a column's real
-  // "ceiling" is Z-INDEPENDENT — sampled ONCE here on a grid, never re-queried per level, exactly
-  // `rough()`'s own `clSurface` reuse (that op's header: the CL surface does not depend on the
-  // current level either). `ceilingMaskAt` then stitches THIS level's own "nothing solid above
-  // here" rectilinear mask from that one grid, cheaply, same geometry `rough()`'s `maskLoops`
-  // already proved — only the inside rule differs (`rasterMask.ts`'s own header).
+  // #966/#970 — THE SHADOW CHECK (`PocketOpOptions.aboveMaterial`'s own doc above): a column's
+  // real "ceiling" is Z-INDEPENDENT — sampled ONCE here on a grid, never re-queried per level,
+  // exactly `rough()`'s own `clSurface` reuse (that op's header: the CL surface does not depend
+  // on the current level either). `ceilingMaskAt` then stitches THIS level's own "nothing solid
+  // above here" rectilinear mask from that one grid, cheaply, same geometry `rough()`'s
+  // `maskLoops` already proved — only the inside rule differs (`rasterMask.ts`'s own header).
   //
-  // THE PROBE IS A ZERO-RADIUS POINT, NEVER this op's own cutter radius — found the hard way
-  // (this branch's own full regression run: `curvedOpsProperty959.spec.ts`'s sloped/filletedFloor
-  // fixtures regressed from ~98% down to ~87-94% the first time this used `profileOf(opts.cutter)`):
-  // `dropCutterHeight`'s own real-radius profile is
-  // CORRECT for `oppositeSurfaceSafeDepthMm`/`rough()`'s `clSurface` because THOSE checks have no
-  // other account of the tool's own body — but `pocket()` already has one, the 2D morphological
-  // erosion/opening `fullyReachable`/`pocketLoops` apply to every region boundary, THIS node's own
-  // walls included. A node's own vertical wall, queried with the real tool radius, reads back the
-  // WALL's own full height everywhere within one radius of it (a vertical facet's points span
-  // every Z from floor to top, all within reach) — exactly the node's own, ALREADY-handled
-  // boundary, now double-counted as a false "shadow" band running the whole way round every
-  // pocket. A zero-radius point probe only ever sees whatever is EXACTLY on the vertical line
-  // through (x, y) — a genuine overhang from an unrelated feature (the belly, the slab) still
-  // reads back correctly (its triangles DO sit exactly over that column), while a nearby wall,
-  // whose own XY projection is degenerate (zero area) and essentially never meets a sampled grid
-  // point exactly, is correctly invisible here — left entirely to the existing 2D erosion to keep
-  // the tool's real body off it, as it always has.
+  // #970, the maintainer's 2026-11-05 ruling (via the manager, on the elephant gouge a
+  // DISTANCE-based fix let through — 3.91 % adjudicated cut-into, 13 mm max, in the flank bands
+  // where the body overhangs the legs near the open outline): a real ceiling is identified by
+  // GEOMETRY, never by distance to an edge or to this node's own wall. Three earlier attempts all
+  // tried to carve a "safe to sample" DOMAIN out of `region` by distance (an opening, a plain
+  // erosion, an erosion plus a ring restored near the true open outline) — every one of them had
+  // to choose, near SOME edge, between re-excluding the node's own wall (losing real tray/
+  // organizer coverage) and re-admitting a genuine overhang that happens to sit near that same
+  // edge (the elephant's own gouge). No distance threshold can tell those two apart, because nothing
+  // about "how far from the boundary" distinguishes them — only the SURFACE ITSELF does.
   //
-  // The grid is judged by the MAX of each cell's centre and four corners (finding the real top
-  // surface — the worse/higher side — never the low one, the same conservative convention
-  // `rough()`'s own sampling uses), at the SAME pitch `rough()` derives from step-over/radius.
-  // Cells with no triangle at all directly above them (open air, nothing to obstruct) are seeded
-  // at `Number.NEGATIVE_INFINITY`, not left unset — `rough()`'s own `Number.isFinite` guard exists
-  // because ITS grid only ever samples points already known to be inside a recognised region; this
-  // grid spans the WHOLE mesh's bbox near the node, where "no triangle found" simply means
-  // "nothing above, always open," not "no information."
-  const POINT_PROFILE: CutterProfile = { radiusMm: 0, flatRadiusMm: 0, kind: 'flat' };
+  // `ceilingAboveMm` (`../ceilingAbove.ts`) asks the real, geometric question instead: of every
+  // triangle along the vertical line through (x, y) whose own outward normal points DOWNWARD
+  // (material genuinely hangs over the void below it), the HIGHEST one — coming down from the
+  // mouth, the first such surface the tool would meet, so it is the one that actually blocks
+  // everything below it, wherever it is, open edge or not. A node's own floor (hit from above,
+  // normal up) never qualifies as a ceiling at all. A node's own wall, drafted or not, and its own
+  // floor-to-wall fillet face sideways or upward, never down, so neither ever qualifies either —
+  // by construction, not because a sample happened to land far enough from them. This needs no
+  // domain restriction at all: `region`'s own full extent is sampled, open-edge corners included,
+  // exactly the maintainer's own instruction ("apply the ceiling test everywhere").
+  //
+  // The grid is judged by the MAXIMUM (the most restrictive — the highest, nearest-the-mouth real
+  // ceiling anywhere within the cell must not be missed) of each cell's centre and four corners'
+  // own `ceilingAboveMm` reading, at the SAME pitch `rough()` derives from step-over/radius. A
+  // cell with no downward-facing triangle anywhere near it reads `null` from every sample —
+  // seeded as `Number.NEGATIVE_INFINITY`, the identity of a MAX reduction and the "always safe,
+  // nothing ever blocks this column" value the predicate below reads it as.
   let ceilingMaskAt: ((levelZ: number) => Polygons) | null = null;
   if (opts.aboveMaterial !== undefined) {
     const marginMm = opts.aboveMaterial.marginMm ?? ARC_CHORD_TOLERANCE_MM;
     const zOffsetMm = opts.aboveMaterial.zOffsetMm ?? 0;
     const mesh = opts.aboveMaterial.mesh;
-    // #970 FOLLOW-UP 2 (the tray/organizer real-part regression, found by E's T3 run on
-    // 966-pocket-shadow@7f915ce0 after the margin-sign fix above — real reference parts, no
-    // overhang, lost 1.10/0.62 coverage points): "a sample is only judged when it falls genuinely
-    // inside `region`" is not enough on its own. A DRAFTED (non-vertical) wall, unlike a plain
-    // vertical one, has real non-degenerate XY extent at every height along its own slope — so a
-    // zero-radius probe sampled well inside `region` but near this SAME node's own wall still
-    // legitimately hits that wall's own higher reaches (confirmed directly: the tray's own
-    // tool-slot walls, probed at points sitting exactly on `region`'s own boundary, read the
-    // slot's TOP LAND 6 mm above the slot's floor — the node's own wall, already kept off by the
-    // ordinary 2D erosion `fullyReachable`/`pocketLoops` apply below, double-counted a second time
-    // as an external shadow). The fillet case above is the SAME class of bug with a curved wall in
-    // place of a flat drafted one — "real XY extent at every height" fits both.
-    //
-    // THE FIX: judge a sample against `opts.node.region` eroded by this op's own cutter radius
-    // ALONE — where the cutter's CENTRE can ever be, not `fullyReachable`'s opening (erode THEN
-    // dilate back out). `fullyReachable` is the wrong shape for this: along a straight wall the
-    // dilate step restores the boundary to the true wall again (a round tool's own EDGE still
-    // reaches a straight wall exactly, which is the whole point of `fullyReachable` everywhere
-    // else it is used in this file) — so it supplied no margin there at all, confirmed directly
-    // against the tray (a reduction from ~3.4 % lost to ~2.9 %, not the fix). The plain erosion
-    // has no such dilate-back step: it is strictly smaller near every wall, by exactly
-    // `toolRadius`, everywhere, matching where the tool's centre can really stand while its OWN
-    // edge is what the existing 2D erosion (`fullyReachable`/`pocketLoops`, below and in
-    // `rough.ts`) already keeps off the wall — so a wall/draft/fillet/rim/scoop within one radius
-    // of the node's own TRUE boundary is correctly excluded from ever being read as a "ceiling"
-    // at all here, the SAME geometry already accounted for, not a second, independent obstruction.
-    //
-    // Eroding `opts.node.region` wholesale is not quite right either, found the hard way: an OPEN
-    // edge is not a real wall at all (the whole reason it was extended above) — there is nothing
-    // there to double-count, and the real design mesh genuinely can (and for an open shoulder,
-    // routinely does — `pocketShadow966.spec.ts`'s own table slab, whose top closes the gap right
-    // out to the part's true outer edge) carry real overhang material out to and past that edge.
-    // A first attempt re-added `openExtensionBand` AFTER eroding `opts.node.region` wholesale, but
-    // that still blinded a toolRadius-wide band of real, judgeable floor just INSIDE the true open
-    // edge near a CONVEX corner (the extension band's own rounded corner, built from `openOutline`
-    // directly, does not line up with `node.region`'s own independently-rounded eroded corner
-    // there) — so the fix is keyed off `openOutline` itself, not reconstructed from two separately
-    // offset shapes: anything within `toolRadius` of the TRUE open edge (`openOutline`, never the
-    // 2r-extended one) is restored regardless of what eroding `node.region`'s OTHER, REAL walls
-    // did to it, since there is no wall there in the first place.
-    // `pocketShadow966.spec.ts`'s existing cases, both the slab (a real overhang, including right
-    // at and past its own open corners) and the open-no-slab fixture (no overhang at all,
-    // including at its own corners), are the regression guard for this exact edge case.
-    const trueWallSafe = opts.offset(opts.node.region, -toolRadius);
-    const reachableDomain =
-      openExtensionBand === undefined
-        ? trueWallSafe
-        : (() => {
-            // The toolRadius-wide ring just inside the TRUE open outline (the outline itself less
-            // its own erosion) — never a real wall, however `node.region`'s OTHER walls round a
-            // nearby corner, so never eroded away. A ∩ B = A \ (A \ B), `union`/`subtract`'s own
-            // only way to express an intersection.
-            const nearTrueEdgeRing = opts.boolean!.subtract(opts.openOutline!, opts.offset(opts.openOutline!, -toolRadius));
-            const nearTrueEdgeInRegion = opts.boolean!.subtract(opts.node.region, opts.boolean!.subtract(opts.node.region, nearTrueEdgeRing));
-            return opts.boolean!.union(opts.boolean!.union(trueWallSafe, openExtensionBand), nearTrueEdgeInRegion);
-          })();
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const ring of region) {
       for (const [x, y] of ring) {
@@ -350,6 +296,11 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
       const ny = Math.max(2, Math.floor((maxY - minY) / pitch + 1e-9) + 1);
       const ceiling = new Float64Array(nx * ny).fill(Number.NEGATIVE_INFINITY);
       const half = pitch / 2;
+      // `ceilingAboveMm`'s own `minZMm`: this node's floor, converted to the mesh's absolute Z
+      // (`node.floorZ` arrives in the level frame `zOffsetMm` converts FROM, so adding it back is
+      // the inverse of this same block's own `- zOffsetMm` below) — never the stock's own
+      // underside or an unrelated opposite-side feature leaking into this node's own gate.
+      const floorAbsMm = opts.node.floorZ + zOffsetMm;
       for (let j = 0; j < ny; j++) {
         for (let i = 0; i < nx; i++) {
           const x = minX + i * pitch;
@@ -358,15 +309,11 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
           for (const [dx, dy] of [[0, 0], [-half, -half], [half, -half], [-half, half], [half, half]] as const) {
             const sx = x + dx;
             const sy = y + dy;
-            // A sample is only judged when it falls inside `reachableDomain` (`region` eroded then
-            // dilated by this op's own cutter radius, FOLLOW-UP 2's own doc above) — never WHICH
-            // node it came from, only where it actually is, and never any closer to a wall than the
-            // cutter can ever really be centred: `reachableDomain` is EVERY node this op may
-            // legally stand on, closed-node extension and all, less one cutter radius at the true
-            // boundary, so this never excludes a sample a real overhang legitimately needs caught,
-            // only one that is this node's own, already-accounted-for wall/draft/fillet/rim.
-            if (!pointInPolygons(reachableDomain, sx, sy)) continue;
-            const h = dropCutterHeight(POINT_PROFILE, mesh, sx, sy);
+            // Sampled over the WHOLE grid — `region`'s own bbox, no domain restriction — since
+            // `ceilingAboveMm` already answers "is this really a ceiling" by geometry; a point
+            // outside `region` entirely just reads back whatever is really above it there too,
+            // harmlessly (the per-level mask below intersects with `region` regardless).
+            const h = ceilingAboveMm(mesh, sx, sy, floorAbsMm);
             if (h !== null && h > hi) hi = h;
           }
           ceiling[j * nx + i] = hi;
@@ -376,36 +323,11 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
       // the caller's `node.floorZ`/`mouthZ` are already in (stock-top-relative, from every real
       // `plan.ts` call site) — `zOffsetMm`'s own doc above. Converting the mesh-absolute ceiling
       // into the LEVEL's frame (subtracting `zOffsetMm`), rather than the other way around, keeps
-      // the comparison in whichever frame the caller actually posts moves in.
-      //
-      // #970 FOLLOW-UP (found by tracing, not assumed, after Session A's independent re-check of
-      // this op's own full regression run flagged `curvedOpsProperty959.spec.ts`'s coverage drop
-      // as a real bug rather than fixture noise): `ceiling` at a point genuinely INSIDE this
-      // node's own floor, with nothing real above it, reads back that floor's OWN height — there
-      // is nothing else solid along that vertical line in the FINISHED design mesh to find; the
-      // floor itself is the only triangle a downward probe ever hits there. The predicate used to
-      // read `ceiling + marginMm < levelZ`, i.e. "safe only when the ceiling sits a whole margin
-      // BELOW this level" — at a node's own LAST level (`depthPasses`' own guarantee: the final
-      // entry is always exactly `floorZ`), that demands `floorZ + marginMm < floorZ`, false for
-      // any positive margin, so the deepest pass excluded its OWN floor's entire interior,
-      // everywhere, confirmed directly (a debug count on the synthetic "open gap, no slab"
-      // fixture: 37 053 of 37 249 grid cells included at every intermediate level, 13 444 — only
-      // the cells already outside the 2D region — at the final one). Two real, reproduced cases:
-      // an isolated floor near another feature (`pocketShadow966.spec.ts`'s own "#970 over-clip"
-      // case) and a nested parent/child floor-patch pair (`pocketShadowNestedFloor966.spec.ts`,
-      // the shelf/well case) both hit this independently, since `plan.ts`'s `allPockets` plans
-      // every node as its own `pocket()` call.
-      //
-      // THE FIX: give the margin BACK to the level instead of taking it from the ceiling —
-      // `ceiling - zOffsetMm - marginMm < levelZ`, i.e. "safe unless the ceiling sits a margin's
-      // width or more ABOVE this level." At a node's own floor (`ceiling === levelZ` exactly),
-      // `floorZ - marginMm < floorZ` is true for any positive margin, so the node's own floor
-      // correctly includes itself. A real overhang (the elephant's belly, this file's own slab)
-      // still excludes every level at or below its own underside: `ceiling` there is well ABOVE
-      // `levelZ - marginMm` for every level down to and including the node's own (unreachable)
-      // floor, so `pocketShadow966.spec.ts`'s existing "fixed" and "red-first" cases (the slab
-      // case) are unaffected — this only ever widens the margin IN THE SAME DIRECTION it already
-      // favoured (toward cutting a genuine floor, never toward cutting past a real obstruction).
+      // the comparison in whichever frame the caller actually posts moves in. The predicate reads
+      // "safe unless the ceiling sits a margin's width or more ABOVE this level" — at a node's own
+      // floor (no downward-facing triangle anywhere above it at all, `ceiling === -Infinity`),
+      // always true; under a real overhang (`ceiling` a real, finite Z above the floor), false for
+      // every level at or below it, `pocketShadow966.spec.ts`'s slab case included.
       ceilingMaskAt = (levelZ: number): Polygons =>
         maskLoopsFromPredicate(
           nx,
