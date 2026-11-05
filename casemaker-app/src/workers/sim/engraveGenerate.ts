@@ -266,12 +266,13 @@ import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 // in `cam/model/plan.ts`, not here — it is that module's own opt-in, "set only by specs for now"
 // (its header), and is read, never redefined, at this call site.
 import {
-  planModelCam,
   USE_MODEL_CAM_ENGINE,
   type ModelPlanInput,
   type ModelPlanOutput,
   type SetupSpec,
 } from '@/engine/cnc/cam/model/plan';
+// #961 — the two-plan run: the OWNED plan posts, the ideal rides beside it for the card's tradeoff.
+import { planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
 import { cutterKeyOf, type CutterCandidates } from '@/engine/cnc/cam/model/sequence';
 import type { EdgeBreakSpec, ModelTolerances } from '@/engine/cnc/cam/model/types';
@@ -770,6 +771,14 @@ export interface EngraveGenerated {
    * planned yet). D's run store reads `(generated as {plan?: …}).plan?.perSetup` speculatively.
    */
   plan?: ModelPlanOutput | null;
+  /**
+   * #961 — THE IDEAL PLAN beside the one that posts. `planTwoOutcomes` runs the cost-ranked plan
+   * twice — the OWNED set (what `plan` carries, what posts, and the default) and every bit the
+   * caller knows — and the second run lands here for the job card's material tradeoff. `null`
+   * when the catalogue adds no cutter the owned set did not already carry: the second plan is
+   * skipped, and the card has no tradeoff to state. Absent on the old heightfield path.
+   */
+  planIdeal?: ModelPlanOutput | null;
   cam: EngraveCamSummary | null;
   /**
    * #250 — the rough/finish split of the program this object describes (the FIRST program for the
@@ -5085,9 +5094,17 @@ export async function generateGoalProgram(
     } catch (e) {
       return fail('cam', `cam/model seam (#966): could not build a ModelPlanInput for "${goal.name}" — ${e instanceof Error ? e.message : String(e)}`);
     }
+    // #961 — PLAN TWICE, POST ONCE. `planTwoOutcomes` runs the cost-ranked plan over the owned set
+    // (what posts, and the default) and over every bit the caller knows (the ideal, carried for the
+    // card's material tradeoff); when the catalogue adds no cutter the owned set did not carry it
+    // returns `ideal: null` and the second plan is never run. The owned run keeps the operator's
+    // pin; the ideal is built without it, by that module's own rule.
     let output: ModelPlanOutput;
+    let idealPlan: ModelPlanOutput | null;
     try {
-      output = await planModelCam(input);
+      const two = await planTwoOutcomes(input);
+      output = two.owned;
+      idealPlan = two.ideal;
     } catch (e) {
       return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -5206,6 +5223,7 @@ export async function generateGoalProgram(
             verify,
             programs: [...programs],
             plan: output,
+            planIdeal: idealPlan,
             errors: [{ stage: 'verify', message: `cam/model (#966): ${programLabel}: ${verifyErrors.length} verifier error(s)` }],
           };
         }
@@ -5239,6 +5257,7 @@ export async function generateGoalProgram(
       verify: first.verify,
       programs,
       plan: output,
+      planIdeal: idealPlan,
     };
   }
 

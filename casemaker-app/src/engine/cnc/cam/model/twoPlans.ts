@@ -14,8 +14,10 @@
  * gate, and nothing here refuses a job the owned set can plan (that rule is the plan's own).
  *
  * The tradeoff LINE is not computed here: it is judged on the two plans' SIMULATED outcomes (the
- * card's seven lines), so it belongs where those are measured — `tests/tools/tradeoff.ts` carries
- * the materiality constant and the one-line comparison.
+ * card's seven lines), so it belongs where those are measured — `./tradeoff.ts` carries the
+ * materiality constant and the one-line comparison, and the job card that shows the line reads
+ * them from there. (#961's wiring: the seam calls this module and carries the ideal beside the
+ * owned plan as `planIdeal`.)
  */
 
 import { planModelCam, type PlanModelCamOptions, type ModelPlanInput, type ModelPlanOutput } from './plan';
