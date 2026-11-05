@@ -176,5 +176,17 @@ describe('#964 — the curved pipeline really does alternate across independent 
     // And every op's own posted moves are byte-identical objects (same outcome.ir reference) —
     // batching reorders the ARRAY, it never touches an op's own planned content.
     for (const o of result.ops) expect(batched).toContain(o);
+
+    // No merge moves a program ahead of one whose material it needs removed: within EACH region,
+    // on these real ops, rough (and any rest) still posts before finish, finish still posts before
+    // pencil, batching only ever regroups ACROSS regions.
+    for (const regionId of ['r1', 'r2']) {
+      const kindsForRegion = batched.filter((o) => o.region.id === regionId).map((o) => o.kind);
+      const roughIdx = kindsForRegion.indexOf('rough');
+      const finishIdx = kindsForRegion.indexOf('finish');
+      expect(roughIdx, `${regionId}: rough must exist`).toBeGreaterThanOrEqual(0);
+      expect(finishIdx, `${regionId}: finish must exist`).toBeGreaterThanOrEqual(0);
+      expect(roughIdx, `${regionId}: rough's material removal must still precede its own finish`).toBeLessThan(finishIdx);
+    }
   }, 60_000);
 });
