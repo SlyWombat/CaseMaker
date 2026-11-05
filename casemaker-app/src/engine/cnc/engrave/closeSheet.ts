@@ -39,8 +39,18 @@ export class UnclosableOpenMeshError extends Error {
 }
 
 export interface CloseOpenSheetOptions {
-  /** The stock's bottom face in the goal mesh's own frame, mm — the skirt's floor. */
-  bottomZ: number;
+  /**
+   * #966 — WHERE THE SKIRT FLOORS. `'lowestBoundary'` (the relief case): the skirt stops at the
+   * sheet's own lowest boundary vertex, so the closed solid is exactly as deep as the relief and
+   * the feature tree reads `partBottom` there — no freeing contour (`frees: false`), no cut below
+   * the sheet. `'stockBottom'` (with `bottomZ`): the skirt runs to the stock's bottom face; that
+   * closes the mesh to full stock height and the tree may classify a freeing through-cut, which is
+   * right only where the caller really means a part spanning the stock.
+   */
+  skirtTo?: 'lowestBoundary' | 'stockBottom';
+  /** The stock's bottom face in the goal mesh's own frame, mm — the skirt's floor when
+   * `skirtTo` is `'stockBottom'` (the default, for backward compatibility). */
+  bottomZ?: number;
   /** Vertex weld distance for the boundary analysis (the same order `solidOf`'s merge uses). */
   weldMm?: number;
 }
@@ -181,6 +191,15 @@ export function closeOpenSheet(tl: ManifoldToplevel, mesh: ParsedMesh, opts: Clo
     loops.push(loop);
   }
 
+  // #966 — THE SKIRT'S FLOOR. A relief closes only to its own lowest boundary; the stock bottom is
+  // for a caller that really means a full-height solid. The cap sits at the same floor either way.
+  const skirtTo = opts.skirtTo ?? 'stockBottom';
+  const lowestBoundaryZ = Math.min(...loops.flatMap((loop) => loop.map((edge) => weldedPos[3 * edge.from + 2]!)));
+  const floorZ = skirtTo === 'lowestBoundary' ? lowestBoundaryZ : opts.bottomZ;
+  if (floorZ === undefined || !Number.isFinite(floorZ)) {
+    throw new UnclosableOpenMeshError(skirtTo === 'stockBottom' ? 'the skirt floor (bottomZ) is missing' : 'the boundary states no lowest Z');
+  }
+
   // The projected loops must not overlap in XY: build the cap region and require its area to be
   // exactly the loops' own summed area (a nested or crossing pair would lose area to the union).
   const loopsXY: [number, number][][] = loops.map((loop) => loop.map((edge) => [weldedPos[3 * edge.from]!, weldedPos[3 * edge.from + 1]!] as [number, number]));
@@ -215,7 +234,7 @@ export function closeOpenSheet(tl: ManifoldToplevel, mesh: ParsedMesh, opts: Clo
         const zs = ids.map((id) => cap.vertProperties[id * cap.numProp + 2]!);
         if (zs.every((z) => Math.abs(z) <= 1e-5)) {
           capTriangles.push(
-            ids.map((id) => [cap.vertProperties[id * cap.numProp]!, cap.vertProperties[id * cap.numProp + 1]!, opts.bottomZ] as [number, number, number]),
+            ids.map((id) => [cap.vertProperties[id * cap.numProp]!, cap.vertProperties[id * cap.numProp + 1]!, floorZ] as [number, number, number]),
           );
         }
       }
@@ -244,8 +263,8 @@ export function closeOpenSheet(tl: ManifoldToplevel, mesh: ParsedMesh, opts: Clo
       const ax = weldedPos[3 * edge.from]!, ay = weldedPos[3 * edge.from + 1]!;
       const bx = weldedPos[3 * edge.to]!, by = weldedPos[3 * edge.to + 1]!;
       const a = addVertex(ax, ay, weldedPos[3 * edge.from + 2]!);
-      const ad = addVertex(ax, ay, opts.bottomZ);
-      const bd = addVertex(bx, by, opts.bottomZ);
+      const ad = addVertex(ax, ay, floorZ);
+      const bd = addVertex(bx, by, floorZ);
       const b = addVertex(bx, by, weldedPos[3 * edge.to + 2]!);
       // Outward-facing skirt for an edge whose interior is on its left (the sheet's own winding).
       newIndices.push(a, ad, bd, a, bd, b);
@@ -291,7 +310,7 @@ export function closeOpenSheet(tl: ManifoldToplevel, mesh: ParsedMesh, opts: Clo
     mesh: closed,
     note:
       `the open goal sheet was closed with a skirt: ${loops.length} boundary loop(s), ` +
-      `${skirtTriangles} skirt triangle(s) down to the stock bottom at ${opts.bottomZ} mm and ` +
+      `${skirtTriangles} skirt triangle(s) down to ${skirtTo === 'lowestBoundary' ? "the sheet's lowest boundary" : 'the stock bottom'} at ${floorZ} mm and ` +
       `${capTriangles.length} bottom-cap triangle(s)` +
       (degenerate > 0 ? ` (${degenerate} degenerate triangle(s) dropped)` : ''),
   };
