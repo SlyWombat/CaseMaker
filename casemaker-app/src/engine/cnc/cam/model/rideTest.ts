@@ -21,6 +21,9 @@
  * passes either side of it make.
  */
 
+import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
+import { dropRow, type DroppedPoint } from './rowDropper';
+
 export interface RidePoint {
   x: number;
   y: number;
@@ -71,17 +74,40 @@ export function followCutSurface(
   rapid: { xyMmPerMin: number; zMmPerMin: number },
   clearanceZMm: number,
 ): { kind: 'feed'; x: number; y: number; z: number; f: number }[] | null {
+  // #970 — THE CHORD HOLDS THE ROW DROPPER'S GUARANTEE. The old point list sampled the surface
+  // every `stepMm` and connected the samples with straight chords: on a convex CL corner (a ridge
+  // whose peak sits between the samples) the chord cut the corner and the ball's flank followed it
+  // under the design — measured 0.486 mm on the organizer's ridge, 0.177 mm of cut-into. The
+  // points are now laid by `dropRow`, the same subdivision the rows already use (midpoint/quarter
+  // departure within the surface's tolerance, the kink guard, and the min-spacing staircase, which
+  // holds the HIGHER height across a true discontinuity), so every chord this link emits carries
+  // the same stated guarantee the rows do (features at least span/4 wide; narrower ones stated).
+  // A throw from `dropRow` is its footprint-notch case: a null on the span is no proof, so the
+  // caller retracts — always safe.
+  const stride = stepMm > 0 ? stepMm : 0.5;
   const length = Math.hypot(to.x - from.x, to.y - from.y);
-  const steps = Math.max(1, Math.ceil(length / stepMm));
-  const points: RidePoint[] = [];
-  for (let s = 0; s <= steps; s++) {
-    const t = s / steps;
-    const x = from.x + (to.x - from.x) * t;
-    const y = from.y + (to.y - from.y) * t;
-    const top = topAt(x, y);
-    if (top === null) return null;
-    points.push({ x, y, z: s === 0 ? from.z : s === steps ? to.z : Math.max(top, clampZMm) });
+  let row: DroppedPoint[];
+  try {
+    row = dropRow(
+      {
+        dropCutter: topAt,
+        toleranceMm: ARC_CHORD_TOLERANCE_MM,
+        minSpacingMm: ARC_CHORD_TOLERANCE_MM,
+        maxSpacingMm: stride,
+        sampleCount: 0,
+      },
+      [from.x, from.y],
+      [to.x, to.y],
+    );
+  } catch {
+    return null;
   }
+  if (row.length < 2) return null;
+  const points: RidePoint[] = row.map((p, i) => ({
+    x: p.x,
+    y: p.y,
+    z: i === 0 ? from.z : i === row.length - 1 ? to.z : Math.max(p.z, clampZMm),
+  }));
   let followSeconds = 0;
   const moves: { kind: 'feed'; x: number; y: number; z: number; f: number }[] = [];
   for (let i = 1; i < points.length; i++) {
