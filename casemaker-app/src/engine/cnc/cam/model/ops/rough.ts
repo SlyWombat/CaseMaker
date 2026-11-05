@@ -606,6 +606,75 @@ export interface SkinOpOptions {
   stockTopZMm?: number;
 }
 
+export interface SkinTargetGrid {
+  nx: number;
+  ny: number;
+  min: [number, number];
+  pitch: number;
+  /** The CL sampled once per grid point (the cell's own centre), row-major `j*nx+i`. */
+  clGrid: Float64Array;
+  /** Per cell, the design target: the max CL over the cell and its eight neighbours (NaN where none sampled). */
+  target: Float64Array;
+}
+
+/**
+ * #970 — the skin's own target grid, one `dropCutter` call per grid point (reused as both a
+ * cell's own centre sample and a corner of its four diagonal neighbours), instead of the 5
+ * radius-3 `dropCutter` calls per cell the exact rule costs (its share of the elephant's 7.6x).
+ *
+ * The design grid: the flat's CL, max over the cell's centre and corners (a cell straddling a
+ * rise is judged by its high side, the rough's own rule, `rough()`'s own header above). A
+ * half-pitch corner sits exactly midway between the cell's own grid point and ONE diagonal
+ * neighbour, tied with its two axis neighbours too (all four equidistant from the true corner) —
+ * so the four corners' own tied candidate sets union to exactly the 3x3 block of grid points
+ * centred on the cell, and maxing all four corners is maxing that whole block. Read directly by
+ * integer index, no rounding of a continuous coordinate at all: an earlier version asked
+ * `clAt(x±half, y±half)` for a point that never lands exactly on a grid sample, and
+ * `Math.round`'s tie-break (round HALF UP) is directional — `+half` always lands one cell over,
+ * `-half` always lands back on the SAME cell — so all four "corners" collapsed onto the single
+ * 2x2 block `{i, i+1} x {j, j+1}`, a block centred a quarter-pitch off the cell in both axes, not
+ * on it (#970, E's SKIN-EQUIV finding on the organizer: 19,331 of 111,918 cells differed from the
+ * per-query five-sample rule, 2,451 by more than 0.5 mm, the worst by 22 mm).
+ */
+export function skinTargetGrid(clSurface: ClSurface, foot: Polygons, pitch: number): SkinTargetGrid {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const ring of foot) {
+    for (const [x, y] of ring) {
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    }
+  }
+  const min: [number, number] = [minX, minY];
+  const nx = Math.max(2, Math.floor((maxX - minX) / pitch + 1e-9) + 1);
+  const ny = Math.max(2, Math.floor((maxY - minY) / pitch + 1e-9) + 1);
+
+  const clGrid = new Float64Array(nx * ny).fill(Number.NaN);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const v = clSurface.dropCutter(min[0] + i * pitch, min[1] + j * pitch);
+      if (v !== null) clGrid[j * nx + i] = v;
+    }
+  }
+  const target = new Float64Array(nx * ny).fill(Number.NaN);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      let hi = -Infinity;
+      for (let dj = -1; dj <= 1; dj++) {
+        const jj = j + dj;
+        if (jj < 0 || jj >= ny) continue;
+        for (let di = -1; di <= 1; di++) {
+          const ii = i + di;
+          if (ii < 0 || ii >= nx) continue;
+          const cl = clGrid[jj * nx + ii]!;
+          if (cl > hi) hi = cl;
+        }
+      }
+      if (hi > -Infinity) target[j * nx + i] = hi;
+    }
+  }
+  return { nx, ny, min, pitch, clGrid, target };
+}
+
 export function skin(opts: SkinOpOptions): OpOutcome {
   const toolRadius = (cuttingDiameter(opts.cutter) ?? 0) / 2;
   if (!(toolRadius > 0)) {
@@ -615,53 +684,7 @@ export function skin(opts: SkinOpOptions): OpOutcome {
   const pitch = opts.gridPitchMm ?? gridPitchFor(stepOver, toolRadius);
   const grown = opts.offset(opts.outline, 2 * toolRadius);
   const foot = grown.length > 0 ? grown : opts.outline;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const ring of foot) {
-    for (const [x, y] of ring) {
-      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-    }
-  }
-  const min: [number, number] = [minX, minY];
-  const max: [number, number] = [maxX, maxY];
-  const nx = Math.max(2, Math.floor((max[0] - min[0]) / pitch + 1e-9) + 1);
-  const ny = Math.max(2, Math.floor((max[1] - min[1]) / pitch + 1e-9) + 1);
-  const half = pitch / 2;
-
-  // #970 — ONE GRID, BUILT ONCE: the CL at every cell centre, then the five-sample neighbourhood
-  // reads the grid instead of re-querying — the skin's 5 radius-3 `dropCutter` calls per cell
-  // (its share of the elephant's 7.6x) are O(1) array reads. The corners read their nearest
-  // cells, so the target is the max over the cell and its half-pitch neighbours, a hair coarser
-  // than the true corner values (the re-pin the manager stated).
-  const clGrid = new Float64Array(nx * ny).fill(Number.NaN);
-  for (let j = 0; j < ny; j++) {
-    for (let i = 0; i < nx; i++) {
-      const v = opts.clSurface.dropCutter(min[0] + i * pitch, min[1] + j * pitch);
-      if (v !== null) clGrid[j * nx + i] = v;
-    }
-  }
-  const clAt = (x: number, y: number): number | null => {
-    const i = Math.round((x - min[0]) / pitch);
-    const j = Math.round((y - min[1]) / pitch);
-    if (i < 0 || j < 0 || i >= nx || j >= ny) return null;
-    const v = clGrid[j * nx + i]!;
-    return Number.isFinite(v) ? v : null;
-  };
-  // The design grid: the flat's CL, max over the cell's centre and corners (a cell straddling a
-  // rise is judged by its high side, the rough's own rule).
-  const target = new Float64Array(nx * ny).fill(Number.NaN);
-  for (let j = 0; j < ny; j++) {
-    for (let i = 0; i < nx; i++) {
-      const x = min[0] + i * pitch;
-      const y = min[1] + j * pitch;
-      let hi = -Infinity;
-      for (const [dx, dy] of [[0, 0], [-half, -half], [half, -half], [-half, half], [half, half]] as const) {
-        const cl = clAt(x + dx, y + dy);
-        if (cl !== null && cl > hi) hi = cl;
-      }
-      if (hi > -Infinity) target[j * nx + i] = hi;
-    }
-  }
+  const { nx, ny, min, target } = skinTargetGrid(opts.clSurface, foot, pitch);
 
   // THE SLOPE GATE (the shared parameter): the grid's own gradient, in degrees. A cell whose
   // steepest neighbour departure exceeds `maxSlopeDeg` is not the flat's to take.
