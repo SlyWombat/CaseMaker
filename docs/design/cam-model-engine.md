@@ -561,6 +561,67 @@ honoured and labelled `pinned: true` in `sequence[]`; an absent key is the engin
 `pinned: false`. `roughToolKey` and `chamfer.toolKey` (today's job-document fields) stop being written
 by a measured search — they are read from `sequence[]` (D's §3.6 above).
 
+
+### The planner's inventory ruling (the maintainer, 2026-11-05, #975) — what `chooseSequence` must serve
+
+**The maintainer's words** (#975, relayed by the review session): *"Our software needs to be able to
+plan based on all bits available, but when constrained with a fixed inventory present to the user
+the tradeoffs (if any) and then implement with the tools available to the best of our ability.
+Potentially also showing the user what the outcome of the choice will be."* Followed by: *"should
+not bug the user if the difference is minor."*
+
+**1. The ideal is planned from the full catalogue.** `candidateSequences` runs over every cutter
+the app knows (the catalogue door, #964), not only the location's inventory. Its output is the
+reference plan — on the tray's digits, a ⌀0.6 flat giving the model's flat −1.80 floor with
+vertical walls. The app plans BOTH from the same input; the order `planTwoOutcomes` happens to use
+(the owned plan first, then the ideal) is an implementation detail and carries no meaning. The
+ideal is kept beside the owned plan; it is never the default and never a gate.
+
+**2. The owned plan is the plan, and it never refuses where an owned tool can do the job.** The
+same candidate builder runs over the location's set and `chooseSequence` picks the best outcome
+those tools can reach — on the digits, the 90° V as a floor-correct pocket (#975's own answer:
+the tool is in the set, so `unreachable` is wrong). A refusal is stated only when no owned cutter
+can do the work at all, with the reason the geometry gives (a tip wider than the stroke, a leg
+shorter than the depth).
+
+**3. The tradeoff is stated only when it is material, in outcome terms.** The owned-versus-ideal
+difference goes up as ONE line on the card, naming the outcome that differs and by how much —
+never the tool that would have made it. It prints nothing when the two plans pass and fail the
+same seven lines and differ by no more than, per the manager's proposed threshold (for the
+maintainer to correct): **0.1 mm** in geometry (walls, floor, cut-into, leftover — the cell
+tolerance), **0.5 points** of coverage, **10 %** of cycle. Past one of those, one line. This is
+the standing rule that warnings must discriminate: a minor difference is visible on demand in the
+comparison view (point 4), never as a warning.
+
+**4. Both outcomes are shown, simulated.** The demo page renders the owned plan's simulated part
+beside the ideal's (its before/after machinery); the Cut card carries the same two pictures, or
+the delta line when they are within the material threshold. The simulation is the same one the
+goal check reads — the owned plan's numbers are the seven lines' numbers.
+
+**5. The operator's choice is recorded on the job; the owned plan is the default.** The job stores
+which plan the operator chose (`ideal | owned`, with the plans' keys), so a re-run reproduces the
+choice. The default is the owned plan — fix the default before adding a control. The ideal is a
+recommendation ("a ⌀0.6 flat would give vertical walls"), never a pass condition.
+
+**What this means for #961.** The cost-ranked sequence is run twice — once over the catalogue,
+once over the inventory — and the card prints both. The stop rule and the seven lines judge the
+OWNED plan; the delta to the catalogue plan is a stated line (on the tray today: 3 owned cutters
+against Makera's 4). `sequence[].house` keeps meaning exactly what the caller put in
+`input.cutters.house`; the two runs are two calls, never one mixed candidate set.
+
+**What this means for #975.** The picker's rule is not "V when nothing else fits"; it is the best
+outcome from the owned set with the ideal's outcome stated beside it. For a pocket narrower than
+every owned flat and ball, the V cuts it as a **floor-correct pocket**: the floor is the model's
+floor at the model's depth (−1.800) and outline (the stroke, exact at the floor plane), the walls
+at the V's half-angle, and the **land taken per side at the surface is `depth · tan(half)` —
+0.60 mm for the 90° bit — stated on the card as the V's own geometry**, not counted as a failure.
+The gate reads the flanks as the **edge-break class** it already has (cells within the stated V's
+reach of a design edge, no deeper than its leg): the plan names the V on the pocket so `whoAt`
+answers it, and nothing on the flanks is adjudicated. The card prints the land per side and, beside
+it, the vendor's T4 reading (−1.60, 0.20 mm above the model floor) — the vendor's approximation is
+a yardstick, not the target. The ideal (vertical walls from a ⌀0.6 flat) is one line up when the
+flank width is past the material threshold, which 0.60 mm is.
+
 ---
 
 ## 5. Linking (#962, C)
