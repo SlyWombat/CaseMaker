@@ -90,20 +90,21 @@ function plan(zHigh: number, zLow: number) {
 }
 
 describe('#959 review — the rough splits shallow from steep', () => {
-  it('a shallow ramp gets a BAND SKIM: the rough runs, at CL + band, never deeper', () => {
+  it("a shallow ramp gets a SKIM to the flat's own CL — never deeper", () => {
     // Depth 0.4 over the region: material above CL + band is 0.1-0.4 thick, under one 1.5 step-down.
     const result = plan(-0.6, -1.0);
     const roughOp = result.ops.find((op) => op.kind === 'rough');
     expect(roughOp, `ops: ${result.ops.map((o) => o.kind).join(', ')}; notes: ${result.notes.join('; ')}`).toBeDefined();
     const feeds = roughOp!.outcome.ir.operations.flatMap((o) => o.moves).filter((m) => m.kind === 'feed');
     expect(feeds.length).toBeGreaterThan(10);
-    // CL + band, with the flat's own SLOPE TERM: on a plane descending in +x the flat touches at
-    // its uphill edge, so its CL stands slope x radius = 0.01 x 3 = 0.03 above the design there.
-    // So the skim runs from (-0.6 + 0.03 + 0.3) = -0.27 at the high end to (-1.0 + 0.03 + 0.3) =
-    // -0.67 at the low end; deeper would cut the band the ball is promised.
+    // THE RULING (ii): the skim cuts to the flat's OWN CL — exact contact, never deeper. On a
+    // plane descending in +x the flat touches at its uphill edge, so its CL stands slope x radius
+    // = 0.01 x 3 = 0.03 above the design there: the skim runs from -0.6 + 0.03 = -0.57 at the
+    // high end to -1.0 + 0.03 = -0.97 at the low end. Deeper than the CL is a gouge; shallower
+    // would leave the band this pass exists to take.
     const zs = feeds.map((m) => m.z);
-    expect(Math.max(...zs)).toBeLessThanOrEqual(-0.27 + 0.05);
-    expect(Math.min(...zs)).toBeGreaterThanOrEqual(-0.67 - 0.05);
+    expect(Math.max(...zs)).toBeLessThanOrEqual(-0.57 + 0.05);
+    expect(Math.min(...zs)).toBeGreaterThanOrEqual(-0.97 - 0.05);
   }, 120_000);
 
   it('a steep ramp still Z-steps: several discrete levels, unchanged', () => {

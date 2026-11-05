@@ -280,10 +280,17 @@ export function rough(opts: RoughOpOptions): OpOutcome {
   // `target` ALREADY holds `cl + stockToLeave` (the grid above) — the skim reads it directly;
   // adding the band a second time put feeds at the stock top (-0.0025 in the red-first's first
   // run, the double band and a half-cell sampling rise).
+  // (ii) THE MANAGER'S RULING: where the flat can reach, it cuts to its OWN drop-cutter CL —
+  // exact contact, never deeper, so there is no gouge and no band left under the blade. The grid
+  // holds `cl + stockToLeave`, so the CL is that value less the leave. The ball's mask (item 4a)
+  // then only visits the cells where this skim could not reach, plus the terraces and scallops it
+  // left. The steep Z-steps keep their `cl + band` target.
+  const skimLeave = Math.max(0, opts.stockToLeaveMm ?? 0);
   const skimTarget = (i: number, j: number): number | null => {
     const z = target[j * nx + i]!;
     if (!Number.isFinite(z)) return null;
-    return z < opts.region.zTop && z >= skimFirstLevel ? z : null;
+    const cl = z - skimLeave;
+    return cl < opts.region.zTop && cl >= skimFirstLevel ? cl : null;
   };
   let skimRuns = 0;
   const skimRun = (i0: number, i1: number, j: number): void => {
