@@ -1211,6 +1211,8 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
       offset: makeClipperOffset(tl),
       pockets: {
         houseFlats: [flat, flatEndMill(3.175, { number: 4, id: 'flat-3.175', name: 'flat-3.175' })],
+        // #975 — the V bits are the chain's last resort for pockets no flat enters (the digits).
+        houseVs: [vbit],
         stepDownMm: 1.5,
         feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
         rapid: Z1.rapidEstimate,
