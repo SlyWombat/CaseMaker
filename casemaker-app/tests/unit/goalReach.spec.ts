@@ -272,6 +272,17 @@ describe('#785 — Generate', () => {
     expect(Math.min(...zs)).toBeLessThanOrEqual(-10.5);
     // The sheet states the floor and what it leaves.
     expect(out.surface3d?.notes.some((n) => n.includes("Cut only the stock's top 11 mm"))).toBe(true);
+
+    // #982 pin — the fixture's OWN flat-only set through the ONE model entry: no ball is the
+    // flat-raster fallback, never a refusal. RED at the parent (planModelCam threw).
+    {
+      const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+      const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+      const modelInput = await buildModelPlanInputForGoal(tallJob(target), target, tool, {});
+      const modelOut = await planModelCam(modelInput);
+      expect(modelOut.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
+      expect(modelOut.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no ball nose');
+    }
   }, 120_000);
 
   it('an unrecorded reach does not stop Generate — the assumption is stated, the cut proceeds', async () => {

@@ -105,7 +105,7 @@ import { rough, skin } from './ops/rough';
 import { maskCellsExact } from './finishMask';
 import { FLAT_SURFACE_MAX_SLOPE_DEG, flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
 import { cellPolygons, rest } from './ops/rest';
-import { DEFAULT_FINISH_SCALLOP_MM, finish, finishKindFor } from './ops/finish';
+import { DEFAULT_FINISH_SCALLOP_MM, finish, finishKindFor, type FinishKind } from './ops/finish';
 import { hasValley, pencil } from './ops/pencil';
 import { chamfer } from './ops/chamfer';
 import { contour as contourOp, throughHole } from './ops/contour';
@@ -608,13 +608,18 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const flats = input.cutters.house
       .filter((t) => t.shape === 'flat' && (cuttingDiameter(t) ?? 0) > 0)
       .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0));
-    const primary = flats[0];
-    if (primary === undefined) {
-      throw new Error('cam/model/plan: the house states no flat end mill with a cutting diameter — a pocket cannot be planned without one');
-    }
     const balls = input.cutters.house
       .filter((t) => t.shape === 'ball' && (cuttingDiameter(t) ?? 0) > 0)
       .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0));
+    // #982 (the review session's ruling) — NO FLAT IN THE SET: the ball takes the primary's place.
+    // It roughs with its own profile and the pocket floors are its scallop pass; the card states
+    // the wall-foot fillet (the ball's radius) as the tradeoff. Only a set with NO round cutter at
+    // all is refused, by name.
+    const noFlatFallback = flats.length === 0;
+    const primary = flats[0] ?? balls[0];
+    if (primary === undefined) {
+      throw new Error('cam/model/plan: the house states no flat end mill and no ball nose with a cutting diameter — no round cutter can plan this part');
+    }
     const ball = balls[0];
     // #965 (the review session's ruling, item 3.1) — THE REST BALL: the next-smaller ball, admitted
     // only on a STATED reach that covers the deepest remainder. The vendor's long ⌀1
@@ -625,9 +630,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const deepestRemainderMm = tree.remainder.reduce((m, r) => Math.max(m, r.zTop - r.zBottom), 0);
     const restBall = balls.find((t) => t !== ball && (t.fluteLength ?? 0) >= deepestRemainderMm - 1e-9);
     const vbit = input.cutters.house.find((t) => t.shape === 'chamfer') ?? input.cutters.house.find((t) => t.shape === 'engraving');
-    if (tree.remainder.length > 0 && ball === undefined) {
-      throw new Error('cam/model/plan: the part has curved remainder regions but the house states no ball nose — the finish stage cannot be planned');
-    }
+    // #982 — NO BALL IN THE SET: the flat finishes the curved remainder (a flat-raster over the
+    // whole region, the flat's cusp rule), the creases via the rest with the smallest flat. The
+    // throw the old code raised here was the refusal the ruling forbids.
+    const finishFlat = flats.length > 0 ? flats[flats.length - 1] : undefined;
 
     const { params: pocketParams, substitution } = resolvedCutParams(input, primary);
     const feeds = { feedMmPerMin: pocketParams.feed, plungeFeedMmPerMin: pocketParams.plungeFeed };
@@ -748,9 +754,62 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       const half = pitch / 2;
       return radiusMm - Math.sqrt(Math.max(0, radiusMm * radiusMm - half * half));
     })();
+
+    // #982 — NO FLAT: each pocket node becomes a synthetic remainder-style region the curved
+    // pipeline plans with the ball (its rough, then the ball's scallop finish). The floor is
+    // CLAMPED at the real design top over the opening: a spurious pocket floor below the body
+    // (the 11.37 mm gouge) yields no depth, so the ball can never cut through the part.
+    let pocketFloorRegions: RemainderRegion[] = [];
+    if (noFlatFallback) {
+      const bins = buildTriangleBins(input.geometry.triangles);
+      const walkPockets = (nodes: PocketNode[]): void => {
+        for (const node of nodes) {
+          let designMax = -Infinity;
+          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+          for (const ring of node.region) {
+            for (const [x, y] of ring) {
+              minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+              minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+            }
+          }
+          for (let x = minX; x <= maxX + 1e-9; x += 0.5) {
+            for (let y = minY; y <= maxY + 1e-9; y += 0.5) {
+              const top = topSurfaceAt(bins, x, y);
+              if (top !== null && top > designMax) designMax = top;
+            }
+          }
+          const zBottom = Number.isFinite(designMax) ? Math.max(node.floorZ, designMax) : node.floorZ;
+          // The ball's CENTRE space: the footprint is eroded by the ball's radius, exactly as the
+          // pocket chain offsets its loops — otherwise the ball's centre reaches the wall and its
+          // flank cuts a radius into it (a 0.95 mm gouge measured on the elephant). Eroded, the
+          // flank is tangent at the wall foot: the stated fillet, never a gouge.
+          const ballRadius = (cuttingDiameter(primary) ?? 0) / 2;
+          const footprint = ballRadius > 0 ? offset(node.region, -ballRadius) : node.region;
+          if (footprint.length === 0) {
+            notes.push(`${node.id}: the ball cannot enter this pocket (narrower than its radius) — left uncut`);
+            walkPockets(node.children);
+            continue;
+          }
+          pocketFloorRegions.push({
+            id: node.id,
+            footprint,
+            area: Math.abs(node.region.reduce((sum, ring) => sum + ringAreaOf(ring), 0)),
+            zTop: node.mouthZ,
+            zBottom,
+            triangles: new Uint32Array(0),
+            slopeDeg: [0, 0],
+            slopeMedianDeg: 0,
+            in: 'top',
+          });
+          walkPockets(node.children);
+        }
+      };
+      walkPockets(tree.pockets);
+    }
+
     const result = planTreePrograms(tree, {
       offset,
-      pockets: {
+      pockets: noFlatFallback ? null : {
         houseFlats: flats,
         // #975 — the V bits are the pocket chain's last resort: a pocket no flat covers gets the
         // narrowest V whose tip fits the stroke and whose leg reaches the floor, floor-correct.
@@ -793,17 +852,30 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       },
       curved: {
         geometry: curvedGeometry,
-        // #869/#966 — absent (every existing caller): `primary`, unchanged. `null` (a goal with no
-        // `roughToolKey`): no rough, ball alone. A `Tool` (a goal's validated `roughToolKey`):
-        // that tool roughs instead of `primary`, which this job's own pockets (if it has any) still
-        // use — the two are independent on purpose, see `ModelPlanInput.curvedRoughTool`'s own doc.
-        ...(input.curvedRoughTool === undefined
-          ? { flat: primary }
-          : input.curvedRoughTool === null
-            ? {}
-            : { flat: input.curvedRoughTool }),
+        // #982 — NO FLAT ANYWHERE IN THE HOUSE: the ball stands in for the flat (ball-as-rough,
+        // 0ca79e89's disc-aware proof against the region and the CL), and the pocket floors (no
+        // pocket chain at all without a flat) become `extraRegions`. A goal's own `curvedRoughTool`
+        // is moot here — with no flat anywhere it can only ever validate to `null` (see the other
+        // branch's own doc), which this one already subsumes with the more capable mechanism.
+        //
+        // #869/#966 — otherwise: absent (every existing caller): `primary`, unchanged. `null` (a
+        // goal with no `roughToolKey`): no rough, ball alone. A `Tool` (a goal's validated
+        // `roughToolKey`): that tool roughs instead of `primary`, which this job's own pockets (if
+        // it has any) still use — the two are independent on purpose, see
+        // `ModelPlanInput.curvedRoughTool`'s own doc.
+        ...(noFlatFallback
+          ? { flat: primary, extraRegions: pocketFloorRegions }
+          : input.curvedRoughTool === undefined
+            ? { flat: primary }
+            : input.curvedRoughTool === null
+              ? {}
+              : { flat: input.curvedRoughTool }),
         ...(ball === undefined ? {} : { ball }),
         ...(restBall === undefined ? {} : { restBall }),
+        // #982 — NO BALL IN THE SET: the flat finishes the curved remainder (a flat-raster over
+        // the whole region, the flat's cusp rule), the creases via the rest with the smallest flat.
+        ...(ball === undefined ? { finishFlat: finishFlat ?? primary } : {}),
+        ...(ball === undefined && finishFlat !== undefined && finishFlat !== primary ? { restFlat: finishFlat } : {}),
         ...(vbit === undefined ? {} : { vbit }),
         stepDownMm: pocketParams.stepDown,
         bandMm: MODEL_STOCK_TO_LEAVE_MM,
@@ -885,6 +957,24 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
 
     const notes = [...result.notes, ...emptyStages, ...freeingNotes];
     notes.push(...toolSubstitutions);
+    // #982 (the review session's ruling) — the two cutter fallbacks, stated on the card in
+    // outcome terms (the measured coverage/cycle numbers are the acceptance card's; the plan
+    // states the method and the tradeoff it implies).
+    if (noFlatFallback) {
+      const r = (cuttingDiameter(primary) ?? 0) / 2;
+      notes.push(
+        `the set holds no flat end mill — the pocket floors are cut by the ${primary.name || primary.shape} ball: ` +
+          `wall feet carry a ${r.toFixed(3)} mm fillet and the floor a stepped scallop between passes (the tradeoff of cutting without a flat)`,
+      );
+    }
+    if (ball === undefined && tree.remainder.length > 0) {
+      const flatName = (finishFlat ?? primary).name || 'flat';
+      notes.push(
+        `the set holds no ball nose — the curved remainder is finished by the ${flatName} as a flat-raster over the whole region ` +
+          `(cusp rule: step = cusp / tan of the steepest slope, clamped to the flat's radius/10 to radius); ` +
+          (finishFlat !== undefined && finishFlat !== primary ? 'the creases go to the rest pass with the smallest flat' : 'no smaller flat is offered, so the creases are left as the raster finds them'),
+      );
+    }
     if (input.fixture.envelope !== null) {
       notes.push(
         `the ${input.fixture.mount} fixture envelope is not yet wired into the region obstacles — this plan carries none; the posted program is still checked against the same envelope by the sweep`,
@@ -1998,6 +2088,9 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
 export interface PlanCurvedOptions {
   /** The mesh the tree's regions index into (`ModelPlanInput.geometry`). */
   geometry: FeatureSource;
+  /** #982 — extra remainder-style regions the curved pipeline also plans (the no-flat path's
+   *  synthetic pocket floors). Absent → the tree's own remainder only. */
+  extraRegions?: RemainderRegion[];
   /** The real Clipper2 offset, or a test fake — the pocket op's own contract. */
   offset: OffsetFn;
   /**
@@ -2021,6 +2114,9 @@ export interface PlanCurvedOptions {
   vbit?: Tool;
   /** An optional smaller flat for the rest pass by CL difference. */
   restFlat?: Tool;
+  /** #982 — the finish cutter when the set holds no ball: the smallest flat that reaches.
+   *  Absent with `ball` absent → the primary flat. */
+  finishFlat?: Tool;
   stepDownMm: number;
   /** The ROUGH's stock-to-leave band, mm — what the flat leaves standing for the ball. */
   bandMm: number;
@@ -2212,11 +2308,14 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     plungeFeedMmPerMin: p.plungeFeed,
   });
 
-  for (const region of tree.remainder) {
+  for (const region of [...tree.remainder, ...(opts.extraRegions ?? [])]) {
     const ball = opts.ball;
-    if (ball === undefined) {
+    // #982 (the review session's ruling) — NO BALL IN THE SET: the flat finishes the whole curved
+    // remainder as a flat-raster, the creases via the rest with the smallest flat. Never a throw.
+    const finishCutter = ball ?? opts.finishFlat ?? opts.flat;
+    if (finishCutter === undefined) {
       throw new Error(
-        `cam/model/plan: the remainder region "${region.id}" needs a ball nose to finish and the call states none`,
+        `cam/model/plan: the remainder region "${region.id}" needs a cutter to finish and the call states no ball, no finish flat and no flat`,
       );
     }
     const base = { ...region, zTop: rebaseZ(region.zTop), zBottom: rebaseZ(region.zBottom) };
@@ -2230,13 +2329,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // The outer-surface test is the footprint's LARGEST ring against the contour's own: the
     // figure's remainder is an ANNULUS (two rings, outer ring = the silhouette), a summed area or a
     // single-ring count both rejected it and its coverage fell back to 87.77 %.
-    const ball0 = opts.ball;
-    const ballRadius0 = ball0 === undefined ? 0 : (cuttingDiameter(ball0) ?? 0) / 2;
+    const finishRadius0 = (cuttingDiameter(finishCutter) ?? 0) / 2;
     const outerMost = (polys: Polygons): number => Math.max(0, ...polys.map(ringAreaOf));
     const contourRing = outerMost(tree.contour.outline);
     const isOuterSurface =
-      ballRadius0 > 0 && contourRing > 0 && Math.abs(outerMost(region.footprint) - contourRing) <= 0.01 * contourRing;
-    const grownFootprint = isOuterSurface ? opts.offset(region.footprint, ballRadius0) : [];
+      finishRadius0 > 0 && contourRing > 0 && Math.abs(outerMost(region.footprint) - contourRing) <= 0.01 * contourRing;
+    const grownFootprint = isOuterSurface ? opts.offset(region.footprint, finishRadius0) : [];
     const roughRegion = grownFootprint.length > 0 ? { ...base, footprint: grownFootprint } : base;
     const roughRef = roughRegion === base
       ? ref
@@ -2276,6 +2374,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
             : Math.min(opts.stepOverMm, (cuttingDiameter(flat) ?? 0) / 2),
           feeds: feedsOf(paramsFor(flat)),
           offset: opts.offset,
+          // #982 — the ball-as-rough fallback (no flat in the set): every cut point must lie
+          // inside the region's own footprint, and the skim's standing field must say so too.
+          ...(opts.ball !== undefined && opts.ball === opts.flat ? { cutPointInRegion: true } : {}),
           safeZMm: opts.safeZMm,
           hopZMm: opts.hopZMm,
           toolNumber: opts.toolNumberFor(flat),
@@ -2291,8 +2392,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       if (!roughed || prevCl === undefined) {
         const skipped: [PlannedOp['kind'], Tool][] = [
           ...(opts.restFlat === undefined ? [] : [['rest', opts.restFlat] as [PlannedOp['kind'], Tool]]),
-          ['finish', ball],
-          ['pencil', ball],
+          ['finish', finishCutter] as [PlannedOp['kind'], Tool],
+          ...(ball === undefined ? [] : [['pencil', ball] as [PlannedOp['kind'], Tool]]),
         ];
         for (const [kind, cutter] of skipped) {
           unplanned.push({ kind, cutterKey: cutterKeyOf(cutter), regionIds: [region.id], reason: `not planned: the rough of "${region.id}" failed` });
@@ -2376,7 +2477,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       if (design === null) return false;
       return flatZ - design > finishBand;
     };
-    const ballRadiusForMask = (cuttingDiameter(ball) ?? 0) / 2;
+    const ballRadiusForMask = (cuttingDiameter(finishCutter) ?? 0) / 2;
     const maskRing: [number, number][] = [];
     for (let d = 0; d < 8; d++) {
       const a = (d * Math.PI) / 4;
@@ -2407,8 +2508,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     let clBallCache: ReturnType<typeof clSurface> | undefined;
     const clBall = (): ReturnType<typeof clSurface> => {
       if (clBallCache === undefined) {
-        clBallCache = shiftSurface(clSurface(opts.geometry, roughRegion, ball, cuts.stepOver));
-        noteGrid(ball, clBallCache);
+        clBallCache = shiftSurface(clSurface(opts.geometry, roughRegion, finishCutter, cuts.stepOver));
+        noteGrid(finishCutter, clBallCache);
       }
       return clBallCache;
     };
@@ -2418,10 +2519,13 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // rough ahead, one level is enough (it already stepped down to within the band). With NONE,
     // the ball must step down on its OWN row, same as a rough would, over as many levels as the
     // region's depth needs.
-    const depth = flat === undefined ? paramsFor(ball).stepDown : Math.max(opts.stepDownMm, base.zTop - base.zBottom);
+    const depth = flat === undefined ? paramsFor(ball ?? finishCutter).stepDown : Math.max(opts.stepDownMm, base.zTop - base.zBottom);
     // #960 — FLAT OR BALL BY THE REGION'S OWN SLOPE, with the threshold stated on the plan; the
     // constant is a parameter (shared with C's #959 skin pass) while the picture decides 1.9° vs 7.1°.
-    const finishKind = finishKindFor(roughRegion, opts.geometry.triangles, opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG);
+    // #982 — with no ball the slope limit is lifted: the flat raster covers the WHOLE remainder.
+    const finishKind: FinishKind = ball === undefined
+      ? 'flat-raster'
+      : finishKindFor(roughRegion, opts.geometry.triangles, opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG);
     {
       const entry = finishKinds.get(finishKind) ?? { count: 0, minSlope: Infinity, maxSlope: -Infinity };
       entry.count++;
@@ -2429,14 +2533,15 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       entry.maxSlope = Math.max(entry.maxSlope, roughRegion.slopeDeg[1]);
       finishKinds.set(finishKind, entry);
     }
-    attempt('finish', ball, ref, () => finish({
-      cutter: ball,
+    attempt('finish', finishCutter, ref, () => finish({
+      cutter: finishCutter,
       region: roughRegion,
       regionRef: roughRef,
       clSurface: clBall(),
       kind: finishKind,
       mesh: opts.geometry.triangles,
       scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
+      ...(ball === undefined ? { flatFallback: true } : {}),
       maskCells,
       // #962 — the material field's answers past the region's own reach (the linker's disc and the
       // down-leg floor reach up to a cutter radius outside it): the goal/mesh top there, which is
@@ -2447,11 +2552,11 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       materialTopAt: designTopAt,
       stockTopZMm: 0,
       stepDownMm: depth,
-      feeds: feedsOf(paramsFor(ball)),
+      feeds: feedsOf(paramsFor(finishCutter)),
       safeZMm: opts.safeZMm,
       hopZMm: opts.hopZMm,
-      toolNumber: opts.toolNumberFor(ball),
-      spindleRpm: paramsFor(ball).rpm,
+      toolNumber: opts.toolNumberFor(finishCutter),
+      spindleRpm: paramsFor(finishCutter).rpm,
       air: opts.air,
       rapid: opts.rapid,
     }));
@@ -2566,8 +2671,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       }
     }
 
-    // 4. PENCIL along the creases the ball's own CL surface leaves.
-    attempt('pencil', ball, ref, () => pencil({
+    // 4. PENCIL along the creases the ball's own CL surface leaves — no ball, no pencil: the
+    // creases are the rest rule's job (the smallest flat, above).
+    if (ball !== undefined) attempt('pencil', ball, ref, () => pencil({
       cutter: ball,
       region,
       regionRef: ref,
@@ -2729,8 +2835,14 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   for (const [finishKind, entry] of finishKinds) {
     // #965 — the card states the scallop it used, never just "constant": the job's own tolerance
     // when it states one, the vendor's 0.027 mm default when it does not.
+    // #982 — with no ball the slope limit is lifted and the flat's own cusp rule sets the step;
+    // the card states both, so the tradeoff is in outcome terms on the plan.
     const scallopMm = opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM;
-    const words = finishKind === 'flat-raster' ? 'flat-following raster' : `ball at a constant ${scallopMm.toFixed(3)} mm scallop`;
+    const words = finishKind === 'flat-raster'
+      ? (opts.ball === undefined
+          ? `flat's fallback raster (no ball in the set; step ${scallopMm.toFixed(3)} mm cusp / tan of the steepest slope, clamped to the flat's radius/10 to radius)`
+          : 'flat-following raster')
+      : `ball at a constant ${scallopMm.toFixed(3)} mm scallop`;
     const plural = entry.count === 1 ? 'region' : 'regions';
     notes.push(
       `finish: ${entry.count} ${plural} run as a ${words} (slopes ${entry.minSlope.toFixed(1)}–${entry.maxSlope.toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG).toFixed(2)}°)`,
@@ -2750,7 +2862,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
  * are split around the contour and the tree's order is: pockets, curved, rims, freeing contour.
  */
 export interface PlanTreeOptions {
-  pockets: Omit<PlanPocketsOptions, 'offset'>;
+  /** #982 — NULL skips the pocket chain entirely (the no-flat path plans the pocket floors as
+   *  the ball's scallop pass through the curved pipeline and states the contour as not planned). */
+  pockets: Omit<PlanPocketsOptions, 'offset'> | null;
   /**
    * The curved stages' options MINUS the retract heights. THE REAL TRAY FOUND THIS: the pocket
    * ops and `generateProfile`'s contour both retract at `SAFE_Z`/`HOP_Z` (`ir.ts`) and
@@ -2875,7 +2989,26 @@ export function orderOpsForPrograms(ops: readonly PlannedOp[]): PlannedOp[] {
 }
 
 export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): PlanTreeResult {
-  const pocketResult = planPocketsForTree(tree, { ...opts.pockets, offset: opts.offset });
+  const pocketResult: PlanPocketsResult = opts.pockets === null
+    ? {
+        ops: [],
+        programs: [],
+        sequence: [],
+        unreachable: [],
+        notes: [
+          'the set holds no flat end mill — the pocket chain is not planned: its freeing contour is not planned with a ball either, so this plan does not free the part',
+        ],
+        unplanned: [],
+        choice: {
+          steps: [],
+          cost: { entries: [], estimateSeconds: 0, toolChanges: 0, toolChangeSeconds: 0, totalSeconds: 0 },
+          considered: [],
+          unreachable: [],
+          freeing: null,
+          unplanned: [],
+        },
+      }
+    : planPocketsForTree(tree, { ...opts.pockets, offset: opts.offset });
   const curvedResult = planCurvedForTree(tree, {
     ...opts.curved,
     offset: opts.offset,

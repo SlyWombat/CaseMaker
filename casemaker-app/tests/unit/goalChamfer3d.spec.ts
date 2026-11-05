@@ -123,6 +123,21 @@ describe('#829 a goal chamfers its own edges', () => {
     expect(out.programs[1]!.nc).toMatch(/G1 Z-1(?:\.0+)? F/);
     // The V program is a real posted file, not a placeholder.
     expect(out.programs[1]!.nc).toContain('M02');
+
+    // #982 pin — the fixture's OWN set (a ball and a V, NO flat) through the ONE model entry:
+    // the pocket floors fall back to the ball, never a refusal. RED at the parent.
+    {
+      const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+      const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+      const modelInput = await buildModelPlanInputForGoal(job, target, BALL, SHOP);
+      const modelOut = await planModelCam(modelInput);
+      // NO REFUSAL is the acceptance (#982): this fixture has no curved remainder and its V rim
+      // stays sharp (the model input states no edge break), so the model engine legitimately plans
+      // nothing here whatever the tool set — what must hold is that the no-flat set plans without
+      // the old throw, and that the route is stated.
+      expect(modelOut.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
+      expect(modelOut.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
+    }
   }, 120_000);
 
   it('surfaces the goal and says why the edges are square when no V is chosen', async () => {
