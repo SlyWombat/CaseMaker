@@ -31,7 +31,7 @@ import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import type { RemainderRegion } from '../features';
 import type { ClSurface } from '../clsurface';
 import { profileOf } from '../dropcutter';
-import { link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
+import { DEFAULT_SHORT_HOP_DIAMETERS, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
 import { dropRow, type DroppedPoint } from '../rowDropper';
 import { cutterKeyOf } from '../sequence';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
@@ -159,6 +159,48 @@ function flatRasterStepOver(radiusMm: number, bandMm: number, steepestSlopeDeg: 
   return Math.min(cap, bandMm / Math.tan(slopeRad));
 }
 
+/**
+ * #962 — THE WHOLE-PROFILE STAY-DOWN TEST. A ball is not a point, and it is not a flat disc
+ * either: `link()`'s material test is the FLAT rule (material at or below the link's own z at
+ * every disc offset), exact for a flat end mill's bottom but not the geometry of a ball, whose own
+ * surface stands `heightAt(profile, d)` above its tip at horizontal offset d.
+ *
+ * The test a shaped cutter needs is exactly the drop-cutter definition read backwards. At (x, y)
+ * the CL surface IS the cutter's whole profile dropped onto the design —
+ * `z_tip = max over the disc of (design − heightAt(ρ))` — so a link that rides AT OR ABOVE the CL
+ * surface at every point along its path clears every point of the design under the cutter there:
+ * the footprint and the flank, not just the centre point. A link that would dip below the CL cuts
+ * into the design and must retract.
+ *
+ * The comparison tolerates the CL surface's own sampling tolerance: the link's z and the CL are
+ * read from the same surface, and the row-dropper only promises the chord between its own points
+ * within that tolerance.
+ *
+ * WHY THIS IS NOT JUST `link()`: `linkIsClear` compares the material FIELD at the disc's own
+ * offsets against the link's z, and the field is the CL of the ground UNDER EACH OFFSET — higher
+ * than the link's own z wherever the ground rises beside the path. Every sloped link is refused
+ * for that reason (the organizer's ball: 71.6 % air), though the cutter's flank would clear the
+ * rise by construction. The shape-aware disc test belongs in the shared linker and is proposed on
+ * #962 for B; until it lands, the op makes this one decision itself and leaves every other route
+ * (retracts, vertical legs, hop clearance) to `link()`.
+ */
+function ridesTheCl(from: LinkPoint, to: LinkPoint, clSurface: ClSurface, stepMm: number): boolean {
+  const length = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
+  const step = stepMm > 0 ? stepMm : 0.5;
+  const steps = Math.max(1, Math.ceil(length / step));
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const x = from.x + (to.x - from.x) * t;
+    const y = from.y + (to.y - from.y) * t;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const cl = clSurface.dropCutter(x, y);
+    if (cl === null) return false; // the surface cannot prove the path: a retract is always safe
+    const z = from.z + (to.z - from.z) * t;
+    if (z < cl - clSurface.toleranceMm) return false;
+  }
+  return true;
+}
+
 export function finish(opts: FinishOpOptions): OpOutcome {
   const toolRadius = (cuttingDiameter(opts.cutter) ?? 0) / 2;
   if (!(toolRadius > 0)) {
@@ -195,6 +237,23 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     feeds: { feed: opts.feeds.feedMmPerMin, plungeFeed: opts.feeds.plungeFeedMmPerMin },
     hopClearanceMm: opts.hopZMm,
   });
+
+  // #962 — the row-to-row (and run-to-run) join. A stay-down link is decided by the whole-profile
+  // test above: within Kiri:Moto's short hop, the same cap `link()` applies, and riding the CL
+  // surface for the whole segment. Everything else — the retract, its vertical legs and the hop
+  // clearance — is `link()`'s own, untouched.
+  const linkSampleStep = Math.min(0.5, Math.max(0.1, toolRadius / 2));
+  const joinMoves = (from: LinkPoint, to: LinkPoint, levelZ: number): ToolpathIR['operations'][number]['moves'] => {
+    const direct = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
+    const shortHop = DEFAULT_SHORT_HOP_DIAMETERS * 2 * toolRadius;
+    if (direct <= shortHop + 1e-9 && ridesTheCl(from, to, opts.clSurface, linkSampleStep)) {
+      // A DESCENDING LINK IS A CUT INTO LOWER GROUND: it runs at the plunge rate, the same rule
+      // the op's own first feed follows (9e976f0b's finding — never a descent at the cutting rate).
+      const f = to.z < from.z - 1e-9 ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
+      return [{ kind: 'feed', x: to.x, y: to.y, z: to.z, f }];
+    }
+    return link(from, to, linkOptionsFor(levelZ));
+  };
 
   const moves: ToolpathIR['operations'][number]['moves'] = [];
   const passes: PassRef[] = [];
@@ -250,7 +309,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
           moves.push({ kind: 'feed', x: entryPoint.x, y: entryPoint.y, z: entryPoint.z, f: opts.feeds.plungeFeedMmPerMin });
         } else {
           const from: LinkPoint = { x: prevExit.x, y: prevExit.y, z: prevExit.z };
-          moves.push(...link(from, entryPoint, linkOptionsFor(prevLevelZ ?? prevExit.z)));
+          moves.push(...joinMoves(from, entryPoint, prevLevelZ ?? prevExit.z));
         }
         for (let i = 1; i < clamped.length; i++) {
           moves.push({ kind: 'feed', x: clamped[i]!.x, y: clamped[i]!.y, z: clamped[i]!.z, f: opts.feeds.feedMmPerMin });
