@@ -28,7 +28,6 @@ import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { tourNearest } from '@/engine/cnc/cam/tour';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import type { RemainderRegion } from '../features';
 import type { ClSurface } from '../clsurface';
 import { profileOf } from '../dropcutter';
@@ -225,10 +224,16 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // nothing (`+Infinity`), so a link endpoint off the region's own edge always retracts.
   const materialFor = (levelZ: number): MaterialField => ({
     topAt: (x, y) => {
-      if (!pointInPolygons(opts.region.footprint, x, y)) return Number.POSITIVE_INFINITY;
       const cl = opts.clSurface.dropCutter(x, y);
-      if (cl === null) return Number.POSITIVE_INFINITY;
-      return Math.max(levelZ, cl);
+      if (cl !== null) return Math.max(levelZ, cl);
+      // #962/B's disc-aware floor (61ea3dd6): the cutter's own footprint reaches PAST the region's
+      // edge, where the CL surface has no answer. The honest finite bound there is the stock top
+      // the region itself tops at — no material in this job stands above `zTop`, so a rapid floored
+      // at `zTop` + hop clears it, and a stay-down link outside the region still needs z >= zTop,
+      // which that same bound clears. Reporting +Infinity here cost every edge-flush row
+      // turnaround the rapid-to-floor split; with the tour most of those turnarounds are gone, but
+      // the ones that remain deserve the split.
+      return opts.region.zTop;
     },
   });
   const linkOptionsFor = (levelZ: number): LinkOptions => ({
