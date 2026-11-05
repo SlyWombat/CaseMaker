@@ -281,7 +281,12 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
     expect(out.surface3d?.scallop?.stepOverMm).toBe(0.05);
     // The theoretical cusp between passes on a flat: r − √(r² − (s/2)²).
     expect(BALL_R - Math.sqrt(BALL_R ** 2 - 0.025 ** 2)).toBeLessThan(0.00025);
-  });
+    // MEASURED (#755, 2026-11-05): `fine()` itself costs ~153 s alone (the 0.05 finish asks the
+    // tip field for more than its 300 M budget, so the run settles coarser and walks the whole
+    // part). At the global 180 s that is 85 % of the budget, and under a full suite at 6 workers
+    // the #755 case below timed out. 300 s is the measured cost with the same ~2x headroom the
+    // 0.005 cap-bound case in this describe already carries.
+  }, 300_000);
 
   // #755 — the grid follows the finish when it can: a 0.05 mm finish on a ⌀3 ball would need more
   // finishing tip-field evaluations than the run's budget allows, so the job settles at the grid it
@@ -301,7 +306,7 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
     } else {
       expect(stated).toBeUndefined();
     }
-  });
+  }, 300_000);
 
   // #755 — and when the heightfield's cell cap binds, the run STATES the pitch it settled on rather
   // than refusing the job (the maintainer's rule: inform, don't refuse).
