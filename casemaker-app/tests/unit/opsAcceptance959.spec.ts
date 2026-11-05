@@ -1209,65 +1209,78 @@ describe('#959 acceptance — the curved pipeline (every op entered)', () => {
   }, 120_000);
 });
 
-// #960 — THE MANAGER'S ACCEPTANCE OF THE BAND-SPACING RULE (2026-11-05): each band's spacing is the
-// old region-wide step divided by a whole number from the same origin, so every old raster row is
-// kept and a finer band only ADDS rows. This measures that on the real parts instead of trusting
-// the argument: both runs' own programs stamped onto the SAME goal grid by
-// `tests/tools/acceptancePics.ts`, and every cell's leftover compared.
+// #960 — THE MANAGER'S PRICED ACCEPTANCE (2026-11-05): the ball's per-band scallop spacing, up to
+// the vendor's ~0.8 mm, with the origin row kept and the rows phased from that same origin. The
+// acceptance is the CARD'S LINES, not per-cell identity: tray coverage ≥ 98.52 %, organizer
+// ≥ 98.98 % − 1 point, cut-into no worse than the base, and any risen cell must sit WITHIN the
+// 0.1 mm band (no new cell above it). Two runs' own programs stamped onto the same goal grid by
+// `tests/tools/acceptancePics.ts`; `tests/tools/risen-cells-960.ts` draws where they rise.
 //
 //   CM_960_BEFORE_PICS=<dir> CM_960_AFTER_PICS=<dir> \
 //     npx vitest run tests/unit/opsAcceptance959.spec.ts -t '#960'
 //
-// Each dir is one `acceptancePics.ts` output root (`<card>/grid.json|goal.f32|union.f32`); the
-// acceptance's own `<card>-posted-facts.json` beside the card dir (when present) adds the cycle.
+// Each dir is one `acceptancePics.ts` output root (`<card>/grid.json|goal.f32|union.f32`), with the
+// acceptance's own `<card>-posted-facts.json` beside the card dir (coverage, cut-into, cycle).
 const BEFORE_PICS = process.env.CM_960_BEFORE_PICS;
 const AFTER_PICS = process.env.CM_960_AFTER_PICS;
+/** The coverage band the leftover line uses, mm — a risen cell at or under this is still "covered". */
+const LEFT_OVER_BAND_MM = 0.1;
 
-describe.skipIf(BEFORE_PICS === undefined || AFTER_PICS === undefined)('#960 — no cell’s leftover rises (the band-spacing rule, measured)', () => {
+describe.skipIf(BEFORE_PICS === undefined || AFTER_PICS === undefined)('#960 — the card’s lines, measured on the real parts', () => {
   const readCard = (root: string, card: string) => {
     const grid = JSON.parse(fs.readFileSync(path.join(root, card, 'grid.json'), 'utf8')) as { nx: number; ny: number; x0: number; y0: number; pitch: number };
     const f32 = (name: string): Float32Array => {
       const b = fs.readFileSync(path.join(root, card, name));
       return new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
     };
-    return { grid, goal: f32('goal.f32'), union: f32('union.f32') };
+    const facts = JSON.parse(fs.readFileSync(path.join(root, `${card}-posted-facts.json`), 'utf8')) as {
+      cycleSeconds: number;
+      coverage: number;
+      cutInto: { adjudicatedFraction: number; maxMm: number };
+    };
+    return { grid, goal: f32('goal.f32'), union: f32('union.f32'), facts };
   };
-  const cycleOf = (root: string, card: string): number | null => {
-    try {
-      return (JSON.parse(fs.readFileSync(path.join(root, `${card}-posted-facts.json`), 'utf8')) as { cycleSeconds: number }).cycleSeconds;
-    } catch {
-      return null;
-    }
-  };
+  // The card's coverage lines: the tray must stay ≥ 98.52 %; the organizer is within one point of
+  // the vendor's 98.98 %.
+  const COVERAGE_FLOOR: Record<string, number> = { tray: 0.9852, organizer: 0.9798 };
   for (const card of ['tray', 'organizer']) {
-    it(`${card}: every cell's leftover is no higher than the base run's`, () => {
+    it(`${card}: coverage ≥ ${(COVERAGE_FLOOR[card]! * 100).toFixed(2)} %, cut-into no worse, no risen cell above the band`, () => {
       const before = readCard(BEFORE_PICS!, card);
       const after = readCard(AFTER_PICS!, card);
       expect(after.grid, 'the two runs were not measured on the same goal grid').toEqual(before.grid);
       expect(after.goal, 'the goal fields differ — not the same STEP, sampler and placement').toEqual(before.goal);
       let risen = 0;
-      let worst = 0;
+      let aboveBand = 0;
+      let worstRise = 0;
+      let worstLeftover = 0;
       let worstAt = '';
       for (let k = 0; k < before.goal.length; k++) {
         const base = Math.max(0, before.goal[k]! - before.union[k]!);
         const now = Math.max(0, after.goal[k]! - after.union[k]!);
         if (now > base + 1e-6) {
           risen++;
-          if (now - base > worst) {
-            worst = now - base;
+          if (now > worstLeftover) worstLeftover = now;
+          if (now - base > worstRise) {
+            worstRise = now - base;
             const i = k % before.grid.nx;
             const j = Math.floor(k / before.grid.nx);
             worstAt = `(${(before.grid.x0 + i * before.grid.pitch).toFixed(1)}, ${(before.grid.y0 + j * before.grid.pitch).toFixed(1)})`;
           }
+          // 'Newly above' — the cell was within the band and is now above it. A pre-existing
+          // residue that rises by a hair is not the rule's failure.
+          if (now > LEFT_OVER_BAND_MM + 1e-6 && base <= LEFT_OVER_BAND_MM + 1e-6) aboveBand++;
         }
       }
-      const beforeCycle = cycleOf(BEFORE_PICS!, card);
-      const afterCycle = cycleOf(AFTER_PICS!, card);
       console.log(
-        `#960 ${card}: ${risen} cell(s) whose leftover rises${risen === 0 ? '' : ` — worst +${worst.toFixed(3)} mm at ${worstAt}`}` +
-          (beforeCycle !== null && afterCycle !== null ? `; cycle ${beforeCycle.toFixed(1)} s → ${afterCycle.toFixed(1)} s` : ''),
+        `#960 ${card}: coverage ${(before.facts.coverage * 100).toFixed(2)} % → ${(after.facts.coverage * 100).toFixed(2)} %` +
+          `; cycle ${before.facts.cycleSeconds.toFixed(1)} s → ${after.facts.cycleSeconds.toFixed(1)} s` +
+          `; cut-into adjudicated ${(before.facts.cutInto.adjudicatedFraction * 100).toFixed(2)} % → ${(after.facts.cutInto.adjudicatedFraction * 100).toFixed(2)} %` +
+          `; ${risen} risen cell(s), worst +${worstRise.toFixed(3)} mm at ${worstAt || '—'}, highest risen leftover ${worstLeftover.toFixed(3)} mm` +
+          `, above the ${LEFT_OVER_BAND_MM} mm band: ${aboveBand}`,
       );
-      expect(risen, `leftover rose on ${risen} cell(s), worst +${worst.toFixed(3)} mm at ${worstAt}`).toBe(0);
+      expect(after.facts.coverage, 'the card’s coverage line').toBeGreaterThanOrEqual(COVERAGE_FLOOR[card]!);
+      expect(after.facts.cutInto.adjudicatedFraction, 'cut-into rose above the base run').toBeLessThanOrEqual(before.facts.cutInto.adjudicatedFraction + 1e-9);
+      expect(aboveBand, `a risen cell stands above the ${LEFT_OVER_BAND_MM} mm band`).toBe(0);
     });
   }
 });

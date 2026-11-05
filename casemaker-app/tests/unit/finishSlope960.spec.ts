@@ -49,7 +49,7 @@ function regionOver(_mesh: FeatureSource, footprint: [number, number][][], slope
   const regionRef: RegionRef = {
     id: 'scoop',
     kind: 'curved',
-    bounds: { min: [0, -10], max: [50, 10] },
+    bounds: { min: [0.5, -10], max: [49.5, 10] },
     topZ: 10,
     bottomZ: 0,
     obstacles: [],
@@ -107,36 +107,27 @@ describe('#960 finishing by slope — the two levers', () => {
     };
   }
 
-  it('steps a gentle region at the scallop spacing its own slope asks for', () => {
-    // 2° everywhere, and the region states it: the old step is already 0.8 mm (the vendor's),
-    // so no subdivision and no wall — ~61 rows over 49 mm, not the old 0.3 mm floor's 163.
+  it('steps a gentle region at the vendor’s spacing — 0.8 mm, from the origin row', () => {
+    // 2° everywhere: the band's own scallop step at the 0.027 mm target is the vendor's 0.8 mm.
     const { rows, notes } = rowsOver(2, [0, 2]);
+    const ORIGIN = 0.5 + 1e-4; // the region's bounds min + finish's X_NUDGE_MM
+    expect(rows[0]).toBeCloseTo(ORIGIN, 9); // the k = 0 row — the one the rewrite dropped
     expect(rows.length).toBeGreaterThan(55);
     expect(rows.length).toBeLessThan(70);
+    const vendorStep = 2 * Math.sqrt(2 * 3 * DEFAULT_FINISH_SCALLOP_MM - DEFAULT_FINISH_SCALLOP_MM ** 2); // ≈ 0.803 mm
+    // The band's slope is read off the CL surface (1.7° here, a hair off the triangle's 2°), so
+    // the spacing lands within 1 % of the closed form at the stated slope.
+    for (const gap of rows.slice(1).map((x, i) => x - rows[i]!)) expect(Math.abs(gap / vendorStep - 1)).toBeLessThan(0.01);
     expect(notes).toEqual([]);
   });
 
-  it('keeps every old row and only ADDS rows — a band is the old step divided by a whole number', () => {
-    // A 64° band inside a region whose stated range tops out at 25° — the tray's centre-slot
-    // shape: the region's own triangles are gentle, the ball bridges the mouth and the CL reads
-    // vertical there. The old region-wide step is the 25° one (~0.69 mm); the band asks for the
-    // 0.3 mm floor, so the old step is split in three — every old row keeps its exact phase, the
-    // finer rows only go BETWEEN them (the manager's no-coverage-loss rule of 2026-11-05).
-    const cos = Math.cos((25 * Math.PI) / 180);
-    const OLD = cos * 2 * Math.sqrt(2 * 3 * 0.027 * cos - (0.027 * cos) ** 2); // the old step
-    expect(OLD).toBeGreaterThan(0.3);
+  it('steps each band by its own scallop step, phased from the origin — nothing is skipped', () => {
+    // A 64° band inside a region stated at 25°: the ball's closed form is below its radius/10
+    // floor there, so every row after the origin one advances by that floor (0.3 mm).
     const { rows, notes } = rowsOver(64, [0, 25]);
-    const ORIGIN = 1e-4; // region bounds min x (0) + finish's X_NUDGE_MM
-    for (let k = 0; ORIGIN + k * OLD <= 49.5; k++) {
-      if (ORIGIN + k * OLD < 0.5) continue; // no footprint interval before the first row
-      expect(rows.some((x) => Math.abs(x - (ORIGIN + k * OLD)) < 1e-9), `old row ${k} at ${(ORIGIN + k * OLD).toFixed(4)}`).toBe(true);
-    }
-    const gaps = rows.slice(1).map((x, i) => x - rows[i]!);
-    for (const gap of gaps) {
-      const n = OLD / gap;
-      expect(Math.abs(n - Math.round(n)), `gap ${gap.toFixed(6)} is not oldStep/whole`).toBeLessThan(1e-6);
-    }
-    expect(Math.min(...gaps)).toBeLessThan(OLD - 1e-9); // a finer band really did add rows
+    const ORIGIN = 0.5 + 1e-4;
+    expect(rows[0]).toBeCloseTo(ORIGIN, 9); // the origin row is cut, always
+    for (const gap of rows.slice(1).map((x, i) => x - rows[i]!)) expect(gap).toBeCloseTo(0.3, 6);
     expect(notes).toEqual([]); // 64° is not a wall
   });
 });

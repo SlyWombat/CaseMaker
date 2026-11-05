@@ -400,7 +400,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         ...(vbit === undefined ? {} : { vbit }),
         stepDownMm: pocketParams.stepDown,
         bandMm: MODEL_STOCK_TO_LEAVE_MM,
-        finishScallopMm: input.tolerances.finishMm,
+        // #960 — the ball's cusp target is the vendor's 0.027 mm (its ⌀6 ball's own 0.8 mm
+        // step-over): a finer tolerance may not tighten it away; a coarser one still applies.
+        finishScallopMm: Math.max(input.tolerances.finishMm, DEFAULT_FINISH_SCALLOP_MM),
         stepOverMm: pocketParams.stepOver,
         feeds,
         cutParamsFor,

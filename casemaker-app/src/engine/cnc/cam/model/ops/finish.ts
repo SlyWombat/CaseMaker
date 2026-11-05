@@ -309,18 +309,16 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     }
     return best;
   };
-  // #960 — NO COVERAGE MAY BE LOST (the manager's ruling, 2026-11-05): a band's spacing is the OLD
-  // region-wide step divided by a WHOLE number, from the same origin. The old rows are at
-  // origin + k·regionStepOverMm and every one of them is kept; a finer band only inserts rows
-  // between them. No cell can get worse, no bridge detector or phase correction is needed.
-  const regionStepOverMm =
-    opts.kind === 'ball-scallop'
-      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1])
-      : flatRasterStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1]);
+  // #960 — THE MANAGER'S PRICED LEVER (2026-11-05): each band's spacing is ITS OWN scallop step —
+  // ~0.8 mm on the gentle floor (the vendor's ⌀6 ball at a 0.027 mm cusp), tightening on the
+  // steeper bands and floored at the cutter's radius/10 on a wall. Every row is phased from the
+  // OLD raster's own origin, and the row AT that origin is cut (the #960 rewrite had dropped it,
+  // which is what cost the tray's 2,411 slot cells — not a phase shift).
+  const flatRowStepMm = flatRasterStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1]);
   const bandStepOverAt = (x: number): number =>
     opts.kind === 'ball-scallop'
       ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, bandSlopeAt(x))
-      : regionStepOverMm;
+      : flatRowStepMm;
   let wallBandsCut = 0;
 
   // The field is honest about only the level just FINISHED (rough.ts's own reasoning): capped at
@@ -359,73 +357,58 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   const X_NUDGE_MM = 1e-4;
   for (const levelZ of levels) {
     const levelCleared: Polygons = [];
-    // The OLD raster placed a row at `min[0] + X_NUDGE_MM` and then every `regionStepOverMm`, so
-    // its rows are at origin + k·regionStepOverMm, k = 0, 1, 2, … (the #960 rewrite had lost the
-    // k = 0 row — 24 moves and the tray's 2,411 slot cells). Every one of them is placed here at
-    // j = 0 of its own band; a finer band only inserts rows after it, so nothing is lost.
+    // #960 — THE ROWS ARE PHASED FROM THE OLD RASTER'S OWN ORIGIN, and the row AT that origin is
+    // cut (the #960 rewrite dropped it — 24 moves per level, and the tray's 2,411 slot cells).
+    // Each row then advances by its OWN band's scallop step: the vendor's ~0.8 mm on the gentle
+    // floor, tightening on steeper bands, floored at the cutter's radius/10 on a wall.
     const originX = min[0] + X_NUDGE_MM;
-    const oldRowCount =
-      regionStepOverMm > 1e-6 && originX <= max[0] + regionStepOverMm * 1e-6
-        ? Math.floor((max[0] - originX) / regionStepOverMm + 1e-6) + 1
-        : 0;
-    for (let k = 0; k < oldRowCount; k++) {
-      const xOld = originX + k * regionStepOverMm;
-      // #960 — A WALL BAND STILL GETS CUT (skipping it lost the organizer 10 points): it rides at
-      // the cutter's own radius/10 floor, expressed — like every band — as the old step divided by
-      // a whole number.
-      const wallBand = opts.kind === 'ball-scallop' && bandSlopeAt(xOld) >= WALL_SKIP_DEG;
+    for (let x = originX; x <= max[0] + 1e-9; ) {
+      const wallBand = opts.kind === 'ball-scallop' && bandSlopeAt(x) >= WALL_SKIP_DEG;
       if (wallBand) wallBandsCut++;
-      const bandStepMm = wallBand ? profile.radiusMm / 10 : bandStepOverAt(xOld);
-      // The smallest whole subdivision of the old step that meets this band's own scallop step.
-      // The epsilon keeps a band whose step IS the old step (float noise makes the ratio
-      // 1 + 1e-16) from halving the spacing by rounding a whole subdivision up.
-      const n = Math.max(1, Math.ceil(regionStepOverMm / Math.max(bandStepMm, 1e-6) - 1e-6));
-      for (let j = 0; j < n; j++) {
-        // j = 0 IS this band's old row (the same `originX + k·step` expression, exactly); j > 0
-        // are the rows the band's finer step adds before the NEXT old row.
-        const x = originX + (k + j / n) * regionStepOverMm;
-        const intervals = footprintColumnIntervals(opts.region.footprint, x);
-        const ordered = rowParity % 2 === 0 ? intervals : [...intervals].reverse();
-        for (const interval of ordered) {
-          const [rawY0, rawY1] = rowParity % 2 === 0 ? interval : [interval[1], interval[0]];
-          // Inset off the footprint's own boundary, a hair, toward the interval's own centre: an
-          // endpoint landing EXACTLY on the polygon edge is where `pointInPolygons`' ray-casting is
-          // ambiguous by convention (`clSurface`'s own gate), not a real gap — advisor's review.
-          const insetY0 = rawY0 + Math.sign(rawY1 - rawY0) * FOOTPRINT_EDGE_INSET_MM;
-          const insetY1 = rawY1 - Math.sign(rawY1 - rawY0) * FOOTPRINT_EDGE_INSET_MM;
-          if (Math.abs(insetY1 - insetY0) <= 1e-9 || (insetY1 - insetY0) * (rawY1 - rawY0) < 0) continue; // the interval is narrower than the inset: nothing to cut
-          const row = dropRow(opts.clSurface, [x, insetY0], [x, insetY1]);
-          const clamped = row.map((p) => ({ ...p, z: Math.max(p.z, levelZ) }));
+      const stepOverMm = wallBand ? profile.radiusMm / 10 : bandStepOverAt(x);
+      const intervals = footprintColumnIntervals(opts.region.footprint, x);
+      const ordered = rowParity % 2 === 0 ? intervals : [...intervals].reverse();
+      for (const interval of ordered) {
+        const [rawY0, rawY1] = rowParity % 2 === 0 ? interval : [interval[1], interval[0]];
+        // Inset off the footprint's own boundary, a hair, toward the interval's own centre: an
+        // endpoint landing EXACTLY on the polygon edge is where `pointInPolygons`' ray-casting is
+        // ambiguous by convention (`clSurface`'s own gate), not a real gap — advisor's review.
+        const insetY0 = rawY0 + Math.sign(rawY1 - rawY0) * FOOTPRINT_EDGE_INSET_MM;
+        const insetY1 = rawY1 - Math.sign(rawY1 - rawY0) * FOOTPRINT_EDGE_INSET_MM;
+        if (Math.abs(insetY1 - insetY0) <= 1e-9 || (insetY1 - insetY0) * (rawY1 - rawY0) < 0) continue; // the interval is narrower than the inset: nothing to cut
+        const row = dropRow(opts.clSurface, [x, insetY0], [x, insetY1]);
+        const clamped = row.map((p) => ({ ...p, z: Math.max(p.z, levelZ) }));
 
-          const entryPoint: LinkPoint = { x: clamped[0]!.x, y: clamped[0]!.y, z: clamped[0]!.z };
-          if (prevExit === null) {
-            // The row's own FIRST feed is a PLUNGE (straight down from the hop height into
-            // material), never at the cutting feed — the same bug 9e976f0b fixed in `ops/pocket.ts`.
-            moves.push({ kind: 'rapid', x: entryPoint.x, y: entryPoint.y, z: opts.hopZMm });
-            moves.push({ kind: 'feed', x: entryPoint.x, y: entryPoint.y, z: entryPoint.z, f: opts.feeds.plungeFeedMmPerMin });
-          } else {
-            const from: LinkPoint = { x: prevExit.x, y: prevExit.y, z: prevExit.z };
-            moves.push(...link(from, entryPoint, linkOptionsFor(prevLevelZ ?? prevExit.z)));
-          }
-          for (let i = 1; i < clamped.length; i++) {
-            moves.push({ kind: 'feed', x: clamped[i]!.x, y: clamped[i]!.y, z: clamped[i]!.z, f: opts.feeds.feedMmPerMin });
-          }
-          const entry: [number, number, number] = [clamped[0]!.x, clamped[0]!.y, clamped[0]!.z];
-          const exitPoint = clamped[clamped.length - 1]!;
-          const exit: [number, number, number] = [exitPoint.x, exitPoint.y, exitPoint.z];
-          passes.push({
-            z: levelZ,
-            boundary: [clamped.map((p) => [p.x, p.y] as [number, number])],
-            cleared: { z: levelZ, boundary: [[entry.slice(0, 2) as [number, number], exit.slice(0, 2) as [number, number]]] },
-            entry,
-            exit,
-          });
-          levelCleared.push([[x, Math.min(rawY0, rawY1)], [x, Math.max(rawY0, rawY1)]]);
-          prevExit = exitPoint;
-          prevLevelZ = levelZ;
-          rowParity++;
+        const entryPoint: LinkPoint = { x: clamped[0]!.x, y: clamped[0]!.y, z: clamped[0]!.z };
+        if (prevExit === null) {
+          // The row's own FIRST feed is a PLUNGE (straight down from the hop height into
+          // material), never at the cutting feed — the same bug 9e976f0b fixed in `ops/pocket.ts`.
+          moves.push({ kind: 'rapid', x: entryPoint.x, y: entryPoint.y, z: opts.hopZMm });
+          moves.push({ kind: 'feed', x: entryPoint.x, y: entryPoint.y, z: entryPoint.z, f: opts.feeds.plungeFeedMmPerMin });
+        } else {
+          const from: LinkPoint = { x: prevExit.x, y: prevExit.y, z: prevExit.z };
+          moves.push(...link(from, entryPoint, linkOptionsFor(prevLevelZ ?? prevExit.z)));
         }
+        for (let i = 1; i < clamped.length; i++) {
+          moves.push({ kind: 'feed', x: clamped[i]!.x, y: clamped[i]!.y, z: clamped[i]!.z, f: opts.feeds.feedMmPerMin });
+        }
+        const entry: [number, number, number] = [clamped[0]!.x, clamped[0]!.y, clamped[0]!.z];
+        const exitPoint = clamped[clamped.length - 1]!;
+        const exit: [number, number, number] = [exitPoint.x, exitPoint.y, exitPoint.z];
+        passes.push({
+          z: levelZ,
+          boundary: [clamped.map((p) => [p.x, p.y] as [number, number])],
+          cleared: { z: levelZ, boundary: [[entry.slice(0, 2) as [number, number], exit.slice(0, 2) as [number, number]]] },
+          entry,
+          exit,
+        });
+        levelCleared.push([[x, Math.min(rawY0, rawY1)], [x, Math.max(rawY0, rawY1)]]);
+        prevExit = exitPoint;
+        prevLevelZ = levelZ;
+        rowParity++;
       }
+      if (!(stepOverMm > 1e-6)) break;
+      x += stepOverMm;
     }
     cleared.push({ z: levelZ, boundary: levelCleared });
   }
@@ -467,7 +450,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       ? {}
       : {
           notes: [
-            `${wallBandsCut} raster band(s) over walls steeper than ${WALL_SKIP_DEG}° ride at or below the cutter's own ${(opts.kind === 'flat-raster' ? 'flat' : 'ball')} floor (radius/10) rather than the scallop spacing — they are cut, not skipped`,
+            `${wallBandsCut} raster row(s) over walls steeper than ${WALL_SKIP_DEG}° ride at or below the cutter's own ${(opts.kind === 'flat-raster' ? 'flat' : 'ball')} floor (radius/10) rather than the scallop spacing — they are cut, not skipped`,
           ],
         }),
   };
