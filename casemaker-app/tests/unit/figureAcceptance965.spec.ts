@@ -409,8 +409,12 @@ for (const figure of FIGURES) {
         '#965: the rest ball never entered the plan',
       ).toBe(true);
       {
-        const refused = figureRun.output.perSetup.flatMap((setup) => setup.unreachable ?? []).filter((line) => line.includes('crease pass'));
-        for (const line of refused) console.log(`#965 ${figure.name}: ${line}`);
+        // The crease pass's own admission counts and refusals: `unplanned` (the curved pipeline's
+        // per-region failures), plus any `unreachable` entries that mention the crease.
+        for (const setup of figureRun.output.perSetup) {
+          const all = [...(setup.unreachable ?? []), ...(setup.unplanned ?? []).map((u) => `${u.kind} ${u.cutterKey}: ${u.reason}`)];
+          for (const line of all.filter((l) => /crease|Pencil|pencil|Engrav/.test(l))) console.log(`#965 ${figure.name}: ${line}`);
+        }
       }
       const tradeoff = owned === null ? null : comparePlanOutcomes({ score: owned.ours, card: owned.scored }, { score: figureRun.ours, card: figureRun.scored });
       console.log(
