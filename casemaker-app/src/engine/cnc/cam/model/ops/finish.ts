@@ -25,6 +25,7 @@
  */
 
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
+import { tourNearest } from '@/engine/cnc/cam/tour';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
@@ -260,7 +261,6 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   const cleared: RegionAtZ[] = [];
   let prevExit: DroppedPoint | null = null;
   let prevLevelZ: number | null = null;
-  let rowParity = 0;
 
   // A raster row COLLINEAR with a polygon edge is the even-odd tracer's own blind spot: a vertical
   // edge at exactly x contributes no crossing by the half-open rule, so a hole on that line becomes
@@ -271,12 +271,17 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // spot is gone.
   const X_NUDGE_MM = 1e-4;
   for (const levelZ of levels) {
+    // 1. COLLECT this level's admitted runs before the first move is posted. The raster's own
+    //    order (row by row, run by run) is NOT the order the runs are cut in: where the mask
+    //    admits sparse strips — the organizer's scoop rims and skirt — consecutive runs of one
+    //    row can be a hundred millimetres apart, and the raster's order pays a full retract
+    //    across the land between them (984 of them, 9,463 s, measured on #962).
+    const levelRuns: DroppedPoint[][] = [];
     const levelCleared: Polygons = [];
     for (let x = min[0] + X_NUDGE_MM; x <= max[0] + stepOverMm * 1e-6; x += stepOverMm) {
       const intervals = footprintColumnIntervals(opts.region.footprint, x);
-      const ordered = rowParity % 2 === 0 ? intervals : [...intervals].reverse();
-      for (const interval of ordered) {
-        const [rawY0, rawY1] = rowParity % 2 === 0 ? interval : [interval[1], interval[0]];
+      for (const interval of intervals) {
+        const [rawY0, rawY1] = interval;
         // Inset off the footprint's own boundary, a hair, toward the interval's own centre: an
         // endpoint landing EXACTLY on the polygon edge is where `pointInPolygons`' ray-casting is
         // ambiguous by convention (`clSurface`'s own gate), not a real gap — advisor's review.
@@ -287,7 +292,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         const clampedAll = row.map((p) => ({ ...p, z: Math.max(p.z, levelZ) }));
 
         // ITEM 4a — the row's points are cut only where the plan's mask admits them; each
-        // contiguous admitted run is emitted as its own cut, and the gaps go to link().
+        // contiguous admitted run is its own cut, and the gaps between runs are links.
         const runs: (typeof clampedAll)[] = [];
         if (opts.maskCells === undefined) {
           runs.push(clampedAll);
@@ -301,37 +306,62 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         }
         for (const clamped of runs) {
           if (clamped.length < 2) continue;
-        const entryPoint: LinkPoint = { x: clamped[0]!.x, y: clamped[0]!.y, z: clamped[0]!.z };
-        if (prevExit === null) {
-          // The row's own FIRST feed is a PLUNGE (straight down from the hop height into
-          // material), never at the cutting feed — the same bug 9e976f0b fixed in `ops/pocket.ts`.
-          moves.push({ kind: 'rapid', x: entryPoint.x, y: entryPoint.y, z: opts.hopZMm });
-          moves.push({ kind: 'feed', x: entryPoint.x, y: entryPoint.y, z: entryPoint.z, f: opts.feeds.plungeFeedMmPerMin });
-        } else {
-          const from: LinkPoint = { x: prevExit.x, y: prevExit.y, z: prevExit.z };
-          moves.push(...joinMoves(from, entryPoint, prevLevelZ ?? prevExit.z));
-        }
-        for (let i = 1; i < clamped.length; i++) {
-          moves.push({ kind: 'feed', x: clamped[i]!.x, y: clamped[i]!.y, z: clamped[i]!.z, f: opts.feeds.feedMmPerMin });
-        }
-        const entry: [number, number, number] = [clamped[0]!.x, clamped[0]!.y, clamped[0]!.z];
-        const exitPoint = clamped[clamped.length - 1]!;
-        const exit: [number, number, number] = [exitPoint.x, exitPoint.y, exitPoint.z];
-        passes.push({
-          z: levelZ,
-          boundary: [clamped.map((p) => [p.x, p.y] as [number, number])],
-          cleared: { z: levelZ, boundary: [[entry.slice(0, 2) as [number, number], exit.slice(0, 2) as [number, number]]] },
-          entry,
-          exit,
-        });
-        levelCleared.push([[x, Math.min(rawY0, rawY1)], [x, Math.max(rawY0, rawY1)]]);
-        prevExit = exitPoint;
-        prevLevelZ = levelZ;
-        rowParity++;
+          levelRuns.push(clamped);
+          levelCleared.push([[x, Math.min(rawY0, rawY1)], [x, Math.max(rawY0, rawY1)]]);
         }
       }
     }
     cleared.push({ z: levelZ, boundary: levelCleared });
+
+    // 2. ORDER the runs so consecutive passes are neighbours: nearest neighbour + 2-opt over the
+    //    runs' midpoints, started from where the tool already is (#487's tour, the same primitive
+    //    the pocket contours use). The raster's row parity used to alternate direction to make the
+    //    turnarounds short; a tour subsumes that — and unlike the raster it can leave a row for
+    //    the neighbouring strip on the next row and come back, which is where the crossings go.
+    const midpoint = (run: DroppedPoint[]): [number, number] => {
+      const a = run[0]!;
+      const b = run[run.length - 1]!;
+      return [(a.x + b.x) / 2, (a.y + b.y) / 2];
+    };
+    const fromXY: [number, number] = prevExit === null ? [min[0], min[1]] : [prevExit.x, prevExit.y];
+    const order = tourNearest(levelRuns.map(midpoint), fromXY);
+
+    // 3. EMIT in tour order; each run is entered at whichever of its ends is nearer the tool.
+    for (const index of order) {
+      let points = levelRuns[index]!;
+      if (prevExit !== null) {
+        const first = points[0]!;
+        const last = points[points.length - 1]!;
+        if (Math.hypot(last.x - prevExit.x, last.y - prevExit.y) < Math.hypot(first.x - prevExit.x, first.y - prevExit.y)) {
+          points = [...points].reverse();
+        }
+      }
+      const entryPoint: LinkPoint = { x: points[0]!.x, y: points[0]!.y, z: points[0]!.z };
+      if (prevExit === null) {
+        // The run's own FIRST feed is a PLUNGE (straight down from the hop height into material),
+        // never at the cutting feed — the same bug 9e976f0b fixed in `ops/pocket.ts`.
+        moves.push({ kind: 'rapid', x: entryPoint.x, y: entryPoint.y, z: opts.hopZMm });
+        moves.push({ kind: 'feed', x: entryPoint.x, y: entryPoint.y, z: entryPoint.z, f: opts.feeds.plungeFeedMmPerMin });
+      } else {
+        const from: LinkPoint = { x: prevExit.x, y: prevExit.y, z: prevExit.z };
+        moves.push(...joinMoves(from, entryPoint, prevLevelZ ?? prevExit.z));
+      }
+      for (let i = 1; i < points.length; i++) {
+        moves.push({ kind: 'feed', x: points[i]!.x, y: points[i]!.y, z: points[i]!.z, f: opts.feeds.feedMmPerMin });
+      }
+      const entry: [number, number, number] = [points[0]!.x, points[0]!.y, points[0]!.z];
+      const exitPoint = points[points.length - 1]!;
+      const exit: [number, number, number] = [exitPoint.x, exitPoint.y, exitPoint.z];
+      passes.push({
+        z: levelZ,
+        boundary: [points.map((p) => [p.x, p.y] as [number, number])],
+        cleared: { z: levelZ, boundary: [[entry.slice(0, 2) as [number, number], exit.slice(0, 2) as [number, number]]] },
+        entry,
+        exit,
+      });
+      prevExit = exitPoint;
+      prevLevelZ = levelZ;
+    }
   }
 
   if (moves.length > 0) {
