@@ -23,7 +23,7 @@
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 
-import type { FrameMesh, Patch, FeatureTolerances } from './patches';
+import { weldVertices, type FrameMesh, type Patch, type FeatureTolerances } from './patches';
 import type { RawRim } from './rims';
 
 type CrossSection = InstanceType<ManifoldToplevel['CrossSection']>;
@@ -214,13 +214,150 @@ const overlaps = (a: CrossSection, b: CrossSection): boolean => {
   return hit;
 };
 
-/** Build the solid the sections are taken from. The mesh must close; the merge welds seams. */
-export function solidOf(tl: ManifoldToplevel, mesh: FrameMesh): Manifold {
-  const mm = new tl.Mesh({
-    numProp: 3,
-    vertProperties: Float32Array.from(mesh.positions),
-    triVerts: Uint32Array.from(mesh.indices),
-  });
+/** Twice a triangle's area (the cross product's length), mm². */
+function doubleArea(p: ArrayLike<number>, a: number, b: number, c: number): number {
+  const ux = p[3 * b]! - p[3 * a]!;
+  const uy = p[3 * b + 1]! - p[3 * a + 1]!;
+  const uz = p[3 * b + 2]! - p[3 * a + 2]!;
+  const vx = p[3 * c]! - p[3 * a]!;
+  const vy = p[3 * c + 1]! - p[3 * a + 1]!;
+  const vz = p[3 * c + 2]! - p[3 * a + 2]!;
+  return Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+}
+
+/** Append one boundary loop's cap, triangulated in its dominant-axis projection. */
+function capLoop(
+  tl: ManifoldToplevel,
+  p: Float32Array,
+  loop: readonly number[],
+  next: ReadonlyMap<number, number>,
+  out: number[],
+): void {
+  // Newell normal: the loop's plane, used here only to pick the 2D projection.
+  let nx = 0;
+  let ny = 0;
+  let nz = 0;
+  for (let i = 0; i < loop.length; i++) {
+    const a = loop[i]! * 3;
+    const b = loop[(i + 1) % loop.length]! * 3;
+    nx += (p[a + 1]! - p[b + 1]!) * (p[a + 2]! + p[b + 2]!);
+    ny += (p[a + 2]! - p[b + 2]!) * (p[a]! + p[b]!);
+    nz += (p[a]! - p[b]!) * (p[a + 1]! + p[b + 1]!);
+  }
+  const ax = Math.abs(nx);
+  const ay = Math.abs(ny);
+  const az = Math.abs(nz);
+  const project: (v: number) => [number, number] =
+    ax >= ay && ax >= az
+      ? (v) => [p[3 * v + 1]!, p[3 * v + 2]!]
+      : ay >= az
+        ? (v) => [p[3 * v + 2]!, p[3 * v]!]
+        : (v) => [p[3 * v]!, p[3 * v + 1]!];
+  const ring = loop.map(project);
+  let winding = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [x0, y0] = ring[i]!;
+    const [x1, y1] = ring[(i + 1) % ring.length]!;
+    winding += x0 * y1 - x1 * y0;
+  }
+  // `triangulate` wants its polygon CCW; remember the reversal so its indices map back.
+  const reversed = winding < 0;
+  if (reversed) ring.reverse();
+  const tris = tl.triangulate([ring]);
+  const at = (i: number): number => (reversed ? loop[loop.length - 1 - i]! : loop[i]!);
+  const cap = tris.map(([i, j, k]) => [at(i!), at(j!), at(k!)] as [number, number, number]);
+  // The cap must traverse every boundary edge opposite the mesh's own edge, or the weld leaves
+  // the surface inside-out on that seam.
+  let same = 0;
+  let opposite = 0;
+  for (const [a, b, c] of cap) {
+    for (const [u, v] of [
+      [a, b],
+      [b, c],
+      [c, a],
+    ] as [number, number][]) {
+      if (next.get(u) === v) same++;
+      else if (next.get(v) === u) opposite++;
+    }
+  }
+  for (const [a, b, c] of cap) {
+    if (same > opposite) out.push(a, c, b);
+    else out.push(a, b, c);
+  }
+}
+
+/**
+ * Close a triangle soup into the watertight solid the sections need (#966 blocker c). Goal meshes
+ * are surfaces, not solids — j27's mouse shell is open at its bottom — so `new Manifold` refuses
+ * them outright. Weld float32-duplicate vertices, drop zero-area triangles, and cap every boundary
+ * loop; the cap is triangulated in the loop's dominant-axis projection.
+ *
+ * shortcut: a non-planar or self-intersecting boundary loop is still capped by that projection,
+ * not by a 3D triangulation — upgrade when a goal mesh actually has one.
+ */
+function closeMesh(tl: ManifoldToplevel, mesh: FrameMesh, weldMm: number): { positions: Float32Array; indices: Uint32Array } {
+  const { weld, canon } = weldVertices(mesh, weldMm);
+  const p = mesh.positions;
+  const W = canon.length;
+  const positions = new Float32Array(W * 3);
+  for (let v = 0; v < W; v++) {
+    const o = canon[v]! * 3;
+    positions[3 * v] = p[o]!;
+    positions[3 * v + 1] = p[o + 1]!;
+    positions[3 * v + 2] = p[o + 2]!;
+  }
+  const src = mesh.indices;
+  const tris: number[] = [];
+  const directed = new Map<number, number>();
+  const count = (key: number): void => {
+    directed.set(key, (directed.get(key) ?? 0) + 1);
+  };
+  for (let t = 0; t + 2 < src.length; t += 3) {
+    const a = weld[src[t]!]!;
+    const b = weld[src[t + 1]!]!;
+    const c = weld[src[t + 2]!]!;
+    if (a === b || b === c || c === a) continue;
+    if (doubleArea(positions, a, b, c) <= 1e-12) continue;
+    tris.push(a, b, c);
+    count(a * W + b);
+    count(b * W + c);
+    count(c * W + a);
+  }
+  // A boundary edge is directed once and has no reverse; anything else is non-manifold and left
+  // for Manifold to report, as before.
+  const next = new Map<number, number>();
+  for (const [key, uses] of directed) {
+    if (uses !== 1) continue;
+    const a = Math.floor(key / W);
+    const b = key % W;
+    if (!directed.has(b * W + a)) next.set(a, b);
+  }
+  const seen = new Set<number>();
+  for (const start of next.keys()) {
+    if (seen.has(start)) continue;
+    const loop: number[] = [];
+    let v = start;
+    let closed = false;
+    while (!seen.has(v)) {
+      seen.add(v);
+      loop.push(v);
+      const w = next.get(v);
+      if (w === undefined) break;
+      if (w === start) {
+        closed = true;
+        break;
+      }
+      v = w;
+    }
+    if (closed && loop.length >= 3) capLoop(tl, positions, loop, next, tris);
+  }
+  return { positions, indices: Uint32Array.from(tris) };
+}
+
+/** Build the solid the sections are taken from; `closeMesh` is what makes an open goal mesh solid. */
+export function solidOf(tl: ManifoldToplevel, mesh: FrameMesh, weldMm: number): Manifold {
+  const closed = closeMesh(tl, mesh, weldMm);
+  const mm = new tl.Mesh({ numProp: 3, vertProperties: closed.positions, triVerts: closed.indices });
   mm.merge();
   return new tl.Manifold(mm);
 }
@@ -242,7 +379,7 @@ export function buildTree(
     if (p[i]! < partBottom) partBottom = p[i]!;
   }
 
-  const solid = solidOf(tl, mesh);
+  const solid = solidOf(tl, mesh, tol.weldMm);
   const garbage: { delete(): void }[] = [solid];
   try {
     const silhouette = solid.project();
