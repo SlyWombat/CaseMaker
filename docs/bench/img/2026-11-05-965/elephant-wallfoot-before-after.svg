@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="720" viewBox="0 0 980 720">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="28" y="32" font-family="sans-serif" font-size="17" font-weight="700" fill="#1a202c">elephant — the same 1 mm wall-foot section before and after the pocket-shadow merge</text>
+<text x="28" y="52" font-family="sans-serif" font-size="12" fill="#4a5568">x = 15.0 … 16.0 mm at y = 16.7 mm · goal.f32 and union.f32, 0.1 mm cells · orange = material left above the goal</text>
+<text x="28" y="74" font-family="sans-serif" font-size="12" fill="#4a5568">zoom: Z = cell goal ±1.6 mm. Black = goal (design); blue = posted sweep; orange = swept above the goal (leftover).</text>
+<text x="100" y="650" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#4a5568">15.0</text><text x="173.99999999999974" y="650" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#4a5568">15.1</text><text x="247.9999999999995" y="650" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#4a5568">15.2</text><text x="321.9999999999992" y="650" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#4a5568">15.3</text><text x="395.999999999999" y="650" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#4a5568">15.4</text><text x="469.9999999999987" y="650" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#4a5568">15.5</text><text x="543.9999999999984" y="650" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#4a5568">15.6</text><text x="617.9999999999982" y="650" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#4a5568">15.7</text><text x="691.999999999998" y="650" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#4a5568">15.8</text><text x="765.9999999999976" y="650" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#4a5568">15.9</text><text x="839.9999999999974" y="650" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#4a5568">16.0</text>
+
+  <text x="28" y="88" font-family="sans-serif" font-size="13" font-weight="700" fill="#1a202c">before — parent 17215cc2 (coverage 89.61 %)</text>
+  <rect x="90" y="94" width="760" height="232" fill="none" stroke="#cbd5e0"/>
+  <polygon points="470.00,210.00 544.00,188.66 544.00,148.74 470.00,239.60" fill="#dd6b20" opacity="0.25"/><polygon points="544.00,188.66 618.00,174.03 618.00,147.76 544.00,148.74" fill="#dd6b20" opacity="0.25"/><polygon points="618.00,174.03 692.00,162.81 692.00,146.05 618.00,147.76" fill="#dd6b20" opacity="0.25"/><polygon points="692.00,162.81 766.00,153.33 766.00,143.54 692.00,146.05" fill="#dd6b20" opacity="0.25"/><polygon points="766.00,153.33 840.00,145.16 840.00,140.15 766.00,143.54" fill="#dd6b20" opacity="0.25"/>
+  <polyline points="470.00,210.00 544.00,188.66 618.00,174.03 692.00,162.81 766.00,153.33 840.00,145.16" fill="none" stroke="#1a202c" stroke-width="2.2"/>
+  <polyline points="100.00,299.21 174.00,299.21 248.00,299.21 322.00,299.21 396.00,299.21 470.00,239.60 544.00,148.74 618.00,147.76 692.00,146.05 766.00,143.54 840.00,140.15" fill="none" stroke="#2b6cb0" stroke-width="2.2"/>
+  <circle cx="469.9996160168667" cy="239.60290908813474" r="4" fill="#2b6cb0"/>
+  <text x="479.9996160168667" y="231.60290908813474" font-family="sans-serif" font-size="11" fill="#2b6cb0">cell 15.5, 16.7: leftover -0.431 mm</text>
+  <text x="88" y="110" text-anchor="end" font-family="sans-serif" font-size="10" fill="#4a5568">-24.07</text>
+  <text x="88" y="318" text-anchor="end" font-family="sans-serif" font-size="10" fill="#4a5568">-27.27</text>
+  <text x="28" y="418" font-family="sans-serif" font-size="13" font-weight="700" fill="#1a202c">after — merge e2ce9b56, pocket-shadow (coverage 83.63 %)</text>
+  <rect x="90" y="424" width="760" height="232" fill="none" stroke="#cbd5e0"/>
+  <polygon points="396.00,-1225.05 470.00,540.00 470.00,493.70 396.00,629.21" fill="#dd6b20" opacity="0.25"/><polygon points="470.00,540.00 544.00,518.66 544.00,478.74 470.00,493.70" fill="#dd6b20" opacity="0.25"/><polygon points="544.00,518.66 618.00,504.03 618.00,477.76 544.00,478.74" fill="#dd6b20" opacity="0.25"/><polygon points="618.00,504.03 692.00,492.81 692.00,476.05 618.00,477.76" fill="#dd6b20" opacity="0.25"/><polygon points="692.00,492.81 766.00,483.33 766.00,473.54 692.00,476.05" fill="#dd6b20" opacity="0.25"/><polygon points="766.00,483.33 840.00,475.16 840.00,470.15 766.00,473.54" fill="#dd6b20" opacity="0.25"/>
+  <polyline points="470.00,540.00 544.00,518.66 618.00,504.03 692.00,492.81 766.00,483.33 840.00,475.16" fill="none" stroke="#1a202c" stroke-width="2.2"/>
+  <polyline points="100.00,629.21 174.00,629.21 248.00,629.21 322.00,629.21 396.00,629.21 470.00,493.70 544.00,478.74 618.00,477.76 692.00,476.05 766.00,473.54 840.00,470.15" fill="none" stroke="#2b6cb0" stroke-width="2.2"/>
+  <circle cx="469.9996160168667" cy="493.70290279388433" r="4" fill="#2b6cb0"/>
+  <text x="479.9996160168667" y="485.70290279388433" font-family="sans-serif" font-size="11" fill="#2b6cb0">cell 15.5, 16.7: leftover 0.673 mm</text>
+  <text x="88" y="440" text-anchor="end" font-family="sans-serif" font-size="10" fill="#4a5568">-24.07</text>
+  <text x="88" y="648" text-anchor="end" font-family="sans-serif" font-size="10" fill="#4a5568">-27.27</text>
+<line x1="730" y1="668" x2="760" y2="668" stroke="#1a202c" stroke-width="2.2"/><text x="768" y="672" font-family="sans-serif" font-size="11" fill="#1a202c">goal</text>
+<line x1="830" y1="668" x2="860" y2="668" stroke="#2b6cb0" stroke-width="2.2"/><text x="868" y="672" font-family="sans-serif" font-size="11" fill="#1a202c">posted sweep</text>
+<text x="28" y="680" font-family="sans-serif" font-size="11" fill="#4a5568">source: figureAcceptance965 at 17215cc2 and e2ce9b56 (B's f537fa4c cherry-picked; coverage reproduced to the digit), fields dumped by elephantBands965.</text>
+</svg>
