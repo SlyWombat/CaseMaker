@@ -53,7 +53,7 @@ function flatPlaneWithRim(): { tree: FeatureTree; geometry: { triangles: { posit
       ]),
       indices: Uint32Array.from([0, 1, 2, 3, 4, 5]),
       triangleCount: 2,
-      bbox: { min: [MX0, MY0, FLAT_Z], max: [MX1, MY1, FLAT_Z] },
+      bbox: { min: [MX0, MY0, FLAT_Z] as [number, number, number], max: [MX1, MY1, FLAT_Z] as [number, number, number] },
     },
   };
   const footprint: Polygons = [[[X0, Y0], [X1, Y0], [X1, Y1], [X0, Y1]]];

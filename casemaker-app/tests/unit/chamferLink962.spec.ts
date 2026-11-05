@@ -40,7 +40,14 @@ describe('#959 review — generateChamfer() feeds every vertical leg of a link, 
       const m = moves[i]!;
       const prev = moves[i - 1]!;
       if (m.x !== prev.x || m.y !== prev.y || m.z === prev.z) continue;
-      expect(m.kind, `move ${i}, a vertical leg from z=${prev.z} to z=${m.z}, posted as a '${m.kind}'`).toBe('feed');
+      // The `throw` (not an `expect`) is what narrows `m` to the 'feed' variant for the `.f` read
+      // below — `CamMove`'s 'rapid' branch carries no `f` field at all, so reading it without
+      // first ruling out 'rapid' is exactly the bug this test exists to catch, not a type cast to
+      // paper over: a vertical leg posted as 'rapid' must fail HERE, on its own kind, never fall
+      // through to compare an undefined `f` against the plunge rate.
+      if (m.kind !== 'feed') {
+        throw new Error(`move ${i}, a vertical leg from z=${prev.z} to z=${m.z}, posted as a '${m.kind}', not a feed`);
+      }
       expect(m.f, `move ${i}'s vertical leg ran at ${m.f} mm/min, not the ${PARAMS.plungeFeed} mm/min plunge rate`).toBe(PARAMS.plungeFeed);
     }
   });
