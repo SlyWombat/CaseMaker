@@ -289,7 +289,19 @@ export function finishBallCandidates(house: readonly Tool[], deepestMm: number):
 
 export interface PlanOutcome {
   coverage: number | null;
-  cutInto: { adjudicatedFraction: number | null; maxMm: number };
+  /**
+   * The gate's cut-into numbers are NOT the planner's to state: the adjudicated share applies the
+   * job's edge-break and wall allowances, and `maxMm` on the card means the deepest cut BELOW the
+   * goal. Both are null here — the planner does not judge them — so the comparison states those
+   * rows as not judged rather than filling them with a different quantity.
+   */
+  cutInto: { adjudicatedFraction: number | null; maxMm: number | null };
+  /**
+   * THE DEEPEST LEFTOVER ABOVE THE GOAL, mm — material the plan's own sweep leaves standing, the
+   * worst cell of `coverage`'s complement. It is NOT cut-into and must never be printed as such:
+   * on the panther it reads ~18 mm, which is an uncut deep feature, not a gouged part.
+   */
+  leftoverAboveMm: number;
   /** The plan's own cycle estimate, seconds — the comparison's cycle row. */
   cycleSeconds: number;
 }
@@ -1056,18 +1068,19 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     for (const field of fields.slice(1)) for (let k = 0; k < union.length; k++) if (field[k]! < union[k]!) union[k] = field[k]!;
     let covered = 0;
     let leftover = 0;
-    let maxMm = 0;
+    let leftoverAboveMm = 0;
     for (let k = 0; k < union.length; k++) {
       if (coverageGoal.covered[k] !== 1) continue;
       covered++;
       const over = union[k]! - (coverageGoal.z[k] as number);
       if (over > 0.1) leftover++;
-      if (over > maxMm) maxMm = over;
+      if (over > leftoverAboveMm) leftoverAboveMm = over;
     }
     const cycleSeconds = perSetup.reduce((n, setup) => n + setup.totalCostSeconds, 0);
     return {
       coverage: covered === 0 ? null : 1 - leftover / covered,
-      cutInto: { adjudicatedFraction: null, maxMm },
+      cutInto: { adjudicatedFraction: null, maxMm: null },
+      leftoverAboveMm,
       cycleSeconds,
     };
   })();

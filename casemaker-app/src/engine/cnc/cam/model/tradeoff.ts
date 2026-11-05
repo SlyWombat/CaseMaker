@@ -25,8 +25,8 @@ export interface PlanOutcomeScore {
   cutInto: {
     /** The judged cut-into share, 0..1 (null when the checker did not adjudicate). */
     adjudicatedFraction: number | null;
-    /** The deepest cut below the goal, mm. */
-    maxMm: number;
+    /** The deepest cut below the goal, mm — NULL when the caller did not judge cut-into. */
+    maxMm: number | null;
   };
   /** The plan's own cycle estimate, seconds. */
   cycleSeconds: number;
@@ -135,18 +135,31 @@ export function comparePlanOutcomes(
     });
   }
 
-  // 2. Geometry: the deepest cut below the goal the card states, mm.
+  // 2. Geometry: the deepest cut below the goal the card states, mm. A side that did not judge
+  // cut-into states that row as not judged — never a different quantity under the same name (the
+  // planner measures leftover ABOVE the goal, which is the opposite direction).
   const ownedDepth = owned.score.cutInto.maxMm;
   const idealDepth = ideal.score.cutInto.maxMm;
-  const depthDiff = Math.abs(ownedDepth - idealDepth);
-  differences.push({
-    bound: 'geometryMm',
-    reading: `deepest cut ${ownedDepth.toFixed(2)} mm vs ${idealDepth.toFixed(2)} mm`,
-    owned: ownedDepth,
-    ideal: idealDepth,
-    amount: depthDiff,
-    material: depthDiff > threshold.geometryMm + 1e-9,
-  });
+  if (ownedDepth === null || idealDepth === null) {
+    differences.push({
+      bound: 'geometryMm',
+      reading: 'deepest cut-into not judged for this comparison',
+      owned: ownedDepth,
+      ideal: idealDepth,
+      amount: null,
+      material: false,
+    });
+  } else {
+    const depthDiff = Math.abs(ownedDepth - idealDepth);
+    differences.push({
+      bound: 'geometryMm',
+      reading: `deepest cut ${ownedDepth.toFixed(2)} mm vs ${idealDepth.toFixed(2)} mm`,
+      owned: ownedDepth,
+      ideal: idealDepth,
+      amount: depthDiff,
+      material: depthDiff > threshold.geometryMm + 1e-9,
+    });
+  }
 
   // 3. Coverage, percentage points.
   const ownedCov = owned.score.coverage;
@@ -252,13 +265,17 @@ export function idealWorsenings(
     });
   }
 
-  {
-    const worseBy = ideal.cutInto.maxMm - owned.cutInto.maxMm;
+  // The deepest-cut row needs BOTH sides judged; an unjudged side leaves the row absent, exactly
+  // as the share row does — never a different quantity under this name.
+  const ownedDepthMm = owned.cutInto.maxMm;
+  const idealDepthMm = ideal.cutInto.maxMm;
+  if (ownedDepthMm !== null && idealDepthMm !== null) {
+    const worseBy = idealDepthMm - ownedDepthMm;
     rows.push({
       outcome: 'deepestCut',
       bound: 'geometryMm',
-      owned: owned.cutInto.maxMm,
-      ideal: ideal.cutInto.maxMm,
+      owned: ownedDepthMm,
+      ideal: idealDepthMm,
       worseBy,
       material: worseBy > threshold.geometryMm + 1e-9,
       reading: `deepest cut ${worseBy.toFixed(2)} mm`,
