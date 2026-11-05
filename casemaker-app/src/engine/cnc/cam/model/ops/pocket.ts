@@ -36,6 +36,7 @@ import { tourNearest } from '@/engine/cnc/cam/tour';
 import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import { DEFAULT_SHORT_HOP_DIAMETERS, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
 import { ridesCutSurface } from '../rideTest';
+import { buildRouteGraph, type RouteGraph } from '../linkRoute';
 import { cutterKeyOf } from '../sequence';
 import type { PocketNode } from '../features';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
@@ -218,29 +219,37 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
   // `open` (already eroded by the radius, so the whole disc stays in cleared material) at the
   // level, and the plan prices feed-at-depth vs a rapid at the same cleared floor against the
   // retract it replaces.
-  const routeFor = (levelZ: number): NonNullable<LinkOptions['route']> => ({
-    options: {
-      // The cleared region as the pocket cuts it: the op's own (extended) region eroded by the
-      // tool radius, and CLOSED at the boundary by `insideClosed` (the #962 ruling).
-      cleared: opts.offset(region, -toolRadius),
-      levelZ,
-      rapidZMm: levelZ,
-      materialAt: (x, y) => (pointInPolygons(open, x, y) ? levelZ : null),
-    },
-    plan: (lengthMm) => {
-      const rideSeconds = moveSeconds(lengthMm, opts.feeds.feedMmPerMin, opts.rapid.accelMmPerS2);
-      // The rapid runs at the cleared floor itself (rapidZMm = levelZ): inside the cleared region
-      // any Z at or above the level is free, so there are no vertical legs to price here.
-      const rapidSeconds = moveSeconds(lengthMm, opts.rapid.xyMmPerMin, opts.rapid.accelMmPerS2);
-      const retractSeconds =
-        moveSeconds(Math.abs(opts.hopZMm - levelZ), opts.rapid.zMmPerMin, opts.rapid.accelMmPerS2) +
-        moveSeconds(lengthMm, opts.rapid.xyMmPerMin, opts.rapid.accelMmPerS2) +
-        moveSeconds(Math.abs(opts.hopZMm - levelZ), opts.feeds.plungeFeedMmPerMin, opts.rapid.accelMmPerS2);
-      if (rideSeconds < retractSeconds) return { mode: 'feed' as const };
-      if (rapidSeconds < retractSeconds) return { mode: 'rapid' as const };
-      return null;
-    },
-  });
+  // One graph per level, reused by every join at that level (the manager's cost ruling).
+  const routeGraphs = new Map<number, { graph: RouteGraph }>();
+  const routeFor = (levelZ: number): NonNullable<LinkOptions['route']> => {
+    // A G0 at the floor it just cut is wrong: the routed rapid flies at levelZ + 1 mm, clamped to
+    // no higher than the hop plane.
+    const liftMm = Math.min(opts.hopZMm, levelZ + 1) - levelZ;
+    // The cleared region as the pocket cuts it: the op's own (extended) region eroded by the tool
+    // radius, CLOSED at the boundary by `insideClosed` (the #962 ruling).
+    const cleared = opts.offset(region, -toolRadius);
+    const materialAt = (x: number, y: number): number | null => (pointInPolygons(open, x, y) ? levelZ : null);
+    if (!routeGraphs.has(levelZ)) routeGraphs.set(levelZ, { graph: buildRouteGraph(cleared, levelZ, materialAt, 40) });
+    return {
+      options: { cleared, levelZ, rapidZMm: levelZ + liftMm, materialAt },
+      graph: routeGraphs.get(levelZ)!.graph,
+      plan: (lengthMm) => {
+        const rideSeconds = moveSeconds(lengthMm, opts.feeds.feedMmPerMin, opts.rapid.accelMmPerS2);
+        // The routed rapid pays its 1 mm up at the rapid rate and its 1 mm down at the plunge feed.
+        const rapidSeconds =
+          moveSeconds(liftMm, opts.rapid.zMmPerMin, opts.rapid.accelMmPerS2) +
+          moveSeconds(lengthMm, opts.rapid.xyMmPerMin, opts.rapid.accelMmPerS2) +
+          moveSeconds(liftMm, opts.feeds.plungeFeedMmPerMin, opts.rapid.accelMmPerS2);
+        const retractSeconds =
+          moveSeconds(Math.abs(opts.hopZMm - levelZ), opts.rapid.zMmPerMin, opts.rapid.accelMmPerS2) +
+          moveSeconds(lengthMm, opts.rapid.xyMmPerMin, opts.rapid.accelMmPerS2) +
+          moveSeconds(Math.abs(opts.hopZMm - levelZ), opts.feeds.plungeFeedMmPerMin, opts.rapid.accelMmPerS2);
+        if (rideSeconds < retractSeconds) return { mode: 'feed' as const };
+        if (rapidSeconds < retractSeconds) return { mode: 'rapid' as const };
+        return null;
+      },
+    };
+  };
   const linkOptions: LinkOptions = {
     material,
     // The REGION's own clearance plane (already above every obstacle IN this region), not the

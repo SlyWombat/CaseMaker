@@ -38,7 +38,7 @@
  */
 
 import type { CamMove } from '../ir';
-import { routeWithin, type RouteOptions } from './linkRoute';
+import { routeOnGraph, routeWithin, type RouteGraph, type RouteOptions } from './linkRoute';
 import { tourNearest } from '../tour';
 
 /** FreeCAD Path's `KeepToolDownRatio` default: a stay-down detour may be 3× the direct distance. */
@@ -98,6 +98,8 @@ export interface LinkOptions {
    */
   route?: {
     options: RouteOptions;
+    /** A graph built once per level by the caller; absent → the hook builds a one-shot graph. */
+    graph?: RouteGraph;
     plan: (lengthMm: number) => { mode: 'feed' | 'rapid' } | null;
   };
   /** The down leg's rapid floor above the material field's own report at the landing (x, y), mm;
@@ -290,7 +292,8 @@ export function link(from: LinkPoint, to: LinkPoint, opts: LinkOptions): CamMove
     }
   }
   if (opts.route !== undefined) {
-    const route = routeWithin(from, to, opts.route.options);
+    const route =
+      opts.route.graph !== undefined ? routeOnGraph(opts.route.graph, from, to, 40) : routeWithin(from, to, opts.route.options);
     if (route !== null) {
       const plan = opts.route.plan(route.lengthMm);
       if (plan !== null) {
