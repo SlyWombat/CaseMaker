@@ -240,6 +240,16 @@ export interface ModelPlanInput {
    * the old pocket-count completeness, unchanged.
    */
   goal?: GoalCellField;
+  /**
+   * #869/#966 — THE CURVED PIPELINE'S OWN ROUGH, independent of `primary` (the pockets' own
+   * largest flat, which a goal with no pockets picks only because the house owns one at all).
+   * Absent (every existing caller): unchanged — the curved pipeline ROUGHS with `primary`, exactly
+   * as before this field existed. `null`: no rough at all, the ball alone takes each remainder
+   * region's full depth (#869's stated default for a goal with no `roughToolKey`). A `Tool`: that
+   * tool roughs instead of `primary` (#869's `roughToolKey`, once validated by the caller — this
+   * field is not itself validated here, the same contract `cutters.house` already keeps).
+   */
+  curvedRoughTool?: Tool | null;
 }
 
 export interface ModelPlanOutput {
@@ -771,7 +781,15 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       },
       curved: {
         geometry: curvedGeometry,
-        flat: primary,
+        // #869/#966 — absent (every existing caller): `primary`, unchanged. `null` (a goal with no
+        // `roughToolKey`): no rough, ball alone. A `Tool` (a goal's validated `roughToolKey`):
+        // that tool roughs instead of `primary`, which this job's own pockets (if it has any) still
+        // use — the two are independent on purpose, see `ModelPlanInput.curvedRoughTool`'s own doc.
+        ...(input.curvedRoughTool === undefined
+          ? { flat: primary }
+          : input.curvedRoughTool === null
+            ? {}
+            : { flat: input.curvedRoughTool }),
         ...(ball === undefined ? {} : { ball }),
         ...(vbit === undefined ? {} : { vbit }),
         stepDownMm: pocketParams.stepDown,
