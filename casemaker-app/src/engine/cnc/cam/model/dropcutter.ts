@@ -410,16 +410,23 @@ export function dropCutterHeight(profile: CutterProfile, mesh: DropCutterMesh, x
     if (triangles.maxZ[t]! - heightAt(profile, rhoMinTri) <= best) continue;
 
     const planeA = triangles.planeA[t]!;
-    if (Number.isNaN(planeA)) continue; // degenerate (vertical) facet: vertices are all there is
 
     const i0v = idx[t * 3]! * 3, i1v = idx[t * 3 + 1]! * 3, i2v = idx[t * 3 + 2]! * 3;
     const ax = p[i0v] as number, ay = p[i0v + 1] as number, az = p[i0v + 2] as number;
     const bx = p[i1v] as number, by = p[i1v + 1] as number, bz = p[i1v + 2] as number;
     const cx = p[i2v] as number, cy = p[i2v + 1] as number, cz = p[i2v + 2] as number;
 
-    const plane: Plane = { a: planeA, b: triangles.planeB[t]!, c: triangles.planeC[t]!, L: triangles.planeL[t]! };
-    const facet = facetContact(plane, profile, x, y);
-    if (facet.z > best && insideTriangleXY(ax, ay, bx, by, cx, cy, facet.px, facet.py)) best = facet.z;
+    // A degenerate (vertical) facet has no facet-interior contact to compute (`insideTriangleXY`
+    // would be asked about a point from a meaningless plane) — but its EDGES are still real
+    // geometry, same as any other triangle's: a quad's two triangles can BOTH collapse to a
+    // vertical facet (e.g. a box's side wall, split on its own diagonal) while that shared
+    // diagonal edge spans real XY distance and is the true contact nowhere else, since neither
+    // adjacent triangle's facet plane exists to carry it. Only the facet maximiser is skipped.
+    if (!Number.isNaN(planeA)) {
+      const plane: Plane = { a: planeA, b: triangles.planeB[t]!, c: triangles.planeC[t]!, L: triangles.planeL[t]! };
+      const facet = facetContact(plane, profile, x, y);
+      if (facet.z > best && insideTriangleXY(ax, ay, bx, by, cx, cy, facet.px, facet.py)) best = facet.z;
+    }
 
     const e1 = edgeContactMax(ax, ay, az, bx, by, bz, x, y, profile);
     if (e1 !== null && e1 > best) best = e1;
