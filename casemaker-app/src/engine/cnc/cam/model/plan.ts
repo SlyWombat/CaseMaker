@@ -2422,8 +2422,10 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       // PREVIOUS cutter's own CL — a region with no crease cell gets no pencil grid and no line at
       // all. The gate samples at 0.5 mm, 25x coarser than the pencil: it exists to skip regions,
       // not to judge cells.
-      // shortcut: a valley under ~1 mm wide is not pre-detected and its region is skipped;
-      // upgrade the gate pitch if a job's creases are finer than that.
+      // shortcut: the gate is a PROXY — it reads the PREVIOUS cutter's CL (the ball, or the rest
+      // ball), so a crease too narrow for that cutter to register, or finer than the 0.5 mm gate
+      // grid, is not pre-detected and its region is skipped (the #983 wall-foot class); upgrade
+      // the gate pitch if a job's creases need it.
       const vPitchGate = Math.max(0.5, (cuttingDiameter(vTool) ?? 0) / 4);
       const prevClGate = restBallCl ?? clBall();
       if (hasValley(prevClGate, { min: roughRef.bounds.min, max: roughRef.bounds.max }, vPitchGate)) {
