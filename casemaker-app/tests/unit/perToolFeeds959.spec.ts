@@ -41,19 +41,36 @@ const FLAT_PARAMS: CutParams = { rpm: 12000, feed: 900, plungeFeed: 250, stepDow
 const BALL_PARAMS: CutParams = { rpm: 18000, feed: 600, plungeFeed: 150, stepDown: 1.5, stepOver: 3, peck: 0, air: true };
 const VBIT_PARAMS: CutParams = { rpm: 20000, feed: 400, plungeFeed: 120, stepDown: 1.5, stepOver: 3, peck: 0, air: true };
 
-/** A flat plane with one rim, at the stock top — the per-tool feeds, not the Z datum, is this
- * fixture's own point, so it is kept flat and at stockTop = 0 rather than reusing a ramp. */
-function flatPlaneWithRim(): { tree: FeatureTree; geometry: { triangles: { positions: Float32Array; indices: Uint32Array; triangleCount: number; bbox: { min: [number, number, number]; max: [number, number, number] } } } } {
+/** A plane with one rim: FLAT margins outside the footprint and a 0.2 SLOPE across it.
+ *
+ * #959 review item (4a), 4a509fda, changed this fixture's premise: the ball's finish now masks to
+ * `flatSwept − design > band`, and on a perfectly flat plane the rough leaves exactly one band
+ * above the design — so the finish (and the pencil) post NO moves and the plan carries no finish
+ * op at all. This spec's subject is the per-tool feeds of the finish/pencil/chamfer programs, so
+ * the fixture must give the ball real leftover: at slope 0.2 a ⌀6 flat's own CL stands
+ * 0.2 × 3 = 0.6 mm above the design across the footprint, twice the 0.3 band. The margins stay
+ * flat at the stock top so the contour and the rim's exposure are the same question they were. */
+function planeWithRim(): { tree: FeatureTree; geometry: { triangles: { positions: Float32Array; indices: Uint32Array; triangleCount: number; bbox: { min: [number, number, number]; max: [number, number, number] } } } } {
   const MX0 = X0 - 10, MX1 = X1 + 10, MY0 = Y0 - 10, MY1 = Y1 + 10;
+  // The design: flat at the stock top outside the footprint, falling at 0.2 across it.
+  const zAt = (x: number): number => (x <= X0 ? FLAT_Z : x >= X1 ? FLAT_Z - 0.2 * (X1 - X0) : FLAT_Z - 0.2 * (x - X0));
+  const positions: number[] = [];
+  const quad = (ax: number, bx: number): void => {
+    positions.push(ax, MY0, zAt(ax), bx, MY0, zAt(bx), bx, MY1, zAt(bx), ax, MY0, zAt(ax), bx, MY1, zAt(bx), ax, MY1, zAt(ax));
+  };
+  quad(MX0, X0);
+  quad(X0, X1);
+  quad(X1, MX1);
+  const arr = Float32Array.from(positions);
   const geometry = {
     triangles: {
-      positions: Float32Array.from([
-        MX0, MY0, FLAT_Z, MX1, MY0, FLAT_Z, MX1, MY1, FLAT_Z,
-        MX0, MY0, FLAT_Z, MX1, MY1, FLAT_Z, MX0, MY1, FLAT_Z,
-      ]),
-      indices: Uint32Array.from([0, 1, 2, 3, 4, 5]),
-      triangleCount: 2,
-      bbox: { min: [MX0, MY0, FLAT_Z] as [number, number, number], max: [MX1, MY1, FLAT_Z] as [number, number, number] },
+      positions: arr,
+      indices: Uint32Array.from({ length: arr.length / 3 }, (_, i) => i),
+      triangleCount: arr.length / 9,
+      bbox: {
+        min: [MX0, MY0, zAt(X1)] as [number, number, number],
+        max: [MX1, MY1, FLAT_Z] as [number, number, number],
+      },
     },
   };
   const footprint: Polygons = [[[X0, Y0], [X1, Y0], [X1, Y1], [X0, Y1]]];
@@ -66,7 +83,7 @@ function flatPlaneWithRim(): { tree: FeatureTree; geometry: { triangles: { posit
     frame: { up: [0, 0, 1], stockTop: FLAT_Z + STOCK_ABOVE, partTop: FLAT_Z + STOCK_ABOVE, partBottom: FLAT_Z },
     levels: [FLAT_Z],
     top: { z: FLAT_Z + STOCK_ABOVE, floors: [], area: 0 },
-    contour: { outline: footprint, area: (X1 - X0) * (Y1 - Y0), zTo: FLAT_Z, frees: true, shoulders: [] },
+    contour: { outline: footprint, area: (X1 - X0) * (Y1 - Y0), zTo: zAt(X1), frees: true, shoulders: [] },
     pockets: [],
     rims: [rim],
     remainder: [{
@@ -74,8 +91,8 @@ function flatPlaneWithRim(): { tree: FeatureTree; geometry: { triangles: { posit
       // real material to clear down toward CL (0) + the band, which a perfectly flat target at
       // zTop = zBottom would give it none of (rough's own mask test, `target < levelZ`, is never
       // true against a target that sits above every level the region spans).
-      id: 'plane', footprint, area: (X1 - X0) * (Y1 - Y0), zTop: FLAT_Z + STOCK_ABOVE, zBottom: FLAT_Z,
-      triangles: new Uint32Array(), slopeDeg: [0, 0], slopeMedianDeg: 0, in: 'top',
+      id: 'plane', footprint, area: (X1 - X0) * (Y1 - Y0), zTop: FLAT_Z + STOCK_ABOVE, zBottom: zAt(X1),
+      triangles: new Uint32Array(), slopeDeg: [11.3, 11.3], slopeMedianDeg: 11.3, in: 'top',
     }],
     unreachable: [],
     report: { source: 'mesh', patches: 1, planarArea: (X1 - X0) * (Y1 - Y0), remainderArea: (X1 - X0) * (Y1 - Y0), tolerances: {} as never, slivers: [], notes: [] },
@@ -84,7 +101,7 @@ function flatPlaneWithRim(): { tree: FeatureTree; geometry: { triangles: { posit
 }
 
 function run(cutParamsFor?: (tool: Tool) => CutParams): ReturnType<typeof planCurvedForTree> {
-  const { tree, geometry } = flatPlaneWithRim();
+  const { tree, geometry } = planeWithRim();
   return planCurvedForTree(tree, {
     geometry, offset: makeClipperOffset(tl), flat, ball, vbit,
     stepDownMm: 1.5, bandMm: 0.3,
