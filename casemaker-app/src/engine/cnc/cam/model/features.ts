@@ -179,7 +179,9 @@ export function recogniseFeatures(
 
   let partBottom = Infinity;
   for (let i = 2; i < mesh.positions.length; i += 3) partBottom = Math.min(partBottom, mesh.positions[i]!);
-  classifyPatches(mesh, patches, partBottom, tol);
+  // #965 — `path` routes the mesh path's per-triangle split; the STEP B-rep path keeps the
+  // whole-face rule (one face = one surface).
+  classifyPatches(mesh, patches, partBottom, tol, path);
   const adj = triangleAdjacency(mesh, tol.weldMm);
   const { surfaces, demoted } = remainderSurfaces(mesh, patches, adj, tol, path);
 
