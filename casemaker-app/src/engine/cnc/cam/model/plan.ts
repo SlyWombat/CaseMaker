@@ -33,13 +33,14 @@ import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engi
 import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
 import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
-import type { FeatureSource, FeatureTree, PocketNode, SetupFrame } from './features';
+import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances } from './types';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { pocket } from './ops/pocket';
 import { clSurface } from './clsurface';
-import { rough } from './ops/rough';
+import { rough, skin } from './ops/rough';
+import { flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
 import { rest } from './ops/rest';
 import { finish } from './ops/finish';
 import { pencil } from './ops/pencil';
@@ -130,6 +131,10 @@ export interface SetupSpec {
 
 export interface ModelPlanInput {
   geometry: FeatureSource;
+  /** #959 ruling: `'on'` plans the facing stage; absent/`'off'` gives the skin to the `skin` pass. */
+  facing?: 'off' | 'on';
+  /** The shared flat/ball slope parameter (#959); absent → the provisional `FLAT_SURFACE_MAX_SLOPE_DEG`. */
+  flatSurfaceMaxSlopeDeg?: number;
   /**
    * Length 1 for the tray/organizer today; #898/#914's flip plan (`held/914-flip-plan`: the
    * reach-aware face decision, the stock-floor anchor, the band-floor trigger) and #965 fill this
@@ -388,6 +393,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         spindleRpm: pocketParams.rpm,
         air: true,
         boolean,
+        facing: input.facing ?? 'off',
       },
       curved: {
         geometry: input.geometry,
@@ -405,6 +411,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         air: true,
         edgeBreak: input.edgeBreak,
         toolNumberFor: (tool) => tool.number ?? 1,
+        facing: input.facing ?? 'off',
+        ...(input.flatSurfaceMaxSlopeDeg === undefined ? {} : { flatSurfaceMaxSlopeDeg: input.flatSurfaceMaxSlopeDeg }),
       },
     });
     opts.signal?.throwIfAborted();
@@ -623,6 +631,12 @@ export interface PlanPocketsOptions {
   tabs?: { count: number; width: number; height: number };
   /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
   boolean?: { union: BooleanFn; subtract: BooleanFn };
+  /**
+   * #959 (2026-11-05 ruling): FACING OFF by default. `'on'` plans the facing stage exactly as
+   * before (the operator option); absent or `'off'` plans none, and the skin over the top land
+   * belongs to the flat surface-following pass (`skin`).
+   */
+  facing?: 'off' | 'on';
 }
 
 /**
@@ -745,7 +759,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // of every pocket/through-hole sharing that same step. See the regression test proving this by
   // POSTED ORDER, not by trusting this push order alone, in `opsAcceptance959.spec.ts`.
   const facingDepthMm = z0 - tree.top.z;
-  const hasFacing = facingDepthMm > 1e-6;
+  // #959 (2026-11-05 ruling): facing is an OPERATOR OPTION, off by default.
+  const hasFacing = (opts.facing ?? 'off') === 'on' && facingDepthMm > 1e-6;
   if (hasFacing) {
     refById.set('facing', {
       id: 'facing', kind: 'pocket', bounds: boundsOfPolygons(tree.contour.outline),
@@ -1154,6 +1169,10 @@ export interface PlanCurvedOptions {
   edgeBreak: EdgeBreakSpec;
   toolNumberFor: (tool: Tool) => number;
   startFrom?: readonly [number, number];
+  /** #959 ruling: `'on'` puts the skin back on the facing stage; absent/`'off'` gives it to `skin`. */
+  facing?: 'off' | 'on';
+  /** The shared flat/ball slope parameter (#959); absent → `FLAT_SURFACE_MAX_SLOPE_DEG`'s provisional value. */
+  flatSurfaceMaxSlopeDeg?: number;
 }
 
 export interface PlanCurvedResult {
@@ -1445,6 +1464,50 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       air: opts.air,
       rapid: opts.rapid,
     }));
+  }
+
+  // THE SKIN PASS (#959, 2026-11-05 ruling): the stock stands above the part top and the job asks
+  // for no facing — the FLAT takes the skin, surface-following (C6's Makera T1 shape), capped at
+  // its own step-down and gated by the shared slope parameter. Facing `'on'` keeps that stage
+  // instead (the operator option).
+  const skinMm = z0 - tree.top.z;
+  if (skinMm > 1e-6 && (opts.facing ?? 'off') !== 'on') {
+    const flatRadius = (cuttingDiameter(opts.flat) ?? 0) / 2;
+    const grownSkin = flatRadius > 0 ? opts.offset(tree.contour.outline, 2 * flatRadius) : [];
+    const skinFootprint = grownSkin.length > 0 ? grownSkin : tree.contour.outline;
+    const skinRegion: RemainderRegion = {
+      id: 'skin', footprint: skinFootprint, area: tree.contour.area, zTop: z0, zBottom: tree.top.z,
+      triangles: new Uint32Array(), slopeDeg: [0, 0], slopeMedianDeg: 0, in: 'top',
+    };
+    const skinRef = regionRefOf('skin', 'curved', skinFootprint, 0, -skinMm);
+    // THE SKIN'S DEPTH IS ITS LEVELS, not an exclusion: they stop at the part top, so a pocket's
+    // own ground is never touched — but the skin ABOVE every pocket's mouth (which the pocket op,
+    // starting at that mouth, never removes) is taken here. The first attempt excluded the pocket
+    // footprints and left that skin standing: the tray's coverage fell 0.77 %.
+    attempt('skin', opts.flat, skinRef, () => {
+      const skinCl = shiftSurface(clSurface(opts.geometry, skinRegion, opts.flat, cuts.stepOver));
+      return skin({
+        cutter: opts.flat,
+        regionRef: skinRef,
+        outline: tree.contour.outline,
+        clSurface: skinCl,
+        skinMm,
+        // THE CAP IS THE ROW'S OWN STEP-DOWN x THE FACTOR (#959): a parameter, provisional at
+        // 1.0 — two passes on the tray's 1.2 mm skin, one on the organizer's 0.8.
+        stepDownMm: paramsFor(opts.flat).stepDown * skinStepdownFactor(),
+        maxSlopeDeg: opts.flatSurfaceMaxSlopeDeg ?? flatSurfaceMaxSlopeDeg(),
+        stepOverMm: opts.stepOverMm,
+        feeds: feedsOf(paramsFor(opts.flat)),
+        offset: opts.offset,
+        safeZMm: opts.safeZMm,
+        hopZMm: opts.hopZMm,
+        toolNumber: opts.toolNumberFor(opts.flat),
+        spindleRpm: paramsFor(opts.flat).rpm,
+        air: opts.air,
+        rapid: opts.rapid,
+        ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
+      });
+    });
   }
 
   // 5. EVERY RIM the tree found, broken by the V at the job's stated edge break.
