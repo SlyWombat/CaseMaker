@@ -28,8 +28,9 @@ One line per picture, including what looks physically notable:
 - `03-toolpaths` — our five programs beside the vendor's T1–T5 at one scale. Our ball-6 finishes
   the whole part shallow; the vendor's T2/T5 carry the pocket rims and the bottom row of square
   slots. Physically the two programs distribute the work differently but both reach the floors.
-- `04-section-worst-cut-into` — the worst adjudicated cell (59.6, 122.1, 0.500 mm) is the chamfer
-  at a rim; the section shows only the 0.5 mm dip and the sweep coincident with the goal elsewhere.
+- `04-section-worst-cut-into` — the worst adjudicated cell (59.6, 122.1, 0.500 mm): the section
+  shows only the 0.5 mm dip and the sweep coincident with the goal elsewhere. **Not an edge cell** —
+  08 shows it is the chamfer's 77.2 mm stay-down G1 link crossing flat land, 3.19 mm from any wall.
 - `05-section-worst-leftover` — the section across the deep square row shows every floor cut to
   −22.8 with the sweep following; the 22 mm is the rim cell above, not a standing island.
 - `08-zoom-cut-into-cell` — plan zoom ±5 mm around (59.6, 122.1) (asked by the manager, 2026-11-05):
