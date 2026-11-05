@@ -124,3 +124,51 @@ export function followCutSurface(
     (1 / feeds.plungeFeedMmPerMin) * 60;
   return followSeconds < retractSeconds ? moves : null;
 }
+
+/**
+ * #970 — THE LINEAR FOLLOW, kept for the GRID-TARGET joins (the rough's skim): the surface there
+ * is a cell-quantised target (`skimTarget`'s grid lookup), not a continuous CL. Laying those
+ * points with `dropRow` turned every cell edge into a min-spacing staircase — measured on the
+ * organizer: +987 segments in program 1 and 12 flat-6 cells cut 0.13–0.23 mm below the goal at
+ * y ≈ 99.1, because a staircase plunge at a grid point puts the flat's 3 mm disc over neighbouring
+ * cells whose material stands above the target. The ball's own CL (the finish's join) is
+ * continuous and carries `dropRow`'s guarantee; a grid target needs its own rule (a
+ * disc-aware check at the join points), which is filed on #970 rather than guessed here.
+ */
+export function followLinearCutSurface(
+  from: RidePoint,
+  to: RidePoint,
+  topAt: (x: number, y: number) => number | null,
+  stepMm: number,
+  clampZMm: number,
+  feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number },
+  rapid: { xyMmPerMin: number; zMmPerMin: number },
+  clearanceZMm: number,
+): { kind: 'feed'; x: number; y: number; z: number; f: number }[] | null {
+  const length = Math.hypot(to.x - from.x, to.y - from.y);
+  const steps = Math.max(1, Math.ceil(length / stepMm));
+  const points: RidePoint[] = [];
+  for (let s = 0; s <= steps; s++) {
+    const t = s / steps;
+    const x = from.x + (to.x - from.x) * t;
+    const y = from.y + (to.y - from.y) * t;
+    const top = topAt(x, y);
+    if (top === null) return null;
+    points.push({ x, y, z: s === 0 ? from.z : s === steps ? to.z : Math.max(top, clampZMm) });
+  }
+  let followSeconds = 0;
+  const moves: { kind: 'feed'; x: number; y: number; z: number; f: number }[] = [];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const d = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+    const f = b.z < a.z - 1e-9 ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin;
+    followSeconds += (d / f) * 60;
+    moves.push({ kind: 'feed', x: b.x, y: b.y, z: b.z, f });
+  }
+  const retractSeconds =
+    ((Math.abs(clearanceZMm - from.z) + Math.abs(clearanceZMm - to.z)) / rapid.zMmPerMin) * 60 +
+    (length / rapid.xyMmPerMin) * 60 +
+    (1 / feeds.plungeFeedMmPerMin) * 60;
+  return followSeconds < retractSeconds ? moves : null;
+}

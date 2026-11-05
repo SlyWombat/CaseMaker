@@ -26,7 +26,7 @@ import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/eng
 import { pocketLoops, type OffsetFn, type Polygons } from '@/engine/cnc/cam/pocket';
 import { tourNearest } from '@/engine/cnc/cam/tour';
 import { DEFAULT_SHORT_HOP_DIAMETERS, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
-import { followCutSurface, ridesCutSurface } from '../rideTest';
+import { followLinearCutSurface, ridesCutSurface } from '../rideTest';
 import { cutterKeyOf } from '../sequence';
 import type { RemainderRegion } from '../features';
 import type { ClSurface } from '../clsurface';
@@ -453,7 +453,7 @@ export function rough(opts: RoughOpOptions): OpOutcome {
       } else {
         // THE DIP CLASS: follow the skim's own target where the chord would dip below it — the
         // ball cuts the band's rise exactly as the rows either side do, never below the CL.
-        const follow = followCutSurface(
+        const follow = followLinearCutSurface(
           { x: from.x, y: from.y, z: from.z },
           { x: to.x, y: to.y, z: to.z },
           (x, y) => skimTarget(Math.round((x - min[0]) / pitch), Math.round((y - min[1]) / pitch)),
