@@ -12,9 +12,9 @@ import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_ADAPTIVE_DEPTH_RATIO,
   generateSurface3dIR,
-  type SurfaceFeeds,
   type RoughingOptions,
 } from '@/engine/cnc/cam/surface3d';
+import type { SurfaceFeeds } from '@/engine/cnc/cam/surfaceFinishTipField';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { roughLevelRegion, roughingAdaptiveMoves, traceMaskLoops } from '@/engine/cnc/cam/rough3d';
 import { adaptiveSettings } from '@/engine/cnc/cam/adaptive';

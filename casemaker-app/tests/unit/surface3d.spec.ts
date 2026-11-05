@@ -25,18 +25,20 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import {
-  DEFAULT_MAX_FINISH_TIP_OPS,
   generateSurface3dIR,
   estimateGoalMoves,
   planGoalOvercut,
-  finishTipField,
-  finishingMoves,
   goalMemoryBudgetMb,
   GOAL_MEMORY_BUDGET_MB,
   GOAL_BYTES_PER_MOVE,
+} from '@/engine/cnc/cam/surface3d';
+import {
+  DEFAULT_MAX_FINISH_TIP_OPS,
+  finishTipField,
+  finishingMoves,
   type SurfaceFeeds,
   type SurfaceTool,
-} from '@/engine/cnc/cam/surface3d';
+} from '@/engine/cnc/cam/surfaceFinishTipField';
 import {
   DEFAULT_GRID_PITCH_MM,
   sampleGoalHeightfield,

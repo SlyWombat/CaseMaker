@@ -18,11 +18,8 @@ const backing = new Map<string, string>();
   },
 } as Storage;
 
-import {
-  generateSurface3dIR,
-  type SurfaceFeeds,
-  type SurfaceTool,
-} from '@/engine/cnc/cam/surface3d';
+import { generateSurface3dIR } from '@/engine/cnc/cam/surface3d';
+import { type SurfaceFeeds, type SurfaceTool } from '@/engine/cnc/cam/surfaceFinishTipField';
 import {
   moldHeightfield,
   sampleGoalHeightfield,

@@ -168,8 +168,6 @@ import { targetRim } from '@/engine/cnc/engrave/targetRim';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, efficiencyOf, estimateCycleSeconds, estimateCycleTerms, HOP_Z, SAFE_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStatsOf, type CamMove, type CamOperation, type CamPassStep, type CycleTerms, type ProgramEfficiency, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import {
-  DEFAULT_MAX_FINISH_TIP_OPS,
-  DEFAULT_STOCK_TO_LEAVE_MM,
   generateSurface3dForGoal,
   generateSurface3dIR,
   estimateGoalMoves,
@@ -189,11 +187,15 @@ import {
   steepestWallDeg,
   type GoalRestFacts,
   type GoalSurfaceFacts,
-  type SurfaceFeeds,
   type SurfaceRestPlan,
   type Surface3dResult,
-  type SurfaceTool,
 } from '@/engine/cnc/cam/surface3d';
+import {
+  DEFAULT_MAX_FINISH_TIP_OPS,
+  DEFAULT_STOCK_TO_LEAVE_MM,
+  type SurfaceFeeds,
+  type SurfaceTool,
+} from '@/engine/cnc/cam/surfaceFinishTipField';
 import {
   DEFAULT_GRID_PITCH_MM,
   DEFAULT_MAX_CELLS,

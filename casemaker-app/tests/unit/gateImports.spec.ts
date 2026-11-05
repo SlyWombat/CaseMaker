@@ -69,6 +69,14 @@ const GATE_ROOTS = [
 /** #967's destination for `GoalHeightfield`, `sampleGoalHeightfield`, `isMold`, `moldHeightfield`. */
 const HEIGHTFIELD_MODULE = 'engine/cnc/engrave/goalHeightfield.ts';
 
+/**
+ * #966's destination for `finishTipField`/`finishingMoves` (and their own types/constants),
+ * extracted from `surface3d.ts` as a pure move because `rotaryRelief.ts` — its own goal class,
+ * out of #966's scope — depends on them directly. `cam/model/**` has its own CL-surface/
+ * dropcutter machinery and must never reach for this old-engine-era module either.
+ */
+const FINISH_TIP_FIELD_MODULE = 'engine/cnc/cam/surfaceFinishTipField.ts';
+
 const isForbidden = (file: string): boolean =>
   file.startsWith('engine/cnc/cam/') || file === 'engine/cnc/vProfile.ts' || file === 'engine/cnc/engrave/partPlan.ts';
 
@@ -154,10 +162,8 @@ describe('#964 the gate’s value-import closure carries no CAM', () => {
 
 describe('#964 the reverse rule — the rebuilt engine never plans on the gate’s field', () => {
   const MODEL = join(SRC, 'engine', 'cnc', 'cam', 'model');
-  const HEIGHTFIELD = join(SRC, HEIGHTFIELD_MODULE);
-  const applicable = existsSync(MODEL) && existsSync(HEIGHTFIELD);
 
-  it.skipIf(!applicable)(`cam/model/** does not import ${HEIGHTFIELD_MODULE}`, () => {
+  const modelFiles = (): string[] => {
     const files: string[] = [];
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -167,16 +173,31 @@ describe('#964 the reverse rule — the rebuilt engine never plans on the gate�
       }
     };
     walk(MODEL);
+    return files;
+  };
+
+  /** `cam/model/**` must never name `forbiddenModule`, even in a type-only import — A's rule is
+   * "never": the engine must not reach for it at all, so a future value import cannot slip in
+   * beside a harmless type. */
+  const assertModelNeverImports = (forbiddenModule: string): void => {
     const bad: string[] = [];
-    for (const file of files) {
+    for (const file of modelFiles()) {
       for (const edge of readImports(file, SRC)) {
-        // A type import is erased, but A's rule is "never" — the engine must not name the gate's
-        // module at all, so a future value import cannot slip in beside a harmless type.
-        if (edge.to === HEIGHTFIELD_MODULE) {
+        if (edge.to === forbiddenModule) {
           bad.push(`${relative(SRC, file).split('\\').join('/')}:${edge.line} imports ${edge.specifier}`);
         }
       }
     }
-    expect(bad, `cam/model imports the gate's heightfield module:\n${bad.join('\n')}`).toEqual([]);
-  });
+    expect(bad, `cam/model imports ${forbiddenModule}:\n${bad.join('\n')}`).toEqual([]);
+  };
+
+  it.skipIf(!(existsSync(MODEL) && existsSync(join(SRC, HEIGHTFIELD_MODULE))))(
+    `cam/model/** does not import ${HEIGHTFIELD_MODULE}`,
+    () => assertModelNeverImports(HEIGHTFIELD_MODULE),
+  );
+
+  it.skipIf(!(existsSync(MODEL) && existsSync(join(SRC, FINISH_TIP_FIELD_MODULE))))(
+    `cam/model/** does not import ${FINISH_TIP_FIELD_MODULE}`,
+    () => assertModelNeverImports(FINISH_TIP_FIELD_MODULE),
+  );
 });

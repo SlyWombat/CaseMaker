@@ -3,13 +3,12 @@
 // compares candidate balls by the residual their own tip field leaves, then by time.
 import { describe, expect, it } from 'vitest';
 import {
-  finishTipField,
   planSurfaceRest,
   restResidualVisible,
   suggestedRestRadiusMm,
   surfaceResidual,
-  type SurfaceFeeds,
 } from '@/engine/cnc/cam/surface3d';
+import { finishTipField, type SurfaceFeeds } from '@/engine/cnc/cam/surfaceFinishTipField';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import type { RapidEstimate } from '@/engine/cnc/cam/ir';
 

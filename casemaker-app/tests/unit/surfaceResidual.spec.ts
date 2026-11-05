@@ -2,7 +2,8 @@
 // cuts; where a concavity is tighter than the ball, the tip rests above the goal and that rise is
 // the material the big ball cannot take. The rest pass is planned from this measurement.
 import { describe, expect, it } from 'vitest';
-import { finishTipField, surfaceResidual } from '@/engine/cnc/cam/surface3d';
+import { surfaceResidual } from '@/engine/cnc/cam/surface3d';
+import { finishTipField } from '@/engine/cnc/cam/surfaceFinishTipField';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 
 /** A V-valley 1 mm wide per side on a flat plate: walls rise 1 mm per 0.5 mm of X away from centre. */

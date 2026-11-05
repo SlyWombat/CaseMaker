@@ -684,6 +684,19 @@ importer):
   does not name as M2 or M3 scope. **Ruled (manager, 2026-11-04): out of scope**, this note's default
   taken as-is. These two keep their own grid-pitch constants, moved beside #967's extracted
   heightfield module, never into `cam/model/`.
+  **Correction (Session A, 2026-11-05):** the claim above about `rotaryRelief.ts` was checked
+  against the actual code and found wrong — it also imports `finishTipField`, `finishingMoves`,
+  `DEFAULT_MAX_FINISH_TIP_OPS`, `DEFAULT_STOCK_TO_LEAVE_MM`, `SurfaceFeeds` and `SurfaceTool`
+  directly from `surface3d.ts` for its own CAM-over-the-field stage (R-2) — real planning
+  machinery, not grid-pitch constants. Since rotary relief stays out of scope and those two
+  functions are genuinely "the rough/finish tip-field logic" §8 elsewhere names for retirement,
+  deleting them with the rest of `surface3d.ts`'s planning functions would break a kept feature.
+  **Ruled (manager, 2026-11-05): extracted as a pure move**, same pattern as #967's heightfield
+  extraction — `finishTipField`/`finishingMoves` and their own constants/types now live in
+  `cam/surfaceFinishTipField.ts`, beside `rotaryRelief.ts`; `rotaryRelief.ts`'s own specs and golden
+  pins are unchanged, and `cam/model/**` never imports it either (`gateImports.spec.ts` pins both
+  rules the same way it already pins the heightfield one). `primitiveSurface.ts`'s own claim checks
+  out — it does not import from `surface3d.ts` at all.
 - `adaptivePool.ts`, `poolSizing.ts`, `levelPlannerPort.ts`, `adaptivePool.worker.ts` depend on
   `rough3d.ts`'s `LevelPlanRequest`/`LevelPlanResult`/`LevelPlanShared`/`LevelPlanner`/`planLevel` —
   checked, and these are the worker-pool plumbing *for* `rough3d.ts`'s own per-level planning, with no

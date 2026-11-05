@@ -10,12 +10,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  generateSurface3dIR,
-  surfaceResidual,
-  type SurfaceFeeds,
-  type SurfaceTool,
-} from '@/engine/cnc/cam/surface3d';
+import { generateSurface3dIR, surfaceResidual } from '@/engine/cnc/cam/surface3d';
+import { type SurfaceFeeds, type SurfaceTool } from '@/engine/cnc/cam/surfaceFinishTipField';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { HOP_Z, SAFE_Z } from '@/engine/cnc/cam/ir';
 import { flatEndMill } from '@/engine/cnc/tool';

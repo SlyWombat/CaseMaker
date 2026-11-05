@@ -22,7 +22,7 @@ import { adaptiveSettings, planAdaptive } from '@/engine/cnc/cam/adaptive';
 import { HOP_Z, SAFE_Z, type CamMove } from '@/engine/cnc/cam/ir';
 import { cuttingRadiusForSweep, flatEndMill } from '@/engine/cnc/tool';
 import type { Tool } from '@/engine/cnc/tool';
-import type { SurfaceFeeds } from '@/engine/cnc/cam/surface3d';
+import type { SurfaceFeeds } from '@/engine/cnc/cam/surfaceFinishTipField';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 
 const FEEDS: SurfaceFeeds = { feed: 900, plungeFeed: 300, stepDown: 0.5, roughStepOver: 1.429, finishStepOver: 0.3 };

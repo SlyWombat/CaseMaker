@@ -62,7 +62,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { finishStepOverForCusp, generateSurface3dIR, type SurfaceFeeds, type SurfaceTool } from '@/engine/cnc/cam/surface3d';
+import { finishStepOverForCusp, generateSurface3dIR } from '@/engine/cnc/cam/surface3d';
+import type { SurfaceFeeds, SurfaceTool } from '@/engine/cnc/cam/surfaceFinishTipField';
 import { sampleGoalHeightfield, DEFAULT_GRID_PITCH_MM } from '@/engine/cnc/engrave/goalHeightfield';
 import { readTargetObjectFile, clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { flatEndMill } from '@/engine/cnc/tool';

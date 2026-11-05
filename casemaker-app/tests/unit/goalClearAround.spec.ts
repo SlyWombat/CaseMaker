@@ -13,11 +13,8 @@
  * MOLD is unchanged (its rim IS the stock top).
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  generateSurface3dIR,
-  type SurfaceFeeds,
-  type SurfaceTool,
-} from '@/engine/cnc/cam/surface3d';
+import { generateSurface3dIR } from '@/engine/cnc/cam/surface3d';
+import { type SurfaceFeeds, type SurfaceTool } from '@/engine/cnc/cam/surfaceFinishTipField';
 import {
   sampleGoalHeightfield,
   type GoalHeightfield,
