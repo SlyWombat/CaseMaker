@@ -41,7 +41,8 @@ import { pocket } from './ops/pocket';
 import { clSurface } from './clsurface';
 import { rough } from './ops/rough';
 import { rest } from './ops/rest';
-import { finish } from './ops/finish';
+import { DEFAULT_FINISH_SCALLOP_MM, finish, finishKindFor } from './ops/finish';
+import { FLAT_SURFACE_MAX_SLOPE_DEG } from './settings';
 import { pencil } from './ops/pencil';
 import { chamfer } from './ops/chamfer';
 import { contour as contourOp, throughHole } from './ops/contour';
@@ -86,6 +87,9 @@ export interface OpOutcome {
   passes: PassRef[];
   /** What the op removed, per depth — the material state's input. Absent for an op that removes nothing new. */
   cleared?: RegionAtZ[];
+  /** #960 — statements the op makes about its own method (a skipped wall band, a stated slope
+   *  threshold), carried into the plan's notes so the operator sees them. */
+  notes?: string[];
 }
 
 export type RegionKind = 'pocket' | 'island-top' | 'curved' | 'contour' | 'rim';
@@ -1129,6 +1133,11 @@ export interface PlanCurvedOptions {
    * band stays its own number.
    */
   finishScallopMm?: number;
+  /**
+   * #960 — THE FLAT/BALL THRESHOLD, degrees. A parameter while the picture decides the value
+   * (equal-cusp 1.9° vs vendor-like 7.1°); the constant is shared with C's #959 skin pass.
+   */
+  flatFinishMaxSlopeDeg?: number;
   /** The rings' spacing; absent → the flat's own radius. */
   stepOverMm?: number;
   /** `flat`'s own feed/plunge — kept as the fallback every tool used before the review's finding
@@ -1414,13 +1423,21 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       return clBallCache;
     };
     const depth = Math.max(opts.stepDownMm, base.zTop - base.zBottom);
+    // #960 — FLAT OR BALL BY THE REGION'S OWN SLOPE, with the threshold stated on the plan; the
+    // constant is a parameter (shared with C's #959 skin pass) while the picture decides 1.9° vs 7.1°.
+    const finishKind = finishKindFor(roughRegion, opts.geometry.triangles, opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG);
+    notes.push(
+      `the ${roughRegion.id} finish runs as a ${finishKind === 'flat-raster' ? 'flat-following raster' : 'ball at constant scallop'} ` +
+        `(slopes ${roughRegion.slopeDeg[0].toFixed(1)}–${roughRegion.slopeDeg[1].toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG).toFixed(2)}°)`,
+    );
     attempt('finish', ball, ref, () => finish({
       cutter: ball,
       region: roughRegion,
       regionRef: roughRef,
       clSurface: clBall(),
-      kind: 'ball-scallop',
-      scallopMm: opts.finishScallopMm ?? opts.bandMm,
+      kind: finishKind,
+      mesh: opts.geometry.triangles,
+      scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
       stepDownMm: depth,
       feeds: feedsOf(paramsFor(ball)),
       safeZMm: opts.safeZMm,
