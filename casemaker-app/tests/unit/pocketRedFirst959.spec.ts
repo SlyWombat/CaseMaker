@@ -263,4 +263,30 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     const reachable = 400 - (36 - 9 * Math.PI);
     expect(areaOf(floor.boundary)).toBeLessThanOrEqual(reachable + 0.05);
   });
+
+  // #962 — THE ROW-END LEG LEVER (D's air attribution, 2026-11-05): a same-level join inside the
+  // pocket's own open area must ride the floor instead of lifting. RED before the caller change
+  // (the tray's flat-6 pocket pass alone carries 151 such legs).
+  it('(6) a same-level pocket join rides the floor — no retract rapid between passes', () => {
+    const s = tl.Manifold.cube([40, 30, 10]).subtract(tl.Manifold.cube([30, 20, 4]).translate([5, 5, 6]));
+    const tree = treeOf(s, 10);
+    const result = plan(tree, [flat(6, 1)]);
+    const legs: string[] = [];
+    for (const op of result.ops.filter((o) => o.kind === 'pocket')) {
+      const moves = op.outcome.ir.operations.flatMap((o) => o.moves);
+      let prev: { x: number; y: number; z: number } | null = null;
+      let seenFeed = false;
+      moves.forEach((m, i) => {
+        if (m.x === undefined || m.y === undefined || m.z === undefined) return;
+        if (m.kind === 'feed') seenFeed = true;
+        // The op's FINAL retract to the safe plane is not a join — it is how every op ends.
+        const isFinalRetract = i === moves.length - 1 && m.kind === 'rapid';
+        if (m.kind === 'rapid' && !isFinalRetract && prev !== null && seenFeed && Math.hypot(m.x - prev.x, m.y - prev.y) < 0.05) {
+          legs.push(`pocket join z ${prev.z.toFixed(2)} -> ${m.z.toFixed(2)}`);
+        }
+        prev = { x: m.x, y: m.y, z: m.z };
+      });
+    }
+    expect(legs, `same-level retract rapids:\n${legs.slice(0, 8).join('\n')}`).toEqual([]);
+  });
 });

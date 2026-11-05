@@ -29,12 +29,13 @@
 
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import type { RapidEstimate, ToolpathIR } from '@/engine/cnc/cam/ir';
-import { estimateCycleSeconds } from '@/engine/cnc/cam/ir';
+import { moveSeconds, estimateCycleSeconds } from '@/engine/cnc/cam/ir';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import { pocketLoops, type OffsetFn, type Polygons } from '@/engine/cnc/cam/pocket';
 import { tourNearest } from '@/engine/cnc/cam/tour';
 import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
-import { link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
+import { DEFAULT_SHORT_HOP_DIAMETERS, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
+import { ridesCutSurface } from '../rideTest';
 import { cutterKeyOf } from '../sequence';
 import type { PocketNode } from '../features';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
@@ -253,11 +254,27 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
           moves.push({ kind: 'rapid', x: start[0], y: start[1], z: opts.hopZMm });
           moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
         } else if (prevExit[2] === z) {
-          // Same level: `open`'s own field is accurate everywhere on it (the whole op's footprint
-          // is the same at every Z), so `link()` alone decides feed vs. retract.
+          // Same level. `link()`'s disc test refuses every join near the pocket wall (the disc
+          // overhangs `open` even when the centre line is clear); #962 rides the join instead when
+          // its centre line stays inside `open` at this level, the join is inside Kiri's short hop,
+          // and the feed beats the retract (time guard). The band it crosses is what this ring pass
+          // is clearing anyway — the same cut the passes either side of it make.
           const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
           const to: LinkPoint = { x: start[0], y: start[1], z };
-          moves.push(...link(from, to, linkOptions));
+          const diameterMm = cuttingDiameter(opts.cutter) ?? 0;
+          const rideLength = Math.hypot(to.x - from.x, to.y - from.y);
+          const rideSeconds = moveSeconds(rideLength, opts.feeds.feedMmPerMin, opts.rapid.accelMmPerS2);
+          const riseMm = Math.abs(opts.hopZMm - z);
+          const retractSeconds =
+            moveSeconds(riseMm, opts.rapid.zMmPerMin, opts.rapid.accelMmPerS2) +
+            moveSeconds(rideLength, opts.rapid.xyMmPerMin, opts.rapid.accelMmPerS2) +
+            moveSeconds(riseMm, opts.feeds.plungeFeedMmPerMin, opts.rapid.accelMmPerS2);
+          const targetAt = (x: number, y: number): number | null => (pointInPolygons(open, x, y) ? z : null);
+          const ride =
+            rideSeconds < retractSeconds &&
+            ridesCutSurface(from, to, targetAt, 1e-6, DEFAULT_SHORT_HOP_DIAMETERS * diameterMm, 0.5);
+          if (ride) moves.push({ kind: 'feed', x: to.x, y: to.y, z, f: opts.feeds.feedMmPerMin });
+          else moves.push(...link(from, to, linkOptions));
         } else {
           // A level change (advisor's review on 9e976f0b): `open` reports every point in the
           // node's footprint as reachable, with no notion of "not yet, at THIS depth" — handing
@@ -266,9 +283,26 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
           // part of the move is linked at the level JUST FINISHED, where `open` is honestly
           // accurate (everything in it has actually been swept by now); the vertical part is
           // always a plain feed at plungeFeed, never left to `link()`'s own feed rate.
-          const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
-          const landing: LinkPoint = { x: start[0], y: start[1], z: prevExit[2] };
-          moves.push(...link(from, landing, linkOptions));
+          const finishedZ = prevExit[2];
+          const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: finishedZ };
+          const landing: LinkPoint = { x: start[0], y: start[1], z: finishedZ };
+          // #962 — the horizontal part at the level JUST FINISHED takes the same ride rule: that
+          // level is fully cut wherever `open` says so, and the disc test in `link()` still refuses
+          // the join near the wall. Same cap, same time guard.
+          const diameterMm = cuttingDiameter(opts.cutter) ?? 0;
+          const rideLength = Math.hypot(landing.x - from.x, landing.y - from.y);
+          const rideSeconds = moveSeconds(rideLength, opts.feeds.feedMmPerMin, opts.rapid.accelMmPerS2);
+          const riseMm = Math.abs(opts.hopZMm - finishedZ);
+          const retractSeconds =
+            moveSeconds(riseMm, opts.rapid.zMmPerMin, opts.rapid.accelMmPerS2) +
+            moveSeconds(rideLength, opts.rapid.xyMmPerMin, opts.rapid.accelMmPerS2) +
+            moveSeconds(riseMm, opts.feeds.plungeFeedMmPerMin, opts.rapid.accelMmPerS2);
+          const targetAt = (x: number, y: number): number | null => (pointInPolygons(open, x, y) ? finishedZ : null);
+          const ride =
+            rideSeconds < retractSeconds &&
+            ridesCutSurface(from, landing, targetAt, 1e-6, DEFAULT_SHORT_HOP_DIAMETERS * diameterMm, 0.5);
+          if (ride) moves.push({ kind: 'feed', x: landing.x, y: landing.y, z: finishedZ, f: opts.feeds.feedMmPerMin });
+          else moves.push(...link(from, landing, linkOptions));
           moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
         }
         moves.push(...traceRing(ring, z, opts.feeds.feedMmPerMin));
