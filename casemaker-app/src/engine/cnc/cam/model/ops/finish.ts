@@ -67,6 +67,39 @@ export interface FinishOpOptions {
    * footprint's own notches.
    */
   maskCells?: (x: number, y: number) => boolean;
+  /**
+   * #962 — THE DESIGN'S TOP AT (x, y), in this op's datum, for the material field where the CL
+   * surface has no answer (past the region's own footprint). The field feeds `link()`'s tests and
+   * the disc-aware down-leg floor, which reach up to the cutter's radius past the region's edge;
+   * the region's own `zTop` is NOT an upper bound there — a wall or land beside a low region can
+   * stand higher, and a rapid floored at zTop would run into it. The plan states the goal/mesh
+   * top (the honest bound at that XY); where even that is silent, `stockTopZMm` is the only bound
+   * left. Absent → the field states nothing past the footprint, exactly as before.
+   */
+  materialTopAt?: (x: number, y: number) => number | null;
+  /** The stock top in this op's datum — the last-resort bound past the footprint (see above). */
+  stockTopZMm?: number;
+}
+
+/**
+ * THE OP'S MATERIAL FIELD (#962; exported for the red-first that pins the bound past the
+ * footprint). Inside the region's reach it is the level just finished, else the CL; past the
+ * footprint it is the DESIGN's top there (`materialTopAt`), the stock top where the design is
+ * silent — never the region's own `zTop`, which a neighbouring wall can out-top.
+ */
+export function finishMaterial(
+  opts: Pick<FinishOpOptions, 'clSurface' | 'materialTopAt' | 'stockTopZMm'>,
+  levelZ: number,
+): MaterialField {
+  return {
+    topAt: (x, y) => {
+      const cl = opts.clSurface.dropCutter(x, y);
+      if (cl !== null) return Math.max(levelZ, cl);
+      const design = opts.materialTopAt?.(x, y);
+      if (design !== null && design !== undefined) return design;
+      return opts.stockTopZMm ?? Number.POSITIVE_INFINITY;
+    },
+  };
 }
 
 /**
@@ -222,20 +255,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // that level's own Z, never the level about to start, so a link is never approved through a
   // deeper target this op has not actually reached yet. Outside the footprint the field states
   // nothing (`+Infinity`), so a link endpoint off the region's own edge always retracts.
-  const materialFor = (levelZ: number): MaterialField => ({
-    topAt: (x, y) => {
-      const cl = opts.clSurface.dropCutter(x, y);
-      if (cl !== null) return Math.max(levelZ, cl);
-      // #962/B's disc-aware floor (61ea3dd6): the cutter's own footprint reaches PAST the region's
-      // edge, where the CL surface has no answer. The honest finite bound there is the stock top
-      // the region itself tops at — no material in this job stands above `zTop`, so a rapid floored
-      // at `zTop` + hop clears it, and a stay-down link outside the region still needs z >= zTop,
-      // which that same bound clears. Reporting +Infinity here cost every edge-flush row
-      // turnaround the rapid-to-floor split; with the tour most of those turnarounds are gone, but
-      // the ones that remain deserve the split.
-      return opts.region.zTop;
-    },
-  });
+  const materialFor = (levelZ: number): MaterialField => finishMaterial(opts, levelZ);
   const linkOptionsFor = (levelZ: number): LinkOptions => ({
     material: materialFor(levelZ),
     clearanceZ: opts.regionRef.regionClearanceZ,
