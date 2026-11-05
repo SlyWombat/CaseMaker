@@ -432,6 +432,102 @@
               ],
               "description": "The two-program summary, or null when only one program ran."
             },
+            "plan": {
+              "description": "The model engine’s plan for the run; omitted when the old engine planned it.",
+              "properties": {
+                "features": {
+                  "description": "What the engine recognised, in the operator’s words (the same sentence the panel and the sheet print).",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "linking": {
+                  "description": "The linking facts the plan states.",
+                  "properties": {
+                    "airFractionPct": {
+                      "description": "The share of the cycle spent in air, per cent.",
+                      "type": "number"
+                    },
+                    "hopsCount": {
+                      "description": "Retracts between regions.",
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "rapidsCount": {
+                      "description": "Rapids in the linked program.",
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "rapidsCount",
+                    "hopsCount",
+                    "airFractionPct"
+                  ],
+                  "type": "object"
+                },
+                "notes": {
+                  "description": "The plan’s own statements — what it could not cut, and why.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "sequence": {
+                  "description": "The costed cutter sequence, in execution order.",
+                  "items": {
+                    "properties": {
+                      "cutterKey": {
+                        "description": "The cutter’s library key.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "house": {
+                        "description": "True when the cutter is the location’s own, false for the catalogue.",
+                        "type": "boolean"
+                      },
+                      "pinned": {
+                        "description": "True when the operator pinned this cutter rather than the engine choosing it.",
+                        "type": "boolean"
+                      },
+                      "seconds": {
+                        "description": "That cutter’s own estimated cycle time, seconds.",
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "toolChangeSeconds": {
+                        "description": "The tool change charged before this program, seconds.",
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "cutterKey",
+                      "seconds",
+                      "toolChangeSeconds",
+                      "pinned",
+                      "house"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "totalSeconds": {
+                  "description": "The whole job’s estimated cycle time, seconds.",
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "features",
+                "sequence",
+                "linking",
+                "totalSeconds",
+                "notes"
+              ],
+              "type": "object"
+            },
             "programs": {
               "description": "Every program the run wrote, in the order written.",
               "items": {

@@ -81,6 +81,7 @@ import { resolvedFeedsTable } from '../../../src/engine/cnc/feeds';
 import { drillSettings } from '../../../src/engine/cnc/cam/drillBit';
 import { pickCandidates, pickForEngrave } from '../../../src/workers/sim/smartPickRun';
 import { explainSmartPick } from '../../../src/engine/cnc/engrave/smartPickWords';
+import type { SetupPlan } from '../../../src/engine/cnc/cam/model/plan';
 import type { ToolLibraryEntry } from '../../../src/engine/cnc/toolLibrary';
 import { createSimSession, type SimDiagnostic, type SimLoadOk, type SimSession } from '../../../src/workers/sim/session';
 import { unionRemoval, restMachining } from '../../../src/workers/sim/engraveRest';
@@ -175,6 +176,7 @@ import {
   diagnostic,
   gateForStage,
   goalBlockFromReport,
+  planBlockFromSetupPlan,
   provenance,
   provenanceForDefault,
   RECEIPT_VERSION,
@@ -428,6 +430,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   const runProvenance: ReceiptProvenance[] = [];
   const runRefusals: ReceiptRefusal[] = [];
   const programs: EngraveProgram[] = [];
+  // #963 — the model engine's plan for this run, when the rebuilt engine planned it (the flag-on
+  // path). Read loosely until `EngraveGenerated` declares it: the seam's own field.
+  let runPlan: ReturnType<typeof planBlockFromSetupPlan> | null = null;
   /** Where each preview PNG belongs on the receipt: the program that drew it (#478). */
   const imageTargets: { svgFile: string; pngFile: string; program: EngraveProgram }[] = [];
   const provenanceNames = new Set<string>();
@@ -502,6 +507,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         coupon,
         pair,
         ...(runGoal === undefined || runGoal === null ? {} : { goal: runGoal }),
+        // #963 — the plan, only when the rebuilt engine planned the run.
+        ...(runPlan === null ? {} : { plan: runPlan }),
         ...(bed === null ? {} : { bed }),
       },
     });
@@ -958,6 +965,11 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       // #881 — the pipeline is async (a pool can plan the roughing levels); the CLI runs it with
       // no pool, so this is the same serial plan it always was.
       generated = await engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, shop);
+      // #963 — THE MODEL ENGINE'S PLAN, when the rebuilt engine planned this run: the receipt and
+      // the sheet state what it recognised, the cutters it priced and how it joined the passes.
+      const seamPlan = (generated as EngraveGenerated & { plan?: { perSetup?: SetupPlan[] } | null }).plan;
+      const firstSetup = seamPlan?.perSetup?.[0];
+      if (firstSetup !== undefined) runPlan = planBlockFromSetupPlan(firstSetup);
     } catch (e) {
       if (isCliExit(e)) throw e;
       return {

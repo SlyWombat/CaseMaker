@@ -4,7 +4,8 @@
 import { describe, expect, it } from 'vitest';
 
 import type { GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
-import { goalBlockFromReport } from '@/platform/headless/receipt';
+import { goalBlockFromReport, planBlockFromSetupPlan, receiptSchema } from '@/platform/headless/receipt';
+import { fixtureSetupPlan } from './fixtures/setupPlan';
 
 function report(over: Partial<GoalCutIntoReport> = {}): GoalCutIntoReport {
   return {
@@ -82,5 +83,44 @@ describe('#953 the receipt goal block', () => {
     );
     expect(block.wholeSurface).toEqual(wholeSurface);
     expect(block.columnCutInto).toEqual(columnCutInto);
+  });
+});
+
+// #963 — the receipt's plan block: the same words the panel and the sheet print, as data, and
+// only on a run the rebuilt engine planned.
+describe('#963 the receipt’s plan block', () => {
+  it('carries the features, the costed sequence, the linking facts and the notes', () => {
+    const plan = fixtureSetupPlan({ notes: ['p2: not cut — planning failed (planned nothing)'] });
+    const block = planBlockFromSetupPlan(plan);
+    expect(block.features).toBe('6 pockets, 1 outer contour, 1 curved region');
+    expect(block.sequence).toHaveLength(4);
+    expect(block.sequence[0]).toEqual({ cutterKey: 'flat-6', seconds: 18 * 60, toolChangeSeconds: 0, pinned: false, house: true });
+    expect(block.linking).toEqual({ rapidsCount: 384, hopsCount: 12, airFractionPct: 3.2 });
+    expect(block.totalSeconds).toBe(47 * 60 + 30);
+    expect(block.notes).toEqual(['p2: not cut — planning failed (planned nothing)']);
+  });
+
+  it('parses inside a receipt, and a receipt without one still parses', () => {
+    const base = {
+      version: 3,
+      command: 'engrave' as const,
+      ok: true,
+      stage: 'done',
+      gate: null,
+      inputs: [],
+      outputs: [],
+      diagnostics: [],
+      provenance: [],
+      refusals: [],
+      details: {
+        kind: 'job' as const,
+        outDir: '/tmp',
+        programs: [],
+        coupon: null,
+        pair: null,
+      },
+    };
+    expect(receiptSchema.safeParse(base).success).toBe(true);
+    expect(receiptSchema.safeParse({ ...base, details: { ...base.details, plan: planBlockFromSetupPlan(fixtureSetupPlan()) } }).success).toBe(true);
   });
 });

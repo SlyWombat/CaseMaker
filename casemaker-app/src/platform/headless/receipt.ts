@@ -19,6 +19,8 @@
 
 import { z } from 'zod';
 import type { GoalCutIntoReport } from '../../engine/cnc/engrave/designCheck';
+import type { SetupPlan } from '../../engine/cnc/cam/model/plan';
+import { featureSentence } from '../../engine/cnc/engrave/planWords';
 
 /**
  * The receipt document's own version. A changed SHAPE bumps it; a new optional field does not.
@@ -285,6 +287,38 @@ export const engravePairSchema = z
   .describe('The two-program summary, when a rest pass ran.');
 
 /** Everything `casemaker engrave` reports beyond the receipt envelope. */
+/**
+ * #963 — THE MODEL ENGINE'S PLAN, AS THE RECEIPT CARRIES IT: what it recognised, the cutters it
+ * priced with their own times, and how the passes are joined. Present only on a run the rebuilt
+ * engine planned (the flag-on path); omitted otherwise, so every pre-#966 receipt stays
+ * byte-identical.
+ */
+export const engravePlanSchema = z
+  .object({
+    features: z.string().min(1).describe('What the engine recognised, in the operator’s words (the same sentence the panel and the sheet print).'),
+    sequence: z
+      .array(
+        z.object({
+          cutterKey: z.string().min(1).describe('The cutter’s library key.'),
+          seconds: z.number().nonnegative().describe('That cutter’s own estimated cycle time, seconds.'),
+          toolChangeSeconds: z.number().nonnegative().describe('The tool change charged before this program, seconds.'),
+          pinned: z.boolean().describe('True when the operator pinned this cutter rather than the engine choosing it.'),
+          house: z.boolean().describe('True when the cutter is the location’s own, false for the catalogue.'),
+        }),
+      )
+      .describe('The costed cutter sequence, in execution order.'),
+    linking: z
+      .object({
+        rapidsCount: z.number().int().nonnegative().describe('Rapids in the linked program.'),
+        hopsCount: z.number().int().nonnegative().describe('Retracts between regions.'),
+        airFractionPct: z.number().describe('The share of the cycle spent in air, per cent.'),
+      })
+      .describe('The linking facts the plan states.'),
+    totalSeconds: z.number().nonnegative().describe('The whole job’s estimated cycle time, seconds.'),
+    notes: z.array(z.string()).describe('The plan’s own statements — what it could not cut, and why.'),
+  })
+  .describe('The model engine’s plan for the run.');
+
 export const engraveDetailsSchema = z
   .object({
     kind: z.enum(['job', 'design', 'coupon']).describe('Which input built the run: a job, a 3MF design, or a coupon spec.'),
@@ -293,6 +327,8 @@ export const engraveDetailsSchema = z
     // #953 — the RUN's goal read (every program's stamp folded together), the number the Cut card
     // shows. Omitted for a job with no goal, so those receipts stay byte-identical.
     goal: engraveGoalSchema.optional().describe('The run’s combined goal check, for a goal job; omitted otherwise.'),
+    // #963 — the model engine's plan, only when the rebuilt engine planned the run.
+    plan: engravePlanSchema.optional().describe('The model engine’s plan for the run; omitted when the old engine planned it.'),
     coupon: engraveCouponSchema.nullable().describe('The coupon summary, or null for a job or design run.'),
     pair: engravePairSchema.nullable().describe('The two-program summary, or null when only one program ran.'),
     bed: z
@@ -651,6 +687,34 @@ export function goalBlockFromReport(report: GoalCutIntoReport): EngraveGoal {
     wholeSurface: extended.wholeSurface ?? null,
     columnCutInto: extended.columnCutInto ?? null,
     sentence: report.sentence,
+  };
+}
+
+/**
+ * #963 — THE PLAN BLOCK, from a `SetupPlan` the rebuilt engine made: the features sentence, the
+ * costed sequence (each cutter with its own time and the tool change before it), the linking
+ * facts and the plan's own notes. The same words the panel and the sheet print, through the same
+ * builders, so the receipt cannot disagree with the screen.
+ */
+export function planBlockFromSetupPlan(plan: SetupPlan): {
+  features: string;
+  sequence: { cutterKey: string; seconds: number; toolChangeSeconds: number; pinned: boolean; house: boolean }[];
+  linking: { rapidsCount: number; hopsCount: number; airFractionPct: number };
+  totalSeconds: number;
+  notes: string[];
+} {
+  return {
+    features: featureSentence(plan.features),
+    sequence: plan.sequence.map((entry) => ({
+      cutterKey: entry.cutterKey,
+      seconds: entry.cost.totalSeconds,
+      toolChangeSeconds: entry.cost.toolChangeSeconds,
+      pinned: entry.pinned,
+      house: entry.house,
+    })),
+    linking: { ...plan.linking },
+    totalSeconds: plan.totalCostSeconds,
+    notes: [...plan.notes],
   };
 }
 export type ExportDetails = z.infer<typeof exportDetailsSchema>;
