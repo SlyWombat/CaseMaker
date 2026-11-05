@@ -73,6 +73,15 @@ export interface RoughOpOptions {
   materialTopAt?: (x: number, y: number) => number | null;
   /** The stock top in this op's datum — the last-resort bound past the grid (see above). */
   stockTopZMm?: number;
+  /**
+   * #982 — BALL-AS-ROUGH ONLY (the no-flat fallback): every cut point must lie inside the
+   * region's own footprint. A cell straddling the footprint edge keeps only its inside corner's
+   * CL in the sampled grid, and cutting at its outside centre puts the ball's flank — which
+   * reaches a full radius above the tip — into the part beside it (the balls-only elephant: the
+   * centre's exact CL −1.432, the grid's lone inside corner −2.407, 0.95 mm of cut-into). Absent
+   * → the flat's own path, unchanged.
+   */
+  cutPointInRegion?: boolean;
 }
 
 /**
@@ -214,9 +223,14 @@ function maskLoops(
   pitch: number,
   levelZ: number,
   marginMm: number,
+  cutPoint: (i: number, j: number) => boolean,
 ): Polygons {
   const inside = (i: number, j: number): boolean =>
-    i >= 0 && j >= 0 && i < nx && j < ny && Number.isFinite(target[j * nx + i]!) && target[j * nx + i]! + marginMm < levelZ;
+    i >= 0 && j >= 0 && i < nx && j < ny &&
+    Number.isFinite(target[j * nx + i]!) && target[j * nx + i]! + marginMm < levelZ &&
+    // #982 — the ball fallback's rule: a cell whose own centre is outside the region never joins a
+    // level's mask (the rings are offset from the mask, so a straddling cell would put one there).
+    cutPoint(i, j);
   return maskLoopsFromPredicate(nx, ny, x0, y0, pitch, inside);
 }
 
@@ -272,19 +286,28 @@ export function rough(opts: RoughOpOptions): OpOutcome {
   // ONE sampling pass: each cell's target is the MAX of the drop-cutter over the cell's centre and
   // four corners — a cell that straddles a rise is judged by its high side, never its low one.
   const target = new Float64Array(nx * ny).fill(Number.NaN);
+  // #982 — WHERE THE CELL'S OWN CENTRE ANSWERS (inside the region): the first sample of each cell
+  // is its centre, so this costs nothing. Read only when `cutPointInRegion` is set.
+  const centreIn = new Uint8Array(nx * ny);
   const half = pitch / 2;
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
       const x = min[0] + i * pitch;
       const y = min[1] + j * pitch;
       let hi = -Infinity;
+      let first = true;
       for (const [dx, dy] of [[0, 0], [-half, -half], [half, -half], [-half, half], [half, half]] as const) {
         const cl = opts.clSurface.dropCutter(x + dx, y + dy);
+        if (first) {
+          centreIn[j * nx + i] = cl === null ? 0 : 1;
+          first = false;
+        }
         if (cl !== null && cl > hi) hi = cl;
       }
       if (hi > -Infinity) target[j * nx + i] = hi + leave;
     }
   }
+  const cutPoint = (i: number, j: number): boolean => opts.cutPointInRegion !== true || centreIn[j * nx + i] === 1;
 
   // The discretisation guard on the mask's own boundary: a cell is judged by its MAX sample
   // (centre and four corners), and `pocketLoops` simplifies ring vertices by
@@ -331,7 +354,7 @@ export function rough(opts: RoughOpOptions): OpOutcome {
 
   let cutLevels = 0;
   for (const z of depthPasses(opts.region.zTop, opts.region.zBottom, opts.stepDownMm)) {
-    const polygons = maskLoops(target, nx, ny, min[0], min[1], pitch, z, margin);
+    const polygons = maskLoops(target, nx, ny, min[0], min[1], pitch, z, margin, cutPoint);
     if (polygons.length === 0) continue;
     const steps = pocketLoops(polygons, toolRadius, stepOver, opts.offset);
     if (steps.length === 0) continue;
@@ -382,7 +405,10 @@ export function rough(opts: RoughOpOptions): OpOutcome {
     const z = target[j * nx + i]!;
     if (!Number.isFinite(z)) return null;
     const cl = z - skimLeave;
-    return cl < opts.region.zTop && cl >= skimFirstLevel ? cl : null;
+    if (!(cl < opts.region.zTop && cl >= skimFirstLevel)) return null;
+    // #982 — THE CELL IS CUT AT ITS OWN CENTRE, WHICH MUST BE IN THE REGION (the ball fallback's
+    // rule; see `cutPointInRegion`): a straddling cell's value is its one inside corner's.
+    return cutPoint(i, j) ? cl : null;
   };
   // #962 — THE SKIM'S OWN STANDING SURFACE, the field its joins read. `materialFor` reports the
   // rough's TARGET (cl + band) everywhere: the material the Z-levels are to LEAVE. But the skim
@@ -400,6 +426,10 @@ export function rough(opts: RoughOpOptions): OpOutcome {
     if (i < 0 || j < 0 || i >= nx || j >= ny) return null;
     const t = target[j * nx + i]!;
     if (!Number.isFinite(t)) return null;
+    // #982 — a cell whose own centre is outside the region is NOT cut by the skim, so it must not
+    // report the cut surface either: the ride test then reads the design top (materialTopAt) and
+    // retracts, instead of riding a join 0.44 mm into the part beside it.
+    if (!cutPoint(i, j)) return null;
     const cl = t - skimLeave;
     // The rough's skim has no slope gate (that belongs to the skin op): it cuts every cell of its
     // band, so every band cell reports its own cut surface here.
@@ -446,7 +476,16 @@ export function rough(opts: RoughOpOptions): OpOutcome {
         opts.clSurface.toleranceMm,
         DEFAULT_SHORT_HOP_DIAMETERS * 2 * toolRadius,
         pitch,
-      );
+      ) &&
+        // #982 — THE BALL-AS-ROUGH FALLBACK PROVES THE RIDE EXACTLY. `ridesCutSurface` reads the
+        // standing field along the join's CENTRE line only; the ball's disc reaches a full radius
+        // sideways, and the centre-only proof let a 3.6 mm ride cut 0.44 mm into the part beside it
+        // (the balls-only elephant, op 4's join at y = 19.236). The exact CL at a point already
+        // accounts for the whole disc — the ball's tip there first touches the design — so the
+        // ride must also pass `pathClClear` against the surface, the same necessary proof the
+        // link above/retract below uses. Off for the flat, whose own path is unchanged.
+        (opts.cutPointInRegion !== true ||
+          pathClClear(from, to, (x, y) => opts.clSurface.dropCutter(x, y), Math.max(pitch / 4, 0.05), opts.clSurface.toleranceMm));
       if (rides) {
         const f = to.z < from.z - 1e-9 ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
         moves.push({ kind: 'feed', x: to.x, y: to.y, z: to.z, f });
@@ -745,7 +784,7 @@ export function skin(opts: SkinOpOptions): OpOutcome {
     // rough's way of never cutting AT its CL — but a skin's last level sits exactly on the part
     // top, and the whole point is to reach it. A NEGATIVE tolerance makes the comparison
     // inclusive (`target <= levelZ`), the one place that sign is right.
-    const polygons = maskLoops(masked, nx, ny, min[0], min[1], pitch, z, -1e-6);
+    const polygons = maskLoops(masked, nx, ny, min[0], min[1], pitch, z, -1e-6, () => true);
     if (polygons.length === 0) continue;
     const steps = pocketLoops(polygons, toolRadius, stepOver, opts.offset);
     if (steps.length === 0) continue;

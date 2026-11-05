@@ -2281,6 +2281,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           stepOverMm: opts.stepOverMm,
           feeds: feedsOf(paramsFor(flat)),
           offset: opts.offset,
+          // #982 — the ball-as-rough fallback (no flat in the set): every cut point must lie
+          // inside the region's own footprint, and the skim's standing field must say so too.
+          ...(opts.ball !== undefined && opts.ball === opts.flat ? { cutPointInRegion: true } : {}),
           safeZMm: opts.safeZMm,
           hopZMm: opts.hopZMm,
           toolNumber: opts.toolNumberFor(flat),
