@@ -44,6 +44,20 @@ export interface ClCutterFixture {
 export interface ClFixture {
   id: string;
   description: string;
+  /**
+   * THE FIXTURE'S OWN LICENCE HEADER (#943's ruling, 2026-11-05): both references' outputs were
+   * generated OFFLINE by the committed generator scripts, at the library versions stated in
+   * `provenance`; only their NUMBERS are stored here — no OpenCamLib (LGPL) or PyCAM (GPL-3.0)
+   * source is copied or linked into the product or the tests. The spec asserts every field, so a
+   * regenerated fixture cannot silently drop the statement.
+   */
+  licence: {
+    statement: string;
+    generatedOffline: boolean;
+    generatorsCommitted: string[];
+    numbersOnly: boolean;
+    sourceCopiedOrLinked: boolean;
+  };
   mesh: { vertices: [number, number, number][]; triangles: [number, number, number][] };
   grid: { x0: number; x1: number; y0: number; y1: number; stepMm: number };
   cutters: ClCutterFixture[];

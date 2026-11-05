@@ -4,8 +4,10 @@
 // the cutter's swept link lies inside material ALREADY removed at that depth, and only under the
 // two prior-art guards: Kiri:Moto's short hop (2 × the cutter's diameter) and FreeCAD's
 // KeepToolDownRatio (a detour at most that many times the direct distance). Otherwise it retracts
-// to the region's clearance plane, traverses, and plunges. Vertical legs are fed at the plunge
-// feed, never the cutting feed (#956 §5, Review B's F8).
+// to the region's clearance plane (feed replaced by a rapid both ways here — the manager's ruling
+// refining #956 §5, Review B's F8), then rapids down again to the material field's own report at
+// the landing plus the default 1 mm hop clearance (`DEFAULT_HOP_CLEARANCE_MM`, these fixtures pass
+// no `hopClearanceMm` of their own), feeding only the part of the down leg below that.
 import { describe, expect, it } from 'vitest';
 
 import type { CamMove } from '@/engine/cnc/cam/ir';
@@ -76,26 +78,31 @@ describe('#962 link decisions', () => {
     expect(moves[0]).toMatchObject({ kind: 'feed', x: 5, y: 0, z: -5, f: 800 });
   });
 
-  it('retracts over standing material: feed up, rapid across, feed down — all verticals at the plunge feed', () => {
-    // A rib at x ∈ (2, 3) left standing at the stock top.
+  it('retracts over standing material: rapid up, rapid across, rapid down to the floor, feed the rest', () => {
+    // A rib at x ∈ (2, 3) left standing at the stock top. The landing (5, 0) itself reads cleared
+    // to -5, so the down leg's floor is -5 + 1 (the default hop clearance) = -4.
     const material = field((x) => (x > 2 && x < 3 ? 0 : -5));
     const moves = link(P(0, 0), P(5, 0), opts({ material }));
-    expect(moves).toHaveLength(3);
-    expect(moves[0]).toMatchObject({ kind: 'feed', x: 0, y: 0, z: 5, f: 200 });
+    expect(moves).toHaveLength(4);
+    expect(moves[0]).toMatchObject({ kind: 'rapid', x: 0, y: 0, z: 5 });
     expect(moves[1]).toMatchObject({ kind: 'rapid', x: 5, y: 0, z: 5 });
-    expect(moves[2]).toMatchObject({ kind: 'feed', x: 5, y: 0, z: -5, f: 200 });
+    expect(moves[2]).toMatchObject({ kind: 'rapid', x: 5, y: 0, z: -4 });
+    expect(moves[3]).toMatchObject({ kind: 'feed', x: 5, y: 0, z: -5, f: 200 });
   });
 
   it("Kiri's guard: a clear link longer than 2 × the cutter diameter retracts", () => {
     const moves = link(P(0, 0), P(15, 0), opts());
-    expect(moves).toHaveLength(3);
-    expect(feedMoves(moves).every((m) => m.f === 200)).toBe(true); // both are vertical legs
+    expect(moves).toHaveLength(4); // rapid up, rapid across, rapid down to the floor, feed the rest
+    expect(moves.filter((m) => m.kind === 'rapid')).toHaveLength(3);
+    const fed = feedMoves(moves);
+    expect(fed).toHaveLength(1); // only the down leg's final approach, below the floor
+    expect(fed.every((m) => m.f === 200)).toBe(true);
   });
 
   it('tests the cutter radius, not only the centreline: a wall within the disc blocks the link', () => {
     const material = field((x) => (x > 2.5 ? 0 : -5));
     expect(linkIsClear(P(0, 0), P(2, 0), opts({ material }))).toBe(false);
-    expect(link(P(0, 0), P(2, 0), opts({ material }))).toHaveLength(3);
+    expect(link(P(0, 0), P(2, 0), opts({ material }))).toHaveLength(4);
   });
 
   it("FreeCAD's ratio guard: a clear dogleg may stay down within the ratio", () => {
@@ -114,7 +121,7 @@ describe('#962 link decisions', () => {
       P(10, 0),
       opts({ material, tool: { radiusMm: 3 }, keepToolDownRatio: 1.1 }),
     );
-    expect(moves).toHaveLength(3);
+    expect(moves).toHaveLength(4);
   });
 
   it('follows a sloped link the material has been cut under', () => {
@@ -159,7 +166,7 @@ describe('#962 link decisions', () => {
     expect(DEFAULT_KEEP_TOOL_DOWN_RATIO).toBe(3);
     // A 16 mm link at a ⌀6 cutter (shortHop 12) retracts; a 10 mm one stays down.
     expect(link(P(0, 0), P(10, 0), opts({ tool: { radiusMm: 3 } }))).toHaveLength(1);
-    expect(link(P(0, 0), P(13, 0), opts({ tool: { radiusMm: 3 } }))).toHaveLength(3);
+    expect(link(P(0, 0), P(13, 0), opts({ tool: { radiusMm: 3 } }))).toHaveLength(4);
   });
 });
 

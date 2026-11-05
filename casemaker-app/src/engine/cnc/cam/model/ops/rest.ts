@@ -61,27 +61,19 @@ function depthPasses(zTop: number, zBottom: number, stepDownMm: number): number[
   return levels;
 }
 
-/** The level's mask as rectilinear loops — `ops/rough.ts`'s `maskLoops`, with the two surfaces. */
-function restMask(
-  prev: Float64Array,
-  next: Float64Array,
+/**
+ * #961 — CELLS TO LOOPS: the rectilinear boundary of every cell a predicate accepts, as closed
+ * rings (`ops/rough.ts`'s `maskLoops` rule). Exported for the coverage rest's own region, which is
+ * built from the chain-so-far's stamped leftover rather than from a CL difference.
+ */
+export function cellPolygons(
+  inside: (i: number, j: number) => boolean,
   nx: number,
   ny: number,
   x0: number,
   y0: number,
   pitch: number,
-  levelZ: number,
-  leave: number,
-  marginMm: number,
 ): Polygons {
-  const inside = (i: number, j: number): boolean => {
-    if (i < 0 || j < 0 || i >= nx || j >= ny) return false;
-    const k = j * nx + i;
-    const n = next[k]!;
-    const p = prev[k]!;
-    if (!Number.isFinite(n) || !Number.isFinite(p)) return false;
-    return n + leave + marginMm < levelZ && p > levelZ;
-  };
   type Edge = { a: [number, number]; b: [number, number] };
   const edges: Edge[] = [];
   const push = (ai: number, aj: number, bi: number, bj: number): void => {
@@ -119,6 +111,32 @@ function restMask(
     if (ring.length >= 4) loops.push(ring);
   }
   return loops;
+}
+
+/** The level's mask as rectilinear loops — `cellPolygons` with the two surfaces' own rule. */
+function restMask(
+  prev: Float64Array,
+  next: Float64Array,
+  nx: number,
+  ny: number,
+  x0: number,
+  y0: number,
+  pitch: number,
+  levelZ: number,
+  leave: number,
+  marginMm: number,
+): Polygons {
+  return cellPolygons(
+    (i, j) => {
+      if (i < 0 || j < 0 || i >= nx || j >= ny) return false;
+      const k = j * nx + i;
+      const n = next[k]!;
+      const p = prev[k]!;
+      if (!Number.isFinite(n) || !Number.isFinite(p)) return false;
+      return n + leave + marginMm < levelZ && p > levelZ;
+    },
+    nx, ny, x0, y0, pitch,
+  );
 }
 
 function orderedRings(loops: readonly [number, number][][], from: readonly [number, number]): [number, number][][] {
@@ -216,6 +234,7 @@ export function rest(opts: RestOpOptions): OpOutcome {
     clearanceZ: opts.regionRef.regionClearanceZ,
     tool: { radiusMm: toolRadius },
     feeds: { feed: opts.feeds.feedMmPerMin, plungeFeed: opts.feeds.plungeFeedMmPerMin },
+    hopClearanceMm: opts.hopZMm,
   });
 
   let prevExit: [number, number, number] | null = null;

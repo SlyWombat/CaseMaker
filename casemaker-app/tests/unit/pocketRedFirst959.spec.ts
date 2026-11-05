@@ -26,6 +26,7 @@ import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { HOP_Z, type RapidEstimate } from '@/engine/cnc/cam/ir';
 import type { Tool } from '@/engine/cnc/tool';
 import type { ParsedMesh } from '@/engine/import/stlParser';
+import { assertFixtureMesh } from '../tools/fixtureMesh';
 
 function parsed(solid: ManifoldInstance): ParsedMesh {
   const m = solid.getMesh();
@@ -39,7 +40,9 @@ function parsed(solid: ManifoldInstance): ParsedMesh {
     min[i % 3] = Math.min(min[i % 3]!, positions[i]!);
     max[i % 3] = Math.max(max[i % 3]!, positions[i]!);
   }
-  return { positions, indices: Uint32Array.from(m.triVerts), triangleCount: m.triVerts.length / 3, bbox: { min, max } };
+  const mesh: ParsedMesh = { positions, indices: Uint32Array.from(m.triVerts), triangleCount: m.triVerts.length / 3, bbox: { min, max } };
+  assertFixtureMesh(mesh, 'pocketRedFirst959 fixture');
+  return mesh;
 }
 
 function flat(d: number, number: number): Tool {

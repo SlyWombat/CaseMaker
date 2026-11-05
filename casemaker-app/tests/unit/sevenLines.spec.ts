@@ -26,6 +26,7 @@ const VENDOR = (over: Partial<ProgramScore> = {}): ProgramScore => ({
   cycleSeconds: 47.6 * 60,
   toolChanges: 0,
   headerTimeSeconds: 47.6 * 60,
+  vendorHolding: "Makera's own: bare bed, tape-down",
   airFraction: 0.15,
   rapidsPer1000FeedLines: 8,
   cutters: 4,
@@ -52,7 +53,7 @@ const OURS = (over: Partial<ProgramScore> = {}): ProgramScore => ({
   rapidsPer1000FeedLines: 10,
   cutters: 3,
   cuttersOwned: true,
-  postsAsFiled: { ok: true, holding: 'bed + tape', pitchMm: 0.1 },
+  postsAsFiled: { ok: true, holding: 'vise', pitchMm: 0.1 },
   ...over,
 });
 
@@ -92,7 +93,7 @@ describe('#964 the seven lines — a card that passes', () => {
     expect(line(card, 'cycle').ours).toBe('45.0 min');
     expect(line(card, 'air').ours).toBe('20.00 %');
     expect(line(card, 'cutters').ours).toBe('3');
-    expect(line(card, 'postsAsFiled').ours).toContain('bed + tape');
+    expect(line(card, 'postsAsFiled').ours).toContain('vise');
   });
 });
 
@@ -288,6 +289,33 @@ describe('#964 line 6 — cutters ≤ vendor + 1, owned for a bench card', () =>
 describe('#964 line 7 — posts as filed', () => {
   it('passes when the record states it posted at the card’s holding and pitch', () => {
     expect(line(score(), 'postsAsFiled').state).toBe('pass');
+  });
+
+  it('prints BOTH holdings on every card — ours and the vendor’s stated one (#943)', () => {
+    const card = score();
+    expect(card.holding.ours).toBe('vise');
+    expect(card.holding.vendor).toBe("Makera's own: bare bed, tape-down");
+    // An unreferenced card still prints its own holding; the vendor side is literally absent.
+    const alone = score(OURS(), null);
+    expect(alone.holding.ours).toBe('vise');
+    expect(alone.holding.vendor).toBeNull();
+  });
+
+  it('never lets a TAPE card claim “as filed” — the line passes only in the vise (#943)', () => {
+    const card = score(
+      OURS({
+        postsAsFiled: {
+          ok: false,
+          holding: 'tape',
+          pitchMm: 0.1,
+          note: "'posts as filed' means the vise with jaw clearance (#943); this card is a tape-down plan",
+        },
+      }),
+    );
+    expect(line(card, 'postsAsFiled').state).toBe('fail');
+    expect(line(card, 'postsAsFiled').ours).toContain('no — tape');
+    expect(line(card, 'postsAsFiled').ours).not.toMatch(/^yes —/);
+    expect(line(card, 'postsAsFiled').rule).toContain('vise with jaw clearance');
   });
 
   it('fails when the run refused or changed the pitch', () => {
