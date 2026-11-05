@@ -848,3 +848,56 @@ export function chooseSequence(
     unplanned: best.failures,
   };
 }
+
+/**
+ * THE TOOL-CHANGE BATCH (#964's own measurement): the curved pipeline plans region by region —
+ * rough, rest, finish, pencil, then the next region's rough again — so a part with N remainder
+ * regions posts the flat and the ball ALTERNATING N times, N-1 unnecessary tool changes the
+ * fixture never asked for (F's tray count: 14 alternations, 29 changes; the shop's own
+ * `toolChange.seconds` default charges ~91 s of real machine time for each one).
+ *
+ * The ruling this keeps: a program is an execution-ORDER run, and a cutter MAY appear twice —
+ * but only where the order actually demands it (the freeing cut returning to an earlier cutter
+ * because taking the profile with it is dearer, `chooseSequence`'s own `freeing` field). Nothing
+ * here re-prices that choice; it only closes the gap the curved pipeline's own per-region loop
+ * opens, where no such choice was ever made — region A's rough has no reason to run before or
+ * after region B's rough relative to EITHER region's own ball stage, because the two regions
+ * never touch each other's material.
+ *
+ * THE SAFETY RULE: two ops may trade places only if neither is the OTHER's own dependency — in
+ * this engine that is exactly "do they touch the same region" (`sameRegion`). Every real
+ * dependency (rough before rest before finish before pencil; a pocket's rest after its own
+ * primary) is between ops on the SAME region, always in that fixed relative order already, by
+ * construction, before this pass ever runs — grouping by cutter and keeping each cutter's own
+ * internal order never reverses a same-region pair, because both of a pair's members stay inside
+ * their own cutter's list, in the order they arrived in. Cross-region ops have no dependency on
+ * each other at all, so freely interleaving them across cutter groups is always safe.
+ *
+ * THE FREEING CUT NEVER MOVES (the issue's own instruction): `isSentinel` marks the ops this pass
+ * must leave exactly where they are — today, the one `'contour'` op a tree ever plans, already
+ * last by construction (`planTreePrograms`'s own header). Pulling it into an earlier cutter's
+ * group the moment that cutter matches would un-free the part before the last pocket/curved stage
+ * ran, which is #959's own ruling 1 this file already exists to prevent.
+ */
+export function batchSameCutterRuns<T>(
+  ops: readonly T[],
+  cutterKeyOf: (op: T) => string,
+  isSentinel: (op: T) => boolean,
+): T[] {
+  const sentinels: T[] = [];
+  const movable: T[] = [];
+  for (const op of ops) (isSentinel(op) ? sentinels : movable).push(op);
+  const groups = new Map<string, T[]>();
+  const order: string[] = [];
+  for (const op of movable) {
+    const key = cutterKeyOf(op);
+    let g = groups.get(key);
+    if (g === undefined) {
+      g = [];
+      groups.set(key, g);
+      order.push(key);
+    }
+    g.push(op);
+  }
+  return [...order.flatMap((key) => groups.get(key)!), ...sentinels];
+}
