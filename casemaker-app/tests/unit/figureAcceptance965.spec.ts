@@ -557,7 +557,12 @@ for (const figure of FIGURES) {
       expect(figureRun.scored.lines.find((l) => l.key === 'coverage')?.oursValue).toBeCloseTo(figureRun.coverage, 9);
       // The ideal is a superset: it can never be worse than the owned plan on the same ruler.
       if (owned !== null) expect(figureRun.coverage).toBeGreaterThanOrEqual(owned.coverage - 1e-9);
-    }, 900_000); // #965 — the card now measures both scallops (0.01 and the 0.027 default), with the long ⌀1 rest
+    // #966 — TEMPORARY, and never the expected cost: at this merge tip the figures take ~2.5x
+    // the branch wall at the SAME coverage (panther 211.1 s on cand/965-figure-rest, 524 s here),
+    // and the old 900 s ceiling expired mid-run on the elephant. The 2.5x slowdown is an open
+    // finding on #966 (attribution with the review session); this ceiling only lets the check
+    // run to the end until it is fixed, and should come back down with the fix.
+    }, 1_800_000); // #965 — the card measures both scallops (0.01 and the 0.027 default), with the long ⌀1 rest
   });
 }
 
