@@ -48,7 +48,8 @@ import {
   voidLimitForFootprint,
   type ItemFootprint,
 } from '@/engine/cnc/engrave/partPlan';
-import type { EngraveJob } from '@/types/engraveJob';
+import type { EngraveJob, StockSurfaceTouch } from '@/types/engraveJob';
+import type { StockProbes } from '@/engine/cnc/cam/model/types';
 import type { Mm } from '@/types/units';
 
 /**
@@ -335,25 +336,35 @@ function touchPoints(
   extents: { minX: Mm; minY: Mm; maxX: Mm; maxY: Mm },
   stock: { length: Mm; width: Mm },
   count: number,
+  onStockTop = false,
 ): SurfaceTouchPoint[] {
-  const cx = (extents.minX + extents.maxX) / 2;
-  const cy = (extents.minY + extents.maxY) / 2;
-  const xLo = clamp(extents.minX, 1, stock.length - 1);
-  const xHi = clamp(extents.maxX, 1, stock.length - 1);
-  const yLo = clamp(extents.minY, 1, stock.width - 1);
-  const yHi = clamp(extents.maxY, 1, stock.width - 1);
+  // #943 (2026-11-05 ruling): when the job faces the stock, the touches move to the STOCK's own
+  // top extents — facing covers the whole outline, and an unprobed low corner of the blank would
+  // stay uncut while the measured spread said the face was clean. The band check is unchanged: it
+  // reads the same readings (wider points are the conservative direction — the relief over the
+  // cuts is a subset of the stock's).
+  const area = onStockTop
+    ? { minX: 0, minY: 0, maxX: stock.length, maxY: stock.width }
+    : extents;
+  const name = onStockTop ? "the stock's" : "the cut area's";
+  const cx = (area.minX + area.maxX) / 2;
+  const cy = (area.minY + area.maxY) / 2;
+  const xLo = clamp(area.minX, 1, stock.length - 1);
+  const xHi = clamp(area.maxX, 1, stock.length - 1);
+  const yLo = clamp(area.minY, 1, stock.width - 1);
+  const yHi = clamp(area.maxY, 1, stock.width - 1);
   const xMid = clamp(cx, 1, stock.length - 1);
   const yMid = clamp(cy, 1, stock.width - 1);
   const all = [
-    { x: xMid, y: yMid, at: "the cut area's centre" },
-    { x: xLo, y: yMid, at: "the cut area's left extent" },
-    { x: xHi, y: yMid, at: "the cut area's right extent" },
-    { x: xMid, y: yLo, at: "the cut area's front extent" },
-    { x: xMid, y: yHi, at: "the cut area's back extent" },
-    { x: xLo, y: yLo, at: "the cut area's front-left corner" },
-    { x: xHi, y: yHi, at: "the cut area's back-right corner" },
-    { x: xHi, y: yLo, at: "the cut area's front-right corner" },
-    { x: xLo, y: yHi, at: "the cut area's back-left corner" },
+    { x: xMid, y: yMid, at: `${name} centre` },
+    { x: xLo, y: yMid, at: `${name} left extent` },
+    { x: xHi, y: yMid, at: `${name} right extent` },
+    { x: xMid, y: yLo, at: `${name} front extent` },
+    { x: xMid, y: yHi, at: `${name} back extent` },
+    { x: xLo, y: yLo, at: `${name} front-left corner` },
+    { x: xHi, y: yHi, at: `${name} back-right corner` },
+    { x: xHi, y: yLo, at: `${name} front-right corner` },
+    { x: xLo, y: yHi, at: `${name} back-left corner` },
   ];
   return all.slice(0, Math.max(1, count)).map((p, i) => ({ id: `surface-${i + 1}`, ...p }));
 }
@@ -424,7 +435,15 @@ export function surfaceSpreadPlan(
   };
 
   return {
-    touches: touchPoints(extents, { length: job.stock.length, width: job.stock.width }, count),
+    // #943 (2026-11-05 ruling): a facing job measures the STOCK's top — the facing covers the whole
+    // outline, not just the cuts. The document's own facing choice is the signal (`enabled` with a
+    // depth to take); a job with no facing keeps the cut-area points #475 planned.
+    touches: touchPoints(
+      extents,
+      { length: job.stock.length, width: job.stock.width },
+      count,
+      job.facing !== undefined && job.facing.enabled && job.facing.depth > 0,
+    ),
     regions,
     band,
     level: options.level ?? null,
@@ -650,6 +669,23 @@ export function surfaceFitForPost(
  * A spread exactly equal to the band is a PASS: the landing range collapses to one depth, and
  * that depth is a floor the band admits at every touch.
  */
+/**
+ * #943 — THE JOB'S KEPT TOUCH SET AS THE PLAN'S INPUT. The plan's datum carries the difference,
+ * not the values: the registration writes Z0 at the LOWEST touch (#475's `Z0_REFERENCE`), so the
+ * lowest reading is 0 and the highest is the spread. Provenance is the WEAKEST reading in the set —
+ * one typed number means an extreme may be typed, not probed.
+ */
+export function stockProbesOf(touches: readonly StockSurfaceTouch[] | undefined): StockProbes | undefined {
+  if (touches === undefined || touches.length === 0) return undefined;
+  const zs = touches.map((t) => t.z);
+  const source = touches.some((t) => t.source === 'stated')
+    ? 'stated'
+    : touches.some((t) => t.source === 'touch-off')
+      ? 'touch-off'
+      : 'probe';
+  return { count: touches.length, spreadMm: Math.max(...zs) - Math.min(...zs), source };
+}
+
 export function assessSurfaceSpread(
   job: EngraveJob,
   readings: readonly SurfaceReading[],

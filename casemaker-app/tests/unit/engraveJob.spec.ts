@@ -166,6 +166,28 @@ describe('EngraveJob schema (#200)', () => {
     expect(parsed.job).toEqual(job);
   });
 
+  it('keeps the surface touch set and its per-reading provenance through a round trip (#943)', () => {
+    const job = defaultEngraveJob();
+    job.stock.surfaceTouches = {
+      touches: [
+        { id: 'surface-1', x: 29.5, y: 17.5, z: -0.12, at: "the stock's centre", source: 'probe' },
+        { id: 'surface-2', x: 1, y: 17.5, z: 0.18, at: "the stock's left extent", source: 'touch-off' },
+      ],
+      measuredAt: '2026-11-05T12:00:00.000Z',
+      machine: { host: '192.168.10.43', port: 2222 },
+    };
+    job.sources = { stock: { surfaceTouches: 'measured' } };
+
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // The readings are the facing depth's own input (#943): a reload that kept the two-drop
+    // summary but lost the points would silently fall back to the stated stock top.
+    expect(parsed.job.stock.surfaceTouches).toEqual(job.stock.surfaceTouches);
+    expect(parsed.job.sources?.stock?.surfaceTouches).toBe('measured');
+    expect(parsed.job).toEqual(job);
+  });
+
   it('drops a pre-#496 one-span flatness on load rather than inventing the other span', () => {
     // The old record was `{ dome, across }`, and the direction word was read in opposite senses by
     // different modules. A job carrying it loads as "not yet measured": one span cannot state the

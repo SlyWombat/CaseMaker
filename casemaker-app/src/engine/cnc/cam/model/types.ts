@@ -41,6 +41,25 @@ export interface GoalCellField {
   covered: Uint8Array;
 }
 
+/**
+ * THE PROBED STOCK TOP (#943's ruling, 2026-11-05): the surface measurement, handed in by the
+ * caller that holds it. The engine never reads the registration store (the sim-worker import-graph
+ * rule), and a job with no measurement has NO entry — "not yet measured" is its own answer.
+ *
+ * DATUM: the plan's own — the registration writes Z0 at the LOWEST touch (#475's `Z0_REFERENCE`),
+ * so among the readings the lowest sits at 0 and the highest at `+spreadMm`. The caller hands the
+ * spread, not the raw points: the facing stage needs the extremes, and the count/source are what
+ * the plan states.
+ */
+export interface StockProbes {
+  /** How many surface touches produced the extremes, as the plan states them. */
+  count: number;
+  /** Highest reading − lowest reading, mm — the surface's own spread about the zero. */
+  spreadMm: number;
+  /** Where the readings came from (decision 28's provenance rule). */
+  source: 'probe' | 'touch-off' | 'stated';
+}
+
 export interface ModelPlanProgress {
   setupIndex: number;
   op: PlannedOpKind | 'features' | 'clSurface' | 'sequence' | 'linking';

@@ -27,7 +27,6 @@
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import type { RemainderRegion, FeatureSource } from '../features';
 import type { ClSurface } from '../clsurface';
 import { profileOf } from '../dropcutter';

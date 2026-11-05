@@ -27,15 +27,16 @@ export function isFlatFamily(tool: Tool): boolean {
 }
 
 /**
- * THE SKIN PASS'S PER-PASS DEPTH CAP, as a MULTIPLE of the cutter row's own step-down (#959;
- * the maintainer's decision pending on #943, the manager recommending one pass up to 1.25x).
- * 1.0 today: the ⌀6 row's 1.0 mm step-down gives two passes on the tray's 1.2 mm skin and one on
- * the organizer's 0.8; 1.25 would take the tray in one. One-line change either way.
+ * THE SKIN PASS'S PER-PASS DEPTH CAP, as a MULTIPLE of the cutter row's own step-down (#959).
+ * DECIDED (#943's ruling, 2026-11-05): the maintainer took the per-pass cap itself — "no pass
+ * deeper than the row's step-down" — and the one-pass-up-to-1.25x option is NOT taken. 1.0: the
+ * ⌀6 row's 1.0 mm step-down gives two passes on the tray's 1.2 mm skin and one on the
+ * organizer's 0.8.
  */
 export const SKIN_STEPDOWN_FACTOR = {
   value: 1.0,
-  status: 'provisional' as const,
-  note: 'the maintainer’s #943 decision pending (1.0 vs one pass up to 1.25x the row)',
+  status: 'decided' as const,
+  note: 'the #943 ruling (2026-11-05): every pass capped at the row’s own step-down; the 1.25x one-pass option was not taken',
 } as const;
 
 export function skinStepdownFactor(): number {

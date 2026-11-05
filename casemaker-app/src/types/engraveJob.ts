@@ -173,6 +173,7 @@ export interface EngraveJobSources {
       | 'fibre'
       | 'colour'
       | 'flatness'
+      | 'surfaceTouches'
       | 'shape'
       | 'diameter'
       | 'wall',
@@ -1682,6 +1683,40 @@ export interface StockFlatness {
 }
 
 /**
+ * ONE surface touch, as the job keeps it (#943's ruling, 2026-11-05): the planned point beside the
+ * reading taken there. The pair is the job's own record — the registration store keeps the session
+ * copy, but a reload must not lose what the operator measured.
+ */
+export interface StockSurfaceTouch {
+  /** The plan's own id (`surface-1`…), so the reading and the point cannot drift apart. */
+  id: string;
+  /** The point in the stock frame (front-left at the origin), mm. */
+  x: Mm;
+  y: Mm;
+  /** The reading taken there, mm. */
+  z: Mm;
+  /** The point in physical words, as the sheet printed it. */
+  at: string;
+  /** How the reading was taken — decision 28's provenance rule, per reading. */
+  source: 'probe' | 'touch-off' | 'stated';
+}
+
+/**
+ * THE PROBED STOCK TOP, kept on the job (#943's ruling: "persist the touch set on the job, not only
+ * in memory, so a reload keeps it"). The facing depth is the spread's consequence — the cut starts
+ * at the highest reading and its target is one row step below the lowest — so these are the
+ * readings the plan runs from. The machine the set was taken on travels with it: another machine's
+ * numbers are not silently read as this one's.
+ */
+export interface StockSurfaceTouches {
+  touches: StockSurfaceTouch[];
+  /** When the touches were taken, ISO 8601. */
+  measuredAt: string;
+  /** The machine the readings were taken on (`host:port`). */
+  machine: { host: string; port: number };
+}
+
+/**
  * The registration half of a saved setup (#419 J2, §5.4; planned by #430).
  *
  * `plan` is the APPROVED choreography, frozen at the moment it was planned — a snapshot, not a
@@ -2006,6 +2041,12 @@ export interface EngraveJob {
     fibre?: FilamentFibre;
     colour?: StockColour;
     flatness?: StockFlatness;
+    /**
+     * #943 — the surface touches and their readings, kept so a reload does not lose the measurement
+     * the facing depth runs from. Absent until the surface has been measured, and kept absent on
+     * every document written before the key (byte-for-byte round trips stay intact).
+     */
+    surfaceTouches?: StockSurfaceTouches;
   };
   /**
    * #783 — which way round the PART sits in this job's box (see {@link StockHold}). ABSENT is the
