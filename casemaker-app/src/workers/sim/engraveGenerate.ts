@@ -274,7 +274,7 @@ import {
 } from '@/engine/cnc/cam/model/plan';
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
 import { cutterKeyOf, type CutterCandidates } from '@/engine/cnc/cam/model/sequence';
-import type { EdgeBreakSpec, ModelTolerances } from '@/engine/cnc/cam/model/types';
+import type { EdgeBreakSpec, ModelTolerances, PlanStatement } from '@/engine/cnc/cam/model/types';
 // #966 — the real reach-aware top+bottom decision (#965), replacing this file's own hardcoded
 // single `top` `SetupSpec` below (`buildModelPlanInputForGoal`'s own doc on why).
 import { buildSetupSpecs } from '@/engine/cnc/cam/model/setups';
@@ -771,6 +771,13 @@ export interface EngraveGenerated {
    * planned yet). D's run store reads `(generated as {plan?: …}).plan?.perSetup` speculatively.
    */
   plan?: ModelPlanOutput | null;
+  /**
+   * #992 — THE PLAN'S TYPED STATEMENTS, carried for the run sheet. `warning`/`info` statements
+   * also become `findings` below (the panel's route); the `sheet`-class ones never reach the
+   * panel — the sheet prints them through its own `sentence()` route, and this field is how they
+   * get there. Absent on the old heightfield path and on a refusal before a plan existed.
+   */
+  planStatements?: PlanStatement[] | null;
   cam: EngraveCamSummary | null;
   /**
    * #250 — the rough/finish split of the program this object describes (the FIRST program for the
@@ -5097,6 +5104,9 @@ export async function generateGoalProgram(
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
   // call site before `planModelCam` has run passes nothing, so `fail` defaults it to `null`.
+  // #992 — `findings` is the fifth seat: a refusal that happens AFTER `planModelCam` returned a
+  // plan still carries the plan's own typed statements (the reason the run came up short), the
+  // same way the success and verify-fail returns do.
   const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null, plan: ModelPlanOutput | null = null, findings: JobFinding[] = []): EngraveGenerated => ({
     ...base,
     ok: false,
@@ -5226,6 +5236,21 @@ export async function generateGoalProgram(
     } catch (e) {
       return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
     }
+    // #992 — THE PLAN'S TYPED STATEMENTS REACH THE OPERATOR. `warning`/`info` become findings on
+    // this run (the panel's route; the message is the statement's own text, the count rides the
+    // field the acceptance reads); `sheet` statements stay out of the findings entirely and ride
+    // `planStatements` for the run sheet's own route. Before this, every "stated on the card"
+    // ruling was readable only by a spec that opened `perSetup[].notes` itself.
+    const planStatements: PlanStatement[] = output.perSetup.flatMap((p) => p.statements);
+    const planFindings: JobFinding[] = planStatements
+      .filter((s) => s.severity !== 'sheet')
+      .map((s) => ({
+        severity: s.severity,
+        code: s.code,
+        labelId: goal.id,
+        message: s.text,
+        ...(s.count === undefined ? {} : { count: s.count }),
+      }));
     // #966 ROUND 3 — THE CUTOVER NOW COVERS MULTI-SETUP. `planModelCam` ran and returned a
     // `SetupPlan` per setup (#965's registration/freeing-cl work, underneath); every setup's own
     // `programs` (one per RUN, in execution order — #963's own rule) posts through the SAME
@@ -5257,7 +5282,7 @@ export async function generateGoalProgram(
           (perSetupNotes.length === 0 ? '' : ` — ${perSetupNotes}`),
         null,
         output,
-        chamferFindings,
+        [...chamferFindings, ...planFindings],
       );
     }
 
@@ -5335,13 +5360,14 @@ export async function generateGoalProgram(
             ...base,
             ok: false,
             stage: 'verify',
-            findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...modelRoughFindings, ...chamferFindings, ...documentFindings()]),
+            findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...modelRoughFindings, ...chamferFindings, ...documentFindings(), ...planFindings]),
             feeds: null,
             cam: null,
             nc: posted.text,
             verify,
             programs: [...programs],
             plan: output,
+            planStatements,
             errors: [{ stage: 'verify', message: `cam/model (#966): ${programLabel}: ${verifyErrors.length} verifier error(s)` }],
           };
         }
@@ -5368,13 +5394,14 @@ export async function generateGoalProgram(
       ...base,
       ok: true,
       stage: 'done',
-      findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...modelRoughFindings, ...chamferFindings, ...documentFindings()]),
+      findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...modelRoughFindings, ...chamferFindings, ...documentFindings(), ...planFindings]),
       feeds: null,
       cam: first.cam,
       nc: first.nc,
       verify: first.verify,
       programs,
       plan: output,
+      planStatements,
     };
   }
 

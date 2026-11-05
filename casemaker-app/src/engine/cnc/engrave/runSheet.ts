@@ -1,4 +1,5 @@
 import type { ProbeFitInstrument } from '@/engine/cnc/probeFitDiagram';
+import type { PlanStatement } from '@/engine/cnc/cam/model/types';
 import {
   type CamPassStep,
   type CycleTerms,
@@ -489,6 +490,13 @@ export interface RunSheetDrillFacts {
 export interface RunSheetGenerated {
   /** The app's full finding list for the job (#206 stage 1: `validateJob` + `validateVise` + the geometry findings, deduped). */
   findings: readonly JobFinding[];
+  /**
+   * #992 — the model plan's typed statements, when the run has one. The sheet prints the
+   * `sheet`-class ones (registration, facing, freeing order, pipeline summary, empty stages) in
+   * its own "What the plan states" section; `warning`/`info` ones already arrive as findings
+   * above and are NOT printed twice. Absent on the old heightfield path, which never planned one.
+   */
+  planStatements?: readonly PlanStatement[] | null;
   /** `feedsFor`'s result, or null when that stage was not reached. */
   feeds: FeedsResult | null;
   cam: RunSheetCamSummary | null;
@@ -5047,8 +5055,17 @@ export function buildRunSheet(
   // #743 P-6 — a board's own section: the blank, the files and the program order.
   const pcbSteps = pcbBoardSteps(job, tool);
 
+  // #992 — THE PLAN'S OWN SHEET-CLASS STATEMENTS: facts of this run (registration, facing, the
+  // freeing order, the pipeline summary, the stages that emitted nothing). The warning/info
+  // statements already reached §8 through `generated.findings` and are NOT printed twice here.
+  // `sentence()` is the same route the 2.5D path's planner notes take.
+  const planSteps: RunSheetStep[] = (generated.planStatements ?? [])
+    .filter((s) => s.severity === 'sheet')
+    .map((s): RunSheetStep => ({ text: sentence(s.text) }));
+
   const sections: { id: string; title: string; steps: RunSheetStep[] }[] = [
     { id: 'need', title: 'What you need', steps: needSteps },
+    ...(planSteps.length === 0 ? [] : [{ id: 'plan', title: 'What the plan states', steps: planSteps }]),
     ...(reachSteps ? [{ id: 'reach', title: 'What each cutter reaches', steps: reachSteps }] : []),
     ...(options.restPass
       ? [{ id: 'rest', title: 'Two tools, one blank', steps: restPassSteps(options.restPass) }]
