@@ -271,7 +271,10 @@ import {
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
 import { cutterKeyOf, type CutterCandidates } from '@/engine/cnc/cam/model/sequence';
 import type { EdgeBreakSpec, ModelTolerances } from '@/engine/cnc/cam/model/types';
-import type { Mount } from '@/engine/cnc/setups/types';
+// #966 — the real reach-aware top+bottom decision (#965), replacing this file's own hardcoded
+// single `top` `SetupSpec` below (`buildModelPlanInputForGoal`'s own doc on why).
+import { buildSetupSpecs } from '@/engine/cnc/cam/model/setups';
+import type { Mount, MountSpec } from '@/engine/cnc/setups/types';
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
 import type { ParsedMesh } from '@/engine/import/stlParser';
@@ -4837,11 +4840,12 @@ export function buildModelPlanInputForGoal(
   tool: Tool,
   shop: EngraveShopOpts,
   /**
-   * #966 test/e2e-only seam — overrides the single `top` setup built below with a caller-supplied
-   * list, so a spec can drive `generateGoalProgram`'s real multi-setup posting path with a
-   * synthetic `ModelPlanInput.setups` (#898/#914's own flip plan is not wired to a goal job here —
-   * that remains separate, future work). No production caller passes this; absent, this
-   * function's own single-`top`-setup behaviour below is byte-for-byte unchanged.
+   * #966 test/e2e-only seam — overrides the real `buildSetupSpecs` decision below with a
+   * caller-supplied list, so a spec can drive `generateGoalProgram`'s real multi-setup posting
+   * path with a synthetic `ModelPlanInput.setups` without depending on a particular mesh's own
+   * flip-plan answer. `multiSetup966.spec.ts`/`camModelSeam966.spec.ts` already depend on this
+   * seam; no production caller passes it, and when present it wins unconditionally, exactly as
+   * before #966-goal-setups wired the real decision in to replace the old hardcoded fallback.
    */
   setupsOverride?: SetupSpec[],
 ): ModelPlanInput {
@@ -4877,14 +4881,51 @@ export function buildModelPlanInputForGoal(
   const underside: SetupSpec['underside'] =
     undersideKind === 'flipped-tabs' ? 'flippedTabs' : undersideKind === 'plinth' ? 'plinth' : 'flatOnStockBottom';
 
-  // The work frame's Z 0 is the stock's own top face (`zDatum: 'probed-top-face'`, this file's own
-  // `ctx` below) — the SAME convention `placeTarget` places the mesh against (`position.z` is the
-  // mesh's own top in that frame), so no second Z origin is invented here.
-  const setups: SetupSpec[] = setupsOverride ?? [
-    { frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -job.stock.thickness }, underside },
-  ];
-
   const mount: Mount = jobMount(job);
+
+  // #966 — THE REAL DECISION. `buildSetupSpecs` (#965's reach-aware top+bottom call, ported from
+  // `held/914-flip-plan`) replaces the single hardcoded `top` `SetupSpec` this function used to
+  // build unconditionally — the bug #966 was opened against: a goal that geometrically needs a
+  // flip (e.g. `underside.kind: 'flipped-tabs'`, no flat face to rest the rest of the part on)
+  // used to plan and post a top-only program as `ok: true`, silently incomplete.
+  //
+  // `mount: MountSpec` follows the SAME construction the other two goal-job call sites into this
+  // same `goalFlipPlan`/`buildSetupSpecs` family already use (`goalFlipSetups.ts`'s
+  // `planFlipSetups` — `const mount: MountSpec = { kind: jobMount(job) };` — and
+  // `goalFlipFindings.ts`'s `goalSurfaceOffer`, identical) — not a new convention invented here.
+  // Neither of those two sites states `viseOpeningMm`/`board` either: this module's own
+  // `frameForFace` only ever turns `top`/`bottom` (#965's stated scope), and `orient`'s own
+  // `up === 'bottom'` branch (`setups/orient.ts`) never reads `viseOpeningMm` — only a side
+  // (`left`/`right`/`front`/`back`) setup would, and this module never offers one.
+  //
+  // REACH-AWARE SCORING (`BuildSetupsInput.reach`, #914) IS DELIBERATELY OMITTED HERE, stated
+  // rather than silently dropped: `goalSurfaceOffer` (`goalFlipFindings.ts`), the only OTHER
+  // production caller that plans a goal job's flip today, already calls `goalFlipPlan` the same
+  // geometry-only way — this keeps the new seam from disagreeing with that established finding
+  // about which sides a goal offers. More importantly, wiring reach here would let a cutter's
+  // recorded reach SILENTLY suppress a geometrically-needed second setup (`goalFlipPlan`'s `band`
+  // check removes a credited face's visibility once it reads too deep for the pool's longest
+  // reach) with no finding stating that happened — the exact shape of bug this issue fixes, one
+  // level further down. Fixing THAT needs its own stated refusal/finding wiring from
+  // `FlipPlan.stopped`/`dropped`/`beyondReachMm2` into this function's caller, which is a separate
+  // design question from "call the real decision instead of a hardcoded one" and is left to a
+  // follow-up rather than guessed at here.
+  const mountSpec: MountSpec = { kind: mount };
+  const setups: SetupSpec[] =
+    setupsOverride ??
+    buildSetupSpecs({
+      geometry,
+      underside,
+      mount: mountSpec,
+      // The stock's own size, in its own frame, mm — `buildSetupSpecs`' own vise-opening rule.
+      stockSize: { x: job.stock.length, y: job.stock.width, z: job.stock.thickness },
+      // The work frame's Z 0 is the stock's own top face (`zDatum: 'probed-top-face'`, this file's
+      // own `ctx` below) — the SAME convention `placeTarget` places the mesh against
+      // (`position.z` is the mesh's own top in that frame), stated explicitly rather than left to
+      // `buildSetupSpecs`' own `0` default so a reviewer sees the two agree on purpose.
+      stockTopZ: 0,
+    }).setups;
+
   const envelope: FixtureEnvelope | null =
     mount === 'vise'
       ? viseEnvelope(job.stock, jobVise(job), job.sacrificial)
