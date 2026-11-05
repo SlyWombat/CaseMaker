@@ -212,8 +212,12 @@ const CHAMFER3175: Tool = {
 const VENDOR_SET = [FLAT6, FLAT3175, BALL6, CHAMFER3175];
 const RAPID = Z1.rapidEstimate;
 
+// This helper serves the OPERATOR-OPTION tests (the facing stage's own behaviour): it asks for
+// facing explicitly. The PRODUCT default is off — planFacingOff959 pins that, and the real-part
+// cases go through `planModelCam` with no option, so they plan no facing stage.
 function planTray(tree: FeatureTree): PlanPocketsResult {
   return planPocketsForTree(tree, {
+    facing: 'on',
     offset: makeClipperOffset(tl),
     houseFlats: VENDOR_SET,
     stepDownMm: 1.5,
@@ -598,6 +602,23 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
       postsAsFiled: holdingFacts(tree, goal),
     };
     measured = { coverage, cutInto, report, ours, scored: scoreSevenLines({ card: name, ours, vendor: vendorScoreFor(name) }) };
+    // BOTH CYCLE BASES, printed together (the manager's #959 acceptance): our estimate on the
+    // posted text PLUS the shop's 91.4 s per tool change, against the vendor's own card value.
+    const changes = Math.max(0, programs.length - 1);
+    const oursTotal = facts.cycleSeconds + changes * TOOL_CHANGE_SECONDS;
+    const cycleLine = measured.scored.lines.find((l) => l.key === 'cycle');
+    // F's #964 harness (origin/964-acceptance-defaults) measured the vendor cards on OUR
+    // estimator plus bit changes; the card scorer does not carry those numbers yet, so they are
+    // stated here with their source rather than invented or printed as '—'.
+    const VENDOR_CYCLE_SECONDS: Record<string, number> = { tray: 4816.7, organizer: 14991.5 };
+    const vendorSeconds = typeof cycleLine?.vendorValue === 'number'
+      ? cycleLine.vendorValue
+      : (VENDOR_CYCLE_SECONDS[name] ?? null);
+    console.log(
+      `#959 ${name} CYCLE BASES — ours: ${facts.cycleSeconds.toFixed(0)} s moves + ${changes} tool change(s) x ${TOOL_CHANGE_SECONDS} s = ${oursTotal.toFixed(0)} s ` +
+        `(${(oursTotal / 60).toFixed(1)} min); vendor: ${vendorSeconds === null ? '—' : `${(vendorSeconds / 60).toFixed(1)} min`}; ` +
+        `ratio ${vendorSeconds === null ? '—' : `${(oursTotal / vendorSeconds).toFixed(2)}x`}`,
+    );
   }
 
   const pocketOps = ops.filter((op) => op.kind === 'pocket').length;

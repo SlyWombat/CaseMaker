@@ -95,7 +95,18 @@ describe('#959 review — the rough splits shallow from steep', () => {
     const result = plan(-0.6, -1.0);
     const roughOp = result.ops.find((op) => op.kind === 'rough');
     expect(roughOp, `ops: ${result.ops.map((o) => o.kind).join(', ')}; notes: ${result.notes.join('; ')}`).toBeDefined();
-    const feeds = roughOp!.outcome.ir.operations.flatMap((o) => o.moves).filter((m) => m.kind === 'feed');
+    // CUTTING feeds only: the runs' lateral feeds at or below the stock top. Since the skim joins
+    // through link() (item 4b's linking fix), the op also carries link VERTICALS at plungeFeed —
+    // those climb to the clearance plane and are not cuts; a job's gouge question is about the
+    // lateral ones.
+    const all = roughOp!.outcome.ir.operations.flatMap((o) => o.moves);
+    const feeds: typeof all = [];
+    let prevMove: (typeof all)[number] | null = null;
+    for (const m of all) {
+      const lateral = prevMove !== null && Math.hypot(m.x - prevMove.x, m.y - prevMove.y) > 1e-6;
+      if (m.kind === 'feed' && lateral && m.z <= 0) feeds.push(m);
+      prevMove = m;
+    }
     expect(feeds.length).toBeGreaterThan(10);
     // THE RULING (ii): the skim cuts to the flat's OWN CL — exact contact, never deeper. On a
     // plane descending in +x the flat touches at its uphill edge, so its CL stands slope x radius
