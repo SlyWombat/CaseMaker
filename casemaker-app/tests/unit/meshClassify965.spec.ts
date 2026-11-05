@@ -103,7 +103,7 @@ describe('#965 a mesh component mixing up- and down-facing facets', () => {
     expect(Math.max(0, ...tree.remainder.map((r) => r.area))).toBeGreaterThan(0.5 * CAP_AREA);
   });
 
-  it('every down-facing facet stays excluded from the remainder regions (a true undercut)', () => {
+  it('every down-facing facet stays excluded from the remainder regions (an all-down component stays whole)', () => {
     const mesh = mixedSphere();
     const tree = treeOf(mesh);
     const sinTol = Math.sin(TOL.angleDeg * (Math.PI / 180));
