@@ -367,11 +367,30 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     opts.signal?.throwIfAborted();
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 0.9 });
 
+    // AN EMPTY PROGRAM NEVER REACHES THE POST — the rule, applied at the one place every stage's
+    // IR passes (the manager's finding on F's seeds: postZ1 refuses an IR with no moves — 'the
+    // toolpath IR has no operation with any moves: nothing to post'). planCurvedForTree drops its
+    // own empty stages; this guard covers the pocket/through-hole/contour chain too, so a step that
+    // planned nothing can only ever be a STATED op, never a posted file. A contour that emitted
+    // nothing is called out for what it is: the part is not freed.
+    const ops: PlannedOp[] = [];
+    const emptyStages: string[] = [];
+    for (const op of result.ops) {
+      if (op.outcome.ir.operations.some((operation) => operation.moves.length > 0)) {
+        ops.push(op);
+        continue;
+      }
+      emptyStages.push(
+        `${op.kind} "${op.region.id}" emitted no moves — not posted` +
+          (op.kind === 'contour' ? ' — THE PART IS NOT FREED BY THIS PLAN' : ''),
+      );
+    }
+
     // Programs ONE PER RUN, in execution order — the same rule `planPocketsForTree` states: a run
     // starts when the cutter key changes, so a cutter's two non-contiguous visits never merge.
     const programs: ToolpathIR[] = [];
     let run: { key: string; ir: ToolpathIR } | null = null;
-    for (const op of result.ops) {
+    for (const op of ops) {
       if (run !== null && run.key !== op.outcome.cutter) {
         programs.push(run.ir);
         run = null;
@@ -386,7 +405,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       if (p > 0) totalCostSeconds += toolChangeSeconds;
     }
 
-    const notes = [...result.notes];
+    const notes = [...result.notes, ...emptyStages];
     if (substitution !== null) notes.push(substitution);
     if (input.fixture.envelope !== null) {
       notes.push(
@@ -401,7 +420,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       setupIndex,
       features: tree,
       clGrid: result.clGrid,
-      ops: result.ops,
+      ops,
       sequence: result.sequence,
       linking: linkingStats(programs),
       programs,
