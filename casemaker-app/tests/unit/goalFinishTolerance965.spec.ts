@@ -1,19 +1,21 @@
 /**
- * #965 — THE SCALLOP SEAT HOLDS A SCALLOP, NEVER A STEP-OVER. `buildModelPlanInputForGoal` used to
- * fill `tolerances.finishMm` from the goal's `finishStepOverMm` (a row spacing for the heightfield
- * raster) or the shop's `stockToLeaveMm` (a roughing allowance). With the ruling that the job's
- * tolerance IS the ball's cusp height, a job stating "step-over 0.2" was commanding a 0.2 mm
- * scallop — ten times coarser than the engine's default. A goal job states no cusp (the surface
- * settings carry step-overs, an allowance and a scallop on/off), so the seat is now EMPTY and the
- * default applies; the step-over and the allowance have no seat in the model plan and are ignored
- * (stated in the builder).
+ * #985 — THE SCALLOP SEAT HOLDS A CUSP, THE FINISH PITCH HAS ITS OWN SEAT.
  *
- * Red at 50c6c5036 (1db5eef1 + F's 209d2fa97): `finishMm` comes out 0.2 and the plan's note says
- * "0.200 mm scallop". Green: `finishMm` absent and the note says 0.027.
+ * `buildModelPlanInputForGoal` used to fill `tolerances.finishMm` from the goal's
+ * `finishStepOverMm` (a finishing raster PITCH, a width) or the shop's `stockToLeaveMm` (an
+ * allowance) — a unit conflation: a job stating 0.3 mm of row spacing commanded a 0.3 mm cusp,
+ * which on a ⌀2 ball is a 1.43 mm row (4.8× the pitch it asked for). The issue's three cases:
+ *
+ *   (a) no pitch, shop allowance 0.2  → `finishMm` undefined (the engine's 0.027 default);
+ *   (b) `finishStepOverMm: 0.3`       → carried as `finishStepOverMm`, and the plan reads the
+ *                                       cusp it implies on the finishing ball, "0.011 mm";
+ *   (c) a stated cusp                 → passes through unchanged, and wins over a pitch.
+ *
+ * Red at 50c6c5036: (a) comes out 0.2 (the allowance) and (b) comes out 0.300 (the pitch read as
+ * a cusp).
  */
 import { describe, expect, it } from 'vitest';
 
-import { tl } from './helpers/manifoldExec';
 import { buildModelPlanInputForGoal } from '@/workers/sim/engraveGenerate';
 import { planModelCam } from '@/engine/cnc/cam/model/plan';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -50,7 +52,7 @@ function sheetMesh(n: number, sizeMm: number): { positions: Float32Array; indice
 const BALL: Tool = flatEndMill(2, { number: 1, id: 'ball-2', name: 'ball-2', shape: 'ball', typeText: 'Ball Nose' });
 const FLAT: Tool = flatEndMill(3, { number: 2, id: 'flat-3', name: 'flat-3' });
 
-function goalJob(finishStepOverMm: number, stockToLeaveMm: number): EngraveJob {
+function goalJob(finishStepOverMm: number | undefined): EngraveJob {
   const sheet = sheetMesh(12, 20);
   const stl = buildBinaryStl([{ positions: sheet.positions, indices: sheet.indices }]);
   const goal: EngraveTargetObject = {
@@ -72,9 +74,6 @@ function goalJob(finishStepOverMm: number, stockToLeaveMm: number): EngraveJob {
     shapes: [],
     stock: { ...defaultEngraveJob().stock, length: 30, width: 20, thickness: 10 },
     targetObject: goal,
-    // The shop's finish allowance is the OTHER half of the old conflation: it must not reach the
-    // scallop seat either (here it is deliberately different from both numbers under test).
-    finish: { stockToLeaveMm: { value: stockToLeaveMm, source: 'chosen' as const } },
   };
 }
 
@@ -83,19 +82,52 @@ const shop = {
     { key: 'inv:ball-2', tool: { ...BALL, number: null }, provenance: 'test fixture' },
     { key: 'inv:flat-3', tool: { ...FLAT, number: null }, provenance: 'test fixture' },
   ],
+  // The shop's finish allowance is the OTHER half of the old conflation: it must not reach the
+  // scallop seat either (it is deliberately different from both numbers under test).
+  finish: { stockToLeaveMm: { value: 0.2, source: 'chosen' as const } },
 };
 
-describe('#965 the goal path does not read a step-over as a scallop', () => {
-  it('RED-FIRST: a goal stating finishStepOverMm 0.2 gets no 0.2 mm scallop — the default applies', async () => {
-    const job = goalJob(0.2, 0.3);
+describe('#985 the scallop seat holds a cusp; the finish pitch has its own seat', () => {
+  /** The plan's scallop sentence, or null when the plan states none. */
+  const scallopLineOf = async (job: EngraveJob): Promise<string | null> => {
     const input = await buildModelPlanInputForGoal(job, job.targetObject!, BALL, shop);
-    expect('finishMm' in input.tolerances ? input.tolerances.finishMm : undefined, 'the step-over reached the scallop seat').toBeUndefined();
-
     const output = await planModelCam(input);
-    const notes = output.perSetup.flatMap((setup) => setup.notes);
-    const scallopLine = notes.find((n) => n.includes('mm scallop'));
-    expect(scallopLine, `no scallop note: ${notes.join(' | ')}`).toBeDefined();
-    expect(scallopLine!).toContain('0.027 mm scallop');
-    expect(scallopLine!, 'the job’s 0.2 step-over became a scallop').not.toContain('0.200');
+    return output.perSetup.flatMap((setup) => setup.notes).find((n) => n.includes('mm scallop')) ?? null;
+  };
+
+  it('(a) no stated pitch, a shop allowance of 0.2: the allowance never reaches the seat — the default applies', async () => {
+    const job = goalJob(undefined);
+    const input = await buildModelPlanInputForGoal(job, job.targetObject!, BALL, shop);
+    expect('finishMm' in input.tolerances ? input.tolerances.finishMm : undefined, 'the shop allowance reached the scallop seat').toBeUndefined();
+    expect('finishStepOverMm' in input.tolerances ? input.tolerances.finishStepOverMm : undefined).toBeUndefined();
+    const line = await scallopLineOf(job);
+    expect(line, 'no scallop note in the plan').not.toBeNull();
+    expect(line!, 'the 0.2 allowance became a cusp').toContain('0.027 mm scallop');
+    expect(line!).not.toContain('0.200');
   }, 120_000);
+
+  it('(b) a stated finishStepOverMm 0.3 is carried as a PITCH and read as the cusp it makes on the ⌀2 ball', async () => {
+    const job = goalJob(0.3);
+    const input = await buildModelPlanInputForGoal(job, job.targetObject!, BALL, shop);
+    expect(input.tolerances.finishStepOverMm, 'the pitch was not carried').toBe(0.3);
+    expect('finishMm' in input.tolerances ? input.tolerances.finishMm : undefined, 'the pitch leaked into the cusp seat').toBeUndefined();
+    // R − √(R² − (s/2)²) on the ⌀2: 1 − √(1 − 0.15²) = 0.01131 mm.
+    const line = await scallopLineOf(job);
+    expect(line, 'no scallop note in the plan').not.toBeNull();
+    expect(line!, 'the 0.3 pitch was read as a 0.3 cusp').toContain('0.011 mm scallop');
+    expect(line!).not.toContain('0.300');
+  }, 120_000);
+
+  it('(c) a stated cusp passes through unchanged and wins over a pitch', async () => {
+    // A cusp is stated on the plan input directly (the job model carries no cusp field).
+    const job = goalJob(0.3);
+    const direct = async (tolerances: { finishMm?: number; finishStepOverMm?: number }): Promise<string | null> => {
+      const input = await buildModelPlanInputForGoal(job, job.targetObject!, BALL, shop);
+      const output = await planModelCam({ ...input, tolerances });
+      return output.perSetup.flatMap((setup) => setup.notes).find((n) => n.includes('mm scallop')) ?? null;
+    };
+    expect(await direct({ finishMm: 0.01 }), 'a stated cusp was not honoured').toContain('0.010 mm scallop');
+    // Both stated: the cusp wins, the pitch does not override it.
+    expect(await direct({ finishMm: 0.01, finishStepOverMm: 0.3 }), 'the pitch overrode the stated cusp').toContain('0.010 mm scallop');
+  }, 240_000);
 });

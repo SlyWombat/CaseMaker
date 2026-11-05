@@ -4955,16 +4955,18 @@ export async function buildModelPlanInputForGoal(
   const house: Tool[] = [...(shop.tools ?? []).map((e) => e.tool), tool];
   const cutters: CutterCandidates = { house, catalogue: [] };
 
-  // #965 — THE SCALLOP SEAT HOLDS A SCALLOP OR NOTHING. The model engine's `tolerances.finishMm`
-  // is the ball's cusp height (the ruling makes it decide the finish), and a goal JOB states none:
-  // `EngraveSurfaceSettings` carries step-overs, allowances and a scallop ON/OFF, never a cusp.
-  // The old filling was a conflation — `finishStepOverMm` is a row spacing for the heightfield
-  // raster and `shop.finish.stockToLeaveMm` an allowance (a step-over of 0.2 became a 0.2 mm
-  // scallop, ten times coarser than the default). Both values have NO seat in the model plan
-  // (`PlanCurvedOptions.stepOverMm` is the cutter row's own; its band is the engine's constant),
-  // so they are IGNORED here, stated rather than mis-seated: `finishMm` is absent and the engine's
-  // 0.027 mm default applies.
-  const tolerances: ModelTolerances = {};
+  // #985 — THE SCALLOP SEAT HOLDS A CUSP, THE PITCH HAS ITS OWN SEAT. The model engine's
+  // `tolerances.finishMm` is the ball's cusp HEIGHT (the ruling makes it decide the finish), and
+  // a goal JOB states no cusp: `EngraveSurfaceSettings` carries step-overs, allowances and a
+  // scallop ON/OFF, never a cusp — so `finishMm` is left ABSENT and the engine's 0.027 mm default
+  // applies. The job's `finishStepOverMm` (the old engine's finishing raster PITCH, a width) is
+  // carried as its own tolerance and converted to a cusp in `plan.ts`, where the finishing ball is
+  // known (`cusp = R − √(R² − (s/2)²)`) — a pitch is honoured as a pitch, never read as a height
+  // (a 0.3 mm step-over read as a cusp is a 1.43 mm row on a ⌀2, 4.8× the pitch the job asked
+  // for). The shop's `finish.stockToLeaveMm` is an ALLOWANCE and feeds no tolerance here.
+  const tolerances: ModelTolerances = {
+    ...(goal.surface?.finishStepOverMm === undefined ? {} : { finishStepOverMm: goal.surface.finishStepOverMm }),
+  };
   const edgeBreak: EdgeBreakSpec = { legMm: 0 };
 
   return {
