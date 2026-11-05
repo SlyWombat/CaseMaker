@@ -405,7 +405,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       if (p > 0) totalCostSeconds += toolChangeSeconds;
     }
 
-    const notes = [...result.notes, ...emptyStages];
+    // The feature tree's own notes reach the plan too: the mesh repair's counts (a closed hole is
+    // stated, not silent), slivers, and the surfaces it ignored.
+    const notes = [...tree.report.notes, ...result.notes, ...emptyStages];
     if (substitution !== null) notes.push(substitution);
     if (input.fixture.envelope !== null) {
       notes.push(

@@ -286,16 +286,32 @@ function capLoop(
   }
 }
 
+/** What the mesh repair found and did. `openEdges`/`degenerateTriangles` are the input's defects. */
+export interface MeshRepair {
+  positions: Float32Array;
+  indices: Uint32Array;
+  /** Boundary edges in the welded topology before capping. */
+  openEdges: number;
+  /** Triangles dropped because a welded vertex collapsed or the area was zero. */
+  degenerateTriangles: number;
+  /** Boundary loops capped; `openEdges === 0` means the mesh was already closed. */
+  cappedLoops: number;
+}
+
 /**
  * Close a triangle soup into the watertight solid the sections need (#966 blocker c). Goal meshes
  * are surfaces, not solids — j27's mouse shell is open at its bottom — so `new Manifold` refuses
  * them outright. Weld float32-duplicate vertices, drop zero-area triangles, and cap every boundary
  * loop; the cap is triangulated in the loop's dominant-axis projection.
  *
+ * A missing facet is a GOUGE risk as well as a crash: the drop-cutter can take a neighbour's edge
+ * contact, which is lower than the true surface. So an open edge is either closed here or refused
+ * BY NAME — never handed on to be planned as-is.
+ *
  * shortcut: a non-planar or self-intersecting boundary loop is still capped by that projection,
  * not by a 3D triangulation — upgrade when a goal mesh actually has one.
  */
-function closeMesh(tl: ManifoldToplevel, mesh: FrameMesh, weldMm: number): { positions: Float32Array; indices: Uint32Array } {
+export function repairMesh(tl: ManifoldToplevel, mesh: FrameMesh, weldMm: number): MeshRepair {
   const { weld, canon } = weldVertices(mesh, weldMm);
   const p = mesh.positions;
   const W = canon.length;
@@ -309,6 +325,7 @@ function closeMesh(tl: ManifoldToplevel, mesh: FrameMesh, weldMm: number): { pos
   const src = mesh.indices;
   const tris: number[] = [];
   const directed = new Map<number, number>();
+  let degenerateTriangles = 0;
   const count = (key: number): void => {
     directed.set(key, (directed.get(key) ?? 0) + 1);
   };
@@ -316,8 +333,10 @@ function closeMesh(tl: ManifoldToplevel, mesh: FrameMesh, weldMm: number): { pos
     const a = weld[src[t]!]!;
     const b = weld[src[t + 1]!]!;
     const c = weld[src[t + 2]!]!;
-    if (a === b || b === c || c === a) continue;
-    if (doubleArea(positions, a, b, c) <= 1e-12) continue;
+    if (a === b || b === c || c === a || doubleArea(positions, a, b, c) <= 1e-12) {
+      degenerateTriangles++;
+      continue;
+    }
     tris.push(a, b, c);
     count(a * W + b);
     count(b * W + c);
@@ -326,13 +345,27 @@ function closeMesh(tl: ManifoldToplevel, mesh: FrameMesh, weldMm: number): { pos
   // A boundary edge is directed once and has no reverse; anything else is non-manifold and left
   // for Manifold to report, as before.
   const next = new Map<number, number>();
+  let openEdges = 0;
   for (const [key, uses] of directed) {
     if (uses !== 1) continue;
     const a = Math.floor(key / W);
     const b = key % W;
-    if (!directed.has(b * W + a)) next.set(a, b);
+    if (directed.has(b * W + a)) continue;
+    openEdges++;
+    // A torn vertex can start two boundary edges; one is enough to walk the chain, and the
+    // uncapped remainder is what `cappedEdges !== openEdges` refuses below.
+    if (!next.has(a)) next.set(a, b);
   }
+  const refuse = (detail: string): never => {
+    throw new Error(
+      `cam/model/features: the goal mesh has ${openEdges} open edge(s) and ${degenerateTriangles} degenerate` +
+        ` triangle(s) that could not be closed into a solid (${detail}) — a missing facet is a gouge risk, so` +
+        ' the job is refused rather than planned',
+    );
+  };
   const seen = new Set<number>();
+  let cappedEdges = 0;
+  let cappedLoops = 0;
   for (const start of next.keys()) {
     if (seen.has(start)) continue;
     const loop: number[] = [];
@@ -349,17 +382,25 @@ function closeMesh(tl: ManifoldToplevel, mesh: FrameMesh, weldMm: number): { pos
       }
       v = w;
     }
-    if (closed && loop.length >= 3) capLoop(tl, positions, loop, next, tris);
+    if (!closed || loop.length < 3) continue;
+    try {
+      capLoop(tl, positions, loop, next, tris);
+    } catch (err) {
+      refuse(`the cap of a ${loop.length}-edge loop failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    cappedEdges += loop.length;
+    cappedLoops++;
   }
-  return { positions, indices: Uint32Array.from(tris) };
+  if (cappedEdges !== openEdges) refuse(`${openEdges - cappedEdges} edge(s) form no closed loop`);
+  return { positions, indices: Uint32Array.from(tris), openEdges, degenerateTriangles, cappedLoops };
 }
 
-/** Build the solid the sections are taken from; `closeMesh` is what makes an open goal mesh solid. */
-export function solidOf(tl: ManifoldToplevel, mesh: FrameMesh, weldMm: number): Manifold {
-  const closed = closeMesh(tl, mesh, weldMm);
-  const mm = new tl.Mesh({ numProp: 3, vertProperties: closed.positions, triVerts: closed.indices });
+/** Build the solid the sections are taken from; `repairMesh` is what makes an open goal mesh solid. */
+export function solidOf(tl: ManifoldToplevel, mesh: FrameMesh, weldMm: number): { solid: Manifold; repair: MeshRepair } {
+  const repair = repairMesh(tl, mesh, weldMm);
+  const mm = new tl.Mesh({ numProp: 3, vertProperties: repair.positions, triVerts: repair.indices });
   mm.merge();
-  return new tl.Manifold(mm);
+  return { solid: new tl.Manifold(mm), repair };
 }
 
 export function buildTree(
@@ -379,7 +420,13 @@ export function buildTree(
     if (p[i]! < partBottom) partBottom = p[i]!;
   }
 
-  const solid = solidOf(tl, mesh, tol.weldMm);
+  const { solid, repair } = solidOf(tl, mesh, tol.weldMm);
+  if (repair.openEdges > 0) {
+    notes.push(
+      `the goal mesh had ${repair.openEdges} open edge(s) and ${repair.degenerateTriangles} degenerate triangle(s); ` +
+        'the holes were closed before planning',
+    );
+  }
   const garbage: { delete(): void }[] = [solid];
   try {
     const silhouette = solid.project();
