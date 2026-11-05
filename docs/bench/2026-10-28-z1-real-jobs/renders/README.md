@@ -22,6 +22,8 @@ on this mesh is 0.04 %, against the page's 0.14 % on the vendor STL; that gap is
 
 The pictures are written by `casemaker-app/tests/tools/acceptancePics.ts` from the acceptance run's
 own `<card>-plan.json` + `<card>-pics.json` (no re-plan), extended here with the per-program owner
-colours, the vendor panels, the simulated stock and the feature tree. The SVGs live beside them in
+colours, the vendor panels, the simulated stock and the feature tree; the extension is branch
+**972-render-set** (`263df637`, off F's `d46f76b0`). The run directory also carries `grid.json`,
+`goal.f32`, `union.f32` and the posted `program-*.nc` for offline zooms. The SVGs live beside them in
 `~/casemaker-manager/pics/<sha>/<part>/` on the machine that rendered them; only the PNGs are
 committed to keep the repository light.

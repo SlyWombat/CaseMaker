@@ -32,6 +32,16 @@ One line per picture, including what looks physically notable:
   at a rim; the section shows only the 0.5 mm dip and the sweep coincident with the goal elsewhere.
 - `05-section-worst-leftover` — the section across the deep square row shows every floor cut to
   −22.8 with the sweep following; the 22 mm is the rim cell above, not a standing island.
+- `08-zoom-cut-into-cell` — plan zoom ±5 mm around (59.6, 122.1) (asked by the manager, 2026-11-05):
+  no model edge lies near the cell — the nearest goal wall cell is **3.19 mm** away — and the chamfer
+  program passes the cell with a single **G1 X81.053 Y143.535**, from (26.465, 88.947, −1.300) to
+  (81.053, 143.535, −1.300): **77.20 mm at constant Z, F1000**. A stay-down link at cutting depth
+  (0.5 mm below the −0.8 top land) crossing flat land — that is the mechanism of the 0.04 %.
+- `09-zoom-wall-section` — 0.01 mm section across pocket-61's left wall (asked by the manager):
+  model top ray-cast at 0.01 mm steps, goal and sweep at 0.1 mm. Model wall at **x = 14.005**; the
+  posted sweep's first floor cell at **x = 14.110**, i.e. **+0.105 mm — one 0.1 mm cell**. The walls
+  are cut to the model; the red-inside-black seen in the low-resolution section is the grid's wall
+  cell, not an undersized pocket.
 - `06-simulated-stock` — union top −0.800 mm, bottom −22.800 mm; the four central rectangles stand
   at −3.8/−5.8 (the shallow pocket and its three round children) surrounded by the deeper rows —
   matches the tree's levels.
