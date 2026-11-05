@@ -15,6 +15,16 @@
  * walker `gateImports.spec.ts` already uses) — none of it is a mock of the eventual behaviour.
  * Each failing case is RED today for a reason confirmed by actually running it (not guessed);
  * the comment beside each assertion says which run produced that reason.
+ *
+ * PART 2's FIXTURE, UPDATED (966-goal-setups' own merge, `c099c5cc`, wired the real
+ * `buildSetupSpecs`/`registerSetupOrigin` decision into `buildModelPlanInputForGoal`): the bare
+ * sphere this part used to plan against now, correctly, REFUSES — `registerSetupOrigin`'s own
+ * by-design correctness (no two holes, no usable edge, `cam/model/setups.ts`), not a bug. That
+ * means the sphere can no longer prove part 2's actual claim ("posts both, no refusal"); per the
+ * Manager's explicit ruling, that claim is proved on a NEW shape carrying a real locating datum
+ * (`tests/unit/helpers/datumTwoSetup966.ts`, shared with `multiSetupVerify966.spec.ts`), and the
+ * sphere is kept as its OWN, separate case below (part 2b) — pinning its refusal, by name, as a
+ * permanent regression guard, never merged into part 2's own claim.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { dirname, join } from 'node:path';
@@ -35,6 +45,7 @@ import type { ParsedMesh } from '@/engine/import/stlParser';
 import type { MountSpec } from '@/engine/cnc/setups/types';
 import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
 import { valueImportClosure } from '../tools/importGraph';
+import { buildDatumGoal, datumFeatureSource } from './helpers/datumTwoSetup966';
 
 afterEach(() => {
   clearTargetObjectMeshCache();
@@ -194,39 +205,33 @@ describe('#966 end-state, part 1 — the flag’s own default routes generateGoa
 // PART 2 — "A goal that needs two setups posts both programs, with no refusal."
 // ───────────────────────────────────────────────────────────────────────────────────────────
 describe('#966 end-state, part 2 — a goal needing two setups posts both, never refused', () => {
-  it('sanity: this sphere+flipped-tabs goal genuinely needs two setups — buildSetupSpecs (#965) says so', () => {
-    // The real #965 reach-aware decision, run directly on the sphere's own triangles: a sphere has
-    // no flat back, so the flip is what finishes it (goalFlipPlan.spec.ts's own documented case).
-    // This passes today — #965's own module is not what's broken.
-    const { setups, plan } = buildSetupSpecs({ geometry: sphereFeatureSource(), underside: 'flippedTabs', mount: VISE, stockSize: { x: 2 * SPHERE_R, y: 2 * SPHERE_R, z: 2 * SPHERE_R } });
+  it('sanity: the datum goal genuinely needs two setups — buildSetupSpecs (#965) says so', async () => {
+    // The real #965 reach-aware decision, run directly on the datum mesh's own triangles (before
+    // this is ever wired through the full pipeline — this file's own helper validates it the same
+    // way `registration965.spec.ts` validates `registerSetupOrigin` in isolation): curved all the
+    // way round like the sphere fixture it replaces, so the top setup's own blind hemisphere is
+    // still what the bottom flip is needed for.
+    const { geometry, bbox } = await datumFeatureSource();
+    const { setups, plan } = buildSetupSpecs({
+      geometry,
+      underside: 'flippedTabs',
+      mount: VISE,
+      stockSize: { x: bbox.max[0] - bbox.min[0], y: bbox.max[1] - bbox.min[1], z: bbox.max[2] - bbox.min[2] },
+    });
     expect(setups).toHaveLength(2);
     expect(plan.sides.map((s) => s.faceUp)).toEqual(['top', 'bottom']);
   });
 
-  it('RED today, for a DIFFERENT reason than the stated candidate: the seam never even ASKS planModelCam for a second setup', async () => {
+  it('GREEN (966-goal-setups wires the real decision in): the seam asks planModelCam for both setups, and both post real programs', async () => {
     // These are the #966 seam's own two calls, in the same order `generateGoalProgram`
     // (engraveGenerate.ts) makes them — not a re-implementation, the literal production functions.
-    const job = jobFor(sphereGoal(), { length: 2 * SPHERE_R, width: 2 * SPHERE_R, thickness: 2 * SPHERE_R });
-    const goal = job.targetObject!;
+    const { goal, stock } = await buildDatumGoal();
+    const job = jobFor(goal, stock);
     const input = buildModelPlanInputForGoal(job, goal, BALL, SHOP);
 
-    // CONFIRMED by running this exact call (2026-11-04): input.setups.length === 1. Read
-    // `buildModelPlanInputForGoal`'s own source (engraveGenerate.ts, "const setups: SetupSpec[] =
-    // [...]") — it hardcodes ONE SetupSpec and never calls `buildSetupSpecs`/`goalFlipPlan` at
-    // all, for ANY goal, regardless of its mesh or its `underside.kind`. So the hard refusal this
-    // issue's candidate blocker names (engraveGenerate.ts:5012, "`output.perSetup.length !== 1`",
-    // #966-green's own commit 86a79088) can NEVER fire through this path: `planModelCam` is never
-    // given more than one setup to plan in the first place. 966-multisetup, as pushed to origin
-    // today (4865709e on top of ffc84ef2), does not touch this either — it only adds
-    // `setModelCamEnabled()` to `cam/model/plan.ts`; `buildSetupSpecs` stays called from nowhere
-    // but its own tests (`grep -rn buildSetupSpecs src/` outside *.spec.ts: only setups.ts itself
-    // and a comment in plan.ts). The real, upstream gap is here, not at the refusal.
-    //
-    // Worse than a refusal: calling the FULL `generateGoalProgram` (flag mocked on) for this same
-    // sphere job does not refuse either — it silently returns `ok: true` with a posted, verified
-    // single-setup (top-only) plan, as if the part had no underside to finish. That false-green
-    // shape is exactly why this assertion is pinned on `input.setups.length`/`perSetup.length`
-    // rather than on `result.ok`, which would already (wrongly) read as passing today.
+    // `buildModelPlanInputForGoal` now calls the real `buildSetupSpecs`/`goalFlipPlan` decision
+    // (966-goal-setups, c099c5cc) instead of hardcoding a single top setup — confirmed directly,
+    // not inferred from `result.ok` (a false-green single-setup plan would also read `ok: true`).
     expect(input.setups).toHaveLength(2);
 
     const output = await planModelCam(input);
@@ -236,7 +241,7 @@ describe('#966 end-state, part 2 — a goal needing two setups posts both, never
     }
   }, 30_000);
 
-  it('RED today (same root cause): generateGoalProgram itself, flag on, must post both setups’ work with no refusal', async () => {
+  it('GREEN: generateGoalProgram itself, flag on, posts both setups’ work with no refusal, and EVERY posted program verifies clean', async () => {
     vi.doMock('@/engine/cnc/cam/model/plan', async (importOriginal) => {
       const actual = await importOriginal<typeof import('@/engine/cnc/cam/model/plan')>();
       return { ...actual, USE_MODEL_CAM_ENGINE: true };
@@ -244,20 +249,81 @@ describe('#966 end-state, part 2 — a goal needing two setups posts both, never
     vi.resetModules();
     const { generateGoalProgram: generateGoalProgramModelCam, buildModelPlanInputForGoal: buildInput } = await import('@/workers/sim/engraveGenerate');
 
+    const { goal, stock } = await buildDatumGoal();
+    const job = jobFor(goal, stock);
+
+    // Confirms, through the FRESHLY-IMPORTED (flag-on) module, the same fact the previous case
+    // established: the seam's own input genuinely carries two setups for this job.
+    const input = buildInput(job, goal, BALL, SHOP);
+    expect(input.setups).toHaveLength(2);
+
+    const result = await generateGoalProgramModelCam(job, goal, BALL, [], null, SHOP);
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
+
+    // THE MANAGER'S OWN BAR (#966-green's "`VerifyReport.ok`"): not "the plan looked sound" but
+    // every POSTED program, across BOTH setups, verifies clean with ZERO error-severity findings —
+    // checked directly against `EngraveProgram.verify`, not merely inferred from `result.ok`
+    // (which already implies no verify error reached the top level, but does not by itself show
+    // BOTH setups actually posted, or name which programs were checked).
+    expect(result.programs).toBeDefined();
+    const programs = result.programs!;
+    expect(programs.length).toBeGreaterThan(0);
+    const setupsPosted = new Set(programs.map((p) => p.setupIndex));
+    expect(setupsPosted.size, 'both setups must have posted at least one program, not just the first').toBe(2);
+    for (const program of programs) {
+      const errors = program.verify.findings.filter((f) => f.severity === 'error');
+      expect(errors, `setup ${program.setupIndex} program (${program.toolKey}) had verify error(s): ${JSON.stringify(errors)}`).toEqual([]);
+    }
+  }, 30_000);
+});
+
+// ───────────────────────────────────────────────────────────────────────────────────────────
+// PART 2b (NEW — the Manager's explicit ruling, #966): the bare sphere, kept as ITS OWN case —
+// it must refuse BY NAME, through `registerSetupOrigin`'s own no-datum finding specifically (not
+// some other unrelated error), and must NEVER post `ok: true` for one side silently. This pins
+// the refusal behaviour itself as a permanent regression guard; it is deliberately NOT merged
+// into part 2's own claim above (which stays exactly "posts both, no refusal", now proved by the
+// datum shape instead).
+// ───────────────────────────────────────────────────────────────────────────────────────────
+describe('#966 end-state, part 2b — the bare sphere refuses BY NAME (registerSetupOrigin), never a silent single-setup ok:true', () => {
+  it('sanity: this sphere+flipped-tabs goal genuinely needs two setups — buildSetupSpecs (#965) says so', () => {
+    // The real #965 reach-aware decision, run directly on the sphere's own triangles: a sphere has
+    // no flat back, so the flip is what finishes it (goalFlipPlan.spec.ts's own documented case).
+    const { setups, plan } = buildSetupSpecs({ geometry: sphereFeatureSource(), underside: 'flippedTabs', mount: VISE, stockSize: { x: 2 * SPHERE_R, y: 2 * SPHERE_R, z: 2 * SPHERE_R } });
+    expect(setups).toHaveLength(2);
+    expect(plan.sides.map((s) => s.faceUp)).toEqual(['top', 'bottom']);
+  });
+
+  it('planModelCam throws registerSetupOrigin’s own named #965 registration refusal — never a silent single-setup plan', async () => {
+    const job = jobFor(sphereGoal(), { length: 2 * SPHERE_R, width: 2 * SPHERE_R, thickness: 2 * SPHERE_R });
+    const goal = job.targetObject!;
+    const input = buildModelPlanInputForGoal(job, goal, BALL, SHOP);
+    // The real decision still proposes two setups for the sphere — the refusal below is
+    // `registerSetupOrigin`'s own (no locating datum), never a setup-count problem.
+    expect(input.setups).toHaveLength(2);
+    await expect(planModelCam(input)).rejects.toThrow(/no locating features found for the vise flip \(#965 registration\)/);
+  }, 30_000);
+
+  it('generateGoalProgram itself, flag on, refuses BY THAT SAME NAME — never ok:true for a part with no locating datum', async () => {
+    vi.doMock('@/engine/cnc/cam/model/plan', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/engine/cnc/cam/model/plan')>();
+      return { ...actual, USE_MODEL_CAM_ENGINE: true };
+    });
+    vi.resetModules();
+    const { generateGoalProgram: generateGoalProgramModelCam } = await import('@/workers/sim/engraveGenerate');
+
     const job = jobFor(sphereGoal(), { length: 2 * SPHERE_R, width: 2 * SPHERE_R, thickness: 2 * SPHERE_R });
     const goal = job.targetObject!;
 
-    // Confirms, through the FRESHLY-IMPORTED (flag-on) module, the same fact the previous case
-    // established: the seam's own input never has more than one setup for this job.
-    const input = buildInput(job, goal, BALL, SHOP);
-    expect(input.setups).toHaveLength(2); // RED today — see previous case's comment
-
     const result = await generateGoalProgramModelCam(job, goal, BALL, [], null, SHOP);
-    // No refusal (this much the Manager's part 2 already asks for, and today it is already true —
-    // but only because the job was silently treated as single-setup, never because both setups'
-    // programs were actually posted).
-    expect(result.ok).toBe(true);
-    expect(result.errors).toEqual([]);
+    expect(result.ok).toBe(false);
+    expect(
+      result.errors.some((e) => /no locating features found for the vise flip \(#965 registration\)/.test(e.message)),
+      `expected a #965 registration refusal; got: ${JSON.stringify(result.errors)}`,
+    ).toBe(true);
+    // Never a silent single-side success — the false-green shape this part guards against.
+    expect(result.programs).toEqual([]);
   }, 30_000);
 });
 
