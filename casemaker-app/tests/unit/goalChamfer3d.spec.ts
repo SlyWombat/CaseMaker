@@ -123,6 +123,17 @@ describe('#829 a goal chamfers its own edges', () => {
     expect(out.programs[1]!.nc).toMatch(/G1 Z-1(?:\.0+)? F/);
     // The V program is a real posted file, not a placeholder.
     expect(out.programs[1]!.nc).toContain('M02');
+
+    // #982 pin — the fixture's OWN set (a ball and a V, NO flat) through the ONE model entry:
+    // the pocket floors fall back to the ball, never a refusal. RED at the parent.
+    {
+      const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+      const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+      const modelInput = await buildModelPlanInputForGoal(job, target, BALL, SHOP);
+      const modelOut = await planModelCam(modelInput);
+      expect(modelOut.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
+      expect(modelOut.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
+    }
   }, 120_000);
 
   it('surfaces the goal and says why the edges are square when no V is chosen', async () => {

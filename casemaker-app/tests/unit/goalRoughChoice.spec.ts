@@ -124,6 +124,28 @@ describe('#846 — the goal path chooses its rough, and says so', () => {
     expect(note!).toMatch(/max engagement .* mm under the .* mm cap/);
   });
 
+  // #982 pins — the fixture's OWN single-cutter sets through the ONE model entry: the fallback
+  // is planned, never a refusal. RED at the parent (planModelCam threw).
+  it('#982 pin — a flat-only set plans the curved ramp through planModelCam (no ball: flat raster)', async () => {
+    const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+    const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+    const job = jobFor(5, 'pla');
+    const input = await buildModelPlanInputForGoal(job, job.targetObject!, FLAT, {});
+    const out = await planModelCam(input);
+    expect(out.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
+    expect(out.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no ball nose');
+  }, 120_000);
+
+  it('#982 pin — a ball-only set plans the same ramp (no flat: the ball floor pass)', async () => {
+    const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+    const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+    const job = jobFor(5, 'pla');
+    const input = await buildModelPlanInputForGoal(job, job.targetObject!, BALL, {});
+    const out = await planModelCam(input);
+    expect(out.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
+    expect(out.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
+  }, 120_000);
+
   it('a shallow softwood goal keeps the raster by the rule, quoting the shop’s own budget', async () => {
     const job = jobFor(1, 'softwood');
     const out = await generateGoalProgram(job, job.targetObject!, FLAT, [], null, SMALL_BUDGET);
