@@ -570,10 +570,12 @@ the tradeoffs (if any) and then implement with the tools available to the best o
 Potentially also showing the user what the outcome of the choice will be."* Followed by: *"should
 not bug the user if the difference is minor."*
 
-**1. The ideal is planned first, from the full catalogue.** `candidateSequences` runs over every
-cutter the app knows (the catalogue door, #964), not only the location's inventory. Its output is
-the reference plan — on the tray's digits, a ⌀0.6 flat giving the model's flat −1.80 floor with
-vertical walls. The ideal is computed and kept; it is never the default and never a gate.
+**1. The ideal is planned from the full catalogue.** `candidateSequences` runs over every cutter
+the app knows (the catalogue door, #964), not only the location's inventory. Its output is the
+reference plan — on the tray's digits, a ⌀0.6 flat giving the model's flat −1.80 floor with
+vertical walls. The app plans BOTH from the same input; the order `planTwoOutcomes` happens to use
+(the owned plan first, then the ideal) is an implementation detail and carries no meaning. The
+ideal is kept beside the owned plan; it is never the default and never a gate.
 
 **2. The owned plan is the plan, and it never refuses where an owned tool can do the job.** The
 same candidate builder runs over the location's set and `chooseSequence` picks the best outcome
