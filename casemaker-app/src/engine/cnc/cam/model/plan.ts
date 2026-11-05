@@ -69,6 +69,14 @@ import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
  * the caller (`planModelCam`) is what checks that before ever calling this, so this function
  * itself assumes it, not re-checks it. `profile`/`mesh` are the OPPOSITE setup's own tool profile
  * and ITS rotated mesh (`rotatedGeometryFor(input.geometry, opposite.features.frame)`).
+ *
+ * #965 REVIEW FINDING, fixed here: this function maps `(x, y)` through `documentXY` — the SAME
+ * function `mapIRToDocument` uses to place this setup's own posted moves in the document frame.
+ * It must therefore take the SAME registration `offset` `planModelCam` passes to that call, or it
+ * checks a different point than the one the cut actually lands on the instant registration finds
+ * a real (non-zero) correction — dormant until then, since every current fixture (including a
+ * genuinely two-setup `planModelCam` run) only ever produces `[0, 0]` for this module's own pure
+ * axis-through-origin flip (no caller has ever needed to exercise it before `registrationFreeingCl965.spec.ts`).
  */
 export function oppositeSurfaceSafeDepthMm(
   frame: SetupFrame,
@@ -77,8 +85,15 @@ export function oppositeSurfaceSafeDepthMm(
   x: number,
   y: number,
   marginMm: number = ARC_CHORD_TOLERANCE_MM,
+  // #965 review finding: this MUST be the same registration offset `mapIRToDocument` is given
+  // for this setup's own posted program, and it MUST go through the same `documentXY` call — the
+  // one mapping both share — or this function checks a different point than the one the cut
+  // actually posts to. Absent → [0, 0], unchanged for every pre-existing caller (none of which
+  // pass a non-zero offset today; see this function's own header for why that case has never
+  // come up on a real job yet).
+  offset: readonly [number, number] = [0, 0],
 ): number | null {
-  const [wx, wy] = documentXY(frame, x, y);
+  const [wx, wy] = documentXY(frame, x, y, offset);
   const surfaceWorldZ = dropCutterHeight(profile, mesh, wx, wy);
   if (surfaceWorldZ === null) return null;
   return surfaceWorldZ + frame.stockTop - marginMm;
@@ -494,8 +509,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         } else {
           const mesh: DropCutterMesh = oppositeGeometry.triangles;
           const frameForQuery = spec.frame;
+          // #965 review finding: this setup's own `registrationOffset` — the SAME one
+          // `mapIRToDocument` below places this setup's posted moves with — or the safety check
+          // and the real cut disagree about where a point is the moment registration is ever
+          // non-zero.
           oppositeSafeDepthMm = (x: number, y: number): number | null =>
-            oppositeSurfaceSafeDepthMm(frameForQuery, profile, mesh, x, y);
+            oppositeSurfaceSafeDepthMm(frameForQuery, profile, mesh, x, y, ARC_CHORD_TOLERANCE_MM, registrationOffset);
           freeingNotes.push(
             `setup ${setupIndex}: the freeing contour's depth is bounded, at every point its path samples, by setup 0's own finished surface (#965, #898 part 2) — it will not cut deeper than that surface, read through this setup's own ${primary.name || primary.shape}`,
           );
