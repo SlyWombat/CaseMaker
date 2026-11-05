@@ -101,7 +101,8 @@ export function oppositeSurfaceSafeDepthMm(
   if (surfaceWorldZ === null) return null;
   return surfaceWorldZ + frame.stockTop - marginMm;
 }
-import { gridPitchFor, rough, skin } from './ops/rough';
+import { rough, skin } from './ops/rough';
+import { maskCellsExact } from './finishMask';
 import { FLAT_SURFACE_MAX_SLOPE_DEG, flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
 import { cellPolygons, rest } from './ops/rest';
 import { DEFAULT_FINISH_SCALLOP_MM, finish, finishKindFor } from './ops/finish';
@@ -2246,49 +2247,41 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // ball's footprint (its centre just outside the leftover still cuts into it, and just outside
     // the part still finishes the skirt its flank holds).
     //
-    // #970 — THE LEFTOVER FIELD, BUILT ONCE (the §8.9 statement on #970): the flat's CL, the rest's
-    // CL and the design top on the plan's grid, in the MESH datum. The mask reads the dilated
-    // leftover in O(1) per point — the per-point `dropCutter` calls (up to 18 per point with the
-    // eight dilation neighbours) are gone. The skin is served separately: it builds its own
-    // one-pass grid inside `skin()` (same pitch, `gridPitchFor`).
+    // #970 (the manager's ruling, #965's bisect) — THE EXACT PER-POINT RULE IS THE MASK'S RULE.
+    // cd5ec056 replaced these queries with a leftover grid read by `Math.round`, which drops the
+    // leftover between its samples: on the panther's 74–89° flanks the finish stopped running
+    // (coverage 73.17 → 49.09 %), and MASK-EQUIV showed the grid cannot be made conservative at
+    // its pitch (9,483 of 23,058 points dropped at 0.5 mm, 0 over-included; a 0.1 mm grid is still
+    // 2.5 points short). Correct cuts before speed: the mask asks the exact CL at the point and at
+    // its eight footprint neighbours, as it did before cd5ec056. The skimming grid that change
+    // also made for `skin()` is untouched — that one carries its own read (#970's 6b35d6e9).
     const finishBand = opts.finishScallopMm ?? opts.bandMm;
-    const gridPitch = gridPitchFor(opts.stepOverMm, (cuttingDiameter(opts.flat) ?? 0) / 2);
-    const gridMin: [number, number] = roughRef.bounds.min;
-    const gnx = Math.max(2, Math.floor((roughRef.bounds.max[0] - gridMin[0]) / gridPitch + 1e-9) + 1);
-    const gny = Math.max(2, Math.floor((roughRef.bounds.max[1] - gridMin[1]) / gridPitch + 1e-9) + 1);
-    const gridLeftover = new Uint8Array(gnx * gny);
-    const gridCellOf = (x: number, y: number): number => {
-      const i = Math.round((x - gridMin[0]) / gridPitch);
-      const j = Math.round((y - gridMin[1]) / gridPitch);
-      return i < 0 || j < 0 || i >= gnx || j >= gny ? -1 : j * gnx + i;
+    const flatAbs = (x: number, y: number): number | null => {
+      const v = prevCl.dropCutter(x, y);
+      return v === null ? null : v + z0;
     };
-    for (let j = 0; j < gny; j++) {
-      for (let i = 0; i < gnx; i++) {
-        const x = gridMin[0] + i * gridPitch;
-        const y = gridMin[1] + j * gridPitch;
-        const f = prevCl.dropCutter(x, y);
-        const r = restClSink.surface?.dropCutter(x, y) ?? null;
-        const design = topSurfaceAt(binsForMask(), x, y);
-        const k = j * gnx + i;
-        const cl = f === null ? r : r === null ? f : Math.min(f, r);
-        gridLeftover[k] = cl !== null && design !== null && cl + z0 - design > finishBand ? 1 : 0;
-      }
-    }
+    const restAbs = (x: number, y: number): number | null => {
+      const surface = restClSink.surface;
+      if (surface === undefined) return null;
+      const v = surface.dropCutter(x, y);
+      return v === null ? null : v + z0;
+    };
+    const leftoverAbove = (x: number, y: number): boolean => {
+      const f = flatAbs(x, y);
+      const r = restAbs(x, y);
+      const flatZ = f === null ? r : r === null ? f : Math.min(f, r);
+      if (flatZ === null) return false;
+      const design = topSurfaceAt(binsForMask(), x, y);
+      if (design === null) return false;
+      return flatZ - design > finishBand;
+    };
     const ballRadiusForMask = (cuttingDiameter(ball) ?? 0) / 2;
     const maskRing: [number, number][] = [];
     for (let d = 0; d < 8; d++) {
       const a = (d * Math.PI) / 4;
       maskRing.push([Math.cos(a) * ballRadiusForMask, Math.sin(a) * ballRadiusForMask]);
     }
-    const maskCells = (x: number, y: number): boolean => {
-      const k0 = gridCellOf(x, y);
-      if (k0 >= 0 && gridLeftover[k0] === 1) return true;
-      for (const [ox, oy] of maskRing) {
-        const k = gridCellOf(x + ox, y + oy);
-        if (k >= 0 && gridLeftover[k] === 1) return true;
-      }
-      return false;
-    };
+    const maskCells = (x: number, y: number): boolean => maskCellsExact(leftoverAbove, maskRing, x, y);
 
     // 3. THE BALL'S ONE FINAL LEVEL: a single pass at the region's depth takes the band.
     //
