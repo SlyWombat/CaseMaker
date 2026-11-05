@@ -647,11 +647,29 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     if (vbitParams?.note !== null && vbitParams?.note !== undefined) toolSubstitutions.push(vbitParams.note);
     const restBallParams = restBall === undefined ? null : toolCutParams(input, restBall, pocketParams);
     if (restBallParams?.note !== null && restBallParams?.note !== undefined) toolSubstitutions.push(restBallParams.note);
+    // #990 — EVERY OTHER CUTTER GETS ITS OWN ROW TOO: a rest flat, the goal's own
+    // `curvedRoughTool`, a smaller skin/rest flat — anything in the house that differs from
+    // `primary` was silently handed `pocketParams` (the primary's feed/step-down/RPM) until now.
+    // Memoised by cutter key, so a plan with several candidate flats resolves each ONCE no
+    // matter how many ops ask for it.
+    const otherParams = new Map<string, CutParams>();
+    const notedOthers = new Set<string>();
+    const primaryKey = cutterKeyOf(primary);
     const cutParamsFor = (tool: Tool): CutParams => {
       if (ball !== undefined && tool === ball && ballParams !== null) return ballParams.params;
       if (restBall !== undefined && tool === restBall && restBallParams !== null) return restBallParams.params;
       if (vbit !== undefined && tool === vbit && vbitParams !== null) return vbitParams.params;
-      return pocketParams;
+      const key = cutterKeyOf(tool);
+      if (key === primaryKey) return pocketParams;
+      const cached = otherParams.get(key);
+      if (cached !== undefined) return cached;
+      const { params, note } = toolCutParams(input, tool, pocketParams);
+      otherParams.set(key, params);
+      if (note !== null && !notedOthers.has(key)) {
+        notedOthers.add(key);
+        toolSubstitutions.push(note);
+      }
+      return params;
     };
 
     opts.onProgress?.({ setupIndex, op: 'sequence', fraction: 0.4 });
@@ -1394,14 +1412,29 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
 
   const cutters: CutterCandidates = { house: [...opts.houseFlats], catalogue: [] };
 
+  // #990 — EVERY CANDIDATE FLAT, ITS OWN ROW. `opts.paramsFor`, when the caller supplies it
+  // (`planModelCam` now does, for every tool in the house), resolves feed/plunge/step-down/RPM
+  // from THAT cutter's own catalogue row; absent, every existing caller that never passes it
+  // keeps the old (primary-wide) numbers unchanged. `stepOver` here stays this function's own
+  // quarter-diameter convention either way — `opts.paramsFor`'s own `.stepOver` is a different,
+  // catalogue-row number no pocket-chain call site reads from this result.
   const cutParamsFor = (cutter: Tool): CutParams => ({
-    rpm: opts.spindleRpm,
-    feed: opts.feeds.feedMmPerMin,
-    plungeFeed: opts.feeds.plungeFeedMmPerMin,
-    stepDown: opts.stepDownMm,
-    stepOver: (cuttingDiameter(cutter) ?? 1) / 4,
+    ...(opts.paramsFor?.(cutter) ?? {
+      rpm: opts.spindleRpm,
+      feed: opts.feeds.feedMmPerMin,
+      plungeFeed: opts.feeds.plungeFeedMmPerMin,
+      stepDown: opts.stepDownMm,
+      peck: 0,
+      air: opts.air,
+    }),
+    // Only feed/plunge/step-down/RPM vary by cutter here (#990); `stepOver` keeps this
+    // function's own quarter-diameter convention and `peck`/`air` keep the pocket chain's own
+    // values regardless of what the resolved row's own catalogue entry happens to carry —
+    // `opts.paramsFor`'s result is a full `CutParams` (its OWN peck/air, meant for a DIFFERENT
+    // consumer), not this function's contract.
     peck: 0,
     air: opts.air,
+    stepOver: (cuttingDiameter(cutter) ?? 1) / 4,
   });
 
   /**
@@ -1498,8 +1531,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       node: restNode,
       region: ref,
       stepOverMm,
-      stepDownMm: opts.stepDownMm,
-      feeds: opts.feeds,
+      // #990 — a rest's cutter is SMALLER than the primary by construction (that is the whole
+      // point of a rest); its own row, not the primary's, is what this pocket is cut at.
+      stepDownMm: cutParamsFor(cutter).stepDown,
+      feeds: { feedMmPerMin: cutParamsFor(cutter).feed, plungeFeedMmPerMin: cutParamsFor(cutter).plungeFeed },
       offset: opts.offset,
       safeZMm: SAFE_Z,
       hopZMm: HOP_Z,
@@ -1576,13 +1611,15 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         },
         region: ref,
         stepOverMm: toolRadius,
-        stepDownMm: opts.stepDownMm,
-        feeds: opts.feeds,
+        // #990 — this cutter's own row, not necessarily the primary's (facing is usually cut by
+        // the chain's primary, but the cutter is still named per-call, never assumed).
+        stepDownMm: cutParamsFor(cutter).stepDown,
+        feeds: { feedMmPerMin: cutParamsFor(cutter).feed, plungeFeedMmPerMin: cutParamsFor(cutter).plungeFeed },
         offset: opts.offset,
         safeZMm: SAFE_Z,
         hopZMm: HOP_Z,
         toolNumber: cutter.number ?? 1,
-        spindleRpm: opts.spindleRpm,
+        spindleRpm: cutParamsFor(cutter).rpm,
         air: opts.air,
         rapid: opts.rapid,
         boolean: opts.boolean,
@@ -1605,13 +1642,14 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
           node: { ...throughNode, mouthZ: rebase(tree.top.z), floorZ: rebase(throughNode.floorZ) },
           region: ref,
           stepOverMm: diameter / 4,
-          stepDownMm: opts.stepDownMm,
-          feeds: opts.feeds,
+          // #990 — this cutter's own row.
+          stepDownMm: cutParamsFor(cutter).stepDown,
+          feeds: { feedMmPerMin: cutParamsFor(cutter).feed, plungeFeedMmPerMin: cutParamsFor(cutter).plungeFeed },
           offset: opts.offset,
           safeZMm: SAFE_Z,
           hopZMm: HOP_Z,
           toolNumber: cutter.number ?? 1,
-          spindleRpm: opts.spindleRpm,
+          spindleRpm: cutParamsFor(cutter).rpm,
           air: opts.air,
           rapid: opts.rapid,
           boolean: opts.boolean,
@@ -1646,8 +1684,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       node: { ...node, mouthZ: rebase(mouthZAbs), floorZ: rebase(node.floorZ) },
       region: ref,
       stepOverMm: diameter / 4,
-      stepDownMm: opts.stepDownMm,
-      feeds: opts.feeds,
+      // #990 — this cutter's own row (a nested/coverage node can be assigned a rest flat, not
+      // necessarily the primary).
+      stepDownMm: cutParamsFor(cutter).stepDown,
+      feeds: { feedMmPerMin: cutParamsFor(cutter).feed, plungeFeedMmPerMin: cutParamsFor(cutter).plungeFeed },
       offset: opts.offset,
       // The SAME constants `contourOp` gets from `generateProfile` (ir.ts) — a pocket and the
       // contour in one cutter's program must agree on `safeZ`/`hopZ` (`concatToolpathIR` refuses
@@ -1656,7 +1696,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       safeZMm: SAFE_Z,
       hopZMm: HOP_Z,
       toolNumber: cutter.number ?? 1,
-      spindleRpm: opts.spindleRpm,
+      spindleRpm: cutParamsFor(cutter).rpm,
       air: opts.air,
       rapid: opts.rapid,
       openOutline: node.open ? tree.contour.outline : undefined,
@@ -2361,7 +2401,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           region: roughRegion,
           regionRef: roughRef,
           clSurface: clFlat,
-          stepDownMm: opts.stepDownMm,
+          // #990 — this rough's own row: `flat` (the goal's own `curvedRoughTool`) can be a
+          // different diameter than `primary`, which `opts.stepDownMm` is sized for.
+          stepDownMm: paramsFor(flat).stepDown,
           stockToLeaveMm: opts.bandMm,
           // #869/#966 — `opts.stepOverMm` is sized for `primary` (the pockets' own flat, the plan-
           // level default); `flat` (this goal's own `curvedRoughTool`) can be a SMALLER tool, and
@@ -2422,7 +2464,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           regionRef: ref,
           prevClSurface: prevCl,
           clSurface: restCl,
-          stepDownMm: opts.stepDownMm,
+          // #990 — the rest flat's own row, not `primary`'s (or `flat`'s): it is SMALLER than
+          // both by construction, so its own feeds-band step-down is finer too.
+          stepDownMm: paramsFor(restFlat).stepDown,
           stockToLeaveMm: opts.bandMm,
           // The rest flat is SMALLER than the primary: the plan-level step-over is the primary's
           // (half a ⌀6 is 3 mm), and handing that to a ⌀3.175 rest is more than its own radius —

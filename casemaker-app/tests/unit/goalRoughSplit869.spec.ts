@@ -195,12 +195,24 @@ describe('#869 the goal’s split, generated', () => {
     expect(out.programs).toHaveLength(2);
     if (USE_MODEL_CAM_ENGINE) {
       // #987 — `out.surface3d` carries no facts on this path (no GoalSurfaceFacts wiring exists
-      // for the model-cam engine). The plan's own ops DO carry a step (`CamOperation.passStepMm`),
-      // but it is not yet the rough tool's OWN feeds-band step this title names: `planModelCam`'s
-      // curved dispatch hands every curved stage the job's shared `pocketParams.stepDown` (sized
-      // off `primary`, the pockets' own flat), never `input.curvedRoughTool`'s own row. That gap
-      // is real but separate from #987 (contour/synthetic) — reported to Manager rather than
-      // asserted here as though it were the intended number.
+      // for the model-cam engine); the plan's own ops carry the equivalent step instead
+      // (`CamOperation.passStepMm`). #990 fixed the rough's own row: it no longer inherits
+      // `primary`'s step-down (0.5 mm, the pockets' own ⌀3 flat's PLA band) — the ⌀1.5
+      // `curvedRoughTool`'s OWN 0.8–1.6 mm band reads 0.3.
+      //
+      // The finish ball's own 1.6–3.2 mm band (0.5) has no equivalent to assert here: the old
+      // engine's `finishStepDownMm` is the RIM LAPS' spacing (#862, runSheet.ts's own doc — "the
+      // rim laps ride the FINISHING cutter, so their spacing is ITS step-down"), which the
+      // model-cam path does not plan at all for this fixture. Ahead of a rough, the model-cam
+      // ball runs exactly ONE level over the whole remainder region's depth (#965 ruling, this
+      // title's own "the rim laps keep the finish's" — unaffected by #990, out of its scope:
+      // the `Math.max(opts.stepDownMm, span)` floor is always dominated by the span here) —
+      // asserted as that, not as a feeds-row number it does not use.
+      const ops = out.plan?.perSetup[0]?.ops ?? [];
+      const roughOps = ops.filter((o) => o.kind === 'rough').flatMap((o) => o.outcome.ir.operations);
+      const finishOps = ops.filter((o) => o.kind === 'finish').flatMap((o) => o.outcome.ir.operations);
+      expect(roughOps.some((op) => op.passStepMm === 0.3)).toBe(true);
+      expect(finishOps.some((op) => op.depthPasses === 1)).toBe(true);
     } else {
       expect(out.surface3d?.stepDownMm).toBeCloseTo(0.3, 6);
       expect(out.surface3d?.finishStepDownMm).toBeCloseTo(0.5, 6);
