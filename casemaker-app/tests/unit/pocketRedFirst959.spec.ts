@@ -27,6 +27,7 @@ import { HOP_Z, type RapidEstimate } from '@/engine/cnc/cam/ir';
 import type { Tool } from '@/engine/cnc/tool';
 import type { ParsedMesh } from '@/engine/import/stlParser';
 import { assertFixtureMesh } from '../tools/fixtureMesh';
+import { insideClosed } from '@/engine/cnc/cam/model/linkRoute';
 
 function parsed(solid: ManifoldInstance): ParsedMesh {
   const m = solid.getMesh();
@@ -121,7 +122,7 @@ function linksOutsideFreeSpace(
   stockTop: number,
   hopZMm: number,
 ): { bad: string[]; feedsChecked: number } {
-  const free = offset(node.region, -(radius - 0.01));
+  const free = offset(node.region, -radius);
   const op = result.ops.find((o) => o.region.id === node.id);
   if (op === undefined) return { bad: [`no op for ${node.id}`], feedsChecked: 0 };
   const floorZ = node.floorZ - stockTop;
@@ -142,7 +143,7 @@ function linksOutsideFreeSpace(
         for (let i = 1; i < n; i++) {
           const x = at[0] + ((next[0] - at[0]) * i) / n;
           const y = at[1] + ((next[1] - at[1]) * i) / n;
-          if (!inside(free, x, y)) {
+          if (!insideClosed(free, x, y)) {
             bad.push(`(${at[0].toFixed(2)}, ${at[1].toFixed(2)}) → (${next[0].toFixed(2)}, ${next[1].toFixed(2)}) leaves free space at (${x.toFixed(2)}, ${y.toFixed(2)})`);
             break;
           }

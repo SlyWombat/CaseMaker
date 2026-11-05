@@ -213,6 +213,35 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
   const material: MaterialField = {
     topAt: (x, y) => (pointInPolygons(open, x, y) ? opts.node.floorZ : Number.POSITIVE_INFINITY),
   };
+  // #962 — THE ROUTE HOOK for this op's joins: the straight chord is refused near the wall, and
+  // the fallback retract is what the air line pays for. The route runs the cutter CENTRE inside
+  // `open` (already eroded by the radius, so the whole disc stays in cleared material) at the
+  // level, and the plan prices feed-at-depth vs a rapid at the same cleared floor against the
+  // retract it replaces.
+  const routeFor = (levelZ: number): NonNullable<LinkOptions['route']> => ({
+    options: {
+      // Inset by a hair: the route's vertices otherwise sit exactly ON the eroded boundary, which
+      // a point-in-polygon sample (and B's guard) reads as outside by convention. The route must
+      // prove the whole DISC stays inside, so its centre never touches the boundary.
+      cleared: opts.offset(region, -toolRadius),
+      levelZ,
+      rapidZMm: levelZ,
+      materialAt: (x, y) => (pointInPolygons(open, x, y) ? levelZ : null),
+    },
+    plan: (lengthMm) => {
+      const rideSeconds = moveSeconds(lengthMm, opts.feeds.feedMmPerMin, opts.rapid.accelMmPerS2);
+      const rapidSeconds =
+        moveSeconds(lengthMm, opts.rapid.xyMmPerMin, opts.rapid.accelMmPerS2) +
+        moveSeconds(2 * Math.abs(levelZ - levelZ), opts.rapid.zMmPerMin, opts.rapid.accelMmPerS2);
+      const retractSeconds =
+        moveSeconds(Math.abs(opts.hopZMm - levelZ), opts.rapid.zMmPerMin, opts.rapid.accelMmPerS2) +
+        moveSeconds(lengthMm, opts.rapid.xyMmPerMin, opts.rapid.accelMmPerS2) +
+        moveSeconds(Math.abs(opts.hopZMm - levelZ), opts.feeds.plungeFeedMmPerMin, opts.rapid.accelMmPerS2);
+      if (rideSeconds < retractSeconds) return { mode: 'feed' as const };
+      if (rapidSeconds < retractSeconds) return { mode: 'rapid' as const };
+      return null;
+    },
+  });
   const linkOptions: LinkOptions = {
     material,
     // The REGION's own clearance plane (already above every obstacle IN this region), not the
@@ -278,7 +307,7 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
             rideSeconds < retractSeconds &&
             ridesCutSurface(from, to, targetAt, 1e-6, DEFAULT_SHORT_HOP_DIAMETERS * diameterMm, 0.5);
           if (ride) moves.push({ kind: 'feed', x: to.x, y: to.y, z, f: opts.feeds.feedMmPerMin });
-          else moves.push(...link(from, to, linkOptions));
+          else moves.push(...link(from, to, { ...linkOptions, route: routeFor(z) }));
         } else {
           // A level change (advisor's review on 9e976f0b): `open` reports every point in the
           // node's footprint as reachable, with no notion of "not yet, at THIS depth" — handing
@@ -306,7 +335,7 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
             rideSeconds < retractSeconds &&
             ridesCutSurface(from, landing, targetAt, 1e-6, DEFAULT_SHORT_HOP_DIAMETERS * diameterMm, 0.5);
           if (ride) moves.push({ kind: 'feed', x: landing.x, y: landing.y, z: finishedZ, f: opts.feeds.feedMmPerMin });
-          else moves.push(...link(from, landing, linkOptions));
+          else moves.push(...link(from, landing, { ...linkOptions, route: routeFor(finishedZ) }));
           moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
         }
         moves.push(...traceRing(ring, z, opts.feeds.feedMmPerMin));

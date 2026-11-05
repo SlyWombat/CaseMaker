@@ -28,7 +28,7 @@ export interface RouteOptions {
   rapidZMm: number;
   /** Material top at a point, or null where it is not reachable; the guard needs z >= it. */
   materialAt: (x: number, y: number) => number | null;
-  /** Sample spacing for the inside-the-polygon and below-material guards, mm; absent → 0.5. */
+  /** Sample spacing for the inside-the-polygon and below-material guards, mm; absent → 0.05. */
   sampleMm?: number;
 }
 
@@ -86,7 +86,9 @@ export function insideClosed(polys: Polygons, x: number, y: number): boolean {
  * exists or the guard cannot prove one.
  */
 export function routeWithin(from: RoutePoint, to: RoutePoint, opts: RouteOptions): Route | null {
-  const sample = opts.sampleMm !== undefined && opts.sampleMm > 0 ? opts.sampleMm : 0.5;
+  // The guard (and B's) samples feeds at 0.05 mm; the route is proved at the same pitch, so a
+  // chord that bulges a fraction of a millimetre outside a concave corner cannot pass unnoticed.
+  const sample = opts.sampleMm !== undefined && opts.sampleMm > 0 ? opts.sampleMm : 0.05;
   const walkable = (a: { x: number; y: number }, b: { x: number; y: number }, z: number): boolean => {
     const len = Math.hypot(b.x - a.x, b.y - a.y);
     const steps = Math.max(1, Math.ceil(len / sample));
