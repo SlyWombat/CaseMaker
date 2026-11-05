@@ -39,3 +39,20 @@ describe("#962 — the skim's ride test carries Kiri's short hop", () => {
     expect(ridesCutSurface({ x: 0, y: 0, z: -0.1 }, { x: 0.5, y: 0, z: -0.1 }, bandTop, TOL, SHORT_HOP, PITCH)).toBe(false);
   });
 });
+
+describe('#962 — an out-of-band join rides only if EVERY sample is at or below the link z', () => {
+  // The manager's condition on the rough's out-of-band class: the honest field reports deeper
+  // ground below the link (safe to ride), but ONE cell standing above it refuses the whole join —
+  // a mostly-deeper strip with one standing cell must retract, not chord over it.
+  const mostlyDeeper = (x: number): number | null => (x >= 0.45 ? 0.2 : -1);
+  it('a mostly-deeper strip with one standing cell refuses', () => {
+    expect(ridesCutSurface({ x: 0, y: 0, z: 0 }, { x: 0.5, y: 0, z: 0 }, mostlyDeeper, TOL, SHORT_HOP, PITCH)).toBe(false);
+  });
+  it('the same strip with every sample below the link rides', () => {
+    expect(ridesCutSurface({ x: 0, y: 0, z: 0 }, { x: 0.5, y: 0, z: 0 }, () => -1, TOL, SHORT_HOP, PITCH)).toBe(true);
+  });
+  it('a standing cell between the samples is the sampling limit, not an approval: with a finer pitch it refuses', () => {
+    const standingAtMid = (x: number): number | null => (Math.abs(x - 0.25) < 0.01 ? 0.2 : -1);
+    expect(ridesCutSurface({ x: 0, y: 0, z: 0 }, { x: 0.5, y: 0, z: 0 }, standingAtMid, TOL, SHORT_HOP, 0.25)).toBe(false);
+  });
+});

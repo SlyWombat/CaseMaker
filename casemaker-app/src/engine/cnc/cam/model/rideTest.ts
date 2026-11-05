@@ -51,3 +51,50 @@ export function ridesCutSurface(
   }
   return true;
 }
+
+/**
+ * #962 — THE FOLLOWING LINK: where a join's chord dips below the cut surface (concave ground),
+ * sample the surface and FEED it — the cutter cuts the rise exactly as the passes either side do,
+ * never below the surface. The TIME GUARD decides: the follow is taken only when its own feed
+ * time (descending segments at the plunge rate) beats the retract it replaces — the retract's
+ * legs priced at the caller's rapid rates (up to the clearance from both ends, across, and the
+ * plunge). Returns the feed moves, or null when the path cannot be proved (a null top anywhere)
+ * or the follow is not faster.
+ */
+export function followCutSurface(
+  from: RidePoint,
+  to: RidePoint,
+  topAt: (x: number, y: number) => number | null,
+  stepMm: number,
+  clampZMm: number,
+  feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number },
+  rapid: { xyMmPerMin: number; zMmPerMin: number },
+  clearanceZMm: number,
+): { kind: 'feed'; x: number; y: number; z: number; f: number }[] | null {
+  const length = Math.hypot(to.x - from.x, to.y - from.y);
+  const steps = Math.max(1, Math.ceil(length / stepMm));
+  const points: RidePoint[] = [];
+  for (let s = 0; s <= steps; s++) {
+    const t = s / steps;
+    const x = from.x + (to.x - from.x) * t;
+    const y = from.y + (to.y - from.y) * t;
+    const top = topAt(x, y);
+    if (top === null) return null;
+    points.push({ x, y, z: s === 0 ? from.z : s === steps ? to.z : Math.max(top, clampZMm) });
+  }
+  let followSeconds = 0;
+  const moves: { kind: 'feed'; x: number; y: number; z: number; f: number }[] = [];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const d = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+    const f = b.z < a.z - 1e-9 ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin;
+    followSeconds += (d / f) * 60;
+    moves.push({ kind: 'feed', x: b.x, y: b.y, z: b.z, f });
+  }
+  const retractSeconds =
+    ((Math.abs(clearanceZMm - from.z) + Math.abs(clearanceZMm - to.z)) / rapid.zMmPerMin) * 60 +
+    (length / rapid.xyMmPerMin) * 60 +
+    (1 / feeds.plungeFeedMmPerMin) * 60;
+  return followSeconds < retractSeconds ? moves : null;
+}

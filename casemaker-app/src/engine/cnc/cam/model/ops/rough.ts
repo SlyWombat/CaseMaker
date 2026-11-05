@@ -26,7 +26,7 @@ import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/eng
 import { pocketLoops, type OffsetFn, type Polygons } from '@/engine/cnc/cam/pocket';
 import { tourNearest } from '@/engine/cnc/cam/tour';
 import { DEFAULT_SHORT_HOP_DIAMETERS, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
-import { ridesCutSurface } from '../rideTest';
+import { followCutSurface, ridesCutSurface } from '../rideTest';
 import { cutterKeyOf } from '../sequence';
 import type { RemainderRegion } from '../features';
 import type { ClSurface } from '../clsurface';
@@ -463,10 +463,15 @@ export function rough(opts: RoughOpOptions): OpOutcome {
       // 13,068.8 s against this version's 12,982.2 — because the longer stay-down feeds at the
       // cutting rate lose to the rapid they replace. THE SHORT HOP (B's review of e3f25fc7): a
       // ride longer than Kiri's 2 x diameter is a retract by rule, cap included in `ridesCutSurface`.
+      // THE HONEST STANDING FIELD (#962, the out-of-band class): band cells are the skim's own cut
+      // surface, every other cell its own target — the deeper ground's material stands below z, so
+      // a stay-down over it is safe, and the cells ABOVE the band still refuse. (The earlier
+      // unguarded version of this converted more joins and measured 86 s slower; the follow's time
+      // guard now keeps only the profitable ones.)
       const rides = ridesCutSurface(
         { x: from.x, y: from.y, z: from.z },
         { x: to.x, y: to.y, z: to.z },
-        (x, y) => skimTarget(Math.round((x - min[0]) / pitch), Math.round((y - min[1]) / pitch)),
+        skimStanding.topAt,
         opts.clSurface.toleranceMm,
         DEFAULT_SHORT_HOP_DIAMETERS * 2 * toolRadius,
         pitch,
@@ -475,17 +480,32 @@ export function rough(opts: RoughOpOptions): OpOutcome {
         const f = to.z < from.z - 1e-9 ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
         moves.push({ kind: 'feed', x: to.x, y: to.y, z: to.z, f });
       } else {
+        // THE DIP CLASS: follow the skim's own target where the chord would dip below it — the
+        // ball cuts the band's rise exactly as the rows either side do, never below the CL.
+        const follow = followCutSurface(
+          { x: from.x, y: from.y, z: from.z },
+          { x: to.x, y: to.y, z: to.z },
+          (x, y) => skimTarget(Math.round((x - min[0]) / pitch), Math.round((y - min[1]) / pitch)),
+          pitch,
+          Number.NEGATIVE_INFINITY,
+          opts.feeds,
+          opts.rapid,
+          opts.hopZMm,
+        );
+        if (follow !== null) moves.push(...follow);
+        else {
         // THE TRANSIT HEIGHT IS THE OP'S OWN HOP PLANE, the height this join flew at before it
         // went through `link()` — the skim visits only cells within one step-down of the region
         // top, and the material beside them stands at that top, which `hopZMm` clears by the same
         // margin the op's own first entry already trusts. The region's clearance plane (+5 over
         // the part top) cost the organizer 619 s of rapid travel on these joins for margin it does
         // not need.
-        moves.push(...link(from, to, {
-          ...linkOptionsFor(prevLevelZ ?? start[2]),
-          material: skimStanding,
-          clearanceZ: opts.hopZMm,
-        }));
+          moves.push(...link(from, to, {
+            ...linkOptionsFor(prevLevelZ ?? start[2]),
+            material: skimStanding,
+            clearanceZ: opts.hopZMm,
+          }));
+        }
       }
     } else {
       moves.push({ kind: 'rapid', x: start[0], y: start[1], z: opts.hopZMm });

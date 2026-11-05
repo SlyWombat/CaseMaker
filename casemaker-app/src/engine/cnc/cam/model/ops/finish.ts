@@ -31,6 +31,7 @@ import type { RemainderRegion } from '../features';
 import type { ClSurface } from '../clsurface';
 import { profileOf } from '../dropcutter';
 import { DEFAULT_SHORT_HOP_DIAMETERS, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
+import { followCutSurface } from '../rideTest';
 import { dropRow, type DroppedPoint } from '../rowDropper';
 import { cutterKeyOf } from '../sequence';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
@@ -233,53 +234,6 @@ function ridesTheCl(from: LinkPoint, to: LinkPoint, clSurface: ClSurface, stepMm
   return true;
 }
 
-/**
- * #962 — THE DIP-FOLLOWING LINK (held here, in the op, until B's linker takes the whole-profile
- * shape): a join whose straight chord dips below the CL — concave ground — can FOLLOW the CL
- * instead. The cutter then cuts the bulge exactly as the passes either side of it do, so nothing
- * is gouged below the CL; what it must prove is that the surface answers all the way (a null is
- * no proof) and that the follow is faster than the retract it would replace (THE TIME GUARD: the
- * earlier pricing showed a stay-down feed only wins inside ~25–30 mm; the retract's own legs are
- * priced here at Z1's rates — up to the clearance, across at rapid, down, and the plunge).
- * Returns the feed moves, or null when the follow is not taken.
- */
-function followTheCl(
-  from: LinkPoint,
-  to: LinkPoint,
-  clSurface: ClSurface,
-  stepMm: number,
-  levelZ: number,
-  feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number },
-  rapid: RapidEstimate,
-  clearanceZ: number,
-): { kind: 'feed'; x: number; y: number; z: number; f: number }[] | null {
-  const length = Math.hypot(to.x - from.x, to.y - from.y);
-  const steps = Math.max(1, Math.ceil(length / stepMm));
-  const points: LinkPoint[] = [];
-  for (let s = 0; s <= steps; s++) {
-    const t = s / steps;
-    const x = from.x + (to.x - from.x) * t;
-    const y = from.y + (to.y - from.y) * t;
-    const cl = clSurface.dropCutter(x, y);
-    if (cl === null) return null;
-    points.push({ x, y, z: s === 0 ? from.z : s === steps ? to.z : Math.max(cl, levelZ) });
-  }
-  let followSeconds = 0;
-  const moves: { kind: 'feed'; x: number; y: number; z: number; f: number }[] = [];
-  for (let i = 1; i < points.length; i++) {
-    const a = points[i - 1]!;
-    const b = points[i]!;
-    const d = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
-    const f = b.z < a.z - 1e-9 ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin;
-    followSeconds += (d / f) * 60;
-    moves.push({ kind: 'feed', x: b.x, y: b.y, z: b.z, f });
-  }
-  const retractSeconds =
-    ((Math.abs(clearanceZ - from.z) + Math.abs(clearanceZ - to.z)) / rapid.zMmPerMin) * 60 +
-    (length / rapid.xyMmPerMin) * 60 +
-    (1 / feeds.plungeFeedMmPerMin) * 60;
-  return followSeconds < retractSeconds ? moves : null;
-}
 
 export function finish(opts: FinishOpOptions): OpOutcome {
   const toolRadius = (cuttingDiameter(opts.cutter) ?? 0) / 2;
@@ -330,7 +284,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     // gouged below the design — but only when the path is provably clear all the way and the
     // follow is FASTER than the retract it replaces (the time guard; the earlier pricing showed a
     // stay-down feed only wins inside ~25-30 mm, and this branch's joins are far shorter).
-    const follow = followTheCl(from, to, opts.clSurface, linkSampleStep, levelZ, opts.feeds, opts.rapid, opts.regionRef.regionClearanceZ);
+    const follow = followCutSurface(from, to, (x, y) => opts.clSurface.dropCutter(x, y), linkSampleStep, levelZ, opts.feeds, opts.rapid, opts.regionRef.regionClearanceZ);
     if (follow !== null) return follow;
     return link(from, to, linkOptionsFor(levelZ));
   };
