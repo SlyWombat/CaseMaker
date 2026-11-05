@@ -113,11 +113,10 @@ export function triangleInfo(mesh: FrameMesh): TriInfo {
 }
 
 /**
- * Weld vertices closer than `weldMm` (hash grid) and return, per triangle, its three neighbours
- * across its edges (-1 where an edge has no partner or more than one: a non-manifold edge is a
- * boundary for clustering).
+ * Weld vertices closer than `weldMm` (hash grid). `weld[original]` is the welded id; `canon[id]`
+ * is one original vertex index per welded id.
  */
-export function triangleAdjacency(mesh: FrameMesh, weldMm: number): Int32Array {
+export function weldVertices(mesh: FrameMesh, weldMm: number): { weld: Int32Array; canon: number[] } {
   const p = mesh.positions;
   const vCount = p.length / 3;
   const weld = new Int32Array(vCount);
@@ -158,12 +157,22 @@ export function triangleAdjacency(mesh: FrameMesh, weldMm: number): Int32Array {
     }
     weld[v] = found;
   }
+  return { weld, canon };
+}
+
+/**
+ * Weld vertices closer than `weldMm` (hash grid) and return, per triangle, its three neighbours
+ * across its edges (-1 where an edge has no partner or more than one: a non-manifold edge is a
+ * boundary for clustering).
+ */
+export function triangleAdjacency(mesh: FrameMesh, weldMm: number): Int32Array {
+  const { weld, canon } = weldVertices(mesh, weldMm);
+  const W = canon.length;
 
   const triCount = mesh.indices.length / 3;
   const adj = new Int32Array(triCount * 3).fill(-1);
   // Pass 1: every welded edge -> the (triangle * 3 + edge) slots that use it.
   const edges = new Map<number, number[]>();
-  const W = next;
   for (let t = 0; t < triCount; t++) {
     for (let e = 0; e < 3; e++) {
       const a = weld[mesh.indices[3 * t + e]!]!;
