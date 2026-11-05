@@ -93,6 +93,7 @@ import {
   goalSides,
   holeNoCutterFindings,
   jobHasItems,
+  jobMount,
   jobSetups,
   pureGoalObject,
   defaultTapeHold,
@@ -135,7 +136,7 @@ import { simErrors, simulationProblem } from '@/engine/cnc/simGate';
 import { withPeriod } from '@/store/engraveRunGate';
 import type { NodeMeshOutput } from '../geometry/meshOutput';
 import { programHash } from '@/engine/cnc/programHash';
-import { validateVise } from '@/engine/cnc/fixture';
+import { jobVise, validateVise, viseEnvelope } from '@/engine/cnc/fixture';
 import { generateEngrave, makeClipperOffset, zPasses, type EngraveRegion, type FinishPassSpec, type VCarveRegion } from '@/engine/cnc/cam/engraveJob';
 // #433/#666 — the adaptive-clearing strategy a metal pocket is cut with. The METHOD settings are
 // the shop's `adaptive.*` defaults; the cut numbers are the resolved feeds row, merged inside
@@ -201,12 +202,12 @@ import {
   isMold,
   type SampleGoalOpts,
 } from '@/engine/cnc/engrave/goalHeightfield';
-import { type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
+import { type PostContext, type PostResult, type VacuumSpan } from '@/engine/cnc/post/z1';
 import { postFor, postKey, postOriginFor } from '@/engine/cnc/post';
 import { appendThumbnail, heightfieldTopViewPng, planViewPng, simulationTopViewPng } from '@/engine/cnc/post/thumbnail';
 import { applySurfaceLift, maxSurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
 import { FRAME_Z, formatDuration, runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
-import type { Setup } from '@/engine/cnc/setup';
+import type { FixtureEnvelope, Setup } from '@/engine/cnc/setup';
 import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
 import { unfacedBands } from '@/engine/cnc/mounts/inPath';
 import { verifyProgram, type DepthLimit, type ThroughMask, type VerifyReport } from '@/engine/cnc/verify';
@@ -256,6 +257,24 @@ import { ceilingName, effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/eng
 import { ORACLE_SHALLOW_DEPTH_FRACTION, type OraclePoint, type OraclePredicted, type OracleThreadMove } from '@/engine/cnc/engrave/oracle';
 import { designCutterOf, type DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
 import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
+// #966 — THE SEAM. `USE_MODEL_CAM_ENGINE` gates `generateGoalProgram` between today's heightfield
+// path (below) and the model-driven CAM engine's one entry point, `planModelCam`. The flag lives
+// in `cam/model/plan.ts`, not here — it is that module's own opt-in, "set only by specs for now"
+// (its header), and is read, never redefined, at this call site.
+import {
+  planModelCam,
+  USE_MODEL_CAM_ENGINE,
+  type ModelPlanInput,
+  type ModelPlanOutput,
+  type SetupSpec,
+} from '@/engine/cnc/cam/model/plan';
+import type { FeatureSource } from '@/engine/cnc/cam/model/features';
+import { cutterKeyOf, type CutterCandidates } from '@/engine/cnc/cam/model/sequence';
+import type { EdgeBreakSpec, ModelTolerances } from '@/engine/cnc/cam/model/types';
+import type { Mount } from '@/engine/cnc/setups/types';
+import { targetObjectMesh } from '@/engine/import/targetObject';
+import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
+import type { ParsedMesh } from '@/engine/import/stlParser';
 
 /** The stage that stopped the pipeline, or `done` when everything passed. */
 export type EngraveStage = 'findings' | 'feeds' | 'cam' | 'post' | 'verify' | 'done';
@@ -4782,6 +4801,100 @@ export function generateRotaryGoalProgram(
  */
 export const MOLD_DRAFT_LIMIT_DEG = 85;
 
+/**
+ * #966 — THE SEAM's own `ModelPlanInput`, built from the SAME job/goal/shop facts the heightfield
+ * path below reads, so the two paths disagree about the CAM engine only, never about the part.
+ *
+ * `geometry.triangles` is the goal's embedded mesh (`targetObjectMesh`), placed into the work frame
+ * by the SAME `placeTarget` the rim extractor and the heightfield sampler already share (#829's own
+ * header: "the two share `targetPlace.ts`'s placement, so they cannot disagree about where the mesh
+ * sits") — not a second, independent placement. `fixture`/`cutters` are read the same way the rest
+ * of this file already reads them (`jobVise`/`viseEnvelope` for a vise, `shop.mount.fixture` for a
+ * bracket — never `bracketMount()` directly: that pulls the defaults client into this worker
+ * realm, the boundary `EngraveShopOpts.mount`'s own doc states).
+ *
+ * NOT yet carried over from the old path: a per-goal edge break (no `EngraveJob`/`EngraveTargetObject`
+ * field states one today, so `edgeBreak.legMm` is 0 — "the job states no edge break", same sentence
+ * `planCurvedForTree` already prints for a rectilinear card with none) and the old path's own
+ * feeds-derived finish tolerance (`tolerances.finishMm` falls back through the goal's own stated
+ * step-over, then the shop's stock-to-leave, rather than re-deriving `finishStepOverForCusp` here —
+ * stated so a reviewer does not read the two paths as cutting the identical number by accident).
+ */
+export function buildModelPlanInputForGoal(
+  job: EngraveJob,
+  goal: EngraveTargetObject,
+  tool: Tool,
+  shop: EngraveShopOpts,
+): ModelPlanInput {
+  const rawMesh = targetObjectMesh(goal);
+  const placed = placeTarget(goal, rawMesh);
+  const positions = new Float32Array(rawMesh.positions.length);
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < rawMesh.positions.length; i += 3) {
+    const [x, y, z] = placed.place(rawMesh.positions[i]!, rawMesh.positions[i + 1]!, rawMesh.positions[i + 2]!);
+    positions[i] = x;
+    positions[i + 1] = y;
+    positions[i + 2] = z;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
+  }
+  const triangles: ParsedMesh = {
+    positions,
+    indices: rawMesh.indices,
+    triangleCount: rawMesh.triangleCount,
+    bbox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
+  };
+  const geometry: FeatureSource = { triangles };
+
+  // #898's three choices, carried across under the new engine's own naming
+  // (`flat`/`flipped-tabs`/`plinth` → `flatOnStockBottom`/`flippedTabs`/`plinth`); absent reads as
+  // the same default the old path's own `undersideFloorZ` falls back to when the block is absent.
+  const undersideKind = goal.underside?.kind;
+  const underside: SetupSpec['underside'] =
+    undersideKind === 'flipped-tabs' ? 'flippedTabs' : undersideKind === 'plinth' ? 'plinth' : 'flatOnStockBottom';
+
+  // The work frame's Z 0 is the stock's own top face (`zDatum: 'probed-top-face'`, this file's own
+  // `ctx` below) — the SAME convention `placeTarget` places the mesh against (`position.z` is the
+  // mesh's own top in that frame), so no second Z origin is invented here.
+  const setups: SetupSpec[] = [
+    { frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -job.stock.thickness }, underside },
+  ];
+
+  const mount: Mount = jobMount(job);
+  const envelope: FixtureEnvelope | null =
+    mount === 'vise'
+      ? viseEnvelope(job.stock, jobVise(job), job.sacrificial)
+      : mount === 'bracket'
+        ? shop.mount?.fixture ?? null
+        : null;
+
+  // The same owned-tool list the reach check above already built (house cutters only — a goal's
+  // CAM has never read the catalogue, `ModelPlanInput.cutters.catalogue` stays empty and
+  // `planModelCam`'s own notes say so when the caller supplies one).
+  const house: Tool[] = [...(shop.tools ?? []).map((e) => e.tool), tool];
+  const cutters: CutterCandidates = { house, catalogue: [] };
+
+  const tolerances: ModelTolerances = {
+    finishMm: goal.surface?.finishStepOverMm ?? shop.finish?.stockToLeaveMm.value ?? DEFAULT_STOCK_TO_LEAVE_MM,
+  };
+  const edgeBreak: EdgeBreakSpec = { legMm: 0 };
+
+  return {
+    geometry,
+    setups,
+    stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness, material: job.stock.material },
+    fixture: { mount, envelope },
+    cutters,
+    tolerances,
+    edgeBreak,
+  };
+}
+
 export async function generateGoalProgram(
   job: EngraveJob,
   goal: EngraveTargetObject,
@@ -4866,6 +4979,143 @@ export async function generateGoalProgram(
 
   if (tool === null) return fail('feeds', 'the job has no usable cutter');
   const mill = jobMachine(job, calibration);
+
+  // #966 — THE SEAM. `USE_MODEL_CAM_ENGINE` off (the default) falls straight through to the
+  // heightfield path below, byte-for-byte unchanged; a spec that flips it (`cam/model/plan.ts`'s
+  // own "set only by specs for now") routes here instead. Full #966 — converting a `SetupPlan[]`
+  // into this function's posted `EngraveGenerated` — is NOT built: this seam only proves
+  // `planModelCam` is reachable with a real `ModelPlanInput` built from the job, and states by
+  // name where the new path stands today rather than crashing uninformatively or silently falling
+  // back to the old engine.
+  if (USE_MODEL_CAM_ENGINE) {
+    let input: ModelPlanInput;
+    try {
+      input = buildModelPlanInputForGoal(job, goal, tool, shop);
+    } catch (e) {
+      return fail('cam', `cam/model seam (#966): could not build a ModelPlanInput for "${goal.name}" — ${e instanceof Error ? e.message : String(e)}`);
+    }
+    let output: ModelPlanOutput;
+    try {
+      output = await planModelCam(input);
+    } catch (e) {
+      return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
+    }
+    // #966 — THE CUTOVER (not just the seam, this round). `planModelCam` ran and returned a
+    // `SetupPlan` per setup; each setup's `programs` (one per RUN, in execution order — #963's own
+    // rule) now posts through the SAME `postFor`/`verifyProgram` pair, and the SAME `VerifyContext`
+    // shape (`toSetup`/`jobDepthLimit`/`mountCtx`), the rest of this file already builds for a
+    // goal's own setup — not a second convention (grep both call sites before touching this).
+    //
+    // #965's flip plan can still return more than one `SetupPlan` (a multi-setup freeing-over-CL
+    // job); that side of the cutover is explicitly another session's work, so more than one setup
+    // is refused BY NAME here rather than silently posting only the first.
+    if (output.perSetup.length !== 1) {
+      return fail(
+        'cam',
+        `cam/model (#966): planModelCam returned ${output.perSetup.length} setup(s) for "${goal.name}" — ` +
+          "this cutover posts a single-setup goal only; a multi-setup flip plan is #965's own work",
+      );
+    }
+    const plan = output.perSetup[0]!;
+    if (plan.programs.length === 0) {
+      return fail(
+        'cam',
+        `cam/model (#966): planModelCam planned no program for "${goal.name}"` +
+          (plan.notes.length === 0 ? '' : ` — ${plan.notes.join(' | ')}`),
+      );
+    }
+
+    const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
+    const limit: DepthLimit = jobDepthLimit(job);
+    const ctx: PostContext = {
+      jobName: job.name,
+      stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
+      materialName: job.stock.material,
+      zDatum: 'probed-top-face',
+      origin: postOriginFor(mill),
+      camVersion: CAM_VERSION,
+      toolKey: job.toolKey,
+    };
+
+    const programs: EngraveProgram[] = [];
+    for (let i = 0; i < plan.programs.length; i++) {
+      const ir = plan.programs[i]!;
+      // #961's own cutter identity — `tool.id ?? tool.name` (`cam/model/sequence.ts`'s
+      // `cutterKeyOf`), the SAME string the plan's own run-grouping already keyed this program's
+      // cutter by (`SetupPlan.programs`'s own doc: "one program per RUN"). `toolKey` here is a
+      // free-text header word (`;@CM|TOOL|key=`, `post/z1.ts`) the post never reads back for
+      // machine control, so it needs no round-trip through the `shop.tools` registry.
+      const toolKey = cutterKeyOf(ir.tool);
+      const span: VacuumSpan =
+        plan.programs.length === 1 ? 'whole' : i === 0 ? 'first' : i === plan.programs.length - 1 ? 'last' : 'middle';
+      const programLabel = `program ${i + 1}/${plan.programs.length} (${toolKey})`;
+      let posted: PostResult;
+      try {
+        posted = postFor(mill)(ir, { ...ctx, toolKey }, { vacuum: span });
+      } catch (e) {
+        return fail('post', `cam/model (#966): ${programLabel}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      if (!posted.ok) {
+        return fail('post', `cam/model (#966): ${programLabel}: ${posted.errors.join('; ')}`);
+      }
+      const verify = verifyProgram(posted.text, {
+        setup,
+        machine: mill,
+        tool: ir.tool,
+        dialect: postKey(mill),
+        depthLimit: limit,
+        minRapidZ: ir.hopZ,
+        ...mountCtx(shop.mount, job.jawClearance),
+      });
+      const verifyErrors = verify.findings.filter((f) => f.severity === 'error');
+      if (verifyErrors.length > 0) {
+        // #966 — a program the verifier refuses stops the run here: the programs already posted
+        // (if any) are returned as the diagnosis `programs` doc states ("a partial list, never a
+        // runnable job"), and the failing program's own text/report ride the top-level fields —
+        // the SAME shape `generateOneProgram`'s own verify-stage stop returns (grep that call site).
+        return {
+          ...base,
+          ok: false,
+          stage: 'verify',
+          findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...documentFindings()]),
+          feeds: null,
+          cam: null,
+          nc: posted.text,
+          verify,
+          programs: [...programs],
+          errors: [{ stage: 'verify', message: `cam/model (#966): ${programLabel}: ${verifyErrors.length} verifier error(s)` }],
+        };
+      }
+      programs.push({
+        setupIndex: 1,
+        setupId: jobSetups(job)[0]!.id,
+        toolKey,
+        nc: posted.text,
+        frame: ir.frame,
+        verify,
+        frameNc: null,
+        frameVerify: null,
+        programHash: programHash(posted.text),
+        cam: summarize(ir, mill.rapidEstimate),
+      });
+    }
+
+    // #419 J3 — the top-level `nc`/`verify`/`cam` describe the FIRST program, exactly as the
+    // `programs` field's own doc states ("the adapter the panels and the bench scripts read
+    // today"); every program's own facts ride in `programs`.
+    const first = programs[0]!;
+    return {
+      ...base,
+      ok: true,
+      stage: 'done',
+      findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...documentFindings()]),
+      feeds: null,
+      cam: first.cam,
+      nc: first.nc,
+      verify: first.verify,
+      programs,
+    };
+  }
 
   // Feeds — the job's 2.5D feeds, reused unchanged (slice F tunes 3D engagement, #536). A ball/bull
   // is refused by `feedsFor` (it cannot trace), so its feeds come through the shared FLAT proxy

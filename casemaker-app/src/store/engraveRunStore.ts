@@ -31,6 +31,7 @@ import {
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
 import { goalCheckForProgram, type SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
+import { pureGoalObject } from '@/engine/cnc/engrave/jobKind';
 import { goalEdgeBreakOptions } from '@/engine/cnc/engrave/edgeBreak';
 import { goalPassCoverage } from '@/platform/defaultsClient';
 import type { ProgramOracle } from './engraveRunGate';
@@ -896,14 +897,19 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           const predicted = program.predicted ?? (isFirst ? generated.predicted : undefined);
           // #948 — A GOAL PROGRAM IS JUDGED AGAINST ITS GOAL, not only against the plan: the
           // worker samples the goal's heightfield and pairs it with this program's live sweep.
-          // `surface3d` is set only on the goal path (the flat goal and the rotary relief), so an
-          // item job sends nothing and runs exactly as before.
+          // #966 — THE GATE IS THE JOB'S OWN SHAPE, NOT WHICH ENGINE CUT IT. `generated.surface3d`
+          // used to be a safe proxy for "this is a goal program" because only the heightfield path
+          // ever set it; the model-engine path (#966) posts a goal job's programs with a real
+          // `verify` and no `surface3d`, which read as an item job under the old proxy and silently
+          // skipped the goal check. `pureGoalObject(job)` is the document's own test (`jobKind.ts`)
+          // and answers the same question directly, for either engine — an item job sends nothing
+          // and runs exactly as before.
           // #948 — AND EVERY PROGRAM OF A GOAL JOB IS JUDGED, predicted items or not. A goal
           // job's rest pass posts a file with no predicted regions (there is no 2.5D plan
           // comparison for it), and the old early return skipped the oracle — so the run judged
           // the finish program's sweep alone, and the run's one goal field (the page stamps every
           // program onto it) never received the rest pass's cuts.
-          const goal = goalCheckForProgram(job, generated.surface3d != null, {
+          const goal = goalCheckForProgram(job, pureGoalObject(job) !== null, {
             passCoverage: goalPassCoverage(shopDefaults),
             ...goalEdge,
           });
