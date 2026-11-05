@@ -17,6 +17,12 @@
  * say on our side. A line whose input could not be measured (the cut-into rule before a checker
  * applies it, a card with no posted program) is STATED — `pass: 'stated'` — never passed by
  * default.
+ *
+ * LINE 5 IS JUDGED ON RAPID TIME, superseding plan v2 §3's per-1,000 rate: the maintainer's
+ * 2026-11-05 ruling (#943) — "rapid seconds ≤ 2× the vendor's, on the same estimator basis as the
+ * cycle, with per-1,000 and the count printed beside it as facts". The rate rewards a program
+ * that posts more feed lines for the same cut, and both cards' vendor readings come from files
+ * whose raster density differs by 3–10×.
  */
 
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
@@ -131,7 +137,15 @@ export interface ProgramScore {
   sequence?: SequenceReceipt | null;
   /** Rapid seconds / cycle seconds, from the same estimate on the posted file. */
   airFraction: number;
-  /** `summary.rapids / summary.cuts × 1000` from `parseGcode` on the posted file. */
+  /**
+   * RAPID TIME (s) from the SAME #927 estimate `cycleSeconds` is read on, on both sides: line 5
+   * judges this (the maintainer's 2026-11-05 ruling, #943), because it is what the machine
+   * actually spends and a per-1,000 rate can be diluted by posting more feed lines.
+   */
+  rapidSeconds: number;
+  /** The program's rapid MOVE count from `parseGcode` — printed beside line 5 as a fact. */
+  rapidMoves: number;
+  /** `summary.rapids / summary.cuts × 1000` from `parseGcode` — printed beside line 5, not judged. */
   rapidsPer1000FeedLines: number;
   /** Distinct tools with cutting moves in the posted file(s). */
   cutters: number;
@@ -238,7 +252,7 @@ export interface SevenLineRules {
   toolChangeSeconds: number;
   /** Air fraction may exceed the vendor's by this many points (plan: +10). */
   airSlackPoints: number;
-  /** Rapids per 1,000 feed lines may be this multiple of the vendor's (plan: 2). */
+  /** Rapid TIME may be this multiple of the vendor's on the estimator (the ruling: 2). */
   rapidsMultiple: number;
   /** Cutters may exceed the vendor's count by this many (plan: +1). */
   cutterSlack: number;
@@ -279,6 +293,11 @@ export interface SevenLine {
   state: LineState;
   /** Why a line is failed or stated; null when it passes cleanly. */
   note: string | null;
+  /**
+   * Measured numbers the line prints BESIDE its verdict as facts — not judged, not optional
+   * where set (line 5's per-1,000 rate and rapid-move count; the ruling requires both printed).
+   */
+  facts?: string | null;
   /** TRUE when the cycle line passes the 3× stop rule's converse — it is within the 1.25× goal. */
   goalMet?: boolean;
 }
@@ -317,6 +336,7 @@ const minutes = (s: number): string => {
   return m >= 60 ? `${(m / 60).toFixed(1)} h` : `${m.toFixed(1)} min`;
 };
 const count = (v: number): string => `${Math.round(v)}`;
+const seconds = (v: number): string => `${v.toFixed(1)} s`;
 
 /**
  * Score one reference card against plan v2 §3.
@@ -463,30 +483,37 @@ export function scoreSevenLines(input: ScoreInput): SevenLineCard {
     });
   }
 
-  // 5 — rapids per 1,000 feed lines ≤ 2× vendor's.
+  // 5 — RAPID TIME ≤ 2× the vendor's, both sides on the #927 estimate the cycle line reads. The
+  // per-1,000 rate and the rapid-move count print beside it as FACTS (the maintainer's 2026-11-05
+  // ruling, #943): the rate rewards a program that posts more feed lines for the same cut, so it
+  // can no longer decide the line.
   {
     let ok = false;
     if (vendor !== null) {
       ok =
-        vendor.rapidsPer1000FeedLines <= r.epsilon
-          ? ours.rapidsPer1000FeedLines <= r.epsilon
-          : ours.rapidsPer1000FeedLines <= vendor.rapidsPer1000FeedLines * r.rapidsMultiple * (1 + r.epsilon);
+        vendor.rapidSeconds <= r.epsilon
+          ? ours.rapidSeconds <= r.epsilon
+          : ours.rapidSeconds <= vendor.rapidSeconds * r.rapidsMultiple * (1 + r.epsilon);
     }
+    const facts = `per 1,000 feed lines ${count(ours.rapidsPer1000FeedLines)}${
+      vendor === null ? '' : ` vs ${count(vendor.rapidsPer1000FeedLines)}`
+    }; rapid moves ${count(ours.rapidMoves)}${vendor === null ? '' : ` vs ${count(vendor.rapidMoves)}`}`;
     add({
       key: 'rapids',
-      rule: `≤ ${r.rapidsMultiple}× the vendor's`,
-      oursValue: ours.rapidsPer1000FeedLines,
-      vendorValue: vendor?.rapidsPer1000FeedLines ?? null,
-      ours: count(ours.rapidsPer1000FeedLines),
-      vendor: vendor === null ? null : count(vendor.rapidsPer1000FeedLines),
+      rule: `≤ ${r.rapidsMultiple}× the vendor's rapid time`,
+      oursValue: ours.rapidSeconds,
+      vendorValue: vendor?.rapidSeconds ?? null,
+      ours: seconds(ours.rapidSeconds),
+      vendor: vendor === null ? null : seconds(vendor.rapidSeconds),
       state: !referenced ? 'stated' : ok ? 'pass' : 'fail',
       note: !referenced
         ? 'no vendor program beside it'
         : ok
           ? null
-          : vendor.rapidsPer1000FeedLines > r.epsilon
-            ? `${(ours.rapidsPer1000FeedLines / vendor.rapidsPer1000FeedLines).toFixed(2)}× the vendor's rate`
+          : vendor.rapidSeconds > r.epsilon
+            ? `${(ours.rapidSeconds / vendor.rapidSeconds).toFixed(2)}× the vendor's rapid time`
             : 'the vendor\'s file has no rapids; this one does',
+      facts,
     });
   }
 

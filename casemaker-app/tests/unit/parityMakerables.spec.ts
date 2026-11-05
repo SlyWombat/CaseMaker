@@ -113,6 +113,12 @@ for (const card of manifest.cards) {
       if (card.vendorEstimateSeconds !== null) {
         expect(facts.cycleSeconds).toBeCloseTo(card.vendorEstimateSeconds, 2);
       }
+      // #943 — THE RAPIDS LINE'S TIME BASIS. Line 5 judges `measurePostedProgram`'s rapidSeconds
+      // on both sides; these pin the vendor's own readings so the basis cannot drift under the
+      // line. The tray's figure is C's independent measurement on #962 (448.668 s, comment
+      // 6660524949); the organizer's is the same read on its NC.
+      const expectedRapidSeconds = card.card === 'tray70-top' ? 448.668 : card.card === 'organizer-top' ? 1424.5377183843116 : null;
+      if (expectedRapidSeconds !== null) expect(facts.rapidSeconds).toBeCloseTo(expectedRapidSeconds, 3);
     });
 
     it.skipIf(!resolution.ok)('the page’s numbers are the manifest’s numbers', () => {
@@ -191,6 +197,8 @@ for (const ours of manifest.ours) {
         toolChanges: Math.max(0, oursFiles.length - 1),
         headerTimeSeconds: null,
         airFraction: facts.airFraction,
+        rapidSeconds: facts.rapidSeconds,
+        rapidMoves: facts.rapidMoves,
         rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
         cutters: facts.cutters.length,
         cuttersOwned: ours.cuttersOwned,

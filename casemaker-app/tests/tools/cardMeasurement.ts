@@ -179,6 +179,8 @@ export function measurePageCard(dir: string, opts: PageCardOptions): ProgramScor
     // One manual bit change between consecutive posted programs, plus any inside a file.
     toolChanges: facts.toolChanges + Math.max(0, artefacts.ncFiles.length - 1),
     airFraction: facts.airFraction,
+    rapidSeconds: facts.rapidSeconds,
+    rapidMoves: facts.rapidMoves,
     rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
     cutters: facts.cutters.length,
     cuttersOwned: opts.cuttersOwned ?? null,
@@ -229,6 +231,8 @@ export function measureVendorCard(opts: VendorCardOptions): ProgramScore {
     headerTimeSeconds: facts.headerTimeSeconds,
     vendorHolding: opts.holding ?? null,
     airFraction: facts.airFraction,
+    rapidSeconds: facts.rapidSeconds,
+    rapidMoves: facts.rapidMoves,
     rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
     cutters: facts.cutters.length,
     cuttersOwned: null,
