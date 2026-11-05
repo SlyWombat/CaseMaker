@@ -37,7 +37,7 @@ import type { FeatureSource, FeatureTree, PocketNode, SetupFrame } from './featu
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances } from './types';
 import { chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep } from './sequence';
-import { documentXY, mapIRToDocument, rotatedGeometryFor } from './setups';
+import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, type SetupRegistration } from './setups';
 import { pocket } from './ops/pocket';
 import { clSurface } from './clsurface';
 import { dropCutterHeight, profileOf, type CutterProfile, type DropCutterMesh } from './dropcutter';
@@ -330,6 +330,33 @@ function linkingStats(programs: readonly ToolpathIR[]): SetupPlan['linking'] {
   return { rapidsCount, hopsCount, airFractionPct: total > 0 ? (rapidXy / total) * 100 : 0 };
 }
 
+/** `fmt3`: trims a computed mm figure to 3 decimals without carrying float noise into the note. */
+const fmt3 = (n: number): string => String(Number(n.toFixed(3)));
+
+/**
+ * #965 registration's own stated sentence — names the datum `registerSetupOrigin` found and the
+ * offset it computed, so the number in `SetupPlan.notes` is traceable to real recognised
+ * geometry, never just "trust the vise".
+ */
+function describeRegistration(setupIndex: number, registration: SetupRegistration): string {
+  const [dx, dy] = registration.offsetMm;
+  const offset = `offset [${fmt3(dx)}, ${fmt3(dy)}] mm`;
+  if (registration.datum.basis === 'two-holes') {
+    const [h1, h2] = registration.datum.holes;
+    return (
+      `setup ${setupIndex}: registered against setup 0 via two through-holes — "${h1.id}" at ` +
+      `(${fmt3(h1.x)}, ${fmt3(h1.y)}) and "${h2.id}" at (${fmt3(h2.x)}, ${fmt3(h2.y)}), ` +
+      `${fmt3(registration.datum.separationMm)} mm apart — computed ${offset} (#965 registration)`
+    );
+  }
+  const [a, b] = registration.datum.endpoints;
+  return (
+    `setup ${setupIndex}: registered against setup 0 via a single straight outline edge from ` +
+    `(${fmt3(a[0])}, ${fmt3(a[1])}) to (${fmt3(b[0])}, ${fmt3(b[1])}), ${fmt3(registration.datum.lengthMm)} mm long ` +
+    `— no through-hole pair qualified — computed ${offset} (#965 registration)`
+  );
+}
+
 /**
  * THE ENTRY (#956 §3.0, filled in on F's check suite finding it still threw). One whole job — every
  * setup, every feature the tree recognises — planned through the model engine and returned as
@@ -354,12 +381,26 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
   const toolChangeSeconds = readDefault(liveShopDefaults(), 'toolChange.seconds').value;
   const perSetup: SetupPlan[] = [];
+  // #965 registration — setup 0's own recognised tree is the document-frame ground truth every
+  // later setup's locating features are read against (`registerSetupOrigin`'s own header on
+  // `setups.ts`). Kept across loop iterations for exactly that comparison; `null` only before
+  // setup 0 has run, which no setup ever observes (setup 0 never reads it).
+  let setup0Tree: FeatureTree | null = null;
 
   for (let setupIndex = 0; setupIndex < input.setups.length; setupIndex++) {
     opts.signal?.throwIfAborted();
     const spec = input.setups[setupIndex]!;
     opts.onProgress?.({ setupIndex, op: 'features', fraction: 0 });
     const tree = recogniseFeatures(input.geometry, spec.frame, tl);
+    if (setupIndex === 0) setup0Tree = tree;
+
+    // #965 registration — computed, never assumed. `registerSetupOrigin` THROWS, by name, when
+    // this part carries neither a reliable two-hole datum nor a long straight edge (see its own
+    // header): that throw is left to propagate out of `planModelCam` rather than caught and
+    // papered over with a nominal `[0, 0]`, per the issue's own ruling ("never falls back to a
+    // guessed/nominal origin"). Only setup 0 is ever registration-free (it IS the reference).
+    const registration: SetupRegistration | null = setupIndex === 0 ? null : registerSetupOrigin(setup0Tree!, tree);
+    const registrationOffset: [number, number] = registration?.offsetMm ?? [0, 0];
 
     const flats = input.cutters.house
       .filter((t) => t.shape === 'flat' && (cuttingDiameter(t) ?? 0) > 0)
@@ -514,7 +555,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         // becomes part of `SetupPlan.ops`/`programs`: identity for the top setup (`up = [0, 0, 1]`,
         // every job today), the setup→document map for a flip (`setups.ts`'s own doc on why this
         // is required before two setups' programs can be read on one goal grid).
-        ops.push({ ...op, outcome: { ...op.outcome, ir: mapIRToDocument(op.outcome.ir, spec.frame) } });
+        ops.push({ ...op, outcome: { ...op.outcome, ir: mapIRToDocument(op.outcome.ir, spec.frame, registrationOffset) } });
         continue;
       }
       emptyStages.push(
@@ -552,18 +593,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     if (input.cutters.catalogue.length > 0) {
       notes.push(`${input.cutters.catalogue.length} catalogue cutter(s) are not in the pocket chain yet — the house set is what it chooses from`);
     }
-    // #965 open item, stated per the issue's own ask ("flag explicitly... rather than guessing
-    // silently") — not a design DECISION, a gap: this plan does not compute how setup N>0 is
-    // actually REGISTERED against what setup 0 already cut (the "locating features cut by the
-    // previous setup" the issue names). `buildSetupSpecs`'s `frameForFace` gets the physical
-    // turn-over's ROTATION right (the same one `setups/orient.ts` uses for a vise), but a real
-    // turn-over also needs the stock reseated against a known reference — today that is left to
-    // the operator's own fixture/jig, the same as every other remount this app plans
-    // (`setups/types.ts`'s own `remountStep`), not computed here.
+    // #965 — registration against setup 0's own cut features is now COMPUTED
+    // (`registerSetupOrigin`, `setups.ts`), not left to the operator's fixture/jig: the note
+    // states WHICH datum was found and the offset it produced, so the number is auditable rather
+    // than asserted. (The freeing-contour gap just below is a SEPARATE, still-open #965 item —
+    // the flat-Z release pass, not the registration this function now answers.)
     if (setupIndex > 0) {
-      notes.push(
-        `setup ${setupIndex}: registration against setup ${setupIndex - 1}'s own cut features is the operator's fixture/jig, not computed by this plan (#965 open item)`,
-      );
+      notes.push(describeRegistration(setupIndex, registration!));
       // The freeing contour's own depth IS now bounded against the opposite setup's finished
       // surface (above, `freeingNotes`) — this is no longer a stated gap; see that note for the
       // actual outcome (or why it could not be checked) on THIS plan.

@@ -30,8 +30,9 @@ import type { Face, MountSpec } from '@/engine/cnc/setups/types';
 import { goalFlipPlan, type FlipPlan, type FlipPlanInput, type FlipPlanReachInput } from '@/engine/cnc/engrave/goalFlipPlan';
 import type { CoverageMesh, CoverageOptions } from '@/engine/cnc/engrave/goalCoverage';
 import type { ParsedMesh } from '@/engine/import/stlParser';
+import type { Polygons } from '@/engine/cnc/cam/pocket';
 import type { CamMove, ToolpathIR } from '../ir';
-import { toSetupFrame, type FeatureSource, type SetupFrame } from './features';
+import { toSetupFrame, type FeatureSource, type FeatureTree, type PocketNode, type SetupFrame } from './features';
 import type { SetupSpec } from './plan';
 
 /** The only two faces this build's `goalFlipPlan` call is ever offered (see this file's header). */
@@ -141,30 +142,38 @@ function frameForFace(face: Face, mount: MountSpec, stockTopZ: number, thickness
  * spec's simpler direct accumulation (`exactSweptField` against one fixed `GoalHeightfield`) relies
  * on it just the same, silently, if this map is never applied.
  */
-export function documentXY(frame: SetupFrame, x: number, y: number): [number, number] {
+/**
+ * `offset` (#965 registration, `registerSetupOrigin` below) is ADDED after the rotation-only map
+ * — a pure translation, in document XY, mm. Defaulting to `[0, 0]` keeps every pre-#965
+ * registration caller (every one today: no caller has ever passed a third argument) byte-for-byte
+ * unchanged; `[0, 0]` is also what a registered setup gets back whenever its two setups' own
+ * recognised features already agree with the rotation-only map (the common case for this module's
+ * own axis-through-origin half-turn — see `registerSetupOrigin`'s header).
+ */
+export function documentXY(frame: SetupFrame, x: number, y: number, offset: readonly [number, number] = [0, 0]): [number, number] {
   const [ux, uy, uz] = frame.up;
-  if (ux === 0 && uy === 0 && uz === 1) return [x, y];
-  if (ux === 0 && uy === 0 && uz === -1) return [x, -y];
+  if (ux === 0 && uy === 0 && uz === 1) return [x + offset[0], y + offset[1]];
+  if (ux === 0 && uy === 0 && uz === -1) return [x + offset[0], -y + offset[1]];
   throw new Error(`cam/model/setups: documentXY has no map for up = [${frame.up.join(', ')}] (#965 stated scope: axis-aligned top/bottom only)`);
 }
 
-function mapMove(m: CamMove, frame: SetupFrame): CamMove {
-  const [x, y] = documentXY(frame, m.x, m.y);
+function mapMove(m: CamMove, frame: SetupFrame, offset: readonly [number, number]): CamMove {
+  const [x, y] = documentXY(frame, m.x, m.y, offset);
   return { ...m, x, y };
 }
 
 /**
  * `documentXY`, applied to every move of a `ToolpathIR` that is about to become `SetupPlan.ops`/
  * `programs` — i.e. applied ONCE, after a setup's whole tree is planned, not inside any one op.
- * Identity (returns `ir` unchanged) for the top setup, so a single-setup job (today's only real
- * caller) sees byte-identical output.
+ * Identity (returns `ir` unchanged) for the top setup with no offset, so a single-setup job
+ * (today's only real caller) sees byte-identical output.
  */
-export function mapIRToDocument(ir: ToolpathIR, frame: SetupFrame): ToolpathIR {
+export function mapIRToDocument(ir: ToolpathIR, frame: SetupFrame, offset: readonly [number, number] = [0, 0]): ToolpathIR {
   const [ux, uy, uz] = frame.up;
-  if (ux === 0 && uy === 0 && uz === 1) return ir;
+  if (ux === 0 && uy === 0 && uz === 1 && offset[0] === 0 && offset[1] === 0) return ir;
   return {
     ...ir,
-    operations: ir.operations.map((op) => ({ ...op, moves: op.moves.map((m) => mapMove(m, frame)) })),
+    operations: ir.operations.map((op) => ({ ...op, moves: op.moves.map((m) => mapMove(m, frame, offset)) })),
   };
 }
 
@@ -201,4 +210,334 @@ export function rotatedGeometryFor(geometry: FeatureSource, frame: SetupFrame): 
     bbox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
   };
   return { triangles, ...(geometry.faceId === undefined ? {} : { faceId: geometry.faceId }) };
+}
+
+/*
+ * #965 REGISTRATION — the vise-flip setup's origin, computed from locating features, not
+ * assumed from the vise alone.
+ *
+ * `plan.ts`'s own #965 open-item note stated the gap exactly: "registration against setup N-1's
+ * own cut features... is left to the operator's fixture/jig, not computed here." `frameForFace`
+ * above gets the physical turn-over's ROTATION right (the vise flip is a half turn about the
+ * X axis, the SAME one `toSetupFrame`/`documentXY` apply), but a rotation alone says nothing
+ * about where that turn's AXIS actually sits relative to the stock. `toSetupFrame` rotates about
+ * the mesh's own coordinate origin (Y = 0, Z = 0) — i.e. it is only the real flip when the
+ * physical turn-over happens to pivot exactly there. A dowel-pinned flip (two holes reseated on
+ * two pins) or an edge-against-a-stop flip pivots wherever THOSE features put it, which may not
+ * be the mesh's coordinate origin at all. `registerSetupOrigin` below answers this the only way
+ * that is not a guess: recognise the SAME physical locating feature (a hole, an edge) in BOTH
+ * setups' own `FeatureTree`s, read where setup 0 says it is (document XY, ground truth — setup 0
+ * IS the document frame) and where setup N's naive `documentXY` map says it is, and report the
+ * DIFFERENCE as `offsetMm`. That offset is computed from real recognised geometry every time,
+ * never assumed to be `[0, 0]` — it comes out as `[0, 0]` whenever the two setups' own recognised
+ * positions already agree (which is always, for THIS module's own axis-through-origin half-turn,
+ * since `documentXY`'s formula is exactly `toSetupFrame`'s own inverse rotation — see the proof in
+ * this function's own tests), and would come out non-zero the moment that stops being true (a
+ * different pivot, a side flip with its own rotation, anything this module does not yet model).
+ *
+ * WHERE THE COMPUTED ORIGIN LIVES (the Manager's #965 ask): a SEPARATE return value
+ * (`SetupRegistration`), not a new field on `SetupFrame`. `SetupFrame` is built by
+ * `buildSetupSpecs`/`frameForFace` BEFORE any feature is recognised — it is a pure rotation/Z-datum
+ * description that `recogniseFeatures`, `clSurface` (via `rotatedGeometryFor`) and `documentXY`
+ * all consume as-is, and every one of those call sites would have to decide whether to honour a
+ * new `SetupFrame.originOffset` field or silently ignore it. The registration offset, by
+ * contrast, can only be computed once BOTH setups' trees exist (it compares setup 0's recognised
+ * features against setup N's), so it is a function of two `FeatureTree`s, returned on its own and
+ * applied by the one caller that already owns the setup→document map: `documentXY`/
+ * `mapIRToDocument`'s new optional `offset` parameter, above.
+ */
+
+/** One through-hole's centre, document XY, mm. */
+export interface LocatingHole {
+  id: string;
+  x: number;
+  y: number;
+}
+
+export interface HolePairDatum {
+  basis: 'two-holes';
+  holes: [LocatingHole, LocatingHole];
+  separationMm: number;
+}
+
+export interface EdgeDatum {
+  basis: 'edge';
+  /** The chosen straight outline run's two endpoints, setup 0's own document XY, mm. */
+  endpoints: [[number, number], [number, number]];
+  lengthMm: number;
+}
+
+export type LocatingDatum = HolePairDatum | EdgeDatum;
+
+export interface SetupRegistration {
+  datum: LocatingDatum;
+  /**
+   * Setup N's origin relative to setup 0, document XY, mm — ADD this to `documentXY`'s own
+   * rotation-only map (its new `offset` parameter) so the chosen datum reads at the SAME document
+   * position under both setups. `[0, 0]` is a COMPUTED agreement, never an unchecked default — see
+   * this file's registration header.
+   */
+  offsetMm: [number, number];
+}
+
+/**
+ * CHOSEN THRESHOLDS, stated here because no rule in the issue or the design note fixes them
+ * (per the issue's own ask: state the rule explicitly rather than pick one silently).
+ *
+ *  - `MIN_HOLE_SEPARATION_MM = 10`: two dowel holes closer than this cannot anchor a reliable
+ *    orientation — a small angular/placement error at the pins turns into a large swing at the
+ *    far end of the part when the pins themselves are close together. 10 mm is a dowel-pin-scale
+ *    number (typical locating dowels are 3-6 mm, so this asks the pair to be at least a couple of
+ *    pin-diameters apart), not a measured bench figure.
+ *  - `MIN_EDGE_LENGTH_MM = 15`: an edge datum has no "two points far apart" baseline of its own —
+ *    its own length IS the baseline — so it is asked to clear a somewhat higher bar than the hole
+ *    pair's separation.
+ *  - `COLLINEAR_TOL_RAD ≈ 0.057°`: merges a polygon's own subdivided straight edges (Clipper's
+ *    output chops a long straight run into several collinear segments) back into one run, without
+ *    merging a genuine shallow corner.
+ *  - `OFFSET_CONSISTENCY_TOL_MM = 1e-3`: the two ends of one chosen datum (the pair's two holes,
+ *    or one edge's two endpoints) must agree with each other about the offset to within this —
+ *    for THIS module's pure rotation-about-origin model that agreement is exact up to floating
+ *    point, so a real disagreement past this band means the candidate is not a trustworthy datum
+ *    (the wrong hole/edge was matched, or the part's geometry does not actually support a simple
+ *    top/bottom flip), and that candidate is discarded rather than averaged over.
+ */
+const MIN_HOLE_SEPARATION_MM = 10;
+const MIN_EDGE_LENGTH_MM = 15;
+const COLLINEAR_TOL_RAD = 1e-3;
+const OFFSET_CONSISTENCY_TOL_MM = 1e-3;
+
+const dist = (a: readonly [number, number], b: readonly [number, number]): number => Math.hypot(a[0] - b[0], a[1] - b[1]);
+
+/** Area-weighted polygon centroid (shoelace form); the vertex average for a near-zero-area ring. */
+function ringCentroid(ring: readonly (readonly [number, number])[]): [number, number] {
+  let a = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [x0, y0] = ring[i]!;
+    const [x1, y1] = ring[(i + 1) % ring.length]!;
+    const cross = x0 * y1 - x1 * y0;
+    a += cross;
+    cx += (x0 + x1) * cross;
+    cy += (y0 + y1) * cross;
+  }
+  if (Math.abs(a) < 1e-9) {
+    let sx = 0;
+    let sy = 0;
+    for (const [x, y] of ring) {
+      sx += x;
+      sy += y;
+    }
+    return [sx / ring.length, sy / ring.length];
+  }
+  return [cx / (3 * a), cy / (3 * a)];
+}
+
+function regionCentroid(region: Polygons, id: string): [number, number] {
+  const outer = region[0];
+  if (outer === undefined || outer.length < 3) {
+    throw new Error(`cam/model/setups: through-hole "${id}" has no outer ring to centre a registration datum on (#965 registration)`);
+  }
+  return ringCentroid(outer);
+}
+
+function allThroughHoles(nodes: PocketNode[]): PocketNode[] {
+  const out: PocketNode[] = [];
+  for (const n of nodes) {
+    if (n.through) out.push(n);
+    out.push(...allThroughHoles(n.children));
+  }
+  return out;
+}
+
+/** Every through-hole's centre, in DOCUMENT xy (this tree's own `documentXY`, no offset yet). */
+function documentHoles(tree: FeatureTree): LocatingHole[] {
+  return allThroughHoles(tree.pockets).map((n) => {
+    const [x, y] = regionCentroid(n.region, n.id);
+    const [dx, dy] = documentXY(tree.frame, x, y);
+    return { id: n.id, x: dx, y: dy };
+  });
+}
+
+/**
+ * Greedy nearest-neighbour correspondence between setup 0's holes and setup N's own
+ * naive-document-mapped holes — correct as long as the real offset is small next to the holes'
+ * OWN spacing, which `MIN_HOLE_SEPARATION_MM` exists to make true. Not a global min-cost
+ * assignment: with the small hole counts this module ever sees (a part's own dowel/locating
+ * holes, not every hole in it), greedy is enough, and a wrong greedy pick is caught by the
+ * separation/consistency checks the caller applies to the result.
+ */
+function matchHoles(holes0: readonly LocatingHole[], holesN: readonly LocatingHole[]): { h0: LocatingHole; hN: LocatingHole }[] | null {
+  if (holes0.length < 2 || holesN.length < 2) return null;
+  const used = new Set<number>();
+  const matches: { h0: LocatingHole; hN: LocatingHole }[] = [];
+  for (const h0 of holes0) {
+    let bestIdx = -1;
+    let bestDist = Infinity;
+    for (let j = 0; j < holesN.length; j++) {
+      if (used.has(j)) continue;
+      const d = dist([h0.x, h0.y], [holesN[j]!.x, holesN[j]!.y]);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = j;
+      }
+    }
+    if (bestIdx === -1) return null;
+    used.add(bestIdx);
+    matches.push({ h0, hN: holesN[bestIdx]! });
+  }
+  return matches;
+}
+
+/**
+ * The two-through-hole datum (strategy (a)). Tries every matched pair, widest separation first,
+ * and takes the first one whose two holes AGREE with each other about the offset (within
+ * `OFFSET_CONSISTENCY_TOL_MM`) — see this file's threshold note for why disagreement discards a
+ * candidate instead of averaging over it. `null` when no matched pair clears
+ * `MIN_HOLE_SEPARATION_MM` at all, or every pair that does disagrees internally.
+ */
+function tryHolePair(tree0: FeatureTree, treeN: FeatureTree): SetupRegistration | null {
+  const matches = matchHoles(documentHoles(tree0), documentHoles(treeN));
+  if (matches === null || matches.length < 2) return null;
+
+  const pairs: { i: number; j: number; separationMm: number }[] = [];
+  for (let i = 0; i < matches.length; i++) {
+    for (let j = i + 1; j < matches.length; j++) {
+      pairs.push({ i, j, separationMm: dist([matches[i]!.h0.x, matches[i]!.h0.y], [matches[j]!.h0.x, matches[j]!.h0.y]) });
+    }
+  }
+  pairs.sort((a, b) => b.separationMm - a.separationMm);
+
+  for (const { i, j, separationMm } of pairs) {
+    if (separationMm < MIN_HOLE_SEPARATION_MM) break; // sorted descending — no later pair clears it either.
+    const a = matches[i]!;
+    const b = matches[j]!;
+    const deltaA: [number, number] = [a.h0.x - a.hN.x, a.h0.y - a.hN.y];
+    const deltaB: [number, number] = [b.h0.x - b.hN.x, b.h0.y - b.hN.y];
+    if (dist(deltaA, deltaB) > OFFSET_CONSISTENCY_TOL_MM) continue; // this pair does not agree with itself — discard, try the next.
+    return {
+      datum: {
+        basis: 'two-holes',
+        holes: [a.h0, b.h0],
+        separationMm,
+      },
+      offsetMm: [(deltaA[0] + deltaB[0]) / 2, (deltaA[1] + deltaB[1]) / 2],
+    };
+  }
+  return null;
+}
+
+interface StraightRun {
+  a: [number, number];
+  b: [number, number];
+  lengthMm: number;
+}
+
+/**
+ * Consecutive collinear edges of a closed ring, merged into runs (Clipper's own output subdivides
+ * a long straight outline edge into several collinear segments). Starts from a genuine corner
+ * (an edge not collinear with the one before it) so no run is split across the array's own
+ * wraparound point; returns `[]` for a degenerate ring where every edge is collinear with the
+ * last (not a real closed polygon).
+ */
+function straightRuns(ring: readonly (readonly [number, number])[]): StraightRun[] {
+  const n = ring.length;
+  if (n < 3) return [];
+  const dirOf = (i: number): [number, number] => {
+    const p = ring[i]!;
+    const q = ring[(i + 1) % n]!;
+    const dx = q[0] - p[0];
+    const dy = q[1] - p[1];
+    const len = Math.hypot(dx, dy);
+    return len > 1e-9 ? [dx / len, dy / len] : [0, 0];
+  };
+  const dirs = Array.from({ length: n }, (_, i) => dirOf(i));
+  const collinear = (i: number, j: number): boolean => {
+    const [ax, ay] = dirs[i]!;
+    const [bx, by] = dirs[j]!;
+    const cos = Math.min(1, Math.max(-1, ax * bx + ay * by));
+    return Math.acos(cos) <= COLLINEAR_TOL_RAD;
+  };
+  let start = -1;
+  for (let i = 0; i < n; i++) {
+    if (!collinear((i - 1 + n) % n, i)) {
+      start = i;
+      break;
+    }
+  }
+  if (start === -1) return [];
+
+  const runs: StraightRun[] = [];
+  let runStart = start;
+  let i = start;
+  for (let steps = 0; steps < n; steps++) {
+    const next = (i + 1) % n;
+    if (steps === n - 1 || !collinear(i, next)) {
+      const a: [number, number] = [ring[runStart]![0], ring[runStart]![1]];
+      const b: [number, number] = [ring[next]![0], ring[next]![1]];
+      runs.push({ a, b, lengthMm: dist(a, b) });
+      runStart = next;
+    }
+    i = next;
+  }
+  return runs;
+}
+
+/** The outer ring's longest straight run, document XY (this tree's own `documentXY`, no offset). */
+function longestOutlineRun(tree: FeatureTree): StraightRun | null {
+  const outer = tree.contour.outline[0];
+  if (outer === undefined) return null;
+  const mapped = outer.map(([x, y]) => documentXY(tree.frame, x, y));
+  const runs = straightRuns(mapped);
+  if (runs.length === 0) return null;
+  return runs.reduce((best, r) => (r.lengthMm > best.lengthMm ? r : best));
+}
+
+/**
+ * The single-straight-edge datum (strategy (b)). Matches setup 0's own longest outline run
+ * against setup N's, pairing endpoints the way that minimises their total distance (the two
+ * rings wind OPPOSITE ways once setup N's mirror-Y map is applied, so the "first" endpoint of one
+ * is the "second" of the other) — then applies the SAME agree-or-discard rule as the hole pair.
+ * `null` when either setup's longest run is under `MIN_EDGE_LENGTH_MM`, or the two ends disagree.
+ */
+function tryEdge(tree0: FeatureTree, treeN: FeatureTree): SetupRegistration | null {
+  const run0 = longestOutlineRun(tree0);
+  const runN = longestOutlineRun(treeN);
+  if (run0 === null || runN === null) return null;
+  if (run0.lengthMm < MIN_EDGE_LENGTH_MM || runN.lengthMm < MIN_EDGE_LENGTH_MM) return null;
+
+  const straight = dist(run0.a, runN.a) + dist(run0.b, runN.b);
+  const swapped = dist(run0.a, runN.b) + dist(run0.b, runN.a);
+  const [pa, pb] = straight <= swapped ? [runN.a, runN.b] : [runN.b, runN.a];
+
+  const deltaA: [number, number] = [run0.a[0] - pa[0], run0.a[1] - pa[1]];
+  const deltaB: [number, number] = [run0.b[0] - pb[0], run0.b[1] - pb[1]];
+  if (dist(deltaA, deltaB) > OFFSET_CONSISTENCY_TOL_MM) return null;
+
+  return {
+    datum: { basis: 'edge', endpoints: [run0.a, run0.b], lengthMm: run0.lengthMm },
+    offsetMm: [(deltaA[0] + deltaB[0]) / 2, (deltaA[1] + deltaB[1]) / 2],
+  };
+}
+
+/**
+ * THE ENTRY — #965 registration. `tree0` is setup 0's own recognised `FeatureTree` (the
+ * document-frame ground truth: setup 0's `frame.up` is always `[0, 0, 1]`, the identity, per this
+ * module's stated scope); `treeN` is setup N's (`N > 0`, the flip). Tries the two-hole datum
+ * first (the more rigid, two-point anchor — an edge alone cannot detect an offset ALONG its own
+ * length), then the single-edge datum, and THROWS, naming the issue, when the part carries
+ * neither — never falls back to a guessed/nominal `[0, 0]` offset.
+ */
+export function registerSetupOrigin(tree0: FeatureTree, treeN: FeatureTree): SetupRegistration {
+  const holeDatum = tryHolePair(tree0, treeN);
+  if (holeDatum !== null) return holeDatum;
+  const edgeDatum = tryEdge(tree0, treeN);
+  if (edgeDatum !== null) return edgeDatum;
+  throw new Error(
+    'cam/model/setups: no locating features found for the vise flip (#965 registration) — ' +
+      `neither two through-holes at least ${MIN_HOLE_SEPARATION_MM} mm apart nor a single straight outline edge at least ` +
+      `${MIN_EDGE_LENGTH_MM} mm long survive, consistently, in both setup 0's and this setup's own recognised geometry; ` +
+      'this part cannot carry a computed vise-flip registration and must not be silently assumed aligned',
+  );
 }
