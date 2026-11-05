@@ -110,34 +110,42 @@ const flat: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
 const ball: Tool = { ...flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6' }), shape: 'ball', typeText: 'Ball Nose' };
 
 function twoRegionTree(): { tree: FeatureTree; geometry: { triangles: { positions: Float32Array; indices: Uint32Array; triangleCount: number; bbox: { min: [number, number, number]; max: [number, number, number] } } } } {
-  // Two separate flat floors, side by side, well apart — no interaction, each its own remainder
-  // region, so nothing but the (removed) per-region loop order relates them.
-  const Z = -5;
+  // Two separate floors, side by side, well apart — no interaction, each its own remainder
+  // region, so nothing but the (removed) per-region loop order relates them. A mild, constant
+  // slope, not a perfectly flat plane (#964's item 4a review): the flat's own CL stands
+  // slope x radius = 0.15 x 3 = 0.45 mm above the design, over the 0.3 mm band, so the ball's
+  // finish actually has leftover to take — a truly flat floor is exactly the case item 4a's own
+  // mask now correctly empties, which would test the mask instead of the batching this fixture
+  // is for.
+  const Z0 = -5;
+  const SLOPE = 0.15;
   const M = 15;
   const x0 = 0 - M, x1 = 80 + M, y0 = 0 - M, y1 = 20 + M;
+  const zAt = (x: number): number => Z0 - SLOPE * (x - x0);
   const geometry = {
     triangles: {
       positions: Float32Array.from([
-        x0, y0, Z, x1, y0, Z, x1, y1, Z,
-        x0, y0, Z, x1, y1, Z, x0, y1, Z,
+        x0, y0, zAt(x0), x1, y0, zAt(x1), x1, y1, zAt(x1),
+        x0, y0, zAt(x0), x1, y1, zAt(x1), x0, y1, zAt(x0),
       ]),
       indices: Uint32Array.from([0, 1, 2, 3, 4, 5]),
       triangleCount: 2,
-      bbox: { min: [x0, y0, Z] as [number, number, number], max: [x1, y1, 0] as [number, number, number] },
+      bbox: { min: [x0, y0, zAt(x1)] as [number, number, number], max: [x1, y1, zAt(x0)] as [number, number, number] },
     },
   };
   const fp1: Polygons = [[[0, 0], [30, 0], [30, 20], [0, 20]]];
   const fp2: Polygons = [[[50, 0], [80, 0], [80, 20], [50, 20]]];
+  const slopeDeg = (Math.atan(SLOPE) * 180) / Math.PI;
   const tree: FeatureTree = {
-    frame: { up: [0, 0, 1], stockTop: 0, partTop: 0, partBottom: Z },
-    levels: [Z],
+    frame: { up: [0, 0, 1], stockTop: 0, partTop: 0, partBottom: zAt(x1) },
+    levels: [zAt(x1)],
     top: { z: 0, floors: [], area: 0 },
-    contour: { outline: [[[0, 0], [80, 0], [80, 20], [0, 20]]], area: 80 * 20, zTo: Z, frees: true, shoulders: [] },
+    contour: { outline: [[[0, 0], [80, 0], [80, 20], [0, 20]]], area: 80 * 20, zTo: zAt(x1), frees: true, shoulders: [] },
     pockets: [],
     rims: [],
     remainder: [
-      { id: 'r1', footprint: fp1, area: 30 * 20, zTop: 0, zBottom: Z, triangles: new Uint32Array(), slopeDeg: [0, 0], slopeMedianDeg: 0, in: 'top' },
-      { id: 'r2', footprint: fp2, area: 30 * 20, zTop: 0, zBottom: Z, triangles: new Uint32Array(), slopeDeg: [0, 0], slopeMedianDeg: 0, in: 'top' },
+      { id: 'r1', footprint: fp1, area: 30 * 20, zTop: 0, zBottom: zAt(30), triangles: new Uint32Array(), slopeDeg: [slopeDeg, slopeDeg], slopeMedianDeg: slopeDeg, in: 'top' },
+      { id: 'r2', footprint: fp2, area: 30 * 20, zTop: 0, zBottom: zAt(80), triangles: new Uint32Array(), slopeDeg: [slopeDeg, slopeDeg], slopeMedianDeg: slopeDeg, in: 'top' },
     ],
     unreachable: [],
     report: { source: 'mesh', patches: 1, planarArea: 1200, remainderArea: 1200, tolerances: {} as never, slivers: [], notes: [] },
