@@ -514,6 +514,7 @@ export function buildTree(
       // The contour keeps its chain (its outline may legitimately be open), and a rim assigned
       // to 'top' has no node to ask.
       let polyline = raw.polyline;
+      let rawz = raw.z;
       const first = polyline[0];
       const last = polyline[polyline.length - 1];
       const open = first !== undefined && last !== undefined && Math.hypot(first[0] - last[0], first[1] - last[1]) > 0.01;
@@ -537,9 +538,24 @@ export function buildTree(
           if (polyline[0]![0] !== polyline[polyline.length - 1]![0] || polyline[0]![1] !== polyline[polyline.length - 1]![1]) {
             polyline.push(polyline[0]!);
           }
+          // #974 follow-up (the manager's 2026-11-05 fix; E's finding): THE RIM'S OWN TOP. The
+          // substituted mouth ring would otherwise keep the CHAIN's z — for a NESTED pocket that
+          // is the PARENT'S FLOOR (the tray's pocket-7 states -4.2, inside pocket-6 whose mouth is
+          // the land at -1.2). The V then legs 0.5 below -4.2 and cuts 3.49 mm through the land
+          // above: E's feed at (19.800, 12.050, -4.692). The rim's top is the TOP SURFACE its edge
+          // sits under — the ROOT ancestor's mouth (a root pocket is its own) — so the bevel is cut
+          // at the level the material actually stands at.
+          let topNode = openNode;
+          for (;;) {
+            const node: typeof topNode = topNode;
+            const parent = nodes.find((n) => n.children.some((c) => c.id === node.id));
+            if (parent === undefined) break;
+            topNode = parent;
+          }
+          rawz = topNode.mouthZ;
         }
       }
-      rims.push({ ...raw, polyline, id: `rim-${i}`, of });
+      rims.push({ ...raw, polyline, z: rawz, id: `rim-${i}`, of });
     });
 
     const strip = (n: TreeNode & { cs: CrossSection }): TreeNode => {
