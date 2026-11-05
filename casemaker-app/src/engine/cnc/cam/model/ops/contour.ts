@@ -39,6 +39,16 @@ export interface ContourOpOptions {
   offset: OffsetFn;
   params: CutParams;
   rapid: RapidEstimate;
+  /**
+   * #965/#898 part 2: when this contour FREES a non-first setup, the max LOCAL depth (same units
+   * and datum as `depthMm` — positive mm below THIS setup's own stock top) that is safe at a given
+   * LOCAL (x, y) ON THE PATH, imposed by the OPPOSITE setup's already-finished surface — `null`
+   * where that setup's surface places no limit (its own waste, or no geometry under that point at
+   * all). The caller (`plan.ts`) is what resolves a setup/frame pair into this plain function;
+   * this file stays frame-agnostic. Absent → no opposite setup (today's single-setup case, or the
+   * first of two) — `contour()` behaves EXACTLY as before (#959/#960's regression safety).
+   */
+  oppositeSafeDepthMm?: (x: number, y: number) => number | null;
 }
 
 // E's measurement on fb9fdaae: over 3,083 contour feeds, the minimum clearance to the outline was
@@ -59,18 +69,43 @@ export function contour(opts: ContourOpOptions): OpOutcome {
     throw new Error(`cam/model/ops/contour: ${opts.cutter.name || opts.cutter.shape} states no cutting diameter`);
   }
   const path: Polygons = profilePath(opts.contour.outline, 'outside', toolRadius, PROFILE_OFFSET_GUARD_MM, opts.offset);
+
+  // #965/#898 part 2: `ProfileCut.depth` is ONE scalar for the whole cut — `generateProfile`'s own
+  // contract, not touched here (this file's header: no new contour math). A true per-point-along-
+  // the-path follow of the opposite surface would need `generateProfile`/`profilePath` to accept a
+  // depth that varies along the path, which they do not and this change does not add. What IS
+  // correct within that constraint: sample `oppositeSafeDepthMm` at every vertex the offset path
+  // ALREADY has (its own chord-tolerance-bound density from `profilePath`'s offset), and take the
+  // MINIMUM safe depth found over the WHOLE path — the single flat depth that is guaranteed never
+  // to cut past the opposite surface at ANY point the tool actually travels. This is not "the easy
+  // choice taken over a better one": given the one-scalar-depth contract, it is the correct one —
+  // never less safe than a true per-point follow (it only ever cuts LESS than that would, never
+  // more, wherever the opposite surface varies along the path), stated here rather than silently
+  // assumed.
+  let depthMm = opts.depthMm;
+  if (opts.oppositeSafeDepthMm !== undefined) {
+    let minSafeMm = Infinity;
+    for (const ring of path) {
+      for (const [x, y] of ring) {
+        const safe = opts.oppositeSafeDepthMm(x, y);
+        if (safe !== null && safe < minSafeMm) minSafeMm = safe;
+      }
+    }
+    if (minSafeMm < depthMm) depthMm = Math.max(0, minSafeMm);
+  }
+
   const cut: ProfileCut = {
     id: 'contour',
     name: 'Contour',
     path,
-    depth: opts.depthMm,
-    thickness: opts.thicknessMm ?? opts.depthMm,
+    depth: depthMm,
+    thickness: opts.thicknessMm ?? depthMm,
     tabs: opts.tabs,
   };
 
   const result = generateProfile([cut], opts.cutter, opts.params, opts.rapid);
 
-  const levels = zPasses(opts.depthMm, opts.params.stepDown);
+  const levels = zPasses(depthMm, opts.params.stepDown);
   const passes: PassRef[] = levels.flatMap((z) =>
     path.map((ring) => {
       const start = ring[0]!;

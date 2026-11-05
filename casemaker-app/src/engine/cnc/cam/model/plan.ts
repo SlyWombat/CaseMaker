@@ -37,9 +37,52 @@ import type { FeatureSource, FeatureTree, PocketNode, SetupFrame } from './featu
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances } from './types';
 import { chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep } from './sequence';
-import { mapIRToDocument, rotatedGeometryFor } from './setups';
+import { documentXY, mapIRToDocument, rotatedGeometryFor } from './setups';
 import { pocket } from './ops/pocket';
 import { clSurface } from './clsurface';
+import { dropCutterHeight, profileOf, type CutterProfile, type DropCutterMesh } from './dropcutter';
+import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
+
+/**
+ * #965/#898 part 2 — THE FRAME-FLIP ALGEBRA, isolated from feature recognition's own
+ * uncertainties so it has its own direct, hand-checkable test (`contourFreeingCl965.spec.ts`).
+ *
+ * `toSetupFrame`'s own half-turn-about-X for `up = [0, 0, -1]` (`features.ts`) negates Y and Z of
+ * every mesh position, with NO translation — so a non-first setup's own RAW local Z (the same
+ * axis `ContourOpOptions.depthMm`/`zPasses` already cut on, before `planPocketsForTree`'s own
+ * `-stockTop` rebase) is exactly the NEGATION of the one fixed frame `ModelPlanInput.geometry`
+ * itself sits in (the opposite, `top`, setup's own frame — `up = [0, 0, 1]`, the identity
+ * rotation — called "world" here only in that sense, not a machine coordinate). A local depth `d`
+ * below THIS setup's own stock top is raw local Z `stockTop - d`, so `worldZ(d) = d - stockTop`.
+ *
+ * The opposite setup's solid sits at or below its own `dropCutterHeight` at the SAME document
+ * (world) point (#957's drop-cutter, read off the design mesh itself — the same ground truth
+ * `rough`/`rest`/`finish` already trust for "where the final surface is," not `SetupPlan.clGrid`,
+ * which carries only `{toleranceMm, minSpacingMm, maxSpacingMm}` per cutter and no sampled height
+ * at all). This setup's cut stays safe while it never reaches past that same world height, less a
+ * numerical-noise margin (the SAME chord-tolerance bound `PROFILE_OFFSET_GUARD_MM`/
+ * `ARC_CHORD_TOLERANCE_MM` already uses elsewhere, not a new tuned number):
+ * `d <= surfaceWorldZ - margin + stockTop`.
+ *
+ * `frame` is THIS (non-first) setup's own — the ONLY supported case is its `up = [0, 0, -1]`
+ * (#965's stated scope: a vise's bottom flip, the one `frameForFace`/`documentXY` actually map);
+ * the caller (`planModelCam`) is what checks that before ever calling this, so this function
+ * itself assumes it, not re-checks it. `profile`/`mesh` are the OPPOSITE setup's own tool profile
+ * and ITS rotated mesh (`rotatedGeometryFor(input.geometry, opposite.features.frame)`).
+ */
+export function oppositeSurfaceSafeDepthMm(
+  frame: SetupFrame,
+  profile: CutterProfile,
+  mesh: DropCutterMesh,
+  x: number,
+  y: number,
+  marginMm: number = ARC_CHORD_TOLERANCE_MM,
+): number | null {
+  const [wx, wy] = documentXY(frame, x, y);
+  const surfaceWorldZ = dropCutterHeight(profile, mesh, wx, wy);
+  if (surfaceWorldZ === null) return null;
+  return surfaceWorldZ + frame.stockTop - marginMm;
+}
 import { rough } from './ops/rough';
 import { rest } from './ops/rest';
 import { finish } from './ops/finish';
@@ -370,6 +413,59 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // (every job today), so this changes nothing for the existing single-setup caller.
     const curvedGeometry = rotatedGeometryFor(input.geometry, spec.frame);
 
+    // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
+    // already-finished surface (this file's own #965 open-item note, below, used to be the whole
+    // story). Only the LAST of exactly two setups has an opposite one already planned — a single-
+    // setup job's `setupIndex` is never `> 0`, so `oppositeSafeDepthMm` stays `undefined` and
+    // `contourOp` behaves exactly as before (#959/#960's regression safety); the FIRST setup's own
+    // contour has no earlier setup to read either. `buildSetupSpecs`'s own stated scope (#965
+    // header) offers only `top`/`bottom` — `perSetup[0]` IS "the opposite setup" whenever this
+    // branch runs, never a guess at which earlier entry that is.
+    //
+    // The opposite setup's "finished surface" is read straight off the SAME design mesh
+    // (`input.geometry`, rotated into ITS frame — `rotatedGeometryFor`, the same helper `curvedGeometry`
+    // above uses) via a real drop-cutter height (`dropcutter.ts`, #957) — not `clGrid` (it carries
+    // only `{toleranceMm, minSpacingMm, maxSpacingMm}` per cutter, a report of what was sampled,
+    // never the sampled heights themselves, so it cannot answer "how deep is safe at (x, y)").
+    // Re-querying the mesh directly is the SAME ground truth `rough`/`rest`/`finish` already trust
+    // for "where the final surface is," not a second, divergent source.
+    //
+    // The cutter used to read it is THIS setup's own `primary` flat — not a guess: a LARGER radius
+    // leaves MORE material standing in a tight corner than the mesh's own mathematical surface
+    // (concave corners it cannot fully enter), so reading the opposite surface through the SAME
+    // tool radius that actually cut it is the conservative direction — it never reports less
+    // material remaining there than the real cut would leave.
+    let oppositeSafeDepthMm: ((x: number, y: number) => number | null) | undefined;
+    const freeingNotes: string[] = [];
+    if (setupIndex > 0 && setupIndex === input.setups.length - 1) {
+      const opposite = perSetup[0];
+      if (opposite === undefined) {
+        throw new Error('cam/model/plan: the last setup has no earlier setup planned yet to free against (#965) — the setup loop order is broken');
+      }
+      const [ux, uy, uz] = spec.frame.up;
+      if (ux === 0 && uy === 0 && uz === -1) {
+        const oppositeGeometry = rotatedGeometryFor(input.geometry, opposite.features.frame);
+        const profile = profileOf(primary);
+        if (profile === null) {
+          freeingNotes.push(
+            `setup ${setupIndex}: the freeing contour's depth could not be checked against setup 0's finished surface — ${primary.name || primary.shape} has no drop-cutter profile (#965) — it still cuts to this setup's own flat zTo`,
+          );
+        } else {
+          const mesh: DropCutterMesh = oppositeGeometry.triangles;
+          const frameForQuery = spec.frame;
+          oppositeSafeDepthMm = (x: number, y: number): number | null =>
+            oppositeSurfaceSafeDepthMm(frameForQuery, profile, mesh, x, y);
+          freeingNotes.push(
+            `setup ${setupIndex}: the freeing contour's depth is bounded, at every point its path samples, by setup 0's own finished surface (#965, #898 part 2) — it will not cut deeper than that surface, read through this setup's own ${primary.name || primary.shape}`,
+          );
+        }
+      } else {
+        freeingNotes.push(
+          `setup ${setupIndex}: this setup's frame is not the stated bottom flip (#965 scope: up = [0, 0, -1]) — the freeing contour is NOT checked against setup 0's surface and still cuts to this setup's own flat zTo`,
+        );
+      }
+    }
+
     const result = planTreePrograms(tree, {
       offset,
       pockets: {
@@ -382,6 +478,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         air: true,
         boolean,
         ...(tabs === undefined ? {} : { tabs }),
+        ...(oppositeSafeDepthMm === undefined ? {} : { oppositeSafeDepthMm }),
       },
       curved: {
         geometry: curvedGeometry,
@@ -445,7 +542,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       if (p > 0) totalCostSeconds += toolChangeSeconds;
     }
 
-    const notes = [...result.notes, ...emptyStages];
+    const notes = [...result.notes, ...emptyStages, ...freeingNotes];
     if (substitution !== null) notes.push(substitution);
     if (input.fixture.envelope !== null) {
       notes.push(
@@ -467,9 +564,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       notes.push(
         `setup ${setupIndex}: registration against setup ${setupIndex - 1}'s own cut features is the operator's fixture/jig, not computed by this plan (#965 open item)`,
       );
-      notes.push(
-        `setup ${setupIndex}: the freeing contour is still a flat-Z pass to this setup's own tree.contour.zTo, not yet re-planned over the other setup's CL surface (#898 part 2 / #965 open item)`,
-      );
+      // The freeing contour's own depth IS now bounded against the opposite setup's finished
+      // surface (above, `freeingNotes`) — this is no longer a stated gap; see that note for the
+      // actual outcome (or why it could not be checked) on THIS plan.
     }
 
     perSetup.push({
@@ -529,6 +626,10 @@ export interface PlanPocketsOptions {
   tabs?: { count: number; width: number; height: number };
   /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
   boolean?: { union: BooleanFn; subtract: BooleanFn };
+  /** `ContourOpOptions.oppositeSafeDepthMm`, carried straight through to the contour op when this
+   * setup's freeing cut must stay off the opposite setup's already-finished surface (#965). Absent
+   * for every single-setup job and the first of two — `contourOp` then behaves exactly as before. */
+  oppositeSafeDepthMm?: (x: number, y: number) => number | null;
 }
 
 /**
@@ -712,6 +813,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         offset: opts.offset,
         params: cutParamsFor(cutter),
         rapid: opts.rapid,
+        ...(opts.oppositeSafeDepthMm === undefined ? {} : { oppositeSafeDepthMm: opts.oppositeSafeDepthMm }),
       });
     }
     if (id === 'facing') {
