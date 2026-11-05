@@ -121,8 +121,23 @@ function linksOutsideFreeSpace(
   radius: number,
   stockTop: number,
   hopZMm: number,
+  openOutline?: Polygons,
 ): { bad: string[]; feedsChecked: number } {
-  const free = offset(node.region, -radius);
+  // #962 ruling — the free space is erode(EXTENDED region, R): `pocket.ts` extends an open node by
+  // the band between the outline and itself (clipped near the node), and the guard computes the
+  // same union ITSELF from the same inputs — an independent check, never the op's recorded output.
+  const base =
+    node.open && openOutline !== undefined
+      ? boolean.union(
+          node.region,
+          (() => {
+            const wholeBand = boolean.subtract(offset(openOutline, 2 * radius), openOutline);
+            const near = offset(node.region, 2 * radius);
+            return boolean.subtract(wholeBand, boolean.subtract(wholeBand, near));
+          })(),
+        )
+      : node.region;
+  const free = offset(base, -radius);
   const op = result.ops.find((o) => o.region.id === node.id);
   if (op === undefined) return { bad: [`no op for ${node.id}`], feedsChecked: 0 };
   const floorZ = node.floorZ - stockTop;
@@ -250,6 +265,11 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     const cutter = op!.outcome.cutter.includes('3.175') ? 3.175 / 2 : 3;
     const swept = sweptFraction(result, ledge.id, ledge.floors.flatMap((f) => f.polygons), 7 - tree.frame.stockTop, cutter);
     expect(swept, `swept ${(100 * swept).toFixed(1)} % of the ${ledgeArea} mm² ledge`).toBeGreaterThanOrEqual(0.95);
+    // #962 — the guard on the OPEN fixture: every feed must stay inside erode(extended region, R),
+    // the extension computed here, not read from the op. Red before the extension was mirrored.
+    const { bad, feedsChecked } = linksOutsideFreeSpace(result, ledge, cutter, tree.frame.stockTop, HOP_Z, tree.contour.outline);
+    expect(feedsChecked, 'the open-node guard looked at some feeds').toBeGreaterThan(0);
+    expect(bad, `open-node feeds outside the extended free space:\n${bad.slice(0, 5).join('\n')}`).toEqual([]);
   });
 
   it('(5) cleared never claims the sharp inside corners a round tool cannot reach', () => {

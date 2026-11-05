@@ -220,9 +220,8 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
   // retract it replaces.
   const routeFor = (levelZ: number): NonNullable<LinkOptions['route']> => ({
     options: {
-      // Inset by a hair: the route's vertices otherwise sit exactly ON the eroded boundary, which
-      // a point-in-polygon sample (and B's guard) reads as outside by convention. The route must
-      // prove the whole DISC stays inside, so its centre never touches the boundary.
+      // The cleared region as the pocket cuts it: the op's own (extended) region eroded by the
+      // tool radius, and CLOSED at the boundary by `insideClosed` (the #962 ruling).
       cleared: opts.offset(region, -toolRadius),
       levelZ,
       rapidZMm: levelZ,
@@ -230,9 +229,9 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
     },
     plan: (lengthMm) => {
       const rideSeconds = moveSeconds(lengthMm, opts.feeds.feedMmPerMin, opts.rapid.accelMmPerS2);
-      const rapidSeconds =
-        moveSeconds(lengthMm, opts.rapid.xyMmPerMin, opts.rapid.accelMmPerS2) +
-        moveSeconds(2 * Math.abs(levelZ - levelZ), opts.rapid.zMmPerMin, opts.rapid.accelMmPerS2);
+      // The rapid runs at the cleared floor itself (rapidZMm = levelZ): inside the cleared region
+      // any Z at or above the level is free, so there are no vertical legs to price here.
+      const rapidSeconds = moveSeconds(lengthMm, opts.rapid.xyMmPerMin, opts.rapid.accelMmPerS2);
       const retractSeconds =
         moveSeconds(Math.abs(opts.hopZMm - levelZ), opts.rapid.zMmPerMin, opts.rapid.accelMmPerS2) +
         moveSeconds(lengthMm, opts.rapid.xyMmPerMin, opts.rapid.accelMmPerS2) +
