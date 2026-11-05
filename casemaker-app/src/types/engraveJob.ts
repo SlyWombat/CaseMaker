@@ -659,6 +659,14 @@ export interface EngraveTargetObject {
    * is gone — then the job says so and asks for an import again.
    */
   data?: string;
+  /**
+   * #991 — the B-rep face id of every triangle, base64 of a little-endian `Uint32Array` (4 bytes
+   * per triangle). Present when `data` is a mesh the door converted from a STEP: the feature tree
+   * then takes its B-rep path (whole-face patches, the cards' classification) instead of reading
+   * the same solid as a plain triangulation. Absent for every mesh file — an STL has no faces —
+   * so every document written before this field round-trips unchanged and plans as it always did.
+   */
+  faceId?: string;
   /** Parsed bounding size in mm. */
   size: { x: Mm; y: Mm; z: Mm };
   position: { x: Mm; y: Mm; z: Mm };

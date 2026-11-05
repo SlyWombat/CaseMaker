@@ -66,7 +66,7 @@ import { getTools } from '@/engine/cnc/toolRegistry';
 import { comparePlanOutcomes, idealWorsenings, type PlanTradeoff } from '../tools/tradeoff';
 import { feedRowsFor } from '../tools/feedRows';
 import { measureVendorCard } from '../tools/cardMeasurement';
-import { planModelCam, planPocketsForTree, planTreePrograms, setModelCamEnabled, type ModelPlanInput, type PlanPocketsResult, type SetupPlan } from '@/engine/cnc/cam/model/plan';
+import { planModelCam, planPocketsForTree, planTreePrograms, setModelCamEnabled, type ModelPlanInput, type PlanPocketsResult, type SetupPlan, type SetupSpec } from '@/engine/cnc/cam/model/plan';
 import type { SequenceChoice, SequenceStepFailure } from '@/engine/cnc/cam/model/sequence';
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
@@ -80,7 +80,9 @@ import { vToolAllowance } from '@/engine/cnc/engrave/edgeBreak';
 import { buildBinaryStl } from '@/workers/export/stlBinary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { generateGoalProgram, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { parseStl } from '@/engine/import/stlParser';
+import { readTargetObjectFile } from '@/engine/import/targetObject';
+import { buildModelPlanInputForGoal, generateGoalProgram, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 
 /** Even-odd point membership over every ring (outers and holes alike) — the same rule
  * `pocketRedFirst959.spec.ts`'s own helper uses. */
@@ -189,6 +191,79 @@ async function placedTree(file: string, stock: [number, number], modelTop: numbe
   };
   return { tree, mesh: { positions, indices: read.mesh.indices }, faceId: read.faceId, target };
 }
+
+/** #991 — the Makerables .stl that ships beside the STEP: the file a user would have picked. */
+function shippedStlBeside(stepPath: string): string | null {
+  const stl = path.join(path.dirname(stepPath), `${path.basename(stepPath, path.extname(stepPath))}.stl`);
+  return fs.existsSync(stl) ? stl : null;
+}
+
+/** The card's own single setup (the #966 test seam), so the #991 rows measure the door, not the
+ * setup decision. */
+const CARD_SETUPS: SetupSpec[] = [{ frame: { up: [0, 0, 1], stockTop: 0 }, underside: 'flatOnStockBottom' }];
+
+
+/**
+ * #991 — THE STL ROW: the Makerables .stl planned through `buildModelPlanInputForGoal`, the
+ * user's own door (an STL carries no faceId), on the card's stock and single setup. The seven
+ * lines are measured by the card's own `writeAcceptance`; the row prints beside the STEP row
+ * and is pinned to today's numbers, so the filed mesh-path item's fix is visible here.
+ */
+async function measureStlRow(name: string, stlPath: string, stockXy: [number, number], modelTop: number) {
+  const bytes = fs.readFileSync(stlPath);
+  const parsed = parseStl(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+  const size = {
+    x: parsed.bbox.max[0] - parsed.bbox.min[0],
+    y: parsed.bbox.max[1] - parsed.bbox.min[1],
+    z: parsed.bbox.max[2] - parsed.bbox.min[2],
+  };
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const goal: EngraveTargetObject = {
+    id: sha256.slice(0, 16),
+    name: path.basename(stlPath),
+    format: 'stl',
+    sha256,
+    data: bytes.toString('base64'),
+    size,
+    position: { x: stockXy[0] / 2, y: stockXy[1] / 2, z: modelTop },
+    rotation: 0,
+    enabled: true,
+    role: 'goal',
+    chamfer: { widthMm: EDGE_BREAK_LEG_MM, toolKey: `inv:${CHAMFER3175.id}` },
+  } as EngraveTargetObject;
+  // The part's top sits at `modelTop` in the work frame (Z 0 = stock top), so the stock is as
+  // thick as the part is tall plus that drop.
+  const thickness = -modelTop + size.z;
+  const base = defaultEngraveJob();
+  const job: EngraveJob = {
+    ...base,
+    labels: [],
+    shapes: [],
+    targetObject: goal,
+    toolKey: '',
+    tool: BALL6,
+    stock: { ...base.stock, length: stockXy[0], width: stockXy[1], thickness, material: 'hardwood' },
+  };
+  const input = await buildModelPlanInputForGoal(job, goal, BALL6, SHOP_991, CARD_SETUPS);
+  const output = await planModelCam(input);
+  const setup = output.perSetup[0]!;
+  const runs = setup.programs.map((ir) => ({ cutterKey: ir.tool.id ?? ir.tool.name, ir }));
+  const measured = writeAcceptance(
+    `${name}-stl`,
+    setup.features,
+    { ops: setup.ops, programs: runs, sequence: setup.sequence, unreachable: setup.unreachable, notes: setup.notes, choice: setup.choice },
+    { target: goal, stock: { length: stockXy[0], width: stockXy[1] } },
+  );
+  const rims = setup.features.rims.length;
+  const modelled = setup.features.rims.filter((r) => r.kind === 'modelledChamfer').length;
+  const chamferOps = setup.ops.filter((op) => op.kind === 'chamfer').length;
+  const skippedRims = setup.notes.filter((n) => n.includes('not broken')).length;
+  console.log(
+    `#991 ${name} STL row: ${setup.features.report.source} path, ${rims} rims (${modelled} modelledChamfer), ${chamferOps} chamfer ops (${skippedRims} rims not broken), ` +
+      `coverage ${measured === null ? '—' : (measured.coverage * 100).toFixed(2)} %, cycle ${measured === null ? '—' : measured.ours.cycleSeconds.toFixed(1)} s`,
+  );
+  return { setup, measured, rims, modelled, chamferOps };
+}
 // Makera's own pattern on these parts (plan v2 §1): the largest flat roughs, a smaller flat rests
 // the corners it cannot enter, the ball finishes the curved remainder, the chamfer breaks the
 // rims. A's R5 ruling: a simulation-only reference card prices on the VENDOR's own set. E's own
@@ -214,6 +289,12 @@ const CHAMFER3175: Tool = {
   halfAngle: 45,
 };
 const VENDOR_SET = [FLAT6, FLAT3175, BALL6, CHAMFER3175];
+
+/** The shop the app's goal seam resolves a stated chamfer key through. */
+const SHOP_991: EngraveShopOpts = {
+  tools: VENDOR_SET.map((t) => ({ key: `inv:${t.id}`, tool: t, provenance: 'test' })),
+  feeds: null,
+};
 const RAPID = Z1.rapidEstimate;
 
 // This helper serves the OPERATOR-OPTION tests (the facing stage's own behaviour): it asks for
@@ -1416,6 +1497,72 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
       expect(worse, JSON.stringify(worse)).toEqual([]);
     }
   }, 1_800_000);
+
+  // #991 — THE STL ROW. The Makerables .stl through the app's own door (no faceId): the file a
+  // user would have picked, planned and measured beside the STEP row above. Its numbers are
+  // pinned as today's known defect — 63 rims, 28 fillets read as modelled chamfers, 41 chamfer
+  // ops with 22 rims skipped — and the rims item drives them to the STEP row's (38 / 27); a
+  // change here is that item's progress or a new bug.
+  it('#991 the shipped STL row: planned through the user’s own door, printed beside the STEP row', async () => {
+    const stlPath = shippedStlBeside(TRAY!);
+    expect(stlPath, 'the Makerables .stl is not beside the STEP').not.toBeNull();
+    if (stlPath === null) return;
+    const row = await measureStlRow('tray', stlPath, [110, 140], -1.2);
+    expect(row.setup.features.report.source, 'an STL must take the mesh path').toBe('mesh');
+    expect(row.rims).toBe(63);
+    expect(row.modelled).toBe(28);
+    expect(row.measured, 'the STL row measured nothing').not.toBeNull();
+    // The seven lines are judged on BOTH rows: the STL row must clear its own gate (the same
+    // 0.95 pass coverage) and cut nothing into the part. Its RIM line differs from the STEP
+    // row's by the filed defect above; that is the only line allowed to.
+    expect(row.measured!.coverage, 'the STL row fell under the card coverage floor').toBeGreaterThanOrEqual(0.9852);
+    expect(row.measured!.adjudicatedFraction ?? 0, 'the STL row cut into the part').toBe(0);
+  }, 900_000);
+});
+
+describe.skipIf(TRAY === undefined)('#991 — the tray imported at the door: B-rep faces, the card’s numbers', () => {
+  it('the door keeps faceId and the seam plans 38 rims / 27 chamfer ops with source "step"', async () => {
+    const bytes = fs.readFileSync(TRAY!);
+    const read = await readTargetObjectFile(new File([bytes], path.basename(TRAY!)), 'tray-991');
+    expect(read.ok, read.ok ? '' : read.error).toBe(true);
+    if (!read.ok) return;
+    expect(read.faceId, 'the door dropped the STEP face ids').toBeDefined();
+    const size = read.size;
+    const goal: EngraveTargetObject = {
+      id: read.id,
+      name: read.name,
+      format: read.format as EngraveTargetObject['format'],
+      sha256: read.sha256,
+      data: read.data,
+      faceId: read.faceId,
+      size,
+      position: { x: 55, y: 70, z: -1.2 },
+      rotation: 0,
+      enabled: true,
+      role: 'goal',
+      chamfer: { widthMm: EDGE_BREAK_LEG_MM, toolKey: `inv:${CHAMFER3175.id}` },
+    };
+    const base = defaultEngraveJob();
+    const job: EngraveJob = {
+      ...base,
+      labels: [],
+      shapes: [],
+      targetObject: goal,
+      toolKey: '',
+      tool: BALL6,
+      stock: { ...base.stock, length: 110, width: 140, thickness: 1.2 + size.z, material: 'hardwood' },
+    };
+    const input = await buildModelPlanInputForGoal(job, goal, BALL6, SHOP_991, CARD_SETUPS);
+    expect(input.geometry.faceId?.length, 'the seam did not carry the face ids').toBe(input.geometry.triangles.triangleCount);
+    console.log(`#991 tray door input: legMm ${input.edgeBreak.legMm}, pinned ${JSON.stringify(input.cutters.pinned)}`);
+    const output = await planModelCam(input);
+    const setup = output.perSetup[0]!;
+    const chamferOps = setup.ops.filter((op) => op.kind === 'chamfer').length;
+    console.log(`#991 tray door: ${setup.features.report.source} path, ${setup.features.rims.length} rims, ${chamferOps} chamfer ops; notes: ${setup.notes.filter((n) => /edge break|not broken/.test(n)).slice(0, 3).join(' | ')}; unplanned: ${(setup.unplanned ?? []).filter((u) => u.kind === 'chamfer').slice(0, 3).map((u) => u.reason).join(' | ')}`);
+    expect(setup.features.report.source).toBe('step');
+    expect(setup.features.rims.length).toBe(38);
+    expect(chamferOps).toBe(27);
+  }, 900_000);
 });
 
 /**
@@ -1541,6 +1688,19 @@ describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.o
       expect(worse, JSON.stringify(worse)).toEqual([]);
     }
   }, 1_800_000);
+
+  // #991 — THE ORGANIZER'S STL ROW, and it is REFUSED, not measured: the shipped organizer STL
+  // has ONE edge used by four triangles after the door's 1e-4 mm weld (12,482 triangles; every
+  // other edge is used twice), so `closeOpenSheet` refuses it by name and a user cannot plan
+  // this file at all today. Recorded here as the user's own experience; the mesh-path item owns
+  // the fix (a tighter weld or a manifold-tolerant tree). The tray's STL row is the planned-and-
+  // measured one.
+  it('#991 the shipped STL row: the user’s own file, refused by the door by name', async () => {
+    const stlPath = shippedStlBeside(ORGANIZER!);
+    expect(stlPath, 'the Makerables .stl is not beside the STEP').not.toBeNull();
+    if (stlPath === null) return;
+    await expect(measureStlRow('organizer', stlPath, [170, 170], -0.8)).rejects.toThrow(/edge\(s\) shared by more than two triangles/);
+  }, 900_000);
 });
 
 describe.skipIf(TRAY !== undefined || ORGANIZER !== undefined)('#959 acceptance — not run', () => {

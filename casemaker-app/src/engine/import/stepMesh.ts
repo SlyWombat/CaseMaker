@@ -196,8 +196,12 @@ export async function stepToMesh(bytes: ArrayBuffer, tessellation: StepTessellat
 /**
  * The same read, plus the binary STL the goal door stores. The stock door takes {@link stepToMesh}
  * alone — it keeps a size, never the bytes — so it does not pay for a file it would throw away.
+ *
+ * #991 — the door reads at `'recognition'`: the app's plan classifies the same mesh the cards do
+ * (whole B-rep faces), so the stored mesh and its `faceId` must be the recognition read, not the
+ * kernel's coarser display defaults.
  */
-export async function stepToStl(bytes: ArrayBuffer): Promise<StepMeshRead> {
-  const read = await stepToMesh(bytes);
+export async function stepToStl(bytes: ArrayBuffer, tessellation: StepTessellation = 'display'): Promise<StepMeshRead> {
+  const read = await stepToMesh(bytes, tessellation);
   return { ...read, stl: buildBinaryStl([read.mesh]) };
 }
