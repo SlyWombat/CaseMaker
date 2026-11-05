@@ -124,6 +124,12 @@ export interface FinishOpOptions {
    */
   mesh?: FeatureSource['triangles'];
   scallopMm: number;
+  /**
+   * #982 (the review session's ruling) — NO BALL IN THE SET: the flat finishes the whole curved
+   * remainder, and its step-over is the flat's own cusp rule `cusp / tan(thetaMax)` clamped to
+   * [R/10, R]. Absent -> the ordinary flat-raster rule.
+   */
+  flatFallback?: boolean;
   stepDownMm: number;
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
   safeZMm: number;
@@ -258,6 +264,13 @@ function ballScallopStepOver(radiusMm: number, bandMm: number, steepestSlopeDeg:
  * has no real cusp at all, so its own step-over is capped at the cutter's diameter instead of
  * diverging.
  */
+/** #982 — the flat's cusp rule with no ball in the set: `s = cusp / tan(thetaMax)`, clamp [R/10, R]. */
+function flatFallbackStepOver(radiusMm: number, bandMm: number, steepestSlopeDeg: number): number {
+  const slopeRad = (steepestSlopeDeg * Math.PI) / 180;
+  const raw = slopeRad > 1e-6 ? bandMm / Math.tan(slopeRad) : radiusMm;
+  return Math.min(radiusMm, Math.max(radiusMm / 10, raw));
+}
+
 function flatRasterStepOver(radiusMm: number, bandMm: number, steepestSlopeDeg: number): number {
   const cap = 2 * radiusMm;
   const slopeRad = (steepestSlopeDeg * Math.PI) / 180;
@@ -402,7 +415,9 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // steeper bands and floored at the cutter's radius/10 on a wall. Every row is phased from the
   // OLD raster's own origin, and the row AT that origin is cut (the #960 rewrite had dropped it,
   // which is what cost the tray's 2,411 slot cells — not a phase shift).
-  const flatRowStepMm = flatRasterStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1]);
+  const flatRowStepMm = opts.flatFallback === true
+    ? flatFallbackStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1])
+    : flatRasterStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1]);
   const regionStepOverMm =
     opts.kind === 'ball-scallop'
       ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1])

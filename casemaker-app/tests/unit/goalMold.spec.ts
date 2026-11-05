@@ -220,6 +220,28 @@ describe('#721 — generate → simulate → match', () => {
     expect(item.findings.some((f) => f.code.startsWith('goal-mold'))).toBe(false);
   });
 
+  // #982 pin — the fixtures' OWN set (the ball alone) through the ONE model entry: no flat in the
+  // set is the ball's fallback, not a refusal. RED at the parent (planModelCam threw).
+  it('#982 pin — a ball-only set plans the item through planModelCam (no flat: the ball is the primary)', async () => {
+    const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+    const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+    const asItem = job();
+    const input = await buildModelPlanInputForGoal(asItem, asItem.targetObject!, flatEndMill(1, { shape: 'ball' }), {});
+    const out = await planModelCam(input);
+    expect(out.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
+    expect(out.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
+  }, 120_000);
+
+  it('#982 pin — the mold mode plans through planModelCam with the ball-only set', async () => {
+    const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+    const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+    const asMold = job({ goalMode: 'mold' });
+    const input = await buildModelPlanInputForGoal(asMold, asMold.targetObject!, flatEndMill(1, { shape: 'ball' }), {});
+    const out = await planModelCam(input);
+    expect(out.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
+    expect(out.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
+  }, 120_000);
+
   it('a box-shaped part has vertical walls and is warned; the hemisphere is not', async () => {
     const box: Tri[] = [];
     const c: V[] = [
