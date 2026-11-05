@@ -36,7 +36,7 @@ import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
-import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances } from './types';
+import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances } from './types';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, type SetupRegistration } from './setups';
 import { pocket } from './ops/pocket';
@@ -106,7 +106,6 @@ import { finish } from './ops/finish';
 import { pencil } from './ops/pencil';
 import { chamfer } from './ops/chamfer';
 import { contour as contourOp, throughHole } from './ops/contour';
-import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { parseGcode } from '@/engine/cnc/gcode';
 import { setupFromHeader } from '@/engine/cnc/setupFromHeader';
@@ -228,7 +227,7 @@ export interface ModelPlanInput {
    * 0.1 mm band (the maintainer's 11-05 ruling), not the count of pockets left behind. Absent →
    * the old pocket-count completeness, unchanged.
    */
-  goal?: GoalHeightfield;
+  goal?: GoalCellField;
 }
 
 export interface ModelPlanOutput {

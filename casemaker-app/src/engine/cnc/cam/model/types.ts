@@ -23,6 +23,24 @@ export interface EdgeBreakSpec {
   legMm: number;
 }
 
+/**
+ * #964/#961 — THE GOAL FIELD AS `cam/model` SEES IT. The completeness simulation needs the goal's
+ * cell grid (extent, pitch) and its own data (`z`, `covered`) — the DATA, never the gate's
+ * heightfield module: the rebuild's point is that the engine stops planning on the field the gate
+ * measures with (gateImports' reverse rule), so the planner names its own structural type here and
+ * a caller passes its field against it. The gate's `GoalHeightfield` is assignable to this shape,
+ * which is the whole contract: no module of `cam/model/**` imports `engrave/goalHeightfield`.
+ */
+export interface GoalCellField {
+  nx: number;
+  ny: number;
+  x0: number;
+  y0: number;
+  pitch: number;
+  z: Float32Array;
+  covered: Uint8Array;
+}
+
 export interface ModelPlanProgress {
   setupIndex: number;
   op: PlannedOpKind | 'features' | 'clSurface' | 'sequence' | 'linking';
