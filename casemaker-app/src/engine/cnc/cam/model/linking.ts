@@ -27,12 +27,22 @@
  * feed time this cost the rough skim's own joins): the horizontal traverse at the clearance plane is
  * always a rapid, and so now is the UP leg — retracting out of material the op just finished cutting
  * at `from` is never hopeful, it is a known-clear G0 like Makera's own NC. The DOWN leg still earns
- * its caution, but only down to where it is owed: it rapids from the clearance plane to the material
- * field's own report at the LANDING (x, y) plus the hop clearance, then feeds (at `plungeFeed`) the
- * rest of the way into unproven territory. When the field cannot prove anything there (not finite —
- * off the footprint, or no field at all, as in `chamfer.ts`'s own V-bit transitions), the whole down
- * leg stays a feed, exactly as before: a hopeful rapid is still not a retract.
+ * its caution, but only down to where it is owed: it rapids from the clearance plane to the tallest
+ * material anywhere under the cutter's WHOLE disc at the LANDING (x, y) plus the hop clearance, then
+ * feeds (at `plungeFeed`) the rest of the way into unproven territory. When the field cannot prove
+ * anything under that disc (not finite anywhere in it — off the footprint, or no field at all, as in
+ * `chamfer.ts`'s own V-bit transitions), the whole down leg stays a feed, exactly as before: a
+ * hopeful rapid is still not a retract.
  *
+ * FOOTPRINT AUDIT (the manager's #962 follow-up, before C's own honest-material-field change): the
+ * down leg's floor used to read `topAt` only at the landing's own point — the tip's XY, not the
+ * cutter's. A ball or a flat travelling straight down still sweeps its whole radius, so a ridge
+ * just inside that radius but clear of the centreline was invisible to the old floor and the rapid
+ * ran straight through it. `linkIsClear`'s own disc sampling was already right (its docstring says
+ * so); only this one point query in `retract()`'s down leg was not. Fixed by reading the disc's own
+ * tallest point (`materialTopOverDisc`), the same footprint `linkIsClear` already samples.
+ *
+
  * `tour.ts` (#487) is the region-order primitive: nearest-neighbour + 2-opt, deterministic. This
  * module lifts it from loops to passes.
  */
@@ -141,6 +151,21 @@ function discOffsets(radius: number, spacing: number): [number, number][] {
 }
 
 /**
+ * The tallest material under the cutter's disc at (x, y), mm — the same footprint `linkIsClear`
+ * samples, collapsed to one point. Non-finite (the field proves nothing somewhere under the disc)
+ * propagates as `Infinity`, which is never finite either: a partial answer is not an answer.
+ */
+function materialTopOverDisc(material: MaterialField, x: number, y: number, radius: number, step: number): number {
+  let maxTop = -Infinity;
+  for (const [ox, oy] of discOffsets(radius, step)) {
+    const top = material.topAt(x + ox, y + oy);
+    if (!Number.isFinite(top)) return Number.POSITIVE_INFINITY;
+    if (top > maxTop) maxTop = top;
+  }
+  return maxTop;
+}
+
+/**
  * True when the cutter, travelling from `from` to `to`, stays inside material already cut to the
  * link's own Z. The segment is sampled at `sampleStep`; at each sample the whole cutter disc is
  * tested, so a wall or a ridge just inside the radius blocks the link even when the centreline is
@@ -220,11 +245,15 @@ function retract(from: LinkPoint, to: LinkPoint, opts: LinkOptions): CamMove[] {
     moves.push(rapidMove({ x: to.x, y: to.y, z: transitZ }));
   }
 
-  // DOWN — rapid to the material field's own report at the LANDING (x, y) plus the hop
-  // clearance, then feed the rest of the way; a hopeful rapid past that point is not a retract.
-  // When the field cannot prove anything there (not finite), the whole leg stays a feed, as before.
+  // DOWN — rapid to the tallest material under the WHOLE cutter disc at the LANDING (x, y) plus
+  // the hop clearance, then feed the rest of the way; a hopeful rapid past that point is not a
+  // retract. The landing's own (x, y) is not enough: a flat or a ball travelling straight down
+  // sweeps its radius too, and a ridge just inside it — clear of the centreline — is still in the
+  // way (the manager's #962 footprint audit). When the field cannot prove anything under the disc
+  // (not finite anywhere in it), the whole leg stays a feed, as before.
   if (transitZ > to.z + EPS) {
-    const materialTop = opts.material.topAt(to.x, to.y);
+    const radius = Math.max(0, opts.tool.radiusMm);
+    const materialTop = materialTopOverDisc(opts.material, to.x, to.y, radius, sampleStep(opts));
     if (Number.isFinite(materialTop)) {
       const hopClearance = opts.hopClearanceMm ?? DEFAULT_HOP_CLEARANCE_MM;
       const floor = Math.max(materialTop + hopClearance, to.z);

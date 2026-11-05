@@ -13,11 +13,17 @@
  *     field at all, as in `chamfer.ts`), the whole down leg stays a feed, exactly as before.
  *
  * The single universal check this file pins, covering every rapid in the program at once: NO
- * RAPID MOVE EVER ENDS BELOW the material field's own `topAt` at that (x, y) plus the hop
- * clearance — an UP leg's landing (the clearance plane) and the horizontal traverse both clear
- * this trivially by construction; the DOWN leg's rapid segment lands EXACTLY on it. A vertical
- * leg that is a FEED must never start above that floor either (a feed above the floor would mean
- * the new rapid segment was skipped for no reason).
+ * RAPID MOVE EVER ENDS BELOW the tallest material anywhere under the cutter's WHOLE disc at that
+ * landing (x, y), plus the hop clearance — an UP leg's landing (the clearance plane) and the
+ * horizontal traverse both clear this trivially by construction; the DOWN leg's rapid segment
+ * lands EXACTLY on it. A FEED leg started above that floor is only allowed when the disc itself
+ * cannot be read in full (below, "near-boundary"): `finish.ts`'s own `materialFor` (#962 footprint
+ * audit) reports `+Infinity` for any (x, y) outside the region's exact footprint, so a landing
+ * within one cutter radius of that footprint's edge — true of EVERY row-to-row turnaround on this
+ * rectangular fixture, since the rows run flush edge to edge — always has some point under its
+ * disc the field cannot speak to, and the whole leg correctly stays a single feed from the
+ * clearance plane. The split itself (a landing with its whole disc inside known material) is
+ * covered directly, with no footprint edge in the way, by `linkStayDown962.spec.ts`.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -72,6 +78,12 @@ describe('#959 review item 6, refined — finish() links rapid above material, f
     // rapid must respect is therefore a single constant here.
     const FLOOR = FLAT_Z + HOP_Z_MM;
     const EPS = 1e-6;
+    const toolRadius = 3; // ball6's cutting radius
+    const nearFootprintEdge = (x: number, y: number): boolean =>
+      x - X0 < toolRadius - EPS ||
+      X1 - x < toolRadius - EPS ||
+      y - Y0 < toolRadius - EPS ||
+      Y1 - y < toolRadius - EPS;
 
     let rowToRowLinksSeen = 0;
     for (let i = 1; i < moves.length - 1; i++) {
@@ -86,24 +98,12 @@ describe('#959 review item 6, refined — finish() links rapid above material, f
       // `CamMove` has exactly two kinds (ir.ts) — ruling out 'rapid' above, not a cast, is what
       // narrows `m` to 'feed' here for the `.f` read below, the same reasoning item 6 first used.
       expect(m.f, `move ${i}'s fed vertical leg ran at ${m.f} mm/min, not the ${FEEDS.plungeFeedMmPerMin} mm/min plunge rate`).toBe(FEEDS.plungeFeedMmPerMin);
-      // A feed leg starting above the floor means the new rapid segment down to the floor was
-      // skipped for no reason — the whole point of the ruling.
-      expect(prev.z, `move ${i}'s fed vertical leg started at z=${prev.z}, above the floor ${FLOOR} — the rapid-down segment to the floor was skipped`).toBeLessThanOrEqual(FLOOR + EPS);
+      // A feed leg starting above the floor means the rapid-down segment was skipped — allowed
+      // only when the landing is close enough to the footprint edge that the disc can't be read
+      // in full (see the file header), never in the open interior.
+      if (nearFootprintEdge(m.x, m.y)) continue;
+      expect(prev.z, `move ${i}'s fed vertical leg started at z=${prev.z}, above the floor ${FLOOR} — the rapid-down segment to the floor was skipped, away from any footprint edge`).toBeLessThanOrEqual(FLOOR + EPS);
     }
     expect(rowToRowLinksSeen, 'the fixture must actually produce vertical legs for this to mean anything').toBeGreaterThan(0);
-
-    // At least one DOWN leg must actually show the split (a rapid ending at the floor, followed
-    // immediately by a feed down into material) — otherwise this fixture isn't exercising the
-    // new rule at all, just re-confirming the old one by accident.
-    let sawSplitDownLeg = false;
-    for (let i = 1; i < moves.length; i++) {
-      const m = moves[i]!;
-      const prev = moves[i - 1]!;
-      if (m.kind === 'feed' && prev.kind === 'rapid' && m.x === prev.x && m.y === prev.y && m.z < prev.z && Math.abs(prev.z - FLOOR) <= EPS) {
-        sawSplitDownLeg = true;
-        break;
-      }
-    }
-    expect(sawSplitDownLeg, 'no row-to-row down leg showed the rapid-to-floor, then feed-into-material split').toBe(true);
   });
 });
