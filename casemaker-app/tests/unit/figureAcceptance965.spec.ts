@@ -69,6 +69,9 @@ const JOBS = join(REPO, 'docs', 'bench', '2026-10-28-z1-real-jobs', 'jobs');
 // Local-only data; without it the figure cases skip with the reason rather than measuring a
 // conservative placeholder as the product.
 const CATALOGUE = installMakeraCatalogue();
+/** #965 — the owned plan's goal check is opt-in: the default run is ONE plan (the figure set).
+ * Set CM_965_TWO_PLANS=1 for the owned→figure-set tradeoff line and its receipt. */
+const TWO_PLANS = process.env.CM_965_TWO_PLANS === '1';
 afterAll(() => clearMakeraCatalogue());
 
 interface FigureCase {
@@ -385,23 +388,23 @@ for (const figure of FIGURES) {
       // #965 (the review session's ruling, item 3.1): the figure set ADMITS the catalogue's long
       // Ø1 (161032105031) as the rest ball; the owned plan — the house set alone — is measured
       // beside it and the tradeoff line states the difference on the card's own receipt.
-      const owned = await runFigure(figure, job, stlPath!, bytes, planInputFor(job, source), ctx);
+      const owned = TWO_PLANS ? await runFigure(figure, job, stlPath!, bytes, planInputFor(job, source), ctx) : null;
       const figureRun = await runFigure(figure, job, stlPath!, bytes, planInputFor(job, source, true), ctx);
       expect(
         figureRun.output.perSetup.some((setup) => setup.ops.some((op) => op.kind === 'rest' && op.outcome.cutter === '161032105031')),
         '#965: the rest ball never entered the plan',
       ).toBe(true);
-      const tradeoff = comparePlanOutcomes({ score: owned.ours, card: owned.scored }, { score: figureRun.ours, card: figureRun.scored });
+      const tradeoff = owned === null ? null : comparePlanOutcomes({ score: owned.ours, card: owned.scored }, { score: figureRun.ours, card: figureRun.scored });
       console.log(
-        `#965 ${figure.name}: owned ${(owned.coverage * 100).toFixed(2)} % / ${owned.ours.cycleSeconds.toFixed(1)} s -> with the long ⌀1 ${(figureRun.coverage * 100).toFixed(2)} % / ${figureRun.ours.cycleSeconds.toFixed(1)} s` +
+        `#965 ${figure.name}: ${owned === null ? 'figure set' : `owned ${(owned.coverage * 100).toFixed(2)} % / ${owned.ours.cycleSeconds.toFixed(1)} s -> with the long ⌀1`} ${(figureRun.coverage * 100).toFixed(2)} % / ${figureRun.ours.cycleSeconds.toFixed(1)} s` +
           (tradeoff === null ? '' : `; tradeoff: ${tradeoff.line ?? JSON.stringify(tradeoff.differences)}`),
       );
 
       const out = process.env.CM_965_OUT;
       if (out !== undefined) {
         fs.mkdirSync(out, { recursive: true });
-        fs.writeFileSync(join(out, `${figure.name}-owned-posted-facts.json`), JSON.stringify({ coverage: owned.coverage, cutInto: owned.cutInto, scored: owned.scored, ours: owned.ours, programs: owned.programs.map((p) => p.ir.tool.name) }, null, 1));
-        fs.writeFileSync(join(out, `${figure.name}-posted-facts.json`), JSON.stringify({ coverage: figureRun.coverage, cutInto: figureRun.cutInto, scored: figureRun.scored, ours: figureRun.ours, programs: figureRun.programs.map((p) => p.ir.tool.name), ownedCoverage: owned.coverage, tradeoff }, null, 1));
+        if (owned !== null) fs.writeFileSync(join(out, `${figure.name}-owned-posted-facts.json`), JSON.stringify({ coverage: owned.coverage, cutInto: owned.cutInto, scored: owned.scored, ours: owned.ours, programs: owned.programs.map((p) => p.ir.tool.name) }, null, 1));
+        fs.writeFileSync(join(out, `${figure.name}-posted-facts.json`), JSON.stringify({ coverage: figureRun.coverage, cutInto: figureRun.cutInto, scored: figureRun.scored, ours: figureRun.ours, programs: figureRun.programs.map((p) => p.ir.tool.name), ownedCoverage: owned?.coverage ?? null, tradeoff }, null, 1));
         // #964 — the standing picture set's inputs: the figure plan's own programs and the goal
         // target / frame / gate options this run measured.
         fs.writeFileSync(join(out, `${figure.name}-plan.json`), JSON.stringify({ perSetup: figureRun.output.perSetup.map((setup) => ({ programs: setup.programs })) }, null, 1));
@@ -417,11 +420,11 @@ for (const figure of FIGURES) {
 
       // THE MAINTAINER'S LINE (#965): the whole-surface ruler, judged on the figure set's own plan
       // (the one carrying the long Ø1); the owned plan's number is stated beside it.
-      expect(figureRun.coverage, `#965 ${figure.name}: whole-surface coverage ${(figureRun.coverage * 100).toFixed(2)} % (owned ${(owned.coverage * 100).toFixed(2)} %) — the line is 95 %`).toBeGreaterThanOrEqual(0.95);
+      expect(figureRun.coverage, `#965 ${figure.name}: whole-surface coverage ${(figureRun.coverage * 100).toFixed(2)} %${owned === null ? '' : ` (owned ${(owned.coverage * 100).toFixed(2)} %)`} — the line is 95 %`).toBeGreaterThanOrEqual(0.95);
       expect(figureRun.cutInto.adjudicatedFraction, `#965 ${figure.name}: cut-into beyond the allowance`).toBe(0);
       expect(figureRun.scored.lines.find((l) => l.key === 'coverage')?.oursValue).toBeCloseTo(figureRun.coverage, 9);
       // The ideal is a superset: it can never be worse than the owned plan on the same ruler.
-      expect(figureRun.coverage).toBeGreaterThanOrEqual(owned.coverage - 1e-9);
+      if (owned !== null) expect(figureRun.coverage).toBeGreaterThanOrEqual(owned.coverage - 1e-9);
     }, 600_000);
   });
 }
