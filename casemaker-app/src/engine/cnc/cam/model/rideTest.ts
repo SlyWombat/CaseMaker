@@ -21,6 +21,9 @@
  * passes either side of it make.
  */
 
+import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
+import { dropRow, type DroppedPoint } from './rowDropper';
+
 export interface RidePoint {
   x: number;
   y: number;
@@ -62,6 +65,77 @@ export function ridesCutSurface(
  * or the follow is not faster.
  */
 export function followCutSurface(
+  from: RidePoint,
+  to: RidePoint,
+  topAt: (x: number, y: number) => number | null,
+  stepMm: number,
+  clampZMm: number,
+  feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number },
+  rapid: { xyMmPerMin: number; zMmPerMin: number },
+  clearanceZMm: number,
+): { kind: 'feed'; x: number; y: number; z: number; f: number }[] | null {
+  // #970 — THE CHORD HOLDS THE ROW DROPPER'S GUARANTEE. The old point list sampled the surface
+  // every `stepMm` and connected the samples with straight chords: on a convex CL corner (a ridge
+  // whose peak sits between the samples) the chord cut the corner and the ball's flank followed it
+  // under the design — measured 0.486 mm on the organizer's ridge, 0.177 mm of cut-into. The
+  // points are now laid by `dropRow`, the same subdivision the rows already use (midpoint/quarter
+  // departure within the surface's tolerance, the kink guard, and the min-spacing staircase, which
+  // holds the HIGHER height across a true discontinuity), so every chord this link emits carries
+  // the same stated guarantee the rows do (features at least span/4 wide; narrower ones stated).
+  // A throw from `dropRow` is its footprint-notch case: a null on the span is no proof, so the
+  // caller retracts — always safe.
+  const stride = stepMm > 0 ? stepMm : 0.5;
+  const length = Math.hypot(to.x - from.x, to.y - from.y);
+  let row: DroppedPoint[];
+  try {
+    row = dropRow(
+      {
+        dropCutter: topAt,
+        toleranceMm: ARC_CHORD_TOLERANCE_MM,
+        minSpacingMm: ARC_CHORD_TOLERANCE_MM,
+        maxSpacingMm: stride,
+        sampleCount: 0,
+      },
+      [from.x, from.y],
+      [to.x, to.y],
+    );
+  } catch {
+    return null;
+  }
+  if (row.length < 2) return null;
+  const points: RidePoint[] = row.map((p, i) => ({
+    x: p.x,
+    y: p.y,
+    z: i === 0 ? from.z : i === row.length - 1 ? to.z : Math.max(p.z, clampZMm),
+  }));
+  let followSeconds = 0;
+  const moves: { kind: 'feed'; x: number; y: number; z: number; f: number }[] = [];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const d = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+    const f = b.z < a.z - 1e-9 ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin;
+    followSeconds += (d / f) * 60;
+    moves.push({ kind: 'feed', x: b.x, y: b.y, z: b.z, f });
+  }
+  const retractSeconds =
+    ((Math.abs(clearanceZMm - from.z) + Math.abs(clearanceZMm - to.z)) / rapid.zMmPerMin) * 60 +
+    (length / rapid.xyMmPerMin) * 60 +
+    (1 / feeds.plungeFeedMmPerMin) * 60;
+  return followSeconds < retractSeconds ? moves : null;
+}
+
+/**
+ * #970 — THE LINEAR FOLLOW, kept for the GRID-TARGET joins (the rough's skim): the surface there
+ * is a cell-quantised target (`skimTarget`'s grid lookup), not a continuous CL. Laying those
+ * points with `dropRow` turned every cell edge into a min-spacing staircase — measured on the
+ * organizer: +987 segments in program 1 and 12 flat-6 cells cut 0.13–0.23 mm below the goal at
+ * y ≈ 99.1, because a staircase plunge at a grid point puts the flat's 3 mm disc over neighbouring
+ * cells whose material stands above the target. The ball's own CL (the finish's join) is
+ * continuous and carries `dropRow`'s guarantee; a grid target needs its own rule (a
+ * disc-aware check at the join points), which is filed on #970 rather than guessed here.
+ */
+export function followLinearCutSurface(
   from: RidePoint,
   to: RidePoint,
   topAt: (x: number, y: number) => number | null,
