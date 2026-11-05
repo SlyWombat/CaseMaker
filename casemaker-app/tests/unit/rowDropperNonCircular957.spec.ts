@@ -210,3 +210,35 @@ describe('#957 the non-circular spec — real mesh features, dense independent c
     }
   }
 });
+
+/**
+ * #957 — THE STATED LIMIT (the manager's ruling, 2026-11-05): the kink guard reads the four
+ * quarter-segment SLOPES, so a CL feature narrower than the acceptance span's quarter (span/4)
+ * that leaves every sampled point on the chord is still accepted, and the chord can dip by the
+ * feature's own height. The guarantee is therefore stated precisely as that bound — "a CL feature
+ * narrower than span/4 can dip by its own height" — and the real-mesh spec above is the
+ * acceptance. This case is SKIPPED by the ruling: it names the limit and would fail the
+ * tolerance line by construction, so it is kept visible rather than silently widened or
+ * "fixed" by a retuned constant.
+ */
+describe.skip('#957 the stated limit — a kink narrower than span/4 can dip by its own height', () => {
+  it('a 0.03 mm ridge at t = 0.375 of a 0.346 mm span is accepted whole and dips 0.0300 mm', () => {
+    const ridge = (x: number): number => Math.max(0, 0.03 - Math.abs(x - 0.12975));
+    const surface: ClSurface = { dropCutter: (x) => ridge(x), toleranceMm: 0.005, minSpacingMm: 0.005, maxSpacingMm: 0.346, sampleCount: 0 };
+    const row = dropRow(surface, [0, 0], [0.346, 0]);
+    // The feature touches none of the five sampled fractions, so the whole span is accepted.
+    expect(row.length).toBe(2);
+    let worst = 0;
+    for (let i = 0; i + 1 < row.length; i++) {
+      const a = row[i]!;
+      const b = row[i + 1]!;
+      for (let s = 0; s <= 400; s++) {
+        const t = s / 400;
+        const x = a.x + (b.x - a.x) * t;
+        worst = Math.min(worst, a.z + (b.z - a.z) * t - ridge(x));
+      }
+    }
+    // 6x the 0.005 mm tolerance: the stated limit, not an accepted cut.
+    expect(worst).toBeCloseTo(-0.03, 4);
+  });
+});
