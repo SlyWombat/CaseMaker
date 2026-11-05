@@ -20,7 +20,8 @@
  * One JSON line per job is written to stdout (and to `--out` when given), so a long run can be
  * read as it goes; a failure inside one engine never stops the corpus.
  */
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -48,6 +49,28 @@ const outIndex = args.indexOf('--out');
 const outFile: string | null = outIndex >= 0 ? (args[outIndex + 1] ?? null) : null;
 const onlyIndex = args.indexOf('--only');
 const only: string | null = onlyIndex >= 0 ? (args[onlyIndex + 1] ?? null) : null;
+// #966 — the figure jobs keep their meshes out of the repo (shop-owned local inputs). `--mesh-dir`
+// (or CM_MESHES) names the directory holding them; a file is used only when its SHA-256 is the
+// hash the job carries, the same rule the demo page's build refuses on.
+const meshIndex = args.indexOf('--mesh-dir');
+const meshDir: string | null =
+  meshIndex >= 0
+    ? (args[meshIndex + 1] ?? null)
+    : (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.['CM_MESHES'] ?? null;
+
+/** Put the job's own mesh back: the file's SHA-256 must be the job's, or the row is refused. */
+function withLocalMesh(job: EngraveJob): { job: EngraveJob; note?: string } {
+  const target = job.targetObject;
+  if (meshDir === null || target === undefined || target.role !== 'goal' || target.data !== undefined) {
+    return { job };
+  }
+  const file = join(meshDir, target.name);
+  if (!existsSync(file)) return { job, note: `mesh ${target.name} not found in ${meshDir}` };
+  const bytes = readFileSync(file);
+  const sha = createHash('sha256').update(bytes).digest('hex');
+  if (sha !== target.sha256) return { job, note: `mesh ${target.name} does not match the job's hash (${sha.slice(0, 12)}…)` };
+  return { job: { ...job, targetObject: { ...target, data: bytes.toString('base64') } } };
+}
 
 // The bench location the demo jobs were built against (its inventory holds the owned cutters the
 // jobs name, and its `catalogue.json` holds Makera's rows). `--location` overrides it.
@@ -175,7 +198,14 @@ async function main(): Promise<void> {
         process.stdout.write(JSON.stringify(row) + '\n');
         continue;
       }
-      job = parsed.job;
+      const local = withLocalMesh(parsed.job);
+      if (local.note !== undefined) {
+        const row: Row = { job: name, goal: false, old: 'refused', oldWhy: local.note, new: 'skipped', newWhy: local.note };
+        rows.push(row);
+        process.stdout.write(JSON.stringify(row) + '\n');
+        continue;
+      }
+      job = local.job;
     } catch (e) {
       const row: Row = { job: name, goal: false, old: 'throws', oldWhy: firstLine(e) };
       rows.push(row);
@@ -207,6 +237,9 @@ async function main(): Promise<void> {
       row.new = 'skipped';
       row.newWhy = 'not a goal job';
     } else {
+      // The rebuilt engine runs FIRST: the old engine can take tens of minutes on a figure, and a
+      // run cut short must still have the number that decides #966's removal.
+      Object.assign(row, await runNew(job, goal));
       if (USE_MODEL_CAM_ENGINE) {
         try {
           const generated = await engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, shop);
@@ -219,7 +252,6 @@ async function main(): Promise<void> {
       } else {
         Object.assign(row, await runOld(job));
       }
-      Object.assign(row, await runNew(job, goal));
     }
     rows.push(row);
     process.stdout.write(JSON.stringify(row) + '\n');
