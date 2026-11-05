@@ -580,20 +580,33 @@ export function candidateSequences(
       addLink(next);
       last = diameterOf(next.tool) ?? 0;
     }
-    // #961 — THE COVERAGE RESTS. A smaller flat whose pocket the primary already enters earns no
-    // geometric link, but its tighter step-over can still buy back surface the primary's passes
-    // left above the band (the tray's 2 mm crest between the scoop halves, #959). Every remaining
-    // smaller flat that can cover a pocket gets an OPTIONAL link after the geometric chain; the
-    // price and the caller's simulated coverage decide whether the candidate that carries it wins.
+    return chain;
+  };
+
+  /**
+   * #961/#975 — THE COVERAGE RESTS, ONE CANDIDATE EACH. A smaller flat whose pocket the primary
+   * already enters earns no geometric link, but its tighter step-over can still buy back surface
+   * the primary's passes left above the band (the tray's 2 mm crest between the scoop halves,
+   * #959). It is an ALTERNATIVE to the geometric chain, never a tail appended to it: appending
+   * made the list depend on the size order — with a ⌀1 in the set the ⌀3.175 fell after a bigger
+   * last link and lost its link entirely, so adding a bit REPLACED a rest choice and the ideal
+   * plan could read worse than the owned one (the tray's 98.38 % against 99.34 %, #975 review).
+   * Each eligible flat now gets its own variant, so adding a cutter adds a candidate and never
+   * removes one.
+   */
+  const coverageRestChains = (primary: CandidateCutter, geometric: ChainLink[]): ChainLink[][] => {
+    const primaryD = diameterOf(primary.tool) ?? 0;
+    const out: ChainLink[][] = [];
     for (const c of flatsDesc) {
-      if (chain.length >= maxCutters) break;
-      if (chain.some((link) => link.cutter.key === c.key)) continue;
-      if (!((diameterOf(c.tool) ?? 0) < (diameterOf(chain[chain.length - 1]!.cutter.tool) ?? 0) - EPS)) continue;
+      const d = diameterOf(c.tool) ?? 0;
+      if (!(d < primaryD - EPS)) continue;
+      if (geometric.some((link) => link.cutter.key === c.key)) continue;
       const regionIds = pocketFeatures.filter((f) => coversFeature(c.tool, f)).map((f) => f.id);
       if (regionIds.length === 0) continue;
-      chain.push({ cutter: c, regionIds, coverage: true });
+      if (geometric.length + 1 > maxCutters) continue;
+      out.push([...geometric, { cutter: c, regionIds, coverage: true }]);
     }
-    return chain;
+    return out;
   };
 
   // The freeing step's cutter is a CHAIN cutter, never a new one: the chain was sized for the
@@ -609,7 +622,8 @@ export function candidateSequences(
       && !(f.depthMm > 0 && (c.tool.fluteLength === null || c.tool.fluteLength + EPS < f.depthMm)));
 
   for (const primary of roughs) {
-    const chain = chainFrom(primary);
+    const geometric = chainFrom(primary);
+    for (const chain of [geometric, ...coverageRestChains(primary, geometric)]) {
     const primaryLink = chain[0]!;
     for (let k = 1; k <= chain.length; k++) {
       const links = chain.slice(0, k);
@@ -698,6 +712,7 @@ export function candidateSequences(
           }
         }
       }
+    }
     }
   }
 

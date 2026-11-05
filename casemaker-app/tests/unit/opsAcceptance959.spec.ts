@@ -1336,6 +1336,14 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     if (idealRun !== null) expect(idealRun.setup.ops.length, `the ideal plan produced nothing: ${idealRun.setup.unreachable.join('; ')}`).toBeGreaterThan(0);
     const tradeoff = writeTwoPlans('tray', { ours: measured!.ours, scored: measured!.scored }, idealMeasured === null ? null : { ours: idealMeasured.ours, scored: idealMeasured.scored });
     if (tradeoff !== null) expect(tradeoff.line !== null, JSON.stringify(tradeoff.differences)).toBe(tradeoff.material);
+    // #975 — THE SUPERSET RULE, RED FIRST. The ideal's candidate set contains the owned set, so
+    // the ideal's OUTCOME can never be worse: coverage at least the owned plan's and cut-into at
+    // most. At 66b978a5 this failed on exactly this part (ideal 98.38 % against owned 99.34 %):
+    // the builder kept ONE rest tail, and adding the library's ⌀1 dropped the ⌀3.175 rest.
+    if (idealMeasured !== null) {
+      expect(idealMeasured.coverage, `ideal ${(idealMeasured.coverage * 100).toFixed(2)} % against owned ${(measured!.coverage * 100).toFixed(2)} %`).toBeGreaterThanOrEqual(measured!.coverage - 1e-9);
+      expect(idealMeasured.adjudicatedFraction).toBeLessThanOrEqual(measured!.adjudicatedFraction + 1e-12);
+    }
   }, 1_800_000);
 });
 
@@ -1371,6 +1379,11 @@ describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.o
     if (idealRun !== null) expect(idealRun.setup.ops.length, `the ideal plan produced nothing: ${idealRun.setup.unreachable.join('; ')}`).toBeGreaterThan(0);
     const tradeoff = writeTwoPlans('organizer', { ours: measured!.ours, scored: measured!.scored }, idealMeasured === null ? null : { ours: idealMeasured.ours, scored: idealMeasured.scored });
     if (tradeoff !== null) expect(tradeoff.line !== null, JSON.stringify(tradeoff.differences)).toBe(tradeoff.material);
+    // #975 — the superset rule on the organizer too (see the tray's case).
+    if (idealMeasured !== null) {
+      expect(idealMeasured.coverage, `ideal ${(idealMeasured.coverage * 100).toFixed(2)} % against owned ${(measured!.coverage * 100).toFixed(2)} %`).toBeGreaterThanOrEqual(measured!.coverage - 1e-9);
+      expect(idealMeasured.adjudicatedFraction).toBeLessThanOrEqual(measured!.adjudicatedFraction + 1e-12);
+    }
   }, 1_800_000);
 });
 

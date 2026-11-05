@@ -69,6 +69,20 @@ describe('#961/#975 the two plans', () => {
     expect(two.ideal).not.toBeNull();
   }, 120_000);
 
+  it('keeps every owned candidate in the ideal’s set — adding a bit never replaces a rest choice', async () => {
+    // The superset rule in candidate terms: the ideal's search must still consider the sequence
+    // the owned plan chose. Before the one-candidate-per-rest change, the coverage rests were a
+    // single tail and a smaller catalogue bit could push the owned rest out (the tray's ⌀3.175,
+    // #975 review); this is the fast pin of that property.
+    const planInput = input([flat6, flat3175, ball6], [smallFlat]);
+    const two = await planTwoOutcomes(planInput);
+    const sig = (steps: readonly { kind: string; cutterKey?: string; cutter?: { key: string } }[]): string =>
+      steps.map((step) => `${step.kind}:${step.cutterKey ?? step.cutter?.key ?? '?'}`).join('+');
+    const ownedSig = sig(two.owned.perSetup[0]!.choice.steps);
+    const idealSigs = new Set(two.ideal!.perSetup[0]!.choice.considered.map((c) => sig(c.steps)));
+    expect(idealSigs.has(ownedSig), `owned ${ownedSig}; ideal considered ${[...idealSigs].join(' | ')}`).toBe(true);
+  }, 120_000);
+
   it('states no ideal when the catalogue adds no cutter the owned set did not carry', async () => {
     const planInput = input([flat6, ball6, v90], [smallFlat, { ...smallFlat }]);
     // A catalogue entry identical to an owned one (same key) is not an extra cutter.
