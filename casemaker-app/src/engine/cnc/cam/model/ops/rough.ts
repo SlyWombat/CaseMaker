@@ -270,6 +270,56 @@ export function rough(opts: RoughOpOptions): OpOutcome {
     cleared.push({ z, boundary: polygons });
   }
 
+  // ── THE BAND SKIM (item 4b): shallow ground the Z-levels cannot reach ──────────────────────
+  // A cell whose CL + band lies between the FIRST level and zTop met no mask at any level (every
+  // level wants cl + band below that level). On ground shallower than one step-down that is the
+  // whole region: the op emitted nothing, and the tray's fourteen remainder regions said exactly
+  // 'rough "…" emitted no moves'. The flat skims those cells at cl + band — the material standing
+  // above the ball's promised band, never the band itself.
+  const skimFirstLevel = depthPasses(opts.region.zTop, opts.region.zBottom, opts.stepDownMm)[0] ?? opts.region.zBottom;
+  // `target` ALREADY holds `cl + stockToLeave` (the grid above) — the skim reads it directly;
+  // adding the band a second time put feeds at the stock top (-0.0025 in the red-first's first
+  // run, the double band and a half-cell sampling rise).
+  const skimTarget = (i: number, j: number): number | null => {
+    const z = target[j * nx + i]!;
+    if (!Number.isFinite(z)) return null;
+    return z < opts.region.zTop && z >= skimFirstLevel ? z : null;
+  };
+  let skimRuns = 0;
+  const skimRun = (i0: number, i1: number, j: number): void => {
+    const points: [number, number, number][] = [];
+    for (let i = i0; i <= i1; i++) points.push([min[0] + i * pitch, min[1] + j * pitch, skimTarget(i, j) as number]);
+    if (points.length < 2) return;
+    const start = points[0]!;
+    // Between runs: a VERTICAL lift at the current position, then travel at the hop plane — never
+    // a diagonal from cut depth (the pencil's own review finding, the same rule here).
+    if (prevExit !== null) moves.push({ kind: 'rapid', x: prevExit[0], y: prevExit[1], z: opts.hopZMm });
+    moves.push({ kind: 'rapid', x: start[0], y: start[1], z: opts.hopZMm });
+    moves.push({ kind: 'feed', x: start[0], y: start[1], z: start[2], f: opts.feeds.plungeFeedMmPerMin });
+    for (let q = 1; q < points.length; q++) {
+      const p = points[q]!;
+      moves.push({ kind: 'feed', x: p[0], y: p[1], z: p[2], f: opts.feeds.feedMmPerMin });
+    }
+    const end = points[points.length - 1]!;
+    const line = points.map((p) => [p[0], p[1]] as [number, number]);
+    const zMin = Math.min(...points.map((p) => p[2]));
+    passes.push({ z: zMin, boundary: [line], cleared: { z: zMin, boundary: [line] }, entry: [start[0], start[1], start[2]], exit: [end[0], end[1], end[2]] });
+    prevExit = [end[0], end[1], end[2]];
+    prevLevelZ = zMin;
+    skimRuns++;
+  };
+  for (let j = 0; j < ny; j++) {
+    let i0 = -1;
+    for (let i = 0; i <= nx; i++) {
+      const inRun = i < nx && skimTarget(i, j) !== null;
+      if (inRun && i0 < 0) i0 = i;
+      if (!inRun && i0 >= 0) {
+        skimRun(i0, i - 1, j);
+        i0 = -1;
+      }
+    }
+  }
+
   const lastMove = moves[moves.length - 1];
   if (lastMove) moves.push({ kind: 'rapid', x: lastMove.x, y: lastMove.y, z: opts.safeZMm });
 
@@ -288,7 +338,7 @@ export function rough(opts: RoughOpOptions): OpOutcome {
         name: `[T${opts.toolNumber}] Rough "${opts.region.id}"`,
         labelId: opts.region.id,
         depth,
-        depthPasses: cutLevels,
+        depthPasses: cutLevels + (skimRuns > 0 ? 1 : 0),
         passStepMm: opts.stepDownMm,
         moves,
         estimatedSeconds: estimateCycleSeconds(moves, opts.rapid),
