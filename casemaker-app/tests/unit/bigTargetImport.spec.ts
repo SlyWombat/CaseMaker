@@ -156,6 +156,8 @@ describe('#720 a 12 MB-class 3MF is an ordinary goal', () => {
         setMeshBlobIO(null);
       }
     },
-    60_000,
+    // #982 — the model entry's own plan over this mesh is now part of the test: ~100 s by itself
+    // (the #982 pin below), past the old 60 s budget the heightfield path alone needed.
+    240_000,
   );
 });
