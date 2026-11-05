@@ -37,6 +37,7 @@ import type { FeatureSource, FeatureTree, PocketNode, SetupFrame } from './featu
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances } from './types';
 import { chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep } from './sequence';
+import { mapIRToDocument, rotatedGeometryFor } from './setups';
 import { pocket } from './ops/pocket';
 import { clSurface } from './clsurface';
 import { rough } from './ops/rough';
@@ -335,6 +336,40 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const { params: pocketParams, substitution } = resolvedCutParams(input, primary);
     const feeds = { feedMmPerMin: pocketParams.feed, plungeFeedMmPerMin: pocketParams.plungeFeed };
     opts.onProgress?.({ setupIndex, op: 'sequence', fraction: 0.4 });
+
+    // #965 — MULTI-SETUP TABS: a job with more than one setup must stay ONE piece of stock
+    // through the turn-over, so every setup but the LAST keeps the pocket chain's own default
+    // tabs (`DEFAULT_RELEASE_TABS`) on its freeing contour, whatever `spec.underside` says — the
+    // part is not released until it has nothing left to turn INTO. The LAST setup's freeing
+    // contour is the one that actually frees the part (`{ count: 0 }`, the pocket chain's own
+    // explicit-release case). A single-setup job (today's only real caller) is untouched: `tabs`
+    // is left unset, so `planPocketsForTree` keeps its own `DEFAULT_RELEASE_TABS` default exactly
+    // as before.
+    //
+    // STATED, NOT YET DONE (#965 open item — flagged in this issue's progress comment, not
+    // guessed): the LAST setup's freeing contour is still a FLAT-Z pass to `tree.contour.zTo`,
+    // the SAME op a single-setup job posts. #898 part 2's "tabbed freeing cut ... re-planned over
+    // the CL surface" — tracking the OTHER setup's already-cut 3D surface instead of one flat Z,
+    // so the final release cannot stand on (or cut into) whatever the earlier setup already
+    // shaped on what is now the underside — is NOT implemented: `contourOp`/`ops/contour.ts` has
+    // no CL-surface input today. A multi-setup job's last-setup release is therefore only as safe
+    // as `tree.contour.zTo` being shallow enough not to reach the opposite setup's cut, which this
+    // plan does not check.
+    const tabs =
+      input.setups.length <= 1
+        ? undefined
+        : setupIndex === input.setups.length - 1
+          ? { count: 0, width: DEFAULT_RELEASE_TABS.width, height: DEFAULT_RELEASE_TABS.height }
+          : DEFAULT_RELEASE_TABS;
+
+    // #965 — the per-setup mesh the curved pipeline's `clSurface` must score against: `recogniseFeatures`
+    // (above) already rotated `input.geometry` into THIS setup's frame to build `tree`; `clSurface`
+    // is handed `ModelPlanInput.geometry` at every call site inside `planCurvedForTree` and must see
+    // the SAME rotation, or a non-identity setup's drop-cutter reads the part's OLD orientation
+    // against a tree built in the NEW one (`rotatedGeometryFor`'s own doc). Identity for `up = [0, 0, 1]`
+    // (every job today), so this changes nothing for the existing single-setup caller.
+    const curvedGeometry = rotatedGeometryFor(input.geometry, spec.frame);
+
     const result = planTreePrograms(tree, {
       offset,
       pockets: {
@@ -346,9 +381,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         spindleRpm: pocketParams.rpm,
         air: true,
         boolean,
+        ...(tabs === undefined ? {} : { tabs }),
       },
       curved: {
-        geometry: input.geometry,
+        geometry: curvedGeometry,
         flat: primary,
         ...(ball === undefined ? {} : { ball }),
         ...(vbit === undefined ? {} : { vbit }),
@@ -377,7 +413,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const emptyStages: string[] = [];
     for (const op of result.ops) {
       if (op.outcome.ir.operations.some((operation) => operation.moves.length > 0)) {
-        ops.push(op);
+        // #965 — every op's posted IR is mapped to the DOCUMENT (world) XY here, once, before it
+        // becomes part of `SetupPlan.ops`/`programs`: identity for the top setup (`up = [0, 0, 1]`,
+        // every job today), the setup→document map for a flip (`setups.ts`'s own doc on why this
+        // is required before two setups' programs can be read on one goal grid).
+        ops.push({ ...op, outcome: { ...op.outcome, ir: mapIRToDocument(op.outcome.ir, spec.frame) } });
         continue;
       }
       emptyStages.push(
@@ -414,6 +454,22 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
     if (input.cutters.catalogue.length > 0) {
       notes.push(`${input.cutters.catalogue.length} catalogue cutter(s) are not in the pocket chain yet — the house set is what it chooses from`);
+    }
+    // #965 open item, stated per the issue's own ask ("flag explicitly... rather than guessing
+    // silently") — not a design DECISION, a gap: this plan does not compute how setup N>0 is
+    // actually REGISTERED against what setup 0 already cut (the "locating features cut by the
+    // previous setup" the issue names). `buildSetupSpecs`'s `frameForFace` gets the physical
+    // turn-over's ROTATION right (the same one `setups/orient.ts` uses for a vise), but a real
+    // turn-over also needs the stock reseated against a known reference — today that is left to
+    // the operator's own fixture/jig, the same as every other remount this app plans
+    // (`setups/types.ts`'s own `remountStep`), not computed here.
+    if (setupIndex > 0) {
+      notes.push(
+        `setup ${setupIndex}: registration against setup ${setupIndex - 1}'s own cut features is the operator's fixture/jig, not computed by this plan (#965 open item)`,
+      );
+      notes.push(
+        `setup ${setupIndex}: the freeing contour is still a flat-Z pass to this setup's own tree.contour.zTo, not yet re-planned over the other setup's CL surface (#898 part 2 / #965 open item)`,
+      );
     }
 
     perSetup.push({
