@@ -4997,6 +4997,11 @@ export async function buildModelPlanInputForGoal(
     cutters,
     tolerances,
     edgeBreak,
+    // #961 (the card slice) — THE GOAL GRID the planner measures each plan's own outcome against
+    // (`ModelPlanOutput.outcome`): the same 0.1 mm sample the acceptance cards and the gate use.
+    // Supplying it ALSO turns on the planner's coverage-first rank — the rank every acceptance
+    // measurement has run with since #961 — so production plans the way the cards were measured.
+    goal: sampleGoalHeightfield(goal, { pitchMm: 0.1, stockTopZ: 0 }),
   };
 }
 

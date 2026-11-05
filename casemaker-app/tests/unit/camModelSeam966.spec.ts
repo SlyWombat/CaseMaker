@@ -270,5 +270,17 @@ describe('#966 ROUND 2 — generateGoalProgram flag ON posts and verifies every 
     expect(withCatalogue.ok, withCatalogue.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toBe(true);
     expect(withCatalogue.planIdeal).not.toBeNull();
     expect(withCatalogue.plan).not.toBeNull();
+
+    // #961 (the card slice) — each plan carries its OWN measured outcome: coverage over the goal
+    // grid and the deepest the sweep stands above it. RED before the outcome wire: both were
+    // undefined, so the card had no numbers to compare.
+    expect(withCatalogue.plan!.outcome, 'the owned plan carried no outcome').toBeDefined();
+    expect(withCatalogue.planIdeal!.outcome, 'the ideal plan carried no outcome').toBeDefined();
+    expect(withCatalogue.plan!.outcome!.coverage).not.toBeNull();
+    expect(withCatalogue.planIdeal!.outcome!.coverage).not.toBeNull();
+    expect(withCatalogue.plan!.outcome!.cycleSeconds).toBeGreaterThan(0);
+    expect(withCatalogue.planIdeal!.outcome!.cycleSeconds).toBeGreaterThan(0);
+    // The owned plan is measured with or without a catalogue — the outcome is the plan's own.
+    expect(without.plan!.outcome).toBeDefined();
   }, 240_000);
 });

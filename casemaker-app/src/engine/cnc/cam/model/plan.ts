@@ -242,8 +242,26 @@ export interface ModelPlanInput {
   goal?: GoalCellField;
 }
 
+/**
+ * #961 (the card slice) — THE PLAN'S OWN MEASURED OUTCOME, when the caller supplied `input.goal`.
+ * Both plans of `planTwoOutcomes` carry one, so the job card can compare them with
+ * `comparePlanOutcomes` without a second pipeline: `coverage` is the share of the goal's covered
+ * cells the plan's own sweep leaves within the 0.1 mm band, and `maxMm` the deepest it stands above
+ * the goal. The ADJUDICATED cut-into share is the gate's number (it applies the edge-break / wall
+ * allowances the planner does not own), so it is `null` here and the comparison skips that row
+ * rather than guessing it.
+ */
+export interface PlanOutcome {
+  coverage: number | null;
+  cutInto: { adjudicatedFraction: number | null; maxMm: number };
+  /** The plan's own cycle estimate, seconds — the comparison's cycle row. */
+  cycleSeconds: number;
+}
+
 export interface ModelPlanOutput {
   perSetup: SetupPlan[];
+  /** #961 — measured on the plan's own programs when `input.goal` was supplied; absent otherwise. */
+  outcome?: PlanOutcome;
 }
 
 /**
@@ -890,7 +908,38 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     });
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 1 });
   }
-  return { perSetup };
+  // #961 (the card slice) — THE PLAN'S OWN OUTCOME, from the same stamping the picker already uses.
+  // Nothing new is simulated: every program's IR is posted and stamped once (the cache above), the
+  // fields are unioned, and the result is the coverage the 0.1 mm band leaves and the deepest
+  // overshoot. Absent without `input.goal` — the caller did not ask for an outcome.
+  const outcome: PlanOutcome | undefined = (() => {
+    if (coverageGoal === undefined) return undefined;
+    const fields: Float32Array[] = [];
+    for (const setup of perSetup) for (const ir of setup.programs) {
+      const field = stampedField(ir);
+      if (field !== null) fields.push(field);
+    }
+    if (fields.length === 0) return undefined;
+    const union = Float32Array.from(fields[0]!);
+    for (const field of fields.slice(1)) for (let k = 0; k < union.length; k++) if (field[k]! < union[k]!) union[k] = field[k]!;
+    let covered = 0;
+    let leftover = 0;
+    let maxMm = 0;
+    for (let k = 0; k < union.length; k++) {
+      if (coverageGoal.covered[k] !== 1) continue;
+      covered++;
+      const over = union[k]! - (coverageGoal.z[k] as number);
+      if (over > 0.1) leftover++;
+      if (over > maxMm) maxMm = over;
+    }
+    const cycleSeconds = perSetup.reduce((n, setup) => n + setup.totalCostSeconds, 0);
+    return {
+      coverage: covered === 0 ? null : 1 - leftover / covered,
+      cutInto: { adjudicatedFraction: null, maxMm },
+      cycleSeconds,
+    };
+  })();
+  return outcome === undefined ? { perSetup } : { perSetup, outcome };
 }
 
 const allPockets = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [n, ...allPockets(n.children)]);
