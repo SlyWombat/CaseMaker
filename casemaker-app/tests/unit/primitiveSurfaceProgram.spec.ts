@@ -5,6 +5,14 @@
  * each posts its own program, carries a `surfaceCheck` (no 2.5D verifier can judge a curved
  * surface), and no cutting move goes below the field it cuts. Beside ordinary items the surface
  * programs come first (the item program cuts its cut-outs last), and the old refusals are gone.
+ *
+ * #966/#979 — SKIPPED, not deleted. #966 removed `generateSurfacePrimitiveProgram` (the CAM path
+ * this whole file exercises) whole, with the old engine; a job carrying an enabled cone or sphere
+ * now refuses on one finding naming #979 (covered directly in `engravePrimitives.spec.ts`'s
+ * "#435 — refusals are by name" describe). #979 is restoring this exact path onto `cam/model` —
+ * its own acceptance criteria says the #966 refusal finding comes back out — so this file is
+ * revived (and almost certainly rewritten against `planModelCam`, not `generateSurfacePrimitiveProgram`
+ * which #966's main deletion commit removes) by #979, not retired for good.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -80,7 +88,7 @@ function cutsBelowTheSurface(nc: string, primitive: SurfacePrimitive): { count: 
   return { count, below };
 }
 
-describe('#786 4a-2 the cone posts its own surface program', () => {
+describe.skip('#786 4a-2 the cone posts its own surface program', () => {
   it('posts, carries a surfaceCheck, and no cut goes below the field', async () => {
     const g = await generate(tl, job([CONE]));
     expect(g.errors).toEqual([]);

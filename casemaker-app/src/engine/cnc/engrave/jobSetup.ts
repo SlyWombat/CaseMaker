@@ -550,7 +550,11 @@ export type JobFindingCode =
   // helix note, carried onto the job so the panel shows it.
   | 'adaptive-clearing'
   | 'adaptive-fallback'
-  | 'adaptive-helix-refused';
+  | 'adaptive-helix-refused'
+  // #966/#979 — a job with an enabled cone or sphere surface primitive: #966 removed
+  // generateSurfacePrimitiveProgram, the old engine's CAM path for one, whole. Restoring it onto
+  // cam/model is #979's own scope; until it lands, the job refuses on this one finding, by name.
+  | 'surface-primitive-removed';
 
 export interface JobFinding {
   /**
