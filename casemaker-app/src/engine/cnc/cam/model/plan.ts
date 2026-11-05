@@ -1783,11 +1783,14 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     const failed = regionFailures.get(id);
     if (failed !== undefined && !unplanned.some((f) => f.regionIds.includes(id))) unplanned.push(failed);
   }
-  // #962 — AND EVERY REGION THAT THREW IS STATED, chosen or not: a rest whose pass could not cut
-  // (its mask eroded to nothing, or nothing of it survives at the pocket's mouth) is exactly the
-  // silence this guards against — the failed candidate loses the ranking, the plan would otherwise
-  // read as if the rest were never needed. One entry per region, its own reason.
+  // #962 — AND A THROWN REGION IS STATED when the chosen plan leaves its material standing, even
+  // when its candidate lost the ranking. WARNINGS MUST DISCRIMINATE: a REGION the chosen chain
+  // covers, which threw only in a candidate that lost, has its material cut — not stated. A REST
+  // is different in kind: its mask was computed as leftover standing above the band, so a rest
+  // that could not cut is standing-material evidence whatever the chain chose.
+  const chosenCovers = new Set(choice.steps.flatMap((step) => step.regionIds));
   for (const [id, failure] of regionFailures) {
+    if (failure.kind !== 'rest' && chosenCovers.has(id)) continue;
     if (!unplanned.some((f) => f.regionIds.includes(id))) unplanned.push(failure);
   }
 
@@ -1820,18 +1823,31 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #975 — the V floor's own lines: floor, wall angle, and the land per side the flanks take
   // (the V's own geometry, stated; the gate's edge-break class carries the land).
   notes.push(...vNotes);
-  for (const [id, { reason: message }] of regionFailures) {
-    notes.push(`${id}: not cut — planning failed (${message})`);
-    // A root pocket's/wide through hole's own mouth assumes facing already cleared the skin
-    // (above) — if facing itself is the region that failed, that assumption is now FALSE for
-    // every pocket this plan still posted, and nothing re-plans them at the stock top instead.
-    // Named here rather than silently trusted, per the advisor's review on this revert.
-    if (id === 'facing') {
-      notes.push(
-        'facing failed to plan but the skin is real (see above) — every pocket/through-hole posted still ' +
-          'assumes it is gone; their own first pass is deeper than it looks.',
-      );
+  // #962 — ONE STATEMENT PER CAUSE, NOT A LINE PER REGION: failed regions are grouped by their
+  // kind and reason with a count; the per-region detail lives in `unplanned` (machine-readable),
+  // never as a wall of operator lines.
+  {
+    const byCause = new Map<string, { kind: string; reason: string; count: number }>();
+    for (const [, failure] of regionFailures) {
+      const key = `${failure.kind}: ${failure.reason}`;
+      const entry = byCause.get(key) ?? { kind: failure.kind, reason: failure.reason, count: 0 };
+      entry.count++;
+      byCause.set(key, entry);
     }
+    for (const entry of byCause.values()) {
+      const plural = entry.count === 1 ? 'region' : 'regions';
+      notes.push(`${entry.kind}: ${entry.count} ${plural} could not be cut — ${entry.reason}`);
+    }
+  }
+  // A root pocket's/wide through hole's own mouth assumes facing already cleared the skin
+  // (above) — if facing itself is the region that failed, that assumption is now FALSE for
+  // every pocket this plan still posted, and nothing re-plans them at the stock top instead.
+  // Named here rather than silently trusted, per the advisor's review on this revert.
+  if (regionFailures.has('facing')) {
+    notes.push(
+      'facing failed to plan but the skin is real (see above) — every pocket/through-hole posted still ' +
+        'assumes it is gone; their own first pass is deeper than it looks.',
+    );
   }
   // #961's own pick between the two freeing-cut options (a return to the covering cutter, or the
   // chain's last cutter taking the profile itself) is priced in `choice.cost` either way; stated
@@ -2014,12 +2030,20 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   // An op with no moves is not a program: it is dropped here WITH A NOTE, so the plan stays honest
   // rather than posting an empty file. A stage that SHOULD have cut and did not still shows up as
   // a coverage failure at the goal check — the drop does not hide it.
+  // #962 — THE OPERATOR SEES ONE STATEMENT PER CAUSE, NOT A LINE PER REGION (the standing rule
+  // that warnings must discriminate): an empty stage and a finish's own slope wording are
+  // accumulated per kind and stated once, with a count and the deepest ground among the regions.
+  const emptyStages = new Map<PlannedOp['kind'], { count: number; deepestMm: number }>();
+  const finishKinds = new Map<string, { count: number; minSlope: number; maxSlope: number }>();
   const pushStage = (kind: PlannedOp['kind'], ref: RegionRef, outcome: OpOutcome): void => {
     if (outcome.ir.operations.some((operation) => operation.moves.length > 0)) {
       ops.push({ kind, region: ref, outcome });
       return;
     }
-    notes.push(`${kind} "${ref.id}" emitted no moves — nothing for it to cut`);
+    const entry = emptyStages.get(kind) ?? { count: 0, deepestMm: 0 };
+    entry.count++;
+    entry.deepestMm = Math.max(entry.deepestMm, Math.abs(ref.topZ - ref.bottomZ));
+    emptyStages.set(kind, entry);
   };
   // #959 item 5 — A THROWING STAGE DOES NOT SINK THE PLAN: each stage (its CL surface included) is
   // caught per region/rim and stated in `unplanned` in `sequence.ts`'s step-failure shape; the
@@ -2295,10 +2319,13 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // #960 — FLAT OR BALL BY THE REGION'S OWN SLOPE, with the threshold stated on the plan; the
     // constant is a parameter (shared with C's #959 skin pass) while the picture decides 1.9° vs 7.1°.
     const finishKind = finishKindFor(roughRegion, opts.geometry.triangles, opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG);
-    notes.push(
-      `the ${roughRegion.id} finish runs as a ${finishKind === 'flat-raster' ? 'flat-following raster' : 'ball at constant scallop'} ` +
-        `(slopes ${roughRegion.slopeDeg[0].toFixed(1)}–${roughRegion.slopeDeg[1].toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG).toFixed(2)}°)`,
-    );
+    {
+      const entry = finishKinds.get(finishKind) ?? { count: 0, minSlope: Infinity, maxSlope: -Infinity };
+      entry.count++;
+      entry.minSlope = Math.min(entry.minSlope, roughRegion.slopeDeg[0]);
+      entry.maxSlope = Math.max(entry.maxSlope, roughRegion.slopeDeg[1]);
+      finishKinds.set(finishKind, entry);
+    }
     attempt('finish', ball, ref, () => finish({
       cutter: ball,
       region: roughRegion,
@@ -2469,6 +2496,21 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     `the curved pipeline follows the ruling: the flat Z-steps each remainder region to its CL less ${opts.bandMm} mm, ` +
       `the ball runs ONE final level, the pencil follows the creases${opts.restFlat === undefined ? ', and no rest flat was offered' : ', and a rest flat clears the CL difference first'}`,
   );
+  // #962 — the grouped statements, one per cause (see the accumulators above).
+  for (const [kind, entry] of emptyStages) {
+    const plural = entry.count === 1 ? 'region' : 'regions';
+    notes.push(
+      `${kind}: ${entry.count} ${plural} emitted no moves — nothing for it to cut` +
+        (entry.deepestMm > 0 ? `; the deepest ground among them is ${entry.deepestMm.toFixed(1)} mm below the part top` : ''),
+    );
+  }
+  for (const [finishKind, entry] of finishKinds) {
+    const words = finishKind === 'flat-raster' ? 'flat-following raster' : 'ball at constant scallop';
+    const plural = entry.count === 1 ? 'region' : 'regions';
+    notes.push(
+      `finish: ${entry.count} ${plural} run as a ${words} (slopes ${entry.minSlope.toFixed(1)}–${entry.maxSlope.toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG).toFixed(2)}°)`,
+    );
+  }
   return { ops, notes, clGrid, unplanned };
 }
 

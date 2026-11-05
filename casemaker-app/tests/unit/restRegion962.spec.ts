@@ -125,6 +125,6 @@ describe('#962 — a rest that cuts nothing is STATED, never silent', () => {
     const stated = result.unplanned.filter((f) => f.kind === 'rest');
     expect(stated.length, `unplanned: ${JSON.stringify(result.unplanned)}`).toBeGreaterThan(0);
     expect(stated[0]!.reason).toMatch(/eroded to nothing|standing|mask/i);
-    expect(result.notes.some((n) => n.startsWith('p:') && /eroded to nothing|standing|mask/i.test(n)), `notes: ${result.notes.join('; ')}`).toBe(true);
+    expect(result.notes.some((n) => n.startsWith('rest:') && /could not be cut/.test(n) && /standing|mask/i.test(n)), `notes: ${result.notes.join('; ')}`).toBe(true);
   });
 });
