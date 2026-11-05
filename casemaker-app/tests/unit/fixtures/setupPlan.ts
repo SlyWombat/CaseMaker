@@ -5,7 +5,7 @@
  * only plan a UI test can be handed until #957/#959/#960 land.
  */
 import type { SetupPlan, CycleCost } from '@/engine/cnc/cam/model/plan';
-import type { FeatureTree, PocketNode } from '@/engine/cnc/cam/model/features';
+import { DEFAULT_FEATURE_TOLERANCES, type FeatureTree, type PocketNode } from '@/engine/cnc/cam/model/features';
 
 const RING: [number, number][] = [
   [0, 0],
@@ -19,7 +19,9 @@ const pocket = (id: string, floorZ: number, children: PocketNode[] = []): Pocket
   floorZ,
   mouthZ: 0,
   open: false,
+  through: false,
   region: [RING],
+  floors: [],
   islands: [],
   children,
   remainder: [],
@@ -29,17 +31,20 @@ const pocket = (id: string, floorZ: number, children: PocketNode[] = []): Pocket
 const tree = (): FeatureTree => ({
   frame: { up: [0, 0, 1], stockTop: 0, partTop: 0, partBottom: -6 },
   levels: [-6],
-  contour: { outline: [RING], zTo: -6, frees: true, shoulders: [] },
+  top: { z: 0, floors: [], area: 100 },
+  contour: { outline: [RING], area: 100, zTo: -6, frees: true, shoulders: [] },
   pockets: Array.from({ length: 6 }, (_, i) => pocket(`p${i}`, -6)),
   rims: [],
   remainder: [
     {
       id: 'r1',
       footprint: [RING],
+      area: 100,
       zTop: 0,
       zBottom: -6,
       triangles: new Uint32Array(),
       slopeDeg: [0, 70],
+      slopeMedianDeg: 30,
       in: 'top',
     },
   ],
@@ -49,7 +54,8 @@ const tree = (): FeatureTree => ({
     patches: 12,
     planarArea: 90,
     remainderArea: 10,
-    tolerances: { planarityMm: 0.005, clusterAngleDeg: 0.5, deflectionMm: 0.01 },
+    tolerances: DEFAULT_FEATURE_TOLERANCES,
+    slivers: [],
     notes: [],
   },
 });
@@ -77,6 +83,8 @@ export function fixtureSetupPlan(overrides: Partial<SetupPlan> = {}): SetupPlan 
     linking: { rapidsCount: 384, hopsCount: 12, airFractionPct: 3.2 },
     programs: [],
     totalCostSeconds: 47 * 60 + 30,
+    notes: [],
+    unreachable: [],
     ...overrides,
   };
 }
