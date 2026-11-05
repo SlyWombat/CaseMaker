@@ -389,6 +389,13 @@ export function setModelCamEnabled(on: boolean): void {
 export interface PlanModelCamOptions {
   signal?: AbortSignal;
   onProgress?: (p: ModelPlanProgress) => void;
+  /**
+   * #986 (the review session's ruling) — THE BALL RANK'S CYCLE CAP, seconds, measured on the
+   * candidate's own coarse finish. A candidate whose cycle exceeds it cannot win the rank, whatever
+   * its leftover; the uncapped best is still MEASURED and stated, so the operator sees what the
+   * cap cost. `planTwoOutcomes` sets it to 2× the owned plan's own cycle; absent, no cap applies.
+   */
+  cycleCapSeconds?: number;
 }
 
 /**
@@ -826,8 +833,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // grid; keep the least leftover, then the cheaper cycle. The owned ball is always among the
     // candidates (the ideal's house contains the owned set), so a superset can never score below
     // its subset by construction. No goal grid → nothing to measure, and the pick above stands.
+    // #986 (the ruling) — THE RANK'S OWN STATEMENT: every measured candidate's leftover and
+    // cycle, the one that won, and the uncapped best as a fact. It rides the plan's notes.
+    const ballRankNotes: string[] = [];
     if (coverageGoal !== undefined && goalCoverage !== undefined && ballCandidates.length > 1 && tree.remainder.length > 0) {
       let best: { tool: Tool; leftover: number; cycle: number } | null = null;
+      let uncappedBest: { tool: Tool; leftover: number; cycle: number } | null = null;
+      const measuredRows: string[] = [];
       // #986 — MEASURE THE LIKELY WINNER FIRST, THEN STOP AT THE FIRST NON-IMPROVEMENT. Candidates
       // are ordered FINE → COARSE, because leftover is monotone in the diameter: a smaller ball
       // reaches deeper into a crease, so it leaves no more than a larger one on the same remainder.
@@ -841,7 +853,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         opts.signal?.throwIfAborted();
         let measured: PlanCurvedResult;
         try {
-          measured = planCurvedForTree(tree, curvedOptionsFor(candidate, cutParamsForBall(candidate)));
+          // #986 (the ruling) — CANDIDATES ARE RANKED COARSE, at the vendor's cusp, on the 4a
+          // mask; only the WINNER is planned at the job's own tolerance. The rank compares balls,
+          // and the cusp the job states is a property of the chosen finish, not of the candidate.
+          measured = planCurvedForTree(tree, {
+            ...curvedOptionsFor(candidate, cutParamsForBall(candidate)),
+            finishScallopMm: DEFAULT_FINISH_SCALLOP_MM,
+          });
         } catch {
           continue; // a candidate that cannot plan this remainder is not a candidate
         }
@@ -852,6 +870,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           (n, o) => n + o.outcome.ir.operations.reduce((k, op) => k + (op.estimatedSeconds ?? 0), 0),
           0,
         );
+        // The cap sits BEFORE the leftover key (the ruling): an over-cap candidate cannot win.
+        const capped = opts.cycleCapSeconds !== undefined && cycle > opts.cycleCapSeconds;
+        if (uncappedBest === null || leftover < uncappedBest.leftover - 1e-9 || (Math.abs(leftover - uncappedBest.leftover) <= 1e-9 && cycle < uncappedBest.cycle)) {
+          uncappedBest = { tool: candidate, leftover, cycle };
+        }
+        const diameterMm = cuttingDiameter(candidate) ?? 0;
+        measuredRows.push(
+          `⌀${diameterMm.toFixed(2)} mm ${candidate.name}: leftover ${(leftover * 100).toFixed(2)} %, cycle ${cycle.toFixed(0)} s` +
+            (capped ? ` — OVER the cap (${(opts.cycleCapSeconds! / 3600).toFixed(2)} h at 2× the owned plan), cannot win` : ''),
+        );
+        if (capped) continue;
         if (best === null || leftover < best.leftover - 1e-9 || (Math.abs(leftover - best.leftover) <= 1e-9 && cycle < best.cycle)) {
           best = { tool: candidate, leftover, cycle };
           continue;
@@ -860,6 +889,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         if (leftover > best.leftover + 1e-9) break;
       }
       if (best !== null) ball = best.tool;
+      // The rank's statement: the measured candidates, the winner, and the uncapped best as a fact.
+      const chosen = best === null ? 'no candidate inside the cap — the pre-#986 pick stands' : `${best.tool.name} (leftover ${(best.leftover * 100).toFixed(2)} %, cycle ${best.cycle.toFixed(0)} s)`;
+      ballRankNotes.push(
+        `ball rank: measured ${measuredRows.length} candidate(s) — ${measuredRows.join('; ')}. Chosen: ${chosen}.` +
+          (uncappedBest !== null && (best === null || uncappedBest.tool !== best.tool)
+            ? ` The uncapped best is ${uncappedBest.tool.name} (leftover ${(uncappedBest.leftover * 100).toFixed(2)} %, cycle ${uncappedBest.cycle.toFixed(0)} s).`
+            : ''),
+      );
     }
     // The chosen ball's own params and note (the note joins the substitution statements).
     const ballParams = ball === undefined ? null : toolCutParams(input, ball, pocketParams);
@@ -966,6 +1003,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
 
     const notes = [...result.notes, ...emptyStages, ...freeingNotes];
     notes.push(...toolSubstitutions);
+    notes.push(...ballRankNotes);
     if (input.fixture.envelope !== null) {
       notes.push(
         `the ${input.fixture.mount} fixture envelope is not yet wired into the region obstacles — this plan carries none; the posted program is still checked against the same envelope by the sweep`,
