@@ -4808,7 +4808,9 @@ export const MOLD_DRAFT_LIMIT_DEG = 85;
  * `geometry.triangles` is the goal's embedded mesh (`targetObjectMesh`), placed into the work frame
  * by the SAME `placeTarget` the rim extractor and the heightfield sampler already share (#829's own
  * header: "the two share `targetPlace.ts`'s placement, so they cannot disagree about where the mesh
- * sits") — not a second, independent placement. `fixture`/`cutters` are read the same way the rest
+ * sits") — not a second, independent placement. A PICTURE goal has no mesh to place: its
+ * `geometry.triangles` is the heightfield the gate itself samples (`reliefMeshInWorkFrame`),
+ * which already carries that same placement. `fixture`/`cutters` are read the same way the rest
  * of this file already reads them (`jobVise`/`viseEnvelope` for a vise, `shop.mount.fixture` for a
  * bracket — never `bracketMount()` directly: that pulls the defaults client into this worker
  * realm, the boundary `EngraveShopOpts.mount`'s own doc states).
@@ -4820,12 +4822,20 @@ export const MOLD_DRAFT_LIMIT_DEG = 85;
  * step-over, then the shop's stock-to-leave, rather than re-deriving `finishStepOverForCusp` here —
  * stated so a reviewer does not read the two paths as cutting the identical number by accident).
  */
-export function buildModelPlanInputForGoal(
-  job: EngraveJob,
-  goal: EngraveTargetObject,
-  tool: Tool,
-  shop: EngraveShopOpts,
-): ModelPlanInput {
+/**
+ * #966 blocker b — a picture's PLANNING cell budget. `goalHeightfield.ts`'s own header states its
+ * 0.1 mm pitch is the measurement pitch, "not a planning budget"; its `maxCells` coarsening is
+ * the sampler's own way of staying bounded. The drop-cutter walks the mesh per query and the
+ * rough steps one raster per recognised floor level, so j07's picture at 0.1 mm (631k cells,
+ * 1.26M triangles) runs for tens of minutes; at 2,000 cells it is ~1.8 mm over a 70×90 mm relief
+ * and plans in about a minute. The gate still measures at its own pitch — only planning coarsens.
+ * shortcut: pictures plan at ≤2,000 cells, not at the measurement pitch; raise when the
+ * drop-cutter gets the spatial index the design note names (`cam/model/dropcutter.ts`).
+ */
+const RELIEF_PLAN_MAX_CELLS = 2_000;
+
+/** The mesh-goal geometry: the embedded mesh through the shared `placeTarget`. */
+function placedGoalMesh(goal: EngraveTargetObject): ParsedMesh {
   const rawMesh = targetObjectMesh(goal);
   const placed = placeTarget(goal, rawMesh);
   const positions = new Float32Array(rawMesh.positions.length);
@@ -4843,12 +4853,93 @@ export function buildModelPlanInputForGoal(
     if (z < minZ) minZ = z;
     if (z > maxZ) maxZ = z;
   }
-  const triangles: ParsedMesh = {
+  return {
     positions,
     indices: rawMesh.indices,
     triangleCount: rawMesh.triangleCount,
     bbox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
   };
+}
+
+/**
+ * #966 blocker b — the picture goal as a CLOSED solid in the work frame: the sampled grid's top
+ * (two triangles per cell, +Z), a wall round the perimeter, and a fan floor below every sampled
+ * height. Closed because `cam/model/features.ts`'s `solidOf` needs a manifold solid, not a sheet.
+ *
+ * The sampler's image branch ALREADY bakes `position`/`rotation` in (`sampleImageHeightfield`'s
+ * own frame), so this does not run `placeTarget` a second time — the grid is work-frame by
+ * construction and matches the field the gate measures.
+ */
+function reliefMeshInWorkFrame(goal: EngraveTargetObject): ParsedMesh {
+  const h = sampleGoalHeightfield(goal, { maxCells: RELIEF_PLAN_MAX_CELLS });
+  const { nx, ny, x0, y0, pitch, z } = h;
+  const floorZ = h.minZ - Math.max(pitch, 0.1);
+  let maxTop = -Infinity;
+  for (let k = 0; k < z.length; k++) if (z[k]! > maxTop) maxTop = z[k]!;
+
+  const xs = (i: number): number => x0 + i * pitch;
+  const ys = (j: number): number => y0 + j * pitch;
+  const pos: number[] = [];
+  const idx: number[] = [];
+  const top = (i: number, j: number): number => j * nx + i;
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) pos.push(xs(i), ys(j), z[j * nx + i]!);
+  }
+  // The top, seen from above: (i,j) → (i+1,j) → (i+1,j+1) is counter-clockwise for +Z.
+  for (let j = 0; j < ny - 1; j++) {
+    for (let i = 0; i < nx - 1; i++) {
+      idx.push(top(i, j), top(i + 1, j), top(i + 1, j + 1));
+      idx.push(top(i, j), top(i + 1, j + 1), top(i, j + 1));
+    }
+  }
+  // Every boundary VERTEX needs a floor copy to close the wall; interior vertices do not, so the
+  // floor is the ring plus one fan centre. `rimFloor[k]` pairs with `rimTop[k]`.
+  const rimTop: number[] = [];
+  for (let i = 0; i < nx - 1; i++) rimTop.push(top(i, 0));
+  for (let j = 0; j < ny - 1; j++) rimTop.push(top(nx - 1, j));
+  for (let i = nx - 1; i > 0; i--) rimTop.push(top(i, ny - 1));
+  for (let j = ny - 1; j > 0; j--) rimTop.push(top(0, j));
+  const rimFloor = rimTop.map((v) => {
+    const i = v % nx;
+    const j = (v - i) / nx;
+    pos.push(xs(i), ys(j), floorZ);
+    return pos.length / 3 - 1;
+  });
+  const centre = pos.length / 3;
+  pos.push((xs(0) + xs(nx - 1)) / 2, (ys(0) + ys(ny - 1)) / 2, floorZ);
+  // Walls: the rim runs counter-clockwise from above, so (dy, −dx) is outward on every segment.
+  for (let k = 0; k < rimTop.length; k++) {
+    const a = rimTop[k]!;
+    const b = rimTop[(k + 1) % rimTop.length]!;
+    const fa = rimFloor[k]!;
+    const fb = rimFloor[(k + 1) % rimFloor.length]!;
+    idx.push(a, fa, fb);
+    idx.push(a, fb, b);
+  }
+  // Floor: the same rim, fan-triangulated to −Z.
+  for (let k = 0; k < rimFloor.length; k++) {
+    idx.push(centre, rimFloor[(k + 1) % rimFloor.length]!, rimFloor[k]!);
+  }
+
+  const indices = new Uint32Array(idx);
+  return {
+    positions: new Float32Array(pos),
+    indices,
+    triangleCount: indices.length / 3,
+    bbox: { min: [xs(0), ys(0), floorZ], max: [xs(nx - 1), ys(ny - 1), maxTop] },
+  };
+}
+
+export function buildModelPlanInputForGoal(
+  job: EngraveJob,
+  goal: EngraveTargetObject,
+  tool: Tool,
+  shop: EngraveShopOpts,
+): ModelPlanInput {
+  // #966 blocker b — ONE engine, and its door takes a mesh: a picture's heightfield is
+  // triangulated HERE, from the gate's own sampler, so the surface planned is the surface the
+  // check measures. A mesh goal keeps `targetObjectMesh` + `placeTarget` untouched.
+  const triangles = goal.format === 'png' ? reliefMeshInWorkFrame(goal) : placedGoalMesh(goal);
   const geometry: FeatureSource = { triangles };
 
   // #898's three choices, carried across under the new engine's own naming
