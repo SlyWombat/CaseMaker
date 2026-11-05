@@ -79,6 +79,57 @@ function rampAtStockTop(): { tree: FeatureTree; geometry: { triangles: { positio
   return { tree, geometry };
 }
 
+/**
+ * A groove 6 mm wide, 0.8 mm deep in a plane at stockTop: the ⌀6 flat bridges it (its CL stays at
+ * the land) while the ⌀3.175 rest flat descends into it — the one geometry where a rest pass has
+ * real work, needed to prove the REST stage's datum (the ramp cannot: its mask stripe is narrower
+ * than the rest cutter, the op's own stated limitation).
+ */
+function grooveAtStockTop(): { tree: FeatureTree; geometry: { triangles: { positions: Float32Array; indices: Uint32Array; triangleCount: number; bbox: { min: [number, number, number]; max: [number, number, number] } } } } {
+  const MX0 = 0, MX1 = 42, MY0 = -12, MY1 = 12;
+  // A 4 mm groove: the ⌀6 flat BRIDGES it (4 < its 6 mm width, so its CL stays at the land) while
+  // a ⌀1 rest flat descends — the strip it can reach, 4 - 1 = 3 mm, fits that cutter, so
+  // `pocketLoops` finds loops. Wider grooves let the ⌀6 in (no rest work at all), and a 3.175 mm
+  // rest leaves a strip narrower than itself (the op's stated narrow-mask limitation).
+  const GX0 = 19, GX1 = 23;
+  const TOP = STOCK_TOP;
+  const BOTTOM = STOCK_TOP - 0.8;
+  const footprint: Polygons = [[[2, -12], [42, -12], [42, 12], [2, 12]]];
+  const positions: number[] = [];
+  const quad = (ax: number, ay: number, az: number, bx: number, by: number, bz: number, cx: number, cy: number, cz: number, dx: number, dy: number, dz: number): void => {
+    positions.push(ax, ay, az, bx, by, bz, cx, cy, cz, ax, ay, az, cx, cy, cz, dx, dy, dz);
+  };
+  quad(MX0, MY0, TOP, GX0, MY0, TOP, GX0, MY1, TOP, MX0, MY1, TOP);
+  quad(GX1, MY0, TOP, MX1, MY0, TOP, MX1, MY1, TOP, GX1, MY1, TOP);
+  quad(GX0, MY0, BOTTOM, GX1, MY0, BOTTOM, GX1, MY1, BOTTOM, GX0, MY1, BOTTOM);
+  quad(GX0, MY0, TOP, GX0, MY0, BOTTOM, GX0, MY1, BOTTOM, GX0, MY1, TOP);
+  quad(GX1, MY0, BOTTOM, GX1, MY0, TOP, GX1, MY1, TOP, GX1, MY1, BOTTOM);
+  const arr = Float32Array.from(positions);
+  const geometry = {
+    triangles: {
+      positions: arr,
+      indices: Uint32Array.from({ length: arr.length / 3 }, (_, i) => i),
+      triangleCount: arr.length / 9,
+      bbox: { min: [MX0, MY0, BOTTOM] as [number, number, number], max: [MX1, MY1, TOP] as [number, number, number] },
+    },
+  };
+  const tree: FeatureTree = {
+    frame: { up: [0, 0, 1], stockTop: STOCK_TOP, partTop: STOCK_TOP, partBottom: BOTTOM },
+    levels: [BOTTOM],
+    top: { z: STOCK_TOP, floors: [], area: 0 },
+    contour: { outline: footprint, area: 800, zTo: BOTTOM, frees: true, shoulders: [] },
+    pockets: [],
+    rims: [],
+    remainder: [{
+      id: 'groove', footprint, area: 800, zTop: TOP, zBottom: BOTTOM,
+      triangles: new Uint32Array(), slopeDeg: [0, 90], slopeMedianDeg: 45, in: 'top',
+    }],
+    unreachable: [],
+    report: { source: 'mesh', patches: 1, planarArea: 800, remainderArea: 800, tolerances: {} as never, slivers: [], notes: [] },
+  };
+  return { tree, geometry };
+}
+
 describe('#959 review — the curved stages speak the STOCK-top datum', () => {
   it('with stockTop = 10, no curved or rim move posts above the clearance plane, and the rim bevel sits at −0.5', () => {
     const { tree, geometry } = rampAtStockTop();
@@ -114,5 +165,36 @@ describe('#959 review — the curved stages speak the STOCK-top datum', () => {
     expect(chamfer, `ops: ${result.ops.map((o) => o.kind).join(', ')}`).toBeDefined();
     const chamferFeeds = chamfer!.outcome.ir.operations[0]!.moves.filter((m) => m.kind === 'feed');
     expect(Math.min(...chamferFeeds.map((m) => m.z))).toBeCloseTo(-0.5, 6);
+  }, 120_000);
+
+  it('the REST stage too: stockTop = 10 with a rest flat, its mask and its feeds on one datum', () => {
+    const { tree, geometry } = grooveAtStockTop();
+    const small = flatEndMill(1, { number: 4, id: 'flat-1', name: 'flat-1' });
+    const result = planCurvedForTree(tree, {
+      geometry,
+      offset: makeClipperOffset(tl),
+      flat,
+      ball,
+      vbit,
+      restFlat: small,
+      // The rest cuts where a Z LEVEL falls inside its CL-difference band; 0.3 mm steps put one
+      // (9.7, rebased -0.3) inside the groove's band on this fixture.
+      stepDownMm: 0.3,
+      bandMm: 0.3,
+      feeds: { feedMmPerMin: 900, plungeFeedMmPerMin: 250 },
+      rapid: RAPID,
+      spindleRpm: 12000,
+      air: true,
+      safeZMm: 5,
+      hopZMm: 1,
+      edgeBreak: { legMm: 0 },
+      toolNumberFor: (t) => t.number ?? 1,
+    });
+    const restOp = result.ops.find((op) => op.kind === 'rest');
+    expect(restOp, `ops: ${result.ops.map((o) => o.kind).join(', ')}; notes: ${result.notes.join('; ')}`).toBeDefined();
+    const restFeeds = restOp!.outcome.ir.operations.flatMap((o) => o.moves).filter((m) => m.kind === 'feed');
+    expect(restFeeds.length).toBeGreaterThan(0);
+    const highest = Math.max(...restFeeds.map((m) => m.z));
+    expect(highest, `the rest posted feeds at z = ${highest} — the rest stage is not on the stock-top datum`).toBeLessThanOrEqual(5 + 1e-6);
   }, 120_000);
 });

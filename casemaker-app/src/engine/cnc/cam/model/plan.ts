@@ -1106,11 +1106,16 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // 2. REST BY CL DIFFERENCE, when the caller offers a smaller flat: the band the previous
     //    cutter left standing, where the smaller one can reach.
     if (opts.restFlat !== undefined) {
-      const restCl = clSurface(opts.geometry, region, opts.restFlat, cuts.stepOver);
+      // B's review of `0461df01`: the rest stage was left on the MESH-ABSOLUTE region and an
+      // unshifted surface — `depthPasses` reads `opts.region.zTop/zBottom`, so at stockTop != 0 the
+      // rebased levels sat above every mesh-absolute CL value and the mask came out EMPTY (a rest
+      // pass silently missing, not merely off-datum). Both go through the plan's one datum here:
+      // the region is `base`, the surface is shifted like the flat's.
+      const restCl = shiftSurface(clSurface(opts.geometry, base, opts.restFlat, cuts.stepOver));
       noteGrid(opts.restFlat, restCl);
       const restOut = rest({
         cutter: opts.restFlat,
-        region,
+        region: base,
         regionRef: ref,
         prevClSurface: clFlat,
         clSurface: restCl,
