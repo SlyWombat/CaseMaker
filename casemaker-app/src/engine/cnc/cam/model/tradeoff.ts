@@ -46,7 +46,12 @@ export interface PlanVerdicts {
 /** One side of the comparison: the plan's numbers and its card's verdicts. */
 export interface PlanTradeoffSide {
   score: PlanOutcomeScore;
-  card: PlanVerdicts;
+  /**
+   * The scored card's verdicts. OPTIONAL because the app's generation path has the plans'
+   * measured OUTCOMES but not a seven-line scoring (that card is the acceptance's); absent, the
+   * verdicts row is stated as not judged — never silently treated as "the same verdict".
+   */
+  card?: PlanVerdicts;
 }
 
 /** The materiality bounds — one constant, the manager's proposal (#975), the maintainer may change. */
@@ -102,20 +107,33 @@ export function comparePlanOutcomes(
 
   // 1. The seven lines' verdicts: any line the two plans pass and fail differently is material,
   // whatever the numbers say — the operator is choosing between two outcomes, not two prices.
-  const verdict = owned.card.lines
-    .map((line) => {
-      const other = ideal.card.lines.find((l) => l.key === line.key);
-      return other === undefined || other.state === line.state ? null : `${line.key}: ${line.state} vs ${other.state}`;
-    })
-    .filter((s): s is string => s !== null);
-  differences.push({
-    bound: 'verdicts',
-    reading: verdict.length === 0 ? 'the same verdict on every line' : verdict.join('; '),
-    owned: null,
-    ideal: null,
-    amount: null,
-    material: verdict.length > 0,
-  });
+  if (owned.card === undefined || ideal.card === undefined) {
+    differences.push({
+      bound: 'verdicts',
+      reading: 'the seven lines were not scored for this comparison',
+      owned: null,
+      ideal: null,
+      amount: null,
+      material: false,
+    });
+  } else {
+    const ownedLines = owned.card.lines;
+    const idealLines = ideal.card.lines;
+    const verdict = ownedLines
+      .map((line) => {
+        const other = idealLines.find((l) => l.key === line.key);
+        return other === undefined || other.state === line.state ? null : `${line.key}: ${line.state} vs ${other.state}`;
+      })
+      .filter((s): s is string => s !== null);
+    differences.push({
+      bound: 'verdicts',
+      reading: verdict.length === 0 ? 'the same verdict on every line' : verdict.join('; '),
+      owned: null,
+      ideal: null,
+      amount: null,
+      material: verdict.length > 0,
+    });
+  }
 
   // 2. Geometry: the deepest cut below the goal the card states, mm.
   const ownedDepth = owned.score.cutInto.maxMm;

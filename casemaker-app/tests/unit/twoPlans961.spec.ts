@@ -162,6 +162,18 @@ describe('#975 the tradeoff line — one line, outcome terms, only when material
     expect(cmp.material).toBe(true);
     expect(cmp.differences.find((d) => d.bound === 'verdicts')!.material).toBe(true);
   });
+
+  it('#961 — the app compares two measured outcomes with no scored card: the verdicts row is stated, never assumed', () => {
+    const owned = SCORE();
+    // Same numbers without a card: nothing material, and the verdicts row says why it is silent.
+    const same = comparePlanOutcomes({ score: owned }, { score: SCORE() });
+    expect(same.material).toBe(false);
+    expect(same.differences.find((d) => d.bound === 'verdicts')!.reading).toContain('not scored');
+    // A material geometry difference still fires from the outcomes alone.
+    const deep = comparePlanOutcomes({ score: owned }, { score: SCORE({ cutInto: { ...SCORE().cutInto, maxMm: 0.5 } }) });
+    expect(deep.material).toBe(true);
+    expect(deep.line).toContain('deepest cut');
+  });
 });
 
 // ── The job records the choice ─────────────────────────────────────────────────────────────────

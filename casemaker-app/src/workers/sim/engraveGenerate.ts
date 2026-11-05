@@ -273,6 +273,7 @@ import {
 } from '@/engine/cnc/cam/model/plan';
 // #961 — the two-plan run: the OWNED plan posts, the ideal rides beside it for the card's tradeoff.
 import { planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
+import { comparePlanOutcomes, type PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
 import { cutterKeyOf, type CutterCandidates } from '@/engine/cnc/cam/model/sequence';
 import type { EdgeBreakSpec, ModelTolerances } from '@/engine/cnc/cam/model/types';
@@ -779,6 +780,14 @@ export interface EngraveGenerated {
    * skipped, and the card has no tradeoff to state. Absent on the old heightfield path.
    */
   planIdeal?: ModelPlanOutput | null;
+  /**
+   * #961 (the card slice) — THE MATERIAL TRADEOFF between the two plans, in outcome terms
+   * (`comparePlanOutcomes`): `material` is true only when coverage, the deepest cut, the cycle or
+   * the seven lines (when they were scored) differ past `PLAN_MATERIALITY`; `line` names the
+   * outcome that moved, never a cutter. `null` when there is no ideal plan or either side was not
+   * measured; the card prints nothing for it.
+   */
+  planTradeoff?: PlanTradeoff | null;
   cam: EngraveCamSummary | null;
   /**
    * #250 — the rough/finish split of the program this object describes (the FIRST program for the
@@ -5119,10 +5128,18 @@ export async function generateGoalProgram(
     // pin; the ideal is built without it, by that module's own rule.
     let output: ModelPlanOutput;
     let idealPlan: ModelPlanOutput | null;
+    // #961 (the card slice) — THE MATERIAL TRADEOFF between the two plans, from their own measured
+    // outcomes (never tool terms, and nothing shown when it is minor). Both outcomes exist only
+    // when the caller supplied the goal grid; the seven-line verdicts are the acceptance card's, so
+    // the comparison states them as not scored rather than pretending they matched.
+    let planTradeoff: PlanTradeoff | null = null;
     try {
       const two = await planTwoOutcomes(input);
       output = two.owned;
       idealPlan = two.ideal;
+      if (idealPlan?.outcome !== undefined && output.outcome !== undefined) {
+        planTradeoff = comparePlanOutcomes({ score: output.outcome }, { score: idealPlan.outcome });
+      }
     } catch (e) {
       return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -5242,6 +5259,7 @@ export async function generateGoalProgram(
             programs: [...programs],
             plan: output,
             planIdeal: idealPlan,
+            planTradeoff,
             errors: [{ stage: 'verify', message: `cam/model (#966): ${programLabel}: ${verifyErrors.length} verifier error(s)` }],
           };
         }
@@ -5276,6 +5294,7 @@ export async function generateGoalProgram(
       programs,
       plan: output,
       planIdeal: idealPlan,
+      planTradeoff,
     };
   }
 

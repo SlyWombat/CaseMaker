@@ -282,5 +282,14 @@ describe('#966 ROUND 2 — generateGoalProgram flag ON posts and verifies every 
     expect(withCatalogue.planIdeal!.outcome!.cycleSeconds).toBeGreaterThan(0);
     // The owned plan is measured with or without a catalogue — the outcome is the plan's own.
     expect(without.plan!.outcome).toBeDefined();
+
+    // #961 (the card slice) — THE MATERIAL TRADEOFF is computed from the two outcomes and carried
+    // with the result, and its line exists exactly when it is material. Its verdicts row says the
+    // seven lines were not scored here rather than pretending they matched.
+    expect(withCatalogue.planTradeoff, 'no tradeoff carried beside the two plans').not.toBeNull();
+    expect(withCatalogue.planTradeoff!.line !== null).toBe(withCatalogue.planTradeoff!.material);
+    expect(withCatalogue.planTradeoff!.differences.some((d) => d.bound === 'verdicts' && d.reading.includes('not scored'))).toBe(true);
+    // No catalogue → no ideal → no tradeoff to state.
+    expect(without.planTradeoff ?? null).toBeNull();
   }, 240_000);
 });
