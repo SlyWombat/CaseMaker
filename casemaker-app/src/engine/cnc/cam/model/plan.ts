@@ -1098,8 +1098,14 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // from the mesh, so the ball follows the design wherever it goes). The CL surface is sampled
     // on the grown region too — dropping a row against a surface that does not reach its own
     // endpoints is what `dropRow` refuses, by name.
+    // ...and only on the part's OWN OUTER SURFACE: for an interior pocket floor the ball is already
+    // surrounded by the part, and growing the footprint there makes raster rows cross the offset's
+    // own notches where the CL surface has no reach — the organizer's first run refused exactly
+    // that ('the row leaves the surface's own reach ... a footprint notch'). A region whose
+    // footprint is the contour's own area IS the outer skirt; only that one is grown.
     const ballRadius = (cuttingDiameter(ball) ?? 0) / 2;
-    const grownFootprint = ballRadius > 0 ? opts.offset(region.footprint, ballRadius) : [];
+    const isOuterSurface = region.area >= 0.99 * tree.contour.area;
+    const grownFootprint = ballRadius > 0 && isOuterSurface ? opts.offset(region.footprint, ballRadius) : [];
     const finishRegion = grownFootprint.length > 0 ? { ...region, footprint: grownFootprint } : region;
     const finishRef = finishRegion === region
       ? ref

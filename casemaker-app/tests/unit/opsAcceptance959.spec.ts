@@ -52,7 +52,7 @@ import { tl } from './helpers/manifoldExec';
 import { stepToMesh } from '@/engine/import/stepMesh';
 import { recogniseFeatures, type FeatureTree, type PocketNode } from '@/engine/cnc/cam/model/features';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
-import type { ToolpathIR } from '@/engine/cnc/cam/ir';
+import { concatToolpathIR, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { Z1 } from '@/engine/cnc/machine';
 import { cuttingDiameter, flatEndMill, type Tool } from '@/engine/cnc/tool';
@@ -61,7 +61,7 @@ import { measurePostedProgram, combinePostedFacts } from '../tools/postedFacts';
 import { scoreSevenLines, type CutIntoScore, type ProgramScore, type SevenLineCard } from '../tools/sevenLines';
 import { makerablesRoot, readMakerablesManifest, resolveMakerablesCard } from '../tools/makerables';
 import { measureVendorCard } from '../tools/cardMeasurement';
-import { planPocketsForTree, planTreePrograms, type PlanPocketsResult, type SetupPlan } from '@/engine/cnc/cam/model/plan';
+import { planModelCam, planPocketsForTree, planTreePrograms, type ModelPlanInput, type PlanPocketsResult, type SetupPlan } from '@/engine/cnc/cam/model/plan';
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
@@ -144,6 +144,8 @@ function totalFeedLength(ir: ToolpathIR): number {
 async function placedTree(file: string, stock: [number, number], modelTop: number): Promise<{
   tree: FeatureTree;
   mesh: { positions: Float32Array; indices: Uint32Array };
+  /** The STEP B-rep face ids — `recognitionFeatures`' step path, and what `planModelCam` re-runs on. */
+  faceId: Uint32Array | undefined;
   target: EngraveTargetObject;
 }> {
   const bytes = fs.readFileSync(file);
@@ -177,7 +179,7 @@ async function placedTree(file: string, stock: [number, number], modelTop: numbe
     enabled: true,
     role: 'goal',
   };
-  return { tree, mesh: { positions, indices: read.mesh.indices }, target };
+  return { tree, mesh: { positions, indices: read.mesh.indices }, faceId: read.faceId, target };
 }
 // Makera's own pattern on these parts (plan v2 §1): the largest flat roughs, a smaller flat rests
 // the corners it cannot enter, the ball finishes the curved remainder, the chamfer breaks the
@@ -217,6 +219,62 @@ function planTray(tree: FeatureTree): PlanPocketsResult {
     maxCutters: VENDOR_SET.length + 1,
     boolean: { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) },
   });
+}
+
+/**
+ * #959 — THE REAL PARTS PLAN THROUGH THE ONE ENTRY (the manager's finding on E's run). The facts
+ * level below used to plan through `planPocketsForTree`, so the curved half never ran on the tray
+ * or the organizer: the ball finish E compared against the vendor's 99.5 % was never in our number,
+ * and 90.44 % / 81.39 % stayed frozen from 9c1bcc41 for that reason. `planModelCam` is what the app
+ * calls — the acceptance now measures what IT posts.
+ */
+const EDGE_BREAK_LEG_MM = 0.5;
+
+/** A plan's runs in execution order — the same split `planModelCam` posts: a run starts when the cutter key changes. */
+function runsOf(setup: SetupPlan): { cutterKey: string; ir: ToolpathIR }[] {
+  const runs: { cutterKey: string; ir: ToolpathIR }[] = [];
+  let current: { cutterKey: string; ir: ToolpathIR } | null = null;
+  for (const op of setup.ops) {
+    if (current !== null && current.cutterKey !== op.outcome.cutter) {
+      runs.push(current);
+      current = null;
+    }
+    current = current === null
+      ? { cutterKey: op.outcome.cutter, ir: op.outcome.ir }
+      : { cutterKey: current.cutterKey, ir: concatToolpathIR(current.ir, op.outcome.ir) };
+  }
+  if (current !== null) runs.push(current);
+  return runs;
+}
+
+async function planCard(
+  placed: Awaited<ReturnType<typeof placedTree>>,
+  stock: { length: number; width: number },
+): Promise<{ setup: SetupPlan; runs: { cutterKey: string; ir: ToolpathIR }[] }> {
+  const positions = placed.mesh.positions;
+  const min: [number, number, number] = [Infinity, Infinity, Infinity];
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < positions.length; i += 3) {
+    for (let c = 0; c < 3; c++) {
+      min[c] = Math.min(min[c]!, positions[i + c]!);
+      max[c] = Math.max(max[c]!, positions[i + c]!);
+    }
+  }
+  const input: ModelPlanInput = {
+    geometry: {
+      triangles: { positions, indices: placed.mesh.indices, triangleCount: placed.mesh.indices.length / 3, bbox: { min, max } },
+      ...(placed.faceId === undefined ? {} : { faceId: placed.faceId }),
+    },
+    setups: [{ frame: { up: [0, 0, 1], stockTop: 0 }, underside: 'flatOnStockBottom' }],
+    stock: { length: stock.length, width: stock.width, thickness: placed.tree.frame.stockTop - placed.tree.frame.partBottom, material: 'hardwood' },
+    fixture: { mount: 'tape', envelope: null },
+    cutters: { house: VENDOR_SET, catalogue: [] },
+    tolerances: { finishMm: 0.01 },
+    edgeBreak: { legMm: EDGE_BREAK_LEG_MM },
+  };
+  const output = await planModelCam(input);
+  const setup = output.perSetup[0]!;
+  return { setup, runs: runsOf(setup) };
 }
 
 function postedTextFor(cutterKey: string, merged: ToolpathIR, ctx: PostContext): string {
@@ -296,7 +354,10 @@ interface AcceptanceGoal {
   stock: { length: number; width: number };
 }
 
-function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsResult, goal?: AcceptanceGoal): void {
+/** What `writeAcceptance` reads from a plan — the pocket result and the one entry's SetupPlan both answer it. */
+type AcceptancePlan = Pick<PlanPocketsResult, 'ops' | 'programs' | 'sequence' | 'unreachable' | 'notes'>;
+
+function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan, goal?: AcceptanceGoal): void {
   const { ops, programs, sequence, unreachable, notes } = result;
 
   const ctx: PostContext = {
@@ -380,7 +441,7 @@ function writeAcceptance(name: string, tree: FeatureTree, result: PlanPocketsRes
   console.log(
     `#959 ${name}: ${pocketOps} pocket + ${contourOps} contour op(s) planned (${unreachable.length} ` +
       `unreachable: ${unreachable.join('; ') || 'none'}), ${programs.length} run(s) on ${new Set(programs.map((p) => p.cutterKey)).size} cutter(s). Posted-text facts ` +
-      `(pocket + contour ONLY — not comparable to Makera's full cycle): cycle ` +
+      `(the WHOLE plan through planModelCam — pockets, curved stages and rims): cycle ` +
       `${facts.cycleSeconds.toFixed(1)} s, air ${(facts.airFraction * 100).toFixed(1)} %, ` +
       `rapids/1000 ${facts.rapidsPer1000FeedLines.toFixed(0)}, cutters ${facts.cutters.length}. ${geometry}` +
       (notes.length > 0 ? ` Notes: ${notes.join('; ')}` : ''),
@@ -974,24 +1035,32 @@ describe.skipIf(TRAY === undefined)('#959 acceptance — tool tray 70, the WHOLE
   }, 900_000);
 });
 
-describe.skipIf(TRAY === undefined)('#959 acceptance — tool tray 70, pocket + contour', () => {
-  it('plans and posts every non-through floored pocket and the outer contour, cycle/air/rapids/cutters measured from the posted text', async () => {
-    const { tree, target } = await placedTree(TRAY!, [110, 140], -1.2);
-    const result = planTray(tree);
-    expect(result.ops.length, `unreachable: ${result.unreachable.join('; ')}`).toBeGreaterThan(0);
-    expect(result.ops.some((op) => op.kind === 'contour'), `unreachable: ${result.unreachable.join('; ')}`).toBe(true);
-    writeAcceptance('tray', tree, result, { target, stock: { length: 110, width: 140 } });
-  });
+describe.skipIf(TRAY === undefined)('#959 acceptance — tool tray 70, the whole plan through the one entry', () => {
+  it('plans the real part through planModelCam — pockets, the curved remainder and the rims — and posts every run', async () => {
+    const placed = await placedTree(TRAY!, [110, 140], -1.2);
+    const { setup, runs } = await planCard(placed, { length: 110, width: 140 });
+    expect(setup.ops.length, `unreachable: ${setup.unreachable.join('; ')}`).toBeGreaterThan(0);
+    expect(setup.ops.some((op) => op.kind === 'contour'), `unreachable: ${setup.unreachable.join('; ')}`).toBe(true);
+    // THE MANAGER'S FINDING: the facts level planned through the pocket chain only, so the ball
+    // finish never ran on the real part. The one entry plans it, and the acceptance asserts it.
+    if (setup.features.remainder.length > 0) {
+      expect(setup.ops.some((op) => op.kind === 'finish'), 'the ball finish never ran on the real part').toBe(true);
+    }
+    writeAcceptance('tray', setup.features, { ops: setup.ops, programs: runs, sequence: setup.sequence, unreachable: setup.unreachable, notes: setup.notes }, { target: placed.target, stock: { length: 110, width: 140 } });
+  }, 1_800_000);
 });
 
-describe.skipIf(ORGANIZER === undefined)('#959 acceptance — tool organizer, pocket + contour', () => {
-  it('plans and posts every non-through floored pocket and the outer contour, cycle/air/rapids/cutters measured from the posted text', async () => {
-    const { tree, target } = await placedTree(ORGANIZER!, [170, 170], -0.8);
-    const result = planTray(tree);
-    expect(result.ops.length, `unreachable: ${result.unreachable.join('; ')}`).toBeGreaterThan(0);
-    expect(result.ops.some((op) => op.kind === 'contour'), `unreachable: ${result.unreachable.join('; ')}`).toBe(true);
-    writeAcceptance('organizer', tree, result, { target, stock: { length: 170, width: 170 } });
-  });
+describe.skipIf(ORGANIZER === undefined)('#959 acceptance — tool organizer, the whole plan through the one entry', () => {
+  it('plans the real part through planModelCam — pockets, the curved remainder and the rims — and posts every run', async () => {
+    const placed = await placedTree(ORGANIZER!, [170, 170], -0.8);
+    const { setup, runs } = await planCard(placed, { length: 170, width: 170 });
+    expect(setup.ops.length, `unreachable: ${setup.unreachable.join('; ')}`).toBeGreaterThan(0);
+    expect(setup.ops.some((op) => op.kind === 'contour'), `unreachable: ${setup.unreachable.join('; ')}`).toBe(true);
+    if (setup.features.remainder.length > 0) {
+      expect(setup.ops.some((op) => op.kind === 'finish'), 'the ball finish never ran on the real part').toBe(true);
+    }
+    writeAcceptance('organizer', setup.features, { ops: setup.ops, programs: runs, sequence: setup.sequence, unreachable: setup.unreachable, notes: setup.notes }, { target: placed.target, stock: { length: 170, width: 170 } });
+  }, 1_800_000);
 });
 
 describe.skipIf(TRAY !== undefined || ORGANIZER !== undefined)('#959 acceptance — not run', () => {
