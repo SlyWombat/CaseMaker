@@ -1103,8 +1103,8 @@ afterAll(() => clearMakeraCatalogue());
 describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedOut))('#959 acceptance — tool tray 70, the WHOLE tree through the one interface', () => {
   it('plans pockets, the curved remainder and rims together, with the freeing contour last and every program posted', async () => {
     const { tree, mesh } = await placedTree(TRAY!, [110, 140], -1.2);
-    let min: [number, number, number] = [Infinity, Infinity, Infinity];
-    let max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+    const min: [number, number, number] = [Infinity, Infinity, Infinity];
+    const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
     for (let v = 0; v < mesh.positions.length; v += 3) {
       for (let a = 0; a < 3; a++) {
         min[a] = Math.min(min[a]!, mesh.positions[v + a] as number);
