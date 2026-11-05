@@ -69,6 +69,27 @@ describe('#960 pencil — creases only', () => {
     expect(Math.abs(Math.max(pass.entry[1], pass.exit[1]) - HALF)).toBeLessThanOrEqual(0.5 + 1e-9);
   });
 
+  it('a second crease chain is entered from ABOVE the hop plane, never diagonally from the last cut', () => {
+    // Two parallel valleys (x = ±3): two chains. The manager's review finding on pencil.ts:151-152 —
+    // the next chain began with ONE rapid from the previous chain's cut depth to (start, hopZ), a
+    // 3-D move a G0 posts as a straight line: a diagonal drag through material. Every move that
+    // changes XY must start from a position already lifted to at least the hop plane.
+    const out = pencil(opts(surfaceOf((x) => Math.min(Math.abs(x - 3), Math.abs(x + 3)) + CREASE)));
+    expect(out.passes.length).toBeGreaterThanOrEqual(2);
+    const moves = out.ir.operations[0]!.moves;
+    for (let i = 1; i < moves.length; i++) {
+      const prev = moves[i - 1]!;
+      const m = moves[i]!;
+      if (m.kind !== 'rapid') continue;
+      const travels = Math.abs(m.x - prev.x) > 1e-9 || Math.abs(m.y - prev.y) > 1e-9;
+      if (!travels) continue;
+      expect(
+        prev.z,
+        `move ${i} travels to (${m.x}, ${m.y}) from (${prev.x}, ${prev.y}, ${prev.z}) — below the hop plane ${3}`,
+      ).toBeGreaterThanOrEqual(3 - 1e-9);
+    }
+  });
+
   it('a convex edge is not a crease: no pass at all', () => {
     const out = pencil(opts(surfaceOf((x) => -Math.abs(x) + 4)));
     expect(out.passes).toHaveLength(0);

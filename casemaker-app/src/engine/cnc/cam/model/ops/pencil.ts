@@ -148,6 +148,16 @@ export function pencil(opts: PencilOpOptions): OpOutcome {
       z: h[c.j * nx + c.i]!,
     }));
     const first = points[0]!;
+    // THE REVIEW FOUND THIS (pencil.ts:151-152): a chain after the first began with ONE rapid from
+    // the previous chain's own CUT DEPTH to (start, hopZ). A post writes a 3-D rapid as a single
+    // straight line, so that move drags diagonally through the material across the part — the
+    // first crease's end to the second's start, through whatever stands between them. Lift
+    // VERTICALLY at the current position first; the travel then runs at the hop plane. The op has
+    // no material field to hand `link()`, so this is the second form the review allows.
+    const previous = moves[moves.length - 1];
+    if (previous !== undefined) {
+      moves.push({ kind: 'rapid', x: previous.x, y: previous.y, z: opts.hopZMm });
+    }
     moves.push({ kind: 'rapid', x: first.x, y: first.y, z: opts.hopZMm });
     moves.push({ kind: 'feed', x: first.x, y: first.y, z: first.z, f: opts.feeds.plungeFeedMmPerMin });
     for (let p = 1; p < points.length; p++) {
