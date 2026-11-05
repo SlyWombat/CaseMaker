@@ -13,9 +13,10 @@
 
 One line per picture:
 
-- `01-cut-into-top` — the 1,080 adjudicated cells are the chamfer's 0.5 mm cuts (the 77.2 mm
-  stay-down G1 link documented in the `389ed57e` set's 08; the link fix is not in this sha).
-  Same counts as `389ed57e`.
+- `01-cut-into-top` — the 1,080 adjudicated cells are the chamfer's 0.5 mm cuts: the 77.20 mm
+  stay-down G1 link documented in the `389ed57e` set's 08 is unchanged here, and the chamfer now
+  posts two longer ones at the same Z (−1.300): `G1 X10.55` and `G1 Y58.55`, 100.90 mm each
+  (63 lateral G1 moves > 5 mm at depth). Same counts as `389ed57e`.
 - `02-leftover-top` — 36,000 cells > 0.1 mm; 5,125 cells (51.3 mm²) > 10 mm are the one-cell band
   along the deep pockets' rims; max 22.000 mm at (15.1, 31.6). Floors are cut (05).
 - `03-toolpaths` — ours then vendor T1–T5 at one scale; Z ramp −26.80…1.81 mm, rapids red. Our
