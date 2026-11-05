@@ -38,6 +38,11 @@ import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import type { RapidEstimate } from '../../src/engine/cnc/cam/ir';
 import type { Polygons } from '../../src/engine/cnc/cam/pocket';
 import { buildRandomPart, type PartKind } from '../tools/randomParts';
+import fs from 'node:fs';
+import { stepToMesh } from '../../src/engine/import/stepMesh';
+import { recogniseFeatures } from '../../src/engine/cnc/cam/model/features';
+import { planModelCam, type ModelPlanInput } from '../../src/engine/cnc/cam/model/plan';
+import type { CamMove } from '../../src/engine/cnc/cam/ir';
 
 const RAPID: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test fixture' };
 const flat: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
@@ -178,4 +183,165 @@ describe('#962 property — every recognised POCKET rim on a real random part is
       });
     }
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// The manager's #962 review: a GENERAL guard, independent of the fix's own reasoning — every
+// posted chamfer FEED segment must lie on an edge `findRims` actually reported for that rim, not
+// a synthetic bridge `closedRing()` added. Checked against the posted MOVES directly, on the real
+// tray and organizer plus the synthetic parts, so a different bridging bug (not this exact open-
+// pocket shape) still gets caught.
+// ---------------------------------------------------------------------------------------------
+
+// `chamfer()` posts the rim's OWN polyline offset by the cutter's tip radius (`cone.tipRadius`,
+// 0.05 mm for the fixtures' own V-bit — `tipDiameter: 0.1`), not the raw polyline itself, so every
+// legitimate posted segment sits that far from a "given" edge by construction. The tolerance
+// covers that known offset (3x it, for Clipper's own rounding) while staying two orders of
+// magnitude below the organizer's real bridge (77 mm) and the synthetic shoulder's own gap (8 mm).
+const EDGE_TOL_MM = 0.15;
+
+/** The edges `findRims` actually gave this rim — consecutive pairs of its OWN polyline, as
+ * recognised, never auto-closed: the synthetic bridge `closedRing()`/`rimRing()` may add is
+ * deliberately excluded, so a segment that only exists because of that bridge fails to match. */
+function givenEdges(polyline: readonly [number, number][]): [[number, number], [number, number]][] {
+  const edges: [[number, number], [number, number]][] = [];
+  for (let i = 1; i < polyline.length; i++) edges.push([polyline[i - 1]!, polyline[i]!]);
+  return edges;
+}
+
+function distToSegment(p: [number, number], a: [number, number], b: [number, number]): number {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1e-12) return Math.hypot(p[0] - a[0], p[1] - a[1]);
+  const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2));
+  return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+}
+
+/** The furthest any of {a, b, midpoint} sits from every given edge — a straight feed segment
+ * that truly traces one of the rim's own edges keeps all three on it; a bridge does not. */
+function worstDistanceToEdges(a: [number, number], b: [number, number], edges: readonly [[number, number], [number, number]][]): number {
+  if (edges.length === 0) return Infinity;
+  const mid: [number, number] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const nearest = (p: [number, number]): number => Math.min(...edges.map(([ea, eb]) => distToSegment(p, ea, eb)));
+  return Math.max(nearest(a), nearest(b), nearest(mid));
+}
+
+interface EdgeViolation { rimId: string; of: string; a: [number, number]; b: [number, number]; dist: number }
+
+/** Every posted chamfer op's own feed segments, checked against ITS rim's given edges. */
+function chamferEdgeViolations(ops: readonly { kind: string; region: { id: string }; outcome: { ir: { operations: readonly { moves: readonly CamMove[] }[] } } }[], rims: readonly Rim[]): EdgeViolation[] {
+  const violations: EdgeViolation[] = [];
+  for (const op of ops) {
+    if (op.kind !== 'chamfer') continue;
+    const rim = rims.find((r) => r.id === op.region.id);
+    if (rim === undefined) continue;
+    const edges = givenEdges(rim.polyline);
+    for (const operation of op.outcome.ir.operations) {
+      let prev: [number, number] | null = null;
+      for (const m of operation.moves) {
+        if (m.kind === 'feed' && prev !== null) {
+          const dist = worstDistanceToEdges(prev, [m.x, m.y], edges);
+          if (dist > EDGE_TOL_MM) violations.push({ rimId: rim.id, of: rim.of, a: prev, b: [m.x, m.y], dist });
+        }
+        prev = [m.x, m.y];
+      }
+    }
+  }
+  return violations;
+}
+
+describe('#962 guard — every posted chamfer feed lies on a real rim edge, not a synthetic bridge', () => {
+  for (const kind of RIM_KINDS) {
+    for (const seed of RIM_SEEDS) {
+      it(`${kind} seed ${seed}: no violation on a POCKET rim; the known open-contour bridge is the only one, and it is short`, () => {
+        const part = buildRandomPart(seed, kind, tl);
+        const result = planCurvedForTree(part.tree, {
+          geometry: { triangles: part.mesh }, offset: makeClipperOffset(tl), flat, ball, vbit,
+          stepDownMm: 1.5, bandMm: 0.3, feeds: { feedMmPerMin: 900, plungeFeedMmPerMin: 250 },
+          rapid: RAPID, spindleRpm: 12000, air: true, safeZMm: 5, hopZMm: 1,
+          edgeBreak: { legMm: 0.5 }, toolNumberFor: (t) => t.number ?? 1,
+        });
+        const violations = chamferEdgeViolations(result.ops, part.tree.rims);
+        const onPocket = violations.filter((v) => v.of !== 'contour');
+        expect(onPocket, `pocket violations: ${JSON.stringify(onPocket)}`).toHaveLength(0);
+        // The one already-documented exception: the open contour's own closing retrace
+        // (buildRandomPart's "shoulder open to +X", 8 mm) — never longer than that fixture's own
+        // scale, and never more than one of them.
+        const onContour = violations.filter((v) => v.of === 'contour');
+        expect(onContour.length, `contour violations: ${JSON.stringify(onContour)}`).toBeLessThanOrEqual(1);
+        for (const v of onContour) expect(v.dist, JSON.stringify(v)).toBeLessThan(20);
+      }, 60_000);
+    }
+  }
+});
+
+const TRAY_STEP = process.env.CM_959_TRAY_STEP;
+const ORGANIZER_STEP = process.env.CM_959_ORGANIZER_STEP;
+const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 32 });
+const FLAT3175: Tool = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 25 });
+const BALL6: Tool = { ...flatEndMill(6, { number: 3, id: 'ball-6', name: 'ball-6', fluteLength: 32 }), typeText: 'Ball Nose', shape: 'ball' };
+const CHAMFER3175: Tool = {
+  ...flatEndMill(3.175, { number: 4, id: 'chamfer-90', name: '3.175mm*90º Chamfer' }),
+  typeText: 'V-Bit', shape: 'chamfer', tipDiameter: 0.1, diameter: 3.175, cornerRadius: 0, angle: 90, halfAngle: 45,
+};
+
+async function realPartViolations(stepPath: string, centre: [number, number], topZ: number, stockWH: [number, number]): Promise<EdgeViolation[]> {
+  const bytes = fs.readFileSync(stepPath);
+  const read = await stepToMesh(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 'recognition');
+  const lo: [number, number, number] = [Infinity, Infinity, Infinity];
+  const hi: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  const positions = Float32Array.from(read.mesh.positions);
+  for (let i = 0; i < positions.length; i += 3) {
+    for (let c = 0; c < 3; c++) {
+      lo[c] = Math.min(lo[c]!, positions[i + c]!);
+      hi[c] = Math.max(hi[c]!, positions[i + c]!);
+    }
+  }
+  const dx = centre[0] - (lo[0] + hi[0]) / 2;
+  const dy = centre[1] - (lo[1] + hi[1]) / 2;
+  const dz = topZ - hi[2];
+  for (let i = 0; i < positions.length; i += 3) {
+    positions[i] = positions[i]! + dx;
+    positions[i + 1] = positions[i + 1]! + dy;
+    positions[i + 2] = positions[i + 2]! + dz;
+  }
+  for (let i = 0; i < positions.length; i += 3) {
+    for (let c = 0; c < 3; c++) {
+      lo[c] = Math.min(lo[c]!, positions[i + c]!);
+      hi[c] = Math.max(hi[c]!, positions[i + c]!);
+    }
+  }
+  const triangles = { positions, indices: read.mesh.indices, triangleCount: read.mesh.indices.length / 3, bbox: { min: lo, max: hi } };
+  const input: ModelPlanInput = {
+    geometry: { triangles, ...(read.faceId === undefined ? {} : { faceId: read.faceId }) },
+    setups: [{ frame: { up: [0, 0, 1], stockTop: 0 }, underside: 'flatOnStockBottom' }],
+    stock: { length: stockWH[0], width: stockWH[1], thickness: -lo[2], material: 'hardwood' },
+    fixture: { mount: 'tape', envelope: null },
+    cutters: { house: [FLAT6, FLAT3175, BALL6, CHAMFER3175], catalogue: [] },
+    tolerances: { finishMm: 0.01 },
+    edgeBreak: { legMm: 0.5 },
+  };
+  const setup = (await planModelCam(input)).perSetup[0]!;
+  const tree = recogniseFeatures({ triangles, ...(read.faceId === undefined ? {} : { faceId: read.faceId }) }, { up: [0, 0, 1], stockTop: 0 }, tl);
+  return chamferEdgeViolations(setup.ops, tree.rims);
+}
+
+describe.skipIf(TRAY_STEP === undefined)('#962 guard — the real tray', () => {
+  it('no posted chamfer feed bridges across a rim that is not its own', async () => {
+    const violations = await realPartViolations(TRAY_STEP!, [55, 70], -1.2, [110, 140]);
+    const onPocket = violations.filter((v) => v.of !== 'contour');
+    expect(onPocket, `pocket violations: ${JSON.stringify(onPocket)}`).toHaveLength(0);
+    const onContour = violations.filter((v) => v.of === 'contour');
+    for (const v of onContour) expect(v.dist, JSON.stringify(v)).toBeLessThan(20);
+  }, 1_800_000);
+});
+
+describe.skipIf(ORGANIZER_STEP === undefined)('#962 guard — the real organizer', () => {
+  it('no posted chamfer feed bridges across a rim that is not its own (rim-5\'s own 77 mm gouge, specifically)', async () => {
+    const violations = await realPartViolations(ORGANIZER_STEP!, [85, 85], -0.8, [170, 170]);
+    const onPocket = violations.filter((v) => v.of !== 'contour');
+    expect(onPocket, `pocket violations: ${JSON.stringify(onPocket)}`).toHaveLength(0);
+    const onContour = violations.filter((v) => v.of === 'contour');
+    for (const v of onContour) expect(v.dist, JSON.stringify(v)).toBeLessThan(20);
+  }, 1_800_000);
 });
