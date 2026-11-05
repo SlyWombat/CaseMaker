@@ -72,6 +72,32 @@ describe('#962 — the path-following stay-down link', () => {
     void to;
   });
 
+  it('routes around a convex island — the only way through', () => {
+    // Free space: a 20 x 20 square with an 8 x 8 island in the middle (a hole ring, drawn CW by
+    // Clipper). The straight chord from left to right crosses the island; the route must go
+    // around it. RED before the fixed-CCW reference: the hole's corners were measured against
+    // its own winding, came out convex, and the graph had no nodes to route through.
+    const cleared: Polygons = [
+      [[0, 0], [20, 0], [20, 20], [0, 20]],
+      [[8, 8], [12, 8], [12, 12], [8, 12]].reverse(),
+    ];
+    const a = { x: 2, y: 10, z: levelZ };
+    const b = { x: 18, y: 10, z: levelZ };
+    const insideIsland = (x: number, y: number): boolean => x > 8 && x < 12 && y > 8 && y < 12;
+    const route = routeWithin(a, b, { cleared, levelZ, rapidZMm: levelZ + 1, materialAt: material });
+    expect(route, 'no route around the island').not.toBeNull();
+    expect(route!.points.length, 'the route went straight through the island').toBeGreaterThan(2);
+    for (let i = 1; i < route!.points.length; i++) {
+      const p = route!.points[i - 1]!;
+      const q = route!.points[i]!;
+      for (let t = 0; t <= 1; t += 0.05) {
+        const x = p.x + (q.x - p.x) * t;
+        const y = p.y + (q.y - p.y) * t;
+        expect(insideIsland(x, y), `the route crosses the island at (${x.toFixed(2)}, ${y.toFixed(2)})`).toBe(false);
+      }
+    }
+  });
+
   it('no G0 in a routed join sits below the in-pocket plane (levelZ + 1 mm)', () => {
     const from: LinkPoint = { x: 18, y: 12, z: levelZ };
     const to: LinkPoint = { x: 2, y: 12, z: levelZ };

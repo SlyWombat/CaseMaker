@@ -119,25 +119,29 @@ function walkableAt(cleared: Polygons, materialAt: (x: number, y: number) => num
   return true;
 }
 
-/** The polygon's reflex vertices: any vertex whose turn has the opposite sign to the ring's winding. */
+/**
+ * The free space's reflex vertices, against a FIXED CCW reference (B's review): every ring is
+ * normalised to CCW first — an outer as drawn, a hole reversed — so an island's corners are
+ * classified by the free-space side, not by the hole's own winding. A convex island has reflex
+ * corners in the free space (a route must go around it); measuring it against its own orientation
+ * inverted them and left the island with zero nodes.
+ */
 function reflexVertices(cleared: Polygons): { x: number; y: number }[] {
+  // FIXED CCW REFERENCE (B's review): Clipper draws outers CCW and holes CW, and the free space
+  // lies to the LEFT of every drawn edge. A corner is reflex in the FREE SPACE iff the ring turns
+  // right there — cross < 0 — in that drawn orientation: an outer's concave corner, and an
+  // island hole's own CONVEX corner (a route must go around it). Measuring each ring against its
+  // own winding inverted the holes, so a convex island gave zero nodes.
   const out: { x: number; y: number }[] = [];
   for (const ring of cleared) {
     const n = ring.length;
     if (n < 3) continue;
-    let area = 0;
-    for (let i = 0; i < n; i++) {
-      const [x0, y0] = ring[i]!;
-      const [x1, y1] = ring[(i + 1) % n]!;
-      area += x0 * y1 - x1 * y0;
-    }
-    const orientation = Math.sign(area);
     for (let i = 0; i < n; i++) {
       const [ax, ay] = ring[(i + n - 1) % n]!;
       const [bx, by] = ring[i]!;
       const [cx, cy] = ring[(i + 1) % n]!;
       const cross = (bx - ax) * (cy - by) - (by - ay) * (cx - bx);
-      if (Math.sign(cross) !== orientation && Math.abs(cross) > 1e-12) out.push({ x: bx, y: by });
+      if (cross < -1e-12) out.push({ x: bx, y: by });
     }
   }
   return out;
