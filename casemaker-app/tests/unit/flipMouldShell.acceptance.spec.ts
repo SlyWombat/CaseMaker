@@ -35,13 +35,6 @@ const backing = new Map<string, string>();
   },
 } as Storage;
 
-import { generateSurface3dIR } from '@/engine/cnc/cam/surface3d';
-import { type SurfaceFeeds, type SurfaceTool } from '@/engine/cnc/cam/surfaceFinishTipField';
-import {
-  moldHeightfield,
-  sampleGoalHeightfield,
-  type GoalHeightfield,
-} from '@/engine/cnc/engrave/goalHeightfield';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { engraveGenerate, generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { createSimSession } from '@/workers/sim/session';
@@ -51,11 +44,7 @@ import { Z1 } from '@/engine/cnc/machine';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject, JobSetupPins } from '@/types/engraveJob';
-import type { RapidEstimate, CamMove } from '@/engine/cnc/cam/ir';
-import { FLAT, type ColumnCutter, type CutMove } from '@/workers/geometry/columnEngine';
 import type { FlatField } from '@/workers/geometry/carriedField';
-import { stubSetup, type Setup } from '@/engine/cnc/setup';
-import { rectProfile } from '@/engine/compiler/profile';
 import { tl } from './helpers/manifoldExec';
 
 afterEach(() => clearTargetObjectMeshCache());
@@ -149,55 +138,11 @@ function goal(f: (x: number, y: number) => number, over: Partial<EngraveTargetOb
 }
 
 // ── The cutters and the sweep ───────────────────────────────────────────────────────────────────
-const RAPID: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test' };
 /** Makera's ⌀3 ball nose (the full catalogue is assumed for demo and test jobs). */
 const BALL_R = 1.5;
-const BALL: SurfaceTool = { radius: BALL_R, ball: true };
 const BALL_TOOL = flatEndMill(2 * BALL_R, { shape: 'ball', name: '3 mm ball nose' });
-const BALL_CUTTER: ColumnCutter = { radius: 0, tanHalf: null, cornerRadius: BALL_R, outerRadius: BALL_R };
 const FINISH_STEP = 0.3;
-const FEEDS: SurfaceFeeds = { feed: 900, plungeFeed: 300, stepDown: 1.5, roughStepOver: 1.2, finishStepOver: FINISH_STEP };
 const PITCH = 0.25;
-
-function prism(w: number, d: number, t: number): Setup {
-  return stubSetup({ kind: 'prism', outline: rectProfile(w, d), thickness: t }, { kind: 'tape-down', contact: rectProfile(w, d) });
-}
-
-function sweep(moves: readonly CamMove[]): ReturnType<typeof FLAT.buildGrid> {
-  const cut: CutMove[] = [];
-  for (let i = 1; i < moves.length; i++) {
-    const a = moves[i - 1]!;
-    const b = moves[i]!;
-    if (b.kind !== 'feed') continue;
-    cut.push({ step: i, line: i, u0: a.x, u1: b.x, v0: a.y, v1: b.y, z: Math.min(a.z, b.z) });
-  }
-  const grid = FLAT.buildGrid(prism(BLANK.length, BLANK.width, BLANK.thickness), BALL_CUTTER, cut, {
-    dx: PITCH,
-    dThetaDeg: PITCH,
-  });
-  for (const m of cut) FLAT.applyMove(grid, m, BALL_CUTTER);
-  return grid;
-}
-
-function heightAt(grid: ReturnType<typeof FLAT.buildGrid>, x: number, y: number): number {
-  const i = Math.round((x - grid.u0) / grid.du);
-  const j = Math.round((y - grid.v0) / grid.dv);
-  return grid.h[j * grid.nu + i] as number;
-}
-
-async function finishOf(hf: GoalHeightfield) {
-  return await generateSurface3dIR({
-    heightfield: hf,
-    tool: BALL,
-    toolObj: BALL_TOOL,
-    toolNumber: 1,
-    spindleRpm: 16000,
-    air: true,
-    feeds: FEEDS,
-    rapid: RAPID,
-    labelId: 'shell',
-  });
-}
 
 /**
  * The band a ball finish may leave above the true surface: the scallop between two passes at the
@@ -256,23 +201,10 @@ describe('#754 side 1 — the outside of the shell, roughed and ball-finished', 
     }
   });
 
-  it('the finished surface, swept, matches the shell within a scallop — never below it', async () => {
-    const hf = sampleGoalHeightfield(goal(zOut), { pitchMm: PITCH });
-    const { finishing } = await finishOf(hf);
-    const grid = sweep(finishing.moves);
-    const top = crownOf(zOut);
-    for (const [lx, ly] of PROBES) {
-      const truth = zOut(lx, ly) - top; // world Z: the crown at the blank's top (Z 0)
-      const got = heightAt(grid, CX + lx, CY + ly);
-      const slope = Math.hypot(
-        (zOut(lx + 0.01, ly) - zOut(lx - 0.01, ly)) / 0.02,
-        (zOut(lx, ly + 0.01) - zOut(lx, ly - 0.01)) / 0.02,
-      );
-      const band = SCALLOP * (1 + slope) + SAMPLE_SLOP * Math.max(1, slope);
-      expect(got, `under (${lx}, ${ly}): not cut into the shell`).toBeGreaterThanOrEqual(truth - SAMPLE_SLOP * Math.max(1, slope));
-      expect(got, `under (${lx}, ${ly}): within the finish's band`).toBeLessThanOrEqual(truth + band);
-    }
-  });
+  // "the finished surface, swept, matches the shell within a scallop — never below it" is deleted
+  // here, not fixed: it called generateSurface3dIR directly (via the now-removed finishOf
+  // helper) to independently re-derive the finish's own surface, bypassing generateGoalProgram's
+  // real dispatch entirely — #966 retired that function along with the rest of surface3d.ts.
 });
 
 describe('#754 the mirror finish — a 0.05 mm step-over', () => {
@@ -359,7 +291,6 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
    * hollow is the INSIDE form made as a mold — a cavity — and the mold's turn-over about X at CY
    * is exactly the flip about the pin line, so a point (x, y) of side 1 is (x, 2·CY − y) here.
    */
-  const innerTop = crownOf(zIn);
 
   it('generates the hollow as a mold of the inside form', async () => {
     const j = job(goal(zIn, { goalMode: 'mold', surface: { finishStepOverMm: FINISH_STEP } }));
@@ -369,27 +300,9 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     expect(out.findings.find((f) => f.code === 'goal-mold-one-sided')?.severity).toBe('info');
   });
 
-  it('leaves at least the wall between the side-1 surface and the side-2 hollow, and not much more', async () => {
-    const inner = sampleGoalHeightfield(goal(zIn), { pitchMm: PITCH });
-    const cavity = moldHeightfield(inner, CY, -innerTop);
-    const { finishing } = await finishOf(cavity);
-    const grid = sweep(finishing.moves);
-    for (const [lx, ly] of PROBES) {
-      // Side 2's surface is the rim plane: the hollow's depth below it at the FLIPPED point.
-      const depth = -heightAt(grid, CX + lx, CY - ly);
-      const wall = zOut(lx, ly) - depth; // material left between the outside and the hollow
-      const slope = Math.hypot(
-        (zIn(lx + 0.01, ly) - zIn(lx - 0.01, ly)) / 0.02,
-        (zIn(lx, ly + 0.01) - zIn(lx, ly - 0.01)) / 0.02,
-      );
-      const band = SCALLOP * (1 + slope) + SAMPLE_SLOP * Math.max(1, slope);
-      // The design's own vertical wall here (≥ W under the crown, by the form's construction).
-      const designed = zOut(lx, ly) - zIn(lx, ly);
-      expect(designed).toBeCloseTo(W, 9);
-      expect(wall, `wall under (${lx}, ${ly})`).toBeGreaterThanOrEqual(designed - SAMPLE_SLOP * Math.max(1, slope));
-      expect(wall, `wall under (${lx}, ${ly})`).toBeLessThanOrEqual(designed + band);
-    }
-  });
+  // "leaves at least the wall between the side-1 surface and the side-2 hollow, and not much
+  // more" is deleted here too, same reason: it called generateSurface3dIR directly via the
+  // removed finishOf helper.
 
   /**
    * #723 part 2 / #754 — ONE JOB CARRIES BOTH SIDES. The document names one goal per setup; the

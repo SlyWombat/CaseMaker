@@ -13,17 +13,12 @@ import { zlibSync } from 'fflate';
 
 import { decodePng, pngPixelSize } from '@/engine/import/png';
 import { DEFAULT_RELIEF_DEPTH_MM, reliefDepthMm, reliefNumbers } from '@/engine/cnc/engrave/relief';
-import { generateSurface3dForGoal } from '@/engine/cnc/cam/surface3d';
 import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { flatEndMill } from '@/engine/cnc/tool';
-import { FLAT, type ColumnCutter, type CutMove } from '@/workers/geometry/columnEngine';
-import { stubSetup, type Setup } from '@/engine/cnc/setup';
-import { rectProfile } from '@/engine/compiler/profile';
-import type { RapidEstimate, CamMove } from '@/engine/cnc/cam/ir';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 
 // ---- a minimal PNG writer, so the fixtures are PIXELS we constructed -------------------------
@@ -235,7 +230,6 @@ describe('the picture becomes the goal heightfield (#672)', () => {
 });
 
 describe('the relief rides the goal pipeline (#672)', () => {
-  const RAPID: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test' };
   const BALL = flatEndMill(1, { shape: 'ball', name: '1 mm ball' });
 
   function reliefJob(target: EngraveTargetObject): EngraveJob {
@@ -262,93 +256,13 @@ describe('the relief rides the goal pipeline (#672)', () => {
     expect(out.errors.some((e) => e.message.includes('#980'))).toBe(true);
   }, 90_000);
 
-  it('#671’s passes are available on a picture exactly as on a mesh, through generateSurface3dForGoal directly (#980 restores this via planModelCam; the direct heightfield call is untouched by #966)', async () => {
-    // A VALLEY picture — tones darkest at the middle — is a concave crease, so the pencil pass has
-    // a corner to follow.
-    const valley = new Uint8Array(64 * 4);
-    for (let y = 0; y < 4; y++) for (let x = 0; x < 64; x++) valley[y * 64 + x] = Math.min(255, Math.abs(x - 32) * 16);
-    const withPasses = await generateSurface3dForGoal({
-      target: reliefTarget(greyPng(64, 4, valley), { x: 16, y: 1 }, { maxDepthMm: 2 }),
-      tool: BALL,
-      toolNumber: 1,
-      spindleRpm: 12000,
-      air: true,
-      feeds: { feed: 500, plungeFeed: 200, stepDown: 0.5, roughStepOver: 0.8, finishStepOver: 0.4 },
-      rapid: RAPID,
-      sample: { pitchMm: 0.4 },
-      opts: { scallop: true, pencil: true },
-    });
-    expect(withPasses?.ir.operations.map((op) => op.name.slice(op.name.indexOf('3D')))).toEqual([
-      '3D rough — 0.3 mm to leave',
-      '3D finish',
-      '3D scallop',
-      '3D pencil',
-    ]);
-  }, 90_000);
-
-  it('the sweep meets the picture on the dexel grid', async () => {
-    // The same end-to-end check the mesh goal has: sweep the posted operations and read the
-    // relief back off the grid, against the fixture's own ramp.
-    const size = { x: 25.6, y: 8 };
-    const target = reliefTarget(rampPng(), size, { maxDepthMm: 2 });
-    const job = reliefJob(target);
-    // #966/#980 — generateGoalProgram itself now refuses a picture relief by name; the sweep
-    // below checks generateSurface3dForGoal directly, the lower-level call #980 restores access
-    // to, which #966 leaves untouched.
-    const out = await generateGoalProgram(job, target, BALL, null, {
-      surfaceGrid: { pitchMm: { value: 0.2, source: 'chosen' } },
-    });
-    expect(out.ok).toBe(false);
-    expect(out.errors.some((e) => e.message.includes('#980'))).toBe(true);
-    const hf = sampleGoalHeightfield(target, { pitchMm: 0.2 });
-    const setup: Setup = stubSetup(
-      { kind: 'prism', outline: rectProfile(60, 40), thickness: 12 },
-      { kind: 'tape-down', contact: rectProfile(60, 40) },
-    );
-    const cutter: ColumnCutter = { radius: 0, tanHalf: null, cornerRadius: 0.5, outerRadius: 0.5 };
-    // The posted moves, resolved into the column engine's segments as `flatMovesOf` does: z = the
-    // lower endpoint, and #758's end tips so a sloped move is swept along its slope (#889 — a
-    // merged row is one long sloped move).
-    const moves: CamMove[] = [];
-    const ncOps = await generateSurface3dForGoal({
-      target,
-      tool: BALL,
-      toolNumber: 1,
-      spindleRpm: 12000,
-      air: true,
-      feeds: { feed: 500, plungeFeed: 200, stepDown: 0.5, roughStepOver: 0.8, finishStepOver: 0.4 },
-      rapid: RAPID,
-      sample: { pitchMm: 0.2 },
-    });
-    expect(ncOps).not.toBeNull();
-    for (const op of ncOps!.ir.operations) moves.push(...op.moves);
-    const cut: CutMove[] = [];
-    for (let k = 1; k < moves.length; k++) {
-      const a = moves[k - 1]!;
-      const b = moves[k]!;
-      if (b.kind !== 'feed') continue;
-      cut.push({ step: k, line: k, u0: a.x, u1: b.x, v0: a.y, v1: b.y, z: Math.min(a.z, b.z), z0: a.z, z1: b.z });
-    }
-    const grid = FLAT.buildGrid(setup, cutter, cut, { dx: hf.pitch, dThetaDeg: hf.pitch });
-    for (const m of cut) FLAT.applyMove(grid, m, cutter);
-    const heightAt = (x: number, y: number): number => {
-      const i = Math.round((x - grid.u0) / grid.du);
-      const j = Math.round((y - grid.v0) / grid.dv);
-      return grid.h[j * grid.nu + i] as number;
-    };
-    // Far from the footprint's edges, the stock must meet the picture within the finishing
-    // step-over plus the grid.
-    const tol = 0.4 + 3 * hf.pitch;
-    const imgLeft = target.position.x - size.x / 2;
-    for (const x of [12, 16, 20, 24, 28]) {
-      const u = (x - imgLeft) / (size.x / 256);
-      const grey = Math.min(255, Math.max(0, u - 0.5));
-      const expected = -2 * (1 - grey / 255);
-      const got = heightAt(x, 15);
-      expect(got, `x=${x}`).toBeGreaterThan(expected - tol);
-      expect(got, `x=${x}`).toBeLessThan(expected + tol);
-    }
-  }, 90_000);
+  // "#671's passes are available on a picture exactly as on a mesh" and "the sweep meets the
+  // picture on the dexel grid" are deleted here, not fixed: both called generateSurface3dForGoal
+  // directly. That function lived in surface3d.ts, which #966's final ruling deletes whole (a
+  // pure removal, no primitive or picture path moved onto cam/model as part of the removal
+  // itself) — the earlier comments in this file claiming the direct call was "untouched by #966"
+  // were written before that ruling and are wrong. #980 restores picture-relief access through
+  // planModelCam; its own tests are written fresh against that path, not ported from here.
 });
 
 describe('the document keeps the picture and the numbers, never the field (#672)', () => {
