@@ -165,11 +165,9 @@ import { concatToolpathIR, efficiencyOf, estimateCycleSeconds, estimateCycleTerm
 // reached from the retired `USE_MODEL_CAM_ENGINE`-off dispatch. `generateSurface3dIR` itself is
 // NOT retired — `generateSurfacePrimitiveProgram` (cone/sphere primitives, #786 slice 4a-2, out
 // of #966's scope entirely) calls it directly, independent of goal objects or the model-CAM
-// engine. `GoalSurfaceFacts` also survives: `generateRotaryGoalProgram` (rotary relief, out of
-// #966's scope per the design note's own §8) constructs one too.
+// engine.
 import {
   generateSurface3dIR,
-  type GoalSurfaceFacts,
   type Surface3dResult,
 } from '@/engine/cnc/cam/surface3d';
 import { DEFAULT_STOCK_TO_LEAVE_MM, type SurfaceFeeds } from '@/engine/cnc/cam/surfaceFinishTipField';
@@ -177,7 +175,10 @@ import { type PostContext, type PostResult, type VacuumSpan } from '@/engine/cnc
 import { postFor, postKey, postOriginFor } from '@/engine/cnc/post';
 import { appendThumbnail, heightfieldTopViewPng, planViewPng, simulationTopViewPng } from '@/engine/cnc/post/thumbnail';
 import { applySurfaceLift, maxSurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
-import { FRAME_Z, runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
+// #966 — `GoalSurfaceFacts` pure-moved here from surface3d.ts: it outlives that file's own
+// retirement because `generateRotaryGoalProgram` below (rotary relief, out of #966's scope)
+// constructs one.
+import { FRAME_Z, runSheetFileName, runSheetFrameFileName, type GoalSurfaceFacts } from '@/engine/cnc/engrave/runSheet';
 import type { FixtureEnvelope, Setup } from '@/engine/cnc/setup';
 import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
 import { unfacedBands } from '@/engine/cnc/mounts/inPath';

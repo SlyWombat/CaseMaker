@@ -418,67 +418,6 @@ export interface PencilPassFacts {
 }
 
 /**
- * #535 — a goal program's surfacing facts, as the operation row and the run sheet quote them.
- * Every number is one the CAM ran with, never a second resolution of the same question.
- */
-export interface GoalSurfaceFacts {
-  /** The heightfield's own resolution sentence ("sampled on a 0.1 mm grid"). */
-  resolutionNote: string;
-  /** The pitch the heightfield was sampled at, mm — after any coarsening. */
-  gridPitchMm: number;
-  /** The cells the heightfield held, `nx × ny`. */
-  gridCells: number;
-  /** Roughing step-down per Z layer, mm. */
-  stepDownMm: number;
-  /**
-   * #869 — the FINISHING cutter's step-down, mm — the spacing of the rim laps (#862), which ride
-   * the finish. Absent on a result stored before the field; a reader falls back to `stepDownMm`.
-   */
-  finishStepDownMm?: number;
-  /** Roughing raster pitch, mm. */
-  roughStepOverMm: number;
-  /** Finishing raster pitch, mm. */
-  finishStepOverMm: number;
-  /** Roughing allowance left on the goal surface, mm. */
-  stockToLeaveMm: number;
-  /**
-   * #898 — the UNDERSIDE choice this program cut to: its kind and the work-Z floor it set (`null`
-   * when the choice carries no floor of its own). Absent when the goal states no underside, or on
-   * a result stored before the field.
-   */
-  underside?: { kind: 'flat' | 'flipped-tabs' | 'plinth'; floorZ: number | null } | null;
-  /** Z layers the roughing pass stepped through. */
-  roughingLayers: number;
-  /**
-   * #869 — THE FLAT ROUGH, when the goal is cut as two programs: the cutter's name, as the run
-   * sheet names it, and which roughing pass ran. Null when a flat was chosen but nothing stood
-   * above the allowance to remove; ABSENT on a one-cutter goal and on every result stored before
-   * the field, which is why a reader asks `!= null`.
-   */
-  rough?: { tool: string; kind: 'raster' | 'adaptive' } | null;
-  /**
-   * #671 — the scallop pass's numbers, or null when it did not run. ABSENT on a result stored by
-   * a build before #671, which is why a reader asks `!= null` rather than `!== null`.
-   */
-  scallop?: { contours: number; stepOverMm: number; clamped: boolean } | null;
-  /** #671 — the pencil pass's numbers, or null when it did not run; absent before #671. */
-  pencil?: { paths: number; creaseDeg: number } | null;
-  /**
-   * #862 — the rim pass's numbers, or null when it did not run; absent before #862. The laps are
-   * the finishing operation's opening moves, down the clear band's wall.
-   */
-  rim?: { laps: number; floorZ: number } | null;
-  /**
-   * #847 — the REST PASS the finish was followed by, or null when the finish reached the goal (or
-   * nothing owned would lower it; the run's `goal-rest-uncut` warning states that case). ABSENT on
-   * a result stored by a build before #847.
-   */
-  rest?: GoalRestFacts | null;
-  /** The engine's notes for the run sheet: the feeds, undercuts and a flat finishing cutter. */
-  notes: string[];
-}
-
-/**
  * #846 — the roughing numbers' LABELLED FALLBACKS (the shop's `rough3d.*`
  * defaults are the real source; these are what a caller with no location gets).
  * `DEFAULT_ADAPTIVE_DEPTH_RATIO`: the goal is "deep" at 1.5× the cutter's ⌀.
@@ -631,26 +570,6 @@ async function chooseRough(
       `Raster roughing chosen by rule: ${ruleLine} (rough3d.adaptiveDepthRatio ${depthRatio}×); the comparison was ` +
       `skipped above ${budget.toLocaleString('en')} cells (rough3d.compareCellBudget).`,
   };
-}
-
-/**
- * #847 — WHAT A REST PASS DID, as the operation row and the run sheet quote it: the smaller ball,
- * the material the finish left, and what that ball still leaves measured from its own tip field.
- */
-export interface GoalRestFacts {
-  /** The smaller ball the rest pass runs, as the tool library files it. */
-  toolKey: string;
-  /** Its display name. */
-  toolName: string;
-  /** What the finish left above the goal, mm³. */
-  finishResidualMm3: number;
-  /** What the rest ball still leaves, mm³. */
-  residualMm3: number;
-  /** The deepest rise above the goal the finish left, mm. */
-  deepestMm: number;
-  /** The rest program's moves and the CAM's cutting-time estimate, seconds. */
-  moves: number;
-  seconds: number;
 }
 
 /**

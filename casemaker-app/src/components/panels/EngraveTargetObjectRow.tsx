@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
-import type { GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
+import type { GoalSurfaceFacts } from '@/engine/cnc/engrave/runSheet';
 import { DEFAULT_PENCIL_CREASE_DEG } from '@/engine/cnc/engrave/goalSurfaceSettings';
 import { DEFAULT_RELIEF_DEPTH_MM } from '@/engine/cnc/engrave/relief';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
