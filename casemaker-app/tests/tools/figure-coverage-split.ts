@@ -453,7 +453,13 @@ export interface FigureCoverageSplitOptions {
 
 export interface CategoryTotals {
   areaMm2: number;
+  /** Against `totals.totalAreaMm2` — the stock-bottom-excluded denominator, the SAME number
+   * checkGoalCutInto's own `n` uses (designCheck.ts:1022), so this sums against F's 89.61 %/
+   * 73.17 % total. */
   pct: number;
+  /** Against `totals.plainTotalAreaMm2` — goalCoverage.ts's own whole-surface total (every
+   * triangle, both faces of a thin part), kept beside `pct` for cross-checking, never dropped. */
+  pctPlain: number;
 }
 
 export interface AttributionBucket {
@@ -474,7 +480,26 @@ export interface FigureCoverageSplitResult {
     planCutterIds: readonly string[] | null;
     setupsPlanned: number;
   };
-  totals: { totalAreaMm2: number; coveredTodayAreaMm2: number; coveredTodayPct: number; gapAreaMm2: number; gapPct: number };
+  totals: {
+    /**
+     * #966 (Manager, 2026-11-04) — THE STOCK-BOTTOM-EXCLUDED denominator: `field.coveredCount *
+     * pitch²`, the SAME number checkGoalCutInto's own `n` counts (designCheck.ts:1022) off the
+     * SAME GoalHeightfield figureAcceptance965.spec.ts's own goalField() builds. Every `.pct`
+     * field in this result (here and in category1/2/3) is now against THIS total, so the split
+     * sums against the SAME total F's 89.61 %/73.17 % use. See this function's own `caveats[0]`
+     * for the traced mechanism (not `wholeSurface.ts`'s GoalSetupSurface.excluded — unused here).
+     */
+    totalAreaMm2: number;
+    /** goalCoverage.ts's own whole-surface total (every triangle, both faces of a thin part) —
+     * the PRE-#966-fix denominator, kept for cross-checking (never dropped). */
+    plainTotalAreaMm2: number;
+    coveredTodayAreaMm2: number;
+    coveredTodayPct: number;
+    coveredTodayPctPlain: number;
+    gapAreaMm2: number;
+    gapPct: number;
+    gapPctPlain: number;
+  };
   /**
    * #966 (Manager, 2026-11-04) — reported BOTH ways, never merged: `plannableAreaMm2` is what a
    * real, registered 2-setup `planModelCam` run actually produces (0 when `registration.ok` is
@@ -488,13 +513,22 @@ export interface FigureCoverageSplitResult {
   category1: CategoryTotals & {
     plannableAreaMm2: number;
     plannablePct: number;
+    plannablePctPlain: number;
     geometricReachAreaMm2: number;
     geometricReachPct: number;
+    geometricReachPctPlain: number;
     registration: { ok: true } | { ok: false; reason: string };
     realistic: 'plannable' | 'geometric-only';
   };
   category2: CategoryTotals;
-  category3: CategoryTotals & { attributions: AttributionBucket[]; unattributedAreaMm2: number };
+  /**
+   * #966 (Manager, 2026-11-04) — STATED PLAINLY, NOT BURIED: `attributions` names the smallest
+   * planned op whose own posted BOUNDING BOX contains the point — the smallest matching box
+   * wins. This is NOT proof that stage/cutter was responsible for missing this exact point, only
+   * that its own planned work happened nearby; a box is coarser than the op's actual cleared
+   * boundary. See `caveats` (this is also stated there) and this file's own header.
+   */
+  category3: CategoryTotals & { attributions: AttributionBucket[]; unattributedAreaMm2: number; attributionCaveat: string };
   caveats: string[];
   cellMap: { kind: 'structured-grid-json'; reason: string } & ReturnType<CellMap['toJSON']>;
 }
@@ -511,20 +545,54 @@ export async function figureCoverageSplit(opts: FigureCoverageSplitOptions): Pro
   const houseFull = opts.house ?? DEFAULT_HOUSE;
   const planHouse = restrictHouse(houseFull, opts.planCutterIds ?? null);
   const caveats: string[] = [
-    'denominator: this tool reuses goalCoverage.ts\'s own plain whole-surface total (every triangle, both faces of a thin part) — ' +
-      'it does NOT apply checkGoalCutInto\'s separate stock-bottom exclusion, so its percentages are not directly the 89.61 %/73.17 % ' +
-      'figures quoted against the acceptance line; they are internally consistent against this tool\'s own stated denominator.',
+    "denominator (#966, Manager, 2026-11-04): every .pct field below is now against " +
+      "stockBottomExcludedAreaMm2 — field.coveredCount * pitch², the SAME number checkGoalCutInto's own " +
+      "n (designCheck.ts:1022, `const n = Math.max(covered, 1)`) counts (goal.covered[k] === 1 cells of " +
+      "the SAME GoalHeightfield figureAcceptance965.spec.ts's own goalField() builds, pitchMm/stockTopZ " +
+      "identical to this tool's goalField() above) — so this split's percentages sum against the SAME " +
+      'total F\'s 89.61 %/73.17 % use. THE REAL MECHANISM, traced (not guessed): checkGoalCutInto ' +
+      '(designCheck.ts:948) applies NO exclusion itself — n is simply whatever `goal.covered` already is ' +
+      "when handed in. The stock-bottom face never gets subtracted anywhere; it never gets COUNTED in " +
+      'the first place — sampleGoalHeightfield (goalHeightfield.ts:115) keeps only the MAX z per XY ' +
+      "column (rasterTriangle, goalHeightfield.ts:478), so a part's own underside/back face sitting flat " +
+      "against the stock's bottom (#898's flatOnStockBottom rule) is always dominated at every column by " +
+      "something taller and so never surfaces as covered area of its own — this is mechanism (a), not " +
+      "(b): `wholeSurface.ts`'s GoalSetupSurface.excluded/{reason:'stock-bottom'} is a DIFFERENT, unused " +
+      "path here — that module's own header states #965's acceptance spec does not build those masks at " +
+      'all. pctPlain fields beside every pct (and totals.plainTotalAreaMm2/plainCoveredTodayPct/' +
+      "plainGapPct) keep goalCoverage.ts's own whole-surface total (every triangle, both faces of a thin " +
+      'part, coverageTriangles/goalCoverage.ts:97-115) for cross-checking — never dropped, per the ' +
+      'Manager\'s own "print it beside it if you like."',
     `"today's actual" in this run means a single TOP setup with underside = '${underside}' (the SAME choice the two-setup comparison ` +
       "uses), not necessarily the real job's own stated/default underside — flatOnStockBottom would make buildSetupSpecs refuse a " +
       'bottom candidate by design (#898) and category 1 would be structurally zero; pass --underside to change this.',
     "category 3's stage/cutter attribution is a BOUNDING-BOX match against each op's own posted feed-move path (document XY), the " +
       "smallest matching box winning — coarser than the op's actual cleared boundary; a name here is not proof that stage should have " +
       'cut this exact point, only that its own planned work happened nearby. See this tool\'s own header for the full statement.',
+    'A `.pct` figure CAN read over 100 %, STATED, NOT A BUG: category areas (and coveredTodayAreaMm2) stay a per-MESH-TRIANGLE real ' +
+      "surface sum (walls, undersides, both faces of a thin section all add real area) — exactly `goalCoverage.ts`'s own convention — " +
+      "while the new denominator is a per-GOAL-CELL count (one value per XY column, F's own convention): a part that carries a lot of " +
+      "wall/underside surface relative to its own footprint (a deep pocket, a cantilever) can have triangle-summed area that exceeds " +
+      "F's own single-column-per-cell total, because F's heightfield structurally never sees that extra surface at all — not merely " +
+      "excludes it. Confirmed on the #966 synthetic fixture (see figureCoverageSplit966.spec.ts): coveredTodayPct reads ~275 % there.",
   ];
 
   const { source } = placedMesh(job, opts.meshBytes);
   const field = goalField(job, opts.meshBytes, opts.meshFileName, pitchMm);
   const mesh: CoverageMesh = { positions: source.triangles.positions, indices: source.triangles.indices };
+  // #966 (Manager, 2026-11-04) — THE STOCK-BOTTOM-EXCLUDED DENOMINATOR. `field` here is built by
+  // the EXACT same call (`goalField`'s own `sampleGoalHeightfield`, same pitchMm/stockTopZ) that
+  // `figureAcceptance965.spec.ts`'s own `goalField` makes before handing it to `checkGoalCutInto`
+  // (designCheck.ts:948) — whose own denominator `n` (designCheck.ts:1022) is a count of
+  // `goal.covered[k] === 1` cells off that SAME field. No separate subtraction runs anywhere: the
+  // stock-bottom face is never counted in the first place, because `sampleGoalHeightfield`
+  // (goalHeightfield.ts:115) keeps only the MAX z per XY column (`rasterTriangle`,
+  // goalHeightfield.ts:478) — a part's own underside/back face pressed flat against the stock's
+  // bottom (#898's `flatOnStockBottom` rule) is always dominated at every column by something
+  // taller, so it never surfaces as covered area of its own. This is `field.coveredCount * pitch²`
+  // — see `caveats[0]` above for the full trace, and why `wholeSurface.ts`'s
+  // `GoalSetupSurface.excluded` is NOT this mechanism (unused by #965's own acceptance spec).
+  const stockBottomExcludedAreaMm2 = field.coveredCount * field.pitch * field.pitch;
 
   // TODAY — a single top setup.
   const todayOutput = await planModelCam(singleSetupInput(job, source, planHouse, underside));
@@ -689,31 +757,54 @@ export async function figureCoverageSplit(opts: FigureCoverageSplitOptions): Pro
     );
   }
 
-  const pct = (a: number): number => (totalAreaMm2 > 0 ? (a / totalAreaMm2) * 100 : 0);
+  // #966 (Manager, 2026-11-04) — TWO DENOMINATORS, NEVER MERGED: `pct` is against
+  // `stockBottomExcludedAreaMm2` (matches checkGoalCutInto's own `n`, F's 89.61 %/73.17 % basis);
+  // `pctPlain` is against `totalAreaMm2` (goalCoverage.ts's whole-surface total, every triangle,
+  // both faces — this tool's own pre-#966-fix denominator), kept beside it for cross-checking.
+  const pct = (a: number): number => (stockBottomExcludedAreaMm2 > 0 ? (a / stockBottomExcludedAreaMm2) * 100 : 0);
+  const pctPlain = (a: number): number => (totalAreaMm2 > 0 ? (a / totalAreaMm2) * 100 : 0);
   const gapAreaMm2 = totalAreaMm2 - coveredTodayAreaMm2;
+  const attributionCaveat =
+    "category 3's stage/cutter attribution is APPROXIMATE: a bounding-box match against each op's own " +
+    "posted feed-move path (document XY), the smallest matching box winning — it is NOT proof that this " +
+    "stage/cutter was responsible for missing the point, only that its own planned work happened nearby.";
 
   return {
     job: job.name ?? opts.label,
     config: { underside, pitchMm, coverage, planCutterIds: opts.planCutterIds ?? null, setupsPlanned: output2.perSetup.length },
-    totals: { totalAreaMm2, coveredTodayAreaMm2, coveredTodayPct: pct(coveredTodayAreaMm2), gapAreaMm2, gapPct: pct(gapAreaMm2) },
+    totals: {
+      totalAreaMm2: stockBottomExcludedAreaMm2,
+      plainTotalAreaMm2: totalAreaMm2,
+      coveredTodayAreaMm2,
+      coveredTodayPct: pct(coveredTodayAreaMm2),
+      coveredTodayPctPlain: pctPlain(coveredTodayAreaMm2),
+      gapAreaMm2,
+      gapPct: pct(gapAreaMm2),
+      gapPctPlain: pctPlain(gapAreaMm2),
+    },
     category1: {
       // Backward-compatible alias — ALWAYS the realistic/plannable number, never the geometric
       // one, so a caller reading only `category1.areaMm2` gets the conservative/achievable figure.
       areaMm2: cat1,
       pct: pct(cat1),
+      pctPlain: pctPlain(cat1),
       plannableAreaMm2: cat1,
       plannablePct: pct(cat1),
+      plannablePctPlain: pctPlain(cat1),
       geometricReachAreaMm2: cat1Geometric,
       geometricReachPct: pct(cat1Geometric),
+      geometricReachPctPlain: pctPlain(cat1Geometric),
       registration: registrationFailure === null ? { ok: true as const } : { ok: false as const, reason: registrationFailure },
       realistic: registrationFailure === null && setups2.length >= 2 ? ('plannable' as const) : ('geometric-only' as const),
     },
-    category2: { areaMm2: cat2, pct: pct(cat2) },
+    category2: { areaMm2: cat2, pct: pct(cat2), pctPlain: pctPlain(cat2) },
     category3: {
       areaMm2: cat3,
       pct: pct(cat3),
+      pctPlain: pctPlain(cat3),
       unattributedAreaMm2,
       attributions: [...attributionMap.values()].sort((a, b) => b.areaMm2 - a.areaMm2),
+      attributionCaveat,
     },
     caveats,
     cellMap: { kind: 'structured-grid-json', reason: 'a per-cell category grid, not an image — zero extra image-encoding dependency, exact, diffable', ...cellMap.toJSON() },
