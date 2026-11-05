@@ -67,7 +67,7 @@ import { comparePlanOutcomes, type PlanTradeoff } from '../tools/tradeoff';
 import { feedRowsFor } from '../tools/feedRows';
 import { measureVendorCard } from '../tools/cardMeasurement';
 import { planModelCam, planPocketsForTree, planTreePrograms, type ModelPlanInput, type PlanPocketsResult, type SetupPlan } from '@/engine/cnc/cam/model/plan';
-import type { SequenceChoice } from '@/engine/cnc/cam/model/sequence';
+import type { SequenceChoice, SequenceStepFailure } from '@/engine/cnc/cam/model/sequence';
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
@@ -950,6 +950,34 @@ function offsetThrowingFor(badWidth: number, real: ReturnType<typeof makeClipper
   };
 }
 
+/**
+ * #962 — A DROPPED STAGE IS STATED THE GROUPED WAY, NOT PER REGION. The operator's contract is one
+ * sentence per cause — the kind, the count and the deepest ground — so no region id appears in it;
+ * per-region detail (ids, kind, reason) is the structured `unplanned` list. A stage that emitted no
+ * moves at all is stated ONLY by the grouped sentence (there is no failure to carry); a stage that
+ * THREW is in `unplanned`. This accepts either, and judges the grouped sentence's own form when it
+ * is the one present.
+ */
+function expectStageStated(kind: 'rough' | 'pencil' | 'rest', notes: readonly string[], unplanned: readonly SequenceStepFailure[]): void {
+  const grouped = notes.find((n) => n.startsWith(`${kind}: `) && n.includes('emitted no moves'));
+  const thrown = unplanned.filter((f) => f.kind === kind);
+  if (grouped === undefined && thrown.length === 0) {
+    throw new Error(
+      `${kind} was dropped without a statement — notes: ${notes.join(' | ')}; unplanned: ${JSON.stringify(unplanned.map((f) => ({ kind: f.kind, regionIds: f.regionIds })))}`,
+    );
+  }
+  if (grouped !== undefined) {
+    expect(grouped).toMatch(
+      new RegExp(`^${kind}: \\d+ regions? emitted no moves — nothing for it to cut(?:; the deepest ground among them is [\\d.]+ mm below the part top)?$`),
+    );
+    expect(Number(/^[^:]+: (\d+)/.exec(grouped)![1])).toBeGreaterThan(0);
+  }
+  for (const failure of thrown) {
+    expect(failure.regionIds.length).toBeGreaterThan(0);
+    expect(failure.reason.length).toBeGreaterThan(0);
+  }
+}
+
 describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
   it('a region that fails to plan does not crash the whole plan — it is a named finding, the rest still posts', () => {
     const tree = syntheticTreeTwoPockets();
@@ -968,7 +996,12 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
     expect(result.ops.some((op) => op.region.id === 'ok-1'), 'the OTHER pocket still plans').toBe(true);
     expect(result.ops.some((op) => op.kind === 'contour'), 'the contour still plans').toBe(true);
     expect(result.ops.some((op) => op.region.id === 'bad-1'), 'the failing region is not planned').toBe(false);
-    expect(result.notes.some((n) => n.startsWith('bad-1:') && n.includes('not cut')), `notes: ${result.notes.join('; ')}`).toBe(true);
+    // #962 — THE STRUCTURED RECORD CARRIES THE REGION; the note states the CAUSE once, grouped.
+    expect(
+      result.unplanned.some((f) => f.kind === 'pocket' && f.regionIds.includes('bad-1') && f.reason.includes('synthetic Clipper failure')),
+      `unplanned: ${JSON.stringify(result.unplanned.map((f) => ({ kind: f.kind, regionIds: f.regionIds, reason: f.reason })))}`,
+    ).toBe(true);
+    expect(result.notes, `notes: ${result.notes.join('; ')}`).toContain('pocket: 1 region could not be cut — synthetic Clipper failure for test');
   });
 
   // The manager's #959 ruling: the freeing cut runs LAST, after every rest/finish/chamfer step —
@@ -1250,10 +1283,11 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     expect(kinds, `unreachable: ${result.unreachable.join('; ')}`).toContain('pocket');
     expect(kinds).toContain('finish');
     // A STAGE THAT FINDS NOTHING IS DROPPED WITH A NOTE (#964) — the project path states an empty
-    // stage rather than listing one that posts nothing.
+    // stage rather than listing one that posts nothing. #962: one grouped sentence per stage
+    // (kind, count, deepest ground), never a line per region.
     for (const stage of ['rough', 'pencil'] as const) {
       if (!kinds.includes(stage)) {
-        expect(result.notes.join(' '), `${stage} was dropped without a note`).toContain(`${stage} "`);
+        expectStageStated(stage, result.notes, result.unplanned);
       }
     }
     if (tree.rims.length > 0) expect(kinds).toContain('chamfer');
@@ -1547,7 +1581,7 @@ describe('#959 acceptance — the curved pipeline (every op entered)', () => {
       expect(op.outcome.ir.operations[0]!.moves.length, `${op.kind} posted no moves`).toBeGreaterThan(0);
     }
     if (!noRestKinds.includes('pencil')) {
-      expect(noRest.notes.join(' '), 'pencil was dropped without a note').toContain('pencil "');
+      expectStageStated('pencil', noRest.notes, noRest.unplanned);
     }
     const chamferOp = noRest.ops.find((o) => o.kind === 'chamfer');
     if (chamferOp !== undefined) {
@@ -1559,10 +1593,10 @@ describe('#959 acceptance — the curved pipeline (every op entered)', () => {
     const withRestKinds = withRest.ops.map((o) => o.kind);
     for (const stage of ['rough', 'finish'] as const) expect(withRestKinds).toContain(stage);
     if (!withRestKinds.includes('pencil')) {
-      expect(withRest.notes.join(' '), 'pencil was dropped without a note').toContain('pencil "');
+      expectStageStated('pencil', withRest.notes, withRest.unplanned);
     }
     if (!withRestKinds.includes('rest')) {
-      expect(withRest.notes.join(' '), 'rest was dropped without a note').toContain('rest "');
+      expectStageStated('rest', withRest.notes, withRest.unplanned);
     }
     expect(withRest.notes.join(' ')).toContain('curved pipeline follows the ruling');
   }, 120_000);

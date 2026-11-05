@@ -1048,6 +1048,13 @@ export interface PlanPocketsOptions {
    */
   facing?: 'off' | 'on';
   /**
+   * #962 — the rest region's dilation about the leftover mask, mm. Default `2 x the cutter's
+   * radius + 0.25` (the MEASURED value: `pocketLoops` erodes by r before ringing, so the grown
+   * strip must be a cutter diameter wide for the ring to exist). Exposed so a spec can drive the
+   * failure geometry a smaller dilation produces — and prove such a rest is STATED, never silent.
+   */
+  restDilationMm?: number;
+  /**
    * #961 — the simulated outcome for a candidate's planned IRs: the goal cells left above the
    * band and the covered cells, stamped by the caller (which owns the goal). Absent → the
    * picker keeps its pocket-count completeness.
@@ -1305,20 +1312,31 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       if (prefixIrs.length === 0) return null; // nothing planned before it: no leftover to cut
       const mask = opts.restRegion(prefixIrs, { id, footprint: node.region, floorZ, bounds: ref.bounds });
       if (mask === null || mask.length === 0) return null;
-      // Dilated so the cutter's CENTRE can reach every leftover cell the pocket op insets away —
-      // then clipped back to the pocket's own mouth (A ∩ B = A \ (A \ B)): the dilation exists to
-      // place the centre, never to let the pass cut the walls or the land beyond the pocket. The
-      // tray's first masked run gouged 0.08 % without this clip.
-      //
-      // The radius is counted TWICE: the op's own loops sit ≥ r inside the region's boundary, and
-      // a loop must be within r of the cell it cuts, so a cell on the mask's edge needs the region
-      // to reach 2r + the step-over past it (plus a margin). Dilating by r + step-over alone left
-      // the thin strips uncut (the tray lost 0.32 points against the floor pass).
-      regionPolys = opts.offset(mask, 2 * radius + stepOverMm + 0.25);
+      // #962 — THE DILATION: 2r + 0.25, MEASURED. `2r + stepOver + 0.25` grew the leftover mask
+      // ~4.2 mm on a ⌀3.175 and the rings swept that grown area: the integration tip's tray rest
+      // spent 601 s of feed over cells the prefix already held within the band. But `r + 0.25`
+      // is WORSE, not tighter: `pocketLoops` erodes the region by r before it rings it, so a
+      // strip grown only to r leaves a region narrower than the cutter's diameter and the rest
+      // emits NO toolpath at all for that pocket — six of the tray's seven lost their pass
+      // outright and coverage fell 99.34 → 99.03 %. The tray sweep brackets the threshold at
+      // exactly 2r (3.15 mm: 99.30 %; 3.20 mm: 99.34 %; 2r = 3.175): the grown strip needs to be
+      // a cutter diameter wide for the eroded ring to exist. So the dilation is 2r — the ring's
+      // own inset plus the reach the cell needs — plus 0.25 mm of margin; the grown region is
+      // still clipped back to the pocket's own mouth (A ∩ B = A \ (A \ B)). Tray at this value:
+      // coverage 99.344 % (identical to the over-grown tip), rapid 660.6 s vs its 732.3 s.
+      regionPolys = opts.offset(mask, opts.restDilationMm ?? 2 * radius + 0.25);
       if (regionPolys.length === 0) return null;
       if (opts.boolean !== undefined) {
         const clipped = opts.boolean.subtract(regionPolys, opts.boolean.subtract(regionPolys, node.region));
-        if (clipped.length === 0) return null;
+        // #962 — the mask holds standing cells but nothing of it survives at this pocket's own
+        // mouth: a planned pass that would cut nothing, STATED rather than silently dropped
+        // (the same silence the r-only dilation produced when `pocketLoops` could not ring).
+        if (clipped.length === 0) {
+          throw new Error(
+            `the rest's leftover mask has standing cells but none of it survives inside this pocket at the ` +
+              `cutter's radius (${radius} mm) — standing material outside the mask's reach is left uncut`,
+          );
+        }
         regionPolys = clipped;
       }
     }
@@ -1331,7 +1349,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       mouthZ: floorZ,
       floorZ,
     };
-    return pocket({
+    const restOutcome = pocket({
       cutter,
       node: restNode,
       region: ref,
@@ -1347,6 +1365,18 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       rapid: opts.rapid,
       boolean: opts.boolean,
     });
+    // #962 — A REST THAT CUTS NOTHING OVER LIVE STANDING MATERIAL IS STATED, NEVER SILENT: the
+    // mask said cells stand here, and the op produced no toolpath (the region eroded to nothing
+    // at the cutter's radius — the failure a too-small dilation produced on six of the tray's
+    // seven rest passes, where those plans simply had no rest op and said nothing). Throwing
+    // takes the region into `unplanned` with this reason, in the plan's own outcome words.
+    if (restOutcome.ir.operations.every((operation) => operation.moves.length === 0)) {
+      throw new Error(
+        `the rest's leftover mask eroded to nothing at the cutter's radius (${radius} mm) — ` +
+          'standing material under this mask is left uncut',
+      );
+    }
+    return restOutcome;
   };
 
   const planRegion = (id: string, step: SequenceStep, prefix?: readonly SequenceStep[]): OpOutcome | null => {
@@ -1753,6 +1783,16 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     const failed = regionFailures.get(id);
     if (failed !== undefined && !unplanned.some((f) => f.regionIds.includes(id))) unplanned.push(failed);
   }
+  // #962 — AND A THROWN REGION IS STATED when the chosen plan leaves its material standing, even
+  // when its candidate lost the ranking. WARNINGS MUST DISCRIMINATE: a REGION the chosen chain
+  // covers, which threw only in a candidate that lost, has its material cut — not stated. A REST
+  // is different in kind: its mask was computed as leftover standing above the band, so a rest
+  // that could not cut is standing-material evidence whatever the chain chose.
+  const chosenCovers = new Set(choice.steps.flatMap((step) => step.regionIds));
+  for (const [id, failure] of regionFailures) {
+    if (failure.kind !== 'rest' && chosenCovers.has(id)) continue;
+    if (!unplanned.some((f) => f.regionIds.includes(id))) unplanned.push(failure);
+  }
 
   const notes: string[] = [];
   // #943 (2026-11-05 ruling): the facing stage states where its cut starts, how many passes the
@@ -1783,18 +1823,31 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #975 — the V floor's own lines: floor, wall angle, and the land per side the flanks take
   // (the V's own geometry, stated; the gate's edge-break class carries the land).
   notes.push(...vNotes);
-  for (const [id, { reason: message }] of regionFailures) {
-    notes.push(`${id}: not cut — planning failed (${message})`);
-    // A root pocket's/wide through hole's own mouth assumes facing already cleared the skin
-    // (above) — if facing itself is the region that failed, that assumption is now FALSE for
-    // every pocket this plan still posted, and nothing re-plans them at the stock top instead.
-    // Named here rather than silently trusted, per the advisor's review on this revert.
-    if (id === 'facing') {
-      notes.push(
-        'facing failed to plan but the skin is real (see above) — every pocket/through-hole posted still ' +
-          'assumes it is gone; their own first pass is deeper than it looks.',
-      );
+  // #962 — ONE STATEMENT PER CAUSE, NOT A LINE PER REGION: failed regions are grouped by their
+  // kind and reason with a count; the per-region detail lives in `unplanned` (machine-readable),
+  // never as a wall of operator lines.
+  {
+    const byCause = new Map<string, { kind: string; reason: string; count: number }>();
+    for (const [, failure] of regionFailures) {
+      const key = `${failure.kind}: ${failure.reason}`;
+      const entry = byCause.get(key) ?? { kind: failure.kind, reason: failure.reason, count: 0 };
+      entry.count++;
+      byCause.set(key, entry);
     }
+    for (const entry of byCause.values()) {
+      const plural = entry.count === 1 ? 'region' : 'regions';
+      notes.push(`${entry.kind}: ${entry.count} ${plural} could not be cut — ${entry.reason}`);
+    }
+  }
+  // A root pocket's/wide through hole's own mouth assumes facing already cleared the skin
+  // (above) — if facing itself is the region that failed, that assumption is now FALSE for
+  // every pocket this plan still posted, and nothing re-plans them at the stock top instead.
+  // Named here rather than silently trusted, per the advisor's review on this revert.
+  if (regionFailures.has('facing')) {
+    notes.push(
+      'facing failed to plan but the skin is real (see above) — every pocket/through-hole posted still ' +
+        'assumes it is gone; their own first pass is deeper than it looks.',
+    );
   }
   // #961's own pick between the two freeing-cut options (a return to the covering cutter, or the
   // chain's last cutter taking the profile itself) is priced in `choice.cost` either way; stated
@@ -1977,12 +2030,20 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   // An op with no moves is not a program: it is dropped here WITH A NOTE, so the plan stays honest
   // rather than posting an empty file. A stage that SHOULD have cut and did not still shows up as
   // a coverage failure at the goal check — the drop does not hide it.
+  // #962 — THE OPERATOR SEES ONE STATEMENT PER CAUSE, NOT A LINE PER REGION (the standing rule
+  // that warnings must discriminate): an empty stage and a finish's own slope wording are
+  // accumulated per kind and stated once, with a count and the deepest ground among the regions.
+  const emptyStages = new Map<PlannedOp['kind'], { count: number; deepestMm: number }>();
+  const finishKinds = new Map<string, { count: number; minSlope: number; maxSlope: number }>();
   const pushStage = (kind: PlannedOp['kind'], ref: RegionRef, outcome: OpOutcome): void => {
     if (outcome.ir.operations.some((operation) => operation.moves.length > 0)) {
       ops.push({ kind, region: ref, outcome });
       return;
     }
-    notes.push(`${kind} "${ref.id}" emitted no moves — nothing for it to cut`);
+    const entry = emptyStages.get(kind) ?? { count: 0, deepestMm: 0 };
+    entry.count++;
+    entry.deepestMm = Math.max(entry.deepestMm, Math.abs(ref.topZ - ref.bottomZ));
+    emptyStages.set(kind, entry);
   };
   // #959 item 5 — A THROWING STAGE DOES NOT SINK THE PLAN: each stage (its CL surface included) is
   // caught per region/rim and stated in `unplanned` in `sequence.ts`'s step-failure shape; the
@@ -2258,10 +2319,13 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // #960 — FLAT OR BALL BY THE REGION'S OWN SLOPE, with the threshold stated on the plan; the
     // constant is a parameter (shared with C's #959 skin pass) while the picture decides 1.9° vs 7.1°.
     const finishKind = finishKindFor(roughRegion, opts.geometry.triangles, opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG);
-    notes.push(
-      `the ${roughRegion.id} finish runs as a ${finishKind === 'flat-raster' ? 'flat-following raster' : 'ball at constant scallop'} ` +
-        `(slopes ${roughRegion.slopeDeg[0].toFixed(1)}–${roughRegion.slopeDeg[1].toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG).toFixed(2)}°)`,
-    );
+    {
+      const entry = finishKinds.get(finishKind) ?? { count: 0, minSlope: Infinity, maxSlope: -Infinity };
+      entry.count++;
+      entry.minSlope = Math.min(entry.minSlope, roughRegion.slopeDeg[0]);
+      entry.maxSlope = Math.max(entry.maxSlope, roughRegion.slopeDeg[1]);
+      finishKinds.set(finishKind, entry);
+    }
     attempt('finish', ball, ref, () => finish({
       cutter: ball,
       region: roughRegion,
@@ -2432,6 +2496,21 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     `the curved pipeline follows the ruling: the flat Z-steps each remainder region to its CL less ${opts.bandMm} mm, ` +
       `the ball runs ONE final level, the pencil follows the creases${opts.restFlat === undefined ? ', and no rest flat was offered' : ', and a rest flat clears the CL difference first'}`,
   );
+  // #962 — the grouped statements, one per cause (see the accumulators above).
+  for (const [kind, entry] of emptyStages) {
+    const plural = entry.count === 1 ? 'region' : 'regions';
+    notes.push(
+      `${kind}: ${entry.count} ${plural} emitted no moves — nothing for it to cut` +
+        (entry.deepestMm > 0 ? `; the deepest ground among them is ${entry.deepestMm.toFixed(1)} mm below the part top` : ''),
+    );
+  }
+  for (const [finishKind, entry] of finishKinds) {
+    const words = finishKind === 'flat-raster' ? 'flat-following raster' : 'ball at constant scallop';
+    const plural = entry.count === 1 ? 'region' : 'regions';
+    notes.push(
+      `finish: ${entry.count} ${plural} run as a ${words} (slopes ${entry.minSlope.toFixed(1)}–${entry.maxSlope.toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG).toFixed(2)}°)`,
+    );
+  }
   return { ops, notes, clGrid, unplanned };
 }
 
