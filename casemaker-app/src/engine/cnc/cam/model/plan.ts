@@ -45,6 +45,7 @@ import { finish } from './ops/finish';
 import { pencil } from './ops/pencil';
 import { chamfer } from './ops/chamfer';
 import { contour as contourOp, throughHole } from './ops/contour';
+import { buildTriangleBins, binnedReachableTriangles, type TriangleBins } from './triangleBins';
 
 /** One ring (outer boundary or a hole); `pocket.ts`'s `Polygons` is `Polygon[]`. NEW — no existing equivalent. */
 export type Polygon = [number, number][];
@@ -473,14 +474,25 @@ const allPockets = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [
 
 /** The `facing` region's own `Box2` — there is no `PocketNode`/`regionRefs` entry for it (it is
  * not a recognised feature, it is this plan's own synthesis of `FeatureTree.top.floors`). */
-/** The topmost mesh surface at (x, y), or null where no triangle covers the point. */
-function topSurfaceAt(mesh: { positions: Float32Array; indices: Uint32Array }, x: number, y: number): number | null {
-  const p = mesh.positions;
+/**
+ * The topmost mesh surface at (x, y), or null where no triangle covers the point.
+ *
+ * PERF FINDING (#959 review): this used to scan EVERY triangle of the whole mesh, for every one
+ * of `rims x segments x 5` samples — the same cost `triangleBins.ts`'s own header describes for
+ * `dropcutter.ts`'s pre-bins query. `binnedReachableTriangles(bins, x, y, 0)` is the exact same
+ * drop-in: a radius-0 query answers "triangle's own bbox contains (x, y)", a NECESSARY condition
+ * for the barycentric test below to ever accept it, so the candidate set it returns is a superset
+ * of the true containing triangle(s) — the barycentric filter here still does the real work, and
+ * the retained (best) result is identical to the brute-force scan's, never just close to it.
+ */
+function topSurfaceAt(bins: TriangleBins, x: number, y: number): number | null {
+  const p = bins.mesh.positions;
+  const indices = bins.mesh.indices;
   let best: number | null = null;
-  for (let t = 0; t + 2 < mesh.indices.length; t += 3) {
-    const i0 = mesh.indices[t]! * 3;
-    const i1 = mesh.indices[t + 1]! * 3;
-    const i2 = mesh.indices[t + 2]! * 3;
+  for (const t of binnedReachableTriangles(bins, x, y, 0)) {
+    const i0 = indices[t * 3]! * 3;
+    const i1 = indices[t * 3 + 1]! * 3;
+    const i2 = indices[t * 3 + 2]! * 3;
     const x0 = p[i0]!, y0 = p[i0 + 1]!, z0 = p[i0 + 2]!;
     const x1 = p[i1]!, y1 = p[i1 + 1]!, z1 = p[i1 + 2]!;
     const x2 = p[i2]!, y2 = p[i2 + 1]!, z2 = p[i2 + 2]!;
@@ -518,11 +530,13 @@ function rimRing(polyline: readonly [number, number][]): [number, number][] {
  * surface continues across the edge at the same height (the edge lies under the land — a cavity
  * mouth, not an open lip), so the break cut 0.5 mm into ground the goal never exposes. A rim is
  * breakable only where its AIR side actually drops — by the goal's own step threshold (0.2 mm,
- * `designEdgeCells`). Sampled at up to eight segment midpoints, 0.25 and 0.5 mm onto the air side;
- * ANY covered sample means the rim is not broken whole (conservative: never break under a lip).
+ * `designEdgeCells`). Sampled at EVERY segment midpoint (not a stride across them — an 8-point
+ * stride missed covered stretches on the tray), five distances onto the air side (0.25/0.5/1.0/
+ * 1.3/1.55 mm, the V's whole footprint reach); ANY covered sample means the rim is not broken
+ * whole (conservative: never break under a lip).
  */
 function rimExposedFromAbove(
-  mesh: { positions: Float32Array; indices: Uint32Array },
+  bins: TriangleBins,
   rim: { polyline: readonly [number, number][]; z: number; of: string },
   stepMm = 0.2,
 ): boolean {
@@ -549,7 +563,7 @@ function rimExposedFromAbove(
     // cutter's skirt reaches its own outer radius from the path, so covered ground that starts
     // ~1 mm out is still cut at 0.5 mm deep.
     for (const d of [0.25, 0.5, 1.0, 1.3, 1.55]) {
-      const top = topSurfaceAt(mesh, mx + nx * d, my + ny * d);
+      const top = topSurfaceAt(bins, mx + nx * d, my + ny * d);
       if (top !== null && top > rim.z - stepMm) return false;
     }
   }
@@ -1358,11 +1372,14 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       );
     }
     const vbit = opts.vbit;
+    // Built ONCE, reused by every rim's query below (#960's own bins, not a fresh brute-force
+    // scan per rim — see `topSurfaceAt`'s own header for the perf finding this replaces).
+    const rimBins = tree.rims.length > 0 ? buildTriangleBins(opts.geometry.triangles) : null;
     for (const rim of tree.rims) {
       // THE MANAGER'S RULING from the tray's 0.5 mm cell: a rim whose air side is COVERED is not
       // broken — see `rimExposedFromAbove` for the measurement that put this here. The test reads
       // the mesh, so it uses the rim's MESH-ABSOLUTE z, before the rebase below.
-      if (!rimExposedFromAbove(opts.geometry.triangles, rim)) {
+      if (!rimExposedFromAbove(rimBins!, rim)) {
         notes.push(
           `rim "${rim.id}" not broken: covered from above (its air side does not drop by 0.2 mm — the edge lies under the land)`,
         );
