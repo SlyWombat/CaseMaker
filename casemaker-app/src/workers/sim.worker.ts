@@ -291,13 +291,19 @@ const api = {
     // #785 — stage progress for the panel and the flight recorder. Its OWN argument, because
     // Comlink only turns a top-level function into a proxy (the same rule `simLoad`'s states).
     onProgress?: (progress: EngraveProgress) => void,
+    /**
+     * #961 — THE IDEAL'S CANDIDATE SET from the main thread's tool library (the house service's
+     * `cat:` rows included). This realm never loads that library, so the caller sends the entries
+     * she has; absent means no ideal (`planIdeal` null) and the second plan is skipped.
+     */
+    catalogueTools?: readonly Tool[],
   ): Promise<EngraveGenerated> {
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
     // #896 — every stage report names this worker's heap too (see `workerMemoryMb`).
     const withMemory =
       onProgress === undefined ? undefined : (progress: EngraveProgress): void => onProgress({ ...progress, memoryMB: workerMemoryMb() });
     // #881 — the pipeline is async now: the adaptive rough's levels can be planned by a pool.
-    return await runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop, withMemory, levelPlanner ?? undefined);
+    return await runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop, withMemory, levelPlanner ?? undefined, catalogueTools);
   },
   /**
    * The volumetric oracle (#206 §3) against the program CURRENTLY loaded in the session. The

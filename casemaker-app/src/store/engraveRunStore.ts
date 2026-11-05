@@ -135,6 +135,11 @@ export type EngraveRunClient = {
     shop?: EngraveShopOpts,
     /** #785 — stage progress for the panel and the flight recorder. */
     onProgress?: (progress: EngraveProgress) => void,
+    /**
+     * #961 — the ideal plan's candidate set, read on this side (the worker cannot see the tool
+     * library). Absent means no ideal: `planIdeal` stays null and only the owned plan is run.
+     */
+    catalogueTools?: readonly Tool[],
   ) => Promise<EngraveGenerated>;
   // #924 activation — the generator's own raw design items ride the oracle call the same way
   // `predicted` does; additive, so a caller that sends none runs exactly as it did before.
@@ -633,7 +638,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         // #881 — a new run forgets the last pool decision; the pool states its own size again
         // only if this program's planning is budgeted.
         forgetPoolSizing();
-        generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop, onProgress);
+        // #961 — the ideal plan's candidate set: the app's own tool library (the same list every
+        // picker shows, the house `cat:` rows included). The worker cannot see it from its realm.
+        generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop, onProgress, getTools().map((entry) => entry.tool));
       } finally {
         clearStall();
       }

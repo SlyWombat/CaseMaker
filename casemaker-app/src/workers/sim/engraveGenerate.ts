@@ -4861,6 +4861,14 @@ export async function buildModelPlanInputForGoal(
    * before #966-goal-setups wired the real decision in to replace the old hardcoded fallback.
    */
   setupsOverride?: SetupSpec[],
+  /**
+   * #961 — THE IDEAL'S CANDIDATE SET, from the caller. The sim worker's own realm never loads the
+   * house service's `cat:` rows (`toolRegistry.getTools()` is a main-thread snapshot there), so the
+   * main thread sends the catalogue's tool entries on the generate message instead of the worker
+   * reaching for house state. Absent = no catalogue: `planTwoOutcomes` then returns `ideal: null`
+   * and the second plan is never run — preview and every other caller that omits it are unchanged.
+   */
+  catalogueTools?: readonly Tool[],
 ): Promise<ModelPlanInput> {
   const rawMesh = targetObjectMesh(goal);
   const placed = placeTarget(goal, rawMesh);
@@ -4961,11 +4969,11 @@ export async function buildModelPlanInputForGoal(
   // The owned set: the shop's own tools and this job's cutter — what the plan uses by default.
   const house: Tool[] = [...(shop.tools ?? []).map((e) => e.tool), tool];
   // #961 (the maintainer's 11-05 ruling, point 1) — THE IDEAL IS PLANNED FROM THE FULL CATALOGUE,
-  // the tool library every picker lists (`getTools()`: built-ins + the house service's `cat:` rows
-  // + the shop's inventory). A shop tool that is not in the catalogue is owned and already in
-  // `house`; `planTwoOutcomes` de-duplicates by key and skips the ideal run when the catalogue
-  // adds nothing the owned set did not carry.
-  const cutters: CutterCandidates = { house, catalogue: getTools().map((entry) => entry.tool) };
+  // sent by the caller (the main thread's tool library: built-ins, the house service's `cat:` rows
+  // and the shop's inventory). A shop tool not in the catalogue is owned and already in `house`;
+  // `planTwoOutcomes` de-duplicates by key and skips the ideal run when the catalogue adds nothing
+  // the owned set did not carry. Absent = no ideal — the worker itself never reads house state.
+  const cutters: CutterCandidates = { house, catalogue: catalogueTools === undefined ? [] : [...catalogueTools] };
 
   // #985 — THE SCALLOP SEAT HOLDS A CUSP, THE PITCH HAS ITS OWN SEAT. The model engine's
   // `tolerances.finishMm` is the ball's cusp HEIGHT (the ruling makes it decide the finish), and
@@ -5004,6 +5012,8 @@ export async function generateGoalProgram(
   planner?: LevelPlanner,
   /** #966 test/e2e-only seam — see `buildModelPlanInputForGoal`'s own doc on this same parameter. */
   modelSetupsOverride?: SetupSpec[],
+  /** #961 — the ideal's candidate set from the caller; absent leaves `planIdeal` null. */
+  catalogueTools?: readonly Tool[],
 ): Promise<EngraveGenerated> {
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
@@ -5093,7 +5103,7 @@ export async function generateGoalProgram(
   if (USE_MODEL_CAM_ENGINE) {
     let input: ModelPlanInput;
     try {
-      input = await buildModelPlanInputForGoal(job, goal, tool, shop, modelSetupsOverride);
+      input = await buildModelPlanInputForGoal(job, goal, tool, shop, modelSetupsOverride, catalogueTools);
     } catch (e) {
       return fail('cam', `cam/model seam (#966): could not build a ModelPlanInput for "${goal.name}" — ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -7177,6 +7187,8 @@ export async function engraveGenerate(
    * exactly as before. The plans and the assembly are the same either way.
    */
   planner?: LevelPlanner,
+  /** #961 — the ideal's candidate set from the caller; absent leaves `planIdeal` null. */
+  catalogueTools?: readonly Tool[],
 ): Promise<EngraveGenerated> {
   onProgress?.({ stage: 'prepare', label: 'reading the job' });
   // #786 slice 4c-2 — the same catalogue fill as `engraveRegions`, applied HERE as well so the
@@ -7305,7 +7317,7 @@ export async function engraveGenerate(
     }
     // #623 — the surface-3D goal path posts flat (it never lifts feeds), so its package claims no
     // surface: the caller judges it in the work frame, which is the frame it was posted in.
-    return { ...(await generateGoalProgram(job, goal, tool, catalogue, calibration, shop, onProgress, planner)), surface: null };
+    return { ...(await generateGoalProgram(job, goal, tool, catalogue, calibration, shop, onProgress, planner, undefined, catalogueTools)), surface: null };
   }
 
   // #419 J3 — A JOB IS A LIST OF PROGRAMS.

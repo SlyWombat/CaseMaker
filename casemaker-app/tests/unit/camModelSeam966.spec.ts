@@ -236,6 +236,7 @@ describe('#966 ROUND 2 — generateGoalProgram flag ON posts and verifies every 
     expect(result.verify).not.toBeNull();
     expect(result.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
 
+
     // The actual #966 assertion: not "didn't throw" but every posted program's OWN verifier report
     // carries zero error-severity findings — `programs` is the run, `verify` alone is program 1.
     expect(result.programs.length).toBeGreaterThan(0);
@@ -246,4 +247,28 @@ describe('#966 ROUND 2 — generateGoalProgram flag ON posts and verifies every 
       expect(errors, `${program.toolKey}: ${errors.map((e) => e.message).join('; ')}`).toEqual([]);
     }
   }, 60_000);
+
+  it('#961 — the ideal plan rides on the generate call only when the caller sends the catalogue', async () => {
+    vi.doMock('@/engine/cnc/cam/model/plan', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/engine/cnc/cam/model/plan')>();
+      return { ...actual, USE_MODEL_CAM_ENGINE: true };
+    });
+    vi.resetModules();
+    const { generateGoalProgram: generateGoalProgramModelCam } = await import('@/workers/sim/engraveGenerate');
+    const { job, goal, shop, tool } = randomPartJob(1);
+
+    // RED FIRST before the catalogueTools wire: the worker had no way to see the app's library,
+    // so the ideal could never exist. Absent = no ideal, the owned plan still posts.
+    const without = await generateGoalProgramModelCam(job, goal, tool, [], null, shop);
+    expect(without.ok, without.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toBe(true);
+    expect(without.planIdeal ?? null).toBeNull();
+    expect(without.plan).not.toBeNull();
+
+    // With the catalogue on the call, the ideal is planned beside the owned plan and carried.
+    const catalogueTool: Tool = flatEndMill(1, { number: 9, id: 'cat:flat-1', name: '1 mm flat end' });
+    const withCatalogue = await generateGoalProgramModelCam(job, goal, tool, [], null, shop, undefined, undefined, undefined, [catalogueTool]);
+    expect(withCatalogue.ok, withCatalogue.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toBe(true);
+    expect(withCatalogue.planIdeal).not.toBeNull();
+    expect(withCatalogue.plan).not.toBeNull();
+  }, 240_000);
 });

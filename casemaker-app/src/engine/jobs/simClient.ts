@@ -554,6 +554,12 @@ export const engraveGenerate = (
    * a function nested inside a plain object is not recognised as callable and cannot be cloned.
    */
   onProgress?: (progress: EngraveProgress) => void,
+  /**
+   * #961 — the ideal plan's candidate set: the app's tool library (built-ins, the house service's
+   * `cat:` rows and the shop's inventory), read on this side because the worker cannot see the
+   * stores. Absent means no ideal — `planIdeal` stays null and only the owned plan is run.
+   */
+  catalogueTools?: readonly Tool[],
 ): Promise<EngraveGenerated> =>
   guarded(
     getSimApi().engraveGenerate(
@@ -564,6 +570,7 @@ export const engraveGenerate = (
       margins,
       shop,
       onProgress === undefined ? undefined : Comlink.proxy(onProgress),
+      catalogueTools,
     ),
   );
 
