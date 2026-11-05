@@ -16,9 +16,9 @@
  * prove it is read as a parameter, not baked in.
  */
 export const FLAT_SURFACE_MAX_SLOPE_DEG = {
-  value: 7.1,
+  value: 1.93,
   status: 'provisional' as const,
-  note: 'pending D’s #960 picture against Makera’s T1 (1.9° vs 7.1°)',
+  note: 'same provisional as D’s #960 branch (1.93) until the manager rules on D’s corrected picture; the candidates were 1.9–7.1',
 } as const;
 
 /** The provisional value, as a plain number for callers that state no override. */

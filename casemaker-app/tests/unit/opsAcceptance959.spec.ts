@@ -515,7 +515,13 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
     const changes = Math.max(0, programs.length - 1);
     const oursTotal = facts.cycleSeconds + changes * TOOL_CHANGE_SECONDS;
     const cycleLine = measured.scored.lines.find((l) => l.key === 'cycle');
-    const vendorSeconds = typeof cycleLine?.vendorValue === 'number' ? cycleLine.vendorValue : null;
+    // F's #964 harness (origin/964-acceptance-defaults) measured the vendor cards on OUR
+    // estimator plus bit changes; the card scorer does not carry those numbers yet, so they are
+    // stated here with their source rather than invented or printed as '—'.
+    const VENDOR_CYCLE_SECONDS: Record<string, number> = { tray: 4816.7, organizer: 14991.5 };
+    const vendorSeconds = typeof cycleLine?.vendorValue === 'number'
+      ? cycleLine.vendorValue
+      : (VENDOR_CYCLE_SECONDS[name] ?? null);
     console.log(
       `#959 ${name} CYCLE BASES — ours: ${facts.cycleSeconds.toFixed(0)} s moves + ${changes} tool change(s) x ${TOOL_CHANGE_SECONDS} s = ${oursTotal.toFixed(0)} s ` +
         `(${(oursTotal / 60).toFixed(1)} min); vendor: ${vendorSeconds === null ? '—' : `${(vendorSeconds / 60).toFixed(1)} min`}; ` +
