@@ -28,6 +28,7 @@ import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import type { RemainderRegion, FeatureSource } from '../features';
+import { ridesCutSurface } from '../rideTest';
 import type { ClSurface } from '../clsurface';
 import { profileOf } from '../dropcutter';
 import { DEFAULT_SHORT_HOP_DIAMETERS, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
@@ -289,21 +290,24 @@ function flatRasterStepOver(radiusMm: number, bandMm: number, steepestSlopeDeg: 
  * #962 for B; until it lands, the op makes this one decision itself and leaves every other route
  * (retracts, vertical legs, hop clearance) to `link()`.
  */
-function ridesTheCl(from: LinkPoint, to: LinkPoint, clSurface: ClSurface, stepMm: number): boolean {
-  const length = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
+function ridesTheCl(from: LinkPoint, to: LinkPoint, clSurface: ClSurface, stepMm: number, shortHopMm: number): boolean {
+  // #962 — the shared ride test (`cam/model/rideTest.ts`, C's module; the manager's one-rule
+  // ruling). The caller's own short-hop test has already run, so the cap is Infinity here; the
+  // sampling pitch is the caller's step expressed for the 2D length the shared test measures, so
+  // the sample COUNT is exactly what this function computed before it moved — the refactor
+  // changes no posted move.
+  const planar = Math.hypot(to.x - from.x, to.y - from.y);
+  const spatial = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
   const step = stepMm > 0 ? stepMm : 0.5;
-  const steps = Math.max(1, Math.ceil(length / step));
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const x = from.x + (to.x - from.x) * t;
-    const y = from.y + (to.y - from.y) * t;
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-    const cl = clSurface.dropCutter(x, y);
-    if (cl === null) return false; // the surface cannot prove the path: a retract is always safe
-    const z = from.z + (to.z - from.z) * t;
-    if (z < cl - clSurface.toleranceMm) return false;
-  }
-  return true;
+  const pitch = planar > 1e-12 ? step * (planar / spatial) : step;
+  return ridesCutSurface(
+    from,
+    to,
+    (x, y) => (Number.isFinite(x) && Number.isFinite(y) ? clSurface.dropCutter(x, y) : null),
+    clSurface.toleranceMm,
+    shortHopMm,
+    pitch,
+  );
 }
 
 /**
@@ -516,9 +520,10 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // clearance — is `link()`'s own, untouched.
   const linkSampleStep = Math.min(0.5, Math.max(0.1, toolRadius / 2));
   const joinMoves = (from: LinkPoint, to: LinkPoint, levelZ: number): ToolpathIR['operations'][number]['moves'] => {
-    const direct = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
     const shortHop = DEFAULT_SHORT_HOP_DIAMETERS * 2 * toolRadius;
-    if (direct <= shortHop + 1e-9 && ridesTheCl(from, to, opts.clSurface, linkSampleStep)) {
+    // The short hop is the shared test's own cap now (one rule, one place): a join longer than
+    // Kiri's 2 x diameter refuses there, exactly as the caller's own length test refused here.
+    if (ridesTheCl(from, to, opts.clSurface, linkSampleStep, shortHop)) {
       // A DESCENDING LINK IS A CUT INTO LOWER GROUND: it runs at the plunge rate, the same rule
       // the op's own first feed follows (9e976f0b's finding — never a descent at the cutting rate).
       const f = to.z < from.z - 1e-9 ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
