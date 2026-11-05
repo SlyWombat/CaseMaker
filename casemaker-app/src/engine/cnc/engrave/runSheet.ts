@@ -1826,10 +1826,11 @@ function surfaceSpreadSteps(
   const refWords =
     Z0_REFERENCE === 'lowest' ? 'LOWEST' : Z0_REFERENCE === 'highest' ? 'HIGHEST' : 'MIDPOINT (the average)';
 
+  const touchesStockTop = job.facing !== undefined && job.facing.enabled && job.facing.depth > 0;
   const steps: RunSheetStep[] = [
     {
       text:
-        `The blank's top is measured at ${n} points across the cut — its centre, then both extents on ` +
+        `The blank's top is measured at ${n} points across ${touchesStockTop ? "the blank's top" : 'the cut'} — its centre, then both extents on ` +
         'each axis — because a printed blank’s colour line is a plane and its dome is extra material ' +
         'above it: one touch at the centre cannot tell you the floor at the ends of a line. Take them ' +
         'in the order below and write each reading down.',

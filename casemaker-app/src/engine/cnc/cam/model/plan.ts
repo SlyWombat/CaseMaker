@@ -35,7 +35,7 @@ import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
-import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances } from './types';
+import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances, StockProbes } from './types';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { pocket } from './ops/pocket';
 import { clSurface } from './clsurface';
@@ -133,6 +133,12 @@ export interface ModelPlanInput {
   geometry: FeatureSource;
   /** #959 ruling: `'on'` plans the facing stage; absent/`'off'` gives the skin to the `skin` pass. */
   facing?: 'off' | 'on';
+  /**
+   * #943's ruling — the probed stock top, handed in by the caller that holds the measurement
+   * (the registration store lives on the main thread; this plan cannot read it). ABSENT is a job
+   * with no measurement: the facing depth comes from the stated stock top and the plan says so.
+   */
+  stockProbes?: StockProbes;
   /** The shared flat/ball slope parameter (#959); absent → the provisional `FLAT_SURFACE_MAX_SLOPE_DEG`. */
   flatSurfaceMaxSlopeDeg?: number;
   /**
@@ -398,6 +404,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         air: true,
         boolean,
         facing: input.facing ?? 'off',
+        ...(input.stockProbes === undefined ? {} : { stockProbes: input.stockProbes }),
       },
       curved: {
         geometry: input.geometry,
@@ -641,6 +648,12 @@ export interface PlanPocketsOptions {
    * belongs to the flat surface-following pass (`skin`).
    */
   facing?: 'off' | 'on';
+  /**
+   * #943's ruling — the probed stock top (see {@link ModelPlanInput.stockProbes}): the facing
+   * cut starts at the highest probed point and its target clamps at the part top. Absent → the
+   * stated stock top, stated on the plan.
+   */
+  stockProbes?: StockProbes;
 }
 
 /**
@@ -765,10 +778,18 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   const facingDepthMm = z0 - tree.top.z;
   // #959 (2026-11-05 ruling): facing is an OPERATOR OPTION, off by default.
   const hasFacing = (opts.facing ?? 'off') === 'on' && facingDepthMm > 1e-6;
+  // #943 (2026-11-05 ruling): THE TOP IS THE HIGHEST PROBED POINT. In this datum the registration
+  // writes Z0 at the LOWEST touch (#475's `Z0_REFERENCE`), so the highest reading is `+spreadMm`
+  // above the zero: the facing cut starts there, and the passes count down to the part top. The
+  // TARGET (one step below the lowest point) is clamped at the part top — one step deeper than
+  // `facingDepthMm` would cut the design's own top face — and the clamp is stated below when it
+  // binds (a skin thinner than one row step). No probes → the stated stock top, also stated.
+  const facingSpreadMm = Math.max(0, opts.stockProbes?.spreadMm ?? 0);
+  const facingTopZ = rebase(z0) + facingSpreadMm;
   if (hasFacing) {
     refById.set('facing', {
       id: 'facing', kind: 'pocket', bounds: boundsOfPolygons(tree.contour.outline),
-      topZ: rebase(z0), bottomZ: rebase(tree.top.z), obstacles: [],
+      topZ: facingTopZ, bottomZ: rebase(tree.top.z), obstacles: [],
       regionClearanceZ: Math.max(0, rebase(tree.frame.partTop)) + 5,
     });
   }
@@ -854,7 +875,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       return pocket({
         cutter,
         node: {
-          id: 'facing', floorZ: rebase(tree.top.z), mouthZ: rebase(z0), open: false, through: false,
+          id: 'facing', floorZ: rebase(tree.top.z), mouthZ: facingTopZ, open: false, through: false,
           region: facingRegion, floors: [], islands: [], children: [], remainder: [], narrowest: Infinity,
         },
         region: ref,
@@ -1056,6 +1077,24 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   }
 
   const notes: string[] = [];
+  // #943 (2026-11-05 ruling): the facing stage states where its cut starts, how many passes the
+  // probed spread takes, and the clamp when the part top binds. The count mirrors `depthPasses`'
+  // own rule (`ceil(total / stepDown)`, the last pass on the floor).
+  if (hasFacing) {
+    const mm = (n: number): string => String(Math.round(n * 1000) / 1000);
+    const passes = Math.max(1, Math.ceil((facingSpreadMm + facingDepthMm) / opts.stepDownMm - 1e-9));
+    const plural = passes === 1 ? 'pass' : 'passes';
+    notes.push(
+      opts.stockProbes === undefined
+        ? `facing: no surface measurement — the stated stock top is the cut's start, ${passes} ${plural} of at most ${mm(opts.stepDownMm)} mm to the part top ${mm(facingDepthMm)} mm below the zero`
+        : `facing: ${opts.stockProbes.count} surface touches, spread ${mm(opts.stockProbes.spreadMm)} mm from the highest point — ${passes} ${plural} of at most ${mm(opts.stepDownMm)} mm to the part top ${mm(facingDepthMm)} mm below the zero`,
+    );
+    if (facingDepthMm < opts.stepDownMm - 1e-9) {
+      notes.push(
+        `facing stops at the part top ${mm(facingDepthMm)} mm below the zero — less than one ${mm(opts.stepDownMm)} mm row step; the low side gets a ${mm(facingDepthMm)} mm bite, because one step deeper would cut the design`,
+      );
+    }
+  }
   for (const [id, { reason: message }] of regionFailures) {
     notes.push(`${id}: not cut — planning failed (${message})`);
     // A root pocket's/wide through hole's own mouth assumes facing already cleared the skin
