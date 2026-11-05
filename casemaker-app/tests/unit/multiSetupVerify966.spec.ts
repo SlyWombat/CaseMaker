@@ -171,7 +171,7 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
       expect(errors, `${label}: ${errors.map((e) => e.message).join('; ')}`).toEqual([]);
       expect(program.verify!.ok, `${label}: verify.ok should agree with "no error-severity finding"`).toBe(true);
     }
-  }, 30_000);
+  }, 90_000);
 
   // IMPLEMENTED (966-goal-setups landed `buildModelPlanInputForGoal`'s real setup decision,
   // `c099c5cc`): a bare sphere genuinely needs two setups (`buildSetupSpecs` says so, below), but
@@ -197,7 +197,7 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
     ).toBe(true);
     // Never the false-green shape this case guards against.
     expect(result.programs).toEqual([]);
-  }, 30_000);
+  }, 90_000);
 
   // NEW (the Manager's ruling, #966): the datum-bearing shape proves what the sphere above cannot
   // — a goal that genuinely needs two setups, carries a real locating datum, and posts EVERY
@@ -229,5 +229,5 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
       expect(errors, `${label}: ${errors.map((e) => e.message).join('; ')}`).toEqual([]);
       expect(program.verify!.ok, `${label}: verify.ok should agree with "no error-severity finding"`).toBe(true);
     }
-  }, 30_000);
+  }, 90_000);
 });

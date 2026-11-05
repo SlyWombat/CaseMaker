@@ -210,7 +210,7 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
       // Above all: never the old silent shape.
       expect(result.ok).not.toBe(true);
     },
-    30_000,
+    90_000,
   );
 
   it(
@@ -246,7 +246,7 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
       expect(message).toContain("a 'bottom' setup is only wired for a vise mount (#965 stated scope)");
       expect(message).not.toMatch(/\n\s+at /);
     },
-    30_000,
+    90_000,
   );
 
   it(

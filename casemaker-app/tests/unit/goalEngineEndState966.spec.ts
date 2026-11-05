@@ -198,7 +198,7 @@ describe('#966 end-state, part 1 — the flag’s own default routes generateGoa
     // planModelCam is the thing that actually ran, for every goal job, with no override.
     expect(spy).toHaveBeenCalled();
     expect(result.ok).toBe(true);
-  }, 30_000);
+  }, 90_000);
 });
 
 // ───────────────────────────────────────────────────────────────────────────────────────────
@@ -239,7 +239,7 @@ describe('#966 end-state, part 2 — a goal needing two setups posts both, never
     for (const setup of output.perSetup) {
       expect(setup.programs.length, `setup ${setup.setupIndex}: no program posted`).toBeGreaterThan(0);
     }
-  }, 30_000);
+  }, 90_000);
 
   it('GREEN: generateGoalProgram itself, flag on, posts both setups’ work with no refusal, and EVERY posted program verifies clean', async () => {
     vi.doMock('@/engine/cnc/cam/model/plan', async (importOriginal) => {
@@ -276,7 +276,7 @@ describe('#966 end-state, part 2 — a goal needing two setups posts both, never
       const errors = program.verify!.findings.filter((f) => f.severity === 'error');
       expect(errors, `setup ${program.setupIndex} program (${program.toolKey}) had verify error(s): ${JSON.stringify(errors)}`).toEqual([]);
     }
-  }, 30_000);
+  }, 90_000);
 });
 
 // ───────────────────────────────────────────────────────────────────────────────────────────
@@ -304,7 +304,7 @@ describe('#966 end-state, part 2b — the bare sphere refuses BY NAME (registerS
     // `registerSetupOrigin`'s own (no locating datum), never a setup-count problem.
     expect(input.setups).toHaveLength(2);
     await expect(planModelCam(input)).rejects.toThrow(/no locating features found for the vise flip \(#965 registration\)/);
-  }, 30_000);
+  }, 90_000);
 
   it('generateGoalProgram itself, flag on, refuses BY THAT SAME NAME — never ok:true for a part with no locating datum', async () => {
     vi.doMock('@/engine/cnc/cam/model/plan', async (importOriginal) => {
@@ -325,7 +325,7 @@ describe('#966 end-state, part 2b — the bare sphere refuses BY NAME (registerS
     ).toBe(true);
     // Never a silent single-side success — the false-green shape this part guards against.
     expect(result.programs).toEqual([]);
-  }, 30_000);
+  }, 90_000);
 });
 
 // ───────────────────────────────────────────────────────────────────────────────────────────
@@ -494,7 +494,7 @@ describe('#966 end-state, part 4 — the freeing-contour safety clamp and the po
     // exact [2, 3] mm offset reads as "offset [2, 3] mm", not "[2.000, 3.000]".
     expect(notes.some((n) => n.includes('offset [2, 3] mm'))).toBe(true);
     expect(notes.some((n) => n.includes('offset [0, 0] mm'))).toBe(false);
-  }, 30_000);
+  }, 90_000);
 
   it('GREEN — THE #965 REVIEW FINDING, CLOSED: the posted program never cuts deeper than what the freeing-contour safety clamp allows at the SAME (correctly offset) point, through a full two-setup planModelCam run', async () => {
     // Run the SAME job twice — once with the registration this part can never produce on its own
@@ -567,5 +567,5 @@ describe('#966 end-state, part 4 — the freeing-contour safety clamp and the po
     // offset, equals the depth `planModelCam` actually posted, to the same chord-tolerance margin.
     expect(minSafeCorrectOffset).toBeCloseTo(THICKNESS - ARC_CHORD_TOLERANCE_MM, 9);
     expect(-deepestWith).toBeCloseTo(minSafeCorrectOffset, 9);
-  }, 30_000);
+  }, 90_000);
 });

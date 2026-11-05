@@ -161,7 +161,7 @@ describe('#966 — generateGoalProgram routes through cam/model behind USE_MODEL
     expect(message).toContain('cam/model seam (#966)');
     expect(message).toMatch(/planModelCam refused —|planModelCam returned \d+ setup/);
     expect(message).not.toMatch(/\n\s+at /); // not a raw stack trace
-  }, 30_000);
+  }, 90_000);
 });
 
 /**

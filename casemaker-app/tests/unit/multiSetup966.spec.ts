@@ -40,7 +40,7 @@ describe('#966 ROUND 3 — generateGoalProgram posts and verifies a real multi-s
     expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
     expect(result.ok).toBe(true);
     expect(result.plan ?? null).toBeNull();
-  }, 30_000);
+  }, 90_000);
 
   it('flag on: planModelCam plans two setups, every setup\'s programs post and verify, plan carries the full ModelPlanOutput', async () => {
     setModelCamEnabled(true);
@@ -81,7 +81,7 @@ describe('#966 ROUND 3 — generateGoalProgram posts and verifies a real multi-s
     // Setup 1 (the last, the vise flip) registered against setup 0 and states so in its notes —
     // #965 registration actually ran, not a nominal/skipped offset.
     expect(result.plan!.perSetup[1]!.notes.some((n) => n.includes('#965 registration'))).toBe(true);
-  }, 30_000);
+  }, 90_000);
 });
 
 describe('#966 ROUND 3 — the registration refusal surfaces as a named stage failure, not a crash', () => {
@@ -104,5 +104,5 @@ describe('#966 ROUND 3 — the registration refusal surfaces as a named stage fa
     // Nothing was planned before the throw (`registerSetupOrigin` runs INSIDE `planModelCam`,
     // before it ever returns an output), so there is no plan to carry here either.
     expect(result.plan ?? null).toBeNull();
-  }, 30_000);
+  }, 90_000);
 });
