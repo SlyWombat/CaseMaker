@@ -5227,6 +5227,16 @@ export async function generateGoalProgram(
       });
     }
   }
+  //
+  // #980 — A PICTURE RELIEF HAS NO MESH (same fact `rotaryRelief.ts`'s own `sampleGoalRadialField`
+  // states for the rotary side): `buildModelPlanInputForGoal` calls `targetObjectMesh` unconditionally,
+  // which throws for a `format: 'png'` goal. Refused here, named and by itself — not folded into
+  // the generic "could not build a ModelPlanInput" catch below — because restoring the path
+  // (triangulating the picture's own heightfield into a watertight FeatureSource) is #980's own
+  // scope, not a `ModelPlanInput`-building bug.
+  if (goal.format === 'png') {
+    return fail('cam', 'a picture relief is a flat heightfield; cam/model needs a mesh (#980)');
+  }
   let input: ModelPlanInput;
   try {
     input = await buildModelPlanInputForGoal(job, goal, tool, shop, modelSetupsOverride);

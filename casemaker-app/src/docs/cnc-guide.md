@@ -84,6 +84,8 @@ the files go to **Makera Studio** by hand. In both builds a person is at the mac
  pencil crease angle (a picture adds its relief depth, direction and placed width). The measured 3D
  engagement feeds are still bench work. A heightfield has one top-Z per (x, y), so undercuts and
  overhangs are unrepresentable — the honest 3-axis answer.
+ **2026-11-05:** a PNG relief refuses by name (#980) until it is restored on `cam/model` — the
+ mesh goal path above is unaffected.
 - V-carving a region whose groove at the colour plane is narrower than one machine step. The app
  states it as a warning (`vcarve-groove-too-narrow`, §8.1) and cuts the grooves; it does open
  regions otherwise.
@@ -562,7 +564,8 @@ so lettering can be given the V-bit while another cutter pockets the blank aroun
 a **PNG** as well as a mesh: the file is embedded in the job by its bytes (never the sampled
 heights), its tones become the goal's top-Z field, and the SAME goal pipeline roughs and finishes
 it — the parallel finish, the scallop and pencil passes, the dexel check and the release are
-the mesh goal's own. The row's Technical fold carries the map's two numbers — the **relief depth**
+the mesh goal's own. **2026-11-05:** Generate refuses a PNG relief by name (#980) until it is
+restored on `cam/model`; a mesh goal is unaffected. The row's Technical fold carries the map's two numbers — the **relief depth**
 (default 1.5 mm, stated as the CAM's default until typed) and which end of the tones sits at the
 **top face** (white as drawn, or black) — and the picture's placed **width** (the height follows
 its aspect). The map is one function: `depth = relief × (1 − luminance/255)`, white at the top

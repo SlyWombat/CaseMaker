@@ -251,26 +251,20 @@ describe('the relief rides the goal pipeline (#672)', () => {
     };
   }
 
-  it('generates the same goal program a mesh would: the surface check, the passes, the bbox', async () => {
+  it('REFUSES by name — #966/#980: cam/model has no path for a picture relief yet', async () => {
     const target = reliefTarget(rampPng(), { x: 25.6, y: 8 }, { maxDepthMm: 2 });
     const job = reliefJob(target);
-    const out = await generateGoalProgram(job, target, BALL, [], null, {
+    const out = await generateGoalProgram(job, target, BALL, null, {
       surfaceGrid: { pitchMm: { value: 0.4, source: 'chosen' } },
     });
-    expect(out.ok, JSON.stringify(out.errors)).toBe(true);
-    expect(out.programs).toHaveLength(1);
-    const program = out.programs[0]!;
-    // #535 — the same check: a surface program, no 2.5D report, the grid and the passes.
-    expect(program.verify).toBeNull();
-    expect(program.surfaceCheck?.kind).toBe('surface');
-    expect(program.surfaceCheck?.gridPitchMm).toBeCloseTo(0.4, 9);
-    expect(program.surfaceCheck?.passes).toHaveLength(2);
-    expect(program.surfaceCheck?.resolutionNote).toContain('mm per pixel');
-    // The operation's facts are the goal path's own.
-    expect(out.surface3d?.gridPitchMm).toBeCloseTo(0.4, 9);
-    expect(out.surface3d?.notes.join(' ')).toContain('mm per pixel');
-    // #671's passes are available on a picture exactly as on a mesh. A VALLEY picture — tones
-    // darkest at the middle — is a concave crease, so the pencil pass has a corner to follow.
+    expect(out.ok).toBe(false);
+    expect(out.programs).toEqual([]);
+    expect(out.errors.some((e) => e.message.includes('#980'))).toBe(true);
+  }, 90_000);
+
+  it('#671’s passes are available on a picture exactly as on a mesh, through generateSurface3dForGoal directly (#980 restores this via planModelCam; the direct heightfield call is untouched by #966)', async () => {
+    // A VALLEY picture — tones darkest at the middle — is a concave crease, so the pencil pass has
+    // a corner to follow.
     const valley = new Uint8Array(64 * 4);
     for (let y = 0; y < 4; y++) for (let x = 0; x < 64; x++) valley[y * 64 + x] = Math.min(255, Math.abs(x - 32) * 16);
     const withPasses = await generateSurface3dForGoal({
@@ -298,10 +292,14 @@ describe('the relief rides the goal pipeline (#672)', () => {
     const size = { x: 25.6, y: 8 };
     const target = reliefTarget(rampPng(), size, { maxDepthMm: 2 });
     const job = reliefJob(target);
-    const out = await generateGoalProgram(job, target, BALL, [], null, {
+    // #966/#980 — generateGoalProgram itself now refuses a picture relief by name; the sweep
+    // below checks generateSurface3dForGoal directly, the lower-level call #980 restores access
+    // to, which #966 leaves untouched.
+    const out = await generateGoalProgram(job, target, BALL, null, {
       surfaceGrid: { pitchMm: { value: 0.2, source: 'chosen' } },
     });
-    expect(out.ok).toBe(true);
+    expect(out.ok).toBe(false);
+    expect(out.errors.some((e) => e.message.includes('#980'))).toBe(true);
     const hf = sampleGoalHeightfield(target, { pitchMm: 0.2 });
     const setup: Setup = stubSetup(
       { kind: 'prism', outline: rectProfile(60, 40), thickness: 12 },
