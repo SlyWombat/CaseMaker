@@ -1351,6 +1351,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // 2. REST BY CL DIFFERENCE, when the caller offers a smaller flat: the band the previous
     //    cutter left standing, where the smaller one can reach.
     const restFlat = opts.restFlat;
+    const restClSink: { surface?: ReturnType<typeof clSurface> } = {};
     if (restFlat !== undefined) {
       // B's review of `0461df01`: the rest stage was left on the MESH-ABSOLUTE region and an
       // unshifted surface — `depthPasses` reads `opts.region.zTop/zBottom`, so at stockTop != 0 the
@@ -1359,6 +1360,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       // the region is `base`, the surface is shifted like the flat's.
       attempt('rest', restFlat, ref, () => {
         const restCl = shiftSurface(clSurface(opts.geometry, base, restFlat, cuts.stepOver));
+        restClSink.surface = restCl;
         noteGrid(restFlat, restCl);
         return rest({
           cutter: restFlat,
@@ -1387,6 +1389,49 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         });
       });
     }
+
+    // ITEM 4a — THE FINISH'S MASK: leftover = flatSwept − design > band, dilated by the ball's
+    // footprint. `flatSwept` is the LOWEST flat CL that actually ran over the region — the skim's
+    // exact-contact pass, else the Z-levels' cl + band; a rest flat's CL when one ran — read back
+    // to the MESH datum (the shifted surfaces + z0), because `design` is the mesh's own top at the
+    // cell (`topSurfaceAt`). The band is the finish's tolerance (the ruling), not the rough's
+    // stock-to-leave.
+    const finishBand = opts.finishScallopMm ?? opts.bandMm;
+    // One bins build for the whole plan's top-surface queries (the same structure the rim
+    // filter uses), not one per region.
+    let surfaceBins: TriangleBins | null = null;
+    const binsForMask = (): TriangleBins => (surfaceBins ??= buildTriangleBins(opts.geometry.triangles));
+    const flatAbs = (x: number, y: number): number | null => {
+      const v = prevCl.dropCutter(x, y);
+      return v === null ? null : v + z0;
+    };
+    const restAbs = (x: number, y: number): number | null => {
+      const surface = restClSink.surface;
+      if (surface === undefined) return null;
+      const v = surface.dropCutter(x, y);
+      return v === null ? null : v + z0;
+    };
+    const leftoverAbove = (x: number, y: number): boolean => {
+      const f = flatAbs(x, y);
+      const r = restAbs(x, y);
+      const flatZ = f === null ? r : r === null ? f : Math.min(f, r);
+      if (flatZ === null) return false;
+      const design = topSurfaceAt(binsForMask(), x, y);
+      if (design === null) return false;
+      return flatZ - design > finishBand;
+    };
+    const ballRadiusForMask = (cuttingDiameter(ball) ?? 0) / 2;
+    const maskCells = (x: number, y: number): boolean => {
+      // Dilated by the ball's footprint: a centre just outside the leftover still cuts into it,
+      // and a centre just OUTSIDE the part still finishes the skirt its flank holds — the same
+      // margin the grown outer ring needs.
+      if (leftoverAbove(x, y)) return true;
+      for (let d = 0; d < 8; d++) {
+        const a = (d * Math.PI) / 4;
+        if (leftoverAbove(x + Math.cos(a) * ballRadiusForMask, y + Math.sin(a) * ballRadiusForMask)) return true;
+      }
+      return false;
+    };
 
     // 3. THE BALL'S ONE FINAL LEVEL: a single pass at the region's depth takes the band.
     //
@@ -1421,6 +1466,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       clSurface: clBall(),
       kind: 'ball-scallop',
       scallopMm: opts.finishScallopMm ?? opts.bandMm,
+      maskCells,
       stepDownMm: depth,
       feeds: feedsOf(paramsFor(ball)),
       safeZMm: opts.safeZMm,
