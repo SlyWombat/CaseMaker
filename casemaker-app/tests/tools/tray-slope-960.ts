@@ -78,6 +78,27 @@ function cellSlope(x: number, y: number): number {
   return slopeOfCell[j * hf.nx + i]!;
 }
 
+// ---- Registration: the NC's own outer contour is the part's outline -------------------------
+// The heightfield is the goal at the vendor's placement; the NC is in the machine's frame. Rather
+// than assume the two agree, the transform is DERIVED from the outline: the vendor's contour
+// toolpath's bounding box is fitted onto the goal's covered bounding box (both orientations tried,
+// the closer fit wins), and every plot and sample uses that transform.
+let hxMin = Infinity;
+let hxMax = -Infinity;
+let hyMin = Infinity;
+let hyMax = -Infinity;
+for (let j = 0; j < hf.ny; j++) {
+  for (let i = 0; i < hf.nx; i++) {
+    if (hf.cov[j * hf.nx + i] !== 1) continue;
+    const x = hf.x0 + i * hf.pitch;
+    const y = hf.y0 + j * hf.pitch;
+    if (x < hxMin) hxMin = x;
+    if (x > hxMax) hxMax = x;
+    if (y < hyMin) hyMin = y;
+    if (y > hyMax) hyMax = y;
+  }
+}
+
 // ---- Makera's own moves for the chosen tool --------------------------------------------------
 const nc = readFileSync(ncPath, 'utf8').split('\n');
 let currentTool: number | null = null;
@@ -92,6 +113,12 @@ for (const line of nc) {
 const pathFilter = opt('--paths', 'relief,pocket').split(',').map((v) => v.trim().toLowerCase());
 let currentPath: number | null = null;
 const moves: { a: [number, number]; b: [number, number]; z: number }[] = [];
+// The outer contour's own extent, for the registration below (any tool's contour: the outline is
+// the same cut).
+let cxMin = Infinity;
+let cxMax = -Infinity;
+let cyMin = Infinity;
+let cyMax = -Infinity;
 let px = 0;
 let py = 0;
 let pz = 0;
@@ -121,9 +148,8 @@ for (const rawLine of nc) {
     }
     continue;
   }
-  if (currentTool !== toolNumber) continue;
   const pathName = currentPath === null ? '' : (pathNames.get(currentPath) ?? '').toLowerCase();
-  if (!pathFilter.some((f) => pathName.includes(f))) continue;
+  const isContourPath = pathName.includes('contour');
   const words = feed[1]!;
   const nxv = /X(-?[\d.]+)/.exec(words);
   const nyv = /Y(-?[\d.]+)/.exec(words);
@@ -133,12 +159,29 @@ for (const rawLine of nc) {
   const tz = nzv ? Number(nzv[1]) : pz;
   // A cutting move: XY travel at a depth below the stock top (Z ≤ 0 here).
   if ((nxv || nyv) && (px !== tx || py !== ty) && tz <= 0) {
+    if (isContourPath) {
+      for (const [x, y] of [[px, py], [tx, ty]] as const) {
+        if (x < cxMin) cxMin = x;
+        if (x > cxMax) cxMax = x;
+        if (y < cyMin) cyMin = y;
+        if (y > cyMax) cyMax = y;
+      }
+    }
+    if (currentTool !== toolNumber) continue;
+    if (!pathFilter.some((f) => pathName.includes(f))) continue;
     moves.push({ a: [px, py], b: [tx, ty], z: tz });
   }
   px = tx;
   py = ty;
   pz = tz;
 }
+
+// ---- the frame: the vendor NC and the goal heightfield share the STOCK frame -----------------
+// Makera's own outline is the stock's boundary (measured −1.00 .. 111.00 × −1.00 .. 141.00 on a
+// 110 × 140 stock — the cutter's centreline half a diameter outside the edge), and the app's
+// heightfield is the part placed inside that same stock (2.00 .. 108.00 × 2.00 .. 138.00 on the
+// 110 × 140). So the transform is the identity: the 2 mm the first plot showed was NOT an offset
+// to remove — it is the part's own inset within the clamped stock.
 
 const sampleSlopes: number[] = [];
 const STEP_MM = 0.5;
@@ -173,8 +216,11 @@ console.log(
 const colours = ['#3f8f4f', '#c9a227', '#8a3b3b'];
 const legend = [`≤ ${thresholds[0]}°`, `${thresholds[0]}–${thresholds[1] ?? '∞'}°`, `> ${thresholds[1] ?? thresholds[0]}°`];
 const SCALE = 4; // px per mm
-const W = Math.round(hf.nx * hf.pitch * SCALE);
-const H = Math.round(hf.ny * hf.pitch * SCALE);
+// The stock frame is the drawing's frame: the NC and the heightfield share it (110 × 140 here).
+const STOCK_W = Math.ceil(hf.x0 + hf.nx * hf.pitch);
+const STOCK_H = Math.ceil(hf.y0 + hf.ny * hf.pitch);
+const W = Math.round(STOCK_W * SCALE);
+const H = Math.round(STOCK_H * SCALE);
 // One cell per BLOCK×BLOCK of the 0.1 mm grid (the block's steepest cell wins — a wall shows
 // through a gentle block), with equal-colour runs merged along each row so the SVG stays small.
 const BLOCK = 4;
@@ -185,8 +231,8 @@ for (let jb = 0; jb < hf.ny; jb += BLOCK) {
   let runStart = 0;
   const flush = (endBlock: number): void => {
     if (runColour < 0) return;
-    const x = runStart * bw * SCALE;
-    const y = (hf.ny - 1 - Math.min(hf.ny - 1, jb + BLOCK - 1)) * hf.pitch * SCALE;
+    const x = (hf.x0 + runStart * hf.pitch) * SCALE;
+    const y = (H - (hf.y0 + (jb + Math.min(BLOCK, hf.ny - jb)) * hf.pitch) * SCALE);
     const h = Math.min(BLOCK, hf.ny - jb) * hf.pitch * SCALE;
     rects.push(
       `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${((endBlock - runStart) * bw).toFixed(1)}" height="${h.toFixed(1)}" fill="${colours[runColour]}"/>`,
@@ -219,10 +265,10 @@ for (let jb = 0; jb < hf.ny; jb += BLOCK) {
 }
 const paths = moves
   .map((m) => {
-    const x1 = (m.a[0] - hf.x0) * SCALE;
-    const y1 = H - (m.a[1] - hf.y0) * SCALE;
-    const x2 = (m.b[0] - hf.x0) * SCALE;
-    const y2 = H - (m.b[1] - hf.y0) * SCALE;
+    const x1 = m.a[0] * SCALE;
+    const y1 = H - m.a[1] * SCALE;
+    const x2 = m.b[0] * SCALE;
+    const y2 = H - m.b[1] * SCALE;
     return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"/>`;
   })
   .join('');

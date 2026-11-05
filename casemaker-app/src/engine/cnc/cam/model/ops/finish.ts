@@ -264,14 +264,60 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       }
     }
   }
+  // #960 — AND THE CL SURFACE'S OWN SLOPE per bin, sampled from the surface the rows actually
+  // follow: the ball's CL is what turns a cliff into a shoulder over the cutter's radius, so a
+  // bin's triangle slopes alone under-read it. Both reads are kept, the steeper wins.
+  {
+    const h = 0.1;
+    const ys = 5;
+    const radius = profile.radiusMm;
+    for (let k = 0; k < binCount; k++) {
+      const xc = min[0] + (k + 0.5) * BIN_MM;
+      let steepest = Number.isNaN(binSlope[k]!) ? 0 : binSlope[k]!;
+      for (let s = 0; s < ys; s++) {
+        const y = min[1] + ((s + 0.5) / ys) * (max[1] - min[1]);
+        const z0 = opts.clSurface.dropCutter(xc, y);
+        const zx = opts.clSurface.dropCutter(xc + h, y);
+        const zy = opts.clSurface.dropCutter(xc, y + h);
+        // #960 — A POCKET MOUTH inside the cutter's own reach: the ball rides the shoulders across
+        // the opening, so any row over it leaves the mouth's depth standing and the rows' phase
+        // decides how much. Those bands keep the old dense floor so nothing is lost.
+        const zl = opts.clSurface.dropCutter(xc - radius, y);
+        const zr = opts.clSurface.dropCutter(xc + radius, y);
+        // A ball bridging a gap sits HIGHER than its neighbours (the CL is a local ridge over the
+        // mouth); that ridge is the signature, not a left-right difference across the opening.
+        if (zl !== null && zr !== null && z0 !== null && z0 - Math.max(zl, zr) > opts.scallopMm) steepest = 90;
+        if (z0 === null || zx === null || zy === null) continue;
+        const slope = (Math.atan(Math.hypot((zx - z0) / h, (zy - z0) / h)) * 180) / Math.PI;
+        if (slope > steepest) steepest = slope;
+      }
+      binSlope[k] = steepest;
+    }
+  }
+  // #960 — the band's slope is the STEEPEST within a small window: a cliff's cell lies in the next
+  // bin along, and a row just off it meets the shoulder too. Without the window 2,411 tray cells
+  // (0.17 %) read 0.10–0.17 mm of leftover they did not have at the old dense spacing.
+  const WINDOW_BINS = 3;
   const bandSlopeAt = (x: number): number => {
     const k = Math.min(binCount - 1, Math.max(0, Math.floor((x - min[0]) / BIN_MM)));
-    const v = binSlope[k]!;
-    return Number.isNaN(v) ? 0 : v;
+    let best = 0;
+    for (let d = -WINDOW_BINS; d <= WINDOW_BINS; d++) {
+      const kk = k + d;
+      if (kk < 0 || kk >= binCount) continue;
+      const v = binSlope[kk]!;
+      if (!Number.isNaN(v) && v > best) best = v;
+    }
+    return best;
   };
+  // #960 — NO COVERAGE MAY BE LOST (the manager's rule): the per-band step may be FINER than the
+  // old region-wide one, never coarser. The old spacing is the ceiling, so every cell the old
+  // raster covered is covered here too; the scallop formula only ever tightens it where a band is
+  // steep. (The coarsening the vendor's 0.8 mm implies is held pending the ruling: on the tray it
+  // moved 2,411 cells at the centre slot past the 0.1 mm band.)
+  const ceilingStep = (): number => ballScallopStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1]);
   const stepOverAt = (x: number): number =>
     opts.kind === 'ball-scallop'
-      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, bandSlopeAt(x))
+      ? Math.min(ballScallopStepOver(profile.radiusMm, opts.scallopMm, bandSlopeAt(x)), ceilingStep())
       : flatRasterStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1]);
   let wallBandsSkipped = 0;
 
