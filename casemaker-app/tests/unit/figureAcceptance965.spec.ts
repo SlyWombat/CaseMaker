@@ -51,6 +51,7 @@ import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrav
 import { checkGoalCutInto, type GoalCutIntoOptions } from '@/engine/cnc/engrave/designCheck';
 import { vToolAllowance } from '@/engine/cnc/engrave/edgeBreak';
 import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
+import { DEFAULT_FINISH_SCALLOP_MM } from '@/engine/cnc/cam/model/ops/finish';
 import { measurePostedProgram, combinePostedFacts } from '../tools/postedFacts';
 import { scoreSevenLines, type CutIntoScore, type ProgramScore } from '../tools/sevenLines';
 import { clearMakeraCatalogue, installMakeraCatalogue } from '../tools/makeraCatalogue';
@@ -149,8 +150,11 @@ function goalField(job: EngraveJob, bytes: Buffer, filePath: string): GoalHeight
   return sampleGoalHeightfield(targetOf(job, bytes, filePath), { pitchMm: 0.1, stockTopZ: 0 });
 }
 
+/** The figure job's stated finish tolerance, mm (#965): the scallop the job asks for. */
+const FIGURE_FINISH_MM = 0.01;
+
 /** The consumed programme's jobs. */
-function planInputFor(job: EngraveJob, source: { triangles: ParsedMesh }): ModelPlanInput {
+function planInputFor(job: EngraveJob, source: { triangles: ParsedMesh }, finishMm: number | undefined): ModelPlanInput {
   return {
     geometry: source,
     setups: [{ frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -job.stock.thickness }, underside: 'flatOnStockBottom' }],
@@ -162,7 +166,9 @@ function planInputFor(job: EngraveJob, source: { triangles: ParsedMesh }): Model
     },
     fixture: { mount: job.workholding.kind === 'vise' ? 'vise' : 'tape', envelope: job.workholding.kind === 'vise' ? viseEnvelope(job.stock, jobVise(job), job.sacrificial) : null },
     cutters: { house: HOUSE, catalogue: [] },
-    tolerances: { finishMm: 0.01 },
+    // #965 — the job's stated tolerance; `undefined` states none, and the engine's 0.027 mm
+    // default applies (the tradeoff run below measures that case).
+    tolerances: finishMm === undefined ? {} : { finishMm },
     edgeBreak: { legMm: 0 },
   };
 }
@@ -253,33 +259,8 @@ for (const figure of FIGURES) {
       expect(sha, `${figure.env}: the file is not the job's mesh`).toBe(job.targetObject?.sha256);
 
       const { source } = placedMesh(job, bytes);
-      const input = planInputFor(job, source);
-      // RED TODAY: planModelCam (and its rough op) is a named stub — the failure must say so.
-      const output = await planModelCam(input);
-      expect(output.perSetup.length).toBeGreaterThanOrEqual(1);
-
       const ctx = postContextFor(job, figure.name);
-      const programs: { ir: ToolpathIR; text: string }[] = [];
-      for (const setup of output.perSetup) {
-        for (const ir of setup.programs) {
-          const posted = postZ1(ir, ctx, Z1);
-          expect(posted.ok, `#965 ${figure.name}: postZ1 refused — ${posted.ok ? '' : posted.errors.join('; ')}`).toBe(true);
-          if (!posted.ok) return;
-          const verify = verifyProgram(posted.text, {
-            setup: toSetup(job, Z1),
-            machine: Z1,
-            tool: ir.tool,
-            depthLimit: stockDepthLimit(job.stock, job.minFloor ?? 1),
-            minRapidZ: HOP_Z,
-          });
-          expect(
-            verify.findings.filter((f) => f.severity === 'error'),
-            `#965 ${figure.name}: verifier errors:\n${verify.findings.map((f) => `${f.code}: ${f.message}`).join('\n')}`,
-          ).toEqual([]);
-          programs.push({ ir, text: posted.text });
-        }
-      }
-      expect(programs.length, `#965 ${figure.name}: the plan posted no program`).toBeGreaterThan(0);
+      const field = goalField(job, bytes, stlPath!);
 
       // #948/v4 — a stated edge break's allowance must name the V (the who gate); a stated break
       // that resolves no V is legitimately no allowance, and the check then judges at the floor.
@@ -290,14 +271,58 @@ for (const figure of FIGURES) {
         !statedBreak || breakOptions.edgeBreak === undefined || breakOptions.edgeBreak.toolNumber !== undefined,
         `#965 ${figure.name}: a stated edge break's allowance must carry the V's tool number — without it the v4 who gate is off`,
       ).toBe(true);
-      const field = goalField(job, bytes, stlPath!);
-      const stamped = wholeSurfaceTop(programs, field);
-      const report = checkGoalCutInto(field, stamped.top, {
-        passCoverage: 0.95, // the maintainer's whole-surface line (#965)
-        ...allowance(job),
-        whoAt: stamped.whoAt,
-      });
-      const coverage = 1 - (report.leftoverFractions[0] ?? 0);
+
+      /** One run of the figure at a stated finish tolerance: plan, post, verify, sweep and judge.
+       * #965 runs it TWICE — the job's 0.01 mm and the 0.027 mm default — so the card's scallop
+       * tradeoff is measured, never asserted. */
+      const measureAt = async (finishMm: number | undefined) => {
+        // RED TODAY: planModelCam (and its rough op) is a named stub — the failure must say so.
+        const output = await planModelCam(planInputFor(job, source, finishMm));
+        expect(output.perSetup.length).toBeGreaterThanOrEqual(1);
+        const programs: { ir: ToolpathIR; text: string }[] = [];
+        for (const setup of output.perSetup) {
+          for (const ir of setup.programs) {
+            const posted = postZ1(ir, ctx, Z1);
+            expect(posted.ok, `#965 ${figure.name}: postZ1 refused — ${posted.ok ? '' : posted.errors.join('; ')}`).toBe(true);
+            if (!posted.ok) throw new Error(`#965 ${figure.name}: postZ1 refused`);
+            const verify = verifyProgram(posted.text, {
+              setup: toSetup(job, Z1),
+              machine: Z1,
+              tool: ir.tool,
+              depthLimit: stockDepthLimit(job.stock, job.minFloor ?? 1),
+              minRapidZ: HOP_Z,
+            });
+            expect(
+              verify.findings.filter((f) => f.severity === 'error'),
+              `#965 ${figure.name}: verifier errors:\n${verify.findings.map((f) => `${f.code}: ${f.message}`).join('\n')}`,
+            ).toEqual([]);
+            programs.push({ ir, text: posted.text });
+          }
+        }
+        expect(programs.length, `#965 ${figure.name}: the plan posted no program`).toBeGreaterThan(0);
+
+        const stamped = wholeSurfaceTop(programs, field);
+        const report = checkGoalCutInto(field, stamped.top, {
+          passCoverage: 0.95, // the maintainer's whole-surface line (#965)
+          ...allowance(job),
+          whoAt: stamped.whoAt,
+        });
+        // The ball's own posted minutes — what the scallop buys and what it costs.
+        const finishSeconds = programs
+          .filter((p) => p.ir.tool.shape === 'ball')
+          .reduce((n, p) => n + measurePostedProgram(p.text).cycleSeconds, 0);
+        return { output, programs, report, notes: output.perSetup.flatMap((setup) => setup.notes), coverage: 1 - (report.leftoverFractions[0] ?? 0), finishSeconds };
+      };
+
+      const used = await measureAt(FIGURE_FINISH_MM); // the job's stated tolerance
+      // The vendor's default beside it (a job that states no tolerance) — the tradeoff's other side.
+      const byDefault = await measureAt(undefined);
+      // The two runs must really be at DIFFERENT scallops, or the tradeoff below would be a plan
+      // compared with itself: the plan's own note is the proof (a default parameter once made
+      // exactly that mistake and both runs read 0.010).
+      expect(used.notes.join('\n'), 'the job\'s run did not state 0.01 mm').toContain(`${FIGURE_FINISH_MM.toFixed(3)} mm scallop`);
+      expect(byDefault.notes.join('\n'), 'the default run did not state 0.027 mm').toContain(`${DEFAULT_FINISH_SCALLOP_MM.toFixed(3)} mm scallop`);
+      const { output, programs, report, coverage } = used;
       const cutInto: CutIntoScore = {
         adjudicatedFraction: report.adjudicatedFraction,
         edgeBreakFraction: report.edgeBreakFraction,
@@ -347,10 +372,25 @@ for (const figure of FIGURES) {
       // the pass rule, and the card prints the other lines' facts beside it.
       const scored = scoreSevenLines({ card: figure.name, ours, vendor: null });
 
+      // #965 (the review session's ruling, 2026-11-05) — THE SCALLOP TRADEOFF, ON THE CARD. The
+      // job states FIGURE_FINISH_MM; the vendor's default is 0.027 mm. The card prints the scallop
+      // it used, the default, and the ball's posted minutes and the whole-surface coverage at
+      // each — both sides measured on this job, so the operator can price the choice.
+      const scallop = {
+        usedMm: FIGURE_FINISH_MM,
+        defaultMm: DEFAULT_FINISH_SCALLOP_MM,
+        atUsed: { finishSeconds: used.finishSeconds, coverage: used.coverage },
+        atDefault: { finishSeconds: byDefault.finishSeconds, coverage: byDefault.coverage },
+      };
+      const scallopLine =
+        `#965 ${figure.name} scallop: the job's ${scallop.usedMm.toFixed(3)} mm — finish ${(used.finishSeconds / 60).toFixed(1)} min, coverage ${(used.coverage * 100).toFixed(2)} %; ` +
+        `the ${scallop.defaultMm.toFixed(3)} mm default — finish ${(byDefault.finishSeconds / 60).toFixed(1)} min, coverage ${(byDefault.coverage * 100).toFixed(2)} %`;
+      console.log(scallopLine);
+
       const out = process.env.CM_965_OUT;
       if (out !== undefined) {
         fs.mkdirSync(out, { recursive: true });
-        fs.writeFileSync(join(out, `${figure.name}-posted-facts.json`), JSON.stringify({ coverage, cutInto, scored, ours, programs: programs.map((p) => p.ir.tool.name) }, null, 1));
+        fs.writeFileSync(join(out, `${figure.name}-posted-facts.json`), JSON.stringify({ coverage, cutInto, scored, ours, scallop, scallopLine, programs: programs.map((p) => p.ir.tool.name) }, null, 1));
         // #964 — the standing picture set's inputs: the plan's own programs and the goal target /
         // frame / gate options this run measured.
         fs.writeFileSync(join(out, `${figure.name}-plan.json`), JSON.stringify({ perSetup: output.perSetup.map((setup) => ({ programs: setup.programs })) }, null, 1));
@@ -369,7 +409,7 @@ for (const figure of FIGURES) {
       expect(cutInto.adjudicatedFraction, `#965 ${figure.name}: cut-into beyond the allowance`).toBe(0);
       expect(scored.lines.find((l) => l.key === 'coverage')?.oursValue).toBeCloseTo(coverage, 9);
 
-    }, 600_000);
+    }, 900_000); // #965 — the card now measures both scallops (0.01 and the 0.027 default)
   });
 }
 
