@@ -260,6 +260,27 @@ function resolvedCutParams(input: ModelPlanInput, tool: Tool): { params: CutPara
   throw new Error(`cam/model/plan: no feeds for ${label} in ${input.stock.material} — ${resolved.reason}`);
 }
 
+/**
+ * THE REVIEW'S FINDING (item 8): the curved pipeline's ball and V were fed and spun at the
+ * PRIMARY FLAT's own resolved numbers — `resolvedCutParams` exists per tool, but was only ever
+ * called for the primary. Resolved the same way for a non-flat tool; if even the largest-covered-
+ * row proxy cannot answer for it (`resolvedCutParams` throws), the primary's already-resolved
+ * numbers stand in instead — stated in a note, never silently.
+ */
+function toolCutParams(input: ModelPlanInput, tool: Tool, primaryParams: CutParams): { params: CutParams; note: string | null } {
+  try {
+    const { params, substitution } = resolvedCutParams(input, tool);
+    return { params, note: substitution };
+  } catch (err) {
+    const label = tool.name || tool.id || `${tool.shape} cutter`;
+    const reason = err instanceof Error ? err.message : String(err);
+    return {
+      params: primaryParams,
+      note: `${label}: ${reason} — the primary flat's own feeds/RPM answer instead, the conservative side`,
+    };
+  }
+}
+
 /** §5's three numbers, read off the posted moves: a hop retracts to `hopZ`, a rapid to `safeZ`. */
 function linkingStats(programs: readonly ToolpathIR[]): SetupPlan['linking'] {
   let rapidsCount = 0;
@@ -334,6 +355,20 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
 
     const { params: pocketParams, substitution } = resolvedCutParams(input, primary);
     const feeds = { feedMmPerMin: pocketParams.feed, plungeFeedMmPerMin: pocketParams.plungeFeed };
+
+    // THE REVIEW'S FINDING (item 8): the ball and the V each get their OWN catalogue row — not
+    // the primary flat's, reused as every tool's numbers before this.
+    const toolSubstitutions: string[] = substitution === null ? [] : [substitution];
+    const ballParams = ball === undefined ? null : toolCutParams(input, ball, pocketParams);
+    if (ballParams?.note !== null && ballParams?.note !== undefined) toolSubstitutions.push(ballParams.note);
+    const vbitParams = vbit === undefined ? null : toolCutParams(input, vbit, pocketParams);
+    if (vbitParams?.note !== null && vbitParams?.note !== undefined) toolSubstitutions.push(vbitParams.note);
+    const cutParamsFor = (tool: Tool): CutParams => {
+      if (ball !== undefined && tool === ball && ballParams !== null) return ballParams.params;
+      if (vbit !== undefined && tool === vbit && vbitParams !== null) return vbitParams.params;
+      return pocketParams;
+    };
+
     opts.onProgress?.({ setupIndex, op: 'sequence', fraction: 0.4 });
     const result = planTreePrograms(tree, {
       offset,
@@ -357,6 +392,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         finishScallopMm: input.tolerances.finishMm,
         stepOverMm: pocketParams.stepOver,
         feeds,
+        cutParamsFor,
         rapid: Z1.rapidEstimate,
         spindleRpm: pocketParams.rpm,
         air: true,
@@ -406,7 +442,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
 
     const notes = [...result.notes, ...emptyStages];
-    if (substitution !== null) notes.push(substitution);
+    notes.push(...toolSubstitutions);
     if (input.fixture.envelope !== null) {
       notes.push(
         `the ${input.fixture.mount} fixture envelope is not yet wired into the region obstacles — this plan carries none; the posted program is still checked against the same envelope by the sweep`,
@@ -1034,9 +1070,22 @@ export interface PlanCurvedOptions {
   finishScallopMm?: number;
   /** The rings' spacing; absent → the flat's own radius. */
   stepOverMm?: number;
+  /** `flat`'s own feed/plunge — kept as the fallback every tool used before the review's finding
+   * below named it: the ball and the V each cut at a DIFFERENT diameter and want their own
+   * catalogue row, not the flat's. */
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
   rapid: RapidEstimate;
+  /** `flat`'s own spindle RPM — see {@link feeds}. */
   spindleRpm: number;
+  /**
+   * THE REVIEW'S FINDING (item 8): every cutter in the curved pipeline — rough's flat, rest's
+   * smaller flat, the ball, the V — was fed and spun at `feeds`/`spindleRpm` ABOVE, which
+   * `planModelCam` resolves for the PRIMARY FLAT ONLY. A ball nose and a V cut at their own
+   * diameters, and the house catalogue has their own rows; absent, the resolver falls back to
+   * `feeds`/`spindleRpm` here, so every existing caller that never passes it keeps the old
+   * (flat-wide) numbers unchanged.
+   */
+  cutParamsFor?: (tool: Tool) => CutParams;
   air: boolean;
   safeZMm: number;
   hopZMm: number;
@@ -1133,6 +1182,24 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     peck: 0,
     air: opts.air,
   };
+  // THE REVIEW'S FINDING (item 8): every one of these calls used `cuts` — the FLAT's own resolved
+  // numbers — for the ball and the V too. `cutParamsFor`, when the caller supplies it, resolves
+  // each tool's OWN catalogue row; absent, this falls back to exactly `cuts`'s own shape (the flat
+  // feeding every tool, unchanged for every existing caller that never passes it).
+  const paramsFor = (tool: Tool): CutParams =>
+    opts.cutParamsFor?.(tool) ?? {
+      rpm: opts.spindleRpm,
+      feed: opts.feeds.feedMmPerMin,
+      plungeFeed: opts.feeds.plungeFeedMmPerMin,
+      stepDown: opts.stepDownMm,
+      stepOver: opts.stepOverMm ?? (cuttingDiameter(tool) ?? 1) / 2,
+      peck: 0,
+      air: opts.air,
+    };
+  const feedsOf = (p: CutParams): { feedMmPerMin: number; plungeFeedMmPerMin: number } => ({
+    feedMmPerMin: p.feed,
+    plungeFeedMmPerMin: p.plungeFeed,
+  });
 
   for (const region of tree.remainder) {
     const ball = opts.ball;
@@ -1174,12 +1241,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       stepDownMm: opts.stepDownMm,
       stockToLeaveMm: opts.bandMm,
       stepOverMm: opts.stepOverMm,
-      feeds: opts.feeds,
+      feeds: feedsOf(paramsFor(opts.flat)),
       offset: opts.offset,
       safeZMm: opts.safeZMm,
       hopZMm: opts.hopZMm,
       toolNumber: opts.toolNumberFor(opts.flat),
-      spindleRpm: opts.spindleRpm,
+      spindleRpm: paramsFor(opts.flat).rpm,
       air: opts.air,
       rapid: opts.rapid,
       ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
@@ -1211,12 +1278,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         stepOverMm: opts.stepOverMm === undefined
           ? undefined
           : Math.min(opts.stepOverMm, (cuttingDiameter(opts.restFlat) ?? 0) / 2),
-        feeds: opts.feeds,
+        feeds: feedsOf(paramsFor(opts.restFlat)),
         offset: opts.offset,
         safeZMm: opts.safeZMm,
         hopZMm: opts.hopZMm,
         toolNumber: opts.toolNumberFor(opts.restFlat),
-        spindleRpm: opts.spindleRpm,
+        spindleRpm: paramsFor(opts.restFlat).rpm,
         air: opts.air,
         rapid: opts.rapid,
         ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
@@ -1250,11 +1317,11 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       kind: 'ball-scallop',
       scallopMm: opts.finishScallopMm ?? opts.bandMm,
       stepDownMm: depth,
-      feeds: opts.feeds,
+      feeds: feedsOf(paramsFor(ball)),
       safeZMm: opts.safeZMm,
       hopZMm: opts.hopZMm,
       toolNumber: opts.toolNumberFor(ball),
-      spindleRpm: opts.spindleRpm,
+      spindleRpm: paramsFor(ball).rpm,
       air: opts.air,
       rapid: opts.rapid,
     });
@@ -1266,11 +1333,11 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       region,
       regionRef: ref,
       clSurface: clBall,
-      feeds: opts.feeds,
+      feeds: feedsOf(paramsFor(ball)),
       safeZMm: opts.safeZMm,
       hopZMm: opts.hopZMm,
       toolNumber: opts.toolNumberFor(ball),
-      spindleRpm: opts.spindleRpm,
+      spindleRpm: paramsFor(ball).rpm,
       air: opts.air,
       rapid: opts.rapid,
     });
@@ -1310,7 +1377,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         region: ref,
         edgeBreak: opts.edgeBreak,
         offset: opts.offset,
-        params: cuts,
+        params: paramsFor(vbit),
         rapid: opts.rapid,
       });
       pushStage('chamfer', ref, out);

@@ -74,11 +74,14 @@ export function chamfer(opts: ChamferOpOptions): OpOutcome {
   // contour, into the pocket for a pocket rim (`of` is the region the rim belongs to).
   const airSign = opts.rim.of === 'contour' ? 1 : -1;
   // THE REAL RIMS FOUND THIS: a rim whose polyline winds against its region, or one whose own
-  // width is under the tip radius, offsets EMPTY on the named side. Try the other side, then a
-  // point-tipped reading (the path on the edge itself) rather than refusing a rim the tree
-  // reported — the bevel is real either way; the tip's 0.05 mm is the only difference.
+  // width is under the tip radius, offsets EMPTY on the named side. The review's finding: the
+  // first fix tried the OTHER side next — the MATERIAL side, where the tool's centre runs INTO
+  // the part rather than the air beside it, a gouge up to one tip radius deep, not a safe
+  // fallback. Fall back only to the point-tipped reading (the path on the edge itself, the AIR
+  // side's own tip radius at exactly zero) rather than refusing a rim the tree reported — the
+  // bevel is real either way; the tip's 0.05 mm is the only difference, never the air/material
+  // side itself.
   let path: Polygons = cone.tipRadius > 0 ? opts.offset([ring], airSign * cone.tipRadius) : [ring];
-  if (path.length === 0 && cone.tipRadius > 0) path = opts.offset([ring], -airSign * cone.tipRadius);
   if (path.length === 0) path = [ring];
 
   // `generateChamfer` places the tip plane at `-cut.depth`, and this engine's IR Z 0 is the stock
