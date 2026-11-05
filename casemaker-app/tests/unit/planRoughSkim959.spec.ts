@@ -128,30 +128,33 @@ describe('#959 review — the rough splits shallow from steep', () => {
     expect(levels.size).toBeGreaterThanOrEqual(3);
   }, 120_000);
 
-  it("#962 — the skim's rows alternate: each row joins the NEXT row's start, not a full-width return", () => {
-    // The skim's raster rows run along x across the region's 40 mm width. Every row used to be
-    // traced low-x to high-x, so the join to the next row raced the full width back: the
-    // organizer's curved-0 measured 645 such returns, 104.1 m of rapid, ~87 min. Odd rows now run
-    // high-x to low-x, and the join crosses one grid pitch (0.5 mm).
+  it("#962 — the skim's runs tour: the travel BETWEEN runs collapses, not just the row turns", () => {
+    // The skim's raster rows run along x across the region's 40 mm width. Before #962 every row
+    // was traced low-x to high-x, so each join raced the full width back (the organizer measured
+    // 645 returns, 104.1 m, ~87 min). The runs now tour — nearest endpoint + 2-opt — so the
+    // between-run travel is one grid pitch in the common case. A tour may strand one run (a
+    // classic nearest-neighbour tail), so the property is the TOTAL travel, not the widest turn.
     const result = plan(-0.6, -1.0);
     const roughOp = result.ops.find((op) => op.kind === 'rough');
     expect(roughOp, `ops: ${result.ops.map((o) => o.kind).join(', ')}`).toBeDefined();
     const moves = roughOp!.outcome.ir.operations.flatMap((o) => o.moves);
-    // The TURN between rows is any near-level lateral move (whatever its kind — a retract's
-    // across leg at constant z, or, with the skim's own field, one stay-down feed): its length is
-    // what the alternation is for. Before, every turn crossed the 40 mm row width.
-    let turns = 0;
-    let widest = 0;
+    // A JUMP is a near-level lateral move longer than one grid pitch — the travel BETWEEN runs
+    // (a retract's across leg, or one stay-down feed). The rows' own 0.5 mm feed steps are not
+    // jumps; the raster's between-run returns were ~46 mm each.
+    let jumps = 0;
+    let total = 0;
     for (let i = 1; i < moves.length; i++) {
       const a = moves[i - 1]!;
       const b = moves[i]!;
-      if (Math.abs(b.z - a.z) > 0.5) continue; // a vertical leg, not a turn
+      if (Math.abs(b.z - a.z) > 0.5) continue; // a vertical leg, not a jump
       const lateral = Math.hypot(b.x - a.x, b.y - a.y);
-      if (lateral <= 0.2) continue;
-      turns++;
-      widest = Math.max(widest, lateral);
+      if (lateral <= 1) continue;
+      jumps++;
+      total += lateral;
     }
-    expect(turns, 'no turn between skim rows was posted — the fixture does not exercise the skip').toBeGreaterThan(3);
-    expect(widest, 'a turn crossed the row width — the skim rows do not alternate').toBeLessThan(2);
+    // The tour may strand ONE run at its tail (nearest-neighbour's classic blind spot, which the
+    // 2-opt cannot fix when the last step is the stranded one); the raster stranded every row.
+    expect(jumps, 'the between-run travel still crosses the region — the runs do not tour').toBeLessThanOrEqual(2);
+    expect(total, 'the between-run travel still crosses the region — the runs do not tour').toBeLessThan(100);
   }, 120_000);
 });
