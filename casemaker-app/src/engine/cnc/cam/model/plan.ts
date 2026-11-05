@@ -2032,6 +2032,17 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       kind: 'ball-scallop',
       scallopMm: opts.finishScallopMm ?? opts.bandMm,
       maskCells,
+      // #962 — the material field's answers past the region's own reach (the linker's disc and the
+      // down-leg floor reach up to a cutter radius outside it): the goal/mesh top there, which is
+      // the honest bound a wall or land beside a low region demands, and the stock top where the
+      // mesh is silent. The region's own zTop is NOT that bound — a neighbouring wall can out-top
+      // it, and a rapid floored at zTop would run into the wall. In this datum (every Z rebased by
+      // −stockTop) the stock top is 0.
+      materialTopAt: (x: number, y: number) => {
+        const top = topSurfaceAt(binsForMask(), x, y);
+        return top === null ? null : top - z0;
+      },
+      stockTopZMm: 0,
       stepDownMm: depth,
       feeds: feedsOf(paramsFor(ball)),
       safeZMm: opts.safeZMm,

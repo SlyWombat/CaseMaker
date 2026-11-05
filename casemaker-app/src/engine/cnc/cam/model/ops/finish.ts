@@ -25,13 +25,13 @@
  */
 
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
+import { tourNearest } from '@/engine/cnc/cam/tour';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import type { RemainderRegion } from '../features';
 import type { ClSurface } from '../clsurface';
 import { profileOf } from '../dropcutter';
-import { link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
+import { DEFAULT_SHORT_HOP_DIAMETERS, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
 import { dropRow, type DroppedPoint } from '../rowDropper';
 import { cutterKeyOf } from '../sequence';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
@@ -67,6 +67,39 @@ export interface FinishOpOptions {
    * footprint's own notches.
    */
   maskCells?: (x: number, y: number) => boolean;
+  /**
+   * #962 — THE DESIGN'S TOP AT (x, y), in this op's datum, for the material field where the CL
+   * surface has no answer (past the region's own footprint). The field feeds `link()`'s tests and
+   * the disc-aware down-leg floor, which reach up to the cutter's radius past the region's edge;
+   * the region's own `zTop` is NOT an upper bound there — a wall or land beside a low region can
+   * stand higher, and a rapid floored at zTop would run into it. The plan states the goal/mesh
+   * top (the honest bound at that XY); where even that is silent, `stockTopZMm` is the only bound
+   * left. Absent → the field states nothing past the footprint, exactly as before.
+   */
+  materialTopAt?: (x: number, y: number) => number | null;
+  /** The stock top in this op's datum — the last-resort bound past the footprint (see above). */
+  stockTopZMm?: number;
+}
+
+/**
+ * THE OP'S MATERIAL FIELD (#962; exported for the red-first that pins the bound past the
+ * footprint). Inside the region's reach it is the level just finished, else the CL; past the
+ * footprint it is the DESIGN's top there (`materialTopAt`), the stock top where the design is
+ * silent — never the region's own `zTop`, which a neighbouring wall can out-top.
+ */
+export function finishMaterial(
+  opts: Pick<FinishOpOptions, 'clSurface' | 'materialTopAt' | 'stockTopZMm'>,
+  levelZ: number,
+): MaterialField {
+  return {
+    topAt: (x, y) => {
+      const cl = opts.clSurface.dropCutter(x, y);
+      if (cl !== null) return Math.max(levelZ, cl);
+      const design = opts.materialTopAt?.(x, y);
+      if (design !== null && design !== undefined) return design;
+      return opts.stockTopZMm ?? Number.POSITIVE_INFINITY;
+    },
+  };
 }
 
 /**
@@ -159,6 +192,48 @@ function flatRasterStepOver(radiusMm: number, bandMm: number, steepestSlopeDeg: 
   return Math.min(cap, bandMm / Math.tan(slopeRad));
 }
 
+/**
+ * #962 — THE WHOLE-PROFILE STAY-DOWN TEST. A ball is not a point, and it is not a flat disc
+ * either: `link()`'s material test is the FLAT rule (material at or below the link's own z at
+ * every disc offset), exact for a flat end mill's bottom but not the geometry of a ball, whose own
+ * surface stands `heightAt(profile, d)` above its tip at horizontal offset d.
+ *
+ * The test a shaped cutter needs is exactly the drop-cutter definition read backwards. At (x, y)
+ * the CL surface IS the cutter's whole profile dropped onto the design —
+ * `z_tip = max over the disc of (design − heightAt(ρ))` — so a link that rides AT OR ABOVE the CL
+ * surface at every point along its path clears every point of the design under the cutter there:
+ * the footprint and the flank, not just the centre point. A link that would dip below the CL cuts
+ * into the design and must retract.
+ *
+ * The comparison tolerates the CL surface's own sampling tolerance: the link's z and the CL are
+ * read from the same surface, and the row-dropper only promises the chord between its own points
+ * within that tolerance.
+ *
+ * WHY THIS IS NOT JUST `link()`: `linkIsClear` compares the material FIELD at the disc's own
+ * offsets against the link's z, and the field is the CL of the ground UNDER EACH OFFSET — higher
+ * than the link's own z wherever the ground rises beside the path. Every sloped link is refused
+ * for that reason (the organizer's ball: 71.6 % air), though the cutter's flank would clear the
+ * rise by construction. The shape-aware disc test belongs in the shared linker and is proposed on
+ * #962 for B; until it lands, the op makes this one decision itself and leaves every other route
+ * (retracts, vertical legs, hop clearance) to `link()`.
+ */
+function ridesTheCl(from: LinkPoint, to: LinkPoint, clSurface: ClSurface, stepMm: number): boolean {
+  const length = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
+  const step = stepMm > 0 ? stepMm : 0.5;
+  const steps = Math.max(1, Math.ceil(length / step));
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const x = from.x + (to.x - from.x) * t;
+    const y = from.y + (to.y - from.y) * t;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const cl = clSurface.dropCutter(x, y);
+    if (cl === null) return false; // the surface cannot prove the path: a retract is always safe
+    const z = from.z + (to.z - from.z) * t;
+    if (z < cl - clSurface.toleranceMm) return false;
+  }
+  return true;
+}
+
 export function finish(opts: FinishOpOptions): OpOutcome {
   const toolRadius = (cuttingDiameter(opts.cutter) ?? 0) / 2;
   if (!(toolRadius > 0)) {
@@ -180,14 +255,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // that level's own Z, never the level about to start, so a link is never approved through a
   // deeper target this op has not actually reached yet. Outside the footprint the field states
   // nothing (`+Infinity`), so a link endpoint off the region's own edge always retracts.
-  const materialFor = (levelZ: number): MaterialField => ({
-    topAt: (x, y) => {
-      if (!pointInPolygons(opts.region.footprint, x, y)) return Number.POSITIVE_INFINITY;
-      const cl = opts.clSurface.dropCutter(x, y);
-      if (cl === null) return Number.POSITIVE_INFINITY;
-      return Math.max(levelZ, cl);
-    },
-  });
+  const materialFor = (levelZ: number): MaterialField => finishMaterial(opts, levelZ);
   const linkOptionsFor = (levelZ: number): LinkOptions => ({
     material: materialFor(levelZ),
     clearanceZ: opts.regionRef.regionClearanceZ,
@@ -196,12 +264,28 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     hopClearanceMm: opts.hopZMm,
   });
 
+  // #962 — the row-to-row (and run-to-run) join. A stay-down link is decided by the whole-profile
+  // test above: within Kiri:Moto's short hop, the same cap `link()` applies, and riding the CL
+  // surface for the whole segment. Everything else — the retract, its vertical legs and the hop
+  // clearance — is `link()`'s own, untouched.
+  const linkSampleStep = Math.min(0.5, Math.max(0.1, toolRadius / 2));
+  const joinMoves = (from: LinkPoint, to: LinkPoint, levelZ: number): ToolpathIR['operations'][number]['moves'] => {
+    const direct = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
+    const shortHop = DEFAULT_SHORT_HOP_DIAMETERS * 2 * toolRadius;
+    if (direct <= shortHop + 1e-9 && ridesTheCl(from, to, opts.clSurface, linkSampleStep)) {
+      // A DESCENDING LINK IS A CUT INTO LOWER GROUND: it runs at the plunge rate, the same rule
+      // the op's own first feed follows (9e976f0b's finding — never a descent at the cutting rate).
+      const f = to.z < from.z - 1e-9 ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
+      return [{ kind: 'feed', x: to.x, y: to.y, z: to.z, f }];
+    }
+    return link(from, to, linkOptionsFor(levelZ));
+  };
+
   const moves: ToolpathIR['operations'][number]['moves'] = [];
   const passes: PassRef[] = [];
   const cleared: RegionAtZ[] = [];
   let prevExit: DroppedPoint | null = null;
   let prevLevelZ: number | null = null;
-  let rowParity = 0;
 
   // A raster row COLLINEAR with a polygon edge is the even-odd tracer's own blind spot: a vertical
   // edge at exactly x contributes no crossing by the half-open rule, so a hole on that line becomes
@@ -212,12 +296,17 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // spot is gone.
   const X_NUDGE_MM = 1e-4;
   for (const levelZ of levels) {
+    // 1. COLLECT this level's admitted runs before the first move is posted. The raster's own
+    //    order (row by row, run by run) is NOT the order the runs are cut in: where the mask
+    //    admits sparse strips — the organizer's scoop rims and skirt — consecutive runs of one
+    //    row can be a hundred millimetres apart, and the raster's order pays a full retract
+    //    across the land between them (984 of them, 9,463 s, measured on #962).
+    const levelRuns: DroppedPoint[][] = [];
     const levelCleared: Polygons = [];
     for (let x = min[0] + X_NUDGE_MM; x <= max[0] + stepOverMm * 1e-6; x += stepOverMm) {
       const intervals = footprintColumnIntervals(opts.region.footprint, x);
-      const ordered = rowParity % 2 === 0 ? intervals : [...intervals].reverse();
-      for (const interval of ordered) {
-        const [rawY0, rawY1] = rowParity % 2 === 0 ? interval : [interval[1], interval[0]];
+      for (const interval of intervals) {
+        const [rawY0, rawY1] = interval;
         // Inset off the footprint's own boundary, a hair, toward the interval's own centre: an
         // endpoint landing EXACTLY on the polygon edge is where `pointInPolygons`' ray-casting is
         // ambiguous by convention (`clSurface`'s own gate), not a real gap — advisor's review.
@@ -228,7 +317,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         const clampedAll = row.map((p) => ({ ...p, z: Math.max(p.z, levelZ) }));
 
         // ITEM 4a — the row's points are cut only where the plan's mask admits them; each
-        // contiguous admitted run is emitted as its own cut, and the gaps go to link().
+        // contiguous admitted run is its own cut, and the gaps between runs are links.
         const runs: (typeof clampedAll)[] = [];
         if (opts.maskCells === undefined) {
           runs.push(clampedAll);
@@ -242,37 +331,62 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         }
         for (const clamped of runs) {
           if (clamped.length < 2) continue;
-        const entryPoint: LinkPoint = { x: clamped[0]!.x, y: clamped[0]!.y, z: clamped[0]!.z };
-        if (prevExit === null) {
-          // The row's own FIRST feed is a PLUNGE (straight down from the hop height into
-          // material), never at the cutting feed — the same bug 9e976f0b fixed in `ops/pocket.ts`.
-          moves.push({ kind: 'rapid', x: entryPoint.x, y: entryPoint.y, z: opts.hopZMm });
-          moves.push({ kind: 'feed', x: entryPoint.x, y: entryPoint.y, z: entryPoint.z, f: opts.feeds.plungeFeedMmPerMin });
-        } else {
-          const from: LinkPoint = { x: prevExit.x, y: prevExit.y, z: prevExit.z };
-          moves.push(...link(from, entryPoint, linkOptionsFor(prevLevelZ ?? prevExit.z)));
-        }
-        for (let i = 1; i < clamped.length; i++) {
-          moves.push({ kind: 'feed', x: clamped[i]!.x, y: clamped[i]!.y, z: clamped[i]!.z, f: opts.feeds.feedMmPerMin });
-        }
-        const entry: [number, number, number] = [clamped[0]!.x, clamped[0]!.y, clamped[0]!.z];
-        const exitPoint = clamped[clamped.length - 1]!;
-        const exit: [number, number, number] = [exitPoint.x, exitPoint.y, exitPoint.z];
-        passes.push({
-          z: levelZ,
-          boundary: [clamped.map((p) => [p.x, p.y] as [number, number])],
-          cleared: { z: levelZ, boundary: [[entry.slice(0, 2) as [number, number], exit.slice(0, 2) as [number, number]]] },
-          entry,
-          exit,
-        });
-        levelCleared.push([[x, Math.min(rawY0, rawY1)], [x, Math.max(rawY0, rawY1)]]);
-        prevExit = exitPoint;
-        prevLevelZ = levelZ;
-        rowParity++;
+          levelRuns.push(clamped);
+          levelCleared.push([[x, Math.min(rawY0, rawY1)], [x, Math.max(rawY0, rawY1)]]);
         }
       }
     }
     cleared.push({ z: levelZ, boundary: levelCleared });
+
+    // 2. ORDER the runs so consecutive passes are neighbours: nearest neighbour + 2-opt over the
+    //    runs' midpoints, started from where the tool already is (#487's tour, the same primitive
+    //    the pocket contours use). The raster's row parity used to alternate direction to make the
+    //    turnarounds short; a tour subsumes that — and unlike the raster it can leave a row for
+    //    the neighbouring strip on the next row and come back, which is where the crossings go.
+    const midpoint = (run: DroppedPoint[]): [number, number] => {
+      const a = run[0]!;
+      const b = run[run.length - 1]!;
+      return [(a.x + b.x) / 2, (a.y + b.y) / 2];
+    };
+    const fromXY: [number, number] = prevExit === null ? [min[0], min[1]] : [prevExit.x, prevExit.y];
+    const order = tourNearest(levelRuns.map(midpoint), fromXY);
+
+    // 3. EMIT in tour order; each run is entered at whichever of its ends is nearer the tool.
+    for (const index of order) {
+      let points = levelRuns[index]!;
+      if (prevExit !== null) {
+        const first = points[0]!;
+        const last = points[points.length - 1]!;
+        if (Math.hypot(last.x - prevExit.x, last.y - prevExit.y) < Math.hypot(first.x - prevExit.x, first.y - prevExit.y)) {
+          points = [...points].reverse();
+        }
+      }
+      const entryPoint: LinkPoint = { x: points[0]!.x, y: points[0]!.y, z: points[0]!.z };
+      if (prevExit === null) {
+        // The run's own FIRST feed is a PLUNGE (straight down from the hop height into material),
+        // never at the cutting feed — the same bug 9e976f0b fixed in `ops/pocket.ts`.
+        moves.push({ kind: 'rapid', x: entryPoint.x, y: entryPoint.y, z: opts.hopZMm });
+        moves.push({ kind: 'feed', x: entryPoint.x, y: entryPoint.y, z: entryPoint.z, f: opts.feeds.plungeFeedMmPerMin });
+      } else {
+        const from: LinkPoint = { x: prevExit.x, y: prevExit.y, z: prevExit.z };
+        moves.push(...joinMoves(from, entryPoint, prevLevelZ ?? prevExit.z));
+      }
+      for (let i = 1; i < points.length; i++) {
+        moves.push({ kind: 'feed', x: points[i]!.x, y: points[i]!.y, z: points[i]!.z, f: opts.feeds.feedMmPerMin });
+      }
+      const entry: [number, number, number] = [points[0]!.x, points[0]!.y, points[0]!.z];
+      const exitPoint = points[points.length - 1]!;
+      const exit: [number, number, number] = [exitPoint.x, exitPoint.y, exitPoint.z];
+      passes.push({
+        z: levelZ,
+        boundary: [points.map((p) => [p.x, p.y] as [number, number])],
+        cleared: { z: levelZ, boundary: [[entry.slice(0, 2) as [number, number], exit.slice(0, 2) as [number, number]]] },
+        entry,
+        exit,
+      });
+      prevExit = exitPoint;
+      prevLevelZ = levelZ;
+    }
   }
 
   if (moves.length > 0) {

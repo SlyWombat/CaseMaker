@@ -153,9 +153,23 @@ describe.each([
   });
 
   it('retracts between rows go to the region\'s own clearance plane, not a bare hop height', () => {
-    const out = run();
+    // #962's tour keeps a PLANE's links down (the chord rides the CL), so the property needs a
+    // join that must retract: a narrow rise BETWEEN the first two raster rows — the CL bulges
+    // 0.3 mm, the chord dips below it, and `joinMoves` falls back to `link()`'s retract.
+    const base = clSurface(geometry, region, cutter, 3);
+    const risen: typeof base = {
+      ...base,
+      dropCutter: (x: number, y: number) => {
+        const z = base.dropCutter(x, y);
+        return z === null ? null : x >= 0.6 && x <= 0.95 ? z + 0.3 : z;
+      },
+    };
+    const out = finish({
+      cutter, region, regionRef, clSurface: risen, kind, scallopMm: 0.1, stepDownMm: 2,
+      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 }, safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+    });
     const rapids = out.ir.operations[0]!.moves.filter((m) => m.kind === 'rapid');
-    expect(rapids.some((m) => m.z === regionRef.regionClearanceZ)).toBe(true);
+    expect(rapids.some((m) => m.z === regionRef.regionClearanceZ), 'the rise was crossed without a retract').toBe(true);
   });
 
   it('engagement at each level is at most stepDownMm past the previous one — the ACTUAL posted depth, not the level\'s own nominal label', () => {
