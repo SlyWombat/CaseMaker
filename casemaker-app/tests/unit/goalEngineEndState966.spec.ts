@@ -191,7 +191,7 @@ describe('#966 end-state, part 1 — the flag’s own default routes generateGoa
     // completely unmocked, exactly as an operator's Generate click would today.
     const spy = vi.spyOn(planModule, 'planModelCam');
     const job = jobFor(domeGoal(), { length: 30, width: 20, thickness: 10 });
-    const result = await generateGoalProgram(job, job.targetObject!, BALL, null, SHOP);
+    const result = await generateGoalProgram(job, job.targetObject!, BALL, null, { shop: SHOP });
     // CONFIRMED by running this exact call (2026-11-04): spy.mock.calls.length === 0 and
     // result.ok === true via the OLD heightfield engine (generateSurface3dForGoal) — the plan
     // that posted was never cam/model's. Success, once removal lands and the default flips true:
@@ -257,7 +257,7 @@ describe('#966 end-state, part 2 — a goal needing two setups posts both, never
     const input = await buildInput(job, goal, BALL, SHOP);
     expect(input.setups).toHaveLength(2);
 
-    const result = await generateGoalProgramModelCam(job, goal, BALL, null, SHOP);
+    const result = await generateGoalProgramModelCam(job, goal, BALL, null, { shop: SHOP });
     expect(result.ok).toBe(true);
     expect(result.errors).toEqual([]);
 
@@ -317,7 +317,7 @@ describe('#966 end-state, part 2b — the bare sphere refuses BY NAME (registerS
     const job = jobFor(sphereGoal(), { length: 2 * SPHERE_R, width: 2 * SPHERE_R, thickness: 2 * SPHERE_R });
     const goal = job.targetObject!;
 
-    const result = await generateGoalProgramModelCam(job, goal, BALL, null, SHOP);
+    const result = await generateGoalProgramModelCam(job, goal, BALL, null, { shop: SHOP });
     expect(result.ok).toBe(false);
     expect(
       result.errors.some((e) => /no locating features found for the vise flip \(#965 registration\)/.test(e.message)),

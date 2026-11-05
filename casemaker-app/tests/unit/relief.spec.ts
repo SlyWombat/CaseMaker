@@ -248,9 +248,9 @@ describe('the relief rides the goal pipeline (#672)', () => {
   it('REFUSES by name — #966/#980: cam/model has no path for a picture relief yet', async () => {
     const target = reliefTarget(rampPng(), { x: 25.6, y: 8 }, { maxDepthMm: 2 });
     const job = reliefJob(target);
-    const out = await generateGoalProgram(job, target, BALL, null, {
+    const out = await generateGoalProgram(job, target, BALL, null, { shop: {
       surfaceGrid: { pitchMm: { value: 0.4, source: 'chosen' } },
-    });
+    } });
     expect(out.ok).toBe(false);
     expect(out.programs).toEqual([]);
     expect(out.errors.some((e) => e.message.includes('#980'))).toBe(true);

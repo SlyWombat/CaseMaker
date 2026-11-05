@@ -43,7 +43,7 @@ describe('#966 ROUND 3 — generateGoalProgram posts and verifies a real multi-s
     setModelCamEnabled(true);
     const L = 40, W = 30, T = 20;
     const job = jobFor(boxTarget('goal-966-ms-on', L, W, T), L, W, T);
-    const result = await generateGoalProgram(job, job.targetObject!, FLAT3, null, SHOP, twoSetups(T));
+    const result = await generateGoalProgram(job, job.targetObject!, FLAT3, null, { shop: SHOP, modelSetupsOverride: twoSetups(T) });
 
     expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
     expect(result.ok).toBe(true);
@@ -89,7 +89,7 @@ describe('#966 ROUND 3 — the registration refusal surfaces as a named stage fa
     // scale): `registerSetupOrigin` has nothing to anchor setup 1 against setup 0 with.
     const L = 5, W = 5, T = 3;
     const job = jobFor(boxTarget('goal-966-ms-refuse', L, W, T), L, W, T);
-    const result = await generateGoalProgram(job, job.targetObject!, FLAT3, null, SHOP, twoSetups(T));
+    const result = await generateGoalProgram(job, job.targetObject!, FLAT3, null, { shop: SHOP, modelSetupsOverride: twoSetups(T) });
 
     expect(result.ok).toBe(false);
     expect(result.stage).toBe('cam');

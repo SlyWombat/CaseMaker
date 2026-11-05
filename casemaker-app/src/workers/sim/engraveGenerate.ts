@@ -5071,10 +5071,20 @@ export async function generateGoalProgram(
   goal: EngraveTargetObject,
   tool: Tool | null,
   calibration: MachineCalibration | null,
-  shop: EngraveShopOpts,
-  /** #966 test/e2e-only seam — see `buildModelPlanInputForGoal`'s own doc on this same parameter. */
-  modelSetupsOverride?: SetupSpec[],
+  /**
+   * #966/#961 — ONE OBJECT FOR EVERY TRAILING OPTIONAL, so a future addition (F's own
+   * `catalogueTools`, #961-wiring) never again shifts an existing positional argument into the
+   * wrong parameter the way dropping `catalogue`/`onProgress`/`planner` from this same signature
+   * did (B's repro, goalClearAround.spec.ts). `shop` stays required — every real caller already
+   * passes one — only `modelSetupsOverride` (the #966 test/e2e-only seam, see
+   * `buildModelPlanInputForGoal`'s own doc) is optional.
+   */
+  opts: {
+    shop: EngraveShopOpts;
+    modelSetupsOverride?: SetupSpec[];
+  },
 ): Promise<EngraveGenerated> {
+  const { shop, modelSetupsOverride } = opts;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -6184,7 +6194,7 @@ export async function engraveGenerate(
     }
     // #623 — the surface-3D goal path posts flat (it never lifts feeds), so its package claims no
     // surface: the caller judges it in the work frame, which is the frame it was posted in.
-    return { ...(await generateGoalProgram(job, goal, tool, calibration, shop)), surface: null };
+    return { ...(await generateGoalProgram(job, goal, tool, calibration, { shop })), surface: null };
   }
 
   // #419 J3 — A JOB IS A LIST OF PROGRAMS.

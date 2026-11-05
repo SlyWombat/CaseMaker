@@ -91,7 +91,7 @@ function jobFor(depth: number, material: StockMaterial): EngraveJob {
 describe('#846 — the goal path chooses its rough, and says so', () => {
   it('a deep PLA goal on a flat cutter posts the adaptive rough, with both roughs measured', async () => {
     const job = jobFor(5, 'pla');
-    const out = await generateGoalProgram(job, job.targetObject!, FLAT, null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, FLAT, null, { shop: {} });
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
     expect(out.nc).not.toBeNull();
     // The operation the post names, and the one line the run carries.

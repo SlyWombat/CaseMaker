@@ -198,7 +198,7 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
       // registration message, not a bare stack trace.
       const result = await withModelCamFlagOn(async () => {
         const { generateGoalProgram: generateGoalProgramModelCam } = await import('@/workers/sim/engraveGenerate');
-        return generateGoalProgramModelCam(job, goal, BALL, null, SHOP);
+        return generateGoalProgramModelCam(job, goal, BALL, null, { shop: SHOP });
       });
       expect(result.ok).toBe(false);
       expect(result.stage).toBe('cam');
@@ -236,7 +236,7 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
       // The same thing, through the real seam: a named 'cam'-stage refusal, never `ok: true`.
       const result = await withModelCamFlagOn(async () => {
         const { generateGoalProgram: generateGoalProgramModelCam } = await import('@/workers/sim/engraveGenerate');
-        return generateGoalProgramModelCam(job, goal, BALL, null, SHOP);
+        return generateGoalProgramModelCam(job, goal, BALL, null, { shop: SHOP });
       });
       expect(result.ok).toBe(false);
       expect(result.stage).toBe('cam');

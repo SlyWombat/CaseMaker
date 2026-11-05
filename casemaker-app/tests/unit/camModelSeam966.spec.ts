@@ -147,7 +147,7 @@ describe('#966 — generateGoalProgram routes through cam/model behind USE_MODEL
     const { generateGoalProgram: generateGoalProgramModelCam } = await import('@/workers/sim/engraveGenerate');
 
     const job = jobFor(goalTarget());
-    const result = await generateGoalProgramModelCam(job, job.targetObject!, BALL, null, SHOP);
+    const result = await generateGoalProgramModelCam(job, job.targetObject!, BALL, null, { shop: SHOP });
 
     // #966 open-mesh repair: the dome fixture is an open sheet (a polar grid with its rim and
     // nothing under it). It used to die at the kernel as a bare "Not manifold"; the goal path now
@@ -230,7 +230,7 @@ describe('#966 ROUND 2 — generateGoalProgram flag ON posts and verifies every 
     const { generateGoalProgram: generateGoalProgramModelCam } = await import('@/workers/sim/engraveGenerate');
 
     const { job, goal, shop, tool } = randomPartJob(1);
-    const result = await generateGoalProgramModelCam(job, goal, tool, null, shop);
+    const result = await generateGoalProgramModelCam(job, goal, tool, null, { shop });
 
     expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
     expect(result.ok).toBe(true);

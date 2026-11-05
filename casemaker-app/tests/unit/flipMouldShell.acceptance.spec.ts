@@ -178,7 +178,7 @@ function job(target: EngraveTargetObject): EngraveJob {
 describe('#754 side 1 — the outside of the shell, roughed and ball-finished', () => {
   it('generates as one job: roughing, then the ball finish and its scallop pass', async () => {
     const j = job(goal(zOut, { surface: { finishStepOverMm: FINISH_STEP, scallop: true } }));
-    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, {});
+    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, { shop: {} });
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
     // Three operations: the roughing, the parallel ball finish and the scallop pass.
@@ -210,7 +210,7 @@ describe('#754 side 1 — the outside of the shell, roughed and ball-finished', 
 describe('#754 the mirror finish — a 0.05 mm step-over', () => {
   const fine = async () => {
     const j = job(goal(zOut, { surface: { finishStepOverMm: 0.05, scallop: true } }));
-    return await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, {});
+    return await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, { shop: {} });
   };
 
   it('generates: the scallop pass steps 0.05 mm along the surface (a 0.0002 mm cusp for a ⌀3 ball)', async () => {
@@ -247,7 +247,7 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
   // than refusing the job (the maintainer's rule: inform, don't refuse).
   it('#755 — a cap-bound grid is stated with the pitch it settled on, not refused', async () => {
     const j = job(goal(zOut, { surface: { finishStepOverMm: 0.005, scallop: false } }));
-    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, {});
+    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, { shop: {} });
     expect(out.ok).toBe(true);
     const f = out.findings.find((x) => x.code === 'goal-finish-finer-than-grid');
     expect(f).toBeDefined();
@@ -294,7 +294,7 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
 
   it('generates the hollow as a mold of the inside form', async () => {
     const j = job(goal(zIn, { goalMode: 'mold', surface: { finishStepOverMm: FINISH_STEP } }));
-    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, {});
+    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, { shop: {} });
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
     expect(out.findings.find((f) => f.code === 'goal-mold-one-sided')?.severity).toBe('info');
