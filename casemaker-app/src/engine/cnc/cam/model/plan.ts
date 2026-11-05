@@ -775,21 +775,25 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // link — and `regionIds`' own order-preserving filter over `pocketFeatures` then puts it ahead
   // of every pocket/through-hole sharing that same step. See the regression test proving this by
   // POSTED ORDER, not by trusting this push order alone, in `opsAcceptance959.spec.ts`.
-  const facingDepthMm = z0 - tree.top.z;
+  const facingSkinMm = z0 - tree.top.z;
   // #959 (2026-11-05 ruling): facing is an OPERATOR OPTION, off by default.
-  const hasFacing = (opts.facing ?? 'off') === 'on' && facingDepthMm > 1e-6;
-  // #943 (2026-11-05 ruling): THE TOP IS THE HIGHEST PROBED POINT. In this datum the registration
-  // writes Z0 at the LOWEST touch (#475's `Z0_REFERENCE`), so the highest reading is `+spreadMm`
-  // above the zero: the facing cut starts there, and the passes count down to the part top. The
-  // TARGET (one step below the lowest point) is clamped at the part top — one step deeper than
-  // `facingDepthMm` would cut the design's own top face — and the clamp is stated below when it
-  // binds (a skin thinner than one row step). No probes → the stated stock top, also stated.
+  const hasFacing = (opts.facing ?? 'off') === 'on' && facingSkinMm > 1e-6;
+  // #943 (2026-11-05 ruling): FACING LEVELS THE TOP, it does not skin it. The top is the HIGHEST
+  // probed point; the TARGET is one step-down below the LOWEST probed point — "it may require many
+  // passes as the high point may be a large variance" — so a stock standing well proud of the part
+  // finishes one step below its low point and the remaining skin is the rough's/skin's to take.
+  // The target clamps at the PART TOP (one step deeper would cut the design's own top face), and
+  // the clamp is STATED when it binds (a skin thinner than one row step). In this datum the
+  // registration writes Z0 at the LOWEST touch (#475's `Z0_REFERENCE`), so the highest reading is
+  // `+spreadMm` above the zero and the target sits at `−stepDown`. No probes → the stated stock
+  // top is the cut's start, stated on the plan.
   const facingSpreadMm = Math.max(0, opts.stockProbes?.spreadMm ?? 0);
   const facingTopZ = rebase(z0) + facingSpreadMm;
+  const facingDepthMm = Math.min(opts.stepDownMm, facingSkinMm);
   if (hasFacing) {
     refById.set('facing', {
       id: 'facing', kind: 'pocket', bounds: boundsOfPolygons(tree.contour.outline),
-      topZ: facingTopZ, bottomZ: rebase(tree.top.z), obstacles: [],
+      topZ: facingTopZ, bottomZ: rebase(z0) - facingDepthMm, obstacles: [],
       regionClearanceZ: Math.max(0, rebase(tree.frame.partTop)) + 5,
     });
   }
@@ -875,7 +879,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       return pocket({
         cutter,
         node: {
-          id: 'facing', floorZ: rebase(tree.top.z), mouthZ: facingTopZ, open: false, through: false,
+          id: 'facing', floorZ: rebase(z0) - facingDepthMm, mouthZ: facingTopZ, open: false, through: false,
           region: facingRegion, floors: [], islands: [], children: [], remainder: [], narrowest: Infinity,
         },
         region: ref,
@@ -1079,17 +1083,24 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   const notes: string[] = [];
   // #943 (2026-11-05 ruling): the facing stage states where its cut starts, how many passes the
   // probed spread takes, and the clamp when the part top binds. The count mirrors `depthPasses`'
-  // own rule (`ceil(total / stepDown)`, the last pass on the floor).
+  // own rule (`ceil(total / stepDown)`, the last pass on the floor). `facingDepthMm` is the
+  // TARGET depth — one row step below the low point, clamped at the part top — and the skin left
+  // above the part top is stated with it.
   if (hasFacing) {
     const mm = (n: number): string => String(Math.round(n * 1000) / 1000);
     const passes = Math.max(1, Math.ceil((facingSpreadMm + facingDepthMm) / opts.stepDownMm - 1e-9));
     const plural = passes === 1 ? 'pass' : 'passes';
+    const above = Math.max(0, facingSkinMm - facingDepthMm);
+    const clamp = facingSkinMm < opts.stepDownMm - 1e-9;
+    const floorWords = clamp
+      ? `the part top ${mm(facingDepthMm)} mm below the zero`
+      : `${mm(facingDepthMm)} mm below the zero, the lowest point less one row step (${mm(above)} mm above the part top)`;
     notes.push(
       opts.stockProbes === undefined
-        ? `facing: no surface measurement — the stated stock top is the cut's start, ${passes} ${plural} of at most ${mm(opts.stepDownMm)} mm to the part top ${mm(facingDepthMm)} mm below the zero`
-        : `facing: ${opts.stockProbes.count} surface touches, spread ${mm(opts.stockProbes.spreadMm)} mm from the highest point — ${passes} ${plural} of at most ${mm(opts.stepDownMm)} mm to the part top ${mm(facingDepthMm)} mm below the zero`,
+        ? `facing: no surface measurement — the stated stock top is the cut's start, ${passes} ${plural} of at most ${mm(opts.stepDownMm)} mm to ${floorWords}`
+        : `facing: ${opts.stockProbes.count} surface touches, spread ${mm(opts.stockProbes.spreadMm)} mm from the highest point — ${passes} ${plural} of at most ${mm(opts.stepDownMm)} mm to ${floorWords}`,
     );
-    if (facingDepthMm < opts.stepDownMm - 1e-9) {
+    if (clamp) {
       notes.push(
         `facing stops at the part top ${mm(facingDepthMm)} mm below the zero — less than one ${mm(opts.stepDownMm)} mm row step; the low side gets a ${mm(facingDepthMm)} mm bite, because one step deeper would cut the design`,
       );
