@@ -208,6 +208,18 @@ describe('#764 — the item goal is cleared around itself', () => {
     const grid = sweep((await finishingOf(hf)).moves);
     const midRing = CX + A + 1.15; // > one ball radius from both walls
     expect(heightAt(grid, midRing, CY)).toBeCloseTo(BASE_Z, 1);
+
+    // #982 pin — the fixture's ball-only set through the ONE model entry: no flat is the ball
+    // fallback, never a refusal. RED at the parent (planModelCam threw 'no flat end mill …').
+    {
+      const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+      const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+      const j = job(target);
+      const modelInput = await buildModelPlanInputForGoal(j, j.targetObject!, BALL_TOOL, {});
+      const modelOut = await planModelCam(modelInput);
+      expect(modelOut.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
+      expect(modelOut.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
+    }
   });
 
   it('“nothing” keeps the pre-#764 cut: the stock outside the footprint stands', async () => {

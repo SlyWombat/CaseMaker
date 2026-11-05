@@ -243,6 +243,17 @@ describe('#754 side 1 — the outside of the shell, roughed and ball-finished', 
     let deepest = Infinity;
     for (const m of out.nc!.matchAll(/Z(-?\d+(?:\.\d+)?)/g)) deepest = Math.min(deepest, Number(m[1]));
     expect(deepest).toBeCloseTo(-crownOf(zOut), 0);
+
+    // #982 pin — the fixture's OWN ball-only set (a ball, NO flat) through the ONE model entry:
+    // the ball takes the rough, never a refusal. RED at the parent (planModelCam threw 'no flat …').
+    {
+      const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+      const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+      const modelInput = await buildModelPlanInputForGoal(j, j.targetObject!, BALL_TOOL, {});
+      const modelOut = await planModelCam(modelInput);
+      expect(modelOut.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
+      expect(modelOut.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
+    }
   });
 
   it('the finished surface, swept, matches the shell within a scallop — never below it', async () => {
