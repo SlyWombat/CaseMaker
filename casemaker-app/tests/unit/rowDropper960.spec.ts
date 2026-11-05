@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { dropRow } from '../../src/engine/cnc/cam/model/rowDropper';
-import { clSurface } from '../../src/engine/cnc/cam/model/clsurface';
+import { clSurface, type ClSurface } from '../../src/engine/cnc/cam/model/clsurface';
 import type { FeatureSource, RemainderRegion } from '../../src/engine/cnc/cam/model/features';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 
@@ -245,5 +245,74 @@ describe('#960 dropRow() — a footprint notch between two otherwise-reachable p
     expect(surface.dropCutter(25.15, 0)).not.toBeNull();
     expect(Math.hypot(25.15 - 24.85, 0)).toBeLessThan(surface.maxSpacingMm); // confirms the isolation above
     expect(() => dropRow(surface, [24.85, 0], [25.15, 0])).toThrow(/footprint notch/);
+  });
+});
+
+// #960 — the organizer's finish found this: the bisection accepted a segment when its MIDPOINT
+// alone sat on the chord, so a CL kink off-centre (here a 0.05 mm ridge a third of the way along)
+// let the chord dip under the surface. The real part measured 0.041 mm; this stub poses it exactly.
+describe('#960 dropRow() — an off-centre kink the midpoint alone cannot see', () => {
+  it('never lets the chord dip under the surface between two posted points', () => {
+    const ridge = (x: number): number => Math.max(0, 0.05 - Math.abs(x - 0.09));
+    const surface: ClSurface = {
+      dropCutter: (x) => ridge(x),
+      toleranceMm: 0.005,
+      minSpacingMm: 0.005,
+      maxSpacingMm: 0.346,
+      sampleCount: 0,
+    };
+    expect(ridge(0.15), 'the midpoint sits on the chord — the case the old rule accepted').toBe(0);
+    const row = dropRow(surface, [0, 0], [0.3, 0]);
+    let worst = 0;
+    for (let i = 0; i + 1 < row.length; i++) {
+      const a = row[i]!;
+      const b = row[i + 1]!;
+      for (let k = 1; k < 50; k++) {
+        const t = k / 50;
+        worst = Math.min(worst, a.z + (b.z - a.z) * t - ridge(a.x + (b.x - a.x) * t));
+      }
+    }
+    expect(worst).toBeGreaterThanOrEqual(-surface.toleranceMm);
+  });
+});
+
+// #957/#960 — D's organizer finding: the #962 alternation walks the same row from either end
+// depending on its parity, and the bisection's own accept/reject decisions are sensitive enough
+// to floating-point order that the two directions could disagree at the same real point (eight
+// of the organizer's cells read 0.10–0.26 mm differently depending on which way their row was
+// walked). `dropRow` now always computes in one canonical direction internally; this pins that
+// walking the SAME row from either end gives the SAME points, only in reverse order.
+describe('#957/#960 dropRow() — direction-canonical: either end first gives the same row', () => {
+  it('a row across the true staircase cliff agrees walked forward or backward', () => {
+    const geometry = stepMesh(25, 50, 10, 0, -10);
+    const surface = clSurface(geometry, region(10, 50), ball6, 3);
+    const forward = dropRow(surface, [0, 0], [50, 0]);
+    const backward = dropRow(surface, [50, 0], [0, 0]);
+    expect(backward.length, 'the two directions disagree on how many points the row needs').toBe(forward.length);
+    const reversedBackward = [...backward].reverse();
+    for (let i = 0; i < forward.length; i++) {
+      expect(reversedBackward[i]!.x, `point ${i}, x`).toBeCloseTo(forward[i]!.x, 9);
+      expect(reversedBackward[i]!.y, `point ${i}, y`).toBeCloseTo(forward[i]!.y, 9);
+      expect(reversedBackward[i]!.z, `point ${i}, z`).toBeCloseTo(forward[i]!.z, 9);
+    }
+  });
+
+  it('the off-centre kink case (the knife-edge accept/reject decision) also agrees both ways', () => {
+    const ridge = (x: number): number => Math.max(0, 0.05 - Math.abs(x - 0.09));
+    const surface: ClSurface = {
+      dropCutter: (x) => ridge(x),
+      toleranceMm: 0.005,
+      minSpacingMm: 0.005,
+      maxSpacingMm: 0.346,
+      sampleCount: 0,
+    };
+    const forward = dropRow(surface, [0, 0], [0.3, 0]);
+    const backward = dropRow(surface, [0.3, 0], [0, 0]);
+    expect(backward.length, 'the two directions disagree on how many points the row needs').toBe(forward.length);
+    const reversedBackward = [...backward].reverse();
+    for (let i = 0; i < forward.length; i++) {
+      expect(reversedBackward[i]!.x, `point ${i}, x`).toBeCloseTo(forward[i]!.x, 9);
+      expect(reversedBackward[i]!.z, `point ${i}, z`).toBeCloseTo(forward[i]!.z, 9);
+    }
   });
 });

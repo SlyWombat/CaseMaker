@@ -70,7 +70,7 @@
 
 import type { Tool } from '@/engine/cnc/tool';
 import { isVShape, vCone } from '@/engine/cnc/vProfile';
-import { binnedReachableTriangles, buildTriangleBins, type TriangleBins } from './triangleBins';
+import { buildTriangleBins, type TriangleBins } from './triangleBins';
 
 /** A triangle-soup mesh: `positions` is 9 numbers (x0,y0,z0,x1,y1,z1,x2,y2,z2) per triangle, exactly `ParsedMesh`'s shape. */
 export interface DropCutterMesh {
@@ -174,8 +174,10 @@ export function reachableTriangles(mesh: DropCutterMesh, x: number, y: number, r
 const EPS = 1e-9;
 
 /** `z = a*x + b*y + c`; `L = sqrt(1 + a^2 + b^2)` — the slope-length factor the ball/flat exact
- * contact formulas both use. `null` for a triangle whose own projection onto XY is degenerate
- * (a vertical facet, or three collinear points) — no `a*x+b*y+c` plane states its height there. */
+ * contact formulas both use. A triangle whose own projection onto XY is degenerate (a vertical
+ * facet, or three collinear points) has no such plane — `triangleBins.ts`'s own `planeA` is `NaN`
+ * for one, the bin-build-time equivalent of this file's old per-query `planeOf`'s `null` (#970:
+ * the plane is now computed once per triangle at bin build, never per query — see that file). */
 interface Plane {
   a: number;
   b: number;
@@ -183,32 +185,16 @@ interface Plane {
   L: number;
 }
 
-function planeOf(tri: Tri): Plane | null {
-  const ux = tri.bx - tri.ax, uy = tri.by - tri.ay, uz = tri.bz - tri.az;
-  const vx = tri.cx - tri.ax, vy = tri.cy - tri.ay, vz = tri.cz - tri.az;
-  let nx = uy * vz - uz * vy;
-  let ny = uz * vx - ux * vz;
-  let nz = ux * vy - uy * vx;
-  if (Math.abs(nz) < EPS) return null;
-  if (nz < 0) {
-    nx = -nx;
-    ny = -ny;
-    nz = -nz;
-  }
-  const a = -nx / nz;
-  const b = -ny / nz;
-  const c = tri.az - a * tri.ax - b * tri.ay;
-  return { a, b, c, L: Math.sqrt(1 + a * a + b * b) };
-}
-
-/** Whether `(px, py)` lies within the triangle's own XY projection (on the boundary counts), by
- * the sign of its three edge cross-products — independent of winding. */
-function insideTriangleXY(tri: Tri, px: number, py: number): boolean {
+/** Whether `(px, py)` lies within the triangle `(ax,ay)-(bx,by)-(cx,cy)`'s own XY projection (on
+ * the boundary counts), by the sign of its three edge cross-products — independent of winding.
+ * Explicit scalar vertices, not a `Tri`, so #970's exact pass can call this straight off the
+ * mesh's own typed arrays with no intermediate object. */
+function insideTriangleXY(ax: number, ay: number, bx: number, by: number, cx: number, cy: number, px: number, py: number): boolean {
   const cross = (ox: number, oy: number, ax: number, ay: number, bx: number, by: number): number =>
     (ax - ox) * (by - oy) - (ay - oy) * (bx - ox);
-  const d1 = cross(tri.ax, tri.ay, tri.bx, tri.by, px, py);
-  const d2 = cross(tri.bx, tri.by, tri.cx, tri.cy, px, py);
-  const d3 = cross(tri.cx, tri.cy, tri.ax, tri.ay, px, py);
+  const d1 = cross(ax, ay, bx, by, px, py);
+  const d2 = cross(bx, by, cx, cy, px, py);
+  const d3 = cross(cx, cy, ax, ay, px, py);
   const hasNeg = d1 < -EPS || d2 < -EPS || d3 < -EPS;
   const hasPos = d1 > EPS || d2 > EPS || d3 > EPS;
   return !(hasNeg && hasPos);
@@ -289,6 +275,12 @@ function edgeContactMax(x0: number, y0: number, z0: number, x1: number, y1: numb
     const rho = Math.min(Math.hypot(px - x, py - y), profile.radiusMm);
     return pz - heightAt(profile, rho);
   };
+  // #970(b) — A FLAT'S OWN EDGE NEEDS NO SEARCH: `heightAt ≡ 0` throughout the reach interval
+  // (flatRadiusMm = radiusMm for a flat profile), so `f` is exactly linear in `s` there — its
+  // maximum is at one endpoint, always, and a golden-section search can only ever return one of
+  // them anyway (this file's own header). Skipping it removes ~170 f-evaluations per candidate on
+  // every path a flat end mill walks — the skim, the 4a mask and every pocket.
+  if (profile.kind === 'flat') return Math.max(f(lo), f(hi));
   const GOLDEN = (Math.sqrt(5) - 1) / 2;
   let a = lo;
   let b = hi;
@@ -315,47 +307,6 @@ function edgeContactMax(x0: number, y0: number, z0: number, x1: number, y1: numb
 }
 
 /**
- * One triangle's contribution to the drop-cutter max at (x, y) — the highest `p.z - heightAt(rho)`
- * over every point of the triangle within `profile.radiusMm`, EXACT for every shape (this file's
- * own header: vertices, the one facet-interior maximiser, and a golden-section edge search).
- */
-function triangleContribution(tri: Tri, profile: CutterProfile, x: number, y: number): number | null {
-  const R = profile.radiusMm;
-  let best: number | null = null;
-  const consider = (px: number, py: number, pz: number): void => {
-    const rho = Math.hypot(px - x, py - y);
-    if (rho > R + EPS) return;
-    const z = pz - heightAt(profile, rho);
-    if (best === null || z > best) best = z;
-  };
-  const considerExact = (z: number): void => {
-    if (best === null || z > best) best = z;
-  };
-
-  // Vertices — always exact, every profile.
-  consider(tri.ax, tri.ay, tri.az);
-  consider(tri.bx, tri.by, tri.bz);
-  consider(tri.cx, tri.cy, tri.cz);
-
-  const plane = planeOf(tri);
-  if (plane === null) return best; // a degenerate (vertical) facet: vertices are all there is
-
-  const facet = facetContact(plane, profile, x, y);
-  if (insideTriangleXY(tri, facet.px, facet.py)) considerExact(facet.z);
-
-  const edges: [number, number, number, number, number, number][] = [
-    [tri.ax, tri.ay, tri.az, tri.bx, tri.by, tri.bz],
-    [tri.bx, tri.by, tri.bz, tri.cx, tri.cy, tri.cz],
-    [tri.cx, tri.cy, tri.cz, tri.ax, tri.ay, tri.az],
-  ];
-  for (const [ex0, ey0, ez0, ex1, ey1, ez1] of edges) {
-    const z = edgeContactMax(ex0, ey0, ez0, ex1, ey1, ez1, x, y, profile);
-    if (z !== null) considerExact(z);
-  }
-  return best;
-}
-
-/**
  * The CL height at (x, y): the Z the cutter's tip reaches, dropped onto `mesh`, or `null` when no
  * triangle is within the cutter's reach. `profile` is this cutter's `profileOf(tool)` — callers that
  * query many points for the same cutter should compute it once.
@@ -371,12 +322,119 @@ function binsFor(mesh: DropCutterMesh): TriangleBins {
   return bins;
 }
 
+/** The horizontal distance from `(x, y)` to the nearest point of the box `[minX,maxX]x[minY,maxY]`
+ * — 0 when `(x, y)` is inside it. The exact pruning bound (#970) needs this, never the box's own
+ * centre or corner: it is the SMALLEST distance any point of the box could be at, so `maxZ −
+ * heightAt(this)` is a true upper bound over the whole box (`heightAt` is non-decreasing). */
+function rhoMinToBox(x: number, y: number, minX: number, maxX: number, minY: number, maxY: number): number {
+  const dx = x < minX ? minX - x : x > maxX ? x - maxX : 0;
+  const dy = y < minY ? minY - y : y > maxY ? y - maxY : 0;
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * #970 — THE EXACT, PRUNED QUERY. Same answer as the old brute force (every triangle, every
+ * contribution), to the bit: a triangle whose own upper bound `maxZ − heightAt(distance to its
+ * bbox)` cannot beat the running maximum is skipped WITHOUT being read, which can only prune
+ * candidates that could never have won — never one that could have. The bound is PER TRIANGLE
+ * only, never per cell: a triangle's own bbox is a true superset of its geometry, so the bound
+ * off it is always valid, but the small cell it happens to be registered in is not (a mesh with
+ * a few triangles much larger than the `cellMm` their own median-extent sizing clamped to can
+ * have a cell-bbox distance that reads FARTHER than the triangle's own, which would wrongly skip
+ * the cell — this is why there is no `cellMaxZ` check here even though the bins compute one).
+ * Two phases over the SAME cell range `binnedReachableTriangles` already used (its own CSR walk
+ * and per-query stamp dedup): first the per-triangle bound plus a cheap vertex-only pass (seeds
+ * `best` before any exact work runs), then the exact facet/edge work, gated by the SAME bound
+ * re-checked against the now-stronger `best` — only for a triangle that still might win. No `Tri`
+ * object, no `edges` array, no per-triangle closures: every read is a scalar off a typed array
+ * (the mesh's own positions/indices, and the bins' precomputed `maxZ`/plane coefficients).
+ */
 export function dropCutterHeight(profile: CutterProfile, mesh: DropCutterMesh, x: number, y: number): number | null {
-  let best: number | null = null;
-  for (const t of binnedReachableTriangles(binsFor(mesh), x, y, profile.radiusMm)) {
-    const tri = triangleOf(mesh, t);
-    const contribution = triangleContribution(tri, profile, x, y);
-    if (contribution !== null && (best === null || contribution > best)) best = contribution;
+  const bins = binsFor(mesh);
+  const R = profile.radiusMm;
+  const { triangles, cellMm, x0, y0, nx, ny, cellStart, cellTriangles, stamp } = bins;
+  const i0 = Math.min(nx - 1, Math.max(0, Math.floor((x - R - x0) / cellMm)));
+  const i1 = Math.min(nx - 1, Math.max(0, Math.floor((x + R - x0) / cellMm)));
+  const j0 = Math.min(ny - 1, Math.max(0, Math.floor((y - R - y0) / cellMm)));
+  const j1 = Math.min(ny - 1, Math.max(0, Math.floor((y + R - y0) / cellMm)));
+  const generation = ++bins.generation;
+  const p = mesh.positions;
+  const idx = mesh.indices;
+
+  let best = -Infinity; // a real contribution is always > -Infinity; no explicit "found" flag needed
+  const candidates: number[] = [];
+
+  // PHASE 1 — cell sweep (no cell-level bound: a triangle's own bbox can reach past the small
+  // cell it happens to be registered in — on a mesh with a few triangles much larger than the
+  // `cellMm` their own median-extent sizing clamped to, `cellMaxZ`'s cell-bbox distance can read
+  // FARTHER than the triangle's own true bbox distance, which would wrongly skip a cell holding
+  // the real winner — #970's cell-level prune was dropped for exactly this; the fix is the
+  // per-triangle bound below, which is always valid since a triangle IS a subset of its own bbox)
+  // then the three vertices of anything that survives THAT — always exact, every profile, and
+  // the cheapest way to seed a strong `best` before any facet/edge work is even considered.
+  for (let j = j0; j <= j1; j++) {
+    for (let i = i0; i <= i1; i++) {
+      const c = j * nx + i;
+      const end = cellStart[c + 1]!;
+      for (let s = cellStart[c]!; s < end; s++) {
+        const t = cellTriangles[s]!;
+        if (stamp[t] === generation) continue;
+        stamp[t] = generation;
+        const tMinX = triangles.minX[t]!, tMaxX = triangles.maxX[t]!;
+        const tMinY = triangles.minY[t]!, tMaxY = triangles.maxY[t]!;
+        if (x < tMinX - R || x > tMaxX + R) continue;
+        if (y < tMinY - R || y > tMaxY + R) continue;
+
+        const rhoMinTri = Math.min(rhoMinToBox(x, y, tMinX, tMaxX, tMinY, tMaxY), R);
+        if (triangles.maxZ[t]! - heightAt(profile, rhoMinTri) <= best) continue;
+
+        candidates.push(t);
+        const i0v = idx[t * 3]! * 3, i1v = idx[t * 3 + 1]! * 3, i2v = idx[t * 3 + 2]! * 3;
+        for (const vi of [i0v, i1v, i2v]) {
+          const vx = p[vi] as number, vy = p[vi + 1] as number, vz = p[vi + 2] as number;
+          const rho = Math.hypot(vx - x, vy - y);
+          if (rho > R + EPS) continue;
+          const z = vz - heightAt(profile, rho);
+          if (z > best) best = z;
+        }
+      }
+    }
   }
-  return best;
+
+  // PHASE 2 — exact work (facet + edges), only for a candidate whose own bound still beats the
+  // vertex-seeded `best`. The plane is the bins' own precomputed one — no `planeOf` call.
+  for (const t of candidates) {
+    const tMinX = triangles.minX[t]!, tMaxX = triangles.maxX[t]!;
+    const tMinY = triangles.minY[t]!, tMaxY = triangles.maxY[t]!;
+    const rhoMinTri = Math.min(rhoMinToBox(x, y, tMinX, tMaxX, tMinY, tMaxY), R);
+    if (triangles.maxZ[t]! - heightAt(profile, rhoMinTri) <= best) continue;
+
+    const planeA = triangles.planeA[t]!;
+
+    const i0v = idx[t * 3]! * 3, i1v = idx[t * 3 + 1]! * 3, i2v = idx[t * 3 + 2]! * 3;
+    const ax = p[i0v] as number, ay = p[i0v + 1] as number, az = p[i0v + 2] as number;
+    const bx = p[i1v] as number, by = p[i1v + 1] as number, bz = p[i1v + 2] as number;
+    const cx = p[i2v] as number, cy = p[i2v + 1] as number, cz = p[i2v + 2] as number;
+
+    // A degenerate (vertical) facet has no facet-interior contact to compute (`insideTriangleXY`
+    // would be asked about a point from a meaningless plane) — but its EDGES are still real
+    // geometry, same as any other triangle's: a quad's two triangles can BOTH collapse to a
+    // vertical facet (e.g. a box's side wall, split on its own diagonal) while that shared
+    // diagonal edge spans real XY distance and is the true contact nowhere else, since neither
+    // adjacent triangle's facet plane exists to carry it. Only the facet maximiser is skipped.
+    if (!Number.isNaN(planeA)) {
+      const plane: Plane = { a: planeA, b: triangles.planeB[t]!, c: triangles.planeC[t]!, L: triangles.planeL[t]! };
+      const facet = facetContact(plane, profile, x, y);
+      if (facet.z > best && insideTriangleXY(ax, ay, bx, by, cx, cy, facet.px, facet.py)) best = facet.z;
+    }
+
+    const e1 = edgeContactMax(ax, ay, az, bx, by, bz, x, y, profile);
+    if (e1 !== null && e1 > best) best = e1;
+    const e2 = edgeContactMax(bx, by, bz, cx, cy, cz, x, y, profile);
+    if (e2 !== null && e2 > best) best = e2;
+    const e3 = edgeContactMax(cx, cy, cz, ax, ay, az, x, y, profile);
+    if (e3 !== null && e3 > best) best = e3;
+  }
+
+  return best === -Infinity ? null : best;
 }

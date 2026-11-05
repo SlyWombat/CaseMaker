@@ -263,3 +263,45 @@ describe('#960 the unified facet contact, all four shapes, on one large sloped t
     for (const [x, y] of points) expect(dropCutterHeight(profile!, mesh, x, y)).toBeCloseTo(oracle(profile, x, y), 6);
   });
 });
+
+// #970 — A DEGENERATE (VERTICAL) FACET'S OWN EDGES ARE STILL REAL GEOMETRY. A triangle standing
+// on edge (every vertex at the same y) has no facet-interior contact — `triangleBins.ts`'s own
+// `planeA` is `NaN` for it, no `a*x+b*y+c` states its height anywhere — but its three EDGES are
+// ordinary 3D line segments with real XY extent, exactly as exact as any other triangle's. A
+// query placed where every VERTEX is out of the cutter's own reach, with one edge's own interior
+// (not an endpoint) the nearest real geometry, proves the edges are the only path to an answer at
+// all here: skipping them whenever the facet is degenerate (the bug this pins) does not just
+// under-report the height, it reports the surface UNREACHABLE at a point that plainly is not.
+describe('#970 a degenerate (vertical) facet still carries its own edges', () => {
+  // A=(0,0,0) B=(16,0,0) C=(8,0,6): a triangle standing in the XZ plane (y=0 throughout), apex
+  // offset from the query so no vertex is in reach. A second, far-off flat triangle (E,F,G) only
+  // gives the mesh a nonzero Y extent overall — `triangleBins` refuses a mesh with none — and
+  // sits nowhere near any query this case makes.
+  const mesh: DropCutterMesh = {
+    positions: Float32Array.from([0, 0, 0, 16, 0, 0, 8, 0, 6, 1000, 1000, 0, 1001, 1000, 0, 1000, 1001, 0]),
+    indices: Uint32Array.from([0, 1, 2, 3, 4, 5]),
+    triangleCount: 2,
+  };
+  const ball2: Tool = { ...flatEndMill(4, { number: 1, id: 'ball-2', name: 'ball-2' }), shape: 'ball' };
+  const profile = profileOf(ball2)!;
+  const QX = 5;
+
+  it('every vertex of the triangle is out of reach (R = 2 mm)', () => {
+    expect(Math.hypot(QX - 0, 0)).toBeGreaterThan(profile.radiusMm); // A, 5 mm away
+    expect(Math.hypot(QX - 16, 0)).toBeGreaterThan(profile.radiusMm); // B, 11 mm away
+    expect(Math.hypot(QX - 8, 0)).toBeGreaterThan(profile.radiusMm); // C, 3 mm away
+  });
+
+  it("edge C-A is the surface here — closed form w = 6/5 (f = 17/4 exactly)", () => {
+    // f(s) = z(s) - heightAt(ball, rho(s)) on edge C-A's own reach interval, substituting
+    // w = 3 - 8s (so rho = |w|, z = 3.75 + 0.75w): the one interior maximum (this file's own
+    // header: concave along any edge) is at d/dw[0.75w + sqrt(4-w^2)] = 0, i.e. w = 6/5.
+    const w = 6 / 5;
+    const r = profile.curveRadiusMm!;
+    const expected = 3.75 + 0.75 * w - (r - Math.sqrt(r * r - w * w));
+    expect(expected).toBeCloseTo(4.25, 9); // 17/4 exactly, by hand above
+    const z = dropCutterHeight(profile, mesh, QX, 0);
+    expect(z).not.toBeNull();
+    expect(z!).toBeCloseTo(expected, 6);
+  });
+});
