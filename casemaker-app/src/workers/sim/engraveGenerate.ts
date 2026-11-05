@@ -4929,7 +4929,13 @@ export async function buildModelPlanInputForGoal(
   // cut the relief loose; the skirt now stops at the sheet's own lowest boundary, so the part is
   // exactly as deep as the imported surface and no cut goes below it.
   const closed = closeOpenSheet(tl, triangles, { skirtTo: 'lowestBoundary' });
-  const geometry: FeatureSource = { triangles: closed.mesh };
+  // #987 — a skirt-closed relief's outline is the kernel's own requirement for a solid, not a
+  // design edge; `recogniseFeatures` reads this to skip the contour demand entirely (never a
+  // freeing cut around stock the design never asked to be cut away from).
+  const geometry: FeatureSource = {
+    triangles: closed.mesh,
+    ...(closed.closedBy === 'skirt' ? { outline: 'synthetic' as const } : {}),
+  };
 
   // #898's three choices, carried across under the new engine's own naming
   // (`flat`/`flipped-tabs`/`plinth` → `flatOnStockBottom`/`flippedTabs`/`plinth`); absent reads as

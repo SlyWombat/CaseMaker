@@ -60,6 +60,14 @@ export interface CloseOpenSheetResult {
   mesh: ParsedMesh;
   /** One sentence for the plan's notes: what was added, or that nothing was. */
   note: string;
+  /**
+   * #987 — HOW (OR WHETHER) THIS CALL CLOSED THE MESH. `'none'`: the input was already a closed
+   * solid — its outline is a real design edge. `'skirt'`: this call added the skirt and cap — the
+   * outline is synthetic (the kernel's own requirement for a solid, not something the design asked
+   * to be cut around). Callers carry this onto the feature tree (`FeatureSource.outline`) so a
+   * contour demand is not raised against an edge the design never drew.
+   */
+  closedBy: 'none' | 'skirt';
 }
 
 interface EdgeUse {
@@ -127,7 +135,7 @@ export function closeOpenSheet(tl: ManifoldToplevel, mesh: ParsedMesh, opts: Clo
   }
   if (overused > 0) throw new UnclosableOpenMeshError(`${overused} edge(s) shared by more than two triangles — the mesh is not a surface`);
   if (boundary.length === 0) {
-    return { mesh, note: 'the goal mesh is already closed' };
+    return { mesh, note: 'the goal mesh is already closed', closedBy: 'none' };
   }
   if (!(signedArea2 > 0)) {
     throw new UnclosableOpenMeshError(
@@ -313,5 +321,6 @@ export function closeOpenSheet(tl: ManifoldToplevel, mesh: ParsedMesh, opts: Clo
       `${skirtTriangles} skirt triangle(s) down to ${skirtTo === 'lowestBoundary' ? "the sheet's lowest boundary" : 'the stock bottom'} at ${floorZ} mm and ` +
       `${capTriangles.length} bottom-cap triangle(s)` +
       (degenerate > 0 ? ` (${degenerate} degenerate triangle(s) dropped)` : ''),
+    closedBy: 'skirt',
   };
 }

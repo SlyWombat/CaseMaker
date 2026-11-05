@@ -1280,7 +1280,13 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       depthMm: z0 - node.floorZ,
     });
   }
-  features.push({ id: 'contour', kind: 'contour', depthMm: contourDepthMm });
+  // #987 — a skirt-closed relief's outline is synthetic: the kernel's own requirement for a
+  // solid, not a design edge, so no contour op is demanded against it. `tree.contour.frees`
+  // stays what it always was (whether a REAL contour reaches the stock bottom, which decides
+  // tabs below) — a different question from whether a contour exists at all.
+  if (!tree.contour.synthetic) {
+    features.push({ id: 'contour', kind: 'contour', depthMm: contourDepthMm });
+  }
   const demand = { features };
 
   const cutters: CutterCandidates = { house: [...opts.houseFlats], catalogue: [] };
@@ -1614,7 +1620,16 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     return merged;
   };
 
-  const choice = chooseSequence(demand, cutters, {
+  // #987 — a demand with NOTHING in it (every pocket/through-hole is a `curved` region planned
+  // by `planCurvedForTree` instead, and the contour is synthetic or absent) is trivially
+  // satisfied: no pocket-chain cutter is needed, so none is required to exist. Without this,
+  // `candidateSequences` finds no candidate to build (every built step list is empty and `add`
+  // drops it) and `chooseSequence` threw "no cutter sequence can be planned" against a relief
+  // that in fact needs no pocket-chain cutter at all (#869's ball-alone relief, #966's open-mesh
+  // relief). Guarded here, not in `sequence.ts`, so the general-purpose chooser stays untouched.
+  const choice: SequenceChoice = demand.features.length === 0
+    ? { steps: [], cost: { entries: [], estimateSeconds: 0, toolChanges: 0, toolChangeSeconds: 0, totalSeconds: 0 }, considered: [], unreachable: [], freeing: null, unplanned: [] }
+    : chooseSequence(demand, cutters, {
     rapid: opts.rapid,
     toolChangeSeconds: opts.toolChangeSeconds,
     planStep,
@@ -1858,6 +1873,12 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #975 — the V floor's own lines: floor, wall angle, and the land per side the flanks take
   // (the V's own geometry, stated; the gate's edge-break class carries the land).
   notes.push(...vNotes);
+  // #987 — a synthetic outline (the skirt `closeOpenSheet` added to close an open relief) is not
+  // a design edge, so this plan demands no contour op against it at all: an open-surface relief —
+  // its edge is the stock beside it; nothing is freed.
+  if (tree.contour.synthetic) {
+    notes.push('an open-surface relief: its edge is the stock beside it; nothing is freed');
+  }
   // #962 — ONE STATEMENT PER CAUSE, NOT A LINE PER REGION: failed regions are grouped by their
   // kind and reason with a count; the per-region detail lives in `unplanned` (machine-readable),
   // never as a wall of operator lines.
