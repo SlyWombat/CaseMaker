@@ -32,7 +32,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, typ
 import { ProbeFitDiagram } from '@/components/ui/ProbeFitDiagram';
 import { probeFor } from '@/engine/cnc/registration/mountContext';
 import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
-import type { EngraveJob, FrozenPackage } from '@/types/engraveJob';
+import { planChoiceOf, type EngraveJob, type FrozenPackage } from '@/types/engraveJob';
+import type { PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import type { MachineObservation } from '@/platform/machineProbe';
 import { machineForJob } from '@/platform/bedProfiles';
@@ -635,6 +636,13 @@ export function EngraveCutSurface({
   // the registration's fitted plane is what the release gate compares the frozen package against.
   const spreadMeasurement = useSurfaceSpread(job.id, target);
   const generate = useEngraveRunStore((s) => s.generate);
+  // #961 — THE CARD'S MATERIAL TRADEOFF AND THE OPERATOR'S CHOICE. The run carries `planTradeoff`
+  // only when the two plans' measured outcomes differ materially; the line names the outcome that
+  // moved, never a cutter. The choice is the job's (`planChoiceOf`, owned by default) and the next
+  // Generate posts the chosen plan.
+  const planTradeoff = (generated as { planTradeoff?: PlanTradeoff | null } | null)?.planTradeoff ?? null;
+  const planChoice = useEngraveJobStore((s) => planChoiceOf(s.job));
+  const setPlanChoice = useEngraveJobStore((s) => s.setPlanChoice);
   /** #656 — the verdict the one screen prints: the run store's oracle for the current package (a
    * re-post replaces it, and the sentence follows). */
   const runOracle = useEngraveRunStore((s) => s.oracle);
@@ -1300,6 +1308,31 @@ export function EngraveCutSurface({
             second HERE — press Generate (the same button Design's footer carries) and the freeze
             follows it. A program that matches the design needs no card; only the blank's hold is
             stated. */}
+        {planTradeoff?.material && planTradeoff.line !== null && (
+          <section style={{ ...BOX, marginTop: 6 }} data-testid="engrave-plan-tradeoff">
+            <p style={MUTED}>{planTradeoff.line}</p>
+            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+              <button
+                type="button"
+                data-testid="engrave-plan-owned"
+                aria-pressed={planChoice === 'owned'}
+                onClick={() => setPlanChoice('owned')}
+                style={{ flex: 1, padding: 7 }}
+              >
+                My tools{planChoice === 'owned' ? ' — chosen' : ''}
+              </button>
+              <button
+                type="button"
+                data-testid="engrave-plan-ideal"
+                aria-pressed={planChoice === 'ideal'}
+                onClick={() => setPlanChoice('ideal')}
+                style={{ flex: 1, padding: 7 }}
+              >
+                Every bit the app knows{planChoice === 'ideal' ? ' — chosen' : ''}
+              </button>
+            </div>
+          </section>
+        )}
         <section
           style={{ ...BOX, marginTop: 6 }}
           data-testid="engrave-package"
