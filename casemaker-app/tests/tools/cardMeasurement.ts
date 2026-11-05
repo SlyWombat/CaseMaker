@@ -227,6 +227,7 @@ export function measureVendorCard(opts: VendorCardOptions): ProgramScore {
     cycleSeconds: facts.cycleSeconds,
     toolChanges: facts.toolChanges,
     headerTimeSeconds: facts.headerTimeSeconds,
+    vendorHolding: opts.holding ?? null,
     airFraction: facts.airFraction,
     rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
     cutters: facts.cutters.length,

@@ -55,12 +55,14 @@ import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engi
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { Z1 } from '@/engine/cnc/machine';
+import { DEFAULT_VISE, seatedVise, viseEnvelope } from '@/engine/cnc/fixture';
 import { cuttingDiameter, flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { pocket } from '@/engine/cnc/cam/model/ops/pocket';
 import { measurePostedProgram, combinePostedFacts } from '../tools/postedFacts';
 import { scoreSevenLines, type CutIntoScore, type ProgramScore, type SevenLineCard } from '../tools/sevenLines';
 import { makerablesRoot, readMakerablesManifest, resolveMakerablesCard } from '../tools/makerables';
 import { clearMakeraCatalogue, installMakeraCatalogue } from '../tools/makeraCatalogue';
+import { feedRowsFor } from '../tools/feedRows';
 import { measureVendorCard } from '../tools/cardMeasurement';
 import { planModelCam, planPocketsForTree, planTreePrograms, type ModelPlanInput, type PlanPocketsResult, type SetupPlan } from '@/engine/cnc/cam/model/plan';
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
@@ -256,14 +258,21 @@ async function planCard(
       max[c] = Math.max(max[c]!, positions[i + c]!);
     }
   }
+  // #943 (the maintainer's 11-05 ruling): the real acceptance parts are planned in the VISE with
+  // jaw clearance, not on the bare bed. The envelope is the app's own call (`defaultFixture`'s
+  // `viseEnvelope(job.stock, jobVise(job))`); the plan states in its notes that the region
+  // obstacles do not consume it yet, and the gate's sweep still checks the posted program
+  // against the SAME envelope — so the holding is a fact of this run, not a silent assumption.
+  const thickness = placed.tree.frame.stockTop - placed.tree.frame.partBottom;
+  const vise = seatedVise(DEFAULT_VISE, thickness);
   const input: ModelPlanInput = {
     geometry: {
       triangles: { positions, indices: placed.mesh.indices, triangleCount: placed.mesh.indices.length / 3, bbox: { min, max } },
       ...(placed.faceId === undefined ? {} : { faceId: placed.faceId }),
     },
     setups: [{ frame: { up: [0, 0, 1], stockTop: 0 }, underside: 'flatOnStockBottom' }],
-    stock: { length: stock.length, width: stock.width, thickness: placed.tree.frame.stockTop - placed.tree.frame.partBottom, material: 'hardwood' },
-    fixture: { mount: 'tape', envelope: null },
+    stock: { length: stock.length, width: stock.width, thickness, material: 'hardwood' },
+    fixture: { mount: 'vise', envelope: viseEnvelope({ length: stock.length, width: stock.width, thickness }, vise) },
     cutters: { house: VENDOR_SET, catalogue: [] },
     tolerances: { finishMm: 0.01 },
     edgeBreak: { legMm: EDGE_BREAK_LEG_MM },
@@ -340,6 +349,8 @@ function vendorScoreFor(name: string): ProgramScore | null {
     card: cardId,
     goalcheckPath: resolved.resolved.goalcheckPath,
     ncFiles: resolved.resolved.ncFiles,
+    // The reference page's own words: the vendor cut on its bare bed (#943 prints both holdings).
+    holding: entry.holding,
   });
 }
 
@@ -348,6 +359,36 @@ interface AcceptanceGoal {
   target: EngraveTargetObject;
   /** The stock the reference card is cut from, for the post's header (the stamp reads the same). */
   stock: { length: number; width: number };
+}
+
+/**
+ * THE HOLDING THE CARD PRINTS (#943). The real acceptance parts are planned in the vise (see
+ * `planCard`), so their card states the vise, the stock's proud height over the jaw tops and that
+ * the pitch was not changed. The synthetic and figure cards are tapes: they say `tape` and state
+ * the line is NOT claimed — never 'as filed'. Every card carries this string into `sevenLines`
+ * (`holding.ours`), and the vendor's own stated holding is printed beside it.
+ */
+function holdingFacts(
+  tree: FeatureTree,
+  goal: AcceptanceGoal | undefined,
+): { ok: boolean; holding: string; pitchMm: number; note?: string } {
+  if (goal === undefined) {
+    return {
+      ok: false,
+      holding: 'tape',
+      pitchMm: 0.1,
+      note: "'posts as filed' means the vise with jaw clearance (#943); this card is a tape-down plan and cannot claim the line",
+    };
+  }
+  const thickness = tree.frame.stockTop - tree.frame.partBottom;
+  const vise = seatedVise(DEFAULT_VISE, thickness);
+  return {
+    ok: true,
+    holding:
+      `vise — Z1 low-profile, stock ${goal.stock.length} × ${goal.stock.width} × ${thickness.toFixed(1)} mm, ` +
+      `${vise.stockProud.toFixed(1)} mm proud of the jaw tops (jaws at x = 0 / ${goal.stock.length} mm)`,
+    pitchMm: 0.1,
+  };
 }
 
 /** What `writeAcceptance` reads from a plan — the pocket result and the one entry's SetupPlan both answer it. */
@@ -417,11 +458,14 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
       // One manual bit change between consecutive posted runs; each run here is one cutter.
       toolChanges: Math.max(0, programs.length - 1),
       headerTimeSeconds: null,
+      // C2 — which row fed each cutter, and the door's own state (installed, or opted out).
+      feedRows: feedRowsFor(VENDOR_SET, 'hardwood'),
+      catalogueStatus: { used: CATALOGUE.installed, note: CATALOGUE.note },
       airFraction: facts.airFraction,
       rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
       cutters: facts.cutters.length,
       cuttersOwned: null, // a simulation-only reference card prices on the vendor's own set (R5)
-      postsAsFiled: { ok: true, holding: "Makera's own: bare bed, tape-down", pitchMm: 0.1 },
+      postsAsFiled: holdingFacts(tree, goal),
     };
     measured = { coverage, cutInto, report, ours, scored: scoreSevenLines({ card: name, ours, vendor: vendorScoreFor(name) }) };
   }
@@ -436,7 +480,8 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
         `(edge break ${((measured.cutInto.edgeBreakFraction ?? 0) * 100).toFixed(2)} %, wall cells ${((measured.cutInto.wallNotScoredFraction ?? 0) * 100).toFixed(2)} %, ` +
         `wall shadow ${((measured.cutInto.shadowNotScoredFraction ?? 0) * 100).toFixed(2)} % not counted; max ${measured.cutInto.maxMm.toFixed(3)} mm` +
         `${measured.cutInto.maxAt ? ` at ${measured.cutInto.maxAt.x.toFixed(1)}, ${measured.cutInto.maxAt.y.toFixed(1)}` : ''}). ` +
-        `Seven lines: ${measured.scored.sentence}.`;
+        `Seven lines: ${measured.scored.sentence}. ` +
+        `Holding — ours: ${measured.scored.holding.ours ?? 'not stated'}; vendor: ${measured.scored.holding.vendor ?? 'not stated'}.`;
   console.log(
     `#959 ${name}: ${pocketOps} pocket + ${contourOps} contour op(s) planned (${unreachable.length} ` +
       `unreachable: ${unreachable.join('; ') || 'none'}), ${programs.length} run(s) on ${new Set(programs.map((p) => p.cutterKey)).size} cutter(s). Posted-text facts ` +
@@ -996,7 +1041,7 @@ const ORGANIZER = process.env.CM_959_ORGANIZER_STEP;
 const CATALOGUE = installMakeraCatalogue();
 afterAll(() => clearMakeraCatalogue());
 
-describe.skipIf(TRAY === undefined || !CATALOGUE.installed)('#959 acceptance — tool tray 70, the WHOLE tree through the one interface', () => {
+describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedOut))('#959 acceptance — tool tray 70, the WHOLE tree through the one interface', () => {
   it('plans pockets, the curved remainder and rims together, with the freeing contour last and every program posted', async () => {
     const { tree, mesh } = await placedTree(TRAY!, [110, 140], -1.2);
     let min: [number, number, number] = [Infinity, Infinity, Infinity];
@@ -1058,7 +1103,7 @@ describe.skipIf(TRAY === undefined || !CATALOGUE.installed)('#959 acceptance —
   }, 900_000);
 });
 
-describe.skipIf(TRAY === undefined || !CATALOGUE.installed)('#959 acceptance — tool tray 70, the whole plan through the one entry', () => {
+describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedOut))('#959 acceptance — tool tray 70, the whole plan through the one entry', () => {
   it('plans the real part through planModelCam — pockets, the curved remainder and the rims — and posts every run', async () => {
     const placed = await placedTree(TRAY!, [110, 140], -1.2);
     const { setup, runs } = await planCard(placed, { length: 110, width: 140 });
@@ -1081,7 +1126,7 @@ describe.skipIf(TRAY === undefined || !CATALOGUE.installed)('#959 acceptance —
   }, 1_800_000);
 });
 
-describe.skipIf(ORGANIZER === undefined || !CATALOGUE.installed)('#959 acceptance — tool organizer, the whole plan through the one entry', () => {
+describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.optedOut))('#959 acceptance — tool organizer, the whole plan through the one entry', () => {
   it('plans the real part through planModelCam — pockets, the curved remainder and the rims — and posts every run', async () => {
     const placed = await placedTree(ORGANIZER!, [170, 170], -0.8);
     const { setup, runs } = await planCard(placed, { length: 170, width: 170 });
@@ -1100,10 +1145,36 @@ describe.skipIf(TRAY !== undefined || ORGANIZER !== undefined)('#959 acceptance 
   });
 });
 
-describe.skipIf(CATALOGUE.installed)('#964 — the catalogue door (the #964 ruling)', () => {
-  it('states why: the acceptance installs the full Makera catalogue (CM_CATALOGUE or <Makerables root>/catalogue.json)', () => {
-    expect(CATALOGUE.installed).toBe(false);
-    console.log(`catalogue not installed: ${CATALOGUE.reason}`);
+describe('#964 harness self-tests — the defects that consumed engine rounds', () => {
+  // RUNSOF. The harness once re-derived "runs" from `setup.ops` (the region-by-region REPORTING
+  // order). Since `batchSameCutterRuns`, a plan's own posted programs group the same cutter's ops,
+  // so an alternating A/B/A/B reporting order posts as TWO runs. Deriving runs from `ops` counted
+  // four, inflating the bit-change count and the cycle line. `runsOf` reads `SetupPlan.programs`
+  // (the execution order) and this case fails if that ever changes back.
+  it('runsOf is the plan’s posted programs, never the un-batched reporting order', () => {
+    const ir = (cutter: string): ToolpathIR => ({ tool: { id: cutter, name: cutter } }) as unknown as ToolpathIR;
+    const alternatingOps = ['A', 'B', 'A', 'B'].map((cutter) => ({
+      kind: 'pocket',
+      outcome: { cutter },
+    }));
+    const setup = {
+      ops: alternatingOps,
+      programs: [ir('A'), ir('B')],
+    } as unknown as SetupPlan;
+    expect(runsOf(setup).map((run) => run.cutterKey)).toEqual(['A', 'B']);
+    expect(runsOf(setup)).toHaveLength(setup.programs.length);
+    expect(runsOf(setup).map((run) => run.ir)).toEqual(setup.programs);
+  });
+});
+
+describe.skipIf(CATALOGUE.installed || CATALOGUE.optedOut)('#964 — the catalogue default (the maintainer’s 11-05 order)', () => {
+  it('FAILS when the licensed STEPs are set and the full catalogue is missing with no opt-out', () => {
+    // The door is the DEFAULT of every acceptance run: a machine with the STEPs set must either
+    // find the catalogue or state CM_NO_CATALOGUE. Skipping the real parts here would look green.
+    if (TRAY === undefined && ORGANIZER === undefined) return; // no STEPs: the not-run case covers it
+    throw new Error(
+      `the acceptance did not run its real parts: no full Makera catalogue was found and no opt-out was stated — ${CATALOGUE.note}`,
+    );
   });
 });
 

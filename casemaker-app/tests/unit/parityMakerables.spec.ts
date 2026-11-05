@@ -104,8 +104,8 @@ for (const card of manifest.cards) {
       if (!resolution.ok) return;
       const facts = measurePostedFiles(resolution.resolved.ncFiles, card.card);
       expect(facts.parseErrors).toBe(0);
-      // The vendor cycle is Makera's own ;@MKR|TIME, not our estimator's read of their file.
-      expect(facts.headerTimeSeconds).toBeCloseTo(card.vendorScore.cycleSeconds, 6);
+      // Makera's own ;@MKR|TIME is a FACT; the cycle line's basis is our estimator (#943).
+      expect(facts.headerTimeSeconds).toBeCloseTo(card.vendorScore.headerTimeSeconds!, 6);
       // Their file's rapids/feed ratio and cutter count, as our parser counts them.
       expect(facts.rapidsPer1000FeedLines).toBeCloseTo(card.vendorScore.rapidsPer1000FeedLines, 5);
       expect(facts.cutters.length).toBe(card.vendorScore.cutters);
@@ -153,6 +153,7 @@ for (const card of manifest.cards) {
       });
       expect(vendor.coverage).toBeCloseTo(card.vendorScore.coverage, 9);
       expect(vendor.cycleSeconds).toBeCloseTo(card.vendorScore.cycleSeconds, 6);
+      expect(vendor.headerTimeSeconds).toBeCloseTo(card.vendorScore.headerTimeSeconds!, 6);
       expect(vendor.cutters).toBe(card.vendorScore.cutters);
       expect(vendor.postsAsFiled).toBeNull();
       expect(vendor.cuttersOwned).toBeNull();

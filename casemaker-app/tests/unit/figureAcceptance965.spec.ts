@@ -54,6 +54,7 @@ import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { measurePostedProgram, combinePostedFacts } from '../tools/postedFacts';
 import { scoreSevenLines, type CutIntoScore, type ProgramScore } from '../tools/sevenLines';
 import { clearMakeraCatalogue, installMakeraCatalogue } from '../tools/makeraCatalogue';
+import { feedRowsFor } from '../tools/feedRows';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 
@@ -202,14 +203,14 @@ function wholeSurfaceTop(programs: readonly { ir: ToolpathIR; text: string }[], 
 for (const figure of FIGURES) {
   const stlPath = process.env[figure.env];
   const jobPath = join(JOBS, figure.jobFile);
-  const have = stlPath !== undefined && fs.existsSync(stlPath) && fs.existsSync(jobPath) && CATALOGUE.installed;
+  const have = stlPath !== undefined && fs.existsSync(stlPath) && fs.existsSync(jobPath) && (CATALOGUE.installed || CATALOGUE.optedOut);
   const reason =
     stlPath === undefined
       ? ` — set ${figure.env} to the local mesh`
       : !fs.existsSync(stlPath)
         ? ` — missing ${stlPath}`
-        : !CATALOGUE.installed
-          ? ` — no Makera catalogue (${CATALOGUE.reason})`
+        : !CATALOGUE.installed && !CATALOGUE.optedOut
+          ? ` — no Makera catalogue and no opt-out (${CATALOGUE.note})`
           : '';
 
   describe.skipIf(!have)(`#965 the ${figure.name} at stick scale${reason}`, () => {
@@ -273,11 +274,31 @@ for (const figure of FIGURES) {
         // One manual bit change between consecutive posted runs; each run here is one cutter.
         toolChanges: Math.max(0, programs.length - 1),
         headerTimeSeconds: null,
+        // C2 — which row fed each cutter, and the door's own state (installed, or opted out).
+        feedRows: feedRowsFor(HOUSE, job.stock.material),
+        catalogueStatus: { used: CATALOGUE.installed, note: CATALOGUE.note },
         airFraction: facts.airFraction,
         rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
         cutters: facts.cutters.length,
         cuttersOwned: true,
-        postsAsFiled: { ok: true, holding: `vise, stock proud ${jobVise(job).stockProud} mm`, pitchMm: 0.1 },
+        // #943 — 'posts as filed' means the VISE with jaw clearance. A figure is scored on its own
+        // job's holding: a vise figure states the vise and claims the line; a tape figure says
+        // 'tape' and states it cannot claim it. Never 'as filed' in the tape's own words.
+        postsAsFiled:
+          job.workholding.kind === 'vise'
+            ? {
+                ok: true,
+                holding:
+                  `vise — Z1 low-profile, stock ${job.stock.length} × ${job.stock.width} × ${job.stock.thickness} mm, ` +
+                  `${jobVise(job).stockProud} mm proud of the jaw tops (jaws at x = 0 / ${job.stock.length} mm)`,
+                pitchMm: 0.1,
+              }
+            : {
+                ok: false,
+                holding: 'tape',
+                pitchMm: 0.1,
+                note: "'posts as filed' means the vise with jaw clearance (#943); this figure's job is held on tape and cannot claim the line",
+              },
       };
       // The figures have no vendor program for the stick; the maintainer's whole-surface line is
       // the pass rule, and the card prints the other lines' facts beside it.
@@ -309,10 +330,13 @@ for (const figure of FIGURES) {
   });
 }
 
-describe.skipIf(CATALOGUE.installed)('#964 — the catalogue door (the #964 ruling)', () => {
-  it('states why: the figures plan on the full Makera catalogue (CM_CATALOGUE or <Makerables root>/catalogue.json)', () => {
-    expect(CATALOGUE.installed).toBe(false);
-    console.log(`catalogue not installed: ${CATALOGUE.reason}`);
+describe.skipIf(CATALOGUE.installed || CATALOGUE.optedOut)('#964 — the catalogue default (the maintainer’s 11-05 order)', () => {
+  it('FAILS when a figure mesh is set and the full catalogue is missing with no opt-out', () => {
+    const anyMesh = process.env.CM_ELEPHANT_STL !== undefined || process.env.CM_PANTHER_STL !== undefined;
+    if (!anyMesh) return; // no mesh set: the figure cases cannot run anyway
+    throw new Error(
+      `the figure acceptance did not run: no full Makera catalogue was found and no opt-out was stated — ${CATALOGUE.note}`,
+    );
   });
 });
 

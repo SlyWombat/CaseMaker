@@ -28,6 +28,7 @@ import type { ParsedMesh } from '@/engine/import/stlParser';
 import type { FeatureTree } from '@/engine/cnc/cam/model/features';
 import { recogniseFeatures } from '@/engine/cnc/cam/model/features';
 import { buildBinaryStl } from '@/workers/export/stlBinary';
+import { assertFixtureMesh } from './fixtureMesh';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 
 export type PartKind = 'rectilinear' | 'filleted' | 'sloped' | 'filletedFloor' | 'scooped' | 'figure';
@@ -276,6 +277,9 @@ export function buildRandomPart(seed: number, kind: PartKind, tl: ManifoldToplev
     triangleCount: indices.length / 3,
     bbox: bboxOf(positions),
   };
+  // #964 — the shared seeded fixture states its own geometry is closed and non-degenerate before
+  // any test believes a number read from it (B's dropped-vertex quad in #959 read as a 4 mm error).
+  assertFixtureMesh(mesh, `randomParts ${kind} seed ${seed}`);
   const tree = recogniseFeatures({ triangles: mesh }, { up: [0, 0, 1], stockTop: 0 }, tl);
   const stl = buildBinaryStl([{ positions: mesh.positions, indices: mesh.indices }]);
   const sha256 = createHash('sha256').update(Buffer.from(stl)).digest('hex');
