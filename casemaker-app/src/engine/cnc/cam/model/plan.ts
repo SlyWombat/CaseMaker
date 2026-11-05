@@ -251,6 +251,33 @@ export interface ModelPlanInput {
  * allowances the planner does not own), so it is `null` here and the comparison skips that row
  * rather than guessing it.
  */
+/**
+ * #986 — THE FINISHING BALL'S CANDIDATE LIST, from the recognised tree (the review session's
+ * analysis, #986 §4). Balls are grouped one per CUTTING DIAMETER (the LONGEST FLUTE of each wins,
+ * because reach is what a deep crease needs), and the list is REACH-FILTERED against the deepest
+ * remainder the setup must finish: a ball whose flute cannot descend to that floor never touches
+ * it, and choosing it — which is exactly what the old "largest diameter, first in catalogue
+ * order" rule did — bridges every crease narrower than its radius. When NO candidate reaches, the
+ * longest-flute ball is returned alone, so the plan states its one limitation rather than picking
+ * by size. The caller measures these candidates by finish and stamp; this function only decides
+ * which balls are worth measuring, and it never consults catalogue order.
+ */
+export function finishBallCandidates(house: readonly Tool[], deepestMm: number): Tool[] {
+  const byDiameter = new Map<number, Tool>();
+  for (const tool of house) {
+    if (tool.shape !== 'ball') continue;
+    const diameter = cuttingDiameter(tool) ?? 0;
+    if (!(diameter > 0)) continue;
+    const current = byDiameter.get(diameter);
+    if (current === undefined || (tool.fluteLength ?? 0) > (current.fluteLength ?? 0)) byDiameter.set(diameter, tool);
+  }
+  const all = [...byDiameter.values()];
+  const reaching = all.filter((tool) => (tool.fluteLength ?? 0) + 1e-9 >= deepestMm);
+  if (reaching.length > 0) return reaching;
+  const longest = [...all].sort((a, b) => (b.fluteLength ?? 0) - (a.fluteLength ?? 0))[0];
+  return longest === undefined ? [] : [longest];
+}
+
 export interface PlanOutcome {
   coverage: number | null;
   cutInto: { adjudicatedFraction: number | null; maxMm: number };
