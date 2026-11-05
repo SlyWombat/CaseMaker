@@ -1,0 +1,161 @@
+/**
+ * #966/#970 — THE TABLE, pinned RED-FIRST as `it.fails` (this commit): a synthetic "table" — a
+ * tabletop slab held up on four legs over a baseplate, open air BETWEEN the legs at floor level,
+ * SOLID slab material directly above that same open air higher up — built through the REAL
+ * Manifold kernel (`tl.Manifold.cube`/`.add`, the same primitives `pocketRedFirst959.spec.ts`/
+ * `966-figure-coverage`'s own synthetic fixtures use), not hand-triangulated, for a guaranteed-
+ * watertight mesh.
+ *
+ * THE BUG (Session E's elephant finding, #965/#966/#970 issue comments): a `PocketNode`'s own
+ * `region` is only ever "cleared area AT floorZ" (`features.ts`'s own doc) — `pocket()` reuses that
+ * ONE static footprint, unmodified, at EVERY Z level from `mouthZ` down to `floorZ`. `tree.ts`'s
+ * own `mouthZ` correction only fires when a SIBLING floor-patch node sits directly above (the
+ * parent-finding loop in `buildTree`) — never for a plain planar cap with no floor patch of its
+ * own, which is exactly what a tabletop's own underside is. So the inter-leg gap, correctly
+ * recognised as air AT its own floor (the baseplate's top), gets pocketed from the SLAB's own top
+ * straight down to that floor — ~15 mm of solid slab included — because nothing ever told this one
+ * node that the slab closes back over the same XY footprint above it.
+ *
+ * THE SOLID (local mm, before any placement): a 40 x 40 mm baseplate (Z 0–5), four 6 x 6 mm legs at
+ * the four corners, inset 2 mm from each edge (Z 5–20), and a 40 x 40 mm slab (Z 20–25) — the SAME
+ * footprint as the baseplate, so it covers the inter-leg gap entirely. The only recognised floor
+ * patches are the baseplate's own top (Z 5, minus the four leg footprints) and the slab's own top
+ * (Z 25, the part's `topZ`) — the legs' own tops at Z 20 are fused into the slab's underside by the
+ * union (no floor patch there, the leg being inset means this is also an OPEN shoulder at its own
+ * outer edge, same as any other root pocket whose footprint reaches the part's own outline).
+ */
+import { describe, expect, it } from 'vitest';
+
+import { tl, type ManifoldInstance } from './helpers/manifoldExec';
+import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
+import { recogniseFeatures, type FeatureTree } from '@/engine/cnc/cam/model/features';
+import { planPocketsForTree, type PlanPocketsOptions, type PlanPocketsResult } from '@/engine/cnc/cam/model/plan';
+import type { RapidEstimate } from '@/engine/cnc/cam/ir';
+import type { Tool } from '@/engine/cnc/tool';
+import type { ParsedMesh } from '@/engine/import/stlParser';
+
+// ───────────────────────────────────────────────────────────────────────────────────────────
+// THE MESH — same extraction helper `pocketRedFirst959.spec.ts` already uses (vertProperties by
+// `numProp`, never assuming 3 floats/vertex), built through the real Manifold kernel.
+// ───────────────────────────────────────────────────────────────────────────────────────────
+
+function parsed(solid: ManifoldInstance): ParsedMesh {
+  const m = solid.getMesh();
+  const n = m.vertProperties.length / m.numProp;
+  const positions = new Float32Array(n * 3);
+  for (let v = 0; v < n; v++) for (let k = 0; k < 3; k++) positions[3 * v + k] = m.vertProperties[v * m.numProp + k]!;
+  solid.delete();
+  const min: [number, number, number] = [Infinity, Infinity, Infinity];
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < positions.length; i++) {
+    min[i % 3] = Math.min(min[i % 3]!, positions[i]!);
+    max[i % 3] = Math.max(max[i % 3]!, positions[i]!);
+  }
+  return { positions, indices: Uint32Array.from(m.triVerts), triangleCount: m.triVerts.length / 3, bbox: { min, max } };
+}
+
+const BASE_Z = 5;
+const LEG_TOP_Z = 20;
+const SLAB_TOP_Z = 25;
+const LEG = 6; // leg cross-section, mm
+const FOOT = 40; // baseplate/slab footprint, mm
+const INSET = 2; // leg inset from the footprint's own edge, mm
+
+function buildTableSolid(): ManifoldInstance {
+  const baseplate = tl.Manifold.cube([FOOT, FOOT, BASE_Z], false);
+  const slab = tl.Manifold.cube([FOOT, FOOT, SLAB_TOP_Z - LEG_TOP_Z], false).translate([0, 0, LEG_TOP_Z]);
+  const legAt = (x: number, y: number): ManifoldInstance => tl.Manifold.cube([LEG, LEG, LEG_TOP_Z - BASE_Z], false).translate([x, y, BASE_Z]);
+  const legs = [
+    legAt(INSET, INSET),
+    legAt(FOOT - INSET - LEG, INSET),
+    legAt(INSET, FOOT - INSET - LEG),
+    legAt(FOOT - INSET - LEG, FOOT - INSET - LEG),
+  ];
+  return legs.reduce((acc, leg) => acc.add(leg), baseplate.add(slab));
+}
+
+function flat(d: number, number: number): Tool {
+  return {
+    number, id: `flat-${d}`, name: `⌀${d} flat`, typeText: 'flat', shape: 'flat',
+    handleDiameter: d, tipDiameter: null, diameter: d, cornerRadius: null,
+    angle: null, halfAngle: null, fluteLength: 20, shoulderLength: null,
+    stickout: null, centreCutting: true,
+  };
+}
+
+const rapid: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test fixture' };
+const offset = makeClipperOffset(tl);
+const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
+
+function treeOf(): FeatureTree {
+  return recogniseFeatures({ triangles: parsed(buildTableSolid()) }, { up: [0, 0, 1], stockTop: SLAB_TOP_Z, stockBottom: 0 }, tl);
+}
+
+function basePlanOptions(houseFlats: Tool[]): PlanPocketsOptions {
+  return {
+    offset,
+    houseFlats,
+    stepDownMm: 2,
+    feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
+    rapid,
+    toolChangeSeconds: 60,
+    spindleRpm: 12000,
+    air: true,
+    maxCutters: houseFlats.length + 1,
+    boolean,
+  };
+}
+
+/**
+ * Every FEED move's own absolute Z (undoing `planPocketsForTree`'s own `-stockTop` rebase —
+ * that file's header note) that lies strictly inside the slab's own band (`LEG_TOP_Z`,
+ * `SLAB_TOP_Z`) is a move cutting straight through solid slab material — #966's exact finding.
+ * `HOP_Z`/`safeZ` retracts sit well above `SLAB_TOP_Z` already and are never flagged by this
+ * (they are rapids, never `feed`, and this only inspects `feed` kind moves).
+ */
+function feedsThroughSlab(result: PlanPocketsResult, stockTop: number): string[] {
+  const bad: string[] = [];
+  for (const op of result.ops) {
+    if (op.kind !== 'pocket') continue;
+    for (const operation of op.outcome.ir.operations) {
+      for (const m of operation.moves) {
+        if (m.kind !== 'feed') continue;
+        const absZ = m.z + stockTop;
+        // ONLY flag a move actually over the slab's own real footprint (X/Y within [0, FOOT]) — a
+        // move past that, however high its Z, is the pocket op's own documented open-edge
+        // overshoot band (`pocket.ts`'s own header: "the overshoot past the true edge is air,
+        // removed by the contour op regardless"), never real material in this fixture.
+        const overSlab = m.x > -1e-6 && m.x < FOOT + 1e-6 && m.y > -1e-6 && m.y < FOOT + 1e-6;
+        if (overSlab && absZ > LEG_TOP_Z + 1e-6 && absZ < SLAB_TOP_Z - 1e-6) {
+          bad.push(`${op.region.id}: feed at (${m.x.toFixed(2)}, ${m.y.toFixed(2)}, abs z ${absZ.toFixed(3)}) — inside the slab's own band (${LEG_TOP_Z}, ${SLAB_TOP_Z})`);
+        }
+      }
+    }
+  }
+  return bad;
+}
+
+describe('#966/#970 the table — a pocket under an overhang the node itself never saw', () => {
+  it('sanity: recogniseFeatures finds exactly the one inter-leg pocket, floor at the baseplate top', () => {
+    const tree = treeOf();
+    expect(tree.pockets).toHaveLength(1);
+    const node = tree.pockets[0]!;
+    expect(node.floorZ).toBeCloseTo(BASE_Z, 3);
+    expect(node.through).toBe(false);
+    // `mouthZ` is the part's own top (the slab's) — never corrected down to the slab's own
+    // underside, because that underside has no floor patch of its own (`tree.ts`'s own parent-
+    // finding loop only ever fires for a sibling floor-patch node) — this IS the root cause,
+    // confirmed directly off the recognised tree rather than assumed from the issue's description.
+    expect(node.mouthZ).toBeCloseTo(SLAB_TOP_Z, 3);
+  });
+
+  it.fails('red-first (pre-#966 call shape, no shadow check): plans a cut straight through the slab', () => {
+    const tree = treeOf();
+    const result = planPocketsForTree(tree, basePlanOptions([flat(4, 1)]));
+    const bad = feedsThroughSlab(result, tree.frame.stockTop);
+    // THE RED ASSERTION — what #966 actually requires — fails today: at least one feed move
+    // exists inside the slab's own band, because `node.region`'s one static footprint is pocketed
+    // unmodified from the slab's own top straight down to the baseplate's floor.
+    expect(bad, bad.join('\n')).toEqual([]);
+  });
+});
