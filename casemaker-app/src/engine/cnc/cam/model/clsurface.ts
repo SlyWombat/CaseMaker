@@ -54,6 +54,39 @@ export interface ReachResult {
  * triangle of the WHOLE mesh (never just `region.triangles`) so a cutter overhanging the region's
  * own edge still sees the wall/land beside it, not air past the region's own footprint boundary.
  */
+/**
+ * Exactly on the footprint's own boundary. `pointInPolygons` answers "outside" for a point lying
+ * ON a vertical edge (ray casting's own convention, `pocket.ts`), while the raster's interval
+ * tracer counts that same column as inside — the disagreement surfaced as `dropRow`'s "footprint
+ * notch" on the organizer's grown finish region, whose offset lands vertical edges on exactly the
+ * raster's round x values. A point on the boundary is the region's own edge, so it is reachable.
+ * Guarded by the footprint's bbox, so a genuinely outside point costs one rectangle test.
+ */
+function onBoundary(footprint: readonly (readonly [number, number][])[], x: number, y: number, eps = 1e-9): boolean {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const ring of footprint) {
+    for (const [px, py] of ring) {
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
+    }
+  }
+  if (x < minX - eps || x > maxX + eps || y < minY - eps || y > maxY + eps) return false;
+  for (const ring of footprint) {
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [x1, y1] = ring[j]!;
+      const [x2, y2] = ring[i]!;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len2 = dx * dx + dy * dy;
+      const t = len2 > 0 ? Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / len2)) : 0;
+      if (Math.hypot(x - (x1 + t * dx), y - (y1 + t * dy)) <= eps) return true;
+    }
+  }
+  return false;
+}
+
 export function clSurface(geometry: FeatureSource, region: RemainderRegion, cutter: Tool, _stepOverMm: number): ClSurface {
   const profile = profileOf(cutter);
   if (profile === null) {
@@ -74,7 +107,7 @@ export function clSurface(geometry: FeatureSource, region: RemainderRegion, cutt
   let sampleCount = 0;
   return {
     dropCutter(x, y) {
-      if (!pointInPolygons(region.footprint, x, y)) return null;
+      if (!pointInPolygons(region.footprint, x, y) && !onBoundary(region.footprint, x, y)) return null;
       sampleCount++;
       return dropCutterHeight(profile, mesh, x, y);
     },

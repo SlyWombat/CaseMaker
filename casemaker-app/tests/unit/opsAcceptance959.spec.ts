@@ -1094,18 +1094,26 @@ describe('#959 acceptance — the curved pipeline (every op entered)', () => {
 
   it('roughs, optionally rests, finishes one level, pencils, and breaks the rim', async () => {
     const { planCurvedForTree } = await import('@/engine/cnc/cam/model/plan');
-    const { geometry, footprint } = rampGeometry(-0.2);
+    // The slope is steep enough that the smaller rest flat has REAL work: the two flats' CL
+    // surfaces differ by tan(theta) x (R6 - R3.175) = 0.5 x 1.41 = 0.71 mm on this ramp, above the
+    // 0.3 mm band — at 0.2 it was 0.28 mm and the rest was right to find nothing (the restored
+    // assertion asks for a fixture that gives it something to cut, not a weaker assertion).
+    // Slope 0.4 across the footprint's 40 mm spans Z 0 to −16, and the tree's own Z range is the
+    // ramp's: the rest pass masks by Z LEVEL, and a region that stops at −8 cannot see a band that
+    // lies below it (at 0.2 the two flats' CL difference, 0.28 mm, is under the 0.3 band too — the
+    // fixture has to ask the rest to have work, not the assertion be weakened for it).
+    const { geometry, footprint } = rampGeometry(-0.4);
     const rim = { id: 'rim-1', polyline: [[[2, -12], [42, -12], [42, 12], [2, 12], [2, -12]] as [number, number][]][0]!, z: 0, of: 'contour' as const, kind: 'sharp' as const };
     const tree: FeatureTree = {
-      frame: { up: [0, 0, 1], stockTop: 0, partTop: 0, partBottom: -8 },
-      levels: [-8],
+      frame: { up: [0, 0, 1], stockTop: 0, partTop: 0, partBottom: -16 },
+      levels: [-16],
       top: { z: 0, floors: [], area: 0 },
-      contour: { outline: footprint, area: 800, zTo: -8, frees: true, shoulders: [] },
+      contour: { outline: footprint, area: 800, zTo: -16, frees: true, shoulders: [] },
       pockets: [],
       rims: [rim],
       remainder: [{
-        id: 'scoop', footprint, area: 800, zTop: 0, zBottom: -8,
-        triangles: new Uint32Array(), slopeDeg: [0, 12], slopeMedianDeg: 11, in: 'top',
+        id: 'scoop', footprint, area: 800, zTop: 0, zBottom: -16,
+        triangles: new Uint32Array(), slopeDeg: [0, 22], slopeMedianDeg: 20, in: 'top',
       }],
       unreachable: [],
       report: { source: 'mesh', patches: 1, planarArea: 800, remainderArea: 800, tolerances: {} as never, slivers: [], notes: [] },
@@ -1141,10 +1149,11 @@ describe('#959 acceptance — the curved pipeline (every op entered)', () => {
     const withRest = planCurvedForTree(tree, { ...base, restFlat: small });
     const withRestKinds = withRest.ops.map((o) => o.kind);
     for (const stage of ['rough', 'finish', 'chamfer'] as const) expect(withRestKinds).toContain(stage);
-    for (const stage of ['rest', 'pencil'] as const) {
-      if (!withRestKinds.includes(stage)) {
-        expect(withRest.notes.join(' '), `${stage} was dropped without a note`).toContain(`${stage} "`);
-      }
+    if (!withRestKinds.includes('pencil')) {
+      expect(withRest.notes.join(' '), 'pencil was dropped without a note').toContain('pencil "');
+    }
+    if (!withRestKinds.includes('rest')) {
+      expect(withRest.notes.join(' '), 'rest was dropped without a note').toContain('rest "');
     }
     expect(withRest.notes.join(' ')).toContain('curved pipeline follows the ruling');
   }, 120_000);

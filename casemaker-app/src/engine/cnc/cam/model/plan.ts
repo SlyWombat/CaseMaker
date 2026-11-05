@@ -437,6 +437,15 @@ const allPockets = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [
 
 /** The `facing` region's own `Box2` — there is no `PocketNode`/`regionRefs` entry for it (it is
  * not a recognised feature, it is this plan's own synthesis of `FeatureTree.top.floors`). */
+/** A ring's projected area (shoelace), mm² — absolute, so the ring's winding does not matter. */
+function ringAreaOf(ring: readonly [number, number][]): number {
+  let area = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    area += ring[j]![0] * ring[i]![1] - ring[i]![0] * ring[j]![1];
+  }
+  return Math.abs(area / 2);
+}
+
 function boundsOfPolygons(polygons: Polygons): Box2 {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const ring of polygons) for (const [x, y] of ring) {
@@ -1031,13 +1040,33 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       );
     }
     const ref = regionRefOf(region.id, 'curved', region.footprint, region.zTop, region.zBottom);
-    const clFlat = clSurface(opts.geometry, region, opts.flat, cuts.stepOver);
+    // THE REVIEW'S SAFETY FINDING: the finish's outer footprint is grown by the ball's radius, and
+    // nothing roughed that ring — the ball would take a full-width, full-depth bite of stock that
+    // no rough had touched. The flat roughs the SAME grown region first (its own drop-cutter rests
+    // against the part's flank over exactly that ring), leaving the band the ball is allowed to
+    // take; both stages then see one region.
+    //
+    // The outer-surface test is the footprint's LARGEST ring against the contour's own: the
+    // figure's remainder is an ANNULUS (two rings, outer ring = the silhouette), a summed area or a
+    // single-ring count both rejected it and its coverage fell back to 87.77 %.
+    const ball0 = opts.ball;
+    const ballRadius0 = ball0 === undefined ? 0 : (cuttingDiameter(ball0) ?? 0) / 2;
+    const outerMost = (polys: Polygons): number => Math.max(0, ...polys.map(ringAreaOf));
+    const contourRing = outerMost(tree.contour.outline);
+    const isOuterSurface =
+      ballRadius0 > 0 && contourRing > 0 && Math.abs(outerMost(region.footprint) - contourRing) <= 0.01 * contourRing;
+    const grownFootprint = isOuterSurface ? opts.offset(region.footprint, ballRadius0) : [];
+    const roughRegion = grownFootprint.length > 0 ? { ...region, footprint: grownFootprint } : region;
+    const roughRef = roughRegion === region
+      ? ref
+      : regionRefOf(region.id, 'curved', roughRegion.footprint, region.zTop, region.zBottom);
+    const clFlat = clSurface(opts.geometry, roughRegion, opts.flat, cuts.stepOver);
     noteGrid(opts.flat, clFlat);
     // 1. The FLAT Z-steps the region to its own CL, leaving the band.
     const roughOut = rough({
       cutter: opts.flat,
-      region,
-      regionRef: ref,
+      region: roughRegion,
+      regionRef: roughRef,
       clSurface: clFlat,
       stepDownMm: opts.stepDownMm,
       stockToLeaveMm: opts.bandMm,
@@ -1067,7 +1096,13 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         clSurface: restCl,
         stepDownMm: opts.stepDownMm,
         stockToLeaveMm: opts.bandMm,
-        stepOverMm: opts.stepOverMm,
+        // The rest flat is SMALLER than the primary: the plan-level step-over is the primary's
+        // (half a ⌀6 is 3 mm), and handing that to a ⌀3.175 rest is more than its own radius —
+        // `pocketLoops` refuses it by name ('step-over 3 mm exceeds the 1.5875 mm tool radius').
+        // The rest takes the smaller of the stated step-over and its own radius.
+        stepOverMm: opts.stepOverMm === undefined
+          ? undefined
+          : Math.min(opts.stepOverMm, (cuttingDiameter(opts.restFlat) ?? 0) / 2),
         feeds: opts.feeds,
         offset: opts.offset,
         safeZMm: opts.safeZMm,
@@ -1093,30 +1128,16 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // footprint, so a convex flank — the figure's bell, whose widest point is at its base — stood
     // in its own shadow: any ball centred inside the part had to rest on the higher shoulder
     // within its radius, and the skirt below read as 12.2 % left standing. A ball cuts a shoulder
-    // from OUTSIDE it: its centre may run up to one radius beyond the part while still touching
-    // it, so the finish's region is grown by exactly the ball's radius (the CL heights still come
-    // from the mesh, so the ball follows the design wherever it goes). The CL surface is sampled
-    // on the grown region too — dropping a row against a surface that does not reach its own
-    // endpoints is what `dropRow` refuses, by name.
-    // ...and only on the part's OWN OUTER SURFACE: for an interior pocket floor the ball is already
-    // surrounded by the part, and growing the footprint there makes raster rows cross the offset's
-    // own notches where the CL surface has no reach — the organizer's first run refused exactly
-    // that ('the row leaves the surface's own reach ... a footprint notch'). A region whose
-    // footprint is the contour's own area IS the outer skirt; only that one is grown.
-    const ballRadius = (cuttingDiameter(ball) ?? 0) / 2;
-    const isOuterSurface = region.area >= 0.99 * tree.contour.area;
-    const grownFootprint = ballRadius > 0 && isOuterSurface ? opts.offset(region.footprint, ballRadius) : [];
-    const finishRegion = grownFootprint.length > 0 ? { ...region, footprint: grownFootprint } : region;
-    const finishRef = finishRegion === region
-      ? ref
-      : regionRefOf(region.id, 'curved', finishRegion.footprint, region.zTop, region.zBottom);
-    const clBall = clSurface(opts.geometry, finishRegion, ball, cuts.stepOver);
+    // from OUTSIDE it, so the finish runs on the same region the rough just cleared (grown, when
+    // the region is the part's own outer surface). The CL surface is sampled on it too — dropping
+    // a row against a surface that does not reach its own endpoints is what `dropRow` refuses.
+    const clBall = clSurface(opts.geometry, roughRegion, ball, cuts.stepOver);
     noteGrid(ball, clBall);
     const depth = Math.max(opts.stepDownMm, region.zTop - region.zBottom);
     const finishOut = finish({
       cutter: ball,
-      region: finishRegion,
-      regionRef: finishRef,
+      region: roughRegion,
+      regionRef: roughRef,
       clSurface: clBall,
       kind: 'ball-scallop',
       scallopMm: opts.finishScallopMm ?? opts.bandMm,

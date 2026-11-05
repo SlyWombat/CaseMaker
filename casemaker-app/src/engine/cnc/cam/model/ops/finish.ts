@@ -170,9 +170,17 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   let prevExit: DroppedPoint | null = null;
   let rowParity = 0;
 
+  // A raster row COLLINEAR with a polygon edge is the even-odd tracer's own blind spot: a vertical
+  // edge at exactly x contributes no crossing by the half-open rule, so a hole on that line becomes
+  // invisible and the row's interval spans straight across it — `dropRow` then refuses the null
+  // midpoint between two valid ends ('a footprint notch'). The organizer's grown finish region hits
+  // it on the real part: its offset lands vertical edges on exactly the raster's round x values.
+  // The rows start a tenth of a micron off, far below the CL tolerance (0.005 mm), and the blind
+  // spot is gone.
+  const X_NUDGE_MM = 1e-4;
   for (const levelZ of levels) {
     const levelCleared: Polygons = [];
-    for (let x = min[0]; x <= max[0] + stepOverMm * 1e-6; x += stepOverMm) {
+    for (let x = min[0] + X_NUDGE_MM; x <= max[0] + stepOverMm * 1e-6; x += stepOverMm) {
       const intervals = footprintColumnIntervals(opts.region.footprint, x);
       const ordered = rowParity % 2 === 0 ? intervals : [...intervals].reverse();
       for (const interval of ordered) {
