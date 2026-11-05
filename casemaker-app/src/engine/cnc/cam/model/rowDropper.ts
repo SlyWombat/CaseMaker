@@ -26,52 +26,61 @@ export interface DroppedPoint {
 // coarsest `maxSpacingMm` is already absurd; real surfaces close long before this.
 const MAX_BISECT_DEPTH = 24;
 
-function bisect(surface: ClSurface, a: DroppedPoint, b: DroppedPoint, depth: number, out: DroppedPoint[]): void {
+/** The surface's drop at `t` along a..b, or a throw: a null between two reachable points is a footprint notch. */
+function dropAt(surface: ClSurface, a: DroppedPoint, b: DroppedPoint, t: number): DroppedPoint {
+  const x = a.x + (b.x - a.x) * t;
+  const y = a.y + (b.y - a.y) * t;
+  const z = surface.dropCutter(x, y);
+  // The manager's ruling on footprint vs links: a row is CUT only where `clSurface` answers; a
+  // stretch where it leaves the footprint and re-enters is a LINK, handed to `link()`'s own
+  // material-state read, never a straight chord guessed across it. `a` and `b` are both known
+  // reachable (every caller — `dropRow`'s own endpoints, or the bisection's own recursion — only
+  // ever bisects between two already-valid points), so a null HERE means the straight line
+  // between them crosses OUT of the footprint somewhere in between: exactly the footprint notch
+  // this rule exists to catch, not a reason to fall back on the chord and cut across it.
+  if (z === null) {
+    throw new Error(
+      `cam/model/rowDropper: the row leaves the surface's own reach between (${a.x}, ${a.y}) and (${b.x}, ${b.y}) — a footprint notch, not a straight chord to guess across. The caller clips a row into separate footprint intervals and hands the gap between them to link(), per the manager's ruling on footprint vs links.`,
+    );
+  }
+  return { x, y, z };
+}
+
+/**
+ * #960 — THE ORGANIZER FOUND THIS: a segment was accepted when its MIDPOINT alone sat on the
+ * chord. A CL kink off-centre (a ball rolling over a crease or a rim) can leave the midpoint on the
+ * chord while the surface rises above it a quarter of the way along — the chord then dips under
+ * the CL (worst 0.041 mm on the real organizer, 745 row segments). The segment is accepted only
+ * when its midpoint AND both quarter points sit within tolerance; the quarter points become the
+ * halves' own midpoints on recursion, so each accepted leaf costs two drops, not three.
+ */
+function bisect(surface: ClSurface, a: DroppedPoint, b: DroppedPoint, mid: DroppedPoint | null, depth: number, out: DroppedPoint[]): void {
   const segLen = Math.hypot(b.x - a.x, b.y - a.y);
   if (segLen <= 1e-9) {
     out.push(b);
     return;
   }
-  const mx = (a.x + b.x) / 2;
-  const my = (a.y + b.y) / 2;
-  const mz = surface.dropCutter(mx, my);
-  // The manager's ruling on footprint vs links: a row is CUT only where `clSurface` answers; a
-  // stretch where it leaves the footprint and re-enters is a LINK, handed to `link()`'s own
-  // material-state read, never a straight chord guessed across it. `a` and `b` are both known
-  // reachable (every caller — `dropRow`'s own endpoints, or this function's own recursion — only
-  // ever bisects between two already-valid points), so a null HERE means the straight line
-  // between them crosses OUT of the footprint somewhere in between: exactly the footprint notch
-  // this rule exists to catch, not a reason to fall back on the chord and cut across it.
-  if (mz === null) {
-    throw new Error(
-      `cam/model/rowDropper: the row leaves the surface's own reach between (${a.x}, ${a.y}) and (${b.x}, ${b.y}) — a footprint notch, not a straight chord to guess across. The caller clips a row into separate footprint intervals and hands the gap between them to link(), per the manager's ruling on footprint vs links.`,
-    );
-  }
-  const chordZ = (a.z + b.z) / 2;
-  const departure = Math.abs(mz - chordZ);
+  const m = mid ?? dropAt(surface, a, b, 0.5);
+  const q1 = dropAt(surface, a, b, 0.25);
+  const q3 = dropAt(surface, a, b, 0.75);
+  const chord = (t: number): number => a.z + (b.z - a.z) * t;
+  const departure = Math.max(Math.abs(m.z - chord(0.5)), Math.abs(q1.z - chord(0.25)), Math.abs(q3.z - chord(0.75)));
   if (departure <= surface.toleranceMm) {
     out.push(b);
     return;
   }
   if (segLen / 2 <= surface.minSpacingMm || depth >= MAX_BISECT_DEPTH) {
-    // A real discontinuity at the finest spacing this surface states. Hold the SHALLOWER of the
-    // two known ends across the whole stretch, stepping vertically right at whichever end is the
-    // DEEPER one — never a diagonal, which could dip the tool under the shallow side's own true
-    // height partway across (exactly the gouge a smooth interpolation would risk here).
-    if (a.z >= b.z) {
-      // a is shallow (or equal): hold a's Z laterally all the way to b's own XY, THEN drop.
-      out.push({ x: b.x, y: b.y, z: a.z });
-      out.push(b);
-    } else {
-      // b is shallow: rise to b's Z right at a's own XY, so the whole stretch after that is level.
-      out.push({ x: a.x, y: a.y, z: b.z });
-      out.push(b);
-    }
+    // A real discontinuity at the finest spacing this surface states — never a diagonal, which
+    // could dip the tool under the high side partway across. Hold the HIGHEST height known on the
+    // stretch (either end, or a sample between them) across it, stepping vertically at each end.
+    const hold = Math.max(a.z, b.z, m.z, q1.z, q3.z);
+    if (hold > a.z) out.push({ x: a.x, y: a.y, z: hold });
+    if (hold > b.z) out.push({ x: b.x, y: b.y, z: hold });
+    out.push(b);
     return;
   }
-  const mid: DroppedPoint = { x: mx, y: my, z: mz };
-  bisect(surface, a, mid, depth + 1, out);
-  bisect(surface, mid, b, depth + 1, out);
+  bisect(surface, a, m, q1, depth + 1, out);
+  bisect(surface, m, b, q3, depth + 1, out);
 }
 
 /**
@@ -106,7 +115,7 @@ export function dropRow(surface: ClSurface, from: readonly [number, number], to:
       throw new Error(`cam/model/rowDropper: a maxSpacing sample at (${x}, ${y}) fell outside the surface's reach — the row crosses the footprint's own edge mid-span, the caller's own clipping to fix`);
     }
     const next: DroppedPoint = { x, y, z };
-    bisect(surface, prev, next, 0, out);
+    bisect(surface, prev, next, null, 0, out);
     prev = next;
   }
   return out;
