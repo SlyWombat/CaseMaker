@@ -39,8 +39,14 @@ export interface Route {
   lengthMm: number;
 }
 
-/** Even-odd point membership over every ring (outers and holes alike). */
-function inside(polys: Polygons, x: number, y: number): boolean {
+/**
+ * CLOSED membership (#962 ruling): a point within 1e-6 mm of the polygon's boundary is INSIDE.
+ * The cleared region is closed — the ring `pocketLoops` cuts lies exactly on `erode(region, R)`,
+ * and the boundary of that region is cut material, not air. Float equality, not a grace.
+ */
+export const BOUNDARY_EPS_MM = 1e-6;
+
+function insideEvenOdd(polys: Polygons, x: number, y: number): boolean {
   let c = false;
   for (const ring of polys) {
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -50,6 +56,27 @@ function inside(polys: Polygons, x: number, y: number): boolean {
     }
   }
   return c;
+}
+
+function distanceToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0;
+  return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
+}
+
+/** The cleared region's own membership, shared by every caller: closed within {@link BOUNDARY_EPS_MM}. */
+export function insideClosed(polys: Polygons, x: number, y: number): boolean {
+  if (insideEvenOdd(polys, x, y)) return true;
+  for (const ring of polys) {
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i]!;
+      const [xj, yj] = ring[j]!;
+      if (distanceToSegment(x, y, xj, yj, xi, yi) <= BOUNDARY_EPS_MM) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -67,7 +94,7 @@ export function routeWithin(from: RoutePoint, to: RoutePoint, opts: RouteOptions
       const t = s / steps;
       const x = a.x + (b.x - a.x) * t;
       const y = a.y + (b.y - a.y) * t;
-      if (!inside(opts.cleared, x, y)) return false;
+      if (!insideClosed(opts.cleared, x, y)) return false;
       const top = opts.materialAt(x, y);
       if (top === null || z < top - 1e-6) return false;
     }
