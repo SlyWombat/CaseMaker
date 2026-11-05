@@ -2727,6 +2727,17 @@ const engraveJobV3Schema = engraveJobV2Schema
       .array(targetObjectSchema)
       .optional()
       .describe('The targets of a job cut from several sides, one per setup; omit for the single `targetObject` form.'),
+    // #961/#975 — THE OPERATOR'S PLAN CHOICE (the maintainer's 11-05 ruling): the owned plan is the
+    // default and what the seven lines judge; the ideal plan (every bit the app knows) is a
+    // recommendation the operator may choose instead. OPTIONAL and not defaulted, so every
+    // document that predates it parses unchanged; absent reads as 'owned' at the one place that
+    // asks (`planChoiceOf`), never rewritten into the file.
+    planChoice: z
+      .enum(['owned', 'ideal'])
+      .optional()
+      .describe(
+        "Which plan the operator chose: 'owned' (the location's own cutters — the default when absent) or 'ideal' (every bit the app knows, the recommendation).",
+      ),
   })
   .passthrough()
   .superRefine((job, ctx) => {
