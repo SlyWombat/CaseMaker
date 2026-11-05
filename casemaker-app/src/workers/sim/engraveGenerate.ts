@@ -202,7 +202,7 @@ import {
   isMold,
   type SampleGoalOpts,
 } from '@/engine/cnc/engrave/goalHeightfield';
-import { type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
+import { type PostContext, type PostResult, type VacuumSpan } from '@/engine/cnc/post/z1';
 import { postFor, postKey, postOriginFor } from '@/engine/cnc/post';
 import { appendThumbnail, heightfieldTopViewPng, planViewPng, simulationTopViewPng } from '@/engine/cnc/post/thumbnail';
 import { applySurfaceLift, maxSurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
@@ -269,7 +269,7 @@ import {
   type SetupSpec,
 } from '@/engine/cnc/cam/model/plan';
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
-import type { CutterCandidates } from '@/engine/cnc/cam/model/sequence';
+import { cutterKeyOf, type CutterCandidates } from '@/engine/cnc/cam/model/sequence';
 import type { EdgeBreakSpec, ModelTolerances } from '@/engine/cnc/cam/model/types';
 import type { Mount } from '@/engine/cnc/setups/types';
 import { targetObjectMesh } from '@/engine/import/targetObject';
@@ -5000,19 +5000,121 @@ export async function generateGoalProgram(
     } catch (e) {
       return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
     }
-    // `planModelCam` ran: the engine is reachable and returned a `SetupPlan` per setup, but turning
-    // that into a posted program (feeds/cam/nc/verify) is the full #966 cutover, owned by a later,
-    // two-owner pass — not this seam. Stated by name, with the engine's own notes, rather than
-    // returning a shape nothing downstream expects.
-    const setupCount = output.perSetup.length;
-    const programCount = output.perSetup.reduce((n, s) => n + s.programs.length, 0);
-    const notes = output.perSetup.flatMap((s) => s.notes);
-    return fail(
-      'cam',
-      `cam/model seam (#966): planModelCam ran (${setupCount} setup(s), ${programCount} program(s)` +
-        `${notes.length === 0 ? '' : `; notes: ${notes.join(' | ')}`}) — generateGoalProgram's conversion ` +
-        'of ModelPlanOutput into a posted program is not implemented yet (the #966 seam only, not the cutover)',
-    );
+    // #966 — THE CUTOVER (not just the seam, this round). `planModelCam` ran and returned a
+    // `SetupPlan` per setup; each setup's `programs` (one per RUN, in execution order — #963's own
+    // rule) now posts through the SAME `postFor`/`verifyProgram` pair, and the SAME `VerifyContext`
+    // shape (`toSetup`/`jobDepthLimit`/`mountCtx`), the rest of this file already builds for a
+    // goal's own setup — not a second convention (grep both call sites before touching this).
+    //
+    // #965's flip plan can still return more than one `SetupPlan` (a multi-setup freeing-over-CL
+    // job); that side of the cutover is explicitly another session's work, so more than one setup
+    // is refused BY NAME here rather than silently posting only the first.
+    if (output.perSetup.length !== 1) {
+      return fail(
+        'cam',
+        `cam/model (#966): planModelCam returned ${output.perSetup.length} setup(s) for "${goal.name}" — ` +
+          "this cutover posts a single-setup goal only; a multi-setup flip plan is #965's own work",
+      );
+    }
+    const plan = output.perSetup[0]!;
+    if (plan.programs.length === 0) {
+      return fail(
+        'cam',
+        `cam/model (#966): planModelCam planned no program for "${goal.name}"` +
+          (plan.notes.length === 0 ? '' : ` — ${plan.notes.join(' | ')}`),
+      );
+    }
+
+    const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
+    const limit: DepthLimit = jobDepthLimit(job);
+    const ctx: PostContext = {
+      jobName: job.name,
+      stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
+      materialName: job.stock.material,
+      zDatum: 'probed-top-face',
+      origin: postOriginFor(mill),
+      camVersion: CAM_VERSION,
+      toolKey: job.toolKey,
+    };
+
+    const programs: EngraveProgram[] = [];
+    for (let i = 0; i < plan.programs.length; i++) {
+      const ir = plan.programs[i]!;
+      // #961's own cutter identity — `tool.id ?? tool.name` (`cam/model/sequence.ts`'s
+      // `cutterKeyOf`), the SAME string the plan's own run-grouping already keyed this program's
+      // cutter by (`SetupPlan.programs`'s own doc: "one program per RUN"). `toolKey` here is a
+      // free-text header word (`;@CM|TOOL|key=`, `post/z1.ts`) the post never reads back for
+      // machine control, so it needs no round-trip through the `shop.tools` registry.
+      const toolKey = cutterKeyOf(ir.tool);
+      const span: VacuumSpan =
+        plan.programs.length === 1 ? 'whole' : i === 0 ? 'first' : i === plan.programs.length - 1 ? 'last' : 'middle';
+      const programLabel = `program ${i + 1}/${plan.programs.length} (${toolKey})`;
+      let posted: PostResult;
+      try {
+        posted = postFor(mill)(ir, { ...ctx, toolKey }, { vacuum: span });
+      } catch (e) {
+        return fail('post', `cam/model (#966): ${programLabel}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      if (!posted.ok) {
+        return fail('post', `cam/model (#966): ${programLabel}: ${posted.errors.join('; ')}`);
+      }
+      const verify = verifyProgram(posted.text, {
+        setup,
+        machine: mill,
+        tool: ir.tool,
+        dialect: postKey(mill),
+        depthLimit: limit,
+        minRapidZ: ir.hopZ,
+        ...mountCtx(shop.mount, job.jawClearance),
+      });
+      const verifyErrors = verify.findings.filter((f) => f.severity === 'error');
+      if (verifyErrors.length > 0) {
+        // #966 — a program the verifier refuses stops the run here: the programs already posted
+        // (if any) are returned as the diagnosis `programs` doc states ("a partial list, never a
+        // runnable job"), and the failing program's own text/report ride the top-level fields —
+        // the SAME shape `generateOneProgram`'s own verify-stage stop returns (grep that call site).
+        return {
+          ...base,
+          ok: false,
+          stage: 'verify',
+          findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...documentFindings()]),
+          feeds: null,
+          cam: null,
+          nc: posted.text,
+          verify,
+          programs: [...programs],
+          errors: [{ stage: 'verify', message: `cam/model (#966): ${programLabel}: ${verifyErrors.length} verifier error(s)` }],
+        };
+      }
+      programs.push({
+        setupIndex: 1,
+        setupId: jobSetups(job)[0]!.id,
+        toolKey,
+        nc: posted.text,
+        frame: ir.frame,
+        verify,
+        frameNc: null,
+        frameVerify: null,
+        programHash: programHash(posted.text),
+        cam: summarize(ir, mill.rapidEstimate),
+      });
+    }
+
+    // #419 J3 — the top-level `nc`/`verify`/`cam` describe the FIRST program, exactly as the
+    // `programs` field's own doc states ("the adapter the panels and the bench scripts read
+    // today"); every program's own facts ride in `programs`.
+    const first = programs[0]!;
+    return {
+      ...base,
+      ok: true,
+      stage: 'done',
+      findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...documentFindings()]),
+      feeds: null,
+      cam: first.cam,
+      nc: first.nc,
+      verify: first.verify,
+      programs,
+    };
   }
 
   // Feeds — the job's 2.5D feeds, reused unchanged (slice F tunes 3D engagement, #536). A ball/bull
