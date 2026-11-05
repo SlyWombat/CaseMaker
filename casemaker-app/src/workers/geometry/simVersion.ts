@@ -16,4 +16,14 @@
 // 2 — #947 opens boundary slivers before counting; #924 folds the design check into `ok`.
 // 3 — #948 judges goal cut-into on the page's own stamp; #924 judges the raw outline with the
 //     cutter's own radius, at every level above the floor (one bump: no package between them).
-export const SIMULATOR_VERSION = 3;
+// 4 — THE GOAL CHECK'S RULE, FROZEN FOR MILESTONE 2 (the maintainer's review §8.6, C9). The
+//     rule as it lands (main's 4ba147e8 plus #964's fcad250d, one rule): the part's silhouette is
+//     a design edge; the edge-break leg is inclusive; wall cells and the wall shadow are excluded
+//     on every goal job; the raw reading prints beside the judged one; and the V GATE — the
+//     stamp's stated tip (the 0.1 mm flat, never a sharp cone), the per-cell `who` map (lowest
+//     reach wins, ties to the later stamp), and edge break excused only where the V bit is the
+//     deepest cutter (a card passes the job's chamfer tool number; with no V there is no
+//     allowance, stated). The rule's fingerprint is pinned in
+//     `tests/unit/goalRuleFreeze948.spec.ts`: a later change to the rule fails there unless this
+//     version is bumped and the cards are re-scored in the same commit.
+export const SIMULATOR_VERSION = 4;

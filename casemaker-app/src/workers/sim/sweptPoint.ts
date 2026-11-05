@@ -24,7 +24,7 @@
  * the disc's edge is not charged. See {@link EDGE_EPS_MM}.
  */
 
-import type { Timeline } from '@/engine/cnc/emulator/timeline';
+import type { Timeline, ToolState } from '@/engine/cnc/emulator/timeline';
 import type { Tool } from '@/engine/cnc/tool';
 
 /** The page's move sampling, mm: one sample every 0.05 mm of XY travel plus |Δz|. */
@@ -59,7 +59,11 @@ export function stampProfile(tool: Tool): StampProfile {
     const diameter = tool.diameter ?? 3.175;
     const ang = tool.halfAngle !== null && tool.halfAngle !== undefined ? 2 * tool.halfAngle : (tool.angle ?? 30);
     const tan = Math.tan((Math.PI * Math.abs(ang)) / 360);
-    const tipR = shape === 'chamfer' ? 0 : (tool.tipDiameter ?? 0) / 2;
+    // #964 — THE STATED TIP IS THE TIP, for a chamfer as much as an engraver. Forcing 0 here made
+    // the V stamp a sharp cone: at r < tipRadius ours read lower than the real 0.1 mm flat by up
+    // to the tip radius, which flipped the per-cell `who` at ~10 000 cells in the tray's rim band
+    // and under-counted the edge break (2.91 % against the page's 3.66 %).
+    const tipR = (tool.tipDiameter ?? 0) / 2;
     return {
       radius: diameter / 2,
       profile: (r) => (r <= tipR ? 0 : (r - tipR) / tan),
@@ -77,25 +81,43 @@ export function stampProfile(tool: Tool): StampProfile {
   return { radius, profile: () => 0 };
 }
 
-/**
- * `goal_check.py`'s stamp as a field over the goal grid (`z[j*nx+i]`, the goal's own cell
- * centres). Unstamped cells read 0 — the stock's top, exactly as the page's `H = zeros` starts.
- * Null when the tool is unknown or no move cuts.
- */
-export function exactSweptField(
+/** The stamp's result: the field, and who left each cell's lowest reach (#964). */
+export interface StampedTop {
+  /** `z[j*nx+i]`, the goal's own cell centres; unstamped cells read 0 (the stock's top). */
+  field: Float32Array;
+  /** Per cell, the tool NUMBER of the stamp that left the lowest reach — 0 when no cut. */
+  who: Uint8Array;
+}
+
+/** The cutter active for a checkpoint, or null when there is none to stamp with. */
+export type StampToolAt = (tool: ToolState) => Tool | null;
+
+function stampField(
   goal: { nx: number; ny: number; x0: number; y0: number; pitch: number },
   timeline: Timeline,
-  tool: Tool | null,
-): Float32Array | null {
-  if (tool === null) return null;
-  const stamp = stampProfile(tool);
+  toolAt: StampToolAt,
+): StampedTop | null {
   const { nx, ny, x0, y0, pitch } = goal;
   const field = new Float32Array(nx * ny);
-  const R = stamp.radius;
-  const Rin = Math.max(R - EDGE_EPS_MM, 0);
-  const Rin2 = Rin * Rin;
+  const who = new Uint8Array(nx * ny);
+  const profiles = new Map<Tool, { stamp: StampProfile; number: number }>();
+  const profileOf = (tool: Tool): { stamp: StampProfile; number: number } => {
+    let p = profiles.get(tool);
+    if (p === undefined) {
+      p = { stamp: stampProfile(tool), number: Math.max(0, Math.min(255, tool.number ?? 0)) };
+      profiles.set(tool, p);
+    }
+    return p;
+  };
   let stamped = 0;
   for (const cp of timeline.checkpoints) {
+    const tool = toolAt(cp.tool);
+    if (tool === null) continue;
+    const { stamp, number } = profileOf(tool);
+    const R = stamp.radius;
+    // #964 — a cell is cut only while its centre is STRICTLY inside the footprint.
+    const Rin = Math.max(R - EDGE_EPS_MM, 0);
+    const Rin2 = Rin * Rin;
     for (let m = 0; m < cp.steps.length; m++) {
       const ax = cp.xy[m * 4] as number;
       const ay = cp.xy[m * 4 + 1] as number;
@@ -128,12 +150,47 @@ export function exactSweptField(
             if (d2 >= Rin2) continue;
             const v = z + stamp.profile(Math.sqrt(d2));
             const k = rowBase + i2;
-            if (v < field[k]!) field[k] = v;
+            // #964 — TIES GO TO THE LATER STAMP, as `goal_check.py`'s `put` does (`Wf[z <= Hf] =
+            // tn` AFTER `minimum.at`): a cell where the V and a flat cut to the same depth is the
+            // V's, which is what makes the `who`-gated edge-break share match the page's.
+            if (v <= field[k]!) {
+              field[k] = v;
+              who[k] = number;
+            }
             stamped++;
           }
         }
       }
     }
   }
-  return stamped === 0 ? null : field;
+  return stamped === 0 ? null : { field, who };
+}
+
+/**
+ * `goal_check.py`'s stamp as a field over the goal grid (`z[j*nx+i]`, the goal's own cell
+ * centres). Unstamped cells read 0 — the stock's top, exactly as the page's `H = zeros` starts.
+ * Null when the tool is unknown or no move cuts.
+ */
+export function exactSweptField(
+  goal: { nx: number; ny: number; x0: number; y0: number; pitch: number },
+  timeline: Timeline,
+  tool: Tool | null,
+): Float32Array | null {
+  if (tool === null) return null;
+  return stampField(goal, timeline, () => tool)?.field ?? null;
+}
+
+/**
+ * #964 — THE SAME STAMP WITH PER-CHECKPOINT CUTTERS, and the per-cell identity of the lowest
+ * reach: `who[k]` is the tool NUMBER of whichever cutter's stamp took that cell deepest. A
+ * multi-tool program (Makera's own tray NC runs four) stamps each checkpoint with the tool it
+ * actually ran, exactly as `goal_check.py` does, so the edge-break allowance can gate on the
+ * deepest cutter being the V bit. Null when nothing was stamped.
+ */
+export function exactSweptFieldTooled(
+  goal: { nx: number; ny: number; x0: number; y0: number; pitch: number },
+  timeline: Timeline,
+  toolAt: StampToolAt,
+): StampedTop | null {
+  return stampField(goal, timeline, toolAt);
 }

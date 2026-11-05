@@ -97,6 +97,24 @@ describe('#955/V2-2 the goal check edge-break allowance', () => {
     expect(r.maxCutIntoMm).toBeCloseTo(2, 6);
   });
 
+  it('#964 — the who rule: only a cell the V bit cut deepest is edge break', () => {
+    const top = swept(STEP, (x) => (Math.abs(x - 5) <= 1 ? 0.5 : null));
+    const V: GoalCutIntoOptions = { edgeBreak: { reachMm: 1.5, legMm: 1.5, toolNumber: 7 } };
+    // The stamp says the V bit is the deepest cutter everywhere: the shallow band is excused.
+    const vCell = checkGoalCutInto(STEP, top, { ...V, whoAt: () => 7 });
+    expect(vCell.edgeBreakFraction).toBeGreaterThan(0);
+    expect(vCell.adjudicatedFraction).toBe(0);
+    expect(vCell.ok).toBe(true);
+    // A flat cut that cell deepest (who = 2): it is judged, not excused.
+    const flatCell = checkGoalCutInto(STEP, top, { ...V, whoAt: () => 2 });
+    expect(flatCell.edgeBreakFraction).toBe(0);
+    expect(flatCell.adjudicatedFraction).toBeGreaterThan(0);
+    expect(flatCell.ok).toBe(false);
+    // No identity at all is the conservative side: not excused.
+    const unknown = checkGoalCutInto(STEP, top, V);
+    expect(unknown.edgeBreakFraction).toBe(0);
+  });
+
   it('a cut in the wall shadow is reported unadjudicable, not as a pass', () => {
     // 1.75 mm from the wall: outside the 1.5 mm edge reach, inside a 2 mm shadow. The cut is kept
     // INSIDE the grid (y 2..8): since the manager's #959 sanction the part's silhouette is a
@@ -171,7 +189,8 @@ describe('#955/V2-2 the gate parameters come from the job, not the CAM', () => {
   it('the stated edge break resolves its pinned V bit and the run’s widest tool for the shadow', () => {
     const toolFor = (key: string) => (key === 'c90' ? chamfer : key === 'ball' ? ball : null);
     const opts = goalEdgeBreakOptions(job({ widthMm: 1, toolKey: 'c90' }), toolFor, ['c90', 'ball']);
-    expect(opts.edgeBreak).toEqual({ reachMm: 1.5875, legMm: 1.5375 });
+    // #964 — the V's own tool number rides with the allowance (the `who` rule).
+    expect(opts.edgeBreak).toEqual({ reachMm: 1.5875, legMm: 1.5375, toolNumber: chamfer.number });
     expect(opts.wallShadowRadiusMm).toBe(3); // the ball, not the 1.5875 chamfer
   });
 
