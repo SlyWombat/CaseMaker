@@ -272,7 +272,8 @@ describe('#966 end-state, part 2 — a goal needing two setups posts both, never
     const setupsPosted = new Set(programs.map((p) => p.setupIndex));
     expect(setupsPosted.size, 'both setups must have posted at least one program, not just the first').toBe(2);
     for (const program of programs) {
-      const errors = program.verify.findings.filter((f) => f.severity === 'error');
+      expect(program.verify, `setup ${program.setupIndex} program (${program.toolKey}) carries no verify report`).not.toBeNull();
+      const errors = program.verify!.findings.filter((f) => f.severity === 'error');
       expect(errors, `setup ${program.setupIndex} program (${program.toolKey}) had verify error(s): ${JSON.stringify(errors)}`).toEqual([]);
     }
   }, 30_000);
