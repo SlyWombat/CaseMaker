@@ -25,6 +25,8 @@ const VENDOR = (over: Partial<ProgramScore> = {}): ProgramScore => ({
   },
   cycleSeconds: 47.6 * 60,
   airFraction: 0.15,
+  rapidSeconds: 47.6 * 60 * 0.15,
+  rapidMoves: 500,
   rapidsPer1000FeedLines: 8,
   cutters: 4,
   cuttersOwned: null,
@@ -45,6 +47,8 @@ const OURS = (over: Partial<ProgramScore> = {}): ProgramScore => ({
   },
   cycleSeconds: 45 * 60,
   airFraction: 0.2,
+  rapidSeconds: 45 * 60 * 0.2,
+  rapidMoves: 400,
   rapidsPer1000FeedLines: 10,
   cutters: 3,
   cuttersOwned: true,
@@ -218,20 +222,44 @@ describe('#964 line 4 — air fraction ≤ vendor + 10 points', () => {
   });
 });
 
-describe('#964 line 5 — rapids per 1,000 feed lines ≤ 2×', () => {
+describe('#964/#943 line 5 — rapid TIME ≤ 2× the vendor’s, on the estimator basis', () => {
   it('passes exactly at 2×', () => {
-    const card = score(OURS({ rapidsPer1000FeedLines: 16 }), VENDOR({ rapidsPer1000FeedLines: 8 }));
+    const card = score(OURS({ rapidSeconds: 856 }), VENDOR({ rapidSeconds: 428 }));
     expect(line(card, 'rapids').state).toBe('pass');
   });
 
   it('fails above 2×', () => {
-    const card = score(OURS({ rapidsPer1000FeedLines: 16.01 }), VENDOR({ rapidsPer1000FeedLines: 8 }));
+    const card = score(OURS({ rapidSeconds: 856.01 }), VENDOR({ rapidSeconds: 428 }));
     expect(line(card, 'rapids').state).toBe('fail');
+    expect(line(card, 'rapids').note).toContain('2.00×');
   });
 
   it('passes only zero against a vendor file with none', () => {
-    expect(line(score(OURS({ rapidsPer1000FeedLines: 0 }), VENDOR({ rapidsPer1000FeedLines: 0 })), 'rapids').state).toBe('pass');
-    expect(line(score(OURS({ rapidsPer1000FeedLines: 1 }), VENDOR({ rapidsPer1000FeedLines: 0 })), 'rapids').state).toBe('fail');
+    expect(line(score(OURS({ rapidSeconds: 0 }), VENDOR({ rapidSeconds: 0 })), 'rapids').state).toBe('pass');
+    expect(line(score(OURS({ rapidSeconds: 1 }), VENDOR({ rapidSeconds: 0 })), 'rapids').state).toBe('fail');
+  });
+
+  it('judges the TIME, not the per-1,000 rate: dilution cannot buy a pass, and a high rate cannot cost one', () => {
+    // The vendor posts 3× the feed lines for the same cut: our per-1,000 rate is 4× the vendor's
+    // — the OLD line failed here — while our rapid time is under the 2× line. Passes now.
+    const diluted = score(
+      OURS({ rapidSeconds: 500, rapidsPer1000FeedLines: 40 }),
+      VENDOR({ rapidSeconds: 428, rapidsPer1000FeedLines: 10 }),
+    );
+    expect(line(diluted, 'rapids').state).toBe('pass');
+    // The converse: a low per-1,000 rate with a rapid time over the line fails.
+    const slow = score(
+      OURS({ rapidSeconds: 1000, rapidsPer1000FeedLines: 2 }),
+      VENDOR({ rapidSeconds: 428, rapidsPer1000FeedLines: 10 }),
+    );
+    expect(line(slow, 'rapids').state).toBe('fail');
+  });
+
+  it('prints the per-1,000 rate and the rapid-move count beside the verdict as facts', () => {
+    const card = score(OURS({ rapidsPer1000FeedLines: 86, rapidMoves: 1081 }), VENDOR({ rapidsPer1000FeedLines: 2.38, rapidMoves: 4906 }));
+    const l = line(card, 'rapids');
+    expect(l.rule).toContain('rapid time');
+    expect(l.facts).toBe('per 1,000 feed lines 86 vs 2; rapid moves 1081 vs 4906');
   });
 });
 
@@ -308,6 +336,8 @@ describe('#964 — a failing card names its lines in words', () => {
         coverage: 0.8,
         cycleSeconds: 10 * 3600,
         airFraction: 0.6,
+        rapidSeconds: 21_600,
+        rapidMoves: 9_000,
         rapidsPer1000FeedLines: 400,
         cutters: 9,
       }),
