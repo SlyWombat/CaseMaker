@@ -116,7 +116,7 @@ const SHOP = { tools: [BALL, ROUGH, SMALL, WIDE] };
 describe('#869 the goal’s split, generated', () => {
   it('#999 an ABSENT roughToolKey lets the ENGINE choose: the flat rough, then the ball (the old path keeps its pinned one-cutter file)', async () => {
     const job = goalJob();
-    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, SHOP);
     expect(out.ok).toBe(true);
     if (USE_MODEL_CAM_ENGINE) {
       // #999 — absent is not "ball alone" on the seam: the plan's sequence chooses the house
@@ -144,7 +144,7 @@ describe('#869 the goal’s split, generated', () => {
 
   it('a roughToolKey posts the flat’s rough first and the ball’s finish second', async () => {
     const job = goalJob({ roughToolKey: ROUGH.key });
-    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, SHOP);
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(2);
     const [rough, finish] = out.programs as [EngraveProgram, EngraveProgram];
@@ -200,7 +200,7 @@ describe('#869 the goal’s split, generated', () => {
   it('the rough’s step-down is its own row’s, and the rim laps keep the finish’s', async () => {
     // ⌀1.5 is the 0.8–1.6 PLA band (step-down 0.3); the ⌀3 ball is the 1.6–3.2 band (0.5).
     const job = goalJob({ roughToolKey: SMALL.key });
-    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, SHOP);
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(2);
     if (USE_MODEL_CAM_ENGINE) {
@@ -231,7 +231,7 @@ describe('#869 the goal’s split, generated', () => {
 
   it('#999 a rough the library does not hold falls back to the engine’s choice, and says which', async () => {
     const job = goalJob({ roughToolKey: 'inv:gone' });
-    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, SHOP);
     expect(out.ok).toBe(true);
     // The seam lets the engine choose (two programs); the old path keeps its one-cutter reading.
     expect(out.programs).toHaveLength(USE_MODEL_CAM_ENGINE ? 2 : 1);
@@ -254,7 +254,7 @@ describe('#869 the goal’s split, generated', () => {
 
   it('a ball named as the rough is refused by name, and the goal still posts', async () => {
     const job = goalJob({ roughToolKey: BALL.key });
-    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, SHOP);
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(1);
     const finding = out.findings.find((f) => f.code === 'goal-rough-no-cutter');
@@ -263,7 +263,7 @@ describe('#869 the goal’s split, generated', () => {
 
   it('the run sheet states both cutters, the change, and which rough ran', async () => {
     const job = goalJob({ roughToolKey: ROUGH.key });
-    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, SHOP);
     const texts = buildRunSheet(job, out, null).sections.flatMap((s) => s.steps.map((st) => st.text));
     if (USE_MODEL_CAM_ENGINE) {
       // #987 — both these lines come from runSheet.ts's `surfaceSteps(facts: GoalSurfaceFacts)`,

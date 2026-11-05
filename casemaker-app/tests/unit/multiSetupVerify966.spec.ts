@@ -147,7 +147,7 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
     setModelCamEnabled(true);
     const L = 40, W = 30, T = 20;
     const job = jobFor(boxTarget('goal-966-verify-box', L, W, T), L, W, T);
-    const result = await generateGoalProgram(job, job.targetObject!, FLAT3, [], null, SHOP, undefined, undefined, twoSetups(T));
+    const result = await generateGoalProgram(job, job.targetObject!, FLAT3, null, SHOP, twoSetups(T));
 
     expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
     expect(result.ok).toBe(true);
@@ -189,7 +189,7 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
     await expect(planModelCam(input)).rejects.toThrow(/no locating features found for the vise flip \(#965 registration\)/);
 
     setModelCamEnabled(true);
-    const result = await generateGoalProgram(job, goal, BALL, [], null, DATUM_SHOP);
+    const result = await generateGoalProgram(job, goal, BALL, null, DATUM_SHOP);
     expect(result.ok).toBe(false);
     expect(
       result.errors.some((e) => /no locating features found for the vise flip \(#965 registration\)/.test(e.message)),
@@ -210,7 +210,7 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
     const input = await buildModelPlanInputForGoal(job, goal, BALL, DATUM_SHOP);
     expect(input.setups).toHaveLength(2);
 
-    const result = await generateGoalProgram(job, goal, BALL, [], null, DATUM_SHOP);
+    const result = await generateGoalProgram(job, goal, BALL, null, DATUM_SHOP);
 
     expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
     expect(result.ok).toBe(true);

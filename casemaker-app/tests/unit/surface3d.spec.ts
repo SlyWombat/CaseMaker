@@ -337,7 +337,7 @@ describe('generateGoalProgram — the worker dispatches a pure goal job', () => 
       // Default stock is 100 x 60 x 12 mm; place the ramp over the middle, top-flush.
       targetObject: goal(rampTris(), { position: { x: 50, y: 30, z: 0 } }),
     };
-    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), null, {});
     expect(out.stage).toBe('done');
     expect(out.ok).toBe(true);
     expect(out.nc).not.toBeNull();
@@ -387,7 +387,7 @@ describe('generateGoalProgram — the goal operation’s own numbers (#535)', ()
 
   it('reports the defaults it ran with: the feeds row’s step-down, the shop’s grid pitch and allowance', async () => {
     const job = goalJob();
-    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), null, {
       finish: { stockToLeaveMm: { value: 0.25, source: 'chosen' } },
       surfaceGrid: { pitchMm: { value: 0.2, source: 'chosen' } },
     });
@@ -420,7 +420,7 @@ describe('generateGoalProgram — the goal operation’s own numbers (#535)', ()
         stockToLeaveMm: 0,
       },
     });
-    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), null, {
       // The shop's own numbers are handed in too: the operation's block must win over both.
       finish: { stockToLeaveMm: { value: 0.25, source: 'chosen' } },
       surfaceGrid: { pitchMm: { value: 0.2, source: 'chosen' } },
@@ -442,7 +442,7 @@ describe('generateGoalProgram — the goal operation’s own numbers (#535)', ()
 
   it('a round cutter roughs and finishes, and the IR names both operations', async () => {
     const job = goalJob({ surface: { roughStepDownMm: 0.5, gridPitchMm: 0.4 } });
-    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175, { shape: 'ball' }), [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175, { shape: 'ball' }), null, {});
     expect(out.ok).toBe(true);
     expect(out.cam?.operations).toBe(2);
     expect(out.cam?.roughOperations).toBe(1);
@@ -773,7 +773,7 @@ describe('generateGoalProgram — an invalid goal is refused, not surfaced (#539
       // Default stock is 100 x 60 x 12 mm; a 200 mm-wide goal overhangs both X edges by 50 mm.
       targetObject: goal(rampTris(), { position: { x: 50, y: 30, z: 0 }, size: { x: 200, y: 30, z: 5 } }),
     };
-    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), null, {});
     expect(out.ok).toBe(false);
     expect(out.stage).toBe('cam');
     const message = out.errors.map((e) => e.message).join('; ');
@@ -791,7 +791,7 @@ describe('generateGoalProgram — an invalid goal is refused, not surfaced (#539
       shapes: [],
       targetObject: goal(rampTris(), { position: { x: 50, y: 30, z: 0 }, size: { x: 20, y: 20, z: 0 } }),
     };
-    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), null, {});
     expect(out.ok).toBe(false);
     expect(out.findings.some((f) => f.code === 'goal-object-oversize')).toBe(true);
     expect(out.nc).toBeNull();
@@ -1018,7 +1018,7 @@ describe('generateGoalProgram — the extra finishing passes reach the program a
 
   it('carries the pass list on the surface check and the facts on the operation', async () => {
     const job = stepJob({ scallop: true, pencil: true });
-    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), null, {});
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
     expect(out.programs[0]!.surfaceCheck?.passes).toEqual([
       '[T1] 3D rough — 0.3 mm to leave',
@@ -1037,7 +1037,7 @@ describe('generateGoalProgram — the extra finishing passes reach the program a
 
   it('absent means off: the old two-pass program, and its check says two passes', async () => {
     const job = stepJob();
-    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, makeFlatTool(3.175), null, {});
     expect(out.ok).toBe(true);
     expect(out.programs[0]!.surfaceCheck?.passes).toHaveLength(2);
     expect(out.surface3d?.scallop ?? null).toBeNull();

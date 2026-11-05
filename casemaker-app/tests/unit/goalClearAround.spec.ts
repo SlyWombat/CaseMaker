@@ -256,7 +256,7 @@ describe('#764 — the goal row wires it, and a mold is unchanged', () => {
   async function generate(surface: EngraveTargetObject['surface'], goalMode?: 'item' | 'mold') {
     const target = goal(zOut, { surface, ...(goalMode === undefined ? {} : { goalMode }) });
     const j = job(target);
-    return await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
+    return await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, {});
   }
 
   it('the default clears a ring one cutter diameter plus a step-over wide, and says so', async () => {

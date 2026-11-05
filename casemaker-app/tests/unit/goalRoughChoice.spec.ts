@@ -113,7 +113,7 @@ const SMALL_BUDGET: EngraveShopOpts = {
 describe('#846 — the goal path chooses its rough, and says so', () => {
   it('a deep PLA goal on a flat cutter posts the adaptive rough, with both roughs measured', async () => {
     const job = jobFor(5, 'pla');
-    const out = await generateGoalProgram(job, job.targetObject!, FLAT, [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, FLAT, null, {});
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
     expect(out.nc).not.toBeNull();
     // The operation the post names, and the one line the run carries.
@@ -153,7 +153,7 @@ describe('#846 — the goal path chooses its rough, and says so', () => {
 
   it('a shallow softwood goal keeps the raster by the rule, quoting the shop’s own budget', async () => {
     const job = jobFor(1, 'softwood');
-    const out = await generateGoalProgram(job, job.targetObject!, FLAT, [], null, SMALL_BUDGET);
+    const out = await generateGoalProgram(job, job.targetObject!, FLAT, null, SMALL_BUDGET);
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
     expect(out.nc).not.toBeNull();
     expect(out.nc!).not.toContain('(adaptive)');
@@ -180,7 +180,7 @@ describe('#846 — the goal path chooses its rough, and says so', () => {
         },
       },
     };
-    const out = await generateGoalProgram(job, job.targetObject!, FLAT, [], null, tight);
+    const out = await generateGoalProgram(job, job.targetObject!, FLAT, null, tight);
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
     expect(out.nc).not.toBeNull();
     expect(out.nc!).not.toContain('(adaptive)');
@@ -192,7 +192,7 @@ describe('#846 — the goal path chooses its rough, and says so', () => {
 
   it('a ball goal states that the adaptive rough cannot run and keeps the raster', async () => {
     const job = jobFor(5, 'pla');
-    const out = await generateGoalProgram(job, job.targetObject!, BALL, [], null, {});
+    const out = await generateGoalProgram(job, job.targetObject!, BALL, null, {});
     expect(out.ok, JSON.stringify(out.errors)).toBe(true);
     expect(out.nc).not.toBeNull();
     expect(out.nc!).not.toContain('(adaptive)');

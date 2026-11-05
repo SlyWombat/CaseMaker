@@ -204,10 +204,10 @@ describe('#721 — generate → simulate → match', () => {
 
   it('the same hemisphere generates as the item (a dome) and as the mold (a bowl)', async () => {
     const asItem = job();
-    const item = await generateGoalProgram(asItem, asItem.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const item = await generateGoalProgram(asItem, asItem.targetObject!, flatEndMill(1, { shape: 'ball' }), null, {});
     expect(item.ok).toBe(true);
     const asMold = job({ goalMode: 'mold' });
-    const mold = await generateGoalProgram(asMold, asMold.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const mold = await generateGoalProgram(asMold, asMold.targetObject!, flatEndMill(1, { shape: 'ball' }), null, {});
     expect(mold.ok).toBe(true);
     expect(mold.programs).toHaveLength(1);
     expect(mold.programs[0]!.surfaceCheck?.kind).toBe('surface');
@@ -259,14 +259,14 @@ describe('#721 — generate → simulate → match', () => {
     };
     q(4, 5, 6, 7); q(0, 3, 2, 1); q(0, 1, 5, 4); q(2, 3, 7, 6); q(1, 2, 6, 5); q(3, 0, 4, 7);
     const boxJob = { ...job(), targetObject: goal(box, { goalMode: 'mold', size: { x: 10, y: 10, z: 4 }, position: { x: 50, y: 30, z: 0 } }) };
-    const out = await generateGoalProgram(boxJob, boxJob.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const out = await generateGoalProgram(boxJob, boxJob.targetObject!, flatEndMill(1, { shape: 'ball' }), null, {});
     expect(out.ok).toBe(true);
     const warn = out.findings.find((f) => f.code === 'goal-mold-no-draft');
     expect(warn?.severity).toBe('warning');
     expect(warn?.message).toMatch(/a wall at 8\d(\.\d)?°/);
     // A hemisphere's wall curves away from vertical within a cell of the rim: no warning.
     const dome = job({ goalMode: 'mold' });
-    const domeOut = await generateGoalProgram(dome, dome.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const domeOut = await generateGoalProgram(dome, dome.targetObject!, flatEndMill(1, { shape: 'ball' }), null, {});
     expect(domeOut.findings.some((f) => f.code === 'goal-mold-no-draft')).toBe(false);
   });
 });
@@ -320,14 +320,14 @@ describe('#721 review — placement', () => {
     expect(validateGoalObject({ ...t, position: { x: 50, y: 30, z: 0 } }, STOCK, { edgeMargin: 1, minFloor: 1 })).toEqual([]);
     // And Generate proceeds: the cavity is cut clipped to the blank, saying what broke out.
     const j = { ...defaultEngraveJob(), labels: [], shapes: [], stock: { ...defaultEngraveJob().stock, ...STOCK }, targetObject: t };
-    const out = await generateGoalProgram(j, t, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const out = await generateGoalProgram(j, t, flatEndMill(1, { shape: 'ball' }), null, {});
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(out.findings.some((x) => x.code === 'goal-mold-rim' && x.severity === 'warning')).toBe(true);
   });
 
   it('a mold run says it is a mold in its facts', async () => {
     const j: EngraveJob = { ...defaultEngraveJob(), labels: [], shapes: [], targetObject: goal(domeTris(R), { goalMode: 'mold', position: { x: 50, y: 30, z: 0 } }) };
-    const out = await generateGoalProgram(j, j.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const out = await generateGoalProgram(j, j.targetObject!, flatEndMill(1, { shape: 'ball' }), null, {});
     expect(out.surface3d?.notes.some((n) => n.startsWith('Made as a mould'))).toBe(true);
   });
 });

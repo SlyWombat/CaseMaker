@@ -149,7 +149,7 @@ describe('#829 a goal chamfers its own edges — the old engine, still the shipp
   it('posts a second program with the chosen V-bit, after the surfacing one', async () => {
     const target = goalTarget({ chamfer: { widthMm: 1, toolKey: VKEY } });
     const job = goalJob(target);
-    const out = await generateGoalProgram(job, target, BALL, [], null, SHOP);
+    const out = await generateGoalProgram(job, target, BALL, null, SHOP);
     expect(out.errors?.map((e) => e.message).join(' ') ?? '').not.toMatch(/refus/i);
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
     expect(out.programs).toHaveLength(2);
@@ -175,7 +175,7 @@ describe('#829 a goal chamfers its own edges — the old engine, still the shipp
   it('surfaces the goal and says why the edges are square when no V is chosen', async () => {
     const target = goalTarget({ chamfer: { widthMm: 1 } });
     const job = goalJob(target);
-    const out = await generateGoalProgram(job, target, BALL, [], null, SHOP);
+    const out = await generateGoalProgram(job, target, BALL, null, SHOP);
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(1);
     const finding = out.findings.find((f) => f.code === 'goal-chamfer-no-cutter');
@@ -185,7 +185,7 @@ describe('#829 a goal chamfers its own edges — the old engine, still the shipp
 
   it('warns when the chosen key is not in the library, and when the width is clamped', async () => {
     const missing = goalTarget({ chamfer: { widthMm: 1, toolKey: 'inv:gone' } });
-    const outMissing = await generateGoalProgram(goalJob(missing), missing, BALL, [], null, SHOP);
+    const outMissing = await generateGoalProgram(goalJob(missing), missing, BALL, null, SHOP);
     expect(outMissing.programs).toHaveLength(1);
     expect(outMissing.findings.find((f) => f.code === 'goal-chamfer-no-cutter')?.message).toContain('not in the tool library');
 
@@ -193,7 +193,7 @@ describe('#829 a goal chamfers its own edges — the old engine, still the shipp
     // fine at 45°, so this asks the WIDTH clamp: the cone's flute (±45° over 1.5375 mm) reaches
     // 1.5375 mm. The cut is that wide, and the sentence says the shortfall.
     const wide = goalTarget({ chamfer: { widthMm: 3, toolKey: VKEY } });
-    const outWide = await generateGoalProgram(goalJob(wide), wide, BALL, [], null, SHOP);
+    const outWide = await generateGoalProgram(goalJob(wide), wide, BALL, null, SHOP);
     const tooWide = outWide.findings.find((f) => f.code === 'chamfer-too-wide');
     expect(tooWide?.severity).toBe('warning');
     expect(outWide.programs).toHaveLength(2);

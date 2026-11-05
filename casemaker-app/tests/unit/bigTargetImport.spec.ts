@@ -133,7 +133,6 @@ describe('#720 a 12 MB-class 3MF is an ordinary goal', () => {
           useEngraveJobStore.getState().job,
           useEngraveJobStore.getState().job.targetObject!,
           flatEndMill(3.175),
-          [],
           null,
           {},
         );

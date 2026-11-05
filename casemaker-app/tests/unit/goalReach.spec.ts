@@ -19,7 +19,6 @@ const backing = new Map<string, string>();
 
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, jobReachFindings, longestKnownReach, knownReach } from '@/engine/cnc/engrave/goalReach';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
-import type { EngraveProgress } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { flatEndMill } from '@/engine/cnc/tool';
@@ -246,7 +245,7 @@ describe('#785 — a rotary relief keeps its own judges', () => {
 describe('#785 — Generate', () => {
   it('refuses a known-short reach EARLY: the sentence, no CAM, no program', async () => {
     const target = rampGoal();
-    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 12 }), [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 12 }), null, {});
     expect(out.ok).toBe(false);
     expect(out.stage).toBe('findings');
     const refusal = out.findings.find((f) => f.code === 'goal-reach-short');
@@ -260,7 +259,7 @@ describe('#785 — Generate', () => {
   it('cutWithinReach cuts the stock’s top band and says what is left', async () => {
     const target = rampGoal({ cutWithinReach: true });
     const tool = flat({ fluteLength: 12 });
-    const out = await generateGoalProgram(tallJob(target), target, tool, [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, tool, null, {});
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(out.nc).not.toBeNull();
     const warning = out.findings.find((f) => f.code === 'goal-cut-top-band');
@@ -322,7 +321,7 @@ describe('#785 — Generate', () => {
 
   it('an unrecorded reach does not stop Generate — the assumption is stated, the cut proceeds', async () => {
     const target = rampGoal();
-    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: null, id: null }), [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: null, id: null }), null, {});
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(out.nc).not.toBeNull();
     const note = out.findings.find((f) => f.code === 'goal-reach-unrecorded');
@@ -330,31 +329,18 @@ describe('#785 — Generate', () => {
     expect(out.findings.some((f) => f.code === 'goal-reach-short')).toBe(false);
   }, 120_000);
 
-  it('#785 the goal CAM reports its stages, and the level and row counts reach the end', async () => {
-    const target = rampGoal({}, 8);
-    const events: EngraveProgress[] = [];
-    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 12 }), [], null, {}, (p) => events.push(p));
-    expect(out.ok).toBe(true);
-    const stages = events.map((e) => e.stage);
-    // `prepare` is the top-level `engraveGenerate`'s first event; the goal program itself starts
-    // at the sampling it owns.
-    for (const stage of ['sample', 'rough', 'finish', 'post', 'done'] as const) {
-      expect(stages, `the run must report ${stage}`).toContain(stage);
-    }
-    const rough = events.filter((e) => e.stage === 'rough');
-    expect(rough.length).toBeGreaterThan(1);
-    expect(rough.at(-1)?.done).toBe(rough.at(-1)?.total);
-    expect(rough.at(-1)?.label).toMatch(/^roughing level \d+ of \d+$/);
-    const finish = events.filter((e) => e.stage === 'finish');
-    expect(finish.at(-1)?.done).toBe(finish.at(-1)?.total);
-    expect(finish.at(-1)?.label).toMatch(/^finishing row \d+ of \d+$/);
-  });
+  // #785's own stage-reporting test ('#785 the goal CAM reports its stages, and the level and row
+  // counts reach the end') is deleted here, not fixed: #966 dropped generateGoalProgram's
+  // onProgress parameter entirely (it only ever threaded through to the retired heightfield
+  // dispatch), and the stages it asserted ('sample'/'rough'/'finish' with "roughing level N of M"/
+  // "finishing row N of M" labels) are that dispatch's own vocabulary, not planModelCam's. A
+  // progress test for the model-cam path is new coverage, not a port of this one.
 
   it('#785 a goal whose program would exceed the stated memory budget is refused by name, with the numbers', async () => {
     // #889 — a fine grid alone no longer costs a level per cell (a level costs what it removes,
     // and the ramp's rows merge), so the oversized job is a finish at a 0.02 mm step-over too.
     const target = rampGoal({ surface: { gridPitchMm: 0.02, finishStepOverMm: 0.02 } }, 30);
-    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), null, {});
     expect(out.ok).toBe(false);
     expect(out.stage).toBe('findings');
     const refusal = out.findings.find((f) => f.code === 'goal-program-too-big');
@@ -385,7 +371,7 @@ describe('#785 — Generate', () => {
     // #785 follow-up — the suggested pitch IS the one-click fix: written onto the goal's grid, the
     // same job generates.
     const pitched = { ...target, surface: { ...(target.surface ?? {}), gridPitchMm: refusal!.suggestedPitchMm } };
-    const retry = await generateGoalProgram(tallJob(pitched), pitched, flat({ fluteLength: 40 }), [], null, {});
+    const retry = await generateGoalProgram(tallJob(pitched), pitched, flat({ fluteLength: 40 }), null, {});
     expect(retry.ok, retry.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(retry.findings.some((f) => f.code === 'goal-program-too-big')).toBe(false);
     // #945 — the retry succeeds at the suggested (coarser, still large) pitch, so it runs the real
@@ -403,7 +389,7 @@ describe('#785 — Generate', () => {
     const target = pitGoal(90, {
       surface: { gridPitchMm: 0.1, roughStepDownMm: 0.1, roughStepOverMm: 0.04, finishStepOverMm: 0.3 },
     });
-    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 150, shoulderLength: 150 }), [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 150, shoulderLength: 150 }), null, {});
     expect(out.ok).toBe(false);
     const refusal = out.findings.find((f) => f.code === 'goal-program-too-big');
     expect(refusal?.budgetMb).toBeGreaterThan(640);
@@ -431,7 +417,7 @@ describe('#785 — Generate', () => {
     // The pre-#889 estimate was (levels + 1) × covered cells: 30 mm at a 0.15 mm step-down on a
     // 0.1 mm grid is 200 levels over ~81,000 cells, some 16 million moves, refused.
     const target = rampGoal({ surface: { gridPitchMm: 0.1, roughStepDownMm: 0.15 } }, 30);
-    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), null, {});
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(out.findings.some((f) => f.code === 'goal-program-too-big')).toBe(false);
     expect(out.cam!.cuttingMoves).toBeLessThan(200_000);
@@ -439,14 +425,14 @@ describe('#785 — Generate', () => {
 
   it('#889 a step-down too fine for the budget is refused, and the step-down press is the one that fits', async () => {
     const target = rampGoal({ surface: { gridPitchMm: 0.1, roughStepDownMm: 0.002 } }, 30);
-    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), null, {});
     const refusal = out.findings.find((f) => f.code === 'goal-program-too-big');
     // #888/#889 — the sentence is the plain one; the step-down press is a NUMBER on the finding,
     // found by trying it (the panel draws it as "Thicker layers (N mm step-down, rougher walls)").
     expect(refusal?.message).toContain('This goal is too detailed to plan');
     expect(refusal?.suggestedStepDownMm).toBeGreaterThan(0.002);
     const stepped = { ...target, surface: { ...(target.surface ?? {}), roughStepDownMm: refusal!.suggestedStepDownMm } };
-    const retry = await generateGoalProgram(tallJob(stepped), stepped, flat({ fluteLength: 40 }), [], null, {});
+    const retry = await generateGoalProgram(tallJob(stepped), stepped, flat({ fluteLength: 40 }), null, {});
     expect(retry.ok, retry.errors.map((e) => e.message).join('; ')).toBe(true);
     // #945 — same reason as the test above: the retry's real finish + overcut guard pass at this
     // job's move count needs more than the old 120 s bound now.
@@ -454,7 +440,7 @@ describe('#785 — Generate', () => {
 
   it('a goal within reach generates with no reach finding at all', async () => {
     const target = rampGoal({}, 8);
-    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 12 }), [], null, {});
+    const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 12 }), null, {});
     expect(out.ok).toBe(true);
     expect(out.findings.some((f) => f.code.startsWith('goal-reach') || f.code === 'goal-cut-top-band')).toBe(false);
   }, 120_000);
