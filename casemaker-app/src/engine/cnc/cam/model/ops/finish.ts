@@ -27,13 +27,15 @@
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import type { RemainderRegion } from '../features';
+import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
+import type { RemainderRegion, FeatureSource } from '../features';
 import type { ClSurface } from '../clsurface';
 import { profileOf } from '../dropcutter';
 import { DEFAULT_SHORT_HOP_DIAMETERS, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
 import { followCutSurface } from '../rideTest';
 import { dropRow, type DroppedPoint } from '../rowDropper';
 import { cutterKeyOf } from '../sequence';
+import { FLAT_SURFACE_MAX_SLOPE_DEG } from '../settings';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
 
 export type FinishKind = 'flat-raster' | 'ball-scallop';
@@ -43,6 +45,72 @@ export type FinishKind = 'flat-raster' | 'ball-scallop';
 // endpoint safely INSIDE the footprint, never exactly on an edge.
 const FOOTPRINT_EDGE_INSET_MM = 1e-4;
 
+/**
+ * #960 — THE SCALLOP HEIGHT THE BALL'S STEP-OVER HOLDS, mm. 0.027 comes from the vendor's own
+ * program, not a preference: Makera's ⌀6 ball raster runs at 0.8 mm step-over, and
+ * R − √(R² − (0.8/2)²) = 3 − √(9 − 0.16) = 0.0268 mm on that ball — the same cusp on the same
+ * cutter. (The old engine's band was the rough's 0.3 mm stock-to-leave, a different quantity.)
+ */
+export const DEFAULT_FINISH_SCALLOP_MM = 0.027;
+
+/**
+ * #960 — the flat/ball threshold is the SHARED constant (`cam/model/settings.ts`'s
+ * `FLAT_SURFACE_MAX_SLOPE_DEG`, also read by C's #959 skin pass), re-exported here so the finish's
+ * callers name it from one place. Its value is a parameter at every call site; the manager ruled
+ * 1.93° on 2026-11-05 (the equal-cusp derivation, not the vendor-like 7.1°).
+ */
+export { FLAT_SURFACE_MAX_SLOPE_DEG };
+
+/** The share of a region's AREA that must lie under the threshold for the flat to take it. */
+export const FLAT_FINISH_AREA_SHARE = 0.9;
+
+/** A raster row steeper than this is a wall: not finishable by raster, skipped with a note. */
+const WALL_SKIP_DEG = 80;
+
+/** Triangle slope from its normal: the angle between the normal and +Z, degrees. */
+function triangleSlopeDeg(positions: Float32Array, a: number, b: number, c: number): number {
+  const ux = positions[b]! - positions[a]!;
+  const uy = positions[b + 1]! - positions[a + 1]!;
+  const uz = positions[b + 2]! - positions[a + 2]!;
+  const vx = positions[c]! - positions[a]!;
+  const vy = positions[c + 1]! - positions[a + 1]!;
+  const vz = positions[c + 2]! - positions[a + 2]!;
+  const nx = uy * vz - uz * vy;
+  const ny = uz * vx - ux * vz;
+  const nz = ux * vy - uy * vx;
+  const len = Math.hypot(nx, ny, nz);
+  if (!(len > 0)) return 0;
+  return (Math.acos(Math.min(1, Math.abs(nz) / len)) * 180) / Math.PI;
+}
+
+/**
+ * #960 — THE FLAT-OR-BALL DECISION from the region's own slope, not the sequence slot: the share
+ * of the region's AREA whose triangle slope is at or under `maxFlatSlopeDeg`; flat when that
+ * share is at least {@link FLAT_FINISH_AREA_SHARE}, otherwise the ball. The threshold is a
+ * parameter (the shared constant with C's #959 skin pass).
+ */
+export function finishKindFor(region: RemainderRegion, mesh: FeatureSource['triangles'], maxFlatSlopeDeg: number): FinishKind {
+  if (region.triangles.length === 0) return 'ball-scallop';
+  const { positions, indices } = mesh;
+  let area = 0;
+  let under = 0;
+  for (const t of region.triangles) {
+    const a = indices[t * 3]! * 3;
+    const b = indices[t * 3 + 1]! * 3;
+    const c = indices[t * 3 + 2]! * 3;
+    const ux = positions[b]! - positions[a]!;
+    const uy = positions[b + 1]! - positions[a + 1]!;
+    const uz = positions[b + 2]! - positions[a + 2]!;
+    const vx = positions[c]! - positions[a]!;
+    const vy = positions[c + 1]! - positions[a + 1]!;
+    const vz = positions[c + 2]! - positions[a + 2]!;
+    const triArea = 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+    area += triArea;
+    if (triangleSlopeDeg(positions, a, b, c) <= maxFlatSlopeDeg) under += triArea;
+  }
+  return area > 0 && under / area >= FLAT_FINISH_AREA_SHARE ? 'flat-raster' : 'ball-scallop';
+}
+
 export interface FinishOpOptions {
   cutter: Tool;
   region: RemainderRegion;
@@ -50,6 +118,12 @@ export interface FinishOpOptions {
   clSurface: ClSurface;
   /** The flat-vs-ball slope classification (C's per-slice minimum) — the admissible angle test that picks `kind`. */
   kind: FinishKind;
+  /**
+   * #960 — the mesh the region's triangle ids index, for the per-band slope. ABSENT falls back
+   * to the region's stated steepest slope for every band (a caller that has no mesh — the op's
+   * own unit fixtures), which is the pre-#960 read but still per-band.
+   */
+  mesh?: FeatureSource['triangles'];
   scallopMm: number;
   stepDownMm: number;
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
@@ -244,13 +318,143 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   if (profile === null) {
     throw new Error(`cam/model/ops/finish: ${opts.cutter.name || opts.cutter.shape} has no drop-cutter profile for a finish pass`);
   }
-  const stepOverMm =
-    opts.kind === 'ball-scallop'
-      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1])
-      : flatRasterStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1]);
-
   const levels = depthLevels(opts.region.zTop, opts.region.zBottom, opts.stepDownMm);
   const { min, max } = opts.regionRef.bounds;
+
+  // #960 — THE BALL'S STEP-OVER PER BAND, not once per region. The old read took the region's
+  // single steepest cell, so one near-vertical facet floored the WHOLE region's spacing (⌀6 ball →
+  // the radius/10 floor = 0.3 mm, against the vendor's 0.8 mm). The slope is binned along X from
+  // the region's own triangles; each raster band's spacing comes from its own slope. A band
+  // steeper than `WALL_SKIP_DEG` is a wall: it is CUT at the cutter's own floor, never skipped —
+  // skipping lost the organizer 10 points.
+  const BIN_MM = 0.25;
+  const binCount = Math.max(1, Math.ceil((max[0] - min[0]) / BIN_MM));
+  const binSlope = new Float64Array(binCount).fill(Number.NaN);
+  if (opts.mesh === undefined) {
+    binSlope.fill(opts.region.slopeDeg[1]);
+  } else {
+    const { positions, indices } = opts.mesh;
+    for (const t of opts.region.triangles) {
+      const a = indices[t * 3]! * 3;
+      const b = indices[t * 3 + 1]! * 3;
+      const c = indices[t * 3 + 2]! * 3;
+      const xs = [positions[a]!, positions[b]!, positions[c]!];
+      const slope = triangleSlopeDeg(positions, a, b, c);
+      const lo = Math.max(min[0], Math.min(...xs));
+      const hi = Math.min(max[0], Math.max(...xs));
+      const first = Math.floor((lo - min[0]) / BIN_MM);
+      const last = Math.floor((hi - min[0]) / BIN_MM);
+      for (let k = Math.max(0, first); k <= Math.min(binCount - 1, last); k++) {
+        if (!(binSlope[k]! >= slope)) binSlope[k] = slope;
+      }
+    }
+  }
+  // #960 — AND THE CL SURFACE'S OWN SLOPE per bin, sampled from the surface the rows actually
+  // follow: the ball's CL is what turns a cliff into a shoulder over the cutter's radius, so a
+  // bin's triangle slopes alone under-read it. Both reads are kept, the steeper wins.
+  {
+    const h = 0.1;
+    const ys = 5;
+    const radius = profile.radiusMm;
+    for (let k = 0; k < binCount; k++) {
+      const xc = min[0] + (k + 0.5) * BIN_MM;
+      let steepest = Number.isNaN(binSlope[k]!) ? 0 : binSlope[k]!;
+      for (let s = 0; s < ys; s++) {
+        const y = min[1] + ((s + 0.5) / ys) * (max[1] - min[1]);
+        const z0 = opts.clSurface.dropCutter(xc, y);
+        const zx = opts.clSurface.dropCutter(xc + h, y);
+        const zy = opts.clSurface.dropCutter(xc, y + h);
+        // #960 — A POCKET MOUTH inside the cutter's own reach: the ball rides the shoulders across
+        // the opening, so any row over it leaves the mouth's depth standing and the rows' phase
+        // decides how much. Those bands keep the old dense floor so nothing is lost.
+        const zl = opts.clSurface.dropCutter(xc - radius, y);
+        const zr = opts.clSurface.dropCutter(xc + radius, y);
+        // A ball bridging a gap sits HIGHER than its neighbours (the CL is a local ridge over the
+        // mouth); that ridge is the signature, not a left-right difference across the opening.
+        if (zl !== null && zr !== null && z0 !== null && z0 - Math.max(zl, zr) > opts.scallopMm) steepest = 90;
+        if (z0 === null || zx === null || zy === null) continue;
+        const slope = (Math.atan(Math.hypot((zx - z0) / h, (zy - z0) / h)) * 180) / Math.PI;
+        if (slope > steepest) steepest = slope;
+      }
+      binSlope[k] = steepest;
+    }
+  }
+  // #960 — the band's slope is the STEEPEST within a small window: a cliff's cell lies in the next
+  // bin along, and a row just off it meets the shoulder too. Without the window 2,411 tray cells
+  // (0.17 %) read 0.10–0.17 mm of leftover they did not have at the old dense spacing.
+  // #960 — THE WINDOW IS THE CUTTER'S REACH, not a fixed ±0.75 mm: a ball cuts with its flank
+  // R·sinθ from its axis (≈2.1 mm at 45° on ⌀6), so a row 1.5–2.5 mm inboard of a steep wall must
+  // read that wall's slope. A ±3-bin window is narrower than the ball's reach and let the lever
+  // space such rows at the gentle-band step (the review's finding on the organizer's 8 cells).
+  const WINDOW_BINS = Math.max(3, Math.ceil(profile.radiusMm / BIN_MM));
+  const bandSlopeAt = (x: number): number => {
+    const k = Math.min(binCount - 1, Math.max(0, Math.floor((x - min[0]) / BIN_MM)));
+    let best = 0;
+    for (let d = -WINDOW_BINS; d <= WINDOW_BINS; d++) {
+      const kk = k + d;
+      if (kk < 0 || kk >= binCount) continue;
+      const v = binSlope[kk]!;
+      if (!Number.isNaN(v) && v > best) best = v;
+    }
+    return best;
+  };
+  // #960 — THE MANAGER'S PRICED LEVER (2026-11-05): each band's spacing is ITS OWN scallop step —
+  // ~0.8 mm on the gentle floor (the vendor's ⌀6 ball at a 0.027 mm cusp), tightening on the
+  // steeper bands and floored at the cutter's radius/10 on a wall. Every row is phased from the
+  // OLD raster's own origin, and the row AT that origin is cut (the #960 rewrite had dropped it,
+  // which is what cost the tray's 2,411 slot cells — not a phase shift).
+  const flatRowStepMm = flatRasterStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1]);
+  const regionStepOverMm =
+    opts.kind === 'ball-scallop'
+      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1])
+      : flatRowStepMm;
+  const bandStepOverAt = (x: number): number =>
+    opts.kind === 'ball-scallop'
+      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, bandSlopeAt(x))
+      : flatRowStepMm;
+  let wallBandsCut = 0;
+
+  // #960 — THE ROW GUARD (the manager's rule: no cell newly above the band). The scallop step holds
+  // the band only where the CL surface is STRAIGHT across the gap. At a slot wall or a bridged
+  // mouth it is not — and a row grid on a new phase can leave a knife-edge cell that the OLD
+  // raster's row lapped (the organizer's 243 cells, all on walls at the 0.30 mm floor). There the
+  // advance snaps to the next OLD-grid row instead (`origin + k·regionStepOverMm`), so the base
+  // raster's rows stay in place; on straight stretches the vendor step stands.
+  const X_NUDGE_MM = 1e-4;
+  const originX = min[0] + X_NUDGE_MM;
+  const oldGridNext = (x: number): number =>
+    originX + (Math.floor((x - originX) / regionStepOverMm + 1e-9) + 1) * regionStepOverMm;
+  const clSafeAcross = (x0: number, x1: number): boolean => {
+    const intervals = footprintColumnIntervals(opts.region.footprint, (x0 + x1) / 2);
+    if (intervals.length === 0) return true; // nothing is cut between the two rows
+    // A KINK test, not a chord test: sample the CL densely across the gap and compare the slope
+    // of its first quarter with its last. A plane answers the same slope (any steepness) and is
+    // safe by the scallop formula; a rim, a slot wall or a bridged mouth changes slope sharply,
+    // and there a new row phase can lose the cell the old row lapped.
+    const SLOPE_JUMP = 0.5; // mm/mm (~26.6°) across one gap — a rim's kink, not surface noise
+    const SAMPLES = 16;
+    for (const [y0, y1] of intervals) {
+      for (const tY of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+        const y = y0 + (y1 - y0) * tY;
+        const pts: [number, number][] = [];
+        for (let k = 1; k < SAMPLES; k++) {
+          const x = x0 + ((x1 - x0) * k) / SAMPLES;
+          const z = opts.clSurface.dropCutter(x, y);
+          if (z !== null) pts.push([x, z]);
+        }
+        if (pts.length < 4) continue; // too few samples to judge: keep the band's own step
+        const q = Math.floor(pts.length / 4);
+        const a = pts[0]!;
+        const b = pts[q]!;
+        const c = pts[pts.length - 1 - q]!;
+        const d = pts[pts.length - 1]!;
+        const s1 = (b[1] - a[1]) / Math.max(1e-9, b[0] - a[0]);
+        const s2 = (d[1] - c[1]) / Math.max(1e-9, d[0] - c[0]);
+        if (Math.abs(s2 - s1) > SLOPE_JUMP) return false;
+      }
+    }
+    return true;
+  };
 
   // The field is honest about only the level just FINISHED (rough.ts's own reasoning): capped at
   // that level's own Z, never the level about to start, so a link is never approved through a
@@ -302,7 +506,6 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // it on the real part: its offset lands vertical edges on exactly the raster's round x values.
   // The rows start a tenth of a micron off, far below the CL tolerance (0.005 mm), and the blind
   // spot is gone.
-  const X_NUDGE_MM = 1e-4;
   for (const levelZ of levels) {
     // 1. COLLECT this level's admitted runs before the first move is posted. The raster's own
     //    order (row by row, run by run) is NOT the order the runs are cut in: where the mask
@@ -311,7 +514,26 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     //    across the land between them (984 of them, 9,463 s, measured on #962).
     const levelRuns: DroppedPoint[][] = [];
     const levelCleared: Polygons = [];
-    for (let x = min[0] + X_NUDGE_MM; x <= max[0] + stepOverMm * 1e-6; x += stepOverMm) {
+    // #960 — THE ROWS ARE PHASED FROM THE OLD RASTER'S OWN ORIGIN, and the row AT that origin is
+    // cut (the #960 rewrite dropped it — 24 moves per level, and the tray's 2,411 slot cells).
+    // Each row then advances by its OWN band's scallop step, unless the row guard finds the
+    // stretch not straight — then it snaps to the old grid's next row.
+    for (let x = originX; x <= max[0] + 1e-9; ) {
+      const wallBand = opts.kind === 'ball-scallop' && bandSlopeAt(x) >= WALL_SKIP_DEG;
+      if (wallBand) wallBandsCut++;
+      let stepOverMm = wallBand ? profile.radiusMm / 10 : bandStepOverAt(x);
+      // A region whose OLD step is already the ball's radius/10 floor has no finer grid to offer:
+      // its base raster is the densest the formula allows, so a band at or under it stays ON the
+      // old grid (the organizer's rim cells live exactly there). Everywhere else a finer band may
+      // ride its own phase, and a kinked gap falls back to the old grid.
+      const flooredBase = regionStepOverMm <= profile.radiusMm / 10 + 1e-9;
+      if (flooredBase && stepOverMm <= regionStepOverMm + 1e-9) {
+        const nextOld = oldGridNext(x);
+        if (nextOld > x + 1e-6) stepOverMm = Math.min(stepOverMm, nextOld - x);
+      } else if (stepOverMm > 1e-6 && !clSafeAcross(x, x + stepOverMm)) {
+        const nextOld = oldGridNext(x);
+        if (nextOld > x + 1e-6) stepOverMm = nextOld - x;
+      }
       const intervals = footprintColumnIntervals(opts.region.footprint, x);
       for (const interval of intervals) {
         const [rawY0, rawY1] = interval;
@@ -343,6 +565,8 @@ export function finish(opts: FinishOpOptions): OpOutcome {
           levelCleared.push([[x, Math.min(rawY0, rawY1)], [x, Math.max(rawY0, rawY1)]]);
         }
       }
+      if (!(stepOverMm > 1e-6)) break;
+      x += stepOverMm;
     }
     cleared.push({ z: levelZ, boundary: levelCleared });
 
@@ -467,5 +691,17 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     ],
   };
 
-  return { ir, cutter: cutterKeyOf(opts.cutter), passes, cleared };
+  return {
+    ir,
+    cutter: cutterKeyOf(opts.cutter),
+    passes,
+    cleared,
+    ...(wallBandsCut === 0
+      ? {}
+      : {
+          notes: [
+            `${wallBandsCut} raster row(s) over walls steeper than ${WALL_SKIP_DEG}° ride at or below the cutter's own ${(opts.kind === 'flat-raster' ? 'flat' : 'ball')} floor (radius/10) rather than the scallop spacing — they are cut, not skipped`,
+          ],
+        }),
+  };
 }

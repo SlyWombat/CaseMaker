@@ -100,9 +100,9 @@ export function oppositeSurfaceSafeDepthMm(
   return surfaceWorldZ + frame.stockTop - marginMm;
 }
 import { gridPitchFor, rough, skin } from './ops/rough';
-import { flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
+import { FLAT_SURFACE_MAX_SLOPE_DEG, flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
 import { cellPolygons, rest } from './ops/rest';
-import { finish } from './ops/finish';
+import { DEFAULT_FINISH_SCALLOP_MM, finish, finishKindFor } from './ops/finish';
 import { pencil } from './ops/pencil';
 import { chamfer } from './ops/chamfer';
 import { contour as contourOp, throughHole } from './ops/contour';
@@ -153,6 +153,9 @@ export interface OpOutcome {
   passes: PassRef[];
   /** What the op removed, per depth — the material state's input. Absent for an op that removes nothing new. */
   cleared?: RegionAtZ[];
+  /** #960 — statements the op makes about its own method (a skipped wall band, a stated slope
+   *  threshold), carried into the plan's notes so the operator sees them. */
+  notes?: string[];
 }
 
 export type RegionKind = 'pocket' | 'island-top' | 'curved' | 'contour' | 'rim';
@@ -751,7 +754,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         ...(vbit === undefined ? {} : { vbit }),
         stepDownMm: pocketParams.stepDown,
         bandMm: MODEL_STOCK_TO_LEAVE_MM,
-        finishScallopMm: input.tolerances.finishMm,
+        // #960 — the ball's cusp target is the vendor's 0.027 mm (its ⌀6 ball's own 0.8 mm
+        // step-over): a finer tolerance may not tighten it away; a coarser one still applies.
+        finishScallopMm: Math.max(input.tolerances.finishMm, DEFAULT_FINISH_SCALLOP_MM),
         stepOverMm: pocketParams.stepOver,
         feeds,
         cutParamsFor,
@@ -1689,6 +1694,11 @@ export interface PlanCurvedOptions {
    * band stays its own number.
    */
   finishScallopMm?: number;
+  /**
+   * #960 — THE FLAT/BALL THRESHOLD, degrees. A parameter while the picture decides the value
+   * (equal-cusp 1.9° vs vendor-like 7.1°); the constant is shared with C's #959 skin pass.
+   */
+  flatFinishMaxSlopeDeg?: number;
   /** The rings' spacing; absent → the flat's own radius. */
   stepOverMm?: number;
   /** `flat`'s own feed/plunge — kept as the fallback every tool used before the review's finding
@@ -2041,13 +2051,21 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       return clBallCache;
     };
     const depth = Math.max(opts.stepDownMm, base.zTop - base.zBottom);
+    // #960 — FLAT OR BALL BY THE REGION'S OWN SLOPE, with the threshold stated on the plan; the
+    // constant is a parameter (shared with C's #959 skin pass) while the picture decides 1.9° vs 7.1°.
+    const finishKind = finishKindFor(roughRegion, opts.geometry.triangles, opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG);
+    notes.push(
+      `the ${roughRegion.id} finish runs as a ${finishKind === 'flat-raster' ? 'flat-following raster' : 'ball at constant scallop'} ` +
+        `(slopes ${roughRegion.slopeDeg[0].toFixed(1)}–${roughRegion.slopeDeg[1].toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG).toFixed(2)}°)`,
+    );
     attempt('finish', ball, ref, () => finish({
       cutter: ball,
       region: roughRegion,
       regionRef: roughRef,
       clSurface: clBall(),
-      kind: 'ball-scallop',
-      scallopMm: opts.finishScallopMm ?? opts.bandMm,
+      kind: finishKind,
+      mesh: opts.geometry.triangles,
+      scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
       maskCells,
       // #962 — the material field's answers past the region's own reach (the linker's disc and the
       // down-leg floor reach up to a cutter radius outside it): the goal/mesh top there, which is

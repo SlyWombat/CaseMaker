@@ -1,29 +1,29 @@
 /**
- * cam/model/settings.ts — THE SHARED ENGINE PARAMETERS (#959, 2026-11-05 ruling).
+ * cam/model/settings.ts — THE SHARED ENGINE PARAMETERS (#959/#960).
  *
  * One place for the numbers the CAM's stages read as PARAMETERS rather than constants-in-code.
- * Each is a named value a caller (or a spec) may override; none is a job-document field yet.
  */
+import type { Tool } from '@/engine/cnc/tool';
 
 /**
- * THE SLOPE WHERE THE FLAT SURFACE-FOLLOWING PASS TAKES OVER (#959; shared with D's #960
- * flat/ball choice). A surface cell at or under this slope is cut by the flat's surface-following
- * pass (`skin`, and the flat's own finish choice); a steeper cell is left to the ball.
+ * THE SLOPE ABOVE WHICH A FLAT CUTTER IS NOT WORTH USING, degrees — the shared flat/surface
+ * threshold, read by the finish's flat/ball choice (`ops/finish.ts`, #960) and the skin pass's
+ * flat (#959). A second copy in either module would let the two drift apart silently.
  *
- * DEFAULT PENDING: the maintainer's ruling is between 1.9° and 7.1°, decided by D's picture
- * against Makera's T1 (the manager's reply on #960). `value` is the PROVISIONAL 7.1 until that
- * ruling lands — every caller reads it through this object, and the specs pass both candidates to
- * prove it is read as a parameter, not baked in.
+ * The manager RULED 1.93° on 2026-11-05 (#960): the equal-cusp derivation on a ⌀6 ball at the
+ * vendor's 0.027 mm scallop. The vendor-like 7.1° reading was not taken. Both ops read this ONE
+ * number, so any further change lands here and nowhere else.
  */
-export const FLAT_SURFACE_MAX_SLOPE_DEG = {
-  value: 1.93,
-  status: 'provisional' as const,
-  note: 'same provisional as D’s #960 branch (1.93) until the manager rules on D’s corrected picture; the candidates were 1.9–7.1',
-} as const;
+export const FLAT_SURFACE_MAX_SLOPE_DEG = 1.93;
 
-/** The provisional value, as a plain number for callers that state no override. */
+/** The ruled value, as a plain-number-returning function for callers that state no override. */
 export function flatSurfaceMaxSlopeDeg(): number {
-  return FLAT_SURFACE_MAX_SLOPE_DEG.value;
+  return FLAT_SURFACE_MAX_SLOPE_DEG;
+}
+
+/** The cutter shapes a flat/surface threshold applies to: the flat family, not balls or V bits. */
+export function isFlatFamily(tool: Tool): boolean {
+  return tool.shape === 'flat' || tool.shape === 'bull';
 }
 
 /**
