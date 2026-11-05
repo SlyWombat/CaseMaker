@@ -300,7 +300,28 @@ export interface SetupRegistration {
  *    for THIS module's pure rotation-about-origin model that agreement is exact up to floating
  *    point, so a real disagreement past this band means the candidate is not a trustworthy datum
  *    (the wrong hole/edge was matched, or the part's geometry does not actually support a simple
- *    top/bottom flip), and that candidate is discarded rather than averaged over.
+ *    top/bottom flip), and that candidate is discarded rather than averaged over. Reused, same
+ *    value, as the #966 WHOLE-DATASET validation tolerance below.
+ *
+ * #966 MIRROR-TWIN FIX: a chosen datum's own two ends agreeing with each other (the check above)
+ * only proves the pairing is SOME rigid translation — it says nothing about whether it is the
+ * RIGHT one. A part with a mirror-twin feature (two parallel edges of identical length that map
+ * onto each other under the flip's own half-turn — the "lying cylinder" case; the hole-pair
+ * analogue is a periodic/evenly-spaced hole row) can have TWO candidate pairings that each pass
+ * that check while disagreeing about the real offset — the lying-cylinder case silently returned
+ * `[0, -20]` instead of the true `[0, 0]` before this fix (`registrationAmbiguity966.spec.ts`).
+ * `outlineMatches`
+ * (edge datum) and the all-matched-holes check inside `tryHolePair` (hole datum) are the
+ * SECOND, independent test this fix adds: does the candidate offset, cast over EVERY OTHER
+ * recognised point of the SAME datum — not just the two that produced it — still agree? A finite
+ * point set translated by a non-zero vector moves its own centroid, so at most one offset can
+ * make a translated point set equal another SET-FOR-SET (not just two points of it); the "rest of
+ * the outline"/"the rest of the holes" is therefore a genuine second datum whenever it has more
+ * than the two points the candidate was built from, and it is what lets `tryEdge`/`tryHolePair`
+ * RESOLVE the lying-cylinder case to `[0, 0]` outright rather than merely refusing it. Only when
+ * more than one candidate survives even that whole-dataset check (the datum truly has no feature,
+ * anywhere in its own recognised geometry, left to tell the mirror twins apart) do they throw the
+ * new named "ambiguous" error below, instead of guessing.
  */
 const MIN_HOLE_SEPARATION_MM = 10;
 const MIN_EDGE_LENGTH_MM = 15;
@@ -308,6 +329,24 @@ const COLLINEAR_TOL_RAD = 1e-3;
 const OFFSET_CONSISTENCY_TOL_MM = 1e-3;
 
 const dist = (a: readonly [number, number], b: readonly [number, number]): number => Math.hypot(a[0] - b[0], a[1] - b[1]);
+
+/**
+ * Groups offsets that agree with each other (within `OFFSET_CONSISTENCY_TOL_MM`) — #966's own
+ * "is there more than one surviving answer" check, shared by `tryEdge` and `tryHolePair`. More
+ * than one group back is the ambiguous case: two (or more) candidates that each individually
+ * passed their own validation but disagree with EACH OTHER about the real offset.
+ */
+function groupByOffset(offsets: readonly (readonly [number, number])[]): [number, number][][] {
+  const groups: [number, number][][] = [];
+  for (const o of offsets) {
+    const g = groups.find((candidate) => dist(candidate[0]!, o) <= OFFSET_CONSISTENCY_TOL_MM);
+    if (g) g.push([o[0], o[1]]);
+    else groups.push([[o[0], o[1]]]);
+  }
+  return groups;
+}
+
+const AMBIGUOUS_MESSAGE_PREFIX = 'cam/model/setups: the vise-flip registration is ambiguous (#966 registration) — ';
 
 /** Area-weighted polygon centroid (shoelace form); the vertex average for a near-zero-area ring. */
 function ringCentroid(ring: readonly (readonly [number, number])[]): [number, number] {
@@ -390,12 +429,32 @@ function matchHoles(holes0: readonly LocatingHole[], holesN: readonly LocatingHo
   return matches;
 }
 
+/** `a.h0 - a.hN`, document XY — one matched hole's own implied offset. */
+function holeDelta(m: { h0: LocatingHole; hN: LocatingHole }): [number, number] {
+  return [m.h0.x - m.hN.x, m.h0.y - m.hN.y];
+}
+
 /**
- * The two-through-hole datum (strategy (a)). Tries every matched pair, widest separation first,
- * and takes the first one whose two holes AGREE with each other about the offset (within
- * `OFFSET_CONSISTENCY_TOL_MM`) — see this file's threshold note for why disagreement discards a
- * candidate instead of averaging over it. `null` when no matched pair clears
- * `MIN_HOLE_SEPARATION_MM` at all, or every pair that does disagrees internally.
+ * The two-through-hole datum (strategy (a)). Tries every matched pair, widest separation first:
+ * a pair survives only if its own two holes AGREE with each other about the offset (within
+ * `OFFSET_CONSISTENCY_TOL_MM`, the ORIGINAL #965 check — see this file's threshold note for why
+ * disagreement discards a candidate instead of averaging over it), AND — #966's own addition —
+ * that SAME offset also agrees with EVERY OTHER matched hole, not only the two the pair was built
+ * from. Two holes agreeing with each other only proves their pairing is SOME rigid translation; a
+ * periodic/evenly-spaced row of holes (three or more, evenly spaced) can have a "shift by one
+ * hole" mismatch that is internally self-consistent for the pair chosen yet wrong — the OTHER
+ * holes' own deltas, mismatched the same wrong way, give it away (`registrationAmbiguity966.spec.ts`).
+ * For exactly two holes this added check is a no-op (there is nothing else to check against) — a
+ * provable, not merely observed, fact: two DISTINCT points related by one assumed global
+ * translation admit at most one self-consistent correspondence (swapping which hole maps to which
+ * would need the two tree-0 holes to coincide, which `MIN_HOLE_SEPARATION_MM` already rules out) —
+ * so this file's own `registration965.spec.ts` two-hole cases are unaffected by this change.
+ *
+ * `null` when no matched pair clears `MIN_HOLE_SEPARATION_MM` at all, or no pair that does also
+ * survives both consistency checks (a genuinely mismatched hole set — #966 prefers this safe
+ * `null`, falling through to the edge strategy or the final named refusal, over naming a
+ * wrong-but-plausible pair "ambiguous" when the real defect is that the correspondence itself
+ * never resolved at all).
  */
 function tryHolePair(tree0: FeatureTree, treeN: FeatureTree): SetupRegistration | null {
   const matches = matchHoles(documentHoles(tree0), documentHoles(treeN));
@@ -409,23 +468,33 @@ function tryHolePair(tree0: FeatureTree, treeN: FeatureTree): SetupRegistration 
   }
   pairs.sort((a, b) => b.separationMm - a.separationMm);
 
+  const validated: { offset: [number, number]; holes: [LocatingHole, LocatingHole]; separationMm: number }[] = [];
   for (const { i, j, separationMm } of pairs) {
     if (separationMm < MIN_HOLE_SEPARATION_MM) break; // sorted descending — no later pair clears it either.
     const a = matches[i]!;
     const b = matches[j]!;
-    const deltaA: [number, number] = [a.h0.x - a.hN.x, a.h0.y - a.hN.y];
-    const deltaB: [number, number] = [b.h0.x - b.hN.x, b.h0.y - b.hN.y];
+    const deltaA = holeDelta(a);
+    const deltaB = holeDelta(b);
     if (dist(deltaA, deltaB) > OFFSET_CONSISTENCY_TOL_MM) continue; // this pair does not agree with itself — discard, try the next.
-    return {
-      datum: {
-        basis: 'two-holes',
-        holes: [a.h0, b.h0],
-        separationMm,
-      },
-      offsetMm: [(deltaA[0] + deltaB[0]) / 2, (deltaA[1] + deltaB[1]) / 2],
-    };
+    const offset: [number, number] = [(deltaA[0] + deltaB[0]) / 2, (deltaA[1] + deltaB[1]) / 2];
+    // #966: self-consistent for THIS pair — does it also agree with every OTHER matched hole?
+    if (!matches.every((m) => dist(holeDelta(m), offset) <= OFFSET_CONSISTENCY_TOL_MM)) continue;
+    validated.push({ offset, holes: [a.h0, b.h0], separationMm });
   }
-  return null;
+  if (validated.length === 0) return null;
+
+  const groups = groupByOffset(validated.map((v) => v.offset));
+  if (groups.length > 1) {
+    throw new Error(
+      AMBIGUOUS_MESSAGE_PREFIX +
+        'more than one matched through-hole pair is self-consistent (and agrees with every other recognised ' +
+        `hole) on its own, but the pairs disagree with EACH OTHER about the real offset (found ${groups
+          .map((g) => `[${g[0]![0]}, ${g[0]![1]}]`)
+          .join(' vs ')} mm); refusing rather than guessing which pair is the real vise-flip correspondence`,
+    );
+  }
+  const best = validated.reduce((b, v) => (v.separationMm > b.separationMm ? v : b));
+  return { datum: { basis: 'two-holes', holes: best.holes, separationMm: best.separationMm }, offsetMm: best.offset };
 }
 
 interface StraightRun {
@@ -484,41 +553,106 @@ function straightRuns(ring: readonly (readonly [number, number])[]): StraightRun
   return runs;
 }
 
-/** The outer ring's longest straight run, document XY (this tree's own `documentXY`, no offset). */
-function longestOutlineRun(tree: FeatureTree): StraightRun | null {
+/**
+ * EVERY outer-ring straight run at least `MIN_EDGE_LENGTH_MM` long, document XY (this tree's own
+ * `documentXY`, no offset) — #966's own change from the original "the single longest run only".
+ * A tied-length pair (the lying-cylinder case: two parallel edges of identical length, each the
+ * flip's mirror twin of the other) must be seen as TWO candidates, not silently collapsed to
+ * whichever one a `reduce`'s own tie-break (first-encountered wins) happened to prefer — that
+ * silent collapse is exactly how the original bug returned a wrong offset without ever tripping
+ * its own consistency check (see this file's #966 header note).
+ */
+function candidateOutlineRuns(tree: FeatureTree): StraightRun[] {
   const outer = tree.contour.outline[0];
-  if (outer === undefined) return null;
+  if (outer === undefined) return [];
   const mapped = outer.map(([x, y]) => documentXY(tree.frame, x, y));
-  const runs = straightRuns(mapped);
-  if (runs.length === 0) return null;
-  return runs.reduce((best, r) => (r.lengthMm > best.lengthMm ? r : best));
+  return straightRuns(mapped).filter((r) => r.lengthMm >= MIN_EDGE_LENGTH_MM);
 }
 
 /**
- * The single-straight-edge datum (strategy (b)). Matches setup 0's own longest outline run
- * against setup N's, pairing endpoints the way that minimises their total distance (the two
- * rings wind OPPOSITE ways once setup N's mirror-Y map is applied, so the "first" endpoint of one
- * is the "second" of the other) — then applies the SAME agree-or-discard rule as the hole pair.
- * `null` when either setup's longest run is under `MIN_EDGE_LENGTH_MM`, or the two ends disagree.
+ * #966's own SECOND, independent check (this file's header note): does `offset`, applied to
+ * EVERY point of `treeN`'s own recognised outline — not just the two endpoints of one candidate
+ * edge — reproduce `tree0`'s own outline, point for point, as a SET (the two rings may start at a
+ * different vertex, or wind the opposite way, once setup N's mirror-Y map is applied, so this is
+ * a set match, not a sequence match)? A bijective nearest-match: every mapped point of `treeN`
+ * claims a DIFFERENT, close point of `tree0`'s, with none left over on either side (`undefined`/
+ * length-mismatched outlines fail closed, never silently "mostly" match).
+ */
+function outlineMatches(tree0: FeatureTree, treeN: FeatureTree, offset: readonly [number, number]): boolean {
+  const outer0 = tree0.contour.outline[0];
+  const outerN = treeN.contour.outline[0];
+  if (outer0 === undefined || outerN === undefined || outer0.length !== outerN.length || outer0.length === 0) return false;
+  const mapped0 = outer0.map(([x, y]) => documentXY(tree0.frame, x, y));
+  const mappedN = outerN.map(([x, y]) => documentXY(treeN.frame, x, y, offset));
+  const claimed = new Set<number>();
+  for (const p of mappedN) {
+    let found = -1;
+    for (let i = 0; i < mapped0.length; i++) {
+      if (claimed.has(i)) continue;
+      if (dist(p, mapped0[i]!) <= OFFSET_CONSISTENCY_TOL_MM) {
+        found = i;
+        break;
+      }
+    }
+    if (found === -1) return false;
+    claimed.add(found);
+  }
+  return true;
+}
+
+/**
+ * The single-straight-edge datum (strategy (b)). Every candidate run in `tree0` is matched
+ * against every length-matching candidate in `treeN`, pairing endpoints the way that minimises
+ * their total distance (the two rings wind OPPOSITE ways once setup N's mirror-Y map is applied,
+ * so the "first" endpoint of one is the "second" of the other) — a pairing that disagrees with
+ * ITSELF (the original #965 per-edge check) is dropped immediately; one that agrees with itself
+ * must then also pass `outlineMatches` (#966) before it is trusted. A mirror-twin pairing (the
+ * lying-cylinder case) passes the per-edge check in both directions but only the one true to the
+ * WHOLE outline survives `outlineMatches` — see this file's #966 header note for why that is not
+ * merely "one more heuristic" but provably decisive (a translated finite point set can equal
+ * another, set for set, for at most one translation). `null` when no candidate survives either
+ * check at all (falls through to the final named refusal); throws the new named "ambiguous" error
+ * when more than one SURVIVING candidate disagrees with the others about the offset — a shape
+ * whose own recognised outline genuinely carries no feature anywhere capable of telling its
+ * mirror twins apart.
  */
 function tryEdge(tree0: FeatureTree, treeN: FeatureTree): SetupRegistration | null {
-  const run0 = longestOutlineRun(tree0);
-  const runN = longestOutlineRun(treeN);
-  if (run0 === null || runN === null) return null;
-  if (run0.lengthMm < MIN_EDGE_LENGTH_MM || runN.lengthMm < MIN_EDGE_LENGTH_MM) return null;
+  const candidates0 = candidateOutlineRuns(tree0);
+  const candidatesN = candidateOutlineRuns(treeN);
+  if (candidates0.length === 0 || candidatesN.length === 0) return null;
 
-  const straight = dist(run0.a, runN.a) + dist(run0.b, runN.b);
-  const swapped = dist(run0.a, runN.b) + dist(run0.b, runN.a);
-  const [pa, pb] = straight <= swapped ? [runN.a, runN.b] : [runN.b, runN.a];
+  const validated: { offset: [number, number]; run0: StraightRun }[] = [];
+  for (const run0 of candidates0) {
+    for (const runN of candidatesN) {
+      if (Math.abs(run0.lengthMm - runN.lengthMm) > OFFSET_CONSISTENCY_TOL_MM) continue; // not the same physical edge length.
 
-  const deltaA: [number, number] = [run0.a[0] - pa[0], run0.a[1] - pa[1]];
-  const deltaB: [number, number] = [run0.b[0] - pb[0], run0.b[1] - pb[1]];
-  if (dist(deltaA, deltaB) > OFFSET_CONSISTENCY_TOL_MM) return null;
+      const straight = dist(run0.a, runN.a) + dist(run0.b, runN.b);
+      const swapped = dist(run0.a, runN.b) + dist(run0.b, runN.a);
+      const [pa, pb] = straight <= swapped ? [runN.a, runN.b] : [runN.b, runN.a];
 
-  return {
-    datum: { basis: 'edge', endpoints: [run0.a, run0.b], lengthMm: run0.lengthMm },
-    offsetMm: [(deltaA[0] + deltaB[0]) / 2, (deltaA[1] + deltaB[1]) / 2],
-  };
+      const deltaA: [number, number] = [run0.a[0] - pa[0], run0.a[1] - pa[1]];
+      const deltaB: [number, number] = [run0.b[0] - pb[0], run0.b[1] - pb[1]];
+      if (dist(deltaA, deltaB) > OFFSET_CONSISTENCY_TOL_MM) continue; // disagrees with itself — discard.
+
+      const offset: [number, number] = [(deltaA[0] + deltaB[0]) / 2, (deltaA[1] + deltaB[1]) / 2];
+      if (!outlineMatches(tree0, treeN, offset)) continue; // #966: self-consistent for this ONE edge, but not the whole outline.
+      validated.push({ offset, run0 });
+    }
+  }
+  if (validated.length === 0) return null;
+
+  const groups = groupByOffset(validated.map((v) => v.offset));
+  if (groups.length > 1) {
+    throw new Error(
+      AMBIGUOUS_MESSAGE_PREFIX +
+        'this part\'s own recognised outline admits more than one equally self-consistent edge-datum offset, ' +
+        `each reproducing a DIFFERENT pair of edges of the SAME outline (found ${groups
+          .map((g) => `[${g[0]![0]}, ${g[0]![1]}]`)
+          .join(' vs ')} mm); refusing rather than guessing which one is the real vise-flip correspondence`,
+    );
+  }
+  const best = validated.reduce((b, v) => (v.run0.lengthMm > b.run0.lengthMm ? v : b));
+  return { datum: { basis: 'edge', endpoints: [best.run0.a, best.run0.b], lengthMm: best.run0.lengthMm }, offsetMm: best.offset };
 }
 
 /**
@@ -527,7 +661,11 @@ function tryEdge(tree0: FeatureTree, treeN: FeatureTree): SetupRegistration | nu
  * module's stated scope); `treeN` is setup N's (`N > 0`, the flip). Tries the two-hole datum
  * first (the more rigid, two-point anchor — an edge alone cannot detect an offset ALONG its own
  * length), then the single-edge datum, and THROWS, naming the issue, when the part carries
- * neither — never falls back to a guessed/nominal `[0, 0]` offset.
+ * neither — never falls back to a guessed/nominal `[0, 0]` offset. Either strategy can ALSO throw
+ * its own #966 "ambiguous" error directly (propagated unmodified, never caught here) when its own
+ * candidate survives every per-candidate check but still disagrees with another, equally-valid
+ * one — a mirror-twin feature with nothing else in the part's own recognised geometry to tell the
+ * twins apart. Never returns an offset indistinguishable from its own mirror image.
  */
 export function registerSetupOrigin(tree0: FeatureTree, treeN: FeatureTree): SetupRegistration {
   const holeDatum = tryHolePair(tree0, treeN);
