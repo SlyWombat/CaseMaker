@@ -310,13 +310,22 @@ export function rough(opts: RoughOpOptions): OpOutcome {
     // material field at the depth just left, stays down where the material says it may, and every
     // VERTICAL leg runs at `plungeFeed`, never as a diagonal at the cutting feed. The previous
     // vertical-lift-then-hop form was safe but expensive: F measured the organizer's rough at
-    // 7,676 s of rapids against 2,387 s of cut.
-    // (The link() routing for these joins is held until B's link() vertical rule lands — see the
-    // #959 queue. Until then the safe form stands: a vertical lift at the current position, then a
-    // rapid at the hop plane.)
-    if (prevExit !== null) moves.push({ kind: 'rapid', x: prevExit[0], y: prevExit[1], z: opts.hopZMm });
-    moves.push({ kind: 'rapid', x: start[0], y: start[1], z: opts.hopZMm });
-    moves.push({ kind: 'feed', x: start[0], y: start[1], z: start[2], f: opts.feeds.plungeFeedMmPerMin });
+    // 7,676 s of rapids against 2,387 s of cut. B's vertical-legs rule (8be24f73's link()) is the
+    // one that landed, so the routing is the shared one now; the first run of the op still enters
+    // from the hop plane, exactly as the Z-level loop's own first pass does.
+    if (prevExit !== null) {
+      const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
+      const to: LinkPoint = { x: start[0], y: start[1], z: start[2] };
+      // THE TRANSIT HEIGHT IS THE OP'S OWN HOP PLANE, the height this join flew at before it went
+      // through `link()` — the skim visits only cells within one step-down of the region top, and
+      // the material beside them stands at that top, which `hopZMm` clears by the same margin the
+      // op's own first entry already trusts. The region's clearance plane (+5 over the part top)
+      // cost the organizer 619 s of rapid travel on these joins for margin it does not need.
+      moves.push(...link(from, to, { ...linkOptionsFor(prevLevelZ ?? start[2]), clearanceZ: opts.hopZMm }));
+    } else {
+      moves.push({ kind: 'rapid', x: start[0], y: start[1], z: opts.hopZMm });
+      moves.push({ kind: 'feed', x: start[0], y: start[1], z: start[2], f: opts.feeds.plungeFeedMmPerMin });
+    }
     for (let q = 1; q < points.length; q++) {
       const p = points[q]!;
       moves.push({ kind: 'feed', x: p[0], y: p[1], z: p[2], f: opts.feeds.feedMmPerMin });
