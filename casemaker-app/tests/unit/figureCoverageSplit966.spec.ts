@@ -223,55 +223,81 @@ describe('#966 figureCoverageSplit — the 3-way split on the synthetic solid', 
       planCutterIds: ['flat-6', 'flat-3.175', 'ball-2'], // ball-0.5 withheld from PLANNING only
     });
 
-    // Sanity: the split accounts for the whole gap, exactly (no triangle double-counted/lost).
+    // #966 (Manager, 2026-11-04 REWORK) — THE PRIMARY CORRECTNESS BAR: covered + cat1 + cat2 +
+    // cat3 sum to EXACTLY totals.totalAreaMm2 (the whole-surface triangle-area basis), because
+    // every mesh triangle (or, for one straddling a category boundary, every LEAF piece of it
+    // after clipping — see figure-coverage-split.ts's own "TRIANGLE-LEVEL AREA ACCOUNTING"
+    // section) is assigned to EXACTLY ONE of the four buckets. Checked BOTH as a tight absolute
+    // tolerance AND as the ±0.1 % relative bound the ruling itself states.
+    const partitionSumMm2 =
+      result.totals.coveredTodayAreaMm2 + result.category1.plannableAreaMm2 + result.category2.areaMm2 + result.category3.areaMm2;
+    expect(partitionSumMm2).toBeCloseTo(result.totals.totalAreaMm2, 3);
+    expect(Math.abs(partitionSumMm2 - result.totals.totalAreaMm2) / result.totals.totalAreaMm2).toBeLessThan(0.001);
+    // The same identity, restated as the gap (cat1+cat2+cat3 alone) — kept from the previous pass.
     expect(result.category1.plannableAreaMm2 + result.category2.areaMm2 + result.category3.areaMm2).toBeCloseTo(result.totals.gapAreaMm2, 3);
 
-    // #966 (Manager, 2026-11-04) — THE STOCK-BOTTOM-EXCLUDED DENOMINATOR, hand-derived, not read
-    // back from the tool. `totals.totalAreaMm2` is now `field.coveredCount * pitch²` — the SAME
-    // count checkGoalCutInto's own `n` uses off the SAME GoalHeightfield. This synthetic solid's
-    // footprint (column X0-4 union arm X4-10, both Y0-8) fills the WHOLE 10 x 8 mm stock rectangle
-    // with no gaps (even the two blind pockets stay "covered" — their floor is still a surface,
-    // just a lower one), so `sampleGoalHeightfield`'s own grid — `planGrid`'s `ceil(extent/pitch) +
-    // 1` per axis, goalHeightfield.ts:315-337 — covers every cell: (ceil(10/0.1)+1) x
-    // (ceil(8/0.1)+1) = 101 x 81 cells, each 0.1 x 0.1 mm — an EXACT figure, not an approximation.
+    // #966 (Manager, 2026-11-04 REWORK, point 1) — THE WHOLE-SURFACE TRIANGLE-AREA BASIS,
+    // HAND-DERIVED from the solid's own geometry (not read back from the tool). The shape is
+    // Column(X0-4,Y0-8,Z0-6) ∪ Arm(X4-10,Y0-8,Z4-6) minus two blind pockets, all faces flat and
+    // axis-aligned (no foreshortening anywhere), so every face's true area is exactly computable:
+    //   - Column alone (4x8x6 box): 2*(4*8 + 4*6 + 8*6)                         = 208 mm²
+    //   - Arm alone (6x8x2 box):    2*(6*8 + 6*2 + 8*2)                         = 152 mm²
+    //   - minus the shared interface where the arm attaches (X=4, Y0-8, Z4-6),
+    //     counted twice (once on each box) and so removed twice: 2 * (8*2)      = -32 mm²
+    //   Union total (before pockets)                                           = 328 mm²
+    // Each pocket punches a hole through the (otherwise continuous) top surface and opens an
+    // equal-area floor at Z4 instead — those two swaps cancel exactly in the TOTAL area sum — and
+    // adds its own 4 new vertical walls (perimeter x depth, depth = Z_TOP - Z_FLOOR = 2 mm):
+    //   - hole B (0.6 x 2.0 mm): perimeter 2*(0.6+2.0) = 5.2 mm, walls 5.2*2    = 10.4 mm²
+    //   - hole C (2.0 x 2.0 mm): perimeter 2*(2.0+2.0) = 8.0 mm, walls 8.0*2    = 16.0 mm²
+    // Hand-derived total mesh surface area                                    = 328 + 26.4 = 354.4 mm²
+    const expectedMeshTriangleAreaMm2 = 354.4;
+    expect(result.totals.meshTriangleAreaMm2).toBeCloseTo(expectedMeshTriangleAreaMm2, 1);
+    // underside = 'flippedTabs' here (not 'flatOnStockBottom') — the stock-bottom exclusion (point
+    // 4) does NOT apply, so the whole-surface total is the mesh's own total, unreduced.
+    expect(result.totals.stockBottomFaceAreaMm2).toBe(0);
+    expect(result.totals.stockBottomExcluded).toBe(false);
+    expect(result.totals.totalAreaMm2).toBeCloseTo(result.totals.meshTriangleAreaMm2, 6);
+
+    // #966 (Manager, 2026-11-04, point 3) — THE COLUMN-BASED NUMBER, KEPT SEPARATE, hand-derived
+    // exactly as the previous pass derived it (never mixed into totalAreaMm2 above). This
+    // synthetic solid's footprint (column X0-4 union arm X4-10, both Y0-8) fills the WHOLE 10 x 8
+    // mm stock rectangle with no gaps (even the two blind pockets stay "covered" — their floor is
+    // still a surface, just a lower one), so `sampleGoalHeightfield`'s own grid — `planGrid`'s
+    // `ceil(extent/pitch) + 1` per axis, goalHeightfield.ts:315-337 — covers every cell:
+    // (ceil(10/0.1)+1) x (ceil(8/0.1)+1) = 101 x 81 cells, each 0.1 x 0.1 mm — an EXACT figure.
     const expectedNx = Math.ceil(10 / 0.1) + 1;
     const expectedNy = Math.ceil(8 / 0.1) + 1;
-    const expectedStockBottomExcludedAreaMm2 = expectedNx * expectedNy * 0.1 * 0.1;
-    expect(result.totals.totalAreaMm2).toBeCloseTo(expectedStockBottomExcludedAreaMm2, 2);
+    const expectedColumnBasedAreaMm2 = expectedNx * expectedNy * 0.1 * 0.1;
+    expect(result.totals.columnBasedAreaMm2).toBeCloseTo(expectedColumnBasedAreaMm2, 2);
 
-    // The PLAIN (pre-#966-fix) total stays goalCoverage.ts's own triangle-sum, BOTH faces: this
-    // solid's own underside is a flat, unsloped 10 x 8 mm face (true area = its XY projection,
-    // no foreshortening) — so the top (>= its own footprint) PLUS that same-size flat bottom ALONE
-    // is already at least double the corrected total, before any of the pocket/cantilever walls'
-    // own (further additive) real area is even counted.
-    expect(result.totals.plainTotalAreaMm2).toBeGreaterThan(result.totals.totalAreaMm2 * 1.9);
-
-    // pct/pctPlain are the SAME areas divided by the two totals above — an algebraic identity,
+    // pct is the SAME area divided by the ONE whole-surface total above — an algebraic identity,
     // checked directly against the formula rather than a magic number copied from the tool's own
     // output (the task's own instruction: hand-check the new basis, don't just mirror the code).
     const pctOf = (areaMm2: number, totalMm2: number): number => (totalMm2 > 0 ? (areaMm2 / totalMm2) * 100 : 0);
     expect(result.totals.coveredTodayPct).toBeCloseTo(pctOf(result.totals.coveredTodayAreaMm2, result.totals.totalAreaMm2), 6);
-    expect(result.totals.coveredTodayPctPlain).toBeCloseTo(pctOf(result.totals.coveredTodayAreaMm2, result.totals.plainTotalAreaMm2), 6);
     expect(result.totals.gapPct).toBeCloseTo(pctOf(result.totals.gapAreaMm2, result.totals.totalAreaMm2), 6);
-    expect(result.totals.gapPctPlain).toBeCloseTo(pctOf(result.totals.gapAreaMm2, result.totals.plainTotalAreaMm2), 6);
     expect(result.category2.pct).toBeCloseTo(pctOf(result.category2.areaMm2, result.totals.totalAreaMm2), 6);
-    expect(result.category2.pctPlain).toBeCloseTo(pctOf(result.category2.areaMm2, result.totals.plainTotalAreaMm2), 6);
     expect(result.category3.pct).toBeCloseTo(pctOf(result.category3.areaMm2, result.totals.totalAreaMm2), 6);
-    expect(result.category3.pctPlain).toBeCloseTo(pctOf(result.category3.areaMm2, result.totals.plainTotalAreaMm2), 6);
     expect(result.category1.geometricReachPct).toBeCloseTo(pctOf(result.category1.geometricReachAreaMm2, result.totals.totalAreaMm2), 6);
-    expect(result.category1.geometricReachPctPlain).toBeCloseTo(pctOf(result.category1.geometricReachAreaMm2, result.totals.plainTotalAreaMm2), 6);
+    // ... and `coveredTodayColumnBasedPct` is the SAME `coveredTodayAreaMm2` numerator divided by
+    // the DIFFERENT (column-based) denominator above — the intentionally mixed-basis ratio.
+    expect(result.totals.coveredTodayColumnBasedPct).toBeCloseTo(
+      pctOf(result.totals.coveredTodayAreaMm2, result.totals.columnBasedAreaMm2),
+      6,
+    );
 
-    // `coveredTodayPctPlain` is a true in-bounds percentage — ALWAYS <= 100 — because
-    // `coveredTodayAreaMm2` is one of the four triangle-partition buckets that exactly sum to
-    // `plainTotalAreaMm2` (the sanity check above). `coveredTodayPct` (against the corrected,
-    // per-CELL total) carries NO such guarantee and, STATED PLAINLY (this tool's own new caveat,
-    // not hidden): for THIS fixture it reads OVER 100 % — the cantilevered arm and the pockets'
-    // own walls add real triangle-summed surface area that F's single-value-per-column
-    // heightfield structurally never sees at all, so the triangle-based numerator here exceeds
-    // the cell-based denominator. Both facts are asserted so a future change cannot silently
-    // "fix" this by quietly capping it.
-    expect(result.totals.coveredTodayPctPlain).toBeLessThanOrEqual(100 + 1e-6);
-    expect(result.totals.coveredTodayPct).toBeGreaterThan(100);
+    // #966 (Manager, 2026-11-04 REWORK) — `coveredTodayPct` is now ALWAYS a true in-bounds
+    // percentage (<= 100), because it is exactly one of the four triangle-partition shares of
+    // `totalAreaMm2` (the identity asserted above) — this is the fix the rework exists for: the
+    // previous pass's basis mismatch (confirmed ~275 % on this fixture) cannot recur here.
+    // `coveredTodayColumnBasedPct`, the SEPARATE, intentionally mixed-basis figure kept for
+    // comparison with F's own quoted numbers, carries NO such guarantee and, as before, DOES read
+    // over 100 % on this fixture (the cantilevered arm and the pockets' own walls add real
+    // triangle-summed surface area the column grid structurally never sees at all) — both facts
+    // stated so a future change cannot silently "fix" one by conflating it with the other.
+    expect(result.totals.coveredTodayPct).toBeLessThanOrEqual(100 + 1e-6);
+    expect(result.totals.coveredTodayColumnBasedPct).toBeGreaterThan(100);
 
     // Feature A — AN UNPLANNED FINDING THAT TURNED OUT TO VALIDATE THE MANAGER's OWN CONCERN
     // (2026-11-04, see this file's header): this 10x8mm block is itself too small to clear
@@ -335,25 +361,97 @@ describe('#966 figureCoverageSplit — the 3-way split on the synthetic solid', 
     const flipAreaMm2 = 6 * widthY + 4 * widthY; // arm underside + the void's own left wall
     expect(result.category1.plannableAreaMm2).toBeGreaterThan(flipAreaMm2 * 0.9);
     expect(result.category1.plannableAreaMm2).toBeLessThan(flipAreaMm2 * 1.1);
-    // Plannable and geometric agree once a real plan actually exists.
-    expect(result.category1.plannableAreaMm2).toBeCloseTo(result.category1.geometricReachAreaMm2, 0);
+    // Plannable and geometric LARGELY agree once a real plan actually exists — within a few
+    // percent, not exactly: the finer leaf-level clipping this rework adds (see
+    // figure-coverage-split.ts's own "TRIANGLE-LEVEL AREA ACCOUNTING" section) now resolves a
+    // real, small sliver near the reach boundary where the ACTUAL posted program's engagement
+    // (a cutter's own stepover/clearance) misses geometric reach by a hair that a single
+    // whole-triangle sample previously averaged away. A tight absolute tolerance here would be
+    // re-fitting to that artifact, not asserting a real invariant.
+    expect(Math.abs(result.category1.plannableAreaMm2 - result.category1.geometricReachAreaMm2) / result.category1.geometricReachAreaMm2).toBeLessThan(
+      0.05,
+    );
 
-    // #966 (Manager, 2026-11-04) — the stock-bottom-excluded denominator on a SECOND, differently
-    // sized/pitched fixture: this part's own footprint (10 x widthY mm) also fills its whole
-    // stock rectangle with no gaps, at pitchMm = 0.2 this time — (ceil(10/0.2)+1) x
+    // #966 (Manager, 2026-11-04 REWORK, point 1/2) — THE PRIMARY CORRECTNESS BAR, on this SECOND,
+    // differently sized/pitched/registered fixture too.
+    const partitionSumMm2 =
+      result.totals.coveredTodayAreaMm2 + result.category1.plannableAreaMm2 + result.category2.areaMm2 + result.category3.areaMm2;
+    expect(partitionSumMm2).toBeCloseTo(result.totals.totalAreaMm2, 3);
+    expect(Math.abs(partitionSumMm2 - result.totals.totalAreaMm2) / result.totals.totalAreaMm2).toBeLessThan(0.001);
+
+    // THE WHOLE-SURFACE TRIANGLE-AREA BASIS, hand-derived exactly as the first test's comment
+    // derives it, for THIS plank's own box dimensions (no pockets here):
+    //   - Column alone (4 x widthY x 6 box): 2*(4*widthY + 4*6 + widthY*6)
+    //   - Arm alone (6 x widthY x 2 box):     2*(6*widthY + 6*2 + widthY*2)
+    //   - minus the shared interface (X=4, Y0-widthY, Z4-6), counted twice: 2*(widthY*2)
+    const columnAloneMm2 = 2 * (4 * widthY + 4 * 6 + widthY * 6);
+    const armAloneMm2 = 2 * (6 * widthY + 6 * 2 + widthY * 2);
+    const sharedInterfaceMm2 = 2 * (widthY * 2);
+    const expectedMeshTriangleAreaMm2 = columnAloneMm2 + armAloneMm2 - sharedInterfaceMm2;
+    expect(result.totals.meshTriangleAreaMm2).toBeCloseTo(expectedMeshTriangleAreaMm2, 1);
+    expect(result.totals.stockBottomFaceAreaMm2).toBe(0);
+    expect(result.totals.stockBottomExcluded).toBe(false);
+    expect(result.totals.totalAreaMm2).toBeCloseTo(result.totals.meshTriangleAreaMm2, 6);
+
+    // #966 (Manager, 2026-11-04, point 3) — the SEPARATE column-based number on this SECOND,
+    // differently sized/pitched fixture: this part's own footprint (10 x widthY mm) also fills
+    // its whole stock rectangle with no gaps, at pitchMm = 0.2 this time — (ceil(10/0.2)+1) x
     // (ceil(widthY/0.2)+1) cells, each 0.2 x 0.2 mm, hand-derived exactly as the first test does.
     const expectedNx = Math.ceil(10 / 0.2) + 1;
     const expectedNy = Math.ceil(widthY / 0.2) + 1;
-    const expectedStockBottomExcludedAreaMm2 = expectedNx * expectedNy * 0.2 * 0.2;
-    expect(result.totals.totalAreaMm2).toBeCloseTo(expectedStockBottomExcludedAreaMm2, 1);
-    // Here too, the flat underside alone (no slope) is a same-size face as the visible top, so the
-    // plain (both-faces) total is still at least double the corrected one.
-    expect(result.totals.plainTotalAreaMm2).toBeGreaterThan(result.totals.totalAreaMm2 * 1.9);
-    // category1.plannablePct is the SAME area now divided by the corrected total — checked as a
-    // formula, not a number copied from the tool's own run.
+    const expectedColumnBasedAreaMm2 = expectedNx * expectedNy * 0.2 * 0.2;
+    expect(result.totals.columnBasedAreaMm2).toBeCloseTo(expectedColumnBasedAreaMm2, 1);
+    // category1.plannablePct is the SAME area divided by the ONE whole-surface total — checked as
+    // a formula, not a number copied from the tool's own run.
     expect(result.category1.plannablePct).toBeCloseTo((result.category1.plannableAreaMm2 / result.totals.totalAreaMm2) * 100, 6);
-    expect(result.category1.plannablePctPlain).toBeCloseTo((result.category1.plannableAreaMm2 / result.totals.plainTotalAreaMm2) * 100, 6);
   }, 120_000);
+
+  it(
+    "#966 (Manager, 2026-11-04, point 4) — underside = 'flatOnStockBottom' excludes the column's own bottom face, named and printed, never folded into a category",
+    async () => {
+      const job = syntheticJob();
+      const result = await figureCoverageSplit({
+        job,
+        meshBytes: MESH_BYTES,
+        meshFileName: 'synthetic-966.stl',
+        label: 'synthetic966-stockbottom',
+        underside: 'flatOnStockBottom',
+        pitchMm: 0.1,
+        planCutterIds: ['flat-6', 'flat-3.175', 'ball-2'],
+      });
+
+      // #898/point 4 — the column's own bottom face (X0-4, Y0-8; the arm never reaches down to
+      // Z0 — it is suspended from Z4 up — so it contributes nothing to this face) lies EXACTLY in
+      // the stock's bottom plane under this underside choice, and is excluded — printed as its
+      // own figure, never folded into a category or dropped.
+      const expectedStockBottomFaceAreaMm2 = 4 * 8;
+      expect(result.totals.stockBottomExcluded).toBe(true);
+      expect(result.totals.stockBottomFaceAreaMm2).toBeCloseTo(expectedStockBottomFaceAreaMm2, 1);
+
+      // The mesh's own full area is unchanged from the first test above (same mesh, 354.4 mm²,
+      // hand-derived there) — only the CLASSIFIABLE total (`totalAreaMm2`) is reduced, by EXACTLY
+      // the exclusion above.
+      expect(result.totals.meshTriangleAreaMm2).toBeCloseTo(354.4, 1);
+      expect(result.totals.totalAreaMm2).toBeCloseTo(result.totals.meshTriangleAreaMm2 - result.totals.stockBottomFaceAreaMm2, 1);
+
+      // The primary identity still holds on the REDUCED total — the excluded face sits in
+      // NEITHER side of it (point 2 of the ruling, re-asserted on this exclusion run too).
+      const partitionSumMm2 =
+        result.totals.coveredTodayAreaMm2 + result.category1.plannableAreaMm2 + result.category2.areaMm2 + result.category3.areaMm2;
+      expect(partitionSumMm2).toBeCloseTo(result.totals.totalAreaMm2, 3);
+      expect(Math.abs(partitionSumMm2 - result.totals.totalAreaMm2) / result.totals.totalAreaMm2).toBeLessThan(0.001);
+
+      // #898's own rule (setups.ts) — flatOnStockBottom never offers the bottom as a flip
+      // candidate at all, so no second setup is even proposed; category 1 is 'geometric-only' for
+      // a DIFFERENT reason than the first test's registration refusal above: there is no
+      // registration FAILURE here (`registerSetupOrigin` is never even called for a single-setup
+      // plan) — `buildSetupSpecs` simply never proposed a second setup to register.
+      expect(result.category1.registration.ok, JSON.stringify(result.caveats)).toBe(true);
+      expect(result.category1.realistic).toBe('geometric-only');
+      expect(result.category1.plannableAreaMm2).toBe(0);
+    },
+    120_000,
+  );
 
   it('restrictHouse filters the planning house by id, leaving the probe house (caller-supplied) untouched', () => {
     const restricted = restrictHouse(DEFAULT_HOUSE, ['flat-6', 'ball-2']);
