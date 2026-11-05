@@ -269,7 +269,11 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
             moveSeconds(riseMm, opts.rapid.zMmPerMin, opts.rapid.accelMmPerS2) +
             moveSeconds(rideLength, opts.rapid.xyMmPerMin, opts.rapid.accelMmPerS2) +
             moveSeconds(riseMm, opts.feeds.plungeFeedMmPerMin, opts.rapid.accelMmPerS2);
-          const targetAt = (x: number, y: number): number | null => (pointInPolygons(open, x, y) ? z : null);
+          // The target area is the NODE's own region, not the eroded free space: the ring paths
+          // lie exactly ON the erosion boundary, where point-in-polygon is a coin toss at the
+          // samples; a centre line inside the region at this level cuts the strip the ring pass
+          // is clearing anyway, and never leaves the pocket.
+          const targetAt = (x: number, y: number): number | null => (pointInPolygons(opts.node.region, x, y) ? z : null);
           const ride =
             rideSeconds < retractSeconds &&
             ridesCutSurface(from, to, targetAt, 1e-6, DEFAULT_SHORT_HOP_DIAMETERS * diameterMm, 0.5);
@@ -297,7 +301,7 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
             moveSeconds(riseMm, opts.rapid.zMmPerMin, opts.rapid.accelMmPerS2) +
             moveSeconds(rideLength, opts.rapid.xyMmPerMin, opts.rapid.accelMmPerS2) +
             moveSeconds(riseMm, opts.feeds.plungeFeedMmPerMin, opts.rapid.accelMmPerS2);
-          const targetAt = (x: number, y: number): number | null => (pointInPolygons(open, x, y) ? finishedZ : null);
+          const targetAt = (x: number, y: number): number | null => (pointInPolygons(opts.node.region, x, y) ? finishedZ : null);
           const ride =
             rideSeconds < retractSeconds &&
             ridesCutSurface(from, landing, targetAt, 1e-6, DEFAULT_SHORT_HOP_DIAMETERS * diameterMm, 0.5);
