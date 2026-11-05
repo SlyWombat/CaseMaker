@@ -52,8 +52,7 @@ function tree(): FeatureTree {
 const STRIP: [number, number][][] = [[[10, 9], [14, 9], [14, 11], [10, 11]]];
 const STRIP_AREA = 8;
 
-function plan(mask: [number, number][][]): PlanPocketsResult {
-  const inStrip = (x: number, y: number): boolean => x >= 10 && x <= 14 && y >= 9 && y <= 11;
+function plan(mask: [number, number][][], restDilationMm?: number): PlanPocketsResult {
   return planPocketsForTree(tree(), {
     offset: makeClipperOffset(tl),
     houseFlats: [FLAT6, FLAT3175],
@@ -67,6 +66,7 @@ function plan(mask: [number, number][][]): PlanPocketsResult {
     // The #961 coverage rank: a candidate that leaves less of the goal standing wins.
     goalCoverage: (irs) => (irs.length >= 3 ? { leftoverCells: 10, coveredCells: 5000, cellAreaMm2: 0.01 } : { leftoverCells: 100, coveredCells: 5000, cellAreaMm2: 0.01 }),
     restRegion: () => mask,
+    ...(restDilationMm === undefined ? {} : { restDilationMm }),
   });
 }
 
@@ -100,5 +100,31 @@ describe('#962 — a coverage rest feeds only where the leftover stands', () => 
     const onStrip = feeds.some((p) => p.x >= 10 - 1e-6 && p.x <= 14 + 1e-6 && p.y >= 9 - 1e-6 && p.y <= 11 + 1e-6);
     expect(onStrip, 'the rest never reached the cell the leftover marks as standing').toBe(true);
     expect(STRIP_AREA).toBe(8);
+  });
+});
+
+describe('#962 — a rest that cuts nothing is STATED, never silent', () => {
+  it('a rest whose mask survives as standing cells but emits no moves goes to unplanned with its reason', () => {
+    // The fixture is the r + 0.25 failure's geometry, driven through the dilation option: a thin
+    // standing strip (0.2 mm — the tray's 0.58 mm lands at this scale) grown only by r renders a
+    // region `pocketLoops` cannot ring, and the rest emits ZERO moves over live standing material.
+    // That must not be silent: the region is `unplanned` with a reason, and the notes carry it.
+    const outside: [number, number][][] = [[[42.0, 8], [42.6, 8], [42.6, 12], [42.0, 12]]];
+    const result = plan(outside);
+    // AND the r-too-small class itself, driven through the dilation option: a 0.2 mm standing
+    // strip that the op cannot ring — exactly what the tray's 0.58 mm lands did at r + 0.25.
+    const thin: [number, number][][] = [[[10, 10], [14, 10], [14, 10.2], [10, 10.2]]];
+    const tooSmall = plan(thin, 0);
+    expect(tooSmall.unplanned.filter((f) => f.kind === 'rest').length, `unplanned: ${JSON.stringify(tooSmall.unplanned)}`).toBeGreaterThan(0);
+    expect(tooSmall.unplanned.find((f) => f.kind === 'rest')!.reason).toMatch(/eroded to nothing/i);
+    const restProgram = result.ops.filter((op) => op.outcome.ir.tool.id === 'flat-3.175');
+    // Either the op is dropped from the ops (its planning threw) or it emits moves; an op with
+    // ZERO moves on non-empty standing material is the silent failure this pins against.
+    const silent = restProgram.filter((op) => op.outcome.ir.operations.every((o) => o.moves.length === 0));
+    expect(silent, 'a rest pass emitted no moves over standing material, silently').toHaveLength(0);
+    const stated = result.unplanned.filter((f) => f.kind === 'rest');
+    expect(stated.length, `unplanned: ${JSON.stringify(result.unplanned)}`).toBeGreaterThan(0);
+    expect(stated[0]!.reason).toMatch(/eroded to nothing|standing|mask/i);
+    expect(result.notes.some((n) => n.startsWith('p:') && /eroded to nothing|standing|mask/i.test(n)), `notes: ${result.notes.join('; ')}`).toBe(true);
   });
 });

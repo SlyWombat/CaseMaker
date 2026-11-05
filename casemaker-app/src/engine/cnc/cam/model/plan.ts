@@ -1048,6 +1048,13 @@ export interface PlanPocketsOptions {
    */
   facing?: 'off' | 'on';
   /**
+   * #962 — the rest region's dilation about the leftover mask, mm. Default `2 x the cutter's
+   * radius + 0.25` (the MEASURED value: `pocketLoops` erodes by r before ringing, so the grown
+   * strip must be a cutter diameter wide for the ring to exist). Exposed so a spec can drive the
+   * failure geometry a smaller dilation produces — and prove such a rest is STATED, never silent.
+   */
+  restDilationMm?: number;
+  /**
    * #961 — the simulated outcome for a candidate's planned IRs: the goal cells left above the
    * band and the covered cells, stamped by the caller (which owns the goal). Absent → the
    * picker keeps its pocket-count completeness.
@@ -1317,11 +1324,19 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       // own inset plus the reach the cell needs — plus 0.25 mm of margin; the grown region is
       // still clipped back to the pocket's own mouth (A ∩ B = A \ (A \ B)). Tray at this value:
       // coverage 99.344 % (identical to the over-grown tip), rapid 660.6 s vs its 732.3 s.
-      regionPolys = opts.offset(mask, 2 * radius + 0.25);
+      regionPolys = opts.offset(mask, opts.restDilationMm ?? 2 * radius + 0.25);
       if (regionPolys.length === 0) return null;
       if (opts.boolean !== undefined) {
         const clipped = opts.boolean.subtract(regionPolys, opts.boolean.subtract(regionPolys, node.region));
-        if (clipped.length === 0) return null;
+        // #962 — the mask holds standing cells but nothing of it survives at this pocket's own
+        // mouth: a planned pass that would cut nothing, STATED rather than silently dropped
+        // (the same silence the r-only dilation produced when `pocketLoops` could not ring).
+        if (clipped.length === 0) {
+          throw new Error(
+            `the rest's leftover mask has standing cells but none of it survives inside this pocket at the ` +
+              `cutter's radius (${radius} mm) — standing material outside the mask's reach is left uncut`,
+          );
+        }
         regionPolys = clipped;
       }
     }
@@ -1334,7 +1349,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       mouthZ: floorZ,
       floorZ,
     };
-    return pocket({
+    const restOutcome = pocket({
       cutter,
       node: restNode,
       region: ref,
@@ -1350,6 +1365,18 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       rapid: opts.rapid,
       boolean: opts.boolean,
     });
+    // #962 — A REST THAT CUTS NOTHING OVER LIVE STANDING MATERIAL IS STATED, NEVER SILENT: the
+    // mask said cells stand here, and the op produced no toolpath (the region eroded to nothing
+    // at the cutter's radius — the failure a too-small dilation produced on six of the tray's
+    // seven rest passes, where those plans simply had no rest op and said nothing). Throwing
+    // takes the region into `unplanned` with this reason, in the plan's own outcome words.
+    if (restOutcome.ir.operations.every((operation) => operation.moves.length === 0)) {
+      throw new Error(
+        `the rest's leftover mask eroded to nothing at the cutter's radius (${radius} mm) — ` +
+          'standing material under this mask is left uncut',
+      );
+    }
+    return restOutcome;
   };
 
   const planRegion = (id: string, step: SequenceStep, prefix?: readonly SequenceStep[]): OpOutcome | null => {
@@ -1755,6 +1782,13 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   for (const id of choice.unreachable) {
     const failed = regionFailures.get(id);
     if (failed !== undefined && !unplanned.some((f) => f.regionIds.includes(id))) unplanned.push(failed);
+  }
+  // #962 — AND EVERY REGION THAT THREW IS STATED, chosen or not: a rest whose pass could not cut
+  // (its mask eroded to nothing, or nothing of it survives at the pocket's mouth) is exactly the
+  // silence this guards against — the failed candidate loses the ranking, the plan would otherwise
+  // read as if the rest were never needed. One entry per region, its own reason.
+  for (const [id, failure] of regionFailures) {
+    if (!unplanned.some((f) => f.regionIds.includes(id))) unplanned.push(failure);
   }
 
   const notes: string[] = [];
