@@ -596,6 +596,8 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
       catalogueStatus: { used: CATALOGUE.installed, note: CATALOGUE.note },
       sequence: sequenceFacts,
       airFraction: facts.airFraction,
+      rapidSeconds: facts.rapidSeconds,
+      rapidMoves: facts.rapidMoves,
       rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
       cutters: facts.cutters.length,
       cuttersOwned: null, // a simulation-only reference card prices on the vendor's own set (R5)

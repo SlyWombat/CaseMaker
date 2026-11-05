@@ -319,6 +319,8 @@ for (const figure of FIGURES) {
         feedRows: feedRowsFor(HOUSE, job.stock.material),
         catalogueStatus: { used: CATALOGUE.installed, note: CATALOGUE.note },
         airFraction: facts.airFraction,
+        rapidSeconds: facts.rapidSeconds,
+        rapidMoves: facts.rapidMoves,
         rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
         cutters: facts.cutters.length,
         cuttersOwned: true,

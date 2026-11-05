@@ -128,6 +128,8 @@ describe('#964 golden pins for the rebuilt engine’s synthetic programs (#965)'
           toolChanges: Math.max(0, texts.length - 1),
           headerTimeSeconds: null,
           airFraction: facts.airFraction,
+          rapidSeconds: facts.rapidSeconds,
+          rapidMoves: facts.rapidMoves,
           rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
           cutters: facts.cutters.length,
           cuttersOwned: true,
