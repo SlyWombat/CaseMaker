@@ -36,7 +36,7 @@ import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances } from './types';
-import { chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep } from './sequence';
+import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep } from './sequence';
 import { pocket } from './ops/pocket';
 import { clSurface } from './clsurface';
 import { rough } from './ops/rough';
@@ -423,11 +423,19 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       );
     }
 
+    // #964's own measurement: the curved pipeline's per-region loop alternates flat/ball once per
+    // remainder region (rough, [rest], finish, pencil, next region's rough, ...) — region A's
+    // rough has no dependency on region B's ball stage or vice versa, so nothing here demands
+    // that alternation. `batchSameCutterRuns` groups same-cutter ops back together wherever nothing
+    // depends on the gap between them (`sequence.ts`'s own header on the one real invariant: never
+    // reorder two ops on the SAME region), with the freeing contour pinned exactly where it was.
+    const batchedOps = batchSameCutterRuns(ops, (op) => op.outcome.cutter, (op) => op.kind === 'contour');
+
     // Programs ONE PER RUN, in execution order — the same rule `planPocketsForTree` states: a run
     // starts when the cutter key changes, so a cutter's two non-contiguous visits never merge.
     const programs: ToolpathIR[] = [];
     let run: { key: string; ir: ToolpathIR } | null = null;
-    for (const op of ops) {
+    for (const op of batchedOps) {
       if (run !== null && run.key !== op.outcome.cutter) {
         programs.push(run.ir);
         run = null;
