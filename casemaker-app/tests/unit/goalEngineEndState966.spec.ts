@@ -227,7 +227,7 @@ describe('#966 end-state, part 2 — a goal needing two setups posts both, never
     // (engraveGenerate.ts) makes them — not a re-implementation, the literal production functions.
     const { goal, stock } = await buildDatumGoal();
     const job = jobFor(goal, stock);
-    const input = buildModelPlanInputForGoal(job, goal, BALL, SHOP);
+    const input = await buildModelPlanInputForGoal(job, goal, BALL, SHOP);
 
     // `buildModelPlanInputForGoal` now calls the real `buildSetupSpecs`/`goalFlipPlan` decision
     // (966-goal-setups, c099c5cc) instead of hardcoding a single top setup — confirmed directly,
@@ -254,7 +254,7 @@ describe('#966 end-state, part 2 — a goal needing two setups posts both, never
 
     // Confirms, through the FRESHLY-IMPORTED (flag-on) module, the same fact the previous case
     // established: the seam's own input genuinely carries two setups for this job.
-    const input = buildInput(job, goal, BALL, SHOP);
+    const input = await buildInput(job, goal, BALL, SHOP);
     expect(input.setups).toHaveLength(2);
 
     const result = await generateGoalProgramModelCam(job, goal, BALL, [], null, SHOP);
@@ -299,7 +299,7 @@ describe('#966 end-state, part 2b — the bare sphere refuses BY NAME (registerS
   it('planModelCam throws registerSetupOrigin’s own named #965 registration refusal — never a silent single-setup plan', async () => {
     const job = jobFor(sphereGoal(), { length: 2 * SPHERE_R, width: 2 * SPHERE_R, thickness: 2 * SPHERE_R });
     const goal = job.targetObject!;
-    const input = buildModelPlanInputForGoal(job, goal, BALL, SHOP);
+    const input = await buildModelPlanInputForGoal(job, goal, BALL, SHOP);
     // The real decision still proposes two setups for the sphere — the refusal below is
     // `registerSetupOrigin`'s own (no locating datum), never a setup-count problem.
     expect(input.setups).toHaveLength(2);

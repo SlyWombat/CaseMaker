@@ -155,7 +155,7 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
 
   it(
     'GREEN (was RED): buildModelPlanInputForGoal now calls the real decision instead of hardcoding one top setup',
-    () => {
+    async () => {
       // Before #966-goal-setups: `input.setups` was hardcoded to length 1 for every goal,
       // regardless of mesh or `underside.kind` — confirmed by reverting this function's own diff
       // and rerunning this exact call (2026-11-04): `input.setups.length === 1`. After the fix,
@@ -163,7 +163,7 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
       // case above: two setups, top then the flip.
       const job = jobFor(sphereGoal(), SPHERE_STOCK);
       const goal = job.targetObject!;
-      const input = buildModelPlanInputForGoal(job, goal, BALL, SHOP);
+      const input = await buildModelPlanInputForGoal(job, goal, BALL, SHOP);
       expect(input.setups).toHaveLength(2);
       expect(input.setups[0]!.frame.up).toEqual([0, 0, 1]);
       expect(input.setups[1]!.frame.up).toEqual([0, 0, -1]);
@@ -180,7 +180,7 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
       // `registerSetupOrigin` in `cam/model/setups.ts`) before it can plan it.
       const job = jobFor(sphereGoal(), SPHERE_STOCK);
       const goal = job.targetObject!;
-      const input = buildModelPlanInputForGoal(job, goal, BALL, SHOP);
+      const input = await buildModelPlanInputForGoal(job, goal, BALL, SHOP);
       expect(input.setups).toHaveLength(2);
 
       // CONFIRMED by running this exact call (2026-11-04): a bare UV sphere carries neither a
@@ -229,7 +229,7 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
       };
       const goal = job.targetObject!;
 
-      expect(() => buildModelPlanInputForGoal(job, goal, BALL, SHOP)).toThrow(
+      await expect(buildModelPlanInputForGoal(job, goal, BALL, SHOP)).rejects.toThrow(
         /a 'bottom' setup is only wired for a vise mount \(#965 stated scope\)/,
       );
 
@@ -251,14 +251,14 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
 
   it(
     'the old test/e2e-only seam (setupsOverride) still wins unconditionally, byte-for-byte unchanged',
-    () => {
+    async () => {
       // `multiSetup966.spec.ts`/`camModelSeam966.spec.ts` already depend on this seam to drive the
       // real posting path with a synthetic plan independent of any one mesh's own flip-plan
       // answer; this fix must not touch it.
       const job = jobFor(sphereGoal(), SPHERE_STOCK);
       const goal = job.targetObject!;
       const override: SetupSpec[] = [{ frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -30 }, underside: 'flippedTabs' }];
-      const input = buildModelPlanInputForGoal(job, goal, BALL, SHOP, override);
+      const input = await buildModelPlanInputForGoal(job, goal, BALL, SHOP, override);
       expect(input.setups).toBe(override);
       expect(input.setups).toHaveLength(1);
     },

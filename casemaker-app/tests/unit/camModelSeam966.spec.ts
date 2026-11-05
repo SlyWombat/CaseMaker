@@ -140,7 +140,7 @@ describe('#966 — generateGoalProgram routes through cam/model behind USE_MODEL
     expect(result.nc).not.toBeNull();
   });
 
-  it('flag on: planModelCam is reachable with a real ModelPlanInput — red, for a named reason', async () => {
+  it('flag on: the open dome sheet is closed with a skirt and the seam posts its program (#966 open meshes)', async () => {
     vi.doMock('@/engine/cnc/cam/model/plan', async (importOriginal) => {
       const actual = await importOriginal<typeof import('@/engine/cnc/cam/model/plan')>();
       return { ...actual, USE_MODEL_CAM_ENGINE: true };
@@ -151,16 +151,14 @@ describe('#966 — generateGoalProgram routes through cam/model behind USE_MODEL
     const job = jobFor(goalTarget());
     const result = await generateGoalProgramModelCam(job, job.targetObject!, BALL, [], null, SHOP);
 
-    expect(result.ok).toBe(false);
-    expect(result.stage).toBe('cam');
-    expect(result.errors).toHaveLength(1);
-    const message = result.errors[0]!.message;
-    // Named, under the #966 tag, one of the two seam-stated reasons — never a bare stack trace:
-    // either `planModelCam` itself refused (still maturing elsewhere in #956/#957/#959/#960), or it
-    // ran and this seam's own "the conversion is not built yet" statement fired.
-    expect(message).toContain('cam/model seam (#966)');
-    expect(message).toMatch(/planModelCam refused —|planModelCam returned \d+ setup/);
-    expect(message).not.toMatch(/\n\s+at /); // not a raw stack trace
+    // #966 open-mesh repair: the dome fixture is an open sheet (a polar grid with its rim and
+    // nothing under it). It used to die at the kernel as a bare "Not manifold"; the goal path now
+    // closes it to the stock bottom, so the seam plans, posts and verifies a real program.
+    expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.stage).toBe('done');
+    expect(result.nc).not.toBeNull();
+    expect(result.programs.length).toBeGreaterThan(0);
   }, 90_000);
 });
 

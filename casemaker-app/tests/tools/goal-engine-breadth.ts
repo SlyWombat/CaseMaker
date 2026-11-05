@@ -148,7 +148,7 @@ async function runNew(job: EngraveJob, goal: EngraveTargetObject): Promise<Pick<
   const tool = jobTool(job);
   if (tool === null) return { new: 'skipped', newWhy: 'the job names no usable cutter' };
   try {
-    const input = buildModelPlanInputForGoal(job, goal, tool, shop);
+    const input = await buildModelPlanInputForGoal(job, goal, tool, shop);
     const output = await planModelCam(input);
     const perSetup = output.perSetup;
     const programs = perSetup.reduce((n, s) => n + s.programs.length, 0);

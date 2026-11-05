@@ -182,7 +182,7 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
   it('two-setup SPHERE goal: refuses BY NAME through registerSetupOrigin — never a silent single-setup ok:true', async () => {
     const job = jobForGoal(sphereGoal(), { length: 2 * SPHERE_R, width: 2 * SPHERE_R, thickness: 2 * SPHERE_R });
     const goal = job.targetObject!;
-    const input = buildModelPlanInputForGoal(job, goal, BALL, DATUM_SHOP);
+    const input = await buildModelPlanInputForGoal(job, goal, BALL, DATUM_SHOP);
     // The real decision still proposes two setups — the refusal below is `registerSetupOrigin`'s
     // own (no locating datum), never a setup-count problem.
     expect(input.setups).toHaveLength(2);
@@ -207,7 +207,7 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
     setModelCamEnabled(true);
     const { goal, stock } = await buildDatumGoal();
     const job = jobForGoal(goal, stock);
-    const input = buildModelPlanInputForGoal(job, goal, BALL, DATUM_SHOP);
+    const input = await buildModelPlanInputForGoal(job, goal, BALL, DATUM_SHOP);
     expect(input.setups).toHaveLength(2);
 
     const result = await generateGoalProgram(job, goal, BALL, [], null, DATUM_SHOP);
