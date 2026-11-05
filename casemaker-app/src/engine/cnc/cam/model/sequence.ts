@@ -174,8 +174,13 @@ export interface SequenceCost {
   totalSeconds: number;
 }
 
-/** The planner seam: build one step's IR (#959/#960 own it), or null when it cannot be planned. */
-export type PlanStep = (step: SequenceStep) => ToolpathIR | null;
+/**
+ * The planner seam: build one step's IR (#959/#960 own it), or null when it cannot be planned.
+ * #961 — `prefix` is the steps this candidate already planned BEFORE this one (in execution
+ * order). A coverage rest needs it: its region is the leftover the chain-so-far's own sweep
+ * leaves, so the rest cuts what stands, not the whole pocket the primary cleared.
+ */
+export type PlanStep = (step: SequenceStep, prefix?: readonly SequenceStep[]) => ToolpathIR | null;
 
 export interface SequenceOptions {
   /** The machine's rapid model, #927's timing. */
@@ -737,7 +742,7 @@ export function priceSequence(
     let ir: ToolpathIR | null;
     let thrown: string | null = null;
     try {
-      ir = opts.planStep(step);
+      ir = opts.planStep(step, planned);
     } catch (e) {
       ir = null;
       thrown = e instanceof Error ? e.message : String(e);

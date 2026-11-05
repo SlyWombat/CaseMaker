@@ -511,7 +511,7 @@ function sequenceReceipt(
       '; the ball and the chamfer are chosen by the curved/rim stages, not priced as picker candidates';
   return {
     rule:
-      'rank: completeness first — the SIMULATED OUTCOME, the goal cells the candidate’s own sweep leaves above the 0.1 mm band (fewer wins), then pockets a cutter could cover and the chain left (leftBehind), then unplanned steps, house before catalogue, rowed before fallback, then the #927 total; rank 1 is the choice. Candidate estimates are #927 on the picker’s planned steps; the chosen cutters’ estimates are #927 on the posted runs (the card’s cycle basis).',
+      'rank: completeness first — the SIMULATED OUTCOME, the goal cells the candidate’s own sweep leaves above the 0.1 mm band (fewer wins), then pockets a cutter could cover and the chain left (leftBehind), then unplanned steps, house before catalogue, rowed before fallback, then the #927 total; rank 1 is the choice. A coverage rest must also clear 0.01 mm²/s of coverage bought against the chain without it, on the picker’s own simulated field — which includes cells the ball finish may cover later, so the price judges what the REST can reach, not a promise of final coverage (the card’s measured gain is stated separately). Candidate estimates are #927 on the picker’s planned steps; the chosen cutters’ estimates are #927 on the posted runs (the card’s cycle basis).',
     chosen,
     candidates,
     vendor,
