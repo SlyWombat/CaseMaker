@@ -127,6 +127,8 @@ export interface ProgramScore {
   vendorHolding?: string | null;
   /** The catalogue door's state for this run: installed (and where from), or opted out/absent. */
   catalogueStatus?: CatalogueStatus;
+  /** #961 — the priced candidate cutter sequences and the chosen chain (printed on the card). */
+  sequence?: SequenceReceipt | null;
   /** Rapid seconds / cycle seconds, from the same estimate on the posted file. */
   airFraction: number;
   /** `summary.rapids / summary.cuts × 1000` from `parseGcode` on the posted file. */
@@ -143,6 +145,44 @@ export interface ProgramScore {
   postsAsFiled: PostsAsFiled | null;
   /** Where each number came from, in words, for the page's provenance line. */
   sources?: Partial<Record<'coverage' | 'cutInto' | 'cycle' | 'air' | 'rapids' | 'cutters', string>>;
+}
+
+/**
+ * #961 acceptance (the maintainer's 11-05 review) — THE PRICED CANDIDATE CUTTER SEQUENCES, as the
+ * card prints them. Every candidate the picker priced, its cutters, #927's estimate and total, and
+ * the completeness rank it competed on; the chosen chain and why. Printed beside the seven lines,
+ * never judged by them.
+ */
+export interface SequenceCandidateFact {
+  /** 1 = the rank the choice was made on (completeness first, then price). */
+  rank: number;
+  steps: { kind: string; cutterKey: string }[];
+  /** The distinct cutters the candidate uses, in first-use order. */
+  cutters: string[];
+  /** #927's estimate on the candidate's posted moves, s; null when it could not be priced. */
+  estimateSeconds: number | null;
+  toolChanges: number | null;
+  /** `estimateSeconds + toolChanges × toolChangeSeconds`; null when unpriced. */
+  totalSeconds: number | null;
+  /** Completeness rank: pockets a cutter in the set COULD have covered and this chain left. */
+  leftBehind: number;
+  /** Every pocket it leaves uncut (including the part's own unreachable features). */
+  unreachable: number;
+  /** Steps its ops could not plan. */
+  unplanned: number;
+  chosen: boolean;
+  /** Why it did not win; empty for the chosen one. */
+  reason: string;
+}
+
+export interface SequenceReceipt {
+  /** The rule the rank uses, in words. */
+  rule: string;
+  /** The chosen chain, by cutter, in execution order, with each cutter's own #927 estimate and runs. */
+  chosen: { cutterKey: string; role: string; estimateSeconds: number; runs: number }[];
+  candidates: SequenceCandidateFact[];
+  /** The chosen whole-job cutter set against the vendor card's own set, in words. */
+  vendor: string;
 }
 
 /** The catalogue door's state for a run: was the full catalogue installed, and where from? */
@@ -237,6 +277,8 @@ export interface SevenLineCard {
   catalogue: CatalogueStatus;
   /** The holding each side was cut in — ours first; the vendor's when the card states one. */
   holding: { ours: string | null; vendor: string | null };
+  /** #961 — the priced candidate cutter sequences and the chosen chain (printed, never judged). */
+  sequence: SequenceReceipt | null;
   /** FALSE when no vendor program was scored beside ours: "unreferenced", never a pass. */
   referenced: boolean;
   /** TRUE only when every judged line passes and the card is referenced. */
@@ -277,6 +319,7 @@ export function scoreSevenLines(input: ScoreInput): SevenLineCard {
   const feedRows = ours.feedRows ?? [];
   const catalogue = ours.catalogueStatus ?? { used: false, note: 'no catalogue status stated' };
   const holding = { ours: ours.postsAsFiled?.holding ?? null, vendor: vendor?.vendorHolding ?? null };
+  const sequence = ours.sequence ?? null;
   const lines: SevenLine[] = [];
 
   const add = (line: Omit<SevenLine, 'number'>): void => {
@@ -490,7 +533,7 @@ export function scoreSevenLines(input: ScoreInput): SevenLineCard {
       ? 'Passes the seven lines of plan v2 §3'
       : `Deviates — ${failing.map((f) => LABELS[f] ?? f).join(', ')}`;
 
-  return { card: input.card, feedRows, catalogue, holding, referenced, pass, lines, failing, sentence };
+  return { card: input.card, feedRows, catalogue, holding, sequence, referenced, pass, lines, failing, sentence };
 }
 
 /** Display names for the line keys, used in the card sentence and the specs' messages. */

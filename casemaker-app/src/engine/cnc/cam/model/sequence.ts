@@ -188,9 +188,23 @@ export interface SequenceOptions {
 /** One candidate the search looked at: its steps, its price or null, and why it did not win. */
 export interface ConsideredSequence {
   steps: { kind: PlannedOpKind; cutterKey: string }[];
+  /** The candidate's priced total, s: `estimateSeconds + toolChanges × toolChangeSeconds`. */
   cost: number | null;
+  /**
+   * #961 acceptance (the maintainer's 11-05 review) — #927's own estimate on this candidate's
+   * posted moves, s, so a card can print the estimate BESIDE the total instead of only the price.
+   * Null when the candidate could not be priced.
+   */
+  estimateSeconds: number | null;
+  /** Changes charged to this candidate: one for each cutter after the first (a return included). */
+  toolChanges: number | null;
   /** How many demanded pockets this candidate left uncut, including the part's own unreachable ones. */
   unreachable: number;
+  /** Its rank among the priced candidates (1 = the choice): completeness, failures, house/rowed, price. */
+  rank: number | null;
+  /** Steps on a catalogue cutter / on the labelled feed fallback — the two preferences the rank reads. */
+  catalogueSteps: number;
+  fallbackSteps: number;
   /** Of those, how many a cutter in the set could have covered — what the rank compares. */
   leftBehind: number;
   /** Steps the ops could not plan (their regions are stated unreachable by the chosen chain). */
@@ -770,9 +784,15 @@ export function chooseSequence(
   const considered: ConsideredSequence[] = priced.map(({ sequence, priced: price }) => ({
     steps: sequence.steps.map((s) => ({ kind: s.kind, cutterKey: s.cutter.key })),
     cost: price === null ? null : price.cost.totalSeconds,
+    estimateSeconds: price === null ? null : price.cost.estimateSeconds,
+    toolChanges: price === null ? null : price.cost.toolChanges,
     unreachable: sequence.unreachable.length,
     leftBehind: sequence.leftBehind,
     unplanned: price === null ? 0 : price.failures.length,
+    // Filled after the rank sort below; null for a candidate that could not be priced at all.
+    rank: null,
+    catalogueSteps: sequence.steps.filter((s) => !s.cutter.house).length,
+    fallbackSteps: sequence.steps.filter((s) => s.cutter.feeds === 'fallback').length,
     reason: price === null
       ? 'the primary step could not be planned'
       : price.failures.length > 0
@@ -809,6 +829,17 @@ export function chooseSequence(
       'no cutter sequence can be planned for this demand: every candidate had a step the ops '
       + `could not post (${considered.length} candidate${considered.length === 1 ? '' : 's'} priced)`,
     );
+  }
+
+  // #961 acceptance — the rank the CARD prints is the engine's own: the same `rankOf` order (its
+  // completeness includes the failed regions' fold), matched back to the considered entries by the
+  // step signature. Unpriced candidates stay null, after every priced one.
+  const signatureOf = (steps: readonly { kind: string; cutterKey: string }[]): string =>
+    steps.map((s) => `${s.kind}:${s.cutterKey}`).join('+');
+  for (let i = 0; i < feasible.length; i++) {
+    const signature = signatureOf(feasible[i]!.sequence.steps.map((s) => ({ kind: s.kind as string, cutterKey: s.cutter.key })));
+    const entry = considered.find((c) => c.rank === null && signatureOf(c.steps) === signature);
+    if (entry !== undefined) entry.rank = i + 1;
   }
 
   const best = feasible[0]!;

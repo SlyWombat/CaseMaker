@@ -59,12 +59,13 @@ import { DEFAULT_VISE, seatedVise, viseEnvelope } from '@/engine/cnc/fixture';
 import { cuttingDiameter, flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { pocket } from '@/engine/cnc/cam/model/ops/pocket';
 import { measurePostedProgram, combinePostedFacts } from '../tools/postedFacts';
-import { scoreSevenLines, type CutIntoScore, type ProgramScore, type SevenLineCard } from '../tools/sevenLines';
+import { scoreSevenLines, type CutIntoScore, type ProgramScore, type SequenceReceipt, type SevenLineCard } from '../tools/sevenLines';
 import { makerablesRoot, readMakerablesManifest, resolveMakerablesCard } from '../tools/makerables';
 import { clearMakeraCatalogue, installMakeraCatalogue } from '../tools/makeraCatalogue';
 import { feedRowsFor } from '../tools/feedRows';
 import { measureVendorCard } from '../tools/cardMeasurement';
 import { planModelCam, planPocketsForTree, planTreePrograms, type ModelPlanInput, type PlanPocketsResult, type SetupPlan } from '@/engine/cnc/cam/model/plan';
+import type { SequenceChoice } from '@/engine/cnc/cam/model/sequence';
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
@@ -426,7 +427,88 @@ function holdingFacts(
 }
 
 /** What `writeAcceptance` reads from a plan — the pocket result and the one entry's SetupPlan both answer it. */
-type AcceptancePlan = Pick<PlanPocketsResult, 'ops' | 'programs' | 'sequence' | 'unreachable' | 'notes'>;
+type AcceptancePlan = Pick<PlanPocketsResult, 'ops' | 'programs' | 'sequence' | 'unreachable' | 'notes' | 'choice'>;
+
+/**
+ * #961 acceptance (the maintainer's 11-05 review) — THE CARD'S PRICED CANDIDATE SEQUENCES.
+ *
+ * The pocket chain's picker already priced every candidate (`SequenceChoice.considered`, ranked by
+ * completeness then failures then house/rowed then #927's total). This turns that into the card's
+ * receipt: each candidate's cutters, its #927 estimate (moves + spin-up + inter-op, without the
+ * changes), its total (with the shop's tool-change seconds), its completeness rank
+ * (`leftBehind`/`unreachable`/`unplanned`), and which one won. The chosen WHOLE-JOB set comes from
+ * the posted runs — the curved stage's ball and the rim chamfer are chosen outside the picker, by
+ * geometry, and the card says so rather than pretending the picker priced them.
+ */
+function sequenceReceipt(
+  choice: SequenceChoice,
+  runs: readonly { cutterKey: string; ir: ToolpathIR; text: string }[],
+): SequenceReceipt {
+  const flats = [...new Set(runs.filter((r) => r.ir.tool.shape === 'flat').map((r) => r.ir.tool))]
+    .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0));
+  const roleOf = (tool: Tool): string => {
+    if (tool.shape === 'flat') return tool === flats[0] ? 'flat' : 'rest';
+    if (tool.shape === 'ball' || tool.shape === 'tapered-ball') return 'ball';
+    if (tool.shape === 'chamfer' || tool.shape === 'engraving') return 'chamfer';
+    return tool.shape;
+  };
+  // Per cutter, in execution order, #927 on every run it posts (a return merges its runs).
+  const chosenMap = new Map<string, { cutterKey: string; role: string; estimateSeconds: number; runs: number }>();
+  for (const run of runs) {
+    const entry = chosenMap.get(run.cutterKey) ?? {
+      cutterKey: run.cutterKey,
+      role: roleOf(run.ir.tool),
+      estimateSeconds: 0,
+      runs: 0,
+    };
+    entry.estimateSeconds += measurePostedProgram(run.text).cycleSeconds;
+    entry.runs += 1;
+    chosenMap.set(run.cutterKey, entry);
+  }
+  const chosen = [...chosenMap.values()];
+  const chosenSignature = choice.steps.map((step) => `${step.kind}:${step.cutter.key}`);
+  const candidates = [...choice.considered]
+    .sort((a, b) => (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER) || (a.cost === null ? 1 : 0) - (b.cost === null ? 1 : 0))
+    .map((candidate) => ({
+      rank: candidate.rank ?? 0, // 0 = could not be priced; printed after every ranked candidate
+      steps: candidate.steps.map((step) => ({ kind: step.kind, cutterKey: step.cutterKey })),
+      cutters: [...new Set(candidate.steps.map((step) => step.cutterKey))],
+      estimateSeconds: candidate.estimateSeconds,
+      toolChanges: candidate.toolChanges,
+      totalSeconds: candidate.cost,
+      leftBehind: candidate.leftBehind,
+      unreachable: candidate.unreachable,
+      unplanned: candidate.unplanned,
+      chosen:
+        candidate.steps.length === choice.steps.length &&
+        candidate.steps.every((step, i) => `${step.kind}:${step.cutterKey}` === chosenSignature[i]),
+      reason: candidate.reason,
+    }));
+  // The vendor's own set, in its run order, and the closest picker candidate: the chain of the
+  // vendor's FLATS (the picker prices flat chains; the ball and chamfer are the curved/rim stages').
+  const vendorKeys = VENDOR_SET.map((tool) => tool.id ?? tool.name);
+  const vendorFlats = VENDOR_SET.filter((tool) => tool.shape === 'flat').map((tool) => tool.id ?? tool.name);
+  const chosenKeys = chosen.map((entry) => entry.cutterKey);
+  const bestFlatChain = candidates.find((candidate) => {
+    const cutters = candidate.cutters;
+    return cutters.length === vendorFlats.length && cutters.every((key, i) => key === vendorFlats[i]);
+  });
+  const sameAsVendor = chosenKeys.length === vendorKeys.length && chosenKeys.every((key, i) => key === vendorKeys[i]);
+  const vendor = sameAsVendor
+    ? `chosen set = Makera's own four, in its run order (${vendorKeys.join(' → ')})`
+    : `chosen set ${chosenKeys.join(' → ')} vs Makera's four ${vendorKeys.join(' → ')}` +
+      (bestFlatChain === undefined
+        ? '; no priced candidate uses the vendor’s flat chain (T1 → T2) — the picker adds a rest flat only for a pocket the primary cannot enter, and this part has none'
+        : `; the vendor’s flat chain (T1 → T2) prices at ${bestFlatChain.totalSeconds === null ? '—' : `${bestFlatChain.totalSeconds.toFixed(1)} s`} (rank ${bestFlatChain.rank || 'unpriced'}), the chosen chain at ${choice.cost.totalSeconds.toFixed(1)} s`) +
+      '; the ball and the chamfer are chosen by the curved/rim stages, not priced as picker candidates';
+  return {
+    rule:
+      'rank: completeness first (pockets a cutter in the set could cover and the chain left = leftBehind), then unplanned steps, then house before catalogue, rowed before fallback, then the #927 total; rank 1 is the choice. Candidate estimates are #927 on the picker’s planned steps; the chosen cutters’ estimates are #927 on the posted runs (the card’s cycle basis).',
+    chosen,
+    candidates,
+    vendor,
+  };
+}
 
 function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan, goal?: AcceptanceGoal): { coverage: number; adjudicatedFraction: number } | null {
   const { ops, programs, sequence, unreachable, notes } = result;
@@ -458,6 +540,7 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
     text: postedTextFor(run.cutterKey, run.ir, ctx),
   }));
   const facts = combinePostedFacts(factsByRun.map((f) => measurePostedProgram(f.text)));
+  const sequenceFacts = sequenceReceipt(result.choice, factsByRun);
 
   // THE TWO GEOMETRY LINES (plan v2 §3, red-first): the goal heightfield from the same STEP, the
   // posted programs stamped with their Tool-record cutters and accumulated, judged by the app's
@@ -499,6 +582,7 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
       // C2 — which row fed each cutter, and the door's own state (installed, or opted out).
       feedRows: feedRowsFor(VENDOR_SET, 'hardwood'),
       catalogueStatus: { used: CATALOGUE.installed, note: CATALOGUE.note },
+      sequence: sequenceFacts,
       airFraction: facts.airFraction,
       rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
       cutters: facts.cutters.length,
@@ -1152,7 +1236,7 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     if (setup.features.remainder.length > 0) {
       expect(setup.ops.some((op) => op.kind === 'finish'), 'the ball finish never ran on the real part').toBe(true);
     }
-    const measured = writeAcceptance('tray', setup.features, { ops: setup.ops, programs: runs, sequence: setup.sequence, unreachable: setup.unreachable, notes: setup.notes }, { target: placed.target, stock: { length: 110, width: 140 } });
+    const measured = writeAcceptance('tray', setup.features, { ops: setup.ops, programs: runs, sequence: setup.sequence, unreachable: setup.unreachable, notes: setup.notes, choice: setup.choice }, { target: placed.target, stock: { length: 110, width: 140 } });
     // RED-FIRST (the manager's ruling): the chamfer ran a 130 mm feed along a rim whose air side
     // the goal sees as land — 0.5 mm into ground it never exposes (0.13 % adjudicated). With rims
     // covered from above skipped, that cell is not cut and the coverage that made the rebuild's
@@ -1173,7 +1257,7 @@ describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.o
     if (setup.features.remainder.length > 0) {
       expect(setup.ops.some((op) => op.kind === 'finish'), 'the ball finish never ran on the real part').toBe(true);
     }
-    writeAcceptance('organizer', setup.features, { ops: setup.ops, programs: runs, sequence: setup.sequence, unreachable: setup.unreachable, notes: setup.notes }, { target: placed.target, stock: { length: 170, width: 170 } });
+    writeAcceptance('organizer', setup.features, { ops: setup.ops, programs: runs, sequence: setup.sequence, unreachable: setup.unreachable, notes: setup.notes, choice: setup.choice }, { target: placed.target, stock: { length: 170, width: 170 } });
   }, 1_800_000);
 });
 

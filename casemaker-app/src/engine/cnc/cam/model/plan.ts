@@ -211,6 +211,13 @@ export interface SetupPlan {
    * posts; only a primary failure refuses (`priceSequence`'s step-0 rule).
    */
   unplanned: SequenceStepFailure[];
+  /**
+   * #961 acceptance (the maintainer's 11-05 review) — the pocket chain's full picker result: the
+   * chosen chain's cost and EVERY candidate it priced (`considered`), so a card or the run sheet
+   * prints the candidates beside the choice instead of only the winner. The plan already computed
+   * this; before this field it was dropped at the SetupPlan seam.
+   */
+  choice: SequenceChoice;
 }
 
 /** Set only by specs for now (see this file's header). */
@@ -483,6 +490,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       notes,
       unreachable: result.unreachable,
       unplanned: result.unplanned,
+      choice: result.choice,
     });
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 1 });
   }
@@ -1571,6 +1579,8 @@ export interface PlanTreeResult {
   notes: string[];
   /** #959 item 5 — the pocket chain's failed steps, then the curved/rim stages'. */
   unplanned: SequenceStepFailure[];
+  /** #961 — the pocket chain's picker result, carried through for `SetupPlan.choice`. */
+  choice: SequenceChoice;
 }
 
 export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): PlanTreeResult {
@@ -1601,5 +1611,6 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
     unreachable: pocketResult.unreachable,
     notes: [...pocketResult.notes, ...curvedResult.notes],
     unplanned: [...pocketResult.unplanned, ...curvedResult.unplanned],
+    choice: pocketResult.choice,
   };
 }
