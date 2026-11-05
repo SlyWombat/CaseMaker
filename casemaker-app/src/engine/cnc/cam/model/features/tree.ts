@@ -506,7 +506,40 @@ export function buildTree(
         of = any.sort((x, y) => y.floorZ - x.floorZ)[0]?.id ?? 'top';
       }
       sq.delete();
-      rims.push({ ...raw, id: `rim-${i}`, of });
+      // #974 — AN OPEN POCKET RIM FALLS BACK TO THE NODE'S OWN MOUTH REGION. The sharp-edge
+      // chain can leave a pocket's mouth open where the tessellation interrupts the wall's top
+      // edge (rim-5 on the organizer, 77.2 mm). A pocket encloses a cavity, so its mouth IS a
+      // closed region — the node's own `region`, already built by the booleans, is that boundary
+      // on the model's own geometry; substituting it closes the rim without inventing a point.
+      // The contour keeps its chain (its outline may legitimately be open), and a rim assigned
+      // to 'top' has no node to ask.
+      let polyline = raw.polyline;
+      const first = polyline[0];
+      const last = polyline[polyline.length - 1];
+      const open = first !== undefined && last !== undefined && Math.hypot(first[0] - last[0], first[1] - last[1]) > 0.01;
+      const openNode = open && of !== 'contour' && of !== 'top' ? nodes.find((n) => n.id === of) : undefined;
+      if (openNode !== undefined) {
+        let best: [number, number][] | null = null;
+        let bestArea = 0;
+        for (const ring of openNode.region) {
+          let area = 0;
+          for (let q = 0, r = ring.length - 1; q < ring.length; r = q++) {
+            area += (ring[r]![0] - ring[q]![0]) * (ring[r]![1] + ring[q]![1]);
+          }
+          area = Math.abs(area / 2);
+          if (area > bestArea) {
+            bestArea = area;
+            best = ring;
+          }
+        }
+        if (best !== null && best.length >= 3) {
+          polyline = best.map((q) => [q[0], q[1]] as [number, number]);
+          if (polyline[0]![0] !== polyline[polyline.length - 1]![0] || polyline[0]![1] !== polyline[polyline.length - 1]![1]) {
+            polyline.push(polyline[0]!);
+          }
+        }
+      }
+      rims.push({ ...raw, polyline, id: `rim-${i}`, of });
     });
 
     const strip = (n: TreeNode & { cs: CrossSection }): TreeNode => {
