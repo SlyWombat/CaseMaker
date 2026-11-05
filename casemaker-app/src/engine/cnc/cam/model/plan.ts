@@ -42,7 +42,7 @@ import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, 
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, type SetupRegistration } from './setups';
 import { pocket } from './ops/pocket';
-import { clSurface } from './clsurface';
+import { clSurface, reach } from './clsurface';
 import { dropCutterHeight, profileOf, type CutterProfile, type DropCutterMesh } from './dropcutter';
 import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
 
@@ -2408,6 +2408,38 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         air: opts.air,
         rapid: opts.rapid,
       }));
+    }
+
+    // 3c. THE CREASE PASS (#965, the review session's step 2; the vendor's own figure method): a
+    // conical engraver riding the creases with its OWN CL, after the rest ball. Admitted only
+    // where `reach()`'s own rule allows — the V's flank angle against the region's steepest slope
+    // (clsurface.ts `reach()`); a region the V cannot descend is STATED by name in `unplanned`,
+    // never silently skipped.
+    if (opts.vbit !== undefined && (opts.vbit.shape === 'chamfer' || opts.vbit.shape === 'engraving')) {
+      const vTool = opts.vbit;
+      const vReach = reach(vTool, roughRegion);
+      if (!vReach.reachable) {
+        unplanned.push({
+          kind: 'pencil',
+          cutterKey: cutterKeyOf(vTool),
+          regionIds: [ref.id],
+          reason: `the crease pass is not offered: ${vReach.note ?? 'the V cannot descend this region'}`,
+        });
+      } else {
+        attempt('pencil', vTool, ref, () => pencil({
+          cutter: vTool,
+          region: roughRegion,
+          regionRef: roughRef,
+          clSurface: shiftSurface(clSurface(opts.geometry, roughRegion, vTool, cuts.stepOver)),
+          feeds: feedsOf(paramsFor(vTool)),
+          safeZMm: opts.safeZMm,
+          hopZMm: opts.hopZMm,
+          toolNumber: opts.toolNumberFor(vTool),
+          spindleRpm: paramsFor(vTool).rpm,
+          air: opts.air,
+          rapid: opts.rapid,
+        }));
+      }
     }
 
     // 4. PENCIL along the creases the ball's own CL surface leaves.

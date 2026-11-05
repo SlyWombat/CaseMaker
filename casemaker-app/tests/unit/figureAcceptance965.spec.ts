@@ -96,6 +96,20 @@ const HOUSE = [FLAT6, FLAT3175, BALL2, BALL05];
 /** #965 — the catalogue's long Ø1 (6*1*30.5mm Ball Nose Engraving, 161032105031): a 1 mm ball on
  * a 6 mm shank with a 30.5 mm flute. The review session's rest ball: the house's 0.5 and the short
  * Ø1 fail on REACH, this one reaches the figures' relief. */
+/** #965 — the catalogue's 30° engraving bit (122111033830, halfAngle 15°, tip 0.3): the vendor's
+ * own crease finish (its Wolf NC's T2). It rides the creases with its own CL, admitted only where
+ * `reach()` allows. */
+const ENGRAVER: Tool = {
+  ...flatEndMill(0.3, { number: 6, id: '122111033830', name: '3.175*0.3mm*30\u00ba Engraving(Metal)' }),
+  shape: 'engraving',
+  typeText: 'Engraving',
+  handleDiameter: 3.175,
+  tipDiameter: 0.3,
+  diameter: 3.175,
+  cornerRadius: null,
+  halfAngle: 15,
+  fluteLength: 5,
+};
 const BALL1_LONG: Tool = {
   ...flatEndMill(1, { number: 5, id: '161032105031', name: '6*1*30.5mm Ball Nose Engraving' }),
   shape: 'ball',
@@ -179,7 +193,7 @@ function planInputFor(job: EngraveJob, source: { triangles: ParsedMesh }, withLo
       material: job.stock.material,
     },
     fixture: { mount: job.workholding.kind === 'vise' ? 'vise' : 'tape', envelope: job.workholding.kind === 'vise' ? viseEnvelope(job.stock, jobVise(job), job.sacrificial) : null },
-    cutters: { house: withLongBall ? [...HOUSE, BALL1_LONG] : HOUSE, catalogue: [] },
+    cutters: { house: withLongBall ? [...HOUSE, BALL1_LONG, ENGRAVER] : HOUSE, catalogue: [] },
     tolerances: { finishMm: 0.01 },
     edgeBreak: { legMm: 0 },
   };
