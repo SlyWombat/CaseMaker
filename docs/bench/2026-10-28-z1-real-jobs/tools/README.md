@@ -36,6 +36,19 @@ reported, never silently dropped:
 `cutIntoPct` (the 0.01 mm floor used by the in-app check) stays in the report as an advisory number;
 `cutIntoInclEdgePct` is the raw count before any allowance.
 
+**One rule with the app (#948, `4ba147e8`).** Each posted program is scored with its **own
+`;@MKR|TOOL` record** (a multi-program run's chamfer is a cone, not a flat), the chamfer's profile is
+the app's **sharp cone** (its stated 0.1 mm tip still sets the edge-break leg, not the profile), a
+**goal grid that ends at the model** has its outermost covered row/column as **border cells** —
+excluded from cut-into like wall cells, and the **edge-break band seeds from wall ∪ border** (the
+part's own silhouette is a design edge) while the wall shadow still seeds from `wall` alone — and,
+for our own programs, the edge-break allowance is the **job's stated break**: every cell in the band
+no deeper than the V bit's leg is edge break (the app's one-field read; the vendor path keeps the
+stricter "the deepest cutter is the V bit itself"). Proven cell for cell at `4ba147e8`: j07's and
+the tray's fields are bit-identical between `goal_check.py` and the app's `exactSweptField`,
+`cutIntoInclEdgePct`/edge/wall/shadow/adjudicated/leftover agree, and the adjudicated max is 0.458
+both.
+
 A cell is charged only where its centre lies **strictly inside** the cutter's footprint —
 `distance < radius − 1e-6`, the app's `EDGE_EPS_MM` (#964). A contour is posted with the tool centre
 offset by the cutter's radius, so the disc's edge is tangent to the outline; `distance <= radius`

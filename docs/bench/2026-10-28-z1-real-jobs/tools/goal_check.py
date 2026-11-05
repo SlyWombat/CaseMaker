@@ -67,9 +67,17 @@ def put(Hf, Wf, idx, z, tn):
     Wf[idx[z <= Hf[idx]]] = tn
 
 
-def stamp(H, x0, y0, p, nc, who=None):
-    tool = R.nc_tool(nc)
-    Rr, prof, shape, leg = cutter(tool)
+def stamp(H, x0, y0, p, nc, who=None, tn=1, t=None):
+    """Stamp one posted program. The cutter is the NC's own `;@MKR|TOOL` header when it has one
+    (our posts write it, as Makera's do), so a multi-program run is scored with each program's
+    own Tool record — the app's model. `tn` is the number the `who` map records."""
+    if t is None:
+        tool = R.nc_tool(nc)
+        Rr, prof, shape, leg = cutter(tool)
+        name = tool.get('name') or tool.get('label') or ''
+    else:
+        Rr, prof, shape, leg = t['R'], t['prof'], t['shape'], t['leg']
+        name = t.get('name') or ''
     ny, nx = H.shape
     n = int(math.ceil(Rr / p)) + 1
     oi, oj = np.meshgrid(np.arange(-n, n + 1), np.arange(-n, n + 1), indexing='xy')
@@ -93,7 +101,7 @@ def stamp(H, x0, y0, p, nc, who=None):
             if who is None:
                 np.minimum.at(Hf, idx, zz)
             else:
-                put(Hf, who.ravel(), idx, zz, 1)
+                put(Hf, who.ravel(), idx, zz, tn)
     for start, seg in R.parse_nc(nc):
         a = np.array(start[:3])
         for (px, py, pz, pa, rapid) in seg:
@@ -108,7 +116,7 @@ def stamp(H, x0, y0, p, nc, who=None):
                 if len(pts) > 400_000: flush()
             a = b
     flush()
-    return {'program': os.path.basename(nc), 'cutter': tool.get('name') or tool.get('label') or '', 'shape': shape, 'cuttingDiameter': round(2 * Rr, 3), 'leg': round(leg, 3)}
+    return {'program': os.path.basename(nc), 'cutter': name, 'shape': shape, 'cuttingDiameter': round(2 * Rr, 3), 'leg': round(leg, 3)}
 
 
 def mkr_tools(path):
@@ -287,7 +295,24 @@ def main():
             tools = allt if only is None else {k: v for k, v in allt.items() if k in only}
             progs.append(stamp_mkr(H, who, x0, y0, p, nc, tools, dz, set(allt)))
     else:
-        progs = [stamp(H, x0, y0, p, nc, who) for nc in ncs]
+        progs = []
+        for i, nc in enumerate(ncs):
+            tools_ = mkr_tools(nc)
+            t = tools_[sorted(tools_)[0]] if tools_ else None
+            if t is None:                      # a header-less program: the old flat/ball reader
+                Rr, prof, shape, leg = cutter(R.nc_tool(nc))
+                t = {'R': Rr, 'prof': prof, 'shape': shape, 'leg': leg, 'name': '', 'cuttingDiameter': 2 * Rr}
+            if t['shape'] == 'v':
+                # The app's own `stampProfile` draws a chamfer as a SHARP cone (tipR 0) while its
+                # Tool record's stated tip still sets the edge-break LEG (vToolAllowance). Mirror
+                # both exactly: the tipped profile the vendor path uses is 0.05 mm shallower at
+                # every cell on a 90° bit — a real app/page disagreement, not rounding.
+                a1 = float(t['prof'](np.array([1.0]))[0]); a2 = float(t['prof'](np.array([2.0]))[0])
+                slope = a2 - a1               # 1 / tan(half)
+                t = {**t, 'prof': (lambda r, s=slope: r * s)}
+            progs.append({'program': os.path.basename(nc), 'cutter': t['name'], 'shape': t['shape'],
+                          'cuttingDiameter': round(t['cuttingDiameter'], 3), 'leg': round(t['leg'], 3)})
+            stamp(H, x0, y0, p, nc, who, tn=i + 1, t=t)
     np.save(os.path.join(out, 'goalcheck.npy'), H)
     # The best ANY program's cutter could do: the goal opened by the smallest cutter used (its tip
     # placed as high as the goal allows at every cell, then swept). Leftover beyond that is the
@@ -329,10 +354,11 @@ def main():
                 if t['shape'] == 'v':
                     legs[t['number']] = t['leg']
                     reaches[t['number']] = t['cuttingDiameter'] / 2
-    elif who.max() >= 1:
-        shp = progs[0]['shape']
-        legs[1] = progs[0].get('leg', 0.0) if shp == 'v' else 0.0
-        reaches[1] = progs[0]['cuttingDiameter'] / 2 if shp == 'v' else 0.0
+    else:
+        for i, q in enumerate(progs):
+            if q['shape'] == 'v':
+                legs[i + 1] = q['leg']
+                reaches[i + 1] = q['cuttingDiameter'] / 2
     raw_cut = C & (Hc - Gc < -CUT_INTO)
     # DESIGN EDGES: a step > 0.2 mm between neighbouring goal cells (a wall), or the model's
     # silhouette (a covered cell beside an uncovered one).
@@ -341,6 +367,16 @@ def main():
     dy[:-1] = np.abs(Gs[1:] - Gs[:-1]); dx[:, :-1] = np.abs(Gs[:, 1:] - Gs[:, :-1])
     wall = (dy > 0.2) | (dx > 0.2)
     wall[1:] |= dy[:-1] > 0.2; wall[:, 1:] |= dx[:, :-1] > 0.2
+    # #948/#959 — THE GRID'S OWN BORDER (the app's `borderCells`, 4ba147e8): a covered cell on the
+    # outermost row or column has no neighbour beyond it, so a goal whose grid ends at the model has
+    # its silhouette on the border and the wall test above never sees it. Those cells are
+    # UNADJUDICABLE — excluded from cut-into like wall cells — and the edge-break band seeds from
+    # wall ∪ border (the silhouette is the edge a rim break exists for). The wall shadow is
+    # unchanged: it still seeds from `wall` alone.
+    border = np.zeros_like(C)
+    border[0, :] |= C[0, :]; border[-1, :] |= C[-1, :]
+    border[:, 0] |= C[:, 0]; border[:, -1] |= C[:, -1]
+    wallb = wall | border
 
     def dilate(mask, radius_mm):
         r = int(math.ceil(radius_mm / p)); out = np.zeros_like(mask)
@@ -352,9 +388,19 @@ def main():
         return out
 
     edge = np.zeros_like(C)
-    if (legs[who] > 0).any():
-        band = dilate(wall, float(reaches[legs > 0].max()))
-        edge = raw_cut & band & (legs[who] > 0) & (-(Hc - Gc) <= legs[who])
+    if mkr:
+        # The vendor card's stated class: the cell's deepest cutter must be the V bit itself.
+        if (legs[who] > 0).any():
+            band = dilate(wallb, float(reaches[legs > 0].max()))
+            edge = raw_cut & band & (legs[who] > 0) & (-(Hc - Gc) <= legs[who])
+    else:
+        # THE APP'S OWN READ (4ba147e8, designCheck.ts): the allowance is the JOB's stated edge
+        # break, so every cell inside the band no deeper than the V bit's leg is edge break —
+        # the app has one swept field and no per-cell cutter, and the page must match it exactly.
+        vlegs = legs[legs > 0]
+        if vlegs.size:
+            band = dilate(wallb, float(reaches[legs > 0].max()))
+            edge = raw_cut & band & (-(Hc - Gc) <= float(vlegs.max()))
     # TWO CLASSES THE HEIGHTFIELD CANNOT ADJUDICATE (#955). Both are reported, never counted:
     #  * WALL CELLS: a vertical wall between goal cells lands on one side of a cell boundary or the
     #    other; a cutter on the floor beside it cuts the straddling cell, whose own sample reads the
@@ -366,9 +412,9 @@ def main():
     Rmax = max((t['cuttingDiameter'] / 2 for q in progs for t in q['tools']), default=0.0) if mkr \
         else progs[0]['cuttingDiameter'] / 2
     shadow = dilate(wall, Rmax) & ~wall
-    wall_ns = wall & raw_cut & ~edge             # would have counted, is not scored
+    wall_ns = wallb & raw_cut & ~edge          # wall cells OR grid-border cells: not adjudicable
     shadow_ns = shadow & raw_cut & ~edge
-    cut = raw_cut & ~edge & ~wall & ~shadow
+    cut = raw_cut & ~edge & ~wallb & ~shadow
     d = (Hc - Gc)[C]  # + material left above the goal, - cut below it
     n = max(int(C.sum()), 1); a = p * p
     def pct(m): return round(float(np.sum(m)) / n * 100, 2)
@@ -382,8 +428,8 @@ def main():
         'edgeBreakPct': pct(edge[C]), 'edgeBreakAreaMm2': round(float(edge.sum()) * a, 1),
         'edgeBreakMaxMm': round(float(max(0.0, (-(Hc - Gc))[edge].max())) if edge.any() else 0.0, 3),
         'cutIntoInclEdgePct': pct(raw_cut[C]),
-        'cutInto0p1Pct': pct(C & ((Hc - Gc) < -0.1) & ~edge & ~wall & ~shadow),
-        'cutInto0p5AreaMm2': round(float(np.sum(C & (Hc - Gc < -0.5) & ~edge & ~wall & ~shadow)) * a, 1),
+        'cutInto0p1Pct': pct(C & ((Hc - Gc) < -0.1) & ~edge & ~wallb & ~shadow),
+        'cutInto0p5AreaMm2': round(float(np.sum(C & (Hc - Gc < -0.5) & ~edge & ~wallb & ~shadow)) * a, 1),
         'maxCutIntoMm': round(float(max(0.0, (-(Hc - Gc))[cut].max())) if cut.any() else 0.0, 3),
         'cutIntoVolumeMm3': round(float(cut.sum()) * a, 1),
         'leftover0p1Pct': pct(d > 0.1), 'leftover0p3Pct': pct(d > 0.3), 'leftover1Pct': pct(d > 1),
