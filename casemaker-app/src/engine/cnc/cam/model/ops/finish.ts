@@ -312,14 +312,10 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   for (const levelZ of levels) {
     const levelCleared: Polygons = [];
     for (let x = min[0] + X_NUDGE_MM; x <= max[0]; ) {
-      // A wall band is skipped, not rastered: the rough and the contour cut it, and a raster row
-      // there would either gouge or collapse every other band's spacing.
-      if (opts.kind === 'ball-scallop' && bandSlopeAt(x) >= WALL_SKIP_DEG) {
-        wallBandsSkipped++;
-        x += BIN_MM;
-        continue;
-      }
-      const stepOverMm = stepOverAt(x);
+      // #960 — A WALL BAND STILL GETS CUT. Skipping it lost coverage (the organizer fell 10 points):
+      // a raster row there is dense rather than absent, at the same radius/10 floor the old read
+      // applied to the WHOLE region. Only the bands that are not walls gain the vendor spacing.
+      const stepOverMm = opts.kind === 'ball-scallop' && bandSlopeAt(x) >= WALL_SKIP_DEG ? profile.radiusMm / 10 : stepOverAt(x);
       x += stepOverMm;
       if (stepOverMm <= 1e-6) break;
       const intervals = footprintColumnIntervals(opts.region.footprint, x);
@@ -404,7 +400,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       ? {}
       : {
           notes: [
-            `${wallBandsSkipped} raster band(s) over walls steeper than ${WALL_SKIP_DEG}° were skipped — the wall is the rough and contour's cut, not the finish's`,
+            `${wallBandsSkipped} raster band(s) over walls steeper than ${WALL_SKIP_DEG}° ride at the cutter's own ${(opts.kind === 'flat-raster' ? 'flat' : 'ball')} floor (radius/10) rather than the scallop spacing — they are cut, not skipped`,
           ],
         }),
   };

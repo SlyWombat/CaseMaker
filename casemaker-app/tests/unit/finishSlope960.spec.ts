@@ -102,7 +102,7 @@ describe('#960 finishing by slope — the two levers', () => {
     const rows = new Set(out.passes.map((p) => p.entry[0]));
     expect(rows.size).toBeGreaterThan(55);
     expect(rows.size).toBeLessThan(70);
-    // Nothing claims a wall band it did not raster.
+    // A wall band is CUT, not skipped: nothing is lost, and its rows sit at the ball's floor.
     expect(out.notes ?? []).toEqual([]);
   });
 });
