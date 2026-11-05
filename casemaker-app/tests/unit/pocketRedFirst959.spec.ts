@@ -105,14 +105,40 @@ function inside(polys: Polygons, x: number, y: number): boolean {
 }
 
 /**
- * Every horizontal FEED segment at `z` must keep the tool's centre inside the node's free space,
- * the region eroded by the cutter radius (less a 0.01 mm grace for offset chords), AND no lateral
- * rapid may run below `hopZMm` (advisor's review on dd150a9b and 9e976f0b: a datum error turns a
- * SHOULD-retract into a feed at depth, which this file's own `floorZ` comparison can only catch
- * when it is itself looking at the right Z — hence `feedsChecked`, so a datum bug cannot pass
- * this check vacuously by finding nothing at `floorZ`). `node.floorZ` is on `recogniseFeatures`'s
- * own mesh axis; `planPocketsForTree` rebases every move onto `Z 0 = stockTop` (plan.ts's header
- * note on dd150a9b), so the floor it actually posts is `floorZ - stockTop`.
+ * #962 ruling — CLOSED membership for the cleared region: a point within 1e-6 mm of the boundary
+ * is inside. The pocket's own ring lies exactly on erode(region, R), so the boundary is cut
+ * material, not air; plain ray casting calls it outside by convention and would flag the op's own
+ * legitimate feeds.
+ */
+function insideClosed(polys: Polygons, x: number, y: number): boolean {
+  if (inside(polys, x, y)) return true;
+  for (const ring of polys) {
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i]!;
+      const [xj, yj] = ring[j]!;
+      const dx = xj - xi;
+      const dy = yj - yi;
+      const len2 = dx * dx + dy * dy;
+      const t = len2 > 0 ? Math.max(0, Math.min(1, ((x - xi) * dx + (y - yi) * dy) / len2)) : 0;
+      if (Math.hypot(x - (xi + dx * t), y - (yi + dy * t)) <= 1e-6) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Every horizontal FEED segment at `z` must keep the tool's centre inside the node's free space —
+ * erode(EXTENDED region, R): `pocket.ts` extends an OPEN node by the band between the part's
+ * outline and itself (clipped near the node), and this guard computes the same union ITSELF from
+ * the same inputs, never from the op's recorded `cleared`, so it stays an independent check. The
+ * region is closed at the boundary (`insideClosed`: a point within 1e-6 of it is inside — the
+ * pocket's own ring lies exactly on erode(region, R)). AND no lateral rapid may run below `hopZMm`
+ * (advisor's review on dd150a9b and 9e976f0b: a datum error turns a SHOULD-retract into a feed at
+ * depth, which this file's own `floorZ` comparison can only catch when it is itself looking at the
+ * right Z — hence `feedsChecked`, so a datum bug cannot pass this check vacuously by finding
+ * nothing at `floorZ`). `node.floorZ` is on `recogniseFeatures`'s own mesh axis;
+ * `planPocketsForTree` rebases every move onto `Z 0 = stockTop` (plan.ts's header note on
+ * dd150a9b), so the floor it actually posts is `floorZ - stockTop`.
  */
 function linksOutsideFreeSpace(
   result: PlanPocketsResult,
@@ -120,8 +146,21 @@ function linksOutsideFreeSpace(
   radius: number,
   stockTop: number,
   hopZMm: number,
+  openOutline?: Polygons,
 ): { bad: string[]; feedsChecked: number } {
-  const free = offset(node.region, -(radius - 0.01));
+  const base =
+    node.open && openOutline !== undefined
+      ? boolean.union(
+          node.region,
+          (() => {
+            const wholeBand = boolean.subtract(offset(openOutline, 2 * radius), openOutline);
+            const near = offset(node.region, 2 * radius);
+            // A ∩ B = A \ (A \ B) — the only intersection `union`/`subtract` alone can express.
+            return boolean.subtract(wholeBand, boolean.subtract(wholeBand, near));
+          })(),
+        )
+      : node.region;
+  const free = offset(base, -radius);
   const op = result.ops.find((o) => o.region.id === node.id);
   if (op === undefined) return { bad: [`no op for ${node.id}`], feedsChecked: 0 };
   const floorZ = node.floorZ - stockTop;
@@ -142,7 +181,7 @@ function linksOutsideFreeSpace(
         for (let i = 1; i < n; i++) {
           const x = at[0] + ((next[0] - at[0]) * i) / n;
           const y = at[1] + ((next[1] - at[1]) * i) / n;
-          if (!inside(free, x, y)) {
+          if (!insideClosed(free, x, y)) {
             bad.push(`(${at[0].toFixed(2)}, ${at[1].toFixed(2)}) → (${next[0].toFixed(2)}, ${next[1].toFixed(2)}) leaves free space at (${x.toFixed(2)}, ${y.toFixed(2)})`);
             break;
           }
@@ -249,6 +288,11 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     const cutter = op!.outcome.cutter.includes('3.175') ? 3.175 / 2 : 3;
     const swept = sweptFraction(result, ledge.id, ledge.floors.flatMap((f) => f.polygons), 7 - tree.frame.stockTop, cutter);
     expect(swept, `swept ${(100 * swept).toFixed(1)} % of the ${ledgeArea} mm² ledge`).toBeGreaterThanOrEqual(0.95);
+    // #962 — the guard on the OPEN fixture: every feed must stay inside erode(extended region, R),
+    // the extension computed here, not read from the op. Red before the extension was mirrored.
+    const { bad, feedsChecked } = linksOutsideFreeSpace(result, ledge, cutter, tree.frame.stockTop, HOP_Z, tree.contour.outline);
+    expect(feedsChecked, 'the open-node guard looked at some feeds').toBeGreaterThan(0);
+    expect(bad, `open-node feeds outside the extended free space:\n${bad.slice(0, 5).join('\n')}`).toEqual([]);
   });
 
   it('(5) cleared never claims the sharp inside corners a round tool cannot reach', () => {
