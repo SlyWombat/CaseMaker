@@ -14,10 +14,9 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
@@ -35,12 +34,11 @@ import { parseReceipt, type Receipt } from '../../src/platform/headless/receipt'
 import { parseEngraveJob } from '../../src/store/engraveJobSchema';
 import { createSimSession } from '../../src/workers/sim/session';
 import type { EngraveDrill, EngraveJob, JobSetup } from '../../src/types/engraveJob';
+import { tsxArgs } from '../tools/tsxCli';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '..', '..');
 const LOCATION = join(APP, 'tests', 'unit', 'fixtures', 'location-doc.json');
-const require = createRequire(import.meta.url);
-const TSX = pathToFileURL(require.resolve('tsx')).href;
 /** The fixture location's two owned flat cutters: 2 mm and a 3.175 mm clone. */
 const FIRST = 'user:1a2b3c4d5e';
 const SECOND = 'user:6f7a8b9c0d';
@@ -568,12 +566,12 @@ describe('#733 an invalid job answers --json on stdout', () => {
 
     const r = spawnSync(
       process.execPath,
-      ['--import', TSX, join(APP, 'scripts', 'casemaker.ts'), 'cut', jobPath, '--json', '--location', LOCATION],
+      tsxArgs(join(APP, 'scripts', 'casemaker.ts'), ['cut', jobPath, '--json', '--location', LOCATION]),
       {
         cwd: APP,
         encoding: 'utf8',
         timeout: 120_000,
-        env: { ...process.env, TSX_TSCONFIG_PATH: join(APP, 'tsconfig.scripts.json') },
+        env: process.env,
       },
     );
 
@@ -628,12 +626,12 @@ describe('#732 a broken catalogue answers --json on stdout', () => {
 
     const r = spawnSync(
       process.execPath,
-      ['--import', TSX, join(APP, 'scripts', 'casemaker.ts'), 'cut', jobPath, '--json', '--location', locationPath],
+      tsxArgs(join(APP, 'scripts', 'casemaker.ts'), ['cut', jobPath, '--json', '--location', locationPath]),
       {
         cwd: APP,
         encoding: 'utf8',
         timeout: 120_000,
-        env: { ...process.env, TSX_TSCONFIG_PATH: join(APP, 'tsconfig.scripts.json') },
+        env: process.env,
       },
     );
 
