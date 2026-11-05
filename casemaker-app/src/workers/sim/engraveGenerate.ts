@@ -4883,7 +4883,11 @@ export async function buildModelPlanInputForGoal(
   // the bottom cap; anything else is refused by name with its count and reason, which this
   // function lets propagate — the seam states it on the run, never as a kernel stack trace.
   const tl = await getToplevel();
-  const closed = closeOpenSheet(tl, triangles, { bottomZ: -job.stock.thickness });
+  // #966 — AN OPEN SHEET IS A RELIEF, NOT A THROUGH-PART. Closing it to the stock bottom made the
+  // tree read a full-height solid and plan a freeing contour (`zTo: -thickness, frees: true`) that
+  // cut the relief loose; the skirt now stops at the sheet's own lowest boundary, so the part is
+  // exactly as deep as the imported surface and no cut goes below it.
+  const closed = closeOpenSheet(tl, triangles, { skirtTo: 'lowestBoundary' });
   const geometry: FeatureSource = { triangles: closed.mesh };
 
   // #898's three choices, carried across under the new engine's own naming

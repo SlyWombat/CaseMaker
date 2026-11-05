@@ -13,6 +13,8 @@ import { describe, expect, it } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { closeOpenSheet, UnclosableOpenMeshError } from '@/engine/cnc/engrave/closeSheet';
 import { buildModelPlanInputForGoal } from '@/workers/sim/engraveGenerate';
+import { planModelCam } from '@/engine/cnc/cam/model/plan';
+import { recogniseFeatures } from '@/engine/cnc/cam/model/features';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { buildBinaryStl } from '@/workers/export/stlBinary';
@@ -151,8 +153,60 @@ describe('#966 an open goal mesh is closed with a skirt before the manifold chec
       ],
     });
     const geometry = { positions: input.geometry.triangles.positions, indices: input.geometry.triangles.indices, triangleCount: input.geometry.triangles.triangleCount, bbox: input.geometry.triangles.bbox };
-    expect(geometry.bbox.min[2]).toBeCloseTo(-10, 5);
+    // #966 — the goal path closes a sheet to its OWN lowest boundary (a relief), not the stock
+    // bottom (−10): the closed solid is exactly as deep as the imported surface.
+    expect(geometry.bbox.min[2]).toBeGreaterThan(-1);
+    expect(geometry.bbox.min[2]).toBeLessThan(-0.2);
     const check = manifoldAccepts(geometry);
     expect(check.ok, `the geometry handed to planModelCam is still open: ${check.reason}`).toBe(true);
   });
+
+  it('RED-FIRST #966: an open sheet closed by the repair is a RELIEF — no freeing contour, no cut below it', async () => {
+    const sheet = sheetMesh(12, 20);
+    const stl = buildBinaryStl([{ positions: sheet.positions, indices: sheet.indices }]);
+    const goal: EngraveTargetObject = {
+      id: 'goal-relief-966',
+      name: 'relief-sheet.stl',
+      format: 'stl',
+      sha256: 'b'.repeat(64),
+      data: Buffer.from(stl).toString('base64'),
+      size: { x: 20, y: 20, z: 0.8 },
+      position: { x: 15, y: 10, z: 0 },
+      rotation: 0,
+      enabled: true,
+      role: 'goal',
+    };
+    const BALL: Tool = flatEndMill(2, { number: 1, id: 'ball-2', name: 'ball-2', shape: 'ball', typeText: 'Ball Nose' });
+    const FLAT: Tool = flatEndMill(3, { number: 2, id: 'flat-3', name: 'flat-3' });
+    const job: EngraveJob = {
+      ...defaultEngraveJob(),
+      labels: [],
+      shapes: [],
+      stock: { ...defaultEngraveJob().stock, length: 30, width: 20, thickness: 10 },
+      targetObject: goal,
+    };
+    const shop = {
+      tools: [
+        { key: 'inv:ball-2', tool: { ...BALL, number: null }, provenance: 'test fixture' },
+        { key: 'inv:flat-3', tool: { ...FLAT, number: null }, provenance: 'test fixture' },
+      ],
+    };
+    const input = await buildModelPlanInputForGoal(job, goal, BALL, shop);
+    // The tree reads the RELIEF: its part bottom is the sheet's own boundary, not the stock bottom.
+    const tree = recogniseFeatures({ triangles: input.geometry.triangles }, input.setups[0]!.frame, tl);
+    expect(tree.contour.frees, 'the relief was classified as a through-part (a freeing contour)').toBe(false);
+    // And no move goes below the sheet's own lowest vertex.
+    let minVertexZ = Infinity;
+    for (let i = 2; i < input.geometry.triangles.positions.length; i += 3) minVertexZ = Math.min(minVertexZ, input.geometry.triangles.positions[i]!);
+    const output = await planModelCam(input);
+    let minMoveZ = Infinity;
+    for (const setupPlan of output.perSetup) {
+      for (const ir of setupPlan.programs) {
+        for (const op of ir.operations) {
+          for (const m of op.moves) minMoveZ = Math.min(minMoveZ, m.z);
+        }
+      }
+    }
+    expect(minMoveZ, `a move cut below the sheet's lowest vertex (${minVertexZ} mm)`).toBeGreaterThanOrEqual(minVertexZ - 0.01);
+  }, 120_000);
 });
