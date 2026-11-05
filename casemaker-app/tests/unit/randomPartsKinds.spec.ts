@@ -51,22 +51,13 @@ describe('#964 the widened seeded parts', () => {
         expect(part.tree.frame.partBottom, `${kind} seed ${seed}: tree partBottom`).toBeCloseTo(-part.stock.thickness, 2);
         expect(part.tree.contour.outline.length, `${kind} seed ${seed}: no silhouette`).toBeGreaterThan(0);
 
-        // A real undercut has height. The first-wave plate kinds carry ONE zero-height entry
-        // today: their island stands 1 mm short of the pocket floor (the pocket void is cut
-        // `depth + 1` deep, the island is `depth` tall), so its underside is exposed. That is a
-        // fixture gap of the first wave, noted on #964 — not this widening's to change, because
-        // three golden pins hash those meshes. The curved kinds must be clean outright.
-        const withHeight = part.tree.unreachable.filter((u) => Math.abs(u.zRange[1] - u.zRange[0]) > 0.01);
+        // Every kind is machinable from one top setup: nothing may be flagged unreachable. The
+        // plate kinds' island used to leave a zero-height entry (its underside, floating 1 mm
+        // above the pocket floor); #969 fixed the fixture, so the rule is the same for all kinds.
         expect(
-          withHeight.map((u) => u.reason),
-          `${kind} seed ${seed}: an undercut with height`,
+          part.tree.unreachable.map((u) => u.reason),
+          `${kind} seed ${seed}: flagged as unreachable`,
         ).toEqual([]);
-        if (kind !== 'rectilinear' && kind !== 'filleted') {
-          expect(
-            part.tree.unreachable.map((u) => u.reason),
-            `${kind} seed ${seed}: flagged as unreachable`,
-          ).toEqual([]);
-        }
 
         if (kind === 'rectilinear' || kind === 'filleted') {
           expect(part.tree.pockets.length, `${kind} seed ${seed}: pockets`).toBeGreaterThanOrEqual(3);
