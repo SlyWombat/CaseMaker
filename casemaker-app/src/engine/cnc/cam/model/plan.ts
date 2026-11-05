@@ -300,8 +300,15 @@ export interface SetupPlan {
   choice: SequenceChoice;
 }
 
-/** Set only by specs for now (see this file's header). */
-export const USE_MODEL_CAM_ENGINE = false;
+/**
+ * Set only by specs and the breadth tool for now (see this file's header). The environment gate
+ * exists so a Node tool (`tests/tools/goal-engine-breadth.ts`) can exercise the seam without a
+ * bundler: `CASEMAKER_MODEL_CAM=1` turns the engine on for a process, and `VITE_MODEL_CAM=1` does
+ * the same for an e2e build. Both default off, so the shipped app is unchanged.
+ */
+export const USE_MODEL_CAM_ENGINE: boolean =
+  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.['CASEMAKER_MODEL_CAM'] === '1' ||
+  (import.meta as { env?: Record<string, string | undefined> }).env?.['VITE_MODEL_CAM'] === '1';
 
 export interface PlanModelCamOptions {
   signal?: AbortSignal;
