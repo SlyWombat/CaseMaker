@@ -154,22 +154,56 @@ describe.each([
 
   it('retracts between rows go to the region\'s own clearance plane, not a bare hop height', () => {
     // #962's tour keeps a PLANE's links down (the chord rides the CL), so the property needs a
-    // join that must retract: a narrow rise BETWEEN the first two raster rows — the CL bulges
-    // 0.3 mm, the chord dips below it, and `joinMoves` falls back to `link()`'s retract.
+    // join that must retract. #960's finer ball step-over passes THROUGH a narrow rise — the
+    // rows follow it, which is the cut the passes exist for, so no retract is owed and none
+    // happens. This fixture therefore puts the rise in a MASKED GAP between the rows: no pass
+    // crosses it, the ONE join over the gap is a chord across it, the CL bulges 0.3 mm above
+    // that chord, and the retract must go to the region's clearance plane.
+    const base = clSurface(geometry, region, cutter, 3);
+    // The gap is long (25 mm) and the feed is the ball's own catalogue rate (F500): the
+    // dip-following link's TIME GUARD refuses it (the follow would out-run the retract), so the
+    // join must retract — and a retract must transit the REGION's clearance plane, never a hop.
+    const risen: typeof base = {
+      ...base,
+      dropCutter: (x: number, y: number) => {
+        const z = base.dropCutter(x, y);
+        return z === null ? null : x >= 14 && x <= 15 ? z + 0.3 : z;
+      },
+    };
+    const out = finish({
+      cutter, region, regionRef, clSurface: risen, kind, scallopMm: 0.1, stepDownMm: 2,
+      maskCells: (x: number) => !(x > 5 && x < 30),
+      feeds: { feedMmPerMin: 500, plungeFeedMmPerMin: 300 }, safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+    });
+    const rapids = out.ir.operations[0]!.moves.filter((m) => m.kind === 'rapid');
+    expect(rapids.some((m) => m.z === regionRef.regionClearanceZ), 'the rise was crossed without a retract').toBe(true);
+  });
+
+  it('a provable rise is FOLLOWED, not chording below it: the feeds ride the CL over it (#962)', () => {
+    // A short gap over the rise with the cutting rate to match: the dip-following link takes it,
+    // and every feed over the rise sits at the risen CL — the ball cuts the rise exactly as the
+    // passes either side do, and never a chord below it (which would be a gouge).
     const base = clSurface(geometry, region, cutter, 3);
     const risen: typeof base = {
       ...base,
       dropCutter: (x: number, y: number) => {
         const z = base.dropCutter(x, y);
-        return z === null ? null : x >= 0.6 && x <= 0.95 ? z + 0.3 : z;
+        return z === null ? null : x >= 7.5 && x <= 8.5 ? z + 0.3 : z;
       },
     };
     const out = finish({
       cutter, region, regionRef, clSurface: risen, kind, scallopMm: 0.1, stepDownMm: 2,
+      maskCells: (x: number) => !(x > 5 && x < 11),
       feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 }, safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
     });
-    const rapids = out.ir.operations[0]!.moves.filter((m) => m.kind === 'rapid');
-    expect(rapids.some((m) => m.z === regionRef.regionClearanceZ), 'the rise was crossed without a retract').toBe(true);
+    const moves = out.ir.operations[0]!.moves;
+    // FOLLOWED, not a chord: a chord would be ONE move from the row at x ≈ 4.5 straight to the
+    // row at x ≈ 11, with nothing in between; a follow is a sampled path with feeds INSIDE the
+    // gap. And it is not a retract: no rapid sits at the region's clearance plane between them.
+    const inGap = moves.filter((m) => m.kind === 'feed' && m.x > 7.5 && m.x < 8.5);
+    expect(inGap.length, 'the join over the rise was not followed — no feed crosses it').toBeGreaterThan(0);
+    const clearRapids = moves.filter((m) => m.kind === 'rapid' && m.z === regionRef.regionClearanceZ);
+    expect(clearRapids.length, 'the follow was replaced by a retract to the clearance plane').toBe(0);
   });
 
   it('engagement at each level is at most stepDownMm past the previous one — the ACTUAL posted depth, not the level\'s own nominal label', () => {

@@ -99,7 +99,7 @@ export function oppositeSurfaceSafeDepthMm(
   if (surfaceWorldZ === null) return null;
   return surfaceWorldZ + frame.stockTop - marginMm;
 }
-import { rough, skin } from './ops/rough';
+import { gridPitchFor, rough, skin } from './ops/rough';
 import { flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
 import { cellPolygons, rest } from './ops/rest';
 import { finish } from './ops/finish';
@@ -1967,41 +1967,50 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       });
     }
 
-    // ITEM 4a — THE FINISH'S MASK: leftover = flatSwept − design > band, dilated by the ball's
-    // footprint. `flatSwept` is the LOWEST flat CL that actually ran over the region — the skim's
-    // exact-contact pass, else the Z-levels' cl + band; a rest flat's CL when one ran — read back
-    // to the MESH datum (the shifted surfaces + z0), because `design` is the mesh's own top at the
-    // cell (`topSurfaceAt`). The band is the finish's tolerance (the ruling), not the rough's
-    // stock-to-leave.
+    // ITEM 4a — THE FINISH'S MASK: leftover = the flat's CL − the design > band, dilated by the
+    // ball's footprint (its centre just outside the leftover still cuts into it, and just outside
+    // the part still finishes the skirt its flank holds).
+    //
+    // #970 — THE LEFTOVER FIELD, BUILT ONCE (the §8.9 statement on #970): the flat's CL, the rest's
+    // CL and the design top on the plan's grid, in the MESH datum. The mask reads the dilated
+    // leftover in O(1) per point — the per-point `dropCutter` calls (up to 18 per point with the
+    // eight dilation neighbours) are gone. The skin is served separately: it builds its own
+    // one-pass grid inside `skin()` (same pitch, `gridPitchFor`).
     const finishBand = opts.finishScallopMm ?? opts.bandMm;
-    const flatAbs = (x: number, y: number): number | null => {
-      const v = prevCl.dropCutter(x, y);
-      return v === null ? null : v + z0;
+    const gridPitch = gridPitchFor(opts.stepOverMm, (cuttingDiameter(opts.flat) ?? 0) / 2);
+    const gridMin: [number, number] = roughRef.bounds.min;
+    const gnx = Math.max(2, Math.floor((roughRef.bounds.max[0] - gridMin[0]) / gridPitch + 1e-9) + 1);
+    const gny = Math.max(2, Math.floor((roughRef.bounds.max[1] - gridMin[1]) / gridPitch + 1e-9) + 1);
+    const gridLeftover = new Uint8Array(gnx * gny);
+    const gridCellOf = (x: number, y: number): number => {
+      const i = Math.round((x - gridMin[0]) / gridPitch);
+      const j = Math.round((y - gridMin[1]) / gridPitch);
+      return i < 0 || j < 0 || i >= gnx || j >= gny ? -1 : j * gnx + i;
     };
-    const restAbs = (x: number, y: number): number | null => {
-      const surface = restClSink.surface;
-      if (surface === undefined) return null;
-      const v = surface.dropCutter(x, y);
-      return v === null ? null : v + z0;
-    };
-    const leftoverAbove = (x: number, y: number): boolean => {
-      const f = flatAbs(x, y);
-      const r = restAbs(x, y);
-      const flatZ = f === null ? r : r === null ? f : Math.min(f, r);
-      if (flatZ === null) return false;
-      const design = topSurfaceAt(binsForMask(), x, y);
-      if (design === null) return false;
-      return flatZ - design > finishBand;
-    };
+    for (let j = 0; j < gny; j++) {
+      for (let i = 0; i < gnx; i++) {
+        const x = gridMin[0] + i * gridPitch;
+        const y = gridMin[1] + j * gridPitch;
+        const f = prevCl.dropCutter(x, y);
+        const r = restClSink.surface?.dropCutter(x, y) ?? null;
+        const design = topSurfaceAt(binsForMask(), x, y);
+        const k = j * gnx + i;
+        const cl = f === null ? r : r === null ? f : Math.min(f, r);
+        gridLeftover[k] = cl !== null && design !== null && cl + z0 - design > finishBand ? 1 : 0;
+      }
+    }
     const ballRadiusForMask = (cuttingDiameter(ball) ?? 0) / 2;
+    const maskRing: [number, number][] = [];
+    for (let d = 0; d < 8; d++) {
+      const a = (d * Math.PI) / 4;
+      maskRing.push([Math.cos(a) * ballRadiusForMask, Math.sin(a) * ballRadiusForMask]);
+    }
     const maskCells = (x: number, y: number): boolean => {
-      // Dilated by the ball's footprint: a centre just outside the leftover still cuts into it,
-      // and a centre just OUTSIDE the part still finishes the skirt its flank holds — the same
-      // margin the grown outer ring needs.
-      if (leftoverAbove(x, y)) return true;
-      for (let d = 0; d < 8; d++) {
-        const a = (d * Math.PI) / 4;
-        if (leftoverAbove(x + Math.cos(a) * ballRadiusForMask, y + Math.sin(a) * ballRadiusForMask)) return true;
+      const k0 = gridCellOf(x, y);
+      if (k0 >= 0 && gridLeftover[k0] === 1) return true;
+      for (const [ox, oy] of maskRing) {
+        const k = gridCellOf(x + ox, y + oy);
+        if (k >= 0 && gridLeftover[k] === 1) return true;
       }
       return false;
     };
@@ -2244,6 +2253,101 @@ export interface PlanTreeResult {
   choice: SequenceChoice;
 }
 
+/**
+ * #962 — THE REGION TOUR: within each cutter's run, order the regions so each one's exit joins the
+ * nearest other region's entry (nearest neighbour + 2-opt — the finish's strip tour one level up).
+ * E's rapid-class picture: the ⌀6 flat's region-to-region moves criss-crossed the tray (404 against
+ * the vendor's 96) and were most of its rapids.
+ *
+ * THE UNIT IS A REGION: all of that cutter's ops on it, in their planned order — a same-region
+ * pair must never be reversed (`sequence.ts`'s own invariant). The ops' paths themselves are
+ * fixed, so a 2-opt move swaps the ORDER of regions and never a region's direction; only the two
+ * boundary edges change.
+ *
+ * THE FREEING CUT NEVER MOVES: the contour op stays pinned at the end, exactly where the plan put
+ * it — pulling it earlier would un-free the part before the last stage ran.
+ */
+export function orderOpsForPrograms(ops: readonly PlannedOp[]): PlannedOp[] {
+  const sentinels = ops.filter((op) => op.kind === 'contour');
+  const movable = ops.filter((op) => op.kind !== 'contour');
+  const groups: PlannedOp[][] = [];
+  const atByKey = new Map<string, number>();
+  for (const op of movable) {
+    let at = atByKey.get(op.outcome.cutter);
+    if (at === undefined) {
+      at = groups.length;
+      atByKey.set(op.outcome.cutter, at);
+      groups.push([]);
+    }
+    groups[at]!.push(op);
+  }
+  const out: PlannedOp[] = [];
+  for (const group of groups) {
+    const units: { ops: PlannedOp[]; entry: [number, number, number] | null; exit: [number, number, number] | null }[] = [];
+    const unitByRegion = new Map<string, number>();
+    for (const op of group) {
+      let at = unitByRegion.get(op.region.id);
+      if (at === undefined) {
+        at = units.length;
+        unitByRegion.set(op.region.id, at);
+        units.push({ ops: [], entry: null, exit: null });
+      }
+      const unit = units[at]!;
+      unit.ops.push(op);
+      if (unit.entry === null && op.outcome.passes[0] !== undefined) unit.entry = op.outcome.passes[0]!.entry;
+      if (op.outcome.passes[op.outcome.passes.length - 1] !== undefined) unit.exit = op.outcome.passes[op.outcome.passes.length - 1]!.exit;
+    }
+    if (units.some((u) => u.entry === null || u.exit === null)) {
+      // An op that recorded no passes: the tour cannot price it, so this run keeps its order.
+      out.push(...group);
+      continue;
+    }
+    const entryOf = (at: number): [number, number, number] => units[at]!.entry!;
+    const exitOf = (at: number): [number, number, number] => units[at]!.exit!;
+    const d = (a: [number, number, number], b: [number, number, number]): number => Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const remaining = units.map((_, k) => k);
+    const order: number[] = [];
+    let px = 0;
+    let py = 0;
+    while (remaining.length > 0) {
+      let bestPos = 0;
+      let best = Infinity;
+      for (let k = 0; k < remaining.length; k++) {
+        const e = entryOf(remaining[k]!);
+        const dist = Math.hypot(e[0] - px, e[1] - py);
+        if (dist < best - 1e-12) {
+          best = dist;
+          bestPos = k;
+        }
+      }
+      const idx = remaining.splice(bestPos, 1)[0]!;
+      order.push(idx);
+      const e = exitOf(idx);
+      px = e[0];
+      py = e[1];
+    }
+    let improved = true;
+    let guard = 0;
+    while (improved && guard++ < 64) {
+      improved = false;
+      for (let i = 1; i + 1 < order.length; i++) {
+        for (let k = i; k < order.length; k++) {
+          const before = d(exitOf(order[i - 1]!), entryOf(order[i]!))
+            + (k + 1 < order.length ? d(exitOf(order[k]!), entryOf(order[k + 1]!)) : 0);
+          const after = d(exitOf(order[i - 1]!), entryOf(order[k]!))
+            + (k + 1 < order.length ? d(exitOf(order[i]!), entryOf(order[k + 1]!)) : 0);
+          if (after < before - 1e-9) {
+            order.splice(i, k - i + 1, ...order.slice(i, k + 1).reverse());
+            improved = true;
+          }
+        }
+      }
+    }
+    for (const at of order) out.push(...units[at]!.ops);
+  }
+  return [...out, ...sentinels];
+}
+
 export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): PlanTreeResult {
   const pocketResult = planPocketsForTree(tree, { ...opts.pockets, offset: opts.offset });
   const curvedResult = planCurvedForTree(tree, {
@@ -2253,11 +2357,13 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
     hopZMm: HOP_Z,
   });
   const freeing = pocketResult.ops.filter((op) => op.kind === 'contour');
-  const ops: PlannedOp[] = [
+  // #962 — THE REGION TOUR: each cutter's run visits its regions in nearest-neighbour order
+  // rather than the planning order; the freeing contour stays pinned last (see the helper).
+  const ops: PlannedOp[] = orderOpsForPrograms([
     ...pocketResult.ops.filter((op) => op.kind !== 'contour'),
     ...curvedResult.ops,
     ...freeing,
-  ];
+  ]);
   const programs = new Map<string, ToolpathIR>();
   for (const op of ops) {
     const key = op.outcome.cutter;

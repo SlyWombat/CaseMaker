@@ -25,7 +25,8 @@ import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { pocketLoops, type OffsetFn, type Polygons } from '@/engine/cnc/cam/pocket';
 import { tourNearest } from '@/engine/cnc/cam/tour';
-import { link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
+import { DEFAULT_SHORT_HOP_DIAMETERS, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
+import { followCutSurface, ridesCutSurface } from '../rideTest';
 import { cutterKeyOf } from '../sequence';
 import type { RemainderRegion } from '../features';
 import type { ClSurface } from '../clsurface';
@@ -98,6 +99,13 @@ export function gridMaterial(
       return opts.stockTopZMm ?? Number.POSITIVE_INFINITY;
     },
   };
+}
+
+/** The ops' sampling-grid pitch for a flat: `min(0.5, max(0.1, min(stepOver, radius) / 4))`.
+ * Exported so the plan's one shared grid (#970) matches the rough's own. */
+export function gridPitchFor(stepOverMm: number | undefined, radiusMm: number): number {
+  const stepOver = stepOverMm ?? radiusMm;
+  return Math.min(0.5, Math.max(0.1, Math.min(stepOver, radiusMm) / 4));
 }
 
 interface SkimTourStep {
@@ -256,7 +264,7 @@ export function rough(opts: RoughOpOptions): OpOutcome {
   }
   const leave = Math.max(0, opts.stockToLeaveMm ?? 0);
   const stepOver = opts.stepOverMm ?? toolRadius;
-  const pitch = opts.gridPitchMm ?? Math.min(0.5, Math.max(0.1, Math.min(stepOver, toolRadius) / 4));
+  const pitch = opts.gridPitchMm ?? gridPitchFor(stepOver, toolRadius);
   const { min, max } = opts.regionRef.bounds;
   const nx = Math.max(2, Math.floor((max[0] - min[0]) / pitch + 1e-9) + 1);
   const ny = Math.max(2, Math.floor((max[1] - min[1]) / pitch + 1e-9) + 1);
@@ -420,40 +428,55 @@ export function rough(opts: RoughOpOptions): OpOutcome {
       // what must be proved is that it does not cut BELOW the skim's own target. So sample the
       // link at its centre and require z >= the skim target there — the finish's `ridesTheCl`,
       // against this op's own grid. A join over a cell outside the band still retracts.
-      const rides = ((): boolean => {
-        const length = Math.hypot(to.x - from.x, to.y - from.y);
-        const steps = Math.max(1, Math.ceil(length / Math.max(pitch, 1e-9)));
-        for (let s = 0; s <= steps; s++) {
-          const t = s / steps;
-          const x = from.x + (to.x - from.x) * t;
-          const y = from.y + (to.y - from.y) * t;
-          // BAND CELLS ONLY: a join whose path leaves the skim's band crosses ground this op is
-          // not cutting, and stays a retract. Measured: allowing the deeper cells as well (their
-          // material stands below the link) converted more joins but made the plan SLOWER —
-          // 13,290.6 -> 13,068.8 s against this version's 12,982.2 — because the longer stay-down
-          // feeds at the cutting rate lose to the rapid they replace.
-          const cell = skimTarget(Math.round((x - min[0]) / pitch), Math.round((y - min[1]) / pitch));
-          if (cell === null) return false;
-          const z = from.z + (to.z - from.z) * t;
-          if (z < cell - opts.clSurface.toleranceMm) return false;
-        }
-        return true;
-      })();
+      // BAND CELLS ONLY: a join whose path leaves the skim's band crosses ground this op is not
+      // cutting, and stays a retract. Measured: allowing the deeper cells as well (their material
+      // stands below the link) converted more joins but made the plan SLOWER — 13,290.6 ->
+      // 13,068.8 s against this version's 12,982.2 — because the longer stay-down feeds at the
+      // cutting rate lose to the rapid they replace. THE SHORT HOP (B's review of e3f25fc7): a
+      // ride longer than Kiri's 2 x diameter is a retract by rule, cap included in `ridesCutSurface`.
+      // THE HONEST STANDING FIELD (#962, the out-of-band class): band cells are the skim's own cut
+      // surface, every other cell its own target — the deeper ground's material stands below z, so
+      // a stay-down over it is safe, and the cells ABOVE the band still refuse. (The earlier
+      // unguarded version of this converted more joins and measured 86 s slower; the follow's time
+      // guard now keeps only the profitable ones.)
+      const rides = ridesCutSurface(
+        { x: from.x, y: from.y, z: from.z },
+        { x: to.x, y: to.y, z: to.z },
+        skimStanding.topAt,
+        opts.clSurface.toleranceMm,
+        DEFAULT_SHORT_HOP_DIAMETERS * 2 * toolRadius,
+        pitch,
+      );
       if (rides) {
         const f = to.z < from.z - 1e-9 ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
         moves.push({ kind: 'feed', x: to.x, y: to.y, z: to.z, f });
       } else {
+        // THE DIP CLASS: follow the skim's own target where the chord would dip below it — the
+        // ball cuts the band's rise exactly as the rows either side do, never below the CL.
+        const follow = followCutSurface(
+          { x: from.x, y: from.y, z: from.z },
+          { x: to.x, y: to.y, z: to.z },
+          (x, y) => skimTarget(Math.round((x - min[0]) / pitch), Math.round((y - min[1]) / pitch)),
+          pitch,
+          Number.NEGATIVE_INFINITY,
+          opts.feeds,
+          opts.rapid,
+          opts.hopZMm,
+        );
+        if (follow !== null) moves.push(...follow);
+        else {
         // THE TRANSIT HEIGHT IS THE OP'S OWN HOP PLANE, the height this join flew at before it
         // went through `link()` — the skim visits only cells within one step-down of the region
         // top, and the material beside them stands at that top, which `hopZMm` clears by the same
         // margin the op's own first entry already trusts. The region's clearance plane (+5 over
         // the part top) cost the organizer 619 s of rapid travel on these joins for margin it does
         // not need.
-        moves.push(...link(from, to, {
-          ...linkOptionsFor(prevLevelZ ?? start[2]),
-          material: skimStanding,
-          clearanceZ: opts.hopZMm,
-        }));
+          moves.push(...link(from, to, {
+            ...linkOptionsFor(prevLevelZ ?? start[2]),
+            material: skimStanding,
+            clearanceZ: opts.hopZMm,
+          }));
+        }
       }
     } else {
       moves.push({ kind: 'rapid', x: start[0], y: start[1], z: opts.hopZMm });
@@ -589,7 +612,7 @@ export function skin(opts: SkinOpOptions): OpOutcome {
     throw new Error(`cam/model/ops/rough: ${opts.cutter.name || opts.cutter.shape} states no cutting diameter`);
   }
   const stepOver = opts.stepOverMm ?? toolRadius;
-  const pitch = opts.gridPitchMm ?? Math.min(0.5, Math.max(0.1, Math.min(stepOver, toolRadius) / 4));
+  const pitch = opts.gridPitchMm ?? gridPitchFor(stepOver, toolRadius);
   const grown = opts.offset(opts.outline, 2 * toolRadius);
   const foot = grown.length > 0 ? grown : opts.outline;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -605,6 +628,25 @@ export function skin(opts: SkinOpOptions): OpOutcome {
   const ny = Math.max(2, Math.floor((max[1] - min[1]) / pitch + 1e-9) + 1);
   const half = pitch / 2;
 
+  // #970 — ONE GRID, BUILT ONCE: the CL at every cell centre, then the five-sample neighbourhood
+  // reads the grid instead of re-querying — the skin's 5 radius-3 `dropCutter` calls per cell
+  // (its share of the elephant's 7.6x) are O(1) array reads. The corners read their nearest
+  // cells, so the target is the max over the cell and its half-pitch neighbours, a hair coarser
+  // than the true corner values (the re-pin the manager stated).
+  const clGrid = new Float64Array(nx * ny).fill(Number.NaN);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const v = opts.clSurface.dropCutter(min[0] + i * pitch, min[1] + j * pitch);
+      if (v !== null) clGrid[j * nx + i] = v;
+    }
+  }
+  const clAt = (x: number, y: number): number | null => {
+    const i = Math.round((x - min[0]) / pitch);
+    const j = Math.round((y - min[1]) / pitch);
+    if (i < 0 || j < 0 || i >= nx || j >= ny) return null;
+    const v = clGrid[j * nx + i]!;
+    return Number.isFinite(v) ? v : null;
+  };
   // The design grid: the flat's CL, max over the cell's centre and corners (a cell straddling a
   // rise is judged by its high side, the rough's own rule).
   const target = new Float64Array(nx * ny).fill(Number.NaN);
@@ -614,7 +656,7 @@ export function skin(opts: SkinOpOptions): OpOutcome {
       const y = min[1] + j * pitch;
       let hi = -Infinity;
       for (const [dx, dy] of [[0, 0], [-half, -half], [half, -half], [-half, half], [half, half]] as const) {
-        const cl = opts.clSurface.dropCutter(x + dx, y + dy);
+        const cl = clAt(x + dx, y + dy);
         if (cl !== null && cl > hi) hi = cl;
       }
       if (hi > -Infinity) target[j * nx + i] = hi;
