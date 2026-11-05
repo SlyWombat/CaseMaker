@@ -6,50 +6,57 @@
 // (`scripts/casemaker.ts` → `dispatch` → `engraveJobMain`, `scripts/lib/casemaker/engrave.ts`) for
 // a single-setup goal job, and that the flag still defaults off when the variable is unset.
 //
-// `vi.resetModules()` plus a fresh `await import(...)` of `engrave.ts` after setting (or clearing)
-// `process.env.CASEMAKER_MODEL_CAM`, BEFORE importing, forces the whole module graph — down through
-// `engraveGenerate.ts` to `cam/model/plan.ts` — to re-evaluate, so each test sees a real, fresh
-// module-load-time read of the flag exactly as a freshly spawned `casemaker` process would, not a
-// value some earlier test or file left cached. This is the same mechanism `camModelSeam966.spec.ts`
-// already uses to flip the flag without a hardcoded module constant to begin with — only no
-// `vi.doMock` is needed here, because the flag is no longer a bare `const` a spec has to override.
+// REAL SPAWNED SUBPROCESSES, not `vi.resetModules()` + an in-process `import()`. This file
+// originally avoided a real spawn because `casemakerCutPrograms.spec.ts`'s own two spawn-based
+// tests were reported to fail in this checkout (`/mnt/d/Projects/Case Maker`, a path with a space)
+// with `ERR_MODULE_NOT_FOUND` on `manifold.wasm` — blamed on tsx's ESM resolver mishandling the
+// space. Investigated on `966-spawn-space` (#966): that could not be reproduced. A fresh `npm ci`
+// in this exact checkout (same space in the path) runs both of that file's spawn-based tests clean,
+// individually and as part of the full suite, under Node 22 and 24, and a manual replay of the same
+// spawnSync argv — including a real job that runs the full geometry/manifold pipeline through to
+// simulation — also succeeds. The two tests use `--import <tsx file:// URL>`; converting them to
+// `tests/tools/tsxCli.ts`'s `tsxArgs()` convention (this file's own convention below, and the one
+// `clParity.spec.ts`/`pageCardParity.spec.ts` already use) landed anyway, as a unification, not a
+// bug fix — see that branch's commit for the full writeup. tsx is pinned to the same resolved
+// version on `main` and on this branch's own `965-int` base, so this isn't version drift either.
 //
-// A real spawned subprocess (`casemakerCutPrograms.spec.ts`'s own `--json` spawn cases, the other
-// established pattern this codebase's CLI specs use) would be the more end-to-end proof, but this
-// checkout's path contains a space (`Case Maker`), and tsx's ESM resolver mishandles that for ANY
-// spawned `casemaker.ts` invocation today — `casemakerCutPrograms.spec.ts`'s own two spawn-based
-// tests ("an invalid job answers --json on stdout", "a broken catalogue answers --json on stdout")
-// fail in this checkout with the exact same `ERR_MODULE_NOT_FOUND` on `manifold.wasm`, independent
-// of anything #966 touches. So this spec follows `casemakerCli.spec.ts`'s OWN established
-// convention instead (a fresh module import, no subprocess) rather than inventing a third one.
+// With that cleared, this spec now does what its own comment always said would be the more
+// end-to-end proof: two real `spawnSync` calls per run — `tests/tools/modelCamFlagProbe.ts` (a tiny
+// script that imports `cam/model/plan.ts` and prints `USE_MODEL_CAM_ENGINE`, spawned fresh so the
+// read is a genuine subprocess's module-load-time value, the same check the old `vi.resetModules()`
+// + `import()` made, but across a real process boundary) and the real `casemaker cut` CLI entry
+// point itself, both via `tsxArgs()`. No module state leaks between tests because nothing is
+// imported in-process anymore — the `afterEach` reset this file used to need is gone with it.
 //
 // The fixture is #964's own seeded "sloped" random part, seed 1, tooled with the SAME three house
 // cutters (`FLAT6`/`FLAT3175`/`BALL2`) `camModelSeam966.spec.ts`'s ROUND 2 describe block and
 // `curvedOpsProperty959.spec.ts` already prove `planModelCam` fully plans, posts and covers for a
 // single setup — not a new, unproven fixture.
 
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '../../src/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import type { ToolLibraryEntry } from '../../src/engine/cnc/toolLibrary';
-import type { Receipt } from '../../src/platform/headless/receipt';
+import { parseReceipt, type Receipt } from '../../src/platform/headless/receipt';
 import type { EngraveJob, EngraveTargetObject } from '../../src/types/engraveJob';
-import type { CommandOptions } from '../../scripts/lib/casemaker/output';
 import { buildRandomPart } from '../tools/randomParts';
+import { tsxArgs } from '../tools/tsxCli';
 import { tl } from './helpers/manifoldExec';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const APP = join(HERE, '..', '..');
+const PROBE_SCRIPT = join(APP, 'tests', 'tools', 'modelCamFlagProbe.ts');
+const CLI_SCRIPT = join(APP, 'scripts', 'casemaker.ts');
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'casemaker-cli-model-cam-966-'));
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
-
-afterEach(() => {
-  delete process.env.CASEMAKER_MODEL_CAM;
-  vi.resetModules();
-});
 
 // The same three house cutters `curvedOpsProperty959.spec.ts` plans this exact fixture with, BUT
 // each `id` is set to the exact `user:` key it is (or, for the ball, would be) registered under —
@@ -146,19 +153,31 @@ interface CliRun {
 }
 
 /**
- * Sets (or clears) `CASEMAKER_MODEL_CAM`, THEN resets the module graph and imports `engraveJobMain`
- * fresh — so `cam/model/plan.ts`'s module-level `USE_MODEL_CAM_ENGINE` read happens after the
- * environment is in the state this run wants, exactly as it would on a freshly spawned `casemaker`
- * process (module load order, not test order, is what #966 is about).
+ * Sets (or clears) `CASEMAKER_MODEL_CAM` in a child process's own environment — never this test
+ * process's `process.env`, so nothing here needs resetting between tests. Two real `spawnSync`
+ * calls: `modelCamFlagProbe.ts` first, proving the environment this run is about to use really
+ * does reach `cam/model/plan.ts`'s module-load-time read in a brand-new process (the direct check
+ * that nothing below could pass for the wrong reason), then the real `casemaker cut` CLI entry
+ * point itself, both spawned exactly as `casemakerCutPrograms.spec.ts`'s own spawn-based tests are
+ * (`tsxArgs()`, `process.execPath`, `cwd: APP`).
  */
-async function cliCut(job: EngraveJob, name: string, locationText: string, modelCam: boolean): Promise<CliRun> {
-  if (modelCam) process.env.CASEMAKER_MODEL_CAM = '1';
-  else delete process.env.CASEMAKER_MODEL_CAM;
-  vi.resetModules();
-  const { engraveJobMain } = await import('../../scripts/lib/casemaker/engrave');
-  // The flag itself, read fresh — the direct check that nothing above silently kept the old value.
-  const { USE_MODEL_CAM_ENGINE } = await import('../../src/engine/cnc/cam/model/plan');
-  expect(USE_MODEL_CAM_ENGINE, 'cam/model/plan.ts did not pick up the environment on this fresh import').toBe(modelCam);
+function cliCut(job: EngraveJob, name: string, locationText: string, modelCam: boolean): CliRun {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (modelCam) env.CASEMAKER_MODEL_CAM = '1';
+  else delete env.CASEMAKER_MODEL_CAM;
+
+  const probe = spawnSync(process.execPath, tsxArgs(PROBE_SCRIPT), {
+    cwd: APP,
+    encoding: 'utf8',
+    timeout: 60_000,
+    env,
+  });
+  expect(probe.status, `probe stderr:\n${probe.stderr}`).toBe(0);
+  const probed = JSON.parse(probe.stdout) as { USE_MODEL_CAM_ENGINE: boolean };
+  expect(
+    probed.USE_MODEL_CAM_ENGINE,
+    'cam/model/plan.ts did not pick up the environment in a fresh process',
+  ).toBe(modelCam);
 
   const dir = join(SCRATCH, name);
   mkdirSync(dir, { recursive: true });
@@ -168,18 +187,19 @@ async function cliCut(job: EngraveJob, name: string, locationText: string, model
   writeFileSync(locationPath, locationText);
   const outDir = join(dir, 'out');
 
-  let receipt: Receipt | null = null;
-  const options: CommandOptions = {
-    json: true,
-    sink: { progress: () => undefined, receipt: (r) => { receipt = r; } },
-  };
-  const code = await engraveJobMain([jobPath, '--out', outDir, '--location', locationPath], options);
-  return { code, receipt, outDir };
+  const run = spawnSync(
+    process.execPath,
+    tsxArgs(CLI_SCRIPT, ['cut', jobPath, '--json', '--out', outDir, '--location', locationPath]),
+    { cwd: APP, encoding: 'utf8', timeout: 180_000, env },
+  );
+  expect(run.stdout.trim(), `stdout was empty; stderr:\n${run.stderr}`).not.toBe('');
+  const receipt = parseReceipt(JSON.parse(run.stdout));
+  return { code: run.status ?? 1, receipt, outDir };
 }
 
 describe('#966 the headless CLI generate path honours CASEMAKER_MODEL_CAM end to end', () => {
-  it('flag set: the CLI entry point posts the goal job through cam/model, every program verifies clean', async () => {
-    const { code, receipt, outDir } = await cliCut(goalJob(), 'flag-on', locationDoc(), true);
+  it('flag set: the CLI entry point posts the goal job through cam/model, every program verifies clean', () => {
+    const { code, receipt, outDir } = cliCut(goalJob(), 'flag-on', locationDoc(), true);
 
     expect(code, JSON.stringify(receipt)).toBe(0);
     expect(receipt).not.toBeNull();
@@ -204,8 +224,8 @@ describe('#966 the headless CLI generate path honours CASEMAKER_MODEL_CAM end to
     }
   }, 180_000);
 
-  it('flag unset: the default is still off — the same job and location still post clean through the old engine', async () => {
-    const { code, receipt } = await cliCut(goalJob(), 'flag-off', locationDoc(), false);
+  it('flag unset: the default is still off — the same job and location still post clean through the old engine', () => {
+    const { code, receipt } = cliCut(goalJob(), 'flag-off', locationDoc(), false);
 
     expect(code, JSON.stringify(receipt)).toBe(0);
     expect(receipt).not.toBeNull();
