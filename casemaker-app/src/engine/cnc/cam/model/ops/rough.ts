@@ -30,6 +30,7 @@ import { cutterKeyOf } from '../sequence';
 import type { RemainderRegion } from '../features';
 import type { ClSurface } from '../clsurface';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
+import { maskLoopsFromPredicate } from './rasterMask';
 
 export interface RoughOpOptions {
   cutter: Tool;
@@ -92,44 +93,7 @@ function maskLoops(
 ): Polygons {
   const inside = (i: number, j: number): boolean =>
     i >= 0 && j >= 0 && i < nx && j < ny && Number.isFinite(target[j * nx + i]!) && target[j * nx + i]! + marginMm < levelZ;
-  type Edge = { a: [number, number]; b: [number, number] };
-  const edges: Edge[] = [];
-  const push = (ai: number, aj: number, bi: number, bj: number): void => {
-    edges.push({ a: [x0 + ai * pitch, y0 + aj * pitch], b: [x0 + bi * pitch, y0 + bj * pitch] });
-  };
-  for (let j = 0; j < ny; j++) {
-    for (let i = 0; i < nx; i++) {
-      if (!inside(i, j)) continue;
-      // The cell's own CCW boundary in (x up, y up), keeping only the sides facing OUTSIDE.
-      if (!inside(i, j - 1)) push(i, j, i + 1, j); // bottom
-      if (!inside(i + 1, j)) push(i + 1, j, i + 1, j + 1); // right
-      if (!inside(i, j + 1)) push(i + 1, j + 1, i, j + 1); // top
-      if (!inside(i - 1, j)) push(i, j + 1, i, j); // left
-    }
-  }
-  if (edges.length === 0) return [];
-  const key = (p: readonly [number, number]): string => `${p[0].toFixed(6)},${p[1].toFixed(6)}`;
-  const byStart = new Map<string, Edge[]>();
-  for (const e of edges) {
-    const list = byStart.get(key(e.a));
-    if (list === undefined) byStart.set(key(e.a), [e]);
-    else list.push(e);
-  }
-  const used = new Set<Edge>();
-  const loops: Polygons = [];
-  for (const startEdge of edges) {
-    if (used.has(startEdge)) continue;
-    const ring: [number, number][] = [];
-    let current: Edge | undefined = startEdge;
-    while (current !== undefined && !used.has(current)) {
-      used.add(current);
-      ring.push(current.a);
-      const nextList: Edge[] = byStart.get(key(current.b)) ?? [];
-      current = nextList.find((e: Edge) => !used.has(e));
-    }
-    if (ring.length >= 4) loops.push(ring);
-  }
-  return loops;
+  return maskLoopsFromPredicate(nx, ny, x0, y0, pitch, inside);
 }
 
 /** Rings in a deterministic, short-travel order — the same tour rule `ops/pocket.ts` uses. */

@@ -518,6 +518,35 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         spindleRpm: pocketParams.rpm,
         air: true,
         boolean,
+        // #966/#970 — the per-level shadow check (`PocketOpOptions.aboveMaterial`'s own doc): the
+        // SAME rotated design mesh `curvedGeometry` below already reads for this setup's own frame,
+        // so every pocket/facing/through-as-pocket op this setup plans is bounded by the real
+        // ceiling, not just each node's own static `region` — #970's own finding (a ⌀6 flat planned
+        // straight through ~22 mm of the elephant's body, because the belly closing the gap above a
+        // recognised floor was never checked).
+        //
+        // KNOWN, ACCEPTED TRADE-OFF (full regression run, this branch): `curvedOpsProperty959.spec.ts`'s
+        // `sloped`/`filletedFloor` synthetic fixtures (`tests/tools/randomParts.ts`) each recognise
+        // two tiny, SPURIOUS `PocketNode`s (a ~5x8 mm sliver, a ~2.5 mm-radius circle) far from
+        // either fixture's own intended single feature — confirmed, not assumed: their own `region`
+        // polygons carry visible float-precision noise (adjacent vertices 0.002-0.003 mm apart),
+        // and a direct `dropCutterHeight` probe at points genuinely inside those regions reads back
+        // FLAT, UNTOUCHED stock (the real surface, not air) where the node claims "clear". This is
+        // a CSG-noise artefact of `slopedPocketVoid`/`filletFloorVoid`'s own large-wedge/cylinder
+        // construction, not a fault in `recogniseFeatures` applied to clean geometry, and not
+        // present in any real reference part (the tray, the organizer, the elephant/panther sticks,
+        // every `setups965`/`contourFreeingCl965`/`registration965`/`opsAcceptance959` fixture all
+        // stay green on this branch). Pre-#966, `pocket()` blindly plunged through these two slivers
+        // regardless of what was really there, which incidentally "counted" toward those two
+        // fixtures' own measured coverage; #970's own shadow check correctly refuses to — the SAME
+        // class of refusal the elephant needs, just triggered by test-fixture noise rather than a
+        // real design feature. This drops `sloped`/`filletedFloor` seeds 1-2 from ~97-98% to
+        // ~87-94% against that spec's own 95% line (its `adjudicatedFraction === 0` cut-into check
+        // is UNAFFECTED — this fix can only ever cut LESS, never gouge more, so it cannot newly
+        // violate that line). Flagged on #966/#970 for the Manager rather than patched around with
+        // an undocumented tolerance that could just as easily mask a real few-mm-scale instance of
+        // this same bug in a real job.
+        shadowMesh: curvedGeometry.triangles,
         ...(tabs === undefined ? {} : { tabs }),
         ...(oppositeSafeDepthMm === undefined ? {} : { oppositeSafeDepthMm }),
       },
@@ -666,6 +695,16 @@ export interface PlanPocketsOptions {
    * setup's freeing cut must stay off the opposite setup's already-finished surface (#965). Absent
    * for every single-setup job and the first of two — `contourOp` then behaves exactly as before. */
   oppositeSafeDepthMm?: (x: number, y: number) => number | null;
+  /**
+   * #966 — the real design mesh, ALREADY ROTATED into THIS setup's own frame (the SAME one
+   * `recogniseFeatures` built `tree` from — `planModelCam`'s own `curvedGeometry`). Threaded into
+   * every `pocket()` call (`PocketOpOptions.aboveMaterial`'s own doc) so a node's per-level cut is
+   * bounded by the true ceiling read off the mesh, not just `node.region`'s own static "air at
+   * floorZ" footprint — #966's elephant/table finding (a flat planned straight through an overhang
+   * with no floor patch of its own to correct `mouthZ`). Absent → every pre-#966 call site/test
+   * (every one of them) is unaffected: no shadow check runs, `pocket()` behaves exactly as before.
+   */
+  shadowMesh?: DropCutterMesh;
 }
 
 /**
@@ -891,6 +930,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         spindleRpm: opts.spindleRpm,
         air: opts.air,
         rapid: opts.rapid,
+        boolean: opts.boolean,
+        ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh, zOffsetMm: z0 } }),
       });
     }
     const throughNode = throughById.get(id);
@@ -918,6 +959,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
           spindleRpm: opts.spindleRpm,
           air: opts.air,
           rapid: opts.rapid,
+          boolean: opts.boolean,
+          ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh, zOffsetMm: z0 } }),
         });
       }
       return throughHole({
@@ -963,6 +1006,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       rapid: opts.rapid,
       openOutline: node.open ? tree.contour.outline : undefined,
       boolean: opts.boolean,
+      ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh, zOffsetMm: z0 } }),
     });
   };
 

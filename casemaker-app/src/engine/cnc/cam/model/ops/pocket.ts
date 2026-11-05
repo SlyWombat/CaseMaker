@@ -34,10 +34,13 @@ import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import { pocketLoops, type OffsetFn, type Polygons } from '@/engine/cnc/cam/pocket';
 import { tourNearest } from '@/engine/cnc/cam/tour';
 import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
+import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
 import { link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
 import { cutterKeyOf } from '../sequence';
 import type { PocketNode } from '../features';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
+import { dropCutterHeight, type CutterProfile, type DropCutterMesh } from '../dropcutter';
+import { maskLoopsFromPredicate } from './rasterMask';
 
 export interface PocketOpOptions {
   cutter: Tool;
@@ -68,6 +71,41 @@ export interface PocketOpOptions {
    */
   openOutline?: Polygons;
   boolean?: { union: BooleanFn; subtract: BooleanFn };
+  /**
+   * #966 — the real design mesh, ALREADY ROTATED into this setup's own frame (the SAME one
+   * `recogniseFeatures` built `node` from — `plan.ts`'s own `curvedGeometry`/`rotatedGeometryFor`,
+   * the same mesh `oppositeSurfaceSafeDepthMm`/`rough()`'s `clSurface` already read for the
+   * identical reason: the ground truth for "what is really there," not a second source).
+   *
+   * `node.region` states "cleared area at `floorZ`" (its own doc on `features.ts`) ONLY — reused
+   * UNMODIFIED at every Z level from `mouthZ` down to `floorZ`, it says nothing about a remainder
+   * surface (an organic overhang with no floor patch of its own to register a sibling `PocketNode`
+   * and correct `mouthZ` down for it) closing back over the SAME XY footprint at a higher Z. This
+   * is #966's exact finding: a ⌀6 flat planned straight through ~22 mm of solid body between two
+   * of the elephant's legs, because the belly closing the gap above `floorZ` was never checked —
+   * `tree.ts`'s own parent-correction of `mouthZ` only ever fires for a SIBLING floor-patch node,
+   * never for a curved/organic surface with no floor of its own.
+   *
+   * With this set, EVERY level this op steps (and the `open`/linking field below) is bounded by
+   * the real per-column ceiling, read with a ZERO-RADIUS point probe (`dropcutter.ts`, #957) —
+   * never this op's own cutter radius; see the implementation's own note on why a real-radius
+   * probe double-counts a node's own walls (already handled by the 2D erosion every region
+   * boundary gets) as a false shadow. Never less safe than `node.region` alone, only ever MORE
+   * restrictive. Absent → the pre-#966 behaviour, unchanged: no existing call site/test passes
+   * this, so nothing already passing is affected.
+   */
+  aboveMaterial?: {
+    mesh: DropCutterMesh;
+    marginMm?: number;
+    /**
+     * `mesh`'s triangles sit on the mesh's own absolute Z axis; `node.floorZ`/`mouthZ` (every
+     * caller in `plan.ts` already rebases them onto `Z 0 = stock top` — that file's own header
+     * note) do not. Added back onto a level's `z` before it is compared against the mesh's own
+     * drop-cutter height — `meshAbsoluteZ = z + zOffsetMm`. Absent → 0: a direct caller (a unit
+     * test, or any future one) that hands `node` mesh-absolute Z values unchanged needs no offset.
+     */
+    zOffsetMm?: number;
+  };
 }
 
 /** The Z passes from the node's mouth down to its floor, each `stepDownMm` apart (the last one shorter, never longer). */
@@ -199,7 +237,123 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
       )
     : opts.node.region;
 
-  const open = fullyReachable(region, opts.offset, toolRadius);
+  // #966 — THE SHADOW CHECK (`PocketOpOptions.aboveMaterial`'s own doc above): a column's real
+  // "ceiling" is Z-INDEPENDENT — sampled ONCE here on a grid, never re-queried per level, exactly
+  // `rough()`'s own `clSurface` reuse (that op's header: the CL surface does not depend on the
+  // current level either). `ceilingMaskAt` then stitches THIS level's own "nothing solid above
+  // here" rectilinear mask from that one grid, cheaply, same geometry `rough()`'s `maskLoops`
+  // already proved — only the inside rule differs (`rasterMask.ts`'s own header).
+  //
+  // THE PROBE IS A ZERO-RADIUS POINT, NEVER this op's own cutter radius — found the hard way
+  // (this branch's own full regression run: `curvedOpsProperty959.spec.ts`'s sloped/filletedFloor
+  // fixtures regressed from ~98% down to ~87-94% the first time this used `profileOf(opts.cutter)`):
+  // `dropCutterHeight`'s own real-radius profile is
+  // CORRECT for `oppositeSurfaceSafeDepthMm`/`rough()`'s `clSurface` because THOSE checks have no
+  // other account of the tool's own body — but `pocket()` already has one, the 2D morphological
+  // erosion/opening `fullyReachable`/`pocketLoops` apply to every region boundary, THIS node's own
+  // walls included. A node's own vertical wall, queried with the real tool radius, reads back the
+  // WALL's own full height everywhere within one radius of it (a vertical facet's points span
+  // every Z from floor to top, all within reach) — exactly the node's own, ALREADY-handled
+  // boundary, now double-counted as a false "shadow" band running the whole way round every
+  // pocket. A zero-radius point probe only ever sees whatever is EXACTLY on the vertical line
+  // through (x, y) — a genuine overhang from an unrelated feature (the belly, the slab) still
+  // reads back correctly (its triangles DO sit exactly over that column), while a nearby wall,
+  // whose own XY projection is degenerate (zero area) and essentially never meets a sampled grid
+  // point exactly, is correctly invisible here — left entirely to the existing 2D erosion to keep
+  // the tool's real body off it, as it always has.
+  //
+  // The grid is judged by the MAX of each cell's centre and four corners (finding the real top
+  // surface — the worse/higher side — never the low one, the same conservative convention
+  // `rough()`'s own sampling uses), at the SAME pitch `rough()` derives from step-over/radius.
+  // Cells with no triangle at all directly above them (open air, nothing to obstruct) are seeded
+  // at `Number.NEGATIVE_INFINITY`, not left unset — `rough()`'s own `Number.isFinite` guard exists
+  // because ITS grid only ever samples points already known to be inside a recognised region; this
+  // grid spans the WHOLE mesh's bbox near the node, where "no triangle found" simply means
+  // "nothing above, always open," not "no information."
+  const POINT_PROFILE: CutterProfile = { radiusMm: 0, flatRadiusMm: 0, kind: 'flat' };
+  let ceilingMaskAt: ((levelZ: number) => Polygons) | null = null;
+  if (opts.aboveMaterial !== undefined) {
+    const marginMm = opts.aboveMaterial.marginMm ?? ARC_CHORD_TOLERANCE_MM;
+    const zOffsetMm = opts.aboveMaterial.zOffsetMm ?? 0;
+    const mesh = opts.aboveMaterial.mesh;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const ring of region) {
+      for (const [x, y] of ring) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+    if (Number.isFinite(minX) && maxX > minX && maxY > minY) {
+      const pitch = Math.min(0.5, Math.max(0.1, Math.min(opts.stepOverMm, toolRadius) / 4));
+      const nx = Math.max(2, Math.floor((maxX - minX) / pitch + 1e-9) + 1);
+      const ny = Math.max(2, Math.floor((maxY - minY) / pitch + 1e-9) + 1);
+      const ceiling = new Float64Array(nx * ny).fill(Number.NEGATIVE_INFINITY);
+      const half = pitch / 2;
+      for (let j = 0; j < ny; j++) {
+        for (let i = 0; i < nx; i++) {
+          const x = minX + i * pitch;
+          const y = minY + j * pitch;
+          let hi = Number.NEGATIVE_INFINITY;
+          for (const [dx, dy] of [[0, 0], [-half, -half], [half, -half], [-half, half], [half, half]] as const) {
+            const sx = x + dx;
+            const sy = y + dy;
+            // Found the hard way (the SAME curved-ops regression run above — filletedFloor/sloped —
+            // still regressed the first time this sampled unconditionally, even at zero radius): a
+            // CORNER sample can stray OUTSIDE `region` into THIS SAME NODE's
+            // own wall or floor-to-wall fillet — real, non-degenerate geometry (unlike a plain
+            // vertical wall, a fillet's curved surface has true XY area, so even a zero-radius
+            // probe sees it) that sits just past the floor's own recognised boundary. A cell whose
+            // CENTRE is legitimately on the flat floor then gets the fillet's own higher reading
+            // via the max-of-5 rule, excluding a thin halo of real floor around the whole pocket's
+            // own perimeter — the node's own geometry double-counted as an external shadow, the
+            // same class of bug the zero-radius probe already fixed for a plain vertical wall, just
+            // via a surface with real area instead of a degenerate one. A sample is only judged
+            // when it falls genuinely inside `region` — never WHICH node it came from, only where
+            // it actually is: `region` is EVERY node this op may legally stand on, closed-node
+            // extension and all, so this never excludes a sample a real overhang legitimately
+            // needs caught, only one that is this node's own, already-accounted-for boundary.
+            if (!pointInPolygons(region, sx, sy)) continue;
+            const h = dropCutterHeight(POINT_PROFILE, mesh, sx, sy);
+            if (h !== null && h > hi) hi = h;
+          }
+          ceiling[j * nx + i] = hi;
+        }
+      }
+      // `ceiling` is sampled in the MESH's own absolute Z; `levelZ` arrives in whatever frame
+      // the caller's `node.floorZ`/`mouthZ` are already in (stock-top-relative, from every real
+      // `plan.ts` call site) — `zOffsetMm`'s own doc above. Converting the mesh-absolute ceiling
+      // into the LEVEL's frame (subtracting `zOffsetMm`), rather than the other way around, keeps
+      // the comparison in whichever frame the caller actually posts moves in.
+      ceilingMaskAt = (levelZ: number): Polygons =>
+        maskLoopsFromPredicate(
+          nx,
+          ny,
+          minX,
+          minY,
+          pitch,
+          (i, j) => i >= 0 && j >= 0 && i < nx && j < ny && ceiling[j * nx + i]! - zOffsetMm + marginMm < levelZ,
+        );
+    }
+  }
+
+  /** `region ∩ mask` — the same `A \ (A \ B)` trick the open-node extension above already uses;
+   * requires a real boolean, same contract as that extension (stated by the caller, never assumed). */
+  const intersectWithRegion = (mask: Polygons): Polygons => {
+    if (opts.boolean === undefined) {
+      throw new Error('cam/model/ops/pocket: aboveMaterial needs a real boolean (union/subtract) to apply the #966 shadow mask');
+    }
+    return opts.boolean.subtract(region, opts.boolean.subtract(region, mask));
+  };
+
+  // The GLOBALLY safe region — reachable all the way to `floorZ`, the most restrictive of every
+  // level's own mask (the masks are NESTED: as `z` drops, fewer columns still satisfy "ceiling
+  // below z", never more) — is what `open`/the linking field below are built from, so neither ever
+  // claims a column is cleared to `floorZ` when a shadow stopped it short.
+  const floorSafeRegion = ceilingMaskAt === null ? region : intersectWithRegion(ceilingMaskAt(opts.node.floorZ));
+
+  const open = fullyReachable(floorSafeRegion, opts.offset, toolRadius);
 
   // A's review 6622610124, finding 1: the free space EVERY same-level or level-to-level link must
   // stay inside is `open` (finding 5's own reachable area), NOT a second erosion of `region` —
@@ -237,7 +391,13 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
   const comingFrom = (): readonly [number, number] => (prevExit === null ? (opts.startFrom ?? [0, 0]) : [prevExit[0], prevExit[1]]);
 
   for (const z of levels) {
-    const steps = pocketLoops(region, toolRadius, opts.stepOverMm, opts.offset);
+    // #966 — THIS level's own true cuttable area: `region`, further restricted to wherever the
+    // real ceiling (sampled once, above) is below `z` — the masks are nested (a shallower level's
+    // mask is a SUPERSET of every deeper one's), so a column whose own ceiling sits between
+    // `floorZ` and `mouthZ` is still correctly cut down to it, then excluded from every level past
+    // that, never cut deeper than its own real obstruction allows.
+    const levelRegion = ceilingMaskAt === null ? region : intersectWithRegion(ceilingMaskAt(z));
+    const steps = pocketLoops(levelRegion, toolRadius, opts.stepOverMm, opts.offset);
     for (const [stepIndex, step] of steps.entries()) {
       const loops = orderedRings(step, comingFrom());
       for (const loop of loops) {

@@ -1,20 +1,20 @@
 /**
- * #966/#970 — THE TABLE, pinned RED-FIRST as `it.fails` (this commit): a synthetic "table" — a
- * tabletop slab held up on four legs over a baseplate, open air BETWEEN the legs at floor level,
- * SOLID slab material directly above that same open air higher up — built through the REAL
- * Manifold kernel (`tl.Manifold.cube`/`.add`, the same primitives `pocketRedFirst959.spec.ts`/
- * `966-figure-coverage`'s own synthetic fixtures use), not hand-triangulated, for a guaranteed-
- * watertight mesh.
+ * #966 — THE TABLE, pinned RED-FIRST as `it.fails` (this commit) and fixed in the next one
+ * (flipped to plain `it`, `shadowMesh` wired in): a synthetic "table" — a tabletop slab held up on
+ * four legs over a baseplate, open air BETWEEN the legs at floor level, SOLID slab material
+ * directly above that same open air higher up — built through the REAL Manifold kernel
+ * (`tl.Manifold.cube`/`.add`, the same primitives `pocketRedFirst959.spec.ts`/`966-figure-coverage`'s
+ * own synthetic fixtures use), not hand-triangulated, for a guaranteed-watertight mesh.
  *
- * THE BUG (Session E's elephant finding, #965/#966/#970 issue comments): a `PocketNode`'s own
- * `region` is only ever "cleared area AT floorZ" (`features.ts`'s own doc) — `pocket()` reuses that
- * ONE static footprint, unmodified, at EVERY Z level from `mouthZ` down to `floorZ`. `tree.ts`'s
- * own `mouthZ` correction only fires when a SIBLING floor-patch node sits directly above (the
- * parent-finding loop in `buildTree`) — never for a plain planar cap with no floor patch of its
- * own, which is exactly what a tabletop's own underside is. So the inter-leg gap, correctly
- * recognised as air AT its own floor (the baseplate's top), gets pocketed from the SLAB's own top
- * straight down to that floor — ~15 mm of solid slab included — because nothing ever told this one
- * node that the slab closes back over the same XY footprint above it.
+ * THE BUG (Session E's elephant finding, #965/#966 issue comments): a `PocketNode`'s own `region`
+ * is only ever "cleared area AT floorZ" (`features.ts`'s own doc) — `pocket()` reuses that ONE
+ * static footprint, unmodified, at EVERY Z level from `mouthZ` down to `floorZ`. `tree.ts`'s own
+ * `mouthZ` correction only fires when a SIBLING floor-patch node sits directly above (the parent-
+ * finding loop in `buildTree`) — never for a plain planar cap with no floor patch of its own, which
+ * is exactly what a tabletop's own underside is. So the inter-leg gap, correctly recognised as air
+ * AT its own floor (the baseplate's top), gets pocketed from the SLAB's own top straight down to
+ * that floor — ~15 mm of solid slab included — because nothing ever told this one node that the
+ * slab closes back over the same XY footprint above it.
  *
  * THE SOLID (local mm, before any placement): a 40 x 40 mm baseplate (Z 0–5), four 6 x 6 mm legs at
  * the four corners, inset 2 mm from each edge (Z 5–20), and a 40 x 40 mm slab (Z 20–25) — the SAME
@@ -91,7 +91,7 @@ function treeOf(): FeatureTree {
   return recogniseFeatures({ triangles: parsed(buildTableSolid()) }, { up: [0, 0, 1], stockTop: SLAB_TOP_Z, stockBottom: 0 }, tl);
 }
 
-function basePlanOptions(houseFlats: Tool[]): PlanPocketsOptions {
+function basePlanOptions(houseFlats: Tool[]): Omit<PlanPocketsOptions, 'shadowMesh'> {
   return {
     offset,
     houseFlats,
@@ -135,7 +135,7 @@ function feedsThroughSlab(result: PlanPocketsResult, stockTop: number): string[]
   return bad;
 }
 
-describe('#966/#970 the table — a pocket under an overhang the node itself never saw', () => {
+describe('#966 the table — a pocket under an overhang the node itself never saw', () => {
   it('sanity: recogniseFeatures finds exactly the one inter-leg pocket, floor at the baseplate top', () => {
     const tree = treeOf();
     expect(tree.pockets).toHaveLength(1);
@@ -157,5 +157,38 @@ describe('#966/#970 the table — a pocket under an overhang the node itself nev
     // exists inside the slab's own band, because `node.region`'s one static footprint is pocketed
     // unmodified from the slab's own top straight down to the baseplate's floor.
     expect(bad, bad.join('\n')).toEqual([]);
+  });
+
+  it('fixed: with shadowMesh wired (the real planModelCam call shape), no move cuts into the slab', () => {
+    const tree = treeOf();
+    const mesh = parsed(buildTableSolid());
+    const result = planPocketsForTree(tree, { ...basePlanOptions([flat(4, 1)]), shadowMesh: mesh });
+    const bad = feedsThroughSlab(result, tree.frame.stockTop);
+    // THE GREEN ASSERTION: not one feed move lies over the slab's own real footprint at a Z
+    // inside the slab's own band — the whole node's true interior sits under the slab everywhere
+    // (the slab's own footprint matches the baseplate's, by this fixture's own construction), so
+    // every level of this one pocket node is correctly excluded there; `pocket()`'s own pre-#966
+    // open-edge overshoot band (past the TRUE footprint, air regardless) is explicitly allowed by
+    // `feedsThroughSlab`'s own XY check — this test is about the slab, not that pre-existing,
+    // unrelated mechanism.
+    expect(bad, bad.join('\n')).toEqual([]);
+  });
+
+  it('a genuinely OPEN gap (no slab overhead) is still fully pocketed — the fix is not a blanket refusal', () => {
+    // The SAME table, minus the slab: now the inter-leg gap is open air all the way to its own
+    // mouth (the baseplate's own top is also the part's `topZ`), so the #966 shadow check must be
+    // a no-op here — proof this isn't just "shadowMesh means never cut," it only ever restricts a
+    // column that is REALLY obstructed.
+    const baseplate = tl.Manifold.cube([FOOT, FOOT, BASE_Z], false);
+    const legAt = (x: number, y: number): ManifoldInstance => tl.Manifold.cube([LEG, LEG, LEG_TOP_Z - BASE_Z], false).translate([x, y, BASE_Z]);
+    const legs = [legAt(INSET, INSET), legAt(FOOT - INSET - LEG, INSET), legAt(INSET, FOOT - INSET - LEG), legAt(FOOT - INSET - LEG, FOOT - INSET - LEG)];
+    const openSolid = legs.reduce((acc, leg) => acc.add(leg), baseplate);
+    const openMesh = parsed(openSolid);
+    const tree = recogniseFeatures({ triangles: openMesh }, { up: [0, 0, 1], stockTop: LEG_TOP_Z, stockBottom: 0 }, tl);
+    expect(tree.pockets).toHaveLength(1);
+    const result = planPocketsForTree(tree, { ...basePlanOptions([flat(4, 1)]), shadowMesh: openMesh });
+    const pocketOps = result.ops.filter((op) => op.kind === 'pocket');
+    const totalMoves = pocketOps.reduce((n, op) => n + op.outcome.ir.operations.reduce((m, o) => m + o.moves.length, 0), 0);
+    expect(totalMoves).toBeGreaterThan(0);
   });
 });
