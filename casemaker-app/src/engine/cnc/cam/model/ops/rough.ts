@@ -26,6 +26,7 @@ import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/eng
 import { pocketLoops, type OffsetFn, type Polygons } from '@/engine/cnc/cam/pocket';
 import { tourNearest } from '@/engine/cnc/cam/tour';
 import { DEFAULT_SHORT_HOP_DIAMETERS, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
+import { ridesCutSurface } from '../rideTest';
 import { cutterKeyOf } from '../sequence';
 import type { RemainderRegion } from '../features';
 import type { ClSurface } from '../clsurface';
@@ -71,35 +72,6 @@ export interface RoughOpOptions {
   materialTopAt?: (x: number, y: number) => number | null;
   /** The stock top in this op's datum — the last-resort bound past the grid (see above). */
   stockTopZMm?: number;
-}
-
-/**
- * #962 — THE SKIM'S RIDE TEST, exported for the red-first (B's review of e3f25fc7): the link's
- * CENTRE samples must sit on the skim's own cut surface (band cells only — a path leaving the
- * band crosses ground this op is not cutting, and stays a retract), and the link must stay within
- * Kiri:Moto's short hop. Without the cap a longer ride over a cut band was approved purely on its
- * centre samples — no such ride occurs on the real organizer today (every approved ride is one
- * diagonal grid step, 0.5–0.71 mm), but nothing in the test refused one.
- */
-export function skimRides(
-  from: readonly [number, number, number],
-  to: readonly [number, number, number],
-  cellTopAt: (x: number, y: number) => number | null,
-  toleranceMm: number,
-  shortHopMm: number,
-  pitchMm: number,
-): boolean {
-  const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
-  if (length > shortHopMm + 1e-9) return false;
-  const steps = Math.max(1, Math.ceil(length / Math.max(pitchMm, 1e-9)));
-  for (let s = 0; s <= steps; s++) {
-    const t = s / steps;
-    const top = cellTopAt(from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t);
-    if (top === null) return false;
-    const z = from[2] + (to[2] - from[2]) * t;
-    if (z < top - toleranceMm) return false;
-  }
-  return true;
 }
 
 /**
@@ -490,10 +462,10 @@ export function rough(opts: RoughOpOptions): OpOutcome {
       // stands below the link) converted more joins but made the plan SLOWER — 13,290.6 ->
       // 13,068.8 s against this version's 12,982.2 — because the longer stay-down feeds at the
       // cutting rate lose to the rapid they replace. THE SHORT HOP (B's review of e3f25fc7): a
-      // ride longer than Kiri's 2 x diameter is a retract by rule, cap included in `skimRides`.
-      const rides = skimRides(
-        [from.x, from.y, from.z],
-        [to.x, to.y, to.z],
+      // ride longer than Kiri's 2 x diameter is a retract by rule, cap included in `ridesCutSurface`.
+      const rides = ridesCutSurface(
+        { x: from.x, y: from.y, z: from.z },
+        { x: to.x, y: to.y, z: to.z },
         (x, y) => skimTarget(Math.round((x - min[0]) / pitch), Math.round((y - min[1]) / pitch)),
         opts.clSurface.toleranceMm,
         DEFAULT_SHORT_HOP_DIAMETERS * 2 * toolRadius,
