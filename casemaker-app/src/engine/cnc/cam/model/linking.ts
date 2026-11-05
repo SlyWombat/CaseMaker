@@ -195,6 +195,32 @@ export function linkIsClear(from: LinkPoint, to: LinkPoint, opts: LinkOptions): 
   return true;
 }
 
+/**
+ * #970 — THE DIRECT-CL PROOF FOR A STAY-DOWN (B's link audit). `linkIsClear` reads the caller's
+ * MATERIAL FIELD, and every op's field is a sampled grid: a rise narrow enough to fall between its
+ * samples is invisible, and a stay-down it approves can feed through standing material — the
+ * buried-rise class. This reads the CL surface itself (the cutter's own drop-cutter height) along
+ * the link's centre line and requires it at or below the link's interpolated z everywhere, within
+ * the surface's tolerance. A null anywhere is no proof. A caller uses the answer as a NECESSARY
+ * condition on the stay-down; the retract stays `link()`'s own.
+ */
+export function pathClClear(
+  from: LinkPoint,
+  to: LinkPoint,
+  clAt: (x: number, y: number) => number | null,
+  stepMm: number,
+  toleranceMm: number,
+): boolean {
+  const length = Math.hypot(to.x - from.x, to.y - from.y);
+  const steps = Math.max(1, Math.ceil(length / Math.max(stepMm, 1e-9)));
+  for (let s = 0; s <= steps; s++) {
+    const t = s / steps;
+    const cl = clAt(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t);
+    if (cl === null || cl > from.z + (to.z - from.z) * t + toleranceMm) return false;
+  }
+  return true;
+}
+
 function feedMove(to: LinkPoint, f: number): CamMove {
   return { kind: 'feed', x: to.x, y: to.y, z: to.z, f };
 }

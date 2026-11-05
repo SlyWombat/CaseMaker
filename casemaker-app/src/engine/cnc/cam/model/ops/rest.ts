@@ -22,7 +22,7 @@ import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { pocketLoops, type OffsetFn, type Polygons } from '@/engine/cnc/cam/pocket';
 import { tourNearest } from '@/engine/cnc/cam/tour';
-import { link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
+import { link, pathClClear, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
 import { cutterKeyOf } from '../sequence';
 import type { RemainderRegion } from '../features';
 import type { ClSurface } from '../clsurface';
@@ -240,6 +240,21 @@ export function rest(opts: RestOpOptions): OpOutcome {
   let prevExit: [number, number, number] | null = null;
   let prevLevelZ: number | null = null;
   const comingFrom = (): readonly [number, number] => (prevExit === null ? (opts.startFrom ?? [0, 0]) : [prevExit[0], prevExit[1]]);
+  /**
+   * #970 — B's link audit: the level's MATERIAL FIELD is a grid of the previous cutter's CL, and a
+   * rise between its samples is invisible to `linkIsClear`. This reads the exact previous surface
+   * where the plan's own mask does not cut (there the material still stands as the previous
+   * cutter left it); inside the mask the level plane is what stands, as `materialFor` states.
+   */
+  const exactStandingAt = (levelZ: number, x: number, y: number): number | null => {
+    const i = Math.round((x - min[0]) / pitch);
+    const j = Math.round((y - min[1]) / pitch);
+    if (i < 0 || j < 0 || i >= nx || j >= ny) return null;
+    const n = next[j * nx + i]!;
+    const p = prev[j * nx + i]!;
+    if (Number.isFinite(n) && Number.isFinite(p) && n + leave + margin < levelZ && p > levelZ) return levelZ;
+    return opts.prevClSurface.dropCutter(x, y);
+  };
 
   let cutLevels = 0;
   for (const z of depthPasses(opts.region.zTop, opts.region.zBottom, opts.stepDownMm)) {
@@ -259,7 +274,11 @@ export function rest(opts: RestOpOptions): OpOutcome {
         } else {
           const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
           const landing: LinkPoint = { x: start[0], y: start[1], z: prevExit[2] };
-          moves.push(...link(from, landing, linkOptionsFor(prevLevelZ ?? prevExit[2])));
+          const levelZ = prevLevelZ ?? prevExit[2];
+          // A negative short hop refuses the stay-down without touching the shared rule, so
+          // link() still emits its own retract (vertical legs, hop floor) where the proof fails.
+          const clClear = pathClClear(from, landing, (x, y) => exactStandingAt(levelZ, x, y), Math.max(pitch / 4, 0.05), opts.prevClSurface.toleranceMm);
+          moves.push(...link(from, landing, clClear ? linkOptionsFor(levelZ) : { ...linkOptionsFor(levelZ), shortHopMm: -1 }));
           if (z !== prevLevelZ) moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
         }
         moves.push(...traceRing(ring, z, opts.feeds.feedMmPerMin));
