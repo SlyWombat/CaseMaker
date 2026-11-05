@@ -27,10 +27,10 @@
   },
   {
    "key": "cycle",
-   "rule": "≤ 2× the vendor's (goal 1.25×)",
-   "oursValue": 180.65657376533863,
+   "rule": "≤ 2× the vendor's (goal 1.25×), cutting time plus bit changes at 91.4 s each",
+   "oursValue": 363.45657376533865,
    "vendorValue": null,
-   "ours": "3.0 min",
+   "ours": "6.1 min",
    "vendor": null,
    "state": "stated",
    "note": "no vendor program beside it",
