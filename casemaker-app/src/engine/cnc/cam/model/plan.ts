@@ -647,9 +647,18 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     if (primary === undefined) {
       throw new Error('cam/model/plan: the house states no flat end mill with a cutting diameter — a pocket cannot be planned without one');
     }
-    const ball = input.cutters.house
-      .filter((t) => t.shape === 'ball' && (cuttingDiameter(t) ?? 0) > 0)
-      .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0))[0];
+    // #986 — THE FINISHING BALL IS RANKED, NOT SIZED. Candidates are one ball per cutting
+    // diameter (the longest flute of each), reach-filtered against this setup's deepest remainder;
+    // the measured rank below prices them by finish + stamp and keeps the best. The old
+    // "largest diameter, first in catalogue order" rule stays ONLY for callers with no goal grid
+    // (nothing to measure against), where it is the documented pre-#986 behaviour.
+    const deepestRemainderMm = tree.remainder.reduce((d, r) => Math.max(d, r.zTop - r.zBottom), 0);
+    const ballCandidates = finishBallCandidates(input.cutters.house, deepestRemainderMm);
+    let ball = coverageGoal === undefined
+      ? input.cutters.house
+          .filter((t) => t.shape === 'ball' && (cuttingDiameter(t) ?? 0) > 0)
+          .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0))[0]
+      : ballCandidates[0];
     const vbit = input.cutters.house.find((t) => t.shape === 'chamfer') ?? input.cutters.house.find((t) => t.shape === 'engraving');
     if (tree.remainder.length > 0 && ball === undefined) {
       throw new Error('cam/model/plan: the part has curved remainder regions but the house states no ball nose — the finish stage cannot be planned');
@@ -661,14 +670,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // THE REVIEW'S FINDING (item 8): the ball and the V each get their OWN catalogue row — not
     // the primary flat's, reused as every tool's numbers before this.
     const toolSubstitutions: string[] = substitution === null ? [] : [substitution];
-    const ballParams = ball === undefined ? null : toolCutParams(input, ball, pocketParams);
-    if (ballParams?.note !== null && ballParams?.note !== undefined) toolSubstitutions.push(ballParams.note);
     const vbitParams = vbit === undefined ? null : toolCutParams(input, vbit, pocketParams);
     if (vbitParams?.note !== null && vbitParams?.note !== undefined) toolSubstitutions.push(vbitParams.note);
-    const cutParamsFor = (tool: Tool): CutParams => {
-      if (ball !== undefined && tool === ball && ballParams !== null) return ballParams.params;
-      if (vbit !== undefined && tool === vbit && vbitParams !== null) return vbitParams.params;
-      return pocketParams;
+    // The cut params a ball candidate would use — the same rule the chosen ball's `cutParamsFor`
+    // applies, so the measurement prices each candidate with its own catalogue row.
+    const cutParamsForBall = (b: Tool | undefined): ((tool: Tool) => CutParams) => {
+      const bp = b === undefined ? null : toolCutParams(input, b, pocketParams);
+      return (tool: Tool): CutParams => {
+        if (b !== undefined && tool === b && bp !== null) return bp.params;
+        if (vbit !== undefined && tool === vbit && vbitParams !== null) return vbitParams.params;
+        return pocketParams;
+      };
     };
 
     opts.onProgress?.({ setupIndex, op: 'sequence', fraction: 0.4 });
@@ -763,14 +775,76 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       }
     }
 
-    const statedFinishCusp = ((): number | undefined => {
+    // #985/#965 — THE STATED TOLERANCE, as a function of the ball: a stated cusp (`finishMm`)
+    // wins; a stated PITCH (`finishStepOverMm`, a width) is converted to the cusp it leaves on the
+    // FINISHING ball, whose radius the candidate supplies — never fed into `finishMm`'s height seat.
+    const statedCuspFor = (b: Tool | undefined): number | undefined => {
       if (input.tolerances.finishMm !== undefined) return input.tolerances.finishMm;
       const pitch = input.tolerances.finishStepOverMm;
-      const radiusMm = ball === undefined ? undefined : (cuttingDiameter(ball) ?? 0) / 2;
+      const radiusMm = b === undefined ? undefined : (cuttingDiameter(b) ?? 0) / 2;
       if (pitch === undefined || radiusMm === undefined || !(radiusMm > 0) || !(pitch > 0)) return undefined;
       const half = pitch / 2;
       return radiusMm - Math.sqrt(Math.max(0, radiusMm * radiusMm - half * half));
-    })();
+    };
+    // #986 — THE CURVED PIPELINE'S OPTIONS, as a function of the ball, so the SAME finish can be
+    // planned once per candidate for measurement and then once for the winner.
+    const curvedOptionsFor = (b: Tool | undefined, paramsFor: (tool: Tool) => CutParams): PlanCurvedOptions => ({
+      offset,
+      safeZMm: SAFE_Z,
+      hopZMm: HOP_Z,
+      geometry: curvedGeometry,
+      flat: primary,
+      ...(b === undefined ? {} : { ball: b }),
+      ...(vbit === undefined ? {} : { vbit }),
+      stepDownMm: pocketParams.stepDown,
+      bandMm: MODEL_STOCK_TO_LEAVE_MM,
+      // #965/#985 — the job's own tolerance, per candidate (see `statedCuspFor`): a stated cusp
+      // wins, a stated pitch converts on THIS ball's radius, and the 0.027 mm default stands only
+      // when the job states neither.
+      finishScallopMm: statedCuspFor(b) ?? DEFAULT_FINISH_SCALLOP_MM,
+      stepOverMm: pocketParams.stepOver,
+      feeds,
+      cutParamsFor: paramsFor,
+      rapid: Z1.rapidEstimate,
+      spindleRpm: pocketParams.rpm,
+      air: true,
+      edgeBreak: input.edgeBreak,
+      toolNumberFor: (tool) => tool.number ?? 1,
+      facing: input.facing ?? 'off',
+      ...(input.flatSurfaceMaxSlopeDeg === undefined ? {} : { flatSurfaceMaxSlopeDeg: input.flatSurfaceMaxSlopeDeg }),
+    });
+    // #986 — THE RANK: finish each candidate over the remainder and stamp it against the goal
+    // grid; keep the least leftover, then the cheaper cycle. The owned ball is always among the
+    // candidates (the ideal's house contains the owned set), so a superset can never score below
+    // its subset by construction. No goal grid → nothing to measure, and the pick above stands.
+    if (coverageGoal !== undefined && goalCoverage !== undefined && ballCandidates.length > 1 && tree.remainder.length > 0) {
+      let best: { tool: Tool; leftover: number; cycle: number } | null = null;
+      for (const candidate of ballCandidates) {
+        opts.signal?.throwIfAborted();
+        let measured: PlanCurvedResult;
+        try {
+          measured = planCurvedForTree(tree, curvedOptionsFor(candidate, cutParamsForBall(candidate)));
+        } catch {
+          continue; // a candidate that cannot plan this remainder is not a candidate
+        }
+        const coverage = goalCoverage(measured.ops.map((o) => o.outcome.ir));
+        if (coverage === null) continue;
+        const leftover = coverage.leftoverCells / Math.max(1, coverage.coveredCells);
+        const cycle = measured.ops.reduce(
+          (n, o) => n + o.outcome.ir.operations.reduce((k, op) => k + (op.estimatedSeconds ?? 0), 0),
+          0,
+        );
+        if (best === null || leftover < best.leftover - 1e-9 || (Math.abs(leftover - best.leftover) <= 1e-9 && cycle < best.cycle)) {
+          best = { tool: candidate, leftover, cycle };
+        }
+      }
+      if (best !== null) ball = best.tool;
+    }
+    // The chosen ball's own params and note (the note joins the substitution statements).
+    const ballParams = ball === undefined ? null : toolCutParams(input, ball, pocketParams);
+    if (ballParams?.note !== null && ballParams?.note !== undefined) toolSubstitutions.push(ballParams.note);
+    const cutParamsFor = cutParamsForBall(ball);
+
     const result = planTreePrograms(tree, {
       offset,
       pockets: {
@@ -814,35 +888,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         ...(restRegion === undefined ? {} : { restRegion }),
         ...(input.stockProbes === undefined ? {} : { stockProbes: input.stockProbes }),
       },
-      curved: {
-        geometry: curvedGeometry,
-        flat: primary,
-        ...(ball === undefined ? {} : { ball }),
-        ...(vbit === undefined ? {} : { vbit }),
-        stepDownMm: pocketParams.stepDown,
-        bandMm: MODEL_STOCK_TO_LEAVE_MM,
-        // #965 (the review session's ruling, 2026-11-05) — THE JOB'S TOLERANCE IS THE SCALLOP.
-        // No floor and no max(): a job that states 0.01 mm finishes at 0.01 mm, and the vendor's
-        // 0.027 mm (its ⌀6 ball's own 0.8 mm step-over) is the default only for a job that states
-        // no tolerance at all. (The 960 merge floored the tolerance at the default, so a finer
-        // tolerance could not tighten the scallop — that reading is withdrawn.)
-        //
-        // #985 — AND A STATED PITCH IS A PITCH. `finishStepOverMm` is a WIDTH (the old engine's
-        // finishing raster pitch); the cusp it leaves is `R − √(R² − (s/2)²)` on the finishing
-        // ball, converted here where R is known, never fed into `finishMm`'s height seat. A
-        // stated cusp wins over a pitch; absent both, the engine's default stands.
-        finishScallopMm: statedFinishCusp ?? DEFAULT_FINISH_SCALLOP_MM,
-        stepOverMm: pocketParams.stepOver,
-        feeds,
-        cutParamsFor,
-        rapid: Z1.rapidEstimate,
-        spindleRpm: pocketParams.rpm,
-        air: true,
-        edgeBreak: input.edgeBreak,
-        toolNumberFor: (tool) => tool.number ?? 1,
-        facing: input.facing ?? 'off',
-        ...(input.flatSurfaceMaxSlopeDeg === undefined ? {} : { flatSurfaceMaxSlopeDeg: input.flatSurfaceMaxSlopeDeg }),
-      },
+      curved: curvedOptionsFor(ball, cutParamsFor),
     });
     opts.signal?.throwIfAborted();
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 0.9 });
