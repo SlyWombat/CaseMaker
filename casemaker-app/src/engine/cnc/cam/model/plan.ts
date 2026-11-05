@@ -102,6 +102,7 @@ export function oppositeSurfaceSafeDepthMm(
   return surfaceWorldZ + frame.stockTop - marginMm;
 }
 import { gridPitchFor, rough, skin } from './ops/rough';
+import { maskCellsConservative, type LeftoverGrid } from './maskGrid';
 import { FLAT_SURFACE_MAX_SLOPE_DEG, flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
 import { cellPolygons, rest } from './ops/rest';
 import { DEFAULT_FINISH_SCALLOP_MM, finish, finishKindFor } from './ops/finish';
@@ -2196,11 +2197,6 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const gnx = Math.max(2, Math.floor((roughRef.bounds.max[0] - gridMin[0]) / gridPitch + 1e-9) + 1);
     const gny = Math.max(2, Math.floor((roughRef.bounds.max[1] - gridMin[1]) / gridPitch + 1e-9) + 1);
     const gridLeftover = new Uint8Array(gnx * gny);
-    const gridCellOf = (x: number, y: number): number => {
-      const i = Math.round((x - gridMin[0]) / gridPitch);
-      const j = Math.round((y - gridMin[1]) / gridPitch);
-      return i < 0 || j < 0 || i >= gnx || j >= gny ? -1 : j * gnx + i;
-    };
     for (let j = 0; j < gny; j++) {
       for (let i = 0; i < gnx; i++) {
         const x = gridMin[0] + i * gridPitch;
@@ -2219,15 +2215,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       const a = (d * Math.PI) / 4;
       maskRing.push([Math.cos(a) * ballRadiusForMask, Math.sin(a) * ballRadiusForMask]);
     }
-    const maskCells = (x: number, y: number): boolean => {
-      const k0 = gridCellOf(x, y);
-      if (k0 >= 0 && gridLeftover[k0] === 1) return true;
-      for (const [ox, oy] of maskRing) {
-        const k = gridCellOf(x + ox, y + oy);
-        if (k >= 0 && gridLeftover[k] === 1) return true;
-      }
-      return false;
-    };
+    // #970 — THE CONSERVATIVE READ (fix for cd5ec056's drop): a point counts as leftover when any
+    // cell its own coordinates touch — its floor/ceil pair in each axis — says leftover; never one
+    // `Math.round` cell. The mask may over-include; it must never drop a point the exact per-point
+    // rule keeps. `maskGrid.ts` carries the read and its red-first spec.
+    const maskGrid: LeftoverGrid = { nx: gnx, ny: gny, min: gridMin, pitch: gridPitch, cells: gridLeftover };
+    const maskCells = (x: number, y: number): boolean => maskCellsConservative(maskGrid, maskRing, x, y);
 
     // 3. THE BALL'S ONE FINAL LEVEL: a single pass at the region's depth takes the band.
     //
