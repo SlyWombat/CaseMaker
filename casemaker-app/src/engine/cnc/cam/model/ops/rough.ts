@@ -25,7 +25,7 @@ import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { pocketLoops, type OffsetFn, type Polygons } from '@/engine/cnc/cam/pocket';
 import { tourNearest } from '@/engine/cnc/cam/tour';
-import { DEFAULT_SHORT_HOP_DIAMETERS, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
+import { DEFAULT_SHORT_HOP_DIAMETERS, link, pathClClear, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
 import { followLinearCutSurface, ridesCutSurface } from '../rideTest';
 import { cutterKeyOf } from '../sequence';
 import type { RemainderRegion } from '../features';
@@ -465,17 +465,25 @@ export function rough(opts: RoughOpOptions): OpOutcome {
         );
         if (follow !== null) moves.push(...follow);
         else {
-        // THE TRANSIT HEIGHT IS THE OP'S OWN HOP PLANE, the height this join flew at before it
-        // went through `link()` — the skim visits only cells within one step-down of the region
-        // top, and the material beside them stands at that top, which `hopZMm` clears by the same
-        // margin the op's own first entry already trusts. The region's clearance plane (+5 over
-        // the part top) cost the organizer 619 s of rapid travel on these joins for margin it does
-        // not need.
-          moves.push(...link(from, to, {
+          // THE TRANSIT HEIGHT IS THE OP'S OWN HOP PLANE, the height this join flew at before it
+          // went through `link()` — the skim visits only cells within one step-down of the region
+          // top, and the material beside them stands at that top, which `hopZMm` clears by the same
+          // margin the op's own first entry already trusts. The region's clearance plane (+5 over
+          // the part top) cost the organizer 619 s of rapid travel on these joins for margin it does
+          // not need.
+          // #970 — B's link audit: the ride test above reads skimStanding, a GRID, and a rise
+          // between its samples is invisible. Prove the centre line against the CL surface itself;
+          // a negative short hop forces link()'s own retract where the CL does not clear, without
+          // touching the shared rule.
+          const skimLinkOpts: LinkOptions = {
             ...linkOptionsFor(prevLevelZ ?? start[2]),
             material: skimStanding,
             clearanceZ: opts.hopZMm,
-          }));
+          };
+          if (!pathClClear(from, to, (x, y) => opts.clSurface.dropCutter(x, y), Math.max(pitch / 4, 0.05), opts.clSurface.toleranceMm)) {
+            skimLinkOpts.shortHopMm = -1;
+          }
+          moves.push(...link(from, to, skimLinkOpts));
         }
       }
     } else {
@@ -753,7 +761,12 @@ export function skin(opts: SkinOpOptions): OpOutcome {
         } else {
           const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
           const landing: LinkPoint = { x: start[0], y: start[1], z: prevExit[2] };
-          moves.push(...link(from, landing, linkOptionsFor));
+          // #970 — B's link audit: `standing` is a GRID, and a rise between its samples is
+          // invisible to `linkIsClear`. Prove the centre line against the CL surface itself; a
+          // negative short hop refuses the stay-down without touching the shared rule, so
+          // link() still emits its own retract (vertical legs, hop floor) when the proof fails.
+          const clClear = pathClClear(from, landing, (x, y) => opts.clSurface.dropCutter(x, y), Math.max(pitch / 4, 0.05), opts.clSurface.toleranceMm);
+          moves.push(...link(from, landing, clClear ? linkOptionsFor : { ...linkOptionsFor, shortHopMm: -1 }));
           if (z !== prevExit[2]) moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
         }
         moves.push(...traceRing(ring, z, opts.feeds.feedMmPerMin));
