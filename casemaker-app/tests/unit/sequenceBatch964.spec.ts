@@ -110,34 +110,57 @@ const flat: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
 const ball: Tool = { ...flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6' }), shape: 'ball', typeText: 'Ball Nose' };
 
 function twoRegionTree(): { tree: FeatureTree; geometry: { triangles: { positions: Float32Array; indices: Uint32Array; triangleCount: number; bbox: { min: [number, number, number]; max: [number, number, number] } } } } {
-  // Two separate flat floors, side by side, well apart — no interaction, each its own remainder
-  // region, so nothing but the (removed) per-region loop order relates them.
-  const Z = -5;
+  // Two separate floors, side by side, well apart — no interaction, each its own remainder
+  // region, so nothing but the (removed) per-region loop order relates them. A CONSTANT SLOPE
+  // (this fixture's own earlier fix, 68db15ed, for #964's item 4a review) is no longer enough:
+  // the skim's own run/region tours (#962) and the coverage rest (#961) together reach a plane
+  // closely enough that the ball's finish again emits nothing — the same fixture-premise defect,
+  // one level up the stack (the manager's 961x960-rt finding). A PLANE, tilted or not, is exactly
+  // what a flat tool can conform to without limit as the stepover tightens; real CURVATURE is
+  // not — a wavy floor (amplitude 1 mm, one full period every 15 mm, so even a single ⌀6 flat
+  // pass straddles a full rise-and-fall) leaves a scallop no stepover closes, well above the
+  // 0.3 mm band, so the ball's finish always has real, curvature-driven leftover to take.
+  const Z0 = -5;
+  const AMPLITUDE = 1;
+  const WAVELENGTH = 15;
   const M = 15;
   const x0 = 0 - M, x1 = 80 + M, y0 = 0 - M, y1 = 20 + M;
+  const zAt = (x: number): number => Z0 - (AMPLITUDE / 2) * (1 - Math.cos((2 * Math.PI * x) / WAVELENGTH));
+  const N = 100; // segments across x — under 1.2 mm each, far finer than the ⌀6 flat's 3 mm radius
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (let i = 0; i <= N; i++) {
+    const x = x0 + ((x1 - x0) * i) / N;
+    const z = zAt(x);
+    positions.push(x, y0, z, x, y1, z);
+  }
+  for (let i = 0; i < N; i++) {
+    const a = 2 * i, b = 2 * i + 1, c = 2 * (i + 1), d = 2 * (i + 1) + 1;
+    indices.push(a, c, b, b, c, d);
+  }
   const geometry = {
     triangles: {
-      positions: Float32Array.from([
-        x0, y0, Z, x1, y0, Z, x1, y1, Z,
-        x0, y0, Z, x1, y1, Z, x0, y1, Z,
-      ]),
-      indices: Uint32Array.from([0, 1, 2, 3, 4, 5]),
-      triangleCount: 2,
-      bbox: { min: [x0, y0, Z] as [number, number, number], max: [x1, y1, 0] as [number, number, number] },
+      positions: Float32Array.from(positions),
+      indices: Uint32Array.from(indices),
+      triangleCount: indices.length / 3,
+      bbox: { min: [x0, y0, Z0 - AMPLITUDE] as [number, number, number], max: [x1, y1, Z0] as [number, number, number] },
     },
   };
   const fp1: Polygons = [[[0, 0], [30, 0], [30, 20], [0, 20]]];
   const fp2: Polygons = [[[50, 0], [80, 0], [80, 20], [50, 20]]];
+  // The wave's own slope range: 0 at its crests/troughs, up to atan(amplitude x pi / wavelength)
+  // at its steepest — both regions span exactly two full periods, so both reach the full range.
+  const maxSlopeDeg = (Math.atan((AMPLITUDE * Math.PI) / WAVELENGTH) * 180) / Math.PI;
   const tree: FeatureTree = {
-    frame: { up: [0, 0, 1], stockTop: 0, partTop: 0, partBottom: Z },
-    levels: [Z],
+    frame: { up: [0, 0, 1], stockTop: 0, partTop: 0, partBottom: Z0 - AMPLITUDE },
+    levels: [Z0 - AMPLITUDE],
     top: { z: 0, floors: [], area: 0 },
-    contour: { outline: [[[0, 0], [80, 0], [80, 20], [0, 20]]], area: 80 * 20, zTo: Z, frees: true, shoulders: [] },
+    contour: { outline: [[[0, 0], [80, 0], [80, 20], [0, 20]]], area: 80 * 20, zTo: Z0 - AMPLITUDE, frees: true, shoulders: [] },
     pockets: [],
     rims: [],
     remainder: [
-      { id: 'r1', footprint: fp1, area: 30 * 20, zTop: 0, zBottom: Z, triangles: new Uint32Array(), slopeDeg: [0, 0], slopeMedianDeg: 0, in: 'top' },
-      { id: 'r2', footprint: fp2, area: 30 * 20, zTop: 0, zBottom: Z, triangles: new Uint32Array(), slopeDeg: [0, 0], slopeMedianDeg: 0, in: 'top' },
+      { id: 'r1', footprint: fp1, area: 30 * 20, zTop: 0, zBottom: Z0 - AMPLITUDE, triangles: new Uint32Array(), slopeDeg: [0, maxSlopeDeg], slopeMedianDeg: maxSlopeDeg / 2, in: 'top' },
+      { id: 'r2', footprint: fp2, area: 30 * 20, zTop: 0, zBottom: Z0 - AMPLITUDE, triangles: new Uint32Array(), slopeDeg: [0, maxSlopeDeg], slopeMedianDeg: maxSlopeDeg / 2, in: 'top' },
     ],
     unreachable: [],
     report: { source: 'mesh', patches: 1, planarArea: 1200, remainderArea: 1200, tolerances: {} as never, slivers: [], notes: [] },

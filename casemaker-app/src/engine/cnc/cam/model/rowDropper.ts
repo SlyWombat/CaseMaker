@@ -26,6 +26,18 @@ export interface DroppedPoint {
 // coarsest `maxSpacingMm` is already absurd; real surfaces close long before this.
 const MAX_BISECT_DEPTH = 24;
 
+// #957 — THE KINK GUARD (the manager's ruling, withdrawing the s²/(8R) ball bound: the CL is an
+// upper envelope of contact families with upward kinks where the binding family switches — a
+// V-bit riding off a thin rib's own edge, a ball crossing a knife edge's plate/flank seam — and a
+// chord across one does not sag by a radius-derived bound, it sags by the SLOPE CHANGE itself.
+// The four quarter-segment slopes (a-q1, q1-m, m-q3, q3-b) are the cheapest local read of that:
+// a real kink shows up as a sharp change between adjacent ones, at a scale the departure check
+// (sampled only at 0.25/0.5/0.75) can miss when the true worst point sits off those fractions —
+// the rib's V-bit case dipped 0.005014 mm against the 0.005 mm tolerance at t=0.516, not 0.5.
+// Below this slope-change, two adjacent quarter-slopes are close enough that the segment is
+// smooth there and the departure check alone is trusted.
+const KINK_SLOPE_CHANGE_MM_PER_MM = 0.05;
+
 /** The surface's drop at `t` along a..b, or a throw: a null between two reachable points is a footprint notch. */
 function dropAt(surface: ClSurface, a: DroppedPoint, b: DroppedPoint, t: number): DroppedPoint {
   const x = a.x + (b.x - a.x) * t;
@@ -65,11 +77,31 @@ function bisect(surface: ClSurface, a: DroppedPoint, b: DroppedPoint, mid: Dropp
   const q3 = dropAt(surface, a, b, 0.75);
   const chord = (t: number): number => a.z + (b.z - a.z) * t;
   const departure = Math.max(Math.abs(m.z - chord(0.5)), Math.abs(q1.z - chord(0.25)), Math.abs(q3.z - chord(0.75)));
-  if (departure <= surface.toleranceMm) {
+  // #957 — THE KINK GUARD: even when every sampled point sits on the chord, the four quarter
+  // slopes may say the TRUE surface bends sharply somewhere between them — exactly where the
+  // departure check's own fixed fractions (0.25 / 0.5 / 0.75) do not look. A real kink forces
+  // one more subdivision regardless of `departure`, so the next level's own quarter points land
+  // closer to where the bend actually is.
+  const quarterLen = segLen / 4;
+  const slope = (z0: number, z1: number): number => (z1 - z0) / quarterLen;
+  const s1 = slope(a.z, q1.z);
+  const s2 = slope(q1.z, m.z);
+  const s3 = slope(m.z, q3.z);
+  const s4 = slope(q3.z, b.z);
+  const kink = Math.max(Math.abs(s2 - s1), Math.abs(s3 - s2), Math.abs(s4 - s3));
+  const noRoomLeft = segLen / 2 <= surface.minSpacingMm || depth >= MAX_BISECT_DEPTH;
+  // A real kink only MATTERS while there is still room to refine: ordinary curvature (a ball
+  // rolling off a step's own radius, a ramp) shows the same kind of slope change at a coarse
+  // scale and resolves it away on its own as segments shrink — re-sampling at the next level's
+  // own finer quarter points, not the staircase, is the right response. At the finest spacing
+  // this surface states, the departure check (not the slope change) is what decides: it is the
+  // actual proven bound, and there is nothing left to re-sample that would resolve the kink
+  // further.
+  if (departure <= surface.toleranceMm && (kink <= KINK_SLOPE_CHANGE_MM_PER_MM || noRoomLeft)) {
     out.push(b);
     return;
   }
-  if (segLen / 2 <= surface.minSpacingMm || depth >= MAX_BISECT_DEPTH) {
+  if (noRoomLeft) {
     // A real discontinuity at the finest spacing this surface states — never a diagonal, which
     // could dip the tool under the high side partway across. Hold the HIGHEST height known on the
     // stretch (either end, or a sample between them) across it, stepping vertically at each end.
@@ -84,14 +116,22 @@ function bisect(surface: ClSurface, a: DroppedPoint, b: DroppedPoint, mid: Dropp
 }
 
 /**
- * The dropped points along the straight line from `from` to `to`, against `surface` — `from`
- * itself included as the first point. Both ends' own Z is read from `surface.dropCutter`, never
- * stated by the caller, so the path and the surface it was dropped against cannot disagree.
- * Throws if either end is outside the surface's own reach — the CALLER decides the row's own
- * extent (typically the region's footprint, intersected with the raster's own bounds), not this
- * function; a row that would cross out of reach partway is the caller's own clipping to get right.
+ * #957/#960 — DIRECTION-CANONICAL (D's organizer finding): the #962 alternation walks the same
+ * row from either end depending on its parity, and the bisection's own knife-edge accept/reject
+ * decisions (`departure`/`kink` against a fixed tolerance) are sensitive enough to floating-point
+ * order that the two directions could land on different sides of the threshold at the same real
+ * point — a coarser grid flips which rows walk which way, and eight of the organizer's cells
+ * read 0.10–0.26 mm differently depending on it. `dropRow` always computes in ONE canonical
+ * direction (lower `x`, `y` breaking ties, first) and reverses the point array for the opposite
+ * request — the row's own geometry is identical either way, only which end is asked for first.
  */
 export function dropRow(surface: ClSurface, from: readonly [number, number], to: readonly [number, number]): DroppedPoint[] {
+  const canonicalFirst = from[0] < to[0] || (from[0] === to[0] && from[1] <= to[1]);
+  if (canonicalFirst) return dropRowCanonical(surface, from, to);
+  return dropRowCanonical(surface, to, from).reverse();
+}
+
+function dropRowCanonical(surface: ClSurface, from: readonly [number, number], to: readonly [number, number]): DroppedPoint[] {
   const z0 = surface.dropCutter(from[0], from[1]);
   const z1 = surface.dropCutter(to[0], to[1]);
   if (z0 === null || z1 === null) {
