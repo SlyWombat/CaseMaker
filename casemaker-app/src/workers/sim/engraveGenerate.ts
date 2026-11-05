@@ -4958,11 +4958,14 @@ export async function buildModelPlanInputForGoal(
         ? shop.mount?.fixture ?? null
         : null;
 
-  // The same owned-tool list the reach check above already built (house cutters only — a goal's
-  // CAM has never read the catalogue, `ModelPlanInput.cutters.catalogue` stays empty and
-  // `planModelCam`'s own notes say so when the caller supplies one).
+  // The owned set: the shop's own tools and this job's cutter — what the plan uses by default.
   const house: Tool[] = [...(shop.tools ?? []).map((e) => e.tool), tool];
-  const cutters: CutterCandidates = { house, catalogue: [] };
+  // #961 (the maintainer's 11-05 ruling, point 1) — THE IDEAL IS PLANNED FROM THE FULL CATALOGUE,
+  // the tool library every picker lists (`getTools()`: built-ins + the house service's `cat:` rows
+  // + the shop's inventory). A shop tool that is not in the catalogue is owned and already in
+  // `house`; `planTwoOutcomes` de-duplicates by key and skips the ideal run when the catalogue
+  // adds nothing the owned set did not carry.
+  const cutters: CutterCandidates = { house, catalogue: getTools().map((entry) => entry.tool) };
 
   // #985 — THE SCALLOP SEAT HOLDS A CUSP, THE PITCH HAS ITS OWN SEAT. The model engine's
   // `tolerances.finishMm` is the ball's cusp HEIGHT (the ruling makes it decide the finish), and
