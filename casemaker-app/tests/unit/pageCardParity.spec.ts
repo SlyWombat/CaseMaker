@@ -89,8 +89,11 @@ describe('#964 a page card’s run directory becomes the scorer’s input', () =
       const vendor: ProgramScore = {
         ...direct,
         label: 'reference',
-        // The reference's file is the vendor's own program: its cycle is the file's own TIME.
+        // The reference's file is the vendor's own program: the same #927 estimator, and the
+        // header TIME is a printed fact, not the reference.
         cycleSeconds: direct.cycleSeconds * 1.1,
+        toolChanges: 0,
+        headerTimeSeconds: 50 * 60,
         cuttersOwned: null,
         postsAsFiled: null,
       };

@@ -33,7 +33,7 @@ import path from 'node:path';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
 import { parseStl, type ParsedMesh } from '@/engine/import/stlParser';
 import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
@@ -53,6 +53,7 @@ import { vToolAllowance } from '@/engine/cnc/engrave/edgeBreak';
 import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { measurePostedProgram, combinePostedFacts } from '../tools/postedFacts';
 import { scoreSevenLines, type CutIntoScore, type ProgramScore } from '../tools/sevenLines';
+import { clearMakeraCatalogue, installMakeraCatalogue } from '../tools/makeraCatalogue';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 
@@ -60,6 +61,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '..', '..');
 const REPO = join(APP, '..');
 const JOBS = join(REPO, 'docs', 'bench', '2026-10-28-z1-real-jobs', 'jobs');
+
+// #964 ruling (2026-11-04): the gate plans on the FULL Makera catalogue, so the ⌀6 flat and the
+// balls are fed from the vendor's own rows, not the compiled table's largest-covered fallback.
+// Local-only data; without it the figure cases skip with the reason rather than measuring a
+// conservative placeholder as the product.
+const CATALOGUE = installMakeraCatalogue();
+afterAll(() => clearMakeraCatalogue());
 
 interface FigureCase {
   name: string;
@@ -73,9 +81,11 @@ const FIGURES: FigureCase[] = [
 ];
 
 /** The house's cutters for the stick: two flats for the rough/rest and two balls for the finish. */
-const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-const FLAT3175: Tool = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' });
-const BALL2: Tool = { ...flatEndMill(2, { number: 3, id: 'ball-2', name: 'ball-2' }), typeText: 'Ball Nose', shape: 'ball' };
+// Makera catalogue ids for the cutters the catalogue carries; the 0.5 mm ball has no row and keeps
+// the largest-covered-row fallback (stated in the plan's notes), as the ruling allows.
+const FLAT6: Tool = flatEndMill(6, { number: 1, id: '111031606032', name: 'flat-6' });
+const FLAT3175: Tool = flatEndMill(3.175, { number: 2, id: '111011313825', name: 'flat-3.175' });
+const BALL2: Tool = { ...flatEndMill(2, { number: 3, id: '131012203812', name: 'ball-2' }), typeText: 'Ball Nose', shape: 'ball' };
 const BALL05: Tool = { ...flatEndMill(0.5, { number: 4, id: 'ball-0.5', name: 'ball-0.5' }), typeText: 'Ball Nose', shape: 'ball' };
 const HOUSE = [FLAT6, FLAT3175, BALL2, BALL05];
 
@@ -192,13 +202,15 @@ function wholeSurfaceTop(programs: readonly { ir: ToolpathIR; text: string }[], 
 for (const figure of FIGURES) {
   const stlPath = process.env[figure.env];
   const jobPath = join(JOBS, figure.jobFile);
-  const have = stlPath !== undefined && fs.existsSync(stlPath) && fs.existsSync(jobPath);
+  const have = stlPath !== undefined && fs.existsSync(stlPath) && fs.existsSync(jobPath) && CATALOGUE.installed;
   const reason =
     stlPath === undefined
       ? ` — set ${figure.env} to the local mesh`
       : !fs.existsSync(stlPath)
         ? ` — missing ${stlPath}`
-        : '';
+        : !CATALOGUE.installed
+          ? ` — no Makera catalogue (${CATALOGUE.reason})`
+          : '';
 
   describe.skipIf(!have)(`#965 the ${figure.name} at stick scale${reason}`, () => {
     it('plans, posts, verifies and scores the whole surface through cam/model', async () => {
@@ -258,6 +270,9 @@ for (const figure of FIGURES) {
         coverage,
         cutInto,
         cycleSeconds: facts.cycleSeconds,
+        // One manual bit change between consecutive posted runs; each run here is one cutter.
+        toolChanges: Math.max(0, programs.length - 1),
+        headerTimeSeconds: null,
         airFraction: facts.airFraction,
         rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
         cutters: facts.cutters.length,
@@ -281,6 +296,13 @@ for (const figure of FIGURES) {
     }, 600_000);
   });
 }
+
+describe.skipIf(CATALOGUE.installed)('#964 — the catalogue door (the #964 ruling)', () => {
+  it('states why: the figures plan on the full Makera catalogue (CM_CATALOGUE or <Makerables root>/catalogue.json)', () => {
+    expect(CATALOGUE.installed).toBe(false);
+    console.log(`catalogue not installed: ${CATALOGUE.reason}`);
+  });
+});
 
 describe.skipIf(process.env.CM_ELEPHANT_STL !== undefined || process.env.CM_PANTHER_STL !== undefined)(
   '#965 acceptance — not run',

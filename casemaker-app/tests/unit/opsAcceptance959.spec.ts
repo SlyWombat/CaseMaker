@@ -46,7 +46,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
 import { stepToMesh } from '@/engine/import/stepMesh';
@@ -60,6 +60,7 @@ import { pocket } from '@/engine/cnc/cam/model/ops/pocket';
 import { measurePostedProgram, combinePostedFacts } from '../tools/postedFacts';
 import { scoreSevenLines, type CutIntoScore, type ProgramScore, type SevenLineCard } from '../tools/sevenLines';
 import { makerablesRoot, readMakerablesManifest, resolveMakerablesCard } from '../tools/makerables';
+import { clearMakeraCatalogue, installMakeraCatalogue } from '../tools/makeraCatalogue';
 import { measureVendorCard } from '../tools/cardMeasurement';
 import { planModelCam, planPocketsForTree, planTreePrograms, type ModelPlanInput, type PlanPocketsResult, type SetupPlan } from '@/engine/cnc/cam/model/plan';
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
@@ -188,13 +189,15 @@ async function placedTree(file: string, stock: [number, number], modelTop: numbe
 // ball, T4 3.175 90° chamfer (tip 0.1) — the real four, not the two this spec carried before: with
 // no ball or chamfer candidate, `chooseSequence` could never reproduce the 99.6 % of the scoop's
 // own cells E found the vendor's ⌀6 ball cutting, which is the coverage gap in one line.
-const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 32 });
-const FLAT3175 = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 25 });
-const BALL6: Tool = { ...flatEndMill(6, { number: 3, id: 'ball-6', name: 'ball-6', fluteLength: 32 }), typeText: 'Ball Nose', shape: 'ball' };
+// The ids ARE Makera's catalogue ids (the vendor NC's T1-T4 records), so the installed catalogue
+// answers each cutter by id — geometry alone would send the ball through the flat proxy.
+const FLAT6 = flatEndMill(6, { number: 1, id: '111031606032', name: 'flat-6', fluteLength: 32 });
+const FLAT3175 = flatEndMill(3.175, { number: 2, id: '111011313825', name: 'flat-3.175', fluteLength: 25 });
+const BALL6: Tool = { ...flatEndMill(6, { number: 3, id: '131032606032', name: 'ball-6', fluteLength: 32 }), typeText: 'Ball Nose', shape: 'ball' };
 /** The vendor's 90° chamfer from the Makerables headers (⌀3.175, tip 0.1) — the bit the job's edge
  * break is cut with, and `edgeBreakAllowance` below's own source. */
 const CHAMFER3175: Tool = {
-  ...flatEndMill(3.175, { number: 4, id: 'chamfer-90', name: '3.175mm*90º Chamfer' }),
+  ...flatEndMill(3.175, { number: 4, id: '122111013890', name: '3.175mm*90º Chamfer' }),
   typeText: 'V-Bit',
   shape: 'chamfer',
   tipDiameter: 0.1,
@@ -418,6 +421,9 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
       coverage,
       cutInto,
       cycleSeconds: facts.cycleSeconds,
+      // One manual bit change between consecutive posted runs; each run here is one cutter.
+      toolChanges: Math.max(0, programs.length - 1),
+      headerTimeSeconds: null,
       airFraction: facts.airFraction,
       rapidsPer1000FeedLines: facts.rapidsPer1000FeedLines,
       cutters: facts.cutters.length,
@@ -956,7 +962,7 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
     expect(result.unreachable).toEqual([]);
     expect(result.ops).toHaveLength(2);
     const pocketOp = result.ops.find((op) => op.kind === 'pocket');
-    expect(pocketOp?.outcome.cutter).toBe('flat-3.175');
+    expect(pocketOp?.outcome.cutter).toBe(FLAT3175.id);
   });
 
   // E's run on 9421a64b, regression 2: a node too narrow for every house cutter is a stated
@@ -975,7 +981,14 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
 const TRAY = process.env.CM_959_TRAY_STEP;
 const ORGANIZER = process.env.CM_959_ORGANIZER_STEP;
 
-describe.skipIf(TRAY === undefined)('#959 acceptance — tool tray 70, the WHOLE tree through the one interface', () => {
+// #964 ruling (2026-11-04): the acceptance installs the FULL Makera catalogue, so the real parts
+// are priced on the vendor's own rows (⌀6 flat 111031606032 at F1000, the ⌀6 ball at F500) rather
+// than the compiled table's 3.2 mm fallback. Local-only data; when it is absent the real-part
+// cases skip with the reason instead of silently planning on the fallback.
+const CATALOGUE = installMakeraCatalogue();
+afterAll(() => clearMakeraCatalogue());
+
+describe.skipIf(TRAY === undefined || !CATALOGUE.installed)('#959 acceptance — tool tray 70, the WHOLE tree through the one interface', () => {
   it('plans pockets, the curved remainder and rims together, with the freeing contour last and every program posted', async () => {
     const { tree, mesh } = await placedTree(TRAY!, [110, 140], -1.2);
     let min: [number, number, number] = [Infinity, Infinity, Infinity];
@@ -1037,7 +1050,7 @@ describe.skipIf(TRAY === undefined)('#959 acceptance — tool tray 70, the WHOLE
   }, 900_000);
 });
 
-describe.skipIf(TRAY === undefined)('#959 acceptance — tool tray 70, the whole plan through the one entry', () => {
+describe.skipIf(TRAY === undefined || !CATALOGUE.installed)('#959 acceptance — tool tray 70, the whole plan through the one entry', () => {
   it('plans the real part through planModelCam — pockets, the curved remainder and the rims — and posts every run', async () => {
     const placed = await placedTree(TRAY!, [110, 140], -1.2);
     const { setup, runs } = await planCard(placed, { length: 110, width: 140 });
@@ -1060,7 +1073,7 @@ describe.skipIf(TRAY === undefined)('#959 acceptance — tool tray 70, the whole
   }, 1_800_000);
 });
 
-describe.skipIf(ORGANIZER === undefined)('#959 acceptance — tool organizer, the whole plan through the one entry', () => {
+describe.skipIf(ORGANIZER === undefined || !CATALOGUE.installed)('#959 acceptance — tool organizer, the whole plan through the one entry', () => {
   it('plans the real part through planModelCam — pockets, the curved remainder and the rims — and posts every run', async () => {
     const placed = await placedTree(ORGANIZER!, [170, 170], -0.8);
     const { setup, runs } = await planCard(placed, { length: 170, width: 170 });
@@ -1076,6 +1089,13 @@ describe.skipIf(ORGANIZER === undefined)('#959 acceptance — tool organizer, th
 describe.skipIf(TRAY !== undefined || ORGANIZER !== undefined)('#959 acceptance — not run', () => {
   it('states why: needs CM_959_TRAY_STEP / CM_959_ORGANIZER_STEP (the licensed Makerables STEPs, on dave-1)', () => {
     expect(TRAY ?? ORGANIZER).toBeUndefined();
+  });
+});
+
+describe.skipIf(CATALOGUE.installed)('#964 — the catalogue door (the #964 ruling)', () => {
+  it('states why: the acceptance installs the full Makera catalogue (CM_CATALOGUE or <Makerables root>/catalogue.json)', () => {
+    expect(CATALOGUE.installed).toBe(false);
+    console.log(`catalogue not installed: ${CATALOGUE.reason}`);
   });
 });
 
