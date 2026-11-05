@@ -105,8 +105,10 @@ def article(card, facts, part, title, sha, label, idx):
     extra = ''
     if unreach:
         extra += f'<p class="notes">{len(unreach)} pocket(s) not cut: {unreach[0]}' + (f' (+{len(unreach) - 1} more)' if len(unreach) > 1 else '') + '</p>'
-    for m in notes:
+    for m in notes[:3]:
         extra += f'<p class="notes">{m}</p>'
+    if len(notes) > 3:
+        extra += f'<p class="notes">… and {len(notes) - 3} more stated notes (the run\'s own facts).</p>'
     return f'''<article class="job" id="{part}-cand">
   <div class="job-head">
     <p class="eyebrow">candidate engine · {label} · not on main · the old engine beside it and Makera Studio’s own NC</p>
