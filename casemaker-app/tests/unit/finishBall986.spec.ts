@@ -34,16 +34,19 @@ describe('#986 the finishing ball candidates', () => {
     ];
     const candidates = finishBallCandidates(house, 20);
     // 6 mm flutes: 12/18/32 → one candidate, the 32 mm one; 4 mm × 32 reaches; 2 × 6 and 0.5 × 2
-    // do NOT reach 20 mm and are filtered out.
-    expect(candidates.map((t) => t.id)).toEqual(['6x32', '4x32']);
+    // do NOT reach 20 mm and are filtered out. The pre-#986 pick (the ⌀6 × 12, first in order) is
+    // APPENDED last so the plan the old rule chose is always measured (C's #986 pre-read).
+    expect(candidates.map((t) => t.id)).toEqual(['6x32', '4x32', '131032605012']);
   });
 
   it('drops a ball that cannot reach the deepest remainder — the panther’s 26 mm', () => {
     const house = [ball(6, 12, '131032605012'), ball(4, 32, '4x32'), ball(2, 6, 'ball-2'), ball(1, 30.5, '161032105031')];
     const candidates = finishBallCandidates(house, 26);
-    // The ⌀6 × 12 the old rule picked first is gone: its flute cannot descend 26 mm.
-    expect(candidates.map((t) => t.id).sort()).toEqual(['161032105031', '4x32']);
-    expect(candidates.some((t) => t.id === '131032605012')).toBe(false);
+    // The ⌀6 × 12 the old rule picked first is NOT the list's choice any more — it cannot descend
+    // 26 mm — but it is appended last as the pre-#986 pick, so the rank still measures it and can
+    // state why it lost.
+    expect(candidates.map((t) => t.id)).toEqual(['4x32', '161032105031', '131032605012']);
+    expect(candidates[0]!.id).not.toBe('131032605012');
   });
 
   it('when nothing reaches, states the one longest ball instead of picking by size', () => {

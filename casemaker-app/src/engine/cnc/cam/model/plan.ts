@@ -273,9 +273,18 @@ export function finishBallCandidates(house: readonly Tool[], deepestMm: number):
   }
   const all = [...byDiameter.values()];
   const reaching = all.filter((tool) => (tool.fluteLength ?? 0) + 1e-9 >= deepestMm);
-  if (reaching.length > 0) return reaching;
+  // #986 (C's pre-read) — THE SUPERSET HOLDS BY DIAMETER, NOT BY TOOL OBJECT: two sets can differ
+  // in which balls their reach filters keep, so the PRE-#986 PICK (largest diameter, first in the
+  // list — the rule this issue replaces) is appended as a candidate whenever the filtered list
+  // does not already carry it. The plan the old rule chose is therefore always measured, and a
+  // superset can never lose to its subset through a fallback list the subset never had.
+  const legacy = house
+    .filter((t) => t.shape === 'ball' && (cuttingDiameter(t) ?? 0) > 0)
+    .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0))[0];
+  const withLegacy = (list: Tool[]): Tool[] => (legacy === undefined || list.includes(legacy) ? list : [...list, legacy]);
+  if (reaching.length > 0) return withLegacy(reaching);
   const longest = [...all].sort((a, b) => (b.fluteLength ?? 0) - (a.fluteLength ?? 0))[0];
-  return longest === undefined ? [] : [longest];
+  return withLegacy(longest === undefined ? [] : [longest]);
 }
 
 export interface PlanOutcome {
@@ -819,7 +828,16 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // its subset by construction. No goal grid → nothing to measure, and the pick above stands.
     if (coverageGoal !== undefined && goalCoverage !== undefined && ballCandidates.length > 1 && tree.remainder.length > 0) {
       let best: { tool: Tool; leftover: number; cycle: number } | null = null;
-      for (const candidate of ballCandidates) {
+      // #986 — MEASURE THE LIKELY WINNER FIRST, THEN STOP AT THE FIRST NON-IMPROVEMENT. Candidates
+      // are ordered FINE → COARSE, because leftover is monotone in the diameter: a smaller ball
+      // reaches deeper into a crease, so it leaves no more than a larger one on the same remainder.
+      // The finest reaching ball is therefore the likely winner and is measured first; the first
+      // candidate that fails to beat the best ends the search, because every candidate after it is
+      // coarser still. Two finishes per plan is the normal case (the panther's target 200–300 s
+      // for the ideal); the monotone argument is stated here so the early exit is auditable, and a
+      // candidate that does TIE keeps the cycle tie-break.
+      const ordered = [...ballCandidates].sort((a, b) => (cuttingDiameter(a) ?? 0) - (cuttingDiameter(b) ?? 0));
+      for (const candidate of ordered) {
         opts.signal?.throwIfAborted();
         let measured: PlanCurvedResult;
         try {
@@ -836,7 +854,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         );
         if (best === null || leftover < best.leftover - 1e-9 || (Math.abs(leftover - best.leftover) <= 1e-9 && cycle < best.cycle)) {
           best = { tool: candidate, leftover, cycle };
+          continue;
         }
+        // Coarser and not better: stop. Every remaining candidate is coarser still.
+        if (leftover > best.leftover + 1e-9) break;
       }
       if (best !== null) ball = best.tool;
     }
