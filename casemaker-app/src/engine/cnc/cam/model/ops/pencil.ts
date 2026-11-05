@@ -28,6 +28,12 @@ export interface PencilOpOptions {
   clSurface: ClSurface;
   /** How much lower than both neighbours a cell must sit to count as the crease, mm. Default 0.02. */
   creaseMm?: number;
+  /**
+   * #965 — THE CREASE ADMISSION (the manager's ruling, beside `reach()`): called at every dip with
+   * the dipping axis's own wall slopes (degrees from horizontal, left/right along that axis). A
+   * false answer leaves the cell out of the valley — the cutter is not admitted at that crease.
+   */
+  admitCrease?: (i: number, j: number, z: number, leftSlopeDeg: number, rightSlopeDeg: number) => boolean;
   /** The sampling grid, mm. Default min(0.5, max(0.1, radius / 2)). */
   gridPitchMm?: number;
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
@@ -37,6 +43,42 @@ export interface PencilOpOptions {
   spindleRpm: number;
   air: boolean;
   rapid: RapidEstimate;
+}
+
+/**
+ * #965 (C's review of the crease pass, 2026-11-05) — THE CHEAP VALLEY PRE-GATE: does the surface
+ * hold ANY crease cell (the pencil's own dip rule) over the region'"'"'s bounds? One scan of the
+ * caller'"'"'s OWN CL, no CL build of its own — a crease pass on a surface with no valley gets no
+ * V CL build, no pencil grid and no line at all.
+ */
+export function hasValley(
+  cl: ClSurface,
+  bounds: { min: [number, number]; max: [number, number] },
+  pitchMm: number,
+  creaseMm = 0.02,
+): boolean {
+  const { min, max } = bounds;
+  const pitch = Math.max(pitchMm, 1e-6);
+  const nx = Math.max(2, Math.floor((max[0] - min[0]) / pitch + 1e-9) + 1);
+  const ny = Math.max(2, Math.floor((max[1] - min[1]) / pitch + 1e-9) + 1);
+  const h = new Float64Array(nx * ny).fill(Number.NaN);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const z = cl.dropCutter(min[0] + i * pitch, min[1] + j * pitch);
+      if (z !== null) h[j * nx + i] = z;
+    }
+  }
+  for (let j = 1; j < ny - 1; j++) {
+    for (let i = 1; i < nx - 1; i++) {
+      const k = j * nx + i;
+      const z = h[k]!;
+      if (!Number.isFinite(z)) continue;
+      const dipX = Number.isFinite(h[k - 1]!) && Number.isFinite(h[k + 1]!) && Math.min(h[k - 1]!, h[k + 1]!) - z > creaseMm;
+      const dipY = Number.isFinite(h[k - nx]!) && Number.isFinite(h[k + nx]!) && Math.min(h[k - nx]!, h[k + nx]!) - z > creaseMm;
+      if (dipX || dipY) return true;
+    }
+  }
+  return false;
 }
 
 type Cell = { i: number; j: number; z: number };
@@ -135,7 +177,15 @@ export function pencil(opts: PencilOpOptions): OpOutcome {
       // nearly constant, so the other axis has no dip and the cell is not double-counted there.
       const dipX = Number.isFinite(left) && Number.isFinite(right) && Math.min(left, right) - z > creaseMm;
       const dipY = Number.isFinite(down) && Number.isFinite(up) && Math.min(down, up) - z > creaseMm;
-      if (dipX || dipY) valley[k] = 1;
+      if (dipX || dipY) {
+        if (opts.admitCrease === undefined) valley[k] = 1;
+        else {
+          const slope = (dz: number): number => (Math.atan(dz / pitch) * 180) / Math.PI;
+          const okX = dipX && opts.admitCrease(i, j, z, slope(left - z), slope(right - z));
+          const okY = dipY && opts.admitCrease(i, j, z, slope(down - z), slope(up - z));
+          if (okX || okY) valley[k] = 1;
+        }
+      }
     }
   }
 

@@ -121,6 +121,37 @@ export function clSurface(geometry: FeatureSource, region: RemainderRegion, cutt
 }
 
 /**
+ * #965 (the review session's step 2; the manager's 2026-11-05 ruling) — THE CREASE ADMISSION, the
+ * groove's own rule, BESIDE `reach()` and never replacing it: `reach()` is the FACE rule (a V's
+ * apex touches only a slope shallower than its flank — a V cutting a surface); a V riding a
+ * CREASE is the opposite case, admitted where BOTH walls are steeper than 90° − the half-angle
+ * (the flanks clear the walls) and the groove's width at the leftover depth — `d/tanθL + d/tanθR`
+ * — is within the V's width there (`2·(tipRadius + d·tanθ)`), so the flanks stay out of the walls.
+ */
+export function creaseFits(
+  cutter: Tool,
+  crease: { leftSlopeDeg: number; rightSlopeDeg: number; depthMm: number },
+): ReachResult {
+  const profile = profileOf(cutter);
+  if (profile === null || profile.kind !== 'cone' || profile.tanHalfAngle === undefined) {
+    return { reachable: false, note: `${cutter.name || cutter.shape}: not a V — the crease rule is the V's own` };
+  }
+  const flankDeg = 90 - (Math.atan(profile.tanHalfAngle) * 180) / Math.PI;
+  const shallower = Math.min(crease.leftSlopeDeg, crease.rightSlopeDeg);
+  if (shallower < flankDeg) {
+    return { reachable: false, note: `a wall (${shallower.toFixed(1)}° from horizontal) is shallower than the V's flank (${flankDeg.toFixed(1)}°)` };
+  }
+  const d = Math.max(0, crease.depthMm);
+  const rad = (deg: number): number => (deg * Math.PI) / 180;
+  const grooveWidth = d / Math.tan(rad(crease.leftSlopeDeg)) + d / Math.tan(rad(crease.rightSlopeDeg));
+  const vWidth = 2 * (profile.flatRadiusMm + d * profile.tanHalfAngle);
+  if (grooveWidth > vWidth + 1e-9) {
+    return { reachable: false, note: `the groove is ${grooveWidth.toFixed(2)} mm wide at ${d.toFixed(2)} mm depth, wider than the V (${vWidth.toFixed(2)} mm) there` };
+  }
+  return { reachable: true };
+}
+
+/**
  * A V/chamfer cutter's apex can only touch a slope shallower than its own flank angle from
  * horizontal (`90° − half-angle`) without the flank interfering — §2's derivation, carried into the
  * `dropcutter.ts` profile as `flatRadiusMm`/`tanHalfAngle`. Flat/ball/bull have no such limit within

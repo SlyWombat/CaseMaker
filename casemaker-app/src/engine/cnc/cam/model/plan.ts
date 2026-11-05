@@ -42,7 +42,7 @@ import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, 
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, type SetupRegistration } from './setups';
 import { pocket } from './ops/pocket';
-import { clSurface } from './clsurface';
+import { clSurface, creaseFits } from './clsurface';
 import { dropCutterHeight, profileOf, type CutterProfile, type DropCutterMesh } from './dropcutter';
 import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
 
@@ -106,7 +106,7 @@ import { maskCellsExact } from './finishMask';
 import { FLAT_SURFACE_MAX_SLOPE_DEG, flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
 import { cellPolygons, rest } from './ops/rest';
 import { DEFAULT_FINISH_SCALLOP_MM, finish, finishKindFor } from './ops/finish';
-import { pencil } from './ops/pencil';
+import { hasValley, pencil } from './ops/pencil';
 import { chamfer } from './ops/chamfer';
 import { contour as contourOp, throughHole } from './ops/contour';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
@@ -602,9 +602,18 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     if (primary === undefined) {
       throw new Error('cam/model/plan: the house states no flat end mill with a cutting diameter — a pocket cannot be planned without one');
     }
-    const ball = input.cutters.house
+    const balls = input.cutters.house
       .filter((t) => t.shape === 'ball' && (cuttingDiameter(t) ?? 0) > 0)
-      .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0))[0];
+      .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0));
+    const ball = balls[0];
+    // #965 (the review session's ruling, item 3.1) — THE REST BALL: the next-smaller ball, admitted
+    // only on a STATED reach that covers the deepest remainder. The vendor's long ⌀1
+    // (6*1*30.5mm Ball Nose Engraving, 161032105031) states a 30.5 mm flute and reaches the
+    // figures' 26 mm relief; the house's 0.5 ball states no flute length at all and failed on
+    // reach in the review's own measurement, so it can never qualify. No new op: the rest runs the
+    // finish's machinery over the ball's own leftover mask.
+    const deepestRemainderMm = tree.remainder.reduce((m, r) => Math.max(m, r.zTop - r.zBottom), 0);
+    const restBall = balls.find((t) => t !== ball && (t.fluteLength ?? 0) >= deepestRemainderMm - 1e-9);
     const vbit = input.cutters.house.find((t) => t.shape === 'chamfer') ?? input.cutters.house.find((t) => t.shape === 'engraving');
     if (tree.remainder.length > 0 && ball === undefined) {
       throw new Error('cam/model/plan: the part has curved remainder regions but the house states no ball nose — the finish stage cannot be planned');
@@ -620,8 +629,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     if (ballParams?.note !== null && ballParams?.note !== undefined) toolSubstitutions.push(ballParams.note);
     const vbitParams = vbit === undefined ? null : toolCutParams(input, vbit, pocketParams);
     if (vbitParams?.note !== null && vbitParams?.note !== undefined) toolSubstitutions.push(vbitParams.note);
+    const restBallParams = restBall === undefined ? null : toolCutParams(input, restBall, pocketParams);
+    if (restBallParams?.note !== null && restBallParams?.note !== undefined) toolSubstitutions.push(restBallParams.note);
     const cutParamsFor = (tool: Tool): CutParams => {
       if (ball !== undefined && tool === ball && ballParams !== null) return ballParams.params;
+      if (restBall !== undefined && tool === restBall && restBallParams !== null) return restBallParams.params;
       if (vbit !== undefined && tool === vbit && vbitParams !== null) return vbitParams.params;
       return pocketParams;
     };
@@ -773,6 +785,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         geometry: curvedGeometry,
         flat: primary,
         ...(ball === undefined ? {} : { ball }),
+        ...(restBall === undefined ? {} : { restBall }),
         ...(vbit === undefined ? {} : { vbit }),
         stepDownMm: pocketParams.stepDown,
         bandMm: MODEL_STOCK_TO_LEAVE_MM,
@@ -1952,6 +1965,13 @@ export interface PlanCurvedOptions {
   flat: Tool;
   /** The ball. Absent is allowed when the tree has no remainder to finish — the region loop refuses by name the moment one needs it. */
   ball?: Tool;
+  /**
+   * #965 (the review session's ruling, item 3.1) — THE REST BALL: a smaller ball whose stated reach
+   * covers the remainder's depth (the vendor's long ⌀1). It runs the finish's machinery a second
+   * time over the cells where the main ball's OWN CL still stands above the design by more than the
+   * band, at its own radius' footprint — the sequence's rest rule, no new op.
+   */
+  restBall?: Tool;
   /** The V. Absent is allowed when the job states no edge break — the rim stage is then not planned at
    * all (the property specs' house holds no V and asks for none). */
   vbit?: Tool;
@@ -2361,6 +2381,116 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       air: opts.air,
       rapid: opts.rapid,
     }));
+
+    let restBallCl: ReturnType<typeof clSurface> | undefined;
+    // 3b. THE REST BALL (#965, the review session's ruling item 3.1): where the ball's OWN CL still
+    // stands above the design by more than the band — its fillet at a wall foot, the slots its
+    // radius cannot enter — a smaller ball whose stated reach covers this region runs the same
+    // finish machinery at its own CL, restricted to that mask and to its own radius' footprint.
+    // The sequence's rest rule, no new op; the reach is the one that qualified it.
+    if (opts.restBall !== undefined) {
+      const restBallTool = opts.restBall;
+      const ballMaskRadiusMm = (cuttingDiameter(restBallTool) ?? 0) / 2;
+      const restRing: [number, number][] = [];
+      for (let d = 0; d < 8; d++) {
+        const a = (d * Math.PI) / 4;
+        restRing.push([Math.cos(a) * ballMaskRadiusMm, Math.sin(a) * ballMaskRadiusMm]);
+      }
+      // The ball's own CL is this op's datum; the design's top is the mesh's absolute Z — the
+      // same +z0 conversion the flat's own leftover rule makes above.
+      const afterBallLeftover = (x: number, y: number): boolean => {
+        const b = clBall().dropCutter(x, y);
+        if (b === null) return false;
+        const design = topSurfaceAt(binsForMask(), x, y);
+        if (design === null) return false;
+        return b + z0 - design > finishBand;
+      };
+      attempt('rest', restBallTool, ref, () => finish({
+        cutter: restBallTool,
+        region: roughRegion,
+        regionRef: roughRef,
+        clSurface: (restBallCl = shiftSurface(clSurface(opts.geometry, roughRegion, restBallTool, cuts.stepOver))),
+        kind: finishKind,
+        mesh: opts.geometry.triangles,
+        scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
+        maskCells: (x, y) => maskCellsExact(afterBallLeftover, restRing, x, y),
+        materialTopAt: designTopAt,
+        stockTopZMm: 0,
+        stepDownMm: depth,
+        feeds: feedsOf(paramsFor(restBallTool)),
+        safeZMm: opts.safeZMm,
+        hopZMm: opts.hopZMm,
+        toolNumber: opts.toolNumberFor(restBallTool),
+        spindleRpm: paramsFor(restBallTool).rpm,
+        air: opts.air,
+        rapid: opts.rapid,
+      }));
+    }
+
+    // 3c. THE CREASE PASS (#965, the review session's step 2; the vendor's own figure method): a
+    // conical engraver riding the creases with its OWN CL, after the rest ball. Admitted only
+    // where `reach()`'s own rule allows — the V's flank angle against the region's steepest slope
+    // (clsurface.ts `reach()`); a region the V cannot descend is STATED by name in `unplanned`,
+    // never silently skipped.
+    if (opts.vbit !== undefined && (opts.vbit.shape === 'chamfer' || opts.vbit.shape === 'engraving')) {
+      const vTool = opts.vbit;
+      // C's review of the crease pass (2026-11-05): PRE-GATE on a cheap valley test over the
+      // PREVIOUS cutter's own CL — a region with no crease cell gets no pencil grid and no line at
+      // all. The gate samples at 0.5 mm, 25x coarser than the pencil: it exists to skip regions,
+      // not to judge cells.
+      // shortcut: the gate is a PROXY — it reads the PREVIOUS cutter's CL (the ball, or the rest
+      // ball), so a crease too narrow for that cutter to register, or finer than the 0.5 mm gate
+      // grid, is not pre-detected and its region is skipped (the #983 wall-foot class); upgrade
+      // the gate pitch if a job's creases need it.
+      const vPitchGate = Math.max(0.5, (cuttingDiameter(vTool) ?? 0) / 4);
+      const prevClGate = restBallCl ?? clBall();
+      if (hasValley(prevClGate, { min: roughRef.bounds.min, max: roughRef.bounds.max }, vPitchGate)) {
+      // The V's own CL and the previous (rest ball's) CL: the leftover depth at a crease is the
+      // material between them — the number the crease rule's width test is stated at.
+      const vCl = shiftSurface(clSurface(opts.geometry, roughRegion, vTool, cuts.stepOver));
+      const prevCl = restBallCl ?? clBall();
+      const vPitch = Math.min(0.5, Math.max(0.1, (cuttingDiameter(vTool) ?? 0) / 4));
+      let creaseAdmitted = 0;
+      let creaseRefused = 0;
+      attempt('pencil', vTool, ref, () => {
+        const out = pencil({
+          cutter: vTool,
+          region: roughRegion,
+          regionRef: roughRef,
+          clSurface: vCl,
+          gridPitchMm: vPitch,
+          admitCrease: (i, j, z, leftSlopeDeg, rightSlopeDeg) => {
+            const x = roughRef.bounds.min[0] + i * vPitch;
+            const y = roughRef.bounds.min[1] + j * vPitch;
+            const prev = prevCl.dropCutter(x, y);
+            const depth = prev === null ? 0 : Math.max(0, prev - z);
+            const fits = creaseFits(vTool, { leftSlopeDeg, rightSlopeDeg, depthMm: depth });
+            if (fits.reachable) creaseAdmitted++;
+            else creaseRefused++;
+            return fits.reachable;
+          },
+          feeds: feedsOf(paramsFor(vTool)),
+          safeZMm: opts.safeZMm,
+          hopZMm: opts.hopZMm,
+          toolNumber: opts.toolNumberFor(vTool),
+          spindleRpm: paramsFor(vTool).rpm,
+          air: opts.air,
+          rapid: opts.rapid,
+        });
+        const emitted = out.ir.operations.some((operation) => operation.moves.length > 0);
+        if (!emitted) {
+          // Stated, never a silent skip: no crease on this region passed the admission.
+          unplanned.push({
+            kind: 'pencil',
+            cutterKey: cutterKeyOf(vTool),
+            regionIds: [ref.id],
+            reason: `the crease pass was admitted at no crease this region (${creaseAdmitted} admitted, ${creaseRefused} refused by the crease rule) — nothing emitted`,
+          });
+        }
+        return out;
+      });
+      }
+    }
 
     // 4. PENCIL along the creases the ball's own CL surface leaves.
     attempt('pencil', ball, ref, () => pencil({
