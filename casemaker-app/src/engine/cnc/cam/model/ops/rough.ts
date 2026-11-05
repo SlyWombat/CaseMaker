@@ -100,6 +100,13 @@ export function gridMaterial(
   };
 }
 
+/** The ops' sampling-grid pitch for a flat: `min(0.5, max(0.1, min(stepOver, radius) / 4))`.
+ * Exported so the plan's one shared grid (#970) matches the rough's own. */
+export function gridPitchFor(stepOverMm: number | undefined, radiusMm: number): number {
+  const stepOver = stepOverMm ?? radiusMm;
+  return Math.min(0.5, Math.max(0.1, Math.min(stepOver, radiusMm) / 4));
+}
+
 interface SkimTourStep {
   index: number;
   reversed: boolean;
@@ -293,7 +300,7 @@ export function rough(opts: RoughOpOptions): OpOutcome {
   }
   const leave = Math.max(0, opts.stockToLeaveMm ?? 0);
   const stepOver = opts.stepOverMm ?? toolRadius;
-  const pitch = opts.gridPitchMm ?? Math.min(0.5, Math.max(0.1, Math.min(stepOver, toolRadius) / 4));
+  const pitch = opts.gridPitchMm ?? gridPitchFor(stepOver, toolRadius);
   const { min, max } = opts.regionRef.bounds;
   const nx = Math.max(2, Math.floor((max[0] - min[0]) / pitch + 1e-9) + 1);
   const ny = Math.max(2, Math.floor((max[1] - min[1]) / pitch + 1e-9) + 1);
@@ -641,7 +648,7 @@ export function skin(opts: SkinOpOptions): OpOutcome {
     throw new Error(`cam/model/ops/rough: ${opts.cutter.name || opts.cutter.shape} states no cutting diameter`);
   }
   const stepOver = opts.stepOverMm ?? toolRadius;
-  const pitch = opts.gridPitchMm ?? Math.min(0.5, Math.max(0.1, Math.min(stepOver, toolRadius) / 4));
+  const pitch = opts.gridPitchMm ?? gridPitchFor(stepOver, toolRadius);
   const grown = opts.offset(opts.outline, 2 * toolRadius);
   const foot = grown.length > 0 ? grown : opts.outline;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -657,6 +664,25 @@ export function skin(opts: SkinOpOptions): OpOutcome {
   const ny = Math.max(2, Math.floor((max[1] - min[1]) / pitch + 1e-9) + 1);
   const half = pitch / 2;
 
+  // #970 — ONE GRID, BUILT ONCE: the CL at every cell centre, then the five-sample neighbourhood
+  // reads the grid instead of re-querying — the skin's 5 radius-3 `dropCutter` calls per cell
+  // (its share of the elephant's 7.6x) are O(1) array reads. The corners read their nearest
+  // cells, so the target is the max over the cell and its half-pitch neighbours, a hair coarser
+  // than the true corner values (the re-pin the manager stated).
+  const clGrid = new Float64Array(nx * ny).fill(Number.NaN);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const v = opts.clSurface.dropCutter(min[0] + i * pitch, min[1] + j * pitch);
+      if (v !== null) clGrid[j * nx + i] = v;
+    }
+  }
+  const clAt = (x: number, y: number): number | null => {
+    const i = Math.round((x - min[0]) / pitch);
+    const j = Math.round((y - min[1]) / pitch);
+    if (i < 0 || j < 0 || i >= nx || j >= ny) return null;
+    const v = clGrid[j * nx + i]!;
+    return Number.isFinite(v) ? v : null;
+  };
   // The design grid: the flat's CL, max over the cell's centre and corners (a cell straddling a
   // rise is judged by its high side, the rough's own rule).
   const target = new Float64Array(nx * ny).fill(Number.NaN);
@@ -666,7 +692,7 @@ export function skin(opts: SkinOpOptions): OpOutcome {
       const y = min[1] + j * pitch;
       let hi = -Infinity;
       for (const [dx, dy] of [[0, 0], [-half, -half], [half, -half], [-half, half], [half, half]] as const) {
-        const cl = opts.clSurface.dropCutter(x + dx, y + dy);
+        const cl = clAt(x + dx, y + dy);
         if (cl !== null && cl > hi) hi = cl;
       }
       if (hi > -Infinity) target[j * nx + i] = hi;

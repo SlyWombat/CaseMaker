@@ -39,7 +39,7 @@ import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances } from './types'
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { pocket } from './ops/pocket';
 import { clSurface } from './clsurface';
-import { rough, skin } from './ops/rough';
+import { gridPitchFor, rough, skin } from './ops/rough';
 import { flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
 import { rest } from './ops/rest';
 import { finish } from './ops/finish';
@@ -1426,41 +1426,50 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       });
     }
 
-    // ITEM 4a — THE FINISH'S MASK: leftover = flatSwept − design > band, dilated by the ball's
-    // footprint. `flatSwept` is the LOWEST flat CL that actually ran over the region — the skim's
-    // exact-contact pass, else the Z-levels' cl + band; a rest flat's CL when one ran — read back
-    // to the MESH datum (the shifted surfaces + z0), because `design` is the mesh's own top at the
-    // cell (`topSurfaceAt`). The band is the finish's tolerance (the ruling), not the rough's
-    // stock-to-leave.
+    // ITEM 4a — THE FINISH'S MASK: leftover = the flat's CL − the design > band, dilated by the
+    // ball's footprint (its centre just outside the leftover still cuts into it, and just outside
+    // the part still finishes the skirt its flank holds).
+    //
+    // #970 — THE LEFTOVER FIELD, BUILT ONCE (the §8.9 statement on #970): the flat's CL, the rest's
+    // CL and the design top on the plan's grid, in the MESH datum. The mask reads the dilated
+    // leftover in O(1) per point — the per-point `dropCutter` calls (up to 18 per point with the
+    // eight dilation neighbours) are gone. The skin is served separately: it builds its own
+    // one-pass grid inside `skin()` (same pitch, `gridPitchFor`).
     const finishBand = opts.finishScallopMm ?? opts.bandMm;
-    const flatAbs = (x: number, y: number): number | null => {
-      const v = prevCl.dropCutter(x, y);
-      return v === null ? null : v + z0;
+    const gridPitch = gridPitchFor(opts.stepOverMm, (cuttingDiameter(opts.flat) ?? 0) / 2);
+    const gridMin: [number, number] = roughRef.bounds.min;
+    const gnx = Math.max(2, Math.floor((roughRef.bounds.max[0] - gridMin[0]) / gridPitch + 1e-9) + 1);
+    const gny = Math.max(2, Math.floor((roughRef.bounds.max[1] - gridMin[1]) / gridPitch + 1e-9) + 1);
+    const gridLeftover = new Uint8Array(gnx * gny);
+    const gridCellOf = (x: number, y: number): number => {
+      const i = Math.round((x - gridMin[0]) / gridPitch);
+      const j = Math.round((y - gridMin[1]) / gridPitch);
+      return i < 0 || j < 0 || i >= gnx || j >= gny ? -1 : j * gnx + i;
     };
-    const restAbs = (x: number, y: number): number | null => {
-      const surface = restClSink.surface;
-      if (surface === undefined) return null;
-      const v = surface.dropCutter(x, y);
-      return v === null ? null : v + z0;
-    };
-    const leftoverAbove = (x: number, y: number): boolean => {
-      const f = flatAbs(x, y);
-      const r = restAbs(x, y);
-      const flatZ = f === null ? r : r === null ? f : Math.min(f, r);
-      if (flatZ === null) return false;
-      const design = topSurfaceAt(binsForMask(), x, y);
-      if (design === null) return false;
-      return flatZ - design > finishBand;
-    };
+    for (let j = 0; j < gny; j++) {
+      for (let i = 0; i < gnx; i++) {
+        const x = gridMin[0] + i * gridPitch;
+        const y = gridMin[1] + j * gridPitch;
+        const f = prevCl.dropCutter(x, y);
+        const r = restClSink.surface?.dropCutter(x, y) ?? null;
+        const design = topSurfaceAt(binsForMask(), x, y);
+        const k = j * gnx + i;
+        const cl = f === null ? r : r === null ? f : Math.min(f, r);
+        gridLeftover[k] = cl !== null && design !== null && cl + z0 - design > finishBand ? 1 : 0;
+      }
+    }
     const ballRadiusForMask = (cuttingDiameter(ball) ?? 0) / 2;
+    const maskRing: [number, number][] = [];
+    for (let d = 0; d < 8; d++) {
+      const a = (d * Math.PI) / 4;
+      maskRing.push([Math.cos(a) * ballRadiusForMask, Math.sin(a) * ballRadiusForMask]);
+    }
     const maskCells = (x: number, y: number): boolean => {
-      // Dilated by the ball's footprint: a centre just outside the leftover still cuts into it,
-      // and a centre just OUTSIDE the part still finishes the skirt its flank holds — the same
-      // margin the grown outer ring needs.
-      if (leftoverAbove(x, y)) return true;
-      for (let d = 0; d < 8; d++) {
-        const a = (d * Math.PI) / 4;
-        if (leftoverAbove(x + Math.cos(a) * ballRadiusForMask, y + Math.sin(a) * ballRadiusForMask)) return true;
+      const k0 = gridCellOf(x, y);
+      if (k0 >= 0 && gridLeftover[k0] === 1) return true;
+      for (const [ox, oy] of maskRing) {
+        const k = gridCellOf(x + ox, y + oy);
+        if (k >= 0 && gridLeftover[k] === 1) return true;
       }
       return false;
     };
