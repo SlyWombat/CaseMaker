@@ -24,6 +24,14 @@
  *   - the pass line: coverage at the first leftover band versus `passCoverage`, including the
  *     boundary case (19/20 = 0.95 passes; 18/20 = 0.90 does not).
  *
+ * v5 (#970, the maintainer's 2026-11-05 ruling): THE WALL SHADOW IS NO LONGER A BLANKET EXCLUSION.
+ * On the tray E found the V driven 3.49 mm into solid land beside a wall (a posted feed at
+ * (19.800, 12.050, -4.692)); all 116,868 shadow cells were excused and the gate read 0.00 %. A
+ * shadow cell is now excused only when the V cut it within its leg, or the deepest stamp's CL
+ * stayed at least the shadow radius from the wall (a disc-stamp artefact). Everything else is
+ * adjudicated. The canonical fixture's C cell (0.3 mm, 2 mm behind the wall, no CL stated) is
+ * therefore ADJUDICATED at v5, and the E-class case below is the red-first pin of the rule.
+ *
  * IF THIS SPEC FAILS, THE GOAL CHECK'S RULE CHANGED. That is allowed, but it is a decision:
  * bump `SIMULATOR_VERSION` in the same commit, update the fingerprint below, and re-score the
  * cards that carry this rule's numbers (tray 70 top, organizer top, and the figure cards) — never
@@ -142,7 +150,7 @@ const COVERED = 572;
 
 /** The rule's own fingerprint: constants, thresholds and the canonical report's rule numbers. */
 const FROZEN = {
-  version: 4,
+  version: 5,
   constants: {
     cutIntoFloorMm: 0.01,
     leftoverBandsMm: [0.1, 0.3, 1],
@@ -157,8 +165,9 @@ const FROZEN = {
     raw: { cells: 8, fraction: 8 / COVERED, maxMm: 0.8, at: { x: 17, y: 5 } },
     edgeBreak: { cells: 2, fraction: 2 / COVERED },
     wall: { cells: 2, fraction: 2 / COVERED },
-    shadow: { cells: 1, fraction: 1 / COVERED },
-    adjudicated: { cells: 1, fraction: 1 / COVERED, maxMm: 0.4, at: { x: 5, y: 5 } },
+    // v5 — C (0.3 mm, 2 mm behind the wall) states no CL here, so it is adjudicated with F.
+    shadow: { cells: 0, fraction: 0 },
+    adjudicated: { cells: 2, fraction: 2 / COVERED, maxMm: 0.4, at: { x: 5, y: 5 } },
     leftover: { fractions: [4 / COVERED, 2 / COVERED, 1 / COVERED], maxMm: 1.05 },
     coverageFraction: 559 / COVERED,
     ok: false,
@@ -205,11 +214,12 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
   it('excludes wall cells and the wall shadow in a job that states NO edge break', () => {
     const r = checkGoalCutInto(CANON, CANON_TOP, { wallShadowRadiusMm: 2 });
     expect(r.edgeBreakFraction, FREEZE).toBe(0);
-    // D (a silhouette wall cell) joins A and B as a wall; E (in the wall's shadow, not a wall
-    // cell) joins C as shadow; only F — clear of every seed — stays adjudicated.
+    // D (a silhouette wall cell) joins A and B as a wall; E (0.4 mm, inside the shadow, no CL)
+    // and C (0.3 mm, behind the wall) are ADJUDICATED at v5 — the shadow excuses nothing without
+    // a CL or the V's leg — and F stays adjudicated.
     expect(r.wallNotScoredFraction, FREEZE).toBe(3 / COVERED);
-    expect(r.shadowNotScoredFraction, FREEZE).toBe(2 / COVERED);
-    expect(r.adjudicatedFraction, FREEZE).toBe(1 / COVERED);
+    expect(r.shadowNotScoredFraction, FREEZE).toBe(0);
+    expect(r.adjudicatedFraction, FREEZE).toBe(3 / COVERED);
   });
 
   it('treats a step of 0.199 mm as NO design edge and 0.201 as one (strict > 0.2)', () => {
@@ -333,13 +343,13 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
     const V = { edgeBreak: { reachMm: 1.5, legMm: 0.5, toolNumber: 7 } };
     const vDeepest = checkGoalCutInto(CANON, CANON_TOP, { ...V, wallShadowRadiusMm: 2, whoAt: () => 7 });
     expect(vDeepest.edgeBreakFraction, FREEZE).toBe(2 / COVERED);
-    // A flat cut both band cells deepest: they are judged instead — D becomes a wall, E falls to
-    // the wall shadow, and only F stays adjudicated.
+    // A flat cut both band cells deepest: they are judged instead — D becomes a wall, and E and C
+    // are adjudicated (v5: no CL is stated, so the shadow excuses neither), F too.
     const flatDeepest = checkGoalCutInto(CANON, CANON_TOP, { ...V, wallShadowRadiusMm: 2, whoAt: () => 2 });
     expect(flatDeepest.edgeBreakFraction, FREEZE).toBe(0);
     expect(flatDeepest.wallNotScoredFraction, FREEZE).toBe(3 / COVERED);
-    expect(flatDeepest.shadowNotScoredFraction, FREEZE).toBe(2 / COVERED);
-    expect(flatDeepest.adjudicatedFraction, FREEZE).toBe(1 / COVERED);
+    expect(flatDeepest.shadowNotScoredFraction, FREEZE).toBe(0);
+    expect(flatDeepest.adjudicatedFraction, FREEZE).toBe(3 / COVERED);
     // No identity at all is the conservative side: nothing is excused.
     const unknown = checkGoalCutInto(CANON, CANON_TOP, { ...V, wallShadowRadiusMm: 2 });
     expect(unknown.edgeBreakFraction, FREEZE).toBe(0);
@@ -382,6 +392,81 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
     expect(goalEdgeBreakOptions(job(), toolFor, ['c90']).edgeBreak, FREEZE).toBeUndefined();
     // A stated break with no V cutter in the run → no allowance either.
     expect(goalEdgeBreakOptions(job({ widthMm: 1, toolKey: 'c90' }), () => null, []).edgeBreak, FREEZE).toBeUndefined();
+  });
+
+  /**
+   * v5 (#970) — THE WALL SHADOW'S DEPTH RULE. E's tray class: the V driven 3.49 mm into land beside
+   * a wall, every shadow cell excused, the gate reading 0.00 %. These are the rule's pins.
+   *
+   * The fixture: a 2 mm step at i = 8..9 (the wall columns) on a 16 × 9 grid at 1 mm. A cut at
+   * i = 7 sits 1 mm from the wall — inside the V's 1.5875 mm reach and inside a 4 mm shadow — and
+   * a cut at i = 6 is 2 mm out, outside a 1.0 mm reach and still inside the shadow. That is the
+   * mouth-rim placement E found: the V is allowed there, so only its DEPTH separates a legal break
+   * from a gouge. (Nine rows, so the cut rows are clear of the border seed's 1 mm reach.)
+   */
+  it('v5 — a V 3.49 mm into land beside a wall is ADJUDICATED, not excused as shadow (E’s tray class)', () => {
+    const goal = field(16, 9, { z: (i) => (i >= 9 ? -2 : 0) });
+    const top = reader(goal, new Map([[at(goal, 7, 4), 3.49]]));
+    const V = { edgeBreak: { reachMm: 1.5875, legMm: 1.5375, toolNumber: 7 }, wallShadowRadiusMm: 4, whoAt: () => 7 };
+    const r = checkGoalCutInto(goal, top, V);
+    // The V is the deepest cutter and the cell is inside its reach, but 3.49 > the 1.5375 leg, so
+    // it is not edge break — and with no CL stated the shadow cannot excuse it either (v4 excused
+    // every shadow cell whatever cut it).
+    expect(r.edgeBreakFraction, FREEZE).toBe(0);
+    expect(r.shadowNotScoredFraction, FREEZE).toBe(0);
+    expect(r.adjudicatedFraction, FREEZE).toBe(1 / 144);
+    expect(r.adjudicatedMaxMm, FREEZE).toBeCloseTo(3.49, 6);
+    expect(r.adjudicatedMaxAt, FREEZE).toEqual({ x: 7, y: 4 });
+    expect(r.ok, FREEZE).toBe(false);
+  });
+
+  it('v5 — a stamp-artefact shadow cell is excused only while the CL stays R from the wall', () => {
+    const goal = field(16, 9, { z: (i) => (i >= 9 ? -2 : 0) });
+    const top = reader(goal, new Map([[at(goal, 6, 4), 0.3]]));
+    // A flat cutter, outside a 1 mm reach: the edge-break allowance cannot excuse the cell, so the
+    // shadow rule alone decides it.
+    const flat = { edgeBreak: { reachMm: 1, legMm: 1.5375 }, wallShadowRadiusMm: 4 };
+    // The CL at x = 0 is 8 mm from the wall: the disc's rim covered the cell, not a wall drive —
+    // excused, as v4 excused it unconditionally.
+    const far = checkGoalCutInto(goal, top, { ...flat, clAt: () => ({ x: 0, y: 4 }) });
+    expect(far.edgeBreakFraction, FREEZE).toBe(0);
+    expect(far.shadowNotScoredFraction, FREEZE).toBe(1 / 144);
+    expect(far.adjudicatedFraction, FREEZE).toBe(0);
+    // The CL at the wall itself: the cutter was driven along the wall's base — adjudicated.
+    const near = checkGoalCutInto(goal, top, { ...flat, clAt: () => ({ x: 8, y: 4 }) });
+    expect(near.shadowNotScoredFraction, FREEZE).toBe(0);
+    expect(near.adjudicatedFraction, FREEZE).toBe(1 / 144);
+    expect(near.adjudicatedMaxMm, FREEZE).toBeCloseTo(0.3, 6);
+    // No CL at all is the conservative side: adjudicated, never excused.
+    const none = checkGoalCutInto(goal, top, flat);
+    expect(none.shadowNotScoredFraction, FREEZE).toBe(0);
+    expect(none.adjudicatedFraction, FREEZE).toBe(1 / 144);
+  });
+
+  /**
+   * v5 (the manager's ruling after the review session's #3 answer, #943): THE EXCUSE IS BOUNDED AT
+   * ONE PITCH. A stamp-artefact excuse takes the deepest stamp's CL at least R from the wall, with
+   * ONE PITCH of slack for the wall's own location error (± half a cell) and the CL's cell
+   * quantisation — never more. This pins the bound at a 0.1 mm pitch: a CL whose cell is exactly
+   * R − pitch from the nearest wall cell is excused; one cell closer (R − 2 pitches) is not.
+   */
+  it('v5 — the CL excuse stops at one pitch inside R, no further', () => {
+    const P = 0.1;
+    // 160 x 90 at 0.1 mm: a 2 mm step between i = 80 and 81 (wall cells x = 8.0 and 8.1).
+    const goal = field(160, 90, { pitch: P, z: (i) => (i >= 81 ? -2 : 0) });
+    // A cut 4 mm behind the wall (x = 4.0), well inside R = 4 and outside a 1 mm reach: only the
+    // shadow rule can excuse it.
+    const top = reader(goal, new Map([[at(goal, 40, 45), 0.3]]));
+    const flat = { edgeBreak: { reachMm: 1, legMm: 1.5375 }, wallShadowRadiusMm: 4 };
+    // CL at x = 4.1: its cell is 39 cells (3.9 mm = R − one pitch) from the nearest wall cell.
+    const atBound = checkGoalCutInto(goal, top, { ...flat, clAt: () => ({ x: 4.1, y: 4.5 }) });
+    expect(atBound.shadowNotScoredFraction, FREEZE).toBe(1 / (160 * 90));
+    expect(atBound.adjudicatedFraction, FREEZE).toBe(0);
+    // CL at x = 4.2: 38 cells (3.8 mm = R − two pitches) — the rim overlaps the wall line by more
+    // than the location error, so the cell is judged.
+    const inside = checkGoalCutInto(goal, top, { ...flat, clAt: () => ({ x: 4.2, y: 4.5 }) });
+    expect(inside.shadowNotScoredFraction, FREEZE).toBe(0);
+    expect(inside.adjudicatedFraction, FREEZE).toBe(1 / (160 * 90));
   });
 
   it('STATES an unchecked goal, never a silent pass', () => {

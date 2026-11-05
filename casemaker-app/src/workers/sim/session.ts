@@ -568,6 +568,15 @@ export interface SimSession {
    */
   sweptWhoExact(goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): ((x: number, y: number) => number | null) | null;
   /**
+   * v5 (#970) — WHERE the deepest stamp's cutter-location stood, per goal cell: the CL point (XY,
+   * work frame) of the stamp that left that cell's lowest reach, null outside the grid and 0/0 on
+   * an untouched cell. The goal check's wall-shadow rule reads it: a shadow cell is excused only
+   * when that CL stays at least the shadow radius from the wall (a disc-stamp artefact), never
+   * because the cell merely sits inside the dilated band. Null on the same sessions the field is
+   * null on.
+   */
+  sweptClExact(goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): ((x: number, y: number) => { x: number; y: number } | null) | null;
+  /**
    * #964 — whether {@link sweptFieldExact} can answer at all on this live sweep: a flat column or
    * an exact-engine sweep. Cheap and grid-free, so a caller can skip sampling the goal for a
    * rotary/refused session (`goalInputFor`).
@@ -870,7 +879,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    * carries material from an earlier program is a later program of the same run and keeps the
    * field; a load with no seed at all begins a new run (see `load`).
    */
-  let exactRun: { key: string; field: Float32Array; who: Uint8Array } | null = null;
+  let exactRun: { key: string; field: Float32Array; who: Uint8Array; clX: Float32Array; clY: Float32Array } | null = null;
 
   const load = (gcodeText: string, setupArg: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): SimLoadResult => {
     dispose();
@@ -1439,23 +1448,27 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
   let exactKey = '';
   let exactValue: Float32Array | null = null;
   let exactWhoValue: Uint8Array | null = null;
+  let exactClValue: { clX: Float32Array; clY: Float32Array } | null = null;
   /**
    * #964 — the stamp WITH ITS IDENTITY. Each program's stamp records the tool number that left
    * each cell's lowest reach (`exactSweptFieldTooled`); the fold carries that map alongside the
    * field, so the edge-break allowance can require the deepest cutter to be the V (the page's
    * `who` rule) instead of excusing every shallow cell near an edge.
    */
-  const sweptStamp = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): { field: Float32Array; who: Uint8Array } | null => {
+  const sweptStamp = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): { field: Float32Array; who: Uint8Array; clX: Float32Array; clY: Float32Array } | null => {
     const l = live;
     const source = stampSource();
     if (l === null || source === null) return null;
     const key = `${goal.nx},${goal.ny},${goal.x0},${goal.y0},${goal.pitch}`;
     if (exactFor === l && exactKey === key) {
-      return exactValue === null || exactWhoValue === null ? null : { field: exactValue, who: exactWhoValue };
+      return exactValue === null || exactWhoValue === null || exactClValue === null
+        ? null
+        : { field: exactValue, who: exactWhoValue, clX: exactClValue.clX, clY: exactClValue.clY };
     }
     const stamp = exactSweptFieldTooled(goal, source.timeline, () => source.tool);
     exactValue = stamp?.field ?? null;
     exactWhoValue = stamp?.who ?? null;
+    exactClValue = stamp === null ? null : { clX: stamp.clX, clY: stamp.clY };
     if (stamp !== null) {
       // #948 — FOLD EACH PROGRAM'S STAMP INTO THE RUN'S ONE FIELD (the page's rule). A run's last
       // program alone (a ⌀0.5 rest pass) reads only its own moves; the fold makes the report carry
@@ -1464,21 +1477,31 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       if (exactRun !== null && exactRun.key === key) {
         const acc = exactRun.field;
         const whoAcc = exactRun.who;
+        const clXAcc = exactRun.clX;
+        const clYAcc = exactRun.clY;
         for (let k = 0; k < acc.length; k++) {
           if (stamp.field[k]! < acc[k]!) {
             acc[k] = stamp.field[k]!;
             whoAcc[k] = stamp.who[k]!;
+            // v5 — the CL point rides the same fold: a cell's CL belongs to the stamp that left it
+            // lowest, so the shadow rule reads the point of the very cut the verdict measures.
+            clXAcc[k] = stamp.clX[k]!;
+            clYAcc[k] = stamp.clY[k]!;
           }
         }
         exactValue = acc;
         exactWhoValue = whoAcc;
+        exactClValue = { clX: clXAcc, clY: clYAcc };
       } else {
-        exactRun = { key, field: stamp.field, who: stamp.who };
+        exactRun = { key, field: stamp.field, who: stamp.who, clX: stamp.clX, clY: stamp.clY };
+        exactClValue = { clX: stamp.clX, clY: stamp.clY };
       }
     }
     exactFor = l;
     exactKey = key;
-    return exactValue === null || exactWhoValue === null ? null : { field: exactValue, who: exactWhoValue };
+    return exactValue === null || exactWhoValue === null || exactClValue === null
+      ? null
+      : { field: exactValue, who: exactWhoValue, clX: exactClValue.clX, clY: exactClValue.clY };
   };
   const sweptFieldExact = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): Float32Array | null =>
     sweptStamp(goal)?.field ?? null;
@@ -1492,6 +1515,21 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       const j = Math.round((y - y0) / pitch);
       if (i < 0 || j < 0 || i >= nx || j >= ny) return null;
       return who[j * nx + i]!;
+    };
+  };
+  const sweptClExact = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): ((x: number, y: number) => { x: number; y: number } | null) | null => {
+    const stamp = sweptStamp(goal);
+    if (stamp === null) return null;
+    const { field, clX, clY } = stamp;
+    const { nx, ny, x0, y0, pitch } = goal;
+    return (x, y) => {
+      const i = Math.round((x - x0) / pitch);
+      const j = Math.round((y - y0) / pitch);
+      if (i < 0 || j < 0 || i >= nx || j >= ny) return null;
+      const k = j * nx + i;
+      // Untouched (0/0) is no CL — the rule then cannot excuse the cell, the conservative side.
+      if (field[k] === 0) return null;
+      return { x: clX[k]!, y: clY[k]! };
     };
   };
 
@@ -1624,6 +1662,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     sweptTop,
     sweptFieldExact,
     sweptWhoExact,
+    sweptClExact,
     canStampGoal,
     dispose,
     get loaded() {

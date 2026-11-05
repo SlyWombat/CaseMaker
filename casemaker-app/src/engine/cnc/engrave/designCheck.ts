@@ -770,6 +770,14 @@ export interface GoalCutIntoOptions {
    * shadow class is reported as 0 (a caller with no tool set); the edge-break band still runs.
    */
   wallShadowRadiusMm?: number;
+  /**
+   * v5 (#970) — THE DEEPEST CUTTER'S CL POINT at this cell: the (x, y) of the stamp that left the
+   * cell's lowest reach (`StampedTop.clX/clY`; sweptPoint.ts). The wall-shadow cell is excused
+   * only when this point stays at least `wallShadowRadiusMm` from the wall (the cell sits at the
+   * disc's rim — a stamp artefact) or when the V cut it within its leg; with no CL the cell is
+   * ADJUDICATED, the conservative side (an uncounted excusal is a false pass).
+   */
+  clAt?: (x: number, y: number) => { x: number; y: number } | null;
 }
 
 export interface GoalCutIntoReport {
@@ -905,6 +913,73 @@ function borderCells(goal: GoalHeightfield): Uint8Array {
     if (covered[right] === 1) border[right] = 1;
   }
   return border;
+}
+
+/**
+ * v5 — THE WALL DISTANCE, ONCE PER GOAL. A run's programs each call the check on the SAME
+ * heightfield object (`goalHeightfieldFor` caches it), and the wall mask is a fact of the goal:
+ * a WeakMap keeps the O(N) transform from being paid per program. The value is derived only from
+ * the goal object, so an entry cannot go stale while that object is alive.
+ */
+const wallDistanceCache = new WeakMap<GoalHeightfield, Float32Array>();
+function wallDistances(goal: GoalHeightfield, wall: Uint8Array): Float32Array {
+  const hit = wallDistanceCache.get(goal);
+  if (hit !== undefined) return hit;
+  const field = wallDistanceField(wall, goal.nx, goal.ny, goal.pitch);
+  wallDistanceCache.set(goal, field);
+  return field;
+}
+
+/**
+ * v5 — THE EXACT DISTANCE (mm) from every cell's centre to the nearest WALL cell's centre, by
+ * Felzenszwalb's 1-D squared-distance passes over the mask (O(n), exact — never the 8 % of a
+ * chamfer approximation, because the shadow rule compares against the radius at its boundary).
+ */
+function wallDistanceField(wall: Uint8Array, nx: number, ny: number, pitch: number): Float32Array {
+  const INF = 1e20;
+  const f = new Float64Array(nx * ny);
+  for (let k = 0; k < f.length; k++) f[k] = wall[k] === 1 ? 0 : INF;
+  const n = Math.max(nx, ny);
+  const src = new Float64Array(n);
+  const dst = new Float64Array(n);
+  const v = new Int32Array(n);
+  const z = new Float64Array(n + 1);
+  const edt1d = (len: number): void => {
+    let k = 0;
+    v[0] = 0;
+    z[0] = -INF;
+    z[1] = INF;
+    for (let q = 1; q < len; q++) {
+      let s = (src[q]! + q * q - (src[v[k]!]! + v[k]! * v[k]!)) / (2 * q - 2 * v[k]!);
+      while (s <= z[k]!) {
+        k--;
+        s = (src[q]! + q * q - (src[v[k]!]! + v[k]! * v[k]!)) / (2 * q - 2 * v[k]!);
+      }
+      k++;
+      v[k] = q;
+      z[k] = s;
+      z[k + 1] = INF;
+    }
+    k = 0;
+    for (let q = 0; q < len; q++) {
+      while (z[k + 1]! < q) k++;
+      const d = q - v[k]!;
+      dst[q] = d * d + src[v[k]!]!;
+    }
+  };
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) src[i] = f[j * nx + i]!;
+    edt1d(nx);
+    for (let i = 0; i < nx; i++) f[j * nx + i] = dst[i]!;
+  }
+  for (let i = 0; i < nx; i++) {
+    for (let j = 0; j < ny; j++) src[j] = f[j * nx + i]!;
+    edt1d(ny);
+    for (let j = 0; j < ny; j++) f[j * nx + i] = dst[j]!;
+  }
+  const dist = new Float32Array(nx * ny);
+  for (let k = 0; k < dist.length; k++) dist[k] = Math.sqrt(f[k]!) * pitch;
+  return dist;
 }
 
 /** Every cell within `radiusMm` of a set cell (the disk dilation `goal_check.py` uses). */
@@ -1058,6 +1133,15 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     shadowRadius !== undefined && shadowRadius > 0
       ? dilateCells(wall, nx, ny, goal.pitch, shadowRadius)
       : null;
+  // v5 (#970) — THE SHADOW CELL IS NO LONGER BLANKET-EXCUSED. E's tray incident: the V's CL was
+  // driven into a wall's base (a feed at (19.800, 12.050, -4.692), 3.49 mm into the land) and the
+  // whole strip beside the wall — 8.1 % of the tray — was excused as wall shadow. The rule now:
+  // a shadow cell is excused only if (a) the V cut it and the cut is no deeper than its leg, or
+  // (b) the deepest cutter's CL point stays at least the shadow radius from the wall there (the
+  // cell sits at the disc's rim — a stamp artefact). Everything else is adjudicated. The CL
+  // distance is read from the exact wall-distance field at the CL's own cell; the comparison keeps
+  // one cell of allowance for the grid discretisation of the wall (stated).
+  const wallDist = shadow === null ? null : wallDistances(goal, wall);
   const allowance = opts.edgeBreak;
   const allowanceActive = allowance !== undefined && allowance.reachMm > 0 && allowance.legMm > 0;
   const band = allowanceActive ? dilateCells(bandSeed, nx, ny, goal.pitch, allowance.reachMm) : null;
@@ -1086,8 +1170,27 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       continue;
     }
     if (shadow !== null && shadow[k] === 1 && wall[k] !== 1) {
-      excluded[k] = 1;
-      shadowNotScoredCells++;
+      const x = goal.x0 + i * goal.pitch;
+      const y = goal.y0 + j * goal.pitch;
+      const vDeepest = allowance !== undefined && allowance.toolNumber !== undefined
+        && opts.whoAt?.(x, y) === allowance.toolNumber;
+      const excusedByV = vDeepest && allowance !== undefined && depth <= allowance.legMm + 1e-9;
+      let excusedByCl = false;
+      if (!excusedByV && opts.clAt !== undefined && wallDist !== null) {
+        const cl = opts.clAt(x, y);
+        if (cl !== null) {
+          const ci = Math.round((cl.x - goal.x0) / goal.pitch);
+          const cj = Math.round((cl.y - goal.y0) / goal.pitch);
+          if (ci >= 0 && cj >= 0 && ci < nx && cj < ny) {
+            excusedByCl = wallDist[cj * nx + ci]! >= shadowRadius! - goal.pitch - 1e-9;
+          }
+        }
+      }
+      if (excusedByV || excusedByCl) {
+        excluded[k] = 1;
+        shadowNotScoredCells++;
+      }
+      continue; // a shadow cell that the rule cannot excuse stays ADJUDICATED (v5)
     }
   }
 

@@ -3,13 +3,13 @@
 // bytes never moved. Gate statement 10: a package reads current only when job, registration,
 // program bytes AND simulator version all match — a package frozen before the simulator was
 // versioned cannot show that match, so it is stale too, with its own sentence (one re-simulation
-// each, intentionally). This file mocks the constant to 5, one past the shipped 4, to exercise a
+// each, intentionally). This file mocks the constant to 6, one past the shipped 5, to exercise a
 // future bump, isolated from `engravePackage.spec.ts` so every other package test keeps seeing the
 // real value.
 
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/workers/geometry/simVersion', () => ({ SIMULATOR_VERSION: 5 }));
+vi.mock('@/workers/geometry/simVersion', () => ({ SIMULATOR_VERSION: 6 }));
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { freezePackage, packageHash, packageStaleness, validatePackage, type PackageProgramInput } from '@/engine/cnc/engrave/package';
@@ -21,7 +21,7 @@ function program(nc: string, over: Partial<PackageProgramInput> = {}): PackagePr
   return { setupIndex: 0, setupId: 'setup-implicit', toolKey: 'flat-1.0', nc, frameNc: null, programHash: programHash(nc), ...over };
 }
 
-describe('packageStaleness/#925 under a bumped simulator (mocked SIMULATOR_VERSION = 5)', () => {
+describe('packageStaleness/#925 under a bumped simulator (mocked SIMULATOR_VERSION = 6)', () => {
   it('a package frozen under THIS (mocked) current version is not stale', () => {
     const job = defaultEngraveJob();
     const made = freezePackage(job, [program('G21\nM2\n')], AT);
@@ -30,20 +30,20 @@ describe('packageStaleness/#925 under a bumped simulator (mocked SIMULATOR_VERSI
     expect(validatePackage(made.package)).toEqual({ ok: true, reason: null });
   });
 
-  it('a package frozen one version back (v4) reads stale, named by the simulator — and is NOT tampered', () => {
+  it('a package frozen one version back (v5) reads stale, named by the simulator — and is NOT tampered', () => {
     const job = defaultEngraveJob();
     const made = freezePackage(job, [program('G21\nM2\n')], AT);
     if (!made.ok) throw new Error(made.reason);
     const pkg = made.package;
-    const frozenUnderV4 = { ...pkg, hash: packageHash(pkg.jobHash, pkg.programs, 4) };
+    const frozenUnderV5 = { ...pkg, hash: packageHash(pkg.jobHash, pkg.programs, 5) };
 
-    const stale = packageStaleness(frozenUnderV4, job);
+    const stale = packageStaleness(frozenUnderV5, job);
     expect(stale).toEqual({ stale: true, reason: 'the simulator changed since it was frozen' });
 
     // Staleness and tampering are different questions (package.ts's own header comment): an
     // outdated-but-intact package must not ALSO be refused as tampered, or Cut could never show
     // the operator a re-freeze offer for it.
-    expect(validatePackage(frozenUnderV4)).toEqual({ ok: true, reason: null });
+    expect(validatePackage(frozenUnderV5)).toEqual({ ok: true, reason: null });
   });
 
   it('a package frozen before #925 (no version term in its hash at all) reads stale, with its own sentence — and is NOT tampered', () => {

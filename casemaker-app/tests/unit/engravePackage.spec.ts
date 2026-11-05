@@ -252,7 +252,7 @@ describe('the package engine (#419 §4)', () => {
 
     // The hash moves with the version: a package frozen under version 1, over the exact same job
     // and programs, reads stale under this build, named by the simulator, and is not tampered.
-    expect(SIMULATOR_VERSION).toBe(4);
+    expect(SIMULATOR_VERSION).toBe(5);
     const frozenUnderV1 = { ...pkg, hash: packageHash(pkg.jobHash, pkg.programs, 1) };
     expect(frozenUnderV1.hash).not.toBe(pkg.hash);
     expect(packageStaleness(frozenUnderV1, job)).toEqual({ stale: true, reason: 'the simulator changed since it was frozen' });

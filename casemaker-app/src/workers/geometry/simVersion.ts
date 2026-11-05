@@ -26,4 +26,14 @@
 //     allowance, stated). The rule's fingerprint is pinned in
 //     `tests/unit/goalRuleFreeze948.spec.ts`: a later change to the rule fails there unless this
 //     version is bumped and the cards are re-scored in the same commit.
-export const SIMULATOR_VERSION = 4;
+// 5 — #970/v5 (the maintainer's ruling, 2026-11-05): THE WALL-SHADOW CELL IS EXCUSED ONLY WHEN
+//     THE STAMP PROVES IT IS A DISC ARTEFACT. A cell within the shadow radius of a design wall
+//     used to be excluded blanket-style; now it is excused only if (a) the V cut it and its cut is
+//     no deeper than the edge-break leg, or (b) the deepest cutter's own CL point stays at least
+//     the shadow radius from the wall (the cell sits at the disc's rim, not under the tool).
+//     Everything else — a cutter's CL driven INTO the wall's base, as the tray's V was at
+//     (19.800, 12.050, -4.692), 3.49 mm into the land — is ADJUDICATED. The stamp now carries
+//     the per-cell CL point (`StampedTop.clX/clY`) and the check reads it via `clAt`. The rule's
+//     fingerprint is re-pinned in `tests/unit/goalRuleFreeze948.spec.ts`; the cards are re-scored
+//     in the same commit.
+export const SIMULATOR_VERSION = 5;

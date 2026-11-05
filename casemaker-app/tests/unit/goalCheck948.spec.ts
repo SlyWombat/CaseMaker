@@ -515,6 +515,19 @@ describe('#948 the live session’s swept top', () => {
       if ('heightfield' in withWho) {
         expect(withWho.opts?.whoAt).toBeTypeOf('function');
         expect(withWho.opts!.whoAt!(30, 20)).toBe(1);
+        // v5 (#970) — the shadow rule's CL rides the same input when the job states a shadow
+        // radius: the deepest stamp's own centre at the cell, from the folded stamp.
+        const withCl = goalInputFor(session, {
+          target: (check as Extract<SimGoalCheck, { target: unknown }>).target,
+          opts: { wallShadowRadiusMm: 3 },
+        });
+        expect('heightfield' in withCl).toBe(true);
+        if ('heightfield' in withCl) {
+          expect(withCl.opts?.clAt).toBeTypeOf('function');
+          const cl = withCl.opts!.clAt!(30, 20);
+          expect(cl).not.toBeNull();
+          expect(Number.isFinite(cl!.x) && Number.isFinite(cl!.y)).toBe(true);
+        }
       }
     } finally {
       session.dispose();

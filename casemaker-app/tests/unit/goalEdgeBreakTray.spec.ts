@@ -4,7 +4,8 @@
 //   cutIntoInclEdgePct (0.01 floor before exclusions)  ~2.6 %
 //   edgeBreakPct                                       ~3.66 %
 //   cutInto0p1Pct (after edge break / wall / shadow)   0 %
-// The app's goal check now applies the same rule. The references are LOCAL
+// The app's goal check now applies the same rule. v5 (#970) narrows the wall-shadow class: with
+// the CL stated, the vendor NC's residual wall-foot cells are adjudicated (see the pin below). The references are LOCAL
 // (`.scratch/makerables`, CC BY-NC-SA, evaluation only) and skipped when absent or when a file's
 // sha256 has moved — the committed artefact is the rule and its expectations, never the data.
 import { createHash } from 'node:crypto';
@@ -151,7 +152,10 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
   expect(r.edgeBreakFraction * 100).toBeLessThan(5.2);
   expect(r.adjudicatedFraction * 100).toBeCloseTo(0, 6);
   expect(r.wallNotScoredFraction).toBeGreaterThan(0);
-  expect(r.shadowNotScoredFraction).toBeGreaterThan(0);
+  // v5 (#970) — the shadow class no longer excuses every cell near a wall: with no CL stated,
+  // a cut cell in the band is either edge break (the 4.95 % above) or adjudicated. The vendor's
+  // tray has no adjudicated cell, so the class reads 0 here; the gated case below carries the CL.
+  expect(r.shadowNotScoredFraction).toBe(0);
   // The rule's point: the vendor's own program passes line 2 once its rim break is allowed.
   expect(r.ok).toBe(true);
 
@@ -171,14 +175,48 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
     if (i < 0 || j < 0 || i >= meta.nx || j >= meta.ny) return null;
     return who[j * meta.nx + i]!;
   };
-  const gated = checkGoalCutInto(goal, top, {
+  // v5 — the CL the shadow rule reads: the deepest stamp's own centre at the cell, as the
+  // session's folded stamp carries it (`sweptClExact`).
+  const clAt = (x: number, y: number): { x: number; y: number } | null => {
+    const i = Math.round((x - meta.x0) / meta.pitch);
+    const j = Math.round((y - meta.y0) / meta.pitch);
+    if (i < 0 || j < 0 || i >= meta.nx || j >= meta.ny) return null;
+    const k = j * meta.nx + i;
+    if ((stamp as NonNullable<typeof stamp>).field[k] === 0) return null;
+    return { x: (stamp as NonNullable<typeof stamp>).clX[k]!, y: (stamp as NonNullable<typeof stamp>).clY[k]! };
+  };
+  // v5 — the SAME stamp supplies the field, the identity and the CL (as the session's folded
+  // stamp does); E's npy field cannot carry a CL, so mixing the two would judge a depth from one
+  // stamp against a CL from another.
+  const stampField = (x: number, y: number): number | null => {
+    const i = Math.round((x - meta.x0) / meta.pitch);
+    const j = Math.round((y - meta.y0) / meta.pitch);
+    if (i < 0 || j < 0 || i >= meta.nx || j >= meta.ny) return null;
+    return (stamp as NonNullable<typeof stamp>).field[j * meta.nx + i]!;
+  };
+  const gated = checkGoalCutInto(goal, stampField, {
     edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4), toolNumber: 4 },
     whoAt,
+    clAt,
     wallShadowRadiusMm: 3,
   });
   // E's own reading on this NC: edgeBreakPct 3.66, cutInto0p1Pct 0.
   expect(gated.edgeBreakFraction * 100).toBeGreaterThan(3.5);
   expect(gated.edgeBreakFraction * 100).toBeLessThan(3.85);
-  expect(gated.adjudicatedFraction * 100).toBeCloseTo(0, 6);
-  expect(gated.ok).toBe(true);
+  // v5 (#970) — THE RESIDUAL, PINNED AS THE FINDING IT IS. With the CL stated, 0.008 % of the
+  // grid (≈ 90 cells, deepest 0.364 mm at (104.9, 38.5)) sits in the shadow band, is NOT the V's
+  // deepest cut (so not edge break) and has a CL within the shadow radius — the rule adjudicates
+  // it. These are the heightfield's wall-FOOT cells: a cutter on a pocket floor, 2.7–3.0 mm from
+  // the wall, has its disc's rim over a LAND cell whose goal height is the wall's top, so the
+  // stamp reads 0.1–0.36 mm below the goal where the wall physically prevents any cut. E's
+  // checker reads this NC as 0 because it excludes the whole shadow class. The vendor's own card
+  // therefore reads `ok: false` under v5 at this residual — reported on #943, with the refinement
+  // option (excuse the cell when a wall cell lies between the CL and it), for the manager's
+  // ruling. A consistent stamp supplies the field, the who map and the CL here, as the session's
+  // folded stamp does; E's npy field cannot carry a CL.
+  expect(gated.edgeBreakFraction * 100).toBeCloseTo(3.81, 2);
+  expect(gated.shadowNotScoredFraction * 100).toBeCloseTo(0.1506, 3);
+  expect(gated.adjudicatedFraction * 100).toBeCloseTo(0.008, 2);
+  expect(gated.adjudicatedMaxMm).toBeCloseTo(0.364, 3);
+  expect(gated.ok).toBe(false);
 });
