@@ -1046,6 +1046,13 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   // EDGE-BREAK allowance depends on the job's own `edgeBreak` (a stated V bit's reach and leg).
   const wall = designEdgeCells(goal);
   const border = borderCells(goal);
+  // THE PART'S OWN SILHOUETTE IS A DESIGN EDGE (the manager's sanction, #959): it is the edge an
+  // edge break exists for. The band seeds from `wall ∪ border`, so the chamfer's legitimate break
+  // of the outer rim is excused like any interior edge's — without it, cells just inside the rim
+  // were adjudicated even though the nearest wall was 0.10 mm away, inside a 1.5875 mm reach. The
+  // WALL SHADOW still seeds from `wall` alone (a different question, measured separately).
+  const bandSeed = new Uint8Array(cells);
+  for (let k = 0; k < cells; k++) if (wall[k] === 1 || border[k] === 1) bandSeed[k] = 1;
   const shadowRadius = opts.wallShadowRadiusMm;
   const shadow =
     shadowRadius !== undefined && shadowRadius > 0
@@ -1053,7 +1060,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       : null;
   const allowance = opts.edgeBreak;
   const allowanceActive = allowance !== undefined && allowance.reachMm > 0 && allowance.legMm > 0;
-  const band = allowanceActive ? dilateCells(wall, nx, ny, goal.pitch, allowance.reachMm) : null;
+  const band = allowanceActive ? dilateCells(bandSeed, nx, ny, goal.pitch, allowance.reachMm) : null;
   const excluded = new Uint8Array(cells);
   let edgeBreakCells = 0;
   let wallNotScoredCells = 0;

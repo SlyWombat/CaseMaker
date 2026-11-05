@@ -437,6 +437,89 @@ const allPockets = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [
 
 /** The `facing` region's own `Box2` — there is no `PocketNode`/`regionRefs` entry for it (it is
  * not a recognised feature, it is this plan's own synthesis of `FeatureTree.top.floors`). */
+/** The topmost mesh surface at (x, y), or null where no triangle covers the point. */
+function topSurfaceAt(mesh: { positions: Float32Array; indices: Uint32Array }, x: number, y: number): number | null {
+  const p = mesh.positions;
+  let best: number | null = null;
+  for (let t = 0; t + 2 < mesh.indices.length; t += 3) {
+    const i0 = mesh.indices[t]! * 3;
+    const i1 = mesh.indices[t + 1]! * 3;
+    const i2 = mesh.indices[t + 2]! * 3;
+    const x0 = p[i0]!, y0 = p[i0 + 1]!, z0 = p[i0 + 2]!;
+    const x1 = p[i1]!, y1 = p[i1 + 1]!, z1 = p[i1 + 2]!;
+    const x2 = p[i2]!, y2 = p[i2 + 1]!, z2 = p[i2 + 2]!;
+    const d = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2);
+    if (Math.abs(d) < 1e-12) continue;
+    const a = ((y1 - y2) * (x - x2) + (x2 - x1) * (y - y2)) / d;
+    const b = ((y2 - y0) * (x - x2) + (x0 - x2) * (y - y2)) / d;
+    const c = 1 - a - b;
+    if (a < -1e-9 || b < -1e-9 || c < -1e-9) continue;
+    const z = a * z0 + b * z1 + c * z2;
+    if (best === null || z > best) best = z;
+  }
+  return best;
+}
+
+/** The chamfer's own air-side sign: outward for the part's contour, into the pocket for a rim. */
+function rimAirSign(rim: { of: string }): number {
+  return rim.of === 'contour' ? 1 : -1;
+}
+
+/** A closed ring normalised to positive orientation (the same convention `chamfer()` uses). */
+function rimRing(polyline: readonly [number, number][]): [number, number][] {
+  const ring = polyline.map((q) => [q[0], q[1]] as [number, number]);
+  const first = ring[0]!;
+  const last = ring[ring.length - 1]!;
+  if (first[0] !== last[0] || first[1] !== last[1]) ring.push([first[0], first[1]]);
+  let area = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) area += ring[j]![0] * ring[i]![1] - ring[i]![0] * ring[j]![1];
+  return area < 0 ? ring.reverse() : ring;
+}
+
+/**
+ * IS THIS RIM EXPOSED FROM +Z? (the manager's ruling, from the tray's 0.5 mm cell). The tray's
+ * chamfer ran a 130 mm feed along a real 90° mesh edge whose air side is COVERED: the goal's top
+ * surface continues across the edge at the same height (the edge lies under the land — a cavity
+ * mouth, not an open lip), so the break cut 0.5 mm into ground the goal never exposes. A rim is
+ * breakable only where its AIR side actually drops — by the goal's own step threshold (0.2 mm,
+ * `designEdgeCells`). Sampled at up to eight segment midpoints, 0.25 and 0.5 mm onto the air side;
+ * ANY covered sample means the rim is not broken whole (conservative: never break under a lip).
+ */
+function rimExposedFromAbove(
+  mesh: { positions: Float32Array; indices: Uint32Array },
+  rim: { polyline: readonly [number, number][]; z: number; of: string },
+  stepMm = 0.2,
+): boolean {
+  const ring = rimRing(rim.polyline);
+  const segments = ring.length - 1;
+  if (segments <= 0) return true;
+  // EVERY segment midpoint, not a sample of them: an 8-point stride missed covered stretches on
+  // the tray (adjudicated cut fell 0.00128 -> 0.00031, not to zero) because a long rim can pass
+  // under a lip for a short run between the sampled points.
+  const air = rimAirSign(rim);
+  for (let s = 0; s < segments; s++) {
+    const a = ring[s]!;
+    const b = ring[(s + 1) % segments]!;
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-9) continue;
+    // For a positively oriented closed ring the interior is on the left; outward is (dy, -dx).
+    const nx = (dy / len) * air;
+    const ny = (-dx / len) * air;
+    const mx = (a[0] + b[0]) / 2;
+    const my = (a[1] + b[1]) / 2;
+    // The samples must cover the V's WHOLE footprint, not just the edge's neighbourhood: the
+    // cutter's skirt reaches its own outer radius from the path, so covered ground that starts
+    // ~1 mm out is still cut at 0.5 mm deep.
+    for (const d of [0.25, 0.5, 1.0, 1.3, 1.55]) {
+      const top = topSurfaceAt(mesh, mx + nx * d, my + ny * d);
+      if (top !== null && top > rim.z - stepMm) return false;
+    }
+  }
+  return true;
+}
+
 /** A ring's projected area (shoelace), mm² — absolute, so the ring's winding does not matter. */
 function ringAreaOf(ring: readonly [number, number][]): number {
   let area = 0;
@@ -1209,6 +1292,15 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     }
     const vbit = opts.vbit;
     for (const rim of tree.rims) {
+      // THE MANAGER'S RULING from the tray's 0.5 mm cell: a rim whose air side is COVERED is not
+      // broken — see `rimExposedFromAbove` for the measurement that put this here. The test reads
+      // the mesh, so it uses the rim's MESH-ABSOLUTE z, before the rebase below.
+      if (!rimExposedFromAbove(opts.geometry.triangles, rim)) {
+        notes.push(
+          `rim "${rim.id}" not broken: covered from above (its air side does not drop by 0.2 mm — the edge lies under the land)`,
+        );
+        continue;
+      }
       // The rim's own Z is mesh-absolute too — rebased before the op sizes its bevel from it.
       const rebasedRim = { ...rim, z: rebaseZ(rim.z) };
       const ref = regionRefOf(rim.id, 'rim', [[...rim.polyline]], rebasedRim.z, rebasedRim.z);

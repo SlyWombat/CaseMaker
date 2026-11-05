@@ -357,7 +357,7 @@ interface AcceptanceGoal {
 /** What `writeAcceptance` reads from a plan — the pocket result and the one entry's SetupPlan both answer it. */
 type AcceptancePlan = Pick<PlanPocketsResult, 'ops' | 'programs' | 'sequence' | 'unreachable' | 'notes'>;
 
-function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan, goal?: AcceptanceGoal): void {
+function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan, goal?: AcceptanceGoal): { coverage: number; adjudicatedFraction: number } | null {
   const { ops, programs, sequence, unreachable, notes } = result;
 
   const ctx: PostContext = {
@@ -447,8 +447,9 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
       (notes.length > 0 ? ` Notes: ${notes.join('; ')}` : ''),
   );
 
+  const measuredResult = measured === null ? null : { coverage: measured.coverage, adjudicatedFraction: measured.cutInto.adjudicatedFraction ?? 0 };
   const out = process.env.CM_959_OUT;
-  if (out === undefined) return;
+  if (out === undefined) return measuredResult;
   fs.mkdirSync(out, { recursive: true });
 
   const plan: { perSetup: Partial<SetupPlan>[] } = {
@@ -485,6 +486,7 @@ function writeAcceptance(name: string, tree: FeatureTree, result: AcceptancePlan
           }),
     }),
   );
+  return measuredResult;
 }
 /** A minimal, hand-built tree: one 20×10 pocket, floor at −3, no STEP needed — proves the plan →
  * post → measure plumbing itself, independent of the licensed Makerables parts this file otherwise
@@ -1046,7 +1048,15 @@ describe.skipIf(TRAY === undefined)('#959 acceptance — tool tray 70, the whole
     if (setup.features.remainder.length > 0) {
       expect(setup.ops.some((op) => op.kind === 'finish'), 'the ball finish never ran on the real part').toBe(true);
     }
-    writeAcceptance('tray', setup.features, { ops: setup.ops, programs: runs, sequence: setup.sequence, unreachable: setup.unreachable, notes: setup.notes }, { target: placed.target, stock: { length: 110, width: 140 } });
+    const measured = writeAcceptance('tray', setup.features, { ops: setup.ops, programs: runs, sequence: setup.sequence, unreachable: setup.unreachable, notes: setup.notes }, { target: placed.target, stock: { length: 110, width: 140 } });
+    // RED-FIRST (the manager's ruling): the chamfer ran a 130 mm feed along a rim whose air side
+    // the goal sees as land — 0.5 mm into ground it never exposes (0.13 % adjudicated). With rims
+    // covered from above skipped, that cell is not cut and the coverage that made the rebuild's
+    // jump stays; the OTHER rims (real, open edges) are still broken.
+    expect(measured, 'the tray measured nothing').not.toBeNull();
+    expect(measured!.adjudicatedFraction, 'the chamfer cut a rim that is covered from above').toBe(0);
+    expect(measured!.coverage).toBeGreaterThanOrEqual(0.98);
+    expect(setup.ops.filter((op) => op.kind === 'chamfer').length, 'no rim was broken at all').toBeGreaterThan(0);
   }, 1_800_000);
 });
 
@@ -1136,19 +1146,31 @@ describe('#959 acceptance — the curved pipeline (every op entered)', () => {
     // program — `postZ1` refuses one — so the pipeline states it instead of posting an empty file.
     // The ramp has no crease on the ball's own CL, so the pencil is the stage that says so here.
     const noRestKinds = noRest.ops.map((o) => o.kind);
-    for (const stage of ['rough', 'finish', 'chamfer'] as const) expect(noRestKinds).toContain(stage);
+    for (const stage of ['rough', 'finish'] as const) expect(noRestKinds).toContain(stage);
+    // THE COVERED-RIM RULE (#959): this fixture's rim sits at the edge of a plane that CONTINUES
+    // beyond it (its mesh was margin-extended so the drop-cutter sees no edge) — there is no drop
+    // on its air side, so it is exactly a rim the rule says not to break, and the plan states it.
+    // The chamfer's real cut lives on the tray/organizer cases, real parts with real edges.
+    if (noRestKinds.includes('chamfer')) {
+      expect(noRest.notes.join(' ')).not.toContain('rim "rim-1" not broken');
+    } else {
+      expect(noRest.notes.join(' '), 'the rim was skipped without a note').toContain('rim "rim-1" not broken: covered from above');
+    }
     for (const op of noRest.ops) {
       expect(op.outcome.ir.operations[0]!.moves.length, `${op.kind} posted no moves`).toBeGreaterThan(0);
     }
     if (!noRestKinds.includes('pencil')) {
       expect(noRest.notes.join(' '), 'pencil was dropped without a note').toContain('pencil "');
     }
-    const chamferZ = noRest.ops.find((o) => o.kind === 'chamfer')!.outcome.ir.operations[0]!.moves.filter((m) => m.kind === 'feed').map((m) => m.z);
-    expect(Math.min(...chamferZ)).toBeCloseTo(-0.5, 6);
+    const chamferOp = noRest.ops.find((o) => o.kind === 'chamfer');
+    if (chamferOp !== undefined) {
+      const chamferZ = chamferOp.outcome.ir.operations[0]!.moves.filter((m) => m.kind === 'feed').map((m) => m.z);
+      expect(Math.min(...chamferZ)).toBeCloseTo(-0.5, 6);
+    }
 
     const withRest = planCurvedForTree(tree, { ...base, restFlat: small });
     const withRestKinds = withRest.ops.map((o) => o.kind);
-    for (const stage of ['rough', 'finish', 'chamfer'] as const) expect(withRestKinds).toContain(stage);
+    for (const stage of ['rough', 'finish'] as const) expect(withRestKinds).toContain(stage);
     if (!withRestKinds.includes('pencil')) {
       expect(withRest.notes.join(' '), 'pencil was dropped without a note').toContain('pencil "');
     }
