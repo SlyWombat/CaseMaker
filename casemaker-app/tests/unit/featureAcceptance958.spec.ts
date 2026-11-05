@@ -229,7 +229,7 @@ function logExtraLevelFits(
   if (faceId === undefined) return;
   const tol = DEFAULT_FEATURE_TOLERANCES;
   const patches = patchesFromFaces(mesh, faceId, tol);
-  classifyPatches(mesh, patches, tree.frame.partBottom, tol);
+  classifyPatches(mesh, patches, tree.frame.partBottom, tol, 'step');
   const extra = tree.levels.filter(
     (z) => !listed.some((d) => Math.abs(modelTop - z - d) <= LEVEL_TOL) || alsoAt.some((d) => Math.abs(modelTop - z - d) <= LEVEL_TOL),
   );

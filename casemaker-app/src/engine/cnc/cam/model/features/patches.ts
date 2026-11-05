@@ -435,12 +435,27 @@ export function remainderSurfaces(
 /**
  * Classify patches against +Z (the setup's up, after `frame.ts`). `partBottom` is the lowest z of
  * the part; a down-facing planar patch there is the stock side, not an undercut.
+ *
+ * #965 — THE MESH PATH CLASSIFIES PER TRIANGLE. A B-rep face (the STEP path) is one surface and
+ * one orientation; a MESH path's curved pool is one edge-connected component of every non-planar
+ * triangle, and a closed sculpture's connected surface spans both its up-facing top and its
+ * down-facing underside — on the panther, one down facet in a 119,262-triangle component demoted
+ * 73 % of the mesh to `undercut`, no RemainderRegion projected over it, and the finish never ran
+ * there. When `path === 'mesh'`, a non-planar patch whose facets disagree is therefore SPLIT by
+ * each triangle's own orientation: up-facing triangles stay remainder ground (they are the top of
+ * the material from above), vertical ones become walls, and down-facing ones keep the undercut
+ * exclusion. A component with NO up-facing facet stays ONE `undercut` patch — its vertical facets
+ * included — and keeps the whole-patch exclusion. The STEP path keeps the whole-patch rule
+ * unchanged (one face = one surface).
  */
-export function classifyPatches(mesh: FrameMesh, patches: Patch[], partBottom: number, tol: FeatureTolerances): void {
+export function classifyPatches(mesh: FrameMesh, patches: Patch[], partBottom: number, tol: FeatureTolerances, path: 'mesh' | 'step' = 'mesh'): void {
   const info = triangleInfo(mesh);
   const cosTol = Math.cos(tol.angleDeg * DEG);
   const sinTol = Math.sin(tol.angleDeg * DEG);
-  for (const patch of patches) {
+  // Snapshot: the mesh path APPENDS the split's pieces while it iterates, and this loop must not
+  // visit them — their kind is assigned where they are created (a pure-down piece `undercut`, a
+  // pure-vertical one `wall`), and visiting them again would split their `undercut` pieces anew.
+  for (const patch of [...patches]) {
     const nz = patch.normal[2];
     if (patch.planar && nz >= cosTol) {
       patch.kind = 'floor';
@@ -459,7 +474,58 @@ export function classifyPatches(mesh: FrameMesh, patches: Patch[], partBottom: n
       if (tz < -sinTol) anyDown = true;
     }
     if (allVertical) patch.kind = 'wall';
-    else if (anyDown) patch.kind = 'undercut';
-    else patch.kind = 'remainder';
+    else if (anyDown) {
+      if (path !== 'mesh' || patch.planar) {
+        patch.kind = 'undercut';
+        continue;
+      }
+      // #965 — the split (see this function's header). Up-facing triangles ARE remainder ground.
+      const up: number[] = [];
+      const vertical: number[] = [];
+      const down: number[] = [];
+      for (const t of patch.triangles) {
+        const tz = info.area[t]! <= 0 ? 0 : info.n[3 * t + 2]!;
+        if (tz > sinTol) up.push(t);
+        else if (tz < -sinTol) down.push(t);
+        else vertical.push(t);
+      }
+      const piece = (tris: number[], kind: PatchKind): void => {
+        const fit = fitPlane(mesh, info, tris);
+        patches.push({
+          id: patches.length,
+          triangles: tris,
+          planar: false,
+          normal: fit.normal,
+          d: fit.d,
+          area: fit.area,
+          zMin: fit.zMin,
+          zMax: fit.zMax,
+          kind,
+          planeDevMm: fit.dev,
+          normalSpreadDeg: fit.minDot === undefined ? 0 : (Math.acos(Math.min(1, fit.minDot)) * 180) / Math.PI,
+        });
+      };
+      // The original patch keeps the up-facing set and its fit is re-derived over exactly that
+      // set — the old fit described the whole component and would be stale. The other two sets
+      // are appended as their own patches, their kinds assigned here (see the loop's snapshot
+      // note: they are not re-visited). A component with NO up-facing facet stays ONE `undercut`
+      // patch, verticals included, and keeps the whole-patch exclusion.
+      if (up.length === 0) {
+        patch.kind = 'undercut';
+        continue;
+      }
+      const upFit = fitPlane(mesh, info, up);
+      patch.triangles = up;
+      patch.kind = 'remainder';
+      patch.normal = upFit.normal;
+      patch.d = upFit.d;
+      patch.area = upFit.area;
+      patch.zMin = upFit.zMin;
+      patch.zMax = upFit.zMax;
+      patch.planeDevMm = upFit.dev;
+      patch.normalSpreadDeg = (Math.acos(Math.min(1, upFit.minDot)) * 180) / Math.PI;
+      if (vertical.length > 0) piece(vertical, 'wall');
+      if (down.length > 0) piece(down, 'undercut');
+    } else patch.kind = 'remainder';
   }
 }
