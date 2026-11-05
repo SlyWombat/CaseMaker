@@ -1,61 +1,59 @@
 /**
- * #970 — THE FINISH MASK'S RED-FIRST: a steep-flank grid where the exact rule keeps a point and
- * the old `Math.round` read drops it.
+ * #970 — THE FINISH MASK'S RED-FIRST: a steep-flank surface where the exact per-point rule keeps a
+ * point and the rounded-grid read of `cd5ec056` drops it.
  *
- * The mask's leftover grid samples the flat's CL at its own pitch. `cd5ec056` read it with ONE
- * rounded cell per point; on the panther's 74–89° flanks the CL varies between samples, the
- * rounded cell said "no leftover" where the exact per-point query said leftover, and the finish
- * stopped running there (coverage 73.17 → 49.09 %). The fix reads the point's floor/ceil pair in
- * each axis; over-inclusion is allowed, a dropped point is the bug.
- *
- * RED-FIRST, precisely: `leftoverRounded` (the pre-fix read) is FALSE at the point this case
- * builds, `leftoverNear` (the fix) is TRUE, and the point sits exactly between two samples — the
- * half-cell tie that `Math.round` resolves upward, away from the leftover cell.
+ * `cd5ec056` gave the mask a leftover grid read by ONE `Math.round` cell per point. On the
+ * panther's 74–89° flanks the CL varies between samples, the rounded cell said "no leftover"
+ * where the exact query said leftover, and the finish stopped running there (coverage
+ * 73.17 → 49.09 %, #965's bisect). The ruling on #970: the exact per-point rule is the mask's
+ * rule; this spec pins it. The rounded reader below is the PRE-FIX algorithm, kept here as the
+ * red side of the comparison — it is not production code.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import { leftoverNear, leftoverRounded, maskCellsConservative, type LeftoverGrid } from '@/engine/cnc/cam/model/maskGrid';
+import { maskCellsExact } from '@/engine/cnc/cam/model/finishMask';
 
-/** A 4x4 grid at 0.5 mm; the leftover cells are listed by (i, j). */
-const grid = (leftover: readonly [number, number][]): LeftoverGrid => {
-  const nx = 4;
-  const ny = 4;
-  const cells = new Uint8Array(nx * ny);
-  for (const [i, j] of leftover) cells[j * nx + i] = 1;
-  return { nx, ny, min: [0, 0], pitch: 0.5, cells };
+/** The pre-fix read, reproduced: one rounded cell from a 0.5 mm grid. */
+const roundedGridRead = (leftoverCell: (i: number, j: number) => boolean, x: number, y: number): boolean => {
+  const i = Math.round(x / 0.5);
+  const j = Math.round(y / 0.5);
+  return leftoverCell(i, j);
 };
 
-describe('#970 the finish mask reads its leftover grid conservatively', () => {
-  it('RED-FIRST: a point exactly between two samples keeps the leftover the rounded read drops', () => {
+describe('#970 the finish mask uses the exact per-point rule', () => {
+  it('RED-FIRST: a point exactly between two samples keeps the leftover the rounded grid read drops', () => {
     // The steep flank: cell (0, 1) is leftover, cell (1, 1) is not — the CL falls across the rise.
-    const g = grid([[0, 1]]);
-    // x = 0.25 mm sits at fx = 0.5 between cell 0 and cell 1: Math.round(HALF UP) picks cell 1
-    // and misses the leftover at cell 0 — the pre-fix mask returned false here.
-    expect(leftoverRounded(g, 0.25, 0.75)).toBe(false);
-    // The fix: the floor/ceil pair touches cell 0, so the point is leftover.
-    expect(leftoverNear(g, 0.25, 0.75)).toBe(true);
+    const leftoverCell = (i: number, j: number): boolean => i === 0 && j === 1;
+    // The EXACT rule on that surface: the point (0.25, 0.75) lies in the leftover side (the exact
+    // CL over the band). The mask keeps it.
+    const exactLeftover = (x: number, y: number): boolean => x >= 0 && x < 0.5 && y >= 0.5 && y < 1.0;
+    expect(maskCellsExact(exactLeftover, [], 0.25, 0.75)).toBe(true);
+    // The pre-fix grid read at the half-cell tie (Math.round HALF UP) picks cell (1, 1) and
+    // misses the leftover at cell (0, 1) — the mask returned false here.
+    expect(roundedGridRead(leftoverCell, 0.25, 0.75)).toBe(false);
   });
 
-  it('the mask keeps a ball footprint point whose ring lands between samples', () => {
-    const g = grid([[0, 1]]);
-    const ring: [number, number][] = [[1, 0], [0, 1], [-1, 0], [0, -1], [Math.SQRT1_2, Math.SQRT1_2], [-Math.SQRT1_2, Math.SQRT1_2], [Math.SQRT1_2, -Math.SQRT1_2], [-Math.SQRT1_2, -Math.SQRT1_2]];
-    // A point whose OWN cell is clean but whose -x ring point (x = 0.25) touches the leftover.
-    expect(maskCellsConservative(g, ring, 1.25, 0.75)).toBe(true);
+  it('the ball footprint is part of the rule: a ring point over the leftover plants the centre', () => {
+    const exactLeftover = (x: number, y: number): boolean => x >= 0 && x < 0.5 && y >= 0.5 && y < 1.0;
+    const ring: [number, number][] = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+    // The centre (1.25, 0.75) is not leftover itself; its -x ring point (0.25, 0.75) is.
+    expect(maskCellsExact(exactLeftover, ring, 1.25, 0.75)).toBe(true);
+    // A point whose centre and ring are both clear is not planted.
+    expect(maskCellsExact(exactLeftover, ring, 3.0, 3.0)).toBe(false);
   });
 
-  it('never drops a point the rounded read keeps — inclusion is monotone', () => {
-    const g = grid([[0, 0], [2, 3], [3, 1]]);
-    for (let x = -0.5; x <= 2.0; x += 0.05) {
-      for (let y = -0.5; y <= 2.0; y += 0.05) {
-        if (leftoverRounded(g, x, y)) expect(leftoverNear(g, x, y), `(${x.toFixed(2)}, ${y.toFixed(2)})`).toBe(true);
+  it('every point INSIDE the leftover is planted — the rule cannot drop one', () => {
+    // The exact rule's guarantee, by construction: the mask plants a point wherever the exact
+    // per-point test says leftover, at every sample of a fine grid across the leftover surface.
+    const exactLeftover = (x: number, y: number): boolean => x >= 0 && x < 2 && y >= 0 && y < 2;
+    let planted = 0;
+    for (let x = 0; x < 2; x += 0.05) {
+      for (let y = 0; y < 2; y += 0.05) {
+        expect(maskCellsExact(exactLeftover, [], x, y), `(${x.toFixed(2)}, ${y.toFixed(2)})`).toBe(true);
+        planted++;
       }
     }
-  });
-
-  it('a point nowhere near a leftover cell is not included', () => {
-    const g = grid([[3, 3]]);
-    expect(leftoverNear(g, 0.1, 0.1)).toBe(false);
-    expect(maskCellsConservative(g, [[1, 0]], 0.1, 0.1)).toBe(false);
+    expect(planted).toBe(40 * 40);
   });
 });
