@@ -4833,10 +4833,10 @@ export const MOLD_DRAFT_LIMIT_DEG = 85;
  *
  * NOT yet carried over from the old path: a per-goal edge break (no `EngraveJob`/`EngraveTargetObject`
  * field states one today, so `edgeBreak.legMm` is 0 — "the job states no edge break", same sentence
- * `planCurvedForTree` already prints for a rectilinear card with none) and the old path's own
- * feeds-derived finish tolerance (`tolerances.finishMm` falls back through the goal's own stated
- * step-over, then the shop's stock-to-leave, rather than re-deriving `finishStepOverForCusp` here —
- * stated so a reviewer does not read the two paths as cutting the identical number by accident).
+ * `planCurvedForTree` already prints for a rectilinear card with none) and a finish SCALLOP: a goal
+ * job states none (`EngraveSurfaceSettings` has step-overs, an allowance and a scallop on/off, not
+ * a cusp height), so `tolerances.finishMm` is left ABSENT and the engine's 0.027 mm default applies
+ * (#965 — the old path's step-over/stock-to-leave conflation is withdrawn; see the tolerances block).
  */
 export async function buildModelPlanInputForGoal(
   job: EngraveJob,
@@ -4955,9 +4955,16 @@ export async function buildModelPlanInputForGoal(
   const house: Tool[] = [...(shop.tools ?? []).map((e) => e.tool), tool];
   const cutters: CutterCandidates = { house, catalogue: [] };
 
-  const tolerances: ModelTolerances = {
-    finishMm: goal.surface?.finishStepOverMm ?? shop.finish?.stockToLeaveMm.value ?? DEFAULT_STOCK_TO_LEAVE_MM,
-  };
+  // #965 — THE SCALLOP SEAT HOLDS A SCALLOP OR NOTHING. The model engine's `tolerances.finishMm`
+  // is the ball's cusp height (the ruling makes it decide the finish), and a goal JOB states none:
+  // `EngraveSurfaceSettings` carries step-overs, allowances and a scallop ON/OFF, never a cusp.
+  // The old filling was a conflation — `finishStepOverMm` is a row spacing for the heightfield
+  // raster and `shop.finish.stockToLeaveMm` an allowance (a step-over of 0.2 became a 0.2 mm
+  // scallop, ten times coarser than the default). Both values have NO seat in the model plan
+  // (`PlanCurvedOptions.stepOverMm` is the cutter row's own; its band is the engine's constant),
+  // so they are IGNORED here, stated rather than mis-seated: `finishMm` is absent and the engine's
+  // 0.027 mm default applies.
+  const tolerances: ModelTolerances = {};
   const edgeBreak: EdgeBreakSpec = { legMm: 0 };
 
   return {
