@@ -95,7 +95,18 @@ describe('#959 review — the rough splits shallow from steep', () => {
     const result = plan(-0.6, -1.0);
     const roughOp = result.ops.find((op) => op.kind === 'rough');
     expect(roughOp, `ops: ${result.ops.map((o) => o.kind).join(', ')}; notes: ${result.notes.join('; ')}`).toBeDefined();
-    const feeds = roughOp!.outcome.ir.operations.flatMap((o) => o.moves).filter((m) => m.kind === 'feed');
+    // CUTTING feeds only: the runs' lateral feeds at or below the stock top. Since the skim joins
+    // through link() (item 4b's linking fix), the op also carries link VERTICALS at plungeFeed —
+    // those climb to the clearance plane and are not cuts; a job's gouge question is about the
+    // lateral ones.
+    const all = roughOp!.outcome.ir.operations.flatMap((o) => o.moves);
+    const feeds: typeof all = [];
+    let prevMove: (typeof all)[number] | null = null;
+    for (const m of all) {
+      const lateral = prevMove !== null && Math.hypot(m.x - prevMove.x, m.y - prevMove.y) > 1e-6;
+      if (m.kind === 'feed' && lateral && m.z <= 0) feeds.push(m);
+      prevMove = m;
+    }
     expect(feeds.length).toBeGreaterThan(10);
     // THE RULING (ii): the skim cuts to the flat's OWN CL — exact contact, never deeper. On a
     // plane descending in +x the flat touches at its uphill edge, so its CL stands slope x radius
@@ -115,5 +126,35 @@ describe('#959 review — the rough splits shallow from steep', () => {
     const feeds = roughOp!.outcome.ir.operations.flatMap((o) => o.moves).filter((m) => m.kind === 'feed');
     const levels = new Set(feeds.map((m) => m.z.toFixed(3)));
     expect(levels.size).toBeGreaterThanOrEqual(3);
+  }, 120_000);
+
+  it("#962 — the skim's runs tour: the travel BETWEEN runs collapses, not just the row turns", () => {
+    // The skim's raster rows run along x across the region's 40 mm width. Before #962 every row
+    // was traced low-x to high-x, so each join raced the full width back (the organizer measured
+    // 645 returns, 104.1 m, ~87 min). The runs now tour — nearest endpoint + 2-opt — so the
+    // between-run travel is one grid pitch in the common case. A tour may strand one run (a
+    // classic nearest-neighbour tail), so the property is the TOTAL travel, not the widest turn.
+    const result = plan(-0.6, -1.0);
+    const roughOp = result.ops.find((op) => op.kind === 'rough');
+    expect(roughOp, `ops: ${result.ops.map((o) => o.kind).join(', ')}`).toBeDefined();
+    const moves = roughOp!.outcome.ir.operations.flatMap((o) => o.moves);
+    // A JUMP is a near-level lateral move longer than one grid pitch — the travel BETWEEN runs
+    // (a retract's across leg, or one stay-down feed). The rows' own 0.5 mm feed steps are not
+    // jumps; the raster's between-run returns were ~46 mm each.
+    let jumps = 0;
+    let total = 0;
+    for (let i = 1; i < moves.length; i++) {
+      const a = moves[i - 1]!;
+      const b = moves[i]!;
+      if (Math.abs(b.z - a.z) > 0.5) continue; // a vertical leg, not a jump
+      const lateral = Math.hypot(b.x - a.x, b.y - a.y);
+      if (lateral <= 1) continue;
+      jumps++;
+      total += lateral;
+    }
+    // The tour may strand ONE run at its tail (nearest-neighbour's classic blind spot, which the
+    // 2-opt cannot fix when the last step is the stranded one); the raster stranded every row.
+    expect(jumps, 'the between-run travel still crosses the region — the runs do not tour').toBeLessThanOrEqual(2);
+    expect(total, 'the between-run travel still crosses the region — the runs do not tour').toBeLessThan(100);
   }, 120_000);
 });

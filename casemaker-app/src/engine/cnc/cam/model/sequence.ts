@@ -53,7 +53,7 @@ import {
 } from '../ir';
 
 /** The op kinds the engine's plan carries (`PlannedOp['kind']` on #956's interface). */
-export type PlannedOpKind = 'pocket' | 'contour' | 'rough' | 'rest' | 'finish' | 'pencil' | 'chamfer';
+export type PlannedOpKind = 'pocket' | 'contour' | 'rough' | 'rest' | 'finish' | 'pencil' | 'chamfer' | 'skin';
 
 /** What a cutter does in the sequence — the vendor's four roles. */
 export type CutterRole = 'flat' | 'rest' | 'ball' | 'chamfer';

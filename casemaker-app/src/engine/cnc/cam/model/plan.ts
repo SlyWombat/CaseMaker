@@ -34,16 +34,16 @@ import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
 import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
-import type { FeatureSource, FeatureTree, PocketNode, SetupFrame } from './features';
+import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances } from './types';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { pocket } from './ops/pocket';
 import { clSurface } from './clsurface';
-import { rough } from './ops/rough';
+import { rough, skin } from './ops/rough';
 import { cellPolygons, rest } from './ops/rest';
 import { DEFAULT_FINISH_SCALLOP_MM, finish, finishKindFor } from './ops/finish';
-import { FLAT_SURFACE_MAX_SLOPE_DEG } from './settings';
+import { flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
 import { pencil } from './ops/pencil';
 import { chamfer } from './ops/chamfer';
 import { contour as contourOp, throughHole } from './ops/contour';
@@ -142,6 +142,10 @@ export interface SetupSpec {
 
 export interface ModelPlanInput {
   geometry: FeatureSource;
+  /** #959 ruling: `'on'` plans the facing stage; absent/`'off'` gives the skin to the `skin` pass. */
+  facing?: 'off' | 'on';
+  /** The shared flat/ball slope parameter (#959); absent → the provisional `FLAT_SURFACE_MAX_SLOPE_DEG`. */
+  flatSurfaceMaxSlopeDeg?: number;
   /**
    * Length 1 for the tray/organizer today; #898/#914's flip plan (`held/914-flip-plan`: the
    * reach-aware face decision, the stock-floor anchor, the band-floor trigger) and #965 fill this
@@ -510,6 +514,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         boolean,
         ...(goalCoverage === undefined ? {} : { goalCoverage }),
         ...(restRegion === undefined ? {} : { restRegion }),
+        facing: input.facing ?? 'off',
       },
       curved: {
         geometry: input.geometry,
@@ -529,6 +534,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         air: true,
         edgeBreak: input.edgeBreak,
         toolNumberFor: (tool) => tool.number ?? 1,
+        facing: input.facing ?? 'off',
+        ...(input.flatSurfaceMaxSlopeDeg === undefined ? {} : { flatSurfaceMaxSlopeDeg: input.flatSurfaceMaxSlopeDeg }),
       },
     });
     opts.signal?.throwIfAborted();
@@ -763,6 +770,12 @@ export interface PlanPocketsOptions {
     prefixIrs: readonly ToolpathIR[],
     region: { id: string; footprint: Polygons; floorZ: number; bounds: { min: [number, number]; max: [number, number] } },
   ) => Polygons | null;
+  /**
+   * #959 (2026-11-05 ruling): FACING OFF by default. `'on'` plans the facing stage exactly as
+   * before (the operator option); absent or `'off'` plans none, and the skin over the top land
+   * belongs to the flat surface-following pass (`skin`).
+   */
+  facing?: 'off' | 'on';
 }
 
 /**
@@ -885,7 +898,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // of every pocket/through-hole sharing that same step. See the regression test proving this by
   // POSTED ORDER, not by trusting this push order alone, in `opsAcceptance959.spec.ts`.
   const facingDepthMm = z0 - tree.top.z;
-  const hasFacing = facingDepthMm > 1e-6;
+  // #959 (2026-11-05 ruling): facing is an OPERATOR OPTION, off by default.
+  const hasFacing = (opts.facing ?? 'off') === 'on' && facingDepthMm > 1e-6;
   if (hasFacing) {
     refById.set('facing', {
       id: 'facing', kind: 'pocket', bounds: boundsOfPolygons(tree.contour.outline),
@@ -1444,6 +1458,10 @@ export interface PlanCurvedOptions {
   edgeBreak: EdgeBreakSpec;
   toolNumberFor: (tool: Tool) => number;
   startFrom?: readonly [number, number];
+  /** #959 ruling: `'on'` puts the skin back on the facing stage; absent/`'off'` gives it to `skin`. */
+  facing?: 'off' | 'on';
+  /** The shared flat/ball slope parameter (#959); absent → `FLAT_SURFACE_MAX_SLOPE_DEG`'s provisional value. */
+  flatSurfaceMaxSlopeDeg?: number;
 }
 
 export interface PlanCurvedResult {
@@ -1508,6 +1526,17 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       unplanned.push({ kind, cutterKey: cutterKeyOf(cutter), regionIds: [ref.id], reason: err instanceof Error ? err.message : String(err) });
       return false;
     }
+  };
+  // #962 — ONE bins build for the whole plan's top-surface queries (the rim filter, the 4a mask
+  // and every op's material field share it), and THE DESIGN'S TOP at (x, y) in this plan's datum:
+  // the answer the material fields need past their own sampled reach, where a wall or land beside
+  // a region can stand HIGHER than the region's own top. The mesh's top where it answers; null
+  // where it is silent (the ops then fall back to the stock top, 0 in this datum).
+  let surfaceBins: TriangleBins | null = null;
+  const binsForMask = (): TriangleBins => (surfaceBins ??= buildTriangleBins(opts.geometry.triangles));
+  const designTopAt = (x: number, y: number): number | null => {
+    const top = topSurfaceAt(binsForMask(), x, y);
+    return top === null ? null : top - z0;
   };
   const clGrid: PlanCurvedResult['clGrid'] = [];
   const noteGrid = (cutter: Tool, surface: ReturnType<typeof clSurface>): void => {
@@ -1622,6 +1651,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         spindleRpm: paramsFor(opts.flat).rpm,
         air: opts.air,
         rapid: opts.rapid,
+        materialTopAt: designTopAt,
+        stockTopZMm: 0,
         ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
       });
     });
@@ -1641,6 +1672,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // 2. REST BY CL DIFFERENCE, when the caller offers a smaller flat: the band the previous
     //    cutter left standing, where the smaller one can reach.
     const restFlat = opts.restFlat;
+    const restClSink: { surface?: ReturnType<typeof clSurface> } = {};
     if (restFlat !== undefined) {
       // B's review of `0461df01`: the rest stage was left on the MESH-ABSOLUTE region and an
       // unshifted surface — `depthPasses` reads `opts.region.zTop/zBottom`, so at stockTop != 0 the
@@ -1649,6 +1681,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       // the region is `base`, the surface is shifted like the flat's.
       attempt('rest', restFlat, ref, () => {
         const restCl = shiftSurface(clSurface(opts.geometry, base, restFlat, cuts.stepOver));
+        restClSink.surface = restCl;
         noteGrid(restFlat, restCl);
         return rest({
           cutter: restFlat,
@@ -1678,6 +1711,45 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       });
     }
 
+    // ITEM 4a — THE FINISH'S MASK: leftover = flatSwept − design > band, dilated by the ball's
+    // footprint. `flatSwept` is the LOWEST flat CL that actually ran over the region — the skim's
+    // exact-contact pass, else the Z-levels' cl + band; a rest flat's CL when one ran — read back
+    // to the MESH datum (the shifted surfaces + z0), because `design` is the mesh's own top at the
+    // cell (`topSurfaceAt`). The band is the finish's tolerance (the ruling), not the rough's
+    // stock-to-leave.
+    const finishBand = opts.finishScallopMm ?? opts.bandMm;
+    const flatAbs = (x: number, y: number): number | null => {
+      const v = prevCl.dropCutter(x, y);
+      return v === null ? null : v + z0;
+    };
+    const restAbs = (x: number, y: number): number | null => {
+      const surface = restClSink.surface;
+      if (surface === undefined) return null;
+      const v = surface.dropCutter(x, y);
+      return v === null ? null : v + z0;
+    };
+    const leftoverAbove = (x: number, y: number): boolean => {
+      const f = flatAbs(x, y);
+      const r = restAbs(x, y);
+      const flatZ = f === null ? r : r === null ? f : Math.min(f, r);
+      if (flatZ === null) return false;
+      const design = topSurfaceAt(binsForMask(), x, y);
+      if (design === null) return false;
+      return flatZ - design > finishBand;
+    };
+    const ballRadiusForMask = (cuttingDiameter(ball) ?? 0) / 2;
+    const maskCells = (x: number, y: number): boolean => {
+      // Dilated by the ball's footprint: a centre just outside the leftover still cuts into it,
+      // and a centre just OUTSIDE the part still finishes the skirt its flank holds — the same
+      // margin the grown outer ring needs.
+      if (leftoverAbove(x, y)) return true;
+      for (let d = 0; d < 8; d++) {
+        const a = (d * Math.PI) / 4;
+        if (leftoverAbove(x + Math.cos(a) * ballRadiusForMask, y + Math.sin(a) * ballRadiusForMask)) return true;
+      }
+      return false;
+    };
+
     // 3. THE BALL'S ONE FINAL LEVEL: a single pass at the region's depth takes the band.
     //
     // THE CURVED PROPERTY SEEDS FOUND THIS: the ball was dropped onto `finishCl` — the FLAT's CL
@@ -1706,10 +1778,10 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const depth = Math.max(opts.stepDownMm, base.zTop - base.zBottom);
     // #960 — FLAT OR BALL BY THE REGION'S OWN SLOPE, with the threshold stated on the plan; the
     // constant is a parameter (shared with C's #959 skin pass) while the picture decides 1.9° vs 7.1°.
-    const finishKind = finishKindFor(roughRegion, opts.geometry.triangles, opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG);
+    const finishKind = finishKindFor(roughRegion, opts.geometry.triangles, opts.flatFinishMaxSlopeDeg ?? flatSurfaceMaxSlopeDeg());
     notes.push(
       `the ${roughRegion.id} finish runs as a ${finishKind === 'flat-raster' ? 'flat-following raster' : 'ball at constant scallop'} ` +
-        `(slopes ${roughRegion.slopeDeg[0].toFixed(1)}–${roughRegion.slopeDeg[1].toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG).toFixed(2)}°)`,
+        `(slopes ${roughRegion.slopeDeg[0].toFixed(1)}–${roughRegion.slopeDeg[1].toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? flatSurfaceMaxSlopeDeg()).toFixed(2)}°)`,
     );
     attempt('finish', ball, ref, () => finish({
       cutter: ball,
@@ -1719,6 +1791,15 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       kind: finishKind,
       mesh: opts.geometry.triangles,
       scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
+      maskCells,
+      // #962 — the material field's answers past the region's own reach (the linker's disc and the
+      // down-leg floor reach up to a cutter radius outside it): the goal/mesh top there, which is
+      // the honest bound a wall or land beside a low region demands, and the stock top where the
+      // mesh is silent. The region's own zTop is NOT that bound — a neighbouring wall can out-top
+      // it, and a rapid floored at zTop would run into the wall. In this datum (every Z rebased by
+      // −stockTop) the stock top is 0.
+      materialTopAt: designTopAt,
+      stockTopZMm: 0,
       stepDownMm: depth,
       feeds: feedsOf(paramsFor(ball)),
       safeZMm: opts.safeZMm,
@@ -1743,6 +1824,52 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       air: opts.air,
       rapid: opts.rapid,
     }));
+  }
+
+  // THE SKIN PASS (#959, 2026-11-05 ruling): the stock stands above the part top and the job asks
+  // for no facing — the FLAT takes the skin, surface-following (C6's Makera T1 shape), capped at
+  // its own step-down and gated by the shared slope parameter. Facing `'on'` keeps that stage
+  // instead (the operator option).
+  const skinMm = z0 - tree.top.z;
+  if (skinMm > 1e-6 && (opts.facing ?? 'off') !== 'on') {
+    const flatRadius = (cuttingDiameter(opts.flat) ?? 0) / 2;
+    const grownSkin = flatRadius > 0 ? opts.offset(tree.contour.outline, 2 * flatRadius) : [];
+    const skinFootprint = grownSkin.length > 0 ? grownSkin : tree.contour.outline;
+    const skinRegion: RemainderRegion = {
+      id: 'skin', footprint: skinFootprint, area: tree.contour.area, zTop: z0, zBottom: tree.top.z,
+      triangles: new Uint32Array(), slopeDeg: [0, 0], slopeMedianDeg: 0, in: 'top',
+    };
+    const skinRef = regionRefOf('skin', 'curved', skinFootprint, 0, -skinMm);
+    // THE SKIN'S DEPTH IS ITS LEVELS, not an exclusion: they stop at the part top, so a pocket's
+    // own ground is never touched — but the skin ABOVE every pocket's mouth (which the pocket op,
+    // starting at that mouth, never removes) is taken here. The first attempt excluded the pocket
+    // footprints and left that skin standing: the tray's coverage fell 0.77 %.
+    attempt('skin', opts.flat, skinRef, () => {
+      const skinCl = shiftSurface(clSurface(opts.geometry, skinRegion, opts.flat, cuts.stepOver));
+      return skin({
+        cutter: opts.flat,
+        regionRef: skinRef,
+        outline: tree.contour.outline,
+        clSurface: skinCl,
+        skinMm,
+        // THE CAP IS THE ROW'S OWN STEP-DOWN x THE FACTOR (#959): a parameter, provisional at
+        // 1.0 — two passes on the tray's 1.2 mm skin, one on the organizer's 0.8.
+        stepDownMm: paramsFor(opts.flat).stepDown * skinStepdownFactor(),
+        maxSlopeDeg: opts.flatSurfaceMaxSlopeDeg ?? flatSurfaceMaxSlopeDeg(),
+        stepOverMm: opts.stepOverMm,
+        feeds: feedsOf(paramsFor(opts.flat)),
+        offset: opts.offset,
+        safeZMm: opts.safeZMm,
+        hopZMm: opts.hopZMm,
+        toolNumber: opts.toolNumberFor(opts.flat),
+        spindleRpm: paramsFor(opts.flat).rpm,
+        air: opts.air,
+        rapid: opts.rapid,
+        materialTopAt: designTopAt,
+        stockTopZMm: 0,
+        ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
+      });
+    });
   }
 
   // 5. EVERY RIM the tree found, broken by the V at the job's stated edge break.
@@ -1869,6 +1996,101 @@ export interface PlanTreeResult {
   choice: SequenceChoice;
 }
 
+/**
+ * #962 — THE REGION TOUR: within each cutter's run, order the regions so each one's exit joins the
+ * nearest other region's entry (nearest neighbour + 2-opt — the finish's strip tour one level up).
+ * E's rapid-class picture: the ⌀6 flat's region-to-region moves criss-crossed the tray (404 against
+ * the vendor's 96) and were most of its rapids.
+ *
+ * THE UNIT IS A REGION: all of that cutter's ops on it, in their planned order — a same-region
+ * pair must never be reversed (`sequence.ts`'s own invariant). The ops' paths themselves are
+ * fixed, so a 2-opt move swaps the ORDER of regions and never a region's direction; only the two
+ * boundary edges change.
+ *
+ * THE FREEING CUT NEVER MOVES: the contour op stays pinned at the end, exactly where the plan put
+ * it — pulling it earlier would un-free the part before the last stage ran.
+ */
+export function orderOpsForPrograms(ops: readonly PlannedOp[]): PlannedOp[] {
+  const sentinels = ops.filter((op) => op.kind === 'contour');
+  const movable = ops.filter((op) => op.kind !== 'contour');
+  const groups: PlannedOp[][] = [];
+  const atByKey = new Map<string, number>();
+  for (const op of movable) {
+    let at = atByKey.get(op.outcome.cutter);
+    if (at === undefined) {
+      at = groups.length;
+      atByKey.set(op.outcome.cutter, at);
+      groups.push([]);
+    }
+    groups[at]!.push(op);
+  }
+  const out: PlannedOp[] = [];
+  for (const group of groups) {
+    const units: { ops: PlannedOp[]; entry: [number, number, number] | null; exit: [number, number, number] | null }[] = [];
+    const unitByRegion = new Map<string, number>();
+    for (const op of group) {
+      let at = unitByRegion.get(op.region.id);
+      if (at === undefined) {
+        at = units.length;
+        unitByRegion.set(op.region.id, at);
+        units.push({ ops: [], entry: null, exit: null });
+      }
+      const unit = units[at]!;
+      unit.ops.push(op);
+      if (unit.entry === null && op.outcome.passes[0] !== undefined) unit.entry = op.outcome.passes[0]!.entry;
+      if (op.outcome.passes[op.outcome.passes.length - 1] !== undefined) unit.exit = op.outcome.passes[op.outcome.passes.length - 1]!.exit;
+    }
+    if (units.some((u) => u.entry === null || u.exit === null)) {
+      // An op that recorded no passes: the tour cannot price it, so this run keeps its order.
+      out.push(...group);
+      continue;
+    }
+    const entryOf = (at: number): [number, number, number] => units[at]!.entry!;
+    const exitOf = (at: number): [number, number, number] => units[at]!.exit!;
+    const d = (a: [number, number, number], b: [number, number, number]): number => Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const remaining = units.map((_, k) => k);
+    const order: number[] = [];
+    let px = 0;
+    let py = 0;
+    while (remaining.length > 0) {
+      let bestPos = 0;
+      let best = Infinity;
+      for (let k = 0; k < remaining.length; k++) {
+        const e = entryOf(remaining[k]!);
+        const dist = Math.hypot(e[0] - px, e[1] - py);
+        if (dist < best - 1e-12) {
+          best = dist;
+          bestPos = k;
+        }
+      }
+      const idx = remaining.splice(bestPos, 1)[0]!;
+      order.push(idx);
+      const e = exitOf(idx);
+      px = e[0];
+      py = e[1];
+    }
+    let improved = true;
+    let guard = 0;
+    while (improved && guard++ < 64) {
+      improved = false;
+      for (let i = 1; i + 1 < order.length; i++) {
+        for (let k = i; k < order.length; k++) {
+          const before = d(exitOf(order[i - 1]!), entryOf(order[i]!))
+            + (k + 1 < order.length ? d(exitOf(order[k]!), entryOf(order[k + 1]!)) : 0);
+          const after = d(exitOf(order[i - 1]!), entryOf(order[k]!))
+            + (k + 1 < order.length ? d(exitOf(order[i]!), entryOf(order[k + 1]!)) : 0);
+          if (after < before - 1e-9) {
+            order.splice(i, k - i + 1, ...order.slice(i, k + 1).reverse());
+            improved = true;
+          }
+        }
+      }
+    }
+    for (const at of order) out.push(...units[at]!.ops);
+  }
+  return [...out, ...sentinels];
+}
+
 export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): PlanTreeResult {
   const pocketResult = planPocketsForTree(tree, { ...opts.pockets, offset: opts.offset });
   const curvedResult = planCurvedForTree(tree, {
@@ -1878,11 +2100,13 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
     hopZMm: HOP_Z,
   });
   const freeing = pocketResult.ops.filter((op) => op.kind === 'contour');
-  const ops: PlannedOp[] = [
+  // #962 — THE REGION TOUR: each cutter's run visits its regions in nearest-neighbour order
+  // rather than the planning order; the freeing contour stays pinned last (see the helper).
+  const ops: PlannedOp[] = orderOpsForPrograms([
     ...pocketResult.ops.filter((op) => op.kind !== 'contour'),
     ...curvedResult.ops,
     ...freeing,
-  ];
+  ]);
   const programs = new Map<string, ToolpathIR>();
   for (const op of ops) {
     const key = op.outcome.cutter;
