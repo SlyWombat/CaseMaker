@@ -306,9 +306,20 @@ export interface SetupPlan {
  * bundler: `CASEMAKER_MODEL_CAM=1` turns the engine on for a process, and `VITE_MODEL_CAM=1` does
  * the same for an e2e build. Both default off, so the shipped app is unchanged.
  */
-export const USE_MODEL_CAM_ENGINE: boolean =
+export let USE_MODEL_CAM_ENGINE: boolean =
   (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.['CASEMAKER_MODEL_CAM'] === '1' ||
   (import.meta as { env?: Record<string, string | undefined> }).env?.['VITE_MODEL_CAM'] === '1';
+
+/**
+ * #966 — a Playwright spec (or any other runtime caller) flips the flag without `vi.doMock`'s
+ * module-registry trick, which a browser-run e2e test does not have. Test/e2e-only purpose, same
+ * as the env gate above — this does not change the shipped app's own default (still env-gated,
+ * off unless `CASEMAKER_MODEL_CAM=1`/`VITE_MODEL_CAM=1`), it only lets a runtime override that
+ * default for the lifetime of the process/page.
+ */
+export function setModelCamEnabled(on: boolean): void {
+  USE_MODEL_CAM_ENGINE = on;
+}
 
 export interface PlanModelCamOptions {
   signal?: AbortSignal;
