@@ -42,7 +42,7 @@ import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, 
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, type SetupRegistration } from './setups';
 import { pocket } from './ops/pocket';
-import { clSurface, reach } from './clsurface';
+import { clSurface, creaseFits } from './clsurface';
 import { dropCutterHeight, profileOf, type CutterProfile, type DropCutterMesh } from './dropcutter';
 import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
 
@@ -2366,6 +2366,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       rapid: opts.rapid,
     }));
 
+    let restBallCl: ReturnType<typeof clSurface> | undefined;
     // 3b. THE REST BALL (#965, the review session's ruling item 3.1): where the ball's OWN CL still
     // stands above the design by more than the band — its fillet at a wall foot, the slots its
     // radius cannot enter — a smaller ball whose stated reach covers this region runs the same
@@ -2392,7 +2393,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         cutter: restBallTool,
         region: roughRegion,
         regionRef: roughRef,
-        clSurface: shiftSurface(clSurface(opts.geometry, roughRegion, restBallTool, cuts.stepOver)),
+        clSurface: (restBallCl = shiftSurface(clSurface(opts.geometry, roughRegion, restBallTool, cuts.stepOver))),
         kind: finishKind,
         mesh: opts.geometry.triangles,
         scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
@@ -2417,20 +2418,30 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // never silently skipped.
     if (opts.vbit !== undefined && (opts.vbit.shape === 'chamfer' || opts.vbit.shape === 'engraving')) {
       const vTool = opts.vbit;
-      const vReach = reach(vTool, roughRegion);
-      if (!vReach.reachable) {
-        unplanned.push({
-          kind: 'pencil',
-          cutterKey: cutterKeyOf(vTool),
-          regionIds: [ref.id],
-          reason: `the crease pass is not offered: ${vReach.note ?? 'the V cannot descend this region'}`,
-        });
-      } else {
-        attempt('pencil', vTool, ref, () => pencil({
+      // The V's own CL and the previous (rest ball's) CL: the leftover depth at a crease is the
+      // material between them — the number the crease rule's width test is stated at.
+      const vCl = shiftSurface(clSurface(opts.geometry, roughRegion, vTool, cuts.stepOver));
+      const prevCl = restBallCl ?? clBall();
+      const vPitch = Math.min(0.5, Math.max(0.1, (cuttingDiameter(vTool) ?? 0) / 4));
+      let creaseAdmitted = 0;
+      let creaseRefused = 0;
+      attempt('pencil', vTool, ref, () => {
+        const out = pencil({
           cutter: vTool,
           region: roughRegion,
           regionRef: roughRef,
-          clSurface: shiftSurface(clSurface(opts.geometry, roughRegion, vTool, cuts.stepOver)),
+          clSurface: vCl,
+          gridPitchMm: vPitch,
+          admitCrease: (i, j, z, leftSlopeDeg, rightSlopeDeg) => {
+            const x = roughRef.bounds.min[0] + i * vPitch;
+            const y = roughRef.bounds.min[1] + j * vPitch;
+            const prev = prevCl.dropCutter(x, y);
+            const depth = prev === null ? 0 : Math.max(0, prev - z);
+            const fits = creaseFits(vTool, { leftSlopeDeg, rightSlopeDeg, depthMm: depth });
+            if (fits.reachable) creaseAdmitted++;
+            else creaseRefused++;
+            return fits.reachable;
+          },
           feeds: feedsOf(paramsFor(vTool)),
           safeZMm: opts.safeZMm,
           hopZMm: opts.hopZMm,
@@ -2438,8 +2449,19 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           spindleRpm: paramsFor(vTool).rpm,
           air: opts.air,
           rapid: opts.rapid,
-        }));
-      }
+        });
+        const emitted = out.ir.operations.some((operation) => operation.moves.length > 0);
+        if (!emitted) {
+          // Stated, never a silent skip: no crease on this region passed the admission.
+          unplanned.push({
+            kind: 'pencil',
+            cutterKey: cutterKeyOf(vTool),
+            regionIds: [ref.id],
+            reason: `the crease pass was admitted at no crease this region (${creaseAdmitted} admitted, ${creaseRefused} refused by the crease rule) — nothing emitted`,
+          });
+        }
+        return out;
+      });
     }
 
     // 4. PENCIL along the creases the ball's own CL surface leaves.
