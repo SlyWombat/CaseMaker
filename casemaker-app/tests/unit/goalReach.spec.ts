@@ -272,6 +272,29 @@ describe('#785 — Generate', () => {
     expect(Math.min(...zs)).toBeLessThanOrEqual(-10.5);
     // The sheet states the floor and what it leaves.
     expect(out.surface3d?.notes.some((n) => n.includes("Cut only the stock's top 11 mm"))).toBe(true);
+
+    // #988 pin — THE SAME CHOICE THROUGH THE ONE MODEL ENTRY. The seam carries the band into
+    // `ModelPlanInput.setups[].bandMm` (reach 12 − 1 clearance = 11 mm) and the plan cuts the top
+    // band instead of refusing on the contour's 150 mm demand. RED at the parent: `planModelCam`
+    // threw 'no cutter sequence can be planned …'.
+    {
+      const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+      const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+      // The model engine finishes a curved remainder with a ball; the OLD path needs none, so the
+      // fixture's own set is the flat alone. Pass a ball beside it — the band is about the depth,
+      // and a house that cannot plan the remainder at all is #982's no-flat/ball gap, not #988's.
+      const ball: Tool = { ...flat({ fluteLength: 12, id: 'ball-12', name: 'ball-12' }), shape: 'ball', typeText: 'Ball Nose' };
+      const modelInput = await buildModelPlanInputForGoal(tallJob(target), target, tool, {
+        tools: [{ key: 'inv:ball-12', tool: ball, provenance: 'test fixture' }],
+      });
+      const modelOut = await planModelCam(modelInput);
+      const programs = modelOut.perSetup.flatMap((s) => s.programs);
+      expect(programs.length, 'no program was planned').toBeGreaterThan(0);
+      const zs = programs.flatMap((p) => p.operations.flatMap((o) => o.moves.map((m) => m.z)));
+      expect(Math.min(...zs), 'the band floor is −11').toBeGreaterThanOrEqual(-11.001);
+      expect(Math.min(...zs), 'the plan must reach the band, not stop above it').toBeLessThanOrEqual(-10.5);
+      expect(modelOut.perSetup.flatMap((s) => s.notes).join('\n')).toContain("Cut only the stock's top 11 mm");
+    }
   }, 120_000);
 
   it('an unrecorded reach does not stop Generate — the assumption is stated, the cut proceeds', async () => {

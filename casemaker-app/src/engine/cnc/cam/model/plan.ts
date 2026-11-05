@@ -199,6 +199,14 @@ export interface SetupSpec {
   frame: SetupFrame;
   /** #898's three choices. */
   underside: 'flatOnStockBottom' | 'flippedTabs' | 'plinth';
+  /**
+   * #988 — THE DEPTH BAND THIS SETUP CUTS TO, mm below the stock top (positive). Absent = the
+   * whole depth, the pre-#988 plan. The seam sets it from `goal.cutWithinReach` (the cutter's
+   * known reach less the clearance — the old path's own number) or a split's stated band (#888);
+   * the plan then stops the freeing contour, every pocket/through/V floor and every curved
+   * region's CL surface at −band, names what is left, and does not tell the contour to release.
+   */
+  bandMm?: number;
 }
 
 export interface ModelPlanInput {
@@ -583,6 +591,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   for (let setupIndex = 0; setupIndex < input.setups.length; setupIndex++) {
     opts.signal?.throwIfAborted();
     const spec = input.setups[setupIndex]!;
+    // #988 — THE SETUP'S DEPTH BAND (`SetupSpec.bandMm`, set by the seam from `cutWithinReach` or
+    // a split's own band). Positive mm below the stock top; absent = the whole depth.
+    const depthBandMm = spec.bandMm !== undefined && spec.bandMm > 0 ? spec.bandMm : undefined;
     opts.onProgress?.({ setupIndex, op: 'features', fraction: 0 });
     const tree = recogniseFeatures(input.geometry, spec.frame, tl);
     if (setupIndex === 0) setup0Tree = tree;
@@ -646,8 +657,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // no CL-surface input today. A multi-setup job's last-setup release is therefore only as safe
     // as `tree.contour.zTo` being shallow enough not to reach the opposite setup's cut, which this
     // plan does not check.
+    // #988 — A BANDED CONTOUR DOES NOT REACH THE PART'S BOTTOM, so it frees nothing and the
+    // release instruction must not be given: the contour keeps its tabs exactly as a non-last
+    // setup's does. (The band is measured from this setup's stock top.)
+    const bandReachesBottom = depthBandMm === undefined || depthBandMm + 1e-9 >= tree.frame.stockTop - tree.contour.zTo;
     const tabs =
-      input.setups.length <= 1
+      input.setups.length <= 1 || !bandReachesBottom
         ? undefined
         : setupIndex === input.setups.length - 1
           ? { count: 0, width: DEFAULT_RELEASE_TABS.width, height: DEFAULT_RELEASE_TABS.height }
@@ -729,6 +744,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const result = planTreePrograms(tree, {
       offset,
       pockets: {
+        ...(depthBandMm === undefined ? {} : { depthBandMm }),
         houseFlats: flats,
         // #975 — the V bits are the pocket chain's last resort: a pocket no flat covers gets the
         // narrowest V whose tip fits the stroke and whose leg reaches the floor, floor-correct.
@@ -770,6 +786,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         ...(input.stockProbes === undefined ? {} : { stockProbes: input.stockProbes }),
       },
       curved: {
+        ...(depthBandMm === undefined ? {} : { depthBandMm }),
         geometry: curvedGeometry,
         flat: primary,
         ...(ball === undefined ? {} : { ball }),
@@ -853,6 +870,26 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
 
     const notes = [...result.notes, ...emptyStages, ...freeingNotes];
+    // #988 — the setup's band, stated once: the depth cut and what the tree's deepest demand
+    // leaves below it. (The seam carries the old path's `goal-cut-top-band` warning already; this
+    // is the PLAN's own line, so the model plan says the same thing in its own words.)
+    if (depthBandMm !== undefined) {
+      const demands: number[] = [tree.frame.stockTop - tree.contour.zTo, ...tree.remainder.map((r) => tree.frame.stockTop - r.zBottom)];
+      const walkFloors = (nodes: typeof tree.pockets): void => {
+        for (const n of nodes) {
+          demands.push(tree.frame.stockTop - n.floorZ);
+          walkFloors(n.children);
+        }
+      };
+      walkFloors(tree.pockets);
+      const left = Math.max(...demands) - depthBandMm;
+      const mm3 = (v: number): number => Math.round(v * 1000) / 1000;
+      notes.push(
+        left > 1e-6
+          ? `Cut only the stock's top ${mm3(depthBandMm)} mm; ${mm3(left)} mm of the goal is left below the band`
+          : `Cut only the stock's top ${mm3(depthBandMm)} mm; nothing of the goal is below the band`,
+      );
+    }
     notes.push(...toolSubstitutions);
     if (input.fixture.envelope !== null) {
       notes.push(
@@ -1031,6 +1068,12 @@ export interface PlanPocketsOptions {
    * ruling — "never a refusal where a tool in the set can do the job"). Absent = no V pocketing.
    */
   houseVs?: readonly Tool[];
+  /**
+   * #988 — THE SETUP'S DEPTH BAND, mm below the stock top (positive; `SetupSpec.bandMm`): the
+   * contour, every pocket/through/V floor and the CL surface stop at −band and the remainder is
+   * named. Absent → the whole depth, every existing caller unchanged.
+   */
+  depthBandMm?: number;
   stepDownMm: number;
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
   rapid: RapidEstimate;
@@ -1158,6 +1201,15 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // shares the SAME Z 0 = stock top — not fixed by a per-caller convention, not assumed.
   const z0 = tree.frame.stockTop;
   const rebase = (z: number): number => z - z0;
+  // #988 — THE SETUP'S DEPTH BAND (`SetupSpec.bandMm`): every floor this function hands an op is
+  // clamped to it, so the contour, the pockets/through holes and the chain's own cutter sizing
+  // (the feature depths below) all stop at the band, and the remainder is named. Absent: the
+  // pre-#988 plan, byte-identical.
+  const depthBandMm = opts.depthBandMm;
+  const cutFloor = (zAbs: number): number => {
+    const z = rebase(zAbs);
+    return depthBandMm === undefined ? z : Math.max(z, -depthBandMm);
+  };
 
   const refs = regionRefs(tree);
   // `regionRefs` reads `topZ`/`bottomZ` straight off the tree (mesh-absolute) — rebased here too,
@@ -1165,7 +1217,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   const refById = new Map(refs.map((r) => [r.id, {
     ...r,
     topZ: rebase(r.topZ),
-    bottomZ: rebase(r.bottomZ),
+    bottomZ: depthBandMm === undefined ? rebase(r.bottomZ) : Math.max(rebase(r.bottomZ), -depthBandMm),
     obstacles: [],
     // The skin above an OPEN node (a shoulder) is cut by this plan; above anything else (an
     // island's own cap, say) it is not, and stays at the stock's own top (rebased, 0) — never
@@ -1192,7 +1244,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // recognised part top — a `partTop - zTo` depth stopped the contour short by exactly the skin
   // between the stock and the part (1.2 mm on the tray, 0.8 mm on the organizer), so the part was
   // never actually freed. These are magnitudes, already stock-top-relative — no `rebase` needed.
-  const contourDepthMm = z0 - tree.contour.zTo;
+  const contourDemandMm = z0 - tree.contour.zTo;
+  // #988 — the freeing contour stops at the band: depth min(demand, band). The demand stays for
+  // the setup's own "what is left" line in `planModelCam`.
+  const contourDepthMm = depthBandMm === undefined ? contourDemandMm : Math.min(contourDemandMm, depthBandMm);
 
   // The manager's #959 ruling: the top land OUTSIDE every pocket's footprint, faced through the
   // SAME `pocket()` op and `link()` safety every other region uses — not a new op. `tree.top.floors`
@@ -1250,7 +1305,9 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       cornerRadiusMm: node.open ? null : node.narrowest / 2,
       // Measured below the STOCK top (`SequenceFeature.depthMm`'s own doc), not the node's own
       // mouth — a nested node's flute reach is under-reported by `mouthZ - floorZ` alone.
-      depthMm: z0 - node.floorZ,
+      // #988 — the BAND makes the feature shallower: the cutter is sized against the depth the
+      // plan actually cuts, and the rest is stated as remainder (the rule itself is untouched).
+      depthMm: depthBandMm === undefined ? z0 - node.floorZ : Math.min(z0 - node.floorZ, depthBandMm),
     });
   }
   for (const node of throughNodes) {
@@ -1259,7 +1316,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       kind: 'pocket',
       minOpeningMm: node.narrowest,
       cornerRadiusMm: node.narrowest / 2,
-      depthMm: z0 - node.floorZ,
+      depthMm: depthBandMm === undefined ? z0 - node.floorZ : Math.min(z0 - node.floorZ, depthBandMm),
     });
   }
   features.push({ id: 'contour', kind: 'contour', depthMm: contourDepthMm });
@@ -1308,7 +1365,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     const ref = refById.get(id);
     if (ref === undefined) return null;
     const cutter = step.cutter.tool;
-    const floorZ = rebase(node.floorZ);
+    const floorZ = cutFloor(node.floorZ);
     const stepOverMm = (cuttingDiameter(cutter) ?? 1) / 4;
     const radius = (cuttingDiameter(cutter) ?? 0) / 2;
     // The chain so far, as IRs (each prefix step planned with its own prefix; all memoized).
@@ -1496,7 +1553,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         id,
         outline: throughNode.region,
         region: ref,
-        depthMm: z0 - throughNode.floorZ,
+        depthMm: depthBandMm === undefined ? z0 - throughNode.floorZ : Math.min(z0 - throughNode.floorZ, depthBandMm),
         offset: opts.offset,
         params: cutParamsFor(cutter),
         rapid: opts.rapid,
@@ -1516,7 +1573,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     const mouthZAbs = rootIds.has(node.id) ? tree.top.z : node.mouthZ;
     return pocket({
       cutter,
-      node: { ...node, mouthZ: rebase(mouthZAbs), floorZ: rebase(node.floorZ) },
+      node: { ...node, mouthZ: rebase(mouthZAbs), floorZ: cutFloor(node.floorZ) },
       region: ref,
       stepOverMm: diameter / 4,
       stepDownMm: opts.stepDownMm,
@@ -1653,7 +1710,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       // which would refuse the tray's digits by 0.26 mm — their mouth is the −1.2 land, their
       // floor −1.8), and above the mouth the shank rides in air the facing already cleared.
       const mouthZAbsV = rootIds.has(node.id) ? tree.top.z : node.mouthZ;
-      const nodeDepthMm = mouthZAbsV - node.floorZ;
+      // #988 — the V is sized and floored on the band, like the flats: the leg must reach from the
+      // MOUTH to the band floor (whichever is shallower), not the node's stated floor.
+      const flooredZAbsV = depthBandMm === undefined ? node.floorZ : Math.max(node.floorZ, tree.frame.stockTop - depthBandMm);
+      const nodeDepthMm = mouthZAbsV - flooredZAbsV;
       for (const tool of opts.houseVs) {
         const cone = vCone(tool);
         if (cone === null) continue;
@@ -1677,7 +1737,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         const ref = refById.get(id)!;
         const mouthZAbs = rootIds.has(node.id) ? tree.top.z : node.mouthZ;
         const mouthZ = rebase(mouthZAbs);
-        const floorZ = rebase(node.floorZ);
+        const floorZ = cutFloor(node.floorZ);
         // The V's OWN row where the caller resolves one (its rpm/feed must match that cutter's
         // other runs so the two merge into one program) — the plan's flat numbers otherwise.
         const vParams = opts.paramsFor?.(group.tool);
@@ -1812,6 +1872,19 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   }
 
   const notes: string[] = [];
+  // #988 — WHAT THE BAND LEAVES, one line per clipped pocket/through feature: the floor it is cut
+  // to and the floor the tree states (`pocket-3: cut to −11 of −18 — 7 mm is left in the stock`).
+  if (depthBandMm !== undefined) {
+    const mm3 = (n: number): string => String(Math.round(n * 1000) / 1000);
+    for (const node of [...pocketNodes, ...throughNodes]) {
+      const floor = rebase(node.floorZ);
+      if (floor < -depthBandMm - 1e-9) {
+        notes.push(
+          `${node.id}: cut to −${mm3(depthBandMm)} of −${mm3(-floor)} — ${mm3(-floor - depthBandMm)} mm is left in the stock (the setup's depth band)`,
+        );
+      }
+    }
+  }
   // #943 (2026-11-05 ruling): the facing stage states where its cut starts, how many passes the
   // probed spread takes, and the clamp when the part top binds. The count mirrors `depthPasses`'
   // own rule (`ceil(total / stepDown)`, the last pass on the floor). `facingDepthMm` is the
@@ -1957,6 +2030,9 @@ export interface PlanCurvedOptions {
   vbit?: Tool;
   /** An optional smaller flat for the rest pass by CL difference. */
   restFlat?: Tool;
+  /** #988 — the setup's depth band, mm below the stock top (see `PlanPocketsOptions`): every
+   *  region's zBottom clamps to −band and every CL surface is floored there. Absent → whole depth. */
+  depthBandMm?: number;
   stepDownMm: number;
   /** The ROUGH's stock-to-leave band, mm — what the flat leaves standing for the ball. */
   bandMm: number;
@@ -2109,6 +2185,20 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   // here, at the plan's own datum, rather than teaching every op a stockTop it would each have to
   // apply the same way. (The red-first spec's first fix moved feeds to z = 10.66: the region's Z
   // was rebased but the surface the ball followed was not.)
+  // #988 — THE SETUP'S DEPTH BAND over the CL surface: a query below −band answers the band, so
+  // rows, levels, the finish and the dip follows never descend past it. The regions' own zBottom
+  // is clamped below too, so `depthPasses` stops there as well. Absent → the surface unchanged.
+  const bandFloorZ = opts.depthBandMm === undefined ? null : -opts.depthBandMm;
+  const floorSurface = (surface: ReturnType<typeof clSurface>): ReturnType<typeof clSurface> =>
+    bandFloorZ === null
+      ? surface
+      : {
+          ...surface,
+          dropCutter: (x: number, y: number) => {
+            const z = surface.dropCutter(x, y);
+            return z === null ? null : Math.max(z, bandFloorZ);
+          },
+        };
   const shiftSurface = (surface: ReturnType<typeof clSurface>): ReturnType<typeof clSurface> => ({
     ...surface,
     dropCutter: (x: number, y: number) => {
@@ -2151,7 +2241,11 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         `cam/model/plan: the remainder region "${region.id}" needs a ball nose to finish and the call states none`,
       );
     }
-    const base = { ...region, zTop: rebaseZ(region.zTop), zBottom: rebaseZ(region.zBottom) };
+    const base = {
+      ...region,
+      zTop: rebaseZ(region.zTop),
+      zBottom: bandFloorZ === null ? rebaseZ(region.zBottom) : Math.max(rebaseZ(region.zBottom), bandFloorZ),
+    };
     const ref = regionRefOf(region.id, 'curved', base.footprint, base.zTop, base.zBottom);
     // THE REVIEW'S SAFETY FINDING: the finish's outer footprint is grown by the ball's radius, and
     // nothing roughed that ring — the ball would take a full-width, full-depth bite of stock that
@@ -2180,7 +2274,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // stated as skipped, not planned.
     const flatCl: { surface?: ReturnType<typeof clSurface> } = {};
     const roughed = attempt('rough', opts.flat, ref, () => {
-      const clFlat = shiftSurface(clSurface(opts.geometry, roughRegion, opts.flat, cuts.stepOver));
+      const clFlat = floorSurface(shiftSurface(clSurface(opts.geometry, roughRegion, opts.flat, cuts.stepOver)));
       flatCl.surface = clFlat;
       noteGrid(opts.flat, clFlat);
       return rough({
@@ -2228,7 +2322,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       // pass silently missing, not merely off-datum). Both go through the plan's one datum here:
       // the region is `base`, the surface is shifted like the flat's.
       attempt('rest', restFlat, ref, () => {
-        const restCl = shiftSurface(clSurface(opts.geometry, base, restFlat, cuts.stepOver));
+        const restCl = floorSurface(shiftSurface(clSurface(opts.geometry, base, restFlat, cuts.stepOver)));
         restClSink.surface = restCl;
         noteGrid(restFlat, restCl);
         return rest({
@@ -2319,7 +2413,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     let clBallCache: ReturnType<typeof clSurface> | undefined;
     const clBall = (): ReturnType<typeof clSurface> => {
       if (clBallCache === undefined) {
-        clBallCache = shiftSurface(clSurface(opts.geometry, roughRegion, ball, cuts.stepOver));
+        clBallCache = floorSurface(shiftSurface(clSurface(opts.geometry, roughRegion, ball, cuts.stepOver)));
         noteGrid(ball, clBallCache);
       }
       return clBallCache;

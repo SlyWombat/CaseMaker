@@ -4942,6 +4942,24 @@ export async function buildModelPlanInputForGoal(
       stockTopZ: 0,
     }).setups;
 
+  // #988 — THE OPERATOR'S TOP-BAND CHOICE, CARRIED INTO THE MODEL PLAN. `cutWithinReach` means
+  // "cut the part I can have": the floor is the stock top less the chosen cutter's known reach
+  // less the clearance — the SAME number the old path derives (`generateGoalProgram`'s own
+  // `topBandMm`: same `knownReach` call, same `GOAL_BAND_CLEARANCE_MM`), set only when the goal is
+  // deeper than that reach. A split side's
+  // stated band (#888) wins over the reach-derived one, exactly as the old path's `topBandMm`
+  // does. Absent: no band, the pre-#988 plan byte-identical, and the seam's own early
+  // `goal-reach-short` refusal above is untouched.
+  const cutterReach = knownReach(tool, shop.tools ?? []);
+  const goalDepth = placedSize(goal).z;
+  const reachBandMm =
+    cutterReach !== null && goalDepth > cutterReach.mm + 1e-9 && goal.cutWithinReach === true
+      ? Number((cutterReach.mm - GOAL_BAND_CLEARANCE_MM).toFixed(3))
+      : null;
+  const statedBandMm = goal.bandMm !== undefined && goal.bandMm > 0 ? goal.bandMm : null;
+  const setupBandMm = statedBandMm === null && reachBandMm !== null && reachBandMm > 0 ? reachBandMm : null;
+  const bandedSetups: SetupSpec[] = setupBandMm === null ? setups : setups.map((s) => ({ ...s, bandMm: setupBandMm }));
+
   const envelope: FixtureEnvelope | null =
     mount === 'vise'
       ? viseEnvelope(job.stock, jobVise(job), job.sacrificial)
@@ -4971,7 +4989,7 @@ export async function buildModelPlanInputForGoal(
 
   return {
     geometry,
-    setups,
+    setups: bandedSetups,
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness, material: job.stock.material },
     fixture: { mount, envelope },
     cutters,
