@@ -121,6 +121,18 @@ describe('#960 finishing by slope — the two levers', () => {
     expect(notes).toEqual([]);
   });
 
+  it('cuts an 85° wall band at the radius/10 floor and says so — cut, not skipped', () => {
+    // F's review case: a band over WALL_SKIP_DEG keeps rows at the ball's own 0.30 mm floor, the
+    // row AT the origin is still first, and the op states the fact in its note.
+    const { rows, notes } = rowsOver(85, [0, 85]);
+    const ORIGIN = 0.5 + 1e-4;
+    expect(rows[0]).toBeCloseTo(ORIGIN, 9);
+    for (const gap of rows.slice(1).map((x, i) => x - rows[i]!)) expect(gap).toBeCloseTo(0.3, 6);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('walls steeper than 80°');
+    expect(notes[0]).toContain('cut, not skipped');
+  });
+
   it('steps each band by its own scallop step, phased from the origin — nothing is skipped', () => {
     // A 64° band inside a region stated at 25°: the ball's closed form is below its radius/10
     // floor there, so every row after the origin one advances by that floor (0.3 mm).
