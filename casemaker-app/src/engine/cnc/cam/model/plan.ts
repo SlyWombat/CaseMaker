@@ -583,6 +583,27 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         spindleRpm: pocketParams.rpm,
         air: true,
         boolean,
+        // #966/#970 — the per-level shadow check (`PocketOpOptions.aboveMaterial`'s own doc): the
+        // SAME rotated design mesh `curvedGeometry` below already reads for this setup's own frame,
+        // so every pocket/facing/through-as-pocket op this setup plans is bounded by the real
+        // ceiling, not just each node's own static `region` — #970's own finding (a ⌀6 flat planned
+        // straight through ~22 mm of the elephant's body, because the belly closing the gap above a
+        // recognised floor was never checked).
+        //
+        // CORRECTION (Session A, independent re-check): `curvedOpsProperty959.spec.ts`'s own
+        // `sloped`/`filletedFloor` coverage drop, first reported here as "CSG-noise artefact of
+        // `slopedPocketVoid`/`filletFloorVoid`'s own construction," was NOT that — both flagged
+        // nodes are the ordinary open-shoulder-notch and blind-hole subtraction every
+        // `randomParts.ts` kind shares, and a direct `dropCutterHeight` probe at each one's own
+        // centroid read back EXACTLY its own `floorZ`, real material, not stock top. The actual
+        // cause (confirmed by tracing and fixed in `ops/pocket.ts`'s own `ceilingMaskAt`): the
+        // per-level predicate read a node's OWN floor — the only thing a probe ever finds along a
+        // vertical line through a floor with nothing above it — as an obstruction AT that floor's
+        // own depth, excluding the node's entire LAST pass. Fixed at the source; see
+        // `ops/pocket.ts`'s own comment at the predicate and `pocketShadow966.spec.ts`'s "#970
+        // over-clip" / `pocketShadowNestedFloor966.spec.ts` cases. `curvedOpsProperty959` is back
+        // at its own 95% line, unchanged.
+        shadowMesh: curvedGeometry.triangles,
         ...(tabs === undefined ? {} : { tabs }),
         ...(oppositeSafeDepthMm === undefined ? {} : { oppositeSafeDepthMm }),
       },
@@ -839,6 +860,16 @@ export interface PlanPocketsOptions {
    * setup's freeing cut must stay off the opposite setup's already-finished surface (#965). Absent
    * for every single-setup job and the first of two — `contourOp` then behaves exactly as before. */
   oppositeSafeDepthMm?: (x: number, y: number) => number | null;
+  /**
+   * #966 — the real design mesh, ALREADY ROTATED into THIS setup's own frame (the SAME one
+   * `recogniseFeatures` built `tree` from — `planModelCam`'s own `curvedGeometry`). Threaded into
+   * every `pocket()` call (`PocketOpOptions.aboveMaterial`'s own doc) so a node's per-level cut is
+   * bounded by the true ceiling read off the mesh, not just `node.region`'s own static "air at
+   * floorZ" footprint — #966's elephant/table finding (a flat planned straight through an overhang
+   * with no floor patch of its own to correct `mouthZ`). Absent → every pre-#966 call site/test
+   * (every one of them) is unaffected: no shadow check runs, `pocket()` behaves exactly as before.
+   */
+  shadowMesh?: DropCutterMesh;
 }
 
 /**
@@ -1066,6 +1097,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         spindleRpm: opts.spindleRpm,
         air: opts.air,
         rapid: opts.rapid,
+        boolean: opts.boolean,
+        ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh, zOffsetMm: z0 } }),
       });
     }
     const throughNode = throughById.get(id);
@@ -1093,6 +1126,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
           spindleRpm: opts.spindleRpm,
           air: opts.air,
           rapid: opts.rapid,
+          boolean: opts.boolean,
+          ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh, zOffsetMm: z0 } }),
         });
       }
       return throughHole({
@@ -1138,6 +1173,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       rapid: opts.rapid,
       openOutline: node.open ? tree.contour.outline : undefined,
       boolean: opts.boolean,
+      ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh, zOffsetMm: z0 } }),
     });
   };
 
