@@ -286,7 +286,11 @@ async function planCard(
     stock: { length: stock.length, width: stock.width, thickness, material: 'hardwood' },
     fixture: { mount: 'vise', envelope: viseEnvelope({ length: stock.length, width: stock.width, thickness }, vise) },
     cutters,
-    tolerances: { finishMm: 0.01 },
+    // #965 (the review session's ruling, 2026-11-05) — these parts STATE NO FINISH TOLERANCE, so
+    // the ball runs at the engine's default scallop (0.027 mm, the vendor's own). The empty object
+    // is the point: a stated 0.01 would now be honoured, and the tray and organizer are not this
+    // ruling's to change.
+    tolerances: {},
     edgeBreak: { legMm: EDGE_BREAK_LEG_MM },
     // #961 — THE SIMULATED OUTCOME: the picker judges a candidate's completeness by what its own
     // sweep leaves above the 0.1 mm band, not by the pockets it declined. The goal is the same

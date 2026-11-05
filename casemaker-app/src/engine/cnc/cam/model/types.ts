@@ -9,8 +9,15 @@
 import type { PlannedOpKind } from './sequence';
 
 export interface ModelTolerances {
-  /** The finish tolerance — §2's `ARC_CHORD_TOLERANCE_MM`-derived adaptive-spacing basis. Per A's R3, this does NOT carry an edge-break leg; see `EdgeBreakSpec`. */
-  finishMm: number;
+  /**
+   * The finish tolerance the JOB states — the ball's scallop height, mm (per A's R3 this does NOT
+   * carry an edge-break leg; see `EdgeBreakSpec`).
+   *
+   * #965 (the review session's ruling, 2026-11-05): the job's tolerance IS the scallop. It is not
+   * floored against the engine's default — a job that states 0.01 mm finishes at 0.01 mm, and the
+   * default applies only when the job states none (`undefined`).
+   */
+  finishMm?: number;
 }
 
 /**

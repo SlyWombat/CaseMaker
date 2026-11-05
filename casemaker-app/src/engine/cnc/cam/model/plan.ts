@@ -768,9 +768,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         ...(vbit === undefined ? {} : { vbit }),
         stepDownMm: pocketParams.stepDown,
         bandMm: MODEL_STOCK_TO_LEAVE_MM,
-        // #960 — the ball's cusp target is the vendor's 0.027 mm (its ⌀6 ball's own 0.8 mm
-        // step-over): a finer tolerance may not tighten it away; a coarser one still applies.
-        finishScallopMm: Math.max(input.tolerances.finishMm, DEFAULT_FINISH_SCALLOP_MM),
+        // #965 (the review session's ruling, 2026-11-05) — THE JOB'S TOLERANCE IS THE SCALLOP.
+        // No floor and no max(): a job that states 0.01 mm finishes at 0.01 mm, and the vendor's
+        // 0.027 mm (its ⌀6 ball's own 0.8 mm step-over) is the default only for a job that states
+        // no tolerance at all. (The 960 merge floored the tolerance at the default, so a finer
+        // tolerance could not tighten the scallop — that reading is withdrawn.)
+        finishScallopMm: input.tolerances.finishMm ?? DEFAULT_FINISH_SCALLOP_MM,
         stepOverMm: pocketParams.stepOver,
         feeds,
         cutParamsFor,
@@ -2498,7 +2501,10 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     );
   }
   for (const [finishKind, entry] of finishKinds) {
-    const words = finishKind === 'flat-raster' ? 'flat-following raster' : 'ball at constant scallop';
+    // #965 — the card states the scallop it used, never just "constant": the job's own tolerance
+    // when it states one, the vendor's 0.027 mm default when it does not.
+    const scallopMm = opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM;
+    const words = finishKind === 'flat-raster' ? 'flat-following raster' : `ball at a constant ${scallopMm.toFixed(3)} mm scallop`;
     const plural = entry.count === 1 ? 'region' : 'regions';
     notes.push(
       `finish: ${entry.count} ${plural} run as a ${words} (slopes ${entry.minSlope.toFixed(1)}–${entry.maxSlope.toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG).toFixed(2)}°)`,
