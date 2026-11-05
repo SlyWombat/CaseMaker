@@ -283,16 +283,28 @@ for (const figure of FIGURES) {
       // the pass rule, and the card prints the other lines' facts beside it.
       const scored = scoreSevenLines({ card: figure.name, ours, vendor: null });
 
+      const out = process.env.CM_965_OUT;
+      if (out !== undefined) {
+        fs.mkdirSync(out, { recursive: true });
+        fs.writeFileSync(join(out, `${figure.name}-posted-facts.json`), JSON.stringify({ coverage, cutInto, scored, ours, programs: programs.map((p) => p.ir.tool.name) }, null, 1));
+        // #964 — the standing picture set's inputs: the plan's own programs and the goal target /
+        // frame / gate options this run measured.
+        fs.writeFileSync(join(out, `${figure.name}-plan.json`), JSON.stringify({ perSetup: output.perSetup.map((setup) => ({ programs: setup.programs })) }, null, 1));
+        fs.writeFileSync(join(out, `${figure.name}-pics.json`), JSON.stringify({
+          card: figure.name,
+          target: targetOf(job, bytes, stlPath!),
+          stock: job.stock,
+          frame: { stockTop: 0, partBottom: -job.stock.thickness },
+          cutIntoOptions: { passCoverage: 0.95, ...allowance(job) },
+          post: ctx,
+        }, null, 1));
+      }
+
       // THE MAINTAINER'S LINE (#965).
       expect(coverage, `#965 ${figure.name}: whole-surface coverage ${(coverage * 100).toFixed(2)} % — the line is 95 %`).toBeGreaterThanOrEqual(0.95);
       expect(cutInto.adjudicatedFraction, `#965 ${figure.name}: cut-into beyond the allowance`).toBe(0);
       expect(scored.lines.find((l) => l.key === 'coverage')?.oursValue).toBeCloseTo(coverage, 9);
 
-      const out = process.env.CM_965_OUT;
-      if (out !== undefined) {
-        fs.mkdirSync(out, { recursive: true });
-        fs.writeFileSync(join(out, `${figure.name}-posted-facts.json`), JSON.stringify({ coverage, cutInto, scored, ours, programs: programs.map((p) => p.ir.tool.name) }, null, 1));
-      }
     }, 600_000);
   });
 }
