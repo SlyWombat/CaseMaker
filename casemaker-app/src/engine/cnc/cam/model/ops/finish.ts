@@ -25,7 +25,6 @@
  */
 
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
-import { tourNearest } from '@/engine/cnc/cam/tour';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import type { RemainderRegion, FeatureSource } from '../features';
@@ -557,29 +556,71 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     }
     cleared.push({ z: levelZ, boundary: levelCleared });
 
-    // 2. ORDER the runs so consecutive passes are neighbours: nearest neighbour + 2-opt over the
-    //    runs' midpoints, started from where the tool already is (#487's tour, the same primitive
-    //    the pocket contours use). The raster's row parity used to alternate direction to make the
-    //    turnarounds short; a tour subsumes that — and unlike the raster it can leave a row for
-    //    the neighbouring strip on the next row and come back, which is where the crossings go.
-    const midpoint = (run: DroppedPoint[]): [number, number] => {
-      const a = run[0]!;
-      const b = run[run.length - 1]!;
-      return [(a.x + b.x) / 2, (a.y + b.y) / 2];
+    // 2. ORDER the runs so consecutive passes are neighbours, WITH A CONNECTIVITY CONSTRAINT
+    //    (#962): a tour edge must stay inside the CL surface's own reach. The finish's region (the
+    //    scoop ring and the skirt, grown by the ball) is non-convex, and the unconstrained tour
+    //    connected runs whose straight path crossed a bay of the region — where `dropCutter`
+    //    answers nothing, the ride test must refuse, and every such join paid a retract. Measured
+    //    on the organizer: 62 of the ball finish's 87 refusals were exactly these, 71 % of its
+    //    remaining rapids. The edge test is the ride test's own null check, applied to the XY path.
+    const reaches = (ax: number, ay: number, bx: number, by: number): boolean => {
+      const length = Math.hypot(bx - ax, by - ay);
+      const steps = Math.max(1, Math.ceil(length / linkSampleStep));
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        if (opts.clSurface.dropCutter(ax + (bx - ax) * t, ay + (by - ay) * t) === null) return false;
+      }
+      return true;
     };
     const fromXY: [number, number] = prevExit === null ? [min[0], min[1]] : [prevExit.x, prevExit.y];
-    const order = tourNearest(levelRuns.map(midpoint), fromXY);
-
-    // 3. EMIT in tour order; each run is entered at whichever of its ends is nearer the tool.
-    for (const index of order) {
-      let points = levelRuns[index]!;
-      if (prevExit !== null) {
-        const first = points[0]!;
-        const last = points[points.length - 1]!;
-        if (Math.hypot(last.x - prevExit.x, last.y - prevExit.y) < Math.hypot(first.x - prevExit.x, first.y - prevExit.y)) {
-          points = [...points].reverse();
+    const remainingRuns = levelRuns.map((_, k) => k);
+    const order: number[] = [];
+    const reversedOf: boolean[] = [];
+    let px = fromXY[0];
+    let py = fromXY[1];
+    while (remainingRuns.length > 0) {
+      // The nearest run whose nearer end is REACHABLE; the plain nearest only when none of the
+      // candidates tried is (a region ringed by unreachable ground still has to be cut). The
+      // candidates are sorted by distance FIRST and the reach test — a CL sampling run, not free —
+      // is spent in that order, at most REACH_CANDIDATES times: testing every run against the
+      // surface at every step is O(n^2) CL queries and took the organizer's plan from minutes to
+      // tens of minutes.
+      const candidates = remainingRuns.map((index, k) => {
+        const run = levelRuns[index]!;
+        const a = run[0]!;
+        const b = run[run.length - 1]!;
+        const da = Math.hypot(a.x - px, a.y - py);
+        const db = Math.hypot(b.x - px, b.y - py);
+        return { k, index, reversed: db < da, d: Math.min(da, db) };
+      });
+      candidates.sort((c1, c2) => c1.d - c2.d || c1.index - c2.index);
+      const REACH_CANDIDATES = 8;
+      let pick = candidates[0]!.k;
+      let pickReversed = candidates[0]!.reversed;
+      let tried = 0;
+      for (const c of candidates) {
+        if (tried++ >= REACH_CANDIDATES) break;
+        const run = levelRuns[c.index]!;
+        const end = c.reversed ? run[0]! : run[run.length - 1]!;
+        if (reaches(px, py, end.x, end.y)) {
+          pick = c.k;
+          pickReversed = c.reversed;
+          break;
         }
       }
+      const index = remainingRuns.splice(pick, 1)[0]!;
+      order.push(index);
+      reversedOf.push(pickReversed);
+      const run = levelRuns[index]!;
+      const end = pickReversed ? run[0]! : run[run.length - 1]!;
+      px = end.x;
+      py = end.y;
+    }
+
+    // 3. EMIT in tour order, each run entered at the end the tour chose.
+    for (let k = 0; k < order.length; k++) {
+      let points = levelRuns[order[k]!]!;
+      if (reversedOf[k]) points = [...points].reverse();
       const entryPoint: LinkPoint = { x: points[0]!.x, y: points[0]!.y, z: points[0]!.z };
       if (prevExit === null) {
         // The run's own FIRST feed is a PLUNGE (straight down from the hop height into material),
