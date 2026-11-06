@@ -60,11 +60,16 @@ function parsedOf(mesh: { positions: Float32Array; indices: Uint32Array }): Pars
 
 /**
  * Two closed boxes, stacked so one's top face and the other's bottom face are coincident but
- * never merged into one surface (moved here from `surface3d.spec.ts`'s old `stepTris`/`boxTris`,
- * #966 — a genuinely unrepairable fixture, not a synthetic one built for this pin: a skirt and a
- * bottom cap can only close ONE open sheet's own boundary, and this mesh has none — every edge is
- * already part of two triangles within its own box, so welding finds no boundary loop to skirt at
- * all; what it finds instead is the coincident internal faces, shared by more than two triangles).
+ * never merged into one surface (moved here from `surface3d.spec.ts`'s old `stepTris`/`boxTris`).
+ *
+ * #993 (D's door split) changed this fixture's own verdict, measured directly: welding only ties
+ * the two boxes together along their one shared edge (the plateau's left edge sitting flush on
+ * the slab's), which is exactly the "4 triangles, 2 opposite-normal pairs" shape the vertex-link
+ * split resolves — the same mechanism the organizer STL's knife edge uses. The result is a single
+ * 24-triangle manifold the kernel accepts with no error, and its volume is exactly 800 + 400 =
+ * 1200 mm³ (the slab's own volume plus the plateau's, nothing cancelled) — a correct stepped
+ * solid, not a silently-wrong one. "Inform, don't refuse" prefers this close to the refusal this
+ * fixture used to pin before #993 existed.
  */
 function stackedBoxesMesh(): { positions: Float32Array; indices: Uint32Array } {
   const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number): [number, number, number][][] => {
@@ -152,22 +157,18 @@ describe('#966 an open goal mesh is closed with a skirt before the manifold chec
     expect(message).toContain('2 disconnected sheet components');
   });
 
-  it('a genuinely degenerate mesh (coincident, un-merged internal faces) is refused by name, never a kernel stack trace', () => {
-    // No raw-kernel sanity check here, unlike the open-sheet/disconnected-sheets cases above: the
-    // kernel's own merge tolerates this one (it cancels the coincident opposite-facing faces
-    // rather than refusing), so `closeOpenSheet`'s own edge-count analysis is the ONLY thing that
-    // catches it — which is exactly the point this pin makes.
+  it('#993 — two stacked boxes split at their one shared edge into a correct, volume-exact manifold', () => {
     const mesh = parsedOf(stackedBoxesMesh());
-    let caught: unknown = null;
-    try {
-      closeOpenSheet(tl, mesh, { bottomZ: BOTTOM_Z });
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught, 'the fixture must be refused, not silently closed or left to the kernel').toBeInstanceOf(UnclosableOpenMeshError);
-    const message = (caught as Error).message;
-    expect(message).toContain('goal-mesh-unclosable');
-    expect(message).toContain('edge(s) shared by more than two triangles');
+    const closed = closeOpenSheet(tl, mesh, { bottomZ: BOTTOM_Z });
+    expect(closed.note).toContain('non-manifold edge(s) split');
+    expect(closed.mesh.triangleCount).toBe(24);
+    const mm = new tl.Mesh({ numProp: 3, vertProperties: closed.mesh.positions, triVerts: closed.mesh.indices });
+    mm.merge();
+    const solid = new tl.Manifold(mm);
+    expect(solid.status()).toBe('NoError');
+    // The slab (20 × 20 × 2) plus the plateau (10 × 20 × 2): 800 + 400, nothing cancelled.
+    expect(solid.volume()).toBeCloseTo(1200, 3);
+    solid.delete();
   });
 
   it('the goal path closes the sheet: buildModelPlanInputForGoal hands the engine a closed mesh', async () => {
