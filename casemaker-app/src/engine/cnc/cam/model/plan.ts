@@ -1025,10 +1025,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       walkFloors(tree.pockets);
       const left = Math.max(...demands) - depthBandMm;
       const mm3 = (v: number): number => Math.round(v * 1000) / 1000;
+      // #1013 — the note names the face the band cuts: a flipped setup's band is measured from the
+      // stock's own bottom, so "the stock's top" would name the wrong side of the part.
+      const face = spec.frame.up[2] === -1 ? 'bottom' : 'top';
       notes.push(
         left > 1e-6
-          ? `Cut only the stock's top ${mm3(depthBandMm)} mm; ${mm3(left)} mm of the goal is left below the band`
-          : `Cut only the stock's top ${mm3(depthBandMm)} mm; nothing of the goal is below the band`,
+          ? `Cut only the stock's ${face} ${mm3(depthBandMm)} mm; ${mm3(left)} mm of the goal is left below the band`
+          : `Cut only the stock's ${face} ${mm3(depthBandMm)} mm; nothing of the goal is below the band`,
       );
     }
     notes.push(...toolSubstitutions);
