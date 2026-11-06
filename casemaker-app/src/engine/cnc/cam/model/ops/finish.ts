@@ -303,10 +303,20 @@ function flatRasterStepOver(radiusMm: number, bandMm: number, steepestSlopeDeg: 
  * #962 for B; until it lands, the op makes this one decision itself and leaves every other route
  * (retracts, vertical legs, hop clearance) to `link()`.
  */
-function ridesTheCl(from: LinkPoint, to: LinkPoint, clSurface: ClSurface, stepMm: number): boolean {
+/**
+ * #1030 — exported for its unit pin: the ride test's sampling step is the thing that decides
+ * whether a short join's interior is ever looked at (the organizer's 0.33 mm plunge-rate joins had
+ * no interior sample and crossed CL creases 0.011–0.014 mm under the exact CL).
+ */
+export function ridesTheCl(from: LinkPoint, to: LinkPoint, clSurface: ClSurface, stepMm: number): boolean {
   const length = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
   const step = stepMm > 0 ? stepMm : 0.5;
-  const steps = Math.max(1, Math.ceil(length / step));
+  // #1030 — AT LEAST TWO INTERVALS. A join shorter than the step used to get ONE interval: t = 0
+  // and t = 1, both run endpoints that sit on the CL by construction, so the chord between them was
+  // never examined — the organizer's 0.33 mm plunge-rate joins crossed CL creases 0.011–0.014 mm
+  // under the exact CL that way. Two intervals sample the midpoint whatever the length; the caller
+  // floors the step at 0.05 mm so a longer join's creases are sampled too.
+  const steps = Math.max(2, Math.ceil(length / step));
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
     const x = from.x + (to.x - from.x) * t;
@@ -488,10 +498,15 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // surface for the whole segment. Everything else — the retract, its vertical legs and the hop
   // clearance — is `link()`'s own, untouched.
   const linkSampleStep = Math.min(0.5, Math.max(0.1, toolRadius / 2));
+  // #1030 — THE RIDE TEST'S STEP IS FLOORED, the long-ride step kept: `linkSampleStep` is sized for
+  // the stay-down rides of #962, but the short joins are 0.3–0.7 mm and must be sampled finely
+  // enough to catch a CL crease between their endpoints — the same 0.05 mm `rough.ts`'s skim joins
+  // already prove at, and never coarser than the CL surface's own spacing.
+  const rideStep = Math.min(linkSampleStep, opts.clSurface.maxSpacingMm, 0.05);
   const joinMoves = (from: LinkPoint, to: LinkPoint, levelZ: number): ToolpathIR['operations'][number]['moves'] => {
     const direct = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
     const shortHop = DEFAULT_SHORT_HOP_DIAMETERS * 2 * toolRadius;
-    if (direct <= shortHop + 1e-9 && ridesTheCl(from, to, opts.clSurface, linkSampleStep)) {
+    if (direct <= shortHop + 1e-9 && ridesTheCl(from, to, opts.clSurface, rideStep)) {
       // A DESCENDING LINK IS A CUT INTO LOWER GROUND: it runs at the plunge rate, the same rule
       // the op's own first feed follows (9e976f0b's finding — never a descent at the cutting rate).
       const f = to.z < from.z - 1e-9 ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
