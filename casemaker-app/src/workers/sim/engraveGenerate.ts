@@ -80,6 +80,7 @@ import { cutterOnMetalLine, cutterRefusedOnMaterial } from '@/engine/cnc/engrave
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach } from '@/engine/cnc/engrave/goalReach';
+import { undersideFloorZ } from '@/engine/cnc/engrave/goalUnderside';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
@@ -233,7 +234,7 @@ import { cutterKeyOf, type CutterCandidates } from '@/engine/cnc/cam/model/seque
 import type { EdgeBreakSpec, ModelTolerances, PlanStatement } from '@/engine/cnc/cam/model/types';
 // #966 — the real reach-aware top+bottom decision (#965), replacing this file's own hardcoded
 // single `top` `SetupSpec` below (`buildModelPlanInputForGoal`'s own doc on why).
-import { buildSetupSpecs } from '@/engine/cnc/cam/model/setups';
+import { buildSetupSpecs, frameForFace } from '@/engine/cnc/cam/model/setups';
 import type { Mount, MountSpec } from '@/engine/cnc/setups/types';
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import { base64ToArrayBuffer } from '@/engine/import/base64';
@@ -4861,6 +4862,14 @@ export async function buildModelPlanInputForGoal(
    * removal's own scope.
    */
   setupsOverride?: SetupSpec[],
+  /**
+   * #1006 — THE SIDE'S OWN FACE, when the caller is planning a JOB'S STATED SIDE. A saved setup
+   * states which stock face is up (`JobSetup.orientation.top`); the operator's sides are
+   * authoritative when present, so that side's plan takes exactly ONE setup, framed from that face
+   * (`frameForFace`) — not the geometry-derived top/bottom decision `buildSetupSpecs` makes for a
+   * job that states none.
+   */
+  sideFace?: 'top' | 'bottom',
 ): Promise<ModelPlanInput> {
   const rawMesh = targetObjectMesh(goal);
   const placed = placeTarget(goal, rawMesh);
@@ -4962,7 +4971,9 @@ export async function buildModelPlanInputForGoal(
   const mountSpec: MountSpec = { kind: mount };
   const setups: SetupSpec[] =
     setupsOverride ??
-    buildSetupSpecs({
+    (sideFace !== undefined
+      ? [{ frame: frameForFace(sideFace, mountSpec, 0, job.stock.thickness), underside }]
+      : buildSetupSpecs({
       geometry,
       underside,
       mount: mountSpec,
@@ -4972,8 +4983,8 @@ export async function buildModelPlanInputForGoal(
       // own `ctx` below) — the SAME convention `placeTarget` places the mesh against
       // (`position.z` is the mesh's own top in that frame), stated explicitly rather than left to
       // `buildSetupSpecs`' own `0` default so a reviewer sees the two agree on purpose.
-      stockTopZ: 0,
-    }).setups;
+        stockTopZ: 0,
+      }).setups);
 
   // #988 — THE OPERATOR'S TOP-BAND CHOICE, CARRIED INTO THE MODEL PLAN. `cutWithinReach` means
   // "cut the part I can have": the floor is the stock top less the chosen cutter's known reach
@@ -4996,12 +5007,22 @@ export async function buildModelPlanInputForGoal(
   // The goal is placed with its top at `position.z` in the stock-top frame (`stockTopZ: 0`), so a
   // top sunk 2 mm needs 2 mm added to a stated band.
   const goalTopBelowStockMm = 0 - goal.position.z;
+  // #1006 — THE UNDERSIDE'S FLOOR REACHES THE PLAN. A goal that says where its underside comes from
+  // cuts to that floor: a plinth stops a stated height above the blank's bottom (the flat and
+  // flipped-tabs kinds have no floor of their own here — a flat part stops at its own bottom, which
+  // the mesh already states). The old path's own order is kept: a stated/split band wins, then the
+  // underside's floor, then the reach-derived band; the plan's depth band is the mechanism that
+  // clamps every floor and the freeing contour to it.
+  const undersideFloor = goal.underside === undefined ? null : undersideFloorZ(goal, job.stock);
+  const undersideBandMm = undersideFloor === null ? null : Number((0 - undersideFloor).toFixed(3));
   const setupBandMm =
     statedBandMm !== null
       ? Number((statedBandMm + goalTopBelowStockMm).toFixed(3))
-      : reachBandMm !== null && reachBandMm > 0
-        ? reachBandMm
-        : null;
+      : undersideBandMm !== null
+        ? undersideBandMm
+        : reachBandMm !== null && reachBandMm > 0
+          ? reachBandMm
+          : null;
   const bandedSetups: SetupSpec[] = setupBandMm === null ? setups : setups.map((s) => ({ ...s, bandMm: setupBandMm }));
 
   const envelope: FixtureEnvelope | null =
@@ -5087,15 +5108,18 @@ export async function generateGoalProgram(
    * `catalogueTools`, #961-wiring) never again shifts an existing positional argument into the
    * wrong parameter the way dropping `catalogue`/`onProgress`/`planner` from this same signature
    * did (B's repro, goalClearAround.spec.ts). `shop` stays required — every real caller already
-   * passes one — only `modelSetupsOverride` (the test-only seam, never set by app code, slated
-   * for retirement — see `buildModelPlanInputForGoal`'s own doc) is optional.
+   * passes one — `modelSetupsOverride` (the test-only seam, never set by app code, slated
+   * for retirement — see `buildModelPlanInputForGoal`'s own doc) and `sideFace` (#1006 — the
+   * job's STATED side's own face, see `buildModelPlanInputForGoal`'s param of the same name) are
+   * both optional.
    */
   opts: {
     shop: EngraveShopOpts;
     modelSetupsOverride?: SetupSpec[];
+    sideFace?: 'top' | 'bottom';
   },
 ): Promise<EngraveGenerated> {
-  const { shop, modelSetupsOverride } = opts;
+  const { shop, modelSetupsOverride, sideFace } = opts;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -5227,7 +5251,7 @@ export async function generateGoalProgram(
   }
   let input: ModelPlanInput;
   try {
-    input = await buildModelPlanInputForGoal(job, goal, tool, shop, modelSetupsOverride);
+    input = await buildModelPlanInputForGoal(job, goal, tool, shop, modelSetupsOverride, sideFace);
   } catch (e) {
     return fail('cam', `cam/model seam (#966): could not build a ModelPlanInput for "${goal.name}" — ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -5434,13 +5458,38 @@ async function generateGoalPrograms(
     }));
   };
 
+  // #1006 — THE SIDE'S OWN TOOLS ARE THE OPERATOR'S AUTHORITY. A saved setup states the tools that
+  // cut its side (`JobSetup.tools`, registry keys); the model input's cutter set is built from
+  // `shop.tools`, which the worker's callers may leave empty (the unit fixtures) or hand over as a
+  // whole library. Resolving the side's stated keys from the tool library and adding them to THIS
+  // side's copy of the shop makes the side's own cutter visible to the planner — the same cutter
+  // the job's key names — without touching the shop the other side sees.
+  // #1006 — THE SIDE'S OWN FACE. `JobSetup.orientation.top` names the stock face that is up in
+  // that setup; a side the operator saved is authoritative, so its plan takes that one setup's
+  // frame instead of the geometry-derived decision (see `buildModelPlanInputForGoal`'s `sideFace`).
+  const faceOfSide = (side: GoalSide): 'top' | 'bottom' => (side.setup.orientation.top === 'bottom' ? 'bottom' : 'top');
+  const shopForSide = (side: GoalSide): EngraveShopOpts => {
+    const keys = side.setup.tools ?? [];
+    if (keys.length === 0) return shop;
+    const have = new Set((shop.tools ?? []).map((e) => e.key));
+    const extra: ToolLibraryEntry[] = [];
+    for (const key of keys) {
+      if (have.has(key)) continue;
+      const entry = entryFor(key);
+      if (entry === null) continue;
+      have.add(key);
+      extra.push(entry);
+    }
+    return extra.length === 0 ? shop : { ...shop, tools: [...(shop.tools ?? []), ...extra] };
+  };
+
   const firstSide = sides[0]!;
-  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop });
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: faceOfSide(firstSide) });
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
   for (const side of sides.slice(1)) {
-    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop });
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: faceOfSide(side) });
     const sideList = sidePrograms(one, side);
     if (sideList === null) return { ...one, programs };
     programs.push(...sideList);

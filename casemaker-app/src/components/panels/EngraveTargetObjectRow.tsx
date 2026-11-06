@@ -1133,6 +1133,19 @@ export function EngraveTargetObjectRow({
             {surfaceFacts !== null && (
               <p style={MUTED} data-testid={`engrave-target-surface-report-${index}`}>
                 Last generated:{' '}
+                {surfaceFacts.roughingLayers === undefined ||
+                surfaceFacts.stepDownMm === undefined ||
+                surfaceFacts.roughStepOverMm === undefined ||
+                surfaceFacts.stockToLeaveMm === undefined ||
+                surfaceFacts.finishStepOverMm === undefined ? (
+                  <>
+                    {surfaceFacts.resolutionNote.charAt(0).toUpperCase() + surfaceFacts.resolutionNote.slice(1)}.
+                    {surfaceFacts.underside == null
+                      ? ''
+                      : ` The underside is ${surfaceFacts.underside.kind === 'plinth' ? 'held on a plinth' : surfaceFacts.underside.kind === 'flipped-tabs' ? 'flipped and held by tabs' : 'flat on the stock’s bottom'}${surfaceFacts.underside.floorZ === null ? '' : `, cut no deeper than Z ${surfaceFacts.underside.floorZ.toFixed(3)}`}.`}
+                  </>
+                ) : (
+                  <>
                 {surfaceFacts.rough == null
                   ? ''
                   : `${surfaceFacts.rough.tool} roughs (${surfaceFacts.rough.kind === 'adaptive' ? 'adaptive' : 'raster'}) as program 1, then the ball finishes as program 2; `}
@@ -1153,6 +1166,8 @@ export function EngraveTargetObjectRow({
                   : `, then a pencil pass on ${surfaceFacts.pencil.paths} crease${surfaceFacts.pencil.paths === 1 ? '' : 's'} at ${Number(surfaceFacts.pencil.creaseDeg.toFixed(0))}°`}
                 .{' '}
                 {surfaceFacts.resolutionNote.charAt(0).toUpperCase() + surfaceFacts.resolutionNote.slice(1)}.
+                  </>
+                )}
               </p>
             )}
           </div>
