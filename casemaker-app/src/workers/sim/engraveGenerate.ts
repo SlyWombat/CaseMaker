@@ -4854,25 +4854,6 @@ export async function buildModelPlanInputForGoal(
   tool: Tool,
   shop: EngraveShopOpts,
   /**
-   * TEST-ONLY SEAM — never set by app code, no production call site passes it. Overrides the
-   * real `buildSetupSpecs` decision below with a caller-supplied list, so a spec can drive
-   * `generateGoalProgram`'s real multi-setup posting path with a synthetic `ModelPlanInput.setups`
-   * without depending on a particular mesh's own flip-plan answer (a plain box, the fixture these
-   * specs need, genuinely needs only one setup by the real decision — there is no analytic
-   * geometry today that needs two setups AND carries a registration datum, so this parameter
-   * stands in for one). `multiSetup966.spec.ts`/`multiSetupVerify966.spec.ts`/`camModelSeam966.spec.ts`
-   * depend on it; present, it wins unconditionally, exactly as before #966-goal-setups wired the
-   * real decision in to replace the old hardcoded fallback.
-   *
-   * SLATED FOR RETIREMENT (#966 ruling, filed as a follow-up): extract `generateGoalProgram`'s
-   * posting/verifying tail into its own callable function, so these specs can call
-   * `buildModelPlanInputForGoal` → override `.setups` → `planModelCam` → that function directly —
-   * the same "call the literal production functions in order" pattern `goalSetups966.spec.ts`
-   * already uses one step short of posting. Not done here: it is a real refactor, not this
-   * removal's own scope.
-   */
-  setupsOverride?: SetupSpec[],
-  /**
    * #1006 — THE SIDE'S OWN FACE, when the caller is planning a JOB'S STATED SIDE. A saved setup
    * states which stock face is up (`JobSetup.orientation.top`); the operator's sides are
    * authoritative when present, so that side's plan takes exactly ONE setup, framed from that face
@@ -4997,8 +4978,7 @@ export async function buildModelPlanInputForGoal(
   // follow-up rather than guessed at here.
   const mountSpec: MountSpec = { kind: mount };
   const setups: SetupSpec[] =
-    setupsOverride ??
-    (sideFace !== undefined
+    sideFace !== undefined
       ? [{ frame: frameForFace(sideFace, mountSpec, 0, job.stock.thickness), underside }]
       : buildSetupSpecs({
       geometry,
@@ -5011,7 +4991,7 @@ export async function buildModelPlanInputForGoal(
       // (`position.z` is the mesh's own top in that frame), stated explicitly rather than left to
       // `buildSetupSpecs`' own `0` default so a reviewer sees the two agree on purpose.
         stockTopZ: 0,
-      }).setups);
+      }).setups;
 
   // #988 — THE OPERATOR'S TOP-BAND CHOICE, CARRIED INTO THE MODEL PLAN. `cutWithinReach` means
   // "cut the part I can have": the floor is the stock top less the chosen cutter's known reach
@@ -5222,28 +5202,37 @@ function goalSurfaceFactsFromPlan(output: ModelPlanOutput): GoalSurfaceFacts {
   };
 }
 
-export async function generateGoalProgram(
+/**
+ * #1004 — THE MODEL PLAN'S POST-AND-VERIFY TAIL, callable on its own. Every program a
+ * `ModelPlanOutput` carries posts through the SAME `postFor`/`verifyProgram` pair this function
+ * uses, setups in planner order then each setup's programs in run order (the turn-over
+ * convention below). `generateGoalProgram` is build -> plan -> this; a spec that must drive a
+ * synthetic setup list builds the input, edits `input.setups`, calls `planModelCam`, then calls
+ * this SAME tail — there is no options-object seam overriding the plan's own setup decision.
+ *
+ * `findings` carries the pre-plan verdicts the head computed (the goal's own validation, the
+ * reach check, the coverage offer, the roughToolKey and chamfer statements); `documentFindings`
+ * below is re-validated here because both the head and this tail state it (the function is pure
+ * and cheap, and the head's copies are scoped to its own refusals).
+ */
+export interface PostModelPlanFindings {
+  goalFindings: JobFinding[];
+  reachFindings: JobFinding[];
+  coverageFindings: JobFinding[];
+  modelRoughFindings: JobFinding[];
+  chamferFindings: JobFinding[];
+}
+
+export async function postModelPlan(
   job: EngraveJob,
   goal: EngraveTargetObject,
   tool: Tool | null,
   calibration: MachineCalibration | null,
-  /**
-   * #966/#961 — ONE OBJECT FOR EVERY TRAILING OPTIONAL, so a future addition (F's own
-   * `catalogueTools`, #961-wiring) never again shifts an existing positional argument into the
-   * wrong parameter the way dropping `catalogue`/`onProgress`/`planner` from this same signature
-   * did (B's repro, goalClearAround.spec.ts). `shop` stays required — every real caller already
-   * passes one — `modelSetupsOverride` (the test-only seam, never set by app code, slated
-   * for retirement — see `buildModelPlanInputForGoal`'s own doc) and `sideFace` (#1006 — the
-   * job's STATED side's own face, see `buildModelPlanInputForGoal`'s param of the same name) are
-   * both optional.
-   */
-  opts: {
-    shop: EngraveShopOpts;
-    modelSetupsOverride?: SetupSpec[];
-    sideFace?: 'top' | 'bottom';
-  },
+  shop: EngraveShopOpts,
+  output: ModelPlanOutput,
+  findings: PostModelPlanFindings,
 ): Promise<EngraveGenerated> {
-  const { shop, modelSetupsOverride, sideFace } = opts;
+  const { goalFindings, reachFindings, coverageFindings, modelRoughFindings, chamferFindings } = findings;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -5251,11 +5240,11 @@ export async function generateGoalProgram(
   // #992 — `findings` is the fifth seat: a refusal that happens AFTER `planModelCam` returned a
   // plan still carries the plan's own typed statements (the reason the run came up short), the
   // same way the success and verify-fail returns do.
-  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null, plan: ModelPlanOutput | null = null, findings: JobFinding[] = []): EngraveGenerated => ({
+  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null, plan: ModelPlanOutput | null = null, findingsIn: JobFinding[] = []): EngraveGenerated => ({
     ...base,
     ok: false,
     stage,
-    findings,
+    findings: findingsIn,
     feeds,
     cam: null,
     nc: null,
@@ -5263,7 +5252,6 @@ export async function generateGoalProgram(
     plan,
     errors: [{ stage, message }],
   });
-
   // #726 W16 — THE DOCUMENT'S OWN FINDINGS RIDE WITH A GOAL RUN. The item pipeline has always
   // merged `validateJob` and the vise's validator into the run's findings; this dispatch returned
   // an empty list, so a goal job on the shipped default vise never carried `vise-default` — and
@@ -5273,144 +5261,8 @@ export async function generateGoalProgram(
       ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools, tool }),
       ...(job.workholding.kind === 'vise' ? validateVise(job.stock, job.workholding.vise, job.sacrificial) : []),
     ]);
-
-  // #539 — the pure-goal dispatch runs BEFORE the item pipeline's `validateJob`, so the
-  // `goal-object-oversize`/zero-volume check (#533) never reaches a goal that is surfaced here.
-  // Run the SAME validation and refuse an unmakeable goal with its blocking finding, rather than
-  // sampling and posting a program the Cut gate would otherwise have to catch with no finding.
-  const goalFindings = validateGoalObject(goal, job.stock, { minFloor: job.minFloor, edgeMargin: job.edgeMargin });
-  const blocking = goalFindings.filter((f) => f.severity === 'error');
-  if (blocking.length > 0) {
-    return {
-      ...base,
-      ok: false,
-      stage: 'findings',
-      findings: dedupeFindings([...goalFindings, ...documentFindings()]),
-      feeds: null,
-      cam: null,
-      nc: null,
-      verify: null,
-      errors: blocking.map((f) => ({ stage: 'findings' as EngraveStage, message: f.message })),
-    };
-  }
-
-  // #785 — THE REACH CHECK, EARLY. Before the CAM or the measured search runs, the goal is judged
-  // against the CHOSEN cutter's known reach (its own flute, else Makera's catalogue number for the
-  // same cutter). A known reach shorter than the goal refuses by default; the operator's
-  // `cutWithinReach` choice turns the same shortfall into a stated top-band cut (the warning
-  // `goal-cut-top-band`, applied below by the sampler's floor). No reach recorded at all is an INFO,
-  // not a refusal — the sweep's holder gate is the real guard. The measured search must never
-  // simulate every candidate to find this out.
-  const ownedTools = [...(shop.tools ?? []).map((e) => e.tool), ...(tool === null ? [] : [tool])];
-  const reachFindings = goalReachFindings(goal, tool, ownedTools, shop.tools ?? []);
-  const reachBlocking = reachFindings.filter((f) => f.severity === 'error');
-  // #872 — WHAT THE TOP SETUP LEAVES UNREACHED. Measured geometrically here (faces pointing away,
-  // the shadow band) and paired with the flip plan that finishes it; inform-only, so it rides
-  // with the findings on every path that posts a program.
-  const coverageFindings = goalFlipFindings(job, goal);
-  if (reachBlocking.length > 0) {
-    return {
-      ...base,
-      ok: false,
-      stage: 'findings',
-      findings: dedupeFindings([...reachFindings, ...coverageFindings, ...goalFindings, ...documentFindings()]),
-      feeds: null,
-      cam: null,
-      nc: null,
-      verify: null,
-      errors: reachBlocking.map((f) => ({ stage: 'findings' as EngraveStage, message: f.message })),
-    };
-  }
-
-  if (tool === null) return fail('feeds', 'the job has no usable cutter');
   const mill = jobMachine(job, calibration);
 
-  // #980 — A PICTURE RELIEF HAS NO MESH (same fact `rotaryRelief.ts`'s own `sampleGoalRadialField`
-  // states for the rotary side): `targetObjectMesh` throws for a `format: 'png'` goal, and the
-  // #949/#1003 overhang check right below calls it unconditionally — this refusal MUST run first,
-  // named and by itself, or a picture relief throws the mesh's own internal error instead of the
-  // named one. Restoring the path (triangulating the picture's own heightfield into a watertight
-  // FeatureSource) is #980's own scope, not a bug in either check below.
-  if (goal.format === 'png') {
-    return fail('cam', 'a picture relief is a flat heightfield; cam/model needs a mesh (#980)');
-  }
-  // #949/#1003 — AN XY OVERHANG IS REFUSED PRE-PLAN, AND A Z OVERHANG IS CLIPPED. A goal that does
-  // not fit its blank in X or Y is a job error the operator must fix (a larger blank, or Fit to the
-  // stock); a goal merely TALLER than the blank is planned to the stock bottom and its overrun
-  // stated (#1003's clamp). The two rules answer different axes and both stand.
-  {
-    const local = targetObjectMesh(goal);
-    const place = placeTarget(goal, local).place;
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (let i = 0; i < local.positions.length; i += 3) {
-      const [x, y] = place(local.positions[i]!, local.positions[i + 1]!, local.positions[i + 2]!);
-      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-    }
-    const overhangs = [
-      { edge: 'left', mm: -minX },
-      { edge: 'right', mm: maxX - job.stock.length },
-      { edge: 'front', mm: -minY },
-      { edge: 'back', mm: maxY - job.stock.width },
-    ].filter((o) => o.mm > 1e-6).sort((a, b) => b.mm - a.mm);
-    if (overhangs.length > 0) {
-      const worst = overhangs[0]!;
-      return fail(
-        'cam',
-        `the goal is larger than the blank: ${worst.mm.toFixed(1)} mm past the ${worst.edge} edge. Fit to the stock, or choose a blank that holds it`,
-      );
-    }
-  }
-  // #966 — THE SEAM REMOVED. The old heightfield dispatch (`generateSurface3dForGoal`/
-  // `generateSurface3dIR`) and the `USE_MODEL_CAM_ENGINE` flag that chose between it and this are
-  // both gone: `planModelCam` is the only path a goal job plans through now.
-  // #869 — the SAME named refusal the heightfield path states for a bad/non-flat `roughToolKey`
-  // (`validateGoalRoughTool`'s own doc): computed here too so the model path's `findings` carries
-  // it, independent of `buildModelPlanInputForGoal`'s own (pure, side-effect-free) re-validation
-  // for `ModelPlanInput.curvedRoughTool`.
-  const modelRoughFinding = validateGoalRoughTool(goal.roughToolKey, shop.tools ?? [], goal.id).finding;
-  const modelRoughFindings = modelRoughFinding === null ? [] : [modelRoughFinding];
-  // #989 — A STATED CHAMFER THE SHOP'S V CANNOT CUT IS NAMED, never silent: the seam then
-  // leaves `edgeBreak.legMm` 0 and the plan's own note says the rims stay sharp. The old
-  // stage's own finding, in its words, so a reader sees one vocabulary whichever engine runs.
-  const chamferFindings: JobFinding[] = [];
-  const chamferWantModel = goal.chamfer;
-  if (chamferWantModel !== undefined) {
-    const who = `The part's edges (“${goal.name}”)`;
-    const entry = (shop.tools ?? []).find((e) => e.key === chamferWantModel.toolKey);
-    if (chamferWantModel.toolKey === undefined || entry === undefined) {
-      chamferFindings.push({
-        severity: 'warning',
-        code: 'goal-chamfer-no-cutter',
-        labelId: goal.id,
-        message:
-          `${who} are not chamfered: ` +
-          (chamferWantModel.toolKey === undefined
-            ? 'no V-bit has been chosen for them'
-            : `the V-bit “${chamferWantModel.toolKey}” is not in the tool library`) +
-          '.',
-      });
-    } else if (vCone(entry.tool) === null) {
-      chamferFindings.push({
-        severity: 'warning',
-        code: 'goal-chamfer-no-cutter',
-        labelId: goal.id,
-        message: `${who} are not chamfered: “${entry.tool.name}” is a ${entry.tool.shape} cutter with no cone to make a bevel.`,
-      });
-    }
-  }
-  let input: ModelPlanInput;
-  try {
-    input = await buildModelPlanInputForGoal(job, goal, tool, shop, modelSetupsOverride, sideFace);
-  } catch (e) {
-    return fail('cam', `cam/model seam (#966): could not build a ModelPlanInput for "${goal.name}" — ${e instanceof Error ? e.message : String(e)}`);
-  }
-  let output: ModelPlanOutput;
-  try {
-    output = await planModelCam(input);
-  } catch (e) {
-    return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
-  }
   // #992 — THE PLAN'S TYPED STATEMENTS REACH THE OPERATOR. `warning`/`info` become findings on
   // this run (the panel's route; the message is the statement's own text, the count rides the
   // field the acceptance reads); `sheet` statements stay out of the findings entirely and ride
@@ -5614,6 +5466,200 @@ export async function generateGoalProgram(
     // heightfield engine that used to fill this block is gone (the #966 removal).
     surface3d: mouldFacts ?? goalSurfaceFactsFromPlan(output),
   };
+}
+
+export async function generateGoalProgram(
+  job: EngraveJob,
+  goal: EngraveTargetObject,
+  tool: Tool | null,
+  calibration: MachineCalibration | null,
+  /**
+   * #966/#961 — ONE OBJECT FOR EVERY TRAILING OPTIONAL, so a future addition (F's own
+   * `catalogueTools`, #961-wiring) never again shifts an existing positional argument into the
+   * wrong parameter the way dropping `catalogue`/`onProgress`/`planner` from this same signature
+   * did (B's repro, goalClearAround.spec.ts). `shop` stays required — every real caller already
+   * passes one — and `sideFace` (#1006 — the job's STATED side's own face, see
+   * `buildModelPlanInputForGoal`'s param of the same name) is optional.
+   */
+  opts: {
+    shop: EngraveShopOpts;
+    sideFace?: 'top' | 'bottom';
+  },
+): Promise<EngraveGenerated> {
+  const { shop, sideFace } = opts;
+  const base = emptyGoalResult();
+  // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
+  // it returned one (a program that fails to post/verify once the plan itself is sound); every
+  // call site before `planModelCam` has run passes nothing, so `fail` defaults it to `null`.
+  // #992 — `findings` is the fifth seat: a refusal that happens AFTER `planModelCam` returned a
+  // plan still carries the plan's own typed statements (the reason the run came up short), the
+  // same way the success and verify-fail returns do.
+  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null, plan: ModelPlanOutput | null = null, findings: JobFinding[] = []): EngraveGenerated => ({
+    ...base,
+    ok: false,
+    stage,
+    findings,
+    feeds,
+    cam: null,
+    nc: null,
+    verify: null,
+    plan,
+    errors: [{ stage, message }],
+  });
+
+  // #726 W16 — THE DOCUMENT'S OWN FINDINGS RIDE WITH A GOAL RUN. The item pipeline has always
+  // merged `validateJob` and the vise's validator into the run's findings; this dispatch returned
+  // an empty list, so a goal job on the shipped default vise never carried `vise-default` — and
+  // Save/Upload/Release asked for no clearance tick while Cut step 1 had no warning to show it.
+  const documentFindings = (): JobFinding[] =>
+    dedupeFindings([
+      ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools, tool }),
+      ...(job.workholding.kind === 'vise' ? validateVise(job.stock, job.workholding.vise, job.sacrificial) : []),
+    ]);
+
+  // #539 — the pure-goal dispatch runs BEFORE the item pipeline's `validateJob`, so the
+  // `goal-object-oversize`/zero-volume check (#533) never reaches a goal that is surfaced here.
+  // Run the SAME validation and refuse an unmakeable goal with its blocking finding, rather than
+  // sampling and posting a program the Cut gate would otherwise have to catch with no finding.
+  const goalFindings = validateGoalObject(goal, job.stock, { minFloor: job.minFloor, edgeMargin: job.edgeMargin });
+  const blocking = goalFindings.filter((f) => f.severity === 'error');
+  if (blocking.length > 0) {
+    return {
+      ...base,
+      ok: false,
+      stage: 'findings',
+      findings: dedupeFindings([...goalFindings, ...documentFindings()]),
+      feeds: null,
+      cam: null,
+      nc: null,
+      verify: null,
+      errors: blocking.map((f) => ({ stage: 'findings' as EngraveStage, message: f.message })),
+    };
+  }
+
+  // #785 — THE REACH CHECK, EARLY. Before the CAM or the measured search runs, the goal is judged
+  // against the CHOSEN cutter's known reach (its own flute, else Makera's catalogue number for the
+  // same cutter). A known reach shorter than the goal refuses by default; the operator's
+  // `cutWithinReach` choice turns the same shortfall into a stated top-band cut (the warning
+  // `goal-cut-top-band`, applied below by the sampler's floor). No reach recorded at all is an INFO,
+  // not a refusal — the sweep's holder gate is the real guard. The measured search must never
+  // simulate every candidate to find this out.
+  const ownedTools = [...(shop.tools ?? []).map((e) => e.tool), ...(tool === null ? [] : [tool])];
+  const reachFindings = goalReachFindings(goal, tool, ownedTools, shop.tools ?? []);
+  const reachBlocking = reachFindings.filter((f) => f.severity === 'error');
+  // #872 — WHAT THE TOP SETUP LEAVES UNREACHED. Measured geometrically here (faces pointing away,
+  // the shadow band) and paired with the flip plan that finishes it; inform-only, so it rides
+  // with the findings on every path that posts a program.
+  const coverageFindings = goalFlipFindings(job, goal);
+  if (reachBlocking.length > 0) {
+    return {
+      ...base,
+      ok: false,
+      stage: 'findings',
+      findings: dedupeFindings([...reachFindings, ...coverageFindings, ...goalFindings, ...documentFindings()]),
+      feeds: null,
+      cam: null,
+      nc: null,
+      verify: null,
+      errors: reachBlocking.map((f) => ({ stage: 'findings' as EngraveStage, message: f.message })),
+    };
+  }
+
+  if (tool === null) return fail('feeds', 'the job has no usable cutter');
+
+  // #966 — THE SEAM REMOVED. The old heightfield dispatch (`generateSurface3dForGoal`/
+  // `generateSurface3dIR`) and the `USE_MODEL_CAM_ENGINE` flag that chose between it and this are
+  // both gone: `planModelCam` is the only path a goal job plans through now.
+  // #869 — the SAME named refusal the heightfield path states for a bad/non-flat `roughToolKey`
+  // (`validateGoalRoughTool`'s own doc): computed here too so the model path's `findings` carries
+  // it, independent of `buildModelPlanInputForGoal`'s own (pure, side-effect-free) re-validation
+  // for `ModelPlanInput.curvedRoughTool`.
+  const modelRoughFinding = validateGoalRoughTool(goal.roughToolKey, shop.tools ?? [], goal.id).finding;
+  const modelRoughFindings = modelRoughFinding === null ? [] : [modelRoughFinding];
+  // #989 — A STATED CHAMFER THE SHOP'S V CANNOT CUT IS NAMED, never silent: the seam then
+  // leaves `edgeBreak.legMm` 0 and the plan's own note says the rims stay sharp. The old
+  // stage's own finding, in its words, so a reader sees one vocabulary whichever engine runs.
+  const chamferFindings: JobFinding[] = [];
+  const chamferWantModel = goal.chamfer;
+  if (chamferWantModel !== undefined) {
+    const who = `The part's edges (“${goal.name}”)`;
+    const entry = (shop.tools ?? []).find((e) => e.key === chamferWantModel.toolKey);
+    if (chamferWantModel.toolKey === undefined || entry === undefined) {
+      chamferFindings.push({
+        severity: 'warning',
+        code: 'goal-chamfer-no-cutter',
+        labelId: goal.id,
+        message:
+          `${who} are not chamfered: ` +
+          (chamferWantModel.toolKey === undefined
+            ? 'no V-bit has been chosen for them'
+            : `the V-bit “${chamferWantModel.toolKey}” is not in the tool library`) +
+          '.',
+      });
+    } else if (vCone(entry.tool) === null) {
+      chamferFindings.push({
+        severity: 'warning',
+        code: 'goal-chamfer-no-cutter',
+        labelId: goal.id,
+        message: `${who} are not chamfered: “${entry.tool.name}” is a ${entry.tool.shape} cutter with no cone to make a bevel.`,
+      });
+    }
+  }
+  // #980 — A PICTURE RELIEF HAS NO MESH (same fact `rotaryRelief.ts`'s own `sampleGoalRadialField`
+  // states for the rotary side): `targetObjectMesh` throws for a `format: 'png'` goal, and the
+  // #949/#1003 overhang check right below calls it unconditionally — this refusal MUST run first,
+  // named and by itself, or a picture relief throws the mesh's own internal error instead of the
+  // named one. Restoring the path (triangulating the picture's own heightfield into a watertight
+  // FeatureSource) is #980's own scope, not a bug in either check below.
+  if (goal.format === 'png') {
+    return fail('cam', 'a picture relief is a flat heightfield; cam/model needs a mesh (#980)');
+  }
+  // #949/#1003 — AN XY OVERHANG IS REFUSED PRE-PLAN, AND A Z OVERHANG IS CLIPPED. A goal that does
+  // not fit its blank in X or Y is a job error the operator must fix (a larger blank, or Fit to the
+  // stock); a goal merely TALLER than the blank is planned to the stock bottom and its overrun
+  // stated (#1003's clamp). The two rules answer different axes and both stand.
+  {
+    const local = targetObjectMesh(goal);
+    const place = placeTarget(goal, local).place;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let i = 0; i < local.positions.length; i += 3) {
+      const [x, y] = place(local.positions[i]!, local.positions[i + 1]!, local.positions[i + 2]!);
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    }
+    const overhangs = [
+      { edge: 'left', mm: -minX },
+      { edge: 'right', mm: maxX - job.stock.length },
+      { edge: 'front', mm: -minY },
+      { edge: 'back', mm: maxY - job.stock.width },
+    ].filter((o) => o.mm > 1e-6).sort((a, b) => b.mm - a.mm);
+    if (overhangs.length > 0) {
+      const worst = overhangs[0]!;
+      return fail(
+        'cam',
+        `the goal is larger than the blank: ${worst.mm.toFixed(1)} mm past the ${worst.edge} edge. Fit to the stock, or choose a blank that holds it`,
+      );
+    }
+  }
+  let input: ModelPlanInput;
+  try {
+    input = await buildModelPlanInputForGoal(job, goal, tool, shop, sideFace);
+  } catch (e) {
+    return fail('cam', `cam/model seam (#966): could not build a ModelPlanInput for "${goal.name}" — ${e instanceof Error ? e.message : String(e)}`);
+  }
+  let output: ModelPlanOutput;
+  try {
+    output = await planModelCam(input);
+  } catch (e) {
+    return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return await postModelPlan(job, goal, tool, calibration, shop, output, {
+    goalFindings,
+    reachFindings,
+    coverageFindings,
+    modelRoughFindings,
+    chamferFindings,
+  });
 }
 
 /**

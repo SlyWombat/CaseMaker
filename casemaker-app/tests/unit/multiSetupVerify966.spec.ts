@@ -19,12 +19,10 @@
  * resulting `VerifyReport` to `EngraveProgram.verify` — so reading `result.programs[i].verify`
  * here IS reading the real verifier's report on the real posted text, not a stand-in.
  *
- * There is, deliberately, no deeper CLI-level call to make instead: `casemaker cut`'s own
- * `engraveGenerate` → `generateGoalProgram` call never passes `modelSetupsOverride` (no production
- * caller does — see `multiSetup966.spec.ts`'s own header note), so a multi-setup goal cannot be
- * reached through the CLI today at all. This spec drives the exact same test-only seam
- * `multiSetup966.spec.ts` uses, because that is the only way to reach `planModelCam` with more
- * than one setup until #966-goal-setups lands `buildModelPlanInputForGoal`'s real setup decision.
+ * #1004 — NO SEAM: the box case below builds the input with `buildModelPlanInputForGoal`,
+ * replaces `input.setups` with its own two-setup list, plans, and posts through `postModelPlan`
+ * — the same steps `generateGoalProgram` runs, with the setup list edited rather than an option
+ * overriding the real decision.
  *
  * THE ZERO-FINDINGS BAR, STATED EXPLICITLY. `966-green`'s own bar (`camModelSeam966.spec.ts`,
  * both ROUND 1 and ROUND 2) is "zero ERROR-severity findings", not "zero findings of any
@@ -55,7 +53,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import { generateGoalProgram, buildModelPlanInputForGoal, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { generateGoalProgram, buildModelPlanInputForGoal, postModelPlan, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import { planModelCam } from '@/engine/cnc/cam/model/plan';
 // The box fixture is `multiSetup966.spec.ts`'s own — factored into a shared helper so this spec
 // drives the SAME geometry instead of forking a second copy of the fixture logic.
@@ -145,7 +143,17 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
   it('two-setup box: every posted program, both setups, carries a VerifyReport with zero error-severity findings', async () => {
     const L = 40, W = 30, T = 20;
     const job = jobFor(boxTarget('goal-966-verify-box', L, W, T), L, W, T);
-    const result = await generateGoalProgram(job, job.targetObject!, FLAT3, null, { shop: SHOP, modelSetupsOverride: twoSetups(T) });
+    // #1004 — build, edit the setup list, plan, post-and-verify through the extracted tail.
+    const input = await buildModelPlanInputForGoal(job, job.targetObject!, FLAT3, SHOP);
+    input.setups = twoSetups(T);
+    const output = await planModelCam(input);
+    const result = await postModelPlan(job, job.targetObject!, FLAT3, null, SHOP, output, {
+      goalFindings: [],
+      reachFindings: [],
+      coverageFindings: [],
+      modelRoughFindings: [],
+      chamferFindings: [],
+    });
 
     expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
     expect(result.ok).toBe(true);
@@ -199,7 +207,7 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
   // NEW (the Manager's ruling, #966): the datum-bearing shape proves what the sphere above cannot
   // — a goal that genuinely needs two setups, carries a real locating datum, and posts EVERY
   // program across BOTH setups with zero error-severity findings, through the REAL
-  // `buildModelPlanInputForGoal` decision (no `modelSetupsOverride` test seam).
+  // `buildModelPlanInputForGoal` decision (no test seam — it is retired, #1004).
   // #1003 (E's review, red-first): THE FLIPPED SETUP'S CURVED REGIONS MUST CUT. b74f653c6 compared
   // the region's rebased bottom against the frame's ABSOLUTE stockBottom (0 on this fixture), which
   // clamped the flipped setup's curved-0 to 0..0 and its rough and finish cut nothing — a silent

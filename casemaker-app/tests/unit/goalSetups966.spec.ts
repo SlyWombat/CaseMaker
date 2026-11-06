@@ -31,7 +31,7 @@ import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { buildModelPlanInputForGoal, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
-import { planModelCam, type SetupSpec } from '@/engine/cnc/cam/model/plan';
+import { planModelCam } from '@/engine/cnc/cam/model/plan';
 import { buildSetupSpecs } from '@/engine/cnc/cam/model/setups';
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
 import type { ParsedMesh } from '@/engine/import/stlParser';
@@ -247,18 +247,4 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
     90_000,
   );
 
-  it(
-    'the old test/e2e-only seam (setupsOverride) still wins unconditionally, byte-for-byte unchanged',
-    async () => {
-      // `multiSetup966.spec.ts`/`camModelSeam966.spec.ts` already depend on this seam to drive the
-      // real posting path with a synthetic plan independent of any one mesh's own flip-plan
-      // answer; this fix must not touch it.
-      const job = jobFor(sphereGoal(), SPHERE_STOCK);
-      const goal = job.targetObject!;
-      const override: SetupSpec[] = [{ frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -30 }, underside: 'flippedTabs' }];
-      const input = await buildModelPlanInputForGoal(job, goal, BALL, SHOP, override);
-      expect(input.setups).toBe(override);
-      expect(input.setups).toHaveLength(1);
-    },
-  );
 });

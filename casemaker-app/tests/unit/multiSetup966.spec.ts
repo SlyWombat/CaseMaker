@@ -8,23 +8,27 @@
  * `recogniseFeatures` + `registerSetupOrigin` path, not a stand-in) posts and verifies BOTH
  * setups' programs, and `EngraveGenerated.plan` carries the full two-setup `ModelPlanOutput`.
  *
- * `buildModelPlanInputForGoal`/`generateGoalProgram`'s own `setupsOverride`/`modelSetupsOverride`
- * parameters are a #966 test/e2e-only seam (their own doc comments): no production caller ever
- * passes one, because #898/#914's own flip plan is not wired to a goal job yet (a separate, future
- * piece of work) — this is the stated reason a real goal job cannot reach `planModelCam` with more
- * than one setup today without it.
+ * #1004 — THE SETUP LIST IS EDITED, NOT OVERRIDDEN. The old test-only seam
+ * (`setupsOverride`/`modelSetupsOverride`) is retired: this spec builds the input with
+ * `buildModelPlanInputForGoal`, replaces `input.setups` with its own two-setup list, plans with
+ * `planModelCam`, then posts and verifies through the extracted `postModelPlan` — the literal
+ * production steps, in order, with no option that can bypass the real `buildSetupSpecs` decision.
  *
  * Also proves the registration-refusal path (#965's `registerSetupOrigin`, thrown when a part
- * carries neither a reliable two-hole datum nor a long straight edge) surfaces through this same
- * seam as a clean, named `'cam'`-stage failure — never a raw, unhandled throw.
+ * carries neither a reliable two-hole datum nor a long straight edge) is a named throw — never a
+ * raw, unhandled crash.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
-import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
+import { buildModelPlanInputForGoal, postModelPlan } from '@/workers/sim/engraveGenerate';
+import { planModelCam } from '@/engine/cnc/cam/model/plan';
 // The box fixture (triangles, STL encoding, job/shop building, the two-setup `SetupSpec[]`) is
 // factored into a shared helper (#966) so `multiSetupVerify966.spec.ts` drives the SAME geometry
 // through `generateGoalProgram` rather than forking a second copy of this logic.
 import { boxTarget, jobFor, FLAT3, SHOP, twoSetups } from './helpers/twoSetupBox966';
+
+/** The pre-plan findings the head computes; these cases exercise posting, not those verdicts. */
+const NO_PLAN_FINDINGS = { goalFindings: [], reachFindings: [], coverageFindings: [], modelRoughFindings: [], chamferFindings: [] };
 
 afterEach(() => {
   clearTargetObjectMeshCache();
@@ -34,7 +38,12 @@ describe('#966 ROUND 3 — generateGoalProgram posts and verifies a real multi-s
   it('planModelCam plans two setups, every setup\'s programs post and verify, plan carries the full ModelPlanOutput', async () => {
     const L = 40, W = 30, T = 20;
     const job = jobFor(boxTarget('goal-966-ms-on', L, W, T), L, W, T);
-    const result = await generateGoalProgram(job, job.targetObject!, FLAT3, null, { shop: SHOP, modelSetupsOverride: twoSetups(T) });
+    // #1004 — THE LITERAL PRODUCTION STEPS, WITH THIS SPEC'S OWN SETUP LIST: build, edit
+    // `input.setups`, plan, post-and-verify through the SAME tail `generateGoalProgram` uses.
+    const input = await buildModelPlanInputForGoal(job, job.targetObject!, FLAT3, SHOP);
+    input.setups = twoSetups(T);
+    const output = await planModelCam(input);
+    const result = await postModelPlan(job, job.targetObject!, FLAT3, null, SHOP, output, NO_PLAN_FINDINGS);
 
     expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
     expect(result.ok).toBe(true);
@@ -79,17 +88,10 @@ describe('#966 ROUND 3 — the registration refusal surfaces as a named stage fa
     // scale): `registerSetupOrigin` has nothing to anchor setup 1 against setup 0 with.
     const L = 5, W = 5, T = 3;
     const job = jobFor(boxTarget('goal-966-ms-refuse', L, W, T), L, W, T);
-    const result = await generateGoalProgram(job, job.targetObject!, FLAT3, null, { shop: SHOP, modelSetupsOverride: twoSetups(T) });
-
-    expect(result.ok).toBe(false);
-    expect(result.stage).toBe('cam');
-    expect(result.errors).toHaveLength(1);
-    const message = result.errors[0]!.message;
-    expect(message).toContain('cam/model seam (#966): planModelCam refused —');
-    expect(message).toMatch(/no locating features found for the vise flip \(#965 registration\)/);
-    expect(message).not.toMatch(/\n\s+at /); // not a raw stack trace
-    // Nothing was planned before the throw (`registerSetupOrigin` runs INSIDE `planModelCam`,
-    // before it ever returns an output), so there is no plan to carry here either.
-    expect(result.plan ?? null).toBeNull();
+    const input = await buildModelPlanInputForGoal(job, job.targetObject!, FLAT3, SHOP);
+    input.setups = twoSetups(T);
+    // #1004 — the refusal is `planModelCam`'s own named throw; the seam's 'cam'-stage wrapping is
+    // covered by the real-decision path (goalSetups966.spec.ts).
+    await expect(planModelCam(input)).rejects.toThrow(/no locating features found for the vise flip \(#965 registration\)/);
   }, 90_000);
 });

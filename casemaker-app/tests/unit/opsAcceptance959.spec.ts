@@ -82,7 +82,7 @@ import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { parseStl } from '@/engine/import/stlParser';
 import { readTargetObjectFile } from '@/engine/import/targetObject';
-import { buildModelPlanInputForGoal, generateGoalProgram, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { buildModelPlanInputForGoal, postModelPlan, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 
 /** Even-odd point membership over every ring (outers and holes alike) — the same rule
  * `pocketRedFirst959.spec.ts`'s own helper uses. */
@@ -244,7 +244,8 @@ async function measureStlRow(name: string, stlPath: string, stockXy: [number, nu
     tool: BALL6,
     stock: { ...base.stock, length: stockXy[0], width: stockXy[1], thickness, material: 'hardwood' },
   };
-  const input = await buildModelPlanInputForGoal(job, goal, BALL6, SHOP_991, CARD_SETUPS);
+  const input = await buildModelPlanInputForGoal(job, goal, BALL6, SHOP_991);
+  input.setups = CARD_SETUPS;
   const output = await planModelCam(input);
   const setup = output.perSetup[0]!;
   const runs = setup.programs.map((ir) => ({ cutterKey: ir.tool.id ?? ir.tool.name, ir }));
@@ -1586,7 +1587,8 @@ describe.skipIf(TRAY === undefined)('#991 — the tray imported at the door: B-r
       tool: BALL6,
       stock: { ...base.stock, length: 110, width: 140, thickness: 1.2 + size.z, material: 'hardwood' },
     };
-    const input = await buildModelPlanInputForGoal(job, goal, BALL6, SHOP_991, CARD_SETUPS);
+    const input = await buildModelPlanInputForGoal(job, goal, BALL6, SHOP_991);
+    input.setups = CARD_SETUPS;
     expect(input.geometry.faceId?.length, 'the seam did not carry the face ids').toBe(input.geometry.triangles.triangleCount);
     console.log(`#991 tray door input: legMm ${input.edgeBreak.legMm}, pinned ${JSON.stringify(input.cutters.pinned)}`);
     const output = await planModelCam(input);
@@ -1637,9 +1639,17 @@ describe.skipIf(TRAY === undefined)('#989 — the tray through the app path: the
     };
     {
       const t0 = performance.now();
-      const out = await generateGoalProgram(job, goal, BALL6, null, {
-        shop,
-        modelSetupsOverride: [{ frame: { up: [0, 0, 1], stockTop: 0 }, underside: 'flatOnStockBottom' }],
+      // #1004 — the literal production steps with the card's single setup: build the seam's input,
+      // edit its setup list, plan, then post-and-verify through the extracted tail.
+      const input = await buildModelPlanInputForGoal(job, goal, BALL6, shop);
+      input.setups = [{ frame: { up: [0, 0, 1], stockTop: 0 }, underside: 'flatOnStockBottom' }];
+      const output = await planModelCam(input);
+      const out = await postModelPlan(job, goal, BALL6, null, shop, output, {
+        goalFindings: [],
+        reachFindings: [],
+        coverageFindings: [],
+        modelRoughFindings: [],
+        chamferFindings: [],
       });
       // The run's own facts, printed so the acceptance comment can quote them.
       const chamferOps = (out.plan?.perSetup ?? []).flatMap((s) => s.ops.filter((o) => o.kind === 'chamfer'));
