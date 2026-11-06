@@ -30,12 +30,14 @@ describe('#1019 un-enterable pockets are stated, never a refusal', () => {
     const candidates = candidateSequences(CAVITY, HOUSE);
     expect(candidates).toHaveLength(1);
     expect(candidates[0]!.steps).toEqual([]);
-    // The pocket is listed by ID (the plan's V-floor run walks the ids) AND by the statement
-    // sentence, which names its opening (three decimals) and the set it was measured against.
-    expect(candidates[0]!.unreachable).toContain('pocket-0');
-    const stated = candidates[0]!.unreachable.find((u) => u.includes('0.541 mm opening'));
-    expect(stated).toBeDefined();
-    expect(stated).toContain('pocket-0');
+    // ONE line per pocket (#1019 review, finding 3): the sentence carries the id (the plan's
+    // V-floor run reads it back off the `': '` prefix), the opening (three decimals) and the set it
+    // was measured against — never a second bare-id line beside it.
+    expect(candidates[0]!.unreachable).toHaveLength(1);
+    const stated = candidates[0]!.unreachable[0]!;
+    expect(stated.startsWith('pocket-0:')).toBe(true);
+    expect(stated).toContain('not cut');
+    expect(stated).toContain('0.541 mm opening');
     expect(stated).toContain('⌀3.175 flat');
   });
 

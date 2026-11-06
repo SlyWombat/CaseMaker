@@ -386,7 +386,28 @@ async function planCard(
   };
   const output = await planModelCam(input);
   const setup = output.perSetup[0]!;
+  expectOwnPocketDepths(setup, 'card');
   return { setup, runs: runsOf(setup) };
+}
+
+/**
+ * #1019 review (finding 1) — RED-FIRST: every pocket op's recorded depth is its OWN node's.
+ * `pocket()` builds an operation's `depth` from its own mouth-to-floor span and its
+ * `estimatedSeconds` from its own moves, so an op wearing another pocket's pair (a 2.9999998 on a
+ * 22 mm pocket — thirteen of them, all pocket-15's) is a pairing bug even when every move is right.
+ * The op's own posted passes are the oracle: they span `(depthPasses − 1) × stepDown`.
+ */
+function expectOwnPocketDepths(setup: SetupPlan, where: string): void {
+  for (const op of setup.ops) {
+    if (op.kind !== 'pocket') continue;
+    const irOp = op.outcome.ir.operations[0];
+    if (irOp === undefined) continue;
+    const ownDepth = ((irOp.depthPasses ?? 1) - 1) * (irOp.passStepMm ?? 0);
+    expect(
+      irOp.depth + 1e-3,
+      `${where}: ${op.region.id}'s recorded depth ${irOp.depth} against its own ${irOp.depthPasses} passes at ${irOp.passStepMm} mm`,
+    ).toBeGreaterThanOrEqual(ownDepth - 1e-3);
+  }
 }
 
 function postedTextFor(cutterKey: string, merged: ToolpathIR, ctx: PostContext): string {

@@ -503,7 +503,7 @@ export function candidateSequences(
   const unenterable = unenterablePockets.map((f) =>
     f.minOpeningMm === null || f.minOpeningMm === undefined
       ? `${f.id}: not cut — no cutter in the set can enter it`
-      : `${f.id}: ${f.minOpeningMm.toFixed(3)} mm opening, narrower than every cutter in the set (${cutterWords}) — left standing`,
+      : `${f.id}: not cut — ${f.minOpeningMm.toFixed(3)} mm opening, narrower than every cutter in the set (${cutterWords}) — left standing`,
   );
   // A primary must reach the curved remainder's floors and, when the part has pockets, rough at
   // least one of them. A flat that fits no pocket is not a primary: the chain never shrinks the

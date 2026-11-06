@@ -235,7 +235,9 @@ describe('#1017 — every setup plans the same on a stockTop ≠ 0 frame as its 
     const base = defaultEngraveJob();
     const job: EngraveJob = { ...base, stock: { ...base.stock, thickness: 26 }, labels: [], shapes: [], targetObject: goal };
     // The seam's own mould input, planned through the FLIPPED setup's frame: the guard's case.
-    const input = await buildModelPlanInputForGoal(job, goal, BALL, SHOP, undefined, 'bottom');
+    // #1004 — the seam takes the side face as its LAST argument now (the pre-#1004
+    // `setupsOverride` parameter is gone); no placeholder `undefined` here.
+    const input = await buildModelPlanInputForGoal(job, goal, BALL, SHOP, 'bottom');
     // NON-VACUITY: an empty plan twin-matches itself. The seam turns the solid over for the
     // flipped frame (#1017's shared-solid rule), and the mould must actually plan ops through it
     // for this guard to mean anything.
