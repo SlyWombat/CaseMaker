@@ -294,10 +294,17 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
   // #755 — the grid follows the finish when it can: a 0.05 mm finish on a ⌀3 ball would need more
   // finishing tip-field evaluations than the run's budget allows, so the job settles at the grid it
   // would have used and STATES that pitch and the cap that bound — never refusing the job.
-  it('#755 — a finish step-over finer than the sampled grid is followed or the cap that bound is stated', async () => {
+  it('#755 — a finish step-over finer than the sampled grid is followed or the cap that bound is stated', async (ctx) => {
     const out = await fine();
     expect(out.ok).toBe(true);
-    const grid = out.surface3d!.gridPitchMm;
+    const grid = out.surface3d?.gridPitchMm;
+    // #1005 — the model engine has no global goal grid and no finish cap, so this finding has
+    // nothing to state on it; the finding's code goes with the budget family (#1009, A), and the
+    // finish-step-over facts are #1007's (E). Stated, not silently green.
+    if (grid === undefined) {
+      ctx.skip();
+      return;
+    }
     const stated = out.findings.find((f) => f.code === 'goal-finish-finer-than-grid');
     if (grid > 0.05) {
       expect(stated).toBeDefined();
@@ -313,17 +320,23 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
 
   // #755 — and when the heightfield's cell cap binds, the run STATES the pitch it settled on rather
   // than refusing the job (the maintainer's rule: inform, don't refuse).
-  it('#755 — a cap-bound grid is stated with the pitch it settled on, not refused', async () => {
+  it('#755 — a cap-bound grid is stated with the pitch it settled on, not refused', async (ctx) => {
     const j = job(goal(zOut, { surface: { finishStepOverMm: 0.005, scallop: false } }));
     const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
     expect(out.ok).toBe(true);
+    // #1005 — heightfield-only fact: the model engine has no goal grid and no cap (#1009, A).
+    const gridPitchMm = out.surface3d?.gridPitchMm;
+    if (gridPitchMm === undefined) {
+      ctx.skip();
+      return;
+    }
     const f = out.findings.find((x) => x.code === 'goal-finish-finer-than-grid');
     expect(f).toBeDefined();
     expect(f!.severity).toBe('warning');
     expect(f!.message).toContain('the finish passes are 0.005 mm apart');
-    const settled = Number(out.surface3d!.gridPitchMm.toFixed(4));
+    const settled = Number(gridPitchMm.toFixed(4));
     expect(f!.message).toContain(`known every ${settled} mm`);
-    expect(out.surface3d!.gridPitchMm).toBeGreaterThan(0.005);
+    expect(gridPitchMm).toBeGreaterThan(0.005);
     // #945 — the overcut guard now tries several candidate points per covered cell instead of
     // one (it has to, to catch a steep column pair a single lateral-nearest point missed); at
     // this stress case's cell count that costs real wall time, past the old 120 s bound.

@@ -28,6 +28,7 @@ import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { validateGoalObject } from '@/engine/cnc/engrave/jobSetup';
+import { USE_MODEL_CAM_ENGINE } from '@/engine/cnc/cam/model/plan';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
@@ -210,7 +211,10 @@ describe('#721 — generate → simulate → match', () => {
     const mold = await generateGoalProgram(asMold, asMold.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
     expect(mold.ok).toBe(true);
     expect(mold.programs).toHaveLength(1);
-    expect(mold.programs[0]!.surfaceCheck?.kind).toBe('surface');
+    // #1005 — the model engine plans from the part's own solid, so its programs carry no goal
+    // HEIGHTFIELD check (`surfaceCheck`); the surface facts are the plan's own. The heightfield
+    // engine's check stands unchanged.
+    if (!USE_MODEL_CAM_ENGINE) expect(mold.programs[0]!.surfaceCheck?.kind).toBe('surface');
     // The deepest Z in each program: the item's rim sits R below the top; the bowl's centre too.
     const deepest = (nc: string): number =>
       Math.min(...[...nc.matchAll(/Z(-?\d+(?:\.\d+)?)/g)].map((m) => Number(m[1])));
@@ -263,7 +267,10 @@ describe('#721 — generate → simulate → match', () => {
     expect(out.ok).toBe(true);
     const warn = out.findings.find((f) => f.code === 'goal-mold-no-draft');
     expect(warn?.severity).toBe('warning');
-    expect(warn?.message).toMatch(/a wall at 8\d(\.\d)?°/);
+    // #1005 — each engine states its OWN measurement of the same wall: the heightfield samples it
+    // between cells (a little under 90°), the model engine measures the cavity's own surface, where
+    // a planar vertical wall is exactly 90°. Both are the wall; both warn.
+    expect(warn?.message).toMatch(USE_MODEL_CAM_ENGINE ? /a wall at 90(\.0)?°/ : /a wall at 8\d(\.\d)?°/);
     // A hemisphere's wall curves away from vertical within a cell of the rim: no warning.
     const dome = job({ goalMode: 'mold' });
     const domeOut = await generateGoalProgram(dome, dome.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
