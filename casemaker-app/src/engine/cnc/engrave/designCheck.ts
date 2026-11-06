@@ -886,6 +886,10 @@ const GOAL_EDGE_STEP_MM = 0.2;
  */
 export const STRADDLING_SLACK_MM = 0.005;
 
+/** #996 — the adjudicated floor, mm: a cut shallower than this is raw-only (never judged), so the
+ *  straddling excuse (and its printed count) applies exactly to the cells the gate would judge. */
+const ADJUDICATED_FLOOR_MM = 0.1;
+
 function designEdgeCells(goal: GoalHeightfield): Uint8Array {
   const { nx, ny, covered, z } = goal;
   const wall = new Uint8Array(nx * ny);
@@ -1215,23 +1219,28 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       if (excusedByV || excusedByCl) {
         excluded[k] = 1;
         shadowNotScoredCells++;
+        continue;
       }
-      continue; // a shadow cell that the rule cannot excuse stays ADJUDICATED (v5)
+      // v6 (#996) — a shadow cell the v5 rule cannot excuse stays ADJUDICATED, but it is still
+      // "about to be judged": the straddling-cell proof below runs for it too. (The organizer's
+      // remaining cell is exactly this class — a v5 shadow cell on a 0.11 mm step.)
     }
     // #996 (gate v6) — THE STRADDLING-CELL EXCUSE, ON PROOF. Only a cell about to be judged
     // reaches here (edge break, wall and shadow have had their say, so a 0.5 mm step stays the wall
     // class and is never double-counted). The step is read over the centre and the cell's four
     // corners, each corner the quarter-average of the four cell centres around it (uncovered
     // neighbours contribute nothing — the design only exists where it is covered).
-    {
+    if (depth > ADJUDICATED_FLOOR_MM) {
       const zc = goal.z[k]!;
       if (Number.isFinite(zc)) {
         let hi = zc;
         let lo = zc;
-        // The heightfield is cell-centred (corners are not sampled), so each corner reads the
-        // diagonal neighbour's centre — the cell the corner points into. Uncovered or off-grid
+        // The heightfield is cell-centred (corners are not sampled), so "the four neighbouring
+        // cell centres" are the AXIAL neighbours — the cells the cell's four edges face. (The
+        // diagonals are not enough: a face running diagonally through a cell leaves all four
+        // diagonal centres on one side, the organizer's own case.) Uncovered or off-grid
         // neighbours contribute nothing: the design only exists where it is covered.
-        for (const [di, dj] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+        for (const [di, dj] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
           const ci = i + di;
           const cj = j + dj;
           if (ci < 0 || cj < 0 || ci >= nx || cj >= ny) continue;
