@@ -2649,10 +2649,19 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         `cam/model/plan: the remainder region "${region.id}" needs a cutter to finish and the call states no ball, no finish flat and no flat`,
       );
     }
+    // #1003 — THE STOCK BOTTOM IS THE FLOOR HERE TOO: `rebaseZ` already puts the region's bottom in
+    // the plan's own datum (stock top = 0), which is the same datum as `tree.frame.stockBottom`, so
+    // the clamp is a plain max. A goal taller than its stock must not finish below the blank.
+    // #1013 — the depth band composes with it; the shallower of the two wins.
+    const planFloorZ = tree.frame.stockBottom;
     const base = {
       ...region,
       zTop: rebaseZ(region.zTop),
-      zBottom: bandFloorZ === null ? rebaseZ(region.zBottom) : Math.max(rebaseZ(region.zBottom), bandFloorZ),
+      zBottom: Math.max(
+        rebaseZ(region.zBottom),
+        bandFloorZ === null ? Number.NEGATIVE_INFINITY : bandFloorZ,
+        planFloorZ === undefined ? Number.NEGATIVE_INFINITY : planFloorZ,
+      ),
     };
     const ref = regionRefOf(region.id, 'curved', base.footprint, base.zTop, base.zBottom);
     // THE REVIEW'S SAFETY FINDING: the finish's outer footprint is grown by the ball's radius, and
