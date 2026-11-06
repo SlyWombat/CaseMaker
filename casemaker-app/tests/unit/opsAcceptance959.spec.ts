@@ -261,7 +261,9 @@ async function measureStlRow(name: string, stlPath: string, stockXy: [number, nu
   console.log(
     `#991 ${name} STL row: ${setup.features.report.source} path, ${rims} rims (${modelled} modelledChamfer), ${chamferOps} chamfer ops (${skippedRims} rims not broken), ` +
       `coverage ${measured === null ? '—' : (measured.coverage * 100).toFixed(2)} %, cut-into ${measured === null ? '—' : ((measured.adjudicatedFraction ?? 0) * 100).toFixed(4)} %, ` +
-      `cycle ${measured === null ? '—' : measured.ours.cycleSeconds.toFixed(1)} s`,
+      `cycle ${measured === null ? '—' : measured.ours.cycleSeconds.toFixed(1)} s, ` +
+      // #995 — the row PRINTS its seven verdicts beside the STEP row's, never only the geometry.
+      `seven lines (${measured === null ? 'unmeasured' : measured.scored.sentence}): ${measured === null ? '—' : sevenVerdicts(measured)}`,
   );
   return { setup, measured, rims, modelled, chamferOps };
 }
@@ -615,6 +617,22 @@ function sequenceReceipt(
     candidates,
     vendor,
   };
+}
+
+/**
+ * #991 — THE REVIEW SESSION'S CLARIFIED RULING: BOTH ROWS, ALL SEVEN LINES. A reference card's
+ * STEP row AND its STL row each pass every line — coverage, cut-into, cycle, air, rapids,
+ * cutters, posts-as-filed — against the same vendor score the card already resolves. A stated
+ * line is not a pass (`scoreSevenLines`' own rule); `failing` names every line that is not.
+ */
+function expectSevenLinesPass(measured: { scored: SevenLineCard }, row: string): void {
+  expect(measured.scored.referenced, `${row}: unreferenced — no vendor score beside it`).toBe(true);
+  expect(measured.scored.failing, `${row} seven lines — ${measured.scored.sentence}`).toEqual([]);
+}
+
+/** #995 — one row's seven verdicts, in the ruling's order, for the card to print. */
+function sevenVerdicts(measured: { scored: SevenLineCard }): string {
+  return measured.scored.lines.map((line) => `${line.key}:${line.state}`).join(' ');
 }
 
 function writeAcceptance(
@@ -1485,6 +1503,9 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     if (idealRun !== null) expect(idealRun.setup.ops.length, `the ideal plan produced nothing: ${idealRun.setup.unreachable.join('; ')}`).toBeGreaterThan(0);
     const tradeoff = writeTwoPlans('tray', { ours: measured!.ours, scored: measured!.scored }, idealMeasured === null ? null : { ours: idealMeasured.ours, scored: idealMeasured.scored });
     if (tradeoff !== null) expect(tradeoff.line !== null, JSON.stringify(tradeoff.differences)).toBe(tradeoff.material);
+    // #991 (the clarified ruling) — the STEP row passes ALL SEVEN lines, not just geometry.
+    console.log(`#995 tray STEP row seven lines: ${sevenVerdicts(measured!)} — ${measured!.scored.sentence}`);
+    expectSevenLinesPass(measured!, 'tray STEP row');
     // #975 — THE SUPERSET RULE, RESTATED (the manager's ruling, 2026-11-05). The ideal's candidate
     // set contains the owned set, but the selector ranks by COST among plans whose outcomes do not
     // differ materially, so an extra bit can move an outcome either way. The rule the acceptance
@@ -1527,6 +1548,9 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     // row's by the filed defect above; that is the only line allowed to.
     expect(row.measured!.coverage, 'the STL row fell under the card coverage floor').toBeGreaterThanOrEqual(0.9852);
     expect(row.measured!.adjudicatedFraction ?? 0, 'the STL row cut into the part').toBe(0);
+    // #991 (the clarified ruling) — the SAME seven lines as the STEP row, on the same vendor basis
+    // (`vendorScoreFor` already resolves 'tray-stl' to the tray card).
+    expectSevenLinesPass(row.measured!, 'tray STL row');
   }, 900_000);
 });
 
@@ -1692,6 +1716,9 @@ describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.o
     if (idealRun !== null) expect(idealRun.setup.ops.length, `the ideal plan produced nothing: ${idealRun.setup.unreachable.join('; ')}`).toBeGreaterThan(0);
     const tradeoff = writeTwoPlans('organizer', { ours: measured!.ours, scored: measured!.scored }, idealMeasured === null ? null : { ours: idealMeasured.ours, scored: idealMeasured.scored });
     if (tradeoff !== null) expect(tradeoff.line !== null, JSON.stringify(tradeoff.differences)).toBe(tradeoff.material);
+    // #991 (the clarified ruling) — the STEP row passes ALL SEVEN lines, not just geometry.
+    console.log(`#995 organizer STEP row seven lines: ${sevenVerdicts(measured!)} — ${measured!.scored.sentence}`);
+    expectSevenLinesPass(measured!, 'organizer STEP row');
     // #975 — the superset rule on the organizer too, in its material form (see the tray's case).
     if (idealMeasured !== null) {
       const worse = idealWorsenings(measured!.ours, idealMeasured.ours).filter((w) => w.material);
@@ -1703,7 +1730,10 @@ describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.o
   // four triangles after the door's 1e-4 mm weld) is split into two sheets by the vertex-link
   // split, so the file a user owns reaches the plan instead of a refusal. Its numbers are pinned
   // from the first run; the rim line against the STEP row belongs to the rims item (#994).
-  it('#993 the shipped STL row: the knife edge split, the user’s file now plans and measures', async () => {
+  // #995 (the maintainer's ruling: both rows, both must pass) — now that the door item has
+  // landed (#993), the STL row is gated on all seven lines, same as the STEP row, not just the
+  // pinned geometry/coverage numbers below.
+  it('#993/#995 the shipped STL row: the knife edge split, the user’s file now plans, measures and passes all seven lines', async () => {
     const stlPath = shippedStlBeside(ORGANIZER!);
     expect(stlPath, 'the Makerables .stl is not beside the STEP').not.toBeNull();
     if (stlPath === null) return;
@@ -1720,6 +1750,8 @@ describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.o
     // PINNED at the split door: 3.973923346491006e-5 adjudicated — not zero, and stated: the mesh
     // path's own V-on-fillet cuts (6 modelledChamfer rims here) are #994's to remove.
     expect(row.measured!.adjudicatedFraction ?? 0, 'the STL row cut into the part').toBeCloseTo(3.973923346491006e-5, 10);
+    console.log(`#995 organizer STL row seven lines: ${sevenVerdicts(row.measured!)} — ${row.measured!.scored.sentence}`);
+    expectSevenLinesPass(row.measured!, 'organizer STL row');
   }, 900_000);
 });
 
