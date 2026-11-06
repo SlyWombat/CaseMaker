@@ -90,6 +90,12 @@ export function mouldSolidOf(tl: ManifoldToplevel, part: ParsedMesh, opts: Mould
   // centre line (the same line `placeTarget` centres the part on); `d` puts the part's base plane
   // at the stock top, so the part's height becomes the cavity's depth.
   const d = (topZ + minZ) / 2;
+  // #1029 — one non-finite coordinate traps the kernel on the x86 build; refuse it by name.
+  for (let i = 0; i < p.length; i++) {
+    if (!Number.isFinite(p[i]!)) {
+      throw new Error(`cam: non-finite coordinate in the mould solid at vertex ${Math.floor(i / 3)}`);
+    }
+  }
   const partMesh = new tl.Mesh({
     numProp: 3,
     vertProperties: Float32Array.from(p),

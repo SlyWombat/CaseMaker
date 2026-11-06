@@ -22,6 +22,7 @@
  * relief when it turns sampled heights into a solid.
  */
 import type { ParsedMesh } from '@/engine/import/stlParser';
+import { assertFinitePolygons } from '@/engine/cnc/cam/engraveJob';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 
 type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
@@ -404,6 +405,9 @@ export function closeOpenSheet(tl: ManifoldToplevel, mesh: ParsedMesh, opts: Clo
     let cs: CrossSectionInstance | null = null;
     let solid: ManifoldInstance | null = null;
     try {
+      // #1029 — the loops' own projection is the last thing that can carry a non-finite value
+      // into the kernel; refuse it by name rather than let the glue trap.
+      assertFinitePolygons(loopsXY, 'the open sheet\u2019s XY loops');
       cs = tl.CrossSection.ofPolygons(loopsXY, 'EvenOdd');
       const area = cs.area();
       if (Math.abs(area - loopArea) > Math.max(1e-6, 1e-4 * loopArea)) {

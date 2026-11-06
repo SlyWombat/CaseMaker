@@ -224,6 +224,7 @@ export function makeClipperOffset(tl: ManifoldToplevel): OffsetFn {
   return (region, delta) => {
     // `ofPolygons([])` throws; an empty region has no rings, so short-circuit.
     if (region.length === 0) return [];
+    assertFinitePolygons(region, 'offset');
     const cs = CS.ofPolygons(region);
     const out = cs.offset(delta, 'Round', 2, segmentsForRadius(Math.abs(delta)));
     const polygons = out.toPolygons() as Polygons;
@@ -231,6 +232,25 @@ export function makeClipperOffset(tl: ManifoldToplevel): OffsetFn {
     cs.delete();
     return polygons;
   };
+}
+
+/**
+ * #1029 — A NON-FINITE COORDINATE NEVER REACHES THE WASM. The glue answers a bad coordinate with
+ * either an unusable thrown number or — on the x86 patched build — a trap that kills the worker's
+ * whole manifold instance; a user's file, or a degenerate internal divide, can carry a NaN or
+ * ±Infinity into any conversion. Throwing a NAMED Error here lets the planner's per-region catch
+ * state the region and carry on, instead of the instance dying mid-plan.
+ */
+export function assertFinitePolygons(polys: Polygons, op: string): void {
+  for (let i = 0; i < polys.length; i++) {
+    const ring = polys[i]!;
+    for (let j = 0; j < ring.length; j++) {
+      const point = ring[j]!;
+      if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) {
+        throw new Error(`cam: non-finite coordinate in ${op} at ring ${i} point ${j}`);
+      }
+    }
+  }
 }
 
 /** A pure boolean on `Polygons`, the same injected-kernel contract `OffsetFn` uses. */
@@ -253,6 +273,8 @@ export function makeClipperUnion(tl: ManifoldToplevel): BooleanFn {
   return (a, b) => {
     if (a.length === 0) return b;
     if (b.length === 0) return a;
+    assertFinitePolygons(a, 'union');
+    assertFinitePolygons(b, 'union');
     // #1024 (E's review) — EACH HANDLE IS FREED ON BOTH PATHS: a throw from the second conversion,
     // the boolean or `toPolygons` must not leak what exists by then. The nested-finally shape is
     // `engraveGenerate.ts`'s `intersectionArea`'s, with the second conversion inside the first
@@ -281,6 +303,8 @@ export function makeClipperSubtract(tl: ManifoldToplevel): BooleanFn {
   const CS = tl.CrossSection;
   return (a, b) => {
     if (a.length === 0 || b.length === 0) return a;
+    assertFinitePolygons(a, 'subtract');
+    assertFinitePolygons(b, 'subtract');
     // See {@link makeClipperUnion}: every handle freed on the throw path too.
     const ca = CS.ofPolygons(a);
     try {
