@@ -1748,9 +1748,12 @@ describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.o
     expect(row.modelled).toBe(0);
     expect(row.chamferOps).toBe(48);
     expect(row.measured!.coverage, 'the STL row fell under the card coverage floor').toBeGreaterThanOrEqual(0.9861);
-    // PINNED at the split door: 3.973923346491006e-5 adjudicated — not zero, and stated: the mesh
-    // path's own V-on-fillet cuts (6 modelledChamfer rims here) are #994's to remove.
-    expect(row.measured!.adjudicatedFraction ?? 0, 'the STL row cut into the part').toBeCloseTo(3.973923346491006e-5, 10);
+    // PINNED at the split door: 3.973923346491006e-5 adjudicated. Measured ZERO at f73deb58
+    // already — the 966-collapse line's plans removed the 40 nm strip this pin recorded — so it is
+    // re-pinned to 0 here with the cause named (#1011's rule) rather than left failing.
+    // #1014 does not move this plan: the organizer's finish feeds are identical with and without
+    // the mask fix (the plan dumps are byte-identical).
+    expect(row.measured!.adjudicatedFraction ?? 0, 'the STL row cut into the part').toBe(0);
     console.log(`#995 organizer STL row seven lines: ${sevenVerdicts(row.measured!)} — ${row.measured!.scored.sentence}`);
     expectSevenLinesPass(row.measured!, 'organizer STL row');
   }, 900_000);

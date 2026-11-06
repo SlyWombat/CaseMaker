@@ -87,6 +87,7 @@ import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } fro
 import { surfacePrimitivesOf } from '@/engine/cnc/engrave/primitiveSurface';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import { closeOpenSheet } from '@/engine/cnc/engrave/closeSheet';
+import { mouldSolidOf } from '@/engine/cnc/engrave/mouldSolid';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import {
   dedupeFindings,
@@ -166,6 +167,9 @@ import { type PostContext, type PostResult, type VacuumSpan } from '@/engine/cnc
 import { postFor, postKey, postOriginFor } from '@/engine/cnc/post';
 import { appendThumbnail, planViewPng, simulationTopViewPng } from '@/engine/cnc/post/thumbnail';
 import { applySurfaceLift, maxSurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
+// #1005 — a mould's own two findings (one-sided, no-draft) need the SAME "is this goal a mould"
+// read `moldHeightfield`'s own callers already share.
+import { isMold } from '@/engine/cnc/engrave/goalHeightfield';
 // #966 — `GoalSurfaceFacts` pure-moved here from surface3d.ts: it outlives that file's own
 // retirement because `generateRotaryGoalProgram` below (rotary relief, out of #966's scope)
 // constructs one.
@@ -4758,8 +4762,11 @@ export function generateRotaryGoalProgram(
  * #721 — the steepest cavity wall a mold is cut with before it is warned as having no draft, degrees
  * from horizontal. A labelled default: casting practice wants a degree or more of draft, and the
  * grid's own staircase reads a true vertical wall as a little under 90°.
+ *
+ * #1005 — the number lives in `cam/model/types.ts` now, where the model engine's own mould
+ * statement reads it; re-exported here so this file's path and its callers are unchanged.
  */
-export const MOLD_DRAFT_LIMIT_DEG = 85;
+export { MOLD_DRAFT_LIMIT_DEG } from '@/engine/cnc/cam/model/types';
 
 /**
  * #869 — A GOAL'S `roughToolKey`, VALIDATED: present in the shop's library, and a flat end mill
@@ -4909,13 +4916,30 @@ export async function buildModelPlanInputForGoal(
   // #987 — a skirt-closed relief's outline is the kernel's own requirement for a solid, not a
   // design edge; `recogniseFeatures` reads this to skip the contour demand entirely (never a
   // freeing cut around stock the design never asked to be cut away from).
+  // #1005 — A MOULD IS A SOLID OF ITS OWN: the stock block minus the part, turned over about its X
+  // axis (a half turn through the footprint's centre line, so the cavity's casting reads the right
+  // way round — the same turn `moldHeightfield` made row by row). The part is closed first (the
+  // sheet rule above), then inverted through the kernel; `planModelCam` plans the result as any
+  // other block with a cavity. The block's own outline IS the stock's boundary — not a design edge
+  // to free — so it carries the same `synthetic` classification a skirt-closed sheet earns (#987),
+  // without which the plan would cut a freeing contour around the blank's own edges.
+  const mould =
+    isMold(goal) && goal.faceId === undefined
+      ? mouldSolidOf(tl, closed.mesh, { stock: job.stock, centreY: goal.position.y, stockTopZ: 0 })
+      : null;
   // #991 — THE STEP'S OWN FACE IDS GO THROUGH TO THE FEATURE TREE. A mesh that carries them is
   // classified by B-rep face (whole-face patches, the acceptance cards' path); a length the tree
   // cannot use is refused by the tree's own named error, never planned as the wrong path. A skirt
   // re-indexes the triangles (and adds its own), so an OPEN sheet's ids cannot survive it: named,
-  // not silently dropped back to the mesh path.
+  // not silently dropped back to the mesh path. #1005 — a mould's solid is built here, so the
+  // imported part's face ids cannot describe the cavity either: refused by name, never ignored.
   let faceId: Uint32Array | undefined;
   if (goal.faceId !== undefined) {
+    if (isMold(goal)) {
+      throw new Error(
+        'cam/model seam (#1005): a mould is cut from a solid built from the part — its STEP face ids cannot describe the cavity; plan the mould without ids',
+      );
+    }
     if (closed.mesh !== triangles) {
       throw new Error(
         'cam/model seam: the goal mesh is an open sheet the skirt had to close — its STEP face ids no longer match the triangles; import a solid STEP, or plan the sheet without ids',
@@ -4927,8 +4951,8 @@ export async function buildModelPlanInputForGoal(
     for (let i = 0; i < faceId.length; i++) faceId[i] = view.getUint32(i * 4, true);
   }
   const geometry: FeatureSource = {
-    triangles: closed.mesh,
-    ...(closed.closedBy === 'skirt' ? { outline: 'synthetic' as const } : {}),
+    triangles: mould === null ? closed.mesh : mould.mesh,
+    ...(mould !== null || closed.closedBy === 'skirt' ? { outline: 'synthetic' as const } : {}),
     ...(faceId === undefined ? {} : { faceId }),
   };
 
@@ -5118,6 +5142,11 @@ export async function buildModelPlanInputForGoal(
     tolerances,
     edgeBreak,
     curvedRoughTool,
+    // #1005 — the plan states the mould's own facts (one-sided, and the cavity's steepest wall
+    // against `MOLD_DRAFT_LIMIT_DEG`). The wall is measured from the part's surface — the cavity's
+    // wall after the turn — because a PLANAR wall has no remainder record in the tree (see
+    // `engrave/mouldSolid.ts`).
+    ...(mould === null ? {} : { mould: { name: goal.name, steepestWallDeg: mould.steepestWallDeg } }),
   };
 }
 
@@ -5434,6 +5463,38 @@ export async function generateGoalProgram(
     }
   }
 
+  // #1005 — THE MODEL ENGINE'S FACTS FOR A MOULD. The heightfield's facts block reports a sampled
+  // goal grid and raster step-overs this engine does not have; a mould's run states the numbers
+  // it does — the CL grid it sampled, the plan's own Z levels and step-down — plus the sentence
+  // the old path put on the item row. Non-mould model jobs keep no facts block here: a goal
+  // item's facts belong to the heightfield path.
+  const mouldFacts: GoalSurfaceFacts | null = !isMold(goal)
+    ? null
+    : (() => {
+        const cl = output.perSetup.flatMap((p) => p.clGrid);
+        const zs = new Set<number>();
+        let stepDown: number | undefined;
+        for (const setup of output.perSetup) {
+          for (const op of setup.ops) {
+            for (const pass of op.outcome.passes) zs.add(Number(pass.z.toFixed(4)));
+            for (const operation of op.outcome.ir.operations) {
+              const step = operation.passStepMm;
+              if (step !== undefined && (stepDown === undefined || step > stepDown)) stepDown = step;
+            }
+          }
+        }
+        return {
+          resolutionNote:
+            'the plan is built from the part’s own solid on the model engine — its centre-line map is sampled directly, not a goal heightfield',
+          ...(cl.length === 0 ? {} : { gridPitchMm: Math.min(...cl.map((g) => g.minSpacingMm)) }),
+          ...(stepDown === undefined ? {} : { stepDownMm: stepDown }),
+          roughingLayers: zs.size,
+          notes: [
+            "Made as a mould: the part's shape is cut as a cavity from the stock's top face, turned over so a casting reads the right way round.",
+          ],
+        };
+      })();
+
   // #419 J3 — the top-level `nc`/`verify`/`cam` describe the FIRST program, exactly as the
   // `programs` field's own doc states ("the adapter the panels and the bench scripts read
   // today"); every program's own facts ride in `programs`.
@@ -5450,6 +5511,7 @@ export async function generateGoalProgram(
     programs,
     plan: output,
     planStatements,
+    ...(mouldFacts === null ? {} : { surface3d: mouldFacts }),
   };
 }
 

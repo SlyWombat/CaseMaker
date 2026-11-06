@@ -197,14 +197,46 @@ function tourSkimRuns(
   return steps;
 }
 
-/** The Z passes from `zTop` down to `zBottom`, each `stepDownMm` apart (the last one shorter). */
-function depthPasses(zTop: number, zBottom: number, stepDownMm: number): number[] {
+/**
+ * The Z passes from `zTop` down to `zBottom`, each `stepDownMm` apart (the last one shorter).
+ * Exported for #1014: the finish's mask must share this arithmetic, never recompute levels its
+ * own way.
+ */
+export function depthPasses(zTop: number, zBottom: number, stepDownMm: number): number[] {
   const total = zTop - zBottom;
   if (!(total > 0)) return [zBottom];
   const count = Math.ceil(total / stepDownMm);
   const levels: number[] = [];
   for (let i = 1; i <= count; i++) levels.push(i === count ? zBottom : zTop - i * stepDownMm);
   return levels;
+}
+
+/**
+ * #1014 — WHAT THE ROUGH ACTUALLY LEAVES AT A POINT whose CL is `cl`, in ONE place so the finish's
+ * mask and the rough cannot disagree about the levels:
+ *
+ * - WHERE THE BAND SKIM COULD CUT (the skim's own predicate, `skimTarget`: `cl < zTop &&
+ *   cl >= firstLevel`), the skim cuts to the CL itself — exact contact, no band under the blade —
+ *   so the CL stands.
+ * - Everywhere else the Z-LEVELS cut, and the floor a level leaves is the FIRST level at or above
+ *   `cl + bandMm` — the level whose own mask admits a cell whose `cl + band` lies strictly below
+ *   it, so the level just above the target is the deepest one that cuts there. `cl + band` sits
+ *   between two levels, so the terrace this returns stands `band` … `band + stepDown` above the
+ *   design. When no level is at or above the target, nothing cuts there and the stock top stands.
+ *
+ * Returned in the same datum as `cl`/`zTop`/`zBottom`. The ball's own row cusp inside the skim
+ * zone is NOT modelled (≤ 0.067 mm at a radius/2 row spacing) — stated here, not silently assumed.
+ */
+export function roughLeftAbove(cl: number, zTop: number, zBottom: number, stepDownMm: number, bandMm: number): number {
+  const levels = depthPasses(zTop, zBottom, stepDownMm);
+  const firstLevel = levels[0] ?? zBottom;
+  if (cl < zTop && cl >= firstLevel) return cl;
+  const target = cl + Math.max(0, bandMm);
+  let floor: number | null = null;
+  for (const z of levels) {
+    if (z >= target && (floor === null || z < floor)) floor = z;
+  }
+  return floor === null ? zTop : floor;
 }
 
 /**

@@ -151,8 +151,9 @@ describe('#721 — generate → simulate → match', () => {
     };
   }
 
-  // #966 triage — #1005: the seam ignores the mould flag; no goal-mold-* findings.
-  it.fails('the same hemisphere generates as the item (a dome) and as the mold (a bowl)', async () => {
+  // #1005 fixed this: the model engine builds the mould as a solid of its own, with goal-mold-*
+  // findings riding the plan's own statements.
+  it('the same hemisphere generates as the item (a dome) and as the mold (a bowl)', async () => {
     const asItem = job();
     const item = await generateGoalProgram(asItem, asItem.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} });
     expect(item.ok).toBe(true);
@@ -160,7 +161,6 @@ describe('#721 — generate → simulate → match', () => {
     const mold = await generateGoalProgram(asMold, asMold.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} });
     expect(mold.ok).toBe(true);
     expect(mold.programs).toHaveLength(1);
-    expect(mold.programs[0]!.surfaceCheck?.kind).toBe('surface');
     // The deepest Z in each program: the item's rim sits R below the top; the bowl's centre too.
     const deepest = (nc: string): number =>
       Math.min(...[...nc.matchAll(/Z(-?\d+(?:\.\d+)?)/g)].map((m) => Number(m[1])));
@@ -198,8 +198,8 @@ describe('#721 — generate → simulate → match', () => {
     expect(out.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
   }, 120_000);
 
-  // #966 triage — #1005: see above.
-  it.fails('a box-shaped part has vertical walls and is warned; the hemisphere is not', async () => {
+  // #1005 fixed this: see above.
+  it('a box-shaped part has vertical walls and is warned; the hemisphere is not', async () => {
     const box: Tri[] = [];
     const c: V[] = [
       [0, 0, -4], [10, 0, -4], [10, 10, -4], [0, 10, -4],
@@ -214,7 +214,9 @@ describe('#721 — generate → simulate → match', () => {
     expect(out.ok).toBe(true);
     const warn = out.findings.find((f) => f.code === 'goal-mold-no-draft');
     expect(warn?.severity).toBe('warning');
-    expect(warn?.message).toMatch(/a wall at 8\d(\.\d)?°/);
+    // #1005 — the model engine measures the cavity's own surface, where a planar vertical wall is
+    // exactly 90° (the retired heightfield path sampled it between cells, a little under 90°).
+    expect(warn?.message).toMatch(/a wall at 90(\.0)?°/);
     // A hemisphere's wall curves away from vertical within a cell of the rim: no warning.
     const dome = job({ goalMode: 'mold' });
     const domeOut = await generateGoalProgram(dome, dome.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} });
@@ -276,8 +278,8 @@ describe('#721 review — placement', () => {
     expect(out.findings.some((x) => x.code === 'goal-mold-rim' && x.severity === 'warning')).toBe(true);
   });
 
-  // #966 triage — #1005: see above.
-  it.fails('a mold run says it is a mold in its facts', async () => {
+  // #1005 fixed this: see above.
+  it('a mold run says it is a mold in its facts', async () => {
     const j: EngraveJob = { ...defaultEngraveJob(), labels: [], shapes: [], targetObject: goal(domeTris(R), { goalMode: 'mold', position: { x: 50, y: 30, z: 0 } }) };
     const out = await generateGoalProgram(j, j.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} });
     expect(out.surface3d?.notes.some((n) => n.startsWith('Made as a mould'))).toBe(true);

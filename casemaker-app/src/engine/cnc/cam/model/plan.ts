@@ -37,9 +37,11 @@ import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanStatement, StockProbes } from './types';
+import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, type SetupRegistration } from './setups';
 import { pocket } from './ops/pocket';
+import { roughLeftAbove } from './ops/rough';
 import { clSurface, creaseFits } from './clsurface';
 import { dropCutterHeight, profileOf, type CutterProfile, type DropCutterMesh } from './dropcutter';
 import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
@@ -253,6 +255,17 @@ export interface ModelPlanInput {
    * the old pocket-count completeness, unchanged.
    */
   goal?: GoalCellField;
+  /**
+   * #1005 — WHEN THIS PLAN CUTS A MOULD. The seam sets it when the goal's `goalMode` is `'mold'`:
+   * its `geometry` is then the stock block minus the part turned over (`engrave/mouldSolid.ts`),
+   * and the plan states the two mould findings that need the cavity's own geometry — one-sided
+   * (always, info) and no-draft (warning past {@link MOLD_DRAFT_LIMIT_DEG}). `steepestWallDeg` is
+   * measured from the part's surface at the seam: a PLANAR wall is classified as a pocket wall and
+   * appears in no `remainder[].slopeDeg`, so the tree alone could not answer the box case. Rim and
+   * floor stay the goal validator's own findings (`validateGoalObject`), unchanged in code and
+   * wording.
+   */
+  mould?: { name: string; steepestWallDeg: number };
   /**
    * #869/#966 — THE CURVED PIPELINE'S OWN ROUGH, independent of `primary` (the pockets' own
    * largest flat, which a goal with no pockets picks only because the house owns one at all).
@@ -1061,6 +1074,28 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // #992 — THE TYPED STATEMENTS: the two planners' own, then this loop's. Every one is the same
     // fact its `notes` line states; the code and severity are what route it to the operator.
     const statements: PlanStatement[] = [...result.statements, ...freeingStatements, ...fallbackStatements];
+    // #1005 — THE MOULD'S OWN FACTS, from the cavity the plan was handed. The sentences are the old
+    // heightfield path's own, word for word (the guide's chapter 8 rows document these codes); the
+    // draft number is measured from the part's surface at the seam, because a planar wall has no
+    // remainder record in the tree. One-sided is always stated: a mould cut from the top cannot
+    // carry undercuts, and the operator should hear it once.
+    if (input.mould !== undefined) {
+      const mouldOneSided =
+        `The mould of "${input.mould.name}" is cut from the top only: the cavity is the part's top surface, ` +
+        'turned over so the casting reads the right way round, and the casting\'s underside is the ' +
+        'flat face you pour into. A part with undercuts, or one shaped on both sides, needs a ' +
+        'two-part mould — two setups.';
+      notes.push(mouldOneSided);
+      statements.push({ severity: 'info', code: 'goal-mold-one-sided', count: 1, text: mouldOneSided });
+      if (input.mould.steepestWallDeg > MOLD_DRAFT_LIMIT_DEG) {
+        const draft =
+          `The mould of "${input.mould.name}" has a wall at ${Number(input.mould.steepestWallDeg.toFixed(1))}° — steeper than ` +
+          `${MOLD_DRAFT_LIMIT_DEG}°, so it has little or no draft and may hold the casting. Give the ` +
+          'part tapered sides, or use a flexible casting material.';
+        notes.push(draft);
+        statements.push({ severity: 'warning', code: 'goal-mold-no-draft', count: 1, text: draft });
+      }
+    }
     for (const group of emptyOpGroups.values()) {
       const plural = group.count === 1 ? 'op' : 'ops';
       statements.push(
@@ -2750,14 +2785,38 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       const v = surface.dropCutter(x, y);
       return v === null ? null : v + z0;
     };
-    const leftoverAbove = (x: number, y: number): boolean => {
+    // #1014 — THE LEFTOVER IS WHAT THE ROUGH LEFT, NOT ITS CUTTER'S IDEAL CL. The old read took
+    // the rough cutter's CL as the leftover; with a flat rough that over-estimates by R·tan θ and
+    // the finish ran, but under the #982 no-flat fallback the rough cutter is the BALL, whose CL
+    // hugs the design on a shallow slope (R(1/cos θ − 1) = 0.0025 mm at 5.7°) — so the mask called
+    // the slope finished while the rough's 0.3 mm terraces stood 0.3–0.6 mm proud. The rough's own
+    // two outputs are stated in ONE helper beside `depthPasses` (`roughLeftAbove`): the CL where
+    // its band skim could cut, else the first of its Z-levels at or above `cl + band` (the stock
+    // top when none) — the level the mask itself admits a cell to. The rest pass's CL stays min'd
+    // in: a smaller FLAT's CL is an honest over-estimate of what a flat leaves, the same premise
+    // that holds for a flat rough.
+    // THE DATUM IS THE PLAN'S OWN (E's review of e5b215423): `flatAbs` answers MESH-ABSOLUTE
+    // (`dropCutter` + z0) while `base.zTop/zBottom` are REBASED (stock top = 0) — the rough plans
+    // in the rebased datum. At stockTop 0 the two coincide, but on any other stock top (every
+    // flipped setup: the datum fixture's `{up:[0,0,-1], stockTop: 30}`) the CL sat z0 above the
+    // levels: no level was ever `>= cl + band`, the helper returned the rebased zTop, and the
+    // finish mask came out EMPTY — the flipped setup silently lost its finish op. Shift into the
+    // plan's datum and back, exactly as the rest stage's own comment (B's review of 0461df01)
+    // describes for this same mistake.
+    const roughStepDown = flat === undefined ? 0 : paramsFor(flat).stepDown;
+    const roughLeft = (x: number, y: number): number | null => {
       const f = flatAbs(x, y);
       const r = restAbs(x, y);
-      const flatZ = f === null ? r : r === null ? f : Math.min(f, r);
-      if (flatZ === null) return false;
+      if (f === null) return r;
+      const left = roughLeftAbove(f - z0, base.zTop, base.zBottom, roughStepDown, opts.bandMm) + z0;
+      return r === null ? left : Math.min(left, r);
+    };
+    const leftoverAbove = (x: number, y: number): boolean => {
+      const left = roughLeft(x, y);
+      if (left === null) return false;
       const design = topSurfaceAt(binsForMask(), x, y);
       if (design === null) return false;
-      return flatZ - design > finishBand;
+      return left - design > finishBand;
     };
     const ballRadiusForMask = (cuttingDiameter(finishCutter) ?? 0) / 2;
     const maskRing: [number, number][] = [];

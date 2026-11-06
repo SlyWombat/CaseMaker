@@ -191,8 +191,8 @@ describe('#723 P2-1b — one program per side', () => {
     expect(validateJob(job, null, { tool: BALL }).some((f) => f.code === 'tool-missing')).toBe(false);
   });
 
-  // #966 triage — #1006: see above.
-  it.fails('a single goal on a job with setups is cut in the first setup — the one-goal compatibility path', async () => {
+  // #1006 fixed this: the seam now reads the job's saved sides.
+  it('a single goal on a job with setups is cut in the first setup — the one-goal compatibility path', async () => {
     const job = twoSideJob();
     job.targetObjects = [goal('goal-out', 10)];
     const out = await engraveGenerate(tl, job, BALL, [], null, undefined, {});

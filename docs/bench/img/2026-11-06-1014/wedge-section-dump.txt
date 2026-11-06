@@ -1,0 +1,43 @@
+stock 100x60x12; programs 1
+setup notes:
+  the set holds no flat end mill — the pocket chain is not planned: its freeing contour is not planned with a ball either, so this plan does not free the part
+  the job states no edge break — 3 rim(s) stay sharp
+  the curved pipeline follows the ruling: the flat Z-steps each remainder region to its CL less 0.3 mm, the ball runs ONE final level, the pencil follows the creases, and no rest flat was offered
+  finish: 1 region run as a ball at a constant 0.027 mm scallop (slopes 5.7–5.7°, flat threshold 1.93°)
+  the set holds no flat end mill — the pocket floors are cut by the 1 mm flat end ball: wall feet carry a 0.500 mm fillet and the floor a stepped scallop between passes (the tradeoff of cutting without a flat)
+  The mould of "wedge.stl" is cut from the top only: the cavity is the part's top surface, turned over so the casting reads the right way round, and the casting's underside is the flat face you pour into. A part with undercuts, or one shaped on both sides, needs a two-part mould — two setups.
+  The mould of "wedge.stl" has a wall at 90° — steeper than 85°, so it has little or no draft and may hold the casting. Give the part tapered sides, or use a flexible casting material.
+  the vise fixture envelope is not yet wired into the region obstacles — this plan carries none; the posted program is still checked against the same envelope by the sweep
+op rough {"kind":"rough","region":{"id":"curved-0","kind":"curved","bounds":{"min":[20,10],"max":[40,30]},"topZ":0,"bottomZ":-2,"obstacles":[],"regionClearanceZ":5},"outcome":{"ir":{"frame":"flat","tool":{"number":1,"id":null,"name":"1 mm flat end","typeText":"Flat End","shape":"ball","handleDiameter":3.175,
+op finish {"kind":"finish","region":{"id":"curved-0","kind":"curved","bounds":{"min":[20,10],"max":[40,30]},"topZ":0,"bottomZ":-2,"obstacles":[],"regionClearanceZ":5},"outcome":{"ir":{"frame":"flat","tool":{"number":1,"id":null,"name":"1 mm flat end","typeText":"Flat End","shape":"ball","handleDiameter":3.175
+op pencil {"kind":"pencil","region":{"id":"curved-0","kind":"curved","bounds":{"min":[20,10],"max":[40,30]},"topZ":0,"bottomZ":-2,"obstacles":[],"regionClearanceZ":5},"outcome":{"ir":{"frame":"flat","tool":{"number":1,"id":null,"name":"1 mm flat end","typeText":"Flat End","shape":"ball","handleDiameter":3.175
+IR op rough "[T1] Rough "curved-0"" feeds 6928; level feeds (z:count) -0.001:263 -0.003:261 -0.008:59 -0.014:174 -0.021:174 -0.026:173 -0.037:172 -0.048:172 -0.059:172 -0.071:344 -0.082:171 -0.093:170 -0.104:170 -0.116:170 -0.127:170 -0.138:170 -0.149:170 -0.161:170 -0.162:242 -0.172:169 -0.183:169 -0.192:72 -0.194:168 -0.206:168 -0.217:168 -0.228:168 -0.239:168 -0.251:168 -0.262:168 -0.273:168 -0.284:168 -0.296:168 -0.300:69 -0.600:54 -0.900:39 -1.200:19 -1.500:4
+IR op finish "[T1] Finish "curved-0" (ball-scallop)" feeds 3592; level feeds (z:count) -0.000:177 -0.002:136 -0.013:138 -0.055:136 -0.136:132 -0.165:129 -0.417:64 -1.899:28
+IR op pencil "[T1] Pencil "curved-0"" feeds 149; level feeds (z:count) -1.923:148
+
+SECTION x=30, y 10.5..29.5 (design = mould solid top; CL−design analytic = R(1/cosθ−1) = 0.0025)
+y | design | rough swept | rough−design | finish swept | finish−design | pencil swept | union−design
+10.5 | -0.050 | -0.044 | 0.006 | — | — | — | 0.006
+11.5 | -0.150 | -0.144 | 0.006 | — | — | — | 0.006
+12.5 | -0.250 | -0.243 | 0.007 | — | — | — | 0.007
+13.5 | -0.350 | 0.014 | 0.364 | — | — | — | 0.364
+14.5 | -0.450 | Infinity | Infinity | — | — | — | Infinity
+15.5 | -0.550 | Infinity | Infinity | — | — | — | Infinity
+16.5 | -0.650 | -0.264 | 0.386 | — | — | — | 0.386
+17.5 | -0.750 | -0.292 | 0.458 | — | — | — | 0.458
+18.5 | -0.850 | -0.300 | 0.550 | — | — | — | 0.550
+19.5 | -0.950 | -0.547 | 0.403 | — | — | — | 0.403
+20.5 | -1.050 | -0.584 | 0.466 | — | — | — | 0.466
+21.5 | -1.150 | -0.599 | 0.551 | — | — | — | 0.551
+22.5 | -1.250 | -0.877 | 0.373 | — | — | — | 0.373
+23.5 | -1.350 | -0.897 | 0.453 | — | — | — | 0.453
+24.5 | -1.450 | -0.897 | 0.553 | — | — | — | 0.553
+25.5 | -1.550 | -1.164 | 0.386 | — | — | — | 0.386
+26.5 | -1.650 | -1.192 | 0.458 | — | — | — | 0.458
+27.5 | -1.750 | -1.187 | 0.563 | — | — | — | 0.563
+28.5 | -1.850 | -1.447 | 0.403 | — | — | — | 0.403
+29.5 | -1.950 | -0.157 | 1.793 | -1.947 | 0.003 | -1.856 | 0.003
+
+STAMP (30,20): design -1.0000; rough move idx 81 (21.512,20.175,-0.600)→(38.513,20.175,-0.600) swept -0.5684 → leftover 0.4316; finish covers? false
+finish feeds span y 10.000..30.000
+finish feeds per 1 mm of y: 10:48 11:76 12:82 13:82 14:89 15:91 16:91 17:91 18:91 19:91 20:104 21:91 22:91 23:91 24:91 25:91 26:91 27:91 28:91 29:1928

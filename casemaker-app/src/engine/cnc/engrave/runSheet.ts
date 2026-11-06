@@ -3167,31 +3167,35 @@ function drillPeckSteps(job: EngraveJob, feedsPeck: number | null): RunSheetStep
 export interface GoalSurfaceFacts {
   /** The heightfield's own resolution sentence ("sampled on a 0.1 mm grid"). */
   resolutionNote: string;
-  /** The pitch the heightfield was sampled at, mm — after any coarsening. */
-  gridPitchMm: number;
-  /** The cells the heightfield held, `nx × ny`. */
-  gridCells: number;
-  /** Roughing step-down per Z layer, mm. */
-  stepDownMm: number;
+  /**
+   * The pitch the heightfield was sampled at, mm — after any coarsening. #1005 — ABSENT on the
+   * model engine's own facts: it plans from the part's solid and reports the CL grid it sampled
+   * (`gridPitchMm` is that grid's finest spacing) instead of a goal heightfield.
+   */
+  gridPitchMm?: number;
+  /** The cells the heightfield held, `nx × ny`. ABSENT on the model engine's facts (#1005). */
+  gridCells?: number;
+  /** Roughing step-down per Z layer, mm. ABSENT on the model engine's facts (#1005). */
+  stepDownMm?: number;
   /**
    * #869 — the FINISHING cutter's step-down, mm — the spacing of the rim laps (#862), which ride
    * the finish. Absent on a result stored before the field; a reader falls back to `stepDownMm`.
    */
   finishStepDownMm?: number;
-  /** Roughing raster pitch, mm. */
-  roughStepOverMm: number;
-  /** Finishing raster pitch, mm. */
-  finishStepOverMm: number;
-  /** Roughing allowance left on the goal surface, mm. */
-  stockToLeaveMm: number;
+  /** Roughing raster pitch, mm. ABSENT on the model engine's facts (#1005). */
+  roughStepOverMm?: number;
+  /** Finishing raster pitch, mm. ABSENT on the model engine's facts (#1005). */
+  finishStepOverMm?: number;
+  /** Roughing allowance left on the goal surface, mm. ABSENT on the model engine's facts (#1005). */
+  stockToLeaveMm?: number;
   /**
    * #898 — the UNDERSIDE choice this program cut to: its kind and the work-Z floor it set (`null`
    * when the choice carries no floor of its own). Absent when the goal states no underside, or on
    * a result stored before the field.
    */
   underside?: { kind: 'flat' | 'flipped-tabs' | 'plinth'; floorZ: number | null } | null;
-  /** Z layers the roughing pass stepped through. */
-  roughingLayers: number;
+  /** Z layers the roughing pass stepped through. ABSENT on the model engine's facts (#1005). */
+  roughingLayers?: number;
   /**
    * #869 — THE FLAT ROUGH, when the goal is cut as two programs: the cutter's name, as the run
    * sheet names it, and which roughing pass ran. Null when a flat was chosen but nothing stood
@@ -3221,21 +3225,22 @@ export interface GoalSurfaceFacts {
  * cutter). Every number is `surface3d`'s, printed rather than re-derived here.
  */
 function surfaceSteps(facts: GoalSurfaceFacts): RunSheetStep[] {
-  // #1006 — A MODEL-ENGINE RUN STATES THE FACTS IT HAS. The heightfield numbers (layers, step-down,
-  // step-overs, allowance) are absent when the plan came from the model engine, which has no goal
-  // heightfield to quote; the resolution sentence, the underside and the plan's own notes are still
-  // the run's. Printing "undefined mm step-over" would be worse than printing less.
+  // #1005/#1006 — THE MODEL ENGINE'S FACTS CARRY NO RASTER NUMBERS: it plans from the part's solid,
+  // not a sampled goal heightfield, so the raster step-overs, roughing layers and allowance a
+  // heightfield run reports do not exist. The sheet prints what the run does state — its
+  // resolution sentence, the underside, and every note — rather than re-deriving numbers the
+  // engine never had. Printing "undefined mm step-over" would be worse than printing less.
   if (
-    facts.roughingLayers === undefined ||
-    facts.stepDownMm === undefined ||
-    facts.roughStepOverMm === undefined ||
-    facts.stockToLeaveMm === undefined ||
-    facts.finishStepOverMm === undefined
+    facts.roughingLayers === undefined
+    || facts.stepDownMm === undefined
+    || facts.roughStepOverMm === undefined
+    || facts.stockToLeaveMm === undefined
+    || facts.finishStepOverMm === undefined
   ) {
     const steps: RunSheetStep[] = [
       {
         text: `Surface a mesh. ${facts.resolutionNote.charAt(0).toUpperCase() + facts.resolutionNote.slice(1)}.`,
-        value: 'model plan',
+        value: 'surface program',
       },
     ];
     for (const note of facts.notes) steps.push({ text: note });

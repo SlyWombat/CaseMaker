@@ -291,8 +291,9 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
    * is exactly the flip about the pin line, so a point (x, y) of side 1 is (x, 2·CY − y) here.
    */
 
-  // #966 triage — #1005: the seam ignores the mould flag; no goal-mold-* findings.
-  it.fails('generates the hollow as a mold of the inside form', async () => {
+  // #1005 fixed this: the model engine builds the mould as a solid of its own, with goal-mold-*
+  // findings riding the plan's own statements.
+  it('generates the hollow as a mold of the inside form', async () => {
     const j = job(goal(zIn, { goalMode: 'mold', surface: { finishStepOverMm: FINISH_STEP } }));
     const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, { shop: {} });
     expect(out.errors).toEqual([]);
