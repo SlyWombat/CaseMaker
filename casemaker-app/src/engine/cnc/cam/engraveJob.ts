@@ -241,15 +241,25 @@ export type BooleanFn = (a: Polygons, b: Polygons) => Polygons;
  * #959's #961 review, finding 3: an OPEN pocket node's region needs extending across its open
  * edge before `pocketLoops` sees it (the node's own boundary there is not a real wall), and that
  * needs a real boolean, not another offset call.
+ *
+ * #1024 — BOTH OPERANDS ARE CONVERTED HERE, AND OURS TO FREE. Handed a POLYGON LIST, the glue's
+ * `cross(other)` builds a temporary CrossSection for that operand and never deletes it (#1022
+ * freed the vectors inside a conversion, not that object): ~16 KB per boolean against a
+ * 654-vertex operand, and per CELL in #1020's predicate — the leak that drove the wasm into its
+ * 4,096 MB cap. Passing handles keeps `cross` a no-op, and we delete both with the result.
  */
 export function makeClipperUnion(tl: ManifoldToplevel): BooleanFn {
   const CS = tl.CrossSection;
   return (a, b) => {
     if (a.length === 0) return b;
     if (b.length === 0) return a;
-    const out = CS.union(a, b);
+    const ca = CS.ofPolygons(a);
+    const cb = CS.ofPolygons(b);
+    const out = CS.union(ca, cb);
     const polygons = out.toPolygons() as Polygons;
     out.delete();
+    ca.delete();
+    cb.delete();
     return polygons;
   };
 }
@@ -259,11 +269,13 @@ export function makeClipperSubtract(tl: ManifoldToplevel): BooleanFn {
   const CS = tl.CrossSection;
   return (a, b) => {
     if (a.length === 0 || b.length === 0) return a;
-    const cs = CS.ofPolygons(a);
-    const out = cs.subtract(b);
+    const ca = CS.ofPolygons(a);
+    const cb = CS.ofPolygons(b);
+    const out = ca.subtract(cb);
     const polygons = out.toPolygons() as Polygons;
     out.delete();
-    cs.delete();
+    ca.delete();
+    cb.delete();
     return polygons;
   };
 }
