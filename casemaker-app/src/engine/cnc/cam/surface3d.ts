@@ -425,28 +425,28 @@ export interface PencilPassFacts {
  * Every number is one the CAM ran with, never a second resolution of the same question.
  */
 export interface GoalSurfaceFacts {
-  /** The resolution the run sampled at, as the sentence the panels quote ("sampled on a 0.1 mm grid"). */
+  /** The heightfield's own resolution sentence ("sampled on a 0.1 mm grid"). */
   resolutionNote: string;
   /**
-   * The pitch the heightfield was sampled at, mm — after any coarsening.
-   * #1006 — OPTIONAL: the model engine plans from the CL surface, not a goal heightfield, and has
-   * no cell grid of its own to state. Absent means "this run did not use a heightfield".
+   * The pitch the heightfield was sampled at, mm — after any coarsening. #1005 — ABSENT on the
+   * model engine's own facts: it plans from the part's solid and reports the CL grid it sampled
+   * (`gridPitchMm` is that grid's finest spacing) instead of a goal heightfield.
    */
   gridPitchMm?: number;
-  /** The cells the heightfield held, `nx × ny`. Absent on a model-engine run (#1006). */
+  /** The cells the heightfield held, `nx × ny`. ABSENT on the model engine's facts (#1005). */
   gridCells?: number;
-  /** Roughing step-down per Z layer, mm. Absent on a model-engine run (#1006). */
+  /** Roughing step-down per Z layer, mm. ABSENT on the model engine's facts (#1005). */
   stepDownMm?: number;
   /**
    * #869 — the FINISHING cutter's step-down, mm — the spacing of the rim laps (#862), which ride
    * the finish. Absent on a result stored before the field; a reader falls back to `stepDownMm`.
    */
   finishStepDownMm?: number;
-  /** Roughing raster pitch, mm. Absent on a model-engine run (#1006). */
+  /** Roughing raster pitch, mm. ABSENT on the model engine's facts (#1005). */
   roughStepOverMm?: number;
-  /** Finishing raster pitch, mm. Absent on a model-engine run (#1006). */
+  /** Finishing raster pitch, mm. ABSENT on the model engine's facts (#1005). */
   finishStepOverMm?: number;
-  /** Roughing allowance left on the goal surface, mm. Absent on a model-engine run (#1006). */
+  /** Roughing allowance left on the goal surface, mm. ABSENT on the model engine's facts (#1005). */
   stockToLeaveMm?: number;
   /**
    * #898 — the UNDERSIDE choice this program cut to: its kind and the work-Z floor it set (`null`
@@ -454,7 +454,7 @@ export interface GoalSurfaceFacts {
    * a result stored before the field.
    */
   underside?: { kind: 'flat' | 'flipped-tabs' | 'plinth'; floorZ: number | null } | null;
-  /** Z layers the roughing pass stepped through. Absent on a model-engine run (#1006). */
+  /** Z layers the roughing pass stepped through. ABSENT on the model engine's facts (#1005). */
   roughingLayers?: number;
   /**
    * #869 — THE FLAT ROUGH, when the goal is cut as two programs: the cutter's name, as the run

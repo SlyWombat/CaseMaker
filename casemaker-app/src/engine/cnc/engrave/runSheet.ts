@@ -3158,21 +3158,21 @@ function drillPeckSteps(job: EngraveJob, feedsPeck: number | null): RunSheetStep
  * cutter). Every number is `surface3d`'s, printed rather than re-derived here.
  */
 function surfaceSteps(facts: GoalSurfaceFacts): RunSheetStep[] {
-  // #1006 — A MODEL-ENGINE RUN STATES THE FACTS IT HAS. The heightfield numbers (layers, step-down,
-  // step-overs, allowance) are absent when the plan came from the model engine, which has no goal
-  // heightfield to quote; the resolution sentence, the underside and the plan's own notes are still
-  // the run's. Printing "undefined mm step-over" would be worse than printing less.
+  // #1005 — THE MODEL ENGINE'S FACTS CARRY NO RASTER NUMBERS: it plans from the part's solid, not
+  // a sampled goal field, so the raster step-overs and roughing layers a heightfield run reports
+  // do not exist. The sheet prints what the run does state — its resolution sentence and every
+  // note — rather than re-deriving numbers the engine never had.
   if (
-    facts.roughingLayers === undefined ||
-    facts.stepDownMm === undefined ||
-    facts.roughStepOverMm === undefined ||
-    facts.stockToLeaveMm === undefined ||
-    facts.finishStepOverMm === undefined
+    facts.roughingLayers === undefined
+    || facts.stepDownMm === undefined
+    || facts.roughStepOverMm === undefined
+    || facts.stockToLeaveMm === undefined
+    || facts.finishStepOverMm === undefined
   ) {
     const steps: RunSheetStep[] = [
       {
         text: `Surface a mesh. ${facts.resolutionNote.charAt(0).toUpperCase() + facts.resolutionNote.slice(1)}.`,
-        value: 'model plan',
+        value: 'surface program',
       },
     ];
     for (const note of facts.notes) steps.push({ text: note });
