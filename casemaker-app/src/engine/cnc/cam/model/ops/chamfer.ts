@@ -68,6 +68,10 @@ export function chamfer(opts: ChamferOpOptions): OpOutcome {
   if (!(depth > 0)) {
     throw new Error('cam/model/ops/chamfer: the stated edge break has no depth — a zero-depth bevel is not a cut');
   }
+  // #1012 — THE CLAMP IS STATED, NEVER SILENT. A cone that cannot reach the asked leg cuts its
+  // own — right, but a cut that differs from what the operator asked for must reach them (#992's
+  // "state the tradeoff" ruling): the outcome carries both legs so the plan can say both widths.
+  const clampedLegMm = coneLeg !== null && wanted > coneLeg + 1e-9 ? { wanted, cut: coneLeg } : undefined;
 
   const ring = closedRing(opts.rim.polyline);
   // The tool's centre runs a TIP RADIUS off the edge on the AIR side: outward for the part's own
@@ -107,5 +111,5 @@ export function chamfer(opts: ChamferOpOptions): OpOutcome {
       exit: [start[0], start[1], tipZ],
     });
   }
-  return { ir, cutter: cutterKeyOf(opts.cutter), passes };
+  return { ir, cutter: cutterKeyOf(opts.cutter), passes, ...(clampedLegMm === undefined ? {} : { clampedLegMm }) };
 }

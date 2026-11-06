@@ -234,6 +234,9 @@ describe('#989 the model engine receives the goal’s own chamfer', () => {
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
     const vPrograms = plannedPrograms(out).filter((p) => p.key === VBIT.name);
     expect(vPrograms).toHaveLength(1);
+    // #1012 — a 0.5 mm bevel is well under this V's 1.5375 mm cone leg: nothing is clamped, so no
+    // `chamfer-too-wide` may be stated (the finding is the clamp's, never a general remark).
+    expect(out.findings.some((f) => f.code === 'chamfer-too-wide')).toBe(false);
     const feeds = plannedFeeds(vPrograms[0]!.ir);
     expect(feeds.length).toBeGreaterThan(4);
     for (const m of feeds) {
@@ -280,6 +283,30 @@ describe('#989 the model engine receives the goal’s own chamfer', () => {
     const finding = out.findings.find((f) => f.code === 'goal-chamfer-no-cutter');
     expect(finding?.severity).toBe('warning');
     expect(finding?.message).toContain('not in the tool library');
+  }, 120_000);
+
+  // #1012 — RED-FIRST (the review session's case, with the model engine on): a bevel WIDER than
+  // the cone reaches is clamped by `chamfer()` and, before this pin, the clamp was silent — the
+  // posted cut was 1.5375 mm where the operator asked for 3, and nothing said so. The clamp is
+  // right (a 3.175 mm 90° V cannot cut a 3 mm bevel in one pass); the silence is the defect.
+  it('#1012 — a bevel wider than the V reaches is clamped and SAID: chamfer-too-wide with both widths, feeds at the cone\'s leg', async () => {
+    setModelCamEnabled(true);
+    const target = goalTarget({ chamfer: { widthMm: 3, toolKey: VKEY } });
+    const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
+    expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
+    const finding = out.findings.find((f) => f.code === 'chamfer-too-wide');
+    expect(finding?.severity).toBe('warning');
+    // Both widths, in the operator's own terms: asked 3 mm, cut 1.5375 mm by this V's cone.
+    expect(finding?.message).toContain('3 mm');
+    expect(finding?.message).toContain('1.5375 mm');
+    expect(finding?.message).not.toMatch(/\b1\.538 mm\b/);
+    expect(finding?.message).toContain(VBIT.name);
+    // The rim program still posts, at the clamped leg — the cut is unchanged, only stated.
+    const vPrograms = plannedPrograms(out).filter((p) => p.key === VBIT.name);
+    expect(vPrograms).toHaveLength(1);
+    const feeds = plannedFeeds(vPrograms[0]!.ir);
+    expect(feeds.length).toBeGreaterThan(4);
+    for (const m of feeds) expect(m.z).toBeCloseTo(-1.5375, 6);
   }, 120_000);
 
   it('a pinned V key the house lacks throws by name — never a silent fallback to another V', async () => {
