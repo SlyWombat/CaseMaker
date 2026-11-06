@@ -95,8 +95,8 @@ describe('#1032 — a posted key resolves by key, then physical id, then name', 
     expect(benchCutterFor('shared name')).toBe(user.tool);
     setRegistry([cat]);
     expect(benchCutterFor('shared name')).toBe(cat.tool);
-    // No registry row keeps that name: the built-in row named the same still answers (the tier
-    // is permanent), and an exact key always outranks a name.
+    // An empty registry holds no row by that name — the permanent built-ins carry their own names,
+    // none of them 'shared name' — so the fallback answers null; an exact key always outranks a name.
     setRegistry([]);
     expect(benchCutterFor('shared name')).toBeNull();
   });
