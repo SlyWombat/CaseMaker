@@ -3,12 +3,10 @@
  * `docs/design/cam-model-engine.md` is this file's source of truth; read that before changing
  * anything here.
  *
- * `planModelCam` replaces both `generateSurface3dForGoal` and `generateSurface3dIR` at their
- * `generateGoalPrograms`/`generateSurfacePrimitiveProgram` call sites — both already `async`, so
- * this is not a new calling convention for either caller. It is wired behind an opt-in flag
- * (`USE_MODEL_CAM_ENGINE`, set only by specs for now) so nothing changes for an operator until
- * #957/#959/#960 land for real; every stub below throws, so a run with the flag on fails loudly
- * instead of posting an empty program.
+ * `planModelCam` replaced `generateSurface3dForGoal`/`generateSurface3dIR` and their
+ * `generateGoalPrograms`/`generateSurfacePrimitiveProgram` call sites outright (#966): the old
+ * heightfield engine, and the `USE_MODEL_CAM_ENGINE` seam that once chose between the two, are
+ * both gone from `engraveGenerate.ts`. `cam/model` is the only path a goal job plans through now.
  *
  * The PUBLIC output types below (`OpOutcome`, `RegionAtZ`, `RegionRef`, `PassRef`, `PlannedOp`,
  * `Polygon`, `Box2`, and this file's OWN `CycleCost`) are distinct from `linking.ts`'s and
@@ -337,21 +335,22 @@ export interface SetupPlan {
 }
 
 /**
- * Set only by specs and the breadth tool for now (see this file's header). The environment gate
- * exists so a Node tool (`tests/tools/goal-engine-breadth.ts`) can exercise the seam without a
- * bundler: `CASEMAKER_MODEL_CAM=1` turns the engine on for a process, and `VITE_MODEL_CAM=1` does
- * the same for an e2e build. Both default off, so the shipped app is unchanged.
+ * #966 — THE SEAM REMOVED: `cam/model` is the only engine a goal job plans through now, so this
+ * is unconditionally `true`. Kept as an exported, mutable binding rather than deleted — the
+ * end-state spec (`goalEngineEndState966.spec.ts`) pins the binding itself (`USE_MODEL_CAM_ENGINE`
+ * === true, with no override), and the handful of specs still calling `setModelCamEnabled` below
+ * (a holdover from when the flag gated `engraveGenerate.ts`'s own dispatch) keep compiling and
+ * stay harmless no-ops now that nothing reads the flag for control flow.
  */
-export let USE_MODEL_CAM_ENGINE: boolean =
-  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.['CASEMAKER_MODEL_CAM'] === '1' ||
-  (import.meta as { env?: Record<string, string | undefined> }).env?.['VITE_MODEL_CAM'] === '1';
+export let USE_MODEL_CAM_ENGINE: boolean = true;
 
 /**
- * #966 — a Playwright spec (or any other runtime caller) flips the flag without `vi.doMock`'s
- * module-registry trick, which a browser-run e2e test does not have. Test/e2e-only purpose, same
- * as the env gate above — this does not change the shipped app's own default (still env-gated,
- * off unless `CASEMAKER_MODEL_CAM=1`/`VITE_MODEL_CAM=1`), it only lets a runtime override that
- * default for the lifetime of the process/page.
+ * #966 — A HOLDOVER, NOW A NO-OP IN EFFECT. `generateGoalProgram` no longer branches on
+ * `USE_MODEL_CAM_ENGINE` at all (the old heightfield engine is gone), so toggling it through here
+ * changes nothing about which engine runs — there is only one. Kept so the specs that still call
+ * this (from before the removal) keep compiling without a rewrite; `USE_MODEL_CAM_ENGINE` itself
+ * is read only by the end-state spec's own pin and, if anything else still imports it, as a
+ * historical signal, never as a dispatch condition.
  */
 export function setModelCamEnabled(on: boolean): void {
   USE_MODEL_CAM_ENGINE = on;

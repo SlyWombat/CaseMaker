@@ -27,7 +27,6 @@ const backing = new Map<string, string>();
 
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { programHash } from '@/engine/cnc/programHash';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
@@ -38,7 +37,6 @@ import type { CandidatePlan, EvalContext } from '@/workers/sim/planEvaluate';
 import { evaluatePlan } from '@/workers/sim/planEvaluate';
 import { candidatePlans, planKey, rulePlanOf } from '@/engine/cnc/engrave/smartPick';
 import { applyCutterPlanToJob } from '@/engine/cnc/engrave/measuredPick';
-import { USE_MODEL_CAM_ENGINE } from '@/engine/cnc/cam/model/plan';
 
 afterEach(() => clearTargetObjectMeshCache());
 
@@ -131,15 +129,14 @@ describe('#869 the goal’s split, generated', () => {
     expect(out.programs).toHaveLength(1);
     expect(out.programs[0]!.toolKey).toBe(BALL.key);
     expect(out.surface3d?.rough ?? null).toBeNull();
-    // The promise that a goal without a rough is untouched: the posted file's hash. Under
-    // CASEMAKER_MODEL_CAM, #987 makes a skirt-closed relief's outline synthetic, so no freeing
-    // contour op is demanded against it: this fixture (a 2-triangle open ramp, always closed with
-    // a skirt) went from 2 posted programs (a flat contour + the ball finish) to the 1 this test
-    // already asserts above, and the posted bytes changed with it — re-pinned for #987. The
-    // heightfield path (no flag) is a different engine with its own, unrelated history
-    // (#889/#909/#927/#945's re-pins) and its own, unchanged bytes; the flag read here is dropped
-    // along with the heightfield path itself once it is removed (#966).
-    expect(programHash(out.nc!)).toBe(USE_MODEL_CAM_ENGINE ? '8275a038' : 'c03b471f');
+    // The promise that a goal without a rough is untouched: the posted file's hash. #987 makes a
+    // skirt-closed relief's outline synthetic, so no freeing contour op is demanded against it:
+    // this fixture (a 2-triangle open ramp, always closed with a skirt) went from 2 posted
+    // programs (a flat contour + the ball finish) to the 1 this test already asserts above, and
+    // the posted bytes changed with it — re-pinned for #987. The old heightfield engine's own,
+    // unrelated pin for this same byte (`c03b471f`, #889/#909/#927/#945's history) went with it
+    // when that engine was removed (#966).
+    expect(programHash(out.nc!)).toBe('8275a038');
   });
 
   it('a roughToolKey posts the flat’s rough first and the ball’s finish second', async () => {
@@ -159,42 +156,17 @@ describe('#869 the goal’s split, generated', () => {
     expect(rough.nc).toMatch(/T\d+ ?M6/);
     expect(finish.nc).toMatch(/T\d+ ?M6/);
 
-    if (USE_MODEL_CAM_ENGINE) {
-      // #987 — the model-cam path has no `surfaceCheck`/"3D rough" vocabulary (surface3d.ts's own
-      // op naming, never ported): the rough's existence and cutter are read from the plan's own
-      // ops instead, which the model-cam path does carry.
-      const ops = out.plan?.perSetup[0]?.ops ?? [];
-      const roughOps = ops.filter((o) => o.kind === 'rough');
-      const finishOps = ops.filter((o) => o.kind === 'finish');
-      expect(roughOps).toHaveLength(1);
-      expect(roughOps[0]!.outcome.cutter).toBe(ROUGH.key);
-      expect(finishOps).toHaveLength(1);
-      expect(finishOps[0]!.outcome.cutter).toBe(BALL.key);
-      expect(ops.indexOf(roughOps[0]!)).toBeLessThan(ops.indexOf(finishOps[0]!));
-    } else {
-      expect(rough.nc).toContain('3D rough');
-      expect(rough.nc).not.toContain('3D finish');
-      expect(finish.nc).toContain('3D finish');
-      expect(finish.nc).not.toContain('3D rough');
-
-      // EACH PROGRAM CARRIES ITS OWN CHECK (#535/#844) — the rough is a judged file, not a prefix.
-      const roughPasses = rough.surfaceCheck?.passes ?? [];
-      const finishPasses = finish.surfaceCheck?.passes ?? [];
-      expect(rough.surfaceCheck?.kind).toBe('surface');
-      expect(roughPasses).toHaveLength(1);
-      expect(roughPasses[0] ?? '').toContain('3D rough');
-      expect(rough.surfaceCheck?.roughingLayers).toBeGreaterThan(0);
-      expect(finish.surfaceCheck?.kind).toBe('surface');
-      expect(finishPasses.every((p) => !p.includes('3D rough'))).toBe(true);
-      expect(finish.surfaceCheck?.roughingLayers).toBe(0);
-      expect(rough.surfaceCheck?.bbox).not.toEqual(finish.surfaceCheck?.bbox);
-
-      // THE ALLOWANCE IS THE ROUGH'S, and both cutters are stated (the row carries the cutter's
-      // display form, as every operator-facing sentence names a cutter).
-      expect(rough.nc).toContain('mm to leave');
-      expect(out.surface3d?.rough?.tool).toContain('flat end');
-      expect(out.surface3d?.rough?.kind).toMatch(/^(raster|adaptive)$/);
-    }
+    // #987/#966 — the model-cam path has no `surfaceCheck`/"3D rough" vocabulary (surface3d.ts's
+    // own op naming, never ported — and surface3d.ts is gone): the rough's existence and cutter
+    // are read from the plan's own ops instead, which the model-cam path does carry.
+    const ops = out.plan?.perSetup[0]?.ops ?? [];
+    const roughOps = ops.filter((o) => o.kind === 'rough');
+    const finishOps = ops.filter((o) => o.kind === 'finish');
+    expect(roughOps).toHaveLength(1);
+    expect(roughOps[0]!.outcome.cutter).toBe(ROUGH.key);
+    expect(finishOps).toHaveLength(1);
+    expect(finishOps[0]!.outcome.cutter).toBe(BALL.key);
+    expect(ops.indexOf(roughOps[0]!)).toBeLessThan(ops.indexOf(finishOps[0]!));
   });
 
   it('the rough’s step-down is its own row’s, and the rim laps keep the finish’s', async () => {
@@ -203,30 +175,25 @@ describe('#869 the goal’s split, generated', () => {
     const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, { shop: SHOP });
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(2);
-    if (USE_MODEL_CAM_ENGINE) {
-      // #987 — `out.surface3d` carries no facts on this path (no GoalSurfaceFacts wiring exists
-      // for the model-cam engine); the plan's own ops carry the equivalent step instead
-      // (`CamOperation.passStepMm`). #990 fixed the rough's own row: it no longer inherits
-      // `primary`'s step-down (0.5 mm, the pockets' own ⌀3 flat's PLA band) — the ⌀1.5
-      // `curvedRoughTool`'s OWN 0.8–1.6 mm band reads 0.3.
-      //
-      // The finish ball's own 1.6–3.2 mm band (0.5) has no equivalent to assert here: the old
-      // engine's `finishStepDownMm` is the RIM LAPS' spacing (#862, runSheet.ts's own doc — "the
-      // rim laps ride the FINISHING cutter, so their spacing is ITS step-down"), which the
-      // model-cam path does not plan at all for this fixture. Ahead of a rough, the model-cam
-      // ball runs exactly ONE level over the whole remainder region's depth (#965 ruling, this
-      // title's own "the rim laps keep the finish's" — unaffected by #990, out of its scope:
-      // the `Math.max(opts.stepDownMm, span)` floor is always dominated by the span here) —
-      // asserted as that, not as a feeds-row number it does not use.
-      const ops = out.plan?.perSetup[0]?.ops ?? [];
-      const roughOps = ops.filter((o) => o.kind === 'rough').flatMap((o) => o.outcome.ir.operations);
-      const finishOps = ops.filter((o) => o.kind === 'finish').flatMap((o) => o.outcome.ir.operations);
-      expect(roughOps.some((op) => op.passStepMm === 0.3)).toBe(true);
-      expect(finishOps.some((op) => op.depthPasses === 1)).toBe(true);
-    } else {
-      expect(out.surface3d?.stepDownMm).toBeCloseTo(0.3, 6);
-      expect(out.surface3d?.finishStepDownMm).toBeCloseTo(0.5, 6);
-    }
+    // #987 — `out.surface3d` carries no facts on this path (no GoalSurfaceFacts wiring exists
+    // for the model-cam engine); the plan's own ops carry the equivalent step instead
+    // (`CamOperation.passStepMm`). #990 fixed the rough's own row: it no longer inherits
+    // `primary`'s step-down (0.5 mm, the pockets' own ⌀3 flat's PLA band) — the ⌀1.5
+    // `curvedRoughTool`'s OWN 0.8–1.6 mm band reads 0.3.
+    //
+    // The finish ball's own 1.6–3.2 mm band (0.5) has no equivalent to assert here: the old
+    // engine's `finishStepDownMm` is the RIM LAPS' spacing (#862, runSheet.ts's own doc — "the
+    // rim laps ride the FINISHING cutter, so their spacing is ITS step-down"), which the
+    // model-cam path does not plan at all for this fixture. Ahead of a rough, the model-cam
+    // ball runs exactly ONE level over the whole remainder region's depth (#965 ruling, this
+    // title's own "the rim laps keep the finish's" — unaffected by #990, out of its scope:
+    // the `Math.max(opts.stepDownMm, span)` floor is always dominated by the span here) —
+    // asserted as that, not as a feeds-row number it does not use.
+    const ops = out.plan?.perSetup[0]?.ops ?? [];
+    const roughOps = ops.filter((o) => o.kind === 'rough').flatMap((o) => o.outcome.ir.operations);
+    const finishOps = ops.filter((o) => o.kind === 'finish').flatMap((o) => o.outcome.ir.operations);
+    expect(roughOps.some((op) => op.passStepMm === 0.3)).toBe(true);
+    expect(finishOps.some((op) => op.depthPasses === 1)).toBe(true);
   });
 
   it('#999 a rough the library does not hold falls back to the engine’s choice, and says which', async () => {
@@ -261,24 +228,11 @@ describe('#869 the goal’s split, generated', () => {
     expect(finding?.message).toContain('must be a flat end mill');
   });
 
-  it('the run sheet states both cutters, the change, and which rough ran', async () => {
-    const job = goalJob({ roughToolKey: ROUGH.key });
-    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, { shop: SHOP });
-    const texts = buildRunSheet(job, out, null).sections.flatMap((s) => s.steps.map((st) => st.text));
-    if (USE_MODEL_CAM_ENGINE) {
-      // #987 — both these lines come from runSheet.ts's `surfaceSteps(facts: GoalSurfaceFacts)`,
-      // fed only by `out.surface3d` (undefined on this path). The model-cam path's own run-sheet
-      // section is #976 (parked, M2) — nothing to assert here until that lands.
-    } else {
-      const split = texts.find((t) => t.includes('Two programs, two cutters'));
-      expect(split).toBeDefined();
-      expect(split).toContain('3 mm flat');
-      expect(split).toContain('change to the ball');
-      const surface = texts.find((t) => t.includes('Surface a mesh'));
-      expect(surface).toBeDefined();
-      expect(surface).toContain('Roughing in');
-    }
-  });
+  // #987/#966 — "the run sheet states both cutters, the change, and which rough ran" is deleted
+  // here, not fixed: both of its lines came from runSheet.ts's `surfaceSteps(facts:
+  // GoalSurfaceFacts)`, fed only by `out.surface3d` — undefined on the model-cam path, and the
+  // old heightfield engine that fed it is gone. The model-cam path's own run-sheet section is
+  // #976 (parked, M2) — nothing to pin here until that lands.
 });
 
 describe('#869 the goal’s split, chosen by the search', () => {
