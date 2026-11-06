@@ -31,7 +31,7 @@
  *     but not for a CAM or POST refusal, and a refusal with no reason is useless in the panel.
  */
 
-import type { EngraveFaceItem, EngraveItem, EngraveJob, EngraveMargins, EngraveRectShape, EngraveShape, EngraveTargetObject } from '@/types/engraveJob';
+import { planChoiceOf, type EngraveFaceItem, type EngraveItem, type EngraveJob, type EngraveMargins, type EngraveRectShape, type EngraveShape, type EngraveTargetObject } from '@/types/engraveJob';
 import type { TextFont } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
@@ -87,6 +87,7 @@ import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } fro
 import { surfacePrimitivesOf } from '@/engine/cnc/engrave/primitiveSurface';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import { closeOpenSheet } from '@/engine/cnc/engrave/closeSheet';
+import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { mouldSolidOf } from '@/engine/cnc/engrave/mouldSolid';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import {
@@ -230,12 +231,14 @@ import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 // engine's one entry point.
 import {
   MODEL_STOCK_TO_LEAVE_MM,
-  planModelCam,
   type ModelPlanInput,
   type ModelPlanOutput,
   type PlannedOp,
   type SetupSpec,
 } from '@/engine/cnc/cam/model/plan';
+// #961 — the two-plan run: the OWNED plan posts, the ideal rides beside it for the card's tradeoff.
+import { planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
+import { comparePlanOutcomes, type PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
 import { cutterKeyOf, type CutterCandidates } from '@/engine/cnc/cam/model/sequence';
 import type { EdgeBreakSpec, ModelTolerances, PlanStatement } from '@/engine/cnc/cam/model/types';
@@ -741,6 +744,22 @@ export interface EngraveGenerated {
    * get there. Absent on the old heightfield path and on a refusal before a plan existed.
    */
   planStatements?: PlanStatement[] | null;
+  /**
+   * #961 — THE IDEAL PLAN beside the one that posts. `planTwoOutcomes` runs the cost-ranked plan
+   * twice — the OWNED set (what `plan` carries, what posts, and the default) and every bit the
+   * caller knows — and the second run lands here for the job card's material tradeoff. `null`
+   * when the catalogue adds no cutter the owned set did not already carry: the second plan is
+   * skipped, and the card has no tradeoff to state. Absent on the old heightfield path.
+   */
+  planIdeal?: ModelPlanOutput | null;
+  /**
+   * #961 (the card slice) — THE MATERIAL TRADEOFF between the two plans, in outcome terms
+   * (`comparePlanOutcomes`): `material` is true only when coverage, the deepest cut, the cycle or
+   * the seven lines (when they were scored) differ past `PLAN_MATERIALITY`; `line` names the
+   * outcome that moved, never a cutter. `null` when there is no ideal plan or either side was not
+   * measured; the card prints nothing for it.
+   */
+  planTradeoff?: PlanTradeoff | null;
   cam: EngraveCamSummary | null;
   /**
    * #250 — the rough/finish split of the program this object describes (the FIRST program for the
@@ -4861,6 +4880,14 @@ export async function buildModelPlanInputForGoal(
    * job that states none.
    */
   sideFace?: 'top' | 'bottom',
+  /**
+   * #961 — THE IDEAL'S CANDIDATE SET, from the caller. The sim worker's own realm never loads the
+   * house service's `cat:` rows (`toolRegistry.getTools()` is a main-thread snapshot there), so the
+   * main thread sends the catalogue's tool entries on the generate message instead of the worker
+   * reaching for house state. Absent = no catalogue: `planTwoOutcomes` then returns `ideal: null`
+   * and the second plan is never run — preview and every other caller that omits it are unchanged.
+   */
+  catalogueTools?: readonly Tool[],
 ): Promise<ModelPlanInput> {
   const rawMesh = targetObjectMesh(goal);
   const placed = placeTarget(goal, rawMesh);
@@ -5062,12 +5089,12 @@ export async function buildModelPlanInputForGoal(
         ? shop.mount?.fixture ?? null
         : null;
 
-  // The same owned-tool list the reach check above already built (house cutters only — a goal's
-  // CAM has never read the catalogue, `ModelPlanInput.cutters.catalogue` stays empty and
-  // `planModelCam`'s own notes say so when the caller supplies one). De-duplicated by key: `tool`
-  // (the caller's chosen finish) is almost always ALSO in `shop.tools` under its own entry, and a
-  // repeated ball confused #869's own "is the pin the caller's tool or just the first ball"
-  // question (B's review) as much as it would confuse `planModelCam`'s own candidate search.
+  // The same owned-tool list the reach check above already built (house cutters only — the
+  // catalogue is a separate candidate set, `ModelPlanInput.cutters.catalogue`, and `planModelCam`'s
+  // own notes say what it does with one). De-duplicated by key: `tool` (the caller's chosen finish)
+  // is almost always ALSO in `shop.tools` under its own entry, and a repeated ball confused #869's
+  // own "is the pin the caller's tool or just the first ball" question (B's review) as much as it
+  // would confuse `planModelCam`'s own candidate search.
   const houseSeen = new Set<string>();
   const house: Tool[] = [];
   for (const candidate of [...(shop.tools ?? []).map((e) => e.tool), tool]) {
@@ -5076,7 +5103,12 @@ export async function buildModelPlanInputForGoal(
     houseSeen.add(key);
     house.push(candidate);
   }
-  const cutters: CutterCandidates = { house, catalogue: [] };
+  // #961 (the maintainer's 11-05 ruling, point 1) — THE IDEAL IS PLANNED FROM THE FULL CATALOGUE,
+  // sent by the caller (the main thread's tool library: built-ins, the house service's `cat:` rows
+  // and the shop's inventory). A shop tool not in the catalogue is owned and already in `house`;
+  // `planTwoOutcomes` de-duplicates by key and skips the ideal run when the catalogue adds nothing
+  // the owned set did not carry. Absent = no ideal — the worker itself never reads house state.
+  const cutters: CutterCandidates = { house, catalogue: catalogueTools === undefined ? [] : [...catalogueTools] };
 
   // #985 — THE SCALLOP SEAT HOLDS A CUSP, THE PITCH HAS ITS OWN SEAT. The model engine's
   // `tolerances.finishMm` is the ball's cusp HEIGHT (the ruling makes it decide the finish), and
@@ -5134,6 +5166,11 @@ export async function buildModelPlanInputForGoal(
     // wall after the turn — because a PLANAR wall has no remainder record in the tree (see
     // `engrave/mouldSolid.ts`).
     ...(mould === null ? {} : { mould: { name: goal.name, steepestWallDeg: mould.steepestWallDeg } }),
+    // #961 (the card slice) — THE GOAL GRID the planner measures each plan's own outcome against
+    // (`ModelPlanOutput.outcome`): the same 0.1 mm sample the acceptance cards and the gate use.
+    // Supplying it ALSO turns on the planner's coverage-first rank — the rank every acceptance
+    // measurement has run with since #961 — so production plans the way the cards were measured.
+    goal: sampleGoalHeightfield(goal, { pitchMm: 0.1, stockTopZ: 0 }),
   };
 }
 
@@ -5221,6 +5258,14 @@ export interface PostModelPlanFindings {
   coverageFindings: JobFinding[];
   modelRoughFindings: JobFinding[];
   chamferFindings: JobFinding[];
+  /**
+   * #961 — THE TWO-PLAN RUN beside the plan that posts: the ideal `ModelPlanOutput` and the
+   * material tradeoff between it and the owned plan. They ride the findings because they are
+   * computed BEFORE this tail (the head chooses which plan posts), and the tail stamps them onto
+   * every return so the card reads them on a verify refusal as much as on success.
+   */
+  planIdeal?: ModelPlanOutput | null;
+  planTradeoff?: PlanTradeoff | null;
 }
 
 export async function postModelPlan(
@@ -5232,7 +5277,7 @@ export async function postModelPlan(
   output: ModelPlanOutput,
   findings: PostModelPlanFindings,
 ): Promise<EngraveGenerated> {
-  const { goalFindings, reachFindings, coverageFindings, modelRoughFindings, chamferFindings } = findings;
+  const { goalFindings, reachFindings, coverageFindings, modelRoughFindings, chamferFindings, planIdeal = null, planTradeoff = null } = findings;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -5250,6 +5295,8 @@ export async function postModelPlan(
     nc: null,
     verify: null,
     plan,
+    planIdeal,
+    planTradeoff,
     errors: [{ stage, message }],
   });
   // #726 W16 — THE DOCUMENT'S OWN FINDINGS RIDE WITH A GOAL RUN. The item pipeline has always
@@ -5262,6 +5309,7 @@ export async function postModelPlan(
       ...(job.workholding.kind === 'vise' ? validateVise(job.stock, job.workholding.vise, job.sacrificial) : []),
     ]);
   const mill = jobMachine(job, calibration);
+
 
   // #992 — THE PLAN'S TYPED STATEMENTS REACH THE OPERATOR. `warning`/`info` become findings on
   // this run (the panel's route; the message is the statement's own text, the count rides the
@@ -5394,6 +5442,8 @@ export async function postModelPlan(
           verify,
           programs: [...programs],
           plan: output,
+          planIdeal,
+          planTradeoff,
           planStatements,
           errors: [{ stage: 'verify', message: `cam/model (#966): ${programLabel}: ${verifyErrors.length} verifier error(s)` }],
         };
@@ -5460,6 +5510,8 @@ export async function postModelPlan(
     verify: first.verify,
     programs,
     plan: output,
+    planIdeal,
+    planTradeoff,
     planStatements,
     // #1007 — THE MODEL RUN CARRIES ITS SURFACE FACTS. #1005's mould facts are richer and win
     // when the job is a mould; every other goal job gets the plan's own numbers here, because the
@@ -5484,9 +5536,12 @@ export async function generateGoalProgram(
   opts: {
     shop: EngraveShopOpts;
     sideFace?: 'top' | 'bottom';
+    /** #961 — the ideal's candidate set from the caller; absent means no ideal (see
+     * `buildModelPlanInputForGoal`'s own param of the same name). */
+    catalogueTools?: readonly Tool[];
   },
 ): Promise<EngraveGenerated> {
-  const { shop, sideFace } = opts;
+  const { shop, sideFace, catalogueTools } = opts;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -5643,13 +5698,27 @@ export async function generateGoalProgram(
   }
   let input: ModelPlanInput;
   try {
-    input = await buildModelPlanInputForGoal(job, goal, tool, shop, sideFace);
+    input = await buildModelPlanInputForGoal(job, goal, tool, shop, sideFace, catalogueTools);
   } catch (e) {
     return fail('cam', `cam/model seam (#966): could not build a ModelPlanInput for "${goal.name}" — ${e instanceof Error ? e.message : String(e)}`);
   }
+  // #961 — PLAN TWICE, POST ONCE. `planTwoOutcomes` runs the cost-ranked plan over the owned set
+  // (what posts, and the default) and over every bit the caller knows (the ideal, carried for the
+  // card's material tradeoff); when the catalogue adds no cutter the owned set did not carry it
+  // returns `ideal: null` and the second plan is never run.
   let output: ModelPlanOutput;
+  let planIdeal: ModelPlanOutput | null = null;
+  let planTradeoff: PlanTradeoff | null = null;
   try {
-    output = await planModelCam(input);
+    const two = await planTwoOutcomes(input);
+    // The operator's recorded choice is what cuts (`planChoiceOf` reads it, owned by default); the
+    // ideal posts only when it exists.
+    const chosenIdeal = planChoiceOf(job) === 'ideal' && two.ideal !== null;
+    output = chosenIdeal ? two.ideal! : two.owned;
+    planIdeal = two.ideal;
+    if (two.ideal?.outcome !== undefined && two.owned.outcome !== undefined) {
+      planTradeoff = comparePlanOutcomes({ score: two.owned.outcome }, { score: two.ideal.outcome });
+    }
   } catch (e) {
     return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -5659,6 +5728,8 @@ export async function generateGoalProgram(
     coverageFindings,
     modelRoughFindings,
     chamferFindings,
+    planIdeal,
+    planTradeoff,
   });
 }
 
@@ -5675,6 +5746,8 @@ async function generateGoalPrograms(
   tool: Tool | null,
   calibration: MachineCalibration | null,
   shop: EngraveShopOpts,
+  // #961 — every side's plan carries the same ideal candidate set from the caller.
+  catalogueTools?: readonly Tool[],
 ): Promise<EngraveGenerated> {
   // A goal program's check is its `surfaceCheck` (there is no verifier report), and the single-goal
   // path already builds each program with it — so each side's programs are those programs with the
@@ -5716,12 +5789,12 @@ async function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: faceOfSide(firstSide) });
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: faceOfSide(firstSide), catalogueTools });
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
   for (const side of sides.slice(1)) {
-    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: faceOfSide(side) });
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: faceOfSide(side), catalogueTools });
     const sideList = sidePrograms(one, side);
     if (sideList === null) return { ...one, programs };
     programs.push(...sideList);
@@ -6317,6 +6390,11 @@ export async function engraveGenerate(
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
   shop: EngraveShopOpts = {},
   onProgress?: EngraveProgressFn,
+  /**
+   * #961 — the ideal's candidate set from the caller; absent leaves `planIdeal` null and only the
+   * owned plan is run.
+   */
+  catalogueTools?: readonly Tool[],
 ): Promise<EngraveGenerated> {
   onProgress?.({ stage: 'prepare', label: 'reading the job' });
   // #786 slice 4c-2 — the same catalogue fill as `engraveRegions`, applied HERE as well so the
@@ -6473,7 +6551,7 @@ export async function engraveGenerate(
           ],
         };
       }
-      return { ...(await generateGoalPrograms(job, sides, tool, calibration, shop)), surface: null };
+      return { ...(await generateGoalPrograms(job, sides, tool, calibration, shop, catalogueTools)), surface: null };
     }
   }
   const goal = job.setups === undefined ? pureGoalObject(job) : null;
@@ -6486,7 +6564,7 @@ export async function engraveGenerate(
     }
     // #623 — the surface-3D goal path posts flat (it never lifts feeds), so its package claims no
     // surface: the caller judges it in the work frame, which is the frame it was posted in.
-    return { ...(await generateGoalProgram(job, goal, tool, calibration, { shop })), surface: null };
+    return { ...(await generateGoalProgram(job, goal, tool, calibration, { shop, catalogueTools })), surface: null };
   }
 
   // #419 J3 — A JOB IS A LIST OF PROGRAMS.

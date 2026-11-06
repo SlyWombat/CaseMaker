@@ -284,8 +284,74 @@ export interface ModelPlanInput {
   curvedRoughTool?: Tool | null;
 }
 
+/**
+ * #961 (the card slice) — THE PLAN'S OWN MEASURED OUTCOME, when the caller supplied `input.goal`.
+ * Both plans of `planTwoOutcomes` carry one, so the job card can compare them with
+ * `comparePlanOutcomes` without a second pipeline: `coverage` is the share of the goal's covered
+ * cells the plan's own sweep leaves within the 0.1 mm band, and `maxMm` the deepest it stands above
+ * the goal. The ADJUDICATED cut-into share is the gate's number (it applies the edge-break / wall
+ * allowances the planner does not own), so it is `null` here and the comparison skips that row
+ * rather than guessing it.
+ */
+/**
+ * #986 — THE FINISHING BALL'S CANDIDATE LIST, from the recognised tree (the review session's
+ * analysis, #986 §4). Balls are grouped one per CUTTING DIAMETER (the LONGEST FLUTE of each wins,
+ * because reach is what a deep crease needs), and the list is REACH-FILTERED against the deepest
+ * remainder the setup must finish: a ball whose flute cannot descend to that floor never touches
+ * it, and choosing it — which is exactly what the old "largest diameter, first in catalogue
+ * order" rule did — bridges every crease narrower than its radius. When NO candidate reaches, the
+ * longest-flute ball is returned alone, so the plan states its one limitation rather than picking
+ * by size. The caller measures these candidates by finish and stamp; this function only decides
+ * which balls are worth measuring, and it never consults catalogue order.
+ */
+export function finishBallCandidates(house: readonly Tool[], deepestMm: number): Tool[] {
+  const byDiameter = new Map<number, Tool>();
+  for (const tool of house) {
+    if (tool.shape !== 'ball') continue;
+    const diameter = cuttingDiameter(tool) ?? 0;
+    if (!(diameter > 0)) continue;
+    const current = byDiameter.get(diameter);
+    if (current === undefined || (tool.fluteLength ?? 0) > (current.fluteLength ?? 0)) byDiameter.set(diameter, tool);
+  }
+  const all = [...byDiameter.values()];
+  const reaching = all.filter((tool) => (tool.fluteLength ?? 0) + 1e-9 >= deepestMm);
+  // #986 (C's pre-read) — THE SUPERSET HOLDS BY DIAMETER, NOT BY TOOL OBJECT: two sets can differ
+  // in which balls their reach filters keep, so the PRE-#986 PICK (largest diameter, first in the
+  // list — the rule this issue replaces) is appended as a candidate whenever the filtered list
+  // does not already carry it. The plan the old rule chose is therefore always measured, and a
+  // superset can never lose to its subset through a fallback list the subset never had.
+  const legacy = house
+    .filter((t) => t.shape === 'ball' && (cuttingDiameter(t) ?? 0) > 0)
+    .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0))[0];
+  const withLegacy = (list: Tool[]): Tool[] => (legacy === undefined || list.includes(legacy) ? list : [...list, legacy]);
+  if (reaching.length > 0) return withLegacy(reaching);
+  const longest = [...all].sort((a, b) => (b.fluteLength ?? 0) - (a.fluteLength ?? 0))[0];
+  return withLegacy(longest === undefined ? [] : [longest]);
+}
+
+export interface PlanOutcome {
+  coverage: number | null;
+  /**
+   * The gate's cut-into numbers are NOT the planner's to state: the adjudicated share applies the
+   * job's edge-break and wall allowances, and `maxMm` on the card means the deepest cut BELOW the
+   * goal. Both are null here — the planner does not judge them — so the comparison states those
+   * rows as not judged rather than filling them with a different quantity.
+   */
+  cutInto: { adjudicatedFraction: number | null; maxMm: number | null };
+  /**
+   * THE DEEPEST LEFTOVER ABOVE THE GOAL, mm — material the plan's own sweep leaves standing, the
+   * worst cell of `coverage`'s complement. It is NOT cut-into and must never be printed as such:
+   * on the panther it reads ~18 mm, which is an uncut deep feature, not a gouged part.
+   */
+  leftoverAboveMm: number;
+  /** The plan's own cycle estimate, seconds — the comparison's cycle row. */
+  cycleSeconds: number;
+}
+
 export interface ModelPlanOutput {
   perSetup: SetupPlan[];
+  /** #961 — measured on the plan's own programs when `input.goal` was supplied; absent otherwise. */
+  outcome?: PlanOutcome;
 }
 
 /**
@@ -646,15 +712,22 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     if (primary === undefined) {
       throw new Error('cam/model/plan: the house states no flat end mill and no ball nose with a cutting diameter — no round cutter can plan this part');
     }
-    const ball = balls[0];
+    // #986 — THE FINISHING BALL IS RANKED, NOT SIZED. Candidates are one ball per cutting
+    // diameter (the longest flute of each), reach-filtered against this setup's deepest remainder;
+    // the measured rank below prices them by finish + stamp and keeps the best. The old
+    // "largest diameter, first in catalogue order" rule is the DEFAULT when there is no goal grid
+    // to measure against — the documented pre-#986 behaviour, and this base pick.
+    const deepestRemainderMm = tree.remainder.reduce((m, r) => Math.max(m, r.zTop - r.zBottom), 0);
+    const ballCandidates = finishBallCandidates(input.cutters.house, deepestRemainderMm);
+    let ball = balls[0];
     // #965 (the review session's ruling, item 3.1) — THE REST BALL: the next-smaller ball, admitted
     // only on a STATED reach that covers the deepest remainder. The vendor's long ⌀1
     // (6*1*30.5mm Ball Nose Engraving, 161032105031) states a 30.5 mm flute and reaches the
     // figures' 26 mm relief; the house's 0.5 ball states no flute length at all and failed on
     // reach in the review's own measurement, so it can never qualify. No new op: the rest runs the
     // finish's machinery over the ball's own leftover mask.
-    const deepestRemainderMm = tree.remainder.reduce((m, r) => Math.max(m, r.zTop - r.zBottom), 0);
-    const restBall = balls.find((t) => t !== ball && (t.fluteLength ?? 0) >= deepestRemainderMm - 1e-9);
+    const restBallFor = (chosen: Tool | undefined): Tool | undefined =>
+      balls.find((t) => t !== chosen && (t.fluteLength ?? 0) >= deepestRemainderMm - 1e-9);
     // #989 — THE RIM STAGE TAKES THE PINNED V when the caller names one (`pinned.chamfer`, the
     // cutterKeyOf key the goal seam derives from its own chamfer request); otherwise the first
     // chamfer/engraving in the house, as before. A pin the house cannot answer is a caller bug,
@@ -678,9 +751,218 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // THE REVIEW'S FINDING (item 8): the ball and the V each get their OWN catalogue row — not
     // the primary flat's, reused as every tool's numbers before this.
     const toolSubstitutions: string[] = substitution === null ? [] : [substitution];
+    const vbitParams = vbit === undefined ? null : toolCutParams(input, vbit, pocketParams);
+
+    // #985/#965 — THE STATED TOLERANCE, as a function of the ball: a stated cusp (`finishMm`)
+    // wins; a stated PITCH (`finishStepOverMm`, a width) is converted to the cusp it leaves on the
+    // FINISHING ball, whose radius the candidate supplies — never fed into `finishMm`'s height seat.
+    const statedCuspFor = (b: Tool | undefined): number | undefined => {
+      if (input.tolerances.finishMm !== undefined) return input.tolerances.finishMm;
+      const pitch = input.tolerances.finishStepOverMm;
+      const radiusMm = b === undefined ? undefined : (cuttingDiameter(b) ?? 0) / 2;
+      if (pitch === undefined || radiusMm === undefined || !(radiusMm > 0) || !(pitch > 0)) return undefined;
+      const half = pitch / 2;
+      return radiusMm - Math.sqrt(Math.max(0, radiusMm * radiusMm - half * half));
+    };
+
+    // #982 — NO FLAT: each pocket node becomes a synthetic remainder-style region the curved
+    // pipeline plans with the ball (its rough, then the ball's scallop finish). The floor is
+    // CLAMPED at the real design top over the opening: a spurious pocket floor below the body
+    // (the 11.37 mm gouge) yields no depth, so the ball can never cut through the part.
+    const pocketFloorRegions: RemainderRegion[] = [];
+    // #982's own note site ran BEFORE this setup's `notes` array exists (the walk below is
+    // called before the array is built), a temporal-dead-zone crash waiting on the first pocket
+    // narrower than the ball; #992 collects them here — same sentence, same position ahead of
+    // the result notes — and the ids so ONE statement can state the cause with its count.
+    const earlyNotes: string[] = [];
+    const ballUncutIds: string[] = [];
+    if (noFlatFallback) {
+      const bins = buildTriangleBins(doorGeometry.triangles);
+      const walkPockets = (nodes: PocketNode[]): void => {
+        for (const node of nodes) {
+          let designMax = -Infinity;
+          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+          for (const ring of node.region) {
+            for (const [x, y] of ring) {
+              minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+              minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+            }
+          }
+          for (let x = minX; x <= maxX + 1e-9; x += 0.5) {
+            for (let y = minY; y <= maxY + 1e-9; y += 0.5) {
+              const top = topSurfaceAt(bins, x, y);
+              if (top !== null && top > designMax) designMax = top;
+            }
+          }
+          const zBottom = Number.isFinite(designMax) ? Math.max(node.floorZ, designMax) : node.floorZ;
+          // The ball's CENTRE space: the footprint is eroded by the ball's radius, exactly as the
+          // pocket chain offsets its loops — otherwise the ball's centre reaches the wall and its
+          // flank cuts a radius into it (a 0.95 mm gouge measured on the elephant). Eroded, the
+          // flank is tangent at the wall foot: the stated fillet, never a gouge.
+          const ballRadius = (cuttingDiameter(primary) ?? 0) / 2;
+          const footprint = ballRadius > 0 ? offset(node.region, -ballRadius) : node.region;
+          if (footprint.length === 0) {
+            earlyNotes.push(`${node.id}: the ball cannot enter this pocket (narrower than its radius) — left uncut`);
+            ballUncutIds.push(node.id);
+            walkPockets(node.children);
+            continue;
+          }
+          pocketFloorRegions.push({
+            id: node.id,
+            footprint,
+            area: Math.abs(node.region.reduce((sum, ring) => sum + ringAreaOf(ring), 0)),
+            zTop: node.mouthZ,
+            zBottom,
+            triangles: new Uint32Array(0),
+            slopeDeg: [0, 0],
+            slopeMedianDeg: 0,
+            in: 'top',
+          });
+          walkPockets(node.children);
+        }
+      };
+      walkPockets(tree.pockets);
+    }
+
+    // #965 — the per-setup mesh the curved pipeline's `clSurface` must score against: `recogniseFeatures`
+    // (above) already rotated `input.geometry` into THIS setup's frame to build `tree`; `clSurface`
+    // is handed `ModelPlanInput.geometry` at every call site inside `planCurvedForTree` and must see
+    // the SAME rotation, or a non-identity setup's drop-cutter reads the part's OLD orientation
+    // against a tree built in the NEW one (`rotatedGeometryFor`'s own doc). Identity for `up = [0, 0, 1]`
+    // (every job today), so this changes nothing for the existing single-setup caller.
+    const curvedGeometry = rotatedGeometryFor(doorGeometry, doorFrame);
+
+    // #986 — THE CURVED PIPELINE'S OPTIONS, as a function of the ball, so the SAME finish can be
+    // planned once per candidate for measurement and then once for the winner.
+    const curvedOptionsFor = (b: Tool | undefined, paramsFor: (tool: Tool) => CutParams): PlanCurvedOptions => ({
+      offset,
+      safeZMm: SAFE_Z,
+      hopZMm: HOP_Z,
+      ...(depthBandMm === undefined ? {} : { depthBandMm }),
+      geometry: curvedGeometry,
+      // #982 — NO FLAT ANYWHERE IN THE HOUSE: the ball stands in for the flat (ball-as-rough,
+      // 0ca79e89's disc-aware proof against the region and the CL), and the pocket floors (no
+      // pocket chain at all without a flat) become `extraRegions`. A goal's own `curvedRoughTool`
+      // is moot here — with no flat anywhere it can only ever validate to `null` (see the other
+      // branch's own doc), which this one already subsumes with the more capable mechanism.
+      //
+      // #869/#966 — otherwise: absent (every existing caller): `primary`, unchanged. `null` (a
+      // goal with no `roughToolKey`): no rough, ball alone. A `Tool` (a goal's validated
+      // `roughToolKey`): that tool roughs instead of `primary`, which this job's own pockets (if
+      // it has any) still use — the two are independent on purpose, see
+      // `ModelPlanInput.curvedRoughTool`'s own doc.
+      ...(noFlatFallback
+        ? { flat: primary, extraRegions: pocketFloorRegions }
+        : input.curvedRoughTool === undefined
+          ? { flat: primary }
+          : input.curvedRoughTool === null
+            ? {}
+            : { flat: input.curvedRoughTool }),
+      ...(b === undefined ? {} : { ball: b }),
+      ...(restBallFor(b) === undefined ? {} : { restBall: restBallFor(b) }),
+      // #982 — NO BALL IN THE SET: the flat finishes the curved remainder (a flat-raster over
+      // the whole region, the flat's cusp rule), the creases via the rest with the smallest flat.
+      ...(b === undefined ? { finishFlat: finishFlat ?? primary } : {}),
+      ...(b === undefined && finishFlat !== undefined && finishFlat !== primary ? { restFlat: finishFlat } : {}),
+      ...(vbit === undefined ? {} : { vbit }),
+      stepDownMm: pocketParams.stepDown,
+      bandMm: MODEL_STOCK_TO_LEAVE_MM,
+      // #965/#985 — the job's own tolerance, per candidate (see `statedCuspFor`): a stated cusp
+      // wins, a stated pitch converts on THIS ball's radius, and the 0.027 mm default stands only
+      // when the job states neither.
+      finishScallopMm: statedCuspFor(b) ?? DEFAULT_FINISH_SCALLOP_MM,
+      stepOverMm: pocketParams.stepOver,
+      feeds,
+      cutParamsFor: paramsFor,
+      rapid: Z1.rapidEstimate,
+      spindleRpm: pocketParams.rpm,
+      air: true,
+      edgeBreak: input.edgeBreak,
+      toolNumberFor: (tool) => tool.number ?? 1,
+      facing: input.facing ?? 'off',
+      ...(input.flatSurfaceMaxSlopeDeg === undefined ? {} : { flatSurfaceMaxSlopeDeg: input.flatSurfaceMaxSlopeDeg }),
+    });
+    // The cut params a ball candidate would use — the same rule the chosen ball's `cutParamsFor`
+    // applies, so the measurement prices each candidate with its own catalogue row.
+    const cutParamsForBall = (b: Tool | undefined): ((tool: Tool) => CutParams) => {
+      const bp = b === undefined ? null : toolCutParams(input, b, pocketParams);
+      return (tool: Tool): CutParams => {
+        if (b !== undefined && tool === b && bp !== null) return bp.params;
+        if (vbit !== undefined && tool === vbit && vbitParams !== null) return vbitParams.params;
+        return pocketParams;
+      };
+    };
+    // #986 — THE RANK: finish each candidate over the remainder and stamp it against the goal
+    // grid; keep the least leftover, then the cheaper cycle. The owned ball is always among the
+    // candidates (the ideal's house contains the owned set), so a superset can never score below
+    // its subset by construction. No goal grid → nothing to measure, and the pick above stands.
+    // #986 (the ruling) — THE RANK'S OWN STATEMENT: every measured candidate's leftover and
+    // cycle, the one that won, and the uncapped best as a fact. It rides the plan's notes.
+    const ballRankNotes: string[] = [];
+    if (coverageGoal !== undefined && goalCoverage !== undefined && ballCandidates.length > 1 && tree.remainder.length > 0) {
+      let best: { tool: Tool; leftover: number; cycle: number } | null = null;
+      let uncappedBest: { tool: Tool; leftover: number; cycle: number } | null = null;
+      const measuredRows: string[] = [];
+      // #986 — MEASURE THE LIKELY WINNER FIRST, THEN STOP AT THE FIRST NON-IMPROVEMENT. Candidates
+      // are ordered FINE → COARSE, because leftover is monotone in the diameter: a smaller ball
+      // reaches deeper into a crease, so it leaves no more than a larger one on the same remainder.
+      // The finest reaching ball is therefore the likely winner and is measured first; the first
+      // candidate that fails to beat the best ends the search, because every candidate after it is
+      // coarser still. Two finishes per plan is the normal case (the panther's target 200–300 s
+      // for the ideal); the monotone argument is stated here so the early exit is auditable, and a
+      // candidate that does TIE keeps the cycle tie-break.
+      const ordered = [...ballCandidates].sort((a, b) => (cuttingDiameter(a) ?? 0) - (cuttingDiameter(b) ?? 0));
+      for (const candidate of ordered) {
+        opts.signal?.throwIfAborted();
+        let measured: PlanCurvedResult;
+        try {
+          // #986 (the ruling) — CANDIDATES ARE RANKED COARSE, at the vendor's cusp, on the 4a
+          // mask; only the WINNER is planned at the job's own tolerance. The rank compares balls,
+          // and the cusp the job states is a property of the chosen finish, not of the candidate.
+          measured = planCurvedForTree(tree, {
+            ...curvedOptionsFor(candidate, cutParamsForBall(candidate)),
+            finishScallopMm: DEFAULT_FINISH_SCALLOP_MM,
+          });
+        } catch {
+          continue; // a candidate that cannot plan this remainder is not a candidate
+        }
+        const coverage = goalCoverage(measured.ops.map((o) => o.outcome.ir));
+        if (coverage === null) continue;
+        const leftover = coverage.leftoverCells / Math.max(1, coverage.coveredCells);
+        const cycle = measured.ops.reduce(
+          (n, o) => n + o.outcome.ir.operations.reduce((k, op) => k + (op.estimatedSeconds ?? 0), 0),
+          0,
+        );
+        // #986 (the maintainer's ruling) — NO CYCLE CAP: a longer plan is a cost the operator is
+        // shown, not a reason to hide a better surface. Every measured candidate is stated with
+        // its leftover and its cycle, and the rank decides on outcome.
+        if (uncappedBest === null || leftover < uncappedBest.leftover - 1e-9 || (Math.abs(leftover - uncappedBest.leftover) <= 1e-9 && cycle < uncappedBest.cycle)) {
+          uncappedBest = { tool: candidate, leftover, cycle };
+        }
+        const diameterMm = cuttingDiameter(candidate) ?? 0;
+        measuredRows.push(`⌀${diameterMm.toFixed(2)} mm ${candidate.name}: leftover ${(leftover * 100).toFixed(2)} %, cycle ${cycle.toFixed(0)} s`);
+        if (best === null || leftover < best.leftover - 1e-9 || (Math.abs(leftover - best.leftover) <= 1e-9 && cycle < best.cycle)) {
+          best = { tool: candidate, leftover, cycle };
+          continue;
+        }
+        // Coarser and not better: stop. Every remaining candidate is coarser still.
+        if (leftover > best.leftover + 1e-9) break;
+      }
+      if (best !== null) ball = best.tool;
+      // The rank's statement: the measured candidates, the winner, and the uncapped best as a fact.
+      const chosen = best === null ? 'no candidate could plan the remainder — the pre-#986 pick stands' : `${best.tool.name} (leftover ${(best.leftover * 100).toFixed(2)} %, cycle ${best.cycle.toFixed(0)} s)`;
+      ballRankNotes.push(
+        `ball rank: measured ${measuredRows.length} candidate(s) — ${measuredRows.join('; ')}. Chosen: ${chosen}.` +
+          (uncappedBest !== null && (best === null || uncappedBest.tool !== best.tool)
+            ? ` The uncapped best is ${uncappedBest.tool.name} (leftover ${(uncappedBest.leftover * 100).toFixed(2)} %, cycle ${uncappedBest.cycle.toFixed(0)} s).`
+            : ''),
+      );
+    }
+    // The chosen ball's own params and note (the note joins the substitution statements) — read
+    // AFTER the rank, so a candidate that won gets its own catalogue row, never the default's.
+    const restBall = restBallFor(ball);
     const ballParams = ball === undefined ? null : toolCutParams(input, ball, pocketParams);
     if (ballParams?.note !== null && ballParams?.note !== undefined) toolSubstitutions.push(ballParams.note);
-    const vbitParams = vbit === undefined ? null : toolCutParams(input, vbit, pocketParams);
     if (vbitParams?.note !== null && vbitParams?.note !== undefined) toolSubstitutions.push(vbitParams.note);
     const restBallParams = restBall === undefined ? null : toolCutParams(input, restBall, pocketParams);
     if (restBallParams?.note !== null && restBallParams?.note !== undefined) toolSubstitutions.push(restBallParams.note);
@@ -739,14 +1021,6 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         : setupIndex === input.setups.length - 1
           ? { count: 0, width: DEFAULT_RELEASE_TABS.width, height: DEFAULT_RELEASE_TABS.height }
           : DEFAULT_RELEASE_TABS;
-
-    // #965 — the per-setup mesh the curved pipeline's `clSurface` must score against: `recogniseFeatures`
-    // (above) already rotated `input.geometry` into THIS setup's frame to build `tree`; `clSurface`
-    // is handed `ModelPlanInput.geometry` at every call site inside `planCurvedForTree` and must see
-    // the SAME rotation, or a non-identity setup's drop-cutter reads the part's OLD orientation
-    // against a tree built in the NEW one (`rotatedGeometryFor`'s own doc). Identity for `up = [0, 0, 1]`
-    // (every job today), so this changes nothing for the existing single-setup caller.
-    const curvedGeometry = rotatedGeometryFor(doorGeometry, doorFrame);
 
     // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
     // already-finished surface (this file's own #965 open-item note, below, used to be the whole
@@ -809,73 +1083,6 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       }
     }
 
-    const statedFinishCusp = ((): number | undefined => {
-      if (input.tolerances.finishMm !== undefined) return input.tolerances.finishMm;
-      const pitch = input.tolerances.finishStepOverMm;
-      const radiusMm = ball === undefined ? undefined : (cuttingDiameter(ball) ?? 0) / 2;
-      if (pitch === undefined || radiusMm === undefined || !(radiusMm > 0) || !(pitch > 0)) return undefined;
-      const half = pitch / 2;
-      return radiusMm - Math.sqrt(Math.max(0, radiusMm * radiusMm - half * half));
-    })();
-
-    // #982 — NO FLAT: each pocket node becomes a synthetic remainder-style region the curved
-    // pipeline plans with the ball (its rough, then the ball's scallop finish). The floor is
-    // CLAMPED at the real design top over the opening: a spurious pocket floor below the body
-    // (the 11.37 mm gouge) yields no depth, so the ball can never cut through the part.
-    const pocketFloorRegions: RemainderRegion[] = [];
-    // #982's own note site ran BEFORE this setup's `notes` array exists (the walk below is
-    // called before the array is built), a temporal-dead-zone crash waiting on the first pocket
-    // narrower than the ball; #992 collects them here — same sentence, same position ahead of
-    // the result notes — and the ids so ONE statement can state the cause with its count.
-    const earlyNotes: string[] = [];
-    const ballUncutIds: string[] = [];
-    if (noFlatFallback) {
-      const bins = buildTriangleBins(doorGeometry.triangles);
-      const walkPockets = (nodes: PocketNode[]): void => {
-        for (const node of nodes) {
-          let designMax = -Infinity;
-          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-          for (const ring of node.region) {
-            for (const [x, y] of ring) {
-              minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-              minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-            }
-          }
-          for (let x = minX; x <= maxX + 1e-9; x += 0.5) {
-            for (let y = minY; y <= maxY + 1e-9; y += 0.5) {
-              const top = topSurfaceAt(bins, x, y);
-              if (top !== null && top > designMax) designMax = top;
-            }
-          }
-          const zBottom = Number.isFinite(designMax) ? Math.max(node.floorZ, designMax) : node.floorZ;
-          // The ball's CENTRE space: the footprint is eroded by the ball's radius, exactly as the
-          // pocket chain offsets its loops — otherwise the ball's centre reaches the wall and its
-          // flank cuts a radius into it (a 0.95 mm gouge measured on the elephant). Eroded, the
-          // flank is tangent at the wall foot: the stated fillet, never a gouge.
-          const ballRadius = (cuttingDiameter(primary) ?? 0) / 2;
-          const footprint = ballRadius > 0 ? offset(node.region, -ballRadius) : node.region;
-          if (footprint.length === 0) {
-            earlyNotes.push(`${node.id}: the ball cannot enter this pocket (narrower than its radius) — left uncut`);
-            ballUncutIds.push(node.id);
-            walkPockets(node.children);
-            continue;
-          }
-          pocketFloorRegions.push({
-            id: node.id,
-            footprint,
-            area: Math.abs(node.region.reduce((sum, ring) => sum + ringAreaOf(ring), 0)),
-            zTop: node.mouthZ,
-            zBottom,
-            triangles: new Uint32Array(0),
-            slopeDeg: [0, 0],
-            slopeMedianDeg: 0,
-            in: 'top',
-          });
-          walkPockets(node.children);
-        }
-      };
-      walkPockets(tree.pockets);
-    }
 
     const result = planTreePrograms(tree, {
       offset,
@@ -922,58 +1129,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         ...(restRegion === undefined ? {} : { restRegion }),
         ...(input.stockProbes === undefined ? {} : { stockProbes: input.stockProbes }),
       },
-      curved: {
-        ...(depthBandMm === undefined ? {} : { depthBandMm }),
-        geometry: curvedGeometry,
-        // #982 — NO FLAT ANYWHERE IN THE HOUSE: the ball stands in for the flat (ball-as-rough,
-        // 0ca79e89's disc-aware proof against the region and the CL), and the pocket floors (no
-        // pocket chain at all without a flat) become `extraRegions`. A goal's own `curvedRoughTool`
-        // is moot here — with no flat anywhere it can only ever validate to `null` (see the other
-        // branch's own doc), which this one already subsumes with the more capable mechanism.
-        //
-        // #869/#966 — otherwise: absent (every existing caller): `primary`, unchanged. `null` (a
-        // goal with no `roughToolKey`): no rough, ball alone. A `Tool` (a goal's validated
-        // `roughToolKey`): that tool roughs instead of `primary`, which this job's own pockets (if
-        // it has any) still use — the two are independent on purpose, see
-        // `ModelPlanInput.curvedRoughTool`'s own doc.
-        ...(noFlatFallback
-          ? { flat: primary, extraRegions: pocketFloorRegions }
-          : input.curvedRoughTool === undefined
-            ? { flat: primary }
-            : input.curvedRoughTool === null
-              ? {}
-              : { flat: input.curvedRoughTool }),
-        ...(ball === undefined ? {} : { ball }),
-        ...(restBall === undefined ? {} : { restBall }),
-        // #982 — NO BALL IN THE SET: the flat finishes the curved remainder (a flat-raster over
-        // the whole region, the flat's cusp rule), the creases via the rest with the smallest flat.
-        ...(ball === undefined ? { finishFlat: finishFlat ?? primary } : {}),
-        ...(ball === undefined && finishFlat !== undefined && finishFlat !== primary ? { restFlat: finishFlat } : {}),
-        ...(vbit === undefined ? {} : { vbit }),
-        stepDownMm: pocketParams.stepDown,
-        bandMm: MODEL_STOCK_TO_LEAVE_MM,
-        // #965 (the review session's ruling, 2026-11-05) — THE JOB'S TOLERANCE IS THE SCALLOP.
-        // No floor and no max(): a job that states 0.01 mm finishes at 0.01 mm, and the vendor's
-        // 0.027 mm (its ⌀6 ball's own 0.8 mm step-over) is the default only for a job that states
-        // no tolerance at all. (The 960 merge floored the tolerance at the default, so a finer
-        // tolerance could not tighten the scallop — that reading is withdrawn.)
-        //
-        // #985 — AND A STATED PITCH IS A PITCH. `finishStepOverMm` is a WIDTH (the old engine's
-        // finishing raster pitch); the cusp it leaves is `R − √(R² − (s/2)²)` on the finishing
-        // ball, converted here where R is known, never fed into `finishMm`'s height seat. A
-        // stated cusp wins over a pitch; absent both, the engine's default stands.
-        finishScallopMm: statedFinishCusp ?? DEFAULT_FINISH_SCALLOP_MM,
-        stepOverMm: pocketParams.stepOver,
-        feeds,
-        cutParamsFor,
-        rapid: Z1.rapidEstimate,
-        spindleRpm: pocketParams.rpm,
-        air: true,
-        edgeBreak: input.edgeBreak,
-        toolNumberFor: (tool) => tool.number ?? 1,
-        facing: input.facing ?? 'off',
-        ...(input.flatSurfaceMaxSlopeDeg === undefined ? {} : { flatSurfaceMaxSlopeDeg: input.flatSurfaceMaxSlopeDeg }),
-      },
+      curved: curvedOptionsFor(ball, cutParamsFor),
     });
     opts.signal?.throwIfAborted();
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 0.9 });
@@ -1060,6 +1216,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       );
     }
     notes.push(...toolSubstitutions);
+    // #986 (the ruling) — the ball rank's own statement: the measured candidates, the winner and
+    // the uncapped best, so the operator sees what the cap cost.
+    notes.push(...ballRankNotes);
     // #982 (the review session's ruling) — the two cutter fallbacks, stated on the card in
     // outcome terms (the measured coverage/cycle numbers are the acceptance card's; the plan
     // states the method and the tradeoff it implies). #992 — each is typed: a cut made by a
@@ -1184,7 +1343,39 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     });
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 1 });
   }
-  return { perSetup };
+  // #961 (the card slice) — THE PLAN'S OWN OUTCOME, from the same stamping the picker already uses.
+  // Nothing new is simulated: every program's IR is posted and stamped once (the cache above), the
+  // fields are unioned, and the result is the coverage the 0.1 mm band leaves and the deepest
+  // overshoot. Absent without `input.goal` — the caller did not ask for an outcome.
+  const outcome: PlanOutcome | undefined = (() => {
+    if (coverageGoal === undefined) return undefined;
+    const fields: Float32Array[] = [];
+    for (const setup of perSetup) for (const ir of setup.programs) {
+      const field = stampedField(ir);
+      if (field !== null) fields.push(field);
+    }
+    if (fields.length === 0) return undefined;
+    const union = Float32Array.from(fields[0]!);
+    for (const field of fields.slice(1)) for (let k = 0; k < union.length; k++) if (field[k]! < union[k]!) union[k] = field[k]!;
+    let covered = 0;
+    let leftover = 0;
+    let leftoverAboveMm = 0;
+    for (let k = 0; k < union.length; k++) {
+      if (coverageGoal.covered[k] !== 1) continue;
+      covered++;
+      const over = union[k]! - (coverageGoal.z[k] as number);
+      if (over > 0.1) leftover++;
+      if (over > leftoverAboveMm) leftoverAboveMm = over;
+    }
+    const cycleSeconds = perSetup.reduce((n, setup) => n + setup.totalCostSeconds, 0);
+    return {
+      coverage: covered === 0 ? null : 1 - leftover / covered,
+      cutInto: { adjudicatedFraction: null, maxMm: null },
+      leftoverAboveMm,
+      cycleSeconds,
+    };
+  })();
+  return outcome === undefined ? { perSetup } : { perSetup, outcome };
 }
 
 const allPockets = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [n, ...allPockets(n.children)]);
@@ -2990,14 +3181,19 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       const vPitchGate = Math.max(0.5, (cuttingDiameter(vTool) ?? 0) / 4);
       const prevClGate = restBallCl ?? clBall();
       if (hasValley(prevClGate, { min: roughRef.bounds.min, max: roughRef.bounds.max }, vPitchGate)) {
-      // The V's own CL and the previous (rest ball's) CL: the leftover depth at a crease is the
-      // material between them — the number the crease rule's width test is stated at.
-      const vCl = clSurface(opts.geometry, roughRegion, vTool, cuts.stepOver);
       const prevCl = restBallCl ?? clBall();
       const vPitch = Math.min(0.5, Math.max(0.1, (cuttingDiameter(vTool) ?? 0) / 4));
       let creaseAdmitted = 0;
       let creaseRefused = 0;
       attempt('pencil', vTool, ref, () => {
+        // The V's own CL and the previous (rest ball's) CL: the leftover depth at a crease is the
+        // material between them — the number the crease rule's width test is stated at.
+        //
+        // #961 (the gate on 961-wiring-r) — BUILT INSIDE THE `attempt`: a V whose cone the house
+        // does not state (the organizer's catalogue row) has no drop-cutter profile and
+        // `clSurface` throws by name; the crease must be STATED in `unplanned` with that reason,
+        // never refuse the whole job. The throw used to sit above the attempt and escaped.
+        const vCl = clSurface(opts.geometry, roughRegion, vTool, cuts.stepOver);
         const out = pencil({
           cutter: vTool,
           region: roughRegion,

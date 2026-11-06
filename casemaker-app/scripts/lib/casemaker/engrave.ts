@@ -1057,13 +1057,25 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // model-engine goal path posts a real `verify` with no `surface3d`, and the old proxy would
     // have read it as an item job and dropped the goal block from the receipt silently. Mirrors
     // the same fix in `engraveRunStore.ts`'s `afterLoad`, so the CLI and the Cut card agree.
+    /**
+     * #961 (the gate) — A POSTED PROGRAM'S KEY MUST RESOLVE TO THE BENCH'S CUTTER. `cutterKeyOf`
+     * stamps `tool.id ?? tool.name`, and the built-in tier carries rows whose identity is not
+     * their registry key: the 1 mm flat has no `id` (so its NAME is stamped), the metal flat's
+     * `id` is the physical `112111313812`. The coverage-ranked sequence now reaches both. Try the
+     * key, then the physical id, then the name — the three identities a tool record states.
+     */
+    const benchCutter = (key: string): Tool | null =>
+      entryFor(key)?.tool ??
+      getTools().find((e) => e.tool.id === key)?.tool ??
+      getTools().find((e) => e.tool.name === key)?.tool ??
+      null;
     const goalCheck = goalCheckForProgram(job, pureGoalObject(job) !== null, {
       passCoverage: goalPassCoverage(shopDefaults),
       // #955/V2-2 — the edge-break allowance's GATE parameters, from the job's edgeBreak and the
       // tools this run posts (never the CAM's plan, A's R3). No edge break → no allowance.
       ...goalEdgeBreakOptions(
         job,
-        (key) => (key === job.toolKey ? tool : (entryFor(key)?.tool ?? null)),
+        (key) => (key === job.toolKey ? tool : benchCutter(key)),
         generated.programs.map((p) => p.toolKey),
       ),
     });
@@ -1082,7 +1094,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // `toolForProgram`'s reading: the job's own snapshot for the job's key, the registry for a
         // setup's later cutter.
         cutterFor: (program) =>
-          program.toolKey === job.toolKey ? tool : (entryFor(program.toolKey)?.tool ?? null),
+          program.toolKey === job.toolKey ? tool : benchCutter(program.toolKey),
         load: async ({ program, index, cutter, drillPoint, priorRemoval, priorFields, priorExactRemoval }) => {
           sweeping =
             (program.kind ?? 'engrave') === 'facing'

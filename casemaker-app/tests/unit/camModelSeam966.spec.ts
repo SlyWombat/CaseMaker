@@ -231,4 +231,57 @@ describe('#966 ROUND 2 — generateGoalProgram posts and verifies every program 
       expect(errors, `${program.toolKey}: ${errors.map((e) => e.message).join('; ')}`).toEqual([]);
     }
   }, 60_000);
+
+  it('#961 — the ideal plan rides on the generate call only when the caller sends the catalogue', async () => {
+    const { job, goal, shop, tool } = randomPartJob(1);
+
+    // RED FIRST before the catalogueTools wire: the worker had no way to see the app's library,
+    // so the ideal could never exist. Absent = no ideal, the owned plan still posts.
+    const without = await generateGoalProgram(job, goal, tool, null, { shop });
+    expect(without.ok, without.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toBe(true);
+    expect(without.planIdeal ?? null).toBeNull();
+    expect(without.plan).not.toBeNull();
+
+    // With the catalogue on the call, the ideal is planned beside the owned plan and carried.
+    const catalogueTool: Tool = flatEndMill(1, { number: 9, id: 'cat:flat-1', name: '1 mm flat end' });
+    const withCatalogue = await generateGoalProgram(job, goal, tool, null, { shop, catalogueTools: [catalogueTool] });
+    expect(withCatalogue.ok, withCatalogue.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toBe(true);
+    expect(withCatalogue.planIdeal).not.toBeNull();
+    expect(withCatalogue.plan).not.toBeNull();
+
+    // #961 (the card slice) — each plan carries its OWN measured outcome: coverage over the goal
+    // grid and the deepest the sweep stands above it. RED before the outcome wire: both were
+    // undefined, so the card had no numbers to compare.
+    expect(withCatalogue.plan!.outcome, 'the owned plan carried no outcome').toBeDefined();
+    expect(withCatalogue.planIdeal!.outcome, 'the ideal plan carried no outcome').toBeDefined();
+    expect(withCatalogue.plan!.outcome!.coverage).not.toBeNull();
+    expect(withCatalogue.planIdeal!.outcome!.coverage).not.toBeNull();
+    expect(withCatalogue.plan!.outcome!.cycleSeconds).toBeGreaterThan(0);
+    expect(withCatalogue.planIdeal!.outcome!.cycleSeconds).toBeGreaterThan(0);
+    // The owned plan is measured with or without a catalogue — the outcome is the plan's own.
+    expect(without.plan!.outcome).toBeDefined();
+
+    // #961 (the card slice) — THE MATERIAL TRADEOFF is computed from the two outcomes and carried
+    // with the result, and its line exists exactly when it is material. Its verdicts row says the
+    // seven lines were not scored here rather than pretending they matched.
+    expect(withCatalogue.planTradeoff, 'no tradeoff carried beside the two plans').not.toBeNull();
+    expect(withCatalogue.planTradeoff!.line !== null).toBe(withCatalogue.planTradeoff!.material);
+    expect(withCatalogue.planTradeoff!.differences.some((d) => d.bound === 'verdicts' && d.reading.includes('not scored'))).toBe(true);
+    // No catalogue → no ideal → no tradeoff to state.
+    expect(without.planTradeoff ?? null).toBeNull();
+    // With no recorded choice the OWNED plan is what posts (the default).
+    expect(withCatalogue.plan).not.toBe(withCatalogue.planIdeal);
+
+    // #961 (the card slice, step 3) — THE OPERATOR'S CHOICE IS WHAT CUTS. With `planChoice:'ideal'`
+    // the ideal plan is the one carried as `plan` (what posts), and the tradeoff still reads
+    // owned-versus-ideal.
+    const chosen = await generateGoalProgram({ ...job, planChoice: 'ideal' as const }, goal, tool, null, {
+      shop,
+      catalogueTools: [catalogueTool],
+    });
+    expect(chosen.ok, chosen.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toBe(true);
+    expect(chosen.planIdeal).not.toBeNull();
+    expect(chosen.plan).toBe(chosen.planIdeal);
+    expect(chosen.planTradeoff).not.toBeNull();
+  }, 240_000);
 });
