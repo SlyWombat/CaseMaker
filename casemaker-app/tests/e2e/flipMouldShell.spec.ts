@@ -87,18 +87,21 @@ test('#754/#723 — a two-side mouse shell opens, posts the model engine’s fou
     if ((await technical.getAttribute('open')) === null) await technical.locator('summary').click();
     await expect(page.getByTestId('sim-job-coverage')).toBeVisible();
     const coverage = page.getByTestId('sim-job-coverage');
-    // #1032 (6b's review) — THE SENTENCES SAY WHAT EACH RESTART KEPT, per program: side 2's rough
-    // (program 3) restarted from the blank with side 1's floor carried; its finish (program 4) is
-    // in the SAME setup as program 3, whose own field cannot be carried into it once a cross-setup
-    // removal mesh is in the chain (#817's rule) — so it is stated as plainly swept from the
-    // blank. Both facts are the engine's own, and the run state carries them per program.
-    expect(state.simPrograms.map((p) => ({ fromBlank: p.fromBlank, carried: p.carriedFloor }))).toEqual([
-      { fromBlank: false, carried: false },
-      { fromBlank: false, carried: false },
-      { fromBlank: true, carried: true },
-      { fromBlank: true, carried: false },
+    // #1034 — EVERY PROGRAM NAMES ITS SEED. Program 3 (side 2's rough) restarts from the blank
+    // with side 1's floor carried; program 4 (side 2's finish) is seeded from program 3's own
+    // removal AND keeps that carried floor, because the seed rule is per predecessor — the old
+    // all-chain rule swept it on a bare blank even though its predecessor was in its own setup.
+    expect(
+      state.simPrograms.map((p) => ({ fromBlank: p.fromBlank, carried: p.carriedFloor, seed: p.seedFrom })),
+    ).toEqual([
+      { fromBlank: false, carried: false, seed: null },
+      { fromBlank: false, carried: false, seed: 'program 1 (flat-1.0)' },
+      { fromBlank: true, carried: true, seed: null },
+      { fromBlank: false, carried: true, seed: 'program 3 (flat-1.0)' },
     ]);
     await expect(coverage).toContainText("Restarted from the blank: program 3 (flat-1.0) — the earlier setup's floor was carried");
-    await expect(coverage).toContainText('Swept from the blank: program 4 (⌀ 2 mm ball · 30 mm flute)');
+    await expect(coverage).toContainText(
+      "program 4 (⌀ 2 mm ball · 30 mm flute) starts from program 3 (flat-1.0)'s removal, with the earlier setup's floor carried",
+    );
   }
 });
