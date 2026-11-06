@@ -273,16 +273,51 @@ describe('#785 — Generate', () => {
     // The sheet states the floor and what it leaves.
     expect(out.surface3d?.notes.some((n) => n.includes("Cut only the stock's top 11 mm"))).toBe(true);
 
-    // #982 pin — the fixture's OWN flat-only set through the ONE model entry: no ball is the
-    // flat-raster fallback, never a refusal. RED at the parent (planModelCam threw).
+    // #988 pin — THE SAME CHOICE THROUGH THE ONE MODEL ENTRY. The seam carries the band into
+    // `ModelPlanInput.setups[].bandMm` (reach 12 − 1 clearance = 11 mm) and the plan cuts the top
+    // band instead of refusing on the contour's 150 mm demand. RED at the parent: `planModelCam`
+    // threw 'no cutter sequence can be planned …'.
     {
       const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
       const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
-      const modelInput = await buildModelPlanInputForGoal(tallJob(target), target, tool, {});
+      // The model engine finishes a curved remainder with a ball; the OLD path needs none, so the
+      // fixture's own set is the flat alone. Pass a ball beside it — the band is about the depth,
+      // and a house that cannot plan the remainder at all is #982's no-flat/ball gap, not #988's.
+      const ball: Tool = { ...flat({ fluteLength: 12, id: 'ball-12', name: 'ball-12' }), shape: 'ball', typeText: 'Ball Nose' };
+      const modelInput = await buildModelPlanInputForGoal(tallJob(target), target, tool, {
+        tools: [{ key: 'inv:ball-12', tool: ball, provenance: 'test fixture' }],
+      });
       const modelOut = await planModelCam(modelInput);
-      expect(modelOut.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
-      expect(modelOut.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no ball nose');
+      const programs = modelOut.perSetup.flatMap((s) => s.programs);
+      expect(programs.length, 'no program was planned').toBeGreaterThan(0);
+      const zs = programs.flatMap((p) => p.operations.flatMap((o) => o.moves.map((m) => m.z)));
+      expect(Math.min(...zs), 'the band floor is −11').toBeGreaterThanOrEqual(-11.001);
+      expect(Math.min(...zs), 'the plan must reach the band, not stop above it').toBeLessThanOrEqual(-10.5);
+      expect(modelOut.perSetup.flatMap((s) => s.notes).join('\n')).toContain("Cut only the stock's top 11 mm");
     }
+  }, 120_000);
+
+  it('#988 — a STATED band (#888) is honoured through the model seam, measured from the goal top', async () => {
+    // The goal's top sits 2 mm below the stock top; a stated 6 mm band (the old path's own datum —
+    // "how deep ITS side cuts below the goal's own highest surface") therefore stops the cut 8 mm
+    // below the STOCK top, and the seam must say so. RED before the fix: nothing was mapped at all.
+    const target = rampGoal({ bandMm: 6, position: { x: 25, y: 25, z: -2 } });
+    const tool = flat({ fluteLength: 60 });
+    const ball: Tool = { ...flat({ fluteLength: 60, id: 'ball-988', name: 'ball-988' }), shape: 'ball', typeText: 'Ball Nose' };
+    const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+    const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+    const job = tallJob(target);
+    const input = await buildModelPlanInputForGoal(job, target, tool, {
+      tools: [{ key: 'inv:ball-988', tool: ball, provenance: 'test fixture' }],
+    });
+    expect(input.setups[0]!.bandMm, 'the stated band must reach the setups').toBeCloseTo(8, 6);
+    const out = await planModelCam(input);
+    const programs = out.perSetup.flatMap((s) => s.programs);
+    expect(programs.length, 'no program was planned').toBeGreaterThan(0);
+    const zs = programs.flatMap((p) => p.operations.flatMap((o) => o.moves.map((m) => m.z)));
+    expect(Math.min(...zs), 'the band floor is −8 (6 below a goal top at −2)').toBeGreaterThanOrEqual(-8.001);
+    expect(Math.min(...zs), 'the plan must reach the band').toBeLessThanOrEqual(-7.5);
+    expect(out.perSetup.flatMap((s) => s.notes).join('\n')).toContain("Cut only the stock's top 8 mm");
   }, 120_000);
 
   it('an unrecorded reach does not stop Generate — the assumption is stated, the cut proceeds', async () => {
