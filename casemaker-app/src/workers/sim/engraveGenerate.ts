@@ -133,6 +133,7 @@ import { simErrors, simulationProblem } from '@/engine/cnc/simGate';
 import { withPeriod } from '@/store/engraveRunGate';
 import type { NodeMeshOutput } from '../geometry/meshOutput';
 import { programHash } from '@/engine/cnc/programHash';
+import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import { jobVise, validateVise, viseEnvelope } from '@/engine/cnc/fixture';
 import { generateEngrave, makeClipperOffset, zPasses, type EngraveRegion, type FinishPassSpec, type VCarveRegion } from '@/engine/cnc/cam/engraveJob';
 // #433/#666 — the adaptive-clearing strategy a metal pocket is cut with. The METHOD settings are
@@ -5141,6 +5142,10 @@ export async function buildModelPlanInputForGoal(
     cutters,
     tolerances,
     edgeBreak,
+    // #1003 — the board's breakthrough, for the FREEING CONTOUR's floor only (a contour cuts through
+    // the blank into the board by design); absent when the job has no board, so the floor is the
+    // stock bottom itself.
+    ...(hasSacrificial(job.sacrificial) ? { sacrificialBreakthroughMm: job.breakthrough } : {}),
     curvedRoughTool,
     // #1005 — the plan states the mould's own facts (one-sided, and the cavity's steepest wall
     // against `MOLD_DRAFT_LIMIT_DEG`). The wall is measured from the part's surface — the cavity's

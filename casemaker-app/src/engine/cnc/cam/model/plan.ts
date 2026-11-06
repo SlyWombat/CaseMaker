@@ -218,6 +218,12 @@ export interface SetupSpec {
 
 export interface ModelPlanInput {
   geometry: FeatureSource;
+  /**
+   * #1003 (the manager's narrowing) — the sacrificial board's BREAKTHROUGH, mm. Used ONLY for the
+   * freeing contour's floor (a contour cuts through the blank into the board by design); pockets
+   * and curved regions never use it.
+   */
+  sacrificialBreakthroughMm?: number;
   /** #959 ruling: `'on'` plans the facing stage; absent/`'off'` gives the skin to the `skin` pass. */
   facing?: 'off' | 'on';
   /**
@@ -871,6 +877,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       pockets: noFlatFallback ? null : {
         ...(depthBandMm === undefined ? {} : { depthBandMm }),
         houseFlats: flats,
+        ...(input.sacrificialBreakthroughMm === undefined ? {} : { sacrificialBreakthroughMm: input.sacrificialBreakthroughMm }),
         // #975 — the V bits are the pocket chain's last resort: a pocket no flat covers gets the
         // narrowest V whose tip fits the stroke and whose leg reaches the floor, floor-correct.
         houseVs: input.cutters.house.filter((t) => isVShape(t)),
@@ -1298,6 +1305,14 @@ function boundsOfPolygons(polygons: Polygons): Box2 {
 export interface PlanPocketsOptions {
   /** The real Clipper2 offset, or a test fake — `pocketLoops`' own contract, carried through unchanged. */
   offset: OffsetFn;
+  /**
+   * #1003 (the manager's narrowing) — THE BOARD'S BREAKTHROUGH, mm, and ONLY for the freeing
+   * contour: the contour's job is to cut through the blank into the board, so its clamp is the
+   * stock bottom minus this. Pocket floors and the curved regions stay at exactly the stock bottom —
+   * nothing there has a reason to go below the blank — and the verifier's spatial rule stays the
+   * net for everything else.
+   */
+  sacrificialBreakthroughMm?: number;
   /** House cutters, largest first is NOT required — #961's `chooseSequence` ranks by cost, not list order. */
   houseFlats: readonly Tool[];
   /**
@@ -1503,10 +1518,12 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // the shallower of the demand, the band and the stock bottom wins.
   const stockBottomZ = tree.frame.stockBottom;
   const stockFloorDepthMm = stockBottomZ === undefined ? undefined : z0 - stockBottomZ;
+  const breakthroughMm = opts.sacrificialBreakthroughMm ?? 0;
+  const contourFloorDepthMm = stockFloorDepthMm === undefined ? undefined : stockFloorDepthMm + Math.max(0, breakthroughMm);
   const contourDepthMm = Math.min(
     contourDepthRawMm,
     depthBandMm === undefined ? Number.POSITIVE_INFINITY : depthBandMm,
-    stockFloorDepthMm === undefined ? Number.POSITIVE_INFINITY : stockFloorDepthMm,
+    contourFloorDepthMm === undefined ? Number.POSITIVE_INFINITY : contourFloorDepthMm,
   );
   /** #1003 — the SAME floor for every op's depth: nothing is planned below the stock bottom. */
   const capDepth = (raw: number): number => (stockFloorDepthMm === undefined ? raw : Math.min(raw, stockFloorDepthMm));
@@ -2192,10 +2209,12 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       }
     }
   }
-  // #1003 — the stock bottom's own clip, stated once per setup, in the same statement path.
-  if (stockFloorDepthMm !== undefined && contourDepthRawMm > stockFloorDepthMm + 1e-9) {
+  // #1003 — the stock bottom's own clip (plus the board's breakthrough, CONTOUR ONLY), stated
+  // once per setup, in the same statement path.
+  if (contourFloorDepthMm !== undefined && contourDepthRawMm > contourFloorDepthMm + 1e-9) {
     notes.push(
-      `the goal extends ${(contourDepthRawMm - stockFloorDepthMm).toFixed(3)} mm below the stock; the freeing contour is cut off at the stock bottom`,
+      `the goal extends ${(contourDepthRawMm - contourFloorDepthMm).toFixed(3)} mm below the stock; the freeing contour is cut off at the stock bottom` +
+        (breakthroughMm > 0 ? ` plus the board's ${breakthroughMm.toFixed(3)} mm breakthrough` : ''),
     );
   }
   // #943 (2026-11-05 ruling): the facing stage states where its cut starts, how many passes the

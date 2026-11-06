@@ -39,9 +39,10 @@ function cube(size: number): ModelPlanInput['geometry'] {
   };
 }
 
-function input(stockThickness: number): ModelPlanInput {
+function input(stockThickness: number, breakthroughMm?: number): ModelPlanInput {
   return {
     geometry: cube(10),
+    ...(breakthroughMm === undefined ? {} : { sacrificialBreakthroughMm: breakthroughMm }),
     setups: [{ frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -stockThickness }, underside: 'flatOnStockBottom' }],
     stock: { length: 20, width: 20, thickness: stockThickness, material: 'hardwood' },
     fixture: { mount: 'vise', envelope: null },
@@ -72,6 +73,16 @@ describe('#1003 the stock bottom is the floor', () => {
     const output = await planModelCam(input(12));
     expect(deepestZ(output)).toBeLessThanOrEqual(-10 + 1e-6);
     expect(deepestZ(output)).toBeGreaterThanOrEqual(-10 - 1e-6);
+    const notes = output.perSetup.flatMap((s) => s.notes).join('\n');
+    expect(notes).not.toContain('cut off at the stock bottom');
+  }, 240_000);
+
+  it('with a board under the blank, the contour may cut through into it — no clip, no note', async () => {
+    // #1003 (the manager's narrowing): the breakthrough exists so the FREEING CONTOUR cuts through
+    // the blank into the board. An 8 mm stock with a 5 mm breakthrough allows the contour to reach
+    // the part's own bottom; the pockets and the surfaces still stop at the stock bottom.
+    const output = await planModelCam(input(8, 5));
+    expect(deepestZ(output)).toBeLessThanOrEqual(-10 + 1e-6);
     const notes = output.perSetup.flatMap((s) => s.notes).join('\n');
     expect(notes).not.toContain('cut off at the stock bottom');
   }, 240_000);
