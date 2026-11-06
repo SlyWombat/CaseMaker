@@ -56,6 +56,9 @@ export async function planTwoOutcomes(input: ModelPlanInput, opts: PlanModelCamO
     {
       ...input,
       cutters: { house: input.cutters.house, catalogue: [], ...(input.cutters.pinned === undefined ? {} : { pinned: input.cutters.pinned }) },
+      // #1027 (E's review) — the catalogue is emptied above so the owned plan cannot see it; the
+      // rest statement still has to tell "none configured" from "configured, none measured".
+      catalogueConfigured: input.catalogueConfigured ?? input.cutters.catalogue.length > 0,
     },
     opts,
   );

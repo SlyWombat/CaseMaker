@@ -281,6 +281,15 @@ export interface ModelPlanInput {
     shareSource: RestSettingSource;
   };
   /**
+   * #1027 (E's review) — DOES THIS SHOP HAVE A CUTTER CATALOGUE AT ALL? The rest statement's
+   * no-reference clause points the operator at the catalogue; whether one is CONFIGURED is not
+   * the same as whether one was MEASURED here. `planTwoOutcomes` empties the catalogue before
+   * planning the owned plan (`twoPlans.ts`'s owned call), so it carries the original answer on
+   * this field; a direct caller defaults to its own `cutters.catalogue.length > 0`. Absent ⇒ the
+   * default.
+   */
+  catalogueConfigured?: boolean;
+  /**
    * #1005 — WHEN THIS PLAN CUTS A MOULD. The seam sets it when the goal's `goalMode` is `'mold'`:
    * its `geometry` is then the stock block minus the part turned over (`engrave/mouldSolid.ts`),
    * and the plan states the two mould findings that need the cavity's own geometry — one-sided
@@ -1567,9 +1576,17 @@ export function restStatementForPlan(
   const look = visible
     ? `— past the ${vis.depthMm.toFixed(2)} mm or ${shareWord(vis.share)} % that marks a leftover visible —`
     : `— under the ${vis.depthMm.toFixed(2)} mm and ${shareWord(vis.share)} % that marks a leftover visible —`;
+  // #1027 (E's review) — WHICH CATALOGUE FACT IS TRUE. `reference === null` means no catalogue
+  // BALL was measured here, never "no catalogue is configured": the owned plan is planned with the
+  // catalogue emptied, and `enrichOwnedRestStatement` leaves the plan alone when the ideal's ball
+  // is owned or better. The configured case names the measured answer's absence; the unconfigured
+  // case points at the setting.
+  const catalogueConfigured = input.catalogueConfigured ?? input.cutters.catalogue.length > 0;
   const would =
     reference === null
-      ? ' The ball that would take it is measured from the cutter catalogue — none is configured for this shop (Manage → Tools).'
+      ? catalogueConfigured
+        ? ' The ball that would take it is measured from the cutter catalogue — none of its balls takes this leftover (Manage → Tools).'
+        : ' The ball that would take it is measured from the cutter catalogue — none is configured for this shop (Manage → Tools).'
       : ` The catalogue's ${reference.ball.name} (⌀${diaWord(cuttingDiameter(reference.ball) ?? 0)} mm) would: ` +
         `leftover ${shareWord(reference.leftoverShare)} %, ` +
         `${reference.cycleDeltaSeconds >= 0 ? '+' : ''}${Math.round(reference.cycleDeltaSeconds)} s of cycle (measured).`;

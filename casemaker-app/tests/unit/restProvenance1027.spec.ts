@@ -7,11 +7,14 @@
  * they agree — never the depth's source for both (the #1023 nit).
  *
  * The ball clause (#1027's other half) is NOT built: with no catalogue ball measured the sentence
- * gives no size and says where one comes from — an action, not a bare absence ("The ball that
- * would take it is measured from the cutter catalogue — none is configured for this shop
- * (Manage → Tools)."). A pure per-point drop-cutter test cannot see a scallop, and on the
- * acceptance plate's 56-degree walls it rejects every radius; the honest removal-envelope measure
- * was ruled out for 1.0 (#1028, option 3).
+ * gives no size and says where one comes from — an action, not a bare absence. WHICH action
+ * depends on the shop (#1027, E's review): a shop with no catalogue configured is pointed at the
+ * setting ("none is configured for this shop (Manage → Tools)"); a shop whose catalogue WAS
+ * measured — the owned plan sees it emptied, and `enrichOwnedRestStatement` leaves the plan alone
+ * when the ideal's ball is owned or better — reads "none of its balls takes this leftover". A
+ * pure per-point drop-cutter test cannot see a scallop, and on the acceptance plate's 56-degree
+ * walls it rejects every radius; the honest removal-envelope measure was ruled out for 1.0
+ * (#1028, option 3).
  */
 import { describe, expect, it } from 'vitest';
 
@@ -34,9 +37,13 @@ const OUTCOME = {
 
 const SETUPS = [{ programs: [{ tool: BALL6 }] }] as unknown as SetupPlan[];
 
-function statementWith(restVisibility: ModelPlanInput['restVisibility']): string {
+function statementWith(
+  restVisibility: ModelPlanInput['restVisibility'],
+  extra: { catalogueConfigured?: boolean; catalogue?: Tool[] } = {},
+): string {
   const input = {
-    cutters: { house: [BALL6], catalogue: [] },
+    ...extra,
+    cutters: { house: [BALL6], catalogue: extra.catalogue ?? [] },
     ...(restVisibility === undefined ? {} : { restVisibility }),
   } as unknown as ModelPlanInput;
   return restStatementForPlan(SETUPS, OUTCOME, input, null)?.text ?? '';
@@ -59,11 +66,22 @@ describe('#1027 each threshold keeps its own source', () => {
     expect(text).toContain('The visible depth is from the shop’s location document; the third-tool share is from this build’s fallback.');
   });
 
-  it('names the catalogue as the action when no ball was measured — the numbers and no size', () => {
+  it('points an UNCONFIGURED shop at the catalogue setting — the numbers and no size', () => {
     const text = statementWith(undefined);
     expect(text).toContain('2.42 mm');
     expect(text).toContain('21.4 %');
     expect(text).toContain('The ball that would take it is measured from the cutter catalogue — none is configured for this shop (Manage → Tools).');
     expect(text).not.toMatch(/about ⌀/);
+  });
+
+  it('a CONFIGURED catalogue that measured no winner says so — never "none is configured"', () => {
+    // The planTwoOutcomes owned call empties `cutters.catalogue` but carries the original answer.
+    const carried = statementWith(undefined, { catalogueConfigured: true });
+    expect(carried).toContain('— none of its balls takes this leftover (Manage → Tools).');
+    expect(carried).not.toContain('none is configured for this shop');
+    // A direct caller needs no flag: the default reads its own catalogue list.
+    const direct = statementWith(undefined, { catalogue: [flatEndMill(2, { number: 9, id: 'flat-2', name: '2 mm flat' })] });
+    expect(direct).toContain('— none of its balls takes this leftover (Manage → Tools).');
+    expect(direct).not.toContain('none is configured for this shop');
   });
 });
