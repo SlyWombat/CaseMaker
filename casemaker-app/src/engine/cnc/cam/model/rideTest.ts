@@ -133,8 +133,9 @@ export function followCutSurface(
  * polyline at feed: a few points over the join's own length, about zero seconds, no rapid. A path
  * whose CL CLIMBS above the straight join by more than `climbBandMm` (a wall, not a crease) or is
  * interrupted (a null anywhere) is not provable this way; the caller keeps its retract/hop, as
- * before. No time guard: a short follow is a few 0.05 mm feed steps, so the ruling makes it the
- * default rather than pricing it against the retract.
+ * before. No time guard: a short follow is a few feed steps, so the ruling makes it the default
+ * rather than pricing it against the retract. The points are laid by `dropRow` — the rows' own
+ * adaptive subdivision — so a crease the CL bends around between samples cannot be cut through.
  *
  * The interior points sit ON the CL (`max(top, clampZMm)` — never below the level being cut), and
  * the last point is the join's own end, so the polyline starts and ends where the row does.
@@ -148,23 +149,48 @@ export function followShortJoin(
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number },
   climbBandMm: number,
 ): { kind: 'feed'; x: number; y: number; z: number; f: number }[] | null {
+  const stride = stepMm > 0 ? stepMm : 0.05;
   const length = Math.hypot(to.x - from.x, to.y - from.y);
-  const step = stepMm > 0 ? stepMm : 0.05;
-  // At least two intervals, the #1030 ride test's own rule: a short join's interior must be looked
-  // at, never only its endpoints (which sit on the CL by construction).
-  const steps = Math.max(2, Math.ceil(length / step));
-  const points: RidePoint[] = [from];
-  for (let s = 1; s < steps; s++) {
-    const t = s / steps;
-    const x = from.x + (to.x - from.x) * t;
-    const y = from.y + (to.y - from.y) * t;
-    const top = topAt(x, y);
-    if (top === null) return null; // interrupted: no proof, the caller retracts
-    const chordZ = from.z + (to.z - from.z) * t;
-    if (top > chordZ + climbBandMm) return null; // climbs like a wall, not a crease
-    points.push({ x, y, z: Math.max(top, clampZMm) });
+  // #1030 (the re-acceptance's finding) — THE CHORD HOLDS THE ROW DROPPER'S GUARANTEE, the same
+  // rule #970 gave `followCutSurface`. The first form of this follow laid points every `stride`
+  // along XY and joined them with straight chords; on the organizer's wall transition the CL rises
+  // 0.303 mm over a 0.048 mm step, and the chord between two samples cut the corner by 0.055 mm —
+  // five chords below CL − 0.005 in finishClOrganizer960. `dropRow` subdivides on the departure
+  // from the straight-line interpolation (down to the surface's own min spacing, a staircase that
+  // holds the HIGHER height across a true discontinuity), so every chord this join emits carries
+  // the same stated guarantee the rows and the #970 follow already prove on this part.
+  let row: DroppedPoint[];
+  try {
+    row = dropRow(
+      {
+        dropCutter: topAt,
+        toleranceMm: ARC_CHORD_TOLERANCE_MM,
+        minSpacingMm: ARC_CHORD_TOLERANCE_MM,
+        maxSpacingMm: stride,
+        sampleCount: 0,
+      },
+      [from.x, from.y],
+      [to.x, to.y],
+    );
+  } catch {
+    return null; // a null on the span is no proof — the caller retracts, as before
   }
-  points.push(to);
+  if (row.length < 2) return null;
+  const points: RidePoint[] = row.map((p, i) => ({
+    x: p.x,
+    y: p.y,
+    z: i === 0 ? from.z : i === row.length - 1 ? to.z : Math.max(p.z, clampZMm),
+  }));
+  // The climb band, unchanged: a CL that rises above the straight join by more than the band is a
+  // WALL to retract over, not a crease to follow. Judged on the row's own sampled heights, before
+  // the clamp lifts a point that sits below the level being cut.
+  const inv = length > 0 ? 1 / length : 0;
+  for (let i = 1; i < row.length - 1; i++) {
+    const p = row[i]!;
+    const t = Math.hypot(p.x - from.x, p.y - from.y) * inv;
+    const chordZ = from.z + (to.z - from.z) * t;
+    if (p.z > chordZ + climbBandMm) return null;
+  }
   const moves: { kind: 'feed'; x: number; y: number; z: number; f: number }[] = [];
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1]!;

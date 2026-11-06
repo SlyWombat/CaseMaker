@@ -419,10 +419,14 @@ describe('#948 the elephant corpus run — zero cut-into is not a pass', () => {
       const report = session.oracle(g.predicted, null, g.designItems, goalInputFor(session, goalCheckForProgram(job, true) as SimGoalCheck));
       expect(report.goalCutInto?.ran).toBe(true);
       // Nothing is ADJUDICATED into the goal; the run fails the pass line because too much of the
-      // goal's top surface is never reached from this side. One RAW cell sits 0.014 mm deep — under
-      // the 0.1 mm floor the verdict judges — so the raw fraction is one cell, never zero, and the
-      // adjudicated fraction (the pass line's own number) is exactly 0.
-      expect(report.goalCutInto?.cutIntoFraction).toBeCloseTo(1 / 22865, 12);
+      // goal's top surface is never reached from this side. #1030 moved the RAW read too: the
+      // ball's short joins follow the CL instead of retracting/hoping (and are laid by the row
+      // dropper, #1030's re-acceptance finding), so the ONE raw cell that used to sit 0.014 mm
+      // deep — under the 0.1 mm floor the verdict judges — is no longer touched at all: the raw
+      // fraction is now exactly 0. The adjudicated read and the raw-vs-adjudicated distinction are
+      // still exercised by the deliberate-gouge cases above (a raw line of cells the 0.1 mm floor
+      // discards), and this verdict still fails on coverage, never on cut-into.
+      expect(report.goalCutInto?.cutIntoFraction).toBe(0);
       expect(report.goalCutInto?.adjudicatedFraction).toBe(0);
       expect(report.goalCutInto?.adjudicatedMaxMm).toBe(0);
       expect(report.goalCutInto?.passCoverage).toBe(0.95);
@@ -440,13 +444,16 @@ describe('#948 the elephant corpus run — zero cut-into is not a pass', () => {
       // away — so the leftover must use the page's rule.
       // #1007 — THE PAGE'S READ ON THE MODEL ENGINE. The old pin (10863/22865 = 0.4750929) was
       // the page's stamp on the OLD engine's program; the model engine posts a different program,
-      // so its leftover at the same 0.1 mm grid and rule is its own measure: 0.3068008, within one
-      // cell. The message prints the MEASURED fraction — the earlier form printed the difference
-      // from the pin, which read as the value and confused the record once.
+      // so its leftover at the same 0.1 mm grid and rule is its own measure: 0.3068883, within one
+      // cell. #1030 moved it from #1007's 0.3068008: the ball's short joins now ride the CL
+      // instead of cutting a ridge's corner (the same change that removed the raw cut-into cell
+      // above), so two more cells' material crosses the 0.1 mm band. The message prints the
+      // MEASURED fraction — the earlier form printed the difference from the pin, which read as
+      // the value and confused the record once.
       const leftoverFraction = report.goalCutInto?.leftoverFractions[0] ?? 0;
       expect(
-        Math.abs(leftoverFraction - 0.3068008),
-        `leftoverFractions[0] measured ${leftoverFraction} (the model engine's pin is 0.3068008 and this compares the difference)`,
+        Math.abs(leftoverFraction - 0.3068883),
+        `leftoverFractions[0] measured ${leftoverFraction} (the model engine's pin is 0.3068883 and this compares the difference)`,
       ).toBeLessThanOrEqual(1 / (report.goalCutInto?.goalCells ?? 1));
     } finally {
       session.dispose();
