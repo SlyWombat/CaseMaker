@@ -856,6 +856,33 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
 
     // #986 — THE CURVED PIPELINE'S OPTIONS, as a function of the ball, so the SAME finish can be
     // planned once per candidate for measurement and then once for the winner.
+    // #1019 — THE CURVED ROUGH'S REACH, PER REGION (6b's ruling (b), per-feature). Each curved
+    // remainder region keeps the first stated flat whose USABLE length (shoulder, else flute —
+    // the holder gate's own number) reaches THAT region's depth below the stock top; a region no
+    // flat reaches is the ball's rough instead (#982's mechanism), stated on its own line. One
+    // deep pocket therefore costs its own region a ball rough, never the whole side.
+    //
+    // AN UNSTATED LENGTH IS NOT A SHORT ONE. A flat that states no shoulder and no flute has an
+    // unknown reach, not a known-insufficient one: the holder gate owns that question, and the
+    // flat keeps the rough (the pre-#1019 behaviour). Only a STATED length below the region's
+    // depth makes the flat absent for that region — the case the sentence names.
+    //
+    // These are declared BEFORE `curvedOptionsFor` on purpose: the #986 ball rank calls that
+    // helper for every candidate, and a `const` declared after it would be in its temporal dead
+    // zone there — every candidate would throw and the rank would measure none (the gate's
+    // finishBallFixture986 failure, 2026-11-06).
+    const usableLengthMm = (t: Tool): number | null => t.shoulderLength ?? t.fluteLength;
+    /** The stated flat whose usable length reaches this region, or null when none does. */
+    const reachingFlatFor = (r: RemainderRegion): Tool | null => {
+      // #1018 — the door shifts the mesh by `-stockTop` once, so the region's own zBottom is
+      // already stock-top-relative: the depth below the stock top is `-zBottom` (frame.stockTop
+      // reads 0 here), no rebase added.
+      const depth = -r.zBottom;
+      return flats.find((t) => {
+        const usable = usableLengthMm(t);
+        return usable === null || usable + 1e-9 >= depth;
+      }) ?? null;
+    };
     const curvedOptionsFor = (b: Tool | undefined, paramsFor: (tool: Tool) => CutParams): PlanCurvedOptions => ({
       offset,
       safeZMm: SAFE_Z,
@@ -876,7 +903,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       ...(noFlatFallback
         ? { flat: primary, extraRegions: pocketFloorRegions }
         : input.curvedRoughTool === undefined
-          ? { flat: primary }
+          ? flats.length > 0
+            ? { flat: primary, flatFor: (r: RemainderRegion): Tool | null => reachingFlatFor(r) ?? b ?? null }
+            : b === undefined
+              ? {}
+              : { flat: b }
           : input.curvedRoughTool === null
             ? {}
             : { flat: input.curvedRoughTool }),
@@ -1106,6 +1137,22 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
 
 
+    const curvedRoughSubstitutions: string[] =
+      !noFlatFallback && flats.length > 0 && input.curvedRoughTool === undefined
+        ? tree.remainder
+            // E's review (finding 2): filter on the FLAT's own reach. `curvedFlatFor` returns the
+            // BALL when no flat reaches, so a null test there only ever caught the no-ball case
+            // and the substitution was never stated on a job that really ball-roughed a region.
+            .filter((r) => reachingFlatFor(r) === null)
+            .map((r) => {
+              const named = flats[0]!;
+              const usable = usableLengthMm(named);
+              const depth = Number((-r.zBottom).toFixed(1));
+              const ballName = ball === undefined ? 'no ball in the set' : (ball.name || 'the ball');
+              return `"${r.id}": the ${named.name || named.shape}'s ${usable === null ? 'unstated' : `${usable} mm`} usable length does not reach the ${depth} mm this region cuts below the stock top — ${ballName} roughs it`;
+            })
+        : [];
+
     const result = planTreePrograms(tree, {
       offset,
       pockets: noFlatFallback ? null : {
@@ -1324,6 +1371,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         ids: ballUncutIds,
         text: `${ballUncutIds.length} ${plural} narrower than the ball's radius — left uncut`,
       });
+    }
+    for (const substitution of curvedRoughSubstitutions) {
+      // #1019 — one region the stated flat cannot reach: the ball took THAT region's rough and the
+      // numbers are on the line (the region, the flat, its length, the region's depth).
+      notes.push(substitution);
+      statements.push({ severity: 'warning', code: 'goal-rough-unreachable', count: 1, text: substitution });
     }
     if (input.fixture.envelope !== null) {
       const text = `the ${input.fixture.mount} fixture envelope is not yet wired into the region obstacles — this plan carries none; the posted program is still checked against the same envelope by the sweep`;
@@ -2392,7 +2445,11 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   if (opts.houseVs !== undefined && opts.houseVs.length > 0 && choice.unreachable.length > 0) {
     const featureOf = new Map(demand.features.map((f) => [f.id, f] as const));
     const byV = new Map<string, { tool: Tool; cone: VCone; ids: string[] }>();
-    for (const id of choice.unreachable) {
+    for (const listed of choice.unreachable) {
+      // #1019 review (finding 3) — an un-enterable pocket arrives as its own SENTENCE (the search
+      // writes one line per pocket; the bare id is not repeated), so the id is read off the
+      // sentence's `': '` prefix before the pocket lookup.
+      const id = listed.includes(': ') ? listed.slice(0, listed.indexOf(': ')) : listed;
       const node = pocketsById.get(id);
       const feature = featureOf.get(id);
       if (node === undefined || feature === undefined || feature.kind !== 'pocket' || throughById.has(id)) continue;
@@ -2524,7 +2581,15 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   const offered = [...opts.houseFlats].map((t) => `⌀${cuttingDiameter(t)}`).join(', ');
   // A's review 6622610124, finding 4: a through node's own limiting number was lost (the lookup
   // only checked `pocketsById`) — the SAME sentence either kind of node gets.
-  const unreachable = choice.unreachable.filter((id) => !vCovered.has(id)).map((id) => {
+  const unreachable = choice.unreachable.filter((id) => !vCovered.has(id) && !(id.includes(': ') && vCovered.has(id.slice(0, id.indexOf(': '))))).map((id) => {
+    // #1019 — an entry the SEARCH composed (a pocket no cutter can enter, stated with its own
+    // number: "pocket-0: 0.541 mm opening, … — left standing") passes through as written unless a
+    // V-floor run covers that pocket (then it is cut, not standing); a bare region id is given
+    // this plan's own sentence below.
+    if (id.includes(': ')) {
+      const named = id.slice(0, id.indexOf(': '));
+      return vCovered.has(named) ? '' : id;
+    }
     const node = pocketsById.get(id) ?? throughById.get(id);
     const failed = regionFailures.get(id);
     // #959 item 5: a region the chosen chain left out because its planning THREW (the chain that
@@ -2567,6 +2632,27 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #992 — the SAME facts, typed: code, severity and count, so the seam can route them. `notes`
   // keeps every string exactly as before (the failure path joins it, the acceptance reads it).
   const statements: PlanStatement[] = [];
+  // #1019 — THE POCKETS NO CUTTER CAN ENTER ARE STATED even when nothing else is planned. The
+  // search carries them as its own sentences (id, opening, the set it was measured against); one
+  // statement per cause with the count (#962), the ids as the cause's pockets, and a single
+  // pocket's own sentence as the text so the number is on the statement itself.
+  {
+    // A sentence whose pocket a V-floor run covers is NOT standing: drop it from the statement.
+    const unenterable = choice.unreachable.filter((u) => u.includes(': ') && !vCovered.has(u.slice(0, u.indexOf(': '))));
+    if (unenterable.length > 0) {
+      const ids = unenterable.map((u) => u.slice(0, u.indexOf(': ')));
+      const plural = unenterable.length === 1 ? 'pocket' : 'pockets';
+      statements.push({
+        severity: 'warning',
+        code: 'goal-region-uncut',
+        count: unenterable.length,
+        ids,
+        text: unenterable.length === 1
+          ? unenterable[0]!
+          : `${unenterable.length} ${plural} no cutter in the set can enter — left standing: ${unenterable.join('; ')}`,
+      });
+    }
+  }
   // #988 — WHAT THE BAND LEAVES, one line per clipped pocket/through feature: the floor it is cut
   // to and the floor the tree states (`pocket-3: cut to −11 of −18 — 7 mm is left in the stock`).
   if (depthBandMm !== undefined) {
@@ -2800,6 +2886,13 @@ export interface PlanCurvedOptions {
    * planned either. Every existing caller passes a flat; this keeps that path byte-identical.
    */
   flat?: Tool;
+  /**
+   * #1019 — THE PER-REGION OVERRIDE OF THE ROUGH CUTTER. A region the given `flat` cannot reach
+   * (its usable length below the region's depth) is roughed by the BALL instead; `null` means "no
+   * flat reaches this one". Absent: `flat` for every region, exactly as before (the
+   * tray/organizer path is byte-identical).
+   */
+  flatFor?: (region: RemainderRegion) => Tool | null;
   /** The ball. Absent is allowed when the tree has no remainder to finish — the region loop refuses by name the moment one needs it. */
   ball?: Tool;
   /**
@@ -3068,7 +3161,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // #959 item 5: the rough is this region's PRIMARY — a rest, finish or pencil on stock it never
     // cleared would take a full-depth bite — so when it throws, the region's later stages are
     // stated as skipped, not planned.
-    const flat = opts.flat;
+    // #1019 — the per-region reach: a region the stated flat cannot reach is the BALL's rough
+    // (null → undefined here), never sent too deep and never turning the whole side into a ball.
+    const flat = opts.flatFor !== undefined ? (opts.flatFor(region) ?? undefined) : opts.flat;
     let prevCl: ReturnType<typeof clSurface> | undefined;
     const restClSink: { surface?: ReturnType<typeof clSurface> } = {};
     if (flat !== undefined) {
@@ -3099,7 +3194,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           offset: opts.offset,
           // #982 — the ball-as-rough fallback (no flat in the set): every cut point must lie
           // inside the region's own footprint, and the skim's standing field must say so too.
-          ...(opts.ball !== undefined && opts.ball === opts.flat ? { cutPointInRegion: true } : {}),
+          ...(opts.ball !== undefined && opts.ball === flat ? { cutPointInRegion: true } : {}),
           safeZMm: opts.safeZMm,
           hopZMm: opts.hopZMm,
           toolNumber: opts.toolNumberFor(flat),
@@ -3629,8 +3724,20 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
   }
   {
+    // #1019 review (finding 2) — the ruling's own sentence is TRUE only for the regions the flat
+    // can reach: a region the flat cannot is the ball's rough (its own line names it), so the note
+    // says so rather than claiming a flat Z-step it never planned.
+    const ballRoughRegions = opts.flatFor === undefined
+      ? 0
+      : tree.remainder.filter((r) => {
+          const flat = opts.flatFor!(r) ?? undefined;
+          return flat !== undefined && flat !== opts.flat;
+        }).length;
+    const substitution = ballRoughRegions === 0
+      ? ''
+      : ` (${ballRoughRegions} region${ballRoughRegions === 1 ? ' is' : 's are'} deeper than the flat's own reach and ${ballRoughRegions === 1 ? 'is' : 'are'} the ball's rough, stated with its own numbers)`;
     const text =
-      `the curved pipeline follows the ruling: the flat Z-steps each remainder region to its CL less ${opts.bandMm} mm, ` +
+      `the curved pipeline follows the ruling: the flat Z-steps each remainder region${substitution} to its CL less ${opts.bandMm} mm, ` +
       `the ball runs ONE final level, the pencil follows the creases${opts.restFlat === undefined ? ', and no rest flat was offered' : ', and a rest flat clears the CL difference first'}`;
     notes.push(text);
     statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });

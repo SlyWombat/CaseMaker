@@ -26,9 +26,10 @@
  * RED: with #1014's `roughLeftAbove(f, base.zTop, …)` — the CL mesh-absolute, the region rebased —
  * the flipped setup's finish mask empties and this spec fails on setup 1's missing finish op.
  *
- * TODO(#1019, D): the MOULD side joins this guard's cases. #1005's mould fixture ("stock minus the
- * turned-over part") must run through the same twin comparison when the #1005 fold rebases onto
- * this guard; 6b's #1005 ruling puts that case — and #1019 — on the fold's owner, not here.
+ * THE MOULD SIDE (#1019, 6b's TODO, done): #1005's mould fixture — the stock minus the turned-over
+ * part — joins the cases below. Its solid is built at the seam and planned through the FLIPPED
+ * setup's frame (`sideFace: 'bottom'`), which is the datum-crossing case this guard exists for:
+ * a non-zero stockTop through the door's one shift, the cavity's regions and CL under it.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -196,6 +197,55 @@ describe('#1017 — every setup plans the same on a stockTop ≠ 0 frame as its 
   // fixture states a 6 mm band on a 30 mm blank: 6 mm below the top face, and 24 mm below the
   // flipped face — one plane, two depths. Reverting #1013 gives the flipped setup 6 and this
   // fails; the congruence below still holds either way, which is exactly why this line exists.
+  // #1019 — THE MOULD SIDE. #1005's wedge fixture, the stock minus the turned-over part, planned
+  // through the seam's own flipped setup. Every setup it yields must match its stockTop-0 twin on
+  // the same four lines the datum fixture is held to.
+  it('the mould fixture’s setup matches its twin', async () => {
+    const tris: [number, number, number][][] = (() => {
+      const p = (x: number, y: number): [number, number, number] => [x, y, -0.1 * y];
+      return [[p(0, 0), p(20, 0), p(20, 20)], [p(0, 0), p(20, 20), p(0, 20)]];
+    })();
+    const buf = new ArrayBuffer(84 + tris.length * 50);
+    const dv = new DataView(buf);
+    dv.setUint32(80, tris.length, true);
+    let off = 84;
+    for (const t of tris) {
+      off += 12;
+      for (const v of t) {
+        dv.setFloat32(off, v[0], true);
+        dv.setFloat32(off + 4, v[1], true);
+        dv.setFloat32(off + 8, v[2], true);
+        off += 12;
+      }
+      off += 2;
+    }
+    const goal: EngraveTargetObject = {
+      id: 'guard-mould',
+      name: 'guard-wedge.stl',
+      format: 'stl',
+      sha256: 'a'.repeat(64),
+      data: Buffer.from(new Uint8Array(buf)).toString('base64'),
+      size: { x: 20, y: 20, z: 2 },
+      position: { x: 30, y: 20, z: 0 },
+      rotation: 0,
+      enabled: true,
+      role: 'goal',
+      goalMode: 'mold',
+    };
+    const base = defaultEngraveJob();
+    const job: EngraveJob = { ...base, stock: { ...base.stock, thickness: 26 }, labels: [], shapes: [], targetObject: goal };
+    // The seam's own mould input, planned through the FLIPPED setup's frame: the guard's case.
+    // #1004 — the seam takes the side face as its LAST argument now (the pre-#1004
+    // `setupsOverride` parameter is gone); no placeholder `undefined` here.
+    const input = await buildModelPlanInputForGoal(job, goal, BALL, SHOP, 'bottom');
+    // NON-VACUITY: an empty plan twin-matches itself. The seam turns the solid over for the
+    // flipped frame (#1017's shared-solid rule), and the mould must actually plan ops through it
+    // for this guard to mean anything.
+    const planned = await planModelCam(input);
+    expect(planned.perSetup.flatMap((s) => s.ops).length, 'the mould plans no ops — the guard would be vacuous').toBeGreaterThan(0);
+    await assertCongruent(input);
+  }, 300_000);
+
   it('a stated band lands on each face’s own plane — 6 mm on top, 24 mm on the flipped side', async () => {
     const input = await datumInput(6);
     const flipped = input.setups.findIndex((s) => Math.abs(s.frame.stockTop) > 1e-9);

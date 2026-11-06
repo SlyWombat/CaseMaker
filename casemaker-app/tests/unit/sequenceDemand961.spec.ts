@@ -42,7 +42,8 @@ describe('#961 the tray demand, as one SequenceDemand', () => {
     // STATED, never allowed to shrink the primary to it.
     const best = candidates.find((c) => c.unreachable.length === 0) ?? candidates[0]!;
     expect(best.steps[0]!.cutter.key).toBe('flat-6');
-    expect(candidates.every((c) => c.unreachable.includes('tiny-1'))).toBe(true);
+    // #1019 — stated as its own sentence (id, opening, the set), not a bare id.
+    expect(candidates.every((c) => c.unreachable.some((u) => u.startsWith('tiny-1:') && u.includes('0.950')))).toBe(true);
   });
 
   it('removing the ~1 mm feature lets the same two house flats serve the rest (confirms the demand shape, not the picker, is the limit)', () => {

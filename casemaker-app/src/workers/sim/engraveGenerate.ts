@@ -4938,6 +4938,25 @@ export async function buildModelPlanInputForGoal(
     isMold(goal) && goal.faceId === undefined
       ? mouldSolidOf(tl, closed.mesh, { stock: job.stock, centreY: goal.position.y, stockTopZ: 0 })
       : null;
+  // #1017/#1019 — A MOULD'S FACE GOES THROUGH THE SETUP'S FRAME (the shared-solid half of
+  // #1006's rule; a mould side in a JOB still plans in its authored frame, see `sideFaceFor`).
+  // The solid above is authored with its cavity opening up at the work frame's stock top, which
+  // is exactly the TOP frame's plan. Through the BOTTOM frame the door first shifts z by
+  // `+thickness` and then half-turns about X (`y → −y`, `z → −z`, `shiftToStockTop` +
+  // `toSetupFrame`), so the solid is turned over by that map's inverse HERE — `y → −y`,
+  // `z → −thickness − z` — and the door's own turn lands exactly the authored mould in the
+  // setup frame, its cavity up and one stock top under the door's `−stockTop` shift. Without
+  // it the plan saw the cavity facing the table and posted no op at all (measured then
+  // pinned in `setupDatumGuard.spec.ts`).
+  if (mould !== null && sideFace === 'bottom') {
+    const pos = mould.mesh.positions;
+    for (let i = 0; i < pos.length; i += 3) {
+      pos[i + 1] = -pos[i + 1]!;
+      pos[i + 2] = -job.stock.thickness - pos[i + 2]!;
+    }
+    const bb = mould.mesh.bbox;
+    mould.mesh.bbox = { min: [bb.min[0], -bb.max[1], -job.stock.thickness - bb.max[2]], max: [bb.max[0], -bb.min[1], -job.stock.thickness - bb.min[2]] };
+  }
   // #991 — THE STEP'S OWN FACE IDS GO THROUGH TO THE FEATURE TREE. A mesh that carries them is
   // classified by B-rep face (whole-face patches, the acceptance cards' path); a length the tree
   // cannot use is refused by the tree's own named error, never planned as the wrong path. A skirt
@@ -5781,6 +5800,14 @@ async function generateGoalPrograms(
   // that setup; a side the operator saved is authoritative, so its plan takes that one setup's
   // frame instead of the geometry-derived decision (see `buildModelPlanInputForGoal`'s `sideFace`).
   const faceOfSide = (side: GoalSide): 'top' | 'bottom' => (side.setup.orientation.top === 'bottom' ? 'bottom' : 'top');
+  // #1005/#1006 — A MOULD SIDE PLANS IN ITS AUTHORED FRAME (the review's accepted rule, reworded:
+  // a per-setup goal plans in its setup's frame; a shared solid's face goes through frameForFace).
+  // Its cavity solid is built in the work frame and turned over inside the solid, so rotating the
+  // plan again by the PHYSICAL mount double-flips it: measured on the both-sides job, the side-2
+  // plan then reads an open-surface relief and posts nothing ("an open-surface relief: its edge is
+  // the stock beside it; nothing is freed") after a ~450 s plan. E's #1017 twin guard cases own the
+  // full guard; until then the mould side states no side face and plans as authored.
+  const sideFaceFor = (side: GoalSide): 'top' | 'bottom' | undefined => (isMold(side.goal) ? undefined : faceOfSide(side));
   const shopForSide = (side: GoalSide): EngraveShopOpts => {
     const keys = side.setup.tools ?? [];
     if (keys.length === 0) return shop;
@@ -5797,12 +5824,12 @@ async function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: faceOfSide(firstSide), catalogueTools });
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools });
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
   for (const side of sides.slice(1)) {
-    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: faceOfSide(side), catalogueTools });
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools });
     const sideList = sidePrograms(one, side);
     if (sideList === null) return { ...one, programs };
     programs.push(...sideList);

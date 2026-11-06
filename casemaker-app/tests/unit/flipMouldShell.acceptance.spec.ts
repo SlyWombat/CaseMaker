@@ -369,7 +369,7 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
 
   // #966 triage — #1005 (the mould half) and #1006 (the seam plans the goal once from geometry,
   // never the job's saved sides).
-  it.fails('one job carries both sides with the pins as their datum, and the app does the flip transform', async () => {
+  it('one job carries both sides with the pins as their datum, and the app does the flip transform', async () => {
     const job = oneJob();
     // The document reads as two sides, in setup order, one goal each.
     expect(goalSides(job).map((s) => [s.setupIndex, s.setup.id, s.goal.id])).toEqual([
@@ -377,21 +377,33 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
       [1, 'setup-2', 'shell-in'],
     ]);
 
-    // ONE job, THREE programs: side 1's outside as the #869 two-program shape — the side's stated
-    // flat takes the rough, the passed ball the finish (the operator's stated values win; the
-    // manager's #1006 ruling, 2026-11-06) — then side 2's mold, each on its own setup.
+    // ONE job, TWO programs: each side's outside/cavity is deeper than the side's stated 12 mm
+    // flat can reach (#1019's per-region reach — the shell's crown ~17 mm, the mould's cavity
+    // ~17 mm), so the ball roughes and finishes each side on its own setup, and the flat is
+    // stated `goal-rough-unreachable` rather than sent too deep (the holder gate stays silent).
     const out = await engraveGenerate(tl, job, BALL_TOOL, [], null, undefined, {});
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
-    // The model engine honours the side's stated flat as the rough (#869), so side 1 is two
-    // programs (rough + finish) and side 2 is one.
     expect(out.programs.map((p) => [p.setupIndex, p.setupId])).toEqual([
-      [1, 'setup-1'],
       [1, 'setup-1'],
       [2, 'setup-2'],
     ]);
-    expect(out.programs.map((p) => p.toolKey)).toEqual(['flat-3.175x12-metal', '3 mm ball nose', 'flat-3.175x12-metal']);
-    expect(new Set(out.programs.map((p) => p.nc)).size).toBe(3);
+    expect(out.programs.map((p) => p.toolKey)).toEqual(['3 mm ball nose', '3 mm ball nose']);
+    expect(new Set(out.programs.map((p) => p.nc)).size).toBe(2);
+
+    // #1019 (E's review, finding 2) — THE SUBSTITUTION IS STATED. Both sides are ball-roughed
+    // because the stated 12 mm flat cannot reach their curved regions (shell-out cuts 17.255 mm
+    // below the stock top, shell-in 14.755 mm), and the job's result says so — the flat, its
+    // usable length, the depth. With the substitution filtered on the ball-carrying helper this
+    // list was EMPTY (the line could only fire when the set had no ball at all). The multi-side
+    // result carries the FIRST side's findings (`generateGoalPrograms`' `{ ...first, programs }`),
+    // so the statement pinned here is side 1's own.
+    const substitution = out.findings
+      .filter((f) => f.code === 'goal-rough-unreachable')
+      .map((f) => f.message)
+      .join('\n');
+    expect(substitution, 'the ball substitution is not stated on the both-sides job').toMatch(/17\.3/);
+    expect(substitution).toContain('12 mm usable length does not reach');
 
     // The app's own frames, built exactly as the run store builds them: top-up first, bottom-up
     // in the vise second, and the second rotation is the turn the remount states.
@@ -426,13 +438,13 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     expect(ref!.confirm!.options[ref!.confirm!.correct]).toBe('the pin 4 mm from the left edge');
   }, 600_000);
 
-  it.fails('the two sides leave the wall in band — #1005 mould mode owes this on the model engine', async () => {
-    // #1005 — THE WALL. The two sides must leave the shell's wall in band everywhere. On the
-    // MODEL ENGINE this is RED today and pinned as `it.fails` naming #1005: the input carries no
-    // `goalMode: 'mold'`, so side 2's cavity is cut ~3.25 mm shallow (measured wall map of the
-    // both-sides job: 57,492 cells thinner than W, 31,106 thicker, 5,542 in band; probe (0,0)
-    // 5.76 mm against the old path's 2.51). When #1005 lands this test passes, `it.fails` goes
-    // red, and the pin must be flipped — that is the enforcement, not a waiver.
+  it('the two sides leave the wall in band', async () => {
+    // #1005 — THE WALL, JUDGED. The two sides must leave the shell's wall in band everywhere.
+    // This was #1006's `it.fails` naming #1005 (the model input carried no mould: 57,492 cells
+    // thinner than W, 31,106 thicker, 5,542 in band; probe (0,0) 5.76 mm against the old path's
+    // 2.51). The mould is in the engine now, so this is a plain test — the flip the pin demanded.
+    // #1019's per-region reach keeps the stated 12 mm flat off every deeper region's rough, which
+    // is what lets the holder gate stay silent.
     const job = oneJob();
     const out = await engraveGenerate(tl, job, BALL_TOOL, [], null, undefined, {});
     const frames = jobSetups(job).map((s) => orient(s.orientation.top, s.mount, STOCK));
@@ -544,4 +556,25 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
       session.dispose();
     }
   }, 600_000);
+
+  // #1019 — THE OPENING, NOT THE FLUTE. A stated flat that cannot ENTER the cavity's 0.541 mm
+  // floor patch must count as absent for that pocket (stated by name and number), never as a
+  // refusal of the whole job. Measured with the sequence probe on this fixture's side 2: one
+  // pocket, depth 14.75 mm, minOpening 0.541 mm; `canCutSomething` was false and the search
+  // returned no primary, so `planModelCam` refused everything with "no cutter sequence can be
+  // planned for this demand". The seam's own input is built directly, exactly as it is with the
+  // stated 12 mm flat in the shop.
+  it('a stated flat that cannot enter the cavity\'s 0.541 mm floor patch is stated unreachable, not a refusal', async () => {
+    const job = oneJob();
+    const flat = entryFor('flat-3.175x12-metal');
+    expect(flat, 'the fixture names a real library flat').not.toBeNull();
+    const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+    const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+    const input = await buildModelPlanInputForGoal(job, job.targetObjects![1]!, BALL_TOOL, { tools: [flat!] });
+    const out = await planModelCam(input);
+    expect(out.perSetup.flatMap((st) => st.programs).length, 'no program was planned').toBeGreaterThan(0);
+    const stated = out.perSetup.flatMap((st) => st.statements).map((st) => st.text).join('\n');
+    expect(stated).toContain('pocket-0');
+    expect(stated).toContain('0.541 mm opening');
+  }, 300_000);
 });
