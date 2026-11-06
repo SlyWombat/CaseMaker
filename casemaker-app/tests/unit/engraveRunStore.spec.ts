@@ -459,6 +459,131 @@ describe('engraveRunStore (#206)', () => {
     expect(s.simStatus).toBe('ready');
   });
 
+  // #1034 — A FLIPPED SETUP SEEDS EVERY PROGRAM FROM ITS PREDECESSOR. Measured on the shell
+  // (#1032): the four programs' seeds read [blank, blank, blank + carried, blank] — once a
+  // cross-setup removal mesh was in the chain, #817's all-chain rule dropped the field path for
+  // the REST of the later setup too, so side 2's finish was swept on a bare blank (neither
+  // program 3's removal nor side 1's floor). The rule becomes per predecessor: a program whose
+  // predecessor is in its own setup seeds from that predecessor's field, and the earlier setup's
+  // carried floor rides the whole later setup.
+  describe('#1034 — the sweep seeds each program from its own predecessor', () => {
+    const fieldOf = (nc: string): unknown => ({ marker: `${nc}-field` });
+    // A carryable seed must be a real mesh: `carrySeedsForSetup` transforms its positions.
+    const meshOf = (nc: string): unknown => ({
+      marker: nc,
+      positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+      indices: new Uint32Array([0, 1, 2]),
+      triangleCount: 1,
+      vertexCount: 3,
+      bbox: { min: [0, 0, 0], max: [1, 1, 0] },
+      componentCount: 1,
+    });
+
+    /** A two-side job: setup 1 top-up, setup 2 bottom-up in the vise (the walk's own flip). */
+    function shareTwoSetups(): void {
+      const job = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({
+        job: {
+          ...job,
+          tool: flatEndMill(3.175, { name: '3.175 mm flat end' }),
+          setups: [
+            {
+              id: 'setup-1',
+              orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' },
+              mount: { kind: 'vise' },
+              itemIds: [],
+              tools: [],
+            },
+            {
+              id: 'setup-2',
+              orientation: { top: 'bottom', bottom: 'top', left: 'left', right: 'right', front: 'back', back: 'front' },
+              mount: { kind: 'vise' },
+              itemIds: [],
+              tools: [],
+            },
+          ],
+        },
+      });
+    }
+
+    async function runPrograms(plan: readonly { nc: string; setupIndex: number }[]): Promise<{
+      calls: Map<string, { carried: unknown; priorFields: unknown }>;
+    }> {
+      shareTwoSetups();
+      const base = clean();
+      const program = base.programs[0]!;
+      const generated: EngraveGenerated = {
+        ...base,
+        programs: plan.map(({ nc, setupIndex }) => ({ ...program, programHash: nc, setupIndex, nc })),
+      };
+      const calls = new Map<string, { carried: unknown; priorFields: unknown }>();
+      const realLoad = useSimStore.getState().loadProgram;
+      useSimStore.setState({
+        loadProgram: async (...args: unknown[]) => {
+          const nc = String(args[0]);
+          calls.set(nc, { carried: args[12], priorFields: args[13] });
+          useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false });
+          return {
+            ...swept(),
+            removalField: fieldOf(nc),
+            flatField: { marker: `${nc}-flat` },
+            meshes: { removal: meshOf(nc) },
+          } as never;
+        },
+      });
+      setEngraveRunClientLoader(async () => ({
+        engraveGenerate: async () => generated,
+        simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+      }));
+      try {
+        await useEngraveRunStore.getState().generate();
+      } finally {
+        useSimStore.setState({ loadProgram: realLoad });
+        setEngraveRunClientLoader(null);
+      }
+      return { calls };
+    }
+
+    it('seeds a flipped setup’s second program from its own predecessor, with the carried floor through the setup', async () => {
+      const { calls } = await runPrograms([
+        { nc: 'P1', setupIndex: 1 },
+        { nc: 'P2', setupIndex: 1 },
+        { nc: 'P3', setupIndex: 2 },
+        { nc: 'P4', setupIndex: 2 },
+      ]);
+      // Program 3 — the first of the flipped setup — restarts from the blank with side 1's carried
+      // floor and no same-setup fields (#1032, unchanged). Program 4 — SAME setup as its
+      // predecessor — keeps the floor and seeds from program 3's own field, never the bare blank.
+      expect(calls.get('P3')!.carried).not.toBeNull();
+      expect(calls.get('P3')!.priorFields).toBeNull();
+      expect(calls.get('P4')!.carried).not.toBeNull();
+      expect(calls.get('P4')!.priorFields).toEqual([fieldOf('P3')]);
+      // The INTRA-setup chain is unchanged: program 2 seeds from program 1's field, exactly the
+      // pre-#1034 rule (a single-setup job's sweeps stay byte-identical).
+      expect(calls.get('P2')!.priorFields).toEqual([fieldOf('P1')]);
+      const s = useEngraveRunStore.getState();
+      expect(s.simPrograms.map((p) => p.carriedFloor === true)).toEqual([false, false, true, true]);
+      // Each seeded program names its seed: program 2 from program 1, program 4 from program 3.
+      expect(s.simPrograms.map((p) => p.seedFrom ?? null)).toEqual([
+        null,
+        'program 1 (flat-1.0)',
+        null,
+        'program 3 (flat-1.0)',
+      ]);
+    });
+
+    it('a ball-only side 2 keeps the old behaviour: its first program carries side 1’s floor', async () => {
+      const { calls } = await runPrograms([
+        { nc: 'P1', setupIndex: 1 },
+        { nc: 'P2', setupIndex: 1 },
+        { nc: 'P3', setupIndex: 2 },
+      ]);
+      expect(calls.get('P3')!.carried).not.toBeNull();
+      expect(calls.get('P3')!.priorFields).toBeNull();
+      expect(useEngraveRunStore.getState().simPrograms.map((p) => p.carriedFloor === true)).toEqual([false, false, true]);
+    });
+  });
+
   it('refuses Save before anything is generated', () => {
     expect(saveBlocker(view())).toBe('Generate first.');
   });

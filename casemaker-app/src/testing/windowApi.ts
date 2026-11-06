@@ -258,7 +258,7 @@ export interface CaseMakerTestApi {
      * to that restart. The e2e walk pins the multi-side carry through these, not only through the
      * panel's prose.
      */
-    simPrograms: { label: string; engine: string | null; fromBlank: boolean; carriedFloor: boolean }[];
+    simPrograms: { label: string; engine: string | null; fromBlank: boolean; carriedFloor: boolean; seedFrom: string | null }[];
   };
   /**
    * #277 — the run-record half of the engrave e2e surface. `openRunRecordText` hands the app the
@@ -742,7 +742,7 @@ export function installCaseMakerTestApi(): void {
         canSave: saveBlocker(view) === null,
         saveReason: saveBlocker(view),
         error: r.error,
-        simPrograms: r.simPrograms.map((p) => ({ label: p.label, engine: p.engine, fromBlank: p.fromBlank, carriedFloor: p.carriedFloor === true })),
+        simPrograms: r.simPrograms.map((p) => ({ label: p.label, engine: p.engine, fromBlank: p.fromBlank, carriedFloor: p.carriedFloor === true, seedFrom: p.seedFrom ?? null })),
       };
     },
     simOpenText(name, text) {

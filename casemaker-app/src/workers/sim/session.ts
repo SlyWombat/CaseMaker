@@ -186,6 +186,12 @@ export interface SimLoadOk {
    */
   carriedFloor?: boolean;
   /**
+   * #1034 — THE PREDECESSOR THIS PROGRAM WAS SEEDED FROM, when it was seeded within its own
+   * setup: the earlier program's own label ("program 3 (flat-1.0)"). Set by the caller that
+   * chose the seed, so the panel names it; null when the program started a setup's chain.
+   */
+  seedFrom?: string | null;
+  /**
    * Where the fixture's dimensions came from (#204), present only when the setup models one.
    * A default is NOT a measurement; the viewport shows this so the shown jaws are not read as
    * exact. Optional so a setup with no `fixture` does not grow the load info's shape.

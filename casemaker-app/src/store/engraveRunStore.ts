@@ -788,6 +788,22 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     const seedSources: number[] = [];
     /** #723 P2-2b — the last FLAT field a column-swept program left, for the next setup's floor. */
     let lastFlat: { setupIndex: number; field: FlatField } | null = null;
+    /**
+     * #1034 — THE CARRIED FLOOR BELONGS TO THE SETUP, NOT THE FIRST PROGRAM OF IT. It is computed
+     * once at the boundary (from the last field of a DIFFERENT setup) and handed to every program
+     * of the new setup, so a same-setup successor keeps the floor state it is judged on.
+     */
+    let carriedFor: { setupIndex: number; carried: CarriedField } | null = null;
+    /**
+     * #1034 — THIS SETUP'S OWN EARLIER PROGRAMS' REMAINING TOPS. The sweep's own `priorFields`
+     * accumulate across setups and a field carries no affine map, so the store keeps them per
+     * setup: a program seeds from its predecessor when that predecessor is in ITS setup. This is
+     * the per-predecessor rule; the old all-chain test dropped the field path for the rest of a
+     * flipped setup once any cross-setup mesh appeared in the chain.
+     */
+    const fieldsBySetup = new Map<number, CarriedField[]>();
+    /** #1034 — the label of the last program that ran in each setup, named as the next seed. */
+    const lastProgramBySetup = new Map<number, string>();
     const firstEngravingIndex = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
     // #743 P-5 — A BOARD IS JUDGED BY ITS COPPER'S TOPOLOGY, on the WHOLE run's swept stock. The
     // volumetric comparison is program 1's own; a board's isolation, holes and outline are three
@@ -857,7 +873,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         shopDrillPoint: null,
         cutterFor: (program) =>
           program.toolKey === job.toolKey ? tool : benchCutterFor(program.toolKey),
-        load: async ({ program, index, cutter, drillPoint, priorRemoval, priorFields, priorExactRemoval }) => {
+        load: async ({ program, index, cutter, drillPoint, priorRemoval, priorExactRemoval }) => {
           // #830 — the simulation's own stage: which program of the sweep is being simulated, so
           // the panel never shows a bare "Working…" through a multi-program sweep.
           if (mine === seq) set({ simProgram: { index: index + 1, count: generated.programs.length } });
@@ -878,15 +894,26 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
             // #723 P2-2b — the CARRIED FIELD. A column-swept program (a ball finish is one) takes
             // the other side's remaining stock as each column's floor; the maps come from the two
             // setups' frames. A side setup declines the carry and simulates from its own stock.
+            // #1034 — computed at the SETUP BOUNDARY and kept for the whole later setup: a
+            // same-setup successor (side 2's finish after side 2's rough) is judged on the same
+            // carried floor state as the setup's first program, never a bare blank.
             let carried: CarriedField | null = null;
-            if (lastFlat !== null && lastFlat.setupIndex !== program.setupIndex) {
+            if (carriedFor !== null && carriedFor.setupIndex === program.setupIndex) {
+              carried = carriedFor.carried;
+            } else if (lastFlat !== null && lastFlat.setupIndex !== program.setupIndex) {
               const from = carryFrames[lastFlat.setupIndex - 1] ?? null;
               const to = carryFrames[program.setupIndex - 1] ?? null;
               if (from !== null && to !== null) {
                 const maps = carriedMaps(from, to);
-                if (maps.ok) carried = { ...lastFlat.field, ...maps.maps };
+                if (maps.ok) {
+                  carried = { ...lastFlat.field, ...maps.maps };
+                  carriedFor = { setupIndex: program.setupIndex, carried };
+                }
               }
             }
+            // #1034 — THE SEED IS THE PREDECESSOR'S, when that predecessor is in this setup.
+            const setupFields = fieldsBySetup.get(program.setupIndex) ?? null;
+            const seedFrom = lastProgramBySetup.get(program.setupIndex) ?? null;
             if (!seeds.ok) {
               return {
                 ok: false as const,
@@ -926,21 +953,32 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
               // #723 P2-2b-ii — carried into THIS program's setup frame.
               seeds.meshes.length === 0 ? null : seeds.meshes,
               carried,
-              // #817 — the column programs' remaining tops, only when every earlier program is in
-              // THIS setup's frame (a field carries no affine map in the plain chain).
-              seedSources.every((s) => s === program.setupIndex) ? (priorFields ?? null) : null,
+              // #817/#1034 — the column programs' remaining tops from THIS setup's own earlier
+              // programs (a field carries no affine map between setups); kept per setup so a
+              // flipped setup's later programs seed from their own predecessor.
+              setupFields,
               priorExactRemoval ?? null,
             );
             if (result !== null) {
               // Keep the frame bookkeeping aligned with the walk's own list: only a load that
               // actually produced a removal mesh is appended there.
               if (result.ok && result.meshes.removal !== null) seedSources.push(program.setupIndex);
-              // A column sweep hands back its final top field; the next setup starts from it.
-              if (result.ok && result.flatField != null) lastFlat = { setupIndex: program.setupIndex, field: result.flatField };
+              if (result.ok) {
+                // A column sweep hands back its final top field; a later setup starts from it.
+                if (result.flatField != null) lastFlat = { setupIndex: program.setupIndex, field: result.flatField };
+                // #1034 — this setup's chain keeps its own remaining tops, and its predecessor's
+                // label is what the next program's panel sentence names.
+                if (result.removalField != null) {
+                  const own = fieldsBySetup.get(program.setupIndex) ?? [];
+                  fieldsBySetup.set(program.setupIndex, [...own, result.removalField]);
+                }
+                lastProgramBySetup.set(program.setupIndex, label);
+              }
               // #1032 (6b's review) — SAY WHAT THE RESTART KEPT. A program that can only sweep
               // from the blank still had the earlier setup's carried floor; the panel must not
-              // read as "the carry was lost".
-              return result.ok ? { ...result, carriedFloor: carried !== null } : result;
+              // read as "the carry was lost". #1034 — and a program seeded from its own setup's
+              // predecessor names that predecessor.
+              return result.ok ? { ...result, carriedFloor: carried !== null, seedFrom } : result;
             }
             const sim = useSimStore.getState();
             // null means this load no longer owns the session (a newer run/panel load stopped it),

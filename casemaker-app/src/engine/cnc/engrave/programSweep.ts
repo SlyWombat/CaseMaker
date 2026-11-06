@@ -75,6 +75,8 @@ export interface ProgramSweepResult {
    * removal-mesh seed could not be taken.
    */
   carriedFloor?: boolean;
+  /** #1034 — the predecessor's label this program was seeded from, within its own setup. */
+  seedFrom?: string | null;
   /** The FLAT dexel grid this program was swept on, mm; null for an exact or rotary sweep. */
   gridPitchMm: number | null;
   /** This program's own removal. Kept private to the walk; summaries below drop it. */
@@ -393,6 +395,7 @@ export async function sweepPrograms<P extends SweepProgram>(options: SweepProgra
       fromBlank,
       fromBlankCode,
       carriedFloor: load.carriedFloor === true,
+      seedFrom: load.seedFrom ?? null,
       gridPitchMm: gridPitchMmOf(load),
       removal: load.meshes.removal,
     };

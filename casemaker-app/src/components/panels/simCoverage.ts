@@ -48,6 +48,12 @@ export interface SimSweptProgram {
    * engine could not take a removal-mesh seed.
    */
   carriedFloor?: boolean;
+  /**
+   * #1034 — the predecessor's label this program was seeded from (within its own setup), when the
+   * caller carries it. A seeded program names its seed; it is never a plain sentence for a
+   * program that silently carries nothing.
+   */
+  seedFrom?: string | null;
   /** The codes this program's OWN sweep raised, when the caller carries them. */
   codes?: readonly string[];
   /** How many ERROR diagnostics this program's sweep raised; absent reads as 0. */
@@ -331,6 +337,20 @@ function wholeRunDisclaimer(
   // blank may still have carried the earlier setup's floor (#723 P2-2b) into the sweep it was
   // judged on; stating only what the engine could not take reads as "the carry was lost", which
   // is false, and the walk's whole point is that end state.
+  // #1034 — EACH SEEDED PROGRAM NAMES ITS SEED. A program seeded from an earlier program in its
+  // own setup starts from that program's removal (and may also carry the earlier setup's floor);
+  // stating it keeps a per-program result from being read against the raw blank.
+  const seeded = programs.filter((p) => typeof p.seedFrom === 'string' && p.seedFrom.length > 0);
+  if (seeded.length > 0) {
+    out.push(
+      `From the earlier program: ${joinAnd(
+        seeded.map(
+          (p) =>
+            `${p.label} starts from ${p.seedFrom}'s removal${p.carriedFloor === true ? ", with the earlier setup's floor carried" : ''}`,
+        ),
+      )}.`,
+    );
+  }
   const blank = programs.filter((p) => p.fromBlank);
   const carriedBlank = blank.filter((p) => p.carriedFloor === true).map((p) => p.label);
   const plainBlank = blank.filter((p) => p.carriedFloor !== true).map((p) => p.label);
