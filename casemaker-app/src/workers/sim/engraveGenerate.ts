@@ -4842,12 +4842,22 @@ export async function buildModelPlanInputForGoal(
   tool: Tool,
   shop: EngraveShopOpts,
   /**
-   * #966 test/e2e-only seam — overrides the real `buildSetupSpecs` decision below with a
-   * caller-supplied list, so a spec can drive `generateGoalProgram`'s real multi-setup posting
-   * path with a synthetic `ModelPlanInput.setups` without depending on a particular mesh's own
-   * flip-plan answer. `multiSetup966.spec.ts`/`camModelSeam966.spec.ts` already depend on this
-   * seam; no production caller passes it, and when present it wins unconditionally, exactly as
-   * before #966-goal-setups wired the real decision in to replace the old hardcoded fallback.
+   * TEST-ONLY SEAM — never set by app code, no production call site passes it. Overrides the
+   * real `buildSetupSpecs` decision below with a caller-supplied list, so a spec can drive
+   * `generateGoalProgram`'s real multi-setup posting path with a synthetic `ModelPlanInput.setups`
+   * without depending on a particular mesh's own flip-plan answer (a plain box, the fixture these
+   * specs need, genuinely needs only one setup by the real decision — there is no analytic
+   * geometry today that needs two setups AND carries a registration datum, so this parameter
+   * stands in for one). `multiSetup966.spec.ts`/`multiSetupVerify966.spec.ts`/`camModelSeam966.spec.ts`
+   * depend on it; present, it wins unconditionally, exactly as before #966-goal-setups wired the
+   * real decision in to replace the old hardcoded fallback.
+   *
+   * SLATED FOR RETIREMENT (#966 ruling, filed as a follow-up): extract `generateGoalProgram`'s
+   * posting/verifying tail into its own callable function, so these specs can call
+   * `buildModelPlanInputForGoal` → override `.setups` → `planModelCam` → that function directly —
+   * the same "call the literal production functions in order" pattern `goalSetups966.spec.ts`
+   * already uses one step short of posting. Not done here: it is a real refactor, not this
+   * removal's own scope.
    */
   setupsOverride?: SetupSpec[],
 ): Promise<ModelPlanInput> {
@@ -5076,8 +5086,8 @@ export async function generateGoalProgram(
    * `catalogueTools`, #961-wiring) never again shifts an existing positional argument into the
    * wrong parameter the way dropping `catalogue`/`onProgress`/`planner` from this same signature
    * did (B's repro, goalClearAround.spec.ts). `shop` stays required — every real caller already
-   * passes one — only `modelSetupsOverride` (the #966 test/e2e-only seam, see
-   * `buildModelPlanInputForGoal`'s own doc) is optional.
+   * passes one — only `modelSetupsOverride` (the test-only seam, never set by app code, slated
+   * for retirement — see `buildModelPlanInputForGoal`'s own doc) is optional.
    */
   opts: {
     shop: EngraveShopOpts;
