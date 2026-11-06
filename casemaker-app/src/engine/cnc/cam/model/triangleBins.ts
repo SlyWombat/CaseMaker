@@ -232,12 +232,230 @@ export function triangleBinsFor(mesh: DropCutterMesh): TriangleBins {
 }
 
 /**
+ * #1003 (6b's rule, round 3) — THE TRIANGLE CLIPPED TO AN XY SQUARE, and the exact height of its
+ * plane over that clipped polygon.
+ *
+ * `triangles.maxZ` is the triangle's HIGHEST VERTEX, which for a big facet spanning many bin
+ * cells is the height at the facet's shallow END, not anywhere near a given cell: one long
+ * sloped-pocket-floor triangle therefore closed every cell its bbox overlapped up to its shallow
+ * end, and the deep half of the slope was never cut (the #1003 sloped seeds, 93.9 %). The
+ * triangle's own surface is a PLANE (`planeA/B/C`, precomputed above); the maximum of a linear
+ * function over a convex polygon is at one of the polygon's vertices, so clipping the triangle to
+ * the cell's own square (Sutherland–Hodgman against the four half-planes) and evaluating the
+ * plane at the clipped polygon's vertices is EXACT — no bin-cell inflation, no rise missed between
+ * samples.
+ *
+ * `clippedTriangleToSquare` returns the polygon as a flat `[x, y, …]` ring (or null when the
+ * triangle does not touch the square), in the triangle's own winding. The caller uses it both for
+ * the height bound and to ask whether the part of the triangle over the cell really lies inside
+ * the node's region (`ops/pocket.ts`): a huge mouth-level land triangle can clip a sliver into a
+ * rim cell while lying wholly OUTSIDE the pocket, and must not close it.
+ */
+const SQUARE_EPS = 1e-9;
+
+type XY = { x: number; y: number };
+
+function clipPoly(poly: XY[], inside: (p: XY) => boolean, cut: (a: XY, b: XY) => XY): XY[] {
+  const out: XY[] = [];
+  for (let i = 0; i < poly.length; i++) {
+    const cur = poly[i]!;
+    const prev = poly[(i + poly.length - 1) % poly.length]!;
+    const curIn = inside(cur);
+    const prevIn = inside(prev);
+    if (curIn) {
+      if (!prevIn) out.push(cut(prev, cur));
+      out.push(cur);
+    } else if (prevIn) {
+      out.push(cut(prev, cur));
+    }
+  }
+  return out;
+}
+
+/** The triangle clipped to the axis-aligned square, as a flat `[x, y, …]` ring; null when empty. */
+export function clippedTriangleToSquare(
+  bins: TriangleBins,
+  t: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): Float64Array | null {
+  const tri = bins.triangles;
+  if (tri.maxX[t]! < x0 - SQUARE_EPS || tri.minX[t]! > x1 + SQUARE_EPS || tri.maxY[t]! < y0 - SQUARE_EPS || tri.minY[t]! > y1 + SQUARE_EPS) {
+    return null;
+  }
+  const pos = bins.mesh.positions;
+  const idx = bins.mesh.indices;
+  const i0 = idx[t * 3]! * 3;
+  const i1 = idx[t * 3 + 1]! * 3;
+  const i2 = idx[t * 3 + 2]! * 3;
+  let poly: XY[] = [
+    { x: pos[i0]!, y: pos[i0 + 1]! },
+    { x: pos[i1]!, y: pos[i1 + 1]! },
+    { x: pos[i2]!, y: pos[i2 + 1]! },
+  ];
+  const cutX = (xc: number) => (a: XY, b: XY): XY => {
+    const s = (xc - a.x) / (b.x - a.x);
+    return { x: xc, y: a.y + s * (b.y - a.y) };
+  };
+  const cutY = (yc: number) => (a: XY, b: XY): XY => {
+    const s = (yc - a.y) / (b.y - a.y);
+    return { x: a.x + s * (b.x - a.x), y: yc };
+  };
+  poly = clipPoly(poly, (p) => p.x >= x0 - SQUARE_EPS, cutX(x0));
+  if (poly.length === 0) return null;
+  poly = clipPoly(poly, (p) => p.x <= x1 + SQUARE_EPS, cutX(x1));
+  if (poly.length === 0) return null;
+  poly = clipPoly(poly, (p) => p.y >= y0 - SQUARE_EPS, cutY(y0));
+  if (poly.length === 0) return null;
+  poly = clipPoly(poly, (p) => p.y <= y1 + SQUARE_EPS, cutY(y1));
+  if (poly.length === 0) return null;
+  const flat = new Float64Array(poly.length * 2);
+  for (let i = 0; i < poly.length; i++) {
+    flat[2 * i] = poly[i]!.x;
+    flat[2 * i + 1] = poly[i]!.y;
+  }
+  return flat;
+}
+
+/**
+ * The exact maximum of the triangle's plane over a clipped polygon from `clippedTriangleToSquare`.
+ * A vertical facet (`planeA` NaN — `planeOf`'s own `null`) states no surface above a column and
+ * reads `-Infinity`, the identity of the caller's max reduction, as does an empty polygon.
+ */
+export function planeMaxOverPolygon(bins: TriangleBins, t: number, poly: Float64Array | null): number {
+  if (poly === null) return Number.NEGATIVE_INFINITY;
+  const tri = bins.triangles;
+  const a = tri.planeA[t]!;
+  if (Number.isNaN(a)) return Number.NEGATIVE_INFINITY;
+  const b = tri.planeB[t]!;
+  const c = tri.planeC[t]!;
+  let m = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < poly.length; i += 2) {
+    const z = a * poly[i]! + b * poly[i + 1]! + c;
+    if (z > m) m = z;
+  }
+  return m;
+}
+
+/** Scratch for `clipEdgeToSquare` — reused so the mask's inner loop allocates nothing. */
+const edgeRange = { t0: 0, t1: 1 };
+
+/**
+ * Liang–Barsky: the parameter range of the segment `(ax, ay) + t·(dx, dy)` inside the square,
+ * written into `edgeRange`; false when the segment misses the square entirely.
+ */
+function clipEdgeToSquare(ax: number, ay: number, dx: number, dy: number, x0: number, y0: number, x1: number, y1: number): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  for (let k = 0; k < 4; k++) {
+    let p: number;
+    let q: number;
+    if (k === 0) {
+      p = -dx;
+      q = ax - x0;
+    } else if (k === 1) {
+      p = dx;
+      q = x1 - ax;
+    } else if (k === 2) {
+      p = -dy;
+      q = ay - y0;
+    } else {
+      p = dy;
+      q = y1 - ay;
+    }
+    if (p === 0) {
+      if (q < 0) return false;
+      continue;
+    }
+    const r = q / p;
+    if (p < 0) {
+      if (r > t1) return false;
+      if (r > t0) t0 = r;
+    } else {
+      if (r < t0) return false;
+      if (r < t1) t1 = r;
+    }
+  }
+  edgeRange.t0 = t0;
+  edgeRange.t1 = t1;
+  return true;
+}
+
+/**
+ * The exact maximum of the triangle's plane over an axis-aligned XY square — the SAME value
+ * `planeMaxOverPolygon` reads off `clippedTriangleToSquare`, computed without building the
+ * polygon. The square's intersection with the triangle is convex, so the plane's maximum is at
+ * one of its vertices: triangle vertices inside the square (the clipped endpoints of each edge),
+ * square corners inside the triangle, and the triangle-edge × square-edge crossings the endpoint
+ * clip already yields. Used on the mask's interior cells, where the per-cell region test has
+ * already been answered by the corner grid; boundary cells use the polygon form, which the
+ * region test also needs.
+ */
+export function planeMaxOverSquare(bins: TriangleBins, t: number, x0: number, y0: number, x1: number, y1: number): number {
+  const tri = bins.triangles;
+  const a = tri.planeA[t]!;
+  if (Number.isNaN(a)) return Number.NEGATIVE_INFINITY;
+  if (tri.maxX[t]! < x0 - SQUARE_EPS || tri.minX[t]! > x1 + SQUARE_EPS || tri.maxY[t]! < y0 - SQUARE_EPS || tri.minY[t]! > y1 + SQUARE_EPS) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  const b = tri.planeB[t]!;
+  const c = tri.planeC[t]!;
+  const pos = bins.mesh.positions;
+  const idx = bins.mesh.indices;
+  const i0 = idx[t * 3]! * 3;
+  const i1 = idx[t * 3 + 1]! * 3;
+  const i2 = idx[t * 3 + 2]! * 3;
+  const ax0 = pos[i0]!, ay0 = pos[i0 + 1]!;
+  const ax1 = pos[i1]!, ay1 = pos[i1 + 1]!;
+  const ax2 = pos[i2]!, ay2 = pos[i2 + 1]!;
+  let m = Number.NEGATIVE_INFINITY;
+  // The three edges, without per-call arrays or closures: this is the mask's inner loop (one
+  // call per cell × candidate triangle, the organizer's largest node being 73k cells).
+  for (let e = 0; e < 3; e++) {
+    const ax = e === 0 ? ax0 : e === 1 ? ax1 : ax2;
+    const ay = e === 0 ? ay0 : e === 1 ? ay1 : ay2;
+    const bx = e === 0 ? ax1 : e === 1 ? ax2 : ax0;
+    const by = e === 0 ? ay1 : e === 1 ? ay2 : ay0;
+    const dx = bx - ax;
+    const dy = by - ay;
+    if (!clipEdgeToSquare(ax, ay, dx, dy, x0, y0, x1, y1)) continue;
+    const t0 = edgeRange.t0;
+    const t1 = edgeRange.t1;
+    const z0 = a * (ax + t0 * dx) + b * (ay + t0 * dy) + c;
+    const z1 = a * (ax + t1 * dx) + b * (ay + t1 * dy) + c;
+    if (z0 > m) m = z0;
+    if (z1 > m) m = z1;
+  }
+  // The square's own corners inside the triangle (the square-in-triangle case).
+  for (let k = 0; k < 4; k++) {
+    const cx = k < 2 ? x0 : x1;
+    const cy = k === 0 || k === 3 ? y0 : y1;
+    const d1 = (ax1 - ax0) * (cy - ay0) - (ay1 - ay0) * (cx - ax0);
+    const d2 = (ax2 - ax1) * (cy - ay1) - (ay2 - ay1) * (cx - ax1);
+    const d3 = (ax0 - ax2) * (cy - ay2) - (ay0 - ay2) * (cx - ax2);
+    const hasNeg = d1 < -SQUARE_EPS || d2 < -SQUARE_EPS || d3 < -SQUARE_EPS;
+    const hasPos = d1 > SQUARE_EPS || d2 > SQUARE_EPS || d3 > SQUARE_EPS;
+    if (hasNeg && hasPos) continue;
+    const z = a * cx + b * cy + c;
+    if (z > m) m = z;
+  }
+  return m;
+}
+
+/**
  * #970 — THE MASK CELL'S OWN BOUND: the max `cellMaxZ` over every bin cell the XY square
  * overlaps. A triangle is registered in every bin cell its bbox covers, so this is an upper bound
  * on ANY registered triangle's height within the square — outward by at most one bin cell, which
  * is the price of never missing a rise between point samples (`ops/pocket.ts`'s per-level ceiling
  * mask: a cell's five samples look at [i·pitch − ½, i·pitch + ½] while the square
  * `maskLoopsFromPredicate` opens is [i·pitch, (i+1)·pitch]).
+ *
+ * #1003 — NO LONGER USED BY THE POCKET MASK (the five-sample gate and its half-pitch inflation are
+ * gone; `clippedTriangleToSquare` + `planeMaxOverPolygon` are the mask's exact per-cell bound).
+ * Kept because it is `triangleBins`' own stated per-cell query and other callers may want the
+ * coarse bound.
  */
 export function maxTriangleZOverSquare(bins: TriangleBins, x0: number, y0: number, x1: number, y1: number): number {
   const { cellMm, x0: bx0, y0: by0, nx, ny, cellMaxZ } = bins;
