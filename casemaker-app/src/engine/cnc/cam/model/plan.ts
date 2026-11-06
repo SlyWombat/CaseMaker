@@ -1118,16 +1118,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // — on the app path the ⌀3.175 rest cuts the tray's five strips to their floor at −4.200 —
     // so this builder keeps only the strips NO owned flat can enter. A strip the ball alone could
     // reach is exactly the no-rest-flat case this issue is about.
-    // The design's own top over each planned strip (the statement's cut test reads it): the same
-    // sampler the fit test uses, kept per strip id.
-    const stripDesign = new Map<string, (x: number, y: number) => number | null>();
     const buildFloorStrips = (restCutters: readonly Tool[], statedByPlan: ReadonlySet<string>): PlanningFloorStrips => {
       const regions: RemainderRegion[] = [];
       const unreachable: { id: string; area: number; fitShare: number }[] = [];
-      if (noFlatFallback || ball === undefined) return { regions, unreachable };
+      if (noFlatFallback) return { regions, unreachable };
       const flatRadius = (cuttingDiameter(primary) ?? 0) / 2;
       if (flatRadius > 0) {
-        const bins = buildTriangleBins(doorGeometry.triangles);
         // Signed, so a hole (negative) is never mistaken for a component.
         const signedArea = (ring: readonly [number, number][]): number => {
           let a = 0;
@@ -1158,9 +1154,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
               if (reach.length === 0 || Math.abs(areaOf(reach)) <= 1e-9) {
                 // THE WHOLE NODE IS THE STRIP: the flat's ring cannot enter the floor at all (the
                 // organizer's pocket-34, a 66 × 1.1 mm ledge). There is no interior to judge — the
-                // node's floor is the strip, so it is kept whole and the gates below decide
-                // whether anything can cut it.
-                kept = outer;
+                // node's floor is the strip, so it is kept WHOLE, holes included: keeping only the
+                // positive rings claimed an island's footprint as strip (F's review, finding 1).
+                kept = node.region;
               } else {
                 const band = boolean.subtract(outer, offset(outer, -BOUNDARY_BAND_MM));
                 kept = [];
@@ -1207,6 +1203,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
               // can take 84 % of a strip should take it and the statement names the remainder.
               // Below that floor (a strip of truly vertical walls — the synthetic fixture) the
               // strip is stated as standing instead of planned as air.
+              // No ball in the house: nothing can finish the strip's floor, so it is stated as
+              // standing by the warning path below (F's review, finding 2).
               const ballRadiusMm = ball === undefined ? 0 : (cuttingDiameter(ball) ?? 0) / 2;
               let ballFitShare = 0;
               let ballFits = false;
@@ -1234,17 +1232,21 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
                     if (y > maxY) maxY = y;
                   }
                 }
-                // THE RULING'S RULE: the ball's tip (CL − R) against the STRIP'S OWN FLOOR —
+                // THE RULING'S RULE: the ball's CL at the cell against the STRIP'S OWN FLOOR —
                 // the node's floor, not a sampled design top (a top sampler read the part's
-                // surface over a strip and mis-scored both the tray and the organizer).
+                // surface over a strip and mis-scored both the tray and the organizer). The
+                // drop-cutter already states the height the tool REACHES (the tip for a ball);
+                // subtracting the radius again double-counted it and planned passes over strips
+                // a ball never descends into (the synthetic cone fixture measured fit ≥ 10 % and
+                // a pass that reached 0 %).
                 const FIT_PITCH_MM = 0.5;
                 for (let x = minX; x <= maxX + 1e-9; x += FIT_PITCH_MM) {
                   for (let y = minY; y <= maxY + 1e-9; y += FIT_PITCH_MM) {
                     if (!pointInPolygons(kept, x, y)) continue;
-                    const centre = cl.dropCutter(x, y);
-                    if (centre === null) continue;
+                    const clAt = cl.dropCutter(x, y);
+                    if (clAt === null) continue;
                     cells++;
-                    if (centre - ballRadiusMm <= node.floorZ + 0.1) within++;
+                    if (clAt <= node.floorZ + 0.1) within++;
                   }
                 }
                 ballFitShare = cells === 0 ? 0 : within / cells;
@@ -1255,39 +1257,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
                 unreachable.push({ id: node.id, area: Math.abs(areaOf(kept)), fitShare: ballFitShare });
               }
               if (kept.length > 0 && !restOwned && ballFits) {
-                // The design's own top over the strip, clamped exactly as the #982 floors are.
-                let designMax = -Infinity;
-                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-                for (const ring of kept) {
-                  for (const [x, y] of ring) {
-                    if (x < minX) minX = x;
-                    if (x > maxX) maxX = x;
-                    if (y < minY) minY = y;
-                    if (y > maxY) maxY = y;
-                  }
-                }
-                // Sampled INSIDE the strip only: its bbox reaches over the pocket's rim, and a
-                // bbox scan read the part's TOP there — the #982 clamp then collapsed a small
-                // pocket's strip to a zero-depth region at the mouth (measured on the organizer's
-                // fourteen small strips: topZ = bottomZ = −0.80, a pass that cut nothing).
-                for (let x = minX; x <= maxX + 1e-9; x += 0.5) {
-                  for (let y = minY; y <= maxY + 1e-9; y += 0.5) {
-                    if (!pointInPolygons(kept, x, y)) continue;
-                    const top = topSurfaceAt(bins, x, y);
-                    if (top !== null && top > designMax) designMax = top;
-                  }
-                }
-                // THE FLOOR IS THE NODE'S OWN. The #982 clamp (`max(floorZ, designMax)`) guards a
-                // spurious floor BELOW the body; on a strip inside a pocket the design sampler can
-                // read the part's top over the opening instead of the floor and the clamp then
-                // collapsed the strip to a zero-depth pass at the mouth — measured on the tray
-                // (topZ = bottomZ = −1.20, a pass that cut nothing, stated as reaching 13 %).
-                void designMax;
+                // THE FLOOR IS THE NODE'S OWN, not a sampled design top: the #982 clamp's
+                // `max(floorZ, designMax)` read the part's top over the opening on the tray and the
+                // organizer and collapsed strips to zero-depth passes at the mouth (topZ = bottomZ
+                // = −1.20 and −0.80 measured), which then cut nothing and were stated wrongly.
                 const zBottom = node.floorZ;
-                const stripId = `${node.id}:floor-strip`;
-                stripDesign.set(stripId, (x, y) => topSurfaceAt(bins, x, y));
                 regions.push({
-                  id: stripId,
+                  id: `${node.id}:floor-strip`,
                   footprint: kept,
                   area: Math.abs(areaOf(kept)),
                   zTop: node.mouthZ,
@@ -1552,8 +1528,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       );
       for (const strip of plannedStrips) {
         // THE CELLS THE PASS ACTUALLY REACHES, not "a feed exists": every 0.5 mm cell of the
-        // strip is reached when a feed lies within 0.75 mm of it and at or below the design there
-        // plus the 0.1 mm band. A pass that only clips the strip's ends reads as what it is.
+        // strip is judged by the ball's own surface over it — the minimum over the feeds near it
+        // of `z + R − √(R² − d²)`, against the strip's floor plus the 0.1 mm band.
         const feeds: { x: number; y: number; z: number }[] = [];
         for (const op of result.ops) {
           if (op.region.id !== strip.id) continue;
@@ -1681,7 +1657,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       totalCostSeconds,
       notes,
       statements,
-      unreachable: result.unreachable.filter((id) => !floorStripsCut.has(id)),
+      unreachable: result.unreachable.filter((entry) => {
+        const cut = [...floorStripsCut].some((id) => entry === id || entry.startsWith(`${id}:`));
+        return !cut;
+      }),
       unplanned: result.unplanned,
       choice: result.choice,
     });
