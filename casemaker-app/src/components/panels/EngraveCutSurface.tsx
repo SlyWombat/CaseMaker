@@ -1321,7 +1321,7 @@ export function EngraveCutSurface({
             <p style={MUTED}>comparing the plans…</p>
           </section>
         )}
-        {idealPlan.status === 'ready' && planTradeoff === null && (
+        {idealPlan.status === 'ready' && (planTradeoff === null || !planTradeoff.material) && (
           <section style={{ ...BOX, marginTop: 6 }} data-testid="engrave-plan-no-difference">
             <p style={MUTED}>with every bit the app knows: no material difference</p>
           </section>
