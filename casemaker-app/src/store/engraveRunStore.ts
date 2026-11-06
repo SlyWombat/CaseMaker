@@ -713,11 +713,20 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     if (generated.ok && generated.nc !== null && job.targetObject !== undefined && client.engravePlanIdeal !== undefined) {
       const idealClient = client;
       const idealJob = job;
+      // #986 (E's review) — THE STALE-RUN RACE: the ideal path has no run of its own, so a slow
+      // ideal from run A could resolve after run B started and write A's tradeoff under B's
+      // program. The store's own run token is the guard: the result lands only while the run that
+      // asked for it still owns the hold.
+      const idealToken = runHold;
       set({ idealPlan: { status: 'comparing', tradeoff: null } });
       void idealClient
         .engravePlanIdeal!(idealJob, idealJob.targetObject!, tool as Tool, shop, getTools().map((entry) => entry.tool))
-        .then((answer) => set({ idealPlan: { status: 'ready', tradeoff: answer.tradeoff } }))
-        .catch(() => set({ idealPlan: { status: 'idle', tradeoff: null } }));
+        .then((answer) => {
+          if (runHold === idealToken) set({ idealPlan: { status: 'ready', tradeoff: answer.tradeoff } });
+        })
+        .catch(() => {
+          if (runHold === idealToken) set({ idealPlan: { status: 'idle', tradeoff: null } });
+        });
     }
     // #787 — every finding the run raised, small enough for the report to carry.
     for (const f of generated.findings) noteFinding(f);
