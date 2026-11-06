@@ -640,7 +640,15 @@ export function EngraveCutSurface({
   // only when the two plans' measured outcomes differ materially; the line names the outcome that
   // moved, never a cutter. The choice is the job's (`planChoiceOf`, owned by default) and the next
   // Generate posts the chosen plan.
-  const planTradeoff = (generated as { planTradeoff?: PlanTradeoff | null } | null)?.planTradeoff ?? null;
+  // #986 (the ruling) — THE IDEAL ARRIVES BEHIND THE OWNED PLAN. While the background comparison
+  // runs the card says so; when it lands the line is its own, and when it finds nothing material
+  // the card says that rather than nothing at all.
+  const idealPlan = useEngraveRunStore((s) => s.idealPlan);
+  const planTradeoff =
+    idealPlan.status === 'ready'
+      ? idealPlan.tradeoff
+      : ((generated as { planTradeoff?: PlanTradeoff | null } | null)?.planTradeoff ?? null);
+  const comparingPlans = idealPlan.status === 'comparing';
   const planChoice = useEngraveJobStore((s) => planChoiceOf(s.job));
   const setPlanChoice = useEngraveJobStore((s) => s.setPlanChoice);
   /** #656 — the verdict the one screen prints: the run store's oracle for the current package (a
@@ -1308,6 +1316,16 @@ export function EngraveCutSurface({
             second HERE — press Generate (the same button Design's footer carries) and the freeze
             follows it. A program that matches the design needs no card; only the blank's hold is
             stated. */}
+        {comparingPlans && (
+          <section style={{ ...BOX, marginTop: 6 }} data-testid="engrave-plan-comparing">
+            <p style={MUTED}>comparing the plans…</p>
+          </section>
+        )}
+        {idealPlan.status === 'ready' && planTradeoff === null && (
+          <section style={{ ...BOX, marginTop: 6 }} data-testid="engrave-plan-no-difference">
+            <p style={MUTED}>with every bit the app knows: no material difference</p>
+          </section>
+        )}
         {planTradeoff?.material && planTradeoff.line !== null && (
           <section style={{ ...BOX, marginTop: 6 }} data-testid="engrave-plan-tradeoff">
             <p style={MUTED}>{planTradeoff.line}</p>
