@@ -143,6 +143,45 @@ describe('#959 rough — the analytic dome', () => {
     sampleCount: 0,
   };
 
+  it('#1002 — a rapid never descends below the CL surface when stepDown exceeds the hop', () => {
+    // Companion to the RED-FIRST pocket fixture in `pocketOp959` (#1002). This dome does not
+    // reach the defect on its own — its adjacent ground sits at the landing's own z, so the buggy
+    // per-ring band and the finished-level proof agree here (verified at 8f5cc4c18) — but it pins
+    // the rough op's version of the same rule at stepDown 2 > hop 1, which the built-in feeds'
+    // stepDowns (all <= 1.0 = the default hop) would otherwise never exercise.
+    const { region, regionRef } = regionOf('dome-1002', bounds, 8, 0, 22);
+    const out = rough({
+      cutter: flat6,
+      region,
+      regionRef,
+      clSurface: cl,
+      stepDownMm: 2,
+      stockToLeaveMm: LEAVE,
+      stepOverMm: 3,
+      gridPitchMm: 0.25,
+      feeds: FEEDS,
+      offset: makeClipperOffset(tl),
+      safeZMm: 12,
+      hopZMm: 1,
+      toolNumber: 1,
+      spindleRpm: 12000,
+      air: true,
+      rapid,
+    });
+    let rapidsChecked = 0;
+    for (const op of out.ir.operations) {
+      for (const m of op.moves) {
+        if (m.kind !== 'rapid') continue;
+        const z = cl.dropCutter(m.x, m.y);
+        if (z === null) continue;
+        rapidsChecked++;
+        expect(m.z, `a rapid at (${m.x.toFixed(2)}, ${m.y.toFixed(2)}) is below the CL surface ${z.toFixed(2)}`).toBeGreaterThanOrEqual(z - 1e-6);
+      }
+    }
+    // Non-vacuous: the plan actually has rapids over the surface to check.
+    expect(rapidsChecked).toBeGreaterThan(3);
+  }, 120_000);
+
   it('never cuts below the CL surface; the leftover above it is within leave + one step-down', () => {
     const { region, regionRef } = regionOf('dome', bounds, 8, 0, 22);
     const out = rough({

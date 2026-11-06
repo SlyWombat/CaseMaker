@@ -409,12 +409,14 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
   const passes: PassRef[] = [];
   const cleared: RegionAtZ[] = [];
 
-  // #1002 — THE LANDING PROOF. A retract's down leg may rapid back to the landing's own level when
-  // the landing stands on ground this op has ALREADY cut down to it: the rings traced so far at
-  // that level (`passes[].cleared`, the swept-so-far area) or the level that finished
-  // (`cleared`, pushed when its last ring ends) — never the level's mask, which says what the
-  // level WILL cut. Without it the down leg stops at the stock top and feeds the whole way.
-  const landingClearedZ = (x: number, y: number, _z: number): number | null => clearedGroundZ(x, y, passes, cleared);
+  // #1002 — THE LANDING PROOF. A retract's down leg may rapid back toward the landing's own level
+  // only as far as the ground under the landing has actually been cut: the DEEPEST FINISHED level
+  // whose recorded cleared area contains it (`cleared`, pushed when a level's last ring ends). The
+  // per-ring `passes[].cleared` band is not a proof — it is the step's whole planned band, so a
+  // same-level landing on a lobe this level has not reached yet would rapid below the stock
+  // standing on the previous level's floor (measured: stepDown 2 > hop 1 → rapid 1 mm into stock).
+  // Without a finished level under the landing the down leg stops at the stock top and feeds.
+  const landingClearedZ = (x: number, y: number, _z: number): number | null => clearedGroundZ(x, y, cleared);
 
   // Tracks where the tool actually is, so a link is only asked for from the SECOND ring/level
   // onward — the very first ring of the whole op has no "from" position, just its own plunge.

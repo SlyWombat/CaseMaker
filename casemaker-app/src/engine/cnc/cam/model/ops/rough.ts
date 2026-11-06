@@ -339,11 +339,12 @@ export function rough(opts: RoughOpOptions): OpOutcome {
   const cleared: RegionAtZ[] = [];
 
   // #1002 — THE LANDING PROOF, as the LEVEL the ground under the landing has been cut to: the
-  // deepest recorded swept area containing it — the rings already traced at a level and the
-  // levels that finished. A same-level link's rapid floor becomes that level + the hop (one
-  // step-down's feed), never the stock-top plunge; a level-change landing keeps the level just
-  // finished. Same rule the pocket op states in full.
-  const landingClearedZ = (x: number, y: number, _z: number): number | null => clearedGroundZ(x, y, passes, cleared);
+  // deepest FINISHED level whose recorded cleared area contains it. A landing over an earlier
+  // level's floor gets its rapid lifted to that floor + the hop (one step-down's feed), never the
+  // stock-top plunge; a level-change landing keeps the level just finished. The per-ring
+  // `passes[].cleared` mask is what this level WILL cut, not swept ground, so it is not a proof.
+  // Same rule the pocket op states in full.
+  const landingClearedZ = (x: number, y: number, _z: number): number | null => clearedGroundZ(x, y, cleared);
   const linkBase = {
     tool: { radiusMm: toolRadius },
     feeds: { feed: opts.feeds.feedMmPerMin, plungeFeed: opts.feeds.plungeFeedMmPerMin },

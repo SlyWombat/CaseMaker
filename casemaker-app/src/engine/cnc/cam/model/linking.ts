@@ -148,37 +148,24 @@ export interface LinkedPass<T extends PassLink> {
 const EPS = 1e-9;
 
 /**
- * #1002 — THE CLEARED-AREA PROOF for a retract's landing. The deep ops record, for every ring they
- * trace, the area they have actually swept at that ring's level (`passes[].cleared`), and for every
- * level that finished, the level's own cleared area (`cleared`, pushed when its last ring ends).
- * A landing whose z matches one of those entries and whose (x, y) lies inside the recorded area is
- * standing on ground the op has already cut DOWN TO THAT LEVEL — so a rapid may descend to that
- * level (`landingCut`'s contract in {@link LinkOptions}), and no farther, before the one-step feed.
+ * #1002 — THE CLEARED-AREA PROOF for a retract's landing: a level that FINISHED, with the area it
+ * cleared. The deep ops push one entry per completed level (`cleared`, after its last ring ends),
+ * and only those entries are swept areas: a level that finished cut the ground down to its own z
+ * everywhere its recorded area reaches. A landing whose (x, y) lies inside such an area stands on
+ * ground the op has already cut down to that level — so a rapid may descend to that level
+ * (`landingClearedZMm`'s contract in {@link LinkOptions}), and no farther, before the one-step feed.
  *
- * This is not the two rejected proofs: the level MASK says what a level WILL cut, and ring
- * proximity says where the cutter's rim passed — both guesses from geometry the op has not swept
- * yet. This reads the area the op has ACTUALLY swept at the stated level, the same polygons the
- * IR's own pass records carry.
+ * The per-ring records (`passes[].cleared`) are NOT a proof: they say what the ring's own step is
+ * about to cover. In the pocket op that is the whole step-over band around the region, and in
+ * rough/rest it is literally the level's mask — the "what this level WILL cut" guess this proof
+ * exists to replace. A same-level landing on such a band can stand on the previous level's floor
+ * (a lobe the current level has not reached yet), and with `stepDown > hop` a rapid to the band's
+ * level descends through standing stock. Only finished levels can lift the floor; a same-level
+ * link falls back to the stock-top rule.
  */
 export interface ClearedArea {
   z: number;
   boundary: Polygons;
-}
-
-export function clearedAtLevel(
-  z: number,
-  traced: readonly ClearedArea[],
-  levels: readonly ClearedArea[],
-): Polygons | null {
-  for (let i = traced.length - 1; i >= 0; i--) {
-    const entry = traced[i]!;
-    if (Math.abs(entry.z - z) <= 1e-9) return entry.boundary;
-  }
-  for (let i = levels.length - 1; i >= 0; i--) {
-    const entry = levels[i]!;
-    if (Math.abs(entry.z - z) <= 1e-9) return entry.boundary;
-  }
-  return null;
 }
 
 /**
@@ -189,19 +176,13 @@ export function clearedAtLevel(
  * far above Clipper/float noise and far below any real feature or the hop clearance.
  */
 /**
- * #1002 — the DEEPEST cleared level under (x, y), from the same recorded areas. Every level the op
- * has finished cut the ground down to that level over its recorded area, and the rings it has
- * already traced at a level cut it to that level inside their bands — so the ground at a point is
- * at the DEEPEST recorded level whose area contains it. Null when no recorded area contains it.
+ * #1002 — the DEEPEST FINISHED level under (x, y). Every finished level cut the ground down to its
+ * own z over its recorded area, so the ground at a point is at the deepest finished level whose
+ * area contains it. Null when no finished area contains it (the stock-top rule then applies).
  */
-export function clearedGroundZ(
-  x: number,
-  y: number,
-  traced: readonly ClearedArea[],
-  levels: readonly ClearedArea[],
-): number | null {
+export function clearedGroundZ(x: number, y: number, levels: readonly ClearedArea[]): number | null {
   let deepest: number | null = null;
-  for (const entry of [...traced, ...levels]) {
+  for (const entry of levels) {
     if (deepest !== null && entry.z >= deepest) continue;
     if (clearedAreaContains(entry.boundary, x, y)) deepest = entry.z;
   }
