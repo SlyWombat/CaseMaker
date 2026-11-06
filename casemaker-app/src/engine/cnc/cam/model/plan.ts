@@ -43,6 +43,7 @@ import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, type SetupRegistration } from './setups';
 import { pocket } from './ops/pocket';
+import { roughLeftAbove } from './ops/rough';
 import { clSurface, creaseFits } from './clsurface';
 import { dropCutterHeight, profileOf, type CutterProfile, type DropCutterMesh } from './dropcutter';
 import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
@@ -2797,14 +2798,30 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       const v = surface.dropCutter(x, y);
       return v === null ? null : v + z0;
     };
-    const leftoverAbove = (x: number, y: number): boolean => {
+    // #1014 — THE LEFTOVER IS WHAT THE ROUGH LEFT, NOT ITS CUTTER'S IDEAL CL. The old read took
+    // the rough cutter's CL as the leftover; with a flat rough that over-estimates by R·tan θ and
+    // the finish ran, but under the #982 no-flat fallback the rough cutter is the BALL, whose CL
+    // hugs the design on a shallow slope (R(1/cos θ − 1) = 0.0025 mm at 5.7°) — so the mask called
+    // the slope finished while the rough's 0.3 mm terraces stood 0.3–0.6 mm proud. The rough's own
+    // two outputs are stated in ONE helper beside `depthPasses` (`roughLeftAbove`): the CL where
+    // its band skim could cut, else the first of its Z-levels at or above `cl + band` (the stock
+    // top when none) — the level the mask itself admits a cell to. The rest pass's CL stays min'd
+    // in: a smaller FLAT's CL is an honest over-estimate of what a flat leaves, the same premise
+    // that holds for a flat rough.
+    const roughStepDown = flat === undefined ? 0 : paramsFor(flat).stepDown;
+    const roughLeft = (x: number, y: number): number | null => {
       const f = flatAbs(x, y);
       const r = restAbs(x, y);
-      const flatZ = f === null ? r : r === null ? f : Math.min(f, r);
-      if (flatZ === null) return false;
+      if (f === null) return r;
+      const left = roughLeftAbove(f, base.zTop, base.zBottom, roughStepDown, opts.bandMm);
+      return r === null ? left : Math.min(left, r);
+    };
+    const leftoverAbove = (x: number, y: number): boolean => {
+      const left = roughLeft(x, y);
+      if (left === null) return false;
       const design = topSurfaceAt(binsForMask(), x, y);
       if (design === null) return false;
-      return flatZ - design > finishBand;
+      return left - design > finishBand;
     };
     const ballRadiusForMask = (cuttingDiameter(finishCutter) ?? 0) / 2;
     const maskRing: [number, number][] = [];
