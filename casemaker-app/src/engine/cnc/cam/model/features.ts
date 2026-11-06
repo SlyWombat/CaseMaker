@@ -197,6 +197,26 @@ export function recogniseFeatures(
 
   const rawRims = findRims(mesh, patches, adj, tol.levelMergeMm);
   const built = buildTree(kernel, mesh, patches, surfaces, tol, rawRims);
+  // #1003 — THE STOCK BOTTOM CLIPS THE TREE ITSELF. Every op takes its depth from the tree's own
+  // nodes and regions (a pocket steps `mouthZ → floorZ`, a rough/finish step a region's
+  // `zTop → zBottom`), so clipping HERE bounds every op kind at once: a 34 mm figure on a 20 mm
+  // blank pockets, roughs and finishes no lower than the blank's bottom. Clipping inside any one
+  // op (the contour, a pocket feature's stated depth) leaves the others free to cut through the
+  // vise, which is exactly how the fitting case failed with 19,505 moves below the stock.
+  if (frame.stockBottom !== undefined) {
+    const floorZ = frame.stockBottom;
+    const clipNodes = (nodes: PocketNode[]): void => {
+      for (const node of nodes) {
+        if (node.floorZ < floorZ) node.floorZ = floorZ;
+        clipNodes(node.children);
+      }
+    };
+    clipNodes(built.pockets);
+    // The CONTOUR is deliberately NOT clipped here: it has its own floor at plan time, which also
+    // carries the board's breakthrough (#1003's allowance) — clipping it here would take that away
+    // and lose the pre-clip depth the statement reports.
+    for (const region of built.remainder) if (region.zBottom < floorZ) region.zBottom = floorZ;
+  }
   const notes = [...built.notes];
   if (demoted.length > 0) notes.push(`${demoted.length} near-flat tangent cap(s) merged into the curved remainder (D2)`);
   if (built.slivers.length > 0) notes.push(`${built.slivers.length} floor sliver(s) under ${tol.minFloorWidthMm} mm wide listed, not cut as pockets (D2)`);

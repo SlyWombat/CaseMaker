@@ -218,6 +218,12 @@ export interface SetupSpec {
 
 export interface ModelPlanInput {
   geometry: FeatureSource;
+  /**
+   * #1003 (the manager's narrowing) — the sacrificial board's BREAKTHROUGH, mm. Used ONLY for the
+   * freeing contour's floor (a contour cuts through the blank into the board by design); pockets
+   * and curved regions never use it.
+   */
+  sacrificialBreakthroughMm?: number;
   /** #959 ruling: `'on'` plans the facing stage; absent/`'off'` gives the skin to the `skin` pass. */
   facing?: 'off' | 'on';
   /**
@@ -871,6 +877,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       pockets: noFlatFallback ? null : {
         ...(depthBandMm === undefined ? {} : { depthBandMm }),
         houseFlats: flats,
+        ...(input.sacrificialBreakthroughMm === undefined ? {} : { sacrificialBreakthroughMm: input.sacrificialBreakthroughMm }),
         // #975 — the V bits are the pocket chain's last resort: a pocket no flat covers gets the
         // narrowest V whose tip fits the stroke and whose leg reaches the floor, floor-correct.
         houseVs: input.cutters.house.filter((t) => isVShape(t)),
@@ -1298,6 +1305,14 @@ function boundsOfPolygons(polygons: Polygons): Box2 {
 export interface PlanPocketsOptions {
   /** The real Clipper2 offset, or a test fake — `pocketLoops`' own contract, carried through unchanged. */
   offset: OffsetFn;
+  /**
+   * #1003 (the manager's narrowing) — THE BOARD'S BREAKTHROUGH, mm, and ONLY for the freeing
+   * contour: the contour's job is to cut through the blank into the board, so its clamp is the
+   * stock bottom minus this. Pocket floors and the curved regions stay at exactly the stock bottom —
+   * nothing there has a reason to go below the blank — and the verifier's spatial rule stays the
+   * net for everything else.
+   */
+  sacrificialBreakthroughMm?: number;
   /** House cutters, largest first is NOT required — #961's `chooseSequence` ranks by cost, not list order. */
   houseFlats: readonly Tool[];
   /**
@@ -1491,10 +1506,27 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // recognised part top — a `partTop - zTo` depth stopped the contour short by exactly the skin
   // between the stock and the part (1.2 mm on the tray, 0.8 mm on the organizer), so the part was
   // never actually freed. These are magnitudes, already stock-top-relative — no `rebase` needed.
-  const contourDemandMm = z0 - tree.contour.zTo;
+  const contourDepthRawMm = z0 - tree.contour.zTo;
   // #988 — the freeing contour stops at the band: depth min(demand, band). The demand stays for
   // the setup's own "what is left" line in `planModelCam`.
-  const contourDepthMm = depthBandMm === undefined ? contourDemandMm : Math.min(contourDemandMm, depthBandMm);
+  //
+  // #1003 — THE STOCK BOTTOM IS THE FLOOR TOO. A goal taller than its blank (the corpus figure is
+  // 41.337 mm on a 40 mm stock) must not free through the vise: the verifier's `cut-too-deep` is
+  // the hard gate, and this is the PLAN honouring it — the freeing contour is cut off at the stock
+  // bottom and the clipped millimetres are stated. The sacrificial board's allowance is a separate
+  // input this function does not receive yet (stated, not silently zero). The two floors COMPOSE:
+  // the shallower of the demand, the band and the stock bottom wins.
+  const stockBottomZ = tree.frame.stockBottom;
+  const stockFloorDepthMm = stockBottomZ === undefined ? undefined : z0 - stockBottomZ;
+  const breakthroughMm = opts.sacrificialBreakthroughMm ?? 0;
+  const contourFloorDepthMm = stockFloorDepthMm === undefined ? undefined : stockFloorDepthMm + Math.max(0, breakthroughMm);
+  const contourDepthMm = Math.min(
+    contourDepthRawMm,
+    depthBandMm === undefined ? Number.POSITIVE_INFINITY : depthBandMm,
+    contourFloorDepthMm === undefined ? Number.POSITIVE_INFINITY : contourFloorDepthMm,
+  );
+  /** #1003 — the SAME floor for every op's depth: nothing is planned below the stock bottom. */
+  const capDepth = (raw: number): number => (stockFloorDepthMm === undefined ? raw : Math.min(raw, stockFloorDepthMm));
 
   // The manager's #959 ruling: the top land OUTSIDE every pocket's footprint, faced through the
   // SAME `pocket()` op and `link()` safety every other region uses — not a new op. `tree.top.floors`
@@ -1554,7 +1586,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       // mouth — a nested node's flute reach is under-reported by `mouthZ - floorZ` alone.
       // #988 — the BAND makes the feature shallower: the cutter is sized against the depth the
       // plan actually cuts, and the rest is stated as remainder (the rule itself is untouched).
-      depthMm: depthBandMm === undefined ? z0 - node.floorZ : Math.min(z0 - node.floorZ, depthBandMm),
+      // #1003 — the stock bottom caps it as well; the shallower wins.
+      depthMm: capDepth(depthBandMm === undefined ? z0 - node.floorZ : Math.min(z0 - node.floorZ, depthBandMm)),
     });
   }
   for (const node of throughNodes) {
@@ -1563,7 +1596,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       kind: 'pocket',
       minOpeningMm: node.narrowest,
       cornerRadiusMm: node.narrowest / 2,
-      depthMm: depthBandMm === undefined ? z0 - node.floorZ : Math.min(z0 - node.floorZ, depthBandMm),
+      depthMm: capDepth(depthBandMm === undefined ? z0 - node.floorZ : Math.min(z0 - node.floorZ, depthBandMm)),
     });
   }
   // #987 — a skirt-closed relief's outline is synthetic: the kernel's own requirement for a
@@ -1826,7 +1859,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         id,
         outline: throughNode.region,
         region: ref,
-        depthMm: depthBandMm === undefined ? z0 - throughNode.floorZ : Math.min(z0 - throughNode.floorZ, depthBandMm),
+        depthMm: capDepth(depthBandMm === undefined ? z0 - throughNode.floorZ : Math.min(z0 - throughNode.floorZ, depthBandMm)),
         offset: opts.offset,
         params: cutParamsFor(cutter),
         rapid: opts.rapid,
@@ -2175,6 +2208,14 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         );
       }
     }
+  }
+  // #1003 — the stock bottom's own clip (plus the board's breakthrough, CONTOUR ONLY), stated
+  // once per setup, in the same statement path.
+  if (contourFloorDepthMm !== undefined && contourDepthRawMm > contourFloorDepthMm + 1e-9) {
+    notes.push(
+      `the goal extends ${(contourDepthRawMm - contourFloorDepthMm).toFixed(3)} mm below the stock; the freeing contour is cut off at the stock bottom` +
+        (breakthroughMm > 0 ? ` plus the board's ${breakthroughMm.toFixed(3)} mm breakthrough` : ''),
+    );
   }
   // #943 (2026-11-05 ruling): the facing stage states where its cut starts, how many passes the
   // probed spread takes, and the clamp when the part top binds. The count mirrors `depthPasses`'
@@ -2627,10 +2668,22 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         `cam/model/plan: the remainder region "${region.id}" needs a cutter to finish and the call states no ball, no finish flat and no flat`,
       );
     }
+    // #1003 — THE STOCK BOTTOM IS THE FLOOR HERE TOO: `rebaseZ` already puts the region's bottom in
+    // the plan's own datum (stock top = 0), which is the same datum as `tree.frame.stockBottom`, so
+    // the clamp is a plain max. A goal taller than its stock must not finish below the blank.
+    // #1013 — the depth band composes with it; the shallower of the two wins.
+    // E's review of b74f653c6 (#1003): `rebaseZ` is relative to the STOCK TOP, `frame.stockBottom`
+    // is absolute — comparing them directly clamped a flipped setup (stockTop 30, stockBottom 0) to
+    // 0 and the region's rough/finish cut nothing. The floor must be rebased like the region is.
+    const planFloorZ = tree.frame.stockBottom === undefined ? undefined : rebaseZ(tree.frame.stockBottom);
     const base = {
       ...region,
       zTop: rebaseZ(region.zTop),
-      zBottom: bandFloorZ === null ? rebaseZ(region.zBottom) : Math.max(rebaseZ(region.zBottom), bandFloorZ),
+      zBottom: Math.max(
+        rebaseZ(region.zBottom),
+        bandFloorZ === null ? Number.NEGATIVE_INFINITY : bandFloorZ,
+        planFloorZ === undefined ? Number.NEGATIVE_INFINITY : planFloorZ,
+      ),
     };
     const ref = regionRefOf(region.id, 'curved', base.footprint, base.zTop, base.zBottom);
     // THE REVIEW'S SAFETY FINDING: the finish's outer footprint is grown by the ball's radius, and

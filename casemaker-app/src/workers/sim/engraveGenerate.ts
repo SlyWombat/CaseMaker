@@ -133,6 +133,7 @@ import { simErrors, simulationProblem } from '@/engine/cnc/simGate';
 import { withPeriod } from '@/store/engraveRunGate';
 import type { NodeMeshOutput } from '../geometry/meshOutput';
 import { programHash } from '@/engine/cnc/programHash';
+import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import { jobVise, validateVise, viseEnvelope } from '@/engine/cnc/fixture';
 import { generateEngrave, makeClipperOffset, zPasses, type EngraveRegion, type FinishPassSpec, type VCarveRegion } from '@/engine/cnc/cam/engraveJob';
 // #433/#666 — the adaptive-clearing strategy a metal pocket is cut with. The METHOD settings are
@@ -5143,6 +5144,10 @@ export async function buildModelPlanInputForGoal(
     cutters,
     tolerances,
     edgeBreak,
+    // #1003 — the board's breakthrough, for the FREEING CONTOUR's floor only (a contour cuts through
+    // the blank into the board by design); absent when the job has no board, so the floor is the
+    // stock bottom itself.
+    ...(hasSacrificial(job.sacrificial) ? { sacrificialBreakthroughMm: job.breakthrough } : {}),
     curvedRoughTool,
     // #1005 — the plan states the mould's own facts (one-sided, and the cavity's steepest wall
     // against `MOLD_DRAFT_LIMIT_DEG`). The wall is measured from the part's surface — the cavity's
@@ -5320,6 +5325,33 @@ export async function generateGoalProgram(
   if (tool === null) return fail('feeds', 'the job has no usable cutter');
   const mill = jobMachine(job, calibration);
 
+  // #949/#1003 — AN XY OVERHANG IS REFUSED PRE-PLAN, AND A Z OVERHANG IS CLIPPED. A goal that does
+  // not fit its blank in X or Y is a job error the operator must fix (a larger blank, or Fit to the
+  // stock); a goal merely TALLER than the blank is planned to the stock bottom and its overrun
+  // stated (#1003's clamp). The two rules answer different axes and both stand.
+  {
+    const local = targetObjectMesh(goal);
+    const place = placeTarget(goal, local).place;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let i = 0; i < local.positions.length; i += 3) {
+      const [x, y] = place(local.positions[i]!, local.positions[i + 1]!, local.positions[i + 2]!);
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    }
+    const overhangs = [
+      { edge: 'left', mm: -minX },
+      { edge: 'right', mm: maxX - job.stock.length },
+      { edge: 'front', mm: -minY },
+      { edge: 'back', mm: maxY - job.stock.width },
+    ].filter((o) => o.mm > 1e-6).sort((a, b) => b.mm - a.mm);
+    if (overhangs.length > 0) {
+      const worst = overhangs[0]!;
+      return fail(
+        'cam',
+        `the goal is larger than the blank: ${worst.mm.toFixed(1)} mm past the ${worst.edge} edge. Fit to the stock, or choose a blank that holds it`,
+      );
+    }
+  }
   // #966 — THE SEAM REMOVED. The old heightfield dispatch (`generateSurface3dForGoal`/
   // `generateSurface3dIR`) and the `USE_MODEL_CAM_ENGINE` flag that chose between it and this are
   // both gone: `planModelCam` is the only path a goal job plans through now.

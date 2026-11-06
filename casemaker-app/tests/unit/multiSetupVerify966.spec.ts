@@ -200,6 +200,36 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
   // — a goal that genuinely needs two setups, carries a real locating datum, and posts EVERY
   // program across BOTH setups with zero error-severity findings, through the REAL
   // `buildModelPlanInputForGoal` decision (no `modelSetupsOverride` test seam).
+  // #1003 (E's review, red-first): THE FLIPPED SETUP'S CURVED REGIONS MUST CUT. b74f653c6 compared
+  // the region's rebased bottom against the frame's ABSOLUTE stockBottom (0 on this fixture), which
+  // clamped the flipped setup's curved-0 to 0..0 and its rough and finish cut nothing — a silent
+  // under-cut that move-only checks (multiSetupVerify966's own verify reports) cannot see. The
+  // floor is `rebaseZ(stockBottom)` now; this pins the depths the cut actually reaches.
+  it('#1003 the flipped setup’s curved-0 rough and finish cut below 0 — a silent under-cut cannot pass again', async () => {
+    const { goal, stock } = await buildDatumGoal();
+    const job = jobForGoal(goal, stock);
+    const input = await buildModelPlanInputForGoal(job, goal, BALL, DATUM_SHOP);
+    expect(input.setups).toHaveLength(2);
+    const output = await planModelCam(input);
+    const flipped = output.perSetup.find((s) => s.setupIndex === 1);
+    expect(flipped, 'no flipped setup in the plan').toBeDefined();
+    const curved = flipped!.ops.filter((op) => op.region.id === 'curved-0');
+    expect(curved.length, 'the flipped setup has no curved-0 op').toBeGreaterThan(0);
+    const minZ = (kind: 'rough' | 'finish'): number => {
+      let best = 0;
+      for (const op of curved) {
+        if (op.kind !== kind) continue;
+        for (const o of op.outcome.ir.operations) for (const m of o.moves) best = Math.min(best, m.z);
+      }
+      return best;
+    };
+    const rough = minZ('rough');
+    const finish = minZ('finish');
+    // At the parent these both read about 0 (the clamp); the fix puts them at about −3.6 / −10.5.
+    expect(rough, `flipped curved-0 rough only reached ${rough} mm — the silent under-cut is back`).toBeLessThan(-2);
+    expect(finish, `flipped curved-0 finish only reached ${finish} mm — the silent under-cut is back`).toBeLessThan(-8);
+  }, 90_000);
+
   it('two-setup DATUM goal: every posted program, both setups, carries a VerifyReport with zero error-severity findings', async () => {
     const { goal, stock } = await buildDatumGoal();
     const job = jobForGoal(goal, stock);

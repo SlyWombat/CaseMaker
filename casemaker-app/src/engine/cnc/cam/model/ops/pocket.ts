@@ -40,8 +40,150 @@ import { cutterKeyOf } from '../sequence';
 import type { PocketNode } from '../features';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
 import type { DropCutterMesh } from '../dropcutter';
-import { ceilingAboveMm } from '../ceilingAbove';
-import { maxTriangleZOverSquare, triangleBinsFor } from '../triangleBins';
+import { binnedReachableTriangles, clippedTriangleToSquare, planeMaxOverPolygon, planeMaxOverSquare, triangleBinsFor } from '../triangleBins';
+
+/**
+ * #1003 (6b's rule, the manager's correction) — DOES A TRIANGLE OVERLAP THE POCKET'S REGION WITH
+ * POSITIVE AREA? "Any vertex inside" is not enough: a large flat or base-plate triangle can cross
+ * the region with all three vertices outside it, which would reopen the gouge. The test is the
+ * real overlap — a vertex strictly inside, a region vertex inside the triangle, or a proper edge
+ * crossing — with touching the boundary only (the drafted-wall strip sharing the region's edge)
+ * counting as OUTSIDE.
+ */
+const CLIP_EPS = 1e-6;
+function cross2(ax: number, ay: number, bx: number, by: number, cx: number, cy: number): number {
+  return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+}
+function segsProperlyCross(ax: number, ay: number, bx: number, by: number, cx: number, cy: number, dx: number, dy: number): boolean {
+  const d1 = cross2(cx, cy, dx, dy, ax, ay);
+  const d2 = cross2(cx, cy, dx, dy, bx, by);
+  const d3 = cross2(ax, ay, bx, by, cx, cy);
+  const d4 = cross2(ax, ay, bx, by, dx, dy);
+  return ((d1 > CLIP_EPS && d2 < -CLIP_EPS) || (d1 < -CLIP_EPS && d2 > CLIP_EPS)) &&
+    ((d3 > CLIP_EPS && d4 < -CLIP_EPS) || (d3 < -CLIP_EPS && d4 > CLIP_EPS));
+}
+function pointStrictlyInTriangle(px: number, py: number, ax: number, ay: number, bx: number, by: number, cx: number, cy: number): boolean {
+  const d1 = cross2(ax, ay, bx, by, px, py);
+  const d2 = cross2(bx, by, cx, cy, px, py);
+  const d3 = cross2(cx, cy, ax, ay, px, py);
+  const hasNeg = d1 < -CLIP_EPS || d2 < -CLIP_EPS || d3 < -CLIP_EPS;
+  const hasPos = d1 > CLIP_EPS || d2 > CLIP_EPS || d3 > CLIP_EPS;
+  return !(hasNeg && hasPos);
+}
+function triangleOverlapsRegion(ax: number, ay: number, bx: number, by: number, cx: number, cy: number, region: Polygons): boolean {
+  if (pointInPolygons(region, ax, ay) || pointInPolygons(region, bx, by) || pointInPolygons(region, cx, cy)) return true;
+  for (const ring of region) {
+    for (let i = 0; i < ring.length; i++) {
+      const [px, py] = ring[i]!;
+      if (pointStrictlyInTriangle(px, py, ax, ay, bx, by, cx, cy)) return true;
+      const [qx, qy] = ring[(i + 1) % ring.length]!;
+      if (segsProperlyCross(ax, ay, bx, by, px, py, qx, qy)) return true;
+      if (segsProperlyCross(bx, by, cx, cy, px, py, qx, qy)) return true;
+      if (segsProperlyCross(cx, cy, ax, ay, px, py, qx, qy)) return true;
+    }
+  }
+  return false;
+}
+/**
+ * #1003 (6b's round-1 discriminator, applied PER CELL) — does the part of a triangle that lies
+ * over a mask cell also lie INSIDE the node's region?
+ *
+ * The per-triangle overlap test above is only a prefilter: a triangle that overlaps the region
+ * anywhere is admitted, and the exact plane bound then evaluates it over every cell its bbox
+ * touches. On the organizer that closed the whole rim band of six pockets at every level: a big
+ * mouth-level LAND triangle's sliver clipped 0.02 mm into each rim cell's square while lying
+ * wholly OUTSIDE the pocket's region, and the sliver's plane (−0.8, the mouth) outranked the
+ * pocket floor everywhere below. Coverage fell 98.61 % → 96.99 %. The question that settles it is
+ * the one the region-clip rule was always asking (`aboveMaterial`'s own doc): is the design that
+ * closes this cell over the pocket's own region, or beside it?
+ *
+ * `polygonOverlapsRegion` answers with POSITIVE AREA against the clipped polygon of one cell —
+ * boundary contact (a sliver lying along the region's edge, the drafted-wall strip sharing it)
+ * counts as OUTSIDE, the same convention `triangleOverlapsRegion` states above: a polygon vertex
+ * strictly inside the region, a region ring vertex strictly inside the polygon, or a proper edge
+ * crossing. The height the cell is then judged by stays the exact plane maximum over the whole
+ * clipped polygon (never less than the in-region part's), so the test can only REMOVE a triangle
+ * that contributes nothing over the pocket; it can never let one under-read the surface.
+ */
+const BOUNDARY_EPS = 1e-6;
+
+/** Is (x, y) on (or within `BOUNDARY_EPS` of) any edge of the ring? */
+function pointOnRing(px: number, py: number, ring: readonly (readonly [number, number])[]): boolean {
+  for (let i = 0; i < ring.length; i++) {
+    const [ax, ay] = ring[i]!;
+    const [bx, by] = ring[(i + 1) % ring.length]!;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    let s = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+    s = Math.max(0, Math.min(1, s));
+    if (Math.hypot(px - (ax + s * dx), py - (ay + s * dy)) <= BOUNDARY_EPS) return true;
+  }
+  return false;
+}
+
+function pointStrictlyInRegion(x: number, y: number, region: Polygons): boolean {
+  if (!pointInPolygons(region, x, y)) return false;
+  for (const ring of region) if (pointOnRing(x, y, ring)) return false;
+  return true;
+}
+
+/** Inside a convex ring (from `clippedTriangleToSquare`), strictly off every edge. */
+function pointStrictlyInConvexRing(px: number, py: number, poly: Float64Array): boolean {
+  const n = poly.length / 2;
+  if (n < 3) return false;
+  let sign = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const ax = poly[2 * i]!;
+    const ay = poly[2 * i + 1]!;
+    const bx = poly[2 * j]!;
+    const by = poly[2 * j + 1]!;
+    const ex = bx - ax;
+    const ey = by - ay;
+    const edgeLen = Math.hypot(ex, ey);
+    if (edgeLen === 0) continue;
+    const d = ex * (py - ay) - ey * (px - ax);
+    if (Math.abs(d) <= BOUNDARY_EPS * edgeLen) return false; // on (or within eps of) this edge
+    const s = d > 0 ? 1 : -1;
+    if (sign === 0) sign = s;
+    else if (s !== sign) return false;
+  }
+  return sign !== 0;
+}
+
+/**
+ * Does the triangle strictly cover the XY point? The same epsilon convention as the polygon test:
+ * a point ON the triangle's edge is contact, not area, and does not count.
+ */
+function triangleStrictlyCovers(ax: number, ay: number, bx: number, by: number, cx: number, cy: number, px: number, py: number): boolean {
+  const d1 = cross2(ax, ay, bx, by, px, py);
+  const d2 = cross2(bx, by, cx, cy, px, py);
+  const d3 = cross2(cx, cy, ax, ay, px, py);
+  return (
+    (d1 < -BOUNDARY_EPS && d2 < -BOUNDARY_EPS && d3 < -BOUNDARY_EPS) ||
+    (d1 > BOUNDARY_EPS && d2 > BOUNDARY_EPS && d3 > BOUNDARY_EPS)
+  );
+}
+
+function polygonOverlapsRegion(poly: Float64Array, region: Polygons): boolean {
+  const n = poly.length / 2;
+  for (let i = 0; i < n; i++) {
+    if (pointStrictlyInRegion(poly[2 * i]!, poly[2 * i + 1]!, region)) return true;
+  }
+  for (const ring of region) {
+    for (let i = 0; i < ring.length; i++) {
+      const [rx, ry] = ring[i]!;
+      if (pointStrictlyInConvexRing(rx, ry, poly)) return true;
+      const [sx, sy] = ring[(i + 1) % ring.length]!;
+      for (let k = 0; k < n; k++) {
+        const j = (k + 1) % n;
+        if (segsProperlyCross(poly[2 * k]!, poly[2 * k + 1]!, poly[2 * j]!, poly[2 * j + 1]!, rx, ry, sx, sy)) return true;
+      }
+    }
+  }
+  return false;
+}
 import { maskLoopsFromPredicate } from './rasterMask';
 
 export interface PocketOpOptions {
@@ -89,12 +231,13 @@ export interface PocketOpOptions {
    * never for a curved/organic surface with no floor of its own.
    *
    * With this set, EVERY level this op steps (and the `open`/linking field below) is bounded by
-   * the real per-column ceiling, read with a ZERO-RADIUS point probe (`dropcutter.ts`, #957) —
-   * never this op's own cutter radius; see the implementation's own note on why a real-radius
-   * probe double-counts a node's own walls (already handled by the 2D erosion every region
-   * boundary gets) as a false shadow. Never less safe than `node.region` alone, only ever MORE
-   * restrictive. Absent → the pre-#966 behaviour, unchanged: no existing call site/test passes
-   * this, so nothing already passing is affected.
+   * the real per-cell surface height: the highest point of any design triangle over that cell's
+   * own square, judged only where the triangle lies over the node's own region (`triangleBins`'
+   * `clippedTriangleToSquare` + `planeMaxOverPolygon`, #1003 — never a triangle's highest vertex
+   * anywhere, never a point sample). A vertical facet states no surface above a column and
+   * contributes nothing, so a node's own walls — already handled by the 2D erosion every region
+   * boundary gets — are never a false shadow. Never less safe than `node.region` alone, only ever
+   * MORE restrictive. Absent → the pre-#966 behaviour, unchanged.
    */
   aboveMaterial?: {
     mesh: DropCutterMesh;
@@ -243,10 +386,10 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
   const region = openExtensionBand === undefined ? opts.node.region : opts.boolean!.union(opts.node.region, openExtensionBand);
 
   // #966/#970 — THE SHADOW CHECK (`PocketOpOptions.aboveMaterial`'s own doc above): a column's
-  // real "ceiling" is Z-INDEPENDENT — sampled ONCE here on a grid, never re-queried per level,
-  // exactly `rough()`'s own `clSurface` reuse (that op's header: the CL surface does not depend
-  // on the current level either). `ceilingMaskAt` then stitches THIS level's own "nothing solid
-  // above here" rectilinear mask from that one grid, cheaply, same geometry `rough()`'s
+  // real "ceiling" is Z-INDEPENDENT — one bound per cell, computed ONCE here, never re-queried per
+  // level, exactly `rough()`'s own `clSurface` reuse (that op's header: the CL surface does not
+  // depend on the current level either). `ceilingMaskAt` then stitches THIS level's own "nothing
+  // solid above here" rectilinear mask from that one bound, cheaply, same geometry `rough()`'s
   // `maskLoops` already proved — only the inside rule differs (`rasterMask.ts`'s own header).
   //
   // #970, the maintainer's 2026-11-05 ruling (via the manager, on the elephant gouge a
@@ -257,26 +400,36 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
   // erosion, an erosion plus a ring restored near the true open outline) — every one of them had
   // to choose, near SOME edge, between re-excluding the node's own wall (losing real tray/
   // organizer coverage) and re-admitting a genuine overhang that happens to sit near that same
-  // edge (the elephant's own gouge). No distance threshold can tell those two apart, because nothing
-  // about "how far from the boundary" distinguishes them — only the SURFACE ITSELF does.
+  // edge (the elephant's own gouge). No distance threshold can tell those two apart, because
+  // nothing about "how far from the boundary" distinguishes them — only the SURFACE ITSELF does.
   //
-  // `ceilingAboveMm` (`../ceilingAbove.ts`) asks the real, geometric question instead: of every
-  // triangle along the vertical line through (x, y) whose own outward normal points DOWNWARD
-  // (material genuinely hangs over the void below it), the HIGHEST one — coming down from the
-  // mouth, the first such surface the tool would meet, so it is the one that actually blocks
-  // everything below it, wherever it is, open edge or not. A node's own floor (hit from above,
-  // normal up) never qualifies as a ceiling at all. A node's own wall, drafted or not, and its own
-  // floor-to-wall fillet face sideways or upward, never down, so neither ever qualifies either —
-  // by construction, not because a sample happened to land far enough from them. This needs no
-  // domain restriction at all: `region`'s own full extent is sampled, open-edge corners included,
-  // exactly the maintainer's own instruction ("apply the ceiling test everywhere").
+  // #1003 round 3 (6b's rule, the manager's ruling): the cell's bound is THE SURFACE ITSELF over
+  // the cell's own square — `triangleBins`' `clippedTriangleToSquare` + `planeMaxOverPolygon`, the
+  // triangle's plane evaluated over the triangle clipped to the square, and only where that
+  // clipped part lies INSIDE the node's region (the per-cell check above; without it the
+  // organizer's mouth-level land closed every pocket's rim band — see `polygonOverlapsRegion`).
+  // Two earlier bounds were wrong in ways that cost real coverage, and the confirming print on the
+  // sloped seed showed both at ten unreached cells (`cellBound` 0.000 against the exact plane
+  // −3.000, a 3 mm leftover):
   //
-  // The grid is judged by the MAXIMUM (the most restrictive — the highest, nearest-the-mouth real
-  // ceiling anywhere within the cell must not be missed) of each cell's centre and four corners'
-  // own `ceilingAboveMm` reading, at the SAME pitch `rough()` derives from step-over/radius. A
-  // cell with no downward-facing triangle anywhere near it reads `null` from every sample —
-  // seeded as `Number.NEGATIVE_INFINITY`, the identity of a MAX reduction and the "always safe,
-  // nothing ever blocks this column" value the predicate below reads it as.
+  //   - a triangle's `maxZ` is its highest VERTEX anywhere, not its height in this cell. One large
+  //     facet (a sloped pocket floor, the top land) therefore closed every cell its bbox touched
+  //     up to a height belonging to another part of the facet. The previous bound's square was
+  //     also the drawn cell UNION a half-pitch the old point samples reached into, so a triangle
+  //     that does not touch the cell at all still closed it — every one of the 703 cells the
+  //     print found was this case (the driver's intersection with the cell's own square was
+  //     EMPTY);
+  //   - point samples (the old five-per-cell gate) miss a rise between them — the elephant's
+  //     eleven rim cells (#970's flank fix), which the maxZ bound had been covering for.
+  //
+  // With the exact bound both fall out: clipping the triangle to the DRAWN square excludes
+  // everything that is not over the cell, and the plane makes the height exact where it is. A
+  // vertical facet states no surface above a column and is skipped (`planeA` NaN); a cell with no
+  // triangle over it reads `-Infinity`, the identity of the max reduction, and is open all the way
+  // down. The five-sample grid and the gate term go with them: the old gate only asked whether ANY
+  // non-vertical surface existed near the column (`ceiling[k]`'s finiteness), never compared its
+  // height to the level — which is why the sloped seed's own floor (topmost at −3.000, far below
+  // the pass) never rescued the cells the maxZ bound had closed.
   let ceilingMaskAt: ((levelZ: number) => Polygons) | null = null;
   if (opts.aboveMaterial !== undefined) {
     const marginMm = opts.aboveMaterial.marginMm ?? ARC_CHORD_TOLERANCE_MM;
@@ -295,58 +448,135 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
       const pitch = Math.min(0.5, Math.max(0.1, Math.min(opts.stepOverMm, toolRadius) / 4));
       const nx = Math.max(2, Math.floor((maxX - minX) / pitch + 1e-9) + 1);
       const ny = Math.max(2, Math.floor((maxY - minY) / pitch + 1e-9) + 1);
-      const ceiling = new Float64Array(nx * ny).fill(Number.NEGATIVE_INFINITY);
-      const half = pitch / 2;
-      // `ceilingAboveMm`'s own `minZMm`: this node's floor, converted to the mesh's absolute Z
-      // (`node.floorZ` arrives in the level frame `zOffsetMm` converts FROM, so adding it back is
-      // the inverse of this same block's own `- zOffsetMm` below) — never the stock's own
-      // underside or an unrelated opposite-side feature leaking into this node's own gate.
-      const floorAbsMm = opts.node.floorZ + zOffsetMm;
-      for (let j = 0; j < ny; j++) {
-        for (let i = 0; i < nx; i++) {
-          const x = minX + i * pitch;
-          const y = minY + j * pitch;
-          let hi = Number.NEGATIVE_INFINITY;
-          for (const [dx, dy] of [[0, 0], [-half, -half], [half, -half], [-half, half], [half, half]] as const) {
-            const sx = x + dx;
-            const sy = y + dy;
-            // Sampled over the WHOLE grid — `region`'s own bbox, no domain restriction — since
-            // `ceilingAboveMm` already answers "is this really a ceiling" by geometry; a point
-            // outside `region` entirely just reads back whatever is really above it there too,
-            // harmlessly (the per-level mask below intersects with `region` regardless).
-            const h = ceilingAboveMm(mesh, sx, sy, floorAbsMm);
-            if (h !== null && h > hi) hi = h;
-          }
-          ceiling[j * nx + i] = hi;
-        }
-      }
-      // `ceiling` is sampled in the MESH's own absolute Z; `levelZ` arrives in whatever frame
-      // the caller's `node.floorZ`/`mouthZ` are already in (stock-top-relative, from every real
-      // `plan.ts` call site) — `zOffsetMm`'s own doc above. Converting the mesh-absolute ceiling
-      // into the LEVEL's frame (subtracting `zOffsetMm`), rather than the other way around, keeps
-      // the comparison in whichever frame the caller actually posts moves in.
-      //
-      // #970, B's link audit follow-up (the elephant's 11 rim cells, review session's fix 2): the
-      // gate above is a set of POINT samples at the cell's point ± half a pitch, so its sampled
-      // footprint is [i·pitch − ½, i·pitch + ½]; `maskLoopsFromPredicate` opens the square
-      // [i·pitch, (i+1)·pitch]. The square's far half is opened by samples that never looked at
-      // it — on a rising flank narrower than the pitch, the disc reaches half a pitch past the
-      // last proven point and cuts the design. The cell's height bound is therefore read from
-      // `triangleBins`' per-cell `maxZ` over the cell's own sampled footprint — the DRAWN square
-      // UNION the half-pitch the gate's corner samples reach into ([point − ½, point + 1] in each
-      // axis; a triangle extent never misses a rise between samples; outward by at most one bin
-      // cell, which the rest and ball recover). Everywhere the old sampled rule closed, a sample
-      // was above the level at a point inside this footprint, and the triangle it hit is
-      // registered in a bin overlapping the footprint — so the bound is never looser than the
-      // rule it replaces. The gate stays as the null case: a column with no downward-facing
-      // triangle at all is this node's own floor/wall, open all the way down, whatever its height.
+      // #970, B's link audit follow-up (the elephant's 11 rim cells, review session's fix 2): a
+      // rise between point samples must never open a cell — both bound forms answer the whole
+      // DRAWN square the mask opens, so a flank narrower than the pitch, anywhere inside the
+      // cell, is in the bound by construction.
       const bins = triangleBinsFor(mesh);
       const cellBound = new Float64Array(nx * ny).fill(Number.NEGATIVE_INFINITY);
+      // #1003 — THE BOUND COUNTS ONLY DESIGN THAT OVERLAPS THE NODE'S REGION (see the helpers).
+      const meshPos = mesh.positions;
+      const meshIdx = mesh.indices;
+      const overlapCache = new Map<number, boolean>();
+      const overlapsRegion = (t: number): boolean => {
+        const cached = overlapCache.get(t);
+        if (cached !== undefined) return cached;
+        const ia = meshIdx[3 * t]! * 3;
+        const ib = meshIdx[3 * t + 1]! * 3;
+        const ic = meshIdx[3 * t + 2]! * 3;
+        const result = triangleOverlapsRegion(
+          meshPos[ia]!, meshPos[ia + 1]!, meshPos[ib]!, meshPos[ib + 1]!, meshPos[ic]!, meshPos[ic + 1]!, opts.node.region,
+        );
+        overlapCache.set(t, result);
+        return result;
+      };
+      // `cellBound` is in the MESH's own absolute Z; `levelZ` arrives in whatever frame the
+      // caller's `node.floorZ`/`mouthZ` are already in (stock-top-relative, from every real
+      // `plan.ts` call site) — `zOffsetMm`'s own doc above. Converting the mesh-absolute bound
+      // into the LEVEL's frame (subtracting `zOffsetMm`), rather than the other way around, keeps
+      // the comparison in whichever frame the caller actually posts moves in.
+      const reach = Math.hypot(pitch, pitch) / 2 + bins.cellMm;
+      // The cell's FOUR CORNERS, judged once on the shared grid nodes: a cell whose whole square
+      // is strictly inside the region needs no per-triangle overlap test — anything over the
+      // square is over the pocket. A boundary cell is settled by the cheap corner proof when the
+      // triangle covers an inside corner, and only otherwise runs the exact `polygonOverlapsRegion`.
+      const nx1 = nx + 1;
+      const cornerIn = new Uint8Array(nx1 * (ny + 1));
+      // Even-odd parity along each node ROW (the same rule `pointInPolygons` applies), so the
+      // grid costs O(rows × ring + nodes) instead of a full ring scan per node — the organizer's
+      // 270 × 270 masks spent ~1.9 s in the per-node version.
+      const xs: number[] = [];
+      for (let j = 0; j <= ny; j++) {
+        const y = minY + j * pitch;
+        xs.length = 0;
+        for (const ring of opts.node.region) {
+          for (let i = 0; i < ring.length; i++) {
+            const [ax, ay] = ring[i]!;
+            const [bx, by] = ring[(i + 1) % ring.length]!;
+            if (ay > y !== by > y) xs.push(ax + ((y - ay) * (bx - ax)) / (by - ay));
+          }
+        }
+        if (xs.length === 0) continue;
+        xs.sort((a, b) => a - b);
+        let k = 0;
+        for (let i = 0; i <= nx; i++) {
+          const x = minX + i * pitch;
+          while (k < xs.length && xs[k]! <= x) k++;
+          if ((k & 1) === 1) cornerIn[j * nx1 + i] = 1;
+        }
+      }
+      // A node on (or within a grid step of) a ring edge is NOT strictly inside: walk every ring
+      // edge through the grid and clear a 5 × 5 node neighbourhood around each sample, so every
+      // cell the edge crosses loses at least one corner. Clearing wider than the epsilon only
+      // pushes the cells beside a boundary onto the per-cell overlap test below, never the other
+      // way round.
+      for (const ring of opts.node.region) {
+        for (let i = 0; i < ring.length; i++) {
+          const [ax, ay] = ring[i]!;
+          const [bx, by] = ring[(i + 1) % ring.length]!;
+          const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / (pitch / 2)));
+          for (let s = 0; s <= steps; s++) {
+            const px = ax + ((bx - ax) * s) / steps;
+            const py = ay + ((by - ay) * s) / steps;
+            const ci = Math.round((px - minX) / pitch);
+            const cj = Math.round((py - minY) / pitch);
+            for (let dj = -2; dj <= 2; dj++) {
+              for (let di = -2; di <= 2; di++) {
+                const ii = ci + di;
+                const jj = cj + dj;
+                if (ii >= 0 && jj >= 0 && ii <= nx && jj <= ny) cornerIn[jj * nx1 + ii] = 0;
+              }
+            }
+          }
+        }
+      }
       for (let j = 0; j < ny; j++) {
         for (let i = 0; i < nx; i++) {
-          const bx = minX + i * pitch;
-          const by = minY + j * pitch;
-          cellBound[j * nx + i] = maxTriangleZOverSquare(bins, bx - half, by - half, bx + pitch, by + pitch);
+          // The cell `maskLoopsFromPredicate` opens, exactly: [i·pitch, (i+1)·pitch] in each axis
+          // from the grid's own origin (`rasterMask.ts`'s `push`). No inflation — the old extra
+          // half-pitch existed only to cover the removed point samples' own footprint.
+          const x0 = minX + i * pitch;
+          const y0 = minY + j * pitch;
+          const x1 = x0 + pitch;
+          const y1 = y0 + pitch;
+          // Corner bit order: (x0,y0), (x1,y0), (x1,y1), (x0,y1).
+          const c00 = cornerIn[j * nx1 + i]!, c10 = cornerIn[j * nx1 + i + 1]!;
+          const c11 = cornerIn[(j + 1) * nx1 + i + 1]!, c01 = cornerIn[(j + 1) * nx1 + i]!;
+          const insideMask = c00 | (c10 << 1) | (c11 << 2) | (c01 << 3);
+          const fullyInside = insideMask === 15;
+          const anyInside = insideMask !== 0;
+          let m = Number.NEGATIVE_INFINITY;
+          for (const t of binnedReachableTriangles(bins, (x0 + x1) / 2, (y0 + y1) / 2, reach)) {
+            if (!overlapsRegion(t)) continue;
+            let covered = fullyInside;
+            if (!covered && anyInside) {
+              // A cell on the pocket's edge: the cheap positive-overlap proof. If the triangle
+              // strictly covers a grid node that is strictly inside the region, it covers some
+              // area inside the pocket, and the exact square bound needs no region clipping.
+              // (Most boundary triangles — the floor, a real ceiling — cover the whole cell.)
+              const ia = meshIdx[3 * t]! * 3;
+              const ib = meshIdx[3 * t + 1]! * 3;
+              const ic = meshIdx[3 * t + 2]! * 3;
+              covered =
+                ((insideMask & 1) !== 0 && triangleStrictlyCovers(meshPos[ia]!, meshPos[ia + 1]!, meshPos[ib]!, meshPos[ib + 1]!, meshPos[ic]!, meshPos[ic + 1]!, x0, y0)) ||
+                ((insideMask & 2) !== 0 && triangleStrictlyCovers(meshPos[ia]!, meshPos[ia + 1]!, meshPos[ib]!, meshPos[ib + 1]!, meshPos[ic]!, meshPos[ic + 1]!, x1, y0)) ||
+                ((insideMask & 4) !== 0 && triangleStrictlyCovers(meshPos[ia]!, meshPos[ia + 1]!, meshPos[ib]!, meshPos[ib + 1]!, meshPos[ic]!, meshPos[ic + 1]!, x1, y1)) ||
+                ((insideMask & 8) !== 0 && triangleStrictlyCovers(meshPos[ia]!, meshPos[ia + 1]!, meshPos[ib]!, meshPos[ib + 1]!, meshPos[ic]!, meshPos[ic + 1]!, x0, y1));
+            }
+            if (covered) {
+              // The whole square (or a proven in-region part of it) is over the pocket, and the
+              // exact bound over the square is the allocation-free form.
+              const z = planeMaxOverSquare(bins, t, x0, y0, x1, y1);
+              if (z > m) m = z;
+              continue;
+            }
+            const poly = clippedTriangleToSquare(bins, t, x0, y0, x1, y1);
+            if (poly === null) continue;
+            if (!polygonOverlapsRegion(poly, opts.node.region)) continue;
+            const z = planeMaxOverPolygon(bins, t, poly);
+            if (z > m) m = z;
+          }
+          cellBound[j * nx + i] = m;
         }
       }
       ceilingMaskAt = (levelZ: number): Polygons =>
@@ -358,9 +588,7 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
           pitch,
           (i, j) => {
             if (i < 0 || j < 0 || i >= nx || j >= ny) return false;
-            const k = j * nx + i;
-            if (!Number.isFinite(ceiling[k]!)) return true; // the gate's null: no real ceiling in this column
-            return cellBound[k]! - zOffsetMm - marginMm < levelZ;
+            return cellBound[j * nx + i]! - zOffsetMm - marginMm < levelZ;
           },
         );
     }
