@@ -629,7 +629,18 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // finish's machinery over the ball's own leftover mask.
     const deepestRemainderMm = tree.remainder.reduce((m, r) => Math.max(m, r.zTop - r.zBottom), 0);
     const restBall = balls.find((t) => t !== ball && (t.fluteLength ?? 0) >= deepestRemainderMm - 1e-9);
-    const vbit = input.cutters.house.find((t) => t.shape === 'chamfer') ?? input.cutters.house.find((t) => t.shape === 'engraving');
+    // #989 — THE RIM STAGE TAKES THE PINNED V when the caller names one (`pinned.chamfer`, the
+    // cutterKeyOf key the goal seam derives from its own chamfer request); otherwise the first
+    // chamfer/engraving in the house, as before. A pin the house cannot answer is a caller bug,
+    // never a silent fallback to another V (the cutter would not be the one the job named).
+    const pinnedVKey = input.cutters.pinned?.['chamfer'];
+    const pinnedV = pinnedVKey === undefined ? undefined : input.cutters.house.find((t) => cutterKeyOf(t) === pinnedVKey);
+    if (pinnedVKey !== undefined && pinnedV === undefined) {
+      throw new Error(`cam/model/plan: cutters.pinned.chamfer names "${pinnedVKey}" but the house has no cutter with that key — the rim stage cannot honour the pin`);
+    }
+    const vbit = pinnedV
+      ?? input.cutters.house.find((t) => t.shape === 'chamfer')
+      ?? input.cutters.house.find((t) => t.shape === 'engraving');
     // #982 — NO BALL IN THE SET: the flat finishes the curved remainder (a flat-raster over the
     // whole region, the flat's cusp rule), the creases via the rest with the smallest flat. The
     // throw the old code raised here was the refusal the ruling forbids.
