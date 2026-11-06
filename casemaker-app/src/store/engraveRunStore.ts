@@ -54,7 +54,7 @@ import {
   type PcbCopperTopologyInput,
 } from '@/engine/cnc/engrave/pcbTopology';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { getTools, entryFor } from '@/engine/cnc/toolRegistry';
+import { getTools, benchCutterFor } from '@/engine/cnc/toolRegistry';
 import type { PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
 import type { PlanOutcome } from '@/engine/cnc/cam/model/plan';
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
@@ -806,11 +806,21 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // later programs' sweeps hold none of the isolation, and a last-program check would read the
     // board's copper uncut. The isolation's OWN program is the sweep that contains the cut, on
     // both sides; the drills and the cut-out remove material the copper check does not ask about.
+    // #1032 — THE SAME CUTTER, BY ANY OF ITS IDENTITIES. A result stored before the posted
+    // header carried registry keys stamps the tool's id or name; the side names its own registry
+    // key. Compare the bench's answers, not the strings, so the old and the new header find the
+    // same program.
+    const sameCutter = (postedKey: string, cutterKey: string): boolean => {
+      if (postedKey === cutterKey) return true;
+      const posted = benchCutterFor(postedKey);
+      return posted !== null && posted === benchCutterFor(cutterKey);
+    };
     const isolationIndexOf = (side: (typeof pcbSides)[number]): number => {
+      const cutterKey = side.cutterKey;
       const at =
-        side.cutterKey === null
+        cutterKey === null
           ? -1
-          : generated.programs.findIndex((p) => p.setupIndex === side.setupIndex && p.toolKey === side.cutterKey);
+          : generated.programs.findIndex((p) => p.setupIndex === side.setupIndex && sameCutter(p.toolKey, cutterKey));
       return at >= 0 ? at : (lastIndexOfSetup.get(side.setupIndex) ?? -1);
     };
     const copperSides: CopperSideReport[] = [];
@@ -832,7 +842,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // tools this run posts (never from the CAM's plan, A's R3). No edge break → no allowance.
     const goalEdge = goalEdgeBreakOptions(
       job,
-      (key) => (key === job.toolKey ? tool : (entryFor(key)?.tool ?? null)),
+      // #1032 — the three-identity resolver (`benchCutterFor`): a posted key is not always a
+      // registry key (the built-in tier stamps an id or a name), and both sites must read the
+      // same rule the command line's bench sweep does.
+      (key) => (key === job.toolKey ? tool : benchCutterFor(key)),
       generated.programs.map((p) => p.toolKey),
     );
     let outcome: ProgramSweepOutcome;
@@ -843,7 +856,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         // so this realm's fallback is null (the command line reads the shop itself).
         shopDrillPoint: null,
         cutterFor: (program) =>
-          program.toolKey === job.toolKey ? tool : (entryFor(program.toolKey)?.tool ?? null),
+          program.toolKey === job.toolKey ? tool : benchCutterFor(program.toolKey),
         load: async ({ program, index, cutter, drillPoint, priorRemoval, priorFields, priorExactRemoval }) => {
           // #830 — the simulation's own stage: which program of the sweep is being simulated, so
           // the panel never shows a bare "Working…" through a multi-program sweep.
@@ -924,7 +937,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
               if (result.ok && result.meshes.removal !== null) seedSources.push(program.setupIndex);
               // A column sweep hands back its final top field; the next setup starts from it.
               if (result.ok && result.flatField != null) lastFlat = { setupIndex: program.setupIndex, field: result.flatField };
-              return result;
+              // #1032 (6b's review) — SAY WHAT THE RESTART KEPT. A program that can only sweep
+              // from the blank still had the earlier setup's carried floor; the panel must not
+              // read as "the carry was lost".
+              return result.ok ? { ...result, carriedFloor: carried !== null } : result;
             }
             const sim = useSimStore.getState();
             // null means this load no longer owns the session (a newer run/panel load stopped it),

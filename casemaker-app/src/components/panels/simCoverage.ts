@@ -42,6 +42,12 @@ export interface SimSweptProgram {
   engine?: 'exact' | 'column' | null;
   /** True when the simulator could not start this program from the earlier programs' stock. */
   fromBlank?: boolean;
+  /**
+   * #1032 — the restart-from-blank continued with the caller's carried floor (#723 P2-2b): the
+   * earlier setup's stock is in the end state the result was judged on, even though the program's
+   * engine could not take a removal-mesh seed.
+   */
+  carriedFloor?: boolean;
   /** The codes this program's OWN sweep raised, when the caller carries them. */
   codes?: readonly string[];
   /** How many ERROR diagnostics this program's sweep raised; absent reads as 0. */
@@ -321,12 +327,25 @@ function wholeRunDisclaimer(
 
   // #744 — a program the simulator could not seed is a real check of its own cuts, not a gap; say
   // which ones so a smaller removed volume is read as the blank it was swept on, not a quiet cut.
-  const blank = programs.filter((p) => p.fromBlank).map((p) => p.label);
-  if (blank.length > 0) {
+  // #1032 (6b's review) — SAY WHAT THE RESTART KEPT. A program that could only start from the
+  // blank may still have carried the earlier setup's floor (#723 P2-2b) into the sweep it was
+  // judged on; stating only what the engine could not take reads as "the carry was lost", which
+  // is false, and the walk's whole point is that end state.
+  const blank = programs.filter((p) => p.fromBlank);
+  const carriedBlank = blank.filter((p) => p.carriedFloor === true).map((p) => p.label);
+  const plainBlank = blank.filter((p) => p.carriedFloor !== true).map((p) => p.label);
+  if (carriedBlank.length > 0) {
     out.push(
-      blank.length === 1
-        ? `Swept from the blank: ${blank[0]} — its engine cannot start from the material the earlier programs left, so its result covers its own cuts only.`
-        : `Swept from the blank: ${joinAnd(blank)} — their engines cannot start from the material the earlier programs left, so each result covers its own cuts only.`,
+      carriedBlank.length === 1
+        ? `Restarted from the blank: ${carriedBlank[0]} — the earlier setup's floor was carried into the sweep, so its stock is in the state the result was judged on; a column program cannot seed from another setup's removal mesh.`
+        : `Restarted from the blank: ${joinAnd(carriedBlank)} — the earlier setup's floor was carried into each sweep, so its stock is in the state each result was judged on; a column program cannot seed from another setup's removal mesh.`,
+    );
+  }
+  if (plainBlank.length > 0) {
+    out.push(
+      plainBlank.length === 1
+        ? `Swept from the blank: ${plainBlank[0]} — its engine cannot start from the material the earlier programs left, so its result covers its own cuts only.`
+        : `Swept from the blank: ${joinAnd(plainBlank)} — their engines cannot start from the material the earlier programs left, so each result covers its own cuts only.`,
     );
   }
 

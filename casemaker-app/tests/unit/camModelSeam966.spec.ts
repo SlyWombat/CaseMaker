@@ -23,9 +23,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
-import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { buildModelPlanInputForGoal, generateGoalProgram, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { cutterKeyOf } from '@/engine/cnc/cam/model/sequence';
 import { tl } from './helpers/manifoldExec';
 import { buildRandomPart } from '../tools/randomParts';
 
@@ -229,6 +230,27 @@ describe('#966 ROUND 2 — generateGoalProgram posts and verifies every program 
       expect(program.verify, `${program.toolKey}: no verify report`).not.toBeNull();
       const errors = program.verify!.findings.filter((f) => f.severity === 'error');
       expect(errors, `${program.toolKey}: ${errors.map((e) => e.message).join('; ')}`).toEqual([]);
+    }
+  }, 60_000);
+
+  it('#1032 — a plan built from the BUILT-IN tier posts each program by its REGISTRY key, not the tool id or name', async () => {
+    const { job, goal, tool } = randomPartJob(1);
+    // The registry's permanent tier, verbatim: its tools are not identified by their keys —
+    // `flat-1.0` has no `id` (its NAME was stamped instead) and `flat-3.175x12-metal` carries the
+    // physical catalogue id `112111313812`. Either string made the app's sweep refuse the posted
+    // program as "not on this bench" (#1032).
+    const shop: EngraveShopOpts = { tools: TOOL_LIBRARY.map((e) => ({ ...e })) };
+    const result = await generateGoalProgram(job, goal, tool, null, { shop });
+    expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
+    // Non-vacuous: the plan really did reach the built-in flats (a ball-only plan would prove
+    // nothing about the header).
+    const builtinKeyed = result.programs.filter((p) => TOOL_LIBRARY.some((e) => e.key === p.toolKey));
+    expect(builtinKeyed.length, result.programs.map((p) => p.toolKey).join(', ')).toBeGreaterThan(0);
+    // Every program names a registry key (the job's own snapshot cutter is the only key the
+    // registry need not hold — `cutterKeyOf` names it exactly as the sweep's first branch expects).
+    const allowed = new Set([...TOOL_LIBRARY.map((e) => e.key), cutterKeyOf(tool)]);
+    for (const program of result.programs) {
+      expect(allowed.has(program.toolKey), `posted key "${program.toolKey}" is not a registry key`).toBe(true);
     }
   }, 60_000);
 

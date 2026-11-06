@@ -162,7 +162,9 @@ describe('#847 the goal follows its finish with a rest pass', () => {
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
     // The ⌀6 rough, then the ⌀2's own run (its finish and pencil): one program per cutter run.
     expect(out.programs).toHaveLength(2);
-    expect(out.programs[1]!.toolKey).toBe(BALL2.name);
+    // #1032 — a house tool posts its REGISTRY key (the row the sweep resolves), never the tool's
+    // display name; the job's own snapshot cutter keeps `cutterKeyOf` (its name — no library row).
+    expect(out.programs[1]!.toolKey).toBe(REST_KEY);
     expect(out.programs[1]!.nc).toContain('M02');
 
     // The coverage rank chose the ⌀2 on outcome, and the plan states the comparison: measured

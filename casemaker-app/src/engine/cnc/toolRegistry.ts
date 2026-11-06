@@ -137,6 +137,31 @@ export function resolveTool(key: string): Tool | null {
 }
 
 /**
+ * #1032 — A POSTED PROGRAM'S KEY, RESOLVED TO THE BENCH'S CUTTER. The model engine stamps each
+ * program's `toolKey` with `cutterKeyOf(tool)` (`cam/model/sequence.ts`) = `tool.id ?? tool.name`,
+ * and the built-in tier is not identified by its registry key: `flat-1.0` has no `id`, so its
+ * display NAME is stamped, and `flat-3.175x12-metal` carries the physical catalogue id
+ * `112111313812`. Resolve the three identities a tool record states — registry key, physical id,
+ * then name (a name shared across tiers ranks inventory, the shop's rows, the catalogue, then
+ * built-in) — so a posted program the plan built from any library cutter resolves back to it.
+ * ONE resolver: the app's run store and the command line's own sweep both call this.
+ */
+export function benchCutterFor(key: string): Tool | null {
+  const entries = getTools();
+  const byKey = entryForIn(entries, key);
+  if (byKey !== null) return byKey.tool;
+  const byId = entries.find((e) => e.tool.id === key);
+  if (byId !== undefined) return byId.tool;
+  // A NAME IS NOT UNIQUE ACROSS TIERS: the shop's inventory is the physical cutter the bench
+  // will actually load, then its own library rows, then the catalogue, and the built-in tier
+  // last — the same order the stock is believed in.
+  const rank = (k: string): number =>
+    k.startsWith('inv:') ? 0 : k.startsWith('user:') ? 1 : k.startsWith('cat:') ? 2 : 3;
+  const byName = entries.filter((e) => e.tool.name === key).sort((a, b) => rank(a.key) - rank(b.key));
+  return byName.length === 0 ? null : byName[0]!.tool;
+}
+
+/**
  * The tool a JOB names, against a list handed in: the job's own snapshot first, then the entry
  * its key names, then null. Pure and module-state-free, so the sim workers call it with the
  * list they were sent.

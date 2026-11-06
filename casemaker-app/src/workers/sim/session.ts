@@ -177,6 +177,15 @@ export interface SimLoadOk {
    */
   removalField?: CarriedField | null;
   /**
+   * #1032 (6b's review) — WAS A CARRIED FLOOR SUPPLIED TO THIS SWEEP? The run walk hands a later
+   * setup the other side's remaining stock as the column engine's floor (#723 P2-2b). A program
+   * whose engine still refuses a removal-mesh seed restarts from the blank; when this is true,
+   * that restart KEPT the earlier setup's carried floor, so the end state the result was judged
+   * on still includes the earlier side. Set by the caller that supplied `carried` — the engine
+   * does not infer it.
+   */
+  carriedFloor?: boolean;
+  /**
    * Where the fixture's dimensions came from (#204), present only when the setup models one.
    * A default is NOT a measurement; the viewport shows this so the shown jaws are not read as
    * exact. Optional so a setup with no `fixture` does not grow the load info's shape.

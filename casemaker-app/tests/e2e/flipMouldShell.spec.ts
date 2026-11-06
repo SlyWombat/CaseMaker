@@ -3,7 +3,8 @@
 // The unit acceptance (tests/unit/flipMouldShell.acceptance.spec.ts) proves the generator, the
 // pins' datum and the app's carry transform on the closed form. This walk proves the SHIPPED ROUTE:
 // a two-side .cutjob.json is opened through File ▾ → Open job… (there is no test API to load a
-// job), Generate posts one job as TWO programs, and the app's own run walk sweeps side 2 ON THE
+// job), Generate posts the model engine's programs — one per cutter per setup: a rough and a
+// finish on each side, FOUR in all (#1032) — and the app's own run walk sweeps side 2 ON THE
 // STOCK SIDE 1 LEFT — the carried field crosses the worker and seeds the column engine.
 //
 // THE PART IS THE REAL MOUSE SHELL (#754, "real resolution"): the fixture builds it from the demo
@@ -17,7 +18,7 @@ import { routeHouse, twoSideJob } from './fixtures/twoSideMouseShell';
 
 test.setTimeout(1_200_000);
 
-test('#754/#723 — a two-side mouse shell opens, generates two programs, and side 2 sweeps the carried stock', async ({
+test('#754/#723 — a two-side mouse shell opens, posts the model engine’s four programs, and side 2 is swept on the carried stock', async ({
   cm,
   page,
 }, testInfo) => {
@@ -61,27 +62,43 @@ test('#754/#723 — a two-side mouse shell opens, generates two programs, and si
   await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'tick', { timeout: 1_100_000 });
   const wallSeconds = (Date.now() - started) / 1000;
   testInfo.annotations.push({ type: 'wall-time', description: `${wallSeconds.toFixed(1)} s` });
-  console.log(`#754 walk: ${wallSeconds.toFixed(1)} s from Generate to a swept two-program run`);
+  console.log(`#754 walk: ${wallSeconds.toFixed(1)} s from Generate to a swept four-program run`);
 
   const state = await page.evaluate(() => window.__caseMaker!.getEngraveRunState());
-  expect(state.programs).toBe(2);
+  // #1032 — the model engine posts one program per cutter: rough + finish on each of the two
+  // setups. The walk asserts the engine's real shape (the resolver path is what it exercises).
+  expect(state.programs).toBe(4);
   expect(state.simStatus).toBe('ready');
   expect(state.stage).toBe('done');
 
-  // SIDE 2'S CARRIED SWEEP, as the app states it: both programs were checked in cut order on the
-  // stock the earlier one left, and NOTHING was re-swept from the blank. The Simulate panel reads
-  // the run store's own per-program summaries; its Technical fold holds the sentence that would
-  // name a from-blank program if the carry had declined.
+  // THE APP'S OWN STATEMENT OF WHERE EACH PROGRAM STARTED. All four are checked in cut order; the
+  // sampled column engine cannot start from another program's removal mesh, so side 2's programs
+  // (3 and 4) restart from the blank — with the earlier setup's carried floor still applied — and
+  // the Technical fold NAMES them and the carry (#1032: the old two-program shape never met this,
+  // and asserted the line's absence rather than its content).
   await page.getByTestId('sidebar-button-cnc-sim').click();
   await expect(page.getByTestId('sim-panel')).toBeVisible();
   const checked = page.getByTestId('sim-job-checked');
-  await expect(checked).toContainText('all 2 programs');
+  await expect(checked).toContainText('all 4 programs');
   await expect(checked).toContainText('program 2');
   await expect(checked).not.toContainText('Swept from the blank');
   const technical = page.getByTestId('sim-job-technical');
   if ((await technical.count()) > 0) {
     if ((await technical.getAttribute('open')) === null) await technical.locator('summary').click();
     await expect(page.getByTestId('sim-job-coverage')).toBeVisible();
-    await expect(page.getByTestId('sim-job-coverage')).not.toContainText('Swept from the blank');
+    const coverage = page.getByTestId('sim-job-coverage');
+    // #1032 (6b's review) — THE SENTENCES SAY WHAT EACH RESTART KEPT, per program: side 2's rough
+    // (program 3) restarted from the blank with side 1's floor carried; its finish (program 4) is
+    // in the SAME setup as program 3, whose own field cannot be carried into it once a cross-setup
+    // removal mesh is in the chain (#817's rule) — so it is stated as plainly swept from the
+    // blank. Both facts are the engine's own, and the run state carries them per program.
+    expect(state.simPrograms.map((p) => ({ fromBlank: p.fromBlank, carried: p.carriedFloor }))).toEqual([
+      { fromBlank: false, carried: false },
+      { fromBlank: false, carried: false },
+      { fromBlank: true, carried: true },
+      { fromBlank: true, carried: false },
+    ]);
+    await expect(coverage).toContainText("Restarted from the blank: program 3 (flat-1.0) — the earlier setup's floor was carried");
+    await expect(coverage).toContainText('Swept from the blank: program 4 (⌀ 2 mm ball · 30 mm flute)');
   }
 });

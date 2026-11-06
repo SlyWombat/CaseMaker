@@ -5404,6 +5404,17 @@ export async function postModelPlan(
   };
 
   const programs: EngraveProgram[] = [];
+  // #1032 — THE REGISTRY KEY BESIDE EACH HOUSE TOOL. `cutterKeyOf` (`tool.id ?? tool.name`) is
+  // the plan's own identity — its dumps and pins stay keyed by it — but a POSTED program's key
+  // must be one the library can resolve back: the built-in tier is not identified by its
+  // registry key (`flat-1.0` has no id, so its display NAME would be stamped;
+  // `flat-3.175x12-metal`'s id is the physical `112111313812`), and either string made the run
+  // store's sweep refuse the program as "not on this bench". The plan's tools ARE the objects
+  // this map is built from (the input's house holds `shop.tools[].tool` by reference); the job's
+  // own snapshot cutter has no library row, so it keeps `cutterKeyOf` — the sweep resolves
+  // `program.toolKey === job.toolKey` first regardless.
+  const registryKeyOf = new Map<Tool, string>();
+  for (const entry of shop.tools ?? []) registryKeyOf.set(entry.tool, entry.key);
   for (const plan of output.perSetup) {
     // 1-based, the operator's "Setup N" (`EngraveProgram.setupIndex`'s own doc); `plan.setupIndex`
     // is 0-based (#963's `SetupPlan`'s own convention, like `job.setups`).
@@ -5425,12 +5436,14 @@ export async function postModelPlan(
     }
     for (let i = 0; i < plan.programs.length; i++) {
       const ir = plan.programs[i]!;
-      // #961's own cutter identity — `tool.id ?? tool.name` (`cam/model/sequence.ts`'s
-      // `cutterKeyOf`), the SAME string the plan's own run-grouping already keyed this program's
-      // cutter by (`SetupPlan.programs`'s own doc: "one program per RUN"). `toolKey` here is a
-      // free-text header word (`;@CM|TOOL|key=`, `post/z1.ts`) the post never reads back for
-      // machine control, so it needs no round-trip through the `shop.tools` registry.
-      const toolKey = cutterKeyOf(ir.tool);
+      // #961's own cutter identity, #1032's header. The plan groups a program's runs by
+      // `cutterKeyOf` (`tool.id ?? tool.name`, `cam/model/sequence.ts`) — but the HEADER is read
+      // back: the run store's sweep resolves it to the bench's cutter (and the post's `;@CM|TOOL|key=`
+      // line names the tool to the operator). A house tool therefore posts its REGISTRY key
+      // (`registryKeyOf`, built above); only the job's own snapshot cutter, which need not have a
+      // library row, keeps `cutterKeyOf` — exactly the string the sweep's `job.toolKey` branch
+      // already matches.
+      const toolKey = registryKeyOf.get(ir.tool) ?? cutterKeyOf(ir.tool);
       // Reset per SETUP, not across the whole job (see this block's own header note on why).
       const span: VacuumSpan =
         plan.programs.length === 1 ? 'whole' : i === 0 ? 'first' : i === plan.programs.length - 1 ? 'last' : 'middle';
