@@ -61,6 +61,8 @@ export interface TriangleBins {
   generation: number;
 }
 
+const PLANE_EPS = 1e-9;
+
 function triangleBboxes(mesh: DropCutterMesh): MeshTriangles {
   const n = mesh.triangleCount;
   const minX = new Float64Array(n).fill(Infinity);
@@ -88,22 +90,22 @@ function triangleBboxes(mesh: DropCutterMesh): MeshTriangles {
     // #970(d) — `planeOf`'s own formula, precomputed once per triangle at bin build rather than
     // once per query: the same cross-product + sqrt, the same winding fix-up (normal flipped to
     // point up), the same vertical-facet exclusion.
+    //
+    // #1020 (C's review, the gouge finding) — `planeA`'s own NaN stays the EXACT-degenerate test
+    // only: this classification is SHARED with `dropcutter.ts`'s own facet-contact query, which
+    // needs every near-vertical (but not exactly vertical) facet's real contact — a flat's rim
+    // touching an 87-89.9° drafted wall in its interior, away from any edge, is exactly this case.
+    // Folding a near-vertical skip in HERE fed a false-negative into every op's CL, not just the
+    // pocket's own per-cell ceiling bound — a possible gouge, worse than the bound's own 0.2 mm
+    // lip. The scale-free "how close to vertical" question (`isNearVertical`, below) is answered
+    // only where the POCKET's bound reads it (`ops/pocket.ts`'s own cellBound loop).
     const ux = bx - ax, uy = by - ay, uz = bz - az;
     const vx = cx - ax, vy = cy - ay, vz = cz - az;
     let nx = uy * vz - uz * vy;
     let ny = uz * vx - ux * vz;
     let nz = ux * vy - uy * vx;
-    // #1020 — THE OLD CHECK WAS SCALE-DEPENDENT: `nz` is a raw cross-product component (grows
-    // with the triangle's own area), so `|nz| < 1e-9` only ever caught an EXACTLY vertical facet,
-    // never a near-vertical one — and `a = -nx/nz`/`b = -ny/nz` blow up as `nz` shrinks, so a
-    // near-vertical step-wall facet's "plane" reports an unstable, often enormous Z over a cell it
-    // barely touches (the organizer's facets 40850/40851). The SCALE-FREE question is the angle
-    // between the facet's own normal and up: `|nz| / |n|` is exactly that angle's cosine, and
-    // under 0.05 (within ~3° of vertical) gets the same "no real ceiling here" treatment the
-    // exactly-vertical case already had.
-    const nLen = Math.sqrt(nx * nx + ny * ny + nz * nz);
-    if (nLen === 0 || Math.abs(nz) / nLen < 0.05) {
-      planeA[t] = NaN; // degenerate (vertical, or near enough) facet — `planeOf`'s own `null`
+    if (Math.abs(nz) < PLANE_EPS) {
+      planeA[t] = NaN; // degenerate (vertical) facet — `planeOf`'s own `null`
     } else {
       if (nz < 0) { nx = -nx; ny = -ny; nz = -nz; }
       const a = -nx / nz;
@@ -277,6 +279,29 @@ function clipPoly(poly: XY[], inside: (p: XY) => boolean, cut: (a: XY, b: XY) =>
     }
   }
   return out;
+}
+
+/**
+ * #1020 — true when facet `t`'s own normal is within `maxCosine` of vertical (default 0.05,
+ * ~3° from vertical) — including the exactly-vertical case (`planeA` `NaN`). NOT the same
+ * question `planeA`'s own classification answers: THAT one is shared with `dropcutter.ts`'s own
+ * facet-contact query, which needs a near-vertical facet's real contact (a flat's rim touching a
+ * steep drafted wall in its interior), so folding this test in there fed a false-negative into
+ * every op's CL — a possible gouge. This is for a caller that specifically wants "no real
+ * ceiling here" for a near-vertical facet, as the pocket's own per-cell bound does
+ * (`ops/pocket.ts`'s `cellBound` loop) — never applied to the shared plane itself.
+ *
+ * `|nz| / |n|` is the angle's cosine; rather than re-deriving `nx`/`ny`/`nz` from the mesh, the
+ * ALREADY-STORED `planeL = sqrt(1 + a² + b²)` (`a = -nx/nz`, `b = -ny/nz`, `nz` flipped positive)
+ * gives it directly: `a² + b² + 1 = (nx² + ny²)/nz² + 1 = |n|²/nz²`, so `planeL = |n| / |nz|` and
+ * `|nz| / |n| = 1 / planeL` — no new per-triangle field, no extra trig.
+ */
+export function isNearVertical(bins: TriangleBins, t: number, maxCosine = 0.05): boolean {
+  const l = bins.triangles.planeL[t]!;
+  // `planeL` is only ever set in the non-degenerate branch (`>= 1` there, `sqrt(1+a²+b²)`); the
+  // degenerate (`planeA` NaN) branch never sets it, so it stays the array's own default, 0 — and
+  // an exactly-vertical facet is trivially "near vertical" too.
+  return l === 0 || 1 / l < maxCosine;
 }
 
 /** The triangle clipped to the axis-aligned square, as a flat `[x, y, …]` ring; null when empty. */
