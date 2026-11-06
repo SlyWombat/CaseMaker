@@ -15,8 +15,9 @@
  * at 145723b0a; the movement from their previous values (ca0bbabe4) is ONE class — the retract's
  * down-leg — and every hunk of the three full-text diffs is attributed to one of four commits,
  * measured by re-running this spec's own generation at each (the reusable runner:
- * `tests/unit/zzGoldenAttribution.spec.ts`, run under vitest with CM_GOLDEN_OUT, since an older
- * checkout's ManifoldRuntime cannot load under plain Node):
+ * `tests/tools/goldenAttribution.ts`, entered through the env-gated
+ * `tests/unit/goldenAttribution.spec.ts` — CM_GOLDEN_OUT names its output directory — since an
+ * older checkout's ManifoldRuntime cannot load under plain Node):
  *
  *   a79bab6ba (#962)           retract()'s down leg tests the cutter's whole disc: a proven-clear
  *                              drop is FED (`G0 Z-1.5`+cut → `G1 Z-1.5 F300`+cut, and the next
