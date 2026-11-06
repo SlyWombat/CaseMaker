@@ -5193,10 +5193,13 @@ export async function buildModelPlanInputForGoal(
     // #1023 — the shop's leftover-visibility thresholds reach the plan, with provenance. The
     // location lives on the main thread, so the caller resolves them (the same snapshot the old
     // rest pair reads); absent is the labelled fallback, never a compiled-in "shop" number.
+    // #1027 — each threshold keeps its OWN source: the two are read independently, so a location
+    // that states one and falls back for the other is labelled per threshold, never by the other's.
     restVisibility: {
       depthMm: shop.rest?.visibleDepth.value ?? REST_MACHINING_FALLBACK.visibleDepth,
       share: (shop.rest?.thirdToolPct.value ?? REST_MACHINING_FALLBACK.thirdToolFraction * 100) / 100,
-      source: shop.rest?.visibleDepth.source ?? REST_MACHINING_FALLBACK.source,
+      depthSource: shop.rest?.visibleDepth.source ?? REST_MACHINING_FALLBACK.source,
+      shareSource: shop.rest?.thirdToolPct.source ?? REST_MACHINING_FALLBACK.source,
     },
   };
 }
