@@ -43,6 +43,7 @@ import {
   GOAL_CUT_INTO_FLOOR_MM,
   GOAL_LEFTOVER_BANDS_MM,
   GOAL_PASS_COVERAGE_FALLBACK,
+  STRADDLING_SLACK_MM,
   checkGoalCutInto,
 } from '@/engine/cnc/engrave/designCheck';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
@@ -150,16 +151,23 @@ const COVERED = 572;
 
 /** The rule's own fingerprint: constants, thresholds and the canonical report's rule numbers. */
 const FROZEN = {
-  version: 5,
+  version: 6,
   constants: {
     cutIntoFloorMm: 0.01,
     leftoverBandsMm: [0.1, 0.3, 1],
     passCoverageFallback: 0.95,
+    // #996 (v6) — the straddling-cell excuse's slack, mm: the swept floor may sit this far below
+    // the design's low side over the cell and still count as at it.
+    straddlingSlackMm: 0.005,
   },
   // The unexported thresholds as the rule states them today: a design edge is a step STRICTLY
   // deeper than 0.2 mm; the adjudicated floor is STRICTLY deeper than 0.1 mm; the edge-break leg
   // is INCLUSIVE. Stated here for the reader; the behavioural cases BELOW are what enforce them.
   thresholds: { designEdgeStepMm: 0.2, adjudicatedFloorMm: 0.1, edgeBreakLegInclusive: true },
+  // #996 (v6) — the straddling excuse's two conditions, as the rule states them: the step over
+  // the cell is AT LEAST the read intrusion, and the swept floor is at the low side (within the
+  // slack above). The canonical fixture's adjudicated cells sit on flat ground, so none qualifies.
+  straddlingRule: { stepAtLeastIntrusion: true, floorAtLowSide: true },
   canonical: {
     goalCells: COVERED,
     raw: { cells: 8, fraction: 8 / COVERED, maxMm: 0.8, at: { x: 17, y: 5 } },
@@ -167,6 +175,7 @@ const FROZEN = {
     wall: { cells: 2, fraction: 2 / COVERED },
     // v5 — C (0.3 mm, 2 mm behind the wall) states no CL here, so it is adjudicated with F.
     shadow: { cells: 0, fraction: 0 },
+    straddling: { cells: 0, maxStepMm: 0 },
     adjudicated: { cells: 2, fraction: 2 / COVERED, maxMm: 0.4, at: { x: 5, y: 5 } },
     leftover: { fractions: [4 / COVERED, 2 / COVERED, 1 / COVERED], maxMm: 1.05 },
     coverageFraction: 559 / COVERED,
@@ -197,6 +206,12 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
     expect(r.edgeBreakFraction, FREEZE).toBe(FROZEN.canonical.edgeBreak.fraction);
     expect(r.wallNotScoredFraction, FREEZE).toBe(FROZEN.canonical.wall.fraction);
     expect(r.shadowNotScoredFraction, FREEZE).toBe(FROZEN.canonical.shadow.fraction);
+    // v6 — the straddling excuse: none on the canonical fixture (its adjudicated cells are flat
+    // ground, step 0, and a step of 0 can never reach the intrusion), but the fields are part of
+    // the rule's fingerprint and must exist, at zero, beside wall/shadow.
+    expect(STRADDLING_SLACK_MM, FREEZE).toBe(FROZEN.constants.straddlingSlackMm);
+    expect(r.straddlingNotScoredCells, FREEZE).toBe(FROZEN.canonical.straddling.cells);
+    expect(r.straddlingMaxStepMm, FREEZE).toBe(FROZEN.canonical.straddling.maxStepMm);
     // The judged reading.
     expect(r.adjudicatedFraction, FREEZE).toBe(FROZEN.canonical.adjudicated.fraction);
     expect(r.adjudicatedMaxMm, FREEZE).toBeCloseTo(FROZEN.canonical.adjudicated.maxMm, 12);

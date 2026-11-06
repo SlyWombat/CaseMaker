@@ -25,6 +25,8 @@ function report(over: Partial<GoalCutIntoReport> = {}): GoalCutIntoReport {
     edgeBreakFraction: 0.0366,
     wallNotScoredFraction: 0.002,
     shadowNotScoredFraction: 0.001,
+    straddlingNotScoredCells: 0,
+    straddlingMaxStepMm: 0,
     leftoverFractions: [0.162, 0.02, 0.001],
     leftoverVolumeMm3: 6.2,
     maxLeftoverMm: 1.4,
