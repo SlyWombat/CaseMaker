@@ -4957,7 +4957,18 @@ export async function buildModelPlanInputForGoal(
       ? Number((cutterReach.mm - GOAL_BAND_CLEARANCE_MM).toFixed(3))
       : null;
   const statedBandMm = goal.bandMm !== undefined && goal.bandMm > 0 ? goal.bandMm : null;
-  const setupBandMm = statedBandMm === null && reachBandMm !== null && reachBandMm > 0 ? reachBandMm : null;
+  // #888 — A STATED BAND WINS, and it needs the goal-top offset: `goal.bandMm` is measured below
+  // the GOAL's own highest surface ("how deep ITS side cuts below the goal's own highest surface",
+  // the old path's own datum), while `SetupSpec.bandMm` is a depth below the setup's STOCK top.
+  // The goal is placed with its top at `position.z` in the stock-top frame (`stockTopZ: 0`), so a
+  // top sunk 2 mm needs 2 mm added to a stated band.
+  const goalTopBelowStockMm = 0 - goal.position.z;
+  const setupBandMm =
+    statedBandMm !== null
+      ? Number((statedBandMm + goalTopBelowStockMm).toFixed(3))
+      : reachBandMm !== null && reachBandMm > 0
+        ? reachBandMm
+        : null;
   const bandedSetups: SetupSpec[] = setupBandMm === null ? setups : setups.map((s) => ({ ...s, bandMm: setupBandMm }));
 
   const envelope: FixtureEnvelope | null =

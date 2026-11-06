@@ -297,6 +297,29 @@ describe('#785 — Generate', () => {
     }
   }, 120_000);
 
+  it('#988 — a STATED band (#888) is honoured through the model seam, measured from the goal top', async () => {
+    // The goal's top sits 2 mm below the stock top; a stated 6 mm band (the old path's own datum —
+    // "how deep ITS side cuts below the goal's own highest surface") therefore stops the cut 8 mm
+    // below the STOCK top, and the seam must say so. RED before the fix: nothing was mapped at all.
+    const target = rampGoal({ bandMm: 6, position: { x: 25, y: 25, z: -2 } });
+    const tool = flat({ fluteLength: 60 });
+    const ball: Tool = { ...flat({ fluteLength: 60, id: 'ball-988', name: 'ball-988' }), shape: 'ball', typeText: 'Ball Nose' };
+    const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+    const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+    const job = tallJob(target);
+    const input = await buildModelPlanInputForGoal(job, target, tool, {
+      tools: [{ key: 'inv:ball-988', tool: ball, provenance: 'test fixture' }],
+    });
+    expect(input.setups[0]!.bandMm, 'the stated band must reach the setups').toBeCloseTo(8, 6);
+    const out = await planModelCam(input);
+    const programs = out.perSetup.flatMap((s) => s.programs);
+    expect(programs.length, 'no program was planned').toBeGreaterThan(0);
+    const zs = programs.flatMap((p) => p.operations.flatMap((o) => o.moves.map((m) => m.z)));
+    expect(Math.min(...zs), 'the band floor is −8 (6 below a goal top at −2)').toBeGreaterThanOrEqual(-8.001);
+    expect(Math.min(...zs), 'the plan must reach the band').toBeLessThanOrEqual(-7.5);
+    expect(out.perSetup.flatMap((s) => s.notes).join('\n')).toContain("Cut only the stock's top 8 mm");
+  }, 120_000);
+
   it('an unrecorded reach does not stop Generate — the assumption is stated, the cut proceeds', async () => {
     const target = rampGoal();
     const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: null, id: null }), [], null, {});
