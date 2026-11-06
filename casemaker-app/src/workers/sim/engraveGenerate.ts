@@ -5165,31 +5165,50 @@ function goalSurfaceFactsFromPlan(output: ModelPlanOutput): GoalSurfaceFacts {
   const spacings = plan.clGrid;
   const pitchOf = (cutterKey: string): number | null => spacings.find((c) => c.cutterKey === cutterKey)?.maxSpacingMm ?? null;
   const opOf = (kind: PlannedOp['kind']): PlannedOp | undefined => plan.ops.find((o) => o.kind === kind);
-  const passStep = (op: PlannedOp | undefined): number | null => {
-    if (op === undefined) return null;
-    const steps = op.outcome.ir.operations
-      .map((o) => o.passStepMm)
-      .filter((s): s is number => typeof s === 'number' && Number.isFinite(s) && s > 0);
-    return steps.length === 0 ? null : Math.max(...steps);
+  const numeric = (values: readonly (number | null | undefined)[]): number | null => {
+    const defined = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0);
+    return defined.length === 0 ? null : Math.max(...defined);
   };
+  const passStep = (op: PlannedOp | undefined): number | null =>
+    op === undefined ? null : numeric(op.outcome.ir.operations.map((o) => o.passStepMm));
+  const layerCount = (op: PlannedOp | undefined): number | null =>
+    op === undefined ? null : numeric(op.outcome.ir.operations.map((o) => o.depthPasses));
   const roughOp = opOf('rough');
   const finishOp = opOf('finish');
   const pencilOp = opOf('pencil');
-  const pitchMax = spacings.length === 0 ? 0 : Math.max(...spacings.map((c) => c.maxSpacingMm));
-  const pitchMin = spacings.length === 0 ? 0 : Math.min(...spacings.map((c) => c.minSpacingMm));
+  const pocketOps = plan.ops.filter((o) => o.kind === 'pocket' || o.kind === 'contour');
+  // #1007 (C's review) — A FACT THE PLAN DOES NOT HAVE STAYS ABSENT, NEVER A DEFINED ZERO. A
+  // pocket-only goal (the relief: a pocket and its contour) carries no raster step-overs and no
+  // rough stage; defining them as 0 made the run sheet print "Roughing has nothing to remove" and
+  // "0 roughing layers at 0.000 mm" — both false. The step-down that DOES exist comes from the
+  // pocket/contour ops' own passes; the layer count is the IR operation's `depthPasses` (the Z
+  // passes that ran), never the operation count (always 1).
+  const hasSurfaceStage = roughOp !== undefined || finishOp !== undefined || pencilOp !== undefined;
+  const stepDownMm = passStep(roughOp) ?? numeric(pocketOps.map((o) => passStep(o)));
+  const roughingLayers = layerCount(roughOp) ?? numeric(pocketOps.map((o) => layerCount(o)));
+  const pitchMax = spacings.length === 0 ? null : Math.max(...spacings.map((c) => c.maxSpacingMm));
+  const pitchMin = spacings.length === 0 ? null : Math.min(...spacings.map((c) => c.minSpacingMm));
+  const finishStepDownMm = passStep(finishOp);
+  const roughStepOverMm = pitchOf(roughOp?.outcome.cutter ?? '');
+  const finishStepOverMm = pitchOf(finishOp?.outcome.cutter ?? '');
   return {
     resolutionNote:
-      spacings.length === 0
-        ? "the model plan's cutter-location grid states no spacing"
+      pitchMax === null || pitchMin === null
+        ? 'the model plan states no cutter-location grid — no curved surface stage ran'
         : `the model plan's cutter-location grid, ${pitchMin}–${pitchMax} mm spacing`,
-    gridPitchMm: pitchMax,
-    gridCells: 0,
-    stepDownMm: passStep(roughOp) ?? 0,
-    finishStepDownMm: passStep(finishOp) ?? 0,
-    roughStepOverMm: pitchOf(roughOp?.outcome.cutter ?? '') ?? 0,
-    finishStepOverMm: pitchOf(finishOp?.outcome.cutter ?? '') ?? 0,
-    stockToLeaveMm: MODEL_STOCK_TO_LEAVE_MM,
-    roughingLayers: roughOp === undefined ? 0 : roughOp.outcome.ir.operations.length,
+    ...(pitchMax === null ? {} : { gridPitchMm: pitchMax }),
+    ...(stepDownMm === null ? {} : { stepDownMm }),
+    ...(roughingLayers === null ? {} : { roughingLayers }),
+    // THE RASTER NUMBERS ARE THE SURFACE STAGES' OWN: only a plan with a rough/finish/pencil stage
+    // has them, and the sheet prints its full surface line only when all five are present.
+    ...(hasSurfaceStage
+      ? {
+          ...(finishStepDownMm === null ? {} : { finishStepDownMm }),
+          ...(roughStepOverMm === null ? {} : { roughStepOverMm }),
+          ...(finishStepOverMm === null ? {} : { finishStepOverMm }),
+          stockToLeaveMm: MODEL_STOCK_TO_LEAVE_MM,
+        }
+      : {}),
     rough: roughOp === undefined ? undefined : { tool: roughOp.outcome.ir.tool.name, kind: 'raster' as const },
     scallop: null,
     pencil: pencilOp === undefined ? null : { paths: pencilOp.outcome.ir.operations.length, creaseDeg: 0 },

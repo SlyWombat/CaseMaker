@@ -248,9 +248,10 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
   // #755 — the grid follows the finish when it can: a 0.05 mm finish on a ⌀3 ball would need more
   // finishing tip-field evaluations than the run's budget allows, so the job settles at the grid it
   // would have used and STATES that pitch and the cap that bound — never refusing the job.
-  // #1007 — THE MODEL RUN NOW CARRIES ITS SURFACE FACTS (`surface3d`), so this case is a plain
-  // test: the grid follows the finish or the plan states the pitch that bound.
-  it('#755 — a finish step-over finer than the sampled grid is followed or the cap that bound is stated', async () => {
+  // #1007 — THE MODEL RUN NOW CARRIES ITS SURFACE FACTS (`surface3d`). What this case can now
+  // check is that the facts state a real grid pitch; #1009 deleted the heightfield cell-cap family,
+  // so there is no cap finding to assert any more.
+  it('#1007 — the run’s surface facts state the cutter-location grid pitch the finish was planned on', async () => {
     const out = await fine();
     expect(out.ok).toBe(true);
     const grid = out.surface3d!.gridPitchMm;

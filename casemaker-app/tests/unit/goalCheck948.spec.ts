@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { bootstrap, loadCatalogue } from '@/platform/headless/bootstrap';
-import { setLocatedFeedTable } from '@/engine/cnc/feeds';
+import { feedsFor, setLocatedFeedTable } from '@/engine/cnc/feeds';
 import { getTools, resetRegistry, resolveTool, setRegistry } from '@/engine/cnc/toolRegistry';
 import { engraveShopOpts } from '@/engine/cnc/engrave/feeds';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
@@ -58,6 +58,7 @@ import { createSimSession, type SimSession } from '@/workers/sim/session';
 import { buildTimeline, parseGcode } from '@/engine/cnc';
 import { exactSweptField } from '@/workers/sim/sweptPoint';
 import { clearGoalFieldCache, goalInputFor, GOAL_CHECK_MAX_CELLS, GOAL_CHECK_PITCH_MM } from '@/workers/sim/goalCheckField';
+import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 
 afterEach(() => {
@@ -555,7 +556,6 @@ describe('#948 the live session’s swept top', () => {
     const target = targetOf(imported, stock);
     const job = goalJob(target, stock);
     const g = await generate(tl, job);
-    console.log('#1007 probe relief: ok', g.ok, 'surface3d', JSON.stringify(g.surface3d)?.slice(0, 200), 'stage', g.stage);
     expect(g.ok, g.errors.map((e) => e.message).join('; ')).toBe(true);
     // #1007 — the carrier: `runSheet`'s surface steps and the goal-check marker read this.
     expect(g.surface3d).toBeDefined();
@@ -621,6 +621,19 @@ describe('#948 the live session’s swept top', () => {
       // page's 0.1 mm floor (re-pinned here with the cause, #1011's rule).
       expect(report.goalCutInto?.leftoverFractions[0] ?? -1).toBe(0);
       expect(report.goalCutInto?.maxLeftoverMm ?? -1).toBeLessThanOrEqual(0.1);
+      // #1007 (C's review) — A POCKET-ONLY GOAL'S SHEET MUST NOT CLAIM THE ROUGH HAD NOTHING TO DO.
+      // This relief cuts a pocket and its contour at one step-down; the facts carry no raster
+      // step-overs and no rough stage, so the sheet must take its short, honest branch rather than
+      // printing "Roughing has nothing to remove" and "0 roughing layers at 0.000 mm".
+      const surfaceProgram = { setupIndex: 1, toolKey: 'flat-1.0', nc: g.nc as string, frameNc: null, cam: null };
+      const sheetTool = jobTool(job);
+      if (sheetTool === null) throw new Error('the relief job states no tool');
+      const sheetFeeds = feedsFor([], job.stock.material, sheetTool, Z1, job.cutOverride);
+      const generated = { findings: [], feeds: sheetFeeds, cam: { operations: 1, cuttingMoves: 100, estimatedSeconds: 60, passes: 1 }, nc: g.nc, verify: null, frameNc: null, frameError: null, surface3d: g.surface3d!, programs: [surfaceProgram] };
+      const sheet = buildRunSheet(job, generated, null);
+      const sheetText = sheet.sections.flatMap((s) => s.steps.map((st) => st.text)).join('\n');
+      expect(sheetText).not.toContain('Roughing has nothing to remove');
+      expect(sheetText).not.toContain('0 roughing layers');
       // And the merge left the report's other verdicts alone.
       expect(report.ok).toBe(true);
     } finally {
