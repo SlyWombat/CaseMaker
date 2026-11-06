@@ -260,7 +260,9 @@ async function measureStlRow(name: string, stlPath: string, stockXy: [number, nu
   const skippedRims = setup.notes.filter((n) => n.includes('not broken')).length;
   console.log(
     `#991 ${name} STL row: ${setup.features.report.source} path, ${rims} rims (${modelled} modelledChamfer), ${chamferOps} chamfer ops (${skippedRims} rims not broken), ` +
-      `coverage ${measured === null ? '—' : (measured.coverage * 100).toFixed(2)} %, cycle ${measured === null ? '—' : measured.ours.cycleSeconds.toFixed(1)} s`,
+      `coverage ${measured === null ? '—' : (measured.coverage * 100).toFixed(2)} %, cycle ${measured === null ? '—' : measured.ours.cycleSeconds.toFixed(1)} s, ` +
+      // #995 — the row PRINTS its seven verdicts beside the STEP row's, never only the geometry.
+      `seven lines (${measured === null ? 'unmeasured' : measured.scored.sentence}): ${measured === null ? '—' : sevenVerdicts(measured)}`,
   );
   return { setup, measured, rims, modelled, chamferOps };
 }
@@ -614,6 +616,32 @@ function sequenceReceipt(
     candidates,
     vendor,
   };
+}
+
+/**
+ * #991 — THE REVIEW SESSION'S CLARIFIED RULING: BOTH ROWS, ALL SEVEN LINES. A reference card's
+ * STEP row AND its STL row each pass every line — coverage, cut-into, cycle, air, rapids,
+ * cutters, posts-as-filed — against the same vendor score the card already resolves. A stated
+ * line is not a pass (`scoreSevenLines`' own rule); `failing` names every line that is not.
+ */
+function expectSevenLinesPass(measured: { scored: SevenLineCard }, row: string): void {
+  expect(measured.scored.referenced, `${row}: unreferenced — no vendor score beside it`).toBe(true);
+  expect(measured.scored.failing, `${row} seven lines — ${measured.scored.sentence}`).toEqual([]);
+}
+
+/**
+ * #995 — A ROW REFUSED AT THE DOOR IS SEVEN FAILS, NEVER SKIPPED. The ruling judges every line on
+ * both rows; a row that cannot be measured at all fails each of the seven, with the door's own
+ * sentence beside them. Printed so the card states the refusal in the ruling's own terms.
+ */
+const SEVEN_LINE_KEYS = ['coverage', 'cutInto', 'cycle', 'air', 'rapids', 'cutters', 'postsAsFiled'] as const;
+
+/** #995 — one row's seven verdicts, in the ruling's order, for the card to print. */
+function sevenVerdicts(measured: { scored: SevenLineCard }): string {
+  return measured.scored.lines.map((line) => `${line.key}:${line.state}`).join(' ');
+}
+function sevenFailsOfRefusal(sentence: string): string[] {
+  return SEVEN_LINE_KEYS.map((key, i) => `${i + 1}. ${key}: fail — refused at the door (${sentence})`);
 }
 
 function writeAcceptance(
@@ -1482,6 +1510,9 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     if (idealRun !== null) expect(idealRun.setup.ops.length, `the ideal plan produced nothing: ${idealRun.setup.unreachable.join('; ')}`).toBeGreaterThan(0);
     const tradeoff = writeTwoPlans('tray', { ours: measured!.ours, scored: measured!.scored }, idealMeasured === null ? null : { ours: idealMeasured.ours, scored: idealMeasured.scored });
     if (tradeoff !== null) expect(tradeoff.line !== null, JSON.stringify(tradeoff.differences)).toBe(tradeoff.material);
+    // #991 (the clarified ruling) — the STEP row passes ALL SEVEN lines, not just geometry.
+    console.log(`#995 tray STEP row seven lines: ${sevenVerdicts(measured!)} — ${measured!.scored.sentence}`);
+    expectSevenLinesPass(measured!, 'tray STEP row');
     // #975 — THE SUPERSET RULE, RESTATED (the manager's ruling, 2026-11-05). The ideal's candidate
     // set contains the owned set, but the selector ranks by COST among plans whose outcomes do not
     // differ materially, so an extra bit can move an outcome either way. The rule the acceptance
@@ -1517,6 +1548,9 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     // row's by the filed defect above; that is the only line allowed to.
     expect(row.measured!.coverage, 'the STL row fell under the card coverage floor').toBeGreaterThanOrEqual(0.9852);
     expect(row.measured!.adjudicatedFraction ?? 0, 'the STL row cut into the part').toBe(0);
+    // #991 (the clarified ruling) — the SAME seven lines as the STEP row, on the same vendor basis
+    // (`vendorScoreFor` already resolves 'tray-stl' to the tray card).
+    expectSevenLinesPass(row.measured!, 'tray STL row');
   }, 900_000);
 });
 
@@ -1682,6 +1716,9 @@ describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.o
     if (idealRun !== null) expect(idealRun.setup.ops.length, `the ideal plan produced nothing: ${idealRun.setup.unreachable.join('; ')}`).toBeGreaterThan(0);
     const tradeoff = writeTwoPlans('organizer', { ours: measured!.ours, scored: measured!.scored }, idealMeasured === null ? null : { ours: idealMeasured.ours, scored: idealMeasured.scored });
     if (tradeoff !== null) expect(tradeoff.line !== null, JSON.stringify(tradeoff.differences)).toBe(tradeoff.material);
+    // #991 (the clarified ruling) — the STEP row passes ALL SEVEN lines, not just geometry.
+    console.log(`#995 organizer STEP row seven lines: ${sevenVerdicts(measured!)} — ${measured!.scored.sentence}`);
+    expectSevenLinesPass(measured!, 'organizer STEP row');
     // #975 — the superset rule on the organizer too, in its material form (see the tray's case).
     if (idealMeasured !== null) {
       const worse = idealWorsenings(measured!.ours, idealMeasured.ours).filter((w) => w.material);
@@ -1695,11 +1732,27 @@ describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.o
   // this file at all today. Recorded here as the user's own experience; the mesh-path item owns
   // the fix (a tighter weld or a manifold-tolerant tree). The tray's STL row is the planned-and-
   // measured one.
-  it('#991 the shipped STL row: the user’s own file, refused by the door by name', async () => {
+  // #995 (the maintainer's ruling: both rows, both must pass) — THE ORGANIZER'S STL ROW IS REFUSED
+  // AT THE DOOR: the shipped organizer STL has one edge used by four triangles after the door's
+  // 1e-4 mm weld, so `closeOpenSheet` refuses it by name and no row can be measured. A refused row
+  // is SEVEN FAILS in the door's own sentence, never a skip; the organizer-STL / mesh-path item
+  // owns the fix, and when it lands this becomes a measured row gated by `expectSevenLinesPass`.
+  it('#991 the organizer STL row: refused at the door — seven fails, with the door’s sentence', async () => {
     const stlPath = shippedStlBeside(ORGANIZER!);
     expect(stlPath, 'the Makerables .stl is not beside the STEP').not.toBeNull();
     if (stlPath === null) return;
-    await expect(measureStlRow('organizer', stlPath, [170, 170], -0.8)).rejects.toThrow(/edge\(s\) shared by more than two triangles/);
+    let refusal: string | null = null;
+    try {
+      await measureStlRow('organizer', stlPath, [170, 170], -0.8);
+    } catch (e) {
+      refusal = e instanceof Error ? e.message : String(e);
+    }
+    expect(refusal, 'the organizer STL row measured — the door item landed; gate it with expectSevenLinesPass').not.toBeNull();
+    expect(refusal).toMatch(/edge\(s\) shared by more than two triangles/);
+    const fails = sevenFailsOfRefusal(refusal!);
+    expect(fails, 'a refused row is seven fails, not a skip').toHaveLength(7);
+    expect(fails.every((f) => f.includes('fail — refused at the door'))).toBe(true);
+    console.log(`#995 organizer STL row — ${fails.join(' | ')}`);
   }, 900_000);
 });
 
