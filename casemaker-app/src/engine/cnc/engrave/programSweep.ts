@@ -69,6 +69,12 @@ export interface ProgramSweepResult {
   notes: SimDiagnostic[];
   fromBlank: boolean;
   fromBlankCode: string | null;
+  /**
+   * #1032 — the restart-from-blank continued with the caller's carried floor (#723 P2-2b): the
+   * earlier setup's stock is in the end state this result was judged on, even though a
+   * removal-mesh seed could not be taken.
+   */
+  carriedFloor?: boolean;
   /** The FLAT dexel grid this program was swept on, mm; null for an exact or rotary sweep. */
   gridPitchMm: number | null;
   /** This program's own removal. Kept private to the walk; summaries below drop it. */
@@ -386,6 +392,7 @@ export async function sweepPrograms<P extends SweepProgram>(options: SweepProgra
       notes,
       fromBlank,
       fromBlankCode,
+      carriedFloor: load.carriedFloor === true,
       gridPitchMm: gridPitchMmOf(load),
       removal: load.meshes.removal,
     };
