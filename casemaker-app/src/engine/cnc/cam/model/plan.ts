@@ -39,7 +39,7 @@ import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanStatement, StockProbes } from './types';
 import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
-import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, type SetupRegistration } from './setups';
+import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
 import { pocket } from './ops/pocket';
 import { roughLeftAbove } from './ops/rough';
 import { clSurface, creaseFits } from './clsurface';
@@ -615,7 +615,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // a split's own band). Positive mm below the stock top; absent = the whole depth.
     const depthBandMm = spec.bandMm !== undefined && spec.bandMm > 0 ? spec.bandMm : undefined;
     opts.onProgress?.({ setupIndex, op: 'features', fraction: 0 });
-    const tree = recogniseFeatures(input.geometry, spec.frame, tl);
+    // #1018 — THE DOOR (see `shiftToStockTop`'s own header): every Z this setup's own tree, curved
+    // geometry and pocket-floor bins see from here on is stock-top-relative, because the mesh
+    // itself was shifted before any of them read it — not because each one subtracts `stockTop`
+    // on its own way out.
+    const { geometry: doorGeometry, frame: doorFrame } = shiftToStockTop(input.geometry, spec.frame);
+    const tree = recogniseFeatures(doorGeometry, doorFrame, tl);
     if (setupIndex === 0) setup0Tree = tree;
 
     // #965 registration — computed, never assumed. `registerSetupOrigin` THROWS, by name, when
@@ -727,7 +732,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // #988 — A BANDED CONTOUR DOES NOT REACH THE PART'S BOTTOM, so it frees nothing and the
     // release instruction must not be given: the contour keeps its tabs exactly as a non-last
     // setup's does. (The band is measured from this setup's stock top.)
-    const bandReachesBottom = depthBandMm === undefined || depthBandMm + 1e-9 >= tree.frame.stockTop - tree.contour.zTo;
+    const bandReachesBottom = depthBandMm === undefined || depthBandMm + 1e-9 >= -tree.contour.zTo;
     const tabs =
       input.setups.length <= 1 || !bandReachesBottom
         ? undefined
@@ -741,7 +746,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // the SAME rotation, or a non-identity setup's drop-cutter reads the part's OLD orientation
     // against a tree built in the NEW one (`rotatedGeometryFor`'s own doc). Identity for `up = [0, 0, 1]`
     // (every job today), so this changes nothing for the existing single-setup caller.
-    const curvedGeometry = rotatedGeometryFor(input.geometry, spec.frame);
+    const curvedGeometry = rotatedGeometryFor(doorGeometry, doorFrame);
 
     // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
     // already-finished surface (this file's own #965 open-item note, below, used to be the whole
@@ -825,7 +830,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const earlyNotes: string[] = [];
     const ballUncutIds: string[] = [];
     if (noFlatFallback) {
-      const bins = buildTriangleBins(input.geometry.triangles);
+      const bins = buildTriangleBins(doorGeometry.triangles);
       const walkPockets = (nodes: PocketNode[]): void => {
         for (const node of nodes) {
           let designMax = -Infinity;
@@ -1035,10 +1040,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // leaves below it. (The seam carries the old path's `goal-cut-top-band` warning already; this
     // is the PLAN's own line, so the model plan says the same thing in its own words.)
     if (depthBandMm !== undefined) {
-      const demands: number[] = [tree.frame.stockTop - tree.contour.zTo, ...tree.remainder.map((r) => tree.frame.stockTop - r.zBottom)];
+      const demands: number[] = [-tree.contour.zTo, ...tree.remainder.map((r) => -r.zBottom)];
       const walkFloors = (nodes: typeof tree.pockets): void => {
         for (const n of nodes) {
-          demands.push(tree.frame.stockTop - n.floorZ);
+          demands.push(-n.floorZ);
           walkFloors(n.children);
         }
       };
@@ -1454,37 +1459,31 @@ export interface PlanPocketsResult {
  * signature — `chooseSequence` calls `planStep` once per candidate it prices, not just the winner.
  */
 export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions): PlanPocketsResult {
-  // ADVISOR'S REVIEW, most severe: there is no single Z datum without this. `zPasses`, SAFE_Z/
-  // HOP_Z (ir.ts) and the post's own `probed-top-face` convention all assume IR Z 0 is the STOCK
-  // top; `pocket()` instead used `node.floorZ`/`mouthZ` as literal move Z, on whatever absolute
-  // axis `recogniseFeatures` happened to place the mesh on (A's own red-first fixtures place it
-  // at `stockTop = 10`, not near 0 — "every real caller keeps stockTop near 0" was simply wrong).
-  // Every Z this function hands an op is rebased by `-stockTop` here, ONCE, so every op downstream
-  // shares the SAME Z 0 = stock top — not fixed by a per-caller convention, not assumed.
-  const z0 = tree.frame.stockTop;
-  const rebase = (z: number): number => z - z0;
+  // #1018 — ONE Z DATUM, by construction: `zPasses`, SAFE_Z/HOP_Z (ir.ts) and the post's own
+  // `probed-top-face` convention all assume IR Z 0 is the STOCK top, and `tree` already is —
+  // `planModelCam`'s own setup loop shifts the mesh by `-stockTop` at the door, once, before
+  // `recogniseFeatures` ever sees it, so `tree.frame.stockTop` reads 0 here and every Z this
+  // function reads off `tree` is already stock-top-relative. Was rebased per-value here
+  // (`rebase`, `z - stockTop`) until the door made that unconditional and the per-site shim
+  // redundant.
   // #988 — THE SETUP'S DEPTH BAND (`SetupSpec.bandMm`): every floor this function hands an op is
   // clamped to it, so the contour, the pockets/through holes and the chain's own cutter sizing
   // (the feature depths below) all stop at the band, and the remainder is named. Absent: the
   // pre-#988 plan, byte-identical.
   const depthBandMm = opts.depthBandMm;
-  const cutFloor = (zAbs: number): number => {
-    const z = rebase(zAbs);
-    return depthBandMm === undefined ? z : Math.max(z, -depthBandMm);
-  };
+  const cutFloor = (floorZ: number): number => (depthBandMm === undefined ? floorZ : Math.max(floorZ, -depthBandMm));
 
   const refs = regionRefs(tree);
-  // `regionRefs` reads `topZ`/`bottomZ` straight off the tree (mesh-absolute) — rebased here too,
-  // so a `RegionRef` never mixes the mesh's own axis with the stock-relative one every op uses.
+  // `regionRefs` reads `topZ`/`bottomZ` straight off `tree`, already stock-top-relative (#1018).
   const refById = new Map(refs.map((r) => [r.id, {
     ...r,
-    topZ: rebase(r.topZ),
-    bottomZ: depthBandMm === undefined ? rebase(r.bottomZ) : Math.max(rebase(r.bottomZ), -depthBandMm),
+    topZ: r.topZ,
+    bottomZ: depthBandMm === undefined ? r.bottomZ : Math.max(r.bottomZ, -depthBandMm),
     obstacles: [],
     // The skin above an OPEN node (a shoulder) is cut by this plan; above anything else (an
-    // island's own cap, say) it is not, and stays at the stock's own top (rebased, 0) — never
-    // below it, or a clearance plane under 5 mm above a thick, uncut skin would not clear it.
-    regionClearanceZ: Math.max(0, rebase(tree.frame.partTop)) + 5,
+    // island's own cap, say) it is not, and stays at the stock's own top (0) — never below it,
+    // or a clearance plane under 5 mm above a thick, uncut skin would not clear it.
+    regionClearanceZ: Math.max(0, tree.frame.partTop) + 5,
   }]));
 
   // A's review 6622610124, finding 2: a ROOT node's mouth is the STOCK's own top, not the
@@ -1505,8 +1504,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // A's review 6622610124, most severe: `zPasses` counts down from Z 0, the STOCK top, not the
   // recognised part top — a `partTop - zTo` depth stopped the contour short by exactly the skin
   // between the stock and the part (1.2 mm on the tray, 0.8 mm on the organizer), so the part was
-  // never actually freed. These are magnitudes, already stock-top-relative — no `rebase` needed.
-  const contourDepthRawMm = z0 - tree.contour.zTo;
+  // never actually freed. `tree.contour.zTo` is already stock-top-relative (#1018's door).
+  const contourDepthRawMm = -tree.contour.zTo;
   // #988 — the freeing contour stops at the band: depth min(demand, band). The demand stays for
   // the setup's own "what is left" line in `planModelCam`.
   //
@@ -1516,8 +1515,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // bottom and the clipped millimetres are stated. The sacrificial board's allowance is a separate
   // input this function does not receive yet (stated, not silently zero). The two floors COMPOSE:
   // the shallower of the demand, the band and the stock bottom wins.
+  // #1018 — `tree.frame.stockBottom` is shifted by the SAME door translate `stockTop` is (the
+  // door's own doc), so this is already "depth below the stock top", no `z0` subtraction needed.
   const stockBottomZ = tree.frame.stockBottom;
-  const stockFloorDepthMm = stockBottomZ === undefined ? undefined : z0 - stockBottomZ;
+  const stockFloorDepthMm = stockBottomZ === undefined ? undefined : -stockBottomZ;
   const breakthroughMm = opts.sacrificialBreakthroughMm ?? 0;
   const contourFloorDepthMm = stockFloorDepthMm === undefined ? undefined : stockFloorDepthMm + Math.max(0, breakthroughMm);
   const contourDepthMm = Math.min(
@@ -1547,7 +1548,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // link — and `regionIds`' own order-preserving filter over `pocketFeatures` then puts it ahead
   // of every pocket/through-hole sharing that same step. See the regression test proving this by
   // POSTED ORDER, not by trusting this push order alone, in `opsAcceptance959.spec.ts`.
-  const facingSkinMm = z0 - tree.top.z;
+  const facingSkinMm = -tree.top.z;
   // #959 (2026-11-05 ruling): facing is an OPERATOR OPTION, off by default.
   const hasFacing = (opts.facing ?? 'off') === 'on' && facingSkinMm > 1e-6;
   // #943 (2026-11-05 ruling): FACING LEVELS THE TOP, it does not skin it. The top is the HIGHEST
@@ -1560,13 +1561,13 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // `+spreadMm` above the zero and the target sits at `−stepDown`. No probes → the stated stock
   // top is the cut's start, stated on the plan.
   const facingSpreadMm = Math.max(0, opts.stockProbes?.spreadMm ?? 0);
-  const facingTopZ = rebase(z0) + facingSpreadMm;
+  const facingTopZ = facingSpreadMm;
   const facingDepthMm = Math.min(opts.stepDownMm, facingSkinMm);
   if (hasFacing) {
     refById.set('facing', {
       id: 'facing', kind: 'pocket', bounds: boundsOfPolygons(tree.contour.outline),
-      topZ: facingTopZ, bottomZ: rebase(z0) - facingDepthMm, obstacles: [],
-      regionClearanceZ: Math.max(0, rebase(tree.frame.partTop)) + 5,
+      topZ: facingTopZ, bottomZ: -facingDepthMm, obstacles: [],
+      regionClearanceZ: Math.max(0, tree.frame.partTop) + 5,
     });
   }
 
@@ -1587,7 +1588,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       // #988 — the BAND makes the feature shallower: the cutter is sized against the depth the
       // plan actually cuts, and the rest is stated as remainder (the rule itself is untouched).
       // #1003 — the stock bottom caps it as well; the shallower wins.
-      depthMm: capDepth(depthBandMm === undefined ? z0 - node.floorZ : Math.min(z0 - node.floorZ, depthBandMm)),
+      depthMm: capDepth(depthBandMm === undefined ? -node.floorZ : Math.min(-node.floorZ, depthBandMm)),
     });
   }
   for (const node of throughNodes) {
@@ -1596,7 +1597,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       kind: 'pocket',
       minOpeningMm: node.narrowest,
       cornerRadiusMm: node.narrowest / 2,
-      depthMm: capDepth(depthBandMm === undefined ? z0 - node.floorZ : Math.min(z0 - node.floorZ, depthBandMm)),
+      depthMm: capDepth(depthBandMm === undefined ? -node.floorZ : Math.min(-node.floorZ, depthBandMm)),
     });
   }
   // #987 — a skirt-closed relief's outline is synthetic: the kernel's own requirement for a
@@ -1804,7 +1805,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       return pocket({
         cutter,
         node: {
-          id: 'facing', floorZ: rebase(z0) - facingDepthMm, mouthZ: facingTopZ, open: false, through: false,
+          id: 'facing', floorZ: -facingDepthMm, mouthZ: facingTopZ, open: false, through: false,
           region: facingRegion, floors: [], islands: [], children: [], remainder: [], narrowest: Infinity,
         },
         region: ref,
@@ -1821,7 +1822,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         air: opts.air,
         rapid: opts.rapid,
         boolean: opts.boolean,
-        ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh, zOffsetMm: z0 } }),
+        ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh } }),
       });
     }
     const throughNode = throughById.get(id);
@@ -1837,7 +1838,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
           cutter,
           // `tree.top.z`, not the stock top — facing already clears the skin above it everywhere,
           // this hole's own footprint included (same reasoning as the root-pocket mouth, below).
-          node: { ...throughNode, mouthZ: rebase(tree.top.z), floorZ: rebase(throughNode.floorZ) },
+          node: { ...throughNode, mouthZ: tree.top.z, floorZ: throughNode.floorZ },
           region: ref,
           stepOverMm: diameter / 4,
           // #990 — this cutter's own row.
@@ -1851,7 +1852,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
           air: opts.air,
           rapid: opts.rapid,
           boolean: opts.boolean,
-          ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh, zOffsetMm: z0 } }),
+          ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh } }),
         });
       }
       return throughHole({
@@ -1859,7 +1860,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         id,
         outline: throughNode.region,
         region: ref,
-        depthMm: capDepth(depthBandMm === undefined ? z0 - throughNode.floorZ : Math.min(z0 - throughNode.floorZ, depthBandMm)),
+        depthMm: capDepth(depthBandMm === undefined ? -throughNode.floorZ : Math.min(-throughNode.floorZ, depthBandMm)),
         offset: opts.offset,
         params: cutParamsFor(cutter),
         rapid: opts.rapid,
@@ -1876,10 +1877,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     // land start below it"). `tree.top.z` equals the stock top when there is no skin, so this is
     // the stock top again in that case — not a separate branch. A nested node's mouth is
     // unaffected, its parent's own floor, as before.
-    const mouthZAbs = rootIds.has(node.id) ? tree.top.z : node.mouthZ;
+    const mouthZ = rootIds.has(node.id) ? tree.top.z : node.mouthZ;
     return pocket({
       cutter,
-      node: { ...node, mouthZ: rebase(mouthZAbs), floorZ: cutFloor(node.floorZ) },
+      node: { ...node, mouthZ, floorZ: cutFloor(node.floorZ) },
       region: ref,
       stepOverMm: diameter / 4,
       // #990 — this cutter's own row (a nested/coverage node can be assigned a rest flat, not
@@ -1899,7 +1900,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       rapid: opts.rapid,
       openOutline: node.open ? tree.contour.outline : undefined,
       boolean: opts.boolean,
-      ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh, zOffsetMm: z0 } }),
+      ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh } }),
     });
   };
 
@@ -2032,7 +2033,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       const mouthZAbsV = rootIds.has(node.id) ? tree.top.z : node.mouthZ;
       // #988 — the V is sized and floored on the band, like the flats: the leg must reach from the
       // MOUTH to the band floor (whichever is shallower), not the node's stated floor.
-      const flooredZAbsV = depthBandMm === undefined ? node.floorZ : Math.max(node.floorZ, tree.frame.stockTop - depthBandMm);
+      const flooredZAbsV = depthBandMm === undefined ? node.floorZ : Math.max(node.floorZ, -depthBandMm);
       const nodeDepthMm = mouthZAbsV - flooredZAbsV;
       for (const tool of opts.houseVs) {
         const cone = vCone(tool);
@@ -2055,8 +2056,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       for (const id of group.ids) {
         const node = pocketsById.get(id)!;
         const ref = refById.get(id)!;
-        const mouthZAbs = rootIds.has(node.id) ? tree.top.z : node.mouthZ;
-        const mouthZ = rebase(mouthZAbs);
+        const mouthZ = rootIds.has(node.id) ? tree.top.z : node.mouthZ;
         const floorZ = cutFloor(node.floorZ);
         // The V's OWN row where the caller resolves one (its rpm/feed must match that cutter's
         // other runs so the two merge into one program) — the plan's flat numbers otherwise.
@@ -2080,7 +2080,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
           air: opts.air,
           rapid: opts.rapid,
           boolean: opts.boolean,
-          ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh, zOffsetMm: z0 } }),
+          ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh } }),
         });
         vOps.push({ kind: 'pocket', region: ref, outcome });
         irs.push(outcome.ir);
@@ -2201,7 +2201,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   if (depthBandMm !== undefined) {
     const mm3 = (n: number): string => String(Math.round(n * 1000) / 1000);
     for (const node of [...pocketNodes, ...throughNodes]) {
-      const floor = rebase(node.floorZ);
+      const floor = node.floorZ;
       if (floor < -depthBandMm - 1e-9) {
         notes.push(
           `${node.id}: cut to −${mm3(depthBandMm)} of −${mm3(-floor)} — ${mm3(-floor - depthBandMm)} mm is left in the stock (the setup's depth band)`,
@@ -2578,10 +2578,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   // where it is silent (the ops then fall back to the stock top, 0 in this datum).
   let surfaceBins: TriangleBins | null = null;
   const binsForMask = (): TriangleBins => (surfaceBins ??= buildTriangleBins(opts.geometry.triangles));
-  const designTopAt = (x: number, y: number): number | null => {
-    const top = topSurfaceAt(binsForMask(), x, y);
-    return top === null ? null : top - z0;
-  };
+  const designTopAt = (x: number, y: number): number | null => topSurfaceAt(binsForMask(), x, y);
   const clGrid: PlanCurvedResult['clGrid'] = [];
   const noteGrid = (cutter: Tool, surface: ReturnType<typeof clSurface>): void => {
     const key = cutterKeyOf(cutter);
@@ -2593,18 +2590,13 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       maxSpacingMm: surface.maxSpacingMm,
     });
   };
-  // THE REVIEW'S FINDING (plan.ts:1033, rough.ts:241, finish.ts:164, chamfer.ts:86): the curved
-  // half took the tree's MESH-ABSOLUTE Z values straight through, while `planPocketsForTree`
-  // rebases every Z it hands an op by -stockTop. On a part recognised at a non-zero stockTop every
-  // curved and rim move posted that far off the stock — silently, because the IR was internally
-  // consistent (the red-first spec at stockTop 10 measured feeds at z = 15). ONE datum here too:
-  // IR Z 0 is the STOCK top, which the post's `probed-top-face` convention and safeZ/hopZ assume.
-  const z0 = tree.frame.stockTop;
-  const rebaseZ = (z: number): number => z - z0;
-  // The CL heights come from the MESH, so they are mesh-absolute too — the drop ANSWER is shifted
-  // here, at the plan's own datum, rather than teaching every op a stockTop it would each have to
-  // apply the same way. (The red-first spec's first fix moved feeds to z = 10.66: the region's Z
-  // was rebased but the surface the ball followed was not.)
+  // #1018 — ONE DATUM NOW, not shimmed here: `region.zTop`/`zBottom` and every `clSurface` CL
+  // height already come from `tree`/`opts.geometry`, both built from the door-shifted mesh
+  // (`shiftToStockTop`, in `planModelCam`'s own setup loop) — stock-top-relative from the start,
+  // the same datum IR Z 0 (the STOCK top) needs for the post's `probed-top-face` convention and
+  // safeZ/hopZ. Was shimmed per-value here (a per-call subtraction of this setup's own stock top)
+  // until the door made the shift unconditional and the shim redundant (the three real bugs that
+  // class cost — #1003, #1013, #1014 — are the twin-guard's own header).
   // #988 — THE SETUP'S DEPTH BAND over the CL surface: a query below −band answers the band, so
   // rows, levels, the finish and the dip follows never descend past it. The regions' own zBottom
   // is clamped below too, so `depthPasses` stops there as well. Absent → the surface unchanged.
@@ -2619,13 +2611,6 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
             return z === null ? null : Math.max(z, bandFloorZ);
           },
         };
-  const shiftSurface = (surface: ReturnType<typeof clSurface>): ReturnType<typeof clSurface> => ({
-    ...surface,
-    dropCutter: (x: number, y: number) => {
-      const z = surface.dropCutter(x, y);
-      return z === null ? null : z - z0;
-    },
-  });
   // #869/#966 — NO ROUGH AT ALL is a real state (ball alone): the sampling pitch that would have
   // come from the flat's own radius falls back to the ball's, so `clSurface`'s own sampling still
   // has a sensible step when there is no flat to size it against.
@@ -2668,19 +2653,18 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         `cam/model/plan: the remainder region "${region.id}" needs a cutter to finish and the call states no ball, no finish flat and no flat`,
       );
     }
-    // #1003 — THE STOCK BOTTOM IS THE FLOOR HERE TOO: `rebaseZ` already puts the region's bottom in
-    // the plan's own datum (stock top = 0), which is the same datum as `tree.frame.stockBottom`, so
-    // the clamp is a plain max. A goal taller than its stock must not finish below the blank.
-    // #1013 — the depth band composes with it; the shallower of the two wins.
-    // E's review of b74f653c6 (#1003): `rebaseZ` is relative to the STOCK TOP, `frame.stockBottom`
-    // is absolute — comparing them directly clamped a flipped setup (stockTop 30, stockBottom 0) to
-    // 0 and the region's rough/finish cut nothing. The floor must be rebased like the region is.
-    const planFloorZ = tree.frame.stockBottom === undefined ? undefined : rebaseZ(tree.frame.stockBottom);
+    // #1003 — THE STOCK BOTTOM IS THE FLOOR HERE TOO: a goal taller than its stock must not finish
+    // below the blank. #1013 — the depth band composes with it; the shallower of the two wins.
+    // #1018 — `tree.frame.stockBottom` is shifted by the door the same way `region.zBottom`
+    // already is (both stock-top-relative from construction now), so the clamp is a plain max —
+    // the class of bug E's review of b74f653c6 found (comparing a rebased value against an
+    // absolute one, dropping a flipped setup's rough/finish to nothing) cannot recur here.
+    const planFloorZ = tree.frame.stockBottom;
     const base = {
       ...region,
-      zTop: rebaseZ(region.zTop),
+      zTop: region.zTop,
       zBottom: Math.max(
-        rebaseZ(region.zBottom),
+        region.zBottom,
         bandFloorZ === null ? Number.NEGATIVE_INFINITY : bandFloorZ,
         planFloorZ === undefined ? Number.NEGATIVE_INFINITY : planFloorZ,
       ),
@@ -2719,7 +2703,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     if (flat !== undefined) {
       const flatCl: { surface?: ReturnType<typeof clSurface> } = {};
       const roughed = attempt('rough', flat, ref, () => {
-        const clFlat = floorSurface(shiftSurface(clSurface(opts.geometry, roughRegion, flat, cuts.stepOver)));
+        const clFlat = floorSurface(clSurface(opts.geometry, roughRegion, flat, cuts.stepOver));
         flatCl.surface = clFlat;
         noteGrid(flat, clFlat);
         return rough({
@@ -2781,7 +2765,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       // pass silently missing, not merely off-datum). Both go through the plan's one datum here:
       // the region is `base`, the surface is shifted like the flat's.
       attempt('rest', restFlat, ref, () => {
-        const restCl = floorSurface(shiftSurface(clSurface(opts.geometry, base, restFlat, cuts.stepOver)));
+        const restCl = floorSurface(clSurface(opts.geometry, base, restFlat, cuts.stepOver));
         restClSink.surface = restCl;
         noteGrid(restFlat, restCl);
         return rest({
@@ -2827,17 +2811,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // its eight footprint neighbours, as it did before cd5ec056. The skimming grid that change
     // also made for `skin()` is untouched — that one carries its own read (#970's 6b35d6e9).
     const finishBand = opts.finishScallopMm ?? opts.bandMm;
-    const flatAbs = (x: number, y: number): number | null => {
-      if (prevCl === undefined) return null;
-      const v = prevCl.dropCutter(x, y);
-      return v === null ? null : v + z0;
-    };
-    const restAbs = (x: number, y: number): number | null => {
-      const surface = restClSink.surface;
-      if (surface === undefined) return null;
-      const v = surface.dropCutter(x, y);
-      return v === null ? null : v + z0;
-    };
+    const flatCl = (x: number, y: number): number | null => (prevCl === undefined ? null : prevCl.dropCutter(x, y));
+    const restCl = (x: number, y: number): number | null => restClSink.surface?.dropCutter(x, y) ?? null;
     // #1014 — THE LEFTOVER IS WHAT THE ROUGH LEFT, NOT ITS CUTTER'S IDEAL CL. The old read took
     // the rough cutter's CL as the leftover; with a flat rough that over-estimates by R·tan θ and
     // the finish ran, but under the #982 no-flat fallback the rough cutter is the BALL, whose CL
@@ -2848,20 +2823,17 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // top when none) — the level the mask itself admits a cell to. The rest pass's CL stays min'd
     // in: a smaller FLAT's CL is an honest over-estimate of what a flat leaves, the same premise
     // that holds for a flat rough.
-    // THE DATUM IS THE PLAN'S OWN (E's review of e5b215423): `flatAbs` answers MESH-ABSOLUTE
-    // (`dropCutter` + z0) while `base.zTop/zBottom` are REBASED (stock top = 0) — the rough plans
-    // in the rebased datum. At stockTop 0 the two coincide, but on any other stock top (every
-    // flipped setup: the datum fixture's `{up:[0,0,-1], stockTop: 30}`) the CL sat z0 above the
-    // levels: no level was ever `>= cl + band`, the helper returned the rebased zTop, and the
-    // finish mask came out EMPTY — the flipped setup silently lost its finish op. Shift into the
-    // plan's datum and back, exactly as the rest stage's own comment (B's review of 0461df01)
-    // describes for this same mistake.
+    // #1018 — ONE DATUM NOW: `flatCl`/`restCl` and `base.zTop/zBottom` are BOTH stock-top-relative
+    // from the door, so `roughLeftAbove` takes the CL straight through — no shift into a second
+    // datum and back. (E's review of e5b215423 found this exact mismatch when `flatAbs` answered
+    // mesh-absolute while `base.zTop/zBottom` were already rebased; #1018 removes the second datum
+    // that mismatch needed in the first place.)
     const roughStepDown = flat === undefined ? 0 : paramsFor(flat).stepDown;
     const roughLeft = (x: number, y: number): number | null => {
-      const f = flatAbs(x, y);
-      const r = restAbs(x, y);
+      const f = flatCl(x, y);
+      const r = restCl(x, y);
       if (f === null) return r;
-      const left = roughLeftAbove(f - z0, base.zTop, base.zBottom, roughStepDown, opts.bandMm) + z0;
+      const left = roughLeftAbove(f, base.zTop, base.zBottom, roughStepDown, opts.bandMm);
       return r === null ? left : Math.min(left, r);
     };
     const leftoverAbove = (x: number, y: number): boolean => {
@@ -2902,7 +2874,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     let clBallCache: ReturnType<typeof clSurface> | undefined;
     const clBall = (): ReturnType<typeof clSurface> => {
       if (clBallCache === undefined) {
-        clBallCache = floorSurface(shiftSurface(clSurface(opts.geometry, roughRegion, finishCutter, cuts.stepOver)));
+        clBallCache = floorSurface(clSurface(opts.geometry, roughRegion, finishCutter, cuts.stepOver));
         noteGrid(finishCutter, clBallCache);
       }
       return clBallCache;
@@ -2969,20 +2941,20 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         const a = (d * Math.PI) / 4;
         restRing.push([Math.cos(a) * ballMaskRadiusMm, Math.sin(a) * ballMaskRadiusMm]);
       }
-      // The ball's own CL is this op's datum; the design's top is the mesh's absolute Z — the
-      // same +z0 conversion the flat's own leftover rule makes above.
+      // #1018 — the ball's own CL and the design's top are both stock-top-relative from the door;
+      // no shift needed to compare them.
       const afterBallLeftover = (x: number, y: number): boolean => {
         const b = clBall().dropCutter(x, y);
         if (b === null) return false;
         const design = topSurfaceAt(binsForMask(), x, y);
         if (design === null) return false;
-        return b + z0 - design > finishBand;
+        return b - design > finishBand;
       };
       attempt('rest', restBallTool, ref, () => finish({
         cutter: restBallTool,
         region: roughRegion,
         regionRef: roughRef,
-        clSurface: (restBallCl = shiftSurface(clSurface(opts.geometry, roughRegion, restBallTool, cuts.stepOver))),
+        clSurface: (restBallCl = clSurface(opts.geometry, roughRegion, restBallTool, cuts.stepOver)),
         kind: finishKind,
         mesh: opts.geometry.triangles,
         scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
@@ -3020,7 +2992,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       if (hasValley(prevClGate, { min: roughRef.bounds.min, max: roughRef.bounds.max }, vPitchGate)) {
       // The V's own CL and the previous (rest ball's) CL: the leftover depth at a crease is the
       // material between them — the number the crease rule's width test is stated at.
-      const vCl = shiftSurface(clSurface(opts.geometry, roughRegion, vTool, cuts.stepOver));
+      const vCl = clSurface(opts.geometry, roughRegion, vTool, cuts.stepOver);
       const prevCl = restBallCl ?? clBall();
       const vPitch = Math.min(0.5, Math.max(0.1, (cuttingDiameter(vTool) ?? 0) / 4));
       let creaseAdmitted = 0;
@@ -3086,7 +3058,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   // for no facing — the FLAT takes the skin, surface-following (C6's Makera T1 shape), capped at
   // its own step-down and gated by the shared slope parameter. Facing `'on'` keeps that stage
   // instead (the operator option).
-  const skinMm = z0 - tree.top.z;
+  const skinMm = -tree.top.z;
   if (skinMm > 1e-6 && (opts.facing ?? 'off') !== 'on' && opts.flat === undefined) {
     // #869/#966 — NO FLAT, NO SKIN: the skin is a flat's own surface-following pass (`skin()`
     // only a flat runs); a ball-alone goal states the skin standing rather than removing it with
@@ -3103,7 +3075,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const grownSkin = flatRadius > 0 ? opts.offset(tree.contour.outline, 2 * flatRadius) : [];
     const skinFootprint = grownSkin.length > 0 ? grownSkin : tree.contour.outline;
     const skinRegion: RemainderRegion = {
-      id: 'skin', footprint: skinFootprint, area: tree.contour.area, zTop: z0, zBottom: tree.top.z,
+      id: 'skin', footprint: skinFootprint, area: tree.contour.area, zTop: 0, zBottom: tree.top.z,
       triangles: new Uint32Array(), slopeDeg: [0, 0], slopeMedianDeg: 0, in: 'top',
     };
     const skinRef = regionRefOf('skin', 'curved', skinFootprint, 0, -skinMm);
@@ -3112,7 +3084,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // starting at that mouth, never removes) is taken here. The first attempt excluded the pocket
     // footprints and left that skin standing: the tray's coverage fell 0.77 %.
     attempt('skin', flat, skinRef, () => {
-      const skinCl = shiftSurface(clSurface(opts.geometry, skinRegion, flat, cuts.stepOver));
+      const skinCl = clSurface(opts.geometry, skinRegion, flat, cuts.stepOver);
       return skin({
         cutter: flat,
         regionRef: skinRef,
@@ -3166,8 +3138,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     for (const rim of tree.rims) {
       try {
         // THE MANAGER'S RULING from the tray's 0.5 mm cell: a rim whose air side is COVERED is not
-        // broken — see `rimExposedFromAbove` for the measurement that put this here. The test reads
-        // the mesh, so it uses the rim's MESH-ABSOLUTE z, before the rebase below.
+        // broken — see `rimExposedFromAbove` for the measurement that put this here. `rimBins`
+        // and `rim.z` are both stock-top-relative from the door (#1018), so the test reads them
+        // straight through.
         if (!rimExposedFromAbove(rimBins!, rim)) {
           notes.push(
             `rim "${rim.id}" not broken: covered from above (its air side does not drop by 0.2 mm — the edge lies under the land)`,
@@ -3207,12 +3180,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           rimSkips.set('open-loop', skip);
           continue;
         }
-        // The rim's own Z is mesh-absolute too — rebased before the op sizes its bevel from it.
-        const rebasedRim = { ...rim, z: rebaseZ(rim.z) };
-        const ref = regionRefOf(rim.id, 'rim', [[...rim.polyline]], rebasedRim.z, rebasedRim.z);
+        // #1018 — the rim's own Z already comes off the door-shifted tree: stock-top-relative
+        // from the start, no rebase needed here.
+        const ref = regionRefOf(rim.id, 'rim', [[...rim.polyline]], rim.z, rim.z);
         const out = chamfer({
           cutter: vbit,
-          rim: rebasedRim,
+          rim,
           region: ref,
           edgeBreak: opts.edgeBreak,
           offset: opts.offset,

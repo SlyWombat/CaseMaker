@@ -212,6 +212,56 @@ export function rotatedGeometryFor(geometry: FeatureSource, frame: SetupFrame): 
   return { triangles, ...(geometry.faceId === undefined ? {} : { faceId: geometry.faceId }) };
 }
 
+/**
+ * #1018 — THE DOOR: ONE TRANSLATE, PER SETUP, BEFORE THE TREE IS EVER BUILT. `toSetupFrame`'s own
+ * rotation carries no translation, so `recogniseFeatures`/`rotatedGeometryFor` hand back raw
+ * mesh-absolute Z — the datum every downstream site in `plan.ts` used to cross by hand, one
+ * per-site offset shim each (the twin-guard's own header names the three real bugs that class
+ * cost in one day: #1003, #1013, #1014). Shifting the mesh by THIS setup's own `−stockTop` here,
+ * once, before `recogniseFeatures`/`rotatedGeometryFor` ever see it, makes every Z the tree, the
+ * curved pipeline and `topSurfaceAt` read stock-top-relative by construction — the SAME shift
+ * `setupDatumGuard.spec.ts`'s own `twinOf` already proves congruent for a real setup, generalised
+ * from a test's oracle into the real path. `frameForFace` keeps producing the real frame (its
+ * `stockTop` is still read here, and at `oppositeSurfaceSafeDepthMm`'s own cross-setup comparison,
+ * which bridges two setups' real frames on purpose and is not part of this shim class); nothing
+ * else in the planner reads `frame.stockTop` once every downstream shim this makes redundant is
+ * deleted — including a direct `recogniseFeatures`/`planPocketsForTree` caller below `plan.ts`'s
+ * own setup loop (a unit test building its own tree at a stated non-zero stock top), which now
+ * has to shift here too: `planPocketsForTree` no longer rebases on its own (#1018's whole point —
+ * ONE place does the shift, not one per caller).
+ *
+ * Cost line (#1018 item 4): one O(n) pass over the mesh's own positions, once per setup —
+ * `recogniseFeatures`/`buildTriangleBins` already walk every position at least once to rotate and
+ * classify it, so this adds no new per-point call, only one more add folded into work already
+ * walking the mesh. Every shim it lets `plan.ts` delete is a subtraction removed from a per-op
+ * path instead; the plan's own cost line does not move.
+ */
+export function shiftToStockTop(geometry: FeatureSource, frame: SetupFrame): { geometry: FeatureSource; frame: SetupFrame } {
+  if (frame.stockTop === 0) return { geometry, frame };
+  // Pre-rotation shift, sign per `up[2]` — exactly `setupDatumGuard.spec.ts`'s own `twinOf`: a
+  // half turn about X (toSetupFrame's up = [0, 0, -1] case) negates Z, so a pre-rotation shift of
+  // `+stockTop` becomes `-stockTop` once rotated; the identity case (up = [0, 0, 1]) takes
+  // `-stockTop` directly. Either way the ROTATED mesh lands shifted by exactly `-stockTop`.
+  const dz = (frame.up[2] ?? 1) < 0 ? frame.stockTop : -frame.stockTop;
+  const src = geometry.triangles;
+  const positions = Float32Array.from(src.positions);
+  for (let i = 2; i < positions.length; i += 3) positions[i] = positions[i]! + dz;
+  const bbox = src.bbox;
+  const triangles: ParsedMesh = {
+    ...src,
+    positions,
+    bbox: { min: [bbox.min[0], bbox.min[1], bbox.min[2] + dz], max: [bbox.max[0], bbox.max[1], bbox.max[2] + dz] },
+  };
+  return {
+    geometry: { ...geometry, triangles },
+    frame: {
+      up: frame.up,
+      stockTop: 0,
+      ...(frame.stockBottom === undefined ? {} : { stockBottom: frame.stockBottom - frame.stockTop }),
+    },
+  };
+}
+
 /*
  * #965 REGISTRATION — the vise-flip setup's origin, computed from locating features, not
  * assumed from the vise alone.

@@ -30,6 +30,7 @@ import { tl, type ManifoldInstance } from './helpers/manifoldExec';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
 import { recogniseFeatures, type FeatureTree } from '@/engine/cnc/cam/model/features';
 import { planPocketsForTree, type PlanPocketsOptions, type PlanPocketsResult } from '@/engine/cnc/cam/model/plan';
+import { shiftToStockTop } from '@/engine/cnc/cam/model/setups';
 import type { RapidEstimate } from '@/engine/cnc/cam/ir';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import type { ParsedMesh } from '@/engine/import/stlParser';
@@ -87,8 +88,17 @@ const rapid: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 1
 const offset = makeClipperOffset(tl);
 const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
 
-function treeOf(): FeatureTree {
-  return recogniseFeatures({ triangles: parsed(buildTableSolid()) }, { up: [0, 0, 1], stockTop: SLAB_TOP_Z, stockBottom: 0 }, tl);
+// #1018 — every real caller shifts the mesh to this setup's own `stockTop` at the door
+// (`shiftToStockTop`, `plan.ts`'s own setup loop) before `planPocketsForTree`/its `shadowMesh`
+// ever see it; this unit test, calling `planPocketsForTree` directly below that loop, does the
+// same shift itself. `doorGeometry` is shared so a tree AND the shadow mesh passed alongside it
+// agree on the one datum.
+function doorGeometry(mesh: ParsedMesh, stockTop: number): ParsedMesh {
+  return shiftToStockTop({ triangles: mesh }, { up: [0, 0, 1], stockTop, stockBottom: 0 }).geometry.triangles;
+}
+function treeOf(mesh: ParsedMesh, stockTop: number): FeatureTree {
+  const shifted = shiftToStockTop({ triangles: mesh }, { up: [0, 0, 1], stockTop, stockBottom: 0 });
+  return recogniseFeatures(shifted.geometry, shifted.frame, tl);
 }
 
 function basePlanOptions(houseFlats: Tool[]): Omit<PlanPocketsOptions, 'shadowMesh'> {
@@ -107,11 +117,12 @@ function basePlanOptions(houseFlats: Tool[]): Omit<PlanPocketsOptions, 'shadowMe
 }
 
 /**
- * Every FEED move's own absolute Z (undoing `planPocketsForTree`'s own `-stockTop` rebase —
- * that file's header note) that lies strictly inside the slab's own band (`LEG_TOP_Z`,
- * `SLAB_TOP_Z`) is a move cutting straight through solid slab material — #966's exact finding.
- * `HOP_Z`/`safeZ` retracts sit well above `SLAB_TOP_Z` already and are never flagged by this
- * (they are rapids, never `feed`, and this only inspects `feed` kind moves).
+ * Every FEED move's own absolute Z (undoing the door's own `-stockTop` shift, #1018 — `stockTop`
+ * here is the shift THIS test applied building its tree, not `tree.frame.stockTop`, which reads
+ * 0 once the tree is built through the door) that lies strictly inside the slab's own band
+ * (`LEG_TOP_Z`, `SLAB_TOP_Z`) is a move cutting straight through solid slab material — #966's
+ * exact finding. `HOP_Z`/`safeZ` retracts sit well above `SLAB_TOP_Z` already and are never
+ * flagged by this (they are rapids, never `feed`, and this only inspects `feed` kind moves).
  */
 function feedsThroughSlab(result: PlanPocketsResult, stockTop: number): string[] {
   const bad: string[] = [];
@@ -137,22 +148,22 @@ function feedsThroughSlab(result: PlanPocketsResult, stockTop: number): string[]
 
 describe('#966 the table — a pocket under an overhang the node itself never saw', () => {
   it('sanity: recogniseFeatures finds exactly the one inter-leg pocket, floor at the baseplate top', () => {
-    const tree = treeOf();
+    const tree = treeOf(parsed(buildTableSolid()), SLAB_TOP_Z);
     expect(tree.pockets).toHaveLength(1);
     const node = tree.pockets[0]!;
-    expect(node.floorZ).toBeCloseTo(BASE_Z, 3);
+    expect(node.floorZ).toBeCloseTo(BASE_Z - SLAB_TOP_Z, 3);
     expect(node.through).toBe(false);
     // `mouthZ` is the part's own top (the slab's) — never corrected down to the slab's own
     // underside, because that underside has no floor patch of its own (`tree.ts`'s own parent-
     // finding loop only ever fires for a sibling floor-patch node) — this IS the root cause,
     // confirmed directly off the recognised tree rather than assumed from the issue's description.
-    expect(node.mouthZ).toBeCloseTo(SLAB_TOP_Z, 3);
+    expect(node.mouthZ).toBeCloseTo(0, 3);
   });
 
   it.fails('red-first (pre-#966 call shape, no shadow check): plans a cut straight through the slab', () => {
-    const tree = treeOf();
+    const tree = treeOf(parsed(buildTableSolid()), SLAB_TOP_Z);
     const result = planPocketsForTree(tree, basePlanOptions([flat(4, 1)]));
-    const bad = feedsThroughSlab(result, tree.frame.stockTop);
+    const bad = feedsThroughSlab(result, SLAB_TOP_Z);
     // THE RED ASSERTION — what #966 actually requires — fails today: at least one feed move
     // exists inside the slab's own band, because `node.region`'s one static footprint is pocketed
     // unmodified from the slab's own top straight down to the baseplate's floor.
@@ -160,10 +171,10 @@ describe('#966 the table — a pocket under an overhang the node itself never sa
   });
 
   it('fixed: with shadowMesh wired (the real planModelCam call shape), no move cuts into the slab', () => {
-    const tree = treeOf();
     const mesh = parsed(buildTableSolid());
-    const result = planPocketsForTree(tree, { ...basePlanOptions([flat(4, 1)]), shadowMesh: mesh });
-    const bad = feedsThroughSlab(result, tree.frame.stockTop);
+    const tree = treeOf(mesh, SLAB_TOP_Z);
+    const result = planPocketsForTree(tree, { ...basePlanOptions([flat(4, 1)]), shadowMesh: doorGeometry(mesh, SLAB_TOP_Z) });
+    const bad = feedsThroughSlab(result, SLAB_TOP_Z);
     // THE GREEN ASSERTION: not one feed move lies over the slab's own real footprint at a Z
     // inside the slab's own band — the whole node's true interior sits under the slab everywhere
     // (the slab's own footprint matches the baseplate's, by this fixture's own construction), so
@@ -184,9 +195,9 @@ describe('#966 the table — a pocket under an overhang the node itself never sa
     const legs = [legAt(INSET, INSET), legAt(FOOT - INSET - LEG, INSET), legAt(INSET, FOOT - INSET - LEG), legAt(FOOT - INSET - LEG, FOOT - INSET - LEG)];
     const openSolid = legs.reduce((acc, leg) => acc.add(leg), baseplate);
     const openMesh = parsed(openSolid);
-    const tree = recogniseFeatures({ triangles: openMesh }, { up: [0, 0, 1], stockTop: LEG_TOP_Z, stockBottom: 0 }, tl);
+    const tree = treeOf(openMesh, LEG_TOP_Z);
     expect(tree.pockets).toHaveLength(1);
-    const result = planPocketsForTree(tree, { ...basePlanOptions([flat(4, 1)]), shadowMesh: openMesh });
+    const result = planPocketsForTree(tree, { ...basePlanOptions([flat(4, 1)]), shadowMesh: doorGeometry(openMesh, LEG_TOP_Z) });
     const pocketOps = result.ops.filter((op) => op.kind === 'pocket');
     const totalMoves = pocketOps.reduce((n, op) => n + op.outcome.ir.operations.reduce((m, o) => m + o.moves.length, 0), 0);
     expect(totalMoves).toBeGreaterThan(0);
@@ -208,8 +219,8 @@ describe('#966 the table — a pocket under an overhang the node itself never sa
     const legs = [legAt(INSET, INSET), legAt(FOOT - INSET - LEG, INSET), legAt(INSET, FOOT - INSET - LEG), legAt(FOOT - INSET - LEG, FOOT - INSET - LEG)];
     const openSolid = legs.reduce((acc, leg) => acc.add(leg), baseplate);
     const openMesh = parsed(openSolid);
-    const tree = recogniseFeatures({ triangles: openMesh }, { up: [0, 0, 1], stockTop: LEG_TOP_Z, stockBottom: 0 }, tl);
-    const result = planPocketsForTree(tree, { ...basePlanOptions([flat(4, 1)]), shadowMesh: openMesh });
+    const tree = treeOf(openMesh, LEG_TOP_Z);
+    const result = planPocketsForTree(tree, { ...basePlanOptions([flat(4, 1)]), shadowMesh: doorGeometry(openMesh, LEG_TOP_Z) });
     const pocketOps = result.ops.filter((op) => op.kind === 'pocket');
     // The dead centre of the gap (local (20, 20) — equidistant from all four legs, no leg there at
     // any height) must be swept at the TRUE floor Z, not merely reached SOMEWHERE on the boundary:
@@ -224,7 +235,7 @@ describe('#966 the table — a pocket under an overhang the node itself never sa
       for (const operation of op.outcome.ir.operations) {
         for (const m of operation.moves) {
           if (m.kind !== 'feed') continue;
-          const absZ = m.z + tree.frame.stockTop;
+          const absZ = m.z + LEG_TOP_Z;
           if (Math.abs(absZ - BASE_Z) > 1e-3) continue;
           const d = Math.hypot(m.x - 20, m.y - 20);
           nearestAtFloor = Math.min(nearestAtFloor, d);
@@ -255,11 +266,11 @@ describe('#966 the table — a pocket under an overhang the node itself never sa
     const cavity = tl.Manifold.hull(points);
     const solid = block.subtract(cavity);
     const mesh = parsed(solid);
-    const tree = recogniseFeatures({ triangles: mesh }, { up: [0, 0, 1], stockTop: SLAB_TOP_Z, stockBottom: 0 }, tl);
+    const tree = treeOf(mesh, SLAB_TOP_Z);
     expect(tree.pockets).toHaveLength(1);
     const node = tree.pockets[0]!;
-    expect(node.floorZ).toBeCloseTo(BASE_Z, 3);
-    const result = planPocketsForTree(tree, { ...basePlanOptions([flat(4, 1)]), shadowMesh: mesh });
+    expect(node.floorZ).toBeCloseTo(BASE_Z - SLAB_TOP_Z, 3);
+    const result = planPocketsForTree(tree, { ...basePlanOptions([flat(4, 1)]), shadowMesh: doorGeometry(mesh, SLAB_TOP_Z) });
     const pocketOps = result.ops.filter((op) => op.kind === 'pocket');
     const toolRadius = (cuttingDiameter(flat(4, 1)) ?? 0) / 2;
     let nearestAtFloor = Infinity;
@@ -267,7 +278,7 @@ describe('#966 the table — a pocket under an overhang the node itself never sa
       for (const operation of op.outcome.ir.operations) {
         for (const m of operation.moves) {
           if (m.kind !== 'feed') continue;
-          const absZ = m.z + tree.frame.stockTop;
+          const absZ = m.z + SLAB_TOP_Z;
           if (Math.abs(absZ - BASE_Z) > 1e-3) continue;
           nearestAtFloor = Math.min(nearestAtFloor, Math.hypot(m.x - cx, m.y - cy));
         }
