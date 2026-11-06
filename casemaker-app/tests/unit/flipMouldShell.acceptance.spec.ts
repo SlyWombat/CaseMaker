@@ -522,6 +522,26 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     const ref = setupPinReference(job.setups![1]!, { x: BLANK.length, y: BLANK.width }, 1);
     expect(ref?.confirm).not.toBeNull();
     expect(ref!.confirm!.options[ref!.confirm!.correct]).toBe('the pin 4 mm from the left edge');
+  }, 600_000);
+
+  const wallIt = USE_MODEL_CAM_ENGINE ? it.fails : it;
+  wallIt('the two sides leave the wall in band — #1005 mould mode owes this on the model engine', async () => {
+    // #1005 — THE WALL. The two sides must leave the shell's wall in band everywhere. On the
+    // MODEL ENGINE this is RED today and pinned as `it.fails` naming #1005: the input carries no
+    // `goalMode: 'mold'`, so side 2's cavity is cut ~3.25 mm shallow (measured wall map of the
+    // both-sides job: 57,492 cells thinner than W, 31,106 thicker, 5,542 in band; probe (0,0)
+    // 5.76 mm against the old path's 2.51). When #1005 rebases onto 1006-sides this test passes,
+    // `it.fails` goes red, and the pin must be flipped — that is the enforcement, not a waiver.
+    const job = oneJob();
+    const out = await engraveGenerate(tl, job, BALL_TOOL, [], null, undefined, {});
+    const frames = jobSetups(job).map((s) => orient(s.orientation.top, s.mount, STOCK));
+    const topFrame = frames[0]!;
+    const flipFrame = frames[1]!;
+    expect(topFrame.ok && flipFrame.ok).toBe(true);
+    if (!topFrame.ok || !flipFrame.ok) return;
+    const top: CarrySetup = { rotation: topFrame.matrix, bounds: BOUNDS };
+    const flip: CarrySetup = { rotation: flipFrame.matrix, bounds: BOUNDS };
+    const map = carryPointBetweenSetups(top, flip);
 
     // THE SWEEPS, on the app's own machinery: side 1 first; side 2 seeded with the stock side 1
     // left, carried into its frame by the app's maps.
