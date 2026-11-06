@@ -253,14 +253,26 @@ export function makeClipperUnion(tl: ManifoldToplevel): BooleanFn {
   return (a, b) => {
     if (a.length === 0) return b;
     if (b.length === 0) return a;
+    // #1024 (E's review) — EACH HANDLE IS FREED ON BOTH PATHS: a throw from the second conversion,
+    // the boolean or `toPolygons` must not leak what exists by then. The nested-finally shape is
+    // `engraveGenerate.ts`'s `intersectionArea`'s, with the second conversion inside the first
+    // handle's try (it can throw before `cb` is assigned).
     const ca = CS.ofPolygons(a);
-    const cb = CS.ofPolygons(b);
-    const out = CS.union(ca, cb);
-    const polygons = out.toPolygons() as Polygons;
-    out.delete();
-    ca.delete();
-    cb.delete();
-    return polygons;
+    try {
+      const cb = CS.ofPolygons(b);
+      try {
+        const out = CS.union(ca, cb);
+        try {
+          return out.toPolygons() as Polygons;
+        } finally {
+          out.delete();
+        }
+      } finally {
+        cb.delete();
+      }
+    } finally {
+      ca.delete();
+    }
   };
 }
 
@@ -269,14 +281,23 @@ export function makeClipperSubtract(tl: ManifoldToplevel): BooleanFn {
   const CS = tl.CrossSection;
   return (a, b) => {
     if (a.length === 0 || b.length === 0) return a;
+    // See {@link makeClipperUnion}: every handle freed on the throw path too.
     const ca = CS.ofPolygons(a);
-    const cb = CS.ofPolygons(b);
-    const out = ca.subtract(cb);
-    const polygons = out.toPolygons() as Polygons;
-    out.delete();
-    ca.delete();
-    cb.delete();
-    return polygons;
+    try {
+      const cb = CS.ofPolygons(b);
+      try {
+        const out = ca.subtract(cb);
+        try {
+          return out.toPolygons() as Polygons;
+        } finally {
+          out.delete();
+        }
+      } finally {
+        cb.delete();
+      }
+    } finally {
+      ca.delete();
+    }
   };
 }
 
