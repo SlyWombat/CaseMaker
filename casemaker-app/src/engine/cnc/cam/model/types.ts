@@ -67,6 +67,10 @@ export type PlanFindingCode =
   | 'goal-relief-edge'
   | 'goal-finish-mode'
   | 'goal-no-edge-break'
+  // #1023 — the finish's own leftover: `goal-rest-pass` is the info form when a smaller owned
+  // ball ran, `goal-rest-uncut` the warning/info form when nothing owned takes what it left.
+  | 'goal-rest-pass'
+  | 'goal-rest-uncut'
   | 'goal-plan-tradeoff'
   // #1012 — the rim stage's bevel was clamped to the V's one-pass reach (the 2.5D path's own code).
   | 'chamfer-too-wide'

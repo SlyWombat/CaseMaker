@@ -7,11 +7,11 @@
  * residual over the notch drops when the ⌀2 is owned, and the rank names the ⌀2 — rather than
  * the old program layout.
  *
- * Still OPEN on the missing statement (#1023): with no smaller ball owned, the run must STATE
- * what the finish left and the ball that would reach it, and must state it as information when
- * the shop's visibility thresholds hide it. The model engine emits no such statement today (the
- * rank note is gated on more than one candidate, `cam/model/plan.ts:902`, and `goal-rest-uncut`
- * is type-only in `engrave/jobSetup.ts`), so those two pins are `it.fails` until #1023 lands.
+ * #1023 — THE LEFTOVER STATEMENT AND THE SHOP'S VISIBILITY THRESHOLDS ARE NOW ON THE MODEL PATH.
+ * The run states what the finish left (mm, share, cells, the thresholds) and, when the catalogue
+ * measured a smaller ball, names it with its own measured leftover and cycle. With no smaller ball
+ * owned the statement is a warning past the thresholds and information under them; the two pins
+ * below cover both.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -92,7 +92,8 @@ function notchedPlate(): string {
 }
 
 const BALL6: Tool = { ...flatEndMill(6), name: '6 mm ball nose', shape: 'ball', typeText: 'Ball', diameter: 6, cornerRadius: 3 };
-const BALL2: Tool = { ...flatEndMill(2), name: '2 mm ball nose', shape: 'ball', typeText: 'Ball', diameter: 2, cornerRadius: 1 };
+// A STATED 10 mm FLUTE so the ⌀2 reaches the 4.5 mm notch. With no flute stated, `finishBallCandidates` keeps only one of the unknown-reach balls (house order decides), and the ideal plan would never measure the ⌀2.
+const BALL2: Tool = { ...flatEndMill(2), name: '2 mm ball nose', shape: 'ball', typeText: 'Ball', diameter: 2, cornerRadius: 1, fluteLength: 10 };
 const REST_KEY = 'user:ball-2-847';
 const REST_ENTRY: ToolLibraryEntry = { key: REST_KEY, tool: BALL2, provenance: 'test' };
 // The shop's own feeds table covering both balls: the compiled starting rows stop at 3.2 mm, and
@@ -154,17 +155,6 @@ function feedCuts(nc: string): { x: number; z: number }[] {
   return cuts;
 }
 
-/** Every sentence the run states to the operator: findings, the plan's notes and its statements. */
-function runStatements(out: Awaited<ReturnType<typeof generateGoalProgram>>): string[] {
-  return [
-    ...out.findings.map((f) => f.message),
-    ...(out.plan?.perSetup.flatMap((s) => [
-      ...s.notes,
-      ...s.statements.map((st) => st.text),
-    ]) ?? []),
-  ];
-}
-
 describe('#847 the goal follows its finish with a rest pass', () => {
   it('cuts a ⌀2 rest program over the notch, and the residual drops', async () => {
     const target = goalTarget();
@@ -180,6 +170,13 @@ describe('#847 the goal follows its finish with a rest pass', () => {
     const rank = out.plan!.perSetup[0]!.notes.find((n) => n.startsWith('ball rank:'));
     expect(rank).toContain('⌀2.00 mm');
     expect(rank).toContain('Chosen: 2 mm ball nose');
+
+    // #1023 — what the ⌀2's own finish still leaves, in the "pass" form: 0.896 mm over 6.5 %,
+    // information (a smaller owned ball ran; the rank note above is unchanged).
+    const rest = out.findings.find((f) => f.code === 'goal-rest-pass');
+    expect(rest?.severity).toBe('info');
+    expect(rest?.message).toContain('0.90 mm');
+    expect(rest?.message).toContain('6.5 %');
 
     // The residual over the notch drops. The plan's own stamp leaves 0.896 mm above the goal
     // with the ⌀2 owned, against 2.424 mm for the ⌀6-alone plan (measured 2026-11-06).
@@ -209,40 +206,62 @@ describe('#847 the goal follows its finish with a rest pass', () => {
     expect(outcome!.leftoverAboveMm).toBeGreaterThan(2.3);
   }, 180_000);
 
-  // #1023 — the missing rest statement. Flip this pin to `it` when #1023 lands.
-  it.fails('with no smaller ball owned, a statement names what the finish left', async () => {
+  it('with no smaller ball owned, the finish posts and the run states what it left', async () => {
     const target = goalTarget();
-    const out = await generateGoalProgram(goalJob(target), target, BALL6, null, { shop: { tools: [], feeds: SHOP_FEEDS } });
+    // The catalogue hands the engine the ⌀2 it does not own, so the statement names the ball that
+    // would take the leftover with the ideal plan's measured numbers (#1023).
+    const out = await generateGoalProgram(goalJob(target), target, BALL6, null, {
+      shop: { tools: [], feeds: SHOP_FEEDS },
+      catalogueTools: [BALL2],
+    });
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
-    const stated = runStatements(out);
-    expect(
-      stated.some((m) => /leaves .*over/i.test(m) || /would reach it/i.test(m)),
-      `no statement names the leftover; the run stated: ${stated.join(' | ')}`,
-    ).toBe(true);
+    // One ⌀6 program — rough, finish and pencil — and no invented rest.
+    expect(out.programs).toHaveLength(1);
+    expect(out.programs[0]!.toolKey).toBe(BALL6.name);
+    // Its outcome is the comparison the statement names: 78.61 % of the goal, 2.424 mm left
+    // standing at the worst cell (measured 2026-11-06).
+    const outcome = out.plan!.outcome;
+    expect(outcome).toBeDefined();
+    expect(outcome!.coverage).toBeGreaterThan(0.7);
+    expect(outcome!.leftoverAboveMm).toBeGreaterThan(2.3);
+
+    // #1023 — the one leftover statement: warning (past the 0.10 mm / 2 % fallback), numbers
+    // first, the ball that would take it last, with its measured leftover and cycle delta.
+    const note = out.findings.find((f) => f.code === 'goal-rest-uncut');
+    expect(note?.severity).toBe('warning');
+    expect(note?.message).toContain('2.42 mm');
+    expect(note?.message).toContain('21.4 %');
+    expect(note?.message).toContain('0.10 mm');
+    expect(note?.message).toContain('2 %');
+    expect(note?.message).toContain('2 mm ball nose');
+    expect(note?.message).toMatch(/\+\d+ s of cycle \(measured\)/);
   }, 180_000);
 
-  // #1023 — the same issue; the shop's visibility thresholds decide warning against info.
-  it.fails('states the leftover as information when the shop sets high visibility thresholds', async () => {
+  it('states the leftover as information when the shop thresholds hide it', async () => {
     const target = goalTarget();
-    // The same part with the whole blank cleared: the leftover (the notch and the fillet where
-    // the ball meets the part's wall) is then a small share of the far more material the goal
-    // removes. Against a shop whose thresholds sit at the tops of their own rules (a 5 mm depth,
-    // a 50 % share), the leftover holds under both, so the run states it and its depth as
-    // information rather than a warning.
-    target.surface = { gridPitchMm: 0.5, clearAround: 'whole' };
-    const quiet = {
-      tools: [] as ToolLibraryEntry[],
-      feeds: SHOP_FEEDS,
-      rest: {
-        overlap: { value: 0.5, source: 'chosen' as const },
-        thirdToolPct: { value: 50, source: 'chosen' as const },
-        visibleDepth: { value: 5, source: 'chosen' as const },
+    const loud = await generateGoalProgram(goalJob(target), target, BALL6, null, {
+      shop: { tools: [], feeds: SHOP_FEEDS },
+      catalogueTools: [BALL2],
+    });
+    const quiet = await generateGoalProgram(goalJob(target), target, BALL6, null, {
+      shop: {
+        tools: [] as ToolLibraryEntry[],
+        feeds: SHOP_FEEDS,
+        rest: {
+          overlap: { value: 0.5, source: 'chosen' as const },
+          thirdToolPct: { value: 30, source: 'chosen' as const },
+          visibleDepth: { value: 3, source: 'chosen' as const },
+        },
       },
-    };
-    const out = await generateGoalProgram(goalJob(target), target, BALL6, null, { shop: quiet });
-    expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
-    const note = out.findings.find((f) => /leaves/i.test(f.message));
+      catalogueTools: [BALL2],
+    });
+    expect(quiet.ok, quiet.errors?.map((e) => e.message).join('; ')).toBe(true);
+    const note = quiet.findings.find((f) => f.code === 'goal-rest-uncut');
     expect(note?.severity).toBe('info');
-    expect(note?.message).toContain('under the 5 mm');
+    expect(note?.message).toContain('2.42 mm');
+    expect(note?.message).toContain('21.4 %');
+    expect(note?.message).toContain('under the 3.00 mm and 30 %');
+    // Statements only: the posted program is byte-identical to the loud run's.
+    expect(quiet.programs[0]!.nc).toBe(loud.programs[0]!.nc);
   }, 180_000);
 });

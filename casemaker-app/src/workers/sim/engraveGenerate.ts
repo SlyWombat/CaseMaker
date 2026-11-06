@@ -5171,6 +5171,14 @@ export async function buildModelPlanInputForGoal(
     // Supplying it ALSO turns on the planner's coverage-first rank — the rank every acceptance
     // measurement has run with since #961 — so production plans the way the cards were measured.
     goal: sampleGoalHeightfield(goal, { pitchMm: 0.1, stockTopZ: 0 }),
+    // #1023 — the shop's leftover-visibility thresholds reach the plan, with provenance. The
+    // location lives on the main thread, so the caller resolves them (the same snapshot the old
+    // rest pair reads); absent is the labelled fallback, never a compiled-in "shop" number.
+    restVisibility: {
+      depthMm: shop.rest?.visibleDepth.value ?? REST_MACHINING_FALLBACK.visibleDepth,
+      share: (shop.rest?.thirdToolPct.value ?? REST_MACHINING_FALLBACK.thirdToolFraction * 100) / 100,
+      source: shop.rest?.visibleDepth.source ?? REST_MACHINING_FALLBACK.source,
+    },
   };
 }
 
