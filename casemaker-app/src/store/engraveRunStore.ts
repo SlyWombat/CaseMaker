@@ -472,6 +472,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
   // arguments the run used. Held here, beside the run hold, so the press needs no re-plumbing of
   // the job through the panel.
   let idealLastRequest: (() => void) | null = null;
+  // The EPOCH a run belongs to: incremented when a run starts, captured by the ideal it kicks off.
+  // `runHold` is the wrong token here — the run's own `finally` clears it when the program posts,
+  // long before the ideal (minutes later) resolves, so the ideal would always be dropped.
+  let runEpoch = 0;
 
   async function run(surface: SurfacePostFit | null = null, opts: { simulateOnly?: boolean } = {}): Promise<void> {
     // #893 — SIMULATE ONLY: the program is already this job's, so the run starts at the sweep.
@@ -727,15 +731,15 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         // ideal from run A could resolve after run B started and write A's tradeoff under B's
         // program. The store's own run token is the guard: the result lands only while the run that
         // asked for it still owns the hold.
-        const idealToken = runHold;
+        const idealEpoch = runEpoch;
         set({ idealPlan: { status: 'comparing', tradeoff: null } });
         void idealClient
           .engravePlanIdeal!(idealJob, idealJob.targetObject!, idealTool, idealShop, getTools().map((entry) => entry.tool))
           .then((answer) => {
-            if (runHold === idealToken) set({ idealPlan: { status: 'ready', tradeoff: answer.tradeoff } });
+            if (runEpoch === idealEpoch) set({ idealPlan: { status: 'ready', tradeoff: answer.tradeoff } });
           })
           .catch(() => {
-            if (runHold === idealToken) set({ idealPlan: { status: 'idle', tradeoff: null } });
+            if (runEpoch === idealEpoch) set({ idealPlan: { status: 'idle', tradeoff: null } });
           });
       };
       // The press repeats the SAME computation on demand (E's review, item 3) — never just the
@@ -1137,6 +1141,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     generate: async (surface?: SurfacePostFit | null) => {
       const token = Symbol('generate');
       runHold = token;
+      runEpoch += 1;
       useEngravePreviewStore.getState().holdMeasurement();
       try {
         await run(surface ?? null);
