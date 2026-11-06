@@ -267,9 +267,19 @@ export interface ModelPlanInput {
    * `rest.visibleDepthMm` / `rest.thirdToolPct` by the caller (the engine never reads the
    * location). A leftover deeper than `depthMm` OR a larger share than `share` is VISIBLE: its
    * statement is a warning, otherwise information. Absent → the labelled
-   * {@link REST_MACHINING_FALLBACK} numbers, `source: 'fallback'`.
+   * {@link REST_MACHINING_FALLBACK} numbers, both sources `'fallback'`.
+   *
+   * #1027 — EACH THRESHOLD KEEPS ITS OWN SOURCE. The two settings are read from the location
+   * independently (`readDefault` answers per key), so a shop can state one and fall back for the
+   * other; the sentence names each threshold's source when they differ, and one phrase when they
+   * agree.
    */
-  restVisibility?: { depthMm: number; share: number; source: RestSettingSource };
+  restVisibility?: {
+    depthMm: number;
+    share: number;
+    depthSource: RestSettingSource;
+    shareSource: RestSettingSource;
+  };
   /**
    * #1005 — WHEN THIS PLAN CUTS A MOULD. The seam sets it when the goal's `goalMode` is `'mold'`:
    * its `geometry` is then the stock block minus the part turned over (`engrave/mouldSolid.ts`),
@@ -1481,7 +1491,8 @@ export function restStatementForPlan(
   const vis = input.restVisibility ?? {
     depthMm: REST_MACHINING_FALLBACK.visibleDepth,
     share: REST_MACHINING_FALLBACK.thirdToolFraction,
-    source: REST_MACHINING_FALLBACK.source,
+    depthSource: REST_MACHINING_FALLBACK.source,
+    shareSource: REST_MACHINING_FALLBACK.source,
   };
   const share = 1 - outcome.coverage;
   const visible = outcome.leftoverAboveMm > vis.depthMm || share > vis.share;
@@ -1515,8 +1526,37 @@ export function restStatementForPlan(
     text:
       `The finish with the ${cutter} leaves up to ${numbers} where it cannot enter ${look} and no owned ball takes it.` +
       would +
-      (vis.source === 'fallback' ? ' The thresholds are this build’s labelled fallback.' : ''),
+      thresholdProvenanceClause(vis.depthSource, vis.shareSource),
   };
+}
+
+/** #1027 — one threshold's source in the sentence's own words (the run sheet's longer phrases live in `restSettings`). */
+function thresholdSourceWords(source: RestSettingSource): string {
+  switch (source) {
+    case 'fallback':
+      return 'this build’s fallback';
+    case 'user':
+      return 'the command line';
+    case 'measured':
+      return 'the bench’s own measurement';
+    case 'chosen':
+    case 'seeded':
+      return 'the shop’s location document';
+  }
+}
+
+/**
+ * #1027 — BOTH THRESHOLDS' PROVENANCE, ONE PHRASE WHEN THEY AGREE. The two readings are
+ * independent (`readDefault` answers per key), so one shop can state the visible depth and fall
+ * back for the share; the sentence names each threshold's source when they differ.
+ */
+function thresholdProvenanceClause(depth: RestSettingSource, share: RestSettingSource): string {
+  if (depth === share) {
+    return depth === 'fallback'
+      ? ' The thresholds are this build’s labelled fallback.'
+      : ` Both thresholds are from ${thresholdSourceWords(depth)}.`;
+  }
+  return ` The visible depth is from ${thresholdSourceWords(depth)}; the third-tool share is from ${thresholdSourceWords(share)}.`;
 }
 
 /**
