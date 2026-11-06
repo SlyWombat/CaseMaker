@@ -40,7 +40,7 @@ import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, 
 import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, type SetupRegistration } from './setups';
-import { pocket } from './ops/pocket';
+import { fullyReachable, pocket } from './ops/pocket';
 import { roughLeftAbove } from './ops/rough';
 import { clSurface, creaseFits } from './clsurface';
 import { dropCutterHeight, profileOf, type CutterProfile, type DropCutterMesh } from './dropcutter';

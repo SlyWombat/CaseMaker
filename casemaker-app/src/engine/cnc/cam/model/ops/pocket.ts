@@ -333,8 +333,12 @@ function rotatedToEntry(ring: readonly [number, number][], target: readonly [num
  * boundary and ANY eroded copy fills the corner's full square wedge, when a round tool can only
  * ever reach the OPENING's rounded profile there, leaving `r² − πr²/4` per corner permanently
  * uncut, however many rings are cut. Computed once per op: it does not depend on progress.
+ *
+ * #1021 — exported: `plan.ts` reuses it, unchanged, to find a POCKET's own floor the PRIMARY
+ * FLAT's ring cannot reach (`region \ fullyReachable(region, offset, flatRadius)`) — the same
+ * opening, the same tool-shape-correct test, one caller earlier than the op itself.
  */
-function fullyReachable(region: Polygons, offset: OffsetFn, toolRadius: number): Polygons {
+export function fullyReachable(region: Polygons, offset: OffsetFn, toolRadius: number): Polygons {
   return offset(offset(region, -toolRadius), toolRadius);
 }
 
