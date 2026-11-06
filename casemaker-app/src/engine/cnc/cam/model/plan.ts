@@ -851,20 +851,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       // `roughToolKey`): that tool roughs instead of `primary`, which this job's own pockets (if
       // it has any) still use — the two are independent on purpose, see
       // `ModelPlanInput.curvedRoughTool`'s own doc.
-      // #1021 — THE FLOOR STRIPS RIDE BESIDE THE NORMAL POCKET CHAIN (never instead of it: a
-      // flat is present, so the chain cuts the pocket as it always has; the ball owns only the
-      // strips the rings cannot enter). The #982 fallback's own floor regions stand in for the
-      // whole chain, unchanged.
+      // #982 — NO FLAT ANYWHERE IN THE HOUSE: the pocket floors become the ball's own regions,
+      // standing in for the whole pocket chain. #1021's strips are NOT added here: they depend on
+      // the chain the plan actually chooses, so `planTreePrograms` decides them after the pockets
+      // and merges them into these options (see `PlanTreeOptions.floorStrips`).
       ...(noFlatFallback
         ? { flat: primary, extraRegions: pocketFloorRegions }
-        : {
-            ...(input.curvedRoughTool === undefined
-              ? { flat: primary }
-              : input.curvedRoughTool === null
-                ? {}
-                : { flat: input.curvedRoughTool }),
-            ...(floorStrips.length === 0 ? {} : { extraRegions: floorStrips }),
-          }),
+        : input.curvedRoughTool === undefined
+          ? { flat: primary }
+          : input.curvedRoughTool === null
+            ? {}
+            : { flat: input.curvedRoughTool }),
       ...(b === undefined ? {} : { ball: b }),
       ...(restBallFor(b) === undefined ? {} : { restBall: restBallFor(b) }),
       // #982 — NO BALL IN THE SET: the flat finishes the curved remainder (a flat-raster over
@@ -1102,9 +1099,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // `extraRegions`: the ball rasters the strips against the real CL surface (never deeper than
     // the design) as its own floor pass.
     //
-    // COST (#1021 §8.9): one erode+dilate, one subtract and one boundary-band offset per node,
-    // once per plan — milliseconds over the tray's 20 nodes and the organizer's 58; the only
-    // posted change is the ball's feed over the strips (~118 mm² on the tray).
+    // COST (#1021 §8.9): one erode+dilate + subtract per pocket node, one boundary-band offset
+    // per node with interior components, one erode per strip per rest flat the chain runs (the
+    // ownership test) and one ball-fit erode per kept strip — all plan-time clipper work over
+    // small polygons, milliseconds on the tray's 20 nodes and the organizer's 58. Nothing is
+    // posted for a strip nothing can enter; a strip the ball fits is planned as its own floor
+    // pass (feed over the strip's own area).
     //
     // THE KEEP RULES. First, A STRIP LIES INSIDE THE FLOOR: a gap component that touches the
     // node's own outer boundary is a CORNER — the flat's wall-foot tradeoff, which the card
@@ -1118,9 +1118,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // — on the app path the ⌀3.175 rest cuts the tray's five strips to their floor at −4.200 —
     // so this builder keeps only the strips NO owned flat can enter. A strip the ball alone could
     // reach is exactly the no-rest-flat case this issue is about.
-    const floorStrips: RemainderRegion[] = [];
-    const floorStripUnreachable: { id: string; area: number }[] = [];
-    if (!noFlatFallback && ball !== undefined && restBall === undefined) {
+    const buildFloorStrips = (restCutters: readonly Tool[]): PlanningFloorStrips => {
+      const regions: RemainderRegion[] = [];
+      const unreachable: { id: string; area: number }[] = [];
+      if (noFlatFallback || ball === undefined) return { regions, unreachable };
       const flatRadius = (cuttingDiameter(primary) ?? 0) / 2;
       if (flatRadius > 0) {
         const bins = buildTriangleBins(doorGeometry.triangles);
@@ -1175,9 +1176,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
               if (Math.abs(areaOf(kept)) < 0.1) kept = [];
               // A strip an owned FLAT can enter is the rest's (see this block's keep rules): the
               // eroded component is non-empty for any flat whose radius fits inside it.
+              // The REST'S OWNERSHIP IS THE PLAN'S, NOT THE SET'S: only a rest step this plan
+              // actually runs can own a strip (on the ideal run the house is owned ∪ catalogue,
+              // and a catalogue flat the chain never uses must not silence it).
               const restOwned = kept.length === 0
                 ? true
-                : input.cutters.house.some((candidate) => {
+                : restCutters.some((candidate) => {
                     if (candidate.shape !== 'flat') return false;
                     const r = (cuttingDiameter(candidate) ?? 0) / 2;
                     if (!(r > 0)) return false;
@@ -1196,7 +1200,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
                 return eroded.length > 0 && Math.abs(areaOf(eroded)) > 1e-9;
               })();
               if (kept.length > 0 && !restOwned && !ballFits) {
-                floorStripUnreachable.push({ id: node.id, area: Math.abs(areaOf(kept)) });
+                unreachable.push({ id: node.id, area: Math.abs(areaOf(kept)) });
               }
               if (kept.length > 0 && !restOwned && ballFits) {
                 // The design's own top over the strip, clamped exactly as the #982 floors are.
@@ -1217,7 +1221,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
                   }
                 }
                 const zBottom = Number.isFinite(designMax) ? Math.max(node.floorZ, designMax) : node.floorZ;
-                floorStrips.push({
+                regions.push({
                   id: `${node.id}:floor-strip`,
                   footprint: kept,
                   area: Math.abs(areaOf(kept)),
@@ -1235,10 +1239,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         };
         walkStrips(tree.pockets);
       }
-    }
+      return { regions, unreachable };
+    };
 
     const result = planTreePrograms(tree, {
       offset,
+      floorStrips: buildFloorStrips,
       pockets: noFlatFallback ? null : {
         ...(depthBandMm === undefined ? {} : { depthBandMm }),
         houseFlats: flats,
@@ -1456,7 +1462,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         text: `${ballUncutIds.length} ${plural} narrower than the ball's radius — left uncut`,
       });
     }
-    if (floorStrips.length > 0 || floorStripUnreachable.length > 0) {
+    const plannedStrips = result.floorStrips?.regions ?? [];
+    const unplannedStrips = result.floorStrips?.unreachable ?? [];
+    if (plannedStrips.length > 0 || unplannedStrips.length > 0) {
       // #1021 — ONLY WHAT THE MOVES SHOW. A strip the ball fits is planned as its floor pass and
       // judged by that pass's own feeds INSIDE the strip and within the plan's 0.1 mm goal band
       // of its floor; a strip no owned flat can enter AND the ball cannot fit is never planned
@@ -1467,10 +1475,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       // is one code with many causes; one sentence per node is enough).
       const alreadyStated = new Set(result.statements.flatMap((st) => st.ids ?? []));
       const cutIds: string[] = [];
-      const unreachable = floorStripUnreachable.filter((s) => !alreadyStated.has(s.id));
+      const unreachable = unplannedStrips.filter((s) => !alreadyStated.has(s.id));
       const uncutIds: string[] = unreachable.map((s) => s.id);
       const uncutWhy: string[] = unreachable.map((s) => `${s.id}: ${s.area.toFixed(1)} mm², no owned cutter fits it`);
-      for (const strip of floorStrips) {
+      for (const strip of plannedStrips) {
         let deepest: number | null = null;
         for (const op of result.ops) {
           if (op.region.id !== strip.id) continue;
@@ -3714,7 +3722,21 @@ export interface PlanTreeOptions {
    * cannot concatenate.
    */
   curved: Omit<PlanCurvedOptions, 'offset' | 'safeZMm' | 'hopZMm'>;
+  /**
+   * #1021 — THE POCKET FLOOR STRIPS, built once the CHAIN IS CHOSEN. A strip the plan's own rest
+   * step can enter is the rest's; set membership is not the test (on the ideal run the house is
+   * owned ∪ catalogue, and a catalogue flat the chain never runs must not silence a strip). The
+   * hook is called with this plan's rest cutters and returns the strips to plan as the ball's own
+   * floor passes plus the ones nothing can reach.
+   */
+  floorStrips?: (restCutters: readonly Tool[]) => PlanningFloorStrips;
   offset: OffsetFn;
+}
+
+/** #1021 — see {@link PlanTreeOptions.floorStrips}. */
+export interface PlanningFloorStrips {
+  regions: RemainderRegion[];
+  unreachable: { id: string; area: number }[];
 }
 
 export interface PlanTreeResult {
@@ -3733,6 +3755,8 @@ export interface PlanTreeResult {
   unplanned: SequenceStepFailure[];
   /** #961 — the pocket chain's picker result, carried through for `SetupPlan.choice`. */
   choice: SequenceChoice;
+  /** #1021 — the floor strips this plan built (and the ones nothing can reach), when it asked. */
+  floorStrips?: PlanningFloorStrips;
 }
 
 /**
@@ -3862,8 +3886,15 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
         },
       }
     : planPocketsForTree(tree, { ...opts.pockets, offset: opts.offset });
+  // #1021 — the floor strips are decided HERE, after the chain: only the cutters THIS plan runs
+  // as rest can own a strip.
+  const stripped: PlanningFloorStrips | undefined = opts.floorStrips?.(
+    pocketResult.choice.steps.filter((step) => step.kind === 'rest').map((step) => step.cutter.tool),
+  );
+  const extraRegions = [...(opts.curved.extraRegions ?? []), ...(stripped?.regions ?? [])];
   const curvedResult = planCurvedForTree(tree, {
     ...opts.curved,
+    ...(extraRegions.length === 0 ? {} : { extraRegions }),
     offset: opts.offset,
     safeZMm: SAFE_Z,
     hopZMm: HOP_Z,
@@ -3892,5 +3923,6 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
     statements: [...pocketResult.statements, ...curvedResult.statements],
     unplanned: [...pocketResult.unplanned, ...curvedResult.unplanned],
     choice: pocketResult.choice,
+    ...(stripped === undefined ? {} : { floorStrips: stripped }),
   };
 }

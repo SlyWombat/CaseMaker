@@ -59,7 +59,48 @@ function fixture(): { positions: Float32Array; indices: Uint32Array; triangleCou
   return { positions, indices, triangleCount: indices.length / 3, bbox: { min: [0, 0, -T], max: [L, W, 0] } };
 }
 
+const FLAT2: Tool = flatEndMill(2, { number: 3, id: 'flat-2', name: 'flat-2' });
+const BALL2: Tool = { ...flatEndMill(2, { number: 4, id: 'ball-2', name: 'ball-2' }), shape: 'ball', typeText: 'Ball Nose' };
+
+function inputFor(house: Tool[]): ModelPlanInput {
+  return {
+    geometry: { triangles: fixture() },
+    setups: [{ frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -T }, underside: 'flatOnStockBottom' }],
+    stock: { length: L, width: W, thickness: T, material: 'hardwood' },
+    fixture: { mount: 'tape', envelope: null },
+    cutters: { house, catalogue: [] },
+    tolerances: {},
+    edgeBreak: { legMm: 0 },
+  };
+}
+
 describe('#1021 — the strip between two islands, nothing owned fits it', () => {
+  it('a rest BALL in the set does not silence the strip (a rest ball owns no pocket floor)', async () => {
+    const output = await planModelCam(inputFor([FLAT6, BALL6, BALL2]));
+    const steps = output.perSetup.flatMap((s) => s.choice.steps);
+    const restFlats = steps.filter((st) => st.kind === 'rest' && st.cutter.tool.shape === 'flat');
+    expect(restFlats, 'the chain ran a rest flat this case did not intend').toHaveLength(0);
+    const strip = output.perSetup.flatMap((s) => s.statements).find((s) => s.code === 'goal-region-uncut' && s.text.includes('floor strip'));
+    expect(strip, 'a rest ball silenced the strip').toBeDefined();
+  }, 240_000);
+
+  it('a CATALOGUE flat the chain never runs does not silence the strip (the ideal run\'s house)', async () => {
+    // The ideal run's house is owned ∪ catalogue (`planTwoOutcomes`); a narrow flat the chain does
+    // not use as a rest must not suppress the statement.
+    const output = await planModelCam(inputFor([FLAT6, BALL6, FLAT2]));
+    const steps = output.perSetup.flatMap((s) => s.choice.steps);
+    console.log('chain:', steps.map((st) => `${st.kind}:${st.cutter.tool.name}`).join(' -> '));
+    const restWithFlat2 = steps.filter((st) => st.kind === 'rest' && st.cutter.tool.id === FLAT2.id);
+    if (restWithFlat2.length > 0) {
+      // The chain really runs the ⌀2 rest here: then the rest owns the strip and nothing is said.
+      const strip = output.perSetup.flatMap((s) => s.statements).find((s) => s.code === 'goal-region-uncut' && s.text.includes('floor strip'));
+      expect(strip, 'the chain ran the ⌀2 rest, so the strip is its own — it must not also be stated').toBeUndefined();
+      return;
+    }
+    const strip = output.perSetup.flatMap((s) => s.statements).find((s) => s.code === 'goal-region-uncut' && s.text.includes('floor strip'));
+    expect(strip, 'a catalogue flat outside the chain silenced the strip').toBeDefined();
+  }, 240_000);
+
   it('states the strip as standing, with its node and area, and plans no air over it', async () => {
     const input: ModelPlanInput = {
       geometry: { triangles: fixture() },
