@@ -1529,6 +1529,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
     const plannedStrips = result.floorStrips?.regions ?? [];
     const unplannedStrips = result.floorStrips?.unreachable ?? [];
+    // #1021 — a strip the BALL actually finishes is no longer "not cut" by the chain: its id comes
+    // out of the setup's unreachable list below (the chain could not reach it; the ball does).
+    const floorStripsCut = new Set<string>();
     if (plannedStrips.length > 0 || unplannedStrips.length > 0) {
       // #1021 — ONLY WHAT THE MOVES SHOW. A strip the ball fits is planned as its floor pass and
       // judged by that pass's own feeds INSIDE the strip and within the plan's 0.1 mm goal band
@@ -1612,8 +1615,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         const missedAreaMm2 = missed.length * 0.25;
         if (share >= 0.995 && missedAreaMm2 < 0.5) {
           cutIds.push(nodeId);
+          floorStripsCut.add(nodeId);
         } else {
           cutIds.push(nodeId);
+          floorStripsCut.add(nodeId);
           remainderWhy.push(
             `${nodeId}: the pass reaches ${(share * 100).toFixed(0)} %; ${missedAreaMm2.toFixed(1)} mm² stays, ` +
               (Number.isFinite(standingMm)
@@ -1676,7 +1681,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       totalCostSeconds,
       notes,
       statements,
-      unreachable: result.unreachable,
+      unreachable: result.unreachable.filter((id) => !floorStripsCut.has(id)),
       unplanned: result.unplanned,
       choice: result.choice,
     });
