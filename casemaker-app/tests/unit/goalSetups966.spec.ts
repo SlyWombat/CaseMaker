@@ -130,12 +130,10 @@ function sphereFeatureSource(): FeatureSource {
 const VISE: MountSpec = { kind: 'vise', viseOpeningMm: 120 };
 const SPHERE_STOCK = { length: 2 * SPHERE_R, width: 2 * SPHERE_R, thickness: 2 * SPHERE_R };
 
+// #966 — A HOLDOVER, NOW A PASSTHROUGH. There is no more flag to mock on: `generateGoalProgram`
+// always plans through `cam/model`. Kept (rather than inlined at each call site) so this file's
+// own diff stays small; every caller below is unaffected by the removal.
 async function withModelCamFlagOn<T>(run: () => Promise<T>): Promise<T> {
-  vi.doMock('@/engine/cnc/cam/model/plan', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('@/engine/cnc/cam/model/plan')>();
-    return { ...actual, USE_MODEL_CAM_ENGINE: true };
-  });
-  vi.resetModules();
   return run();
 }
 

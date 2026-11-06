@@ -334,28 +334,6 @@ export interface SetupPlan {
   choice: SequenceChoice;
 }
 
-/**
- * #966 — THE SEAM REMOVED: `cam/model` is the only engine a goal job plans through now, so this
- * is unconditionally `true`. Kept as an exported, mutable binding rather than deleted — the
- * end-state spec (`goalEngineEndState966.spec.ts`) pins the binding itself (`USE_MODEL_CAM_ENGINE`
- * === true, with no override), and the handful of specs still calling `setModelCamEnabled` below
- * (a holdover from when the flag gated `engraveGenerate.ts`'s own dispatch) keep compiling and
- * stay harmless no-ops now that nothing reads the flag for control flow.
- */
-export let USE_MODEL_CAM_ENGINE: boolean = true;
-
-/**
- * #966 — A HOLDOVER, NOW A NO-OP IN EFFECT. `generateGoalProgram` no longer branches on
- * `USE_MODEL_CAM_ENGINE` at all (the old heightfield engine is gone), so toggling it through here
- * changes nothing about which engine runs — there is only one. Kept so the specs that still call
- * this (from before the removal) keep compiling without a rewrite; `USE_MODEL_CAM_ENGINE` itself
- * is read only by the end-state spec's own pin and, if anything else still imports it, as a
- * historical signal, never as a dispatch condition.
- */
-export function setModelCamEnabled(on: boolean): void {
-  USE_MODEL_CAM_ENGINE = on;
-}
-
 export interface PlanModelCamOptions {
   signal?: AbortSignal;
   onProgress?: (p: ModelPlanProgress) => void;

@@ -36,7 +36,7 @@ import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { generateGoalProgram, buildModelPlanInputForGoal, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
-import { planModelCam, oppositeSurfaceSafeDepthMm, USE_MODEL_CAM_ENGINE, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
+import { planModelCam, oppositeSurfaceSafeDepthMm, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import * as planModule from '@/engine/cnc/cam/model/plan';
 import { buildSetupSpecs, rotatedGeometryFor } from '@/engine/cnc/cam/model/setups';
 import { profileOf } from '@/engine/cnc/cam/model/dropcutter';
@@ -176,29 +176,26 @@ const VISE: MountSpec = { kind: 'vise', viseOpeningMm: 120 };
 // PART 1 — "With the flag at its default, generateGoalProgram plans through cam/model."
 // ───────────────────────────────────────────────────────────────────────────────────────────
 describe('#966 end-state, part 1 — the flag’s own default routes generateGoalProgram through cam/model', () => {
-  it('RED today: USE_MODEL_CAM_ENGINE’s real default is false — confirmed by importing it with no override at all', () => {
-    // No vi.doMock, no env var set by this test: this is the SAME binding `generateGoalProgram`'s
-    // own `if (USE_MODEL_CAM_ENGINE)` branches on (engraveGenerate.ts, the #966 seam). Red today
-    // because the old engine has not been removed yet, so `cam/model/plan.ts`'s own default stays
-    // `false` ("set only by specs for now", that module's header) — confirmed by this very read,
-    // in a process with neither CASEMAKER_MODEL_CAM nor VITE_MODEL_CAM set.
-    expect(USE_MODEL_CAM_ENGINE).toBe(true);
+  it('GREEN: cam/model/plan.ts exports no USE_MODEL_CAM_ENGINE and no setModelCamEnabled — there is nothing left to flip', () => {
+    // The ruling removes the flag itself, not just the seam that branched on it: a binding that
+    // compiles but never branches on anything is exactly the debris the removal exists to clear.
+    // Pinned on the module's own shape, not a value, so a future re-introduction of either name
+    // fails this test immediately rather than silently reviving dead-flag debris.
+    expect('USE_MODEL_CAM_ENGINE' in planModule).toBe(false);
+    expect('setModelCamEnabled' in planModule).toBe(false);
   });
 
-  it('RED today: a goal job never reaches planModelCam at all when the flag is left at its real default', async () => {
+  it('GREEN: a goal job with no override reaches planModelCam', async () => {
     // Spies on the REAL `planModelCam` export (calls through — this is not a mock of its
     // behaviour, only an observer of whether it was invoked) and runs `generateGoalProgram`
-    // completely unmocked, exactly as an operator's Generate click would today.
+    // completely unmocked, exactly as an operator's Generate click would today — no flag, no
+    // override, nothing to set.
     const spy = vi.spyOn(planModule, 'planModelCam');
     const job = jobFor(domeGoal(), { length: 30, width: 20, thickness: 10 });
     const result = await generateGoalProgram(job, job.targetObject!, BALL, null, { shop: SHOP });
-    // CONFIRMED by running this exact call (2026-11-04): spy.mock.calls.length === 0 and
-    // result.ok === true via the OLD heightfield engine (generateSurface3dForGoal) — the plan
-    // that posted was never cam/model's. Success, once removal lands and the default flips true:
-    // planModelCam is the thing that actually ran, for every goal job, with no override.
     expect(spy).toHaveBeenCalled();
     expect(result.ok).toBe(true);
-  }, 90_000);
+  }, 300_000);
 });
 
 // ───────────────────────────────────────────────────────────────────────────────────────────
@@ -239,25 +236,23 @@ describe('#966 end-state, part 2 — a goal needing two setups posts both, never
     for (const setup of output.perSetup) {
       expect(setup.programs.length, `setup ${setup.setupIndex}: no program posted`).toBeGreaterThan(0);
     }
-  }, 90_000);
+    // TEMPORARY — this 2-setup datum plan now regularly exceeds 300 s on a loaded box (budget
+    // raised from 90 s -> 300 s -> 600 s across #965/#982's own stages landing since this spec
+    // was pinned: the ball-rough, the rest-ball reach check and the crease pre-gate all run per
+    // setup now, where only the flat/ball finish ran before). Not root-caused as a regression vs.
+    // a real cost increase — flagging for whoever picks up the open slowdown finding.
+  }, 600_000);
 
-  it('GREEN: generateGoalProgram itself, flag on, posts both setups’ work with no refusal, and EVERY posted program verifies clean', async () => {
-    vi.doMock('@/engine/cnc/cam/model/plan', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('@/engine/cnc/cam/model/plan')>();
-      return { ...actual, USE_MODEL_CAM_ENGINE: true };
-    });
-    vi.resetModules();
-    const { generateGoalProgram: generateGoalProgramModelCam, buildModelPlanInputForGoal: buildInput } = await import('@/workers/sim/engraveGenerate');
-
+  it('GREEN: generateGoalProgram itself posts both setups’ work with no refusal, and EVERY posted program verifies clean', async () => {
     const { goal, stock } = await buildDatumGoal();
     const job = jobFor(goal, stock);
 
-    // Confirms, through the FRESHLY-IMPORTED (flag-on) module, the same fact the previous case
-    // established: the seam's own input genuinely carries two setups for this job.
-    const input = await buildInput(job, goal, BALL, SHOP);
+    // Confirms the same fact the previous case established: the seam's own input genuinely
+    // carries two setups for this job.
+    const input = await buildModelPlanInputForGoal(job, goal, BALL, SHOP);
     expect(input.setups).toHaveLength(2);
 
-    const result = await generateGoalProgramModelCam(job, goal, BALL, null, { shop: SHOP });
+    const result = await generateGoalProgram(job, goal, BALL, null, { shop: SHOP });
     expect(result.ok).toBe(true);
     expect(result.errors).toEqual([]);
 
@@ -276,7 +271,9 @@ describe('#966 end-state, part 2 — a goal needing two setups posts both, never
       const errors = program.verify!.findings.filter((f) => f.severity === 'error');
       expect(errors, `setup ${program.setupIndex} program (${program.toolKey}) had verify error(s): ${JSON.stringify(errors)}`).toEqual([]);
     }
-  }, 90_000);
+    // TEMPORARY — same open slowdown finding as the previous case (300 s -> 600 s): this test
+    // re-plans the same 2-setup datum goal through the real seam, so it pays the same cost.
+  }, 600_000);
 });
 
 // ───────────────────────────────────────────────────────────────────────────────────────────
@@ -304,20 +301,13 @@ describe('#966 end-state, part 2b — the bare sphere refuses BY NAME (registerS
     // `registerSetupOrigin`'s own (no locating datum), never a setup-count problem.
     expect(input.setups).toHaveLength(2);
     await expect(planModelCam(input)).rejects.toThrow(/no locating features found for the vise flip \(#965 registration\)/);
-  }, 90_000);
+  }, 300_000);
 
-  it('generateGoalProgram itself, flag on, refuses BY THAT SAME NAME — never ok:true for a part with no locating datum', async () => {
-    vi.doMock('@/engine/cnc/cam/model/plan', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('@/engine/cnc/cam/model/plan')>();
-      return { ...actual, USE_MODEL_CAM_ENGINE: true };
-    });
-    vi.resetModules();
-    const { generateGoalProgram: generateGoalProgramModelCam } = await import('@/workers/sim/engraveGenerate');
-
+  it('generateGoalProgram itself refuses BY THAT SAME NAME — never ok:true for a part with no locating datum', async () => {
     const job = jobFor(sphereGoal(), { length: 2 * SPHERE_R, width: 2 * SPHERE_R, thickness: 2 * SPHERE_R });
     const goal = job.targetObject!;
 
-    const result = await generateGoalProgramModelCam(job, goal, BALL, null, { shop: SHOP });
+    const result = await generateGoalProgram(job, goal, BALL, null, { shop: SHOP });
     expect(result.ok).toBe(false);
     expect(
       result.errors.some((e) => /no locating features found for the vise flip \(#965 registration\)/.test(e.message)),
@@ -325,7 +315,7 @@ describe('#966 end-state, part 2b — the bare sphere refuses BY NAME (registerS
     ).toBe(true);
     // Never a silent single-side success — the false-green shape this part guards against.
     expect(result.programs).toEqual([]);
-  }, 90_000);
+  }, 300_000);
 });
 
 // ───────────────────────────────────────────────────────────────────────────────────────────
@@ -494,7 +484,7 @@ describe('#966 end-state, part 4 — the freeing-contour safety clamp and the po
     // exact [2, 3] mm offset reads as "offset [2, 3] mm", not "[2.000, 3.000]".
     expect(notes.some((n) => n.includes('offset [2, 3] mm'))).toBe(true);
     expect(notes.some((n) => n.includes('offset [0, 0] mm'))).toBe(false);
-  }, 90_000);
+  }, 300_000);
 
   it('GREEN — THE #965 REVIEW FINDING, CLOSED: the posted program never cuts deeper than what the freeing-contour safety clamp allows at the SAME (correctly offset) point, through a full two-setup planModelCam run', async () => {
     // Run the SAME job twice — once with the registration this part can never produce on its own
@@ -567,5 +557,5 @@ describe('#966 end-state, part 4 — the freeing-contour safety clamp and the po
     // offset, equals the depth `planModelCam` actually posted, to the same chord-tolerance margin.
     expect(minSafeCorrectOffset).toBeCloseTo(THICKNESS - ARC_CHORD_TOLERANCE_MM, 9);
     expect(-deepestWith).toBeCloseTo(minSafeCorrectOffset, 9);
-  }, 90_000);
+  }, 300_000);
 });

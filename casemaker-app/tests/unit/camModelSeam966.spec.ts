@@ -1,17 +1,15 @@
 /**
  * #966 — THE SEAM, and (below, the dome's own describe block stays as a seam-reachability check)
  * the ROUND-2 CUTOVER for the one case this round takes on: a SINGLE-setup goal `planModelCam` can
- * fully plan today. `generateGoalProgram` (`workers/sim/engraveGenerate.ts`) routes a goal job
- * through EITHER engine, selected by `USE_MODEL_CAM_ENGINE` (`engine/cnc/cam/model/plan.ts`, off by
- * default — "set only by specs for now", that module's own header):
+ * fully plan today. `generateGoalProgram` (`workers/sim/engraveGenerate.ts`) plans every goal job
+ * through `cam/model` now — the `USE_MODEL_CAM_ENGINE` flag that once selected between it and the
+ * old heightfield engine is gone, along with that engine:
  *
- *   - flag OFF (today's default): the old heightfield path (`generateSurface3dForGoal`) runs
- *     byte-for-byte unchanged — GREEN.
- *   - flag ON, the DOME fixture below: `planModelCam` itself refuses this particular mesh ("Not
+ *   - the DOME fixture below: `planModelCam` itself refuses this particular mesh ("Not
  *     manifold") — still a NAMED #966 reason, never a crash, so that describe block is unchanged
  *     from round 1 and proves the seam stays reachable whatever `cam/model/plan.ts` does with a
  *     mesh it cannot plan.
- *   - flag ON, THE "sloped" RANDOM-PART FIXTURE below (#964's own `randomParts.ts` — the same
+ *   - THE "sloped" RANDOM-PART FIXTURE below (#964's own `randomParts.ts` — the same
  *     fixture `curvedOpsProperty959.spec.ts` already proves `planModelCam` fully plans, posts and
  *     covers ≥ 95 % of, for a SINGLE setup): `generateGoalProgram` now posts every
  *     `SetupPlan.programs[]` entry with `postFor`/`verifyProgram` (the SAME convention
@@ -27,7 +25,7 @@ import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import { buildModelPlanInputForGoal, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { buildModelPlanInputForGoal, generateGoalProgram, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import { tl } from './helpers/manifoldExec';
 import { buildRandomPart } from '../tools/randomParts';
 
@@ -130,24 +128,15 @@ const SHOP: EngraveShopOpts = {
   tools: [entry('inv:ball-2', BALL), entry('inv:flat-3', FLAT)],
 };
 
-describe('#966 — generateGoalProgram routes through cam/model behind USE_MODEL_CAM_ENGINE', () => {
+describe('#966 — generateGoalProgram routes through cam/model', () => {
   // "flag off (the default): the old heightfield engine runs, green" is deleted here, not fixed:
-  // #966 removed the seam this test pinned (the if/else in generateGoalProgram), so there is no
-  // more flag-off path for the old engine to run on. The maintainer's ruling on #966: anything
-  // asserting a flag-off path is deleted, the premise no longer exists. This whole describe (and
-  // its vi.doMock('USE_MODEL_CAM_ENGINE: true') below, now mocking a binding nothing reads) is
-  // part of this file's larger pending rewrite against the removed engine.
+  // #966 removed the seam this test pinned (the if/else in generateGoalProgram) and the flag
+  // itself, so there is no more flag-off path for the old engine to run on, and nothing left to
+  // mock — generateGoalProgram always plans through cam/model now.
 
-  it('flag on: the open dome sheet is closed with a skirt and the seam posts its program (#966 open meshes)', async () => {
-    vi.doMock('@/engine/cnc/cam/model/plan', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('@/engine/cnc/cam/model/plan')>();
-      return { ...actual, USE_MODEL_CAM_ENGINE: true };
-    });
-    vi.resetModules();
-    const { generateGoalProgram: generateGoalProgramModelCam } = await import('@/workers/sim/engraveGenerate');
-
+  it('the open dome sheet is closed with a skirt and the seam posts its program (#966 open meshes)', async () => {
     const job = jobFor(goalTarget());
-    const result = await generateGoalProgramModelCam(job, job.targetObject!, BALL, null, { shop: SHOP });
+    const result = await generateGoalProgram(job, job.targetObject!, BALL, null, { shop: SHOP });
 
     // #966 open-mesh repair: the dome fixture is an open sheet (a polar grid with its rim and
     // nothing under it). It used to die at the kernel as a bare "Not manifold"; the goal path now
@@ -181,7 +170,7 @@ describe('#999 — the goal’s rough is tri-state in the seam', () => {
   }, 60_000);
 });
 
-describe('#966 ROUND 2 — generateGoalProgram flag ON posts and verifies every program (single setup)', () => {
+describe('#966 ROUND 2 — generateGoalProgram posts and verifies every program (single setup)', () => {
   function randomPartJob(seed: number): { job: EngraveJob; goal: EngraveTargetObject; shop: EngraveShopOpts; tool: Tool } {
     const part = buildRandomPart(seed, 'sloped', tl);
     // `placeTarget` (the one placement every goal path reads) centres the mesh's own XY bbox at
@@ -221,16 +210,9 @@ describe('#966 ROUND 2 — generateGoalProgram flag ON posts and verifies every 
   // "flag off (the default) still runs the old heightfield engine, green" is deleted here too,
   // same reason as ROUND 1's above: no flag-off path left to run.
 
-  it('flag on: planModelCam fully plans this job, every posted program passes verifyProgram', async () => {
-    vi.doMock('@/engine/cnc/cam/model/plan', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('@/engine/cnc/cam/model/plan')>();
-      return { ...actual, USE_MODEL_CAM_ENGINE: true };
-    });
-    vi.resetModules();
-    const { generateGoalProgram: generateGoalProgramModelCam } = await import('@/workers/sim/engraveGenerate');
-
+  it('planModelCam fully plans this job, every posted program passes verifyProgram', async () => {
     const { job, goal, shop, tool } = randomPartJob(1);
-    const result = await generateGoalProgramModelCam(job, goal, tool, null, { shop });
+    const result = await generateGoalProgram(job, goal, tool, null, { shop });
 
     expect(result.errors, result.errors.map((e) => `${e.stage}: ${e.message}`).join('\n')).toEqual([]);
     expect(result.ok).toBe(true);

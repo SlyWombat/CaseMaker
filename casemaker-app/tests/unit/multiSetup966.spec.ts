@@ -1,7 +1,7 @@
 /**
- * #966 ROUND 3 — MULTI-SETUP POSTING. `generateGoalProgram`'s flag-on path (`USE_MODEL_CAM_ENGINE`)
- * used to refuse by name whenever `planModelCam` returned more than one `SetupPlan` ("this cutover
- * posts a single-setup goal only"). This spec is RED-FIRST for lifting that refusal: a real,
+ * #966 ROUND 3 — MULTI-SETUP POSTING. `generateGoalProgram`'s model-cam path used to refuse by
+ * name whenever `planModelCam` returned more than one `SetupPlan` ("this cutover posts a
+ * single-setup goal only"). This spec is RED-FIRST for lifting that refusal: a real,
  * analytic two-setup part (a plain box — the SAME geometry `contourFreeingCl965.spec.ts`'s own
  * section C already proves `planModelCam` plans end to end for two setups, driven here through an
  * embedded STL goal mesh instead of a hand-built `ParsedMesh`, so the test exercises the REAL
@@ -21,7 +21,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
-import { setModelCamEnabled } from '@/engine/cnc/cam/model/plan';
 // The box fixture (triangles, STL encoding, job/shop building, the two-setup `SetupSpec[]`) is
 // factored into a shared helper (#966) so `multiSetupVerify966.spec.ts` drives the SAME geometry
 // through `generateGoalProgram` rather than forking a second copy of this logic.
@@ -29,18 +28,10 @@ import { boxTarget, jobFor, FLAT3, SHOP, twoSetups } from './helpers/twoSetupBox
 
 afterEach(() => {
   clearTargetObjectMeshCache();
-  setModelCamEnabled(false);
 });
 
 describe('#966 ROUND 3 — generateGoalProgram posts and verifies a real multi-setup plan', () => {
-  // "flag off (the default): unaffected by the override — the old heightfield engine still runs,
-  // green" is deleted here, not fixed: #966 removed the USE_MODEL_CAM_ENGINE seam, so there is no
-  // more flag-off path to be unaffected on — generateGoalProgram always plans through planModelCam
-  // now, and result.plan is never null for a real run. The maintainer's ruling on #966: anything
-  // asserting a flag-off path is deleted, the premise no longer exists.
-
-  it('flag on: planModelCam plans two setups, every setup\'s programs post and verify, plan carries the full ModelPlanOutput', async () => {
-    setModelCamEnabled(true);
+  it('planModelCam plans two setups, every setup\'s programs post and verify, plan carries the full ModelPlanOutput', async () => {
     const L = 40, W = 30, T = 20;
     const job = jobFor(boxTarget('goal-966-ms-on', L, W, T), L, W, T);
     const result = await generateGoalProgram(job, job.targetObject!, FLAT3, null, { shop: SHOP, modelSetupsOverride: twoSetups(T) });
@@ -83,7 +74,6 @@ describe('#966 ROUND 3 — generateGoalProgram posts and verifies a real multi-s
 
 describe('#966 ROUND 3 — the registration refusal surfaces as a named stage failure, not a crash', () => {
   it('a part with no usable datum (too small for either the hole or the edge strategy) refuses by name', async () => {
-    setModelCamEnabled(true);
     // 5 × 5 mm — every edge under `MIN_EDGE_LENGTH_MM` (15) and no through-holes at all
     // (`registration965.spec.ts`'s own "(c) neither feature survives" fixture, reused at goal
     // scale): `registerSetupOrigin` has nothing to anchor setup 1 against setup 0 with.

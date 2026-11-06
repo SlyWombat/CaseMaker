@@ -3,7 +3,7 @@
  * pure goal stays pure and posts a SECOND program with the V-bit after its surfacing one; when no
  * V can cut it the goal is still surfaced, and the warning says why the edges are square.
  *
- * #989 — THE MODEL ENGINE'S OWN PIN. `USE_MODEL_CAM_ENGINE` on: the seam carries the goal's
+ * #989 — THE MODEL ENGINE'S OWN PIN. The seam carries the goal's
  * `chamfer` as `edgeBreak.legMm = widthMm / tan(halfAngle)` of the V named by `toolKey`, pinned
  * for the rim stage. On the box fixture it plans ONE program — the V, at z = −leg, one tip radius
  * off the edge on the air side — never "no refusal" with zero programs. A 60° V proves the leg is
@@ -14,7 +14,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { generateGoalProgram, buildModelPlanInputForGoal } from '@/workers/sim/engraveGenerate';
-import { planModelCam, setModelCamEnabled } from '@/engine/cnc/cam/model/plan';
+import { planModelCam } from '@/engine/cnc/cam/model/plan';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
@@ -24,7 +24,6 @@ import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 type P = [number, number, number];
 
 afterEach(() => {
-  setModelCamEnabled(false);
   clearTargetObjectMeshCache();
 });
 
@@ -227,7 +226,6 @@ describe('#989 the model engine receives the goal’s own chamfer', () => {
   // program, not the only one — the issue's "1 program" counts only the chamfer stage. The pin
   // asserts the V program by its own tool key and drops the old path's "no refusal" bar.
   it('width 0.5 on the 90° V: the V program posts, every feed at z = −0.5 one tip radius off the edge', async () => {
-    setModelCamEnabled(true);
     const target = goalTarget({ chamfer: { widthMm: 0.5, toolKey: VKEY } });
     const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
     expect(out.errors?.map((e) => `${e.stage}: ${e.message}`).join('\n') ?? '').toBe('');
@@ -248,7 +246,6 @@ describe('#989 the model engine receives the goal’s own chamfer', () => {
   }, 120_000);
 
   it('a 60° V: leg = width / tan 30° = 0.866, and the PINNED V cuts — not the first chamfer in the house', async () => {
-    setModelCamEnabled(true);
     const target = goalTarget({ chamfer: { widthMm: 0.5, toolKey: V60KEY } });
     const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
@@ -261,7 +258,6 @@ describe('#989 the model engine receives the goal’s own chamfer', () => {
   }, 120_000);
 
   it('no toolKey: no V program, and the plan’s own sentence says the rims stay sharp', async () => {
-    setModelCamEnabled(true);
     const target = goalTarget({ chamfer: { widthMm: 0.5 } });
     const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
@@ -272,7 +268,6 @@ describe('#989 the model engine receives the goal’s own chamfer', () => {
   }, 120_000);
 
   it('a toolKey the house lacks: no V program, and the finding names it', async () => {
-    setModelCamEnabled(true);
     const target = goalTarget({ chamfer: { widthMm: 0.5, toolKey: 'inv:gone' } });
     const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);

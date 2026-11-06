@@ -56,7 +56,7 @@ import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { generateGoalProgram, buildModelPlanInputForGoal, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
-import { planModelCam, setModelCamEnabled } from '@/engine/cnc/cam/model/plan';
+import { planModelCam } from '@/engine/cnc/cam/model/plan';
 // The box fixture is `multiSetup966.spec.ts`'s own — factored into a shared helper so this spec
 // drives the SAME geometry instead of forking a second copy of the fixture logic.
 import { boxTarget, jobFor, FLAT3, SHOP, twoSetups } from './helpers/twoSetupBox966';
@@ -66,7 +66,6 @@ import { buildDatumGoal } from './helpers/datumTwoSetup966';
 
 afterEach(() => {
   clearTargetObjectMeshCache();
-  setModelCamEnabled(false);
   vi.restoreAllMocks();
   vi.doUnmock('@/engine/cnc/cam/model/plan');
   vi.resetModules();
@@ -144,7 +143,6 @@ const DATUM_SHOP: EngraveShopOpts = { tools: [entry('inv:ball-2', BALL), entry('
 
 describe('#966 — every program a multi-setup goal posts passes the real verifier end to end', () => {
   it('two-setup box: every posted program, both setups, carries a VerifyReport with zero error-severity findings', async () => {
-    setModelCamEnabled(true);
     const L = 40, W = 30, T = 20;
     const job = jobFor(boxTarget('goal-966-verify-box', L, W, T), L, W, T);
     const result = await generateGoalProgram(job, job.targetObject!, FLAT3, null, { shop: SHOP, modelSetupsOverride: twoSetups(T) });
@@ -188,7 +186,6 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
     expect(input.setups).toHaveLength(2);
     await expect(planModelCam(input)).rejects.toThrow(/no locating features found for the vise flip \(#965 registration\)/);
 
-    setModelCamEnabled(true);
     const result = await generateGoalProgram(job, goal, BALL, null, { shop: DATUM_SHOP });
     expect(result.ok).toBe(false);
     expect(
@@ -204,7 +201,6 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
   // program across BOTH setups with zero error-severity findings, through the REAL
   // `buildModelPlanInputForGoal` decision (no `modelSetupsOverride` test seam).
   it('two-setup DATUM goal: every posted program, both setups, carries a VerifyReport with zero error-severity findings', async () => {
-    setModelCamEnabled(true);
     const { goal, stock } = await buildDatumGoal();
     const job = jobForGoal(goal, stock);
     const input = await buildModelPlanInputForGoal(job, goal, BALL, DATUM_SHOP);

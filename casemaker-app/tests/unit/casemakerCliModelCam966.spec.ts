@@ -1,18 +1,10 @@
-// #966 — THE CLI FLAG, END TO END. `CASEMAKER_MODEL_CAM=1` in the environment is
-// `cam/model/plan.ts`'s `USE_MODEL_CAM_ENGINE` initial value (landed on `963-job-model`@9025eec3,
-// cherry-picked onto this branch — see this branch's own commit log), read ONCE at that module's
-// first import. This spec proves the variable actually reaches `generateGoalProgram`'s branch
-// (`workers/sim/engraveGenerate.ts`, "#966 — THE SEAM") through the REAL headless CLI entry point
-// (`scripts/casemaker.ts` → `dispatch` → `engraveJobMain`, `scripts/lib/casemaker/engrave.ts`) for
-// a single-setup goal job, and that the flag still defaults off when the variable is unset.
-//
-// `vi.resetModules()` plus a fresh `await import(...)` of `engrave.ts` after setting (or clearing)
-// `process.env.CASEMAKER_MODEL_CAM`, BEFORE importing, forces the whole module graph — down through
-// `engraveGenerate.ts` to `cam/model/plan.ts` — to re-evaluate, so each test sees a real, fresh
-// module-load-time read of the flag exactly as a freshly spawned `casemaker` process would, not a
-// value some earlier test or file left cached. This is the same mechanism `camModelSeam966.spec.ts`
-// already uses to flip the flag without a hardcoded module constant to begin with — only no
-// `vi.doMock` is needed here, because the flag is no longer a bare `const` a spec has to override.
+// #966 — THE CLI, END TO END, NOW THE ONLY PATH. `CASEMAKER_MODEL_CAM` and the
+// `USE_MODEL_CAM_ENGINE` flag it once set are both gone with the old heightfield engine removal —
+// `generateGoalProgram` plans every goal job through `cam/model` unconditionally. This spec posts
+// a single-setup goal job through the REAL headless CLI entry point (`scripts/casemaker.ts` →
+// `dispatch` → `engraveJobMain`, `scripts/lib/casemaker/engrave.ts`) and checks it comes out
+// clean — the thing this file used to prove ONLY happened with the flag set, now simply what the
+// CLI always does.
 //
 // A real spawned subprocess (`casemakerCutPrograms.spec.ts`'s own `--json` spawn cases, the other
 // established pattern this codebase's CLI specs use) would be the more end-to-end proof, but this
@@ -47,7 +39,6 @@ const SCRATCH = mkdtempSync(join(tmpdir(), 'casemaker-cli-model-cam-966-'));
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
 
 afterEach(() => {
-  delete process.env.CASEMAKER_MODEL_CAM;
   vi.resetModules();
 });
 
@@ -145,20 +136,8 @@ interface CliRun {
   outDir: string;
 }
 
-/**
- * Sets (or clears) `CASEMAKER_MODEL_CAM`, THEN resets the module graph and imports `engraveJobMain`
- * fresh — so `cam/model/plan.ts`'s module-level `USE_MODEL_CAM_ENGINE` read happens after the
- * environment is in the state this run wants, exactly as it would on a freshly spawned `casemaker`
- * process (module load order, not test order, is what #966 is about).
- */
-async function cliCut(job: EngraveJob, name: string, locationText: string, modelCam: boolean): Promise<CliRun> {
-  if (modelCam) process.env.CASEMAKER_MODEL_CAM = '1';
-  else delete process.env.CASEMAKER_MODEL_CAM;
-  vi.resetModules();
+async function cliCut(job: EngraveJob, name: string, locationText: string): Promise<CliRun> {
   const { engraveJobMain } = await import('../../scripts/lib/casemaker/engrave');
-  // The flag itself, read fresh — the direct check that nothing above silently kept the old value.
-  const { USE_MODEL_CAM_ENGINE } = await import('../../src/engine/cnc/cam/model/plan');
-  expect(USE_MODEL_CAM_ENGINE, 'cam/model/plan.ts did not pick up the environment on this fresh import').toBe(modelCam);
 
   const dir = join(SCRATCH, name);
   mkdirSync(dir, { recursive: true });
@@ -177,9 +156,9 @@ async function cliCut(job: EngraveJob, name: string, locationText: string, model
   return { code, receipt, outDir };
 }
 
-describe('#966 the headless CLI generate path honours CASEMAKER_MODEL_CAM end to end', () => {
-  it('flag set: the CLI entry point posts the goal job through cam/model, every program verifies clean', async () => {
-    const { code, receipt, outDir } = await cliCut(goalJob(), 'flag-on', locationDoc(), true);
+describe('#966 the headless CLI generate path posts a goal job through cam/model end to end', () => {
+  it('the CLI entry point posts the goal job through cam/model, every program verifies clean', async () => {
+    const { code, receipt, outDir } = await cliCut(goalJob(), 'model-cam', locationDoc());
 
     expect(code, JSON.stringify(receipt)).toBe(0);
     expect(receipt).not.toBeNull();
@@ -207,16 +186,6 @@ describe('#966 the headless CLI generate path honours CASEMAKER_MODEL_CAM end to
       expect(program.ncLines).toBeGreaterThan(0);
     }
   }, 180_000);
-
-  it('flag unset: the default is still off — the same job and location still post clean through the old engine', async () => {
-    const { code, receipt } = await cliCut(goalJob(), 'flag-off', locationDoc(), false);
-
-    expect(code, JSON.stringify(receipt)).toBe(0);
-    expect(receipt).not.toBeNull();
-    const r = receipt!;
-    expect(r.ok, JSON.stringify(r.diagnostics)).toBe(true);
-    expect(r.stage).toBe('done');
-    const verifyErrors = r.diagnostics.filter((d) => d.source === 'verify' && d.severity === 'error');
-    expect(verifyErrors).toEqual([]);
-  }, 180_000);
+  // "flag unset: the default is still off — ... through the old engine" is deleted here, not
+  // fixed: there is no more flag-off path, and no old engine for it to run through.
 });

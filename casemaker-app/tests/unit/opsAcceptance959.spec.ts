@@ -66,7 +66,7 @@ import { getTools } from '@/engine/cnc/toolRegistry';
 import { comparePlanOutcomes, idealWorsenings, type PlanTradeoff } from '../tools/tradeoff';
 import { feedRowsFor } from '../tools/feedRows';
 import { measureVendorCard } from '../tools/cardMeasurement';
-import { planModelCam, planPocketsForTree, planTreePrograms, setModelCamEnabled, type ModelPlanInput, type PlanPocketsResult, type SetupPlan, type SetupSpec } from '@/engine/cnc/cam/model/plan';
+import { planModelCam, planPocketsForTree, planTreePrograms, type ModelPlanInput, type PlanPocketsResult, type SetupPlan, type SetupSpec } from '@/engine/cnc/cam/model/plan';
 import type { SequenceChoice, SequenceStepFailure } from '@/engine/cnc/cam/model/sequence';
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
@@ -1635,12 +1635,12 @@ describe.skipIf(TRAY === undefined)('#989 — the tray through the app path: the
       tools: VENDOR_SET.map((t) => ({ key: `inv:${t.id}`, tool: t, provenance: 'test' })),
       feeds: null,
     };
-    setModelCamEnabled(true);
-    try {
+    {
       const t0 = performance.now();
-      const out = await generateGoalProgram(job, goal, BALL6, [], null, shop, undefined, undefined, [
-        { frame: { up: [0, 0, 1], stockTop: 0 }, underside: 'flatOnStockBottom' },
-      ]);
+      const out = await generateGoalProgram(job, goal, BALL6, null, {
+        shop,
+        modelSetupsOverride: [{ frame: { up: [0, 0, 1], stockTop: 0 }, underside: 'flatOnStockBottom' }],
+      });
       // The run's own facts, printed so the acceptance comment can quote them.
       const chamferOps = (out.plan?.perSetup ?? []).flatMap((s) => s.ops.filter((o) => o.kind === 'chamfer'));
       console.log(
@@ -1678,8 +1678,6 @@ describe.skipIf(TRAY === undefined)('#989 — the tray through the app path: the
       const shallowest = vFeedZs.reduce((a, z) => Math.max(a, z), -Infinity);
       expect(shallowest).toBeCloseTo(topZ - EDGE_BREAK_LEG_MM, 6);
       for (const z of vFeedZs) expect(z).toBeLessThanOrEqual(topZ - EDGE_BREAK_LEG_MM + 1e-6);
-    } finally {
-      setModelCamEnabled(false);
     }
   }, 1_800_000);
 });

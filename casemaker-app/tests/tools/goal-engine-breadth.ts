@@ -1,21 +1,20 @@
 /**
- * #966 BREADTH CHECK — how much of the demo corpus the rebuilt engine already covers, per job,
- * beside what the old heightfield engine does on the same file.
+ * #966 BREADTH CHECK — how much of the demo corpus the rebuilt engine covers, per job.
  *
  * Not a spec: a tool. For every job file the Z1 demo page uses (`docs/bench/2026-10-28-z1-real-jobs/
  * jobs/*.json`) plus any committed sample job files, it runs
  *
- *   old   — `generateGoalProgram` through `engraveGenerate`, the flag OFF (today's default).
- *   new   — exactly what the flag-on seam calls: `buildModelPlanInputForGoal` + `planModelCam`
- *           (A's #966 seam, `ef0c56cd`), reported as posts / refused / throws, with the plan's own
- *           program count, cutter sequence and cycle.
- *   seam  — only when `CASEMAKER_MODEL_CAM=1`: the real `engraveGenerate` path with the flag on,
- *           i.e. what `generateGoalProgram` answers today (the seam's stated refusal, carrying
- *           its setup/program counts and notes).
+ *   seam  — `generateGoalProgram` through `engraveGenerate` (posts / refused / throws, with its
+ *           setup/program counts and notes).
+ *   new   — the same plan read directly: `buildModelPlanInputForGoal` + `planModelCam`, reported
+ *           as posts / refused / throws, with the plan's own program count, cutter sequence and
+ *           cycle.
+ *
+ * The old heightfield engine this tool once also ran, beside the new one for comparison, is gone
+ * with the #966 removal — there is one engine now, read two ways (through the seam, and directly).
  *
  * Run:
  *   npx tsx --tsconfig tsconfig.scripts.json tests/tools/goal-engine-breadth.ts [--out FILE] [--only NAME]
- *   CASEMAKER_MODEL_CAM=1 npx tsx --tsconfig tsconfig.scripts.json tests/tools/goal-engine-breadth.ts
  *
  * One JSON line per job is written to stdout (and to `--out` when given), so a long run can be
  * read as it goes; a failure inside one engine never stops the corpus.
@@ -36,8 +35,8 @@ import { supportingFloors } from '../../src/workers/sim/engraveGenerate';
 import { toPartPlan } from '../../src/engine/cnc/engrave/partPlan';
 import { parseEngraveJob } from '../../src/store/engraveJobSchema';
 import { jobTool } from '../../src/engine/cnc/engrave/jobSetup';
-import { engraveGenerate, buildModelPlanInputForGoal, type EngraveGenerated } from '../../src/workers/sim/engraveGenerate';
-import { planModelCam, USE_MODEL_CAM_ENGINE } from '../../src/engine/cnc/cam/model/plan';
+import { engraveGenerate, buildModelPlanInputForGoal } from '../../src/workers/sim/engraveGenerate';
+import { planModelCam } from '../../src/engine/cnc/cam/model/plan';
 import type { EngraveJob, EngraveTargetObject } from '../../src/types/engraveJob';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -127,23 +126,6 @@ function jobFiles(): string[] {
 
 const firstLine = (e: unknown): string => (e instanceof Error ? (e.stack ?? e.message).split('\n').slice(0, 3).join(' / ') : String(e));
 
-async function runOld(job: EngraveJob): Promise<Pick<Row, 'old' | 'oldPrograms' | 'oldCutter' | 'oldCycleSeconds' | 'oldWhy'>> {
-  try {
-    const generated: EngraveGenerated = await engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, shop);
-    if (generated.ok) {
-      return {
-        old: 'posts',
-        oldPrograms: generated.programs.length,
-        oldCutter: jobTool(job)?.name ?? job.toolKey ?? null,
-        oldCycleSeconds: generated.cam?.estimatedSeconds ?? null,
-      };
-    }
-    return { old: 'refused', oldWhy: generated.errors.map((e) => e.message).join(' | ') || `stage ${generated.stage}` };
-  } catch (e) {
-    return { old: 'throws', oldWhy: firstLine(e) };
-  }
-}
-
 async function runNew(job: EngraveJob, goal: EngraveTargetObject): Promise<Pick<Row, 'new' | 'newPrograms' | 'newCutters' | 'newCycleSeconds' | 'newWhy'>> {
   const tool = jobTool(job);
   if (tool === null) return { new: 'skipped', newWhy: 'the job names no usable cutter' };
@@ -202,22 +184,20 @@ async function main(): Promise<void> {
     }
     if (goal === undefined) {
       // A 2.5D job: the rebuilt engine does not plan it (its scope is a goal), so there is
-      // nothing to compare; the old engine's row is still recorded for the corpus census.
-      if (!USE_MODEL_CAM_ENGINE) Object.assign(row, await runOld(job));
+      // nothing to compare.
       row.new = 'skipped';
       row.newWhy = 'not a goal job';
     } else {
-      if (USE_MODEL_CAM_ENGINE) {
-        try {
-          const generated = await engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, shop);
-          row.seam = generated.ok ? 'posts' : 'refused';
-          row.seamWhy = generated.ok ? '' : generated.errors.map((e) => e.message).join(' | ');
-        } catch (e) {
-          row.seam = 'throws';
-          row.seamWhy = firstLine(e);
-        }
-      } else {
-        Object.assign(row, await runOld(job));
+      // #966 — there is only one engine now: `engraveGenerate` (the "seam" row) and `runNew`'s
+      // direct `buildModelPlanInputForGoal`/`planModelCam` call both plan through `cam/model`;
+      // the old heightfield comparison this tool once ran beside it is gone with that engine.
+      try {
+        const generated = await engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, shop);
+        row.seam = generated.ok ? 'posts' : 'refused';
+        row.seamWhy = generated.ok ? '' : generated.errors.map((e) => e.message).join(' | ');
+      } catch (e) {
+        row.seam = 'throws';
+        row.seamWhy = firstLine(e);
       }
       Object.assign(row, await runNew(job, goal));
     }
