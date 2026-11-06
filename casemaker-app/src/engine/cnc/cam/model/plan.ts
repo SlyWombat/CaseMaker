@@ -1121,7 +1121,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const buildFloorStrips = (restCutters: readonly Tool[], statedByPlan: ReadonlySet<string>): PlanningFloorStrips => {
       const regions: RemainderRegion[] = [];
       const unreachable: { id: string; area: number; fitShare: number }[] = [];
-      if (noFlatFallback) return { regions, unreachable };
+      const planned: PlanningFloorStrips['planned'] = [];
+      if (noFlatFallback) return { regions, unreachable, planned };
       const flatRadius = (cuttingDiameter(primary) ?? 0) / 2;
       if (flatRadius > 0) {
         // Signed, so a hole (negative) is never mistaken for a component.
@@ -1193,21 +1194,24 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
                     const eroded = offset(kept, -r);
                     return eroded.length > 0 && Math.abs(areaOf(eroded)) > 1e-9;
                   });
-              // THE BALL FITS BY ITS DROP-CUTTER, NOT BY AN XY EROSION. Eroding the strip's
-              // polygon assumes VERTICAL walls; a strip between sloping faces (the tray's scoops,
-              // the organizer's bowl) is reached by a ball whose disc bridges them, because the
-              // CL rides the DESIGN and the tip stays within the band of the design across the
-              // strip. Fit = the share of the strip's own cells whose tip (CL − R) lands within
-              // the plan's 0.1 mm goal band of the design; the pass is planned whenever that
-              // reach is material — ≥ 10 % of the strip or ≥ 1 mm² of it — because a ball that
-              // can take 84 % of a strip should take it and the statement names the remainder.
-              // Below that floor (a strip of truly vertical walls — the synthetic fixture) the
-              // strip is stated as standing instead of planned as air.
-              // No ball in the house: nothing can finish the strip's floor, so it is stated as
-              // standing by the warning path below (F's review, finding 2).
+              // THE BALL FITS BY ITS DROP-CUTTER, AND THE FIT RETURNS THE AREA IT REACHES (#1026).
+              // The fit samples the strip's cells at their CENTRES (phase bbox + pitch/2 — a grid
+              // from the bbox minimum put its first column on the strip's edge and read 14.3 % of
+              // a strip the ball reaches along 0.3 mm of it) and keeps the cells whose CL is
+              // within the plan's 0.1 mm goal band of the node's floor. Those cells — as a
+              // polygon via `cellPolygons`, the #961 helper — ARE the region the ball's floor
+              // pass is planned over, so the pass rasters ground the ball can reach and no air
+              // over ground it cannot. The bar is AREA: plan when the reachable area is at least
+              // max(1 mm², the ball's step-over × 1 mm); below that the whole strip is stated
+              // standing. A strip every sampled cell reaches keeps its ORIGINAL footprint, so the
+              // cards' plans stay byte-identical.
               const ballRadiusMm = ball === undefined ? 0 : (cuttingDiameter(ball) ?? 0) / 2;
+              const BAND_MM = 0.1;
               let ballFitShare = 0;
               let ballFits = false;
+              let plannedStrip:
+                | { footprint: Polygons; reachArea: number; stripArea: number; staysArea: number; standingMm: number; allReached: boolean }
+                | null = null;
               if (kept.length > 0 && ball !== undefined && ballRadiusMm > 0) {
                 const fitRegion: RemainderRegion = {
                   id: `${node.id}:fit`,
@@ -1221,8 +1225,6 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
                   in: 'top',
                 };
                 const cl = clSurface(curvedGeometry, fitRegion, ball, pocketParams.stepOver);
-                let cells = 0;
-                let within = 0;
                 let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
                 for (const ring of kept) {
                   for (const [x, y] of ring) {
@@ -1232,40 +1234,71 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
                     if (y > maxY) maxY = y;
                   }
                 }
-                // THE RULING'S RULE: the ball's CL at the cell against the STRIP'S OWN FLOOR —
-                // the node's floor, not a sampled design top (a top sampler read the part's
-                // surface over a strip and mis-scored both the tray and the organizer). The
-                // drop-cutter already states the height the tool REACHES (the tip for a ball);
-                // subtracting the radius again double-counted it and planned passes over strips
-                // a ball never descends into (the synthetic cone fixture measured fit ≥ 10 % and
-                // a pass that reached 0 %).
                 const FIT_PITCH_MM = 0.5;
-                for (let x = minX; x <= maxX + 1e-9; x += FIT_PITCH_MM) {
-                  for (let y = minY; y <= maxY + 1e-9; y += FIT_PITCH_MM) {
+                const nx = Math.max(1, Math.ceil((maxX - minX) / FIT_PITCH_MM));
+                const ny = Math.max(1, Math.ceil((maxY - minY) / FIT_PITCH_MM));
+                const reach = new Uint8Array(nx * ny);
+                let cells = 0;
+                let within = 0;
+                let standingMm = 0;
+                for (let j = 0; j < ny; j++) {
+                  for (let i = 0; i < nx; i++) {
+                    const x = minX + (i + 0.5) * FIT_PITCH_MM;
+                    const y = minY + (j + 0.5) * FIT_PITCH_MM;
                     if (!pointInPolygons(kept, x, y)) continue;
                     const clAt = cl.dropCutter(x, y);
                     if (clAt === null) continue;
                     cells++;
-                    if (clAt <= node.floorZ + 0.1) within++;
+                    const stand = clAt - node.floorZ;
+                    if (stand <= BAND_MM) {
+                      within++;
+                      reach[j * nx + i] = 1;
+                    } else if (stand > standingMm) {
+                      standingMm = stand;
+                    }
                   }
                 }
                 ballFitShare = cells === 0 ? 0 : within / cells;
                 const cellAreaMm2 = FIT_PITCH_MM * FIT_PITCH_MM;
-                ballFits = ballFitShare >= 0.1 || within * cellAreaMm2 >= 1;
+                const reachArea = within * cellAreaMm2;
+                const stripArea = Math.abs(areaOf(kept));
+                ballFits = reachArea >= Math.max(1, (pocketParams.stepOver ?? 0) * 1);
+                if (ballFits) {
+                  const allReached = cells > 0 && within === cells;
+                  plannedStrip = {
+                    footprint: allReached
+                      ? kept
+                      : cellPolygons((i, j) => reach[j * nx + i] === 1, nx, ny, minX, minY, FIT_PITCH_MM),
+                    reachArea,
+                    stripArea,
+                    staysArea: Math.max(0, stripArea - reachArea),
+                    standingMm,
+                    allReached,
+                  };
+                }
               }
               if (kept.length > 0 && !restOwned && !ballFits) {
                 unreachable.push({ id: node.id, area: Math.abs(areaOf(kept)), fitShare: ballFitShare });
               }
-              if (kept.length > 0 && !restOwned && ballFits) {
+              if (kept.length > 0 && !restOwned && ballFits && plannedStrip !== null) {
                 // THE FLOOR IS THE NODE'S OWN, not a sampled design top: the #982 clamp's
                 // `max(floorZ, designMax)` read the part's top over the opening on the tray and the
                 // organizer and collapsed strips to zero-depth passes at the mouth (topZ = bottomZ
                 // = −1.20 and −0.80 measured), which then cut nothing and were stated wrongly.
                 const zBottom = node.floorZ;
+                planned.push({
+                  id: `${node.id}:floor-strip`,
+                  nodeId: node.id,
+                  reachArea: plannedStrip.reachArea,
+                  stripArea: plannedStrip.stripArea,
+                  staysArea: plannedStrip.staysArea,
+                  standingMm: plannedStrip.standingMm,
+                  allReached: plannedStrip.allReached,
+                });
                 regions.push({
                   id: `${node.id}:floor-strip`,
-                  footprint: kept,
-                  area: Math.abs(areaOf(kept)),
+                  footprint: plannedStrip.footprint,
+                  area: plannedStrip.reachArea,
                   zTop: node.mouthZ,
                   zBottom,
                   triangles: new Uint32Array(0),
@@ -1280,7 +1313,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         };
         walkStrips(tree.pockets);
       }
-      return { regions, unreachable };
+      return { regions, unreachable, planned };
     };
 
     const result = planTreePrograms(tree, {
@@ -1528,10 +1561,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           ? `${s.id}: ${s.area.toFixed(1)} mm² — no ball is held to finish it`
           : `${s.id}: ${s.area.toFixed(1)} mm², the ball reaches ${(s.fitShare * 100).toFixed(0)} % of it within the 0.1 mm band`,
       );
+      const plannedAreas = new Map((result.floorStrips?.planned ?? []).map((p) => [p.id, p] as const));
       for (const strip of plannedStrips) {
-        // THE CELLS THE PASS ACTUALLY REACHES, not "a feed exists": every 0.5 mm cell of the
-        // strip is judged by the ball's own surface over it — the minimum over the feeds near it
-        // of `z + R − √(R² − d²)`, against the strip's floor plus the 0.1 mm band.
+        // THE REACH CHECK ON THE PASS'S OWN MOVES (#1026): the planned region IS the area the fit
+        // found reachable, so the check runs over those cells and a cell AT the band counts as
+        // reached (`<= band + 1e-6` — the knife-edge comparison that read 0 % on ground the fit
+        // had just passed is gone).
+        const areas = plannedAreas.get(strip.id);
         const feeds: { x: number; y: number; z: number }[] = [];
         for (const op of result.ops) {
           if (op.region.id !== strip.id) continue;
@@ -1539,9 +1575,6 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             for (const m of irOp.moves) if (m.kind === 'feed') feeds.push({ x: m.x, y: m.y, z: m.z });
           }
         }
-        // The ball's own surface over a cell: for a feed whose TIP is at (f.x, f.y, f.z), the
-        // material at distance d ≤ R is cut at f.z + R − √(R² − d²); the standing height is the
-        // minimum of that over every feed, less the design.
         const leftoverAt = (x: number, y: number): number => {
           let cut = Infinity;
           for (const f of feeds) {
@@ -1554,54 +1587,31 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         };
         let cells = 0;
         let reached = 0;
-        {
-          const xs = strip.footprint.flatMap((ring) => ring.map((p) => p[0]));
-          const ys = strip.footprint.flatMap((ring) => ring.map((p) => p[1]));
-          for (let x = Math.min(...xs); x <= Math.max(...xs) + 1e-9; x += 0.5) {
-            for (let y = Math.min(...ys); y <= Math.max(...ys) + 1e-9; y += 0.5) {
-              if (!pointInPolygons(strip.footprint, x, y)) continue;
-              cells++;
-              if (leftoverAt(x, y) <= 0.1) reached++;
-            }
+        const xs = strip.footprint.flatMap((ring) => ring.map((p) => p[0]));
+        const ys = strip.footprint.flatMap((ring) => ring.map((p) => p[1]));
+        for (let x = Math.min(...xs); x <= Math.max(...xs) + 1e-9; x += 0.5) {
+          for (let y = Math.min(...ys); y <= Math.max(...ys) + 1e-9; y += 0.5) {
+            if (!pointInPolygons(strip.footprint, x, y)) continue;
+            cells++;
+            if (leftoverAt(x, y) <= 0.1 + 1e-6) reached++;
           }
         }
         const share = cells === 0 ? 0 : reached / cells;
         const nodeId = strip.id.replace(/:floor-strip$/, '');
         if (alreadyStated.has(nodeId)) continue;
-        // A PLANNED PASS ALWAYS CUTS WHAT IT REACHES; the statement names the remainder. The
-        // standing height is the scallop the ball leaves between its own rows over a cell it did
-        // not reach — R − √(R² − d²) at the distance to the nearest feed, and "untouched" for a
-        // cell no feed passes within the ball's radius.
-        const missed: number[] = [];
-        let stride: number | null = null;
-        const xsB = strip.footprint.flatMap((ring) => ring.map((p) => p[0]));
-        const ysB = strip.footprint.flatMap((ring) => ring.map((p) => p[1]));
-        for (let x = Math.min(...xsB); x <= Math.max(...xsB) + 1e-9; x += 0.5) {
-          for (let y = Math.min(...ysB); y <= Math.max(...ysB) + 1e-9; y += 0.5) {
-            if (!pointInPolygons(strip.footprint, x, y)) continue;
-            const leftover = leftoverAt(x, y);
-            if (leftover <= 0.1) continue;
-            if (leftover === Infinity) {
-              missed.push(Infinity);
-              for (const f of feeds) stride = Math.min(stride ?? Infinity, Math.hypot(f.x - x, f.y - y));
-            } else {
-              missed.push(leftover);
-            }
+        if (share >= 0.99) {
+          cutIds.push(nodeId);
+          floorStripsCut.add(nodeId);
+          if (areas !== undefined && !areas.allReached) {
+            remainderWhy.push(
+              `${nodeId}: ${areas.reachArea.toFixed(1)} of ${areas.stripArea.toFixed(1)} mm² finished by the ball; ` +
+                `${areas.staysArea.toFixed(1)} mm² stays, up to ${areas.standingMm.toFixed(2)} mm tall`,
+            );
           }
-        }
-        const standingMm = missed.length === 0 ? 0 : missed.some((m) => m === Infinity) ? Infinity : Math.max(...missed);
-        const missedAreaMm2 = missed.length * 0.25;
-        if (share >= 0.995 && missedAreaMm2 < 0.5) {
-          cutIds.push(nodeId);
-          floorStripsCut.add(nodeId);
         } else {
-          cutIds.push(nodeId);
-          floorStripsCut.add(nodeId);
-          remainderWhy.push(
-            `${nodeId}: the pass reaches ${(share * 100).toFixed(0)} %; ${missedAreaMm2.toFixed(1)} mm² stays, ` +
-              (Number.isFinite(standingMm)
-                ? `up to ${standingMm.toFixed(2)} mm tall`
-                : `untouched beyond ${(stride ?? 0).toFixed(1)} mm from any feed`),
+          uncutIds.push(nodeId);
+          uncutWhy.push(
+            `${nodeId}: the pass reaches ${(share * 100).toFixed(0)} % of the ${areas?.reachArea.toFixed(1) ?? 'reachable'} mm² it was planned over`,
           );
         }
       }
@@ -3849,6 +3859,16 @@ export interface PlanTreeOptions {
 export interface PlanningFloorStrips {
   regions: RemainderRegion[];
   unreachable: { id: string; area: number; fitShare: number }[];
+  /** #1026 — the areas the fit's own cells give each planned strip, for its statement. */
+  planned: {
+    id: string;
+    nodeId: string;
+    reachArea: number;
+    stripArea: number;
+    staysArea: number;
+    standingMm: number;
+    allReached: boolean;
+  }[];
 }
 
 export interface PlanTreeResult {
