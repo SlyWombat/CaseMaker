@@ -367,7 +367,7 @@ export interface PlanModelCamOptions {
  * (`finishScallopMm`), because F's coverage line counts anything over 0.1 mm standing above the
  * goal as leftover — a finish leaving the rough's band as its own scallop reads as uncovered.
  */
-const MODEL_STOCK_TO_LEAVE_MM = 0.3;
+export const MODEL_STOCK_TO_LEAVE_MM = 0.3;
 
 /** #962 — how close a rim's own first and last point must already be to count as closed; past
  * this is a genuine gap in `findRims`' own chain, not float noise from the mesh. */

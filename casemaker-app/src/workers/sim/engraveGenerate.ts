@@ -228,9 +228,11 @@ import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 // #966 — `generateGoalProgram` plans every goal job through `planModelCam`, the model-driven CAM
 // engine's one entry point.
 import {
+  MODEL_STOCK_TO_LEAVE_MM,
   planModelCam,
   type ModelPlanInput,
   type ModelPlanOutput,
+  type PlannedOp,
   type SetupSpec,
 } from '@/engine/cnc/cam/model/plan';
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
@@ -5150,6 +5152,52 @@ export async function buildModelPlanInputForGoal(
   };
 }
 
+/**
+ * #1007 — THE MODEL PLAN'S SURFACE FACTS, in the shape `runSheet.ts`'s `surfaceSteps` reads.
+ * Every number is the plan's own: the cutter-location grid's spacing, the rough/finish ops'
+ * `passStepMm`, the engine's stated stock-to-leave. `gridCells` is 0 — this engine samples CL
+ * grids, not a goal heightfield, and the resolution note says so; `scallop`/`rim` are null
+ * because the model engine runs no separate scallop or rim pass (its finish is one scallop-level
+ * raster and its rim work is the chamfer op, stated in the plan's own notes).
+ */
+function goalSurfaceFactsFromPlan(output: ModelPlanOutput): GoalSurfaceFacts {
+  const plan = output.perSetup[0]!;
+  const spacings = plan.clGrid;
+  const pitchOf = (cutterKey: string): number | null => spacings.find((c) => c.cutterKey === cutterKey)?.maxSpacingMm ?? null;
+  const opOf = (kind: PlannedOp['kind']): PlannedOp | undefined => plan.ops.find((o) => o.kind === kind);
+  const passStep = (op: PlannedOp | undefined): number | null => {
+    if (op === undefined) return null;
+    const steps = op.outcome.ir.operations
+      .map((o) => o.passStepMm)
+      .filter((s): s is number => typeof s === 'number' && Number.isFinite(s) && s > 0);
+    return steps.length === 0 ? null : Math.max(...steps);
+  };
+  const roughOp = opOf('rough');
+  const finishOp = opOf('finish');
+  const pencilOp = opOf('pencil');
+  const pitchMax = spacings.length === 0 ? 0 : Math.max(...spacings.map((c) => c.maxSpacingMm));
+  const pitchMin = spacings.length === 0 ? 0 : Math.min(...spacings.map((c) => c.minSpacingMm));
+  return {
+    resolutionNote:
+      spacings.length === 0
+        ? "the model plan's cutter-location grid states no spacing"
+        : `the model plan's cutter-location grid, ${pitchMin}–${pitchMax} mm spacing`,
+    gridPitchMm: pitchMax,
+    gridCells: 0,
+    stepDownMm: passStep(roughOp) ?? 0,
+    finishStepDownMm: passStep(finishOp) ?? 0,
+    roughStepOverMm: pitchOf(roughOp?.outcome.cutter ?? '') ?? 0,
+    finishStepOverMm: pitchOf(finishOp?.outcome.cutter ?? '') ?? 0,
+    stockToLeaveMm: MODEL_STOCK_TO_LEAVE_MM,
+    roughingLayers: roughOp === undefined ? 0 : roughOp.outcome.ir.operations.length,
+    rough: roughOp === undefined ? undefined : { tool: roughOp.outcome.ir.tool.name, kind: 'raster' as const },
+    scallop: null,
+    pencil: pencilOp === undefined ? null : { paths: pencilOp.outcome.ir.operations.length, creaseDeg: 0 },
+    rim: null,
+    notes: plan.notes,
+  };
+}
+
 export async function generateGoalProgram(
   job: EngraveJob,
   goal: EngraveTargetObject,
@@ -5511,7 +5559,10 @@ export async function generateGoalProgram(
     programs,
     plan: output,
     planStatements,
-    ...(mouldFacts === null ? {} : { surface3d: mouldFacts }),
+    // #1007 — THE MODEL RUN CARRIES ITS SURFACE FACTS. #1005's mould facts are richer and win
+    // when the job is a mould; every other goal job gets the plan's own numbers here, because the
+    // heightfield engine that used to fill this block is gone (the #966 removal).
+    surface3d: mouldFacts ?? goalSurfaceFactsFromPlan(output),
   };
 }
 
