@@ -1,9 +1,13 @@
 /**
  * #993 — THE DOOR SPLITS A NON-MANIFOLD EDGE INSTEAD OF REFUSING IT. Two sheets meeting along a
- * line (the organizer STL's one knife edge: four triangles, two opposite-normal pairs) are split
- * into two sheets by duplicating the edge's vertices for the pair with the larger dihedral — a
- * zero-width slit Manifold accepts. Exact duplicate triangles are dropped; what pairing cannot
- * resolve is refused by name with the count and the first edge's position.
+ * line (the organizer STL's one knife edge: four triangles, two opposite-normal pairs) are
+ * separated by the vertex-link (umbrella) split: at each vertex of an overused edge the triangles
+ * around it group into sheets through TWO-SIDED spokes — the overused edge is the seam, never a
+ * spoke — and every sheet beyond the first gets a copy of that vertex, which is a zero-width slit
+ * Manifold accepts. A split is only made where every sheet carries 0 or 2 of the edge's triangles;
+ * a flap on a three-use edge is left to the caller's named refusal (count + first edge's position).
+ * Exact duplicate triangles are dropped first. (A literal pair duplication was measured to leave
+ * boundary edges: the pair's OTHER edges become single-sided.)
  */
 import { describe, expect, it } from 'vitest';
 

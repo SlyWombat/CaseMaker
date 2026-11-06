@@ -1512,6 +1512,7 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     expect(row.setup.features.report.source, 'an STL must take the mesh path').toBe('mesh');
     expect(row.rims).toBe(63);
     expect(row.modelled).toBe(28);
+    expect(row.chamferOps).toBe(41);
     expect(row.measured, 'the STL row measured nothing').not.toBeNull();
     // The seven lines are judged on BOTH rows: the STL row must clear its own gate (the same
     // 0.95 pass coverage) and cut nothing into the part. Its RIM line differs from the STEP
@@ -1707,9 +1708,9 @@ describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.o
     expect(row.modelled).toBe(6);
     expect(row.chamferOps).toBe(48);
     expect(row.measured!.coverage, 'the STL row fell under the card coverage floor').toBeGreaterThanOrEqual(0.9861);
-    // MEASURED at the split door: 3.97e-5 adjudicated (four cells' worth) — not zero, and stated:
-    // the mesh path's own V-on-fillet cuts (6 modelledChamfer rims here) are #994's to remove.
-    expect(row.measured!.adjudicatedFraction ?? 0, 'the STL row cut into the part').toBeLessThanOrEqual(1e-4);
+    // PINNED at the split door: 3.973923346491006e-5 adjudicated — not zero, and stated: the mesh
+    // path's own V-on-fillet cuts (6 modelledChamfer rims here) are #994's to remove.
+    expect(row.measured!.adjudicatedFraction ?? 0, 'the STL row cut into the part').toBeCloseTo(3.973923346491006e-5, 10);
   }, 900_000);
 });
 
