@@ -1523,7 +1523,8 @@ export interface RestReference {
  * words) and #992's statement rule.
  *
  * The "ball that would take it" is the ideal plan's when `reference` is non-null and that ball is
- * not in the owned set; otherwise the sentence says no catalogue ball was measured. `restVisibility`
+ * not in the owned set; otherwise the sentence gives no size and points at the catalogue as the
+ * action (none configured for this shop). `restVisibility`
  * carries the shop's thresholds and their provenance; absent is the labelled fallback.
  */
 export function restStatementForPlan(
@@ -1568,7 +1569,7 @@ export function restStatementForPlan(
     : `— under the ${vis.depthMm.toFixed(2)} mm and ${shareWord(vis.share)} % that marks a leftover visible —`;
   const would =
     reference === null
-      ? ' No catalogue ball was measured.'
+      ? ' The ball that would take it is measured from the cutter catalogue — none is configured for this shop (Manage → Tools).'
       : ` The catalogue's ${reference.ball.name} (⌀${diaWord(cuttingDiameter(reference.ball) ?? 0)} mm) would: ` +
         `leftover ${shareWord(reference.leftoverShare)} %, ` +
         `${reference.cycleDeltaSeconds >= 0 ? '+' : ''}${Math.round(reference.cycleDeltaSeconds)} s of cycle (measured).`;

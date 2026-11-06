@@ -7,9 +7,11 @@
  * they agree — never the depth's source for both (the #1023 nit).
  *
  * The ball clause (#1027's other half) is NOT built: with no catalogue ball measured the sentence
- * keeps "No catalogue ball was measured." and gives no size. A pure per-point drop-cutter test
- * cannot see a scallop, and on the acceptance plate's 56-degree walls it rejects every radius; the
- * honest removal-envelope measure is filed as its own issue (evidence on #1027).
+ * gives no size and says where one comes from — an action, not a bare absence ("The ball that
+ * would take it is measured from the cutter catalogue — none is configured for this shop
+ * (Manage → Tools)."). A pure per-point drop-cutter test cannot see a scallop, and on the
+ * acceptance plate's 56-degree walls it rejects every radius; the honest removal-envelope measure
+ * was ruled out for 1.0 (#1028, option 3).
  */
 import { describe, expect, it } from 'vitest';
 
@@ -57,11 +59,11 @@ describe('#1027 each threshold keeps its own source', () => {
     expect(text).toContain('The visible depth is from the shop’s location document; the third-tool share is from this build’s fallback.');
   });
 
-  it('keeps the plain absence when no catalogue ball was measured — the numbers and no size', () => {
+  it('names the catalogue as the action when no ball was measured — the numbers and no size', () => {
     const text = statementWith(undefined);
     expect(text).toContain('2.42 mm');
     expect(text).toContain('21.4 %');
-    expect(text).toContain('No catalogue ball was measured.');
+    expect(text).toContain('The ball that would take it is measured from the cutter catalogue — none is configured for this shop (Manage → Tools).');
     expect(text).not.toMatch(/about ⌀/);
   });
 });

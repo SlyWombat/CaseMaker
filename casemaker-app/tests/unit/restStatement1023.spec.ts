@@ -128,7 +128,7 @@ describe('#1023 — the finish states what it leaves', () => {
     expect(statement?.text).toContain('0.10 mm');
     expect(statement?.text).toContain('2 %');
     // planModelCam alone has no measured catalogue ball; the seam's ideal plan supplies one.
-    expect(statement?.text).toContain('catalogue ball was measured');
+    expect(statement?.text).toContain('none is configured for this shop (Manage → Tools)');
     expect(statement?.count).toBeGreaterThan(0);
   }, 180_000);
 
