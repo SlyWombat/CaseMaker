@@ -433,12 +433,15 @@ describe('#948 the elephant corpus run — zero cut-into is not a pass', () => {
       // so the page's stamp was re-taken on the new program and never adjusted to the app. The
       // column grid's max-of-four read gives 66.23 % leftover, i.e. 33.77 % coverage — 18.7 points
       // away — so the leftover must use the page's rule.
-      // #1007 — THE PAGE'S READ. The old pin (10863/22865 = 0.4750929) was the page's stamp on
-      // the OLD engine's program; the model engine posts a different program, so its leftover at
-      // the same 0.1 mm grid and rule is its own number, re-pinned here (it was 0.1682921 on the
-      // model path when measured; the cell-count tolerance stays).
+      // #1007 — THE PAGE'S READ ON THE MODEL ENGINE. The old pin (10863/22865 = 0.4750929) was
+      // the page's stamp on the OLD engine's program; the model engine posts a different program,
+      // so its leftover at the same 0.1 mm grid and rule is its own measure: 0.3068008, within one
+      // cell. The message prints the MEASURED fraction — the earlier form printed the difference
+      // from the pin, which read as the value and confused the record once.
+      const leftoverFraction = report.goalCutInto?.leftoverFractions[0] ?? 0;
       expect(
-        Math.abs((report.goalCutInto?.leftoverFractions[0] ?? 0) - 0.1682921),
+        Math.abs(leftoverFraction - 0.3068008),
+        `leftoverFractions[0] measured ${leftoverFraction} (the model engine's pin is 0.3068008 and this compares the difference)`,
       ).toBeLessThanOrEqual(1 / (report.goalCutInto?.goalCells ?? 1));
     } finally {
       session.dispose();
