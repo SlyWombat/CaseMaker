@@ -479,6 +479,15 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
       }
     }
     const finalDepthMm = toolRadius + Math.max(0, steps.length - 1) * opts.stepOverMm + toolRadius;
+    // The record is derived from `region`, though the level cuts only `levelRegion` — and that
+    // broader base is CONSERVATIVE, which is why it is safe as a landing proof:
+    //  - the claimed set is a subset of `open`, and `open` is the opening of the FLOOR-safe
+    //    region; the ceiling masks are nested (mask(floorZ) ⊆ mask(z) for every level), so the
+    //    record can never reach a cell this level does not cut;
+    //  - the hole is `region` eroded by the depth, and eroding a SUPERSET gives a superset, so
+    //    the broad base subtracts at least as much as the level region's own core would — the
+    //    near-mask cells a tighter `levelRegion` hole would add back are left UNCLAIMED (their
+    //    landings fall back to the stock-top rule), never over-claimed.
     cleared.push({ z, boundary: clearedToDepth(open, region, opts.offset, finalDepthMm) });
   }
 
