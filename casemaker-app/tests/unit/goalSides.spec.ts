@@ -147,9 +147,12 @@ describe('#723 P2-1b — the sides reading', () => {
 });
 
 describe('#723 P2-1b — one program per side', () => {
-  // #966 triage — #1006: the seam plans the job's goal once from geometry, never the job's saved
-  // sides; programs carry no setup.
-  it.fails('generates a surface program for each side, in setup order, with its setup on the program', async () => {
+  // #1032 — PROMOTED FROM `it.fails`. The marker was written at #966's triage (#1006: the seam
+  // planned the job's goal once from geometry and programs carried no setup). By this tip the
+  // seam posts one program per side, and #1032's registry-key stamping made the LAST failing
+  // assertion hold too (`programs[0].toolKey === job.toolKey`) — every assertion below passes, so
+  // the known red is gone. A future failure here is a regression, not an expected state.
+  it('generates a surface program for each side, in setup order, with its setup on the program', async () => {
     const job = twoSideJob();
     expect(jobHasItems(job), 'the fixture must be a pure-goal job').toBe(false);
     expect(goalSides(job)).toHaveLength(2);

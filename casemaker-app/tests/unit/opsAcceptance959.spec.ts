@@ -1696,7 +1696,10 @@ describe.skipIf(TRAY === undefined)('#989 — the tray through the app path: the
       ).toBe(true);
       // The V program exists at all. Before the seam carried the goal's chamfer there was none,
       // whatever the plan did with the rest of the part.
-      const vKey = CHAMFER3175.id!;
+      // #1032 — a POSTED program names its registry key (this shop's own `inv:…` row), while the
+      // plan's IR keeps `cutterKeyOf` (`tool.id ?? tool.name`); read each where it lives.
+      const vCutterKey = CHAMFER3175.id!;
+      const vKey = `inv:${vCutterKey}`;
       const vPrograms = out.programs.filter((p) => p.toolKey === vKey);
       expect(vPrograms.length, `programs: ${out.programs.map((p) => p.toolKey).join(', ')}`).toBe(1);
       // Every feed on the V run is one leg below a rim's own z; the TOP rim's plane is `topZ`,
@@ -1704,7 +1707,7 @@ describe.skipIf(TRAY === undefined)('#989 — the tray through the app path: the
       const vFeedZs: number[] = [];
       for (const setup of out.plan?.perSetup ?? []) {
         for (const ir of setup.programs) {
-          if ((ir.tool.id ?? ir.tool.name) !== vKey) continue;
+          if ((ir.tool.id ?? ir.tool.name) !== vCutterKey) continue;
           for (const op of ir.operations) for (const m of op.moves) if (m.kind === 'feed') vFeedZs.push(m.z);
         }
       }
