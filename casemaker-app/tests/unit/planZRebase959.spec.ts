@@ -1,15 +1,21 @@
 /**
- * #959 review item (3) — THE CURVED STAGES' Z DATUM, RED-FIRST AT stockTop = 10.
+ * #959 review item (3) — THE CURVED STAGES' Z DATUM, originally RED-FIRST AT stockTop = 10.
  *
- * `planPocketsForTree` rebases every Z it hands an op by `-stockTop` (one datum: IR Z 0 is the
- * STOCK top, which the post's `probed-top-face` convention and `safeZ`/`hopZ` all assume). The
- * curved half did not: `regionRefOf` and the ops took the tree's mesh-absolute Z values straight
- * through, so on any part recognised at a non-zero stockTop every curved move posts that far off
- * the stock — silently, since the IR itself is consistent.
+ * `planPocketsForTree` used to rebase every Z it hands an op by `-stockTop` (one datum: IR Z 0 is
+ * the STOCK top, which the post's `probed-top-face` convention and `safeZ`/`hopZ` all assume).
+ * The curved half did not: `regionRefOf` and the ops took the tree's mesh-absolute Z values
+ * straight through, so on any part recognised at a non-zero stockTop every curved move posted
+ * that far off the stock — silently, since the IR itself was internally consistent.
  *
- * The reviewer's finding (plan.ts:1033, rough.ts:241, finish.ts:164, chamfer.ts:86): red-first
- * here with a ramp whose surface runs from z = 10 down to z = 2, a tree at stockTop = 10, and the
- * assertion that NOTHING feeds above Z 0 in the rebased datum, the rim's bevel at −0.5.
+ * #1018 made that whole class of bug impossible by construction: `planModelCam`'s own setup loop
+ * shifts the mesh by `-stockTop` at the door, ONCE, before `recogniseFeatures`/`planCurvedForTree`
+ * ever see it, so a REAL tree is ALREADY stock-top-relative and `planCurvedForTree` itself no
+ * longer rebases anything (the per-site shim this file's own red-first case was pinning against
+ * is gone — the twin-frame guard, `setupDatumGuard.spec.ts`, is the standing regression test for
+ * the class now). This file's own fixtures are hand-built `FeatureTree`s calling
+ * `planCurvedForTree` directly, below the door — updated to supply what a real caller now would:
+ * a tree already shifted to `stockTop = 0` (the ramp 10→2 becomes 0→−8, the groove's land 10
+ * becomes 0), proving the SAME ceiling/bevel numbers the original red-first case checked.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -50,9 +56,11 @@ const vbit: Tool = flatEndMill(3.175, { number: 3, id: 'v90', name: '90 chamfer'
 function rampAtStockTop(): { tree: FeatureTree; geometry: { triangles: { positions: Float32Array; indices: Uint32Array; triangleCount: number; bbox: { min: [number, number, number]; max: [number, number, number] } } } } {
   // The MESH runs well past the region's footprint (the grown finish region needs surface to the
   // drop-cutter's own reach outside it — the same margin the existing ramp fixture carries).
+  // #1018 — already shifted by `-STOCK_TOP`, as the door would: the ramp top (STOCK_TOP) lands at
+  // 0, its low end (Z_LOW) at `Z_LOW - STOCK_TOP` (−8), same for the floor and every other Z below.
   const MX0 = -10, MX1 = 50, MY0 = -20, MY1 = 20;
-  const FLOOR = -10; // well below Z_LOW (2) and below every rim.z - stepMm (9.8): a genuine drop.
-  const zAt = (x: number): number => STOCK_TOP + ((x - X0) / (X1 - X0)) * (Z_LOW - STOCK_TOP);
+  const FLOOR = -10 - STOCK_TOP; // well below Z_LOW - STOCK_TOP and below every rim.z - stepMm: a genuine drop.
+  const zAt = (x: number): number => ((x - X0) / (X1 - X0)) * (Z_LOW - STOCK_TOP);
   const footprint: Polygons = [[[X0, Y0], [X1, Y0], [X1, Y1], [X0, Y1]]];
   const geometry = {
     triangles: {
@@ -69,26 +77,26 @@ function rampAtStockTop(): { tree: FeatureTree; geometry: { triangles: { positio
       triangleCount: 4,
       bbox: {
         min: [MX0, MY0, FLOOR] as [number, number, number],
-        max: [MX1, MY1, STOCK_TOP] as [number, number, number],
+        max: [MX1, MY1, 0] as [number, number, number],
       },
     },
   };
   const rim = {
     id: 'rim-0',
     polyline: [[X0, Y0], [X1, Y0], [X1, Y1], [X0, Y1], [X0, Y0]] as [number, number][],
-    z: STOCK_TOP,
+    z: 0,
     of: 'contour' as const,
     kind: 'sharp' as const,
   };
   const tree: FeatureTree = {
-    frame: { up: [0, 0, 1], stockTop: STOCK_TOP, partTop: STOCK_TOP, partBottom: Z_LOW },
-    levels: [Z_LOW],
-    top: { z: STOCK_TOP, floors: [], area: 0 },
-    contour: { outline: footprint, area: (X1 - X0) * (Y1 - Y0), zTo: Z_LOW, frees: true, shoulders: [] },
+    frame: { up: [0, 0, 1], stockTop: 0, partTop: 0, partBottom: Z_LOW - STOCK_TOP },
+    levels: [Z_LOW - STOCK_TOP],
+    top: { z: 0, floors: [], area: 0 },
+    contour: { outline: footprint, area: (X1 - X0) * (Y1 - Y0), zTo: Z_LOW - STOCK_TOP, frees: true, shoulders: [] },
     pockets: [],
     rims: [rim],
     remainder: [{
-      id: 'ramp', footprint, area: (X1 - X0) * (Y1 - Y0), zTop: STOCK_TOP, zBottom: Z_LOW,
+      id: 'ramp', footprint, area: (X1 - X0) * (Y1 - Y0), zTop: 0, zBottom: Z_LOW - STOCK_TOP,
       triangles: new Uint32Array(), slopeDeg: [0, 12], slopeMedianDeg: 11, in: 'top',
     }],
     unreachable: [],
@@ -110,8 +118,9 @@ function grooveAtStockTop(): { tree: FeatureTree; geometry: { triangles: { posit
   // `pocketLoops` finds loops. Wider grooves let the ⌀6 in (no rest work at all), and a 3.175 mm
   // rest leaves a strip narrower than itself (the op's stated narrow-mask limitation).
   const GX0 = 19, GX1 = 23;
-  const TOP = STOCK_TOP;
-  const BOTTOM = STOCK_TOP - 0.8;
+  // #1018 — already shifted by `-STOCK_TOP`, as the door would: the land (STOCK_TOP) lands at 0.
+  const TOP = 0;
+  const BOTTOM = -0.8;
   const footprint: Polygons = [[[2, -12], [42, -12], [42, 12], [2, 12]]];
   const positions: number[] = [];
   const quad = (ax: number, ay: number, az: number, bx: number, by: number, bz: number, cx: number, cy: number, cz: number, dx: number, dy: number, dz: number): void => {
@@ -132,9 +141,9 @@ function grooveAtStockTop(): { tree: FeatureTree; geometry: { triangles: { posit
     },
   };
   const tree: FeatureTree = {
-    frame: { up: [0, 0, 1], stockTop: STOCK_TOP, partTop: STOCK_TOP, partBottom: BOTTOM },
+    frame: { up: [0, 0, 1], stockTop: 0, partTop: 0, partBottom: BOTTOM },
     levels: [BOTTOM],
-    top: { z: STOCK_TOP, floors: [], area: 0 },
+    top: { z: 0, floors: [], area: 0 },
     contour: { outline: footprint, area: 800, zTo: BOTTOM, frees: true, shoulders: [] },
     pockets: [],
     rims: [],
@@ -200,7 +209,7 @@ describe('#959 review — the curved stages speak the STOCK-top datum', () => {
       vbit,
       restFlat: small,
       // The rest cuts where a Z LEVEL falls inside its CL-difference band; 0.3 mm steps put one
-      // (9.7, rebased -0.3) inside the groove's band on this fixture.
+      // (−0.3, in this fixture's own stock-top-relative datum) inside the groove's band.
       stepDownMm: 0.3,
       bandMm: 0.3,
       feeds: { feedMmPerMin: 900, plungeFeedMmPerMin: 250 },

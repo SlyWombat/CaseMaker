@@ -240,16 +240,14 @@ export interface PocketOpOptions {
    * MORE restrictive. Absent → the pre-#966 behaviour, unchanged.
    */
   aboveMaterial?: {
+    /**
+     * #1018 — `mesh`'s triangles are stock-top-relative too, the SAME datum `node.floorZ`/
+     * `mouthZ` already arrive in: every real caller (`plan.ts`'s own setup loop) shifts the
+     * mesh at the door, before this op or anything else ever reads it, so no per-site offset
+     * converts between two datums here any more.
+     */
     mesh: DropCutterMesh;
     marginMm?: number;
-    /**
-     * `mesh`'s triangles sit on the mesh's own absolute Z axis; `node.floorZ`/`mouthZ` (every
-     * caller in `plan.ts` already rebases them onto `Z 0 = stock top` — that file's own header
-     * note) do not. Added back onto a level's `z` before it is compared against the mesh's own
-     * drop-cutter height — `meshAbsoluteZ = z + zOffsetMm`. Absent → 0: a direct caller (a unit
-     * test, or any future one) that hands `node` mesh-absolute Z values unchanged needs no offset.
-     */
-    zOffsetMm?: number;
   };
 }
 
@@ -433,7 +431,6 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
   let ceilingMaskAt: ((levelZ: number) => Polygons) | null = null;
   if (opts.aboveMaterial !== undefined) {
     const marginMm = opts.aboveMaterial.marginMm ?? ARC_CHORD_TOLERANCE_MM;
-    const zOffsetMm = opts.aboveMaterial.zOffsetMm ?? 0;
     const mesh = opts.aboveMaterial.mesh;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const ring of region) {
@@ -470,11 +467,8 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
         overlapCache.set(t, result);
         return result;
       };
-      // `cellBound` is in the MESH's own absolute Z; `levelZ` arrives in whatever frame the
-      // caller's `node.floorZ`/`mouthZ` are already in (stock-top-relative, from every real
-      // `plan.ts` call site) — `zOffsetMm`'s own doc above. Converting the mesh-absolute bound
-      // into the LEVEL's frame (subtracting `zOffsetMm`), rather than the other way around, keeps
-      // the comparison in whichever frame the caller actually posts moves in.
+      // #1018 — `cellBound` and `levelZ` are both stock-top-relative now (`aboveMaterial.mesh`'s
+      // own doc above): the door shift makes them the same datum, no per-site offset either way.
       const reach = Math.hypot(pitch, pitch) / 2 + bins.cellMm;
       // The cell's FOUR CORNERS, judged once on the shared grid nodes: a cell whose whole square
       // is strictly inside the region needs no per-triangle overlap test — anything over the
@@ -588,7 +582,10 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
           pitch,
           (i, j) => {
             if (i < 0 || j < 0 || i >= nx || j >= ny) return false;
-            return cellBound[j * nx + i]! - zOffsetMm - marginMm < levelZ;
+            // #1018 — `cellBound` is sampled on `mesh`, which is now the SAME stock-top-relative
+            // datum `levelZ` already is (the door shift, `plan.ts`'s own setup loop); compared
+            // directly, no per-site offset.
+            return cellBound[j * nx + i]! - marginMm < levelZ;
           },
         );
     }

@@ -22,6 +22,7 @@ import { tl, type ManifoldInstance } from './helpers/manifoldExec';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
 import { recogniseFeatures, type FeatureTree, type PocketNode } from '@/engine/cnc/cam/model/features';
 import { planPocketsForTree, type PlanPocketsResult } from '@/engine/cnc/cam/model/plan';
+import { shiftToStockTop } from '@/engine/cnc/cam/model/setups';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { HOP_Z, type RapidEstimate } from '@/engine/cnc/cam/ir';
 import type { Tool } from '@/engine/cnc/tool';
@@ -59,8 +60,13 @@ const offset = makeClipperOffset(tl);
 const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
 const all = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [n, ...all(n.children)]);
 
+// #1018 — every real caller now shifts the mesh to this setup's own `stockTop` at the door
+// (`shiftToStockTop`, `plan.ts`'s own setup loop), before `planPocketsForTree` ever sees a tree:
+// this unit test, calling `planPocketsForTree` directly below that loop, has to do the same shift
+// itself, or test a tree the real engine never builds any more.
 function treeOf(solid: ManifoldInstance, stockTop: number): FeatureTree {
-  return recogniseFeatures({ triangles: parsed(solid) }, { up: [0, 0, 1], stockTop, stockBottom: 0 }, tl);
+  const { geometry, frame } = shiftToStockTop({ triangles: parsed(solid) }, { up: [0, 0, 1], stockTop, stockBottom: 0 });
+  return recogniseFeatures(geometry, frame, tl);
 }
 
 function plan(tree: FeatureTree, houseFlats: Tool[]): PlanPocketsResult {
@@ -110,9 +116,10 @@ function inside(polys: Polygons, x: number, y: number): boolean {
  * rapid may run below `hopZMm` (advisor's review on dd150a9b and 9e976f0b: a datum error turns a
  * SHOULD-retract into a feed at depth, which this file's own `floorZ` comparison can only catch
  * when it is itself looking at the right Z — hence `feedsChecked`, so a datum bug cannot pass
- * this check vacuously by finding nothing at `floorZ`). `node.floorZ` is on `recogniseFeatures`'s
- * own mesh axis; `planPocketsForTree` rebases every move onto `Z 0 = stockTop` (plan.ts's header
- * note on dd150a9b), so the floor it actually posts is `floorZ - stockTop`.
+ * this check vacuously by finding nothing at `floorZ`). #1018 — `node.floorZ` and the posted
+ * moves share ONE stock-top-relative datum now (`treeOf`'s own door shift), so `stockTop` here is
+ * always `tree.frame.stockTop` — 0, for a tree built through the door — kept as a parameter
+ * rather than assumed, so a caller that still hands a non-shifted tree is not silently wrong.
  */
 function linksOutsideFreeSpace(
   result: PlanPocketsResult,
@@ -204,6 +211,11 @@ function sweptFraction(result: PlanPocketsResult, nodeId: string, area: Polygons
   return total === 0 ? 0 : hit / total;
 }
 
+// The fixtures below were all built, and their floors stated, in the solid's own absolute Z —
+// `treeOf` now shifts that onto the stock-top-relative datum (#1018), so a fixture's stated
+// absolute floor height needs the SAME shift to still find the right node.
+const STOCK_TOP = 10;
+
 describe('#959 red-first (A’s review 6622610124)', () => {
   it('(1) a same-level link stays in free space: a pocket with an island', () => {
     // 40 × 40 × 10 block; a 30 × 30 pocket 4 deep (floor z 6) with two 5 × 5 islands standing to
@@ -212,8 +224,8 @@ describe('#959 red-first (A’s review 6622610124)', () => {
       .subtract(tl.Manifold.cube([30, 30, 4]).translate([5, 5, 6]))
       .add(tl.Manifold.cube([5, 5, 4]).translate([11, 11, 6]))
       .add(tl.Manifold.cube([5, 5, 4]).translate([24, 24, 6]));
-    const tree = treeOf(s, 10);
-    const node = all(tree.pockets).find((n) => Math.abs(n.floorZ - 6) < 1e-6 && n.islands.length === 2)!;
+    const tree = treeOf(s, STOCK_TOP);
+    const node = all(tree.pockets).find((n) => Math.abs(n.floorZ - (6 - STOCK_TOP)) < 1e-6 && n.islands.length === 2)!;
     expect(node, 'the floor node holds the island').toBeDefined();
     const { bad, feedsChecked } = linksOutsideFreeSpace(plan(tree, [flat(3, 1)]), node, 1.5, tree.frame.stockTop, HOP_Z);
     expect(feedsChecked, 'the check actually looked at some feeds — a datum bug must not pass by finding none').toBeGreaterThan(0);
@@ -226,8 +238,8 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     const s = tl.Manifold.cube([40, 30, 10])
       .subtract(tl.Manifold.cube([30, 20, 4]).translate([5, 5, 6]))
       .add(tl.Manifold.cube([4, 16, 4]).translate([18, 5, 6]));
-    const tree = treeOf(s, 10);
-    const node = all(tree.pockets).find((n) => Math.abs(n.floorZ - 6) < 1e-6)!;
+    const tree = treeOf(s, STOCK_TOP);
+    const node = all(tree.pockets).find((n) => Math.abs(n.floorZ - (6 - STOCK_TOP)) < 1e-6)!;
     expect(node).toBeDefined();
     const { bad, feedsChecked } = linksOutsideFreeSpace(plan(tree, [flat(2, 1)]), node, 1, tree.frame.stockTop, HOP_Z);
     expect(feedsChecked, 'the check actually looked at some feeds — a datum bug must not pass by finding none').toBeGreaterThan(0);
@@ -237,8 +249,8 @@ describe('#959 red-first (A’s review 6622610124)', () => {
   it('(3) an open shoulder narrower than the cutter is cleared (the tray’s ~3 mm ledge)', () => {
     // A 40 × 30 × 7 base with a 34 × 24 × 3 plateau on top: a 3 mm-wide open ledge at z 7 all round.
     const s = tl.Manifold.cube([40, 30, 7]).add(tl.Manifold.cube([34, 24, 3]).translate([3, 3, 7]));
-    const tree = treeOf(s, 10);
-    const ledge = all(tree.pockets).find((n) => n.open && Math.abs(n.floorZ - 7) < 1e-6)!;
+    const tree = treeOf(s, STOCK_TOP);
+    const ledge = all(tree.pockets).find((n) => n.open && Math.abs(n.floorZ - (7 - STOCK_TOP)) < 1e-6)!;
     expect(ledge, 'the tree reads an open shoulder at z 7').toBeDefined();
     const ledgeArea = 40 * 30 - 34 * 24;
     const result = plan(tree, [flat(6, 1), flat(3.175, 2)]);
@@ -247,7 +259,7 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     expect(op, 'an op cuts the ledge').toBeDefined();
     // Swept, read from the moves (the op's own `cleared` overclaims, finding 5): ≥ 95 % of the ledge.
     const cutter = op!.outcome.cutter.includes('3.175') ? 3.175 / 2 : 3;
-    const swept = sweptFraction(result, ledge.id, ledge.floors.flatMap((f) => f.polygons), 7 - tree.frame.stockTop, cutter);
+    const swept = sweptFraction(result, ledge.id, ledge.floors.flatMap((f) => f.polygons), ledge.floorZ, cutter);
     expect(swept, `swept ${(100 * swept).toFixed(1)} % of the ${ledgeArea} mm² ledge`).toBeGreaterThanOrEqual(0.95);
   });
 
@@ -255,11 +267,11 @@ describe('#959 red-first (A’s review 6622610124)', () => {
     // A 20 × 20 pocket 4 deep with sharp corners, cut with a ⌀6 flat. Reachable = the opening:
     // 400 − 4·(r² − πr²/4) with r 3 = 400 − (36 − 9π) ≈ 392.27 mm².
     const s = tl.Manifold.cube([30, 30, 10]).subtract(tl.Manifold.cube([20, 20, 4]).translate([5, 5, 6]));
-    const tree = treeOf(s, 10);
-    const node = all(tree.pockets).find((n) => Math.abs(n.floorZ - 6) < 1e-6)!;
+    const tree = treeOf(s, STOCK_TOP);
+    const node = all(tree.pockets).find((n) => Math.abs(n.floorZ - (6 - STOCK_TOP)) < 1e-6)!;
     const result = plan(tree, [flat(6, 1)]);
     const op = result.ops.find((o) => o.region.id === node.id)!;
-    const floor = op.outcome.cleared!.filter((c) => Math.abs(c.z - (6 - tree.frame.stockTop)) < 1e-6).at(-1)!;
+    const floor = op.outcome.cleared!.filter((c) => Math.abs(c.z - node.floorZ) < 1e-6).at(-1)!;
     const reachable = 400 - (36 - 9 * Math.PI);
     expect(areaOf(floor.boundary)).toBeLessThanOrEqual(reachable + 0.05);
   });

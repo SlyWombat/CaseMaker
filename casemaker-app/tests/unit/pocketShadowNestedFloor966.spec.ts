@@ -17,6 +17,7 @@ import { tl, type ManifoldInstance } from './helpers/manifoldExec';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
 import { recogniseFeatures, type FeatureTree } from '@/engine/cnc/cam/model/features';
 import { planPocketsForTree, type PlanPocketsOptions } from '@/engine/cnc/cam/model/plan';
+import { shiftToStockTop } from '@/engine/cnc/cam/model/setups';
 import type { RapidEstimate } from '@/engine/cnc/cam/ir';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import type { ParsedMesh } from '@/engine/import/stlParser';
@@ -62,8 +63,17 @@ const rapid: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 1
 const offset = makeClipperOffset(tl);
 const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
 
+// #1018 — every real caller shifts the mesh to this setup's own `stockTop` at the door
+// (`shiftToStockTop`, `plan.ts`'s own setup loop) before `planPocketsForTree`/its `shadowMesh`
+// ever see it; this unit test, calling `planPocketsForTree` directly below that loop, does the
+// same shift itself. `doorGeometry` is shared so the tree AND the shadow mesh passed to
+// `planPocketsForTree` agree on the one datum.
+function doorGeometry(mesh: ParsedMesh): ParsedMesh {
+  return shiftToStockTop({ triangles: mesh }, { up: [0, 0, 1], stockTop: TOP_Z, stockBottom: 0 }).geometry.triangles;
+}
 function treeOf(mesh: ParsedMesh): FeatureTree {
-  return recogniseFeatures({ triangles: mesh }, { up: [0, 0, 1], stockTop: TOP_Z, stockBottom: 0 }, tl);
+  const shifted = shiftToStockTop({ triangles: mesh }, { up: [0, 0, 1], stockTop: TOP_Z, stockBottom: 0 });
+  return recogniseFeatures(shifted.geometry, shifted.frame, tl);
 }
 
 function basePlanOptions(houseFlats: Tool[]): Omit<PlanPocketsOptions, 'shadowMesh'> {
@@ -81,15 +91,15 @@ function basePlanOptions(houseFlats: Tool[]): Omit<PlanPocketsOptions, 'shadowMe
   };
 }
 
-/** The nearest FEED move, at absolute Z within 1e-3 of `targetZ`, to `(x, y)` — `Infinity` when none exists at that Z at all. */
-function nearestFeedAt(result: ReturnType<typeof planPocketsForTree>, stockTop: number, targetZ: number, x: number, y: number): number {
+/** The nearest FEED move, at stock-top-relative Z within 1e-3 of `targetZ`, to `(x, y)` — `Infinity` when none exists at that Z at all. */
+function nearestFeedAt(result: ReturnType<typeof planPocketsForTree>, targetZ: number, x: number, y: number): number {
   let best = Infinity;
   for (const op of result.ops) {
     if (op.kind !== 'pocket') continue;
     for (const operation of op.outcome.ir.operations) {
       for (const m of operation.moves) {
         if (m.kind !== 'feed') continue;
-        if (Math.abs(m.z + stockTop - targetZ) > 1e-3) continue;
+        if (Math.abs(m.z - targetZ) > 1e-3) continue;
         best = Math.min(best, Math.hypot(m.x - x, m.y - y));
       }
     }
@@ -103,20 +113,20 @@ describe('#970 the nested shelf — a parent floor and its own deeper child, nei
     const tree = treeOf(mesh);
     expect(tree.pockets).toHaveLength(1);
     const parent = tree.pockets[0]!;
-    expect(parent.floorZ).toBeCloseTo(SHELF_Z, 2);
+    expect(parent.floorZ).toBeCloseTo(SHELF_Z - TOP_Z, 2);
     expect(parent.children).toHaveLength(1);
-    expect(parent.children[0]!.floorZ).toBeCloseTo(WELL_Z, 2);
+    expect(parent.children[0]!.floorZ).toBeCloseTo(WELL_Z - TOP_Z, 2);
   });
 
   it('#970 over-clip, FIXED: both the shelf ring and the well are cut to their own true floor', () => {
     const mesh = parsed(buildNestedSolid());
     const tree = treeOf(mesh);
-    const result = planPocketsForTree(tree, { ...basePlanOptions([flat(4, 1)]), shadowMesh: mesh });
+    const result = planPocketsForTree(tree, { ...basePlanOptions([flat(4, 1)]), shadowMesh: doorGeometry(mesh) });
     // The shelf ring's own floor, well clear of the well (e.g. (12, 12), inside the 20x20 shelf,
     // outside the 10x10 well).
-    const ringReach = nearestFeedAt(result, tree.frame.stockTop, SHELF_Z, 12, 12);
+    const ringReach = nearestFeedAt(result, SHELF_Z - TOP_Z, 12, 12);
     // The well's own floor, its own centre.
-    const wellReach = nearestFeedAt(result, tree.frame.stockTop, WELL_Z, 20, 20);
+    const wellReach = nearestFeedAt(result, WELL_Z - TOP_Z, 20, 20);
     const toolRadius = (cuttingDiameter(flat(4, 1)) ?? 0) / 2;
     expect(ringReach, `shelf ring floor (${SHELF_Z}) nearest feed to (12,12) = ${ringReach}`).toBeLessThan(toolRadius + 1);
     expect(wellReach, `well floor (${WELL_Z}) nearest feed to (20,20) = ${wellReach}`).toBeLessThan(toolRadius + 1);
