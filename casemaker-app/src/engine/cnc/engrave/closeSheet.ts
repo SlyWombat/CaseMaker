@@ -70,6 +70,121 @@ interface EdgeUse {
   count: number;
 }
 
+
+/**
+ * #993 — SPLIT A NON-MANIFOLD EDGE INSTEAD OF REFUSING IT. Two sheets that touch along a line
+ * (two pocket walls meeting at a zero-thickness knife edge) are topologically non-manifold but
+ * geometrically ordinary; the tessellator emits both sheets' triangles on one edge and the weld
+ * keeps them. The repair is the vertex-link split: at each vertex of an overused edge, the
+ * triangles around it are grouped into their sheets (two triangles are on one sheet when they
+ * share an edge through that vertex, EXCLUDING an overused edge), and each sheet beyond the first
+ * gets its own copy of the vertex. A split is only made where EVERY sheet carries exactly two of
+ * the triangles on each overused edge it touches — a flap hinged on one triangle (a three-use
+ * edge) is left for the caller's named refusal, never silently unhinged. Every other edge stays
+ * two-sided, so the result is the same surface with a zero-width slit wherever the sheets touched
+ * — which `solidOf`'s Manifold accepts. Mutates `welded` and `weldedPos`; returns how many
+ * OVERUSED EDGES the split resolved.
+ */
+function splitNonManifoldEdges(
+  welded: Int32Array,
+  weldedPos: number[],
+  kept: readonly number[],
+  edgeKey: (a: number, b: number) => string,
+): number {
+  const edgeUses = (): Map<string, { u: number; v: number; count: number }> => {
+    const uses = new Map<string, { u: number; v: number; count: number }>();
+    for (const t of kept) {
+      const a = welded[3 * t]!, b = welded[3 * t + 1]!, c = welded[3 * t + 2]!;
+      for (const [u, v] of [[a, b], [b, c], [c, a]] as const) {
+        const key = edgeKey(u, v);
+        const use = uses.get(key);
+        if (use === undefined) uses.set(key, { u, v, count: 1 });
+        else use.count++;
+      }
+    }
+    return uses;
+  };
+  const overusedCount = (uses: Map<string, { count: number }>): number => {
+    let n = 0;
+    for (const use of uses.values()) if (use.count > 2) n++;
+    return n;
+  };
+
+  const initialUses = edgeUses();
+  const initial = overusedCount(initialUses);
+  if (initial === 0) return 0;
+  const candidates = [...new Set([...initialUses.values()].filter((e) => e.count > 2).flatMap((e) => [e.u, e.v]))].sort((a, b) => a - b);
+
+  for (const vertex of candidates) {
+    const uses = edgeUses();
+    const overusedAt = [...uses.entries()].filter(([, e]) => e.count > 2 && (e.u === vertex || e.v === vertex));
+    // The triangles around this vertex, grouped by the spokes they share (a spoke is an edge
+    // through the vertex used by exactly two triangles; an overused one is the seam itself).
+    const spokes = new Map<string, number[]>();
+    const incident: number[] = [];
+    for (const t of kept) {
+      const ids = [welded[3 * t]!, welded[3 * t + 1]!, welded[3 * t + 2]!];
+      const at = ids.indexOf(vertex);
+      if (at < 0) continue;
+      incident.push(t);
+      for (const w of [ids[(at + 1) % 3]!, ids[(at + 2) % 3]!]) {
+        const key = edgeKey(vertex, w);
+        const list = spokes.get(key);
+        if (list === undefined) spokes.set(key, [t]);
+        else list.push(t);
+      }
+    }
+    if (incident.length === 0) continue;
+    const parent = new Map<number, number>();
+    const find = (x: number): number => {
+      let r = parent.get(x) ?? x;
+      while (r !== (parent.get(r) ?? r)) r = parent.get(r) ?? r;
+      let c = x;
+      while (c !== r) { const n = parent.get(c) ?? c; parent.set(c, r); c = n; }
+      return r;
+    };
+    for (const list of spokes.values()) {
+      if (list.length !== 2) continue;
+      const a = find(list[0]!), b = find(list[1]!);
+      if (a !== b) parent.set(a, b);
+    }
+    const order: number[] = [];
+    const members = new Map<number, number[]>();
+    for (const t of incident) {
+      const r = find(t);
+      if (!members.has(r)) { members.set(r, []); order.push(r); }
+      members.get(r)!.push(t);
+    }
+    if (order.length <= 1) continue;
+    // VALIDITY: every sheet (component) must carry 0 or 2 of the triangles on each overused edge
+    // it touches — one or three is a flap, and separating it would open a free edge.
+    let valid = true;
+    for (const [key] of overusedAt) {
+      for (const root of order) {
+        let n = 0;
+        for (const t of members.get(root)!) {
+          const ids = [welded[3 * t]!, welded[3 * t + 1]!, welded[3 * t + 2]!];
+          for (let i = 0; i < 3; i++) {
+            if (edgeKey(ids[i]!, ids[(i + 1) % 3]!) === key) { n++; break; }
+          }
+        }
+        if (n !== 0 && n !== 2) { valid = false; break; }
+      }
+      if (!valid) break;
+    }
+    if (!valid) continue;
+    // Components in first-appearance order; the first keeps the welded vertex.
+    for (let k = 1; k < order.length; k++) {
+      const copy = weldedPos.length / 3;
+      weldedPos.push(weldedPos[3 * vertex]!, weldedPos[3 * vertex + 1]!, weldedPos[3 * vertex + 2]!);
+      for (const t of members.get(order[k]!)!) {
+        for (let i = 0; i < 3; i++) if (welded[3 * t + i] === vertex) welded[3 * t + i] = copy;
+      }
+    }
+  }
+  return initial - overusedCount(edgeUses());
+}
+
 /** The closure (#966). Throws {@link UnclosableOpenMeshError} when the mesh is open and the skirt
  * rule does not apply; returns the input unchanged when it is already closed. */
 export function closeOpenSheet(tl: ManifoldToplevel, mesh: ParsedMesh, opts: CloseOpenSheetOptions): CloseOpenSheetResult {
@@ -103,31 +218,84 @@ export function closeOpenSheet(tl: ManifoldToplevel, mesh: ParsedMesh, opts: Clo
     if (a === b || b === c || a === c) { degenerate++; continue; }
     kept.push(t);
   }
-  const edges = new Map<string, EdgeUse>();
+  // #993 — EXACT DUPLICATE TRIANGLES ARE NOT GEOMETRY: a triangle repeated verbatim adds two uses
+  // of each of its edges. Dropped here (counted for the note); a genuine non-manifold edge goes
+  // through the split below.
+  let duplicateTriangles = 0;
+  {
+    const seen = new Set<string>();
+    const unique: number[] = [];
+    for (const t of kept) {
+      const ids = [welded[3 * t]!, welded[3 * t + 1]!, welded[3 * t + 2]!].sort((x, y) => x - y);
+      const key = `${ids[0]}:${ids[1]}:${ids[2]}`;
+      if (seen.has(key)) { duplicateTriangles++; continue; }
+      seen.add(key);
+      unique.push(t);
+    }
+    kept.length = 0;
+    kept.push(...unique);
+  }
+
   const edgeKey = (a: number, b: number): string => (a < b ? `${a}:${b}` : `${b}:${a}`);
+  const buildEdges = (): Map<string, EdgeUse> => {
+    const out = new Map<string, EdgeUse>();
+    for (const t of kept) {
+      const a = welded[3 * t]!, b = welded[3 * t + 1]!, c = welded[3 * t + 2]!;
+      for (const [u, v] of [[a, b], [b, c], [c, a]] as const) {
+        const key = edgeKey(u, v);
+        const use = out.get(key);
+        if (use === undefined) out.set(key, { from: u, to: v, count: 1 });
+        else use.count++;
+      }
+    }
+    return out;
+  };
+  // #993 — a knife edge is split (the weld undone for one sheet) before any refusal; what pairing
+  // cannot resolve stays overused and is refused with its count and the first edge's position.
+  const splitEdgeCount = splitNonManifoldEdges(welded, weldedPos, kept, edgeKey);
+
+  const edges = buildEdges();
   let signedArea2 = 0;
   for (const t of kept) {
     const a = welded[3 * t]!, b = welded[3 * t + 1]!, c = welded[3 * t + 2]!;
-    for (const [u, v] of [[a, b], [b, c], [c, a]] as const) {
-      const key = edgeKey(u, v);
-      const use = edges.get(key);
-      if (use === undefined) edges.set(key, { from: u, to: v, count: 1 });
-      else use.count++;
-    }
-    // The XY projection's signed area: its sign is the sheet's facing (+ up).
     const pa = 3 * a, pb = 3 * b, pc = 3 * c;
     signedArea2 += (weldedPos[pb]! - weldedPos[pa]!) * (weldedPos[pc + 1]! - weldedPos[pa + 1]!)
       - (weldedPos[pc]! - weldedPos[pa]!) * (weldedPos[pb + 1]! - weldedPos[pa + 1]!);
   }
   const boundary: EdgeUse[] = [];
   let overused = 0;
+  let firstOverused: EdgeUse | null = null;
   for (const use of edges.values()) {
     if (use.count === 1) boundary.push(use);
-    else if (use.count > 2) overused++;
+    else if (use.count > 2) { overused++; firstOverused ??= use; }
   }
-  if (overused > 0) throw new UnclosableOpenMeshError(`${overused} edge(s) shared by more than two triangles — the mesh is not a surface`);
+  if (overused > 0) {
+    const at = firstOverused === null ? '' :
+      `; the first at (${weldedPos[3 * firstOverused.from]!.toFixed(3)}, ${weldedPos[3 * firstOverused.from + 1]!.toFixed(3)}), z ${weldedPos[3 * firstOverused.from + 2]!.toFixed(3)}–${weldedPos[3 * firstOverused.to + 2]!.toFixed(3)}`;
+    throw new UnclosableOpenMeshError(`${overused} edge(s) shared by more than two triangles — the mesh is not a surface${at}`);
+  }
   if (boundary.length === 0) {
-    return { mesh, note: 'the goal mesh is already closed' };
+    if (splitEdgeCount === 0 && duplicateTriangles === 0) return { mesh, note: 'the goal mesh is already closed' };
+    // The topology changed (a split or a dropped duplicate), so the input mesh is no longer the
+    // right answer: rebuild from the welded ids, keeping the split's duplicated vertices.
+    const outPositions = new Float32Array(weldedPos);
+    const outIndices = new Uint32Array(kept.length * 3);
+    for (let i = 0; i < kept.length; i++) {
+      const t = kept[i]!;
+      for (let k = 0; k < 3; k++) outIndices[3 * i + k] = welded[3 * t + k]!;
+    }
+    let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < outPositions.length; i += 3) {
+      minX = Math.min(minX, outPositions[i]!); maxX = Math.max(maxX, outPositions[i]!);
+      minY = Math.min(minY, outPositions[i + 1]!); maxY = Math.max(maxY, outPositions[i + 1]!);
+      minZ = Math.min(minZ, outPositions[i + 2]!); maxZ = Math.max(maxZ, outPositions[i + 2]!);
+    }
+    return {
+      mesh: { positions: outPositions, indices: outIndices, triangleCount: outIndices.length / 3, bbox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] } },
+      note:
+        `the goal mesh is already closed; ${splitEdgeCount} non-manifold edge(s) split` +
+        (duplicateTriangles > 0 ? ` and ${duplicateTriangles} duplicate triangle(s) dropped` : ''),
+    };
   }
   if (!(signedArea2 > 0)) {
     throw new UnclosableOpenMeshError(
@@ -248,10 +416,11 @@ export function closeOpenSheet(tl: ManifoldToplevel, mesh: ParsedMesh, opts: Clo
     }
   }
 
-  // Assemble: the sheet, the skirt, the cap.
-  const newPositions = Array.from(positions);
+  // Assemble: the sheet, the skirt, the cap — from the WELDED ids, so a split's duplicated
+  // vertices survive into the output (positions are the same; only the topology differs).
+  const newPositions = Array.from(weldedPos);
   const newIndices: number[] = [];
-  for (const t of kept) newIndices.push(indices[3 * t]!, indices[3 * t + 1]!, indices[3 * t + 2]!);
+  for (const t of kept) newIndices.push(welded[3 * t]!, welded[3 * t + 1]!, welded[3 * t + 2]!);
   let skirtTriangles = 0;
   const addVertex = (x: number, y: number, z: number): number => {
     const id = newPositions.length / 3;
@@ -312,6 +481,8 @@ export function closeOpenSheet(tl: ManifoldToplevel, mesh: ParsedMesh, opts: Clo
       `the open goal sheet was closed with a skirt: ${loops.length} boundary loop(s), ` +
       `${skirtTriangles} skirt triangle(s) down to ${skirtTo === 'lowestBoundary' ? "the sheet's lowest boundary" : 'the stock bottom'} at ${floorZ} mm and ` +
       `${capTriangles.length} bottom-cap triangle(s)` +
-      (degenerate > 0 ? ` (${degenerate} degenerate triangle(s) dropped)` : ''),
+      (degenerate > 0 ? ` (${degenerate} degenerate triangle(s) dropped)` : '') +
+      (splitEdgeCount > 0 ? ` (${splitEdgeCount} non-manifold edge(s) split)` : '') +
+      (duplicateTriangles > 0 ? ` (${duplicateTriangles} duplicate triangle(s) dropped)` : ''),
   };
 }
