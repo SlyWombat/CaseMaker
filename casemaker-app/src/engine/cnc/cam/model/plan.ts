@@ -157,6 +157,13 @@ export interface OpOutcome {
   /** #960 — statements the op makes about its own method (a skipped wall band, a stated slope
    *  threshold), carried into the plan's notes so the operator sees them. */
   notes?: string[];
+  /**
+   * #1012 — the rim stage's bevel was CLAMPED to the cone's one-pass reach: the LEG it asked for
+   * and the leg it cut, mm. Absent when the cone reaches the asked leg. The plan states it once
+   * per cause (`chamfer-too-wide`, both widths in the sentence) — a cut that differs from what
+   * the operator asked for is never silent.
+   */
+  clampedLegMm?: { wanted: number; cut: number };
 }
 
 export type RegionKind = 'pocket' | 'island-top' | 'curved' | 'contour' | 'rim';
@@ -3037,6 +3044,10 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // #992 — a rim the stage declines is stated ONCE PER CAUSE with its count (the #962 rule);
     // the per-rim lines stay in `notes` as the dump's detail.
     const rimSkips = new Map<'covered' | 'open-loop', { count: number; ids: string[] }>();
+    // #1012 — the rims whose bevel the V's cone CLAMPED, and the first clamp's own numbers (every
+    // rim asks the same edge break and cuts with the same V, so one sample speaks for all).
+    const clampedRims: string[] = [];
+    let clampedSample: { wanted: number; cut: number } | undefined;
     for (const rim of tree.rims) {
       try {
         // THE MANAGER'S RULING from the tray's 0.5 mm cell: a rim whose air side is COVERED is not
@@ -3093,6 +3104,10 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           params: paramsFor(vbit),
           rapid: opts.rapid,
         });
+        if (out.clampedLegMm !== undefined) {
+          clampedRims.push(rim.id);
+          clampedSample ??= out.clampedLegMm;
+        }
         pushStage('chamfer', ref, out);
       } catch (err) {
         // #959 item 5: one rim that cannot be broken (its exposure test included) is stated, not fatal.
@@ -3113,6 +3128,24 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
             ? `${entry.count} ${plural} not broken: covered from above (the air side does not drop by 0.2 mm — the edge lies under the land)`
             : `${entry.count} ${plural} not broken: the rim's own loop is not closed, so no chamfer is cut rather than bridging across it`,
       });
+    }
+    // #1012 — A BEVEL WIDER THAN THE CONE REACHES IS CLAMPED AND SAID. The cut is the cone's own
+    // leg (right — a deeper pass would bury the flank), but the operator asked for another width,
+    // so the plan states both, in the widths they asked in (`leg = width / tan α`, so
+    // `width = leg × tan α` of the SAME V), one statement for every rim the clamp touched.
+    if (clampedSample !== undefined) {
+      const cone = vCone(vbit);
+      const tanHalf = cone?.tanHalf ?? 1;
+      const mm = (v: number): string => String(Number(v.toFixed(4)));
+      const askedMm = clampedSample.wanted * tanHalf;
+      const cutMm = clampedSample.cut * tanHalf;
+      const plural = clampedRims.length === 1 ? 'rim asks' : 'rims ask';
+      const text =
+        `${clampedRims.length} ${plural} for a ${mm(askedMm)} mm chamfer, but “${vbit.name}”’s cone ` +
+        `reaches ${mm(cutMm)} mm in one pass — the cut is ${mm(cutMm)} mm wide, ${mm(askedMm - cutMm)} mm short ` +
+        'of the design. A wider V-bit, or a second pass, reaches the rest.';
+      notes.push(text);
+      statements.push({ severity: 'warning', code: 'chamfer-too-wide', count: clampedRims.length, ids: clampedRims, text });
     }
   } else if (tree.rims.length > 0) {
     const text = `the job states no edge break — ${tree.rims.length} rim(s) stay sharp`;

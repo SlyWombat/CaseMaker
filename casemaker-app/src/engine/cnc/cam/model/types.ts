@@ -67,7 +67,9 @@ export type PlanFindingCode =
   | 'goal-relief-edge'
   | 'goal-finish-mode'
   | 'goal-no-edge-break'
-  | 'goal-plan-tradeoff';
+  | 'goal-plan-tradeoff'
+  // #1012 — the rim stage's bevel was clamped to the V's one-pass reach (the 2.5D path's own code).
+  | 'chamfer-too-wide';
 
 export type PlanSheetCode = 'plan-setup' | 'plan-run';
 
