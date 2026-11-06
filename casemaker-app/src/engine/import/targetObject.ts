@@ -85,6 +85,35 @@ export interface ImageFit {
 const NATURAL_MM_PER_PX = 25.4 / 96;
 
 /**
+ * #1029 — ONE NON-FINITE VERTEX HAS NO SHAPE. A binary STL carries raw float32 bits, so a NaN or
+ * ±Infinity parses without complaint and then either throws an unusable number or traps the
+ * kernel's whole instance (the failure mode depends on the build). The sentence names the count
+ * and the first offending triangle; both parses below — the door's and the cached plan-path one —
+ * refuse with it.
+ */
+function nonFiniteMeshSentence(name: string, mesh: ParsedMesh): string | null {
+  const vertices = mesh.positions.length / 3;
+  let bad = 0;
+  let firstTriangle = -1;
+  for (let v = 0; v < vertices; v++) {
+    const x = mesh.positions[3 * v]!;
+    const y = mesh.positions[3 * v + 1]!;
+    const z = mesh.positions[3 * v + 2]!;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      bad++;
+      if (firstTriangle < 0) firstTriangle = Math.floor(v / 3);
+    }
+  }
+  const bboxFinite =
+    mesh.bbox.min.every((n) => Number.isFinite(n)) && mesh.bbox.max.every((n) => Number.isFinite(n));
+  if (bad === 0 && bboxFinite) return null;
+  return (
+    `goal-mesh-non-finite: ${name} has ${bad} of ${vertices} vertices that are not finite numbers` +
+    `${firstTriangle < 0 ? '' : ` (first at triangle ${firstTriangle})`}.`
+  );
+}
+
+/**
  * Read a picked `.stl` / `.3mf` / `.step` as a reference object. `id` is supplied by the caller
  * (the store's `newTargetObjectId`), so this module stays free of the store and the id convention
  * lives in one place.
@@ -179,6 +208,11 @@ export async function readTargetObjectFile(
   if (mesh.triangleCount === 0 || mesh.indices.length === 0) {
     return { ok: false, error: `${file.name} holds no triangles, so it has no shape to show.` };
   }
+
+  // #1029 — a non-finite vertex must never reach the booleans; refused here, by name, with the
+  // count that decided it — the same discipline `goal-mesh-unclosable` applies one layer down.
+  const nonFinite = nonFiniteMeshSentence(file.name, mesh);
+  if (nonFinite !== null) return { ok: false, error: nonFinite };
 
   const size = {
     x: mesh.bbox.max[0] - mesh.bbox.min[0],
@@ -286,6 +320,10 @@ export function targetObjectMesh(target: Pick<EngraveTargetObject, 'sha256' | 'f
   // so a saved goal draws and surfaces the mesh the import measured.
   const parsed =
     target.format === '3mf' ? parse3MF(bytes) : target.format === 'obj' ? parseObj(bytes) : parseStl(bytes);
+  // #1029 — a stored job imported before the door's guard still parses here; refuse it before any
+  // `new tl.Manifold(mesh)` / CrossSection conversion can trap the worker.
+  const nonFinite = nonFiniteMeshSentence('the mesh', parsed);
+  if (nonFinite !== null) throw new Error(nonFinite);
   meshCache.set(target.sha256, parsed);
   return parsed;
 }
