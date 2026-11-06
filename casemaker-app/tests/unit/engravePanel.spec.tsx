@@ -4730,7 +4730,7 @@ describe('#798 — the Cutter line', () => {
   });
 
   // #966 triage — #1010: the measured-pick panel is rewritten against the model engine.
-  it.fails('names the simulation and the fidelity when the measured plan is the one applied', () => {
+  it('names the cutter as the recommendation — the fidelity claim is the plan’s, not the picker’s', () => {
     act(() => {
       const ids = useEngraveJobStore.getState().job.labels.map((l) => l.id);
       useEngraveJobStore.getState().applyCutterPlan([{ key: 'flat-1.0', items: ids }], 'computed');
@@ -4762,10 +4762,13 @@ describe('#798 — the Cutter line', () => {
       }),
     );
     const line = screen.getByTestId('engrave-cutter-line').textContent ?? '';
-    expect(line).toContain('chosen by simulation');
-    expect(line).toContain('96 % fidelity');
-    // The collapsed group's own summary carries the same verdict.
-    expect(screen.getByTestId('engrave-group-cutter-summary').textContent).toContain('96 % fidelity');
+    // #1010 — the picker's simulation/fidelity words are retired with the measured auto-apply.
+    // The cutter line names the cutter and the fact that it is the recommendation; the job's
+    // measured outcome (coverage, cut-into, cycle) is the plan's own, printed per run (#961).
+    expect(line).toContain('recommended');
+    expect(line).not.toContain('chosen by simulation');
+    expect(line).not.toContain('fidelity');
+    expect(screen.queryByTestId('engrave-group-cutter-summary')?.textContent ?? '').not.toContain('fidelity');
   });
 });
 

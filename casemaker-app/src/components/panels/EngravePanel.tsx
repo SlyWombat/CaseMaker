@@ -1,7 +1,6 @@
 import { featureSim } from '@/platform/features';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode, type RefObject } from 'react';
 import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/engraveJobStore';
-import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
 import { useEngraveRunStore, firstRunError, gateViewFor, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker, type EngraveRunState } from '@/store/engraveRunStore';
@@ -62,9 +61,6 @@ import { deadSetupKeys, replacementCutter } from '@/engine/cnc/engrave/setupWork
 import { measureFingerprint } from '@/engine/cnc/engrave/measuredPick';
 import { jobReachFindings } from '@/engine/cnc/engrave/goalReach';
 import { toolForIn, toolForJob } from '@/engine/cnc/toolRegistry';
-// #786 slice 6 — the simulator's own cutter resolver, the one `columnSweep` asks before it sweeps:
-// the panel reads the SAME answer to decide that a refused cutter must be substituted.
-import { columnCutterFor } from '@/workers/geometry/columnEngine';
 import { bedUnderFacts, machineForJob, switchActiveProfile } from '@/platform/bedProfiles';
 import { vDepthLimit } from '@/engine/cnc/vProfile';
 // #513 — the bed a job was set up on: binding, version diff and the findings that say so.
@@ -189,7 +185,6 @@ import type {
   EngraveChamfer,
   EngraveDrill,
   EngraveJob,
-  EngraveJobSubstitution,
   EngraveSetupSubstitution,
   EngraveKeepOut,
   EngraveLabel,
@@ -2137,155 +2132,16 @@ export function EngravePanel(): JSX.Element {
       const owned = measuredSetup?.toolItems?.[c.key] ?? [];
       return owned.length === c.items.length && owned.every((id, i) => id === c.items[i]);
     });
-  // #786 slice 4c — A DRILL BIT OR THREAD MILL THE OPERATOR NAMED KEEPS ITS JOB AND GAINS THE
-  // CUTTER THE OTHER WORK NEEDS. The guard above still holds for every plan that would REPLACE
-  // their cutter, but the measured search's split KEEPS it: the named cutter is first and owns
-  // exactly its own holes/threads, and the flat (or the kind plan's cutters) take the rest. That
-  // is the operator's own decision carried out, so it is applied like a computed answer.
-  const namedNow = jobTool(job);
-  const namedSplit =
-    measuredNow !== null &&
-    measuredNow.cutters.length > 1 &&
-    // #848 — the named thread mill is LAST when the plan raises its boss first; it is still kept.
-    measuredNow.cutters.some((c) => c.key === job.toolKey) &&
-    namedNow !== null &&
-    (namedNow.shape === 'drill' || namedNow.shape === 'thread');
-  // #786 slice 4c-2 — A MISSING OR REFUSED CUTTER IS REPLACED BY THE SEARCH'S ANSWER. The guard
-  // above protects a decision that still holds; a key the library does not hold, or a cutter no
-  // CAM here can use on this job (a ball in a region job, no feeds row for this material), holds
-  // no usable decision to protect — and the measured plan is exactly the answer to that question.
-  // A 'values' refusal is the operator's own override or the machine's limit, not the cutter's
-  // shape: a different cutter is no honest fix for it, so it is left alone.
-  const namedMissing = job.toolKey !== '' && namedNow === null;
-  const namedRefused =
-    namedNow !== null &&
-    namedNow.shape !== 'drill' &&
-    namedNow.shape !== 'thread' &&
-    feeds !== null &&
-    !feeds.ok &&
-    feeds.cause !== 'values';
-  // #835 — THE JOB'S FRAME, as the sweep reads it: a wrapped job's column grid has one radius per
-  // (θ, X) column, so the rotary parameterisation is part of the cutter's own predicate.
-  const rotaryHeld = rotaryMapOf(job) !== null;
-  // #786 slice 6 — `tool-refused` AND `setup-rest-unavailable` ANSWER THE SAME QUESTION AS A
-  // MISSING KEY. Both are computed here, in the effect, because both read `measuredNow` and the
-  // panel's own shop readings — a fresh object each render would otherwise re-run the effect on
-  // every keystroke.
-  //
-  //   - `tool-refused`: a record the CAM cannot model (a V with no tip or angle, a drill or thread
-  //     mill with no cutting diameter, a shape with no profile), and — #835 — a shape the ROTARY
-  //     parameterisation has no profile for (a drill, a bull nose or a thread mill on a wrapped
-  //     job). The predicate is the simulator's OWN resolver, `columnCutterFor` — the check
-  //     `columnSweep` makes before it sweeps — handed the run's own drill default and the job's
-  //     frame, so the panel and the run cannot disagree about which records are refused.
-  //   - `setup-rest-unavailable`'s "not on this bench": a setup's LATER cutter key that resolves to
-  //     nothing. `applyCutterPlanToJob` rewrites the FIRST setup's cutters, so only a missing key
-  //     there is answered here — one in a later setup keeps the finding's own sentence rather than
-  //     a half-fix — and the plan is applied only when it KEEPS the operator's cutter as program
-  //     1: a rest pass was missing, not the cutter they chose.
-  useEffect(() => {
-    const source = job.sources?.tool;
-    // #743 P-8 — a BOARD ARRIVES WITH ITS PLAN. The import writes each role's cutter (§3.4) and
-    // records it as the catalogue's answer; the background search below plans one held position
-    // with one cutter chain and cannot express a board's engraver + drills + flat, so it must not
-    // replace that plan. A person's or a measured plan is left alone for the same reason (#516) —
-    // except that #786 4c's named split KEEPS the named cutter and adds the rest, so it may be
-    // applied over a user or measured pick, and 4c-2/slice 6 substitute a missing, refused or
-    // unmodellable one.
-    if (source === 'catalogue') return;
-    const firstSetupTools = jobSetups(job)[0]?.tools ?? [];
-    const missingRestKey =
-      firstSetupTools.slice(1).find((key) => key !== job.toolKey && toolForIn(tools, key) === null) ?? null;
-    // #835 — the ROTARY frame is part of the question: a drill, bull or thread on a wrapped job is
-    // refused by the sweep exactly as a shapeless record is on a flat one, so it is substituted by
-    // the same measured answer and the sentence names the cutter that now sweeps it.
-    const simRefused =
-      namedNow !== null &&
-      !columnCutterFor(
-        namedNow,
-        { deg: drillShop.settings.pointAngleDeg, source: drillShop.sources.pointAngleDeg },
-        { rotary: rotaryHeld },
-      ).ok;
-    const restSubstitutable =
-      missingRestKey !== null &&
-      measuredNow !== null &&
-      (job.toolKey === '' || measuredNow.cutters[0]?.key === job.toolKey);
-    const restCase =
-      restSubstitutable && !namedMissing && !namedRefused && !simRefused;
-    const substituteNamed = measuredNow !== null && (namedMissing || namedRefused || simRefused || restCase);
-    if ((source === 'user' || source === 'measured') && !namedSplit && !substituteNamed) return;
-    // #516 item 5 — the first recommendation lands on the first edit or Generate, not on load: a
-    // clean (just-opened or just-saved) tool-less document keeps its empty key, so opening a saved
-    // job does not immediately dirty it.
-    if (job.toolKey === '' && !useEngraveJobFileStore.getState().dirty) return;
-    // #766 REGRESSION — A GENERATED JOB IS NEVER EDITED BY A BACKGROUND ANSWER. The measured
-    // search runs behind the panel and can answer AFTER Generate; writing its plan then made the
-    // job's own program stale the instant it was made — the Cut surface's first blocking row said
-    // "The job changed since it was generated" with nothing the operator did. While a run exists
-    // and still matches the job (or is still in flight) the answer is OFFERED — "Use the
-    // recommendation" is drawn while `measuredApplied` is false — and applying it is a press, whose
-    // stale row is then the operator's own edit. With no current result the old behaviour stands:
-    // the answer follows the design as it is edited.
-    const runNow = useEngraveRunStore.getState();
-    const runHoldsThisJob = runNow.generated !== null && runNow.staleSince === null;
-    if (runHoldsThisJob || runNow.phase === 'generating' || runNow.phase === 'simulating' || runNow.phase === 'checking') {
-      return;
-    }
-    if (measuredNow !== null) {
-      if (!measuredApplied) {
-        // #786 slice 4c-2 — replacing a cutter the operator CHOSE is recorded, so the finding and
-        // the cutter line can say whose cutter it was, why it could not cut, and what replaced it.
-        // #786 slice 6 — a setup's rest cutter is ALWAYS the operator's document fact (nothing
-        // computes a setup's key), so its replacement is recorded whatever the job's tool source.
-        const said = restCase || (substituteNamed && (source === 'user' || source === 'measured'));
-        if (said) {
-          // A rest pass's missing key is answered by the plan's cutter that is not the job's own
-          // (or the first, when the plan is a single cutter); a refused or missing job cutter by
-          // the plan's first.
-          const toCutter = restCase
-            ? (measuredNow.cutters.find((c) => c.key !== job.toolKey) ?? measuredNow.cutters[0]!)
-            : measuredNow.cutters[0]!;
-          const toKey = toCutter.key;
-          const toEntry = tools.find((e) => e.key === toKey);
-          const reason: EngraveJobSubstitution['reason'] =
-            namedMissing || restCase
-              ? 'missing'
-              : feeds !== null && !feeds.ok && feeds.cause === 'no-feeds' && !simRefused
-                ? 'no-feeds'
-                : 'refused';
-          applyCutterPlan(
-            measuredNow.cutters,
-            'computed',
-            0,
-            {
-              fromKey: restCase ? missingRestKey! : job.toolKey,
-              fromName: restCase
-                ? missingRestKey!
-                : namedNow !== null
-                  ? toolDisplayName(namedNow).split(' · ')[0]!
-                  : job.toolKey,
-              reason,
-              ...(reason === 'no-feeds' ? { material: job.stock.material } : {}),
-              toKey,
-              toName: toEntry !== undefined ? toolDisplayName(toEntry.tool).split(' · ')[0]! : toKey,
-            },
-            measuredNow.goalRoughKey,
-          );
-        } else {
-          applyCutterPlan(measuredNow.cutters, 'computed', 0, undefined, measuredNow.goalRoughKey);
-        }
-      }
-      return;
-    }
-    // #786 slice 4c-2 — a substitution is the MEASURED search's answer, not a provisional rule
-    // pick: while the search re-answers for the edited job, the rule must not undo it. The record
-    // is cleared the moment the operator chooses a cutter, so this only protects the substitute.
-    if (job.substitution !== undefined) return;
-    const key = rec?.key ?? null;
-    if (key === null) return;
-    if (job.toolKey !== key) setTool(key, 'computed');
-  }, [rec?.key, measuredNow, measuredApplied, job.sources?.tool, job.toolKey, job.substitution, job.setups, namedSplit, namedMissing, namedRefused, namedNow, feeds, tools, drillShop, rotaryHeld, job.stock.material, applyCutterPlan, setTool]);
-
+  // #1010 (the maintainer's 2026-11-05 ruling) — THE MEASURED AUTO-APPLY IS RETIRED. The panel
+  // used to write a measured answer into the job behind the operator: the plain pick (#766 D), the
+  // named-drill split (#786 4c) and the missing/refused substitutions (#786 4c-2 / slice 6). That
+  // silently changed the cutter the job carries, and the shipped contract is the opposite: the
+  // OWNED plan is the default, the ideal and its tradeoff are printed per run, and the operator
+  // records a choice (`setPlanChoice`) — the measured answer is OFFERED, and applying it is the
+  // press (`engrave-use-measured`, still below). The effect also re-applied itself through its own
+  // job write — the live "Maximum update depth exceeded" in the computed-job/no-run state — which
+  // this retirement removes with it. `measuredApplied` still describes the pressed state, so the
+  // fidelity line keeps appearing exactly when the operator applied the measured plan.
   // #835 — A SETUP'S DEAD CUTTER IS REPLACED BY THAT SETUP'S OWN MEASURED ANSWER. The search
   // judges one setup at a time, so a multi-setup job's dead keys are measured on the setup each
   // belongs to (`setupWorkJob`) and the plan is written back into THAT setup only. Applied only
