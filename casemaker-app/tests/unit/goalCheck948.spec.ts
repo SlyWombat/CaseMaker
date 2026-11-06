@@ -574,12 +574,18 @@ describe('#948 the live session’s swept top', () => {
       expect(input.heightfield.pitch).toBe(GOAL_CHECK_PITCH_MM);
       expect(GOAL_CHECK_MAX_CELLS).toBe(20_000_000);
 
-      // #945 — the session's verdict is the page's exact stamp; mirror its input on the direct
-      // call so the two are the same comparison, not one on the column read and one on the stamp.
+      // #945/#1007 — the session's verdict is the page's exact stamp; mirror its input on the
+      // direct call SO THE TWO ARE THE SAME COMPARISON: the input's own heightfield and swept
+      // reads (the column read is absent on the exact engine), the page's exact stamp, and the
+      // check's own options — including the allowance's `whoAt`/`clAt` gates, which are what
+      // excuse the edge-break cells the raw call counts.
       const direct = checkGoalCutInto(
-        sampleGoalHeightfield(target, { pitchMm: GOAL_CHECK_PITCH_MM, maxCells: GOAL_CHECK_MAX_CELLS }),
-        top as NonNullable<ReturnType<SimSession['sweptTop']>>,
-        'sweptTopExact' in input && input.sweptTopExact !== undefined ? { leftoverTop: input.sweptTopExact } : {},
+        input.heightfield,
+        ('sweptTop' in input ? input.sweptTop : top) ?? null,
+        {
+          ...('sweptTopExact' in input && input.sweptTopExact !== undefined ? { leftoverTop: input.sweptTopExact } : {}),
+          ...(input.opts ?? {}),
+        },
       );
       const report = session.oracle(g.predicted, null, g.designItems, input);
       expect(report.goalCutInto).toBeDefined();
@@ -621,13 +627,24 @@ describe('#948 the live session’s swept top', () => {
     const job = goalJob(target, stock);
     const g = await generate(tl, job);
     expect(g.ok, g.errors.map((e) => e.message).join('; ')).toBe(true);
-    // Splice the plunge BEFORE the program's shutdown (`M332` vacuum off / `M05` spindle stop):
-    // a cut after the spindle stops is not a cut, and the sweep agrees.
-    const gouged = (g.nc as string).replace(
-      /\nM332\nM05\n/,
-      '\nG0 Z5\nG0 X40 Y25\nG1 Z-0.2 F200\nG0 Z5\nM332\nM05\n',
-    );
-    expect(gouged).not.toBe(g.nc);
+    // #1007 — THE GOUGE IS GOAL-RELATIVE AND THE RUN IS EVERY PROGRAM. The old splice asked for
+    // Z −0.2 in absolute machine Z; on the model program the relief's goal at (40, 25) is far
+    // below that, so the plunge cut 3 mm and the test would have read its own injection. The
+    // injected Z is the sampled goal at the cell less 0.2 mm, and every program of the run is
+    // loaded and folded exactly as the run store's walk hands them over (#948's fold).
+    const hf = sampleGoalHeightfield(target, { pitchMm: GOAL_CHECK_PITCH_MM, maxCells: GOAL_CHECK_MAX_CELLS });
+    const ci = Math.round((40 - hf.x0) / hf.pitch);
+    const cj = Math.round((25 - hf.y0) / hf.pitch);
+    const cellGoalZ = hf.z[cj * hf.nx + ci] as number;
+    expect(Number.isFinite(cellGoalZ)).toBe(true);
+    const gougeBlock = `\nG0 Z5\nG0 X40 Y25\nG1 Z${(cellGoalZ - 0.2).toFixed(3)} F200\nG0 Z5\nM332\nM05\n`;
+    // The run's own field is the fold of every program; the gouge is spliced into the LAST one
+    // and that program's own stamp carries it. (The exact route keeps no column grid, so the
+    // `flatField` fold the synthetic fold case uses is not available here — this positive case
+    // judges the injected cut on the program that carries it.)
+    const last = g.programs[g.programs.length - 1]!;
+    const gouged = last.nc.replace(/\nM332\nM05\n/, gougeBlock);
+    expect(gouged).not.toBe(last.nc);
     const tool = jobTool(job);
     if (tool === null) throw new Error(`${job.toolKey} is not in the tool library`);
 
