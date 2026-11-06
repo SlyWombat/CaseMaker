@@ -1088,11 +1088,11 @@ const targetObjectSchema = z
       .describe('Chamfer the goal mesh’s top rim with a V-bit after its surfacing program (#829); omit for square edges.'),
     // #869 — the flat end mill that roughs a goal as its own program, before the ball's finish.
     roughToolKey: z
-      .string()
-      .min(1)
+      .union([z.string().min(1), z.null()])
       .optional()
       .describe(
-        'The flat end mill’s library key for the goal’s roughing program (#869); omit to cut the goal with one cutter.',
+        'The goal’s curved rough (#869/#999): a flat end mill’s library key, or null for the ball ' +
+          'alone (one cutter); omit and the engine chooses the rough by sequence.',
       ),
   })
   .strict()

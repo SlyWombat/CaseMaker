@@ -4825,25 +4825,42 @@ export const MOLD_DRAFT_LIMIT_DEG = 85;
  * (never a replacement for either engine's own further checks — the old path's feed/station
  * resolution is each engine's own concern, since the heightfield and model-cam paths differ there
  * already). Shared by both engines so the one message a bad key earns is the same word for word,
- * never retyped per caller. Absent `roughToolKey` is not an error: the goal is cut by the ball
- * alone, and this returns `{ tool: null, finding: null }` — silent, because there is nothing to
- * refuse.
+ * never retyped per caller.
+ *
+ * #999 — THE THREE STATES ARE THE GOAL'S OWN. Absent means the ENGINE CHOOSES the rough (the
+ * model plan's sequence ranks the house's flats); `null` means the operator chose the ball alone
+ * and is stated as such; a string names that flat. An absent key is silent; a `null` is an INFO
+ * finding, because a one-cutter goal must not be a silent reading of "nobody filled the field".
+ * A key the library does not hold falls back to the ENGINE'S CHOICE (the goal is not cut with
+ * one cutter because a stale key survived), the named warning saying so. A non-flat named as the
+ * rough is refused by name and the goal is cut by the ball alone (#869's own case).
  */
 function validateGoalRoughTool(
-  roughToolKey: string | undefined,
+  roughToolKey: string | null | undefined,
   tools: readonly ToolLibraryEntry[],
   goalId: string,
-): { tool: Tool | null; finding: JobFinding | null } {
-  if (roughToolKey === undefined) return { tool: null, finding: null };
+): { tool: Tool | null | undefined; finding: JobFinding | null } {
+  if (roughToolKey === undefined) return { tool: undefined, finding: null };
+  if (roughToolKey === null) {
+    return {
+      tool: null,
+      finding: {
+        severity: 'info',
+        code: 'goal-rough-ball-alone',
+        labelId: goalId,
+        message: 'The goal is cut by one cutter: the operator chose the ball alone (no flat rough).',
+      },
+    };
+  }
   const entry = tools.find((e) => e.key === roughToolKey);
   if (entry === undefined) {
     return {
-      tool: null,
+      tool: undefined,
       finding: {
         severity: 'warning',
         code: 'goal-rough-no-cutter',
         labelId: goalId,
-        message: `The goal is cut by one cutter: the roughing cutter “${roughToolKey}” is not in the tool library — choose another, or none.`,
+        message: `The roughing cutter “${roughToolKey}” is not in the tool library — the app chooses the rough instead.`,
       },
     };
   }
@@ -5066,7 +5083,8 @@ export async function buildModelPlanInputForGoal(
   // SAME helper the heightfield path uses (byte-identical findings, never retyped), or `null` — no
   // rough, the ball alone — when the goal states none. The finding itself is the caller's own: it
   // rides `generateGoalProgram`'s `findings`, computed there by the same pure call.
-  const curvedRoughTool: Tool | null = validateGoalRoughTool(goal.roughToolKey, shop.tools ?? [], goal.id).tool;
+  // #999 — the tri-state passes through unchanged: undefined = the engine chooses, null = ball alone.
+  const curvedRoughTool: Tool | null | undefined = validateGoalRoughTool(goal.roughToolKey, shop.tools ?? [], goal.id).tool;
 
   return {
     geometry,
@@ -5472,7 +5490,9 @@ export async function generateGoalProgram(
   const roughEntryDefined = goal.roughToolKey !== undefined;
   const roughValidated = validateGoalRoughTool(goal.roughToolKey, shop.tools ?? [], goal.id);
   const roughEntry = roughEntryDefined ? (shop.tools ?? []).find((e) => e.key === goal.roughToolKey) : undefined;
-  const roughTool = roughValidated.tool;
+  // #999 — the OLD heightfield path keeps its own reading: absent and null both mean "no split"
+  // (its plans are pinned byte-for-byte); only the model seam gives absent the engine's choice.
+  const roughTool = roughValidated.tool ?? null;
   const roughResolved =
     roughTool === null
       ? null

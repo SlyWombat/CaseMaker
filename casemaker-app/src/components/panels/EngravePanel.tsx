@@ -2176,9 +2176,10 @@ export function EngravePanel(): JSX.Element {
     (job.targetObject?.chamfer === undefined ||
       measuredNow.cutters[1] === undefined ||
       job.targetObject.chamfer.toolKey === measuredNow.cutters[1].key) &&
-    // #869 — the goal's rough is the plan's own decision: the applied answer must be the one the
-    // goal carries, and a plan with no rough matches only a goal with none.
-    (job.targetObject?.roughToolKey ?? null) === (measuredNow.goalRoughKey ?? null) &&
+    // #869/#999 — the goal's rough is the plan's own decision, and the three states are distinct:
+    // a plan with no rough (ball alone) matches a goal stating `null`, never an ABSENT key (which
+    // now means the engine chooses), and a named key matches itself.
+    job.targetObject?.roughToolKey === (measuredNow.goalRoughKey ?? null) &&
     (measuredSetup?.tools ?? []).length === measuredNow.cutters.length &&
     (measuredSetup?.tools ?? []).every((k, i) => k === measuredNow.cutters[i]?.key) &&
     measuredNow.cutters.every((c) => {

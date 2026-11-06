@@ -114,10 +114,20 @@ function goalJob(over: Partial<EngraveTargetObject> = {}, stockThickness = 12): 
 const SHOP = { tools: [BALL, ROUGH, SMALL, WIDE] };
 
 describe('#869 the goal’s split, generated', () => {
-  it('a goal with no flat rough is ONE program, byte-identical (pinned)', async () => {
+  it('#999 an ABSENT roughToolKey lets the ENGINE choose: the flat rough, then the ball (the old path keeps its pinned one-cutter file)', async () => {
     const job = goalJob();
     const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
     expect(out.ok).toBe(true);
+    if (USE_MODEL_CAM_ENGINE) {
+      // #999 — absent is not "ball alone" on the seam: the plan's sequence chooses the house
+      // flat (the largest, ⌀3 here) and the ball finishes.
+      expect(out.programs).toHaveLength(2);
+      expect(out.programs[0]!.toolKey).toBe(ROUGH.key);
+      expect(out.programs[1]!.toolKey).toBe(BALL.key);
+      expect(out.surface3d?.rough ?? null).toBeNull();
+      return;
+    }
+    // The OLD heightfield path's own reading is unchanged (its bytes are pinned): absent = one cutter.
     expect(out.programs).toHaveLength(1);
     expect(out.programs[0]!.toolKey).toBe(BALL.key);
     expect(out.surface3d?.rough ?? null).toBeNull();
@@ -207,14 +217,27 @@ describe('#869 the goal’s split, generated', () => {
     }
   });
 
-  it('a rough the library does not hold leaves one program and says which', async () => {
+  it('#999 a rough the library does not hold falls back to the engine’s choice, and says which', async () => {
     const job = goalJob({ roughToolKey: 'inv:gone' });
     const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
     expect(out.ok).toBe(true);
-    expect(out.programs).toHaveLength(1);
+    // The seam lets the engine choose (two programs); the old path keeps its one-cutter reading.
+    expect(out.programs).toHaveLength(USE_MODEL_CAM_ENGINE ? 2 : 1);
+    if (USE_MODEL_CAM_ENGINE) expect(out.programs[0]!.toolKey).toBe(ROUGH.key);
     const finding = out.findings.find((f) => f.code === 'goal-rough-no-cutter');
     expect(finding).toBeDefined();
     expect(finding!.message).toContain('not in the tool library');
+  });
+
+  it('#999 an explicit null is the operator’s ball alone, stated in the findings', async () => {
+    const job = goalJob({ roughToolKey: null });
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    expect(out.ok).toBe(true);
+    expect(out.programs).toHaveLength(1);
+    expect(out.programs[0]!.toolKey).toBe(BALL.key);
+    const stated = out.findings.find((f) => f.code === 'goal-rough-ball-alone');
+    expect(stated?.severity).toBe('info');
+    expect(stated?.message).toContain('ball alone');
   });
 
   it('a ball named as the rough is refused by name, and the goal still posts', async () => {
@@ -267,7 +290,7 @@ describe('#869 the goal’s split, chosen by the search', () => {
     expect(plan?.goalRoughKey).toBe(ROUGH.key);
   });
 
-  it('applying a plan writes the rough key, and a plan without one clears it', async () => {
+  it('#999 applying a plan writes the rough key, and a plan without one writes null (ball alone)', async () => {
     const job = goalJob();
     const withRough = applyCutterPlanToJob(job, {
       cutters: [{ key: BALL.key, items: [job.targetObject!.id] }],
@@ -275,7 +298,9 @@ describe('#869 the goal’s split, chosen by the search', () => {
     });
     expect(withRough.targetObject?.roughToolKey).toBe(ROUGH.key);
     const without = applyCutterPlanToJob(withRough, { cutters: [{ key: BALL.key, items: [job.targetObject!.id] }] });
-    expect(without.targetObject?.roughToolKey).toBeUndefined();
+    // #999 — NEVER a delete: absent now means the engine chooses, so a ball-alone plan that
+    // deleted the key would generate a rough the verdict never measured.
+    expect(without.targetObject?.roughToolKey).toBeNull();
   });
 
   it('the split charges one more tool change to the measured cost', async () => {
