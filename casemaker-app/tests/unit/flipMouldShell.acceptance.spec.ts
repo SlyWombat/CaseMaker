@@ -369,7 +369,7 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
 
   // #966 triage — #1005 (the mould half) and #1006 (the seam plans the goal once from geometry,
   // never the job's saved sides).
-  it.fails('one job carries both sides with the pins as their datum, and the app does the flip transform', async () => {
+  it('one job carries both sides with the pins as their datum, and the app does the flip transform', async () => {
     const job = oneJob();
     // The document reads as two sides, in setup order, one goal each.
     expect(goalSides(job).map((s) => [s.setupIndex, s.setup.id, s.goal.id])).toEqual([
@@ -426,13 +426,13 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     expect(ref!.confirm!.options[ref!.confirm!.correct]).toBe('the pin 4 mm from the left edge');
   }, 600_000);
 
-  it.fails('the two sides leave the wall in band — #1005 mould mode owes this on the model engine', async () => {
-    // #1005 — THE WALL. The two sides must leave the shell's wall in band everywhere. On the
-    // MODEL ENGINE this is RED today and pinned as `it.fails` naming #1005: the input carries no
-    // `goalMode: 'mold'`, so side 2's cavity is cut ~3.25 mm shallow (measured wall map of the
-    // both-sides job: 57,492 cells thinner than W, 31,106 thicker, 5,542 in band; probe (0,0)
-    // 5.76 mm against the old path's 2.51). When #1005 lands this test passes, `it.fails` goes
-    // red, and the pin must be flipped — that is the enforcement, not a waiver.
+  it('the two sides leave the wall in band', async () => {
+    // #1005 — THE WALL, JUDGED. The two sides must leave the shell's wall in band everywhere.
+    // This was #1006's `it.fails` naming #1005 (the model input carried no mould: 57,492 cells
+    // thinner than W, 31,106 thicker, 5,542 in band; probe (0,0) 5.76 mm against the old path's
+    // 2.51). The mould is in the engine now, so this is a plain test — the flip the pin demanded.
+    // #1019's per-region reach keeps the stated 12 mm flat off every deeper region's rough, which
+    // is what lets the holder gate stay silent.
     const job = oneJob();
     const out = await engraveGenerate(tl, job, BALL_TOOL, [], null, undefined, {});
     const frames = jobSetups(job).map((s) => orient(s.orientation.top, s.mount, STOCK));

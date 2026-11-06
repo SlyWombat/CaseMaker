@@ -854,7 +854,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       ...(noFlatFallback
         ? { flat: primary, extraRegions: pocketFloorRegions }
         : input.curvedRoughTool === undefined
-          ? { flat: primary }
+          ? curvedRoughFlat !== undefined
+            ? { flat: curvedRoughFlat }
+            : b === undefined
+              ? {}
+              : { flat: b }
           : input.curvedRoughTool === null
             ? {}
             : { flat: input.curvedRoughTool }),
@@ -1084,6 +1088,27 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
 
 
+    // #1019 — THE CURVED ROUGH'S REACH, the per-feature rule applied to the curved stage. The
+    // rough goes to the first STATED flat whose USABLE length (shoulder, else flute — the number
+    // the holder gate measures) reaches the deepest curved region below the stock top. When none
+    // reaches, the ball roughs (#982's own mechanism) and the substituted flat, its length and
+    // the depth are stated: a flat sent too deep is a shank collision, not a rough.
+    const curvedRegionDepthMm = tree.remainder.reduce((m, r) => Math.max(m, tree.frame.stockTop - r.zBottom), 0);
+    const usableLengthMm = (t: Tool): number | null => t.shoulderLength ?? t.fluteLength;
+    const curvedRoughFlat = flats.find((t) => {
+      const usable = usableLengthMm(t);
+      return usable !== null && usable + 1e-9 >= curvedRegionDepthMm;
+    });
+    const curvedRoughSubstitution =
+      !noFlatFallback && flats.length > 0 && input.curvedRoughTool === undefined && curvedRoughFlat === undefined
+        ? (() => {
+            const named = flats[0]!;
+            const usable = usableLengthMm(named);
+            const ballName = ball === undefined ? 'no ball in the set' : (ball.name || 'the ball');
+            return `the ${named.name || named.shape}'s ${usable === null ? 'unstated' : `${usable} mm`} usable length does not reach the ${Number(curvedRegionDepthMm.toFixed(1))} mm the curved remainder cuts below the stock top — ${ballName} roughs instead`;
+          })()
+        : null;
+
     const result = planTreePrograms(tree, {
       offset,
       pockets: noFlatFallback ? null : {
@@ -1302,6 +1327,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         ids: ballUncutIds,
         text: `${ballUncutIds.length} ${plural} narrower than the ball's radius — left uncut`,
       });
+    }
+    if (curvedRoughSubstitution !== null) {
+      // #1019 — the stated flat was sent no deeper than it can reach: the ball took the rough and
+      // the numbers are on the line (the flat, its length, the depth the region cuts).
+      notes.push(curvedRoughSubstitution);
+      statements.push({ severity: 'warning', code: 'goal-rough-unreachable', count: 1, text: curvedRoughSubstitution });
     }
     if (input.fixture.envelope !== null) {
       const text = `the ${input.fixture.mount} fixture envelope is not yet wired into the region obstacles — this plan carries none; the posted program is still checked against the same envelope by the sweep`;
@@ -2345,6 +2376,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // A's review 6622610124, finding 4: a through node's own limiting number was lost (the lookup
   // only checked `pocketsById`) — the SAME sentence either kind of node gets.
   const unreachable = choice.unreachable.filter((id) => !vCovered.has(id)).map((id) => {
+    // #1019 — an entry the SEARCH composed (a pocket no cutter can enter, stated with its own
+    // number: "pocket-0: 0.541 mm opening, … — left standing") passes through as written; a bare
+    // region id is given this plan's own sentence below.
+    if (id.includes(': ')) return id;
     const node = pocketsById.get(id) ?? throughById.get(id);
     const failed = regionFailures.get(id);
     // #959 item 5: a region the chosen chain left out because its planning THREW (the chain that
@@ -2387,6 +2422,26 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #992 — the SAME facts, typed: code, severity and count, so the seam can route them. `notes`
   // keeps every string exactly as before (the failure path joins it, the acceptance reads it).
   const statements: PlanStatement[] = [];
+  // #1019 — THE POCKETS NO CUTTER CAN ENTER ARE STATED even when nothing else is planned. The
+  // search carries them as its own sentences (id, opening, the set it was measured against); one
+  // statement per cause with the count (#962), the ids as the cause's pockets, and a single
+  // pocket's own sentence as the text so the number is on the statement itself.
+  {
+    const unenterable = choice.unreachable.filter((u) => u.includes(': '));
+    if (unenterable.length > 0) {
+      const ids = unenterable.map((u) => u.slice(0, u.indexOf(': ')));
+      const plural = unenterable.length === 1 ? 'pocket' : 'pockets';
+      statements.push({
+        severity: 'warning',
+        code: 'goal-region-uncut',
+        count: unenterable.length,
+        ids,
+        text: unenterable.length === 1
+          ? unenterable[0]!
+          : `${unenterable.length} ${plural} no cutter in the set can enter — left standing: ${unenterable.join('; ')}`,
+      });
+    }
+  }
   // #988 — WHAT THE BAND LEAVES, one line per clipped pocket/through feature: the floor it is cut
   // to and the floor the tree states (`pocket-3: cut to −11 of −18 — 7 mm is left in the stock`).
   if (depthBandMm !== undefined) {

@@ -489,12 +489,28 @@ export function candidateSequences(
   const balls = ballsAll.filter((c) => ballRefusal(c.tool, curvedFeatures) === null);
   const chamfers = all.filter((c) => isChamfer(c.tool) && chamferRefusal(c.tool) === null);
 
+  // #1019 — THE POCKET POOL, PARTITIONED BY ENTERABILITY BEFORE THE SEARCH. A pocket no cutter in
+  // the set can ENTER (`entersFeature`: its opening is narrower than every round cutter's
+  // diameter) is not something the primary can rough, and it must not take every candidate down
+  // with it: the search runs on the enterable pockets, and each un-enterable one is stated by its
+  // own number. The line-902 refusal stays for a demand a cutter could enter but none can reach
+  // or fit.
+  const roundPool = [...flatsDesc, ...ballsAll];
+  const entersSome = (f: SequenceFeature): boolean => roundPool.some((c) => entersFeature(c.tool, f));
+  const searchPockets = pocketFeatures.filter(entersSome);
+  const unenterablePockets = pocketFeatures.filter((f) => !entersSome(f));
+  const cutterWords = roundPool.map((c) => `⌀${diameterOf(c.tool)} ${isFlat(c.tool) ? 'flat' : 'ball'}`).join(', ');
+  const unenterable = unenterablePockets.map((f) =>
+    f.minOpeningMm === null || f.minOpeningMm === undefined
+      ? `${f.id}: not cut — no cutter in the set can enter it`
+      : `${f.id}: ${f.minOpeningMm.toFixed(3)} mm opening, narrower than every cutter in the set (${cutterWords}) — left standing`,
+  );
   // A primary must reach the curved remainder's floors and, when the part has pockets, rough at
   // least one of them. A flat that fits no pocket is not a primary: the chain never shrinks the
   // primary to a feature — it adds a smaller cutter for what the primary cannot reach.
   const reachesCurved = (c: CandidateCutter): boolean => curvedFeatures.every((f) => reachesFeature(c.tool, f));
   const canRoughPocket = (c: CandidateCutter): boolean =>
-    pocketFeatures.some((f) => entersFeature(c.tool, f) && reachesFeature(c.tool, f));
+    searchPockets.some((f) => entersFeature(c.tool, f) && reachesFeature(c.tool, f));
   // A primary must have SOMETHING to cut: a pocket it can rough, or the freeing profile. A part
   // whose only pocket is too narrow for every flat still needs its contour cut (the pocket is
   // stated, not silently dropped) — before the contour had its own step this was satisfied by the
@@ -502,7 +518,7 @@ export function candidateSequences(
   const canCutSomething = (c: CandidateCutter): boolean =>
     canRoughPocket(c)
     || contourFeatures.some((f) => coversFeature(c.tool, f))
-    || (pocketFeatures.length === 0 && contourFeatures.length === 0);
+    || (searchPockets.length === 0 && contourFeatures.length === 0);
   // The LARGEST cutter that can rough the part is the ONE primary — "largest flat roughs what it
   // enters; next smaller for what the previous cannot reach" (the #961 ruling). A smaller flat
   // that also roughs a pocket is a REST, never a second primary: without this the ⌀3.175 chain is
@@ -518,9 +534,16 @@ export function candidateSequences(
     ? primaries
     : maximal(ballsAll.filter((c) => reachesCurved(c) && canCutSomething(c)));
 
-  if (pocketFeatures.length > 0 && roughs.length === 0) return [];
   if (curvedFeatures.length > 0 && balls.length === 0) return [];
   if (rimFeatures.length > 0 && chamfers.length === 0) return [];
+  // #1019 — a demand whose pockets are ALL un-enterable, with no contour to cut, is trivially
+  // satisfied the way #987 treats an empty demand: nothing for the pocket chain, every pocket
+  // stated by its own number. It is NOT the line-902 refusal, which is reserved for a demand a
+  // cutter could enter but none can reach or fit.
+  if (roundPool.length > 0 && pocketFeatures.length > 0 && searchPockets.length === 0 && contourFeatures.length === 0) {
+    return [{ steps: [], unreachable: [...unenterable], leftBehind: 0 }];
+  }
+  if (searchPockets.length > 0 && roughs.length === 0) return [];
 
   const ballChoices: (CandidateCutter | null)[] = curvedFeatures.length > 0 ? balls : [null];
   const chamferChoices: (CandidateCutter | null)[] = rimFeatures.length > 0 ? chamfers : [null];
@@ -541,7 +564,7 @@ export function candidateSequences(
     const signature = steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
     if (seen.has(signature)) return;
     seen.add(signature);
-    out.push({ steps, unreachable, covered });
+    out.push({ steps, unreachable: [...unreachable, ...unenterable], covered });
   };
 
   /** The chain from one primary: each link names the pockets that cutter is needed for. */
@@ -560,7 +583,7 @@ export function candidateSequences(
       // The primary also names the pockets it can ROUGH even where its corner leaves a rest —
       // the rest step names the same pocket again for the corner, and the ops union.
       if (chain.length === 0) {
-        for (const f of pocketFeatures) {
+        for (const f of searchPockets) {
           if (!regionIds.includes(f.id) && entersFeature(cutter.tool, f) && reachesFeature(cutter.tool, f)) {
             regionIds.push(f.id);
           }
@@ -574,7 +597,7 @@ export function candidateSequences(
       const next = flatsDesc.find((c) => {
         const d = diameterOf(c.tool) ?? 0;
         if (!(d < last - EPS)) return false;
-        return pocketFeatures.some((f) => !covered.has(f.id) && coversFeature(c.tool, f));
+        return searchPockets.some((f) => !covered.has(f.id) && coversFeature(c.tool, f));
       });
       if (next === undefined) break;
       addLink(next);
@@ -601,7 +624,7 @@ export function candidateSequences(
       const d = diameterOf(c.tool) ?? 0;
       if (!(d < primaryD - EPS)) continue;
       if (geometric.some((link) => link.cutter.key === c.key)) continue;
-      const regionIds = pocketFeatures.filter((f) => coversFeature(c.tool, f)).map((f) => f.id);
+      const regionIds = searchPockets.filter((f) => coversFeature(c.tool, f)).map((f) => f.id);
       if (regionIds.length === 0) continue;
       if (geometric.length + 1 > maxCutters) continue;
       out.push([...geometric, { cutter: c, regionIds, coverage: true }]);
@@ -658,9 +681,9 @@ export function candidateSequences(
       // The pockets this prefix covers; the rest are STATED for this candidate.
       const coveredNow = new Set<string>();
       for (const link of links) {
-        for (const f of pocketFeatures) if (coversFeature(link.cutter.tool, f)) coveredNow.add(f.id);
+        for (const f of searchPockets) if (coversFeature(link.cutter.tool, f)) coveredNow.add(f.id);
       }
-      const unreachablePockets = pocketFeatures.filter((f) => !coveredNow.has(f.id)).map((f) => f.id);
+      const unreachablePockets = searchPockets.filter((f) => !coveredNow.has(f.id)).map((f) => f.id);
       // The freeing cut, posted LAST. Its cutter is the first chain link that covers the profile
       // (the largest — usually the primary; coming back to it after the rests costs a RETURN tool
       // change, which `priceSequence` now charges), or the chain's last cutter when it can take
@@ -906,6 +929,16 @@ export function chooseSequence(
   }
 
   const priced = candidates.map((sequence) => {
+    // #1019 — an EMPTY chain is the trivially-satisfied demand (every pocket un-enterable, no
+    // contour): it prices at zero so it is feasible and chosen, never ranked as "could not be
+    // priced"; nothing is posted for it and its `unreachable` states the pockets.
+    if (sequence.steps.length === 0) {
+      return {
+        sequence,
+        priced: { cost: { entries: [], estimateSeconds: 0, toolChanges: 0, toolChangeSeconds: 0, totalSeconds: 0 }, steps: [], failures: [] },
+        coverage: null,
+      };
+    }
     const price = priceSequence(sequence, opts);
     // The simulated outcome runs on the PLANNED steps (a failed step posts nothing).
     const coverage = price === null || opts.coverage === undefined ? null : opts.coverage(price.steps);

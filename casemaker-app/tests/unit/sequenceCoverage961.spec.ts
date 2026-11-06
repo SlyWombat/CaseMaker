@@ -164,7 +164,10 @@ describe('#961 the organizer demand: cover what a house cutter can cut', () => {
     expect(choice.steps.some((s) => s.kind === 'rest' && s.cutter.key === 'flat-3.175')).toBe(true);
     expect(choice.steps[0]!.cutter.key).toBe('flat-6');
     for (const id of CUTTABLE_REST) expect(choice.unreachable).not.toContain(id);
-    expect([...choice.unreachable].sort()).toEqual([...BELOW_HOUSE].sort());
+    // #1019 — an un-enterable pocket is stated as its own sentence ("id: 0.541 mm opening …"),
+    // not a bare id: the ids named are still exactly the below-house set.
+    const statedIds = choice.unreachable.map((u) => (u.includes(': ') ? u.slice(0, u.indexOf(': ')) : u)).sort();
+    expect(statedIds).toEqual([...BELOW_HOUSE].sort());
     expect(CUTTABLE_REST).toHaveLength(27);
     expect(BELOW_HOUSE).toHaveLength(16);
   });

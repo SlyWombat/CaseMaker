@@ -70,6 +70,8 @@ export type PlanFindingCode =
   | 'goal-plan-tradeoff'
   // #1012 — the rim stage's bevel was clamped to the V's one-pass reach (the 2.5D path's own code).
   | 'chamfer-too-wide'
+  // #1019 — the engine-chosen curved rough's stated flat could not reach the region's depth.
+  | 'goal-rough-unreachable'
   // #1005 — the mould's own four. Rim and floor are the goal validator's
   // (`validateGoalObject`); one-sided and no-draft are the plan's, from its own solid.
   | 'goal-mold-rim'
