@@ -2672,7 +2672,10 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // the plan's own datum (stock top = 0), which is the same datum as `tree.frame.stockBottom`, so
     // the clamp is a plain max. A goal taller than its stock must not finish below the blank.
     // #1013 — the depth band composes with it; the shallower of the two wins.
-    const planFloorZ = tree.frame.stockBottom;
+    // E's review of b74f653c6 (#1003): `rebaseZ` is relative to the STOCK TOP, `frame.stockBottom`
+    // is absolute — comparing them directly clamped a flipped setup (stockTop 30, stockBottom 0) to
+    // 0 and the region's rough/finish cut nothing. The floor must be rebased like the region is.
+    const planFloorZ = tree.frame.stockBottom === undefined ? undefined : rebaseZ(tree.frame.stockBottom);
     const base = {
       ...region,
       zTop: rebaseZ(region.zTop),
