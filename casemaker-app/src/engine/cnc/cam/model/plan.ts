@@ -38,7 +38,7 @@ import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
-import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, StockProbes } from './types';
+import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanStatement, StockProbes } from './types';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, type SetupRegistration } from './setups';
 import { pocket } from './ops/pocket';
@@ -304,6 +304,13 @@ export interface SetupPlan {
    * own finding was that `planModelCam` computed these and dropped them.
    */
   notes: string[];
+  /**
+   * #992 — `notes`, typed: the same facts with a code and a severity, so the seam can route them
+   * (warning/info to the panel's findings, sheet lines to the run sheet) instead of leaving every
+   * ruling "stated on the card" reachable only by the acceptance specs. One per cause, with a
+   * count (#962's rule); `notes` stays as the dump's full prose.
+   */
+  statements: PlanStatement[];
   /** Features no cutter in the chain covers, each a sentence naming the limiting number. */
   unreachable: string[];
   /**
@@ -724,6 +731,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // material remaining there than the real cut would leave.
     let oppositeSafeDepthMm: ((x: number, y: number) => number | null) | undefined;
     const freeingNotes: string[] = [];
+    // #992 — the freeing-depth check's outcome, typed: the bounded case is a fact of the run
+    // (sheet); the two "not checked" cases are developer gaps and stay in `notes` only.
+    const freeingStatements: PlanStatement[] = [];
     if (setupIndex > 0 && setupIndex === input.setups.length - 1) {
       const opposite = perSetup[0];
       if (opposite === undefined) {
@@ -749,6 +759,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           freeingNotes.push(
             `setup ${setupIndex}: the freeing contour's depth is bounded, at every point its path samples, by setup 0's own finished surface (#965, #898 part 2) — it will not cut deeper than that surface, read through this setup's own ${primary.name || primary.shape}`,
           );
+          freeingStatements.push({ severity: 'sheet', code: 'plan-run', count: 1, text: freeingNotes[freeingNotes.length - 1]! });
         }
       } else {
         freeingNotes.push(
@@ -771,6 +782,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // CLAMPED at the real design top over the opening: a spurious pocket floor below the body
     // (the 11.37 mm gouge) yields no depth, so the ball can never cut through the part.
     const pocketFloorRegions: RemainderRegion[] = [];
+    // #982's own note site ran BEFORE this setup's `notes` array exists (the walk below is
+    // called before the array is built), a temporal-dead-zone crash waiting on the first pocket
+    // narrower than the ball; #992 collects them here — same sentence, same position ahead of
+    // the result notes — and the ids so ONE statement can state the cause with its count.
+    const earlyNotes: string[] = [];
+    const ballUncutIds: string[] = [];
     if (noFlatFallback) {
       const bins = buildTriangleBins(input.geometry.triangles);
       const walkPockets = (nodes: PocketNode[]): void => {
@@ -797,7 +814,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           const ballRadius = (cuttingDiameter(primary) ?? 0) / 2;
           const footprint = ballRadius > 0 ? offset(node.region, -ballRadius) : node.region;
           if (footprint.length === 0) {
-            notes.push(`${node.id}: the ball cannot enter this pocket (narrower than its radius) — left uncut`);
+            earlyNotes.push(`${node.id}: the ball cannot enter this pocket (narrower than its radius) — left uncut`);
+            ballUncutIds.push(node.id);
             walkPockets(node.children);
             continue;
           }
@@ -924,6 +942,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // nothing is called out for what it is: the part is not freed.
     const ops: PlannedOp[] = [];
     const emptyStages: string[] = [];
+    // #992 — the same drops, grouped per kind for the operator (one statement per cause with a
+    // count); the per-op strings above stay in `notes` as the dump's detail.
+    const emptyOpGroups = new Map<string, { kind: string; count: number; ids: string[] }>();
     for (const op of result.ops) {
       if (op.outcome.ir.operations.some((operation) => operation.moves.length > 0)) {
         // #965 — every op's posted IR is mapped to the DOCUMENT (world) XY here, once, before it
@@ -937,6 +958,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         `${op.kind} "${op.region.id}" emitted no moves — not posted` +
           (op.kind === 'contour' ? ' — THE PART IS NOT FREED BY THIS PLAN' : ''),
       );
+      const group = emptyOpGroups.get(op.kind) ?? { kind: op.kind, count: 0, ids: [] };
+      group.count++;
+      group.ids.push(op.region.id);
+      emptyOpGroups.set(op.kind, group);
     }
 
     // #964's own measurement: the curved pipeline's per-region loop alternates flat/ball once per
@@ -966,32 +991,77 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       if (p > 0) totalCostSeconds += toolChangeSeconds;
     }
 
-    const notes = [...result.notes, ...emptyStages, ...freeingNotes];
+    const notes = [...earlyNotes, ...result.notes, ...emptyStages, ...freeingNotes];
     notes.push(...toolSubstitutions);
     // #982 (the review session's ruling) — the two cutter fallbacks, stated on the card in
     // outcome terms (the measured coverage/cycle numbers are the acceptance card's; the plan
-    // states the method and the tradeoff it implies).
+    // states the method and the tradeoff it implies). #992 — each is typed: a cut made by a
+    // fallback the job did not ask for changes what comes off the machine (wall fillets, a
+    // flat's raster on a curved surface), so both are warnings.
+    const fallbackStatements: PlanStatement[] = [];
     if (noFlatFallback) {
       const r = (cuttingDiameter(primary) ?? 0) / 2;
-      notes.push(
+      const text =
         `the set holds no flat end mill — the pocket floors are cut by the ${primary.name || primary.shape} ball: ` +
-          `wall feet carry a ${r.toFixed(3)} mm fillet and the floor a stepped scallop between passes (the tradeoff of cutting without a flat)`,
-      );
+        `wall feet carry a ${r.toFixed(3)} mm fillet and the floor a stepped scallop between passes (the tradeoff of cutting without a flat)`;
+      notes.push(text);
+      fallbackStatements.push({ severity: 'warning', code: 'goal-cutter-substituted', count: 1, text });
     }
     if (ball === undefined && tree.remainder.length > 0) {
       const flatName = (finishFlat ?? primary).name || 'flat';
-      notes.push(
+      const text =
         `the set holds no ball nose — the curved remainder is finished by the ${flatName} as a flat-raster over the whole region ` +
-          `(cusp rule: step = cusp / tan of the steepest slope, clamped to the flat's radius/10 to radius); ` +
-          (finishFlat !== undefined && finishFlat !== primary ? 'the creases go to the rest pass with the smallest flat' : 'no smaller flat is offered, so the creases are left as the raster finds them'),
+        `(cusp rule: step = cusp / tan of the steepest slope, clamped to the flat's radius/10 to radius); ` +
+        (finishFlat !== undefined && finishFlat !== primary ? 'the creases go to the rest pass with the smallest flat' : 'no smaller flat is offered, so the creases are left as the raster finds them');
+      notes.push(text);
+      fallbackStatements.push({ severity: 'warning', code: 'goal-cutter-substituted', count: 1, text });
+    }
+    // #992 — THE TYPED STATEMENTS: the two planners' own, then this loop's. Every one is the same
+    // fact its `notes` line states; the code and severity are what route it to the operator.
+    const statements: PlanStatement[] = [...result.statements, ...freeingStatements, ...fallbackStatements];
+    for (const group of emptyOpGroups.values()) {
+      const plural = group.count === 1 ? 'op' : 'ops';
+      statements.push(
+        group.kind === 'contour'
+          ? {
+              severity: 'warning',
+              code: 'goal-not-freed',
+              count: group.count,
+              ids: group.ids,
+              text: `${group.kind}: ${group.count} ${plural} emitted no moves — THE PART IS NOT FREED BY THIS PLAN`,
+            }
+          : {
+              severity: 'warning',
+              code: 'goal-region-uncut',
+              count: group.count,
+              ids: group.ids,
+              text: `${group.kind}: ${group.count} ${plural} emitted no moves — nothing for it to cut`,
+            },
       );
+    }
+    for (const text of toolSubstitutions) {
+      // A cutter cut with another tool's numbers (a fallback/proxy feed row) changes the cut.
+      statements.push({ severity: 'warning', code: 'goal-cutter-substituted', count: 1, text });
+    }
+    if (ballUncutIds.length > 0) {
+      // #982/#992 — the no-flat fallback's ball cannot enter a pocket narrower than its radius:
+      // material stands there. One statement per cause with the count, never a line per pocket.
+      const plural = ballUncutIds.length === 1 ? 'pocket' : 'pockets';
+      statements.push({
+        severity: 'warning',
+        code: 'goal-region-uncut',
+        count: ballUncutIds.length,
+        ids: ballUncutIds,
+        text: `${ballUncutIds.length} ${plural} narrower than the ball's radius — left uncut`,
+      });
     }
     if (input.fixture.envelope !== null) {
-      notes.push(
-        `the ${input.fixture.mount} fixture envelope is not yet wired into the region obstacles — this plan carries none; the posted program is still checked against the same envelope by the sweep`,
-      );
+      const text = `the ${input.fixture.mount} fixture envelope is not yet wired into the region obstacles — this plan carries none; the posted program is still checked against the same envelope by the sweep`;
+      notes.push(text);
+      statements.push({ severity: 'warning', code: 'goal-fixture-unmodelled', count: 1, text });
     }
     if (input.cutters.catalogue.length > 0) {
+      // #992 dump-only: a developer gap ("not in the pocket chain yet"), not an operator fact.
       notes.push(`${input.cutters.catalogue.length} catalogue cutter(s) are not in the pocket chain yet — the house set is what it chooses from`);
     }
     // #965 — registration against setup 0's own cut features is now COMPUTED
@@ -1000,7 +1070,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // than asserted. (The freeing-contour gap just below is a SEPARATE, still-open #965 item —
     // the flat-Z release pass, not the registration this function now answers.)
     if (setupIndex > 0) {
-      notes.push(describeRegistration(setupIndex, registration!));
+      const text = describeRegistration(setupIndex, registration!);
+      notes.push(text);
+      statements.push({ severity: 'sheet', code: 'plan-setup', count: 1, text });
       // The freeing contour's own depth IS now bounded against the opposite setup's finished
       // surface (above, `freeingNotes`) — this is no longer a stated gap; see that note for the
       // actual outcome (or why it could not be checked) on THIS plan.
@@ -1016,6 +1088,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       programs,
       totalCostSeconds,
       notes,
+      statements,
       unreachable: result.unreachable,
       unplanned: result.unplanned,
       choice: result.choice,
@@ -1261,6 +1334,8 @@ export interface PlanPocketsResult {
   unreachable: string[];
   /** Other stated findings — a skin above the part this plan does not fully face, and similar gaps that are not a refusal. */
   notes: string[];
+  /** #992 — `notes`, typed: one statement per cause with its code, severity and count. */
+  statements: PlanStatement[];
   /** The full picker result (`considered`, `cost`) — for a caller that wants more than `ops`/`unreachable`. */
   choice: SequenceChoice;
   /** #959 item 5 — the chosen chain's failed steps, one entry per region that threw (with its own message). */
@@ -1787,6 +1862,9 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   const vOps: PlannedOp[] = [];
   const vRuns: { cutterKey: string; ir: ToolpathIR }[] = [];
   const vNotes: string[] = [];
+  // #992 — the per-pocket V-floor numbers behind `vNotes`, so ONE grouped statement can state the
+  // cause with its count (the #962 rule) while every pocket keeps its own line in the dump.
+  const vFloors: { id: string; depth: number; land: number; angleDeg: number }[] = [];
   if (opts.houseVs !== undefined && opts.houseVs.length > 0 && choice.unreachable.length > 0) {
     const featureOf = new Map(demand.features.map((f) => [f.id, f] as const));
     const byV = new Map<string, { tool: Tool; cone: VCone; ids: string[] }>();
@@ -1854,6 +1932,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         vCovered.add(id);
         const depth = mouthZ - floorZ;
         const land = depth * group.cone.tanHalf;
+        vFloors.push({ id, depth, land, angleDeg: group.cone.halfAngleDeg });
         const r3 = (n: number): string => String(Math.round(n * 1000) / 1000);
         vNotes.push(
           `${id}: cut by the ${group.tool.name || group.tool.shape} V as a floor-correct pocket — floor at the model's ` +
@@ -1959,6 +2038,9 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   }
 
   const notes: string[] = [];
+  // #992 — the SAME facts, typed: code, severity and count, so the seam can route them. `notes`
+  // keeps every string exactly as before (the failure path joins it, the acceptance reads it).
+  const statements: PlanStatement[] = [];
   // #943 (2026-11-05 ruling): the facing stage states where its cut starts, how many passes the
   // probed spread takes, and the clamp when the part top binds. The count mirrors `depthPasses`'
   // own rule (`ceil(total / stepDown)`, the last pass on the floor). `facingDepthMm` is the
@@ -1973,40 +2055,99 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     const floorWords = clamp
       ? `the part top ${mm(facingDepthMm)} mm below the zero`
       : `${mm(facingDepthMm)} mm below the zero, the lowest point less one row step (${mm(above)} mm above the part top)`;
-    notes.push(
+    const facingText =
       opts.stockProbes === undefined
         ? `facing: no surface measurement — the stated stock top is the cut's start, ${passes} ${plural} of at most ${mm(opts.stepDownMm)} mm to ${floorWords}`
-        : `facing: ${opts.stockProbes.count} surface touches, spread ${mm(opts.stockProbes.spreadMm)} mm from the highest point — ${passes} ${plural} of at most ${mm(opts.stepDownMm)} mm to ${floorWords}`,
-    );
+        : `facing: ${opts.stockProbes.count} surface touches, spread ${mm(opts.stockProbes.spreadMm)} mm from the highest point — ${passes} ${plural} of at most ${mm(opts.stepDownMm)} mm to ${floorWords}`;
+    notes.push(facingText);
+    statements.push({ severity: 'sheet', code: 'plan-run', text: facingText, count: passes });
     if (clamp) {
-      notes.push(
-        `facing stops at the part top ${mm(facingDepthMm)} mm below the zero — less than one ${mm(opts.stepDownMm)} mm row step; the low side gets a ${mm(facingDepthMm)} mm bite, because one step deeper would cut the design`,
-      );
+      const clampText = `facing stops at the part top ${mm(facingDepthMm)} mm below the zero — less than one ${mm(opts.stepDownMm)} mm row step; the low side gets a ${mm(facingDepthMm)} mm bite, because one step deeper would cut the design`;
+      notes.push(clampText);
+      statements.push({ severity: 'sheet', code: 'plan-run', text: clampText, count: 1 });
     }
   }
   // #975 — the V floor's own lines: floor, wall angle, and the land per side the flanks take
   // (the V's own geometry, stated; the gate's edge-break class carries the land).
   notes.push(...vNotes);
+  if (vFloors.length > 0) {
+    // #992 — ONE statement for the V floor, with the count: the same cause on every pocket, and
+    // the six per-pocket lines above are the dump's detail. The numerals are the range the group
+    // actually cuts at, never one pocket's numbers generalised to the others.
+    const r3 = (n: number): string => String(Math.round(n * 1000) / 1000);
+    const depths = vFloors.map((f) => f.depth);
+    const lands = vFloors.map((f) => f.land);
+    const angles = [...new Set(vFloors.map((f) => r3(f.angleDeg)))];
+    const dMin = r3(Math.min(...depths));
+    const dMax = r3(Math.max(...depths));
+    const lMin = r3(Math.min(...lands));
+    const lMax = r3(Math.max(...lands));
+    const plural = vFloors.length === 1 ? 'pocket' : 'pockets';
+    statements.push({
+      severity: 'info',
+      code: 'goal-plan-tradeoff',
+      count: vFloors.length,
+      ids: vFloors.map((f) => f.id),
+      text:
+        `${vFloors.length} ${plural} cut by the V as floor-correct ${vFloors.length === 1 ? 'pocket' : 'pockets'} — ` +
+        `floor at the model's −${dMin === dMax ? dMin : `${dMin}…${dMax}`} mm, walls at ${angles.join('/')}°, ` +
+        `land ${lMin === lMax ? lMin : `${lMin}…${lMax}`} mm per side (the V's own geometry: depth × tan(half)); ` +
+        'the land at the surface is the edge-break class, not cut-into',
+    });
+  }
   // #987 — a synthetic outline (the skirt `closeOpenSheet` added to close an open relief) is not
   // a design edge, so this plan demands no contour op against it at all: an open-surface relief —
   // its edge is the stock beside it; nothing is freed.
   if (tree.contour.synthetic) {
     notes.push('an open-surface relief: its edge is the stock beside it; nothing is freed');
+    statements.push({
+      severity: 'info',
+      code: 'goal-relief-edge',
+      count: 1,
+      text: 'an open-surface relief: its edge is the stock beside it; nothing is freed',
+    });
   }
   // #962 — ONE STATEMENT PER CAUSE, NOT A LINE PER REGION: failed regions are grouped by their
   // kind and reason with a count; the per-region detail lives in `unplanned` (machine-readable),
   // never as a wall of operator lines.
   {
-    const byCause = new Map<string, { kind: string; reason: string; count: number }>();
-    for (const [, failure] of regionFailures) {
+    const byCause = new Map<string, { kind: string; reason: string; count: number; ids: string[] }>();
+    // #992 — what the OPERATOR actually loses: the same discriminate rule `unplanned` applies
+    // (a region the chosen chain covers, which threw only in a candidate that lost, has its
+    // material cut). The note above stays the dump's full accounting; the statement must not
+    // warn about a region that was cut.
+    const lostByCause = new Map<string, { count: number; ids: string[] }>();
+    for (const [id, failure] of regionFailures) {
       const key = `${failure.kind}: ${failure.reason}`;
-      const entry = byCause.get(key) ?? { kind: failure.kind, reason: failure.reason, count: 0 };
+      const entry = byCause.get(key) ?? { kind: failure.kind, reason: failure.reason, count: 0, ids: [] };
       entry.count++;
+      entry.ids.push(...failure.regionIds);
       byCause.set(key, entry);
+      if (failure.kind !== 'rest' && chosenCovers.has(id)) continue;
+      const lost = lostByCause.get(key) ?? { count: 0, ids: [] };
+      lost.count++;
+      lost.ids.push(...failure.regionIds);
+      lostByCause.set(key, lost);
     }
     for (const entry of byCause.values()) {
       const plural = entry.count === 1 ? 'region' : 'regions';
-      notes.push(`${entry.kind}: ${entry.count} ${plural} could not be cut — ${entry.reason}`);
+      const text = `${entry.kind}: ${entry.count} ${plural} could not be cut — ${entry.reason}`;
+      notes.push(text);
+    }
+    for (const [key, lost] of lostByCause) {
+      const entry = byCause.get(key)!;
+      const plural = lost.count === 1 ? 'region' : 'regions';
+      const text = `${entry.kind}: ${lost.count} ${plural} could not be cut — ${entry.reason}`;
+      // #992 — a region the plan demanded and did not cut changes what comes off the machine:
+      // a warning, one per cause with its count (the #962 grouping above). A failed freeing
+      // contour is its own code because its consequence is its own: the part is never released.
+      statements.push({
+        severity: 'warning',
+        code: entry.kind === 'contour' ? 'goal-not-freed' : 'goal-region-uncut',
+        count: lost.count,
+        ids: lost.ids,
+        text: entry.kind === 'contour' ? `${text} — THE PART IS NOT FREED BY THIS PLAN` : text,
+      });
     }
   }
   // A root pocket's/wide through hole's own mouth assumes facing already cleared the skin
@@ -2014,21 +2155,22 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // every pocket this plan still posted, and nothing re-plans them at the stock top instead.
   // Named here rather than silently trusted, per the advisor's review on this revert.
   if (regionFailures.has('facing')) {
-    notes.push(
+    const text =
       'facing failed to plan but the skin is real (see above) — every pocket/through-hole posted still ' +
-        'assumes it is gone; their own first pass is deeper than it looks.',
-    );
+      'assumes it is gone; their own first pass is deeper than it looks.';
+    notes.push(text);
+    statements.push({ severity: 'warning', code: 'goal-region-uncut', count: 1, ids: ['facing'], text });
   }
   // #961's own pick between the two freeing-cut options (a return to the covering cutter, or the
   // chain's last cutter taking the profile itself) is priced in `choice.cost` either way; stated
   // here only when it actually cost something — a plain "no extra change" pick is not a finding.
   if (choice.freeing !== null && choice.freeing.extraToolChange) {
     const lastChainCutter = [...choice.steps].reverse().find((s) => s.kind !== 'contour')?.cutter.key ?? 'the last step';
-    notes.push(
-      choice.freeing.lastCutterEligible
-        ? `the freeing cut (contour) is posted LAST on ${choice.freeing.cutterKey} — a RETURN tool change back to it after ${lastChainCutter}, priced in the cycle (taking the profile with ${lastChainCutter} was dearer)`
-        : `the freeing cut (contour) is posted LAST on ${choice.freeing.cutterKey} — a RETURN tool change back to it after ${lastChainCutter}, priced in the cycle; ${lastChainCutter} cannot take the profile (flute or stated shape)`,
-    );
+    const text = choice.freeing.lastCutterEligible
+      ? `the freeing cut (contour) is posted LAST on ${choice.freeing.cutterKey} — a RETURN tool change back to it after ${lastChainCutter}, priced in the cycle (taking the profile with ${lastChainCutter} was dearer)`
+      : `the freeing cut (contour) is posted LAST on ${choice.freeing.cutterKey} — a RETURN tool change back to it after ${lastChainCutter}, priced in the cycle; ${lastChainCutter} cannot take the profile (flute or stated shape)`;
+    notes.push(text);
+    statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
   }
 
   const sequence: SequencedCutter[] = choice.cost.entries.map((entry) => {
@@ -2077,7 +2219,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     });
   }
 
-  return { ops, programs, sequence, unreachable, notes, choice, unplanned };
+  return { ops, programs, sequence, unreachable, notes, statements, choice, unplanned };
 }
 
 /**
@@ -2179,6 +2321,8 @@ export interface PlanCurvedResult {
   ops: PlannedOp[];
   /** Statements the plan owes the operator: nothing here is silent. */
   notes: string[];
+  /** #992 — `notes`, typed: one statement per cause with its code, severity and count. */
+  statements: PlanStatement[];
   /** `SetupPlan.clGrid`'s entries — every CL surface this pipeline sampled, one per cutter that built one. */
   clGrid: { cutterKey: string; toleranceMm: number; minSpacingMm: number; maxSpacingMm: number }[];
   /** #959 item 5 — every stage that threw, per region/rim, and the stages a failed rough skipped. */
@@ -2212,6 +2356,8 @@ function regionRefOf(id: string, kind: RegionKind, footprint: Polygons, topZ: nu
 export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): PlanCurvedResult {
   const ops: PlannedOp[] = [];
   const notes: string[] = [];
+  // #992 — the SAME facts, typed (codes, severities, counts), for the seam to route.
+  const statements: PlanStatement[] = [];
   // THE CURVED PROPERTY SEEDS FOUND THIS: some stages legitimately have nothing to cut (the pencil
   // on a surface with no creases, a rough whose mask is empty), and an op that emitted no moves was
   // still pushed — then posted as a program `postZ1` refuses ("no operation with any moves").
@@ -2708,10 +2854,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // #869/#966 — NO FLAT, NO SKIN: the skin is a flat's own surface-following pass (`skin()`
     // only a flat runs); a ball-alone goal states the skin standing rather than removing it with
     // the wrong tool. `facing: 'on'` is the operator's other route to the same stock.
-    notes.push(
+    const skinText =
       `${String(Math.round(skinMm * 1000) / 1000)} mm of skin stands above the part top — no rough tool is chosen for ` +
-        'this goal, so it is left standing rather than cleared with the ball; set a rough tool, or turn facing on, to remove it',
-    );
+      'this goal, so it is left standing rather than cleared with the ball; set a rough tool, or turn facing on, to remove it';
+    notes.push(skinText);
+    // #992 — the skin is real material left on the part: a decision the operator has to make.
+    statements.push({ severity: 'warning', code: 'goal-skin-standing', count: 1, text: skinText });
   } else if (skinMm > 1e-6 && (opts.facing ?? 'off') !== 'on' && opts.flat !== undefined) {
     const flat = opts.flat;
     const flatRadius = (cuttingDiameter(flat) ?? 0) / 2;
@@ -2771,6 +2919,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // Built ONCE, reused by every rim's query below (#960's own bins, not a fresh brute-force
     // scan per rim — see `topSurfaceAt`'s own header for the perf finding this replaces).
     const rimBins = tree.rims.length > 0 ? buildTriangleBins(opts.geometry.triangles) : null;
+    // #992 — a rim the stage declines is stated ONCE PER CAUSE with its count (the #962 rule);
+    // the per-rim lines stay in `notes` as the dump's detail.
+    const rimSkips = new Map<'covered' | 'open-loop', { count: number; ids: string[] }>();
     for (const rim of tree.rims) {
       try {
         // THE MANAGER'S RULING from the tray's 0.5 mm cell: a rim whose air side is COVERED is not
@@ -2780,6 +2931,10 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           notes.push(
             `rim "${rim.id}" not broken: covered from above (its air side does not drop by 0.2 mm — the edge lies under the land)`,
           );
+          const skip = rimSkips.get('covered') ?? { count: 0, ids: [] };
+          skip.count++;
+          skip.ids.push(rim.id);
+          rimSkips.set('covered', skip);
           continue;
         }
         // #962 — THE ORGANIZER'S 77 mm GROOVE FOUND THIS: `findRims`' edge-chaining can leave a
@@ -2805,6 +2960,10 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
             `rim "${rim.id}" not broken: its own loop is not closed (ends ${Math.hypot(first[0] - last[0], first[1] - last[1]).toFixed(2)} mm apart) — ` +
               `a straight bridge there is not real geometry, so no chamfer is cut rather than gouging across it`,
           );
+          const skip = rimSkips.get('open-loop') ?? { count: 0, ids: [] };
+          skip.count++;
+          skip.ids.push(rim.id);
+          rimSkips.set('open-loop', skip);
           continue;
         }
         // The rim's own Z is mesh-absolute too — rebased before the op sizes its bevel from it.
@@ -2825,23 +2984,53 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         unplanned.push({ kind: 'chamfer', cutterKey: cutterKeyOf(vbit), regionIds: [rim.id], reason: err instanceof Error ? err.message : String(err) });
       }
     }
+    // #992 — ONE statement per cause, with the count and the rim ids (the per-rim lines above
+    // are the dump's detail). The two causes have different remedies, so they are never merged.
+    for (const [cause, entry] of rimSkips) {
+      const plural = entry.count === 1 ? 'rim' : 'rims';
+      statements.push({
+        severity: 'warning',
+        code: 'goal-rim-unbroken',
+        count: entry.count,
+        ids: entry.ids,
+        text:
+          cause === 'covered'
+            ? `${entry.count} ${plural} not broken: covered from above (the air side does not drop by 0.2 mm — the edge lies under the land)`
+            : `${entry.count} ${plural} not broken: the rim's own loop is not closed, so no chamfer is cut rather than bridging across it`,
+      });
+    }
   } else if (tree.rims.length > 0) {
-    notes.push(`the job states no edge break — ${tree.rims.length} rim(s) stay sharp`);
+    const text = `the job states no edge break — ${tree.rims.length} rim(s) stay sharp`;
+    notes.push(text);
+    // #992 — the job asked for no bevel: a fact, not a fault (the operator's own choice).
+    statements.push({ severity: 'info', code: 'goal-no-edge-break', count: tree.rims.length, text });
   }
 
-  if (tree.remainder.length === 0) notes.push('no curved remainder regions — the rough/rest/finish/pencil stages have nothing to plan');
-  if (tree.rims.length === 0) notes.push('no rims — the chamfer stage has nothing to plan');
-  notes.push(
-    `the curved pipeline follows the ruling: the flat Z-steps each remainder region to its CL less ${opts.bandMm} mm, ` +
-      `the ball runs ONE final level, the pencil follows the creases${opts.restFlat === undefined ? ', and no rest flat was offered' : ', and a rest flat clears the CL difference first'}`,
-  );
+  if (tree.remainder.length === 0) {
+    const text = 'no curved remainder regions — the rough/rest/finish/pencil stages have nothing to plan';
+    notes.push(text);
+    statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
+  }
+  if (tree.rims.length === 0) {
+    const text = 'no rims — the chamfer stage has nothing to plan';
+    notes.push(text);
+    statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
+  }
+  {
+    const text =
+      `the curved pipeline follows the ruling: the flat Z-steps each remainder region to its CL less ${opts.bandMm} mm, ` +
+      `the ball runs ONE final level, the pencil follows the creases${opts.restFlat === undefined ? ', and no rest flat was offered' : ', and a rest flat clears the CL difference first'}`;
+    notes.push(text);
+    statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
+  }
   // #962 — the grouped statements, one per cause (see the accumulators above).
   for (const [kind, entry] of emptyStages) {
     const plural = entry.count === 1 ? 'region' : 'regions';
-    notes.push(
+    const text =
       `${kind}: ${entry.count} ${plural} emitted no moves — nothing for it to cut` +
-        (entry.deepestMm > 0 ? `; the deepest ground among them is ${entry.deepestMm.toFixed(1)} mm below the part top` : ''),
-    );
+      (entry.deepestMm > 0 ? `; the deepest ground among them is ${entry.deepestMm.toFixed(1)} mm below the part top` : '');
+    notes.push(text);
+    statements.push({ severity: 'sheet', code: 'plan-run', count: entry.count, text });
   }
   for (const [finishKind, entry] of finishKinds) {
     // #965 — the card states the scallop it used, never just "constant": the job's own tolerance
@@ -2855,11 +3044,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           : 'flat-following raster')
       : `ball at a constant ${scallopMm.toFixed(3)} mm scallop`;
     const plural = entry.count === 1 ? 'region' : 'regions';
-    notes.push(
-      `finish: ${entry.count} ${plural} run as a ${words} (slopes ${entry.minSlope.toFixed(1)}–${entry.maxSlope.toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG).toFixed(2)}°)`,
-    );
+    const text = `finish: ${entry.count} ${plural} run as a ${words} (slopes ${entry.minSlope.toFixed(1)}–${entry.maxSlope.toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG).toFixed(2)}°)`;
+    notes.push(text);
+    // #992 — which finish mode ran, and at what scallop: a fact of the run with no action.
+    statements.push({ severity: 'info', code: 'goal-finish-mode', count: entry.count, text });
   }
-  return { ops, notes, clGrid, unplanned };
+  return { ops, notes, statements, clGrid, unplanned };
 }
 
 /**
@@ -2898,6 +3088,8 @@ export interface PlanTreeResult {
   clGrid: { cutterKey: string; toleranceMm: number; minSpacingMm: number; maxSpacingMm: number }[];
   unreachable: string[];
   notes: string[];
+  /** #992 — the pocket and curved planners' statements, in the same order as `notes`. */
+  statements: PlanStatement[];
   /** #959 item 5 — the pocket chain's failed steps, then the curved/rim stages'. */
   unplanned: SequenceStepFailure[];
   /** #961 — the pocket chain's picker result, carried through for `SetupPlan.choice`. */
@@ -3009,6 +3201,17 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
         notes: [
           'the set holds no flat end mill — the pocket chain is not planned: its freeing contour is not planned with a ball either, so this plan does not free the part',
         ],
+        // #992 — the no-flat fallback (#982) never frees the part: a warning, and the sentence
+        // says so in the operator's own words (the review's ruling: "no flat, so the part isn't
+        // freed" is a warning, never a silent property of the plan).
+        statements: [
+          {
+            severity: 'warning',
+            code: 'goal-not-freed',
+            count: 1,
+            text: 'the set holds no flat end mill — the part is not freed by this plan: no freeing contour is cut, so it stays attached to the stock',
+          },
+        ],
         unplanned: [],
         choice: {
           steps: [],
@@ -3047,6 +3250,7 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
     clGrid: curvedResult.clGrid,
     unreachable: pocketResult.unreachable,
     notes: [...pocketResult.notes, ...curvedResult.notes],
+    statements: [...pocketResult.statements, ...curvedResult.statements],
     unplanned: [...pocketResult.unplanned, ...curvedResult.unplanned],
     choice: pocketResult.choice,
   };

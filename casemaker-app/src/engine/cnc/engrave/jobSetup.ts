@@ -420,6 +420,28 @@ export type JobFindingCode =
   // #999 — THE OPERATOR'S BALL-ALONE CHOICE is an INFO, stated so a one-cutter goal is never a
   // silent reading of an unfilled field: `roughToolKey: null`.
   | 'goal-rough-ball-alone'
+  // #992 — THE MODEL PLAN'S OWN STATEMENTS, now typed and routed. Before this, the planner's
+  // notes were readable only by a spec that opened `perSetup[].notes`; the reviews that ruled
+  // "stated on the card" were satisfied in tests and invisible in the app. One code per cause:
+  // a region the plan demanded and did not cut (`goal-region-uncut`), a freeing contour that
+  // never ran or a part with no flat to release it (`goal-not-freed` — the part stays on the
+  // stock), a cutter cut with another tool's numbers (`goal-cutter-substituted`), real skin left
+  // above the part (`goal-skin-standing`), a rim the V stage declined (`goal-rim-unbroken`, one
+  // finding per cause with a count), the fixture envelope the plan does not yet model
+  // (`goal-fixture-unmodelled`), and the infos: a relief edge that is the stock
+  // (`goal-relief-edge`), which finish mode ran (`goal-finish-mode`), a job that asked for no
+  // bevel (`goal-no-edge-break`), and what the plan chose and what it costs (`goal-plan-tradeoff`,
+  // the #961 line, the V floor and the crease/scallop numbers).
+  | 'goal-not-freed'
+  | 'goal-region-uncut'
+  | 'goal-cutter-substituted'
+  | 'goal-skin-standing'
+  | 'goal-rim-unbroken'
+  | 'goal-fixture-unmodelled'
+  | 'goal-relief-edge'
+  | 'goal-finish-mode'
+  | 'goal-no-edge-break'
+  | 'goal-plan-tradeoff'
   // Facing (#432). The job's facing depth is taken off the same blank every item is measured
   // against, so the check is one number against the stock's minimum floor — not a per-item one.
   // An item over-deep once the skim is counted is still `depth-exceeds-stock`, whose own check
@@ -631,6 +653,13 @@ export interface JobFinding {
    */
   underBoardMm?: number;
   stopShortMm?: number;
+  /**
+   * #992 — on a statement that groups ONE CAUSE over many regions/ops/rims, how many it covers
+   * (the #962 grouping rule). The message already states the count in words; this field is for a
+   * consumer that wants the number without parsing prose (the acceptance reads it). Absent on
+   * every finding that is about a single thing.
+   */
+  count?: number;
   message: string;
 }
 

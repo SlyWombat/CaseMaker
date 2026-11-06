@@ -39,6 +39,59 @@ export interface EdgeBreakSpec {
 }
 
 /**
+ * #992 — A STATEMENT THE PLAN OWES THE OPERATOR, typed. `notes` is the dump's full prose (the
+ * failure path joins it into its message, and the acceptance specs read it); a statement is the
+ * SAME fact with the two things a downstream consumer needs and a string does not carry: a CODE
+ * (so it can be deduped, routed and documented) and a SEVERITY (so the seam knows where it goes).
+ *
+ * The #962 rule applies to every emitter: ONE statement per cause with a COUNT, never a line per
+ * region. `ids` carries the regions a grouped statement covers (the detail, not the sentence).
+ *
+ * Severities, as the review's ruling sorts them:
+ * - `warning` — it changes what comes off the machine or needs a decision (a region left uncut,
+ *   the part never freed, a cutter substituted, skin left standing, a rim not broken);
+ * - `info` — it records a choice or a fact with no action (a relief edge, the finish mode, no
+ *   edge break asked, what the plan chose and what it costs);
+ * - `sheet` — a fact of the run the run sheet prints (registration, facing, freeing order, the
+ *   pipeline summary, empty stages). Sheet codes are NOT `JobFindingCode`s: they never reach the
+ *   panel, only the sheet — but the guide's scanner reads every `code:` literal, so they get a
+ *   chapter 8 row whose meaning says "printed on the run sheet".
+ */
+export type PlanFindingCode =
+  | 'goal-not-freed'
+  | 'goal-region-uncut'
+  | 'goal-cutter-substituted'
+  | 'goal-skin-standing'
+  | 'goal-rim-unbroken'
+  | 'goal-fixture-unmodelled'
+  | 'goal-relief-edge'
+  | 'goal-finish-mode'
+  | 'goal-no-edge-break'
+  | 'goal-plan-tradeoff';
+
+export type PlanSheetCode = 'plan-setup' | 'plan-run';
+
+export type PlanStatement = PlanFindingStatement | PlanSheetStatement;
+
+export interface PlanFindingStatement {
+  severity: 'warning' | 'info';
+  code: PlanFindingCode;
+  text: string;
+  /** How many causes/regions this one statement covers (the #962 grouping). */
+  count?: number;
+  /** The region/rim ids behind a grouped statement — the detail, never a line each. */
+  ids?: string[];
+}
+
+export interface PlanSheetStatement {
+  severity: 'sheet';
+  code: PlanSheetCode;
+  text: string;
+  count?: number;
+  ids?: string[];
+}
+
+/**
  * #964/#961 — THE GOAL FIELD AS `cam/model` SEES IT. The completeness simulation needs the goal's
  * cell grid (extent, pitch) and its own data (`z`, `covered`) — the DATA, never the gate's
  * heightfield module: the rebuild's point is that the engine stops planning on the field the gate
