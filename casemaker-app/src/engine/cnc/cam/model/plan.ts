@@ -29,6 +29,7 @@ import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, t
 import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, resolvedFeedsTable, type CutParams } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
 import { readDefault, liveShopDefaults } from '@/platform/defaultsClient';
+import { REST_MACHINING_FALLBACK, type RestSettingSource } from '@/engine/cnc/engrave/restSettings';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
 import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
@@ -262,6 +263,14 @@ export interface ModelPlanInput {
    */
   goal?: GoalCellField;
   /**
+   * #1023 — the shop's leftover-visibility thresholds, carried from the location's
+   * `rest.visibleDepthMm` / `rest.thirdToolPct` by the caller (the engine never reads the
+   * location). A leftover deeper than `depthMm` OR a larger share than `share` is VISIBLE: its
+   * statement is a warning, otherwise information. Absent → the labelled
+   * {@link REST_MACHINING_FALLBACK} numbers, `source: 'fallback'`.
+   */
+  restVisibility?: { depthMm: number; share: number; source: RestSettingSource };
+  /**
    * #1005 — WHEN THIS PLAN CUTS A MOULD. The seam sets it when the goal's `goalMode` is `'mold'`:
    * its `geometry` is then the stock block minus the part turned over (`engrave/mouldSolid.ts`),
    * and the plan states the two mould findings that need the cavity's own geometry — one-sided
@@ -346,6 +355,13 @@ export interface PlanOutcome {
   leftoverAboveMm: number;
   /** The plan's own cycle estimate, seconds — the comparison's cycle row. */
   cycleSeconds: number;
+  /**
+   * #1023 — the same stamp's cell counts, so the leftover statement states the cells and the area
+   * it is a share of without a second measurement. `coverage` is `1 − leftoverCells / coveredCells`.
+   */
+  leftoverCells: number;
+  coveredCells: number;
+  cellAreaMm2: number;
 }
 
 export interface ModelPlanOutput {
@@ -429,6 +445,12 @@ export interface SetupPlan {
 export interface PlanModelCamOptions {
   signal?: AbortSignal;
   onProgress?: (p: ModelPlanProgress) => void;
+  /**
+   * #1023 — TRUE (default) emits the finish's leftover statement. `planTwoOutcomes` suppresses it
+   * on the IDEAL reference run: the owned plan is the one that posts, and its statement is the one
+   * that names the ideal's measured ball (one leftover statement per card, not two).
+   */
+  restStatement?: boolean;
 }
 
 /**
@@ -1373,12 +1395,170 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       cutInto: { adjudicatedFraction: null, maxMm: null },
       leftoverAboveMm,
       cycleSeconds,
+      leftoverCells: leftover,
+      coveredCells: covered,
+      cellAreaMm2: coverageGoal.pitch * coverageGoal.pitch,
     };
   })();
+  // #1023 — THE FINISH'S LEFTOVER IS STATED, on the plan that posts. `planTwoOutcomes` replaces
+  // this base sentence with the ideal plan's measured ball when one exists; the statement lives on
+  // the LAST setup because the outcome is the union of every setup's programs (the plan's final
+  // state), never one setup's own.
+  if (outcome !== undefined && opts.restStatement !== false) {
+    const statement = restStatementForPlan(perSetup, outcome, input, null);
+    if (statement !== null) {
+      const last = perSetup[perSetup.length - 1]!;
+      last.statements.push(statement);
+      // The dump's prose carries the same line; the card's notes are what a reviewer reads.
+      last.notes.push(statement.text);
+    }
+  }
   return outcome === undefined ? { perSetup } : { perSetup, outcome };
 }
 
 const allPockets = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [n, ...allPockets(n.children)]);
+
+/** #1023 — the finishing ball a plan actually ran: the smallest-diameter ball among its programs. */
+function finishingBallOf(setups: readonly SetupPlan[]): Tool | null {
+  let finish: Tool | null = null;
+  let finishD = Infinity;
+  for (const setup of setups) {
+    for (const ir of setup.programs) {
+      if (ir.tool.shape !== 'ball') continue;
+      const d = cuttingDiameter(ir.tool) ?? 0;
+      if (!(d > 0) || d >= finishD) continue;
+      finish = ir.tool;
+      finishD = d;
+    }
+  }
+  return finish;
+}
+
+/** The digits the statement prints: 6 → "6", 3.175 → "3.175". */
+const diaWord = (d: number): string => String(Number(d.toFixed(3)));
+
+/** A share as the operator reads it: 0.02 → "2", 0.214 → "21.4". */
+const shareWord = (share: number): string => String(Number((share * 100).toFixed(1)));
+
+/** #1023 — the ideal plan's measured ball, as the owned plan's statement names it. */
+export interface RestReference {
+  ball: Tool;
+  /** The ideal plan's own leftover share (1 − its coverage) — the number its sentence prints. */
+  leftoverShare: number;
+  /** The ideal plan's cycle less the owned plan's, seconds (the #961 tradeoff carrier's row). */
+  cycleDeltaSeconds: number;
+}
+
+/**
+ * #1023 — THE FINISH'S LEFTOVER, AS ONE STATEMENT.
+ *
+ * `goal-rest-uncut` when nothing smaller than the largest owned ball ran: the finish leaves
+ * `leftoverAboveMm` over `1 − coverage` of the goal's cells, past or under the shop's visibility
+ * thresholds, and no owned ball takes it. `goal-rest-pass` (always info) when a smaller owned ball
+ * DID run: what remains after it. Numbers first, the cutter last, and every clause testable by the
+ * sentence alone — the two precedents are the old heightfield sentence (`goal-rest-uncut`'s own
+ * words) and #992's statement rule.
+ *
+ * The "ball that would take it" is the ideal plan's when `reference` is non-null and that ball is
+ * not in the owned set; otherwise the sentence says no catalogue ball was measured. `restVisibility`
+ * carries the shop's thresholds and their provenance; absent is the labelled fallback.
+ */
+export function restStatementForPlan(
+  setups: readonly SetupPlan[],
+  outcome: PlanOutcome,
+  input: ModelPlanInput,
+  reference: RestReference | null,
+): PlanStatement | null {
+  if (outcome.coverage === null || outcome.coverage >= 1 - 1e-9) return null;
+  const finish = finishingBallOf(setups);
+  const finishD = finish === null ? 0 : cuttingDiameter(finish) ?? 0;
+  if (finish === null || !(finishD > 0)) return null;
+  const ownedBalls = input.cutters.house
+    .filter((t) => t.shape === 'ball')
+    .map((t) => cuttingDiameter(t) ?? 0);
+  const largestOwned = ownedBalls.length === 0 ? 0 : Math.max(...ownedBalls);
+  const smallerRan = largestOwned > finishD + 1e-9;
+  const vis = input.restVisibility ?? {
+    depthMm: REST_MACHINING_FALLBACK.visibleDepth,
+    share: REST_MACHINING_FALLBACK.thirdToolFraction,
+    source: REST_MACHINING_FALLBACK.source,
+  };
+  const share = 1 - outcome.coverage;
+  const visible = outcome.leftoverAboveMm > vis.depthMm || share > vis.share;
+  const code = smallerRan ? 'goal-rest-pass' : 'goal-rest-uncut';
+  const severity = smallerRan ? 'info' : visible ? 'warning' : 'info';
+  const numbers =
+    `${outcome.leftoverAboveMm.toFixed(2)} mm standing over ${shareWord(share)} % of the goal ` +
+    `(${outcome.leftoverCells} cells, ${(outcome.leftoverCells * outcome.cellAreaMm2).toFixed(1)} mm²)`;
+  const cutter = `${finish.name} (⌀${diaWord(finishD)} mm)`;
+  if (smallerRan) {
+    return {
+      severity,
+      code,
+      count: outcome.leftoverCells,
+      text: `After the ${cutter}, the finish leaves up to ${numbers}.`,
+    };
+  }
+  const look = visible
+    ? `— past the ${vis.depthMm.toFixed(2)} mm or ${shareWord(vis.share)} % that marks a leftover visible —`
+    : `— under the ${vis.depthMm.toFixed(2)} mm and ${shareWord(vis.share)} % that marks a leftover visible —`;
+  const would =
+    reference === null
+      ? ' No catalogue ball was measured.'
+      : ` The catalogue's ${reference.ball.name} (⌀${diaWord(cuttingDiameter(reference.ball) ?? 0)} mm) would: ` +
+        `leftover ${shareWord(reference.leftoverShare)} %, ` +
+        `${reference.cycleDeltaSeconds >= 0 ? '+' : ''}${Math.round(reference.cycleDeltaSeconds)} s of cycle (measured).`;
+  return {
+    severity,
+    code,
+    count: outcome.leftoverCells,
+    text:
+      `The finish with the ${cutter} leaves up to ${numbers} where it cannot enter ${look} and no owned ball takes it.` +
+      would +
+      (vis.source === 'fallback' ? ' The thresholds are this build’s labelled fallback.' : ''),
+  };
+}
+
+/**
+ * #1023 — THE OWNED PLAN'S STATEMENT, ENRICHED WITH THE IDEAL'S MEASURED BALL. `planTwoOutcomes`
+ * plans the owned set first and the ideal second; when the ideal's finishing ball is not owned, it
+ * is the ball that would take what the owned plan left, and its own outcome gives the sentence its
+ * measured leftover share and cycle delta. Nothing but the statement's text changes.
+ */
+export function enrichOwnedRestStatement(
+  owned: ModelPlanOutput,
+  ideal: ModelPlanOutput,
+  input: ModelPlanInput,
+): ModelPlanOutput {
+  const outcome = owned.outcome;
+  const idealOutcome = ideal.outcome;
+  if (outcome === undefined || idealOutcome === undefined || idealOutcome.coverage === null) return owned;
+  const ownedBall = finishingBallOf(owned.perSetup);
+  const idealBall = finishingBallOf(ideal.perSetup);
+  if (ownedBall === null || idealBall === null) return owned;
+  if (cutterKeyOf(idealBall) === cutterKeyOf(ownedBall)) return owned;
+  if (input.cutters.house.some((t) => cutterKeyOf(t) === cutterKeyOf(idealBall))) return owned;
+  const rebuilt = restStatementForPlan(owned.perSetup, outcome, input, {
+    ball: idealBall,
+    leftoverShare: 1 - idealOutcome.coverage,
+    cycleDeltaSeconds: idealOutcome.cycleSeconds - outcome.cycleSeconds,
+  });
+  if (rebuilt === null) return owned;
+  const lastIndex = owned.perSetup.length - 1;
+  const last = owned.perSetup[lastIndex]!;
+  const at = last.statements.findIndex((s) => s.code === 'goal-rest-uncut' || s.code === 'goal-rest-pass');
+  const statements =
+    at < 0
+      ? [...last.statements, rebuilt]
+      : [...last.statements.slice(0, at), rebuilt, ...last.statements.slice(at + 1)];
+  // The dump's prose line is replaced with the enriched one, never duplicated.
+  const oldText = at < 0 ? null : last.statements[at]!.text;
+  const notes =
+    oldText !== null && last.notes.includes(oldText)
+      ? last.notes.map((n) => (n === oldText ? rebuilt.text : n))
+      : [...last.notes, rebuilt.text];
+  return { ...owned, perSetup: owned.perSetup.map((s, i) => (i === lastIndex ? { ...s, statements, notes } : s)) };
+}
 
 /** The `facing` region's own `Box2` — there is no `PocketNode`/`regionRefs` entry for it (it is
  * not a recognised feature, it is this plan's own synthesis of `FeatureTree.top.floors`). */

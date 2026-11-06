@@ -20,7 +20,7 @@
  * owned plan as `planIdeal`.)
  */
 
-import { planModelCam, type PlanModelCamOptions, type ModelPlanInput, type ModelPlanOutput } from './plan';
+import { enrichOwnedRestStatement, planModelCam, type PlanModelCamOptions, type ModelPlanInput, type ModelPlanOutput } from './plan';
 import type { Tool } from '@/engine/cnc/tool';
 
 export type PlanKind = 'owned' | 'ideal';
@@ -64,6 +64,12 @@ export async function planTwoOutcomes(input: ModelPlanInput, opts: PlanModelCamO
   if (extra.length === 0) return { owned, ideal: null, defaultPlan: 'owned' };
   // #986 (the maintainer's ruling) — NO CYCLE CAP. The ideal is ranked on outcome alone; a longer
   // plan is stated as its cost on the card, never used to hide a better surface.
-  const ideal = await planModelCam({ ...input, cutters: { house: [...input.cutters.house, ...extra], catalogue: [] } }, opts);
-  return { owned, ideal, defaultPlan: 'owned' };
+  //
+  // #1023 — THE IDEAL'S OWN LEFTOVER STATEMENT IS SUPPRESSED: the owned plan is the one that
+  // posts, and it is the owned plan's single statement that names the ideal's measured ball.
+  const ideal = await planModelCam(
+    { ...input, cutters: { house: [...input.cutters.house, ...extra], catalogue: [] } },
+    { ...opts, restStatement: false },
+  );
+  return { owned: enrichOwnedRestStatement(owned, ideal, input), ideal, defaultPlan: 'owned' };
 }
