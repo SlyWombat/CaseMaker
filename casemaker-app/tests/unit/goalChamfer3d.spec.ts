@@ -184,9 +184,9 @@ describe('#829 a goal chamfers its own edges — the old engine, still the shipp
     expect(finding?.message).toContain('are not chamfered');
   }, 120_000);
 
-  // #966 triage — #1012: the width-vs-cone-reach clamp exists on the model path
-  // (ops/chamfer.ts:65-67) and is right, but it clamps silently — no finding names the shortfall.
-  it.fails('warns when the chosen key is not in the library, and when the width is clamped', async () => {
+  // #1012 fixed the width-vs-cone-reach clamp: it now names the shortfall with `chamfer-too-wide`
+  // instead of clamping silently.
+  it('warns when the chosen key is not in the library, and when the width is clamped', async () => {
     const missing = goalTarget({ chamfer: { widthMm: 1, toolKey: 'inv:gone' } });
     const outMissing = await generateGoalProgram(goalJob(missing), missing, BALL, null, { shop: SHOP });
     expect(outMissing.programs).toHaveLength(1);
@@ -289,9 +289,8 @@ describe('#989 the model engine receives the goal’s own chamfer', () => {
   // posted cut was 1.5375 mm where the operator asked for 3, and nothing said so. The clamp is
   // right (a 3.175 mm 90° V cannot cut a 3 mm bevel in one pass); the silence is the defect.
   it('#1012 — a bevel wider than the V reaches is clamped and SAID: chamfer-too-wide with both widths, feeds at the cone\'s leg', async () => {
-    setModelCamEnabled(true);
     const target = goalTarget({ chamfer: { widthMm: 3, toolKey: VKEY } });
-    const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
+    const out = await generateGoalProgram(goalJob(target), target, BALL, null, { shop: SHOP });
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
     const finding = out.findings.find((f) => f.code === 'chamfer-too-wide');
     expect(finding?.severity).toBe('warning');
