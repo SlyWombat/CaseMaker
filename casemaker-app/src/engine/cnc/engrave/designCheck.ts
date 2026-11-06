@@ -842,6 +842,14 @@ export interface GoalCutIntoReport {
   wallNotScoredFraction: number;
   /** #955 — share excluded as WALL SHADOW (behind a wall, beyond the sweep's reach), 0-1. */
   shadowNotScoredFraction: number;
+  /**
+   * #996 (gate v6) — cells excused as STRADDLING A STEP ON PROOF: the step over the cell is at
+   * least as tall as the read intrusion and the swept floor is at the design's low side (see
+   * {@link STRADDLING_SLACK_MM}). Printed beside wall/shadow so the excuse can never be silent.
+   */
+  straddlingNotScoredCells: number;
+  /** #996 — the tallest step (mm) among the straddling cells excused; 0 when none. */
+  straddlingMaxStepMm: number;
   /** #955/#964 — the 0.1 mm-floor share AFTER the exclusions (wall and wall shadow always; edge
    *  break when the job states one): the pass line's judged number, 0-1. */
   adjudicatedFraction: number;
@@ -861,6 +869,22 @@ export interface GoalCutIntoReport {
  * one). Both sides of a step are marked, as E's `goal_check.py` does.
  */
 const GOAL_EDGE_STEP_MM = 0.2;
+
+/**
+ * #996 — THE STRADDLING-CELL EXCUSE, ON PROOF (gate v6). A cell whose CENTRE sits on a vertical
+ * step reads the step's high side while the cutter correctly stops at the step: the comparison is
+ * sample-against-sample on the face's plane, where the design is multi-valued. Such a cell is
+ * excused only when BOTH hold:
+ *   - the step actually straddled (`max − min` over the centre and the cell's four corners) is at
+ *     least as tall as the read intrusion `d = goal(centre) − swept(centre)` — so a one-cell gouge
+ *     on flat ground (step 0) can never qualify; and
+ *   - the swept floor is no more than this slack below the design's low side over the cell — the
+ *     tool never went below the lowest design height within the cell, so nothing was cut that the
+ *     design keeps.
+ * No distance term anywhere. Excused cells are counted and their tallest step kept, both printed
+ * beside wall/shadow, so the excuse can never become a silent class.
+ */
+export const STRADDLING_SLACK_MM = 0.005;
 
 function designEdgeCells(goal: GoalHeightfield): Uint8Array {
   const { nx, ny, covered, z } = goal;
@@ -1149,6 +1173,8 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   let edgeBreakCells = 0;
   let wallNotScoredCells = 0;
   let shadowNotScoredCells = 0;
+  let straddlingNotScoredCells = 0;
+  let straddlingMaxStepMm = 0;
   for (let k = 0; k < cells; k++) {
     if (sampled[k] !== 1 || dOf[k]! >= -cutIntoFloorMm) continue;
     const depth = -dOf[k]!;
@@ -1191,6 +1217,40 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
         shadowNotScoredCells++;
       }
       continue; // a shadow cell that the rule cannot excuse stays ADJUDICATED (v5)
+    }
+    // #996 (gate v6) — THE STRADDLING-CELL EXCUSE, ON PROOF. Only a cell about to be judged
+    // reaches here (edge break, wall and shadow have had their say, so a 0.5 mm step stays the wall
+    // class and is never double-counted). The step is read over the centre and the cell's four
+    // corners, each corner the quarter-average of the four cell centres around it (uncovered
+    // neighbours contribute nothing — the design only exists where it is covered).
+    {
+      const zc = goal.z[k]!;
+      if (Number.isFinite(zc)) {
+        let hi = zc;
+        let lo = zc;
+        // The heightfield is cell-centred (corners are not sampled), so each corner reads the
+        // diagonal neighbour's centre — the cell the corner points into. Uncovered or off-grid
+        // neighbours contribute nothing: the design only exists where it is covered.
+        for (const [di, dj] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+          const ci = i + di;
+          const cj = j + dj;
+          if (ci < 0 || cj < 0 || ci >= nx || cj >= ny) continue;
+          const kk = cj * nx + ci;
+          if (sampled[kk] !== 1) continue;
+          const z = goal.z[kk]!;
+          if (!Number.isFinite(z)) continue;
+          if (z > hi) hi = z;
+          if (z < lo) lo = z;
+        }
+        const step = hi - lo;
+        const swept = zc + dOf[k]!;
+        if (step > 0 && step + 1e-12 >= depth && swept >= lo - STRADDLING_SLACK_MM) {
+          excluded[k] = 1;
+          straddlingNotScoredCells++;
+          if (step > straddlingMaxStepMm) straddlingMaxStepMm = step;
+          continue;
+        }
+      }
     }
   }
 
@@ -1241,9 +1301,13 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   // rim cells only when the job states one.
   const judgedCells = adjudicatedCells;
   const ok = judgedCells === 0 && coverageOk;
+  const straddlingClause =
+    straddlingNotScoredCells > 0
+      ? `; ${straddlingNotScoredCells} cell${straddlingNotScoredCells === 1 ? '' : 's'} on a ${straddlingMaxStepMm.toFixed(3)} mm step, excused on proof`
+      : '';
   const excludedNote =
-    edgeBreakCells + wallNotScoredCells + shadowNotScoredCells > 0
-      ? ` (the rim edge break${edgeBreakCells > 0 ? `, ${(edgeBreakFraction * 100).toFixed(2)} % of the goal,` : ''} and ${(wallNotScoredFraction * 100 + shadowNotScoredFraction * 100).toFixed(2)} % of cells the heightfield cannot adjudicate are not counted)`
+    edgeBreakCells + wallNotScoredCells + shadowNotScoredCells + straddlingNotScoredCells > 0
+      ? ` (the rim edge break${edgeBreakCells > 0 ? `, ${(edgeBreakFraction * 100).toFixed(2)} % of the goal,` : ''} and ${(wallNotScoredFraction * 100 + shadowNotScoredFraction * 100).toFixed(2)} % of cells the heightfield cannot adjudicate are not counted${straddlingClause})`
       : '';
   const sentence =
     judgedCells > 0
@@ -1276,6 +1340,8 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     edgeBreakFraction,
     wallNotScoredFraction,
     shadowNotScoredFraction,
+    straddlingNotScoredCells,
+    straddlingMaxStepMm,
     adjudicatedFraction,
     adjudicatedMaxMm,
     adjudicatedMaxAt,
@@ -1314,6 +1380,8 @@ export function goalCutIntoUnchecked(reason: string, passCoverage: number = GOAL
     medianDeltaMm: 0,
     edgeBreakFraction: 0,
     wallNotScoredFraction: 0,
+    straddlingNotScoredCells: 0,
+    straddlingMaxStepMm: 0,
     shadowNotScoredFraction: 0,
     adjudicatedFraction: 0,
     adjudicatedMaxMm: 0,

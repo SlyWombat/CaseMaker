@@ -729,6 +729,8 @@ function writeAcceptance(
       ? 'Coverage/cut-into: not measured (this case carries no STEP goal).'
       : `Coverage ${(measured.coverage * 100).toFixed(2)} % (vendor ${measured.scored.lines.find((l) => l.key === 'coverage')?.vendor ?? '—'}), ` +
         `cut-into adjudicated ${((measured.cutInto.adjudicatedFraction ?? 0) * 100).toFixed(2)} % ` +
+        // #996 — the straddling excuse's count and tallest step, beside the other exclusions.
+        `(straddling ${measured.report.straddlingNotScoredCells} cell(s) on up to ${measured.report.straddlingMaxStepMm.toFixed(3)} mm) ` +
         `(edge break ${((measured.cutInto.edgeBreakFraction ?? 0) * 100).toFixed(2)} %, wall cells ${((measured.cutInto.wallNotScoredFraction ?? 0) * 100).toFixed(2)} %, ` +
         `wall shadow ${((measured.cutInto.shadowNotScoredFraction ?? 0) * 100).toFixed(2)} % not counted; max ${measured.cutInto.maxMm.toFixed(3)} mm` +
         `${measured.cutInto.maxAt ? ` at ${measured.cutInto.maxAt.x.toFixed(1)}, ${measured.cutInto.maxAt.y.toFixed(1)}` : ''}). ` +
