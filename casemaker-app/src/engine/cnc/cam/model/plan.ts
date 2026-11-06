@@ -2808,12 +2808,20 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // top when none) — the level the mask itself admits a cell to. The rest pass's CL stays min'd
     // in: a smaller FLAT's CL is an honest over-estimate of what a flat leaves, the same premise
     // that holds for a flat rough.
+    // THE DATUM IS THE PLAN'S OWN (E's review of e5b215423): `flatAbs` answers MESH-ABSOLUTE
+    // (`dropCutter` + z0) while `base.zTop/zBottom` are REBASED (stock top = 0) — the rough plans
+    // in the rebased datum. At stockTop 0 the two coincide, but on any other stock top (every
+    // flipped setup: the datum fixture's `{up:[0,0,-1], stockTop: 30}`) the CL sat z0 above the
+    // levels: no level was ever `>= cl + band`, the helper returned the rebased zTop, and the
+    // finish mask came out EMPTY — the flipped setup silently lost its finish op. Shift into the
+    // plan's datum and back, exactly as the rest stage's own comment (B's review of 0461df01)
+    // describes for this same mistake.
     const roughStepDown = flat === undefined ? 0 : paramsFor(flat).stepDown;
     const roughLeft = (x: number, y: number): number | null => {
       const f = flatAbs(x, y);
       const r = restAbs(x, y);
       if (f === null) return r;
-      const left = roughLeftAbove(f, base.zTop, base.zBottom, roughStepDown, opts.bandMm);
+      const left = roughLeftAbove(f - z0, base.zTop, base.zBottom, roughStepDown, opts.bandMm) + z0;
       return r === null ? left : Math.min(left, r);
     };
     const leftoverAbove = (x: number, y: number): boolean => {
