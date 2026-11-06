@@ -55,6 +55,8 @@ import {
 } from '@/engine/cnc/engrave/pcbTopology';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { getTools, entryFor } from '@/engine/cnc/toolRegistry';
+import type { PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
+import type { PlanOutcome } from '@/engine/cnc/cam/model/plan';
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
 import type { MachineCalibration } from '@/engine/cnc';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
@@ -134,6 +136,11 @@ export type EngraveRunClient = {
     shop?: EngraveShopOpts,
     /** #785 — stage progress for the panel and the flight recorder. */
     onProgress?: (progress: EngraveProgress) => void,
+    /**
+     * #961 — the ideal plan's candidate set, read on this side (the worker cannot see the tool
+     * library). Absent means no ideal: `planIdeal` stays null and only the owned plan is run.
+     */
+    catalogueTools?: readonly Tool[],
   ) => Promise<EngraveGenerated>;
   // #924 activation — the generator's own raw design items ride the oracle call the same way
   // `predicted` does; additive, so a caller that sends none runs exactly as it did before.
@@ -150,6 +157,18 @@ export type EngraveRunClient = {
    * worker for; the real sim client's is `terminateSim`.
    */
   cancelGenerate?: () => void;
+  /**
+   * #986 (the ruling) — THE BACKGROUND IDEAL. Optional so a fake client (a test, a preview-only
+   * build) need not implement it; when present, the run store calls it AFTER the owned plan has
+   * posted and holds its answer as the second result stream.
+   */
+  engravePlanIdeal?: (
+    job: EngraveJob,
+    goal: EngraveTargetObject,
+    tool: Tool,
+    shop?: EngraveShopOpts,
+    catalogueTools?: readonly Tool[],
+  ) => Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }>;
 };
 
 /**
@@ -289,6 +308,18 @@ export function combineOracles(reports: readonly OracleReport[], copper: OracleR
 export interface EngraveRunState {
   /** The last generated result — kept on screen while a newer run builds. */
   generated: EngraveGenerated | null;
+  /**
+   * #986 (the ruling) — THE BACKGROUND IDEAL'S SECOND RESULT STREAM. `idle` until a run succeeds;
+   * `comparing` while the ideal is planned behind the posted owned plan (the card reads
+   * "comparing…"); `ready` with the tradeoff (null when there is no ideal or nothing material).
+   */
+  idealPlan: { status: 'idle' | 'comparing' | 'ready'; tradeoff: PlanTradeoff | null };
+  /**
+   * #986 — re-run the background comparison with the LAST RUN'S OWN arguments (the press). It
+   * compares the job, tool and shop that run used — not whatever the job looks like now — so the
+   * line it prints always belongs to the program on screen.
+   */
+  comparePlans: () => void;
   oracle: OracleReport | null;
   /**
    * #844 — EVERY PROGRAM'S OWN VERDICT, in cut order, with the words that name it. `oracle` is the
@@ -439,6 +470,15 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
    * releasing a NEWER run's hold.
    */
   let runHold: symbol | null = null;
+
+  // #986 (E's review) — THE ON-DEMAND PRESS re-runs the background comparison with the SAME
+  // arguments the run used. Held here, beside the run hold, so the press needs no re-plumbing of
+  // the job through the panel.
+  let idealLastRequest: (() => void) | null = null;
+  // The EPOCH a run belongs to: incremented when a run starts, captured by the ideal it kicks off.
+  // `runHold` is the wrong token here — the run's own `finally` clears it when the program posts,
+  // long before the ideal (minutes later) resolves, so the ideal would always be dropped.
+  let runEpoch = 0;
 
   async function run(surface: SurfacePostFit | null = null, opts: { simulateOnly?: boolean } = {}): Promise<void> {
     // #893 — SIMULATE ONLY: the program is already this job's, so the run starts at the sweep.
@@ -629,7 +669,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         }
       };
       try {
-        generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop, onProgress);
+        // #961 — the ideal plan's candidate set: the app's own tool library (the same list every
+        // picker shows, the house `cat:` rows included). The worker cannot see it from its realm.
+        generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop, onProgress, getTools().map((entry) => entry.tool));
       } finally {
         clearStall();
       }
@@ -676,6 +718,35 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     }
 
     set({ generated, progress: null });
+    // #986 (the ruling) — THE IDEAL RUNS IN THE BACKGROUND: the owned plan has posted, so the card
+    // can be read now; the second plan's outcome and the tradeoff arrive behind it and light the
+    // card's line up without blocking the operator. No goal or no catalogue → nothing to compare.
+    if (generated.ok && generated.nc !== null && job.targetObject !== undefined && client.engravePlanIdeal !== undefined) {
+      const idealClient = client;
+      const idealJob = job;
+      const idealTool = tool as Tool;
+      const idealShop = shop;
+      const fireIdealCompare = (): void => {
+        // #986 (E's review) — THE STALE-RUN RACE: the ideal path has no run of its own, so a slow
+        // ideal from run A could resolve after run B started and write A's tradeoff under B's
+        // program. The store's own run token is the guard: the result lands only while the run that
+        // asked for it still owns the hold.
+        const idealEpoch = runEpoch;
+        set({ idealPlan: { status: 'comparing', tradeoff: null } });
+        void idealClient
+          .engravePlanIdeal!(idealJob, idealJob.targetObject!, idealTool, idealShop, getTools().map((entry) => entry.tool))
+          .then((answer) => {
+            if (runEpoch === idealEpoch) set({ idealPlan: { status: 'ready', tradeoff: answer.tradeoff } });
+          })
+          .catch(() => {
+            if (runEpoch === idealEpoch) set({ idealPlan: { status: 'idle', tradeoff: null } });
+          });
+      };
+      // The press repeats the SAME computation on demand (E's review, item 3) — never just the
+      // recorded choice.
+      idealLastRequest = fireIdealCompare;
+      fireIdealCompare();
+    }
     // #787 — every finding the run raised, small enough for the report to carry.
     for (const f of generated.findings) noteFinding(f);
     if (!generated.ok || generated.nc === null) {
@@ -1038,6 +1109,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
 
   return {
     generated: null,
+    idealPlan: { status: 'idle', tradeoff: null },
     oracle: null,
     oraclePrograms: [],
     simDiagnostics: [],
@@ -1062,9 +1134,14 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // that changes mid-run makes the run stale the moment it finishes (the maintainer's elephant
     // goal stopped at "generated · not checked yet" for exactly this). Held for the run, released
     // for the next edit — the preview keeps drawing.
+    // #986 (E's review) — the press re-runs the computation, not just the choice.
+    comparePlans: () => {
+      idealLastRequest?.();
+    },
     generate: async (surface?: SurfacePostFit | null) => {
       const token = Symbol('generate');
       runHold = token;
+      runEpoch += 1;
       useEngravePreviewStore.getState().holdMeasurement();
       try {
         await run(surface ?? null);

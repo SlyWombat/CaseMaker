@@ -1641,3 +1641,23 @@ describe('#948 the goal check’s line', () => {
     expect(line.textContent).not.toContain('Matches the design');
   });
 });
+
+// #986 (the ruling, E's review) — the background comparison's three card states.
+describe('#986 the card reads the background comparison', () => {
+  it('says "comparing…" while the ideal is out and "no material difference" when it lands with none', () => {
+    const job = defaultEngraveJob();
+    passRun();
+    act(() => {
+      useEngraveRunStore.setState({ idealPlan: { status: 'comparing', tradeoff: null } });
+    });
+    const view = draw({ job, report: reportOf(), pkg: null, generated: generated([P1]) });
+    expect(screen.getByTestId('engrave-plan-comparing')).toBeTruthy();
+
+    act(() => {
+      useEngraveRunStore.setState({ idealPlan: { status: 'ready', tradeoff: { material: false, line: null, differences: [] } as never } });
+    });
+    view.show({ job, report: reportOf(), pkg: null, generated: generated([P1]) });
+    expect(screen.queryByTestId('engrave-plan-comparing')).toBeNull();
+    expect(screen.getByTestId('engrave-plan-no-difference')).toBeTruthy();
+  });
+});
