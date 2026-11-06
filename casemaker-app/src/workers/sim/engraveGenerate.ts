@@ -5079,7 +5079,30 @@ export async function buildModelPlanInputForGoal(
         : reachBandMm !== null && reachBandMm > 0
           ? reachBandMm
           : null;
-  const bandedSetups: SetupSpec[] = setupBandMm === null ? setups : setups.map((s) => ({ ...s, bandMm: setupBandMm }));
+  // #1013 — THE BAND'S KIND. A REACH band (#988, a cutter-length limit) is the same depth from
+  // every face. A PLANE — a stated band (#888) or the underside's floor (#1006) — is one Z in the
+  // part, so a flipped face meets it at `T − b`, never `b`: #1006 applied the top number to every
+  // setup, which on a flipped side pointed the floor outside the stock on one face and let the
+  // other cut through the plinth toward the vise. A plane that leaves a face nothing to cut, or
+  // that does not fit the stock, is refused by name on that side.
+  const bandIsPlane = statedBandMm !== null || undersideBandMm !== null;
+  const bandWord = statedBandMm !== null ? 'stated band' : 'underside floor';
+  const bandedSetups: SetupSpec[] =
+    setupBandMm === null
+      ? setups
+      : setups.map((s) => {
+          if (!bandIsPlane) return { ...s, bandMm: setupBandMm };
+          const flipped = s.frame.up[2] === -1;
+          const band = Number((flipped ? job.stock.thickness - setupBandMm : setupBandMm).toFixed(3));
+          const face = flipped ? 'bottom' : 'top';
+          if (band <= 0) {
+            throw new Error(`the ${bandWord} leaves the ${face} side nothing to cut on a ${job.stock.thickness} mm blank`);
+          }
+          if (band > job.stock.thickness) {
+            throw new Error(`the ${bandWord} asks the ${face} side to cut ${band} mm of a ${job.stock.thickness} mm blank`);
+          }
+          return { ...s, bandMm: band };
+        });
 
   const envelope: FixtureEnvelope | null =
     mount === 'vise'
