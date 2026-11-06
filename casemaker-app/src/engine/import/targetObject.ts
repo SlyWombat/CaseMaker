@@ -91,7 +91,7 @@ const NATURAL_MM_PER_PX = 25.4 / 96;
  * and the first offending triangle; both parses below — the door's and the cached plan-path one —
  * refuse with it.
  */
-function nonFiniteMeshSentence(name: string, mesh: ParsedMesh): string | null {
+export function nonFiniteMeshSentence(name: string, mesh: ParsedMesh): string | null {
   const vertices = mesh.positions.length / 3;
   let bad = 0;
   let firstTriangle = -1;

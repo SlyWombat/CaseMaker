@@ -14,6 +14,10 @@ import { describe, expect, it } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
 import { readTargetObjectFile, targetObjectMesh } from '@/engine/import/targetObject';
+import { importStlFile } from '@/engine/import/assetImporter';
+import { mergeGerberShapes, type GerberShape } from '@/engine/import/gerber';
+import { mesh } from '@/engine/compiler/buildPlan';
+import { executeOpSync } from '@/workers/geometry/evaluateOp';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 
 type Tri = [[number, number, number], [number, number, number], [number, number, number]];
@@ -84,5 +88,35 @@ describe('#1029 — a non-finite operand throws a named error, never a trap', ()
     expect(() => subtract(SQUARE, [[[Infinity, 0], [10, 0], [10, 10], [0, 10]]])).toThrow(/non-finite/);
     const out = subtract(SQUARE, CELL);
     expect(out.length).toBeGreaterThan(0);
+  });
+});
+
+describe('#1029 — user files on the asset and Gerber paths are refused by name too', () => {
+  const bad: Tri[] = [GOOD[0]!, [[NaN, 0, 0], [10, 0, 0], [0, Infinity, 5]]];
+
+  it('an external asset STL with a NaN vertex is refused at import', async () => {
+    await expect(importStlFile(new File([binaryStl(bad)], 'asset.stl'))).rejects.toThrow(/goal-mesh-non-finite/);
+  });
+
+  it('the same mesh as a union asset fails its build op by name, and the instance lives', () => {
+    const positions = new Float32Array([0, 0, 0, 10, 0, 0, NaN, 10, 5]);
+    const indices = new Uint32Array([0, 1, 2]);
+    expect(() => executeOpSync(tl, mesh(positions, indices))).toThrow(
+      'cam: non-finite coordinate in a mesh build op at vertex 2',
+    );
+    // The instance is alive afterwards — a valid solid still builds.
+    const cube = executeOpSync(tl, { kind: 'cube', size: [2, 2, 2] });
+    expect(cube.numTri()).toBeGreaterThan(0);
+    cube.delete();
+  });
+
+  it('a Gerber shape with a NaN contour point is refused by name', () => {
+    const shape: GerberShape = {
+      polarity: 'dark',
+      contours: [[[0, 0], [10, 0], [NaN, 10], [0, 10]]],
+      fillRule: 'NonZero',
+      line: 7,
+    };
+    expect(() => mergeGerberShapes(tl, [shape])).toThrow('cam: non-finite coordinate in a Gerber shape at ring 0 point 2');
   });
 });
