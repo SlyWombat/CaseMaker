@@ -30,12 +30,13 @@ describe('#1019 un-enterable pockets are stated, never a refusal', () => {
     const candidates = candidateSequences(CAVITY, HOUSE);
     expect(candidates).toHaveLength(1);
     expect(candidates[0]!.steps).toEqual([]);
-    // One entry, naming the pocket, its opening (three decimals) and the set it was measured
-    // against — the acceptance's own sentence.
-    expect(candidates[0]!.unreachable).toHaveLength(1);
-    expect(candidates[0]!.unreachable[0]).toContain('pocket-0');
-    expect(candidates[0]!.unreachable[0]).toContain('0.541 mm opening');
-    expect(candidates[0]!.unreachable[0]).toContain('⌀3.175 flat');
+    // The pocket is listed by ID (the plan's V-floor run walks the ids) AND by the statement
+    // sentence, which names its opening (three decimals) and the set it was measured against.
+    expect(candidates[0]!.unreachable).toContain('pocket-0');
+    const stated = candidates[0]!.unreachable.find((u) => u.includes('0.541 mm opening'));
+    expect(stated).toBeDefined();
+    expect(stated).toContain('pocket-0');
+    expect(stated).toContain('⌀3.175 flat');
   });
 
   it('chooseSequence does not throw for it — the demand is trivially satisfied, not refused', () => {

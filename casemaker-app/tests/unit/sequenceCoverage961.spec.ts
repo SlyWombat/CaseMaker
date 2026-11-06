@@ -166,7 +166,7 @@ describe('#961 the organizer demand: cover what a house cutter can cut', () => {
     for (const id of CUTTABLE_REST) expect(choice.unreachable).not.toContain(id);
     // #1019 — an un-enterable pocket is stated as its own sentence ("id: 0.541 mm opening …"),
     // not a bare id: the ids named are still exactly the below-house set.
-    const statedIds = choice.unreachable.map((u) => (u.includes(': ') ? u.slice(0, u.indexOf(': ')) : u)).sort();
+    const statedIds = [...new Set(choice.unreachable.map((u) => (u.includes(': ') ? u.slice(0, u.indexOf(': ')) : u)))].sort();
     expect(statedIds).toEqual([...BELOW_HOUSE].sort());
     expect(CUTTABLE_REST).toHaveLength(27);
     expect(BELOW_HOUSE).toHaveLength(16);
@@ -179,15 +179,19 @@ describe('#961 the organizer demand: cover what a house cutter can cut', () => {
       opts((step) => standIn(step, step.kind === 'rest' ? 5000 : 10)),
     );
     expect(choice.steps.some((s) => s.kind === 'rest' && s.cutter.key === 'flat-3.175')).toBe(true);
-    expect(choice.unreachable).toHaveLength(BELOW_HOUSE.length);
+    // #1019 — the ids ride beside their sentences: count the distinct pockets named.
+    expect(new Set(choice.unreachable.map((u) => (u.includes(': ') ? u.slice(0, u.indexOf(': ')) : u))).size).toBe(BELOW_HOUSE.length);
   });
 
   it('every candidate prices the same demand; the primary alone is the one that leaves cuttable pockets', () => {
     const candidates = candidateSequences(DEMAND, HOUSE);
     const only6 = candidates.find((c) => !c.steps.some((s) => s.kind === 'rest'))!;
     const chain = candidates.find((c) => c.steps.some((s) => s.kind === 'rest'))!;
-    expect(only6.unreachable).toHaveLength(43);
-    expect(chain.unreachable).toHaveLength(16);
+    // #1019 — ids and sentences both ride `unreachable`: compare the distinct pockets named.
+    const distinct = (c: (typeof candidates)[number]): number =>
+      new Set(c.unreachable.map((u) => (u.includes(': ') ? u.slice(0, u.indexOf(': ')) : u))).size;
+    expect(distinct(only6)).toBe(43);
+    expect(distinct(chain)).toBe(16);
     // …and no chain ever shrinks the primary to the smaller flat, however cheap that is: the
     // chain is the largest flat + rest, the ruling's own shape.
     for (const c of candidates) expect(c.steps[0]!.cutter.key).toBe('flat-6');

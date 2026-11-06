@@ -541,7 +541,7 @@ export function candidateSequences(
   // stated by its own number. It is NOT the line-902 refusal, which is reserved for a demand a
   // cutter could enter but none can reach or fit.
   if (roundPool.length > 0 && pocketFeatures.length > 0 && searchPockets.length === 0 && contourFeatures.length === 0) {
-    return [{ steps: [], unreachable: [...unenterable], leftBehind: 0 }];
+    return [{ steps: [], unreachable: [...unenterablePockets.map((f) => f.id), ...unenterable], leftBehind: 0 }];
   }
   if (searchPockets.length > 0 && roughs.length === 0) return [];
 
@@ -683,7 +683,11 @@ export function candidateSequences(
       for (const link of links) {
         for (const f of searchPockets) if (coversFeature(link.cutter.tool, f)) coveredNow.add(f.id);
       }
-      const unreachablePockets = searchPockets.filter((f) => !coveredNow.has(f.id)).map((f) => f.id);
+      // Every demanded pocket the chain does not cover is listed by id — the un-enterable ones
+      // INCLUDED: the plan's V-floor run walks `unreachable`'s ids to find pockets a V can still
+      // floor-cut (a mould's cavity has no V, the tray's 0.9 mm slots do), and a sentence would
+      // hide them from it. The sentences ride beside the ids for the operator's statement.
+      const unreachablePockets = pocketFeatures.filter((f) => !coveredNow.has(f.id)).map((f) => f.id);
       // The freeing cut, posted LAST. Its cutter is the first chain link that covers the profile
       // (the largest — usually the primary; coming back to it after the rests costs a RETURN tool
       // change, which `priceSequence` now charges), or the chain's last cutter when it can take

@@ -2375,11 +2375,15 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   const offered = [...opts.houseFlats].map((t) => `⌀${cuttingDiameter(t)}`).join(', ');
   // A's review 6622610124, finding 4: a through node's own limiting number was lost (the lookup
   // only checked `pocketsById`) — the SAME sentence either kind of node gets.
-  const unreachable = choice.unreachable.filter((id) => !vCovered.has(id)).map((id) => {
+  const unreachable = choice.unreachable.filter((id) => !vCovered.has(id) && !(id.includes(': ') && vCovered.has(id.slice(0, id.indexOf(': '))))).map((id) => {
     // #1019 — an entry the SEARCH composed (a pocket no cutter can enter, stated with its own
-    // number: "pocket-0: 0.541 mm opening, … — left standing") passes through as written; a bare
-    // region id is given this plan's own sentence below.
-    if (id.includes(': ')) return id;
+    // number: "pocket-0: 0.541 mm opening, … — left standing") passes through as written unless a
+    // V-floor run covers that pocket (then it is cut, not standing); a bare region id is given
+    // this plan's own sentence below.
+    if (id.includes(': ')) {
+      const named = id.slice(0, id.indexOf(': '));
+      return vCovered.has(named) ? '' : id;
+    }
     const node = pocketsById.get(id) ?? throughById.get(id);
     const failed = regionFailures.get(id);
     // #959 item 5: a region the chosen chain left out because its planning THREW (the chain that
@@ -2427,7 +2431,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // statement per cause with the count (#962), the ids as the cause's pockets, and a single
   // pocket's own sentence as the text so the number is on the statement itself.
   {
-    const unenterable = choice.unreachable.filter((u) => u.includes(': '));
+    // A sentence whose pocket a V-floor run covers is NOT standing: drop it from the statement.
+    const unenterable = choice.unreachable.filter((u) => u.includes(': ') && !vCovered.has(u.slice(0, u.indexOf(': '))));
     if (unenterable.length > 0) {
       const ids = unenterable.map((u) => u.slice(0, u.indexOf(': ')));
       const plural = unenterable.length === 1 ? 'pocket' : 'pockets';
