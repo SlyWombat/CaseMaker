@@ -31,7 +31,7 @@ import type { RemainderRegion, FeatureSource } from '../features';
 import type { ClSurface } from '../clsurface';
 import { profileOf } from '../dropcutter';
 import { DEFAULT_SHORT_HOP_DIAMETERS, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
-import { followCutSurface } from '../rideTest';
+import { followCutSurface, followShortJoin } from '../rideTest';
 import { dropRow, type DroppedPoint } from '../rowDropper';
 import { cutterKeyOf } from '../sequence';
 import { FLAT_SURFACE_MAX_SLOPE_DEG } from '../settings';
@@ -503,6 +503,10 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // enough to catch a CL crease between their endpoints — the same 0.05 mm `rough.ts`'s skim joins
   // already prove at, and never coarser than the CL surface's own spacing.
   const rideStep = Math.min(linkSampleStep, opts.clSurface.maxSpacingMm, 0.05);
+  // #1030 (the manager's ruling) — the band above which a CL rise is a WALL to retract over, not a
+  // crease to follow: the plan's own 0.1 mm leftover band. Under it, a short refused join is fed
+  // along the sampled CL (a few 0.05 mm steps) instead of paying a retract/hop.
+  const SHORT_JOIN_CLIMB_BAND_MM = 0.1;
   const joinMoves = (from: LinkPoint, to: LinkPoint, levelZ: number): ToolpathIR['operations'][number]['moves'] => {
     const direct = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
     const shortHop = DEFAULT_SHORT_HOP_DIAMETERS * 2 * toolRadius;
@@ -511,6 +515,21 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       // the op's own first feed follows (9e976f0b's finding — never a descent at the cutting rate).
       const f = to.z < from.z - 1e-9 ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
       return [{ kind: 'feed', x: to.x, y: to.y, z: to.z, f }];
+    }
+    // #1030 (the manager's ruling) — A SHORT JOIN REFUSED ONLY BY THE CREASE IS FOLLOWED, not
+    // retracted: the sampled CL polyline at feed, a few points over the join's own length. The
+    // climb/interrupt cases return null here and keep the old path below.
+    if (direct <= shortHop + 1e-9) {
+      const shortFollow = followShortJoin(
+        from,
+        to,
+        (x, y) => opts.clSurface.dropCutter(x, y),
+        rideStep,
+        levelZ,
+        opts.feeds,
+        SHORT_JOIN_CLIMB_BAND_MM,
+      );
+      if (shortFollow !== null) return shortFollow;
     }
     // #962 — THE DIP-FOLLOWING LINK: the chord dipped below the CL (concave ground). FOLLOW the CL
     // instead — the ball cuts the bulge exactly as the passes either side of it do, so nothing is
