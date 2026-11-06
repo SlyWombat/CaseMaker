@@ -418,6 +418,47 @@ describe('engraveRunStore (#206)', () => {
     clearFeedCatalogue();
   });
 
+  // #1032 — A POSTED PROGRAM'S KEY MUST RESOLVE BY ALL THREE IDENTITIES A TOOL RECORD STATES.
+  // The model engine stamps each program's `toolKey` with `cutterKeyOf(tool)` = `tool.id ??
+  // tool.name`, and the built-in tier is not identified by its registry key: `flat-1.0` has no
+  // `id` (so its NAME is stamped) and `flat-3.175x12-metal` carries the physical catalogue id
+  // `112111313812`. The sweep resolved a posted key by exact registry key only, so a job planned
+  // with either built-in was refused as "not on this bench" (the flipMouldShell walk's red on
+  // 966-collapse, #1021 comment 6696909602). Red-first at d792bd281: both programs stop at
+  // program 1's tool-refused and `simPrograms` holds only the failure.
+  it('resolves a posted program keyed by a built-in’s display name and one keyed by its physical id', async () => {
+    const base = clean();
+    const program = base.programs[0]!;
+    const generated: EngraveGenerated = {
+      ...base,
+      programs: [
+        { ...program, programHash: 'name-keyed', toolKey: '1 mm flat end' },
+        { ...program, programHash: 'id-keyed', toolKey: '112111313812' },
+      ],
+    };
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({
+      loadProgram: async () => {
+        useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false });
+        return swept();
+      },
+    });
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => generated,
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    try {
+      await useEngraveRunStore.getState().generate();
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+      setEngraveRunClientLoader(null);
+    }
+    const s = useEngraveRunStore.getState();
+    expect(s.simDiagnostics.filter((d) => d.code === 'tool-refused')).toEqual([]);
+    expect(s.simPrograms.map((p) => p.index)).toEqual([0, 1]);
+    expect(s.simStatus).toBe('ready');
+  });
+
   it('refuses Save before anything is generated', () => {
     expect(saveBlocker(view())).toBe('Generate first.');
   });
