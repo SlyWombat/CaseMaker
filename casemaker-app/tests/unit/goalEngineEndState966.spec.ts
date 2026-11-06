@@ -236,11 +236,7 @@ describe('#966 end-state, part 2 — a goal needing two setups posts both, never
     for (const setup of output.perSetup) {
       expect(setup.programs.length, `setup ${setup.setupIndex}: no program posted`).toBeGreaterThan(0);
     }
-    // TEMPORARY, #998 — C measured this exact fixture at 250–350 s, both at this tip and at the
-    // base, against 28.7 s before the #965/#982 merges: a real, open slowdown (C is bisecting it
-    // now), not load. Budget raised 90 s -> 600 s as a holding measure; bring it back down with
-    // the #998 fix, not by re-measuring load here.
-  }, 600_000);
+  }, 90_000);
 
   it('GREEN: generateGoalProgram itself posts both setups’ work with no refusal, and EVERY posted program verifies clean', async () => {
     const { goal, stock } = await buildDatumGoal();
@@ -270,9 +266,7 @@ describe('#966 end-state, part 2 — a goal needing two setups posts both, never
       const errors = program.verify!.findings.filter((f) => f.severity === 'error');
       expect(errors, `setup ${program.setupIndex} program (${program.toolKey}) had verify error(s): ${JSON.stringify(errors)}`).toEqual([]);
     }
-    // TEMPORARY, #998 — same open slowdown finding as the previous case: this test re-plans the
-    // same 2-setup datum goal through the real seam, so it pays the same cost.
-  }, 600_000);
+  }, 90_000);
 });
 
 // ───────────────────────────────────────────────────────────────────────────────────────────

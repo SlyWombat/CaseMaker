@@ -27,7 +27,6 @@ const backing = new Map<string, string>();
 
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { programHash } from '@/engine/cnc/programHash';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -116,27 +115,14 @@ describe('#869 the goal’s split, generated', () => {
     const job = goalJob();
     const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, { shop: SHOP });
     expect(out.ok).toBe(true);
-    if (USE_MODEL_CAM_ENGINE) {
-      // #999 — absent is not "ball alone" on the seam: the plan's sequence chooses the house
-      // flat (the largest, ⌀3 here) and the ball finishes.
-      expect(out.programs).toHaveLength(2);
-      expect(out.programs[0]!.toolKey).toBe(ROUGH.key);
-      expect(out.programs[1]!.toolKey).toBe(BALL.key);
-      expect(out.surface3d?.rough ?? null).toBeNull();
-      return;
-    }
-    // The OLD heightfield path's own reading is unchanged (its bytes are pinned): absent = one cutter.
-    expect(out.programs).toHaveLength(1);
-    expect(out.programs[0]!.toolKey).toBe(BALL.key);
+    // #999 — absent is not "ball alone" on the seam: the plan's sequence chooses the house
+    // flat (the largest, ⌀3 here) and the ball finishes. (The old heightfield engine's own
+    // reading — absent = one cutter, pinned at `c03b471f` — went with it when that engine was
+    // removed, #966/#987.)
+    expect(out.programs).toHaveLength(2);
+    expect(out.programs[0]!.toolKey).toBe(ROUGH.key);
+    expect(out.programs[1]!.toolKey).toBe(BALL.key);
     expect(out.surface3d?.rough ?? null).toBeNull();
-    // The promise that a goal without a rough is untouched: the posted file's hash. #987 makes a
-    // skirt-closed relief's outline synthetic, so no freeing contour op is demanded against it:
-    // this fixture (a 2-triangle open ramp, always closed with a skirt) went from 2 posted
-    // programs (a flat contour + the ball finish) to the 1 this test already asserts above, and
-    // the posted bytes changed with it — re-pinned for #987. The old heightfield engine's own,
-    // unrelated pin for this same byte (`c03b471f`, #889/#909/#927/#945's history) went with it
-    // when that engine was removed (#966).
-    expect(programHash(out.nc!)).toBe('8275a038');
   });
 
   it('a roughToolKey posts the flat’s rough first and the ball’s finish second', async () => {
@@ -200,9 +186,9 @@ describe('#869 the goal’s split, generated', () => {
     const job = goalJob({ roughToolKey: 'inv:gone' });
     const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, { shop: SHOP });
     expect(out.ok).toBe(true);
-    // The seam lets the engine choose (two programs); the old path keeps its one-cutter reading.
-    expect(out.programs).toHaveLength(USE_MODEL_CAM_ENGINE ? 2 : 1);
-    if (USE_MODEL_CAM_ENGINE) expect(out.programs[0]!.toolKey).toBe(ROUGH.key);
+    // The seam lets the engine choose instead (two programs), the house's largest flat roughing.
+    expect(out.programs).toHaveLength(2);
+    expect(out.programs[0]!.toolKey).toBe(ROUGH.key);
     const finding = out.findings.find((f) => f.code === 'goal-rough-no-cutter');
     expect(finding).toBeDefined();
     expect(finding!.message).toContain('not in the tool library');
@@ -210,7 +196,7 @@ describe('#869 the goal’s split, generated', () => {
 
   it('#999 an explicit null is the operator’s ball alone, stated in the findings', async () => {
     const job = goalJob({ roughToolKey: null });
-    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, { shop: SHOP });
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(1);
     expect(out.programs[0]!.toolKey).toBe(BALL.key);

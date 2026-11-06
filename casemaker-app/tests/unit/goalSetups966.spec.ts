@@ -208,11 +208,7 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
       // Above all: never the old silent shape.
       expect(result.ok).not.toBe(true);
     },
-      // TEMPORARY, #998 — C measured this exact fixture's own cost at 250–350 s, both
-      // at this tip and at the base, against 28.7 s before the #965/#982 merges: a real,
-      // open slowdown (C is bisecting it now), not load. Budget raised 90 s -> 600 s as a
-      // holding measure; bring it back down with the #998 fix.
-    600_000,
+    90_000,
   );
 
   it(
@@ -248,11 +244,7 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
       expect(message).toContain("a 'bottom' setup is only wired for a vise mount (#965 stated scope)");
       expect(message).not.toMatch(/\n\s+at /);
     },
-      // TEMPORARY, #998 — C measured this exact fixture's own cost at 250–350 s, both
-      // at this tip and at the base, against 28.7 s before the #965/#982 merges: a real,
-      // open slowdown (C is bisecting it now), not load. Budget raised 90 s -> 600 s as a
-      // holding measure; bring it back down with the #998 fix.
-    600_000,
+    90_000,
   );
 
   it(
