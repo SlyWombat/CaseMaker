@@ -1,0 +1,152 @@
+/**
+ * #1021 — A POCKET FLOOR STRIP NARROWER THAN THE PRIMARY FLAT'S RING, RED-FIRST.
+ *
+ * The geometry is the issue's own, scaled to the Manager's numbers: an 84 × 60 mm pocket floored
+ * at −6, two 30 × 20 mm ISLANDS standing in it, a 3.3 mm gap between them and 10 mm of open floor
+ * all round. Islands are what makes the strip exist at all: `recogniseFeatures`' pocket region is
+ * the cleared cross-section at the floor, so a DEPRESSION leaves the region solid and its strip is
+ * within a flat-radius of open floor; a standing island removes the area from the region, and the
+ * strip between two long islands is a channel whose middle is 10 mm from the open floor at its
+ * ends — further than the ⌀6 flat's radius, so no ring ever enters it.
+ *
+ * RED FIRST: with the #1021 builder removed, the strip has no owner — nothing in the plan states
+ * it and no pass cuts it. GREEN: the plan states it through the EXISTING `goal-region-uncut`
+ * warning with the node id and its area, because with {⌀6 flat, ⌀6 ball} nothing owned fits a
+ * 3.3 mm strip (a round cutter cannot reach a floor narrower than its own diameter), and it plans
+ * no air motion over it.
+ */
+import { describe, expect, it } from 'vitest';
+
+import { tl } from './helpers/manifoldExec';
+import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+
+const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+const BALL6: Tool = { ...flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6' }), shape: 'ball', typeText: 'Ball Nose' };
+
+const L = 130;
+const W = 110;
+const T = 12;
+const FLOOR = -6;
+/** Pocket, then the two islands and the gap between them — the Manager's own numbers. */
+const POCKET = { x0: 23, x1: 107, y0: 25, y1: 85 };
+const ISLAND_W = 30;
+const GAP = 3.3;
+const ISLAND_Y = { y0: 45, y1: 65 };
+const ISLAND_A_X = { x0: 33, x1: 63 };
+const ISLAND_B_X = { x0: 63 + GAP, x1: 63 + GAP + ISLAND_W };
+
+/**
+ * The block with its pocket and the two islands standing in it. The strip between them is a
+ * channel at the pocket's floor whose walls are the islands' VERTICAL sides: the ball's disc
+ * bridges it, its tip rides the islands' tops three millimetres above the floor, so the strip is
+ * the warning case — nothing planned as air.
+ */
+function fixture(kind: 'islands' | 'cones' = 'islands'): { positions: Float32Array; indices: Uint32Array; triangleCount: number; bbox: { min: [number, number, number]; max: [number, number, number] } } {
+  const M = tl.Manifold;
+  const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number) =>
+    M.cube([x1 - x0, y1 - y0, z1 - z0], true).translate([(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2]);
+  let solid = box(0, L, 0, W, -T, 0);
+  // The pocket void with the two islands standing in it: the void is the pocket less the
+  // islands, so the islands are part of the part.
+  let pocketVoid = box(POCKET.x0, POCKET.x1, POCKET.y0, POCKET.y1, FLOOR, 0);
+  if (kind === 'cones') {
+    // Sloping islands: two truncated cones (bottom ⌀8, top ⌀4, 6 mm tall) whose bottoms stand
+    // 3.3 mm apart. The buggy fit (centre − R) planned a pass here; the ball's tip only wedges to
+    // ~1.2 mm above the floor, so the correct fit states it standing.
+    const cy = (ISLAND_Y.y0 + ISLAND_Y.y1) / 2;
+    for (const cx of [55, 55 + 8 + GAP]) {
+      pocketVoid = pocketVoid.subtract(M.cylinder(6, 4, 2, 64, false).translate([cx, cy, FLOOR]));
+    }
+  } else {
+    pocketVoid = pocketVoid.subtract(box(ISLAND_A_X.x0, ISLAND_A_X.x1, ISLAND_Y.y0, ISLAND_Y.y1, FLOOR, 0));
+    pocketVoid = pocketVoid.subtract(box(ISLAND_B_X.x0, ISLAND_B_X.x1, ISLAND_Y.y0, ISLAND_Y.y1, FLOOR, 0));
+  }
+  solid = solid.subtract(pocketVoid);
+  const mesh = solid.getMesh();
+  const numProp = mesh.numProp;
+  const numVert = mesh.vertProperties.length / numProp;
+  const positions = new Float32Array(numVert * 3);
+  for (let i = 0; i < numVert; i++) {
+    for (let k = 0; k < 3; k++) positions[i * 3 + k] = mesh.vertProperties[i * numProp + k]!;
+  }
+  const indices = new Uint32Array(mesh.triVerts);
+  solid.delete();
+  return { positions, indices, triangleCount: indices.length / 3, bbox: { min: [0, 0, -T], max: [L, W, 0] } };
+}
+
+const FLAT2: Tool = flatEndMill(2, { number: 3, id: 'flat-2', name: 'flat-2' });
+const BALL2: Tool = { ...flatEndMill(2, { number: 4, id: 'ball-2', name: 'ball-2' }), shape: 'ball', typeText: 'Ball Nose' };
+
+function inputFor(house: Tool[], kind: 'islands' | 'cones' = 'islands'): ModelPlanInput {
+  return {
+    geometry: { triangles: fixture(kind) },
+    setups: [{ frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -T }, underside: 'flatOnStockBottom' }],
+    stock: { length: L, width: W, thickness: T, material: 'hardwood' },
+    fixture: { mount: 'tape', envelope: null },
+    cutters: { house, catalogue: [] },
+    tolerances: {},
+    edgeBreak: { legMm: 0 },
+  };
+}
+
+describe('#1021 — the strip between two islands, nothing owned fits it', () => {
+  it('a rest BALL in the set does not silence the strip (a rest ball owns no pocket floor)', async () => {
+    const output = await planModelCam(inputFor([FLAT6, BALL6, BALL2]));
+    const steps = output.perSetup.flatMap((s) => s.choice.steps);
+    const restFlats = steps.filter((st) => st.kind === 'rest' && st.cutter.tool.shape === 'flat');
+    expect(restFlats, 'the chain ran a rest flat this case did not intend').toHaveLength(0);
+    const strip = output.perSetup.flatMap((s) => s.statements).find((s) => s.text.includes('pocket floor strip'));
+    expect(strip, 'a rest ball silenced the strip').toBeDefined();
+  }, 240_000);
+
+  it('a CATALOGUE flat the chain never runs does not silence the strip (the ideal run\'s house)', async () => {
+    // The ideal run's house is owned ∪ catalogue (`planTwoOutcomes`); a narrow flat the chain does
+    // not use as a rest must not suppress the statement.
+    const output = await planModelCam(inputFor([FLAT6, BALL6, FLAT2]));
+    const steps = output.perSetup.flatMap((s) => s.choice.steps);
+    console.log('chain:', steps.map((st) => `${st.kind}:${st.cutter.tool.name}`).join(' -> '));
+    const restWithFlat2 = steps.filter((st) => st.kind === 'rest' && st.cutter.tool.id === FLAT2.id);
+    if (restWithFlat2.length > 0) {
+      // The chain really runs the ⌀2 rest here: then the rest owns the strip and nothing is said.
+      const strip = output.perSetup.flatMap((s) => s.statements).find((s) => s.text.includes('pocket floor strip'));
+      expect(strip, 'the chain ran the ⌀2 rest, so the strip is its own — it must not also be stated').toBeUndefined();
+      return;
+    }
+    const strip = output.perSetup.flatMap((s) => s.statements).find((s) => s.text.includes('pocket floor strip'));
+    expect(strip, 'a catalogue flat outside the chain silenced the strip').toBeDefined();
+  }, 240_000);
+
+  it('the cone case is stated standing — the buggy centre−R fit planned a pass (F review 4)', async () => {
+    const output = await planModelCam(inputFor([FLAT6, BALL6], 'cones'));
+    const statements = output.perSetup.flatMap((s) => s.statements);
+    const strip = statements.find((s) => s.text.includes('floor strip'));
+    expect(strip, `no strip statement on the cone fixture; statements: ${statements.map((s) => `${s.code}: ${s.text}`).join(' | ')}`).toBeDefined();
+    expect(strip!.code).toBe('goal-region-uncut');
+    expect(statements.some((s) => s.code === 'goal-pocket-floor-rest')).toBe(false);
+  }, 240_000);
+
+  it('a flats-only house states the strip and says no ball is held', async () => {
+    const output = await planModelCam(inputFor([FLAT6]));
+    const statements = output.perSetup.flatMap((s) => s.statements);
+    const strip = statements.find((s) => s.code === 'goal-region-uncut' && s.text.includes('floor strip'));
+    expect(strip, `no standing-strip warning without a ball; statements: ${statements.map((s) => `${s.code}: ${s.text}`).join(' | ')}`).toBeDefined();
+    expect(strip!.text).toContain('no ball is held');
+    expect(strip!.text).not.toMatch(/reaches \d+ % of it/);
+  }, 240_000);
+
+  it('states the strip as standing when the ball\'s tip cannot reach its floor', async () => {
+    const output = await planModelCam(inputFor([FLAT6, BALL6]));
+    const statements = output.perSetup.flatMap((s) => s.statements);
+    const notes = output.perSetup.flatMap((s) => s.notes).join('\n');
+    const strip = statements.find((s) => s.code === 'goal-region-uncut' && s.text.includes('floor strip'));
+    expect(strip, `no standing-strip warning; statements: ${statements.map((s) => `${s.code}: ${s.text}`).join(' | ')}\nnotes:\n${notes}`).toBeDefined();
+    expect(strip!.severity).toBe('warning');
+    expect(strip!.count).toBe(1);
+    expect(strip!.text).toMatch(/pocket-\d+: [\d.]+ mm², the ball reaches \d+ % of it/);
+    // Nothing is planned as air over a strip the ball's tip never reaches.
+    expect(statements.some((s) => s.code === 'goal-pocket-floor-rest')).toBe(false);
+    expect(output.perSetup.flatMap((s) => s.ops).filter((o) => o.region.id.endsWith(':floor-strip')).length).toBe(0);
+  }, 240_000);
+
+});

@@ -41,7 +41,7 @@ import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, 
 import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
-import { pocket } from './ops/pocket';
+import { fullyReachable, pocket } from './ops/pocket';
 import { roughLeftAbove } from './ops/rough';
 import { clSurface, creaseFits } from './clsurface';
 import { dropCutterHeight, profileOf, type CutterProfile, type DropCutterMesh } from './dropcutter';
@@ -873,6 +873,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       // `roughToolKey`): that tool roughs instead of `primary`, which this job's own pockets (if
       // it has any) still use — the two are independent on purpose, see
       // `ModelPlanInput.curvedRoughTool`'s own doc.
+      // #982 — NO FLAT ANYWHERE IN THE HOUSE: the pocket floors become the ball's own regions,
+      // standing in for the whole pocket chain. #1021's strips are NOT added here: they depend on
+      // the chain the plan actually chooses, so `planTreePrograms` decides them after the pockets
+      // and merges them into these options (see `PlanTreeOptions.floorStrips`).
       ...(noFlatFallback
         ? { flat: primary, extraRegions: pocketFloorRegions }
         : input.curvedRoughTool === undefined
@@ -1106,8 +1110,237 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
 
 
+    // #1021 — THE FLOOR STRIPS THE PRIMARY FLAT'S RING CANNOT REACH, WHEN NOTHING ELSE OWNS THEM.
+    // A floor strip narrower than the flat's diameter never holds a ring (`pocketLoops` insets by
+    // the radius, and the strip's centre space is empty by construction), and with a flat in the
+    // set the #982 ball-only floor regions are never built; #961's rest owns these cells only when
+    // the set holds a rest cutter. With a flat, a ball and no rest, the strip belongs to nobody —
+    // the tray's five strips between the scoops stand as the two balls' scallop cusp (0.70 mm).
+    // Each node's gap (`region \ fullyReachable(region, R_flat)`, the same erode/dilate pair
+    // `pocketLoops` rings with) is built here and handed to the curved pipeline as
+    // `extraRegions`: the ball rasters the strips against the real CL surface (never deeper than
+    // the design) as its own floor pass.
+    //
+    // COST (#1021 §8.9): one erode+dilate + subtract per pocket node, one boundary-band offset
+    // per node with interior components, one erode per strip per rest flat the chain runs (the
+    // ownership test) and one drop-cutter CL sampling per kept strip — all plan-time work over
+    // small polygons, milliseconds on the tray's 20 nodes and the organizer's 58. Nothing is
+    // posted for a strip nothing can enter; a strip the ball fits is planned as its own floor
+    // pass (feed over the strip's own area).
+    //
+    // THE KEEP RULES. First, A STRIP LIES INSIDE THE FLOOR: a gap component that touches the
+    // node's own outer boundary is a CORNER — the flat's wall-foot tradeoff, which the card
+    // already states and which a ball reaches no better (its own fillet is its radius). Only
+    // components clear of that boundary are strips the rings genuinely cannot own. The node's
+    // HOLES (islands, and the curved regions' mouths) are not its outer boundary: a strip between
+    // two scoops touches both of their walls and nothing else, and is kept.
+    //
+    // Second, A STRIP A SMALLER FLAT CAN ENTER IS THE REST'S (the maintainer's 11-05 ruling, the
+    // 2026-11-06 narrowing): #961's rest already owns every strip a smaller owned flat can reach
+    // — on the app path the ⌀3.175 rest cuts the tray's five strips to their floor at −4.200 —
+    // so this builder keeps only the strips NO owned flat can enter. A strip the ball alone could
+    // reach is exactly the no-rest-flat case this issue is about.
+    const buildFloorStrips = (restCutters: readonly Tool[], statedByPlan: ReadonlySet<string>): PlanningFloorStrips => {
+      const regions: RemainderRegion[] = [];
+      const unreachable: { id: string; area: number; fitShare: number }[] = [];
+      const planned: PlanningFloorStrips['planned'] = [];
+      if (noFlatFallback) return { regions, unreachable, planned };
+      const flatRadius = (cuttingDiameter(primary) ?? 0) / 2;
+      if (flatRadius > 0) {
+        // Signed, so a hole (negative) is never mistaken for a component.
+        const signedArea = (ring: readonly [number, number][]): number => {
+          let a = 0;
+          for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+            a += ring[j]![0] * ring[i]![1] - ring[i]![0] * ring[j]![1];
+          }
+          return a / 2;
+        };
+        const areaOf = (polys: Polygons): number => polys.reduce((s, ring) => s + signedArea(ring), 0);
+        const intersect = (a: Polygons, b: Polygons): Polygons => boolean.subtract(a, boolean.subtract(a, b));
+        // A 0.05 mm band inside the outer ring — wide enough to survive polygonization, far
+        // narrower than any real corner, so only a component that reaches the boundary touches it.
+        const BOUNDARY_BAND_MM = 0.05;
+        const walkStrips = (nodes: PocketNode[]): void => {
+          for (const node of nodes) {
+            // A through node has no floor (the contour frees it); nothing to finish. Neither has
+            // a ZERO-DEPTH node — one whose floor is its mouth (the organizer's engraved outlines
+            // read as pockets at −0.80): its "strip" is the surface itself, and a ball pass over
+            // it would be a no-op stated as a missing floor.
+            const outer =
+              node.through || node.floorZ >= node.mouthZ - 0.05 || statedByPlan.has(node.id)
+                ? []
+                : node.region.filter((ring) => signedArea(ring) > 0);
+            if (outer.length > 0) {
+              const reach = fullyReachable(node.region, offset, flatRadius);
+              const gap = boolean.subtract(node.region, reach);
+              let kept: Polygons;
+              if (reach.length === 0 || Math.abs(areaOf(reach)) <= 1e-9) {
+                // THE WHOLE NODE IS THE STRIP: the flat's ring cannot enter the floor at all (the
+                // organizer's pocket-34, a 66 × 1.1 mm ledge). There is no interior to judge — the
+                // node's floor is the strip, so it is kept WHOLE, holes included: keeping only the
+                // positive rings claimed an island's footprint as strip (F's review, finding 1).
+                kept = node.region;
+              } else {
+                const band = boolean.subtract(outer, offset(outer, -BOUNDARY_BAND_MM));
+                kept = [];
+                let current: Polygons | null = null;
+                // Clipper emits each component's outer ring followed by its holes; judge the
+                // component as one polygon set (its holes included) and keep it whole or not at all.
+                const flush = (): void => {
+                  if (current !== null && current.length > 0 && areaOf(intersect(current, band)) <= 1e-6) kept.push(...current);
+                  current = null;
+                };
+                for (const ring of gap) {
+                  if (signedArea(ring) > 0) {
+                    flush();
+                    current = [ring];
+                  } else if (current !== null) {
+                    current.push(ring);
+                  }
+                }
+                flush();
+              }
+              // Slivers below a tenth of a square millimetre are polygon noise, not floors.
+              if (Math.abs(areaOf(kept)) < 0.1) kept = [];
+              // A strip an owned FLAT can enter is the rest's (see this block's keep rules): the
+              // eroded component is non-empty for any flat whose radius fits inside it.
+              // The REST'S OWNERSHIP IS THE PLAN'S, NOT THE SET'S: only a rest step this plan
+              // actually runs can own a strip (on the ideal run the house is owned ∪ catalogue,
+              // and a catalogue flat the chain never uses must not silence it).
+              const restOwned = kept.length === 0
+                ? true
+                : restCutters.some((candidate) => {
+                    if (candidate.shape !== 'flat') return false;
+                    const r = (cuttingDiameter(candidate) ?? 0) / 2;
+                    if (!(r > 0)) return false;
+                    const eroded = offset(kept, -r);
+                    return eroded.length > 0 && Math.abs(areaOf(eroded)) > 1e-9;
+                  });
+              // THE BALL FITS BY ITS DROP-CUTTER, AND THE FIT RETURNS THE AREA IT REACHES (#1026).
+              // The fit samples the strip's cells at their CENTRES (phase bbox + pitch/2 — a grid
+              // from the bbox minimum put its first column on the strip's edge and read 14.3 % of
+              // a strip the ball reaches along 0.3 mm of it) and keeps the cells whose CL is
+              // within the plan's 0.1 mm goal band of the node's floor. Those cells — as a
+              // polygon via `cellPolygons`, the #961 helper — ARE the region the ball's floor
+              // pass is planned over, so the pass rasters ground the ball can reach and no air
+              // over ground it cannot. The bar is AREA: plan when the reachable area is at least
+              // max(1 mm², the ball's step-over × 1 mm); below that the whole strip is stated
+              // standing. A strip every sampled cell reaches keeps its ORIGINAL footprint, so the
+              // cards' plans stay byte-identical.
+              const ballRadiusMm = ball === undefined ? 0 : (cuttingDiameter(ball) ?? 0) / 2;
+              const BAND_MM = 0.1;
+              let ballFitShare = 0;
+              let ballFits = false;
+              let plannedStrip:
+                | { footprint: Polygons; reachArea: number; stripArea: number; staysArea: number; standingMm: number; allReached: boolean }
+                | null = null;
+              if (kept.length > 0 && ball !== undefined && ballRadiusMm > 0) {
+                const fitRegion: RemainderRegion = {
+                  id: `${node.id}:fit`,
+                  footprint: kept,
+                  area: Math.abs(areaOf(kept)),
+                  zTop: node.mouthZ,
+                  zBottom: node.floorZ,
+                  triangles: new Uint32Array(0),
+                  slopeDeg: [0, 0],
+                  slopeMedianDeg: 0,
+                  in: 'top',
+                };
+                const cl = clSurface(curvedGeometry, fitRegion, ball, pocketParams.stepOver);
+                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                for (const ring of kept) {
+                  for (const [x, y] of ring) {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                  }
+                }
+                const FIT_PITCH_MM = 0.5;
+                const nx = Math.max(1, Math.ceil((maxX - minX) / FIT_PITCH_MM));
+                const ny = Math.max(1, Math.ceil((maxY - minY) / FIT_PITCH_MM));
+                const reach = new Uint8Array(nx * ny);
+                let cells = 0;
+                let within = 0;
+                let standingMm = 0;
+                for (let j = 0; j < ny; j++) {
+                  for (let i = 0; i < nx; i++) {
+                    const x = minX + (i + 0.5) * FIT_PITCH_MM;
+                    const y = minY + (j + 0.5) * FIT_PITCH_MM;
+                    if (!pointInPolygons(kept, x, y)) continue;
+                    const clAt = cl.dropCutter(x, y);
+                    if (clAt === null) continue;
+                    cells++;
+                    const stand = clAt - node.floorZ;
+                    if (stand <= BAND_MM) {
+                      within++;
+                      reach[j * nx + i] = 1;
+                    } else if (stand > standingMm) {
+                      standingMm = stand;
+                    }
+                  }
+                }
+                ballFitShare = cells === 0 ? 0 : within / cells;
+                const cellAreaMm2 = FIT_PITCH_MM * FIT_PITCH_MM;
+                const reachArea = within * cellAreaMm2;
+                const stripArea = Math.abs(areaOf(kept));
+                ballFits = reachArea >= Math.max(1, (pocketParams.stepOver ?? 0) * 1);
+                if (ballFits) {
+                  const allReached = cells > 0 && within === cells;
+                  plannedStrip = {
+                    footprint: allReached
+                      ? kept
+                      : cellPolygons((i, j) => reach[j * nx + i] === 1, nx, ny, minX, minY, FIT_PITCH_MM),
+                    reachArea,
+                    stripArea,
+                    staysArea: Math.max(0, stripArea - reachArea),
+                    standingMm,
+                    allReached,
+                  };
+                }
+              }
+              if (kept.length > 0 && !restOwned && !ballFits) {
+                unreachable.push({ id: node.id, area: Math.abs(areaOf(kept)), fitShare: ballFitShare });
+              }
+              if (kept.length > 0 && !restOwned && ballFits && plannedStrip !== null) {
+                // THE FLOOR IS THE NODE'S OWN, not a sampled design top: the #982 clamp's
+                // `max(floorZ, designMax)` read the part's top over the opening on the tray and the
+                // organizer and collapsed strips to zero-depth passes at the mouth (topZ = bottomZ
+                // = −1.20 and −0.80 measured), which then cut nothing and were stated wrongly.
+                const zBottom = node.floorZ;
+                planned.push({
+                  id: `${node.id}:floor-strip`,
+                  nodeId: node.id,
+                  reachArea: plannedStrip.reachArea,
+                  stripArea: plannedStrip.stripArea,
+                  staysArea: plannedStrip.staysArea,
+                  standingMm: plannedStrip.standingMm,
+                  allReached: plannedStrip.allReached,
+                });
+                regions.push({
+                  id: `${node.id}:floor-strip`,
+                  footprint: plannedStrip.footprint,
+                  area: plannedStrip.reachArea,
+                  zTop: node.mouthZ,
+                  zBottom,
+                  triangles: new Uint32Array(0),
+                  slopeDeg: [0, 0],
+                  slopeMedianDeg: 0,
+                  in: 'top',
+                });
+              }
+            }
+            walkStrips(node.children);
+          }
+        };
+        walkStrips(tree.pockets);
+      }
+      return { regions, unreachable, planned };
+    };
+
     const result = planTreePrograms(tree, {
       offset,
+      floorStrips: buildFloorStrips,
       pockets: noFlatFallback ? null : {
         ...(depthBandMm === undefined ? {} : { depthBandMm }),
         houseFlats: flats,
@@ -1325,6 +1558,106 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         text: `${ballUncutIds.length} ${plural} narrower than the ball's radius — left uncut`,
       });
     }
+    const plannedStrips = result.floorStrips?.regions ?? [];
+    const unplannedStrips = result.floorStrips?.unreachable ?? [];
+    // #1021 — a strip the BALL actually finishes is no longer "not cut" by the chain: its id comes
+    // out of the setup's unreachable list below (the chain could not reach it; the ball does).
+    const floorStripsCut = new Set<string>();
+    if (plannedStrips.length > 0 || unplannedStrips.length > 0) {
+      // #1021 — ONLY WHAT THE MOVES SHOW. A strip the ball fits is planned as its floor pass and
+      // judged by that pass's own feeds INSIDE the strip and within the plan's 0.1 mm goal band
+      // of its floor; a strip no owned flat can enter AND the ball cannot fit is never planned
+      // as air — it is stated as standing (the EXISTING `goal-region-uncut` warning), because a
+      // round cutter that does not fit cannot reach its floor at all. Never a "finished by the
+      // ball" line the paths do not support.
+      // A node the plan ALREADY states as unreachable is not restated here (`goal-region-uncut`
+      // is one code with many causes; one sentence per node is enough).
+      const alreadyStated = new Set(result.statements.flatMap((st) => st.ids ?? []));
+      const cutIds: string[] = [];
+      const remainderWhy: string[] = [];
+      const R_BALL_MM = ball === undefined ? 0 : (cuttingDiameter(ball) ?? 0) / 2;
+      const unreachable = unplannedStrips.filter((s) => !alreadyStated.has(s.id));
+      const uncutIds: string[] = unreachable.map((s) => s.id);
+      const uncutWhy: string[] = unreachable.map((s) =>
+        ball === undefined
+          ? `${s.id}: ${s.area.toFixed(1)} mm² — no ball is held to finish it`
+          : `${s.id}: ${s.area.toFixed(1)} mm², the ball reaches ${(s.fitShare * 100).toFixed(0)} % of it within the 0.1 mm band`,
+      );
+      const plannedAreas = new Map((result.floorStrips?.planned ?? []).map((p) => [p.id, p] as const));
+      for (const strip of plannedStrips) {
+        // THE REACH CHECK ON THE PASS'S OWN MOVES (#1026): the planned region IS the area the fit
+        // found reachable, so the check runs over those cells and a cell AT the band counts as
+        // reached (`<= band + 1e-6` — the knife-edge comparison that read 0 % on ground the fit
+        // had just passed is gone).
+        const areas = plannedAreas.get(strip.id);
+        const feeds: { x: number; y: number; z: number }[] = [];
+        for (const op of result.ops) {
+          if (op.region.id !== strip.id) continue;
+          for (const irOp of op.outcome.ir.operations) {
+            for (const m of irOp.moves) if (m.kind === 'feed') feeds.push({ x: m.x, y: m.y, z: m.z });
+          }
+        }
+        const leftoverAt = (x: number, y: number): number => {
+          let cut = Infinity;
+          for (const f of feeds) {
+            const d = Math.hypot(f.x - x, f.y - y);
+            if (d > R_BALL_MM) continue;
+            const surface = f.z + R_BALL_MM - Math.sqrt(Math.max(0, R_BALL_MM * R_BALL_MM - d * d));
+            if (surface < cut) cut = surface;
+          }
+          return cut === Infinity ? Infinity : cut - strip.zBottom;
+        };
+        let cells = 0;
+        let reached = 0;
+        const xs = strip.footprint.flatMap((ring) => ring.map((p) => p[0]));
+        const ys = strip.footprint.flatMap((ring) => ring.map((p) => p[1]));
+        for (let x = Math.min(...xs); x <= Math.max(...xs) + 1e-9; x += 0.5) {
+          for (let y = Math.min(...ys); y <= Math.max(...ys) + 1e-9; y += 0.5) {
+            if (!pointInPolygons(strip.footprint, x, y)) continue;
+            cells++;
+            if (leftoverAt(x, y) <= 0.1 + 1e-6) reached++;
+          }
+        }
+        const share = cells === 0 ? 0 : reached / cells;
+        const nodeId = strip.id.replace(/:floor-strip$/, '');
+        if (alreadyStated.has(nodeId)) continue;
+        if (share >= 0.99) {
+          cutIds.push(nodeId);
+          floorStripsCut.add(nodeId);
+          if (areas !== undefined && !areas.allReached) {
+            remainderWhy.push(
+              `${nodeId}: ${areas.reachArea.toFixed(1)} of ${areas.stripArea.toFixed(1)} mm² finished by the ball; ` +
+                `${areas.staysArea.toFixed(1)} mm² stays, up to ${areas.standingMm.toFixed(2)} mm tall`,
+            );
+          }
+        } else {
+          uncutIds.push(nodeId);
+          uncutWhy.push(
+            `${nodeId}: the pass reaches ${(share * 100).toFixed(0)} % of the ${areas?.reachArea.toFixed(1) ?? 'reachable'} mm² it was planned over`,
+          );
+        }
+      }
+      const ballName = ball === undefined ? 'ball' : ball.name || ball.shape;
+      if (cutIds.length > 0) {
+        const plural = cutIds.length === 1 ? 'strip' : 'strips';
+        const text =
+          `${cutIds.length} pocket floor ${plural} narrower than the ${primary.name || primary.shape}'s ring ` +
+          `(${cutIds.join(', ')}) ${cutIds.length === 1 ? 'is' : 'are'} finished by the ${ballName} as its own floor pass` +
+          (remainderWhy.length === 0 ? ' across it' : ` — ${remainderWhy.join('; ')}`);
+        notes.push(text);
+        statements.push({ severity: 'info', code: 'goal-pocket-floor-rest', count: cutIds.length, ids: cutIds, text });
+      }
+      if (uncutIds.length > 0) {
+        const plural = uncutIds.length === 1 ? 'strip' : 'strips';
+        const text =
+          `${uncutIds.length} pocket floor ${plural} narrower than the ${primary.name || primary.shape}'s ring ` +
+          `${uncutIds.length === 1 ? 'is' : 'are'} left standing — ` +
+          (ball === undefined ? 'and no ball is held to finish ' : `the ${ballName} cannot reach `) +
+          `${uncutIds.length === 1 ? 'it' : 'them'} (${uncutWhy.join('; ')})`;
+        notes.push(text);
+        statements.push({ severity: 'warning', code: 'goal-region-uncut', count: uncutIds.length, ids: uncutIds, text });
+      }
+    }
     if (input.fixture.envelope !== null) {
       const text = `the ${input.fixture.mount} fixture envelope is not yet wired into the region obstacles — this plan carries none; the posted program is still checked against the same envelope by the sweep`;
       notes.push(text);
@@ -1359,7 +1692,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       totalCostSeconds,
       notes,
       statements,
-      unreachable: result.unreachable,
+      // ONLY the cutter-size sentence is cleared for a strip the ball finishes: a 'planning
+      // failed (…)' sentence is a different fact about the node and stays (F's review, finding 3).
+      unreachable: result.unreachable.filter(
+        (entry) => ![...floorStripsCut].some((id) => entry.startsWith(`${id}: not cut — needs a cutter `)),
+      ),
       unplanned: result.unplanned,
       choice: result.choice,
     });
@@ -3687,7 +4024,31 @@ export interface PlanTreeOptions {
    * cannot concatenate.
    */
   curved: Omit<PlanCurvedOptions, 'offset' | 'safeZMm' | 'hopZMm'>;
+  /**
+   * #1021 — THE POCKET FLOOR STRIPS, built once the CHAIN IS CHOSEN. A strip the plan's own rest
+   * step can enter is the rest's; set membership is not the test (on the ideal run the house is
+   * owned ∪ catalogue, and a catalogue flat the chain never runs must not silence a strip). The
+   * hook is called with this plan's rest cutters and returns the strips to plan as the ball's own
+   * floor passes plus the ones nothing can reach.
+   */
+  floorStrips?: (restCutters: readonly Tool[], alreadyStated: ReadonlySet<string>) => PlanningFloorStrips;
   offset: OffsetFn;
+}
+
+/** #1021 — see {@link PlanTreeOptions.floorStrips}. */
+export interface PlanningFloorStrips {
+  regions: RemainderRegion[];
+  unreachable: { id: string; area: number; fitShare: number }[];
+  /** #1026 — the areas the fit's own cells give each planned strip, for its statement. */
+  planned: {
+    id: string;
+    nodeId: string;
+    reachArea: number;
+    stripArea: number;
+    staysArea: number;
+    standingMm: number;
+    allReached: boolean;
+  }[];
 }
 
 export interface PlanTreeResult {
@@ -3706,6 +4067,8 @@ export interface PlanTreeResult {
   unplanned: SequenceStepFailure[];
   /** #961 — the pocket chain's picker result, carried through for `SetupPlan.choice`. */
   choice: SequenceChoice;
+  /** #1021 — the floor strips this plan built (and the ones nothing can reach), when it asked. */
+  floorStrips?: PlanningFloorStrips;
 }
 
 /**
@@ -3835,8 +4198,16 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
         },
       }
     : planPocketsForTree(tree, { ...opts.pockets, offset: opts.offset });
+  // #1021 — the floor strips are decided HERE, after the chain: only the cutters THIS plan runs
+  // as rest can own a strip.
+  const stripped: PlanningFloorStrips | undefined = opts.floorStrips?.(
+    pocketResult.choice.steps.filter((step) => step.kind === 'rest').map((step) => step.cutter.tool),
+    new Set(pocketResult.statements.flatMap((st) => st.ids ?? [])),
+  );
+  const extraRegions = [...(opts.curved.extraRegions ?? []), ...(stripped?.regions ?? [])];
   const curvedResult = planCurvedForTree(tree, {
     ...opts.curved,
+    ...(extraRegions.length === 0 ? {} : { extraRegions }),
     offset: opts.offset,
     safeZMm: SAFE_Z,
     hopZMm: HOP_Z,
@@ -3865,5 +4236,6 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
     statements: [...pocketResult.statements, ...curvedResult.statements],
     unplanned: [...pocketResult.unplanned, ...curvedResult.unplanned],
     choice: pocketResult.choice,
+    ...(stripped === undefined ? {} : { floorStrips: stripped }),
   };
 }
