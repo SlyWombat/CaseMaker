@@ -40,7 +40,7 @@ import { cutterKeyOf } from '../sequence';
 import type { PocketNode } from '../features';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
 import type { DropCutterMesh } from '../dropcutter';
-import { binnedReachableTriangles, clippedTriangleToSquare, planeMaxOverPolygon, planeMaxOverSquare, triangleBinsFor } from '../triangleBins';
+import { binnedReachableTriangles, clippedTriangleToSquare, isNearVertical, planeMaxOverPolygon, planeMaxOverSquare, triangleBinsFor } from '../triangleBins';
 
 /**
  * #1003 (6b's rule, the manager's correction) — DOES A TRIANGLE OVERLAP THE POCKET'S REGION WITH
@@ -107,51 +107,6 @@ function triangleOverlapsRegion(ax: number, ay: number, bx: number, by: number, 
  */
 const BOUNDARY_EPS = 1e-6;
 
-/** Is (x, y) on (or within `BOUNDARY_EPS` of) any edge of the ring? */
-function pointOnRing(px: number, py: number, ring: readonly (readonly [number, number])[]): boolean {
-  for (let i = 0; i < ring.length; i++) {
-    const [ax, ay] = ring[i]!;
-    const [bx, by] = ring[(i + 1) % ring.length]!;
-    const dx = bx - ax;
-    const dy = by - ay;
-    const len2 = dx * dx + dy * dy;
-    let s = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
-    s = Math.max(0, Math.min(1, s));
-    if (Math.hypot(px - (ax + s * dx), py - (ay + s * dy)) <= BOUNDARY_EPS) return true;
-  }
-  return false;
-}
-
-function pointStrictlyInRegion(x: number, y: number, region: Polygons): boolean {
-  if (!pointInPolygons(region, x, y)) return false;
-  for (const ring of region) if (pointOnRing(x, y, ring)) return false;
-  return true;
-}
-
-/** Inside a convex ring (from `clippedTriangleToSquare`), strictly off every edge. */
-function pointStrictlyInConvexRing(px: number, py: number, poly: Float64Array): boolean {
-  const n = poly.length / 2;
-  if (n < 3) return false;
-  let sign = 0;
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    const ax = poly[2 * i]!;
-    const ay = poly[2 * i + 1]!;
-    const bx = poly[2 * j]!;
-    const by = poly[2 * j + 1]!;
-    const ex = bx - ax;
-    const ey = by - ay;
-    const edgeLen = Math.hypot(ex, ey);
-    if (edgeLen === 0) continue;
-    const d = ex * (py - ay) - ey * (px - ax);
-    if (Math.abs(d) <= BOUNDARY_EPS * edgeLen) return false; // on (or within eps of) this edge
-    const s = d > 0 ? 1 : -1;
-    if (sign === 0) sign = s;
-    else if (s !== sign) return false;
-  }
-  return sign !== 0;
-}
-
 /**
  * Does the triangle strictly cover the XY point? The same epsilon convention as the polygon test:
  * a point ON the triangle's edge is contact, not area, and does not count.
@@ -166,23 +121,70 @@ function triangleStrictlyCovers(ax: number, ay: number, bx: number, by: number, 
   );
 }
 
-function polygonOverlapsRegion(poly: Float64Array, region: Polygons): boolean {
+/**
+ * #1020 (the second half) — A TOUCH IS NOT AN AREA, AGAINST THE REGION BOUNDARY TOO. The point and
+ * crossing tests this replaces admitted a facet whose ONLY contact with the pocket was a single
+ * vertex 65 nm inside the wall line (Float32 placement rounds 26.5 to 26.499935): the clipped
+ * polygon is degenerate, the cell still closed, and the floor ring bowed 0.25 mm — twelve fins of
+ * 0.6–2.3 mm on the organizer (149 cells) at the periodic slot-end ramps. The predicate answers
+ * with the POSITIVE AREA of (clipped polygon ∩ region) > 1e-4 mm² — a 0.3 mm sliver 3e-4 wide,
+ * nothing a cutter can see — never a point test.
+ *
+ * The area is exact and needs no boolean: each region ring is clipped to the cell polygon
+ * (Sutherland–Hodgman against a CONVEX window, which `clippedTriangleToSquare` guarantees) and its
+ * shoelace taken. A Clipper round-trip per cell was tried first and aborts inside manifold's wasm
+ * on the tray's own region after a few thousand calls, so the hot loop keeps plain arithmetic.
+ */
+export const REGION_AREA_EPS_MM2 = 1e-4;
+
+/** Signed double area of `ring` clipped to the convex window `poly`, in the RING's own winding. The
+ *  subject may be non-convex: the pieces are rejoined along the window boundary, whose edges
+ *  retrace, so the shoelace total is still the intersection's area. */
+function clippedRingArea2(ring: readonly (readonly [number, number])[], poly: Float64Array): number {
   const n = poly.length / 2;
+  if (n < 3 || ring.length < 3) return 0;
+  let window2 = 0;
   for (let i = 0; i < n; i++) {
-    if (pointStrictlyInRegion(poly[2 * i]!, poly[2 * i + 1]!, region)) return true;
+    const j = (i + 1) % n;
+    window2 += poly[2 * i]! * poly[2 * j + 1]! - poly[2 * j]! * poly[2 * i + 1]!;
   }
-  for (const ring of region) {
-    for (let i = 0; i < ring.length; i++) {
-      const [rx, ry] = ring[i]!;
-      if (pointStrictlyInConvexRing(rx, ry, poly)) return true;
-      const [sx, sy] = ring[(i + 1) % ring.length]!;
-      for (let k = 0; k < n; k++) {
-        const j = (k + 1) % n;
-        if (segsProperlyCross(poly[2 * k]!, poly[2 * k + 1]!, poly[2 * j]!, poly[2 * j + 1]!, rx, ry, sx, sy)) return true;
+  if (window2 === 0) return 0;
+  const s = window2 > 0 ? 1 : -1;
+  let pts: [number, number][] = ring.map(([x, y]) => [x, y]);
+  for (let e = 0; e < n && pts.length > 0; e++) {
+    const ax = poly[2 * e]!, ay = poly[2 * e + 1]!;
+    const bx = poly[2 * ((e + 1) % n)]!, by = poly[2 * ((e + 1) % n) + 1]!;
+    const out: [number, number][] = [];
+    for (let i = 0; i < pts.length; i++) {
+      const [px, py] = pts[i]!;
+      const [qx, qy] = pts[(i + 1) % pts.length]!;
+      const dp = s * ((bx - ax) * (py - ay) - (by - ay) * (px - ax));
+      const dq = s * ((bx - ax) * (qy - ay) - (by - ay) * (qx - ax));
+      if (dp >= 0) out.push([px, py]);
+      if ((dp >= 0) !== (dq >= 0) && dp !== dq) {
+        const t = dp / (dp - dq);
+        out.push([px + (qx - px) * t, py + (qy - py) * t]);
       }
     }
+    pts = out;
   }
-  return false;
+  let area2 = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [px, py] = pts[i]!;
+    const [qx, qy] = pts[(i + 1) % pts.length]!;
+    area2 += px * qy - qx * py;
+  }
+  return area2;
+}
+
+/** Does the cell's clipped polygon cover POSITIVE area of the node's region? Boundary contact —
+ *  a sliver lying along the region's edge — is not area. Rings sum with their own winding sign
+ *  (outers CCW, holes CW), the convention `Polygons` carries. */
+export function polygonOverlapsRegion(poly: Float64Array, region: Polygons): boolean {
+  if (poly.length < 6) return false;
+  let area = 0;
+  for (const ring of region) area += clippedRingArea2(ring, poly) / 2;
+  return Math.abs(area) > REGION_AREA_EPS_MM2;
 }
 import { maskLoopsFromPredicate } from './rasterMask';
 
@@ -542,6 +544,11 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
           let m = Number.NEGATIVE_INFINITY;
           for (const t of binnedReachableTriangles(bins, (x0 + x1) / 2, (y0 + y1) / 2, reach)) {
             if (!overlapsRegion(t)) continue;
+            // #1020 (C's review) — a near-vertical facet (within ~3° of vertical) is "no real
+            // ceiling here" for THIS bound specifically — never folded into the shared `planeA`
+            // classification (`isNearVertical`'s own doc: that would drop a real facet contact
+            // from every op's CL, a possible gouge on a drafted wall touched in its interior).
+            if (isNearVertical(bins, t)) continue;
             let covered = fullyInside;
             if (!covered && anyInside) {
               // A cell on the pocket's edge: the cheap positive-overlap proof. If the triangle
