@@ -1491,7 +1491,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // recognised part top — a `partTop - zTo` depth stopped the contour short by exactly the skin
   // between the stock and the part (1.2 mm on the tray, 0.8 mm on the organizer), so the part was
   // never actually freed. These are magnitudes, already stock-top-relative — no `rebase` needed.
-  const contourDemandMm = z0 - tree.contour.zTo;
+  const contourDepthRawMm = z0 - tree.contour.zTo;
   // #988 — the freeing contour stops at the band: depth min(demand, band). The demand stays for
   // the setup's own "what is left" line in `planModelCam`.
   //
@@ -1504,10 +1504,12 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   const stockBottomZ = tree.frame.stockBottom;
   const stockFloorDepthMm = stockBottomZ === undefined ? undefined : z0 - stockBottomZ;
   const contourDepthMm = Math.min(
-    contourDemandMm,
+    contourDepthRawMm,
     depthBandMm === undefined ? Number.POSITIVE_INFINITY : depthBandMm,
     stockFloorDepthMm === undefined ? Number.POSITIVE_INFINITY : stockFloorDepthMm,
   );
+  /** #1003 — the SAME floor for every op's depth: nothing is planned below the stock bottom. */
+  const capDepth = (raw: number): number => (stockFloorDepthMm === undefined ? raw : Math.min(raw, stockFloorDepthMm));
 
   // The manager's #959 ruling: the top land OUTSIDE every pocket's footprint, faced through the
   // SAME `pocket()` op and `link()` safety every other region uses — not a new op. `tree.top.floors`
@@ -1567,7 +1569,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       // mouth — a nested node's flute reach is under-reported by `mouthZ - floorZ` alone.
       // #988 — the BAND makes the feature shallower: the cutter is sized against the depth the
       // plan actually cuts, and the rest is stated as remainder (the rule itself is untouched).
-      depthMm: depthBandMm === undefined ? z0 - node.floorZ : Math.min(z0 - node.floorZ, depthBandMm),
+      // #1003 — the stock bottom caps it as well; the shallower wins.
+      depthMm: capDepth(depthBandMm === undefined ? z0 - node.floorZ : Math.min(z0 - node.floorZ, depthBandMm)),
     });
   }
   for (const node of throughNodes) {
@@ -1576,7 +1579,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       kind: 'pocket',
       minOpeningMm: node.narrowest,
       cornerRadiusMm: node.narrowest / 2,
-      depthMm: depthBandMm === undefined ? z0 - node.floorZ : Math.min(z0 - node.floorZ, depthBandMm),
+      depthMm: capDepth(depthBandMm === undefined ? z0 - node.floorZ : Math.min(z0 - node.floorZ, depthBandMm)),
     });
   }
   // #987 — a skirt-closed relief's outline is synthetic: the kernel's own requirement for a
@@ -1839,7 +1842,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         id,
         outline: throughNode.region,
         region: ref,
-        depthMm: depthBandMm === undefined ? z0 - throughNode.floorZ : Math.min(z0 - throughNode.floorZ, depthBandMm),
+        depthMm: capDepth(depthBandMm === undefined ? z0 - throughNode.floorZ : Math.min(z0 - throughNode.floorZ, depthBandMm)),
         offset: opts.offset,
         params: cutParamsFor(cutter),
         rapid: opts.rapid,
@@ -2190,9 +2193,9 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     }
   }
   // #1003 — the stock bottom's own clip, stated once per setup, in the same statement path.
-  if (stockFloorDepthMm !== undefined && contourDemandMm > stockFloorDepthMm + 1e-9) {
+  if (stockFloorDepthMm !== undefined && contourDepthRawMm > stockFloorDepthMm + 1e-9) {
     notes.push(
-      `the goal extends ${(contourDemandMm - stockFloorDepthMm).toFixed(3)} mm below the stock; the freeing contour is cut off at the stock bottom`,
+      `the goal extends ${(contourDepthRawMm - stockFloorDepthMm).toFixed(3)} mm below the stock; the freeing contour is cut off at the stock bottom`,
     );
   }
   // #943 (2026-11-05 ruling): the facing stage states where its cut starts, how many passes the
