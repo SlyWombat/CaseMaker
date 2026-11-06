@@ -19,6 +19,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { planModelCam } from '@/engine/cnc/cam/model/plan';
+import { planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
@@ -164,5 +165,21 @@ describe('#1023 — the finish states what it leaves', () => {
     expect(statement?.text).toContain('0.90 mm');
     expect(statement?.text).toContain('6.5 %');
     expect(statement?.text).toContain('2 mm ball nose');
+  }, 180_000);
+
+  it('a catalogue that exists and offers no ball says so — the flag rides through planTwoOutcomes', async () => {
+    // E's finding on the #1028 follow-up: `planTwoOutcomes` empties `cutters.catalogue` before the
+    // owned plan runs, so `reference === null` cannot tell "none configured" from "configured,
+    // none measured". restProvenance1027 pins the two facts on the statement; this pins the WIRE —
+    // that `twoPlans.ts` carries the answer from the CALLER's catalogue onto the owned run.
+    const target = goalTarget();
+    const job = goalJob(target);
+    const flat1: Tool = flatEndMill(1, { name: '1 mm flat end', diameter: 1 });
+    const input = await buildModelPlanInputForGoal(job, target, BALL6, { tools: [], feeds: SHOP_FEEDS }, undefined, [flat1]);
+    expect(input.cutters.catalogue.length).toBe(1);
+    const two = await planTwoOutcomes(input);
+    const statement = two.owned.perSetup.at(-1)!.statements.find((s) => s.code === 'goal-rest-uncut' || s.code === 'goal-rest-pass');
+    expect(statement?.text).toContain('none of its balls takes this leftover');
+    expect(statement?.text).not.toContain('none is configured for this shop');
   }, 180_000);
 });
