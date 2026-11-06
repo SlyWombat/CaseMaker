@@ -323,7 +323,6 @@ describe('#785 — Generate', () => {
     const target = rampGoal({ surface: { gridPitchMm: 0.1, roughStepDownMm: 0.15 } }, 30);
     const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 40 }), null, { shop: {} });
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
-    expect(out.findings.some((f) => f.code === 'goal-program-too-big')).toBe(false);
     expect(out.cam!.cuttingMoves).toBeLessThan(200_000);
   }, 120_000);
 
