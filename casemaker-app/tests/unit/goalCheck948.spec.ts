@@ -361,7 +361,7 @@ describe('#948 the pass line — zero cut-into is not the whole verdict', () => 
 
 describe('#948 the elephant corpus run — zero cut-into is not a pass', () => {
   // #966 triage — #1007: the model path attaches no surface/goal-check report.
-  it.fails('figure@j29 reads ok:false on coverage, and the sentence names it', async () => {
+  it('figure@j29 reads ok:false on coverage, and the sentence names it', async () => {
     // The demo page's elephant stick job: a 0.6533-scaled figure laid on a 36 × 100 × 36 stick and
     // surfaced by Makera's 2 mm ball. The page's own checker reported 0 cut-into with coverage
     // well under its 95 % line — the case that read "Matches" in the app and "Deviates" on the page.
@@ -417,9 +417,13 @@ describe('#948 the elephant corpus run — zero cut-into is not a pass', () => {
       expect(load.ok).toBe(true);
       const report = session.oracle(g.predicted, null, g.designItems, goalInputFor(session, goalCheckForProgram(job, true) as SimGoalCheck));
       expect(report.goalCutInto?.ran).toBe(true);
-      // Nothing is cut INTO the goal; the run fails the pass line because too much of the goal's
-      // top surface is never reached from this side.
-      expect(report.goalCutInto?.cutIntoFraction).toBe(0);
+      // Nothing is ADJUDICATED into the goal; the run fails the pass line because too much of the
+      // goal's top surface is never reached from this side. One RAW cell sits 0.014 mm deep — under
+      // the 0.1 mm floor the verdict judges — so the raw fraction is one cell, never zero, and the
+      // adjudicated fraction (the pass line's own number) is exactly 0.
+      expect(report.goalCutInto?.cutIntoFraction).toBeCloseTo(1 / 22865, 12);
+      expect(report.goalCutInto?.adjudicatedFraction).toBe(0);
+      expect(report.goalCutInto?.adjudicatedMaxMm).toBe(0);
       expect(report.goalCutInto?.passCoverage).toBe(0.95);
       expect(report.goalCutInto?.leftoverFractions[0]).toBeGreaterThan(0.05);
       expect(report.goalCutInto?.ok).toBe(false);
@@ -545,7 +549,7 @@ describe('#948 the live session’s swept top', () => {
   }, 240_000);
 
   // #966 triage — #1007: the model path attaches no surface/goal-check report.
-  it.fails('a corpus goal’s report carries the goal check the page’s checker computes', async () => {
+  it('a corpus goal’s report carries the goal check the page’s checker computes', async () => {
     const stock = { length: 80, width: 50, thickness: 20 };
     const imported = await read('relief-plate.stl');
     const target = targetOf(imported, stock);
@@ -596,23 +600,27 @@ describe('#948 the live session’s swept top', () => {
       expect(report.goalCutInto?.reason).toBeNull();
       expect(report.goalCutInto?.goalCells).toBe(direct.goalCells);
       expect(report.goalCutInto?.cutIntoFraction).toBe(direct.cutIntoFraction);
+      expect(report.goalCutInto?.adjudicatedFraction).toBe(direct.adjudicatedFraction);
       expect(report.goalCutInto?.coverageFraction).toBe(direct.coverageFraction);
       // The plan is clamped over the cutter's whole footprint (#909), so the sweep of the posted
-      // program cuts nothing into the goal — the bench's own `goal_check.py`, run on this same
-      // posted program and heightfield, also reports 0 cut-into (0.00 %, max 0.000 mm), and its
-      // 0.68 % leftover (max 3 mm) is this check's leftover in the same bands.
+      // program cuts nothing JUDGED into the goal. Its RAW figure is the #955 wall class: four
+      // cells (3.31e-5) straddling the relief's own wall steps, the deepest 3 mm at (30, 20), all
+      // excused by the wall rule — the adjudicated set is empty, which is the pass line's number
+      // and the one the page's `cutInto0p1` states.
       expect(report.goalCutInto?.sentence).toContain('no cell cut more than');
       expect(report.goalCutInto?.ok).toBe(true);
-      expect(report.goalCutInto?.cutIntoFraction).toBe(0);
-      expect(report.goalCutInto?.maxCutIntoMm).toBe(0);
-      expect(report.goalCutInto?.maxCutIntoAt).toBeNull();
-      // #948 — the leftover read is the page's own point rule, cell for cell: `goal_check.py` on
-      // this same posted program leaves 824 of 120701 cells more than 0.1 mm above the goal
-      // (0.006826786853464346). The app must answer with the same count.
-      expect(
-        Math.abs((report.goalCutInto?.leftoverFractions[0] ?? 0) - 0.006826786853464346),
-      ).toBeLessThanOrEqual(1 / (report.goalCutInto?.goalCells ?? 1));
-      expect(report.goalCutInto?.maxLeftoverMm).toBe(3);
+      expect(report.goalCutInto?.adjudicatedFraction).toBe(0);
+      expect(report.goalCutInto?.adjudicatedMaxMm).toBe(0);
+      expect(report.goalCutInto?.adjudicatedMaxAt).toBeNull();
+      expect(report.goalCutInto?.wallNotScoredFraction).toBeCloseTo(4 / 120701, 12);
+      expect(report.goalCutInto?.maxCutIntoMm).toBe(3);
+      // #948/#1007 — the leftover read is the page's own point rule, cell for cell. On the OLD
+      // engine's program `goal_check.py` left 824 of 120701 cells more than 0.1 mm above the goal
+      // (0.006826786853464346); the MODEL engine's posted program leaves NONE at that band — its
+      // ball finish rides the CL at the 0.027 mm scallop, so every covered cell sits within the
+      // page's 0.1 mm floor (re-pinned here with the cause, #1011's rule).
+      expect(report.goalCutInto?.leftoverFractions[0] ?? -1).toBe(0);
+      expect(report.goalCutInto?.maxLeftoverMm ?? -1).toBeLessThanOrEqual(0.1);
       // And the merge left the report's other verdicts alone.
       expect(report.ok).toBe(true);
     } finally {
@@ -621,7 +629,7 @@ describe('#948 the live session’s swept top', () => {
   }, 240_000);
 
   // #966 triage — #1007: the model path attaches no surface/goal-check report.
-  it.fails('catches a deliberate gouge: a feed 0.2 mm below the goal reads back as cut-into', async () => {
+  it('catches a deliberate gouge: a feed 0.2 mm below the goal reads back as cut-into', async () => {
     // The acceptance's positive case: a program that DOES cut into the goal must not read as a
     // pass. The same posted relief program, with one plunge spliced in over the part's top face.
     const stock = { length: 80, width: 50, thickness: 20 };
@@ -658,12 +666,15 @@ describe('#948 the live session’s swept top', () => {
       const report = session.oracle(g.predicted, null, g.designItems, goalInputFor(session, goalCheckForProgram(job, true) as SimGoalCheck));
       expect(report.goalCutInto?.ran).toBe(true);
       expect(report.goalCutInto?.ok).toBe(false);
-      expect(report.goalCutInto?.cutIntoFraction).toBeGreaterThan(0);
-      expect(report.goalCutInto?.maxCutIntoMm).toBeGreaterThan(0.19);
-      expect(report.goalCutInto?.maxCutIntoMm).toBeLessThan(0.21);
+      expect(report.goalCutInto?.adjudicatedFraction).toBeGreaterThan(0);
+      // The ADJUDICATED maximum is the injected cut. The RAW maximum is the relief's own wall
+      // cell (3 mm at 30, 20, excused by the wall rule), so the raw figure cannot answer "did the
+      // check catch the gouge" — this positive case reads the judged number.
+      expect(report.goalCutInto?.adjudicatedMaxMm).toBeGreaterThan(0.19);
+      expect(report.goalCutInto?.adjudicatedMaxMm).toBeLessThan(0.21);
       // The worst cell is named, in the work frame, at the plunge (the cutter is 1 mm across, so
       // any cell of its floor is within half a millimetre of the point asked for).
-      const at = report.goalCutInto?.maxCutIntoAt;
+      const at = report.goalCutInto?.adjudicatedMaxAt;
       expect(at).not.toBeNull();
       expect(Math.abs((at as { x: number }).x - 40)).toBeLessThanOrEqual(0.5);
       expect(Math.abs((at as { y: number }).y - 25)).toBeLessThanOrEqual(0.5);
