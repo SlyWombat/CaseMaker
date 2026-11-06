@@ -4938,6 +4938,25 @@ export async function buildModelPlanInputForGoal(
     isMold(goal) && goal.faceId === undefined
       ? mouldSolidOf(tl, closed.mesh, { stock: job.stock, centreY: goal.position.y, stockTopZ: 0 })
       : null;
+  // #1017/#1019 — A MOULD'S FACE GOES THROUGH THE SETUP'S FRAME (the shared-solid half of
+  // #1006's rule; a mould side in a JOB still plans in its authored frame, see `sideFaceFor`).
+  // The solid above is authored with its cavity opening up at the work frame's stock top, which
+  // is exactly the TOP frame's plan. Through the BOTTOM frame the door first shifts z by
+  // `+thickness` and then half-turns about X (`y → −y`, `z → −z`, `shiftToStockTop` +
+  // `toSetupFrame`), so the solid is turned over by that map's inverse HERE — `y → −y`,
+  // `z → −thickness − z` — and the door's own turn lands exactly the authored mould in the
+  // setup frame, its cavity up and one stock top under the door's `−stockTop` shift. Without
+  // it the plan saw the cavity facing the table and posted no op at all (measured then
+  // pinned in `setupDatumGuard.spec.ts`).
+  if (mould !== null && sideFace === 'bottom') {
+    const pos = mould.mesh.positions;
+    for (let i = 0; i < pos.length; i += 3) {
+      pos[i + 1] = -pos[i + 1]!;
+      pos[i + 2] = -job.stock.thickness - pos[i + 2]!;
+    }
+    const bb = mould.mesh.bbox;
+    mould.mesh.bbox = { min: [bb.min[0], -bb.max[1], -job.stock.thickness - bb.max[2]], max: [bb.max[0], -bb.min[1], -job.stock.thickness - bb.min[2]] };
+  }
   // #991 — THE STEP'S OWN FACE IDS GO THROUGH TO THE FEATURE TREE. A mesh that carries them is
   // classified by B-rep face (whole-face patches, the acceptance cards' path); a length the tree
   // cannot use is refused by the tree's own named error, never planned as the wrong path. A skirt

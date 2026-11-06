@@ -1095,7 +1095,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // deep pocket therefore costs its own region a ball rough, never the whole side.
     const usableLengthMm = (t: Tool): number | null => t.shoulderLength ?? t.fluteLength;
     const curvedFlatFor = (r: RemainderRegion): Tool | null => {
-      const depth = tree.frame.stockTop - r.zBottom;
+      // #1018 — the door shifts the mesh by `-stockTop` once, so the region's own zBottom is
+      // already stock-top-relative: the depth below the stock top is `-zBottom` (frame.stockTop
+      // reads 0 here), no rebase added.
+      const depth = -r.zBottom;
       const reaching = flats.find((t) => {
         const usable = usableLengthMm(t);
         return usable !== null && usable + 1e-9 >= depth;
@@ -1113,7 +1116,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             .map((r) => {
               const named = flats[0]!;
               const usable = usableLengthMm(named);
-              const depth = Number((tree.frame.stockTop - r.zBottom).toFixed(1));
+              const depth = Number((-r.zBottom).toFixed(1));
               const ballName = ball === undefined ? 'no ball in the set' : (ball.name || 'the ball');
               return `"${r.id}": the ${named.name || named.shape}'s ${usable === null ? 'unstated' : `${usable} mm`} usable length does not reach the ${depth} mm this region cuts below the stock top — ${ballName} roughs it`;
             })
