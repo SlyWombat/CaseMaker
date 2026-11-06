@@ -27,6 +27,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject, StockMaterial } from '@/types/engraveJob';
+import { planCutInto } from '../tools/planCutInto';
 
 afterEach(() => clearTargetObjectMeshCache());
 
@@ -134,6 +135,10 @@ describe('#846 — the goal path chooses its rough, and says so', () => {
     const out = await planModelCam(input);
     expect(out.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
     expect(out.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no ball nose');
+    // #982 follow-up (A's review) — the no-ball plan swept against the goal cuts into it NOWHERE
+    // (the flat-raster fallback's own outcome check; a cusp/step regression shows up here).
+    const report = planCutInto(job, job.targetObject!, out.perSetup.flatMap((s) => s.programs));
+    expect(report.adjudicated, `cut-into must be 0 — ${JSON.stringify(report)}`).toBe(0);
   }, 120_000);
 
   it('#982 pin — a ball-only set plans the same ramp (no flat: the ball floor pass)', async () => {
