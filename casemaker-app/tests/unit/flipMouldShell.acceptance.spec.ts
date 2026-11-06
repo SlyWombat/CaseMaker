@@ -391,6 +391,20 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     expect(out.programs.map((p) => p.toolKey)).toEqual(['3 mm ball nose', '3 mm ball nose']);
     expect(new Set(out.programs.map((p) => p.nc)).size).toBe(2);
 
+    // #1019 (E's review, finding 2) — THE SUBSTITUTION IS STATED. Both sides are ball-roughed
+    // because the stated 12 mm flat cannot reach their curved regions (shell-out cuts 17.255 mm
+    // below the stock top, shell-in 14.755 mm), and the job's result says so — the flat, its
+    // usable length, the depth. With the substitution filtered on the ball-carrying helper this
+    // list was EMPTY (the line could only fire when the set had no ball at all). The multi-side
+    // result carries the FIRST side's findings (`generateGoalPrograms`' `{ ...first, programs }`),
+    // so the statement pinned here is side 1's own.
+    const substitution = out.findings
+      .filter((f) => f.code === 'goal-rough-unreachable')
+      .map((f) => f.message)
+      .join('\n');
+    expect(substitution, 'the ball substitution is not stated on the both-sides job').toMatch(/17\.3/);
+    expect(substitution).toContain('12 mm usable length does not reach');
+
     // The app's own frames, built exactly as the run store builds them: top-up first, bottom-up
     // in the vise second, and the second rotation is the turn the remount states.
     const frames = jobSetups(job).map((s) => orient(s.orientation.top, s.mount, STOCK));
