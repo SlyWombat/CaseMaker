@@ -376,31 +376,38 @@ describe('#873 the goal corpus: generated, swept, and measured against the goal'
   // rough-plus-finish cutter pairing) is the step that has to lift these numbers; until then this
   // is today's honest baseline, and the plan's geometric reach is pinned in the describe below.
   // #966 triage — #1007: the model path attaches no surface/goal-check report.
-  it.fails('the relief: about a quarter of the surface — the top and the dome; the flat back faces away', async () => {
+  it('the relief: about a quarter of the surface — the top and the dome; the flat back faces away', async () => {
     const r = await runFixture('relief-plate.stl', { length: 80, width: 50, thickness: 20 });
     expect(r.ok).toBe(true);
     expect(r.stage).toBe('done');
     expect(r.loadOk).toBe(true);
-    expect(r.fraction).toBeCloseTo(0.471, 2); // today: 0.4713 (#909: the rough no longer over-cuts, so fewer cells sit outside the band)
+    // #1007 — THE MODEL ENGINE'S OWN MEASURE (measured 0.6178344 at the #1007 rebase): the old
+    // 1 mm-flat terracing is gone, so far more of the surface is reached. Re-pinned with the cause.
+    expect(r.fraction).toBeCloseTo(0.6178, 2);
     expect(r.seconds).toBeLessThan(9_000); // today: 7 948 s
   }, 240_000);
 
   // #966 triage — #1007: see above.
-  it.fails('the near-sphere: the lower half faces away, and a 1 mm flat cannot hug the flanks', async () => {
+  it('the near-sphere: the lower half faces away, and a 1 mm flat cannot hug the flanks', async () => {
     const r = await runFixture('near-sphere.stl', { length: 60, width: 50, thickness: 32 });
     expect(r.ok).toBe(true);
     expect(r.loadOk).toBe(true);
-    expect(r.fraction).toBeCloseTo(0.134, 2); // today: 0.1341 (#909: the clamp is taken over the cutter's whole reach)
+    // #1007 — the model engine's own measure (0.2673667 at the #1007 rebase), re-pinned with the cause.
+    expect(r.fraction).toBeCloseTo(0.2674, 2);
     expect(r.facingAway).toBeGreaterThan(0);
     expect(r.seconds).toBeLessThan(51_000); // today: 49 076 s
   }, 240_000);
 
   // #966 triage — #1007: see above.
+  // #1007 — THE FIGURE'S RUN IS BLOCKED ELSEWHERE: its flat program posts moves at Z −40.5 on the
+  // 40 mm blank (849 cut-too-deep at the verifier) — the stock-bottom cut class #1003's clamp
+  // answers, and #1003 is not in this lineage. The case stays it.fails until that lands; the
+  // coverage re-pin waits with it (the delivered run cannot be measured).
   it.fails('the figure: the top setup leaves most of the surface unreached — the case #872 answers', async () => {
     const r = await runFixture('figure.stl', { length: 100, width: 60, thickness: 40 });
     expect(r.ok).toBe(true);
     expect(r.loadOk).toBe(true);
-    expect(r.fraction).toBeCloseTo(0.139, 2); // today: 0.1386 (#909)
+    expect(r.fraction).toBeCloseTo(0.139, 2); // today: 0.1386 (#909) — see the case's own note (#1007/#1003)
     // Some of the unreached area faces away (legs, belly, tail underside) and some is shadowed.
     expect(r.facingAway).toBeGreaterThan(0);
     expect(r.seconds).toBeLessThan(97_000); // today: 92 828 s

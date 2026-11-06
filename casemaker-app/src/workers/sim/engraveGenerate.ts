@@ -228,9 +228,11 @@ import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 // #966 — `generateGoalProgram` plans every goal job through `planModelCam`, the model-driven CAM
 // engine's one entry point.
 import {
+  MODEL_STOCK_TO_LEAVE_MM,
   planModelCam,
   type ModelPlanInput,
   type ModelPlanOutput,
+  type PlannedOp,
   type SetupSpec,
 } from '@/engine/cnc/cam/model/plan';
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
@@ -5150,6 +5152,71 @@ export async function buildModelPlanInputForGoal(
   };
 }
 
+/**
+ * #1007 — THE MODEL PLAN'S SURFACE FACTS, in the shape `runSheet.ts`'s `surfaceSteps` reads.
+ * Every number is the plan's own: the cutter-location grid's spacing, the rough/finish ops'
+ * `passStepMm`, the engine's stated stock-to-leave. `gridCells` is 0 — this engine samples CL
+ * grids, not a goal heightfield, and the resolution note says so; `scallop`/`rim` are null
+ * because the model engine runs no separate scallop or rim pass (its finish is one scallop-level
+ * raster and its rim work is the chamfer op, stated in the plan's own notes).
+ */
+function goalSurfaceFactsFromPlan(output: ModelPlanOutput): GoalSurfaceFacts {
+  const plan = output.perSetup[0]!;
+  const spacings = plan.clGrid;
+  const pitchOf = (cutterKey: string): number | null => spacings.find((c) => c.cutterKey === cutterKey)?.maxSpacingMm ?? null;
+  const opOf = (kind: PlannedOp['kind']): PlannedOp | undefined => plan.ops.find((o) => o.kind === kind);
+  const numeric = (values: readonly (number | null | undefined)[]): number | null => {
+    const defined = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0);
+    return defined.length === 0 ? null : Math.max(...defined);
+  };
+  const passStep = (op: PlannedOp | undefined): number | null =>
+    op === undefined ? null : numeric(op.outcome.ir.operations.map((o) => o.passStepMm));
+  const layerCount = (op: PlannedOp | undefined): number | null =>
+    op === undefined ? null : numeric(op.outcome.ir.operations.map((o) => o.depthPasses));
+  const roughOp = opOf('rough');
+  const finishOp = opOf('finish');
+  const pencilOp = opOf('pencil');
+  const pocketOps = plan.ops.filter((o) => o.kind === 'pocket' || o.kind === 'contour');
+  // #1007 (C's review) — A FACT THE PLAN DOES NOT HAVE STAYS ABSENT, NEVER A DEFINED ZERO. A
+  // pocket-only goal (the relief: a pocket and its contour) carries no raster step-overs and no
+  // rough stage; defining them as 0 made the run sheet print "Roughing has nothing to remove" and
+  // "0 roughing layers at 0.000 mm" — both false. The step-down that DOES exist comes from the
+  // pocket/contour ops' own passes; the layer count is the IR operation's `depthPasses` (the Z
+  // passes that ran), never the operation count (always 1).
+  const hasSurfaceStage = roughOp !== undefined || finishOp !== undefined || pencilOp !== undefined;
+  const stepDownMm = passStep(roughOp) ?? numeric(pocketOps.map((o) => passStep(o)));
+  const roughingLayers = layerCount(roughOp) ?? numeric(pocketOps.map((o) => layerCount(o)));
+  const pitchMax = spacings.length === 0 ? null : Math.max(...spacings.map((c) => c.maxSpacingMm));
+  const pitchMin = spacings.length === 0 ? null : Math.min(...spacings.map((c) => c.minSpacingMm));
+  const finishStepDownMm = passStep(finishOp);
+  const roughStepOverMm = pitchOf(roughOp?.outcome.cutter ?? '');
+  const finishStepOverMm = pitchOf(finishOp?.outcome.cutter ?? '');
+  return {
+    resolutionNote:
+      pitchMax === null || pitchMin === null
+        ? 'the model plan states no cutter-location grid — no curved surface stage ran'
+        : `the model plan's cutter-location grid, ${pitchMin}–${pitchMax} mm spacing`,
+    ...(pitchMax === null ? {} : { gridPitchMm: pitchMax }),
+    ...(stepDownMm === null ? {} : { stepDownMm }),
+    ...(roughingLayers === null ? {} : { roughingLayers }),
+    // THE RASTER NUMBERS ARE THE SURFACE STAGES' OWN: only a plan with a rough/finish/pencil stage
+    // has them, and the sheet prints its full surface line only when all five are present.
+    ...(hasSurfaceStage
+      ? {
+          ...(finishStepDownMm === null ? {} : { finishStepDownMm }),
+          ...(roughStepOverMm === null ? {} : { roughStepOverMm }),
+          ...(finishStepOverMm === null ? {} : { finishStepOverMm }),
+          stockToLeaveMm: MODEL_STOCK_TO_LEAVE_MM,
+        }
+      : {}),
+    rough: roughOp === undefined ? undefined : { tool: roughOp.outcome.ir.tool.name, kind: 'raster' as const },
+    scallop: null,
+    pencil: pencilOp === undefined ? null : { paths: pencilOp.outcome.ir.operations.length, creaseDeg: 0 },
+    rim: null,
+    notes: plan.notes,
+  };
+}
+
 export async function generateGoalProgram(
   job: EngraveJob,
   goal: EngraveTargetObject,
@@ -5511,7 +5578,10 @@ export async function generateGoalProgram(
     programs,
     plan: output,
     planStatements,
-    ...(mouldFacts === null ? {} : { surface3d: mouldFacts }),
+    // #1007 — THE MODEL RUN CARRIES ITS SURFACE FACTS. #1005's mould facts are richer and win
+    // when the job is a mould; every other goal job gets the plan's own numbers here, because the
+    // heightfield engine that used to fill this block is gone (the #966 removal).
+    surface3d: mouldFacts ?? goalSurfaceFactsFromPlan(output),
   };
 }
 
