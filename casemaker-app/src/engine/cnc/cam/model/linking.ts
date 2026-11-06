@@ -169,13 +169,6 @@ export interface ClearedArea {
 }
 
 /**
- * Is (x, y) inside the cleared area — INCLUDING its own edge? A ring's start lies exactly ON the
- * outer boundary of the area the previous ring swept (both are the same tool-radius offset of the
- * region), and `pointInPolygons` tests a point on an edge by strict comparison, so the exact
- * boundary reads as outside and every outer-ring landing would be refused. A ±0.001 mm probe is
- * far above Clipper/float noise and far below any real feature or the hop clearance.
- */
-/**
  * #1002 — the DEEPEST FINISHED level under (x, y). Every finished level cut the ground down to its
  * own z over its recorded area, so the ground at a point is at the deepest finished level whose
  * area contains it. Null when no finished area contains it (the stock-top rule then applies).
@@ -189,6 +182,13 @@ export function clearedGroundZ(x: number, y: number, levels: readonly ClearedAre
   return deepest;
 }
 
+/**
+ * Is (x, y) inside the cleared area — INCLUDING its own edge? A ring's start lies exactly ON the
+ * outer boundary of the area the previous ring swept (both are the same tool-radius offset of the
+ * region), and `pointInPolygons` tests a point on an edge by strict comparison, so the exact
+ * boundary reads as outside and every outer-ring landing would be refused. A ±0.001 mm probe is
+ * far above Clipper/float noise and far below any real feature or the hop clearance.
+ */
 export function clearedAreaContains(area: Polygons, x: number, y: number): boolean {
   const eps = 1e-3;
   return (
