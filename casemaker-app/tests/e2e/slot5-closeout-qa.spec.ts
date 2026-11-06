@@ -95,8 +95,11 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
 
   await openCutterGroup(page);
   await expect(page.getByTestId('engrave-tool')).toBeVisible();
-  // #211 acceptance 1: a fresh job opens with a selected tool AND a recommendation sentence.
-  await expect(page.getByTestId('engrave-tool')).not.toHaveValue('');
+  // #1010 — a fresh job no longer PRESELECTS a cutter: the panel offers one (the rule's answer at
+  // once, the measured answer when its search lands) and applies it only on the press. So the
+  // fresh state is an empty select beside an offer; #211 acceptance 1's "opens with a selected
+  // tool" is reached by pressing it, which is the next block.
+  await expect(page.getByTestId('engrave-tool')).toHaveValue('');
   // #766 D — the #211 answer is the panel's PROVISIONAL one: it is drawn at once and the measured
   // plan replaces it once the background search lands, so the rule's sentence is read in its
   // provisional window (from the preview landing until the search completes — seconds, not the
@@ -104,6 +107,16 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
   await expect(page.getByTestId('engrave-pick-provisional')).toBeVisible({ timeout: 60_000 });
   const recFresh = await page.getByTestId('engrave-recommendation').innerText();
   console.log('DIAG #211 fresh selection=%j rec=%j', await page.getByTestId('engrave-tool').inputValue(), recFresh);
+  // The press: whichever offer is on screen (the rule's "Use it" or the measured answer's button).
+  const useRecommended = page.getByTestId('engrave-use-recommended');
+  const useMeasured = page.getByTestId('engrave-use-measured');
+  await expect
+    .poll(async () => (await useRecommended.count()) + (await useMeasured.count()), { timeout: 120_000 })
+    .toBeGreaterThan(0);
+  if ((await useRecommended.count()) > 0) await useRecommended.click();
+  else await useMeasured.click();
+  await expect(page.getByTestId('engrave-tool')).not.toHaveValue('');
+  console.log('DIAG #211 after the press selection=%j', await page.getByTestId('engrave-tool').inputValue());
   // #687/#699 — the line is the cutter's display name and a lowercase `recommended` tag, then the
   // reason. The intent is unchanged: a fresh job shows a recommendation sentence of its own.
   expect(recFresh.toLowerCase()).toContain('recommended');

@@ -19,7 +19,7 @@
 //   npx playwright test tests/e2e/viewportEngraveToolbar.spec.ts
 
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -134,11 +134,14 @@ test('the depth legend stays put and inside the pane while the camera orbits (#3
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
   await page.getByTestId('sidebar-button-cnc-engrave').click();
+  // #516 item 5 / #1010 — the default job starts tool-less and the measured pick is OFFERED, not
+  // applied, so nothing is cut and the legend lists no depths. Fit the built-in flat through the
+  // panel's own select, the way a person would (the same fit `engrave.spec.ts`'s #288 test makes);
+  // then wait for the floors (the legend's depth swatches) rather than a fixed delay, so the
+  // legend's box is the settled one before its position is read.
+  await openCutterGroup(page);
+  await page.getByTestId('engrave-tool').selectOption('flat-1.0');
   await expect(page.getByTestId('engrave-preview-legend')).toBeVisible({ timeout: 60_000 });
-  // #516 item 5 — the default job starts tool-less; the recommendation lands on first load and the
-  // preview rebuilds with the floors it names. Wait for those floors (the legend's depth swatches)
-  // rather than a fixed delay, so the legend's box is the settled one before its position is read —
-  // the same wait `engrave.spec.ts`'s #288 test uses for the default job's 2, 1 and 0.5 mm cuts.
   for (const d of ['2', '1', '0.5']) await expect(page.getByTestId(`engrave-legend-${d}`)).toBeVisible({ timeout: 60_000 });
   // Let the section-open AutoFrame settle.
   await page.waitForTimeout(700);
