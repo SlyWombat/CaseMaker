@@ -56,6 +56,8 @@ import {
 } from '@/engine/cnc/engrave/pcbTopology';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { getTools, entryFor } from '@/engine/cnc/toolRegistry';
+import type { PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
+import type { PlanOutcome } from '@/engine/cnc/cam/model/plan';
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
 import type { MachineCalibration } from '@/engine/cnc';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
@@ -156,6 +158,18 @@ export type EngraveRunClient = {
    * worker for; the real sim client's is `terminateSim`.
    */
   cancelGenerate?: () => void;
+  /**
+   * #986 (the ruling) — THE BACKGROUND IDEAL. Optional so a fake client (a test, a preview-only
+   * build) need not implement it; when present, the run store calls it AFTER the owned plan has
+   * posted and holds its answer as the second result stream.
+   */
+  engravePlanIdeal?: (
+    job: EngraveJob,
+    goal: EngraveTargetObject,
+    tool: Tool,
+    shop?: EngraveShopOpts,
+    catalogueTools?: readonly Tool[],
+  ) => Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }>;
 };
 
 /**
@@ -295,6 +309,12 @@ export function combineOracles(reports: readonly OracleReport[], copper: OracleR
 export interface EngraveRunState {
   /** The last generated result — kept on screen while a newer run builds. */
   generated: EngraveGenerated | null;
+  /**
+   * #986 (the ruling) — THE BACKGROUND IDEAL'S SECOND RESULT STREAM. `idle` until a run succeeds;
+   * `comparing` while the ideal is planned behind the posted owned plan (the card reads
+   * "comparing…"); `ready` with the tradeoff (null when there is no ideal or nothing material).
+   */
+  idealPlan: { status: 'idle' | 'comparing' | 'ready'; tradeoff: PlanTradeoff | null };
   oracle: OracleReport | null;
   /**
    * #844 — EVERY PROGRAM'S OWN VERDICT, in cut order, with the words that name it. `oracle` is the
@@ -687,6 +707,18 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     }
 
     set({ generated, progress: null });
+    // #986 (the ruling) — THE IDEAL RUNS IN THE BACKGROUND: the owned plan has posted, so the card
+    // can be read now; the second plan's outcome and the tradeoff arrive behind it and light the
+    // card's line up without blocking the operator. No goal or no catalogue → nothing to compare.
+    if (generated.ok && generated.nc !== null && job.targetObject !== undefined && client.engravePlanIdeal !== undefined) {
+      const idealClient = client;
+      const idealJob = job;
+      set({ idealPlan: { status: 'comparing', tradeoff: null } });
+      void idealClient
+        .engravePlanIdeal!(idealJob, idealJob.targetObject!, tool as Tool, shop, getTools().map((entry) => entry.tool))
+        .then((answer) => set({ idealPlan: { status: 'ready', tradeoff: answer.tradeoff } }))
+        .catch(() => set({ idealPlan: { status: 'idle', tradeoff: null } }));
+    }
     // #787 — every finding the run raised, small enough for the report to carry.
     for (const f of generated.findings) noteFinding(f);
     if (!generated.ok || generated.nc === null) {
@@ -1049,6 +1081,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
 
   return {
     generated: null,
+    idealPlan: { status: 'idle', tradeoff: null },
     oracle: null,
     oraclePrograms: [],
     simDiagnostics: [],

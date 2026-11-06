@@ -14,7 +14,9 @@ import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
+import type { EngraveJob, EngraveMargins, EngraveTargetObject } from '@/types/engraveJob';
+import type { PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
+import type { PlanOutcome } from '@/engine/cnc/cam/model/plan';
 import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated } from '@/workers/sim.worker';
 import type { SimDesign } from '@/workers/sim/session';
 import type { EngraveProgress, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
@@ -541,6 +543,17 @@ export const engraveSmartPick = (
  * `drill.peckClearanceMm` where each peck's re-entry rapid stops. Omitted, the worker keeps both
  * labelled fallbacks — the program a headless run without a location would cut.
  */
+/** #986 (the ruling) — THE BACKGROUND IDEAL: the second plan's outcome and the tradeoff line,
+ * computed after the owned plan has posted. Posts nothing; returns nulls when there is no ideal. */
+export const engravePlanIdeal = (
+  job: EngraveJob,
+  goal: EngraveTargetObject,
+  tool: Tool,
+  shop?: EngraveShopOpts,
+  catalogueTools?: readonly Tool[],
+): Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }> =>
+  guarded(getSimApi().engravePlanIdeal(job, goal, tool, shop ?? {}, catalogueTools ?? []));
+
 export const engraveGenerate = (
   job: EngraveJob,
   tool: Tool | null,
