@@ -557,12 +557,13 @@ for (const figure of FIGURES) {
       expect(figureRun.scored.lines.find((l) => l.key === 'coverage')?.oursValue).toBeCloseTo(figureRun.coverage, 9);
       // The ideal is a superset: it can never be worse than the owned plan on the same ruler.
       if (owned !== null) expect(figureRun.coverage).toBeGreaterThanOrEqual(owned.coverage - 1e-9);
-    // #966 — TEMPORARY, and never the expected cost: at this merge tip the figures take ~2.5x
-    // the branch wall at the SAME coverage (panther 211.1 s on cand/965-figure-rest, 524 s here),
-    // and the old 900 s ceiling expired mid-run on the elephant. The 2.5x slowdown is an open
-    // finding on #966 (attribution with the review session); this ceiling only lets the check
-    // run to the end until it is fixed, and should come back down with the fix.
-    }, 1_800_000); // #965 — the card measures both scallops (0.01 and the 0.027 default), with the long ⌀1 rest
+    // #965/#998 — THE SPEC'S STATED BUDGET, not a temporary ceiling. The card measures TWO plans
+    // (the job's 0.010 mm scallop and the 0.027 mm default), so the wall is the two-plan wall:
+    // elephant 977.9 s at 966-collapse 41660656, panther 424.6 s (C's run, #998) — a per-plan
+    // time unchanged from the one-plan wall the "2.5x slowdown" reading compared it with (#998
+    // resolved: the plans are the same speed; the spec plans twice). The ceiling is ~1.5x the
+    // larger wall; a run that crosses it is a regression, not the expected cost.
+    }, 1_500_000); // #965 — the card measures both scallops (0.01 and the 0.027 default), with the long ⌀1 rest
   });
 }
 
