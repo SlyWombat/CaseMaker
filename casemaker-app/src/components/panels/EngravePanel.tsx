@@ -2114,18 +2114,18 @@ export function EngravePanel(): JSX.Element {
   // otherwise be re-applied on every render — and each write marks a generated job stale. Comparing
   // both is also the "equal answer writes nothing" rule.
   const measuredSetup = job.setups?.[0];
-  // #1035 — THE PRESS, AS A FACT OF THIS PANEL. #1010's retirement made the measured answer an
-  // OFFER whose numbers belong to the pressed state ("`measuredApplied`/the fidelity line now
-  // describe only that pressed state"), but the expression below is a comparison: a job that
-  // already carries the measured plan — a saved document, the evaluator's own write — matches it
-  // without anyone pressing this panel's button, and claiming "chosen by simulation" there was
-  // exactly the #798 pin's objection. The marker records the answer the operator pressed; the
-  // comparison still guards it, so a job edit that leaves the plan clears the words with it.
+  // #1035 — TWO FACTS, TWO NAMES. `measuredCarried`: the document ALREADY carries the measured
+  // plan (a saved job, the evaluator's write, or this panel's own press) — the press would write
+  // nothing, so the offer must not appear (the #766 "equal answer writes nothing" rule; a reopened
+  // saved job must not re-offer a no-op). `measuredApplied`: the operator PRESSED this answer in
+  // this panel — the marker records the pressed answer's jobKey — AND the document still carries
+  // it. Only then do the 'chosen by simulation' words and the fidelity line appear: #1010 says
+  // those words describe the pressed state, and #798 pins that a coincidental match keeps
+  // 'recommended'. The marker is panel-local, so a reload falls back to 'recommended' with no
+  // offer — the reload case is pinned in engraveMeasuredPickPanel's spec.
   const [pressedMeasuredKey, setPressedMeasuredKey] = useState<string | null>(null);
-  const measuredApplied =
+  const measuredCarried =
     measuredNow !== null &&
-    // #1035 — only the answer the operator pressed, never a coincidence of document contents.
-    pressedMeasuredKey === measuredNow.jobKey &&
     job.toolKey === measuredNow.cutters[0]?.key &&
     // #829 — a goal's second cutter is its chamfer's V-bit; the plan is applied only when the
     // goal already carries the key it measured (a plan with no V leaves it alone).
@@ -2145,6 +2145,9 @@ export function EngravePanel(): JSX.Element {
       const owned = measuredSetup?.toolItems?.[c.key] ?? [];
       return owned.length === c.items.length && owned.every((id, i) => id === c.items[i]);
     });
+  // #1035 — the pressed words, and their guard (see the marker's note above): the ANSWER this
+  // panel pressed, while the document still carries it.
+  const measuredApplied = measuredNow !== null && measuredCarried && pressedMeasuredKey === measuredNow.jobKey;
   // #1010 (the maintainer's 2026-11-05 ruling) — THE MEASURED AUTO-APPLY IS RETIRED. The panel
   // used to write a measured answer into the job behind the operator: the plain pick (#766 D), the
   // named-drill split (#786 4c) and the missing/refused substitutions (#786 4c-2 / slice 6). That
@@ -4349,7 +4352,7 @@ export function EngravePanel(): JSX.Element {
               measured
             </span>
             {measuredNow.words.difference !== null ? ` — ${measuredNow.words.difference}` : ''}{' '}
-            {!measuredApplied && (
+            {!measuredCarried && (
               <button
                 type="button"
                 data-testid="engrave-use-measured"

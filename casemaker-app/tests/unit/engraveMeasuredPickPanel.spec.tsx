@@ -538,6 +538,41 @@ describe('#766 D the panel’s provisional → measured answers', () => {
     expect(screen.queryByTestId('engrave-use-measured')).toBeNull();
   });
 
+  // #1035 (the manager's reload question) — A REOPENED JOB THAT ALREADY CARRIES THE MEASURED PLAN.
+  // The press marker is panel-local, so after a reload the pressed words do not survive — and they
+  // must not: the cutter line falls back to #798's `recommended`, because the measured words
+  // describe a press this panel never saw. The offer is NOT shown either: the document already
+  // carries the plan, so the press would write the same thing (the #766 "equal answer writes
+  // nothing" rule) — a reopened saved job must not re-offer a no-op.
+  it('#1035 — a job that already carries the measured plan offers no press and reads as recommended', () => {
+    act(() => {
+      setRegistry([{ key: 'flat-3.175', tool: flatEndMill(3.175, { name: '3.175 mm flat end' }), provenance: 'test' }]);
+    });
+    act(() => {
+      const job = pocketJob();
+      job.toolKey = '';
+      useEngraveJobStore.setState({ job });
+      // The saved document's own plan, written the same way a load restores it.
+      useEngraveJobStore.getState().applyCutterPlan([{ key: 'flat-3.175', items: ['pocket'] }], 'computed');
+    });
+    const job = useEngraveJobStore.getState().job;
+    const measured = measuredFlat();
+    useEngravePreviewStore.setState({
+      preview: null,
+      status: 'ready',
+      measured,
+      measuredJob: measureFingerprint(job),
+      measuredStatus: 'ready',
+    });
+    render(<EngravePanel />);
+
+    expect(screen.queryByTestId('engrave-use-measured')).toBeNull();
+    const line = screen.getByTestId('engrave-cutter-line').textContent ?? '';
+    expect(line).toContain('recommended');
+    expect(line).not.toContain('chosen by simulation');
+    expect(line).not.toContain('fidelity');
+  });
+
   it('leaves the rule answer standing, labelled, when the search fails', () => {
     useEngravePreviewStore.setState({ preview: previewWith(), status: 'ready' });
     render(<EngravePanel />);
