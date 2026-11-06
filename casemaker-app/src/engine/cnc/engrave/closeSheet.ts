@@ -240,8 +240,12 @@ export function closeOpenSheet(tl: ManifoldToplevel, mesh: ParsedMesh, opts: Clo
       seen.add(key);
       unique.push(t);
     }
+    // #1015 — NO SPREAD OVER THE MESH: `push(...unique)` passes every triangle index as a call
+    // argument and V8 refuses past ~125k of them, so the 12 MB dragon's 243,602-triangle
+    // heightfield (and any goal past that count) died here with "Maximum call stack size
+    // exceeded" before the mould, the solid or the tree existed.
     kept.length = 0;
-    kept.push(...unique);
+    for (const t of unique) kept.push(t);
   }
 
   const edgeKey = (a: number, b: number): string => (a < b ? `${a}:${b}` : `${b}:${a}`);
@@ -373,7 +377,10 @@ export function closeOpenSheet(tl: ManifoldToplevel, mesh: ParsedMesh, opts: Clo
   // #966 — THE SKIRT'S FLOOR. A relief closes only to its own lowest boundary; the stock bottom is
   // for a caller that really means a full-height solid. The cap sits at the same floor either way.
   const skirtTo = opts.skirtTo ?? 'stockBottom';
-  const lowestBoundaryZ = Math.min(...loops.flatMap((loop) => loop.map((edge) => weldedPos[3 * edge.from + 2]!)));
+  // #1015 — a running minimum, not `Math.min(...loops.flatMap(...))`: the spread is the same
+  // fixed-argument limit this issue fixes above, and a fragmented sheet's boundary is unbounded.
+  let lowestBoundaryZ = Infinity;
+  for (const loop of loops) for (const edge of loop) lowestBoundaryZ = Math.min(lowestBoundaryZ, weldedPos[3 * edge.from + 2]!);
   const floorZ = skirtTo === 'lowestBoundary' ? lowestBoundaryZ : opts.bottomZ;
   if (floorZ === undefined || !Number.isFinite(floorZ)) {
     throw new UnclosableOpenMeshError(skirtTo === 'stockBottom' ? 'the skirt floor (bottomZ) is missing' : 'the boundary states no lowest Z');
