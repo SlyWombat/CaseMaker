@@ -192,6 +192,11 @@ export interface SimLoadOk {
    */
   seedFrom?: string | null;
   /**
+   * #1034 (C's review) — how many EARLIER same-setup programs' removals this load was also
+   * seeded from (the whole setup's field list applies, `seedFrom` names only its latest member).
+   */
+  seedEarlier?: number;
+  /**
    * Where the fixture's dimensions came from (#204), present only when the setup models one.
    * A default is NOT a measurement; the viewport shows this so the shown jaws are not read as
    * exact. Optional so a setup with no `fixture` does not grow the load info's shape.

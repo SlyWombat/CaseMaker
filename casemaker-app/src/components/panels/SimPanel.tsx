@@ -342,6 +342,7 @@ export function SimPanel() {
             // sentence states the carry it kept, not only the seed the engine refused.
             carriedFloor: p.carriedFloor === true,
             seedFrom: p.seedFrom ?? null,
+            seedEarlier: p.seedEarlier ?? 0,
             errorCount: p.errorCount,
             codes: [...p.diagnostics, ...p.notes].map((d) => d.code),
           })),

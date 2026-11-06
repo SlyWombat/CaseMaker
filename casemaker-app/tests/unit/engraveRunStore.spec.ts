@@ -506,8 +506,12 @@ describe('engraveRunStore (#206)', () => {
       });
     }
 
-    async function runPrograms(plan: readonly { nc: string; setupIndex: number }[]): Promise<{
+    async function runPrograms(
+      plan: readonly { nc: string; setupIndex: number }[],
+      opts: { refuseFirst?: readonly string[] } = {},
+    ): Promise<{
       calls: Map<string, { carried: unknown; priorFields: unknown }>;
+      all: { nc: string; carried: unknown; priorFields: unknown }[];
     }> {
       shareTwoSetups();
       const base = clean();
@@ -517,11 +521,22 @@ describe('engraveRunStore (#206)', () => {
         programs: plan.map(({ nc, setupIndex }) => ({ ...program, programHash: nc, setupIndex, nc })),
       };
       const calls = new Map<string, { carried: unknown; priorFields: unknown }>();
+      const all: { nc: string; carried: unknown; priorFields: unknown }[] = [];
+      const refused = new Set(opts.refuseFirst ?? []);
       const realLoad = useSimStore.getState().loadProgram;
       useSimStore.setState({
         loadProgram: async (...args: unknown[]) => {
           const nc = String(args[0]);
           calls.set(nc, { carried: args[12], priorFields: args[13] });
+          all.push({ nc, carried: args[12], priorFields: args[13] });
+          if (refused.delete(nc)) {
+            // The engine's own refusal of a prior-material seed (`programSweep.ts`'s retry path).
+            return {
+              ok: false,
+              pathOnly: false,
+              diagnostics: [{ source: 'sweep', severity: 'error', code: 'prior-removal-column', message: 'this program’s engine cannot start from the material the previous program left' }],
+            } as never;
+          }
           useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false });
           return {
             ...swept(),
@@ -541,7 +556,7 @@ describe('engraveRunStore (#206)', () => {
         useSimStore.setState({ loadProgram: realLoad });
         setEngraveRunClientLoader(null);
       }
-      return { calls };
+      return { calls, all };
     }
 
     it('seeds a flipped setup’s second program from its own predecessor, with the carried floor through the setup', async () => {
@@ -570,6 +585,28 @@ describe('engraveRunStore (#206)', () => {
         null,
         'program 3 (flat-1.0)',
       ]);
+    });
+
+    it('#1034 (C’s review) — a RETRY from the blank takes no same-setup fields and names no seed', async () => {
+      // Program 2 is refused its seeded load (prior-removal-column) and re-swept from the blank.
+      // The retry must not be field-seeded behind the sweep's back: fields null, seedFrom null —
+      // otherwise the panel prints "Restarted from the blank" AND "starts from program 1's
+      // removal" for the same program (#948's exactRun reset reads the same absence).
+      const { all } = await runPrograms(
+        [
+          { nc: 'P1', setupIndex: 1 },
+          { nc: 'P2', setupIndex: 1 },
+        ],
+        { refuseFirst: ['P2'] },
+      );
+      const p2 = all.filter((c) => c.nc === 'P2');
+      expect(p2).toHaveLength(2);
+      expect(p2[0]!.priorFields).toEqual([fieldOf('P1')]);
+      expect(p2[1]!.priorFields).toBeNull();
+      const summary = useEngraveRunStore.getState().simPrograms.find((p) => p.label.startsWith('program 2'))!;
+      expect(summary.fromBlank).toBe(true);
+      expect(summary.seedFrom ?? null).toBeNull();
+      expect(summary.seedEarlier ?? 0).toBe(0);
     });
 
     it('a ball-only side 2 keeps the old behaviour: its first program carries side 1’s floor', async () => {

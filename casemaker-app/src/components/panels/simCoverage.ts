@@ -54,6 +54,8 @@ export interface SimSweptProgram {
    * program that silently carries nothing.
    */
   seedFrom?: string | null;
+  /** #1034 — how many earlier same-setup removals were also in the seed (0 or absent = none). */
+  seedEarlier?: number;
   /** The codes this program's OWN sweep raised, when the caller carries them. */
   codes?: readonly string[];
   /** How many ERROR diagnostics this program's sweep raised; absent reads as 0. */
@@ -346,7 +348,13 @@ function wholeRunDisclaimer(
       `From the earlier program: ${joinAnd(
         seeded.map(
           (p) =>
-            `${p.label} starts from ${p.seedFrom}'s removal${p.carriedFloor === true ? ", with the earlier setup's floor carried" : ''}`,
+            `${p.label} starts from ${p.seedFrom}'s removal${
+              (p.seedEarlier ?? 0) > 0
+                ? (p.seedEarlier ?? 0) === 1
+                  ? ", and the earlier program's removal"
+                  : `, and the ${p.seedEarlier} earlier programs' removals`
+                : ''
+            }${p.carriedFloor === true ? ", with the earlier setup's floor carried" : ''}`,
         ),
       )}.`,
     );

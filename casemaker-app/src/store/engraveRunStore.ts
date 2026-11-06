@@ -873,7 +873,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         shopDrillPoint: null,
         cutterFor: (program) =>
           program.toolKey === job.toolKey ? tool : benchCutterFor(program.toolKey),
-        load: async ({ program, index, cutter, drillPoint, priorRemoval, priorExactRemoval }) => {
+        load: async ({ program, index, cutter, drillPoint, priorRemoval, priorExactRemoval, fromBlank }) => {
           // #830 — the simulation's own stage: which program of the sweep is being simulated, so
           // the panel never shows a bare "Working…" through a multi-program sweep.
           if (mine === seq) set({ simProgram: { index: index + 1, count: generated.programs.length } });
@@ -912,8 +912,15 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
               }
             }
             // #1034 — THE SEED IS THE PREDECESSOR'S, when that predecessor is in this setup.
-            const setupFields = fieldsBySetup.get(program.setupIndex) ?? null;
-            const seedFrom = lastProgramBySetup.get(program.setupIndex) ?? null;
+            // C's review: ON A RETRY THE LOAD IS THE SWEEP'S BLANK. `fromBlank` clears every
+            // same-setup seed and the label with it — the engine already refused that material,
+            // and a retry that quietly kept the fields would read as seeded while the sweep and
+            // the panel say it restarted from the blank (#948's exactRun reset reads the same
+            // absence). The carried floor is NOT a same-setup seed; it stays by design (#1032).
+            const setupFields = fromBlank ? null : (fieldsBySetup.get(program.setupIndex) ?? null);
+            const seedFrom =
+              setupFields === null ? null : (lastProgramBySetup.get(program.setupIndex) ?? null);
+            const seedEarlier = setupFields === null ? 0 : Math.max(0, setupFields.length - 1);
             if (!seeds.ok) {
               return {
                 ok: false as const,
@@ -971,14 +978,16 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
                 if (result.removalField != null) {
                   const own = fieldsBySetup.get(program.setupIndex) ?? [];
                   fieldsBySetup.set(program.setupIndex, [...own, result.removalField]);
+                  // The label names the program whose field is the LATEST in the seed list; the
+                  // earlier ones are counted (`seedEarlier`) so the sentence never understates.
+                  lastProgramBySetup.set(program.setupIndex, label);
                 }
-                lastProgramBySetup.set(program.setupIndex, label);
               }
               // #1032 (6b's review) — SAY WHAT THE RESTART KEPT. A program that can only sweep
               // from the blank still had the earlier setup's carried floor; the panel must not
               // read as "the carry was lost". #1034 — and a program seeded from its own setup's
               // predecessor names that predecessor.
-              return result.ok ? { ...result, carriedFloor: carried !== null, seedFrom } : result;
+              return result.ok ? { ...result, carriedFloor: carried !== null, seedFrom, seedEarlier } : result;
             }
             const sim = useSimStore.getState();
             // null means this load no longer owns the session (a newer run/panel load stopped it),

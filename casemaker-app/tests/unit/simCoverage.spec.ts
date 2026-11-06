@@ -211,6 +211,21 @@ describe('#744 coverageDisclaimer — a run of several programs', () => {
     expect(s).not.toContain('Swept from the blank');
   });
 
+  it('#1034 — a seeded program names its seed, and says when earlier removals were in it too', () => {
+    const s = text({
+      programs: [
+        swept('program 1 (flat-1.0)'),
+        swept('program 2 (ball-2)', { seedFrom: 'program 1 (flat-1.0)' }),
+        swept('program 3 (ball-2)', { seedFrom: 'program 2 (ball-2)', seedEarlier: 1 }),
+        swept('program 4 (ball-2)', { seedFrom: 'program 3 (ball-2)', seedEarlier: 2 }),
+      ],
+      expectedPrograms: 4,
+    });
+    expect(s).toContain("program 2 (ball-2) starts from program 1 (flat-1.0)'s removal");
+    expect(s).toContain("program 3 (ball-2) starts from program 2 (ball-2)'s removal, and the earlier program's removal");
+    expect(s).toContain("program 4 (ball-2) starts from program 3 (ball-2)'s removal, and the 2 earlier programs' removals");
+  });
+
   it('#1032 — carried and plainly blank programs are stated apart, each in its own words', () => {
     const s = text({
       programs: [
