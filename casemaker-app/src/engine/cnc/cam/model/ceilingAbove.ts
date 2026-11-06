@@ -112,7 +112,6 @@ export function ceilingAboveMm(mesh: DropCutterMesh, x: number, y: number, minZM
   const bins = triangleBinsFor(mesh);
   const candidates = binnedReachableTriangles(bins, x, y, 0);
   const floor = minZMm - EPS;
-  let anyDownward = false;
   let topmostAny: number | null = null;
   for (const t of candidates) {
     const tri = triangleOf(mesh, t);
@@ -130,7 +129,11 @@ export function ceilingAboveMm(mesh: DropCutterMesh, x: number, y: number, minZM
     const z = tri.az - (nx * (x - tri.ax) + ny * (y - tri.ay)) / nz;
     if (z < floor) continue; // at or below this node's own floor: never this node's concern, see `minZMm`'s own doc above
     if (topmostAny === null || z > topmostAny) topmostAny = z;
-    if (cosFromHorizon < DOWNWARD_COS_THRESHOLD) anyDownward = true;
   }
-  return anyDownward ? topmostAny : null;
+  // #1003 (6b's rule, the manager's ruling) — NO TWO-PHASE GATE: the blocking height is the
+  // topmost non-vertical surface above the floor. The gate opened a dome's central columns (dome
+  // top → solid → floor, no downward face) and a pocket's floor pass took the dome away. The
+  // edge-shrinking the gate used to hide is fixed where it belongs: `ceilingMaskAt` now counts
+  // only triangles that overlap the node's own region.
+  return topmostAny;
 }

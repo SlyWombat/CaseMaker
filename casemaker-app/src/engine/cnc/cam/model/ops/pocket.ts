@@ -41,7 +41,50 @@ import type { PocketNode } from '../features';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
 import type { DropCutterMesh } from '../dropcutter';
 import { ceilingAboveMm } from '../ceilingAbove';
-import { maxTriangleZOverSquare, triangleBinsFor } from '../triangleBins';
+import { binnedReachableTriangles, triangleBinsFor } from '../triangleBins';
+
+/**
+ * #1003 (6b's rule, the manager's correction) — DOES A TRIANGLE OVERLAP THE POCKET'S REGION WITH
+ * POSITIVE AREA? "Any vertex inside" is not enough: a large flat or base-plate triangle can cross
+ * the region with all three vertices outside it, which would reopen the gouge. The test is the
+ * real overlap — a vertex strictly inside, a region vertex inside the triangle, or a proper edge
+ * crossing — with touching the boundary only (the drafted-wall strip sharing the region's edge)
+ * counting as OUTSIDE.
+ */
+const CLIP_EPS = 1e-6;
+function cross2(ax: number, ay: number, bx: number, by: number, cx: number, cy: number): number {
+  return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+}
+function segsProperlyCross(ax: number, ay: number, bx: number, by: number, cx: number, cy: number, dx: number, dy: number): boolean {
+  const d1 = cross2(cx, cy, dx, dy, ax, ay);
+  const d2 = cross2(cx, cy, dx, dy, bx, by);
+  const d3 = cross2(ax, ay, bx, by, cx, cy);
+  const d4 = cross2(ax, ay, bx, by, dx, dy);
+  return ((d1 > CLIP_EPS && d2 < -CLIP_EPS) || (d1 < -CLIP_EPS && d2 > CLIP_EPS)) &&
+    ((d3 > CLIP_EPS && d4 < -CLIP_EPS) || (d3 < -CLIP_EPS && d4 > CLIP_EPS));
+}
+function pointStrictlyInTriangle(px: number, py: number, ax: number, ay: number, bx: number, by: number, cx: number, cy: number): boolean {
+  const d1 = cross2(ax, ay, bx, by, px, py);
+  const d2 = cross2(bx, by, cx, cy, px, py);
+  const d3 = cross2(cx, cy, ax, ay, px, py);
+  const hasNeg = d1 < -CLIP_EPS || d2 < -CLIP_EPS || d3 < -CLIP_EPS;
+  const hasPos = d1 > CLIP_EPS || d2 > CLIP_EPS || d3 > CLIP_EPS;
+  return !(hasNeg && hasPos);
+}
+function triangleOverlapsRegion(ax: number, ay: number, bx: number, by: number, cx: number, cy: number, region: Polygons): boolean {
+  if (pointInPolygons(region, ax, ay) || pointInPolygons(region, bx, by) || pointInPolygons(region, cx, cy)) return true;
+  for (const ring of region) {
+    for (let i = 0; i < ring.length; i++) {
+      const [px, py] = ring[i]!;
+      if (pointStrictlyInTriangle(px, py, ax, ay, bx, by, cx, cy)) return true;
+      const [qx, qy] = ring[(i + 1) % ring.length]!;
+      if (segsProperlyCross(ax, ay, bx, by, px, py, qx, qy)) return true;
+      if (segsProperlyCross(bx, by, cx, cy, px, py, qx, qy)) return true;
+      if (segsProperlyCross(cx, cy, ax, ay, px, py, qx, qy)) return true;
+    }
+  }
+  return false;
+}
 import { maskLoopsFromPredicate } from './rasterMask';
 
 export interface PocketOpOptions {
@@ -342,11 +385,41 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
       // triangle at all is this node's own floor/wall, open all the way down, whatever its height.
       const bins = triangleBinsFor(mesh);
       const cellBound = new Float64Array(nx * ny).fill(Number.NEGATIVE_INFINITY);
+      // #1003 — THE BOUND COUNTS ONLY DESIGN THAT OVERLAPS THE NODE'S REGION (see the helpers).
+      const meshPos = mesh.positions;
+      const meshIdx = mesh.indices;
+      const overlapCache = new Map<number, boolean>();
+      const overlapsRegion = (t: number): boolean => {
+        const cached = overlapCache.get(t);
+        if (cached !== undefined) return cached;
+        const ia = meshIdx[3 * t]! * 3;
+        const ib = meshIdx[3 * t + 1]! * 3;
+        const ic = meshIdx[3 * t + 2]! * 3;
+        const result = triangleOverlapsRegion(
+          meshPos[ia]!, meshPos[ia + 1]!, meshPos[ib]!, meshPos[ib + 1]!, meshPos[ic]!, meshPos[ic + 1]!, opts.node.region,
+        );
+        overlapCache.set(t, result);
+        return result;
+      };
+      const tri = bins.triangles;
       for (let j = 0; j < ny; j++) {
         for (let i = 0; i < nx; i++) {
           const bx = minX + i * pitch;
           const by = minY + j * pitch;
-          cellBound[j * nx + i] = maxTriangleZOverSquare(bins, bx - half, by - half, bx + pitch, by + pitch);
+          const x0 = bx - half;
+          const y0 = by - half;
+          const x1 = bx + pitch;
+          const y1 = by + pitch;
+          let m = Number.NEGATIVE_INFINITY;
+          const reach = Math.hypot(x1 - x0, y1 - y0) / 2 + bins.cellMm;
+          for (const t of binnedReachableTriangles(bins, (x0 + x1) / 2, (y0 + y1) / 2, reach)) {
+            if (tri.maxX[t]! < x0 || tri.minX[t]! > x1 || tri.maxY[t]! < y0 || tri.minY[t]! > y1) continue;
+            const z = tri.maxZ[t]!;
+            if (z <= m) continue;
+            if (!overlapsRegion(t)) continue;
+            m = z;
+          }
+          cellBound[j * nx + i] = m;
         }
       }
       ceilingMaskAt = (levelZ: number): Polygons =>
