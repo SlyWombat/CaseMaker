@@ -260,7 +260,8 @@ async function measureStlRow(name: string, stlPath: string, stockXy: [number, nu
   const skippedRims = setup.notes.filter((n) => n.includes('not broken')).length;
   console.log(
     `#991 ${name} STL row: ${setup.features.report.source} path, ${rims} rims (${modelled} modelledChamfer), ${chamferOps} chamfer ops (${skippedRims} rims not broken), ` +
-      `coverage ${measured === null ? '—' : (measured.coverage * 100).toFixed(2)} %, cycle ${measured === null ? '—' : measured.ours.cycleSeconds.toFixed(1)} s`,
+      `coverage ${measured === null ? '—' : (measured.coverage * 100).toFixed(2)} %, cut-into ${measured === null ? '—' : ((measured.adjudicatedFraction ?? 0) * 100).toFixed(4)} %, ` +
+      `cycle ${measured === null ? '—' : measured.ours.cycleSeconds.toFixed(1)} s`,
   );
   return { setup, measured, rims, modelled, chamferOps };
 }
@@ -1511,6 +1512,7 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     expect(row.setup.features.report.source, 'an STL must take the mesh path').toBe('mesh');
     expect(row.rims).toBe(63);
     expect(row.modelled).toBe(28);
+    expect(row.chamferOps).toBe(41);
     expect(row.measured, 'the STL row measured nothing').not.toBeNull();
     // #999 — THE ROUGH IS POSTED: an absent roughToolKey means the engine chooses, so the ⌀6
     // flat's rough must be among the posted runs (60.38 % was this row with the ball alone).
@@ -1695,17 +1697,26 @@ describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.o
     }
   }, 1_800_000);
 
-  // #991 — THE ORGANIZER'S STL ROW, and it is REFUSED, not measured: the shipped organizer STL
-  // has ONE edge used by four triangles after the door's 1e-4 mm weld (12,482 triangles; every
-  // other edge is used twice), so `closeOpenSheet` refuses it by name and a user cannot plan
-  // this file at all today. Recorded here as the user's own experience; the mesh-path item owns
-  // the fix (a tighter weld or a manifold-tolerant tree). The tray's STL row is the planned-and-
-  // measured one.
-  it('#991 the shipped STL row: the user’s own file, refused by the door by name', async () => {
+  // #993 — THE ORGANIZER'S STL ROW NOW PLANS: the shipped STL's one knife edge (an edge used by
+  // four triangles after the door's 1e-4 mm weld) is split into two sheets by the vertex-link
+  // split, so the file a user owns reaches the plan instead of a refusal. Its numbers are pinned
+  // from the first run; the rim line against the STEP row belongs to the rims item (#994).
+  it('#993 the shipped STL row: the knife edge split, the user’s file now plans and measures', async () => {
     const stlPath = shippedStlBeside(ORGANIZER!);
     expect(stlPath, 'the Makerables .stl is not beside the STEP').not.toBeNull();
     if (stlPath === null) return;
-    await expect(measureStlRow('organizer', stlPath, [170, 170], -0.8)).rejects.toThrow(/edge\(s\) shared by more than two triangles/);
+    const row = await measureStlRow('organizer', stlPath, [170, 170], -0.8);
+    expect(row.setup.features.report.source).toBe('mesh');
+    expect(row.measured, 'the STL row measured nothing').not.toBeNull();
+    // Pinned from the first run through the split door: 74 rims (6 read as modelled chamfers),
+    // 48 chamfer ops with 26 rims skipped — the rim line against the STEP row is #994's to move.
+    expect(row.rims).toBe(74);
+    expect(row.modelled).toBe(6);
+    expect(row.chamferOps).toBe(48);
+    expect(row.measured!.coverage, 'the STL row fell under the card coverage floor').toBeGreaterThanOrEqual(0.9861);
+    // PINNED at the split door: 3.973923346491006e-5 adjudicated — not zero, and stated: the mesh
+    // path's own V-on-fillet cuts (6 modelledChamfer rims here) are #994's to remove.
+    expect(row.measured!.adjudicatedFraction ?? 0, 'the STL row cut into the part').toBeCloseTo(3.973923346491006e-5, 10);
   }, 900_000);
 });
 
