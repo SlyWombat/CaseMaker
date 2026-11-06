@@ -79,11 +79,12 @@ import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
 import { cutterOnMetalLine, cutterRefusedOnMaterial } from '@/engine/cnc/engrave/cutterMaterial';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
-import { goalReachFindings } from '@/engine/cnc/engrave/goalReach';
+import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach } from '@/engine/cnc/engrave/goalReach';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { surfacePrimitivesOf } from '@/engine/cnc/engrave/primitiveSurface';
+import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import { closeOpenSheet } from '@/engine/cnc/engrave/closeSheet';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import {

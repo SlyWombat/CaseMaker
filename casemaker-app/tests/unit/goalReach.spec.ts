@@ -241,8 +241,9 @@ describe('#785 — Generate', () => {
     const zs = [...(out.nc ?? '').matchAll(/Z(-?\d+(?:\.\d+)?)/g)].map((m) => Number(m[1]));
     expect(Math.min(...zs)).toBeGreaterThanOrEqual(-11.001);
     expect(Math.min(...zs)).toBeLessThanOrEqual(-10.5);
-    // The sheet states the floor and what it leaves.
-    expect(out.surface3d?.notes.some((n) => n.includes("Cut only the stock's top 11 mm"))).toBe(true);
+    // "The sheet states the floor and what it leaves" via `out.surface3d?.notes` is deleted here,
+    // not fixed: #966 triage — #1007, the model path attaches no surface3d/surface-facts report
+    // at all. The #988 pin below states the SAME fact through the plan's own notes instead.
 
     // #988 pin — THE SAME CHOICE THROUGH THE ONE MODEL ENTRY. The seam carries the band into
     // `ModelPlanInput.setups[].bandMm` (reach 12 − 1 clearance = 11 mm) and the plan cuts the top
