@@ -17,7 +17,9 @@ type P = [number, number, number];
 
 /** A closed solid: the (y, z) profile below extruded along X from 0 to 20. The profile is a
  * 10 × 5 block with its top-right edge rounded by a 1 mm quarter arc over `segments` facets —
- * the facet count a vendor STL of this class carries. */
+ * the facet count a vendor STL of this class carries. Vertices are SHARED between the side quads
+ * and the caps (the kernel's merge is not relied on here), so the solid is manifold by
+ * construction: sides wound outward for the CCW profile, the x = 0 cap reversed, x = 20 as is. */
 function roundedEdgeSolid(segments: number): ParsedMesh {
   const profile: [number, number][] = [
     [0, 0],
@@ -29,59 +31,30 @@ function roundedEdgeSolid(segments: number): ParsedMesh {
     profile.push([9 + Math.cos(a), 4 + Math.sin(a)]);
   }
   profile.push([0, 5]);
-
-  const positions: number[] = [];
-  const indices: number[] = [];
+  const n = profile.length;
   const X0 = 0;
   const X1 = 20;
-  const add = (x: number, y: number, z: number): number => {
-    positions.push(x, y, z);
-    return positions.length / 3 - 1;
-  };
-  // Side quads, one per profile edge.
-  for (let e = 0; e < profile.length; e++) {
-    const [ya, za] = profile[e]!;
-    const [yb, zb] = profile[(e + 1) % profile.length]!;
-    const a0 = add(X0, ya, za), b0 = add(X0, yb, zb), b1 = add(X1, yb, zb), a1 = add(X1, ya, za);
-    indices.push(a0, b0, b1, a0, b1, a1);
+  const positions: number[] = [];
+  for (const [y, z] of profile) positions.push(X0, y, z);
+  for (const [y, z] of profile) positions.push(X1, y, z);
+  const indices: number[] = [];
+  // Side quads: outward normals for a CCW profile (interior on the left of the travel).
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    indices.push(i, j, n + j, i, n + j, n + i);
   }
-  // End caps: a fan from the first profile point (the profile is convex at every fan triangle).
-  const fan = (x: number, flip: boolean): void => {
-    const ids = profile.map(([y, z]) => add(x, y, z));
-    for (let k = 1; k + 1 < ids.length; k++) {
-      if (flip) indices.push(ids[0]!, ids[k + 1]!, ids[k]!);
-      else indices.push(ids[0]!, ids[k]!, ids[k + 1]!);
-    }
-  };
-  fan(X0, false);
-  fan(X1, true);
-
-  // Outward normals: flip every triangle if the closed solid's signed volume came out negative.
-  const pos = new Float32Array(positions);
-  let vol = 0;
-  for (let t = 0; t < indices.length; t += 3) {
-    const a = indices[t]! * 3, b = indices[t + 1]! * 3, c = indices[t + 2]! * 3;
-    vol +=
-      (pos[a]! * (pos[b + 1]! * pos[c + 2]! - pos[c + 1]! * pos[b + 2]!) -
-        pos[a + 1]! * (pos[b]! * pos[c + 2]! - pos[c]! * pos[b + 2]!) +
-        pos[a + 2]! * (pos[b]! * pos[c + 1]! - pos[c]! * pos[b + 1]!)) / 6;
+  // Caps: a fan from profile point 0 (the profile is convex). x = 0 faces −X (reversed order);
+  // x = 20 faces +X (the profile's own CCW order).
+  for (let k = 1; k + 1 < n; k++) {
+    indices.push(0, k + 1, k); // x = 0, faces −X
+    indices.push(n, n + k, n + k + 1); // x = 20, faces +X
   }
-  if (vol < 0) {
-    for (let t = 0; t < indices.length; t += 3) {
-      const tmp = indices[t + 1]!;
-      indices[t + 1] = indices[t + 2]!;
-      indices[t + 2] = tmp;
-    }
-  }
-  const bbox = {
-    min: [X0, 0, 0] as P,
-    max: [X1, 10, 5] as P,
-  };
-  return { positions: pos, indices: new Uint32Array(indices), triangleCount: indices.length / 3, bbox };
+  const bbox = { min: [X0, 0, 0] as P, max: [X1, 10, 5] as P };
+  return { positions: new Float32Array(positions), indices: new Uint32Array(indices), triangleCount: indices.length / 3, bbox };
 }
 
 describe('#991 the mesh path must not read a fillet as a modelled chamfer', () => {
-  it.fails('a 1 mm rounded edge at 12 facets yields no modelledChamfer rim', () => {
+  it('a 1 mm rounded edge at 12 facets yields no modelledChamfer rim', () => {
     const mesh = roundedEdgeSolid(12);
     const tree = recogniseFeatures({ triangles: mesh }, { up: [0, 0, 1], stockTop: 0 }, tl);
     const modelled = tree.rims.filter((r) => r.kind === 'modelledChamfer');
@@ -89,5 +62,16 @@ describe('#991 the mesh path must not read a fillet as a modelled chamfer', () =
     // The design edge is a curve the finish must leave to the ball: it belongs to the curved
     // remainder, not to the V's chamfer stage.
     expect(tree.remainder.length, 'the fillet must reach the curved remainder').toBeGreaterThan(0);
+  });
+
+  // #994 — the stricter rule must not lose a REAL modelled chamfer: ONE inclined planar patch
+  // spanning wall to floor is still one modelledChamfer rim, with its legs.
+  it('a ONE-facet chamfer (45°, 1 mm legs) still counts: exactly 1 modelledChamfer with legs (1, 1)', () => {
+    const mesh = roundedEdgeSolid(1);
+    const tree = recogniseFeatures({ triangles: mesh }, { up: [0, 0, 1], stockTop: 0 }, tl);
+    const modelled = tree.rims.filter((r) => r.kind === 'modelledChamfer');
+    expect(modelled.length, modelled.map((r) => r.id).join(', ')).toBe(1);
+    expect(modelled[0]!.legs?.[0]).toBeCloseTo(1, 6);
+    expect(modelled[0]!.legs?.[1]).toBeCloseTo(1, 6);
   });
 });

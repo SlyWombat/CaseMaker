@@ -1500,19 +1500,19 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
   }, 1_800_000);
 
   // #991 — THE STL ROW. The Makerables .stl through the app's own door (no faceId): the file a
-  // user would have picked, planned and measured beside the STEP row above. Its numbers are
-  // pinned as today's known defect — 63 rims, 28 fillets read as modelled chamfers, 41 chamfer
-  // ops with 22 rims skipped — and the rims item drives them to the STEP row's (38 / 27); a
-  // change here is that item's progress or a new bug.
+  // user would have picked, planned and measured beside the STEP row above. #994 fixed the
+  // fillet misread: 63 rims / 28 modelledChamfer / 41 chamfer ops became 35 / 0 / 27 — the
+  // chamfer line now matches the STEP row's 27, and the 3-rim rim-line gap is the mesh path's
+  // own chaining, pinned so any move is visible.
   it('#991 the shipped STL row: planned through the user’s own door, printed beside the STEP row', async () => {
     const stlPath = shippedStlBeside(TRAY!);
     expect(stlPath, 'the Makerables .stl is not beside the STEP').not.toBeNull();
     if (stlPath === null) return;
     const row = await measureStlRow('tray', stlPath, [110, 140], -1.2);
     expect(row.setup.features.report.source, 'an STL must take the mesh path').toBe('mesh');
-    expect(row.rims).toBe(63);
-    expect(row.modelled).toBe(28);
-    expect(row.chamferOps).toBe(41);
+    expect(row.rims).toBe(35);
+    expect(row.modelled).toBe(0);
+    expect(row.chamferOps).toBe(27);
     expect(row.measured, 'the STL row measured nothing').not.toBeNull();
     // #999 — THE ROUGH IS POSTED: an absent roughToolKey means the engine chooses, so the ⌀6
     // flat's rough must be among the posted runs (60.38 % was this row with the ball alone).
@@ -1708,10 +1708,11 @@ describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.o
     const row = await measureStlRow('organizer', stlPath, [170, 170], -0.8);
     expect(row.setup.features.report.source).toBe('mesh');
     expect(row.measured, 'the STL row measured nothing').not.toBeNull();
-    // Pinned from the first run through the split door: 74 rims (6 read as modelled chamfers),
-    // 48 chamfer ops with 26 rims skipped — the rim line against the STEP row is #994's to move.
-    expect(row.rims).toBe(74);
-    expect(row.modelled).toBe(6);
+    // Pinned after #994: the 6 fillets that were read as modelled chamfers are curved remainder
+    // now (74 rims / 6 modelled became 68 / 0); the chamfer line stayed 48, because those six
+    // were among the 26 rims the exposure test already skipped (20 now).
+    expect(row.rims).toBe(68);
+    expect(row.modelled).toBe(0);
     expect(row.chamferOps).toBe(48);
     expect(row.measured!.coverage, 'the STL row fell under the card coverage floor').toBeGreaterThanOrEqual(0.9861);
     // PINNED at the split door: 3.973923346491006e-5 adjudicated — not zero, and stated: the mesh
