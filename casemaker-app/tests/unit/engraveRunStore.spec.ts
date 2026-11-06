@@ -1944,3 +1944,72 @@ describe('#986 the background ideal', () => {
     }
   }, 60_000);
 });
+
+// #986 (E's nits) — the press re-runs; a refused ideal leaves no spinner.
+describe('#986 the press and the failure path', () => {
+  const generatedWithProgram = (): EngraveGenerated => ({
+    ...clean(),
+    nc: 'G90\nM02',
+    programs: [{ setupIndex: 1, setupId: 'setup-1', toolKey: 'flat-1.0', nc: 'G90\nM02', verify: null, frame: 'flat' } as never],
+  });
+  const settle = async (): Promise<void> => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+  const goal = {
+    id: 'g', name: 'g', format: 'stl' as const, sha256: 'x', data: '', size: { x: 1, y: 1, z: 1 },
+    position: { x: 0, y: 0, z: 0 }, rotation: 0, enabled: true, role: 'goal' as const,
+  };
+  const withJob = (): void => {
+    useEngraveJobStore.setState({ job: { ...useEngraveJobStore.getState().job, targetObject: goal, tool: flatEndMill(3.175, { name: '3.175 mm flat end' }) } });
+  };
+
+  it('the press re-runs the computation and lands ready again', async () => {
+    let calls = 0;
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => generatedWithProgram(),
+      engravePlanIdeal: async () => {
+        calls += 1;
+        return { tradeoff: { material: false, line: null, differences: [] } as never, owned: null, ideal: null };
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    withJob();
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({ loadProgram: async () => { useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false }); return swept(); } });
+    try {
+      await useEngraveRunStore.getState().generate();
+      await settle();
+      expect(useEngraveRunStore.getState().idealPlan.status).toBe('ready');
+      expect(calls).toBe(1);
+      // The press re-runs the SAME computation — not just the recorded choice.
+      useEngraveRunStore.getState().comparePlans();
+      await settle();
+      expect(calls).toBe(2);
+      expect(useEngraveRunStore.getState().idealPlan.status).toBe('ready');
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+    }
+  }, 60_000);
+
+  it('a refused ideal goes idle — no spinner is left behind', async () => {
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => generatedWithProgram(),
+      engravePlanIdeal: async () => {
+        throw new Error('the ideal refused');
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    withJob();
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({ loadProgram: async () => { useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false }); return swept(); } });
+    try {
+      await useEngraveRunStore.getState().generate();
+      await settle();
+      expect(useEngraveRunStore.getState().idealPlan).toEqual({ status: 'idle', tradeoff: null });
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+    }
+  }, 60_000);
+});

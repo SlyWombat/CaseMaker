@@ -315,7 +315,11 @@ export interface EngraveRunState {
    * "comparing…"); `ready` with the tradeoff (null when there is no ideal or nothing material).
    */
   idealPlan: { status: 'idle' | 'comparing' | 'ready'; tradeoff: PlanTradeoff | null };
-  /** #986 — re-run the background comparison with the last run's own arguments (the press). */
+  /**
+   * #986 — re-run the background comparison with the LAST RUN'S OWN arguments (the press). It
+   * compares the job, tool and shop that run used — not whatever the job looks like now — so the
+   * line it prints always belongs to the program on screen.
+   */
   comparePlans: () => void;
   oracle: OracleReport | null;
   /**
