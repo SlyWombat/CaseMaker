@@ -2114,8 +2114,18 @@ export function EngravePanel(): JSX.Element {
   // otherwise be re-applied on every render — and each write marks a generated job stale. Comparing
   // both is also the "equal answer writes nothing" rule.
   const measuredSetup = job.setups?.[0];
+  // #1035 — THE PRESS, AS A FACT OF THIS PANEL. #1010's retirement made the measured answer an
+  // OFFER whose numbers belong to the pressed state ("`measuredApplied`/the fidelity line now
+  // describe only that pressed state"), but the expression below is a comparison: a job that
+  // already carries the measured plan — a saved document, the evaluator's own write — matches it
+  // without anyone pressing this panel's button, and claiming "chosen by simulation" there was
+  // exactly the #798 pin's objection. The marker records the answer the operator pressed; the
+  // comparison still guards it, so a job edit that leaves the plan clears the words with it.
+  const [pressedMeasuredKey, setPressedMeasuredKey] = useState<string | null>(null);
   const measuredApplied =
     measuredNow !== null &&
+    // #1035 — only the answer the operator pressed, never a coincidence of document contents.
+    pressedMeasuredKey === measuredNow.jobKey &&
     job.toolKey === measuredNow.cutters[0]?.key &&
     // #829 — a goal's second cutter is its chamfer's V-bit; the plan is applied only when the
     // goal already carries the key it measured (a plan with no V leaves it alone).
@@ -4343,7 +4353,12 @@ export function EngravePanel(): JSX.Element {
               <button
                 type="button"
                 data-testid="engrave-use-measured"
-                onClick={() => applyCutterPlan(measuredNow.cutters, 'computed', 0, measuredNow.goalRoughKey)}
+                onClick={() => {
+                  // #1035 — the press is what makes the answer "applied" (see the marker's note):
+                  // record it BEFORE the write, so the offer retires and the line states it.
+                  setPressedMeasuredKey(measuredNow.jobKey);
+                  applyCutterPlan(measuredNow.cutters, 'computed', 0, measuredNow.goalRoughKey);
+                }}
               >
                 Use the recommendation
               </button>
