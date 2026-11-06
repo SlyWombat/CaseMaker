@@ -122,7 +122,10 @@ describe('#869 the goal’s split, generated', () => {
     expect(out.programs).toHaveLength(2);
     expect(out.programs[0]!.toolKey).toBe(ROUGH.key);
     expect(out.programs[1]!.toolKey).toBe(BALL.key);
-    expect(out.surface3d?.rough ?? null).toBeNull();
+    // #1007 — a fact the plan HAS stays stated, never dropped to null: the engine chose the
+    // house flat and roughed with it, so `surface3d.rough` names it, same as a stated
+    // `roughToolKey` would (the test right below this one).
+    expect(out.surface3d?.rough).toEqual({ tool: ROUGH.tool.name, kind: 'raster' });
   });
 
   it('a roughToolKey posts the flat’s rough first and the ball’s finish second', async () => {
