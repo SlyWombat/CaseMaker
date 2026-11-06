@@ -1650,9 +1650,12 @@ describe.skipIf(TRAY === undefined)('#989 — the tray through the app path: the
       expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
       // THE POINT OF #989: the rim stage planned chamfer ops at all (before the seam carried the
       // goal's chamfer there were none), and the TOP face rims are among them. Pinned to the
-      // measured set — 40 top-face rims plus the tray's lower rim (rim-33 at z = −4.2), 41 in
-      // all at `b0500f47f` — so a regression to fewer-but-nonzero ops fails, not just to zero.
-      const TOP_RIM_OPS = 40;
+      // measured set — 26 top-face rims plus the tray's lower rim (rim-33 at z = −4.2), 27 in
+      // all. #994 re-pinned the STL rows in this file from 41 to 27 chamfer ops (its modelled-
+      // chamfer rule stops cutting a fillet's facets — rim-38…rim-51); this case was left at the
+      // pre-#994 40/41 and is re-pinned here to the same 27, naming #994. A regression to
+      // fewer-but-nonzero ops still fails, not just to zero.
+      const TOP_RIM_OPS = 26;
       expect(chamferOps.length, `chamfer ops: ${chamferOps.map((o) => `${o.region.id}@${o.region.topZ}`).join(', ')}`).toBe(TOP_RIM_OPS + 1);
       const topRimOps = chamferOps.filter((o) => Math.abs(o.region.topZ - topZ) < 0.01);
       expect(topRimOps.length, `top-face chamfer ops: ${topRimOps.map((o) => o.region.id).join(', ')}`).toBe(TOP_RIM_OPS);
