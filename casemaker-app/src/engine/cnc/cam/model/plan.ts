@@ -787,11 +787,6 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       return radiusMm - Math.sqrt(Math.max(0, radiusMm * radiusMm - half * half));
     })();
 
-    // `notes` is declared here, ahead of `result` (below): `walkPockets`' own "ball cannot enter"
-    // note (#982) pushes into it before `planTreePrograms` runs, so the array exists before that
-    // first push, not just before its later `result.notes`/`emptyStages`/`freeingNotes` fill-in.
-    const notes: string[] = [];
-
     // #982 — NO FLAT: each pocket node becomes a synthetic remainder-style region the curved
     // pipeline plans with the ball (its rough, then the ball's scallop finish). The floor is
     // CLAMPED at the real design top over the opening: a spurious pocket floor below the body
