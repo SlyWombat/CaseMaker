@@ -834,6 +834,33 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
 
     // #986 — THE CURVED PIPELINE'S OPTIONS, as a function of the ball, so the SAME finish can be
     // planned once per candidate for measurement and then once for the winner.
+    // #1019 — THE CURVED ROUGH'S REACH, PER REGION (6b's ruling (b), per-feature). Each curved
+    // remainder region keeps the first stated flat whose USABLE length (shoulder, else flute —
+    // the holder gate's own number) reaches THAT region's depth below the stock top; a region no
+    // flat reaches is the ball's rough instead (#982's mechanism), stated on its own line. One
+    // deep pocket therefore costs its own region a ball rough, never the whole side.
+    //
+    // AN UNSTATED LENGTH IS NOT A SHORT ONE. A flat that states no shoulder and no flute has an
+    // unknown reach, not a known-insufficient one: the holder gate owns that question, and the
+    // flat keeps the rough (the pre-#1019 behaviour). Only a STATED length below the region's
+    // depth makes the flat absent for that region — the case the sentence names.
+    //
+    // These are declared BEFORE `curvedOptionsFor` on purpose: the #986 ball rank calls that
+    // helper for every candidate, and a `const` declared after it would be in its temporal dead
+    // zone there — every candidate would throw and the rank would measure none (the gate's
+    // finishBallFixture986 failure, 2026-11-06).
+    const usableLengthMm = (t: Tool): number | null => t.shoulderLength ?? t.fluteLength;
+    /** The stated flat whose usable length reaches this region, or null when none does. */
+    const reachingFlatFor = (r: RemainderRegion): Tool | null => {
+      // #1018 — the door shifts the mesh by `-stockTop` once, so the region's own zBottom is
+      // already stock-top-relative: the depth below the stock top is `-zBottom` (frame.stockTop
+      // reads 0 here), no rebase added.
+      const depth = -r.zBottom;
+      return flats.find((t) => {
+        const usable = usableLengthMm(t);
+        return usable === null || usable + 1e-9 >= depth;
+      }) ?? null;
+    };
     const curvedOptionsFor = (b: Tool | undefined, paramsFor: (tool: Tool) => CutParams): PlanCurvedOptions => ({
       offset,
       safeZMm: SAFE_Z,
@@ -855,7 +882,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         ? { flat: primary, extraRegions: pocketFloorRegions }
         : input.curvedRoughTool === undefined
           ? flats.length > 0
-            ? { flat: primary, flatFor: curvedFlatFor }
+            ? { flat: primary, flatFor: (r: RemainderRegion): Tool | null => reachingFlatFor(r) ?? b ?? null }
             : b === undefined
               ? {}
               : { flat: b }
@@ -1088,30 +1115,6 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
 
 
-    // #1019 — THE CURVED ROUGH'S REACH, PER REGION (6b's ruling (b), per-feature). Each curved
-    // remainder region keeps the first stated flat whose USABLE length (shoulder, else flute —
-    // the holder gate's own number) reaches THAT region's depth below the stock top; a region no
-    // flat reaches is the ball's rough instead (#982's mechanism), stated on its own line. One
-    // deep pocket therefore costs its own region a ball rough, never the whole side.
-    const usableLengthMm = (t: Tool): number | null => t.shoulderLength ?? t.fluteLength;
-    /** The stated flat whose usable length reaches this region, or null when none does. */
-    const reachingFlatFor = (r: RemainderRegion): Tool | null => {
-      // #1018 — the door shifts the mesh by `-stockTop` once, so the region's own zBottom is
-      // already stock-top-relative: the depth below the stock top is `-zBottom` (frame.stockTop
-      // reads 0 here), no rebase added.
-      const depth = -r.zBottom;
-      return flats.find((t) => {
-        const usable = usableLengthMm(t);
-        return usable !== null && usable + 1e-9 >= depth;
-      }) ?? null;
-    };
-    const curvedFlatFor = (r: RemainderRegion): Tool | null => {
-      // A region no flat reaches is the BALL's rough, exactly as #982's no-flat path does it (the
-      // ball in the rough's own slot, every cut point proven inside the region) — never a bare "no
-      // rough", which hands the region's whole depth to the finish and churns the tip field for
-      // minutes (measured: the both-sides job's side 1 ran past 10 minutes that way).
-      return reachingFlatFor(r) ?? ball ?? null;
-    };
     const curvedRoughSubstitutions: string[] =
       !noFlatFallback && flats.length > 0 && input.curvedRoughTool === undefined
         ? tree.remainder
