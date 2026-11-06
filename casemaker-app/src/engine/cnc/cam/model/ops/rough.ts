@@ -25,7 +25,7 @@ import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { pocketLoops, type OffsetFn, type Polygons } from '@/engine/cnc/cam/pocket';
 import { tourNearest } from '@/engine/cnc/cam/tour';
-import { DEFAULT_SHORT_HOP_DIAMETERS, link, pathClClear, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
+import { clearedGroundZ, DEFAULT_SHORT_HOP_DIAMETERS, link, pathClClear, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
 import { followLinearCutSurface, ridesCutSurface } from '../rideTest';
 import { cutterKeyOf } from '../sequence';
 import type { RemainderRegion } from '../features';
@@ -337,6 +337,13 @@ export function rough(opts: RoughOpOptions): OpOutcome {
   const moves: ToolpathIR['operations'][number]['moves'] = [];
   const passes: PassRef[] = [];
   const cleared: RegionAtZ[] = [];
+
+  // #1002 — THE LANDING PROOF, as the LEVEL the ground under the landing has been cut to: the
+  // deepest recorded swept area containing it — the rings already traced at a level and the
+  // levels that finished. A same-level link's rapid floor becomes that level + the hop (one
+  // step-down's feed), never the stock-top plunge; a level-change landing keeps the level just
+  // finished. Same rule the pocket op states in full.
+  const landingClearedZ = (x: number, y: number, _z: number): number | null => clearedGroundZ(x, y, passes, cleared);
   const linkBase = {
     tool: { radiusMm: toolRadius },
     feeds: { feed: opts.feeds.feedMmPerMin, plungeFeed: opts.feeds.plungeFeedMmPerMin },
@@ -372,7 +379,7 @@ export function rough(opts: RoughOpOptions): OpOutcome {
           const landing: LinkPoint = { x: start[0], y: start[1], z: prevExit[2] };
           // The horizontal part links at the level just FINISHED, where the field is honest;
           // the descent is always a plain feed at plungeFeed, never a diagonal at cutting rate.
-          moves.push(...link(from, landing, { ...linkOptionsFor(prevLevelZ ?? prevExit[2]) }));
+          moves.push(...link(from, landing, { ...linkOptionsFor(prevLevelZ ?? prevExit[2]), landingClearedZMm: landingClearedZ }));
           if (z !== prevLevelZ) moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
         }
         moves.push(...traceRing(ring, z, opts.feeds.feedMmPerMin));
