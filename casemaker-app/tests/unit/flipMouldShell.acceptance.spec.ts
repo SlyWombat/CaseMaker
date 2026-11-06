@@ -44,12 +44,19 @@ import {
 } from '@/engine/cnc/engrave/goalHeightfield';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { engraveGenerate, generateGoalProgram } from '@/workers/sim/engraveGenerate';
+import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
+import { parseGcode } from '@/engine/cnc';
+import { buildTimeline } from '@/engine/cnc/emulator/timeline';
+import { USE_MODEL_CAM_ENGINE } from '@/engine/cnc/cam/model/plan';
 import { createSimSession } from '@/workers/sim/session';
 import { goalSides, jobSetups, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { carriedMaps, carryPointBetweenSetups, flipAxisOf, orient, setupPinReference, type CarrySetup } from '@/engine/cnc/setups';
 import { Z1 } from '@/engine/cnc/machine';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { flatEndMill } from '@/engine/cnc/tool';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import { cutterKeyOf } from '@/engine/cnc/cam/model/sequence';
+import { entryFor } from '@/engine/cnc/toolRegistry';
+import type { CarriedField } from '@/workers/geometry/carriedField';
 import type { EngraveJob, EngraveTargetObject, JobSetupPins } from '@/types/engraveJob';
 import type { RapidEstimate, CamMove } from '@/engine/cnc/cam/ir';
 import { FLAT, type ColumnCutter, type CutMove } from '@/workers/geometry/columnEngine';
@@ -459,15 +466,30 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
       [1, 'setup-2', 'shell-in'],
     ]);
 
-    // ONE job, TWO programs: side 1's outside, then side 2's mold, each on its own setup.
+    // ONE job, THREE programs: side 1's outside as the #869 two-program shape — the side's stated
+    // flat takes the rough, the passed ball the finish (the operator's stated values win; the
+    // manager's #1006 ruling, 2026-11-06) — then side 2's mold, each on its own setup.
     const out = await engraveGenerate(tl, job, BALL_TOOL, [], null, undefined, {});
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
-    expect(out.programs.map((p) => [p.setupIndex, p.setupId])).toEqual([
-      [1, 'setup-1'],
-      [2, 'setup-2'],
-    ]);
-    expect(out.programs[1]!.nc).not.toBe(out.programs[0]!.nc);
+    // The OLD heightfield path cuts each side with the one passed cutter (one program per side);
+    // the model engine honours the side's stated flat as the rough (#869), so side 1 is two.
+    expect(out.programs.map((p) => [p.setupIndex, p.setupId])).toEqual(
+      USE_MODEL_CAM_ENGINE
+        ? [
+            [1, 'setup-1'],
+            [1, 'setup-1'],
+            [2, 'setup-2'],
+          ]
+        : [
+            [1, 'setup-1'],
+            [2, 'setup-2'],
+          ],
+    );
+    if (USE_MODEL_CAM_ENGINE) {
+      expect(out.programs.map((p) => p.toolKey)).toEqual(['flat-3.175x12-metal', '3 mm ball nose', 'flat-3.175x12-metal']);
+      expect(new Set(out.programs.map((p) => p.nc)).size).toBe(3);
+    }
 
     // The app's own frames, built exactly as the run store builds them: top-up first, bottom-up
     // in the vise second, and the second rotation is the turn the remount states.
@@ -505,20 +527,65 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     // left, carried into its frame by the app's maps.
     const setup = toSetup(job, Z1);
     const session = createSimSession(tl);
+    // Each program is swept with ITS cutter — the side's stated flat rought, the passed ball
+    // finished — resolved by the header key the seam wrote (`entryFor` for a library cutter,
+    // `cutterKeyOf` for the caller's own snapshot).
+    // The old path cuts each side with the one passed cutter and stamps `job.toolKey` on every
+    // program, so ITS sweep tool is the passed ball; the model engine names each program's real
+    // cutter, and the sweep follows it.
+    const toolOf = (key: string): Tool =>
+      USE_MODEL_CAM_ENGINE ? (key === cutterKeyOf(BALL_TOOL) ? BALL_TOOL : (entryFor(key)?.tool ?? BALL_TOOL)) : BALL_TOOL;
+    const sideOne = out.programs.filter((p) => p.setupId === 'setup-1');
+    const sideTwo = out.programs.filter((p) => p.setupId === 'setup-2');
     let sideTwoStock: number;
     let blankStock = 0;
     try {
-      const r1 = session.load(out.programs[0]!.nc, setup, BALL_TOOL, Z1.id);
-      expect(r1.ok, r1.ok ? '' : JSON.stringify(r1.diagnostics)).toBe(true);
-      if (!r1.ok || !r1.flatField) return;
+      // Side 1's own two programs in cut order, the rough's remaining top seeding the finish
+      // (#869/#817 — the run's field chain, exactly as the run store sweeps a multi-program run).
+      let priorFields: CarriedField[] = [];
+      // Side 1's own removal solids, for side 2's EXACT program (the model engine cuts side 2
+      // with the stated flat; the exact sweeper starts from priorRemoval's meshes, never from a
+      // carried field). The old path's side 2 is a ball (column) and uses the carried field.
+      const sideOneRemovals: NonNullable<ReturnType<typeof session.load> extends infer R ? (R extends { meshes: { removal: infer M } } ? M : never) : never>[] = [];
+      let r1: ReturnType<typeof session.load> | null = null;
+      for (const [i, program] of sideOne.entries()) {
+        const load = session.load(program.nc, setup, toolOf(program.toolKey), Z1.id, i === 0 ? undefined : { priorFields });
+        expect(load.ok, load.ok ? '' : JSON.stringify(load.diagnostics)).toBe(true);
+        if (!load.ok) return;
+        // A missing field is a FAILURE, not an early pass: this sweep's whole point is the field.
+        expect(load.flatField, `side 1 program ${i + 1} (${program.toolKey}) returned no flat field — the sweep never ran`).toBeTruthy();
+        if (!load.flatField) return;
+        priorFields = [{ ...load.flatField, top: load.flatField.top.slice(), map: [1, 0, 0, 0, 1, 0], z: [1, 0] }];
+        if (load.meshes.removal !== null) sideOneRemovals.push(load.meshes.removal);
+        r1 = load;
+      }
+      if (r1 === null) return;
+      const sideOneField = (r1 as { flatField?: import('@/workers/geometry/carriedField').FlatField | null }).flatField!;
       const maps = carriedMaps(top, flip);
       expect(maps.ok).toBe(true);
       if (!maps.ok) return;
-      const r2 = session.load(out.programs[1]!.nc, setup, BALL_TOOL, Z1.id, {
-        carried: { ...r1.flatField, ...maps.maps },
+      const r2 = session.load(sideTwo[0]!.nc, setup, toolOf(sideTwo[0]!.toolKey), Z1.id, {
+        carried: { ...sideOneField, ...maps.maps },
+        ...(USE_MODEL_CAM_ENGINE && sideOneRemovals.length > 0 ? { priorRemoval: sideOneRemovals } : {}),
       });
       expect(r2.ok, r2.ok ? '' : JSON.stringify(r2.diagnostics)).toBe(true);
-      if (!r2.ok || !r2.flatField) return;
+      if (!r2.ok) return;
+      // Side 2's program can be cut by the stated FLAT (the model engine's primary), whose sweep
+      // is the EXACT engine — no column grid comes back. The exact engine's own stamp is the
+      // field then: the same `exactSweptFieldTooled` the acceptance pictures use, over the
+      // program's own NC and cutter.
+      const sideTwoField =
+        r2.flatField ??
+        ((): FlatField => {
+          const parsed = parseGcode(sideTwo[0]!.nc);
+          const timeline = buildTimeline(parsed, setup, Z1);
+          const pitch = 0.5;
+          const nx = Math.ceil(BLANK.length / pitch) + 1;
+          const ny = Math.ceil(BLANK.width / pitch) + 1;
+          const stamp = exactSweptFieldTooled({ nx, ny, x0: 0, y0: 0, pitch }, timeline, () => toolOf(sideTwo[0]!.toolKey));
+          if (stamp === null) throw new Error('side 2 produced no exact sweep stamp');
+          return { u0: 0, v0: 0, du: pitch, dv: pitch, nu: nx, nv: ny, top: stamp.field, base: -BLANK.thickness };
+        })();
       expect(r2.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
       sideTwoStock = r2.stats.stockVolume;
 
@@ -526,7 +593,7 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
       // material side 1 removed. The run store hands the field across exactly this way.
       const blank = createSimSession(tl);
       try {
-        const r2b = blank.load(out.programs[1]!.nc, setup, BALL_TOOL, Z1.id);
+        const r2b = blank.load(sideTwo[0]!.nc, setup, toolOf(sideTwo[0]!.toolKey), Z1.id);
         expect(r2b.ok, r2b.ok ? '' : JSON.stringify(r2b.diagnostics)).toBe(true);
         if (r2b.ok) blankStock = r2b.stats.stockVolume;
       } finally {
@@ -535,13 +602,14 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
       expect(blankStock).toBeGreaterThan(BLANK.length * BLANK.width * BLANK.thickness * 0.99);
       expect(sideTwoStock).toBeLessThan(blankStock - 1000);
 
+
       // THE WALL, at the point the app's map pairs with each side-1 probe: side 1's finished top
       // (its height above the rim is + the crown), and the side-2 cavity's floor there.
       const crown = crownOf(zOut);
       for (const [lx, ly] of PROBES) {
         const s2 = map([CX + lx, CY + ly, 0] as [number, number, number]);
-        const outside = topAt(r1.flatField, CX + lx, CY + ly) + crown;
-        const cavity = topAt(r2.flatField, s2[0], s2[1]);
+        const outside = topAt(sideOneField, CX + lx, CY + ly) + crown;
+        const cavity = topAt(sideTwoField, s2[0], s2[1]);
         const wall = outside + cavity;
         const slope = Math.hypot(
           (zOut(lx + 0.01, ly) - zOut(lx - 0.01, ly)) / 0.02,
