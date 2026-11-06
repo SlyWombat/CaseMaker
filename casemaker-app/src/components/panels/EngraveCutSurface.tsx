@@ -651,6 +651,9 @@ export function EngraveCutSurface({
   const comparingPlans = idealPlan.status === 'comparing';
   const planChoice = useEngraveJobStore((s) => planChoiceOf(s.job));
   const setPlanChoice = useEngraveJobStore((s) => s.setPlanChoice);
+  // #986 (E's review) — the press RE-RUNS the comparison with the last run's own arguments; it
+  // never only records the choice.
+  const comparePlans = useEngraveRunStore((s) => s.comparePlans);
   /** #656 — the verdict the one screen prints: the run store's oracle for the current package (a
    * re-post replaces it, and the sentence follows). */
   const runOracle = useEngraveRunStore((s) => s.oracle);
@@ -1343,7 +1346,10 @@ export function EngraveCutSurface({
                 type="button"
                 data-testid="engrave-plan-ideal"
                 aria-pressed={planChoice === 'ideal'}
-                onClick={() => setPlanChoice('ideal')}
+                onClick={() => {
+                  setPlanChoice('ideal');
+                  comparePlans();
+                }}
                 style={{ flex: 1, padding: 7 }}
               >
                 Every bit the app knows{planChoice === 'ideal' ? ' — chosen' : ''}

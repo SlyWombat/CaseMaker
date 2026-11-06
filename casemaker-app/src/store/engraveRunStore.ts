@@ -315,6 +315,8 @@ export interface EngraveRunState {
    * "comparing…"); `ready` with the tradeoff (null when there is no ideal or nothing material).
    */
   idealPlan: { status: 'idle' | 'comparing' | 'ready'; tradeoff: PlanTradeoff | null };
+  /** #986 — re-run the background comparison with the last run's own arguments (the press). */
+  comparePlans: () => void;
   oracle: OracleReport | null;
   /**
    * #844 — EVERY PROGRAM'S OWN VERDICT, in cut order, with the words that name it. `oracle` is the
@@ -465,6 +467,11 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
    * releasing a NEWER run's hold.
    */
   let runHold: symbol | null = null;
+
+  // #986 (E's review) — THE ON-DEMAND PRESS re-runs the background comparison with the SAME
+  // arguments the run used. Held here, beside the run hold, so the press needs no re-plumbing of
+  // the job through the panel.
+  let idealLastRequest: (() => void) | null = null;
 
   async function run(surface: SurfacePostFit | null = null, opts: { simulateOnly?: boolean } = {}): Promise<void> {
     // #893 — SIMULATE ONLY: the program is already this job's, so the run starts at the sweep.
@@ -713,20 +720,28 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     if (generated.ok && generated.nc !== null && job.targetObject !== undefined && client.engravePlanIdeal !== undefined) {
       const idealClient = client;
       const idealJob = job;
-      // #986 (E's review) — THE STALE-RUN RACE: the ideal path has no run of its own, so a slow
-      // ideal from run A could resolve after run B started and write A's tradeoff under B's
-      // program. The store's own run token is the guard: the result lands only while the run that
-      // asked for it still owns the hold.
-      const idealToken = runHold;
-      set({ idealPlan: { status: 'comparing', tradeoff: null } });
-      void idealClient
-        .engravePlanIdeal!(idealJob, idealJob.targetObject!, tool as Tool, shop, getTools().map((entry) => entry.tool))
-        .then((answer) => {
-          if (runHold === idealToken) set({ idealPlan: { status: 'ready', tradeoff: answer.tradeoff } });
-        })
-        .catch(() => {
-          if (runHold === idealToken) set({ idealPlan: { status: 'idle', tradeoff: null } });
-        });
+      const idealTool = tool as Tool;
+      const idealShop = shop;
+      const fireIdealCompare = (): void => {
+        // #986 (E's review) — THE STALE-RUN RACE: the ideal path has no run of its own, so a slow
+        // ideal from run A could resolve after run B started and write A's tradeoff under B's
+        // program. The store's own run token is the guard: the result lands only while the run that
+        // asked for it still owns the hold.
+        const idealToken = runHold;
+        set({ idealPlan: { status: 'comparing', tradeoff: null } });
+        void idealClient
+          .engravePlanIdeal!(idealJob, idealJob.targetObject!, idealTool, idealShop, getTools().map((entry) => entry.tool))
+          .then((answer) => {
+            if (runHold === idealToken) set({ idealPlan: { status: 'ready', tradeoff: answer.tradeoff } });
+          })
+          .catch(() => {
+            if (runHold === idealToken) set({ idealPlan: { status: 'idle', tradeoff: null } });
+          });
+      };
+      // The press repeats the SAME computation on demand (E's review, item 3) — never just the
+      // recorded choice.
+      idealLastRequest = fireIdealCompare;
+      fireIdealCompare();
     }
     // #787 — every finding the run raised, small enough for the report to carry.
     for (const f of generated.findings) noteFinding(f);
@@ -1115,6 +1130,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // that changes mid-run makes the run stale the moment it finishes (the maintainer's elephant
     // goal stopped at "generated · not checked yet" for exactly this). Held for the run, released
     // for the next edit — the preview keeps drawing.
+    // #986 (E's review) — the press re-runs the computation, not just the choice.
+    comparePlans: () => {
+      idealLastRequest?.();
+    },
     generate: async (surface?: SurfacePostFit | null) => {
       const token = Symbol('generate');
       runHold = token;
