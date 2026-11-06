@@ -1494,7 +1494,20 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   const contourDemandMm = z0 - tree.contour.zTo;
   // #988 — the freeing contour stops at the band: depth min(demand, band). The demand stays for
   // the setup's own "what is left" line in `planModelCam`.
-  const contourDepthMm = depthBandMm === undefined ? contourDemandMm : Math.min(contourDemandMm, depthBandMm);
+  //
+  // #1003 — THE STOCK BOTTOM IS THE FLOOR TOO. A goal taller than its blank (the corpus figure is
+  // 41.337 mm on a 40 mm stock) must not free through the vise: the verifier's `cut-too-deep` is
+  // the hard gate, and this is the PLAN honouring it — the freeing contour is cut off at the stock
+  // bottom and the clipped millimetres are stated. The sacrificial board's allowance is a separate
+  // input this function does not receive yet (stated, not silently zero). The two floors COMPOSE:
+  // the shallower of the demand, the band and the stock bottom wins.
+  const stockBottomZ = tree.frame.stockBottom;
+  const stockFloorDepthMm = stockBottomZ === undefined ? undefined : z0 - stockBottomZ;
+  const contourDepthMm = Math.min(
+    contourDemandMm,
+    depthBandMm === undefined ? Number.POSITIVE_INFINITY : depthBandMm,
+    stockFloorDepthMm === undefined ? Number.POSITIVE_INFINITY : stockFloorDepthMm,
+  );
 
   // The manager's #959 ruling: the top land OUTSIDE every pocket's footprint, faced through the
   // SAME `pocket()` op and `link()` safety every other region uses — not a new op. `tree.top.floors`
@@ -2175,6 +2188,12 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         );
       }
     }
+  }
+  // #1003 — the stock bottom's own clip, stated once per setup, in the same statement path.
+  if (stockFloorDepthMm !== undefined && contourDemandMm > stockFloorDepthMm + 1e-9) {
+    notes.push(
+      `the goal extends ${(contourDemandMm - stockFloorDepthMm).toFixed(3)} mm below the stock; the freeing contour is cut off at the stock bottom`,
+    );
   }
   // #943 (2026-11-05 ruling): the facing stage states where its cut starts, how many passes the
   // probed spread takes, and the clamp when the part top binds. The count mirrors `depthPasses`'
