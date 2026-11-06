@@ -241,16 +241,38 @@ export type BooleanFn = (a: Polygons, b: Polygons) => Polygons;
  * #959's #961 review, finding 3: an OPEN pocket node's region needs extending across its open
  * edge before `pocketLoops` sees it (the node's own boundary there is not a real wall), and that
  * needs a real boolean, not another offset call.
+ *
+ * #1024 — BOTH OPERANDS ARE CONVERTED HERE, AND OURS TO FREE. Handed a POLYGON LIST, the glue's
+ * `cross(other)` builds a temporary CrossSection for that operand and never deletes it (#1022
+ * freed the vectors inside a conversion, not that object): ~16 KB per boolean against a
+ * 654-vertex operand, and per CELL in #1020's predicate — the leak that drove the wasm into its
+ * 4,096 MB cap. Passing handles keeps `cross` a no-op, and we delete both with the result.
  */
 export function makeClipperUnion(tl: ManifoldToplevel): BooleanFn {
   const CS = tl.CrossSection;
   return (a, b) => {
     if (a.length === 0) return b;
     if (b.length === 0) return a;
-    const out = CS.union(a, b);
-    const polygons = out.toPolygons() as Polygons;
-    out.delete();
-    return polygons;
+    // #1024 (E's review) — EACH HANDLE IS FREED ON BOTH PATHS: a throw from the second conversion,
+    // the boolean or `toPolygons` must not leak what exists by then. The nested-finally shape is
+    // `engraveGenerate.ts`'s `intersectionArea`'s, with the second conversion inside the first
+    // handle's try (it can throw before `cb` is assigned).
+    const ca = CS.ofPolygons(a);
+    try {
+      const cb = CS.ofPolygons(b);
+      try {
+        const out = CS.union(ca, cb);
+        try {
+          return out.toPolygons() as Polygons;
+        } finally {
+          out.delete();
+        }
+      } finally {
+        cb.delete();
+      }
+    } finally {
+      ca.delete();
+    }
   };
 }
 
@@ -259,12 +281,23 @@ export function makeClipperSubtract(tl: ManifoldToplevel): BooleanFn {
   const CS = tl.CrossSection;
   return (a, b) => {
     if (a.length === 0 || b.length === 0) return a;
-    const cs = CS.ofPolygons(a);
-    const out = cs.subtract(b);
-    const polygons = out.toPolygons() as Polygons;
-    out.delete();
-    cs.delete();
-    return polygons;
+    // See {@link makeClipperUnion}: every handle freed on the throw path too.
+    const ca = CS.ofPolygons(a);
+    try {
+      const cb = CS.ofPolygons(b);
+      try {
+        const out = ca.subtract(cb);
+        try {
+          return out.toPolygons() as Polygons;
+        } finally {
+          out.delete();
+        }
+      } finally {
+        cb.delete();
+      }
+    } finally {
+      ca.delete();
+    }
   };
 }
 
