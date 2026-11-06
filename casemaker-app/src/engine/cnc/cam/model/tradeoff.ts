@@ -89,8 +89,6 @@ export interface PlanTradeoff {
   differences: TradeoffDifference[];
 }
 
-const pctPoints = (v: number): string => `${(v * 100).toFixed(2)} points`;
-
 /**
  * Compare the OWNED plan's card with the IDEAL plan's for the same job.
  *

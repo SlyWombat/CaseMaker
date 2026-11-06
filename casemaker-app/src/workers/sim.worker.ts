@@ -16,7 +16,7 @@ import type { Setup, MachineCalibration } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
-import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
+import type { EngraveJob, EngraveTargetObject, EngraveMargins } from '@/types/engraveJob';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { getToplevel } from './geometry/ManifoldRuntime';
 import type { NodeMeshOutput } from './geometry/meshOutput';
@@ -26,7 +26,12 @@ import { goalInputFor } from './sim/goalCheckField';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
-import { engraveGenerate as runEngraveGenerate, supportingFloors, type EngraveGenerated, type EngraveProgress, type EngraveShopOpts } from './sim/engraveGenerate';
+import { engraveGenerate as runEngraveGenerate, buildModelPlanInputForGoal, supportingFloors, type EngraveGenerated, type EngraveProgress, type EngraveShopOpts } from './sim/engraveGenerate';
+// #986 (the ruling) — the background ideal: the second plan's outcome and the tradeoff line,
+// computed AFTER the owned plan has posted, never posting itself.
+import { planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
+import { comparePlanOutcomes, type PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
+import type { PlanOutcome } from '@/engine/cnc/cam/model/plan';
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { portLevelPlanner } from './sim/levelPlannerPort';
 import type { PoolSizing } from '@/engine/jobs/poolSizing';
@@ -281,6 +286,33 @@ const api = {
    * findings and `drill.peckClearanceMm` for the peck re-entry height. Omitted, the pipeline uses
    * its labelled fallbacks, exactly as a headless run with no location does.
    */
+  /**
+   * #986 (the maintainer's ruling) — THE BACKGROUND IDEAL. The owned plan has already posted; this
+   * computes the IDEAL plan's own outcome beside it and the material tradeoff, WITHOUT posting a
+   * second program. The card reads "comparing…" until this resolves, then prints the line; the
+   * "Every bit the app knows" press calls the same method again, on demand.
+   *
+   * `catalogueTools` is required: without it there is no ideal to compute, and the caller says so
+   * by not asking.
+   */
+  async engravePlanIdeal(
+    job: EngraveJob,
+    goal: EngraveTargetObject,
+    tool: Tool,
+    shop: EngraveShopOpts,
+    catalogueTools: readonly Tool[],
+  ): Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }> {
+    const input = await buildModelPlanInputForGoal(job, goal, tool, shop, undefined, catalogueTools);
+    const two = await planTwoOutcomes(input);
+    const owned = two.owned.outcome ?? null;
+    const ideal = two.ideal?.outcome ?? null;
+    return {
+      tradeoff: owned !== null && ideal !== null ? comparePlanOutcomes({ score: owned }, { score: ideal }) : null,
+      owned,
+      ideal,
+    };
+  },
+
   async engraveGenerate(
     job: EngraveJob,
     tool: Tool | null,
