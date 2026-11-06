@@ -5325,6 +5325,15 @@ export async function generateGoalProgram(
   if (tool === null) return fail('feeds', 'the job has no usable cutter');
   const mill = jobMachine(job, calibration);
 
+  // #980 — A PICTURE RELIEF HAS NO MESH (same fact `rotaryRelief.ts`'s own `sampleGoalRadialField`
+  // states for the rotary side): `targetObjectMesh` throws for a `format: 'png'` goal, and the
+  // #949/#1003 overhang check right below calls it unconditionally — this refusal MUST run first,
+  // named and by itself, or a picture relief throws the mesh's own internal error instead of the
+  // named one. Restoring the path (triangulating the picture's own heightfield into a watertight
+  // FeatureSource) is #980's own scope, not a bug in either check below.
+  if (goal.format === 'png') {
+    return fail('cam', 'a picture relief is a flat heightfield; cam/model needs a mesh (#980)');
+  }
   // #949/#1003 — AN XY OVERHANG IS REFUSED PRE-PLAN, AND A Z OVERHANG IS CLIPPED. A goal that does
   // not fit its blank in X or Y is a job error the operator must fix (a larger blank, or Fit to the
   // stock); a goal merely TALLER than the blank is planned to the stock bottom and its overrun
@@ -5389,16 +5398,6 @@ export async function generateGoalProgram(
         message: `${who} are not chamfered: “${entry.tool.name}” is a ${entry.tool.shape} cutter with no cone to make a bevel.`,
       });
     }
-  }
-  //
-  // #980 — A PICTURE RELIEF HAS NO MESH (same fact `rotaryRelief.ts`'s own `sampleGoalRadialField`
-  // states for the rotary side): `buildModelPlanInputForGoal` calls `targetObjectMesh` unconditionally,
-  // which throws for a `format: 'png'` goal. Refused here, named and by itself — not folded into
-  // the generic "could not build a ModelPlanInput" catch below — because restoring the path
-  // (triangulating the picture's own heightfield into a watertight FeatureSource) is #980's own
-  // scope, not a `ModelPlanInput`-building bug.
-  if (goal.format === 'png') {
-    return fail('cam', 'a picture relief is a flat heightfield; cam/model needs a mesh (#980)');
   }
   let input: ModelPlanInput;
   try {
