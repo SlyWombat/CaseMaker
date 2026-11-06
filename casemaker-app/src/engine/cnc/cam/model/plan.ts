@@ -106,6 +106,7 @@ import { rough, skin } from './ops/rough';
 import { maskCellsExact } from './finishMask';
 import { FLAT_SURFACE_MAX_SLOPE_DEG, flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
 import { cellPolygons, rest } from './ops/rest';
+import { removalEnvelopeBall, type EnvelopeCell } from './restEnvelope';
 import { DEFAULT_FINISH_SCALLOP_MM, finish, finishKindFor, type FinishKind } from './ops/finish';
 import { hasValley, pencil } from './ops/pencil';
 import { chamfer } from './ops/chamfer';
@@ -372,6 +373,12 @@ export interface PlanOutcome {
   leftoverCells: number;
   coveredCells: number;
   cellAreaMm2: number;
+  /**
+   * #1028 — the ball whose REMOVAL ENVELOPE takes the leftover (its own step-over's scallop
+   * included), rounded to 0.5 mm; `null` when no radius ≥ 0.5 mm reaches. The catalogue path's
+   * measured ideal replaces the sentence, so this rides only the no-catalogue form.
+   */
+  wouldTakeDiameterMm?: number | null;
 }
 
 export interface ModelPlanOutput {
@@ -1392,14 +1399,38 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     let covered = 0;
     let leftover = 0;
     let leftoverAboveMm = 0;
+    const leftoverCells: EnvelopeCell[] = [];
     for (let k = 0; k < union.length; k++) {
       if (coverageGoal.covered[k] !== 1) continue;
       covered++;
       const over = union[k]! - (coverageGoal.z[k] as number);
-      if (over > 0.1) leftover++;
+      if (over > 0.1) {
+        leftover++;
+        const i = k % coverageGoal.nx;
+        const j = Math.floor(k / coverageGoal.nx);
+        leftoverCells.push({
+          x: coverageGoal.x0 + i * coverageGoal.pitch,
+          y: coverageGoal.y0 + j * coverageGoal.pitch,
+          goalZ: coverageGoal.z[k] as number,
+          aboveMm: over,
+        });
+      }
       if (over > leftoverAboveMm) leftoverAboveMm = over;
     }
     const cycleSeconds = perSetup.reduce((n, setup) => n + setup.totalCostSeconds, 0);
+    // #1028 — THE BALL THE LEFTOVER'S OWN REMOVAL ENVELOPE WOULD TAKE. Only the no-catalogue
+    // sentence shows it (the seam's measured ideal replaces the sentence when one exists).
+    const finishBall = finishingBallOf(perSetup);
+    const finishProfile = finishBall === null ? null : profileOf(finishBall);
+    const finishRadiusMm = finishBall === null ? 0 : (cuttingDiameter(finishBall) ?? 0) / 2;
+    const wouldTakeDiameterMm =
+      finishProfile === null || !(finishRadiusMm > 0) || leftoverCells.length === 0
+        ? null
+        : removalEnvelopeBall(
+            leftoverCells,
+            (x, y) => dropCutterHeight(finishProfile, input.geometry.triangles, x, y),
+            { finishRadiusMm, cellPitchMm: coverageGoal.pitch },
+          ).diameterMm;
     return {
       coverage: covered === 0 ? null : 1 - leftover / covered,
       cutInto: { adjudicatedFraction: null, maxMm: null },
@@ -1408,6 +1439,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       leftoverCells: leftover,
       coveredCells: covered,
       cellAreaMm2: coverageGoal.pitch * coverageGoal.pitch,
+      wouldTakeDiameterMm,
     };
   })();
   // #1023 — THE FINISH'S LEFTOVER IS STATED, on the plan that posts. `planTwoOutcomes` replaces
@@ -1513,9 +1545,14 @@ export function restStatementForPlan(
   const look = visible
     ? `— past the ${vis.depthMm.toFixed(2)} mm or ${shareWord(vis.share)} % that marks a leftover visible —`
     : `— under the ${vis.depthMm.toFixed(2)} mm and ${shareWord(vis.share)} % that marks a leftover visible —`;
+  // #1028 — NO CATALOGUE BALL: the leftover's own removal envelope names the ball that would take
+  // it, or the sentence keeps the plain absence when no radius the operator would use reaches.
+  const envelope = outcome.wouldTakeDiameterMm ?? null;
   const would =
     reference === null
-      ? ' No catalogue ball was measured.'
+      ? envelope === null
+        ? ' No catalogue ball was measured.'
+        : ` A ball of about ⌀${diaWord(envelope)} mm would reach it — its removal envelope, at its own step-over's scallop, takes the leftover within the band (measured on the plan's own stamp).`
       : ` The catalogue's ${reference.ball.name} (⌀${diaWord(cuttingDiameter(reference.ball) ?? 0)} mm) would: ` +
         `leftover ${shareWord(reference.leftoverShare)} %, ` +
         `${reference.cycleDeltaSeconds >= 0 ? '+' : ''}${Math.round(reference.cycleDeltaSeconds)} s of cycle (measured).`;
