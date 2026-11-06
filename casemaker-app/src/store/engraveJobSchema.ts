@@ -926,6 +926,14 @@ const targetObjectSchema = z
       .min(1)
       .optional()
       .describe('Base64 of the mesh file; omitted while the bytes live in the app’s mesh store or are missing.'),
+    // #991 — OPTIONAL: the per-triangle B-rep face id a STEP conversion keeps beside the mesh, so
+    // the app plans the same whole-face classification the acceptance cards do. Absent for a
+    // mesh file (an STL has no faces); a document without it plans exactly as before.
+    faceId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Base64 of the per-triangle B-rep face id (Uint32Array), for a mesh converted from a STEP.'),
     size: z
       .object({
         x: z.number().finite().positive().describe('Mesh bounding-box size along X, in millimetres.'),

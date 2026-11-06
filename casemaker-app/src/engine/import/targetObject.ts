@@ -37,6 +37,12 @@ export type TargetObjectRead =
       data: string;
       size: { x: number; y: number; z: number };
       /**
+       * #991 — base64 of the per-triangle B-rep face id (little-endian `Uint32Array`), for a
+       * STEP the door converted. Kept with the target so the app plans the STEP's B-rep path
+       * (whole-face patches), not a plain triangulation of the same solid.
+       */
+      faceId?: string;
+      /**
        * #825 — a fact the import must state about the file it read, in one sentence: an OBJ has
        * no unit of its own, so the door says which reading its numbers got. Absent for the
        * formats whose numbers are already the app's millimetres by definition.
@@ -133,15 +139,26 @@ export async function readTargetObjectFile(
   // #774 — a STEP is converted ONCE, here: the kernel tessellates the B-rep and the job stores
   // the binary STL, so the id/hash/embed contract below is the one every mesh already has. The
   // file's own name is kept, so the row still says which file was picked.
+  //
+  // #991 — AT THE RECOGNITION READ, WITH THE FACE IDS. The plan classifies the mesh through its
+  // B-rep faces (one face, one patch); the kernel's display defaults split whole faces into
+  // many triangles and the dropped ids made the same solid read as a plain triangulation (the
+  // tray: 63 rims against the cards' 38, 28 fillets misread as modelled chamfers).
   let stored: ArrayBuffer = bytes;
   let mesh: ParsedMesh;
   let note: string | undefined;
+  let faceId: string | undefined;
   try {
     if (format === 'step') {
       const { stepToStl } = await import('./stepMesh');
-      const converted = await stepToStl(bytes);
+      const converted = await stepToStl(bytes, 'recognition');
       stored = converted.stl;
       mesh = converted.mesh;
+      if (converted.faceId !== undefined) {
+        faceId = arrayBufferToBase64(
+          converted.faceId.buffer.slice(converted.faceId.byteOffset, converted.faceId.byteOffset + converted.faceId.byteLength) as ArrayBuffer,
+        );
+      }
     } else if (format === 'obj') {
       // #825 — the OBJ's own bytes are embedded (they are what the hash identifies), and the
       // parser's unit reading is stated on the result: an OBJ has no unit, so the door says
@@ -193,6 +210,7 @@ export async function readTargetObjectFile(
     sha256,
     data: arrayBufferToBase64(stored),
     size,
+    ...(faceId === undefined ? {} : { faceId }),
     ...(note === undefined ? {} : { note }),
   };
 }

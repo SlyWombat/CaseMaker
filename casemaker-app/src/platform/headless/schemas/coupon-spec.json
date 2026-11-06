@@ -6370,6 +6370,11 @@
               "description": "False keeps the object in the document but out of the program.",
               "type": "boolean"
             },
+            "faceId": {
+              "description": "Base64 of the per-triangle B-rep face id (Uint32Array), for a mesh converted from a STEP.",
+              "minLength": 1,
+              "type": "string"
+            },
             "format": {
               "description": "File format of the reference object: a mesh ('stl'/'3mf'/'obj'), or a 'png' picture whose luminance is the goal heightfield (#672).",
               "enum": [
@@ -6705,6 +6710,11 @@
               "enabled": {
                 "description": "False keeps the object in the document but out of the program.",
                 "type": "boolean"
+              },
+              "faceId": {
+                "description": "Base64 of the per-triangle B-rep face id (Uint32Array), for a mesh converted from a STEP.",
+                "minLength": 1,
+                "type": "string"
               },
               "format": {
                 "description": "File format of the reference object: a mesh ('stl'/'3mf'/'obj'), or a 'png' picture whose luminance is the goal heightfield (#672).",

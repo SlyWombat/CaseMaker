@@ -280,6 +280,7 @@ import type { EdgeBreakSpec, ModelTolerances } from '@/engine/cnc/cam/model/type
 import { buildSetupSpecs } from '@/engine/cnc/cam/model/setups';
 import type { Mount, MountSpec } from '@/engine/cnc/setups/types';
 import { targetObjectMesh } from '@/engine/import/targetObject';
+import { base64ToArrayBuffer } from '@/engine/import/base64';
 import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
 import type { ParsedMesh } from '@/engine/import/stlParser';
 
@@ -4932,9 +4933,27 @@ export async function buildModelPlanInputForGoal(
   // #987 — a skirt-closed relief's outline is the kernel's own requirement for a solid, not a
   // design edge; `recogniseFeatures` reads this to skip the contour demand entirely (never a
   // freeing cut around stock the design never asked to be cut away from).
+  // #991 — THE STEP'S OWN FACE IDS GO THROUGH TO THE FEATURE TREE. A mesh that carries them is
+  // classified by B-rep face (whole-face patches, the acceptance cards' path); a length the tree
+  // cannot use is refused by the tree's own named error, never planned as the wrong path. A skirt
+  // re-indexes the triangles (and adds its own), so an OPEN sheet's ids cannot survive it: named,
+  // not silently dropped back to the mesh path.
+  let faceId: Uint32Array | undefined;
+  if (goal.faceId !== undefined) {
+    if (closed.mesh !== triangles) {
+      throw new Error(
+        'cam/model seam: the goal mesh is an open sheet the skirt had to close — its STEP face ids no longer match the triangles; import a solid STEP, or plan the sheet without ids',
+      );
+    }
+    const bytes = base64ToArrayBuffer(goal.faceId);
+    const view = new DataView(bytes);
+    faceId = new Uint32Array(bytes.byteLength / 4);
+    for (let i = 0; i < faceId.length; i++) faceId[i] = view.getUint32(i * 4, true);
+  }
   const geometry: FeatureSource = {
     triangles: closed.mesh,
     ...(closed.closedBy === 'skirt' ? { outline: 'synthetic' as const } : {}),
+    ...(faceId === undefined ? {} : { faceId }),
   };
 
   // #898's three choices, carried across under the new engine's own naming
