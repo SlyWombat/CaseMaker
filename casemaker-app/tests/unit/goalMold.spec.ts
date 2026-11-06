@@ -29,11 +29,7 @@ import { validateGoalObject } from '@/engine/cnc/engrave/jobSetup';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import type { RapidEstimate, CamMove } from '@/engine/cnc/cam/ir';
-import { FLAT, type ColumnCutter, type CutMove } from '@/workers/geometry/columnEngine';
-import { stubSetup, type Setup } from '@/engine/cnc/setup';
 import { planCutInto } from '../tools/planCutInto';
-import { rectProfile } from '@/engine/compiler/profile';
 
 afterEach(() => clearTargetObjectMeshCache());
 
