@@ -35,7 +35,7 @@ import { pocketLoops, type OffsetFn, type Polygons } from '@/engine/cnc/cam/pock
 import { tourNearest } from '@/engine/cnc/cam/tour';
 import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
-import { link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
+import { clearedGroundZ, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
 import { cutterKeyOf } from '../sequence';
 import type { PocketNode } from '../features';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
@@ -409,6 +409,15 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
   const passes: PassRef[] = [];
   const cleared: RegionAtZ[] = [];
 
+  // #1002 — THE LANDING PROOF. A retract's down leg may rapid back toward the landing's own level
+  // only as far as the ground under the landing has actually been cut: the DEEPEST FINISHED level
+  // whose recorded cleared area contains it (`cleared`, pushed when a level's last ring ends). The
+  // per-ring `passes[].cleared` band is not a proof — it is the step's whole planned band, so a
+  // same-level landing on a lobe this level has not reached yet would rapid below the stock
+  // standing on the previous level's floor (measured: stepDown 2 > hop 1 → rapid 1 mm into stock).
+  // Without a finished level under the landing the down leg stops at the stock top and feeds.
+  const landingClearedZ = (x: number, y: number, _z: number): number | null => clearedGroundZ(x, y, cleared);
+
   // Tracks where the tool actually is, so a link is only asked for from the SECOND ring/level
   // onward — the very first ring of the whole op has no "from" position, just its own plunge.
   let prevExit: [number, number, number] | null = null;
@@ -445,7 +454,7 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
           // is the same at every Z), so `link()` alone decides feed vs. retract.
           const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
           const to: LinkPoint = { x: start[0], y: start[1], z };
-          moves.push(...link(from, to, { ...linkOptions }));
+          moves.push(...link(from, to, { ...linkOptions, landingClearedZMm: landingClearedZ }));
         } else {
           // A level change (advisor's review on 9e976f0b): `open` reports every point in the
           // node's footprint as reachable, with no notion of "not yet, at THIS depth" — handing
@@ -456,7 +465,7 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
           // always a plain feed at plungeFeed, never left to `link()`'s own feed rate.
           const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
           const landing: LinkPoint = { x: start[0], y: start[1], z: prevExit[2] };
-          moves.push(...link(from, landing, { ...linkOptions }));
+          moves.push(...link(from, landing, { ...linkOptions, landingClearedZMm: landingClearedZ }));
           moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
         }
         moves.push(...traceRing(ring, z, opts.feeds.feedMmPerMin));

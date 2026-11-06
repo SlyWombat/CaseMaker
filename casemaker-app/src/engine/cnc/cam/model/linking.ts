@@ -48,6 +48,8 @@
  */
 
 import type { CamMove } from '../ir';
+import type { Polygons } from '../pocket';
+import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import { tourNearest } from '../tour';
 
 /** FreeCAD Path's `KeepToolDownRatio` default: a stay-down detour may be 3× the direct distance. */
@@ -115,6 +117,16 @@ export interface LinkOptions {
    * `rapid-through-stock`).
    */
   landingCut?: (x: number, y: number, z: number) => boolean;
+  /**
+   * #1002 — THE CLEARED LEVEL UNDER THE LANDING, when the caller can state one: the deepest Z the
+   * ground at (x, y) has actually been cut to by this op (the deepest recorded swept area that
+   * contains the point). The down leg then rapids to THAT level plus the hop and feeds only the
+   * rest — the review's "rapid descends to prevLevel + hop". `landingCut` above answers yes/no
+   * against the material field; this answers with the level itself, which is the only form that
+   * can lift a same-level link's floor above its own z. Null/absent → the boolean proof, then the
+   * stock top.
+   */
+  landingClearedZMm?: (x: number, y: number, z: number) => number | null;
   /** The datum's stock top, mm — the down leg's rapid floor where the landing is not proven cut.
    * Absent → 0: every cam/model op works in the plan's own stock-top datum. */
   stockTopZMm?: number;
@@ -134,6 +146,59 @@ export interface LinkedPass<T extends PassLink> {
 }
 
 const EPS = 1e-9;
+
+/**
+ * #1002 — THE CLEARED-AREA PROOF for a retract's landing: a level that FINISHED, with the area it
+ * cleared. The deep ops push one entry per completed level (`cleared`, after its last ring ends),
+ * and only those entries are swept areas: a level that finished cut the ground down to its own z
+ * everywhere its recorded area reaches. A landing whose (x, y) lies inside such an area stands on
+ * ground the op has already cut down to that level — so a rapid may descend to that level
+ * (`landingClearedZMm`'s contract in {@link LinkOptions}), and no farther, before the one-step feed.
+ *
+ * The per-ring records (`passes[].cleared`) are NOT a proof: they say what the ring's own step is
+ * about to cover. In the pocket op that is the whole step-over band around the region, and in
+ * rough/rest it is literally the level's mask — the "what this level WILL cut" guess this proof
+ * exists to replace. A same-level landing on such a band can stand on the previous level's floor
+ * (a lobe the current level has not reached yet), and with `stepDown > hop` a rapid to the band's
+ * level descends through standing stock. Only finished levels can lift the floor; a same-level
+ * link falls back to the stock-top rule.
+ */
+export interface ClearedArea {
+  z: number;
+  boundary: Polygons;
+}
+
+/**
+ * Is (x, y) inside the cleared area — INCLUDING its own edge? A ring's start lies exactly ON the
+ * outer boundary of the area the previous ring swept (both are the same tool-radius offset of the
+ * region), and `pointInPolygons` tests a point on an edge by strict comparison, so the exact
+ * boundary reads as outside and every outer-ring landing would be refused. A ±0.001 mm probe is
+ * far above Clipper/float noise and far below any real feature or the hop clearance.
+ */
+/**
+ * #1002 — the DEEPEST FINISHED level under (x, y). Every finished level cut the ground down to its
+ * own z over its recorded area, so the ground at a point is at the deepest finished level whose
+ * area contains it. Null when no finished area contains it (the stock-top rule then applies).
+ */
+export function clearedGroundZ(x: number, y: number, levels: readonly ClearedArea[]): number | null {
+  let deepest: number | null = null;
+  for (const entry of levels) {
+    if (deepest !== null && entry.z >= deepest) continue;
+    if (clearedAreaContains(entry.boundary, x, y)) deepest = entry.z;
+  }
+  return deepest;
+}
+
+export function clearedAreaContains(area: Polygons, x: number, y: number): boolean {
+  const eps = 1e-3;
+  return (
+    pointInPolygons(area, x, y)
+    || pointInPolygons(area, x + eps, y)
+    || pointInPolygons(area, x - eps, y)
+    || pointInPolygons(area, x, y + eps)
+    || pointInPolygons(area, x, y - eps)
+  );
+}
 
 function dist2(a: LinkPoint, b: LinkPoint): number {
   return Math.hypot(b.x - a.x, b.y - a.y);
@@ -303,13 +368,20 @@ function retract(from: LinkPoint, to: LinkPoint, opts: LinkOptions): CamMove[] {
   if (transitZ > to.z + EPS) {
     const radius = Math.max(0, opts.tool.radiusMm);
     const hopClearance = opts.hopClearanceMm ?? DEFAULT_HOP_CLEARANCE_MM;
-    const provenCut = opts.landingCut?.(to.x, to.y, to.z) === true;
-    const materialTop = provenCut ? materialTopOverDisc(opts.material, to.x, to.y, radius, sampleStep(opts)) : -Infinity;
-    if (provenCut && !Number.isFinite(materialTop)) {
+    const clearedZ = opts.landingClearedZMm?.(to.x, to.y, to.z) ?? null;
+    const provenCut = clearedZ !== null || opts.landingCut?.(to.x, to.y, to.z) === true;
+    const materialTop = provenCut && clearedZ === null
+      ? materialTopOverDisc(opts.material, to.x, to.y, radius, sampleStep(opts))
+      : -Infinity;
+    if (provenCut && clearedZ === null && !Number.isFinite(materialTop)) {
       moves.push(feedMove({ x: to.x, y: to.y, z: to.z }, plunge));
     } else {
       const stockTop = opts.stockTopZMm ?? 0;
-      const floor = provenCut ? Math.max(materialTop + hopClearance, to.z) : Math.max(stockTop + hopClearance, to.z);
+      const floor = clearedZ !== null
+        ? Math.max(clearedZ + hopClearance, to.z)
+        : provenCut
+          ? Math.max(materialTop + hopClearance, to.z)
+          : Math.max(stockTop + hopClearance, to.z);
       if (transitZ > floor + EPS) {
         moves.push(rapidMove({ x: to.x, y: to.y, z: floor }));
       }

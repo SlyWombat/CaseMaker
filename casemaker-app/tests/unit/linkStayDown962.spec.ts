@@ -7,7 +7,9 @@
 // to the region's clearance plane (feed replaced by a rapid both ways here — the manager's ruling
 // refining #956 §5, Review B's F8), then rapids down again to the material field's own report at
 // the landing plus the default 1 mm hop clearance (`DEFAULT_HOP_CLEARANCE_MM`, these fixtures pass
-// no `hopClearanceMm` of their own), feeding only the part of the down leg below that.
+// no `hopClearanceMm` of their own), feeding only the part of the down leg below that — but ONLY
+// when the caller PROVES the landing is cut at that z (#1002): `opts()` below states the proof,
+// and the unproven case pins the stock-top rule the merge made universal.
 import { describe, expect, it } from 'vitest';
 
 import type { CamMove } from '@/engine/cnc/cam/ir';
@@ -37,6 +39,10 @@ function opts(over: Partial<LinkOptions> = {}): LinkOptions {
     clearanceZ: 5,
     tool: { radiusMm: 1.5 },
     feeds: { feed: 800, plungeFeed: 200 },
+    // #1002 — these fixtures' fields describe ground already cut, so the caller's landing proof
+    // (the deep ops' `passes[].cleared` membership test) is stated here as `true`: without it the
+    // down leg's rapid floor is the STOCK TOP, which is the rule the unproven case below pins.
+    landingCut: () => true,
     ...over,
   };
 }
@@ -87,6 +93,30 @@ describe('#962 link decisions', () => {
     expect(moves[0]).toMatchObject({ kind: 'rapid', x: 0, y: 0, z: 5 });
     expect(moves[1]).toMatchObject({ kind: 'rapid', x: 5, y: 0, z: 5 });
     expect(moves[2]).toMatchObject({ kind: 'rapid', x: 5, y: 0, z: -4 });
+    expect(moves[3]).toMatchObject({ kind: 'feed', x: 5, y: 0, z: -5, f: 200 });
+  });
+
+  it('without a landing proof the down leg stops at the stock top plus the hop and feeds the rest (#966/#1002)', () => {
+    // The same retract as above, but the caller states no proof and states the datum's stock top
+    // (2 mm): the rapid may descend only to 2 + the default 1 mm hop, never to the material
+    // field's own report — the merge's rule, which the deep ops now opt out of with their proof.
+    const material = field((x) => (x > 2 && x < 3 ? 0 : -5));
+    const moves = link(P(0, 0), P(5, 0), opts({ material, landingCut: undefined, stockTopZMm: 2 }));
+    expect(moves).toHaveLength(4);
+    expect(moves[0]).toMatchObject({ kind: 'rapid', x: 0, y: 0, z: 5 });
+    expect(moves[1]).toMatchObject({ kind: 'rapid', x: 5, y: 0, z: 5 });
+    expect(moves[2]).toMatchObject({ kind: 'rapid', x: 5, y: 0, z: 3 }); // stock top 2 + hop 1
+    expect(moves[3]).toMatchObject({ kind: 'feed', x: 5, y: 0, z: -5, f: 200 });
+  });
+
+  it('a cleared LEVEL lifts the down leg above a same-level landing: rapid to the ground + hop, feed the step (#1002)', () => {
+    // The deep ops' own form of the proof: the ground under the landing was cut to -4 by the
+    // level just finished, and the link is descending to -5 at the same level — the rapid stops
+    // one hop above the GROUND (-3), then feeds the single step to the landing.
+    const material = field((x) => (x > 2 && x < 3 ? 0 : -5)); // the rib forces the retract
+    const moves = link(P(0, 0), P(5, 0), opts({ material, landingClearedZMm: () => -4 }));
+    expect(moves).toHaveLength(4);
+    expect(moves[2]).toMatchObject({ kind: 'rapid', x: 5, y: 0, z: -3 });
     expect(moves[3]).toMatchObject({ kind: 'feed', x: 5, y: 0, z: -5, f: 200 });
   });
 

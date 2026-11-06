@@ -317,4 +317,57 @@ describe('#959 pocket()', () => {
     // well above the near lobe's (0-10) and well below the far lobe's rotated entry being <= 110.
     expect(out.passes[0]!.entry[0], `visited ${JSON.stringify(out.passes.map((p) => p.entry))} first`).toBeGreaterThan(50);
   });
+
+  // #1002 — RED-FIRST, D's review of 8f5cc4c18. `stepDown` 2 exceeds `hop` 1, and the level −2
+  // link back from the second lobe lands at (24.3, 5.7) — the first lobe's inner-ring corner,
+  // ground this level has not reached yet, so it still stands at the stock top. The per-ring
+  // cleared band (`passes[].cleared`, the step's whole planned band) claims the area at this
+  // level and railed that rapid to −1, one millimetre INTO the stock; one level down the same
+  // claim railed the cross-lobe rapid to −3 under ground standing at −2. Only FINISHED levels
+  // may lift a down leg, so the rapid may never end below the standing surface at its own
+  // landing: the previous level's floor, or the stock top when entering the first level.
+  it('#1002 — a down leg never rapids below the standing surface at its landing (stepDown > hop)', () => {
+    const twoLobes: Polygons = [
+      [[0, 0], [30, 0], [30, 30], [0, 30]],
+      [[40, 0], [52, 0], [52, 12], [40, 12]],
+    ];
+    const lobes: PocketNode = { ...node(-4, 0), region: twoLobes, narrowest: 12 };
+    const lobesRegion: RegionRef = { ...region(), bounds: { min: [0, 0], max: [52, 30] }, bottomZ: -4 };
+    const out = pocket({
+      cutter: flat6, node: lobes, region: lobesRegion,
+      stepOverMm: 2.7, stepDownMm: 2, // stepDown > hop, the case the boolean proof could not cover
+      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
+      offset: fakeMultiRectOffset, safeZMm: 10, hopZMm: 1,
+      toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+    });
+    const moves = out.ir.operations[0]!.moves;
+
+    // The op's levels in cut order: each time a feed descends below every level so far.
+    const levels: number[] = [];
+    for (const m of moves) if (m.kind === 'feed' && m.z < (levels[levels.length - 1] ?? Infinity) - 1e-9) levels.push(m.z);
+    expect(levels).toEqual([-2, -4]);
+
+    const sameXY = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y) < 1e-9;
+    let checked = 0;
+    for (let i = 2; i < moves.length; i++) {
+      const m = moves[i]!, down = moves[i - 1]!, before = moves[i - 2]!;
+      // A retract's down leg: a vertical rapid descent at the XY the lateral rapid brought it to.
+      if (m.kind !== 'feed' || down.kind !== 'rapid' || down.z >= before.z) continue;
+      if (!sameXY(m, down) || !sameXY(down, before)) continue;
+      // The level this leg leads into is the deepest z of the contiguous feed run it opens.
+      let levelZ = m.z;
+      for (let k = i; k < moves.length && moves[k]!.kind === 'feed'; k++) levelZ = Math.min(levelZ, moves[k]!.z);
+      const li = levels.findIndex((z) => Math.abs(z - levelZ) <= 1e-9);
+      expect(li, `down leg into a level not in ${JSON.stringify(levels)}`).toBeGreaterThanOrEqual(0);
+      // The standing surface at the landing: the previous level's floor, or the stock top (0)
+      // entering the first level — never the level being cut, which has not finished yet.
+      const standing = li > 0 ? levels[li - 1]! : 0;
+      expect(
+        down.z,
+        `down leg at (${down.x.toFixed(2)}, ${down.y.toFixed(2)}) into level ${levelZ} rapids below the standing surface ${standing}`,
+      ).toBeGreaterThanOrEqual(standing - 1e-9);
+      checked++;
+    }
+    expect(checked).toBeGreaterThanOrEqual(4);
+  });
 });
