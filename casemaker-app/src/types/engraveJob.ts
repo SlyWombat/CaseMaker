@@ -776,7 +776,16 @@ export interface EngraveTargetObject {
    * cut by one cutter, as before. Optional, so every document written before the field existed
    * round-trips unchanged.
    */
-  roughToolKey?: string;
+  /**
+   * #869/#999 — the goal's CURVED ROUGH is tri-state. **Absent**: the engine chooses — the plan's
+   * sequence ranks the house's flats and one of them roughs. **`null`**: the operator chose the
+   * ball alone (one cutter; the run states it). **A string**: that flat's library key, validated
+   * by `validateGoalRoughTool` (a key the library does not hold falls back to the engine's
+   * choice with a named finding). Every document written before this field chose a value still
+   * round-trips: absent used to mean "ball alone", and its plans are now engine-chosen — the
+   * operator's ball-alone is written as `null`.
+   */
+  roughToolKey?: string | null;
 }
 
 /** #829 — the 3D chamfer a GOAL asks for: its bevel width, and the V-bit chosen to cut it. */

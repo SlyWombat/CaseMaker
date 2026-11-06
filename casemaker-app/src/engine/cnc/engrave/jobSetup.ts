@@ -417,6 +417,9 @@ export type JobFindingCode =
   // that is not a flat end mill, or one that cannot be fed for the material. The goal still
   // surfaces (the finish is unchanged), so this informs and never refuses.
   | 'goal-rough-no-cutter'
+  // #999 — THE OPERATOR'S BALL-ALONE CHOICE is an INFO, stated so a one-cutter goal is never a
+  // silent reading of an unfilled field: `roughToolKey: null`.
+  | 'goal-rough-ball-alone'
   // Facing (#432). The job's facing depth is taken off the same blank every item is measured
   // against, so the check is one number against the stock's minimum floor — not a per-item one.
   // An item over-deep once the skim is counted is still `depth-exceeds-stock`, whose own check

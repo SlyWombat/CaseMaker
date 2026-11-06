@@ -1512,6 +1512,12 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     expect(row.rims).toBe(63);
     expect(row.modelled).toBe(28);
     expect(row.measured, 'the STL row measured nothing').not.toBeNull();
+    // #999 — THE ROUGH IS POSTED: an absent roughToolKey means the engine chooses, so the ⌀6
+    // flat's rough must be among the posted runs (60.38 % was this row with the ball alone).
+    expect(
+      row.setup.programs.some((ir) => ir.tool.id === '111031606032'),
+      `flat-6 did not post: ${row.setup.programs.map((ir) => ir.tool.id ?? ir.tool.name).join(', ')}`,
+    ).toBe(true);
     // The seven lines are judged on BOTH rows: the STL row must clear its own gate (the same
     // 0.95 pass coverage) and cut nothing into the part. Its RIM line differs from the STEP
     // row's by the filed defect above; that is the only line allowed to.

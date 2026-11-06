@@ -27,7 +27,7 @@ import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import { generateGoalProgram, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { buildModelPlanInputForGoal, generateGoalProgram, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import { tl } from './helpers/manifoldExec';
 import { buildRandomPart } from '../tools/randomParts';
 
@@ -172,6 +172,17 @@ describe('#966 — generateGoalProgram routes through cam/model behind USE_MODEL
  * `verifyProgram`, not merely "didn't throw". (`figure` is the two cases that stay red even through
  * `planModelCam` directly — a separate, unrelated finish-coverage gap — so it is not used here.)
  */
+describe('#999 — the goal’s rough is tri-state in the seam', () => {
+  it('an ABSENT roughToolKey yields curvedRoughTool undefined (the engine chooses); an explicit null yields null (ball alone)', async () => {
+    const job = jobFor(goalTarget());
+    const absent = await buildModelPlanInputForGoal(job, job.targetObject!, BALL, SHOP);
+    expect(absent.curvedRoughTool).toBeUndefined();
+    const nulledJob = { ...job, targetObject: { ...job.targetObject!, roughToolKey: null } };
+    const nulled = await buildModelPlanInputForGoal(nulledJob, nulledJob.targetObject!, BALL, SHOP);
+    expect(nulled.curvedRoughTool).toBeNull();
+  }, 60_000);
+});
+
 describe('#966 ROUND 2 — generateGoalProgram flag ON posts and verifies every program (single setup)', () => {
   function randomPartJob(seed: number): { job: EngraveJob; goal: EngraveTargetObject; shop: EngraveShopOpts; tool: Tool } {
     const part = buildRandomPart(seed, 'sloped', tl);
