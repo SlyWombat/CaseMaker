@@ -396,11 +396,11 @@ describe('#873 the goal corpus: generated, swept, and measured against the goal'
   }, 240_000);
 
   // #966 triage — #1007: see above.
-  it.fails('the figure: the top setup leaves most of the surface unreached — the case #872 answers', async () => {
+  it('the figure: the top setup leaves most of the surface unreached — the case #872 answers', async () => {
     const r = await runFixture('figure.stl', { length: 100, width: 60, thickness: 40 });
     expect(r.ok).toBe(true);
     expect(r.loadOk).toBe(true);
-    expect(r.fraction).toBeCloseTo(0.139, 2); // today: 0.1386 (#909)
+    expect(r.fraction).toBeCloseTo(0.205, 2); // today: 0.2055 on 1003-stock-bottom (#1003 landed: the contour frees at the stock bottom)
     // Some of the unreached area faces away (legs, belly, tail underside) and some is shadowed.
     expect(r.facingAway).toBeGreaterThan(0);
     expect(r.seconds).toBeLessThan(97_000); // today: 92 828 s
