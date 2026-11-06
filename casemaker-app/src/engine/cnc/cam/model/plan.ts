@@ -1101,7 +1101,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     //
     // COST (#1021 §8.9): one erode+dilate + subtract per pocket node, one boundary-band offset
     // per node with interior components, one erode per strip per rest flat the chain runs (the
-    // ownership test) and one ball-fit erode per kept strip — all plan-time clipper work over
+    // ownership test) and one drop-cutter CL sampling per kept strip — all plan-time work over
     // small polygons, milliseconds on the tray's 20 nodes and the organizer's 58. Nothing is
     // posted for a strip nothing can enter; a strip the ball fits is planned as its own floor
     // pass (feed over the strip's own area).
@@ -1118,9 +1118,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // — on the app path the ⌀3.175 rest cuts the tray's five strips to their floor at −4.200 —
     // so this builder keeps only the strips NO owned flat can enter. A strip the ball alone could
     // reach is exactly the no-rest-flat case this issue is about.
-    const buildFloorStrips = (restCutters: readonly Tool[]): PlanningFloorStrips => {
+    // The design's own top over each planned strip (the statement's cut test reads it): the same
+    // sampler the fit test uses, kept per strip id.
+    const stripDesign = new Map<string, (x: number, y: number) => number | null>();
+    const buildFloorStrips = (restCutters: readonly Tool[], statedByPlan: ReadonlySet<string>): PlanningFloorStrips => {
       const regions: RemainderRegion[] = [];
-      const unreachable: { id: string; area: number }[] = [];
+      const unreachable: { id: string; area: number; fitShare: number }[] = [];
       if (noFlatFallback || ball === undefined) return { regions, unreachable };
       const flatRadius = (cuttingDiameter(primary) ?? 0) / 2;
       if (flatRadius > 0) {
@@ -1140,8 +1143,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         const BOUNDARY_BAND_MM = 0.05;
         const walkStrips = (nodes: PocketNode[]): void => {
           for (const node of nodes) {
-            // A through node has no floor (the contour frees it); nothing to finish.
-            const outer = node.through ? [] : node.region.filter((ring) => signedArea(ring) > 0);
+            // A through node has no floor (the contour frees it); nothing to finish. Neither has
+            // a ZERO-DEPTH node — one whose floor is its mouth (the organizer's engraved outlines
+            // read as pockets at −0.80): its "strip" is the surface itself, and a ball pass over
+            // it would be a no-op stated as a missing floor.
+            const outer =
+              node.through || node.floorZ >= node.mouthZ - 0.05 || statedByPlan.has(node.id)
+                ? []
+                : node.region.filter((ring) => signedArea(ring) > 0);
             if (outer.length > 0) {
               const reach = fullyReachable(node.region, offset, flatRadius);
               const gap = boolean.subtract(node.region, reach);
@@ -1188,19 +1197,57 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
                     const eroded = offset(kept, -r);
                     return eroded.length > 0 && Math.abs(areaOf(eroded)) > 1e-9;
                   });
-              // THE BALL MUST FIT TOO. A round cutter can only reach a point of the floor if its
-              // centre can stand within its radius of it; a strip narrower than the ball's own
-              // diameter is bridged, its CL rides the rims and the pass cuts nothing over the
-              // floor (#1021's measured caveat — a ⌀6 ball cannot cut a 3.3 mm strip). Such a
-              // strip is STATED as standing instead of planned as air, and a strip the ball CAN
-              // enter is planned as its floor pass below.
+              // THE BALL FITS BY ITS DROP-CUTTER, NOT BY AN XY EROSION. Eroding the strip's
+              // polygon assumes VERTICAL walls; a strip between sloping faces (the tray's scoops,
+              // the organizer's bowl) is reached by a ball whose disc bridges them, because the
+              // CL rides the DESIGN and the tip stays within the band of the design across the
+              // strip. Fit = the share of the strip's own cells whose tip (CL − R) lands within
+              // the plan's 0.1 mm goal band of the design; the pass is planned only when that
+              // share is ≥ 90 % (a strip of truly vertical walls fails it — the synthetic
+              // fixture — and is then stated as standing instead of planned as air).
               const ballRadiusMm = ball === undefined ? 0 : (cuttingDiameter(ball) ?? 0) / 2;
-              const ballFits = kept.length > 0 && ballRadiusMm > 0 && (() => {
-                const eroded = offset(kept, -ballRadiusMm);
-                return eroded.length > 0 && Math.abs(areaOf(eroded)) > 1e-9;
-              })();
+              let ballFitShare = 0;
+              let ballFits = false;
+              if (kept.length > 0 && ball !== undefined && ballRadiusMm > 0) {
+                const fitRegion: RemainderRegion = {
+                  id: `${node.id}:fit`,
+                  footprint: kept,
+                  area: Math.abs(areaOf(kept)),
+                  zTop: node.mouthZ,
+                  zBottom: node.floorZ,
+                  triangles: new Uint32Array(0),
+                  slopeDeg: [0, 0],
+                  slopeMedianDeg: 0,
+                  in: 'top',
+                };
+                const cl = clSurface(curvedGeometry, fitRegion, ball, pocketParams.stepOver);
+                let cells = 0;
+                let within = 0;
+                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                for (const ring of kept) {
+                  for (const [x, y] of ring) {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                  }
+                }
+                const FIT_PITCH_MM = 0.5;
+                for (let x = minX; x <= maxX + 1e-9; x += FIT_PITCH_MM) {
+                  for (let y = minY; y <= maxY + 1e-9; y += FIT_PITCH_MM) {
+                    if (!pointInPolygons(kept, x, y)) continue;
+                    const centre = cl.dropCutter(x, y);
+                    const design = topSurfaceAt(bins, x, y);
+                    if (centre === null || design === null) continue;
+                    cells++;
+                    if (centre - ballRadiusMm <= design + 0.1) within++;
+                  }
+                }
+                ballFitShare = cells === 0 ? 0 : within / cells;
+                ballFits = ballFitShare >= 0.9;
+              }
               if (kept.length > 0 && !restOwned && !ballFits) {
-                unreachable.push({ id: node.id, area: Math.abs(areaOf(kept)) });
+                unreachable.push({ id: node.id, area: Math.abs(areaOf(kept)), fitShare: ballFitShare });
               }
               if (kept.length > 0 && !restOwned && ballFits) {
                 // The design's own top over the strip, clamped exactly as the #982 floors are.
@@ -1214,15 +1261,22 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
                     if (y > maxY) maxY = y;
                   }
                 }
+                // Sampled INSIDE the strip only: its bbox reaches over the pocket's rim, and a
+                // bbox scan read the part's TOP there — the #982 clamp then collapsed a small
+                // pocket's strip to a zero-depth region at the mouth (measured on the organizer's
+                // fourteen small strips: topZ = bottomZ = −0.80, a pass that cut nothing).
                 for (let x = minX; x <= maxX + 1e-9; x += 0.5) {
                   for (let y = minY; y <= maxY + 1e-9; y += 0.5) {
+                    if (!pointInPolygons(kept, x, y)) continue;
                     const top = topSurfaceAt(bins, x, y);
                     if (top !== null && top > designMax) designMax = top;
                   }
                 }
                 const zBottom = Number.isFinite(designMax) ? Math.max(node.floorZ, designMax) : node.floorZ;
+                const stripId = `${node.id}:floor-strip`;
+                stripDesign.set(stripId, (x, y) => topSurfaceAt(bins, x, y));
                 regions.push({
-                  id: `${node.id}:floor-strip`,
+                  id: stripId,
                   footprint: kept,
                   area: Math.abs(areaOf(kept)),
                   zTop: node.mouthZ,
@@ -1477,26 +1531,44 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       const cutIds: string[] = [];
       const unreachable = unplannedStrips.filter((s) => !alreadyStated.has(s.id));
       const uncutIds: string[] = unreachable.map((s) => s.id);
-      const uncutWhy: string[] = unreachable.map((s) => `${s.id}: ${s.area.toFixed(1)} mm², no owned cutter fits it`);
+      const uncutWhy: string[] = unreachable.map(
+        (s) => `${s.id}: ${s.area.toFixed(1)} mm², the ball reaches ${(s.fitShare * 100).toFixed(0)} % of it within the 0.1 mm band`,
+      );
       for (const strip of plannedStrips) {
-        let deepest: number | null = null;
+        // THE CELLS THE PASS ACTUALLY REACHES, not "a feed exists": every 0.5 mm cell of the
+        // strip is reached when a feed lies within 0.75 mm of it and at or below the design there
+        // plus the 0.1 mm band. A pass that only clips the strip's ends reads as what it is.
+        const design = stripDesign.get(strip.id);
+        const feeds: { x: number; y: number; z: number }[] = [];
         for (const op of result.ops) {
           if (op.region.id !== strip.id) continue;
           for (const irOp of op.outcome.ir.operations) {
-            for (const m of irOp.moves) {
-              if (m.kind !== 'feed') continue;
-              if (!pointInPolygons(strip.footprint, m.x, m.y)) continue;
-              const above = m.z - strip.zBottom;
-              if (deepest === null || above < deepest) deepest = above;
+            for (const m of irOp.moves) if (m.kind === 'feed') feeds.push({ x: m.x, y: m.y, z: m.z });
+          }
+        }
+        let cells = 0;
+        let reached = 0;
+        if (design !== undefined) {
+          const xs = strip.footprint.flatMap((ring) => ring.map((p) => p[0]));
+          const ys = strip.footprint.flatMap((ring) => ring.map((p) => p[1]));
+          for (let x = Math.min(...xs); x <= Math.max(...xs) + 1e-9; x += 0.5) {
+            for (let y = Math.min(...ys); y <= Math.max(...ys) + 1e-9; y += 0.5) {
+              if (!pointInPolygons(strip.footprint, x, y)) continue;
+              const top = design(x, y);
+              if (top === null) continue;
+              cells++;
+              if (feeds.some((f) => Math.hypot(f.x - x, f.y - y) <= 0.75 && f.z <= top + 0.1)) reached++;
             }
           }
         }
+        const share = cells === 0 ? 0 : reached / cells;
         const nodeId = strip.id.replace(/:floor-strip$/, '');
-        if (deepest !== null && deepest <= 0.1) {
+        if (alreadyStated.has(nodeId)) continue;
+        if (share >= 0.9) {
           cutIds.push(nodeId);
         } else {
           uncutIds.push(nodeId);
-          uncutWhy.push(`${nodeId}: ${deepest === null ? 'no feed reaches it' : `${deepest.toFixed(2)} mm above its floor`}`);
+          uncutWhy.push(`${nodeId}: the pass reaches ${(share * 100).toFixed(0)} % of it within the 0.1 mm band`);
         }
       }
       const ballName = ball === undefined ? 'ball' : ball.name || ball.shape;
@@ -3729,14 +3801,14 @@ export interface PlanTreeOptions {
    * hook is called with this plan's rest cutters and returns the strips to plan as the ball's own
    * floor passes plus the ones nothing can reach.
    */
-  floorStrips?: (restCutters: readonly Tool[]) => PlanningFloorStrips;
+  floorStrips?: (restCutters: readonly Tool[], alreadyStated: ReadonlySet<string>) => PlanningFloorStrips;
   offset: OffsetFn;
 }
 
 /** #1021 — see {@link PlanTreeOptions.floorStrips}. */
 export interface PlanningFloorStrips {
   regions: RemainderRegion[];
-  unreachable: { id: string; area: number }[];
+  unreachable: { id: string; area: number; fitShare: number }[];
 }
 
 export interface PlanTreeResult {
@@ -3890,6 +3962,7 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
   // as rest can own a strip.
   const stripped: PlanningFloorStrips | undefined = opts.floorStrips?.(
     pocketResult.choice.steps.filter((step) => step.kind === 'rest').map((step) => step.cutter.tool),
+    new Set(pocketResult.statements.flatMap((st) => st.ids ?? [])),
   );
   const extraRegions = [...(opts.curved.extraRegions ?? []), ...(stripped?.regions ?? [])];
   const curvedResult = planCurvedForTree(tree, {
