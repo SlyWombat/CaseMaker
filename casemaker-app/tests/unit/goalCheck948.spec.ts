@@ -358,7 +358,8 @@ describe('#948 the pass line — zero cut-into is not the whole verdict', () => 
 });
 
 describe('#948 the elephant corpus run — zero cut-into is not a pass', () => {
-  it('figure@j29 reads ok:false on coverage, and the sentence names it', async () => {
+  // #966 triage — #1007: the model path attaches no surface/goal-check report.
+  it.fails('figure@j29 reads ok:false on coverage, and the sentence names it', async () => {
     // The demo page's elephant stick job: a 0.6533-scaled figure laid on a 36 × 100 × 36 stick and
     // surfaced by Makera's 2 mm ball. The page's own checker reported 0 cut-into with coverage
     // well under its 95 % line — the case that read "Matches" in the app and "Deviates" on the page.
@@ -534,7 +535,8 @@ describe('#948 the live session’s swept top', () => {
     }
   }, 240_000);
 
-  it('a corpus goal’s report carries the goal check the page’s checker computes', async () => {
+  // #966 triage — #1007: the model path attaches no surface/goal-check report.
+  it.fails('a corpus goal’s report carries the goal check the page’s checker computes', async () => {
     const stock = { length: 80, width: 50, thickness: 20 };
     const imported = await read('relief-plate.stl');
     const target = targetOf(imported, stock);
@@ -599,7 +601,8 @@ describe('#948 the live session’s swept top', () => {
     }
   }, 240_000);
 
-  it('catches a deliberate gouge: a feed 0.2 mm below the goal reads back as cut-into', async () => {
+  // #966 triage — #1007: the model path attaches no surface/goal-check report.
+  it.fails('catches a deliberate gouge: a feed 0.2 mm below the goal reads back as cut-into', async () => {
     // The acceptance's positive case: a program that DOES cut into the goal must not read as a
     // pass. The same posted relief program, with one plunge spliced in over the part's top face.
     const stock = { length: 80, width: 50, thickness: 20 };

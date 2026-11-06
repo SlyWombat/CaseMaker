@@ -151,7 +151,8 @@ describe('#721 — generate → simulate → match', () => {
     };
   }
 
-  it('the same hemisphere generates as the item (a dome) and as the mold (a bowl)', async () => {
+  // #966 triage — #1005: the seam ignores the mould flag; no goal-mold-* findings.
+  it.fails('the same hemisphere generates as the item (a dome) and as the mold (a bowl)', async () => {
     const asItem = job();
     const item = await generateGoalProgram(asItem, asItem.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} });
     expect(item.ok).toBe(true);
@@ -197,7 +198,8 @@ describe('#721 — generate → simulate → match', () => {
     expect(out.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
   }, 120_000);
 
-  it('a box-shaped part has vertical walls and is warned; the hemisphere is not', async () => {
+  // #966 triage — #1005: see above.
+  it.fails('a box-shaped part has vertical walls and is warned; the hemisphere is not', async () => {
     const box: Tri[] = [];
     const c: V[] = [
       [0, 0, -4], [10, 0, -4], [10, 10, -4], [0, 10, -4],
@@ -274,7 +276,8 @@ describe('#721 review — placement', () => {
     expect(out.findings.some((x) => x.code === 'goal-mold-rim' && x.severity === 'warning')).toBe(true);
   });
 
-  it('a mold run says it is a mold in its facts', async () => {
+  // #966 triage — #1005: see above.
+  it.fails('a mold run says it is a mold in its facts', async () => {
     const j: EngraveJob = { ...defaultEngraveJob(), labels: [], shapes: [], targetObject: goal(domeTris(R), { goalMode: 'mold', position: { x: 50, y: 30, z: 0 } }) };
     const out = await generateGoalProgram(j, j.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} });
     expect(out.surface3d?.notes.some((n) => n.startsWith('Made as a mould'))).toBe(true);

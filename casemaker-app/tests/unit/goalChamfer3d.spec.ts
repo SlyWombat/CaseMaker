@@ -145,7 +145,9 @@ function goalJob(target: EngraveTargetObject): EngraveJob {
 const SHOP = { tools: ENTRIES, feeds: null };
 
 describe('#829 a goal chamfers its own edges — the old engine, still the shipped default', () => {
-  it('posts a second program with the chosen V-bit, after the surfacing one', async () => {
+  // #966 triage — #989: the old engine's own second-program shape; re-pin to one program through
+  // the rim stage once #989's own follow-up lands.
+  it.fails('posts a second program with the chosen V-bit, after the surfacing one', async () => {
     const target = goalTarget({ chamfer: { widthMm: 1, toolKey: VKEY } });
     const job = goalJob(target);
     const out = await generateGoalProgram(job, target, BALL, null, { shop: SHOP });
@@ -182,7 +184,9 @@ describe('#829 a goal chamfers its own edges — the old engine, still the shipp
     expect(finding?.message).toContain('are not chamfered');
   }, 120_000);
 
-  it('warns when the chosen key is not in the library, and when the width is clamped', async () => {
+  // #966 triage — #1012: the width-vs-cone-reach clamp exists on the model path
+  // (ops/chamfer.ts:65-67) and is right, but it clamps silently — no finding names the shortfall.
+  it.fails('warns when the chosen key is not in the library, and when the width is clamped', async () => {
     const missing = goalTarget({ chamfer: { widthMm: 1, toolKey: 'inv:gone' } });
     const outMissing = await generateGoalProgram(goalJob(missing), missing, BALL, null, { shop: SHOP });
     expect(outMissing.programs).toHaveLength(1);

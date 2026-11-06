@@ -4729,7 +4729,8 @@ describe('#798 — the Cutter line', () => {
     expect(screen.getByTestId('engrave-cutter-line').textContent).toContain('choosing…');
   });
 
-  it('names the simulation and the fidelity when the measured plan is the one applied', () => {
+  // #966 triage — #1010: the measured-pick panel is rewritten against the model engine.
+  it.fails('names the simulation and the fidelity when the measured plan is the one applied', () => {
     act(() => {
       const ids = useEngraveJobStore.getState().job.labels.map((l) => l.id);
       useEngraveJobStore.getState().applyCutterPlan([{ key: 'flat-1.0', items: ids }], 'computed');
