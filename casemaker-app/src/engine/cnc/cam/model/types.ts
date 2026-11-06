@@ -81,7 +81,12 @@ export type PlanFindingCode =
   | 'goal-mold-rim'
   | 'goal-mold-floor'
   | 'goal-mold-one-sided'
-  | 'goal-mold-no-draft';
+  | 'goal-mold-no-draft'
+  // #1021 — a pocket floor strip narrower than the primary flat's own ring (its opening is
+  // empty there) IS finished, by the ball, as its own floor pass. Good news, stated once per
+  // setup with the pocket ids and count — never the #982 fallback's `goal-region-uncut` (that
+  // one means left uncut; this one means covered a different way).
+  | 'goal-pocket-floor-rest';
 
 /**
  * #721/#1005 — the steepest cavity wall a mould is cut with before it is warned as having no

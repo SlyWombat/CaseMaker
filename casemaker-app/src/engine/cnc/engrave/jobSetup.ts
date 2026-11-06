@@ -432,6 +432,10 @@ export type JobFindingCode =
   // the #961 line, the V floor and the crease/scallop numbers).
   | 'goal-not-freed'
   | 'goal-region-uncut'
+  // #1021 — a pocket floor strip narrower than the primary flat's ring IS finished, by the ball,
+  // as its own floor pass. Info, one per setup with the ids and the count — never the
+  // `goal-region-uncut` warning above, which means material stands.
+  | 'goal-pocket-floor-rest'
   | 'goal-cutter-substituted'
   | 'goal-skin-standing'
   | 'goal-rim-unbroken'
