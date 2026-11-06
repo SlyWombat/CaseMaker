@@ -40,7 +40,7 @@ import { cutterKeyOf } from '../sequence';
 import type { PocketNode } from '../features';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
 import type { DropCutterMesh } from '../dropcutter';
-import { binnedReachableTriangles, clippedTriangleToSquare, planeMaxOverPolygon, planeMaxOverSquare, triangleBinsFor } from '../triangleBins';
+import { binnedReachableTriangles, clippedTriangleToSquare, isNearVertical, planeMaxOverPolygon, planeMaxOverSquare, triangleBinsFor } from '../triangleBins';
 
 /**
  * #1003 (6b's rule, the manager's correction) — DOES A TRIANGLE OVERLAP THE POCKET'S REGION WITH
@@ -548,6 +548,11 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
           let m = Number.NEGATIVE_INFINITY;
           for (const t of binnedReachableTriangles(bins, (x0 + x1) / 2, (y0 + y1) / 2, reach)) {
             if (!overlapsRegion(t)) continue;
+            // #1020 (C's review) — a near-vertical facet (within ~3° of vertical) is "no real
+            // ceiling here" for THIS bound specifically — never folded into the shared `planeA`
+            // classification (`isNearVertical`'s own doc: that would drop a real facet contact
+            // from every op's CL, a possible gouge on a drafted wall touched in its interior).
+            if (isNearVertical(bins, t)) continue;
             let covered = fullyInside;
             if (!covered && anyInside) {
               // A cell on the pocket's edge: the cheap positive-overlap proof. If the triangle
