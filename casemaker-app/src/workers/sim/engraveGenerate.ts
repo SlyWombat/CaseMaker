@@ -6718,8 +6718,18 @@ async function generateGoalPrograms(
   // #1006 — THE SIDE'S OWN FACE. `JobSetup.orientation.top` names the stock face that is up in
   // that setup; a side the operator saved is authoritative, so its plan takes that one setup's
   // frame instead of the geometry-derived decision (see `buildModelPlanInputForGoal`'s `sideFace`).
-  const faceOfSide = (side: GoalSide): 'top' | 'bottom' => (side.setup.orientation.top === 'bottom' ? 'bottom' : 'top');
+  // #1005 — NOT FOR A MOULD: its cavity is built in the work frame and turned over inside the
+  // solid; rotating that plan by the physical mount double-flips it, and the tree reads an open
+  // surface instead of a cavity. A mould side plans in its authored frame.
+  const faceOfSide = (side: GoalSide): 'top' | 'bottom' | undefined =>
+    isMold(side.goal) ? undefined : side.setup.orientation.top === 'bottom' ? 'bottom' : 'top';
+  // #1006 — THE SIDE'S OWN TOOLS ARE THE OPERATOR'S AUTHORITY, EXCEPT ON A MOULD. #1005/6b's ruling
+  // (b) — a flat that cannot reach counts as no flat, per feature — is the real fix and is not in
+  // yet; until it lands, a mould's plan does not inherit the side's stated flats, because the
+  // cavity's tightest corner can be below every cutter's diameter and the sequence search then
+  // refuses the whole job. The mould plans with the caller's own cutter (the old path's rule).
   const shopForSide = (side: GoalSide): EngraveShopOpts => {
+    if (isMold(side.goal)) return shop;
     const keys = side.setup.tools ?? [];
     if (keys.length === 0) return shop;
     const have = new Set((shop.tools ?? []).map((e) => e.key));

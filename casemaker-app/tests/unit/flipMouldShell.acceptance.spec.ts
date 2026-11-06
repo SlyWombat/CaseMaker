@@ -43,11 +43,11 @@ import {
   type GoalHeightfield,
 } from '@/engine/cnc/engrave/goalHeightfield';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
-import { engraveGenerate, generateGoalProgram } from '@/workers/sim/engraveGenerate';
+import { buildModelPlanInputForGoal, engraveGenerate, generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
 import { parseGcode } from '@/engine/cnc';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
-import { USE_MODEL_CAM_ENGINE } from '@/engine/cnc/cam/model/plan';
+import { planModelCam, USE_MODEL_CAM_ENGINE } from '@/engine/cnc/cam/model/plan';
 import { createSimSession } from '@/workers/sim/session';
 import { goalSides, jobSetups, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { carriedMaps, carryPointBetweenSetups, flipAxisOf, orient, setupPinReference, type CarrySetup } from '@/engine/cnc/setups';
@@ -301,10 +301,17 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
   // #755 — the grid follows the finish when it can: a 0.05 mm finish on a ⌀3 ball would need more
   // finishing tip-field evaluations than the run's budget allows, so the job settles at the grid it
   // would have used and STATES that pitch and the cap that bound — never refusing the job.
-  it('#755 — a finish step-over finer than the sampled grid is followed or the cap that bound is stated', async () => {
+  it('#755 — a finish step-over finer than the sampled grid is followed or the cap that bound is stated', async (ctx) => {
     const out = await fine();
     expect(out.ok).toBe(true);
-    const grid = out.surface3d!.gridPitchMm!;
+    const grid = out.surface3d?.gridPitchMm;
+    // #1005 — the model engine has no global goal grid and no finish cap, so this finding has
+    // nothing to state on it; the finding's code goes with the budget family (#1009, A), and the
+    // finish-step-over facts are #1007's (E). Stated, not silently green.
+    if (grid === undefined) {
+      ctx.skip();
+      return;
+    }
     const stated = out.findings.find((f) => f.code === 'goal-finish-finer-than-grid');
     if (grid > 0.05) {
       expect(stated).toBeDefined();
@@ -320,17 +327,23 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
 
   // #755 — and when the heightfield's cell cap binds, the run STATES the pitch it settled on rather
   // than refusing the job (the maintainer's rule: inform, don't refuse).
-  it('#755 — a cap-bound grid is stated with the pitch it settled on, not refused', async () => {
+  it('#755 — a cap-bound grid is stated with the pitch it settled on, not refused', async (ctx) => {
     const j = job(goal(zOut, { surface: { finishStepOverMm: 0.005, scallop: false } }));
     const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
     expect(out.ok).toBe(true);
+    // #1005 — heightfield-only fact: the model engine has no goal grid and no cap (#1009, A).
+    const gridPitchMm = out.surface3d?.gridPitchMm;
+    if (gridPitchMm === undefined) {
+      ctx.skip();
+      return;
+    }
     const f = out.findings.find((x) => x.code === 'goal-finish-finer-than-grid');
     expect(f).toBeDefined();
     expect(f!.severity).toBe('warning');
     expect(f!.message).toContain('the finish passes are 0.005 mm apart');
-    const settled = Number(out.surface3d!.gridPitchMm!.toFixed(4));
+    const settled = Number(gridPitchMm.toFixed(4));
     expect(f!.message).toContain(`known every ${settled} mm`);
-    expect(out.surface3d!.gridPitchMm!).toBeGreaterThan(0.005);
+    expect(gridPitchMm).toBeGreaterThan(0.005);
     // #945 — the overcut guard now tries several candidate points per covered cell instead of
     // one (it has to, to catch a steep column pair a single lateral-nearest point missed); at
     // this stress case's cell count that costs real wall time, past the old 120 s bound.
@@ -487,7 +500,10 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
           ],
     );
     if (USE_MODEL_CAM_ENGINE) {
-      expect(out.programs.map((p) => p.toolKey)).toEqual(['flat-3.175x12-metal', '3 mm ball nose', 'flat-3.175x12-metal']);
+      // Side 2 is a MOULD: its stated 3.175 flat is not carried into the cavity's plan (#1005's
+      // seam guard — 6b's per-feature reach ruling is the real fix, pinned below), so its program
+      // is cut by the job's ball.
+      expect(out.programs.map((p) => p.toolKey)).toEqual(['flat-3.175x12-metal', '3 mm ball nose', '3 mm ball nose']);
       expect(new Set(out.programs.map((p) => p.nc)).size).toBe(3);
     }
 
@@ -524,8 +540,9 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     expect(ref!.confirm!.options[ref!.confirm!.correct]).toBe('the pin 4 mm from the left edge');
   }, 600_000);
 
-  const wallIt = USE_MODEL_CAM_ENGINE ? it.fails : it;
-  wallIt('the two sides leave the wall in band — #1005 mould mode owes this on the model engine', async () => {
+  // #1005 — the wall is judged, not waived: the mould mode made this pass on the model engine, so
+  // the #1006 pin (`it.fails` naming #1005) is flipped here, as its own comment demanded.
+  it('the two sides leave the wall in band', async () => {
     // #1005 — THE WALL. The two sides must leave the shell's wall in band everywhere. On the
     // MODEL ENGINE this is RED today and pinned as `it.fails` naming #1005: the input carries no
     // `goalMode: 'mold'`, so side 2's cavity is cut ~3.25 mm shallow (measured wall map of the
@@ -645,4 +662,23 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
       session.dispose();
     }
   }, 600_000);
+
+  // #1005 / 6b's per-feature reach issue — RED-FIRST. A stated flat that cannot reach the mould's
+  // tightest corner must count as ABSENT FOR THAT FEATURE (the corner becomes stated leftover),
+  // never as a refusal of the whole job. Measured with the sequence probe on this fixture's side
+  // 2: one pocket, depth 14.75 mm, minOpening 0.541 mm; the 3.175 mm flat reaches the curved
+  // demand but `canCutSomething` is false, no ball is admitted either, and
+  // `candidateSequences` returns no primary, so `planModelCam` refuses everything with "no cutter
+  // sequence can be planned for this demand". The seam's #1005 guard keeps the app path off this
+  // today (a mould side plans with the job's cutter), so the seam's own input is built directly,
+  // exactly as it would be built with the stated flat in the shop. `it.fails` until the per-
+  // feature fallback lands; flip it to a plain `it` then.
+  it.fails('a stated 12 mm flat on a deep cavity is a per-feature absence, not a refusal (6b\'s reach issue)', async () => {
+    const job = oneJob();
+    const flat = entryFor('flat-3.175x12-metal');
+    expect(flat, 'the fixture names a real library flat').not.toBeNull();
+    const input = await buildModelPlanInputForGoal(job, job.targetObjects![1]!, BALL_TOOL, { tools: [flat!] });
+    const out = await planModelCam(input);
+    expect(out.perSetup.flatMap((s) => s.programs).length, 'no program was planned').toBeGreaterThan(0);
+  }, 300_000);
 });
