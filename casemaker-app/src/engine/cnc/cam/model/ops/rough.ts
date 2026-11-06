@@ -477,26 +477,41 @@ export function rough(opts: RoughOpOptions): OpOutcome {
         DEFAULT_SHORT_HOP_DIAMETERS * 2 * toolRadius,
         pitch,
       ) &&
-        // #982 — THE BALL-AS-ROUGH FALLBACK PROVES THE RIDE EXACTLY. `ridesCutSurface` reads the
-        // standing field along the join's CENTRE line only; the ball's disc reaches a full radius
-        // sideways, and the centre-only proof let a 3.6 mm ride cut 0.44 mm into the part beside it
-        // (the balls-only elephant, op 4's join at y = 19.236). The exact CL at a point already
-        // accounts for the whole disc — the ball's tip there first touches the design — so the
-        // ride must also pass `pathClClear` against the surface, the same necessary proof the
-        // link above/retract below uses. Off for the flat, whose own path is unchanged.
-        (opts.cutPointInRegion !== true ||
-          pathClClear(from, to, (x, y) => opts.clSurface.dropCutter(x, y), Math.max(pitch / 4, 0.05), opts.clSurface.toleranceMm));
+        // #982/#1001 — EVERY CUTTER PROVES THE RIDE EXACTLY. `ridesCutSurface` reads the standing
+        // field along the join's CENTRE line only — a GRID of point samples — so a rise between
+        // its samples is invisible; the ball's disc reaching sideways let a 3.6 mm ride cut
+        // 0.44 mm into the part beside it (#982, the balls-only elephant), and the flat's disc
+        // reaches a full radius too: the organizer STL row's (57.1, 99.8) cell is a flat skim
+        // join whose grid proof passed and whose 20° descent cut 0.186 mm into the slope beside
+        // it (#1001). The exact CL at a point already accounts for the whole disc — the tip there
+        // first touches the design — so the ride must also pass `pathClClear` against the surface,
+        // the same necessary proof the link above/retract below uses, for every cutter (#982 had
+        // it on for the ball fallback only; the flat's own joins are proven now too).
+        pathClClear(from, to, (x, y) => opts.clSurface.dropCutter(x, y), Math.max(pitch / 4, 0.05), opts.clSurface.toleranceMm);
       if (rides) {
         const f = to.z < from.z - 1e-9 ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
         moves.push({ kind: 'feed', x: to.x, y: to.y, z: to.z, f });
       } else {
         // THE DIP CLASS: follow the skim's own target where the chord would dip below it — the
         // ball cuts the band's rise exactly as the rows either side do, never below the CL.
+        // #1001 — THE FOLLOW READS THE EXACT CL, not the grid: the grid's per-cell values are what
+        // the join just failed to chord over, so following them would repeat the point-sample
+        // blindness. The skim's own CUT MASK still decides where the join may follow at all (a
+        // cell outside the band or the region is a retract, unchanged); inside it, the height is
+        // the cutter's own drop-cutter value at the sample.
         const follow = followLinearCutSurface(
           { x: from.x, y: from.y, z: from.z },
           { x: to.x, y: to.y, z: to.z },
-          (x, y) => skimTarget(Math.round((x - min[0]) / pitch), Math.round((y - min[1]) / pitch)),
-          pitch,
+          (x, y) => {
+            const i = Math.round((x - min[0]) / pitch);
+            const j = Math.round((y - min[1]) / pitch);
+            if (skimTarget(i, j) === null) return null;
+            return opts.clSurface.dropCutter(x, y);
+          },
+          // #1001 — the follow samples at the PROOF's own spacing, not the grid's: a chord between
+          // 0.5 mm samples of a convex CL dips below it between them, which is the very blindness
+          // the proof just caught (the organizer's residual 7.7e-7 came from this).
+          Math.max(pitch / 4, 0.05),
           Number.NEGATIVE_INFINITY,
           opts.feeds,
           opts.rapid,
