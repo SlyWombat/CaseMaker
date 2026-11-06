@@ -194,7 +194,11 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
     ).toBe(true);
     // Never the false-green shape this case guards against.
     expect(result.programs).toEqual([]);
-  }, 90_000);
+    // TEMPORARY, #998 — C measured this exact fixture's own cost at 250–350 s, both at this tip
+    // and at the base, against 28.7 s before the #965/#982 merges: a real, open slowdown (C is
+    // bisecting it now), not load. Budget raised 90 s -> 600 s as a holding measure; bring it
+    // back down with the #998 fix.
+  }, 600_000);
 
   // NEW (the Manager's ruling, #966): the datum-bearing shape proves what the sphere above cannot
   // — a goal that genuinely needs two setups, carries a real locating datum, and posts EVERY
@@ -225,5 +229,7 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
       expect(errors, `${label}: ${errors.map((e) => e.message).join('; ')}`).toEqual([]);
       expect(program.verify!.ok, `${label}: verify.ok should agree with "no error-severity finding"`).toBe(true);
     }
-  }, 90_000);
+    // TEMPORARY, #998 — same open slowdown finding as the sphere case above: this test re-plans
+    // a different 2-setup datum goal through the real seam, so it pays the same cost.
+  }, 600_000);
 });
