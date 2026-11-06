@@ -25,6 +25,23 @@ Each card's `vendorScore` is the page's own measurement:
 `vendorEstimateSeconds` is #927 on the vendor's file, printed beside their TIME as a calibration
 figure; it is never the vendor's line.
 
+## Harness environment (the acceptance specs)
+
+The specs that plan the licensed parts read these from the environment; a missing one skips with a
+stated reason, never guesses:
+
+- `CM_MAKERABLES` — the Makerables root (the STEPs, the `.stl` beside each, the vendor NC). Default
+  `.scratch/makerables` under the checkout. **A worktree or a second checkout has no `.scratch` of
+  its own: point it at the machine's root explicitly**
+  (`CM_MAKERABLES=/…/Case Maker/.scratch/makerables`), or every reference card scores as
+  "unreferenced" and the seven-line gate fails on the vendor score rather than on the plan.
+- `CM_959_TRAY_STEP` / `CM_959_ORGANIZER_STEP` — the two licensed STEPs the acceptance cards plan;
+  absent, their tests skip with a stated reason.
+- `CM_959_OUT` — where a run writes its receipts (`-plan.json`, `-posted-facts.json`, `-pics.json`);
+  absent, nothing is written and the run still measures.
+- `CM_CATALOGUE` — a full Makera catalogue JSON for the cutter rows; absent, the catalogue door is
+  opted out and the cards say so.
+
 ## CL surface (`cl/*.json`)
 
 Three analytic meshes — a horizontal plane, a 26.57° ramp and a two-level step — dropped with
