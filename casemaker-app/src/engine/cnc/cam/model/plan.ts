@@ -1096,10 +1096,15 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const usableLengthMm = (t: Tool): number | null => t.shoulderLength ?? t.fluteLength;
     const curvedFlatFor = (r: RemainderRegion): Tool | null => {
       const depth = tree.frame.stockTop - r.zBottom;
-      return flats.find((t) => {
+      const reaching = flats.find((t) => {
         const usable = usableLengthMm(t);
         return usable !== null && usable + 1e-9 >= depth;
-      }) ?? null;
+      });
+      // A region no flat reaches is the BALL's rough, exactly as #982's no-flat path does it (the
+      // ball in the rough's own slot, every cut point proven inside the region) — never a bare "no
+      // rough", which hands the region's whole depth to the finish and churns the tip field for
+      // minutes (measured: the both-sides job's side 1 ran past 10 minutes that way).
+      return reaching ?? ball ?? null;
     };
     const curvedRoughSubstitutions: string[] =
       !noFlatFallback && flats.length > 0 && input.curvedRoughTool === undefined

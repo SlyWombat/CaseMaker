@@ -377,21 +377,19 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
       [1, 'setup-2', 'shell-in'],
     ]);
 
-    // ONE job, THREE programs: side 1's outside as the #869 two-program shape — the side's stated
-    // flat takes the rough, the passed ball the finish (the operator's stated values win; the
-    // manager's #1006 ruling, 2026-11-06) — then side 2's mold, each on its own setup.
+    // ONE job, TWO programs: each side's outside/cavity is deeper than the side's stated 12 mm
+    // flat can reach (#1019's per-region reach — the shell's crown ~17 mm, the mould's cavity
+    // ~17 mm), so the ball roughes and finishes each side on its own setup, and the flat is
+    // stated `goal-rough-unreachable` rather than sent too deep (the holder gate stays silent).
     const out = await engraveGenerate(tl, job, BALL_TOOL, [], null, undefined, {});
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
-    // The model engine honours the side's stated flat as the rough (#869), so side 1 is two
-    // programs (rough + finish) and side 2 is one.
     expect(out.programs.map((p) => [p.setupIndex, p.setupId])).toEqual([
-      [1, 'setup-1'],
       [1, 'setup-1'],
       [2, 'setup-2'],
     ]);
-    expect(out.programs.map((p) => p.toolKey)).toEqual(['flat-3.175x12-metal', '3 mm ball nose', 'flat-3.175x12-metal']);
-    expect(new Set(out.programs.map((p) => p.nc)).size).toBe(3);
+    expect(out.programs.map((p) => p.toolKey)).toEqual(['3 mm ball nose', '3 mm ball nose']);
+    expect(new Set(out.programs.map((p) => p.nc)).size).toBe(2);
 
     // The app's own frames, built exactly as the run store builds them: top-up first, bottom-up
     // in the vise second, and the second rotation is the turn the remount states.
@@ -544,4 +542,25 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
       session.dispose();
     }
   }, 600_000);
+
+  // #1019 — THE OPENING, NOT THE FLUTE. A stated flat that cannot ENTER the cavity's 0.541 mm
+  // floor patch must count as absent for that pocket (stated by name and number), never as a
+  // refusal of the whole job. Measured with the sequence probe on this fixture's side 2: one
+  // pocket, depth 14.75 mm, minOpening 0.541 mm; `canCutSomething` was false and the search
+  // returned no primary, so `planModelCam` refused everything with "no cutter sequence can be
+  // planned for this demand". The seam's own input is built directly, exactly as it is with the
+  // stated 12 mm flat in the shop.
+  it('a stated flat that cannot enter the cavity\'s 0.541 mm floor patch is stated unreachable, not a refusal', async () => {
+    const job = oneJob();
+    const flat = entryFor('flat-3.175x12-metal');
+    expect(flat, 'the fixture names a real library flat').not.toBeNull();
+    const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+    const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+    const input = await buildModelPlanInputForGoal(job, job.targetObjects![1]!, BALL_TOOL, { tools: [flat!] });
+    const out = await planModelCam(input);
+    expect(out.perSetup.flatMap((st) => st.programs).length, 'no program was planned').toBeGreaterThan(0);
+    const stated = out.perSetup.flatMap((st) => st.statements).map((st) => st.text).join('\n');
+    expect(stated).toContain('pocket-0');
+    expect(stated).toContain('0.541 mm opening');
+  }, 300_000);
 });

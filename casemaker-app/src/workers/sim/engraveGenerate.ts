@@ -5773,6 +5773,14 @@ async function generateGoalPrograms(
   // that setup; a side the operator saved is authoritative, so its plan takes that one setup's
   // frame instead of the geometry-derived decision (see `buildModelPlanInputForGoal`'s `sideFace`).
   const faceOfSide = (side: GoalSide): 'top' | 'bottom' => (side.setup.orientation.top === 'bottom' ? 'bottom' : 'top');
+  // #1005/#1006 — A MOULD SIDE PLANS IN ITS AUTHORED FRAME (the review's accepted rule, reworded:
+  // a per-setup goal plans in its setup's frame; a shared solid's face goes through frameForFace).
+  // Its cavity solid is built in the work frame and turned over inside the solid, so rotating the
+  // plan again by the PHYSICAL mount double-flips it: measured on the both-sides job, the side-2
+  // plan then reads an open-surface relief and posts nothing ("an open-surface relief: its edge is
+  // the stock beside it; nothing is freed") after a ~450 s plan. E's #1017 twin guard cases own the
+  // full guard; until then the mould side states no side face and plans as authored.
+  const sideFaceFor = (side: GoalSide): 'top' | 'bottom' | undefined => (isMold(side.goal) ? undefined : faceOfSide(side));
   const shopForSide = (side: GoalSide): EngraveShopOpts => {
     const keys = side.setup.tools ?? [];
     if (keys.length === 0) return shop;
@@ -5789,12 +5797,12 @@ async function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: faceOfSide(firstSide), catalogueTools });
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools });
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
   for (const side of sides.slice(1)) {
-    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: faceOfSide(side), catalogueTools });
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools });
     const sideList = sidePrograms(one, side);
     if (sideList === null) return { ...one, programs };
     programs.push(...sideList);
