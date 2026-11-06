@@ -227,7 +227,7 @@ describe('#989 the model engine receives the goal’s own chamfer', () => {
   // asserts the V program by its own tool key and drops the old path's "no refusal" bar.
   it('width 0.5 on the 90° V: the V program posts, every feed at z = −0.5 one tip radius off the edge', async () => {
     const target = goalTarget({ chamfer: { widthMm: 0.5, toolKey: VKEY } });
-    const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
+    const out = await generateGoalProgram(goalJob(target), target, BALL, null, { shop: SHOP });
     expect(out.errors?.map((e) => `${e.stage}: ${e.message}`).join('\n') ?? '').toBe('');
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
     const vPrograms = plannedPrograms(out).filter((p) => p.key === VBIT.name);
@@ -247,7 +247,7 @@ describe('#989 the model engine receives the goal’s own chamfer', () => {
 
   it('a 60° V: leg = width / tan 30° = 0.866, and the PINNED V cuts — not the first chamfer in the house', async () => {
     const target = goalTarget({ chamfer: { widthMm: 0.5, toolKey: V60KEY } });
-    const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
+    const out = await generateGoalProgram(goalJob(target), target, BALL, null, { shop: SHOP });
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
     // The 90° V is in the house too; only the pinned one may post.
     const vPrograms = plannedPrograms(out).filter((p) => p.key === V60.name || p.key === VBIT.name);
@@ -259,7 +259,7 @@ describe('#989 the model engine receives the goal’s own chamfer', () => {
 
   it('no toolKey: no V program, and the plan’s own sentence says the rims stay sharp', async () => {
     const target = goalTarget({ chamfer: { widthMm: 0.5 } });
-    const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
+    const out = await generateGoalProgram(goalJob(target), target, BALL, null, { shop: SHOP });
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
     expect(plannedPrograms(out).filter((p) => p.key === VBIT.name || p.key === V60.name)).toEqual([]);
     const notes = (out.plan?.perSetup ?? []).flatMap((s) => s.notes).join('\n');
@@ -269,7 +269,7 @@ describe('#989 the model engine receives the goal’s own chamfer', () => {
 
   it('a toolKey the house lacks: no V program, and the finding names it', async () => {
     const target = goalTarget({ chamfer: { widthMm: 0.5, toolKey: 'inv:gone' } });
-    const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
+    const out = await generateGoalProgram(goalJob(target), target, BALL, null, { shop: SHOP });
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
     expect(plannedPrograms(out).filter((p) => p.key === VBIT.name || p.key === V60.name)).toEqual([]);
     const finding = out.findings.find((f) => f.code === 'goal-chamfer-no-cutter');
