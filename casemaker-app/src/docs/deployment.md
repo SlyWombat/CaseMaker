@@ -69,6 +69,7 @@ The same Tauri shell builds on Linux as a `.deb` (`Case Maker_1.0.0_amd64.deb`) 
 - Rust stable ≥ 1.90 and Node 22.12+ (24 LTS recommended) in the build environment.
 - `libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev build-essential file curl xz-utils patchelf`.
 - `npm ci` in `casemaker-app/`. The lockfile is generated on Windows, so `npm ci` on Linux skips the Linux-native rolldown binding; add it once with `npm install --no-save "@rolldown/binding-linux-x64-gnu@$(node -p "require('rolldown/package.json').version")"` (#565).
+- `npm ci` runs the package `postinstall` too: `patch-package` applies everything in `casemaker-app/patches/` — today `manifold-3d+3.5.4.patch`, upstream master's two glue deletes for the polygon-conversion leak (#1022). Drop the patch when a manifold-3d release ships them; `tests/unit/manifoldGlueLeak.spec.ts` holds it in place.
 
 **One package (#867).** The same bundle is the desktop app AND the house server. The Rust server embeds `dist/` at compile time, and that one desktop bundle both opens the window and serves LAN browsers: a browser drives the machine through the instance's relay, while the window's own controls — local-file dialogs and the app-server settings — are runtime `isTauri` checks, so a LAN browser is never offered them. It is built once:
 

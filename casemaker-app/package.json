@@ -45,7 +45,8 @@
     "docs:sync": "node scripts/sync-docs.mjs",
     "reference-gcode:fetch": "node scripts/fetch-reference-gcode.mjs",
     "check:sim-gate": "node scripts/check-sim-gate.mjs",
-    "check:platform-gate": "node tools/check-platform-gate.mjs"
+    "check:platform-gate": "node tools/check-platform-gate.mjs",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
@@ -85,6 +86,7 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
     "jsdom": "^29.0.2",
+    "patch-package": "^8.0.1",
     "tsx": "^4.21.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
