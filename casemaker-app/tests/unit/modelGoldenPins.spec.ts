@@ -11,6 +11,29 @@
  *
  *   CASEMAKER_UPDATE_GOLDEN=1 npx vitest run tests/unit/modelGoldenPins.spec.ts
  *
+ * #1011 — WHY THESE THREE PINS MOVED (attributed, 2026-11-06). The values below were regenerated
+ * at 145723b0a; the movement from their previous values (ca0bbabe4) is ONE class — the retract's
+ * down-leg — and every hunk of the three full-text diffs is attributed to one of four commits,
+ * measured by re-running this spec's own generation at each (the reusable runner:
+ * `tests/unit/zzGoldenAttribution.spec.ts`, run under vitest with CM_GOLDEN_OUT, since an older
+ * checkout's ManifoldRuntime cannot load under plain Node):
+ *
+ *   a79bab6ba (#962)           retract()'s down leg tests the cutter's whole disc: a proven-clear
+ *                              drop is FED (`G0 Z-1.5`+cut → `G1 Z-1.5 F300`+cut, and the next
+ *                              move carries its F). old→1: rect-a 4 hunks, rect-b 0, fillet-a 2.
+ *   e956c7228 (6faf88d6, #966) the landing rapid is emitted at the hop (Z1); every rapid straight
+ *                              to a band above the cut becomes `G0 Z1`. 1→2: 11 / 3 / 7 hunks.
+ *   8f5cc4c18 (#1002)          the deep ops hand the landing the previous FINISHED level:
+ *                              `G0 Z1` → `G0 Z-0.5` / `Z-2` / `Z-2.777`. 2→3: 12 / 2 / 7 hunks.
+ *   938a2dc6f (4531ad0f, #1002)  only a FINISHED level lifts a retract landing: `-0.5`→`Z1`,
+ *                              `-2`→`-0.5`, `-2.777`→`-2`, `-2.343`→`-2`. 3→4: 6 / 0 / 3 hunks.
+ *
+ * The final diffs against the previous pins are 9 / 3 / 6 hunks (rect-a / rect-b / fillet-a);
+ * every one is a retract or plunge site above (later steps rewrote the earlier steps' values, so
+ * the step counts sum above the final count), and no hunk is unattributed. A later re-pin repeats
+ * this: run the generation at the old pin's commit and at the tip, diff full text, attribute every
+ * hunk — a hunk nobody can attribute is a finding, not a re-pin.
+ *
  * Bytes that move without a landing note naming the artefact are the defect this spec catches.
  */
 
