@@ -35,6 +35,14 @@
  * this: run the generation at the old pin's commit and at the tip, diff full text, attribute every
  * hunk — a hunk nobody can attribute is a finding, not a re-pin.
  *
+ * #1011 — THE FINAL PASS ON THE POST-#1030 TIP (2026-11-06, 9d8cb1339): REGENERATED, NO BYTES
+ * MOVED. The same runner, run on the tip that carries #1019/#1021/#1022/#1024/#1029/#1030, writes
+ * all three programs byte-for-byte identical to the pins below — 84bce0c3… (19,752 bytes),
+ * 900c5f11… (19,263), 01c66850… (22,563) — so there is no hunk to attribute. These cases run the
+ * house FLATS only (flat-6, flat-3.175, flat-2; no ball), and #1030 changes the ball finish's
+ * joins; the day's other merges moved no posted byte in these programs. The app-path goldens
+ * (badge, 450-laminate-base, single-thin) were green in #1030's own full gate on the same tree.
+ *
  * Bytes that move without a landing note naming the artefact are the defect this spec catches.
  */
 
