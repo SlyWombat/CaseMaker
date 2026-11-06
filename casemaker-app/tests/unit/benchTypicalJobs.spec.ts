@@ -1086,14 +1086,13 @@ describe.skipIf(!existsSync(REAL_JOBS))('#766 slice E the demo set’s no-cutter
    * (three runs), so the pin below runs exactly that and judges its end state.
    *
    * The pin states what the demo's own card rule (#944) judges — the END STATE, not the search:
-   * a plan posts from the house set (the named ball is an `inv:` cutter, and the CLI refuses a key
-   * that does not resolve; the goal's rough, when the engine chooses one, comes from the same
-   * location's tools), the goal check runs, it cuts zero into the goal after the wall and
-   * edge-break exclusions, and the top-surface coverage clears the shop's own pass line (the
-   * demo's 95 %). Measured on this engine: zero cut-into (raw and adjudicated, 0 mm), coverage
-   * 99.19 % (leftover 0.81 % beyond 0.1 mm; 98.3 % of the goal within 0.01 mm) — the old engine
-   * read 82.03 % on the same card. The search itself stays exercised by the other rows above
-   * (j11, j14, j16), which finish in their budget.
+   * the plan posts, the goal check runs, it cuts zero into the goal after the wall and edge-break
+   * exclusions, and the top-surface coverage clears the shop's own pass line (the demo's 95 %).
+   * The measured value on this engine is 99.19 % (leftover 0.81 % beyond 0.1 mm; 98.3 % of the
+   * goal within 0.01 mm) with zero cut-into (raw and adjudicated, 0 mm) — the PIN is the card's
+   * floor, the shop's 95 % line, not this measured number, so a better plan still passes and a
+   * regression below the line fails. The old engine read 82.03 % on the same card. The search
+   * itself stays exercised by the other rows above (j11, j14, j16), which finish in their budget.
    */
   it('j27-mouse-shell-side1 posts a house plan at the demo’s stated budget (zero cut-into, coverage ≥ 95 %)', async () => {
     const { code, receipt } = await cut(
@@ -1101,9 +1100,9 @@ describe.skipIf(!existsSync(REAL_JOBS))('#766 slice E the demo set’s no-cutter
       SCRATCH,
       demoSetLocation(),
     );
-    // The plan is the house's by construction: the job names the demo location's own `inv:` ball,
-    // and the CLI refuses a key that does not resolve (so a house cutter ran), while the goal's
-    // rough — when the engine chooses one — comes from the same location's tool list.
+    // The job names the demo location's own `inv:` long ball (the only cutter in it that reaches
+    // the shell); the CLI refuses a key that does not resolve, so this posting is the plan that
+    // ball cuts.
     expect(code, allDiagnostics(receipt)).toBe(0);
     expect(receipt.command, 'the cut reads as an engrave run').toBe('engrave');
     if (receipt.command !== 'engrave' || receipt.details === null) throw new Error('expected an engrave receipt');

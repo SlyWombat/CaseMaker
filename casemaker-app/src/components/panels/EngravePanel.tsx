@@ -33,7 +33,7 @@ import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds'
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
 import { TOOL_GROUPS, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
-import { setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/engrave/substitution';
+import { setupSubstitutionOfferSentence, setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/engrave/substitution';
 import { useHouseStore } from '@/store/houseStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -2142,42 +2142,42 @@ export function EngravePanel(): JSX.Element {
   // job write — the live "Maximum update depth exceeded" in the computed-job/no-run state — which
   // this retirement removes with it. `measuredApplied` still describes the pressed state, so the
   // fidelity line keeps appearing exactly when the operator applied the measured plan.
-  // #835 — A SETUP'S DEAD CUTTER IS REPLACED BY THAT SETUP'S OWN MEASURED ANSWER. The search
-  // judges one setup at a time, so a multi-setup job's dead keys are measured on the setup each
-  // belongs to (`setupWorkJob`) and the plan is written back into THAT setup only. Applied only
-  // for the job content it was measured on, and never while a run is in flight or a current
-  // result still describes this job — the same guards the job-level substitution keeps. One write
-  // per pass: the write changes the fingerprint, and a remaining setup with a dead key is
-  // measured afresh on the new content.
-  useEffect(() => {
-    if (setupMeasured === null || setupMeasuredJob === null) return;
-    if (setupMeasuredJob !== measureFingerprint(job)) return;
-    const runNow = useEngraveRunStore.getState();
-    if (
-      runNow.phase === 'generating' ||
-      runNow.phase === 'simulating' ||
-      runNow.phase === 'checking' ||
-      (runNow.generated !== null && runNow.staleSince === null)
-    ) {
-      return;
-    }
+  // #1010 (the maintainer's 2026-11-06 ruling) — A SETUP'S DEAD CUTTER IS OFFERED, NOT
+  // SUBSTITUTED. #835 wrote a setup's measured answer into that setup behind the operator — the
+  // same act the job-level auto-apply committed, one level down. The document now keeps what the
+  // operator wrote at both levels: the answer is OFFERED beside the cutter line, the press is the
+  // write, and the substitution record is made only then. The offers are DERIVED (no effect, no
+  // write), so they cannot re-apply themselves, and one appears only for the job content the
+  // answer was measured on and only while a key it was measured for is still dead in that setup.
+  //
+  // The search judges one setup at a time, so a multi-setup job's dead keys are measured on the
+  // setup each belongs to (`setupWorkJob`) and the plan is written into THAT setup only. The
+  // fingerprint cannot see a setup's tool list (that is what lets a write-back keep the answer),
+  // so a setup the operator has since re-cut by hand — or a NEW dead key the search never saw —
+  // gets no offer.
+  // #1010 lint fix — the memo stays: this build has no React compiler, so the rule's "dependency
+  // may be modified later" would cost the dead-key walk on every render of the panel.
+  const setupOffers = useMemo(() => {
+    if (setupMeasured === null || setupMeasuredJob === null || setupMeasuredJob !== measureFingerprint(job)) return [];
     const setups = jobSetups(job);
     const nameOf = (key: string): string => {
       const entry = tools.find((e) => e.key === key);
       return entry === undefined ? key : toolDisplayName(entry.tool).split(' · ')[0]!;
     };
+    const offers: {
+      setupIndex: number;
+      sentence: string;
+      cutters: readonly { key: string; items: readonly string[] }[];
+      records: EngraveSetupSubstitution[];
+    }[] = [];
     for (const { setupIndex, forKeys, pick } of setupMeasured) {
       const setup = setups[setupIndex];
       if (setup === undefined || pick.cutters.length === 0) continue;
-      // ONLY THE DEAD KEYS THIS ANSWER WAS MEASURED FOR ARE ANSWERED. The fingerprint cannot see a
-      // setup's tool list (that is what lets a write-back keep the answer), so a setup the
-      // operator has since re-cut by hand — or a NEW dead key the search never saw — is left
-      // exactly as it is.
       const stillDead = deadSetupKeys(job, tools, setupIndex);
       if (!forKeys.some((key) => stillDead.includes(key))) continue;
       const cutters = pick.cutters;
-      // "Applied" is the whole write, as on the job's cutter: a plan whose keys match but whose
-      // item assignment differs would otherwise be re-applied on every render.
+      // A plan already in the setup has nothing to offer — the same "equal answer writes nothing"
+      // rule the job-level press uses, so the offer disappears the moment it is taken.
       const written =
         setup.tools.length === cutters.length &&
         setup.tools.every((k, i) => k === cutters[i]?.key) &&
@@ -2216,10 +2216,12 @@ export function EngravePanel(): JSX.Element {
           toName: nameOf(to.key),
         });
       }
-      applySetupPlan(setupIndex, cutters, records);
-      return;
+      if (records.length === 0) continue;
+      offers.push({ setupIndex, sentence: records.map(setupSubstitutionOfferSentence).join(' '), cutters, records });
     }
-  }, [setupMeasured, setupMeasuredJob, job, tools, applySetupPlan]);
+    return offers;
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- real memo; no React compiler in this build
+  }, [setupMeasured, setupMeasuredJob, job, tools]);
 
   // ---- #798 — THE CUTTER AS ONE LINE ------------------------------------------------------
   // What is in the spindle, where that answer came from, and — when the measured search chose it
@@ -2807,7 +2809,7 @@ export function EngravePanel(): JSX.Element {
     if (job.toolKey === '' && source !== 'user' && source !== 'measured') {
       const pick = await useEngravePreviewStore.getState().measureNow(job);
       if (pick !== null) {
-        applyCutterPlan(pick.cutters, 'computed', 0, undefined, pick.goalRoughKey);
+        applyCutterPlan(pick.cutters, 'computed', 0, pick.goalRoughKey);
       } else {
         const key = rec?.key ?? (await awaitPreviewRecommendationKey());
         if (key) setTool(key, 'computed');
@@ -3568,6 +3570,23 @@ export function EngravePanel(): JSX.Element {
         </button>
       </div>
 
+      {/* #1010 — A SETUP'S DEAD CUTTER IS OFFERED BESIDE THE CUTTER LINE, never substituted. The
+          measured answer for that setup is drawn with its press; taking it writes THAT setup only
+          and records the substitution the one sentence states. */}
+      {setupOffers.map((offer) => (
+        <p key={offer.setupIndex} style={{ ...MUTED, margin: '4px 0 0' }} data-testid={`engrave-setup-measured-${offer.setupIndex + 1}`}>
+          {offer.sentence}{' '}
+          <button
+            type="button"
+            data-testid={`engrave-use-measured-setup-${offer.setupIndex + 1}`}
+            title="Write this setup's measured plan into the setup, replacing the cutter it does not hold."
+            onClick={() => applySetupPlan(offer.setupIndex, offer.cutters, offer.records)}
+          >
+            Use the measurement for setup {offer.setupIndex + 1}
+          </button>
+        </p>
+      ))}
+
       {/* 1a — the skim of the top (#432 slice 4, decision Q6; #686's one line). On wood and metal
           the choice is one line with its current number; `change` opens the choice and the depth in
           place. An absent `facing` key is the pre-#432 job: nothing has chosen, and the job does not
@@ -4321,7 +4340,7 @@ export function EngravePanel(): JSX.Element {
               <button
                 type="button"
                 data-testid="engrave-use-measured"
-                onClick={() => applyCutterPlan(measuredNow.cutters, 'computed', 0, undefined, measuredNow.goalRoughKey)}
+                onClick={() => applyCutterPlan(measuredNow.cutters, 'computed', 0, measuredNow.goalRoughKey)}
               >
                 Use the recommendation
               </button>

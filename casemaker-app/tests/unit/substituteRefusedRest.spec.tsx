@@ -1,19 +1,14 @@
 // @vitest-environment jsdom
-// #786 slice 6 — THE TWO REFUSALS THAT HAD NO SMART-PICK ANSWER.
+// #786 slice 6 → #1010 — A REFUSED CUTTER OR A DEAD SETUP KEY IS OFFERED, NEVER SUBSTITUTED.
 //
-// Slice 4c-2 substitutes the search's plan for a cutter the operator chose that is MISSING from
-// the library or has no feeds for the material. Two refusals still stopped the job with their
-// sentence alone:
-//
-//   - `tool-refused` — a record the simulator cannot model (here a drill that states no cutting
-//     diameter: the feeds rule exempts drills from its own refusal, so nothing else notices);
-//   - `setup-rest-unavailable` — a setup's LATER cutter key the library no longer holds.
-//
-// Both now hand the job to the measured plan exactly as a missing key does, and a replacement of
-// the operator's own document is RECORDED — the cutter line and the `cutter-substituted` finding
-// print the one substitution sentence, so nothing is replaced silently. The negative control is
-// the other half of the contract: a cutter the CAM models, with the same measured answer waiting,
-// is the operator's choice and is not rewritten.
+// Slice 6 answered two refusals by writing the measured plan into the document behind the
+// operator: `tool-refused` (a record the CAM cannot model — here a drill that states no cutting
+// diameter) and `setup-rest-unavailable` (a setup's later cutter the library does not hold).
+// #1010 (the maintainer's 2026-11-05 ruling, and 11-06 for the setup level) retires both writes:
+// the measured answer is OFFERED — the job-level block's press (`engrave-use-measured`), or a
+// per-setup offer and press for the setup-level one — and the document keeps what the operator
+// wrote until they press it. The negative control is unchanged: a cutter the CAM models, with
+// the same measured answer waiting, is the operator's choice and is not offered a replacement.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
 
@@ -206,7 +201,7 @@ afterEach(() => {
 });
 
 describe('#786 slice 6 — a refused cutter and a missing rest cutter are substituted by the search', () => {
-  it('`tool-refused`: a cutter the simulator cannot model is replaced by the measured plan, and the job says so', () => {
+  it('`tool-refused`: a cutter the simulator cannot model keeps the job, and the measured answer is offered', () => {
     const job = drillJob(KEY_DRILL_SIZELESS, DRILL_SIZELESS);
     act(() => {
       useEngraveJobStore.setState({ job });
@@ -221,17 +216,20 @@ describe('#786 slice 6 — a refused cutter and a missing rest cutter are substi
 
     render(<EngravePanel />);
 
+    // #1010 — nothing is written behind the operator: the refused record stays the document's.
+    const before = useEngraveJobStore.getState().job;
+    expect(before.toolKey).toBe(KEY_DRILL_SIZELESS);
+    expect(before.substitution).toBeUndefined();
+    // The measured answer is OFFERED, and applying it is the press.
+    expect(screen.getByTestId('engrave-pick-measured')).toBeTruthy();
+    expect(screen.getByTestId('engrave-use-measured')).toBeTruthy();
+    act(() => {
+      screen.getByTestId('engrave-use-measured').click();
+    });
     const after = useEngraveJobStore.getState().job;
     expect(after.toolKey).toBe(KEY_DRILL);
-    expect(after.substitution).toMatchObject({
-      fromKey: KEY_DRILL_SIZELESS,
-      reason: 'refused',
-      toKey: KEY_DRILL,
-    });
-    // The one sentence both surfaces print says whose cutter it was and what cuts instead.
-    const note = screen.getByTestId('engrave-cutter-line').textContent ?? '';
-    expect(note).toContain('cannot cut this job');
-    expect(note).toContain('is used instead');
+    // The press applies a plan; it does not record a substitution nobody made.
+    expect(after.substitution).toBeUndefined();
   });
 
   it('the negative control: a cutter the CAM DOES model is the operator’s choice and is never rewritten', () => {
@@ -257,7 +255,7 @@ describe('#786 slice 6 — a refused cutter and a missing rest cutter are substi
   // #835 — THE SAME DRILL IS REFUSED ON A WRAPPED JOB. A turntable column holds one radius per
   // (θ, X), so a drill's cone point has no profile there; the substitution predicate asks the
   // simulator's resolver WITH the job's frame, and the sentence names the cutter that sweeps it.
-  it('#835 — a drill the rotary engine cannot model is substituted, and the sentence names the flat', () => {
+  it('#835 — a drill the rotary engine cannot model keeps the job, and the measured answer is offered', () => {
     const job = rotaryJob(KEY_DRILL, DRILL);
     act(() => {
       useEngraveJobStore.setState({ job });
@@ -272,19 +270,17 @@ describe('#786 slice 6 — a refused cutter and a missing rest cutter are substi
 
     render(<EngravePanel />);
 
-    const after = useEngraveJobStore.getState().job;
-    expect(after.toolKey).toBe(KEY_FLAT);
-    expect(after.substitution).toMatchObject({
-      fromKey: KEY_DRILL,
-      reason: 'refused',
-      toKey: KEY_FLAT,
+    const before = useEngraveJobStore.getState().job;
+    expect(before.toolKey).toBe(KEY_DRILL);
+    expect(before.substitution).toBeUndefined();
+    expect(screen.getByTestId('engrave-use-measured')).toBeTruthy();
+    act(() => {
+      screen.getByTestId('engrave-use-measured').click();
     });
-    const note = screen.getByTestId('engrave-cutter-line').textContent ?? '';
-    expect(note).toContain('cannot cut this job');
-    expect(note).toContain('is used instead');
+    expect(useEngraveJobStore.getState().job.toolKey).toBe(KEY_FLAT);
   });
 
-  it('`setup-rest-unavailable`: a setup’s missing later cutter is replaced, keeping the operator’s program-1 cutter', () => {
+  it('`setup-rest-unavailable`: a setup’s missing later cutter keeps the document until the press', () => {
     const base = defaultEngraveJob();
     const itemIds = base.labels.map((l) => l.id);
     const setups: JobSetup[] = [
@@ -307,25 +303,27 @@ describe('#786 slice 6 — a refused cutter and a missing rest cutter are substi
 
     render(<EngravePanel />);
 
+    const before = useEngraveJobStore.getState().job;
+    expect(before.toolKey).toBe(KEY_FLAT);
+    expect(before.setups?.[0]?.tools).toEqual([KEY_FLAT, MISSING_REST]);
+    expect(before.substitution).toBeUndefined();
+    // The measured pair — the operator's program-1 cutter and the rest — is the OFFER.
+    expect(screen.getByTestId('engrave-use-measured')).toBeTruthy();
+    act(() => {
+      screen.getByTestId('engrave-use-measured').click();
+    });
     const after = useEngraveJobStore.getState().job;
-    // Program 1 is the cutter the operator named; the rest pass's dead key is the plan's ⌀1.
     expect(after.toolKey).toBe(KEY_FLAT);
     expect(after.setups?.[0]?.tools).toEqual([KEY_FLAT, KEY_REST]);
-    expect(after.substitution).toMatchObject({
-      fromKey: MISSING_REST,
-      reason: 'missing',
-      toKey: KEY_REST,
-    });
-    const note = screen.getByTestId('engrave-cutter-line').textContent ?? '';
-    expect(note).toContain(MISSING_REST);
-    expect(note).toContain('is not in the tool library');
   });
 
-  // #835 — A LATER SETUP'S DEAD CUTTER IS MEASURED ON THAT SETUP'S OWN WORK. The whole-job search
-  // refuses a multi-setup job, so the preview store measures each dead setup separately
-  // (`setupWorkJob`); the panel writes the plan into THAT setup and records the substitution, in
-  // the one sentence, naming the setup.
-  it('#835 — a dead key in a LATER setup is replaced by that setup’s plan, and the sentence names the setup', () => {
+  // #835 → #1010 — A LATER SETUP'S DEAD CUTTER IS MEASURED ON THAT SETUP'S OWN WORK, AND OFFERED.
+  // The whole-job search refuses a multi-setup job, so the preview store measures each dead setup
+  // separately (`setupWorkJob`). The panel used to write the plan into that setup behind the
+  // operator; the ruling is the job-level one — the document keeps the dead key, the answer is
+  // OFFERED beside it, and the press (per setup) is the write and the only time the substitution
+  // record is made. This is the red-first the retirement was built against.
+  it('#835 — a dead key in a LATER setup is offered that setup’s plan; the job keeps the key until the press', () => {
     const base = defaultEngraveJob();
     const itemIds = base.labels.map((l) => l.id);
     const setups: JobSetup[] = [
@@ -346,23 +344,39 @@ describe('#786 slice 6 — a refused cutter and a missing rest cutter are substi
 
     render(<EngravePanel />);
 
+    // NOTHING IS WRITTEN BEHIND THE OPERATOR: the dead key stays in its setup, setup 1 and the
+    // document's own cutter are untouched, and no substitution is recorded yet.
+    const before = useEngraveJobStore.getState().job;
+    expect(before.setups?.[1]?.tools).toEqual([MISSING_REST]);
+    expect(before.setups?.[0]?.tools).toEqual([KEY_FLAT]);
+    expect(before.toolKey).toBe(KEY_FLAT);
+    expect(before.setupSubstitutions).toBeUndefined();
+    // The answer is OFFERED, naming the setup and the key it answers.
+    const offer = screen.getByTestId('engrave-setup-measured-2');
+    expect(offer.textContent).toContain('Setup 2');
+    expect(offer.textContent).toContain(MISSING_REST);
+
+    // The press writes THAT setup's plan, records the substitution, and the cutter line states it
+    // in the one sentence, naming the setup. The offer is gone once the plan is in.
+    act(() => {
+      screen.getByTestId('engrave-use-measured-setup-2').click();
+    });
     const after = useEngraveJobStore.getState().job;
-    // The dead key is replaced IN ITS SETUP; setup 1 and the document's own cutter are untouched.
     expect(after.setups?.[1]?.tools).toEqual([KEY_REST]);
     expect(after.setups?.[0]?.tools).toEqual([KEY_FLAT]);
     expect(after.toolKey).toBe(KEY_FLAT);
     expect(after.setupSubstitutions).toMatchObject([
       { setupId: 'setup-2', setupNumber: 2, fromKey: MISSING_REST, reason: 'missing', toKey: KEY_REST },
     ]);
-    // The one substitution sentence says which setup, and both surface it.
     const note = screen.getByTestId('engrave-cutter-line').textContent ?? '';
     expect(note).toContain('Setup 2');
     expect(note).toContain(MISSING_REST);
     expect(note).toContain('is not in the tool library');
     expect(note).toContain('is used instead');
+    expect(screen.queryByTestId('engrave-setup-measured-2')).toBeNull();
   });
 
-  it('#835 — an answer measured on older content is not written into the job', () => {
+  it('#835 — an answer measured on older content is neither written nor offered', () => {
     const base = defaultEngraveJob();
     const itemIds = base.labels.map((l) => l.id);
     const setups: JobSetup[] = [
@@ -386,6 +400,7 @@ describe('#786 slice 6 — a refused cutter and a missing rest cutter are substi
     const after = useEngraveJobStore.getState().job;
     expect(after.setups?.[1]?.tools).toEqual([MISSING_REST]);
     expect(after.setupSubstitutions).toBeUndefined();
+    expect(screen.queryByTestId('engrave-setup-measured-2')).toBeNull();
   });
 
   it('a generated job is offered the answer, never rewritten behind its own program', () => {
