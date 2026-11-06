@@ -42,7 +42,7 @@ const ISLAND_B_X = { x0: 63 + GAP, x1: 63 + GAP + ISLAND_W };
  * bridges it, its tip rides the islands' tops three millimetres above the floor, so the strip is
  * the warning case — nothing planned as air.
  */
-function fixture(kind: 'islands' | 'cones' = 'islands'): { positions: Float32Array; indices: Uint32Array; triangleCount: number; bbox: { min: [number, number, number]; max: [number, number, number] } } {
+function fixture(kind: 'islands' | 'cones' = 'islands', hA = 6, hB = 6): { positions: Float32Array; indices: Uint32Array; triangleCount: number; bbox: { min: [number, number, number]; max: [number, number, number] } } {
   const M = tl.Manifold;
   const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number) =>
     M.cube([x1 - x0, y1 - y0, z1 - z0], true).translate([(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2]);
@@ -59,8 +59,8 @@ function fixture(kind: 'islands' | 'cones' = 'islands'): { positions: Float32Arr
       pocketVoid = pocketVoid.subtract(M.cylinder(6, 4, 2, 64, false).translate([cx, cy, FLOOR]));
     }
   } else {
-    pocketVoid = pocketVoid.subtract(box(ISLAND_A_X.x0, ISLAND_A_X.x1, ISLAND_Y.y0, ISLAND_Y.y1, FLOOR, 0));
-    pocketVoid = pocketVoid.subtract(box(ISLAND_B_X.x0, ISLAND_B_X.x1, ISLAND_Y.y0, ISLAND_Y.y1, FLOOR, 0));
+    pocketVoid = pocketVoid.subtract(box(ISLAND_A_X.x0, ISLAND_A_X.x1, ISLAND_Y.y0, ISLAND_Y.y1, FLOOR, FLOOR + hA));
+    pocketVoid = pocketVoid.subtract(box(ISLAND_B_X.x0, ISLAND_B_X.x1, ISLAND_Y.y0, ISLAND_Y.y1, FLOOR, FLOOR + hB));
   }
   solid = solid.subtract(pocketVoid);
   const mesh = solid.getMesh();
@@ -78,9 +78,9 @@ function fixture(kind: 'islands' | 'cones' = 'islands'): { positions: Float32Arr
 const FLAT2: Tool = flatEndMill(2, { number: 3, id: 'flat-2', name: 'flat-2' });
 const BALL2: Tool = { ...flatEndMill(2, { number: 4, id: 'ball-2', name: 'ball-2' }), shape: 'ball', typeText: 'Ball Nose' };
 
-function inputFor(house: Tool[], kind: 'islands' | 'cones' = 'islands'): ModelPlanInput {
+function inputFor(house: Tool[], kind: 'islands' | 'cones' = 'islands', hA = 6, hB = 6): ModelPlanInput {
   return {
-    geometry: { triangles: fixture(kind) },
+    geometry: { triangles: fixture(kind, hA, hB) },
     setups: [{ frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -T }, underside: 'flatOnStockBottom' }],
     stock: { length: L, width: W, thickness: T, material: 'hardwood' },
     fixture: { mount: 'tape', envelope: null },
@@ -115,6 +115,52 @@ describe('#1021 — the strip between two islands, nothing owned fits it', () =>
     }
     const strip = output.perSetup.flatMap((s) => s.statements).find((s) => s.text.includes('pocket floor strip'));
     expect(strip, 'a catalogue flat outside the chain silenced the strip').toBeDefined();
+  }, 240_000);
+
+  it('the two-height fixture: the pass covers the reachable band only, and the statement names both areas (#1026)', async () => {
+    // Island A (west) 0.1 mm over the floor, island B 6 mm: the ball reaches the floor only in a
+    // 0.3 mm band beside the low island. The fit plans the pass over that band alone (the mask
+    // drops every point whose CL stands above the band), so no row climbs the tall wall.
+    const output = await planModelCam(inputFor([FLAT6, BALL6], 'islands', 0.1, 6));
+    const statements = output.perSetup.flatMap((s) => s.statements);
+    const strip = statements.find((s) => s.code === 'goal-pocket-floor-rest' && s.text.includes('floor strip'));
+    expect(strip, `no floor-strip statement; statements: ${statements.map((s) => `${s.code}: ${s.text}`).join(' | ')}`).toBeDefined();
+    expect(strip!.severity).toBe('info');
+    const m = /(\d+\.\d) of (\d+\.\d) mm² finished by the ball; (\d+\.\d) mm² stays, up to (\d+\.\d\d) mm tall/.exec(strip!.text);
+    expect(m, strip!.text).not.toBeNull();
+    const [finished, whole, stays] = [Number(m![1]), Number(m![2]), Number(m![3])];
+    console.log(`finished ${finished} of ${whole}; stays ${stays} — ${strip!.text}`);
+    // The planned area is the reachable band (0.3 × 20 = 6 mm² plus a cell ring), never the strip.
+    expect(finished).toBeLessThanOrEqual(12);
+    // The two stated areas are the strip's own.
+    expect(finished + stays).toBeCloseTo(whole, 0);
+    // No feed on the strip above the band: every strip op's feed inside the strip's XY sits at
+    // or within 0.1 mm of the floor.
+    const stripOps = output.perSetup.flatMap((s) => s.ops).filter((o) => o.region.id.endsWith(':floor-strip'));
+    expect(stripOps.length).toBeGreaterThan(0);
+    for (const op of stripOps) {
+      for (const irOp of op.outcome.ir.operations) {
+        for (const mv of irOp.moves) {
+          if (mv.kind !== 'feed') continue;
+          if (mv.x < ISLAND_A_X.x1 || mv.x > ISLAND_B_X.x0 || mv.y < ISLAND_Y.y0 || mv.y > ISLAND_Y.y1) continue;
+          expect(mv.z, `a feed at (${mv.x.toFixed(2)}, ${mv.y.toFixed(2)}) stands ${(mv.z - FLOOR).toFixed(2)} mm over the floor`).toBeLessThanOrEqual(FLOOR + 0.1 + 1e-6);
+        }
+      }
+    }
+  }, 240_000);
+
+  it('the mirrored two-height fixture reads the same areas — the reach is symmetric', async () => {
+    // The west-low case plans a 10.0 mm² band beside the low island; mirrored, the band is on the
+    // east side and the areas must match (6b's "standing 0 %" mirror was the bbox-phased grid
+    // missing that side's band — a sampling artefact, not physics).
+    const output = await planModelCam(inputFor([FLAT6, BALL6], 'islands', 6, 0.1));
+    const statements = output.perSetup.flatMap((s) => s.statements);
+    const strip = statements.find((s) => s.code === 'goal-pocket-floor-rest' && s.text.includes('floor strip'));
+    expect(strip, `no strip statement; statements: ${statements.map((s) => `${s.code}: ${s.text}`).join(' | ')}`).toBeDefined();
+    const m = /(\d+\.\d) of (\d+\.\d) mm² finished by the ball; (\d+\.\d) mm² stays/.exec(strip!.text);
+    expect(m, strip!.text).not.toBeNull();
+    console.log(`mirror: finished ${m![1]} of ${m![2]}; stays ${m![3]}`);
+    expect(Number(m![1])).toBeCloseTo(10, 0);
   }, 240_000);
 
   it('the cone case is stated standing — the buggy centre−R fit planned a pass (F review 4)', async () => {

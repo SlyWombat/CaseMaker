@@ -1122,7 +1122,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       const regions: RemainderRegion[] = [];
       const unreachable: { id: string; area: number; fitShare: number }[] = [];
       const planned: PlanningFloorStrips['planned'] = [];
-      if (noFlatFallback) return { regions, unreachable, planned };
+      const masks = new Map<string, (x: number, y: number) => boolean>();
+      if (noFlatFallback) return { regions, unreachable, planned, masks };
       const flatRadius = (cuttingDiameter(primary) ?? 0) / 2;
       if (flatRadius > 0) {
         // Signed, so a hole (negative) is never mistaken for a component.
@@ -1212,6 +1213,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
               let plannedStrip:
                 | { footprint: Polygons; reachArea: number; stripArea: number; staysArea: number; standingMm: number; allReached: boolean }
                 | null = null;
+              let fitGrid: { nx: number; ny: number; minX: number; minY: number; pitch: number; reach: Uint8Array; cl: ReturnType<typeof clSurface> } | null = null;
               if (kept.length > 0 && ball !== undefined && ballRadiusMm > 0) {
                 const fitRegion: RemainderRegion = {
                   id: `${node.id}:fit`,
@@ -1259,10 +1261,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
                   }
                 }
                 ballFitShare = cells === 0 ? 0 : within / cells;
+                fitGrid = { nx, ny, minX, minY, pitch: FIT_PITCH_MM, reach, cl };
                 const cellAreaMm2 = FIT_PITCH_MM * FIT_PITCH_MM;
                 const reachArea = within * cellAreaMm2;
                 const stripArea = Math.abs(areaOf(kept));
-                ballFits = reachArea >= Math.max(1, (pocketParams.stepOver ?? 0) * 1);
+                ballFits = reachArea >= Math.max(1, (ballParams?.params.stepOver ?? 0) * 1);
                 if (ballFits) {
                   const allReached = cells > 0 && within === cells;
                   plannedStrip = {
@@ -1286,14 +1289,34 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
                 // organizer and collapsed strips to zero-depth passes at the mouth (topZ = bottomZ
                 // = −1.20 and −0.80 measured), which then cut nothing and were stated wrongly.
                 const zBottom = node.floorZ;
+                const stripId = `${node.id}:floor-strip`;
+                const reachCells: { x: number; y: number }[] = [];
+                const grid = fitGrid;
+                if (grid !== null) {
+                  for (let j = 0; j < grid.ny; j++) {
+                    for (let i = 0; i < grid.nx; i++) {
+                      if (grid.reach[j * grid.nx + i] !== 1) continue;
+                      reachCells.push({ x: grid.minX + (i + 0.5) * grid.pitch, y: grid.minY + (j + 0.5) * grid.pitch });
+                    }
+                  }
+                  // The mask admits a point only where the BALL'S OWN CL is within the band of the
+                  // floor — the fit's rule, point for point — so the finish's rows cannot climb a
+                  // wall the ball does not reach (its raster Z is the CL, which rides the wall).
+                  const clForMask = grid.cl;
+                  masks.set(stripId, (x: number, y: number): boolean => {
+                    const at = clForMask.dropCutter(x, y);
+                    return at !== null && at <= node.floorZ + BAND_MM;
+                  });
+                }
                 planned.push({
-                  id: `${node.id}:floor-strip`,
+                  id: stripId,
                   nodeId: node.id,
                   reachArea: plannedStrip.reachArea,
                   stripArea: plannedStrip.stripArea,
                   staysArea: plannedStrip.staysArea,
                   standingMm: plannedStrip.standingMm,
                   allReached: plannedStrip.allReached,
+                  cells: reachCells,
                 });
                 regions.push({
                   id: `${node.id}:floor-strip`,
@@ -1313,7 +1336,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         };
         walkStrips(tree.pockets);
       }
-      return { regions, unreachable, planned };
+      return { regions, unreachable, planned, masks };
     };
 
     const result = planTreePrograms(tree, {
@@ -1553,6 +1576,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       const alreadyStated = new Set(result.statements.flatMap((st) => st.ids ?? []));
       const cutIds: string[] = [];
       const remainderWhy: string[] = [];
+      const shortWhy: string[] = [];
       const R_BALL_MM = ball === undefined ? 0 : (cuttingDiameter(ball) ?? 0) / 2;
       const unreachable = unplannedStrips.filter((s) => !alreadyStated.has(s.id));
       const uncutIds: string[] = unreachable.map((s) => s.id);
@@ -1585,23 +1609,20 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           }
           return cut === Infinity ? Infinity : cut - strip.zBottom;
         };
-        let cells = 0;
-        let reached = 0;
-        const xs = strip.footprint.flatMap((ring) => ring.map((p) => p[0]));
-        const ys = strip.footprint.flatMap((ring) => ring.map((p) => p[1]));
-        for (let x = Math.min(...xs); x <= Math.max(...xs) + 1e-9; x += 0.5) {
-          for (let y = Math.min(...ys); y <= Math.max(...ys) + 1e-9; y += 0.5) {
-            if (!pointInPolygons(strip.footprint, x, y)) continue;
-            cells++;
-            if (leftoverAt(x, y) <= 0.1 + 1e-6) reached++;
-          }
-        }
-        const share = cells === 0 ? 0 : reached / cells;
+        // THE CHECK IS ON THE FEEDS, the acceptance's own rule: every feed on the planned area
+        // must sit within the band of the floor (`<= band + 1e-6`; a feed AT the band counts).
+        void leftoverAt;
+        const feedsOnArea = feeds.filter((f) => pointInPolygons(strip.footprint, f.x, f.y));
+        const shortFeeds = feedsOnArea.filter((f) => f.z > strip.zBottom + 0.1 + 1e-6);
+        const share = feedsOnArea.length === 0 ? 0 : 1 - shortFeeds.length / feedsOnArea.length;
         const nodeId = strip.id.replace(/:floor-strip$/, '');
         if (alreadyStated.has(nodeId)) continue;
+        // A PLANNED PASS IS NEVER LABELLED "CANNOT REACH": the chain sentence is cleared and the
+        // statement names what the pass did with the area it was planned over (F's review 5,
+        // finding 3). A pass that fell short of its own planned area says exactly that.
+        floorStripsCut.add(nodeId);
         if (share >= 0.99) {
           cutIds.push(nodeId);
-          floorStripsCut.add(nodeId);
           if (areas !== undefined && !areas.allReached) {
             remainderWhy.push(
               `${nodeId}: ${areas.reachArea.toFixed(1)} of ${areas.stripArea.toFixed(1)} mm² finished by the ball; ` +
@@ -1609,9 +1630,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             );
           }
         } else {
-          uncutIds.push(nodeId);
-          uncutWhy.push(
-            `${nodeId}: the pass reaches ${(share * 100).toFixed(0)} % of the ${areas?.reachArea.toFixed(1) ?? 'reachable'} mm² it was planned over`,
+          cutIds.push(nodeId);
+          shortWhy.push(
+            `${nodeId}: the pass fell short on ${((1 - share) * (areas?.reachArea ?? 0)).toFixed(1)} mm² of the ` +
+              `${areas?.reachArea.toFixed(1) ?? 'reachable'} mm² it was planned over`,
           );
         }
       }
@@ -1621,7 +1643,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         const text =
           `${cutIds.length} pocket floor ${plural} narrower than the ${primary.name || primary.shape}'s ring ` +
           `(${cutIds.join(', ')}) ${cutIds.length === 1 ? 'is' : 'are'} finished by the ${ballName} as its own floor pass` +
-          (remainderWhy.length === 0 ? ' across it' : ` — ${remainderWhy.join('; ')}`);
+          (remainderWhy.length === 0 && shortWhy.length === 0
+            ? ' across it'
+            : ` — ${[...remainderWhy, ...shortWhy].join('; ')}`);
         notes.push(text);
         statements.push({ severity: 'info', code: 'goal-pocket-floor-rest', count: cutIds.length, ids: cutIds, text });
       }
@@ -2948,6 +2972,12 @@ export interface PlanCurvedOptions {
   /** #982 — extra remainder-style regions the curved pipeline also plans (the no-flat path's
    *  synthetic pocket floors). Absent → the tree's own remainder only. */
   extraRegions?: RemainderRegion[];
+  /**
+   * #1026 — A MASK PER EXTRA REGION, keyed by its id: the finish cuts only the points the mask
+   * admits. A floor strip's mask is the cells the fit found reachable, so the ball never rasters
+   * rows up a wall it cannot reach (the raster's Z is the CL, which rides the wall).
+   */
+  extraRegionMasks?: ReadonlyMap<string, (x: number, y: number) => boolean>;
   /** The real Clipper2 offset, or a test fake — the pocket op's own contract. */
   offset: OffsetFn;
   /**
@@ -3380,7 +3410,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // #869/#966 — NO ROUGH, NO MASK: with no flat ahead of it the ball has nothing to compare
     // against, and nothing to mask against either — it takes the whole region, as `finish()`'s own
     // `maskCells === undefined` case already means ("the plan admits every point of every row").
-    const maskCells = flat === undefined ? undefined : (x: number, y: number): boolean => maskCellsExact(leftoverAbove, maskRing, x, y);
+    const extraMask = opts.extraRegionMasks?.get(region.id);
+    const maskCells = extraMask ?? (flat === undefined ? undefined : (x: number, y: number): boolean => maskCellsExact(leftoverAbove, maskRing, x, y));
 
     // 3. THE BALL'S ONE FINAL LEVEL: a single pass at the region's depth takes the band.
     //
@@ -3859,6 +3890,8 @@ export interface PlanTreeOptions {
 export interface PlanningFloorStrips {
   regions: RemainderRegion[];
   unreachable: { id: string; area: number; fitShare: number }[];
+  /** #1026 — a mask per planned strip: the finish cuts only the cells the fit found reachable. */
+  masks: ReadonlyMap<string, (x: number, y: number) => boolean>;
   /** #1026 — the areas the fit's own cells give each planned strip, for its statement. */
   planned: {
     id: string;
@@ -3868,6 +3901,8 @@ export interface PlanningFloorStrips {
     staysArea: number;
     standingMm: number;
     allReached: boolean;
+    /** The reachable cells' centres — the reach check's own sample set. */
+    cells: { x: number; y: number }[];
   }[];
 }
 
@@ -4028,6 +4063,7 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
   const curvedResult = planCurvedForTree(tree, {
     ...opts.curved,
     ...(extraRegions.length === 0 ? {} : { extraRegions }),
+    ...(stripped === undefined || stripped.masks.size === 0 ? {} : { extraRegionMasks: stripped.masks }),
     offset: opts.offset,
     safeZMm: SAFE_Z,
     hopZMm: HOP_Z,
