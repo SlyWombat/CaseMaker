@@ -42,7 +42,7 @@ const ISLAND_B_X = { x0: 63 + GAP, x1: 63 + GAP + ISLAND_W };
  * bridges it, its tip rides the islands' tops three millimetres above the floor, so the strip is
  * the warning case — nothing planned as air.
  */
-function fixture(): { positions: Float32Array; indices: Uint32Array; triangleCount: number; bbox: { min: [number, number, number]; max: [number, number, number] } } {
+function fixture(kind: 'islands' | 'cones' = 'islands'): { positions: Float32Array; indices: Uint32Array; triangleCount: number; bbox: { min: [number, number, number]; max: [number, number, number] } } {
   const M = tl.Manifold;
   const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number) =>
     M.cube([x1 - x0, y1 - y0, z1 - z0], true).translate([(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2]);
@@ -50,8 +50,18 @@ function fixture(): { positions: Float32Array; indices: Uint32Array; triangleCou
   // The pocket void with the two islands standing in it: the void is the pocket less the
   // islands, so the islands are part of the part.
   let pocketVoid = box(POCKET.x0, POCKET.x1, POCKET.y0, POCKET.y1, FLOOR, 0);
-  pocketVoid = pocketVoid.subtract(box(ISLAND_A_X.x0, ISLAND_A_X.x1, ISLAND_Y.y0, ISLAND_Y.y1, FLOOR, 0));
-  pocketVoid = pocketVoid.subtract(box(ISLAND_B_X.x0, ISLAND_B_X.x1, ISLAND_Y.y0, ISLAND_Y.y1, FLOOR, 0));
+  if (kind === 'cones') {
+    // Sloping islands: two truncated cones (bottom ⌀8, top ⌀4, 6 mm tall) whose bottoms stand
+    // 3.3 mm apart. The buggy fit (centre − R) planned a pass here; the ball's tip only wedges to
+    // ~1.2 mm above the floor, so the correct fit states it standing.
+    const cy = (ISLAND_Y.y0 + ISLAND_Y.y1) / 2;
+    for (const cx of [55, 55 + 8 + GAP]) {
+      pocketVoid = pocketVoid.subtract(M.cylinder(6, 4, 2, 64, false).translate([cx, cy, FLOOR]));
+    }
+  } else {
+    pocketVoid = pocketVoid.subtract(box(ISLAND_A_X.x0, ISLAND_A_X.x1, ISLAND_Y.y0, ISLAND_Y.y1, FLOOR, 0));
+    pocketVoid = pocketVoid.subtract(box(ISLAND_B_X.x0, ISLAND_B_X.x1, ISLAND_Y.y0, ISLAND_Y.y1, FLOOR, 0));
+  }
   solid = solid.subtract(pocketVoid);
   const mesh = solid.getMesh();
   const numProp = mesh.numProp;
@@ -68,9 +78,9 @@ function fixture(): { positions: Float32Array; indices: Uint32Array; triangleCou
 const FLAT2: Tool = flatEndMill(2, { number: 3, id: 'flat-2', name: 'flat-2' });
 const BALL2: Tool = { ...flatEndMill(2, { number: 4, id: 'ball-2', name: 'ball-2' }), shape: 'ball', typeText: 'Ball Nose' };
 
-function inputFor(house: Tool[]): ModelPlanInput {
+function inputFor(house: Tool[], kind: 'islands' | 'cones' = 'islands'): ModelPlanInput {
   return {
-    geometry: { triangles: fixture() },
+    geometry: { triangles: fixture(kind) },
     setups: [{ frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -T }, underside: 'flatOnStockBottom' }],
     stock: { length: L, width: W, thickness: T, material: 'hardwood' },
     fixture: { mount: 'tape', envelope: null },
@@ -105,6 +115,24 @@ describe('#1021 — the strip between two islands, nothing owned fits it', () =>
     }
     const strip = output.perSetup.flatMap((s) => s.statements).find((s) => s.text.includes('pocket floor strip'));
     expect(strip, 'a catalogue flat outside the chain silenced the strip').toBeDefined();
+  }, 240_000);
+
+  it('the cone case is stated standing — the buggy centre−R fit planned a pass (F review 4)', async () => {
+    const output = await planModelCam(inputFor([FLAT6, BALL6], 'cones'));
+    const statements = output.perSetup.flatMap((s) => s.statements);
+    const strip = statements.find((s) => s.text.includes('floor strip'));
+    expect(strip, `no strip statement on the cone fixture; statements: ${statements.map((s) => `${s.code}: ${s.text}`).join(' | ')}`).toBeDefined();
+    expect(strip!.code).toBe('goal-region-uncut');
+    expect(statements.some((s) => s.code === 'goal-pocket-floor-rest')).toBe(false);
+  }, 240_000);
+
+  it('a flats-only house states the strip and says no ball is held', async () => {
+    const output = await planModelCam(inputFor([FLAT6]));
+    const statements = output.perSetup.flatMap((s) => s.statements);
+    const strip = statements.find((s) => s.code === 'goal-region-uncut' && s.text.includes('floor strip'));
+    expect(strip, `no standing-strip warning without a ball; statements: ${statements.map((s) => `${s.code}: ${s.text}`).join(' | ')}`).toBeDefined();
+    expect(strip!.text).toContain('no ball is held');
+    expect(strip!.text).not.toMatch(/reaches \d+ % of it/);
   }, 240_000);
 
   it('states the strip as standing when the ball\'s tip cannot reach its floor', async () => {

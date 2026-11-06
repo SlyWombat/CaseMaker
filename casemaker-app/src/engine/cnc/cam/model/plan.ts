@@ -1523,8 +1523,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       const R_BALL_MM = ball === undefined ? 0 : (cuttingDiameter(ball) ?? 0) / 2;
       const unreachable = unplannedStrips.filter((s) => !alreadyStated.has(s.id));
       const uncutIds: string[] = unreachable.map((s) => s.id);
-      const uncutWhy: string[] = unreachable.map(
-        (s) => `${s.id}: ${s.area.toFixed(1)} mm², the ball reaches ${(s.fitShare * 100).toFixed(0)} % of it within the 0.1 mm band`,
+      const uncutWhy: string[] = unreachable.map((s) =>
+        ball === undefined
+          ? `${s.id}: ${s.area.toFixed(1)} mm² — no ball is held to finish it`
+          : `${s.id}: ${s.area.toFixed(1)} mm², the ball reaches ${(s.fitShare * 100).toFixed(0)} % of it within the 0.1 mm band`,
       );
       for (const strip of plannedStrips) {
         // THE CELLS THE PASS ACTUALLY REACHES, not "a feed exists": every 0.5 mm cell of the
@@ -1617,8 +1619,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         const plural = uncutIds.length === 1 ? 'strip' : 'strips';
         const text =
           `${uncutIds.length} pocket floor ${plural} narrower than the ${primary.name || primary.shape}'s ring ` +
-          `${uncutIds.length === 1 ? 'is' : 'are'} left standing — the ${ballName} cannot reach ${uncutIds.length === 1 ? 'it' : 'them'} ` +
-          `(${uncutWhy.join('; ')})`;
+          `${uncutIds.length === 1 ? 'is' : 'are'} left standing — ` +
+          (ball === undefined ? 'and no ball is held to finish ' : `the ${ballName} cannot reach `) +
+          `${uncutIds.length === 1 ? 'it' : 'them'} (${uncutWhy.join('; ')})`;
         notes.push(text);
         statements.push({ severity: 'warning', code: 'goal-region-uncut', count: uncutIds.length, ids: uncutIds, text });
       }
@@ -1657,10 +1660,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       totalCostSeconds,
       notes,
       statements,
-      unreachable: result.unreachable.filter((entry) => {
-        const cut = [...floorStripsCut].some((id) => entry === id || entry.startsWith(`${id}:`));
-        return !cut;
-      }),
+      // ONLY the cutter-size sentence is cleared for a strip the ball finishes: a 'planning
+      // failed (…)' sentence is a different fact about the node and stays (F's review, finding 3).
+      unreachable: result.unreachable.filter(
+        (entry) => ![...floorStripsCut].some((id) => entry.startsWith(`${id}: not cut — needs a cutter `)),
+      ),
       unplanned: result.unplanned,
       choice: result.choice,
     });
