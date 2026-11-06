@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ridesTheCl } from '@/engine/cnc/cam/model/ops/finish';
+import { followShortJoin } from '@/engine/cnc/cam/model/rideTest';
 import type { ClSurface } from '@/engine/cnc/cam/model/clsurface';
 import type { LinkPoint } from '@/engine/cnc/cam/model/linking';
 
@@ -66,5 +67,34 @@ describe('#1030 — the ride test samples a short join’s interior', () => {
     const a: LinkPoint = { x: 0, y: 0, z: -1 };
     const b: LinkPoint = { x: 5, y: 0, z: -1 };
     expect(ridesTheCl(a, b, hole, Math.min(LINK_STEP, hole.maxSpacingMm, 0.05))).toBe(false);
+  });
+
+  it('a refused short join is FED along the sampled CL, never retracted (the manager’s ruling)', () => {
+    // The crease above: the chord is refused at 0.5, and the short join follows the CL instead —
+    // interior points on the CL, about zero seconds, no rapid.
+    const moves = followShortJoin(from, to, (x) => CREASE.dropCutter(x, 0), -1, 0.05, { feedMmPerMin: 500, plungeFeedMmPerMin: 200 }, 0.1);
+    expect(moves).not.toBeNull();
+    expect(moves!.length).toBeGreaterThan(2); // more than one straight chord
+    for (const m of moves!) {
+      // Every feed point sits ON the CL (the crease included), never below it.
+      const cl = CREASE.dropCutter(m.x, 0)!;
+      expect(m.z).toBeGreaterThanOrEqual(Math.max(cl, -1) - 1e-9);
+    }
+    // The join's own end is the last point.
+    const last = moves![moves!.length - 1]!;
+    expect(last.x).toBeCloseTo(to.x, 9);
+    expect(last.z).toBeCloseTo(to.z, 9);
+  });
+
+  it('a join whose CL climbs like a wall keeps the retract (followShortJoin refuses it)', () => {
+    const wall: ClSurface = { ...CREASE, dropCutter: (x: number) => (x > 0.1 && x < 0.23 ? 0.5 : -0.02) };
+    const moves = followShortJoin({ x: 0, y: 0, z: -0.02 }, { x: 0.33, y: 0, z: -0.02 }, (x) => wall.dropCutter(x, 0), -1, 0.05, { feedMmPerMin: 500, plungeFeedMmPerMin: 200 }, 0.1);
+    expect(moves).toBeNull();
+  });
+
+  it('an interrupted CL keeps the retract (followShortJoin refuses it)', () => {
+    const hole: ClSurface = { ...CREASE, dropCutter: (x: number) => (x > 0.1 && x < 0.23 ? null : -0.02) };
+    const moves = followShortJoin({ x: 0, y: 0, z: -0.02 }, { x: 0.33, y: 0, z: -0.02 }, (x) => hole.dropCutter(x, 0), -1, 0.05, { feedMmPerMin: 500, plungeFeedMmPerMin: 200 }, 0.1);
+    expect(moves).toBeNull();
   });
 });

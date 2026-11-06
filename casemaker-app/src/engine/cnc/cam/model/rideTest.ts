@@ -126,6 +126,55 @@ export function followCutSurface(
 }
 
 /**
+ * #1030 (the manager's 2026-11-06 ruling) — A SHORT JOIN THE RIDE TEST REFUSES IS FED ALONG THE
+ * CL, NOT RETRACTED. When `ridesTheCl` refuses a short join only because the chord crosses below
+ * the CL — the surface is continuous along the path and only BULGES over the chord, a crease at a
+ * concave corner (0.011–0.014 mm measured on the organizer) — the join is posted as the sampled CL
+ * polyline at feed: a few points over the join's own length, about zero seconds, no rapid. A path
+ * whose CL CLIMBS above the straight join by more than `climbBandMm` (a wall, not a crease) or is
+ * interrupted (a null anywhere) is not provable this way; the caller keeps its retract/hop, as
+ * before. No time guard: a short follow is a few 0.05 mm feed steps, so the ruling makes it the
+ * default rather than pricing it against the retract.
+ *
+ * The interior points sit ON the CL (`max(top, clampZMm)` — never below the level being cut), and
+ * the last point is the join's own end, so the polyline starts and ends where the row does.
+ */
+export function followShortJoin(
+  from: RidePoint,
+  to: RidePoint,
+  topAt: (x: number, y: number) => number | null,
+  stepMm: number,
+  clampZMm: number,
+  feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number },
+  climbBandMm: number,
+): { kind: 'feed'; x: number; y: number; z: number; f: number }[] | null {
+  const length = Math.hypot(to.x - from.x, to.y - from.y);
+  const step = stepMm > 0 ? stepMm : 0.05;
+  // At least two intervals, the #1030 ride test's own rule: a short join's interior must be looked
+  // at, never only its endpoints (which sit on the CL by construction).
+  const steps = Math.max(2, Math.ceil(length / step));
+  const points: RidePoint[] = [from];
+  for (let s = 1; s < steps; s++) {
+    const t = s / steps;
+    const x = from.x + (to.x - from.x) * t;
+    const y = from.y + (to.y - from.y) * t;
+    const top = topAt(x, y);
+    if (top === null) return null; // interrupted: no proof, the caller retracts
+    const chordZ = from.z + (to.z - from.z) * t;
+    if (top > chordZ + climbBandMm) return null; // climbs like a wall, not a crease
+    points.push({ x, y, z: Math.max(top, clampZMm) });
+  }
+  points.push(to);
+  const moves: { kind: 'feed'; x: number; y: number; z: number; f: number }[] = [];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    moves.push({ kind: 'feed', x: b.x, y: b.y, z: b.z, f: b.z < a.z - 1e-9 ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin });
+  }
+  return moves;
+}
+
+/**
  * #970 — THE LINEAR FOLLOW, kept for the GRID-TARGET joins (the rough's skim): the surface there
  * is a cell-quantised target (`skimTarget`'s grid lookup), not a continuous CL. Laying those
  * points with `dropRow` turned every cell edge into a min-spacing staircase — measured on the
