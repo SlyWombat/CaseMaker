@@ -297,7 +297,7 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
   it('#755 — a finish step-over finer than the sampled grid is followed or the cap that bound is stated', async () => {
     const out = await fine();
     expect(out.ok).toBe(true);
-    const grid = out.surface3d!.gridPitchMm;
+    const grid = out.surface3d!.gridPitchMm!;
     const stated = out.findings.find((f) => f.code === 'goal-finish-finer-than-grid');
     if (grid > 0.05) {
       expect(stated).toBeDefined();
@@ -321,9 +321,9 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
     expect(f).toBeDefined();
     expect(f!.severity).toBe('warning');
     expect(f!.message).toContain('the finish passes are 0.005 mm apart');
-    const settled = Number(out.surface3d!.gridPitchMm.toFixed(4));
+    const settled = Number(out.surface3d!.gridPitchMm!.toFixed(4));
     expect(f!.message).toContain(`known every ${settled} mm`);
-    expect(out.surface3d!.gridPitchMm).toBeGreaterThan(0.005);
+    expect(out.surface3d!.gridPitchMm!).toBeGreaterThan(0.005);
     // #945 — the overcut guard now tries several candidate points per covered cell instead of
     // one (it has to, to catch a steep column pair a single lateral-nearest point missed); at
     // this stress case's cell count that costs real wall time, past the old 120 s bound.

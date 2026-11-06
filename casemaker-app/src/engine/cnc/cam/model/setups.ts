@@ -116,7 +116,7 @@ export function buildSetupSpecs(input: BuildSetupsInput): BuildSetupsResult {
  * bracket/tape mount's own bottom-flip is `RY180` (about Y) instead, which `documentXY` below does
  * NOT reproduce — stated here, not guessed, by refusing rather than posting a silently-wrong map.
  */
-function frameForFace(face: Face, mount: MountSpec, stockTopZ: number, thicknessMm: number): SetupFrame {
+export function frameForFace(face: Face, mount: MountSpec, stockTopZ: number, thicknessMm: number): SetupFrame {
   if (face === 'top') return { up: [0, 0, 1], stockTop: stockTopZ, stockBottom: stockTopZ - thicknessMm };
   if (face === 'bottom') {
     if (mount.kind !== 'vise') {

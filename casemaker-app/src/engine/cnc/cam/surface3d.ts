@@ -425,33 +425,37 @@ export interface PencilPassFacts {
  * Every number is one the CAM ran with, never a second resolution of the same question.
  */
 export interface GoalSurfaceFacts {
-  /** The heightfield's own resolution sentence ("sampled on a 0.1 mm grid"). */
+  /** The resolution the run sampled at, as the sentence the panels quote ("sampled on a 0.1 mm grid"). */
   resolutionNote: string;
-  /** The pitch the heightfield was sampled at, mm — after any coarsening. */
-  gridPitchMm: number;
-  /** The cells the heightfield held, `nx × ny`. */
-  gridCells: number;
-  /** Roughing step-down per Z layer, mm. */
-  stepDownMm: number;
+  /**
+   * The pitch the heightfield was sampled at, mm — after any coarsening.
+   * #1006 — OPTIONAL: the model engine plans from the CL surface, not a goal heightfield, and has
+   * no cell grid of its own to state. Absent means "this run did not use a heightfield".
+   */
+  gridPitchMm?: number;
+  /** The cells the heightfield held, `nx × ny`. Absent on a model-engine run (#1006). */
+  gridCells?: number;
+  /** Roughing step-down per Z layer, mm. Absent on a model-engine run (#1006). */
+  stepDownMm?: number;
   /**
    * #869 — the FINISHING cutter's step-down, mm — the spacing of the rim laps (#862), which ride
    * the finish. Absent on a result stored before the field; a reader falls back to `stepDownMm`.
    */
   finishStepDownMm?: number;
-  /** Roughing raster pitch, mm. */
-  roughStepOverMm: number;
-  /** Finishing raster pitch, mm. */
-  finishStepOverMm: number;
-  /** Roughing allowance left on the goal surface, mm. */
-  stockToLeaveMm: number;
+  /** Roughing raster pitch, mm. Absent on a model-engine run (#1006). */
+  roughStepOverMm?: number;
+  /** Finishing raster pitch, mm. Absent on a model-engine run (#1006). */
+  finishStepOverMm?: number;
+  /** Roughing allowance left on the goal surface, mm. Absent on a model-engine run (#1006). */
+  stockToLeaveMm?: number;
   /**
    * #898 — the UNDERSIDE choice this program cut to: its kind and the work-Z floor it set (`null`
    * when the choice carries no floor of its own). Absent when the goal states no underside, or on
    * a result stored before the field.
    */
   underside?: { kind: 'flat' | 'flipped-tabs' | 'plinth'; floorZ: number | null } | null;
-  /** Z layers the roughing pass stepped through. */
-  roughingLayers: number;
+  /** Z layers the roughing pass stepped through. Absent on a model-engine run (#1006). */
+  roughingLayers?: number;
   /**
    * #869 — THE FLAT ROUGH, when the goal is cut as two programs: the cutter's name, as the run
    * sheet names it, and which roughing pass ran. Null when a flat was chosen but nothing stood
