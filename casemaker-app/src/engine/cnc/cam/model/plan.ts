@@ -1094,25 +1094,31 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // flat reaches is the ball's rough instead (#982's mechanism), stated on its own line. One
     // deep pocket therefore costs its own region a ball rough, never the whole side.
     const usableLengthMm = (t: Tool): number | null => t.shoulderLength ?? t.fluteLength;
-    const curvedFlatFor = (r: RemainderRegion): Tool | null => {
+    /** The stated flat whose usable length reaches this region, or null when none does. */
+    const reachingFlatFor = (r: RemainderRegion): Tool | null => {
       // #1018 — the door shifts the mesh by `-stockTop` once, so the region's own zBottom is
       // already stock-top-relative: the depth below the stock top is `-zBottom` (frame.stockTop
       // reads 0 here), no rebase added.
       const depth = -r.zBottom;
-      const reaching = flats.find((t) => {
+      return flats.find((t) => {
         const usable = usableLengthMm(t);
         return usable !== null && usable + 1e-9 >= depth;
-      });
+      }) ?? null;
+    };
+    const curvedFlatFor = (r: RemainderRegion): Tool | null => {
       // A region no flat reaches is the BALL's rough, exactly as #982's no-flat path does it (the
       // ball in the rough's own slot, every cut point proven inside the region) — never a bare "no
       // rough", which hands the region's whole depth to the finish and churns the tip field for
       // minutes (measured: the both-sides job's side 1 ran past 10 minutes that way).
-      return reaching ?? ball ?? null;
+      return reachingFlatFor(r) ?? ball ?? null;
     };
     const curvedRoughSubstitutions: string[] =
       !noFlatFallback && flats.length > 0 && input.curvedRoughTool === undefined
         ? tree.remainder
-            .filter((r) => curvedFlatFor(r) === null)
+            // E's review (finding 2): filter on the FLAT's own reach. `curvedFlatFor` returns the
+            // BALL when no flat reaches, so a null test there only ever caught the no-ball case
+            // and the substitution was never stated on a job that really ball-roughed a region.
+            .filter((r) => reachingFlatFor(r) === null)
             .map((r) => {
               const named = flats[0]!;
               const usable = usableLengthMm(named);
@@ -2256,7 +2262,11 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   if (opts.houseVs !== undefined && opts.houseVs.length > 0 && choice.unreachable.length > 0) {
     const featureOf = new Map(demand.features.map((f) => [f.id, f] as const));
     const byV = new Map<string, { tool: Tool; cone: VCone; ids: string[] }>();
-    for (const id of choice.unreachable) {
+    for (const listed of choice.unreachable) {
+      // #1019 review (finding 3) — an un-enterable pocket arrives as its own SENTENCE (the search
+      // writes one line per pocket; the bare id is not repeated), so the id is read off the
+      // sentence's `': '` prefix before the pocket lookup.
+      const id = listed.includes(': ') ? listed.slice(0, listed.indexOf(': ')) : listed;
       const node = pocketsById.get(id);
       const feature = featureOf.get(id);
       if (node === undefined || feature === undefined || feature.kind !== 'pocket' || throughById.has(id)) continue;
@@ -3531,8 +3541,20 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
   }
   {
+    // #1019 review (finding 2) — the ruling's own sentence is TRUE only for the regions the flat
+    // can reach: a region the flat cannot is the ball's rough (its own line names it), so the note
+    // says so rather than claiming a flat Z-step it never planned.
+    const ballRoughRegions = opts.flatFor === undefined
+      ? 0
+      : tree.remainder.filter((r) => {
+          const flat = opts.flatFor!(r) ?? undefined;
+          return flat !== undefined && flat !== opts.flat;
+        }).length;
+    const substitution = ballRoughRegions === 0
+      ? ''
+      : ` (${ballRoughRegions} region${ballRoughRegions === 1 ? ' is' : 's are'} deeper than the flat's own reach and ${ballRoughRegions === 1 ? 'is' : 'are'} the ball's rough, stated with its own numbers)`;
     const text =
-      `the curved pipeline follows the ruling: the flat Z-steps each remainder region to its CL less ${opts.bandMm} mm, ` +
+      `the curved pipeline follows the ruling: the flat Z-steps each remainder region${substitution} to its CL less ${opts.bandMm} mm, ` +
       `the ball runs ONE final level, the pencil follows the creases${opts.restFlat === undefined ? ', and no rest flat was offered' : ', and a rest flat clears the CL difference first'}`;
     notes.push(text);
     statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });

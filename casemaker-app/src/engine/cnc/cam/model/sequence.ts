@@ -541,7 +541,9 @@ export function candidateSequences(
   // stated by its own number. It is NOT the line-902 refusal, which is reserved for a demand a
   // cutter could enter but none can reach or fit.
   if (roundPool.length > 0 && pocketFeatures.length > 0 && searchPockets.length === 0 && contourFeatures.length === 0) {
-    return [{ steps: [], unreachable: [...unenterablePockets.map((f) => f.id), ...unenterable], leftBehind: 0 }];
+    // #1019 review (finding 3) — the sentence IS the entry: no bare id beside it (the plan reads
+    // the id off the sentence), so the operator sees one line per pocket, never two.
+    return [{ steps: [], unreachable: [...unenterable], leftBehind: 0 }];
   }
   if (searchPockets.length > 0 && roughs.length === 0) return [];
 
@@ -564,7 +566,11 @@ export function candidateSequences(
     const signature = steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
     if (seen.has(signature)) return;
     seen.add(signature);
-    out.push({ steps, unreachable: [...unreachable, ...unenterable], covered });
+    // #1019 review (finding 3) — an un-enterable pocket is stated by its own sentence ONLY: its
+    // bare id is dropped here (it would add the legacy "needs a cutter" line beside the sentence),
+    // the V-floor walk reads the id off the sentence.
+    const unenterableIds = new Set(unenterablePockets.map((f) => f.id));
+    out.push({ steps, unreachable: [...unreachable.filter((id) => !unenterableIds.has(id)), ...unenterable], covered });
   };
 
   /** The chain from one primary: each link names the pockets that cutter is needed for. */
