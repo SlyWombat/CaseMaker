@@ -854,8 +854,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       ...(noFlatFallback
         ? { flat: primary, extraRegions: pocketFloorRegions }
         : input.curvedRoughTool === undefined
-          ? curvedRoughFlat !== undefined
-            ? { flat: curvedRoughFlat }
+          ? flats.length > 0
+            ? { flat: primary, flatFor: curvedFlatFor }
             : b === undefined
               ? {}
               : { flat: b }
@@ -1088,26 +1088,31 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
 
 
-    // #1019 — THE CURVED ROUGH'S REACH, the per-feature rule applied to the curved stage. The
-    // rough goes to the first STATED flat whose USABLE length (shoulder, else flute — the number
-    // the holder gate measures) reaches the deepest curved region below the stock top. When none
-    // reaches, the ball roughs (#982's own mechanism) and the substituted flat, its length and
-    // the depth are stated: a flat sent too deep is a shank collision, not a rough.
-    const curvedRegionDepthMm = tree.remainder.reduce((m, r) => Math.max(m, tree.frame.stockTop - r.zBottom), 0);
+    // #1019 — THE CURVED ROUGH'S REACH, PER REGION (6b's ruling (b), per-feature). Each curved
+    // remainder region keeps the first stated flat whose USABLE length (shoulder, else flute —
+    // the holder gate's own number) reaches THAT region's depth below the stock top; a region no
+    // flat reaches is the ball's rough instead (#982's mechanism), stated on its own line. One
+    // deep pocket therefore costs its own region a ball rough, never the whole side.
     const usableLengthMm = (t: Tool): number | null => t.shoulderLength ?? t.fluteLength;
-    const curvedRoughFlat = flats.find((t) => {
-      const usable = usableLengthMm(t);
-      return usable !== null && usable + 1e-9 >= curvedRegionDepthMm;
-    });
-    const curvedRoughSubstitution =
-      !noFlatFallback && flats.length > 0 && input.curvedRoughTool === undefined && curvedRoughFlat === undefined
-        ? (() => {
-            const named = flats[0]!;
-            const usable = usableLengthMm(named);
-            const ballName = ball === undefined ? 'no ball in the set' : (ball.name || 'the ball');
-            return `the ${named.name || named.shape}'s ${usable === null ? 'unstated' : `${usable} mm`} usable length does not reach the ${Number(curvedRegionDepthMm.toFixed(1))} mm the curved remainder cuts below the stock top — ${ballName} roughs instead`;
-          })()
-        : null;
+    const curvedFlatFor = (r: RemainderRegion): Tool | null => {
+      const depth = tree.frame.stockTop - r.zBottom;
+      return flats.find((t) => {
+        const usable = usableLengthMm(t);
+        return usable !== null && usable + 1e-9 >= depth;
+      }) ?? null;
+    };
+    const curvedRoughSubstitutions: string[] =
+      !noFlatFallback && flats.length > 0 && input.curvedRoughTool === undefined
+        ? tree.remainder
+            .filter((r) => curvedFlatFor(r) === null)
+            .map((r) => {
+              const named = flats[0]!;
+              const usable = usableLengthMm(named);
+              const depth = Number((tree.frame.stockTop - r.zBottom).toFixed(1));
+              const ballName = ball === undefined ? 'no ball in the set' : (ball.name || 'the ball');
+              return `"${r.id}": the ${named.name || named.shape}'s ${usable === null ? 'unstated' : `${usable} mm`} usable length does not reach the ${depth} mm this region cuts below the stock top — ${ballName} roughs it`;
+            })
+        : [];
 
     const result = planTreePrograms(tree, {
       offset,
@@ -1328,11 +1333,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         text: `${ballUncutIds.length} ${plural} narrower than the ball's radius — left uncut`,
       });
     }
-    if (curvedRoughSubstitution !== null) {
-      // #1019 — the stated flat was sent no deeper than it can reach: the ball took the rough and
-      // the numbers are on the line (the flat, its length, the depth the region cuts).
-      notes.push(curvedRoughSubstitution);
-      statements.push({ severity: 'warning', code: 'goal-rough-unreachable', count: 1, text: curvedRoughSubstitution });
+    for (const substitution of curvedRoughSubstitutions) {
+      // #1019 — one region the stated flat cannot reach: the ball took THAT region's rough and the
+      // numbers are on the line (the region, the flat, its length, the region's depth).
+      notes.push(substitution);
+      statements.push({ severity: 'warning', code: 'goal-rough-unreachable', count: 1, text: substitution });
     }
     if (input.fixture.envelope !== null) {
       const text = `the ${input.fixture.mount} fixture envelope is not yet wired into the region obstacles — this plan carries none; the posted program is still checked against the same envelope by the sweep`;
@@ -2680,6 +2685,13 @@ export interface PlanCurvedOptions {
    * planned either. Every existing caller passes a flat; this keeps that path byte-identical.
    */
   flat?: Tool;
+  /**
+   * #1019 — THE PER-REGION OVERRIDE OF THE ROUGH CUTTER. A region the given `flat` cannot reach
+   * (its usable length below the region's depth) is roughed by the BALL instead; `null` means "no
+   * flat reaches this one". Absent: `flat` for every region, exactly as before (the
+   * tray/organizer path is byte-identical).
+   */
+  flatFor?: (region: RemainderRegion) => Tool | null;
   /** The ball. Absent is allowed when the tree has no remainder to finish — the region loop refuses by name the moment one needs it. */
   ball?: Tool;
   /**
@@ -2948,7 +2960,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // #959 item 5: the rough is this region's PRIMARY — a rest, finish or pencil on stock it never
     // cleared would take a full-depth bite — so when it throws, the region's later stages are
     // stated as skipped, not planned.
-    const flat = opts.flat;
+    // #1019 — the per-region reach: a region the stated flat cannot reach is the BALL's rough
+    // (null → undefined here), never sent too deep and never turning the whole side into a ball.
+    const flat = opts.flatFor !== undefined ? (opts.flatFor(region) ?? undefined) : opts.flat;
     let prevCl: ReturnType<typeof clSurface> | undefined;
     const restClSink: { surface?: ReturnType<typeof clSurface> } = {};
     if (flat !== undefined) {
@@ -2979,7 +2993,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           offset: opts.offset,
           // #982 — the ball-as-rough fallback (no flat in the set): every cut point must lie
           // inside the region's own footprint, and the skim's standing field must say so too.
-          ...(opts.ball !== undefined && opts.ball === opts.flat ? { cutPointInRegion: true } : {}),
+          ...(opts.ball !== undefined && opts.ball === flat ? { cutPointInRegion: true } : {}),
           safeZMm: opts.safeZMm,
           hopZMm: opts.hopZMm,
           toolNumber: opts.toolNumberFor(flat),
