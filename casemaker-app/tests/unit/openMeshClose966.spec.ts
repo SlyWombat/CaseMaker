@@ -58,6 +58,41 @@ function parsedOf(mesh: { positions: Float32Array; indices: Uint32Array }): Pars
   return { positions: mesh.positions, indices: mesh.indices, triangleCount: mesh.indices.length / 3, bbox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] } };
 }
 
+/**
+ * Two closed boxes, stacked so one's top face and the other's bottom face are coincident but
+ * never merged into one surface (moved here from `surface3d.spec.ts`'s old `stepTris`/`boxTris`).
+ *
+ * #993 (D's door split) changed this fixture's own verdict, measured directly: welding only ties
+ * the two boxes together along their one shared edge (the plateau's left edge sitting flush on
+ * the slab's), which is exactly the "4 triangles, 2 opposite-normal pairs" shape the vertex-link
+ * split resolves — the same mechanism the organizer STL's knife edge uses. The result is a single
+ * 24-triangle manifold the kernel accepts with no error, and its volume is exactly 800 + 400 =
+ * 1200 mm³ (the slab's own volume plus the plateau's, nothing cancelled) — a correct stepped
+ * solid, not a silently-wrong one. "Inform, don't refuse" prefers this close to the refusal this
+ * fixture used to pin before #993 existed.
+ */
+function stackedBoxesMesh(): { positions: Float32Array; indices: Uint32Array } {
+  const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number): [number, number, number][][] => {
+    const c: [number, number, number][] = [
+      [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
+      [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1],
+    ];
+    const quad = (a: number, b: number, q: number, d: number): [number, number, number][][] => [
+      [c[a]!, c[b]!, c[q]!],
+      [c[a]!, c[q]!, c[d]!],
+    ];
+    return [...quad(4, 5, 6, 7), ...quad(0, 3, 2, 1), ...quad(0, 1, 5, 4), ...quad(2, 3, 7, 6), ...quad(1, 2, 6, 5), ...quad(3, 0, 4, 7)];
+  };
+  // A base slab under the whole footprint, and a narrower plateau sitting exactly on its top
+  // face — the plateau's bottom face and part of the slab's top face occupy the same plane.
+  const tris = [...box(0, 20, 0, 20, -4, -2), ...box(0, 10, 0, 20, -2, 0)];
+  const positions = new Float32Array(tris.length * 9);
+  let k = 0;
+  for (const tri of tris) for (const v of tri) { positions[k++] = v[0]; positions[k++] = v[1]; positions[k++] = v[2]; }
+  const indices = Uint32Array.from({ length: tris.length * 3 }, (_, i) => i);
+  return { positions, indices };
+}
+
 /** The kernel's own check, the one `solidOf` runs — the closure must pass it. */
 function manifoldAccepts(mesh: ParsedMesh): { ok: boolean; reason: string } {
   const mm = new tl.Mesh({ numProp: 3, vertProperties: mesh.positions, triVerts: mesh.indices });
@@ -120,6 +155,20 @@ describe('#966 an open goal mesh is closed with a skirt before the manifold chec
     const message = (caught as Error).message;
     expect(message).toContain('goal-mesh-unclosable');
     expect(message).toContain('2 disconnected sheet components');
+  });
+
+  it('#993 — two stacked boxes split at their one shared edge into a correct, volume-exact manifold', () => {
+    const mesh = parsedOf(stackedBoxesMesh());
+    const closed = closeOpenSheet(tl, mesh, { bottomZ: BOTTOM_Z });
+    expect(closed.note).toContain('non-manifold edge(s) split');
+    expect(closed.mesh.triangleCount).toBe(24);
+    const mm = new tl.Mesh({ numProp: 3, vertProperties: closed.mesh.positions, triVerts: closed.mesh.indices });
+    mm.merge();
+    const solid = new tl.Manifold(mm);
+    expect(solid.status()).toBe('NoError');
+    // The slab (20 × 20 × 2) plus the plateau (10 × 20 × 2): 800 + 400, nothing cancelled.
+    expect(solid.volume()).toBeCloseTo(1200, 3);
+    solid.delete();
   });
 
   it('the goal path closes the sheet: buildModelPlanInputForGoal hands the engine a closed mesh', async () => {

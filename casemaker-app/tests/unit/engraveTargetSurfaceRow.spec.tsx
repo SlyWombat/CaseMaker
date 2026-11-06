@@ -13,7 +13,7 @@ import {
   type ReliefRowFacts,
   type SurfaceDefaults,
 } from '@/components/panels/EngraveTargetObjectRow';
-import type { GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
+import type { GoalSurfaceFacts } from '@/engine/cnc/engrave/runSheet';
 import { resetEngraveRows } from '@/store/engraveRowStore';
 import type { TargetObjectPatch } from '@/store/engraveJobStore';
 import type { EngraveTargetObject } from '@/types/engraveJob';

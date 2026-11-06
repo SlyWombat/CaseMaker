@@ -1,5 +1,15 @@
 {
  "card": "synth-rect-b",
+ "feedRows": [],
+ "catalogue": {
+  "used": false,
+  "note": "no catalogue status stated"
+ },
+ "holding": {
+  "ours": "tape",
+  "vendor": null
+ },
+ "sequence": null,
  "referenced": false,
  "pass": false,
  "lines": [
@@ -27,8 +37,8 @@
   },
   {
    "key": "cycle",
-   "rule": "≤ 2× the vendor's (goal 1.25×), cutting time plus bit changes at 91.4 s each",
-   "oursValue": 372.5902923766182,
+   "rule": "≤ 2× the vendor’s (goal 1.25×) on our #927 estimator over both files, plus bit changes at 91.4 s each (#943)",
+   "oursValue": 373.19785461592676,
    "vendorValue": null,
    "ours": "6.2 min",
    "vendor": null,
@@ -40,9 +50,9 @@
   {
    "key": "air",
    "rule": "≤ vendor + 10 points",
-   "oursValue": 0.1738109170676184,
+   "oursValue": 0.17024259456020166,
    "vendorValue": null,
-   "ours": "17.38 %",
+   "ours": "17.02 %",
    "vendor": null,
    "state": "stated",
    "note": "no vendor program beside it",
@@ -50,13 +60,14 @@
   },
   {
    "key": "rapids",
-   "rule": "≤ 2× the vendor's",
-   "oursValue": 52.38649592549476,
+   "rule": "≤ 2× the vendor's rapid time",
+   "oursValue": 32.41382476851144,
    "vendorValue": null,
-   "ours": "52",
+   "ours": "32.4 s",
    "vendor": null,
    "state": "stated",
    "note": "no vendor program beside it",
+   "facts": "per 1,000 feed lines 52; rapid moves 45",
    "number": 5
   },
   {
@@ -72,7 +83,7 @@
   },
   {
    "key": "postsAsFiled",
-   "rule": "posts as filed, in the vendor’s holding, without changing the pitch",
+   "rule": "posts as filed — in the vise with jaw clearance, without changing the pitch (#943)",
    "oursValue": true,
    "vendorValue": null,
    "ours": "yes — tape, 0.1 mm",

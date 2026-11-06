@@ -390,14 +390,10 @@ export type JobFindingCode =
   // (faces pointing away, the shadow band) and, when one is worth it, the flip plan that finishes
   // it. Inform-only: it never refuses a program that posts and verifies.
   | 'goal-unreached'
-  // #785 — the goal's program would exceed the app's stated move budget: refused BY NAME with the
-  // numbers and the fixes (a coarser grid, a bigger step-down, or two setups), never by dying.
-  | 'goal-program-too-big'
   | 'goal-mold-rim'
   | 'goal-mold-floor'
   | 'goal-mold-one-sided'
   | 'goal-mold-no-draft'
-  | 'goal-finish-finer-than-grid'
   | 'goal-object-no-toolpath'
   // #829 — THE 3D CHAMFER THE GOAL ASKS FOR. `goal-chamfer-no-cutter` is the WARNING that names
   // why no V program was posted (no V-bit chosen, one the library does not hold, or one with no
@@ -550,7 +546,11 @@ export type JobFindingCode =
   // helix note, carried onto the job so the panel shows it.
   | 'adaptive-clearing'
   | 'adaptive-fallback'
-  | 'adaptive-helix-refused';
+  | 'adaptive-helix-refused'
+  // #966/#979 — a job with an enabled cone or sphere surface primitive: #966 removed
+  // generateSurfacePrimitiveProgram, the old engine's CAM path for one, whole. Restoring it onto
+  // cam/model is #979's own scope; until it lands, the job refuses on this one finding, by name.
+  | 'surface-primitive-removed';
 
 export interface JobFinding {
   /**
@@ -584,43 +584,11 @@ export interface JobFinding {
    */
   goalReachedFraction?: number;
   /**
-   * #785 — on `goal-program-too-big`, the grid pitch that fits the move budget, mm. The panel's
-   * one-click "Generate at N mm" writes it onto the goal's `surface.gridPitchMm` and presses
-   * Generate; absent on every other finding.
-   */
-  suggestedPitchMm?: number;
-  /**
    * #856 — on `vcarve-depth-beyond-cone`, the MATERIAL depth (above its floor) the item asks the
    * cone to cut, mm. The panel's press finds a cutter whose cone reaches it; absent on findings
    * that are not about a V-carve's reach.
    */
   materialMm?: number;
-  /**
-   * #832 — on `goal-program-too-big`, the step-down that fits the move budget AT the pitch the
-   * run settled on, mm. The moves fall with the step-down as they do with the pitch, so this is
-   * the other press the operator can make: "Raise the step-down to N mm".
-   */
-  suggestedStepDownMm?: number;
-  /**
-   * #888 — on `goal-program-too-big`, the MOVES the run estimated, the cells it counted and the
-   * budget it broke. The panel folds these under its Technical line; the sentence the operator
-   * reads does not count them. #889 — the budget is kept in MB (the memory the CAM, the post and
-   * the simulation will really take), so `budgetMb` is what the run estimates and `budgetLimitMb`
-   * what it breaks; `budgetMoves` stays as the exact move count behind it.
-   */
-  budgetMoves?: number;
-  budgetCells?: number;
-  budgetMb?: number;
-  budgetLimitMb?: number;
-  budgetPitchMm?: number;
-  budgetStepDownMm?: number;
-  /**
-   * #888 — on `goal-program-too-big`, the depth split that puts BOTH programs under the budget:
-   * each side of a top/bottom split, mm. The panel's "Split into two setups" press builds the two
-   * setups from it (via `goalFlipSetups`' machines); absent when no two-band split fits — the
-   * press is then not shown at all rather than opening a dead end.
-   */
-  suggestedSplit?: { firstMm: number; secondMm: number; movesEach: number };
   /**
    * #805 — on `goal-rotary-oversize`, the goal's own outermost radius, mm (the field's
    * `maxRadius`). The panel's "Scale the goal to fit (r …)" button turns it into the factor that

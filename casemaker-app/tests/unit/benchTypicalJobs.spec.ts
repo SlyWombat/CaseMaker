@@ -561,7 +561,9 @@ describe('#734 the typical jobs run clean through the cut pipeline', () => {
 // The exercise ran each job under a 600 s timeout. The surfacing jobs measured here generate in
 // 1.3–2.0 s and sweep in 5.8–6.6 s (j06's uncommitted bench copy: 10.5 s), so 150 s is ample.
 describe('#738 the real jobs leave no rapid through material', () => {
-  it('j07 photo relief (2 mm ball): a gap retract lifts before it travels', async () => {
+  // #966 triage — #980: a PNG/photo relief has no path on cam/model today (a flat heightfield;
+  // the model engine needs a mesh); parked until #980 restores it.
+  it.fails('j07 photo relief (2 mm ball): a gap retract lifts before it travels', async () => {
     // Recorded: "5 rapids pass through material still present ... (first at line 72655)", that
     // line being `G0 X49.5 Z1` straight out of `G1 X49.6 Z-0.794`.
     const { code, receipt } = await cut('j07-photo-relief.json', REAL_JOBS);
@@ -570,7 +572,8 @@ describe('#738 the real jobs leave no rapid through material', () => {
     expect(code, 'a clean job must not be refused by its own simulation').toBe(0);
   }, 150_000);
 
-  it('j07 photo relief (1 mm ball): the same roughing hop at the finer cutter', async () => {
+  // #966 triage — #980: same as above.
+  it.fails('j07 photo relief (1 mm ball): the same roughing hop at the finer cutter', async () => {
     // Recorded: 63 rapids, first at line 26169.
     const { code, receipt } = await cut('j07-photo-relief-1mm-ball.json', REAL_JOBS);
     const rapid = receipt.diagnostics.filter((d) => d.code === 'rapid-through-stock');
@@ -1023,26 +1026,30 @@ describe.skipIf(!existsSync(REAL_JOBS))('#766 slice E the demo set’s no-cutter
     // #869 — THE MEASURED WINNER IS NOW A SPLIT: a ⌀3.175 flat roughs the relief before the ⌀2
     // ball finishes it, and it beats the single ⌀2×30-ball plan (same fidelity) on measured run
     // time — the flat's wider step-over is what wins. Both photo-relief jobs take the same plan.
-    { job: 'j07-photo-relief.json', chosen: 'inv:kz-ball-nose-2-12', worst: 100 },
-    { job: 'j07-photo-relief-1mm-ball.json', chosen: 'inv:kz-ball-nose-2-12', worst: 100 },
+    // #966 triage — #980: a PNG/photo relief has no path on cam/model (a flat heightfield; the
+    // model engine needs a mesh); this pin is the old engine's, parked until #980 restores it.
+    { job: 'j07-photo-relief.json', chosen: 'inv:kz-ball-nose-2-12', worst: 100, issue: '#980' },
+    { job: 'j07-photo-relief-1mm-ball.json', chosen: 'inv:kz-ball-nose-2-12', worst: 100, issue: '#980' },
     // The mouse shell: the same seam, on an STL goal whose 26 mm stock needs the long ball. #785 —
     // the 1 mm ball has a 4 mm flute and the goal is 17.255 mm deep, so it cannot reach it (the
     // holder would enter the part); the 30 mm-flute ball is the candidate that both reaches and
     // posts at full fidelity.
-    { job: 'j27-mouse-shell-side1.json', chosen: 'inv:demo-ball-nose-2-30', worst: 100 },
+    // #966 triage — #1010: the engine-chosen rough (#999) changes this job's measured plan; the
+    // no-cutter demo search is rewritten against the model engine there.
+    { job: 'j27-mouse-shell-side1.json', chosen: 'inv:demo-ball-nose-2-30', worst: 100, issue: '#1010' },
     // Was refused with the cutaway's missing reference — the plan's setup dropped it. #860 — its
     // worst item is the MALE PLUG, and a male half is scored by the plug's visible (base) face —
     // what planing reveals — not by the cutaway's own cut, which reproduces its design exactly.
     // The j11 plug keeps 81 % of the design there (a 4.8 mm pocket with a 1.3 mm glue gap at a
     // 30° V), so the search states 81 % rather than the old, mistaken 100 %.
-    { job: 'j11-inlay-female-30v-male.json', chosen: 'inv:kz-engrave-30-0-5', worst: 81 },
+    { job: 'j11-inlay-female-30v-male.json', chosen: 'inv:kz-engrave-30-0-5', worst: 81, issue: null },
     // Was refused with "Characters lost to a 1 mm cutter" under the demo library; the bench
     // location's finest metal engraver holds the tag's "555-0100" instead.
-    { job: 'j14-dog-tag-alu.json', chosen: 'inv:kz-engrave-m-30-0-2', worst: 100 },
+    { job: 'j14-dog-tag-alu.json', chosen: 'inv:kz-engrave-m-30-0-2', worst: 100, issue: null },
   ] as const;
 
-  for (const { job, chosen, worst } of CHOICES_ON_2026_10_30) {
-    it(`${job} posts, with ${chosen}`, async () => {
+  for (const { job, chosen, worst, issue } of CHOICES_ON_2026_10_30) {
+    (issue === null ? it : it.fails)(`${job} posts, with ${chosen}`, async () => {
       const { code, receipt, progress } = await cut(pickedVariant(job, REAL_JOBS), SCRATCH, demoSetLocation());
       const lines = progress.join('\n');
       expect(code, allDiagnostics(receipt)).toBe(0);

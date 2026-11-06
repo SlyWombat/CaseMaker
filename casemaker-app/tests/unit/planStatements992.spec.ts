@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
 import { makeClipperOffset } from '@/engine/cnc/cam/engraveJob';
-import { planCurvedForTree, planPocketsForTree, setModelCamEnabled, type PlanCurvedOptions } from '@/engine/cnc/cam/model/plan';
+import { planCurvedForTree, planPocketsForTree, type PlanCurvedOptions } from '@/engine/cnc/cam/model/plan';
 import type { FeatureTree, Rim } from '@/engine/cnc/cam/model/features';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
@@ -235,10 +235,9 @@ function goalJob(target: EngraveTargetObject, tool: Tool = BALL, toolKey = 'inv:
 
 describe('#992 — the seam routes the plan statements', () => {
   it('on the success path: warning/info statements become findings, sheet statements ride the run sheet', async () => {
-    setModelCamEnabled(true);
     try {
       const target = goalTarget();
-      const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
+      const out = await generateGoalProgram(goalJob(target), target, BALL, null, { shop: SHOP });
       expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
       // A job that asks for no bevel states it as an INFO finding (the planner's own sentence).
       const noEdge = out.findings.find((f) => f.code === 'goal-no-edge-break');
@@ -263,19 +262,17 @@ describe('#992 — the seam routes the plan statements', () => {
       // `sentence()` upper-cases the planner's clauses: every sheet line reads as a sentence.
       for (const step of section!.steps) expect(step.text.charAt(0)).toBe(step.text.charAt(0).toUpperCase());
     } finally {
-      setModelCamEnabled(false);
       clearTargetObjectMeshCache();
     }
   }, 180_000);
 
   it('a stated chamfer with no V chosen: the plan\'s "no edge break" reaches the findings as an info', async () => {
-    setModelCamEnabled(true);
     try {
       // #989's no-toolKey case: the seam hands the rim stage legMm 0 ("the type's own no chamfer
       // program case"), the plan states the rims stay sharp — and #992 makes that statement the
       // operator's info finding, beside #989's own goal-chamfer-no-cutter warning.
       const target = { ...goalTarget(), chamfer: { widthMm: 0.5 } };
-      const out = await generateGoalProgram(goalJob(target), target, BALL, [], null, SHOP);
+      const out = await generateGoalProgram(goalJob(target), target, BALL, null, { shop: SHOP });
       expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
       const noEdge = out.findings.find((f) => f.code === 'goal-no-edge-break');
       expect(noEdge, `findings: ${out.findings.map((f) => f.code).join(', ')}`).toBeDefined();
@@ -283,13 +280,11 @@ describe('#992 — the seam routes the plan statements', () => {
       const cant = out.findings.find((f) => f.code === 'goal-chamfer-no-cutter');
       expect(cant, `findings: ${out.findings.map((f) => f.code).join(', ')}`).toBeDefined();
     } finally {
-      setModelCamEnabled(false);
       clearTargetObjectMeshCache();
     }
   }, 180_000);
 
   it('no flat in the shop: the run warns that the part is not freed (count 1)', async () => {
-    setModelCamEnabled(true);
     try {
       // A curved solid (the sphere) with a house that holds no flat end mill at all: #982's
       // ball-as-primary dispatch plans the surface but no freeing contour either — "no flat, so
@@ -297,7 +292,7 @@ describe('#992 — the seam routes the plan statements', () => {
       const target = sphereTarget();
       const job = goalJob(target);
       const shop = { tools: [{ key: 'inv:ball-2', tool: BALL, provenance: 'test' as const }, { key: 'inv:v90', tool: VBIT, provenance: 'test' as const }], feeds: null };
-      const out = await generateGoalProgram(job, target, BALL, [], null, shop);
+      const out = await generateGoalProgram(job, target, BALL, null, { shop });
       expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
       const freed = out.findings.find((f) => f.code === 'goal-not-freed');
       expect(freed, `findings: ${out.findings.map((f) => f.code).join(', ')}`).toBeDefined();
@@ -305,18 +300,16 @@ describe('#992 — the seam routes the plan statements', () => {
       expect(freed!.count).toBe(1);
       expect(freed!.message).toContain('not freed');
     } finally {
-      setModelCamEnabled(false);
       clearTargetObjectMeshCache();
     }
   }, 180_000);
 
   it('no ball in the shop: the flat finishes the curved remainder — a warning finding, and the run sheet names it', async () => {
-    setModelCamEnabled(true);
     try {
       const target = sphereTarget();
       const job = goalJob(target, FLAT, 'inv:flat-6');
       const shop = { tools: [{ key: 'inv:flat-6', tool: FLAT, provenance: 'test' as const }], feeds: null };
-      const out = await generateGoalProgram(job, target, FLAT, [], null, shop);
+      const out = await generateGoalProgram(job, target, FLAT, null, { shop });
       expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
       const subst = out.findings.find((f) => f.code === 'goal-cutter-substituted' && f.message.includes('no ball nose'));
       expect(subst, `findings: ${out.findings.map((f) => `${f.code}: ${f.message}`).join(' | ')}`).toBeDefined();
@@ -330,7 +323,6 @@ describe('#992 — the seam routes the plan statements', () => {
       const text = warnings!.steps.map((s) => s.text).join(' ');
       expect(text).toContain('finished by the flat-6 as a flat-raster');
     } finally {
-      setModelCamEnabled(false);
       clearTargetObjectMeshCache();
     }
   }, 180_000);

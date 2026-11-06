@@ -63,8 +63,7 @@ import { threadMillIR, threadSettings, type ThreadMillPlan, type ThreadSettingsR
 import { drillBitIR, drillSettings, type DrillBitPlan, type DrillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
-import type { LevelPlanner } from '@/engine/cnc/cam/rough3d';
-import { dedupeCutterEntries, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { itemLeftUncutMessage, vCone, vDepthLimit, vDepthRefusal, vDepthShortfall, vFluteLength, vTraceDepthRefusal, vTraceDepthWarning, type VCone } from '@/engine/cnc/vProfile';
 import { minimumXyStepMm } from '@/engine/cnc/machine';
@@ -82,13 +81,12 @@ import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach } from '@/engine/cnc/engrave/goalReach';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
-import { undersideClearBaseZ, undersideFloorZ } from '@/engine/cnc/engrave/goalUnderside';
 import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
-import { primitiveHeightfield, surfacePrimitiveWord, surfacePrimitivesOf, type SurfacePrimitive } from '@/engine/cnc/engrave/primitiveSurface';
+import { surfacePrimitivesOf } from '@/engine/cnc/engrave/primitiveSurface';
+import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import { closeOpenSheet } from '@/engine/cnc/engrave/closeSheet';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
-import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import {
   dedupeFindings,
   goalSides,
@@ -118,11 +116,7 @@ import {
 import {
   restSeamFacts,
   thirdToolAdvice,
-  restOutcome,
-  restOutcomeAbsurd,
-  restOutcomeBetter,
   REST_MACHINING_FALLBACK,
-  type RestOutcome,
   type RestSettingSource,
   type SeamCutter,
   type SeamFacts,
@@ -164,52 +158,17 @@ import { buildThroughMask, type MaskCutout } from '@/engine/cnc/engrave/throughM
 import { tapeHoldFindings, type TapedPiece } from '@/engine/cnc/engrave/tapeHold';
 import type { BedUnderFacts } from '@/engine/cnc/engrave/jobSetup';
 import { generateChamfer, type ChamferCut } from '@/engine/cnc/cam/chamfer';
-import { generateChamfer3d, type Chamfer3dCut } from '@/engine/cnc/cam/chamfer3d';
-import { targetRim } from '@/engine/cnc/engrave/targetRim';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, efficiencyOf, estimateCycleSeconds, estimateCycleTerms, HOP_Z, SAFE_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStatsOf, type CamMove, type CamOperation, type CamPassStep, type CycleTerms, type ProgramEfficiency, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
-import {
-  generateSurface3dForGoal,
-  generateSurface3dIR,
-  estimateGoalMoves,
-  finishStepOverForCusp,
-  goalMemoryBudgetMb,
-  GOAL_BYTES_PER_MOVE,
-  tipStencilCells,
-  type GoalMoveEstimate,
-  REST_TOLERANCE_MM,
-  planSurfaceRest,
-  restResidualVisible,
-  goalClearBand,
-  suggestedRestRadiusMm,
-  surfaceResidual,
-  surfaceToolFor,
-  planGoalOvercut,
-  steepestWallDeg,
-  type GoalRestFacts,
-  type GoalSurfaceFacts,
-  type SurfaceRestPlan,
-  type Surface3dResult,
-} from '@/engine/cnc/cam/surface3d';
-import {
-  DEFAULT_MAX_FINISH_TIP_OPS,
-  DEFAULT_STOCK_TO_LEAVE_MM,
-  type SurfaceFeeds,
-  type SurfaceTool,
-} from '@/engine/cnc/cam/surfaceFinishTipField';
-import {
-  DEFAULT_GRID_PITCH_MM,
-  DEFAULT_MAX_CELLS,
-  moldHeightfield,
-  sampleGoalHeightfield,
-  isMold,
-  type SampleGoalOpts,
-} from '@/engine/cnc/engrave/goalHeightfield';
+import { DEFAULT_STOCK_TO_LEAVE_MM, type SurfaceFeeds } from '@/engine/cnc/cam/surfaceFinishTipField';
 import { type PostContext, type PostResult, type VacuumSpan } from '@/engine/cnc/post/z1';
 import { postFor, postKey, postOriginFor } from '@/engine/cnc/post';
-import { appendThumbnail, heightfieldTopViewPng, planViewPng, simulationTopViewPng } from '@/engine/cnc/post/thumbnail';
+import { appendThumbnail, planViewPng, simulationTopViewPng } from '@/engine/cnc/post/thumbnail';
 import { applySurfaceLift, maxSurfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
-import { FRAME_Z, formatDuration, runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
+// #966 — `GoalSurfaceFacts` pure-moved here from surface3d.ts: it outlives that file's own
+// retirement because `generateRotaryGoalProgram` below (rotary relief, out of #966's scope)
+// constructs one.
+import { FRAME_Z, runSheetFileName, runSheetFrameFileName, type GoalSurfaceFacts } from '@/engine/cnc/engrave/runSheet';
 import type { FixtureEnvelope, Setup } from '@/engine/cnc/setup';
 import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
 import { unfacedBands } from '@/engine/cnc/mounts/inPath';
@@ -261,13 +220,10 @@ import { ceilingName, effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/eng
 import { ORACLE_SHALLOW_DEPTH_FRACTION, type OraclePoint, type OraclePredicted, type OracleThreadMove } from '@/engine/cnc/engrave/oracle';
 import { designCutterOf, type DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
 import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
-// #966 — THE SEAM. `USE_MODEL_CAM_ENGINE` gates `generateGoalProgram` between today's heightfield
-// path (below) and the model-driven CAM engine's one entry point, `planModelCam`. The flag lives
-// in `cam/model/plan.ts`, not here — it is that module's own opt-in, "set only by specs for now"
-// (its header), and is read, never redefined, at this call site.
+// #966 — `generateGoalProgram` plans every goal job through `planModelCam`, the model-driven CAM
+// engine's one entry point.
 import {
   planModelCam,
-  USE_MODEL_CAM_ENGINE,
   type ModelPlanInput,
   type ModelPlanOutput,
   type SetupSpec,
@@ -762,13 +718,12 @@ export interface EngraveGenerated {
    */
   threadMachining?: ThreadSettingsResult | null;
   /**
-   * #966 — THE MODEL ENGINE'S OWN PLAN, riding alongside the posted `programs`. `generateGoalProgram`'s
-   * flag-on path (`USE_MODEL_CAM_ENGINE`) sets this to `planModelCam`'s real `ModelPlanOutput` (every
-   * `SetupPlan`, one per setup) as soon as `planModelCam` returns one — even on a LATER refusal (a
-   * program that fails to post or verify after planning succeeded), because the plan itself is still
-   * the truth about what was attempted. `null`/absent on the old heightfield path (it has no
-   * `ModelPlanOutput` to carry) and on a refusal before `planModelCam` ever returned (nothing was
-   * planned yet). D's run store reads `(generated as {plan?: …}).plan?.perSetup` speculatively.
+   * #966 — THE MODEL ENGINE'S OWN PLAN, riding alongside the posted `programs`. `generateGoalProgram`
+   * sets this to `planModelCam`'s real `ModelPlanOutput` (every `SetupPlan`, one per setup) as soon
+   * as `planModelCam` returns one — even on a LATER refusal (a program that fails to post or verify
+   * after planning succeeded), because the plan itself is still the truth about what was attempted.
+   * `null`/absent only on a refusal before `planModelCam` ever returned (nothing was planned yet).
+   * D's run store reads `(generated as {plan?: …}).plan?.perSetup` speculatively.
    */
   plan?: ModelPlanOutput | null;
   /**
@@ -3605,28 +3560,6 @@ export function depthLimitReason(stack: StackDepthLimit, job: EngraveJob, x: Mm,
  * One program's result, before the list is assembled. `generateOneProgram`'s return shape.
  */
 /**
- * #786 slice 4a-2 — the job's work BESIDES its cone/sphere surfaces. A surface program is its own
- * file (one check per program), so a sub-job of only surfaces goes to the 3D CAM and everything
- * else goes to the region pipeline.
- */
-function jobHasNonSurfaceWork(job: EngraveJob): boolean {
-  const on = <T extends { enabled: boolean; construction?: boolean }>(list: readonly T[] | undefined): boolean =>
-    (list ?? []).some((i) => i.enabled && i.construction !== true);
-  return (
-    on(job.labels) ||
-    on(job.shapes) ||
-    on(job.combined) ||
-    on(job.vectors) ||
-    on(job.traces) ||
-    on(job.drills) ||
-    on(job.threads) ||
-    on(job.cutouts) ||
-    on(job.chamfers) ||
-    (job.primitives ?? []).some((p) => p.enabled && (p.kind === 'box' || p.kind === 'cylinder'))
-  );
-}
-
-/**
  * #737/#849 — whether a program leaves the neck for parting: `false`, `true` (appended as its last
  * operations, in the same file), or `{ apart }` — cut by the same CAM but posted as a neck-only
  * file of its own, with `apart` as that file's share of the run's vacuum words.
@@ -4910,12 +4843,22 @@ export async function buildModelPlanInputForGoal(
   tool: Tool,
   shop: EngraveShopOpts,
   /**
-   * #966 test/e2e-only seam — overrides the real `buildSetupSpecs` decision below with a
-   * caller-supplied list, so a spec can drive `generateGoalProgram`'s real multi-setup posting
-   * path with a synthetic `ModelPlanInput.setups` without depending on a particular mesh's own
-   * flip-plan answer. `multiSetup966.spec.ts`/`camModelSeam966.spec.ts` already depend on this
-   * seam; no production caller passes it, and when present it wins unconditionally, exactly as
-   * before #966-goal-setups wired the real decision in to replace the old hardcoded fallback.
+   * TEST-ONLY SEAM — never set by app code, no production call site passes it. Overrides the
+   * real `buildSetupSpecs` decision below with a caller-supplied list, so a spec can drive
+   * `generateGoalProgram`'s real multi-setup posting path with a synthetic `ModelPlanInput.setups`
+   * without depending on a particular mesh's own flip-plan answer (a plain box, the fixture these
+   * specs need, genuinely needs only one setup by the real decision — there is no analytic
+   * geometry today that needs two setups AND carries a registration datum, so this parameter
+   * stands in for one). `multiSetup966.spec.ts`/`multiSetupVerify966.spec.ts`/`camModelSeam966.spec.ts`
+   * depend on it; present, it wins unconditionally, exactly as before #966-goal-setups wired the
+   * real decision in to replace the old hardcoded fallback.
+   *
+   * SLATED FOR RETIREMENT (#966 ruling, filed as a follow-up): extract `generateGoalProgram`'s
+   * posting/verifying tail into its own callable function, so these specs can call
+   * `buildModelPlanInputForGoal` → override `.setups` → `planModelCam` → that function directly —
+   * the same "call the literal production functions in order" pattern `goalSetups966.spec.ts`
+   * already uses one step short of posting. Not done here: it is a real refactor, not this
+   * removal's own scope.
    */
   setupsOverride?: SetupSpec[],
 ): Promise<ModelPlanInput> {
@@ -5138,15 +5081,21 @@ export async function generateGoalProgram(
   job: EngraveJob,
   goal: EngraveTargetObject,
   tool: Tool | null,
-  catalogue: readonly FeedCatalogueRow[],
   calibration: MachineCalibration | null,
-  shop: EngraveShopOpts,
-  onProgress?: EngraveProgressFn,
-  /** #881 — where the adaptive rough's levels are planned; absent, in this thread. */
-  planner?: LevelPlanner,
-  /** #966 test/e2e-only seam — see `buildModelPlanInputForGoal`'s own doc on this same parameter. */
-  modelSetupsOverride?: SetupSpec[],
+  /**
+   * #966/#961 — ONE OBJECT FOR EVERY TRAILING OPTIONAL, so a future addition (F's own
+   * `catalogueTools`, #961-wiring) never again shifts an existing positional argument into the
+   * wrong parameter the way dropping `catalogue`/`onProgress`/`planner` from this same signature
+   * did (B's repro, goalClearAround.spec.ts). `shop` stays required — every real caller already
+   * passes one — only `modelSetupsOverride` (the test-only seam, never set by app code, slated
+   * for retirement — see `buildModelPlanInputForGoal`'s own doc) is optional.
+   */
+  opts: {
+    shop: EngraveShopOpts;
+    modelSetupsOverride?: SetupSpec[];
+  },
 ): Promise<EngraveGenerated> {
+  const { shop, modelSetupsOverride } = opts;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -5228,717 +5177,118 @@ export async function generateGoalProgram(
   if (tool === null) return fail('feeds', 'the job has no usable cutter');
   const mill = jobMachine(job, calibration);
 
-  // #966 — THE SEAM. `USE_MODEL_CAM_ENGINE` off (the default) falls straight through to the
-  // heightfield path below, byte-for-byte unchanged; a spec that flips it (`cam/model/plan.ts`'s
-  // own "set only by specs for now") routes here instead. Full #966 — converting a `SetupPlan[]`
-  // into this function's posted `EngraveGenerated` — is NOT built: this seam only proves
-  // `planModelCam` is reachable with a real `ModelPlanInput` built from the job, and states by
-  // name where the new path stands today rather than crashing uninformatively or silently falling
-  // back to the old engine.
-  if (USE_MODEL_CAM_ENGINE) {
-    // #869 — the SAME named refusal the heightfield path states for a bad/non-flat `roughToolKey`
-    // (`validateGoalRoughTool`'s own doc): computed here too so the model path's `findings` carries
-    // it, independent of `buildModelPlanInputForGoal`'s own (pure, side-effect-free) re-validation
-    // for `ModelPlanInput.curvedRoughTool`.
-    const modelRoughFinding = validateGoalRoughTool(goal.roughToolKey, shop.tools ?? [], goal.id).finding;
-    const modelRoughFindings = modelRoughFinding === null ? [] : [modelRoughFinding];
-    // #989 — A STATED CHAMFER THE SHOP'S V CANNOT CUT IS NAMED, never silent: the seam then
-    // leaves `edgeBreak.legMm` 0 and the plan's own note says the rims stay sharp. The old
-    // stage's own finding, in its words, so a reader sees one vocabulary whichever engine runs.
-    const chamferFindings: JobFinding[] = [];
-    const chamferWantModel = goal.chamfer;
-    if (chamferWantModel !== undefined) {
-      const who = `The part's edges (“${goal.name}”)`;
-      const entry = (shop.tools ?? []).find((e) => e.key === chamferWantModel.toolKey);
-      if (chamferWantModel.toolKey === undefined || entry === undefined) {
-        chamferFindings.push({
-          severity: 'warning',
-          code: 'goal-chamfer-no-cutter',
-          labelId: goal.id,
-          message:
-            `${who} are not chamfered: ` +
-            (chamferWantModel.toolKey === undefined
-              ? 'no V-bit has been chosen for them'
-              : `the V-bit “${chamferWantModel.toolKey}” is not in the tool library`) +
-            '.',
-        });
-      } else if (vCone(entry.tool) === null) {
-        chamferFindings.push({
-          severity: 'warning',
-          code: 'goal-chamfer-no-cutter',
-          labelId: goal.id,
-          message: `${who} are not chamfered: “${entry.tool.name}” is a ${entry.tool.shape} cutter with no cone to make a bevel.`,
-        });
-      }
-    }
-    let input: ModelPlanInput;
-    try {
-      input = await buildModelPlanInputForGoal(job, goal, tool, shop, modelSetupsOverride);
-    } catch (e) {
-      return fail('cam', `cam/model seam (#966): could not build a ModelPlanInput for "${goal.name}" — ${e instanceof Error ? e.message : String(e)}`);
-    }
-    let output: ModelPlanOutput;
-    try {
-      output = await planModelCam(input);
-    } catch (e) {
-      return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
-    }
-    // #992 — THE PLAN'S TYPED STATEMENTS REACH THE OPERATOR. `warning`/`info` become findings on
-    // this run (the panel's route; the message is the statement's own text, the count rides the
-    // field the acceptance reads); `sheet` statements stay out of the findings entirely and ride
-    // `planStatements` for the run sheet's own route. Before this, every "stated on the card"
-    // ruling was readable only by a spec that opened `perSetup[].notes` itself.
-    const planStatements: PlanStatement[] = output.perSetup.flatMap((p) => p.statements);
-    const planFindings: JobFinding[] = planStatements
-      .filter((s) => s.severity !== 'sheet')
-      .map((s) => ({
-        severity: s.severity,
-        code: s.code,
-        labelId: goal.id,
-        message: s.text,
-        ...(s.count === undefined ? {} : { count: s.count }),
-      }));
-    // #966 ROUND 3 — THE CUTOVER NOW COVERS MULTI-SETUP. `planModelCam` ran and returned a
-    // `SetupPlan` per setup (#965's registration/freeing-cl work, underneath); every setup's own
-    // `programs` (one per RUN, in execution order — #963's own rule) posts through the SAME
-    // `postFor`/`verifyProgram` pair, and the SAME `VerifyContext` shape (`toSetup`/`jobDepthLimit`/
-    // `mountCtx`), the rest of this file already builds for a goal's own setup — not a second
-    // convention (grep both call sites before touching this). Setups post IN ORDER, then that
-    // setup's own programs in order.
-    //
-    // THE TURN-OVER CONVENTION — no established one existed in this file for a model-engine job,
-    // so this is stated rather than guessed: `runSheet.ts`'s own multi-setup paper
-    // (`turnOverSteps`) represents the physical remount between two setups PURELY as a change in a
-    // posted `EngraveProgram`'s `setupIndex`/`setupId` between consecutive entries — it reads the
-    // boundary off that field change, never a sentinel object inserted into the program list. This
-    // loop follows the SAME convention: `programs` stays flat, in posting order, and the setup
-    // boundary is only ever visible as `setupIndex`/`setupId` changing between two entries. The one
-    // thing that DOES reset at that boundary is the vacuum span (`post/z1.ts`'s `VacuumSpan`):
-    // vacuum cannot hold through a physical turn-over (the part is unclamped and flipped), so
-    // 'first'/'last'/'whole' are computed against EACH setup's own `programs.length`, never across
-    // the whole job's combined program count.
-    const jobSetupList = jobSetups(job);
-    const totalPrograms = output.perSetup.reduce((n, p) => n + p.programs.length, 0);
-    if (totalPrograms === 0) {
-      const perSetupNotes = output.perSetup
-        .map((p) => `setup ${p.setupIndex + 1}${p.notes.length === 0 ? '' : `: ${p.notes.join(' | ')}`}`)
-        .join(' / ');
-      return fail(
-        'cam',
-        `cam/model (#966): planModelCam planned no program for "${goal.name}" across ${output.perSetup.length} setup(s)` +
-          (perSetupNotes.length === 0 ? '' : ` — ${perSetupNotes}`),
-        null,
-        output,
-        [...chamferFindings, ...planFindings],
-      );
-    }
-
-    const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
-    const limit: DepthLimit = jobDepthLimit(job);
-    const ctx: PostContext = {
-      jobName: job.name,
-      stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
-      materialName: job.stock.material,
-      zDatum: 'probed-top-face',
-      origin: postOriginFor(mill),
-      camVersion: CAM_VERSION,
-      toolKey: job.toolKey,
-    };
-
-    const programs: EngraveProgram[] = [];
-    for (const plan of output.perSetup) {
-      // 1-based, the operator's "Setup N" (`EngraveProgram.setupIndex`'s own doc); `plan.setupIndex`
-      // is 0-based (#963's `SetupPlan`'s own convention, like `job.setups`).
-      const setupIndex = plan.setupIndex + 1;
-      // No per-setup `JobSetup` exists for a model-engine job today (`buildModelPlanInputForGoal`
-      // builds `ModelPlanInput.setups` independently of `job.setups` — a goal dispatches before the
-      // item pipeline's own setups ever apply, `jobSetup.ts`'s own #888 item 6 note). Reuse the
-      // real id when `job.setups` ever does carry one at this index (future wiring, not a guess
-      // this entry makes), else synthesize a stable, readable one off the job's own implicit id.
-      const setupId = jobSetupList[plan.setupIndex]?.id ?? `${jobSetupList[0]!.id}#${setupIndex}`;
-      if (plan.programs.length === 0) {
-        return fail(
-          'cam',
-          `cam/model (#966): planModelCam planned no program for "${goal.name}" setup ${setupIndex}` +
-            (plan.notes.length === 0 ? '' : ` — ${plan.notes.join(' | ')}`),
-          null,
-          output,
-        );
-      }
-      for (let i = 0; i < plan.programs.length; i++) {
-        const ir = plan.programs[i]!;
-        // #961's own cutter identity — `tool.id ?? tool.name` (`cam/model/sequence.ts`'s
-        // `cutterKeyOf`), the SAME string the plan's own run-grouping already keyed this program's
-        // cutter by (`SetupPlan.programs`'s own doc: "one program per RUN"). `toolKey` here is a
-        // free-text header word (`;@CM|TOOL|key=`, `post/z1.ts`) the post never reads back for
-        // machine control, so it needs no round-trip through the `shop.tools` registry.
-        const toolKey = cutterKeyOf(ir.tool);
-        // Reset per SETUP, not across the whole job (see this block's own header note on why).
-        const span: VacuumSpan =
-          plan.programs.length === 1 ? 'whole' : i === 0 ? 'first' : i === plan.programs.length - 1 ? 'last' : 'middle';
-        const programLabel = `setup ${setupIndex} program ${i + 1}/${plan.programs.length} (${toolKey})`;
-        let posted: PostResult;
-        try {
-          posted = postFor(mill)(ir, { ...ctx, toolKey }, { vacuum: span });
-        } catch (e) {
-          return fail('post', `cam/model (#966): ${programLabel}: ${e instanceof Error ? e.message : String(e)}`, null, output);
-        }
-        if (!posted.ok) {
-          return fail('post', `cam/model (#966): ${programLabel}: ${posted.errors.join('; ')}`, null, output);
-        }
-        const verify = verifyProgram(posted.text, {
-          setup,
-          machine: mill,
-          tool: ir.tool,
-          dialect: postKey(mill),
-          depthLimit: limit,
-          minRapidZ: ir.hopZ,
-          ...mountCtx(shop.mount, job.jawClearance),
-        });
-        const verifyErrors = verify.findings.filter((f) => f.severity === 'error');
-        if (verifyErrors.length > 0) {
-          // #966 — a program the verifier refuses stops the run here: the programs already posted
-          // (if any, from this or an earlier setup) are returned as the diagnosis `programs` doc
-          // states ("a partial list, never a runnable job"), and the failing program's own
-          // text/report ride the top-level fields — the SAME shape `generateOneProgram`'s own
-          // verify-stage stop returns (grep that call site). `plan` still carries the FULL
-          // `ModelPlanOutput` — the plan itself was sound, only this posted file was not.
-          return {
-            ...base,
-            ok: false,
-            stage: 'verify',
-            findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...modelRoughFindings, ...chamferFindings, ...documentFindings(), ...planFindings]),
-            feeds: null,
-            cam: null,
-            nc: posted.text,
-            verify,
-            programs: [...programs],
-            plan: output,
-            planStatements,
-            errors: [{ stage: 'verify', message: `cam/model (#966): ${programLabel}: ${verifyErrors.length} verifier error(s)` }],
-          };
-        }
-        programs.push({
-          setupIndex,
-          setupId,
-          toolKey,
-          nc: posted.text,
-          frame: ir.frame,
-          verify,
-          frameNc: null,
-          frameVerify: null,
-          programHash: programHash(posted.text),
-          cam: summarize(ir, mill.rapidEstimate),
-        });
-      }
-    }
-
-    // #419 J3 — the top-level `nc`/`verify`/`cam` describe the FIRST program, exactly as the
-    // `programs` field's own doc states ("the adapter the panels and the bench scripts read
-    // today"); every program's own facts ride in `programs`.
-    const first = programs[0]!;
-    return {
-      ...base,
-      ok: true,
-      stage: 'done',
-      findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...modelRoughFindings, ...chamferFindings, ...documentFindings(), ...planFindings]),
-      feeds: null,
-      cam: first.cam,
-      nc: first.nc,
-      verify: first.verify,
-      programs,
-      plan: output,
-      planStatements,
-    };
-  }
-
-  // Feeds — the job's 2.5D feeds, reused unchanged (slice F tunes 3D engagement, #536). A ball/bull
-  // is refused by `feedsFor` (it cannot trace), so its feeds come through the shared FLAT proxy
-  // (feedsToolForSurface); a flat cutter resolves directly.
-  const resolved = engraveFeedsFor(shop, catalogue, job.stock.material, feedsToolForSurface(tool), mill, job.cutOverride);
-  if (!resolved.ok) return fail('feeds', resolved.reason, resolved);
-
-  // #535 — the goal operation's own settings, each falling back to the default it overrides: the
-  // feeds row's step-down/step-over, and the shop's finish allowance and flat-grid pitch.
-  const settings = goal.surface ?? {};
-  const stockToLeaveMm = settings.stockToLeaveMm ?? shop.finish?.stockToLeaveMm.value;
-  const gridPitchMm = settings.gridPitchMm ?? shop.surfaceGrid?.pitchMm.value ?? null;
-  // #755 — the grid this run samples at absent a finer finish step-over (the one further down
-  // re-reads the same fallback after the step-over below may have refined it). Hoisted here so
-  // #945's step-over derivation can floor to a whole multiple of it before either number is read
-  // again.
-  const basePitchMm = gridPitchMm ?? DEFAULT_GRID_PITCH_MM;
-  // #945 a1 — THE LEFTOVER BAND A FINISH STEP-OVER IS DERIVED AGAINST: the shop's own "does this
-  // leftover show" threshold (#847/#912's `rest.visibleDepthMm`), hoisted here from where the
-  // goal-rest sentences below read it — the same number, read once rather than resolved twice.
-  const visibleDepthMm = shop.rest?.visibleDepth.value ?? REST_MACHINING_FALLBACK.visibleDepth;
-  // #945 a1 — THE BALL FINISH'S OWN DEFAULT STEP-OVER, when the operation states none. A ball/bull
-  // cutter's row spacing is derived from its own radius and the band above — the cusp a FLAT span
-  // leaves between rows, held at or under that band ({@link finishStepOverForCusp}) — capped at
-  // today's 2.5D pocketing step-over so a cutter this derivation does not help (one whose radius is
-  // already comfortably under the band) never runs COARSER than before. A flat finishing cutter
-  // (no `ball`) keeps the 2.5D step-over outright: it drops onto the highest point under its disc
-  // rather than a ball's flank, so this cusp formula does not describe it, and the module's notes
-  // already flag a flat finish as a fallback on its own terms.
-  const cuspStepOverMm =
-    tool.shape === 'ball' || tool.shape === 'bull'
-      ? finishStepOverForCusp((cuttingDiameter(tool) ?? 0) / 2, visibleDepthMm, basePitchMm)
-      : null;
-  const defaultFinishStepOverMm =
-    cuspStepOverMm !== null ? Math.min(cuspStepOverMm, resolved.params.stepOver) : resolved.params.stepOver;
-
-  // #764 — THE ITEM IS CLEARED AROUND, down to its base plane. Cut only inside the goal's own
-  // footprint, the blank around the part keeps its full height and the part ends in a pit; the
-  // band is sampled as part of the surface, so the roughing and finishing passes that are written
-  // anyway include it. A MOLD is unchanged — its cavity's rim IS the stock top — and a PICTURE
-  // keeps the pre-#764 cut.
-  //
-  // THE WIDTH IS ONE CUTTER DIAMETER PLUS ONE FINISHING STEP-OVER. The diameter is what lets the
-  // ball reach the part's wall at all; the extra step-over is what leaves a FLOOR at the base
-  // plane between the two fillets the ball necessarily leaves against the part and against the
-  // stock outside the ring (each one radius wide on a tall wall). A band of exactly one diameter
-  // lets the two fillets meet, and the "cleared" floor then sits a radius above the base.
-  // #888 — the ONE reader of the clear band (`goalClearBand`), shared with the top-face measure
-  // that decides whether facing has anything to skim. The step-over widens the ring exactly as
-  // this block always did.
-  // #945 — THE CLEAR RING KEEPS THE OLD STEP-OVER, deliberately not `defaultFinishStepOverMm`.
-  // The ring only has to be WIDE ENOUGH for its two fillets to meet (the comment above); the old,
-  // coarser 2.5D step-over is always at least as wide as the newly-derived one (the derivation
-  // only ever tightens), so sizing by it is still correct and never makes the band too narrow. It
-  // also keeps the clear band's extent — and so the heightfield's grid origin — exactly where it
-  // was before this fix, so a job that does not benefit from the finer finish (a flat cutter, or
-  // a ball already comfortably under the band) sees no change at all outside the finish raster.
-  const ringStepOverMm = settings.finishStepOverMm ?? resolved.params.stepOver;
-  const { clear, ringWidthMm } = goalClearBand(goal, {
-    toolDiameterMm: cuttingDiameter(tool) ?? 0,
-    stepOverMm: ringStepOverMm > 0 ? ringStepOverMm : 0,
-  });
-  // #898 — THE PART'S BASE PLANE, and the CLEAR BAND's floor under it. A flat underside's SKIN
-  // raises the band's floor by that much, so the band leaves the skin connecting the part to the
-  // surrounding stock rather than freeing it.
-  const partBaseZ = goal.position.z - placedSize(goal).z;
-  const bandBaseFloorZ = undersideClearBaseZ(goal) ?? partBaseZ;
-  const sampleClear =
-    clear === null
-      ? {}
-      : {
-          clear,
-          stockRect: { xMin: 0, xMax: job.stock.length, yMin: 0, yMax: job.stock.width },
-          baseZ: bandBaseFloorZ,
-        };
-
-  const feeds: SurfaceFeeds = {
-    feed: resolved.params.feed,
-    plungeFeed: resolved.params.plungeFeed,
-    stepDown: settings.roughStepDownMm ?? resolved.params.stepDown,
-    roughStepOver: settings.roughStepOverMm ?? resolved.params.stepOver,
-    // #945 — a ball finish's own derived step-over ({@link defaultFinishStepOverMm}), or the goal
-    // operation's own stated one.
-    finishStepOver: settings.finishStepOverMm ?? defaultFinishStepOverMm,
-  };
-
-  // #869 — THE GOAL'S FLAT ROUGH: a program of its own, with its own feeds. The measured search
-  // wrote the key into the goal (`roughToolKey`); the split happens only when the library really
-  // holds a FLAT under it and that flat can be fed for this material. A key that cannot be used
-  // leaves the goal cut by one cutter (as before) and says so — inform, never refuse: the part is
-  // still made, the finish is unchanged.
-  const roughFindings: JobFinding[] = [];
-  const roughEntryDefined = goal.roughToolKey !== undefined;
-  const roughValidated = validateGoalRoughTool(goal.roughToolKey, shop.tools ?? [], goal.id);
-  const roughEntry = roughEntryDefined ? (shop.tools ?? []).find((e) => e.key === goal.roughToolKey) : undefined;
-  // #999 — the OLD heightfield path keeps its own reading: absent and null both mean "no split"
-  // (its plans are pinned byte-for-byte); only the model seam gives absent the engine's choice.
-  const roughTool = roughValidated.tool ?? null;
-  const roughResolved =
-    roughTool === null
-      ? null
-      : engraveFeedsFor(shop, catalogue, job.stock.material, roughTool, mill, job.cutOverride);
-  if (roughValidated.finding !== null) {
-    roughFindings.push(roughValidated.finding);
-  } else if (roughEntryDefined && roughResolved !== null && !roughResolved.ok) {
-    roughFindings.push({
-      severity: 'warning',
-      code: 'goal-rough-no-cutter',
-      labelId: goal.id,
-      message: `The goal is cut by one cutter: “${roughEntry!.tool.name}” cannot be fed for ${job.stock.material} — ${roughResolved.reason}.`,
-    });
-  }
-  // A station the post cannot write (T0 is the probe slot) is a refusal of the SPLIT, not of the
-  // goal: the finish still runs on one cutter.
-  const roughStation = ((): number | null => {
-    if (roughTool === null) return null;
-    try {
-      return toolNumberFor(roughTool);
-    } catch {
-      return null;
-    }
-  })();
-  if (roughTool !== null && roughStation === null && roughEntryDefined) {
-    roughFindings.push({
-      severity: 'warning',
-      code: 'goal-rough-no-cutter',
-      labelId: goal.id,
-      message: `The goal is cut by one cutter: “${roughEntry!.tool.name}” states no usable tool station, so the post cannot change to it.`,
-    });
-  }
-  /** The rough cutter, its station and its own feeds — null when the goal is cut by one cutter. */
-  const rough: { tool: Tool; number: number; feeds: SurfaceFeeds; rpm: number } | null =
-    roughTool === null || roughResolved === null || !roughResolved.ok || roughStation === null
-      ? null
-      : {
-          tool: roughTool,
-          number: roughStation,
-          rpm: roughResolved.params.rpm,
-          feeds: {
-            feed: roughResolved.params.feed,
-            plungeFeed: roughResolved.params.plungeFeed,
-            // The goal's stated step-down/step-over win, as they do for the ball (they are the
-            // GOAL's own operation settings); otherwise the flat's row — a flat takes more than a
-            // ball, which is the whole point of the split.
-            stepDown: settings.roughStepDownMm ?? roughResolved.params.stepDown,
-            roughStepOver: settings.roughStepOverMm ?? roughResolved.params.stepOver,
-            finishStepOver: roughResolved.params.stepOver,
-          },
-        };
-  // #755 — A FINISH FINER THAN THE SHAPE IS KNOWN BUYS NOTHING. When the finish's step-over is
-  // finer than the grid the goal would be sampled on, sample at the step-over instead: the passes
-  // then follow a surface known at the resolution they cut at. A COARSER step-over does not
-  // coarsen the grid. Two caps can still stop the refinement — the heightfield's cell count and
-  // the finishing tip field's evaluation budget — and they relax it rather than refuse the job;
-  // the run then says which pitch it settled on and why (inform, never refuse).
-  const finishStepOverMm = feeds.finishStepOver;
-  const refinedPitchMm = finishStepOverMm > 0 && finishStepOverMm < basePitchMm ? finishStepOverMm : basePitchMm;
-  // #671 — the two extra finishing passes are OPT-IN: absent = today's rough + parallel finish.
-  const scallop = settings.scallop === true;
-  const pencil = settings.pencil === true;
-  const pencilCreaseDeg = settings.pencilCreaseDeg;
-
-  // #785 — THE OPERATOR'S TOP-BAND CHOICE, as a floor in work Z. `cutWithinReach` on the goal says
-  // "let me make the part I can have": the goal is cut only down to the stock top less the cutter's
-  // known reach less the clearance, so the holder never enters the work. The reach is the SAME
-  // number the refusal above reports (the chosen cutter's own flute, else Makera's catalogue row);
-  // a longer cutter later deepens the band with the same choice standing, which is why the band is
-  // derived here rather than stored on the job. Absent or zero band: no floor, the pre-#785 cut.
-  const cutterReach = tool === null ? null : knownReach(tool, shop.tools ?? []);
-  const goalDepth = placedSize(goal).z;
-  const bandMm =
-    cutterReach !== null && goalDepth > cutterReach.mm + 1e-9 && goal.cutWithinReach === true
-      ? Number((cutterReach.mm - GOAL_BAND_CLEARANCE_MM).toFixed(3))
-      : null;
-  // #888 — THE SPLIT'S OWN BAND. A goal copy made by the budget split names how deep ITS side cuts
-  // below the goal's own highest surface; the floor it states wins over the reach-derived one,
-  // because the split chose it to keep this program under the move budget. Measured from the
-  // placement's top (not the blank's) so the same number splits the goal in the flipped frame,
-  // where the goal's own top is the stock's underside. Absent on every goal that has not been split.
-  const statedBandMm = goal.bandMm !== undefined && goal.bandMm > 0 ? goal.bandMm : null;
-  // #898 — THE UNDERSIDE'S FLOOR. A goal that says where its underside comes from cuts to that
-  // floor: a flat part stops at its own bottom plane (plus any skin), a plinth a stated height
-  // above the blank's bottom. The sampler's clamp does the rest — cells below the floor are cut
-  // flat there — so nothing under the part is machined. A split side's own band wins: it is the
-  // more specific statement, and the two can then never disagree about the floor.
-  const undersideFloor = goal.underside === undefined ? null : undersideFloorZ(goal, job.stock);
-  const topBandMm = statedBandMm === null && bandMm !== null && bandMm > 0 ? bandMm : null;
-  const depthLimitZ =
-    statedBandMm !== null
-      ? goal.position.z - statedBandMm
-      : undersideFloor ?? (topBandMm === null ? null : -topBandMm);
-
-  // #862 — THE CLEAR BAND'S WALL, as the rim finish is told it: from the stock top down to the
-  // band's own floor — the goal's base plane (raised by a flat underside's skin, #898), or the
-  // #785 top-band clamp when the operator chose to cut only what the cutter reaches. A job with
-  // no band has no wall to finish.
-  const bandBaseZ = bandBaseFloorZ;
-  const bandFloorZ =
-    clear === null ? null : depthLimitZ === null ? bandBaseZ : Math.max(bandBaseZ, depthLimitZ);
-
-  // #784 — the blank's rectangle: an oversized goal is cut clipped to the stock, never as air
-  // cuts past its edge. A goal already inside the blank samples exactly as before.
-  const sampleAt = (pitchMm: number): SampleGoalOpts => ({
-    pitchMm,
-    ...sampleClear,
-    clip: { xMin: 0, xMax: job.stock.length, yMin: 0, yMax: job.stock.width },
-    // #785 — the top-band floor, when the operator chose to cut what the cutter reaches.
-    depthLimitZ,
-  });
-
-  // #785, #889 — THE STATED MEMORY BUDGET, BEFORE THE CAM BUILDS A SINGLE MOVE. The program is
-  // held whole through the post and the simulation, so its size is known first: sample the goal —
-  // cheap, and the same grid the CAM will cut — and count what each roughing level really removes
-  // and what the finishing raster samples. Settle on the coarser base pitch when that fits; if
-  // even that is over, refuse BY NAME with the numbers and the fixes. A dead tab is never the
-  // outcome.
-  const allowanceMm = stockToLeaveMm ?? DEFAULT_STOCK_TO_LEAVE_MM;
-  const budgetMb = goalMemoryBudgetMb();
-  type MoveEstimate = GoalMoveEstimate & { depth: number; cells: number; pitch: number };
-  const movesAt = (pitchMm: number, stepDown = feeds.stepDown): MoveEstimate => {
-    const sampled = sampleGoalHeightfield(goal, sampleAt(pitchMm));
-    if (sampled.coveredCount === 0) return { rough: 0, finish: 0, moves: 0, mb: 0, depth: 0, cells: 0, pitch: sampled.pitch };
-    // The mould's field, as the CAM will cut it (`generateSurface3dForGoal`).
-    const hf = isMold(goal)
-      ? moldHeightfield(sampled, goal.position.y, goal.position.z - placedSize(goal).z)
-      : sampled;
-    // #862's rim laps are part of the finish when the run clears a band.
-    const rim =
-      bandFloorZ === null
-        ? null
-        : {
-            floorZ: bandFloorZ,
-            tool: { radius: (cuttingDiameter(tool) ?? 0) / 2, ball: tool.shape === 'ball' || tool.shape === 'bull' },
-          };
-    // #869/#889 — THE SPLIT IS ESTIMATED AS THE TWO PROGRAMS IT IS. Without a flat rough the one
-    // call is the whole program (its rough and finish at this budget's step-down, plus the rim).
-    // With one, the ROUGH is counted from the FLAT's own feeds (the step-down press still moves
-    // it) and the finish from the ball's, rim included; the two are summed.
-    const estimate: GoalMoveEstimate =
-      rough === null
-        ? estimateGoalMoves(hf, { ...feeds, stepDown }, allowanceMm, null, rim, surfaceToolFor(tool))
-        : {
-            ...(() => {
-              // #909 — the rough's clamp is taken over ITS OWN cutter's disc, exactly as the CAM
-              // takes it, so the estimate counts what the rough really writes.
-              const r = rough === null ? 0 : estimateGoalMoves(hf, { ...rough.feeds, stepDown }, allowanceMm, null, null, surfaceToolFor(rough.tool)).rough;
-              const f = estimateGoalMoves(hf, feeds, allowanceMm, null, rim).finish;
-              const moves = r + f;
-              return { rough: r, finish: f, moves, mb: (moves * GOAL_BYTES_PER_MOVE) / (1024 * 1024) };
-            })(),
-          };
-    return { ...estimate, depth: hf.topZ - hf.minZ, cells: hf.coveredCount, pitch: hf.pitch };
-  };
-  let cutPitchMm = refinedPitchMm;
-  let moveEstimate = movesAt(cutPitchMm);
-  let moveBudgetBound = false;
-  if (moveEstimate.mb > budgetMb && cutPitchMm !== basePitchMm) {
-    const coarser = movesAt(basePitchMm);
-    if (coarser.mb <= budgetMb) {
-      cutPitchMm = basePitchMm;
-      moveEstimate = coarser;
-      moveBudgetBound = true;
-    }
-  }
-  // The finishing tip field's own cap (#540) is the other budget the CAM holds. When the run
-  // has no coarser grid to settle on, it is refused here too, by name with the same presses,
-  // rather than failing inside the CAM.
-  const radius = (cuttingDiameter(tool) ?? 0) / 2;
-  const tipOpsOf = (e: MoveEstimate): number => e.cells * tipStencilCells(radius, e.pitch);
-  const tipFits = (e: MoveEstimate): boolean => tipOpsOf(e) <= DEFAULT_MAX_FINISH_TIP_OPS;
-  const tipOver = cutPitchMm === basePitchMm && !tipFits(moveEstimate);
-  if (moveEstimate.mb > budgetMb || tipOver) {
-    // The two presses, each found by trying it: the pitch that fits BOTH budgets — this one and
-    // the tip field's — and, at the pitch the run settled on, the step-down that fits. The counts
-    // are not proportional to either number any more (a level costs what it removes), so each is
-    // stepped up by a quarter until the estimate fits; a press that never fits within a dozen
-    // steps, or cannot help, is not offered.
-    const round2Up = (v: number): number => Math.ceil(v * 100) / 100;
-    let suggestedPitch: number | undefined;
-    for (let p = round2Up(moveEstimate.pitch * 1.25), n = 0; n < 12; p = round2Up(p * 1.25), n++) {
-      const e = movesAt(p);
-      if (e.mb <= budgetMb && tipFits(e)) {
-        suggestedPitch = p;
-        break;
-      }
-    }
-    let suggestedStepDown: number | undefined;
-    // The step-down changes the roughing only: no help when the tip field is what is over.
-    for (let d = round2Up(feeds.stepDown * 1.25), n = 0; n < 12 && !tipOver; d = round2Up(d * 1.25), n++) {
-      if (movesAt(cutPitchMm, d).mb <= budgetMb) {
-        suggestedStepDown = d;
-        break;
-      }
-    }
-    // #888 — THE DEPTH SPLIT, IF TWO BANDS FIT. The budget is a per-PROGRAM limit (the CAM holds
-    // every move at once), so a goal cut as a top band and a bottom band — each from its own side
-    // of the stock — is two programs, each at half the levels. The two halves meet wherever they
-    // meet; each side's band is stated on its own goal copy (`bandMm`). Offered only when BOTH
-    // bands fit the budget and the chosen cutter can reach the deeper half, so the press never
-    // builds a job that refuses again. A goal already cutting a band (a split side, or the
-    // #785 top-band cut) is not split. The band arithmetic is the #888 model (levels across every
-    // cell); #889's exact per-level count estimates the RUN, not a hypothetical half-depth one.
-    // The band estimate is proportional to #889's own: the roughing work per level (its exact
-    // full-depth count over the levels it runs) times the band's levels, plus HALF the finish —
-    // each setup finishes only the surface its band exposes. The pre-#889 model (cells × levels)
-    // is not used: a raster level merges into one move per row, so that model overstated a band
-    // by orders of magnitude and the press was never offered.
-    const levelsFull = Math.max(1, Math.ceil((moveEstimate.depth + allowanceMm) / feeds.stepDown));
-    const roughPerLevel = moveEstimate.rough / levelsFull;
-    const finishEach = moveEstimate.finish / 2;
-    const levelsForBand = (bandMm: number): number =>
-      Math.max(1, Math.ceil((bandMm + allowanceMm) / feeds.stepDown));
-    const movesForBand = (bandMm: number): number => roughPerLevel * levelsForBand(bandMm) + finishEach;
-    const firstBandMm = Number((moveEstimate.depth / 2).toFixed(3));
-    const secondBandMm = Number((moveEstimate.depth - firstBandMm).toFixed(3));
-    const splitMoves = Math.max(movesForBand(firstBandMm), movesForBand(secondBandMm));
-    const splitMb = (splitMoves * GOAL_BYTES_PER_MOVE) / (1024 * 1024);
-    const splitReachFits =
-      cutterReach === null || Math.max(firstBandMm, secondBandMm) <= cutterReach.mm - GOAL_BAND_CLEARANCE_MM + 1e-9;
-    const suggestedSplit =
-      statedBandMm === null &&
-      goal.cutWithinReach !== true &&
-      moveEstimate.depth > 0 &&
-      splitReachFits &&
-      splitMb <= budgetMb
-        ? { firstMm: firstBandMm, secondMm: secondBandMm, movesEach: splitMoves }
-        : undefined;
-    const finding: JobFinding = {
-      severity: 'error',
-      code: 'goal-program-too-big',
-      targetId: goal.id,
-      ...(suggestedPitch === undefined ? {} : { suggestedPitchMm: suggestedPitch }),
-      ...(suggestedStepDown === undefined ? {} : { suggestedStepDownMm: suggestedStepDown }),
-      // #888 — the numbers the operator does not count, folded under Technical. #889 — the budget
-      // itself is stated in MB, the unit the run is refused in.
-      budgetMoves: moveEstimate.moves,
-      budgetCells: moveEstimate.cells,
-      budgetMb: moveEstimate.mb,
-      budgetLimitMb: budgetMb,
-      budgetPitchMm: moveEstimate.pitch,
-      budgetStepDownMm: feeds.stepDown,
-      ...(suggestedSplit === undefined ? {} : { suggestedSplit }),
-      // #888 — the plain sentence (the panel adds " Choose one:" and its presses): what the goal
-      // is, in the operator's units. Moves, MB and the budget are the Technical line's.
-      message:
-        `This goal is too detailed to plan at ${Number(moveEstimate.pitch.toFixed(4))} mm in one go ` +
-        `(${Number(moveEstimate.depth.toFixed(3))} mm deep).`,
-    };
-    return {
-      ...base,
-      ok: false,
-      stage: 'findings',
-      findings: dedupeFindings([finding, ...goalFindings, ...documentFindings()]),
-      feeds: null,
-      cam: null,
-      nc: null,
-      verify: null,
-      errors: [{ stage: 'findings' as EngraveStage, message: finding.message }],
-    };
-  }
-
-  type Surfaced = Awaited<ReturnType<typeof generateSurface3dForGoal>>;
-  const surfaceAt = async (pitchMm: number): Promise<Surfaced> =>
-    await generateSurface3dForGoal({
-      target: goal,
-      tool,
-      toolNumber: toolNumberFor(tool),
-      spindleRpm: resolved.params.rpm,
-      air: job.cutOverride?.air ?? true,
-      feeds,
-      rapid: mill.rapidEstimate,
-      sample: sampleAt(pitchMm),
-      // #869 — the split: the flat roughs, the ball (this call's `tool`) finishes.
-      ...(rough === null ? {} : { rough: { tool: rough.tool, toolNumber: rough.number, feeds: rough.feeds } }),
-      opts: {
-        stockToLeaveMm,
-        scallop,
-        pencil,
-        ...(pencilCreaseDeg === undefined ? {} : { pencilCreaseDeg }),
-        // #862 — finish the clear band's wall as contour laps (see bandFloorZ above).
-        rim: bandFloorZ === null ? null : { floorZ: bandFloorZ },
-        // #846 — HOW EACH ROUGHING LEVEL IS CLEARED, decided per job from the shop's two rough3d
-        // numbers and the job's material — the same wiring a surface primitive gets. A mesh goal
-        // is where most 3D roughing happens, so the chooser's one stated line lands in this run's
-        // notes and its sheet; a goal with no roughing option (a caller of the CAM directly) keeps
-        // the raster byte for byte. #881 — its levels go to the pool when one is attached.
-        roughing: {
-          mode: 'auto',
-          material: job.stock.material,
-          depthRatio: readDefault(shop.defaults ?? null, 'rough3d.adaptiveDepthRatio').value,
-          cellBudget: readDefault(shop.defaults ?? null, 'rough3d.compareCellBudget').value,
-          // #846 — the planning budget: the adaptive is planned one level at a time, so above
-          // this much work the goal keeps the raster and the line says why.
-          planBudget: readDefault(shop.defaults ?? null, 'rough3d.planBudgetCellLevels').value,
-          adaptive: adaptiveSettings(shop.defaults ?? null).settings,
-          // #881 — THE POOL'S MEMORY BOUND. #889's budget is the page's allowance for the whole
-          // program; the program's own estimate is the parent, and the port sizes each planner's
-          // level from its own measuring grid. `moveEstimate` is read at call time, so a run that
-          // settled on the coarser pitch states the coarser program.
-          ...(planner === undefined
-            ? {}
-            : {
-                planner,
-                memory: {
-                  budgetBytes: budgetMb * 1024 * 1024,
-                  parentBytes: moveEstimate.mb * 1024 * 1024,
-                },
-              }),
-        },
-        // #785 — the CAM's own layer/scan-line counts, as Generate's progress words.
-        onProgress: (p) =>
-          onProgress?.({
-            stage: p.pass,
-            label: `${p.pass === 'rough' ? 'roughing level' : 'finishing row'} ${p.done} of ${p.total}`,
-            done: p.done,
-            total: p.total,
-          }),
-      },
-    });
-  let surfaced: Surfaced;
-  let budgetBound = false;
-  onProgress?.({ stage: 'sample', label: 'sampling the goal' });
-  try {
-    surfaced = await surfaceAt(cutPitchMm);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    // The finishing tip field's own cap (#540) is a cost limit, not a fault: settle at the grid
-    // the job would have used and let the finding below state the pitch the run really took.
-    const budget = refinedPitchMm !== basePitchMm && /tip evaluations/.test(message) && /budget/.test(message);
-    if (!budget) return fail('cam', message, resolved);
-    try {
-      surfaced = await surfaceAt(basePitchMm);
-      budgetBound = true;
-    } catch (e2) {
-      return fail('cam', e2 instanceof Error ? e2.message : String(e2), resolved);
-    }
-  }
-  if (surfaced === null) {
-    return fail('cam', `the goal "${goal.name}" lies at or above the stock top, so there is no surface to cut`, resolved);
-  }
-
-  // #721 — a MOLD's honest limits, said once. It is one-sided (cut from the top, so the cavity is
-  // the part's top surface and the casting's underside is the flat pour face), and a wall with no
-  // draft holds the casting: warn past the labelled limit, naming the steepest wall found.
-  const moldFindings: JobFinding[] = [];
-  // #755 — the grid the sampler SETTLED on, against the finish the job asked for. The cap is the
-  // heightfield's own (4 M cells); a coarser settled pitch means the passes are finer than the
-  // shape is known, and the operator should hear it once, with the number the run really used.
-  const gridFindings: JobFinding[] = [];
-  const settledPitchMm = surfaced.heightfield.pitch;
-  if (finishStepOverMm > 0 && settledPitchMm > finishStepOverMm + 1e-9) {
-    const trim = (n: number): string => String(Number(n.toFixed(4)));
-    const why = moveBudgetBound
-      ? `the program would exceed the app's ${budgetMb} MB memory budget at that spacing`
-      : budgetBound
-        ? `a ball at that spacing would ask the finishing tip field for more than its ${DEFAULT_MAX_FINISH_TIP_OPS.toLocaleString('en-US')} evaluations`
-        : `the heightfield's ${DEFAULT_MAX_CELLS.toLocaleString('en-US')} cells settle the grid there`;
-    gridFindings.push({
-      severity: 'warning',
-      code: 'goal-finish-finer-than-grid',
-      message:
-        `the finish passes are ${trim(finishStepOverMm)} mm apart but the shape is known every ${trim(settledPitchMm)} mm — ` +
-        `${why}, so the finer passes buy at most that accuracy; set a step-over at or above it, or surface a smaller blank`,
-    });
-  }
-  if (isMold(goal)) {
-    const steepest = steepestWallDeg(surfaced.heightfield);
-    moldFindings.push({
-      severity: 'info',
-      code: 'goal-mold-one-sided',
-      message:
-        `The mould of "${goal.name}" is cut from the top only: the cavity is the part's top surface, ` +
-        'turned over so the casting reads the right way round, and the casting\'s underside is the ' +
-        'flat face you pour into. A part with undercuts, or one shaped on both sides, needs a ' +
-        'two-part mould — two setups.',
-    });
-    if (steepest > MOLD_DRAFT_LIMIT_DEG) {
-      moldFindings.push({
+  // #966 — THE SEAM REMOVED. The old heightfield dispatch (`generateSurface3dForGoal`/
+  // `generateSurface3dIR`) and the `USE_MODEL_CAM_ENGINE` flag that chose between it and this are
+  // both gone: `planModelCam` is the only path a goal job plans through now.
+  // #869 — the SAME named refusal the heightfield path states for a bad/non-flat `roughToolKey`
+  // (`validateGoalRoughTool`'s own doc): computed here too so the model path's `findings` carries
+  // it, independent of `buildModelPlanInputForGoal`'s own (pure, side-effect-free) re-validation
+  // for `ModelPlanInput.curvedRoughTool`.
+  const modelRoughFinding = validateGoalRoughTool(goal.roughToolKey, shop.tools ?? [], goal.id).finding;
+  const modelRoughFindings = modelRoughFinding === null ? [] : [modelRoughFinding];
+  // #989 — A STATED CHAMFER THE SHOP'S V CANNOT CUT IS NAMED, never silent: the seam then
+  // leaves `edgeBreak.legMm` 0 and the plan's own note says the rims stay sharp. The old
+  // stage's own finding, in its words, so a reader sees one vocabulary whichever engine runs.
+  const chamferFindings: JobFinding[] = [];
+  const chamferWantModel = goal.chamfer;
+  if (chamferWantModel !== undefined) {
+    const who = `The part's edges (“${goal.name}”)`;
+    const entry = (shop.tools ?? []).find((e) => e.key === chamferWantModel.toolKey);
+    if (chamferWantModel.toolKey === undefined || entry === undefined) {
+      chamferFindings.push({
         severity: 'warning',
-        code: 'goal-mold-no-draft',
+        code: 'goal-chamfer-no-cutter',
+        labelId: goal.id,
         message:
-          `The mould of "${goal.name}" has a wall at ${Number(steepest.toFixed(1))}° — steeper than ` +
-          `${MOLD_DRAFT_LIMIT_DEG}°, so it has little or no draft and may hold the casting. Give the ` +
-          'part tapered sides, or use a flexible casting material.',
+          `${who} are not chamfered: ` +
+          (chamferWantModel.toolKey === undefined
+            ? 'no V-bit has been chosen for them'
+            : `the V-bit “${chamferWantModel.toolKey}” is not in the tool library`) +
+          '.',
+      });
+    } else if (vCone(entry.tool) === null) {
+      chamferFindings.push({
+        severity: 'warning',
+        code: 'goal-chamfer-no-cutter',
+        labelId: goal.id,
+        message: `${who} are not chamfered: “${entry.tool.name}” is a ${entry.tool.shape} cutter with no cone to make a bevel.`,
       });
     }
   }
+  //
+  // #980 — A PICTURE RELIEF HAS NO MESH (same fact `rotaryRelief.ts`'s own `sampleGoalRadialField`
+  // states for the rotary side): `buildModelPlanInputForGoal` calls `targetObjectMesh` unconditionally,
+  // which throws for a `format: 'png'` goal. Refused here, named and by itself — not folded into
+  // the generic "could not build a ModelPlanInput" catch below — because restoring the path
+  // (triangulating the picture's own heightfield into a watertight FeatureSource) is #980's own
+  // scope, not a `ModelPlanInput`-building bug.
+  if (goal.format === 'png') {
+    return fail('cam', 'a picture relief is a flat heightfield; cam/model needs a mesh (#980)');
+  }
+  let input: ModelPlanInput;
+  try {
+    input = await buildModelPlanInputForGoal(job, goal, tool, shop, modelSetupsOverride);
+  } catch (e) {
+    return fail('cam', `cam/model seam (#966): could not build a ModelPlanInput for "${goal.name}" — ${e instanceof Error ? e.message : String(e)}`);
+  }
+  let output: ModelPlanOutput;
+  try {
+    output = await planModelCam(input);
+  } catch (e) {
+    return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
+  }
+  // #992 — THE PLAN'S TYPED STATEMENTS REACH THE OPERATOR. `warning`/`info` become findings on
+  // this run (the panel's route; the message is the statement's own text, the count rides the
+  // field the acceptance reads); `sheet` statements stay out of the findings entirely and ride
+  // `planStatements` for the run sheet's own route. Before this, every "stated on the card"
+  // ruling was readable only by a spec that opened `perSetup[].notes` itself.
+  const planStatements: PlanStatement[] = output.perSetup.flatMap((p) => p.statements);
+  const planFindings: JobFinding[] = planStatements
+    .filter((s) => s.severity !== 'sheet')
+    .map((s) => ({
+      severity: s.severity,
+      code: s.code,
+      labelId: goal.id,
+      message: s.text,
+      ...(s.count === undefined ? {} : { count: s.count }),
+    }));
+  // #966 ROUND 3 — THE CUTOVER NOW COVERS MULTI-SETUP. `planModelCam` ran and returned a
+  // `SetupPlan` per setup (#965's registration/freeing-cl work, underneath); every setup's own
+  // `programs` (one per RUN, in execution order — #963's own rule) posts through the SAME
+  // `postFor`/`verifyProgram` pair, and the SAME `VerifyContext` shape (`toSetup`/`jobDepthLimit`/
+  // `mountCtx`), the rest of this file already builds for a goal's own setup — not a second
+  // convention (grep both call sites before touching this). Setups post IN ORDER, then that
+  // setup's own programs in order.
+  //
+  // THE TURN-OVER CONVENTION — no established one existed in this file for a model-engine job,
+  // so this is stated rather than guessed: `runSheet.ts`'s own multi-setup paper
+  // (`turnOverSteps`) represents the physical remount between two setups PURELY as a change in a
+  // posted `EngraveProgram`'s `setupIndex`/`setupId` between consecutive entries — it reads the
+  // boundary off that field change, never a sentinel object inserted into the program list. This
+  // loop follows the SAME convention: `programs` stays flat, in posting order, and the setup
+  // boundary is only ever visible as `setupIndex`/`setupId` changing between two entries. The one
+  // thing that DOES reset at that boundary is the vacuum span (`post/z1.ts`'s `VacuumSpan`):
+  // vacuum cannot hold through a physical turn-over (the part is unclamped and flipped), so
+  // 'first'/'last'/'whole' are computed against EACH setup's own `programs.length`, never across
+  // the whole job's combined program count.
+  const jobSetupList = jobSetups(job);
+  const totalPrograms = output.perSetup.reduce((n, p) => n + p.programs.length, 0);
+  if (totalPrograms === 0) {
+    const perSetupNotes = output.perSetup
+      .map((p) => `setup ${p.setupIndex + 1}${p.notes.length === 0 ? '' : `: ${p.notes.join(' | ')}`}`)
+      .join(' / ');
+    return fail(
+      'cam',
+      `cam/model (#966): planModelCam planned no program for "${goal.name}" across ${output.perSetup.length} setup(s)` +
+        (perSetupNotes.length === 0 ? '' : ` — ${perSetupNotes}`),
+      null,
+      output,
+      [...chamferFindings, ...planFindings],
+    );
+  }
 
+  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
+  const limit: DepthLimit = jobDepthLimit(job);
   const ctx: PostContext = {
     jobName: job.name,
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
@@ -5948,617 +5298,111 @@ export async function generateGoalProgram(
     camVersion: CAM_VERSION,
     toolKey: job.toolKey,
   };
-  // #869 — THE SPLIT, POSTED AS TWO PROGRAMS. A flat rough that actually has stock to remove posts
-  // first, with its own tool key, station and feed events; the ball's finishing passes (the rim
-  // laps #862 included) post second, exactly as they did as one program. The rough's check is its
-  // OWN surface check (#535): every posted file is swept and judged by #844's per-program oracle,
-  // and the release gate takes no program without one, so the rough is a first-class file rather
-  // than a prefix of the finish.
-  const splitRough = rough !== null && surfaced.roughing.moves.length > 0;
-  const roughIr: ToolpathIR | null = splitRough
-    ? {
-        ...surfaced.ir,
-        tool: rough!.tool,
-        toolNumber: rough!.number,
-        spindleRpm: rough!.rpm,
-        operations: [surfaced.roughing],
-      }
-    : null;
-  const finishIr: ToolpathIR = splitRough
-    ? { ...surfaced.ir, operations: surfaced.ir.operations.filter((op) => op !== surfaced.roughing) }
-    : surfaced.ir;
 
-  let nc: string;
-  let roughNc: string | null = null;
-  onProgress?.({ stage: 'post', label: 'posting the program' });
-  try {
-    if (roughIr !== null) {
-      // #845 — the rough program posts through the machine's own chooser like every other file.
-      const postedRough = postFor(mill)(roughIr, { ...ctx, toolKey: goal.roughToolKey! }, { vacuum: 'whole' });
-      if (!postedRough.ok) return fail('post', postedRough.errors.join('; '), resolved);
-      roughNc = postedRough.text;
-    }
-    // #771 — the goal's design preview is its own sampled heightfield, drawn in the blank's
-    // frame. It is the same grid the toolpath was generated over (no second sampling), and the
-    // post writes it as the same after-M02 comment block as an engrave program.
-    const posted = postFor(mill)(finishIr, ctx, {
-      vacuum: 'whole',
-      thumbnail: heightfieldTopViewPng(job.stock, surfaced.heightfield),
-    });
-    if (!posted.ok) return fail('post', posted.errors.join('; '), resolved);
-    nc = posted.text;
-  } catch (e) {
-    return fail('post', e instanceof Error ? e.message : String(e), resolved);
-  }
-
-  // #535 — THE GOAL PROGRAM JOINS THE RUN. It is a release source like any other: the package
-  // freezes it, the Cut step plays it and the upload seam takes it. Its check is the material
-  // sweep (the 2.5D verifier cannot judge a 3D program), recorded with the heightfield's grid and
-  // the CAM's roughing layers; the run store stamps the dexel grid the simulation actually ran on
-  // once the sweep has happened.
-  //
-  // #671 — the check also carries the PASSES it was made over. The grid says what the sweep is
-  // good to; the pass list says what that sweep judged, so a dropped finishing pass is visible in
-  // the frozen package instead of assumed.
-  const checkOf = (ir: ToolpathIR, layers: number): SurfaceProgramCheck => ({
-    kind: 'surface',
-    gridPitchMm: surfaced.heightfield.pitch,
-    roughingLayers: layers,
-    passes: ir.operations.map((op) => op.name),
-    resolutionNote: surfaced.heightfield.resolutionNote,
-    bbox: pathBbox(ir),
-  });
-  const surfaceCheck: SurfaceProgramCheck = checkOf(finishIr, splitRough ? 0 : surfaced.roughingLayers);
-  const cam = summarize(finishIr, mill.rapidEstimate);
-  const program: EngraveProgram = {
-    kind: 'engrave',
-    setupIndex: 1,
-    setupId: jobSetups(job)[0]!.id,
-    toolKey: job.toolKey,
-    nc,
-    frame: finishIr.frame,
-    verify: null,
-    surfaceCheck,
-    frameNc: null,
-    frameVerify: null,
-    programHash: programHash(nc),
-    cam,
-    // #940 — this program's own feeds, for the sheet's per-program section.
-    ...(resolved.ok ? { feeds: resolved } : {}),
-  };
-  const roughProgram: EngraveProgram | null =
-    roughNc === null || roughIr === null
-      ? null
-      : {
-          kind: 'engrave',
-          setupIndex: 1,
-          setupId: jobSetups(job)[0]!.id,
-          toolKey: goal.roughToolKey!,
-          nc: roughNc,
-          frame: roughIr.frame,
-          verify: null,
-          surfaceCheck: checkOf(roughIr, surfaced.roughingLayers),
-          frameNc: null,
-          frameVerify: null,
-          programHash: programHash(roughNc),
-          cam: summarize(roughIr, mill.rapidEstimate),
-        };
-
-  // #847 — WHAT THE FINISH LEFT, AND THE REST PASS THAT TAKES IT. The measurement is the finish's
-  // OWN gouge-safe tip field (the surface its program cuts): where the ball could not enter a
-  // concavity its tip rests above the goal, and that rise is material. A smaller owned ball is
-  // tried over just those cells (the same finishing raster, the residual dilated by the ball's
-  // radius); the pick takes the least residual, then the least time. When nothing owned lowers it
-  // the finish still posts, and a warning states the volume, the depth and the ball that would.
-  const restFindings: JobFinding[] = [];
-  const finishTool: SurfaceTool = {
-    radius: (cuttingDiameter(tool) ?? 0) / 2,
-    ball: tool.shape === 'ball' || tool.shape === 'bull',
-  };
-  const finishResidual = surfaceResidual(surfaced.heightfield, surfaced.finishTip, 0, REST_TOLERANCE_MM);
-  // #847 follow-up — THE NOISE RULE. Nearly every organic goal leaves some material where its ball
-  // could not enter, so "nothing owned takes it" is INFORMATION unless the leftover would show: a
-  // ridge deeper than the shop's `rest.visibleDepthMm` (hoisted above as `visibleDepthMm`, #945),
-  // or a leftover that is a real share of what the goal removes (`rest.thirdToolPct`, the same
-  // share the 2D rest pair uses for a third cutter).
-  const visibleShare =
-    (shop.rest?.thirdToolPct.value ?? REST_MACHINING_FALLBACK.thirdToolFraction * 100) / 100;
-  const visibility = restResidualVisible(finishResidual, visibleDepthMm, visibleShare);
-  const pct = (v: number): string => String(Number((v * 100).toFixed(v * 100 < 1 ? 2 : 1)));
-  // The ball that finished, as the run's sentences name it.
-  const finishName = finishTool.radius > 0 ? `${Number((finishTool.radius * 2).toFixed(2))} mm ${tool.shape === 'ball' || tool.shape === 'bull' ? 'ball' : 'cutter'}` : tool.name;
-  const mm3 = (v: number): string => String(Number(v.toFixed(v >= 10 ? 1 : v >= 1 ? 2 : 3)));
-  const mm2 = (v: number): string => String(Number(v.toFixed(2)));
-  type RestCandidate = {
-    entry: ToolLibraryEntry;
-    plan: SurfaceRestPlan;
-    rpm: number;
-    /** #912 — the pass's outcome: what it takes, its seconds a mm³, and what it would leave. */
-    outcome: RestOutcome;
-  };
-  // #912 — a pass too slow for the material it takes is kept only to be stated, never run.
-  let absurdRest: RestCandidate | null = null;
-  const restPick = ((): RestCandidate | null => {
-    if (finishResidual.cells === 0 || !(finishTool.radius > 0)) return null;
-    let best: RestCandidate | null = null;
-    const seenRadius = new Set<number>();
-    // #922 — one entry per physical cutter, the owned key over the catalogue's definition: the
-    // rest pick takes the first candidate of a radius, and the two doors' registries order the
-    // duplicate `cat:`/`inv:` entries of the same ball differently.
-    for (const entry of dedupeCutterEntries(shop.tools ?? [])) {
-      if (entry.key === job.toolKey) continue;
-      const candidate = entry.tool;
-      if (candidate.shape !== 'ball' && candidate.shape !== 'bull' && candidate.shape !== 'tapered-ball') continue;
-      const diameter = cuttingDiameter(candidate);
-      if (diameter === null || !(diameter > 0)) continue;
-      const radius = diameter / 2;
-      // A ball no smaller than the finish cannot enter a concavity that this one could not.
-      if (!(radius < finishTool.radius - 1e-9)) continue;
-      // One candidate per stated radius: the first library entry that states it.
-      const bucket = Math.round(radius * 1000);
-      if (seenRadius.has(bucket)) continue;
-      seenRadius.add(bucket);
-      const restResolved = engraveFeedsFor(shop, catalogue, job.stock.material, feedsToolForSurface(candidate), mill, job.cutOverride);
-      if (!restResolved.ok) continue;
-      // #945 — ONE RULE, TWO CALL SITES: the same `finishStepOverForCusp` derivation the main
-      // finish uses above (`defaultFinishStepOverMm`), against THIS candidate's OWN radius and
-      // the same leftover-visible band — not the candidate's catalogue step-over reused as-is.
-      // The rest ball's whole job is reaching into a concavity the finish's own ball could not;
-      // leaving its row-to-row cusp un-adapted defeats that job exactly where it matters most (a
-      // steep wall), which is why this was worth a second call site rather than folding the rest
-      // pass into the finish's own derivation above. Capped the same way, so a candidate this
-      // derivation does not help never runs coarser than its own feeds row did before.
-      const restCuspStepOverMm = finishStepOverForCusp(radius, visibleDepthMm, basePitchMm);
-      const restDefaultFinishStepOverMm =
-        restCuspStepOverMm !== null ? Math.min(restCuspStepOverMm, restResolved.params.stepOver) : restResolved.params.stepOver;
-      const restFeeds: SurfaceFeeds = {
-        feed: restResolved.params.feed,
-        plungeFeed: restResolved.params.plungeFeed,
-        stepDown: restResolved.params.stepDown,
-        roughStepOver: restResolved.params.stepOver,
-        // The operation's own finishing step-over wins; else the rest ball's own derived default.
-        finishStepOver: settings.finishStepOverMm ?? restDefaultFinishStepOverMm,
-      };
-      let plan: SurfaceRestPlan;
-      try {
-        plan = planSurfaceRest({
-          heightfield: surfaced.heightfield,
-          residual: finishResidual,
-          tool: { radius, ball: true },
-          feeds: restFeeds,
-          rapid: mill.rapidEstimate,
-          stockToLeaveMm: 0,
-          toleranceMm: REST_TOLERANCE_MM,
-        });
-      } catch {
-        // Over the tip field's budget: skip this ball rather than fail the goal; the warning
-        // below still states what the finish left.
-        continue;
-      }
-      // #912 — THE OUTCOME, NOT JUST THE RESIDUAL. What the pass takes, how long it takes to
-      // take it, and whether the leftover it leaves would still show; a pass past the absurd
-      // rate is not run at all (the sentence below states what it would have cost).
-      const removedMm3 = finishResidual.volumeMm3 - plan.residual.volumeMm3;
-      if (plan.moves.length === 0 || !(removedMm3 > 1e-9)) continue;
-      const scored: RestCandidate = {
-        entry,
-        plan,
-        rpm: restResolved.params.rpm,
-        outcome: restOutcome(
-          removedMm3,
-          plan.residual.volumeMm3,
-          plan.estimatedSeconds,
-          restResidualVisible(plan.residual, visibleDepthMm, visibleShare).visible,
-        ),
-      };
-      if (restOutcomeAbsurd(scored.outcome)) {
-        // Keep the least wasteful absurd pass for the sentence: the one that takes the most for
-        // its time (the lowest seconds a mm³), not the last one tried.
-        if (absurdRest === null || scored.outcome.secondsPerMm3 < absurdRest.outcome.secondsPerMm3) absurdRest = scored;
-        continue;
-      }
-      if (restOutcomeBetter(scored.outcome, best?.outcome ?? null)) best = scored;
-    }
-    return best;
-  })();
-
-  let restProgram: EngraveProgram | null = null;
-  /** #909 — the rest pass's moves and cutter, for the goal over-cut check. */
-  let restStage: { moves: readonly CamMove[]; tool: SurfaceTool } | null = null;
-  let restFacts: GoalRestFacts | null = null;
-  if (finishResidual.cells > 0) {
-    const left =
-      `The finish leaves ${mm3(finishResidual.volumeMm3)} mm³ up to ${mm2(finishResidual.deepestMm)} mm ` +
-      `above the goal where the ${finishName} cannot enter`;
-    // The visibility clause states the thresholds whichever way it comes out, so the severity is
-    // never a judgement the sentence hides; the depth and the volume are already above.
-    const look = visibility.visible
-      ? ` — past the ${mm2(visibleDepthMm)} mm or ${pct(visibleShare)} % that marks a leftover visible —`
-      : ` — under the ${mm2(visibleDepthMm)} mm and ${pct(visibleShare)} % that marks a leftover visible —`;
-    if (restPick === null && absurdRest !== null) {
-      // #912 — THE PASS THAT WOULD NOT PAY. It was measured and scored like every other; its
-      // outcome (minutes a cubic millimetre) is past the bar, so it is skipped and the numbers
-      // are stated rather than an afternoon of the machine's time being spent on them.
-      const slowed = absurdRest;
-      const restTool = slowed.entry.tool;
-      const restDiameter = Number((cuttingDiameter(restTool) ?? 0).toFixed(2));
-      restFindings.push({
-        severity: visibility.visible ? 'warning' : 'info',
-        code: 'goal-rest-uncut',
-        labelId: goal.id,
-        message:
-          `${left}${look} a rest pass with the ${restTool.name} (⌀${restDiameter} mm) would take about ` +
-          `${formatDuration(slowed.plan.estimatedSeconds)} to take ${mm3(slowed.outcome.removedMm3)} mm³ of it ` +
-          `(about ${mm2(slowed.outcome.secondsPerMm3)} s for each mm³ it takes) — past the minute a cubic ` +
-          `millimetre that marks a pass not worth the cut — so it is skipped and the leftover stands.`,
-      });
-    } else if (restPick === null) {
-      const suggestion = suggestedRestRadiusMm(
-        surfaced.heightfield,
-        finishResidual,
-        finishTool,
-        0,
-        REST_TOLERANCE_MM,
-        DEFAULT_MAX_FINISH_TIP_OPS,
+  const programs: EngraveProgram[] = [];
+  for (const plan of output.perSetup) {
+    // 1-based, the operator's "Setup N" (`EngraveProgram.setupIndex`'s own doc); `plan.setupIndex`
+    // is 0-based (#963's `SetupPlan`'s own convention, like `job.setups`).
+    const setupIndex = plan.setupIndex + 1;
+    // No per-setup `JobSetup` exists for a model-engine job today (`buildModelPlanInputForGoal`
+    // builds `ModelPlanInput.setups` independently of `job.setups` — a goal dispatches before the
+    // item pipeline's own setups ever apply, `jobSetup.ts`'s own #888 item 6 note). Reuse the
+    // real id when `job.setups` ever does carry one at this index (future wiring, not a guess
+    // this entry makes), else synthesize a stable, readable one off the job's own implicit id.
+    const setupId = jobSetupList[plan.setupIndex]?.id ?? `${jobSetupList[0]!.id}#${setupIndex}`;
+    if (plan.programs.length === 0) {
+      return fail(
+        'cam',
+        `cam/model (#966): planModelCam planned no program for "${goal.name}" setup ${setupIndex}` +
+          (plan.notes.length === 0 ? '' : ` — ${plan.notes.join(' | ')}`),
+        null,
+        output,
       );
-      restFindings.push({
-        // Information unless the leftover would show: the noise rule above.
-        severity: visibility.visible ? 'warning' : 'info',
-        code: 'goal-rest-uncut',
-        labelId: goal.id,
-        message:
-          `${left}${look} and no owned ball cuts it` +
-          (suggestion === null
-            ? '.'
-            : ` — a ball of about ⌀${mm2(suggestion * 2)} mm would reach it.`),
-      });
-    } else {
-      const restTool = restPick.entry.tool;
-      const restDiameter = Number((cuttingDiameter(restTool) ?? 0).toFixed(2));
-      restStage = { moves: restPick.plan.moves, tool: surfaceToolFor(restTool) };
-      const restIr: ToolpathIR = {
-        frame: 'flat',
-        tool: restTool,
-        toolNumber: toolNumberFor(restTool),
-        spindleRpm: restPick.rpm,
-        air: job.cutOverride?.air ?? true,
-        safeZ: SAFE_Z,
-        hopZ: HOP_Z,
-        operations: [
-          {
-            number: 1,
-            name: `[T${toolNumberFor(restTool)}] 3D rest — ⌀${restDiameter} mm ball`,
-            labelId: goal.id,
-            depth: Math.max(0, surfaced.heightfield.topZ - surfaced.heightfield.minZ),
-            passKind: 'finish',
-            moves: restPick.plan.moves,
-            estimatedSeconds: restPick.plan.estimatedSeconds,
-          },
-        ],
-      };
-      onProgress?.({ stage: 'post', label: 'posting the rest pass' });
-      // #845 — the rest program goes through the machine's own chooser like every other file
-      // this run posts: a stated GRBL machine writes it in its dialect, the Z1 in its own.
-      const postedRest = postFor(mill)(restIr, { ...ctx, toolKey: restPick.entry.key }, { vacuum: 'whole' });
-      if (!postedRest.ok) {
-        restFindings.push({
-          severity: 'warning',
-          code: 'goal-rest-uncut',
-          labelId: goal.id,
-          message: `${left}: the ${restTool.name} rest pass was refused by the post — ${postedRest.errors.join('; ')}.`,
-        });
-      } else {
-        restProgram = {
-          kind: 'engrave',
-          setupIndex: 1,
-          setupId: jobSetups(job)[0]!.id,
-          toolKey: restPick.entry.key,
-          nc: postedRest.text,
-          frame: 'flat',
-          verify: null,
-          surfaceCheck: {
-            kind: 'surface',
-            gridPitchMm: surfaced.heightfield.pitch,
-            roughingLayers: 0,
-            passes: restIr.operations.map((op) => op.name),
-            resolutionNote: surfaced.heightfield.resolutionNote,
-            bbox: pathBbox(restIr),
-          },
-          frameNc: null,
-          frameVerify: null,
-          programHash: programHash(postedRest.text),
-          cam: summarize(restIr, mill.rapidEstimate),
-        };
-        restFacts = {
-          toolKey: restPick.entry.key,
-          toolName: restTool.name,
-          finishResidualMm3: finishResidual.volumeMm3,
-          residualMm3: restPick.plan.residual.volumeMm3,
-          deepestMm: finishResidual.deepestMm,
-          moves: restPick.plan.moves.length,
-          seconds: restPick.plan.estimatedSeconds,
-        };
-        restFindings.push({
-          severity: 'info',
-          code: 'goal-rest-pass',
-          labelId: goal.id,
-          message:
-            `${left}; a rest pass with the ${restTool.name} (⌀${restDiameter} mm) cuts those concavities — ` +
-            `${restPick.plan.moves.length.toLocaleString('en-US')} moves, about ${Math.round(restPick.plan.estimatedSeconds)} s, ` +
-            `${mm2(restPick.outcome.secondsPerMm3)} s for each mm³ it takes — ` +
-            `and leaves ${mm3(restPick.plan.residual.volumeMm3)} mm³.`,
-        });
+    }
+    for (let i = 0; i < plan.programs.length; i++) {
+      const ir = plan.programs[i]!;
+      // #961's own cutter identity — `tool.id ?? tool.name` (`cam/model/sequence.ts`'s
+      // `cutterKeyOf`), the SAME string the plan's own run-grouping already keyed this program's
+      // cutter by (`SetupPlan.programs`'s own doc: "one program per RUN"). `toolKey` here is a
+      // free-text header word (`;@CM|TOOL|key=`, `post/z1.ts`) the post never reads back for
+      // machine control, so it needs no round-trip through the `shop.tools` registry.
+      const toolKey = cutterKeyOf(ir.tool);
+      // Reset per SETUP, not across the whole job (see this block's own header note on why).
+      const span: VacuumSpan =
+        plan.programs.length === 1 ? 'whole' : i === 0 ? 'first' : i === plan.programs.length - 1 ? 'last' : 'middle';
+      const programLabel = `setup ${setupIndex} program ${i + 1}/${plan.programs.length} (${toolKey})`;
+      let posted: PostResult;
+      try {
+        posted = postFor(mill)(ir, { ...ctx, toolKey }, { vacuum: span });
+      } catch (e) {
+        return fail('post', `cam/model (#966): ${programLabel}: ${e instanceof Error ? e.message : String(e)}`, null, output);
       }
+      if (!posted.ok) {
+        return fail('post', `cam/model (#966): ${programLabel}: ${posted.errors.join('; ')}`, null, output);
+      }
+      const verify = verifyProgram(posted.text, {
+        setup,
+        machine: mill,
+        tool: ir.tool,
+        dialect: postKey(mill),
+        depthLimit: limit,
+        minRapidZ: ir.hopZ,
+        ...mountCtx(shop.mount, job.jawClearance),
+      });
+      const verifyErrors = verify.findings.filter((f) => f.severity === 'error');
+      if (verifyErrors.length > 0) {
+        // #966 — a program the verifier refuses stops the run here: the programs already posted
+        // (if any, from this or an earlier setup) are returned as the diagnosis `programs` doc
+        // states ("a partial list, never a runnable job"), and the failing program's own
+        // text/report ride the top-level fields — the SAME shape `generateOneProgram`'s own
+        // verify-stage stop returns (grep that call site). `plan` still carries the FULL
+        // `ModelPlanOutput` — the plan itself was sound, only this posted file was not.
+        return {
+          ...base,
+          ok: false,
+          stage: 'verify',
+          findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...modelRoughFindings, ...chamferFindings, ...documentFindings(), ...planFindings]),
+          feeds: null,
+          cam: null,
+          nc: posted.text,
+          verify,
+          programs: [...programs],
+          plan: output,
+          planStatements,
+          errors: [{ stage: 'verify', message: `cam/model (#966): ${programLabel}: ${verifyErrors.length} verifier error(s)` }],
+        };
+      }
+      programs.push({
+        setupIndex,
+        setupId,
+        toolKey,
+        nc: posted.text,
+        frame: ir.frame,
+        verify,
+        frameNc: null,
+        frameVerify: null,
+        programHash: programHash(posted.text),
+        cam: summarize(ir, mill.rapidEstimate),
+      });
     }
   }
 
-  // #829 — THE PART'S EDGES: a second program with the V-bit, along the mesh's top rim. The goal
-  // stays a pure goal (the chamfer is a property of the object, not an item), and the bevel's
-  // shortfalls are stated with the numbers the CAM cuts — the 2D chamfer's own codes.
-  const chamferFindings: JobFinding[] = [];
-  const chamferProgram = ((): EngraveProgram | null => {
-    const want = goal.chamfer;
-    if (want === undefined) return null;
-    const who = `The part's edges (“${goal.name}”)`;
-    const entry = (shop.tools ?? []).find((e) => e.key === want.toolKey);
-    if (want.toolKey === undefined || entry === undefined) {
-      chamferFindings.push({
-        severity: 'warning',
-        code: 'goal-chamfer-no-cutter',
-        labelId: goal.id,
-        message:
-          `${who} are not chamfered: ` +
-          (want.toolKey === undefined
-            ? 'no V-bit has been chosen for them'
-            : `the V-bit “${want.toolKey}” is not in the tool library`) +
-          '.',
-      });
-      return null;
-    }
-    const cone = vCone(entry.tool);
-    if (cone === null) {
-      chamferFindings.push({
-        severity: 'warning',
-        code: 'goal-chamfer-no-cutter',
-        labelId: goal.id,
-        message: `${who} are not chamfered: “${entry.tool.name}” is a ${entry.tool.shape} cutter with no cone to make a bevel.`,
-      });
-      return null;
-    }
-    const rim = targetRim(goal);
-    if (rim.chains.length === 0) {
-      chamferFindings.push({
-        severity: 'warning',
-        code: 'goal-chamfer-no-rim',
-        labelId: goal.id,
-        message: `${who} are not chamfered: ${rim.notes.join('; ') || 'no top rim was found on the mesh'}.`,
-      });
-      return null;
-    }
-    const num3 = (n: number): string => String(Number(n.toFixed(3)));
-    const flute = vFluteLength(entry.tool);
-    const reach = flute === null ? null : flute * cone.tanHalf;
-    // The part's base, in the work frame: a goal lives IN the stock, its top at `position.z` and
-    // its underside `placedSize.z` below it.
-    const baseZ = goal.position.z - placedSize(goal).z;
-    const cuts: Chamfer3dCut[] = [];
-    for (const chain of rim.chains) {
-      const lowest = Math.min(...chain.points.map((p) => p.z));
-      const wallDepth = lowest - baseZ;
-      let width = want.widthMm;
-      if (reach !== null && width > reach + 1e-9) {
-        chamferFindings.push({
-          severity: 'warning',
-          code: 'chamfer-too-wide',
-          labelId: goal.id,
-          message:
-            `${who} ask for a ${num3(width)} mm chamfer, but “${entry.tool.name}”’s cone reaches ` +
-            `${num3(reach)} mm in one pass (its ${num3(flute as number)} mm flute at ` +
-            `${num3(cone.halfAngleDeg * 2)}°). The cut is ${num3(reach)} mm wide, ` +
-            `${num3(width - reach)} mm short of the design — use a wider chamfer bit for the full width.`,
-        });
-        width = reach;
-      }
-      // The tip stops at the part's own base: a bevel deeper than the wall the part has under
-      // this edge would run off it, leaving no bevel at all.
-      if (wallDepth > 0 && width / cone.tanHalf >= wallDepth - 1e-9) {
-        const floor = Math.max(0, (wallDepth - 1e-6) * cone.tanHalf);
-        chamferFindings.push({
-          severity: 'warning',
-          code: 'chamfer-too-deep',
-          labelId: goal.id,
-          message:
-            `${who} would reach ${num3(width / cone.tanHalf)} mm below the top face, and the part is ` +
-            `only ${num3(wallDepth)} mm deep at its lowest edge; the tip stops at the part's base, so ` +
-            `the bevel is ${num3(floor)} mm wide instead of ${num3(want.widthMm)} — use a smaller chamfer.`,
-        });
-        width = floor;
-      }
-      if (!(width > 0)) continue;
-      cuts.push({ id: goal.id, name: 'the part’s edge', chain, depth: width / cone.tanHalf });
-    }
-    if (cuts.length === 0) return null;
-    const chamferFeeds = engraveFeedsFor(shop, catalogue, job.stock.material, entry.tool, mill, job.cutOverride);
-    if (!chamferFeeds.ok) {
-      chamferFindings.push({
-        severity: 'warning',
-        code: 'goal-chamfer-no-cutter',
-        labelId: goal.id,
-        message: `${who} are not chamfered: “${entry.tool.name}” cannot be fed for ${job.stock.material} — ${chamferFeeds.reason}.`,
-      });
-      return null;
-    }
-    const chamferIr = generateChamfer3d(cuts, entry.tool, chamferFeeds.params, mill.rapidEstimate);
-    const chamferPosted = postFor(mill)(chamferIr, { ...ctx, toolKey: entry.key }, { vacuum: 'whole' });
-    if (!chamferPosted.ok) {
-      chamferFindings.push({
-        severity: 'warning',
-        code: 'goal-chamfer-no-cutter',
-        labelId: goal.id,
-        message: `${who} are not chamfered: the post refused the V-bit’s program — ${chamferPosted.errors.join('; ')}.`,
-      });
-      return null;
-    }
-    return {
-      kind: 'engrave',
-      setupIndex: 1,
-      setupId: jobSetups(job)[0]!.id,
-      toolKey: entry.key,
-      nc: chamferPosted.text,
-      frame: 'flat',
-      verify: null,
-      surfaceCheck: null,
-      frameNc: null,
-      frameVerify: null,
-      programHash: programHash(chamferPosted.text),
-      cam: summarize(chamferIr, mill.rapidEstimate),
-    };
-  })();
-
-  // #909 — EVERY PROGRAM IS JUDGED AGAINST THE GOAL, WHICH THE ORACLE CANNOT DO. The oracle
-  // compares the SIMULATION with the PLAN, so a plan that gouges the goal passes it on every job
-  // (the 2026-11-02 demo's mouse shell: the rough cut up to 7.1 mm into the part). Each program's
-  // own feed moves are stamped by its cutter's whole footprint — the rough, the finish (rim laps
-  // and raster) and the rest pass — and any covered cell reached below the goal's surface by more
-  // than the grid's pitch is a refusal, not a warning: the part cannot be put back.
-  {
-    const roughSurface = rough === null ? finishTool : surfaceToolFor(rough.tool);
-    const finishMoves = surfaced.ir.operations
-      .filter((op) => op !== surfaced.roughing)
-      .flatMap((op) => op.moves);
-    const overcut = planGoalOvercut(
-      surfaced.heightfield,
-      [
-        { moves: surfaced.roughing.moves, tool: roughSurface },
-        { moves: finishMoves, tool: finishTool },
-        ...(restStage === null ? [] : [restStage]),
-      ],
-      Math.max(1e-3, surfaced.heightfield.pitch),
-    );
-    if (overcut.cells > 0 && overcut.at !== null) {
-      const at = overcut.at;
-      // Name the pass that actually gouges: the rough, the finish or the rest (#909).
-      const who = overcut.stage === 1 ? 'finish' : overcut.stage === 2 ? 'rest pass' : 'roughing';
-      const finding: JobFinding = {
-        severity: 'error',
-        code: 'goal-overcut',
-        targetId: goal.id,
-        message:
-          `The ${who} cuts ${Number(overcut.worstMm.toFixed(2))} mm into the goal's surface at ` +
-          `(${Number(at.x.toFixed(1))}, ${Number(at.y.toFixed(1))}) mm; the program would gouge the part.`,
-      };
-      return {
-        ...base,
-        ok: false,
-        stage: 'findings',
-        findings: dedupeFindings([finding, ...goalFindings, ...documentFindings()]),
-        feeds: null,
-        cam: null,
-        nc: null,
-        verify: null,
-        errors: [{ stage: 'findings' as EngraveStage, message: finding.message }],
-      };
-    }
-  }
-
-  onProgress?.({ stage: 'done', label: 'done' });
+  // #419 J3 — the top-level `nc`/`verify`/`cam` describe the FIRST program, exactly as the
+  // `programs` field's own doc states ("the adapter the panels and the bench scripts read
+  // today"); every program's own facts ride in `programs`.
+  const first = programs[0]!;
   return {
     ...base,
     ok: true,
     stage: 'done',
-    findings: dedupeFindings([
-      ...documentFindings(),
-      ...moldFindings,
-      ...gridFindings,
-      ...reachFindings,
-      ...restFindings,
-      ...roughFindings,
-      ...coverageFindings,
-      ...chamferFindings,
-    ]),
-    feeds: resolved,
-    cam,
-    nc,
-    verify: null,
-    // #869/#847 — cut order: the flat's rough (when split), the ball's finish (with the part's
-    // thumbnail), the rest pass over what the finish left, then the V-bit's bevel. The top-level
-    // `nc`/`cam` above describe the FINISHING program — the part.
-    programs: [
-      ...(roughProgram === null ? [] : [roughProgram]),
-      program,
-      ...(restProgram === null ? [] : [restProgram]),
-      ...(chamferProgram === null ? [] : [chamferProgram]),
-    ],
-    // #535 — the operation's own facts, for its row and the run sheet: the numbers the CAM ran
-    // with and the grid it sampled. A caller with no generated result has no facts to print.
-    surface3d: {
-      resolutionNote: surfaced.heightfield.resolutionNote,
-      gridPitchMm: surfaced.heightfield.pitch,
-      gridCells: surfaced.heightfield.nx * surfaced.heightfield.ny,
-      // #869 — the rough's own numbers when it is split out; the ball's otherwise. The finish's
-      // step-down rides separately (the rim laps are the finish's).
-      stepDownMm: rough?.feeds.stepDown ?? feeds.stepDown,
-      finishStepDownMm: feeds.stepDown,
-      roughStepOverMm: rough?.feeds.roughStepOver ?? feeds.roughStepOver,
-      finishStepOverMm: feeds.finishStepOver,
-      stockToLeaveMm: stockToLeaveMm ?? DEFAULT_STOCK_TO_LEAVE_MM,
-      roughingLayers: surfaced.roughingLayers,
-      // #898 — the underside choice this program cut to, when the goal states one.
-      ...(goal.underside === undefined
-        ? {}
-        : { underside: { kind: goal.underside.kind, floorZ: depthLimitZ } }),
-      rough:
-        roughProgram === null
-          ? null
-          : { tool: toolDisplayName(rough!.tool).split(' · ')[0]!, kind: surfaced.roughKind },
-      scallop: surfaced.scallop === null ? null : surfaced.scallop.facts,
-      pencil: surfaced.pencil === null ? null : surfaced.pencil.facts,
-      // #862 — the rim laps that finished the clear band's wall, or null when there is no band.
-      rim: surfaced.rim,
-      // #847 — the rest pass over what the finish left, or null when there was nothing to take.
-      rest: restFacts,
-      // #721 — the run sheet and the row say a mold is a mold.
-      notes: [
-        ...surfaced.notes,
-        // #945 a1 — WHEN THE FINISH STEP-OVER WAS DERIVED, SAY SO AND SAY THE NUMBERS. The note
-        // two lines up ("the job's 2.5D feeds, reused unchanged") is no longer true of this value
-        // once the derivation ran, so it is corrected here with what actually set it. Gated on
-        // the derivation being what WON the `Math.min` in `defaultFinishStepOverMm` — when the
-        // 2.5D row was already tighter than the cusp bound, that row still stands unchanged, and
-        // this note must not claim a derivation that did not move anything.
-        ...(settings.finishStepOverMm === undefined && defaultFinishStepOverMm === cuspStepOverMm
-          ? [
-              `The finish step-over (${Number(defaultFinishStepOverMm.toFixed(3))} mm) is derived from the ` +
-                `${Number((finishTool.radius * 2).toFixed(2))} mm ball’s own radius and the ${Number(visibleDepthMm.toFixed(3))} mm leftover-visible band, ` +
-                'held at or under that band on a flat span, not the 2.5D pocketing step-over reused as-is.',
-            ]
-          : []),
-        ...(isMold(goal)
-          ? [
-              "Made as a mould: the part's shape is cut as a cavity from the stock's top face, turned over so a casting reads the right way round.",
-            ]
-          : []),
-        ...(clear === null
-          ? []
-          : [
-              clear.kind === 'whole'
-                ? "Cleared the whole blank around the part down to its base plane, so the part is not left in a pit."
-                : `Cleared a ${Number(ringWidthMm.toFixed(3))} mm band around the part down to its base plane, so the part is not left in a pit.`,
-            ]),
-        // #785 — the operator's top-band choice, on the sheet: the cut's floor and what it leaves.
-        ...(topBandMm === null
-          ? []
-          : [
-              `Cut only the stock's top ${Number(topBandMm.toFixed(3))} mm (this cutter's reach less ${GOAL_BAND_CLEARANCE_MM} mm clearance); the rest of the goal is left in the stock.`,
-            ]),
-        // #888 — one side of the budget's depth split: what this program takes and what it leaves.
-        ...(statedBandMm === null
-          ? []
-          : [
-              `This side cuts the top ${Number(statedBandMm.toFixed(3))} mm of the goal; the other side of the split takes the rest.`,
-            ]),
-      ],
-    } satisfies GoalSurfaceFacts,
+    findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...modelRoughFindings, ...chamferFindings, ...documentFindings(), ...planFindings]),
+    feeds: null,
+    cam: first.cam,
+    nc: first.nc,
+    verify: first.verify,
+    programs,
+    plan: output,
+    planStatements,
   };
 }
 
@@ -6573,12 +5417,8 @@ async function generateGoalPrograms(
   job: EngraveJob,
   sides: readonly GoalSide[],
   tool: Tool | null,
-  catalogue: readonly FeedCatalogueRow[],
   calibration: MachineCalibration | null,
   shop: EngraveShopOpts,
-  onProgress?: EngraveProgressFn,
-  /** #881 — the roughing level pool, handed to each side's goal program. */
-  planner?: LevelPlanner,
 ): Promise<EngraveGenerated> {
   // A goal program's check is its `surfaceCheck` (there is no verifier report), and the single-goal
   // path already builds each program with it — so each side's programs are those programs with the
@@ -6595,171 +5435,17 @@ async function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = await generateGoalProgram(job, firstSide.goal, tool, catalogue, calibration, shop, onProgress, planner);
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop });
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
   for (const side of sides.slice(1)) {
-    const one = await generateGoalProgram(job, side.goal, tool, catalogue, calibration, shop, onProgress, planner);
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop });
     const sideList = sidePrograms(one, side);
     if (sideList === null) return { ...one, programs };
     programs.push(...sideList);
   }
   return { ...first, programs };
-}
-
-/**
- * #786 slice 4a-2 — ONE CONE OR SPHERE, SURFACED: the analytic heightfield becomes the 3D CAM's
- * program, posts, and carries a `surfaceCheck` instead of a 2.5D verifier report (there is none to
- * have: the file cuts a curved surface, not plateaus). The fields and passes are the goal
- * program's own — the same `generateSurface3dIR`, the same feeds resolution (a ball through its
- * flat proxy), the same check shape — so a primitive and a goal are cut and checked the same way.
- */
-async function generateSurfacePrimitiveProgram(
-  job: EngraveJob,
-  primitive: SurfacePrimitive,
-  tool: Tool,
-  catalogue: readonly FeedCatalogueRow[],
-  calibration: MachineCalibration | null,
-  shop: EngraveShopOpts,
-  span: VacuumSpan,
-  /** #881 — the roughing level pool, when one is attached. */
-  planner?: LevelPlanner,
-): Promise<OneProgram> {
-  const base: OneProgram = {
-    ok: false,
-    stage: 'findings',
-    findings: [],
-    feeds: null,
-    cam: null,
-    nc: null,
-    verify: null,
-    ...emptyGoalResult(),
-  };
-  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null): OneProgram => ({
-    ...base,
-    ok: false,
-    stage,
-    feeds,
-    errors: [{ stage, message }],
-  });
-
-  const mill = jobMachine(job, calibration);
-  // The job's 2.5D feeds, reused unchanged (the goal path's rule): a ball or bull resolves through
-  // a FLAT PROXY of its cutting diameter, because `feedsFor` cannot feed a shape it cannot trace.
-  const isRound = tool.shape === 'ball' || tool.shape === 'bull';
-  const feedTool = feedsToolForSurface(tool);
-  const resolved = engraveFeedsFor(shop, catalogue, job.stock.material, feedTool, mill, job.cutOverride);
-  if (!resolved.ok) return fail('feeds', resolved.reason, resolved);
-
-  const field = primitiveHeightfield(primitive, {
-    pitchMm: shop.surfaceGrid?.pitchMm.value ?? null,
-    stockTopZ: 0,
-  });
-  if (field === null) {
-    return fail('cam', `${surfacePrimitiveWord(primitive)} has no surface to cut: its depth, diameter or tip cannot form one`);
-  }
-
-  const feeds: SurfaceFeeds = {
-    feed: resolved.params.feed,
-    plungeFeed: resolved.params.plungeFeed,
-    stepDown: resolved.params.stepDown,
-    roughStepOver: resolved.params.stepOver,
-    finishStepOver: resolved.params.stepOver,
-  };
-  const radius = (cuttingDiameter(tool) ?? 0) / 2;
-  let surfaced: Surface3dResult;
-  try {
-    surfaced = await generateSurface3dIR({
-      heightfield: field,
-      tool: { radius, ball: isRound },
-      toolObj: tool,
-      toolNumber: toolNumberFor(tool),
-      spindleRpm: resolved.params.rpm,
-      air: job.cutOverride?.air ?? true,
-      feeds,
-      rapid: mill.rapidEstimate,
-      labelId: primitive.id,
-      opts: {
-        stockToLeaveMm: shop.finish?.stockToLeaveMm.value,
-        // #846 — how each roughing level is cleared, decided per job from the
-        // shop's two rough3d numbers and the job's material.
-        roughing: {
-          mode: 'auto',
-          material: job.stock.material,
-          depthRatio: readDefault(shop.defaults ?? null, 'rough3d.adaptiveDepthRatio').value,
-          cellBudget: readDefault(shop.defaults ?? null, 'rough3d.compareCellBudget').value,
-          // #846 — the planning budget: the adaptive is planned one level at a time, so above
-          // this much work the goal keeps the raster and the line says why.
-          planBudget: readDefault(shop.defaults ?? null, 'rough3d.planBudgetCellLevels').value,
-          adaptive: adaptiveSettings(shop.defaults ?? null).settings,
-          ...(planner === undefined ? {} : { planner }),
-        },
-      },
-    });
-  } catch (e) {
-    return fail('cam', e instanceof Error ? e.message : String(e), resolved);
-  }
-
-  const ctx: PostContext = {
-    jobName: job.name,
-    stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
-    materialName: job.stock.material,
-    zDatum: 'probed-top-face',
-    origin: postOriginFor(mill),
-    camVersion: CAM_VERSION,
-    toolKey: job.toolKey,
-  };
-  let nc: string;
-  try {
-    const posted = postFor(mill)(surfaced.ir, ctx, {
-      vacuum: span,
-      thumbnail: heightfieldTopViewPng(job.stock, field),
-    });
-    if (!posted.ok) return fail('post', posted.errors.join('; '), resolved);
-    nc = posted.text;
-  } catch (e) {
-    return fail('post', e instanceof Error ? e.message : String(e), resolved);
-  }
-
-  const surfaceCheck: SurfaceProgramCheck = {
-    kind: 'surface',
-    gridPitchMm: field.pitch,
-    roughingLayers: surfaced.roughingLayers,
-    passes: surfaced.ir.operations.map((op) => op.name),
-    resolutionNote: field.resolutionNote,
-    bbox: pathBbox(surfaced.ir),
-  };
-
-  const shortName = toolDisplayName(tool).split(' · ')[0]!;
-  const findings: JobFinding[] = [
-    {
-      severity: 'info',
-      code: 'primitive-surface-program',
-      labelId: primitive.id,
-      message:
-        `${surfacePrimitiveWord(primitive)} is cut by a 3D surface program (${field.resolutionNote}); ` +
-        (isRound
-          ? `the ${shortName} follows the curve.`
-          : `the ${shortName} is a flat cutter, so its finish is a stepped approximation — a ball nose follows the curve.`),
-    },
-  ];
-
-  return {
-    ...base,
-    ok: true,
-    stage: 'done',
-    findings: dedupeFindings([
-      ...findings,
-      ...validateJob(job, null, { bed: shop.bed ?? null, defaults: shop.defaults, tools: shop.tools }),
-      ...(job.workholding.kind === 'vise' ? validateVise(job.stock, job.workholding.vise, job.sacrificial) : []),
-    ]),
-    feeds: resolved,
-    cam: summarize(surfaced.ir, mill.rapidEstimate),
-    nc,
-    verify: null,
-    surfaceCheck,
-  };
 }
 
 /**
@@ -7350,12 +6036,6 @@ export async function engraveGenerate(
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
   shop: EngraveShopOpts = {},
   onProgress?: EngraveProgressFn,
-  /**
-   * #881 — WHERE THE ROUGHING LEVELS ARE PLANNED. A pool when the app runs (its workers live on
-   * the main thread, reached over a MessagePort); absent, every level is planned in this thread,
-   * exactly as before. The plans and the assembly are the same either way.
-   */
-  planner?: LevelPlanner,
 ): Promise<EngraveGenerated> {
   onProgress?.({ stage: 'prepare', label: 'reading the job' });
   // #786 slice 4c-2 — the same catalogue fill as `engraveRegions`, applied HERE as well so the
@@ -7426,6 +6106,47 @@ export async function engraveGenerate(
     };
   }
 
+  // #966/#979 — A CONE OR SPHERE PRIMITIVE HAS NO CAM PATH LEFT. #966 removed the old engine
+  // whole, `generateSurfacePrimitiveProgram` (cam/surface3d's goal-mesh path, reused for a
+  // primitive's analytic heightfield) included — nothing uses primitives today, so restoring the
+  // path onto cam/model is its own issue (#979), not part of this removal. Refused here, before
+  // any other dispatch, on ONE finding naming #979; the 3D preview still draws the cavity
+  // (`engravePreview.ts`'s own revolve-to-Manifold path, untouched by this refusal).
+  if (surfacePrimitivesOf(job).length > 0) {
+    return {
+      ok: false,
+      stage: 'findings',
+      findings: [
+        {
+          severity: 'error',
+          code: 'surface-primitive-removed',
+          message:
+            'Cone/sphere surface primitives have no CAM path right now (#979) — nothing uses them today, ' +
+            'so restoring the path is its own issue. The preview still draws the cavity; remove the primitive ' +
+            '(or disable it) to generate.',
+        },
+      ],
+      feeds: null,
+      threads: null,
+      threadMachining: null,
+      cam: null,
+      nc: null,
+      verify: null,
+      frameNc: null,
+      frameVerify: null,
+      facingNc: null,
+      facingVerify: null,
+      facingToolKey: null,
+      facingError: null,
+      facingCam: null,
+      surface: null,
+      predicted: [],
+      designItems: [],
+      programs: [],
+      errors: [],
+    };
+  }
+
   // #241 slice 2 — A JOB WHOSE WORK IS ON THE STOCK'S FACES ONLY. Its operations are a list, not
   // the item pipeline's, so it is generated by its own function BEFORE the goal and item
   // dispatches; one indexed program carries every face and hole in cut order.
@@ -7471,7 +6192,7 @@ export async function engraveGenerate(
           ],
         };
       }
-      return { ...(await generateGoalPrograms(job, sides, tool, catalogue, calibration, shop, onProgress, planner)), surface: null };
+      return { ...(await generateGoalPrograms(job, sides, tool, calibration, shop)), surface: null };
     }
   }
   const goal = job.setups === undefined ? pureGoalObject(job) : null;
@@ -7484,7 +6205,7 @@ export async function engraveGenerate(
     }
     // #623 — the surface-3D goal path posts flat (it never lifts feeds), so its package claims no
     // surface: the caller judges it in the work frame, which is the frame it was posted in.
-    return { ...(await generateGoalProgram(job, goal, tool, catalogue, calibration, shop, onProgress, planner)), surface: null };
+    return { ...(await generateGoalProgram(job, goal, tool, calibration, { shop })), surface: null };
   }
 
   // #419 J3 — A JOB IS A LIST OF PROGRAMS.
@@ -7506,19 +6227,6 @@ export async function engraveGenerate(
   const documentFloors = supportingFloors(tl, toPartPlan(job));
   onProgress?.({ stage: 'items', label: 'cutting the items' });
   if (job.setups === undefined) {
-    // #786 slice 4a-2 — A CONE OR SPHERE (OR SEVERAL) IS A SURFACE PROGRAM OF ITS OWN. On a legacy
-    // document the surfaces are generated here, in document order, BEFORE the item program: the
-    // item program cuts its cut-outs last (they release the part), so a surface after it would be
-    // cut on a part held only by its tabs. A document whose only work is surfaces returns them as
-    // the whole run; one with both returns the surfaces first, then the item program.
-    const legacySurfaces = surfacePrimitivesOf(job);
-    const itemWork = jobHasNonSurfaceWork(job);
-    const surfaceOnes: OneProgram[] =
-      tool === null || legacySurfaces.length === 0
-        ? []
-        : await Promise.all(
-            legacySurfaces.map((p) => generateSurfacePrimitiveProgram(job, p, tool, catalogue, calibration, shop, 'whole', planner)),
-          );
     // #836 — A LEGACY MIXED JOB (no `setups[]`, map items AND faces): the wrapped program is cut
     // as it always was, then the face program after it, in the same mounting. The vacuum words
     // split across the files.
@@ -7541,26 +6249,21 @@ export async function engraveGenerate(
       const into = faceIntoNeckFinding(job, faceTool);
       if (into !== null) return neckRefusal(into);
     }
-    // #786 slice 4a-2 — a document whose only work is surfaces takes the first surface program as
-    // its one program (the rest are appended below); one with item work cuts its item program.
-    const one =
-      itemWork || legacySurfaces.length === 0
-        ? await generateOneProgram(
-            tl,
-            job,
-            tool,
-            catalogue,
-            calibration,
-            margins,
-            shop,
-            mixedFaces ? 'first' : 'whole',
-            true,
-            'rough-and-finish',
-            neckLast ? { apart: 'last' } : !mixedFaces,
-            undefined,
-            documentFloors,
-          )
-        : surfaceOnes[0]!;
+    const one = await generateOneProgram(
+      tl,
+      job,
+      tool,
+      catalogue,
+      calibration,
+      margins,
+      shop,
+      mixedFaces ? 'first' : 'whole',
+      true,
+      'rough-and-finish',
+      neckLast ? { apart: 'last' } : !mixedFaces,
+      undefined,
+      documentFloors,
+    );
     // #677 — a legacy document names ONE cutter, so a variable carve's core cannot be cleared: it
     // stands, and the warning says what to add. A job that has setups gets the same sentence from
     // the loop below, with the setup's number on it.
@@ -7572,14 +6275,8 @@ export async function engraveGenerate(
       toolKey: job.toolKey,
       itemIds: [],
     };
-    const surfacePrograms = surfaceOnes
-      .filter((s) => s.ok && s.nc !== null && s.surfaceCheck != null)
-      .map((s) => programOf(s, ref));
-    // A surface-only document has no item program to face or engrave; the surfaces ARE the run.
-    const itemProgramHere = itemWork || legacySurfaces.length === 0;
-    const facingFile = itemProgramHere ? facingProgramOf(oneReady, ref) : null;
-    const engraved =
-      itemProgramHere && oneReady.ok && oneReady.nc !== null && oneReady.verify !== null ? [programOf(oneReady, ref)] : [];
+    const facingFile = facingProgramOf(oneReady, ref);
+    const engraved = oneReady.ok && oneReady.nc !== null && oneReady.verify !== null ? [programOf(oneReady, ref)] : [];
     // #836 — the face program, cut after the map work with the setup's face cutter.
     if (faceRef !== null) {
       const faceOne = await generateFaceProgram(
@@ -7616,11 +6313,11 @@ export async function engraveGenerate(
           ...faceOne.findings,
           ...(neckFile.length === 0 ? [] : [neckAfterFacesFinding()]),
         ]),
-        programs: [...surfacePrograms, ...(facingFile === null ? [] : [facingFile]), ...engraved, ...facePrograms, ...neckFile],
+        programs: [...(facingFile === null ? [] : [facingFile]), ...engraved, ...facePrograms, ...neckFile],
       };
     }
     // #623 — the frame the programs were posted against; the panel loads the simulation with it.
-    return { ...oneReady, surface: shop.surface ?? null, programs: [...surfacePrograms, ...(facingFile === null ? [] : [facingFile]), ...engraved] };
+    return { ...oneReady, surface: shop.surface ?? null, programs: [...(facingFile === null ? [] : [facingFile]), ...engraved] };
   }
 
   // A setup that cannot become exactly one program is refused BEFORE anything is cut: the panel's
@@ -8136,27 +6833,6 @@ async function generateOneProgram(
    */
   raisedCoFlat?: Tool | null,
 ): Promise<OneProgram> {
-  // #786 slice 4a-2 — A CONE OR SPHERE IS ITS OWN SURFACE PROGRAM. `setupPrograms` splits the
-  // primitive out of its owner's ordinary ref, so a sub-job whose only work is surfaces lands
-  // here; the region pipeline has nothing to plan for a sloped wall or a curved floor.
-  const surfacePrimitives = surfacePrimitivesOf(job);
-  if (surfacePrimitives.length > 0 && !jobHasNonSurfaceWork(job)) {
-    const only = surfacePrimitives[0]!;
-    if (tool === null) {
-      return {
-        ...emptyGoalResult(),
-        ok: false,
-        stage: 'feeds',
-        findings: [],
-        feeds: null,
-        cam: null,
-        nc: null,
-        verify: null,
-        errors: [{ stage: 'feeds', message: 'the job has no usable cutter' }],
-      };
-    }
-    return generateSurfacePrimitiveProgram(job, only, tool, catalogue, calibration, shop, span);
-  }
   // #347 — the JOB's machine, not the app's only one: the envelope, the spindle ceiling and the
   // frame below are read off the profile the document names. The POST is still `postZ1`'s dialect,
   // which is the only post this app has; a second mill is a second post, and this line is where a

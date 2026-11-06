@@ -105,7 +105,6 @@ import { clearanceZOf, rotaryOf, type WorkOrigin } from '@/engine/cnc/machine';
 import { facingDefault, facingRefusal, finishOf } from '@/engine/cnc/stockStart';
 import { NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import type { FacingCamSummary } from '@/engine/cnc/cam/facing';
-import type { GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
 import type { InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import type { VerifyReport } from '@/engine/cnc/verify';
 // #243 — the blind-spot sentence is the Simulate panel's OWN builder, imported rather than
@@ -3150,6 +3149,70 @@ function drillPeckSteps(job: EngraveJob, feedsPeck: number | null): RunSheetStep
     });
   }
   return steps;
+}
+
+/**
+ * #535 — a goal program's surfacing facts, as the operation row and the run sheet quote them.
+ * Every number is one the CAM ran with, never a second resolution of the same question.
+ *
+ * #966 — pure-moved from `cam/surface3d.ts` ahead of that file's removal: this type outlives the
+ * retired goal-mesh dispatch (`generateSurface3dForGoal`) that used to build it — rotary relief
+ * (`generateRotaryGoalProgram`, engraveGenerate.ts) constructs one too, and that path is untouched
+ * by #966. `surfaceSteps` below is this type's one reader, so the type lives right beside it.
+ *
+ * `GoalRestFacts`/the `rest?` field did NOT move with it: nothing ever constructed a
+ * `GoalRestFacts` (its only builder was the retired dispatch), and `surfaceSteps` never read
+ * `facts.rest` — so there was no live branch left to carry, only a dead type.
+ */
+export interface GoalSurfaceFacts {
+  /** The heightfield's own resolution sentence ("sampled on a 0.1 mm grid"). */
+  resolutionNote: string;
+  /** The pitch the heightfield was sampled at, mm — after any coarsening. */
+  gridPitchMm: number;
+  /** The cells the heightfield held, `nx × ny`. */
+  gridCells: number;
+  /** Roughing step-down per Z layer, mm. */
+  stepDownMm: number;
+  /**
+   * #869 — the FINISHING cutter's step-down, mm — the spacing of the rim laps (#862), which ride
+   * the finish. Absent on a result stored before the field; a reader falls back to `stepDownMm`.
+   */
+  finishStepDownMm?: number;
+  /** Roughing raster pitch, mm. */
+  roughStepOverMm: number;
+  /** Finishing raster pitch, mm. */
+  finishStepOverMm: number;
+  /** Roughing allowance left on the goal surface, mm. */
+  stockToLeaveMm: number;
+  /**
+   * #898 — the UNDERSIDE choice this program cut to: its kind and the work-Z floor it set (`null`
+   * when the choice carries no floor of its own). Absent when the goal states no underside, or on
+   * a result stored before the field.
+   */
+  underside?: { kind: 'flat' | 'flipped-tabs' | 'plinth'; floorZ: number | null } | null;
+  /** Z layers the roughing pass stepped through. */
+  roughingLayers: number;
+  /**
+   * #869 — THE FLAT ROUGH, when the goal is cut as two programs: the cutter's name, as the run
+   * sheet names it, and which roughing pass ran. Null when a flat was chosen but nothing stood
+   * above the allowance to remove; ABSENT on a one-cutter goal and on every result stored before
+   * the field, which is why a reader asks `!= null`.
+   */
+  rough?: { tool: string; kind: 'raster' | 'adaptive' } | null;
+  /**
+   * #671 — the scallop pass's numbers, or null when it did not run. ABSENT on a result stored by
+   * a build before #671, which is why a reader asks `!= null` rather than `!== null`.
+   */
+  scallop?: { contours: number; stepOverMm: number; clamped: boolean } | null;
+  /** #671 — the pencil pass's numbers, or null when it did not run; absent before #671. */
+  pencil?: { paths: number; creaseDeg: number } | null;
+  /**
+   * #862 — the rim pass's numbers, or null when it did not run; absent before #862. The laps are
+   * the finishing operation's opening moves, down the clear band's wall.
+   */
+  rim?: { laps: number; floorZ: number } | null;
+  /** The engine's notes for the run sheet: the feeds, undercuts and a flat finishing cutter. */
+  notes: string[];
 }
 
 /**

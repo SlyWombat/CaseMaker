@@ -14,7 +14,7 @@
  * any run. Both read the same facts, so the line and the program cannot disagree.
  */
 
-import { goalClearBand } from '@/engine/cnc/cam/surface3d';
+import { goalClearBand } from '@/engine/cnc/engrave/goalSurfaceSettings';
 import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';

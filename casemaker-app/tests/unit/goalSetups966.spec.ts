@@ -130,12 +130,10 @@ function sphereFeatureSource(): FeatureSource {
 const VISE: MountSpec = { kind: 'vise', viseOpeningMm: 120 };
 const SPHERE_STOCK = { length: 2 * SPHERE_R, width: 2 * SPHERE_R, thickness: 2 * SPHERE_R };
 
+// #966 — A HOLDOVER, NOW A PASSTHROUGH. There is no more flag to mock on: `generateGoalProgram`
+// always plans through `cam/model`. Kept (rather than inlined at each call site) so this file's
+// own diff stays small; every caller below is unaffected by the removal.
 async function withModelCamFlagOn<T>(run: () => Promise<T>): Promise<T> {
-  vi.doMock('@/engine/cnc/cam/model/plan', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('@/engine/cnc/cam/model/plan')>();
-    return { ...actual, USE_MODEL_CAM_ENGINE: true };
-  });
-  vi.resetModules();
   return run();
 }
 
@@ -198,7 +196,7 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
       // registration message, not a bare stack trace.
       const result = await withModelCamFlagOn(async () => {
         const { generateGoalProgram: generateGoalProgramModelCam } = await import('@/workers/sim/engraveGenerate');
-        return generateGoalProgramModelCam(job, goal, BALL, [], null, SHOP);
+        return generateGoalProgramModelCam(job, goal, BALL, null, { shop: SHOP });
       });
       expect(result.ok).toBe(false);
       expect(result.stage).toBe('cam');
@@ -236,7 +234,7 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
       // The same thing, through the real seam: a named 'cam'-stage refusal, never `ok: true`.
       const result = await withModelCamFlagOn(async () => {
         const { generateGoalProgram: generateGoalProgramModelCam } = await import('@/workers/sim/engraveGenerate');
-        return generateGoalProgramModelCam(job, goal, BALL, [], null, SHOP);
+        return generateGoalProgramModelCam(job, goal, BALL, null, { shop: SHOP });
       });
       expect(result.ok).toBe(false);
       expect(result.stage).toBe('cam');

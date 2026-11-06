@@ -19,8 +19,6 @@ import { stepAtLine } from '@/engine/cnc/playbackClock';
 import { EngraveCutSurface } from './EngraveCutSurface';
 import { saveEngraveProgram, saveText } from '@/engine/exportTrigger';
 import { buildSimStallReport, simStallReportFileName } from '@/engine/jobs/simStallReport';
-import { lastPoolSizing } from '@/engine/jobs/adaptivePool';
-import { PoolTechnicalLine } from './PoolTechnicalLine';
 import { flightCrumbs } from '@/platform/flightRecorder';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
@@ -40,7 +38,7 @@ import { setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/en
 import { useHouseStore } from '@/store/houseStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { planFlipSetups, splitGoalForBudget } from '@/engine/cnc/engrave/goalFlipSetups';
+import { planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
 import { jobFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { jobTopFaceCached, NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { millModelById, workOriginOf } from '@/engine/cnc/machine';
@@ -58,7 +56,7 @@ import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { efficiencyThresholds, readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
-import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobMount, jobSetups, jobTargetObjects, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobMount, jobSetups, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 // #835 — one setup's own work, measured and written back into that setup only.
 import { deadSetupKeys, replacementCutter } from '@/engine/cnc/engrave/setupWork';
 import { measureFingerprint } from '@/engine/cnc/engrave/measuredPick';
@@ -2013,53 +2011,6 @@ export function EngravePanel(): JSX.Element {
     void generate();
   };
 
-  /**
-   * #785 follow-up — the too-big refusal's one press. It writes the pitch the refusal suggested
-   * onto the goal's own grid setting (so the job says what it will be cut at, and the result stays
-   * current), then presses Generate — the operator already chose, by pressing.
-   */
-  const generateAtPitch = (finding: JobFinding): void => {
-    const pitch = finding.suggestedPitchMm;
-    if (pitch === undefined) return;
-    updateTargetObject({ surface: { gridPitchMm: pitch } });
-    void generate();
-  };
-
-  /**
-   * #832 — the budget's OTHER press: raise the step-down to the number the finding states, and
-   * Generate in the same click. The moves fall with the step-down exactly as they do with the
-   * pitch, so this is the same kind of choice, not a hint.
-   */
-  const generateAtStepDown = (finding: JobFinding): void => {
-    const stepDown = finding.suggestedStepDownMm;
-    if (stepDown === undefined) return;
-    updateTargetObject({ surface: { roughStepDownMm: stepDown } });
-    void generate();
-  };
-
-  /**
-   * #888 — THE SPLIT PRESS DOES THE SPLIT. The finding's `suggestedSplit` was computed with the
-   * generator's own move model (both bands under the budget), so this builds the two sides the
-   * sentence promised — the goal cut as a top band and a bottom band from its flipped side,
-   * registered on the same dowel holes #872's plan uses — writes them as the job's setups, and
-   * presses Generate. A plan the setups engine refuses is stated beside the goal, never half
-   * written. The press is not drawn at all when no split fits (the finding carries no numbers).
-   */
-  const splitForBudget = (finding: JobFinding): void => {
-    const split = finding.suggestedSplit;
-    if (split === undefined) return;
-    const goal = jobTargetObjects(job).find((g) => g.id === finding.targetId) ?? job.targetObject;
-    if (goal === undefined) return;
-    const result = splitGoalForBudget(job, goal, split);
-    if (!result.ok) {
-      setTargetError(result.reason);
-      return;
-    }
-    setSetups(result.setups);
-    for (const side of result.goals) setSideGoal(side.setupId!, side);
-    void generate();
-  };
-
   // #673 — THE INLAY HALF: the derived plug numbers (null when they do not derive) and the action
   // that saves the MALE blank as its own job. The action is offered only when the female's job has
   // no blocking finding — a male built from a job that cannot cut would be a second broken job.
@@ -2461,11 +2412,6 @@ export function EngravePanel(): JSX.Element {
   // ---- the run (#206) ----------------------------------------------------------------------
 
   const run = useEngraveRunStore();
-  // #881 — THE LEVEL POOL'S SIZE, as the pool itself stated it when it sized for this run. It is
-  // read on each render (the run's progress updates re-render the panel while planning), and it is
-  // absent until a budgeted run has planned — a raster job never states one. The run store clears
-  // it when a generate starts, so it cannot outlive the program it describes.
-  const poolSizing = run.generated !== null ? lastPoolSizing() : null;
   const simEnabled = featureSim;
   const running = run.phase === 'generating' || run.phase === 'simulating' || run.phase === 'checking';
 
@@ -2702,9 +2648,6 @@ export function EngravePanel(): JSX.Element {
   // blank high enough, or take it off the jaws), so that is the field the Fix opens. The plan's
   // own holding group is where the vise row lives.
   const runFix: PanelFix | null = currentRunError === null ? null : findingFix(currentRunError);
-  // #785 follow-up — the too-big refusal's one-click grid: the run stopped on it, and the finding
-  // carries the pitch that fits. The button beside the sentence writes that pitch onto the goal's
-  // grid and presses Generate in the same click, so the refusal turns into a choice.
   // #895 — the Cut step's press for a sweep that STALLED, beside the sentence that says so: run
   // the job again (Generate's own path). There is no limit to raise: the simulation stops only on
   // silence, so "again" is the whole of it.
@@ -2729,10 +2672,6 @@ export function EngravePanel(): JSX.Element {
     });
     void saveText(JSON.stringify(report, null, 2), simStallReportFileName(at), 'application/json');
   };
-  const runPitchFinding =
-    run.staleSince === null
-      ? (run.generated?.findings.find((f) => f.code === 'goal-program-too-big' && f.suggestedPitchMm !== undefined) ?? null)
-      : null;
   // #805 — a rotary goal wider than the rod is INFORMED (the relief is cut clipped, #786 slice 2).
   // Its sentence carries the two answers, beside it, as presses.
   const rotaryOversizeFinding =
@@ -2880,11 +2819,8 @@ export function EngravePanel(): JSX.Element {
   // `error` is stated once beside Generate (`engrave-generate-error`), not printed here too.
   const runSaysSomething = running || run.generated !== null || run.error !== null;
   // #888 — A RUN THAT STOPPED BEFORE POSTING states ONE sentence, not four "not … yet" rows (the
-  // three other rows add nothing when there is no program at all). The reason itself is the
-  // errors line below; the budget gets its own words because that is the case the maintainer hit.
+  // three other rows add nothing when there is no program at all).
   const runRefused = run.generated !== null && !run.generated.ok;
-  const runRefusedBudget =
-    runRefused && (run.generated?.findings.some((f) => f.code === 'goal-program-too-big') ?? false);
   // …and a run that PASSED and still matches the job collapses to ONE line, with the ticks behind
   // its `›`. #794 — that line is the Ready card, and the footer's primary becomes the next step.
   const runReady =
@@ -4849,8 +4785,6 @@ export function EngravePanel(): JSX.Element {
             )}
           </div>
         </div>
-        {/* #881 — the level pool's own number, beside the margins it planned within. */}
-        <PoolTechnicalLine sizing={poolSizing} />
       </details>
       </Group>
 
@@ -5404,7 +5338,7 @@ export function EngravePanel(): JSX.Element {
                     rows said the same thing three more times. */}
                 {runRefused ? (
                   <span data-testid="engrave-run-refused" style={{ color: '#c8d3de' }}>
-                    {runRefusedBudget ? 'Not generated: the goal is over the planning budget.' : 'Not generated.'}
+                    Not generated.
                   </span>
                 ) : (
                   <>
@@ -5471,57 +5405,13 @@ export function EngravePanel(): JSX.Element {
 
             {runErrors.length > 0 && (
               <p
-                // #832 — A BUDGET IS NOT A FAULT: the too-big sentence is drawn in the inform
-                // colour, with its presses named, rather than as an error-red refusal.
-                style={{ ...MUTED, color: runPitchFinding !== null ? SEVERITY_COLOR.warning : SEVERITY_COLOR.error }}
+                style={{ ...MUTED, color: SEVERITY_COLOR.error }}
                 data-testid="engrave-run-errors"
               >
                 {firstRunErrorText === null
                   ? `${runErrors.length} error${runErrors.length === 1 ? '' : 's'} outstanding.`
                   : operatorRunError(firstRunErrorText)}
                 {runErrors.length > 1 && ` (+${runErrors.length - 1} more error${runErrors.length === 2 ? '' : 's'})`}
-                {/* #888 — the budget's three presses, in the operator's words, each saying what it
-                    costs: coarsen, thicken the layers, or split the depth into two setups. The
-                    numbers that made the decision live under Technical, not in the sentence. The
-                    split press is drawn only when a two-band split actually fits (the finding's
-                    `suggestedSplit`) — a press that cannot do what it says is not shown. */}
-                {runPitchFinding !== null && (
-                  <>
-                    {' '}
-                    Choose one:{' '}
-                    <button
-                      type="button"
-                      data-testid="engrave-generate-at-pitch"
-                      onClick={() => generateAtPitch(runPitchFinding)}
-                    >
-                      Coarser detail ({runPitchFinding.suggestedPitchMm} mm)
-                    </button>
-                    {runPitchFinding.suggestedStepDownMm !== undefined && (
-                      <>
-                        {' '}
-                        <button
-                          type="button"
-                          data-testid="engrave-generate-at-stepdown"
-                          onClick={() => generateAtStepDown(runPitchFinding)}
-                        >
-                          Thicker layers ({runPitchFinding.suggestedStepDownMm} mm step-down, rougher walls)
-                        </button>
-                      </>
-                    )}
-                    {runPitchFinding.suggestedSplit !== undefined && (
-                      <>
-                        {' '}
-                        <button
-                          type="button"
-                          data-testid="engrave-split-goal"
-                          onClick={() => splitForBudget(runPitchFinding)}
-                        >
-                          Split into two setups
-                        </button>
-                      </>
-                    )}
-                  </>
-                )}
                 {/* #895 — a stall is a fault, not a slow program: the sentence says so, and the
                     press simply runs the job again (the simulation stops only on silence). */}
                 {simStalled && (
@@ -5542,7 +5432,7 @@ export function EngravePanel(): JSX.Element {
                 {/* #725 B4 — the same sentence's Fix, in the footer at the button: the verifier's
                     clamp/arm refusals and the rotary's have always had their sentences, but no
                     control took the operator to what resolves one. #832: named by its action. */}
-                {runFix !== null && fixIsOffered(runFix) && runPitchFinding === null && (
+                {runFix !== null && fixIsOffered(runFix) && (
                   <>
                     {' '}
                     <button
@@ -5576,26 +5466,6 @@ export function EngravePanel(): JSX.Element {
                   {runErrors.length > 1
                     ? ` (+${runErrors.length - 1} more error${runErrors.length === 2 ? '' : 's'}; the first is shown)`
                     : ''}
-                </p>
-              </details>
-            )}
-            {/* #888 — THE NUMBERS UNDER TECHNICAL. The sentence above says what the goal is in the
-                operator's terms; the moves, cells, pitch, step-down and budget that made the
-                decision are a fact to look at when someone wants them, not the message. */}
-            {runPitchFinding !== null && runPitchFinding.budgetMoves !== undefined && (
-              <details data-testid="engrave-run-budget-technical" style={{ margin: '0 0 6px' }}>
-                <summary style={{ ...MUTED, cursor: 'pointer', listStyle: 'none' }}>Technical</summary>
-                <p style={{ ...MUTED, margin: '2px 0 0', lineHeight: 1.45 }}>
-                  About {Math.round(runPitchFinding.budgetMb ?? 0).toLocaleString('en-US')} MB to
-                  build, post and simulate —{' '}
-                  {runPitchFinding.budgetMoves.toLocaleString('en-US')} moves on{' '}
-                  {runPitchFinding.budgetCells?.toLocaleString('en-US') ?? '—'} cells at{' '}
-                  {runPitchFinding.budgetPitchMm ?? runPitchFinding.suggestedPitchMm} mm,{' '}
-                  {runPitchFinding.budgetStepDownMm ?? '—'} mm step-down; the app’s budget is{' '}
-                  {runPitchFinding.budgetLimitMb?.toLocaleString('en-US') ?? '—'} MB.
-                  {runPitchFinding.suggestedSplit !== undefined
-                    ? ` A two-setup split takes ${runPitchFinding.suggestedSplit.firstMm} mm from the top and ${runPitchFinding.suggestedSplit.secondMm} mm from the flipped side — about ${runPitchFinding.suggestedSplit.movesEach.toLocaleString('en-US')} moves each.`
-                    : ' No two-setup depth split puts both programs under the budget.'}
                 </p>
               </details>
             )}

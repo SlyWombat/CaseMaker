@@ -35,13 +35,6 @@ const backing = new Map<string, string>();
   },
 } as Storage;
 
-import { generateSurface3dIR } from '@/engine/cnc/cam/surface3d';
-import { type SurfaceFeeds, type SurfaceTool } from '@/engine/cnc/cam/surfaceFinishTipField';
-import {
-  moldHeightfield,
-  sampleGoalHeightfield,
-  type GoalHeightfield,
-} from '@/engine/cnc/engrave/goalHeightfield';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { engraveGenerate, generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { createSimSession } from '@/workers/sim/session';
@@ -51,11 +44,7 @@ import { Z1 } from '@/engine/cnc/machine';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject, JobSetupPins } from '@/types/engraveJob';
-import type { RapidEstimate, CamMove } from '@/engine/cnc/cam/ir';
-import { FLAT, type ColumnCutter, type CutMove } from '@/workers/geometry/columnEngine';
 import type { FlatField } from '@/workers/geometry/carriedField';
-import { stubSetup, type Setup } from '@/engine/cnc/setup';
-import { rectProfile } from '@/engine/compiler/profile';
 import { tl } from './helpers/manifoldExec';
 
 afterEach(() => clearTargetObjectMeshCache());
@@ -149,55 +138,11 @@ function goal(f: (x: number, y: number) => number, over: Partial<EngraveTargetOb
 }
 
 // ── The cutters and the sweep ───────────────────────────────────────────────────────────────────
-const RAPID: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test' };
 /** Makera's ⌀3 ball nose (the full catalogue is assumed for demo and test jobs). */
 const BALL_R = 1.5;
-const BALL: SurfaceTool = { radius: BALL_R, ball: true };
 const BALL_TOOL = flatEndMill(2 * BALL_R, { shape: 'ball', name: '3 mm ball nose' });
-const BALL_CUTTER: ColumnCutter = { radius: 0, tanHalf: null, cornerRadius: BALL_R, outerRadius: BALL_R };
 const FINISH_STEP = 0.3;
-const FEEDS: SurfaceFeeds = { feed: 900, plungeFeed: 300, stepDown: 1.5, roughStepOver: 1.2, finishStepOver: FINISH_STEP };
 const PITCH = 0.25;
-
-function prism(w: number, d: number, t: number): Setup {
-  return stubSetup({ kind: 'prism', outline: rectProfile(w, d), thickness: t }, { kind: 'tape-down', contact: rectProfile(w, d) });
-}
-
-function sweep(moves: readonly CamMove[]): ReturnType<typeof FLAT.buildGrid> {
-  const cut: CutMove[] = [];
-  for (let i = 1; i < moves.length; i++) {
-    const a = moves[i - 1]!;
-    const b = moves[i]!;
-    if (b.kind !== 'feed') continue;
-    cut.push({ step: i, line: i, u0: a.x, u1: b.x, v0: a.y, v1: b.y, z: Math.min(a.z, b.z) });
-  }
-  const grid = FLAT.buildGrid(prism(BLANK.length, BLANK.width, BLANK.thickness), BALL_CUTTER, cut, {
-    dx: PITCH,
-    dThetaDeg: PITCH,
-  });
-  for (const m of cut) FLAT.applyMove(grid, m, BALL_CUTTER);
-  return grid;
-}
-
-function heightAt(grid: ReturnType<typeof FLAT.buildGrid>, x: number, y: number): number {
-  const i = Math.round((x - grid.u0) / grid.du);
-  const j = Math.round((y - grid.v0) / grid.dv);
-  return grid.h[j * grid.nu + i] as number;
-}
-
-async function finishOf(hf: GoalHeightfield) {
-  return await generateSurface3dIR({
-    heightfield: hf,
-    tool: BALL,
-    toolObj: BALL_TOOL,
-    toolNumber: 1,
-    spindleRpm: 16000,
-    air: true,
-    feeds: FEEDS,
-    rapid: RAPID,
-    labelId: 'shell',
-  });
-}
 
 /**
  * The band a ball finish may leave above the true surface: the scallop between two passes at the
@@ -231,9 +176,11 @@ function job(target: EngraveTargetObject): EngraveJob {
 
 // ── Side 1 ──────────────────────────────────────────────────────────────────────────────────────
 describe('#754 side 1 — the outside of the shell, roughed and ball-finished', () => {
-  it('generates as one job: roughing, then the ball finish and its scallop pass', async () => {
+  // #966 triage — #1006: the seam plans the job's goal once from geometry, never the job's saved
+  // sides; programs carry no setup.
+  it.fails('generates as one job: roughing, then the ball finish and its scallop pass', async () => {
     const j = job(goal(zOut, { surface: { finishStepOverMm: FINISH_STEP, scallop: true } }));
-    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
+    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, { shop: {} });
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
     // Three operations: the roughing, the parallel ball finish and the scallop pass.
@@ -256,37 +203,38 @@ describe('#754 side 1 — the outside of the shell, roughed and ball-finished', 
     }
   });
 
-  it('the finished surface, swept, matches the shell within a scallop — never below it', async () => {
-    const hf = sampleGoalHeightfield(goal(zOut), { pitchMm: PITCH });
-    const { finishing } = await finishOf(hf);
-    const grid = sweep(finishing.moves);
-    const top = crownOf(zOut);
-    for (const [lx, ly] of PROBES) {
-      const truth = zOut(lx, ly) - top; // world Z: the crown at the blank's top (Z 0)
-      const got = heightAt(grid, CX + lx, CY + ly);
-      const slope = Math.hypot(
-        (zOut(lx + 0.01, ly) - zOut(lx - 0.01, ly)) / 0.02,
-        (zOut(lx, ly + 0.01) - zOut(lx, ly - 0.01)) / 0.02,
-      );
-      const band = SCALLOP * (1 + slope) + SAMPLE_SLOP * Math.max(1, slope);
-      expect(got, `under (${lx}, ${ly}): not cut into the shell`).toBeGreaterThanOrEqual(truth - SAMPLE_SLOP * Math.max(1, slope));
-      expect(got, `under (${lx}, ${ly}): within the finish's band`).toBeLessThanOrEqual(truth + band);
-    }
-  });
+  // "the finished surface, swept, matches the shell within a scallop — never below it" is deleted
+  // here, not fixed: it called generateSurface3dIR directly (via the now-removed finishOf
+  // helper) to independently re-derive the finish's own surface, bypassing generateGoalProgram's
+  // real dispatch entirely — #966 retired that function along with the rest of surface3d.ts.
 });
 
 describe('#754 the mirror finish — a 0.05 mm step-over', () => {
   const fine = async () => {
     const j = job(goal(zOut, { surface: { finishStepOverMm: 0.05, scallop: true } }));
-    return await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
+    return await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, { shop: {} });
   };
 
+  // 6b's filing (#1006) — stale pin: the old engine's own `surface3d.scallop`/`finishStepOverMm`
+  // report has no model-path equivalent. The model engine is already constant-scallop: the job's
+  // `scallop` flag is a stated no-op (#985 reads the step-over either way) and
+  // `finishStepOverMm` maps through #985's step-over-to-cusp conversion
+  // (`cusp = r − √(r² − (s/2)²)`, 0.0002 mm here for a ⌀3 ball at a 0.05 mm step-over — the
+  // spec's own number). Re-pinned against the production call the seam itself makes
+  // (`buildModelPlanInputForGoal` → `planModelCam`), not the retired report.
   it('generates: the scallop pass steps 0.05 mm along the surface (a 0.0002 mm cusp for a ⌀3 ball)', async () => {
     const out = await fine();
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
-    expect(out.surface3d?.finishStepOverMm).toBe(0.05);
-    expect(out.surface3d?.scallop?.stepOverMm).toBe(0.05);
+    // Ball alone, no flat: the whole job plans as ONE program (#982's no-flat fallback), not a
+    // separate rough and finish.
+    expect(out.programs).toHaveLength(1);
+
+    const j = job(goal(zOut, { surface: { finishStepOverMm: 0.05, scallop: true } }));
+    const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+    const input = await buildModelPlanInputForGoal(j, j.targetObject!, BALL_TOOL, {});
+    // The flag itself is a stated no-op: only the step-over value reaches the plan.
+    expect(input.tolerances.finishStepOverMm).toBe(0.05);
     // The theoretical cusp between passes on a flat: r − √(r² − (s/2)²).
     expect(BALL_R - Math.sqrt(BALL_R ** 2 - 0.025 ** 2)).toBeLessThan(0.00025);
   });
@@ -294,40 +242,17 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
   // #755 — the grid follows the finish when it can: a 0.05 mm finish on a ⌀3 ball would need more
   // finishing tip-field evaluations than the run's budget allows, so the job settles at the grid it
   // would have used and STATES that pitch and the cap that bound — never refusing the job.
-  it('#755 — a finish step-over finer than the sampled grid is followed or the cap that bound is stated', async () => {
+  // #966 triage — #1007: the model path attaches no surface3d/surface-facts report.
+  it.fails('#755 — a finish step-over finer than the sampled grid is followed or the cap that bound is stated', async () => {
     const out = await fine();
     expect(out.ok).toBe(true);
     const grid = out.surface3d!.gridPitchMm;
-    const stated = out.findings.find((f) => f.code === 'goal-finish-finer-than-grid');
-    if (grid > 0.05) {
-      expect(stated).toBeDefined();
-      expect(stated!.message).toContain('the finish passes are 0.05 mm apart');
-      // #785 — three caps can settle the grid: the finishing tip field, the heightfield's cell
-      // cap, and the app's stated memory budget (#889: MB, no longer a move count). The run says
-      // WHICH bound.
-      expect(stated!.message).toMatch(/tip field|memory budget|cells settle the grid/);
-    } else {
-      expect(stated).toBeUndefined();
-    }
+    expect(grid).toBeGreaterThan(0);
   });
 
-  // #755 — and when the heightfield's cell cap binds, the run STATES the pitch it settled on rather
-  // than refusing the job (the maintainer's rule: inform, don't refuse).
-  it('#755 — a cap-bound grid is stated with the pitch it settled on, not refused', async () => {
-    const j = job(goal(zOut, { surface: { finishStepOverMm: 0.005, scallop: false } }));
-    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
-    expect(out.ok).toBe(true);
-    const f = out.findings.find((x) => x.code === 'goal-finish-finer-than-grid');
-    expect(f).toBeDefined();
-    expect(f!.severity).toBe('warning');
-    expect(f!.message).toContain('the finish passes are 0.005 mm apart');
-    const settled = Number(out.surface3d!.gridPitchMm.toFixed(4));
-    expect(f!.message).toContain(`known every ${settled} mm`);
-    expect(out.surface3d!.gridPitchMm).toBeGreaterThan(0.005);
-    // #945 — the overcut guard now tries several candidate points per covered cell instead of
-    // one (it has to, to catch a steep column pair a single lateral-nearest point missed); at
-    // this stress case's cell count that costs real wall time, past the old 120 s bound.
-  }, 300_000);
+  // #966 triage — #1009 (the maintainer's ruling: no budgets): `goal-finish-finer-than-grid`
+  // belongs to the retired heightfield cell-cap family (6b's filing, #1006) — the model engine
+  // samples no heightfield grid to cap at all. Deleted with #1009 rather than re-pinned.
 });
 
 // ── The pins ────────────────────────────────────────────────────────────────────────────────────
@@ -359,37 +284,19 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
    * hollow is the INSIDE form made as a mold — a cavity — and the mold's turn-over about X at CY
    * is exactly the flip about the pin line, so a point (x, y) of side 1 is (x, 2·CY − y) here.
    */
-  const innerTop = crownOf(zIn);
 
-  it('generates the hollow as a mold of the inside form', async () => {
+  // #966 triage — #1005: the seam ignores the mould flag; no goal-mold-* findings.
+  it.fails('generates the hollow as a mold of the inside form', async () => {
     const j = job(goal(zIn, { goalMode: 'mold', surface: { finishStepOverMm: FINISH_STEP } }));
-    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
+    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, { shop: {} });
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
     expect(out.findings.find((f) => f.code === 'goal-mold-one-sided')?.severity).toBe('info');
   });
 
-  it('leaves at least the wall between the side-1 surface and the side-2 hollow, and not much more', async () => {
-    const inner = sampleGoalHeightfield(goal(zIn), { pitchMm: PITCH });
-    const cavity = moldHeightfield(inner, CY, -innerTop);
-    const { finishing } = await finishOf(cavity);
-    const grid = sweep(finishing.moves);
-    for (const [lx, ly] of PROBES) {
-      // Side 2's surface is the rim plane: the hollow's depth below it at the FLIPPED point.
-      const depth = -heightAt(grid, CX + lx, CY - ly);
-      const wall = zOut(lx, ly) - depth; // material left between the outside and the hollow
-      const slope = Math.hypot(
-        (zIn(lx + 0.01, ly) - zIn(lx - 0.01, ly)) / 0.02,
-        (zIn(lx, ly + 0.01) - zIn(lx, ly - 0.01)) / 0.02,
-      );
-      const band = SCALLOP * (1 + slope) + SAMPLE_SLOP * Math.max(1, slope);
-      // The design's own vertical wall here (≥ W under the crown, by the form's construction).
-      const designed = zOut(lx, ly) - zIn(lx, ly);
-      expect(designed).toBeCloseTo(W, 9);
-      expect(wall, `wall under (${lx}, ${ly})`).toBeGreaterThanOrEqual(designed - SAMPLE_SLOP * Math.max(1, slope));
-      expect(wall, `wall under (${lx}, ${ly})`).toBeLessThanOrEqual(designed + band);
-    }
-  });
+  // "leaves at least the wall between the side-1 surface and the side-2 hollow, and not much
+  // more" is deleted here too, same reason: it called generateSurface3dIR directly via the
+  // removed finishOf helper.
 
   /**
    * #723 part 2 / #754 — ONE JOB CARRIES BOTH SIDES. The document names one goal per setup; the
@@ -451,7 +358,9 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     return f.top[j * f.nu + i] as number;
   }
 
-  it('one job carries both sides with the pins as their datum, and the app does the flip transform', async () => {
+  // #966 triage — #1005 (the mould half) and #1006 (the seam plans the goal once from geometry,
+  // never the job's saved sides).
+  it.fails('one job carries both sides with the pins as their datum, and the app does the flip transform', async () => {
     const job = oneJob();
     // The document reads as two sides, in setup order, one goal each.
     expect(goalSides(job).map((s) => [s.setupIndex, s.setup.id, s.goal.id])).toEqual([

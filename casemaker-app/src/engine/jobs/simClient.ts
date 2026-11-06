@@ -31,10 +31,7 @@ import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
 import { recordCrumb } from '@/platform/flightRecorder';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
 import { createFrameCoalescer } from './frameCoalescer';
-import { AdaptivePool } from './adaptivePool';
 
-/** #881 — the roughing level pool, owned here and lent to the sim worker over a port. */
-let adaptivePool: AdaptivePool | null = null;
 let simWorker: Worker | null = null;
 let simApi: Comlink.Remote<SimWorkerApi> | null = null;
 let frameSink: ((k: number, frame: SimFrame) => void) | null = null;
@@ -84,9 +81,6 @@ function failWorker(message: string): void {
   const f = failure;
   failure = null;
   frames.reset();
-  // #881 — the pool's planners are this run's children: a dead worker takes them with it.
-  adaptivePool?.dispose();
-  adaptivePool = null;
   simWorker?.terminate();
   simWorker = null;
   simApi = null;
@@ -112,11 +106,6 @@ export function getSimApi(): Comlink.Remote<SimWorkerApi> {
     };
     simWorker.onmessageerror = () => failWorker('the simulation worker sent a message the page could not read');
     simApi = Comlink.wrap<SimWorkerApi>(simWorker);
-    // #881 — lend the worker the level pool. The port is TRANSFERRED, and Comlink keeps the calls
-    // in order on this endpoint, so the worker has the planner before any generate that follows.
-    adaptivePool = new AdaptivePool();
-    const plannerPort = adaptivePool.beginRun();
-    void simApi.setLevelPlanner(Comlink.transfer(plannerPort, [plannerPort])).catch(() => undefined);
   }
   return simApi;
 }
@@ -138,9 +127,6 @@ const frames = createFrameCoalescer<SimFrame>({
 export function terminateSim(): void {
   frames.reset();
   frameDesign = 'stock';
-  // #881 — the cancel path: a terminated Generate must leave no planner running either.
-  adaptivePool?.dispose();
-  adaptivePool = null;
   simWorker?.terminate();
   simWorker = null;
   simApi = null;
