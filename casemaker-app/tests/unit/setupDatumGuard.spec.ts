@@ -25,6 +25,10 @@
  *
  * RED: with #1014's `roughLeftAbove(f, base.zTop, …)` — the CL mesh-absolute, the region rebased —
  * the flipped setup's finish mask empties and this spec fails on setup 1's missing finish op.
+ *
+ * TODO(#1019, D): the MOULD side joins this guard's cases. #1005's mould fixture ("stock minus the
+ * turned-over part") must run through the same twin comparison when the #1005 fold rebases onto
+ * this guard; 6b's #1005 ruling puts that case — and #1019 — on the fold's owner, not here.
  */
 import { describe, expect, it } from 'vitest';
 
