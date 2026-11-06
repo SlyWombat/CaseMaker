@@ -39,6 +39,7 @@ import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanStatement, StockProbes } from './types';
+import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, type SetupRegistration } from './setups';
 import { pocket } from './ops/pocket';
@@ -248,6 +249,17 @@ export interface ModelPlanInput {
    * the old pocket-count completeness, unchanged.
    */
   goal?: GoalCellField;
+  /**
+   * #1005 — WHEN THIS PLAN CUTS A MOULD. The seam sets it when the goal's `goalMode` is `'mold'`:
+   * its `geometry` is then the stock block minus the part turned over (`engrave/mouldSolid.ts`),
+   * and the plan states the two mould findings that need the cavity's own geometry — one-sided
+   * (always, info) and no-draft (warning past {@link MOLD_DRAFT_LIMIT_DEG}). `steepestWallDeg` is
+   * measured from the part's surface at the seam: a PLANAR wall is classified as a pocket wall and
+   * appears in no `remainder[].slopeDeg`, so the tree alone could not answer the box case. Rim and
+   * floor stay the goal validator's own findings (`validateGoalObject`), unchanged in code and
+   * wording.
+   */
+  mould?: { name: string; steepestWallDeg: number };
   /**
    * #869/#966 — THE CURVED PIPELINE'S OWN ROUGH, independent of `primary` (the pockets' own
    * largest flat, which a goal with no pockets picks only because the house owns one at all).
@@ -1074,6 +1086,28 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // #992 — THE TYPED STATEMENTS: the two planners' own, then this loop's. Every one is the same
     // fact its `notes` line states; the code and severity are what route it to the operator.
     const statements: PlanStatement[] = [...result.statements, ...freeingStatements, ...fallbackStatements];
+    // #1005 — THE MOULD'S OWN FACTS, from the cavity the plan was handed. The sentences are the old
+    // heightfield path's own, word for word (the guide's chapter 8 rows document these codes); the
+    // draft number is measured from the part's surface at the seam, because a planar wall has no
+    // remainder record in the tree. One-sided is always stated: a mould cut from the top cannot
+    // carry undercuts, and the operator should hear it once.
+    if (input.mould !== undefined) {
+      const mouldOneSided =
+        `The mould of "${input.mould.name}" is cut from the top only: the cavity is the part's top surface, ` +
+        'turned over so the casting reads the right way round, and the casting\'s underside is the ' +
+        'flat face you pour into. A part with undercuts, or one shaped on both sides, needs a ' +
+        'two-part mould — two setups.';
+      notes.push(mouldOneSided);
+      statements.push({ severity: 'info', code: 'goal-mold-one-sided', count: 1, text: mouldOneSided });
+      if (input.mould.steepestWallDeg > MOLD_DRAFT_LIMIT_DEG) {
+        const draft =
+          `The mould of "${input.mould.name}" has a wall at ${Number(input.mould.steepestWallDeg.toFixed(1))}° — steeper than ` +
+          `${MOLD_DRAFT_LIMIT_DEG}°, so it has little or no draft and may hold the casting. Give the ` +
+          'part tapered sides, or use a flexible casting material.';
+        notes.push(draft);
+        statements.push({ severity: 'warning', code: 'goal-mold-no-draft', count: 1, text: draft });
+      }
+    }
     for (const group of emptyOpGroups.values()) {
       const plural = group.count === 1 ? 'op' : 'ops';
       statements.push(

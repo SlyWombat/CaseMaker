@@ -67,7 +67,21 @@ export type PlanFindingCode =
   | 'goal-relief-edge'
   | 'goal-finish-mode'
   | 'goal-no-edge-break'
-  | 'goal-plan-tradeoff';
+  | 'goal-plan-tradeoff'
+  // #1005 — the mould's own four. Rim and floor are the goal validator's
+  // (`validateGoalObject`); one-sided and no-draft are the plan's, from its own solid.
+  | 'goal-mold-rim'
+  | 'goal-mold-floor'
+  | 'goal-mold-one-sided'
+  | 'goal-mold-no-draft';
+
+/**
+ * #721/#1005 — the steepest cavity wall a mould is cut with before it is warned as having no
+ * draft, degrees from horizontal. A labelled default: casting practice wants a degree or more of
+ * draft. Shared by both engines so the warning's number cannot drift between them — the old
+ * heightfield path re-exports it from here.
+ */
+export const MOLD_DRAFT_LIMIT_DEG = 85;
 
 export type PlanSheetCode = 'plan-setup' | 'plan-run';
 
