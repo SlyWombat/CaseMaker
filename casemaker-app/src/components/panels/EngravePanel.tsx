@@ -2124,8 +2124,11 @@ export function EngravePanel(): JSX.Element {
       job.targetObject.chamfer.toolKey === measuredNow.cutters[1].key) &&
     // #869/#999 — the goal's rough is the plan's own decision, and the three states are distinct:
     // a plan with no rough (ball alone) matches a goal stating `null`, never an ABSENT key (which
-    // now means the engine chooses), and a named key matches itself.
-    job.targetObject?.roughToolKey === (measuredNow.goalRoughKey ?? null) &&
+    // now means the engine chooses), and a named key matches itself. #1035 — the clause is a
+    // GOAL's rule: a job with no target object has no rough to compare, and `undefined === null`
+    // kept `measuredApplied` false forever, so the offer never retired after its own press and the
+    // fidelity line never showed.
+    (job.targetObject === undefined || job.targetObject.roughToolKey === (measuredNow.goalRoughKey ?? null)) &&
     (measuredSetup?.tools ?? []).length === measuredNow.cutters.length &&
     (measuredSetup?.tools ?? []).every((k, i) => k === measuredNow.cutters[i]?.key) &&
     measuredNow.cutters.every((c) => {
