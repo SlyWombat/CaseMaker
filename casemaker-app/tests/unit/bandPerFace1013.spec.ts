@@ -108,11 +108,11 @@ describe('#1013 the depth band is per face', () => {
     const goal = goalOf(20, { underside: { kind: 'plinth', plinthMm: 14 } });
     const job = jobOf(goal, 20);
 
-    const top = await buildModelPlanInputForGoal(job, goal, FLAT, SHOP, undefined, 'top');
+    const top = await buildModelPlanInputForGoal(job, goal, FLAT, SHOP, 'top');
     expect(top.setups).toHaveLength(1);
     expect(top.setups[0]!.bandMm).toBeCloseTo(6, 6);
 
-    const bottom = await buildModelPlanInputForGoal(job, goal, FLAT, SHOP, undefined, 'bottom');
+    const bottom = await buildModelPlanInputForGoal(job, goal, FLAT, SHOP, 'bottom');
     expect(bottom.setups).toHaveLength(1);
     expect(bottom.setups[0]!.frame.up).toEqual([0, 0, -1]);
     // RED at the parent: 6 — the same top-face number on a face whose own top is the stock's bottom.
@@ -136,9 +136,9 @@ describe('#1013 the depth band is per face', () => {
   it('a reach band is the same depth on every face: a 10 mm flute clamps both at −9', async () => {
     const goal = goalOf(20, { cutWithinReach: true });
     const job = jobOf(goal, 20);
-    const top = await buildModelPlanInputForGoal(job, goal, REACH_TOOL, SHOP, undefined, 'top');
+    const top = await buildModelPlanInputForGoal(job, goal, REACH_TOOL, SHOP, 'top');
     expect(top.setups[0]!.bandMm).toBeCloseTo(9, 6);
-    const bottom = await buildModelPlanInputForGoal(job, goal, REACH_TOOL, SHOP, undefined, 'bottom');
+    const bottom = await buildModelPlanInputForGoal(job, goal, REACH_TOOL, SHOP, 'bottom');
     expect(bottom.setups[0]!.bandMm).toBeCloseTo(9, 6);
 
     const bottomOut = await planModelCam(bottom);
@@ -151,13 +151,13 @@ describe('#1013 the depth band is per face', () => {
     // The underside floor at the blank's own bottom: the flipped side has nothing left to remove.
     const plinthZero = goalOf(20, { underside: { kind: 'plinth', plinthMm: 0 } });
     await expect(
-      buildModelPlanInputForGoal(jobOf(plinthZero, 20), plinthZero, FLAT, SHOP, undefined, 'bottom'),
+      buildModelPlanInputForGoal(jobOf(plinthZero, 20), plinthZero, FLAT, SHOP, 'bottom'),
     ).rejects.toThrow(/the underside floor leaves the bottom side nothing to cut on a 20 mm blank/);
 
     // A stated band deeper than the stock: 8 mm on a 5 mm blank.
     const small = goalOf(5, { bandMm: 8 });
     await expect(
-      buildModelPlanInputForGoal(jobOf(small, 5), small, FLAT, SHOP, undefined, 'bottom'),
+      buildModelPlanInputForGoal(jobOf(small, 5), small, FLAT, SHOP, 'bottom'),
     ).rejects.toThrow(/the stated band leaves the bottom side nothing to cut on a 5 mm blank/);
   }, 60_000);
 
