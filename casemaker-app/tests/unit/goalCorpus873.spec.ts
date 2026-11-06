@@ -261,10 +261,10 @@ describe('#909 the goal corpus: the plan never cuts into the part', () => {
     ['near-sphere.stl', { length: 60, width: 50, thickness: 32 }],
     ['figure.stl', { length: 100, width: 60, thickness: 40 }],
   ] as const) {
-    // #966 triage — #1003: figure.stl is 41.337 mm tall on a 40 mm stock; the seam carries no
-    // stockBottom, so the freeing contour cuts below the blank. The other two fixtures sit inside
-    // their stock and are unaffected.
-    (name === 'figure.stl' ? it.fails : it)(`${name}: no cell of the plan reaches below the goal`, async () => {
+    // #1003 landed: the seam carries the stock bottom, every op's depth is capped at it, and the
+    // clipped millimetres are stated — figure.stl (41.337 mm on a 40 mm stock) no longer frees
+    // through the blank. The other two fixtures sit inside their stock and are unaffected.
+    it(`${name}: no cell of the plan reaches below the goal`, async () => {
       const imported = await read(name);
       const target = targetOf(imported, { length: stock.length, width: stock.width });
       const job = goalJob(target, stock);
@@ -336,9 +336,9 @@ describe('#909 the goal corpus: the plan never cuts into the part', () => {
 });
 
 describe('#949 an oversized goal is refused at the CAM, not clipped along the jaws', () => {
-  // #966 triage — #1003: the oversize-XY refusal must stay on the model path as a job finding
-  // before planning; folded into #1003's fix alongside the stockBottom clamp.
-  it.fails('a figure larger than its blank is refused, and the sentence names the overhang', async () => {
+  // #1003 landed: the oversize-XY refusal runs on the model path as a job finding before
+  // planning, with the same sentence the old path stated.
+  it('a figure larger than its blank is refused, and the sentence names the overhang', async () => {
     // The figure is ~34 mm tall and wider than this blank on both axes: the exact shape of the
     // goalTransform e2e's case (a 75 mm goal on a 43 × 32 blank), small enough for a unit test.
     const imported = await read('figure.stl');
@@ -355,8 +355,8 @@ describe('#949 an oversized goal is refused at the CAM, not clipped along the ja
     expect(message).toContain('Fit to the stock');
   });
 
-  // #966 triage — #1003: see above.
-  it.fails('the same figure on a blank that holds it still generates — a fitting goal is untouched', async () => {
+  // #1003 landed: a fitting goal generates (see above).
+  it('the same figure on a blank that holds it still generates — a fitting goal is untouched', async () => {
     const imported = await read('figure.stl');
     const size = imported.size;
     const stock = { length: size.x + 4, width: size.y + 4, thickness: 20 };
