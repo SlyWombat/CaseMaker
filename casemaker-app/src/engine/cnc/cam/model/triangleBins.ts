@@ -61,8 +61,6 @@ export interface TriangleBins {
   generation: number;
 }
 
-const PLANE_EPS = 1e-9;
-
 function triangleBboxes(mesh: DropCutterMesh): MeshTriangles {
   const n = mesh.triangleCount;
   const minX = new Float64Array(n).fill(Infinity);
@@ -95,8 +93,17 @@ function triangleBboxes(mesh: DropCutterMesh): MeshTriangles {
     let nx = uy * vz - uz * vy;
     let ny = uz * vx - ux * vz;
     let nz = ux * vy - uy * vx;
-    if (Math.abs(nz) < PLANE_EPS) {
-      planeA[t] = NaN; // degenerate (vertical) facet — `planeOf`'s own `null`
+    // #1020 — THE OLD CHECK WAS SCALE-DEPENDENT: `nz` is a raw cross-product component (grows
+    // with the triangle's own area), so `|nz| < 1e-9` only ever caught an EXACTLY vertical facet,
+    // never a near-vertical one — and `a = -nx/nz`/`b = -ny/nz` blow up as `nz` shrinks, so a
+    // near-vertical step-wall facet's "plane" reports an unstable, often enormous Z over a cell it
+    // barely touches (the organizer's facets 40850/40851). The SCALE-FREE question is the angle
+    // between the facet's own normal and up: `|nz| / |n|` is exactly that angle's cosine, and
+    // under 0.05 (within ~3° of vertical) gets the same "no real ceiling here" treatment the
+    // exactly-vertical case already had.
+    const nLen = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (nLen === 0 || Math.abs(nz) / nLen < 0.05) {
+      planeA[t] = NaN; // degenerate (vertical, or near enough) facet — `planeOf`'s own `null`
     } else {
       if (nz < 0) { nx = -nx; ny = -ny; nz = -nz; }
       const a = -nx / nz;
@@ -311,6 +318,19 @@ export function clippedTriangleToSquare(
   if (poly.length === 0) return null;
   poly = clipPoly(poly, (p) => p.y <= y1 + SQUARE_EPS, cutY(y1));
   if (poly.length === 0) return null;
+  // #1020 — A TOUCH IS NOT AN OVERLAP. A facet that only grazes the square's own edge or corner
+  // (never crosses into its interior) clips to a degenerate ring — a point or a zero-width sliver
+  // along the boundary — with `poly.length > 0` but no real area; the organizer's own facets
+  // 40284/40320 (a shelf) touch the cell [26.25, 26.50]×[89.50, 89.75] at exactly x = 26.500 this
+  // way. Treated as "no overlap" (the shoelace area is the exact test, not a vertex count), the
+  // SAME null a facet that misses the square entirely already returns.
+  let area2 = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i]!;
+    const q = poly[(i + 1) % poly.length]!;
+    area2 += p.x * q.y - q.x * p.y;
+  }
+  if (Math.abs(area2) <= SQUARE_EPS) return null;
   const flat = new Float64Array(poly.length * 2);
   for (let i = 0; i < poly.length; i++) {
     flat[2 * i] = poly[i]!.x;
