@@ -112,22 +112,33 @@ export function findRims(mesh: FrameMesh, patches: readonly Patch[], adj: Int32A
     if (patch.kind !== 'remainder' || !patch.planar) continue;
     const vertical = patch.zMax - patch.zMin;
     if (vertical <= 0 || vertical > MODELLED_CHAMFER_MAX_LEG_MM) continue;
+    // #994 — THE CONTACT MUST BE ON THE RIGHT BOUNDARY. A modelled chamfer is ONE planar patch
+    // that alone spans wall to floor: its lower boundary lies on the wall, its upper boundary on
+    // the floor. A fillet is a band of narrow facets that touch the wall only at an end cap and
+    // chain into each other across their long edges — the old "touches a wall anywhere" test
+    // cannot tell them apart and cut a V along every fillet facet. So: wall contact must be on
+    // the LOWER boundary (both vertices at zMin), floor contact on the UPPER (both at zMax), and
+    // a remainder neighbour across either boundary disqualifies the patch (it is one facet of a
+    // band, not a whole bevel).
     const top: [number, number, number, number, number, number][] = [];
-    let touchesWall = false;
+    let wallBelow = false;
+    let remainderAcross = false;
     for (const t of patch.triangles) {
       for (let e = 0; e < 3; e++) {
+        const a = vtx(t, e);
+        const b = vtx(t, (e + 1) % 3);
+        const lower = Math.abs(a[2] - patch.zMin) <= levelMergeMm && Math.abs(b[2] - patch.zMin) <= levelMergeMm;
+        const upper = Math.abs(a[2] - patch.zMax) <= levelMergeMm && Math.abs(b[2] - patch.zMax) <= levelMergeMm;
+        if (!lower && !upper) continue;
         const u = adj[3 * t + e]!;
-        if (u < 0) continue;
-        const k = kindOf(u);
-        if (k === 'wall') touchesWall = true;
-        if (k === 'floor') {
-          const a = vtx(t, e);
-          const b = vtx(t, (e + 1) % 3);
-          top.push([a[0], a[1], a[2], b[0], b[1], b[2]]);
-        }
+        const k = u < 0 ? null : kindOf(u);
+        if (k === 'remainder') { remainderAcross = true; break; }
+        if (lower && k === 'wall') wallBelow = true;
+        if (upper && k === 'floor') top.push([a[0], a[1], a[2], b[0], b[1], b[2]]);
       }
+      if (remainderAcross) break;
     }
-    if (!touchesWall || top.length === 0) continue;
+    if (remainderAcross || !wallBelow || top.length === 0) continue;
     const nz = Math.abs(patch.normal[2]);
     const horizontal = nz >= 1 ? 0 : vertical * (nz / Math.sqrt(1 - nz * nz));
     for (const line of chain(top)) {
