@@ -84,8 +84,8 @@ the files go to **Makera Studio** by hand. In both builds a person is at the mac
  pencil crease angle (a picture adds its relief depth, direction and placed width). The measured 3D
  engagement feeds are still bench work. A heightfield has one top-Z per (x, y), so undercuts and
  overhangs are unrepresentable — the honest 3-axis answer.
- **2026-11-05:** a PNG relief refuses by name (#980) until it is restored on `cam/model` — the
- mesh goal path above is unaffected.
+ **2026-11-05:** a PNG relief currently refuses by name until its own picture-to-mesh path is
+ restored — the mesh goal path above is unaffected.
 - V-carving a region whose groove at the colour plane is narrower than one machine step. The app
  states it as a warning (`vcarve-groove-too-narrow`, §8.1) and cuts the grooves; it does open
  regions otherwise.
@@ -564,8 +564,8 @@ so lettering can be given the V-bit while another cutter pockets the blank aroun
 a **PNG** as well as a mesh: the file is embedded in the job by its bytes (never the sampled
 heights), its tones become the goal's top-Z field, and the SAME goal pipeline roughs and finishes
 it — the parallel finish, the scallop and pencil passes, the dexel check and the release are
-the mesh goal's own. **2026-11-05:** Generate refuses a PNG relief by name (#980) until it is
-restored on `cam/model`; a mesh goal is unaffected. The row's Technical fold carries the map's two numbers — the **relief depth**
+the mesh goal's own. **2026-11-05:** Generate currently refuses a PNG relief by name until its own
+picture-to-mesh path is restored; a mesh goal is unaffected. The row's Technical fold carries the map's two numbers — the **relief depth**
 (default 1.5 mm, stated as the CAM's default until typed) and which end of the tones sits at the
 **top face** (white as drawn, or black) — and the picture's placed **width** (the height follows
 its aspect). The map is one function: `depth = relief × (1 − luminance/255)`, white at the top
@@ -1718,6 +1718,7 @@ simulation does report about one is the sweep's own list, next:
 | `goal-mold-no-draft` | warning | A mould's steepest cavity wall is past 85° from horizontal (a labelled default), so it has little or no draft and may hold the casting. | Give the part tapered sides, or cast in a flexible material. |
 | `goal-finish-finer-than-grid` | warning | A 3D goal's finishing step-over is finer than the heightfield grid the run settled on: the sampler follows the step-over, but its 4 000 000-cell cap can coarsen the pitch, and passes finer than the pitch buy at most the grid's own accuracy. The finding states both numbers. | Set a step-over at or above the settled pitch, or surface a smaller blank. |
 | `goal-object-no-toolpath` | info | A target object is marked as the shape to MAKE and fits the blank, but this job is the **mixed** path — a goal beside ordinary items — so only the item program cuts. The goal is validated and previewed; the roughing and ball-nose finishing passes are generated only for a **pure-goal** job, whose only work is the goal mesh. | Cut the goal in a job of its own (no items): the goal's row then carries the surfacing operation and its own controls. |
+| `surface-primitive-removed` | error | A cone or sphere surface primitive has no CAM path right now — nothing uses primitives today, so restoring one is its own, separate piece of work. The 3D preview still draws the cavity; Generate refuses before building any toolpath. | Remove the primitive (or disable it) and generate. |
 | `goal-chamfer-no-cutter` | warning | A goal asks for its edges to be chamfered (`chamfer` on the target object) and no V program was posted: no V-bit has been chosen for it, the chosen key is not in the tool library, the record has no cone, or the V cannot be fed for this material. The goal is still surfaced; its edges are left square, and the sentence names which of those it is. | Choose a V-bit for the chamfer on the part’s row — the measured search fills this in when the library holds one. |
 | `goal-chamfer-no-rim` | warning | A goal asks for a 3D chamfer and the mesh has no TOP RIM to bevel — no edge where an up-facing top meets a wall (an open sheet, or a mesh whose edges are all between walls). The goal is surfaced; the edges are square, and the sentence carries the extractor’s own note. | Use a closed part mesh: the rim is the boundary of the surface the part stands on. |
 | `goal-rest-pass` | info | A 3D goal’s finish left material where the finishing ball could not enter a concavity tighter than itself, and a smaller OWNED ball cuts it as its own program after the finish. The pass is the same finishing raster over just the residual region, cut with that ball; the sentence names the ball, the volume the finish left, the moves and time, and the material the rest still leaves. | Nothing — the rest program follows the finish and loads its own cutter. |
