@@ -5114,9 +5114,27 @@ export async function buildModelPlanInputForGoal(
   // is almost always ALSO in `shop.tools` under its own entry, and a repeated ball confused #869's
   // own "is the pin the caller's tool or just the first ball" question (B's review) as much as it
   // would confuse `planModelCam`'s own candidate search.
+  // #1041 — THE OWNED HOUSE IS THE SHOP'S OWN RECORDS, NOT THE REGISTRY SNAPSHOT. `getTools()`
+  // carries three tiers — the built-in library, the house service's definitions (`cat:`, `user:`)
+  // and the physical inventory (`inv:`) — and taking every entry planned the "owned" set from
+  // cutters nobody owns: the M1 tray chose `flat-1.0` and `flat-3.175x12-metal` beside the owned
+  // `inv:` twins (the sequence rank is rowed-before-fallback, and `flat-1.0` states no flute, so
+  // the depth refusal can never turn it away either). Owned = `inv:` + `user:` + the caller's
+  // chosen tool; `cat:` rows are the catalogue's — the ideal's candidate set, carried separately —
+  // and the built-in tier joins only when the shop has neither inventory nor user records: the
+  // fresh-install fallback, stated on the plan (`ModelPlanInput.houseNote`).
+  const shopEntries = shop.tools ?? [];
+  const isOwnedKey = (key: string): boolean => key.startsWith('inv:') || key.startsWith('user:');
+  const ownedEntries = shopEntries.filter((e) => isOwnedKey(e.key));
+  const fallbackEntries =
+    ownedEntries.length === 0 ? shopEntries.filter((e) => !e.key.startsWith('cat:') && !isOwnedKey(e.key)) : [];
+  const houseNote =
+    ownedEntries.length === 0 && fallbackEntries.length > 0
+      ? 'no inventory recorded; the built-in registry stands in'
+      : undefined;
   const houseSeen = new Set<string>();
   const house: Tool[] = [];
-  for (const candidate of [...(shop.tools ?? []).map((e) => e.tool), tool]) {
+  for (const candidate of [...ownedEntries.map((e) => e.tool), ...fallbackEntries.map((e) => e.tool), tool]) {
     const key = cutterKeyOf(candidate);
     if (houseSeen.has(key)) continue;
     houseSeen.add(key);
@@ -5173,6 +5191,7 @@ export async function buildModelPlanInputForGoal(
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness, material: job.stock.material },
     fixture: { mount, envelope },
     cutters,
+    ...(houseNote === undefined ? {} : { houseNote }),
     tolerances,
     edgeBreak,
     // #1003 — the board's breakthrough, for the FREEING CONTOUR's floor only (a contour cuts through

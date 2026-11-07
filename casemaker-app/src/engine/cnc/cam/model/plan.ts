@@ -220,6 +220,12 @@ export interface SetupSpec {
 export interface ModelPlanInput {
   geometry: FeatureSource;
   /**
+   * #1041 — THE SEAM'S OWN STATEMENT ABOUT THE HOUSE, when the shop had no inventory or user
+   * records and the built-in registry stood in. Stated on the plan's notes, so an operator reading
+   * a plan cut by a cutter the shop does not own knows why (`engraveGenerate.ts` builds it).
+   */
+  houseNote?: string;
+  /**
    * #1003 (the manager's narrowing) — the sacrificial board's BREAKTHROUGH, mm. Used ONLY for the
    * freeing contour's floor (a contour cuts through the blank into the board by design); pockets
    * and curved regions never use it.
@@ -1534,7 +1540,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       if (p > 0) totalCostSeconds += toolChangeSeconds;
     }
 
-    const notes = [...earlyNotes, ...result.notes, ...emptyStages, ...freeingNotes];
+    const notes = [
+      ...(input.houseNote === undefined ? [] : [input.houseNote]),
+      ...earlyNotes,
+      ...result.notes,
+      ...emptyStages,
+      ...freeingNotes,
+    ];
     // #988 — the setup's band, stated once: the depth cut and what the tree's deepest demand
     // leaves below it. (The seam carries the old path's `goal-cut-top-band` warning already; this
     // is the PLAN's own line, so the model plan says the same thing in its own words.)
