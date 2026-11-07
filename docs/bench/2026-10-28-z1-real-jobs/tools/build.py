@@ -424,6 +424,11 @@ def run_card(c, args, sha, cat):
         json.dump({'exit': r['exit'], 'wall': r['wall'], 'timeout': r['timeout']},
                   open(os.path.join(rundir, 'run.json'), 'w'))
     run = read_json(os.path.join(rundir, 'run.json'), {})
+    # The card's own WALL-CLOCK compute time — the CLI command's wall as it actually spent it, from
+    # the cached `run.json` (a timed-out card records the whole window it was given). Printed on the
+    # card beside the CAM's estimate so a run's cost is visible, not inferred.
+    if run.get('wall') is not None:
+        card['computeSeconds'] = round(float(run['wall']), 1)
     if run.get('timeout'):
         card['verdict'], card['sentence'] = 'error', f"the command ran {args.timeout} s with no result and was stopped"
         return card
@@ -813,6 +818,9 @@ def page(cards, args, sha, loc, cat):
                           ('Verifier errors', str(n['verifierErrors']))]
         if c.get('referenceRemovedMm3') is not None:
             facts.append(('Reference program removed', f"{c['referenceRemovedMm3']} mm³"))
+        if c.get('computeSeconds') is not None:
+            w = float(c['computeSeconds'])
+            facts.append(('Compute time (wall)', f"{w:.0f} s" + (f" ({w / 60:.1f} min)" if w >= 120 else '')))
         if c.get('time'):
             facts.append(('Estimated time', c['time']))
         if c.get('warnings'):
@@ -876,12 +884,30 @@ def main():
         print(f'[{i}/{len(todo)}] {c["id"]} {c["job"]}', flush=True)
         try:
             card = run_card(c, args, sha, cat)
+            # Cache the finished card beside its run: a later pass over a subset (a card rebuilt on
+            # another machine, one card re-run after a harness fix) regenerates the whole page
+            # without re-running or re-rendering the cards that already have one.
+            cache = os.path.join(args.out, 'runs', sha, c['id'])
+            os.makedirs(cache, exist_ok=True)
+            json.dump(card, open(os.path.join(cache, 'card.json'), 'w'))
         except Exception as e:                        # keep going: one broken card must not lose the page
             card = dict(c, verdict='error', sentence=f'{type(e).__name__}: {e}', figures=[], numbers={})
         print(f'    {card.get("verdict")}: {card.get("sentence")}', flush=True)
         out_cards.append(card)
+    # THE PAGE IS EVERY CARD THAT HAS A RESULT, in the table's own order: this pass's cards, plus
+    # any cached card from an earlier pass over this out dir. A subset run (`--only`, a rebuild of
+    # the slow cards) refreshes its own cards and leaves the rest on the page as they were.
+    built = {c['id']: c for c in out_cards}
+    page_cards = []
+    for c in CARDS:
+        if c['id'] in built:
+            page_cards.append(built[c['id']])
+            continue
+        cached = read_json(os.path.join(args.out, 'runs', sha, c['id'], 'card.json'))
+        if cached:
+            page_cards.append(cached)
     page_path = os.path.join(args.out, 'page.html')
-    open(page_path, 'w').write(page(out_cards, args, sha, loc, cat))
+    open(page_path, 'w').write(page(page_cards, args, sha, loc, cat))
     manifest = {'sha': sha, 'candidate': bool(getattr(args, 'candidate', False)), 'builtAt': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
                 'location': {'path': args.location, 'id': loc.get('id'), 'name': loc.get('name'),
                              'cutters': len(loc.get('inventory') or [])},
@@ -892,7 +918,7 @@ def main():
                 'catalogue': {'path': args.catalogue, 'syncedAt': cat.get('syncedAt'),
                               'cutters': len(cat.get('tools') or []), 'rows': len(cat.get('feeds') or [])},
                 'appendix': [{'card': a, 'why': b} for a, b in APPENDIX],
-                'cards': [{k: v for k, v in c.items() if k not in ('design', 'figures')} for c in out_cards]}
+                'cards': [{k: v for k, v in c.items() if k not in ('design', 'figures')} for c in page_cards]}
     json.dump(manifest, open(os.path.join(args.out, 'manifest.json'), 'w'), indent=1)
     print(f'page: {page_path} (app sha {sha}, worktree HEAD {head})')
     print(f'manifest: {os.path.join(args.out, "manifest.json")}')
