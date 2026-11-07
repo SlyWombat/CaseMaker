@@ -52,6 +52,11 @@ export interface TwoPlanOutput {
  * available bit do", not "what would the operator's pin do".
  */
 export async function planTwoOutcomes(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<TwoPlanOutput> {
+  // #1028 — THE LADDER IS THE OWNED PLAN'S, AND ONLY WHEN NOTHING ELSE ANSWERS. A catalogue ball
+  // the caller carries is the enriched reference's own answer (`enrichOwnedRestStatement`), so the
+  // ladder would be a second, virtual answer beside it; the owned plan measures the rungs only
+  // when the catalogue carries no ball at all.
+  const catalogueHasBall = input.cutters.catalogue.some((tool) => tool.shape === 'ball');
   const owned = await planModelCam(
     {
       ...input,
@@ -60,7 +65,7 @@ export async function planTwoOutcomes(input: ModelPlanInput, opts: PlanModelCamO
       // rest statement still has to tell "none configured" from "configured, none measured".
       catalogueConfigured: input.catalogueConfigured ?? input.cutters.catalogue.length > 0,
     },
-    opts,
+    { ...opts, restLadder: opts.restLadder === true && !catalogueHasBall },
   );
   const seen = new Set(input.cutters.house.map(toolKey));
   const extra = input.cutters.catalogue.filter((tool) => !seen.has(toolKey(tool)));
@@ -72,7 +77,7 @@ export async function planTwoOutcomes(input: ModelPlanInput, opts: PlanModelCamO
   // posts, and it is the owned plan's single statement that names the ideal's measured ball.
   const ideal = await planModelCam(
     { ...input, cutters: { house: [...input.cutters.house, ...extra], catalogue: [] } },
-    { ...opts, restStatement: false },
+    { ...opts, restStatement: false, restLadder: false },
   );
   return { owned: enrichOwnedRestStatement(owned, ideal, input), ideal, defaultPlan: 'owned' };
 }
