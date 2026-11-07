@@ -241,7 +241,7 @@ import { planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
 import { comparePlanOutcomes, type PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
 import { cutterKeyOf, type CutterCandidates } from '@/engine/cnc/cam/model/sequence';
-import type { EdgeBreakSpec, ModelTolerances, PlanStatement } from '@/engine/cnc/cam/model/types';
+import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances, PlanStatement } from '@/engine/cnc/cam/model/types';
 // #966 — the real reach-aware top+bottom decision (#965), replacing this file's own hardcoded
 // single `top` `SetupSpec` below (`buildModelPlanInputForGoal`'s own doc on why).
 import { buildSetupSpecs, frameForFace } from '@/engine/cnc/cam/model/setups';
@@ -5582,9 +5582,19 @@ export async function generateGoalProgram(
     /** #961 — the ideal's candidate set from the caller; absent means no ideal (see
      * `buildModelPlanInputForGoal`'s own param of the same name). */
     catalogueTools?: readonly Tool[];
+    /**
+     * #1038 — THE PLAN'S OWN STAGES. `planModelCam` reports four steps per setup (features,
+     * sequence, linking, linking); without this channel they reach nobody, and a plate that takes
+     * minutes to plan looks dead until the app's silence watchdog kills the worker. Forwarded
+     * into `planTwoOutcomes`, so every report re-arms that watchdog.
+     */
+    onProgress?: EngraveProgressFn;
+    /** #1038 — an optional stop for the planner itself; the app's stop remains the worker
+     * terminate (`cancelGenerate`). */
+    signal?: AbortSignal;
   },
 ): Promise<EngraveGenerated> {
-  const { shop, sideFace, catalogueTools } = opts;
+  const { shop, sideFace, catalogueTools, onProgress, signal } = opts;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -5753,7 +5763,19 @@ export async function generateGoalProgram(
   let planIdeal: ModelPlanOutput | null = null;
   let planTradeoff: PlanTradeoff | null = null;
   try {
-    const two = await planTwoOutcomes(input);
+    // #1038 — the planner's stage reports reach the run (see this function's `opts.onProgress`).
+    const two = await planTwoOutcomes(input, {
+      ...(onProgress === undefined
+        ? {}
+        : {
+            onProgress: (p: ModelPlanProgress) =>
+              onProgress({
+                stage: 'plan',
+                label: `planning: ${p.op} — setup ${p.setupIndex + 1}, ${Math.round(p.fraction * 100)} %`,
+              }),
+          }),
+      ...(signal === undefined ? {} : { signal }),
+    });
     // The operator's recorded choice is what cuts (`planChoiceOf` reads it, owned by default); the
     // ideal posts only when it exists.
     const chosenIdeal = planChoiceOf(job) === 'ideal' && two.ideal !== null;
@@ -5791,6 +5813,8 @@ async function generateGoalPrograms(
   shop: EngraveShopOpts,
   // #961 — every side's plan carries the same ideal candidate set from the caller.
   catalogueTools?: readonly Tool[],
+  /** #1038 — the same stage channel `generateGoalProgram` takes, passed to each side's plan. */
+  onProgress?: EngraveProgressFn,
 ): Promise<EngraveGenerated> {
   // A goal program's check is its `surfaceCheck` (there is no verifier report), and the single-goal
   // path already builds each program with it — so each side's programs are those programs with the
@@ -5840,12 +5864,12 @@ async function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools });
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }) });
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
   for (const side of sides.slice(1)) {
-    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools });
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }) });
     const sideList = sidePrograms(one, side);
     if (sideList === null) return { ...one, programs };
     programs.push(...sideList);
@@ -5922,7 +5946,7 @@ function pathBbox(ir: ToolpathIR): { min: [number, number]; max: [number, number
  * work the run really does; a stage that fails or is refused simply gets no later event.
  */
 export interface EngraveProgress {
-  stage: 'prepare' | 'items' | 'sample' | 'rough' | 'finish' | 'post' | 'verify' | 'done';
+  stage: 'prepare' | 'items' | 'plan' | 'sample' | 'rough' | 'finish' | 'post' | 'verify' | 'done';
   label: string;
   done?: number;
   total?: number;
@@ -6602,7 +6626,7 @@ export async function engraveGenerate(
           ],
         };
       }
-      return { ...(await generateGoalPrograms(job, sides, tool, calibration, shop, catalogueTools)), surface: null };
+      return { ...(await generateGoalPrograms(job, sides, tool, calibration, shop, catalogueTools, onProgress)), surface: null };
     }
   }
   const goal = job.setups === undefined ? pureGoalObject(job) : null;
@@ -6615,7 +6639,14 @@ export async function engraveGenerate(
     }
     // #623 — the surface-3D goal path posts flat (it never lifts feeds), so its package claims no
     // surface: the caller judges it in the work frame, which is the frame it was posted in.
-    return { ...(await generateGoalProgram(job, goal, tool, calibration, { shop, catalogueTools })), surface: null };
+    return {
+      ...(await generateGoalProgram(job, goal, tool, calibration, {
+        shop,
+        catalogueTools,
+        ...(onProgress === undefined ? {} : { onProgress }),
+      })),
+      surface: null,
+    };
   }
 
   // #419 J3 — A JOB IS A LIST OF PROGRAMS.
