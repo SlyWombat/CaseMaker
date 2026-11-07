@@ -39,7 +39,7 @@ import { presetJawStrips } from '@/engine/cnc/sacrificial';
 import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { clearFeedCatalogue, setFeedCatalogue, type FeedCatalogueRow } from '@/engine/cnc/feeds';
-import { setInventoryEntries, resetRegistry } from '@/engine/cnc/toolRegistry';
+import { setInventoryEntries, setRegistry, resetRegistry } from '@/engine/cnc/toolRegistry';
 import { setJobFileIO, useEngraveJobFileStore } from '@/store/engraveJobFileStore';
 import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
@@ -127,9 +127,10 @@ describe('EngravePanel (#205)', () => {
 
   // #1051 — THE LINE THE OPERATOR CUTS FROM SPEAKS FOR THE PLAN. Before a result it is advice
   // (the rule's or the search's); once programs have posted, it lists THEIR cutters — in cut
-  // order, each once, with the registry key beside the display name — so the screen can never
-  // show a cutter the plan did not use.
-  it('#1051 — once a plan has posted, the cutter line lists its programs’ cutters, keys and all', () => {
+  // order, each once — so the screen can never show a cutter the plan did not use.
+  // #930/#690b — AND IT CARRIES NO CODE TOKEN: a cutter is named by its DISPLAY form, never by
+  // its registry key (`flat-1.0` is a key, not a word); the key stays on the run sheet.
+  it('#1051 — once a plan has posted, the cutter line names its programs’ cutters in cut order', () => {
     const before = useEngraveRunStore.getState().generated;
     const program = (toolKey: string): EngraveProgram =>
       ({ setupIndex: 1, setupId: 'setup-1', toolKey, nc: '', verify: null }) as EngraveProgram;
@@ -169,13 +170,77 @@ describe('EngravePanel (#205)', () => {
       });
       render(<EngravePanel />);
       const line = screen.getByTestId('engrave-cutter-line').textContent ?? '';
-      expect(line).toContain('⌀ 3.175 mm flat end · 25 mm flute');
-      expect(line).toContain('(inv:kz-o-flute-3-175-25)');
-      expect(line).toContain('(inv:kz-ball-nose-3-175-22)');
-      // Cut order, each cutter once (the flute's second program is not a second cutter).
-      expect(line.indexOf('inv:kz-o-flute-3-175-25')).toBeLessThan(line.indexOf('inv:kz-ball-nose-3-175-22'));
-      expect((line.match(/inv:kz-o-flute-3-175-25/g) ?? []).length).toBe(1);
+      // Cut order, each cutter once (the flute's second program is not a second cutter) — and the
+      // display form only: no key, and no tier word because no two cutters share a name.
+      expect(line).toContain('⌀ 3.175 mm flat end · 25 mm flute · ⌀ 3.175 mm ball · 22 mm flute');
+      expect(line).not.toContain('inv:');
+      expect(line).not.toContain('(inventory)');
       expect(line).not.toContain('choosing…');
+    } finally {
+      act(() => {
+        useEngraveRunStore.setState({ generated: before });
+        resetRegistry();
+      });
+    }
+  });
+
+  // #1051/#930 — TWO POSTED CUTTERS CAN SHARE A DISPLAY NAME (a catalogue row and the shop's own
+  // copy of the same bit). A clash says which TIER each came from — a word, never the key — and a
+  // cutter with no clash carries no tier word at all.
+  it('#1051 — a shared display name says its tier, never the registry key', () => {
+    const before = useEngraveRunStore.getState().generated;
+    const program = (toolKey: string): EngraveProgram =>
+      ({ setupIndex: 1, setupId: 'setup-1', toolKey, nc: '', verify: null }) as EngraveProgram;
+    const CAT = 'cat:019c049a-1111-7000-8000-000000000001';
+    const USER = 'user:shop-flat-3-175-25';
+    const INV = 'inv:kz-o-flute-3-175-25';
+    const INV_ONE = 'inv:kz-flat-1-0';
+    const three = '⌀ 3.175 mm flat end · 25 mm flute';
+    try {
+      act(() => {
+        setRegistry([
+          { key: CAT, provenance: 'test', tool: flatEndMill(3.175, { name: 'O-flute', fluteLength: 25 }) },
+          { key: USER, provenance: 'test', tool: flatEndMill(3.175, { name: 'O-flute', fluteLength: 25 }) },
+        ]);
+        setInventoryEntries([
+          { key: INV, provenance: 'test', tool: flatEndMill(3.175, { name: 'O-flute', fluteLength: 25 }) },
+          { key: INV_ONE, provenance: 'test', tool: flatEndMill(1, { name: '1 mm flat end' }) },
+        ]);
+        useEngraveRunStore.setState({
+          generated: {
+            ok: true,
+            stage: 'done',
+            findings: [],
+            feeds: null,
+            threads: null,
+            cam: null,
+            nc: 'G90\nM02',
+            verify: null,
+            frameNc: null,
+            frameVerify: null,
+            facingNc: null,
+            facingVerify: null,
+            facingToolKey: null,
+            facingError: null,
+            facingCam: null,
+            predicted: [],
+            designItems: [],
+            // The same ⌀3.175 flat as a possession, a catalogue row and the shop's own definition;
+            // then the built-in ⌀1 flat beside an inventory ⌀1 flat.
+            programs: [program(INV), program(CAT), program(USER), program('flat-1.0'), program(INV_ONE)],
+            errors: [],
+          } as unknown as EngraveGenerated,
+        });
+      });
+      render(<EngravePanel />);
+      const line = screen.getByTestId('engrave-cutter-line').textContent ?? '';
+      expect(line).toContain(`${three} (inventory) · ${three} (catalogue) · ${three} (your library)`);
+      // The built-in's key is a code token too: its clash says "built-in", never `flat-1.0`.
+      expect(line).toContain('⌀ 1 mm flat end (built-in) · ⌀ 1 mm flat end (inventory)');
+      expect(line).not.toContain('flat-1.0');
+      expect(line).not.toContain('cat:');
+      expect(line).not.toContain('user:');
+      expect(line).not.toContain('inv:');
     } finally {
       act(() => {
         useEngraveRunStore.setState({ generated: before });
