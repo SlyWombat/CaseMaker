@@ -51,6 +51,7 @@ import {
   type RapidEstimate,
   type ToolpathIR,
 } from '../ir';
+import { PlanMetadataInconsistentError } from './planMeta';
 
 /** The op kinds the engine's plan carries (`PlannedOp['kind']` on #956's interface). */
 export type PlannedOpKind = 'pocket' | 'contour' | 'rough' | 'rest' | 'finish' | 'pencil' | 'chamfer' | 'skin';
@@ -792,6 +793,9 @@ export function priceSequence(
     try {
       ir = opts.planStep(step, planned);
     } catch (e) {
+      // #1025 — a metadata contradiction is never a step failure to price around: it refuses the
+      // whole plan, here as at every other catch on the planning path (see `planMeta.ts`).
+      if (e instanceof PlanMetadataInconsistentError) throw e;
       ir = null;
       thrown = e instanceof Error ? e.message : String(e);
     }

@@ -42,7 +42,7 @@ import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
 import { fullyReachable, pocket } from './ops/pocket';
-import { assertOwnPocketMetadata } from './planMeta';
+import { assertOwnPocketMetadata, PlanMetadataInconsistentError } from './planMeta';
 import { roughLeftAbove } from './ops/rough';
 import { clSurface, creaseFits } from './clsurface';
 import { dropCutterHeight, profileOf, type CutterProfile, type DropCutterMesh } from './dropcutter';
@@ -2244,6 +2244,15 @@ export interface PlanPocketsOptions {
    * stated stock top, stated on the plan.
    */
   stockProbes?: StockProbes;
+  /**
+   * #1025 — TESTS ONLY: wraps the chain's own region planner, so a spec can hand the chain a
+   * CORRUPT record — an op whose own passes and estimate disagree with its moves — and prove the
+   * plan REFUSES AS A WHOLE rather than dropping the region and posting the rest. Called with the
+   * real outcome for every region in every candidate priced (the returned outcome is what the
+   * chain sees), so the corrupt record takes exactly the path a real one takes. Production never
+   * sets it.
+   */
+  planRegionForTest?: (outcome: OpOutcome | null, id: string) => OpOutcome | null;
 }
 
 /**
@@ -2521,7 +2530,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         let ir: ToolpathIR | null;
         try {
           ir = planStep(prefix[i]!, prefix.slice(0, i));
-        } catch {
+        } catch (err) {
+          // #1025 — a metadata contradiction is never "this prefix step cut nothing": the rest
+          // would then be planned from a shorter prefix. It refuses the whole plan (see planMeta).
+          if (err instanceof PlanMetadataInconsistentError) throw err;
           ir = null;
         }
         if (ir !== null) prefixIrs.push(ir);
@@ -2787,8 +2799,16 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         let outcome: OpOutcome | null;
         try {
           outcome = planRegion(id, step, prefix);
+          // #1025 — the spec seam, AFTER the real planner and BEFORE the invariant: the corrupt
+          // record then takes exactly the path a real 89a83dbdf firing takes through this chain.
+          if (opts.planRegionForTest !== undefined) outcome = opts.planRegionForTest(outcome, id);
           if (outcome !== null) assertOwnPocketMetadata('pocket chain', id, outcome.ir.operations, opts.rapid);
         } catch (err) {
+          // #1025 — A METADATA CONTRADICTION IS NOT A REGION THAT CANNOT BE PLANNED (the review's
+          // ruling): it is rethrown so the whole plan refuses. Recorded here, it would drop the
+          // region and post the rest — a part missing a pocket because a label was wrong, when
+          // the moves themselves were byte-identical to a clean run.
+          if (err instanceof PlanMetadataInconsistentError) throw err;
           const reason = err instanceof Error ? err.message : String(err);
           if (!regionFailures.has(id)) regionFailures.set(id, { kind: step.kind, cutterKey: step.cutter.key, regionIds: [id], reason });
           const signature = stepSignature(step);
@@ -2837,7 +2857,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
               let ir: ToolpathIR | null;
               try {
                 ir = planStep(step, already);
-              } catch {
+              } catch (err) {
+                // #1025 — the coverage measure must not outlive a metadata contradiction: the
+                // candidate is refused (rethrown), never priced on a silently shortened chain.
+                if (err instanceof PlanMetadataInconsistentError) throw err;
                 ir = null;
               }
               if (ir !== null) irs.push(ir);
