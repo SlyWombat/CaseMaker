@@ -2037,6 +2037,7 @@ semantics are LinuxCNC-flavoured.
 | Tools | `M6 T<n>` (with the `T` on the same command), `M491` (re-measure tool length) |
 | Manual tool change | `M490.1` / `M490.2` (the operator handshake) |
 | Vacuum | `M331` / `M332` (bare; what this app's programs use) |
+| Spindle air blow (Auto Blow) | `M331.1` on / `M332.1` off — the run switches it with the vacuum when **Air blow with the vacuum** is on (the default) |
 | Air (no-op) | `M7` / `M9` — answered `ok`, blow nothing on a Z1 |
 | Laser (refused) | `M321`–`M325` |
 | Pause | `M600` |

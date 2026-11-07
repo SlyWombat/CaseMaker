@@ -374,7 +374,7 @@ describe('#773 the Carvera Air is framed, and the Carvera is a row with no frame
     expect(CARVERA_AIR.rotary).toMatchObject({ envelope: { diameter: 92, length: 200 }, maxRate: 2400, acceleration: 360 });
     // The accessory words this app emits are the Z1's; a Carvera's vacuum is M801/M802, so the
     // flags are false rather than speaking a dialect this app does not model.
-    expect(CARVERA_AIR.capabilities).toEqual({ rotary: true, laser: false, air: false, vacuum: false, antistatic: false });
+    expect(CARVERA_AIR.capabilities).toEqual({ rotary: true, laser: false, air: false, vacuum: false, antistatic: false, blow: false });
     for (const value of Object.values(CARVERA_AIR.sources)) expect(value.length).toBeGreaterThan(20);
     expect(CARVERA_AIR.sources.maxCutFeed).toContain('t_MachineType');
     expect(CARVERA_AIR.sources.sensorOffsetFromAnchor1).toContain('CARVERA_AIR');

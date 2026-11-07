@@ -375,9 +375,10 @@ export interface MillProfile extends MachineIdentity {
      * 2026-10-07 is a reading of our own traffic now.
      *
      * The rest of the machine's accessory surface is the same family's sub-codes — `M331.2` bed
-     * cleaning, `M331.1` blowing — plus `M951` time-lapse, none of which this app emits or reads
-     * (#283, #289; `/Z1-Firmware-Dialect.md` §11.3). The Carvera's internal vacuum, `M801`/`M802`,
-     * is a different machine's and is not this.
+     * cleaning and `M331.1` blowing (the spindle's Auto Blow, switched by the RUN since #1060 when
+     * `run.blowWithVacuum` is on — `blow` below) — plus `M951` time-lapse, none of which this app
+     * writes into a file or reads back (#283, #289; `/Z1-Firmware-Dialect.md` §11.3). The Carvera's
+     * internal vacuum, `M801`/`M802`, is a different machine's and is not this.
      */
     vacuum: boolean;
     /**
@@ -389,6 +390,15 @@ export interface MillProfile extends MachineIdentity {
      * `machineVacuum.ts` beside `VACUUM_ON`/`VACUUM_OFF`).
      */
     antistatic: boolean;
+
+    /**
+     * #1060 — the `M331.1`/`M332.1` sub-codes: "turning auto blowing mode on/off", Makera's Auto
+     * Blow (the Z1 quick start's spindle air blowing; Studio's own MDI log sends `M331.1`). A
+     * separable mode in the vacuum's family, switched by the RUN when the shop's
+     * `run.blowWithVacuum` (or the job) asks for it — never written in a file, exactly like the
+     * antistatic above. The bench's first line (`M331.1` → `ok`, air at the spindle) is owed.
+     */
+    blow: boolean;
   };
   dialect: MachineDialect;
   /** Machine coordinates of the two anchor positions, the bed's native XY datum. */
@@ -771,7 +781,7 @@ export const Z1: MillProfile = {
   // `air: false` — `M7`/`M9` are answered `ok` and blow nothing on this machine; `vacuum: true` —
   // the post writes bare `M331`/`M332` and the machine obeys them (#283, bench 2026-10-12).
   // `antistatic: true` — the device is mounted and answers `M331.4`/`M332.4` (#564, bench 2026-10).
-  capabilities: { rotary: true, laser: false, air: false, vacuum: true, antistatic: true },
+  capabilities: { rotary: true, laser: false, air: false, vacuum: true, antistatic: true, blow: true },
   dialect: { acceptsArcs: true, cannedCycles: false, grblMode: true, axisPrecision: 3, feedPrecision: 2 },
   // The frame and its derivations, not the numbers themselves: `Z1_DATUMS` is
   // `deriveCoordinateFrame(Z1_FRAME)` and is the only thing that computes a position (#279).
@@ -931,7 +941,7 @@ export const CARVERA_AIR: MillProfile = {
     zMin: -121.0,
     source: 'CarveraController src/config.txt @ 3914c912 — shipped settings, not measured',
   },
-  capabilities: { rotary: true, laser: false, air: false, vacuum: false, antistatic: false },
+  capabilities: { rotary: true, laser: false, air: false, vacuum: false, antistatic: false, blow: false },
   dialect: { acceptsArcs: true, cannedCycles: false, grblMode: true, axisPrecision: 3, feedPrecision: 2 },
   anchor1: CA1_FRAME.anchor1,
   anchor2: CA1_DATUMS.anchor2,
@@ -1274,7 +1284,7 @@ export const CARVERA: MillProfile = {
     source:
       'Carvera Community Firmware src/modules/robot/Robot.cpp @ 2c97111 (the soft_endstop defaults) — shipped settings, not measured',
   },
-  capabilities: { rotary: true, laser: false, air: false, vacuum: false, antistatic: false },
+  capabilities: { rotary: true, laser: false, air: false, vacuum: false, antistatic: false, blow: false },
   dialect: { acceptsArcs: true, cannedCycles: false, grblMode: true, axisPrecision: 3, feedPrecision: 2 },
   anchor1: C1_FRAME.anchor1,
   anchor2: C1_DATUMS.anchor2,
@@ -1779,7 +1789,7 @@ export const millProfileSchema = z.object({
     })
     .optional(),
   softEndstop: softEndstopSchema,
-  capabilities: z.object({ rotary: z.boolean(), laser: z.boolean(), air: z.boolean(), vacuum: z.boolean(), antistatic: z.boolean() }),
+  capabilities: z.object({ rotary: z.boolean(), laser: z.boolean(), air: z.boolean(), vacuum: z.boolean(), antistatic: z.boolean(), blow: z.boolean() }),
   dialect: z.object({
     acceptsArcs: z.boolean(),
     cannedCycles: z.boolean(),

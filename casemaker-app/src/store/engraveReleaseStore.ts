@@ -70,6 +70,7 @@ import {
 } from '@/engine/cnc/engrave/release';
 import { machineKey, runContextFor, useMachineRunStore, type RunContext } from './machineRunStore';
 import { finishedProgramsFor } from './locationStore';
+import { readFlag } from '@/platform/defaultsClient';
 import { useShopDefaultsStore } from './shopDefaultsStore';
 import { firstRegistrationFor } from './engraveRegistrationStore';
 import { facingRegistrationBlocker } from './engraveRunGate';
@@ -282,6 +283,9 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       // the outcome against the frozen program rather than against its position in today's list.
       setupIndex: file.setupIndex,
       setupId: file.setupId,
+      // #1060 — the job's own choice wins, else the shop's flag (on by default). The capability is
+      // checked where the machine is known (the run store's start).
+      blow: rec.job.blowWithVacuum ?? readFlag(useShopDefaultsStore.getState().defaults, 'run.blowWithVacuum').value,
       // #547 — a lifted dry-run file records nothing at its end (no stock, no runtime, no finished hash).
       ...(file.dryRun ? { dryRun: true } : {}),
     };

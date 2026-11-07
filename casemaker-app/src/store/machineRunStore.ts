@@ -34,6 +34,7 @@ import type { StockItem } from '@/platform/stockClient';
 import type { InventoryItem } from '@/platform/houseClient';
 import type { EngraveJob, FilamentFibre } from '@/types/engraveJob';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
+import { MACHINES } from '@/engine/cnc/machine';
 import { isPlasticMaterial } from '@/engine/cnc/materials';
 import { readDefault, readFlag } from '@/platform/defaultsClient';
 import { newStockId, useStockStore } from './stockStore';
@@ -87,6 +88,8 @@ export interface RunContext {
    * be mistaken for "the runner should bracket it".
    */
   vacuumSpan?: VacuumSpan;
+  /** #1060 — the job's (or shop's) choice that the spindle blower follows the vacuum on this run. */
+  blow?: boolean;
   /**
    * #419 §4.5 / #469 — the program's FNV hash, when the caller already has it. The finished-program
    * record uses this rather than re-hashing the text, so the key that `finishedProgramsFor` reads is
@@ -502,6 +505,12 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
       flags.set(machine, f);
       patch(machine, { running: true, progress: null, lines: [], outcome: null, stopAsked: false, paused: false, toolWaiting: null, end: null });
       const session = attachConsole(target);
+      // #1060 — the job's/shop's choice, gated on this machine's own capability (where the target
+      // maps to a known machine; an unknown target keeps the choice, as the antistatic does).
+      const targetMachineId2 = io.machineIdFor(target);
+      const blow =
+        prepared.context?.blow === true &&
+        (targetMachineId2 === null || MACHINES[targetMachineId2]?.capabilities.blow === true);
       void (async () => {
         try {
           const outcome = await runProgram(prepared.filename, {
@@ -520,6 +529,9 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
             // job flow) has no material to gate on, so the antistatic stays off.
             antistatic:
               prepared.context?.material !== undefined && isPlasticMaterial(prepared.context.material),
+            // #1060 — the blower, on the same footing as the antistatic: the run switches it, the
+            // file never carries it. Gated on the machine's own capability where the id is known.
+            blow,
             stopRequested: () => f.stop,
             // #618 — the ask is TAKEN (cleared) at the boundary it is sent on, so one press is one
             // suspend/resume and a later boundary cannot send it again.
