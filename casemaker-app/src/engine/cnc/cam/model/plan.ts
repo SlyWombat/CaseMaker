@@ -1432,6 +1432,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       pockets: noFlatFallback ? null : {
         ...(depthBandMm === undefined ? {} : { depthBandMm }),
         houseFlats: flats,
+        houseAll: input.cutters.house,
         ...(input.sacrificialBreakthroughMm === undefined ? {} : { sacrificialBreakthroughMm: input.sacrificialBreakthroughMm }),
         // #975 — the V bits are the pocket chain's last resort: a pocket no flat covers gets the
         // narrowest V whose tip fits the stroke and whose leg reaches the floor, floor-correct.
@@ -2160,6 +2161,13 @@ export interface PlanPocketsOptions {
    * net for everything else.
    */
   sacrificialBreakthroughMm?: number;
+  /**
+   * #1037 — THE WHOLE HOUSE, unfiltered. `houseFlats` is the chain's own candidate list (flats with
+   * a stated cutting diameter); the `goal-not-freed` warning must be able to name a house flat that
+   * REACHES the profile but is not a chain candidate (no stated diameter), or its sentence would
+   * call a set with a reaching flute "short". Absent: `houseFlats` is used.
+   */
+  houseAll?: readonly Tool[];
   /** House cutters, largest first is NOT required — #961's `chooseSequence` ranks by cost, not list order. */
   houseFlats: readonly Tool[];
   /**
@@ -3062,19 +3070,25 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     const contourFeature = features.find((f) => f.kind === 'contour');
     if (contourFeature !== undefined && !choice.steps.some((step) => step.kind === 'contour')) {
       const floorMm = Number(contourFeature.depthMm.toFixed(3));
-      const stated = cutters.house.filter((t) => t.shape === 'flat' && t.fluteLength !== null);
+      const stated = (opts.houseAll ?? cutters.house).filter((t) => t.shape === 'flat' && t.fluteLength !== null);
       const longest = stated.reduce<Tool | null>(
         (best, t) => (best === null || (t.fluteLength ?? 0) > (best.fluteLength ?? 0) ? t : best),
         null,
       );
-      const reachWords =
-        longest === null
-          ? 'no flat in the set states a flute'
-          : `the longest stated flute in the set is ${longest.fluteLength} mm (⌀${Number((longest.diameter ?? longest.tipDiameter ?? 0).toFixed(3))} flat)`;
+      const diaWords = (t: Tool): string => `⌀${Number((t.diameter ?? t.tipDiameter ?? 0).toFixed(3))} flat`;
+      // THE CAUSE HAS TO BE TRUE (the Manager's review): a house flat whose stated flute DOES reach
+      // the floor but no step of the chosen chain covers the profile is a different fact from "the
+      // set's longest flute is short" — say which, or the numbers would contradict themselves
+      // ("floor 27.2 … longest stated flute 42 mm").
       const text =
-        `the part is not freed by this plan: the profile's floor is ${floorMm} mm and ${reachWords}, ` +
-        'so no freeing contour is cut and the part stays attached to the stock — ' +
-        `use a flat with a stated flute ≥ ${floorMm} mm, or free it by hand`;
+        longest !== null && (longest.fluteLength ?? 0) + 1e-9 >= contourFeature.depthMm
+          ? `the chosen chain does not free the part: the profile's floor is ${floorMm} mm and the ${diaWords(longest)} states a ${longest.fluteLength} mm flute that reaches it, but no step of the chosen chain covers the profile — choose a chain that frees it, or free it by hand`
+          : `the part is not freed by this plan: the profile's floor is ${floorMm} mm and ${
+              longest === null
+                ? 'no flat in the set states a flute'
+                : `the longest stated flute in the set is ${longest.fluteLength} mm (${diaWords(longest)})`
+            }, so no freeing contour is cut and the part stays attached to the stock — ` +
+            `use a flat with a stated flute ≥ ${floorMm} mm, or free it by hand`;
       statements.push({ severity: 'warning', code: 'goal-not-freed', count: 1, ids: [contourFeature.id], text });
       notes.push(text);
     }

@@ -5651,27 +5651,11 @@ export async function generateGoalProgram(
   // record does not state is the INFO `goal-reach-unrecorded` (never a refusal; the sweep's holder
   // gate is the guard), and `cutWithinReach`'s band (#988) is untouched because it is the
   // operator's choice about the CHOSEN cutter's reach, not a verdict on the goal.
-  const reachFindings = goalReachFindings(goal, tool, ownedTools, shop.tools ?? []).filter(
-    (f) => f.severity !== 'error',
-  );
-  const reachBlocking = reachFindings.filter((f) => f.severity === 'error');
+  const reachFindings = goalReachFindings(goal, tool, ownedTools, shop.tools ?? []);
   // #872 — WHAT THE TOP SETUP LEAVES UNREACHED. Measured geometrically here (faces pointing away,
   // the shadow band) and paired with the flip plan that finishes it; inform-only, so it rides
   // with the findings on every path that posts a program.
   const coverageFindings = goalFlipFindings(job, goal);
-  if (reachBlocking.length > 0) {
-    return {
-      ...base,
-      ok: false,
-      stage: 'findings',
-      findings: dedupeFindings([...reachFindings, ...coverageFindings, ...goalFindings, ...documentFindings()]),
-      feeds: null,
-      cam: null,
-      nc: null,
-      verify: null,
-      errors: reachBlocking.map((f) => ({ stage: 'findings' as EngraveStage, message: f.message })),
-    };
-  }
 
   if (tool === null) return fail('feeds', 'the job has no usable cutter');
 

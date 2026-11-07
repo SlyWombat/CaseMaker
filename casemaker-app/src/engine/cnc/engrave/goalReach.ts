@@ -134,17 +134,19 @@ function reachWords(reach: ToolReach): string {
 /**
  * The reach findings for ONE goal, in the order they matter:
  *
- *   - `goal-reach-short` (ERROR) — the cutter's known reach is shorter than the goal is deep and
- *     the operator has not chosen the top-band cut. The sentence carries the depth and the reach,
- *     the four fixes, and (when the chosen cutter is not the house's longest) what the longest is.
- *   - `goal-cut-top-band` (WARNING) — the same shortfall with `cutWithinReach` chosen: the goal is
- *     cut as the stock's top band, and the sentence states how much of the goal is left in it.
+ *   - `goal-cut-top-band` (WARNING) — a short reach with `cutWithinReach` chosen: the goal is cut
+ *     as the stock's top band, and the sentence states how much of the goal is left in it.
  *   - `goal-reach-unrecorded` (INFO) — no stated or catalogued reach: the assumption is stated and
  *     nothing blocks; the sweep's holder gate is the guard.
  *
- * `goal-reach-short` carries the `targetId` and the band depth (`goalBandMm`) so the panel can put
- * the one-click option beside the sentence; it is absent when the band would be zero (a reach at
- * or under the clearance has nothing safe to cut, and the other three fixes stand alone).
+ * #1037 — A MESH GOAL IS NEVER REFUSED HERE FOR ITS WHOLE DEPTH. The model engine assigns cutters
+ * PER FEATURE (`cam/model/sequence.ts depthRefusal`): the ball finishes the curved remainders, the
+ * flat frees the contour, and the goal's depth belongs to whichever feature demands it. The M1
+ * tray's ⌀3.175 × 22 ball is right at 4.2 mm and the goal stands 26 mm deep; judged by the goal's
+ * depth it was refused from the main thread (the panel disabled Generate) and here. A cutter that
+ * cannot reach an assigned feature, or free the part, is refused or stated by the engine itself
+ * (`goal-not-freed`). A PNG goal never reached this function (line above); its own refusal is the
+ * plan path's. A rotary relief is skipped by `jobReachFindings`' own rule.
  */
 export function goalReachFindings(
   goal: EngraveTargetObject,
@@ -211,19 +213,9 @@ export function goalReachFindings(
     ];
   }
 
-  return [
-    {
-      severity: 'error',
-      code: 'goal-reach-short',
-      targetId: goal.id,
-      ...(band > 0 ? { goalBandMm: band } : {}),
-      message:
-        `The goal is ${depthWords} and ${reachPhrase}, so the holder would enter the part before the tip reaches ` +
-        `the bottom. Scale the goal to ${mm3(mine.mm)} mm or less, cut it from both sides (a flip, one setup per side), ` +
-        `choose a longer cutter` +
-        (band > 0 ? `, or cut just the top ${mm3(band)} mm (the depth this cutter reaches safely).` : '.'),
-    },
-  ];
+  // #1037 — no whole-goal refusal for a mesh goal; the operator's top-band choice above still
+  // states itself, and the engine judges each cutter against the features it actually cuts.
+  return [];
 }
 
 /** Every reach finding over the job's goals, in goal order. */

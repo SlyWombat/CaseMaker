@@ -133,26 +133,30 @@ describe('#785 — which reach is known', () => {
   });
 });
 
+describe('#1037 — jobReachFindings on the M1 tray shape and a picture goal', () => {
+  it('a 26 mm mesh goal with a 22 mm ball yields no error; a PNG goal was never judged here', () => {
+    const job = tallJob(goal(26));
+    const ball = flat({ fluteLength: 22 });
+    const findings = jobReachFindings(job, ball, [ball], []);
+    expect(findings.some((f) => f.severity === 'error')).toBe(false);
+    expect(findings.some((f) => f.code === 'goal-reach-short')).toBe(false);
+    // A picture is skipped before any depth judgement; its own refusal is the plan path's (#980).
+    const pngJob = tallJob(goal(26, { format: 'png' }));
+    expect(jobReachFindings(pngJob, ball, [ball], [])).toEqual([]);
+  });
+});
+
 describe('#785 — the findings', () => {
-  it('a known short reach REFUSES with the numbers and the four fixes', async () => {
-    const [f] = goalReachFindings(goal(112), flat({ fluteLength: 22 }), [flat({ fluteLength: 22 })], []);
-    expect(f?.severity).toBe('error');
-    expect(f?.code).toBe('goal-reach-short');
-    expect(f?.targetId).toBe('g-0');
-    expect(f?.goalBandMm).toBe(21);
-    expect(f?.message).toContain('112 mm deep');
-    expect(f?.message).toContain('your longest reach is 22 mm');
-    expect(f?.message).toContain('Scale the goal to 22 mm or less');
-    expect(f?.message).toContain('cut it from both sides');
-    expect(f?.message).toContain('choose a longer cutter');
-    expect(f?.message).toContain('cut just the top 21 mm');
+  it('a known short reach is NOT a refusal for a MESH goal any more (#1037): the engine judges per feature', async () => {
+    // The M1 tray's shape: a 26 mm mesh goal finished by a 22 mm ball that only cuts at 4.2 mm.
+    // The whole-goal sentence was the wrong number for it, and it disabled Generate from the main
+    // thread (the panel joins these findings) and refused the measured search.
+    expect(goalReachFindings(goal(112), flat({ fluteLength: 22 }), [flat({ fluteLength: 22 })], [])).toEqual([]);
   });
 
-  it('names the catalogue as the source, and the house’s longer cutter when the chosen one is not it', async () => {
+  it('the catalogue-source sentence is gone with the refusal; the reach is still resolved for the band', async () => {
     const copy = flat({ id: '112', fluteLength: null });
-    const [f] = goalReachFindings(goal(112), copy, [copy, flat({ fluteLength: 50 })], [catEntry('112', 12)]);
-    expect(f?.message).toContain("this cutter reaches 12 mm (Makera's catalogue)");
-    expect(f?.message).toContain('your longest reach is 50 mm');
+    expect(goalReachFindings(goal(112), copy, [copy, flat({ fluteLength: 50 })], [catEntry('112', 12)])).toEqual([]);
   });
 
   it('cutWithinReach turns the refusal into the stated top-band cut', async () => {
@@ -178,10 +182,9 @@ describe('#785 — the findings', () => {
   it('a goal sunk into the blank is judged by its LOWEST surface, and the sentence says both numbers', async () => {
     // 30 mm tall, its top 20 mm below the stock top: the cutter must go 50 mm down, not 30.
     const sunk = goal(30, { position: { x: 25, y: 25, z: -20 } });
-    const [f] = goalReachFindings(sunk, flat({ fluteLength: 40 }), [], []);
-    expect(f?.severity).toBe('error');
-    expect(f?.message).toContain('30 mm deep');
-    expect(f?.message).toContain('its lowest surface 50 mm below the stock top');
+    // #1037 — the whole-goal refusal is gone for a mesh goal; its lowest-surface number now lives
+    // in the engine's own per-feature judgement.
+    expect(goalReachFindings(sunk, flat({ fluteLength: 40 }), [], [])).toEqual([]);
     // A goal entirely ABOVE the blank needs nothing from this check.
     expect(goalReachFindings(goal(30, { position: { x: 25, y: 25, z: 40 } }), flat({ fluteLength: 4 }), [], [])).toEqual([]);
   });

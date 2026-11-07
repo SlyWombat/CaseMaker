@@ -109,6 +109,27 @@ describe.skipIf(TRAY === undefined)('#1037 the M1 tray reaches Generate with the
     expect(out.findings.some((f) => f.code === 'goal-not-freed')).toBe(false);
   }, 600_000);
 
+  it('a house flat whose stated flute reaches but is not in the chain says so, never "longest is 42 mm" contradicting itself', async () => {
+    const target = await placedTray(TRAY!);
+    const job = trayJob(target);
+    // The 42-flute flat is in the HOUSE but cannot enter the chain (it states no cutting diameter),
+    // so no step of the chosen chain covers the profile — the warning's cause is the CHAIN, not a
+    // short set, and the sentence must name the reaching flat rather than call the set short.
+    const blind = { ...flat(42, '42 x blind flat'), diameter: null, tipDiameter: null } as Tool;
+    const set = OWNED.filter((_, i) => i !== 0).concat(blind);
+    const out = await generateGoalProgram(job, target, OWNED[2]!, null, { shop: { tools: set.map(entry) } });
+    expect(out.ok).toBe(true);
+    const contourOps = out.plan!.perSetup.flatMap((s) => s.ops).filter((o) => o.kind === 'contour');
+    expect(contourOps.length, 'no chain link covers the profile').toBe(0);
+    const warned = out.findings.find((f) => f.code === 'goal-not-freed');
+    expect(warned?.severity).toBe('warning');
+    expect(warned?.message).toContain('the chosen chain does not free the part');
+    expect(warned?.message).toContain('42 mm flute that reaches it');
+    expect(warned?.message).toContain('no step of the chosen chain covers the profile');
+    // The self-contradicting form the Manager's review named is not what is said.
+    expect(warned?.message).not.toContain('longest stated flute');
+  }, 600_000);
+
   it('with the ×42 flat removed the run POSTS with no freeing contour and STATES it: goal-not-freed, 27.2 and 25', async () => {
     const target = await placedTray(TRAY!);
     const job = trayJob(target);
