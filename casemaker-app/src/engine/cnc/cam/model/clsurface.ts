@@ -28,8 +28,23 @@ import type { FeatureSource, RemainderRegion } from './features';
 import { dropCutterHeight, profileOf, type DropCutterMesh } from './dropcutter';
 
 export interface ClSurface {
-  /** The CL height at (x, y), or `null` where the cutter cannot reach (outside the region, or past `reach`'s limit). */
+  /**
+   * The CL height at (x, y); `null` outside the region's footprint (a hair on its boundary still
+   * counts as inside — see `onBoundary`) or where no triangle lies within the cutter's reach.
+   * `reach()`'s face rule is a CALLER's admission test, never a gate inside this query (E's review
+   * of #1033 corrected the old wording, which claimed one).
+   */
   dropCutter(x: number, y: number): number | null;
+  /**
+   * #1033 (lever b) — THE SAME CL, IGNORING THE FOOTPRINT CLIP. Outside the region's footprint the
+   * physical surface still exists: the ball riding an island's top or a pocket mouth sits at its
+   * own CL there, and a join may ride across it ONLY when its chord stays at or above that height.
+   * The rows keep the clipped query; this one is the join's proof against the neighbouring surface.
+   * `null` where no triangle lies within the cutter's reach (off the part entirely). Optional so a
+   * caller's own `ClSurface` literal (the op specs' fakes) keeps compiling; absent reads as "no
+   * unclipped proof", which is exactly the pre-#1033 refusal.
+   */
+  dropCutterUnclipped?(x: number, y: number): number | null;
   toleranceMm: number;
   minSpacingMm: number;
   maxSpacingMm: number;
@@ -108,6 +123,13 @@ export function clSurface(geometry: FeatureSource, region: RemainderRegion, cutt
   return {
     dropCutter(x, y) {
       if (!pointInPolygons(region.footprint, x, y) && !onBoundary(region.footprint, x, y)) return null;
+      sampleCount++;
+      return dropCutterHeight(profile, mesh, x, y);
+    },
+    // #1033 — the footprint clip is the ROWS' own reach rule; the join's ride proof asks the same
+    // mesh without it, so the neighbouring surface (an island's top, a pocket mouth) can prove a
+    // chord at or above it. Same profile, same bins, same value inside the footprint.
+    dropCutterUnclipped(x, y) {
       sampleCount++;
       return dropCutterHeight(profile, mesh, x, y);
     },

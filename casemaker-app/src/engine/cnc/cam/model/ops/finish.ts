@@ -322,7 +322,12 @@ export function ridesTheCl(from: LinkPoint, to: LinkPoint, clSurface: ClSurface,
     const x = from.x + (to.x - from.x) * t;
     const y = from.y + (to.y - from.y) * t;
     if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-    const cl = clSurface.dropCutter(x, y);
+    // #1033 (lever b) — A SAMPLE THE CLIPPED SURFACE DOES NOT OWN IS STILL PROVABLE. The clip is
+    // the ROWS' reach rule: where the footprint is holed or non-convex (an island, a pocket mouth)
+    // the clipped query answers null although the physical CL there is well defined. Ask the same
+    // mesh unclipped and hold the chord to it — it may ride ATOP the neighbouring surface, never
+    // below it. Only a null there (off the part entirely, or no unclipped query at all) is no proof.
+    const cl = clSurface.dropCutter(x, y) ?? clSurface.dropCutterUnclipped?.(x, y) ?? null;
     if (cl === null) return false; // the surface cannot prove the path: a retract is always safe
     const z = from.z + (to.z - from.z) * t;
     if (z < cl - clSurface.toleranceMm) return false;
@@ -507,10 +512,16 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // crease to follow: the plan's own 0.1 mm leftover band. Under it, a short refused join is fed
   // along the sampled CL (a few 0.05 mm steps) instead of paying a retract/hop.
   const SHORT_JOIN_CLIMB_BAND_MM = 0.1;
+  // #1033 (§6) — THE JOIN AUDIT, per op: which branch decided each run-to-run join, so a card can
+  // show where its cycle goes. `ride` = the chord proven by the ride test (clipped or, since lever
+  // b, against the neighbouring surface); `follow` = the short CL follow or the dip-following link;
+  // `routed` = a join routed inside the footprint (lever a); `retract` = the last resort.
+  const joinCounts = { ride: 0, follow: 0, routed: 0, retract: 0 };
   const joinMoves = (from: LinkPoint, to: LinkPoint, levelZ: number): ToolpathIR['operations'][number]['moves'] => {
     const direct = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
     const shortHop = DEFAULT_SHORT_HOP_DIAMETERS * 2 * toolRadius;
     if (direct <= shortHop + 1e-9 && ridesTheCl(from, to, opts.clSurface, rideStep)) {
+      joinCounts.ride++;
       // A DESCENDING LINK IS A CUT INTO LOWER GROUND: it runs at the plunge rate, the same rule
       // the op's own first feed follows (9e976f0b's finding — never a descent at the cutting rate).
       const f = to.z < from.z - 1e-9 ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
@@ -529,7 +540,10 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         opts.feeds,
         SHORT_JOIN_CLIMB_BAND_MM,
       );
-      if (shortFollow !== null) return shortFollow;
+      if (shortFollow !== null) {
+        joinCounts.follow++;
+        return shortFollow;
+      }
     }
     // #962 — THE DIP-FOLLOWING LINK: the chord dipped below the CL (concave ground). FOLLOW the CL
     // instead — the ball cuts the bulge exactly as the passes either side of it do, so nothing is
@@ -537,10 +551,14 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     // follow is FASTER than the retract it replaces (the time guard; the earlier pricing showed a
     // stay-down feed only wins inside ~25-30 mm, and this branch's joins are far shorter).
     const follow = followCutSurface(from, to, (x, y) => opts.clSurface.dropCutter(x, y), linkSampleStep, levelZ, opts.feeds, opts.rapid, opts.regionRef.regionClearanceZ);
-    if (follow !== null) return follow;
+    if (follow !== null) {
+      joinCounts.follow++;
+      return follow;
+    }
     // #966 — NO `landingCut`: a row's start is not proven cut at the row's own z. The finish's rows
     // run at the CL surface, and on a steep flank the row before can sit above the landing's z, so
     // the retract descends only to the stock top plus the hop and feeds the rest.
+    joinCounts.retract++;
     return link(from, to, linkOptionsFor(levelZ));
   };
 
@@ -742,17 +760,25 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     ],
   };
 
+  const notes: string[] = [];
+  if (wallBandsCut > 0) {
+    notes.push(
+      `${wallBandsCut} raster row(s) over walls steeper than ${WALL_SKIP_DEG}° ride at or below the cutter's own ${(opts.kind === 'flat-raster' ? 'flat' : 'ball')} floor (radius/10) rather than the scallop spacing — they are cut, not skipped`,
+    );
+  }
+  // #1033 (§6) — THE JOIN AUDIT: only where a join costs a retract (or a route) is the count worth
+  // the line; an op whose joins all ride states nothing new.
+  const joinTotal = joinCounts.ride + joinCounts.follow + joinCounts.routed + joinCounts.retract;
+  if (joinCounts.retract > 0 || joinCounts.routed > 0) {
+    notes.push(
+      `${joinTotal} run-to-run join(s): ${joinCounts.ride} ride the CL, ${joinCounts.follow} follow it, ${joinCounts.routed} routed inside the footprint, ${joinCounts.retract} retract`,
+    );
+  }
   return {
     ir,
     cutter: cutterKeyOf(opts.cutter),
     passes,
     cleared,
-    ...(wallBandsCut === 0
-      ? {}
-      : {
-          notes: [
-            `${wallBandsCut} raster row(s) over walls steeper than ${WALL_SKIP_DEG}° ride at or below the cutter's own ${(opts.kind === 'flat-raster' ? 'flat' : 'ball')} floor (radius/10) rather than the scallop spacing — they are cut, not skipped`,
-          ],
-        }),
+    ...(notes.length === 0 ? {} : { notes }),
   };
 }
