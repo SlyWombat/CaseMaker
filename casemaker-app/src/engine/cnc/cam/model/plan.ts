@@ -25,6 +25,8 @@ import type { ObstacleBox } from '@/engine/cnc/setup';
 import { cuttingDiameter, flatEndMill, type Tool, isCuttingRecord } from '@/engine/cnc/tool';
 import { coneHeight, isVShape, vCone, type VCone } from '@/engine/cnc/vProfile';
 import { vCarvePassPitch } from '@/engine/cnc/vCarveGeometry';
+import { memTrace } from '@/engine/cnc/memTrace';
+import { PlanFinishTooManyMoves } from './ops/finish';
 import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, resolvedFeedsTable, type CutParams, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
@@ -516,6 +518,11 @@ export interface PlanModelCamOptions {
    * that names the ideal's measured ball (one leftover statement per card, not two).
    */
   restStatement?: boolean;
+  /**
+   * #1052 — which of `planTwoOutcomes`' two runs this is, for the memory trace's `plan:start` row
+   * (owned or ideal). Absent for a plan the caller runs alone.
+   */
+  planKind?: 'owned' | 'ideal';
 }
 
 /**
@@ -677,6 +684,8 @@ function describeRegistration(setupIndex: number, registration: SetupRegistratio
  * house flats only) — the plan says that too when a caller supplies one.
  */
 export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
+  // #1052 — the flag-gated memory trace (a null check when off): one row at the plan's start.
+  memTrace('plan:start', { plan: opts.planKind ?? 'owned', setups: input.setups.length, house: input.cutters.house.length });
   const tl = await getToplevel();
   const offset = makeClipperOffset(tl);
   const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
@@ -1077,6 +1086,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // #986 (the ruling) — THE RANK'S OWN STATEMENT: every measured candidate's leftover and
     // cycle, the one that won, and the uncapped best as a fact. It rides the plan's notes.
     const ballRankNotes: string[] = [];
+    // #1052 — a candidate whose finish passes the move cap is a stated refusal on the card, not a
+    // silent drop: its own typed statement, one per candidate.
+    const capStatements: PlanStatement[] = [];
     if (coverageGoal !== undefined && goalCoverage !== undefined && ballCandidates.length > 1 && tree.remainder.length > 0) {
       let best: { tool: Tool; leftover: number; cycle: number } | null = null;
       let uncappedBest: { tool: Tool; leftover: number; cycle: number } | null = null;
@@ -1090,7 +1102,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       // for the ideal); the monotone argument is stated here so the early exit is auditable, and a
       // candidate that does TIE keeps the cycle tie-break.
       const ordered = [...ballCandidates].sort((a, b) => (cuttingDiameter(a) ?? 0) - (cuttingDiameter(b) ?? 0));
+      // #1052 — the measured search's shape: the candidate count first, then a row per candidate.
+      memTrace('rank:start', { candidates: ordered.length });
       for (const candidate of ordered) {
+        memTrace('rank:candidate', { diameterMm: cuttingDiameter(candidate) ?? 0 });
         opts.signal?.throwIfAborted();
         let measured: PlanCurvedResult;
         try {
@@ -1101,7 +1116,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             ...curvedOptionsFor(candidate, cutParamsForBall(candidate)),
             finishScallopMm: DEFAULT_FINISH_SCALLOP_MM,
           });
-        } catch {
+        } catch (err) {
+          // #1052 — a candidate whose finish passes the move cap leaves the rank STATED, with its
+          // number; the plan continues with the other candidates.
+          if (err instanceof PlanFinishTooManyMoves) {
+            const text = `${candidate.name || 'the ball'}: ${err.message}`;
+            ballRankNotes.push(text);
+            capStatements.push({ severity: 'warning', code: 'goal-finish-too-many-moves', count: 1, ids: [err.region], text });
+          }
           continue; // a candidate that cannot plan this remainder is not a candidate
         }
         const coverage = goalCoverage(measured.ops.map((o) => o.outcome.ir));
@@ -1528,6 +1550,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       return { regions, unreachable, planned, masks };
     };
 
+    // #1052 — the pocket chain's own bracket (A's finding): an abort between plan:start and the
+    // first curved op names the chain, and its end row carries the candidate count.
+    memTrace('chain:start');
     const result = planTreePrograms(tree, {
       offset,
       floorStrips: buildFloorStrips,
@@ -1582,6 +1607,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       },
       curved: curvedOptionsFor(ball, cutParamsFor),
     });
+    memTrace('chain:end', { candidates: result.choice.considered?.length ?? 0 });
     opts.signal?.throwIfAborted();
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 0.9 });
 
@@ -1702,7 +1728,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
     // #992 — THE TYPED STATEMENTS: the two planners' own, then this loop's. Every one is the same
     // fact its `notes` line states; the code and severity are what route it to the operator.
-    const statements: PlanStatement[] = [...result.statements, ...freeingStatements, ...fallbackStatements];
+    const statements: PlanStatement[] = [...result.statements, ...freeingStatements, ...fallbackStatements, ...capStatements];
     // #1005 — THE MOULD'S OWN FACTS, from the cavity the plan was handed. The sentences are the old
     // heightfield path's own, word for word (the guide's chapter 8 rows document these codes); the
     // draft number is measured from the part's surface at the seam, because a planar wall has no
@@ -1993,6 +2019,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       last.notes.push(statement.text);
     }
   }
+  memTrace('plan:end', { setups: perSetup.length });
   return outcome === undefined ? { perSetup } : { perSetup, outcome };
 }
 
@@ -2956,6 +2983,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   const planStep: SequenceOptions['planStep'] = (step, prefix) => {
     const signature = stepKey(step, prefix);
     if (irCache.has(signature)) return irCache.get(signature)!;
+    // #1052 — the pocket chain's own boundary (A's finding): an abort inside it names its step.
+    memTrace('chain:step', { kind: step.kind, cutter: step.cutter.key });
     opts.signal?.throwIfAborted();
     opts.onStep?.(step.kind);
     // The outcome cache uses the SAME key as the IR cache (a rest's regions depend on its prefix),
@@ -3694,6 +3723,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   const emptyStages = new Map<PlannedOp['kind'], { count: number; deepestMm: number }>();
   const finishKinds = new Map<string, { count: number; minSlope: number; maxSlope: number }>();
   const pushStage = (kind: PlannedOp['kind'], ref: RegionRef, outcome: OpOutcome): void => {
+    // #1052 — one row per op (kind, cutter, moves): the jump between rows is the op's own cost.
+    memTrace('op', {
+      kind,
+      cutter: outcome.cutter,
+      moves: outcome.ir.operations.reduce((n, operation) => n + operation.moves.length, 0),
+    });
     if (outcome.ir.operations.some((operation) => operation.moves.length > 0)) {
       ops.push({ kind, region: ref, outcome });
       return;
@@ -3791,6 +3826,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   });
 
   for (const region of [...tree.remainder, ...(opts.extraRegions ?? [])]) {
+    // #1052 (the 4096/8192 traces) — the rank's ⌀0.5 candidate enters this pipeline and outlives the
+    // cap inside it; one row per region and per field build shows which structure grows.
+    memTrace('curved:region', { id: region.id, top: region.zTop, bottom: region.zBottom });
     const ball = opts.ball;
     // #982 (the review session's ruling) — NO BALL IN THE SET: the flat finishes the whole curved
     // remainder as a flat-raster, the creases via the rest with the smallest flat. Never a throw.
@@ -3851,8 +3889,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const restClSink: { surface?: ReturnType<typeof clSurface> } = {};
     if (flat !== undefined) {
       const flatCl: { surface?: ReturnType<typeof clSurface> } = {};
+      memTrace('curved:stage', { stage: 'rough', cutter: cutterKeyOf(flat), region: roughRegion.id });
       const roughed = attempt('rough', flat, ref, () => {
+        memTrace('cl:build', { cutter: cutterKeyOf(flat), region: roughRegion.id, what: 'flat' });
+        const clFlatStarted = performance.now();
         const clFlat = floorSurface(clSurface(opts.geometry, roughRegion, flat, cuts.stepOver));
+        memTrace('cl:built', { cutter: cutterKeyOf(flat), region: roughRegion.id, what: 'flat', ms: Math.round(performance.now() - clFlatStarted) });
         flatCl.surface = clFlat;
         noteGrid(flat, clFlat);
         return rough({
@@ -3913,6 +3955,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       // rebased levels sat above every mesh-absolute CL value and the mask came out EMPTY (a rest
       // pass silently missing, not merely off-datum). Both go through the plan's one datum here:
       // the region is `base`, the surface is shifted like the flat's.
+      memTrace('curved:stage', { stage: 'rest-flat', cutter: cutterKeyOf(restFlat), region: roughRegion.id });
       attempt('rest', restFlat, ref, () => {
         const restCl = floorSurface(clSurface(opts.geometry, base, restFlat, cuts.stepOver));
         restClSink.surface = restCl;
@@ -4024,7 +4067,10 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     let clBallCache: ReturnType<typeof clSurface> | undefined;
     const clBall = (): ReturnType<typeof clSurface> => {
       if (clBallCache === undefined) {
+        memTrace('cl:build', { cutter: cutterKeyOf(finishCutter), region: roughRegion.id, what: 'finish' });
+        const clStarted = performance.now();
         clBallCache = floorSurface(clSurface(opts.geometry, roughRegion, finishCutter, cuts.stepOver));
+        memTrace('cl:built', { cutter: cutterKeyOf(finishCutter), region: roughRegion.id, what: 'finish', ms: Math.round(performance.now() - clStarted) });
         noteGrid(finishCutter, clBallCache);
       }
       return clBallCache;
@@ -4064,6 +4110,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     let finishOutcome: OpOutcome | null = null;
     let finishError: string | null = null;
     try {
+      memTrace('curved:stage', { stage: 'finish', cutter: cutterKeyOf(finishCutter), region: roughRegion.id });
       finishOutcome = finish({
         cutter: finishCutter,
         region: roughRegion,
@@ -4092,6 +4139,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         rapid: opts.rapid,
     });
     } catch (err) {
+      // #1052 — the move cap is a CANDIDATE decision, not a stage failure: it leaves the rank
+      // with its own sentence (below), never the unplanned list.
+      if (err instanceof PlanFinishTooManyMoves) throw err;
       finishError = err instanceof Error ? err.message : String(err);
     }
     if (finishError !== null) {
@@ -4137,6 +4187,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         if (design === null) return false;
         return b - design > finishBand;
       };
+      memTrace('curved:stage', { stage: 'rest-ball', cutter: cutterKeyOf(restBallTool), region: roughRegion.id });
       attempt('rest', restBallTool, ref, () => finish({
         cutter: restBallTool,
         region: roughRegion,
@@ -4181,6 +4232,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       const vPitch = Math.min(0.5, Math.max(0.1, (cuttingDiameter(vTool) ?? 0) / 4));
       let creaseAdmitted = 0;
       let creaseRefused = 0;
+      memTrace('curved:stage', { stage: 'pencil-v', cutter: cutterKeyOf(vTool), region: roughRegion.id });
       attempt('pencil', vTool, ref, () => {
         // The V's own CL and the previous (rest ball's) CL: the leftover depth at a crease is the
         // material between them — the number the crease rule's width test is stated at.
@@ -4231,6 +4283,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
 
     // 4. PENCIL along the creases the ball's own CL surface leaves — no ball, no pencil: the
     // creases are the rest rule's job (the smallest flat, above).
+    if (ball !== undefined) memTrace('curved:stage', { stage: 'pencil-ball', cutter: cutterKeyOf(ball), region: roughRegion.id });
     if (ball !== undefined) attempt('pencil', ball, ref, () => pencil({
       cutter: ball,
       region,

@@ -89,6 +89,7 @@ import { surfacePrimitivesOf } from '@/engine/cnc/engrave/primitiveSurface';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import { closeOpenSheet } from '@/engine/cnc/engrave/closeSheet';
 import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { memTrace } from '@/engine/cnc/memTrace';
 import { mouldSolidOf } from '@/engine/cnc/engrave/mouldSolid';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import {
@@ -5273,7 +5274,12 @@ export async function buildModelPlanInputForGoal(
     // (`ModelPlanOutput.outcome`): the same 0.1 mm sample the acceptance cards and the gate use.
     // Supplying it ALSO turns on the planner's coverage-first rank — the rank every acceptance
     // measurement has run with since #961 — so production plans the way the cards were measured.
-    goal: sampleGoalHeightfield(goal, { pitchMm: 0.1, stockTopZ: 0 }),
+    goal: (() => {
+      // #1052 — the goal field fixes a plan's cell count; one row with its size.
+      const field = sampleGoalHeightfield(goal, { pitchMm: 0.1, stockTopZ: 0 });
+      memTrace('goal-field', { nx: field.nx, ny: field.ny, cells: field.nx * field.ny, bytes: field.nx * field.ny * 5 });
+      return field;
+    })(),
     // #1023 — the shop's leftover-visibility thresholds reach the plan, with provenance. The
     // location lives on the main thread, so the caller resolves them (the same snapshot the old
     // rest pair reads); absent is the labelled fallback, never a compiled-in "shop" number.
@@ -6569,6 +6575,7 @@ export async function engraveGenerate(
    */
   catalogueTools?: readonly Tool[],
 ): Promise<EngraveGenerated> {
+  memTrace('pipeline:start', { job: job.name });
   onProgress?.({ stage: 'prepare', label: 'reading the job' });
   // #786 slice 4c-2 — the same catalogue fill as `engraveRegions`, applied HERE as well so the
   // CAM (which reads the tool after the regions step) and every sub-job cutter use the values the

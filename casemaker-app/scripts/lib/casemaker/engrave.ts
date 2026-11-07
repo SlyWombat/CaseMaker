@@ -172,6 +172,8 @@ import { renderRunSheetMarkdown } from '../../runSheetMarkdown';
 import { CliExit, isCliExit } from './exit';
 import { commandOutput, HUMAN, type CommandOptions } from './output';
 import { fileReceipt } from './receiptFiles';
+import { setMemTraceSink, setWasmHeapReader, memTrace } from '../../../src/engine/cnc/memTrace';
+import { appendFileSync } from 'node:fs';
 import {
   diagnostic,
   gateForStage,
@@ -213,9 +215,12 @@ interface Args {
   thirdTool?: number;
   location?: string;
   out?: string;
+  /** #1052 — write the per-boundary memory trace (JSONL) to this file. */
+  memTrace?: string;
 }
 
-function parseArgs(argv: string[]): Args {
+/** Exported for the CLI's own spec (#1052): the flag set is pinned by parsing. */
+export function parseArgs(argv: string[]): Args {
   const args: Args = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -257,7 +262,8 @@ function parseArgs(argv: string[]): Args {
         );
       }
       args.thirdTool = parsed.data;
-    } else if (a === '--location') args.location = argv[++i];
+    } else if (a === '--mem-trace') args.memTrace = argv[++i];
+    else if (a === '--location') args.location = argv[++i];
     else if (a === '--turn') {
       const v = argv[++i];
       if (v !== 'ccw' && v !== 'cw') throw new Error(`--turn must be "ccw" or "cw", not "${v}"`);
@@ -530,6 +536,19 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     fail(`${(e as Error).message}\n${USAGE}`);
     throw e; // unreachable; `fail` exits
   }
+  // #1052 — THE MEMORY TRACE. Flag or env; rows are appended synchronously so the LAST rows before
+  // an abort (exit 134) are on disk — a buffered stream loses exactly the rows a crash investigation
+  // needs. Off by default: the sink is null and every memTrace call is one null check.
+  const memTracePath = args.memTrace ?? process.env.CASEMAKER_MEM_TRACE;
+  if (typeof memTracePath === 'string' && memTracePath !== '') {
+    setMemTraceSink((line) => {
+      try {
+        appendFileSync(memTracePath, line);
+      } catch {
+        /* the trace must never take the run with it */
+      }
+    });
+  }
   const inputs = [
     args.job,
     args.coupon,
@@ -553,6 +572,16 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   // machine's own, and validates it exactly as the app's import panel does (#412).
   const boot = await bootstrap({ location: args.location }).catch((e: Error) => fail(e.message));
   const tl = boot.manifold;
+  // #1052 — the wasm module's own heap, when it exposes one (the 4,096 MB cap is its own source of
+  // exit 134). Emscripten's modular build may hide HEAP8; the reader then answers null and the row
+  // falls back to `arrayBuffers`, naming which it used.
+  setWasmHeapReader(() => {
+    const m = tl as unknown as { HEAP8?: { buffer?: ArrayBuffer }; HEAPU8?: { buffer?: ArrayBuffer }; wasmMemory?: WebAssembly.Memory };
+    if (m.HEAP8?.buffer !== undefined) return { bytes: m.HEAP8.buffer.byteLength, source: 'HEAP8' as const };
+    if (m.HEAPU8?.buffer !== undefined) return { bytes: m.HEAPU8.buffer.byteLength, source: 'HEAPU8' as const };
+    if (m.wasmMemory?.buffer !== undefined) return { bytes: m.wasmMemory.buffer.byteLength, source: 'wasmMemory' as const };
+    return null;
+  });
   /**
    * The shop's tunable defaults, as the document holds them (#416/#417), or null when this run has no
    * document to read them from — a house file from before the section existed, or no file at all. Null
@@ -1105,6 +1134,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         cutterFor: (program) =>
           program.toolKey === job.toolKey ? tool : benchCutterFor(program.toolKey),
         load: async ({ program, index, cutter, drillPoint, priorRemoval, priorFields, priorExactRemoval, fromBlank }) => {
+          memTrace('sweep:start', { program: index + 1, kind: program.kind ?? 'engrave', cutter: program.toolKey });
           sweeping =
             (program.kind ?? 'engrave') === 'facing'
               ? `the facing pass (${program.toolKey})`

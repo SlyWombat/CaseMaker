@@ -418,6 +418,8 @@ export type JobFindingCode =
   | 'goal-mold-no-draft'
   // #1019 — the engine-chosen curved rough's stated flat could not reach the region's depth.
   | 'goal-rough-unreachable'
+  // #1052 — a finish op would build past the move cap; the candidate leaves the rank with its number.
+  | 'goal-finish-too-many-moves'
   // #1037 — no cutter in the set reaches a curved region's floor: the finish does not post it.
   | 'goal-finish-unreachable'
   | 'goal-object-no-toolpath'
