@@ -1750,10 +1750,24 @@ function registrationSteps(
   const steps: RunSheetStep[] = [];
   // What the fixture supplies before any touch. Stated first, because it is what makes the rest of
   // the sequence as short as it is.
-  for (const d of plan.datums) {
+  // #1070 (6b's ruling) — a PLACED bracket supplies no datum: the ±0.05 claim is false and the
+  // anchor would put the origin where the bracket is not. The registration then says what is true:
+  // the touches come from the blank, and a found rotation is re-posted or the bracket squared.
+  const placedBracket = job.workholding.kind === 'bracket' && job.workholding.bracket.placement === 'placed';
+  if (placedBracket) {
     steps.push({
-      text: `The ${kindWord(job.workholding.kind)} already references ${axesWord(d.fixes)} to within ±${fmtNum(d.uncertainty)} mm, before any touch.`,
+      text:
+        'The bracket is screwed to the wasteboard where you put it: there is no anchor datum. The ' +
+        'origin and the rotation are probed from the blank — two touches on the front edge for the ' +
+        'rotation, two on the left edge for X, one on the front edge for Y. A found rotation either ' +
+        'goes back through the re-post or you square the bracket before the clamps are tight.',
     });
+  } else {
+    for (const d of plan.datums) {
+      steps.push({
+        text: `The ${kindWord(job.workholding.kind)} already references ${axesWord(d.fixes)} to within ±${fmtNum(d.uncertainty)} mm, before any touch.`,
+      });
+    }
   }
   // One step per touch, in the plan's own order: rotation's pair first, then whatever the pair did
   // not settle. Named physically, never by coordinate alone.
@@ -4349,13 +4363,27 @@ export function buildRunSheet(
   ];
   // #707 BM-1 — the bracket's own setup: pinned at the job's anchor, the blank into its inside
   // corner, the job's clamps on the free edges. The QuickStart's order, in physical words.
-  const bracketMountSteps: RunSheetStep[] = [
-    { text: 'Home the machine, remove any tool, then switch the machine off at its switch.' },
-    {
-      text: `Remove the MDF wasteboard. Pin the bracket to the bed at anchor ${bracket?.anchor ?? 1} with two 4 mm locating dowels and three M5 × 20 screws.`,
-    },
-    { text: 'Switch the machine on.' },
-  ];
+  // #1070 (6b's ruling) — A PLACED BRACKET IS NOT PINNED. It is screwed to the MDF wasteboard
+  // where the operator put it: no wasteboard comes out, no dowels, no anchor — and the origin is
+  // probed from the blank, never taken from the anchor.
+  const bracketMountSteps: RunSheetStep[] =
+    bracket?.placement === 'placed'
+      ? [
+          {
+            text:
+              "The bracket is screwed to the wasteboard where you put it — it is not on the table's " +
+              'locating pins and there is no anchor datum.',
+          },
+          { text: "Push the blank's front-left corner into the bracket's inside corner; fit the clamps as stated." },
+          { text: 'The origin is probed, not taken from the anchor.' },
+        ]
+      : [
+          { text: 'Home the machine, remove any tool, then switch the machine off at its switch.' },
+          {
+            text: `Remove the MDF wasteboard. Pin the bracket to the bed at anchor ${bracket?.anchor ?? 1} with two 4 mm locating dowels and three M5 × 20 screws.`,
+          },
+          { text: 'Switch the machine on.' },
+        ];
   // #707 §5 — tape-down: the strips inside the blank's edges and the blank pressed flat.
   const tapeMountSteps: RunSheetStep[] = [
     { text: 'Home the machine, remove any tool, then switch the machine off at its switch.' },
@@ -4432,8 +4460,11 @@ export function buildRunSheet(
       ? ([
           {
             text:
-              `Push the blank's front-left corner into the bracket's inside corner at anchor ${bracket?.anchor ?? 1} — ` +
-              'the datum is measured from the anchor, so the corner must seat fully.',
+              bracket?.placement === 'placed'
+                ? `Push the blank's front-left corner into the bracket's inside corner — the origin is ` +
+                  'probed, not taken from the anchor, so the corner must seat fully.'
+                : `Push the blank's front-left corner into the bracket's inside corner at anchor ${bracket?.anchor ?? 1} — ` +
+                  'the datum is measured from the anchor, so the corner must seat fully.',
           },
           ...(bracket === null || bracket.clamps.length === 0
             ? []

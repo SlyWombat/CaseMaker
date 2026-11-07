@@ -108,6 +108,8 @@ function bracketJob(opts: {
   shape: EngraveShape;
   clamps: { edge: 'back' | 'right'; at: number; kind?: 'top' | 'side' }[];
   obstacles?: JobBox[];
+  /** #1070 — 'placed' = screwed to the wasteboard where the operator put it (no anchor datum). */
+  placement?: 'anchored' | 'placed';
 }): EngraveJob {
   const base = defaultEngraveJob();
   return {
@@ -121,6 +123,7 @@ function bracketJob(opts: {
       kind: 'bracket',
       bracket: {
         anchor: 1,
+        ...(opts.placement === undefined ? {} : { placement: opts.placement }),
         variant: 'thin',
         clamps: opts.clamps,
         ...(opts.obstacles === undefined ? {} : { obstacles: opts.obstacles }),
@@ -285,6 +288,34 @@ describe('#1068 a bracket job through the command line is checked against its mo
       "Fit the clamp: the clamp on the back edge, 2.5 mm in from the right-hand corner — the job was planned with a clamp there, checked at the top clamp's height.",
     );
     expect(sheet).not.toContain('Fit a top clamp');
+  });
+
+  /**
+   * #1070 (6b's ruling) — A PLACED BRACKET SAYS WHAT IS THERE. Screwed to the MDF wasteboard where
+   * the operator put it, so: no wasteboard comes out, no dowels, no anchor, and the "already
+   * references X, Y and rotation to within ±0.05 mm" claim is false — the origin is probed.
+   */
+  it('a PLACED bracket is screwed to the wasteboard and its origin probed, never anchored', async () => {
+    const job = bracketJob({
+      shape: pocket('clear', 50, 50, 20, 10, 1),
+      clamps: [{ edge: 'back', at: 90 }],
+      placement: 'placed',
+    });
+    const run = await cut(job, 'placed-sheet');
+    expect(
+      run.code,
+      JSON.stringify({ refusals: run.receipt?.refusals ?? null, diagnostics: diagnosticsOf(run) }, null, 2),
+    ).toBe(0);
+    if (run.receipt === null || run.receipt.command !== 'engrave') throw new Error('expected the engrave receipt');
+    const sheetFile = run.receipt.details.programs[0]!.sheet?.file;
+    const sheet = readFileSync(join(run.outDir, sheetFile!), 'utf8');
+    expect(sheet).toContain('The bracket is screwed to the wasteboard where you put it');
+    expect(sheet).toContain('The origin is probed, not taken from the anchor');
+    expect(sheet).toContain('there is no anchor datum');
+    expect(sheet).not.toContain('Remove the MDF wasteboard');
+    expect(sheet).not.toContain('Pin the bracket to the bed at anchor');
+    expect(sheet).not.toContain('inside corner at anchor');
+    expect(sheet).not.toContain('to within ±0.05 mm, before any touch');
 
     // #1068 residual — THE LATER SECTIONS READ THE MOUNT TOO. The origin paragraph names what this
     // job's program is judged against, and §8's coverage names the fixture the sweep was handed.
