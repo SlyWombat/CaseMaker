@@ -1532,6 +1532,14 @@ export interface BracketObstacle {
 export interface BracketHold {
   /** The anchor the bracket is pinned at — Makera's origin is "relative to Anchor 1" (§5). */
   anchor: 1 | 2;
+  /**
+   * #1070 (6b's ruling) — HOW the bracket is bolted down. Absent = `anchored`: on the table's
+   * locating pins at {@link anchor}, so the anchor datum is the origin. `placed`: screwed to the
+   * MDF wasteboard where the operator put it — there is NO anchor datum and the ±0.05 claim is
+   * false; the origin and the rotation are probed from the blank (the vise-class datum path).
+   * Absent keeps every stored job byte-identical.
+   */
+  placement?: 'anchored' | 'placed';
   /** The bracket fitted, as its fixture record names it — `thin`, the Makera kit's L-bracket. */
   variant: string;
   /**

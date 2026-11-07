@@ -1333,6 +1333,12 @@ const bracketObstacleSchema = z
 /** A job pushed into the bracket's corner and clamped (#707 BM-1, §3.6). */
 const bracketHoldSchema = z.object({
   anchor: z.union([z.literal(1), z.literal(2)]).describe('The anchor the bracket is pinned at; Makera\'s origin is relative to Anchor 1.'),
+  placement: z
+    .enum(['anchored', 'placed'])
+    .optional()
+    .describe(
+      "How the bracket is bolted down. Absent = 'anchored': on the table's pins at the anchor, and the anchor datum is the origin. 'placed': screwed to the MDF wasteboard where the operator put it — no anchor datum; the origin and rotation are probed from the blank.",
+    ),
   variant: z.string().min(1).describe("The bracket fitted, as its fixture record names it — 'thin' is the Makera kit's L-bracket."),
   clamps: z
     .array(clampPlacementSchema)
