@@ -63,6 +63,7 @@ import { threadMillIR, threadSettings, type ThreadMillPlan, type ThreadSettingsR
 import { drillBitIR, drillSettings, type DrillBitPlan, type DrillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
+import { GOAL_FIT_TOLERANCE_MM } from '@/engine/cnc/engrave/goalPlacement';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { itemLeftUncutMessage, vCone, vDepthLimit, vDepthRefusal, vDepthShortfall, vFluteLength, vTraceDepthRefusal, vTraceDepthWarning, type VCone } from '@/engine/cnc/vProfile';
@@ -5766,12 +5767,15 @@ export async function generateGoalProgram(
       { edge: 'right', mm: maxX - job.stock.length },
       { edge: 'front', mm: -minY },
       { edge: 'back', mm: maxY - job.stock.width },
-    ].filter((o) => o.mm > 1e-6).sort((a, b) => b.mm - a.mm);
+      // #1045 — the same tolerance the panel's overhang row uses: the stored size (three decimals)
+      // and this re-measured mesh differ by float32 noise at a 66 mm goal (1.59 µm on j28), and a
+      // goal within 0.01 mm of the edge is a fit, not a miss. A real overhang still refuses.
+    ].filter((o) => o.mm > GOAL_FIT_TOLERANCE_MM).sort((a, b) => b.mm - a.mm);
     if (overhangs.length > 0) {
       const worst = overhangs[0]!;
       return fail(
         'cam',
-        `the goal is larger than the blank: ${worst.mm.toFixed(1)} mm past the ${worst.edge} edge. Fit to the stock, or choose a blank that holds it`,
+        `the goal is larger than the blank: ${worst.mm.toFixed(2)} mm past the ${worst.edge} edge. Fit to the stock, or choose a blank that holds it`,
       );
     }
   }

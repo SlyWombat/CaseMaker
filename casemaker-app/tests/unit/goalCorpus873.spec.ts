@@ -363,6 +363,45 @@ describe('#949 an oversized goal is refused at the CAM, not clipped along the ja
     const g = await generate(tl, goalJob(targetOf(imported, stock), stock));
     expect(g.ok, JSON.stringify(g.errors)).toBe(true);
   });
+
+  // #1045 — THE TWO READINGS OF ONE GOAL. The document's stored size carries three decimals
+  // (Fit to the stock reads it); the seam re-measures the mesh's own float32 vertices. j28's stored
+  // 66.404 against its mesh's true 66.4040059 is 1.59 µm — below float32's resolution at 66 mm and
+  // below anything a display can show — and the old 1e-6 tolerance refused the app's own fit,
+  // printing "0.0 mm past the left edge". These two cases are the seam's end of GOAL_FIT_TOLERANCE_MM.
+  it('#1045 a goal fitted to its stored size is not refused for the mesh’s own 1.6 µm', async () => {
+    const imported = await read('figure.stl');
+    // The document's stored size rounds DOWN from the mesh's extent — the j28 shape exactly (its
+    // stored 66.404 against the mesh's 66.4040059). 2 µm here puts the seam's own per-side overhang
+    // at 1.5 µm: past the old 1e-6 tolerance, inside GOAL_FIT_TOLERANCE_MM.
+    const storedX = imported.size.x - 2e-6;
+    const stock = { length: storedX, width: imported.size.y, thickness: 10 };
+    const target: EngraveTargetObject = { ...targetOf(imported, stock), size: { ...imported.size, x: storedX } };
+    // The seam measures the MESH: its true width is 1.6e-6 past the blank's edge. Refused at main;
+    // a fit under the shared 0.01 mm tolerance.
+    const g = await generate(tl, goalJob(target, stock));
+    // The FIT is not what refuses it: at main this is the cam refusal "0.0 mm past the right edge".
+    // A job fitted to the FULL stock still runs its finish along the stock's edge, where this job's
+    // mount refuses it (the #949 class) — that is the edge margin's job, not this tolerance's, and
+    // the j28 builder now fits the room (34 mm), not the stock.
+    const message = g.ok ? '' : g.errors.map((e) => e.message).join(' ');
+    expect(message).not.toContain('larger than the blank');
+    if (!g.ok) expect(g.stage).not.toBe('cam');
+  }, 300_000);
+
+  it('#1045 a real 0.05 mm miss still refuses, and the sentence prints two decimals', async () => {
+    const imported = await read('figure.stl');
+    const stock = { length: imported.size.x, width: imported.size.y, thickness: 10 };
+    const base = targetOf(imported, stock);
+    const target: EngraveTargetObject = {
+      ...base,
+      position: { ...base.position, x: base.position.x - 0.05 },
+    };
+    const g = await generate(tl, goalJob(target, stock));
+    expect(g.ok).toBe(false);
+    const message = g.errors.map((e) => e.message).join(' ');
+    expect(message).toContain('0.05 mm past the left edge');
+  }, 300_000);
 });
 
 describe('#873 the goal corpus: generated, swept, and measured against the goal', () => {
