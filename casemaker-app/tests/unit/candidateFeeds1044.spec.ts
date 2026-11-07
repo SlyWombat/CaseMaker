@@ -5,7 +5,9 @@
  * "no feeds for 6*17mm Flat End(Metal) in aluminium-6061": `primary = flats[0]` — the largest
  * diameter — then `resolvedCutParams(primary)` throws before the search, and the whole plan dies
  * even though other ⌀6 flats in the library carry aluminium rows. The starting table has no
- * aluminium rows, so the proxy cannot answer for a cutter the catalogue lacks either.
+ * aluminium rows, so the proxy cannot answer for a cutter this catalogue lacks either. (The real
+ * catalogue DOES carry a row for that cutter; the cards saw an empty realm snapshot — #1047.
+ * This spec seeds its own catalogue, so "row-less" here means row-less in the rows it installs.)
  *
  * The rule: resolve every house candidate before the primary is chosen; an unfeedable cutter
  * leaves the candidate set with one stated line; the primary is the largest flat that remains;

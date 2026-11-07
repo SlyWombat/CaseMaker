@@ -716,13 +716,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         };
   const perSetup: SetupPlan[] = [];
   // #1044 — A CANDIDATE WITH NO FEEDS LEAVES THE SET, STATED; THE PLAN IS NOT REFUSED FOR IT.
-  // The primary is the largest flat, chosen before feeds are known — so one row-less ⌀6 (the
-  // aluminium cards' 6*17mm Flat End(Metal), no catalogue row and no starting-table proxy on a
-  // material the table does not cover) threw before the search ever saw another cutter. Resolve
-  // every house candidate up front: an unfeedable one leaves the candidate set with its own
-  // stated line, and the primary is the largest flat that REMAINS. Two exceptions keep their
-  // place because the caller named them: the chosen tool and the pinned V. Only the chosen tool's
-  // own feeds refusal stands, exactly where it always did.
+  // The primary is the largest flat, chosen before feeds are known — so one cutter with no row for
+  // this material (and no starting-table proxy where the table does not cover it) threw before the
+  // search ever saw another cutter. Resolve every house candidate up front: an unfeedable one
+  // leaves the candidate set with its own stated line, and the primary is the largest flat that
+  // REMAINS. Two exceptions keep their place because the caller named them: the chosen tool and
+  // the pinned V. Only the chosen tool's own feeds refusal stands, exactly where it always did.
   const pinnedChamferKey = input.cutters.pinned?.['chamfer'];
   const unfeedableLines: string[] = [];
   const candidateHouse = input.cutters.house.filter((tool) => {
