@@ -50,6 +50,7 @@ import { operatorRunError } from './runErrorWords';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize, type Tool, isCuttingRecord } from '@/engine/cnc/tool';
+import { tierOf } from '@/engine/cnc/toolTiers';
 import { slotFacts, type SlotCutterOption } from '@/engine/cnc/engrave/slot';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
@@ -1343,7 +1344,19 @@ export function EngravePanel(): JSX.Element {
     !(job.threads ?? []).some((t) => t.enabled);
   // #1063 — the picker offers CUTTERS: an instrument record (a probe) is never a choice. The
   // job's own key stays listed so the select's value is always one of its options.
-  const toolOptions = tools.filter(
+  // #1065 — THE SHOP'S OWN CUTTERS, OR THE BUILT-INS WHEN IT HAS NONE. The built-ins are the
+  // fallback for an empty house, never a peer of owned cutters (#1063's ruling): a picker that
+  // lists cutters the plan would never consider (a `cat:` row, an unowned built-in) puts two
+  // things in one slot and invites the unowned pick #1042 then warns about. With records, the
+  // picker is `inv:` + `user:` only, plus the job's own key when it is something else.
+  const shopCutterRecords = tools.filter((e) => tierOf(e.key) === 'owned' || tierOf(e.key) === 'yours');
+  const baseCutterOptions =
+    shopCutterRecords.length > 0 ? shopCutterRecords : tools.filter((e) => tierOf(e.key) === 'builtin');
+  const withJobKey =
+    job.toolKey !== '' && !baseCutterOptions.some((e) => e.key === job.toolKey)
+      ? [...baseCutterOptions, ...tools.filter((e) => e.key === job.toolKey)]
+      : baseCutterOptions;
+  const toolOptions = withJobKey.filter(
     (e) => (isCuttingRecord(e.tool) || e.key === job.toolKey) && (e.tool.shape !== 'drill' || e.key === job.toolKey || drillOnly),
   );
   const vCarveJob = cone !== null && hasRegions;
