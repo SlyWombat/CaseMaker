@@ -47,7 +47,7 @@ import { cuttingDiameter, cuttingForTrace, drillPointAngle, type Tool } from '@/
 import { holderOf, type Mill } from '@/engine/cnc/machine';
 import type { NodeMeshOutput } from './meshOutput';
 import { applyCarriedField, applyPriorTops, fieldOfGrid, type CarriedField } from './carriedField';
-import { AIR_PROGRESS_EVERY, type SweepDiagnostic, type SweepStats } from './sweep';
+import { AIR_PROGRESS_EVERY, AIR_TICK_MS, type SweepDiagnostic, type SweepStats } from './sweep';
 import {
   MAX_GOUGES,
   holderGate,
@@ -2212,6 +2212,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     // #1048 — the air phase reports while it works, as its own phase.
     const airTotal = timeline.airMoves.filter((mv) => Math.min(mv.from[2], mv.to[2]) <= grid.initial).length;
     opts?.onPhase?.('air');
+    let lastAirTickAt = performance.now();
     for (const mv of timeline.airMoves) {
       checked++;
       // #923 — `rapid-into-fixture` / `feed-into-fixture`: tested before the "wholly above the
@@ -2237,7 +2238,13 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
       const tip = Math.min(mv.from[2], mv.to[2]);
       if (tip > grid.initial) continue; // wholly above the stock
       tested++;
-      if (tested % AIR_PROGRESS_EVERY === 0) opts?.onProgress?.(tested, airTotal);
+      if (opts?.onProgress !== undefined) {
+        const now = performance.now();
+        if (tested % AIR_PROGRESS_EVERY === 0 || now - lastAirTickAt >= AIR_TICK_MS) {
+          opts.onProgress(tested, airTotal);
+          lastAirTickAt = now;
+        }
+      }
       const gouged = rotary
         ? (() => {
             const aEnd = timeline.stateAt(mv.step).a;

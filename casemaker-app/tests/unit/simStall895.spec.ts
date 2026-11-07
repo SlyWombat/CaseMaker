@@ -59,14 +59,16 @@ describe('#895 — the progress watchdog', () => {
     expect(fired).toBe(0);
   });
 
-  it('says it stalled, where, and that this is a fault rather than a slow program', () => {
+  it('#1056 — says it stalled and names the PHASE it stopped in, without a fault verdict', () => {
     expect(sweepStallMessage(30_000, 49_915, 341_707)).toBe(
-      'the simulation stalled: no progress for 30 s after checkpoint 49915 of 341707. This is a fault, not a slow program',
+      'the simulation stalled: no progress for 30 s after checkpoint 49915 of 341707.',
     );
-    // Before the first checkpoint there is no place to name.
-    expect(sweepStallMessage(30_000, 0, 0)).toBe(
-      'the simulation stalled: no progress for 30 s. This is a fault, not a slow program',
+    // #1056 — the rapid-move check is its own phase: the sentence names it, not the last checkpoint.
+    expect(sweepStallMessage(30_000, 264, 1_048, 'air')).toBe(
+      'the simulation stalled: no progress for 30 s after checking rapid move 264 of 1048.',
     );
+    // Before the first report there is no place to name.
+    expect(sweepStallMessage(30_000, 0, 0)).toBe('the simulation stalled: no progress for 30 s.');
   });
 });
 

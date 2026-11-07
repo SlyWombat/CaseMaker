@@ -865,9 +865,11 @@ describe('#1048 — the air phase holds the client’s window open', () => {
         await progress?.(1, 3);
         if (phase === null) return;
         await phase('air');
+        // #1056 — TIME-shaped ticks, not count ticks: these are 35 slow moves, none a multiple of
+        // AIR_PROGRESS_EVERY, so only a time-driven report can keep the window open.
         for (let k = 1; k <= 20 && !AirTickingWorker.stopTicks; k++) {
           await new Promise((r) => setTimeout(r, 10));
-          await progress?.(k * 256, 2560);
+          await progress?.(k, 35);
         }
       })();
     }
@@ -952,9 +954,10 @@ describe('#895/#1048 — a worker that speaks once and then goes silent', () => 
       expect(r.pathOnly).toBe(false);
       expect(r.diagnostics[0]?.code).toBe('sweep-stalled');
       expect(r.diagnostics[0]?.message).toMatch(/no progress for/);
-      expect(r.diagnostics[0]?.message).toMatch(/This is a fault, not a slow program/);
       // The checkpoint was heard: the sentence names where it stopped.
       expect(r.diagnostics[0]?.message).toMatch(/after checkpoint 1 of 35/);
+      // #1056 — and it no longer claims a fault: silence alone cannot prove one.
+      expect(r.diagnostics[0]?.message).not.toMatch(/fault/);
       expect(OneWordWorker.spoke, 'the worker reported once').toBe(1);
       expect(OneWordWorker.terminated, 'the stalled worker is terminated exactly once').toBe(1);
     } finally {
