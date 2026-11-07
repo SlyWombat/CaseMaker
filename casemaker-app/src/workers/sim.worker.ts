@@ -282,8 +282,15 @@ const api = {
     shop: EngraveShopOpts,
     catalogueTools: readonly Tool[],
     ownedOutcome?: PlanOutcome | null,
+    /**
+     * #1047 — THE ROWS THIS REALM RESOLVES AGAINST, passed on every call (`[]` when the shop has
+     * no catalogue), never left to the module snapshot: this realm's copy is always empty (#324).
+     * Defaulted so it may follow #1049's optional `ownedOutcome`; the production caller always
+     * passes it.
+     */
+    catalogue: readonly FeedCatalogueRow[] = [],
   ): Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }> {
-    const input = await buildModelPlanInputForGoal(job, goal, tool, shop, undefined, catalogueTools);
+    const input = await buildModelPlanInputForGoal(job, goal, tool, shop, undefined, catalogueTools, catalogue);
     if (ownedOutcome !== undefined && ownedOutcome !== null) {
       const { tradeoff, ideal } = await planIdealAgainst(input, ownedOutcome);
       return { tradeoff, owned: ownedOutcome, ideal };

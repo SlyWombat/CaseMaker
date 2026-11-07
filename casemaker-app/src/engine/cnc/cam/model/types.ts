@@ -79,6 +79,10 @@ export type PlanFindingCode =
   // #1042 — the job's chosen cutter is not in the shop's inventory; it cuts because the job names
   // it, and the plan says so (a warning: the bench cuts owned cutters).
   | 'goal-cutter-not-owned'
+  // #1047 — a house cutter set aside before the search: neither its own catalogue row nor the
+  // starting table can feed it for this material, so it leaves the candidate set instead of
+  // refusing the plan (info, one per cutter, named with the material).
+  | 'goal-cutter-unfeedable'
   // #1037 — no cutter in the set reaches a curved region's floor: the finish does not post the
   // region, and the sentence names the region, the floor and the finisher's usable length.
   | 'goal-finish-unreachable'

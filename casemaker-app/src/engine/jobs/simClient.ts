@@ -626,8 +626,9 @@ export const engravePlanIdeal = (
   shop?: EngraveShopOpts,
   catalogueTools?: readonly Tool[],
   ownedOutcome?: PlanOutcome | null,
+  catalogue?: readonly FeedCatalogueRow[],
 ): Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }> =>
-  guarded(getSimApi().engravePlanIdeal(job, goal, tool, shop ?? {}, catalogueTools ?? [], ownedOutcome ?? null));
+  guarded(getSimApi().engravePlanIdeal(job, goal, tool, shop ?? {}, catalogueTools ?? [], ownedOutcome ?? null, catalogue ?? []));
 
 export const engraveGenerate = (
   job: EngraveJob,

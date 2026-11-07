@@ -4889,6 +4889,14 @@ export async function buildModelPlanInputForGoal(
    * and the second plan is never run — preview and every other caller that omits it are unchanged.
    */
   catalogueTools?: readonly Tool[],
+  /**
+   * #1047 — THE MAKERA FEED ROWS, from the door that already holds them. The model plan resolves
+   * its cut numbers against these, never against this realm's `feedCatalogueSnapshot()` (empty in
+   * both the worker and the CLI, #324). The production doors (the worker's `generate` and `ideal`,
+   * the CLI through `engraveGenerate`) pass an array ALWAYS — empty when no catalogue exists.
+   * Absent is a direct caller in the main realm (the specs), where the snapshot is the right copy.
+   */
+  feedCatalogue?: readonly FeedCatalogueRow[],
 ): Promise<ModelPlanInput> {
   const rawMesh = targetObjectMesh(goal);
   const placed = placeTarget(goal, rawMesh);
@@ -5211,6 +5219,8 @@ export async function buildModelPlanInputForGoal(
     ...(houseNote === undefined ? {} : { houseNote }),
     ...(houseStatement === undefined ? {} : { houseStatement }),
     chosenTool: tool, // #1044 — the caller's cutter stays a candidate even if its feeds cannot resolve
+    // #1047 — the rows this realm was handed; absent only for a direct main-realm caller.
+    ...(feedCatalogue === undefined ? {} : { feedCatalogue }),
     tolerances,
     edgeBreak,
     // #1003 — the board's breakthrough, for the FREEING CONTOUR's floor only (a contour cuts through
@@ -5630,9 +5640,15 @@ export async function generateGoalProgram(
     /** #1038 — an optional stop for the planner itself; the app's stop remains the worker
      * terminate (`cancelGenerate`). */
     signal?: AbortSignal;
+    /** #1047 — the Makera feed rows this plan resolves against, from the door that holds them.
+     * The production doors (the worker's generate and ideal, the CLI) pass an array ALWAYS — empty
+     * when the shop has no catalogue, never `undefined` — so in those realms the module snapshot
+     * can never stand in. Absent is a direct caller in the main realm (the specs), where the
+     * snapshot is the right copy (6b's review). */
+    feedCatalogue?: readonly FeedCatalogueRow[];
   },
 ): Promise<EngraveGenerated> {
-  const { shop, sideFace, catalogueTools, onProgress, signal } = opts;
+  const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue } = opts;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -5786,7 +5802,7 @@ export async function generateGoalProgram(
   }
   let input: ModelPlanInput;
   try {
-    input = await buildModelPlanInputForGoal(job, goal, tool, shop, sideFace, catalogueTools);
+    input = await buildModelPlanInputForGoal(job, goal, tool, shop, sideFace, catalogueTools, feedCatalogue);
   } catch (e) {
     return fail('cam', `cam/model seam (#966): could not build a ModelPlanInput for "${goal.name}" — ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -5846,6 +5862,8 @@ async function generateGoalPrograms(
   tool: Tool | null,
   calibration: MachineCalibration | null,
   shop: EngraveShopOpts,
+  // #1047 — every side's plan resolves against the same rows (required, `[]` when no catalogue).
+  feedCatalogue: readonly FeedCatalogueRow[],
   // #961 — every side's plan carries the same ideal candidate set from the caller.
   catalogueTools?: readonly Tool[],
   /** #1038 — the same stage channel `generateGoalProgram` takes, passed to each side's plan. */
@@ -5899,12 +5917,12 @@ async function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }) });
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue });
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
   for (const side of sides.slice(1)) {
-    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }) });
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue });
     const sideList = sidePrograms(one, side);
     if (sideList === null) return { ...one, programs };
     programs.push(...sideList);
@@ -6661,7 +6679,7 @@ export async function engraveGenerate(
           ],
         };
       }
-      return { ...(await generateGoalPrograms(job, sides, tool, calibration, shop, catalogueTools, onProgress)), surface: null };
+      return { ...(await generateGoalPrograms(job, sides, tool, calibration, shop, catalogue, catalogueTools, onProgress)), surface: null };
     }
   }
   const goal = job.setups === undefined ? pureGoalObject(job) : null;
@@ -6679,6 +6697,7 @@ export async function engraveGenerate(
         shop,
         catalogueTools,
         ...(onProgress === undefined ? {} : { onProgress }),
+        feedCatalogue: catalogue,
       })),
       surface: null,
     };
