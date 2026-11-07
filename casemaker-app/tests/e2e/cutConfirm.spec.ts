@@ -239,8 +239,10 @@ async function fakeHouseWithRotary(page: Page): Promise<void> {
     // #1065 — the picker lists this owned cutter, and the recorded frame this test replays says
     // T:1: the fixture's record states number 1 so the strip's tool cell names it (the wrap check
     // is about the name fitting its elastic cell). The shared fixture keeps number null.
-    if (path === '/inventory')
-      return json((LOCATION_DOC.inventory ?? []).map((i) => ({ ...i, tool: { ...i.tool, number: 1 } })));
+    if (path === '/inventory') {
+      const inventory = (LOCATION_DOC.inventory ?? []) as { tool?: Record<string, unknown> }[];
+      return json(inventory.map((i) => ({ ...i, tool: { ...i.tool, number: 1 } })));
+    }
     if (path === '/stock') return json(LOCATION_DOC.stock ?? []);
     if (path === '/defaults') return json(LOCATION_DOC.defaults ?? {});
     if (path === '/location') return json(location);
