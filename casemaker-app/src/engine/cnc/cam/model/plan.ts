@@ -26,6 +26,7 @@ import { cuttingDiameter, flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { coneHeight, isVShape, vCone, type VCone } from '@/engine/cnc/vProfile';
 import { vCarvePassPitch } from '@/engine/cnc/vCarveGeometry';
 import { memTrace } from '@/engine/cnc/memTrace';
+import { PlanFinishTooManyMoves } from './ops/finish';
 import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, resolvedFeedsTable, type CutParams } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
@@ -1033,6 +1034,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // #986 (the ruling) — THE RANK'S OWN STATEMENT: every measured candidate's leftover and
     // cycle, the one that won, and the uncapped best as a fact. It rides the plan's notes.
     const ballRankNotes: string[] = [];
+    // #1052 — a candidate whose finish passes the move cap is a stated refusal on the card, not a
+    // silent drop: its own typed statement, one per candidate.
+    const capStatements: PlanStatement[] = [];
     if (coverageGoal !== undefined && goalCoverage !== undefined && ballCandidates.length > 1 && tree.remainder.length > 0) {
       let best: { tool: Tool; leftover: number; cycle: number } | null = null;
       let uncappedBest: { tool: Tool; leftover: number; cycle: number } | null = null;
@@ -1060,7 +1064,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             ...curvedOptionsFor(candidate, cutParamsForBall(candidate)),
             finishScallopMm: DEFAULT_FINISH_SCALLOP_MM,
           });
-        } catch {
+        } catch (err) {
+          // #1052 — a candidate whose finish passes the move cap leaves the rank STATED, with its
+          // number; the plan continues with the other candidates.
+          if (err instanceof PlanFinishTooManyMoves) {
+            const text = `${candidate.name || 'the ball'}: ${err.message}`;
+            ballRankNotes.push(text);
+            capStatements.push({ severity: 'warning', code: 'goal-finish-too-many-moves', count: 1, ids: [err.region], text });
+          }
           continue; // a candidate that cannot plan this remainder is not a candidate
         }
         const coverage = goalCoverage(measured.ops.map((o) => o.outcome.ir));
@@ -1665,7 +1676,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
     // #992 — THE TYPED STATEMENTS: the two planners' own, then this loop's. Every one is the same
     // fact its `notes` line states; the code and severity are what route it to the operator.
-    const statements: PlanStatement[] = [...result.statements, ...freeingStatements, ...fallbackStatements];
+    const statements: PlanStatement[] = [...result.statements, ...freeingStatements, ...fallbackStatements, ...capStatements];
     // #1005 — THE MOULD'S OWN FACTS, from the cavity the plan was handed. The sentences are the old
     // heightfield path's own, word for word (the guide's chapter 8 rows document these codes); the
     // draft number is measured from the part's surface at the seam, because a planar wall has no
@@ -4045,6 +4056,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         rapid: opts.rapid,
     });
     } catch (err) {
+      // #1052 — the move cap is a CANDIDATE decision, not a stage failure: it leaves the rank
+      // with its own sentence (below), never the unplanned list.
+      if (err instanceof PlanFinishTooManyMoves) throw err;
       finishError = err instanceof Error ? err.message : String(err);
     }
     if (finishError !== null) {

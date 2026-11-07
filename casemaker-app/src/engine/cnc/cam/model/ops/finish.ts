@@ -64,6 +64,29 @@ export { FLAT_SURFACE_MAX_SLOPE_DEG };
 /** The share of a region's AREA that must lie under the threshold for the flat to take it. */
 export const FLAT_FINISH_AREA_SHARE = 0.9;
 
+/**
+ * #1052 — THE FINISH'S MOVE CAP. One finish op's IR holds every level's moves; on j27 (the ⌀0.5
+ * ball, a 50 mm region at the r/10 floor) that is ~874k moves per 0.2 mm level — an OOM by
+ * construction at ~250 levels. Above this cap the op refuses BY NAME (the candidate leaves the
+ * rank with its number, the plan continues), never an OOM. The §8.9 rule in code.
+ */
+export const FINISH_MOVE_CAP = 5_000_000;
+
+/** Thrown when a finish op's moves pass the cap; the rank drops the candidate. */
+export class PlanFinishTooManyMoves extends Error {
+  readonly moves: number;
+  readonly region: string;
+  readonly cap: number;
+  constructor(moves: number, region: string, cap = FINISH_MOVE_CAP) {
+    super(
+      `the finish of "${region}" passed ${moves.toLocaleString('en-US')} moves (the cap is ${cap.toLocaleString('en-US')} per op) — a finer scallop or a smaller region, or a larger cutter's band`,
+    );
+    this.name = 'PlanFinishTooManyMoves';
+    this.moves = moves;
+    this.region = region;
+    this.cap = cap;
+  }
+}
 /** A raster row steeper than this is a wall: not finishable by raster, skipped with a note. */
 const WALL_SKIP_DEG = 80;
 
@@ -159,6 +182,11 @@ export interface FinishOpOptions {
   materialTopAt?: (x: number, y: number) => number | null;
   /** The stock top in this op's datum — the last-resort bound past the footprint (see above). */
   stockTopZMm?: number;
+  /**
+   * #1052 — the move cap for THIS op, default {@link FINISH_MOVE_CAP}. Tests inject a small one
+   * to pin the refusal without building millions of moves; production never passes it.
+   */
+  moveCap?: number;
 }
 
 /**
@@ -738,6 +766,12 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       });
       prevExit = exitPoint;
       prevLevelZ = levelZ;
+    }
+    // #1052 — THE CAP, checked per LEVEL so the heap never holds more than one level past it. The
+    // rank drops this candidate with the number; the plan continues (never an OOM).
+    const cap = opts.moveCap ?? FINISH_MOVE_CAP;
+    if (moves.length > cap) {
+      throw new PlanFinishTooManyMoves(moves.length, opts.region.id, cap);
     }
   }
 
