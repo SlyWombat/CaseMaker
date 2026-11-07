@@ -504,6 +504,9 @@ export type JobFindingCode =
   | 'axis-crossing'
   // #723 — a rotary GOAL's own envelope check: the part is wider than the rod it would be turned from.
   | 'goal-rotary-oversize'
+  // #1061 — the goal's first millimetres lie inside the chuck/jaws keep-out: they are CLIPPED, not
+  // cut (a warning; the sibling of `goal-rotary-oversize`).
+  | 'goal-rotary-in-chuck'
   | 'rotary-unsupported'
   | 'wrap-into-clamp'
   | 'wrap-off-free-end'

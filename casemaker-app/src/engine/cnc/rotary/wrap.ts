@@ -302,20 +302,28 @@ type Polylines = readonly (readonly (readonly [number, number])[])[];
  * model that reads only X/Y/Z would time a full turn as standing still.
  */
 export function toRotaryIR(ir: ToolpathIR, radius: number, rapid: RapidEstimate): ToolpathIR {
-  // #1061 (the maintainer's rule) — NOTHING MOVES INTO THE CHUCK/JAWS BAND, at any Z: every
-  // mapped move is clamped to X ≥ the keep-out band plus the cutter's radius, so the cutter's
-  // EDGE (not only its tip) stays right of the jaw tips. The callers that plan moves there (the
-  // relief CAM) clip to the same line and state it; this is the frame's last wall.
+  // #1061 (the maintainer's rule) — NOTHING MOVES INTO THE CHUCK/JAWS BAND, at any Z. A move that
+  // reaches this frame converter inside the keep-out band plus the cutter's radius is a CAM bug,
+  // not a path to post: every caller either clips the goal to that line and states it (the relief
+  // CAM) or refuses the design before planning (the wrapped 2.5D findings). Moving the cut in
+  // silence would be the one thing the rule forbids, so the converter REFUSES by name — the
+  // generate path's own error route states the sentence.
   const keepOutX = ROTARY_JAW_KEEP_OUT_MM + (cuttingDiameter(ir.tool) ?? 0) / 2;
   const operations: CamOperation[] = ir.operations.map((op) => {
     const moves: CamMove[] = op.moves.map((move) => {
-      const x = Math.max(move.x, keepOutX);
+      if (move.x < keepOutX - 1e-6) {
+        throw new Error(
+          `a rotary program reaches into the chuck/jaws keep-out: a move at X ${Number(move.x.toFixed(3))} mm is left of the ` +
+            `line every planned move stays right of (X ≥ ${Number(keepOutX.toFixed(3))} mm — the jaw tips plus the cutter's radius); ` +
+            `the CAM clips the design to the line and states the cut it leaves`,
+        );
+      }
       const a = arcToAngle(move.y, radius);
       const z = radius + move.z;
       const liftedRapid = move.kind === 'rapid' ? Math.max(z, radius + SAFE_Z) : z;
       return move.kind === 'feed'
-        ? { kind: 'feed', x, y: 0, z, f: move.f, a }
-        : { kind: 'rapid', x, y: 0, z: liftedRapid, a };
+        ? { kind: 'feed', x: move.x, y: 0, z, f: move.f, a }
+        : { kind: 'rapid', x: move.x, y: 0, z: liftedRapid, a };
     });
     return { ...op, moves, estimatedSeconds: estimateCycleSeconds(moves, rapid, radius) };
   });

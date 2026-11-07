@@ -4654,7 +4654,7 @@ export function generateRotaryGoalProgram(
   if (field.x0 < keepOutX - 1e-9) {
     findings.push({
       severity: 'warning',
-      code: 'wrap-into-clamp',
+      code: 'goal-rotary-in-chuck',
       message:
         `The goal "${goal.name}" starts at X ${Number(field.x0.toFixed(3))} mm, inside the chuck's keep-out band: ` +
         `the jaws' reach depends on the grip, so no height over them is clear — every move stays right of the jaw tips ` +
