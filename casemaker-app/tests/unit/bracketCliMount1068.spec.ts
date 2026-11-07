@@ -261,6 +261,17 @@ describe('#1068 a bracket job through the command line is checked against its mo
       shape: pocket('clear', 50, 50, 20, 10, 1),
       clamps: [{ edge: 'back', at: 90 }],
     });
+    // #943 (10) — WITH A BOARD UNDER THE BLANK THE WASTEBOARD STAYS: the bracket's pins go
+    // through it, so the step must not send the operator to remove the board the job stands on.
+    const withBoard: EngraveJob = {
+      ...job,
+      sacrificial: { ...job.sacrificial, under: { thickness: 6, overhang: { left: 0, right: 0, front: 0, back: 0 }, attach: 'screws' } },
+    };
+    const boardSheet = buildRunSheet(withBoard, { findings: [], feeds: null, cam: null, nc: '', verify: null, frameNc: null }, null)
+      .sections.flatMap((s) => s.steps.map((step) => step.text))
+      .join('\n');
+    expect(boardSheet).toContain('The bracket is pinned at anchor 1 through the wasteboard with its two 4 mm dowels and screwed down; the wasteboard stays.');
+    expect(boardSheet).not.toContain('Remove the MDF wasteboard');
     const run = await cut(job, 'sheet');
     expect(
       run.code,

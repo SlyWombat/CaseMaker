@@ -4396,7 +4396,13 @@ export function buildRunSheet(
       : [
           { text: 'Home the machine, remove any tool, then switch the machine off at its switch.' },
           {
-            text: `Remove the MDF wasteboard. Pin the bracket to the bed at anchor ${bracket?.anchor ?? 1} with two 4 mm locating dowels and three M5 × 20 screws.`,
+            // #943 (10), 6b's ruling — WITH A BOARD UNDER THE BLANK THE WASTEBOARD STAYS: the
+            // bracket pins go through it into the anchor, so the step must not send the operator
+            // to remove the very board the job stands on.
+            text:
+              job.sacrificial.under !== null
+                ? `The bracket is pinned at anchor ${bracket?.anchor ?? 1} through the wasteboard with its two 4 mm dowels and screwed down; the wasteboard stays.`
+                : `Remove the MDF wasteboard. Pin the bracket to the bed at anchor ${bracket?.anchor ?? 1} with two 4 mm locating dowels and three M5 × 20 screws.`,
           },
           { text: 'Switch the machine on.' },
         ];
