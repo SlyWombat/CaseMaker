@@ -1117,10 +1117,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           };
           let measured: PlanCurvedResult;
           try {
+            const __probeT0 = performance.now(); // #1028 PROBE — throwaway branch only
             measured = planCurvedForTree(tree, {
               ...curvedOptionsFor(rung, cutParamsForBall(rung)),
               finishScallopMm: DEFAULT_FINISH_SCALLOP_MM,
             });
+            console.log(`#1028 rung ⌀${diameterMm}: ${(performance.now() - __probeT0).toFixed(0)} ms`); // #1028 PROBE
           } catch {
             continue; // a rung that cannot plan this remainder is not a rung
           }
