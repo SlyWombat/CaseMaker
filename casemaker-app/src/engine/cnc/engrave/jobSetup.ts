@@ -109,6 +109,9 @@ export type JobFindingCode =
   | 'goal-cutter-unfeedable'
   // #1063 — instrument records (probes) are not cutters; the plan states them once, in aggregate.
   | 'goal-cutter-instrument'
+  // #1067 — a V-carved item's flank widens the opening above the colour plane; one info line per
+  // distinct (depth, cutter) pair, naming the items it covers.
+  | 'vcarve-bevel'
   // #740 — a POINTED cutter whose tip the record does not state. A V-bit's tip is the width that
   // reaches the design; for a chamfer and an engraver `diameter` is the shank, so there is no honest
   // geometry sentence to write about the item. Raised where the plane model would otherwise judge
