@@ -5210,6 +5210,7 @@ export async function buildModelPlanInputForGoal(
     cutters,
     ...(houseNote === undefined ? {} : { houseNote }),
     ...(houseStatement === undefined ? {} : { houseStatement }),
+    chosenTool: tool, // #1044 — the caller's cutter stays a candidate even if its feeds cannot resolve
     tolerances,
     edgeBreak,
     // #1003 — the board's breakthrough, for the FREEING CONTOUR's floor only (a contour cuts through

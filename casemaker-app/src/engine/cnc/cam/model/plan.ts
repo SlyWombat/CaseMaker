@@ -233,6 +233,12 @@ export interface ModelPlanInput {
    */
   houseStatement?: PlanStatement;
   /**
+   * #1044 — THE CALLER'S CHOSEN CUTTER, kept in the candidate set even when its feeds cannot be
+   * resolved: the operator's cutter is honoured (its refusal stands where it always did), while a
+   * non-chosen candidate without feeds leaves the set, stated. The seam sets it (`tool`).
+   */
+  chosenTool?: Tool;
+  /**
    * #1003 (the manager's narrowing) — the sacrificial board's BREAKTHROUGH, mm. Used ONLY for the
    * freeing contour's floor (a contour cuts through the blank into the board by design); pockets
    * and curved regions never use it.
@@ -722,6 +728,33 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           return { leftoverCells: leftover, coveredCells: covered, cellAreaMm2: coverageGoal.pitch * coverageGoal.pitch };
         };
   const perSetup: SetupPlan[] = [];
+  // #1044 — A CANDIDATE WITH NO FEEDS LEAVES THE SET, STATED; THE PLAN IS NOT REFUSED FOR IT.
+  // The primary is the largest flat, chosen before feeds are known — so one cutter with no row for
+  // this material (and no starting-table proxy where the table does not cover it) threw before the
+  // search ever saw another cutter. Resolve every house candidate up front: an unfeedable one
+  // leaves the candidate set with its own stated line, and the primary is the largest flat that
+  // REMAINS. Two exceptions keep their place because the caller named them: the chosen tool and
+  // the pinned V. The chosen tool is matched by KEY, never object identity (6b's review): the seam
+  // de-duplicates the house by `cutterKeyOf`, so when the operator's cutter is also a shop entry
+  // the house holds the ENTRY's object and the appended tool is skipped — and a worker holds
+  // clones. Only the chosen tool's own feeds refusal stands, exactly where it always did.
+  const pinnedChamferKey = input.cutters.pinned?.['chamfer'];
+  const chosenKey = input.chosenTool === undefined ? null : cutterKeyOf(input.chosenTool);
+  const unfeedableLines: string[] = [];
+  const candidateHouse = input.cutters.house.filter((tool) => {
+    if (chosenKey !== null && cutterKeyOf(tool) === chosenKey) return true;
+    if (pinnedChamferKey !== undefined && cutterKeyOf(tool) === pinnedChamferKey) return true;
+    try {
+      resolvedCutParams(input, tool);
+      return true;
+    } catch {
+      const label = tool.name || tool.id || `${tool.shape} cutter`;
+      unfeedableLines.push(
+        `${label}: no cutting parameters in ${input.stock.material} (no catalogue row, no starting-table row) — not a candidate`,
+      );
+      return false;
+    }
+  });
   // #965 registration — setup 0's own recognised tree is the document-frame ground truth every
   // later setup's locating features are read against (`registerSetupOrigin`'s own header on
   // `setups.ts`). Kept across loop iterations for exactly that comparison; `null` only before
@@ -751,10 +784,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const registration: SetupRegistration | null = setupIndex === 0 ? null : registerSetupOrigin(setup0Tree!, tree);
     const registrationOffset: [number, number] = registration?.offsetMm ?? [0, 0];
 
-    const flats = input.cutters.house
+    const flats = candidateHouse
       .filter((t) => t.shape === 'flat' && (cuttingDiameter(t) ?? 0) > 0)
       .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0));
-    const balls = input.cutters.house
+    const balls = candidateHouse
       .filter((t) => t.shape === 'ball' && (cuttingDiameter(t) ?? 0) > 0)
       .sort((a, b) => (cuttingDiameter(b) ?? 0) - (cuttingDiameter(a) ?? 0));
     // #982 (the review session's ruling) — NO FLAT IN THE SET: the ball takes the primary's place.
@@ -764,7 +797,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const noFlatFallback = flats.length === 0;
     const primary = flats[0] ?? balls[0];
     if (primary === undefined) {
-      throw new Error('cam/model/plan: the house states no flat end mill and no ball nose with a cutting diameter — no round cutter can plan this part');
+      throw new Error(
+        unfeedableLines.length > 0
+          ? `cam/model/plan: no cutter in the set has cutting parameters for ${input.stock.material}`
+          : 'cam/model/plan: the house states no flat end mill and no ball nose with a cutting diameter — no round cutter can plan this part',
+      );
     }
     // #986 — THE FINISHING BALL IS RANKED, NOT SIZED. Candidates are one ball per cutting
     // diameter (the longest flute of each), reach-filtered against this setup's deepest remainder;
@@ -772,7 +809,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // "largest diameter, first in catalogue order" rule is the DEFAULT when there is no goal grid
     // to measure against — the documented pre-#986 behaviour, and this base pick.
     const deepestRemainderMm = tree.remainder.reduce((m, r) => Math.max(m, r.zTop - r.zBottom), 0);
-    const ballCandidates = finishBallCandidates(input.cutters.house, deepestRemainderMm);
+    const ballCandidates = finishBallCandidates(candidateHouse, deepestRemainderMm);
     let ball = balls[0];
     // #965 (the review session's ruling, item 3.1) — THE REST BALL: the next-smaller ball, admitted
     // only on a STATED reach that covers the deepest remainder. The vendor's long ⌀1
@@ -792,8 +829,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       throw new Error(`cam/model/plan: cutters.pinned.chamfer names "${pinnedVKey}" but the house has no cutter with that key — the rim stage cannot honour the pin`);
     }
     const vbit = pinnedV
-      ?? input.cutters.house.find((t) => t.shape === 'chamfer')
-      ?? input.cutters.house.find((t) => t.shape === 'engraving');
+      ?? candidateHouse.find((t) => t.shape === 'chamfer')
+      ?? candidateHouse.find((t) => t.shape === 'engraving');
     // #982 — NO BALL IN THE SET: the flat finishes the curved remainder (a flat-raster over the
     // whole region, the flat's cusp rule), the creases via the rest with the smallest flat. The
     // throw the old code raised here was the refusal the ruling forbids.
@@ -1872,6 +1909,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const last = perSetup[perSetup.length - 1]!;
     last.statements.push(input.houseStatement);
     last.notes.push(input.houseStatement.text);
+  }
+  // #1044 — the omitted candidates are stated on the plan, one line each.
+  if (unfeedableLines.length > 0 && perSetup.length > 0) {
+    const last = perSetup[perSetup.length - 1]!;
+    for (const line of unfeedableLines) last.notes.push(line);
   }
   return outcome === undefined ? { perSetup } : { perSetup, outcome };
 }
