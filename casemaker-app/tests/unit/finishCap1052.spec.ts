@@ -109,4 +109,23 @@ describe('#1052 the finish move cap', () => {
     // The fixture genuinely passes the small cap above — the refusal is not a vacuous pass.
     expect(posted).toBeGreaterThan(1_000);
   });
+
+  it('cuts each cell once — a row point is not repeated level by level', () => {
+    // Red-first: the old loop re-rastered the whole span at every level, so every row's XY
+    // appeared at every level's z (5 levels on this fixture). A cell's band is the level whose
+    // pass first reaches its CL; later levels must not cut it again.
+    const out = run(10_000_000);
+    const byXY = new Map<string, number>();
+    for (const op of out.ir.operations) {
+      for (const m of op.moves) {
+        if (m.kind !== 'feed') continue;
+        const key = `${m.x.toFixed(4)},${m.y.toFixed(4)}`;
+        byXY.set(key, (byXY.get(key) ?? 0) + 1);
+      }
+    }
+    expect(byXY.size).toBeGreaterThan(500);
+    const repeated = [...byXY.values()].filter((n) => n > 1).length;
+    // joins may legitimately revisit a point; the cutting rows must not
+    expect(repeated / byXY.size).toBeLessThan(0.05);
+  });
 });
