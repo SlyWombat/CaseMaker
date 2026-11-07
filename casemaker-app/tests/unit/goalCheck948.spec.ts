@@ -39,7 +39,7 @@ import { getTools, resetRegistry, resolveTool, setRegistry } from '@/engine/cnc/
 import { engraveShopOpts } from '@/engine/cnc/engrave/feeds';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
-import { combineOracles } from '@/store/engraveRunStore';
+import { combineOracles, goalCoverageDeferred } from '@/store/engraveRunStore';
 import type { OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { CarriedField } from '@/workers/geometry/carriedField';
 
@@ -48,7 +48,7 @@ import { generate } from './helpers/engravePipeline';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { goalCheckForProgram, type SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
-import { checkGoalCutInto, goalCutIntoUnchecked } from '@/engine/cnc/engrave/designCheck';
+import { checkGoalCutInto, goalCutIntoUnchecked, type GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
 import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { clearTargetObjectMeshCache, readTargetObjectFile } from '@/engine/import/targetObject';
@@ -869,4 +869,87 @@ describe.skipIf(!HAVE_STICK)('#948 the stick goal’s two programs read the page
       resetRegistry();
     }
   }, 1_200_000);
+});
+
+// #1035 (6b's ruling) — THE COVERAGE LINE IS THE END OF THE RUN'S. A #869 rough/finish split posts
+// two goal programs, and `afterLoad` runs the goal check once per program on the cumulative field:
+// the rough stage reads its own stock (81.07 % under the 95 % line, `ok` false), the finish reads
+// the end state (100 %, `ok` true). `combineOracles`' AND of every program's `ok` then made the
+// run cross while the Cut card showed the finish — two surfaces disagreeing on one verdict. The
+// rule: an intermediate goal program contributes only its CUT-INTO verdict (a gouge is real at any
+// stage); the coverage-vs-pass-line verdict counts on the LAST goal program's cumulative report.
+describe('#1035 — the goal coverage verdict is the last program’s, the cut-into verdict is every program’s', () => {
+  const goalReport = (over: Partial<GoalCutIntoReport> = {}): GoalCutIntoReport => ({
+    ok: true,
+    ran: true,
+    reason: null,
+    goalCells: 100,
+    pitchMm: 0.1,
+    cutIntoFloorMm: 0.1,
+    cutIntoFraction: 0,
+    cutIntoAreaMm2: 0,
+    cutIntoVolumeMm3: 0,
+    maxCutIntoMm: 0,
+    maxCutIntoAt: null,
+    leftoverFractions: [0, 0, 0],
+    leftoverVolumeMm3: 0,
+    maxLeftoverMm: 0,
+    coverageFraction: 1,
+    passCoverage: 0.95,
+    medianDeltaMm: 0,
+    edgeBreakFraction: 0,
+    wallNotScoredFraction: 0,
+    shadowNotScoredFraction: 0,
+    straddlingNotScoredCells: 0,
+    straddlingMaxStepMm: 0,
+    adjudicatedFraction: 0,
+    adjudicatedMaxMm: 0,
+    adjudicatedMaxAt: null,
+    sentence: 'goal check',
+    ...over,
+  });
+  const report = (ok: boolean, goal: GoalCutIntoReport): OracleReport => ({
+    ok,
+    band: 0.016,
+    levels: [],
+    worst: { underCut: 0, overCut: 0 },
+    goalCutInto: goal,
+  });
+  // The measured shape: the rough leaves 81.07 % (18.93 % stands more than 0.1 mm above the goal),
+  // the finish lands 100 %. 81.07 % < 95 %, so the rough's own `ok` is false.
+  const roughUnder = (): OracleReport =>
+    report(false, goalReport({ ok: false, leftoverFractions: [0.1893, 0.01, 0], sentence: 'goal check: coverage 81.07 %' }));
+  const finishOver = (): OracleReport => report(true, goalReport());
+
+  it('a rough under the pass line and a finish over it is the run’s pass, and the finish’s report is the verdict', () => {
+    const finish = finishOver();
+    const combined = combineOracles([roughUnder(), finish], null);
+    expect(combined.ok).toBe(true);
+    expect(combined.goalCutInto).toBe(finish.goalCutInto);
+  });
+
+  it('a rough that CUTS INTO the design still fails the run — only the coverage line is deferred', () => {
+    const gougingRough = report(
+      false,
+      goalReport({ ok: false, cutIntoFraction: 0.01, adjudicatedFraction: 0.01, maxCutIntoMm: 0.42, adjudicatedMaxMm: 0.42 }),
+    );
+    const combined = combineOracles([gougingRough, finishOver()], null);
+    expect(combined.ok).toBe(false);
+  });
+
+  it('the finish’s own coverage still decides the run', () => {
+    const shortFinish = report(false, goalReport({ ok: false, leftoverFractions: [0.12, 0, 0], sentence: 'goal check: coverage 88 %' }));
+    const combined = combineOracles([roughUnder(), shortFinish], null);
+    expect(combined.ok).toBe(false);
+    // And it is the FINISH that is named, not the rough whose coverage was deferred.
+    expect(combined.goalCutInto).toBe(shortFinish.goalCutInto);
+  });
+
+  it('the evidence marks the deferred program: its coverage is judged at the end of the run', () => {
+    const rough = roughUnder();
+    const finish = finishOver();
+    expect(goalCoverageDeferred(rough, false)).toBe(true);
+    expect(goalCoverageDeferred(finish, true)).toBe(false);
+    expect(goalCoverageDeferred(rough, true)).toBe(false);
+  });
 });
