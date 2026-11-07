@@ -28,7 +28,12 @@ import type { FeatureSource, RemainderRegion } from './features';
 import { dropCutterHeight, profileOf, type DropCutterMesh } from './dropcutter';
 
 export interface ClSurface {
-  /** The CL height at (x, y), or `null` where the cutter cannot reach (outside the region, or past `reach`'s limit). */
+  /**
+   * The CL height at (x, y); `null` outside the region's footprint (a hair on its boundary still
+   * counts as inside — see `onBoundary`) or where no triangle lies within the cutter's reach.
+   * `reach()`'s face rule is a CALLER's admission test, never a gate inside this query (E's review
+   * of #1033 corrected the old wording, which claimed one).
+   */
   dropCutter(x: number, y: number): number | null;
   /**
    * #1033 (lever b) — THE SAME CL, IGNORING THE FOOTPRINT CLIP. Outside the region's footprint the
