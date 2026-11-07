@@ -1704,7 +1704,9 @@ function senderOriginSteps(origin: WorkOrigin, onBoard: boolean): RunSheetStep[]
 function judgedAgainstWords(job: EngraveJob): { against: string; relativeTo: string } {
   const mount = jobMount(job);
   return mount === 'bracket'
-    ? { against: "the bracket's arms and the clamps", relativeTo: 'both' }
+    ? job.workholding.kind === 'bracket' && job.workholding.bracket.clamps.length === 0
+      ? { against: "the bracket's arms", relativeTo: 'both' }
+      : { against: "the bracket's arms and the clamps", relativeTo: 'both' }
     : mount === 'tape'
       ? { against: 'the cut', relativeTo: 'the blank' }
       : { against: 'the jaws', relativeTo: 'both' };
@@ -1777,7 +1779,7 @@ function registrationSteps(
       text: `Touch ${i + 1} of ${plan.touches.length}: ${words.edge}, ${words.where} — this gives ${readsWord(t)}.`,
     });
   });
-  steps.push(z0Step(onBoard, facingRun));
+  steps.push(job.z0CarriedFrom === undefined ? z0Step(onBoard, facingRun) : z0CarriedStep(job.z0CarriedFrom.thicknessMm));
   steps.push({
     text:
       `X0 Y0 Z0 is the top-front-left corner of the ${onBoard ? 'part' : 'blank'}. That leaves the ` +
@@ -1803,6 +1805,20 @@ function registrationSteps(
   // writes notes as clauses, and the sheet prints sentences.
   for (const note of plan.notes) steps.push({ text: sentence(note) });
   return steps;
+}
+
+/**
+ * #943 (10) — A FLIP JOB'S Z0 IS CARRIED. The face this job cuts is the sawn underside of an
+ * earlier setup's part; touching it there would measure nothing the job wants, and the datum it
+ * must share with the first side is the FIRST side's Z0, less the part's measured thickness.
+ */
+function z0CarriedStep(thicknessMm: Mm): RunSheetStep {
+  return {
+    text:
+      `Z0 is CARRIED from the earlier setup: Z0 = the earlier setup's Z0 − ${fmtNum(thicknessMm)} mm (the part's ` +
+      'measured thickness). Do not probe or touch the sawn underside — it is the face this job cuts.',
+    record: "the earlier setup's Z0 (mm) and the part's measured thickness (mm)",
+  };
 }
 
 /**
@@ -4466,8 +4482,30 @@ export function buildRunSheet(
                 : `Push the blank's front-left corner into the bracket's inside corner at anchor ${bracket?.anchor ?? 1} — ` +
                   'the datum is measured from the anchor, so the corner must seat fully.',
           },
+          // #943 (10), the bench's own note — the blank has been on this board before, and the
+          // screws that held it need not land in the same board holes a second time.
+          ...(under !== null && under.attach === 'screws'
+            ? [
+                {
+                  text:
+                    "The blank's two countersunk screw holes may no longer meet the board's holes after re-seating. " +
+                    (bracket === null || bracket.clamps.length === 0
+                      ? 'If they do not line up, do not drill the board: hold the part with the bracket alone, and put double-sided tape under it as Makera does.'
+                      : 'If they do not line up, do not drill the board: hold the blank with the bracket and the clamp alone, and put double-sided tape under it as Makera does.'),
+                } as RunSheetStep,
+              ]
+            : []),
           ...(bracket === null || bracket.clamps.length === 0
-            ? []
+            ? // #943 (10) — the vendor's own side-2 hold: the bracket is the fence, the tape is
+              // what keeps the part down.
+              [
+                {
+                  text:
+                    "There are no clamps in this job: lay double-sided tape over most of the part's top face " +
+                    '(it lies face down), press it onto the board and push the part into the bracket’s anchored ' +
+                    'corner, as Makera does.',
+                } as RunSheetStep,
+              ]
             : bracket.clamps.map(
                 (p, i): RunSheetStep => {
                   // #1070 — ONE PLACE, ONE SENTENCE. The verifier's warning words this clamp with
@@ -4494,7 +4532,12 @@ export function buildRunSheet(
                   return { text };
                 },
               )),
-          { text: 'Tighten the clamps. Check the blank does not rock and its corner stays seated.' },
+          {
+            text:
+              bracket === null || bracket.clamps.length === 0
+                ? 'Check the part does not rock and its corner stays seated.'
+                : 'Tighten the clamps. Check the blank does not rock and its corner stays seated.',
+          },
         ] as RunSheetStep[])
       : mount === 'tape'
         ? ([

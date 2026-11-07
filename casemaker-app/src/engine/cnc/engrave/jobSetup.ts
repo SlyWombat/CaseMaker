@@ -460,6 +460,9 @@ export type JobFindingCode =
   // as its own floor pass. Info, one per setup with the ids and the count — never the
   // `goal-region-uncut` warning above, which means material stands.
   | 'goal-pocket-floor-rest'
+  // #943 (10) — the goal's outline is the stock's own footprint: no material around the part, so
+  // no freeing contour is cut. Info; a side-2 job whose stock is the freed part states it.
+  | 'goal-outline-is-stock'
   | 'goal-cutter-substituted'
   | 'goal-skin-standing'
   | 'goal-rim-unbroken'

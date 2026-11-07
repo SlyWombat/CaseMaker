@@ -20,7 +20,7 @@ import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type { RapidEstimate } from '@/engine/cnc/cam/ir';
 import { zPasses } from '@/engine/cnc/cam/engraveJob';
-import { generateProfile, profilePath, type ProfileCut } from '@/engine/cnc/cam/profile';
+import { generateProfile, placeTabs, profilePath, type ProfileCut } from '@/engine/cnc/cam/profile';
 import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import { cutterKeyOf } from '../sequence';
 import type { FeatureTree } from '../features';
@@ -49,6 +49,13 @@ export interface ContourOpOptions {
    * first of two) — `contour()` behaves EXACTLY as before (#959/#960's regression safety).
    */
   oppositeSafeDepthMm?: (x: number, y: number) => number | null;
+  /**
+   * #943 (10) — this contour is a THROUGH cut (its depth reaches the stock bottom, so the board's
+   * breakthrough applies): the returned `OpOutcome.throughKerf` states the kerf — path, tab spans,
+   * radius, tab height — for the verifier's through mask. Absent/false: no kerf is stated, and a
+   * contour that stops above the stock bottom grants no breakthrough.
+   */
+  through?: boolean;
 }
 
 // E's measurement on fb9fdaae: over 3,083 contour feeds, the minimum clearance to the outline was
@@ -115,7 +122,21 @@ export function contour(opts: ContourOpOptions): OpOutcome {
   );
   const cleared: RegionAtZ[] = levels.map((z) => ({ z, boundary: path }));
 
-  return { ir: result.ir, cutter: cutterKeyOf(opts.cutter), passes, cleared };
+  // #943 (10) — the kerf this through cut leaves for the verifier's own mask. The spans are the
+  // SAME `placeTabs` call `generateProfile` makes one level down (same path, same count, width and
+  // radius — a pure function), so the mask protects exactly the tabs the file keeps; nothing is
+  // re-derived from moves.
+  const throughKerf =
+    opts.through === true
+      ? {
+          path,
+          spans: path.map((ring) => placeTabs(ring, cut.tabs.count, cut.tabs.width, toolRadius).spans),
+          toolRadius,
+          tabHeight: cut.tabs.height,
+        }
+      : undefined;
+
+  return { ir: result.ir, cutter: cutterKeyOf(opts.cutter), passes, cleared, ...(throughKerf === undefined ? {} : { throughKerf }) };
 }
 
 export interface ThroughHoleOpOptions {

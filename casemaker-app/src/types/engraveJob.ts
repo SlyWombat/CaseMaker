@@ -1544,7 +1544,8 @@ export interface BracketHold {
   variant: string;
   /**
    * The clamp places, on the free edges: `back` and `right` (the bracket holds the front and the
-   * left). One to four, in the order the operator sees them.
+   * left). Zero to four, in the order the operator sees them; ZERO is the vendor tray's side-2
+   * hold — double-sided tape under the part, the bracket as the fence only.
    */
   clamps: ClampPlacement[];
   /**
@@ -2318,6 +2319,13 @@ export interface EngraveJob {
    * (#213/#218). PROVISIONAL 0.3: enough to part cleanly; measured on the first through-cut.
    */
   breakthrough: Mm;
+  /**
+   * #943 (10) — THIS JOB CUTS THE FLIP OF AN EARLIER ONE AND ITS Z0 IS CARRIED, not touched on
+   * the face to be cut: Z0 = the earlier setup's Z0 − this measured part thickness, mm. The run
+   * sheet states it in the origin step and says the sawn underside is never touched. Absent on
+   * every ordinary job, so every existing sheet is byte-identical.
+   */
+  z0CarriedFrom?: { thicknessMm: Mm };
   /**
    * How far a cut's floor must stay above the vise jaws' TOPS, mm (#362). PROVISIONAL 1.0, the
    * same clearance the jaw check carried as a bare constant before #345's rule moved the number

@@ -231,6 +231,7 @@ import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 // #966 — `generateGoalProgram` plans every goal job through `planModelCam`, the model-driven CAM
 // engine's one entry point.
 import {
+  DEFAULT_RELEASE_TABS,
   MODEL_STOCK_TO_LEAVE_MM,
   type ModelPlanInput,
   type ModelPlanOutput,
@@ -5249,6 +5250,17 @@ export async function buildModelPlanInputForGoal(
   return {
     geometry,
     setups: bandedSetups,
+    // #943 (10) — a job that STATES its underside says how its freeing tabs are: `underside.tabs`
+    // as written, or none when the block leaves it out (a part freed by the cut alone, the
+    // vendor tray's own side 1). A job with no underside block keeps the pocket chain's default.
+    ...(goal.underside?.kind !== 'flat'
+      ? {}
+      : {
+          freeingTabs:
+            goal.underside.tabs === undefined
+              ? { count: 0, widthMm: DEFAULT_RELEASE_TABS.width, heightMm: DEFAULT_RELEASE_TABS.height }
+              : { count: goal.underside.tabs.count, widthMm: goal.underside.tabs.widthMm, heightMm: goal.underside.tabs.thicknessMm },
+        }),
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness, material: job.stock.material },
     fixture: { mount, envelope },
     cutters,
@@ -5476,7 +5488,18 @@ export async function postModelPlan(
   }
 
   const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
-  const limit: DepthLimit = jobDepthLimit(job);
+  // #943 (10) — A THROUGH FREEING CONTOUR GRANTS THE BOARD'S BREAKTHROUGH AT ITS OWN KERF, and
+  // only there: the plan states that kerf (`OpOutcome.throughKerf`, path + tab spans + radius +
+  // tab height), and the verifier's through mask is built from it — the same mask the item
+  // pipeline builds from its cut-outs. Per SETUP, because a two-setup job's second frame is the
+  // flipped one; a setup with no through contour keeps the plain `jobDepthLimit(job)` it had.
+  const depthLimits: DepthLimit[] = output.perSetup.map((p) => {
+    const cutouts = p.ops.flatMap((op) => (op.kind === 'contour' && op.outcome.throughKerf !== undefined ? [op.outcome.throughKerf] : []));
+    if (cutouts.length === 0) return jobDepthLimit(job);
+    const mask = buildThroughMask({ thickness: job.stock.thickness, breakthrough: job.breakthrough, cutouts });
+    return mask === null ? jobDepthLimit(job) : jobDepthLimit(job, undefined, mask);
+  });
+  const limit: DepthLimit = depthLimits[0] ?? jobDepthLimit(job);
   const ctx: PostContext = {
     jobName: job.name,
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
@@ -5546,7 +5569,7 @@ export async function postModelPlan(
         machine: mill,
         tool: ir.tool,
         dialect: postKey(mill),
-        depthLimit: limit,
+        depthLimit: depthLimits[plan.setupIndex] ?? limit,
         minRapidZ: ir.hopZ,
         ...mountCtx(shop.mount, job.jawClearance),
       });
