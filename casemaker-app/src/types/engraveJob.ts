@@ -1544,8 +1544,8 @@ export interface BracketHold {
   variant: string;
   /**
    * The clamp places, on the free edges: `back` and `right` (the bracket holds the front and the
-   * left). Zero to four, in the order the operator sees them; ZERO is the vendor tray's side-2
-   * hold — double-sided tape under the part, the bracket as the fence only.
+   * left). One to four, in the order the operator sees them; ZERO only when the board under the
+   * blank is taped — the vendor tray's side-2 hold, the bracket as the fence only.
    */
   clamps: ClampPlacement[];
   /**

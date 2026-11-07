@@ -1344,8 +1344,8 @@ const bracketHoldSchema = z.object({
     .array(clampPlacementSchema)
     .max(4)
     .describe(
-      'The clamp places the job was set up with, on the free edges. Zero to four; ZERO means the ' +
-        'part is held by double-sided tape under it (the vendor tray’s own side-2 hold — the bracket is then only the fence).',
+      'The clamp places the job was set up with, on the free edges. One to four; ZERO only when the ' +
+        'board under the blank is taped (the vendor tray’s side-2 hold — the bracket is then only the fence).',
     ),
   obstacles: z
     .array(bracketObstacleSchema)
@@ -2886,6 +2886,21 @@ const engraveJobV3Schema = engraveJobV2Schema
         code: z.ZodIssueCode.custom,
         path: ['stock', 'wall'],
         message: 'a tube states its wall, in mm',
+      });
+    }
+    // #943 (10) — A BRACKET WITH NO CLAMPS IS A HOLD ONLY WHEN THE PART IS TAPED DOWN. #709 keeps
+    // refusing every other 'none': the machine cannot hold a bracket job with neither clamps nor
+    // tape. The vendor tray's side 2 is the tape case — the bracket is the fence, the tape holds.
+    if (
+      job.workholding.kind === 'bracket' &&
+      job.workholding.bracket.clamps.length === 0 &&
+      job.sacrificial.under?.attach !== 'tape'
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['workholding', 'bracket', 'clamps'],
+        message:
+          "a bracket job with no clamps is held by tape: state sacrificial.under.attach 'tape', or fit one to four clamps",
       });
     }
   });
