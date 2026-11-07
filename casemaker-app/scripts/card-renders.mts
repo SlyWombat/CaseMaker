@@ -19,7 +19,7 @@
  * NOT IN THE VITEST RUN: this reads the acceptance's outputs and writes image files.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -116,6 +116,9 @@ function render(card: string, plan: string, pics: string, dest: string, vendor: 
 const args = parseArgs(process.argv.slice(2));
 const destRoot = join(REPO, 'docs', 'bench', 'img', 'cards', args.sha);
 const want = (card: string): boolean => args.cards.length === 0 || args.cards.includes(card);
+/** Every set's status, written beside them: a row whose inputs are absent is STATED, never skipped silently. */
+const status: { card: string; state: 'rendered' | 'missing inputs'; detail: string }[] = [];
+const startedAt = Date.now();
 const sectionsFor = (card: string): { axis: 'x' | 'y'; mm: number }[] => {
   const explicit = args.sections.filter((s) => s.card === card).map((s) => ({ axis: s.axis, mm: s.mm }));
   const standing = STANDING_SECTIONS.filter((s) => s.match(card)).map((s) => ({ axis: s.axis, mm: s.mm }));
@@ -128,12 +131,14 @@ for (const card of ROWS) {
   const plan = join(args.outDir, `${card}-plan.json`);
   const pics = join(args.outDir, `${card}-pics.json`);
   if (!existsSync(plan) || !existsSync(pics)) {
-    process.stdout.write(`${card}: no plan/pics in ${args.outDir} — skipped\n`);
+    process.stdout.write(`${card}: no plan/pics in ${args.outDir} — not rendered\n`);
+    status.push({ card, state: 'missing inputs', detail: `no \`${card}-plan.json\` / \`${card}-pics.json\` in \`${args.outDir}\`` });
     continue;
   }
   const vendorName = VENDOR_NC[card];
   const vendor = args.vendorDir === null || vendorName === undefined ? null : findFile(args.vendorDir, vendorName);
   render(card, plan, pics, join(destRoot, card), vendor, sectionsFor(card));
+  status.push({ card, state: 'rendered', detail: vendor === null ? 'vendor NC not found — the plan panel is ours alone' : 'vendor NC beside ours' });
   made++;
 }
 if (args.figuresOut !== null) {
@@ -142,11 +147,30 @@ if (args.figuresOut !== null) {
     const plan = join(args.figuresOut, `${figure}-plan.json`);
     const pics = join(args.figuresOut, `${figure}-pics.json`);
     if (!existsSync(plan) || !existsSync(pics)) {
-      process.stdout.write(`${figure}: no plan/pics in ${args.figuresOut} — skipped\n`);
+      process.stdout.write(`${figure}: no plan/pics in ${args.figuresOut} — not rendered\n`);
+      status.push({ card: figure, state: 'missing inputs', detail: `no \`${figure}-plan.json\` / \`${figure}-pics.json\` in \`${args.figuresOut}\` (the local-only figure meshes are not on this machine)` });
       continue;
     }
     render(figure, plan, pics, join(destRoot, figure), null, sectionsFor(figure));
     made++;
   }
 }
-process.stdout.write(`card-renders: ${made} set(s) under ${destRoot}\n`);
+{
+  // THE SET'S OWN INDEX: the command line, the sha, the gate version, each row's state (a row whose
+  // inputs are absent is stated here — the set never silently loses a card), and the wall time.
+  const lines = [
+    `# The standing picture set — ${args.sha}`,
+    '',
+    `- SIMULATOR_VERSION: ${SIMULATOR_VERSION}`,
+    `- command: \`npx tsx scripts/card-renders.mts ${process.argv.slice(2).join(' ')}\``,
+    `- wall: ${((Date.now() - startedAt) / 1000).toFixed(0)} s for ${made} set(s)`,
+    '',
+    '| card | state | detail |',
+    '|---|---|---|',
+    ...status.map((s) => `| ${s.card} | ${s.state} | ${s.detail} |`),
+    '',
+  ];
+  mkdirSync(destRoot, { recursive: true });
+  writeFileSync(join(destRoot, 'index.md'), lines.join('\n'));
+}
+process.stdout.write(`card-renders: ${made} set(s) under ${destRoot} (${((Date.now() - startedAt) / 1000).toFixed(0)} s)\n`);

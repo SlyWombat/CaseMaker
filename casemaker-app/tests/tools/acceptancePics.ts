@@ -1169,7 +1169,7 @@ function main(): void {
   }
   // Render every SVG to PNG with the maintainer's Playwright tool.
   for (const f of files) {
-    // The rasteriser rides in the repo (scripts/svg2png.mjs), resolved from THIS file — a scratch
+    // The rasteriser rides in the repo (scripts/bench-svg2png.mjs), resolved from THIS file — a scratch
     // checkout under $HOME was the tool's only route and no other machine has it.
     execFileSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'bench-svg2png.mjs'), f.svg, f.png], { stdio: 'pipe' });
   }
