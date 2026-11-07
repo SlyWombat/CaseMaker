@@ -5173,6 +5173,7 @@ export async function buildModelPlanInputForGoal(
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness, material: job.stock.material },
     fixture: { mount, envelope },
     cutters,
+    chosenTool: tool, // #1044 — the caller's cutter stays a candidate even if its feeds cannot resolve
     tolerances,
     edgeBreak,
     // #1003 — the board's breakthrough, for the FREEING CONTOUR's floor only (a contour cuts through
