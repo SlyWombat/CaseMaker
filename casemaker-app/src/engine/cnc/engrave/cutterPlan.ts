@@ -59,6 +59,7 @@ import { cutterRefusedOnMaterial } from './cutterMaterial';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
 import { jobHasItems, pureGoalObject } from './jobSetup';
 import { goalSideNeedMm } from './goalReach';
+import { NO_TOOL_KEY } from '@/engine/cnc/toolRegistry';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { faceChordMm } from '@/engine/cnc/rotary/faceOps';
 import { fmtMm } from '@/workers/sim/engraveGeometry';
@@ -186,6 +187,26 @@ export function reachOf(entry: ToolLibraryEntry): number | null {
 /** `⌀2 mm` — a sentence's diameter, as `recommendTool` writes it. */
 function dia(v: number): string {
   return `⌀${Number(v.toFixed(3))} mm`;
+}
+
+/**
+ * #1051 — THE MESH GOAL'S BALL SENTENCE. No whole-goal reach claim: the engine (#1037) measures
+ * the finisher against the surfaces it actually cuts, so the panel names the balls it advised
+ * among and says how the engine judges them. `registryStandsIn` is the #1041 fallback — a shop
+ * with no inventory or user records is advised from the registry, and the sentence says so.
+ */
+function meshGoalBallReason(balls: readonly Candidate[], registryStandsIn: boolean): string {
+  const sorted = [...balls].sort((a, b) => b.diameter - a.diameter || (b.reach ?? 0) - (a.reach ?? 0));
+  const named = sorted.slice(0, 3).map((c) => {
+    const flute = c.tool.fluteLength !== null && c.tool.fluteLength > 0 ? ` × ${r3(c.tool.fluteLength)} mm flute` : '';
+    return `${dia(c.diameter)}${flute}`;
+  });
+  const list = sorted.length > 3 ? `${named.join(', ')}, …` : named.join(', ');
+  return (
+    'a mesh goal is surfaced by a ball — ' +
+    (registryStandsIn ? 'no inventory recorded, so the registry stands in; ' : '') +
+    `the engine measures the finishing ball among ${registryStandsIn ? "the registry's" : "the shop's"} balls (${list}) against the surfaces it cuts`
+  );
 }
 
 /** How close a cutter's diameter must be to a cross-hole's to be the one that drills it, mm. */
@@ -595,6 +616,28 @@ export function planCutters(
   const mixedFace = jobHasItems(job) ? faceCutterPick(job, tools, catalogue, conditions, table, true, true) : null;
   const faceToolKey = mixedFace === null ? undefined : mixedFace.entry.key;
 
+  // #1051 — THE PANEL'S ADVISORY FOLLOWS THE ENGINE'S TWO RULES.
+  // (1) OWNED FIRST (#1041): a shop with inventory or user records is advised from THOSE records
+  // (plus the job's own chosen cutter); the catalogue's `cat:` rows are the ideal's, not the
+  // shop's, and the built-ins are the registry's stand-in. Only a shop with neither falls back to
+  // the whole registry — and the sentence says the registry stands in, never a silent catalogue
+  // cutter the bench does not hold.
+  // (2) A MESH GOAL'S BALL IS NOT JUDGED BY THE GOAL'S WHOLE DEPTH (#1037): the engine measures
+  // the finisher per surface, so the advisory drops the "reaches N mm" claim for the depth the
+  // ball never cuts. PNG reliefs and rotary maps keep the reach rule (their engines have no
+  // per-feature judge).
+  const cutterLineGoal = pureGoalObject(job);
+  const meshGoal = cutterLineGoal !== null && cutterLineGoal.format !== 'png' && rotaryMapOf(job) === null;
+  const chosenCutterKey = job.toolKey === NO_TOOL_KEY ? null : job.toolKey;
+  // The SHOP's records decide the fallback — the chosen tool is an exception that joins a shop's
+  // own list, never a record that makes the registry fall back off (#1041's seam rule exactly).
+  const ownedRecords = meshGoal ? tools.filter((e) => e.key.startsWith('inv:') || e.key.startsWith('user:')) : [];
+  const candidateTools =
+    meshGoal && ownedRecords.length > 0
+      ? tools.filter((e) => e.key.startsWith('inv:') || e.key.startsWith('user:') || (chosenCutterKey !== null && e.key === chosenCutterKey))
+      : tools;
+  const registryStandsIn = meshGoal && ownedRecords.length === 0;
+
   const work = kindedWork(job, floors);
   const unassigned: CutterPlan['unassigned'] = [];
   const notes: string[] = [];
@@ -602,7 +645,7 @@ export function planCutters(
 
   const candidates: Candidate[] = [];
   const refusals = new Map<string, string>();
-  for (const entry of tools) {
+  for (const entry of candidateTools) {
     const refusal = materialRefusal(job, entry, catalogue, conditions, table);
     if (refusal !== null) {
       refusals.set(entry.key, refusal);
@@ -617,7 +660,7 @@ export function planCutters(
   }
   /** The first material refusal among the entries of a shape, for a kind that had no pick. */
   const whyNoShape = (shapes: readonly string[]): string => {
-    const first = tools.find((t) => shapes.includes(t.tool.shape) && refusals.has(t.key));
+    const first = candidateTools.find((t) => shapes.includes(t.tool.shape) && refusals.has(t.key));
     return first === undefined ? '' : ` — ${refusals.get(first.key)}`;
   };
 
@@ -685,23 +728,30 @@ export function planCutters(
     // it against the floors it actually cuts, and refuses it there if it cannot.
     const balls = candidates.filter((c) => (c.tool.shape === 'ball' || c.tool.shape === 'bull') && c.diameter > 0);
     const reaching = balls.filter((c) => reaches(c, needed));
-    const pick =
-      bestOf(reaching.filter(budgetOk), deeperFirst) ??
-      bestOf(reaching, smallerFirst) ??
-      bestOf(balls.filter(budgetOk), deeperFirst) ??
-      bestOf(balls, deeperFirst);
+    // #1051 — A MESH GOAL HAS NO WHOLE-GOAL REACH PICK. The engine (#1037) measures the finisher
+    // against the surfaces it actually cuts, so the advisory takes the largest ball that fits the
+    // finishing budget and never claims "reaches N mm" for a depth the ball does not cut. PNG
+    // reliefs and rotary maps keep the reach rule (their engines have no per-feature judge).
+    const pick = meshGoal
+      ? (bestOf(balls.filter(budgetOk), deeperFirst) ?? bestOf(balls, deeperFirst))
+      : (bestOf(reaching.filter(budgetOk), deeperFirst) ??
+        bestOf(reaching, smallerFirst) ??
+        bestOf(balls.filter(budgetOk), deeperFirst) ??
+        bestOf(balls, deeperFirst));
     if (pick !== null) {
       add(
         pick,
         ballWork,
-        reaching.length > 0
-          ? `a 3D goal is surfaced by a ball — ${dia(pick.diameter)} is the largest that reaches ${r3(needed)} mm and fits the finishing budget`
-          : `a 3D goal is surfaced by a ball — ${dia(pick.diameter)}; no ball in the set reaches the goal's ${r3(needed)} mm, so the engine judges its reach per feature (the ball cuts the curved remainder, the flat the freeing contour)`,
+        meshGoal
+          ? meshGoalBallReason(balls, registryStandsIn)
+          : reaching.length > 0
+            ? `a 3D goal is surfaced by a ball — ${dia(pick.diameter)} is the largest that reaches ${r3(needed)} mm and fits the finishing budget`
+            : `a 3D goal is surfaced by a ball — ${dia(pick.diameter)}; no ball in the set reaches the goal's ${r3(needed)} mm, so the engine judges its reach per feature (the ball cuts the curved remainder, the flat the freeing contour)`,
       );
       // #869 — THE ROUGH IS A FLAT, AND ITS OWN PROGRAM. The rule names the flat nearest the
       // ball's size: the finish must lift whatever the rough leaves, and the flat closest to the
       // ball leaves the least extra stock for it. The search measures the alternatives.
-      const rough = goalRoughOptions(job, tools, catalogue, conditions, table, pick.diameter);
+      const rough = goalRoughOptions(job, candidateTools, catalogue, conditions, table, pick.diameter);
       const roughPick = rough?.candidates[0];
       if (roughPick !== undefined) {
         goalRoughKey = roughPick.key;
@@ -711,7 +761,7 @@ export function planCutters(
       }
     } else {
       const balls = candidates.filter((c) => c.tool.shape === 'ball' || c.tool.shape === 'bull').length;
-      const all = tools.filter((t) => t.tool.shape === 'ball' || t.tool.shape === 'bull').length;
+      const all = candidateTools.filter((t) => t.tool.shape === 'ball' || t.tool.shape === 'bull').length;
       for (const w of ballWork) {
         unassigned.push({
           id: w.id,

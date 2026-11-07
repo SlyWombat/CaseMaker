@@ -31,7 +31,7 @@ import {
 } from '@/engine/cnc/engrave/depthBounds';
 import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
-import { TOOL_GROUPS, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { TOOL_GROUPS, cutterNameForKey, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { setupSubstitutionOfferSentence, setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/engrave/substitution';
 import { useHouseStore } from '@/store/houseStore';
@@ -2289,20 +2289,41 @@ export function EngravePanel(): JSX.Element {
       .join(' and ');
     return `${words} from Makera's catalogue`;
   })();
-  // #807 — "no cutter chosen" only when nothing can choose: while the measured search runs (or
-  // its answer is waiting to be applied), the line says the app is choosing.
-  const cutterVerdict =
-    tool !== null
-      ? [toolDisplayName(tool), cutterProvenance, cutterFidelity, catalogueNote, substitutionNote, setupSubstitutionNote === '' ? null : setupSubstitutionNote]
-          .filter((w): w is string => w !== null)
-          .join(' · ')
-      : measuredStatus === 'measuring' || measuredNow !== null || rec !== null
-        ? 'choosing…'
-        : 'no cutter chosen';
-
   // ---- the run (#206) ----------------------------------------------------------------------
 
   const run = useEngraveRunStore();
+  // #1051 — ONCE A PLAN HAS POSTED, THE CUTTER LINE SPEAKS FOR IT: the posted programs' cutters,
+  // in the order they cut, with their registry keys (the display name alone can be ambiguous
+  // between a `cat:` row and the shop's own record). The pre-plan sentence — the rule's or the
+  // search's advice — can name cutters the job does not use, so it is replaced once a result
+  // exists; the screen never shows a cutter the plan did not cut with.
+  const postedCutterLine = ((): string | null => {
+    // A STALE RESULT DOES NOT DESCRIBE THIS JOB: the line falls back to the advice until the plan
+    // is generated again.
+    const programs = run.staleSince === null && run.generated?.ok === true ? run.generated.programs : null;
+    if (programs === null || programs.length === 0) return null;
+    const seen = new Set<string>();
+    const parts: string[] = [];
+    for (const program of programs) {
+      if (seen.has(program.toolKey)) continue;
+      seen.add(program.toolKey);
+      parts.push(`${cutterNameForKey(program.toolKey)} (${program.toolKey})`);
+    }
+    return parts.join(' · ');
+  })();
+  // #807 — "no cutter chosen" only when nothing can choose: while the measured search runs (or
+  // its answer is waiting to be applied), the line says the app is choosing.
+  const cutterVerdict =
+    postedCutterLine !== null
+      ? postedCutterLine
+      : tool !== null
+        ? [toolDisplayName(tool), cutterProvenance, cutterFidelity, catalogueNote, substitutionNote, setupSubstitutionNote === '' ? null : setupSubstitutionNote]
+            .filter((w): w is string => w !== null)
+            .join(' · ')
+        : measuredStatus === 'measuring' || measuredNow !== null || rec !== null
+          ? 'choosing…'
+          : 'no cutter chosen';
+
   const simEnabled = featureSim;
   const running = run.phase === 'generating' || run.phase === 'simulating' || run.phase === 'checking';
 
