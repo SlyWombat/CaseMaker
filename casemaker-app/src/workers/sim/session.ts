@@ -337,6 +337,14 @@ interface LiveColumn {
 }
 type Live = LiveSwept | LivePath | LiveColumn;
 
+/**
+ * #224 — the load's stages as the client states them: `sweep` while the sweep runs, then
+ * `playback` while the anchor chain is built up front. #1048 adds `waiting`: the worker has not
+ * spoken for this load yet, so the load is queued behind other work (the background ideal plan)
+ * rather than stalled — the queue clock's word, never the stall watchdog's.
+ */
+export type SimLoadPhase = 'sweep' | 'playback' | 'waiting';
+
 /** What `load` will accept on top of its arguments (#194). */
 export interface SimLoadOpts {
   /**
@@ -345,6 +353,8 @@ export interface SimLoadOpts {
    */
   stallMs?: number;
   onProgress?: (done: number, total: number) => void;
+  /** #1048 — `waiting` while the load queues, `playback` after the sweep (see {@link SimLoadPhase}). */
+  onPhase?: (phase: SimLoadPhase) => void;
   /**
    * The machine's own coordinate frame, if one has been read from it (#279). Resolved against
    * the profile named by `machineId` — the timeline animates a predicted tool-length probe

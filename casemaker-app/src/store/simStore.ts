@@ -12,7 +12,7 @@
 
 import { featureSim } from '@/platform/features';
 import { create } from 'zustand';
-import { noteProgress as noteFlightProgress } from '@/platform/flightRecorder';
+import { noteProgress as noteFlightProgress, noteStage } from '@/platform/flightRecorder';
 import type { MachineCalibration, PausePoint, Setup } from '@/engine/cnc';
 import { resolveMachine } from '@/engine/cnc/calibration';
 import { MACHINES } from '@/engine/cnc/machine';
@@ -438,6 +438,9 @@ export const useSimStore = create<SimState>()((set, get) => {
         },
         onPhase: (phase) => {
           if (mine === loadSeq) set({ phase });
+          // #1048 — THE LAST BOUNDARY THE WORKER REACHED, in the crash report's own record: a load
+          // that stalls before its first checkpoint names where it got to instead of silence.
+          noteStage('simulate', phase, `load ${phase}`);
         },
         calibration: args.calibration,
         drillPointDefault: args.drillPointDefault,

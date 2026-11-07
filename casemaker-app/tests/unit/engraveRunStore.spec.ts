@@ -2121,15 +2121,51 @@ describe('#986 the background ideal', () => {
     const realLoad = useSimStore.getState().loadProgram;
     useSimStore.setState({ loadProgram: async () => { useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false }); return swept(); } });
     try {
-      const run = useEngraveRunStore.getState().generate();
-      await settle();
-      // The OWNED plan's result is on screen while the ideal is still out.
+      // #1048 — the ideal starts only after the sweep walk, so the RUN resolves first and the
+      // ideal is still out: the owned result is on screen while the card reads comparing.
+      await useEngraveRunStore.getState().generate();
       expect(useEngraveRunStore.getState().generated?.nc).toBe('G90\nM02');
       expect(useEngraveRunStore.getState().idealPlan.status).toBe('comparing');
       releaseIdeal({ tradeoff: { material: false, line: null, differences: [] }, owned: null, ideal: null });
-      await run;
       await settle();
       expect(useEngraveRunStore.getState().idealPlan.status).toBe('ready');
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+    }
+  }, 60_000);
+
+  it('#1048 — the background ideal starts only after the sweep walk', async () => {
+    const order: string[] = [];
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => {
+        order.push('generate');
+        return generatedWithProgram();
+      },
+      engravePlanIdeal: async () => {
+        order.push('ideal');
+        return { tradeoff: { material: false, line: null, differences: [] }, owned: null, ideal: null };
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    const goalForIdeal = {
+      id: 'g', name: 'g', format: 'stl' as const, sha256: 'x', data: '', size: { x: 1, y: 1, z: 1 },
+      position: { x: 0, y: 0, z: 0 }, rotation: 0, enabled: true, role: 'goal' as const,
+    };
+    useEngraveJobStore.setState({ job: { ...useEngraveJobStore.getState().job, targetObject: goalForIdeal, tool: flatEndMill(3.175, { name: '3.175 mm flat end' }) } });
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({
+      loadProgram: async () => {
+        order.push('load');
+        useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false });
+        return swept();
+      },
+    });
+    try {
+      await useEngraveRunStore.getState().generate();
+      // The walk's loads all precede the ideal: the second full plan must not hold the worker
+      // while the run's own sweep is queued behind it (#1048).
+      expect(order.lastIndexOf('load')).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf('ideal'), `call order: ${order.join(' → ')}`).toBeGreaterThan(order.lastIndexOf('load'));
     } finally {
       useSimStore.setState({ loadProgram: realLoad });
     }
@@ -2154,10 +2190,11 @@ describe('#986 the background ideal', () => {
     const realLoad = useSimStore.getState().loadProgram;
     useSimStore.setState({ loadProgram: async () => { useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false }); return swept(); } });
     try {
+      // #1048 — each run's ideal starts after ITS walk; awaiting the run lands the ideal request.
       const runA = useEngraveRunStore.getState().generate();
-      await settle();
+      await runA;
       const runB = useEngraveRunStore.getState().generate();
-      await settle();
+      await runB;
       expect(releases.length).toBeGreaterThanOrEqual(2);
       // A's ideal resolves LAST, after B started: it must be dropped, and B's (still pending) state
       // must stand.

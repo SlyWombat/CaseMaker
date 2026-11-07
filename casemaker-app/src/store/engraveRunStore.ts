@@ -751,6 +751,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // #986 (the ruling) — THE IDEAL RUNS IN THE BACKGROUND: the owned plan has posted, so the card
     // can be read now; the second plan's outcome and the tradeoff arrive behind it and light the
     // card's line up without blocking the operator. No goal or no catalogue → nothing to compare.
+    let idealAfterWalk: (() => void) | null = null;
     if (generated.ok && generated.nc !== null && job.targetObject !== undefined && client.engravePlanIdeal !== undefined) {
       const idealClient = client;
       const idealJob = job;
@@ -775,7 +776,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // The press repeats the SAME computation on demand (E's review, item 3) — never just the
       // recorded choice.
       idealLastRequest = fireIdealCompare;
-      fireIdealCompare();
+      // #1048 — NOT YET. The ideal is a second full plan, and both realms share ONE sim worker:
+      // fired here it held the thread for ~900 s on the tray while the run's own sweep queued
+      // behind it, and the sweep's window read the queue as silence. It starts after the walk.
+      idealAfterWalk = fireIdealCompare;
     }
     // #787 — every finding the run raised, small enough for the report to carry.
     for (const f of generated.findings) noteFinding(f);
@@ -1139,6 +1143,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // count is the RUN's files, not the results: a walk stopped at its first program still names it.
     const simDiagnostics = attributedDiagnostics(summaries, generated.programs.length > 1);
     const firstSwept = summaries.find((s) => s.index === firstEngravingIndex) ?? summaries[0] ?? null;
+
+    // #1048 — THE SWEEP WALK IS DONE; the worker is free. Now the background ideal may have it.
+    idealAfterWalk?.();
 
     if (!outcome.ok) {
       set({
