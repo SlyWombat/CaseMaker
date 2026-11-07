@@ -1,0 +1,8 @@
+# The standing picture set's PICTURES are the artifact. The renderer's intermediates — the 0.1 mm
+# grids (goal.f32/union.f32), the posted programs (.nc), the SVGs the PNGs were rasterised from
+# and grid.json — are reproducible by `scripts/card-renders.mts` and stay out of the tree: they
+# are tens of MB per sha against ~0.5 MB of pictures per card.
+*.f32
+*.nc
+*.svg
+grid.json
