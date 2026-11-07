@@ -385,7 +385,7 @@ export interface SweepOpts {
    * the stock top), so a long rapid-move check is never silence to the client's window. The app's
    * run line reads "checking rapid moves k of M".
    */
-  onPhase?: (phase: 'air') => void;
+  onPhase?: (phase: 'air' | 'air-done') => void;
   /**
    * The machine in use (#204). Its `holder` is the collet nut above the cutter — the widest thing
    * above the tool, and the only part of the spindle that can reach an obstacle the CUTTER has
@@ -836,7 +836,7 @@ export function checkAirMoves(
    */
   proximityMm: number = SPINDLE_OFF_PROXIMITY_FALLBACK_MM,
   /** #1048 — the air phase's own phase signal (see `SweepOpts.onPhase`). */
-  onPhase: ((phase: 'air') => void) | undefined = undefined,
+  onPhase: ((phase: 'air' | 'air-done') => void) | undefined = undefined,
   /** #1048 — a tick every {@link AIR_PROGRESS_EVERY} tested moves, so the phase is never silence. */
   onAirProgress: ((done: number, total: number) => void) | undefined = undefined,
 ): { diagnostics: SweepDiagnostic[]; gouges: Gouge[]; checked: number; rechecked: number; cleared: number; budgetExceeded: boolean } {
@@ -1180,6 +1180,9 @@ export function checkAirMoves(
     for (const r of pf.ramps) r.solid.delete();
   }
   for (const r of retired) r.delete();
+  // #1056 — the phase is OVER, and that is its own fact: silence after this point (the post-loop
+  // meshes) is reported as "after the rapid-move check finished", not as a slow rapid-move check.
+  onPhase?.('air-done');
   return { diagnostics, gouges, checked, rechecked, cleared, budgetExceeded };
 }
 

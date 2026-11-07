@@ -789,6 +789,8 @@ function runProgressWords(
     if (simStatus === 'loading' && simPhase === 'air' && simProgress !== null) {
       return `${where} · checking rapid moves ${grouped(simProgress.done)} of ${grouped(simProgress.total)}`;
     }
+    // #1056 — the check is done; the app is finishing the sweep's meshes.
+    if (simStatus === 'loading' && simPhase === 'air-done') return `${where} · finishing the sweep`;
     if (simStatus === 'loading' && simProgress !== null) {
       const left = timeLeftWords(simProjectionMs, simProgress);
       return `${where} · swept ${grouped(simProgress.done)} of ${grouped(simProgress.total)}${left === null ? '' : ` · ${left}`}`;
@@ -5345,8 +5347,9 @@ export function EngravePanel(): JSX.Element {
                   ? `${runErrors.length} error${runErrors.length === 1 ? '' : 's'} outstanding.`
                   : operatorRunError(firstRunErrorText)}
                 {runErrors.length > 1 && ` (+${runErrors.length - 1} more error${runErrors.length === 2 ? '' : 's'})`}
-                {/* #895 — a stall is a fault, not a slow program: the sentence says so, and the
-                    press simply runs the job again (the simulation stops only on silence). */}
+                {/* #895/#1056 — the sentence says what the app knows: nothing was reported for
+                    the window, and where it last heard from. It never calls the stall a fault;
+                    the press simply runs the job again (the simulation stops only on silence). */}
                 {simStalled && (
                   <>
                     {' '}

@@ -908,6 +908,72 @@ describe('#1048 — the air phase holds the client’s window open', () => {
   });
 });
 
+// #1056 (6b's latent hole) — THE PLAYBACK WARM-UP IS NOT SILENCE TO BE BOUND. The client used to
+// leave its stall clock armed while `simWarmup` ran after the load result had already arrived, so a
+// slow-but-healthy warm-up could terminate the worker. The clock now stops when the load resolves.
+describe('#1056 — a warm-up longer than the window is not a stall', () => {
+  class ReturningWorker {
+    static terminated = 0;
+    static stopped = 0;
+    static warmupCalls = 0;
+    private readonly listeners: ((ev: { data: unknown }) => void)[] = [];
+    private readonly name: string;
+    constructor(_url?: URL | string, options?: { name?: string }) {
+      this.name = options?.name ?? '';
+    }
+    addEventListener(type: string, fn: (ev: { data: unknown }) => void): void {
+      if (type === 'message') this.listeners.push(fn);
+    }
+    removeEventListener(): void {}
+    private reply(id: unknown, value: unknown): void {
+      // Comlink's reply spreads the wire value's own fields beside the id: {id, type: 'RAW', value}.
+      for (const fn of this.listeners) fn({ data: { id, type: 'RAW', value } });
+    }
+    postMessage(message: unknown, transfer?: unknown[]): void {
+      const msg = message as { id: string; type: string; path?: string[] };
+      if (msg.type !== 'APPLY') return;
+      const path = (msg.path ?? []).join('.');
+      if (path === 'simLoad') {
+        // One checkpoint arms the client's stall clock (the hole needs an armed clock), then the
+        // load RESULT lands at once and the warm-up that follows takes longer than the window.
+        const progressPort = (transfer ?? [])[0] as MessagePort | undefined;
+        const progress = progressPort === undefined ? null : (Comlink.wrap(progressPort as never) as unknown as (d: number, t: number) => Promise<void>);
+        // The checkpoint posts first and the load reply follows at once (no waiting on the
+        // proxy's round trip: a loaded machine must not turn the test's own window into the race).
+        void progress?.(1, 3);
+        this.reply(msg.id, { ok: true, count: 3 });
+      } else if (path === 'simWarmup') {
+        ReturningWorker.warmupCalls += 1;
+        setTimeout(() => this.reply(msg.id, undefined), 4000);
+      }
+    }
+    terminate(): void {
+      ReturningWorker.stopped += 1;
+      if (this.name === 'sim') ReturningWorker.terminated += 1;
+    }
+  }
+
+  it('a 4 s warm-up past a 2 s window completes the load without a stall', async () => {
+    const g = globalThis as unknown as { Worker: unknown };
+    const real = g.Worker;
+    ReturningWorker.terminated = 0;
+    ReturningWorker.stopped = 0;
+    ReturningWorker.warmupCalls = 0;
+    // The client caches its worker; another test's must not answer this one.
+    terminateSim();
+    g.Worker = ReturningWorker;
+    try {
+      const r = await loadSim(THREE, setup(), tool, null, { stallMs: 2_000, queueMs: 5_000 });
+      expect(r.ok, JSON.stringify(!r.ok ? r.diagnostics : undefined)).toBe(true);
+      expect(ReturningWorker.warmupCalls, 'the warm-up ran and its reply was waited for').toBe(1);
+      expect(ReturningWorker.terminated, 'no stall, no termination').toBe(0);
+    } finally {
+      g.Worker = real;
+      terminateSim();
+    }
+  });
+});
+
 // A's note (1) on #1048 — THE REAL FAULT PATH AT THE CLIENT LEVEL: the worker reports ONCE (its
 // first checkpoint, through the very proxy the client passes it), then goes silent past the stall
 // window. The load must end in `sweep-stalled` with the worker terminated exactly once — the case
@@ -953,7 +1019,7 @@ describe('#895/#1048 — a worker that speaks once and then goes silent', () => 
       if (r.ok) return;
       expect(r.pathOnly).toBe(false);
       expect(r.diagnostics[0]?.code).toBe('sweep-stalled');
-      expect(r.diagnostics[0]?.message).toMatch(/no progress for/);
+      expect(r.diagnostics[0]?.message).toMatch(/reported nothing for/);
       // The checkpoint was heard: the sentence names where it stopped.
       expect(r.diagnostics[0]?.message).toMatch(/after checkpoint 1 of 35/);
       // #1056 — and it no longer claims a fault: silence alone cannot prove one.

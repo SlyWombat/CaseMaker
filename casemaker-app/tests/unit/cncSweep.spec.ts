@@ -869,7 +869,7 @@ describe('#194: the time budget and progress are part of the contract', () => {
     const ticks: [number, number][] = [];
     let phaseAt: number | null = null;
     const { out } = sweep(src, tool, setup(), {
-      onPhase: (p) => { phases.push(p); phaseAt = ticks.length; },
+      onPhase: (p) => { phases.push(p); if (p === 'air') phaseAt = ticks.length; },
       onProgress: (d, total) => ticks.push([d, total]),
     });
     expect(out.ok).toBe(true);

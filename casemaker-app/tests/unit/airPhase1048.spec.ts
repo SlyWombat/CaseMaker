@@ -32,7 +32,7 @@ describe('#1048 — the column engine’s rapid-move check is its own phase', ()
       onProgress: (d, t) => ticks.push([d, t]),
     });
     expect(out.ok).toBe(true);
-    expect(phases).toEqual(['air']);
+    expect(phases).toEqual(['air', 'air-done']);
     const airTicks = ticks.filter(([, total]) => total > 100);
     expect(airTicks.length, 'the phase ticks while it works').toBeGreaterThanOrEqual(1);
     expect(airTicks[0]![0] % AIR_PROGRESS_EVERY).toBe(0);
@@ -60,11 +60,11 @@ describe('#1048 — the column engine’s rapid-move check is its own phase', ()
     const ticks: [number, number][] = [];
     let phaseAt: number | null = null;
     const out = columnSweep(timeline, tool, s, {
-      onPhase: (p) => { phases.push(p); phaseAt = ticks.length; },
+      onPhase: (p) => { phases.push(p); if (p === 'air') phaseAt = ticks.length; },
       onProgress: (d, total) => ticks.push([d, total]),
     });
     expect(out.ok).toBe(true);
-    expect(phases).toEqual(['air']);
+    expect(phases).toEqual(['air', 'air-done']);
     // Only ticks AFTER the phase opened count: the checkpoint progress that precedes it is not
     // the air phase reporting.
     const airTicks = ticks.slice(phaseAt ?? ticks.length);

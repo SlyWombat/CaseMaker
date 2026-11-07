@@ -589,7 +589,7 @@ export interface ColumnSweepOpts {
   stallMs?: number;
   onProgress?: (done: number, total: number) => void;
   /** #1048 — the air phase's own phase + ticks (see `SweepOpts.onPhase`). */
-  onPhase?: (phase: 'air') => void;
+  onPhase?: (phase: 'air' | 'air-done') => void;
   /** Override the §4.4 sim-resolution estimate (a spec and the probe set this). */
   resolution?: ColumnResolution;
   /**
@@ -2256,6 +2256,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
         if (gouges.length < MAX_GOUGES) gouges.push({ step: mv.step, line: mv.line });
       }
     }
+    opts?.onPhase?.('air-done');
     stats.airMovesChecked = checked;
     if (gouges.length > 0) diagnostics.push({ severity: 'error', code: 'rapid-through-stock', message: `${gouges.length} rapid${gouges.length === 1 ? '' : 's'} pass through material still present at that point in the program (first at line ${gouges[0]?.line})` });
   }

@@ -264,19 +264,28 @@ export function sweepStallMessage(
   stallMs: number,
   done: number,
   total: number,
-  phase: 'sweep' | 'air' = 'sweep',
+  phase: 'sweep' | 'air' | 'air-done' = 'sweep',
 ): string {
-  // #1056 — the sentence names the PHASE it stopped in (the cut sweep, or the rapid-move check),
-  // and states the silence. It no longer claims "a fault, not a slow program": the app cannot
-  // know that from silence alone, and on a stuck-but-healthy worker the cause is ours to find.
+  // #1056 (6b's ruled wording) — WHAT THE APP KNOWS is that nothing was reported for the window,
+  // and the sentence says exactly that, naming the place it last heard from. It never claims a
+  // fault: silence alone cannot prove one, and on a worker that is stuck-but-alive the cause is
+  // the app's to find.
+  const seconds = Math.round(stallMs / 1000);
   const where =
-    total > 0
-      ? phase === 'air'
+    phase === 'air-done'
+      ? ' after the rapid-move check finished'
+      : phase === 'air' && total > 0
         ? ` after checking rapid move ${done} of ${total}`
-        : ` after checkpoint ${done} of ${total}`
-      : '';
-  return `the simulation stalled: no progress for ${Math.round(stallMs / 1000)} s${where}.`;
+        : total > 0
+          ? done >= total
+            ? ' after the last checkpoint'
+            : ` after checkpoint ${done} of ${total}`
+          : '';
+  return `the simulation reported nothing for ${seconds} s${where}.`;
 }
+
+/** #1056 — the current load's own stop, so a superseded load's stall cannot terminate its worker. */
+let activeStop: (() => void) | null = null;
 
 /** What `loadSim` accepts on top of its arguments (#194). */
 export interface SimLoadOpts {
@@ -405,12 +414,18 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
   // because that is the same "one stage of a large job can be a long pass" fact, now said for
   // waiting behind another task instead of for silence inside one.
   const queueMs = opts?.queueMs ?? readDefault(liveShopDefaults(), 'sim.stallMs').value;
+  // #1056 — A NEW LOAD SUPERSEDES AN OLDER ONE'S WATCHDOG. A load whose promise was orphaned (the
+  // app cancels by terminating; a test leaves one pending) kept its clocks armed, and its late
+  // stall would TERMINATE whatever worker is current — killing a fresh, healthy load. Only the
+  // load that is still current may act on its own stall.
+  activeStop?.();
+  let myStop: (() => void) | null = null;
   const clocks = loadStallPolicy(
     queueMs,
     stallMs,
     () => phaseDown?.('waiting'),
     () => {
-      if (settled) return;
+      if (settled || myStop === null || activeStop !== myStop) return;
       settled = true;
       terminateSim();
       resolveStall({
@@ -428,12 +443,15 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
       });
     },
   );
+  myStop = () => clocks.stop();
+  activeStop = myStop;
   clocks.start();
   // #1048 — THE WORKER'S OWN PHASES (the air phase) are messages too: they reach the caller and
   // re-arm the silence clock, exactly as a checkpoint does.
-  let lastPhase: 'sweep' | 'air' = 'sweep';
+  let lastPhase: 'sweep' | 'air' | 'air-done' = 'sweep';
   const workerPhase = (phase: SimLoadPhase): void => {
     if (phase === 'air') lastPhase = 'air';
+    else if (phase === 'air-done') lastPhase = 'air-done';
     phaseDown?.(phase);
     clocks.heard();
   };
@@ -496,6 +514,10 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
           // keeps this promise pending (so the UI stays "loading") until the anchor chain is
           // built; only then does the caller go ready and accept scrubs.
           if (r.ok && r.count > 0) {
+            // #1056 (6b's latent hole) — THE LOAD IS DONE, SO THE SILENCE CLOCK HAS NOTHING LEFT
+            // TO BOUND: it used to stay armed through the playback warm-up and could fire on a
+            // healthy, silent warm-up. The warm-up has its own progress; stop the clocks here.
+            clocks.stop();
             phaseDown?.('playback');
             await getSimApi().simWarmup();
           }
@@ -509,6 +531,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
     return result;
   } finally {
     clocks.stop();
+    if (activeStop === myStop) activeStop = null;
   }
 }
 

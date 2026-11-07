@@ -59,16 +59,23 @@ describe('#895 — the progress watchdog', () => {
     expect(fired).toBe(0);
   });
 
-  it('#1056 — says it stalled and names the PHASE it stopped in, without a fault verdict', () => {
-    expect(sweepStallMessage(30_000, 49_915, 341_707)).toBe(
-      'the simulation stalled: no progress for 30 s after checkpoint 49915 of 341707.',
+  it('#1056 (6b’s wording) — what the app knows: nothing was reported for the window, and where it last heard from', () => {
+    expect(sweepStallMessage(30_000, 7, 35)).toBe(
+      'the simulation reported nothing for 30 s after checkpoint 7 of 35.',
     );
-    // #1056 — the rapid-move check is its own phase: the sentence names it, not the last checkpoint.
-    expect(sweepStallMessage(30_000, 264, 1_048, 'air')).toBe(
-      'the simulation stalled: no progress for 30 s after checking rapid move 264 of 1048.',
+    // The last checkpoint is its own place: there are none after it.
+    expect(sweepStallMessage(30_000, 35, 35)).toBe(
+      'the simulation reported nothing for 30 s after the last checkpoint.',
     );
-    // Before the first report there is no place to name.
-    expect(sweepStallMessage(30_000, 0, 0)).toBe('the simulation stalled: no progress for 30 s.');
+    // The rapid-move check is its own phase, mid-check and (the ruled first sentence) once done.
+    expect(sweepStallMessage(30_000, 12, 35, 'air')).toBe(
+      'the simulation reported nothing for 30 s after checking rapid move 12 of 35.',
+    );
+    expect(sweepStallMessage(30_000, 35, 35, 'air-done')).toBe(
+      'the simulation reported nothing for 30 s after the rapid-move check finished.',
+    );
+    // Before any report there is no place to name.
+    expect(sweepStallMessage(30_000, 0, 0)).toBe('the simulation reported nothing for 30 s.');
   });
 });
 
