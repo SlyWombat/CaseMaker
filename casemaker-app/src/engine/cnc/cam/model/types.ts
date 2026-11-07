@@ -79,6 +79,9 @@ export type PlanFindingCode =
   // #1042 — the job's chosen cutter is not in the shop's inventory; it cuts because the job names
   // it, and the plan says so (a warning: the bench cuts owned cutters).
   | 'goal-cutter-not-owned'
+  // #1037 — no cutter in the set reaches a curved region's floor: the finish does not post the
+  // region, and the sentence names the region, the floor and the finisher's usable length.
+  | 'goal-finish-unreachable'
   // #1005 — the mould's own four. Rim and floor are the goal validator's
   // (`validateGoalObject`); one-sided and no-draft are the plan's, from its own solid.
   | 'goal-mold-rim'

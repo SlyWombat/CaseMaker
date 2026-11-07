@@ -1445,6 +1445,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       pockets: noFlatFallback ? null : {
         ...(depthBandMm === undefined ? {} : { depthBandMm }),
         houseFlats: flats,
+        houseAll: input.cutters.house,
         ...(input.sacrificialBreakthroughMm === undefined ? {} : { sacrificialBreakthroughMm: input.sacrificialBreakthroughMm }),
         // #975 — the V bits are the pocket chain's last resort: a pocket no flat covers gets the
         // narrowest V whose tip fits the stroke and whose leg reaches the floor, floor-correct.
@@ -2187,6 +2188,13 @@ export interface PlanPocketsOptions {
    * net for everything else.
    */
   sacrificialBreakthroughMm?: number;
+  /**
+   * #1037 — THE WHOLE HOUSE, unfiltered. `houseFlats` is the chain's own candidate list (flats with
+   * a stated cutting diameter); the `goal-not-freed` warning must be able to name a house flat that
+   * REACHES the profile but is not a chain candidate (no stated diameter), or its sentence would
+   * call a set with a reaching flute "short". Absent: `houseFlats` is used.
+   */
+  houseAll?: readonly Tool[];
   /** House cutters, largest first is NOT required — #961's `chooseSequence` ranks by cost, not list order. */
   houseFlats: readonly Tool[];
   /**
@@ -3104,6 +3112,41 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #992 — the SAME facts, typed: code, severity and count, so the seam can route them. `notes`
   // keeps every string exactly as before (the failure path joins it, the acceptance reads it).
   const statements: PlanStatement[] = [];
+  // #1037 — A PLAN THAT DOES NOT FREE THE PART SAYS SO, WITH THE NUMBERS. When the demand carries
+  // a real contour (`tree.contour.synthetic` false) and the CHOSEN sequence has no contour step —
+  // no link's stated flute reaches the profile's floor — the profile is not cut and the part stays
+  // attached to the stock. The reach numbers come from the STATED flutes only (the owned cutters
+  // carry no ids; no catalogue row is read, 6b's rule): the profile's floor and the longest stated
+  // flute among the set's flats. The old behaviour was silence, and the whole-goal reach gate used
+  // to mask it on the model path (#1037). A job that never frees a part (no contour in the demand)
+  // is untouched.
+  {
+    const contourFeature = features.find((f) => f.kind === 'contour');
+    if (contourFeature !== undefined && !choice.steps.some((step) => step.kind === 'contour')) {
+      const floorMm = Number(contourFeature.depthMm.toFixed(3));
+      const stated = (opts.houseAll ?? cutters.house).filter((t) => t.shape === 'flat' && t.fluteLength !== null);
+      const longest = stated.reduce<Tool | null>(
+        (best, t) => (best === null || (t.fluteLength ?? 0) > (best.fluteLength ?? 0) ? t : best),
+        null,
+      );
+      const diaWords = (t: Tool): string => `⌀${Number((t.diameter ?? t.tipDiameter ?? 0).toFixed(3))} flat`;
+      // THE CAUSE HAS TO BE TRUE (the Manager's review): a house flat whose stated flute DOES reach
+      // the floor but no step of the chosen chain covers the profile is a different fact from "the
+      // set's longest flute is short" — say which, or the numbers would contradict themselves
+      // ("floor 27.2 … longest stated flute 42 mm").
+      const text =
+        longest !== null && (longest.fluteLength ?? 0) + 1e-9 >= contourFeature.depthMm
+          ? `the chosen chain does not free the part: the profile's floor is ${floorMm} mm and the ${diaWords(longest)} states a ${longest.fluteLength} mm flute that reaches it, but no step of the chosen chain covers the profile — choose a chain that frees it, or free it by hand`
+          : `the part is not freed by this plan: the profile's floor is ${floorMm} mm and ${
+              longest === null
+                ? 'no flat in the set states a flute'
+                : `the longest stated flute in the set is ${longest.fluteLength} mm (${diaWords(longest)})`
+            }, so no freeing contour is cut and the part stays attached to the stock — ` +
+            `use a flat with a stated flute ≥ ${floorMm} mm, or free it by hand`;
+      statements.push({ severity: 'warning', code: 'goal-not-freed', count: 1, ids: [contourFeature.id], text });
+      notes.push(text);
+    }
+  }
   // #1019 — THE POCKETS NO CUTTER CAN ENTER ARE STATED even when nothing else is planned. The
   // search carries them as its own sentences (id, opening, the set it was measured against); one
   // statement per cause with the count (#962), the ids as the cause's pockets, and a single
@@ -3844,33 +3887,70 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       entry.maxSlope = Math.max(entry.maxSlope, roughRegion.slopeDeg[1]);
       finishKinds.set(finishKind, entry);
     }
-    attempt('finish', finishCutter, ref, () => finish({
-      cutter: finishCutter,
-      region: roughRegion,
-      regionRef: roughRef,
-      clSurface: clBall(),
-      kind: finishKind,
-      mesh: opts.geometry.triangles,
-      scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
-      ...(ball === undefined ? { flatFallback: true } : {}),
-      maskCells,
-      // #962 — the material field's answers past the region's own reach (the linker's disc and the
-      // down-leg floor reach up to a cutter radius outside it): the goal/mesh top there, which is
-      // the honest bound a wall or land beside a low region demands, and the stock top where the
-      // mesh is silent. The region's own zTop is NOT that bound — a neighbouring wall can out-top
-      // it, and a rapid floored at zTop would run into the wall. In this datum (every Z rebased by
-      // −stockTop) the stock top is 0.
-      materialTopAt: designTopAt,
-      stockTopZMm: 0,
-      stepDownMm: depth,
-      feeds: feedsOf(paramsFor(finishCutter)),
-      safeZMm: opts.safeZMm,
-      hopZMm: opts.hopZMm,
-      toolNumber: opts.toolNumberFor(finishCutter),
-      spindleRpm: paramsFor(finishCutter).rpm,
-      air: opts.air,
-      rapid: opts.rapid,
-    }));
+    // #1037 (6b's ruling, 2026-11-07) — THE FINISH'S OWN REACH RULE, the rough's and the chain's:
+    // a finisher is assigned a region only if its usable length (shoulder, else flute) reaches the
+    // depth the finish would cut. A region it cannot is NOT finished — no move of it is posted —
+    // and the plan states it with its numbers. An unstated length is an unknown reach and still
+    // runs (#1019: the sweep judges it), and there is NO automatic band — `cutWithinReach` stays
+    // the operator's own choice. The rough above keeps its own rule: it may still take the region.
+    //
+    // THE MEASURE IS THE MOVES IT WOULD POST, not the region's own zBottom: a finish rides the CL,
+    // and over a vertical wall the CL stands at the wall's top edge, so a region whose design floor
+    // is 24 mm down is finished entirely near the top (the M1 tray's curved-14/15 — the 22 mm ball
+    // finishes them at −4.2). Judging the region's floor instead would skip two regions the tray
+    // has always cut.
+    let finishOutcome: OpOutcome | null = null;
+    let finishError: string | null = null;
+    try {
+      finishOutcome = finish({
+        cutter: finishCutter,
+        region: roughRegion,
+        regionRef: roughRef,
+        clSurface: clBall(),
+        kind: finishKind,
+        mesh: opts.geometry.triangles,
+        scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
+        ...(ball === undefined ? { flatFallback: true } : {}),
+        maskCells,
+        // #962 — the material field's answers past the region's own reach (the linker's disc and the
+        // down-leg floor reach up to a cutter radius outside it): the goal/mesh top there, which is
+        // the honest bound a wall or land beside a low region demands, and the stock top where the
+        // mesh is silent. The region's own zTop is NOT that bound — a neighbouring wall can out-top
+        // it, and a rapid floored at zTop would run into the wall. In this datum (every Z rebased by
+        // −stockTop) the stock top is 0.
+        materialTopAt: designTopAt,
+        stockTopZMm: 0,
+        stepDownMm: depth,
+        feeds: feedsOf(paramsFor(finishCutter)),
+        safeZMm: opts.safeZMm,
+        hopZMm: opts.hopZMm,
+        toolNumber: opts.toolNumberFor(finishCutter),
+        spindleRpm: paramsFor(finishCutter).rpm,
+        air: opts.air,
+        rapid: opts.rapid,
+    });
+    } catch (err) {
+      finishError = err instanceof Error ? err.message : String(err);
+    }
+    if (finishError !== null) {
+      // The attempt's own contract: a throwing stage does not sink the plan (#959 item 5).
+      unplanned.push({ kind: 'finish', cutterKey: cutterKeyOf(finishCutter), regionIds: [ref.id], reason: finishError });
+    } else {
+      let deepestZ = 0;
+      for (const operation of finishOutcome!.ir.operations) for (const move of operation.moves) deepestZ = Math.min(deepestZ, move.z);
+      const finisherReach = finishCutter.shoulderLength ?? finishCutter.fluteLength;
+      const cutFloorMm = Number((-deepestZ).toFixed(1));
+      if (finisherReach !== null && cutFloorMm - finisherReach > 1e-6) {
+        const cutterName = finishCutter.name || finishCutter.shape;
+        const text =
+          `"${region.id}": not finished — floor ${cutFloorMm} mm below the stock top, the ${cutterName}'s usable length ${finisherReach} mm, no cutter in the set reaches it — use a longer-flute cutter, or let a ball finish it`;
+        notes.push(text);
+        statements.push({ severity: 'warning', code: 'goal-finish-unreachable', count: 1, ids: [region.id], text });
+        // No move of the region is posted: the rest and pencil passes ride this finish's CL.
+        continue;
+      }
+      pushStage('finish', ref, finishOutcome!);
+    }
 
     let restBallCl: ReturnType<typeof clSurface> | undefined;
     // 3b. THE REST BALL (#965, the review session's ruling item 3.1): where the ball's OWN CL still

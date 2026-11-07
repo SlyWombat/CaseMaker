@@ -678,10 +678,26 @@ export function planCutters(
     };
     const budgetOk = (c: Candidate): boolean =>
       coveredCount === null || coveredCount * stencilCells(c.diameter) <= DEFAULT_MAX_FINISH_TIP_OPS;
-    const balls = candidates.filter((c) => (c.tool.shape === 'ball' || c.tool.shape === 'bull') && c.diameter > 0 && reaches(c, needed));
-    const pick = bestOf(balls.filter(budgetOk), deeperFirst) ?? bestOf(balls, smallerFirst);
+    // #1037 — THE GOAL'S DEPTH IS NOT THE BALL'S. The model engine assigns cutters per feature
+    // (`cam/model/sequence.ts depthRefusal`): the ball finishes the curved remainders, and the
+    // goal's whole depth belongs to its flat/contour. A ball that reaches is still preferred, but
+    // when none reaches the goal's depth the largest is still the goal's ball — the engine judges
+    // it against the floors it actually cuts, and refuses it there if it cannot.
+    const balls = candidates.filter((c) => (c.tool.shape === 'ball' || c.tool.shape === 'bull') && c.diameter > 0);
+    const reaching = balls.filter((c) => reaches(c, needed));
+    const pick =
+      bestOf(reaching.filter(budgetOk), deeperFirst) ??
+      bestOf(reaching, smallerFirst) ??
+      bestOf(balls.filter(budgetOk), deeperFirst) ??
+      bestOf(balls, deeperFirst);
     if (pick !== null) {
-      add(pick, ballWork, `a 3D goal is surfaced by a ball — ${dia(pick.diameter)} is the largest that reaches ${r3(needed)} mm and fits the finishing budget`);
+      add(
+        pick,
+        ballWork,
+        reaching.length > 0
+          ? `a 3D goal is surfaced by a ball — ${dia(pick.diameter)} is the largest that reaches ${r3(needed)} mm and fits the finishing budget`
+          : `a 3D goal is surfaced by a ball — ${dia(pick.diameter)}; no ball in the set reaches the goal's ${r3(needed)} mm, so the engine judges its reach per feature (the ball cuts the curved remainder, the flat the freeing contour)`,
+      );
       // #869 — THE ROUGH IS A FLAT, AND ITS OWN PROGRAM. The rule names the flat nearest the
       // ball's size: the finish must lift whatever the rough leaves, and the flat closest to the
       // ball leaves the least extra stock for it. The search measures the alternatives.
