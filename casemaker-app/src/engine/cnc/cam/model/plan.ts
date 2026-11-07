@@ -394,6 +394,20 @@ export interface ModelPlanOutput {
    * rung whose own leftover is under the shop's visibility thresholds). Never a plan candidate.
    */
   ladderRows?: LadderRow[];
+  /**
+   * #1046 — WALL TIME, IN THE DUMP ONLY. `planMs` is the whole plan's; `finishStageMs` is the
+   * curved finish attempts' (the same quantity a ladder re-run repeats per rung). No statement,
+   * NC byte or card line reads them: the run-sheet press uses them to state the ladder's expected
+   * cost BEFORE running it, from the last Generate's measured numbers (never a constant).
+   */
+  planMs?: number;
+  finishStageMs?: number;
+  /**
+   * #1046 — the finishing ball the rest statement judged, mm: the `D_finish` in the ladder's cost
+   * estimate (Σ√(D_finish/d) per rung). Stated here because the plan is where `finishingBallOf`
+   * runs; a reader of the result cannot recover it from the cutters' keys.
+   */
+  finishBallDiameterMm?: number;
 }
 
 /**
@@ -649,6 +663,8 @@ function describeRegistration(setupIndex: number, registration: SetupRegistratio
  * house flats only) — the plan says that too when a caller supplies one.
  */
 export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
+  // #1046 — the plan's own wall time, for the ladder's cost estimate (the dump only).
+  const planStartedAt = performance.now();
   const tl = await getToplevel();
   const offset = makeClipperOffset(tl);
   const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
@@ -748,6 +764,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           return { leftoverCells: leftover, coveredCells: covered, cellAreaMm2: coverageGoal.pitch * coverageGoal.pitch, leftoverAboveMm };
         };
   const perSetup: SetupPlan[] = [];
+  // #1046 — the curved finish attempts' wall time over every setup (the ladder's repeated stage).
+  let finishStageMs = 0;
   /** #1028 — the last setup's measured ladder rows, when `restLadder` asked for them. */
   let ladderRowsAll: LadderRow[] | undefined;
   // #965 registration — setup 0's own recognised tree is the document-frame ground truth every
@@ -1895,6 +1913,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       unplanned: result.unplanned,
       choice: result.choice,
     });
+    finishStageMs += result.finishStageMs;
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 1 });
   }
   // #961 (the card slice) — THE PLAN'S OWN OUTCOME, from the same stamping the picker already uses.
@@ -1949,10 +1968,37 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // same list); absent when the ladder did not run.
   const result: ModelPlanOutput = outcome === undefined ? { perSetup } : { perSetup, outcome };
   if (ladderRowsAll !== undefined) result.ladderRows = ladderRowsAll;
+  // #1046 — the timing read (dump only) and the finishing ball the ladder's estimate scales.
+  result.planMs = Math.round(performance.now() - planStartedAt);
+  result.finishStageMs = Math.round(finishStageMs);
+  const finishBall = finishingBallOf(perSetup);
+  const finishBallD = finishBall === null ? null : cuttingDiameter(finishBall);
+  if (finishBallD !== null && finishBallD !== undefined && finishBallD > 0) result.finishBallDiameterMm = finishBallD;
   return result;
 }
 
 const allPockets = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [n, ...allPockets(n.children)]);
+
+/** #1046 — the standard rungs the ladder measures (plan.ts's own ladder loop filters by diameter). */
+export const REST_LADDER_RUNGS_MM = [4, 3, 2, 1.5, 1, 0.5] as const;
+
+/**
+ * #1046 — THE LADDER'S EXPECTED COST, ms, from a plan the last Generate measured: the owned plan
+ * again PLUS Σ√(D_finish/d) × the finish stage, over the rungs finer than the finishing ball (the
+ * #1028 shape — a rung's finish scales with the cutter diameter's square root). NULL when the
+ * plan carries no timing (a reloaded job, an older result): the press then says "run Generate
+ * first" rather than quoting a constant.
+ */
+export function restLadderEstimateMs(
+  plan: Pick<ModelPlanOutput, 'planMs' | 'finishStageMs' | 'finishBallDiameterMm'>,
+): number | null {
+  const { planMs, finishStageMs, finishBallDiameterMm } = plan;
+  if (planMs === undefined || finishStageMs === undefined || finishBallDiameterMm === undefined) return null;
+  if (!(finishBallDiameterMm > 0)) return null;
+  const rungs = REST_LADDER_RUNGS_MM.filter((r) => r < finishBallDiameterMm - 1e-9);
+  const scale = rungs.reduce((n, r) => n + Math.sqrt(finishBallDiameterMm / r), 0);
+  return planMs + scale * finishStageMs;
+}
 
 /** #1023 — the finishing ball a plan actually ran: the smallest-diameter ball among its programs. */
 function finishingBallOf(setups: readonly SetupPlan[]): Tool | null {
@@ -3528,6 +3574,8 @@ export interface PlanCurvedOptions {
 
 export interface PlanCurvedResult {
   ops: PlannedOp[];
+  /** #1046 — wall time of the finish attempts (ms), for the plan's own timing read. */
+  finishMs: number;
   /** Statements the plan owes the operator: nothing here is silent. */
   notes: string[];
   /** #992 — `notes`, typed: one statement per cause with its code, severity and count. */
@@ -3567,6 +3615,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   const notes: string[] = [];
   // #992 — the SAME facts, typed (codes, severities, counts), for the seam to route.
   const statements: PlanStatement[] = [];
+  // #1046 — the finish attempts' wall time, carried on the result for the ladder's cost estimate.
+  let finishMs = 0;
   // THE CURVED PROPERTY SEEDS FOUND THIS: some stages legitimately have nothing to cut (the pencil
   // on a surface with no creases, a rough whose mask is empty), and an op that emitted no moves was
   // still pushed — then posted as a program `postZ1` refuses ("no operation with any moves").
@@ -3932,6 +3982,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       entry.maxSlope = Math.max(entry.maxSlope, roughRegion.slopeDeg[1]);
       finishKinds.set(finishKind, entry);
     }
+    const finishStartedAt = performance.now();
     attempt('finish', finishCutter, ref, () => finish({
       cutter: finishCutter,
       region: roughRegion,
@@ -3959,6 +4010,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       air: opts.air,
       rapid: opts.rapid,
     }));
+    finishMs += performance.now() - finishStartedAt;
 
     let restBallCl: ReturnType<typeof clSurface> | undefined;
     // 3b. THE REST BALL (#965, the review session's ruling item 3.1): where the ball's OWN CL still
@@ -4335,7 +4387,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // #992 — which finish mode ran, and at what scallop: a fact of the run with no action.
     statements.push({ severity: 'info', code: 'goal-finish-mode', count: entry.count, text });
   }
-  return { ops, notes, statements, clGrid, unplanned };
+  return { ops, notes, statements, clGrid, finishMs, unplanned };
 }
 
 /**
@@ -4410,6 +4462,8 @@ export interface PlanTreeResult {
   choice: SequenceChoice;
   /** #1021 — the floor strips this plan built (and the ones nothing can reach), when it asked. */
   floorStrips?: PlanningFloorStrips;
+  /** #1046 — the curved finish attempts' wall time (ms), summed from the curved pipeline. */
+  finishStageMs: number;
 }
 
 /**
@@ -4578,6 +4632,7 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
     statements: [...pocketResult.statements, ...curvedResult.statements],
     unplanned: [...pocketResult.unplanned, ...curvedResult.unplanned],
     choice: pocketResult.choice,
+    finishStageMs: curvedResult.finishMs,
     ...(stripped === undefined ? {} : { floorStrips: stripped }),
   };
 }

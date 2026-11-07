@@ -141,6 +141,8 @@ export type EngraveRunClient = {
      * library). Absent means no ideal: `planIdeal` stays null and only the owned plan is run.
      */
     catalogueTools?: readonly Tool[],
+    /** #1046 — the virtual ladder, on demand (the run sheet's press). Off/absent: unchanged. */
+    restLadder?: boolean,
   ) => Promise<EngraveGenerated>;
   // #924 activation — the generator's own raw design items ride the oracle call the same way
   // `predicted` does; additive, so a caller that sends none runs exactly as it did before.
@@ -431,7 +433,11 @@ export interface EngraveRunState {
    */
   simStopped: boolean;
   /** Run the whole pipeline for the job as it is NOW. `surface` (#608) re-posts against a tilt. */
-  generate: (surface?: SurfacePostFit | null) => Promise<void>;
+  /**
+   * #1046 — `restLadder` asks the OWNED plan to measure the standard rungs on this run (the run
+   * sheet's press); absent, the run is byte-identical to the pre-#1046 one.
+   */
+  generate: (surface?: SurfacePostFit | null, opts?: { restLadder?: boolean }) => Promise<void>;
   /** #893 — simulate and check the program already generated, without generating again. */
   simulate: () => Promise<void>;
   /**
@@ -510,7 +516,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
   // long before the ideal (minutes later) resolves, so the ideal would always be dropped.
   let runEpoch = 0;
 
-  async function run(surface: SurfacePostFit | null = null, opts: { simulateOnly?: boolean } = {}): Promise<void> {
+  async function run(surface: SurfacePostFit | null = null, opts: { simulateOnly?: boolean; restLadder?: boolean } = {}): Promise<void> {
     // #893 — SIMULATE ONLY: the program is already this job's, so the run starts at the sweep.
     // A stale program (or one that never posted) has nothing this press can honestly check.
     const simulateOnly = opts.simulateOnly === true;
@@ -701,7 +707,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       try {
         // #961 — the ideal plan's candidate set: the app's own tool library (the same list every
         // picker shows, the house `cat:` rows included). The worker cannot see it from its realm.
-        generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop, onProgress, getTools().map((entry) => entry.tool));
+        generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop, onProgress, getTools().map((entry) => entry.tool), opts.restLadder === true);
       } finally {
         clearStall();
       }
@@ -1238,13 +1244,13 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     comparePlans: () => {
       idealLastRequest?.();
     },
-    generate: async (surface?: SurfacePostFit | null) => {
+    generate: async (surface?: SurfacePostFit | null, opts?: { restLadder?: boolean }) => {
       const token = Symbol('generate');
       runHold = token;
       runEpoch += 1;
       useEngravePreviewStore.getState().holdMeasurement();
       try {
-        await run(surface ?? null);
+        await run(surface ?? null, opts === undefined ? {} : { ...opts });
       } finally {
         // A newer run (or a cancel) may own the hold by now: only its owner releases it.
         if (runHold === token) {

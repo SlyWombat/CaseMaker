@@ -5582,9 +5582,16 @@ export async function generateGoalProgram(
     /** #961 — the ideal's candidate set from the caller; absent means no ideal (see
      * `buildModelPlanInputForGoal`'s own param of the same name). */
     catalogueTools?: readonly Tool[];
+    /**
+     * #1046 — THE VIRTUAL LADDER, ON DEMAND. The run-sheet press and the CLI's `--rest-ladder`
+     * ask the OWNED plan to measure the standard rungs (`PlanModelCamOptions.restLadder`); the
+     * ideal is never re-planned with it (`planTwoOutcomes` keeps `restLadder: false` on the
+     * reference run). Absent/false: the pre-#1046 plan, byte-identical.
+     */
+    restLadder?: boolean;
   },
 ): Promise<EngraveGenerated> {
-  const { shop, sideFace, catalogueTools } = opts;
+  const { shop, sideFace, catalogueTools, restLadder } = opts;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -5753,7 +5760,7 @@ export async function generateGoalProgram(
   let planIdeal: ModelPlanOutput | null = null;
   let planTradeoff: PlanTradeoff | null = null;
   try {
-    const two = await planTwoOutcomes(input);
+    const two = await planTwoOutcomes(input, restLadder === true ? { restLadder: true } : {});
     // The operator's recorded choice is what cuts (`planChoiceOf` reads it, owned by default); the
     // ideal posts only when it exists.
     const chosenIdeal = planChoiceOf(job) === 'ideal' && two.ideal !== null;
@@ -5791,6 +5798,8 @@ async function generateGoalPrograms(
   shop: EngraveShopOpts,
   // #961 — every side's plan carries the same ideal candidate set from the caller.
   catalogueTools?: readonly Tool[],
+  // #1046 — and the same ladder choice: the press/flag asks every side's OWNED plan to measure.
+  restLadder?: boolean,
 ): Promise<EngraveGenerated> {
   // A goal program's check is its `surfaceCheck` (there is no verifier report), and the single-goal
   // path already builds each program with it — so each side's programs are those programs with the
@@ -5840,12 +5849,12 @@ async function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools });
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(restLadder === true ? { restLadder: true } : {}) });
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
   for (const side of sides.slice(1)) {
-    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools });
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(restLadder === true ? { restLadder: true } : {}) });
     const sideList = sidePrograms(one, side);
     if (sideList === null) return { ...one, programs };
     programs.push(...sideList);
@@ -6446,6 +6455,12 @@ export async function engraveGenerate(
    * owned plan is run.
    */
   catalogueTools?: readonly Tool[],
+  /**
+   * #1046 — THE VIRTUAL LADDER, ON DEMAND (the run-sheet press, the CLI's `--rest-ladder`). The
+   * OWNED plan measures the standard rungs; the ideal reference is never re-planned with it, and
+   * with the flag off every byte of the plan is unchanged.
+   */
+  restLadder?: boolean,
 ): Promise<EngraveGenerated> {
   onProgress?.({ stage: 'prepare', label: 'reading the job' });
   // #786 slice 4c-2 — the same catalogue fill as `engraveRegions`, applied HERE as well so the
@@ -6602,7 +6617,7 @@ export async function engraveGenerate(
           ],
         };
       }
-      return { ...(await generateGoalPrograms(job, sides, tool, calibration, shop, catalogueTools)), surface: null };
+      return { ...(await generateGoalPrograms(job, sides, tool, calibration, shop, catalogueTools, restLadder)), surface: null };
     }
   }
   const goal = job.setups === undefined ? pureGoalObject(job) : null;
@@ -6615,7 +6630,7 @@ export async function engraveGenerate(
     }
     // #623 — the surface-3D goal path posts flat (it never lifts feeds), so its package claims no
     // surface: the caller judges it in the work frame, which is the frame it was posted in.
-    return { ...(await generateGoalProgram(job, goal, tool, calibration, { shop, catalogueTools })), surface: null };
+    return { ...(await generateGoalProgram(job, goal, tool, calibration, { shop, catalogueTools, ...(restLadder === true ? { restLadder: true } : {}) })), surface: null };
   }
 
   // #419 J3 — A JOB IS A LIST OF PROGRAMS.

@@ -301,12 +301,14 @@ const api = {
      * she has; absent means no ideal (`planIdeal` null) and the second plan is skipped.
      */
     catalogueTools?: readonly Tool[],
+    /** #1046 — the virtual ladder, on demand (the run-sheet press). Off/absent: unchanged bytes. */
+    restLadder?: boolean,
   ): Promise<EngraveGenerated> {
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
     // #896 — every stage report names this worker's heap too (see `workerMemoryMb`).
     const withMemory =
       onProgress === undefined ? undefined : (progress: EngraveProgress): void => onProgress({ ...progress, memoryMB: workerMemoryMb() });
-    return await runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop, withMemory, catalogueTools);
+    return await runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop, withMemory, catalogueTools, restLadder);
   },
   /**
    * The volumetric oracle (#206 §3) against the program CURRENTLY loaded in the session. The
