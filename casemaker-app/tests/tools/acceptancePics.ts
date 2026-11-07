@@ -25,6 +25,7 @@
  * gate.
  */
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import path from 'node:path';
@@ -1168,7 +1169,9 @@ function main(): void {
   }
   // Render every SVG to PNG with the maintainer's Playwright tool.
   for (const f of files) {
-    execFileSync(process.execPath, [path.join(process.env.HOME ?? '', 'projects', 'cm-gate2', 'casemaker-app', 'svg2png.tmp.mjs'), f.svg, f.png], { stdio: 'pipe' });
+    // The rasteriser rides in the repo (scripts/svg2png.mjs), resolved from THIS file — a scratch
+    // checkout under $HOME was the tool's only route and no other machine has it.
+    execFileSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'svg2png.mjs'), f.svg, f.png], { stdio: 'pipe' });
   }
   process.stdout.write(`${files.map((f) => f.png).join('\n')}\n`);
 }
