@@ -42,6 +42,7 @@ import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
 import { fullyReachable, pocket } from './ops/pocket';
+import { assertOwnPocketMetadata } from './planMeta';
 import { roughLeftAbove } from './ops/rough';
 import { clSurface, creaseFits } from './clsurface';
 import { dropCutterHeight, profileOf, type CutterProfile, type DropCutterMesh } from './dropcutter';
@@ -1489,6 +1490,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // count); the per-op strings above stay in `notes` as the dump's detail.
     const emptyOpGroups = new Map<string, { kind: string; count: number; ids: string[] }>();
     for (const op of result.ops) {
+      if (op.kind === 'pocket') assertOwnPocketMetadata('plan assembly', op.region.id, op.outcome.ir.operations, Z1.rapidEstimate);
       if (op.outcome.ir.operations.some((operation) => operation.moves.length > 0)) {
         // #965 — every op's posted IR is mapped to the DOCUMENT (world) XY here, once, before it
         // becomes part of `SetupPlan.ops`/`programs`: identity for the top setup (`up = [0, 0, 1]`,
@@ -2785,6 +2787,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         let outcome: OpOutcome | null;
         try {
           outcome = planRegion(id, step, prefix);
+          if (outcome !== null) assertOwnPocketMetadata('pocket chain', id, outcome.ir.operations, opts.rapid);
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
           if (!regionFailures.has(id)) regionFailures.set(id, { kind: step.kind, cutterKey: step.cutter.key, regionIds: [id], reason });
@@ -2794,6 +2797,9 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         }
         if (outcome === null) continue;
         outcomes.push({ id, outcome });
+      }
+      for (const { id, outcome } of outcomes) {
+        assertOwnPocketMetadata('pocket chain (post-loop)', id, outcome.ir.operations, opts.rapid);
       }
       outcomeCache.set(signature, outcomes);
     }
