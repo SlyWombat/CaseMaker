@@ -845,7 +845,14 @@ export function checkAirMoves(
   onPhase: ((phase: 'air' | 'air-done') => void) | undefined = undefined,
   /** #1048 — a tick every {@link AIR_PROGRESS_EVERY} tested moves, so the phase is never silence. */
   onAirProgress: ((done: number, total: number) => void) | undefined = undefined,
-): { diagnostics: SweepDiagnostic[]; gouges: Gouge[]; checked: number; rechecked: number; cleared: number; budgetExceeded: boolean } {
+  /**
+   * #1068-perf — THE FIXTURE'S BOXES, pre-inflated, as the gate before the exact boolean: a move
+   * whose own swept box clears every box cannot hit the fixture, so the boolean (a Manifold op per
+   * move) is skipped for it. Empty means no gate (a caller that passes only the union keeps the
+   * exact check on every move).
+   */
+  fixtureBoxes: readonly ObstacleBox[] = [],
+): { diagnostics: SweepDiagnostic[]; gouges: Gouge[]; checked: number; rechecked: number; cleared: number; budgetExceeded: boolean; fixtureBooleans: number } {
   const diagnostics: SweepDiagnostic[] = [];
   const gouges: Gouge[] = [];
   const nCap = segmentsForRadius(radius);
@@ -871,6 +878,8 @@ export function checkAirMoves(
   let rechecked = 0;
   let cleared = 0;
   let budgetExceeded = false;
+  // #1068-perf — the fixture booleans this pass ran; the gate's own count, for the unit pin.
+  let fixtureBooleans = 0;
   const overBudget = (): boolean => deadline !== null && performance.now() > deadline;
 
   // #194 step 7. Most air moves are a retract straight up out of the cut just made, and that
@@ -1061,9 +1070,26 @@ export function checkAirMoves(
     // solids are exact — the body a hull of cylinders, the fixture a union of boxes — so
     // anything above float dust is real, no derived floor needed.
     if (fixture !== null) {
-      // #653 — the fixture is unsheared too: the lifted move's body, when this is a surface un-lift.
-      const fixtureBody =
-        mv.lifted === undefined
+      // #1068-perf — THE BOX GATE. The exact check below is a Manifold intersect per move, and on a
+      // long bracket job's sweep that is tens of thousands of them; every one of them is against a
+      // fixture whose own boxes are mostly along the edges. The same conservative box-vs-box test
+      // the column engine already answers with (`columnFixtureHit`: the move's swept box, tool
+      // radius grown, against each pre-inflated box) says when the boolean cannot find anything —
+      // a diagonal corner it clears by could only ADD a collision, never miss one. Only moves near
+      // a box pay the boolean.
+      const nearFixture =
+        fixtureBoxes.length === 0 ||
+        columnFixtureHit(
+          [real.from[0], real.from[1]],
+          [real.to[0], real.to[1]],
+          radius + margin,
+          zLo,
+          zTop + margin,
+          fixtureBoxes,
+        ) !== null;
+      if (nearFixture) {
+        // #653 — the fixture is unsheared too: the lifted move's body, when this is a surface un-lift.
+        const fixtureBody = mv.lifted === undefined
           ? body
           : sweptToolBody(
               tl,
@@ -1073,16 +1099,18 @@ export function checkAirMoves(
               spindleOff ? nMargin : nCap,
               zTop + margin,
             );
-      const fhit = fixtureBody.intersect(fixture);
-      const fvol = fhit.volume();
-      fhit.delete();
-      if (fixtureBody !== body) fixtureBody.delete();
-      if (fvol > SLIVER_MM3) {
-        pushFixture(
-          spindleOff
-            ? { severity: 'error', code: 'feed-into-fixture', message: `line ${mv.line}: a feed move with the spindle off drives the tool ${formatVolume(fvol)} mm³ into the fixture` }
-            : { severity: 'error', code: 'rapid-into-fixture', message: `line ${mv.line}: a rapid drives the tool ${formatVolume(fvol)} mm³ into the fixture` },
-        );
+        fixtureBooleans++;
+        const fhit = fixtureBody.intersect(fixture);
+        const fvol = fhit.volume();
+        fhit.delete();
+        if (fixtureBody !== body) fixtureBody.delete();
+        if (fvol > SLIVER_MM3) {
+          pushFixture(
+            spindleOff
+              ? { severity: 'error', code: 'feed-into-fixture', message: `line ${mv.line}: a feed move with the spindle off drives the tool ${formatVolume(fvol)} mm³ into the fixture` }
+              : { severity: 'error', code: 'rapid-into-fixture', message: `line ${mv.line}: a rapid drives the tool ${formatVolume(fvol)} mm³ into the fixture` },
+          );
+        }
       }
     }
     // #241 — the MATERIAL is in the STOCK frame, so the tool body meets it turned by `−a`. A move
@@ -1189,7 +1217,7 @@ export function checkAirMoves(
   // #1056 — the phase is OVER, and that is its own fact: silence after this point (the post-loop
   // meshes) is reported as "after the rapid-move check finished", not as a slow rapid-move check.
   onPhase?.('air-done');
-  return { diagnostics, gouges, checked, rechecked, cleared, budgetExceeded };
+  return { diagnostics, gouges, checked, rechecked, cleared, budgetExceeded, fixtureBooleans };
 }
 
 /**
@@ -1692,7 +1720,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // window can only condemn finished work, never a hang) and the check's own MAX_AIR_CHECKS cap
   // already bounds the phase. A move the cap leaves unchecked is an ERROR in its own words
   // (#925, `air-moves-unchecked`), never a `sweep-stalled`.
-  const air = checkAirMoves(tl, airMaterial, topZ, bedZ, timeline.airMoves, timeline.checkpoints, radius, null, fixture, fixtureTop, (d) => fixtureDiag.push(d), proximity, opts?.onPhase, opts?.onProgress);
+  const air = checkAirMoves(tl, airMaterial, topZ, bedZ, timeline.airMoves, timeline.checkpoints, radius, null, fixture, fixtureTop, (d) => fixtureDiag.push(d), proximity, opts?.onPhase, opts?.onProgress, prepared.boxes);
   if (airMaterial !== stock) airMaterial.delete();
   const msAir = performance.now() - a0;
   diagnostics.push(...air.diagnostics);
