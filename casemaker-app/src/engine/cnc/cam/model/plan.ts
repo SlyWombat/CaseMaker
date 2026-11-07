@@ -1864,8 +1864,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
   }
   // #1042 — the seam's typed house statement, once (a job's cutter is the job's, not a setup's).
+  // Its text joins the dump's prose like every other typed statement (the rest sentence above).
   if (input.houseStatement !== undefined && perSetup.length > 0) {
-    perSetup[perSetup.length - 1]!.statements.push(input.houseStatement);
+    const last = perSetup[perSetup.length - 1]!;
+    last.statements.push(input.houseStatement);
+    last.notes.push(input.houseStatement.text);
   }
   return outcome === undefined ? { perSetup } : { perSetup, outcome };
 }

@@ -152,6 +152,8 @@ describe('#1041 the owned house is inv: + user: + the chosen tool', () => {
     expect(st!.text).toContain(BALL6.name);
     expect(st!.text).toContain('cat:112233');
     expect(st!.text).toContain('not in this shop’s inventory');
+    // The dump's prose carries the same line (the Manager's nit): the plan's notes show it.
+    expect(plan.perSetup.at(-1)!.notes.join(' | ')).toContain(st!.text);
   }, 180_000);
 
   it('a chosen owned cutter says nothing', async () => {
