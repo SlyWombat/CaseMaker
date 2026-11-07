@@ -252,3 +252,30 @@ describe('#975 the superset rule — the ideal is never MATERIALLY worse', () =>
     expect(idealWorsenings(owned, unjudged).map((w) => w.outcome)).toEqual(['coverage', 'deepestCut']);
   });
 });
+
+describe('#1062 the tradeoff line states a predicted bevel when the two plans differ', () => {
+  /** A minimal scored side; `predictedCutIntoMm` is the plan's own V-floor prediction. */
+  const bevelSide = (bevel: number | null) => ({
+    score: { coverage: 0.99, cutInto: { adjudicatedFraction: 0, maxMm: 0 }, cycleSeconds: 600, predictedCutIntoMm: bevel },
+  });
+
+  it('a V floor on one side and square lips on the other is a material row, labelled a prediction', () => {
+    const cmp = comparePlanOutcomes(bevelSide(0.6), bevelSide(null));
+    const row = cmp.differences.find((d) => d.reading.startsWith('lips:'));
+    expect(row, 'no bevel row').toBeDefined();
+    expect(row!.reading).toBe('lips: bevelled 0.60 mm (V floor) · square (prediction)');
+    expect(row!.material).toBe(true);
+    expect(cmp.line).toContain('lips: bevelled 0.60 mm (V floor) · square');
+  });
+
+  it('the same bevel on both sides prints no row', () => {
+    const cmp = comparePlanOutcomes(bevelSide(0.6), bevelSide(0.6));
+    expect(cmp.differences.some((d) => d.reading.startsWith('lips:'))).toBe(false);
+    expect(cmp.material).toBe(false);
+  });
+
+  it('a difference under the 0.1 mm geometry bound prints no row', () => {
+    const cmp = comparePlanOutcomes(bevelSide(0.6), bevelSide(0.52));
+    expect(cmp.differences.some((d) => d.reading.startsWith('lips:'))).toBe(false);
+  });
+});

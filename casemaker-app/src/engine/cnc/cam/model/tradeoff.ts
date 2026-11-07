@@ -30,6 +30,13 @@ export interface PlanOutcomeScore {
   };
   /** The plan's own cycle estimate, seconds. */
   cycleSeconds: number;
+  /**
+   * #1062 (defect 1) — the plan's PREDICTED lip bevel, mm (`depth × tan(half)` per side on a
+   * floor-correct V pocket), when the plan carries one. A prediction, not the gate's measurement:
+   * `cutInto` above stays null by contract, and no materiality row is built from this (the
+   * statement in the plan's notes is what the operator reads).
+   */
+  predictedCutIntoMm?: number | null;
 }
 
 /** One seven-line verdict, as the card prints it. */
@@ -130,6 +137,26 @@ export function comparePlanOutcomes(
       ideal: null,
       amount: null,
       material: verdict.length > 0,
+    });
+  }
+
+  // 1b. #1062 (defect 1, 6b's addition) — THE PREDICTED LIP BEVEL. A floor-correct V pocket's
+  // flank bevels the design's top face by depth·tan(half); when the two plans differ there by the
+  // geometry bound, the operator is choosing between two outcomes — a bevelled lip and a square
+  // one — so it gets its own row. It is a PREDICTION, and the row says so: the gate's measured
+  // cut-into is its own number and never stands in for this.
+  const ownedBevel = owned.score.predictedCutIntoMm ?? 0;
+  const idealBevel = ideal.score.predictedCutIntoMm ?? 0;
+  const bevelDiff = Math.abs(ownedBevel - idealBevel);
+  if (bevelDiff >= threshold.geometryMm - 1e-9) {
+    const words = (v: number): string => (v > 0 ? `bevelled ${v.toFixed(2)} mm (V floor)` : 'square');
+    differences.push({
+      bound: 'geometryMm',
+      reading: `lips: ${words(ownedBevel)} · ${words(idealBevel)} (prediction)`,
+      owned: ownedBevel,
+      ideal: idealBevel,
+      amount: bevelDiff,
+      material: true,
     });
   }
 

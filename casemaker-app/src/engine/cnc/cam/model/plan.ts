@@ -168,6 +168,15 @@ export interface OpOutcome {
    * the operator asked for is never silent.
    */
   clampedLegMm?: { wanted: number; cut: number };
+  /**
+   * #1062 (defect 1) — THE PLAN'S OWN PREDICTION of the lip bevel a floor-correct V pocket cuts
+   * into the design's top face at its walls, mm: `depth × tan(half)` per side, the V's own
+   * geometry. A PREDICTION, not the gate's measurement — `PlanOutcome.cutInto` stays null ("the
+   * planner does not judge it") and this number never stands in for it. Stated in the plan's
+   * notes and surfaced on the outcome, so the operator and the tradeoff read what the V costs
+   * without the gate having to find it. Absent on every op that is not a floor-correct V pocket.
+   */
+  predictedCutIntoMm?: number;
 }
 
 export type RegionKind = 'pocket' | 'island-top' | 'curved' | 'contour' | 'rim';
@@ -395,6 +404,14 @@ export interface PlanOutcome {
    * rows as not judged rather than filling them with a different quantity.
    */
   cutInto: { adjudicatedFraction: number | null; maxMm: number | null };
+  /**
+   * #1062 (defect 1) — THE PLAN'S OWN PREDICTION of the deepest lip bevel its floor-correct V
+   * pockets cut into the design's top face, mm (`depth × tan(half)` per side, the max over the
+   * V ops). A PREDICTION, never the gate's measurement: `cutInto` above stays null by contract.
+   * Present only when the plan has a floor-correct V pocket; null otherwise. The tradeoff and any
+   * card can read it without mistaking it for an adjudicated number.
+   */
+  predictedCutIntoMm?: number | null;
   /**
    * THE DEEPEST LEFTOVER ABOVE THE GOAL, mm — material the plan's own sweep leaves standing, the
    * worst cell of `coverage`'s complement. It is NOT cut-into and must never be printed as such:
@@ -1920,9 +1937,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       if (over > leftoverAboveMm) leftoverAboveMm = over;
     }
     const cycleSeconds = perSetup.reduce((n, setup) => n + setup.totalCostSeconds, 0);
+    // #1062 (defect 1) — the V floor pockets' own predicted lip bevel, max across the plan.
+    const bevels = perSetup.flatMap((setup) =>
+      setup.ops.map((op) => op.outcome.predictedCutIntoMm).filter((v): v is number => v !== undefined),
+    );
     return {
       coverage: covered === 0 ? null : 1 - leftover / covered,
       cutInto: { adjudicatedFraction: null, maxMm: null },
+      predictedCutIntoMm: bevels.length === 0 ? null : Math.max(...bevels),
       leftoverAboveMm,
       cycleSeconds,
       leftoverCells: leftover,
@@ -3030,8 +3052,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // FLOOR-CORRECT pocket — the model's floor at the model's depth, the floor plane exact (rings
   // from the region offset by the tip's own radius, at the V-carve pass pitch, one level), the
   // walls opening at the V's half-angle, and the land the flanks take per side (`depth·tan(half)`)
-  // STATED, never counted as a failure (the gate's edge-break class carries it: the IR's tool is
-  // the V, so `whoAt` answers it there). Planned OUTSIDE the chain's cost ranking on purpose —
+  // STATED AS CUT-INTO (#1062 defect 1): the op outcome carries `predictedCutIntoMm = land`, the
+  // plan's note says so in outcome terms, and the gate scores it wherever the job states no edge
+  // break — the old "edge-break class, not cut-into" clause was a claim the job had not made.
+  // Planned OUTSIDE the chain's cost ranking on purpose —
   // the V is the last resort for features nothing else covers, and a 0.05 mm floor pitch would
   // never earn its place against a covering flat by cost. Its run posts BEFORE the freeing
   // contour: the part must stay captured while it is cut.
@@ -3110,17 +3134,21 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
           boolean: opts.boolean,
           ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh } }),
         });
-        vOps.push({ kind: 'pocket', region: ref, outcome });
-        irs.push(outcome.ir);
-        vCovered.add(id);
         const depth = mouthZ - floorZ;
         const land = depth * group.cone.tanHalf;
+        // #1062 (defect 1) — THE OP CARRIES ITS OWN PREDICTION of the lip bevel: the flank reaches
+        // `land` mm into the design's top face at the pocket's edge, by the cone's own geometry.
+        // Stated, never refused, and never a stand-in for the gate's measured cut-into.
+        vOps.push({ kind: 'pocket', region: ref, outcome: { ...outcome, predictedCutIntoMm: land } });
+        irs.push(outcome.ir);
+        vCovered.add(id);
         vFloors.push({ id, depth, land, angleDeg: group.cone.halfAngleDeg });
         const r3 = (n: number): string => String(Math.round(n * 1000) / 1000);
         vNotes.push(
           `${id}: cut by the ${group.tool.name || group.tool.shape} V as a floor-correct pocket — floor at the model's ` +
             `−${r3(depth)} mm, walls at ${r3(group.cone.halfAngleDeg)}°, land ${r3(land)} mm per side (the V's own geometry: ` +
-            `depth × tan(half)); the land at the surface is the edge-break class, not cut-into`,
+            `depth × tan(half)); the lips are bevelled ${r3(land)} mm — the plan cuts that far into the design's top face ` +
+            `at the pocket edge, and a flat that fits the pocket would cut them square`,
         );
       }
       if (irs.length > 0) vRuns.push({ cutterKey: key, ir: irs.reduce((a, b) => concatToolpathIR(a, b)) });
@@ -3360,7 +3388,11 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         `${vFloors.length} ${plural} cut by the V as floor-correct ${vFloors.length === 1 ? 'pocket' : 'pockets'} — ` +
         `floor at the model's −${dMin === dMax ? dMin : `${dMin}…${dMax}`} mm, walls at ${angles.join('/')}°, ` +
         `land ${lMin === lMax ? lMin : `${lMin}…${lMax}`} mm per side (the V's own geometry: depth × tan(half)); ` +
-        'the land at the surface is the edge-break class, not cut-into',
+        // #1062 (defect 1) — THE BEVEL IS STATED AS CUT-INTO, IN OUTCOME TERMS. The old clause called
+        // it "the edge-break class, not cut-into" on every job, including the ones that state no edge
+        // break — where the gate scores it (the M1 tray's 0.523 mm). The plan now says what it cuts.
+        `the lips are bevelled ${lMin === lMax ? lMin : `${lMin}…${lMax}`} mm — this plan cuts that far into ` +
+        `the design's top face at each pocket edge, and a flat that fits the pocket would cut them square`,
     });
   }
   // #987 — a synthetic outline (the skirt `closeOpenSheet` added to close an open relief) is not
