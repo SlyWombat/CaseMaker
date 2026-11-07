@@ -135,17 +135,24 @@ describe('#1028 the ladder measures the standard rungs beside the owned plan', (
     for (let i = 1; i < rows!.length; i++) {
       expect(rows![i]!.leftoverShare, `⌀${rows![i]!.diameterMm} is worse than the coarser rung`).toBeLessThanOrEqual(rows![i - 1]!.leftoverShare + 1e-9);
     }
-    // The rank's known ⌀2 numbers (goalRestPass's own measurement): 6.50 %, 0.896 mm.
-    const two = rows!.find((r) => r.diameterMm === 2)!;
-    expect(two.leftoverShare * 100).toBeCloseTo(6.5, 1);
-    expect(two.leftoverAboveMm).toBeCloseTo(0.896, 2);
-    // The statement names a rung — the plate has no rung under 0.10 mm / 2 %, so the finest one is
-    // named as a reduction, with the cycle's source stated.
+    // T1-lite — THE FIRST RUN'S ROWS, PINNED (the rank's known ⌀2 numbers are the check on the
+    // measurement: 6.50 %, 0.896 mm — goalRestPass's own).
+    const pinnedRows = rows!.map((r) => `⌀${r.diameterMm} | ${(r.leftoverShare * 100).toFixed(2)} % | ${r.leftoverAboveMm.toFixed(3)} mm`);
+    expect(pinnedRows).toEqual([
+      '⌀4 | 13.46 % | 1.633 mm',
+      '⌀3 | 9.55 % | 1.279 mm',
+      '⌀2 | 6.50 % | 0.896 mm',
+      '⌀1.5 | 4.48 % | 0.635 mm',
+      '⌀1 | 2.50 % | 0.456 mm',
+      '⌀0.5 | 0.52 % | 0.234 mm',
+    ]);
+    // T1-lite — THE STATEMENT, PINNED IN FULL. The plate has no rung under 0.10 mm / 2 %, so the
+    // finest rung is named as the reduction it buys, with the cycle's source stated.
     const st = statementOf(plan);
     expect(st.code).toBe('goal-rest-uncut');
-    expect(st.text).toContain('standard size, not in this shop’s catalogue');
-    expect(st.text).toMatch(/⌀\d+(\.\d+)? mm ball/);
-    expect(st.text).toContain('estimated from the shop’s seeded bands');
+    expect(st.text).toBe(
+      'The finish with the 6 mm ball nose (⌀6 mm) leaves up to 2.42 mm standing over 21.4 % of the goal (4343 cells, 43.4 mm²) where it cannot enter — past the 0.10 mm or 2 % that marks a leftover visible — and no owned ball takes it. A ⌀0.5 mm ball (a standard size, not in this shop’s catalogue) would reduce it to 0.23 mm over 0.5 % — +87 s of cycle (estimated from the shop’s seeded bands). The thresholds are this build’s labelled fallback.',
+    );
   }, 180_000);
 
   it('ladder OFF (the default): the statement is the #1027 plain absence, byte-identical', async () => {
