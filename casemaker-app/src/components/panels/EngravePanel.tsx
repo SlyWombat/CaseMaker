@@ -31,7 +31,7 @@ import {
 } from '@/engine/cnc/engrave/depthBounds';
 import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
-import { TOOL_GROUPS, cutterNameForKey, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { TOOL_GROUPS, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { setupSubstitutionOfferSentence, setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/engrave/substitution';
 import { useHouseStore } from '@/store/houseStore';
@@ -60,7 +60,7 @@ import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowNa
 import { deadSetupKeys, replacementCutter } from '@/engine/cnc/engrave/setupWork';
 import { measureFingerprint } from '@/engine/cnc/engrave/measuredPick';
 import { jobReachFindings } from '@/engine/cnc/engrave/goalReach';
-import { toolForIn, toolForJob } from '@/engine/cnc/toolRegistry';
+import { benchCutterFor, toolForIn, toolForJob } from '@/engine/cnc/toolRegistry';
 import { bedUnderFacts, machineForJob, switchActiveProfile } from '@/platform/bedProfiles';
 import { vDepthLimit } from '@/engine/cnc/vProfile';
 // #513 — the bed a job was set up on: binding, version diff and the findings that say so.
@@ -2293,23 +2293,40 @@ export function EngravePanel(): JSX.Element {
 
   const run = useEngraveRunStore();
   // #1051 — ONCE A PLAN HAS POSTED, THE CUTTER LINE SPEAKS FOR IT: the posted programs' cutters,
-  // in the order they cut, with their registry keys (the display name alone can be ambiguous
-  // between a `cat:` row and the shop's own record). The pre-plan sentence — the rule's or the
-  // search's advice — can name cutters the job does not use, so it is replaced once a result
-  // exists; the screen never shows a cutter the plan did not cut with.
+  // in the order they cut. The pre-plan sentence — the rule's or the search's advice — can name
+  // cutters the job does not use, so it is replaced once a result exists; the screen never shows
+  // a cutter the plan did not cut with.
+  // #930/#690b — THE OPERATOR'S SENTENCE CARRIES NO REGISTRY KEY. A built-in's key is friendly to
+  // the registry and still a code token on screen (`flat-1.0`), so every cutter is named by its
+  // DISPLAY form (resolved through the ONE bench resolver, #1032); the key stays on the run sheet.
+  // Two cutters can share a display name — a catalogue row and the shop's own copy of the same bit
+  // — so a clash says which TIER each came from: a word, never the key.
+  const cutterTierWord = (toolKey: string): string =>
+    toolKey.startsWith('inv:')
+      ? 'inventory'
+      : toolKey.startsWith('user:')
+        ? 'your library'
+        : toolKey.startsWith('cat:')
+          ? 'catalogue'
+          : 'built-in';
   const postedCutterLine = ((): string | null => {
     // A STALE RESULT DOES NOT DESCRIBE THIS JOB: the line falls back to the advice until the plan
     // is generated again.
     const programs = run.staleSince === null && run.generated?.ok === true ? run.generated.programs : null;
     if (programs === null || programs.length === 0) return null;
     const seen = new Set<string>();
-    const parts: string[] = [];
+    const cutters: { key: string; name: string }[] = [];
     for (const program of programs) {
       if (seen.has(program.toolKey)) continue;
       seen.add(program.toolKey);
-      parts.push(`${cutterNameForKey(program.toolKey)} (${program.toolKey})`);
+      const posted = benchCutterFor(program.toolKey);
+      cutters.push({ key: program.toolKey, name: posted === null ? 'unknown cutter' : toolDisplayName(posted) });
     }
-    return parts.join(' · ');
+    const named = new Map<string, number>();
+    for (const cutter of cutters) named.set(cutter.name, (named.get(cutter.name) ?? 0) + 1);
+    return cutters
+      .map((cutter) => ((named.get(cutter.name) ?? 0) > 1 ? `${cutter.name} (${cutterTierWord(cutter.key)})` : cutter.name))
+      .join(' · ');
   })();
   // #807 — "no cutter chosen" only when nothing can choose: while the measured search runs (or
   // its answer is waiting to be applied), the line says the app is choosing.
