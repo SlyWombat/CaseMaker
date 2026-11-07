@@ -5996,9 +5996,16 @@ export async function generateGoalProgram(
      * can never stand in. Absent is a direct caller in the main realm (the specs), where the
      * snapshot is the right copy (6b's review). */
     feedCatalogue?: readonly FeedCatalogueRow[];
+    /**
+     * #1046 — THE VIRTUAL LADDER, ON DEMAND. The run-sheet press and the CLI's `--rest-ladder`
+     * ask the OWNED plan to measure the standard rungs (`PlanModelCamOptions.restLadder`); the
+     * ideal is never re-planned with it (`planTwoOutcomes` keeps `restLadder: false` on the
+     * reference run). Absent/false: the pre-#1046 plan, byte-identical.
+     */
+    restLadder?: boolean;
   },
 ): Promise<EngraveGenerated> {
-  const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue } = opts;
+  const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue, restLadder } = opts;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -6190,6 +6197,8 @@ export async function generateGoalProgram(
               }),
           }),
       ...(signal === undefined ? {} : { signal }),
+      // #1046 — the owned plan measures the rungs only when the caller asked.
+      ...(restLadder === true ? { restLadder: true } : {}),
     });
     // The operator's recorded choice is what cuts (`planChoiceOf` reads it, owned by default); the
     // ideal posts only when it exists.
@@ -6258,6 +6267,8 @@ async function generateGoalPrograms(
   catalogueTools?: readonly Tool[],
   /** #1038 — the same stage channel `generateGoalProgram` takes, passed to each side's plan. */
   onProgress?: EngraveProgressFn,
+  // #1046 — and the same ladder choice: the press/flag asks every side's OWNED plan to measure.
+  restLadder?: boolean,
 ): Promise<EngraveGenerated> {
   // #1073 — A FRAME FLIP NEEDS ITS BAND BEFORE ANYTHING POSTS. `flip: { method: 'tabs-in-blank' }`
   // means side 1 stops above the part's silhouette plane and side 2 below it, so a band of stock
@@ -6331,7 +6342,7 @@ async function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue });
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue , ...(restLadder === true ? { restLadder: true } : {}) });
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
@@ -6358,7 +6369,7 @@ async function generateGoalPrograms(
     programs.push(locating.program);
   }
   for (const side of sides.slice(1)) {
-    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue });
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue , ...(restLadder === true ? { restLadder: true } : {}) });
     const sideList = sidePrograms(one, side);
     if (sideList === null) return { ...one, programs };
     programs.push(...sideList);
@@ -7065,6 +7076,12 @@ export async function engraveGenerate(
    * owned plan is run.
    */
   catalogueTools?: readonly Tool[],
+  /**
+   * #1046 — THE VIRTUAL LADDER, ON DEMAND (the run-sheet press, the CLI's `--rest-ladder`). The
+   * OWNED plan measures the standard rungs; the ideal reference is never re-planned with it, and
+   * with the flag off every byte of the plan is unchanged.
+   */
+  restLadder?: boolean,
 ): Promise<EngraveGenerated> {
   memTrace('pipeline:start', { job: job.name });
   onProgress?.({ stage: 'prepare', label: 'reading the job' });
@@ -7273,7 +7290,7 @@ export async function engraveGenerate(
           ],
         };
       }
-      return { ...(await generateGoalPrograms(tl, job, sides, tool, calibration, margins, shop, catalogue, catalogueTools, onProgress)), surface: null };
+      return { ...(await generateGoalPrograms(tl, job, sides, tool, calibration, margins, shop, catalogue, catalogueTools, onProgress, restLadder)), surface: null };
     }
   }
   const goal = job.setups === undefined ? pureGoalObject(job) : null;
@@ -7292,6 +7309,7 @@ export async function engraveGenerate(
         catalogueTools,
         ...(onProgress === undefined ? {} : { onProgress }),
         feedCatalogue: catalogue,
+        ...(restLadder === true ? { restLadder: true } : {}),
       })),
       surface: null,
     };

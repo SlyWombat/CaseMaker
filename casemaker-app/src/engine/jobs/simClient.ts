@@ -684,6 +684,8 @@ export const engraveGenerate = (
    * stores. Absent means no ideal — `planIdeal` stays null and only the owned plan is run.
    */
   catalogueTools?: readonly Tool[],
+  /** #1046 — the virtual ladder, on demand (the run-sheet press). Off/absent: unchanged bytes. */
+  restLadder?: boolean,
 ): Promise<EngraveGenerated> =>
   guarded(
     getSimApi().engraveGenerate(
@@ -695,6 +697,7 @@ export const engraveGenerate = (
       shop,
       onProgress === undefined ? undefined : Comlink.proxy(onProgress),
       catalogueTools,
+      restLadder,
     ),
   );
 

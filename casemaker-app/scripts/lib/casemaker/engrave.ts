@@ -182,6 +182,7 @@ import { commandOutput, HUMAN, type CommandOptions } from './output';
 import { fileReceipt } from './receiptFiles';
 import { setMemTraceSink, setWasmHeapReader, memTrace } from '../../../src/engine/cnc/memTrace';
 import { appendFileSync } from 'node:fs';
+import type { LadderRow } from '../../../src/engine/cnc/cam/model/plan';
 import {
   diagnostic,
   gateForStage,
@@ -229,6 +230,8 @@ interface Args {
   out?: string;
   /** #1052 — write the per-boundary memory trace (JSONL) to this file. */
   memTrace?: string;
+  /** #1046 — measure the standard rest rungs on the owned plan (the virtual ladder). */
+  restLadder?: boolean;
 }
 
 /** Exported for the CLI's own spec (#1052): the flag set is pinned by parsing. */
@@ -275,6 +278,7 @@ export function parseArgs(argv: string[]): Args {
       }
       args.thirdTool = parsed.data;
     } else if (a === '--mem-trace') args.memTrace = argv[++i];
+    else if (a === '--rest-ladder') args.restLadder = true;
     else if (a === '--location') args.location = argv[++i];
     else if (a === '--catalogue') args.catalogue = argv[++i];
     else if (a === '--turn') {
@@ -298,7 +302,7 @@ const USAGE =
   '       casemaker cut --coupon <coupon-spec.json> [--out <dir>]\n' +
   '       casemaker cut --from-gerber <file> [<file> ...] --blank <L>x<W>x<T> [--out <dir>]\n' +
   '       casemaker cut --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]\n' +
-  '              [--rest <key|none>] [--overlap <mm>] [--third-tool <pct>] [--out <dir>]\n' +
+  '              [--rest <key|none>] [--overlap <mm>] [--third-tool <pct>] [--rest-ladder] [--out <dir>]\n' +
   '       [--location <location.json|house.json>]  (any input; default: the app’s own location)\n' +
   '       [--catalogue <catalogue.json>]  (Makera’s feed rows; default: beside the --location file,\n' +
   '              or the app’s own data directory; CM_CATALOGUE names it too)\n' +
@@ -565,6 +569,13 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   let runSampling: EngraveDetails['sampling'] | undefined;
   let runOk = true;
   let runStage: string | null = null;
+  /**
+   * #1046 — THE LADDER'S MEASURED RUNGS, from the plan that last ran it. They ride the receipt's
+   * goal block (`details.goal.ladder`, the CLI's record); absent when `--rest-ladder` was not
+   * asked or no rung measured.
+   */
+  let runLadder: LadderRow[] | null = null;
+  let ladderSentencePrinted = false;
   let runGate: Receipt['gate'] = null;
 
   /** Add a number's provenance once, whatever route reached it. */
@@ -626,7 +637,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         programs,
         coupon,
         pair,
-        ...(runGoal === undefined || runGoal === null ? {} : { goal: runGoal }),
+        ...(runGoal === undefined || runGoal === null
+          ? {}
+          : { goal: { ...runGoal, ...(runLadder === null ? {} : { ladder: runLadder }) } }),
         ...(bed === null ? {} : { bed }),
         ...(faceAngle === undefined ? {} : { faceAngle }),
         ...(runSampling === undefined ? {} : { sampling: runSampling }),
@@ -1137,6 +1150,15 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // #749 — the generator builds Clipper/Manifold CSG from the job's own geometry; a kernel
     // crash there is caught (never a bare throw) and answered as a stopped run at `cam`.
     let generated: EngraveGenerated;
+    if (args.restLadder === true && !ladderSentencePrinted) {
+      // #1046 — THE EXPECTED COST, BEFORE THE RUN. A first CLI run has no previous plan's timings,
+      // so the sentence states #1028's MEASURED bounds instead of inventing a number — the ladder
+      // re-plans the owned plan and every rung is a finish pass over the remainder.
+      ladderSentencePrinted = true;
+      console.error(
+        'casemaker cut: measuring the standard balls — the ladder re-plans the owned plan and adds a finish pass per standard rung (measured on k3, #1028: a small plate in seconds, the tray ≈ 36 s, the organizer ≈ 23.5 min).',
+      );
+    }
     try {
       // #881 — the pipeline is async (a pool can plan the roughing levels); the CLI runs it with
       // no pool, so this is the same serial plan it always was.
@@ -1149,7 +1171,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // the app's.
         undefined,
         getTools().map((entry) => entry.tool),
+        // #1046 — measure the standard rest rungs on the owned plan (the CLI's own flag).
+        args.restLadder === true,
       );
+      if (args.restLadder === true && generated.plan?.ladderRows !== undefined) runLadder = generated.plan.ladderRows;
     } catch (e) {
       if (isCliExit(e)) throw e;
       return {
