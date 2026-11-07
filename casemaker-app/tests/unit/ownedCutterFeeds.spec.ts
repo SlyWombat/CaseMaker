@@ -224,7 +224,9 @@ describe('#732 a confirmed Makera id resolves the owned cutter from the catalogu
     expect(res.params.plungeFeed).toBe(200);
     expect(res.params.stepDown).toBe(0.2);
     expect(res.catalogue?.cutterId).toBe(G_METAL_FLAT_3_175_12);
-    expect(res.provenance).toContain('aluminium-6061');
+    // #1066 — the sentence names the APP's word for the material, not its id: the ids only ever
+    // matched their labels for the woods, and `epoxy-tooling` exposed the difference.
+    expect(res.provenance).toContain('Aluminium 6061');
     expect(res.sources.rpm).toBe('catalogue');
     expect(res.sources.feed).toBe('catalogue');
   });
