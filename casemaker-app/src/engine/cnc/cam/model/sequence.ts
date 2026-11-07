@@ -208,6 +208,13 @@ export interface SequenceOptions {
     /** The goal field's own cell area, mm² — the unit the rest price is stated in. */
     cellAreaMm2: number;
   } | null;
+  /**
+   * #1038 — a tick at every CANDIDATE's boundary, once before its chain is priced and its outcome
+   * simulated. The simulated outcome can be seconds per candidate and a plan is minutes; between
+   * the plan's stage reports the run's silence watchdog hears nothing. One callback per candidate
+   * costs nothing measurable (no per-cell hooks).
+   */
+  onCandidate?: (index: number, total: number) => void;
 }
 
 /**
@@ -938,7 +945,8 @@ export function chooseSequence(
     );
   }
 
-  const priced = candidates.map((sequence) => {
+  const priced = candidates.map((sequence, candidateIndex) => {
+    opts.onCandidate?.(candidateIndex, candidates.length);
     // #1019 — an EMPTY chain is the trivially-satisfied demand (every pocket un-enterable, no
     // contour): it prices at zero so it is feasible and chosen, never ranked as "could not be
     // priced"; nothing is posted for it and its `unreachable` states the pockets.

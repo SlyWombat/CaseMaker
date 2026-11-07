@@ -1429,6 +1429,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const result = planTreePrograms(tree, {
       offset,
       floorStrips: buildFloorStrips,
+      // #1038 — the tree's boundary ticks reach the run as the plan's own progress reports.
+      ...(opts.onProgress === undefined
+        ? {}
+        : { onProgress: (op: ModelPlanProgress['op'], fraction: number) => opts.onProgress!({ setupIndex, op, fraction }) }),
       pockets: noFlatFallback ? null : {
         ...(depthBandMm === undefined ? {} : { depthBandMm }),
         houseFlats: flats,
@@ -2190,6 +2194,15 @@ export interface PlanPocketsOptions {
   air: boolean;
   /** The card's "vendor + 1" cutter budget (`SequenceOptions.maxCutters`). Absent → no cap. */
   maxCutters?: number;
+  /**
+   * #1038 — a tick when a step's own work actually STARTS (a cache hit is not a boundary: the
+   * same step priced by another candidate costs nothing). The pocket chain is one synchronous
+   * call lasting minutes on the tray, and between the plan's stage reports the run's silence
+   * watchdog hears nothing; this is a step boundary, never a per-cell hook.
+   */
+  onStep?: (kind: PlannedOpKind) => void;
+  /** #1038 — a tick at each candidate chain's boundary (see `SequenceOptions.onCandidate`). */
+  onCandidate?: (index: number, total: number) => void;
   /** Absent → {@link DEFAULT_RELEASE_TABS} (the part must stay held until the last cut touches it). */
   tabs?: { count: number; width: number; height: number };
   /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
@@ -2775,6 +2788,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   const planStep: SequenceOptions['planStep'] = (step, prefix) => {
     const signature = stepKey(step, prefix);
     if (irCache.has(signature)) return irCache.get(signature)!;
+    opts.onStep?.(step.kind);
     // The outcome cache uses the SAME key as the IR cache (a rest's regions depend on its prefix),
     // and the chosen chain's ops build reads it back by `stepKey` — the two must agree or a rest's
     // ops silently drop out of the posted program.
@@ -2818,6 +2832,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     toolChangeSeconds: opts.toolChangeSeconds,
     planStep,
     maxCutters: opts.maxCutters,
+    ...(opts.onCandidate === undefined ? {} : { onCandidate: opts.onCandidate }),
     ...(opts.goalCoverage === undefined
       ? {}
       : {
@@ -3304,6 +3319,12 @@ export interface PlanCurvedOptions {
   /** The real Clipper2 offset, or a test fake — the pocket op's own contract. */
   offset: OffsetFn;
   /**
+   * #1038 — a tick at every stage attempt's boundary (one per stage per region, never per cell):
+   * the curved pipeline's stages can each run for seconds, and the run's silence watchdog needs a
+   * report in between the plan's own stage lines.
+   */
+  onStage?: (kind: PlannedOp['kind']) => void;
+  /**
    * The three tools the curved pipeline uses: the flat roughs, the ball finishes, the V breaks
    * rims. Absent (#869/#966): no rough at all — the ball alone takes each remainder region's
    * whole depth in one pass, and the skin stage (which only a flat can surface-follow) is not
@@ -3451,6 +3472,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   // other stages and regions still plan. Returns whether the stage planned.
   const unplanned: SequenceStepFailure[] = [];
   const attempt = (kind: PlannedOp['kind'], cutter: Tool, ref: RegionRef, plan: () => OpOutcome): boolean => {
+    opts.onStage?.(kind);
     try {
       pushStage(kind, ref, plan());
       return true;
@@ -4228,6 +4250,12 @@ export interface PlanTreeOptions {
    */
   floorStrips?: (restCutters: readonly Tool[], alreadyStated: ReadonlySet<string>) => PlanningFloorStrips;
   offset: OffsetFn;
+  /**
+   * #1038 — the tree's own boundary ticks, mapped into the plan's progress bands: the pocket
+   * chain at 0.4 (its steps and its candidates) and the curved stages at 0.7. Boundary hooks
+   * only — nothing per cell — so reporting costs nothing measurable.
+   */
+  onProgress?: (op: ModelPlanProgress['op'], fraction: number) => void;
 }
 
 /** #1021 — see {@link PlanTreeOptions.floorStrips}. */
@@ -4396,7 +4424,16 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
           unplanned: [],
         },
       }
-    : planPocketsForTree(tree, { ...opts.pockets, offset: opts.offset });
+    : planPocketsForTree(tree, {
+        ...opts.pockets,
+        offset: opts.offset,
+        ...(opts.onProgress === undefined
+          ? {}
+          : {
+              onStep: (kind: PlannedOpKind) => opts.onProgress!(kind, 0.4),
+              onCandidate: () => opts.onProgress!('sequence', 0.4),
+            }),
+      });
   // #1021 — the floor strips are decided HERE, after the chain: only the cutters THIS plan runs
   // as rest can own a strip.
   const stripped: PlanningFloorStrips | undefined = opts.floorStrips?.(
@@ -4406,6 +4443,7 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
   const extraRegions = [...(opts.curved.extraRegions ?? []), ...(stripped?.regions ?? [])];
   const curvedResult = planCurvedForTree(tree, {
     ...opts.curved,
+    ...(opts.onProgress === undefined ? {} : { onStage: (kind: PlannedOp['kind']) => opts.onProgress!(kind, 0.7) }),
     ...(extraRegions.length === 0 ? {} : { extraRegions }),
     ...(stripped === undefined || stripped.masks.size === 0 ? {} : { extraRegionMasks: stripped.masks }),
     offset: opts.offset,

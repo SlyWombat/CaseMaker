@@ -96,6 +96,10 @@ describe('#1038 — the goal plan reports its stages', () => {
       const planning = events.filter((e) => /planning/i.test(e.label ?? ''));
       // The plan's own four stages per setup: features, sequence, linking, linking.
       expect(planning.length, `planner stages seen: ${planning.length} — all events: ${events.map((e) => `${e.stage}:${e.label}`).join(' | ')}`).toBeGreaterThanOrEqual(3);
+      // The stage lines alone are minutes apart on a real plate: the pocket chain's own step
+      // boundaries must report too (a step kind, not the four band labels).
+      const ticks = events.filter((e) => e.stage === 'plan' && /planning: (pocket|contour|rest|rough|finish|pencil) —/.test(e.label ?? ''));
+      expect(ticks.length, `step ticks seen: ${ticks.length}`).toBeGreaterThan(0);
     },
     600_000,
   );
