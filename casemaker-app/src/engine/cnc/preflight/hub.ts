@@ -33,9 +33,10 @@ import type { BedUnderFacts } from '@/engine/cnc/engrave/jobSetup';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { StockItem } from '@/platform/stockClient';
 import type { Reachability } from '@/engine/cnc/engrave/reachability';
-import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
+import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 import { packageStaleness, type FrozenPackage } from '@/engine/cnc/engrave/package';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
+import { setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/engrave/substitution';
 import { labelFontsLoaded } from '@/engine/fonts/registry';
 import { collect } from './collect';
 import type { PreflightCause, PreflightRow, PreflightScope } from './types';
@@ -132,15 +133,32 @@ export function preflightHub(input: PreflightHubInput): PreflightHubReport {
   // job-as-data. A job that yields NO scope at all — no stored setups, or only setups that name no
   // cutter (the tool-less default of #516 item 5) — falls back to the single scope such a job would
   // have, so the gate is never vacuously green for want of anything to iterate.
-  const namedScopes: PreflightScope[] = setups.flatMap((setup, i) =>
+  const statedScopes: PreflightScope[] = setups.flatMap((setup, i) =>
     setup.tools.map((toolKey) => ({ setupIndex: i, toolKey })),
   );
-  const scopes: PreflightScope[] =
-    namedScopes.length === 0 ? [{ setupIndex: 0, toolKey: input.job.toolKey }] : namedScopes;
+  const fallbackScopes: PreflightScope[] =
+    statedScopes.length === 0 ? [{ setupIndex: 0, toolKey: input.job.toolKey }] : statedScopes;
 
-  const groups: PreflightScopeRows[] = scopes.map((scope) => ({
-    scope,
-    rows: collect({
+  // #1036 — ONCE A RUN EXISTS, THE SCOPES FOLLOW THE POSTED PROGRAMS, NOT THE DOCUMENT. The plan may
+  // substitute the cutter (the job states the ⌀1 flat-1.0, the plan posts flat-3.175x12-metal); the
+  // posts are keyed by the PLAN's cutter, so a scope keyed by the job's stated tool matched no
+  // program and the Cut gate refused a run its own save gate calls clean. The scopes are now the
+  // programs' own (setup, effective toolKey) pairs — and a setup that posted NO program at all keeps
+  // its stated tools' scopes, because that is a MISSING program (`generate-stopped`/`no-generate`),
+  // not a substitution. Before a run the job's stated tools still define the scopes.
+  const programScopes = input.generated === null ? null : scopesFromPrograms(input.generated.programs);
+  let scopes: PreflightScope[];
+  if (programScopes === null || programScopes.length === 0) {
+    scopes = fallbackScopes;
+  } else {
+    const postedSetups = new Set(programScopes.map((s) => s.setupIndex));
+    const missingScopes = fallbackScopes.filter((s) => !postedSetups.has(s.setupIndex));
+    // Setup order, the programs' own order within a setup (the sort is stable).
+    scopes = [...programScopes, ...missingScopes].sort((a, b) => a.setupIndex - b.setupIndex);
+  }
+
+  const groups: PreflightScopeRows[] = scopes.map((scope) => {
+    const rows = collect({
       scope,
       job: input.job,
       generated: generatedForScope(input.generated, scope),
@@ -148,8 +166,12 @@ export function preflightHub(input: PreflightHubInput): PreflightHubReport {
       shelfItem: input.shelfItem,
       reach: input.reach ?? null,
       bed: input.bed ?? null,
-    }),
-  }));
+    });
+    // #1036 — a scope that posts a cutter the setup does not state is a SUBSTITUTION, stated as
+    // one: never the "no program was produced" row a stated-tool scope would have written.
+    const substituted = substitutionRow(scope, setups, input.job);
+    return { scope, rows: substituted === null ? rows : [...rows, substituted] };
+  });
 
   const policyRows = runPolicyRows(input, scopes[0] ?? { setupIndex: 0, toolKey: input.job.toolKey });
   const rows = [...policyRows, ...groups.flatMap((g) => g.rows)];
@@ -199,6 +221,69 @@ function generatedForScope(generated: EngraveGenerated | null, scope: PreflightS
     frameZ: program.frameZ ?? null,
     frameError: program.frameError ?? null,
   };
+}
+
+/**
+ * #1036 — the scopes a run's own programs define: one per (setup, effective toolKey), deduped in
+ * program order. A program's `setupIndex` is one-based (the operator's "Setup 2"); the scope's is
+ * zero-based (the collector's contract), converted here, once.
+ */
+function scopesFromPrograms(programs: readonly EngraveProgram[]): PreflightScope[] {
+  const seen = new Set<string>();
+  const out: PreflightScope[] = [];
+  for (const program of programs) {
+    const scope: PreflightScope = { setupIndex: program.setupIndex - 1, toolKey: program.toolKey };
+    const key = `${scope.setupIndex}\u0000${scope.toolKey}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(scope);
+  }
+  return out;
+}
+
+/**
+ * #1036 — THE SUBSTITUTION, STATED AS ONE. A scope whose program posts a cutter its setup does not
+ * name is the plan's own answer to a cutter the job could not use (the goal-transform case: the job
+ * states the ⌀1 flat-1.0, the plan posts flat-3.175x12-metal). The plan's own record is used when
+ * the job carries one (the record's read path, #786/#835); otherwise the sentence names the job's
+ * cutter and the posted key. INFO: the run is healthy — this row explains the difference the
+ * stated-tool scope used to show as "no program was produced". A setup that states several tools
+ * and posts one of them is not a substitution; the row fires only when the job's own cutter (or a
+ * record) is the one that did not post.
+ */
+function substitutionRow(
+  scope: PreflightScope,
+  setups: readonly { tools: readonly string[] }[],
+  job: EngraveJob,
+): PreflightRow | null {
+  const stated = setups[scope.setupIndex]?.tools ?? [];
+  if (stated.includes(scope.toolKey)) return null;
+  const own = job.substitution;
+  const setupRecord = (job.setupSubstitutions ?? []).find(
+    (s) => s.toKey === scope.toolKey && s.setupNumber === scope.setupIndex + 1,
+  );
+  const message =
+    own !== undefined && own.toKey === scope.toolKey
+      ? substitutionSentence(own)
+      : setupRecord !== undefined
+        ? setupSubstitutionSentence(setupRecord)
+        : stated.includes(job.toolKey) && job.toolKey !== scope.toolKey
+          ? `The job names ${jobCutterName(job)}; the run posts ${scope.toolKey} instead — the plan's own cutter, not a missing program.`
+          : null;
+  if (message === null) return null;
+  return {
+    severity: 'info',
+    code: 'cutter-substituted',
+    message,
+    owner: 'run',
+    cause: { setupIndex: scope.setupIndex, toolKey: scope.toolKey, hubTarget: null },
+  };
+}
+
+/** The job's own cutter as a sentence names it: `"⌀ 1 mm flat end"` when the snapshot knows it, the key otherwise. */
+function jobCutterName(job: EngraveJob): string {
+  const name = job.tool?.name ?? '';
+  return name === '' ? `"${job.toolKey}"` : `"${name}"`;
 }
 
 /**

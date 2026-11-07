@@ -187,24 +187,32 @@ test('a 75 mm goal on a 43 × 32 blank: Lay it flat, a quarter turn on the X rin
   const undone = (await placement(page))!;
   expect(undone.turns).toEqual(before.turns);
 
-  // #923 — THE REFUSAL IS THE POINT. The goal never fits the 32 mm blank: the path is clipped to
-  // the stock edge and the ⌀1 finish runs along the jaws, so the column engine's fixture check
-  // names the collision (thousands of tool-into-fixture findings). Before #923 this case ticked
-  // "simulated" on the same job — the silent pass the issue is about.
+  // #1035 item 11 — THE RUN COMPLETES ON THE LAID-FLAT JOB, and that is the truth of this fixture:
+  // the quarter turn fits it inside the 43 × 32 blank (the placement above asserts 24 mm deep of
+  // 32, inside x and y), so the finish cuts the blank's own face — the jaws stand BESIDE the stock,
+  // not under the path. The old tail asserted the opposite, a jaw collision with its "would cut
+  // into the vise" sentence; that sentence never came from this job: measured at bcbb8427d, the run
+  // CROSSED on the sim refusing the program's cutter ("program 1 (112111313812) names
+  // 112111313812, which is not on this bench"), and #1032's registry resolution removed that
+  // refusal, so the sim now evaluates the real program and finds no collision. The oracle row below
+  // still carries the goal check's own verdict.
   await page.getByTestId('engrave-generate').click();
   await expect(page.getByTestId('engrave-run-toolpath')).toHaveAttribute('data-state', 'tick', { timeout: 300_000 });
-  await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'cross', { timeout: 300_000 });
-  // The operator's sentence, not the finding code: the first error names the jaw in words.
-  await expect(page.getByTestId('engrave-run-errors')).toContainText(/would cut .*into the vise/i, {
-    timeout: 60_000,
-  });
-  await shoot(page, 'goal-laid-flat-refused.png');
+  await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'tick', { timeout: 300_000 });
+  // A clean run states no error row at all — neither the old jaw sentence nor the refusal it
+  // actually failed on before #1032.
+  await expect(page.getByTestId('engrave-run-errors')).toHaveCount(0);
+  await shoot(page, 'goal-laid-flat-generated.png');
 
-  // Cut reads the same run (#931): "did not pass", and the hold is the offered fix.
+  // Cut reads the same run (#931) and, since #1036, reads it the way the run's own gate does: the
+  // plan substituted the job's ⌀1 flat-1.0 for flat-3.175x12-metal, and the scopes follow the
+  // POSTED programs — so the gate is the clean one the run earned, not "no program was produced".
   await page.getByTestId('cnc-mode-cut').click();
   await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
-  await expect(page.getByTestId('engrave-cut-verdict')).toHaveAttribute('data-state', 'failed');
-  await expect(page.getByTestId('engrave-cut-verdict-fix')).toHaveText('Open the Holding step');
+  await expect(page.getByTestId('engrave-cut-surface')).not.toContainText('no program was produced');
+  // The goal card's own end state: the judged coverage passes its line.
+  await expect(page.getByTestId('engrave-cut-goal')).toHaveAttribute('data-state', 'match');
+  await expect(page.getByTestId('engrave-cut-goal')).toHaveText('Matches the design (goal)');
 });
 
 // #949 — THE OVERSIZED GOAL IS REFUSED AT THE CAM, BEFORE A TOOLPATH EXISTS. The 30 × 24 column

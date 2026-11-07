@@ -207,6 +207,48 @@ describe('preflightHub: the (setup, tool) loop', () => {
   });
 });
 
+describe('#1036 the run, not the document, defines the scopes once a run exists', () => {
+  it('a program posted under a substituted cutter blocks nothing and states the substitution', () => {
+    // The stamp: the job states the ⌀1 flat-1.0, the plan substitutes flat-3.175x12-metal, and the
+    // run is healthy. Scoped by the job's stated tool, the posted program matched nothing and the
+    // Cut gate refused a run its own save gate calls clean.
+    const job = dj();
+    const generated = generatedWith({ programs: [program(1, 'flat-3.175x12-metal', 'G0 X0\n')] });
+    const report = hubFor(job, { generated });
+
+    expect(report.rows.filter((r) => r.code === 'no-generate')).toEqual([]);
+    expect(report.firstBlocking).toBeNull();
+    // The substitution is stated, naming the job's cutter and the plan's.
+    const stated = report.scopes.flatMap((g) => g.rows).find((r) => r.code === 'cutter-substituted');
+    expect(stated, 'the substitution must be stated on the run it changed').toBeDefined();
+    expect(stated!.severity).toBe('info');
+    expect(stated!.message).toContain('flat-1.0');
+    expect(stated!.message).toContain('flat-3.175x12-metal');
+  });
+
+  it('asks the scope of the program that posted, so its own report is the one judged', () => {
+    const job = dj();
+    const a = program(1, 'flat-3.175x12-metal', 'G0 X0\n', reportWith([
+      { severity: 'error', code: 'bad-ending', line: null, message: 'the substituted program is the one at fault' },
+    ]));
+    const report = hubFor(job, { generated: generatedWith({ nc: a.nc, verify: a.verify, programs: [a] }) });
+    expect(report.scopes.map((g) => g.scope.toolKey)).toEqual(['flat-3.175x12-metal']);
+    expect(report.scopes[0]!.rows.some((r) => r.code === 'bad-ending')).toBe(true);
+    expect(report.firstBlocking?.code).toBe('bad-ending');
+  });
+
+  it('keeps the stated tool’s scope when its setup posted NO program at all (a stopped Generate)', () => {
+    // The other side of the rule: a run that stopped before a setup posted must still say so —
+    // that is a missing program, not a substitution.
+    const job = twoSetups(dj(), ['user:flat-1-a', TOOL_B]);
+    const a = program(1, 'user:flat-1-a', 'A\n');
+    const generated = generatedWith({ ok: false, stage: 'feeds', nc: a.nc, verify: a.verify, programs: [a] });
+    const report = hubFor(job, { generated });
+    expect(report.scopes.map((g) => g.scope.toolKey)).toEqual(['user:flat-1-a', TOOL_B]);
+    expect(report.scopes[1]!.rows.some((r) => r.code === 'generate-stopped' || r.code === 'no-generate')).toBe(true);
+  });
+});
+
 describe('preflightHub: the run-policy rows', () => {
   it('states a stale Generate first, before any scope row', () => {
     const job = dj();
