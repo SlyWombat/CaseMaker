@@ -47,7 +47,8 @@ import { cuttingDiameter, cuttingForTrace, drillPointAngle, type Tool } from '@/
 import { holderOf, type Mill } from '@/engine/cnc/machine';
 import type { NodeMeshOutput } from './meshOutput';
 import { applyCarriedField, applyPriorTops, fieldOfGrid, type CarriedField } from './carriedField';
-import { AIR_PROGRESS_EVERY, MAX_AIR_CHECKS, type SweepDiagnostic, type SweepStats } from './sweep';
+import { AIR_PROGRESS_EVERY, type SweepDiagnostic, type SweepStats } from './sweep';
+import { COLUMN_AIR_CHECK_CAP } from './sweep';
 import {
   MAX_GOUGES,
   holderGate,
@@ -2202,15 +2203,17 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   const gouges: { step: number; line: number }[] = [];
   {
     let checked = 0;
-    // #858/#1048 — the phase is bounded by a COUNT, like the exact sweeper, never by a wall
-    // clock: the old deadline could only stop the loop after it had already run long (it never
-    // caught a hang), and on a slow machine it turned a healthy phase into a false
-    // `air-moves-unchecked` error. `MAX_AIR_CHECKS` marks every move past the cap as unchecked,
-    // stated by the #925 error in its own words.
+    // #858/#1048 — the phase is bounded by a COUNT, never by a wall clock: the old deadline could
+    // only stop the loop after it had already run long (it never caught a hang), and on a slow
+    // machine it turned a healthy phase into a false `air-moves-unchecked` error. The cap is
+    // HIGH on this engine for #858's reason: a check here is a walk over the grid cells under the
+    // move — the tray's ⌀1 program (15,204 air moves) checks in full in ~41 ms — so the cap only
+    // bounds a pathological file, and the e2e's figure job (5,039 below the stock top) fits with
+    // room. Moves past it are marked unchecked, stated by the #925 error in its own words.
     let unchecked = 0;
     let tested = 0;
     // #1048 — the air phase reports while it works, as its own phase.
-    const airTotal = timeline.airMoves.filter((mv) => Math.min(mv.from[2], mv.to[2]) <= grid.initial).length;
+    const airTotal = Math.min(COLUMN_AIR_CHECK_CAP, timeline.airMoves.filter((mv) => Math.min(mv.from[2], mv.to[2]) <= grid.initial).length);
     opts?.onPhase?.('air');
     for (const mv of timeline.airMoves) {
       checked++;
@@ -2236,12 +2239,12 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
       }
       const tip = Math.min(mv.from[2], mv.to[2]);
       if (tip > grid.initial) continue; // wholly above the stock
-      if (tested >= MAX_AIR_CHECKS) {
+      if (tested >= COLUMN_AIR_CHECK_CAP) {
         unchecked++;
         continue;
       }
       tested++;
-      if (tested % AIR_PROGRESS_EVERY === 0) opts?.onProgress?.(tested, Math.min(airTotal, MAX_AIR_CHECKS));
+      if (tested % AIR_PROGRESS_EVERY === 0) opts?.onProgress?.(tested, Math.min(airTotal, COLUMN_AIR_CHECK_CAP));
       const gouged = rotary
         ? (() => {
             const aEnd = timeline.stateAt(mv.step).a;
