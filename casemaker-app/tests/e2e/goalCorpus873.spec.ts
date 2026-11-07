@@ -107,7 +107,7 @@ test.describe('the goal corpus, desktop', () => {
     const split = await readSplit(page);
     expect(split).not.toBeNull();
     expect(split!).toMatch(/The top setup reproduces \d/);
-    expect(split!).toMatch(/faces away from the tool/);
+    expect(split!).toMatch(/faces away from this setup/);
 
     // #948 — THE GOAL CHECK'S OWN VERDICT, IN D'S WORDS. The figure's sweep does leave a cell cut
     // 0.023 mm below the goal (at 65, 43.7) — but since #964/#1003 that cell is UN-ADJUDICABLE (a

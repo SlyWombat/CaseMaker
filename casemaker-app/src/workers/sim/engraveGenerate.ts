@@ -5726,7 +5726,16 @@ export async function generateGoalProgram(
   // #872 — WHAT THE TOP SETUP LEAVES UNREACHED. Measured geometrically here (faces pointing away,
   // the shadow band) and paired with the flip plan that finishes it; inform-only, so it rides
   // with the findings on every path that posts a program.
-  const coverageFindings = goalFlipFindings(job, goal);
+  //
+  // #1068 — THE SHEET AND THE RECEIPT CARRY THE FACT, and the offer is validated against the same
+  // material the panel's would be: the job's own board, else the bed's wasteboard, else none.
+  const coverageFindings = goalFlipFindings(
+    job,
+    goal,
+    undefined,
+    job.sacrificial.under?.thickness ??
+      (shop.bed?.surface === 'wasteboard' && shop.bed.wasteboardMm !== null ? shop.bed.wasteboardMm : 0),
+  );
 
   if (tool === null) return fail('feeds', 'the job has no usable cutter');
 

@@ -1151,6 +1151,20 @@
       "unit": "mm",
       "note": "chosen placement, not a measurement: a clamp's side this far in from the corner of the edge it holds"
     },
+    "clamps.sideWidthMm": {
+      "value": 15.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: a side clamp's width, along the edge it holds \u2014 the Side Clamp Set has never been calipered"
+    },
+    "clamps.sideDepthMm": {
+      "value": 12.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: how far a side clamp's body stands out from the blank's edge \u2014 the Side Clamp Set has never been calipered"
+    },
     "offcut.minSideMm": {
       "value": 20.0,
       "source": "seeded",
