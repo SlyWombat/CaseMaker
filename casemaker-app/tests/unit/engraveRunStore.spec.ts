@@ -2300,6 +2300,35 @@ describe('#986 the press and the failure path', () => {
     }
   }, 60_000);
 
+  // #1048 (restored in the #1049 rewrite; A's review) — STOP MUST FREE A QUEUED LOAD. The walk's
+  // load waits for the worker when another computation holds it; Cancel is the operator's way out
+  // and cannot be left waiting with it.
+  it('#1048 — Stop works while the load waits for the worker', async () => {
+    let cancels = 0;
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => generatedWithProgram(),
+      engravePlanIdeal: async () => ({ tradeoff: { material: false, line: null, differences: [] }, owned: null, ideal: null }),
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+      cancelGenerate: () => {
+        cancels += 1;
+      },
+    }));
+    withJob();
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({ loadProgram: () => new Promise(() => undefined) as never });
+    try {
+      void useEngraveRunStore.getState().generate();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(useEngraveRunStore.getState().phase, 'the walk is on the wait').toBe('simulating');
+      // The press the panel's Cancel calls: it must free the app from a queued load too.
+      useEngraveRunStore.getState().cancelGenerate();
+      expect(cancels).toBe(1);
+      expect(useEngraveRunStore.getState().phase).not.toBe('simulating');
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+    }
+  }, 60_000);
+
   it('a refused ideal goes idle — no spinner is left behind', async () => {
     setEngraveRunClientLoader(async () => ({
       engraveGenerate: async () => generatedWithProgram(),
