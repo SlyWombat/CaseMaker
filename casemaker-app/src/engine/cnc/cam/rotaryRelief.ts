@@ -291,7 +291,7 @@ import {
   finishingMoves,
   type SurfaceFeeds,
   type SurfaceTool,
-} from './surface3d';
+} from './surfaceFinishTipField';
 import {
   estimateCycleSeconds,
   HOP_Z,

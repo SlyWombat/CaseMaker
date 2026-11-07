@@ -1,4 +1,5 @@
 import { profileReachFrom, rectProfile } from '@/engine/compiler/profile';
+import { labelFontsLoaded } from '@/engine/fonts/registry';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import type { Mill } from '@/engine/cnc/machine';
 import type { Face } from '@/engine/cnc/setups/types';
@@ -390,14 +391,12 @@ export type JobFindingCode =
   // (faces pointing away, the shadow band) and, when one is worth it, the flip plan that finishes
   // it. Inform-only: it never refuses a program that posts and verifies.
   | 'goal-unreached'
-  // #785 — the goal's program would exceed the app's stated move budget: refused BY NAME with the
-  // numbers and the fixes (a coarser grid, a bigger step-down, or two setups), never by dying.
-  | 'goal-program-too-big'
   | 'goal-mold-rim'
   | 'goal-mold-floor'
   | 'goal-mold-one-sided'
   | 'goal-mold-no-draft'
-  | 'goal-finish-finer-than-grid'
+  // #1019 — the engine-chosen curved rough's stated flat could not reach the region's depth.
+  | 'goal-rough-unreachable'
   | 'goal-object-no-toolpath'
   // #829 — THE 3D CHAMFER THE GOAL ASKS FOR. `goal-chamfer-no-cutter` is the WARNING that names
   // why no V program was posted (no V-bit chosen, one the library does not hold, or one with no
@@ -417,6 +416,35 @@ export type JobFindingCode =
   // that is not a flat end mill, or one that cannot be fed for the material. The goal still
   // surfaces (the finish is unchanged), so this informs and never refuses.
   | 'goal-rough-no-cutter'
+  // #999 — THE OPERATOR'S BALL-ALONE CHOICE is an INFO, stated so a one-cutter goal is never a
+  // silent reading of an unfilled field: `roughToolKey: null`.
+  | 'goal-rough-ball-alone'
+  // #992 — THE MODEL PLAN'S OWN STATEMENTS, now typed and routed. Before this, the planner's
+  // notes were readable only by a spec that opened `perSetup[].notes`; the reviews that ruled
+  // "stated on the card" were satisfied in tests and invisible in the app. One code per cause:
+  // a region the plan demanded and did not cut (`goal-region-uncut`), a freeing contour that
+  // never ran or a part with no flat to release it (`goal-not-freed` — the part stays on the
+  // stock), a cutter cut with another tool's numbers (`goal-cutter-substituted`), real skin left
+  // above the part (`goal-skin-standing`), a rim the V stage declined (`goal-rim-unbroken`, one
+  // finding per cause with a count), the fixture envelope the plan does not yet model
+  // (`goal-fixture-unmodelled`), and the infos: a relief edge that is the stock
+  // (`goal-relief-edge`), which finish mode ran (`goal-finish-mode`), a job that asked for no
+  // bevel (`goal-no-edge-break`), and what the plan chose and what it costs (`goal-plan-tradeoff`,
+  // the #961 line, the V floor and the crease/scallop numbers).
+  | 'goal-not-freed'
+  | 'goal-region-uncut'
+  // #1021 — a pocket floor strip narrower than the primary flat's ring IS finished, by the ball,
+  // as its own floor pass. Info, one per setup with the ids and the count — never the
+  // `goal-region-uncut` warning above, which means material stands.
+  | 'goal-pocket-floor-rest'
+  | 'goal-cutter-substituted'
+  | 'goal-skin-standing'
+  | 'goal-rim-unbroken'
+  | 'goal-fixture-unmodelled'
+  | 'goal-relief-edge'
+  | 'goal-finish-mode'
+  | 'goal-no-edge-break'
+  | 'goal-plan-tradeoff'
   // Facing (#432). The job's facing depth is taken off the same blank every item is measured
   // against, so the check is one number against the stock's minimum floor — not a per-item one.
   // An item over-deep once the skim is counted is still `depth-exceeds-stock`, whose own check
@@ -525,7 +553,11 @@ export type JobFindingCode =
   // helix note, carried onto the job so the panel shows it.
   | 'adaptive-clearing'
   | 'adaptive-fallback'
-  | 'adaptive-helix-refused';
+  | 'adaptive-helix-refused'
+  // #966/#979 — a job with an enabled cone or sphere surface primitive: #966 removed
+  // generateSurfacePrimitiveProgram, the old engine's CAM path for one, whole. Restoring it onto
+  // cam/model is #979's own scope; until it lands, the job refuses on this one finding, by name.
+  | 'surface-primitive-removed';
 
 export interface JobFinding {
   /**
@@ -559,43 +591,11 @@ export interface JobFinding {
    */
   goalReachedFraction?: number;
   /**
-   * #785 — on `goal-program-too-big`, the grid pitch that fits the move budget, mm. The panel's
-   * one-click "Generate at N mm" writes it onto the goal's `surface.gridPitchMm` and presses
-   * Generate; absent on every other finding.
-   */
-  suggestedPitchMm?: number;
-  /**
    * #856 — on `vcarve-depth-beyond-cone`, the MATERIAL depth (above its floor) the item asks the
    * cone to cut, mm. The panel's press finds a cutter whose cone reaches it; absent on findings
    * that are not about a V-carve's reach.
    */
   materialMm?: number;
-  /**
-   * #832 — on `goal-program-too-big`, the step-down that fits the move budget AT the pitch the
-   * run settled on, mm. The moves fall with the step-down as they do with the pitch, so this is
-   * the other press the operator can make: "Raise the step-down to N mm".
-   */
-  suggestedStepDownMm?: number;
-  /**
-   * #888 — on `goal-program-too-big`, the MOVES the run estimated, the cells it counted and the
-   * budget it broke. The panel folds these under its Technical line; the sentence the operator
-   * reads does not count them. #889 — the budget is kept in MB (the memory the CAM, the post and
-   * the simulation will really take), so `budgetMb` is what the run estimates and `budgetLimitMb`
-   * what it breaks; `budgetMoves` stays as the exact move count behind it.
-   */
-  budgetMoves?: number;
-  budgetCells?: number;
-  budgetMb?: number;
-  budgetLimitMb?: number;
-  budgetPitchMm?: number;
-  budgetStepDownMm?: number;
-  /**
-   * #888 — on `goal-program-too-big`, the depth split that puts BOTH programs under the budget:
-   * each side of a top/bottom split, mm. The panel's "Split into two setups" press builds the two
-   * setups from it (via `goalFlipSetups`' machines); absent when no two-band split fits — the
-   * press is then not shown at all rather than opening a dead end.
-   */
-  suggestedSplit?: { firstMm: number; secondMm: number; movesEach: number };
   /**
    * #805 — on `goal-rotary-oversize`, the goal's own outermost radius, mm (the field's
    * `maxRadius`). The panel's "Scale the goal to fit (r …)" button turns it into the factor that
@@ -628,6 +628,13 @@ export interface JobFinding {
    */
   underBoardMm?: number;
   stopShortMm?: number;
+  /**
+   * #992 — on a statement that groups ONE CAUSE over many regions/ops/rims, how many it covers
+   * (the #962 grouping rule). The message already states the count in words; this field is for a
+   * consumer that wants the number without parsing prose (the acceptance reads it). Absent on
+   * every finding that is about a single thing.
+   */
+  count?: number;
   message: string;
 }
 
@@ -3320,7 +3327,17 @@ export function validateJob(
   // #240 — the jaw rule is the VISE's, and a job in the rotary chuck has no jaw faces to reach.
   // Slice 1 reads no swept cuts for it at all; slice 3's rotary rules are what will judge the cut
   // against the chuck, the tailstock and the stock's own cylinder.
+  //
+  // #1035 item 9 — NEVER REFUSE ON THE PLACEHOLDER BOX. `sweptCuts` builds its plan with
+  // `unparsedFace: 'estimate'`, and `inkBoxOf`'s estimate is the WIDEST a bundled face can set
+  // (1.95 em/char): while a label's face is still being fetched, a centred "CASE" on the default
+  // job spans 109 mm of a 100 mm stock and crosses both jaws — a collision this loop would refuse
+  // from a box that is a placeholder, not a measurement. The fit path is allowed that box; the
+  // gate is not. Skip the collision until the faces are in (the preflight states it as pending),
+  // and run-time paths, which parse first, keep the exact refusal unchanged.
+  const labelFacesIn = labelFontsLoaded(job.labels, job.customFonts ?? []);
   for (const cut of swept) {
+    if (!labelFacesIn) break;
     const { jaw, gap } = jawGapFor(job, cut.box);
     if (gap >= jawClearance) continue;
     // #841 — a THREAD whose tip stays the clearance above the jaw tops works wholly above them: the

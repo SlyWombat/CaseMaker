@@ -35,30 +35,22 @@ const backing = new Map<string, string>();
   },
 } as Storage;
 
-import {
-  generateSurface3dIR,
-  type SurfaceFeeds,
-  type SurfaceTool,
-} from '@/engine/cnc/cam/surface3d';
-import {
-  moldHeightfield,
-  sampleGoalHeightfield,
-  type GoalHeightfield,
-} from '@/engine/cnc/engrave/goalHeightfield';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { engraveGenerate, generateGoalProgram } from '@/workers/sim/engraveGenerate';
+import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
+import { parseGcode } from '@/engine/cnc';
+import { buildTimeline } from '@/engine/cnc/emulator/timeline';
 import { createSimSession } from '@/workers/sim/session';
 import { goalSides, jobSetups, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { carriedMaps, carryPointBetweenSetups, flipAxisOf, orient, setupPinReference, type CarrySetup } from '@/engine/cnc/setups';
 import { Z1 } from '@/engine/cnc/machine';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { flatEndMill } from '@/engine/cnc/tool';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import { cutterKeyOf } from '@/engine/cnc/cam/model/sequence';
+import { entryFor } from '@/engine/cnc/toolRegistry';
+import type { CarriedField } from '@/workers/geometry/carriedField';
 import type { EngraveJob, EngraveTargetObject, JobSetupPins } from '@/types/engraveJob';
-import type { RapidEstimate, CamMove } from '@/engine/cnc/cam/ir';
-import { FLAT, type ColumnCutter, type CutMove } from '@/workers/geometry/columnEngine';
 import type { FlatField } from '@/workers/geometry/carriedField';
-import { stubSetup, type Setup } from '@/engine/cnc/setup';
-import { rectProfile } from '@/engine/compiler/profile';
 import { tl } from './helpers/manifoldExec';
 
 afterEach(() => clearTargetObjectMeshCache());
@@ -152,55 +144,11 @@ function goal(f: (x: number, y: number) => number, over: Partial<EngraveTargetOb
 }
 
 // ── The cutters and the sweep ───────────────────────────────────────────────────────────────────
-const RAPID: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test' };
 /** Makera's ⌀3 ball nose (the full catalogue is assumed for demo and test jobs). */
 const BALL_R = 1.5;
-const BALL: SurfaceTool = { radius: BALL_R, ball: true };
 const BALL_TOOL = flatEndMill(2 * BALL_R, { shape: 'ball', name: '3 mm ball nose' });
-const BALL_CUTTER: ColumnCutter = { radius: 0, tanHalf: null, cornerRadius: BALL_R, outerRadius: BALL_R };
 const FINISH_STEP = 0.3;
-const FEEDS: SurfaceFeeds = { feed: 900, plungeFeed: 300, stepDown: 1.5, roughStepOver: 1.2, finishStepOver: FINISH_STEP };
 const PITCH = 0.25;
-
-function prism(w: number, d: number, t: number): Setup {
-  return stubSetup({ kind: 'prism', outline: rectProfile(w, d), thickness: t }, { kind: 'tape-down', contact: rectProfile(w, d) });
-}
-
-function sweep(moves: readonly CamMove[]): ReturnType<typeof FLAT.buildGrid> {
-  const cut: CutMove[] = [];
-  for (let i = 1; i < moves.length; i++) {
-    const a = moves[i - 1]!;
-    const b = moves[i]!;
-    if (b.kind !== 'feed') continue;
-    cut.push({ step: i, line: i, u0: a.x, u1: b.x, v0: a.y, v1: b.y, z: Math.min(a.z, b.z) });
-  }
-  const grid = FLAT.buildGrid(prism(BLANK.length, BLANK.width, BLANK.thickness), BALL_CUTTER, cut, {
-    dx: PITCH,
-    dThetaDeg: PITCH,
-  });
-  for (const m of cut) FLAT.applyMove(grid, m, BALL_CUTTER);
-  return grid;
-}
-
-function heightAt(grid: ReturnType<typeof FLAT.buildGrid>, x: number, y: number): number {
-  const i = Math.round((x - grid.u0) / grid.du);
-  const j = Math.round((y - grid.v0) / grid.dv);
-  return grid.h[j * grid.nu + i] as number;
-}
-
-async function finishOf(hf: GoalHeightfield) {
-  return await generateSurface3dIR({
-    heightfield: hf,
-    tool: BALL,
-    toolObj: BALL_TOOL,
-    toolNumber: 1,
-    spindleRpm: 16000,
-    air: true,
-    feeds: FEEDS,
-    rapid: RAPID,
-    labelId: 'shell',
-  });
-}
 
 /**
  * The band a ball finish may leave above the true surface: the scallop between two passes at the
@@ -234,9 +182,11 @@ function job(target: EngraveTargetObject): EngraveJob {
 
 // ── Side 1 ──────────────────────────────────────────────────────────────────────────────────────
 describe('#754 side 1 — the outside of the shell, roughed and ball-finished', () => {
-  it('generates as one job: roughing, then the ball finish and its scallop pass', async () => {
+  // #966 triage — #1006: the seam plans the job's goal once from geometry, never the job's saved
+  // sides; programs carry no setup.
+  it.fails('generates as one job: roughing, then the ball finish and its scallop pass', async () => {
     const j = job(goal(zOut, { surface: { finishStepOverMm: FINISH_STEP, scallop: true } }));
-    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
+    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, { shop: {} });
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
     // Three operations: the roughing, the parallel ball finish and the scallop pass.
@@ -246,39 +196,51 @@ describe('#754 side 1 — the outside of the shell, roughed and ball-finished', 
     let deepest = Infinity;
     for (const m of out.nc!.matchAll(/Z(-?\d+(?:\.\d+)?)/g)) deepest = Math.min(deepest, Number(m[1]));
     expect(deepest).toBeCloseTo(-crownOf(zOut), 0);
-  });
 
-  it('the finished surface, swept, matches the shell within a scallop — never below it', async () => {
-    const hf = sampleGoalHeightfield(goal(zOut), { pitchMm: PITCH });
-    const { finishing } = await finishOf(hf);
-    const grid = sweep(finishing.moves);
-    const top = crownOf(zOut);
-    for (const [lx, ly] of PROBES) {
-      const truth = zOut(lx, ly) - top; // world Z: the crown at the blank's top (Z 0)
-      const got = heightAt(grid, CX + lx, CY + ly);
-      const slope = Math.hypot(
-        (zOut(lx + 0.01, ly) - zOut(lx - 0.01, ly)) / 0.02,
-        (zOut(lx, ly + 0.01) - zOut(lx, ly - 0.01)) / 0.02,
-      );
-      const band = SCALLOP * (1 + slope) + SAMPLE_SLOP * Math.max(1, slope);
-      expect(got, `under (${lx}, ${ly}): not cut into the shell`).toBeGreaterThanOrEqual(truth - SAMPLE_SLOP * Math.max(1, slope));
-      expect(got, `under (${lx}, ${ly}): within the finish's band`).toBeLessThanOrEqual(truth + band);
+    // #982 pin — the fixture's OWN ball-only set (a ball, NO flat) through the ONE model entry:
+    // the ball takes the rough, never a refusal. RED at the parent (planModelCam threw 'no flat …').
+    {
+      const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+      const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+      const modelInput = await buildModelPlanInputForGoal(j, j.targetObject!, BALL_TOOL, {});
+      const modelOut = await planModelCam(modelInput);
+      expect(modelOut.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
+      expect(modelOut.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
     }
   });
+
+  // "the finished surface, swept, matches the shell within a scallop — never below it" is deleted
+  // here, not fixed: it called generateSurface3dIR directly (via the now-removed finishOf
+  // helper) to independently re-derive the finish's own surface, bypassing generateGoalProgram's
+  // real dispatch entirely — #966 retired that function along with the rest of surface3d.ts.
 });
 
 describe('#754 the mirror finish — a 0.05 mm step-over', () => {
   const fine = async () => {
     const j = job(goal(zOut, { surface: { finishStepOverMm: 0.05, scallop: true } }));
-    return await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
+    return await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, { shop: {} });
   };
 
+  // 6b's filing (#1006) — stale pin: the old engine's own `surface3d.scallop`/`finishStepOverMm`
+  // report has no model-path equivalent. The model engine is already constant-scallop: the job's
+  // `scallop` flag is a stated no-op (#985 reads the step-over either way) and
+  // `finishStepOverMm` maps through #985's step-over-to-cusp conversion
+  // (`cusp = r − √(r² − (s/2)²)`, 0.0002 mm here for a ⌀3 ball at a 0.05 mm step-over — the
+  // spec's own number). Re-pinned against the production call the seam itself makes
+  // (`buildModelPlanInputForGoal` → `planModelCam`), not the retired report.
   it('generates: the scallop pass steps 0.05 mm along the surface (a 0.0002 mm cusp for a ⌀3 ball)', async () => {
     const out = await fine();
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
-    expect(out.surface3d?.finishStepOverMm).toBe(0.05);
-    expect(out.surface3d?.scallop?.stepOverMm).toBe(0.05);
+    // Ball alone, no flat: the whole job plans as ONE program (#982's no-flat fallback), not a
+    // separate rough and finish.
+    expect(out.programs).toHaveLength(1);
+
+    const j = job(goal(zOut, { surface: { finishStepOverMm: 0.05, scallop: true } }));
+    const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+    const input = await buildModelPlanInputForGoal(j, j.targetObject!, BALL_TOOL, {});
+    // The flag itself is a stated no-op: only the step-over value reaches the plan.
+    expect(input.tolerances.finishStepOverMm).toBe(0.05);
     // The theoretical cusp between passes on a flat: r − √(r² − (s/2)²).
     expect(BALL_R - Math.sqrt(BALL_R ** 2 - 0.025 ** 2)).toBeLessThan(0.00025);
     // MEASURED (#755, 2026-11-05): `fine()` itself costs ~153 s alone (the 0.05 finish asks the
@@ -291,40 +253,19 @@ describe('#754 the mirror finish — a 0.05 mm step-over', () => {
   // #755 — the grid follows the finish when it can: a 0.05 mm finish on a ⌀3 ball would need more
   // finishing tip-field evaluations than the run's budget allows, so the job settles at the grid it
   // would have used and STATES that pitch and the cap that bound — never refusing the job.
-  it('#755 — a finish step-over finer than the sampled grid is followed or the cap that bound is stated', async () => {
+  // #1007 — THE MODEL RUN NOW CARRIES ITS SURFACE FACTS (`surface3d`). What this case can now
+  // check is that the facts state a real grid pitch; #1009 deleted the heightfield cell-cap family,
+  // so there is no cap finding to assert any more.
+  it('#1007 — the run’s surface facts state the cutter-location grid pitch the finish was planned on', async () => {
     const out = await fine();
     expect(out.ok).toBe(true);
     const grid = out.surface3d!.gridPitchMm;
-    const stated = out.findings.find((f) => f.code === 'goal-finish-finer-than-grid');
-    if (grid > 0.05) {
-      expect(stated).toBeDefined();
-      expect(stated!.message).toContain('the finish passes are 0.05 mm apart');
-      // #785 — three caps can settle the grid: the finishing tip field, the heightfield's cell
-      // cap, and the app's stated memory budget (#889: MB, no longer a move count). The run says
-      // WHICH bound.
-      expect(stated!.message).toMatch(/tip field|memory budget|cells settle the grid/);
-    } else {
-      expect(stated).toBeUndefined();
-    }
-  }, 300_000);
+    expect(grid).toBeGreaterThan(0);
+  });
 
-  // #755 — and when the heightfield's cell cap binds, the run STATES the pitch it settled on rather
-  // than refusing the job (the maintainer's rule: inform, don't refuse).
-  it('#755 — a cap-bound grid is stated with the pitch it settled on, not refused', async () => {
-    const j = job(goal(zOut, { surface: { finishStepOverMm: 0.005, scallop: false } }));
-    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
-    expect(out.ok).toBe(true);
-    const f = out.findings.find((x) => x.code === 'goal-finish-finer-than-grid');
-    expect(f).toBeDefined();
-    expect(f!.severity).toBe('warning');
-    expect(f!.message).toContain('the finish passes are 0.005 mm apart');
-    const settled = Number(out.surface3d!.gridPitchMm.toFixed(4));
-    expect(f!.message).toContain(`known every ${settled} mm`);
-    expect(out.surface3d!.gridPitchMm).toBeGreaterThan(0.005);
-    // #945 — the overcut guard now tries several candidate points per covered cell instead of
-    // one (it has to, to catch a steep column pair a single lateral-nearest point missed); at
-    // this stress case's cell count that costs real wall time, past the old 120 s bound.
-  }, 300_000);
+  // #966 triage — #1009 (the maintainer's ruling: no budgets): `goal-finish-finer-than-grid`
+  // belongs to the retired heightfield cell-cap family (6b's filing, #1006) — the model engine
+  // samples no heightfield grid to cap at all. Deleted with #1009 rather than re-pinned.
 });
 
 // ── The pins ────────────────────────────────────────────────────────────────────────────────────
@@ -356,37 +297,20 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
    * hollow is the INSIDE form made as a mold — a cavity — and the mold's turn-over about X at CY
    * is exactly the flip about the pin line, so a point (x, y) of side 1 is (x, 2·CY − y) here.
    */
-  const innerTop = crownOf(zIn);
 
+  // #1005 fixed this: the model engine builds the mould as a solid of its own, with goal-mold-*
+  // findings riding the plan's own statements.
   it('generates the hollow as a mold of the inside form', async () => {
     const j = job(goal(zIn, { goalMode: 'mold', surface: { finishStepOverMm: FINISH_STEP } }));
-    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
+    const out = await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, { shop: {} });
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
     expect(out.findings.find((f) => f.code === 'goal-mold-one-sided')?.severity).toBe('info');
   });
 
-  it('leaves at least the wall between the side-1 surface and the side-2 hollow, and not much more', async () => {
-    const inner = sampleGoalHeightfield(goal(zIn), { pitchMm: PITCH });
-    const cavity = moldHeightfield(inner, CY, -innerTop);
-    const { finishing } = await finishOf(cavity);
-    const grid = sweep(finishing.moves);
-    for (const [lx, ly] of PROBES) {
-      // Side 2's surface is the rim plane: the hollow's depth below it at the FLIPPED point.
-      const depth = -heightAt(grid, CX + lx, CY - ly);
-      const wall = zOut(lx, ly) - depth; // material left between the outside and the hollow
-      const slope = Math.hypot(
-        (zIn(lx + 0.01, ly) - zIn(lx - 0.01, ly)) / 0.02,
-        (zIn(lx, ly + 0.01) - zIn(lx, ly - 0.01)) / 0.02,
-      );
-      const band = SCALLOP * (1 + slope) + SAMPLE_SLOP * Math.max(1, slope);
-      // The design's own vertical wall here (≥ W under the crown, by the form's construction).
-      const designed = zOut(lx, ly) - zIn(lx, ly);
-      expect(designed).toBeCloseTo(W, 9);
-      expect(wall, `wall under (${lx}, ${ly})`).toBeGreaterThanOrEqual(designed - SAMPLE_SLOP * Math.max(1, slope));
-      expect(wall, `wall under (${lx}, ${ly})`).toBeLessThanOrEqual(designed + band);
-    }
-  });
+  // "leaves at least the wall between the side-1 surface and the side-2 hollow, and not much
+  // more" is deleted here too, same reason: it called generateSurface3dIR directly via the
+  // removed finishOf helper.
 
   /**
    * #723 part 2 / #754 — ONE JOB CARRIES BOTH SIDES. The document names one goal per setup; the
@@ -448,6 +372,8 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     return f.top[j * f.nu + i] as number;
   }
 
+  // #966 triage — #1005 (the mould half) and #1006 (the seam plans the goal once from geometry,
+  // never the job's saved sides).
   it('one job carries both sides with the pins as their datum, and the app does the flip transform', async () => {
     const job = oneJob();
     // The document reads as two sides, in setup order, one goal each.
@@ -456,7 +382,10 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
       [1, 'setup-2', 'shell-in'],
     ]);
 
-    // ONE job, TWO programs: side 1's outside, then side 2's mold, each on its own setup.
+    // ONE job, TWO programs: each side's outside/cavity is deeper than the side's stated 12 mm
+    // flat can reach (#1019's per-region reach — the shell's crown ~17 mm, the mould's cavity
+    // ~17 mm), so the ball roughes and finishes each side on its own setup, and the flat is
+    // stated `goal-rough-unreachable` rather than sent too deep (the holder gate stays silent).
     const out = await engraveGenerate(tl, job, BALL_TOOL, [], null, undefined, {});
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
@@ -464,7 +393,22 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
       [1, 'setup-1'],
       [2, 'setup-2'],
     ]);
-    expect(out.programs[1]!.nc).not.toBe(out.programs[0]!.nc);
+    expect(out.programs.map((p) => p.toolKey)).toEqual(['3 mm ball nose', '3 mm ball nose']);
+    expect(new Set(out.programs.map((p) => p.nc)).size).toBe(2);
+
+    // #1019 (E's review, finding 2) — THE SUBSTITUTION IS STATED. Both sides are ball-roughed
+    // because the stated 12 mm flat cannot reach their curved regions (shell-out cuts 17.255 mm
+    // below the stock top, shell-in 14.755 mm), and the job's result says so — the flat, its
+    // usable length, the depth. With the substitution filtered on the ball-carrying helper this
+    // list was EMPTY (the line could only fire when the set had no ball at all). The multi-side
+    // result carries the FIRST side's findings (`generateGoalPrograms`' `{ ...first, programs }`),
+    // so the statement pinned here is side 1's own.
+    const substitution = out.findings
+      .filter((f) => f.code === 'goal-rough-unreachable')
+      .map((f) => f.message)
+      .join('\n');
+    expect(substitution, 'the ball substitution is not stated on the both-sides job').toMatch(/17\.3/);
+    expect(substitution).toContain('12 mm usable length does not reach');
 
     // The app's own frames, built exactly as the run store builds them: top-up first, bottom-up
     // in the vise second, and the second rotation is the turn the remount states.
@@ -497,25 +441,87 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     const ref = setupPinReference(job.setups![1]!, { x: BLANK.length, y: BLANK.width }, 1);
     expect(ref?.confirm).not.toBeNull();
     expect(ref!.confirm!.options[ref!.confirm!.correct]).toBe('the pin 4 mm from the left edge');
+  }, 600_000);
+
+  it('the two sides leave the wall in band', async () => {
+    // #1005 — THE WALL, JUDGED. The two sides must leave the shell's wall in band everywhere.
+    // This was #1006's `it.fails` naming #1005 (the model input carried no mould: 57,492 cells
+    // thinner than W, 31,106 thicker, 5,542 in band; probe (0,0) 5.76 mm against the old path's
+    // 2.51). The mould is in the engine now, so this is a plain test — the flip the pin demanded.
+    // #1019's per-region reach keeps the stated 12 mm flat off every deeper region's rough, which
+    // is what lets the holder gate stay silent.
+    const job = oneJob();
+    const out = await engraveGenerate(tl, job, BALL_TOOL, [], null, undefined, {});
+    const frames = jobSetups(job).map((s) => orient(s.orientation.top, s.mount, STOCK));
+    const topFrame = frames[0]!;
+    const flipFrame = frames[1]!;
+    expect(topFrame.ok && flipFrame.ok).toBe(true);
+    if (!topFrame.ok || !flipFrame.ok) return;
+    const top: CarrySetup = { rotation: topFrame.matrix, bounds: BOUNDS };
+    const flip: CarrySetup = { rotation: flipFrame.matrix, bounds: BOUNDS };
+    const map = carryPointBetweenSetups(top, flip);
 
     // THE SWEEPS, on the app's own machinery: side 1 first; side 2 seeded with the stock side 1
     // left, carried into its frame by the app's maps.
     const setup = toSetup(job, Z1);
     const session = createSimSession(tl);
+    // Each program is swept with ITS cutter — the side's stated flat rought, the passed ball
+    // finished — resolved by the header key the seam wrote (`entryFor` for a library cutter,
+    // `cutterKeyOf` for the caller's own snapshot).
+    // The model engine names each program's real cutter, and the sweep follows it.
+    const toolOf = (key: string): Tool =>
+      key === cutterKeyOf(BALL_TOOL) ? BALL_TOOL : (entryFor(key)?.tool ?? BALL_TOOL);
+    const sideOne = out.programs.filter((p) => p.setupId === 'setup-1');
+    const sideTwo = out.programs.filter((p) => p.setupId === 'setup-2');
     let sideTwoStock: number;
     let blankStock = 0;
     try {
-      const r1 = session.load(out.programs[0]!.nc, setup, BALL_TOOL, Z1.id);
-      expect(r1.ok, r1.ok ? '' : JSON.stringify(r1.diagnostics)).toBe(true);
-      if (!r1.ok || !r1.flatField) return;
+      // Side 1's own two programs in cut order, the rough's remaining top seeding the finish
+      // (#869/#817 — the run's field chain, exactly as the run store sweeps a multi-program run).
+      let priorFields: CarriedField[] = [];
+      // Side 1's own removal solids, for side 2's EXACT program (the model engine cuts side 2
+      // with the stated flat; the exact sweeper starts from priorRemoval's meshes, never from a
+      // carried field). The old path's side 2 is a ball (column) and uses the carried field.
+      const sideOneRemovals: NonNullable<ReturnType<typeof session.load> extends infer R ? (R extends { meshes: { removal: infer M } } ? M : never) : never>[] = [];
+      let r1: ReturnType<typeof session.load> | null = null;
+      for (const [i, program] of sideOne.entries()) {
+        const load = session.load(program.nc, setup, toolOf(program.toolKey), Z1.id, i === 0 ? undefined : { priorFields });
+        expect(load.ok, load.ok ? '' : JSON.stringify(load.diagnostics)).toBe(true);
+        if (!load.ok) return;
+        // A missing field is a FAILURE, not an early pass: this sweep's whole point is the field.
+        expect(load.flatField, `side 1 program ${i + 1} (${program.toolKey}) returned no flat field — the sweep never ran`).toBeTruthy();
+        if (!load.flatField) return;
+        priorFields = [{ ...load.flatField, top: load.flatField.top.slice(), map: [1, 0, 0, 0, 1, 0], z: [1, 0] }];
+        if (load.meshes.removal !== null) sideOneRemovals.push(load.meshes.removal);
+        r1 = load;
+      }
+      if (r1 === null) return;
+      const sideOneField = (r1 as { flatField?: import('@/workers/geometry/carriedField').FlatField | null }).flatField!;
       const maps = carriedMaps(top, flip);
       expect(maps.ok).toBe(true);
       if (!maps.ok) return;
-      const r2 = session.load(out.programs[1]!.nc, setup, BALL_TOOL, Z1.id, {
-        carried: { ...r1.flatField, ...maps.maps },
+      const r2 = session.load(sideTwo[0]!.nc, setup, toolOf(sideTwo[0]!.toolKey), Z1.id, {
+        carried: { ...sideOneField, ...maps.maps },
+        ...(sideOneRemovals.length > 0 ? { priorRemoval: sideOneRemovals } : {}),
       });
       expect(r2.ok, r2.ok ? '' : JSON.stringify(r2.diagnostics)).toBe(true);
-      if (!r2.ok || !r2.flatField) return;
+      if (!r2.ok) return;
+      // Side 2's program can be cut by the stated FLAT (the model engine's primary), whose sweep
+      // is the EXACT engine — no column grid comes back. The exact engine's own stamp is the
+      // field then: the same `exactSweptFieldTooled` the acceptance pictures use, over the
+      // program's own NC and cutter.
+      const sideTwoField =
+        r2.flatField ??
+        ((): FlatField => {
+          const parsed = parseGcode(sideTwo[0]!.nc);
+          const timeline = buildTimeline(parsed, setup, Z1);
+          const pitch = 0.5;
+          const nx = Math.ceil(BLANK.length / pitch) + 1;
+          const ny = Math.ceil(BLANK.width / pitch) + 1;
+          const stamp = exactSweptFieldTooled({ nx, ny, x0: 0, y0: 0, pitch }, timeline, () => toolOf(sideTwo[0]!.toolKey));
+          if (stamp === null) throw new Error('side 2 produced no exact sweep stamp');
+          return { u0: 0, v0: 0, du: pitch, dv: pitch, nu: nx, nv: ny, top: stamp.field, base: -BLANK.thickness };
+        })();
       expect(r2.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
       sideTwoStock = r2.stats.stockVolume;
 
@@ -523,7 +529,7 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
       // material side 1 removed. The run store hands the field across exactly this way.
       const blank = createSimSession(tl);
       try {
-        const r2b = blank.load(out.programs[1]!.nc, setup, BALL_TOOL, Z1.id);
+        const r2b = blank.load(sideTwo[0]!.nc, setup, toolOf(sideTwo[0]!.toolKey), Z1.id);
         expect(r2b.ok, r2b.ok ? '' : JSON.stringify(r2b.diagnostics)).toBe(true);
         if (r2b.ok) blankStock = r2b.stats.stockVolume;
       } finally {
@@ -532,13 +538,14 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
       expect(blankStock).toBeGreaterThan(BLANK.length * BLANK.width * BLANK.thickness * 0.99);
       expect(sideTwoStock).toBeLessThan(blankStock - 1000);
 
+
       // THE WALL, at the point the app's map pairs with each side-1 probe: side 1's finished top
       // (its height above the rim is + the crown), and the side-2 cavity's floor there.
       const crown = crownOf(zOut);
       for (const [lx, ly] of PROBES) {
         const s2 = map([CX + lx, CY + ly, 0] as [number, number, number]);
-        const outside = topAt(r1.flatField, CX + lx, CY + ly) + crown;
-        const cavity = topAt(r2.flatField, s2[0], s2[1]);
+        const outside = topAt(sideOneField, CX + lx, CY + ly) + crown;
+        const cavity = topAt(sideTwoField, s2[0], s2[1]);
         const wall = outside + cavity;
         const slope = Math.hypot(
           (zOut(lx + 0.01, ly) - zOut(lx - 0.01, ly)) / 0.02,
@@ -554,4 +561,25 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
       session.dispose();
     }
   }, 600_000);
+
+  // #1019 — THE OPENING, NOT THE FLUTE. A stated flat that cannot ENTER the cavity's 0.541 mm
+  // floor patch must count as absent for that pocket (stated by name and number), never as a
+  // refusal of the whole job. Measured with the sequence probe on this fixture's side 2: one
+  // pocket, depth 14.75 mm, minOpening 0.541 mm; `canCutSomething` was false and the search
+  // returned no primary, so `planModelCam` refused everything with "no cutter sequence can be
+  // planned for this demand". The seam's own input is built directly, exactly as it is with the
+  // stated 12 mm flat in the shop.
+  it('a stated flat that cannot enter the cavity\'s 0.541 mm floor patch is stated unreachable, not a refusal', async () => {
+    const job = oneJob();
+    const flat = entryFor('flat-3.175x12-metal');
+    expect(flat, 'the fixture names a real library flat').not.toBeNull();
+    const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+    const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+    const input = await buildModelPlanInputForGoal(job, job.targetObjects![1]!, BALL_TOOL, { tools: [flat!] });
+    const out = await planModelCam(input);
+    expect(out.perSetup.flatMap((st) => st.programs).length, 'no program was planned').toBeGreaterThan(0);
+    const stated = out.perSetup.flatMap((st) => st.statements).map((st) => st.text).join('\n');
+    expect(stated).toContain('pocket-0');
+    expect(stated).toContain('0.541 mm opening');
+  }, 300_000);
 });

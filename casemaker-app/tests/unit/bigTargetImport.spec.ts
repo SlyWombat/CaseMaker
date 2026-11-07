@@ -133,17 +133,30 @@ describe('#720 a 12 MB-class 3MF is an ordinary goal', () => {
           useEngraveJobStore.getState().job,
           useEngraveJobStore.getState().job.targetObject!,
           flatEndMill(3.175),
-          [],
           null,
-          {},
+          { shop: {} },
         );
         expect(out.ok, `${out.stage} ${JSON.stringify(out.errors)}`).toBe(true);
         expect(out.nc).not.toBeNull();
         expect(out.programs).toHaveLength(1);
+
+        // #982 pin — the fixture's OWN flat-only set through the ONE model entry: no ball is the
+        // flat-raster fallback, never a refusal. RED at the parent (planModelCam threw).
+        {
+          const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+          const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+          const live = useEngraveJobStore.getState().job;
+          const modelInput = await buildModelPlanInputForGoal(live, live.targetObject!, flatEndMill(3.175), {});
+          const modelOut = await planModelCam(modelInput);
+          expect(modelOut.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
+          expect(modelOut.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no ball nose');
+        }
       } finally {
         setMeshBlobIO(null);
       }
     },
-    60_000,
+    // #982 — the model entry's own plan over this mesh is now part of the test: ~100 s by itself
+    // (the #982 pin below), past the old 60 s budget the heightfield path alone needed.
+    240_000,
   );
 });

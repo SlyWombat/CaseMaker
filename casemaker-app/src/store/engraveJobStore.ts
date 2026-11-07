@@ -111,8 +111,8 @@ import type {
   StockHold,
   TapeHold,
   ViseParams,
-  EngraveJobSubstitution,
   EngraveSetupSubstitution,
+  PlanChoice,
 } from '@/types/engraveJob';
 import { pruneRunLog } from '@/engine/cnc/engrave/package';
 import {
@@ -1100,8 +1100,6 @@ export interface EngraveJobState {
     source?: FieldSource,
     /** #743 P-8 — which setup the plan is written to (0: the job's own cutter). */
     setupIndex?: number,
-    /** #786 slice 4c-2 — set ONLY when this plan replaces a cutter the operator chose. */
-    substitution?: EngraveJobSubstitution,
     /** #869 — the flat that roughs a pure goal before the plan's first cutter; absent = one cutter. */
     goalRoughKey?: string,
   ) => void;
@@ -1443,6 +1441,12 @@ export interface EngraveJobState {
    * reaches.
    */
   setJobMargins: (margins: EngraveMargins | null) => void;
+  /**
+   * #961 — THE OPERATOR'S PLAN CHOICE (the card's tradeoff control). `'owned'` is the default and
+   * is written as ABSENCE — a job with no choice follows the default the rule states, so a future
+   * default reaches it; `'ideal'` is recorded on the document. Reads go through `planChoiceOf`.
+   */
+  setPlanChoice: (choice: PlanChoice) => void;
   /**
    * #743 D-2 — RESIZE THE JOB TO A MEASURED DISC. Every item is scaled in X and Y about the
    * stock's centre and the stock box (and a disc's ⌀) with them; depths and the cut's Z numbers are
@@ -1989,7 +1993,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     // #766 D — see the interface note. The plan itself is written by the same function the
     // evaluator applies (engine/cnc/engrave/measuredPick), so the app and the search cannot
     // disagree about what "this plan" means in the document.
-    applyCutterPlan: (cutters, source = 'computed', setupIndex = 0, substitution, goalRoughKey) =>
+    applyCutterPlan: (cutters, source = 'computed', setupIndex = 0, goalRoughKey) =>
       apply((job) => {
         if (cutters.length === 0) return job;
         const next = applyCutterPlanToJob(job, {
@@ -2004,9 +2008,11 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           ...next,
           tool: resolveTool(cutters[0]!.key),
           sources: { ...(job.sources ?? {}), tool: source },
-          // A plan applied without a substitution CLEARS an earlier record: the sentence must
-          // never outlive the replacement it describes.
-          ...(substitution === undefined ? { substitution: undefined } : { substitution }),
+          // #1010 — A SAVED DOCUMENT'S SUBSTITUTION SENTENCE IS CLEARED BY A NEW PLAN. Nothing
+          // writes a substitution any more (the operator applies a plan; nothing is substituted
+          // behind them), but a record a saved document carries must not outlive the cutter it
+          // describes — the READ path keeps that sentence for documents written before the ruling.
+          substitution: undefined,
         };
       }),
 
@@ -3350,6 +3356,17 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       }),
 
     applyHoldAnswers: (answers) => apply((job) => applyHoldAnswers(job, answers)),
+
+    // #961 — the operator's plan choice: 'ideal' is recorded; 'owned' deletes the key (absence is
+    // the default, `planChoiceOf`), so the document never carries a choice it does not need.
+    setPlanChoice: (choice) =>
+      apply((job) => {
+        if (choice === 'owned') {
+          const { planChoice: _dropped, ...rest } = job;
+          return rest;
+        }
+        return { ...job, planChoice: choice };
+      }),
 
     setJobMargins: (margins) =>
       apply((job) => {

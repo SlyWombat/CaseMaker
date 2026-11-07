@@ -144,7 +144,7 @@ describe('#435 — refusals are by name, never an approximation', () => {
     expect(out.findings.find((f) => f.code === 'primitive-not-vertical')?.severity).toBe('warning');
   }, 60_000);
 
-  it('CUTS a cone as a 3D surface program — the #435 refusal is gone (#786 4a-2)', async () => {
+  it('REFUSES a cone by name (#966/#979 — the 3D surface CAM path was removed with the old engine)', async () => {
     const job = jobWith([primitive({ kind: 'cone', diameter: 8, tipDiameter: 1 })], {
       toolKey: 'flat-1.0',
       tool: flatEndMill(1, { fluteLength: 20, centreCutting: true }),
@@ -153,21 +153,21 @@ describe('#435 — refusals are by name, never an approximation', () => {
     expect(found).not.toContain('primitive-cone-needs-cam');
     expect(found).not.toContain('primitive-sphere-needs-3d');
     const out = await engraveGenerate(tl, job, job.tool!, [], null);
-    expect(out.ok, JSON.stringify(out.findings.map((f) => `${f.severity}:${f.code}`))).toBe(true);
-    const surface = out.programs.find((p) => p.surfaceCheck != null);
-    expect(surface).toBeDefined();
-    expect(out.findings.some((f) => f.code === 'primitive-surface-program' && f.severity === 'info')).toBe(true);
+    expect(out.ok).toBe(false);
+    expect(out.programs).toEqual([]);
+    expect(out.findings.some((f) => f.code === 'surface-primitive-removed' && f.severity === 'error')).toBe(true);
   }, 60_000);
 
-  it('CUTS a sphere the same way, as the surface it is (#786 4a-2)', async () => {
+  it('REFUSES a sphere the same way (#966/#979)', async () => {
     const job = jobWith([primitive({ kind: 'sphere', diameter: 8 })], {
       toolKey: 'flat-1.0',
       tool: flatEndMill(1, { fluteLength: 20, centreCutting: true }),
     });
     expect(codes(job)).not.toContain('primitive-sphere-needs-3d');
     const out = await engraveGenerate(tl, job, job.tool!, [], null);
-    expect(out.ok, JSON.stringify(out.findings.map((f) => `${f.severity}:${f.code}`))).toBe(true);
-    expect(out.programs.some((p) => p.surfaceCheck != null)).toBe(true);
+    expect(out.ok).toBe(false);
+    expect(out.programs).toEqual([]);
+    expect(out.findings.some((f) => f.code === 'surface-primitive-removed' && f.severity === 'error')).toBe(true);
   }, 60_000);
 
   it('does not say the job is empty when a cuttable primitive is its only work', () => {

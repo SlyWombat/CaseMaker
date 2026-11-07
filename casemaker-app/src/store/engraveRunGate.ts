@@ -73,6 +73,14 @@ export interface ProgramOracle {
   /** The run's own numbering (`programLabel`): "program 2 (flat-3.175x12)". */
   label: string;
   report: OracleReport;
+  /**
+   * #1035 (6b's ruling) — THIS PROGRAM'S COVERAGE IS JUDGED AT THE END OF THE RUN. An intermediate
+   * goal program (a rough before the finish) reads its own stage's leftover, so its coverage line
+   * can be short while the run's end state passes; its own `report.ok` is then false, but that
+   * failure is not the run's — the last goal program's coverage is. The gate never names it, and
+   * the evidence says why.
+   */
+  goalCoverageDeferred: boolean;
 }
 
 /**
@@ -510,7 +518,7 @@ export function saveBlocker(v: EngraveRunView): string | null {
   if (!v.oracle.ok) {
     // #844 — WHICH FILE. A rest pair's second program or a board's later cutter that did not
     // match is named, not the run; a result with no per-program list keeps the old sentence.
-    const failed = (v.oraclePrograms ?? []).find((p) => !p.report.ok);
+    const failed = (v.oraclePrograms ?? []).find((p) => !p.report.ok && !p.goalCoverageDeferred);
     return failed === undefined
       ? 'the simulation does not match the prediction'
       : `${failed.label}: the simulation does not match the prediction`;

@@ -177,6 +177,26 @@ export interface SimLoadOk {
    */
   removalField?: CarriedField | null;
   /**
+   * #1032 (6b's review) — WAS A CARRIED FLOOR SUPPLIED TO THIS SWEEP? The run walk hands a later
+   * setup the other side's remaining stock as the column engine's floor (#723 P2-2b). A program
+   * whose engine still refuses a removal-mesh seed restarts from the blank; when this is true,
+   * that restart KEPT the earlier setup's carried floor, so the end state the result was judged
+   * on still includes the earlier side. Set by the caller that supplied `carried` — the engine
+   * does not infer it.
+   */
+  carriedFloor?: boolean;
+  /**
+   * #1034 — THE PREDECESSOR THIS PROGRAM WAS SEEDED FROM, when it was seeded within its own
+   * setup: the earlier program's own label ("program 3 (flat-1.0)"). Set by the caller that
+   * chose the seed, so the panel names it; null when the program started a setup's chain.
+   */
+  seedFrom?: string | null;
+  /**
+   * #1034 (C's review) — how many EARLIER same-setup programs' removals this load was also
+   * seeded from (the whole setup's field list applies, `seedFrom` names only its latest member).
+   */
+  seedEarlier?: number;
+  /**
    * Where the fixture's dimensions came from (#204), present only when the setup models one.
    * A default is NOT a measurement; the viewport shows this so the shown jaws are not read as
    * exact. Optional so a setup with no `fixture` does not grow the load info's shape.

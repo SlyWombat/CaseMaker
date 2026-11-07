@@ -128,7 +128,7 @@ import {
   type ProgramSweepSummary,
 } from '../../../src/engine/cnc/engrave/programSweep';
 import { buildCouponPrograms, type CouponRecord, type CouponRecordRow, type CouponSpec } from '../../../src/engine/cnc/engrave/couponJob';
-import { entryFor, getTools, NO_TOOL_KEY } from '../../../src/engine/cnc/toolRegistry';
+import { benchCutterFor, entryFor, getTools, NO_TOOL_KEY } from '../../../src/engine/cnc/toolRegistry';
 import {
   finerThan,
   reachabilityFor,
@@ -154,6 +154,7 @@ import { engravePreviewSvg } from '../engravePreviewSvg';
 import { svgToPng } from '../svgToPng';
 import { efficiencyThresholds, goalPassCoverage, KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
 import { goalCheckForProgram, type SimGoalCheck } from '../../../src/engine/cnc/engrave/goalCheckInput';
+import { pureGoalObject } from '../../../src/engine/cnc/engrave/jobKind';
 import { goalEdgeBreakOptions } from '../../../src/engine/cnc/engrave/edgeBreak';
 import { goalInputFor } from '../../../src/workers/sim/goalCheckField';
 import type { OracleReport } from '../../../src/engine/cnc/engrave/oracle';
@@ -1052,13 +1053,21 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // #953 — THE GOAL CHECK, AS THE RECEIPT CARRIES IT. One input for the run (the goal target and
     // the shop's pass line), and each program's report taken while its own sweep is the live one —
     // the run store's rule, so the CLI and the Cut card judge the same file the same way.
-    const goalCheck = goalCheckForProgram(job, generated.surface3d != null, {
+    // #966 — the gate is the job's own shape (`pureGoalObject`), not `generated.surface3d`: the
+    // model-engine goal path posts a real `verify` with no `surface3d`, and the old proxy would
+    // have read it as an item job and dropped the goal block from the receipt silently. Mirrors
+    // the same fix in `engraveRunStore.ts`'s `afterLoad`, so the CLI and the Cut card agree.
+    // #961/#1032 — A POSTED PROGRAM'S KEY MUST RESOLVE TO THE BENCH'S CUTTER: `cutterKeyOf`
+    // stamps `tool.id ?? tool.name`, and the built-in tier's identity is not its registry key.
+    // `benchCutterFor` (`toolRegistry.ts`) is the one rule; the app's run store calls it too, so
+    // the CLI and the Cut card cannot disagree about which cutter a posted program names.
+    const goalCheck = goalCheckForProgram(job, pureGoalObject(job) !== null, {
       passCoverage: goalPassCoverage(shopDefaults),
       // #955/V2-2 — the edge-break allowance's GATE parameters, from the job's edgeBreak and the
       // tools this run posts (never the CAM's plan, A's R3). No edge break → no allowance.
       ...goalEdgeBreakOptions(
         job,
-        (key) => (key === job.toolKey ? tool : (entryFor(key)?.tool ?? null)),
+        (key) => (key === job.toolKey ? tool : benchCutterFor(key)),
         generated.programs.map((p) => p.toolKey),
       ),
     });
@@ -1077,7 +1086,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // `toolForProgram`'s reading: the job's own snapshot for the job's key, the registry for a
         // setup's later cutter.
         cutterFor: (program) =>
-          program.toolKey === job.toolKey ? tool : (entryFor(program.toolKey)?.tool ?? null),
+          program.toolKey === job.toolKey ? tool : benchCutterFor(program.toolKey),
         load: async ({ program, index, cutter, drillPoint, priorRemoval, priorFields, priorExactRemoval }) => {
           sweeping =
             (program.kind ?? 'engrave') === 'facing'

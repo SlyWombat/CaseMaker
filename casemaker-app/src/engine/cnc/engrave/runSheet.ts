@@ -1,4 +1,5 @@
 import type { ProbeFitInstrument } from '@/engine/cnc/probeFitDiagram';
+import type { PlanStatement } from '@/engine/cnc/cam/model/types';
 import {
   type CamPassStep,
   type CycleTerms,
@@ -104,7 +105,6 @@ import { clearanceZOf, rotaryOf, type WorkOrigin } from '@/engine/cnc/machine';
 import { facingDefault, facingRefusal, finishOf } from '@/engine/cnc/stockStart';
 import { NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import type { FacingCamSummary } from '@/engine/cnc/cam/facing';
-import type { GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
 import type { InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import type { VerifyReport } from '@/engine/cnc/verify';
 // #243 — the blind-spot sentence is the Simulate panel's OWN builder, imported rather than
@@ -489,6 +489,13 @@ export interface RunSheetDrillFacts {
 export interface RunSheetGenerated {
   /** The app's full finding list for the job (#206 stage 1: `validateJob` + `validateVise` + the geometry findings, deduped). */
   findings: readonly JobFinding[];
+  /**
+   * #992 — the model plan's typed statements, when the run has one. The sheet prints the
+   * `sheet`-class ones (registration, facing, freeing order, pipeline summary, empty stages) in
+   * its own "What the plan states" section; `warning`/`info` ones already arrive as findings
+   * above and are NOT printed twice. Absent on the old heightfield path, which never planned one.
+   */
+  planStatements?: readonly PlanStatement[] | null;
   /** `feedsFor`'s result, or null when that stage was not reached. */
   feeds: FeedsResult | null;
   cam: RunSheetCamSummary | null;
@@ -1410,6 +1417,11 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
             outcome: p.outcome,
             engine: p.engine,
             fromBlank: p.fromBlank,
+            // #1032 — a blank restart that kept the caller's carried floor says so; the coverage
+            // sentence states the carry it kept, not only the seed the engine refused.
+            carriedFloor: p.carriedFloor === true,
+            seedFrom: p.seedFrom ?? null,
+            seedEarlier: p.seedEarlier ?? 0,
             errorCount: p.errorCount,
             codes: [...p.diagnostics, ...p.notes].map((d) => d.code),
           })),
@@ -1826,10 +1838,11 @@ function surfaceSpreadSteps(
   const refWords =
     Z0_REFERENCE === 'lowest' ? 'LOWEST' : Z0_REFERENCE === 'highest' ? 'HIGHEST' : 'MIDPOINT (the average)';
 
+  const touchesStockTop = job.facing !== undefined && job.facing.enabled && job.facing.depth > 0;
   const steps: RunSheetStep[] = [
     {
       text:
-        `The blank's top is measured at ${n} points across the cut — its centre, then both extents on ` +
+        `The blank's top is measured at ${n} points across ${touchesStockTop ? "the blank's top" : 'the cut'} — its centre, then both extents on ` +
         'each axis — because a printed blank’s colour line is a plane and its dome is extra material ' +
         'above it: one touch at the centre cannot tell you the floor at the ends of a line. Take them ' +
         'in the order below and write each reading down.',
@@ -3144,11 +3157,100 @@ function drillPeckSteps(job: EngraveJob, feedsPeck: number | null): RunSheetStep
 }
 
 /**
+ * #535 — a goal program's surfacing facts, as the operation row and the run sheet quote them.
+ * Every number is one the CAM ran with, never a second resolution of the same question.
+ *
+ * #966 — pure-moved from `cam/surface3d.ts` ahead of that file's removal: this type outlives the
+ * retired goal-mesh dispatch (`generateSurface3dForGoal`) that used to build it — rotary relief
+ * (`generateRotaryGoalProgram`, engraveGenerate.ts) constructs one too, and that path is untouched
+ * by #966. `surfaceSteps` below is this type's one reader, so the type lives right beside it.
+ *
+ * `GoalRestFacts`/the `rest?` field did NOT move with it: nothing ever constructed a
+ * `GoalRestFacts` (its only builder was the retired dispatch), and `surfaceSteps` never read
+ * `facts.rest` — so there was no live branch left to carry, only a dead type.
+ */
+export interface GoalSurfaceFacts {
+  /** The heightfield's own resolution sentence ("sampled on a 0.1 mm grid"). */
+  resolutionNote: string;
+  /**
+   * The pitch the heightfield was sampled at, mm — after any coarsening. #1005 — ABSENT on the
+   * model engine's own facts: it plans from the part's solid and reports the CL grid it sampled
+   * (`gridPitchMm` is that grid's finest spacing) instead of a goal heightfield.
+   */
+  gridPitchMm?: number;
+  /** The cells the heightfield held, `nx × ny`. ABSENT on the model engine's facts (#1005). */
+  gridCells?: number;
+  /** Roughing step-down per Z layer, mm. ABSENT on the model engine's facts (#1005). */
+  stepDownMm?: number;
+  /**
+   * #869 — the FINISHING cutter's step-down, mm — the spacing of the rim laps (#862), which ride
+   * the finish. Absent on a result stored before the field; a reader falls back to `stepDownMm`.
+   */
+  finishStepDownMm?: number;
+  /** Roughing raster pitch, mm. ABSENT on the model engine's facts (#1005). */
+  roughStepOverMm?: number;
+  /** Finishing raster pitch, mm. ABSENT on the model engine's facts (#1005). */
+  finishStepOverMm?: number;
+  /** Roughing allowance left on the goal surface, mm. ABSENT on the model engine's facts (#1005). */
+  stockToLeaveMm?: number;
+  /**
+   * #898 — the UNDERSIDE choice this program cut to: its kind and the work-Z floor it set (`null`
+   * when the choice carries no floor of its own). Absent when the goal states no underside, or on
+   * a result stored before the field.
+   */
+  underside?: { kind: 'flat' | 'flipped-tabs' | 'plinth'; floorZ: number | null } | null;
+  /** Z layers the roughing pass stepped through. ABSENT on the model engine's facts (#1005). */
+  roughingLayers?: number;
+  /**
+   * #869 — THE FLAT ROUGH, when the goal is cut as two programs: the cutter's name, as the run
+   * sheet names it, and which roughing pass ran. Null when a flat was chosen but nothing stood
+   * above the allowance to remove; ABSENT on a one-cutter goal and on every result stored before
+   * the field, which is why a reader asks `!= null`.
+   */
+  rough?: { tool: string; kind: 'raster' | 'adaptive' } | null;
+  /**
+   * #671 — the scallop pass's numbers, or null when it did not run. ABSENT on a result stored by
+   * a build before #671, which is why a reader asks `!= null` rather than `!== null`.
+   */
+  scallop?: { contours: number; stepOverMm: number; clamped: boolean } | null;
+  /** #671 — the pencil pass's numbers, or null when it did not run; absent before #671. */
+  pencil?: { paths: number; creaseDeg: number } | null;
+  /**
+   * #862 — the rim pass's numbers, or null when it did not run; absent before #862. The laps are
+   * the finishing operation's opening moves, down the clear band's wall.
+   */
+  rim?: { laps: number; floorZ: number } | null;
+  /** The engine's notes for the run sheet: the feeds, undercuts and a flat finishing cutter. */
+  notes: string[];
+}
+
+/**
  * #535 — a PURE GOAL job's surface steps: what the two passes did, then the engine's own notes
  * (the feeds, the undercuts a heightfield cannot express, the resolution, and a flat finishing
  * cutter). Every number is `surface3d`'s, printed rather than re-derived here.
  */
 function surfaceSteps(facts: GoalSurfaceFacts): RunSheetStep[] {
+  // #1005/#1006 — THE MODEL ENGINE'S FACTS CARRY NO RASTER NUMBERS: it plans from the part's solid,
+  // not a sampled goal heightfield, so the raster step-overs, roughing layers and allowance a
+  // heightfield run reports do not exist. The sheet prints what the run does state — its
+  // resolution sentence, the underside, and every note — rather than re-deriving numbers the
+  // engine never had. Printing "undefined mm step-over" would be worse than printing less.
+  if (
+    facts.roughingLayers === undefined
+    || facts.stepDownMm === undefined
+    || facts.roughStepOverMm === undefined
+    || facts.stockToLeaveMm === undefined
+    || facts.finishStepOverMm === undefined
+  ) {
+    const steps: RunSheetStep[] = [
+      {
+        text: `Surface a mesh. ${facts.resolutionNote.charAt(0).toUpperCase() + facts.resolutionNote.slice(1)}.`,
+        value: 'surface program',
+      },
+    ];
+    for (const note of facts.notes) steps.push({ text: note });
+    return steps;
+  }
   const rough =
     facts.roughingLayers === 0
       ? 'Roughing has nothing to remove: no stock stands above the goal surface and its allowance.'
@@ -5046,8 +5148,17 @@ export function buildRunSheet(
   // #743 P-6 — a board's own section: the blank, the files and the program order.
   const pcbSteps = pcbBoardSteps(job, tool);
 
+  // #992 — THE PLAN'S OWN SHEET-CLASS STATEMENTS: facts of this run (registration, facing, the
+  // freeing order, the pipeline summary, the stages that emitted nothing). The warning/info
+  // statements already reached §8 through `generated.findings` and are NOT printed twice here.
+  // `sentence()` is the same route the 2.5D path's planner notes take.
+  const planSteps: RunSheetStep[] = (generated.planStatements ?? [])
+    .filter((s) => s.severity === 'sheet')
+    .map((s): RunSheetStep => ({ text: sentence(s.text) }));
+
   const sections: { id: string; title: string; steps: RunSheetStep[] }[] = [
     { id: 'need', title: 'What you need', steps: needSteps },
+    ...(planSteps.length === 0 ? [] : [{ id: 'plan', title: 'What the plan states', steps: planSteps }]),
     ...(reachSteps ? [{ id: 'reach', title: 'What each cutter reaches', steps: reachSteps }] : []),
     ...(options.restPass
       ? [{ id: 'rest', title: 'Two tools, one blank', steps: restPassSteps(options.restPass) }]

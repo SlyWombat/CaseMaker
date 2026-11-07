@@ -338,6 +338,11 @@ export function SimPanel() {
             outcome: p.outcome,
             engine: p.engine,
             fromBlank: p.fromBlank,
+            // #1032 — a blank restart that kept the caller's carried floor says so; the coverage
+            // sentence states the carry it kept, not only the seed the engine refused.
+            carriedFloor: p.carriedFloor === true,
+            seedFrom: p.seedFrom ?? null,
+            seedEarlier: p.seedEarlier ?? 0,
             errorCount: p.errorCount,
             codes: [...p.diagnostics, ...p.notes].map((d) => d.code),
           })),

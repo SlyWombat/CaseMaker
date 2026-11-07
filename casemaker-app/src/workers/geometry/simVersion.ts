@@ -36,4 +36,12 @@
 //     the per-cell CL point (`StampedTop.clX/clY`) and the check reads it via `clAt`. The rule's
 //     fingerprint is re-pinned in `tests/unit/goalRuleFreeze948.spec.ts`; the cards are re-scored
 //     in the same commit.
-export const SIMULATOR_VERSION = 5;
+// v6 (#996) — THE STRADDLING-CELL EXCUSE, ON PROOF. A cut-into cell whose centre sits on a
+// vertical step reads the step's high side while the cutter correctly stops at the step; it is now
+// excused when the step over the cell (centre + four corners) is at least as tall as the read
+// intrusion and the swept floor is no more than 0.005 mm below the design's low side over the cell
+// — nothing cut that the design keeps. Excused cells are counted and their tallest step printed
+// (`straddlingNotScoredCells` / `straddlingMaxStepMm`), never silent. A one-cell gouge on flat
+// ground (step 0) can never qualify. The rule's fingerprint gains the two constants in
+// `tests/unit/goalRuleFreeze948.spec.ts`; the cards are re-scored in the same commit.
+export const SIMULATOR_VERSION = 6;

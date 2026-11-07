@@ -114,7 +114,10 @@ function reliefJob(name: string, maxLobe: number): EngraveJob {
   job.labels = [];
   job.shapes = [];
   job.targetObject = target(maxLobe);
-  job.toolKey = 'flat-3.175x12-metal';
+  // #407 — the metal-line bit is REFUSED on a PLA blank ("no feed row was written for it on this
+  // material"), which disabled Generate with the panel's own sentence. This job is a plastic rod,
+  // so it carries the wood/plastic built-in flat the panel itself offers for it.
+  job.toolKey = 'flat-1.0';
   return job;
 }
 

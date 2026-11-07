@@ -16,7 +16,7 @@ import type { Setup, MachineCalibration } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
-import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
+import type { EngraveJob, EngraveTargetObject, EngraveMargins } from '@/types/engraveJob';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { getToplevel } from './geometry/ManifoldRuntime';
 import type { NodeMeshOutput } from './geometry/meshOutput';
@@ -26,11 +26,13 @@ import { goalInputFor } from './sim/goalCheckField';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
-import { engraveGenerate as runEngraveGenerate, supportingFloors, type EngraveGenerated, type EngraveProgress, type EngraveShopOpts } from './sim/engraveGenerate';
+import { engraveGenerate as runEngraveGenerate, buildModelPlanInputForGoal, supportingFloors, type EngraveGenerated, type EngraveProgress, type EngraveShopOpts } from './sim/engraveGenerate';
+// #986 (the ruling) — the background ideal: the second plan's outcome and the tradeoff line,
+// computed AFTER the owned plan has posted, never posting itself.
+import { planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
+import { comparePlanOutcomes, type PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
+import type { PlanOutcome } from '@/engine/cnc/cam/model/plan';
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
-import { portLevelPlanner } from './sim/levelPlannerPort';
-import type { PoolSizing } from '@/engine/jobs/poolSizing';
-import type { LevelPlanner } from '@/engine/cnc/cam/rough3d';
 import { runSmartPick, type EngravePickSummary } from './sim/smartPickRun';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
@@ -41,17 +43,6 @@ import { sha256Hex } from '@/engine/import/meshStock';
 import { designJobFor, type DesignJobPatch, type DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
 
 let session: SimSession | null = null;
-/**
- * #881 — the roughing level pool, as this worker sees it: a port to the main thread's planners.
- * Set once per worker lifetime by `setLevelPlanner`; absent, every level is planned here.
- */
-let levelPlanner: LevelPlanner | null = null;
-/**
- * #881 — how many planners the last budgeted batch was allowed, as the pool stated it. The
- * worker cannot apply the core rule itself (no `matchMedia` here), so it reports the pool's own
- * answer — the run's Technical line quotes it.
- */
-let levelPoolSizing: PoolSizing | null = null;
 async function getSession(): Promise<SimSession> {
   session ??= createSimSession(await getToplevel());
   return session;
@@ -96,20 +87,6 @@ function buffersOf(meshes: (NodeMeshOutput | null | undefined)[]): Transferable[
 }
 
 const api = {
-  /**
-   * #881 — take the roughing level pool's channel. The main thread owns the workers; this end
-   * only sends level requests down it. The port is TRANSFERRED (Comlink.transfer on the caller's
-   * side), so no copy is made and the channel dies with this worker.
-   */
-  setLevelPlanner(port: MessagePort): void {
-    levelPlanner = portLevelPlanner(port, (sizing) => {
-      levelPoolSizing = sizing;
-    });
-  },
-  /** #881 — how many planners the last budgeted batch allowed; null before one has run. */
-  levelPoolSizing(): PoolSizing | null {
-    return levelPoolSizing;
-  },
   /**
    * Disposes any existing session first. A refused load leaves none — except when the runner
    * succeeded and only the sweep refused, in which case the session is PATH-ONLY: `toolPath`
@@ -281,6 +258,33 @@ const api = {
    * findings and `drill.peckClearanceMm` for the peck re-entry height. Omitted, the pipeline uses
    * its labelled fallbacks, exactly as a headless run with no location does.
    */
+  /**
+   * #986 (the maintainer's ruling) — THE BACKGROUND IDEAL. The owned plan has already posted; this
+   * computes the IDEAL plan's own outcome beside it and the material tradeoff, WITHOUT posting a
+   * second program. The card reads "comparing…" until this resolves, then prints the line; the
+   * "Every bit the app knows" press calls the same method again, on demand.
+   *
+   * `catalogueTools` is required: without it there is no ideal to compute, and the caller says so
+   * by not asking.
+   */
+  async engravePlanIdeal(
+    job: EngraveJob,
+    goal: EngraveTargetObject,
+    tool: Tool,
+    shop: EngraveShopOpts,
+    catalogueTools: readonly Tool[],
+  ): Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }> {
+    const input = await buildModelPlanInputForGoal(job, goal, tool, shop, undefined, catalogueTools);
+    const two = await planTwoOutcomes(input);
+    const owned = two.owned.outcome ?? null;
+    const ideal = two.ideal?.outcome ?? null;
+    return {
+      tradeoff: owned !== null && ideal !== null ? comparePlanOutcomes({ score: owned }, { score: ideal }) : null,
+      owned,
+      ideal,
+    };
+  },
+
   async engraveGenerate(
     job: EngraveJob,
     tool: Tool | null,
@@ -291,13 +295,18 @@ const api = {
     // #785 — stage progress for the panel and the flight recorder. Its OWN argument, because
     // Comlink only turns a top-level function into a proxy (the same rule `simLoad`'s states).
     onProgress?: (progress: EngraveProgress) => void,
+    /**
+     * #961 — THE IDEAL'S CANDIDATE SET from the main thread's tool library (the house service's
+     * `cat:` rows included). This realm never loads that library, so the caller sends the entries
+     * she has; absent means no ideal (`planIdeal` null) and the second plan is skipped.
+     */
+    catalogueTools?: readonly Tool[],
   ): Promise<EngraveGenerated> {
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
     // #896 — every stage report names this worker's heap too (see `workerMemoryMb`).
     const withMemory =
       onProgress === undefined ? undefined : (progress: EngraveProgress): void => onProgress({ ...progress, memoryMB: workerMemoryMb() });
-    // #881 — the pipeline is async now: the adaptive rough's levels can be planned by a pool.
-    return await runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop, withMemory, levelPlanner ?? undefined);
+    return await runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop, withMemory, catalogueTools);
   },
   /**
    * The volumetric oracle (#206 §3) against the program CURRENTLY loaded in the session. The

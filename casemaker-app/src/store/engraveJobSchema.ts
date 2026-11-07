@@ -926,6 +926,14 @@ const targetObjectSchema = z
       .min(1)
       .optional()
       .describe('Base64 of the mesh file; omitted while the bytes live in the app’s mesh store or are missing.'),
+    // #991 — OPTIONAL: the per-triangle B-rep face id a STEP conversion keeps beside the mesh, so
+    // the app plans the same whole-face classification the acceptance cards do. Absent for a
+    // mesh file (an STL has no faces); a document without it plans exactly as before.
+    faceId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Base64 of the per-triangle B-rep face id (Uint32Array), for a mesh converted from a STEP.'),
     size: z
       .object({
         x: z.number().finite().positive().describe('Mesh bounding-box size along X, in millimetres.'),
@@ -1080,11 +1088,11 @@ const targetObjectSchema = z
       .describe('Chamfer the goal mesh’s top rim with a V-bit after its surfacing program (#829); omit for square edges.'),
     // #869 — the flat end mill that roughs a goal as its own program, before the ball's finish.
     roughToolKey: z
-      .string()
-      .min(1)
+      .union([z.string().min(1), z.null()])
       .optional()
       .describe(
-        'The flat end mill’s library key for the goal’s roughing program (#869); omit to cut the goal with one cutter.',
+        'The goal’s curved rough (#869/#999): a flat end mill’s library key, or null for the ball ' +
+          'alone (one cutter); omit and the engine chooses the rough by sequence.',
       ),
   })
   .strict()
@@ -1506,6 +1514,38 @@ const stockFlatnessSchema = z.union([
   legacyFlatnessSchema.transform(() => undefined),
 ]);
 
+/**
+ * #943 — the surface touches and their readings, as the job keeps them. OPTIONAL, not defaulted,
+ * for the same byte-for-byte reason as `flatness`: a job whose surface has not been measured keeps
+ * no key. The point travels with its reading and the sheet's own words, so the plan can state
+ * where each number came from; `machine` says which machine took them.
+ */
+const stockSurfaceTouchSchema = z.object({
+  id: z.string().min(1).max(64).describe('The planned point\'s own id ("surface-1" …).'),
+  x: z.number().finite().describe('The point along X in the stock frame, millimetres.'),
+  y: z.number().finite().describe('The point along Y in the stock frame, millimetres.'),
+  z: z.number().finite().describe('The reading taken there, millimetres.'),
+  at: z.string().min(1).max(200).describe('The point in words, as the run sheet printed it.'),
+  source: z
+    .enum(['probe', 'touch-off', 'stated'])
+    .describe('How the reading was taken: probe, touched off, or typed from another instrument.'),
+});
+
+const stockSurfaceTouchesSchema = z.object({
+  touches: z
+    .array(stockSurfaceTouchSchema)
+    .min(1)
+    .max(1000)
+    .describe('The planned points and their readings, in the plan\'s order.'),
+  measuredAt: z.string().min(1).max(64).describe('When the touches were taken.'),
+  machine: z
+    .object({
+      host: z.string().min(1).max(200).describe('The machine\'s host.'),
+      port: z.number().int().min(1).max(65535).describe('The machine\'s command port.'),
+    })
+    .describe('The machine the readings were taken on.'),
+});
+
 const stockObjectSchema = z
   .object({
     length: z
@@ -1569,6 +1609,9 @@ const stockObjectSchema = z
     flatness: stockFlatnessSchema
       .optional()
       .describe('Bow measured on the clamped piece; omit when the surface has not been measured.'),
+    surfaceTouches: stockSurfaceTouchesSchema
+      .optional()
+      .describe('The surface touches and readings; omit when the surface has not been measured.'),
   })
   .superRefine((stock, ctx) => {
     // #240 §1, #713 — a cylinder is stated EXACTLY: the diameter is present, and the box the job
@@ -2362,6 +2405,8 @@ const jobSourcesSchema = z.object({
       // because zod STRIPS what an object does not name: the far side of a round trip would lose
       // the provenance while keeping the value, which is worse than either.
       flatness: fieldSourceSchema.optional(),
+      // #943 — the surface touch set, stamped `measured` by the registration that took it.
+      surfaceTouches: fieldSourceSchema.optional(),
       // #240 — the round-stock facts a rotary job's axis-frame box carries.
       shape: fieldSourceSchema.optional(),
       diameter: fieldSourceSchema.optional(),
@@ -2690,6 +2735,17 @@ const engraveJobV3Schema = engraveJobV2Schema
       .array(targetObjectSchema)
       .optional()
       .describe('The targets of a job cut from several sides, one per setup; omit for the single `targetObject` form.'),
+    // #961/#975 — THE OPERATOR'S PLAN CHOICE (the maintainer's 11-05 ruling): the owned plan is the
+    // default and what the seven lines judge; the ideal plan (every bit the app knows) is a
+    // recommendation the operator may choose instead. OPTIONAL and not defaulted, so every
+    // document that predates it parses unchanged; absent reads as 'owned' at the one place that
+    // asks (`planChoiceOf`), never rewritten into the file.
+    planChoice: z
+      .enum(['owned', 'ideal'])
+      .optional()
+      .describe(
+        "Which plan the operator chose: 'owned' (the location's own cutters — the default when absent) or 'ideal' (every bit the app knows, the recommendation).",
+      ),
   })
   .passthrough()
   .superRefine((job, ctx) => {

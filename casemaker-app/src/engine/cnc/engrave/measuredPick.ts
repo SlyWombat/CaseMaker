@@ -146,17 +146,17 @@ export function applyCutterPlanToJob(job: EngraveJob, plan: CutterPlanLike): Eng
     // #829 — a pure goal's SECOND cutter is the V-bit that bevels its rim; the goal has no setup
     // to carry it, so the plan's second key is written into the goal's own `chamfer`.
     //
-    // #869 — AND THE ROUGH IS THE PLAN'S OWN. The goal's `roughToolKey` is written when the plan
-    // names one and CLEARED when it does not: the rough's presence is the plan's decision, and a
-    // stale key would make a plan measured as one program generate as two — the evaluator applies
-    // a plan to a clone and generates it, so the job the verdict describes must be the job it
-    // writes. (The chamfer is different: whether the goal asks for a bevel is the document's, so a
-    // plan with no second cutter leaves the V alone.)
+    // #869/#999 — AND THE ROUGH IS THE PLAN'S OWN. The goal's `roughToolKey` is written when the
+    // plan names one, and written as NULL when it does not: under #999 an ABSENT key means the
+    // engine chooses the rough, so deleting it would make a plan measured as one program generate
+    // as two — the evaluator applies a plan to a clone and generates it, so the job the verdict
+    // describes must be the job it writes. `null` is the operator-visible "ball alone".
+    // (The chamfer is different: whether the goal asks for a bevel is the document's, so a plan
+    // with no second cutter leaves the V alone.)
     const goal = applied.targetObject;
     if (goal !== undefined) {
       const next = { ...goal };
-      if (plan.goalRoughKey === undefined) delete next.roughToolKey;
-      else next.roughToolKey = plan.goalRoughKey;
+      next.roughToolKey = plan.goalRoughKey ?? null;
       if (goal.chamfer !== undefined && plan.cutters[1] !== undefined) {
         next.chamfer = { ...goal.chamfer, toolKey: plan.cutters[1].key };
       }

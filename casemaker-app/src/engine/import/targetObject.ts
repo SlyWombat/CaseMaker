@@ -37,6 +37,12 @@ export type TargetObjectRead =
       data: string;
       size: { x: number; y: number; z: number };
       /**
+       * #991 — base64 of the per-triangle B-rep face id (little-endian `Uint32Array`), for a
+       * STEP the door converted. Kept with the target so the app plans the STEP's B-rep path
+       * (whole-face patches), not a plain triangulation of the same solid.
+       */
+      faceId?: string;
+      /**
        * #825 — a fact the import must state about the file it read, in one sentence: an OBJ has
        * no unit of its own, so the door says which reading its numbers got. Absent for the
        * formats whose numbers are already the app's millimetres by definition.
@@ -77,6 +83,35 @@ export interface ImageFit {
 }
 
 const NATURAL_MM_PER_PX = 25.4 / 96;
+
+/**
+ * #1029 — ONE NON-FINITE VERTEX HAS NO SHAPE. A binary STL carries raw float32 bits, so a NaN or
+ * ±Infinity parses without complaint and then either throws an unusable number or traps the
+ * kernel's whole instance (the failure mode depends on the build). The sentence names the count
+ * and the first offending triangle; both parses below — the door's and the cached plan-path one —
+ * refuse with it.
+ */
+export function nonFiniteMeshSentence(name: string, mesh: ParsedMesh): string | null {
+  const vertices = mesh.positions.length / 3;
+  let bad = 0;
+  let firstTriangle = -1;
+  for (let v = 0; v < vertices; v++) {
+    const x = mesh.positions[3 * v]!;
+    const y = mesh.positions[3 * v + 1]!;
+    const z = mesh.positions[3 * v + 2]!;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      bad++;
+      if (firstTriangle < 0) firstTriangle = Math.floor(v / 3);
+    }
+  }
+  const bboxFinite =
+    mesh.bbox.min.every((n) => Number.isFinite(n)) && mesh.bbox.max.every((n) => Number.isFinite(n));
+  if (bad === 0 && bboxFinite) return null;
+  return (
+    `goal-mesh-non-finite: ${name} has ${bad} of ${vertices} vertices that are not finite numbers` +
+    `${firstTriangle < 0 ? '' : ` (first at triangle ${firstTriangle})`}.`
+  );
+}
 
 /**
  * Read a picked `.stl` / `.3mf` / `.step` as a reference object. `id` is supplied by the caller
@@ -133,15 +168,26 @@ export async function readTargetObjectFile(
   // #774 — a STEP is converted ONCE, here: the kernel tessellates the B-rep and the job stores
   // the binary STL, so the id/hash/embed contract below is the one every mesh already has. The
   // file's own name is kept, so the row still says which file was picked.
+  //
+  // #991 — AT THE RECOGNITION READ, WITH THE FACE IDS. The plan classifies the mesh through its
+  // B-rep faces (one face, one patch); the kernel's display defaults split whole faces into
+  // many triangles and the dropped ids made the same solid read as a plain triangulation (the
+  // tray: 63 rims against the cards' 38, 28 fillets misread as modelled chamfers).
   let stored: ArrayBuffer = bytes;
   let mesh: ParsedMesh;
   let note: string | undefined;
+  let faceId: string | undefined;
   try {
     if (format === 'step') {
       const { stepToStl } = await import('./stepMesh');
-      const converted = await stepToStl(bytes);
+      const converted = await stepToStl(bytes, 'recognition');
       stored = converted.stl;
       mesh = converted.mesh;
+      if (converted.faceId !== undefined) {
+        faceId = arrayBufferToBase64(
+          converted.faceId.buffer.slice(converted.faceId.byteOffset, converted.faceId.byteOffset + converted.faceId.byteLength) as ArrayBuffer,
+        );
+      }
     } else if (format === 'obj') {
       // #825 — the OBJ's own bytes are embedded (they are what the hash identifies), and the
       // parser's unit reading is stated on the result: an OBJ has no unit, so the door says
@@ -162,6 +208,11 @@ export async function readTargetObjectFile(
   if (mesh.triangleCount === 0 || mesh.indices.length === 0) {
     return { ok: false, error: `${file.name} holds no triangles, so it has no shape to show.` };
   }
+
+  // #1029 — a non-finite vertex must never reach the booleans; refused here, by name, with the
+  // count that decided it — the same discipline `goal-mesh-unclosable` applies one layer down.
+  const nonFinite = nonFiniteMeshSentence(file.name, mesh);
+  if (nonFinite !== null) return { ok: false, error: nonFinite };
 
   const size = {
     x: mesh.bbox.max[0] - mesh.bbox.min[0],
@@ -193,6 +244,7 @@ export async function readTargetObjectFile(
     sha256,
     data: arrayBufferToBase64(stored),
     size,
+    ...(faceId === undefined ? {} : { faceId }),
     ...(note === undefined ? {} : { note }),
   };
 }
@@ -268,6 +320,10 @@ export function targetObjectMesh(target: Pick<EngraveTargetObject, 'sha256' | 'f
   // so a saved goal draws and surfaces the mesh the import measured.
   const parsed =
     target.format === '3mf' ? parse3MF(bytes) : target.format === 'obj' ? parseObj(bytes) : parseStl(bytes);
+  // #1029 — a stored job imported before the door's guard still parses here; refuse it before any
+  // `new tl.Manifold(mesh)` / CrossSection conversion can trap the worker.
+  const nonFinite = nonFiniteMeshSentence('the mesh', parsed);
+  if (nonFinite !== null) throw new Error(nonFinite);
   meshCache.set(target.sha256, parsed);
   return parsed;
 }

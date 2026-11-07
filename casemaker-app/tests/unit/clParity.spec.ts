@@ -90,6 +90,8 @@ describe('#964 the CL fixtures are well formed', () => {
       expect(ocl).toBeDefined();
       expect(ocl!['licence']).toContain('NUMBERS ONLY');
       expect(ocl!['library']).toBe('OpenCamLib');
+      expect(ocl!['licence']).toContain('LGPL');
+      expect(ocl!['version']).toBe('2023.01.11');
       const pycam = f.provenance.pycam;
       expect(pycam).toBeDefined();
       expect(pycam!['licence']).toContain('NUMBERS ONLY');
@@ -97,6 +99,35 @@ describe('#964 the CL fixtures are well formed', () => {
       expect(pycam!['version']).toBe('0.6.4');
       expect(f.provenance.kiriMoto).toBeNull();
       expect(f.provenance.kiriMotoNote).toContain('Kiri:Moto');
+    }
+  });
+
+  // #943's ruling, 2026-11-05: the fixtures' HEADER must state the licence boundary itself —
+  // generated offline, generator scripts and versions committed, numbers only, no source copied
+  // or linked — and the scripts it names must be in this tree at the versions the provenance
+  // records. A regenerated fixture that drops the statement fails here, not in a review.
+  it('carries the licence header on every fixture, with its generator scripts committed', () => {
+    for (const f of fixtures) {
+      const licence = f.licence;
+      expect(licence, `${f.id} states no licence header`).toBeDefined();
+      expect(licence.generatedOffline).toBe(true);
+      expect(licence.numbersOnly).toBe(true);
+      expect(licence.sourceCopiedOrLinked).toBe(false);
+      expect(licence.statement).toContain('OpenCamLib');
+      expect(licence.statement).toContain('LGPL');
+      expect(licence.statement).toContain('PyCAM');
+      expect(licence.statement).toContain('GPL-3.0');
+      expect(licence.statement).toContain('OFFLINE');
+      expect(licence.statement).toContain('NUMBERS ONLY');
+      expect(licence.statement).toContain('no OpenCamLib or PyCAM source is copied or linked');
+      // The committed generator scripts exist and are the ones the provenance names.
+      expect(licence.generatorsCommitted).toContain(f.provenance.opencamlib!['command']!.replace(/^node /, ''));
+      expect(licence.generatorsCommitted).toContain(f.provenance.pycam!['command']!.replace(/^python3 /, ''));
+      for (const relative of licence.generatorsCommitted) {
+        expect(existsSync(join(APP, relative)), `${relative} is named but not committed`).toBe(true);
+      }
+      expect(f.provenance.opencamlib!['version']).toBeDefined();
+      expect(f.provenance.pycam!['version']).toBeDefined();
     }
   });
 });

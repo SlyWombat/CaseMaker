@@ -164,6 +164,17 @@ test('#503 — engrave lines fit and the drawer handle covers nothing', async ({
   // open the GROUP first (the same helper every other spec uses), then the Technical fold: the
   // #503 intent is to measure the laid-out margins line, not a closed `<details>`'s zero box.
   await openCutterGroup(page);
+  // #1010 — a fresh job no longer preselects a cutter: the panel offers one and applies it only
+  // on the press. The Cutting rows (feed/plunge) the loop below measures exist only once a cutter
+  // is fitted, so press whichever offer is on screen first.
+  const useRecommended = page.getByTestId('engrave-use-recommended');
+  const useMeasured = page.getByTestId('engrave-use-measured');
+  await expect
+    .poll(async () => (await useRecommended.count()) + (await useMeasured.count()), { timeout: 60_000 })
+    .toBeGreaterThan(0);
+  if ((await useRecommended.count()) > 0) await useRecommended.click();
+  else await useMeasured.click();
+  await expect(page.getByTestId('engrave-tool')).not.toHaveValue('');
   await page.getByTestId('engrave-cutter-technical').locator('summary').click();
   await expect(page.getByTestId('engrave-margins-value')).toBeVisible();
 

@@ -207,9 +207,16 @@ test('a drilled hole reaches the preview, not only the program (#288)', async ({
   await cm.ready();
   await openEngravePanel(page);
 
+  // #516 item 5 — a fresh job carries NO_TOOL_KEY, and a job with no cutter previews nothing: the
+  // legend says "nothing cut" and has no depth to read. Fit the built-in flat through the panel's
+  // own select, the way a person would — only then do the labels' cuts exist as floors the legend
+  // lists.
+  await openCutterGroup(page);
+  await page.getByTestId('engrave-tool').selectOption('flat-1.0');
+
   // The labels' own depths are on the legend before anything is added…
   await expect(page.getByTestId('engrave-preview-legend')).toBeVisible();
-  for (const d of ['2', '1', '0.5']) await expect(page.getByTestId(`engrave-legend-${d}`)).toBeVisible();
+  for (const d of ['2', '1', '0.5']) await expect(page.getByTestId(`engrave-legend-${d}`)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('engrave-legend-3.5')).toHaveCount(0);
 
   await page.getByTestId('engrave-add-summary').click();

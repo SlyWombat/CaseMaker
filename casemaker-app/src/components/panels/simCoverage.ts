@@ -42,6 +42,20 @@ export interface SimSweptProgram {
   engine?: 'exact' | 'column' | null;
   /** True when the simulator could not start this program from the earlier programs' stock. */
   fromBlank?: boolean;
+  /**
+   * #1032 — the restart-from-blank continued with the caller's carried floor (#723 P2-2b): the
+   * earlier setup's stock is in the end state the result was judged on, even though the program's
+   * engine could not take a removal-mesh seed.
+   */
+  carriedFloor?: boolean;
+  /**
+   * #1034 — the predecessor's label this program was seeded from (within its own setup), when the
+   * caller carries it. A seeded program names its seed; it is never a plain sentence for a
+   * program that silently carries nothing.
+   */
+  seedFrom?: string | null;
+  /** #1034 — how many earlier same-setup removals were also in the seed (0 or absent = none). */
+  seedEarlier?: number;
   /** The codes this program's OWN sweep raised, when the caller carries them. */
   codes?: readonly string[];
   /** How many ERROR diagnostics this program's sweep raised; absent reads as 0. */
@@ -321,12 +335,45 @@ function wholeRunDisclaimer(
 
   // #744 — a program the simulator could not seed is a real check of its own cuts, not a gap; say
   // which ones so a smaller removed volume is read as the blank it was swept on, not a quiet cut.
-  const blank = programs.filter((p) => p.fromBlank).map((p) => p.label);
-  if (blank.length > 0) {
+  // #1032 (6b's review) — SAY WHAT THE RESTART KEPT. A program that could only start from the
+  // blank may still have carried the earlier setup's floor (#723 P2-2b) into the sweep it was
+  // judged on; stating only what the engine could not take reads as "the carry was lost", which
+  // is false, and the walk's whole point is that end state.
+  // #1034 — EACH SEEDED PROGRAM NAMES ITS SEED. A program seeded from an earlier program in its
+  // own setup starts from that program's removal (and may also carry the earlier setup's floor);
+  // stating it keeps a per-program result from being read against the raw blank.
+  const seeded = programs.filter((p) => typeof p.seedFrom === 'string' && p.seedFrom.length > 0);
+  if (seeded.length > 0) {
     out.push(
-      blank.length === 1
-        ? `Swept from the blank: ${blank[0]} — its engine cannot start from the material the earlier programs left, so its result covers its own cuts only.`
-        : `Swept from the blank: ${joinAnd(blank)} — their engines cannot start from the material the earlier programs left, so each result covers its own cuts only.`,
+      `From the earlier program: ${joinAnd(
+        seeded.map(
+          (p) =>
+            `${p.label} starts from ${p.seedFrom}'s removal${
+              (p.seedEarlier ?? 0) > 0
+                ? (p.seedEarlier ?? 0) === 1
+                  ? ", and the earlier program's removal"
+                  : `, and the ${p.seedEarlier} earlier programs' removals`
+                : ''
+            }${p.carriedFloor === true ? ", with the earlier setup's floor carried" : ''}`,
+        ),
+      )}.`,
+    );
+  }
+  const blank = programs.filter((p) => p.fromBlank);
+  const carriedBlank = blank.filter((p) => p.carriedFloor === true).map((p) => p.label);
+  const plainBlank = blank.filter((p) => p.carriedFloor !== true).map((p) => p.label);
+  if (carriedBlank.length > 0) {
+    out.push(
+      carriedBlank.length === 1
+        ? `Restarted from the blank: ${carriedBlank[0]} — the earlier setup's floor was carried into the sweep, so its stock is in the state the result was judged on; a column program cannot seed from another setup's removal mesh.`
+        : `Restarted from the blank: ${joinAnd(carriedBlank)} — the earlier setup's floor was carried into each sweep, so its stock is in the state each result was judged on; a column program cannot seed from another setup's removal mesh.`,
+    );
+  }
+  if (plainBlank.length > 0) {
+    out.push(
+      plainBlank.length === 1
+        ? `Swept from the blank: ${plainBlank[0]} — its engine cannot start from the material the earlier programs left, so its result covers its own cuts only.`
+        : `Swept from the blank: ${joinAnd(plainBlank)} — their engines cannot start from the material the earlier programs left, so each result covers its own cuts only.`,
     );
   }
 

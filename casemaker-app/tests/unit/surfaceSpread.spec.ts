@@ -23,6 +23,7 @@ import {
   surfaceMarginWords,
   surfaceSpreadPlan,
   surfaceTiltWords,
+  stockProbesOf,
   Z0_REFERENCE,
   type SurfaceReading,
   type SurfaceSpreadPlan,
@@ -367,5 +368,36 @@ describe('#630 — the verdict says the margin, and a dome names the next steps'
     const g = surfaceDomeGuidance(a);
     expect(g).not.toContain('write the origin anyway');
     expect(g.startsWith('G32 from the console levels the curved top')).toBe(true);
+  });
+});
+
+describe('#943 — a facing job measures the stock’s top, and the job’s set maps to the plan’s input', () => {
+  it('moves the touches to the stock’s top extents when the job faces the blank', () => {
+    const job = badgeJob({ facing: { enabled: true, depth: 0.6, source: 'user' } });
+    const plan = surfaceSpreadPlan(job)!;
+    expect(plan.touches[0]!.at).toBe("the stock's centre");
+    expect(plan.touches[0]!.x).toBeCloseTo(job.stock.length / 2, 6);
+    expect(plan.touches[0]!.y).toBeCloseTo(job.stock.width / 2, 6);
+    expect(plan.touches[1]!.x).toBeCloseTo(1, 6); // clamped 1 mm inside, the plan's own rule
+    expect(plan.touches[2]!.x).toBeCloseTo(job.stock.length - 1, 6);
+  });
+
+  it('keeps the cut-area points when the job does not face', () => {
+    const plan = surfaceSpreadPlan(badgeJob())!;
+    expect(plan.touches[0]!.at).toBe("the cut area's centre");
+  });
+
+  it('maps the job’s kept readings to the plan’s input: the spread, the count, the weakest source', () => {
+    const touches = [
+      { id: 'surface-1', x: 0, y: 0, z: -55.1, at: 'a', source: 'probe' as const },
+      { id: 'surface-2', x: 0, y: 0, z: -55.4, at: 'b', source: 'touch-off' as const },
+    ];
+    const probes = stockProbesOf(touches)!;
+    expect(probes.count).toBe(2);
+    expect(Math.abs(probes.spreadMm - 0.3)).toBeLessThan(1e-9);
+    expect(probes.source).toBe('touch-off');
+    expect(stockProbesOf([{ ...touches[0]!, source: 'stated' }])!.source).toBe('stated');
+    expect(stockProbesOf([])).toBeUndefined();
+    expect(stockProbesOf(undefined)).toBeUndefined();
   });
 });

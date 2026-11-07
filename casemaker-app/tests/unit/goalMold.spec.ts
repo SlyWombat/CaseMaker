@@ -19,11 +19,6 @@ const backing = new Map<string, string>();
 } as Storage;
 
 import {
-  generateSurface3dIR,
-  type SurfaceFeeds,
-  type SurfaceTool,
-} from '@/engine/cnc/cam/surface3d';
-import {
   moldHeightfield,
   sampleGoalHeightfield,
 } from '@/engine/cnc/engrave/goalHeightfield';
@@ -34,19 +29,12 @@ import { validateGoalObject } from '@/engine/cnc/engrave/jobSetup';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import type { RapidEstimate, CamMove } from '@/engine/cnc/cam/ir';
-import { FLAT, type ColumnCutter, type CutMove } from '@/workers/geometry/columnEngine';
-import { stubSetup, type Setup } from '@/engine/cnc/setup';
-import { rectProfile } from '@/engine/compiler/profile';
+import { planCutInto } from '../tools/planCutInto';
 
 afterEach(() => clearTargetObjectMeshCache());
 
 type V = [number, number, number];
 type Tri = [V, V, V];
-const RAPID: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test' };
-const FEEDS: SurfaceFeeds = { feed: 500, plungeFeed: 200, stepDown: 0.5, roughStepOver: 0.8, finishStepOver: 0.4 };
-const BALL: SurfaceTool = { radius: 0.5, ball: true };
-const BALL_CUTTER: ColumnCutter = { radius: 0, tanHalf: null, cornerRadius: 0.5, outerRadius: 0.5 };
 
 function stl(tris: Tri[]): string {
   const buf = new ArrayBuffer(84 + tris.length * 50);
@@ -113,29 +101,6 @@ function goal(tris: Tri[], over: Partial<EngraveTargetObject> = {}): EngraveTarg
   };
 }
 
-function prism(w: number, d: number, t: number): Setup {
-  return stubSetup({ kind: 'prism', outline: rectProfile(w, d), thickness: t }, { kind: 'tape-down', contact: rectProfile(w, d) });
-}
-
-function sweep(setup: Setup, moves: readonly CamMove[], pitch: number): ReturnType<typeof FLAT.buildGrid> {
-  const cut: CutMove[] = [];
-  for (let i = 1; i < moves.length; i++) {
-    const a = moves[i - 1]!;
-    const b = moves[i]!;
-    if (b.kind !== 'feed') continue;
-    cut.push({ step: i, line: i, u0: a.x, u1: b.x, v0: a.y, v1: b.y, z: Math.min(a.z, b.z) });
-  }
-  const grid = FLAT.buildGrid(setup, BALL_CUTTER, cut, { dx: pitch, dThetaDeg: pitch });
-  for (const m of cut) FLAT.applyMove(grid, m, BALL_CUTTER);
-  return grid;
-}
-
-function heightAt(grid: ReturnType<typeof FLAT.buildGrid>, x: number, y: number): number {
-  const i = Math.round((x - grid.u0) / grid.du);
-  const j = Math.round((y - grid.v0) / grid.dv);
-  return grid.h[j * grid.nu + i] as number;
-}
-
 function cellAt(hf: ReturnType<typeof sampleGoalHeightfield>, x: number, y: number): number {
   const i = Math.round((x - hf.x0) / hf.pitch);
   const j = Math.round((y - hf.y0) / hf.pitch);
@@ -172,28 +137,10 @@ describe('#721 — the mold heightfield', () => {
 });
 
 describe('#721 — generate → simulate → match', () => {
-  it('the mold’s finishing pass, swept, reproduces the bowl at the interior', async () => {
-    const item = sampleGoalHeightfield(goal(domeTris(R)), { pitchMm: 0.1 });
-    const mold = moldHeightfield(item, 10, -R);
-    const { finishing } = await generateSurface3dIR({
-      heightfield: mold,
-      tool: BALL,
-      toolObj: flatEndMill(1, { shape: 'ball', name: 'ball' }),
-      toolNumber: 1,
-      spindleRpm: 12000,
-      air: true,
-      feeds: FEEDS,
-      rapid: RAPID,
-      labelId: 'goal-1',
-    });
-    const grid = sweep(prism(40, 40, 10), finishing.moves, mold.pitch);
-    const tol = FEEDS.finishStepOver + 4 * mold.pitch;
-    for (const [x, y] of [[10, 10], [11, 10], [10, 11], [12, 11]] as const) {
-      const got = heightAt(grid, x, y);
-      expect(got).toBeGreaterThanOrEqual(bowl(x, y) - tol);
-      expect(got).toBeLessThanOrEqual(bowl(x, y) + tol);
-    }
-  });
+  // "the mold's finishing pass, swept, reproduces the bowl at the interior" is deleted here, not
+  // fixed: it called generateSurface3dIR directly to independently sweep the mold's own surface,
+  // bypassing generateGoalProgram's real dispatch entirely — #966 retired that function along
+  // with the rest of surface3d.ts.
 
   function job(over: Partial<EngraveTargetObject> = {}): EngraveJob {
     return {
@@ -204,15 +151,16 @@ describe('#721 — generate → simulate → match', () => {
     };
   }
 
+  // #1005 fixed this: the model engine builds the mould as a solid of its own, with goal-mold-*
+  // findings riding the plan's own statements.
   it('the same hemisphere generates as the item (a dome) and as the mold (a bowl)', async () => {
     const asItem = job();
-    const item = await generateGoalProgram(asItem, asItem.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const item = await generateGoalProgram(asItem, asItem.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} });
     expect(item.ok).toBe(true);
     const asMold = job({ goalMode: 'mold' });
-    const mold = await generateGoalProgram(asMold, asMold.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const mold = await generateGoalProgram(asMold, asMold.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} });
     expect(mold.ok).toBe(true);
     expect(mold.programs).toHaveLength(1);
-    expect(mold.programs[0]!.surfaceCheck?.kind).toBe('surface');
     // The deepest Z in each program: the item's rim sits R below the top; the bowl's centre too.
     const deepest = (nc: string): number =>
       Math.min(...[...nc.matchAll(/Z(-?\d+(?:\.\d+)?)/g)].map((m) => Number(m[1])));
@@ -223,6 +171,34 @@ describe('#721 — generate → simulate → match', () => {
     expect(item.findings.some((f) => f.code.startsWith('goal-mold'))).toBe(false);
   });
 
+  // #982 pin — the fixtures' OWN set (the ball alone) through the ONE model entry: no flat in the
+  // set is the ball's fallback, not a refusal. RED at the parent (planModelCam threw).
+  it('#982 pin — a ball-only set plans the item through planModelCam (no flat: the ball is the primary)', async () => {
+    const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+    const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+    const asItem = job();
+    const input = await buildModelPlanInputForGoal(asItem, asItem.targetObject!, flatEndMill(1, { shape: 'ball' }), {});
+    const out = await planModelCam(input);
+    expect(out.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
+    expect(out.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
+    // #982 follow-up (A's review) — THE OUTCOME, not just the note: the ball-only plan swept
+    // against the goal cuts into it NOWHERE. This is the check the 11.37 mm pocket-2 gouge (and
+    // the 0.953 mm skim/ride class after it) would have failed loudly instead of silently.
+    const report = planCutInto(asItem, asItem.targetObject!, out.perSetup.flatMap((s) => s.programs));
+    expect(report.adjudicated, `cut-into must be 0 — ${JSON.stringify(report)}`).toBe(0);
+  }, 120_000);
+
+  it('#982 pin — the mold mode plans through planModelCam with the ball-only set', async () => {
+    const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+    const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+    const asMold = job({ goalMode: 'mold' });
+    const input = await buildModelPlanInputForGoal(asMold, asMold.targetObject!, flatEndMill(1, { shape: 'ball' }), {});
+    const out = await planModelCam(input);
+    expect(out.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
+    expect(out.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
+  }, 120_000);
+
+  // #1005 fixed this: see above.
   it('a box-shaped part has vertical walls and is warned; the hemisphere is not', async () => {
     const box: Tri[] = [];
     const c: V[] = [
@@ -234,14 +210,16 @@ describe('#721 — generate → simulate → match', () => {
     };
     q(4, 5, 6, 7); q(0, 3, 2, 1); q(0, 1, 5, 4); q(2, 3, 7, 6); q(1, 2, 6, 5); q(3, 0, 4, 7);
     const boxJob = { ...job(), targetObject: goal(box, { goalMode: 'mold', size: { x: 10, y: 10, z: 4 }, position: { x: 50, y: 30, z: 0 } }) };
-    const out = await generateGoalProgram(boxJob, boxJob.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const out = await generateGoalProgram(boxJob, boxJob.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} });
     expect(out.ok).toBe(true);
     const warn = out.findings.find((f) => f.code === 'goal-mold-no-draft');
     expect(warn?.severity).toBe('warning');
-    expect(warn?.message).toMatch(/a wall at 8\d(\.\d)?°/);
+    // #1005 — the model engine measures the cavity's own surface, where a planar vertical wall is
+    // exactly 90° (the retired heightfield path sampled it between cells, a little under 90°).
+    expect(warn?.message).toMatch(/a wall at 90(\.0)?°/);
     // A hemisphere's wall curves away from vertical within a cell of the rim: no warning.
     const dome = job({ goalMode: 'mold' });
-    const domeOut = await generateGoalProgram(dome, dome.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const domeOut = await generateGoalProgram(dome, dome.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} });
     expect(domeOut.findings.some((f) => f.code === 'goal-mold-no-draft')).toBe(false);
   });
 });
@@ -295,14 +273,15 @@ describe('#721 review — placement', () => {
     expect(validateGoalObject({ ...t, position: { x: 50, y: 30, z: 0 } }, STOCK, { edgeMargin: 1, minFloor: 1 })).toEqual([]);
     // And Generate proceeds: the cavity is cut clipped to the blank, saying what broke out.
     const j = { ...defaultEngraveJob(), labels: [], shapes: [], stock: { ...defaultEngraveJob().stock, ...STOCK }, targetObject: t };
-    const out = await generateGoalProgram(j, t, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const out = await generateGoalProgram(j, t, flatEndMill(1, { shape: 'ball' }), null, { shop: {} });
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(out.findings.some((x) => x.code === 'goal-mold-rim' && x.severity === 'warning')).toBe(true);
   });
 
+  // #1005 fixed this: see above.
   it('a mold run says it is a mold in its facts', async () => {
     const j: EngraveJob = { ...defaultEngraveJob(), labels: [], shapes: [], targetObject: goal(domeTris(R), { goalMode: 'mold', position: { x: 50, y: 30, z: 0 } }) };
-    const out = await generateGoalProgram(j, j.targetObject!, flatEndMill(1, { shape: 'ball' }), [], null, {});
+    const out = await generateGoalProgram(j, j.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} });
     expect(out.surface3d?.notes.some((n) => n.startsWith('Made as a mould'))).toBe(true);
   });
 });

@@ -15,7 +15,7 @@ import { verifyProgram } from '@/engine/cnc/verify';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { columnSweep } from '@/workers/geometry/columnEngine';
 import type { RapidEstimate } from '@/engine/cnc/cam/ir';
-import type { SurfaceFeeds } from '@/engine/cnc/cam/surface3d';
+import type { SurfaceFeeds } from '@/engine/cnc/cam/surfaceFinishTipField';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 
 type V = [number, number, number];

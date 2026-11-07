@@ -252,6 +252,13 @@ export interface CaseMakerTestApi {
     canSave: boolean;
     saveReason: string | null;
     error: string | null;
+    /**
+     * #1032 — each program's own sweep facts, in cut order: the engine that swept it, whether it
+     * restarted from the blank, and whether the earlier setup's carried floor was still supplied
+     * to that restart. The e2e walk pins the multi-side carry through these, not only through the
+     * panel's prose.
+     */
+    simPrograms: { label: string; engine: string | null; fromBlank: boolean; carriedFloor: boolean; seedFrom: string | null }[];
   };
   /**
    * #277 — the run-record half of the engrave e2e surface. `openRunRecordText` hands the app the
@@ -735,6 +742,7 @@ export function installCaseMakerTestApi(): void {
         canSave: saveBlocker(view) === null,
         saveReason: saveBlocker(view),
         error: r.error,
+        simPrograms: r.simPrograms.map((p) => ({ label: p.label, engine: p.engine, fromBlank: p.fromBlank, carriedFloor: p.carriedFloor === true, seedFrom: p.seedFrom ?? null })),
       };
     },
     simOpenText(name, text) {

@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties, type JSX } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
-import { DEFAULT_PENCIL_CREASE_DEG, type GoalSurfaceFacts } from '@/engine/cnc/cam/surface3d';
+import type { GoalSurfaceFacts } from '@/engine/cnc/engrave/runSheet';
+import { DEFAULT_PENCIL_CREASE_DEG } from '@/engine/cnc/engrave/goalSurfaceSettings';
 import { DEFAULT_RELIEF_DEPTH_MM } from '@/engine/cnc/engrave/relief';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
@@ -1131,27 +1132,46 @@ export function EngraveTargetObjectRow({
 
             {surfaceFacts !== null && (
               <p style={MUTED} data-testid={`engrave-target-surface-report-${index}`}>
-                Last generated:{' '}
-                {surfaceFacts.rough == null
-                  ? ''
-                  : `${surfaceFacts.rough.tool} roughs (${surfaceFacts.rough.kind === 'adaptive' ? 'adaptive' : 'raster'}) as program 1, then the ball finishes as program 2; `}
-                {surfaceFacts.roughingLayers} roughing layer
-                {surfaceFacts.roughingLayers === 1 ? '' : 's'} at{' '}
-                {Number(surfaceFacts.stepDownMm.toFixed(3))} mm step-down and{' '}
-                {Number(surfaceFacts.roughStepOverMm.toFixed(3))} mm step-over, leaving{' '}
-                {Number(surfaceFacts.stockToLeaveMm.toFixed(3))} mm; finishing at{' '}
-                {Number(surfaceFacts.finishStepOverMm.toFixed(3))} mm step-over
-                {surfaceFacts.rim == null
-                  ? ''
-                  : `, opening with ${surfaceFacts.rim.laps} rim lap${surfaceFacts.rim.laps === 1 ? '' : 's'} down the cleared band’s wall`}
-                {surfaceFacts.scallop == null
-                  ? ''
-                  : `, then a scallop pass on ${surfaceFacts.scallop.contours} contour${surfaceFacts.scallop.contours === 1 ? '' : 's'}`}
-                {surfaceFacts.pencil == null
-                  ? ''
-                  : `, then a pencil pass on ${surfaceFacts.pencil.paths} crease${surfaceFacts.pencil.paths === 1 ? '' : 's'} at ${Number(surfaceFacts.pencil.creaseDeg.toFixed(0))}°`}
-                .{' '}
-                {surfaceFacts.resolutionNote.charAt(0).toUpperCase() + surfaceFacts.resolutionNote.slice(1)}.
+                {/* #1005 — the model engine's facts carry no raster numbers (it plans from the
+                    part's solid), so the row prints the resolution sentence it does state rather
+                    than a sentence of blanks. The heightfield run's own line is unchanged. */}
+                {surfaceFacts.roughingLayers === undefined
+                || surfaceFacts.stepDownMm === undefined
+                || surfaceFacts.roughStepOverMm === undefined
+                || surfaceFacts.stockToLeaveMm === undefined
+                || surfaceFacts.finishStepOverMm === undefined ? (
+                  <>
+                    Last generated:{' '}
+                    {surfaceFacts.resolutionNote.charAt(0).toUpperCase() + surfaceFacts.resolutionNote.slice(1)}.
+                    {surfaceFacts.underside == null
+                      ? ''
+                      : ` The underside is ${surfaceFacts.underside.kind === 'plinth' ? 'held on a plinth' : surfaceFacts.underside.kind === 'flipped-tabs' ? 'flipped and held by tabs' : 'flat on the stock’s bottom'}${surfaceFacts.underside.floorZ === null ? '' : `, cut no deeper than Z ${surfaceFacts.underside.floorZ.toFixed(3)}`}.`}
+                  </>
+                ) : (
+                  <>
+                    Last generated:{' '}
+                    {surfaceFacts.rough == null
+                      ? ''
+                      : `${surfaceFacts.rough.tool} roughs (${surfaceFacts.rough.kind === 'adaptive' ? 'adaptive' : 'raster'}) as program 1, then the ball finishes as program 2; `}
+                    {surfaceFacts.roughingLayers} roughing layer
+                    {surfaceFacts.roughingLayers === 1 ? '' : 's'} at{' '}
+                    {Number(surfaceFacts.stepDownMm.toFixed(3))} mm step-down and{' '}
+                    {Number(surfaceFacts.roughStepOverMm.toFixed(3))} mm step-over, leaving{' '}
+                    {Number(surfaceFacts.stockToLeaveMm.toFixed(3))} mm; finishing at{' '}
+                    {Number(surfaceFacts.finishStepOverMm.toFixed(3))} mm step-over
+                    {surfaceFacts.rim == null
+                      ? ''
+                      : `, opening with ${surfaceFacts.rim.laps} rim lap${surfaceFacts.rim.laps === 1 ? '' : 's'} down the cleared band’s wall`}
+                    {surfaceFacts.scallop == null
+                      ? ''
+                      : `, then a scallop pass on ${surfaceFacts.scallop.contours} contour${surfaceFacts.scallop.contours === 1 ? '' : 's'}`}
+                    {surfaceFacts.pencil == null
+                      ? ''
+                      : `, then a pencil pass on ${surfaceFacts.pencil.paths} crease${surfaceFacts.pencil.paths === 1 ? '' : 's'} at ${Number(surfaceFacts.pencil.creaseDeg.toFixed(0))}°`}
+                    .{' '}
+                    {surfaceFacts.resolutionNote.charAt(0).toUpperCase() + surfaceFacts.resolutionNote.slice(1)}.
+                  </>
+                )}
               </p>
             )}
           </div>

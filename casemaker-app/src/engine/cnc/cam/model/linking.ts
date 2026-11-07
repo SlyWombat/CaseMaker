@@ -1,0 +1,465 @@
+/**
+ * #962 — STAY-DOWN LINKING AND THE REGION TOUR.
+ *
+ * A link joins one pass's exit to the next pass's entry. It stays down at the cut depth only when
+ * the cutter's swept link lies inside material ALREADY removed at that depth; otherwise it retracts
+ * to the region's clearance plane, traverses, and plunges. The decision is made once, here, and is
+ * shared by every op (rough, pocket, finish) so the price #961 computes and the moves the plan posts
+ * cannot disagree about what a link costs.
+ *
+ * PRIOR ART, and what was taken from it (Kiri:Moto and FreeCAD Path are LOCAL REFERENCES only,
+ * the same tier as OpenCamLib and PyCAM: the methods are re-implemented from their descriptions,
+ * no code is copied or linked):
+ *  - Kiri:Moto (`prepare.js`): a short planar move — 2 × the cutter's diameter — at the same Z is
+ *    re-emitted as a cut, and a move that would cross the pocket's boundary goes up and over. This
+ *    module keeps the SHORT HOP as a hard permission guard: nothing longer stays down, even in open
+ *    material.
+ *  - FreeCAD Path (`Path/Base/Generator/linking.py`, `Adaptive.py`): links are collision-tested
+ *    against the model and the lowest clear height is chosen; `KeepToolDownRatio` (default 3.0)
+ *    caps a stay-down detour at that multiple of the direct distance, and a link below the safe
+ *    height is FED, not rapided. This module keeps the ratio guard and feeds every vertical leg.
+ *  - The material test is ours: the caller supplies `MaterialField.topAt(x, y)` — the stock top
+ *    after every preceding op — and a link is clear only where that is at or below the link's own
+ *    Z across the whole cutter disc, sampled along the segment. If the field cannot prove it, the
+ *    linker retracts: a retract is always safe, a hopeful link is not.
+ *
+ * VERTICAL LEGS (the manager's ruling refining #956 §5, Review B's F8, after C measured ~8,800 s of
+ * feed time this cost the rough skim's own joins): the horizontal traverse at the clearance plane is
+ * always a rapid, and so now is the UP leg — retracting out of material the op just finished cutting
+ * at `from` is never hopeful, it is a known-clear G0 like Makera's own NC. The DOWN leg still earns
+ * its caution, but only down to where it is owed: it rapids from the clearance plane to the tallest
+ * material anywhere under the cutter's WHOLE disc at the LANDING (x, y) plus the hop clearance, then
+ * feeds (at `plungeFeed`) the rest of the way into unproven territory. When the field cannot prove
+ * anything under that disc (not finite anywhere in it — off the footprint, or no field at all, as in
+ * `chamfer.ts`'s own V-bit transitions), the whole down leg stays a feed, exactly as before: a
+ * hopeful rapid is still not a retract.
+ *
+ * FOOTPRINT AUDIT (the manager's #962 follow-up, before C's own honest-material-field change): the
+ * down leg's floor used to read `topAt` only at the landing's own point — the tip's XY, not the
+ * cutter's. A ball or a flat travelling straight down still sweeps its whole radius, so a ridge
+ * just inside that radius but clear of the centreline was invisible to the old floor and the rapid
+ * ran straight through it. `linkIsClear`'s own disc sampling was already right (its docstring says
+ * so); only this one point query in `retract()`'s down leg was not. Fixed by reading the disc's own
+ * tallest point (`materialTopOverDisc`), the same footprint `linkIsClear` already samples.
+ *
+
+ * `tour.ts` (#487) is the region-order primitive: nearest-neighbour + 2-opt, deterministic. This
+ * module lifts it from loops to passes.
+ */
+
+import type { CamMove } from '../ir';
+import type { Polygons } from '../pocket';
+import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
+import { tourNearest } from '../tour';
+
+/** FreeCAD Path's `KeepToolDownRatio` default: a stay-down detour may be 3× the direct distance. */
+export const DEFAULT_KEEP_TOOL_DOWN_RATIO = 3;
+
+/** Kiri:Moto's short hop, in cutter diameters: past this, retract even in open material. */
+export const DEFAULT_SHORT_HOP_DIAMETERS = 2;
+
+/** The down leg's rapid floor above the material field's own report, mm, when the caller states
+ * no op-specific hop height of its own; matches `ir.ts`'s `HOP_Z`, the intra-operation hop height. */
+export const DEFAULT_HOP_CLEARANCE_MM = 1;
+
+export interface LinkPoint {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/**
+ * The material state after every preceding op: the stock top at (x, y), mm. 0 is untouched stock;
+ * a cell cut to the pass floor reports that floor. The caller owns the field (the plan updates it
+ * as each op posts); the linker never assumes a cut that the field does not state.
+ */
+export interface MaterialField {
+  topAt(x: number, y: number): number;
+}
+
+export interface LinkTool {
+  /** The cutter's cutting radius, mm. */
+  radiusMm: number;
+}
+
+export interface LinkFeeds {
+  /** The cutting feed the stay-down link runs at, mm/min. */
+  feed: number;
+  /** The plunge feed every vertical leg runs at, mm/min. */
+  plungeFeed: number;
+}
+
+export interface LinkOptions {
+  material: MaterialField;
+  /** The region's clearance plane, mm (already above every obstacle in the region). */
+  clearanceZ: number;
+  tool: LinkTool;
+  feeds: LinkFeeds;
+  /** FreeCAD's stay-down ratio; absent → {@link DEFAULT_KEEP_TOOL_DOWN_RATIO}. */
+  keepToolDownRatio?: number;
+  /** Kiri's short hop, mm; absent → {@link DEFAULT_SHORT_HOP_DIAMETERS} × the cutting diameter. */
+  shortHopMm?: number;
+  /** Sample spacing for the material test, mm; absent → min(0.5, max(0.1, radius / 2)). */
+  sampleStepMm?: number;
+  /** The down leg's rapid floor above the material field's own report at the landing (x, y), mm;
+   * absent → {@link DEFAULT_HOP_CLEARANCE_MM}. Callers that already carry their own hop height
+   * (every op's `hopZMm`) pass that value here so the down leg rapids to the same height the op's
+   * first plunge already uses. */
+  hopClearanceMm?: number;
+  /**
+   * #966 — WHERE THE DOWN LEG MAY RAPID TO. `material` above is the RIDE field: the surface the
+   * cutter may travel along, which on several ops is the surface the op WILL LEAVE, not what stands
+   * at the landing when the link runs. A rapid may only descend to clearance above material that is
+   * PROVEN gone at the landing, so the caller proves it here: the landing (x, y) lies in ground it
+   * has ALREADY cut at z. Without the proof the down leg descends only to the stock top plus the
+   * hop clearance and FEEDS the rest — the crash class the band skim's join found (a rapid
+   * 0.739 mm below the stock top through uncut stock, flagged by the sweep as
+   * `rapid-through-stock`).
+   */
+  landingCut?: (x: number, y: number, z: number) => boolean;
+  /**
+   * #1002 — THE CLEARED LEVEL UNDER THE LANDING, when the caller can state one: the deepest Z the
+   * ground at (x, y) has actually been cut to by this op (the deepest recorded swept area that
+   * contains the point). The down leg then rapids to THAT level plus the hop and feeds only the
+   * rest — the review's "rapid descends to prevLevel + hop". `landingCut` above answers yes/no
+   * against the material field; this answers with the level itself, which is the only form that
+   * can lift a same-level link's floor above its own z. Null/absent → the boolean proof, then the
+   * stock top.
+   */
+  landingClearedZMm?: (x: number, y: number, z: number) => number | null;
+  /** The datum's stock top, mm — the down leg's rapid floor where the landing is not proven cut.
+   * Absent → 0: every cam/model op works in the plan's own stock-top datum. */
+  stockTopZMm?: number;
+}
+
+/** One pass, as the linker needs it: where the tool enters and leaves, and which region it is in. */
+export interface PassLink {
+  entry: LinkPoint;
+  exit: LinkPoint;
+  regionId: string;
+}
+
+/** A pass with the moves that join it to the pass before it. The first has no link. */
+export interface LinkedPass<T extends PassLink> {
+  pass: T;
+  linkBefore: CamMove[];
+}
+
+const EPS = 1e-9;
+
+/**
+ * #1002 — THE CLEARED-AREA PROOF for a retract's landing: a level that FINISHED, with the area it
+ * cleared. The deep ops push one entry per completed level (`cleared`, after its last ring ends),
+ * and only those entries are swept areas: a level that finished cut the ground down to its own z
+ * everywhere its recorded area reaches. A landing whose (x, y) lies inside such an area stands on
+ * ground the op has already cut down to that level — so a rapid may descend to that level
+ * (`landingClearedZMm`'s contract in {@link LinkOptions}), and no farther, before the one-step feed.
+ *
+ * The per-ring records (`passes[].cleared`) are NOT a proof: they say what the ring's own step is
+ * about to cover. In the pocket op that is the whole step-over band around the region, and in
+ * rough/rest it is literally the level's mask — the "what this level WILL cut" guess this proof
+ * exists to replace. A same-level landing on such a band can stand on the previous level's floor
+ * (a lobe the current level has not reached yet), and with `stepDown > hop` a rapid to the band's
+ * level descends through standing stock. Only finished levels can lift the floor; a same-level
+ * link falls back to the stock-top rule.
+ */
+export interface ClearedArea {
+  z: number;
+  boundary: Polygons;
+}
+
+/**
+ * #1002 — the DEEPEST FINISHED level under (x, y). Every finished level cut the ground down to its
+ * own z over its recorded area, so the ground at a point is at the deepest finished level whose
+ * area contains it. Null when no finished area contains it (the stock-top rule then applies).
+ */
+export function clearedGroundZ(x: number, y: number, levels: readonly ClearedArea[]): number | null {
+  let deepest: number | null = null;
+  for (const entry of levels) {
+    if (deepest !== null && entry.z >= deepest) continue;
+    if (clearedAreaContains(entry.boundary, x, y)) deepest = entry.z;
+  }
+  return deepest;
+}
+
+/**
+ * Is (x, y) inside the cleared area — INCLUDING its own edge? A ring's start lies exactly ON the
+ * outer boundary of the area the previous ring swept (both are the same tool-radius offset of the
+ * region), and `pointInPolygons` tests a point on an edge by strict comparison, so the exact
+ * boundary reads as outside and every outer-ring landing would be refused. A ±0.001 mm probe is
+ * far above Clipper/float noise and far below any real feature or the hop clearance.
+ */
+export function clearedAreaContains(area: Polygons, x: number, y: number): boolean {
+  const eps = 1e-3;
+  return (
+    pointInPolygons(area, x, y)
+    || pointInPolygons(area, x + eps, y)
+    || pointInPolygons(area, x - eps, y)
+    || pointInPolygons(area, x, y + eps)
+    || pointInPolygons(area, x, y - eps)
+  );
+}
+
+function dist2(a: LinkPoint, b: LinkPoint): number {
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function dist3(a: LinkPoint, b: LinkPoint): number {
+  return Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+}
+
+function sampleStep(opts: LinkOptions): number {
+  if (opts.sampleStepMm !== undefined && opts.sampleStepMm > 0) return opts.sampleStepMm;
+  const radius = Math.max(0, opts.tool.radiusMm);
+  return Math.min(0.5, Math.max(0.1, radius / 2));
+}
+
+/** The points of the cutter disc the material test samples: a grid inside the circle, plus the rim. */
+function discOffsets(radius: number, spacing: number): [number, number][] {
+  const out: [number, number][] = [[0, 0]];
+  if (!(radius > 0)) return out;
+  const s = Math.max(0.05, Math.min(spacing, radius / 2));
+  const n = Math.ceil(radius / s);
+  for (let i = -n; i <= n; i++) {
+    for (let j = -n; j <= n; j++) {
+      if (i === 0 && j === 0) continue;
+      if (Math.hypot(i * s, j * s) <= radius + 1e-9) out.push([i * s, j * s]);
+    }
+  }
+  return out;
+}
+
+/**
+ * The tallest material under the cutter's disc at (x, y), mm — the same footprint `linkIsClear`
+ * samples, collapsed to one point. Non-finite (the field proves nothing somewhere under the disc)
+ * propagates as `Infinity`, which is never finite either: a partial answer is not an answer.
+ */
+function materialTopOverDisc(material: MaterialField, x: number, y: number, radius: number, step: number): number {
+  let maxTop = -Infinity;
+  for (const [ox, oy] of discOffsets(radius, step)) {
+    const top = material.topAt(x + ox, y + oy);
+    if (!Number.isFinite(top)) return Number.POSITIVE_INFINITY;
+    if (top > maxTop) maxTop = top;
+  }
+  return maxTop;
+}
+
+/**
+ * True when the cutter, travelling from `from` to `to`, stays inside material already cut to the
+ * link's own Z. The segment is sampled at `sampleStep`; at each sample the whole cutter disc is
+ * tested, so a wall or a ridge just inside the radius blocks the link even when the centreline is
+ * clear. A link whose field says nothing (NaN) is blocked.
+ */
+export function linkIsClear(from: LinkPoint, to: LinkPoint, opts: LinkOptions): boolean {
+  const length = dist3(from, to);
+  if (length <= EPS) return true;
+  const radius = Math.max(0, opts.tool.radiusMm);
+  const step = sampleStep(opts);
+  const steps = Math.max(1, Math.ceil(length / step));
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const dz = to.z - from.z;
+  const disc = discOffsets(radius, step);
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const cx = from.x + dx * t;
+    const cy = from.y + dy * t;
+    const cz = from.z + dz * t;
+    for (const [ox, oy] of disc) {
+      const top = opts.material.topAt(cx + ox, cy + oy);
+      if (!Number.isFinite(top)) return false;
+      if (top > cz + 1e-6) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * #970 — THE DIRECT-CL PROOF FOR A STAY-DOWN (B's link audit). `linkIsClear` reads the caller's
+ * MATERIAL FIELD, and every op's field is a sampled grid: a rise narrow enough to fall between its
+ * samples is invisible, and a stay-down it approves can feed through standing material — the
+ * buried-rise class. This reads the CL surface itself (the cutter's own drop-cutter height) along
+ * the link's centre line and requires it at or below the link's interpolated z everywhere, within
+ * the surface's tolerance. A null anywhere is no proof. A caller uses the answer as a NECESSARY
+ * condition on the stay-down; the retract stays `link()`'s own.
+ */
+export function pathClClear(
+  from: LinkPoint,
+  to: LinkPoint,
+  clAt: (x: number, y: number) => number | null,
+  stepMm: number,
+  toleranceMm: number,
+): boolean {
+  const length = Math.hypot(to.x - from.x, to.y - from.y);
+  const steps = Math.max(1, Math.ceil(length / Math.max(stepMm, 1e-9)));
+  for (let s = 0; s <= steps; s++) {
+    const t = s / steps;
+    const cl = clAt(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t);
+    if (cl === null || cl > from.z + (to.z - from.z) * t + toleranceMm) return false;
+  }
+  return true;
+}
+
+function feedMove(to: LinkPoint, f: number): CamMove {
+  return { kind: 'feed', x: to.x, y: to.y, z: to.z, f };
+}
+
+function rapidMove(to: LinkPoint): CamMove {
+  return { kind: 'rapid', x: to.x, y: to.y, z: to.z };
+}
+
+/**
+ * A detour waypoint around standing material, or null when none is clear. The candidates are
+ * perpendicular offsets of the midpoint at 2×, 3×, 4× and 6× the cutter radius, both sides; each
+ * leg is tested with the same material rule. The caller applies FreeCAD's ratio guard to the
+ * resulting path, so a long way round can still lose to a retract.
+ */
+function dogleg(from: LinkPoint, to: LinkPoint, opts: LinkOptions): LinkPoint | null {
+  const flat = dist2(from, to);
+  if (flat <= EPS) return null;
+  const radius = Math.max(0, opts.tool.radiusMm);
+  const nx = -(to.y - from.y) / flat;
+  const ny = (to.x - from.x) / flat;
+  const mx = (from.x + to.x) / 2;
+  const my = (from.y + to.y) / 2;
+  const base = radius > 0 ? radius : 1;
+  for (const factor of [2, 3, 4, 6]) {
+    for (const side of [1, -1]) {
+      const way: LinkPoint = {
+        x: mx + nx * base * factor * side,
+        y: my + ny * base * factor * side,
+        z: from.z,
+      };
+      if (linkIsClear(from, way, opts) && linkIsClear(way, to, opts)) return way;
+    }
+  }
+  return null;
+}
+
+function retract(from: LinkPoint, to: LinkPoint, opts: LinkOptions): CamMove[] {
+  const transitZ = Math.max(opts.clearanceZ, from.z, to.z);
+  const plunge = opts.feeds.plungeFeed;
+  const moves: CamMove[] = [];
+
+  // UP — retracting out of material the op just cut at `from`: always a rapid. The op finishing
+  // there already proves that (x, y) is clear up to `from.z`; there is nothing hopeful about it.
+  if (transitZ > from.z + EPS) {
+    moves.push(rapidMove({ x: from.x, y: from.y, z: transitZ }));
+  }
+  if (dist2(from, to) > EPS) {
+    moves.push(rapidMove({ x: to.x, y: to.y, z: transitZ }));
+  }
+
+  // DOWN — rapid to the tallest material under the WHOLE cutter disc at the LANDING (x, y) plus
+  // the hop clearance, then feed the rest of the way; a hopeful rapid past that point is not a
+  // retract. The landing's own (x, y) is not enough: a flat or a ball travelling straight down
+  // sweeps its radius too, and a ridge just inside it — clear of the centreline — is still in the
+  // way (the manager's #962 footprint audit). When the field cannot prove anything under the disc
+  // (not finite anywhere in it), the whole leg stays a feed, as before.
+  //
+  // #966 — THE FIELD ABOVE IS THE RIDE FIELD, NOT A FLOOR. On the band skim it reports the surface
+  // the skim will leave (the CL) and the design top past the grid — ground the program has NOT cut
+  // yet — so a floor taken from it sent a rapid 0.739 mm below the stock top through standing
+  // stock (`rapid-through-stock`, 18.347 mm³ on the #964 sloped fixture). The floor is now the
+  // caller's PROOF (`landingCut`) that the landing is already cut at `to.z`: where it is, nothing
+  // stands above `to.z` and any floor at or above it is safe, the ride field only lifting it
+  // higher. Where the landing is NOT proven cut, the rapid descends only to the STOCK TOP plus the
+  // hop clearance and feeds the rest — the one height provably clear of standing material.
+  if (transitZ > to.z + EPS) {
+    const radius = Math.max(0, opts.tool.radiusMm);
+    const hopClearance = opts.hopClearanceMm ?? DEFAULT_HOP_CLEARANCE_MM;
+    const clearedZ = opts.landingClearedZMm?.(to.x, to.y, to.z) ?? null;
+    const provenCut = clearedZ !== null || opts.landingCut?.(to.x, to.y, to.z) === true;
+    const materialTop = provenCut && clearedZ === null
+      ? materialTopOverDisc(opts.material, to.x, to.y, radius, sampleStep(opts))
+      : -Infinity;
+    if (provenCut && clearedZ === null && !Number.isFinite(materialTop)) {
+      moves.push(feedMove({ x: to.x, y: to.y, z: to.z }, plunge));
+    } else {
+      const stockTop = opts.stockTopZMm ?? 0;
+      const floor = clearedZ !== null
+        ? Math.max(clearedZ + hopClearance, to.z)
+        : provenCut
+          ? Math.max(materialTop + hopClearance, to.z)
+          : Math.max(stockTop + hopClearance, to.z);
+      if (transitZ > floor + EPS) {
+        moves.push(rapidMove({ x: to.x, y: to.y, z: floor }));
+      }
+      if (floor > to.z + EPS) {
+        moves.push(feedMove({ x: to.x, y: to.y, z: to.z }, plunge));
+      }
+    }
+  }
+
+  // A degenerate case (both ends already on the clearance plane and coincident in XY): a single
+  // plunge at the target is still an honest link.
+  if (moves.length === 0) moves.push(feedMove(to, plunge));
+  return moves;
+}
+
+/**
+ * The one linker every op calls (rough, pocket and finish alike).
+ *
+ *  1. A clear link within Kiri's short hop stays down: one feed at the cutting feed.
+ *  2. A blocked short link may go around by a clear waypoint if FreeCAD's ratio pays for the
+ *     detour; the two legs are cutting feeds.
+ *  3. Otherwise retract to the region's clearance plane (a rapid up, a rapid traverse), then
+ *     rapid back down to the material field's own report at the landing plus the hop clearance,
+ *     and feed (at {@link LinkFeeds.plungeFeed}) only the part of the down leg below that — but
+ *     only when the caller PROVES the landing is already cut at that z ({@link LinkOptions.landingCut});
+ *     otherwise the rapid stops at the stock top plus the hop and the rest is a feed (#966).
+ */
+export function link(from: LinkPoint, to: LinkPoint, opts: LinkOptions): CamMove[] {
+  if (dist3(from, to) <= EPS) return [];
+  const direct = dist3(from, to);
+  const ratio = opts.keepToolDownRatio ?? DEFAULT_KEEP_TOOL_DOWN_RATIO;
+  const diameter = Math.max(0, opts.tool.radiusMm) * 2;
+  const shortHop = opts.shortHopMm ?? DEFAULT_SHORT_HOP_DIAMETERS * diameter;
+
+  if (direct <= shortHop + EPS) {
+    if (linkIsClear(from, to, opts)) return [feedMove(to, opts.feeds.feed)];
+    // A detour only makes sense in one plane: a sloped link's waypoint would need its own Z.
+    if (Math.abs(to.z - from.z) <= EPS) {
+      const way = dogleg(from, to, opts);
+      if (way !== null) {
+        const path = dist2(from, way) + dist2(way, to);
+        if (path <= ratio * direct + EPS) {
+          return [
+            feedMove({ x: way.x, y: way.y, z: from.z }, opts.feeds.feed),
+            feedMove(to, opts.feeds.feed),
+          ];
+        }
+      }
+    }
+  }
+  return retract(from, to, opts);
+}
+
+/**
+ * The region tour (#487 lifted from loops to passes): nearest neighbour from `from`, refined by
+ * 2-opt. Deterministic — the same passes always come back in the same order.
+ */
+export function orderPasses<T extends { entry: LinkPoint }>(
+  passes: readonly T[],
+  from: readonly [number, number] = [0, 0],
+): T[] {
+  if (passes.length <= 1) return [...passes];
+  const points = passes.map((p) => [p.entry.x, p.entry.y] as const);
+  return tourNearest(points, from).map((i) => passes[i]!);
+}
+
+/**
+ * Order the passes and join each to the one before it. The first pass has no incoming link: the
+ * program's entry is the op's own start, not a link between regions.
+ */
+export function linkPasses<T extends PassLink>(
+  passes: readonly T[],
+  opts: LinkOptions,
+  from: readonly [number, number] = [0, 0],
+): LinkedPass<T>[] {
+  const ordered = orderPasses(passes, from);
+  return ordered.map((pass, i) => ({
+    pass,
+    linkBefore: i === 0 ? [] : link(ordered[i - 1]!.exit, pass.entry, opts),
+  }));
+}

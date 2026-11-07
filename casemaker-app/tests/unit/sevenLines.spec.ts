@@ -24,6 +24,9 @@ const VENDOR = (over: Partial<ProgramScore> = {}): ProgramScore => ({
     maxMm: 0.45,
   },
   cycleSeconds: 47.6 * 60,
+  toolChanges: 0,
+  headerTimeSeconds: 47.6 * 60,
+  vendorHolding: "Makera's own: bare bed, tape-down",
   airFraction: 0.15,
   rapidSeconds: 47.6 * 60 * 0.15,
   rapidMoves: 500,
@@ -46,13 +49,15 @@ const OURS = (over: Partial<ProgramScore> = {}): ProgramScore => ({
     maxMm: 0.05,
   },
   cycleSeconds: 45 * 60,
+  toolChanges: 0,
+  headerTimeSeconds: null,
   airFraction: 0.2,
   rapidSeconds: 45 * 60 * 0.2,
   rapidMoves: 400,
   rapidsPer1000FeedLines: 10,
   cutters: 3,
   cuttersOwned: true,
-  postsAsFiled: { ok: true, holding: 'bed + tape', pitchMm: 0.1 },
+  postsAsFiled: { ok: true, holding: 'vise', pitchMm: 0.1 },
   ...over,
 });
 
@@ -92,7 +97,7 @@ describe('#964 the seven lines — a card that passes', () => {
     expect(line(card, 'cycle').ours).toBe('45.0 min');
     expect(line(card, 'air').ours).toBe('20.00 %');
     expect(line(card, 'cutters').ours).toBe('3');
-    expect(line(card, 'postsAsFiled').ours).toContain('bed + tape');
+    expect(line(card, 'postsAsFiled').ours).toContain('vise');
   });
 });
 
@@ -208,6 +213,29 @@ describe('#964 line 3 — cycle ≤ 2× the vendor’s, goal 1.25×', () => {
     expect(line(card, 'cycle').goalMet).toBe(true);
     expect(line(card, 'cycle').note).toContain('goal');
   });
+
+  it('counts manual bit changes as real machine time on both sides', () => {
+    // Equal cutting time; ours needs 40 changes, the vendor none — the changes take it past 2×.
+    const card = score(OURS({ toolChanges: 40 }), VENDOR({ cycleSeconds: 45 * 60, toolChanges: 0 }));
+    const cycle = line(card, 'cycle');
+    expect(cycle.state).toBe('fail');
+    expect(cycle.oursValue).toBe(45 * 60 + 40 * 91.4);
+    expect(cycle.note).toContain('bit changes');
+    // The same change count on both sides leaves the comparison unchanged.
+    const level = score(OURS({ toolChanges: 40 }), VENDOR({ cycleSeconds: 45 * 60, toolChanges: 40 }));
+    expect(line(level, 'cycle').state).toBe('pass');
+  });
+
+  it('never uses Makera’s header TIME as the reference — it is a printed fact', () => {
+    // The vendor's own file costs 60 min under our estimator but its header claims 10 min.
+    // Our 60 min cutting is level with the file; judged against the header it would be 6×.
+    const card = score(OURS({ cycleSeconds: 60 * 60 }), VENDOR({ cycleSeconds: 60 * 60, headerTimeSeconds: 10 * 60 }));
+    const cycle = line(card, 'cycle');
+    expect(cycle.state).toBe('pass');
+    expect(cycle.vendorValue).toBe(60 * 60);
+    expect(cycle.note).toContain('header TIME');
+    expect(cycle.note).toContain('10.0 min');
+  });
 });
 
 describe('#964 line 4 — air fraction ≤ vendor + 10 points', () => {
@@ -289,6 +317,33 @@ describe('#964 line 6 — cutters ≤ vendor + 1, owned for a bench card', () =>
 describe('#964 line 7 — posts as filed', () => {
   it('passes when the record states it posted at the card’s holding and pitch', () => {
     expect(line(score(), 'postsAsFiled').state).toBe('pass');
+  });
+
+  it('prints BOTH holdings on every card — ours and the vendor’s stated one (#943)', () => {
+    const card = score();
+    expect(card.holding.ours).toBe('vise');
+    expect(card.holding.vendor).toBe("Makera's own: bare bed, tape-down");
+    // An unreferenced card still prints its own holding; the vendor side is literally absent.
+    const alone = score(OURS(), null);
+    expect(alone.holding.ours).toBe('vise');
+    expect(alone.holding.vendor).toBeNull();
+  });
+
+  it('never lets a TAPE card claim “as filed” — the line passes only in the vise (#943)', () => {
+    const card = score(
+      OURS({
+        postsAsFiled: {
+          ok: false,
+          holding: 'tape',
+          pitchMm: 0.1,
+          note: "'posts as filed' means the vise with jaw clearance (#943); this card is a tape-down plan",
+        },
+      }),
+    );
+    expect(line(card, 'postsAsFiled').state).toBe('fail');
+    expect(line(card, 'postsAsFiled').ours).toContain('no — tape');
+    expect(line(card, 'postsAsFiled').ours).not.toMatch(/^yes —/);
+    expect(line(card, 'postsAsFiled').rule).toContain('vise with jaw clearance');
   });
 
   it('fails when the run refused or changed the pitch', () => {

@@ -196,6 +196,49 @@ describe('#744 coverageDisclaimer — a run of several programs', () => {
     );
   });
 
+  it('#1032 — a restart from the blank that KEPT the carried floor says so, not just what the engine could not take', () => {
+    const s = text({
+      programs: [
+        swept('program 1 (flat-1.0)'),
+        swept('program 2 (ball-2)', { engine: 'column', fromBlank: true, carriedFloor: true }),
+      ],
+      expectedPrograms: 2,
+    });
+    expect(s).toContain(
+      "Restarted from the blank: program 2 (ball-2) — the earlier setup's floor was carried into the sweep, so its stock is in the state the result was judged on; a column program cannot seed from another setup's removal mesh.",
+    );
+    // The old wording would read as "the carry was lost".
+    expect(s).not.toContain('Swept from the blank');
+  });
+
+  it('#1034 — a seeded program names its seed, and says when earlier removals were in it too', () => {
+    const s = text({
+      programs: [
+        swept('program 1 (flat-1.0)'),
+        swept('program 2 (ball-2)', { seedFrom: 'program 1 (flat-1.0)' }),
+        swept('program 3 (ball-2)', { seedFrom: 'program 2 (ball-2)', seedEarlier: 1 }),
+        swept('program 4 (ball-2)', { seedFrom: 'program 3 (ball-2)', seedEarlier: 2 }),
+      ],
+      expectedPrograms: 4,
+    });
+    expect(s).toContain("program 2 (ball-2) starts from program 1 (flat-1.0)'s removal");
+    expect(s).toContain("program 3 (ball-2) starts from program 2 (ball-2)'s removal, and the earlier program's removal");
+    expect(s).toContain("program 4 (ball-2) starts from program 3 (ball-2)'s removal, and the 2 earlier programs' removals");
+  });
+
+  it('#1032 — carried and plainly blank programs are stated apart, each in its own words', () => {
+    const s = text({
+      programs: [
+        swept('program 1 (flat-1.0)'),
+        swept('program 2 (ball-2)', { engine: 'column', fromBlank: true, carriedFloor: true }),
+        swept('program 3 (drill-2)', { engine: 'column', fromBlank: true }),
+      ],
+      expectedPrograms: 3,
+    });
+    expect(s).toContain("Restarted from the blank: program 2 (ball-2) — the earlier setup's floor was carried");
+    expect(s).toContain('Swept from the blank: program 3 (drill-2) — its engine cannot start from the material');
+  });
+
   it('never claims the whole run when the walk stopped part-way', () => {
     const s = text({
       programs: [

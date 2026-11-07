@@ -13,6 +13,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import {
+  benchCutterFor,
   entryFor,
   getTools,
   resetRegistry,
@@ -65,6 +66,39 @@ describe('the builtins are permanent (#305)', () => {
     const b = getTools();
     expect(getTools()).toBe(b);
     expect(b).not.toBe(a); // a real change does swap the snapshot
+  });
+});
+
+// #1032 — A POSTED PROGRAM'S KEY RESOLVES BY THE THREE IDENTITIES A TOOL RECORD STATES. The model
+// engine stamps `tool.id ?? tool.name` on a posted program, and the built-in tier's identity is
+// not its registry key: `flat-1.0` has no id (its NAME is stamped) and `flat-3.175x12-metal`'s id
+// is the physical `112111313812`. The run store's sweep read only the exact registry key and
+// refused every such program as "not on this bench" (the flipMouldShell red on 966-collapse).
+describe('#1032 — a posted key resolves by key, then physical id, then name', () => {
+  it('resolves a built-in by its registry key, its physical id, and its display name', () => {
+    const oneMm = entryFor('flat-1.0')!.tool;
+    const metal = entryFor('flat-3.175x12-metal')!.tool;
+    expect(benchCutterFor('flat-1.0')).toBe(oneMm);
+    expect(benchCutterFor('1 mm flat end')).toBe(oneMm);
+    expect(benchCutterFor('flat-3.175x12-metal')).toBe(metal);
+    expect(benchCutterFor('112111313812')).toBe(metal);
+    expect(benchCutterFor('no such cutter')).toBeNull();
+  });
+
+  it('a name shared across tiers ranks inventory, then the shop, then the catalogue, then built-in', () => {
+    const cat = entry('cat:shared', { name: 'shared name' });
+    const user = entry('user:shared', { name: 'shared name' });
+    const inv = entry('inv:shared', { name: 'shared name' });
+    setRegistry([cat, user, inv]);
+    expect(benchCutterFor('shared name')).toBe(inv.tool);
+    setRegistry([cat, user]);
+    expect(benchCutterFor('shared name')).toBe(user.tool);
+    setRegistry([cat]);
+    expect(benchCutterFor('shared name')).toBe(cat.tool);
+    // An empty registry holds no row by that name — the permanent built-ins carry their own names,
+    // none of them 'shared name' — so the fallback answers null; an exact key always outranks a name.
+    setRegistry([]);
+    expect(benchCutterFor('shared name')).toBeNull();
   });
 });
 

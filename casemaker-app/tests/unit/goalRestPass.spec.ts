@@ -1,10 +1,17 @@
 /**
  * #847 — A 3D FINISH THAT COULD NOT REACH THE GOAL IS FOLLOWED BY A REST PASS.
  *
- * The finish's own gouge-safe tip field says what is left: in the notch, a ⌀6 ball rides up the
- * walls and the material below it stays. A smaller OWNED ball is then cut over just that region as
- * its own program, after the finish; when no smaller ball is owned, the finish still posts and the
- * run states the volume left and the ball that would reach it.
+ * #1008 — RE-PINNED AGAINST THE MODEL ENGINE. The rest is no longer a hand-built second program
+ * with its own `goal-rest-pass` finding: `planModelCam` ranks the owned balls by OUTCOME (#986)
+ * and the winner posts its own finish + pencil program. These pins assert that outcome — the
+ * residual over the notch drops when the ⌀2 is owned, and the rank names the ⌀2 — rather than
+ * the old program layout.
+ *
+ * #1023 — THE LEFTOVER STATEMENT AND THE SHOP'S VISIBILITY THRESHOLDS ARE NOW ON THE MODEL PATH.
+ * The run states what the finish left (mm, share, cells, the thresholds) and, when the catalogue
+ * measured a smaller ball, names it with its own measured leftover and cycle. With no smaller ball
+ * owned the statement is a warning past the thresholds and information under them; the two pins
+ * below cover both.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -13,9 +20,9 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import { finishStepOverForCusp } from '@/engine/cnc/cam/surface3d';
 
 type P = [number, number, number];
+type Tri2 = [[number, number], [number, number], [number, number]];
 
 function stlBase64(tris: readonly (readonly [P, P, P])[]): string {
   const bytes = new Uint8Array(84 + tris.length * 50);
@@ -40,33 +47,38 @@ function stlBase64(tris: readonly (readonly [P, P, P])[]): string {
 /**
  * A 20 × 10 × 5 plate with a 6 mm-wide V notch along Y, 4.5 mm deep, its mouth flush with the
  * plate's top face. A ⌀6 ball cannot enter the V: it rides on the walls and on the shoulders, so
- * the notch's floor stands 1.5 mm above the goal — material only a smaller ball takes.
+ * the notch's floor stands above the goal — material only a smaller ball takes.
+ *
+ * #1008 — THE MESH IS CONSISTENTLY WOUND. The first version fanned the concave (X, Z) section
+ * from vertex 0: two of those triangles cross the notch with negative area, and the side walls
+ * were wound opposite the caps. The old heightfield engine never read winding; `planModelCam`'s
+ * door refuses that mesh ("Not manifold") before planning starts. The caps below are the section
+ * ear-clipped from its reflex vertex E (every triangle CCW in X/Z, every cap boundary edge the
+ * section's own), and each side wall runs `[a0, a1, b1]`, `[a0, b1, b0]` so its edge on the
+ * shared cap edge is traversed the opposite way. Same outer dimensions, same notch, same grid.
  */
 function notchedPlate(): string {
-  const section: [number, number][] = [
-    [0, 0],
-    [20, 0],
-    [20, 5],
-    [13, 5],
-    [10, 0.5],
-    [7, 5],
-    [0, 5],
-  ];
+  const A: [number, number] = [0, 0];
+  const B: [number, number] = [20, 0];
+  const C: [number, number] = [20, 5];
+  const D: [number, number] = [13, 5];
+  const E: [number, number] = [10, 0.5];
+  const F: [number, number] = [7, 5];
+  const G: [number, number] = [0, 5];
+  const section = [A, B, C, D, E, F, G];
   const depth = 10;
-  const cap = (y: number): readonly (readonly [P, P, P])[] => {
-    // A fan from the section's first vertex triangulates this concave profile.
-    const tris: (readonly [P, P, P])[] = [];
-    for (let i = 1; i < section.length - 1; i++) {
-      const a = section[0]!;
-      const b = section[i]!;
-      const c = section[i + 1]!;
-      tris.push(y === 0
-        ? [[a[0], y, a[1]], [b[0], y, b[1]], [c[0], y, c[1]]]
-        : [[a[0], y, a[1]], [c[0], y, c[1]], [b[0], y, b[1]]]);
-    }
-    return tris;
-  };
-  const sides: (readonly [P, P, P])[] = [];
+  const capTris: Tri2[] = [
+    [C, D, E],
+    [B, C, E],
+    [A, B, E],
+    [G, A, E],
+    [E, F, G],
+  ];
+  const cap = (y: number): readonly (readonly [P, P, P])[] =>
+    capTris.map(([a, b, c]) => (y === 0
+      ? [[a[0], y, a[1]], [b[0], y, b[1]], [c[0], y, c[1]]]
+      : [[a[0], y, a[1]], [c[0], y, c[1]], [b[0], y, b[1]]])) as readonly (readonly [P, P, P])[];
+  const sideTris: (readonly [P, P, P])[] = [];
   for (let i = 0; i < section.length; i++) {
     const a = section[i]!;
     const b = section[(i + 1) % section.length]!;
@@ -74,13 +86,14 @@ function notchedPlate(): string {
     const b0: P = [b[0], 0, b[1]];
     const a1: P = [a[0], depth, a[1]];
     const b1: P = [b[0], depth, b[1]];
-    sides.push([a0, b0, b1], [a0, b1, a1]);
+    sideTris.push([a0, a1, b1], [a0, b1, b0]);
   }
-  return stlBase64([...cap(0), ...cap(depth), ...sides]);
+  return stlBase64([...cap(0), ...cap(depth), ...sideTris]);
 }
 
 const BALL6: Tool = { ...flatEndMill(6), name: '6 mm ball nose', shape: 'ball', typeText: 'Ball', diameter: 6, cornerRadius: 3 };
-const BALL2: Tool = { ...flatEndMill(2), name: '2 mm ball nose', shape: 'ball', typeText: 'Ball', diameter: 2, cornerRadius: 1 };
+// A STATED 10 mm FLUTE so the ⌀2 reaches the 4.5 mm notch. With no flute stated, `finishBallCandidates` keeps only one of the unknown-reach balls (house order decides), and the ideal plan would never measure the ⌀2.
+const BALL2: Tool = { ...flatEndMill(2), name: '2 mm ball nose', shape: 'ball', typeText: 'Ball', diameter: 2, cornerRadius: 1, fluteLength: 10 };
 const REST_KEY = 'user:ball-2-847';
 const REST_ENTRY: ToolLibraryEntry = { key: REST_KEY, tool: BALL2, provenance: 'test' };
 // The shop's own feeds table covering both balls: the compiled starting rows stop at 3.2 mm, and
@@ -142,183 +155,115 @@ function feedCuts(nc: string): { x: number; z: number }[] {
   return cuts;
 }
 
-/** The XY distance the posted file travels while cutting (every G1 step, modal position). */
-function cutPathLength(nc: string): number {
-  let x = 0;
-  let y = 0;
-  let px = 0;
-  let py = 0;
-  let len = 0;
-  let started = false;
-  for (const line of nc.split('\n')) {
-    const t = line.trim();
-    if (!/^G[01]\b/.test(t)) continue;
-    const mx = t.match(/X(-?\d+(?:\.\d+)?)/);
-    if (mx) x = Number(mx[1]);
-    const my = t.match(/Y(-?\d+(?:\.\d+)?)/);
-    if (my) y = Number(my[1]);
-    if (t.startsWith('G1') && started) len += Math.hypot(x - px, y - py);
-    started = t.startsWith('G1');
-    px = x;
-    py = y;
-  }
-  return len;
-}
-
-/** Distinct 0.5 mm XY cells the posted file cuts through — the ground it sweeps, not its moves. */
-function cutCells(nc: string): number {
-  const seen = new Set<string>();
-  let x = 0;
-  let y = 0;
-  for (const line of nc.split('\n')) {
-    const t = line.trim();
-    if (!/^G1\b/.test(t)) continue;
-    const mx = t.match(/X(-?\d+(?:\.\d+)?)/);
-    if (mx) x = Number(mx[1]);
-    const my = t.match(/Y(-?\d+(?:\.\d+)?)/);
-    if (my) y = Number(my[1]);
-    seen.add(`${Math.round(x / 0.5)},${Math.round(y / 0.5)}`);
-  }
-  return seen.size;
-}
-
 describe('#847 the goal follows its finish with a rest pass', () => {
-  it('cuts a ⌀2 rest program over the notch only, and the residual drops', async () => {
+  it('cuts a ⌀2 rest program over the notch, and the residual drops', async () => {
     const target = goalTarget();
-    const out = await generateGoalProgram(goalJob(target), target, BALL6, [], null, { tools: [REST_ENTRY], feeds: SHOP_FEEDS });
+    const out = await generateGoalProgram(goalJob(target), target, BALL6, null, { shop: { tools: [REST_ENTRY], feeds: SHOP_FEEDS } });
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
-    // The finish, then the rest cutter's own program — a real posted file.
+    // The ⌀6 rough, then the ⌀2's own run (its finish and pencil): one program per cutter run.
     expect(out.programs).toHaveLength(2);
+    // #1032 — a house tool posts its REGISTRY key (the row the sweep resolves), never the tool's
+    // display name; the job's own snapshot cutter keeps `cutterKeyOf` (its name — no library row).
     expect(out.programs[1]!.toolKey).toBe(REST_KEY);
     expect(out.programs[1]!.nc).toContain('M02');
 
-    const info = out.findings.find((f) => f.code === 'goal-rest-pass');
-    expect(info?.severity).toBe('info');
-    expect(info?.message).toContain('2 mm ball nose');
-    expect(info?.message).toContain('leaves');
+    // The coverage rank chose the ⌀2 on outcome, and the plan states the comparison: measured
+    // 2026-11-06, ⌀2 leftover 6.50 % against the ⌀6's 21.39 %.
+    const rank = out.plan!.perSetup[0]!.notes.find((n) => n.startsWith('ball rank:'));
+    expect(rank).toContain('⌀2.00 mm');
+    expect(rank).toContain('Chosen: 2 mm ball nose');
 
-    const rest = out.surface3d?.rest;
-    expect(rest).not.toBeNull();
-    expect(rest?.toolKey).toBe(REST_KEY);
-    expect(rest?.finishResidualMm3 ?? 0).toBeGreaterThan(0);
-    // The simulated outcome drops: the rest ball leaves less above the goal than the finish did.
-    expect(rest?.residualMm3 ?? 0).toBeLessThan(rest?.finishResidualMm3 ?? 0);
+    // #1023 — what the ⌀2's own finish still leaves, in the "pass" form: 0.896 mm over 6.5 %,
+    // information (a smaller owned ball ran; the rank note above is unchanged).
+    const rest = out.findings.find((f) => f.code === 'goal-rest-pass');
+    expect(rest?.severity).toBe('info');
+    expect(rest?.message).toContain('0.90 mm');
+    expect(rest?.message).toContain('6.5 %');
 
-    // The rest ball reaches material the finish's did not: the notch's floor stands at work
-    // Z −4.5, and the ⌀6 ball's tip stops around −3.0, so a cut below −3.5 at the notch's centre
-    // (work X 30) is the ⌀2 ball's alone.
+    // The residual over the notch drops. The plan's own stamp leaves 0.896 mm above the goal
+    // with the ⌀2 owned, against 2.424 mm for the ⌀6-alone plan (measured 2026-11-06).
+    const outcome = out.plan!.outcome;
+    expect(outcome).toBeDefined();
+    expect(outcome!.leftoverAboveMm).toBeLessThan(1.5);
+    expect(outcome!.coverage).toBeGreaterThan(0.9);
+
+    // And the posted rest ball reaches material the ⌀6 cannot: at the notch's centre (work X 30)
+    // a cut below −3.5 is the ⌀2's alone (it cuts to −3.606 there; the ⌀6 alone stops at −2.076).
     const restCuts = feedCuts(out.programs[1]!.nc);
     expect(restCuts.filter((m) => Math.abs(m.x - 30) <= 1.5 && m.z < -3.5).length).toBeGreaterThan(0);
-    // A partial pass: the rest ball cuts the concavities (the notch, and the fillet the ⌀6 ball
-    // leaves around the part's base), not the whole surface again. Measure the GROUND it sweeps,
-    // not its move count: the finish's raster merges long rows into few moves while the rest
-    // contours a narrow region in many short ones. The #909 footprint-correct tip field leaves a
-    // wider fillet at the base (the ball cannot reach the cell columns' near edges), so the rest
-    // follows a little more of it — still a fraction of the surface.
-    expect(cutCells(out.programs[1]!.nc)).toBeLessThan(cutCells(out.programs[0]!.nc));
-    // #945 — the rest ball's own step-over is now derived from ITS radius against the same band,
-    // not reused from the catalogue (the describe block below), so it can run FINER than the
-    // finish's own derived default when the rest ball is proportionally much smaller than the
-    // finish's — as it is here (⌀2 against ⌀6). This fixture's residual is not only the notch but
-    // also the fillet the ⌀6 ball leaves around the whole part's base (the comment above), so the
-    // rest's path length is no longer reliably SHORTER than the finish's own merged-raster one:
-    // measured directly (2026-11-03), 1552 mm against the finish's 1528 mm — close parity, not a
-    // blowout. Bounded here rather than compared "less than", so a real regression (the rest pass
-    // running away) still fails this.
-    expect(cutPathLength(out.programs[1]!.nc)).toBeLessThan(cutPathLength(out.programs[0]!.nc) * 1.5);
   }, 180_000);
 
-  it('with no smaller ball owned, the finish still posts and the run states what it left', async () => {
+  it('with no smaller ball owned, the finish still posts', async () => {
     const target = goalTarget();
-    const out = await generateGoalProgram(goalJob(target), target, BALL6, [], null, { tools: [], feeds: SHOP_FEEDS });
+    const out = await generateGoalProgram(goalJob(target), target, BALL6, null, { shop: { tools: [], feeds: SHOP_FEEDS } });
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
+    // One ⌀6 program — rough, finish and pencil — and no invented rest.
     expect(out.programs).toHaveLength(1);
-    const warning = out.findings.find((f) => f.code === 'goal-rest-uncut');
-    expect(warning?.severity).toBe('warning');
-    expect(warning?.message).toContain('no owned ball cuts it');
-    // The ball that would reach it, from the grid alone — no inventory, no simulation.
-    expect(warning?.message).toMatch(/a ball of about ⌀\d+(?:\.\d+)? mm would reach it/);
-    expect(out.surface3d?.rest).toBeNull();
+    expect(out.programs[0]!.toolKey).toBe(BALL6.name);
+    // Its outcome is the comparison the missing statement must name: 78.61 % of the goal,
+    // 2.424 mm left standing at the worst cell (measured 2026-11-06).
+    const outcome = out.plan!.outcome;
+    expect(outcome).toBeDefined();
+    expect(outcome!.coverage).toBeGreaterThan(0.7);
+    expect(outcome!.leftoverAboveMm).toBeGreaterThan(2.3);
   }, 180_000);
 
-  it('is information when the leftover would not show: a shallow ridge under the shop’s depth', async () => {
-    // The same part, judged against a shop whose visibility thresholds sit at the tops of their
-    // own rules (a 5 mm depth, a 50 % share): the leftover — the ring's fillet, 4.96 mm deep and
-    // just under half of what the goal removes — holds under both, so the run still states it, its
-    // depth and the ball that would reach it, but as information rather than a warning.
+  it('with no smaller ball owned, the finish posts and the run states what it left', async () => {
     const target = goalTarget();
-    // Clear the WHOLE blank: the leftover (the fillet where the ball meets the part's wall) is then
-    // a small share of the far more material the goal removes.
-    target.surface = { gridPitchMm: 0.5, clearAround: 'whole' };
-    const quiet = {
-      tools: [] as ToolLibraryEntry[],
-      feeds: SHOP_FEEDS,
-      rest: {
-        overlap: { value: 0.5, source: 'chosen' as const },
-        thirdToolPct: { value: 50, source: 'chosen' as const },
-        visibleDepth: { value: 5, source: 'chosen' as const },
-      },
-    };
-    const out = await generateGoalProgram(goalJob(target), target, BALL6, [], null, quiet);
+    // The catalogue hands the engine the ⌀2 it does not own, so the statement names the ball that
+    // would take the leftover with the ideal plan's measured numbers (#1023).
+    const out = await generateGoalProgram(goalJob(target), target, BALL6, null, {
+      shop: { tools: [], feeds: SHOP_FEEDS },
+      catalogueTools: [BALL2],
+    });
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
+    // One ⌀6 program — rough, finish and pencil — and no invented rest.
+    expect(out.programs).toHaveLength(1);
+    expect(out.programs[0]!.toolKey).toBe(BALL6.name);
+    // Its outcome is the comparison the statement names: 78.61 % of the goal, 2.424 mm left
+    // standing at the worst cell (measured 2026-11-06).
+    const outcome = out.plan!.outcome;
+    expect(outcome).toBeDefined();
+    expect(outcome!.coverage).toBeGreaterThan(0.7);
+    expect(outcome!.leftoverAboveMm).toBeGreaterThan(2.3);
+
+    // #1023 — the one leftover statement: warning (past the 0.10 mm / 2 % fallback), numbers
+    // first, the ball that would take it last, with its measured leftover and cycle delta.
     const note = out.findings.find((f) => f.code === 'goal-rest-uncut');
-    expect(note?.severity).toBe('info');
-    expect(note?.message).toContain('under the 5 mm');
-    expect(note?.message).toContain('marks a leftover visible');
-    expect(note?.message).toMatch(/a ball of about ⌀\d+(?:\.\d+)? mm would reach it/);
+    expect(note?.severity).toBe('warning');
+    expect(note?.message).toContain('2.42 mm');
+    expect(note?.message).toContain('21.4 %');
+    expect(note?.message).toContain('0.10 mm');
+    expect(note?.message).toContain('2 %');
+    expect(note?.message).toContain('2 mm ball nose');
+    expect(note?.message).toMatch(/\+\d+ s of cycle \(measured\)/);
   }, 180_000);
-});
 
-/**
- * #945 — THE REST PASS'S OWN STEP-OVER, DERIVED FROM ITS OWN (SMALLER) RADIUS, NOT REUSED FROM
- * THE CATALOGUE. Before this fix, `restFeeds.finishStepOver` fell straight back to
- * `restResolved.params.stepOver` — the rest ball's own feeds row, exactly as the catalogue states
- * it, with no regard for the leftover-visible band the rest pass exists to hold. The rest ball's
- * whole job is reaching into a concavity the finish's own (larger) ball could not, so leaving ITS
- * row-to-row cusp un-adapted defeats the pass exactly where it matters — the real #945 diagnosis
- * found this un-adapted cusp responsible for most of a real job's top-surface leftover. The fix
- * is "one rule, two call sites": the SAME `finishStepOverForCusp` the main finish's own default
- * already uses (surface3d.ts), called again here against the rest candidate's OWN radius and the
- * same band, capped by `Math.min` against its own feeds row so a candidate this does not help
- * never runs coarser than it did before.
- *
- * `GoalRestFacts.residualMm3` is NOT the right metric to assert this on: it is computed from the
- * ball's gouge-safe TIP FIELD (`surfaceResidual`), a continuous, step-over-independent measure of
- * what a perfect sweep could reach — confirmed directly (temporarily reverting just this fix and
- * re-running this fixture) to be byte-identical whether the stride is 0.5 mm or 1.0 mm. The
- * row-to-row CUSP this fix is about is a property of the DISCRETE raster `finishingMoves` actually
- * cuts (`rasterRows(hf, feeds.finishStepOver)`), not of that continuous field — the posted
- * program's own move count is.
- */
-describe('#945 the rest pass’s own step-over is derived from ITS radius, not reused from the catalogue', () => {
-  it('rasters at the derived stride, not the catalogue’s coarser one — roughly double the rows over the same residual', async () => {
+  it('states the leftover as information when the shop thresholds hide it', async () => {
     const target = goalTarget();
-    const out = await generateGoalProgram(goalJob(target), target, BALL6, [], null, { tools: [REST_ENTRY], feeds: SHOP_FEEDS });
-    expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
-    expect(out.programs).toHaveLength(2);
-
-    // Closed-form, this fixture's own numbers: REST_ENTRY's ⌀2 ball (radius 1 mm), the shop's
-    // 0.1 mm leftover-visible band (REST_MACHINING_FALLBACK.visibleDepth — no `rest` settings
-    // passed here), this goal's own 0.5 mm grid pitch (`goalTarget()`'s `surface.gridPitchMm`).
-    const derivedStepOverMm = finishStepOverForCusp(1, 0.1, 0.5);
-    expect(derivedStepOverMm).toBe(0.5);
-    // SHOP_FEEDS's own stepOverFraction (0.45) × this ball's 2 mm diameter — the catalogue row
-    // this fix stops reusing as-is. At this same 0.5 mm pitch it rounds to a 2-cell, 1.0 mm
-    // stride (`Math.round(0.9 / 0.5)`): twice as wide as the derived one.
-    const catalogueStepOverMm = 0.45 * 2;
-    expect(catalogueStepOverMm).toBeCloseTo(0.9, 9);
-    expect(derivedStepOverMm as number).toBeLessThan(catalogueStepOverMm);
-
-    // THE WIRING: `rasterRows`' stride is `Math.round(stepOver / pitch)`, so halving the
-    // step-over (1.0 mm → 0.5 mm) exactly doubles the row count over the same residual region,
-    // and so the posted moves/cutting time. Measured directly on this fixture (2026-11-03): 861
-    // moves / 258 s before this fix (the catalogue's 0.9 mm, 1.0 mm stride); 1721 moves / 512 s
-    // after (the derived 0.5 mm stride) — both bounds below sit comfortably under the "after"
-    // figure and well above "before", so a regression back to the catalogue's own step-over
-    // fails this.
-    const rest = out.surface3d?.rest;
-    expect(rest).not.toBeNull();
-    expect(rest?.moves ?? 0).toBeGreaterThan(1500);
-    expect(rest?.seconds ?? 0).toBeGreaterThan(450);
+    const loud = await generateGoalProgram(goalJob(target), target, BALL6, null, {
+      shop: { tools: [], feeds: SHOP_FEEDS },
+      catalogueTools: [BALL2],
+    });
+    const quiet = await generateGoalProgram(goalJob(target), target, BALL6, null, {
+      shop: {
+        tools: [] as ToolLibraryEntry[],
+        feeds: SHOP_FEEDS,
+        rest: {
+          overlap: { value: 0.5, source: 'chosen' as const },
+          thirdToolPct: { value: 30, source: 'chosen' as const },
+          visibleDepth: { value: 3, source: 'chosen' as const },
+        },
+      },
+      catalogueTools: [BALL2],
+    });
+    expect(quiet.ok, quiet.errors?.map((e) => e.message).join('; ')).toBe(true);
+    const note = quiet.findings.find((f) => f.code === 'goal-rest-uncut');
+    expect(note?.severity).toBe('info');
+    expect(note?.message).toContain('2.42 mm');
+    expect(note?.message).toContain('21.4 %');
+    expect(note?.message).toContain('under the 3.00 mm and 30 %');
+    // Statements only: the posted program is byte-identical to the loud run's.
+    expect(quiet.programs[0]!.nc).toBe(loud.programs[0]!.nc);
   }, 180_000);
 });

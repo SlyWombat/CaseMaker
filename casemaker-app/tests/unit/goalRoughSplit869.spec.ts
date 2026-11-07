@@ -27,8 +27,6 @@ const backing = new Map<string, string>();
 
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
-import { programHash } from '@/engine/cnc/programHash';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -113,35 +111,26 @@ function goalJob(over: Partial<EngraveTargetObject> = {}, stockThickness = 12): 
 const SHOP = { tools: [BALL, ROUGH, SMALL, WIDE] };
 
 describe('#869 the goal’s split, generated', () => {
-  it('a goal with no flat rough is ONE program, byte-identical (pinned)', async () => {
+  it('#999 an ABSENT roughToolKey lets the ENGINE choose: the flat rough, then the ball (the old path keeps its pinned one-cutter file)', async () => {
     const job = goalJob();
-    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, { shop: SHOP });
     expect(out.ok).toBe(true);
-    expect(out.programs).toHaveLength(1);
-    expect(out.programs[0]!.toolKey).toBe(BALL.key);
-    expect(out.surface3d?.rough ?? null).toBeNull();
-    // The promise that a goal without a rough is untouched: the posted file's hash. #889 changed
-    // goal POSTS on purpose (packed moves, merged collinear feeds, the chunked body), so the pin
-    // is the post-#889 value; the split-vs-one-cutter difference is asserted below. Re-pinned when
-    // #889 merged only LEVEL lines (a merged slope sweeps high in the column engine). Re-pinned
-    // by #909: the single-cutter plan's rough is clamped over its ball's footprint. Re-pinned by
-    // #927: only the `;@MKR|TIME` line moved (266 s → 280 s). Re-pinned by #945's cut-into fix:
-    // the finish raster now steps a steep column pair instead of posting it as one diagonal move
-    // — this fixture's ramp has at least one such pair. Re-pinned AGAIN by #945's coverage fix:
-    // the ball's own default finish step-over is now DERIVED from its radius and the shop's
-    // leftover-visible band (`finishStepOverForCusp`, surface3d.ts) rather than reused from the
-    // 2.5D pocketing row — for this 3 mm ball (r 1.5 mm) against the fallback 0.1 mm band at the
-    // fallback 0.1 mm grid, that derives 1.0 mm, tighter than the pre-fix ~1.35 mm 2.5D default
-    // (the compiled PLA row's 0.45 fraction of the 3 mm proxy), so the finish raster's row count —
-    // and the posted file — changed. Verified against a clean revert: this job states no
-    // `surface.finishStepOverMm`, and the old pin (`da7e66c7`) is exactly what `git stash` here
-    // reproduces.
-    expect(programHash(out.nc!)).toBe('c03b471f');
+    // #999 — absent is not "ball alone" on the seam: the plan's sequence chooses the house
+    // flat (the largest, ⌀3 here) and the ball finishes. (The old heightfield engine's own
+    // reading — absent = one cutter, pinned at `c03b471f` — went with it when that engine was
+    // removed, #966/#987.)
+    expect(out.programs).toHaveLength(2);
+    expect(out.programs[0]!.toolKey).toBe(ROUGH.key);
+    expect(out.programs[1]!.toolKey).toBe(BALL.key);
+    // #1007 — a fact the plan HAS stays stated, never dropped to null: the engine chose the
+    // house flat and roughed with it, so `surface3d.rough` names it, same as a stated
+    // `roughToolKey` would (the test right below this one).
+    expect(out.surface3d?.rough).toEqual({ tool: ROUGH.tool.name, kind: 'raster' });
   });
 
   it('a roughToolKey posts the flat’s rough first and the ball’s finish second', async () => {
     const job = goalJob({ roughToolKey: ROUGH.key });
-    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, { shop: SHOP });
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(2);
     const [rough, finish] = out.programs as [EngraveProgram, EngraveProgram];
@@ -149,76 +138,90 @@ describe('#869 the goal’s split, generated', () => {
     // TWO CUTTERS, IN CUT ORDER: the flat roughs, the ball finishes.
     expect(rough.toolKey).toBe(ROUGH.key);
     expect(finish.toolKey).toBe(BALL.key);
-    expect(rough.nc).toContain('3D rough');
-    expect(rough.nc).not.toContain('3D finish');
-    expect(finish.nc).toContain('3D finish');
-    expect(finish.nc).not.toContain('3D rough');
-    // Each file names its own cutter in the post's TOOL record and changes to it.
+    // Each file names its own cutter in the post's TOOL record and changes to it — the SAME
+    // postFor/verifyProgram pair both engines post through.
     expect(rough.nc).toContain(';@CM|TOOL|key=inv:flat-3');
     expect(finish.nc).toContain(';@CM|TOOL|key=inv:ball-3');
     expect(rough.nc).toMatch(/T\d+ ?M6/);
     expect(finish.nc).toMatch(/T\d+ ?M6/);
 
-    // EACH PROGRAM CARRIES ITS OWN CHECK (#535/#844) — the rough is a judged file, not a prefix.
-    const roughPasses = rough.surfaceCheck?.passes ?? [];
-    const finishPasses = finish.surfaceCheck?.passes ?? [];
-    expect(rough.surfaceCheck?.kind).toBe('surface');
-    expect(roughPasses).toHaveLength(1);
-    expect(roughPasses[0] ?? '').toContain('3D rough');
-    expect(rough.surfaceCheck?.roughingLayers).toBeGreaterThan(0);
-    expect(finish.surfaceCheck?.kind).toBe('surface');
-    expect(finishPasses.every((p) => !p.includes('3D rough'))).toBe(true);
-    expect(finish.surfaceCheck?.roughingLayers).toBe(0);
-    expect(rough.surfaceCheck?.bbox).not.toEqual(finish.surfaceCheck?.bbox);
-
-    // THE ALLOWANCE IS THE ROUGH'S, and both cutters are stated (the row carries the cutter's
-    // display form, as every operator-facing sentence names a cutter).
-    expect(rough.nc).toContain('mm to leave');
-    expect(out.surface3d?.rough?.tool).toContain('flat end');
-    expect(out.surface3d?.rough?.kind).toMatch(/^(raster|adaptive)$/);
+    // #987/#966 — the model-cam path has no `surfaceCheck`/"3D rough" vocabulary (surface3d.ts's
+    // own op naming, never ported — and surface3d.ts is gone): the rough's existence and cutter
+    // are read from the plan's own ops instead, which the model-cam path does carry.
+    const ops = out.plan?.perSetup[0]?.ops ?? [];
+    const roughOps = ops.filter((o) => o.kind === 'rough');
+    const finishOps = ops.filter((o) => o.kind === 'finish');
+    expect(roughOps).toHaveLength(1);
+    expect(roughOps[0]!.outcome.cutter).toBe(ROUGH.key);
+    expect(finishOps).toHaveLength(1);
+    expect(finishOps[0]!.outcome.cutter).toBe(BALL.key);
+    expect(ops.indexOf(roughOps[0]!)).toBeLessThan(ops.indexOf(finishOps[0]!));
   });
 
   it('the rough’s step-down is its own row’s, and the rim laps keep the finish’s', async () => {
     // ⌀1.5 is the 0.8–1.6 PLA band (step-down 0.3); the ⌀3 ball is the 1.6–3.2 band (0.5).
     const job = goalJob({ roughToolKey: SMALL.key });
-    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, { shop: SHOP });
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(2);
-    expect(out.surface3d?.stepDownMm).toBeCloseTo(0.3, 6);
-    expect(out.surface3d?.finishStepDownMm).toBeCloseTo(0.5, 6);
+    // #987 — `out.surface3d` carries no facts on this path (no GoalSurfaceFacts wiring exists
+    // for the model-cam engine); the plan's own ops carry the equivalent step instead
+    // (`CamOperation.passStepMm`). #990 fixed the rough's own row: it no longer inherits
+    // `primary`'s step-down (0.5 mm, the pockets' own ⌀3 flat's PLA band) — the ⌀1.5
+    // `curvedRoughTool`'s OWN 0.8–1.6 mm band reads 0.3.
+    //
+    // The finish ball's own 1.6–3.2 mm band (0.5) has no equivalent to assert here: the old
+    // engine's `finishStepDownMm` is the RIM LAPS' spacing (#862, runSheet.ts's own doc — "the
+    // rim laps ride the FINISHING cutter, so their spacing is ITS step-down"), which the
+    // model-cam path does not plan at all for this fixture. Ahead of a rough, the model-cam
+    // ball runs exactly ONE level over the whole remainder region's depth (#965 ruling, this
+    // title's own "the rim laps keep the finish's" — unaffected by #990, out of its scope:
+    // the `Math.max(opts.stepDownMm, span)` floor is always dominated by the span here) —
+    // asserted as that, not as a feeds-row number it does not use.
+    const ops = out.plan?.perSetup[0]?.ops ?? [];
+    const roughOps = ops.filter((o) => o.kind === 'rough').flatMap((o) => o.outcome.ir.operations);
+    const finishOps = ops.filter((o) => o.kind === 'finish').flatMap((o) => o.outcome.ir.operations);
+    expect(roughOps.some((op) => op.passStepMm === 0.3)).toBe(true);
+    expect(finishOps.some((op) => op.depthPasses === 1)).toBe(true);
   });
 
-  it('a rough the library does not hold leaves one program and says which', async () => {
+  it('#999 a rough the library does not hold falls back to the engine’s choice, and says which', async () => {
     const job = goalJob({ roughToolKey: 'inv:gone' });
-    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, { shop: SHOP });
     expect(out.ok).toBe(true);
-    expect(out.programs).toHaveLength(1);
+    // The seam lets the engine choose instead (two programs), the house's largest flat roughing.
+    expect(out.programs).toHaveLength(2);
+    expect(out.programs[0]!.toolKey).toBe(ROUGH.key);
     const finding = out.findings.find((f) => f.code === 'goal-rough-no-cutter');
     expect(finding).toBeDefined();
     expect(finding!.message).toContain('not in the tool library');
   });
 
+  it('#999 an explicit null is the operator’s ball alone, stated in the findings', async () => {
+    const job = goalJob({ roughToolKey: null });
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, { shop: SHOP });
+    expect(out.ok).toBe(true);
+    expect(out.programs).toHaveLength(1);
+    expect(out.programs[0]!.toolKey).toBe(BALL.key);
+    const stated = out.findings.find((f) => f.code === 'goal-rough-ball-alone');
+    expect(stated?.severity).toBe('info');
+    expect(stated?.message).toContain('ball alone');
+  });
+
   it('a ball named as the rough is refused by name, and the goal still posts', async () => {
     const job = goalJob({ roughToolKey: BALL.key });
-    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
+    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, null, { shop: SHOP });
     expect(out.ok).toBe(true);
     expect(out.programs).toHaveLength(1);
     const finding = out.findings.find((f) => f.code === 'goal-rough-no-cutter');
     expect(finding?.message).toContain('must be a flat end mill');
   });
 
-  it('the run sheet states both cutters, the change, and which rough ran', async () => {
-    const job = goalJob({ roughToolKey: ROUGH.key });
-    const out = await generateGoalProgram(job, job.targetObject!, BALL.tool, [], null, SHOP);
-    const texts = buildRunSheet(job, out, null).sections.flatMap((s) => s.steps.map((st) => st.text));
-    const split = texts.find((t) => t.includes('Two programs, two cutters'));
-    expect(split).toBeDefined();
-    expect(split).toContain('3 mm flat');
-    expect(split).toContain('change to the ball');
-    const surface = texts.find((t) => t.includes('Surface a mesh'));
-    expect(surface).toBeDefined();
-    expect(surface).toContain('Roughing in');
-  });
+  // #987/#966 — "the run sheet states both cutters, the change, and which rough ran" is deleted
+  // here, not fixed: both of its lines came from runSheet.ts's `surfaceSteps(facts:
+  // GoalSurfaceFacts)`, fed only by `out.surface3d` — undefined on the model-cam path, and the
+  // old heightfield engine that fed it is gone. The model-cam path's own run-sheet section is
+  // #976 (parked, M2) — nothing to pin here until that lands.
 });
 
 describe('#869 the goal’s split, chosen by the search', () => {
@@ -242,7 +245,7 @@ describe('#869 the goal’s split, chosen by the search', () => {
     expect(plan?.goalRoughKey).toBe(ROUGH.key);
   });
 
-  it('applying a plan writes the rough key, and a plan without one clears it', async () => {
+  it('#999 applying a plan writes the rough key, and a plan without one writes null (ball alone)', async () => {
     const job = goalJob();
     const withRough = applyCutterPlanToJob(job, {
       cutters: [{ key: BALL.key, items: [job.targetObject!.id] }],
@@ -250,7 +253,9 @@ describe('#869 the goal’s split, chosen by the search', () => {
     });
     expect(withRough.targetObject?.roughToolKey).toBe(ROUGH.key);
     const without = applyCutterPlanToJob(withRough, { cutters: [{ key: BALL.key, items: [job.targetObject!.id] }] });
-    expect(without.targetObject?.roughToolKey).toBeUndefined();
+    // #999 — NEVER a delete: absent now means the engine chooses, so a ball-alone plan that
+    // deleted the key would generate a rough the verdict never measured.
+    expect(without.targetObject?.roughToolKey).toBeNull();
   });
 
   it('the split charges one more tool change to the measured cost', async () => {

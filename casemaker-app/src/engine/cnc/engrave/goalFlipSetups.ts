@@ -33,6 +33,7 @@ import type { Face, MountSpec } from '@/engine/cnc/setups/types';
 import { jobMount, jobSetups } from './jobSetup';
 import { newId } from '@/utils/id';
 import type { EngraveJob, EngraveTargetObject, JobSetup, JobSetupPins } from '@/types/engraveJob';
+import { coverageTriangles, sampleCoverageField, type CoverageMesh } from './goalCoverage';
 
 const DEG = Math.PI / 180;
 
@@ -65,14 +66,14 @@ function normalize(deg: number): number {
   return v === 360 ? 0 : v;
 }
 
-interface Box3 {
+export interface Box3 {
   x: number;
   y: number;
   z: number;
 }
 
 /** The rotated stock box's machine-frame bounds and the setup's work origin (front-left-TOP). */
-function setupFrame(R: Mat3, stock: Box3): { origin: Box3; machineToWork: (m: Box3) => Box3 } {
+export function setupFrame(R: Mat3, stock: Box3): { origin: Box3; machineToWork: (m: Box3) => Box3 } {
   let minX = Infinity, minY = Infinity, maxZ = -Infinity;
   for (const cx of [0, stock.x]) {
     for (const cy of [0, stock.y]) {
@@ -94,6 +95,126 @@ function setupFrame(R: Mat3, stock: Box3): { origin: Box3; machineToWork: (m: Bo
 /** The physical point (setup 1's work coordinates) as the setup turns it: machine = R·(p + (0,0,T)). */
 function toMachine(R: Mat3, stock: Box3, p: Box3): Box3 {
   return applyMat(R, { x: p.x, y: p.y, z: p.z + stock.z });
+}
+
+/** `Mᵗ`, row-major 3×3 — a proper rotation's own inverse (`orient`'s own guarantee: det = +1,
+ *  orthonormal), so this is all the inverse chain below needs. */
+function transpose(m: Mat3): Mat3 {
+  return [m[0]!, m[3]!, m[6]!, m[1]!, m[4]!, m[7]!, m[2]!, m[5]!, m[8]!];
+}
+
+/**
+ * #898 part 2 — THE EXPLICIT AFFINE, both ways, for a reader (C's whole-surface union) that needs
+ * to carry a point measured in one setup's own work frame back to setup 1's (the document's own
+ * geometry) — or forward, the same chain `goalForSetup` already walks for a bbox.
+ *
+ * FORWARD is this module's own existing chain restated as one call: `toMachine` (shift by the
+ * stock's thickness, box-frame bottom-origin, then `R`) then `frame.machineToWork` (re-zero on
+ * the rotated box's own top). INVERSE solves the same equation for the setup-1 point: `R` is a
+ * proper rotation (orthonormal), so `R⁻¹ = Rᵗ` and `p = Rᵗ·(w + origin) − (0,0,T)`. Computed
+ * fresh from `R` and `stock` every call — never chained — the same promise the forward chain
+ * already keeps.
+ */
+export interface SetupAffine {
+  /** Setup 1's own work frame → this setup's own work frame (the forward chain, restated). */
+  toSetup(p: Box3): Box3;
+  /** This setup's own work frame → setup 1's (the document's) — the inverse. */
+  toDocument(p: Box3): Box3;
+}
+
+export function setupAffine(R: Mat3, stock: Box3): SetupAffine {
+  const frame = setupFrame(R, stock);
+  const Rt = transpose(R);
+  return {
+    toSetup: (p) => frame.machineToWork(toMachine(R, stock, p)),
+    toDocument: (w) => {
+      const m = { x: w.x + frame.origin.x, y: w.y + frame.origin.y, z: w.z + frame.origin.z };
+      const r = applyMat(Rt, m);
+      return { x: r.x, y: r.y, z: r.z - stock.z };
+    },
+  };
+}
+
+/**
+ * #914 — the single Z constant that turns a PURE rotation of a setup-1 work-frame point (`R·p`,
+ * no shift — `goalFlipPlan`'s own `rotateCoverageMesh`, which never needed the absolute frame
+ * because its classification is translation-invariant) into that same point's real depth below
+ * THIS candidate orientation's own stock top: `setupAffine(R, stock).toSetup(p).z` always equals
+ * `(R·p).z + faceDepthOffsetMm(R, stock)` — the two chains differ only by this one constant, so
+ * the plan's reach-aware scoring can add it to an already-rotated triangle's z instead of
+ * re-transforming the whole mesh a second time.
+ */
+export function faceDepthOffsetMm(R: Mat3, stock: Box3): number {
+  const c = applyMat(R, { x: 0, y: 0, z: stock.z });
+  return c.z - setupFrame(R, stock).origin.z;
+}
+
+/**
+ * #898 part 2 — WHICH GENERATED-PROGRAM-LIST INDEXES BELONG TO THIS SETUP, in cut order. Read off
+ * the generator's OWN posted list (`EngraveProgram.setupId`, `programs.ts`'s `setupPrograms`
+ * carries the same id through), never predicted from `JobSetup.tools`: a setup whose rest pass
+ * finds nothing to cut drops a program (#419's own settle pass, `engraveGenerate.ts`), and a face
+ * or neck file can insert one — only the real, posted list knows where a setup's programs
+ * actually landed.
+ */
+export function programIndexesFor(setupId: string, programs: readonly { setupId: string }[]): number[] {
+  const out: number[] = [];
+  programs.forEach((p, i) => {
+    if (p.setupId === setupId) out.push(i);
+  });
+  return out;
+}
+
+/** #914/#898 — how flat a face must be to count as "the stock's own bottom", degrees off straight
+ *  down; the same tolerance `goalFlipPlan`'s own noise rule reads a flat remainder by. */
+const STOCK_BOTTOM_FLAT_DEG = 3;
+
+export interface ExcludedSurface {
+  reason: 'stock-bottom';
+  areaMm2: number;
+}
+
+/**
+ * #914/#898 — THE GOAL'S OWN UNDERSIDE, PRESSED AGAINST THE STOCK'S BOTTOM in setup 1: no setup a
+ * flip plan offers ever puts this face up — it is the face the part sits ON — so it is excluded
+ * BY DESIGN, not refused for lack of a holdable side. The maintainer named the elephant's
+ * underside as the first case (#943 review §4.1: "the elephant's underside on the stock bottom is
+ * excluded by design"). This looks for exactly that shape: a FLAT face (within
+ * `STOCK_BOTTOM_FLAT_DEG` of straight down) sitting at the STOCK's own bottom plane
+ * (`z ≈ −stockThicknessMm`, setup 1's own work-frame convention — top at 0). A goal with no such
+ * face there (nothing flat at the stock's own bottom) returns null.
+ *
+ * NOT THE MESH'S OWN MINIMUM. An earlier version of this function anchored on the mesh's lowest
+ * vertex, which is WRONG whenever the goal does not reach all the way to the stock's physical
+ * floor: on the real stick figure (36 mm stock, ~27 mm goal depth) the goal's lowest point sits 9
+ * mm clear of the stock bottom, and that 9 mm clearance means a FLIPPED setup reaches those faces
+ * easily (9 mm is well inside a 21 mm band) — crediting them as both "excluded" and "reached"
+ * would double-count the same area. Anchoring on the stock's own floor instead of the mesh's
+ * minimum is why `stockThicknessMm` is a required input, not an optional one.
+ *
+ * THIS IS A NAMED FIRST CASE, not a general "any excluded region" system: a shape whose true
+ * stock-bottom contact is NOT flat (curved feet, three point-contacts) is not detected, and this
+ * function says so by returning null rather than guessing at a shape it has not seen. Extend it
+ * when a second shape needs a different rule.
+ */
+export function stockBottomExclusion(mesh: CoverageMesh, stockThicknessMm: number, pitchMm = 0.3): ExcludedSurface | null {
+  const field = sampleCoverageField(mesh, pitchMm);
+  // `{}` — the default classification is irrelevant here: this reads `nz`/`areaMm2`/`centre`
+  // directly, never `cls` (`coverageTriangles`' own `facingDeg` means "tilt down PAST VERTICAL",
+  // a near-90° test for its purpose; "flat", for this function, means near nz = −1, straight
+  // down, a much narrower band this function tests for itself).
+  const facts = coverageTriangles(mesh, field, {});
+  const stockBottomZ = -stockThicknessMm;
+  const atTheFloor = 0.5; // mm — slop around the stock's own bottom plane, not a tuned tolerance
+  const straightDown = -Math.cos((STOCK_BOTTOM_FLAT_DEG * Math.PI) / 180);
+  let areaMm2 = 0;
+  for (const f of facts) {
+    if (!(f.areaMm2 > 0)) continue;
+    if (f.nz > straightDown) continue; // not within STOCK_BOTTOM_FLAT_DEG of straight down
+    if (f.centre[2] > stockBottomZ + atTheFloor) continue; // not at the stock's own floor
+    areaMm2 += f.areaMm2;
+  }
+  return areaMm2 > 0 ? { reason: 'stock-bottom', areaMm2 } : null;
 }
 
 /**

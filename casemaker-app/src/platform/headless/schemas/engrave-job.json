@@ -3031,6 +3031,14 @@
       ],
       "type": "object"
     },
+    "planChoice": {
+      "description": "Which plan the operator chose: 'owned' (the location's own cutters — the default when absent) or 'ideal' (every bit the app knows, the recommendation).",
+      "enum": [
+        "owned",
+        "ideal"
+      ],
+      "type": "string"
+    },
     "primitives": {
       "description": "3D negative volumes (box, cylinder, cone, sphere); omit for none.",
       "items": {
@@ -5800,6 +5808,17 @@
               ],
               "type": "string"
             },
+            "surfaceTouches": {
+              "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
+              "enum": [
+                "computed",
+                "catalogue",
+                "user",
+                "measured",
+                "assumed"
+              ],
+              "type": "string"
+            },
             "thickness": {
               "description": "Where this value came from: computed, a cutter catalogue, the user, a measurement, or an assumption.",
               "enum": [
@@ -6029,6 +6048,97 @@
           ],
           "description": "The plan shape of round stock (#743): \"cylinder\" for a rod or a tube, \"disc\" for a round blank milled flat; omit for a rectangular blank."
         },
+        "surfaceTouches": {
+          "description": "The surface touches and readings; omit when the surface has not been measured.",
+          "properties": {
+            "machine": {
+              "description": "The machine the readings were taken on.",
+              "properties": {
+                "host": {
+                  "description": "The machine's host.",
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "port": {
+                  "description": "The machine's command port.",
+                  "maximum": 65535,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "host",
+                "port"
+              ],
+              "type": "object"
+            },
+            "measuredAt": {
+              "description": "When the touches were taken.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "touches": {
+              "description": "The planned points and their readings, in the plan's order.",
+              "items": {
+                "properties": {
+                  "at": {
+                    "description": "The point in words, as the run sheet printed it.",
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "id": {
+                    "description": "The planned point's own id (\"surface-1\" …).",
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "source": {
+                    "description": "How the reading was taken: probe, touched off, or typed from another instrument.",
+                    "enum": [
+                      "probe",
+                      "touch-off",
+                      "stated"
+                    ],
+                    "type": "string"
+                  },
+                  "x": {
+                    "description": "The point along X in the stock frame, millimetres.",
+                    "type": "number"
+                  },
+                  "y": {
+                    "description": "The point along Y in the stock frame, millimetres.",
+                    "type": "number"
+                  },
+                  "z": {
+                    "description": "The reading taken there, millimetres.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id",
+                  "x",
+                  "y",
+                  "z",
+                  "at",
+                  "source"
+                ],
+                "type": "object"
+              },
+              "maxItems": 1000,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "touches",
+            "measuredAt",
+            "machine"
+          ],
+          "type": "object"
+        },
         "thickness": {
           "description": "Stock thickness along Z, in millimetres (bounded by the job's own machine's Z travel).",
           "exclusiveMinimum": 0,
@@ -6257,6 +6367,11 @@
           "description": "False keeps the object in the document but out of the program.",
           "type": "boolean"
         },
+        "faceId": {
+          "description": "Base64 of the per-triangle B-rep face id (Uint32Array), for a mesh converted from a STEP.",
+          "minLength": 1,
+          "type": "string"
+        },
         "format": {
           "description": "File format of the reference object: a mesh ('stl'/'3mf'/'obj'), or a 'png' picture whose luminance is the goal heightfield (#672).",
           "enum": [
@@ -6347,9 +6462,16 @@
           "type": "number"
         },
         "roughToolKey": {
-          "description": "The flat end mill’s library key for the goal’s roughing program (#869); omit to cut the goal with one cutter.",
-          "minLength": 1,
-          "type": "string"
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The goal’s curved rough (#869/#999): a flat end mill’s library key, or null for the ball alone (one cutter); omit and the engine chooses the rough by sequence."
         },
         "scale": {
           "additionalProperties": false,
@@ -6593,6 +6715,11 @@
             "description": "False keeps the object in the document but out of the program.",
             "type": "boolean"
           },
+          "faceId": {
+            "description": "Base64 of the per-triangle B-rep face id (Uint32Array), for a mesh converted from a STEP.",
+            "minLength": 1,
+            "type": "string"
+          },
           "format": {
             "description": "File format of the reference object: a mesh ('stl'/'3mf'/'obj'), or a 'png' picture whose luminance is the goal heightfield (#672).",
             "enum": [
@@ -6683,9 +6810,16 @@
             "type": "number"
           },
           "roughToolKey": {
-            "description": "The flat end mill’s library key for the goal’s roughing program (#869); omit to cut the goal with one cutter.",
-            "minLength": 1,
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The goal’s curved rough (#869/#999): a flat end mill’s library key, or null for the ball alone (one cutter); omit and the engine chooses the rough by sequence."
           },
           "scale": {
             "additionalProperties": false,

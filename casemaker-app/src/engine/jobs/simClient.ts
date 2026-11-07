@@ -14,7 +14,9 @@ import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
+import type { EngraveJob, EngraveMargins, EngraveTargetObject } from '@/types/engraveJob';
+import type { PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
+import type { PlanOutcome } from '@/engine/cnc/cam/model/plan';
 import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated } from '@/workers/sim.worker';
 import type { SimDesign } from '@/workers/sim/session';
 import type { EngraveProgress, EngraveShopOpts } from '@/workers/sim/engraveGenerate';
@@ -31,10 +33,7 @@ import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
 import { recordCrumb } from '@/platform/flightRecorder';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
 import { createFrameCoalescer } from './frameCoalescer';
-import { AdaptivePool } from './adaptivePool';
 
-/** #881 — the roughing level pool, owned here and lent to the sim worker over a port. */
-let adaptivePool: AdaptivePool | null = null;
 let simWorker: Worker | null = null;
 let simApi: Comlink.Remote<SimWorkerApi> | null = null;
 let frameSink: ((k: number, frame: SimFrame) => void) | null = null;
@@ -84,9 +83,6 @@ function failWorker(message: string): void {
   const f = failure;
   failure = null;
   frames.reset();
-  // #881 — the pool's planners are this run's children: a dead worker takes them with it.
-  adaptivePool?.dispose();
-  adaptivePool = null;
   simWorker?.terminate();
   simWorker = null;
   simApi = null;
@@ -112,11 +108,6 @@ export function getSimApi(): Comlink.Remote<SimWorkerApi> {
     };
     simWorker.onmessageerror = () => failWorker('the simulation worker sent a message the page could not read');
     simApi = Comlink.wrap<SimWorkerApi>(simWorker);
-    // #881 — lend the worker the level pool. The port is TRANSFERRED, and Comlink keeps the calls
-    // in order on this endpoint, so the worker has the planner before any generate that follows.
-    adaptivePool = new AdaptivePool();
-    const plannerPort = adaptivePool.beginRun();
-    void simApi.setLevelPlanner(Comlink.transfer(plannerPort, [plannerPort])).catch(() => undefined);
   }
   return simApi;
 }
@@ -138,9 +129,6 @@ const frames = createFrameCoalescer<SimFrame>({
 export function terminateSim(): void {
   frames.reset();
   frameDesign = 'stock';
-  // #881 — the cancel path: a terminated Generate must leave no planner running either.
-  adaptivePool?.dispose();
-  adaptivePool = null;
   simWorker?.terminate();
   simWorker = null;
   simApi = null;
@@ -541,6 +529,17 @@ export const engraveSmartPick = (
  * `drill.peckClearanceMm` where each peck's re-entry rapid stops. Omitted, the worker keeps both
  * labelled fallbacks — the program a headless run without a location would cut.
  */
+/** #986 (the ruling) — THE BACKGROUND IDEAL: the second plan's outcome and the tradeoff line,
+ * computed after the owned plan has posted. Posts nothing; returns nulls when there is no ideal. */
+export const engravePlanIdeal = (
+  job: EngraveJob,
+  goal: EngraveTargetObject,
+  tool: Tool,
+  shop?: EngraveShopOpts,
+  catalogueTools?: readonly Tool[],
+): Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }> =>
+  guarded(getSimApi().engravePlanIdeal(job, goal, tool, shop ?? {}, catalogueTools ?? []));
+
 export const engraveGenerate = (
   job: EngraveJob,
   tool: Tool | null,
@@ -554,6 +553,12 @@ export const engraveGenerate = (
    * a function nested inside a plain object is not recognised as callable and cannot be cloned.
    */
   onProgress?: (progress: EngraveProgress) => void,
+  /**
+   * #961 — the ideal plan's candidate set: the app's tool library (built-ins, the house service's
+   * `cat:` rows and the shop's inventory), read on this side because the worker cannot see the
+   * stores. Absent means no ideal — `planIdeal` stays null and only the owned plan is run.
+   */
+  catalogueTools?: readonly Tool[],
 ): Promise<EngraveGenerated> =>
   guarded(
     getSimApi().engraveGenerate(
@@ -564,6 +569,7 @@ export const engraveGenerate = (
       margins,
       shop,
       onProgress === undefined ? undefined : Comlink.proxy(onProgress),
+      catalogueTools,
     ),
   );
 

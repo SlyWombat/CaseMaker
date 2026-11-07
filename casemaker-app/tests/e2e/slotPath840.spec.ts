@@ -14,10 +14,13 @@ test.setTimeout(240_000);
 const ROOT = path.resolve(process.cwd(), '..');
 const OUT = path.join(ROOT, 'docs', 'bench', 'img', '2026-10-31-slot-path');
 
-/** An S-curve 40 mm wide, drawn as a stroke only — an open path, so it imports as a line. */
+/** An S-curve 40 mm wide, drawn as a HAIRLINE stroke — an open path, so it imports as a line.
+ *  #968 — a stroke with a real width is a painted REGION now, not a centre line (the width the
+ *  cutter opens to a band); only a hairline below 0.01 mm keeps the line reading this test's
+ *  slot-width flow needs. The 0.5 mm this drew before became a region and left no trace row. */
 const S_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="20mm" viewBox="0 0 40 20">' +
-  '<path d="M0 10 C 10 -6, 10 -6, 20 10 S 30 26, 40 10" fill="none" stroke="black" stroke-width="0.5"/></svg>';
+  '<path d="M0 10 C 10 -6, 10 -6, 20 10 S 30 26, 40 10" fill="none" stroke="black" stroke-width="0.001"/></svg>';
 
 async function shoot(page: Page, name: string): Promise<void> {
   fs.mkdirSync(OUT, { recursive: true });

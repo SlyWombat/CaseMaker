@@ -176,6 +176,8 @@ export function measurePageCard(dir: string, opts: PageCardOptions): ProgramScor
     coverage: coverageFromPage(artefacts.goalcheck),
     cutInto: cutIntoFromPage(artefacts.goalcheck),
     cycleSeconds: facts.cycleSeconds,
+    // One manual bit change between consecutive posted programs, plus any inside a file.
+    toolChanges: facts.toolChanges + Math.max(0, artefacts.ncFiles.length - 1),
     airFraction: facts.airFraction,
     rapidSeconds: facts.rapidSeconds,
     rapidMoves: facts.rapidMoves,
@@ -186,7 +188,7 @@ export function measurePageCard(dir: string, opts: PageCardOptions): ProgramScor
     sources: {
       coverage: 'the page goal check (coverage0p1Pct)',
       cutInto: 'the page goal check (cutIntoPct at 0.01 mm)',
-      cycle: '#927 estimate on the posted .nc',
+      cycle: '#927 cutting estimate on the posted .nc; bit changes counted by the scorer',
       air: '#927 estimate on the posted .nc',
       rapids: 'parseGcode summary on the posted .nc',
       cutters: 'the posted .nc tool records',
@@ -218,12 +220,16 @@ export interface VendorCardOptions {
 export function measureVendorCard(opts: VendorCardOptions): ProgramScore {
   const goalcheck = readJson<PageGoalCheck>(opts.goalcheckPath);
   const facts = measurePostedFiles(opts.ncFiles, opts.card);
-  const cycle = facts.headerTimeSeconds ?? facts.cycleSeconds;
   return {
     label: opts.card,
     coverage: coverageFromPage(goalcheck),
     cutInto: cutIntoFromPage(goalcheck),
-    cycleSeconds: cycle,
+    // LIKE FOR LIKE: the same #927 model on the vendor's own file. Its header `;@MKR|TIME` is
+    // carried as a fact and printed beside the line, never used as the reference.
+    cycleSeconds: facts.cycleSeconds,
+    toolChanges: facts.toolChanges,
+    headerTimeSeconds: facts.headerTimeSeconds,
+    vendorHolding: opts.holding ?? null,
     airFraction: facts.airFraction,
     rapidSeconds: facts.rapidSeconds,
     rapidMoves: facts.rapidMoves,
@@ -234,7 +240,7 @@ export function measureVendorCard(opts: VendorCardOptions): ProgramScore {
     sources: {
       coverage: 'the reference goal check (coverage0p1Pct)',
       cutInto: 'the reference goal check (cutIntoPct at 0.01 mm)',
-      cycle: facts.headerTimeSeconds === null ? '#927 estimate on the vendor .nc' : 'the vendor .nc’s own ;@MKR|TIME',
+      cycle: '#927 cutting estimate on the vendor .nc; bit changes counted by the scorer',
       air: '#927 estimate on the vendor .nc',
       rapids: 'parseGcode summary on the vendor .nc',
       cutters: 'the vendor .nc tool records',

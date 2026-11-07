@@ -216,6 +216,34 @@ describe('engraveRunStore (#206)', () => {
       expect(sentence).toContain('the simulation does not match the prediction');
     });
 
+    it('#1035 — the gate names the FINISH, never the rough whose coverage is deferred', () => {
+      // The two-surface ruling (6b): an intermediate goal program's coverage is judged at the end
+      // of the run, so a failing run names the program that really decided — never the deferred
+      // rough that would otherwise be `find`'s first `!ok`.
+      const goal = (over: Record<string, unknown> = {}): never =>
+        ({
+          ok: true, ran: true, reason: null, goalCells: 10, pitchMm: 0.1, cutIntoFloorMm: 0.1,
+          cutIntoFraction: 0, cutIntoAreaMm2: 0, cutIntoVolumeMm3: 0, maxCutIntoMm: 0, maxCutIntoAt: null,
+          leftoverFractions: [0, 0, 0], leftoverVolumeMm3: 0, maxLeftoverMm: 0, coverageFraction: 1,
+          passCoverage: 0.95, medianDeltaMm: 0, edgeBreakFraction: 0, wallNotScoredFraction: 0,
+          shadowNotScoredFraction: 0, straddlingNotScoredCells: 0, straddlingMaxStepMm: 0,
+          adjudicatedFraction: 0, adjudicatedMaxMm: 0, adjudicatedMaxAt: null, sentence: 'goal check',
+          ...over,
+        }) as never;
+      const rough = { index: 0, label: 'program 1 (flat-1.0)', report: { ok: false, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 }, goalCutInto: goal({ ok: false, leftoverFractions: [0.19, 0, 0] }) } as never, goalCoverageDeferred: true };
+      const finish = { index: 1, label: 'program 2 (ball-2)', report: { ok: false, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 }, goalCutInto: goal({ ok: false, leftoverFractions: [0.12, 0, 0] }) } as never, goalCoverageDeferred: false };
+      const sentence = saveBlocker(
+        view({
+          generated: clean(),
+          phase: 'blocked',
+          simStatus: 'ready',
+          oracle: { ok: false, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
+          oraclePrograms: [rough, finish],
+        }),
+      );
+      expect(sentence).toBe('program 2 (ball-2): the simulation does not match the prediction');
+    });
+
     it('a stored result with no per-program predictions uses the top-level list for program 1 and does not re-judge later files', async () => {
       const { seen } = await runWith(twoPrograms(undefined, undefined), () => ({ ok: true }));
       expect(seen).toHaveLength(1);
@@ -416,6 +444,209 @@ describe('engraveRunStore (#206)', () => {
     // No Makera catalogue unless a test loads one: it is module state (`feeds.ts`), so it outlives a
     // test that set it (#324).
     clearFeedCatalogue();
+  });
+
+  // #1032 — A POSTED PROGRAM'S KEY MUST RESOLVE BY ALL THREE IDENTITIES A TOOL RECORD STATES.
+  // The model engine stamps each program's `toolKey` with `cutterKeyOf(tool)` = `tool.id ??
+  // tool.name`, and the built-in tier is not identified by its registry key: `flat-1.0` has no
+  // `id` (so its NAME is stamped) and `flat-3.175x12-metal` carries the physical catalogue id
+  // `112111313812`. The sweep resolved a posted key by exact registry key only, so a job planned
+  // with either built-in was refused as "not on this bench" (the flipMouldShell walk's red on
+  // 966-collapse, #1021 comment 6696909602). Red-first at d792bd281: both programs stop at
+  // program 1's tool-refused and `simPrograms` holds only the failure.
+  it('resolves a posted program keyed by a built-in’s display name and one keyed by its physical id', async () => {
+    const base = clean();
+    const program = base.programs[0]!;
+    const generated: EngraveGenerated = {
+      ...base,
+      programs: [
+        { ...program, programHash: 'name-keyed', toolKey: '1 mm flat end' },
+        { ...program, programHash: 'id-keyed', toolKey: '112111313812' },
+      ],
+    };
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({
+      loadProgram: async () => {
+        useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false });
+        return swept();
+      },
+    });
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => generated,
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    try {
+      await useEngraveRunStore.getState().generate();
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+      setEngraveRunClientLoader(null);
+    }
+    const s = useEngraveRunStore.getState();
+    expect(s.simDiagnostics.filter((d) => d.code === 'tool-refused')).toEqual([]);
+    expect(s.simPrograms.map((p) => p.index)).toEqual([0, 1]);
+    expect(s.simStatus).toBe('ready');
+  });
+
+  // #1034 — A FLIPPED SETUP SEEDS EVERY PROGRAM FROM ITS PREDECESSOR. Measured on the shell
+  // (#1032): the four programs' seeds read [blank, blank, blank + carried, blank] — once a
+  // cross-setup removal mesh was in the chain, #817's all-chain rule dropped the field path for
+  // the REST of the later setup too, so side 2's finish was swept on a bare blank (neither
+  // program 3's removal nor side 1's floor). The rule becomes per predecessor: a program whose
+  // predecessor is in its own setup seeds from that predecessor's field, and the earlier setup's
+  // carried floor rides the whole later setup.
+  describe('#1034 — the sweep seeds each program from its own predecessor', () => {
+    const fieldOf = (nc: string): unknown => ({ marker: `${nc}-field` });
+    // A carryable seed must be a real mesh: `carrySeedsForSetup` transforms its positions.
+    const meshOf = (nc: string): unknown => ({
+      marker: nc,
+      positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+      indices: new Uint32Array([0, 1, 2]),
+      triangleCount: 1,
+      vertexCount: 3,
+      bbox: { min: [0, 0, 0], max: [1, 1, 0] },
+      componentCount: 1,
+    });
+
+    /** A two-side job: setup 1 top-up, setup 2 bottom-up in the vise (the walk's own flip). */
+    function shareTwoSetups(): void {
+      const job = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({
+        job: {
+          ...job,
+          tool: flatEndMill(3.175, { name: '3.175 mm flat end' }),
+          setups: [
+            {
+              id: 'setup-1',
+              orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' },
+              mount: { kind: 'vise' },
+              itemIds: [],
+              tools: [],
+            },
+            {
+              id: 'setup-2',
+              orientation: { top: 'bottom', bottom: 'top', left: 'left', right: 'right', front: 'back', back: 'front' },
+              mount: { kind: 'vise' },
+              itemIds: [],
+              tools: [],
+            },
+          ],
+        },
+      });
+    }
+
+    async function runPrograms(
+      plan: readonly { nc: string; setupIndex: number }[],
+      opts: { refuseFirst?: readonly string[] } = {},
+    ): Promise<{
+      calls: Map<string, { carried: unknown; priorFields: unknown }>;
+      all: { nc: string; carried: unknown; priorFields: unknown }[];
+    }> {
+      shareTwoSetups();
+      const base = clean();
+      const program = base.programs[0]!;
+      const generated: EngraveGenerated = {
+        ...base,
+        programs: plan.map(({ nc, setupIndex }) => ({ ...program, programHash: nc, setupIndex, nc })),
+      };
+      const calls = new Map<string, { carried: unknown; priorFields: unknown }>();
+      const all: { nc: string; carried: unknown; priorFields: unknown }[] = [];
+      const refused = new Set(opts.refuseFirst ?? []);
+      const realLoad = useSimStore.getState().loadProgram;
+      useSimStore.setState({
+        loadProgram: async (...args: unknown[]) => {
+          const nc = String(args[0]);
+          calls.set(nc, { carried: args[12], priorFields: args[13] });
+          all.push({ nc, carried: args[12], priorFields: args[13] });
+          if (refused.delete(nc)) {
+            // The engine's own refusal of a prior-material seed (`programSweep.ts`'s retry path).
+            return {
+              ok: false,
+              pathOnly: false,
+              diagnostics: [{ source: 'sweep', severity: 'error', code: 'prior-removal-column', message: 'this program’s engine cannot start from the material the previous program left' }],
+            } as never;
+          }
+          useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false });
+          return {
+            ...swept(),
+            removalField: fieldOf(nc),
+            flatField: { marker: `${nc}-flat` },
+            meshes: { removal: meshOf(nc) },
+          } as never;
+        },
+      });
+      setEngraveRunClientLoader(async () => ({
+        engraveGenerate: async () => generated,
+        simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+      }));
+      try {
+        await useEngraveRunStore.getState().generate();
+      } finally {
+        useSimStore.setState({ loadProgram: realLoad });
+        setEngraveRunClientLoader(null);
+      }
+      return { calls, all };
+    }
+
+    it('seeds a flipped setup’s second program from its own predecessor, with the carried floor through the setup', async () => {
+      const { calls } = await runPrograms([
+        { nc: 'P1', setupIndex: 1 },
+        { nc: 'P2', setupIndex: 1 },
+        { nc: 'P3', setupIndex: 2 },
+        { nc: 'P4', setupIndex: 2 },
+      ]);
+      // Program 3 — the first of the flipped setup — restarts from the blank with side 1's carried
+      // floor and no same-setup fields (#1032, unchanged). Program 4 — SAME setup as its
+      // predecessor — keeps the floor and seeds from program 3's own field, never the bare blank.
+      expect(calls.get('P3')!.carried).not.toBeNull();
+      expect(calls.get('P3')!.priorFields).toBeNull();
+      expect(calls.get('P4')!.carried).not.toBeNull();
+      expect(calls.get('P4')!.priorFields).toEqual([fieldOf('P3')]);
+      // The INTRA-setup chain is unchanged: program 2 seeds from program 1's field, exactly the
+      // pre-#1034 rule (a single-setup job's sweeps stay byte-identical).
+      expect(calls.get('P2')!.priorFields).toEqual([fieldOf('P1')]);
+      const s = useEngraveRunStore.getState();
+      expect(s.simPrograms.map((p) => p.carriedFloor === true)).toEqual([false, false, true, true]);
+      // Each seeded program names its seed: program 2 from program 1, program 4 from program 3.
+      expect(s.simPrograms.map((p) => p.seedFrom ?? null)).toEqual([
+        null,
+        'program 1 (flat-1.0)',
+        null,
+        'program 3 (flat-1.0)',
+      ]);
+    });
+
+    it('#1034 (C’s review) — a RETRY from the blank takes no same-setup fields and names no seed', async () => {
+      // Program 2 is refused its seeded load (prior-removal-column) and re-swept from the blank.
+      // The retry must not be field-seeded behind the sweep's back: fields null, seedFrom null —
+      // otherwise the panel prints "Restarted from the blank" AND "starts from program 1's
+      // removal" for the same program (#948's exactRun reset reads the same absence).
+      const { all } = await runPrograms(
+        [
+          { nc: 'P1', setupIndex: 1 },
+          { nc: 'P2', setupIndex: 1 },
+        ],
+        { refuseFirst: ['P2'] },
+      );
+      const p2 = all.filter((c) => c.nc === 'P2');
+      expect(p2).toHaveLength(2);
+      expect(p2[0]!.priorFields).toEqual([fieldOf('P1')]);
+      expect(p2[1]!.priorFields).toBeNull();
+      const summary = useEngraveRunStore.getState().simPrograms.find((p) => p.label.startsWith('program 2'))!;
+      expect(summary.fromBlank).toBe(true);
+      expect(summary.seedFrom ?? null).toBeNull();
+      expect(summary.seedEarlier ?? 0).toBe(0);
+    });
+
+    it('a ball-only side 2 keeps the old behaviour: its first program carries side 1’s floor', async () => {
+      const { calls } = await runPrograms([
+        { nc: 'P1', setupIndex: 1 },
+        { nc: 'P2', setupIndex: 1 },
+        { nc: 'P3', setupIndex: 2 },
+      ]);
+      expect(calls.get('P3')!.carried).not.toBeNull();
+      expect(calls.get('P3')!.priorFields).toBeNull();
+      expect(useEngraveRunStore.getState().simPrograms.map((p) => p.carriedFloor === true)).toEqual([false, false, true]);
+    });
   });
 
   it('refuses Save before anything is generated', () => {
@@ -1854,4 +2085,162 @@ describe('#893 — a run holds the measured pick, and an unsimulated program can
       useSimStore.setState({ loadProgram: realLoad });
     }
   });
+});
+
+// ── #986 (the ruling, E's review) — THE BACKGROUND IDEAL ────────────────────────────────────────
+describe('#986 the background ideal', () => {
+  const generatedWithProgram = (): EngraveGenerated => ({
+    ...clean(),
+    nc: 'G90\nM02',
+    programs: [{ setupIndex: 1, setupId: 'setup-1', toolKey: 'flat-1.0', nc: 'G90\nM02', verify: null, frame: 'flat' } as never],
+  });
+
+  /** Let the store's microtasks run. */
+  const settle = async (): Promise<void> => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+
+  it('the owned result arrives first, the ideal second, and the card reads comparing in between', async () => {
+    let releaseIdeal!: (v: { tradeoff: { material: boolean; line: string | null; differences: never[] }; owned: null; ideal: null }) => void;
+    const idealPromise = new Promise<{ tradeoff: { material: boolean; line: string | null; differences: never[] }; owned: null; ideal: null }>((resolve) => {
+      releaseIdeal = resolve;
+    });
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => generatedWithProgram(),
+      engravePlanIdeal: () => idealPromise,
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    // The background ideal needs a goal on the job; the fake client ignores its contents.
+    const goalForIdeal = {
+      id: 'g', name: 'g', format: 'stl' as const, sha256: 'x', data: '', size: { x: 1, y: 1, z: 1 },
+      position: { x: 0, y: 0, z: 0 }, rotation: 0, enabled: true, role: 'goal' as const,
+    };
+    useEngraveJobStore.setState({ job: { ...useEngraveJobStore.getState().job, targetObject: goalForIdeal, tool: flatEndMill(3.175, { name: '3.175 mm flat end' }) } });
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({ loadProgram: async () => { useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false }); return swept(); } });
+    try {
+      const run = useEngraveRunStore.getState().generate();
+      await settle();
+      // The OWNED plan's result is on screen while the ideal is still out.
+      expect(useEngraveRunStore.getState().generated?.nc).toBe('G90\nM02');
+      expect(useEngraveRunStore.getState().idealPlan.status).toBe('comparing');
+      releaseIdeal({ tradeoff: { material: false, line: null, differences: [] }, owned: null, ideal: null });
+      await run;
+      await settle();
+      expect(useEngraveRunStore.getState().idealPlan.status).toBe('ready');
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+    }
+  }, 60_000);
+
+  it('a stale run’s ideal never writes over the current run', async () => {
+    const releases: ((v: { tradeoff: { material: boolean; line: string | null; differences: never[] }; owned: null; ideal: null }) => void)[] = [];
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => generatedWithProgram(),
+      engravePlanIdeal: () =>
+        new Promise((resolve) => {
+          releases.push(resolve as never);
+        }),
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    // The background ideal needs a goal on the job; the fake client ignores its contents.
+    const goalForIdeal = {
+      id: 'g', name: 'g', format: 'stl' as const, sha256: 'x', data: '', size: { x: 1, y: 1, z: 1 },
+      position: { x: 0, y: 0, z: 0 }, rotation: 0, enabled: true, role: 'goal' as const,
+    };
+    useEngraveJobStore.setState({ job: { ...useEngraveJobStore.getState().job, targetObject: goalForIdeal, tool: flatEndMill(3.175, { name: '3.175 mm flat end' }) } });
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({ loadProgram: async () => { useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false }); return swept(); } });
+    try {
+      const runA = useEngraveRunStore.getState().generate();
+      await settle();
+      const runB = useEngraveRunStore.getState().generate();
+      await settle();
+      expect(releases.length).toBeGreaterThanOrEqual(2);
+      // A's ideal resolves LAST, after B started: it must be dropped, and B's (still pending) state
+      // must stand.
+      releases[0]!({ tradeoff: { material: true, line: 'stale line', differences: [] }, owned: null, ideal: null });
+      await runA;
+      await settle();
+      expect(useEngraveRunStore.getState().idealPlan.tradeoff?.line ?? null).toBeNull();
+      expect(useEngraveRunStore.getState().idealPlan.status).toBe('comparing');
+      releases[1]!({ tradeoff: { material: false, line: null, differences: [] }, owned: null, ideal: null });
+      await runB;
+      await settle();
+      expect(useEngraveRunStore.getState().idealPlan.status).toBe('ready');
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+    }
+  }, 60_000);
+});
+
+// #986 (E's nits) — the press re-runs; a refused ideal leaves no spinner.
+describe('#986 the press and the failure path', () => {
+  const generatedWithProgram = (): EngraveGenerated => ({
+    ...clean(),
+    nc: 'G90\nM02',
+    programs: [{ setupIndex: 1, setupId: 'setup-1', toolKey: 'flat-1.0', nc: 'G90\nM02', verify: null, frame: 'flat' } as never],
+  });
+  const settle = async (): Promise<void> => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+  const goal = {
+    id: 'g', name: 'g', format: 'stl' as const, sha256: 'x', data: '', size: { x: 1, y: 1, z: 1 },
+    position: { x: 0, y: 0, z: 0 }, rotation: 0, enabled: true, role: 'goal' as const,
+  };
+  const withJob = (): void => {
+    useEngraveJobStore.setState({ job: { ...useEngraveJobStore.getState().job, targetObject: goal, tool: flatEndMill(3.175, { name: '3.175 mm flat end' }) } });
+  };
+
+  it('the press re-runs the computation and lands ready again', async () => {
+    let calls = 0;
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => generatedWithProgram(),
+      engravePlanIdeal: async () => {
+        calls += 1;
+        return { tradeoff: { material: false, line: null, differences: [] } as never, owned: null, ideal: null };
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    withJob();
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({ loadProgram: async () => { useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false }); return swept(); } });
+    try {
+      await useEngraveRunStore.getState().generate();
+      await settle();
+      expect(useEngraveRunStore.getState().idealPlan.status).toBe('ready');
+      expect(calls).toBe(1);
+      // The press re-runs the SAME computation — not just the recorded choice.
+      useEngraveRunStore.getState().comparePlans();
+      await settle();
+      expect(calls).toBe(2);
+      expect(useEngraveRunStore.getState().idealPlan.status).toBe('ready');
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+    }
+  }, 60_000);
+
+  it('a refused ideal goes idle — no spinner is left behind', async () => {
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => generatedWithProgram(),
+      engravePlanIdeal: async () => {
+        throw new Error('the ideal refused');
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    withJob();
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({ loadProgram: async () => { useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false }); return swept(); } });
+    try {
+      await useEngraveRunStore.getState().generate();
+      await settle();
+      expect(useEngraveRunStore.getState().idealPlan).toEqual({ status: 'idle', tradeoff: null });
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+    }
+  }, 60_000);
 });

@@ -6,7 +6,7 @@
 // background run, cancellation and caching are `engravePreviewStore766.spec.ts`).
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { EngravePanel } from '@/components/panels/EngravePanel';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
@@ -238,7 +238,11 @@ describe('#766 D the panel’s provisional → measured answers', () => {
     expect(screen.getByTestId('engrave-use-measured')).toBeTruthy();
   });
 
-  it('still follows the measured answer while the design has no generated result', () => {
+  // #1010 (the maintainer's 2026-11-05 ruling) — THE PLAN ANSWER IS PER RUN. The measured
+  // auto-apply is retired: a computed job with no generated result keeps the cutter it was given,
+  // the panel renders (the effect that used to re-apply itself through its own job write is gone),
+  // and the "what would a different set give me" answer is the run's tradeoff line, shown here.
+  it('leaves the job’s own cutter alone while the design has no generated result — the plan answer is per run', () => {
     const job = computedJob();
     act(() => {
       useEngraveJobStore.setState({ job });
@@ -254,16 +258,22 @@ describe('#766 D the panel’s provisional → measured answers', () => {
 
     render(<EngravePanel />);
 
-    // No run exists, so the answer is the current design's: the whole plan is written.
+    // Rendered without "Maximum update depth exceeded", and the job is exactly the operator's
+    // document: nothing was written behind their back. The "what would a different set give me"
+    // answer is the run's tradeoff line — rendered by the Cut card and pinned where it lives
+    // (`cutSurface.spec.tsx`), not by rewriting the job here.
     const after = useEngraveJobStore.getState().job;
-    expect(after.toolKey).toBe('flat-3.175');
-    expect(after.setups?.[0]?.tools ?? []).toEqual(['flat-3.175', 'engraver-0.3']);
+    expect(after.toolKey).toBe('flat-1.0');
+    expect(after.setups?.[0]?.tools ?? []).not.toContain('flat-3.175');
   });
 
   // #786 slice 4c — a hand-chosen drill bit with other work: the split KEEPS the cutter the
   // operator named, so it is applied like a computed answer. The guard's subject is the cutter,
   // not the source: a plan that would replace the drill is never applied, this one never does.
-  it('applies a split that keeps a hand-chosen drill first, for its holes only', () => {
+  // #1010 — A HAND-CHOSEN CUTTER IS NEVER REPLACED. The old split (a measured plan dividing the
+  // work between cutters) was the auto-apply's; the measured answer is offered and applied by the
+  // press, so the drill stays the drill and no split is written into the job.
+  it('keeps a hand-chosen drill as the job’s cutter, and writes no split into it', () => {
     const DRILL = flatEndMill(3, {
       name: '3 mm drill',
       typeText: 'Drill',
@@ -314,10 +324,9 @@ describe('#766 D the panel’s provisional → measured answers', () => {
     render(<EngravePanel />);
 
     const after = useEngraveJobStore.getState().job;
-    // The named drill is STILL the job's cutter, and now owns exactly its hole.
+    // The named drill is STILL the job's cutter; no measured split is applied over it.
     expect(after.toolKey).toBe('user:drill-3');
-    expect(after.setups?.[0]?.tools).toEqual(['user:drill-3', 'flat-3.175']);
-    expect(after.setups?.[0]?.toolItems).toEqual({ 'user:drill-3': ['hole'], 'flat-3.175': ['pocket'] });
+    expect(after.setups?.[0]?.tools ?? []).not.toContain('flat-3.175');
   });
 
   // #786 slice 4c-2 — A MISSING OR REFUSED CUTTER IS SUBSTITUTED. The replace-guard protects a
@@ -348,7 +357,9 @@ describe('#766 D the panel’s provisional → measured answers', () => {
     };
   }
 
-  it('replaces a key the library does not hold', () => {
+  // #1010 — A MISSING KEY IS OFFERED, NOT SUBSTITUTED. The measured answer is the operator's to
+  // apply (the press); the job keeps the document they wrote.
+  it('offers the measured answer for a key the library does not hold — never rewrites the job', () => {
     const job = pocketJob();
     job.toolKey = 'user:gone';
     job.tool = null;
@@ -367,12 +378,12 @@ describe('#766 D the panel’s provisional → measured answers', () => {
     render(<EngravePanel />);
 
     const after = useEngraveJobStore.getState().job;
-    expect(after.toolKey).toBe('flat-3.175');
-    expect(after.setups?.[0]?.tools).toEqual(['flat-3.175']);
-    expect(after.setups?.[0]?.toolItems).toEqual({ 'flat-3.175': ['pocket'] });
+    expect(after.toolKey).toBe('user:gone');
+    expect(after.setups?.[0]?.tools ?? []).toEqual([]);
   });
 
-  it('replaces a cutter no CAM here can use (a ball in a region job)', () => {
+  // #1010 — A REFUSED CUTTER IS OFFERED, NOT SUBSTITUTED (see above).
+  it('offers the measured answer for a cutter no CAM here can use — the ball stays the job’s', () => {
     const job = pocketJob();
     job.toolKey = 'user:ball';
     job.tool = flatEndMill(3.175, { name: 'ball nose', typeText: 'Ball End', shape: 'ball' });
@@ -390,12 +401,13 @@ describe('#766 D the panel’s provisional → measured answers', () => {
     });
     render(<EngravePanel />);
 
-    expect(useEngraveJobStore.getState().job.toolKey).toBe('flat-3.175');
+    expect(useEngraveJobStore.getState().job.toolKey).toBe('user:ball');
   });
 
-  // #786 slice 4c-2 — the substitution of the operator's OWN cutter is stated on the cutter line
-  // AND as a finding, never silent, with a one-click way back to the cutter list.
-  it('states a substitution of the operator’s own cutter, on the line and as a finding', () => {
+  // #1010 — NO SILENT SUBSTITUTION AT ALL. The old slice 4c-2 path changed the operator's cutter
+  // and stated it afterwards; with the auto-apply retired nothing is substituted, so no
+  // substitution finding or override button is fabricated either.
+  it('leaves the operator’s own cutter in place instead of substituting it silently', () => {
     // The measured answer's cutter is in the registry, so the job's snapshot resolves and the
     // cutter line can name it (the app's own state; the other tests only assert the key).
     act(() => {
@@ -418,14 +430,147 @@ describe('#766 D the panel’s provisional → measured answers', () => {
     });
     render(<EngravePanel />);
 
-    // The app's ONE display name form: the ball names its kind and size, never the vendor string.
-    const sentence = /Your ⌀ 3\.175 mm ball cannot cut this job; the ⌀ 3\.175 mm flat end is used instead\./;
-    // On the cutter line…
-    expect(screen.getByTestId('engrave-cutter-line').textContent).toMatch(sentence);
-    // …and as a finding, with the one-click override.
-    const finding = screen.getByTestId(/^engrave-finding-\d+-cutter-substituted$/);
-    expect(finding.textContent).toMatch(sentence);
-    expect(screen.getByTestId('cutter-substituted-choose')).toBeTruthy();
+    expect(useEngraveJobStore.getState().job.toolKey).toBe('user:ball');
+    expect(screen.queryByTestId(/^engrave-finding-\d+-cutter-substituted$/)).toBeNull();
+    expect(screen.queryByTestId('cutter-substituted-choose')).toBeNull();
+  });
+
+  // #1035 — THE OFFER RETIRES WHEN ITS OWN PLAN IS THE JOB. A job with no goal still compares the
+  // measured plan against the document: the rough-key clause is a GOAL's rule, and an absent
+  // `targetObject` reads `undefined`, which never equals the `null` the clause compares it to — so
+  // `measuredApplied` stayed false forever, the button never retired after the press and the
+  // fidelity line never showed. RED before the fix: the button is still there after the click.
+  it('#1035 — the pressed measured pick retires the offer and the cutter line states the fidelity', () => {
+    act(() => {
+      setRegistry([{ key: 'flat-3.175', tool: flatEndMill(3.175, { name: '3.175 mm flat end' }), provenance: 'test' }]);
+    });
+    const job = pocketJob();
+    job.toolKey = '';
+    act(() => {
+      useEngraveJobStore.setState({ job });
+    });
+    const measured = measuredFlat();
+    useEngravePreviewStore.setState({
+      preview: previewWith(),
+      status: 'ready',
+      measured,
+      measuredJob: measureFingerprint(job),
+      measuredStatus: 'ready',
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-use-measured')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('engrave-use-measured'));
+
+    expect(useEngraveJobStore.getState().job.toolKey).toBe('flat-3.175');
+    expect(screen.queryByTestId('engrave-use-measured')).toBeNull();
+    // The applied plan is recognised as the answer: its fidelity is on the cutter line.
+    expect(document.body.textContent).toContain('chosen by simulation');
+    expect(document.body.textContent).toContain('97 % fidelity');
+  });
+
+  // #1035 — A THREAD JOB'S MEASURED OFFER CARRIES THE THREAD MILL, and the press is the write.
+  // The retired auto-apply used to assign the mill behind the operator; #1010's ruling makes the
+  // measured answer the offer and the press the write, so the split is stated before Generate.
+  function bossThreadJob(): ReturnType<typeof defaultEngraveJob> {
+    const job = defaultEngraveJob();
+    job.labels = [];
+    job.stock = { ...job.stock, length: 40, width: 40, thickness: 20 };
+    job.shapes = [
+      { kind: 'circle', id: 'boss', name: 'boss', position: { x: 20, y: 20 }, rotation: 0, depth: 8, enabled: true, diameter: 8, construction: true },
+      { kind: 'circle', id: 'field', name: 'field', position: { x: 20, y: 20 }, rotation: 0, depth: 8, enabled: true, diameter: 30, construction: true },
+    ] as NonNullable<ReturnType<typeof defaultEngraveJob>['shapes']>;
+    job.combined = [
+      { kind: 'cutaway', id: 'ring', name: 'ring', position: { x: 20, y: 20 }, rotation: 0, depth: 8, enabled: true, outer: 'field', islands: ['boss'] },
+    ] as NonNullable<ReturnType<typeof defaultEngraveJob>['combined']>;
+    job.threads = [
+      { kind: 'thread', id: 'thr', position: { x: 20, y: 20 }, enabled: true, size: 'M8', standard: 'metric', classFit: '6h', side: 'external', depth: 6, through: false },
+    ] as NonNullable<ReturnType<typeof defaultEngraveJob>['threads']>;
+    job.toolKey = 'user:848-flat3';
+    job.tool = flatEndMill(3, { name: '3 mm flat end mill', fluteLength: 20 });
+    job.sources = { tool: 'user' };
+    return job;
+  }
+
+  it('#1035 — a thread job’s measured offer carries the thread mill and the press states the split', () => {
+    act(() => {
+      setRegistry([
+        { key: 'user:848-flat3', tool: flatEndMill(3, { name: '3 mm flat end mill', fluteLength: 20 }), provenance: 'test' },
+        {
+          key: 'user:848-m8',
+          tool: flatEndMill(6, { name: 'Thread mill M8x1.25 (d6mm)', typeText: 'Thread Mill', shape: 'thread', tipDiameter: 6, diameter: 6, fluteLength: 20 }),
+          provenance: 'test',
+        },
+      ]);
+    });
+    const job = bossThreadJob();
+    act(() => {
+      useEngraveJobStore.setState({ job });
+    });
+    const base = measuredFlat();
+    const measured: EngravePickSummary = {
+      ...base,
+      cutters: [
+        { key: 'user:848-flat3', items: ['ring'], source: 'owned' },
+        { key: 'user:848-m8', items: ['thr'], source: 'owned' },
+      ],
+      words: { ...base.words, plan: '3 mm flat + M8 thread mill', verdict: 'Chosen by simulation: the split posts.' },
+    };
+    // No preview: the panel then computes the job's findings itself (`preview?.findings ??
+    // validateJob(...)`), which is where the split sentence comes from.
+    useEngravePreviewStore.setState({
+      preview: null,
+      status: 'ready',
+      measured,
+      measuredJob: measureFingerprint(job),
+      measuredStatus: 'ready',
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-use-measured')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('engrave-use-measured'));
+
+    const setups = useEngraveJobStore.getState().job.setups ?? [];
+    expect(setups[0]?.tools).toEqual(['user:848-flat3', 'user:848-m8']);
+    expect(setups[0]?.toolItems?.['user:848-m8']).toEqual(['thr']);
+    // The split is stated, so Generate's program count is explained before it happens.
+    expect(document.body.textContent).toContain('Split into 2 programs');
+    expect(screen.queryByTestId('engrave-use-measured')).toBeNull();
+  });
+
+  // #1035 (the manager's reload question) — A REOPENED JOB THAT ALREADY CARRIES THE MEASURED PLAN.
+  // The press marker is panel-local, so after a reload the pressed words do not survive — and they
+  // must not: the cutter line falls back to #798's `recommended`, because the measured words
+  // describe a press this panel never saw. The offer is NOT shown either: the document already
+  // carries the plan, so the press would write the same thing (the #766 "equal answer writes
+  // nothing" rule) — a reopened saved job must not re-offer a no-op.
+  it('#1035 — a job that already carries the measured plan offers no press and reads as recommended', () => {
+    act(() => {
+      setRegistry([{ key: 'flat-3.175', tool: flatEndMill(3.175, { name: '3.175 mm flat end' }), provenance: 'test' }]);
+    });
+    act(() => {
+      const job = pocketJob();
+      job.toolKey = '';
+      useEngraveJobStore.setState({ job });
+      // The saved document's own plan, written the same way a load restores it.
+      useEngraveJobStore.getState().applyCutterPlan([{ key: 'flat-3.175', items: ['pocket'] }], 'computed');
+    });
+    const job = useEngraveJobStore.getState().job;
+    const measured = measuredFlat();
+    useEngravePreviewStore.setState({
+      preview: null,
+      status: 'ready',
+      measured,
+      measuredJob: measureFingerprint(job),
+      measuredStatus: 'ready',
+    });
+    render(<EngravePanel />);
+
+    expect(screen.queryByTestId('engrave-use-measured')).toBeNull();
+    const line = screen.getByTestId('engrave-cutter-line').textContent ?? '';
+    expect(line).toContain('recommended');
+    expect(line).not.toContain('chosen by simulation');
+    expect(line).not.toContain('fidelity');
   });
 
   it('leaves the rule answer standing, labelled, when the search fails', () => {

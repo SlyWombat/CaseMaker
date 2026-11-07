@@ -1032,6 +1032,17 @@ export function mergeGerberShapes(tl: ManifoldToplevel, shapes: readonly GerberS
   const empty = tl.CrossSection.union([]);
   let region: CS = empty;
   for (const shape of shapes) {
+    // #1029 — the contours are USER geometry; a non-finite point either throws an unusable
+    // number or traps the kernel's instance. Refused by name before the conversion.
+    for (let r = 0; r < shape.contours.length; r++) {
+      const ring = shape.contours[r]!;
+      for (let i = 0; i < ring.length; i++) {
+        const point = ring[i]!;
+        if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) {
+          throw new Error(`cam: non-finite coordinate in a Gerber shape at ring ${r} point ${i}`);
+        }
+      }
+    }
     const cs = shape.fillRule === 'EvenOdd' ? tl.CrossSection.ofPolygons(shape.contours, 'EvenOdd') : tl.CrossSection.ofPolygons(shape.contours);
     const next = shape.polarity === 'dark' ? region.add(cs) : region.subtract(cs);
     if (region !== empty) region.delete();

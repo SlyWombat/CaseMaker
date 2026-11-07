@@ -173,6 +173,7 @@ export interface EngraveJobSources {
       | 'fibre'
       | 'colour'
       | 'flatness'
+      | 'surfaceTouches'
       | 'shape'
       | 'diameter'
       | 'wall',
@@ -658,6 +659,14 @@ export interface EngraveTargetObject {
    * is gone — then the job says so and asks for an import again.
    */
   data?: string;
+  /**
+   * #991 — the B-rep face id of every triangle, base64 of a little-endian `Uint32Array` (4 bytes
+   * per triangle). Present when `data` is a mesh the door converted from a STEP: the feature tree
+   * then takes its B-rep path (whole-face patches, the cards' classification) instead of reading
+   * the same solid as a plain triangulation. Absent for every mesh file — an STL has no faces —
+   * so every document written before this field round-trips unchanged and plans as it always did.
+   */
+  faceId?: string;
   /** Parsed bounding size in mm. */
   size: { x: Mm; y: Mm; z: Mm };
   position: { x: Mm; y: Mm; z: Mm };
@@ -767,7 +776,16 @@ export interface EngraveTargetObject {
    * cut by one cutter, as before. Optional, so every document written before the field existed
    * round-trips unchanged.
    */
-  roughToolKey?: string;
+  /**
+   * #869/#999 — the goal's CURVED ROUGH is tri-state. **Absent**: the engine chooses — the plan's
+   * sequence ranks the house's flats and one of them roughs. **`null`**: the operator chose the
+   * ball alone (one cutter; the run states it). **A string**: that flat's library key, validated
+   * by `validateGoalRoughTool` (a key the library does not hold falls back to the engine's
+   * choice with a named finding). Every document written before this field chose a value still
+   * round-trips: absent used to mean "ball alone", and its plans are now engine-chosen — the
+   * operator's ball-alone is written as `null`.
+   */
+  roughToolKey?: string | null;
 }
 
 /** #829 — the 3D chamfer a GOAL asks for: its bevel width, and the V-bit chosen to cut it. */
@@ -1682,6 +1700,40 @@ export interface StockFlatness {
 }
 
 /**
+ * ONE surface touch, as the job keeps it (#943's ruling, 2026-11-05): the planned point beside the
+ * reading taken there. The pair is the job's own record — the registration store keeps the session
+ * copy, but a reload must not lose what the operator measured.
+ */
+export interface StockSurfaceTouch {
+  /** The plan's own id (`surface-1`…), so the reading and the point cannot drift apart. */
+  id: string;
+  /** The point in the stock frame (front-left at the origin), mm. */
+  x: Mm;
+  y: Mm;
+  /** The reading taken there, mm. */
+  z: Mm;
+  /** The point in physical words, as the sheet printed it. */
+  at: string;
+  /** How the reading was taken — decision 28's provenance rule, per reading. */
+  source: 'probe' | 'touch-off' | 'stated';
+}
+
+/**
+ * THE PROBED STOCK TOP, kept on the job (#943's ruling: "persist the touch set on the job, not only
+ * in memory, so a reload keeps it"). The facing depth is the spread's consequence — the cut starts
+ * at the highest reading and its target is one row step below the lowest — so these are the
+ * readings the plan runs from. The machine the set was taken on travels with it: another machine's
+ * numbers are not silently read as this one's.
+ */
+export interface StockSurfaceTouches {
+  touches: StockSurfaceTouch[];
+  /** When the touches were taken, ISO 8601. */
+  measuredAt: string;
+  /** The machine the readings were taken on (`host:port`). */
+  machine: { host: string; port: number };
+}
+
+/**
  * The registration half of a saved setup (#419 J2, §5.4; planned by #430).
  *
  * `plan` is the APPROVED choreography, frozen at the moment it was planned — a snapshot, not a
@@ -1926,6 +1978,17 @@ export interface StockHold {
   z: PartAxis;
 }
 
+/** #961/#975 — the two plans a job may cut: the owned set (default) or the ideal (every bit). */
+export type PlanChoice = 'owned' | 'ideal';
+
+/**
+ * #961/#975 — the job's plan choice, with the ruling's default in ONE place: absent means the
+ * owned plan. The document is never rewritten to say so (the schema leaves the field optional).
+ */
+export function planChoiceOf(job: Pick<EngraveJob, 'planChoice'>): PlanChoice {
+  return job.planChoice ?? 'owned';
+}
+
 export interface EngraveJob {
   schemaVersion: 3;
   /**
@@ -2006,6 +2069,12 @@ export interface EngraveJob {
     fibre?: FilamentFibre;
     colour?: StockColour;
     flatness?: StockFlatness;
+    /**
+     * #943 — the surface touches and their readings, kept so a reload does not lose the measurement
+     * the facing depth runs from. Absent until the surface has been measured, and kept absent on
+     * every document written before the key (byte-for-byte round trips stay intact).
+     */
+    surfaceTouches?: StockSurfaceTouches;
   };
   /**
    * #783 — which way round the PART sits in this job's box (see {@link StockHold}). ABSENT is the
@@ -2139,6 +2208,13 @@ export interface EngraveJob {
    * refuses a document that carries both forms. Absent here = the single form.
    */
   targetObjects?: EngraveTargetObject[];
+  /**
+   * #961/#975 — WHICH PLAN THE OPERATOR CHOSE (the maintainer's 2026-11-05 ruling). `'owned'` is
+   * the location's own cutters and the default; `'ideal'` is every bit the app knows, the
+   * recommendation. ABSENT means `'owned'` — read it through {@link planChoiceOf}, never by hand,
+   * so the default lives in one place.
+   */
+  planChoice?: PlanChoice;
   /**
    * The key of the cutter this job is written for — a builtin (`flat-1.0`), or a later registry
    * tier's key (`cat:`, `user:`, `inv:`). A PLAIN STRING, so no saved job has ever needed

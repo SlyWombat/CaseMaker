@@ -224,12 +224,104 @@ export function makeClipperOffset(tl: ManifoldToplevel): OffsetFn {
   return (region, delta) => {
     // `ofPolygons([])` throws; an empty region has no rings, so short-circuit.
     if (region.length === 0) return [];
+    assertFinitePolygons(region, 'offset');
     const cs = CS.ofPolygons(region);
     const out = cs.offset(delta, 'Round', 2, segmentsForRadius(Math.abs(delta)));
     const polygons = out.toPolygons() as Polygons;
     out.delete();
     cs.delete();
     return polygons;
+  };
+}
+
+/**
+ * #1029 — A NON-FINITE COORDINATE NEVER REACHES THE WASM. The glue answers a bad coordinate with
+ * either an unusable thrown number or — on the x86 patched build — a trap that kills the worker's
+ * whole manifold instance; a user's file, or a degenerate internal divide, can carry a NaN or
+ * ±Infinity into any conversion. Throwing a NAMED Error here lets the planner's per-region catch
+ * state the region and carry on, instead of the instance dying mid-plan.
+ */
+export function assertFinitePolygons(polys: Polygons, op: string): void {
+  for (let i = 0; i < polys.length; i++) {
+    const ring = polys[i]!;
+    for (let j = 0; j < ring.length; j++) {
+      const point = ring[j]!;
+      if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) {
+        throw new Error(`cam: non-finite coordinate in ${op} at ring ${i} point ${j}`);
+      }
+    }
+  }
+}
+
+/** A pure boolean on `Polygons`, the same injected-kernel contract `OffsetFn` uses. */
+export type BooleanFn = (a: Polygons, b: Polygons) => Polygons;
+
+/**
+ * `a ∪ b`, via Clipper2's own union (`CrossSection.union`, Positive fill) — never hand-rolled.
+ * #959's #961 review, finding 3: an OPEN pocket node's region needs extending across its open
+ * edge before `pocketLoops` sees it (the node's own boundary there is not a real wall), and that
+ * needs a real boolean, not another offset call.
+ *
+ * #1024 — BOTH OPERANDS ARE CONVERTED HERE, AND OURS TO FREE. Handed a POLYGON LIST, the glue's
+ * `cross(other)` builds a temporary CrossSection for that operand and never deletes it (#1022
+ * freed the vectors inside a conversion, not that object): ~16 KB per boolean against a
+ * 654-vertex operand, and per CELL in #1020's predicate — the leak that drove the wasm into its
+ * 4,096 MB cap. Passing handles keeps `cross` a no-op, and we delete both with the result.
+ */
+export function makeClipperUnion(tl: ManifoldToplevel): BooleanFn {
+  const CS = tl.CrossSection;
+  return (a, b) => {
+    if (a.length === 0) return b;
+    if (b.length === 0) return a;
+    assertFinitePolygons(a, 'union');
+    assertFinitePolygons(b, 'union');
+    // #1024 (E's review) — EACH HANDLE IS FREED ON BOTH PATHS: a throw from the second conversion,
+    // the boolean or `toPolygons` must not leak what exists by then. The nested-finally shape is
+    // `engraveGenerate.ts`'s `intersectionArea`'s, with the second conversion inside the first
+    // handle's try (it can throw before `cb` is assigned).
+    const ca = CS.ofPolygons(a);
+    try {
+      const cb = CS.ofPolygons(b);
+      try {
+        const out = CS.union(ca, cb);
+        try {
+          return out.toPolygons() as Polygons;
+        } finally {
+          out.delete();
+        }
+      } finally {
+        cb.delete();
+      }
+    } finally {
+      ca.delete();
+    }
+  };
+}
+
+/** `a \ b`, via Clipper2's own subtract (`CrossSection.subtract`). See {@link makeClipperUnion}. */
+export function makeClipperSubtract(tl: ManifoldToplevel): BooleanFn {
+  const CS = tl.CrossSection;
+  return (a, b) => {
+    if (a.length === 0 || b.length === 0) return a;
+    assertFinitePolygons(a, 'subtract');
+    assertFinitePolygons(b, 'subtract');
+    // See {@link makeClipperUnion}: every handle freed on the throw path too.
+    const ca = CS.ofPolygons(a);
+    try {
+      const cb = CS.ofPolygons(b);
+      try {
+        const out = ca.subtract(cb);
+        try {
+          return out.toPolygons() as Polygons;
+        } finally {
+          out.delete();
+        }
+      } finally {
+        cb.delete();
+      }
+    } finally {
+      ca.delete();
+    }
   };
 }
 

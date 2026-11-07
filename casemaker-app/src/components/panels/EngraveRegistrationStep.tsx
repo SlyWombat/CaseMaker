@@ -558,6 +558,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         measureSurface(job.id, target, r.spread);
         const store = useEngraveJobStore.getState();
         if (store.job.id === job.id) {
+          const measuredAt = new Date().toISOString();
           store.setStock(
             {
               flatness: {
@@ -565,7 +566,15 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                 yMm: r.spread.drops.yMm,
                 source: 'measured',
                 touchCount: r.spread.touches.length,
-                measuredAt: new Date().toISOString(),
+                measuredAt,
+              },
+              // #943 — the touch set itself, on the job: the facing depth runs from the spread
+              // (highest reading starts the cut, one row step below the lowest is the target), and
+              // a reload must keep what the operator measured, not just the two-drop summary.
+              surfaceTouches: {
+                touches: r.spread.touches.map((t) => ({ id: t.id, x: t.x, y: t.y, z: t.z, at: t.at, source: t.source })),
+                measuredAt,
+                machine: { host: target.host, port: target.port },
               },
             },
             'measured',

@@ -1,5 +1,27 @@
 {
-  "version": 1,
-  "note": "Golden pins for the rebuilt engine's programs (#957-#966). Empty until the engine posts; a case is added only when its program passes the seven-line card, and its regeneration is CASEMAKER_UPDATE_GOLDEN=1 with the landing note naming what moved and why.",
-  "cases": []
+ "version": 1,
+ "note": "Golden pins for the rebuilt engine’s programs (#957-#966): three seeded synthetic parts planned through planPocketsForTree, posted, hashed WITHOUT their ;@MKR|TIME line. Regenerate with CASEMAKER_UPDATE_GOLDEN=1 and a landing note naming the artefact.",
+ "cases": [
+  {
+   "id": "synth-rect-a",
+   "job": "synthetic:rectilinear seed 1",
+   "meshSha256": "b1c9a7c0062eb71576c661eef89fc5bce0257ae7a7490276c9b0bff8a3a38791",
+   "setupIndex": 0,
+   "note": "rectilinear plate, seed 1"
+  },
+  {
+   "id": "synth-rect-b",
+   "job": "synthetic:rectilinear seed 3",
+   "meshSha256": "e70913a9c6e7c2502bf74e766cbd390feec687eebc64368098b879c9b4fc1123",
+   "setupIndex": 0,
+   "note": "rectilinear plate, seed 3"
+  },
+  {
+   "id": "synth-fillet-a",
+   "job": "synthetic:filleted seed 2",
+   "meshSha256": "732ddb20cddbe6c1e8015d9ef13d192b0b7026b907a2d0c237ce4e8a5ea1be8d",
+   "setupIndex": 0,
+   "note": "filleted pockets, seed 2"
+  }
+ ]
 }

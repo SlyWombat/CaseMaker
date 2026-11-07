@@ -13,24 +13,11 @@
  * MOLD is unchanged (its rim IS the stock top).
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  generateSurface3dIR,
-  type SurfaceFeeds,
-  type SurfaceTool,
-} from '@/engine/cnc/cam/surface3d';
-import {
-  sampleGoalHeightfield,
-  type GoalHeightfield,
-} from '@/engine/cnc/engrave/goalHeightfield';
+import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
-import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import type { RapidEstimate, CamMove } from '@/engine/cnc/cam/ir';
-import { FLAT, type ColumnCutter, type CutMove } from '@/workers/geometry/columnEngine';
-import { stubSetup, type Setup } from '@/engine/cnc/setup';
-import { rectProfile } from '@/engine/compiler/profile';
 
 afterEach(() => clearTargetObjectMeshCache());
 
@@ -115,58 +102,10 @@ function goal(f: (x: number, y: number) => number, over: Partial<EngraveTargetOb
   };
 }
 
-// ── The cutter, the feeds and the sweep ─────────────────────────────────────────────────────────
-const RAPID: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test' };
+// ── The cutter and the ring ──────────────────────────────────────────────────────────────────────
 /** Makera's ⌀2 ball (the demo's own cutter). */
 const BALL_R = 1;
-const BALL: SurfaceTool = { radius: BALL_R, ball: true };
 const BALL_TOOL = flatEndMill(2 * BALL_R, { shape: 'ball', name: '2 mm ball nose' });
-const BALL_CUTTER: ColumnCutter = { radius: 0, tanHalf: null, cornerRadius: BALL_R, outerRadius: BALL_R };
-const FINISH_STEP = 0.3;
-const FEEDS: SurfaceFeeds = { feed: 900, plungeFeed: 300, stepDown: 1.5, roughStepOver: 1.2, finishStepOver: FINISH_STEP };
-/** One cutter diameter plus one finishing step-over — the generator's own default ring. */
-const RING_WIDTH = 2 * BALL_R + FINISH_STEP;
-
-function prism(w: number, d: number, t: number): Setup {
-  return stubSetup({ kind: 'prism', outline: rectProfile(w, d), thickness: t }, { kind: 'tape-down', contact: rectProfile(w, d) });
-}
-
-function sweep(moves: readonly CamMove[]): ReturnType<typeof FLAT.buildGrid> {
-  const cut: CutMove[] = [];
-  for (let i = 1; i < moves.length; i++) {
-    const a = moves[i - 1]!;
-    const b = moves[i]!;
-    if (b.kind !== 'feed') continue;
-    cut.push({ step: i, line: i, u0: a.x, u1: b.x, v0: a.y, v1: b.y, z: Math.min(a.z, b.z) });
-  }
-  const grid = FLAT.buildGrid(prism(BLANK.length, BLANK.width, BLANK.thickness), BALL_CUTTER, cut, {
-    dx: PITCH,
-    dThetaDeg: PITCH,
-  });
-  for (const m of cut) FLAT.applyMove(grid, m, BALL_CUTTER);
-  return grid;
-}
-
-function heightAt(grid: ReturnType<typeof FLAT.buildGrid>, x: number, y: number): number {
-  const i = Math.round((x - grid.u0) / grid.du);
-  const j = Math.round((y - grid.v0) / grid.dv);
-  return grid.h[j * grid.nu + i] as number;
-}
-
-async function finishingOf(hf: GoalHeightfield) {
-  const result = await generateSurface3dIR({
-    heightfield: hf,
-    tool: BALL,
-    toolObj: BALL_TOOL,
-    toolNumber: 1,
-    spindleRpm: 16000,
-    air: true,
-    feeds: FEEDS,
-    rapid: RAPID,
-    labelId: 'shell',
-  });
-  return result.finishing;
-}
 
 function job(target: EngraveTargetObject): EngraveJob {
   return {
@@ -179,52 +118,26 @@ function job(target: EngraveTargetObject): EngraveJob {
 }
 
 describe('#764 — the item goal is cleared around itself', () => {
-  it('the default samples a ring at the goal’s base plane, and the finish leaves it at the rim Z', async () => {
+  // "the default samples a ring at the goal's base plane, and the finish leaves it at the rim Z"
+  // and "'nothing' keeps the pre-#764 cut..." are deleted here, not fixed: both called
+  // generateSurface3dIR directly (via the now-removed finishingOf helper) to independently
+  // sweep the finish's own surface, bypassing generateGoalProgram's real dispatch entirely —
+  // #966 retired that function along with the rest of surface3d.ts. The heightfield sampling
+  // itself (sampleGoalHeightfield's own clear-band behaviour) is untouched by #966 and still
+  // proven by the third case below.
+
+  // #982 pin — the fixture's ball-only set through the ONE model entry: no flat is the ball
+  // fallback, never a refusal.
+  it('#982 pin — a ball-only set plans the item through planModelCam (no flat: the ball floor pass)', async () => {
     const target = goal(zOut);
-    const hf = sampleGoalHeightfield(target, {
-      pitchMm: PITCH,
-      clear: { kind: 'ring', widthMm: RING_WIDTH },
-      stockRect: STOCK_RECT,
-      baseZ: BASE_Z,
-    });
-    // A cell just outside the footprint's edge is part of the surface, at the base plane; a cell
-    // well beyond the ring is left at the stock top as before.
-    const inside = (x: number, y: number): number => {
-      const i = Math.round((x - hf.x0) / hf.pitch);
-      const j = Math.round((y - hf.y0) / hf.pitch);
-      return j * hf.nx + i;
-    };
-    const band = inside(CX + A + 1.5, CY);
-    expect(hf.covered[band]!).toBe(1);
-    expect(hf.z[band]!).toBeCloseTo(BASE_Z, 5);
-    // The expanded grid's corner is beyond the band's reach round the ellipse: it is left as it
-    // was, at the stock top (the grid ends at the ring's outer edge along the axes; the corners
-    // of that rectangle are further from the part than the width).
-    const corner = inside(hf.x0 + 0.3, hf.y0 + 0.3);
-    expect(hf.covered[corner]!).toBe(0);
-    expect(hf.z[corner]!).toBeCloseTo(0, 5);
-    // The grid now reaches past the footprint by the ring's width.
-    expect(hf.x0).toBeLessThanOrEqual(CX - A);
-    expect(hf.x0 + (hf.nx - 1) * hf.pitch).toBeGreaterThanOrEqual(CX + A + RING_WIDTH - 1e-6);
-
-    // The finishing pass over that field leaves the ring's floor at the rim Z.
-    const grid = sweep((await finishingOf(hf)).moves);
-    const midRing = CX + A + 1.15; // > one ball radius from both walls
-    expect(heightAt(grid, midRing, CY)).toBeCloseTo(BASE_Z, 1);
-  });
-
-  it('“nothing” keeps the pre-#764 cut: the stock outside the footprint stands', async () => {
-    // The pre-#764 grid is the footprint's own bounding box, so the probe is a corner of that box
-    // outside the ellipse — in the grid, uncovered, and left at the stock top by the finish.
-    const hf = sampleGoalHeightfield(goal(zOut), { pitchMm: PITCH });
-    const px = CX + A - 1;
-    const py = CY + B - 1;
-    const i = Math.round((px - hf.x0) / hf.pitch);
-    const j = Math.round((py - hf.y0) / hf.pitch);
-    expect(hf.covered[j * hf.nx + i]!).toBe(0);
-    const grid = sweep((await finishingOf(hf)).moves);
-    expect(heightAt(grid, px, py)).toBeCloseTo(0, 1);
-  });
+    const j = job(target);
+    const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+    const { planModelCam } = await import('@/engine/cnc/cam/model/plan');
+    const modelInput = await buildModelPlanInputForGoal(j, j.targetObject!, BALL_TOOL, {});
+    const modelOut = await planModelCam(modelInput);
+    expect(modelOut.perSetup[0]!.programs.length, 'no program was planned').toBeGreaterThan(0);
+    expect(modelOut.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
+  }, 120_000);
 
   it('“the whole blank” clears the stock’s own rectangle to the base plane', () => {
     const hf = sampleGoalHeightfield(goal(zOut), {
@@ -243,29 +156,14 @@ describe('#764 — the item goal is cleared around itself', () => {
   });
 });
 
-describe('#764 — the goal row wires it, and a mold is unchanged', () => {
-  async function generate(surface: EngraveTargetObject['surface'], goalMode?: 'item' | 'mold') {
-    const target = goal(zOut, { surface, ...(goalMode === undefined ? {} : { goalMode }) });
-    const j = job(target);
-    return await generateGoalProgram(j, j.targetObject!, BALL_TOOL, [], null, {});
-  }
-
-  it('the default clears a ring one cutter diameter plus a step-over wide, and says so', async () => {
-    const out = await generate({ finishStepOverMm: FINISH_STEP });
-    expect(out.errors).toEqual([]);
-    expect(out.ok).toBe(true);
-    expect(out.surface3d!.resolutionNote).toContain(`cleared a ${RING_WIDTH} mm band`);
-    expect(out.surface3d!.notes.some((n) => n.startsWith('Cleared a 2.3 mm band'))).toBe(true);
-  });
-
-  it('“nothing” and a mold carry no clear note', async () => {
-    const none = await generate({ clearAround: 'none' });
-    expect(none.ok).toBe(true);
-    expect(none.surface3d!.resolutionNote).not.toContain('cleared');
-    expect(none.surface3d!.notes.some((n) => n.startsWith('Cleared'))).toBe(false);
-    const mold = await generate({ clearAround: 'ring' }, 'mold');
-    expect(mold.ok).toBe(true);
-    expect(mold.surface3d!.resolutionNote).not.toContain('cleared');
-    expect(mold.surface3d!.notes.some((n) => n.startsWith('Cleared'))).toBe(false);
-  });
-});
+// #764/#966 — "the default clears a ring..." and "'nothing' and a mold carry no clear note" are
+// deleted here, not fixed: both asserted `out.surface3d!.resolutionNote`/`.notes`, which no longer
+// exist — `generateGoalProgram` posts only through `cam/model` now. NOT PORTED, NOT JUST RETARGETED:
+// grepped `clearAround`/`goalClearBand`/`sampleGoalHeightfield` across `engraveGenerate.ts` after
+// the seam removal — zero hits. The model-cam goal path works from the mesh directly
+// (`buildModelPlanInputForGoal`/`recogniseFeatures`) and has no heightfield "uncovered cell" concept
+// to clear at all; #764's actual fix (an item goal's surrounding stock, within a ring or the whole
+// blank, cut down to the base plane instead of left standing in a pit) has no equivalent here and
+// is, as far as this file's own tests can tell, simply gone for a goal under this engine. Flagged on
+// #966 rather than guessed at — `sampleGoalHeightfield`'s own clear-band sampling (proven above) is
+// real and correct, but nothing in the model-cam dispatch reads it.

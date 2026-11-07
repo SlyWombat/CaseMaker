@@ -121,6 +121,15 @@ export function executeOpSync(
         op.center ?? false,
       );
     case 'mesh': {
+      // #1029 — a user file's vertices reach this case through an external union/subtract
+      // asset, and `deduplicateMesh` passes NaN/±Infinity through; the kernel traps on them
+      // and the whole worker instance dies. Refuse by name instead, so the op fails with a
+      // sentence and the instance lives.
+      for (let i = 0; i < op.positions.length; i++) {
+        if (!Number.isFinite(op.positions[i]!)) {
+          throw new Error(`cam: non-finite coordinate in a mesh build op at vertex ${Math.floor(i / 3)}`);
+        }
+      }
       const dedup = deduplicateMesh(op.positions, op.indices);
       const meshObj = new tl.Mesh({
         numProp: 3,

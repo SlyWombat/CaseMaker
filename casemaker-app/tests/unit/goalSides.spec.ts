@@ -147,6 +147,11 @@ describe('#723 P2-1b — the sides reading', () => {
 });
 
 describe('#723 P2-1b — one program per side', () => {
+  // #1032 — PROMOTED FROM `it.fails`. The marker was written at #966's triage (#1006: the seam
+  // planned the job's goal once from geometry and programs carried no setup). By this tip the
+  // seam posts one program per side, and #1032's registry-key stamping made the LAST failing
+  // assertion hold too (`programs[0].toolKey === job.toolKey`) — every assertion below passes, so
+  // the known red is gone. A future failure here is a regression, not an expected state.
   it('generates a surface program for each side, in setup order, with its setup on the program', async () => {
     const job = twoSideJob();
     expect(jobHasItems(job), 'the fixture must be a pure-goal job').toBe(false);
@@ -189,6 +194,7 @@ describe('#723 P2-1b — one program per side', () => {
     expect(validateJob(job, null, { tool: BALL }).some((f) => f.code === 'tool-missing')).toBe(false);
   });
 
+  // #1006 fixed this: the seam now reads the job's saved sides.
   it('a single goal on a job with setups is cut in the first setup — the one-goal compatibility path', async () => {
     const job = twoSideJob();
     job.targetObjects = [goal('goal-out', 10)];

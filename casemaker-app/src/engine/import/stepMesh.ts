@@ -39,7 +39,24 @@ export interface StepMesh {
   mesh: ParsedMesh;
   /** How many bodies the kernel found; 1 for a single solid. */
   parts: number;
+  /**
+   * #958 — per triangle, the B-rep face it came from (occt-import-js `brep_faces`), unique across
+   * bodies. Feature recognition groups by it: one face, one patch. `undefined` when the kernel
+   * reported no face ranges, or they do not cover every triangle.
+   */
+  faceId?: Uint32Array;
 }
+
+/**
+ * How finely the kernel tessellates. `'display'` keeps the kernel's own defaults (the app's import
+ * door since #774). `'recognition'` is #958 §2's read: an ABSOLUTE 0.01 mm chord, because the
+ * default (0.001 × the bounding box's mean size: ≈ 0.09 mm on the tool tray, 0.12 mm on the
+ * organizer) already breaks the 0.1 mm line on curved walls.
+ */
+export type StepTessellation = 'display' | 'recognition';
+
+/** #958 §2 — the recognition read's chord, mm. */
+export const RECOGNITION_LINEAR_DEFLECTION_MM = 0.01;
 
 export interface StepMeshRead extends StepMesh {
   /**
@@ -86,7 +103,7 @@ const why = (e: unknown): string => (e instanceof Error ? e.message : String(e))
  * Read a STEP file and return the merged mesh. Never returns a malformed result; every refusal is
  * an `Error` whose message is a sentence the importer shows after the file's own name.
  */
-export async function stepToMesh(bytes: ArrayBuffer): Promise<StepMesh> {
+export async function stepToMesh(bytes: ArrayBuffer, tessellation: StepTessellation = 'display'): Promise<StepMesh> {
   let occt: Kernel;
   try {
     occt = await loadKernel();
@@ -96,10 +113,14 @@ export async function stepToMesh(bytes: ArrayBuffer): Promise<StepMesh> {
 
   let result: import('occt-import-js').OcctReadResult;
   try {
-    // `null` params keep the kernel's own defaults: bounding-box-ratio linear deflection and a
-    // 0.3 rad angular deflection, which is the tolerance its examples use and is finer than the
-    // app's own heightfield sampling needs at every pitch it offers.
-    result = occt.ReadStepFile(new Uint8Array(bytes), null);
+    // 'display' passes `null`: the kernel's own defaults, a bounding-box-ratio linear deflection
+    // (0.001) and a 0.5 rad angular deflection (`js-interface.cpp`; this comment said 0.3 before
+    // #958 checked it). 'recognition' asks for an absolute 0.01 mm chord (#958 §2).
+    const params =
+      tessellation === 'recognition'
+        ? { linearUnit: 'millimeter', linearDeflectionType: 'absolute_value', linearDeflection: RECOGNITION_LINEAR_DEFLECTION_MM, angularDeflection: 0.5 }
+        : null;
+    result = occt.ReadStepFile(new Uint8Array(bytes), params);
   } catch (e) {
     throw new Error(`the CAD kernel could not read the file as STEP data (${why(e)})`, { cause: e });
   }
@@ -117,6 +138,10 @@ export async function stepToMesh(bytes: ArrayBuffer): Promise<StepMesh> {
   }
   const positions = new Float32Array(vertexCount * 3);
   const indices = new Uint32Array(indexCount);
+  // #958: the B-rep face of every triangle, numbered across bodies. Dropped (undefined) if any
+  // body's ranges leave a triangle uncovered, rather than guessing.
+  let faceId: Uint32Array | undefined = new Uint32Array(indexCount / 3).fill(0xffffffff);
+  let faceBase = 0;
   let minX = Infinity;
   let minY = Infinity;
   let minZ = Infinity;
@@ -145,6 +170,15 @@ export async function stepToMesh(bytes: ArrayBuffer): Promise<StepMesh> {
     }
     const index = m.index.array;
     for (let i = 0; i < index.length; i++) indices[iBase + i] = vBase + (index[i] as number);
+    if (faceId !== undefined) {
+      const faces = m.brep_faces ?? [];
+      const triBase = iBase / 3;
+      const triCount = Math.floor(index.length / 3);
+      faces.forEach((face, f) => {
+        for (let t = face.first; t <= face.last && t < triCount; t++) faceId![triBase + t] = faceBase + f;
+      });
+      faceBase += faces.length;
+    }
     vBase += count;
     iBase += index.length;
   }
@@ -155,14 +189,19 @@ export async function stepToMesh(bytes: ArrayBuffer): Promise<StepMesh> {
     triangleCount: Math.floor(indices.length / 3),
     bbox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
   };
-  return { mesh, parts: meshes.length };
+  if (faceId !== undefined && faceId.includes(0xffffffff)) faceId = undefined;
+  return faceId === undefined ? { mesh, parts: meshes.length } : { mesh, parts: meshes.length, faceId };
 }
 
 /**
  * The same read, plus the binary STL the goal door stores. The stock door takes {@link stepToMesh}
  * alone — it keeps a size, never the bytes — so it does not pay for a file it would throw away.
+ *
+ * #991 — the door reads at `'recognition'`: the app's plan classifies the same mesh the cards do
+ * (whole B-rep faces), so the stored mesh and its `faceId` must be the recognition read, not the
+ * kernel's coarser display defaults.
  */
-export async function stepToStl(bytes: ArrayBuffer): Promise<StepMeshRead> {
-  const read = await stepToMesh(bytes);
+export async function stepToStl(bytes: ArrayBuffer, tessellation: StepTessellation = 'display'): Promise<StepMeshRead> {
+  const read = await stepToMesh(bytes, tessellation);
   return { ...read, stl: buildBinaryStl([read.mesh]) };
 }

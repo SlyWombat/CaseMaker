@@ -1,7 +1,6 @@
 import { featureSim } from '@/platform/features';
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type JSX, type ReactNode, type RefObject } from 'react';
 import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/engraveJobStore';
-import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
 import { useEngraveRunStore, firstRunError, gateViewFor, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker, type EngraveRunState } from '@/store/engraveRunStore';
@@ -19,8 +18,6 @@ import { stepAtLine } from '@/engine/cnc/playbackClock';
 import { EngraveCutSurface } from './EngraveCutSurface';
 import { saveEngraveProgram, saveText } from '@/engine/exportTrigger';
 import { buildSimStallReport, simStallReportFileName } from '@/engine/jobs/simStallReport';
-import { lastPoolSizing } from '@/engine/jobs/adaptivePool';
-import { PoolTechnicalLine } from './PoolTechnicalLine';
 import { flightCrumbs } from '@/platform/flightRecorder';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
@@ -36,11 +33,11 @@ import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds'
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
 import { TOOL_GROUPS, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
-import { setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/engrave/substitution';
+import { setupSubstitutionOfferSentence, setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/engrave/substitution';
 import { useHouseStore } from '@/store/houseStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { planFlipSetups, splitGoalForBudget } from '@/engine/cnc/engrave/goalFlipSetups';
+import { planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
 import { jobFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { jobTopFaceCached, NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { millModelById, workOriginOf } from '@/engine/cnc/machine';
@@ -58,15 +55,12 @@ import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { efficiencyThresholds, readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
-import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobMount, jobSetups, jobTargetObjects, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobMount, jobSetups, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 // #835 — one setup's own work, measured and written back into that setup only.
 import { deadSetupKeys, replacementCutter } from '@/engine/cnc/engrave/setupWork';
 import { measureFingerprint } from '@/engine/cnc/engrave/measuredPick';
 import { jobReachFindings } from '@/engine/cnc/engrave/goalReach';
 import { toolForIn, toolForJob } from '@/engine/cnc/toolRegistry';
-// #786 slice 6 — the simulator's own cutter resolver, the one `columnSweep` asks before it sweeps:
-// the panel reads the SAME answer to decide that a refused cutter must be substituted.
-import { columnCutterFor } from '@/workers/geometry/columnEngine';
 import { bedUnderFacts, machineForJob, switchActiveProfile } from '@/platform/bedProfiles';
 import { vDepthLimit } from '@/engine/cnc/vProfile';
 // #513 — the bed a job was set up on: binding, version diff and the findings that say so.
@@ -94,7 +88,7 @@ import {
   primitiveReducesToRegion,
   voidLimitForItem,
 } from '@/engine/cnc/engrave/partPlan';
-import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, labelFontsLoaded } from '@/engine/fonts/registry';
+import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, facesLoadedEpoch, labelFontsLoaded, subscribeFacesLoaded } from '@/engine/fonts/registry';
 import { buildRunSheet, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { buildRunRecord, isMeasuredRun, runSeconds, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
@@ -191,7 +185,6 @@ import type {
   EngraveChamfer,
   EngraveDrill,
   EngraveJob,
-  EngraveJobSubstitution,
   EngraveSetupSubstitution,
   EngraveKeepOut,
   EngraveLabel,
@@ -1071,6 +1064,9 @@ export function EngravePanel(): JSX.Element {
   // `labelGlyphMeasure` is synchronous and reads the registry, so a re-render is the whole of it. The
   // seed paths (`useBadgeBlank`/`useBlankStock`) await the same call, so neither relies on this race.
   const [, bumpFacesLoaded] = useState(0);
+  // #1035 item 9 — the REACTIVE half of the same wait: the preflight memo below re-runs when a
+  // face lands, so a gate computed from the estimate is replaced by the measured one.
+  const facesEpoch = useSyncExternalStore(subscribeFacesLoaded, facesLoadedEpoch);
   useEffect(() => {
     // The ordinary case is that they are already up (every render after the first, and every test),
     // and then this render's numbers are final: no fetch, no bump, no second render. Only a cold
@@ -2013,53 +2009,6 @@ export function EngravePanel(): JSX.Element {
     void generate();
   };
 
-  /**
-   * #785 follow-up — the too-big refusal's one press. It writes the pitch the refusal suggested
-   * onto the goal's own grid setting (so the job says what it will be cut at, and the result stays
-   * current), then presses Generate — the operator already chose, by pressing.
-   */
-  const generateAtPitch = (finding: JobFinding): void => {
-    const pitch = finding.suggestedPitchMm;
-    if (pitch === undefined) return;
-    updateTargetObject({ surface: { gridPitchMm: pitch } });
-    void generate();
-  };
-
-  /**
-   * #832 — the budget's OTHER press: raise the step-down to the number the finding states, and
-   * Generate in the same click. The moves fall with the step-down exactly as they do with the
-   * pitch, so this is the same kind of choice, not a hint.
-   */
-  const generateAtStepDown = (finding: JobFinding): void => {
-    const stepDown = finding.suggestedStepDownMm;
-    if (stepDown === undefined) return;
-    updateTargetObject({ surface: { roughStepDownMm: stepDown } });
-    void generate();
-  };
-
-  /**
-   * #888 — THE SPLIT PRESS DOES THE SPLIT. The finding's `suggestedSplit` was computed with the
-   * generator's own move model (both bands under the budget), so this builds the two sides the
-   * sentence promised — the goal cut as a top band and a bottom band from its flipped side,
-   * registered on the same dowel holes #872's plan uses — writes them as the job's setups, and
-   * presses Generate. A plan the setups engine refuses is stated beside the goal, never half
-   * written. The press is not drawn at all when no split fits (the finding carries no numbers).
-   */
-  const splitForBudget = (finding: JobFinding): void => {
-    const split = finding.suggestedSplit;
-    if (split === undefined) return;
-    const goal = jobTargetObjects(job).find((g) => g.id === finding.targetId) ?? job.targetObject;
-    if (goal === undefined) return;
-    const result = splitGoalForBudget(job, goal, split);
-    if (!result.ok) {
-      setTargetError(result.reason);
-      return;
-    }
-    setSetups(result.setups);
-    for (const side of result.goals) setSideGoal(side.setupId!, side);
-    void generate();
-  };
-
   // #673 — THE INLAY HALF: the derived plug numbers (null when they do not derive) and the action
   // that saves the MALE blank as its own job. The action is offered only when the female's job has
   // no blocking finding — a male built from a job that cannot cut would be a second broken job.
@@ -2168,7 +2117,17 @@ export function EngravePanel(): JSX.Element {
   // otherwise be re-applied on every render — and each write marks a generated job stale. Comparing
   // both is also the "equal answer writes nothing" rule.
   const measuredSetup = job.setups?.[0];
-  const measuredApplied =
+  // #1035 — TWO FACTS, TWO NAMES. `measuredCarried`: the document ALREADY carries the measured
+  // plan (a saved job, the evaluator's write, or this panel's own press) — the press would write
+  // nothing, so the offer must not appear (the #766 "equal answer writes nothing" rule; a reopened
+  // saved job must not re-offer a no-op). `measuredApplied`: the operator PRESSED this answer in
+  // this panel — the marker records the pressed answer's jobKey — AND the document still carries
+  // it. Only then do the 'chosen by simulation' words and the fidelity line appear: #1010 says
+  // those words describe the pressed state, and #798 pins that a coincidental match keeps
+  // 'recommended'. The marker is panel-local, so a reload falls back to 'recommended' with no
+  // offer — the reload case is pinned in engraveMeasuredPickPanel's spec.
+  const [pressedMeasuredKey, setPressedMeasuredKey] = useState<string | null>(null);
+  const measuredCarried =
     measuredNow !== null &&
     job.toolKey === measuredNow.cutters[0]?.key &&
     // #829 — a goal's second cutter is its chamfer's V-bit; the plan is applied only when the
@@ -2176,200 +2135,68 @@ export function EngravePanel(): JSX.Element {
     (job.targetObject?.chamfer === undefined ||
       measuredNow.cutters[1] === undefined ||
       job.targetObject.chamfer.toolKey === measuredNow.cutters[1].key) &&
-    // #869 — the goal's rough is the plan's own decision: the applied answer must be the one the
-    // goal carries, and a plan with no rough matches only a goal with none.
-    (job.targetObject?.roughToolKey ?? null) === (measuredNow.goalRoughKey ?? null) &&
+    // #869/#999 — the goal's rough is the plan's own decision, and the three states are distinct:
+    // a plan with no rough (ball alone) matches a goal stating `null`, never an ABSENT key (which
+    // now means the engine chooses), and a named key matches itself. #1035 — the clause is a
+    // GOAL's rule: a job with no target object has no rough to compare, and `undefined === null`
+    // kept `measuredApplied` false forever, so the offer never retired after its own press and the
+    // fidelity line never showed.
+    (job.targetObject === undefined || job.targetObject.roughToolKey === (measuredNow.goalRoughKey ?? null)) &&
     (measuredSetup?.tools ?? []).length === measuredNow.cutters.length &&
     (measuredSetup?.tools ?? []).every((k, i) => k === measuredNow.cutters[i]?.key) &&
     measuredNow.cutters.every((c) => {
       const owned = measuredSetup?.toolItems?.[c.key] ?? [];
       return owned.length === c.items.length && owned.every((id, i) => id === c.items[i]);
     });
-  // #786 slice 4c — A DRILL BIT OR THREAD MILL THE OPERATOR NAMED KEEPS ITS JOB AND GAINS THE
-  // CUTTER THE OTHER WORK NEEDS. The guard above still holds for every plan that would REPLACE
-  // their cutter, but the measured search's split KEEPS it: the named cutter is first and owns
-  // exactly its own holes/threads, and the flat (or the kind plan's cutters) take the rest. That
-  // is the operator's own decision carried out, so it is applied like a computed answer.
-  const namedNow = jobTool(job);
-  const namedSplit =
-    measuredNow !== null &&
-    measuredNow.cutters.length > 1 &&
-    // #848 — the named thread mill is LAST when the plan raises its boss first; it is still kept.
-    measuredNow.cutters.some((c) => c.key === job.toolKey) &&
-    namedNow !== null &&
-    (namedNow.shape === 'drill' || namedNow.shape === 'thread');
-  // #786 slice 4c-2 — A MISSING OR REFUSED CUTTER IS REPLACED BY THE SEARCH'S ANSWER. The guard
-  // above protects a decision that still holds; a key the library does not hold, or a cutter no
-  // CAM here can use on this job (a ball in a region job, no feeds row for this material), holds
-  // no usable decision to protect — and the measured plan is exactly the answer to that question.
-  // A 'values' refusal is the operator's own override or the machine's limit, not the cutter's
-  // shape: a different cutter is no honest fix for it, so it is left alone.
-  const namedMissing = job.toolKey !== '' && namedNow === null;
-  const namedRefused =
-    namedNow !== null &&
-    namedNow.shape !== 'drill' &&
-    namedNow.shape !== 'thread' &&
-    feeds !== null &&
-    !feeds.ok &&
-    feeds.cause !== 'values';
-  // #835 — THE JOB'S FRAME, as the sweep reads it: a wrapped job's column grid has one radius per
-  // (θ, X) column, so the rotary parameterisation is part of the cutter's own predicate.
-  const rotaryHeld = rotaryMapOf(job) !== null;
-  // #786 slice 6 — `tool-refused` AND `setup-rest-unavailable` ANSWER THE SAME QUESTION AS A
-  // MISSING KEY. Both are computed here, in the effect, because both read `measuredNow` and the
-  // panel's own shop readings — a fresh object each render would otherwise re-run the effect on
-  // every keystroke.
+  // #1035 — the pressed words, and their guard (see the marker's note above): the ANSWER this
+  // panel pressed, while the document still carries it.
+  const measuredApplied = measuredNow !== null && measuredCarried && pressedMeasuredKey === measuredNow.jobKey;
+  // #1010 (the maintainer's 2026-11-05 ruling) — THE MEASURED AUTO-APPLY IS RETIRED. The panel
+  // used to write a measured answer into the job behind the operator: the plain pick (#766 D), the
+  // named-drill split (#786 4c) and the missing/refused substitutions (#786 4c-2 / slice 6). That
+  // silently changed the cutter the job carries, and the shipped contract is the opposite: the
+  // OWNED plan is the default, the ideal and its tradeoff are printed per run, and the operator
+  // records a choice (`setPlanChoice`) — the measured answer is OFFERED, and applying it is the
+  // press (`engrave-use-measured`, still below). The effect also re-applied itself through its own
+  // job write — the live "Maximum update depth exceeded" in the computed-job/no-run state — which
+  // this retirement removes with it. `measuredApplied` still describes the pressed state, so the
+  // fidelity line keeps appearing exactly when the operator applied the measured plan.
+  // #1010 (the maintainer's 2026-11-06 ruling) — A SETUP'S DEAD CUTTER IS OFFERED, NOT
+  // SUBSTITUTED. #835 wrote a setup's measured answer into that setup behind the operator — the
+  // same act the job-level auto-apply committed, one level down. The document now keeps what the
+  // operator wrote at both levels: the answer is OFFERED beside the cutter line, the press is the
+  // write, and the substitution record is made only then. The offers are DERIVED (no effect, no
+  // write), so they cannot re-apply themselves, and one appears only for the job content the
+  // answer was measured on and only while a key it was measured for is still dead in that setup.
   //
-  //   - `tool-refused`: a record the CAM cannot model (a V with no tip or angle, a drill or thread
-  //     mill with no cutting diameter, a shape with no profile), and — #835 — a shape the ROTARY
-  //     parameterisation has no profile for (a drill, a bull nose or a thread mill on a wrapped
-  //     job). The predicate is the simulator's OWN resolver, `columnCutterFor` — the check
-  //     `columnSweep` makes before it sweeps — handed the run's own drill default and the job's
-  //     frame, so the panel and the run cannot disagree about which records are refused.
-  //   - `setup-rest-unavailable`'s "not on this bench": a setup's LATER cutter key that resolves to
-  //     nothing. `applyCutterPlanToJob` rewrites the FIRST setup's cutters, so only a missing key
-  //     there is answered here — one in a later setup keeps the finding's own sentence rather than
-  //     a half-fix — and the plan is applied only when it KEEPS the operator's cutter as program
-  //     1: a rest pass was missing, not the cutter they chose.
-  useEffect(() => {
-    const source = job.sources?.tool;
-    // #743 P-8 — a BOARD ARRIVES WITH ITS PLAN. The import writes each role's cutter (§3.4) and
-    // records it as the catalogue's answer; the background search below plans one held position
-    // with one cutter chain and cannot express a board's engraver + drills + flat, so it must not
-    // replace that plan. A person's or a measured plan is left alone for the same reason (#516) —
-    // except that #786 4c's named split KEEPS the named cutter and adds the rest, so it may be
-    // applied over a user or measured pick, and 4c-2/slice 6 substitute a missing, refused or
-    // unmodellable one.
-    if (source === 'catalogue') return;
-    const firstSetupTools = jobSetups(job)[0]?.tools ?? [];
-    const missingRestKey =
-      firstSetupTools.slice(1).find((key) => key !== job.toolKey && toolForIn(tools, key) === null) ?? null;
-    // #835 — the ROTARY frame is part of the question: a drill, bull or thread on a wrapped job is
-    // refused by the sweep exactly as a shapeless record is on a flat one, so it is substituted by
-    // the same measured answer and the sentence names the cutter that now sweeps it.
-    const simRefused =
-      namedNow !== null &&
-      !columnCutterFor(
-        namedNow,
-        { deg: drillShop.settings.pointAngleDeg, source: drillShop.sources.pointAngleDeg },
-        { rotary: rotaryHeld },
-      ).ok;
-    const restSubstitutable =
-      missingRestKey !== null &&
-      measuredNow !== null &&
-      (job.toolKey === '' || measuredNow.cutters[0]?.key === job.toolKey);
-    const restCase =
-      restSubstitutable && !namedMissing && !namedRefused && !simRefused;
-    const substituteNamed = measuredNow !== null && (namedMissing || namedRefused || simRefused || restCase);
-    if ((source === 'user' || source === 'measured') && !namedSplit && !substituteNamed) return;
-    // #516 item 5 — the first recommendation lands on the first edit or Generate, not on load: a
-    // clean (just-opened or just-saved) tool-less document keeps its empty key, so opening a saved
-    // job does not immediately dirty it.
-    if (job.toolKey === '' && !useEngraveJobFileStore.getState().dirty) return;
-    // #766 REGRESSION — A GENERATED JOB IS NEVER EDITED BY A BACKGROUND ANSWER. The measured
-    // search runs behind the panel and can answer AFTER Generate; writing its plan then made the
-    // job's own program stale the instant it was made — the Cut surface's first blocking row said
-    // "The job changed since it was generated" with nothing the operator did. While a run exists
-    // and still matches the job (or is still in flight) the answer is OFFERED — "Use the
-    // recommendation" is drawn while `measuredApplied` is false — and applying it is a press, whose
-    // stale row is then the operator's own edit. With no current result the old behaviour stands:
-    // the answer follows the design as it is edited.
-    const runNow = useEngraveRunStore.getState();
-    const runHoldsThisJob = runNow.generated !== null && runNow.staleSince === null;
-    if (runHoldsThisJob || runNow.phase === 'generating' || runNow.phase === 'simulating' || runNow.phase === 'checking') {
-      return;
-    }
-    if (measuredNow !== null) {
-      if (!measuredApplied) {
-        // #786 slice 4c-2 — replacing a cutter the operator CHOSE is recorded, so the finding and
-        // the cutter line can say whose cutter it was, why it could not cut, and what replaced it.
-        // #786 slice 6 — a setup's rest cutter is ALWAYS the operator's document fact (nothing
-        // computes a setup's key), so its replacement is recorded whatever the job's tool source.
-        const said = restCase || (substituteNamed && (source === 'user' || source === 'measured'));
-        if (said) {
-          // A rest pass's missing key is answered by the plan's cutter that is not the job's own
-          // (or the first, when the plan is a single cutter); a refused or missing job cutter by
-          // the plan's first.
-          const toCutter = restCase
-            ? (measuredNow.cutters.find((c) => c.key !== job.toolKey) ?? measuredNow.cutters[0]!)
-            : measuredNow.cutters[0]!;
-          const toKey = toCutter.key;
-          const toEntry = tools.find((e) => e.key === toKey);
-          const reason: EngraveJobSubstitution['reason'] =
-            namedMissing || restCase
-              ? 'missing'
-              : feeds !== null && !feeds.ok && feeds.cause === 'no-feeds' && !simRefused
-                ? 'no-feeds'
-                : 'refused';
-          applyCutterPlan(
-            measuredNow.cutters,
-            'computed',
-            0,
-            {
-              fromKey: restCase ? missingRestKey! : job.toolKey,
-              fromName: restCase
-                ? missingRestKey!
-                : namedNow !== null
-                  ? toolDisplayName(namedNow).split(' · ')[0]!
-                  : job.toolKey,
-              reason,
-              ...(reason === 'no-feeds' ? { material: job.stock.material } : {}),
-              toKey,
-              toName: toEntry !== undefined ? toolDisplayName(toEntry.tool).split(' · ')[0]! : toKey,
-            },
-            measuredNow.goalRoughKey,
-          );
-        } else {
-          applyCutterPlan(measuredNow.cutters, 'computed', 0, undefined, measuredNow.goalRoughKey);
-        }
-      }
-      return;
-    }
-    // #786 slice 4c-2 — a substitution is the MEASURED search's answer, not a provisional rule
-    // pick: while the search re-answers for the edited job, the rule must not undo it. The record
-    // is cleared the moment the operator chooses a cutter, so this only protects the substitute.
-    if (job.substitution !== undefined) return;
-    const key = rec?.key ?? null;
-    if (key === null) return;
-    if (job.toolKey !== key) setTool(key, 'computed');
-  }, [rec?.key, measuredNow, measuredApplied, job.sources?.tool, job.toolKey, job.substitution, job.setups, namedSplit, namedMissing, namedRefused, namedNow, feeds, tools, drillShop, rotaryHeld, job.stock.material, applyCutterPlan, setTool]);
-
-  // #835 — A SETUP'S DEAD CUTTER IS REPLACED BY THAT SETUP'S OWN MEASURED ANSWER. The search
-  // judges one setup at a time, so a multi-setup job's dead keys are measured on the setup each
-  // belongs to (`setupWorkJob`) and the plan is written back into THAT setup only. Applied only
-  // for the job content it was measured on, and never while a run is in flight or a current
-  // result still describes this job — the same guards the job-level substitution keeps. One write
-  // per pass: the write changes the fingerprint, and a remaining setup with a dead key is
-  // measured afresh on the new content.
-  useEffect(() => {
-    if (setupMeasured === null || setupMeasuredJob === null) return;
-    if (setupMeasuredJob !== measureFingerprint(job)) return;
-    const runNow = useEngraveRunStore.getState();
-    if (
-      runNow.phase === 'generating' ||
-      runNow.phase === 'simulating' ||
-      runNow.phase === 'checking' ||
-      (runNow.generated !== null && runNow.staleSince === null)
-    ) {
-      return;
-    }
+  // The search judges one setup at a time, so a multi-setup job's dead keys are measured on the
+  // setup each belongs to (`setupWorkJob`) and the plan is written into THAT setup only. The
+  // fingerprint cannot see a setup's tool list (that is what lets a write-back keep the answer),
+  // so a setup the operator has since re-cut by hand — or a NEW dead key the search never saw —
+  // gets no offer.
+  // #1010 lint fix — the memo stays: this build has no React compiler, so the rule's "dependency
+  // may be modified later" would cost the dead-key walk on every render of the panel.
+  const setupOffers = useMemo(() => {
+    if (setupMeasured === null || setupMeasuredJob === null || setupMeasuredJob !== measureFingerprint(job)) return [];
     const setups = jobSetups(job);
     const nameOf = (key: string): string => {
       const entry = tools.find((e) => e.key === key);
       return entry === undefined ? key : toolDisplayName(entry.tool).split(' · ')[0]!;
     };
+    const offers: {
+      setupIndex: number;
+      sentence: string;
+      cutters: readonly { key: string; items: readonly string[] }[];
+      records: EngraveSetupSubstitution[];
+    }[] = [];
     for (const { setupIndex, forKeys, pick } of setupMeasured) {
       const setup = setups[setupIndex];
       if (setup === undefined || pick.cutters.length === 0) continue;
-      // ONLY THE DEAD KEYS THIS ANSWER WAS MEASURED FOR ARE ANSWERED. The fingerprint cannot see a
-      // setup's tool list (that is what lets a write-back keep the answer), so a setup the
-      // operator has since re-cut by hand — or a NEW dead key the search never saw — is left
-      // exactly as it is.
       const stillDead = deadSetupKeys(job, tools, setupIndex);
       if (!forKeys.some((key) => stillDead.includes(key))) continue;
       const cutters = pick.cutters;
-      // "Applied" is the whole write, as on the job's cutter: a plan whose keys match but whose
-      // item assignment differs would otherwise be re-applied on every render.
+      // A plan already in the setup has nothing to offer — the same "equal answer writes nothing"
+      // rule the job-level press uses, so the offer disappears the moment it is taken.
       const written =
         setup.tools.length === cutters.length &&
         setup.tools.every((k, i) => k === cutters[i]?.key) &&
@@ -2408,10 +2235,12 @@ export function EngravePanel(): JSX.Element {
           toName: nameOf(to.key),
         });
       }
-      applySetupPlan(setupIndex, cutters, records);
-      return;
+      if (records.length === 0) continue;
+      offers.push({ setupIndex, sentence: records.map(setupSubstitutionOfferSentence).join(' '), cutters, records });
     }
-  }, [setupMeasured, setupMeasuredJob, job, tools, applySetupPlan]);
+    return offers;
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- real memo; no React compiler in this build
+  }, [setupMeasured, setupMeasuredJob, job, tools]);
 
   // ---- #798 — THE CUTTER AS ONE LINE ------------------------------------------------------
   // What is in the spindle, where that answer came from, and — when the measured search chose it
@@ -2460,11 +2289,6 @@ export function EngravePanel(): JSX.Element {
   // ---- the run (#206) ----------------------------------------------------------------------
 
   const run = useEngraveRunStore();
-  // #881 — THE LEVEL POOL'S SIZE, as the pool itself stated it when it sized for this run. It is
-  // read on each render (the run's progress updates re-render the panel while planning), and it is
-  // absent until a budgeted run has planned — a raster job never states one. The run store clears
-  // it when a generate starts, so it cannot outlive the program it describes.
-  const poolSizing = run.generated !== null ? lastPoolSizing() : null;
   const simEnabled = featureSim;
   const running = run.phase === 'generating' || run.phase === 'simulating' || run.phase === 'checking';
 
@@ -2524,7 +2348,7 @@ export function EngravePanel(): JSX.Element {
           })
         : null,
     // eslint-disable-next-line react-hooks/preserve-manual-memoization -- real memo; no React compiler in this build
-    [mode, job, run.generated, run.staleSince, run.staleReason, jobPackage, calibration, shelfItem, bedFacts, locationMachine],
+    [mode, job, run.generated, run.staleSince, run.staleReason, jobPackage, calibration, shelfItem, bedFacts, locationMachine, facesEpoch],
   );
 
   const backToDesign = (cause: PreflightCause | null): void => {
@@ -2701,9 +2525,6 @@ export function EngravePanel(): JSX.Element {
   // blank high enough, or take it off the jaws), so that is the field the Fix opens. The plan's
   // own holding group is where the vise row lives.
   const runFix: PanelFix | null = currentRunError === null ? null : findingFix(currentRunError);
-  // #785 follow-up — the too-big refusal's one-click grid: the run stopped on it, and the finding
-  // carries the pitch that fits. The button beside the sentence writes that pitch onto the goal's
-  // grid and presses Generate in the same click, so the refusal turns into a choice.
   // #895 — the Cut step's press for a sweep that STALLED, beside the sentence that says so: run
   // the job again (Generate's own path). There is no limit to raise: the simulation stops only on
   // silence, so "again" is the whole of it.
@@ -2728,10 +2549,6 @@ export function EngravePanel(): JSX.Element {
     });
     void saveText(JSON.stringify(report, null, 2), simStallReportFileName(at), 'application/json');
   };
-  const runPitchFinding =
-    run.staleSince === null
-      ? (run.generated?.findings.find((f) => f.code === 'goal-program-too-big' && f.suggestedPitchMm !== undefined) ?? null)
-      : null;
   // #805 — a rotary goal wider than the rod is INFORMED (the relief is cut clipped, #786 slice 2).
   // Its sentence carries the two answers, beside it, as presses.
   const rotaryOversizeFinding =
@@ -2879,11 +2696,8 @@ export function EngravePanel(): JSX.Element {
   // `error` is stated once beside Generate (`engrave-generate-error`), not printed here too.
   const runSaysSomething = running || run.generated !== null || run.error !== null;
   // #888 — A RUN THAT STOPPED BEFORE POSTING states ONE sentence, not four "not … yet" rows (the
-  // three other rows add nothing when there is no program at all). The reason itself is the
-  // errors line below; the budget gets its own words because that is the case the maintainer hit.
+  // three other rows add nothing when there is no program at all).
   const runRefused = run.generated !== null && !run.generated.ok;
-  const runRefusedBudget =
-    runRefused && (run.generated?.findings.some((f) => f.code === 'goal-program-too-big') ?? false);
   // …and a run that PASSED and still matches the job collapses to ONE line, with the ticks behind
   // its `›`. #794 — that line is the Ready card, and the footer's primary becomes the next step.
   const runReady =
@@ -3014,7 +2828,7 @@ export function EngravePanel(): JSX.Element {
     if (job.toolKey === '' && source !== 'user' && source !== 'measured') {
       const pick = await useEngravePreviewStore.getState().measureNow(job);
       if (pick !== null) {
-        applyCutterPlan(pick.cutters, 'computed', 0, undefined, pick.goalRoughKey);
+        applyCutterPlan(pick.cutters, 'computed', 0, pick.goalRoughKey);
       } else {
         const key = rec?.key ?? (await awaitPreviewRecommendationKey());
         if (key) setTool(key, 'computed');
@@ -3775,6 +3589,23 @@ export function EngravePanel(): JSX.Element {
         </button>
       </div>
 
+      {/* #1010 — A SETUP'S DEAD CUTTER IS OFFERED BESIDE THE CUTTER LINE, never substituted. The
+          measured answer for that setup is drawn with its press; taking it writes THAT setup only
+          and records the substitution the one sentence states. */}
+      {setupOffers.map((offer) => (
+        <p key={offer.setupIndex} style={{ ...MUTED, margin: '4px 0 0' }} data-testid={`engrave-setup-measured-${offer.setupIndex + 1}`}>
+          {offer.sentence}{' '}
+          <button
+            type="button"
+            data-testid={`engrave-use-measured-setup-${offer.setupIndex + 1}`}
+            title="Write this setup's measured plan into the setup, replacing the cutter it does not hold."
+            onClick={() => applySetupPlan(offer.setupIndex, offer.cutters, offer.records)}
+          >
+            Use the measurement for setup {offer.setupIndex + 1}
+          </button>
+        </p>
+      ))}
+
       {/* 1a — the skim of the top (#432 slice 4, decision Q6; #686's one line). On wood and metal
           the choice is one line with its current number; `change` opens the choice and the depth in
           place. An absent `facing` key is the pre-#432 job: nothing has chosen, and the job does not
@@ -4524,11 +4355,16 @@ export function EngravePanel(): JSX.Element {
               measured
             </span>
             {measuredNow.words.difference !== null ? ` — ${measuredNow.words.difference}` : ''}{' '}
-            {!measuredApplied && (
+            {!measuredCarried && (
               <button
                 type="button"
                 data-testid="engrave-use-measured"
-                onClick={() => applyCutterPlan(measuredNow.cutters, 'computed', 0, undefined, measuredNow.goalRoughKey)}
+                onClick={() => {
+                  // #1035 — the press is what makes the answer "applied" (see the marker's note):
+                  // record it BEFORE the write, so the offer retires and the line states it.
+                  setPressedMeasuredKey(measuredNow.jobKey);
+                  applyCutterPlan(measuredNow.cutters, 'computed', 0, measuredNow.goalRoughKey);
+                }}
               >
                 Use the recommendation
               </button>
@@ -4848,8 +4684,6 @@ export function EngravePanel(): JSX.Element {
             )}
           </div>
         </div>
-        {/* #881 — the level pool's own number, beside the margins it planned within. */}
-        <PoolTechnicalLine sizing={poolSizing} />
       </details>
       </Group>
 
@@ -5403,7 +5237,7 @@ export function EngravePanel(): JSX.Element {
                     rows said the same thing three more times. */}
                 {runRefused ? (
                   <span data-testid="engrave-run-refused" style={{ color: '#c8d3de' }}>
-                    {runRefusedBudget ? 'Not generated: the goal is over the planning budget.' : 'Not generated.'}
+                    Not generated.
                   </span>
                 ) : (
                   <>
@@ -5470,57 +5304,13 @@ export function EngravePanel(): JSX.Element {
 
             {runErrors.length > 0 && (
               <p
-                // #832 — A BUDGET IS NOT A FAULT: the too-big sentence is drawn in the inform
-                // colour, with its presses named, rather than as an error-red refusal.
-                style={{ ...MUTED, color: runPitchFinding !== null ? SEVERITY_COLOR.warning : SEVERITY_COLOR.error }}
+                style={{ ...MUTED, color: SEVERITY_COLOR.error }}
                 data-testid="engrave-run-errors"
               >
                 {firstRunErrorText === null
                   ? `${runErrors.length} error${runErrors.length === 1 ? '' : 's'} outstanding.`
                   : operatorRunError(firstRunErrorText)}
                 {runErrors.length > 1 && ` (+${runErrors.length - 1} more error${runErrors.length === 2 ? '' : 's'})`}
-                {/* #888 — the budget's three presses, in the operator's words, each saying what it
-                    costs: coarsen, thicken the layers, or split the depth into two setups. The
-                    numbers that made the decision live under Technical, not in the sentence. The
-                    split press is drawn only when a two-band split actually fits (the finding's
-                    `suggestedSplit`) — a press that cannot do what it says is not shown. */}
-                {runPitchFinding !== null && (
-                  <>
-                    {' '}
-                    Choose one:{' '}
-                    <button
-                      type="button"
-                      data-testid="engrave-generate-at-pitch"
-                      onClick={() => generateAtPitch(runPitchFinding)}
-                    >
-                      Coarser detail ({runPitchFinding.suggestedPitchMm} mm)
-                    </button>
-                    {runPitchFinding.suggestedStepDownMm !== undefined && (
-                      <>
-                        {' '}
-                        <button
-                          type="button"
-                          data-testid="engrave-generate-at-stepdown"
-                          onClick={() => generateAtStepDown(runPitchFinding)}
-                        >
-                          Thicker layers ({runPitchFinding.suggestedStepDownMm} mm step-down, rougher walls)
-                        </button>
-                      </>
-                    )}
-                    {runPitchFinding.suggestedSplit !== undefined && (
-                      <>
-                        {' '}
-                        <button
-                          type="button"
-                          data-testid="engrave-split-goal"
-                          onClick={() => splitForBudget(runPitchFinding)}
-                        >
-                          Split into two setups
-                        </button>
-                      </>
-                    )}
-                  </>
-                )}
                 {/* #895 — a stall is a fault, not a slow program: the sentence says so, and the
                     press simply runs the job again (the simulation stops only on silence). */}
                 {simStalled && (
@@ -5541,7 +5331,7 @@ export function EngravePanel(): JSX.Element {
                 {/* #725 B4 — the same sentence's Fix, in the footer at the button: the verifier's
                     clamp/arm refusals and the rotary's have always had their sentences, but no
                     control took the operator to what resolves one. #832: named by its action. */}
-                {runFix !== null && fixIsOffered(runFix) && runPitchFinding === null && (
+                {runFix !== null && fixIsOffered(runFix) && (
                   <>
                     {' '}
                     <button
@@ -5575,26 +5365,6 @@ export function EngravePanel(): JSX.Element {
                   {runErrors.length > 1
                     ? ` (+${runErrors.length - 1} more error${runErrors.length === 2 ? '' : 's'}; the first is shown)`
                     : ''}
-                </p>
-              </details>
-            )}
-            {/* #888 — THE NUMBERS UNDER TECHNICAL. The sentence above says what the goal is in the
-                operator's terms; the moves, cells, pitch, step-down and budget that made the
-                decision are a fact to look at when someone wants them, not the message. */}
-            {runPitchFinding !== null && runPitchFinding.budgetMoves !== undefined && (
-              <details data-testid="engrave-run-budget-technical" style={{ margin: '0 0 6px' }}>
-                <summary style={{ ...MUTED, cursor: 'pointer', listStyle: 'none' }}>Technical</summary>
-                <p style={{ ...MUTED, margin: '2px 0 0', lineHeight: 1.45 }}>
-                  About {Math.round(runPitchFinding.budgetMb ?? 0).toLocaleString('en-US')} MB to
-                  build, post and simulate —{' '}
-                  {runPitchFinding.budgetMoves.toLocaleString('en-US')} moves on{' '}
-                  {runPitchFinding.budgetCells?.toLocaleString('en-US') ?? '—'} cells at{' '}
-                  {runPitchFinding.budgetPitchMm ?? runPitchFinding.suggestedPitchMm} mm,{' '}
-                  {runPitchFinding.budgetStepDownMm ?? '—'} mm step-down; the app’s budget is{' '}
-                  {runPitchFinding.budgetLimitMb?.toLocaleString('en-US') ?? '—'} MB.
-                  {runPitchFinding.suggestedSplit !== undefined
-                    ? ` A two-setup split takes ${runPitchFinding.suggestedSplit.firstMm} mm from the top and ${runPitchFinding.suggestedSplit.secondMm} mm from the flipped side — about ${runPitchFinding.suggestedSplit.movesEach.toLocaleString('en-US')} moves each.`
-                    : ' No two-setup depth split puts both programs under the budget.'}
                 </p>
               </details>
             )}

@@ -1,0 +1,105 @@
+{
+ "card": "synth-rect-b",
+ "feedRows": [],
+ "catalogue": {
+  "used": false,
+  "note": "no catalogue status stated"
+ },
+ "holding": {
+  "ours": "tape",
+  "vendor": null
+ },
+ "sequence": null,
+ "referenced": false,
+ "pass": false,
+ "lines": [
+  {
+   "key": "coverage",
+   "rule": "≥ vendor − 1 point and ≥ 95.00 %",
+   "oursValue": null,
+   "vendorValue": null,
+   "ours": "not measured",
+   "vendor": null,
+   "state": "stated",
+   "note": "no vendor program beside it",
+   "number": 1
+  },
+  {
+   "key": "cutInto",
+   "rule": "0 at the 0.1 mm floor beyond the excluded shares",
+   "oursValue": null,
+   "vendorValue": null,
+   "ours": "not judged",
+   "vendor": null,
+   "state": "stated",
+   "note": "the checker has not applied the cut-into rule (0.1 mm floor with edge break, wall cells and wall shadow excluded) — cut-into is not judged",
+   "number": 2
+  },
+  {
+   "key": "cycle",
+   "rule": "≤ 2× the vendor’s (goal 1.25×) on our #927 estimator over both files, plus bit changes at 91.4 s each (#943)",
+   "oursValue": 373.19785461592676,
+   "vendorValue": null,
+   "ours": "6.2 min",
+   "vendor": null,
+   "state": "stated",
+   "note": "no vendor program beside it",
+   "goalMet": false,
+   "number": 3
+  },
+  {
+   "key": "air",
+   "rule": "≤ vendor + 10 points",
+   "oursValue": 0.17024259456020166,
+   "vendorValue": null,
+   "ours": "17.02 %",
+   "vendor": null,
+   "state": "stated",
+   "note": "no vendor program beside it",
+   "number": 4
+  },
+  {
+   "key": "rapids",
+   "rule": "≤ 2× the vendor's rapid time",
+   "oursValue": 32.41382476851144,
+   "vendorValue": null,
+   "ours": "32.4 s",
+   "vendor": null,
+   "state": "stated",
+   "note": "no vendor program beside it",
+   "facts": "per 1,000 feed lines 52; rapid moves 45",
+   "number": 5
+  },
+  {
+   "key": "cutters",
+   "rule": "≤ vendor + 1, and only the location's cutters for a bench card",
+   "oursValue": 2,
+   "vendorValue": null,
+   "ours": "2",
+   "vendor": null,
+   "state": "stated",
+   "note": "no vendor program beside it",
+   "number": 6
+  },
+  {
+   "key": "postsAsFiled",
+   "rule": "posts as filed — in the vise with jaw clearance, without changing the pitch (#943)",
+   "oursValue": true,
+   "vendorValue": null,
+   "ours": "yes — tape, 0.1 mm",
+   "vendor": null,
+   "state": "pass",
+   "note": null,
+   "number": 7
+  }
+ ],
+ "failing": [
+  "coverage",
+  "cutInto",
+  "cycle",
+  "air",
+  "rapids",
+  "cutters"
+ ],
+ "sentence": "Unreferenced — no vendor program beside this card, so it cannot be called a match"
+}
