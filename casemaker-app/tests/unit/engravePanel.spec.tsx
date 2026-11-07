@@ -5770,5 +5770,97 @@ describe('#1065 the cutter picker', () => {
     expect(values).toContain('flat-1.0');
     expect(values).toContain('flat-3.175x12-metal');
     expect(values).not.toContain('cat:p1065');
+
+// ── #1046 — THE LADDER'S PRESS ON goal-rest-uncut ─────────────────────────────────────────────
+describe('#1046 EngravePanel — the standard-balls press', () => {
+  const goal = {
+    id: 'goal-1046', name: 'plate.stl', format: 'stl' as const, sha256: 'a'.repeat(64), data: 'QUJD',
+    size: { x: 20, y: 10, z: 5 }, position: { x: 30, y: 20, z: 0 }, rotation: 0, enabled: true, role: 'goal' as const,
+  };
+  const NO_BALL_TAIL =
+    ' The ball that would take it is measured from the cutter catalogue — none of its balls takes this leftover (Manage → Tools).';
+  const seed = (message: string, plan: unknown): void => {
+    act(() => {
+      useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), labels: [], shapes: [], targetObject: goal } });
+      useEngraveRunStore.setState({
+        generated: {
+          ok: true,
+          stage: 'done',
+          nc: ';@MKR|BEGIN\nG21 G90\nM02',
+          findings: [{ severity: 'warning', code: 'goal-rest-uncut', labelId: goal.id, targetId: goal.id, message }],
+          feeds: null,
+          threads: null,
+          cam: null,
+          verify: null,
+          surface3d: null,
+          frameNc: null,
+          frameVerify: null,
+          facingNc: null,
+          facingVerify: null,
+          facingToolKey: null,
+          facingError: null,
+          facingCam: null,
+          predicted: [],
+          programs: [],
+          errors: [],
+          plan,
+        } as unknown as EngraveGenerated,
+        simStatus: 'ready',
+        simDiagnostics: [],
+        phase: 'ready',
+        staleSince: null,
+      });
+    });
+  };
+  const openDrawer = (): HTMLElement => {
+    const drawer = screen.getByTestId('engrave-findings');
+    fireEvent.click(drawer.querySelector('summary')!);
+    return drawer;
+  };
+
+  it('states the expected cost from the last result’s timings, and the press runs Generate with the ladder', async () => {
+    const plan = { perSetup: [], planMs: 450_000, finishStageMs: 36_000, finishBallDiameterMm: 6 };
+    seed('The finish with the 6 mm ball nose leaves up to 2.42 mm standing over 21 % of the goal.' + NO_BALL_TAIL, plan);
+    render(<EngravePanel />);
+    const drawer = openDrawer();
+    const press = drawer.querySelector('[data-testid="engrave-goal-measure-balls"]') as HTMLButtonElement;
+    expect(press, 'the no-measured-ball form offers the ladder').not.toBeNull();
+    // N = (planMs + Σ√(D/d) × finishStageMs) from the LAST result: ≈ 450 s + 12.3 × 36 s ≈ 15 min.
+    expect(press.textContent).toMatch(/Measure the standard balls \(about \d+ min\)/);
+    expect(press.disabled).toBe(false);
+
+    let seen: unknown = 'unset';
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async (...args: unknown[]) => {
+        seen = args[8];
+        return { ok: false, stage: 'findings', findings: [], feeds: null, threads: null, cam: null, verify: null, surface3d: null, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted: [], programs: [], errors: [], nc: null } as unknown as EngraveGenerated;
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    fireEvent.click(press);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(seen, 'the press asks the pipeline for the ladder').toBe(true);
+  }, 60_000);
+
+  it('a result with no timings says to run Generate first, and a measured catalogue ball shows no press at all', () => {
+    seed('The finish with the 6 mm ball nose leaves up to 2.42 mm standing over 21 % of the goal.' + NO_BALL_TAIL, { perSetup: [] });
+    render(<EngravePanel />);
+    const drawer = openDrawer();
+    const press = drawer.querySelector('[data-testid="engrave-goal-measure-balls"]') as HTMLButtonElement;
+    expect(press.textContent).toBe('Run Generate first');
+    expect(press.disabled).toBe(true);
+    cleanup();
+    // The enriched form names the catalogue's measured ball — the ladder is not offered.
+    seed('The finish with the 6 mm ball nose leaves up to 2.42 mm standing over 21 % of the goal. The catalogue’s 2 mm ball nose (⌀2 mm) would: leftover 6.5 %, -120 s of cycle (measured).', {
+      perSetup: [],
+      planMs: 1,
+      finishStageMs: 1,
+      finishBallDiameterMm: 6,
+    });
+    render(<EngravePanel />);
+    openDrawer();
+    expect(screen.queryByTestId('engrave-goal-measure-balls')).toBeNull();
   });
 });

@@ -1225,6 +1225,13 @@ export function EngravePanel(): JSX.Element {
     // with unmeasured datums is NOT reported per job (every fresh bed is unmeasured); the cards and
     // the Start line say it once.
     ...bedFindings({ job, machine: locationMachine, mount: jobMount(job) }),
+    // #1046 — THE RUN'S OWN LEFTOVER LINE, WHERE ITS ACTION LIVES. `goal-rest-uncut`/`-pass` are
+    // plan statements on the LAST run (the printed sheet carries them in §8), and they carry the
+    // goal's labelId; the drawer is where the presses stand, so the job-level list shows them too
+    // (labelId cleared) — the ladder's press hangs off that line.
+    ...(useEngraveRunStore.getState().generated?.findings ?? [])
+      .filter((f) => f.code === 'goal-rest-uncut' || f.code === 'goal-rest-pass')
+      .map((f) => ({ ...f, labelId: undefined })),
   ]);
   const jobFindings = findings.filter((f) => f.labelId === undefined);
   // A cutter this app can write an answer to: a house definition or an owned cutter. A catalogue
