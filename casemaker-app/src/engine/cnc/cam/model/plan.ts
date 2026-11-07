@@ -25,6 +25,7 @@ import type { ObstacleBox } from '@/engine/cnc/setup';
 import { cuttingDiameter, flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { coneHeight, isVShape, vCone, type VCone } from '@/engine/cnc/vProfile';
 import { vCarvePassPitch } from '@/engine/cnc/vCarveGeometry';
+import { memTrace } from '@/engine/cnc/memTrace';
 import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, resolvedFeedsTable, type CutParams } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
@@ -634,6 +635,8 @@ function describeRegistration(setupIndex: number, registration: SetupRegistratio
  * house flats only) — the plan says that too when a caller supplies one.
  */
 export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
+  // #1052 — the flag-gated memory trace (a null check when off): one row at the plan's start.
+  memTrace('plan:start', { setups: input.setups.length, house: input.cutters.house.length });
   const tl = await getToplevel();
   const offset = makeClipperOffset(tl);
   const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
@@ -1038,7 +1041,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       // for the ideal); the monotone argument is stated here so the early exit is auditable, and a
       // candidate that does TIE keeps the cycle tie-break.
       const ordered = [...ballCandidates].sort((a, b) => (cuttingDiameter(a) ?? 0) - (cuttingDiameter(b) ?? 0));
+      // #1052 — the measured search's shape: the candidate count first, then a row per candidate.
+      memTrace('rank:start', { candidates: ordered.length });
       for (const candidate of ordered) {
+        memTrace('rank:candidate', { diameterMm: cuttingDiameter(candidate) ?? 0 });
         opts.signal?.throwIfAborted();
         let measured: PlanCurvedResult;
         try {
@@ -1920,6 +1926,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const last = perSetup[perSetup.length - 1]!;
     for (const line of unfeedableLines) last.notes.push(line);
   }
+  memTrace('plan:end', { setups: perSetup.length });
   return outcome === undefined ? { perSetup } : { perSetup, outcome };
 }
 
@@ -3611,6 +3618,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   const emptyStages = new Map<PlannedOp['kind'], { count: number; deepestMm: number }>();
   const finishKinds = new Map<string, { count: number; minSlope: number; maxSlope: number }>();
   const pushStage = (kind: PlannedOp['kind'], ref: RegionRef, outcome: OpOutcome): void => {
+    // #1052 — one row per op (kind, cutter, moves): the jump between rows is the op's own cost.
+    memTrace('op', {
+      kind,
+      cutter: outcome.cutter,
+      moves: outcome.ir.operations.reduce((n, operation) => n + operation.moves.length, 0),
+    });
     if (outcome.ir.operations.some((operation) => operation.moves.length > 0)) {
       ops.push({ kind, region: ref, outcome });
       return;
