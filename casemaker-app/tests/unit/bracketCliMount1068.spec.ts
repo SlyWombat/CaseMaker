@@ -261,6 +261,17 @@ describe('#1068 a bracket job through the command line is checked against its mo
       shape: pocket('clear', 50, 50, 20, 10, 1),
       clamps: [{ edge: 'back', at: 90 }],
     });
+    // #943 (10) — WITH A BOARD UNDER THE BLANK THE WASTEBOARD STAYS: the bracket's pins go
+    // through it, so the step must not send the operator to remove the board the job stands on.
+    const withBoard: EngraveJob = {
+      ...job,
+      sacrificial: { ...job.sacrificial, under: { thickness: 6, overhang: { left: 0, right: 0, front: 0, back: 0 }, attach: 'screws' } },
+    };
+    const boardSheet = buildRunSheet(withBoard, { findings: [], feeds: null, cam: null, nc: '', verify: null, frameNc: null }, null)
+      .sections.flatMap((s) => s.steps.map((step) => step.text))
+      .join('\n');
+    expect(boardSheet).toContain('The bracket is pinned at anchor 1 through the wasteboard with its two 4 mm dowels and screwed down; the wasteboard stays.');
+    expect(boardSheet).not.toContain('Remove the MDF wasteboard');
     const run = await cut(job, 'sheet');
     expect(
       run.code,
@@ -338,6 +349,57 @@ describe('#1068 a bracket job through the command line is checked against its mo
       'Fit the clamp: the side clamp on the back edge, 2.5 mm in from the right-hand corner — its top below the stock top; the job was planned with a clamp there.',
     );
   }, 300_000);
+
+  it('an anchored bracket on a SCREWED board says the blank’s screw holes may not meet the board’s', () => {
+    // #943 (10) — the blank has been on this board before; its two countersunk screw holes need not
+    // land in the same board holes a second time, and the sheet says what to do when they do not.
+    const stub = (): RunSheetGenerated => ({ findings: [], feeds: null, cam: null, nc: '', verify: null, frameNc: null });
+    const withAttach = (attach: 'screws' | 'tape'): EngraveJob => {
+      const job = bracketJob({ shape: pocket('clear', 50, 50, 20, 10, 1), clamps: [{ edge: 'back', at: 90, kind: 'side' }] });
+      return {
+        ...job,
+        sacrificial: {
+          ...job.sacrificial,
+          under: { thickness: 6, overhang: { left: 5, right: 5, front: 5, back: 5 }, attach },
+        },
+      };
+    };
+    const stepsOf = (job: EngraveJob): string =>
+      buildRunSheet(job, stub(), null)
+        .sections.flatMap((s) => s.steps.map((step) => step.text))
+        .join('\n');
+    const screws = stepsOf(withAttach('screws'));
+    expect(screws).toContain("The blank's two countersunk screw holes may no longer meet the board's holes after re-seating");
+    expect(screws).toContain('hold the blank with the bracket and the clamp alone');
+    expect(stepsOf(withAttach('tape'))).not.toContain('may no longer meet the board');
+  });
+
+  it('a clamp-less bracket job is held with tape and the sheet says so', () => {
+    // #943 (10) — the vendor tray's side 2: the bracket is the fence, double-sided tape holds the
+    // freed part down. The sheet must not ask for a clamp the job does not have.
+    const stub = (): RunSheetGenerated => ({ findings: [], feeds: null, cam: null, nc: '', verify: null, frameNc: null });
+    const job = bracketJob({ shape: pocket('clear', 50, 50, 20, 10, 1), clamps: [] });
+    const sheet = buildRunSheet(job, stub(), null);
+    const text = sheet.sections.flatMap((s) => s.steps.map((step) => step.text)).join('\n');
+    expect(text).toContain("There are no clamps in this job: lay double-sided tape over most of the part's top face");
+    expect(text).not.toContain('Tighten the clamps.');
+    expect(text).toContain("judges the bracket's arms against it");
+  });
+
+  it('a FLIP job carries its Z0 from the earlier setup — the sawn underside is never touched', () => {
+    // #943 (10) — side 2 of the tray: its Z0 is the first side's less the measured thickness.
+    const stub = (): RunSheetGenerated => ({ findings: [], feeds: null, cam: null, nc: '', verify: null, frameNc: null });
+    const job: EngraveJob = {
+      ...bracketJob({ shape: pocket('clear', 50, 50, 20, 10, 1), clamps: [] }),
+      z0CarriedFrom: { thicknessMm: 25 },
+    };
+    const text = buildRunSheet(job, stub(), null)
+      .sections.flatMap((s) => s.steps.map((step) => step.text))
+      .join('\n');
+    expect(text).toContain("Z0 is CARRIED from the earlier setup: Z0 = the earlier setup's Z0 − 25 mm");
+    expect(text).toContain('Do not probe or touch the sawn underside');
+    expect(text).not.toContain("Z0: the PART's top face");
+  });
 
   it('the side view of a bracket job draws no vise jaws; a vise job still draws them', () => {
     /** The generated half, stubbed: this test is about the mount's boxes, not the toolpath. */

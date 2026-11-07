@@ -86,4 +86,34 @@ describe('#1003 the stock bottom is the floor', () => {
     const notes = output.perSetup.flatMap((s) => s.notes).join('\n');
     expect(notes).not.toContain('cut off at the stock bottom');
   }, 240_000);
+
+  it('a part whose bottom is the stock bottom takes the board breakthrough — no skin under it', async () => {
+    // #943 (10): the M1 tray's freeing contour stopped at −25.000 on a 25 mm blank over a board,
+    // leaving the part held by a skin. A contour that reaches the stock bottom IS a through cut:
+    // it goes `thickness + breakthrough`, the same rule every through cut follows.
+    const output = await planModelCam(input(10, 0.3));
+    expect(deepestZ(output)).toBeGreaterThanOrEqual(-10.3 - 1e-6);
+    expect(deepestZ(output)).toBeLessThanOrEqual(-10.3 + 1e-6);
+    const notes = output.perSetup.flatMap((s) => s.notes).join('\n');
+    expect(notes).not.toContain('cut off at the stock bottom');
+  }, 240_000);
+
+  it('a job that states NO freeing tabs cuts the contour to its floor everywhere', async () => {
+    // #943 (10), the vendor tray's own side 1: `supportTabs = 0`. The job states it through
+    // `ModelPlanInput.freeingTabs` (from `goal.underside`); the default job keeps its 4 tabs, so
+    // the tab-top level (−(thickness − height) = −9.3 at height 0.7) only exists with the tabs.
+    const contourZ = (out: Awaited<ReturnType<typeof planModelCam>>): number[] =>
+      out.perSetup
+        .flatMap((s) => s.ops)
+        .filter((op) => op.kind === 'contour')
+        .flatMap((op) => op.outcome.ir.operations)
+        .flatMap((op) => op.moves)
+        .filter((m) => m.kind === 'feed')
+        .map((m) => Math.round(m.z * 1000) / 1000);
+    const withTabs = contourZ(await planModelCam({ ...input(10, 0.3), freeingTabs: { count: 4, widthMm: 6, heightMm: 0.7 } }));
+    expect(withTabs).toContain(-9.3);
+    const without = contourZ(await planModelCam({ ...input(10, 0.3), freeingTabs: { count: 0, widthMm: 6, heightMm: 0.7 } }));
+    expect(without).not.toContain(-9.3);
+    expect(Math.min(...without)).toBeCloseTo(-10.3, 3);
+  }, 240_000);
 });
