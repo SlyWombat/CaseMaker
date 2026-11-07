@@ -3594,6 +3594,7 @@
                         "tape",
                         "glue",
                         "screws",
+                        "screwed",
                         "loose"
                       ],
                       "type": "string"
@@ -8168,6 +8169,14 @@
                         "type": "object"
                       },
                       "type": "array"
+                    },
+                    "placement": {
+                      "description": "How the bracket is bolted down. Absent = 'anchored': on the table's pins at the anchor, and the anchor datum is the origin. 'placed': screwed to the MDF wasteboard where the operator put it — no anchor datum; the origin and rotation are probed from the blank.",
+                      "enum": [
+                        "anchored",
+                        "placed"
+                      ],
+                      "type": "string"
                     },
                     "source": {
                       "description": "Where these bracket numbers came from: a default, a saved setup, or a measurement.",
