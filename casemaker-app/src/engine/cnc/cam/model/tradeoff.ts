@@ -30,6 +30,13 @@ export interface PlanOutcomeScore {
   };
   /** The plan's own cycle estimate, seconds. */
   cycleSeconds: number;
+  /**
+   * #1062 (defect 1) — the plan's PREDICTED lip bevel, mm (`depth × tan(half)` per side on a
+   * floor-correct V pocket), when the plan carries one. A prediction, not the gate's measurement:
+   * `cutInto` above stays null by contract, and no materiality row is built from this (the
+   * statement in the plan's notes is what the operator reads).
+   */
+  predictedCutIntoMm?: number | null;
 }
 
 /** One seven-line verdict, as the card prints it. */
