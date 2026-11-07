@@ -23,6 +23,7 @@ import type { Mount } from '@/engine/cnc/setups/types';
 import type { FixtureEnvelope } from '@/engine/cnc/setup';
 import type { ObstacleBox } from '@/engine/cnc/setup';
 import { cuttingDiameter, flatEndMill, type Tool, isCuttingRecord } from '@/engine/cnc/tool';
+import { PLAN_MATERIALITY } from './tradeoff';
 import { coneHeight, isVShape, vCone, type VCone } from '@/engine/cnc/vProfile';
 import { vCarvePassPitch } from '@/engine/cnc/vCarveGeometry';
 import { memTrace } from '@/engine/cnc/memTrace';
@@ -506,6 +507,31 @@ export interface ModelPlanOutput {
   perSetup: SetupPlan[];
   /** #961 — measured on the plan's own programs when `input.goal` was supplied; absent otherwise. */
   outcome?: PlanOutcome;
+  /**
+   * #1028 — THE LADDER'S MEASURED RUNGS, when `restLadder` asked for them and no catalogue ball
+   * was measured. Coarse → fine, in the order measured (the early stop ends the list at the first
+   * rung whose own leftover is under the shop's visibility thresholds). Never a plan candidate.
+   */
+  ladderRows?: LadderRow[];
+}
+
+/**
+ * #1028 — ONE VIRTUAL RUNG'S MEASURED FACTS, from the rank's own machinery (`planCurvedForTree`
+ * at the rank's cusp + `goalCoverage`): the share of the goal's covered cells it leaves above the
+ * 0.1 mm band, the deepest such standing, its finish's estimated cycle, and where its feeds came
+ * from (a virtual rung has no catalogue row — the shop's seeded bands answer, and the sentence
+ * says so).
+ */
+export interface LadderRow {
+  diameterMm: number;
+  /** The share of the goal's covered cells the rung's finish leaves above the band, 0–1. */
+  leftoverShare: number;
+  /** The deepest over-band standing its finish leaves, mm. */
+  leftoverAboveMm: number;
+  /** The rung's finish cycle, estimated seconds (the curved pipeline's own ops). */
+  cycleSeconds: number;
+  /** The provenance of the rung's feeds — "the shop's seeded bands" when no catalogue row exists. */
+  feedsSource: string;
 }
 
 /**
@@ -596,6 +622,14 @@ export interface PlanModelCamOptions {
    * (owned or ideal). Absent for a plan the caller runs alone.
    */
   planKind?: 'owned' | 'ideal';
+  /**
+   * #1028 — THE VIRTUAL LADDER. When true, and no catalogue ball was measured, the rank measures
+   * the standard rungs (⌀0.5/1/1.5/2/3/4 mm, those finer than the finishing ball) with its own
+   * finish + coverage call, coarse → fine, and the leftover statement names the largest rung that
+   * takes the leftover. On demand only (a run-sheet/CLI flag); never a plan candidate — the owned
+   * ball is still the one the plan chooses.
+   */
+  restLadder?: boolean;
 }
 
 /**
@@ -1013,7 +1047,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           // #1125 — false for the RANK's per-candidate folds (transient, never cached); the plan
           // outcome and every other caller keep the cache so an IR is stamped once for them.
           remember = true,
-        ): { leftoverCells: number; coveredCells: number; cellAreaMm2: number } | null => {
+        ): { leftoverCells: number; coveredCells: number; cellAreaMm2: number; leftoverAboveMm: number } | null => {
           let acc: Float32Array | null = null;
           for (const ir of irs) {
             const field = stampedField(ir, remember);
@@ -1024,12 +1058,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           if (acc === null) return null;
           let covered = 0;
           let leftover = 0;
+          // #1028 — THE DEEPEST OVER-BAND STANDING, the same 0.1 mm band the share counts: the
+          // ladder's "takes it" test and its "would reduce it to X mm" sentence both read it.
+          let leftoverAboveMm = 0;
           for (let k = 0; k < acc.length; k++) {
             if (coverageGoal.covered[k] !== 1) continue;
             covered++;
-            if (acc[k]! - (coverageGoal.z[k] as number) > 0.1) leftover++;
+            const over = acc[k]! - (coverageGoal.z[k] as number);
+            if (over > 0.1) leftover++;
+            if (over > leftoverAboveMm) leftoverAboveMm = over;
           }
-          return { leftoverCells: leftover, coveredCells: covered, cellAreaMm2: coverageGoal.pitch * coverageGoal.pitch };
+          return { leftoverCells: leftover, coveredCells: covered, cellAreaMm2: coverageGoal.pitch * coverageGoal.pitch, leftoverAboveMm };
         };
   const perSetup: SetupPlan[] = [];
   // #1044 — A CANDIDATE WITH NO FEEDS LEAVES THE SET, STATED; THE PLAN IS NOT REFUSED FOR IT.
@@ -1068,6 +1107,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       return false;
     }
   });
+  /** #1028 — the last setup's measured ladder rows, when `restLadder` asked for them. */
+  let ladderRowsAll: LadderRow[] | undefined;
   // #965 registration — setup 0's own recognised tree is the document-frame ground truth every
   // later setup's locating features are read against (`registerSetupOrigin`'s own header on
   // `setups.ts`). Kept across loop iterations for exactly that comparison; `null` only before
@@ -1549,6 +1590,65 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             ? ` The uncapped best is ${uncappedBest.tool.name} (leftover ${(uncappedBest.leftover * 100).toFixed(2)} %, cycle ${uncappedBest.cycle.toFixed(0)} s).`
             : ''),
       );
+    }
+    // #1028 — THE VIRTUAL LADDER (6b's six fields, the rank scope). When asked, and no catalogue
+    // ball was measured, measure the standard rungs with the SAME call the rank makes for an owned
+    // candidate: plan the finish over the remainder at the rank's coarse cusp and stamp the goal.
+    // The rungs are NEVER plan candidates (they cannot touch `ball`/`best`); they are measured
+    // coarse -> fine, stopping at the first rung whose own leftover is under the shop's visibility
+    // thresholds — that rung is the largest that takes the leftover, and a finer one would cost
+    // cycle for nothing. Only when no SMALLER OWNED ball ran: a rest pass already took it.
+    if (
+      opts.restLadder === true &&
+      coverageGoal !== undefined &&
+      goalCoverage !== undefined &&
+      tree.remainder.length > 0 &&
+      !input.cutters.catalogue.some((tool) => tool.shape === 'ball')
+    ) {
+      const finishD = ball === undefined ? 0 : (cuttingDiameter(ball) ?? 0);
+      const ownedBallDiameters = input.cutters.house.filter((tool) => tool.shape === 'ball').map((tool) => cuttingDiameter(tool) ?? 0);
+      const largestOwned = ownedBallDiameters.length === 0 ? 0 : Math.max(...ownedBallDiameters);
+      if (finishD > 0 && !(largestOwned > finishD + 1e-9)) {
+        const vis = input.restVisibility ?? {
+          depthMm: REST_MACHINING_FALLBACK.visibleDepth,
+          share: REST_MACHINING_FALLBACK.thirdToolFraction,
+        };
+        const deepestRemainder = tree.remainder.reduce((n, r) => Math.max(n, r.zTop - r.zBottom), 0);
+        const fluteLength = deepestRemainder + 1;
+        const rows: LadderRow[] = [];
+        for (const diameterMm of [4, 3, 2, 1.5, 1, 0.5].filter((d) => d < finishD - 1e-9)) {
+          opts.signal?.throwIfAborted();
+          // A virtual rung: a ball the shop does not own — no id, no number, reach never filtering.
+          // Its feeds come from the same resolver an unknown cutter gets (the shop's seeded bands),
+          // and the sentence says so.
+          const rung: Tool = {
+            ...flatEndMill(diameterMm),
+            name: `${diameterMm} mm ball nose`,
+            shape: 'ball',
+            typeText: 'Ball',
+            diameter: diameterMm,
+            tipDiameter: diameterMm,
+            cornerRadius: diameterMm / 2,
+            fluteLength,
+          };
+          let measured: PlanCurvedResult;
+          try {
+            measured = planCurvedForTree(tree, {
+              ...curvedOptionsFor(rung, cutParamsForBall(rung)),
+              finishScallopMm: DEFAULT_FINISH_SCALLOP_MM,
+            });
+          } catch {
+            continue; // a rung that cannot plan this remainder is not a rung
+          }
+          const coverage = goalCoverage(measured.ops.map((o) => o.outcome.ir));
+          if (coverage === null) continue;
+          const leftoverShare = coverage.leftoverCells / Math.max(1, coverage.coveredCells);
+          const cycleSeconds = measured.ops.reduce((n, o) => n + o.outcome.ir.operations.reduce((k, op) => k + (op.estimatedSeconds ?? 0), 0), 0);
+          rows.push({ diameterMm, leftoverShare, leftoverAboveMm: coverage.leftoverAboveMm, cycleSeconds, feedsSource: 'the shop’s seeded bands' });
+          if (coverage.leftoverAboveMm <= vis.depthMm + 1e-9 && leftoverShare <= vis.share + 1e-9) break;
+        }
+        if (rows.length > 0) ladderRowsAll = rows;
+      }
     }
     // The chosen ball's own params and note (the note joins the substitution statements) — read
     // AFTER the rank, so a candidate that won gets its own catalogue row, never the default's.
@@ -2447,7 +2547,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // the LAST setup because the outcome is the union of every setup's programs (the plan's final
   // state), never one setup's own.
   if (outcome !== undefined && opts.restStatement !== false) {
-    const statement = restStatementForPlan(perSetup, outcome, input, null);
+    const statement = restStatementForPlan(perSetup, outcome, input, null, ladderRowsAll);
     if (statement !== null) {
       const last = perSetup[perSetup.length - 1]!;
       last.statements.push(statement);
@@ -2508,7 +2608,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
   }
   memTrace('plan:end', { setups: perSetup.length });
-  return outcome === undefined ? { perSetup } : { perSetup, outcome };
+  // #1028 — the ladder's measured rungs ride the plan's result (the statement was built from the
+  // same list); absent when the ladder did not run.
+  const result: ModelPlanOutput = outcome === undefined ? { perSetup } : { perSetup, outcome };
+  if (ladderRowsAll !== undefined) result.ladderRows = ladderRowsAll;
+  return result;
 }
 
 const allPockets = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [n, ...allPockets(n.children)]);
@@ -2564,6 +2668,8 @@ export function restStatementForPlan(
   outcome: PlanOutcome,
   input: ModelPlanInput,
   reference: RestReference | null,
+  /** #1028 — the ladder's measured rungs (`opts.restLadder`); absent when the ladder did not run. */
+  ladderRows?: readonly LadderRow[],
 ): PlanStatement | null {
   if (outcome.coverage === null || outcome.coverage >= 1 - 1e-9) return null;
   const finish = finishingBallOf(setups);
@@ -2605,11 +2711,41 @@ export function restStatementForPlan(
   // is owned or better. The configured case names the measured answer's absence; the unconfigured
   // case points at the setting.
   const catalogueConfigured = input.catalogueConfigured ?? input.cutters.catalogue.length > 0;
+  // #1028 — THE LADDER'S SENTENCE. The rungs are measured coarse -> fine, so the FIRST rung under
+  // the shop's visibility thresholds is the LARGEST that takes it; when none does, the finest rung
+  // is named as the reduction it buys. A rung is never named unless it beats the finish by the
+  // plan's own materiality band. The cycle delta is against the finish the plan runs (its curved
+  // stages' own estimate), and its source is stated because a virtual rung has no catalogue row.
+  const ladderSentence = ((): string | null => {
+    if (ladderRows === undefined || ladderRows.length === 0) return null;
+    const passing = ladderRows.find((r) => r.leftoverAboveMm <= vis.depthMm + 1e-9 && r.leftoverShare <= vis.share + 1e-9);
+    const rung = passing ?? ladderRows[ladderRows.length - 1]!;
+    if ((share - rung.leftoverShare) * 100 <= PLAN_MATERIALITY.coveragePoints + 1e-9) return null;
+    const finishSeconds = setups.reduce(
+      (n, s) =>
+        n +
+        s.ops.reduce(
+          (k, op) =>
+            op.kind === 'rough' || op.kind === 'finish' || op.kind === 'pencil' || op.kind === 'chamfer'
+              ? k + op.outcome.ir.operations.reduce((m, o) => m + (o.estimatedSeconds ?? 0), 0)
+              : k,
+          0,
+        ),
+      0,
+    );
+    const delta = Math.round(rung.cycleSeconds - finishSeconds);
+    const cycle = `${delta >= 0 ? '+' : ''}${delta} s of cycle`;
+    const ballWords = `A ⌀${diaWord(rung.diameterMm)} mm ball (a standard size, not in this shop’s catalogue)`;
+    return passing !== undefined
+      ? ` ${ballWords} would: leftover ${shareWord(rung.leftoverShare)} %, ${cycle} (estimated from the shop’s seeded bands).`
+      : ` ${ballWords} would reduce it to ${rung.leftoverAboveMm.toFixed(2)} mm over ${shareWord(rung.leftoverShare)} % — ${cycle} (estimated from the shop’s seeded bands).`;
+  })();
   const would =
     reference === null
-      ? catalogueConfigured
-        ? ' The ball that would take it is measured from the cutter catalogue — none of its balls takes this leftover (Manage → Tools).'
-        : ' The ball that would take it is measured from the cutter catalogue — none is configured for this shop (Manage → Tools).'
+      ? (ladderSentence ??
+        (catalogueConfigured
+          ? ' The ball that would take it is measured from the cutter catalogue — none of its balls takes this leftover (Manage → Tools).'
+          : ' The ball that would take it is measured from the cutter catalogue — none is configured for this shop (Manage → Tools).'))
       : ` The catalogue's ${reference.ball.name} (⌀${diaWord(cuttingDiameter(reference.ball) ?? 0)} mm) would: ` +
         `leftover ${shareWord(reference.leftoverShare)} %, ` +
         `${reference.cycleDeltaSeconds >= 0 ? '+' : ''}${Math.round(reference.cycleDeltaSeconds)} s of cycle (measured).`;
@@ -2672,11 +2808,17 @@ export function enrichOwnedRestStatement(
   if (ownedBall === null || idealBall === null) return owned;
   if (cutterKeyOf(idealBall) === cutterKeyOf(ownedBall)) return owned;
   if (input.cutters.house.some((t) => cutterKeyOf(t) === cutterKeyOf(idealBall))) return owned;
-  const rebuilt = restStatementForPlan(owned.perSetup, outcome, input, {
-    ball: idealBall,
-    leftoverShare: 1 - idealOutcome.coverage,
-    cycleDeltaSeconds: idealOutcome.cycleSeconds - outcome.cycleSeconds,
-  });
+  const rebuilt = restStatementForPlan(
+    owned.perSetup,
+    outcome,
+    input,
+    {
+      ball: idealBall,
+      leftoverShare: 1 - idealOutcome.coverage,
+      cycleDeltaSeconds: idealOutcome.cycleSeconds - outcome.cycleSeconds,
+    },
+    owned.ladderRows,
+  );
   if (rebuilt === null) return owned;
   const lastIndex = owned.perSetup.length - 1;
   const last = owned.perSetup[lastIndex]!;

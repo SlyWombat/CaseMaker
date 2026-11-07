@@ -53,6 +53,11 @@ export interface TwoPlanOutput {
  * available bit do", not "what would the operator's pin do".
  */
 export async function planTwoOutcomes(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<TwoPlanOutput> {
+  // #1028 — THE LADDER IS THE OWNED PLAN'S, AND ONLY WHEN NOTHING ELSE ANSWERS. A catalogue ball
+  // the caller carries is the enriched reference's own answer (`enrichOwnedRestStatement`), so the
+  // ladder would be a second, virtual answer beside it; the owned plan measures the rungs only
+  // when the catalogue carries no ball at all.
+  const catalogueHasBall = input.cutters.catalogue.some((tool) => tool.shape === 'ball');
   const owned = await planModelCam(
     {
       ...input,
@@ -62,7 +67,9 @@ export async function planTwoOutcomes(input: ModelPlanInput, opts: PlanModelCamO
       catalogueConfigured: input.catalogueConfigured ?? input.cutters.catalogue.length > 0,
     },
     // #1052 — the trace's plan:start row names which of the two runs it is (6b's round).
-    { ...opts, planKind: 'owned' },
+    // #1028 — and the ladder is the OWNED run's, only when the catalogue carries no ball for the
+    // enriched reference to measure; the ideal is never re-planned with it (#1151's deferral).
+    { ...opts, planKind: 'owned', restLadder: opts.restLadder === true && !catalogueHasBall },
   );
   const ideal = await planIdealOnly(input, opts);
   if (ideal === null) return { owned, ideal: null, defaultPlan: 'owned' };
@@ -92,7 +99,9 @@ export async function planIdealOnly(
   // posts, and it is the owned plan's single statement that names the ideal's measured ball.
   return planModelCam(
     { ...input, cutters: { house: [...input.cutters.house, ...extra], catalogue: [] } },
-    { ...opts, restStatement: false, planKind: 'ideal' },
+    // #1052's plan kind, #1023's restatement rule and #1028's ladder: the ideal run has none of
+    // the ladder — the owned plan is the only one that measures the virtual rungs.
+    { ...opts, restStatement: false, planKind: 'ideal', restLadder: false },
   );
 }
 
