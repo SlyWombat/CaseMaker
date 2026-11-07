@@ -3050,6 +3050,35 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #992 — the SAME facts, typed: code, severity and count, so the seam can route them. `notes`
   // keeps every string exactly as before (the failure path joins it, the acceptance reads it).
   const statements: PlanStatement[] = [];
+  // #1037 — A PLAN THAT DOES NOT FREE THE PART SAYS SO, WITH THE NUMBERS. When the demand carries
+  // a real contour (`tree.contour.synthetic` false) and the CHOSEN sequence has no contour step —
+  // no link's stated flute reaches the profile's floor — the profile is not cut and the part stays
+  // attached to the stock. The reach numbers come from the STATED flutes only (the owned cutters
+  // carry no ids; no catalogue row is read, 6b's rule): the profile's floor and the longest stated
+  // flute among the set's flats. The old behaviour was silence, and the whole-goal reach gate used
+  // to mask it on the model path (#1037). A job that never frees a part (no contour in the demand)
+  // is untouched.
+  {
+    const contourFeature = features.find((f) => f.kind === 'contour');
+    if (contourFeature !== undefined && !choice.steps.some((step) => step.kind === 'contour')) {
+      const floorMm = Number(contourFeature.depthMm.toFixed(3));
+      const stated = cutters.house.filter((t) => t.shape === 'flat' && t.fluteLength !== null);
+      const longest = stated.reduce<Tool | null>(
+        (best, t) => (best === null || (t.fluteLength ?? 0) > (best.fluteLength ?? 0) ? t : best),
+        null,
+      );
+      const reachWords =
+        longest === null
+          ? 'no flat in the set states a flute'
+          : `the longest stated flute in the set is ${longest.fluteLength} mm (⌀${Number((longest.diameter ?? longest.tipDiameter ?? 0).toFixed(3))} flat)`;
+      const text =
+        `the part is not freed by this plan: the profile's floor is ${floorMm} mm and ${reachWords}, ` +
+        'so no freeing contour is cut and the part stays attached to the stock — ' +
+        `use a flat with a stated flute ≥ ${floorMm} mm, or free it by hand`;
+      statements.push({ severity: 'warning', code: 'goal-not-freed', count: 1, ids: [contourFeature.id], text });
+      notes.push(text);
+    }
+  }
   // #1019 — THE POCKETS NO CUTTER CAN ENTER ARE STATED even when nothing else is planned. The
   // search carries them as its own sentences (id, opening, the set it was measured against); one
   // statement per cause with the count (#962), the ids as the cause's pockets, and a single

@@ -215,17 +215,21 @@ describe('#785 — a rotary relief keeps its own judges', () => {
 });
 
 describe('#785 — Generate', () => {
-  it('refuses a known-short reach EARLY: the sentence, no CAM, no program', async () => {
+  it('a known-short reach is STATED, not refused, on the model engine: the plan posts and warns goal-not-freed', async () => {
+    // #1037 (6b's ruling) — the whole-goal refusal is gone from the model path: the engine assigns
+    // cutters PER FEATURE, and a part it cannot free is a warning on the posted plan, never a
+    // refusal (the #992 rule "the part isn't freed is a warning, never a silent property").
+    // PNG/rotary keep their own refusal; this seam is the model path's.
     const target = rampGoal();
     const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 12 }), null, { shop: {} });
-    expect(out.ok).toBe(false);
-    expect(out.stage).toBe('findings');
-    const refusal = out.findings.find((f) => f.code === 'goal-reach-short');
-    expect(refusal?.severity).toBe('error');
-    expect(refusal?.message).toContain('30 mm deep');
-    expect(out.nc).toBeNull();
-    expect(out.cam).toBeNull();
-    expect(out.programs).toEqual([]);
+    expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
+    expect(out.nc).not.toBeNull();
+    // The old whole-goal verdict is gone from this path.
+    expect(out.findings.some((f) => f.code === 'goal-reach-short')).toBe(false);
+    // This fixture is an open relief: its contour is synthetic, so no freeing cut is demanded and
+    // `goal-not-freed` is rightly absent. The warning's own numbers (a real profile's floor and
+    // the longest stated flute) are pinned on the M1 tray in `trayReachGate1037.spec.ts`.
+    expect(out.findings.some((f) => f.code === 'goal-not-freed')).toBe(false);
   }, 120_000);
 
   it('cutWithinReach cuts the stock’s top band and says what is left', async () => {
