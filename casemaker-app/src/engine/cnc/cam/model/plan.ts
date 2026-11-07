@@ -3732,6 +3732,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   });
 
   for (const region of [...tree.remainder, ...(opts.extraRegions ?? [])]) {
+    // #1052 (the 4096/8192 traces) — the rank's ⌀0.5 candidate enters this pipeline and outlives the
+    // cap inside it; one row per region and per field build shows which structure grows.
+    memTrace('curved:region', { id: region.id, top: region.zTop, bottom: region.zBottom });
     const ball = opts.ball;
     // #982 (the review session's ruling) — NO BALL IN THE SET: the flat finishes the whole curved
     // remainder as a flat-raster, the creases via the rest with the smallest flat. Never a throw.
@@ -3792,8 +3795,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const restClSink: { surface?: ReturnType<typeof clSurface> } = {};
     if (flat !== undefined) {
       const flatCl: { surface?: ReturnType<typeof clSurface> } = {};
+      memTrace('curved:stage', { stage: 'rough', cutter: cutterKeyOf(flat), region: roughRegion.id });
       const roughed = attempt('rough', flat, ref, () => {
+        memTrace('cl:build', { cutter: cutterKeyOf(flat), region: roughRegion.id, what: 'flat' });
+        const clFlatStarted = performance.now();
         const clFlat = floorSurface(clSurface(opts.geometry, roughRegion, flat, cuts.stepOver));
+        memTrace('cl:built', { cutter: cutterKeyOf(flat), region: roughRegion.id, what: 'flat', ms: Math.round(performance.now() - clFlatStarted) });
         flatCl.surface = clFlat;
         noteGrid(flat, clFlat);
         return rough({
@@ -3854,6 +3861,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       // rebased levels sat above every mesh-absolute CL value and the mask came out EMPTY (a rest
       // pass silently missing, not merely off-datum). Both go through the plan's one datum here:
       // the region is `base`, the surface is shifted like the flat's.
+      memTrace('curved:stage', { stage: 'rest-flat', cutter: cutterKeyOf(restFlat), region: roughRegion.id });
       attempt('rest', restFlat, ref, () => {
         const restCl = floorSurface(clSurface(opts.geometry, base, restFlat, cuts.stepOver));
         restClSink.surface = restCl;
@@ -3965,7 +3973,10 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     let clBallCache: ReturnType<typeof clSurface> | undefined;
     const clBall = (): ReturnType<typeof clSurface> => {
       if (clBallCache === undefined) {
+        memTrace('cl:build', { cutter: cutterKeyOf(finishCutter), region: roughRegion.id, what: 'finish' });
+        const clStarted = performance.now();
         clBallCache = floorSurface(clSurface(opts.geometry, roughRegion, finishCutter, cuts.stepOver));
+        memTrace('cl:built', { cutter: cutterKeyOf(finishCutter), region: roughRegion.id, what: 'finish', ms: Math.round(performance.now() - clStarted) });
         noteGrid(finishCutter, clBallCache);
       }
       return clBallCache;
@@ -4005,6 +4016,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     let finishOutcome: OpOutcome | null = null;
     let finishError: string | null = null;
     try {
+      memTrace('curved:stage', { stage: 'finish', cutter: cutterKeyOf(finishCutter), region: roughRegion.id });
       finishOutcome = finish({
         cutter: finishCutter,
         region: roughRegion,
@@ -4078,6 +4090,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         if (design === null) return false;
         return b - design > finishBand;
       };
+      memTrace('curved:stage', { stage: 'rest-ball', cutter: cutterKeyOf(restBallTool), region: roughRegion.id });
       attempt('rest', restBallTool, ref, () => finish({
         cutter: restBallTool,
         region: roughRegion,
@@ -4122,6 +4135,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       const vPitch = Math.min(0.5, Math.max(0.1, (cuttingDiameter(vTool) ?? 0) / 4));
       let creaseAdmitted = 0;
       let creaseRefused = 0;
+      memTrace('curved:stage', { stage: 'pencil-v', cutter: cutterKeyOf(vTool), region: roughRegion.id });
       attempt('pencil', vTool, ref, () => {
         // The V's own CL and the previous (rest ball's) CL: the leftover depth at a crease is the
         // material between them — the number the crease rule's width test is stated at.
@@ -4172,6 +4186,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
 
     // 4. PENCIL along the creases the ball's own CL surface leaves — no ball, no pencil: the
     // creases are the rest rule's job (the smallest flat, above).
+    if (ball !== undefined) memTrace('curved:stage', { stage: 'pencil-ball', cutter: cutterKeyOf(ball), region: roughRegion.id });
     if (ball !== undefined) attempt('pencil', ball, ref, () => pencil({
       cutter: ball,
       region,
