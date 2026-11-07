@@ -168,6 +168,8 @@ export type EngraveRunClient = {
     tool: Tool,
     shop?: EngraveShopOpts,
     catalogueTools?: readonly Tool[],
+    /** #1047 — the Makera rows from this thread's snapshot: the worker realm's own copy is empty. */
+    catalogue?: readonly FeedCatalogueRow[],
   ) => Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }>;
 };
 
@@ -764,7 +766,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         const idealEpoch = runEpoch;
         set({ idealPlan: { status: 'comparing', tradeoff: null } });
         void idealClient
-          .engravePlanIdeal!(idealJob, idealJob.targetObject!, idealTool, idealShop, getTools().map((entry) => entry.tool))
+          .engravePlanIdeal!(idealJob, idealJob.targetObject!, idealTool, idealShop, getTools().map((entry) => entry.tool), catalogue)
           .then((answer) => {
             if (runEpoch === idealEpoch) set({ idealPlan: { status: 'ready', tradeoff: answer.tradeoff } });
           })

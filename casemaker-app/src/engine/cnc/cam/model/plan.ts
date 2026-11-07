@@ -26,7 +26,7 @@ import { cuttingDiameter, flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { coneHeight, isVShape, vCone, type VCone } from '@/engine/cnc/vProfile';
 import { vCarvePassPitch } from '@/engine/cnc/vCarveGeometry';
 import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
-import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, resolvedFeedsTable, type CutParams } from '@/engine/cnc/feeds';
+import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, resolvedFeedsTable, type CutParams, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
 import { readDefault, liveShopDefaults } from '@/platform/defaultsClient';
 import { REST_MACHINING_FALLBACK, type RestSettingSource } from '@/engine/cnc/engrave/restSettings';
@@ -37,7 +37,7 @@ import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
-import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanStatement, StockProbes } from './types';
+import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanFindingStatement, PlanStatement, StockProbes } from './types';
 import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
@@ -238,6 +238,16 @@ export interface ModelPlanInput {
    * non-chosen candidate without feeds leaves the set, stated. The seam sets it (`tool`).
    */
   chosenTool?: Tool;
+  /**
+   * #1047 — THE MAKERA FEED ROWS THIS PLAN RESOLVES AGAINST. The caller holds them (the sim worker
+   * and the CLI receive them by structured clone, #324), and the plan must not read the realm's
+   * module snapshot: both realms' copies are empty. The production doors always pass an array —
+   * EMPTY when no catalogue exists, never `undefined` — so a realm that forgot the rows reads "no
+   * catalogue", not the snapshot by accident. Absent → {@link feedCatalogueSnapshot}, the main
+   * thread's copy, so a direct caller (and every spec that seeds with `setFeedCatalogue`) is
+   * unchanged.
+   */
+  feedCatalogue?: readonly FeedCatalogueRow[];
   /**
    * #1003 (the manager's narrowing) — the sacrificial board's BREAKTHROUGH, mm. Used ONLY for the
    * freeing contour's floor (a contour cuts through the blank into the board by design); pockets
@@ -518,7 +528,10 @@ const RIM_CLOSE_TOL_MM = 0.01;
  * substitution is returned so the plan STATES it, never posts it silently.
  */
 function resolvedCutParams(input: ModelPlanInput, tool: Tool): { params: CutParams; substitution: string | null } {
-  const resolved = feedsFor(feedCatalogueSnapshot(), input.stock.material, feedsToolForSurface(tool), Z1);
+  // #1047 — the caller's rows, never this realm's snapshot: the worker and the CLI both hold an
+  // empty module state however carefully the main thread filled its own (#324, `feeds.ts`).
+  const catalogue = input.feedCatalogue ?? feedCatalogueSnapshot();
+  const resolved = feedsFor(catalogue, input.stock.material, feedsToolForSurface(tool), Z1);
   if (resolved.ok) return { params: resolved.params, substitution: null };
   const rows = resolvedFeedsTable()
     .table.filter((row) => row.material === input.stock.material && (row.edge ?? 'flat') === 'flat')
@@ -526,7 +539,7 @@ function resolvedCutParams(input: ModelPlanInput, tool: Tool): { params: CutPara
   const largest = rows[0];
   if (largest !== undefined) {
     const proxy = flatEndMill(largest.maxDiameter, { number: tool.number, id: tool.id, name: tool.name });
-    const viaProxy = feedsFor(feedCatalogueSnapshot(), input.stock.material, proxy, Z1);
+    const viaProxy = feedsFor(catalogue, input.stock.material, proxy, Z1);
     if (viaProxy.ok) {
       return {
         params: viaProxy.params,
@@ -738,9 +751,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // de-duplicates the house by `cutterKeyOf`, so when the operator's cutter is also a shop entry
   // the house holds the ENTRY's object and the appended tool is skipped — and a worker holds
   // clones. Only the chosen tool's own feeds refusal stands, exactly where it always did.
+  // #1047 — each omission is a TYPED statement (`goal-cutter-unfeedable`, info), so the panel's
+  // findings carry it; the note keeps the same text for the plan dump's prose.
   const pinnedChamferKey = input.cutters.pinned?.['chamfer'];
   const chosenKey = input.chosenTool === undefined ? null : cutterKeyOf(input.chosenTool);
-  const unfeedableLines: string[] = [];
+  const unfeedableStatements: PlanFindingStatement[] = [];
   const candidateHouse = input.cutters.house.filter((tool) => {
     if (chosenKey !== null && cutterKeyOf(tool) === chosenKey) return true;
     if (pinnedChamferKey !== undefined && cutterKeyOf(tool) === pinnedChamferKey) return true;
@@ -749,9 +764,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       return true;
     } catch {
       const label = tool.name || tool.id || `${tool.shape} cutter`;
-      unfeedableLines.push(
-        `${label}: no cutting parameters in ${input.stock.material} (no catalogue row, no starting-table row) — not a candidate`,
-      );
+      unfeedableStatements.push({
+        severity: 'info',
+        code: 'goal-cutter-unfeedable',
+        text: `${label}: no cutting parameters in ${input.stock.material} (no catalogue row, no starting-table row) — not a candidate`,
+      });
       return false;
     }
   });
@@ -798,7 +815,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const primary = flats[0] ?? balls[0];
     if (primary === undefined) {
       throw new Error(
-        unfeedableLines.length > 0
+        unfeedableStatements.length > 0
           ? `cam/model/plan: no cutter in the set has cutting parameters for ${input.stock.material}`
           : 'cam/model/plan: the house states no flat end mill and no ball nose with a cutting diameter — no round cutter can plan this part',
       );
@@ -1910,10 +1927,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     last.statements.push(input.houseStatement);
     last.notes.push(input.houseStatement.text);
   }
-  // #1044 — the omitted candidates are stated on the plan, one line each.
-  if (unfeedableLines.length > 0 && perSetup.length > 0) {
+  // #1044/#1047 — the omitted candidates are stated on the plan, one typed info statement each
+  // (the panel's finding route) with the same text on the notes (the dump's prose).
+  if (unfeedableStatements.length > 0 && perSetup.length > 0) {
     const last = perSetup[perSetup.length - 1]!;
-    for (const line of unfeedableLines) last.notes.push(line);
+    for (const statement of unfeedableStatements) {
+      last.statements.push(statement);
+      last.notes.push(statement.text);
+    }
   }
   return outcome === undefined ? { perSetup } : { perSetup, outcome };
 }
