@@ -20,7 +20,8 @@
  * owned plan as `planIdeal`.)
  */
 
-import { enrichOwnedRestStatement, planModelCam, type PlanModelCamOptions, type ModelPlanInput, type ModelPlanOutput } from './plan';
+import { enrichOwnedRestStatement, planModelCam, type PlanModelCamOptions, type ModelPlanInput, type ModelPlanOutput, type PlanOutcome } from './plan';
+import { comparePlanOutcomes, type PlanTradeoff } from './tradeoff';
 import type { Tool } from '@/engine/cnc/tool';
 
 export type PlanKind = 'owned' | 'ideal';
@@ -62,17 +63,52 @@ export async function planTwoOutcomes(input: ModelPlanInput, opts: PlanModelCamO
     },
     opts,
   );
+  const ideal = await planIdealOnly(input, opts);
+  if (ideal === null) return { owned, ideal: null, defaultPlan: 'owned' };
+  return { owned: enrichOwnedRestStatement(owned, ideal, input), ideal, defaultPlan: 'owned' };
+}
+
+/**
+ * #1049 — THE IDEAL PLAN ALONE, for a caller that already holds the owned outcome: the press
+ * ("Every bit the app knows") re-plans only this half instead of both. `planTwoOutcomes` calls it
+ * too, so the ideal the press returns and the ideal Generate measured are one computation of one
+ * input — the same union set and `restStatement: false` — never two spellings of it.
+ *
+ * NULL when the catalogue adds no cutter the owned set did not already carry: the two runs would
+ * be the same plan, and the comparison would print a tradeoff against itself.
+ */
+export async function planIdealOnly(
+  input: ModelPlanInput,
+  opts: PlanModelCamOptions = {},
+): Promise<ModelPlanOutput | null> {
   const seen = new Set(input.cutters.house.map(toolKey));
   const extra = input.cutters.catalogue.filter((tool) => !seen.has(toolKey(tool)));
-  if (extra.length === 0) return { owned, ideal: null, defaultPlan: 'owned' };
+  if (extra.length === 0) return null;
   // #986 (the maintainer's ruling) — NO CYCLE CAP. The ideal is ranked on outcome alone; a longer
   // plan is stated as its cost on the card, never used to hide a better surface.
   //
   // #1023 — THE IDEAL'S OWN LEFTOVER STATEMENT IS SUPPRESSED: the owned plan is the one that
   // posts, and it is the owned plan's single statement that names the ideal's measured ball.
-  const ideal = await planModelCam(
+  return planModelCam(
     { ...input, cutters: { house: [...input.cutters.house, ...extra], catalogue: [] } },
     { ...opts, restStatement: false },
   );
-  return { owned: enrichOwnedRestStatement(owned, ideal, input), ideal, defaultPlan: 'owned' };
+}
+
+/**
+ * #1049 — THE PRESS'S ONE PLAN: the ideal half plus its tradeoff line against an owned outcome the
+ * caller already holds. `planTwoOutcomes` uses the same `planIdealOnly`, so the numbers this
+ * returns are the ones Generate's own comparison printed for the same inputs.
+ */
+export async function planIdealAgainst(
+  input: ModelPlanInput,
+  ownedOutcome: PlanOutcome,
+  opts: PlanModelCamOptions = {},
+): Promise<{ tradeoff: PlanTradeoff | null; ideal: PlanOutcome | null }> {
+  const idealPlan = await planIdealOnly(input, opts);
+  const ideal = idealPlan?.outcome ?? null;
+  return {
+    tradeoff: ideal === null ? null : comparePlanOutcomes({ score: ownedOutcome }, { score: ideal }),
+    ideal,
+  };
 }

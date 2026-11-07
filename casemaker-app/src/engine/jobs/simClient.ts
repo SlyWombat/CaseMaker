@@ -608,16 +608,19 @@ export const engraveSmartPick = (
  * `drill.peckClearanceMm` where each peck's re-entry rapid stops. Omitted, the worker keeps both
  * labelled fallbacks — the program a headless run without a location would cut.
  */
-/** #986 (the ruling) — THE BACKGROUND IDEAL: the second plan's outcome and the tradeoff line,
- * computed after the owned plan has posted. Posts nothing; returns nulls when there is no ideal. */
+/** #986 (the ruling) — THE ON-DEMAND IDEAL: the second plan's outcome and the tradeoff line,
+ * computed on the press. Posts nothing; returns nulls when there is no ideal. #1049 — the owned
+ * outcome Generate produced rides along, so the press plans the ideal half alone; `null` (a stale
+ * run) runs both as before. */
 export const engravePlanIdeal = (
   job: EngraveJob,
   goal: EngraveTargetObject,
   tool: Tool,
   shop?: EngraveShopOpts,
   catalogueTools?: readonly Tool[],
+  ownedOutcome?: PlanOutcome | null,
 ): Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }> =>
-  guarded(getSimApi().engravePlanIdeal(job, goal, tool, shop ?? {}, catalogueTools ?? []));
+  guarded(getSimApi().engravePlanIdeal(job, goal, tool, shop ?? {}, catalogueTools ?? [], ownedOutcome ?? null));
 
 export const engraveGenerate = (
   job: EngraveJob,
