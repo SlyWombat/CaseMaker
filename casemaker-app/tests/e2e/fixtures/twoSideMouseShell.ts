@@ -53,7 +53,31 @@ export const HEALTH = {
   warnings: [],
 };
 
-/** Answer the house service (no real one runs in the web build) with the demo long ball. */
+/**
+ * #1041 (the M1 batch) — THE FLAT THE BENCH JOB CUT THIS SHELL'S ROUGH WITH: the ⌀3.175 × 25 mm
+ * O-flute, the k3 inventory's own twin (`kz-o-flute-3-175-25`). The fixture used to serve the long
+ * ball alone; before #1041 the registry's BUILT-IN flats leaked into the owned house and roughed
+ * the shell (four programs), and under the owned rule a ball-only shop takes the no-flat fallback
+ * (two programs). So the shop now owns the cutter the rough was made with, as an `inv:` record —
+ * the walk's four programs are the engine's real shape for a shop that holds both cutters.
+ */
+export const O_FLUTE_INVENTORY = {
+  id: 'kz-o-flute-3-175-25',
+  quantity: 1,
+  addedAt: '2026-10-28T00:00:00.000Z',
+  tool: flatEndMill(3.175, {
+    name: 'Spiral \'O\' Single Flute Bit - 1/8" Shank 3.175mm * 25mm',
+    typeText: 'Flat End',
+    handleDiameter: 3.175,
+    tipDiameter: 3.175,
+    diameter: 3.175,
+    cornerRadius: 0,
+    fluteLength: 25,
+  }),
+};
+
+/** Answer the house service (no real one runs in the web build) with the demo long ball and the
+ *  bench's O-flute. */
 export async function routeHouse(page: Page): Promise<void> {
   await page.route('**/api/v1/health**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(HEALTH) }),
@@ -68,7 +92,7 @@ export async function routeHouse(page: Page): Promise<void> {
   );
   await page.route('**/api/v1/feeds**', (route) => route.fulfill({ status: 404, body: '' }));
   await page.route('**/api/v1/inventory**', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([O_FLUTE_INVENTORY]) }),
   );
 }
 
