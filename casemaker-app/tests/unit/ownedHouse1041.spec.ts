@@ -138,6 +138,30 @@ describe('#1041 the owned house is inv: + user: + the chosen tool', () => {
     expect(input.cutters.house.map((t) => t.name)).toContain('kz corn 1.0');
   }, 180_000);
 
+  it('a chosen cutter the shop does not own warns, names it and its key, and still cuts', async () => {
+    // The operator's job names a `cat:` ball while the shop HAS an inventory: the cutter wins by
+    // "stated tools win", and the plan says it is not owned.
+    const target = targetFor(pocketBlock());
+    const job: EngraveJob = { ...jobFor(target), toolKey: 'cat:112233' };
+    const input = await buildModelPlanInputForGoal(job, target, BALL6, shopWith([{ key: 'inv:kz-corn-1-7', tool: INV_CORN1 }]));
+    expect(input.cutters.house, 'the chosen tool still rides the house').toContain(BALL6);
+    const plan = await planModelCam(input);
+    const st = plan.perSetup.at(-1)!.statements.find((x) => x.code === 'goal-cutter-not-owned');
+    expect(st, 'no goal-cutter-not-owned statement').toBeDefined();
+    expect(st!.severity).toBe('warning');
+    expect(st!.text).toContain(BALL6.name);
+    expect(st!.text).toContain('cat:112233');
+    expect(st!.text).toContain('not in this shop’s inventory');
+  }, 180_000);
+
+  it('a chosen owned cutter says nothing', async () => {
+    const target = targetFor(pocketBlock());
+    const job: EngraveJob = { ...jobFor(target), toolKey: 'inv:kz-corn-1-7' };
+    const input = await buildModelPlanInputForGoal(job, target, BALL6, shopWith([{ key: 'inv:kz-corn-1-7', tool: INV_CORN1 }]));
+    const plan = await planModelCam(input);
+    expect(plan.perSetup.flatMap((p) => p.statements).some((x) => x.code === 'goal-cutter-not-owned')).toBe(false);
+  }, 180_000);
+
   it('built-ins are the fresh-install fallback, stated on the plan', async () => {
     const input = await inputFor(shopWith([{ key: 'flat-1.0', tool: BUILTIN_FLAT1 }]));
     expect(input.cutters.house, 'the fallback did not keep the built-in').toContain(BUILTIN_FLAT1);
@@ -146,5 +170,6 @@ describe('#1041 the owned house is inv: + user: + the chosen tool', () => {
     expect(BUILTIN_FLAT1.fluteLength).toBeNull();
     const plan = await planModelCam(input);
     expect(plan.perSetup.at(-1)!.notes.join(' | ')).toContain('no inventory recorded; the built-in registry stands in');
+    expect(plan.perSetup.flatMap((p) => p.statements).some((s) => s.code === 'goal-cutter-not-owned')).toBe(false);
   }, 180_000);
 });

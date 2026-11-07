@@ -76,6 +76,9 @@ export type PlanFindingCode =
   | 'chamfer-too-wide'
   // #1019 — the engine-chosen curved rough's stated flat could not reach the region's depth.
   | 'goal-rough-unreachable'
+  // #1042 — the job's chosen cutter is not in the shop's inventory; it cuts because the job names
+  // it, and the plan says so (a warning: the bench cuts owned cutters).
+  | 'goal-cutter-not-owned'
   // #1005 — the mould's own four. Rim and floor are the goal validator's
   // (`validateGoalObject`); one-sided and no-draft are the plan's, from its own solid.
   | 'goal-mold-rim'
