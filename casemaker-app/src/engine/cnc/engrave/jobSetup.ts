@@ -1,4 +1,5 @@
 import { profileReachFrom, rectProfile } from '@/engine/compiler/profile';
+import { labelFontsLoaded } from '@/engine/fonts/registry';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import type { Mill } from '@/engine/cnc/machine';
 import type { Face } from '@/engine/cnc/setups/types';
@@ -3326,7 +3327,17 @@ export function validateJob(
   // #240 — the jaw rule is the VISE's, and a job in the rotary chuck has no jaw faces to reach.
   // Slice 1 reads no swept cuts for it at all; slice 3's rotary rules are what will judge the cut
   // against the chuck, the tailstock and the stock's own cylinder.
+  //
+  // #1035 item 9 — NEVER REFUSE ON THE PLACEHOLDER BOX. `sweptCuts` builds its plan with
+  // `unparsedFace: 'estimate'`, and `inkBoxOf`'s estimate is the WIDEST a bundled face can set
+  // (1.95 em/char): while a label's face is still being fetched, a centred "CASE" on the default
+  // job spans 109 mm of a 100 mm stock and crosses both jaws — a collision this loop would refuse
+  // from a box that is a placeholder, not a measurement. The fit path is allowed that box; the
+  // gate is not. Skip the collision until the faces are in (the preflight states it as pending),
+  // and run-time paths, which parse first, keep the exact refusal unchanged.
+  const labelFacesIn = labelFontsLoaded(job.labels, job.customFonts ?? []);
   for (const cut of swept) {
+    if (!labelFacesIn) break;
     const { jaw, gap } = jawGapFor(job, cut.box);
     if (gap >= jawClearance) continue;
     // #841 — a THREAD whose tip stays the clearance above the jaw tops works wholly above them: the

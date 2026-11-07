@@ -109,17 +109,31 @@ test.describe('the goal corpus, desktop', () => {
     expect(split!).toMatch(/The top setup reproduces \d/);
     expect(split!).toMatch(/faces away from the tool/);
 
-    // #948 — THE GOAL CHECK'S OWN VERDICT, IN D'S WORDS. The figure's check finds a cell cut
-    // 0.023 mm into the design (at 65, 43.7), so the run is a truthful cross and Cut states the
-    // cut-into with its worst cell; the coverage fact below states the surface it measured.
-    expect(verdict, 'the figure is cut-into — a cross, not a ready program').toBe('cross');
+    // #948 — THE GOAL CHECK'S OWN VERDICT, IN D'S WORDS. The figure's sweep does leave a cell cut
+    // 0.023 mm below the goal (at 65, 43.7) — but since #964/#1003 that cell is UN-ADJUDICABLE (a
+    // wall region: a cell closes where design of any facing stands above the level), so the JUDGED
+    // reading is 0 mm cut-into and the run is a cross on its coverage (88.64 % against the 95 %
+    // line), not on a cut-into sentence. The raw reading is still printed beside the judged one,
+    // and this spec asserts both: the exclusions hide nothing.
+    expect(verdict, 'the figure fails its pass line — a cross, not a ready program').toBe('cross');
     // The findings fold leaves the Design panel scrolled and the sticky footer covers the mode
     // tab's click point at this window; switch on the element itself — the Cut card is what this
     // asserts, not the pointer.
     await page.getByTestId('cnc-mode-cut').evaluate((el) => (el as HTMLElement).click());
     await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
-    await expect(page.getByTestId('engrave-cut-goal')).toHaveAttribute('data-state', 'cut-into');
-    await expect(page.getByTestId('engrave-cut-goal')).toHaveText('Cuts 0.023 mm into the design at 65, 43.7');
+    await expect(page.getByTestId('engrave-cut-goal')).toHaveAttribute('data-state', 'coverage');
+    // Measured 2026-11-06 on 966-collapse; the judge states the coverage it measured against the
+    // pass line it judged (#948), never a 0 mm cut-into that never happened.
+    await expect(page.getByTestId('engrave-cut-goal')).toHaveText(
+      'Covers 88.64 % of the design’s top surface (the pass line is 95 %)',
+    );
+    // #964 — the raw reading beside the judged one, and it is the wall that moves: the deepest RAW
+    // cell is a wall column 10 mm below the goal at (44.8, 26.8) — un-adjudicable under #1003's
+    // exact bound — while the judged cut-into is 0. Measured 2026-11-06 on 966-collapse; the
+    // pre-#1003 spec pinned 0.023 mm at (65, 43.7), which is no longer the raw maximum.
+    await expect(page.getByTestId('engrave-cut-goal-raw')).toHaveText(
+      'raw, before exclusions: 0 % cut-into, max 10 mm at 44.8, 26.8',
+    );
     await expect(page.getByTestId('engrave-cut-goal-coverage')).toHaveText(
       /^Top-surface coverage: [\d.]+ % \(the pass line is 95 %\)$/,
     );
