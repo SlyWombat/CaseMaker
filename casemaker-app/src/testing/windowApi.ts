@@ -259,6 +259,13 @@ export interface CaseMakerTestApi {
      * panel's prose.
      */
     simPrograms: { label: string; engine: string | null; fromBlank: boolean; carriedFloor: boolean; seedFrom: string | null }[];
+    /**
+     * #1041/#1042 — THE PLAN'S OWN WORDS, so a spec can assert what the plan did NOT say: the
+     * notes carry the seam's house note (the built-in fallback) and every typed statement's text;
+     * the codes name the statements (a chosen cutter the shop does not own is one).
+     */
+    planNotes: string[];
+    planStatementCodes: string[];
   };
   /**
    * #277 — the run-record half of the engrave e2e surface. `openRunRecordText` hands the app the
@@ -743,6 +750,8 @@ export function installCaseMakerTestApi(): void {
         saveReason: saveBlocker(view),
         error: r.error,
         simPrograms: r.simPrograms.map((p) => ({ label: p.label, engine: p.engine, fromBlank: p.fromBlank, carriedFloor: p.carriedFloor === true, seedFrom: p.seedFrom ?? null })),
+        planNotes: r.generated?.plan?.perSetup.flatMap((setup) => setup.notes) ?? [],
+        planStatementCodes: (r.generated?.planStatements ?? []).map((statement) => statement.code),
       };
     },
     simOpenText(name, text) {

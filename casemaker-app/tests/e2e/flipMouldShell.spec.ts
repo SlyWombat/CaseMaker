@@ -23,7 +23,9 @@ test('#754/#723 — a two-side mouse shell opens, posts the model engine’s fou
   page,
 }, testInfo) => {
   // A real house service is not running in this web build; answer it as the app's own schemas read
-  // it, with the demo long ball on the bench (#744's spec does the same for its facing cutter).
+  // it, with the cutters the bench job held (#1041): the demo long ball as a `user:` record and the
+  // ⌀3.175 O-flute the shell was roughed with as an `inv:` one. Both are owned, so the plan's
+  // house is the shop's own records — never the registry's built-in tier.
   await routeHouse(page);
 
   await cm.ready();
@@ -65,6 +67,13 @@ test('#754/#723 — a two-side mouse shell opens, posts the model engine’s fou
   console.log(`#754 walk: ${wallSeconds.toFixed(1)} s from Generate to a swept four-program run`);
 
   const state = await page.evaluate(() => window.__caseMaker!.getEngraveRunState());
+  // #1041/#1042 — THE FIXTURE'S SHOP OWNS BOTH CUTTERS (the long ball as `user:`, the bench's
+  // O-flute as `inv:`), so the plan's own words carry neither the built-in fallback note nor a
+  // chosen-cutter-not-owned statement. One assertion, both facts: a fixture that silently fell
+  // back to the built-ins would fail here, not only at the program count.
+  expect(
+    { fallbackNote: state.planNotes.join(' | ').includes('built-in registry stands in'), notOwned: state.planStatementCodes.includes('goal-cutter-not-owned') },
+  ).toEqual({ fallbackNote: false, notOwned: false });
   // #1032 — the model engine posts one program per cutter: rough + finish on each of the two
   // setups. The walk asserts the engine's real shape (the resolver path is what it exercises).
   expect(state.programs).toBe(4);
@@ -87,21 +96,26 @@ test('#754/#723 — a two-side mouse shell opens, posts the model engine’s fou
     if ((await technical.getAttribute('open')) === null) await technical.locator('summary').click();
     await expect(page.getByTestId('sim-job-coverage')).toBeVisible();
     const coverage = page.getByTestId('sim-job-coverage');
-    // #1034 — EVERY PROGRAM NAMES ITS SEED. Program 3 (side 2's rough) restarts from the blank
-    // with side 1's floor carried; program 4 (side 2's finish) is seeded from program 3's own
-    // removal AND keeps that carried floor, because the seed rule is per predecessor — the old
-    // all-chain rule swept it on a bare blank even though its predecessor was in its own setup.
+    // #1034 — EVERY PROGRAM NAMES ITS SEED. Side 1's finish is seeded from side 1's rough, and the
+    // panel names it. (The pre-#1041 pins carried 'flat-1.0' — the built-in flat that leaked into
+    // the house; the shop's own O-flute takes its place by name.)
     expect(
       state.simPrograms.map((p) => ({ fromBlank: p.fromBlank, carried: p.carriedFloor, seed: p.seedFrom })),
     ).toEqual([
       { fromBlank: false, carried: false, seed: null },
-      { fromBlank: false, carried: false, seed: 'program 1 (flat-1.0)' },
-      { fromBlank: true, carried: true, seed: null },
-      { fromBlank: false, carried: true, seed: 'program 3 (flat-1.0)' },
+      { fromBlank: false, carried: false, seed: 'program 1 (⌀ 3.175 mm flat end · 25 mm flute)' },
+      // Side 2, with the bench's O-flute: both programs START from the material the earlier setup
+      // left (the carried floor AND the prior removal) — they no longer restart from the blank as
+      // the ⌀1 built-in's engine made them, so `fromBlank` is false and the field route names no
+      // seed. The carry itself is the `carried` flag (and the panel's own sentence below).
+      { fromBlank: false, carried: true, seed: null },
+      { fromBlank: false, carried: true, seed: null },
     ]);
-    await expect(coverage).toContainText("Restarted from the blank: program 3 (flat-1.0) — the earlier setup's floor was carried");
     await expect(coverage).toContainText(
-      "program 4 (⌀ 2 mm ball · 30 mm flute) starts from program 3 (flat-1.0)'s removal, with the earlier setup's floor carried",
+      "program 2 (⌀ 2 mm ball · 30 mm flute) starts from program 1 (⌀ 3.175 mm flat end · 25 mm flute)'s removal",
     );
+    // The old shape restarted side 2's programs from the blank; with the shop's own flat the sweep
+    // seeds them instead, so the panel claims no blank restart at all.
+    await expect(coverage).not.toContainText('Restarted from the blank');
   }
 });
