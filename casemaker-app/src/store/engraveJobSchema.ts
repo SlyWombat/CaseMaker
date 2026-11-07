@@ -1287,19 +1287,34 @@ const tapeHoldSchema = z.object({
  * blank (screwed down) that the mount's own obstacles cannot describe. Work frame, Z0 on the
  * stock's top.
  */
-const bracketObstacleSchema = z.object({
-  id: z.string().min(1).describe('A stable id for the box, so a finding can name it.'),
-  label: z
-    .string()
-    .min(1)
-    .describe('The box in landmark words — "the counterbored hole, 8 mm in from the left edge".'),
-  min: z
-    .tuple([z.number().finite(), z.number().finite(), z.number().finite()])
-    .describe('The box’s low corner in the work frame: X 0..length, Y 0..width, Z0 on the stock’s top, mm.'),
-  max: z
-    .tuple([z.number().finite(), z.number().finite(), z.number().finite()])
-    .describe('The box’s high corner in the work frame, mm.'),
-});
+const bracketObstacleSchema = z
+  .object({
+    id: z.string().min(1).describe('A stable id for the box, so a finding can name it.'),
+    label: z
+      .string()
+      .min(1)
+      .describe('The box in landmark words — "the counterbored hole, 8 mm in from the left edge".'),
+    min: z
+      .tuple([z.number().finite(), z.number().finite(), z.number().finite()])
+      .describe('The box’s low corner in the work frame: X 0..length, Y 0..width, Z0 on the stock’s top, mm.'),
+    max: z
+      .tuple([z.number().finite(), z.number().finite(), z.number().finite()])
+      .describe('The box’s high corner in the work frame, mm.'),
+  })
+  // #1068 review (6b) — THE FIELD IS FOR FEATURES INSIDE THE BLANK, not for anything that stands
+  // over it. An above-top box would be checked as a fixture solid but could never raise a travel
+  // height (that list is the mount's own obstacles), so a program would plan straight through it;
+  // a clamp-shaped obstruction is the mount's, not the job's. Refused by name at the document.
+  .superRefine((box, ctx) => {
+    if (box.max[2] > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          `an obstacle above the stock's top is not a hole: "${box.label}" reaches Z ${box.max[2]} mm — ` +
+          'state it as a clamp',
+      });
+    }
+  });
 
 /** A job pushed into the bracket's corner and clamped (#707 BM-1, §3.6). */
 const bracketHoldSchema = z.object({

@@ -101,7 +101,7 @@ import { toolDisplayName } from '../../../src/engine/cnc/toolDisplay';
 import type { JobFinding } from '../../../src/engine/cnc/engrave/jobSetup';
 import type { NodeMeshOutput } from '../../../src/workers/geometry/meshOutput';
 import { Z1 } from '../../../src/engine/cnc/machine';
-import { jobMountObstacles, jobSetups, jobTool, toSetup } from '../../../src/engine/cnc/engrave/jobSetup';
+import { jobMount, jobMountObstacles, jobSetups, jobTool, toSetup } from '../../../src/engine/cnc/engrave/jobSetup';
 // #835 — each setup's own work, measured and written back into that setup only.
 import {
   deadSetupKeys,
@@ -1345,7 +1345,15 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       // absent, this is the wall clock the command has always used.
       options.now ?? new Date(),
       MARGIN_DEFAULTS,
-      { ...(opts.sheetOptions ?? {}), efficiencyThresholds: efficiencyThresholds(shopDefaults) },
+      {
+        ...(opts.sheetOptions ?? {}),
+        efficiencyThresholds: efficiencyThresholds(shopDefaults),
+        // #1068 — §8 names the fixture THIS job's sweep was handed: the bracket's arms and the
+        // job's clamps (and its own obstacle boxes), never the vise's jaws. A vise job leaves it
+        // absent (the sheet derives the vise's own envelope, as it always did); a tape job says
+        // nothing is modelled.
+        fixture: jobMount(job) === 'vise' ? undefined : (mountFor(job)?.fixture ?? null),
+      },
     );
     if (sheet.header.fileName !== names[firstEngraving]!.ncFile) {
       fail(`run sheet file name drifted: expected ${names[firstEngraving]!.ncFile}, got ${sheet.header.fileName}`);

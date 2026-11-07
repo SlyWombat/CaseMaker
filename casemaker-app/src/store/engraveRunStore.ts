@@ -39,6 +39,7 @@ import type { SimDiagnostic } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { SimStatus } from './simStore';
 import { jobMountObstacles, jobSetups, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
 import { carrySeedsForSetup, carriedMaps, orient, type CarrySetup } from '@/engine/cnc/setups';
 import type { CarriedField, FlatField } from '@/workers/geometry/carriedField';
 import { bedUnderFacts, machineForJob } from '@/platform/bedProfiles';
@@ -391,6 +392,13 @@ export interface EngraveRunState {
    * Empty before a run, and for a run whose first load never produced a sweep.
    */
   simPrograms: ProgramSweepSummary[];
+  /**
+   * #1068 — the mount this run derived (the bracket's arms and clamps, the job's own obstacle
+   * boxes), captured at Generate like `simDiagnostics` so the run sheet's coverage section names
+   * the fixture the sweep was actually handed. Null for the vise (whose own envelope is stated) and
+   * for tape (nothing over the part).
+   */
+  runMount: MountObstacles | null;
   phase: EngraveRunPhase;
   /** The ONE statement (see `ACKNOWLEDGE_CODES`), reset on every Generate. */
   acknowledged: boolean;
@@ -483,6 +491,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     simEngine: null as 'exact' | 'column' | null,
     simGridPitchMm: null as number | null,
     simPrograms: [] as ProgramSweepSummary[],
+    // #1068 — the mount this run derived, so the sheet can name the fixture the sweep was handed.
+    runMount: null as MountObstacles | null,
     acknowledged: false,
     acknowledgedFor: null as string | null,
     staleSince: null as number | null,
@@ -571,6 +581,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // check none at all). It folds in #707 BM-1's own clamp places and the job's own obstacle
     // boxes (a hole in the blank, screwed down).
     const mount = jobMountObstacles(job, shopDefaults);
+    // #1068 — captured like the sim results: the sheet names the fixture THIS run was swept
+    // against, not one re-derived after the location might have changed.
+    set({ runMount: mount });
     // #712 — the bed's through-cut facts, resolved HERE for the same reason the mount is: the
     // active bed profile lives in the location, and the worker must not read it. The need is the
     // job's own (`breakthrough + 1`), so a board the sentence names is one that really passes.
@@ -1240,6 +1253,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     simEngine: null,
     simGridPitchMm: null,
     simPrograms: [],
+    runMount: null,
     phase: 'idle',
     acknowledged: false,
     acknowledgedFor: null,

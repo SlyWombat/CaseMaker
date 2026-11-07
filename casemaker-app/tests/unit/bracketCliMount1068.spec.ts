@@ -26,7 +26,13 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
 import type { CommandOptions } from '../../scripts/lib/casemaker/output';
 import { defaultEngraveJob } from '../../src/engine/cnc/engrave/defaults';
+import {
+  buildRunSheet,
+  runSheetStackUpSvg,
+  type RunSheetGenerated,
+} from '../../src/engine/cnc/engrave/runSheet';
 import type { Receipt } from '../../src/platform/headless/receipt';
+import { parseEngraveJob } from '../../src/store/engraveJobSchema';
 import type { EngraveJob, EngraveShape } from '../../src/types/engraveJob';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -128,6 +134,41 @@ function diagnosticsOf(run: CutRun): { code: string; message: string }[] {
   return (run.receipt?.diagnostics ?? []).map((d) => ({ code: d.code, message: d.message }));
 }
 
+describe('#1068 the job-side obstacle field', () => {
+  it('refuses a box ABOVE the stock’s top at load, by name — it is not a hole', () => {
+    const job = bracketJob({
+      shape: pocket('clear', 50, 50, 20, 10, 1),
+      clamps: [{ edge: 'back', at: 90 }],
+      obstacles: [
+        { id: 'stray-clamp', label: 'the stray clamp over the middle', min: [10, 10, -12], max: [20, 20, 2] },
+      ],
+    });
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    const text = parsed.errors.join('\n');
+    expect(text).toContain('an obstacle above the stock');
+    expect(text).toContain('the stray clamp over the middle');
+    expect(text).toContain('state it as a clamp');
+    // And a box that DOES lie in the blank (the hole) parses — the guard is about the top, not the field.
+    expect(
+      parseEngraveJob({
+        ...JSON.parse(JSON.stringify(job)),
+        workholding: {
+          kind: 'bracket',
+          bracket: {
+            anchor: 1,
+            variant: 'thin',
+            clamps: [{ edge: 'back', at: 90 }],
+            obstacles: [{ id: 'hole-1', label: 'the counterbored hole, 8 mm in from the left edge', min: [8, 38, -12], max: [15, 44, -2] }],
+            source: 'default',
+          },
+        },
+      }).ok,
+    ).toBe(true);
+  });
+});
+
 describe('#1068 a bracket job through the command line is checked against its mount', () => {
   it('a cut under the job’s clamp is refused clamp-in-path, naming the clamp', async () => {
     // The clamp footprint (location defaults): 15 mm wide, 8 mm reach in over the back edge,
@@ -201,9 +242,53 @@ describe('#1068 a bracket job through the command line is checked against its mo
     expect(sheet).toContain('Top view of the stock and the work origin');
     expect(sheet).toContain('Pin the bracket to the bed at anchor 1');
     expect(sheet).toContain("front-left corner into the bracket's inside corner at anchor 1");
-    // The job's own clamp place, in the sheet's words.
-    expect(sheet).toContain('Fit a top clamp on the back edge, its centre 90 mm from the left end');
+    // The job's own clamp place, in the sheet's words — and NOT called a top clamp (review 6b:
+    // the record states no kind; the plan checks the top clamp's height as the safe side).
+    expect(sheet).toContain(
+      "Fit the clamp on the back edge, its centre 90 mm from the left end of the edge — the job was planned with a clamp there, checked at the top clamp's height.",
+    );
+    expect(sheet).not.toContain('Fit a top clamp');
+
+    // #1068 residual — THE LATER SECTIONS READ THE MOUNT TOO. The origin paragraph names what this
+    // job's program is judged against, and §8's coverage names the fixture the sweep was handed.
+    expect(sheet).toContain("judges the bracket's arms and the clamps against it");
+    expect(sheet).not.toContain('judges the jaws');
+    expect(sheet).toContain('the modelled fixture (the bracket’s front arm, the bracket’s left arm');
+    expect(sheet).not.toContain('Vise fixed jaw');
   }, 300_000);
+
+  it('the side view of a bracket job draws no vise jaws; a vise job still draws them', () => {
+    /** The generated half, stubbed: this test is about the mount's boxes, not the toolpath. */
+    const stub = (): RunSheetGenerated => ({ findings: [], feeds: null, cam: null, nc: '', verify: null, frameNc: null });
+    const board = (job: EngraveJob): EngraveJob => ({
+      ...job,
+      sacrificial: {
+        ...job.sacrificial,
+        under: { thickness: 6, overhang: { left: 5, right: 5, front: 5, back: 5 }, attach: 'tape' },
+      },
+    });
+
+    const bracket = board(bracketJob({ shape: pocket('clear', 50, 50, 20, 10, 1), clamps: [{ edge: 'back', at: 90 }] }));
+    const bracketSheet = buildRunSheet(bracket, stub(), null);
+    expect(bracketSheet.stackUp).toBeDefined();
+    expect(bracketSheet.stackUp!.boxes.some((b) => b.id.startsWith('vise-'))).toBe(false);
+    expect(bracketSheet.stackUp!.boxes.map((b) => b.id)).toContain('sacrificial-under');
+    const svg = runSheetStackUpSvg(bracketSheet.stackUp!);
+    expect(svg).toContain('the sacrificial board and strips, and the part');
+    expect(svg).not.toContain('vise jaws');
+
+    // The guard: the same side view for a vise job is byte-for-byte what it always was.
+    const vise = board({
+      ...defaultEngraveJob(),
+      name: 'vise stackup 1068',
+      labels: [],
+      shapes: [pocket('clear', 50, 30, 20, 10, 1)],
+      toolKey: CUTTER,
+    });
+    const viseSheet = buildRunSheet(vise, stub(), null);
+    expect(viseSheet.stackUp!.boxes.some((b) => b.id === 'vise-fixed-jaw')).toBe(true);
+    expect(runSheetStackUpSvg(viseSheet.stackUp!)).toContain('the vise jaws');
+  });
 
   it('a VISE job still gets the vise section — the branch reads the mount, it does not remove it', async () => {
     const base = defaultEngraveJob();

@@ -35,6 +35,7 @@ import {
   zBudgetInputsFor,
   type MarginSettings,
 } from '@/engine/cnc/engrave/depthBounds';
+import type { FixtureEnvelope } from '@/engine/cnc/setup';
 import { printedLayerGridOf } from '@/engine/cnc/layerStack';
 import { statedCuttingSize } from '@/engine/cnc/tool';
 import { cutterLegend, cutterProfileSvg } from '@/engine/cnc/cutterProfile';
@@ -1234,28 +1235,35 @@ function buildStackUp(job: EngraveJob): RunSheetStackUp | null {
   }
 
   // The jaws, at their shifted faces — the same faces `viseEnvelope` collides against.
-  boxes.push(
-    {
-      id: 'vise-fixed-jaw',
-      label: 'fixed jaw (left)',
-      minX: -shift.left - vise.fixedJawThickness,
-      maxX: -shift.left,
-      minZ: jawBottomZ,
-      maxZ: jawTopZ,
-      dimension: null,
-      sacrificial: false,
-    },
-    {
-      id: 'vise-moving-jaw',
-      label: 'moving jaw (right)',
-      minX: length + shift.right,
-      maxX: length + shift.right + vise.movingJawThickness,
-      minZ: jawBottomZ,
-      maxZ: jawTopZ,
-      dimension: null,
-      sacrificial: false,
-    },
-  );
+  //
+  // #1068 — ONLY A VISE JOB HAS JAWS. A bracket or taped job's side view is the board, the strips
+  // the job states, and the part; drawing the vise beside it was the same false picture the top
+  // view had. The bracket's own arms are sized by the location's defaults, which this function
+  // does not hold, so they are not drawn — an absent box is honest, a guessed one would not be.
+  if (jobMount(job) === 'vise') {
+    boxes.push(
+      {
+        id: 'vise-fixed-jaw',
+        label: 'fixed jaw (left)',
+        minX: -shift.left - vise.fixedJawThickness,
+        maxX: -shift.left,
+        minZ: jawBottomZ,
+        maxZ: jawTopZ,
+        dimension: null,
+        sacrificial: false,
+      },
+      {
+        id: 'vise-moving-jaw',
+        label: 'moving jaw (right)',
+        minX: length + shift.right,
+        maxX: length + shift.right + vise.movingJawThickness,
+        minZ: jawBottomZ,
+        maxZ: jawTopZ,
+        dimension: null,
+        sacrificial: false,
+      },
+    );
+  }
 
   for (const pos of ['left', 'right'] as const) {
     const strip = sides[pos];
@@ -1388,7 +1396,16 @@ function isViseDefault(vise: ViseParams): boolean {
  * only when the run's own codes say the check was needed and could not be made, which on a vise
  * job — every obstacle below the stock top — is never.
  */
-function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunSheetSim | null): SimCoverageInput {
+function coverageFor(
+  job: EngraveJob,
+  generated: RunSheetGenerated,
+  sim: RunSheetSim | null,
+  // #1068 — THE FIXTURE THE SWEEP WAS HANDED, when the caller knows it. A bracket job is checked
+  // against its arms, its clamps and its own boxes, not the vise's jaws; naming the vise here was
+  // the same false statement the mount section made. Absent = a caller with no mount in hand, and
+  // the vise's own envelope is stated exactly as before; `null` = nothing is modelled (tape).
+  fixture?: FixtureEnvelope | null,
+): SimCoverageInput {
   const codes = new Set<string>();
   for (const f of generated.findings) codes.add(f.code);
   for (const f of generated.verify?.findings ?? []) codes.add(f.code);
@@ -1400,7 +1417,7 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
     for (const d of program.diagnostics) codes.add(d.code);
     for (const d of program.notes) codes.add(d.code);
   }
-  const envelope = viseEnvelope(job.stock, jobVise(job), job.sacrificial);
+  const envelope = fixture === undefined ? viseEnvelope(job.stock, jobVise(job), job.sacrificial) : fixture;
   return {
     outcome: sim?.outcome ?? 'swept',
     engine: sim?.engine,
@@ -1409,8 +1426,8 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
     ...(sim?.designCheck === undefined ? {} : { designCheck: sim.designCheck }),
     // #743 P-6 — the copper's own verdict, when the run is a board (the sheet names the shorts).
     ...(sim?.copper === undefined ? {} : { copper: sim.copper }),
-    fixtureLabels: envelope.boxes.map((b) => b.label),
-    fixtureSource: envelope.source,
+    fixtureLabels: envelope === null ? [] : envelope.boxes.map((b) => b.label),
+    fixtureSource: envelope === null ? undefined : envelope.source,
     sacrificialModelled: hasSacrificial(job.sacrificial),
     toolName: jobTool(job)?.name ?? null,
     codes: [...codes],
@@ -1673,6 +1690,20 @@ function senderOriginSteps(origin: WorkOrigin, onBoard: boolean): RunSheetStep[]
   ];
 }
 
+/**
+ * #1068 — WHAT THE ORIGIN IS JUDGED AGAINST, in the job's own mount's words. Every program is
+ * checked against the blank and whatever the mount puts in the way; only a vise job has jaws.
+ * `relativeTo` completes the same sentence's "shifts the whole job relative to …".
+ */
+function judgedAgainstWords(job: EngraveJob): { against: string; relativeTo: string } {
+  const mount = jobMount(job);
+  return mount === 'bracket'
+    ? { against: "the bracket's arms and the clamps", relativeTo: 'both' }
+    : mount === 'tape'
+      ? { against: 'the cut', relativeTo: 'the blank' }
+      : { against: 'the jaws', relativeTo: 'both' };
+}
+
 function registrationSteps(
   job: EngraveJob,
   onBoard: boolean,
@@ -1691,6 +1722,9 @@ function registrationSteps(
   // would name edges a disc does not have, so the disc branch replaces them outright.
   if (job.stock.shape === 'disc') return discRegistrationSteps(job, onBoard, facingRun);
   const { length, width } = job.stock;
+  // #1068 — the origin paragraph names what THIS job's mount puts in the way (the jaws, the
+  // bracket's arms and clamps, or nothing for tape), never the vise's jaws by default.
+  const judged = judgedAgainstWords(job);
   // #449 — the tip is the shop's measured `registration.tipDiameterMm` when the caller passed the scan
   // settings; `PROBE_SPEC` (the same 2.0 mm, its labelled fallback) otherwise.
   const plan = registrationFor(job, tipDiameterMm === undefined ? undefined : { ...PROBE_SPEC, tipDiameter: tipDiameterMm });
@@ -1737,9 +1771,9 @@ function registrationSteps(
       // in the model. `edgeMargin` is the X/Y slack the content keeps from a stock edge — it is not
       // a locating tolerance, but it is all there is, so the sheet says so where the origin is set
       // rather than letting it be absorbed into the vise's own uncertainty band.
-      `How well YOU set it is not modelled: the file places the blank at this corner and judges the ` +
-      `jaws against it, so an origin that is out by a little — or a ${onBoard ? 'part' : 'blank'} ` +
-      `sitting differently from what was measured — shifts the whole job relative to both without the ` +
+      `How well YOU set it is not modelled: the file places the blank at this corner and judges ` +
+      `${judged.against} against it, so an origin that is out by a little — or a ${onBoard ? 'part' : 'blank'} ` +
+      `sitting differently from what was measured — shifts the whole job relative to ${judged.relativeTo} without the ` +
       `app knowing. The only X/Y slack for that is this job's edge margin, ${fmtNum(job.edgeMargin)} mm, ` +
       'which is the gap the content keeps from a stock edge rather than a locating tolerance: a cut ' +
       'standing at that margin has used all of it.',
@@ -1810,8 +1844,8 @@ function discRegistrationSteps(job: EngraveJob, onBoard: boolean, facingRun: boo
         `X0 Y0 Z0 is the top-front-left corner of the box around the disc — the registration writes it as the rim’s ` +
         `centre − ${fmtNum(radius)} mm on each axis. The program is never rotated: a disc has no rotation to read, ` +
         'so if the design must line up with something on the disc, put a reference feature on it and register on that. ' +
-        'How well YOU set the origin is not modelled: the file places the blank at this corner and judges the jaws ' +
-        `against it, and this job’s ${fmtNum(job.edgeMargin)} mm edge margin is the gap the content keeps from the rim, ` +
+        `How well YOU set the origin is not modelled: the file places the blank at this corner and judges ` +
+        `${judgedAgainstWords(job).against} against it, and this job’s ${fmtNum(job.edgeMargin)} mm edge margin is the gap the content keeps from the rim, ` +
         'not a locating tolerance.',
     },
   ];
@@ -2449,6 +2483,13 @@ export interface RunSheetOptions {
    * section prints — an unregistered job's sheet is unchanged.
    */
   found?: { offset: { x: number; y: number }; rotationDeg: number | null };
+  /**
+   * #1068 — THE FIXTURE THE SWEEP WAS HANDED, when the caller knows it. A bracket job is checked
+   * against its arms, its clamps and its own obstacle boxes, and §8 must name those, not the
+   * vise's jaws it has no part of. Absent (every caller without a mount in hand) states the vise's
+   * own envelope exactly as before; `null` states that no fixture is modelled (a tape job).
+   */
+  fixture?: FixtureEnvelope | null;
 }
 
 /** A share as the operator reads it. Rounded to the whole percent: a tenth is not a fact about a cutter. */
@@ -4370,9 +4411,13 @@ export function buildRunSheet(
             ? []
             : bracket.clamps.map(
                 (p): RunSheetStep => ({
-                  text: `Fit a top clamp on the ${p.edge} edge, its centre ${fmtNum(p.at)} mm from ${
+                  // #1068 review (6b) — the job's clamp record states no kind, and the tray's
+                  // back-edge clamp is a side clamp below the top; the plan checks it as the top
+                  // clamp's box (10.05 mm, the safe side), so the step says what was checked
+                  // without calling the clamp what it is not.
+                  text: `Fit the clamp on the ${p.edge} edge, its centre ${fmtNum(p.at)} mm from ${
                     p.edge === 'back' ? 'the left end' : 'the front end'
-                  } of the edge — the job was planned with the clamps there.`,
+                  } of the edge — the job was planned with a clamp there, checked at the top clamp's height.`,
                 }),
               )),
           { text: 'Tighten the clamps. Check the blank does not rock and its corner stays seated.' },
@@ -5068,7 +5113,7 @@ export function buildRunSheet(
     // geometry the sweep was given and which it never saw, and whether this run swept at all.
     // It appears whenever a simulation is part of the run (a `sim` is passed), never when the
     // caller says there was none.
-    for (const sentence of coverageDisclaimer(coverageFor(job, generated, sim))) pushWarning('coverage', sentence);
+    for (const sentence of coverageDisclaimer(coverageFor(job, generated, sim, options.fixture))) pushWarning('coverage', sentence);
   }
   // #926 — THE TWO EFFICIENCY THRESHOLDS. Both are shop settings (`location.json`), passed in by
   // the caller; when the caller has none the measures are still printed and nothing is judged,
@@ -5468,11 +5513,17 @@ export function runSheetStackUpSvg(stackUp: RunSheetStackUp): string {
   const zmin = Math.min(...zs) - STACKUP_PAD;
   const zmax = Math.max(...zs) + STACKUP_PAD;
 
+  // #1068 — the label names what the side view actually draws: a bracket or taped job has no jaws.
+  const hasJaws = stackUp.boxes.some((b) => b.id.startsWith('vise-'));
   const parts: string[] = [];
   parts.push(
     `<svg xmlns="${SVG_NS}" viewBox="${xmin} ${-zmax} ${xmax - xmin} ${zmax - zmin}" ` +
       `class="run-sheet-svg run-sheet-stackup" role="img" ` +
-      `aria-label="Side view of the setup: the vise jaws, the sacrificial board and strips, and the part">`,
+      `aria-label="${
+        hasJaws
+          ? 'Side view of the setup: the vise jaws, the sacrificial board and strips, and the part'
+          : 'Side view of the setup: the sacrificial board and strips, and the part'
+      }">`,
   );
 
   for (const b of stackUp.boxes) {
