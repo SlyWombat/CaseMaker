@@ -29,7 +29,7 @@ import type { ProbeResiduals } from '@/engine/cnc/probePlan';
 import { engraveGenerate as runEngraveGenerate, buildModelPlanInputForGoal, supportingFloors, type EngraveGenerated, type EngraveProgress, type EngraveShopOpts } from './sim/engraveGenerate';
 // #986 (the ruling) — the background ideal: the second plan's outcome and the tradeoff line,
 // computed AFTER the owned plan has posted, never posting itself.
-import { planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
+import { planIdealAgainst, planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
 import { comparePlanOutcomes, type PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
 import type { PlanOutcome } from '@/engine/cnc/cam/model/plan';
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
@@ -259,10 +259,16 @@ const api = {
    * its labelled fallbacks, exactly as a headless run with no location does.
    */
   /**
-   * #986 (the maintainer's ruling) — THE BACKGROUND IDEAL. The owned plan has already posted; this
-   * computes the IDEAL plan's own outcome beside it and the material tradeoff, WITHOUT posting a
-   * second program. The card reads "comparing…" until this resolves, then prints the line; the
-   * "Every bit the app knows" press calls the same method again, on demand.
+   * #986 (the maintainer's ruling) — THE ON-DEMAND IDEAL. The "Every bit the app knows" press
+   * computes the IDEAL plan's own outcome and the material tradeoff, WITHOUT posting a second
+   * program.
+   *
+   * #1049 — ONE PLAN, NOT TWO. Generate has already planned both outcomes and put the tradeoff on
+   * its result, so the store reads that line straight away; the press passes the OWNED outcome
+   * Generate produced (`ownedOutcome`) and this plans the ideal half alone (`planIdealOnly`) —
+   * the same union set and `restStatement: false`, so the numbers match what Generate compared.
+   * With no owned outcome (a stale run: the job, shop or inventory moved since Generate) the
+   * whole two-plan path runs, as before, because a reused outcome would compare a stale plan.
    *
    * `catalogueTools` is required: without it there is no ideal to compute, and the caller says so
    * by not asking.
@@ -273,8 +279,13 @@ const api = {
     tool: Tool,
     shop: EngraveShopOpts,
     catalogueTools: readonly Tool[],
+    ownedOutcome?: PlanOutcome | null,
   ): Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }> {
     const input = await buildModelPlanInputForGoal(job, goal, tool, shop, undefined, catalogueTools);
+    if (ownedOutcome !== undefined && ownedOutcome !== null) {
+      const { tradeoff, ideal } = await planIdealAgainst(input, ownedOutcome);
+      return { tradeoff, owned: ownedOutcome, ideal };
+    }
     const two = await planTwoOutcomes(input);
     const owned = two.owned.outcome ?? null;
     const ideal = two.ideal?.outcome ?? null;

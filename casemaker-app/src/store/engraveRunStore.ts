@@ -168,6 +168,8 @@ export type EngraveRunClient = {
     tool: Tool,
     shop?: EngraveShopOpts,
     catalogueTools?: readonly Tool[],
+    /** #1049 — Generate's owned outcome, passed only while the run is not stale. */
+    ownedOutcome?: PlanOutcome | null,
   ) => Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }>;
 };
 
@@ -748,10 +750,16 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     }
 
     set({ generated, progress: null });
-    // #986 (the ruling) — THE IDEAL RUNS IN THE BACKGROUND: the owned plan has posted, so the card
-    // can be read now; the second plan's outcome and the tradeoff arrive behind it and light the
-    // card's line up without blocking the operator. No goal or no catalogue → nothing to compare.
-    let idealAfterWalk: (() => void) | null = null;
+    // #1049 — THE TRADEOFF IS GENERATE'S OWN. Generate plans both outcomes and carries the line on
+    // its result (`planIdeal`/`planTradeoff`); the store reads it here instead of re-planning both
+    // halves in the sim worker. The card lights the moment the result lands, and the worker stays
+    // free for the run's own sweep — the ~900 s second plan on the tray is gone. No ideal on the
+    // result (no goal, no catalogue, or the ideal added no cutter): nothing to compare.
+    set({
+      idealPlan: generated.planIdeal !== undefined && generated.planIdeal !== null
+        ? { status: 'ready', tradeoff: generated.planTradeoff ?? null }
+        : { status: 'idle', tradeoff: null },
+    });
     if (generated.ok && generated.nc !== null && job.targetObject !== undefined && client.engravePlanIdeal !== undefined) {
       const idealClient = client;
       const idealJob = job;
@@ -764,8 +772,13 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         // asked for it still owns the hold.
         const idealEpoch = runEpoch;
         set({ idealPlan: { status: 'comparing', tradeoff: null } });
+        // #1049 — THE OWNED OUTCOME IS REUSED ONLY WHILE THE RUN IS CURRENT. `staleSince` is the
+        // store's own marker that the job, shop or inventory moved after Generate; the held plan
+        // then no longer describes the job, so the press passes none and the worker plans both
+        // halves again rather than comparing against a stale plan.
+        const held = get().staleSince === null ? get().generated?.plan?.outcome ?? null : null;
         void idealClient
-          .engravePlanIdeal!(idealJob, idealJob.targetObject!, idealTool, idealShop, getTools().map((entry) => entry.tool))
+          .engravePlanIdeal!(idealJob, idealJob.targetObject!, idealTool, idealShop, getTools().map((entry) => entry.tool), held)
           .then((answer) => {
             if (runEpoch === idealEpoch) set({ idealPlan: { status: 'ready', tradeoff: answer.tradeoff } });
           })
@@ -776,10 +789,6 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // The press repeats the SAME computation on demand (E's review, item 3) — never just the
       // recorded choice.
       idealLastRequest = fireIdealCompare;
-      // #1048 — NOT YET. The ideal is a second full plan, and both realms share ONE sim worker:
-      // fired here it held the thread for ~900 s on the tray while the run's own sweep queued
-      // behind it, and the sweep's window read the queue as silence. It starts after the walk.
-      idealAfterWalk = fireIdealCompare;
     }
     // #787 — every finding the run raised, small enough for the report to carry.
     for (const f of generated.findings) noteFinding(f);
@@ -1145,7 +1154,6 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     const firstSwept = summaries.find((s) => s.index === firstEngravingIndex) ?? summaries[0] ?? null;
 
     // #1048 — THE SWEEP WALK IS DONE; the worker is free. Now the background ideal may have it.
-    idealAfterWalk?.();
 
     if (!outcome.ok) {
       set({

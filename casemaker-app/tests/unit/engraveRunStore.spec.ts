@@ -45,6 +45,7 @@ import { calibrationFromReplies, type MachineCalibration } from '@/engine/cnc';
 import { clearFeedCatalogue, setFeedCatalogue, setLocatedFeedTable, type FeedCatalogueRow, type StoredFeedRow } from '@/engine/cnc/feeds';
 import { resetFeedTableStore, useFeedTableStore } from '@/store/feedTableStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
+import { setInventoryEntries } from '@/engine/cnc/toolRegistry';
 import { resetEngraveRegistrationStore, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import type { FeedRow } from '@/platform/feedClient';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
@@ -2087,158 +2088,160 @@ describe('#893 — a run holds the measured pick, and an unsimulated program can
   });
 });
 
-// ── #986 (the ruling, E's review) — THE BACKGROUND IDEAL ────────────────────────────────────────
-describe('#986 the background ideal', () => {
-  const generatedWithProgram = (): EngraveGenerated => ({
+// ── #1049 — THE TRADEOFF IS GENERATE'S OWN ─────────────────────────────────────────────────────
+describe('#1049 the tradeoff Generate already measured', () => {
+  const goalForIdeal = {
+    id: 'g', name: 'g', format: 'stl' as const, sha256: 'x', data: '', size: { x: 1, y: 1, z: 1 },
+    position: { x: 0, y: 0, z: 0 }, rotation: 0, enabled: true, role: 'goal' as const,
+  };
+  const resultWithProgram = (): EngraveGenerated => ({
     ...clean(),
     nc: 'G90\nM02',
     programs: [{ setupIndex: 1, setupId: 'setup-1', toolKey: 'flat-1.0', nc: 'G90\nM02', verify: null, frame: 'flat' } as never],
   });
-
+  const outcome = (ms: number): never => ({ coverage: 0.9, cutInto: { adjudicatedFraction: 0, maxMm: 0 }, leftoverAboveMm: 0.1, cycleSeconds: ms, leftoverCells: 1, coveredCells: 100, cellAreaMm2: 0.01 } as never);
+  const tradeoff = { material: true, line: 'the ideal leaves less standing', differences: [] } as never;
+  const withGoal = (): void => {
+    useEngraveJobStore.setState({ job: { ...useEngraveJobStore.getState().job, targetObject: goalForIdeal, tool: flatEndMill(3.175, { name: '3.175 mm flat end' }) } });
+  };
   /** Let the store's microtasks run. */
   const settle = async (): Promise<void> => {
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
   };
-
-  it('the owned result arrives first, the ideal second, and the card reads comparing in between', async () => {
-    let releaseIdeal!: (v: { tradeoff: { material: boolean; line: string | null; differences: never[] }; owned: null; ideal: null }) => void;
-    const idealPromise = new Promise<{ tradeoff: { material: boolean; line: string | null; differences: never[] }; owned: null; ideal: null }>((resolve) => {
-      releaseIdeal = resolve;
-    });
-    setEngraveRunClientLoader(async () => ({
-      engraveGenerate: async () => generatedWithProgram(),
-      engravePlanIdeal: () => idealPromise,
-      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
-    }));
-    // The background ideal needs a goal on the job; the fake client ignores its contents.
-    const goalForIdeal = {
-      id: 'g', name: 'g', format: 'stl' as const, sha256: 'x', data: '', size: { x: 1, y: 1, z: 1 },
-      position: { x: 0, y: 0, z: 0 }, rotation: 0, enabled: true, role: 'goal' as const,
-    };
-    useEngraveJobStore.setState({ job: { ...useEngraveJobStore.getState().job, targetObject: goalForIdeal, tool: flatEndMill(3.175, { name: '3.175 mm flat end' }) } });
-    const realLoad = useSimStore.getState().loadProgram;
+  const realLoad = (): void => {
     useSimStore.setState({ loadProgram: async () => { useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false }); return swept(); } });
-    try {
-      // #1048 — the ideal starts only after the sweep walk, so the RUN resolves first and the
-      // ideal is still out: the owned result is on screen while the card reads comparing.
-      await useEngraveRunStore.getState().generate();
-      expect(useEngraveRunStore.getState().generated?.nc).toBe('G90\nM02');
-      expect(useEngraveRunStore.getState().idealPlan.status).toBe('comparing');
-      releaseIdeal({ tradeoff: { material: false, line: null, differences: [] }, owned: null, ideal: null });
-      await settle();
-      expect(useEngraveRunStore.getState().idealPlan.status).toBe('ready');
-    } finally {
-      useSimStore.setState({ loadProgram: realLoad });
-    }
-  }, 60_000);
+  };
 
-  it('#1048 — the background ideal starts only after the sweep walk', async () => {
-    const order: string[] = [];
+  it('lights the card from the result and plans nothing — engravePlanIdeal is not called', async () => {
+    let idealCalls = 0;
+    const withIdeal = resultWithProgram();
+    withIdeal.planIdeal = { perSetup: [] } as never;
+    withIdeal.planTradeoff = tradeoff;
     setEngraveRunClientLoader(async () => ({
-      engraveGenerate: async () => {
-        order.push('generate');
-        return generatedWithProgram();
-      },
+      engraveGenerate: async () => withIdeal,
       engravePlanIdeal: async () => {
-        order.push('ideal');
-        return { tradeoff: { material: false, line: null, differences: [] }, owned: null, ideal: null };
+        idealCalls += 1;
+        return { tradeoff: null, owned: null, ideal: null };
       },
       simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
     }));
-    const goalForIdeal = {
-      id: 'g', name: 'g', format: 'stl' as const, sha256: 'x', data: '', size: { x: 1, y: 1, z: 1 },
-      position: { x: 0, y: 0, z: 0 }, rotation: 0, enabled: true, role: 'goal' as const,
-    };
-    useEngraveJobStore.setState({ job: { ...useEngraveJobStore.getState().job, targetObject: goalForIdeal, tool: flatEndMill(3.175, { name: '3.175 mm flat end' }) } });
-    const realLoad = useSimStore.getState().loadProgram;
-    useSimStore.setState({
-      loadProgram: async () => {
-        order.push('load');
-        useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false });
-        return swept();
-      },
-    });
+    withGoal();
+    const real = useSimStore.getState().loadProgram;
+    realLoad();
     try {
       await useEngraveRunStore.getState().generate();
-      // The walk's loads all precede the ideal: the second full plan must not hold the worker
-      // while the run's own sweep is queued behind it (#1048).
-      expect(order.lastIndexOf('load')).toBeGreaterThanOrEqual(0);
-      expect(order.indexOf('ideal'), `call order: ${order.join(' → ')}`).toBeGreaterThan(order.lastIndexOf('load'));
+      expect(useEngraveRunStore.getState().idealPlan.status).toBe('ready');
+      expect(useEngraveRunStore.getState().idealPlan.tradeoff).toEqual(tradeoff);
+      expect(idealCalls, 'Generate already measured it').toBe(0);
     } finally {
-      useSimStore.setState({ loadProgram: realLoad });
+      useSimStore.setState({ loadProgram: real });
     }
   }, 60_000);
 
-  it('#1048 — Stop works while the load waits for the worker', async () => {
-    let cancels = 0;
+  it('a result with no ideal leaves the card idle and plans nothing', async () => {
+    let idealCalls = 0;
     setEngraveRunClientLoader(async () => ({
-      engraveGenerate: async () => generatedWithProgram(),
-      engravePlanIdeal: async () => ({ tradeoff: { material: false, line: null, differences: [] }, owned: null, ideal: null }),
-      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
-      cancelGenerate: () => {
-        cancels += 1;
+      engraveGenerate: async () => resultWithProgram(),
+      engravePlanIdeal: async () => {
+        idealCalls += 1;
+        return { tradeoff: null, owned: null, ideal: null };
       },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
     }));
-    const goalForIdeal = {
-      id: 'g', name: 'g', format: 'stl' as const, sha256: 'x', data: '', size: { x: 1, y: 1, z: 1 },
-      position: { x: 0, y: 0, z: 0 }, rotation: 0, enabled: true, role: 'goal' as const,
-    };
-    useEngraveJobStore.setState({ job: { ...useEngraveJobStore.getState().job, targetObject: goalForIdeal, tool: flatEndMill(3.175, { name: '3.175 mm flat end' }) } });
-    const realLoad = useSimStore.getState().loadProgram;
-    useSimStore.setState({ loadProgram: () => new Promise(() => undefined) as never });
+    withGoal();
+    const real = useSimStore.getState().loadProgram;
+    realLoad();
     try {
-      void useEngraveRunStore.getState().generate();
-      await new Promise((r) => setTimeout(r, 0));
-      expect(useEngraveRunStore.getState().phase, 'the walk is on the wait').toBe('simulating');
-      // The press the panel's Cancel calls: it must free the app from a queued load too.
-      useEngraveRunStore.getState().cancelGenerate();
-      expect(cancels).toBe(1);
-      expect(useEngraveRunStore.getState().phase).not.toBe('simulating');
+      await useEngraveRunStore.getState().generate();
+      expect(useEngraveRunStore.getState().idealPlan).toEqual({ status: 'idle', tradeoff: null });
+      expect(idealCalls).toBe(0);
     } finally {
-      useSimStore.setState({ loadProgram: realLoad });
+      useSimStore.setState({ loadProgram: real });
     }
-  });
+  }, 60_000);
 
   it('a stale run’s ideal never writes over the current run', async () => {
-    const releases: ((v: { tradeoff: { material: boolean; line: string | null; differences: never[] }; owned: null; ideal: null }) => void)[] = [];
+    const releases: ((v: { tradeoff: unknown; owned: null; ideal: null }) => void)[] = [];
+    const withIdeal = resultWithProgram();
+    withIdeal.planIdeal = { perSetup: [] } as never;
+    withIdeal.planTradeoff = tradeoff;
     setEngraveRunClientLoader(async () => ({
-      engraveGenerate: async () => generatedWithProgram(),
+      engraveGenerate: async () => withIdeal,
       engravePlanIdeal: () =>
         new Promise((resolve) => {
           releases.push(resolve as never);
         }),
       simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
     }));
-    // The background ideal needs a goal on the job; the fake client ignores its contents.
-    const goalForIdeal = {
-      id: 'g', name: 'g', format: 'stl' as const, sha256: 'x', data: '', size: { x: 1, y: 1, z: 1 },
-      position: { x: 0, y: 0, z: 0 }, rotation: 0, enabled: true, role: 'goal' as const,
-    };
-    useEngraveJobStore.setState({ job: { ...useEngraveJobStore.getState().job, targetObject: goalForIdeal, tool: flatEndMill(3.175, { name: '3.175 mm flat end' }) } });
-    const realLoad = useSimStore.getState().loadProgram;
-    useSimStore.setState({ loadProgram: async () => { useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false }); return swept(); } });
+    withGoal();
+    const real = useSimStore.getState().loadProgram;
+    realLoad();
     try {
-      // #1048 — each run's ideal starts after ITS walk; awaiting the run lands the ideal request.
-      const runA = useEngraveRunStore.getState().generate();
-      await runA;
-      const runB = useEngraveRunStore.getState().generate();
-      await runB;
-      expect(releases.length).toBeGreaterThanOrEqual(2);
-      // A's ideal resolves LAST, after B started: it must be dropped, and B's (still pending) state
-      // must stand.
+      // #1048/#1049 — the press is the only caller now; a run's result sets the card, and a
+      // press's late answer must not overwrite a later run's line.
+      await useEngraveRunStore.getState().generate();
+      useEngraveRunStore.getState().comparePlans();
+      await Promise.resolve();
+      expect(releases.length).toBe(1);
+      // Run B lands its own result while A's press is still out.
+      await useEngraveRunStore.getState().generate();
+      expect(useEngraveRunStore.getState().idealPlan.tradeoff).toEqual(tradeoff);
       releases[0]!({ tradeoff: { material: true, line: 'stale line', differences: [] }, owned: null, ideal: null });
-      await runA;
       await settle();
-      expect(useEngraveRunStore.getState().idealPlan.tradeoff?.line ?? null).toBeNull();
-      expect(useEngraveRunStore.getState().idealPlan.status).toBe('comparing');
-      releases[1]!({ tradeoff: { material: false, line: null, differences: [] }, owned: null, ideal: null });
-      await runB;
-      await settle();
+      expect(useEngraveRunStore.getState().idealPlan.tradeoff, 'A’s late answer is dropped').toEqual(tradeoff);
       expect(useEngraveRunStore.getState().idealPlan.status).toBe('ready');
     } finally {
-      useSimStore.setState({ loadProgram: realLoad });
+      useSimStore.setState({ loadProgram: real });
+    }
+  }, 60_000);
+
+  it('a stale run’s ideal never writes over the current run after an inventory change', async () => {
+    // #1049 (the Manager's case) — AN INVENTORY CHANGE IS SHOP STATE, NOT JOB STATE: it must mark
+    // the run stale, and then the press passes NO held outcome so the worker plans both halves
+    // instead of comparing against a plan made with a different set of owned cutters.
+    let idealCalls = 0;
+    let heldArg: unknown = 'unset';
+    const withIdeal = resultWithProgram();
+    const ownedOutcome = outcome(450);
+    withIdeal.plan = { perSetup: [], outcome: ownedOutcome } as never;
+    withIdeal.planIdeal = { perSetup: [] } as never;
+    withIdeal.planTradeoff = tradeoff;
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => withIdeal,
+      engravePlanIdeal: async (...args: unknown[]) => {
+        idealCalls += 1;
+        heldArg = args[5];
+        return { tradeoff: null, owned: null, ideal: null };
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    withGoal();
+    const real = useSimStore.getState().loadProgram;
+    realLoad();
+    try {
+      await useEngraveRunStore.getState().generate();
+      useEngraveRunStore.getState().comparePlans();
+      await settle();
+      expect(idealCalls).toBe(1);
+      expect(heldArg, 'the current run’s owned outcome is reused').toEqual(ownedOutcome);
+
+      // The possession is registered in the house: the registry store moves, and the run must go
+      // stale (the watcher compares `cuttersKey`, which hashes the inventory’s `inv:` entries).
+      setInventoryEntries([{ key: 'inv:1049', tool: flatEndMill(2, { name: '2 mm flat' }), provenance: 'test' }]);
+      useToolRegistryStore.setState({ items: [{ id: '1049' } as never] });
+      expect(useEngraveRunStore.getState().staleSince, 'an inventory change marks the run stale').not.toBeNull();
+      expect(useEngraveRunStore.getState().staleReason).toBe('cutters');
+
+      useEngraveRunStore.getState().comparePlans();
+      await settle();
+      expect(idealCalls).toBe(2);
+      expect(heldArg, 'a stale run passes no held outcome').toBeNull();
+    } finally {
+      setInventoryEntries([]);
+      useToolRegistryStore.setState({ items: [] });
+      useSimStore.setState({ loadProgram: real });
     }
   }, 60_000);
 });
@@ -2279,9 +2282,15 @@ describe('#986 the press and the failure path', () => {
     try {
       await useEngraveRunStore.getState().generate();
       await settle();
-      expect(useEngraveRunStore.getState().idealPlan.status).toBe('ready');
-      expect(calls).toBe(1);
+      // #1049 — Generate plans both outcomes itself; a result with no ideal on it lights nothing
+      // and calls nothing. The press is the only caller.
+      expect(useEngraveRunStore.getState().idealPlan).toEqual({ status: 'idle', tradeoff: null });
+      expect(calls).toBe(0);
       // The press re-runs the SAME computation — not just the recorded choice.
+      useEngraveRunStore.getState().comparePlans();
+      await settle();
+      expect(calls).toBe(1);
+      expect(useEngraveRunStore.getState().idealPlan.status).toBe('ready');
       useEngraveRunStore.getState().comparePlans();
       await settle();
       expect(calls).toBe(2);
@@ -2304,6 +2313,8 @@ describe('#986 the press and the failure path', () => {
     useSimStore.setState({ loadProgram: async () => { useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false }); return swept(); } });
     try {
       await useEngraveRunStore.getState().generate();
+      // #1049 — the press is what asks the worker; a refusing worker leaves no spinner.
+      useEngraveRunStore.getState().comparePlans();
       await settle();
       expect(useEngraveRunStore.getState().idealPlan).toEqual({ status: 'idle', tradeoff: null });
     } finally {
