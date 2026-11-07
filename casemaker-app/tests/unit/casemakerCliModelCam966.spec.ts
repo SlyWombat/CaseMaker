@@ -175,6 +175,13 @@ describe('#966 the headless CLI generate path posts a goal job through cam/model
     // skim's join used to rapid 0.739 mm below the stock top: "line 37 ... 18.347 mm³").
     const rapidThrough = r.diagnostics.filter((d) => d.code === 'rapid-through-stock');
     expect(rapidThrough, rapidThrough.map((d) => d.message).join('\n')).toEqual([]);
+    // #1068 — THE ACCEPTED FACT TRAVELS TO THE RECEIPT. The run posts with the top setup's share
+    // stated as the job's own line — the same sentence the panel shows — and never as a step or a
+    // proposal: what a flip would involve lives in the panel's action, not on the paper.
+    const unreached = r.diagnostics.filter((d) => d.code === 'goal-unreached');
+    expect(unreached.length, 'this goal leaves a share the top setup does not reach').toBeGreaterThan(0);
+    expect(unreached[0]!.message).toMatch(/faces away from this setup and is left as stock/);
+    expect(unreached[0]!.message).not.toMatch(/Setup 1 drills|locating holes/);
 
     if (r.command !== 'engrave') throw new Error('unreachable — checked above');
     expect(r.details.programs.length).toBeGreaterThan(0);

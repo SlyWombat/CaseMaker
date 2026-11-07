@@ -603,6 +603,25 @@ export interface JobFinding {
    */
   goalFlipSides?: Face[];
   /**
+   * #1068 — on `goal-unreached`, THE DRAWER'S ONE ACTION VERB, when the plan can be accepted as
+   * the job stands ("Add the flipped setup"). A proposal is an action, never a step: the warning's
+   * sentence carries the fact only, and what the flip would involve lives in `goalFlipDetail`.
+   * Absent when the plan exists but this job cannot accept it — `goalFlipNeed` says why.
+   */
+  goalFlipAction?: string;
+  /**
+   * #1068 — on `goal-unreached`, WHAT THE ACTION WOULD INVOLVE, shown only inside the action's own
+   * expansion ("If you add it:"): the sides, the share they reach, the locating holes and the
+   * second setup's registration. Never part of the warning's sentence, never numbered as steps.
+   */
+  goalFlipDetail?: string;
+  /**
+   * #1068 — on `goal-unreached`, WHY NO ACTION IS OFFERED when the plan exists but cannot be
+   * accepted here (the holes would post below the bed, or no owned cutter drills them). In the
+   * operator's words: "needs a sacrificial board under the blank".
+   */
+  goalFlipNeed?: string;
+  /**
    * #872 — on `goal-unreached`, the share of the goal's surface the SIDES' union reaches
    * geometrically (0…1). The sentence states it; the panel does not have to recompute it.
    */
