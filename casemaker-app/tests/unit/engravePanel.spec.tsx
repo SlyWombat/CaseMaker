@@ -125,6 +125,65 @@ describe('EngravePanel (#205)', () => {
     expect(rows()).toHaveLength(4);
   });
 
+  // #1051 — THE LINE THE OPERATOR CUTS FROM SPEAKS FOR THE PLAN. Before a result it is advice
+  // (the rule's or the search's); once programs have posted, it lists THEIR cutters — in cut
+  // order, each once, with the registry key beside the display name — so the screen can never
+  // show a cutter the plan did not use.
+  it('#1051 — once a plan has posted, the cutter line lists its programs’ cutters, keys and all', () => {
+    const before = useEngraveRunStore.getState().generated;
+    const program = (toolKey: string): EngraveProgram =>
+      ({ setupIndex: 1, setupId: 'setup-1', toolKey, nc: '', verify: null }) as EngraveProgram;
+    try {
+      act(() => {
+        setInventoryEntries([
+          { key: 'inv:kz-o-flute-3-175-25', provenance: 'test', tool: flatEndMill(3.175, { name: 'O-flute', fluteLength: 25 }) },
+          {
+            key: 'inv:kz-ball-nose-3-175-22',
+            provenance: 'test',
+            tool: { ...flatEndMill(3.175, { name: 'Ball', fluteLength: 22 }), shape: 'ball', typeText: 'Ball Nose' } as Tool,
+          },
+        ]);
+        useEngraveRunStore.setState({
+          generated: {
+            ok: true,
+            stage: 'done',
+            findings: [],
+            feeds: null,
+            threads: null,
+            cam: null,
+            nc: 'G90\nM02',
+            verify: null,
+            frameNc: null,
+            frameVerify: null,
+            facingNc: null,
+            facingVerify: null,
+            facingToolKey: null,
+            facingError: null,
+            facingCam: null,
+            predicted: [],
+            designItems: [],
+            programs: [program('inv:kz-o-flute-3-175-25'), program('inv:kz-ball-nose-3-175-22'), program('inv:kz-o-flute-3-175-25')],
+            errors: [],
+          } as unknown as EngraveGenerated,
+        });
+      });
+      render(<EngravePanel />);
+      const line = screen.getByTestId('engrave-cutter-line').textContent ?? '';
+      expect(line).toContain('⌀ 3.175 mm flat end · 25 mm flute');
+      expect(line).toContain('(inv:kz-o-flute-3-175-25)');
+      expect(line).toContain('(inv:kz-ball-nose-3-175-22)');
+      // Cut order, each cutter once (the flute's second program is not a second cutter).
+      expect(line.indexOf('inv:kz-o-flute-3-175-25')).toBeLessThan(line.indexOf('inv:kz-ball-nose-3-175-22'));
+      expect((line.match(/inv:kz-o-flute-3-175-25/g) ?? []).length).toBe(1);
+      expect(line).not.toContain('choosing…');
+    } finally {
+      act(() => {
+        useEngraveRunStore.setState({ generated: before });
+        resetRegistry();
+      });
+    }
+  });
+
   it('marks a depth past the floor and shows the finding under that row', () => {
     render(<EngravePanel />);
     // 12 mm stock, 1 mm minimum floor -> at most 11 mm.
@@ -4706,6 +4765,9 @@ describe('#798 — the Cutter line', () => {
   beforeEach(() => {
     useEngraveJobStore.getState().replace(defaultEngraveJob());
     useEngravePreviewStore.setState({ measured: null, measuredJob: null, measuredStatus: 'idle', measuredError: null });
+    // #1051 — a result left by another test is not this job's; the line's pre-plan statements are
+    // what these cases read, so the run store starts clean.
+    useEngraveRunStore.setState({ generated: null, staleSince: null });
     resetEngraveRows();
   });
 
