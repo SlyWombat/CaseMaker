@@ -8092,7 +8092,7 @@
                   "description": "The anchor the bracket is pinned at; Makera's origin is relative to Anchor 1."
                 },
                 "clamps": {
-                  "description": "The clamp places the job was set up with, on the free edges. Zero to four; ZERO means the part is held by double-sided tape under it (the vendor tray’s own side-2 hold — the bracket is then only the fence).",
+                  "description": "The clamp places the job was set up with, on the free edges. One to four; ZERO only when the board under the blank is taped (the vendor tray’s side-2 hold — the bracket is then only the fence).",
                   "items": {
                     "properties": {
                       "at": {

@@ -1558,7 +1558,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       pockets: noFlatFallback ? null : {
         ...(depthBandMm === undefined ? {} : { depthBandMm }),
         stockThicknessMm: input.stock.thickness,
-        stockFootprintMm: { length: input.stock.length, width: input.stock.width },
+        // #943 (10) — THE OUTLINE-IS-THE-STOCK RULE IS A SINGLE-SETUP RULE. It exists for a side-2
+        // job whose stock IS the freed part; a two-setup job on a blank keeps its freeing contour
+        // on every setup as before (a part that fills the blank in one frame is the 966 multi-setup
+        // case, whose setups each plan their own side of the stock). Absent below the two-setup
+        // case, so the rule cannot fire there.
+        ...(input.setups.length > 1 ? {} : { stockFootprintMm: { length: input.stock.length, width: input.stock.width } }),
         houseFlats: flats,
         houseAll: input.cutters.house,
         ...(input.sacrificialBreakthroughMm === undefined ? {} : { sacrificialBreakthroughMm: input.sacrificialBreakthroughMm }),
