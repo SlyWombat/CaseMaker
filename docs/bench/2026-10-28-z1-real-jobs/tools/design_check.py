@@ -28,6 +28,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import render  # noqa: E402
 
 TOL = 0.05  # mm, depth tolerance
+# "MATERIAL LEFT" IS COUNTED ONLY ABOVE 0.1 mm — the first band the app's own goal check reports
+# (GOAL_LEFTOVER_BANDS_MM), so the two checkers share one threshold. A V groove sampled one grid
+# pitch off its centreline reads 0.067 mm standing (j10); under a 0.05 mm threshold that was a
+# deviation, under the goal check's own first band it is not material at all.
+LEFTOVER_MM = 0.1
 ERODE_MM = 0.3  # the tool cannot hold the design's inner corners; check this far inside
 OUTSIDE_MM = 0.15  # a cut this far below the top, away from the design, is overcut
 KERF_MARGIN_MM = 3.5  # a cutout's kerf lies within this of the part's outline
@@ -496,7 +501,7 @@ def main():
             deep = float(np.mean(vals < -T - 0.35))  # breakthrough depth is ~T + 0.3
             report['items'].append({'id': it['id'], 'kind': it['kind'], 'through': True, 'left': round(left, 4), 'deepPastBreak': round(deep, 4), 'maxZ': round(float(vals.max()), 3), 'areaMm2': round(float(mask.sum()) * g.res * g.res, 2)})
         else:
-            left = float(np.mean(vals > want + TOL))
+            left = float(np.mean(vals > want + LEFTOVER_MM))
             deep = float(np.mean(vals < want - TOL))
             report['items'].append({'id': it['id'], 'kind': it['kind'], 'depth': it['depth'], 'left': round(left, 4), 'deep': round(deep, 4), 'p05': round(float(np.percentile(vals - want, 5)), 3), 'maxZ': round(float(vals.max()), 3), 'areaMm2': round(float(mask.sum()) * g.res * g.res, 2)})
     # Outside: material removed where the design expects stock. On a part cut free by a cut-out,

@@ -794,9 +794,10 @@ def page(cards, args, sha, loc, cat):
   and the raw share is printed as a fact.</p>
   <p>Two scoring rules on the design check, stated so the numbers can be read: a cell within the
   check’s own 0.3 mm erosion of a <b>deeper item’s region</b> is that item’s cut, not this one’s
-  over-depth (a ray that starts inside the head pocket’s V flank); and a <b>painted band cut by a V
+  over-depth (a ray that starts inside the head pocket’s V flank); a <b>painted band cut by a V
   cutter</b> is scored as a cone — its walls are the design — whether or not the job carries
-  <code>vCarveDepth</code>.</p>
+  <code>vCarveDepth</code>; and the design check counts <b>material left</b> only above 0.1 mm, the
+  first band the app’s own goal check reports — one threshold for both checkers.</p>
   <p>Not reproducible here, so not cards: {html.escape('; '.join(f'{a} — {b}' for a, b in APPENDIX))}.</p>
   <h3>The five hardwood samples (#936–#941, the 36 × 36 × 100 sticks)</h3>
   <p>A sample joins the card table below as soon as its job file is committed; until then this is what
