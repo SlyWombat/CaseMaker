@@ -1,0 +1,64 @@
+name: 🔧 Engine work item (ready-gated)
+description: A CAM-engine change with the analysis done up front. The manager sets `ready` only when all six fields are filled; programmers take `ready` issues only.
+labels: [fabrication]
+body:
+  - type: textarea
+    id: stamping-fact
+    attributes:
+      label: 1. Stamping fact
+      description: Which operation, move and line produces the symptom, with the numbers from the dump that prove it (plan dump `programs[].operations[].name`, the nearest move at the level, the gate's goal/union values at the cell).
+      placeholder: |
+        Cell (7.1, 63.5) at −9: nearest T1 move at that level is Pocket "pocket-2" feed (4.125, 58.99)→(4.125, 63.55), d = 2.975. goal −8.869, union −9.000. No rough pass within R.
+    validations:
+      required: true
+  - type: textarea
+    id: mechanism
+    attributes:
+      label: 2. Mechanism, in geometry
+      description: One paragraph a reader can check against the data. If it cannot be stated, the analysis is not done.
+      placeholder: |
+        The mask square for cell (i, j) spans [i·pitch, (i+1)·pitch] but its five samples span [i·pitch − ½, i·pitch + ½]; the far half is opened by samples that never looked at it, and pocketLoops insets exactly R from that edge.
+    validations:
+      required: true
+  - type: textarea
+    id: picture
+    attributes:
+      label: 3. Picture
+      description: The one section or map from the §4 render set that shows the mechanism (not the symptom). Path or link.
+      placeholder: scratchpad/970/pocket-mask-half-pitch.svg — section along y = 63.5
+    validations:
+      required: true
+  - type: textarea
+    id: cost
+    attributes:
+      label: 4. Cost line (§8.9, before the branch)
+      description: What the stage iterates over, the index it uses, expected seconds from a synthetic timing, and the 3× stop.
+      placeholder: |
+        O(cells) per level over the bins' per-cell maxZ; 26k cells × 27 levels ≈ 0.7 M reads, < 1 s. Elephant plan expected 210 s; stop at 630 s.
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: 5. The change, named
+      description: File, function, one sentence of what changes, and what must not change.
+      placeholder: |
+        ops/pocket.ts and ops/rough.ts: pass x0 − half, y0 − half to maskLoopsFromPredicate. Rings, links, the ceiling gate and the margin are unchanged.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 6. Acceptance, as numbers
+      description: Which cells go to zero, which card lines must not move, which spec pins it red-first.
+      placeholder: |
+        Elephant adjudicated 11 → 0; organizer 2 unchanged (gate class, #943 v5); tray lines unchanged to the digit; red-first spec: a synthetic ridge between a cell's corner samples.
+    validations:
+      required: true
+  - type: input
+    id: owner
+    attributes:
+      label: Analysis by
+      placeholder: review session (case-maker-6b) / manager
+    validations:
+      required: true
