@@ -1063,6 +1063,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // the CLI and the Cut card cannot disagree about which cutter a posted program names.
     const goalCheck = goalCheckForProgram(job, pureGoalObject(job) !== null, {
       passCoverage: goalPassCoverage(shopDefaults),
+      // #1064 (d) — the plan's own bevel prediction, stated beside the measurement.
+      ...(generated.plan?.outcome?.predictedCutIntoMm == null
+        ? {}
+        : { predictedCutIntoMm: generated.plan.outcome.predictedCutIntoMm }),
       // #955/V2-2 — the edge-break allowance's GATE parameters, from the job's edgeBreak and the
       // tools this run posts (never the CAM's plan, A's R3). No edge break → no allowance.
       ...goalEdgeBreakOptions(

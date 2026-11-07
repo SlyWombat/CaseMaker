@@ -44,4 +44,11 @@
 // (`straddlingNotScoredCells` / `straddlingMaxStepMm`), never silent. A one-cell gouge on flat
 // ground (step 0) can never qualify. The rule's fingerprint gains the two constants in
 // `tests/unit/goalRuleFreeze948.spec.ts`; the cards are re-scored in the same commit.
-export const SIMULATOR_VERSION = 6;
+//
+// v7 (#1064) — THE EDGE-BREAK BAND SEEDS ONLY FROM THE EDGES THE JOB NAMED. The job's edge-break
+// statement gains `edges: 'silhouette' | 'all'` (absent = silhouette, the part's own outline);
+// `all` is the pre-v7 reading (every design wall, interior pocket lips included). A stated rim
+// chamfer no longer excuses a V floor pocket's lip at an interior wall unless the job said `all`.
+// The canonical fingerprint keeps its numbers under an explicit `all`; the new default is pinned
+// beside it. The cards carrying this rule's numbers are re-scored in the same commit.
+export const SIMULATOR_VERSION = 7;

@@ -759,7 +759,19 @@ export interface GoalCutIntoOptions {
      * synthetic fixtures' pre-`who` behaviour).
      */
     toolNumber?: number;
+    /**
+     * #1064 — WHICH EDGES THE BAND SEEDS FROM. `silhouette` (default, and what an absent field
+     * means) is the part's own outline; `all` adds every interior design wall (the pre-#1064
+     * reading, which let a stated rim chamfer excuse a V floor pocket's lip at an interior wall).
+     */
+    edges?: 'silhouette' | 'all';
   };
+  /**
+   * #1064 (d) — THE PLAN'S PREDICTED LIP BEVEL, mm (`depth·tan(half)` per side on a floor-correct
+   * V pocket; `PlanOutcome.predictedCutIntoMm`). Stated in the sentence BESIDE the measured
+   * number, never instead of it: "predicted 0.60 mm, measured 0.52 mm". Absent = no prediction.
+   */
+  predictedCutIntoMm?: number;
   /**
    * #964 — the per-cell identity of the lowest stamp: the tool number that left it (0 = none),
    * sampled on the same grid as the swept top. Needed only with `edgeBreak.toolNumber`.
@@ -1154,8 +1166,12 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   // of the outer rim is excused like any interior edge's — without it, cells just inside the rim
   // were adjudicated even though the nearest wall was 0.10 mm away, inside a 1.5875 mm reach. The
   // WALL SHADOW still seeds from `wall` alone (a different question, measured separately).
+  // #1064 — THE BAND SEEDS ONLY FROM THE EDGES THE JOB NAMED: the part's silhouette by default,
+  // every interior design wall only when the statement says `all`. A rim chamfer no longer excuses
+  // a V floor pocket's lip at an interior wall without the job having said so.
+  const bandEdges = opts.edgeBreak?.edges ?? 'silhouette';
   const bandSeed = new Uint8Array(cells);
-  for (let k = 0; k < cells; k++) if (wall[k] === 1 || border[k] === 1) bandSeed[k] = 1;
+  for (let k = 0; k < cells; k++) if (border[k] === 1 || (bandEdges === 'all' && wall[k] === 1)) bandSeed[k] = 1;
   const shadowRadius = opts.wallShadowRadiusMm;
   const shadow =
     shadowRadius !== undefined && shadowRadius > 0
@@ -1318,9 +1334,15 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     edgeBreakCells + wallNotScoredCells + shadowNotScoredCells + straddlingNotScoredCells > 0
       ? ` (the rim edge break${edgeBreakCells > 0 ? `, ${(edgeBreakFraction * 100).toFixed(2)} % of the goal,` : ''} and ${(wallNotScoredFraction * 100 + shadowNotScoredFraction * 100).toFixed(2)} % of cells the heightfield cannot adjudicate are not counted${straddlingClause})`
       : '';
+  // #1064 (d) — MEASURED BESIDE PREDICTED. The plan's own bevel prediction rides in the sentence
+  // when the caller supplies it; the measured number is still the verdict.
+  const predictedNote =
+    opts.predictedCutIntoMm === undefined
+      ? ''
+      : ` The plan predicted ${opts.predictedCutIntoMm.toFixed(2)} mm, measured ${adjudicatedMaxMm.toFixed(2)} mm.`;
   const sentence =
     judgedCells > 0
-      ? `goal check: ${(adjudicatedFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(adjudicatedCells, cellArea).toFixed(1)} mm²) cut into by up to ${adjudicatedMaxMm.toFixed(3)} mm — ${adjudicatedVolumeMm3.toFixed(1)} mm³ over-cut${excludedNote}.`
+      ? `goal check: ${(adjudicatedFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(adjudicatedCells, cellArea).toFixed(1)} mm²) cut into by up to ${adjudicatedMaxMm.toFixed(3)} mm — ${adjudicatedVolumeMm3.toFixed(1)} mm³ over-cut${excludedNote}.${predictedNote}`
       : coverageOk
         ? `goal check: no cell cut more than 0.1 mm into the goal${excludedNote} (${(coverageFraction * 100).toFixed(1)} % of the goal within ${cutIntoFloorMm} mm).`
         : `goal check: coverage ${surfacePct} % of the goal's top surface — the pass line asks ${passPct} % (${((1 - surfaceCoverage) * 100).toFixed(2)} % stands more than ${GOAL_LEFTOVER_BANDS_MM[0]} mm above the goal).`;
