@@ -2565,6 +2565,10 @@ export function EngravePanel(): JSX.Element {
           blankToleranceMm: shopDefault('runSheet.blankToleranceMm').value,
           // #926 — the air-time threshold the sheet judges a program against.
           efficiencyThresholds: efficiencyThresholds(shopDefaults),
+          // #1068 — THE FIXTURE THIS RUN WAS SWEPT AGAINST, so §8 names the bracket's arms, the
+          // job's clamps and its own obstacle boxes instead of the vise's jaws. A vise job keeps
+          // the sheet's own vise derivation (absent); a tape job states that nothing is modelled.
+          fixture: jobMount(job) === 'vise' ? undefined : (run.runMount?.fixture ?? null),
           // #927 — the last imported run's clock beside its estimate, so the sheet's §9 shows the
           // model's error on this job. Only a run with a number (machine elapsed or minutes) prints.
           lastRun:

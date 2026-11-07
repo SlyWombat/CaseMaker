@@ -101,7 +101,7 @@ import { toolDisplayName } from '../../../src/engine/cnc/toolDisplay';
 import type { JobFinding } from '../../../src/engine/cnc/engrave/jobSetup';
 import type { NodeMeshOutput } from '../../../src/workers/geometry/meshOutput';
 import { Z1 } from '../../../src/engine/cnc/machine';
-import { jobSetups, jobTool, toSetup } from '../../../src/engine/cnc/engrave/jobSetup';
+import { jobMount, jobMountObstacles, jobSetups, jobTool, toSetup } from '../../../src/engine/cnc/engrave/jobSetup';
 // #835 — each setup's own work, measured and written back into that setup only.
 import {
   deadSetupKeys,
@@ -577,6 +577,17 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    */
   const shop: EngraveShopOpts = engraveShopOpts(shopDefaults);
   /**
+   * #1068 — THE JOB'S MOUNT, DERIVED AS THE APP DERIVES IT. `jobMountObstacles` is the one
+   * derivation `engraveRunStore.ts` calls, so the command line and the browser check a bracket
+   * job against the same boxes: the two arms, the job's own clamps, the fit, and the job's own
+   * obstacles (a hole in the blank, screwed down). Before this the CLI passed NO mount: the plan
+   * lifted over nothing, the verifier had no clamps or arms to refuse, and the sweep loaded a
+   * setup with no fixture — while the run sheet told the operator to mount the vise.
+   *
+   * `null` for a vise or a tape job, exactly as the app's run store gets it.
+   */
+  const mountFor = (job: EngraveJob) => jobMountObstacles(job, shopDefaults);
+  /**
    * #922/#947 — THE PICKER'S SHOP, FIELD FOR FIELD. The app's picker
    * (`engravePreviewStore.ts`'s `previewInputs`) hands the measured search a shop WITHOUT the
    * finish allowance (only the posted Generate reads it), with the tool-change cost, and without
@@ -958,7 +969,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     try {
       // #881 — the pipeline is async (a pool can plan the roughing levels); the CLI runs it with
       // no pool, so this is the same serial plan it always was.
-      generated = await engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, shop);
+      // #1068 — the app's Generate sends `mount` inside its shop; the CLI now sends the SAME object
+      // (the mount's boxes reach the plan's travel heights and the program's verifier).
+      generated = await engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, { ...shop, mount: mountFor(job) });
     } catch (e) {
       if (isCliExit(e)) throw e;
       return {
@@ -1096,7 +1109,11 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
             (program.kind ?? 'engrave') === 'facing'
               ? `the facing pass (${program.toolKey})`
               : `program ${index + 1} (${program.toolKey})`;
-          return session.load(program.nc, toSetup(job, Z1), cutter, Z1.id, {
+          // #1068 — THE SAME FIXTURE THE APP'S SWEEP LOADS (`engraveRunStore.ts`'s
+          // `toSetup(job, machine, mount?.fixture, bed)`). Without it a bracket job's program was
+          // swept against no fixture at all, so a cutter through the bracket's arm — or through a
+          // hole the job states — was never seen.
+          return session.load(program.nc, toSetup(job, Z1, mountFor(job)?.fixture), cutter, Z1.id, {
             // #734 — the CAM posts a through move to `thickness + breakthrough`, so the sweep's floor
             // must be the same: without it a correct through cut's retract reads as a rapid through
             // material (j17 reproduced the bench's `rapid-through-stock` on 7 vertical retracts).
@@ -1332,7 +1349,15 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       // absent, this is the wall clock the command has always used.
       options.now ?? new Date(),
       MARGIN_DEFAULTS,
-      { ...(opts.sheetOptions ?? {}), efficiencyThresholds: efficiencyThresholds(shopDefaults) },
+      {
+        ...(opts.sheetOptions ?? {}),
+        efficiencyThresholds: efficiencyThresholds(shopDefaults),
+        // #1068 — §8 names the fixture THIS job's sweep was handed: the bracket's arms and the
+        // job's clamps (and its own obstacle boxes), never the vise's jaws. A vise job leaves it
+        // absent (the sheet derives the vise's own envelope, as it always did); a tape job says
+        // nothing is modelled.
+        fixture: jobMount(job) === 'vise' ? undefined : (mountFor(job)?.fixture ?? null),
+      },
     );
     if (sheet.header.fileName !== names[firstEngraving]!.ncFile) {
       fail(`run sheet file name drifted: expected ${names[firstEngraving]!.ncFile}, got ${sheet.header.fileName}`);

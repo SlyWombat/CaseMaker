@@ -51,8 +51,8 @@ const CAL: MachineCalibration = {
 
 describe('#427 the sizes are the location’s, labelled as defaults', () => {
   it('reads every bracket and clamp size from the shop defaults, none of them measured, each with a note saying so', () => {
-    expect(B.read.map((r) => r.source)).toEqual(Array(12).fill('seeded'));
-    expect(B.unmeasured).toHaveLength(12);
+    expect(B.read.map((r) => r.source)).toEqual(Array(14).fill('seeded'));
+    expect(B.unmeasured).toHaveLength(14);
     for (const r of B.read) expect(r.note, r.key).toMatch(/not (measured|a measurement)/);
     expect(B.settings).toMatchObject({ originOffset: { x: 0, y: 0 }, fitMm: 0.1, armWidth: 10, clamp: { height: 12, reach: 8 } });
     // Every stored size has a line on the caliper list, and the seat (touched, never seeded) too; the
@@ -121,6 +121,27 @@ describe('#427 the clamps and the arms', () => {
     expect(clamps[0]).toMatchObject({ min: [15, 92], max: [30, 122], topZ: 12 });
     const right = clampObstacles(PLATE, [{ edge: 'right', at: 80 }], B.settings)[0]!;
     expect(right).toMatchObject({ min: [92, 72.5], max: [122, 87.5], label: 'the clamp on the right edge, 12.5 mm in from the back corner' });
+  });
+
+  it('#1068 — a SIDE clamp stands outside the blank: no reach over the stock, its top at the stock’s top', () => {
+    const side = clampObstacles(PLATE, [{ edge: 'back', at: 80, kind: 'side' }], B.settings)[0]!;
+    // The Side Clamp Set's seeded sizes: 15 mm along the edge, 12 mm out from it (never calipered, #1069).
+    expect(side).toMatchObject({
+      min: [72.5, 100],
+      max: [87.5, 112],
+      topZ: 0,
+      label: 'the side clamp on the back edge, 12.5 mm in from the right-hand corner',
+    });
+    const right = clampObstacles(PLATE, [{ edge: 'right', at: 40, kind: 'side' }], B.settings)[0]!;
+    expect(right).toMatchObject({ min: [100, 32.5], max: [112, 47.5] });
+    // ABSENT KIND IS A TOP CLAMP, byte for byte — no stored job moves.
+    expect(clampObstacles(PLATE, [{ edge: 'back', at: 80 }], B.settings)[0]).toEqual(
+      clampObstacles(PLATE, [{ edge: 'back', at: 80, kind: 'top' }], B.settings)[0],
+    );
+    // …and clamps-overlap still applies to the side pair (two clamps at one place).
+    expect(
+      validateBracketMount(PLATE, [{ edge: 'back', at: 80, kind: 'side' }, { edge: 'back', at: 82, kind: 'side' }], B).map((f) => f.code),
+    ).toContain('clamps-overlap');
   });
 
   it('the arms are outside the front and left edges, their tops from the bracket’s height', () => {
@@ -221,6 +242,20 @@ describe('#427 the verifier runs it on the file', () => {
     expect(f!.message).toContain('back edge');
     // Without the mount's obstacles, nothing changes.
     expect(codes(text, ctx({ mountObstacles: undefined }))).not.toContain('clamp-in-path');
+  });
+
+  it('#1068 — a side clamp: a cut inside the blank is not refused; one that leaves the blank at that edge is', () => {
+    const side = clampObstacles(PLATE, [{ edge: 'back', at: 80, kind: 'side' }], B.settings);
+    const withSide = ctx({ mountObstacles: { obstacles: side, uncertainty: B.settings.fitMm } });
+    // The tray's own case: a pocket 5 mm inside the back edge. A TOP clamp's 8 mm reach refused
+    // this pocket; the side clamp never reaches over the stock, so clamp-in-path cannot fire.
+    expect(codes(prog(['G0 X80 Y95', 'G0 Z1', 'G1 Z-0.5 F300', 'G1 X80 Y96']), withSide)).not.toContain('clamp-in-path');
+    // …but a move that LEAVES the blank at that edge, below the stock's top, runs into it — named.
+    const out = verifyProgram(prog(['G0 X80 Y95', 'G0 Z1', 'G1 Z-0.5 F300', 'G1 Y105']), withSide).findings.find(
+      (f) => f.code === 'clamp-in-path',
+    );
+    expect(out).toBeDefined();
+    expect(out!.message).toContain('the side clamp on the back edge');
   });
 
   it('a move from a position the program never placed, below the clamps, is reported — never silently left out', () => {

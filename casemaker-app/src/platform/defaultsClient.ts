@@ -261,6 +261,10 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'clamps.topHeightMm': { label: 'top clamp height above the stock (not measured)', unit: 'mm', rule: z.number().min(1).max(80), fallback: 12 },
   'clamps.topReachMm': { label: 'top clamp reach onto the stock (not measured)', unit: 'mm', rule: z.number().min(1).max(50), fallback: 8 },
   'clamps.topInFromCornerMm': { label: 'top clamp in from the corner', unit: 'mm', rule: z.number().min(0).max(200), fallback: 15 },
+  // #1068 (review 6b) — THE SIDE CLAMP SET: a clamp that pushes the blank from outside its edge,
+  // its top below the stock's. Seeded because the set has never been calipered (#1069).
+  'clamps.sideWidthMm': { label: 'side clamp width (not measured)', unit: 'mm', rule: z.number().min(3).max(80), fallback: 15 },
+  'clamps.sideDepthMm': { label: 'side clamp depth (not measured)', unit: 'mm', rule: z.number().min(2).max(80), fallback: 12 },
   // #711 — THE TAPE HOLD RULE (#707 BM-4): the tape's area against the cutter's bite. The ratio is
   // Case Maker's own until the bench's tape coupon measures it (the design's §7), so it is a
   // setting with a per-job recommendation, never a constant in code; the inset is the layout

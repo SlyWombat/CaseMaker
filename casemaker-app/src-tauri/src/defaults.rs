@@ -239,6 +239,20 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         "mm",
         "chosen placement, not a measurement: a clamp's side this far in from the corner of the edge it holds",
     ),
+    // #1068 (review 6b) — the SIDE CLAMP SET: pushes the blank from outside its edge, its top below
+    // the stock's. Seeded; the set has never been calipered (#1069).
+    (
+        "clamps.sideWidthMm",
+        15.0,
+        "mm",
+        "default, not measured: a side clamp's width, along the edge it holds — the Side Clamp Set has never been calipered",
+    ),
+    (
+        "clamps.sideDepthMm",
+        12.0,
+        "mm",
+        "default, not measured: how far a side clamp's body stands out from the blank's edge — the Side Clamp Set has never been calipered",
+    ),
     // #711 — the tape hold rule (#707 BM-4): taped area against the cutter's bite. The coupon at
     // the bench measures the ratio.
     (
@@ -893,6 +907,14 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "clamps.topInFromCornerMm" => Some(need(
             n.is_some_and(|v| (0.0..=200.0).contains(&v)),
             "0 to 200 mm",
+        )),
+        "clamps.sideWidthMm" => Some(need(
+            n.is_some_and(|v| (3.0..=80.0).contains(&v)),
+            "3 to 80 mm",
+        )),
+        "clamps.sideDepthMm" => Some(need(
+            n.is_some_and(|v| (2.0..=80.0).contains(&v)),
+            "2 to 80 mm",
         )),
         "tape.holdRatio" => Some(need(n.is_some_and(|v| (1.0..=1000.0).contains(&v)), "1 to 1000 x")),
         "tape.insetMm" => Some(need(n.is_some_and(|v| (0.0..=50.0).contains(&v)), "0 to 50 mm")),

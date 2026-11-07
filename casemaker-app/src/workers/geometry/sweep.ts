@@ -670,7 +670,12 @@ export function holderVsFixtureUnproven(opts: {
   holderKnown: boolean;
 }): SweepDiagnostic | null {
   if (!opts.fixturePresent || opts.holderKnown || opts.fixtureTop <= opts.topZ) return null;
-  const name = opts.tallest?.label ?? 'an obstacle';
+  // #1068 — the bracket mount's labels are already a sentence's subject ("the clamp on the back
+  // edge, 15 mm in from the corner"), and this message supplies its own article: prefixing one
+  // printed "the the clamp…". A label that starts with its own article is stated without it; the
+  // pre-#1068 labels (vise jaws) and the fallback are unchanged.
+  const raw = opts.tallest?.label ?? 'an obstacle';
+  const name = raw.startsWith('the ') ? raw.slice(4) : raw;
   const rise = (opts.fixtureTop - opts.topZ).toFixed(3);
   const band = opts.uncertainty;
   const declaredTop = opts.tallest === null ? opts.topZ : opts.tallest.max[2] - band;
