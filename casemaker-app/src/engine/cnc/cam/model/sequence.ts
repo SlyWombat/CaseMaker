@@ -209,6 +209,25 @@ export interface SequenceOptions {
     /** The goal field's own cell area, mm² — the unit the rest price is stated in. */
     cellAreaMm2: number;
   } | null;
+  /**
+   * #1038 — a tick at every CANDIDATE's boundary, once before its chain is priced and its outcome
+   * simulated. The simulated outcome can be seconds per candidate and a plan is minutes; between
+   * the plan's stage reports the run's silence watchdog hears nothing. One callback per candidate
+   * costs nothing measurable (no per-cell hooks).
+   */
+  onCandidate?: (index: number, total: number) => void;
+  /**
+   * #1038 — THE STOP THE CALLER ALREADY HOLDS, checked once per candidate boundary: the plan is
+   * one synchronous call, and without this a stop raised mid-plan waits for the next stage line
+   * (429 s on the tray). Checked before the tick, so an aborted plan emits no further report.
+   */
+  signal?: AbortSignal;
+}
+
+/** #1038 — an abort crossed a catch that states step failures: it is the CALLER's stop, not a
+ *  failure of the step, so it must keep travelling. */
+export function isAbortError(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as { name?: unknown }).name === 'AbortError';
 }
 
 /**
@@ -796,6 +815,8 @@ export function priceSequence(
       // #1025 — a metadata contradiction is never a step failure to price around: it refuses the
       // whole plan, here as at every other catch on the planning path (see `planMeta.ts`).
       if (e instanceof PlanMetadataInconsistentError) throw e;
+      // #1038 — a stop raised at a boundary hook is not a step failure: it must reach the caller.
+      if (isAbortError(e)) throw e;
       ir = null;
       thrown = e instanceof Error ? e.message : String(e);
     }
@@ -942,7 +963,9 @@ export function chooseSequence(
     );
   }
 
-  const priced = candidates.map((sequence) => {
+  const priced = candidates.map((sequence, candidateIndex) => {
+    opts.signal?.throwIfAborted();
+    opts.onCandidate?.(candidateIndex, candidates.length);
     // #1019 — an EMPTY chain is the trivially-satisfied demand (every pocket un-enterable, no
     // contour): it prices at zero so it is feasible and chosen, never ranked as "could not be
     // priced"; nothing is posted for it and its `unreachable` states the pockets.
