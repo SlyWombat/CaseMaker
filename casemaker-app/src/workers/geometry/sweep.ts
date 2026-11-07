@@ -1437,14 +1437,15 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
 
   const t0 = performance.now();
   const total = timeline.checkpoints.length;
-  // #895 — no deadline: the window restarts whenever a checkpoint completes. `lastProgressAt` is
-  // moved after every checkpoint AND before the air-move phase, so each phase gets its own window.
+  // #1048 (the ruling) — THE WORKER NEVER REFUSES FINISHED WORK. This window used to refuse a
+  // sweep whose checkpoint took longer than `stallMs`, but the check runs only AFTER the
+  // checkpoint returns, so it could only ever condemn work that had already completed — it can
+  // never catch a hang (a wasm call does not yield, so the client's silence clock is the one
+  // terminator that works). A slow checkpoint is now a FACT, recorded and stated as one info
+  // note; the sweep runs on and its verdict is unchanged.
   const stallMs = opts?.stallMs;
   let lastProgressAt = performance.now();
-  // `>=` so a 0 ms window (a spec's sentinel; the shop rule's floor is 5 s) refuses at once.
-  const overStall = (): boolean => stallMs !== undefined && performance.now() - lastProgressAt >= stallMs;
-  /** The window's own deadline for the one phase that takes it as a parameter (the air moves). */
-  const freshDeadline = (): number | null => (stallMs === undefined ? null : performance.now() + stallMs);
+  const slowCheckpoints: { checkpoint: number; ms: number }[] = [];
   let msUnion = 0;
   let msExtrude = 0;
   let contours = 0;
@@ -1472,28 +1473,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
     bucket.push(f);
     return f.id;
   };
-  /**
-   * Give up without leaking. `perCheckpoint` aliases `solids`, so deleting `solids` covers
-   * both; `stock` is the only other handle alive at either call site.
-   */
-  const refuseBudget = (done: number): SweepOutcome => {
-    for (const s of solids) s.delete();
-    disposeFixture();
-    sacrificial?.delete();
-    stock.delete();
-    return {
-      ok: false,
-      diagnostics: [
-        {
-          severity: 'error',
-          code: 'sweep-stalled',
-          message: `the sweep stalled at checkpoint ${done} of ${total}: no progress for ${Math.round((stallMs ?? 0) / 1000)} s. This is a fault, not a slow program`,
-        },
-      ],
-    };
-  };
 
-  let budgetHit = false;
   let done = 0;
   for (let idx = 0; idx < total; idx++) {
     const cp = timeline.checkpoints[idx] as Checkpoint;
@@ -1618,15 +1598,20 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
       }
     }
     done = idx + 1;
+    const tookMs = performance.now() - lastProgressAt;
     lastProgressAt = performance.now();
     opts?.onProgress?.(done, total);
-    // Between checkpoints is as fine-grained as this can be: a wasm call is not interruptible.
-    if (overStall()) {
-      budgetHit = true;
-      break;
-    }
+    if (stallMs !== undefined && tookMs >= stallMs) slowCheckpoints.push({ checkpoint: done, ms: tookMs });
   }
-  if (budgetHit) return refuseBudget(done);
+  // ONE note for the whole sweep, naming the worst slow checkpoint; a fact, not a verdict.
+  if (slowCheckpoints.length > 0 && stallMs !== undefined) {
+    const worst = slowCheckpoints.reduce((a, b) => (b.ms > a.ms ? b : a));
+    diagnostics.push({
+      severity: 'info',
+      code: 'checkpoint-slow',
+      message: `checkpoint ${worst.checkpoint} of ${total} took ${(worst.ms / 1000).toFixed(1)} s — past the ${Math.round(stallMs / 1000)} s watch window (${slowCheckpoints.length} slow checkpoint${slowCheckpoints.length === 1 ? '' : 's'}); the sweep ran on and its verdict is unchanged`,
+    });
+  }
 
   // The gates that need the stock: holder depth, and the air moves.
   const swept = timeline.checkpoints.filter((cp) => cp.z < topZ);
@@ -1662,14 +1647,13 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // `fixture-unchecked` when none is modelled.
   const bedZ = setup.part.kind === 'cylinder' ? Number.NEGATIVE_INFINITY : bb.min[2];
   const a0 = performance.now();
-  // #895 — the air phase gets its own stall window: the checkpoints it follows made progress.
-  const air = checkAirMoves(tl, airMaterial, topZ, bedZ, timeline.airMoves, timeline.checkpoints, radius, freshDeadline(), fixture, fixtureTop, (d) => fixtureDiag.push(d), proximity);
+  // #1048 — the air phase has no wall-clock deadline either: the same ruling (a worker-side
+  // window can only condemn finished work, never a hang) and the check's own MAX_AIR_CHECKS cap
+  // already bounds the phase. A move the cap leaves unchecked is an ERROR in its own words
+  // (#925, `air-moves-unchecked`), never a `sweep-stalled`.
+  const air = checkAirMoves(tl, airMaterial, topZ, bedZ, timeline.airMoves, timeline.checkpoints, radius, null, fixture, fixtureTop, (d) => fixtureDiag.push(d), proximity);
   if (airMaterial !== stock) airMaterial.delete();
   const msAir = performance.now() - a0;
-  if (air.budgetExceeded) {
-    for (const g of air.gouges) g.solid.delete();
-    return refuseBudget(done);
-  }
   diagnostics.push(...air.diagnostics);
   // The fixture checks fold together and go in after the stock gates, so the picture reads in
   // the order the tool meets things.
