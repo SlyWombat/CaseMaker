@@ -251,25 +251,55 @@ export function rampThresholdMm(predicted: readonly OraclePredicted[], tool: Too
 }
 
 /**
+ * #1035 (6b's ruling, #948) — WHOSE COVERAGE FAILURE IS THE RUN'S. A #869 rough/finish split posts
+ * two goal programs, and the goal check runs once per program on the cumulative field: the rough
+ * stage reads the stock its own pass left (81.07 % under the 95 % line, `ok` false), the finish
+ * reads the end state (100 %, `ok` true). The AND of both made Design's row cross while the Cut
+ * card showed the finish pass — two surfaces disagreeing on one run. So an INTERMEDIATE goal
+ * program contributes only its CUT-INTO verdict (a gouge is real whichever stage made it); the
+ * coverage-vs-pass-line verdict counts on the LAST goal program's cumulative report.
+ *
+ * `true` when this report's own `ok` is false ONLY because its coverage is short: it is not the
+ * run's failure, and the per-program evidence says its coverage is judged at the end of the run.
+ *
+ * INVARIANT — a deferred report is COVERAGE-SHORT ONLY. `checkGoalCutInto`'s `ok` is
+ * `judgedCells === 0 && coverage`, and a judged cell is one deeper than the floor, so a report
+ * with no adjudicated cut-into at the floor (the test below) can have failed on nothing but the
+ * pass line. A report carrying a cut-into cell is never deferred: a gouge is the run's failure
+ * whichever stage made it.
+ */
+export function goalCoverageDeferred(report: OracleReport, isLastGoalProgram: boolean): boolean {
+  if (isLastGoalProgram) return false;
+  const goal = report.goalCutInto;
+  if (goal === undefined || report.ok || !goal.ran) return false;
+  // `ok = judgedCells === 0 && coverage`; a judged cell is one below the floor, so a report with
+  // no cut-into deeper than the floor failed on coverage, and that verdict is the run's last one.
+  return goal.adjudicatedMaxMm <= goal.cutIntoFloorMm + 1e-9;
+}
+
+/**
  * #844 — THE RUN'S COMBINED ORACLE. Every program's own verdict must pass; the run's tick is all
  * of them. The numbers are the run's totals (each program's worst summed — the files cut
  * different material), the band the widest tolerance any of them used, and the first failing
  * report's location. A board's copper verdict is carried and must pass too.
+ *
+ * #1035 — with `goalCoverageDeferred`'s rule: an intermediate goal program whose only failure is
+ * its own stage's coverage does not fail the run.
  */
 export function combineOracles(reports: readonly OracleReport[], copper: OracleReport | null): OracleReport {
   const all = copper === null ? reports : [...reports, copper];
   const first = reports[0] ?? copper;
   if (first === null || all.length === 0) throw new Error('no oracle report to combine');
-  const failing = reports.filter((r) => !r.ok);
-  const locus = failing[0] ?? first;
   // #948 — THE GOAL VERDICT IS THE FINAL SURFACE'S. A #869 rough/finish split posts two goal
   // programs and BOTH carry a check; the rough's leftover is not the run's verdict, so the LAST
-  // program's report that carries one is taken (not the first that has one). The combined `ok`
-  // below already folds every program's `ok`, and each of those folds its own goal check.
+  // program's report that carries one is taken (not the first that has one). #1035 — and it is
+  // that report's coverage that counts: an earlier goal program contributes only its cut-into.
   const goal = reports.reduce<OracleReport | null>(
     (last, r) => (r.goalCutInto === undefined ? last : r),
     null,
   );
+  const failing = reports.filter((r) => !r.ok && !goalCoverageDeferred(r, r === goal));
+  const locus = failing[0] ?? first;
   // #947 gate 7 / #924 — THE REST OF THE ORACLE'S EVIDENCE TRAVELS TOO, the same way. The sliver
   // width is the constant every flat comparison that ran the open states; the design-side check is
   // whose verdict the `ok` above already folds, so without it a failed run shows an unexplained
@@ -1156,10 +1186,17 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // than compare the wrong session.
       if (oracles.length === 0 && copperReport === null) throw new Error('the prediction was not checked');
       const oracle = combineOracles(oracles.map((o) => o.report), copperReport);
-      const oraclePrograms: ProgramOracle[] = oracles.map((o) => ({
+      // #1035 — the last goal-carrying program is the one whose coverage decides the run; every
+      // earlier goal program's coverage is deferred to it, and its evidence says so.
+      const lastGoalIndex = oracles.reduce<number>(
+        (last, o, i) => (o.report.goalCutInto === undefined ? last : i),
+        -1,
+      );
+      const oraclePrograms: ProgramOracle[] = oracles.map((o, i) => ({
         index: o.index,
         label: programLabel(generated.programs, o.index),
         report: o.report,
+        goalCoverageDeferred: goalCoverageDeferred(o.report, i === lastGoalIndex),
       }));
       if (mine !== seq) return;
       set({ oracle, oraclePrograms, phase: oracle.ok ? 'ready' : 'blocked' });

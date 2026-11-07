@@ -216,6 +216,34 @@ describe('engraveRunStore (#206)', () => {
       expect(sentence).toContain('the simulation does not match the prediction');
     });
 
+    it('#1035 — the gate names the FINISH, never the rough whose coverage is deferred', () => {
+      // The two-surface ruling (6b): an intermediate goal program's coverage is judged at the end
+      // of the run, so a failing run names the program that really decided — never the deferred
+      // rough that would otherwise be `find`'s first `!ok`.
+      const goal = (over: Record<string, unknown> = {}): never =>
+        ({
+          ok: true, ran: true, reason: null, goalCells: 10, pitchMm: 0.1, cutIntoFloorMm: 0.1,
+          cutIntoFraction: 0, cutIntoAreaMm2: 0, cutIntoVolumeMm3: 0, maxCutIntoMm: 0, maxCutIntoAt: null,
+          leftoverFractions: [0, 0, 0], leftoverVolumeMm3: 0, maxLeftoverMm: 0, coverageFraction: 1,
+          passCoverage: 0.95, medianDeltaMm: 0, edgeBreakFraction: 0, wallNotScoredFraction: 0,
+          shadowNotScoredFraction: 0, straddlingNotScoredCells: 0, straddlingMaxStepMm: 0,
+          adjudicatedFraction: 0, adjudicatedMaxMm: 0, adjudicatedMaxAt: null, sentence: 'goal check',
+          ...over,
+        }) as never;
+      const rough = { index: 0, label: 'program 1 (flat-1.0)', report: { ok: false, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 }, goalCutInto: goal({ ok: false, leftoverFractions: [0.19, 0, 0] }) } as never, goalCoverageDeferred: true };
+      const finish = { index: 1, label: 'program 2 (ball-2)', report: { ok: false, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 }, goalCutInto: goal({ ok: false, leftoverFractions: [0.12, 0, 0] }) } as never, goalCoverageDeferred: false };
+      const sentence = saveBlocker(
+        view({
+          generated: clean(),
+          phase: 'blocked',
+          simStatus: 'ready',
+          oracle: { ok: false, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
+          oraclePrograms: [rough, finish],
+        }),
+      );
+      expect(sentence).toBe('program 2 (ball-2): the simulation does not match the prediction');
+    });
+
     it('a stored result with no per-program predictions uses the top-level list for program 1 and does not re-judge later files', async () => {
       const { seen } = await runWith(twoPrograms(undefined, undefined), () => ({ ok: true }));
       expect(seen).toHaveLength(1);
