@@ -19,6 +19,7 @@ import io
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import urllib.request
@@ -61,14 +62,32 @@ def arg_parse():
 
 
 def sh(cmd, cwd, timeout):
+    """Run one command with a wall-clock limit, and on a timeout kill its WHOLE PROCESS GROUP.
+
+    The child starts its own session (`start_new_session`), so a timeout can signal the group.
+    `subprocess.run`'s timeout kills only the direct child: `npm run` exits, its `tsx` and node
+    grandchildren survive, and on 2026-11-07 three timed-out cards' nodes kept running as orphans
+    (7.0 + 4.1 + 2.7 GB) after their builds had moved on. Draining `communicate()` AFTER the group
+    is dead also keeps the captured output text: `TimeoutExpired` hands it back as bytes (that is
+    what crashed the j27/j29 cards at `write(r['stderr'])`).
+    """
     t0 = datetime.datetime.now()
+
+    def wall():
+        return round((datetime.datetime.now() - t0).total_seconds(), 1)
+
+    p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         text=True, start_new_session=True)
     try:
-        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
-        return {'exit': p.returncode, 'stdout': p.stdout, 'stderr': p.stderr,
-                'wall': round((datetime.datetime.now() - t0).total_seconds(), 1), 'timeout': False}
-    except subprocess.TimeoutExpired as e:
-        return {'exit': 124, 'stdout': e.stdout or '', 'stderr': e.stderr or '',
-                'wall': round((datetime.datetime.now() - t0).total_seconds(), 1), 'timeout': True}
+        out, err = p.communicate(timeout=timeout)
+        return {'exit': p.returncode, 'stdout': out, 'stderr': err, 'wall': wall(), 'timeout': False}
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        out, err = p.communicate()                 # drains the pipes now every holder is dead
+        return {'exit': 124, 'stdout': out or '', 'stderr': err or '', 'wall': wall(), 'timeout': True}
 
 
 def git_sha(repo):
