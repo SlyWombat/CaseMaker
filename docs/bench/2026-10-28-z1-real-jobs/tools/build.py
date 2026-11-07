@@ -416,7 +416,9 @@ def run_card(c, args, sha, cat):
 
     run_job = materialise_job(job, rundir, args.meshes, args)
     job = run_job if run_job != job else job   # the design check and goal reader take the same bytes
-    if not os.path.exists(receipt_path):
+    # A receipt that exists but is EMPTY is a crashed command's leavings, not a result: retrying a
+    # card must re-run the CLI (j28 was stuck on a 0-byte receipt from a failed first attempt).
+    if not os.path.exists(receipt_path) or os.path.getsize(receipt_path) == 0:
         r = sh(['npm', 'run', '-s', 'casemaker', '--', 'cut', run_job, '--out', rundir,
                 '--json', '--location', loc], os.path.join(args.repo, 'casemaker-app'), args.timeout)
         open(receipt_path, 'w').write(r['stdout'])
