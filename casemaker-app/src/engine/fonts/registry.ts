@@ -70,11 +70,45 @@ function decodeBase64(b64: string): ArrayBuffer {
 
 const parsedCache = new Map<string, ParsedFont>();
 
+/**
+ * #1035 item 9 — A REACTIVE SIGNAL FOR THE FACES LANDING. The Cut preflight reads the job as data
+ * and measures its labels through this cache; before a face is parsed, `inkBoxOf` answers with its
+ * documented UPPER-bound estimate — the fit path's placeholder. A gate that refused a cut from that
+ * box refused a cut that does not exist, and nothing told it when the real face arrived. A
+ * subscriber (the panel's preflight memo) re-runs its gate on each bump, so the estimate is never
+ * the last word.
+ *
+ * Every face that ENTERS the cache bumps it: a bundled fetch (the asynchronous case a gate waits
+ * for) and a custom face's first synchronous parse. The latter happens inside the measuring call
+ * itself and settles within that same render — one extra pass, never a loop.
+ */
+let facesEpoch = 0;
+const faceListeners = new Set<() => void>();
+
+function noteFaceParsed(): void {
+  facesEpoch += 1;
+  for (const listener of faceListeners) listener();
+}
+
+/** The snapshot a subscriber reads (`useSyncExternalStore`'s getSnapshot). */
+export function facesLoadedEpoch(): number {
+  return facesEpoch;
+}
+
+/** Subscribe to faces landing. Returns the unsubscribe. */
+export function subscribeFacesLoaded(listener: () => void): () => void {
+  faceListeners.add(listener);
+  return () => {
+    faceListeners.delete(listener);
+  };
+}
+
 function parseCached(key: string, bytes: ArrayBuffer): ParsedFont {
   let f = parsedCache.get(key);
   if (!f) {
     f = opentype.parse(bytes);
     parsedCache.set(key, f);
+    noteFaceParsed();
   }
   return f;
 }
@@ -101,6 +135,7 @@ function loadBundledFont(key: string): Promise<void> {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`failed to fetch bundled font "${key}" (HTTP ${res.status}) from ${url}`);
       parsedCache.set(key, opentype.parse(await res.arrayBuffer()));
+      noteFaceParsed();
     } finally {
       pendingLoads.delete(key);
     }

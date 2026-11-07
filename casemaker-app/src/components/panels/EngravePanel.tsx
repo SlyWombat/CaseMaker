@@ -1,5 +1,5 @@
 import { featureSim } from '@/platform/features';
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type JSX, type ReactNode, type RefObject } from 'react';
 import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
@@ -88,7 +88,7 @@ import {
   primitiveReducesToRegion,
   voidLimitForItem,
 } from '@/engine/cnc/engrave/partPlan';
-import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, labelFontsLoaded } from '@/engine/fonts/registry';
+import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, facesLoadedEpoch, labelFontsLoaded, subscribeFacesLoaded } from '@/engine/fonts/registry';
 import { buildRunSheet, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { buildRunRecord, isMeasuredRun, runSeconds, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
@@ -1064,6 +1064,9 @@ export function EngravePanel(): JSX.Element {
   // `labelGlyphMeasure` is synchronous and reads the registry, so a re-render is the whole of it. The
   // seed paths (`useBadgeBlank`/`useBlankStock`) await the same call, so neither relies on this race.
   const [, bumpFacesLoaded] = useState(0);
+  // #1035 item 9 — the REACTIVE half of the same wait: the preflight memo below re-runs when a
+  // face lands, so a gate computed from the estimate is replaced by the measured one.
+  const facesEpoch = useSyncExternalStore(subscribeFacesLoaded, facesLoadedEpoch);
   useEffect(() => {
     // The ordinary case is that they are already up (every render after the first, and every test),
     // and then this render's numbers are final: no fetch, no bump, no second render. Only a cold
@@ -2345,7 +2348,7 @@ export function EngravePanel(): JSX.Element {
           })
         : null,
     // eslint-disable-next-line react-hooks/preserve-manual-memoization -- real memo; no React compiler in this build
-    [mode, job, run.generated, run.staleSince, run.staleReason, jobPackage, calibration, shelfItem, bedFacts, locationMachine],
+    [mode, job, run.generated, run.staleSince, run.staleReason, jobPackage, calibration, shelfItem, bedFacts, locationMachine, facesEpoch],
   );
 
   const backToDesign = (cause: PreflightCause | null): void => {

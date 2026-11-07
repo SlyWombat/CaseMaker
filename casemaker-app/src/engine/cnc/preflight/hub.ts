@@ -36,6 +36,7 @@ import type { Reachability } from '@/engine/cnc/engrave/reachability';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import { packageStaleness, type FrozenPackage } from '@/engine/cnc/engrave/package';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
+import { labelFontsLoaded } from '@/engine/fonts/registry';
 import { collect } from './collect';
 import type { PreflightCause, PreflightRow, PreflightScope } from './types';
 
@@ -215,6 +216,22 @@ function runPolicyRows(input: PreflightHubInput, firstScope: PreflightScope): Pr
     toolKey: firstScope.toolKey,
     hubTarget: null,
   });
+
+  // #1035 item 9 — THE JAW CHECK IS PENDING, NOT PASSING. While a label's face is still being
+  // fetched, `validateJob` holds its collision back (a refusal computed from `inkBoxOf`'s
+  // upper-bound estimate refused cuts that do not exist). Say so, so a gate with no jaw row reads
+  // as "not measured yet", never as "clear". The panel subscribes to `subscribeFacesLoaded`, so
+  // this row disappears — and the measured collision, if there is one, appears — the moment the
+  // faces land.
+  if (!labelFontsLoaded(input.job.labels, input.job.customFonts ?? [])) {
+    rows.push({
+      severity: 'info',
+      code: 'labels-measuring',
+      message: 'Measuring the labels — the jaw clearance check runs as soon as their faces are in.',
+      owner: 'run',
+      cause: cause(),
+    });
+  }
 
   // #513 — the bed moved under the job. Before the stale rows: this is about the SETUP, and no
   // re-generate changes it — the operator has to re-plan or put the bed back.
