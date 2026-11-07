@@ -21,6 +21,20 @@ import { planChoiceOf } from '@/types/engraveJob';
 import { PLAN_MATERIALITY, comparePlanOutcomes, idealWorsenings } from '../tools/tradeoff';
 import { scoreSevenLines, type ProgramScore } from '../tools/sevenLines';
 
+/**
+ * #1046 — the plan now carries its own WALL TIME (`planMs` / `finishStageMs` / the finishing ball's
+ * diameter) for the ladder's cost estimate. Two runs of the same input differ in the clock by
+ * nature, so the JSON comparisons below drop those three numbers and keep pinning everything else;
+ * no statement, note or program carries them (tests/unit/restLadder1046.spec.ts pins that).
+ */
+function withoutTimings(plan: unknown): string {
+  const plain = JSON.parse(JSON.stringify(plan)) as Record<string, unknown>;
+  delete plain.planMs;
+  delete plain.finishStageMs;
+  delete plain.finishBallDiameterMm;
+  return JSON.stringify(plain);
+}
+
 const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
 const ball6: Tool = { ...flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6' }), shape: 'ball', typeText: 'Ball Nose' };
 const v90: Tool = flatEndMill(3.175, { number: 3, id: 'v90', name: '90 chamfer', shape: 'chamfer', typeText: 'Chamfer', angle: 90, halfAngle: 45, tipDiameter: 0.1 });
@@ -51,10 +65,10 @@ describe('#961/#975 the two plans', () => {
     expect(two.ideal).not.toBeNull();
     // The ideal run is exactly `planModelCam` over the union set — same entry, same options.
     const directIdeal = await planModelCam({ ...planInput, cutters: { house: [...owned, smallFlat], catalogue: [] } });
-    expect(JSON.stringify(two.ideal)).toBe(JSON.stringify(directIdeal));
+    expect(withoutTimings(two.ideal)).toBe(withoutTimings(directIdeal));
     // And the owned run is `planModelCam` over the owned set alone — the catalogue never leaks in.
     const directOwned = await planModelCam({ ...planInput, cutters: { house: owned, catalogue: [] } });
-    expect(JSON.stringify(two.owned)).toBe(JSON.stringify(directOwned));
+    expect(withoutTimings(two.owned)).toBe(withoutTimings(directOwned));
   }, 120_000);
 
   it('never refuses where an owned tool can do the job — even when the catalogue carries a better bit', async () => {
@@ -99,7 +113,7 @@ describe('#961/#975 the two plans', () => {
     // The owned plan honours the pin; the ideal run is built without one (its own call).
     expect(two.ideal).not.toBeNull();
     const directIdeal = await planModelCam({ ...planInput, cutters: { house: [flat6, ball6, v90, smallFlat], catalogue: [] } });
-    expect(JSON.stringify(two.ideal)).toBe(JSON.stringify(directIdeal));
+    expect(withoutTimings(two.ideal)).toBe(withoutTimings(directIdeal));
   }, 120_000);
 });
 

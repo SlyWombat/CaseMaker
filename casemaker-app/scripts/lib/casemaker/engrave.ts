@@ -218,7 +218,8 @@ interface Args {
   restLadder?: boolean;
 }
 
-function parseArgs(argv: string[]): Args {
+/** Exported for the CLI's own spec (#1046): the flag set is pinned by parsing, not by running the wasm pipeline. */
+export function parseArgs(argv: string[]): Args {
   const args: Args = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];

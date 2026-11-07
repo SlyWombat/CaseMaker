@@ -202,6 +202,20 @@ export const engraveGoalSchema = z
       .array(z.number())
       .describe('Share of the covered cells standing more than each leftover band (0.1 / 0.3 / 1 mm) above the goal.'),
     passCoverage: z.number().describe('The coverage the pass line asks for, 0–1 — the shop’s own `goal.passCoverage`.'),
+    ladder: z
+      .array(
+        z.object({
+          diameterMm: z.number().describe('The standard rung’s ball diameter, mm.'),
+          leftoverShare: z.number().describe('The share of the goal the rung leaves standing, 0–1.'),
+          leftoverAboveMm: z.number().describe('The deepest leftover the rung leaves, mm.'),
+          cycleSeconds: z.number().describe('The rung’s own finish cycle estimate, seconds.'),
+          feedsSource: z.string().describe('Where the rung’s feeds came from — a virtual rung has no catalogue row.'),
+        }),
+      )
+      .optional()
+      .describe(
+        '#1046 — the standard rest rungs the virtual ladder measured on this run (`--rest-ladder`); omitted when the ladder did not run. The statement beside them names the rung that takes the leftover.',
+      ),
     wholeSurface: z
       .object({
         fraction: z.number().describe('Share of the goal’s whole surface reproduced after every proposed setup, 0–1.'),
