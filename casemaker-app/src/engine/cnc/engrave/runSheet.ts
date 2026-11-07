@@ -4411,13 +4411,17 @@ export function buildRunSheet(
             ? []
             : bracket.clamps.map(
                 (p): RunSheetStep => ({
-                  // #1068 review (6b) — the job's clamp record states no kind, and the tray's
-                  // back-edge clamp is a side clamp below the top; the plan checks it as the top
-                  // clamp's box (10.05 mm, the safe side), so the step says what was checked
-                  // without calling the clamp what it is not.
-                  text: `Fit the clamp on the ${p.edge} edge, its centre ${fmtNum(p.at)} mm from ${
-                    p.edge === 'back' ? 'the left end' : 'the front end'
-                  } of the edge — the job was planned with a clamp there, checked at the top clamp's height.`,
+                  // #1068 review (6b) — a TOP clamp presses from above and is checked at the top
+                  // clamp's height; a SIDE clamp pushes from outside the edge with its top below
+                  // the stock's, so the step says that instead. Absent kind = top.
+                  text:
+                    p.kind === 'side'
+                      ? `Fit the side clamp on the ${p.edge} edge, its top below the stock top, its centre ${fmtNum(p.at)} mm from ${
+                          p.edge === 'back' ? 'the left end' : 'the front end'
+                        } of the edge — the job was planned with a clamp there.`
+                      : `Fit the clamp on the ${p.edge} edge, its centre ${fmtNum(p.at)} mm from ${
+                          p.edge === 'back' ? 'the left end' : 'the front end'
+                        } of the edge — the job was planned with a clamp there, checked at the top clamp's height.`,
                 }),
               )),
           { text: 'Tighten the clamps. Check the blank does not rock and its corner stays seated.' },

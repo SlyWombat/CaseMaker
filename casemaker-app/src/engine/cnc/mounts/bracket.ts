@@ -52,6 +52,13 @@ export interface BracketSettings {
   /** The bracket's top (and its screw heads) above the surface the stock sits on. */
   height: number;
   clamp: ClampSize;
+  /**
+   * #1068 — THE SIDE CLAMP SET (review 6b): a clamp that pushes the blank from OUTSIDE its edge,
+   * its top below the stock's. Width runs along the edge, depth outward from it; there is no reach
+   * over the stock and no height to model — the box's top is the stock's top. Seeded, never
+   * calipered (#1069).
+   */
+  side: { width: number; depth: number };
 }
 
 export interface SettingRead {
@@ -74,6 +81,8 @@ const KEYS = {
   clampHeight: 'clamps.topHeightMm',
   clampReach: 'clamps.topReachMm',
   clampInFromCorner: 'clamps.topInFromCornerMm',
+  sideWidth: 'clamps.sideWidthMm',
+  sideDepth: 'clamps.sideDepthMm',
 } as const;
 
 /**
@@ -92,6 +101,8 @@ export const BRACKET_CALIPER_LIST: readonly { key: string; what: string }[] = [
   { key: KEYS.clampWidth, what: 'a top clamp’s width, across' },
   { key: KEYS.clampHeight, what: 'with a clamp tightened on a plate: from the plate’s top up to the clamp’s highest point, screw head included' },
   { key: KEYS.clampReach, what: 'with a clamp tightened on a plate: how far its nose reaches in over the plate from the plate’s edge' },
+  { key: KEYS.sideWidth, what: 'a side clamp’s width, along the edge it pushes (the Side Clamp Set)' },
+  { key: KEYS.sideDepth, what: 'a side clamp’s body, from the blank’s edge outward (the Side Clamp Set)' },
   { key: 'bracket.seatMachineZ', what: 'no caliper: one probe touch on the bed (or the board the stock sits on) beside the bracket, read as machine Z' },
 ];
 
@@ -125,6 +136,7 @@ export function bracketSettings(map: ShopDefaults | null): BracketSettingsRead {
       reach: v(KEYS.clampReach),
       inFromCorner: v(KEYS.clampInFromCorner),
     },
+    side: { width: v(KEYS.sideWidth), depth: v(KEYS.sideDepth) },
   };
   return { settings, read, unmeasured: read.filter((r) => r.source !== 'measured').map((r) => r.key) };
 }
@@ -343,10 +355,24 @@ export interface StockSize {
 /** Clamps go on the free edges — the bracket holds the front and the left. */
 export type ClampEdge = 'back' | 'right';
 
+/**
+ * #1068 — HOW A CLAMP HOLDS. `top` presses on the blank from above (the Makera QuickStart's top
+ * clamps); `side` pushes it from OUTSIDE its edge, its top below the stock's (the Side Clamp Set,
+ * fitted on the tray's back edge).
+ */
+export type ClampKind = 'top' | 'side';
+
 export interface ClampPlacement {
   edge: ClampEdge;
   /** The clamp's centre along its edge, mm from the edge's LEFT end (back edge) or FRONT end (right edge). */
   at: number;
+  /**
+   * #1068 — absent means `top`, and a stored job stays byte-identical: the field appears only when
+   * the job states a side clamp. A side clamp's box starts at the blank's edge and runs outward —
+   * it never reaches over the stock, which is why a top clamp at the same place refused a pocket
+   * the machine's own side clamp never crosses.
+   */
+  kind?: ClampKind;
 }
 
 export interface MountObstacle {
@@ -383,28 +409,43 @@ function clampLabel(p: ClampPlacement, stock: StockSize, width: number): string 
   const fromHigh = r3(len - p.at - width / 2);
   const [lowCorner, highCorner] = p.edge === 'back' ? ['left-hand', 'right-hand'] : ['front', 'back'];
   const near = fromLow <= fromHigh ? `${fromLow} mm in from the ${lowCorner} corner` : `${fromHigh} mm in from the ${highCorner} corner`;
-  return `the clamp on the ${p.edge} edge, ${near}`;
+  // #1068 — a side clamp says so: the operator has two kinds on the same edges.
+  return `${p.kind === 'side' ? 'the side clamp' : 'the clamp'} on the ${p.edge} edge, ${near}`;
 }
 
 /** Each clamp's footprint and top, work frame. */
 export function clampObstacles(stock: StockSize, placements: ClampPlacement[], s: BracketSettings): MountObstacle[] {
   const c = s.clamp;
   return placements.map((p, i) => {
-    const across: [number, number] = [r3(p.at - c.width / 2), r3(p.at + c.width / 2)];
-    const onto: [number, number] = p.edge === 'back' ? [r3(stock.y - c.reach), r3(stock.y - c.reach + c.length)] : [r3(stock.x - c.reach), r3(stock.x - c.reach + c.length)];
+    // #1068 — TWO KINDS, TWO BOXES. A TOP clamp presses from above and reaches `reach` in over the
+    // stock. A SIDE clamp pushes from OUTSIDE the blank: its stock-side face is the edge itself (no
+    // reach), its body stands `depth` out, and its top is the STOCK'S top (the set sits below it —
+    // the box takes the safe side). A cut inside the blank therefore cannot enter it, which is why
+    // a tray pocket under the old top-clamp reach is no longer refused; a path that leaves the
+    // blank at that edge below the top still is.
+    const side = p.kind === 'side';
+    const width = side ? s.side.width : c.width;
+    const across: [number, number] = [r3(p.at - width / 2), r3(p.at + width / 2)];
+    const onto: [number, number] = side
+      ? p.edge === 'back'
+        ? [r3(stock.y), r3(stock.y + s.side.depth)]
+        : [r3(stock.x), r3(stock.x + s.side.depth)]
+      : p.edge === 'back'
+        ? [r3(stock.y - c.reach), r3(stock.y - c.reach + c.length)]
+        : [r3(stock.x - c.reach), r3(stock.x - c.reach + c.length)];
     const [min, max]: [[number, number], [number, number]] =
       p.edge === 'back' ? [[across[0], onto[0]], [across[1], onto[1]]] : [[onto[0], across[0]], [onto[1], across[1]]];
     return {
       id: `clamp-${i + 1}`,
       kind: 'clamp' as const,
-      label: clampLabel(p, stock, c.width),
+      label: clampLabel(p, stock, width),
       // #710 — the design's fix, in the operator's words (§3.7): the two free edges are the only
       // places a clamp can go, and the sentence says so without a clause about the bracket.
       fix: `slide the clamp along the ${p.edge} edge, or move it to the ${p.edge === 'back' ? 'right' : 'back'} edge, clear of the cut`,
       edge: p.edge,
       min,
       max,
-      topZ: c.height,
+      topZ: side ? 0 : c.height,
     };
   });
 }
@@ -518,7 +559,9 @@ export function validateBracketMount(stock: StockSize, placements: ClampPlacemen
   const obstacles = clampObstacles(stock, placements, s);
   placements.forEach((p, i) => {
     const len = p.edge === 'back' ? stock.x : stock.y;
-    if (p.at - s.clamp.width / 2 < 0 || p.at + s.clamp.width / 2 > len) {
+    // #1068 — the width along the edge is the KIND's: a side clamp is the Side Clamp Set's width.
+    const w = p.kind === 'side' ? s.side.width : s.clamp.width;
+    if (p.at - w / 2 < 0 || p.at + w / 2 > len) {
       out.push({ code: 'clamp-off-stock', severity: 'error', text: `${obstacles[i]!.label} hangs past the end of the ${len} mm edge — it would not hold` });
     }
   });

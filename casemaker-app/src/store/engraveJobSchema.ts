@@ -1255,6 +1255,12 @@ const clampPlacementSchema = z.object({
     .describe(
       "The clamp's centre along its edge, in millimetres from the edge's left end (back edge) or front end (right edge).",
     ),
+  kind: z
+    .enum(['top', 'side'])
+    .optional()
+    .describe(
+      "How the clamp holds: 'top' presses on the stock from above; 'side' pushes it from outside the blank's edge, its top below the stock top. Absent means 'top', so a stored job is unchanged.",
+    ),
 });
 
 /**

@@ -106,7 +106,7 @@ function pocket(id: string, x: number, y: number, width: number, height: number,
  */
 function bracketJob(opts: {
   shape: EngraveShape;
-  clamps: { edge: 'back' | 'right'; at: number }[];
+  clamps: { edge: 'back' | 'right'; at: number; kind?: 'top' | 'side' }[];
   obstacles?: JobBox[];
 }): EngraveJob {
   const base = defaultEngraveJob();
@@ -190,6 +190,32 @@ describe('#1068 a bracket job through the command line is checked against its mo
     expect(run.code).not.toBe(0);
   }, 300_000);
 
+  it('#1068 review — the SAME clamp as a side clamp leaves the cut clear; the top clamp refused it', async () => {
+    // The tray's own clamp kind (6b's amendment): it pushes from OUTSIDE the back edge, so its box
+    // reaches nothing over the blank. At 5e47e74dc the field was stripped and this was the top
+    // clamp's 8 mm reach — the run was refused. The pocket keeps its distance from the edge beyond
+    // the side clamp's own keep-out (radius + fit + the job's jaw clearance).
+    const job = bracketJob({
+      shape: pocket('under-clamp', 50, 90, 20, 6, 1),
+      clamps: [{ edge: 'back', at: 50, kind: 'side' }],
+    });
+    const run = await cut(job, 'side-clamp');
+    expect(
+      run.code,
+      JSON.stringify({ refusals: run.receipt?.refusals ?? null, diagnostics: diagnosticsOf(run) }, null, 2),
+    ).toBe(0);
+    expect(diagnosticsOf(run).some((d) => d.code === 'clamp-in-path')).toBe(false);
+    // And a TOP clamp at the same place, over the same pocket's edge, still refuses (the guard).
+    expect(
+      diagnosticsOf(
+        await cut(
+          bracketJob({ shape: pocket('top-clamp', 50, 90, 20, 6, 1), clamps: [{ edge: 'back', at: 50, kind: 'top' }] }),
+          'top-clamp-guard',
+        ),
+      ).some((d) => d.code === 'clamp-in-path'),
+    ).toBe(true);
+  }, 300_000);
+
   it('a cut into a hole box the JOB states is refused tool-into-fixture, naming it', async () => {
     // The tray's two counterbored holes sit in the LEFT waste. This box is the hole up to the
     // counterbore's floor (Z -2), so a pocket cut to Z -4 passes through the screw head's space.
@@ -255,6 +281,18 @@ describe('#1068 a bracket job through the command line is checked against its mo
     expect(sheet).not.toContain('judges the jaws');
     expect(sheet).toContain('the modelled fixture (the bracket’s front arm, the bracket’s left arm');
     expect(sheet).not.toContain('Vise fixed jaw');
+
+    // #1068 review (6b) — a SIDE clamp's own step, in the words the review asked for.
+    const sideRun = await cut(
+      bracketJob({ shape: pocket('clear', 50, 50, 20, 10, 1), clamps: [{ edge: 'back', at: 90, kind: 'side' }] }),
+      'side-sheet',
+    );
+    expect(sideRun.code).toBe(0);
+    if (sideRun.receipt === null || sideRun.receipt.command !== 'engrave') throw new Error('expected the engrave receipt');
+    const sideSheet = readFileSync(join(sideRun.outDir, sideRun.receipt.details.programs[0]!.sheet!.file!), 'utf8');
+    expect(sideSheet).toContain(
+      'Fit the side clamp on the back edge, its top below the stock top, its centre 90 mm from the left end',
+    );
   }, 300_000);
 
   it('the side view of a bracket job draws no vise jaws; a vise job still draws them', () => {

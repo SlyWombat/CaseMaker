@@ -8094,6 +8094,14 @@
                               "right"
                             ],
                             "type": "string"
+                          },
+                          "kind": {
+                            "description": "How the clamp holds: 'top' presses on the stock from above; 'side' pushes it from outside the blank's edge, its top below the stock top. Absent means 'top', so a stored job is unchanged.",
+                            "enum": [
+                              "top",
+                              "side"
+                            ],
+                            "type": "string"
                           }
                         },
                         "required": [

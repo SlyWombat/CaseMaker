@@ -1829,7 +1829,9 @@ export function HoldingStep({
   }
 
   function moveClamp(index: number, placement: ClampPlacement): void {
-    const clamps = bracketHold.clamps.map((c, i) => (i === index ? placement : c));
+    // #1068 — the drag states the edge and the place, not the KIND: a side clamp dragged along its
+    // edge must stay a side clamp, so the job's own record is kept and the drag's fields laid over it.
+    const clamps = bracketHold.clamps.map((c, i) => (i === index ? { ...c, ...placement } : c));
     writeBracket({ ...bracketHold, clamps });
   }
 
