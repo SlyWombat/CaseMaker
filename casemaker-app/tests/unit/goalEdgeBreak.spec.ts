@@ -96,6 +96,17 @@ describe('#955/V2-2 the goal check edge-break allowance', () => {
     expect(r.sentence).toContain('edge break');
   });
 
+  it('#1064 (d) — the sentence states the plan’s predicted bevel BESIDE the measured one', () => {
+    // The same gouge under an explicit all-edges allowance, with the plan's own prediction: the
+    // measured number stays the verdict; the prediction is stated beside it.
+    const top = swept(STEP, (x, y) => (Math.abs(x - 5) <= 1 && y > 2 && y < 8 ? 0.5 : null));
+    const judged = checkGoalCutInto(STEP, top, { ...EDGE, predictedCutIntoMm: 0.6 });
+    expect(judged.adjudicatedMaxMm).toBeCloseTo(0.5, 6);
+    expect(judged.sentence).toContain('The plan predicted 0.60 mm, measured 0.50 mm.');
+    // No prediction supplied: no clause, exactly as before.
+    expect(checkGoalCutInto(STEP, top, EDGE).sentence).not.toContain('predicted');
+  });
+
   it('the part’s own silhouette is still a named edge, with no `all` needed', () => {
     // A flat plate: its only edge is the part outline. A gouge 0.5 mm inside it is within the
     // 1.5 mm reach and shallower than the leg — the rim chamfer's own break, excused by default.

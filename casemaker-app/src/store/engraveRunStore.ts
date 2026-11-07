@@ -1095,6 +1095,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // program onto it) never received the rest pass's cuts.
           const goal = goalCheckForProgram(job, pureGoalObject(job) !== null, {
             passCoverage: goalPassCoverage(shopDefaults),
+            // #1064 (d) — the plan's own bevel prediction, stated beside the measurement.
+            ...(generated.plan?.outcome?.predictedCutIntoMm == null
+              ? {}
+              : { predictedCutIntoMm: generated.plan.outcome.predictedCutIntoMm }),
             ...goalEdge,
           });
           const goalOnly = goal !== undefined && (predicted === undefined || predicted.length === 0);
