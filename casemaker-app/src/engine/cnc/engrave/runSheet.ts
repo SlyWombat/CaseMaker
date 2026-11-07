@@ -63,6 +63,7 @@ import {
   type MaterialScanSettings,
   type ScanTouch,
 } from '@/engine/cnc/engrave/materialScan';
+import type { FootprintPlan } from '@/engine/cnc/registration/footprint';
 import type { FeedsResult } from '@/engine/cnc/feeds';
 // #445 — `ThreadPlanFacts` exists for THIS reader: the half of the CAM's thread plan the sheet
 // prints, with `moves`/the IR/the simulator's spec left out (see the type's own comment).
@@ -1666,6 +1667,56 @@ function senderOriginSteps(origin: WorkOrigin, onBoard: boolean): RunSheetStep[]
   ];
 }
 
+/**
+ * #1070 — §6 FOR A BED-HELD JOB: the cut region's footprint, in the plan's own order. Every
+ * position carries both frames — work XY, which the operator can check against the part, and
+ * machine XY, which the console shows — and the soft-limit statement is the plan's, never a
+ * second reading of the calibration here.
+ */
+function footprintRegistrationSteps(onBoard: boolean, facingRun: boolean, plan: FootprintPlan): RunSheetStep[] {
+  const steps: RunSheetStep[] = [
+    {
+      text:
+        "Registration is planned on the cut region's footprint, not the blank's edges: the two touches on each " +
+        "bounding edge sit at the cut's own extents, so a rough or out-of-square edge is stated with the margin " +
+        'it leaves — never a stop. Write each reading down as the console shows it.',
+      value: `${fmtNum(plan.marginMm)} mm margin`,
+    },
+  ];
+  const total = plan.scans.length + plan.corners.length;
+  plan.scans.forEach((s, i) => {
+    const machine = `machine X ${fmtNum(s.machineStart[0])} → ${fmtNum(s.machineLimit[0])}, Y ${fmtNum(s.machineStart[1])} → ${fmtNum(s.machineLimit[1])}`;
+    steps.push({
+      text:
+        `Touch ${i + 1} of ${total}: the ${s.edge} edge at ${fmtNum(s.along)} mm, scanning from ${fmtNum(s.start)} ` +
+        `to ${fmtNum(s.limit)} (${machine}) — ` +
+        (s.purpose === 'extent'
+          ? 'this gives the edge line and its rotation where the cut is.'
+          : 'this proves material exists past the cut; a reading that finds none stops the run.'),
+    });
+  });
+  plan.corners.forEach((c, i) => {
+    steps.push({
+      text:
+        `Touch ${plan.scans.length + i + 1} of ${total}: ${c.why} (work X ${fmtNum(c.x)} Y ${fmtNum(c.y)}; ` +
+        `machine X ${fmtNum(c.machine[0])} Y ${fmtNum(c.machine[1])}) — the surface for the Z band.`,
+    });
+  });
+  steps.push(z0Step(onBoard, facingRun));
+  steps.push({
+    text:
+      'The origin is the front-left corner the two touched edge lines intersect at. The machine coordinates are ' +
+      `seeded from ${plan.origin.from}; the touches correct the seed.`,
+  });
+  const unread = plan.notes.find((n) => n.includes('soft endstop has not been read'));
+  steps.push({
+    text:
+      unread ??
+      'Every planned position above is inside the machine’s soft endstop — a move past one is refused here, by name, before any line is sent.',
+  });
+  return steps;
+}
+
 function registrationSteps(
   job: EngraveJob,
   onBoard: boolean,
@@ -1677,7 +1728,13 @@ function registrationSteps(
    * engraving cutter's Z0 be worked out from this one reading.
    */
   facingRun: boolean,
+  /** #1070 — the bed-held footprint plan, when the caller has one (see `RunSheetOptions`). */
+  footprint?: FootprintPlan,
 ): RunSheetStep[] {
+  // #1070 — A BED-HELD JOB IS REGISTERED ON ITS CUT REGION, not the blank's edges: the six scans
+  // and the four corner touches come from the plan the Cut step runs, so paper and console say the
+  // same positions, in machine coordinates.
+  if (footprint !== undefined) return footprintRegistrationSteps(onBoard, facingRun, footprint);
   // #743 §4.6/§4.7 — A DISC IS REGISTERED ON ITS RIM, not on a rectangle's edges. Four touches
   // through the centre-lines find the circle's extreme points; the centre sets the origin and the
   // span against the stated ⌀ refuses a different piece. The rectangle's probe-plan touches below
@@ -2319,6 +2376,13 @@ export interface RunSheetOptions {
    * here — this module is in the sim worker's import graph. Absent: `SCAN_FALLBACK`, the seeds.
    */
   scan?: MaterialScanSettings;
+  /**
+   * #1070 — THE BED-HELD FOOTPRINT PLAN, when the caller has one (the Cut step's attempt, or the
+   * CLI's own seam): §6 prints the cut region's six scans and four corner Z touches with their
+   * machine coordinates instead of the blank's edge touches. Passed in, never read here — the plan
+   * needs the machine's calibration, which this module does not carry.
+   */
+  footprint?: FootprintPlan;
   /**
    * #475 — the shop's `registration.surfaceTouchCount`: how many surface touches the cut regions'
    * extents get. Resolved by the caller from `registrationSettings(defaults).settings`, never read
@@ -4446,7 +4510,7 @@ export function buildRunSheet(
           },
         ]
       : []),
-    ...registrationSteps(job, onBoard, options.scan?.tipDiameterMm, facingRun),
+    ...registrationSteps(job, onBoard, options.scan?.tipDiameterMm, facingRun, options.footprint),
     // #475 — Z0 is a spread, not a point: print the surface touches across the cut's extents, the
     // band they must land in, and (when the caller has readings) the measured verdict. Additive:
     // a caller that passes no `surfaceTouchCount`/`surfaceReadings` gets the plan and stop rule.

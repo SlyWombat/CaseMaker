@@ -577,9 +577,11 @@ describe('#471 registration — planned only after approval, refused with the en
     expect(screen.getByTestId('engrave-setup-probe-1').textContent).toBe('Makera Wired Probe V2');
   });
 
-  // #934 — THE BRACKET IS HIDDEN as a registration branch: the editor offers the vise, and a job
-  // that is already in a bracket is refused by name rather than planned.
-  it('offers the vise only, and refuses a job already in the bracket by name', () => {
+  // #934 hid the bracket as a registration branch; #1070 lifts that — the bracket's registration
+  // is now PLANNED on the cut region's footprint. This fixture's machine has no calibration read,
+  // so the row refuses with the reason that is actually missing (the anchor the seed comes from),
+  // never the old "has not been run on this machine yet".
+  it('offers the vise in the editor, and PLANS a job already in the bracket — naming any missing machine fact', () => {
     act(() => useEngraveJobStore.setState({ job: savedJob() }));
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
@@ -594,7 +596,10 @@ describe('#471 registration — planned only after approval, refused with the en
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
     expect(screen.getByTestId('engrave-setup-reg-refusal-1').textContent).toContain(
-      'the bracket’s registration has not been run on this machine yet',
+      'the machine’s calibration has not been read',
+    );
+    expect(screen.getByTestId('engrave-setup-reg-refusal-1').textContent).not.toContain(
+      'has not been run on this machine yet',
     );
   });
 

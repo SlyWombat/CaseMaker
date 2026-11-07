@@ -26,6 +26,9 @@ import {
   type BracketSeatDatum,
 } from '@/engine/cnc/mounts/bracket';
 import type { MountDatum, PlanObstacle, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { footprintInputFor, mountObstaclesFor } from '@/engine/cnc/registration/footprintJob';
+import { planFootprintRegistration } from '@/engine/cnc/registration/footprint';
+import { footprintToRegistrationPlan } from '@/engine/cnc/registration/footprintPlan';
 import { bracketTapFor } from '@/engine/cnc/registration/mountContext';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
@@ -105,18 +108,44 @@ export function planRegistrationAttempt(args: {
       reason: 'a disc’s rim registration has not been run on this machine yet — use a rectangular blank',
     };
   }
-  // tape and bracket registration are hidden: refused by name, never planned as the datum path
-  // would (and before any bracket datum work is attempted). The alias keeps the kept branch
-  // below type-checkable rather than narrowing `mount` away.
+  // tape registration is hidden (refused by name); a BRACKET job registers on its cut region's
+  // footprint (#1070 — the maintainer's rule: find the edges of where it will cut, not the blank's).
   const mountKind: MountSpec['kind'] = mount.kind;
   if (mountKind !== 'vise') {
-    return {
-      kind: 'refused',
-      reason:
-        mountKind === 'tape'
-          ? 'registration on tape has not been run on this machine yet — hold the blank in the vise'
-          : 'the bracket’s registration has not been run on this machine yet — hold the blank in the vise',
-    };
+    if (mountKind === 'tape') {
+      return { kind: 'refused', reason: 'registration on tape has not been run on this machine yet — hold the blank in the vise' };
+    }
+    // #1070 — THE FOOTPRINT PLAN, from the job: two touches per bounding edge at the cut region's
+    // extents, the far edges once each, one Z touch per region corner, every position in machine
+    // coordinates checked against the soft endstop before a line is sent. The anchor-1 bracket
+    // datum only SEEDS the machine coordinates; the touches derive the origin.
+    const sizes = bracketSettings(defaults);
+    const anchor = anchorFrom(calibration, job.machineId);
+    if (!anchor.ok) return { kind: 'refused', reason: anchor.reason };
+    const datum = bracketDatum(anchor.anchor, sizes);
+    const obstacles = mountObstaclesFor(job, mount, sizes);
+    const footprint = footprintInputFor({
+      job,
+      mount,
+      calibration,
+      defaults,
+      probe: args.probe,
+      mountObstacles: obstacles,
+      bracketSeat: args.bracketSeat,
+    });
+    if (!footprint.ok) return { kind: 'refused', reason: footprint.reason };
+    const result = planFootprintRegistration(footprint.input);
+    if (!result.ok) return { kind: 'refused', reason: result.reason };
+    const plan = footprintToRegistrationPlan({
+      input: footprint.input,
+      plan: result.plan,
+      mount: 'bracket',
+      settings: args.settings,
+      probe: args.probe,
+      obstacles,
+      offsetMeasured: datum.offsetMeasured,
+    });
+    return { kind: 'plan', method: mount.kind, plan, summary: summarizePlan(plan), expected: expectedWords(plan) };
   }
   // #845 — a stated machine has no clearance to seek from; the preview it places a tap with is
   // only run where a connected Makera machine exists, and the 0 is never used to place a touch.
