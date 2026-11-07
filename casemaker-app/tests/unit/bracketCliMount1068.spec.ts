@@ -278,8 +278,11 @@ describe('#1068 a bracket job through the command line is checked against its mo
     expect(sheet).toContain("front-left corner into the bracket's inside corner at anchor 1");
     // The job's own clamp place, in the sheet's words — and NOT called a top clamp (review 6b:
     // the record states no kind; the plan checks the top clamp's height as the safe side).
+    // #1070 (1068-bench-sheet) — ONE PLACE, ONE SENTENCE: with the run's fixture envelope in hand
+    // the clamp step quotes the verifier's own label instead of naming the centre from the other
+    // end. The bracket's job here carries the back clamp at 90 mm, 2.5 mm in from the right corner.
     expect(sheet).toContain(
-      "Fit the clamp on the back edge, its centre 90 mm from the left end of the edge — the job was planned with a clamp there, checked at the top clamp's height.",
+      "Fit the clamp: the clamp on the back edge, 2.5 mm in from the right-hand corner — the job was planned with a clamp there, checked at the top clamp's height.",
     );
     expect(sheet).not.toContain('Fit a top clamp');
 
