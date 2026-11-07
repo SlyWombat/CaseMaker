@@ -217,13 +217,18 @@ function runPolicyRows(input: PreflightHubInput, firstScope: PreflightScope): Pr
     hubTarget: null,
   });
 
-  // #1035 item 9 — THE JAW CHECK IS PENDING, NOT PASSING. While a label's face is still being
+  // #1035 item 9 — THE JAW CHECK IS PENDING, NOT PASSING (and a VISE job is the only one with a
+  // jaw check to hold back — `validateJob` reads no swept cuts in the rotary chuck, so the row
+  // never names a check that cannot run). While a label's face is still being
   // fetched, `validateJob` holds its collision back (a refusal computed from `inkBoxOf`'s
   // upper-bound estimate refused cuts that do not exist). Say so, so a gate with no jaw row reads
   // as "not measured yet", never as "clear". The panel subscribes to `subscribeFacesLoaded`, so
   // this row disappears — and the measured collision, if there is one, appears — the moment the
   // faces land.
-  if (!labelFontsLoaded(input.job.labels, input.job.customFonts ?? [])) {
+  if (
+    input.job.workholding.kind === 'vise' &&
+    !labelFontsLoaded(input.job.labels, input.job.customFonts ?? [])
+  ) {
     rows.push({
       severity: 'info',
       code: 'labels-measuring',

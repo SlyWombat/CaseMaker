@@ -59,6 +59,26 @@ describe('#1035 item 9 — a jaw collision is never judged on the ink-box estima
     expect(report.firstBlocking?.code).toBe('no-generate');
   });
 
+  it('a rotary job holds no jaw check at all, so no pending row names one (C’s nit)', () => {
+    faces.loaded = false;
+    const job = defaultEngraveJob();
+    job.workholding = {
+      kind: 'rotary-chuck',
+      rotary: { stickout: 40, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' },
+    };
+    const report = preflightHub({
+      job,
+      generated: null,
+      staleSince: null,
+      package: null,
+      calibration: null,
+      shelfItem: null,
+      reach: null,
+      bed: null,
+    });
+    expect(report.rows.some((r) => r.code === 'labels-measuring')).toBe(false);
+  });
+
   it('once the faces are in, the gate measures the real boxes and needs no pending row', () => {
     faces.loaded = true;
     const report = gate();
