@@ -1758,7 +1758,7 @@ function registrationSteps(
   // One step per touch, in the plan's own order: rotation's pair first, then whatever the pair did
   // not settle. Named physically, never by coordinate alone.
   plan.touches.forEach((t, i) => {
-    const words = describeTouch(t, length, width);
+    const words = describeTouch(t, length, width, jobMount(job));
     steps.push({
       text: `Touch ${i + 1} of ${plan.touches.length}: ${words.edge}, ${words.where} — this gives ${readsWord(t)}.`,
     });
@@ -4129,6 +4129,14 @@ export function buildRunSheet(
   // of telling the operator the bit is 3.175 mm wide. No stated size prints as unknown, not as the
   // shank.
   const diameter = tool ? statedCuttingSize(tool) : null;
+  // #1070 — THE SHEET NAMES THE CUTTER THE POSTED FILE RUNS. The job's `toolKey` is the picker's
+  // DEFAULT; the plan may post a different cutter (the tray's job names a 42 mm-flute flat while
+  // every program runs the 25 mm one), and the sheet said the job's while the NC said the other.
+  const postedToolKey = generated.programs?.find((p) => p.kind !== 'facing')?.toolKey ?? null;
+  const postedResolved = postedToolKey === null || postedToolKey === job.toolKey ? null : cutterNameForKey(postedToolKey);
+  // A key the sheet cannot see names nothing: fall back to the job's own cutter rather than print
+  // "unknown cutter" as if the file ran one.
+  const postedToolName = postedResolved === null || postedResolved === 'unknown cutter' ? null : postedResolved;
   const params = generated.feeds && generated.feeds.ok ? generated.feeds.params : null;
   // #221 — the V-carve facts are resolved ONCE, with the engine's own functions: the cone from the
   // job's cutter, and the colour plane from the print grid the plan carries. A V-carve job is a V
@@ -4206,7 +4214,9 @@ export function buildRunSheet(
     },
     {
       text: tool
-        ? `The cutter — ${options.toolCase === undefined ? '' : `${options.toolCase} — `}${toolDisplayName(tool)}.`
+        ? `The cutter — ${options.toolCase === undefined ? '' : `${options.toolCase} — `}${
+            postedToolName ?? toolDisplayName(tool)
+          }${postedToolName === null ? '' : " — the cutter the posted programs run"}.`
         : 'The cutter named by the job.',
       value: diameter === null ? 'cutting diameter unknown' : `⌀ ${fmtNum(diameter)} mm cutting`,
     },
@@ -4227,7 +4237,8 @@ export function buildRunSheet(
       : [
           {
             text:
-              'The Z1 low-profile vise, and the wired probe that ships with the machine — a mechanical ' +
+              (jobMount(job) === 'vise' ? 'The Z1 low-profile vise, and ' : '') +
+              'the wired probe that ships with the machine — a mechanical ' +
               'touch tip, so it triggers on PLA (measured 2026-10-08, 0.001 mm). The 3D Probe stays in reserve.',
           },
         ]),
