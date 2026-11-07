@@ -14,9 +14,16 @@
 import { writeFileSync } from 'node:fs';
 
 import { test, expect } from './fixtures/caseMaker';
+import { attachEngraveRunDiagnostics } from './fixtures/runDiagnostics';
 import { routeHouse, twoSideJob } from './fixtures/twoSideMouseShell';
 
 test.setTimeout(1_200_000);
+
+// A red on this walk must diagnose itself: on any failure, the run state, the findings, the four
+// run rows and the flight-recorder crumbs are attached to the test (the helper no-ops on a pass).
+test.afterEach(async ({ page }, testInfo) => {
+  await attachEngraveRunDiagnostics(page, testInfo);
+});
 
 test('#754/#723 — a two-side mouse shell opens, posts the model engine’s four programs, and side 2 is swept on the carried stock', async ({
   cm,
