@@ -644,6 +644,8 @@ const MAKERA_MATERIALS: StockMaterial[] = [
   'aluminium-6061', 'aluminium-7075', 'brass', 'copper',
   // #743 P-1 — Makera's `PCB` row, now that this app has the material for it.
   'pcb',
+  // #1066 — Makera's `Epoxy Tooling` row, now that this app has the material for it.
+  'epoxy-tooling',
 ];
 
 /**

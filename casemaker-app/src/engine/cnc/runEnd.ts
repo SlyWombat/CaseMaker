@@ -417,6 +417,9 @@ export const WEAR_CLASS: Readonly<Record<StockMaterial, WearClass>> = {
   // #743 P-1 — FR-4 is glass-fibre board: its wear belongs with the fibre-filled class, and
   // Makera's own PCB rows already state the numbers this weights.
   pcb: 'abrasive',
+  // #1066 — a mineral-filled cast epoxy board, not an unfilled resin: its wear belongs with the
+  // abrasive class (the conservative side of the tool-life weight).
+  'epoxy-tooling': 'abrasive',
 };
 
 /** The shop's words for a fibre flag, for the runtime line. */

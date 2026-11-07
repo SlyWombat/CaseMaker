@@ -699,10 +699,12 @@ export const FeedCatalogueSchema = z.array(
  * by EXACT name and nothing else — a name that is not a key here is REFUSED, the row is not used,
  * rather than guessed at by substring. So a future `Hardwood (Oak)` cannot silently become
  * `hardwood`, an `Aluminum 6061` in the vendor's own other order is not read as our `6061 Aluminum`,
- * and `Bakelite`, `Carbon Fiber`, `Epoxy Tooling`, `Synthetic Stone`, `Delrin` and `Polycarbonate`
+ * and `Bakelite`, `Carbon Fiber`, `Synthetic Stone`, `Delrin` and `Polycarbonate`
  * — which this app has no material for, and therefore no starting row and no gate for — can never
  * be answered as something else. `PCB` was in that list until #743 P-1 gave it a material of its
- * own, so Makera's own rows for a copper-clad board can answer a PCB job.
+ * own, so Makera's own rows for a copper-clad board can answer a PCB job; `Epoxy Tooling` likewise
+ * since #1066 gave the maintainer's tooling board its material, so Makera's rows for it answer an
+ * `epoxy-tooling` job.
  *
  * The metals are where the exactness earns its keep (#347): `6061 Aluminum` and `7075 Aluminum` map
  * to TWO different materials, so a 7075 row can never answer a 6061 job. One `aluminium` key would
@@ -719,6 +721,8 @@ export const CATALOGUE_MATERIALS: Readonly<Record<string, StockMaterial>> = {
   Copper: 'copper',
   // #743 P-1 — the vendor's own word for a copper-clad board.
   PCB: 'pcb',
+  // #1066 — Makera's Epoxy Tooling Board (the maintainer's M1 blank); exact name only.
+  'Epoxy Tooling': 'epoxy-tooling',
 };
 
 /**
@@ -1148,7 +1152,10 @@ function catalogueProvenance(
   snapshot: FeedCatalogue,
   mappedFor: StockMaterial | null,
 ): string {
-  const material = catalogueMaterialFor(row.material) ?? row.material;
+  // #1066 — the sentence names the APP's material, not its id ('epoxy-tooling' is not a word an
+  // operator reads); an unmapped vendor name keeps the vendor's own words, as before.
+  const mappedMaterial = catalogueMaterialFor(row.material);
+  const material = mappedMaterial === null ? row.material : MATERIAL_LABELS[mappedMaterial];
   const fromCoupon = entry.status === 'measured';
   const mapped =
     mappedFor === null

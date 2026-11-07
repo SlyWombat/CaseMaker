@@ -68,6 +68,9 @@ export const STOCK_MATERIALS = [
   // #743 P-1 — the copper-clad board. A COMPOSITE, not a plastic: the antistatic rule follows
   // `isPlasticMaterial`, and glass-fibre board must not switch a static-removal device on.
   'pcb',
+  // #1066 — Makera's Epoxy Tooling Board, the maintainer's M1 blank. A cast resin board: a
+  // composite, not a plastic (no antistatic) and not a wood (no facing).
+  'epoxy-tooling',
   'aluminium-6061',
   'aluminium-7075',
   'brass',
@@ -101,6 +104,8 @@ export const MATERIAL_LABELS: Readonly<Record<StockMaterial, string>> = {
   plastic: 'plastic (unspecified)',
   // #743 P-1 — Makera's word, plus what the board is.
   pcb: 'PCB (copper-clad FR-4)',
+  // #1066 — the operator's word for the blank, not the vendor's row name.
+  'epoxy-tooling': 'Epoxy tooling board',
   'aluminium-6061': 'Aluminium 6061',
   'aluminium-7075': 'Aluminium 7075',
   brass: 'Brass',
@@ -142,7 +147,7 @@ export function isWoodMaterial(material: StockMaterial): boolean {
  * #743 P-1 — the composite boards: a copper-clad PCB is a laminate, not a plastic, a wood or a
  * metal. Listed rather than derived, for the reason {@link isMetalMaterial} gives.
  */
-export const COMPOSITE_MATERIALS = ['pcb'] as const satisfies readonly StockMaterial[];
+export const COMPOSITE_MATERIALS = ['pcb', 'epoxy-tooling'] as const satisfies readonly StockMaterial[];
 
 /** Is this stock a composite board (a PCB)? See {@link COMPOSITE_MATERIALS}. */
 export function isCompositeMaterial(material: StockMaterial): boolean {

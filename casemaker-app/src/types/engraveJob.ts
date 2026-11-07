@@ -78,7 +78,10 @@ export type StockMaterial =
   | 'copper'
   // #743 P-1 — a copper-clad FR-4 board. Its copper is the stock's COLOUR CAP (a laminate, D2),
   // never a material of its own; the material exists so Makera's own PCB feed rows can answer it.
-  | 'pcb';
+  | 'pcb'
+  // #1066 — Makera's Epoxy Tooling Board: a cast resin board, one of the composite boards (not a
+  // plastic for the antistatic rule, not a wood for facing), answered by Makera's own vendor rows.
+  | 'epoxy-tooling';
 
 /**
  * The fibre a printed blank's filament class states (#464): `cf` carbon, `gf` glass.
