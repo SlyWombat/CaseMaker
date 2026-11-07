@@ -11,6 +11,16 @@
  * The fixture is the seeded `sloped` part (seed 1): its `curved-0` remainder carries a crease cell
  * at the pipeline's own gate pitch, so the V's CL is really built. RED at the parent (the plan
  * throws); GREEN with the CL inside the attempt (the plan posts and the crease is stated).
+ *
+ * #1062 RE-PIN (2026-11-07, at 1a438a48b). The V is now PINNED in `cutters.pinned.chamfer`.
+ * Before #1062 the fixture relied on an UNPINNED no-cone V reaching the plan at all: its feeds
+ * refused (`cuttingForTrace` — a V trace needs a cone), and #669's diameter proxy stood in for it
+ * because the proxy carried the cutter's id. #1062 made a proxy geometry-only and gated the
+ * substitution to `no-feeds`: a shape refusal is no longer turned into a feed row, so an unpinned
+ * no-cone V correctly leaves the candidate set (`goal-cutter-unfeedable`) and never reaches the
+ * crease — `unplanned` had no pencil entry. The premise is unchanged; the ROUTE into the plan is
+ * now the pinned cutter (the exception that keeps an operator's stated V in the set, exactly the
+ * job this containment exists for). Numbers and the assertion are untouched.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -32,7 +42,9 @@ function input(house: Tool[]): ModelPlanInput {
     setups: [{ frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -part.stock.thickness }, underside: 'flatOnStockBottom' }],
     stock: { length: part.stock.length, width: part.stock.width, thickness: part.stock.thickness, material: 'hardwood' },
     fixture: { mount: 'tape', envelope: null },
-    cutters: { house, catalogue: [] },
+    // #1062 — the V reaches the plan as the job's PINNED cutter: an unpinned no-cone V is
+    // unfeedable (a V trace needs a cone) and never enters the set.
+    cutters: { house, catalogue: [], pinned: { chamfer: 'v-no-cone' } },
     tolerances: { finishMm: 0.01 },
     edgeBreak: { legMm: 0 },
   };
