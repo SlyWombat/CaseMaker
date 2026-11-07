@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest';
 import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
 
 import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
+import { planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
@@ -112,6 +113,28 @@ async function plateInput(): Promise<ModelPlanInput> {
   return await buildModelPlanInputForGoal(job, target, BALL6, { tools: [], feeds: SHOP_FEEDS });
 }
 
+
+describe('#1052 the trace names which plan it is', () => {
+  it('planTwoOutcomes’ run yields plan:start tagged owned, then ideal', async () => {
+    // A catalogue cutter the owned set does not carry: the ideal half runs, so both start rows exist.
+    const small = flatEndMill(1, { number: 9, id: 'flat-1', name: 'flat-1' });
+    const input = { ...(await plateInput()) };
+    input.cutters = { house: input.cutters.house, catalogue: [small] };
+    const rows: string[] = [];
+    setMemTraceSink((line) => rows.push(line));
+    try {
+      const two = await planTwoOutcomes(input);
+      expect(two.ideal, 'the ideal half ran').not.toBeNull();
+    } finally {
+      setMemTraceSink(null);
+    }
+    const starts = rows
+      .map((r) => JSON.parse(r) as { stage: string; plan?: string })
+      .filter((r) => r.stage === 'plan:start')
+      .map((r) => r.plan);
+    expect(starts).toEqual(['owned', 'ideal']);
+  }, 300_000);
+});
 
 describe('#1052 the memory trace is flag-gated and changes nothing', () => {
   it('trace off: the plan JSON and the posted NC are byte-identical, and no row exists', async () => {
