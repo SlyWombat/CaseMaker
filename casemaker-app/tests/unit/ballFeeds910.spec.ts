@@ -181,17 +181,30 @@ describe('#910 1 — a ball is fed from its own catalogue row', () => {
 describe('#910 2 — the search states its refusal', () => {
   it('a library whose every cutter is refused answers with each cutter’s reason, not a throw', async () => {
     const anonymous = { key: 'inv:ball-6', tool: { ...BALL_6x32.tool, id: null }, provenance: 'owned' } as ToolLibraryEntry;
-    const short = { ...BALL_3x22, key: 'cat:short' };
-    const result = await smartPick(panther(), [anonymous, short], CATALOGUE, () => {
+    // #1037 — THE SHORT BALL NO LONGER BELONGS HERE. This case's subject is a library with NO
+    // candidate plan; a ball shorter than the goal's whole depth still builds one (below), so the
+    // plan-less library is the unfeedable ball plus a cutter of the wrong shape.
+    const result = await smartPick(panther(), [anonymous, FLAT_6x32], CATALOGUE, () => {
       throw new Error('nothing should be evaluated');
     });
     expect(result.refused).toBe(true);
     if (result.refused !== true) throw new Error('expected a refusal');
-    expect(result.candidates.map((c) => c.key)).toEqual(['inv:ball-6', 'cat:short']);
+    expect(result.candidates.map((c) => c.key)).toEqual(['inv:ball-6', 'cat:111031606032']);
     expect(result.candidates[0]!.reason).toContain('no cutting parameters');
-    expect(result.candidates[1]!.reason).toBe('it reaches 22 mm, and the work is 50.12 mm deep');
+    expect(result.candidates[1]!.reason).toBe("a flat cutter does none of this job's work (it needs ball)");
     expect(result.reason).toContain('inv:ball-6 — no cutting parameters');
-    expect(result.reason).toContain('cat:short — it reaches 22 mm');
+    // The wrong-shaped rest are counted in the sentence, not listed.
+    expect(result.reason).toContain('1 other cutter is not the shape this work needs');
+  });
+
+  it('a ball shorter than the goal’s whole depth is still a candidate — its reach is judged per feature (#1037)', () => {
+    // The #785 whole-goal rule is gone by 6b's ruling: the finisher is gated on the depth it would
+    // CUT (cam/model/plan's `goal-finish-unreachable`), so a 22 mm ball on the 50 mm-class panther
+    // is a plan, never a pre-plan refusal. The plan's own gate states any region it cannot reach.
+    const short = { ...BALL_3x22, key: 'cat:short' };
+    const plans = candidatePlans(panther(), [short], CATALOGUE);
+    expect(plans).toHaveLength(1);
+    expect(plans[0]!.cutters.map((c) => c.key)).toEqual(['cat:short']);
   });
 
   it('names the shape a cutter lacks', () => {
@@ -234,16 +247,14 @@ describe('#910 — elephant- and panther-class hardwood goals propose a ⌀6 bal
     expect(feeds.ok && feeds.catalogue?.cutterId).toBe('131032606032');
   });
 
-  it('the panther (115 × 66 × 50 mm) is too deep for any ball from one side, and says so', async () => {
-    const result = await smartPick(panther(), LIBRARY, CATALOGUE, () => {
-      throw new Error('nothing should be evaluated');
-    });
-    expect(result.refused).toBe(true);
-    if (result.refused !== true) throw new Error('expected a refusal');
-    const six = result.candidates.find((c) => c.key === BALL_6x32.key);
-    expect(six?.reason).toBe('it reaches 32 mm, and the work is 50.12 mm deep');
-    // The two flats are counted in the sentence, not listed.
-    expect(result.reason).toContain('2 other cutters are not the shape this work needs');
+  it('the panther (115 × 66 × 50 mm) is no longer refused for the goal’s whole depth — the ⌀6 × 32 ball is its plan (#1037)', () => {
+    // Re-pinned: this case used to pin the #785 whole-goal refusal — "the work is 50.12 mm deep",
+    // the search refusing without evaluating anything. #1037's ruling (6b) removes that class:
+    // the reach is judged per feature by the finisher gate (`goal-finish-unreachable`), so the
+    // search has a plan and evaluates it. The ⌀6 × 32 is the ball that builds it.
+    const plans = candidatePlans(panther(), LIBRARY, CATALOGUE);
+    expect(plans).toHaveLength(1);
+    expect(plans[0]!.cutters.map((c) => c.key)).toEqual([BALL_6x32.key]);
   });
 
   it('cut as a flip, each side of the panther is offered the ⌀6 × 32 ball', () => {
