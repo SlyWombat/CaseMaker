@@ -150,8 +150,8 @@ describe('#1068 the job-side obstacle field', () => {
     expect(text).toContain('an obstacle above the stock');
     expect(text).toContain('the stray clamp over the middle');
     expect(text).toContain('state it as a clamp');
-    // And a box that DOES lie in the blank (the hole) parses — the guard is about the top, not the field.
-    expect(
+    /** The same document with a different obstacle list. */
+    const withBoxes = (obstacles: JobBox[]) =>
       parseEngraveJob({
         ...JSON.parse(JSON.stringify(job)),
         workholding: {
@@ -160,11 +160,19 @@ describe('#1068 the job-side obstacle field', () => {
             anchor: 1,
             variant: 'thin',
             clamps: [{ edge: 'back', at: 90 }],
-            obstacles: [{ id: 'hole-1', label: 'the counterbored hole, 8 mm in from the left edge', min: [8, 38, -12], max: [15, 44, -2] }],
+            obstacles,
             source: 'default',
           },
         },
-      }).ok,
+      });
+    // A box that lies in the blank (the hole) parses — the guard is about the top, not the field.
+    expect(
+      withBoxes([{ id: 'hole-1', label: 'the counterbored hole, 8 mm in from the left edge', min: [8, 38, -12], max: [15, 44, -2] }]).ok,
+    ).toBe(true);
+    // A box that tops out EXACTLY at the stock's top parses too: the tray's proof models its two
+    // holes as ONE box over the left-waste band, from the bed up to Z 0 — which is not above it.
+    expect(
+      withBoxes([{ id: 'left-band', label: 'the left waste band the tray moves off', min: [0, 0, -12], max: [10, 100, 0] }]).ok,
     ).toBe(true);
   });
 });
