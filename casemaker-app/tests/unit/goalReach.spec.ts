@@ -218,30 +218,39 @@ describe('#785 — a rotary relief keeps its own judges', () => {
 });
 
 describe('#785 — Generate', () => {
-  it('a known-short reach is STATED, not refused, on the model engine: the plan posts and warns goal-not-freed', async () => {
+  it('a region no finisher reaches is NOT finished and stated — the plan never posts with the holder in the part', async () => {
     // #1037 (6b's ruling) — the whole-goal refusal is gone from the model path: the engine assigns
     // cutters PER FEATURE, and a part it cannot free is a warning on the posted plan, never a
     // refusal (the #992 rule "the part isn't freed is a warning, never a silent property").
     // PNG/rotary keep their own refusal; this seam is the model path's.
     const target = rampGoal();
     const out = await generateGoalProgram(tallJob(target), target, flat({ fluteLength: 12 }), null, { shop: {} });
-    expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
-    expect(out.nc).not.toBeNull();
     // The old whole-goal verdict is gone from this path.
     expect(out.findings.some((f) => f.code === 'goal-reach-short')).toBe(false);
-    // #1037 (6b's round three) — WHAT THE PLAN DOES WITH THE 18 mm IT CANNOT REACH. The rough is
-    // refused per region (`goal-rough-unreachable`, above), but the FINISH still follows the
-    // region's CL to its floor: the NC cuts to −29.995 with a 12 mm-flute flat, so the holder is
-    // in the part. The pipeline states that per region too.
-    let deepest = 0;
-    for (const m of (out.nc ?? '').matchAll(/Z(-?\d+(?:\.\d+)?)/g)) deepest = Math.min(deepest, Number(m[1]));
-    expect(deepest, 'the finish really posts below the flute').toBeLessThan(-12);
-    const over = out.findings.find((f) => f.code === 'goal-finish-overreach');
+    // #1037 (6b's round three, the ruling) — WHAT THE PLAN DOES WITH THE 18 mm IT CANNOT REACH.
+    // The rough is refused per region (`goal-rough-unreachable`, above) and the FINISH is judged
+    // the same way: a finisher is assigned a region only if its usable length reaches the region's
+    // floor, so the 12 mm-flute flat posts NO finish moves of the 30 mm region — the holder never
+    // enters the part — and the skip is stated with its numbers.
+    //
+    // THIS FIXTURE HAS NOTHING ELSE TO CUT (one region, one cutter, no pocket, rim or contour):
+    // with the finish skipped the plan posts no program at all, and the seam's existing no-program
+    // refusal fires WITH the statement quoted — never a deep cut, never a silent success. A job
+    // with other stages still posts the rest (test 1 of `trayReachGate1037.spec.ts`, ok true).
+    expect(out.ok).toBe(false);
+    expect(out.nc).toBeNull();
+    const quoted = out.errors.map((e) => e.message).join('; ');
+    expect(quoted).toContain('planned no program');
+    expect(quoted).toContain('"curved-0": not finished');
+    expect(quoted).toContain('floor 30 mm below the stock top');
+    expect(quoted).toContain('usable length 12 mm');
+    expect(quoted).toContain('no cutter in the set reaches it');
+    const over = out.findings.find((f) => f.code === 'goal-finish-unreachable');
     expect(over?.severity).toBe('warning');
-    expect(over?.message).toContain('"curved-0"');
-    expect(over?.message).toContain('30 mm below the stock top');
-    expect(over?.message).toContain('12 mm usable length');
-    expect(over?.message).toContain('18 mm above the flute');
+    expect(over?.message).toContain('"curved-0": not finished');
+    expect(over?.message).toContain('floor 30 mm below the stock top');
+    expect(over?.message).toContain('usable length 12 mm');
+    expect(over?.message).toContain('no cutter in the set reaches it');
     expect(over?.message).toContain('longer-flute cutter');
     // This fixture is an open relief: its contour is synthetic, so no freeing cut is demanded and
     // `goal-not-freed` is rightly absent. The warning's own numbers (a real profile's floor and

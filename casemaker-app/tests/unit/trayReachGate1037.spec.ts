@@ -107,6 +107,8 @@ describe.skipIf(TRAY === undefined)('#1037 the M1 tray reaches Generate with the
     expect(contourOps.length, 'one freeing contour is posted').toBe(1);
     expect(contourOps[0]!.outcome.cutter).toContain('42');
     expect(out.findings.some((f) => f.code === 'goal-not-freed')).toBe(false);
+    // #1037 — the finisher reaches the curved remainder's floor: no skip is stated.
+    expect(out.findings.some((f) => f.code === 'goal-finish-unreachable')).toBe(false);
   }, 600_000);
 
   it('a house flat whose stated flute reaches but is not in the chain says so, never "longest is 42 mm" contradicting itself', async () => {

@@ -3833,47 +3833,69 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       entry.maxSlope = Math.max(entry.maxSlope, roughRegion.slopeDeg[1]);
       finishKinds.set(finishKind, entry);
     }
-    if (attempt('finish', finishCutter, ref, () => finish({
-      cutter: finishCutter,
-      region: roughRegion,
-      regionRef: roughRef,
-      clSurface: clBall(),
-      kind: finishKind,
-      mesh: opts.geometry.triangles,
-      scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
-      ...(ball === undefined ? { flatFallback: true } : {}),
-      maskCells,
-      // #962 — the material field's answers past the region's own reach (the linker's disc and the
-      // down-leg floor reach up to a cutter radius outside it): the goal/mesh top there, which is
-      // the honest bound a wall or land beside a low region demands, and the stock top where the
-      // mesh is silent. The region's own zTop is NOT that bound — a neighbouring wall can out-top
-      // it, and a rapid floored at zTop would run into the wall. In this datum (every Z rebased by
-      // −stockTop) the stock top is 0.
-      materialTopAt: designTopAt,
-      stockTopZMm: 0,
-      stepDownMm: depth,
-      feeds: feedsOf(paramsFor(finishCutter)),
-      safeZMm: opts.safeZMm,
-      hopZMm: opts.hopZMm,
-      toolNumber: opts.toolNumberFor(finishCutter),
-      spindleRpm: paramsFor(finishCutter).rpm,
-      air: opts.air,
-      rapid: opts.rapid,
-    }))) {
-      // #1037 — THE FINISH'S OWN REACH LINE. The rough has one (#1019): a region deeper than the
-      // stated flat's usable length is the ball's rough and the substitution is stated. The finish
-      // had none: it followed the region's CL to its floor however deep that is, so a 12 mm-flute
-      // flat posted moves 30 mm down and the holder entered the part silently. Not a refusal (the
-      // plan still posts — #992's rule), one warning per region with the depths on the line.
-      const usable = finishCutter.shoulderLength ?? finishCutter.fluteLength;
-      const floorMm = Number((-base.zBottom).toFixed(1));
-      if (usable !== null && floorMm - usable > 1e-6) {
+    // #1037 (6b's ruling, 2026-11-07) — THE FINISH'S OWN REACH RULE, the rough's and the chain's:
+    // a finisher is assigned a region only if its usable length (shoulder, else flute) reaches the
+    // depth the finish would cut. A region it cannot is NOT finished — no move of it is posted —
+    // and the plan states it with its numbers. An unstated length is an unknown reach and still
+    // runs (#1019: the sweep judges it), and there is NO automatic band — `cutWithinReach` stays
+    // the operator's own choice. The rough above keeps its own rule: it may still take the region.
+    //
+    // THE MEASURE IS THE MOVES IT WOULD POST, not the region's own zBottom: a finish rides the CL,
+    // and over a vertical wall the CL stands at the wall's top edge, so a region whose design floor
+    // is 24 mm down is finished entirely near the top (the M1 tray's curved-14/15 — the 22 mm ball
+    // finishes them at −4.2). Judging the region's floor instead would skip two regions the tray
+    // has always cut.
+    let finishOutcome: OpOutcome | null = null;
+    let finishError: string | null = null;
+    try {
+      finishOutcome = finish({
+        cutter: finishCutter,
+        region: roughRegion,
+        regionRef: roughRef,
+        clSurface: clBall(),
+        kind: finishKind,
+        mesh: opts.geometry.triangles,
+        scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
+        ...(ball === undefined ? { flatFallback: true } : {}),
+        maskCells,
+        // #962 — the material field's answers past the region's own reach (the linker's disc and the
+        // down-leg floor reach up to a cutter radius outside it): the goal/mesh top there, which is
+        // the honest bound a wall or land beside a low region demands, and the stock top where the
+        // mesh is silent. The region's own zTop is NOT that bound — a neighbouring wall can out-top
+        // it, and a rapid floored at zTop would run into the wall. In this datum (every Z rebased by
+        // −stockTop) the stock top is 0.
+        materialTopAt: designTopAt,
+        stockTopZMm: 0,
+        stepDownMm: depth,
+        feeds: feedsOf(paramsFor(finishCutter)),
+        safeZMm: opts.safeZMm,
+        hopZMm: opts.hopZMm,
+        toolNumber: opts.toolNumberFor(finishCutter),
+        spindleRpm: paramsFor(finishCutter).rpm,
+        air: opts.air,
+        rapid: opts.rapid,
+    });
+    } catch (err) {
+      finishError = err instanceof Error ? err.message : String(err);
+    }
+    if (finishError !== null) {
+      // The attempt's own contract: a throwing stage does not sink the plan (#959 item 5).
+      unplanned.push({ kind: 'finish', cutterKey: cutterKeyOf(finishCutter), regionIds: [ref.id], reason: finishError });
+    } else {
+      let deepestZ = 0;
+      for (const operation of finishOutcome!.ir.operations) for (const move of operation.moves) deepestZ = Math.min(deepestZ, move.z);
+      const finisherReach = finishCutter.shoulderLength ?? finishCutter.fluteLength;
+      const cutFloorMm = Number((-deepestZ).toFixed(1));
+      if (finisherReach !== null && cutFloorMm - finisherReach > 1e-6) {
         const cutterName = finishCutter.name || finishCutter.shape;
         const text =
-          `"${region.id}": the finish follows the region to ${floorMm} mm below the stock top and the ${cutterName} states a ${usable} mm usable length — the ${Number((floorMm - usable).toFixed(1))} mm above the flute is the holder's; use a longer-flute cutter, or let a ball finish it`;
+          `"${region.id}": not finished — floor ${cutFloorMm} mm below the stock top, the ${cutterName}'s usable length ${finisherReach} mm, no cutter in the set reaches it — use a longer-flute cutter, or let a ball finish it`;
         notes.push(text);
-        statements.push({ severity: 'warning', code: 'goal-finish-overreach', count: 1, ids: [region.id], text });
+        statements.push({ severity: 'warning', code: 'goal-finish-unreachable', count: 1, ids: [region.id], text });
+        // No move of the region is posted: the rest and pencil passes ride this finish's CL.
+        continue;
       }
+      pushStage('finish', ref, finishOutcome!);
     }
 
     let restBallCl: ReturnType<typeof clSurface> | undefined;

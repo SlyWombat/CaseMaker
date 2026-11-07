@@ -76,9 +76,9 @@ export type PlanFindingCode =
   | 'chamfer-too-wide'
   // #1019 — the engine-chosen curved rough's stated flat could not reach the region's depth.
   | 'goal-rough-unreachable'
-  // #1037 — the finish follows a curved region's CL past the finishing cutter's usable length:
-  // the part above the flute is the holder's, and the sentence names the region and both depths.
-  | 'goal-finish-overreach'
+  // #1037 — no cutter in the set reaches a curved region's floor: the finish does not post the
+  // region, and the sentence names the region, the floor and the finisher's usable length.
+  | 'goal-finish-unreachable'
   // #1005 — the mould's own four. Rim and floor are the goal validator's
   // (`validateGoalObject`); one-sided and no-draft are the plan's, from its own solid.
   | 'goal-mold-rim'

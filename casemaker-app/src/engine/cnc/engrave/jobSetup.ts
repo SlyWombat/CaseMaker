@@ -397,8 +397,8 @@ export type JobFindingCode =
   | 'goal-mold-no-draft'
   // #1019 — the engine-chosen curved rough's stated flat could not reach the region's depth.
   | 'goal-rough-unreachable'
-  // #1037 — the finish follows the region's CL past the finishing cutter's usable length.
-  | 'goal-finish-overreach'
+  // #1037 — no cutter in the set reaches a curved region's floor: the finish does not post it.
+  | 'goal-finish-unreachable'
   | 'goal-object-no-toolpath'
   // #829 — THE 3D CHAMFER THE GOAL ASKS FOR. `goal-chamfer-no-cutter` is the WARNING that names
   // why no V program was posted (no V-bit chosen, one the library does not hold, or one with no
