@@ -25,6 +25,7 @@
  */
 
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
+import { memTrace } from '@/engine/cnc/memTrace';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import type { RemainderRegion, FeatureSource } from '../features';
@@ -575,6 +576,10 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // it on the real part: its offset lands vertical edges on exactly the raster's round x values.
   // The rows start a tenth of a micron off, far below the CL tolerance (0.005 mm), and the blind
   // spot is gone.
+  // #1052 — the raster's own progress, every 32 rows: the 10-minute j27 run sits inside ONE
+  // finish() call, so these are the only rows that show the heap's slope.
+  let finishRows = 0;
+  let finishRowTick = 0;
   for (const levelZ of levels) {
     // 1. COLLECT this level's admitted runs before the first move is posted. The raster's own
     //    order (row by row, run by run) is NOT the order the runs are cut in: where the mask
@@ -635,6 +640,10 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         }
       }
       if (!(stepOverMm > 1e-6)) break;
+      finishRows++;
+      if (++finishRowTick % 32 === 0) {
+        memTrace('finish:row', { rows: finishRows, x: Number(x.toFixed(2)), levelZ: Number(levelZ.toFixed(2)), moves: moves.length });
+      }
       x += stepOverMm;
     }
     cleared.push({ z: levelZ, boundary: levelCleared });
