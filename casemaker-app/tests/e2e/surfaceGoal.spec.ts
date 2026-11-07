@@ -133,8 +133,13 @@ test('a goal STL from the picker generates, and the UI states its own check and 
   await expect(report).toContainText('roughing layer');
   await expect(report).toContainText('mm step-down');
   await expect(report).toContainText('mm step-over');
-  await expect(report).toContainText('Sampled on a');
-  await expect(report).toContainText('mm grid');
+  // #1035 item 12 — THE FACTS COME FROM THE MODEL PLAN NOW (#1007's carrier): its own resolution
+  // sentence names the cutter-location grid the plan was measured on ("The model plan's
+  // cutter-location grid, 0.005–1.5875 mm spacing"). "Sampled on a …mm grid" is the heightfield
+  // sampler's sentence, and it belongs to the non-model run's branch — the string no longer exists
+  // in the app. The roughing-layer/step-down/step-over lines above are unchanged.
+  await expect(report).toContainText('Last generated:');
+  await expect(report).toContainText('cutter-location grid');
 
   // #535/#948 — THE GOAL PROGRAM IS A RELEASE SOURCE, AND ITS CHECK DECIDES THE PRESS. Cut freezes
   // it (the package is current), but the failed goal check keeps the run from being offered: step 1
