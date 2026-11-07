@@ -301,8 +301,10 @@ describe('#1068 a bracket job through the command line is checked against its mo
     expect(sideRun.code).toBe(0);
     if (sideRun.receipt === null || sideRun.receipt.command !== 'engrave') throw new Error('expected the engrave receipt');
     const sideSheet = readFileSync(join(sideRun.outDir, sideRun.receipt.details.programs[0]!.sheet!.file!), 'utf8');
+    // #1070 — the same one-sentence rule, side form (the label names the clamp; the step says
+    // its top sits below the stock's).
     expect(sideSheet).toContain(
-      'Fit the side clamp on the back edge, its top below the stock top, its centre 90 mm from the left end',
+      'Fit the clamp: the side clamp on the back edge, 2.5 mm in from the right-hand corner — its top below the stock top; the job was planned with a clamp there.',
     );
   }, 300_000);
 
