@@ -5565,3 +5565,51 @@ describe('EngravePanel — the label’s V-carve depth (#940b)', () => {
     expect(screen.queryByTestId('engrave-label-vcarve-depth-0')).toBeNull();
   });
 });
+// ── #1065 — THE CUTTER PICKER: THE SHOP'S OWN CUTTERS, OR THE BUILT-INS ───────────────────────
+describe('#1065 the cutter picker', () => {
+  const optionValues = (): string[] =>
+    [...(screen.getByTestId('engrave-tool') as HTMLSelectElement).options].map((o) => o.value);
+  const owned = { key: 'inv:p1065', tool: flatEndMill(2, { name: '2 mm flat' }), provenance: 'test' };
+
+  afterEach(() => {
+    act(() => setInventoryEntries([]));
+    resetRegistry();
+    cleanup();
+  });
+
+  it('a shop with records lists them — not the built-ins — and keeps the job’s own key listed', () => {
+    act(() => setInventoryEntries([owned]));
+    act(() => {
+      const job = defaultEngraveJob();
+      useEngraveJobStore.setState({ job: { ...job, toolKey: owned.key, tool: owned.tool } });
+    });
+    render(<EngravePanel />);
+    let values = optionValues();
+    expect(values).toContain('inv:p1065');
+    expect(values).not.toContain('flat-1.0');
+    cleanup();
+    // The job's own key is something else (a built-in): it stays listed so the select's value is
+    // always one of the options, while the picker's list stays the shop's.
+    act(() => {
+      const job = defaultEngraveJob();
+      useEngraveJobStore.setState({ job: { ...job, toolKey: 'flat-1.0' } });
+    });
+    render(<EngravePanel />);
+    values = optionValues();
+    expect(values).toContain('flat-1.0');
+    expect(values).toContain('inv:p1065');
+  });
+
+  it('an empty shop lists the two built-ins — and not the catalogue rows it never owned', () => {
+    // The house service's `cat:` rows are installed (a real app with no inventory but a readable
+    // catalogue): the picker still offers only the built-ins, because a catalogue definition is
+    // not a cutter the shop holds.
+    act(() => setRegistry([{ key: 'cat:p1065', tool: flatEndMill(1.5, { name: '1.5 mm flat', id: '131' }), provenance: 'test catalogue' }]));
+    act(() => setInventoryEntries([]));
+    render(<EngravePanel />);
+    const values = optionValues();
+    expect(values).toContain('flat-1.0');
+    expect(values).toContain('flat-3.175x12-metal');
+    expect(values).not.toContain('cat:p1065');
+  });
+});
