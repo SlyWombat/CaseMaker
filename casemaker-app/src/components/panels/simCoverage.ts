@@ -56,6 +56,12 @@ export interface SimSweptProgram {
   seedFrom?: string | null;
   /** #1034 — how many earlier same-setup removals were also in the seed (0 or absent = none). */
   seedEarlier?: number;
+  /**
+   * #1050 — the route the load was seeded by: `'field'` (the column field `seedFrom` names),
+   * `'removal'` (the earlier programs' removal meshes — the exact route, which has no field
+   * label), or `null` (nothing). Absent reads as unknown; the removal sentence never fires on it.
+   */
+  seedRoute?: 'field' | 'removal' | null;
   /** The codes this program's OWN sweep raised, when the caller carries them. */
   codes?: readonly string[];
   /** How many ERROR diagnostics this program's sweep raised; absent reads as 0. */
@@ -355,6 +361,25 @@ function wholeRunDisclaimer(
                   : `, and the ${p.seedEarlier} earlier programs' removals`
                 : ''
             }${p.carriedFloor === true ? ", with the earlier setup's floor carried" : ''}`,
+        ),
+      )}.`,
+    );
+  }
+  // #1050 — THE EXACT ROUTE NAMES ITS SEED TOO. A load seeded from the earlier programs' REMOVAL
+  // meshes has no column field to point at, so `seedFrom` is null and #1034's sentence above could
+  // not fire: the program was seeded and the panel said nothing. The field route keeps its exact
+  // wording (a program seeded by both is in `seeded`, never here).
+  const seededByRemoval = programs.filter(
+    (p) => (typeof p.seedFrom !== 'string' || p.seedFrom.length === 0) && p.fromBlank !== true && p.seedRoute === 'removal',
+  );
+  if (seededByRemoval.length > 0) {
+    out.push(
+      `From the earlier programs: ${joinAnd(
+        seededByRemoval.map(
+          (p) =>
+            `${p.label} starts from the material the earlier programs left — their removal${
+              p.carriedFloor === true ? ", with the earlier setup's floor carried" : ''
+            }`,
         ),
       )}.`,
     );

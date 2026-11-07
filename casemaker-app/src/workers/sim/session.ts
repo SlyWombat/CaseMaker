@@ -197,6 +197,13 @@ export interface SimLoadOk {
    */
   seedEarlier?: number;
   /**
+   * #1050 — THE ROUTE THIS LOAD WAS SEEDED BY, set by the caller that chose the seed: `'field'`
+   * (the column field `seedFrom` names), `'removal'` (the earlier programs' removal meshes — the
+   * exact route, which has no field to name), or null (nothing / a blank restart). The panel
+   * names the seed from whichever route it took.
+   */
+  seedRoute?: 'field' | 'removal' | null;
+  /**
    * Where the fixture's dimensions came from (#204), present only when the setup models one.
    * A default is NOT a measurement; the viewport shows this so the shown jaws are not read as
    * exact. Optional so a setup with no `fixture` does not grow the load info's shape.

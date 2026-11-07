@@ -965,6 +965,13 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
                 ],
               };
             }
+            // #1050 — WHICH ROUTE SEEDED THIS LOAD, so the panel can name it. The field route is
+            // the one `seedFrom` already names; the exact route is a load handed the earlier
+            // programs' removal meshes with no field to point at, and it used to fall through every
+            // sentence. A blank restart is neither. A program with BOTH says 'field' (#1034's
+            // wording wins, unchanged).
+            const seedRoute: 'field' | 'removal' | null =
+              fromBlank === true ? null : seedFrom !== null ? 'field' : seeds.meshes.length > 0 ? 'removal' : null;
             const result = await useSimStore.getState().loadProgram(
               program.nc,
               // #725 B7 — the wasteboard is the setup's under-board for a bed job: a through cut
@@ -1019,7 +1026,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
               // from the blank still had the earlier setup's carried floor; the panel must not
               // read as "the carry was lost". #1034 — and a program seeded from its own setup's
               // predecessor names that predecessor.
-              return result.ok ? { ...result, carriedFloor: carried !== null, seedFrom, seedEarlier } : result;
+              return result.ok ? { ...result, carriedFloor: carried !== null, seedFrom, seedEarlier, seedRoute } : result;
             }
             const sim = useSimStore.getState();
             // null means this load no longer owns the session (a newer run/panel load stopped it),
