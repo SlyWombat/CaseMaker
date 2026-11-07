@@ -100,11 +100,11 @@ function targetFor(mesh: ReturnType<typeof pocketBlock>): EngraveTargetObject {
   } as EngraveTargetObject;
 }
 
-function jobFor(target: EngraveTargetObject): EngraveJob {
+function jobFor(target: EngraveTargetObject, material: EngraveJob['stock']['material'] = 'aluminium-6061'): EngraveJob {
   const base = defaultEngraveJob();
   return {
     ...base, labels: [], shapes: [], targetObject: target, toolKey: '', tool: BALL6,
-    stock: { ...base.stock, length: L, width: W, thickness: 12, material: 'aluminium-6061' },
+    stock: { ...base.stock, length: L, width: W, thickness: 12, material },
   };
 }
 
@@ -158,5 +158,58 @@ describe('#1044 a candidate with no feeds leaves the set, stated', () => {
     // ball remain, so the refusal names the material rather than the wrong candidate.
     const input = await inputFor([METAL6, VBIT], VBIT);
     await expect(planModelCam(input)).rejects.toThrow(/no cutter in the set has cutting parameters for aluminium-6061/);
+  }, 180_000);
+});
+
+/**
+ * #1062 defect 2 — THE #669 BODY PROXY HAS GEOMETRY AND NO IDENTITY.
+ *
+ * A corn-class cutter: ⌀0.6, below the hardwood table's 0.8 mm floor, carrying Makera's id whose
+ * catalogue rows (for another material) state the same ⌀0.6. Its own feeds refuse on hardwood as
+ * they always did, and #669's flat proxy at hardwood's largest covered row (3.2 mm) is what stands
+ * in. The proxy used to carry the cutter's id, so #732 compared the 3.2 mm stand-in with the
+ * 0.6 mm cutter the catalogue states, called it a different cutter and refused the substitution —
+ * the candidate left the set with #1044's line, and on the M1 tray the V then took the two shallow
+ * pockets (#1062's 0.523 mm).
+ *
+ * RED at 95c15d344: the corn is dropped and stated "not a candidate"; the plan falls back to the
+ * ball (no flat in the set) and no op cuts the pocket with a flat.
+ */
+const CORN: Tool = flatEndMill(0.6, { number: 4, id: '111218063803', name: 'TiN Coating Corn Bit 0.6mm' });
+/** A shape no CAM here can trace: the substitution answers a diameter, never a shape. */
+const DRILL: Tool = { ...flatEndMill(1, { number: 5, id: '111018103803', name: 'TiN Coating Drill Bit 1mm' }), shape: 'drill', typeText: 'Drill' } as Tool;
+
+describe('#1062 the #669 body proxy is judged on the owned record, never on an id', () => {
+  it('RED: under rows, a below-the-floor corn keeps its place through the 3.2 mm proxy', async () => {
+    // The catalogue knows this cutter's id — for PCB, not hardwood — and its rows carry the joined
+    // geometry (the service joins it; a test row states it, as `withCatalogueGeometry` does).
+    setFeedCatalogue([
+      {
+        cutterId: '111218063803',
+        material: 'PCB',
+        rpm: 10000,
+        feed: 500,
+        plungeFeed: 200,
+        stepDown: 0.2,
+        cutter: { shape: 'flat', diameter: 0.6, tipDiameter: 0.6 },
+      },
+    ]);
+    const target = targetFor(pocketBlock());
+    const input = await buildModelPlanInputForGoal(jobFor(target, 'hardwood'), target, BALL6, shopWith([CORN, DRILL, BALL6]));
+    const plan = await planModelCam(input);
+    const last = plan.perSetup.at(-1)!;
+    const codes = last.statements.map((s) => s.code);
+    const unfeedable = last.statements
+      .filter((s) => s.code === 'goal-cutter-unfeedable')
+      .map((s) => s.text)
+      .join(' | ');
+    expect(unfeedable, 'the corn was dropped from the candidate set').not.toContain('Corn');
+    // The substitution answers a diameter, never a shape: a drill keeps its own refusal.
+    expect(unfeedable, 'a drill was made feedable by a flat proxy').toContain('Drill');
+    expect(codes, 'the substitution that fed the corn is not stated').toContain('goal-cutter-substituted');
+    expect(last.notes.join(' | ')).toContain('largest covered row (3.2 mm)');
+    // The corn is the set's only flat, so its own numbers cut the pocket floor.
+    const ops = plan.perSetup.flatMap((s) => s.ops);
+    expect(ops.some((op) => op.outcome.ir.tool.name === CORN.name), 'the corn cut no op').toBe(true);
   }, 180_000);
 });
