@@ -26,6 +26,22 @@ export interface GoalStock {
 }
 
 const fmt1 = (n: number): string => `${Number(n.toFixed(1))}`;
+/** An overhang in mm to two decimals: 0.05 never prints as "0.0", and 1.59 µm never refuses. */
+const fmt2 = (n: number): string => n.toFixed(2);
+
+/**
+ * #1045 — THE ONE "FITS THE BLANK" TOLERANCE, shared by the panel's overhang row and the CAM seam.
+ *
+ * The two readings of one goal differ: the PANEL reads the document's stored size (three decimals,
+ * as Fit to the stock wrote it), the SEAM re-measures the mesh's own vertices through `placeTarget`.
+ * On j28 those differ by 1.59 µm (stored 66.404 against the mesh's true 66.4040059 at scale
+ * 36/66.404) — below both float32's resolution at 66 mm and anything a display can show, yet the
+ * seam's 1e-6 tolerance refused it and printed "0.0 mm past the left edge". 0.01 mm is two orders
+ * above that noise and far below anything a cutter notices: a goal within it of the edge fits
+ * everywhere. Used as {@link goalStockOverhang}'s default and at the CAM seam in
+ * `engraveGenerate.ts`; a real miss still refuses, and its sentence prints two decimals.
+ */
+export const GOAL_FIT_TOLERANCE_MM = 0.01;
 
 /** Centre the placed bounding box in the stock's X/Y. */
 export function centreInStockPatch(stock: GoalStock): { position: { x: number; y: number } } {
@@ -83,7 +99,7 @@ export function goalStockOverhang(
     'format' | 'scale' | 'size' | 'rotation' | 'rotationX' | 'rotationY' | 'position'
   > & { name?: string },
   rect: { xMin: number; xMax: number; yMin: number; yMax: number },
-  toleranceMm = 1e-6,
+  toleranceMm = GOAL_FIT_TOLERANCE_MM,
 ): GoalOverhang {
   const size = placedSize(target);
   const gxMin = target.position.x - size.x / 2;
@@ -101,11 +117,11 @@ export function goalStockOverhang(
   if (sides.length === 0) return { fits: true, sides: [], sentence: '' };
   const list =
     sides.length === 1
-      ? `${fmt1(sides[0]!.mm)} mm past the ${sides[0]!.side} edge`
+      ? `${fmt2(sides[0]!.mm)} mm past the ${sides[0]!.side} edge`
       : `${sides
           .slice(0, -1)
-          .map((s) => `${fmt1(s.mm)} mm past the ${s.side} edge`)
-          .join(', ')} and ${fmt1(sides.at(-1)!.mm)} mm past the ${sides.at(-1)!.side} edge`;
+          .map((s) => `${fmt2(s.mm)} mm past the ${s.side} edge`)
+          .join(', ')} and ${fmt2(sides.at(-1)!.mm)} mm past the ${sides.at(-1)!.side} edge`;
   return {
     fits: false,
     sides: sides.map((s) => ({ ...s })),
@@ -143,7 +159,9 @@ export function goalFit(
   const over = { x: size.x - room.x, y: size.y - room.y, z: size.z - room.z };
   const axes = ['x', 'y', 'z'] as const;
   const worstOver = axes.reduce((a, b) => (over[b] > over[a] ? b : a));
-  if (over[worstOver] > 1e-6) {
+  // #1045 — the same tolerance the seam uses, so the panel's fit row and the CAM's fit check
+  // cannot disagree about a goal that is within float noise of the room.
+  if (over[worstOver] > GOAL_FIT_TOLERANCE_MM) {
     const mm = Number(over[worstOver].toFixed(1));
     const word = worstOver === 'z' ? 'tall' : worstOver === 'x' ? 'wide' : 'long';
     return {
