@@ -20,7 +20,7 @@ import type { EngraveJob, EngraveTargetObject, EngraveMargins } from '@/types/en
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { getToplevel } from './geometry/ManifoldRuntime';
 import type { NodeMeshOutput } from './geometry/meshOutput';
-import { createSimSession, type SimDesign, type SimFrame, type SimLoadOpts, type SimLoadResult, type SimPath, type SimSession } from './sim/session';
+import { createSimSession, type SimDesign, type SimFrame, type SimLoadOpts, type SimLoadPhase, type SimLoadResult, type SimPath, type SimSession } from './sim/session';
 import type { SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
 import { goalInputFor } from './sim/goalCheckField';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
@@ -110,12 +110,14 @@ const api = {
   cancelEngravePick(gen: number): void {
     if (gen + 1 > latestEditGen) latestEditGen = gen + 1;
   },
-  async simLoad(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts, onProgress?: (done: number, total: number, memoryMB?: number | null) => void): Promise<SimLoadResult> {
+  async simLoad(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts, onProgress?: (done: number, total: number, memoryMB?: number | null) => void, onPhase?: (phase: SimLoadPhase) => void): Promise<SimLoadResult> {
     // #896 — the sweep's progress carries THIS worker's heap, so a long goal sweep says what it
     // is holding while it holds it.
     const withMemory =
       onProgress === undefined ? undefined : (done: number, total: number): void => onProgress(done, total, workerMemoryMb());
-    const result = (await getSession()).load(gcodeText, setup, tool, machineId, { ...opts, onProgress: withMemory });
+    // #1048 — the sweep's own phase ('air' for the rapid-move check) reaches the client, whose
+    // silence clock re-arms on it; the run line names the phase.
+    const result = (await getSession()).load(gcodeText, setup, tool, machineId, { ...opts, onProgress: withMemory, ...(onPhase === undefined ? {} : { onPhase }) });
     if (!result.ok) return result;
     const m = result.meshes;
     return Comlink.transfer(result, buffersOf([m.stock, m.result, m.removal, ...m.gouges.map((g) => g.mesh)]));

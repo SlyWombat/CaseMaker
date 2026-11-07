@@ -47,7 +47,7 @@ import { cuttingDiameter, cuttingForTrace, drillPointAngle, type Tool } from '@/
 import { holderOf, type Mill } from '@/engine/cnc/machine';
 import type { NodeMeshOutput } from './meshOutput';
 import { applyCarriedField, applyPriorTops, fieldOfGrid, type CarriedField } from './carriedField';
-import type { SweepDiagnostic, SweepStats } from './sweep';
+import { AIR_PROGRESS_EVERY, MAX_AIR_CHECKS, type SweepDiagnostic, type SweepStats } from './sweep';
 import {
   MAX_GOUGES,
   holderGate,
@@ -588,6 +588,8 @@ export interface ColumnSweepOpts {
    */
   stallMs?: number;
   onProgress?: (done: number, total: number) => void;
+  /** #1048 — the air phase's own phase + ticks (see `SweepOpts.onPhase`). */
+  onPhase?: (phase: 'air') => void;
   /** Override the §4.4 sim-resolution estimate (a spec and the probe set this). */
   resolution?: ColumnResolution;
   /**
@@ -2200,15 +2202,16 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   const gouges: { step: number; line: number }[] = [];
   {
     let checked = 0;
-    // #858 — NO COUNT CAP HERE. `MAX_AIR_CHECKS` bounds the EXACT sweeper, where each check is a
-    // Manifold boolean; on this engine a check is a walk over the grid cells under the move, and
-    // the tool tray's ⌀1 program — 15 204 air moves, 14 644 of them below the stock top — checks
-    // in full in about 41 ms where the cap had left 11 204 unchecked to save 25 ms. The bound that
-    // remains is the sweep's own time budget: past it, the moves still to test are reported.
+    // #858/#1048 — the phase is bounded by a COUNT, like the exact sweeper, never by a wall
+    // clock: the old deadline could only stop the loop after it had already run long (it never
+    // caught a hang), and on a slow machine it turned a healthy phase into a false
+    // `air-moves-unchecked` error. `MAX_AIR_CHECKS` marks every move past the cap as unchecked,
+    // stated by the #925 error in its own words.
     let unchecked = 0;
-    let outOfTime = false;
-    // #895 — the air phase gets its OWN stall window: the grid checkpoints it follows made progress.
-    const airDeadline = stallMs === undefined ? null : performance.now() + stallMs;
+    let tested = 0;
+    // #1048 — the air phase reports while it works, as its own phase.
+    const airTotal = timeline.airMoves.filter((mv) => Math.min(mv.from[2], mv.to[2]) <= grid.initial).length;
+    opts?.onPhase?.('air');
     for (const mv of timeline.airMoves) {
       checked++;
       // #923 — `rapid-into-fixture` / `feed-into-fixture`: tested before the "wholly above the
@@ -2233,11 +2236,12 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
       }
       const tip = Math.min(mv.from[2], mv.to[2]);
       if (tip > grid.initial) continue; // wholly above the stock
-      if (!outOfTime && airDeadline !== null && checked % 256 === 0 && performance.now() > airDeadline) outOfTime = true;
-      if (outOfTime) {
+      if (tested >= MAX_AIR_CHECKS) {
         unchecked++;
         continue;
       }
+      tested++;
+      if (tested % AIR_PROGRESS_EVERY === 0) opts?.onProgress?.(tested, Math.min(airTotal, MAX_AIR_CHECKS));
       const gouged = rotary
         ? (() => {
             const aEnd = timeline.stateAt(mv.step).a;
