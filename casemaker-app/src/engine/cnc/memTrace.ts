@@ -14,8 +14,8 @@
  */
 
 type Sink = (line: string) => void;
-/** Reads the manifold wasm memory's byte size; null when the module does not expose it. */
-type WasmHeapReader = () => number | null;
+/** Reads the manifold wasm memory: its byte size and WHICH field answered (A's review, #1052). */
+type WasmHeapReader = () => { bytes: number; source: 'HEAP8' | 'HEAPU8' | 'wasmMemory' } | null;
 
 let sink: Sink | null = null;
 let startedAt = 0;
@@ -76,8 +76,11 @@ export function memTrace(stage: string, extra?: Record<string, number | string |
   let wasmSource = 'arrayBuffers';
   if (wasmHeap !== null) {
     try {
-      wasmBytes = wasmHeap();
-      if (wasmBytes !== null) wasmSource = 'HEAP8';
+      const read = wasmHeap();
+      if (read !== null) {
+        wasmBytes = read.bytes;
+        wasmSource = read.source;
+      }
     } catch {
       wasmBytes = null;
     }

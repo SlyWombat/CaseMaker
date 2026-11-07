@@ -577,8 +577,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   // falls back to `arrayBuffers`, naming which it used.
   setWasmHeapReader(() => {
     const m = tl as unknown as { HEAP8?: { buffer?: ArrayBuffer }; HEAPU8?: { buffer?: ArrayBuffer }; wasmMemory?: WebAssembly.Memory };
-    const buf = m.HEAP8?.buffer ?? m.HEAPU8?.buffer ?? m.wasmMemory?.buffer;
-    return buf === undefined ? null : buf.byteLength;
+    if (m.HEAP8?.buffer !== undefined) return { bytes: m.HEAP8.buffer.byteLength, source: 'HEAP8' as const };
+    if (m.HEAPU8?.buffer !== undefined) return { bytes: m.HEAPU8.buffer.byteLength, source: 'HEAPU8' as const };
+    if (m.wasmMemory?.buffer !== undefined) return { bytes: m.wasmMemory.buffer.byteLength, source: 'wasmMemory' as const };
+    return null;
   });
   /**
    * The shop's tunable defaults, as the document holds them (#416/#417), or null when this run has no

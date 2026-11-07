@@ -490,6 +490,11 @@ export interface PlanModelCamOptions {
    * that names the ideal's measured ball (one leftover statement per card, not two).
    */
   restStatement?: boolean;
+  /**
+   * #1052 — which of `planTwoOutcomes`' two runs this is, for the memory trace's `plan:start` row
+   * (owned or ideal). Absent for a plan the caller runs alone.
+   */
+  planKind?: 'owned' | 'ideal';
 }
 
 /**
@@ -636,7 +641,7 @@ function describeRegistration(setupIndex: number, registration: SetupRegistratio
  */
 export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
   // #1052 — the flag-gated memory trace (a null check when off): one row at the plan's start.
-  memTrace('plan:start', { setups: input.setups.length, house: input.cutters.house.length });
+  memTrace('plan:start', { plan: opts.planKind ?? 'owned', setups: input.setups.length, house: input.cutters.house.length });
   const tl = await getToplevel();
   const offset = makeClipperOffset(tl);
   const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
@@ -1482,6 +1487,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       return { regions, unreachable, planned, masks };
     };
 
+    // #1052 — the pocket chain's own bracket (A's finding): an abort between plan:start and the
+    // first curved op names the chain, and its end row carries the candidate count.
+    memTrace('chain:start');
     const result = planTreePrograms(tree, {
       offset,
       floorStrips: buildFloorStrips,
@@ -1536,6 +1544,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       },
       curved: curvedOptionsFor(ball, cutParamsFor),
     });
+    memTrace('chain:end', { candidates: result.choice.considered?.length ?? 0 });
     opts.signal?.throwIfAborted();
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 0.9 });
 
@@ -2890,6 +2899,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   const planStep: SequenceOptions['planStep'] = (step, prefix) => {
     const signature = stepKey(step, prefix);
     if (irCache.has(signature)) return irCache.get(signature)!;
+    // #1052 — the pocket chain's own boundary (A's finding): an abort inside it names its step.
+    memTrace('chain:step', { kind: step.kind, cutter: step.cutter.key });
     opts.signal?.throwIfAborted();
     opts.onStep?.(step.kind);
     // The outcome cache uses the SAME key as the IR cache (a rest's regions depend on its prefix),

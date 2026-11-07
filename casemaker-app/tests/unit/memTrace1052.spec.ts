@@ -150,7 +150,7 @@ describe('#1052 the memory trace is flag-gated and changes nothing', () => {
       for (const r of stages) {
         expect(typeof r.heapUsed).toBe('number');
         expect(typeof r.wasmBytes).toBe('number');
-        expect(['HEAP8', 'arrayBuffers']).toContain(r.wasmSource);
+        expect(['HEAP8', 'HEAPU8', 'wasmMemory', 'arrayBuffers']).toContain(r.wasmSource);
       }
     } finally {
       setMemTraceSink(null);
@@ -194,7 +194,7 @@ describe('#1052 casemaker cut --mem-trace', () => {
     for (const r of rows) {
       expect(typeof r.heapUsed).toBe('number');
       expect(typeof r.wasmBytes).toBe('number');
-      expect(['HEAP8', 'arrayBuffers']).toContain(r.wasmSource);
+      expect(['HEAP8', 'HEAPU8', 'wasmMemory', 'arrayBuffers']).toContain(r.wasmSource);
     }
 
     // The posted program is the same file: the trace is an observation, not an input.
