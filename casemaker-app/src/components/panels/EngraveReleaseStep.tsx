@@ -26,6 +26,9 @@ import { useEngraveReleaseStore, type ReleaseFile } from '@/store/engraveRelease
 import { useFirstRegistration } from '@/store/engraveRegistrationStore';
 import { facingRegistrationBlocker, withPeriod } from '@/store/engraveRunGate';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
+import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { readFlag } from '@/platform/defaultsClient';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
@@ -288,6 +291,26 @@ export function EngraveReleaseStep({
         The vacuum goes on with the job’s first program and stays on across every bit change; only the job’s last
         program turns it off. A Stop between programs sends M332 and homes.
       </p>
+      {/* #1060 — THE SPINDLE BLOWER'S OWN SWITCH. It follows the vacuum (M331.1 on with it, M332.1
+          off before it) unless this job turns it off; the shop's run.blowWithVacuum is the default. */}
+      {(() => {
+        const blowOn = job.blowWithVacuum ?? readFlag(useShopDefaultsStore.getState().defaults, 'run.blowWithVacuum').value;
+        return (
+          <p style={MUTED} data-testid="engrave-release-blow">
+            Air blow with the vacuum: <strong>{blowOn ? 'on' : 'off'}</strong>{' '}
+            <button
+              type="button"
+              data-testid="engrave-release-blow-toggle"
+              onClick={() => {
+                const current = useEngraveJobStore.getState().job;
+                useEngraveJobStore.setState({ job: { ...current, blowWithVacuum: !blowOn } });
+              }}
+            >
+              {blowOn ? 'Turn it off' : 'Turn it on'}
+            </button>
+          </p>
+        );
+      })()}
       {job.facing?.enabled === true && (
         <p style={{ ...MUTED, color: '#f0b8a8' }} data-testid="engrave-release-facing-blocker">
           The release is blocked — {hiddenRetouch}.

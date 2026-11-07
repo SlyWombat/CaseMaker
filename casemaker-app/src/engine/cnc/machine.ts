@@ -375,9 +375,10 @@ export interface MillProfile extends MachineIdentity {
      * 2026-10-07 is a reading of our own traffic now.
      *
      * The rest of the machine's accessory surface is the same family's sub-codes — `M331.2` bed
-     * cleaning, `M331.1` blowing — plus `M951` time-lapse, none of which this app emits or reads
-     * (#283, #289; `/Z1-Firmware-Dialect.md` §11.3). The Carvera's internal vacuum, `M801`/`M802`,
-     * is a different machine's and is not this.
+     * cleaning and `M331.1` blowing (the spindle's Auto Blow, switched by the RUN since #1060 when
+     * `run.blowWithVacuum` is on — `blow` below) — plus `M951` time-lapse, none of which this app
+     * writes into a file or reads back (#283, #289; `/Z1-Firmware-Dialect.md` §11.3). The Carvera's
+     * internal vacuum, `M801`/`M802`, is a different machine's and is not this.
      */
     vacuum: boolean;
     /**

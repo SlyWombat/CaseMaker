@@ -82,6 +82,10 @@
           ],
           "type": "object"
         },
+        "blowWithVacuum": {
+          "description": "Switch the spindle air blow on with the vacuum for this job; omit to follow the shop setting (on by default).",
+          "type": "boolean"
+        },
         "breakthrough": {
           "description": "How far a through cut goes past the blank's bottom face, in millimetres.",
           "minimum": 0,

@@ -10,7 +10,7 @@
 
 import { create } from 'zustand';
 
-export type AccessoryKind = 'vacuum' | 'antistatic' | 'light';
+export type AccessoryKind = 'vacuum' | 'antistatic' | 'blow' | 'light';
 
 /** `true` on, `false` off, `null` unknown (nothing sent, or the last press was unsure). */
 export type AccessoryMode = boolean | null;

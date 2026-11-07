@@ -201,11 +201,11 @@ export async function stopOnSession(
     if (poll.kind === 'sent') {
       const state = controllerState(poll.text);
       if (state !== null && state.toLowerCase() === 'idle' && !programRunning(poll.text)) {
-        // #1060 — the blower goes off BEFORE the vacuum does (the operator's ordering), and the
-        // antistatic as it always has.
+        // #1060 — the blower goes off BEFORE the vacuum does (the operator's ordering); the
+        // antistatic keeps the order it always had (after the vacuum's own word).
         const blowOff = blow ? await session.send(BLOW_OFF) : null;
-        const antiOff = antistatic ? await session.send(ANTISTATIC_OFF) : null;
         const off = await session.send(VACUUM_OFF);
+        const antiOff = antistatic ? await session.send(ANTISTATIC_OFF) : null;
         return {
           kind: 'stopped',
           vacuumOff: off.kind === 'sent',

@@ -308,14 +308,14 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
   if (played.kind === 'sent' && /\berror\b|not found|no such file|unknown/i.test(played.text)) {
     // Nothing ran, so a runner-owned vacuum goes off again. A program-owned one never went on.
     if (blowOn) await send(BLOW_OFF);
-    if (deps.antistatic === true) await send(ANTISTATIC_OFF);
     if (vacOwner === 'runner') await send(VACUUM_OFF);
+    if (deps.antistatic === true) await send(ANTISTATIC_OFF);
     return { kind: 'refused', reason: `the controller did not accept the program: ${played.text.trim()}` };
   }
   if (played.kind === 'refused' || played.kind === 'unavailable') {
     if (blowOn) await send(BLOW_OFF);
-    if (deps.antistatic === true) await send(ANTISTATIC_OFF);
     if (vacOwner === 'runner') await send(VACUUM_OFF);
+    if (deps.antistatic === true) await send(ANTISTATIC_OFF);
     return { kind: 'refused', reason: `${play} could not be sent: ${said(played)}` };
   }
   // A timeout or a socket error AFTER the line went out is not a job that failed to start: the

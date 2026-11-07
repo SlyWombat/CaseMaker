@@ -33,7 +33,11 @@
 
 import { useState } from 'react';
 import { canReachMachine } from '@/platform/capabilities';
-import { toggleVacuum } from '@/platform/machineVacuum';
+import { toggleBlow, toggleVacuum } from '@/platform/machineVacuum';
+import { readFlag } from '@/platform/defaultsClient';
+import { MACHINES } from '@/engine/cnc/machine';
+import { machineAt } from '@/store/locationStore';
+import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 
 /** The switch, or nothing at all in a build that cannot open a socket. Read at render, not at import. */
 export function MachineVacuum({
@@ -64,7 +68,16 @@ function VacuumSwitch({ host, port, label }: { host: string; port: number; label
     if (busy) return;
     setBusy(true);
     try {
+      // #1060 — the manual press follows the same coupling the run does: with the shop option on
+      // and the machine's capability present, the blower goes OFF BEFORE the vacuum when switching
+      // off, and ON right after it when switching on (the vacuum switch is what the operator
+      // pressed; the blower rides with it).
+      const coupling =
+        readFlag(useShopDefaultsStore.getState().defaults, 'run.blowWithVacuum').value &&
+        MACHINES[machineAt({ host, port })?.id ?? '']?.capabilities.blow === true;
+      if (!on && coupling) await toggleBlow({ host, port }, false);
       const result = await toggleVacuum({ host, port }, on);
+      if (on && coupling && result.kind === 'toggled') await toggleBlow({ host, port }, true);
       switch (result.kind) {
         case 'toggled':
           setMode(result.on);

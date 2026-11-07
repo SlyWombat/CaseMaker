@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { toggleVacuum, toggleAntistatic } from '@/platform/machineVacuum';
+import { toggleVacuum, toggleAntistatic, toggleBlow } from '@/platform/machineVacuum';
 import { toggleLight } from '@/platform/machineLight';
 import { useStripAccessoryStore, type AccessoryKind, type AccessoryMode } from '@/store/stripAccessoryStore';
 
@@ -78,6 +78,12 @@ const SPECS: AccessorySpec[] = [
     icon: boltIcon,
   },
   {
+    kind: 'blow',
+    name: 'Air blow',
+    meaning: 'The spindle blower (Makera’s Auto Blow). M331.1 on, M332.1 off — it follows the vacuum on a run when run.blowWithVacuum is on (the default).',
+    icon: fanIcon,
+  },
+  {
     kind: 'light',
     name: 'Work light',
     meaning: 'The machine’s own light: M821 on, M822 off.',
@@ -89,6 +95,7 @@ const SPECS: AccessorySpec[] = [
 async function press(kind: AccessoryKind, target: { host: string; port: number }, on: boolean) {
   if (kind === 'vacuum') return toggleVacuum(target, on);
   if (kind === 'antistatic') return toggleAntistatic(target, on);
+  if (kind === 'blow') return toggleBlow(target, on);
   return toggleLight(target, on);
 }
 
