@@ -261,6 +261,12 @@ export function rampThresholdMm(predicted: readonly OraclePredicted[], tool: Too
  *
  * `true` when this report's own `ok` is false ONLY because its coverage is short: it is not the
  * run's failure, and the per-program evidence says its coverage is judged at the end of the run.
+ *
+ * INVARIANT — a deferred report is COVERAGE-SHORT ONLY. `checkGoalCutInto`'s `ok` is
+ * `judgedCells === 0 && coverage`, and a judged cell is one deeper than the floor, so a report
+ * with no adjudicated cut-into at the floor (the test below) can have failed on nothing but the
+ * pass line. A report carrying a cut-into cell is never deferred: a gouge is the run's failure
+ * whichever stage made it.
  */
 export function goalCoverageDeferred(report: OracleReport, isLastGoalProgram: boolean): boolean {
   if (isLastGoalProgram) return false;
