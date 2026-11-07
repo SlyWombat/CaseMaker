@@ -34,6 +34,8 @@ import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engi
 import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
 import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
+import type { ProfileSpan } from '@/engine/cnc/cam/profile';
+import { GOAL_FIT_TOLERANCE_MM } from '@/engine/cnc/engrave/goalPlacement';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
@@ -177,6 +179,15 @@ export interface OpOutcome {
    * without the gate having to find it. Absent on every op that is not a floor-correct V pocket.
    */
   predictedCutIntoMm?: number;
+  /**
+   * #943 (10) — THE FREEING CONTOUR'S KERF, when that contour is a THROUGH cut (its depth reaches
+   * the stock bottom and so takes the board's breakthrough): the centre path, its tab spans, the
+   * cutter radius and the tab height — the verifier's through-mask shape. `engraveGenerate` feeds
+   * it into `buildThroughMask` so a through contour is accepted at `thickness + breakthrough`
+   * while a tab span still caps the cut at its top. Absent on every other op: a contour that stops
+   * above the stock bottom is a wall, not a through cut, and grants no breakthrough.
+   */
+  throughKerf?: { path: Polygons; spans: ProfileSpan[][]; toolRadius: number; tabHeight: number };
 }
 
 export type RegionKind = 'pocket' | 'island-top' | 'curved' | 'contour' | 'rim';
@@ -229,6 +240,12 @@ export interface SetupSpec {
 
 export interface ModelPlanInput {
   geometry: FeatureSource;
+  /**
+   * #943 (10) — THE JOB'S STATED FREEING TABS (`goal.underside.tabs`), width/height in mm. `count:
+   * 0` frees the part with no tabs (the vendor tray's own side 1). Absent → the pocket chain's
+   * DEFAULT_RELEASE_TABS, so every job that states no underside block posts byte-identically.
+   */
+  freeingTabs?: { count: number; widthMm: number; heightMm: number };
   /**
    * #1041 — THE SEAM'S OWN STATEMENT ABOUT THE HOUSE, when the shop had no inventory or user
    * records and the built-in registry stood in. Stated on the plan's notes, so an operator reading
@@ -1194,11 +1211,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // setup's does. (The band is measured from this setup's stock top.)
     const bandReachesBottom = depthBandMm === undefined || depthBandMm + 1e-9 >= -tree.contour.zTo;
     const tabs =
-      input.setups.length <= 1 || !bandReachesBottom
-        ? undefined
-        : setupIndex === input.setups.length - 1
+      input.setups.length > 1 && bandReachesBottom
+        ? setupIndex === input.setups.length - 1
           ? { count: 0, width: DEFAULT_RELEASE_TABS.width, height: DEFAULT_RELEASE_TABS.height }
-          : DEFAULT_RELEASE_TABS;
+          : DEFAULT_RELEASE_TABS
+        : input.freeingTabs === undefined
+          ? undefined
+          : { count: input.freeingTabs.count, width: input.freeingTabs.widthMm, height: input.freeingTabs.heightMm };
 
     // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
     // already-finished surface (this file's own #965 open-item note, below, used to be the whole
@@ -1538,6 +1557,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       ...(opts.signal === undefined ? {} : { signal: opts.signal }),
       pockets: noFlatFallback ? null : {
         ...(depthBandMm === undefined ? {} : { depthBandMm }),
+        stockThicknessMm: input.stock.thickness,
+        stockFootprintMm: { length: input.stock.length, width: input.stock.width },
         houseFlats: flats,
         houseAll: input.cutters.house,
         ...(input.sacrificialBreakthroughMm === undefined ? {} : { sacrificialBreakthroughMm: input.sacrificialBreakthroughMm }),
@@ -2336,6 +2357,21 @@ export interface PlanPocketsOptions {
    * named. Absent → the whole depth, every existing caller unchanged.
    */
   depthBandMm?: number;
+  /**
+   * #943 (10) — the blank's own thickness, mm. A THROUGH freeing contour states it to the
+   * contour op, so its tabs are measured from the PART's bottom (`thickness − height`) rather
+   * than from the deeper `thickness + breakthrough` floor the cut itself reaches. Absent → the
+   * op's own default (`depthMm`), every existing caller unchanged.
+   */
+  stockThicknessMm?: number;
+  /**
+   * #943 (10) — the stock's own footprint, mm (work frame, front-left at the origin). When the
+   * goal's outline lies inside it by more than the fit tolerance on some side there is material
+   * around the part to free, and a contour is demanded; when the outline IS the stock's (a side-2
+   * job whose stock is the freed part) no contour is demanded and the plan says so. Absent → the
+   * contour is always demanded, every existing caller unchanged.
+   */
+  stockFootprintMm?: { length: number; width: number };
   stepDownMm: number;
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
   rapid: RapidEstimate;
@@ -2530,17 +2566,24 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #1003 — THE STOCK BOTTOM IS THE FLOOR TOO. A goal taller than its blank (the corpus figure is
   // 41.337 mm on a 40 mm stock) must not free through the vise: the verifier's `cut-too-deep` is
   // the hard gate, and this is the PLAN honouring it — the freeing contour is cut off at the stock
-  // bottom and the clipped millimetres are stated. The sacrificial board's allowance is a separate
-  // input this function does not receive yet (stated, not silently zero). The two floors COMPOSE:
-  // the shallower of the demand, the band and the stock bottom wins.
+  // bottom and the clipped millimetres are stated.
+  //
+  // #943 (10) — A PART THAT REACHES THE STOCK BOTTOM IS A THROUGH CUT, and takes the board's
+  // breakthrough like every other through cut: the floor is the stock bottom PLUS the stated
+  // breakthrough. Stopping at the stock bottom itself left the part held by a skin (the M1 tray's
+  // p9 ended at −25.000 on a 25 mm blank over a board). A contour that stops above the stock
+  // bottom is a wall, not a through cut, and keeps its own demand. The band and the floor COMPOSE
+  // as caps: the shallower of the band and the floor wins, and a goal that runs deeper than the
+  // floor is still clipped at it and stated.
   // #1018 — `tree.frame.stockBottom` is shifted by the SAME door translate `stockTop` is (the
   // door's own doc), so this is already "depth below the stock top", no `z0` subtraction needed.
   const stockBottomZ = tree.frame.stockBottom;
   const stockFloorDepthMm = stockBottomZ === undefined ? undefined : -stockBottomZ;
   const breakthroughMm = opts.sacrificialBreakthroughMm ?? 0;
   const contourFloorDepthMm = stockFloorDepthMm === undefined ? undefined : stockFloorDepthMm + Math.max(0, breakthroughMm);
+  const contourThrough = stockFloorDepthMm !== undefined && contourDepthRawMm >= stockFloorDepthMm - 1e-9;
   const contourDepthMm = Math.min(
-    contourDepthRawMm,
+    contourThrough && contourFloorDepthMm !== undefined ? contourFloorDepthMm : contourDepthRawMm,
     depthBandMm === undefined ? Number.POSITIVE_INFINITY : depthBandMm,
     contourFloorDepthMm === undefined ? Number.POSITIVE_INFINITY : contourFloorDepthMm,
   );
@@ -2622,7 +2665,29 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // solid, not a design edge, so no contour op is demanded against it. `tree.contour.frees`
   // stays what it always was (whether a REAL contour reaches the stock bottom, which decides
   // tabs below) — a different question from whether a contour exists at all.
-  if (!tree.contour.synthetic) {
+  //
+  // #943 (10) — THE OUTLINE IS THE STOCK'S: no material stands outside the goal to free, so no
+  // contour is demanded (the vendor tray's side 2, whose stock IS the freed part). Any side with
+  // more than the fit tolerance of stock beyond the outline means a contour is demanded as before.
+  const outlineIsStock =
+    opts.stockFootprintMm !== undefined &&
+    (() => {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const ring of tree.contour.outline) {
+        for (const [x, y] of ring) {
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+      }
+      const margins = [minX, minY, opts.stockFootprintMm!.length - maxX, opts.stockFootprintMm!.width - maxY];
+      return margins.every((m) => m <= GOAL_FIT_TOLERANCE_MM);
+    })();
+  if (!tree.contour.synthetic && !outlineIsStock) {
     features.push({ id: 'contour', kind: 'contour', depthMm: contourDepthMm });
   }
   const demand = { features };
@@ -2796,6 +2861,12 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         contour: tree.contour,
         region: ref,
         depthMm: contourDepthMm,
+        // #943 (10) — a through contour declares its kerf for the verifier's mask, and states the
+        // PART's own thickness for the tab top: the cut goes `thickness + breakthrough` deep, but
+        // a tab is `height` mm of material above the part's bottom, not above that deeper floor.
+        ...(contourThrough && opts.stockThicknessMm !== undefined
+          ? { thicknessMm: opts.stockThicknessMm, through: true }
+          : {}),
         tabs: opts.tabs ?? DEFAULT_RELEASE_TABS,
         offset: opts.offset,
         params: cutParamsFor(cutter),
@@ -3260,6 +3331,16 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #992 — the SAME facts, typed: code, severity and count, so the seam can route them. `notes`
   // keeps every string exactly as before (the failure path joins it, the acceptance reads it).
   const statements: PlanStatement[] = [];
+  // #943 (10) — no material stands outside the goal: the plan states it rather than leaving the
+  // operator to notice a contour program is missing.
+  if (outlineIsStock && !tree.contour.synthetic) {
+    const text = "the part's outline is the stock's — no freeing contour";
+    notes.push(text);
+    statements.push({ severity: 'info', code: 'goal-outline-is-stock', count: 1, text });
+    // …and on the paper too: §2's "What the plan states" is where the operator looks for the
+    // programs' own reasoning.
+    statements.push({ severity: 'sheet', code: 'plan-run', count: 1, text });
+  }
   // #1037 — A PLAN THAT DOES NOT FREE THE PART SAYS SO, WITH THE NUMBERS. When the demand carries
   // a real contour (`tree.contour.synthetic` false) and the CHOSEN sequence has no contour step —
   // no link's stated flute reaches the profile's floor — the profile is not cut and the part stays

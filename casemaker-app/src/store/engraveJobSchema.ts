@@ -1342,9 +1342,11 @@ const bracketHoldSchema = z.object({
   variant: z.string().min(1).describe("The bracket fitted, as its fixture record names it — 'thin' is the Makera kit's L-bracket."),
   clamps: z
     .array(clampPlacementSchema)
-    .min(1)
     .max(4)
-    .describe('The clamp places the job was set up with, on the free edges. One to four.'),
+    .describe(
+      'The clamp places the job was set up with, on the free edges. Zero to four; ZERO means the ' +
+        'part is held by double-sided tape under it (the vendor tray’s own side-2 hold — the bracket is then only the fence).',
+    ),
   obstacles: z
     .array(bracketObstacleSchema)
     .optional()
@@ -2584,6 +2586,14 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
     .finite()
     .nonnegative()
     .describe("How far a through cut goes past the blank's bottom face, in millimetres."),
+  // #943 (10) — a flip job's Z0 is carried from the earlier setup, not touched on the cut face:
+  // ABSENT on every ordinary job, so no existing document or sheet changes.
+  z0CarriedFrom: z
+    .object({
+      thicknessMm: z.number().finite().nonnegative().describe("The part's measured thickness from the earlier setup, mm."),
+    })
+    .optional()
+    .describe("Z0 = the earlier setup's Z0 − this thickness; the run sheet says the sawn underside is never touched."),
   // #362's jaw clearance. DEFAULTED, unlike the optional keys below: the shipped value is the 1 mm
   // the jaw check carried as a bare constant before it became a setting (#488), so a job written
   // without this field loads with exactly the clearance it was judged by, and no document changes

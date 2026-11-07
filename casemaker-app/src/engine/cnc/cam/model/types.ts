@@ -99,7 +99,10 @@ export type PlanFindingCode =
   // empty there) IS finished, by the ball, as its own floor pass. Good news, stated once per
   // setup with the pocket ids and count — never the #982 fallback's `goal-region-uncut` (that
   // one means left uncut; this one means covered a different way).
-  | 'goal-pocket-floor-rest';
+  | 'goal-pocket-floor-rest'
+  // #943 (10) — the goal's outline is the stock's own: there is no material around the part to
+  // free, so the plan cuts no freeing contour and says so.
+  | 'goal-outline-is-stock';
 
 /**
  * #721/#1005 — the steepest cavity wall a mould is cut with before it is warned as having no

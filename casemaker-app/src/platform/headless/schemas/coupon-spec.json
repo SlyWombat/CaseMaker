@@ -8095,7 +8095,7 @@
                       "description": "The anchor the bracket is pinned at; Makera's origin is relative to Anchor 1."
                     },
                     "clamps": {
-                      "description": "The clamp places the job was set up with, on the free edges. One to four.",
+                      "description": "The clamp places the job was set up with, on the free edges. Zero to four; ZERO means the part is held by double-sided tape under it (the vendor tray’s own side-2 hold — the bracket is then only the fence).",
                       "items": {
                         "properties": {
                           "at": {
@@ -8127,7 +8127,6 @@
                         "type": "object"
                       },
                       "maxItems": 4,
-                      "minItems": 1,
                       "type": "array"
                     },
                     "obstacles": {
@@ -8229,6 +8228,20 @@
               "type": "object"
             }
           ]
+        },
+        "z0CarriedFrom": {
+          "description": "Z0 = the earlier setup's Z0 − this thickness; the run sheet says the sawn underside is never touched.",
+          "properties": {
+            "thicknessMm": {
+              "description": "The part's measured thickness from the earlier setup, mm.",
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "thicknessMm"
+          ],
+          "type": "object"
         }
       },
       "required": [
