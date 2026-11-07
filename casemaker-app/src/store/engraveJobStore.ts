@@ -1389,6 +1389,8 @@ export interface EngraveJobState {
    * which is the pre-#432 state — no facing section on the sheet and nothing faced.
    */
   setFacing: (facing: EngraveFacing | null) => void;
+  /** #1060 — the job's own spindle-blower choice (absent follows the shop's run.blowWithVacuum). */
+  setBlowWithVacuum: (value: boolean | undefined) => void;
   /**
    * #513 — bind the job to a bed profile (or clear the binding). `undefined` deletes the key, so a
    * job written before the bed binding existed keeps its exact shape; the panel calls this at
@@ -3160,6 +3162,12 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     // #432 slice 4 — replaced whole, never merged: the panel sends both fields every time, and a
     // field-by-field merge would let a stale `toolKey` (slice 2's own cutter) survive a toggle it
     // has no business surviving. `null` puts the job back to the pre-#432 state exactly.
+    setBlowWithVacuum: (value) =>
+      apply((job) => ({
+        ...job,
+        ...(value === undefined ? { blowWithVacuum: undefined } : { blowWithVacuum: value }),
+      })),
+
     setFacing: (facing) =>
       apply((job) => {
         if (facing === null) {

@@ -408,6 +408,49 @@ describe('#1060 — the spindle blower follows the vacuum', () => {
     expect(f.lines()).toEqual(['?', 'M331.1', 'play /sd/gcodes/job.nc', '?', '?', 'M332.1', '$H']);
   });
 
+  it('across a three-file job-owned span the blower follows the vacuum per file: on at first, nothing in the middle, off at last', async () => {
+    // File 1 (span 'first'): the vacuum goes on and STAYS on across the bit change — the blower
+    // stays on with it, so this file's finish must not send M332.1.
+    const first = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
+    const f1 = await runProgram('job.nc', { ...deps(first), blow: true, vacuumSpan: 'first', programOwnsVacuum: true });
+    expect(f1.kind).toBe('finished');
+    expect(first.lines()).toContain('M331.1');
+    expect(first.lines()).not.toContain('M332.1');
+    // File 2 (span 'middle'): the vacuum is already on; no words at all.
+    const middle = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
+    const f2 = await runProgram('job.nc', { ...deps(middle), blow: true, vacuumSpan: 'middle', programOwnsVacuum: true });
+    expect(f2.kind).toBe('finished');
+    expect(middle.lines().filter((l) => l === 'M331.1' || l === 'M332.1')).toEqual([]);
+    // File 3 (span 'last'): the vacuum's own M332 is in the file, so the blower goes off after it,
+    // in the finish — never M331.1 at the start.
+    const last = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
+    const f3 = await runProgram('job.nc', { ...deps(last), blow: true, vacuumSpan: 'last', programOwnsVacuum: true });
+    expect(f3.kind).toBe('finished');
+    expect(last.lines()).not.toContain('M331.1');
+    expect(last.lines()).toContain('M332.1');
+  });
+
+  it('a Stop during a middle file turns the blower off before the vacuum, though this file sent neither', async () => {
+    let pressed = false;
+    const f = fake(['<Run|P:10,10,5>', '<Run|P:12,20,7>']);
+    // The program's own per-line progress; press Stop after the first poll boundary.
+    const sleep = async (): Promise<void> => {
+      pressed = true;
+    };
+    const o = await runProgram('job.nc', {
+      ...deps(f),
+      blow: true,
+      vacuumSpan: 'middle',
+      programOwnsVacuum: true,
+      stopRequested: () => pressed,
+      sleep,
+    });
+    expect(o.kind).toBe('aborted');
+    const lines = f.lines();
+    expect(lines).toContain('M332.1');
+    expect(lines.indexOf('M332.1')).toBeLessThan(lines.indexOf('M332'));
+  });
+
   it('a refused play turns the blower off before the vacuum it switched on', async () => {
     const f = fake([], { play: 'error: file not found' });
     const o = await runProgram('job.nc', { ...deps(f), blow: true });

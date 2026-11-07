@@ -289,10 +289,17 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
   // never reaches here with either owner, so it gets neither word. The blower follows the vacuum for
   // the whole run: on here, off just BEFORE the vacuum's own off (the finish, the stop, every
   // refusal), never toggled across a bit change — the middle files carry no words at all.
-  const blowOn =
-    deps.blow === true &&
-    span !== 'none' &&
-    (vacOwner === 'runner' || deps.programOwnsVacuum === true || span === 'first' || span === 'whole');
+  // #1060 (6b's round) — THE BLOWER FOLLOWS THE VACUUM'S OWN TRANSITIONS IN THIS FILE. Armed means
+  // the blower may be on (this file or an earlier one of the span): every off path that finds the
+  // machine Idle must still send M332.1. ON happens where the vacuum goes ON here (the runner's
+  // bracket, the program's own first file, a span's first/whole file). OFF happens where it goes
+  // OFF here: the runner's own M332 (before it), a program-owned M332 (trailing it by the poll that
+  // saw the finish), or the span's last/whole file. A span's FIRST file therefore leaves the
+  // blower on across the bit change; a MIDDLE file sends nothing.
+  const blowArmed = deps.blow === true && span !== 'none';
+  const programOwnsHere = span === undefined && deps.programOwnsVacuum === true;
+  const blowOn = blowArmed && (vacOwner === 'runner' || span === 'first' || span === 'whole' || programOwnsHere);
+  const blowOffHere = blowArmed && (vacOwner === 'runner' || span === 'last' || span === 'whole' || programOwnsHere);
   if (blowOn) {
     const blow = await send(BLOW_ON);
     if (blow.kind !== 'sent' || anyAlarm(blow) !== null) {
@@ -307,13 +314,13 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
   const played = await send(play);
   if (played.kind === 'sent' && /\berror\b|not found|no such file|unknown/i.test(played.text)) {
     // Nothing ran, so a runner-owned vacuum goes off again. A program-owned one never went on.
-    if (blowOn) await send(BLOW_OFF);
+    if (blowArmed) await send(BLOW_OFF);
     if (vacOwner === 'runner') await send(VACUUM_OFF);
     if (deps.antistatic === true) await send(ANTISTATIC_OFF);
     return { kind: 'refused', reason: `the controller did not accept the program: ${played.text.trim()}` };
   }
   if (played.kind === 'refused' || played.kind === 'unavailable') {
-    if (blowOn) await send(BLOW_OFF);
+    if (blowArmed) await send(BLOW_OFF);
     if (vacOwner === 'runner') await send(VACUUM_OFF);
     if (deps.antistatic === true) await send(ANTISTATIC_OFF);
     return { kind: 'refused', reason: `${play} could not be sent: ${said(played)}` };
@@ -366,7 +373,7 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
     if (wait > 0) await sleep(wait);
 
     if (deps.stopRequested()) {
-      const stop = await stopOnSession({ send }, sleep, deps.settings.stop ?? STOP_FALLBACK, deps.antistatic === true, blowOn);
+      const stop = await stopOnSession({ send }, sleep, deps.settings.stop ?? STOP_FALLBACK, deps.antistatic === true, blowArmed);
       // `not-running` is Idle with no program in progress. After progress was seen, that is the job
       // ending just as Stop was pressed — a finish. Before any, it proves nothing: say so, send nothing.
       // #618 — while paused it proves nothing either: a suspended job may have dropped its `P:` (the
@@ -468,7 +475,7 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
       // own words never executed, so there is nothing to switch either way. The antistatic this run
       // switched on goes off on the same Idle-only rule (#564).
       const blowOff =
-        blowOn && p.state === 'Idle' ? (await send(BLOW_OFF)).kind === 'sent' : undefined;
+        blowArmed && p.state === 'Idle' ? (await send(BLOW_OFF)).kind === 'sent' : undefined;
       const vacuumOff =
         vacOwner === 'runner' && p.state === 'Idle' ? (await send(VACUUM_OFF)).kind === 'sent' : false;
       const antistaticOff =
@@ -491,7 +498,7 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
     // program never carries `M331.4`/`M332.4`, so it is switched off here before the home.
     // #1060 — THE BLOWER GOES OFF FIRST, before the vacuum's own off: the operator's rule ("off
     // before the vacuum goes off"). The antistatic follows the same order it always has.
-    const blowOff = blowOn ? await send(BLOW_OFF) : null;
+    const blowOff = blowOffHere ? await send(BLOW_OFF) : null;
     const off = vacOwner === 'runner' ? await send(VACUUM_OFF) : null;
     const antiOff = deps.antistatic === true ? await send(ANTISTATIC_OFF) : null;
     const home = await send('$H');
@@ -562,7 +569,7 @@ export function describeRun(o: RunOutcome): string {
               : o.stop.antistaticOff
                 ? ', antistatic off'
                 : ' — the antistatic-off was not confirmed'
-          }. Home the machine when the head is clear.`
+          }${o.stop.blowOff === undefined ? '' : o.stop.blowOff ? ', air blow off' : ' — the air-blow-off was not confirmed'}. Home the machine when the head is clear.`
         : `Stop was sent, but: ${'detail' in o.stop ? o.stop.detail : o.stop.kind}. The machine's red button is the emergency stop.`;
     case 'alarm':
       return `The controller said \`${o.alarm}\` — an alarm. Nothing further was sent; the physical stop is the stop.`;

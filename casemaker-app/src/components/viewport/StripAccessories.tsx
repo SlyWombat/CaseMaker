@@ -64,6 +64,15 @@ const bulbIcon = (on: boolean): JSX.Element => (
   </svg>
 );
 
+/** #1060 — the air blow's own icon (air moving), not the vacuum's fan. */
+const airIcon = (on: boolean): JSX.Element => (
+  <svg viewBox="0 0 16 16" width={13} height={13} aria-hidden="true" data-filled={on ? 'yes' : 'no'}>
+    <path d="M2 5.2h7.1a2.1 2.1 0 1 0-2.1-2.1" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity={on ? 1 : 0.55} />
+    <path d="M2 8h9.2a2.1 2.1 0 1 1-2.1 2.1" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity={on ? 1 : 0.55} />
+    {on && <path d="M2 10.8h4.6" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />}
+  </svg>
+);
+
 const SPECS: AccessorySpec[] = [
   {
     kind: 'vacuum',
@@ -81,7 +90,7 @@ const SPECS: AccessorySpec[] = [
     kind: 'blow',
     name: 'Air blow',
     meaning: 'The spindle blower (Makera’s Auto Blow). M331.1 on, M332.1 off — it follows the vacuum on a run when run.blowWithVacuum is on (the default).',
-    icon: fanIcon,
+    icon: airIcon,
   },
   {
     kind: 'light',

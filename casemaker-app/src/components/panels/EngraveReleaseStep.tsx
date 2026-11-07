@@ -301,10 +301,7 @@ export function EngraveReleaseStep({
             <button
               type="button"
               data-testid="engrave-release-blow-toggle"
-              onClick={() => {
-                const current = useEngraveJobStore.getState().job;
-                useEngraveJobStore.setState({ job: { ...current, blowWithVacuum: !blowOn } });
-              }}
+              onClick={() => useEngraveJobStore.getState().setBlowWithVacuum(!blowOn)}
             >
               {blowOn ? 'Turn it off' : 'Turn it on'}
             </button>
