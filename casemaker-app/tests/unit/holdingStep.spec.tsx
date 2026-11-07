@@ -11,10 +11,9 @@
 // machine-change backdrop carries one for exactly this) and the stacking scale's own values from
 // `tokens.css` — the same source-reading approach `benchDefaults.spec.ts` uses.
 
-// #934 — THE BED MOUNTS ARE HIDDEN from Holding until their bench runs (tape and bracket are
-// registration branches this machine has not run; the vise is the one procedure the milestone
-// ships). These specs exercise the hidden branch and return behind its own issue: skipped, not
-// deleted, so the coverage comes back with the code.
+// #934 hid the bed mounts from Holding until their bench run; the maintainer's rule ("we test
+// using the program", the dated run of 2026-11-08) lifted the hide (C3), and these specs return
+// with the code — skipped, not deleted, until now.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { jobVise } from '@/engine/cnc/fixture';
@@ -189,7 +188,7 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     expect(rowText('ledge')).not.toContain('surface');
   });
 
-  it.skip('shows all six mounts, with each machine-only one’s cost and escape; an unowned fixture says only "not owned"', () => {
+  it('shows all six mounts, with each machine-only one’s cost and escape; an unowned fixture says only "not owned"', () => {
     seedLocation(machineWith(BOARDS_AND_TAPE));
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
 
@@ -663,7 +662,7 @@ describe('#684 — the picture, the folds, and the technical provenance', () => 
     expect(svg.textContent).toContain('⌀ 55');
   });
 
-  it.skip('#705 — a mount that needs the machine change still draws on hover, labelled with what it needs', () => {
+  it('#705 — a mount that needs the machine change still draws on hover, labelled with what it needs', () => {
     seedLocation(machineWith(null));
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
 
@@ -812,7 +811,7 @@ describe('#684 — the picture, the folds, and the technical provenance', () => 
 });
 
 describe('#684 — the #693 escape, over the job wizard', () => {
-  it.skip('an option’s Change the machine… opens the real wizard with that mount and this job', () => {
+  it('an option’s Change the machine… opens the real wizard with that mount and this job', () => {
     seedLocation(machineWith(null));
     const job = dj({ length: 76.2, width: 38.1, thickness: 3.81 });
     openHolding(job);
@@ -841,7 +840,7 @@ describe('#684 — the #693 escape, over the job wizard', () => {
     expect(useMachineChangeStore.getState().request.forJob?.holding).toBe('held in the vise on the jaw ledge');
   });
 
-  it.skip('the change wizard’s dialog sits above the job wizard’s dialog', () => {
+  it('the change wizard’s dialog sits above the job wizard’s dialog', () => {
     seedLocation(machineWith(null));
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
     fireEvent.click(screen.getByTestId('engrave-setup-change-bed-tape'));
