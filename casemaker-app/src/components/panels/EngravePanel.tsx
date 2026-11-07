@@ -49,7 +49,7 @@ import { findingFix, fixActionLabel, fixIsOffered, type PanelFix } from './findi
 import { operatorRunError } from './runErrorWords';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize, type Tool } from '@/engine/cnc/tool';
+import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize, type Tool, isCuttingRecord } from '@/engine/cnc/tool';
 import { slotFacts, type SlotCutterOption } from '@/engine/cnc/engrave/slot';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
@@ -1341,7 +1341,11 @@ export function EngravePanel(): JSX.Element {
     !hasRegions &&
     !(job.traces ?? []).some((t) => t.enabled) &&
     !(job.threads ?? []).some((t) => t.enabled);
-  const toolOptions = tools.filter((e) => e.tool.shape !== 'drill' || e.key === job.toolKey || drillOnly);
+  // #1063 — the picker offers CUTTERS: an instrument record (a probe) is never a choice. The
+  // job's own key stays listed so the select's value is always one of its options.
+  const toolOptions = tools.filter(
+    (e) => (isCuttingRecord(e.tool) || e.key === job.toolKey) && (e.tool.shape !== 'drill' || e.key === job.toolKey || drillOnly),
+  );
   const vCarveJob = cone !== null && hasRegions;
   // The preview may still be resolving. If the blank is a PRINT and no preview has landed yet, the
   // plane is UNKNOWN — showing the no-film arithmetic here would be a wrong number, not a

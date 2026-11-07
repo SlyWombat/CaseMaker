@@ -21,6 +21,18 @@ import { isVShape, grooveRadiusAt, vCone, type VCone } from './vProfile';
 
 export type ToolShape = 'flat' | 'ball' | 'tapered-ball' | 'engraving' | 'chamfer' | 'drill' | 'thread' | 'bull' | 'unknown';
 
+/**
+ * #1063 — A PROBE IS NOT A CUTTER. The shop inventory carries instruments (the k3 export has
+ * `makera-wired-probe-v2` and `makera-3d-probe`) whose records state no cutting geometry: their
+ * `typeText` is 'Probe' and their shape falls through to 'unknown'. Such a record must never be a
+ * candidate — not in the planner's house and not in the UI's cutter picker — and its exclusion is
+ * stated once, in aggregate, never as a per-record "no feeds" line. #1053 will give probes a real
+ * shape; until then these two statements are the rule.
+ */
+export function isCuttingRecord(tool: Pick<Tool, 'typeText' | 'shape'>): boolean {
+  return tool.typeText !== 'Probe' && tool.shape !== 'unknown';
+}
+
 export interface Tool {
   number: number | null;
   id: string | null;
