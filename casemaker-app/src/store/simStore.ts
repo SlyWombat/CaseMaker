@@ -434,7 +434,16 @@ export const useSimStore = create<SimState>()((set, get) => {
       const r = await client.loadSim(args.gcodeText, args.setup, args.tool, args.machineId, {
         stallMs,
         onProgress: (done: number, total: number, memoryMB?: number | null) => {
-          if (mine === loadSeq) set({ progress: { done, total }, waitingSince: null });
+          if (mine === loadSeq) {
+            // #1048 (A's finding) — THE FIRST CHECKPOINT ENDS THE WAIT ENTIRELY: the phase goes
+            // back to `sweep`, so the panel swaps "waiting for the simulation worker" for the
+            // swept/time-left line instead of keeping the wait sentence through the sweep.
+            set({
+              progress: { done, total },
+              waitingSince: null,
+              ...(get().phase === 'waiting' ? { phase: 'sweep' as const } : {}),
+            });
+          }
           // #896 — a long goal sweep says which worker is holding the memory, in the report.
           noteFlightProgress('simulate', 'sweep', done, total, undefined, memoryMB === undefined || memoryMB === null ? undefined : { memoryMB });
         },

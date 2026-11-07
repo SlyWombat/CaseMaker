@@ -96,6 +96,9 @@ describe('#1048 — a load waiting on the worker is shown as waiting, with its e
       expect(useSimStore.getState().waitingSince, 'each re-arm keeps the FIRST timestamp').toBe(since);
       progress!(1, 35);
       expect(useSimStore.getState().waitingSince, 'the first checkpoint ends the wait').toBeNull();
+      // A's finding (#1048): the phase must leave 'waiting' too, or the panel keeps the wait
+      // sentence over the whole sweep instead of the swept/time-left line.
+      expect(useSimStore.getState().phase, 'the sweep stage resumes at the first checkpoint').toBe('sweep');
       void pending;
       void job;
     } finally {
