@@ -276,6 +276,12 @@ export interface SimLoadOpts {
    */
   stallMs?: number;
   /**
+   * #1048 — how long the load may QUEUE before it states `waiting`, ms. The clock repeats and
+   * never faults (a crash is the worker-error race's own); the stall window above starts at the
+   * worker's first message. Defaults to the shop's `sim.stallMs`.
+   */
+  queueMs?: number;
+  /**
    * Checkpoints swept so far. Called from the worker as the sweep advances; #896 adds the
    * worker's own JS heap (MB) so a long goal sweep can say which worker holds the memory.
    */
@@ -388,7 +394,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
   // #1048 — the QUEUE clock's own allowance: the shop's generated-window seed (three minutes),
   // because that is the same "one stage of a large job can be a long pass" fact, now said for
   // waiting behind another task instead of for silence inside one.
-  const queueMs = readDefault(liveShopDefaults(), 'sim.stallMs').value;
+  const queueMs = opts?.queueMs ?? readDefault(liveShopDefaults(), 'sim.stallMs').value;
   const clocks = loadStallPolicy(
     queueMs,
     stallMs,
