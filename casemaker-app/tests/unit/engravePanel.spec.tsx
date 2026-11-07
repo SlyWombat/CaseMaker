@@ -5506,6 +5506,34 @@ describe('#1046 EngravePanel — the standard-balls press', () => {
     expect(seen, 'the press asks the pipeline for the ladder').toBe(true);
   }, 60_000);
 
+  it('a stale run’s rest line is not shown as current — no run line, no press', () => {
+    seed('The finish with the 6 mm ball nose leaves up to 2.42 mm standing over 21 % of the goal.' + NO_BALL_TAIL, {
+      perSetup: [],
+      planMs: 450_000,
+      finishStageMs: 36_000,
+      finishBallDiameterMm: 6,
+    });
+    render(<EngravePanel />);
+    let drawer = openDrawer();
+    expect(drawer.querySelector('[data-testid="engrave-goal-measure-balls"]'), 'current run: the press is offered').not.toBeNull();
+    cleanup();
+    // 6b's condition (#1046) — the job moves after Generate: the run's leftover sentence is stale,
+    // so it is not shown beside live document findings and the press goes with it.
+    seed('The finish with the 6 mm ball nose leaves up to 2.42 mm standing over 21 % of the goal.' + NO_BALL_TAIL, {
+      perSetup: [],
+      planMs: 450_000,
+      finishStageMs: 36_000,
+      finishBallDiameterMm: 6,
+    });
+    act(() => {
+      useEngraveRunStore.setState({ staleSince: Date.now(), staleReason: 'job' });
+    });
+    render(<EngravePanel />);
+    drawer = openDrawer();
+    expect(drawer.querySelector('[data-testid="engrave-goal-measure-balls"]')).toBeNull();
+    expect(drawer.querySelector('[data-code="goal-rest-uncut"]')).toBeNull();
+  });
+
   it('a result with no timings says to run Generate first, and a measured catalogue ball shows no press at all', () => {
     seed('The finish with the 6 mm ball nose leaves up to 2.42 mm standing over 21 % of the goal.' + NO_BALL_TAIL, { perSetup: [] });
     render(<EngravePanel />);
