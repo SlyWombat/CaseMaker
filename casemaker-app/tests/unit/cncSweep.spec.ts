@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tl } from './helpers/manifoldExec';
 import {
+  AIR_PROGRESS_EVERY,
   capsuleArea,
   capsuleContours,
   checkpointRegion,
@@ -851,6 +852,27 @@ describe('#194: the time budget and progress are part of the contract', () => {
     // A later sweep on the same wasm heap still works.
     const after = sweep(THREE);
     expect(after.out.ok).toBe(true);
+  });
+
+  it('#1048 — the rapid-move check is its own phase and ticks every AIR_PROGRESS_EVERY tested moves', () => {
+    // One stroke, then 300 rapids below the stock top: more than one tick inside the air phase.
+    const rapids = Array.from({ length: 300 }, (_, i) => `G0 X${2 + (i % 40)} Y${2 + Math.floor(i / 40)} Z-0.5`).join('\n');
+    const src = 'S1000 M3\nG0 X10 Y10 Z-1\nG1 X20 F100\nG0 Z-0.5\n' + rapids + '\nG0 Z2\nM5\n';
+    const phases: string[] = [];
+    const ticks: [number, number][] = [];
+    const { out } = sweep(src, tool, setup(), {
+      onPhase: (p) => phases.push(p),
+      onProgress: (d, t) => ticks.push([d, t]),
+    });
+    expect(out.ok).toBe(true);
+    expect(phases, 'the air phase announces itself before its first tick').toContain('air');
+    const airTicks = ticks.filter(([, total]) => total > 100);
+    expect(airTicks.length, 'the phase ticks while it works').toBeGreaterThanOrEqual(1);
+    expect(airTicks[0]![0] % AIR_PROGRESS_EVERY).toBe(0);
+    // The tick arrives while the phase runs, not after it: the phase is reported first.
+    const firstTick = ticks.findIndex(([, total]) => total > 100);
+    expect(phases.indexOf('air')).toBeGreaterThanOrEqual(0);
+    expect(firstTick).toBeGreaterThanOrEqual(0);
   });
 
   it('onProgress is called once per checkpoint, in order, ending at (total, total)', () => {

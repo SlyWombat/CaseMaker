@@ -419,6 +419,12 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
     },
   );
   clocks.start();
+  // #1048 — THE WORKER'S OWN PHASES (the air phase) are messages too: they reach the caller and
+  // re-arm the silence clock, exactly as a checkpoint does.
+  const workerPhase = (phase: SimLoadPhase): void => {
+    phaseDown?.(phase);
+    clocks.heard();
+  };
   // #871/#895 — the projection INFORMS and never stops. The clock starts at the FIRST checkpoint,
   // so worker startup and parsing (a fixed cost on every load) are not charged to the sweep's rate.
   const forward = opts?.onProgress;
@@ -471,6 +477,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
             continueRun: opts?.continueRun ?? undefined,
           },
           Comlink.proxy(onProgress),
+          Comlink.proxy(workerPhase),
         )
         .then(async (r) => {
           // #224: the warm-up is part of the load, not the first scrub. Awaiting `simWarmup`

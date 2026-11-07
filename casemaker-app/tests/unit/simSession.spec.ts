@@ -838,6 +838,74 @@ describe('#895 — a load that stops reporting is stopped by the watchdog', () =
   });
 });
 
+// #1048 (6b's follow-up) — A LONG AIR PHASE THAT KEEPS REPORTING IS NOT SILENCE. The worker's
+// rapid-move check is its own phase and ticks while it works; the client's window re-arms on those
+// messages, so a slow machine's air phase is never mistaken for a hang.
+describe('#1048 — the air phase holds the client’s window open', () => {
+  class AirTickingWorker {
+    static terminated = 0;
+    static stopped = 0;
+    static stopTicks = false;
+    private readonly name: string;
+    private started = false;
+    constructor(_url?: URL | string, options?: { name?: string }) {
+      this.name = options?.name ?? '';
+    }
+    addEventListener(): void {}
+    removeEventListener(): void {}
+    postMessage(_message: unknown, transfer?: unknown[]): void {
+      if (this.started) return;
+      this.started = true;
+      const ports = (transfer ?? []) as MessagePort[];
+      const progress = ports[0] === undefined ? null : (Comlink.wrap(ports[0] as never) as unknown as (d: number, t: number) => Promise<void>);
+      const phase = ports[1] === undefined ? null : (Comlink.wrap(ports[1] as never) as unknown as (p: string) => Promise<void>);
+      void (async () => {
+        // The first checkpoint switches the stall clock on; then the air phase runs for ~200 ms,
+        // far past the 30 ms window, ticking every 10 ms — never silence.
+        await progress?.(1, 3);
+        if (phase === null) return;
+        await phase('air');
+        for (let k = 1; k <= 20 && !AirTickingWorker.stopTicks; k++) {
+          await new Promise((r) => setTimeout(r, 10));
+          await progress?.(k * 256, 2560);
+        }
+      })();
+    }
+    terminate(): void {
+      AirTickingWorker.stopped += 1;
+      if (this.name === 'sim') AirTickingWorker.terminated += 1;
+    }
+  }
+
+  it('a 200 ms air phase past a 30 ms window completes the check without a stall', async () => {
+    const g = globalThis as unknown as { Worker: unknown };
+    const real = g.Worker;
+    AirTickingWorker.terminated = 0;
+    AirTickingWorker.stopped = 0;
+    AirTickingWorker.stopTicks = false;
+    g.Worker = AirTickingWorker;
+    const phases: string[] = [];
+    try {
+      const pending = loadSim(THREE, setup(), tool, null, {
+        stallMs: 30,
+        queueMs: 5_000,
+        onPhase: (p) => phases.push(p),
+      });
+      // 150 ms in: five windows have passed since the first checkpoint, and the load is STILL
+      // RUNNING — the air ticks held the window open (at the base, no tick exists and the load
+      // would already have resolved `sweep-stalled`).
+      const raced = await Promise.race([pending, new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 150))]);
+      expect(raced, 'the load is still running, not stalled').toBe('timeout');
+      expect(phases).toContain('air');
+      expect(AirTickingWorker.terminated, 'no stall, no termination').toBe(0);
+    } finally {
+      AirTickingWorker.stopTicks = true;
+      g.Worker = real;
+      terminateSim();
+    }
+  });
+});
+
 // A's note (1) on #1048 — THE REAL FAULT PATH AT THE CLIENT LEVEL: the worker reports ONCE (its
 // first checkpoint, through the very proxy the client passes it), then goes silent past the stall
 // window. The load must end in `sweep-stalled` with the worker terminated exactly once — the case

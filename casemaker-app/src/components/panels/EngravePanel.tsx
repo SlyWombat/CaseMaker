@@ -785,6 +785,10 @@ function runProgressWords(
     // #1048 — the worker is busy with an earlier task (the background ideal): the load is queued,
     // not stalled. Said as waiting, in the one place the operator reads the run's progress.
     if (simStatus === 'loading' && simPhase === 'waiting') return `${where} · waiting for the simulation worker`;
+    // #1048 — the rapid-move check is its own phase and reports k of M while it works.
+    if (simStatus === 'loading' && simPhase === 'air' && simProgress !== null) {
+      return `${where} · checking rapid moves ${grouped(simProgress.done)} of ${grouped(simProgress.total)}`;
+    }
     if (simStatus === 'loading' && simProgress !== null) {
       const left = timeLeftWords(simProjectionMs, simProgress);
       return `${where} · swept ${grouped(simProgress.done)} of ${grouped(simProgress.total)}${left === null ? '' : ` · ${left}`}`;

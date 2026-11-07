@@ -76,6 +76,8 @@ export const OVERSHOOT_MM = 0.01;
 export const SPINDLE_OFF_PROXIMITY_FALLBACK_MM = 1.0;
 /** Air moves checked individually; beyond this a job is summarised instead (each is a boolean). */
 export const MAX_AIR_CHECKS = 4000;
+/** #1048 — how many tested air moves between progress ticks inside the rapid-move check. */
+export const AIR_PROGRESS_EVERY = 256;
 /** Gouge solids kept; beyond this a rapid is still reported, just not drawn (memory, and the transfer to the viewport). */
 export const MAX_GOUGES = 200;
 /**
@@ -370,6 +372,13 @@ export interface SweepOpts {
   stallMs?: number;
   /** Once per checkpoint, after its solid is built. `done` runs 1…total. */
   onProgress?: (done: number, total: number) => void;
+  /**
+   * #1048 — THE AIR PHASE SAYS IT IS RUNNING. `onPhase('air')` opens it and `onProgress` then
+   * ticks every {@link AIR_PROGRESS_EVERY} tested moves (done = moves tested, total = moves below
+   * the stock top), so a long rapid-move check is never silence to the client's window. The app's
+   * run line reads "checking rapid moves k of M".
+   */
+  onPhase?: (phase: 'air') => void;
   /**
    * The machine in use (#204). Its `holder` is the collet nut above the cutter — the widest thing
    * above the tool, and the only part of the spindle that can reach an obstacle the CUTTER has
@@ -819,6 +828,10 @@ export function checkAirMoves(
    * `sim.spindleOffProximityMm`, resolved by the caller. Absent: the labelled fallback.
    */
   proximityMm: number = SPINDLE_OFF_PROXIMITY_FALLBACK_MM,
+  /** #1048 — the air phase's own phase signal (see `SweepOpts.onPhase`). */
+  onPhase: ((phase: 'air') => void) | undefined = undefined,
+  /** #1048 — a tick every {@link AIR_PROGRESS_EVERY} tested moves, so the phase is never silence. */
+  onAirProgress: ((done: number, total: number) => void) | undefined = undefined,
 ): { diagnostics: SweepDiagnostic[]; gouges: Gouge[]; checked: number; rechecked: number; cleared: number; budgetExceeded: boolean } {
   const diagnostics: SweepDiagnostic[] = [];
   const gouges: Gouge[] = [];
@@ -963,6 +976,10 @@ export function checkAirMoves(
   // a retract inside its own cut, is settled without a boolean and is not what the cap protects;
   // counting it spent a large job's whole allowance on its clearance moves.
   let tested = 0;
+  // #1048 — WHAT THE PHASE WILL TEST, so a tick can state k of M; and the phase announces itself
+  // before the first move, so the client's window sees it working rather than silence.
+  const airTotal = Math.min(MAX_AIR_CHECKS, moves.filter((mv) => Math.min(mv.from[2], mv.to[2]) <= topZ).length);
+  onPhase?.('air');
   let unchecked = 0;
   for (const mv of moves) {
     checked++;
@@ -1010,6 +1027,7 @@ export function checkAirMoves(
       continue;
     }
     tested++;
+    if (onAirProgress !== undefined && tested % AIR_PROGRESS_EVERY === 0) onAirProgress(tested, airTotal);
     // The tool body (grown by the margin for the proximity rule) swept along the move.
     const body = sweptToolBody(
       tl,
@@ -1651,7 +1669,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // window can only condemn finished work, never a hang) and the check's own MAX_AIR_CHECKS cap
   // already bounds the phase. A move the cap leaves unchecked is an ERROR in its own words
   // (#925, `air-moves-unchecked`), never a `sweep-stalled`.
-  const air = checkAirMoves(tl, airMaterial, topZ, bedZ, timeline.airMoves, timeline.checkpoints, radius, null, fixture, fixtureTop, (d) => fixtureDiag.push(d), proximity);
+  const air = checkAirMoves(tl, airMaterial, topZ, bedZ, timeline.airMoves, timeline.checkpoints, radius, null, fixture, fixtureTop, (d) => fixtureDiag.push(d), proximity, opts?.onPhase, opts?.onProgress);
   if (airMaterial !== stock) airMaterial.delete();
   const msAir = performance.now() - a0;
   diagnostics.push(...air.diagnostics);

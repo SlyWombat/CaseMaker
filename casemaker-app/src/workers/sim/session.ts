@@ -343,7 +343,7 @@ type Live = LiveSwept | LivePath | LiveColumn;
  * spoken for this load yet, so the load is queued behind other work (the background ideal plan)
  * rather than stalled — the queue clock's word, never the stall watchdog's.
  */
-export type SimLoadPhase = 'sweep' | 'playback' | 'waiting';
+export type SimLoadPhase = 'sweep' | 'air' | 'playback' | 'waiting';
 
 /** What `load` will accept on top of its arguments (#194). */
 export interface SimLoadOpts {
