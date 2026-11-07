@@ -140,6 +140,19 @@ describe('#1044 a candidate with no feeds leaves the set, stated', () => {
     await expect(planModelCam(input)).rejects.toThrow(/no feeds for 6\*17mm Flat End\(Metal\) in aluminium-6061/);
   }, 180_000);
 
+  it('the chosen cutter present as its own shop entry is matched by KEY, not object identity', async () => {
+    // The seam de-duplicates the house by `cutterKeyOf`, so when the operator's cutter is also a
+    // shop entry the house holds the ENTRY's object and the appended chosen tool is skipped; a
+    // worker holds clones on top of that. With `tool === chosenTool` the exception never matched:
+    // the unfeedable chosen cutter was silently DROPPED and the plan ran on the ball. It must
+    // refuse by name instead.
+    const entry = flatEndMill(6, { id: '112111313812', name: '6*17mm Flat End(Metal)' });
+    const chosen = flatEndMill(6, { id: '112111313812', name: '6*17mm Flat End(Metal)' });
+    expect(chosen, 'the case is vacuous if the two are the same object').not.toBe(entry);
+    const input = await inputFor([entry, BALL6], chosen);
+    await expect(planModelCam(input)).rejects.toThrow(/no feeds for 6\*17mm Flat End\(Metal\) in aluminium-6061/);
+  }, 180_000);
+
   it('nothing remains: refuses naming the material', async () => {
     // The chosen V is kept (the caller's cutter); the only flat cannot be fed — no flat and no
     // ball remain, so the refusal names the material rather than the wrong candidate.

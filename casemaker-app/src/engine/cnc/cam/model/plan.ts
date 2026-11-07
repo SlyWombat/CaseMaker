@@ -721,11 +721,15 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // search ever saw another cutter. Resolve every house candidate up front: an unfeedable one
   // leaves the candidate set with its own stated line, and the primary is the largest flat that
   // REMAINS. Two exceptions keep their place because the caller named them: the chosen tool and
-  // the pinned V. Only the chosen tool's own feeds refusal stands, exactly where it always did.
+  // the pinned V. The chosen tool is matched by KEY, never object identity (6b's review): the seam
+  // de-duplicates the house by `cutterKeyOf`, so when the operator's cutter is also a shop entry
+  // the house holds the ENTRY's object and the appended tool is skipped — and a worker holds
+  // clones. Only the chosen tool's own feeds refusal stands, exactly where it always did.
   const pinnedChamferKey = input.cutters.pinned?.['chamfer'];
+  const chosenKey = input.chosenTool === undefined ? null : cutterKeyOf(input.chosenTool);
   const unfeedableLines: string[] = [];
   const candidateHouse = input.cutters.house.filter((tool) => {
-    if (tool === input.chosenTool) return true;
+    if (chosenKey !== null && cutterKeyOf(tool) === chosenKey) return true;
     if (pinnedChamferKey !== undefined && cutterKeyOf(tool) === pinnedChamferKey) return true;
     try {
       resolvedCutParams(input, tool);
