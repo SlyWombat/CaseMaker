@@ -274,6 +274,18 @@ describe('columnSweep (whole-program)', () => {
     expect(out.diagnostics.some((d) => d.code === 'axis-clamped')).toBe(false);
   });
 
+  it('#1061 — the chuck/jaws keep-out is full height: a cut at X 1 is refused, one at X 5 is clear', () => {
+    const low = columnSweep(fakeTimeline([move({ u0: 1, u1: 1, z: 5 })]), flatEndMill(3.175), cyl(10, 30));
+    if (!low.ok) throw new Error(JSON.stringify(low.diagnostics));
+    const d = low.diagnostics.find((x) => x.code === 'rotary-into-chuck');
+    expect(d?.severity).toBe('error');
+    expect(d?.message).toContain('no height over them is clear');
+    // The ⌀3.175 cutter's edge is at X 1 − 1.5875, inside the first 3 mm; at X 5 it is outside.
+    const clear = columnSweep(fakeTimeline([move({ u0: 5, u1: 5, z: 5 })]), flatEndMill(3.175), cyl(10, 30));
+    if (!clear.ok) throw new Error(JSON.stringify(clear.diagnostics));
+    expect(clear.diagnostics.some((x) => x.code === 'rotary-into-chuck')).toBe(false);
+  });
+
   it('refuses a non-cylinder stock for a rotary job', () => {
     const tl = fakeTimeline([move({ z: 5 })]);
     const out = columnSweep(tl, flatEndMill(3.175), prism(10, 10, 5));

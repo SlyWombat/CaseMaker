@@ -388,15 +388,18 @@ describe('#241 the air gate on an indexed job', () => {
 });
 
 describe('#729 — the retroactive review: the chuck, an unstated A, and face matching', () => {
-  it('refuses a rapid into the jaws: a pure-Z rapid at X −10 down to Z −5', () => {
+  it('#1061 — a rapid into the jaws is refused at any Z (the Z allowance is retired)', () => {
     const src = ['S1000 M3', 'G0 X15 Y0 Z15 A0', 'G0 X-10', 'G0 Z-5', 'G0 Z15'].join('\n');
     const timeline = buildTimeline(parseGcode(src), setup());
     const out = sweepTimeline(tl, timeline, WIDE, setup());
     const diags = out.ok ? out.value.diagnostics : out.diagnostics;
     const chuck = diags.find((d) => d.code === 'rotary-into-chuck');
     expect(chuck?.severity).toBe('error');
-    // Line 3 moves over the chuck at Z 15, above the jaws' reach (12.5): clear. Line 4 drops into them.
-    expect(chuck?.message).toContain('line 4: a rapid reaches the chuck');
+    // #1061 (the maintainer's rule) — the move over the chuck at Z 15 was clear only while the
+    // jaws' reach (12.5) bounded the half-space; the keep-out is full height now, so the first
+    // offending line is the move itself, not the drop after it.
+    expect(chuck?.message).toContain('reaches the chuck');
+    expect(chuck?.message).toContain('no height over them is clear');
     if (out.ok) dispose(out.value);
   });
 
@@ -423,24 +426,27 @@ describe('#729 — the retroactive review: the chuck, an unstated A, and face ma
     if (out.ok) dispose(out.value);
   });
 
-  it('refuses a move over the jaws above the rod top but below the jaws’ reach (D2)', () => {
-    // The fixture's jaws are ⌀25 (reach 12.5) on a ⌀20 rod (top 10): Z 12 is above the rod, in the jaws.
+  it('#1061 — a move over the jaws above the rod top is refused too (the Z allowance is retired)', () => {
+    // The fixture's jaws are ⌀25 (reach 12.5) on a ⌀20 rod (top 10). Under the maintainer's rule the
+    // jaws' radial reach depends on the grip, so no height over the chuck is clear: the Z 12 move
+    // and the Z 15 move are both refused.
     const src = ['S1000 M3', 'G0 X15 Y0 Z15 A0', 'G0 X-10 Z12', 'G0 Z15'].join('\n');
     const timeline = buildTimeline(parseGcode(src), setup());
     const out = sweepTimeline(tl, timeline, WIDE, setup());
     const diags = out.ok ? out.value.diagnostics : out.diagnostics;
-    expect(diags.find((d) => d.code === 'rotary-into-chuck')?.message).toContain('below Z 12.500 mm');
+    expect(diags.find((d) => d.code === 'rotary-into-chuck')?.message).toContain('no height over them is clear');
     if (out.ok) dispose(out.value);
-    // Above the jaws it is clear.
     const high = buildTimeline(parseGcode(['S1000 M3', 'G0 X15 Y0 Z15 A0', 'G0 X-10 Z15', 'G0 X15'].join('\n')), setup());
-    const ok = sweepTimeline(tl, high, WIDE, setup());
-    if (!ok.ok) throw new Error(JSON.stringify(ok.diagnostics));
-    expect(ok.value.diagnostics.some((d) => d.code === 'rotary-into-chuck')).toBe(false);
-    dispose(ok.value);
+    const okHigh = sweepTimeline(tl, high, WIDE, setup());
+    const highDiags = okHigh.ok ? okHigh.value.diagnostics : okHigh.diagnostics;
+    expect(highDiags.some((d) => d.code === 'rotary-into-chuck'), 'no height over the chuck is clear').toBe(true);
+    if (okHigh.ok) dispose(okHigh.value);
   });
 
-  it('a pass one cutter radius clear of the jaws is not refused', () => {
-    const src = ['S1000 M3', 'G0 X5 Y0 Z15 A0', 'G1 Z9 F100', 'G1 X20', 'G0 Z15'].join('\n');
+  it('#1061 — a pass clear of the keep-out band is not refused', () => {
+    // The ⌀10 cutter's edge needs X ≥ 3 + 5 = 8: start the pass there. X 5 was one cutter radius
+    // clear of the jaw FACE and is now inside the 3 mm keep-out band.
+    const src = ['S1000 M3', 'G0 X8 Y0 Z15 A0', 'G1 Z9 F100', 'G1 X20', 'G0 Z15'].join('\n');
     const timeline = buildTimeline(parseGcode(src), setup());
     const out = sweepTimeline(tl, timeline, WIDE, setup());
     if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));

@@ -29,6 +29,7 @@ import type { EngraveJob } from '@/types/engraveJob';
 import { chuckStockOf } from '@/engine/cnc/stockStart';
 import type { CamMove, CamOperation, ToolpathIR } from '@/engine/cnc/cam/ir';
 import { SAFE_Z, estimateCycleSeconds, type RapidEstimate } from '@/engine/cnc/cam/ir';
+import { cuttingDiameter } from '@/engine/cnc/tool';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 
 /**
@@ -301,14 +302,20 @@ type Polylines = readonly (readonly (readonly [number, number])[])[];
  * model that reads only X/Y/Z would time a full turn as standing still.
  */
 export function toRotaryIR(ir: ToolpathIR, radius: number, rapid: RapidEstimate): ToolpathIR {
+  // #1061 (the maintainer's rule) — NOTHING MOVES INTO THE CHUCK/JAWS BAND, at any Z: every
+  // mapped move is clamped to X ≥ the keep-out band plus the cutter's radius, so the cutter's
+  // EDGE (not only its tip) stays right of the jaw tips. The callers that plan moves there (the
+  // relief CAM) clip to the same line and state it; this is the frame's last wall.
+  const keepOutX = ROTARY_JAW_KEEP_OUT_MM + (cuttingDiameter(ir.tool) ?? 0) / 2;
   const operations: CamOperation[] = ir.operations.map((op) => {
     const moves: CamMove[] = op.moves.map((move) => {
+      const x = Math.max(move.x, keepOutX);
       const a = arcToAngle(move.y, radius);
       const z = radius + move.z;
       const liftedRapid = move.kind === 'rapid' ? Math.max(z, radius + SAFE_Z) : z;
       return move.kind === 'feed'
-        ? { kind: 'feed', x: move.x, y: 0, z, f: move.f, a }
-        : { kind: 'rapid', x: move.x, y: 0, z: liftedRapid, a };
+        ? { kind: 'feed', x, y: 0, z, f: move.f, a }
+        : { kind: 'rapid', x, y: 0, z: liftedRapid, a };
     });
     return { ...op, moves, estimatedSeconds: estimateCycleSeconds(moves, rapid, radius) };
   });

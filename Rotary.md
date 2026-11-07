@@ -671,6 +671,14 @@ fixes **A-zero only up to a convention**. Under decision 26 (`/Fabrication.md` �
 | Datum candidates | the axis line, from the module's preset zero (precision **unknown**) or from probing; **not X and not A-zero** |
 | Residual | X (the chuck face or stock end must be touched); the stock's actual radius and run-out; A-zero if the job is indexed to a feature |
 
+**The chuck and jaws are a full-height keep-out** (maintainer, 2026-11-07): *"You will never move
+into the chuck area, as that is variable height and you never need to cut over there."* The jaws'
+radial reach depends on the grip's ⌀ — the variable height — so no Z over them is provably clear.
+Every move — a cut, a rapid, a retract, an index turn's parking — stays right of the jaw tips plus
+the 3 mm band (`ROTARY_JAW_KEEP_OUT_MM`, map X ≥ 3 mm), which the CAM clamps to and the verifier
+refuses beyond: `wrap-into-clamp` for cuts, `rapid-into-chuck` for every other move. A goal that
+reaches into the band is clipped, and the program states what it left.
+
 ### 6.2 Probing the radius and the run-out
 
 Probe Z on the stock top at A = 0°, 90°, 180°, 270° at one X. The mean is the radius; the first
@@ -707,6 +715,7 @@ re-established per mounting, everywhere.
 | `axis-crossing` | tip or floor at Z ≤ 0 | R8 |
 | `rotary-rapid-engaged` | a `G0` that changes A or X while `Z_t` is below the stock's current surface radius at that column (cheap form: below `R_stock + clearance`) | the rotary form of `rapid-too-low`; the vendor's rapids move A |
 | `wrap-into-clamp` | any cut X inside the chuck envelope or the tailstock envelope, the envelopes inflated by their uncertainty | the chuck and tailstock are the fixture |
+| `rapid-into-chuck` | any move whose cutter edge reaches X inside the chuck/jaw keep-out (map X < 3 mm plus the cutter's radius), at ANY Z — the #729 "above the rod top + clearance" allowance is retired | the jaws' reach depends on the grip's ⌀, so no height over them is clear |
 | `stock-exceeds-module` | stock diameter > 80 or length > 150 | `t_MachineType` |
 | `feed-at-radius` (warning) | surface speed implied by F and the perimeter model (§1.2) falls below the table value by more than a stated fraction, or the 60 °/s cap binds | so the operator knows the chip load is not what the table says (§3.4 below) |
 | `g93-unsupported` | already refused | Fusion's 4-axis output mode (§8) |
