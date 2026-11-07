@@ -63,24 +63,38 @@ interface Args {
   out: string;
   /** The vendor's own NC files, drawn beside ours at the same scale (repeatable). */
   vendor: string[];
+  /** Appended to every picture's caption (the sha, the card row, the SIMULATOR_VERSION). */
+  titleExtra: string | null;
+  /** Named sections at a fixed axis coordinate (repeatable): `[name:]x=<mm>` or `[name:]y=<mm>`. */
+  sections: { name: string; axis: 'x' | 'y'; mm: number }[];
 }
 
 function parseArgs(argv: readonly string[]): Args {
   const args: Record<string, string> = {};
   const vendor: string[] = [];
+  const sections: { name: string; axis: 'x' | 'y'; mm: number }[] = [];
   for (let i = 0; i < argv.length; i += 2) {
     const key = argv[i]!.replace(/^--/, '');
     const value = argv[i + 1]!;
     if (key === 'vendor') vendor.push(value);
-    else args[key] = value;
+    else if (key === 'section') {
+      // `[name:]x=<mm>` — the standing set's named lines (organizer y = 89.5, tray y = 114.6).
+      const m = /^(?:([\w.-]+):)?([xy])=(-?\d+(?:\.\d+)?)$/.exec(value.trim());
+      if (m === null) throw new Error(`--section ${value}: expected [name:]x=<mm> or [name:]y=<mm>`);
+      const axis = m[2] as 'x' | 'y';
+      const mm = Number(m[3]);
+      sections.push({ name: m[1] ?? `section-${axis}${mm}`, axis, mm });
+    } else args[key] = value;
   }
   const plan = args.plan;
   const pics = args.pics;
   const out = args.out;
   if (plan === undefined || pics === undefined || out === undefined) {
-    throw new Error('usage: acceptancePics.ts --plan <plan.json> --pics <pics.json> --out <dir> [--vendor <nc> ...]');
+    throw new Error(
+      'usage: acceptancePics.ts --plan <plan.json> --pics <pics.json> --out <dir> [--vendor <nc> ...] [--title-extra <text>] [--section [name:]x=<mm> ...]',
+    );
   }
-  return { plan, pics, out, vendor };
+  return { plan, pics, out, vendor, titleExtra: args['title-extra'] ?? null, sections };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -915,8 +929,11 @@ function renderSection(
   title: string,
   name: string,
   outDir: string,
+  fixed?: { axis: 'x' | 'y'; mm: number },
 ): { svg: string; png: string } {
-  // Choose the axis with the longer covered run through the cell.
+  // Choose the axis with the longer covered run through the cell — or take the NAMED line when the
+  // caller pinned one (`--section y=89.5`): the standing set's sections must sit at the same
+  // coordinate for every sha, not where the worst cell happens to be.
   const runLength = (alongX: boolean): number => {
     let len = 0;
     const other = alongX ? at.y : at.x;
@@ -929,8 +946,8 @@ function renderSection(
     }
     return len;
   };
-  const alongX = runLength(true) >= runLength(false);
-  const other = alongX ? at.y : at.x;
+  const alongX = fixed !== undefined ? fixed.axis === 'y' : runLength(true) >= runLength(false);
+  const other = fixed !== undefined ? fixed.mm : alongX ? at.y : at.x;
   const lo = alongX ? goal.x0 : goal.y0;
   const hi = alongX ? goal.x0 + (goal.nx - 1) * goal.pitch : goal.y0 + (goal.ny - 1) * goal.pitch;
   const sampleAt = (v: number): { goalZ: number | null; topZ: number | null } => {
@@ -1037,7 +1054,9 @@ function renderSection(
     `<line x1="360" y1="${legendY}" x2="390" y2="${legendY}" stroke="#d7301f" stroke-width="1.6"/><text x="396" y="${legendY + 4}" font-family="sans-serif" font-size="10" fill="#1a202c">posted sweep top</text>` +
     `<text x="60" y="${legendY + 20}" font-family="sans-serif" font-size="10" fill="#1a202c">toolpath Z: ● feed (each program a colour), × rapid (whole-part panel only)</text>`;
   const body =
-    `<text x="28" y="22" font-family="sans-serif" font-size="14" font-weight="700" fill="#1a202c">${esc(title)} — ${kind === 'cut' ? `worst cut-into (${at.cls === 'adjudicated' ? 'adjudicated' : `raw, ${at.cls}`})` : 'worst leftover'} section</text>` +
+    `<text x="28" y="22" font-family="sans-serif" font-size="14" font-weight="700" fill="#1a202c">${esc(title)} — ${
+      fixed !== undefined ? `the standing section at ${fixed.axis} = ${fixed.mm}` : kind === 'cut' ? `worst cut-into (${at.cls === 'adjudicated' ? 'adjudicated' : `raw, ${at.cls}`})` : 'worst leftover'
+    } section</text>` +
     `<text x="28" y="40" font-family="sans-serif" font-size="11" fill="#4a5568">at ${at.x.toFixed(1)}, ${at.y.toFixed(1)} (${at.value.toFixed(3)} mm) along ${alongX ? 'X' : 'Y'} (${alongX ? `y = ${other.toFixed(1)}` : `x = ${other.toFixed(1)}`}) — upper: whole part; lower: surface zoom</text>` +
     panel(full, doc.frame.stockTop + 2, doc.frame.partBottom - 2, { ground: true, rapids: true }) +
     `<text x="${full.x}" y="${full.y - 8}" font-family="sans-serif" font-size="10" font-weight="700" fill="#1a202c">whole part</text>` +
@@ -1099,7 +1118,7 @@ function main(): void {
     process.stdout.write(`leftover: >0.1 mm ${over01} cells · >1 mm ${over1} · >10 mm ${over10} · max ${maxL.toFixed(3)} at ${maxAt} · adjudicated cut-into ${adj} cells\n`);
     process.stdout.write(`max cell raw: ${JSON.stringify((globalThis as Record<string, unknown>)['__maxCell'])}\n`);
   }
-  const title = `${doc.card} — ${path.basename(path.dirname(args.plan))}`;
+  const title = `${doc.card} — ${path.basename(path.dirname(args.plan))}${args.titleExtra === null ? '' : ` · ${args.titleExtra}`}`;
   const stl = Buffer.from(doc.target.data ?? '', 'base64');
   const triangles = stl.length >= 84 ? stl.readUInt32LE(80) : 0;
   process.stdout.write(
@@ -1122,6 +1141,31 @@ function main(): void {
   const worstLeft = worstCell(cells, goal, 'left');
   if (worstCut !== null) files.push(renderSection(goal, runs, doc, top, worstCut, 'cut', title, '04-section-worst-cut-into', args.out));
   if (worstLeft !== null) files.push(renderSection(goal, runs, doc, top, worstLeft, 'left', title, '05-section-worst-leftover', args.out));
+  // The named sections: the worst cell ALONG the pinned line marks the caption; the line itself is
+  // fixed by the caller.
+  for (const s of args.sections) {
+    const j = s.axis === 'y' ? Math.round((s.mm - goal.y0) / goal.pitch) : -1;
+    const i = s.axis === 'x' ? Math.round((s.mm - goal.x0) / goal.pitch) : -1;
+    let at: { x: number; y: number; value: number; cls: CellClass } | null = null;
+    let best = -Infinity;
+    for (let k = 0; k < (s.axis === 'y' ? goal.nx : goal.ny); k++) {
+      const ii = s.axis === 'y' ? k : i;
+      const jj = s.axis === 'y' ? j : k;
+      if (ii < 0 || jj < 0 || ii >= goal.nx || jj >= goal.ny) continue;
+      const idx = jj * goal.nx + ii;
+      if (goal.covered[idx] !== 1) continue;
+      const v = cells.leftover[idx]!;
+      if (v > best) {
+        best = v;
+        at = { x: goal.x0 + ii * goal.pitch, y: goal.y0 + jj * goal.pitch, value: v, cls: CLASS[cells.classOf[idx]!]! };
+      }
+    }
+    if (at === null) {
+      process.stdout.write(`section ${s.name}: no covered cells on ${s.axis} = ${s.mm}; skipped\n`);
+      continue;
+    }
+    files.push(renderSection(goal, runs, doc, top, at, 'left', title, s.name, args.out, { axis: s.axis, mm: s.mm }));
+  }
   // Render every SVG to PNG with the maintainer's Playwright tool.
   for (const f of files) {
     execFileSync(process.execPath, [path.join(process.env.HOME ?? '', 'projects', 'cm-gate2', 'casemaker-app', 'svg2png.tmp.mjs'), f.svg, f.png], { stdio: 'pipe' });
