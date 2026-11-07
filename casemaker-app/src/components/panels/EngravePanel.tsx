@@ -2114,7 +2114,17 @@ export function EngravePanel(): JSX.Element {
   // otherwise be re-applied on every render — and each write marks a generated job stale. Comparing
   // both is also the "equal answer writes nothing" rule.
   const measuredSetup = job.setups?.[0];
-  const measuredApplied =
+  // #1035 — TWO FACTS, TWO NAMES. `measuredCarried`: the document ALREADY carries the measured
+  // plan (a saved job, the evaluator's write, or this panel's own press) — the press would write
+  // nothing, so the offer must not appear (the #766 "equal answer writes nothing" rule; a reopened
+  // saved job must not re-offer a no-op). `measuredApplied`: the operator PRESSED this answer in
+  // this panel — the marker records the pressed answer's jobKey — AND the document still carries
+  // it. Only then do the 'chosen by simulation' words and the fidelity line appear: #1010 says
+  // those words describe the pressed state, and #798 pins that a coincidental match keeps
+  // 'recommended'. The marker is panel-local, so a reload falls back to 'recommended' with no
+  // offer — the reload case is pinned in engraveMeasuredPickPanel's spec.
+  const [pressedMeasuredKey, setPressedMeasuredKey] = useState<string | null>(null);
+  const measuredCarried =
     measuredNow !== null &&
     job.toolKey === measuredNow.cutters[0]?.key &&
     // #829 — a goal's second cutter is its chamfer's V-bit; the plan is applied only when the
@@ -2124,14 +2134,20 @@ export function EngravePanel(): JSX.Element {
       job.targetObject.chamfer.toolKey === measuredNow.cutters[1].key) &&
     // #869/#999 — the goal's rough is the plan's own decision, and the three states are distinct:
     // a plan with no rough (ball alone) matches a goal stating `null`, never an ABSENT key (which
-    // now means the engine chooses), and a named key matches itself.
-    job.targetObject?.roughToolKey === (measuredNow.goalRoughKey ?? null) &&
+    // now means the engine chooses), and a named key matches itself. #1035 — the clause is a
+    // GOAL's rule: a job with no target object has no rough to compare, and `undefined === null`
+    // kept `measuredApplied` false forever, so the offer never retired after its own press and the
+    // fidelity line never showed.
+    (job.targetObject === undefined || job.targetObject.roughToolKey === (measuredNow.goalRoughKey ?? null)) &&
     (measuredSetup?.tools ?? []).length === measuredNow.cutters.length &&
     (measuredSetup?.tools ?? []).every((k, i) => k === measuredNow.cutters[i]?.key) &&
     measuredNow.cutters.every((c) => {
       const owned = measuredSetup?.toolItems?.[c.key] ?? [];
       return owned.length === c.items.length && owned.every((id, i) => id === c.items[i]);
     });
+  // #1035 — the pressed words, and their guard (see the marker's note above): the ANSWER this
+  // panel pressed, while the document still carries it.
+  const measuredApplied = measuredNow !== null && measuredCarried && pressedMeasuredKey === measuredNow.jobKey;
   // #1010 (the maintainer's 2026-11-05 ruling) — THE MEASURED AUTO-APPLY IS RETIRED. The panel
   // used to write a measured answer into the job behind the operator: the plain pick (#766 D), the
   // named-drill split (#786 4c) and the missing/refused substitutions (#786 4c-2 / slice 6). That
@@ -4336,11 +4352,16 @@ export function EngravePanel(): JSX.Element {
               measured
             </span>
             {measuredNow.words.difference !== null ? ` — ${measuredNow.words.difference}` : ''}{' '}
-            {!measuredApplied && (
+            {!measuredCarried && (
               <button
                 type="button"
                 data-testid="engrave-use-measured"
-                onClick={() => applyCutterPlan(measuredNow.cutters, 'computed', 0, measuredNow.goalRoughKey)}
+                onClick={() => {
+                  // #1035 — the press is what makes the answer "applied" (see the marker's note):
+                  // record it BEFORE the write, so the offer retires and the line states it.
+                  setPressedMeasuredKey(measuredNow.jobKey);
+                  applyCutterPlan(measuredNow.cutters, 'computed', 0, measuredNow.goalRoughKey);
+                }}
               >
                 Use the recommendation
               </button>

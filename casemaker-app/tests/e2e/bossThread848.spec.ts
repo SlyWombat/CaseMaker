@@ -16,7 +16,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveCombinedShape, EngraveJob } from '@/types/engraveJob';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 
 test.setTimeout(600_000);
 
@@ -105,6 +105,17 @@ test('an ⌀8 mm boss the job raises, threaded M8×1.25: the boss, then the thre
   await page.getByTestId('engrave-thread-use-size-0').click();
   await expect(page.getByTestId('engrave-thread-size-0')).toHaveValue('M8');
   await expect(page.getByTestId('engrave-thread-use-size-0')).toHaveCount(0);
+
+  // #1035 — THE THREAD MILL IS OFFERED, AND THE PRESS IS THE WRITE (#1010's ruling). The
+  // measured answer carries the thread mill beside the flat; pressing it assigns the thread to
+  // the mill and the split is stated. The retired auto-apply used to make this write behind the
+  // operator; without the press Generate stays disabled on `thread-wrong-tool`.
+  // The offer lives inside the Cutter group: open it, as the measured-pick walk does.
+  await openCutterGroup(page);
+  await expect(page.getByTestId('engrave-pick-measured')).toBeVisible({ timeout: 240_000 });
+  await expect(page.getByTestId('engrave-use-measured')).toBeVisible();
+  await page.getByTestId('engrave-use-measured').click();
+  await expect(page.getByTestId('engrave-use-measured')).toHaveCount(0);
 
   // The plan splits the job, boss first, and one line says so.
   const split = page.locator('[data-code="setup-programs-split"]');
