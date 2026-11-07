@@ -2171,6 +2171,36 @@ describe('#986 the background ideal', () => {
     }
   }, 60_000);
 
+  it('#1048 — Stop works while the load waits for the worker', async () => {
+    let cancels = 0;
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => generatedWithProgram(),
+      engravePlanIdeal: async () => ({ tradeoff: { material: false, line: null, differences: [] }, owned: null, ideal: null }),
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+      cancelGenerate: () => {
+        cancels += 1;
+      },
+    }));
+    const goalForIdeal = {
+      id: 'g', name: 'g', format: 'stl' as const, sha256: 'x', data: '', size: { x: 1, y: 1, z: 1 },
+      position: { x: 0, y: 0, z: 0 }, rotation: 0, enabled: true, role: 'goal' as const,
+    };
+    useEngraveJobStore.setState({ job: { ...useEngraveJobStore.getState().job, targetObject: goalForIdeal, tool: flatEndMill(3.175, { name: '3.175 mm flat end' }) } });
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({ loadProgram: () => new Promise(() => undefined) as never });
+    try {
+      void useEngraveRunStore.getState().generate();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(useEngraveRunStore.getState().phase, 'the walk is on the wait').toBe('simulating');
+      // The press the panel's Cancel calls: it must free the app from a queued load too.
+      useEngraveRunStore.getState().cancelGenerate();
+      expect(cancels).toBe(1);
+      expect(useEngraveRunStore.getState().phase).not.toBe('simulating');
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+    }
+  });
+
   it('a stale run’s ideal never writes over the current run', async () => {
     const releases: ((v: { tradeoff: { material: boolean; line: string | null; differences: never[] }; owned: null; ideal: null }) => void)[] = [];
     setEngraveRunClientLoader(async () => ({

@@ -807,7 +807,21 @@ function RunProgressLine({ run }: { run: Pick<EngraveRunState, 'phase' | 'progre
   const simPhase = useSimStore((s) => s.phase);
   const simProgress = useSimStore((s) => s.progress);
   const simProjectionMs = useSimStore((s) => s.projectionMs);
-  return <span>{runProgressWords(run, simStatus, simPhase, simProgress, simProjectionMs)}</span>;
+  const waitingSince = useSimStore((s) => s.waitingSince);
+  // #1048 — the wait is counted out loud; Stop stays beside it (the run's own Cancel press).
+  const [now, setNow] = useState(() => Date.now());
+  const waiting = simStatus === 'loading' && simPhase === 'waiting' && waitingSince !== null;
+  useEffect(() => {
+    if (!waiting) return undefined;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [waiting]);
+  return (
+    <span>
+      {runProgressWords(run, simStatus, simPhase, simProgress, simProjectionMs)}
+      {waiting ? ` · ${formatDuration((now - waitingSince) / 1000)}` : ''}
+    </span>
+  );
 }
 
 /**

@@ -54,3 +54,52 @@ describe('#1048 — the load waits out the queue before it may call a stall', ()
     expect(waiting + stalled).toBe(0);
   });
 });
+
+// ── #1048 (the Manager's follow-up) — WHILE THE LOAD WAITS ────────────────────────────────────
+// Option (a): the wait is shown with its elapsed time, and Stop stays available. A liveness ping
+// cannot tell a queue from a wasm call that will never return (the ping itself queues behind it),
+// so no ping is added; a CRASHED worker is already caught by the client's worker-error race.
+import { setSimClientLoader, useSimStore, type SimClient } from '@/store/simStore';
+import { flatEndMill } from '@/engine/cnc/tool';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+
+describe('#1048 — a load waiting on the worker is shown as waiting, with its elapsed time', () => {
+  it('the first waiting report starts the clock; a checkpoint ends it', async () => {
+    let phase: ((p: 'waiting' | 'sweep' | 'playback') => void) | null = null;
+    let progress: ((done: number, total: number) => void) | null = null;
+    const client = {
+      setSimSinks: () => undefined,
+      loadSim: async (..._a: unknown[]) => {
+        const opts = _a[4] as
+          | { onPhase?: (p: 'waiting' | 'sweep' | 'playback') => void; onProgress?: (done: number, total: number) => void }
+          | undefined;
+        phase = opts?.onPhase ?? null;
+        progress = opts?.onProgress ?? null;
+        return new Promise(() => undefined);
+      },
+      requestFrame: () => undefined,
+      simPath: async () => null,
+      disposeSim: async () => undefined,
+    } as unknown as SimClient;
+    setSimClientLoader(async () => client);
+    try {
+      const job = defaultEngraveJob();
+      const pending = useSimStore.getState().loadProgram('G0 X0 Y0\n', { stock: {} } as never, flatEndMill(3.175, { name: 'x' }), null);
+      await Promise.resolve();
+      expect(useSimStore.getState().phase).toBe('sweep');
+      expect(useSimStore.getState().waitingSince).toBeNull();
+      phase!('waiting');
+      const since = useSimStore.getState().waitingSince;
+      expect(useSimStore.getState().phase).toBe('waiting');
+      expect(since, 'the wait started being timed').not.toBeNull();
+      phase!('waiting');
+      expect(useSimStore.getState().waitingSince, 'each re-arm keeps the FIRST timestamp').toBe(since);
+      progress!(1, 35);
+      expect(useSimStore.getState().waitingSince, 'the first checkpoint ends the wait').toBeNull();
+      void pending;
+      void job;
+    } finally {
+      setSimClientLoader(null);
+    }
+  });
+});
