@@ -434,7 +434,23 @@ def run_card(c, args, sha, cat):
         return card
     rc = load_receipt(rundir)
     if rc['ok'] is None and not os.path.getsize(receipt_path):
-        card['verdict'], card['sentence'] = 'error', 'the command wrote no receipt'
+        # A killed command is a COST finding, and the two ways it dies read differently: a timeout
+        # names its window (above), an out-of-memory kill names its ceiling and its wall time.
+        errtext = ''
+        try:
+            errtext = open(os.path.join(rundir, 'stderr.txt'), errors='replace').read()
+        except OSError:
+            pass
+        if run.get('exit') == 134 or 'heap out of memory' in errtext.lower():
+            wall = run.get('wall')
+            card['verdict'] = 'error'
+            card['sentence'] = (
+                'the command ran out of memory (exit 134'
+                + (f' after {wall:.0f} s' if wall is not None else '')
+                + '): JavaScript heap out of memory at the Node heap ceiling, and no receipt was written')
+            card['numbers'] = {'oomWallSeconds': wall}
+        else:
+            card['verdict'], card['sentence'] = 'error', 'the command wrote no receipt'
         return card
     card['time'] = rc['time']
     card['warnings'] = rc['warnings']
@@ -506,8 +522,15 @@ def run_card(c, args, sha, cat):
                 lo = (appg.get('leftoverFractions') or [1.0])[0]
                 covers = 100.0 * (1.0 - float(lo))
                 passp = 100.0 * float(appg.get('passCoverage') or 0.95)
-                cut = float(appg.get('cutIntoFraction') or 0.0)
+                # THE RULE THE PAGE STATES: cut-into BEYOND the edge-break allowance. The raw
+                # fraction counts the cells the app's own rule excuses (the edge break and the wall
+                # cells the heightfield cannot adjudicate; on ref-ringbox all 3.3e-5 of it was wall
+                # cells, so a card whose sentence says "no cell cut more than 0.1 mm" read
+                # "deviates"); the app's adjudicatedFraction is the one the rule names. The raw
+                # share stays a fact on the card (app_goal_numbers).
                 problems = []
+                adj = appg.get('adjudicatedFraction')
+                cut = float(adj if adj is not None else (appg.get('cutIntoFraction') or 0.0))
                 if cut > 0:
                     problems.append(f"cut into the goal on {round(100 * cut, 2)} % of the surface")
                 if covers < passp:
@@ -764,7 +787,14 @@ def page(cards, args, sha, loc, cat):
   below the goal — the goal heightfield’s own pitch — outside three stated classes: the <b>edge break</b> (a V
   bit within its reach of a design edge, no deeper than its leg), <b>wall cells</b> (a vertical wall lands on one
   side of a cell boundary or the other) and the <b>wall shadow</b> (material a cutter cannot reach behind a wall,
-  which the heightfield stamp nevertheless spreads over). Each excluded share is printed on the card.</p>
+  which the heightfield stamp nevertheless spreads over). Each excluded share is printed on the card. A card is judged on the app’s <b>adjudicated</b>
+  cut-into — cells past the edge-break, wall and wall-shadow allowances are not counted against it,
+  and the raw share is printed as a fact.</p>
+  <p>Two scoring rules on the design check, stated so the numbers can be read: a cell within the
+  check’s own 0.3 mm erosion of a <b>deeper item’s region</b> is that item’s cut, not this one’s
+  over-depth (a ray that starts inside the head pocket’s V flank); and a <b>painted band cut by a V
+  cutter</b> is scored as a cone — its walls are the design — whether or not the job carries
+  <code>vCarveDepth</code>.</p>
   <p>Not reproducible here, so not cards: {html.escape('; '.join(f'{a} — {b}' for a, b in APPENDIX))}.</p>
   <h3>The five hardwood samples (#936–#941, the 36 × 36 × 100 sticks)</h3>
   <p>A sample joins the card table below as soon as its job file is committed; until then this is what
