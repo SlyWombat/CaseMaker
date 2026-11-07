@@ -11,6 +11,8 @@
  * RED at the #1028 tip: none of the three fields exists and `restLadderEstimateMs` has nothing to
  * read — the estimate is a constant or absent.
  */
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -23,7 +25,7 @@ import {
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import { buildModelPlanInputForGoal } from '@/workers/sim/engraveGenerate';
+import { buildModelPlanInputForGoal, generateGoalProgram } from '@/workers/sim/engraveGenerate';
 
 type P = [number, number, number];
 type Tri2 = [[number, number], [number, number], [number, number]];
@@ -148,5 +150,18 @@ describe('#1046 the plan states its own wall time (dump only)', () => {
     expect(plan.ladderRows?.length).toBeGreaterThan(0);
     expect(plan.finishStageMs!).toBeGreaterThan(0);
     expect(restLadderEstimateMs(plan)).not.toBeNull();
+  }, 300_000);
+
+
+  it('the posted NC bytes with the flag off are the pre-#1046 bytes (hashed), so the timing fields change no card', async () => {
+    // The Manager's ask: prove the flag-off program is byte-identical to the base commit's, by the
+    // NC TEXT — not only the plan JSON minus timings. The hash was measured by running this same
+    // case with the eight src files checked out at the #1046 base (c369d54ef).
+    const target = goalTarget();
+    const job = goalJob(target);
+    const out = await generateGoalProgram(job, target, BALL6, null, { shop: { tools: [], feeds: SHOP_FEEDS } });
+    expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
+    expect(out.nc).not.toBeNull();
+    expect(createHash('sha256').update(out.nc!, 'utf8').digest('hex')).toBe('d9aa746147f445bd0d60ab87c7c392ac163fef44146364115665111604bda6e9');
   }, 300_000);
 });

@@ -1229,9 +1229,14 @@ export function EngravePanel(): JSX.Element {
     // plan statements on the LAST run (the printed sheet carries them in §8), and they carry the
     // goal's labelId; the drawer is where the presses stand, so the job-level list shows them too
     // (labelId cleared) — the ladder's press hangs off that line.
-    ...(useEngraveRunStore.getState().generated?.findings ?? [])
-      .filter((f) => f.code === 'goal-rest-uncut' || f.code === 'goal-rest-pass')
-      .map((f) => ({ ...f, labelId: undefined })),
+    // 6b's condition (#1046): the RUN's lines follow the run's staleness — a stale plan's leftover
+    // sentence must never sit beside live document findings as if it were current, so it is shown
+    // only while `staleSince` is null (and with it the ladder's press).
+    ...(useEngraveRunStore.getState().staleSince === null
+      ? (useEngraveRunStore.getState().generated?.findings ?? [])
+          .filter((f) => f.code === 'goal-rest-uncut' || f.code === 'goal-rest-pass')
+          .map((f) => ({ ...f, labelId: undefined }))
+      : []),
   ]);
   const jobFindings = findings.filter((f) => f.labelId === undefined);
   // A cutter this app can write an answer to: a house definition or an owned cutter. A catalogue
