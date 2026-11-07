@@ -22,7 +22,7 @@ import type { EngraveJob } from '@/types/engraveJob';
 import type { Mount } from '@/engine/cnc/setups/types';
 import type { FixtureEnvelope } from '@/engine/cnc/setup';
 import type { ObstacleBox } from '@/engine/cnc/setup';
-import { cuttingDiameter, flatEndMill, type Tool } from '@/engine/cnc/tool';
+import { cuttingDiameter, flatEndMill, type Tool, isCuttingRecord } from '@/engine/cnc/tool';
 import { coneHeight, isVShape, vCone, type VCone } from '@/engine/cnc/vProfile';
 import { vCarvePassPitch } from '@/engine/cnc/vCarveGeometry';
 import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
@@ -769,7 +769,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const pinnedChamferKey = input.cutters.pinned?.['chamfer'];
   const chosenKey = input.chosenTool === undefined ? null : cutterKeyOf(input.chosenTool);
   const unfeedableStatements: PlanFindingStatement[] = [];
+  // #1063 — A PROBE IS NOT A CUTTER. Instrument records (typeText 'Probe' / shape 'unknown') leave
+  // the candidate set BEFORE feeds are asked — a probe would otherwise be reported as "no cutting
+  // parameters", which is true but the wrong statement — and one aggregate line names them.
+  const instruments = input.cutters.house.filter((tool) => !isCuttingRecord(tool));
   const candidateHouse = input.cutters.house.filter((tool) => {
+    if (!isCuttingRecord(tool)) return false;
     if (chosenKey !== null && cutterKeyOf(tool) === chosenKey) return true;
     if (pinnedChamferKey !== undefined && cutterKeyOf(tool) === pinnedChamferKey) return true;
     try {
@@ -1947,8 +1952,20 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   }
   // #1044/#1047 — the omitted candidates are stated on the plan, one typed info statement each
   // (the panel's finding route) with the same text on the notes (the dump's prose).
-  if (unfeedableStatements.length > 0 && perSetup.length > 0) {
+  if (perSetup.length > 0) {
     const last = perSetup[perSetup.length - 1]!;
+    // #1063 — the instruments first: ONE line for every probe-style record the shop holds, named,
+    // never a "no feeds" line each. (A probe is not a cutter; there is nothing to feed.)
+    if (instruments.length > 0) {
+      const names = instruments.map((tool) => tool.name || tool.id || 'an instrument record');
+      const list = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} and ${names.at(-1)!}`;
+      const text =
+        names.length === 1
+          ? `1 inventory record is an instrument, not a cutter (${list}), and was not considered`
+          : `${names.length} inventory records are instruments, not cutters (${list}), and were not considered`;
+      last.statements.push({ severity: 'info', code: 'goal-cutter-instrument', text });
+      last.notes.push(text);
+    }
     for (const statement of unfeedableStatements) {
       last.statements.push(statement);
       last.notes.push(statement.text);

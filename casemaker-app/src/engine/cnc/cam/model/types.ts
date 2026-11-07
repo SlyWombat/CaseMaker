@@ -83,6 +83,9 @@ export type PlanFindingCode =
   // starting table can feed it for this material, so it leaves the candidate set instead of
   // refusing the plan (info, one per cutter, named with the material).
   | 'goal-cutter-unfeedable'
+  // #1063 — instrument records (probes) leave the candidate set before feeds are asked: they are
+  // not cutters at all, and one aggregate line names them instead of a "no feeds" line each.
+  | 'goal-cutter-instrument'
   // #1037 — no cutter in the set reaches a curved region's floor: the finish does not post the
   // region, and the sentence names the region, the floor and the finisher's usable length.
   | 'goal-finish-unreachable'
