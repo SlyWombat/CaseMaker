@@ -794,6 +794,13 @@ export interface EngraveGoalChamfer {
   widthMm: Mm;
   /** The V-bit's library key; absent while none is chosen (no chamfer program is posted). */
   toolKey?: string;
+  /**
+   * #1064 — WHICH EDGES THIS STATEMENT NAMES. `silhouette` (the default, and what an absent field
+   * means) is the part's own outline: the gate's allowance is a rim chamfer's. `all` adds every
+   * interior design wall — a job that really means the pocket lips too says so. The JOB says
+   * which; the CAM never decides, and the gate excuses only what the job named.
+   */
+  edges?: 'silhouette' | 'all';
 }
 
 /** #898 — where the part's underside comes from. See {@link EngraveTargetObject.underside}. */

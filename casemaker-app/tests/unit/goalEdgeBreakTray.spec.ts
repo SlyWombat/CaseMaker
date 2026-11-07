@@ -140,8 +140,11 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
   // The 90° chamfer's header: diameter 3.175 (the cone's outer end), tip 0.1, angle 90° → reach
   // 1.5875 mm, leg (1.5875 − 0.05)/tan45° = 1.5375 mm (the checker's own leg reads 1.538). The
   // widest cutting tool is the ⌀6 flat/ball → the wall shadow is 3 mm.
+  // #1064 — E's page rule seeded its band from every design wall; that is the `edges: 'all'`
+  // reading, and it is what these numbers are parity with. The default (silhouette) is checked
+  // by the next case.
   const r = checkGoalCutInto(goal, top, {
-    edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4) },
+    edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4), edges: 'all' },
     wallShadowRadiusMm: 3,
   });
 
@@ -158,6 +161,16 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
   expect(r.shadowNotScoredFraction).toBe(0);
   // The rule's point: the vendor's own program passes line 2 once its rim break is allowed.
   expect(r.ok).toBe(true);
+
+  // #1064 — THE DEFAULT BAND NAMES THE PART'S SILHOUETTE ONLY. This NC's V strokes are on
+  // interior pocket lips: with no `edges: 'all'` in the job, they are cut-into, not edge break.
+  const interior = checkGoalCutInto(goal, top, {
+    edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4) },
+    wallShadowRadiusMm: 3,
+  });
+  expect(interior.edgeBreakFraction).toBe(0);
+  expect(interior.adjudicatedFraction).toBeGreaterThan(0);
+  expect(interior.adjudicatedFraction).toBeLessThanOrEqual(interior.cutIntoFraction);
 
   // #964 — THE PAGE'S `who` RULE. E's 3.66 % excuses a cell only where the DEEPEST stamp in it
   // is the V bit. The vendor NC runs four cutters (⌀6 flat, ⌀3.175 flat, ⌀6 ball, ⌀3.175 90°
@@ -194,8 +207,9 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
     if (i < 0 || j < 0 || i >= meta.nx || j >= meta.ny) return null;
     return (stamp as NonNullable<typeof stamp>).field[j * meta.nx + i]!;
   };
+  // #1064 — E's/page numbers are the all-edges reading (see the first case).
   const gated = checkGoalCutInto(goal, stampField, {
-    edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4), toolNumber: 4 },
+    edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4), toolNumber: 4, edges: 'all' },
     whoAt,
     clAt,
     wallShadowRadiusMm: 3,

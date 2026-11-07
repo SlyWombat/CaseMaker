@@ -759,6 +759,12 @@ export interface GoalCutIntoOptions {
      * synthetic fixtures' pre-`who` behaviour).
      */
     toolNumber?: number;
+    /**
+     * #1064 — WHICH EDGES THE BAND SEEDS FROM. `silhouette` (default, and what an absent field
+     * means) is the part's own outline; `all` adds every interior design wall (the pre-#1064
+     * reading, which let a stated rim chamfer excuse a V floor pocket's lip at an interior wall).
+     */
+    edges?: 'silhouette' | 'all';
   };
   /**
    * #964 — the per-cell identity of the lowest stamp: the tool number that left it (0 = none),
@@ -1154,8 +1160,12 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   // of the outer rim is excused like any interior edge's — without it, cells just inside the rim
   // were adjudicated even though the nearest wall was 0.10 mm away, inside a 1.5875 mm reach. The
   // WALL SHADOW still seeds from `wall` alone (a different question, measured separately).
+  // #1064 — THE BAND SEEDS ONLY FROM THE EDGES THE JOB NAMED: the part's silhouette by default,
+  // every interior design wall only when the statement says `all`. A rim chamfer no longer excuses
+  // a V floor pocket's lip at an interior wall without the job having said so.
+  const bandEdges = opts.edgeBreak?.edges ?? 'silhouette';
   const bandSeed = new Uint8Array(cells);
-  for (let k = 0; k < cells; k++) if (wall[k] === 1 || border[k] === 1) bandSeed[k] = 1;
+  for (let k = 0; k < cells; k++) if (border[k] === 1 || (bandEdges === 'all' && wall[k] === 1)) bandSeed[k] = 1;
   const shadowRadius = opts.wallShadowRadiusMm;
   const shadow =
     shadowRadius !== undefined && shadowRadius > 0

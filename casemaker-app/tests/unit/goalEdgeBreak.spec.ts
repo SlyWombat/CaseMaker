@@ -62,12 +62,30 @@ function swept(goalField: GoalHeightfield, cut: (x: number, y: number) => number
 const STEP = goal((x) => (x < 5 ? -1 : -3));
 
 const EDGE: GoalCutIntoOptions = { edgeBreak: { reachMm: 1.5, legMm: 1.5 } };
+// #1064 — the same allowance with the job naming EVERY design wall, interior ones included.
+const EDGE_ALL: GoalCutIntoOptions = { edgeBreak: { reachMm: 1.5, legMm: 1.5, edges: 'all' } };
 
 describe('#955/V2-2 the goal check edge-break allowance', () => {
-  it('a V cut within reach and leg of an edge is edge break, not cut-into', () => {
-    // A 0.5 mm gouge in a 1 mm band around the step: within the 1.5 mm reach, shallower than 1.5.
-    const top = swept(STEP, (x) => (Math.abs(x - 5) <= 1 ? 0.5 : null));
+  // #1064 — RED at ee4ec1f75: the band seeds from EVERY design wall, so a stated rim chamfer
+  // excused a V's lip at an interior wall. The default is the part's silhouette; an interior wall
+  // is an edge-break site only when the job says `edges: 'all'`.
+  it('RED: an interior wall is not a named edge — the same gouge is cut-into under the default', () => {
+    // Confined in y: the plate's outline (the silhouette, still a named edge) is > 2 mm away, so
+    // only the interior wall could have excused these cells.
+    const top = swept(STEP, (x, y) => (Math.abs(x - 5) <= 1 && y > 2 && y < 8 ? 0.5 : null));
     const r = checkGoalCutInto(STEP, top, EDGE);
+    expect(r.cutIntoFraction).toBeGreaterThan(0);
+    expect(r.edgeBreakFraction).toBe(0); // the interior wall excuses nothing by default
+    expect(r.adjudicatedFraction).toBeGreaterThan(0);
+    expect(r.maxCutIntoMm).toBeCloseTo(0.5, 6);
+    expect(r.adjudicatedMaxMm).toBeCloseTo(0.5, 6);
+    expect(r.ok).toBe(false);
+  });
+
+  it('a job that names every edge excuses the interior-wall lip again', () => {
+    // A 0.5 mm gouge in a 1 mm band around the step: within the 1.5 mm reach, shallower than 1.5.
+    const top = swept(STEP, (x, y) => (Math.abs(x - 5) <= 1 && y > 2 && y < 8 ? 0.5 : null));
+    const r = checkGoalCutInto(STEP, top, EDGE_ALL);
     expect(r.cutIntoFraction).toBeGreaterThan(0); // the raw figure still says it was cut
     expect(r.edgeBreakFraction).toBeGreaterThan(0);
     expect(r.adjudicatedFraction).toBe(0);
@@ -76,6 +94,16 @@ describe('#955/V2-2 the goal check edge-break allowance', () => {
     expect(r.adjudicatedMaxMm).toBe(0);
     expect(r.ok).toBe(true);
     expect(r.sentence).toContain('edge break');
+  });
+
+  it('the part’s own silhouette is still a named edge, with no `all` needed', () => {
+    // A flat plate: its only edge is the part outline. A gouge 0.5 mm inside it is within the
+    // 1.5 mm reach and shallower than the leg — the rim chamfer's own break, excused by default.
+    const flat = goal(() => -1);
+    const top = swept(flat, (x, y) => (x <= 0.5 && y > 2 && y < 8 ? 0.5 : null));
+    const r = checkGoalCutInto(flat, top, EDGE);
+    expect(r.edgeBreakFraction).toBeGreaterThan(0);
+    expect(r.adjudicatedFraction).toBe(0);
   });
 
   it('a V gouge away from every edge stays cut-into', () => {
@@ -101,7 +129,9 @@ describe('#955/V2-2 the goal check edge-break allowance', () => {
 
   it('#964 — the who rule: only a cell the V bit cut deepest is edge break', () => {
     const top = swept(STEP, (x) => (Math.abs(x - 5) <= 1 ? 0.5 : null));
-    const V: GoalCutIntoOptions = { edgeBreak: { reachMm: 1.5, legMm: 1.5, toolNumber: 7 } };
+    // #1064 — this case is about IDENTITY, not edge scope: the job names every edge (`all`) so
+    // the interior wall is a legal site and the `who` rule is what is being read.
+    const V: GoalCutIntoOptions = { edgeBreak: { reachMm: 1.5, legMm: 1.5, toolNumber: 7, edges: 'all' } };
     // The stamp says the V bit is the deepest cutter everywhere: the shallow band is excused.
     const vCell = checkGoalCutInto(STEP, top, { ...V, whoAt: () => 7 });
     expect(vCell.edgeBreakFraction).toBeGreaterThan(0);
@@ -201,7 +231,8 @@ describe('#955/V2-2 the gate parameters come from the job, not the CAM', () => {
     const toolFor = (key: string) => (key === 'c90' ? chamfer : key === 'ball' ? ball : null);
     const opts = goalEdgeBreakOptions(job({ widthMm: 1, toolKey: 'c90' }), toolFor, ['c90', 'ball']);
     // #964 — the V's own tool number rides with the allowance (the `who` rule).
-    expect(opts.edgeBreak).toEqual({ reachMm: 1.5875, legMm: 1.5375, toolNumber: chamfer.number });
+    // #1064 — the job's edge scope rides with the allowance; absent means silhouette.
+    expect(opts.edgeBreak).toEqual({ reachMm: 1.5875, legMm: 1.5375, toolNumber: chamfer.number, edges: 'silhouette' });
     expect(opts.wallShadowRadiusMm).toBe(3); // the ball, not the 1.5875 chamfer
   });
 
