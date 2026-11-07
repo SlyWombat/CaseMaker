@@ -3833,7 +3833,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       entry.maxSlope = Math.max(entry.maxSlope, roughRegion.slopeDeg[1]);
       finishKinds.set(finishKind, entry);
     }
-    attempt('finish', finishCutter, ref, () => finish({
+    if (attempt('finish', finishCutter, ref, () => finish({
       cutter: finishCutter,
       region: roughRegion,
       regionRef: roughRef,
@@ -3859,7 +3859,22 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       spindleRpm: paramsFor(finishCutter).rpm,
       air: opts.air,
       rapid: opts.rapid,
-    }));
+    }))) {
+      // #1037 — THE FINISH'S OWN REACH LINE. The rough has one (#1019): a region deeper than the
+      // stated flat's usable length is the ball's rough and the substitution is stated. The finish
+      // had none: it followed the region's CL to its floor however deep that is, so a 12 mm-flute
+      // flat posted moves 30 mm down and the holder entered the part silently. Not a refusal (the
+      // plan still posts — #992's rule), one warning per region with the depths on the line.
+      const usable = finishCutter.shoulderLength ?? finishCutter.fluteLength;
+      const floorMm = Number((-base.zBottom).toFixed(1));
+      if (usable !== null && floorMm - usable > 1e-6) {
+        const cutterName = finishCutter.name || finishCutter.shape;
+        const text =
+          `"${region.id}": the finish follows the region to ${floorMm} mm below the stock top and the ${cutterName} states a ${usable} mm usable length — the ${Number((floorMm - usable).toFixed(1))} mm above the flute is the holder's; use a longer-flute cutter, or let a ball finish it`;
+        notes.push(text);
+        statements.push({ severity: 'warning', code: 'goal-finish-overreach', count: 1, ids: [region.id], text });
+      }
+    }
 
     let restBallCl: ReturnType<typeof clSurface> | undefined;
     // 3b. THE REST BALL (#965, the review session's ruling item 3.1): where the ball's OWN CL still

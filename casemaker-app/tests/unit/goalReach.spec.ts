@@ -229,6 +229,20 @@ describe('#785 — Generate', () => {
     expect(out.nc).not.toBeNull();
     // The old whole-goal verdict is gone from this path.
     expect(out.findings.some((f) => f.code === 'goal-reach-short')).toBe(false);
+    // #1037 (6b's round three) — WHAT THE PLAN DOES WITH THE 18 mm IT CANNOT REACH. The rough is
+    // refused per region (`goal-rough-unreachable`, above), but the FINISH still follows the
+    // region's CL to its floor: the NC cuts to −29.995 with a 12 mm-flute flat, so the holder is
+    // in the part. The pipeline states that per region too.
+    let deepest = 0;
+    for (const m of (out.nc ?? '').matchAll(/Z(-?\d+(?:\.\d+)?)/g)) deepest = Math.min(deepest, Number(m[1]));
+    expect(deepest, 'the finish really posts below the flute').toBeLessThan(-12);
+    const over = out.findings.find((f) => f.code === 'goal-finish-overreach');
+    expect(over?.severity).toBe('warning');
+    expect(over?.message).toContain('"curved-0"');
+    expect(over?.message).toContain('30 mm below the stock top');
+    expect(over?.message).toContain('12 mm usable length');
+    expect(over?.message).toContain('18 mm above the flute');
+    expect(over?.message).toContain('longer-flute cutter');
     // This fixture is an open relief: its contour is synthetic, so no freeing cut is demanded and
     // `goal-not-freed` is rightly absent. The warning's own numbers (a real profile's floor and
     // the longest stated flute) are pinned on the M1 tray in `trayReachGate1037.spec.ts`.
