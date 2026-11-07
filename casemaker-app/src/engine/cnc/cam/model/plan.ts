@@ -1852,7 +1852,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       }
     }
     if (input.fixture.envelope !== null) {
-      const text = `the ${input.fixture.mount} fixture envelope is not yet wired into the region obstacles — this plan carries none; the posted program is still checked against the same envelope by the sweep`;
+      const text = `the ${input.fixture.mount} fixture envelope is not one of this plan's own region obstacles — the posted program is checked against it by the verifier and the sweep`;
       notes.push(text);
       statements.push({ severity: 'warning', code: 'goal-fixture-unmodelled', count: 1, text });
     }

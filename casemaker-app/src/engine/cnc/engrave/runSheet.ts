@@ -340,6 +340,12 @@ export interface RunSheetProgram {
    * Absent/null on every 2.5D program.
    */
   surfaceCheck?: { readonly kind: 'surface' } | null;
+  /**
+   * #1070 — the worker's own verifier report, carried here so the dry-run step can tell a program
+   * that PASSED (and simply has no frame — the model path writes none) from one that failed. The
+   * sheet never printed the report itself; only this fact is read.
+   */
+  verify?: unknown | null;
 }
 
 /**
@@ -3445,6 +3451,17 @@ function programRunSteps(program: RunSheetProgram, number: number): RunSheetStep
               'check the work origin, so look at the origin and the clamps before you start.',
             bold: true,
           }
+        : program.verify != null
+        ? {
+            // #1070 — a program that VERIFIED but has no frame and no frame error: the model (goal)
+            // path writes no air-trace frames for its programs. Saying "did not pass verification"
+            // here was false and told the operator not to run a good file.
+            text:
+              `There is no frame file for program ${number}: the goal (model) path writes no ` +
+              `air-trace frame. ${program.nc} itself passed verification, so it can still be cut — ` +
+              'look at the origin and the clamps before you start.',
+            bold: true,
+          }
         : {
             text:
               `There is no frame file for program ${number}: it did not pass verification, so the trace ` +
@@ -4410,19 +4427,30 @@ export function buildRunSheet(
           ...(bracket === null || bracket.clamps.length === 0
             ? []
             : bracket.clamps.map(
-                (p): RunSheetStep => ({
+                (p, i): RunSheetStep => {
+                  // #1070 — ONE PLACE, ONE SENTENCE. The verifier's warning words this clamp with
+                  // `clampLabel` (near edge, from the corner); the sheet used to name the centre
+                  // from the other end, so one clamp read as two. When the run's fixture envelope
+                  // is in hand its box carries that same label — quote it; the centre-from-the-left
+                  // wording is the fallback for a caller that has no envelope.
+                  const label = options.fixture?.boxes.find((box) => box.id === `clamp-${i + 1}`)?.label ?? null;
                   // #1068 review (6b) — a TOP clamp presses from above and is checked at the top
                   // clamp's height; a SIDE clamp pushes from outside the edge with its top below
                   // the stock's, so the step says that instead. Absent kind = top.
-                  text:
-                    p.kind === 'side'
-                      ? `Fit the side clamp on the ${p.edge} edge, its top below the stock top, its centre ${fmtNum(p.at)} mm from ${
-                          p.edge === 'back' ? 'the left end' : 'the front end'
-                        } of the edge — the job was planned with a clamp there.`
-                      : `Fit the clamp on the ${p.edge} edge, its centre ${fmtNum(p.at)} mm from ${
-                          p.edge === 'back' ? 'the left end' : 'the front end'
-                        } of the edge — the job was planned with a clamp there, checked at the top clamp's height.`,
-                }),
+                  const text =
+                    label !== null
+                      ? p.kind === 'side'
+                        ? `Fit the clamp: ${label} — its top below the stock top; the job was planned with a clamp there.`
+                        : `Fit the clamp: ${label} — the job was planned with a clamp there, checked at the top clamp's height.`
+                      : p.kind === 'side'
+                        ? `Fit the side clamp on the ${p.edge} edge, its top below the stock top, its centre ${fmtNum(p.at)} mm from ${
+                            p.edge === 'back' ? 'the left end' : 'the front end'
+                          } of the edge — the job was planned with a clamp there.`
+                        : `Fit the clamp on the ${p.edge} edge, its centre ${fmtNum(p.at)} mm from ${
+                            p.edge === 'back' ? 'the left end' : 'the front end'
+                          } of the edge — the job was planned with a clamp there, checked at the top clamp's height.`;
+                  return { text };
+                },
               )),
           { text: 'Tighten the clamps. Check the blank does not rock and its corner stays seated.' },
         ] as RunSheetStep[])
@@ -5086,12 +5114,24 @@ export function buildRunSheet(
     if (code === 'vise-default' && viseWarningAt < 0) viseWarningAt = warnings.length;
     warnings.push({ text: message });
   };
+  /** #1070 — attributed per-program warnings, keyed by code + the message WITHOUT the program
+   * prefix, so nine programs saying the same thing print ONE line naming the programs. */
+  const folded = new Map<string, { code: string; message: string; original: string; programs: number[] }>();
+  const foldAttributed = (code: string, message: string): boolean => {
+    const m = /^program (\d+)(?: \([^)]*\))?: ([\s\S]*)$/.exec(message);
+    if (m === null) return false;
+    const key = `${code}|${m[2]}`;
+    const entry = folded.get(key);
+    if (entry === undefined) folded.set(key, { code, message: m[2]!, original: message, programs: [Number(m[1])] });
+    else if (!entry.programs.includes(Number(m[1]))) entry.programs.push(Number(m[1]));
+    return true;
+  };
   for (const f of [...generated.findings, ...(options.extraFindings ?? [])]) {
     // #737 — the neck step in its program's Cut section already carries this warning at the point
     // of use, with the air-cut instruction. Carrying it here too printed the same warning twice on
     // one sheet; the neck step is the one copy the operator reads beside the cut it describes.
     if (f.code === 'neck-jaw-clearance') continue;
-    if (f.severity === 'warning') pushWarning(f.code, f.message);
+    if (f.severity === 'warning' && !foldAttributed(f.code, f.message)) pushWarning(f.code, f.message);
   }
   if (generated.verify) {
     for (const f of generated.verify.findings) {
@@ -5111,7 +5151,16 @@ export function buildRunSheet(
     for (const d of diagnostics) {
       // #490 — a panel crash is an `error`, but section 8 is where the sheet says what the app
       // could not do, so it is carried beside the warnings rather than dropped.
-      if (d.severity === 'warning' || d.code === PANEL_RENDER_ERROR_CODE) pushWarning(d.code, d.message);
+      if (d.severity === 'warning' && !foldAttributed(d.code, d.message)) pushWarning(d.code, d.message);
+      else if (d.code === PANEL_RENDER_ERROR_CODE) pushWarning(d.code, d.message);
+    }
+    // #1070 — the folded lines: one per distinct message that MORE THAN ONE program raised, naming
+    // the programs. A message only one program raised keeps its own label (AND its cutter) — the
+    // fold exists to stop nine programs saying the same thing, never to strip a single program's
+    // identity.
+    for (const f of folded.values()) {
+      if (f.programs.length === 1) pushWarning(f.code, f.original);
+      else pushWarning(f.code, `programs ${f.programs.sort((a, b) => a - b).join(', ')}: ${f.message}`);
     }
     // #243 — the coverage sentence, from the same builder the Simulate panel prints: which
     // geometry the sweep was given and which it never saw, and whether this run swept at all.
