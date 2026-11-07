@@ -113,12 +113,15 @@ test('a goal STL from the picker generates, and the UI states its own check and 
   await expect(page.getByTestId('engrave-run-toolpath')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
   await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
 
-  // #948 — THE GOAL CHECK'S OWN VERDICT. The chamfered block's top surface finishes at 81.07 %
-  // coverage against the shop's 95 % pass line (zero cut-into), so the oracle row CROSSES. That is
-  // the truthful end state: the program runs, and the check says what the top setup leaves.
+  // #948 (6b's ruling, D's combineOracles fix) — THE GOAL CHECK'S VERDICT IS THE END STATE: the
+  // coverage verdict is the LAST program's (the cut-into verdict stays every program's), because a
+  // rough stage's own coverage describes the surface it intends to leave, not the design's end
+  // state. This job's finish reproduces the design, so the oracle row MATCHES — the 81.07 % this
+  // test pinned was the rough stage's coverage ANDed into the verdict (the deferred number), not a
+  // shortfall of the finished part.
   const oracleRow = page.getByTestId('engrave-run-oracle');
-  await expect(oracleRow).toHaveAttribute('data-state', 'cross', { timeout: 180_000 });
-  await expect(oracleRow).toContainText('does not match the design');
+  await expect(oracleRow).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
+  await expect(oracleRow).toContainText('matches the design');
   await expect(oracleRow).not.toContainText('0.0000');
 
   // The goal row's own facts, after a Generate: the passes' layers and the sampled grid. The
@@ -133,30 +136,23 @@ test('a goal STL from the picker generates, and the UI states its own check and 
   await expect(report).toContainText('roughing layer');
   await expect(report).toContainText('mm step-down');
   await expect(report).toContainText('mm step-over');
-  await expect(report).toContainText('Sampled on a');
-  await expect(report).toContainText('mm grid');
+  // #1035 item 12 — THE FACTS COME FROM THE MODEL PLAN NOW (#1007's carrier): its own resolution
+  // sentence names the cutter-location grid the plan was measured on ("The model plan's
+  // cutter-location grid, 0.005–1.5875 mm spacing"). "Sampled on a …mm grid" is the heightfield
+  // sampler's sentence, and it belongs to the non-model run's branch — the string no longer exists
+  // in the app. The roughing-layer/step-down/step-over lines above are unchanged.
+  await expect(report).toContainText('Last generated:');
+  await expect(report).toContainText('cutter-location grid');
 
   // #535/#948 — THE GOAL PROGRAM IS A RELEASE SOURCE, AND ITS CHECK DECIDES THE PRESS. Cut freezes
-  // it (the package is current), but the failed goal check keeps the run from being offered: step 1
-  // states the failure in D's words — the measured coverage against the shop's pass line — and no
-  // start press is drawn. The check's own findings stay readable in the details fold.
+  // it (the package is current); the goal card reads the END state the ruling names — a match, the
+  // finish's 100 % top-surface coverage against the 95 % pass line — and the press is offered.
   await page.getByTestId('cnc-mode-cut').click();
   await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
   await expect(page.getByTestId('engrave-package')).toHaveAttribute('data-state', 'current');
-  await expect(page.getByTestId('engrave-cut-verdict')).toHaveAttribute('data-state', 'failed');
-  await expect(page.getByTestId('engrave-cut-verdict-line')).toHaveText('The simulation did not pass.');
-  await expect(page.getByTestId('engrave-cut-goal')).toHaveAttribute('data-state', 'coverage');
-  await expect(page.getByTestId('engrave-cut-goal')).toHaveText(
-    'Covers 81.07 % of the design’s top surface (the pass line is 95 %)',
-  );
+  await expect(page.getByTestId('engrave-cut-goal')).toHaveAttribute('data-state', 'match');
+  await expect(page.getByTestId('engrave-cut-goal')).toHaveText('Matches the design (goal)');
   await expect(page.getByTestId('engrave-cut-goal-coverage')).toHaveText(
-    'Top-surface coverage: 81.07 % (the pass line is 95 %)',
+    'Top-surface coverage: 100 % (the pass line is 95 %)',
   );
-  // The failed verdict is the press's blocker: there is no start-cut button to arm.
-  await expect(page.getByTestId('engrave-cut-go')).toHaveCount(0);
-  // The check's own findings — why the top setup leaves the surface short — stay in the fold.
-  const details = page.getByTestId('engrave-cut-details');
-  if (!(await details.evaluate((el) => (el as HTMLDetailsElement).open))) await details.locator('summary').click();
-  await expect(details).toContainText(/The finish leaves [\d.]+ mm³/);
-  await expect(details).toContainText(/The top setup reproduces \d+ % of the goal's surface/);
 });

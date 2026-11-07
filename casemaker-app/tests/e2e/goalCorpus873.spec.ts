@@ -137,6 +137,20 @@ test.describe('the goal corpus, desktop', () => {
     await expect(page.getByTestId('engrave-cut-goal-coverage')).toHaveText(
       /^Top-surface coverage: [\d.]+ % \(the pass line is 95 %\)$/,
     );
+
+    // #1035 item 12 (C's and D's re-checks, measured) — A GOAL RUN'S CUT PAGE RENDERS NO
+    // ONE-SCREEN CONFIRM, so no press — on either verdict: the confirm needs a machine AND a
+    // single-program run (#656), and a goal job posts rough + finish. This pin is the UI SHAPE
+    // only (the failed-gate press itself is pinned in tests/unit/engraveCutConfirm.spec.tsx); the
+    // failed gate's real statements here are the verdict and goal rows asserted above. The goal
+    // check's own finding still reaches the Cut details fold — that is the second half of this
+    // block, and it is what the re-pinned surfaceGoal can no longer read.
+    await expect(page.getByTestId('engrave-cut-go')).toHaveCount(0);
+    const cutDetails = page.getByTestId('engrave-cut-details');
+    if (!(await cutDetails.evaluate((el) => (el as HTMLDetailsElement).open))) {
+      await cutDetails.locator('summary').click();
+    }
+    await expect(cutDetails).toContainText(/The top setup reproduces \d+ % of the goal's surface/);
   });
 
   test('the relief: picked in the wizard, generated, and no flip is proposed', async ({ page }) => {
