@@ -13,12 +13,14 @@
 //   2. B7 + W11 — a through cut taped on the wasteboard GENERATES (the bed facts reach the panel
 //      and the worker); on a bare bed with no board, the blocker says the design's sentence.
 //
-// #934 HIDES THESE ENTRIES (the code stays in src; the UI entry and the planner acceptance are
+// #934 hid these entries (the code stayed in src, the UI entry and the planner acceptance were
 // removed): `engrave-setup-mount-bed-tape`, `engrave-setup-mount-bed-bracket`,
 // `engrave-setups-use-typed-seat`, `engrave-setup-seat-<n>`, `engrave-registration-g32`,
 // `engrave-release-facing-note`, and the disc re-seat block (`engrave-centre-find` and its
-// siblings). Every walk below drives one of them, so the file is skipped for the #934 batch and
-// restored with the branch.
+// siblings). EVERY walk in this file drives a BED MOUNT, and that hide was lifted by the
+// maintainer's rule ("we test using the program", the dated run of 2026-11-08 — C3), so the file
+// runs again. The other #934 entries above stay hidden behind their own issues; a walk that ever
+// reaches one must be skipped with that reason, not this one.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -169,7 +171,7 @@ async function runPhase(page: Page): Promise<{ phase: string; stage: string | nu
   });
 }
 
-test.skip('#725 B4/W1 — a clamp in the Tray’s path is named at Generate, and its Fix opens Holding', async ({ cm, page }) => {
+test('#725 B4/W1 — a clamp in the Tray’s path is named at Generate, and its Fix opens Holding', async ({ cm, page }) => {
   await fakeHouse(page, locationView({ anchor: true }));
   await cm.ready();
   await typePlate(page, [100, 60, 6]);
@@ -202,7 +204,10 @@ test.skip('#725 B4/W1 — a clamp in the Tray’s path is named at Generate, and
     'runs under the clamp on the back edge, 15 mm in from the left-hand corner',
     { timeout: 240_000 },
   );
-  await expect(page.getByTestId('engrave-run-errors')).toContainText('(+1 more error)');
+  // The bracket mount carries TWO back clamps, and the Tray's far edge runs under both noses: the
+  // run states two clamp-in-path errors plus the verifier's, so the count is three (the walk was
+  // written for one clamp, when the bracket's second clamp was not yet planned). #1070 C3.
+  await expect(page.getByTestId('engrave-run-errors')).toContainText('(+2 more errors)');
   await expect(page.getByTestId('engrave-run-blocker-fix')).toBeVisible();
 
   await page.getByTestId('engrave-run-blocker-fix').click();
@@ -211,7 +216,7 @@ test.skip('#725 B4/W1 — a clamp in the Tray’s path is named at Generate, and
   await expect(page.getByTestId('engrave-setup-holding-picture-clamp').first()).toBeVisible();
 });
 
-test.skip('#725 B7/W11 — a through cut taped on the wasteboard generates; a bare bed says the design’s sentence', async ({ cm, page }) => {
+test('#725 B7/W11 — a through cut taped on the wasteboard generates; a bare bed says the design’s sentence', async ({ cm, page }) => {
   await fakeHouse(page, locationView({ anchor: false }));
   await cm.ready();
   await typePlate(page, [80, 60, 2]);
@@ -250,7 +255,7 @@ test.skip('#725 B7/W11 — a through cut taped on the wasteboard generates; a ba
   await expect(page.getByTestId('engrave-run-errors')).toHaveCount(0);
 });
 
-test.skip('#725 B6 — hovering a mount row previews it without moving the wizard’s controls', async ({ cm, page }) => {
+test('#725 B6 — hovering a mount row previews it without moving the wizard’s controls', async ({ cm, page }) => {
   await fakeHouse(page, locationView({ anchor: true }));
   await cm.ready();
   await typePlate(page, [100, 60, 6]);
@@ -271,7 +276,7 @@ test.skip('#725 B6 — hovering a mount row previews it without moving the wizar
   expect(Math.abs(after!.x - before!.x)).toBeLessThan(1);
 });
 
-test.skip('#725 W11 — a bare bed with no board under it says what to put there', async ({ cm, page }) => {
+test('#725 W11 — a bare bed with no board under it says what to put there', async ({ cm, page }) => {
   await fakeHouse(page, locationView({ anchor: false, bare: true }));
   await cm.ready();
   await typePlate(page, [80, 60, 2]);
