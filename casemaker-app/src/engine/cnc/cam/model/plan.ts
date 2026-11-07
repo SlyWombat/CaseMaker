@@ -537,8 +537,21 @@ function resolvedCutParams(input: ModelPlanInput, tool: Tool): { params: CutPara
     .table.filter((row) => row.material === input.stock.material && (row.edge ?? 'flat') === 'flat')
     .sort((a, b) => b.maxDiameter - a.maxDiameter);
   const largest = rows[0];
-  if (largest !== undefined) {
-    const proxy = flatEndMill(largest.maxDiameter, { number: tool.number, id: tool.id, name: tool.name });
+  // #1062 — THE SUBSTITUTION ANSWERS A DIAMETER, NOT A SHAPE. Only a refusal about the ROW — the
+  // table does not cover this diameter (`no-feeds`) — may be stood in by the largest covered row's
+  // flat. A cutter the resolver refuses outright (a drill or a thread mill cannot be traced at all,
+  // `cause: 'cutter'`) or a row it refuses on its own numbers (`cause: 'values'`) is not made
+  // feedable by a proxy, and keeps its own stated refusal.
+  if (largest !== undefined && resolved.cause === 'no-feeds') {
+    // #1062 — A PROXY HAS GEOMETRY AND NO IDENTITY. Catalogue coverage is judged on the owned
+    // record; this stand-in exists only to reach the largest row the starting table covers, and it
+    // must not present itself as the cutter. Carrying the tool's id here made #732's geometry
+    // check compare the stand-in's diameter with the catalogue's own statement of the id — a
+    // mismatch by construction — so the substitution was refused and the candidate left the set
+    // with #1044's line (the M1 tray's ⌀0.6 corn, whose hardwood feeds exist only through this
+    // row). `feedsToolForSurface`'s flat proxy keeps the id because its diameter IS the cutter's
+    // own cutting diameter, so the catalogue's check agrees with the record there.
+    const proxy = flatEndMill(largest.maxDiameter, { number: tool.number, name: tool.name });
     const viaProxy = feedsFor(catalogue, input.stock.material, proxy, Z1);
     if (viaProxy.ok) {
       return {

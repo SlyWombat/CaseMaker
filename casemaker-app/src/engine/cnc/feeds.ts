@@ -1562,6 +1562,12 @@ export function feedsToolForSurface(tool: Tool): Tool {
   // #910 — THE PROXY KEEPS THE CUTTER'S IDENTITY. Makera's rows are keyed by its id (`vendorId`);
   // a proxy without one could never read the ball's own row, so a ⌀4 or ⌀6 ball — whose diameter
   // the starting table does not reach — was refused on every material the table covers.
+  // #1062 — THE RULE, AND WHY THIS SITE IS ITS EXCEPTION. Catalogue coverage is judged on the
+  // owned record; a proxy has geometry and no identity. This proxy may keep the id because its
+  // diameter IS the cutter's own cutting diameter, so #732's geometry check reads the same cutter
+  // and agrees. A proxy at ANOTHER diameter — `cam/model/plan.ts`'s #669 body stand-in at the
+  // table's largest covered row — must carry none, or it is judged as a cutter the catalogue says
+  // is a different size and the substitution is refused.
   return tool.shape === 'ball' || tool.shape === 'bull'
     ? flatEndMill(cuttingDiameter(tool) ?? 0, { name: `${tool.name} (feeds via flat proxy)`, id: tool.id, number: tool.number })
     : tool;
