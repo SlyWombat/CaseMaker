@@ -2064,11 +2064,16 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   const tGrid = performance.now();
 
   const count = timeline.checkpoints.length;
-  // #895 — the window restarts at every checkpoint, so this is a stall bound, not a deadline.
+  // #895/#1048 — the caller's watch window, used ONLY to STATE a slow checkpoint (see below); it
+  // never refuses anything from inside the worker.
   const stallMs = opts?.stallMs;
+  // #1048 (the ruling) — no worker-side refusal: the window below could only ever condemn a
+  // checkpoint that had ALREADY finished slowly (the check runs after it returns), never catch a
+  // hang; the client's silence clock is the one terminator. A slow checkpoint is a recorded FACT,
+  // stated as one info note at the end; the sweep runs on and its verdict is unchanged.
   let lastProgressAt = performance.now();
+  const slowCheckpoints: { checkpoint: number; ms: number }[] = [];
   // `>=` so a 0 ms window (a spec's sentinel; the shop rule's floor is 5 s) refuses at once.
-  const overStall = (): boolean => stallMs !== undefined && performance.now() - lastProgressAt >= stallMs;
   const anchorEvery = Math.max(COLUMN_MIN_ANCHOR_EVERY, Math.ceil(count / COLUMN_MAX_ANCHORS));
   // anchors[k] is a full grid copy after checkpoint k, for k ≡ anchorEvery−1 (mod anchorEvery),
   // plus the last checkpoint. Snapshotting is a `slice`, the only allocation in the hot loop.
@@ -2160,13 +2165,18 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
       }
     }
     if (k % anchorEvery === anchorEvery - 1 || k === count - 1) anchors.set(k, grid.h.slice());
+    const tookMs = performance.now() - lastProgressAt;
     lastProgressAt = performance.now();
     if (opts?.onProgress) opts.onProgress(k + 1, count);
-    if (overStall()) {
-      stats.ms.total = performance.now() - t0;
-      stats.checkpointsSwept = k + 1;
-      return { ok: false, diagnostics: [{ severity: 'error', code: 'sweep-stalled', message: `the column sweep stalled at checkpoint ${k + 1} of ${count}: no progress for ${Math.round((stallMs ?? 0) / 1000)} s. This is a fault, not a slow program` }] };
-    }
+    if (stallMs !== undefined && tookMs >= stallMs) slowCheckpoints.push({ checkpoint: k + 1, ms: tookMs });
+  }
+  if (slowCheckpoints.length > 0 && stallMs !== undefined) {
+    const worst = slowCheckpoints.reduce((a, b) => (b.ms > a.ms ? b : a));
+    diagnostics.push({
+      severity: 'info',
+      code: 'checkpoint-slow',
+      message: `checkpoint ${worst.checkpoint} of ${count} took ${(worst.ms / 1000).toFixed(1)} s — past the ${Math.round(stallMs / 1000)} s watch window (${slowCheckpoints.length} slow checkpoint${slowCheckpoints.length === 1 ? '' : 's'}); the sweep ran on and its verdict is unchanged`,
+    });
   }
   const tSweep = performance.now();
   if (clampedMoves > 0) diagnostics.push({ severity: 'warning', code: 'axis-clamped', message: `${clampedMoves} cutting move(s) took the cutter tip past the rotary axis by less than the tool radius ${cutter.radius.toFixed(4)} mm and were clamped to Z 0 (deepest Z ${clampedWorst.toFixed(3)}): the cut did not come out as deep as the program asked and its far-side hollow is not modelled` });

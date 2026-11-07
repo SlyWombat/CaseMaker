@@ -829,13 +829,26 @@ describe('#194 step 7: a retract provably in air needs no boolean', () => {
 });
 
 describe('#194: the time budget and progress are part of the contract', () => {
-  it('#895 stallMs: 0 is refused with sweep-stalled, and a later sweep on the same wasm heap still works', () => {
-    const { out } = sweep(THREE, tool, setup(), { stallMs: 0 });
-    expect(out.ok).toBe(false);
-    if (out.ok) return;
-    expect(out.diagnostics[0]?.code).toBe('sweep-stalled');
-    expect(out.diagnostics[0]?.message).toMatch(/checkpoint 1 of 3/);
-    // The refusal deleted every handle it had created; if it had not, this would throw or hang.
+  it('#1048 — a window every checkpoint overruns is a NOTE, not a refusal: the sweep completes with its verdict', () => {
+    // The old contract refused with `sweep-stalled`; the ruling deleted that worker-side refusal
+    // (it could only condemn a checkpoint that had already finished), and the fact is one info
+    // note naming the worst slow checkpoint. A 0 ms window makes every checkpoint slow.
+    const base = sweep(THREE);
+    const { out, timeline } = sweep(THREE, tool, setup(), { stallMs: 0 });
+    expect(out.ok, 'the sweep still runs to its verdict').toBe(true);
+    if (!out.ok) return;
+    // NOTHING about the verdict changes: same checkpoints, same removal as the window-free sweep.
+    if (!base.out.ok) throw new Error(JSON.stringify(base.out.diagnostics));
+    expect(out.value.perCheckpoint.length).toBe(timeline.checkpoints.length);
+    expect(out.value.perCheckpoint.length).toBe(base.out.value.perCheckpoint.length);
+    expect(out.value.stats.removedVolume).toBeCloseTo(base.out.value.stats.removedVolume, 6);
+    const note = out.value.diagnostics.find((d) => d.code === 'checkpoint-slow');
+    expect(note, 'one note states the fact').toBeDefined();
+    expect(note?.severity).toBe('info');
+    expect(note?.message).toMatch(new RegExp(`checkpoint \\d+ of ${timeline.checkpoints.length} took`));
+    expect(note?.message).toMatch(/verdict is unchanged/);
+    expect(out.value.diagnostics.some((d) => d.code === 'sweep-stalled'), 'the worker never says sweep-stalled again').toBe(false);
+    // A later sweep on the same wasm heap still works.
     const after = sweep(THREE);
     expect(after.out.ok).toBe(true);
   });

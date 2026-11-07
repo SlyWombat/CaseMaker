@@ -181,11 +181,20 @@ describe('#776 — the lobed-shaft relief', () => {
     expect(lastDone).toBe(out.count);
   });
 
-  it('a budget it cannot meet refuses by name rather than running on', { timeout: 120_000 }, async () => {
+  it('#1048 — a window every checkpoint overruns is a NOTE, not a refusal: the column sweep completes', { timeout: 120_000 }, async () => {
+    // Same ruling on the column engine: no worker-side refusal; the worst slow checkpoint is one
+    // info note and the sweep's own verdict stands.
     const { timeline, tool, setup } = await reliefTimeline(true);
+    const base = swept(columnSweep(timeline, tool, setup, {}));
     const out = columnSweep(timeline, tool, setup, { stallMs: 0 });
-    expect(out.ok).toBe(false);
-    if (out.ok) return;
-    expect(out.diagnostics.some((d) => d.code === 'sweep-stalled')).toBe(true);
+    expect(out.ok, 'the sweep still runs to its verdict').toBe(true);
+    if (!out.ok) return;
+    expect(out.count).toBe(base.count);
+    expect(out.stats.removedVolume).toBeCloseTo(base.stats.removedVolume, 6);
+    const note = out.diagnostics.find((d) => d.code === 'checkpoint-slow');
+    expect(note, 'one note states the fact').toBeDefined();
+    expect(note?.severity).toBe('info');
+    expect(note?.message).toMatch(new RegExp(`checkpoint \\d+ of ${out.count} took`));
+    expect(out.diagnostics.some((d) => d.code === 'sweep-stalled'), 'the worker never says sweep-stalled again').toBe(false);
   });
 });
