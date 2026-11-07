@@ -700,7 +700,15 @@ export function finish(opts: FinishOpOptions): OpOutcome {
           const segment = admitted.slice(segStart, i);
           if (segment.length >= 2) {
             const k = levelIndexOf(admitted[segStart]!.z);
-            rasterRuns[k]!.push(segment);
+            // #1052 — THE LEVEL'S OWN FLOOR IS STILL A FLOOR: the band a cell joins is the level
+            // whose pass first reached its CL, and its cut is `max(CL, level floor)` exactly as the
+            // per-level clamp stated it. A CL BELOW the region's zBottom (an open mesh's repair
+            // skirt under the sheet) is held at zBottom, never followed under it.
+            const floorZ = levels[k]!;
+            const clamped = segment.some((p) => p.z < floorZ)
+              ? segment.map((p) => (p.z < floorZ ? { ...p, z: floorZ } : p))
+              : segment;
+            rasterRuns[k]!.push(clamped);
             rasterCleared[k]!.push([[x, Math.min(rawY0, rawY1)], [x, Math.max(rawY0, rawY1)]]);
           }
           segStart = i;
