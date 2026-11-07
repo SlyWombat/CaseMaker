@@ -407,3 +407,78 @@ describe('#741 review — the CAM’s own guard throws', () => {
     );
   });
 });
+
+// #1067 — THE V'S BEVEL IS STATED, ONCE PER (DEPTH, CUTTER). A V-carved item is exact AT the
+// colour plane and its flank widens the opening above the plane by `material × tan(half)` per
+// side (0.8 mm × tan 45° = 0.80 mm on the bench chamfer). The operator used to read only "cut at
+// the colour plane" — the design correct and the walls unstated. One info line per distinct
+// (depth, cutter) pair names the items it covers; six labels at one depth are one line, not six.
+describe('#1067 the V bevel is stated once per (depth, cutter)', () => {
+  function item(id: string, depth: number, cx: number): EngraveRectShape {
+    return {
+      id,
+      name: id,
+      kind: 'rect',
+      position: { x: cx, y: 15 },
+      rotation: 0,
+      depth,
+      enabled: true,
+      width: 8,
+      height: 6,
+      cornerRadius: 0,
+    };
+  }
+  function bevelJob(items: EngraveRectShape[], tool: Tool): EngraveJob {
+    const base = defaultEngraveJob();
+    return {
+      ...base,
+      stock: { ...base.stock, length: 40, width: 30 },
+      labels: [],
+      traces: [],
+      shapes: items,
+      toolKey: 'bench-cutter',
+      tool,
+      cutOverride: { stepDown: 0.2, stepOver: 1.42875 },
+    };
+  }
+  const bevels = (gen: Awaited<ReturnType<typeof generate>>) => gen.findings.filter((f) => f.code === 'vcarve-bevel');
+
+  it('one 0.8 mm item on the 90° chamfer: the flank widens it by 0.80 mm per side, exact at the plane', async () => {
+    const gen = await generate(bevelJob([item('label-a', 0.8, 12)], CHAMFER_90), CHAMFER_90);
+    const lines = bevels(gen);
+    expect(lines, JSON.stringify(gen.findings.map((f) => `${f.severity}:${f.code}`))).toHaveLength(1);
+    expect(lines[0]!.severity).toBe('info');
+    expect(lines[0]!.message).toContain('widens the opening by 0.80 mm per side');
+    expect(lines[0]!.message).toContain('the design is exact at the plane');
+    expect(lines[0]!.message).toContain('depth 0.8 mm × tan 45°');
+    expect(lines[0]!.message).toContain('a flat cutter would cut the walls square');
+    expect(gen.ok).toBe(true);
+  });
+
+  it('two items at the same depth are ONE line naming both', async () => {
+    const gen = await generate(bevelJob([item('label-a', 0.8, 12), item('label-b', 0.8, 28)], CHAMFER_90), CHAMFER_90);
+    const lines = bevels(gen);
+    expect(lines).toHaveLength(1);
+    // The plan names the item by its display name (the shape and size behind the id), so the line
+    // is matched on the count and the number rather than the raw id.
+    expect(lines[0]!.message).toContain('label-a');
+    expect(lines[0]!.message).toContain('(and 1 more at this depth)');
+    expect(lines[0]!.message).toContain('by 0.80 mm per side');
+  });
+
+  it('a different depth gets its own line, with its own bevel', async () => {
+    const gen = await generate(bevelJob([item('label-a', 0.8, 12), item('label-b', 0.4, 28)], CHAMFER_90), CHAMFER_90);
+    const lines = bevels(gen).map((l) => l.message);
+    expect(lines).toHaveLength(2);
+    const shallow = lines.find((m) => m.includes('label-b'))!;
+    const deep = lines.find((m) => m.includes('label-a'))!;
+    expect(shallow).toContain('by 0.40 mm per side');
+    expect(shallow).toContain('depth 0.4 mm × tan 45°');
+    expect(deep).toContain('by 0.80 mm per side');
+  });
+
+  it('a flat cutter states no bevel — there is no flank to widen anything', async () => {
+    const gen = await generate(shallowJob(0.8, FLAT_1MM), FLAT_1MM);
+    expect(bevels(gen)).toEqual([]);
+  });
+});

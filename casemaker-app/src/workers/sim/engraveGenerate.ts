@@ -66,7 +66,7 @@ import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { GOAL_FIT_TOLERANCE_MM } from '@/engine/cnc/engrave/goalPlacement';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import { itemLeftUncutMessage, vCone, vDepthLimit, vDepthRefusal, vDepthShortfall, vFluteLength, vTraceDepthRefusal, vTraceDepthWarning, type VCone } from '@/engine/cnc/vProfile';
+import { itemLeftUncutMessage, vCone, vDepthLimit, vDepthRefusal, vDepthShortfall, vFluteLength, vTraceDepthRefusal, vTraceDepthWarning, type VCone, vBevelSentence } from '@/engine/cnc/vProfile';
 import { minimumXyStepMm } from '@/engine/cnc/machine';
 import {
   coreOffsetRadius,
@@ -1435,6 +1435,13 @@ function vCarveDepthFindings(plan: PartPlan, tool: Tool, floors: ReadonlyMap<str
   const limit = vDepthLimit(tool);
   if (limit === null) return [];
   const findings: JobFinding[] = [];
+  // #1067 — THE V'S BEVEL, STATED ONCE PER (DEPTH, CUTTER). A V-carved item is exact AT the colour
+  // plane and its flank widens the opening above it by `material x tan(half)` per side; the
+  // operator reads the design as correct and never what the walls cost. One line per distinct
+  // (depth, cutter) pair, naming the items it covers — six labels at one depth are one line, not
+  // six. Inform-only: the CAM, the preview and every refusal are untouched.
+  const cone = vCone(tool);
+  const bevelGroups = new Map<string, { materialMm: number; names: string[]; ids: string[] }>();
   for (const item of plan.engraves) {
     if (item.prism !== undefined) continue;
     // #856 — THE MATERIAL ABOVE THE FLOOR, not the depth below the top. A V-carve inside a pocket
@@ -1457,7 +1464,19 @@ function vCarveDepthFindings(plan: PartPlan, tool: Tool, floors: ReadonlyMap<str
       });
       continue;
     }
-    if (!(material > limit.limitMm + 1e-9)) continue;
+    if (!(material > limit.limitMm + 1e-9)) {
+      // The item fits the cone — the V cuts it, and the bevel is the V's own geometry (#1067).
+      if (cone !== null && cone.tanHalf > 0) {
+        const key = `${material.toFixed(6)}\u0000${tool.id ?? ''}\u0000${String(tool.number ?? '')}`;
+        const group = bevelGroups.get(key);
+        if (group === undefined) bevelGroups.set(key, { materialMm: material, names: [item.name], ids: [item.id] });
+        else {
+          group.names.push(item.name);
+          group.ids.push(item.id);
+        }
+      }
+      continue;
+    }
     // #786 slice 3 — CUT TO THE CONE, INFORMED. Past the cone's height the flank has ended; the
     // cut stops at the height the cone reaches and the sentence states the shortfall. A STATED
     // FLUTE shorter than the cone still refuses: past it there is no cutting edge at all, and the
@@ -1474,6 +1493,16 @@ function vCarveDepthFindings(plan: PartPlan, tool: Tool, floors: ReadonlyMap<str
         ? vDepthRefusal(item.name, material, tool, limit, floor)
         : vDepthShortfall(item.name, material, tool, limit, floor),
     });
+  }
+  if (cone !== null) {
+    for (const group of bevelGroups.values()) {
+      findings.push({
+        severity: 'info',
+        code: 'vcarve-bevel',
+        labelId: group.ids[0]!,
+        message: vBevelSentence(group.names[0]!, group.names.length - 1, group.materialMm * cone.tanHalf, group.materialMm, cone.halfAngleDeg),
+      });
+    }
   }
   for (const trace of plan.traces) {
     let deepest = trace.depth;

@@ -339,6 +339,29 @@ function coneWords(tool: Tool): { angle: string; body: string | null } {
  * trace is still planned; this sentence names the cone height so the operator can see what the
  * top of the groove will be doing (and decide whether to lower it or choose a taller cone).
  */
+/**
+ * #1067 — WHAT THE V'S FLANK COSTS, in outcome terms. A V-carved item is exact AT the colour
+ * plane and its flank widens the opening above the plane by `material x tan(half)` per side; the
+ * operator reads the design as correct and never what the walls cost. One sentence per distinct
+ * (depth, cutter) pair — `moreAtDepth` counts the other items that share it, so six labels at one
+ * depth read "and 5 more at this depth", never six lines.
+ */
+export function vBevelSentence(
+  itemName: string,
+  moreAtDepth: number,
+  bevelMm: number,
+  materialMm: number,
+  halfAngleDeg: number,
+): string {
+  const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
+  const who = moreAtDepth > 0 ? `“${itemName}” (and ${moreAtDepth} more at this depth)` : `“${itemName}”`;
+  return (
+    `${who}: the V's flank widens the opening by ${bevelMm.toFixed(2)} mm per side above the colour plane — ` +
+    `the design is exact at the plane (depth ${mm(materialMm)} mm × tan ${mm(halfAngleDeg)}°); ` +
+    `a flat cutter would cut the walls square.`
+  );
+}
+
 export function vTraceDepthWarning(itemName: string, depthMm: number, tool: Tool, limit: VDepthLimit): string {
   const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
   const { angle, body } = coneWords(tool);
