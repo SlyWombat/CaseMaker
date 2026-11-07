@@ -458,6 +458,13 @@ export interface SimLoadOpts {
    * diagnostics.
    */
   rampThresholdMm?: number | null;
+  /**
+   * #1040 — THIS LOAD BELONGS TO THE RUN ALREADY IN FLIGHT, even though it starts from the blank.
+   * `sweepPrograms`' from-blank retry (an engine that cannot take the previous program's removal)
+   * sets it; a genuinely new run — the Simulate panel's own load, or a first program — leaves it
+   * off, so the run-wide goal fold starts clean there and only there.
+   */
+  continueRun?: boolean;
 }
 
 /**
@@ -935,7 +942,19 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     // for it (`sweptFieldExact`). A load that carries material from an earlier program is a later
     // program of the same run and keeps the field; a load with no seed at all starts clean, so a
     // new run (or the Simulate panel's own load) cannot inherit the last run's cuts.
-    if (!hasPrior && opts?.carried == null && (opts?.priorFields?.length ?? 0) === 0 && (opts?.priorExactRemoval?.length ?? 0) === 0) {
+    // #1040 — UNLESS THE CALLER SAYS IT IS STILL THE SAME RUN. The walk retries a program from the
+    // blank when its engine cannot start from the previous program's material (`programSweep.ts`'s
+    // PRIOR_REFUSAL_CODES retry); that retry is a limitation of the sweep, not a new run, and it
+    // used to reset the fold here — so the run's final goal report covered only the programs since
+    // the restart (the tape card read 51.64 % standing where the same NCs stamp 0.59 %).
+    // `continueRun` is the walk's own statement that this load belongs to the run in flight.
+    if (
+      opts?.continueRun !== true &&
+      !hasPrior &&
+      opts?.carried == null &&
+      (opts?.priorFields?.length ?? 0) === 0 &&
+      (opts?.priorExactRemoval?.length ?? 0) === 0
+    ) {
       exactRun = null;
     }
     let machine: Mill | undefined;

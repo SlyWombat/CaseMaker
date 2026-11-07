@@ -995,6 +995,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
               // flipped setup's later programs seed from their own predecessor.
               setupFields,
               priorExactRemoval ?? null,
+              // #1040 — the walk's from-blank retry is still THIS run: keep the run-wide goal fold.
+              fromBlank === true,
             );
             if (result !== null) {
               // Keep the frame bookkeeping aligned with the walk's own list: only a load that

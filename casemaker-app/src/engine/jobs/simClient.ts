@@ -295,6 +295,8 @@ export interface SimLoadOpts {
   priorFields?: readonly CarriedField[] | null;
   /** #817 — which of `priorRemoval` an exact program made; a column seed cannot use them. */
   priorExactRemoval?: readonly NodeMeshOutput[] | null;
+  /** #1040 — this load continues the run already in flight (a from-blank retry inside it). */
+  continueRun?: boolean;
 }
 
 /** The two stages of a load (#224). */
@@ -390,6 +392,10 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
             carried: opts?.carried ?? undefined,
             priorFields: opts?.priorFields ?? undefined,
             priorExactRemoval: opts?.priorExactRemoval ?? undefined,
+            // #1040 — the walk's from-blank retry continues the run's goal fold. This payload is a
+            // WHITELIST, not a spread of `opts`: a field left out here never reaches the session,
+            // and the app's run would reset the fold exactly as the command line no longer does.
+            continueRun: opts?.continueRun ?? undefined,
           },
           onProgress === undefined ? undefined : Comlink.proxy(onProgress),
         )
