@@ -2322,6 +2322,13 @@ export interface EngraveJob {
    */
   facing?: EngraveFacing;
   /**
+   * #1060 — THE SPINDLE BLOWER WITH THE VACUUM, this job's own choice. When the vacuum goes on for
+   * a run, Makera's Auto Blow (`M331.1`) goes on with it and off (`M332.1`) before the vacuum does;
+   * this field overrides the shop's `run.blowWithVacuum` (on by default). Absent follows the shop.
+   * It never reaches the file: the RUN switches the mode, exactly as it does the antistatic.
+   */
+  blowWithVacuum?: boolean;
+  /**
    * Where the asserted values came from (#246/#254). Optional: a job that has never had a setup
    * applied carries no key, so a pre-#246 document round-trips byte-for-byte.
    */

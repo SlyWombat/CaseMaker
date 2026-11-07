@@ -36,7 +36,7 @@ import {
   type ConsoleTiming,
   type MachineConsoleTarget,
 } from './machineConsole';
-import { ANTISTATIC_OFF, VACUUM_OFF } from './machineVacuum';
+import { ANTISTATIC_OFF, VACUUM_OFF, BLOW_OFF } from './machineVacuum';
 import { readDefault, type ShopDefaults } from './defaultsClient';
 
 export const ABORT_LINE = 'abort';
@@ -115,7 +115,7 @@ function safeStop(s: StopSettings): StopSettings {
  *   - `timeout` / `error` / `unavailable` — the socket failed or this build cannot reach a machine.
  */
 export type StopOutcome =
-  | { kind: 'stopped'; vacuumOff: boolean; antistaticOff?: boolean; status: string }
+  | { kind: 'stopped'; vacuumOff: boolean; antistaticOff?: boolean; blowOff?: boolean; status: string }
   | { kind: 'draining'; detail: string }
   | { kind: 'not-running'; status: string }
   | { kind: 'alarm'; detail: string; status: string }
@@ -160,6 +160,8 @@ export async function stopOnSession(
   sleep: (ms: number) => Promise<void> = realSleep,
   settings: StopSettings = STOP_FALLBACK,
   antistatic: boolean = false,
+  /** #1060 — the spindle blower this run switched on goes off before the vacuum does. */
+  blow: boolean = false,
 ): Promise<StopOutcome> {
   const { idlePolls, idlePollMs, abortReplyMs, statusTiming } = safeStop(settings);
   const ask = await session.send('?', statusTiming);
@@ -199,12 +201,16 @@ export async function stopOnSession(
     if (poll.kind === 'sent') {
       const state = controllerState(poll.text);
       if (state !== null && state.toLowerCase() === 'idle' && !programRunning(poll.text)) {
-        const off = await session.send(VACUUM_OFF);
+        // #1060 — the blower goes off BEFORE the vacuum does (the operator's ordering), and the
+        // antistatic as it always has.
+        const blowOff = blow ? await session.send(BLOW_OFF) : null;
         const antiOff = antistatic ? await session.send(ANTISTATIC_OFF) : null;
+        const off = await session.send(VACUUM_OFF);
         return {
           kind: 'stopped',
           vacuumOff: off.kind === 'sent',
           ...(antiOff === null ? {} : { antistaticOff: antiOff.kind === 'sent' }),
+          ...(blowOff === null ? {} : { blowOff: blowOff.kind === 'sent' }),
           status: poll.text,
         };
       }

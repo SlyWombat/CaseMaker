@@ -457,11 +457,18 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
 
 /// Yes/no starting values, seeded `chosen`-in-spirit with a note (#414: the maintainer's "option to
 /// ignore scrap"). `(key, value, note)`.
-pub const FLAG_SEEDS: &[(&str, bool, &str)] = &[(
-    "offcut.offer",
-    true,
-    "chosen, not measured: offer an offcut back to the shelf at the end of a run that split the stock (false: never ask)",
-)];
+pub const FLAG_SEEDS: &[(&str, bool, &str)] = &[
+    (
+        "offcut.offer",
+        true,
+        "chosen, not measured: offer an offcut back to the shelf at the end of a run that split the stock (false: never ask)",
+    ),
+    (
+        "run.blowWithVacuum",
+        true,
+        "chosen, not measured: the spindle blower (Makera's Auto Blow, M331.1/M332.1) follows the vacuum on every run (false: the vacuum switches alone)",
+    ),
+];
 
 /// The flags this build knows: a key here must hold true or false.
 fn is_flag(key: &str) -> bool {

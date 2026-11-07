@@ -379,6 +379,45 @@ describe('#419 Q-E — the program owns the vacuum, or the runner brackets it', 
   });
 });
 
+// #1060 — the spindle blower (Makera's Auto Blow, M331.1/M332.1) follows the vacuum: on when the
+// run switches the vacuum on, off BEFORE the vacuum's own off, at the finish and at an abort. The
+// program never carries the sub-codes, so this run is the only thing that switches it.
+describe('#1060 — the spindle blower follows the vacuum', () => {
+  it('on with the vacuum at the start, off before it at the finish', async () => {
+    const f = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
+    const o = await runProgram('job.nc', { ...deps(f), blow: true });
+    expect(o).toMatchObject({ kind: 'finished', vacuumOff: true, blowOff: true });
+    expect(f.lines()).toEqual(['?', 'M331', 'M331.1', 'play /sd/gcodes/job.nc', '?', '?', 'M332.1', 'M332', '$H']);
+  });
+
+  it('the option off sends neither word; an air:false job (span none) neither', async () => {
+    const off = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
+    await runProgram('job.nc', deps(off));
+    expect(off.lines().filter((l) => l === 'M331.1' || l === 'M332.1')).toEqual([]);
+    const airless = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
+    await runProgram('job.nc', { ...deps(airless), blow: true, vacuumSpan: 'none' });
+    expect(airless.lines().filter((l) => l === 'M331.1' || l === 'M332.1' || l === 'M331' || l === 'M332')).toEqual([]);
+  });
+
+  it('a program-owned vacuum still gets the run’s blower bracket, and the blow goes off before its own M332 is never sent', async () => {
+    const f = fake(['<Run|P:10,20,5>', '<Idle|P:9,100,4>']);
+    const o = await runProgram('job.nc', { ...deps(f), programOwnsVacuum: true, blow: true });
+    expect(o).toMatchObject({ kind: 'finished', blowOff: true });
+    // The program owns M331/M332; the blower is the run's, bracketing it.
+    expect(f.lines().filter((l) => l === 'M331' || l === 'M332')).toEqual([]);
+    expect(f.lines()).toEqual(['?', 'M331.1', 'play /sd/gcodes/job.nc', '?', '?', 'M332.1', '$H']);
+  });
+
+  it('a refused play turns the blower off before the vacuum it switched on', async () => {
+    const f = fake([], { play: 'error: file not found' });
+    const o = await runProgram('job.nc', { ...deps(f), blow: true });
+    expect(o.kind).toBe('refused');
+    const lines = f.lines();
+    expect(lines).toContain('M332.1');
+    expect(lines.indexOf('M332.1')).toBeLessThan(lines.indexOf('M332'));
+  });
+});
+
 // #564 — the antistatic (static-removal) device. The run switches it on for plastic jobs only,
 // beside the vacuum, and off at the run's end — the finish AND the abort — exactly once. The
 // program never carries `M331.4`/`M332.4`, so this run is the only thing that switches it.

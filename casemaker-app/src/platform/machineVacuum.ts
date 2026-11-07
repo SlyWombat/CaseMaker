@@ -63,6 +63,15 @@ export const VACUUM_OFF = 'M332';
 export const ANTISTATIC_ON = 'M331.4';
 export const ANTISTATIC_OFF = 'M332.4';
 
+/**
+ * #1060 — the `M331.1`/`M332.1` sub-codes: "turning auto blowing mode on/off", Makera's Auto Blow
+ * (the spindle's air blow; the Z1 quick start's "Enable Auto Blow"; Studio's MDI log sends
+ * `M331.1`). A separable mode in the vacuum's family, switched by the RUN when the shop's
+ * `run.blowWithVacuum` (or the job) asks for it — never written in a file, like the antistatic.
+ */
+export const BLOW_ON = 'M331.1';
+export const BLOW_OFF = 'M332.1';
+
 /** The console line for one state, in one place: the switch and any test agree on the code. */
 export function vacuumLine(on: boolean): string {
   return on ? VACUUM_ON : VACUUM_OFF;
@@ -109,6 +118,14 @@ export async function toggleVacuum(target: MachineConsoleTarget, on: boolean): P
  */
 export async function toggleAntistatic(target: MachineConsoleTarget, on: boolean): Promise<VacuumOutcome> {
   return guardedMode(target, on ? ANTISTATIC_ON : ANTISTATIC_OFF, 'antistatic device');
+}
+
+/**
+ * #1060 — the spindle blower (Auto Blow), the same guarded seam and the same rule: `M331.1` on,
+ * `M332.1` off, only on an explicit Idle with no program running.
+ */
+export async function toggleBlow(target: MachineConsoleTarget, on: boolean): Promise<VacuumOutcome> {
+  return guardedMode(target, on ? BLOW_ON : BLOW_OFF, 'air blow');
 }
 
 /** The guard + send every mode command shares. `what` names the mode in the refusal sentences. */
@@ -180,7 +197,7 @@ async function guardedMode(target: MachineConsoleTarget, code: string, what: str
     const result = await session.send(code);
     switch (result.kind) {
       case 'sent':
-        return { kind: 'toggled', on: code === VACUUM_ON || code === ANTISTATIC_ON, status: ask.text };
+        return { kind: 'toggled', on: code === VACUUM_ON || code === ANTISTATIC_ON || code === BLOW_ON, status: ask.text };
       case 'refused':
         return { kind: 'refused', detail: result.detail };
       case 'timeout':

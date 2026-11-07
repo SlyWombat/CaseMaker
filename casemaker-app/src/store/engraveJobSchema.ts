@@ -2552,6 +2552,12 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   // #432's facing choice. OPTIONAL, not defaulted, for the byte-for-byte reason every list below
   // gives: an absent key means the job does not face, which is what every stored document says.
   facing: facingSchema.optional().describe('The facing pass to run first; omit to skip facing.'),
+  // #1060 — the spindle blower (Auto Blow, M331.1/M332.1) follows this job's vacuum unless the
+  // shop's run.blowWithVacuum says otherwise; the run switches it, never the file.
+  blowWithVacuum: z
+    .boolean()
+    .optional()
+    .describe('Switch the spindle air blow on with the vacuum for this job; omit to follow the shop setting (on by default).'),
   // #214's shape pockets. Defaulted to empty so a v2 job written before shapes existed (and
   // the v1 transform below) still loads as a text-only job.
   shapes: z.array(shapeSchema).default([]).describe('Rectangular, round, slot and polygon pockets.'),

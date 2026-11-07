@@ -567,6 +567,9 @@ export const MEASURED_ONLY: Readonly<Record<string, Omit<KnownDefault, 'fallback
 export const KNOWN_FLAGS: Readonly<Record<string, { label: string; fallback: boolean }>> = {
   // The maintainer, 2026-10-16: "plus option to ignore scrap" — false turns offcut offers off.
   'offcut.offer': { label: 'offer offcuts at the end of a run', fallback: true },
+  // #1060 — the maintainer, 2026-11-07: the spindle blower (Makera's Auto Blow, `M331.1`/`M332.1`)
+  // follows the vacuum unless the shop turns the coupling off. On by default.
+  'run.blowWithVacuum': { label: 'spindle air blow with the vacuum (chosen)', fallback: true },
 };
 
 /** A flag's value and where it came from — `fallback` with no location or no readable entry. */

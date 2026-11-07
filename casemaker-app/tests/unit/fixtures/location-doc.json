@@ -1207,6 +1207,13 @@
       "unit": null,
       "note": "chosen, not measured: offer an offcut back to the shelf at the end of a run that split the stock (false: never ask)"
     },
+    "run.blowWithVacuum": {
+      "value": true,
+      "source": "seeded",
+      "setAt": null,
+      "unit": null,
+      "note": "chosen, not measured: the spindle blower (Makera's Auto Blow, M331.1/M332.1) follows the vacuum on every run (false: the vacuum switches alone)"
+    },
     "registration.tipRadiusUncertaintyMm": {
       "value": 0.25,
       "source": "measured",
