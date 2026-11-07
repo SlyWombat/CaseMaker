@@ -48,7 +48,6 @@ import { holderOf, type Mill } from '@/engine/cnc/machine';
 import type { NodeMeshOutput } from './meshOutput';
 import { applyCarriedField, applyPriorTops, fieldOfGrid, type CarriedField } from './carriedField';
 import { AIR_PROGRESS_EVERY, type SweepDiagnostic, type SweepStats } from './sweep';
-import { COLUMN_AIR_CHECK_CAP } from './sweep';
 import {
   MAX_GOUGES,
   holderGate,
@@ -2203,17 +2202,15 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   const gouges: { step: number; line: number }[] = [];
   {
     let checked = 0;
-    // #858/#1048 — the phase is bounded by a COUNT, never by a wall clock: the old deadline could
-    // only stop the loop after it had already run long (it never caught a hang), and on a slow
-    // machine it turned a healthy phase into a false `air-moves-unchecked` error. The cap is
-    // HIGH on this engine for #858's reason: a check here is a walk over the grid cells under the
-    // move — the tray's ⌀1 program (15,204 air moves) checks in full in ~41 ms — so the cap only
-    // bounds a pathological file, and the e2e's figure job (5,039 below the stock top) fits with
-    // room. Moves past it are marked unchecked, stated by the #925 error in its own words.
-    let unchecked = 0;
+    // #858/#1048 — NO CAP AND NO WALL CLOCK ON THIS ENGINE. A check here is a walk over the grid
+    // cells under the move (15,204 air moves in ~41 ms on the tray), so every below-top move is
+    // checked: a count cap only moves the cliff, and the old wall-clock deadline could only stop
+    // the loop after it had run long — it never caught a hang, and on a slow machine it turned a
+    // healthy phase into a false `air-moves-unchecked` error. The exact engine keeps its own
+    // MAX_AIR_CHECKS, where each check is a Manifold boolean.
     let tested = 0;
     // #1048 — the air phase reports while it works, as its own phase.
-    const airTotal = Math.min(COLUMN_AIR_CHECK_CAP, timeline.airMoves.filter((mv) => Math.min(mv.from[2], mv.to[2]) <= grid.initial).length);
+    const airTotal = timeline.airMoves.filter((mv) => Math.min(mv.from[2], mv.to[2]) <= grid.initial).length;
     opts?.onPhase?.('air');
     for (const mv of timeline.airMoves) {
       checked++;
@@ -2239,12 +2236,8 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
       }
       const tip = Math.min(mv.from[2], mv.to[2]);
       if (tip > grid.initial) continue; // wholly above the stock
-      if (tested >= COLUMN_AIR_CHECK_CAP) {
-        unchecked++;
-        continue;
-      }
       tested++;
-      if (tested % AIR_PROGRESS_EVERY === 0) opts?.onProgress?.(tested, Math.min(airTotal, COLUMN_AIR_CHECK_CAP));
+      if (tested % AIR_PROGRESS_EVERY === 0) opts?.onProgress?.(tested, airTotal);
       const gouged = rotary
         ? (() => {
             const aEnd = timeline.stateAt(mv.step).a;
@@ -2255,11 +2248,6 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
       if (gouged) {
         if (gouges.length < MAX_GOUGES) gouges.push({ step: mv.step, line: mv.line });
       }
-    }
-    if (unchecked > 0) {
-      // #925 — an unchecked air move below the stock top is a gap in the gate, not a nicety: error,
-      // never downgraded, so it blocks Upload exactly like a proven gouge does.
-      diagnostics.push({ severity: 'error', code: 'air-moves-unchecked', message: `${unchecked} air move(s) below the stock top not checked: the simulation stopped making progress before them` });
     }
     stats.airMovesChecked = checked;
     if (gouges.length > 0) diagnostics.push({ severity: 'error', code: 'rapid-through-stock', message: `${gouges.length} rapid${gouges.length === 1 ? '' : 's'} pass through material still present at that point in the program (first at line ${gouges[0]?.line})` });

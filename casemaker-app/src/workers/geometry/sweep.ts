@@ -76,12 +76,6 @@ export const OVERSHOOT_MM = 0.01;
 export const SPINDLE_OFF_PROXIMITY_FALLBACK_MM = 1.0;
 /** Air moves checked individually; beyond this a job is summarised instead (each is a boolean). */
 export const MAX_AIR_CHECKS = 4000;
-/**
- * #858/#1048 — THE COLUMN ENGINE'S OWN CAP. Its air check is a walk over grid cells, not a
- * Manifold boolean (the tray's 15,204 moves check in ~41 ms), so a cap that binds on real jobs
- * buys nothing and marks healthy moves unchecked; this one only bounds a pathological file.
- */
-export const COLUMN_AIR_CHECK_CAP = 100_000;
 /** #1048 — how many tested air moves between progress ticks inside the rapid-move check. */
 export const AIR_PROGRESS_EVERY = 256;
 /** Gouge solids kept; beyond this a rapid is still reported, just not drawn (memory, and the transfer to the viewport). */
