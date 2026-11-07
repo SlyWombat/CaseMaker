@@ -239,10 +239,14 @@ describe('#910 — elephant- and panther-class hardwood goals propose a ⌀6 bal
     expect(firstKeys(job)).toContain(BALL_6x32.key);
     expect(firstKeys(job)).not.toContain(BALL_6x22.key);
     expect(plans.some((p) => p.cutters[0]!.key === BALL_6x32.key && p.goalRoughKey !== undefined)).toBe(true);
-    // The rule's own plan is a long ball that reaches (its finishing-budget check at the 0.1 mm
-    // grid may prefer the ⌀4 × 32); before #910 it had no ball at all.
+    // #1051 — THE RULE'S OWN PICK IS NOW THE LARGEST BALL THAT FITS THE FINISHING BUDGET, its
+    // reach no longer filtering it for a mesh goal (#1037's rule the engine already follows). At
+    // the 0.1 mm grid the ⌀6 and ⌀4 × 32 stencils exceed the budget, so the rule offers the
+    // ⌀3.175 × 22 the budget allows — a plan that posts; the old reach-first order preferred an
+    // over-budget ball the generator refuses. The SEARCH still builds the ⌀6 × 32 plan (asserted
+    // above), and the engine judges the finisher's reach per feature.
     const rule = planCutters(job, null, LIBRARY, CATALOGUE);
-    expect([BALL_6x32.key, BALL_4x32.key]).toContain(rule.cutters[0]?.key);
+    expect(rule.cutters[0]?.key).toBe(BALL_3x22.key);
     const feeds = feedsFor(CATALOGUE, 'hardwood', feedsToolForSurface(BALL_6x32.tool), jobMachine(job));
     expect(feeds.ok && feeds.catalogue?.cutterId).toBe('131032606032');
   });
