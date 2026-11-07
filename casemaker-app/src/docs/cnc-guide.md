@@ -1132,7 +1132,8 @@ the stock, the feeds and the steps to follow at the machine, derived from how th
 - **What you need** — the blank, the cutter, the probe and the cutter's side profile drawn from
  its own record, so the paper names the cutter it means.
 - **What each cutter reaches**, and, for a two-tool job, the rest pass.
-- **Mount the vise**, **load the blank**, and the **side view** of the sacrificial stack.
+- **The mount the job states** — mount the vise, fit the anchor bracket, or tape the blank
+ down — **load the blank**, and the **side view** of the sacrificial stack.
 - **Set the work origin with the probe**: the method the stock and mount call for, the edge
  touches in physical words, and the **surface touches** across the cut's extents. Z0 is
  measured, not a point: the sheet prints the band the readings must fit, the stop rule, and,

@@ -23,6 +23,7 @@
 
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { FixtureEnvelope, ObstacleBox } from '@/engine/cnc/setup';
+import type { BracketObstacle } from '@/types/engraveJob';
 import { readDefault, readMeasured, type DefaultSource, type ShopDefaults } from '@/platform/defaultsClient';
 
 export interface ClampSize {
@@ -475,6 +476,7 @@ export function bracketMount(
   defaults: ShopDefaults | null,
   underMm = 0,
   clamps?: readonly ClampPlacement[] | null,
+  voids?: readonly BracketObstacle[] | null,
 ): MountObstacles | null {
   if (mount !== 'bracket') return null;
   const b = bracketSettings(defaults);
@@ -485,12 +487,18 @@ export function bracketMount(
     ...bracketObstacles(stock, b.settings, underMm),
     ...clampObstacles(stock, placements, b.settings),
   ];
+  const envelope = mountEnvelope(obstacles, b, -stock.z - underMm);
+  // #1068 — THE JOB'S OWN BOXES: holes and fixed features the mount cannot describe. They join the
+  // SAME envelope the verifier and the sweep read (one statement, both readers), and they ride its
+  // stated uncertainty like every other box — the fit is the envelope's own margin, so a box the
+  // operator entered is checked at least as strictly as the bracket's.
+  const jobBoxes: ObstacleBox[] = (voids ?? []).map((v) => ({ id: v.id, label: v.label, min: [...v.min], max: [...v.max] }));
   return {
     obstacles,
     uncertainty: b.settings.fitMm,
     // The bracket stands on the bed the stock sits on (under the board when there is one), and its
     // top is `height` above that; the boxes run from the bed up to each obstacle's own top.
-    fixture: mountEnvelope(obstacles, b, -stock.z - underMm),
+    fixture: jobBoxes.length === 0 ? envelope : { ...envelope, boxes: [...envelope.boxes, ...jobBoxes] },
   };
 }
 

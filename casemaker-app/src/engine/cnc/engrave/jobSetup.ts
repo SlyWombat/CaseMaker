@@ -55,7 +55,15 @@ import { textureNumbers, textureStrokes } from './texture';
 import { fluteNumbers, fluteOperationName } from './flute';
 import { prismHeightRefusal, prismNumbers } from './prism';
 import { reliefNumbers } from './relief';
-import { bracketSettings, defaultClampPlacements, validateBracketMount, type ClampPlacement, type StockSize } from '@/engine/cnc/mounts/bracket';
+import {
+  bracketMount,
+  bracketSettings,
+  defaultClampPlacements,
+  validateBracketMount,
+  type ClampPlacement,
+  type MountObstacles,
+  type StockSize,
+} from '@/engine/cnc/mounts/bracket';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type {
@@ -1116,6 +1124,30 @@ function derivedMount(job: EngraveJob): MountSpec {
  */
 export function clampPlacementsFor(job: Pick<EngraveJob, 'workholding'>): ClampPlacement[] | null {
   return job.workholding.kind === 'bracket' ? job.workholding.bracket.clamps : null;
+}
+
+/**
+ * #1068 — THE MOUNT'S OBSTACLES, ONE DERIVATION BOTH DOORS CALL.
+ *
+ * The app's Generate (`engraveRunStore.ts`) and the command line (`scripts/lib/casemaker/
+ * engrave.ts`) must check a job against the same boxes: the bracket's two arms, the job's own
+ * clamps, the fit as their uncertainty, and the job's own obstacle boxes (#1068 — a hole in the
+ * blank the mount cannot know). Until this helper existed the CLI called `bracketMount` not at
+ * all, so a bracket job's program was swept with NO fixture and planned without the mount,
+ * while its run sheet said "Mount the vise".
+ *
+ * The sizes behind the arms and clamps live in the location's defaults, which is why the caller
+ * passes them in: the engine (and the worker) must not pull the defaults client in.
+ */
+export function jobMountObstacles(job: EngraveJob, defaults: ShopDefaults | null): MountObstacles | null {
+  return bracketMount(
+    { x: job.stock.length, y: job.stock.width, z: job.stock.thickness },
+    jobMount(job),
+    defaults,
+    job.sacrificial.under?.thickness ?? 0,
+    clampPlacementsFor(job),
+    job.workholding.kind === 'bracket' ? job.workholding.bracket.obstacles : null,
+  );
 }
 
 /**

@@ -8106,6 +8106,61 @@
                       "minItems": 1,
                       "type": "array"
                     },
+                    "obstacles": {
+                      "description": "Boxes the mount cannot know and the program must not sweep through — holes already in the blank, screwed down — in the work frame. Absent means none.",
+                      "items": {
+                        "properties": {
+                          "id": {
+                            "description": "A stable id for the box, so a finding can name it.",
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "label": {
+                            "description": "The box in landmark words — \"the counterbored hole, 8 mm in from the left edge\".",
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "max": {
+                            "description": "The box’s high corner in the work frame, mm.",
+                            "prefixItems": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ],
+                            "type": "array"
+                          },
+                          "min": {
+                            "description": "The box’s low corner in the work frame: X 0..length, Y 0..width, Z0 on the stock’s top, mm.",
+                            "prefixItems": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ],
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "min",
+                          "max"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
                     "source": {
                       "description": "Where these bracket numbers came from: a default, a saved setup, or a measurement.",
                       "enum": [

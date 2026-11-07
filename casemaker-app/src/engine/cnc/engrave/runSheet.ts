@@ -8,7 +8,7 @@ import {
   type RapidEstimate,
 } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
-import { itemLabel, jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { itemLabel, jobMount, jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
   idJawReach,
   jawGapFor,
@@ -1339,22 +1339,29 @@ function buildDiagram(job: EngraveJob, plan: PartPlan): RunSheetDiagram {
 
   return {
     stock: { length, width },
-    jaws: [
-      {
-        id: 'vise-fixed-jaw',
-        // The fixed jaw is on the LEFT (/Fabrication.md §7.3); its face is x = 0, shifted out
-        // for sacrificial material (#213 §2).
-        label: 'Fixed jaw (left)',
-        min: [-shift.left - vise.fixedJawThickness, jawMinY],
-        max: [0 - shift.left, jawMaxY],
-      },
-      {
-        id: 'vise-moving-jaw',
-        label: 'Moving jaw (right)',
-        min: [length + shift.right, jawMinY],
-        max: [length + shift.right + vise.movingJawThickness, jawMaxY],
-      },
-    ],
+    // #1068 — THE PICTURE IS THE JOB'S MOUNT TOO. A bracket or taped job has no jaws in the
+    // machine; drawing them beside a sheet that says "Fit the bracket" was a false picture of the
+    // bed. The bracket's own arms are sized by the location's defaults, which this function does
+    // not hold, so they are not drawn: an empty list is honest, a guessed arm would not be.
+    jaws:
+      jobMount(job) === 'vise'
+        ? [
+            {
+              id: 'vise-fixed-jaw',
+              // The fixed jaw is on the LEFT (/Fabrication.md §7.3); its face is x = 0, shifted
+              // out for sacrificial material (#213 §2).
+              label: 'Fixed jaw (left)',
+              min: [-shift.left - vise.fixedJawThickness, jawMinY],
+              max: [0 - shift.left, jawMaxY],
+            },
+            {
+              id: 'vise-moving-jaw',
+              label: 'Moving jaw (right)',
+              min: [length + shift.right, jawMinY],
+              max: [length + shift.right + vise.movingJawThickness, jawMaxY],
+            },
+          ]
+        : [],
     origin: [0, 0],
     items,
     keepOuts,
@@ -4252,19 +4259,47 @@ export function buildRunSheet(
     });
   }
 
-  // ---- 2 · Mount the vise ---------------------------------------------------------------------
+  // ---- 2 · The mount --------------------------------------------------------------------------
   // The bench issue any step that has NOT been walked at the machine names (see the module note):
   // today that is the held stepped material scan and the rest pass's routine.
   const BENCH_ISSUE = '#443';
+  // #1068 — THE SHEET READS THE JOB'S MOUNT. Every job used to be handed the vise's section,
+  // title and all, so a bracket job told the operator to mount a vise it does not use (and its
+  // program had been swept against no fixture at all — the CLI half of the same defect).
+  const mount = jobMount(job);
+  const tape = job.workholding.kind === 'tape' ? job.workholding.tape : null;
+  const bracket = job.workholding.kind === 'bracket' ? job.workholding.bracket : null;
   // #717 — Makera's low-profile-vise page, in its own order: home, tool out, power off at the
   // machine's switch, the board off, the pins, the jaw off for the six screws, the jaw back on
   // with its locating key seated. The fixed jaw is on the left.
-  const mountSteps: RunSheetStep[] = [
+  const viseMountSteps: RunSheetStep[] = [
     { text: 'Home the machine, remove any tool, then switch the machine off at its switch.' },
     { text: 'Remove the MDF wasteboard. Insert the two 4 × 11 mm locating pins.' },
     { text: 'With the left fixed jaw off, seat the vise on the pins; fasten it with six M5 × 20 screws.' },
     { text: 'Refit the left fixed jaw with its locating key seated. Switch the machine on.' },
   ];
+  // #707 BM-1 — the bracket's own setup: pinned at the job's anchor, the blank into its inside
+  // corner, the job's clamps on the free edges. The QuickStart's order, in physical words.
+  const bracketMountSteps: RunSheetStep[] = [
+    { text: 'Home the machine, remove any tool, then switch the machine off at its switch.' },
+    {
+      text: `Remove the MDF wasteboard. Pin the bracket to the bed at anchor ${bracket?.anchor ?? 1} with two 4 mm locating dowels and three M5 × 20 screws.`,
+    },
+    { text: 'Switch the machine on.' },
+  ];
+  // #707 §5 — tape-down: the strips inside the blank's edges and the blank pressed flat.
+  const tapeMountSteps: RunSheetStep[] = [
+    { text: 'Home the machine, remove any tool, then switch the machine off at its switch.' },
+    {
+      text:
+        tape === null
+          ? 'Lay strips of double-sided tape across the bed, just inside where the blank’s edges will land — the edge scans read the bed past them.'
+          : `Lay strips of ${fmtNum(tape.width)} mm double-sided tape across the bed, ${fmtNum(tape.inset)} mm inside where the blank’s edges will land — the edge scans read the bed just past them.`,
+    },
+    { text: 'Switch the machine on.' },
+  ];
+  const mountSteps: RunSheetStep[] =
+    mount === 'bracket' ? bracketMountSteps : mount === 'tape' ? tapeMountSteps : viseMountSteps;
 
   // ---- 3 · Load the blank --------------------------------------------------------------------
   const frontGap = -vise.jawStartY;
@@ -4311,23 +4346,55 @@ export function buildRunSheet(
       }),
     {
       text:
-        `The blank's ${betweenJaws} runs left–right between the jaws. ` +
-        (orientation.top === 'top'
-          ? 'The face to be cut is up.'
-          : `The stock's ${orientation.top} face is up — that is the face to be cut.`),
+        mount === 'vise'
+          ? `The blank's ${betweenJaws} runs left–right between the jaws. ` +
+            (orientation.top === 'top'
+              ? 'The face to be cut is up.'
+              : `The stock's ${orientation.top} face is up — that is the face to be cut.`)
+          : orientation.top === 'top'
+            ? 'The face to be cut is up.'
+            : `The stock's ${orientation.top} face is up — that is the face to be cut.`,
       value: `${fmtNum(betweenJaws === 'length' ? length : width)} mm`,
     },
-    {
-      text:
-        `The ${onBoard ? "part's " : ''}top face stands ${fmtNum(vise.stockProud)} mm above the jaw tops. ` +
-        `${clearanceWords} Record the measured ` +
-        stopWords,
-      record: 'measured stock proud (mm)',
-    },
-    {
-      text: `Push the blank's front edge to where the file expects it: the front edge is ${fmtNum(frontGap)} mm behind the front of the jaws.`,
-    },
-    { text: 'Tighten. Check the blank does not rock.' },
+    // #1068 — THE BLANK GOES WHERE THE MOUNT PUTS IT. The vise's jaw-top clearance and front-edge
+    // offsets are vise facts; a bracket job's datum is its inside corner and its clamps, and a
+    // taped job's is the bed's front edge. The steps below are each mount's own physical acts.
+    ...(mount === 'bracket'
+      ? ([
+          {
+            text:
+              `Push the blank's front-left corner into the bracket's inside corner at anchor ${bracket?.anchor ?? 1} — ` +
+              'the datum is measured from the anchor, so the corner must seat fully.',
+          },
+          ...(bracket === null || bracket.clamps.length === 0
+            ? []
+            : bracket.clamps.map(
+                (p): RunSheetStep => ({
+                  text: `Fit a top clamp on the ${p.edge} edge, its centre ${fmtNum(p.at)} mm from ${
+                    p.edge === 'back' ? 'the left end' : 'the front end'
+                  } of the edge — the job was planned with the clamps there.`,
+                }),
+              )),
+          { text: 'Tighten the clamps. Check the blank does not rock and its corner stays seated.' },
+        ] as RunSheetStep[])
+      : mount === 'tape'
+        ? ([
+            { text: "Press the blank down onto the tape, square to the bed's front edge, and hold it for a slow count of ten." },
+            { text: 'Check the blank cannot slide or rock — the datum comes from its edges, not from a stop.' },
+          ] as RunSheetStep[])
+        : ([
+            {
+              text:
+                `The ${onBoard ? "part's " : ''}top face stands ${fmtNum(vise.stockProud)} mm above the jaw tops. ` +
+                `${clearanceWords} Record the measured ` +
+                stopWords,
+              record: 'measured stock proud (mm)',
+            },
+            {
+              text: `Push the blank's front edge to where the file expects it: the front edge is ${fmtNum(frontGap)} mm behind the front of the jaws.`,
+            },
+            { text: 'Tighten. Check the blank does not rock.' },
+          ] as RunSheetStep[])),
   ];
 
   // #432 review R1 — A FACING JOB'S ORDER IS PROBE → FACE → RE-TOUCH → ENGRAVE. The origin is
@@ -5164,7 +5231,12 @@ export function buildRunSheet(
     ...(options.restPass
       ? [{ id: 'rest', title: 'Two tools, one blank', steps: restPassSteps(options.restPass) }]
       : []),
-    { id: 'mount', title: 'Mount the vise', steps: mountSteps },
+    // #1068 — the mount's OWN name: the section title is the first thing the operator reads.
+    {
+      id: 'mount',
+      title: mount === 'bracket' ? 'Fit the bracket' : mount === 'tape' ? 'Tape the blank down' : 'Mount the vise',
+      steps: mountSteps,
+    },
     ...rotaryFeedSection,
     { id: 'load', title: 'Load the blank', steps: loadSteps },
     ...(pcbSteps === null ? [] : [{ id: 'board', title: 'The board', steps: pcbSteps }]),
@@ -5276,7 +5348,13 @@ export function runSheetDiagramSvg(diagram: RunSheetDiagram): string {
   const parts: string[] = [];
   parts.push(
     `<svg xmlns="${SVG_NS}" viewBox="${xmin} ${-ymax} ${xmax - xmin} ${ymax - ymin}" ` +
-      `class="run-sheet-svg" role="img" aria-label="Top view of the stock, the vise jaws and the work origin">`,
+      // #1068 — the label names what the picture actually draws: a bracket or taped job has no
+      // jaws to show.
+      `class="run-sheet-svg" role="img" aria-label="${
+        diagram.jaws.length === 0
+          ? 'Top view of the stock and the work origin'
+          : 'Top view of the stock, the vise jaws and the work origin'
+      }">`,
   );
   parts.push(
     `<defs><marker id="run-sheet-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">` +

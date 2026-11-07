@@ -1492,6 +1492,29 @@ export interface TapeHold {
 }
 
 /**
+ * #1068 — A BOX THE PROGRAM MUST NOT SWEEP THROUGH, stated by the job itself.
+ *
+ * The bracket's arms and the clamps are DERIVED from the mount (their sizes are shop defaults);
+ * these are the features only the operator knows about: a hole already in the blank, screwed
+ * down, that the cutter would otherwise pass through. The tray's two counterbored holes in the
+ * left waste were the first of them.
+ *
+ * Work frame, as everywhere in the CAM: X 0..length, Y 0..width, Z0 on the stock's top, down
+ * negative. The box is the material's own extent — for a counterbored hole, the hole from the
+ * bed up to the counterbore's floor, so a cut that reaches the screw head is inside it.
+ */
+export interface BracketObstacle {
+  /** Stable id, so a finding can name it. */
+  id: string;
+  /** In landmark words: "the counterbored hole, 8 mm in from the left edge". */
+  label: string;
+  /** The box's low corner, work frame. */
+  min: [Mm, Mm, Mm];
+  /** The box's high corner, work frame. */
+  max: [Mm, Mm, Mm];
+}
+
+/**
  * A job pushed into the bracket's corner and clamped (#707 BM-1, §3.6).
  *
  * The CLAMP PLACES are the job's own: the CAM, the verifier and the simulation check these, never
@@ -1509,6 +1532,11 @@ export interface BracketHold {
    * left). One to four, in the order the operator sees them.
    */
   clamps: ClampPlacement[];
+  /**
+   * #1068 — boxes the MOUNT cannot know: holes and fixed features already in the blank, which the
+   * sweep and the verifier must treat as solids. Absent or empty means none.
+   */
+  obstacles?: BracketObstacle[];
   /** Where these came from — the same provenance rule as the vise (decision 28). */
   source: 'default' | 'saved' | 'measured';
 }
