@@ -3,6 +3,7 @@
 // session is what is tested; the coalescer and the store are tested against it in-process.
 
 import { describe, it, expect } from 'vitest';
+import * as Comlink from 'comlink';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -830,6 +831,64 @@ describe('#895 — a load that stops reporting is stopped by the watchdog', () =
       terminateSim();
       expect(SilentWorker.stopped).toBeGreaterThanOrEqual(1);
       void pending;
+    } finally {
+      g.Worker = real;
+      terminateSim();
+    }
+  });
+});
+
+// A's note (1) on #1048 — THE REAL FAULT PATH AT THE CLIENT LEVEL: the worker reports ONCE (its
+// first checkpoint, through the very proxy the client passes it), then goes silent past the stall
+// window. The load must end in `sweep-stalled` with the worker terminated exactly once — the case
+// the two-clock re-pin removed when the silent-worker test became a WAIT.
+describe('#895/#1048 — a worker that speaks once and then goes silent', () => {
+  class OneWordWorker {
+    static terminated = 0;
+    static stopped = 0;
+    static spoke = 0;
+    private readonly name: string;
+    constructor(_url?: URL | string, options?: { name?: string }) {
+      this.name = options?.name ?? '';
+    }
+    addEventListener(): void {}
+    removeEventListener(): void {}
+    postMessage(_message: unknown, transfer?: unknown[]): void {
+      // The proxied onProgress arrives as a transferred MessagePort; call it ONCE, exactly as
+      // the worker's own sweep would at its first checkpoint.
+      const port = (transfer ?? []).find((t): t is MessagePort => typeof (t as MessagePort)?.postMessage === 'function');
+      if (port === undefined || OneWordWorker.spoke > 0) return;
+      OneWordWorker.spoke += 1;
+      const cb = Comlink.wrap(port as never) as unknown as (done: number, total: number) => Promise<void>;
+      void cb(1, 35);
+    }
+    terminate(): void {
+      OneWordWorker.stopped += 1;
+      if (this.name === 'sim') OneWordWorker.terminated += 1;
+    }
+  }
+
+  it('the stall window runs from the first checkpoint: sweep-stalled, terminated exactly once', async () => {
+    const g = globalThis as unknown as { Worker: unknown };
+    const real = g.Worker;
+    OneWordWorker.terminated = 0;
+    OneWordWorker.stopped = 0;
+    OneWordWorker.spoke = 0;
+    g.Worker = OneWordWorker;
+    try {
+      // The queue window is generous; the stall window is tiny. The single checkpoint switches
+      // the clocks, then silence must be the fault #895 means.
+      const r = await loadSim(THREE, setup(), tool, null, { stallMs: 25, queueMs: 5_000 });
+      expect(r.ok).toBe(false);
+      if (r.ok) return;
+      expect(r.pathOnly).toBe(false);
+      expect(r.diagnostics[0]?.code).toBe('sweep-stalled');
+      expect(r.diagnostics[0]?.message).toMatch(/no progress for/);
+      expect(r.diagnostics[0]?.message).toMatch(/This is a fault, not a slow program/);
+      // The checkpoint was heard: the sentence names where it stopped.
+      expect(r.diagnostics[0]?.message).toMatch(/after checkpoint 1 of 35/);
+      expect(OneWordWorker.spoke, 'the worker reported once').toBe(1);
+      expect(OneWordWorker.terminated, 'the stalled worker is terminated exactly once').toBe(1);
     } finally {
       g.Worker = real;
       terminateSim();
