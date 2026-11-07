@@ -27,6 +27,8 @@ import { pureGoalObject } from './jobSetup';
 interface GoalEdgeBreakView {
   widthMm: number;
   toolKey?: string;
+  /** #1064 — absent = `silhouette` (the part's own outline). */
+  edges?: 'silhouette' | 'all';
 }
 
 /** What `checkGoalCutInto` takes: the allowance, or nothing when the job states none. */
@@ -82,14 +84,19 @@ export function goalEdgeBreakOptions(
   if (stated === undefined) return wallShadowRadiusMm === undefined ? {} : { wallShadowRadiusMm };
 
   const pinned = stated.toolKey === undefined ? null : toolFor(stated.toolKey);
-  let allowance: { reachMm: number; legMm: number; toolNumber?: number } | null = null;
+  let allowance: { reachMm: number; legMm: number; toolNumber?: number; edges: 'silhouette' | 'all' } | null = null;
   for (const tool of [pinned, ...tools]) {
     if (tool === null) continue;
     const candidate = vToolAllowance(tool);
     if (candidate !== null && (allowance === null || candidate.reachMm > allowance.reachMm)) {
       // #964 — the V's own tool number rides with the allowance: the check excuses a cell only
       // where this cutter made its deepest stamp (the page's `who` rule).
-      allowance = { ...candidate, ...(tool.number === null || tool.number === undefined ? {} : { toolNumber: tool.number }) };
+      // #1064 — the job's own edge scope rides with the numbers; absent means silhouette.
+      allowance = {
+        ...candidate,
+        edges: stated.edges ?? 'silhouette',
+        ...(tool.number === null || tool.number === undefined ? {} : { toolNumber: tool.number }),
+      };
     }
   }
   return {

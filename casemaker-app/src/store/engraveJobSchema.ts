@@ -1082,6 +1082,14 @@ const targetObjectSchema = z
           .min(1)
           .optional()
           .describe('The V-bit’s library key; omit while none is chosen (no chamfer program is posted).'),
+        // #1064 — which edges the statement names; absent = the part's silhouette only.
+        edges: z
+          .enum(['silhouette', 'all'])
+          .optional()
+          .describe(
+            'Which edges this edge break names: “silhouette” (the default) is the part’s own outline; ' +
+              '“all” adds every interior design wall. Unset means “silhouette”.',
+          ),
       })
       .strict()
       .optional()

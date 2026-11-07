@@ -151,7 +151,10 @@ const COVERED = 572;
 
 /** The rule's own fingerprint: constants, thresholds and the canonical report's rule numbers. */
 const FROZEN = {
-  version: 6,
+  // #1064 (v7) — the edge-break band seeds only from the edges the job names; the canonical
+  // numbers below are the explicit `edges: 'all'` reading, and the default silhouette case is
+  // pinned beside them.
+  version: 7,
   constants: {
     cutIntoFloorMm: 0.01,
     leftoverBandsMm: [0.1, 0.3, 1],
@@ -194,7 +197,9 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
     expect(GOAL_PASS_COVERAGE_FALLBACK, FREEZE).toBe(FROZEN.constants.passCoverageFallback);
 
     const r = checkGoalCutInto(CANON, CANON_TOP, {
-      edgeBreak: { reachMm: 1.5, legMm: 0.5 },
+      // #1064 — the canonical fixture is the all-edges reading: an interior wall (E) and the
+      // hole's silhouette (D) are both edge-break sites only when the job names every edge.
+      edgeBreak: { reachMm: 1.5, legMm: 0.5, edges: 'all' },
       wallShadowRadiusMm: 2,
     });
     // The raw reading beside the judged one.
@@ -224,6 +229,22 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
     expect(r.ok, FREEZE).toBe(FROZEN.canonical.ok);
     // Volume, so a change to the cell area or the depth fold is caught too.
     expect(r.cutIntoVolumeMm3, FREEZE).toBeCloseTo(2.99, 9);
+  });
+
+  // #1064 (v7) — THE DEFAULT BAND NAMES THE PART'S SILHOUETTE ONLY. On the canonical fixture the
+  // hole's silhouette is a WALL cell (not the grid border) and E sits at an interior wall, so
+  // with the default edge scope the allowance excuses nothing here: both are judged or wall, and
+  // only a job that states `edges: 'all'` reads the canonical 2-cell edge break above.
+  it('the default edge scope excuses nothing at the interior wall — D is wall, E is judged', () => {
+    const r = checkGoalCutInto(CANON, CANON_TOP, {
+      edgeBreak: { reachMm: 1.5, legMm: 0.5 },
+      wallShadowRadiusMm: 2,
+    });
+    expect(r.edgeBreakFraction, FREEZE).toBe(0);
+    expect(r.wallNotScoredFraction, FREEZE).toBe(3 / COVERED);
+    expect(r.adjudicatedFraction, FREEZE).toBe(3 / COVERED);
+    expect(r.adjudicatedMaxMm, FREEZE).toBeCloseTo(0.4, 12);
+    expect(r.adjudicatedMaxAt, FREEZE).toEqual({ x: 5, y: 5 });
   });
 
   it('excludes wall cells and the wall shadow in a job that states NO edge break', () => {
@@ -355,7 +376,8 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
   });
 
   it('gates the edge-break band on the V being the deepest cutter', () => {
-    const V = { edgeBreak: { reachMm: 1.5, legMm: 0.5, toolNumber: 7 } };
+    // #1064 — this case is about IDENTITY, not edge scope: the job names every edge (`all`).
+    const V = { edgeBreak: { reachMm: 1.5, legMm: 0.5, toolNumber: 7, edges: 'all' as const } };
     const vDeepest = checkGoalCutInto(CANON, CANON_TOP, { ...V, wallShadowRadiusMm: 2, whoAt: () => 7 });
     expect(vDeepest.edgeBreakFraction, FREEZE).toBe(2 / COVERED);
     // A flat cut both band cells deepest: they are judged instead — D becomes a wall, and E and C
@@ -401,6 +423,7 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
     expect(goalEdgeBreakOptions(job({ widthMm: 1, toolKey: 'c90' }), toolFor, ['c90']).edgeBreak, FREEZE).toEqual({
       reachMm: 1.5875,
       legMm: 1.5375,
+      edges: 'silhouette',
       toolNumber: 4,
     });
     // No stated break → no allowance, and the absence is the answer (never a silent excusal).

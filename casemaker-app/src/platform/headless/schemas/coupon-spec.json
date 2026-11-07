@@ -6345,6 +6345,14 @@
               "additionalProperties": false,
               "description": "Chamfer the goal mesh’s top rim with a V-bit after its surfacing program (#829); omit for square edges.",
               "properties": {
+                "edges": {
+                  "description": "Which edges this edge break names: “silhouette” (the default) is the part’s own outline; “all” adds every interior design wall. Unset means “silhouette”.",
+                  "enum": [
+                    "silhouette",
+                    "all"
+                  ],
+                  "type": "string"
+                },
                 "toolKey": {
                   "description": "The V-bit’s library key; omit while none is chosen (no chamfer program is posted).",
                   "minLength": 1,
@@ -6693,6 +6701,14 @@
                 "additionalProperties": false,
                 "description": "Chamfer the goal mesh’s top rim with a V-bit after its surfacing program (#829); omit for square edges.",
                 "properties": {
+                  "edges": {
+                    "description": "Which edges this edge break names: “silhouette” (the default) is the part’s own outline; “all” adds every interior design wall. Unset means “silhouette”.",
+                    "enum": [
+                      "silhouette",
+                      "all"
+                    ],
+                    "type": "string"
+                  },
                   "toolKey": {
                     "description": "The V-bit’s library key; omit while none is chosen (no chamfer program is posted).",
                     "minLength": 1,
