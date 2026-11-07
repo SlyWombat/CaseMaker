@@ -4406,7 +4406,7 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
     act(() => setInventoryEntries([]));
   });
 
-  it('a goal deeper than the cutter’s reach blocks with the numbers, and the button turns it into the band cut', () => {
+  it('a goal deeper than the cutter’s reach no longer refuses a mesh goal — Generate stays enabled — and the band choice still states what it leaves', () => {
     act(() => setInventoryEntries([{ key: 'inv:flute-785', tool: CUTTER, provenance: 'EngravePanel #785 spec' }]));
     const base = defaultEngraveJob();
     act(() => {
@@ -4416,10 +4416,11 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
           stock: { ...base.stock, length: 50, width: 50, thickness: 150 },
           toolKey: 'inv:flute-785',
           tool: CUTTER,
-          // A second error (the label deeper than the blank) keeps this blocking after the reach
-          // one is chosen away, so the press here only sets the choice — Generate stays the press
-          // that cuts, exactly as it would belong to the operator.
-          labels: base.labels.map((l, i) => (i === 0 ? { ...l, depth: 151 } : l)),
+          // The default job's CASE engrave comes within the jaw's clearance on this small blank;
+          // this case is about the reach, so the job carries only the goal.
+          labels: [],
+          shapes: [],
+          drills: [],
           targetObject: {
             id: 'goal-785',
             name: 'tall.stl',
@@ -4437,19 +4438,24 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
     });
     render(<EngravePanel />);
 
-    // The refusal is in the findings list, with the depth, the reach and the band's own depth.
+    // #1037 — the whole-goal reach refusal is gone from the model path: the engine judges the
+    // finisher PER FEATURE (a region its usable length cannot reach is not cut and is stated on
+    // the plan as `goal-finish-unreachable`), so the drawer carries no reach row and Generate
+    // stays enabled for this job. The band button that sat beside the refusal was keyed on it and
+    // no longer renders; #1043 removes the dead button and `goalBandMm` themselves.
     const drawer = screen.getByTestId('engrave-findings');
     fireEvent.click(drawer.querySelector('summary')!);
-    const refusal = drawer.querySelector('[data-code="goal-reach-short"]');
-    expect(refusal?.textContent).toContain('112 mm deep');
-    expect(refusal?.textContent).toContain('your longest reach is 12 mm');
-    const band = screen.getByTestId('engrave-goal-cut-top-band');
-    expect(band.textContent).toContain('Cut the top 11 mm only'); // 12 mm reach − 1 mm clearance
-
-    fireEvent.click(band);
-    expect(useEngraveJobStore.getState().job.targetObject?.cutWithinReach).toBe(true);
-    // The refusal is gone from the list and the stated band warning has taken its place.
     expect(drawer.querySelector('[data-code="goal-reach-short"]')).toBeNull();
+    expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(false);
+
+    // #785's band choice is unchanged — the operator's own `cutWithinReach` still yields its
+    // warning, with the band's own depth (12 mm reach − 1 mm clearance).
+    act(() => {
+      const current = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({
+        job: { ...current, targetObject: { ...current.targetObject!, cutWithinReach: true } },
+      });
+    });
     const warning = drawer.querySelector('[data-code="goal-cut-top-band"]');
     expect(warning?.textContent).toContain("only the stock's top 11 mm is cut");
   });
