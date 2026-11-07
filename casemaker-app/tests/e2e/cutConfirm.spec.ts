@@ -236,7 +236,11 @@ async function fakeHouseWithRotary(page: Page): Promise<void> {
       });
     if (path === '/health') return json(HEALTH);
     if (path === '/tools') return json([]);
-    if (path === '/inventory') return json(LOCATION_DOC.inventory ?? []);
+    // #1065 — the picker lists this owned cutter, and the recorded frame this test replays says
+    // T:1: the fixture's record states number 1 so the strip's tool cell names it (the wrap check
+    // is about the name fitting its elastic cell). The shared fixture keeps number null.
+    if (path === '/inventory')
+      return json((LOCATION_DOC.inventory ?? []).map((i) => ({ ...i, tool: { ...i.tool, number: 1 } })));
     if (path === '/stock') return json(LOCATION_DOC.stock ?? []);
     if (path === '/defaults') return json(LOCATION_DOC.defaults ?? {});
     if (path === '/location') return json(location);
@@ -271,7 +275,13 @@ test('#769 review — at the 760 px column with a rotary module the DRO wraps an
   await page.getByTestId('sidebar-button-cnc-engrave').click();
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   await openCutterGroup(page);
-  await page.getByTestId('engrave-tool').selectOption('flat-1.0');
+  // #1065 — the picker lists the shop's own cutters when the house has records (this fixture's
+  // fake house holds one owned ball nose and `/tools` is empty), so a built-in key like `flat-1.0`
+  // is correctly not offered. Pick the first cutter the select actually lists — the fit-a-cutter
+  // step is the same walk either way.
+  const cutterSelect = page.getByTestId('engrave-tool');
+  const firstCutter = await cutterSelect.locator('option:not([value=""])').first().getAttribute('value');
+  await cutterSelect.selectOption(firstCutter!);
   await rememberMachine(page, ROTARY_CUT);
 
   const strip = page.getByTestId('machine-status');
