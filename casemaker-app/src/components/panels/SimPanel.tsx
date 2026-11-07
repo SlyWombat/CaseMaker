@@ -343,6 +343,7 @@ export function SimPanel() {
             carriedFloor: p.carriedFloor === true,
             seedFrom: p.seedFrom ?? null,
             seedEarlier: p.seedEarlier ?? 0,
+            seedRoute: p.seedRoute ?? null,
             errorCount: p.errorCount,
             codes: [...p.diagnostics, ...p.notes].map((d) => d.code),
           })),

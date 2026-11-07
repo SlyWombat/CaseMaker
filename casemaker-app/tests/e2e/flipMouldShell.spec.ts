@@ -103,23 +103,29 @@ test('#754/#723 — a two-side mouse shell opens, posts the model engine’s fou
     if ((await technical.getAttribute('open')) === null) await technical.locator('summary').click();
     await expect(page.getByTestId('sim-job-coverage')).toBeVisible();
     const coverage = page.getByTestId('sim-job-coverage');
-    // #1034 — EVERY PROGRAM NAMES ITS SEED. Side 1's finish is seeded from side 1's rough, and the
-    // panel names it. (The pre-#1041 pins carried 'flat-1.0' — the built-in flat that leaked into
-    // the house; the shop's own O-flute takes its place by name.)
+    // #1034/#1050 — EVERY PROGRAM NAMES ITS SEED AND ITS ROUTE. Side 1's finish is seeded by a
+    // column field from side 1's rough; side 2's programs are seeded by the earlier programs'
+    // REMOVAL meshes (the exact route), which has no field to label — the carrier says which.
     expect(
-      state.simPrograms.map((p) => ({ fromBlank: p.fromBlank, carried: p.carriedFloor, seed: p.seedFrom })),
+      state.simPrograms.map((p) => ({ fromBlank: p.fromBlank, carried: p.carriedFloor, seed: p.seedFrom, route: p.seedRoute })),
     ).toEqual([
-      { fromBlank: false, carried: false, seed: null },
-      { fromBlank: false, carried: false, seed: 'program 1 (⌀ 3.175 mm flat end · 25 mm flute)' },
+      { fromBlank: false, carried: false, seed: null, route: null },
+      { fromBlank: false, carried: false, seed: 'program 1 (⌀ 3.175 mm flat end · 25 mm flute)', route: 'field' },
       // Side 2, with the bench's O-flute: both programs START from the material the earlier setup
       // left (the carried floor AND the prior removal) — they no longer restart from the blank as
-      // the ⌀1 built-in's engine made them, so `fromBlank` is false and the field route names no
-      // seed. The carry itself is the `carried` flag (and the panel's own sentence below).
-      { fromBlank: false, carried: true, seed: null },
-      { fromBlank: false, carried: true, seed: null },
+      // the ⌀1 built-in's engine made them. The exact route is named by the panel below.
+      { fromBlank: false, carried: true, seed: null, route: 'removal' },
+      { fromBlank: false, carried: true, seed: null, route: 'removal' },
     ]);
     await expect(coverage).toContainText(
       "program 2 (⌀ 2 mm ball · 30 mm flute) starts from program 1 (⌀ 3.175 mm flat end · 25 mm flute)'s removal",
+    );
+    // #1050 — the exact-route seeds are named too, not silence.
+    await expect(coverage).toContainText(
+      'program 3 (⌀ 3.175 mm flat end · 25 mm flute) starts from the material the earlier programs left — their removal, with the earlier setup',
+    );
+    await expect(coverage).toContainText(
+      'program 4 (⌀ 2 mm ball · 30 mm flute) starts from the material the earlier programs left — their removal, with the earlier setup',
     );
     // The old shape restarted side 2's programs from the blank; with the shop's own flat the sweep
     // seeds them instead, so the panel claims no blank restart at all.

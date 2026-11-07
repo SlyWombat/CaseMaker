@@ -239,6 +239,42 @@ describe('#744 coverageDisclaimer — a run of several programs', () => {
     expect(s).toContain('Swept from the blank: program 3 (drill-2) — its engine cannot start from the material');
   });
 
+  // #1050 — THE EXACT ROUTE NAMES ITS SEED TOO. A load seeded from the earlier programs' removal
+  // meshes has no column field to point at, so `seedFrom` is null; before this the sentence fell
+  // through every branch and the program (side 2's rough and finish on the shop's O-flute) was
+  // named nowhere.
+  it('names an exact-route seed: the earlier programs’ removal, with no field to label (#1050)', () => {
+    const s = text({
+      programs: [
+        swept('program 1 (flat-3.175)'),
+        swept('program 2 (ball-2)', { engine: 'column', seedFrom: 'program 1 (flat-3.175)' }),
+        swept('program 3 (flat-3.175)', { carriedFloor: true, seedRoute: 'removal' }),
+        swept('program 4 (ball-2)', { engine: 'column', carriedFloor: true, seedRoute: 'removal' }),
+      ],
+      expectedPrograms: 4,
+    });
+    expect(s).toContain(
+      "From the earlier programs: program 3 (flat-3.175) starts from the material the earlier programs left — their removal, with the earlier setup's floor carried and program 4 (ball-2) starts from the material the earlier programs left — their removal, with the earlier setup's floor carried.",
+    );
+    // The field route keeps its own sentence, unchanged, and is never repeated here.
+    expect(s).toContain("From the earlier program: program 2 (ball-2) starts from program 1 (flat-3.175)'s removal.");
+    // Nothing restarted from the blank, so no blank sentence appears.
+    expect(s).not.toContain('Restarted from the blank');
+    expect(s).not.toContain('Swept from the blank');
+  });
+
+  it('a program seeded by BOTH routes says the field sentence only (#1050)', () => {
+    const s = text({
+      programs: [
+        swept('program 1 (flat-3.175)'),
+        swept('program 2 (ball-2)', { seedFrom: 'program 1 (flat-3.175)', seedRoute: 'field', carriedFloor: true }),
+      ],
+      expectedPrograms: 2,
+    });
+    expect(s).toContain("program 2 (ball-2) starts from program 1 (flat-3.175)'s removal, with the earlier setup's floor carried");
+    expect(s).not.toContain('their removal');
+  });
+
   it('never claims the whole run when the walk stopped part-way', () => {
     const s = text({
       programs: [
