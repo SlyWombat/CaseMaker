@@ -5046,8 +5046,8 @@ export async function buildModelPlanInputForGoal(
   // `topBandMm`: same `knownReach` call, same `GOAL_BAND_CLEARANCE_MM`), set only when the goal is
   // deeper than that reach. A split side's
   // stated band (#888) wins over the reach-derived one, exactly as the old path's `topBandMm`
-  // does. Absent: no band, the pre-#988 plan byte-identical, and the seam's own early
-  // `goal-reach-short` refusal above is untouched.
+  // does. Absent: no band, the pre-#988 plan byte-identical. (#1037 removed the seam's own early
+  // whole-goal reach refusal; the plan's finisher gate states an unreachable region instead.)
   const cutterReach = knownReach(tool, shop.tools ?? []);
   const goalDepth = placedSize(goal).z;
   const reachBandMm =

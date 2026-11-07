@@ -1997,13 +1997,6 @@ export function EngravePanel(): JSX.Element {
       );
     };
 
-  const cutTopBand = (finding: JobFinding): void => {
-    updateTargetObject({ cutWithinReach: true });
-    if (errors.length === 1 && errors[0]?.code === 'goal-reach-short' && errors[0]?.targetId === finding.targetId) {
-      void generate();
-    }
-  };
-
   /**
    * #872 — THE FLIP PLAN'S ONE PRESS. The finding carries the sides the plan chose; this turns
    * them into saved setups and the goal each one cuts (the flipped side's copy placed in its own
@@ -5031,15 +5024,6 @@ export function EngravePanel(): JSX.Element {
                       </span>
                     );
                   })()}
-                  {/* #785 — the reach refusal's one-click choice: cut the stock's top band the
-                      chosen cutter reaches safely, and say what is left, instead of refusing. */}
-                  {f.code === 'goal-reach-short' && f.severity === 'error' && f.goalBandMm !== undefined && job.targetObject?.id === f.targetId && (
-                    <span style={{ flexShrink: 0, marginLeft: 'auto' }}>
-                      <button type="button" data-testid="engrave-goal-cut-top-band" onClick={() => cutTopBand(f)}>
-                        Cut the top {f.goalBandMm} mm only
-                      </button>
-                    </span>
-                  )}
                   {/* #872 — the flip plan's one press: the sides the run measured are added as
                       setups, the goal copied into each one's work frame, and Generate runs. */}
                   {f.code === 'goal-unreached' && (f.goalFlipSides?.length ?? 0) > 1 && job.targetObject?.id === f.targetId && (
@@ -5223,15 +5207,6 @@ export function EngravePanel(): JSX.Element {
                 {fixActionLabel(generateBlocker.fix!)}
               </button>
               </>
-              )}
-              {/* #785 — the reach refusal's other press: cut what this cutter reaches. */}
-              {errors[0]?.code === 'goal-reach-short' && errors[0].goalBandMm !== undefined && job.targetObject?.id === errors[0].targetId && (
-                <>
-                  {' '}
-                  <button type="button" data-testid="engrave-generate-cut-top-band" onClick={() => cutTopBand(errors[0]!)}>
-                    Cut the top {errors[0].goalBandMm} mm only
-                  </button>
-                </>
               )}
             </span>
           )}
