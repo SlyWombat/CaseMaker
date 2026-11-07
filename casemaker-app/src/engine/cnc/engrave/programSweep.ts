@@ -79,6 +79,15 @@ export interface ProgramSweepResult {
   seedFrom?: string | null;
   /** #1034 — how many earlier same-setup removals were also in the seed, beyond `seedFrom`. */
   seedEarlier?: number;
+  /**
+   * #1050 — THE ROUTE THIS PROGRAM WAS SEEDED BY. `'field'`: a column field from its own setup's
+   * predecessor (named by `seedFrom`). `'removal'`: the earlier programs' removal meshes — the
+   * exact route, which has no field to name, so `seedFrom` is null and the panel used to say
+   * nothing. `null`: nothing to seed from (the first program, a blank restart). A program seeded
+   * by BOTH says `'field'` — the field sentence keeps its wording (#1034). Absent on a result
+   * stored before this field existed, which reads as unknown, never as the removal route.
+   */
+  seedRoute?: 'field' | 'removal' | null;
   /** The FLAT dexel grid this program was swept on, mm; null for an exact or rotary sweep. */
   gridPitchMm: number | null;
   /** This program's own removal. Kept private to the walk; summaries below drop it. */
@@ -399,6 +408,8 @@ export async function sweepPrograms<P extends SweepProgram>(options: SweepProgra
       carriedFloor: load.carriedFloor === true,
       seedFrom: load.seedFrom ?? null,
       seedEarlier: load.seedEarlier ?? 0,
+      // #1050 — the route the caller seeded the load by (field / removal mesh / none).
+      seedRoute: load.seedRoute ?? null,
       gridPitchMm: gridPitchMmOf(load),
       removal: load.meshes.removal,
     };

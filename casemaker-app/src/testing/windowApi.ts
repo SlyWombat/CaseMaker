@@ -258,7 +258,15 @@ export interface CaseMakerTestApi {
      * to that restart. The e2e walk pins the multi-side carry through these, not only through the
      * panel's prose.
      */
-    simPrograms: { label: string; engine: string | null; fromBlank: boolean; carriedFloor: boolean; seedFrom: string | null }[];
+    simPrograms: {
+      label: string;
+      engine: string | null;
+      fromBlank: boolean;
+      carriedFloor: boolean;
+      seedFrom: string | null;
+      /** #1050 — which route seeded it: 'field', 'removal' (the exact route), or null. */
+      seedRoute: 'field' | 'removal' | null;
+    }[];
     /**
      * #1041/#1042 — THE PLAN'S OWN WORDS, so a spec can assert what the plan did NOT say: the
      * notes carry the seam's house note (the built-in fallback) and every typed statement's text;
@@ -749,7 +757,7 @@ export function installCaseMakerTestApi(): void {
         canSave: saveBlocker(view) === null,
         saveReason: saveBlocker(view),
         error: r.error,
-        simPrograms: r.simPrograms.map((p) => ({ label: p.label, engine: p.engine, fromBlank: p.fromBlank, carriedFloor: p.carriedFloor === true, seedFrom: p.seedFrom ?? null })),
+        simPrograms: r.simPrograms.map((p) => ({ label: p.label, engine: p.engine, fromBlank: p.fromBlank, carriedFloor: p.carriedFloor === true, seedFrom: p.seedFrom ?? null, seedRoute: p.seedRoute ?? null })),
         planNotes: r.generated?.plan?.perSetup.flatMap((setup) => setup.notes) ?? [],
         planStatementCodes: (r.generated?.planStatements ?? []).map((statement) => statement.code),
       };
