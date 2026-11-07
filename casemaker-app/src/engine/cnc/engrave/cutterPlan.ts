@@ -762,11 +762,22 @@ export function planCutters(
     } else {
       const balls = candidates.filter((c) => c.tool.shape === 'ball' || c.tool.shape === 'bull').length;
       const all = candidateTools.filter((t) => t.tool.shape === 'ball' || t.tool.shape === 'bull').length;
+      // #1051 — THE MESH GOAL'S NO-BALL SENTENCE MAKES NO REACH CLAIM EITHER (6b's words): the
+      // fact is that no ball the shop holds can cut this material, so the engine finishes the
+      // curved surfaces with a flat (#982). The old "the goal needs N mm of reach" was the
+      // whole-goal depth the ball never cuts.
+      const where = registryStandsIn ? 'the registry' : "the shop's records";
+      const gate = all === 0 ? '' : ` (${balls} of ${all} passed the material gate)`;
+      const meshReason =
+        `no ball end mill in ${where}${gate} — the engine finishes the curved surfaces with a flat (#982) ` +
+        'unless a ball is added to the inventory';
       for (const w of ballWork) {
         unassigned.push({
           id: w.id,
           name: w.name,
-          reason: `no ball end mill reaches this goal — ${balls} of ${all} passed the material gate, and the goal needs ${r3(needed)} mm of reach${whyNoShape(['ball', 'bull'])}`,
+          reason: meshGoal
+            ? meshReason
+            : `no ball end mill reaches this goal — ${balls} of ${all} passed the material gate, and the goal needs ${r3(needed)} mm of reach${whyNoShape(['ball', 'bull'])}`,
         });
       }
     }
