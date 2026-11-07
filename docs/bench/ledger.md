@@ -21,6 +21,8 @@ Rule: before anyone asks the maintainer for a measurement or a test, look here, 
 
 | 3D probe incident (OUT OF SERVICE) | 2026-11-07 ~20:06Z, manager session hand-driving a datum routine (not the app): `G53 G0 X-220` hit soft_endstop.x_min −207 (alarm) → `$X` unpowered the probe (alarms drop the M831 supply) → `G91 G38.3 X25 F200` at 4 mm below the blank top ran through the left face with no trigger (`:0`) and bent the stylus; straightened by the maintainer, it now triggers but stays `Probe: 1` after release. Rules: after any alarm re-send M831 + deflection proof; no unattended command loops — routines run only as the program under test | 2026-11-07 | `traces/2026-11-07-console.log` (from 19:58Z); k3 inventory 3D probe OUT OF SERVICE; #1070 |
 
+| Wasteboard | 6 mm MDF; hold-down screws countersunk 1 mm below the surface; none under the M1 tray part | 2026-11-07 | the maintainer (caliper); k3 machine record `thickness` 6, `thicknessSource` measured; #1069 |
+
 ## Still genuinely unmeasured (the only things it is fair to ask)
 k3 `seeded`: `clamps.topReachMm` (nose reach in), `bracket.originOffsetX/YMm` (needs the bracket fitted once), `bracket.fitMm`, `bracket.repeatMm`; the Side Clamp Set (footprint, height); the wasteboard's hole pitch; the Thick L Bracket; rotary TIR/backlash, tailstock reach, inner/outer grip ranges.
 | M1 tray holding (bracket) | blank 126 × 160 × 25 hardwood against the L-bracket (arms FRONT + LEFT), one side clamp on the BACK edge (below the stock top); two screwed counterbored holes in the LEFT waste → place the tray 10 mm right of centred; usable length ≈ 142 from the bracket | 2026-11-07 | `img/2026-11-07-tray-holding.jpg` (photo rotated 90°); #1068 |
