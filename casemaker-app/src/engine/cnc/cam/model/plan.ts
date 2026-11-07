@@ -39,7 +39,7 @@ import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFram
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanStatement, StockProbes } from './types';
 import { MOLD_DRAFT_LIMIT_DEG } from './types';
-import { batchSameCutterRuns, chooseSequence, cutterKeyOf, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
+import { batchSameCutterRuns, chooseSequence, cutterKeyOf, isAbortError, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
 import { fullyReachable, pocket } from './ops/pocket';
 import { roughLeftAbove } from './ops/rough';
@@ -1433,6 +1433,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       ...(opts.onProgress === undefined
         ? {}
         : { onProgress: (op: ModelPlanProgress['op'], fraction: number) => opts.onProgress!({ setupIndex, op, fraction }) }),
+      ...(opts.signal === undefined ? {} : { signal: opts.signal }),
       pockets: noFlatFallback ? null : {
         ...(depthBandMm === undefined ? {} : { depthBandMm }),
         houseFlats: flats,
@@ -2203,6 +2204,9 @@ export interface PlanPocketsOptions {
   onStep?: (kind: PlannedOpKind) => void;
   /** #1038 — a tick at each candidate chain's boundary (see `SequenceOptions.onCandidate`). */
   onCandidate?: (index: number, total: number) => void;
+  /** #1038 — the caller's stop, checked once per step boundary (and forwarded to
+   *  `SequenceOptions.signal` for the candidate boundaries). */
+  signal?: AbortSignal;
   /** Absent → {@link DEFAULT_RELEASE_TABS} (the part must stay held until the last cut touches it). */
   tabs?: { count: number; width: number; height: number };
   /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
@@ -2532,7 +2536,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         let ir: ToolpathIR | null;
         try {
           ir = planStep(prefix[i]!, prefix.slice(0, i));
-        } catch {
+        } catch (e) {
+          if (isAbortError(e)) throw e;
           ir = null;
         }
         if (ir !== null) prefixIrs.push(ir);
@@ -2788,6 +2793,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   const planStep: SequenceOptions['planStep'] = (step, prefix) => {
     const signature = stepKey(step, prefix);
     if (irCache.has(signature)) return irCache.get(signature)!;
+    opts.signal?.throwIfAborted();
     opts.onStep?.(step.kind);
     // The outcome cache uses the SAME key as the IR cache (a rest's regions depend on its prefix),
     // and the chosen chain's ops build reads it back by `stepKey` — the two must agree or a rest's
@@ -2800,6 +2806,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         try {
           outcome = planRegion(id, step, prefix);
         } catch (err) {
+          if (isAbortError(err)) throw err;
           const reason = err instanceof Error ? err.message : String(err);
           if (!regionFailures.has(id)) regionFailures.set(id, { kind: step.kind, cutterKey: step.cutter.key, regionIds: [id], reason });
           const signature = stepSignature(step);
@@ -2833,6 +2840,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     planStep,
     maxCutters: opts.maxCutters,
     ...(opts.onCandidate === undefined ? {} : { onCandidate: opts.onCandidate }),
+    ...(opts.signal === undefined ? {} : { signal: opts.signal }),
     ...(opts.goalCoverage === undefined
       ? {}
       : {
@@ -2846,7 +2854,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
               let ir: ToolpathIR | null;
               try {
                 ir = planStep(step, already);
-              } catch {
+              } catch (e) {
+                if (isAbortError(e)) throw e;
                 ir = null;
               }
               if (ir !== null) irs.push(ir);
@@ -3324,6 +3333,8 @@ export interface PlanCurvedOptions {
    * report in between the plan's own stage lines.
    */
   onStage?: (kind: PlannedOp['kind']) => void;
+  /** #1038 — the caller's stop, checked once per stage attempt (see `PlanPocketsOptions.signal`). */
+  signal?: AbortSignal;
   /**
    * The three tools the curved pipeline uses: the flat roughs, the ball finishes, the V breaks
    * rims. Absent (#869/#966): no rough at all — the ball alone takes each remainder region's
@@ -3472,6 +3483,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   // other stages and regions still plan. Returns whether the stage planned.
   const unplanned: SequenceStepFailure[] = [];
   const attempt = (kind: PlannedOp['kind'], cutter: Tool, ref: RegionRef, plan: () => OpOutcome): boolean => {
+    opts.signal?.throwIfAborted();
     opts.onStage?.(kind);
     try {
       pushStage(kind, ref, plan());
@@ -4256,6 +4268,8 @@ export interface PlanTreeOptions {
    * only — nothing per cell — so reporting costs nothing measurable.
    */
   onProgress?: (op: ModelPlanProgress['op'], fraction: number) => void;
+  /** #1038 — the caller's stop, checked at the same boundary hooks (one per tick). */
+  signal?: AbortSignal;
 }
 
 /** #1021 — see {@link PlanTreeOptions.floorStrips}. */
@@ -4433,6 +4447,7 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
               onStep: (kind: PlannedOpKind) => opts.onProgress!(kind, 0.4),
               onCandidate: () => opts.onProgress!('sequence', 0.4),
             }),
+        ...(opts.signal === undefined ? {} : { signal: opts.signal }),
       });
   // #1021 — the floor strips are decided HERE, after the chain: only the cutters THIS plan runs
   // as rest can own a strip.
@@ -4444,6 +4459,7 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
   const curvedResult = planCurvedForTree(tree, {
     ...opts.curved,
     ...(opts.onProgress === undefined ? {} : { onStage: (kind: PlannedOp['kind']) => opts.onProgress!(kind, 0.7) }),
+    ...(opts.signal === undefined ? {} : { signal: opts.signal }),
     ...(extraRegions.length === 0 ? {} : { extraRegions }),
     ...(stripped === undefined || stripped.masks.size === 0 ? {} : { extraRegionMasks: stripped.masks }),
     offset: opts.offset,

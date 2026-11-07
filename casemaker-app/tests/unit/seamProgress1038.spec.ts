@@ -105,28 +105,35 @@ describe('#1038 — the goal plan reports its stages', () => {
   );
 
   it.skipIf(TRAY_STL === null || !existsSync(TRAY_STL))(
-    'aborting mid-plan stops the planner — the watchdog’s cancel reaches planModelCam',
+    'a stop raised mid-plan lands within one boundary — at most one further tick, then the refusal',
     async () => {
       const job = trayJob(TRAY_STL!);
       const ctrl = new AbortController();
       const events: EngraveProgress[] = [];
       let abortedAt: number | null = null;
+      let afterAbort = 0;
       const gen = await generateGoalProgram(job, job.targetObject!, X42, null, {
         shop: { tools: [X42_ENTRY] },
         signal: ctrl.signal,
         onProgress: (p) => {
           events.push(p);
-          // Abort from INSIDE the plan: by the first planner report the planner is mid-plan, so
-          // the abort can only stop it if `signal` is forwarded and checked between stages.
-          if (abortedAt === null && /planning/i.test(p.label ?? '')) {
+          if (abortedAt !== null) {
+            afterAbort++;
+            return;
+          }
+          // MID-PLAN: the 40 % line comes before the pocket chain (the 429 s stretch on the
+          // plate); a stop raised here can only land quickly if the signal is checked at the
+          // boundary hooks, not only between stages.
+          if (/planning: .* — setup 1, 40 %/.test(p.label ?? '')) {
             abortedAt = events.length;
             ctrl.abort();
           }
         },
       });
-      expect(abortedAt).not.toBeNull();
-      // At the tip the seam took no signal at all: the whole plan ran and posted (`ok: true`).
-      // With the signal forwarded, the planner throws at its next checkpoint and nothing posts.
+      expect(abortedAt, `no 40 % tick was reported; events: ${events.map((e) => e.label).join(' | ')}`).not.toBeNull();
+      // One check per boundary: the hook after the abort throws before emitting, so the abort
+      // costs at most one further report and the refusal follows (never the full plan).
+      expect(afterAbort, `events after the abort: ${events.slice(abortedAt!).map((e) => e.label).join(' | ')}`).toBe(0);
       expect(gen.ok).toBe(false);
       expect(gen.nc).toBeNull();
       expect(gen.errors.map((e) => `${e.stage}: ${e.message}`).join(' | ')).toMatch(/abort/i);
