@@ -97,7 +97,9 @@ describe('#1052 the finish move cap', () => {
     expect(err.moves).toBeGreaterThan(smallCap);
     expect(err.region).toBe('scoop');
     expect(err.cap).toBe(smallCap);
-    expect(err.message).toContain('passed');
+    // The pre-build estimate is the gate; a count that only crosses during the build raises the
+    // same class with "passed". Either way the number and the cap are in the sentence.
+    expect(err.message).toMatch(/would build about|passed/);
     expect(err.message).toContain('the cap is 1,000 per op');
   });
 
