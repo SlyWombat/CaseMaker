@@ -98,6 +98,12 @@ export function sidesSentence(plan: FlipPlan): string {
   return plan.sides.map((s) => sideWords(s.faceUp)).join(', then ');
 }
 
+/** #1068 — the flip's locating holes go this far past the stock's underside, mm. */
+export const FLIP_HOLE_BREAKTHROUGH_MM = 2;
+
+/** #1068 — the drawer's one action verb, when the plan can be accepted as the job stands. */
+export const FLIP_ACTION_LABEL = 'Add the flipped setup';
+
 /**
  * The finding for one goal: nothing when the target is not a goal; an INFO when the top setup
  * leaves less than the small amount; a WARNING with the split, and the plan when one is worth it.
@@ -108,6 +114,13 @@ export function goalFlipFindings(
   /** #911 — the LOCATION's cutters, so the hold sentence names the shop's own drill (or says
    *  there is none among them), rather than the app's default registry. */
   tools?: readonly { key: string; tool: Tool }[],
+  /**
+   * #1068 — THE MATERIAL UNDER THE STOCK the locating holes would enter, mm: the job's own
+   * sacrificial board, else the bed's wasteboard, else 0 (a bare bed). The offer is validated
+   * against it before it is made — an offer that would refuse when accepted is the same false
+   * statement as a refusal of the real setup. Absent: the job's own board only.
+   */
+  underMm: number = job.sacrificial.under?.thickness ?? 0,
 ): JobFinding[] {
   const offer = goalSurfaceOffer(job, goal);
   if (offer === null) return [];
@@ -120,6 +133,7 @@ export function goalFlipFindings(
   const planWords = coveragePercent(plan.reachedFraction);
   const facingWords = coveragePercent(first.facingAwayMm2 / first.totalMm2);
   const shadowWords = coveragePercent(first.shadowedMm2 / first.totalMm2);
+  const unreachedWords = coveragePercent(unreached);
 
   if (unreached <= COVERAGE_SMALL_FRACTION) {
     return [
@@ -136,23 +150,38 @@ export function goalFlipFindings(
     ];
   }
 
+  // #1068 — THE SENTENCE IS THE FACT AND NOTHING ELSE. A proposal is an ACTION, never a step: what
+  // a flip would involve (the sides, the locating holes, the second setup's registration) lives in
+  // `goalFlipDetail`, shown only inside the drawer's action's own expansion. A warning that reads
+  // "Setup 1 drills…" is read at the machine as a step.
   const split =
-    `${facingWords} of its surface faces away from the tool — downward faces and undercuts — and ` +
-    `${shadowWords} lies in an overhang's shadow, so it is not cut from this side.`;
+    `${unreachedWords} of the goal faces away from this setup and is left as stock — ` +
+    `${facingWords} of its surface is downward faces and undercuts, and ${shadowWords} lies in an ` +
+    `overhang's shadow, so it is not cut from this side.`;
+  const noFlip =
+    plan.sides.length <= 1
+      ? plan.stopped === 'only-flat-faces-remain'
+        ? ` What remains is the stock's own flat face, so no second setup is proposed.`
+        : ` No side this mount can hold reaches more of it, so no second setup is proposed.`
+      : '';
+  // THE OFFER, VALIDATED BEFORE IT IS MADE. The locating holes reach `thickness + 2`: they need
+  // that much material under the stock, and a cutter among the shop's own that can drill them.
   const hold =
     plan.sides.length > 1 ? dowelHold(job, goal, plan.sides[1]!.rotate?.about ?? 'x', tools) : null;
-  const holdWords =
-    plan.sides.length <= 1
-      ? ''
-      : hold !== null
-        ? ` Setup 1 drills two ⌀${hold.diameterMm} mm locating holes ${hold.depthMm} mm deep in the margin, clear of the part, and setup 2 registers on them.`
-        : ` Setup 2 needs two locating holes to register on; none of your cutters is a drill, so record one in Manage › Tools first.`;
-  const proposal =
-    plan.sides.length > 1
-      ? ` A flip finishes it: ${sidesSentence(plan)} — ${plan.sides.length} setups reach ${planWords} of the surface. That is the geometry the sides expose: how much of it the CHOSEN CUTTER reproduces is the run's own simulation verdict.${holdWords}`
-      : plan.stopped === 'only-flat-faces-remain'
-        ? ` What remains is the stock's own flat face, so no second setup is proposed.`
-        : ` No side this mount can hold reaches more of it, so no second setup is proposed.`;
+  const canOffer = plan.sides.length > 1 && hold !== null && underMm >= FLIP_HOLE_BREAKTHROUGH_MM;
+  const need =
+    plan.sides.length <= 1 || canOffer
+      ? undefined
+      : hold === null
+        ? 'needs a drill among your cutters — record one in Manage › Tools'
+        : 'needs a sacrificial board under the blank';
+  const detail =
+    hold === null
+      ? undefined
+      : `${sidesSentence(plan)} — ${plan.sides.length} setups reach ${planWords} of the surface; ` +
+        `how much of it the chosen cutter reproduces is the run's own simulation verdict. ` +
+        `The first setup drills two ⌀${hold.diameterMm} mm locating holes ${hold.depthMm} mm deep in ` +
+        `the margin, clear of the part, and the flipped setup registers on them.`;
   return [
     {
       severity: 'warning',
@@ -160,7 +189,9 @@ export function goalFlipFindings(
       targetId: goal.id,
       goalReachedFraction: plan.reachedFraction,
       ...(plan.sides.length > 1 ? { goalFlipSides: plan.sides.map((s) => s.faceUp) } : {}),
-      message: `The top setup reproduces ${topWords} of the goal's surface. ${split}${proposal}`,
+      ...(canOffer ? { goalFlipAction: FLIP_ACTION_LABEL, ...(detail === undefined ? {} : { goalFlipDetail: detail }) } : {}),
+      ...(need === undefined ? {} : { goalFlipNeed: need }),
+      message: `The top setup reproduces ${topWords} of the goal's surface. ${split}${noFlip}`,
     },
   ];
 }
@@ -170,10 +201,15 @@ export function goalFlipFindings(
  * `jobReachFindings`. A ROTARY job is not judged by the flat frame (its goal's local Z is radial,
  * the same rule the reach check states): the rotary's own checks and the sweep judge it.
  */
-export function jobFlipFindings(job: EngraveJob, tools?: readonly { key: string; tool: Tool }[]): JobFinding[] {
+export function jobFlipFindings(
+  job: EngraveJob,
+  tools?: readonly { key: string; tool: Tool }[],
+  /** #1068 — the material under the stock the flip's holes would enter, mm (see `goalFlipFindings`). */
+  underMm?: number,
+): JobFinding[] {
   if (rotaryMapOf(job) !== null) return [];
   const out: JobFinding[] = [];
-  for (const goal of jobTargetObjects(job)) out.push(...cachedFlipFindings(job, goal, tools));
+  for (const goal of jobTargetObjects(job)) out.push(...cachedFlipFindings(job, goal, tools, underMm));
   return out;
 }
 
@@ -187,7 +223,12 @@ export function jobFlipFindings(job: EngraveJob, tools?: readonly { key: string;
 const flipCache = new Map<string, JobFinding[]>();
 const FLIP_CACHE_MAX = 8;
 
-function cacheKey(job: EngraveJob, goal: EngraveTargetObject): string {
+function cacheKey(
+  job: EngraveJob,
+  goal: EngraveTargetObject,
+  tools: readonly { key: string; tool: Tool }[] | undefined,
+  underMm: number | undefined,
+): string {
   const s = goal.scale ?? { x: 1, y: 1, z: 1 };
   return [
     goal.sha256,
@@ -202,6 +243,11 @@ function cacheKey(job: EngraveJob, goal: EngraveTargetObject): string {
     s.x, s.y, s.z,
     job.stock.length, job.stock.width, job.stock.thickness,
     jobMount(job),
+    // #1068 — THE OFFER DEPENDS ON THESE TOO: the material under the stock (a board added or
+    // removed changes the need) and the cutters the shop owns (a drill recorded changes the hold
+    // sentence). A cached offer that outlived either would be a false statement.
+    underMm ?? job.sacrificial.under?.thickness ?? 0,
+    (tools ?? []).map((t) => t.key).join(','),
   ].join('|');
 }
 
@@ -209,11 +255,12 @@ function cachedFlipFindings(
   job: EngraveJob,
   goal: EngraveTargetObject,
   tools?: readonly { key: string; tool: Tool }[],
+  underMm?: number,
 ): JobFinding[] {
-  const key = cacheKey(job, goal);
+  const key = cacheKey(job, goal, tools, underMm);
   const hit = flipCache.get(key);
   if (hit !== undefined) return hit;
-  const computed = goalFlipFindings(job, goal, tools);
+  const computed = goalFlipFindings(job, goal, tools, underMm);
   flipCache.set(key, computed);
   if (flipCache.size > FLIP_CACHE_MAX) {
     const first = flipCache.keys().next().value;

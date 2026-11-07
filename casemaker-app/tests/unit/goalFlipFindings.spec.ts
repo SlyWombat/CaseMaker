@@ -8,8 +8,10 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { buildRunSheet, type RunSheetGenerated } from '@/engine/cnc/engrave/runSheet';
 import { clearTargetObjectMeshCache, readTargetObjectFile } from '@/engine/import/targetObject';
-import { goalFlipFindings, goalSurfaceOffer } from '@/engine/cnc/engrave/goalFlipFindings';
+import { FLIP_ACTION_LABEL, goalFlipFindings, goalSurfaceOffer } from '@/engine/cnc/engrave/goalFlipFindings';
+import { flatEndMill } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 
 afterEach(() => clearTargetObjectMeshCache());
@@ -36,6 +38,20 @@ async function goalOf(name: string): Promise<{ job: EngraveJob; goal: EngraveTar
   return { job, goal };
 }
 
+/** A board under the stock, mm — the material a flip's locating holes would enter. */
+function withBoard(job: EngraveJob, thickness: number): EngraveJob {
+  return {
+    ...job,
+    sacrificial: {
+      ...job.sacrificial,
+      under: { thickness, overhang: { left: 0, right: 0, front: 0, back: 0 }, attach: 'tape' },
+    },
+  };
+}
+
+/** A cutter a locating hole is made with: a 3 mm flat, which `ownedDrill` accepts as a pin mill. */
+const PIN = { key: 'user:pin-3', tool: flatEndMill(3) };
+
 describe('#872 the goal-unreached finding', () => {
   it('a relief: the split is stated, and no flip is proposed — its remainder is a flat face', async () => {
     const { job, goal } = await goalOf('relief-plate.stl');
@@ -49,25 +65,77 @@ describe('#872 the goal-unreached finding', () => {
     expect(finding!.code).toBe('goal-unreached');
     expect(finding!.targetId).toBe(goal.id);
     expect(finding!.message).toMatch(/The top setup reproduces \d/);
-    expect(finding!.message).toMatch(/faces away from the tool/);
+    expect(finding!.message).toMatch(/faces away from this setup and is left as stock/);
     expect(finding!.message).toMatch(/flat face/);
     expect(finding!.goalFlipSides).toBeUndefined();
+    expect(finding!.goalFlipAction).toBeUndefined();
+    expect(finding!.goalFlipNeed).toBeUndefined();
   });
 
-  it('a sphere: the plan is offered, with the bottom named as the second side', async () => {
+  it('a sphere: the fact is the sentence, and the offer is ONE action with its detail folded away', async () => {
     const { job, goal } = await goalOf('near-sphere.stl');
-    const [finding] = goalFlipFindings(job, goal);
+    // #1068 — the offer is validated before it is made: the locating holes go through the stock
+    // into a board, so the job carries one, and a cutter the shop owns can drill it.
+    const [finding] = goalFlipFindings(withBoard(job, 6), goal, [PIN]);
     expect(finding).toBeDefined();
     expect(finding!.severity).toBe('warning');
     expect(finding!.goalFlipSides).toEqual(['top', 'bottom']);
     expect(finding!.goalReachedFraction).toBeGreaterThan(0.9);
-    expect(finding!.message).toMatch(/A flip finishes it: top, then bottom — 2 setups reach/);
-    // The percentage is the GEOMETRY the sides expose; the cutter's own reproduction is the run's
-    // simulation verdict (#869 lifts it). The sentence says so rather than promising a finish.
-    expect(finding!.message).toMatch(/how much of it the CHOSEN CUTTER reproduces is the run's own simulation verdict/);
-    // The hold the flip needs is stated: the default registry owns no drill, and the sentence
-    // says which one to record rather than planning a registration with nothing to sit on.
-    expect(finding!.message).toMatch(/locating holes/);
+    // THE SENTENCE IS THE FACT — no proposal, no steps, no numbered setups.
+    expect(finding!.message).toMatch(/faces away from this setup and is left as stock/);
+    expect(finding!.message).not.toMatch(/Setup 1 drills|A flip finishes it|locating holes/);
+    // THE PROPOSAL IS ONE ACTION, and what it involves lives in the action's own expansion.
+    expect(finding!.goalFlipAction).toBe(FLIP_ACTION_LABEL);
+    expect(finding!.goalFlipNeed).toBeUndefined();
+    expect(finding!.goalFlipDetail).toMatch(/^top, then bottom/);
+    expect(finding!.goalFlipDetail).toMatch(/2 setups reach \d+ % of the surface/);
+    expect(finding!.goalFlipDetail).toMatch(/how much of it the chosen cutter reproduces is the run's own simulation verdict/);
+    // 12 mm stock + the 2 mm breakthrough = the hole depth the detail states.
+    expect(finding!.goalFlipDetail).toMatch(/two ⌀3 mm locating holes 14 mm deep in the margin, clear of the part/);
+    expect(finding!.goalFlipDetail).toMatch(/the flipped setup registers on them/);
+  });
+
+  it('a bare bed: no action is offered — the row states what the flip needs', async () => {
+    const { job, goal } = await goalOf('near-sphere.stl');
+    // 27 mm holes in a 25 mm blank: the same shape as the M1 tray's own case. With no board the
+    // holes would post below the bed, and an offer that refuses when accepted is a false offer.
+    const trayLike: EngraveJob = {
+      ...job,
+      stock: { ...job.stock, thickness: 25 },
+      sacrificial: { ...job.sacrificial, under: null },
+    };
+    const [finding] = goalFlipFindings(trayLike, goal, [PIN], 0);
+    expect(finding!.goalFlipAction).toBeUndefined();
+    expect(finding!.goalFlipNeed).toBe('needs a sacrificial board under the blank');
+    // The fact still stands, and the plan's sides still ride (the panel's press reads them).
+    expect(finding!.goalFlipSides).toEqual(['top', 'bottom']);
+    expect(finding!.message).toMatch(/faces away from this setup and is left as stock/);
+    // A board thin enough to leave the holes short of the bed is the same need.
+    expect(goalFlipFindings(withBoard(trayLike, 1), goal, [PIN], 1)[0]!.goalFlipNeed).toBe(
+      'needs a sacrificial board under the blank',
+    );
+    // …and a board that can take the breakthrough turns the need into the action.
+    expect(goalFlipFindings(withBoard(trayLike, 6), goal, [PIN], 6)[0]!.goalFlipAction).toBe(FLIP_ACTION_LABEL);
+  });
+
+  it('no cutter that can drill: no action is offered — the row says which cutter is missing', async () => {
+    const { job, goal } = await goalOf('near-sphere.stl');
+    const [finding] = goalFlipFindings(withBoard(job, 6), goal, []);
+    expect(finding!.goalFlipAction).toBeUndefined();
+    expect(finding!.goalFlipNeed).toBe('needs a drill among your cutters — record one in Manage › Tools');
+  });
+
+  it('the accepted fact is the sheet’s line too — its warnings section states it verbatim', async () => {
+    const { job, goal } = await goalOf('near-sphere.stl');
+    const sheetJob = withBoard(job, 6);
+    const findings = goalFlipFindings(sheetJob, goal, [PIN]);
+    const generated: RunSheetGenerated = { findings, feeds: null, cam: null, nc: '', verify: null, frameNc: null };
+    const sheet = buildRunSheet(sheetJob, generated, null);
+    const warnings = sheet.sections.find((s) => s.id === 'warnings');
+    expect(warnings, 'the sheet carries the run’s findings').toBeDefined();
+    const text = warnings!.steps.map((s) => s.text).join('\n');
+    expect(text).toContain('faces away from this setup and is left as stock');
+    expect(text).not.toContain('Setup 1 drills');
   });
 
   it('a reference object is not a goal and gets no finding', async () => {

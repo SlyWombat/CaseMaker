@@ -1188,7 +1188,15 @@ export function EngravePanel(): JSX.Element {
     // sentence measures, the split, and the flip plan's one press when a side earns its setup.
     // #911 — the location's cutters travel with the finding: its hold sentence names the shop's
     // own drill (or says there is none among them), never the app's default registry.
-    ...jobFlipFindings(job, tools),
+    // #1068 — so does the material under the stock the flip's locating holes would enter: the
+    // job's own board, else the bed's wasteboard, else none. The offer is validated against it, so
+    // a plan whose holes would post below the bed states its need instead of offering the press.
+    ...jobFlipFindings(
+      job,
+      tools,
+      job.sacrificial.under?.thickness ??
+        (bedFacts?.surface === 'wasteboard' && bedFacts.wasteboardMm !== null ? bedFacts.wasteboardMm : 0),
+    ),
     // #513 — the bed: a job planned on a bed that is not there now (`bed-changed`, a WARNING here
     // with its two presses — the Cut gate makes it the error), a mount the bed does not have, a
     // stock that leaves the board, an unmeasured datum the mount's registration would need. A bed
@@ -5089,13 +5097,26 @@ export function EngravePanel(): JSX.Element {
                       </span>
                     );
                   })()}
-                  {/* #872 — the flip plan's one press: the sides the run measured are added as
-                      setups, the goal copied into each one's work frame, and Generate runs. */}
-                  {f.code === 'goal-unreached' && (f.goalFlipSides?.length ?? 0) > 1 && job.targetObject?.id === f.targetId && (
-                    <span style={{ flexShrink: 0, marginLeft: 'auto' }}>
+                  {/* #872/#1068 — THE FLIP OFFER IS ONE ACTION, NEVER A STEP. The warning states the
+                      fact; what the flip would involve (the sides, the locating holes, the second
+                      setup's registration) lives only in the action's own fold, and a plan this job
+                      cannot accept states its need where the action would be. */}
+                  {f.code === 'goal-unreached' && job.targetObject?.id === f.targetId && f.goalFlipAction !== undefined && (
+                    <span style={{ flexShrink: 0, marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
                       <button type="button" data-testid="engrave-goal-add-flip" onClick={() => addFlipPlan(f)}>
-                        Add the {f.goalFlipSides!.length} setups
+                        {f.goalFlipAction}
                       </button>
+                      {f.goalFlipDetail !== undefined && (
+                        <details data-testid="engrave-goal-flip-detail" style={{ maxWidth: 360 }}>
+                          <summary style={{ ...MUTED, cursor: 'pointer', fontSize: 11, textAlign: 'right' }}>If you add it:</summary>
+                          <div style={{ color: '#aab4bf', fontSize: 11, marginTop: 2 }}>{f.goalFlipDetail}</div>
+                        </details>
+                      )}
+                    </span>
+                  )}
+                  {f.code === 'goal-unreached' && job.targetObject?.id === f.targetId && f.goalFlipNeed !== undefined && (
+                    <span style={{ flexShrink: 0, marginLeft: 'auto', color: SEVERITY_COLOR.info }} data-testid="engrave-goal-flip-need">
+                      {f.goalFlipNeed}
                     </span>
                   )}
                   {/* #786 slice 4c-2 — the plunge question, answered in place. The write goes to
