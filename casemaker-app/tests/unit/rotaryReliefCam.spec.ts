@@ -123,6 +123,33 @@ describe('#723 R-2 — the relief program posts, parses and sweeps to the cone',
     expect(ir.radius).toBe(R);
   });
 
+  it('#1061 — a goal reaching into the chuck/jaws band is CLIPPED, stated, and no word goes left of X 3', () => {
+    // The same cone placed at X 10 (its span −5 … 25): its left end lies inside the keep-out band.
+    const field = sampleGoalRadialField({ ...goal(), position: { x: 10, y: 0, z: 0 } }, R, { pitchMm: 0.5 });
+    expect(field.x0).toBeLessThan(3);
+    const ir = generateRotaryReliefIR({
+      field,
+      tool: BALL2,
+      toolNumber: 1,
+      spindleRpm: 12000,
+      air: true,
+      feeds: FEEDS,
+      rapid: RAPID,
+      stockToLeaveMm: ALLOWANCE,
+    });
+    // The CAM says what it clipped; every planned move starts right of the band (the band plus the
+    // ball's radius is where the EDGE clears, so X 3 is the floor the acceptance asks for).
+    expect(ir.clippedFromX).toBeCloseTo(field.x0, 6);
+    const posted = postZ1(ir.ir, ctx(), Z1);
+    if (!posted.ok) throw new Error(posted.errors.slice(0, 3).join('; '));
+    const xs = posted.text
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith(';'))
+      .flatMap((line) => [...line.matchAll(/X(-?\d+(?:\.\d+)?)/g)].map((m) => Number(m[1])));
+    expect(xs.length).toBeGreaterThan(0);
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(3);
+  });
+
   it('the finishing passes hold one A angle and the roughing turns A', () => {
     const { ir } = build();
     const fin = ir.finishing.moves.filter((m) => m.kind === 'feed');

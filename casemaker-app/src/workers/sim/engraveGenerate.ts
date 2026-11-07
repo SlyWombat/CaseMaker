@@ -222,8 +222,8 @@ import type { FaceFrame } from '@/engine/cnc/rotary/faceOps';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { faceCutIntoNeck, faceJobRefusal, planFaceCuts } from '@/engine/cnc/rotary/faceOps';
 import { rotaryMapOf, toRotaryIR } from '@/engine/cnc/rotary/wrap';
-import { rotaryFreeSpan, freeEndSentence, jawsSentence, tailstockSentence, throughCentreSentence } from '@/engine/cnc/rotary/wrap';
-import { generateRotaryReliefIR, sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
+import { rotaryFreeSpan, freeEndSentence, tailstockSentence, throughCentreSentence } from '@/engine/cnc/rotary/wrap';
+import { generateRotaryReliefIR, reliefKeepOutX, sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
 import { ceilingName, effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { ORACLE_SHALLOW_DEPTH_FRACTION, type OraclePoint, type OraclePredicted, type OracleThreadMove } from '@/engine/cnc/engrave/oracle';
 import { designCutterOf, type DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
@@ -4647,11 +4647,18 @@ export function generateRotaryGoalProgram(
     });
   }
   const span = rotaryFreeSpan(rotary);
-  if (field.x0 < span.from) {
+  // #1061 — THE CHUCK/JAWS KEEP-OUT IS CLIPPED, STATED, NEVER CUT (the maintainer's rule): the
+  // relief CAM drops every column left of the band plus the cutter's radius, and the program posts
+  // the rest. What used to refuse such a goal now states what will not be cut.
+  const keepOutX = reliefKeepOutX(tool);
+  if (field.x0 < keepOutX - 1e-9) {
     findings.push({
-      severity: 'error',
-      code: 'wrap-into-clamp',
-      message: `The goal "${goal.name}" ${jawsSentence(field.x0)}`,
+      severity: 'warning',
+      code: 'goal-rotary-in-chuck',
+      message:
+        `The goal "${goal.name}" starts at X ${Number(field.x0.toFixed(3))} mm, inside the chuck's keep-out band: ` +
+        `the jaws' reach depends on the grip, so no height over them is clear — every move stays right of the jaw tips ` +
+        `(X ≥ 3 mm), and the first ${Number((keepOutX - field.x0).toFixed(3))} mm of the goal is not cut.`,
       labelId: goal.id,
     });
   }

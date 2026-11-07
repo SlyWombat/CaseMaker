@@ -173,16 +173,20 @@ describe('the rotary refusals — operator words, at the step', () => {
     expect(finding(['G0 X40 Z15 A90', 'G1 Z-2 F100', 'G1 A120 F300', 'G0 Z15'], 'axis-crossing')).toBeDefined();
   });
 
-  it('#729 — a rapid into the chuck: past the jaw face below the rod’s clearance', () => {
+  it('#1061 — a rapid into the chuck: past the jaw tips at ANY Z (the Z allowance retired)', () => {
     // From above the rod down and back over the jaws: both ends could look clear, the line is not.
     const body = ['G0 X20 Z15 A0', 'G0 X-5 Z11'];
     const f = finding(body, 'rapid-into-chuck');
     expect(f).toBeDefined();
     expect(f!.line).toBe(lineOf(body, 'G0 X-5 Z11'));
-    expect(f!.message).toContain('past the jaw face (X 0) below Z 13');
+    expect(f!.message).toContain('no height over them is clear');
+    expect(f!.message).toContain('X ≥ 3 mm');
     expect(f!.message).not.toMatch(CODE);
-    // Over the chuck above the clearance height is fine.
-    expect(finding(['G0 X20 Z15 A0', 'G0 X-5 Z15'], 'rapid-into-chuck')).toBeUndefined();
+    // #1061 (the maintainer's rule) — THE Z ALLOWANCE IS GONE: over the chuck above the clearance
+    // height is refused too, because the jaws' reach depends on the grip and no height is clear.
+    const high = finding(['G0 X20 Z15 A0', 'G0 X-5 Z15'], 'rapid-into-chuck');
+    expect(high).toBeDefined();
+    expect(high!.message).toContain('no height over them is clear');
   });
 
   it('a rapid that TRAVERSES along the axis in the cut is the same hazard', () => {

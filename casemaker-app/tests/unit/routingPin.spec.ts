@@ -32,9 +32,13 @@ function denseFlatProgram(): string {
   return lines.join('\n');
 }
 
-const WRAPPED = ['S1000 M3', 'G0 X0 Y0 Z30 A0', 'G1 Z5 F100', 'G1 A360 F500', 'G0 Z30'].join('\n');
+// #1061 — likewise right of the chuck/jaws keep-out (X 0 cut inside the band): the routing pin
+// is what this fixture tests, not a program the CAM would now post.
+const WRAPPED = ['S1000 M3', 'G0 X4 Y0 Z30 A0', 'G1 Z5 F100', 'G1 A360 F500', 'G0 Z30'].join('\n');
 /** Indexed: A changes only BETWEEN cuts, so the exact engine is the right one. */
-const INDEXED = ['S1000 M3', 'G0 X2 Y0 Z30 A0', 'G1 Z5 F100', 'G1 X10', 'G0 Z30', 'G0 A90', 'G1 Z5 F100', 'G1 X10', 'G0 Z30'].join('\n');
+// #1061 — the indexed program starts at X 4, right of the chuck/jaws keep-out (the ⌀1 cutter's
+// edge clears the 3 mm band at X 3.5); its routing pin is unchanged.
+const INDEXED = ['S1000 M3', 'G0 X4 Y0 Z30 A0', 'G1 Z5 F100', 'G1 X10', 'G0 Z30', 'G0 A90', 'G1 Z5 F100', 'G1 X10', 'G0 Z30'].join('\n');
 
 /** A minimal solid — the refusal under test happens before the seed is ever read. */
 function seedMesh(): NodeMeshOutput {

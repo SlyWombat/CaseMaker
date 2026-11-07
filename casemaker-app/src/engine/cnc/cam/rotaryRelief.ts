@@ -33,6 +33,7 @@
  */
 
 import type { EngraveTargetObject } from '@/types/engraveJob';
+import { ROTARY_JAW_KEEP_OUT_MM } from '@/engine/cnc/rotary/wrap';
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import { targetScale } from '@/engine/cnc/engrave/targetScale';
 import { DEFAULT_GRID_PITCH_MM, DEFAULT_MAX_CELLS, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
@@ -324,6 +325,43 @@ export function radialFieldAsHeightfield(field: GoalRadialField): GoalHeightfiel
   };
 }
 
+/**
+ * #1061 — THE LINE THE RELIEF CAM KEEPS EVERY PLANNED MOVE TO THE RIGHT OF, mm: the jaws' keep-out
+ * band plus the cutter's radius, so the cutter's EDGE (not only its tip) stays clear — the same
+ * wall `wrap-into-clamp` judges. Exported so the job path states the same clip line the CAM uses.
+ */
+export function reliefKeepOutX(tool: Tool): number {
+  return ROTARY_JAW_KEEP_OUT_MM + (cuttingDiameter(tool) ?? 0) / 2;
+}
+
+/**
+ * #1061 — CLIP A RADIAL FIELD TO THE CHUCK/JAWS KEEP-OUT: columns whose map X lies left of
+ * `keepOutX` are dropped before any move is planned, so nothing the CAM writes can reach into the
+ * band. Returns the field unchanged when it already clears the line.
+ */
+function clipFieldX(field: GoalRadialField, keepOutX: number): { field: GoalRadialField; clippedFromX: number | null } {
+  if (field.x0 >= keepOutX - 1e-9) return { field, clippedFromX: null };
+  const drop = Math.min(field.nx, Math.ceil((keepOutX - field.x0) / field.pitch - 1e-9));
+  const nx = field.nx - drop;
+  if (nx <= 0) {
+    throw new Error(
+      `a rotary relief entirely inside the chuck's keep-out band cannot be cut: the goal lies left of X ${Number(keepOutX.toFixed(3))} mm, where the jaws are`,
+    );
+  }
+  const z = new Float32Array(nx * field.ny);
+  const covered = new Uint8Array(nx * field.ny);
+  let coveredCount = 0;
+  for (let j = 0; j < field.ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const from = j * field.nx + (i + drop);
+      z[j * nx + i] = field.z[from]!;
+      covered[j * nx + i] = field.covered[from]!;
+      if (covered[j * nx + i] === 1) coveredCount++;
+    }
+  }
+  return { field: { ...field, nx, x0: field.x0 + drop * field.pitch, z, covered, coveredCount }, clippedFromX: field.x0 };
+}
+
 export interface RotaryReliefArgs {
   field: GoalRadialField;
   /**
@@ -353,6 +391,11 @@ export interface RotaryReliefResult {
   roughingLayers: number;
   /** The design radius the program was wrapped at, mm. */
   radius: number;
+  /**
+   * #1061 — the goal's own left edge when the field was clipped to the chuck/jaws keep-out (null
+   * when nothing was clipped). The job path states the clip; the moves are all right of the line.
+   */
+  clippedFromX: number | null;
 }
 
 /**
@@ -388,10 +431,13 @@ export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResu
   if (!(diameter > 0)) throw new Error(`the rotary relief's cutter ${tool.name} states no cutting diameter`);
   const toolRadius = diameter / 2;
   const surfaceTool: SurfaceTool = { radius: toolRadius, ball: tool.shape === 'ball' || tool.shape === 'bull' };
-  const hf = radialFieldAsHeightfield(field);
+  // #1061 — the field is CLIPPED to the chuck/jaws keep-out before any move is planned: nothing
+  // in the program may reach into the band, at any Z.
+  const { field: cutField, clippedFromX } = clipFieldX(field, reliefKeepOutX(tool));
+  const hf = radialFieldAsHeightfield(cutField);
 
   // Roughing: the A sweeps at stepped radii, from the stock's own section surface.
-  const rough = aSweepRoughing(field, feeds, allowance, args.section);
+  const rough = aSweepRoughing(cutField, feeds, allowance, args.section);
   const roughing: CamOperation = {
     number: 1,
     name: `[T${args.toolNumber}] rotary 3D rough — ${allowance} mm to leave`,
@@ -438,6 +484,7 @@ export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResu
     finishing: ir.operations[1]!,
     roughingLayers: rough.layers,
     radius: field.radius,
+    clippedFromX,
   };
 }
 

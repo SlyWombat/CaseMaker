@@ -34,6 +34,7 @@ import { partToWork } from '@/engine/cnc/frames';
 import type { FixtureEnvelope, ObstacleBox, Setup, Workholding } from '@/engine/cnc/setup';
 import { holderOf, type Mill } from '@/engine/cnc/machine';
 import { inflate } from '@/engine/cnc/fixture';
+import { ROTARY_JAW_KEEP_OUT_MM } from '@/engine/cnc/rotary/wrap';
 import { hasSacrificial, sacrificialBoxes } from '@/engine/cnc/sacrificial';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
@@ -1708,34 +1709,22 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // engine; same condition (`!fixture`), same obstruction lookup, same message.
   const unchecked = fixtureUncheckedDiagnostic(setup.workholding, fixture !== null);
   if (unchecked) diagnostics.push(unchecked);
-  // #729 — A ROUND STOCK IN THE CHUCK. The rod runs X 0 → its length with X 0 at the jaws' face
-  // (#714), so the chuck (jaws and body) is everything at X < 0. Neither is modelled as a solid
-  // yet; the half-space is checked up to the JAWS' reach — half the jaw diameter above the axis, or
-  // the rod's top if that is higher — which is the height a tool over the chuck must clear. Any
-  // move whose cutter edge is past the jaw face (X − radius < 0) below that height is refused,
-  // tested along the WHOLE straight move (a rapid can cross the zone between two clear ends).
-  // The chuck body above the jaws is still not modelled; the TAILSTOCK is, when the setup states
-  // whether it is in (#241 slice 4). An absent flag keeps the pre-#241 behaviour (the synthetic
-  // setups and old documents), where nothing claimed to check it.
+  // #1061 (the maintainer's rule, 2026-11-07) — THE CHUCK AND JAWS ARE A FULL-HEIGHT KEEP-OUT.
+  // The rod runs X 0 → its length with X 0 at the jaws' face (#714), and the map's keep-out band is
+  // the first ROTARY_JAW_KEEP_OUT_MM mm of that stick-out. The jaws' radial reach depends on the
+  // grip's ⌀, so no Z over them is provably clear: every move's cutter EDGE must stay right of the
+  // jaw tips plus that margin, at ANY Z — tested along the WHOLE straight move (a rapid can cross
+  // the zone between two clear ends). The old "below the jaws' reach (half the jaw diameter)" limit
+  // is retired. The chuck body above the jaws is still not modelled; the TAILSTOCK is, when the
+  // setup states whether it is in (#241 slice 4). An absent flag keeps the pre-#241 behaviour (the
+  // synthetic setups and old documents), where nothing claimed to check it.
   if (setup.part.kind === 'cylinder') {
-    const jawReach =
-      setup.workholding.kind === 'rotary-chuck' ? Math.max(topZ, setup.workholding.jawDiameter / 2) : topZ;
-    /** Whether the straight move (x0,z0)→(x1,z1) enters {x − radius < 0, z < jawReach}. */
-    const crosses = (x0: number, z0: number, x1: number, z1: number): boolean => {
-      const span = (p0: number, p1: number, limit: number): [number, number] | null => {
-        // The t ∈ [0, 1] where p(t) < limit, as an interval, or null.
-        const d = p1 - p0;
-        if (Math.abs(d) < 1e-12) return p0 < limit - 1e-6 ? [0, 1] : null;
-        const t = (limit - 1e-6 - p0) / d;
-        return d > 0 ? (t > 0 ? [0, Math.min(1, t)] : null) : t < 1 ? [Math.max(0, t), 1] : null;
-      };
-      const sx = span(x0, x1, radius);
-      const sz = span(z0, z1, jawReach);
-      return sx !== null && sz !== null && Math.max(sx[0], sz[0]) < Math.min(sx[1], sz[1]) + 1e-12;
-    };
+    const keepOut = ROTARY_JAW_KEEP_OUT_MM + radius;
+    /** Whether the straight move x0 → x1 reaches inside the keep-out band, at any Z. */
+    const crosses = (x0: number, x1: number): boolean => Math.min(x0, x1) < keepOut - 1e-6;
     const jawHits: { line: number; x: number; z: number; kind: string }[] = [];
     for (const m of timeline.airMoves) {
-      if (crosses(m.from[0], m.from[2], m.to[0], m.to[2])) {
+      if (crosses(m.from[0], m.to[0])) {
         const at = m.from[0] < m.to[0] ? m.from : m.to;
         jawHits.push({ line: m.line, x: at[0], z: Math.min(m.from[2], m.to[2]), kind: m.kind === 'rapid' ? 'rapid' : 'spindle-off move' });
       }
@@ -1744,10 +1733,9 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
       for (let k = 0; k < cp.steps.length; k++) {
         const x0 = cp.xy[4 * k] as number;
         const x1 = cp.xy[4 * k + 2] as number;
-        const z0 = cp.zs[2 * k] as number;
-        const z1 = cp.zs[2 * k + 1] as number;
-        if (crosses(x0, z0, x1, z1)) {
-          jawHits.push({ line: eventLine(timeline.events, cp.steps[k] as number) ?? 0, x: Math.min(x0, x1), z: Math.min(z0, z1), kind: 'cut' });
+        // #1061 — the Z the cut runs at no longer matters: the keep-out is full height.
+        if (crosses(x0, x1)) {
+          jawHits.push({ line: eventLine(timeline.events, cp.steps[k] as number) ?? 0, x: Math.min(x0, x1), z: Math.min(cp.zs[2 * k] as number, cp.zs[2 * k + 1] as number), kind: 'cut' });
           break;
         }
       }
@@ -1760,9 +1748,9 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
         code: 'rotary-into-chuck',
         message:
           `line ${first.line}: a ${first.kind} reaches the chuck — the ⌀${(2 * radius).toFixed(3)} mm cutter's ` +
-          `edge goes past the jaw face (X 0) below Z ${jawReach.toFixed(3)} mm, the height the jaws reach above ` +
-          `the axis${jawHits.length > 1 ? ` (${jawHits.length} moves in all)` : ''}. Keep every pass a cutter ` +
-          `radius clear of the jaw face, and move over the chuck only above the jaws.`,
+          `edge goes past the jaw tips (the keep-out is the first ${ROTARY_JAW_KEEP_OUT_MM} mm of the stick-out) ` +
+          `at any Z: the jaws' reach depends on the grip, so no height over them is clear` +
+          `${jawHits.length > 1 ? ` (${jawHits.length} moves in all)` : ''}.`,
       });
     }
     // #723 R-4 review — the jaws' half-space check above stays; the INFO that raced with it does

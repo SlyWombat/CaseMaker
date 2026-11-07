@@ -41,7 +41,7 @@ import { checkpointStoreOf } from '@/engine/cnc/emulator/checkpointStore';
 import { eventLine, eventStoreOf } from '@/engine/cnc/gcode/eventStore';
 import { partToWork } from '@/engine/cnc/frames';
 import { aabbOfProfile } from '@/engine/compiler/profile';
-import { sectionRadiusAt } from '@/engine/cnc/rotary/wrap';
+import { ROTARY_JAW_KEEP_OUT_MM, sectionRadiusAt } from '@/engine/cnc/rotary/wrap';
 import type { ObstacleBox, Setup } from '@/engine/cnc/setup';
 import { cuttingDiameter, cuttingForTrace, drillPointAngle, type Tool } from '@/engine/cnc/tool';
 import { holderOf, type Mill } from '@/engine/cnc/machine';
@@ -2083,6 +2083,14 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   let ops = 0;
   let clampedMoves = 0;
   let clampedWorst = 0;
+  // #1061 — the chuck/jaws keep-out, full height: any move whose cutter EDGE reaches X < the jaw
+  // tips + the shop's margin is an error, at any Z. The jaws' radial reach depends on the grip, so
+  // no height over them is provably clear (the maintainer's rule; the exact sweeper, `verify` and
+  // `sweep.ts` carry the same wall).
+  let chuckHits = 0;
+  let chuckFirstLine: number | null = null;
+  const chuckReached = (x0: number, x1: number): boolean =>
+    rotary && Math.min(x0, x1) - cutter.radius < ROTARY_JAW_KEEP_OUT_MM - 1e-6;
 
   // #776 — the span sweep is exact for a rotary flat end mill's pure-A moves (see
   // `applyRotaryPureAFlat`); every other move, and the test seam that disables it, takes the
@@ -2091,6 +2099,10 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
 
   for (let k = 0; k < count; k++) {
     for (const m of movesOf(k)) {
+      if (chuckReached(m.u0, m.u1)) {
+        chuckHits++;
+        if (chuckFirstLine === null) chuckFirstLine = m.line;
+      }
       const r = (spanSweep ? applyRotaryPureAFlat(grid, m, cutter) : null) ?? param.applyMove(grid, m, cutter);
       ops += r.written;
       if (r.crossed) {
@@ -2215,6 +2227,10 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     let lastAirTickAt = performance.now();
     for (const mv of timeline.airMoves) {
       checked++;
+      if (chuckReached(mv.from[0], mv.to[0])) {
+        chuckHits++;
+        if (chuckFirstLine === null) chuckFirstLine = mv.line;
+      }
       // #923 — `rapid-into-fixture` / `feed-into-fixture`: tested before the "wholly above the
       // stock" cull below, because a fixture box can rise above the stock top
       // (`holder-vs-fixture-unproven` exists for exactly that case) and an air move entirely
@@ -2263,6 +2279,18 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   // #923 — the fixture checks fold together (one bad label must not print hundreds of lines),
   // same as the exact sweeper's own `fixtureDiag.finish()`, and go in after the stock gates.
   diagnostics.push(...fixtureDiag.finish());
+  // #1061 — one sentence for the chuck/jaws keep-out, the first line named and the rest counted.
+  if (chuckHits > 0) {
+    diagnostics.push({
+      severity: 'error',
+      code: 'rotary-into-chuck',
+      line: chuckFirstLine ?? 0,
+      message:
+        `line ${chuckFirstLine}: ${chuckHits === 1 ? 'a move reaches' : `${chuckHits} moves reach`} the chuck — ` +
+        `the cutter's edge goes past the jaw tips (the keep-out is the first ${ROTARY_JAW_KEEP_OUT_MM} mm of the ` +
+        'stick-out) at any Z: the jaws\' reach depends on the grip, so no height over them is clear.',
+    });
+  }
   const tAir = performance.now();
 
   const stockGrid: ColumnGrid = { ...grid, h: new Float32Array(grid.h.length).fill(grid.initial) };
