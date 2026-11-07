@@ -5191,7 +5191,8 @@ export async function buildModelPlanInputForGoal(
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness, material: job.stock.material },
     fixture: { mount, envelope },
     cutters,
-    ...(houseNote === undefined ? {} : { houseNote }),    tolerances,
+    ...(houseNote === undefined ? {} : { houseNote }),
+    tolerances,
     edgeBreak,
     // #1003 — the board's breakthrough, for the FREEING CONTOUR's floor only (a contour cuts through
     // the blank into the board by design); absent when the job has no board, so the floor is the
