@@ -6,9 +6,9 @@
  * stalled with nothing actually wrong. The phase now announces itself ('air') and ticks every
  * AIR_PROGRESS_EVERY tested moves, so the window always sees it working.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AIR_PROGRESS_EVERY } from '@/workers/geometry/sweep';
+import { AIR_PROGRESS_EVERY, AIR_TICK_MS } from '@/workers/geometry/sweep';
 import { columnSweep } from '@/workers/geometry/columnEngine';
 import { buildTimeline, parseGcode, stubSetup, MACHINES } from '@/engine/cnc';
 import { flatEndMill } from '@/engine/cnc/tool';
@@ -44,6 +44,34 @@ describe('#1048 — the column engine’s rapid-move check is its own phase', ()
     const many = Array.from({ length: count }, (_, i) => `G0 X${2 + (i % 60)} Y${2 + Math.floor((i / 60) % 40)} Z-0.5`).join('\n');
     return 'S1000 M3\nG0 X10 Y10 Z-1\nG1 X20 F100\nG0 Z-0.5\n' + many + '\nG0 Z2\nM5\n';
   };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('#1056 — 35 slow air moves and no count tick: the TIME tick keeps the phase reporting', () => {
+    // Fewer below-top moves than AIR_PROGRESS_EVERY, so only the time tick can speak while the
+    // phase runs. The clock is mocked to advance 0.9 s per reading — a slow move.
+    let t = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => (t += 900));
+    const s = setup();
+    const timeline = buildTimeline(parseGcode(airProgram(35)), s, MACHINES.Z1);
+    const phases: string[] = [];
+    const ticks: [number, number][] = [];
+    let phaseAt: number | null = null;
+    const out = columnSweep(timeline, tool, s, {
+      onPhase: (p) => { phases.push(p); phaseAt = ticks.length; },
+      onProgress: (d, total) => ticks.push([d, total]),
+    });
+    expect(out.ok).toBe(true);
+    expect(phases).toEqual(['air']);
+    // Only ticks AFTER the phase opened count: the checkpoint progress that precedes it is not
+    // the air phase reporting.
+    const airTicks = ticks.slice(phaseAt ?? ticks.length);
+    expect(airTicks.length, `air ticks: ${JSON.stringify(airTicks)}`).toBeGreaterThanOrEqual(1);
+    expect(airTicks.every(([, total]) => total <= 40)).toBe(true);
+    expect(AIR_TICK_MS).toBeLessThanOrEqual(2_000);
+  });
 
   it('#858/#1048 — a job with more moves than the EXACT cap still checks every one here', () => {
     // The e2e's figure job has 5,039 air moves below the stock top; the column engine has NO cap

@@ -4,7 +4,7 @@
 // way and had silently collapsed to half a disc (#187). A test that compared the sweep with
 // itself would have passed on that.
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -852,6 +852,33 @@ describe('#194: the time budget and progress are part of the contract', () => {
     // A later sweep on the same wasm heap still works.
     const after = sweep(THREE);
     expect(after.out.ok).toBe(true);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('#1056 — 35 slow air moves and no count tick: the TIME tick keeps the phase reporting', () => {
+    // Fewer below-top moves than AIR_PROGRESS_EVERY; the clock advances 0.9 s per reading, so the
+    // phase only speaks if the time tick exists. Red at the base: no tick at all.
+    let t = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => (t += 900));
+    const rapids = Array.from({ length: 35 }, (_, i) => `G0 X${2 + (i % 30)} Y${2 + Math.floor(i / 30)} Z-0.5`).join('\n');
+    const src = 'S1000 M3\nG0 X10 Y10 Z-1\nG1 X20 F100\nG0 Z-0.5\n' + rapids + '\nG0 Z2\nM5\n';
+    const phases: string[] = [];
+    const ticks: [number, number][] = [];
+    let phaseAt: number | null = null;
+    const { out } = sweep(src, tool, setup(), {
+      onPhase: (p) => { phases.push(p); phaseAt = ticks.length; },
+      onProgress: (d, total) => ticks.push([d, total]),
+    });
+    expect(out.ok).toBe(true);
+    expect(phases).toContain('air');
+    // Only ticks AFTER the phase opened count: the checkpoint progress that precedes it is not
+    // the air phase reporting.
+    const airTicks = ticks.slice(phaseAt ?? ticks.length);
+    expect(airTicks.length, `air ticks: ${JSON.stringify(airTicks)}`).toBeGreaterThanOrEqual(1);
+    expect(airTicks.every(([, total]) => total <= 40)).toBe(true);
   });
 
   it('#1048 — the rapid-move check is its own phase and ticks every AIR_PROGRESS_EVERY tested moves', () => {

@@ -78,6 +78,13 @@ export const SPINDLE_OFF_PROXIMITY_FALLBACK_MM = 1.0;
 export const MAX_AIR_CHECKS = 4000;
 /** #1048 — how many tested air moves between progress ticks inside the rapid-move check. */
 export const AIR_PROGRESS_EVERY = 256;
+/**
+ * #1056 — AND A TIME TICK BESIDE THE COUNT TICK: a job with fewer below-top air moves than
+ * {@link AIR_PROGRESS_EVERY} reported nothing while its phase ran, so the client's silence window
+ * killed a healthy run. Every tested move also ticks when this long has passed since the last
+ * tick, so the window is bounded by time, never by move count.
+ */
+export const AIR_TICK_MS = 2000;
 /** Gouge solids kept; beyond this a rapid is still reported, just not drawn (memory, and the transfer to the viewport). */
 export const MAX_GOUGES = 200;
 /**
@@ -980,6 +987,7 @@ export function checkAirMoves(
   // before the first move, so the client's window sees it working rather than silence.
   const airTotal = Math.min(MAX_AIR_CHECKS, moves.filter((mv) => Math.min(mv.from[2], mv.to[2]) <= topZ).length);
   onPhase?.('air');
+  let lastAirTickAt = performance.now();
   let unchecked = 0;
   for (const mv of moves) {
     checked++;
@@ -1027,7 +1035,13 @@ export function checkAirMoves(
       continue;
     }
     tested++;
-    if (onAirProgress !== undefined && tested % AIR_PROGRESS_EVERY === 0) onAirProgress(tested, airTotal);
+    if (onAirProgress !== undefined) {
+      const now = performance.now();
+      if (tested % AIR_PROGRESS_EVERY === 0 || now - lastAirTickAt >= AIR_TICK_MS) {
+        onAirProgress(tested, airTotal);
+        lastAirTickAt = now;
+      }
+    }
     // The tool body (grown by the margin for the proximity rule) swept along the move.
     const body = sweptToolBody(
       tl,

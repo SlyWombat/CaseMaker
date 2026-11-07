@@ -260,12 +260,22 @@ export function loadStallPolicy(
 }
 
 /** #895 — THE STALL SENTENCE: what happened, where it stopped, and that it is the app's fault. */
-export function sweepStallMessage(stallMs: number, done: number, total: number): string {
-  return (
-    `the simulation stalled: no progress for ${Math.round(stallMs / 1000)} s` +
-    (total > 0 ? ` after checkpoint ${done} of ${total}` : '') +
-    '. This is a fault, not a slow program'
-  );
+export function sweepStallMessage(
+  stallMs: number,
+  done: number,
+  total: number,
+  phase: 'sweep' | 'air' = 'sweep',
+): string {
+  // #1056 — the sentence names the PHASE it stopped in (the cut sweep, or the rapid-move check),
+  // and states the silence. It no longer claims "a fault, not a slow program": the app cannot
+  // know that from silence alone, and on a stuck-but-healthy worker the cause is ours to find.
+  const where =
+    total > 0
+      ? phase === 'air'
+        ? ` after checking rapid move ${done} of ${total}`
+        : ` after checkpoint ${done} of ${total}`
+      : '';
+  return `the simulation stalled: no progress for ${Math.round(stallMs / 1000)} s${where}.`;
 }
 
 /** What `loadSim` accepts on top of its arguments (#194). */
@@ -411,7 +421,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
             source: 'sweep',
             severity: 'error',
             code: 'sweep-stalled',
-            message: sweepStallMessage(stallMs, lastDone, lastTotal),
+            message: sweepStallMessage(stallMs, lastDone, lastTotal, lastPhase),
             ...(lastTotal > 0 ? { checkpoint: lastDone } : null),
           },
         ],
@@ -421,7 +431,9 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
   clocks.start();
   // #1048 — THE WORKER'S OWN PHASES (the air phase) are messages too: they reach the caller and
   // re-arm the silence clock, exactly as a checkpoint does.
+  let lastPhase: 'sweep' | 'air' = 'sweep';
   const workerPhase = (phase: SimLoadPhase): void => {
+    if (phase === 'air') lastPhase = 'air';
     phaseDown?.(phase);
     clocks.heard();
   };
