@@ -782,6 +782,9 @@ function runProgressWords(
   if (run.phase === 'simulating') {
     const where = run.simProgram === null ? 'simulating' : `simulating program ${run.simProgram.index} of ${run.simProgram.count}`;
     if (simStatus === 'loading' && simPhase === 'playback') return `${where} · preparing playback`;
+    // #1048 — the worker is busy with an earlier task (the background ideal): the load is queued,
+    // not stalled. Said as waiting, in the one place the operator reads the run's progress.
+    if (simStatus === 'loading' && simPhase === 'waiting') return `${where} · waiting for the simulation worker`;
     if (simStatus === 'loading' && simProgress !== null) {
       const left = timeLeftWords(simProjectionMs, simProgress);
       return `${where} · swept ${grouped(simProgress.done)} of ${grouped(simProgress.total)}${left === null ? '' : ` · ${left}`}`;
@@ -804,7 +807,21 @@ function RunProgressLine({ run }: { run: Pick<EngraveRunState, 'phase' | 'progre
   const simPhase = useSimStore((s) => s.phase);
   const simProgress = useSimStore((s) => s.progress);
   const simProjectionMs = useSimStore((s) => s.projectionMs);
-  return <span>{runProgressWords(run, simStatus, simPhase, simProgress, simProjectionMs)}</span>;
+  const waitingSince = useSimStore((s) => s.waitingSince);
+  // #1048 — the wait is counted out loud; Stop stays beside it (the run's own Cancel press).
+  const [now, setNow] = useState(() => Date.now());
+  const waiting = simStatus === 'loading' && simPhase === 'waiting' && waitingSince !== null;
+  useEffect(() => {
+    if (!waiting) return undefined;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [waiting]);
+  return (
+    <span>
+      {runProgressWords(run, simStatus, simPhase, simProgress, simProjectionMs)}
+      {waiting ? ` · ${formatDuration((now - waitingSince) / 1000)}` : ''}
+    </span>
+  );
 }
 
 /**

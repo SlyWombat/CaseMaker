@@ -8,6 +8,7 @@
  */
 
 import * as Comlink from 'comlink';
+import { noteStage } from '@/platform/flightRecorder';
 import type { MachineCalibration, Setup } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
 import type { SimThreadSpec } from '@/engine/cnc/cam/threadMill';
@@ -100,6 +101,9 @@ export function killSimWorkerForTest(message = 'the simulation worker stopped'):
 export function getSimApi(): Comlink.Remote<SimWorkerApi> {
   if (!simApi) {
     simWorker = new Worker(new URL('../../workers/sim.worker.ts', import.meta.url), { type: 'module', name: 'sim' });
+    // #1048 — the worker's own existence, timestamped: a load whose 'accepted' phase never comes
+    // can now be told apart from a worker that was never created.
+    noteStage('simulate', 'worker-spawn', 'simulation worker created');
     ensureFailure();
     simWorker.onerror = (event) => {
       // The browser has already logged it; the page's record must carry the worker's words.
@@ -203,6 +207,58 @@ export function stallWatchdog(windowMs: number, onStall: () => void): { arm: () 
   };
 }
 
+/**
+ * #1048 — THE LOAD'S TWO CLOCKS. The sim worker is shared with the background ideal plan, so a
+ * load can QUEUE behind it for minutes; the old single window, armed at the call, read that queue
+ * time as silence and terminated a healthy worker. The QUEUE clock runs until the worker says
+ * anything for this load (a phase boundary or a checkpoint); a queue expiry reports "waiting",
+ * never a fault, and re-arms. Once the worker has spoken, the STALL clock applies: silence from a
+ * load the thread actually started is the fault #895 means, and it terminates.
+ */
+export function loadStallPolicy(
+  queueMs: number,
+  stallMs: number,
+  onWaiting: () => void,
+  onStalled: () => void,
+): { start: () => void; heard: () => void; stop: () => void } {
+  let switched = false;
+  let stopped = false;
+  let queueTimer: ReturnType<typeof setTimeout> | null = null;
+  const stall = stallWatchdog(stallMs, () => {
+    if (!stopped && switched) onStalled();
+  });
+  // The queue clock REPEATS (a load may wait out many windows); `stallWatchdog` fires once by
+  // design, so this one is its own timer.
+  const armQueue = (): void => {
+    if (stopped || switched) return;
+    queueTimer = setTimeout(() => {
+      queueTimer = null;
+      if (stopped || switched) return;
+      onWaiting();
+      armQueue();
+    }, queueMs);
+  };
+  return {
+    start: armQueue,
+    /** Any message for THIS load: switch to the stall clock and (re-)arm it. */
+    heard: () => {
+      if (stopped) return;
+      if (!switched) {
+        switched = true;
+        if (queueTimer !== null) clearTimeout(queueTimer);
+        queueTimer = null;
+      }
+      stall.arm();
+    },
+    stop: () => {
+      stopped = true;
+      if (queueTimer !== null) clearTimeout(queueTimer);
+      queueTimer = null;
+      stall.stop();
+    },
+  };
+}
+
 /** #895 — THE STALL SENTENCE: what happened, where it stopped, and that it is the app's fault. */
 export function sweepStallMessage(stallMs: number, done: number, total: number): string {
   return (
@@ -219,6 +275,12 @@ export interface SimLoadOpts {
    * checkpoint. Defaults to the shop's `sim.loadStallMs`.
    */
   stallMs?: number;
+  /**
+   * #1048 — how long the load may QUEUE before it states `waiting`, ms. The clock repeats and
+   * never faults (a crash is the worker-error race's own); the stall window above starts at the
+   * worker's first message. Defaults to the shop's `sim.stallMs`.
+   */
+  queueMs?: number;
   /**
    * Checkpoints swept so far. Called from the worker as the sweep advances; #896 adds the
    * worker's own JS heap (MB) so a long goal sweep can say which worker holds the memory.
@@ -299,8 +361,10 @@ export interface SimLoadOpts {
   continueRun?: boolean;
 }
 
-/** The two stages of a load (#224). */
-export type SimLoadPhase = 'sweep' | 'playback';
+// #1048 — the load's own boundaries are declared where the worker's load lives; re-exported here,
+// where the panels and the store have always read the type from.
+import type { SimLoadPhase } from '@/workers/sim/session';
+export type { SimLoadPhase };
 
 /**
  * Load a program. The anchor chain is warmed up front (#224): after the sweep the worker builds
@@ -326,43 +390,52 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
   const stalled = new Promise<SimLoadResult>((resolve) => {
     resolveStall = resolve;
   });
-  const watchdog = stallWatchdog(stallMs, () => {
-    if (settled) return;
-    settled = true;
-    terminateSim();
-    resolveStall({
-      ok: false,
-      pathOnly: false,
-      diagnostics: [
-        {
-          source: 'sweep',
-          severity: 'error',
-          code: 'sweep-stalled',
-          message: sweepStallMessage(stallMs, lastDone, lastTotal),
-          ...(lastTotal > 0 ? { checkpoint: lastDone } : null),
-        },
-      ],
-    });
-  });
-  watchdog.arm();
+  const phaseDown = opts?.onPhase;
+  // #1048 — the QUEUE clock's own allowance: the shop's generated-window seed (three minutes),
+  // because that is the same "one stage of a large job can be a long pass" fact, now said for
+  // waiting behind another task instead of for silence inside one.
+  const queueMs = opts?.queueMs ?? readDefault(liveShopDefaults(), 'sim.stallMs').value;
+  const clocks = loadStallPolicy(
+    queueMs,
+    stallMs,
+    () => phaseDown?.('waiting'),
+    () => {
+      if (settled) return;
+      settled = true;
+      terminateSim();
+      resolveStall({
+        ok: false,
+        pathOnly: false,
+        diagnostics: [
+          {
+            source: 'sweep',
+            severity: 'error',
+            code: 'sweep-stalled',
+            message: sweepStallMessage(stallMs, lastDone, lastTotal),
+            ...(lastTotal > 0 ? { checkpoint: lastDone } : null),
+          },
+        ],
+      });
+    },
+  );
+  clocks.start();
   // #871/#895 — the projection INFORMS and never stops. The clock starts at the FIRST checkpoint,
   // so worker startup and parsing (a fixed cost on every load) are not charged to the sweep's rate.
   const forward = opts?.onProgress;
   const report = opts?.onProjection;
   let rateSince: number | null = null;
-  const onProgress =
-    forward === undefined && report === undefined
-      ? undefined
-      : (done: number, total: number, memoryMB?: number | null): void => {
-          forward?.(done, total, memoryMB);
-          lastDone = done;
-          lastTotal = total;
-          watchdog.arm();
-          if (report === undefined) return;
-          rateSince ??= performance.now();
-          const ms = sweepProjectionMs(performance.now() - rateSince, done, total);
-          if (ms !== null) report(ms, done, total);
-        };
+  const onProgress = (done: number, total: number, memoryMB?: number | null): void => {
+    forward?.(done, total, memoryMB);
+    lastDone = done;
+    lastTotal = total;
+    // #1048 — the worker's FIRST message for this load is the switch: before it the load is
+    // queued (waiting), after it silence is the stall the watchdog means.
+    clocks.heard();
+    if (report === undefined) return;
+    rateSince ??= performance.now();
+    const ms = sweepProjectionMs(performance.now() - rateSince, done, total);
+    if (ms !== null) report(ms, done, total);
+  };
   try {
     const result = await Promise.race([
       getSimApi()
@@ -397,14 +470,14 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
             // and the app's run would reset the fold exactly as the command line no longer does.
             continueRun: opts?.continueRun ?? undefined,
           },
-          onProgress === undefined ? undefined : Comlink.proxy(onProgress),
+          Comlink.proxy(onProgress),
         )
         .then(async (r) => {
           // #224: the warm-up is part of the load, not the first scrub. Awaiting `simWarmup`
           // keeps this promise pending (so the UI stays "loading") until the anchor chain is
           // built; only then does the caller go ready and accept scrubs.
           if (r.ok && r.count > 0) {
-            opts?.onPhase?.('playback');
+            phaseDown?.('playback');
             await getSimApi().simWarmup();
           }
           return r;
@@ -416,7 +489,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
     ]);
     return result;
   } finally {
-    watchdog.stop();
+    clocks.stop();
   }
 }
 

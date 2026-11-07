@@ -3,6 +3,7 @@
 // session is what is tested; the coalescer and the store are tested against it in-process.
 
 import { describe, it, expect } from 'vitest';
+import * as Comlink from 'comlink';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -811,24 +812,83 @@ describe('#895 — a load that stops reporting is stopped by the watchdog', () =
     }
   }
 
-  it('the stall window expires, the worker is terminated exactly once, and the refusal names the fault', async () => {
+  it('#1048 — a worker that never answers is WAITED on (never faulted), and Stop still terminates it', async () => {
     const g = globalThis as unknown as { Worker: unknown };
     const real = g.Worker;
     SilentWorker.terminated = 0;
     SilentWorker.stopped = 0;
     g.Worker = SilentWorker;
+    const phases: string[] = [];
     try {
-      // #895 — the window is a stall bound: a worker that never reports a checkpoint is a fault.
-      const r = await loadSim(THREE, setup(), tool, null, { stallMs: 25 });
+      // #1048 — the load's window is two clocks: before the worker says anything for this load
+      // the queue clock only REPORTS waiting (a load behind the ideal plan is not a fault); the
+      // stall clock — the one #895 means — starts at the worker's first message.
+      const pending = loadSim(THREE, setup(), tool, null, { stallMs: 25, queueMs: 25, onPhase: (p) => phases.push(p) });
+      await new Promise((r) => setTimeout(r, 80));
+      expect(phases, 'the queue clock speaks up as waiting').toContain('waiting');
+      expect(SilentWorker.terminated, 'a queued load is never terminated').toBe(0);
+      // Stop from the wait: the run's own press terminates the worker.
+      terminateSim();
+      expect(SilentWorker.stopped).toBeGreaterThanOrEqual(1);
+      void pending;
+    } finally {
+      g.Worker = real;
+      terminateSim();
+    }
+  });
+});
+
+// A's note (1) on #1048 — THE REAL FAULT PATH AT THE CLIENT LEVEL: the worker reports ONCE (its
+// first checkpoint, through the very proxy the client passes it), then goes silent past the stall
+// window. The load must end in `sweep-stalled` with the worker terminated exactly once — the case
+// the two-clock re-pin removed when the silent-worker test became a WAIT.
+describe('#895/#1048 — a worker that speaks once and then goes silent', () => {
+  class OneWordWorker {
+    static terminated = 0;
+    static stopped = 0;
+    static spoke = 0;
+    private readonly name: string;
+    constructor(_url?: URL | string, options?: { name?: string }) {
+      this.name = options?.name ?? '';
+    }
+    addEventListener(): void {}
+    removeEventListener(): void {}
+    postMessage(_message: unknown, transfer?: unknown[]): void {
+      // The proxied onProgress arrives as a transferred MessagePort; call it ONCE, exactly as
+      // the worker's own sweep would at its first checkpoint.
+      const port = (transfer ?? []).find((t): t is MessagePort => typeof (t as MessagePort)?.postMessage === 'function');
+      if (port === undefined || OneWordWorker.spoke > 0) return;
+      OneWordWorker.spoke += 1;
+      const cb = Comlink.wrap(port as never) as unknown as (done: number, total: number) => Promise<void>;
+      void cb(1, 35);
+    }
+    terminate(): void {
+      OneWordWorker.stopped += 1;
+      if (this.name === 'sim') OneWordWorker.terminated += 1;
+    }
+  }
+
+  it('the stall window runs from the first checkpoint: sweep-stalled, terminated exactly once', async () => {
+    const g = globalThis as unknown as { Worker: unknown };
+    const real = g.Worker;
+    OneWordWorker.terminated = 0;
+    OneWordWorker.stopped = 0;
+    OneWordWorker.spoke = 0;
+    g.Worker = OneWordWorker;
+    try {
+      // The queue window is generous; the stall window is tiny. The single checkpoint switches
+      // the clocks, then silence must be the fault #895 means.
+      const r = await loadSim(THREE, setup(), tool, null, { stallMs: 25, queueMs: 5_000 });
       expect(r.ok).toBe(false);
       if (r.ok) return;
-      // NOT path-only: killing the worker takes the timeline with it, so there is no path
-      // either. A path-only refusal only happens when the SWEEP refused and the worker lived.
       expect(r.pathOnly).toBe(false);
       expect(r.diagnostics[0]?.code).toBe('sweep-stalled');
       expect(r.diagnostics[0]?.message).toMatch(/no progress for/);
       expect(r.diagnostics[0]?.message).toMatch(/This is a fault, not a slow program/);
-      expect(SilentWorker.terminated).toBe(1);
+      // The checkpoint was heard: the sentence names where it stopped.
+      expect(r.diagnostics[0]?.message).toMatch(/after checkpoint 1 of 35/);
+      expect(OneWordWorker.spoke, 'the worker reported once').toBe(1);
+      expect(OneWordWorker.terminated, 'the stalled worker is terminated exactly once').toBe(1);
     } finally {
       g.Worker = real;
       terminateSim();

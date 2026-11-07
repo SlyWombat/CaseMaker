@@ -12,7 +12,7 @@
 
 import { featureSim } from '@/platform/features';
 import { create } from 'zustand';
-import { noteProgress as noteFlightProgress } from '@/platform/flightRecorder';
+import { noteProgress as noteFlightProgress, noteStage } from '@/platform/flightRecorder';
 import type { MachineCalibration, PausePoint, Setup } from '@/engine/cnc';
 import { resolveMachine } from '@/engine/cnc/calibration';
 import { MACHINES } from '@/engine/cnc/machine';
@@ -174,9 +174,13 @@ export interface SimState {
   progress: SimProgress | null;
   /**
    * Which stage of a load is running while `status === 'loading'` (#224): `sweep` for the
-   * sweep, `playback` while the anchor chain is warmed up. null when not loading.
+   * sweep, `playback` while the anchor chain is warmed up. null when not loading. #1048 adds
+   * `waiting`: the load is queued behind the worker's earlier task — the elapsed time is shown,
+   * and Stop stays available.
    */
   phase: SimLoadPhase | null;
+  /** #1048 — when the load began waiting for the worker, ms since epoch; null unless waiting. */
+  waitingSince: number | null;
   /** True when the runner succeeded and only the sweep refused: the path is drawable, no material (#194). */
   pathOnly: boolean;
   /**
@@ -327,6 +331,7 @@ const EMPTY = {
   tool: null as Tool | null,
   frame: null,
   k: -1,
+  waitingSince: null as number | null,
   design: 'stock' as SimDesign,
   path: null,
   step: -1,
@@ -429,7 +434,16 @@ export const useSimStore = create<SimState>()((set, get) => {
       const r = await client.loadSim(args.gcodeText, args.setup, args.tool, args.machineId, {
         stallMs,
         onProgress: (done: number, total: number, memoryMB?: number | null) => {
-          if (mine === loadSeq) set({ progress: { done, total } });
+          if (mine === loadSeq) {
+            // #1048 (A's finding) — THE FIRST CHECKPOINT ENDS THE WAIT ENTIRELY: the phase goes
+            // back to `sweep`, so the panel swaps "waiting for the simulation worker" for the
+            // swept/time-left line instead of keeping the wait sentence through the sweep.
+            set({
+              progress: { done, total },
+              waitingSince: null,
+              ...(get().phase === 'waiting' ? { phase: 'sweep' as const } : {}),
+            });
+          }
           // #896 — a long goal sweep says which worker is holding the memory, in the report.
           noteFlightProgress('simulate', 'sweep', done, total, undefined, memoryMB === undefined || memoryMB === null ? undefined : { memoryMB });
         },
@@ -437,7 +451,13 @@ export const useSimStore = create<SimState>()((set, get) => {
           if (mine === loadSeq) set({ projectionMs: projectedMs });
         },
         onPhase: (phase) => {
-          if (mine === loadSeq) set({ phase });
+          if (mine === loadSeq) {
+            // #1048 — the elapsed wait is shown from the FIRST waiting report, not each re-arm.
+            set({ phase, waitingSince: phase === 'waiting' ? (get().waitingSince ?? Date.now()) : null });
+          }
+          // #1048 — THE LAST BOUNDARY THE WORKER REACHED, in the crash report's own record: a load
+          // that stalls before its first checkpoint names where it got to instead of silence.
+          noteStage('simulate', phase, `load ${phase}`);
         },
         calibration: args.calibration,
         drillPointDefault: args.drillPointDefault,
