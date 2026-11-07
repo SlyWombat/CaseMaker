@@ -5132,6 +5132,22 @@ export async function buildModelPlanInputForGoal(
     ownedEntries.length === 0 && fallbackEntries.length > 0
       ? 'no inventory recorded; the built-in registry stands in'
       : undefined;
+  // #1042 — A CHOSEN CUTTER THE SHOP DOES NOT OWN STILL CUTS, AND SAYS SO. "Stated tools win" is
+  // the operator's own statement and the plan honours it; what was missing is the other half of
+  // every statement rule — the plan saying what it did. Ownership is a prefix test on the job's
+  // key (an id-less tool matches nothing by object); a shop with no inventory keeps the #1041
+  // fallback sentence alone (the chosen built-in IS the registry standing in).
+  const chosenKey = job.toolKey;
+  const houseStatement: PlanStatement | undefined =
+    ownedEntries.length > 0 && chosenKey !== '' && !isOwnedKey(chosenKey)
+      ? {
+          severity: 'warning',
+          code: 'goal-cutter-not-owned',
+          text:
+            `the job’s cutter ${tool.name} (${chosenKey}) is not in this shop’s inventory; it cuts because the job names it — ` +
+            `add it to the inventory (Manage → Tools) or choose an owned cutter`,
+        }
+      : undefined;
   const houseSeen = new Set<string>();
   const house: Tool[] = [];
   for (const candidate of [...ownedEntries.map((e) => e.tool), ...fallbackEntries.map((e) => e.tool), tool]) {
@@ -5192,6 +5208,7 @@ export async function buildModelPlanInputForGoal(
     fixture: { mount, envelope },
     cutters,
     ...(houseNote === undefined ? {} : { houseNote }),
+    ...(houseStatement === undefined ? {} : { houseStatement }),
     tolerances,
     edgeBreak,
     // #1003 — the board's breakthrough, for the FREEING CONTOUR's floor only (a contour cuts through

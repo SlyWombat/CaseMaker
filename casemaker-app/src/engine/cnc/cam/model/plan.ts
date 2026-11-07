@@ -226,6 +226,12 @@ export interface ModelPlanInput {
    */
   houseNote?: string;
   /**
+   * #1042 — THE SEAM'S TYPED STATEMENT ABOUT THE HOUSE, e.g. a chosen cutter the shop does not
+   * own (`goal-cutter-not-owned`). Stated once on the plan's last setup; the seam builds it where
+   * it knows the job's key and the shop's entries.
+   */
+  houseStatement?: PlanStatement;
+  /**
    * #1003 (the manager's narrowing) — the sacrificial board's BREAKTHROUGH, mm. Used ONLY for the
    * freeing contour's floor (a contour cuts through the blank into the board by design); pockets
    * and curved regions never use it.
@@ -1856,6 +1862,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       // The dump's prose carries the same line; the card's notes are what a reviewer reads.
       last.notes.push(statement.text);
     }
+  }
+  // #1042 — the seam's typed house statement, once (a job's cutter is the job's, not a setup's).
+  // Its text joins the dump's prose like every other typed statement (the rest sentence above).
+  if (input.houseStatement !== undefined && perSetup.length > 0) {
+    const last = perSetup[perSetup.length - 1]!;
+    last.statements.push(input.houseStatement);
+    last.notes.push(input.houseStatement.text);
   }
   return outcome === undefined ? { perSetup } : { perSetup, outcome };
 }

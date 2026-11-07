@@ -101,6 +101,9 @@ export type JobFindingCode =
   // is the comparison it cannot make; an error, because material cut from the part cannot be put
   // back.
   | 'goal-overcut'
+  // #1042 — the job's chosen cutter is not in this shop's inventory; it cuts as stated, and the
+  // plan says so (the #1041 rule makes the owned house the shop's own records).
+  | 'goal-cutter-not-owned'
   // #740 — a POINTED cutter whose tip the record does not state. A V-bit's tip is the width that
   // reaches the design; for a chamfer and an engraver `diameter` is the shank, so there is no honest
   // geometry sentence to write about the item. Raised where the plane model would otherwise judge
