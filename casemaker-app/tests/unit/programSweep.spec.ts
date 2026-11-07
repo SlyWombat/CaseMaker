@@ -89,7 +89,12 @@ function program(toolKey: string, nc: string, drill?: { simDrillPoint: { deg: nu
 async function sweep(
   programs: readonly SweepProgram[],
   tools: ReadonlyMap<string, Tool>,
-  opts: { initialRemoval?: readonly NodeMeshOutput[]; shopDrillPoint?: { deg: number; source: string } | null } = {},
+  opts: {
+    initialRemoval?: readonly NodeMeshOutput[];
+    shopDrillPoint?: { deg: number; source: string } | null;
+    /** #1040 — read the run's goal fold after each program, while it is still the live one. */
+    afterLoad?: (index: number) => void;
+  } = {},
 ) {
   const session: SimSession = createSimSession(tl);
   try {
@@ -105,9 +110,13 @@ async function sweep(
           // #817 — the earlier column programs' remaining tops; the column engine seeds from them.
           ...(args.priorFields.length === 0 ? {} : { priorFields: args.priorFields }),
           ...(args.priorExactRemoval === undefined ? {} : { priorExactRemoval: args.priorExactRemoval }),
+          // #1040 — both production call sites state that the walk's own from-blank retry belongs
+          // to the run in flight; the session must keep the run-wide goal fold across it.
+          continueRun: args.fromBlank === true,
           ...(args.drillPoint === null ? {} : { drillPointDefault: args.drillPoint }),
         });
       },
+      afterLoad: opts.afterLoad === undefined ? undefined : ({ index }) => opts.afterLoad!(index),
       initialRemoval: opts.initialRemoval,
     });
     return { outcome, calls };
@@ -359,4 +368,83 @@ describe('#744 one sweep per program, shared with the command line', () => {
       'the facing pass (fly-22) names fly-22, which is not on this bench',
     ]);
   });
+});
+
+// #1040 — THE RUN-WIDE GOAL FOLD ACROSS A FROM-BLANK RETRY. The goal check stamps every program of
+// a run onto one goal field; the session folds each program's stamp in as the oracle reads it
+// (`afterLoad`, while the program is still the live one). A from-blank retry is a limitation of the
+// sweep, not a new run: it must keep the fold. A genuinely new load — the Simulate panel's own —
+// must start it clean, or a run would inherit its predecessor's cuts.
+describe('#1040 the run-wide goal fold', () => {
+  /** The goal the run is checked against: a 100 x 60 mm grid at 0.5 mm, work frame. */
+  const GOAL = { nx: 201, ny: 121, x0: 0, y0: 0, pitch: 0.5 };
+  const cellAt = (field: Float32Array, x: number, y: number): number =>
+    field[Math.round(y / GOAL.pitch) * GOAL.nx + Math.round(x / GOAL.pitch)]!;
+  /** A channel at Y 40 to Z −1: a new run's own cut, away from the Y 10 channel. */
+  const FRESH_CHANNEL = ['S1000 M3', 'G0 X10 Y40 Z2', 'G1 Z-1 F100', 'G1 X30', 'G0 Z2', 'M5'].join('\n');
+  const TOOLS = new Map<string, Tool>([
+    ['flat-2', FLAT_2],
+    ['flat-1', FLAT_1],
+  ]);
+
+  /** The walk, wired as both production call sites are; the session stays the caller's. */
+  async function walkOn(session: SimSession, programs: readonly SweepProgram[], afterLoad?: (index: number) => void) {
+    return sweepPrograms({
+      programs,
+      shopDrillPoint: null,
+      cutterFor: (p) => TOOLS.get(p.toolKey) ?? null,
+      load: async (args) =>
+        session.load(args.program.nc, SETUP, args.cutter, null, {
+          ...(args.priorRemoval.length === 0 ? {} : { priorRemoval: args.priorRemoval }),
+          ...(args.priorFields.length === 0 ? {} : { priorFields: args.priorFields }),
+          ...(args.priorExactRemoval === undefined ? {} : { priorExactRemoval: args.priorExactRemoval }),
+          continueRun: args.fromBlank === true,
+        }),
+      afterLoad: afterLoad === undefined ? undefined : ({ index }) => afterLoad(index),
+    });
+  }
+
+  it('a from-blank retry inside the run keeps the fold — program 1’s channel stays in the run’s field', async () => {
+    const session = createSimSession(tl);
+    try {
+      const fields: (Float32Array | null)[] = [];
+      const outcome = await walkOn(session, [program('flat-2', CHANNEL), program('flat-1', DENSE_FLAT)], (index) => {
+        fields[index] = session.sweptFieldExact(GOAL);
+      });
+      if (!outcome.ok) throw new Error(JSON.stringify(outcome.failed?.diagnostics));
+      // The walk really did retry the dense flat from the blank — the tape run's condition.
+      expect(outcome.sweeps[1]!.fromBlank).toBe(true);
+      expect(outcome.sweeps[1]!.fromBlankCode).toBe('dense-3d-refused');
+      // Program 1 alone leaves the channel floor at Z −2.
+      expect(cellAt(fields[0]!, 20, 10)).toBeLessThanOrEqual(-1.99);
+      // After the retry, the run's field must still carry that floor. The retry itself only
+      // reaches Z −1 on the same line, so a fold reset by the retry reads −1 here.
+      expect(cellAt(fields[1]!, 20, 10)).toBeLessThanOrEqual(-1.99);
+      // The retry's own cut is folded in too: the dense pass reaches Z −1 where it alone cut,
+      // and the fold keeps either program's deeper stamp at every cell.
+      expect(cellAt(fields[1]!, 20, 10)).toBeGreaterThanOrEqual(-2.01);
+    } finally {
+      session.dispose();
+    }
+  }, 120_000);
+
+  it('a genuinely new load — the Simulate panel’s own — starts the fold clean', async () => {
+    const session = createSimSession(tl);
+    try {
+      // A run first: its fold carries the channel at Y 10.
+      const first = await walkOn(session, [program('flat-2', CHANNEL)]);
+      if (!first.ok) throw new Error(JSON.stringify(first.failed?.diagnostics));
+      expect(cellAt(session.sweptFieldExact(GOAL)!, 20, 10)).toBeLessThanOrEqual(-1.99);
+      // The panel's own Simulate load: no prior material and no continue-run statement.
+      const fresh = session.load(FRESH_CHANNEL, SETUP, FLAT_2, null);
+      if (!fresh.ok) throw new Error(JSON.stringify(fresh.diagnostics));
+      const field = session.sweptFieldExact(GOAL)!;
+      // The new run's own cut is stamped...
+      expect(cellAt(field, 20, 40)).toBeLessThanOrEqual(-0.99);
+      // ...and the previous run's channel is gone: untouched stock reads 0, not Z −2.
+      expect(cellAt(field, 20, 10)).toBe(0);
+    } finally {
+      session.dispose();
+    }
+  }, 120_000);
 });

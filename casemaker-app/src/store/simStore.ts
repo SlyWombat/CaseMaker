@@ -251,6 +251,8 @@ export interface SimState {
     priorFields?: readonly CarriedField[] | null,
     /** #817 — which of `priorRemoval` an exact program made; a column seed cannot use them. */
     priorExactRemoval?: readonly NodeMeshOutput[] | null,
+    /** #1040 — this load continues the run already in flight (a from-blank retry inside it). */
+    continueRun?: boolean,
   ): Promise<SimLoadResult | null>;
   /** #895 — run the last load again on the same stall window. No-op when nothing has been loaded. */
   retry(): Promise<void>;
@@ -399,6 +401,13 @@ interface LoadArgs {
   priorFields: CarriedField[] | null;
   /** #817 — which of `priorRemoval` came from an EXACT program (a column seed cannot use them). */
   priorExactRemoval: NodeMeshOutput[] | null;
+  /**
+   * #1040 — the sweep walk's from-blank RETRY of a program inside the same run (its engine cannot
+   * take the previous program's removal). The session keeps the run-wide goal fold across it; a
+   * genuinely new load (the panel's own, or a run's first program) leaves this false and starts
+   * clean. Kept with the load so a retry replays the same statement.
+   */
+  continueRun: boolean;
 }
 let lastLoad: LoadArgs | null = null;
 
@@ -444,6 +453,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         carried: args.carried,
         priorFields: args.priorFields,
         priorExactRemoval: args.priorExactRemoval,
+        continueRun: args.continueRun,
       });
       if (mine !== loadSeq) return null; // superseded by a newer load or a dispose
       if (!r.ok) {
@@ -495,7 +505,7 @@ export const useSimStore = create<SimState>()((set, get) => {
     speed: startingSpeed(),
     stallMs: startingStallMs(),
   projectionMs: null,
-    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel', surface = null, rampThresholdMm = null, breakthroughMm = null, priorRemoval = null, carried = null, priorFields = null, priorExactRemoval = null) {
+    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride, threads = [], drillPointDefault = null, origin = 'panel', surface = null, rampThresholdMm = null, breakthroughMm = null, priorRemoval = null, carried = null, priorFields = null, priorExactRemoval = null, continueRun = false) {
       // The saved read of the machine's own frame, if the user has one (#279). Resolved HERE so
       // every load path — a panel, the engrave run, the QA harness — simulates the same machine,
       // and so a retry or a restart cannot drift onto a different frame than the job was loaded on.
@@ -534,6 +544,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         carried,
         priorFields: priorFields === null ? null : [...priorFields],
         priorExactRemoval: priorExactRemoval === null ? null : [...priorExactRemoval],
+        continueRun: continueRun === true,
       };
       return run(lastLoad, fresh ? startingStallMs() : get().stallMs);
     },

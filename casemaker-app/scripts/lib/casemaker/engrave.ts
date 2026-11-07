@@ -1087,7 +1087,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // setup's later cutter.
         cutterFor: (program) =>
           program.toolKey === job.toolKey ? tool : benchCutterFor(program.toolKey),
-        load: async ({ program, index, cutter, drillPoint, priorRemoval, priorFields, priorExactRemoval }) => {
+        load: async ({ program, index, cutter, drillPoint, priorRemoval, priorFields, priorExactRemoval, fromBlank }) => {
           sweeping =
             (program.kind ?? 'engrave') === 'facing'
               ? `the facing pass (${program.toolKey})`
@@ -1104,6 +1104,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
             // #817 — the earlier column programs' remaining tops, in the same frame here.
             ...(priorFields.length === 0 ? {} : { priorFields }),
             ...(priorExactRemoval === undefined ? {} : { priorExactRemoval }),
+            // #1040 — a from-blank retry inside the run keeps the run's goal fold.
+            continueRun: fromBlank === true,
             ...(drillPoint === null ? {} : { drillPointDefault: drillPoint }),
           });
         },
