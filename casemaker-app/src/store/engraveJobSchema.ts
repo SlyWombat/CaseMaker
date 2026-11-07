@@ -1422,7 +1422,7 @@ const sacrificialUnderSchema = z.object({
     })
     .describe('How far the board extends beyond the stock on each side, in millimetres.'),
   attach: z
-    .enum(['tape', 'glue', 'screws', 'screwed', 'loose'])
+    .enum(['tape', 'glue', 'screws', 'loose'])
     .describe('How the under-board is held to the stock.'),
 });
 

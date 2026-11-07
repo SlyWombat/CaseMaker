@@ -1609,7 +1609,7 @@ export interface SacrificialUnder {
   /** How far the board extends past the part on each side, mm. 0 = flush. */
   overhang: { left: Mm; right: Mm; front: Mm; back: Mm };
   /** How the part is fixed to the board. Recorded for the run sheet; 'loose' is a warning. */
-  attach: 'tape' | 'glue' | 'screws' | 'screwed' | 'loose';
+  attach: 'tape' | 'glue' | 'screws' | 'loose';
 }
 
 /**
