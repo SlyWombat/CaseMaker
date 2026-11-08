@@ -390,7 +390,7 @@ describe('the Holding step’s rotary option (#240 §2)', () => {
     return machine;
   }
 
-  it('is disabled for a plate, with the step-2 sentence', () => {
+  it('is disabled for a box that never said it is a block, with the step-2 sentence', () => {
     const options = mountOptions({
       machine: rotaryMachine(),
       accessories: [...LOCATION_DOC.accessories, ROTARY],
@@ -402,6 +402,21 @@ describe('the Holding step’s rotary option (#240 §2)', () => {
     expect(rotary!.reason).toBe('the rotary holds round stock — say a rod in the stock step');
     // The stock's own refusal: no machine change can fix it, so there is no escape to offer.
     expect(rotary!.escape).toBeNull();
+  });
+
+  it('#1059 — the chuck is offered to a BLOCK, and its line states the envelope it turns', () => {
+    // #777 made a squared block a rotary job: its section turns on the envelope that
+    // circumscribes it. The panther's 44.5 mm square bar is ⌀62.93 across the corners.
+    const options = mountOptions({
+      machine: rotaryMachine(),
+      accessories: [...LOCATION_DOC.accessories, ROTARY],
+      stock: { length: 100, width: 44.5, thickness: 44.5 },
+      block: true,
+    });
+    const rotary = options.find((o) => o.mount === 'rotary')!;
+    expect(rotary.disabled).toBe(false);
+    expect(rotary.reason).toBeNull();
+    expect(rotary.hint).toBe('the block turns about X on its ⌀62.933 mm envelope; the cutter stays over it');
   });
 
   it('#877 — a stated machine has no fourth axis, and its rod is not judged against the Z1’s envelope', () => {

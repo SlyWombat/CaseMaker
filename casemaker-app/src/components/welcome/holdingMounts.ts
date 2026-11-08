@@ -343,6 +343,13 @@ export interface MountOptionArgs {
    */
   round?: boolean;
   /**
+   * #1059 — the stock is a BLOCK the chuck can hold: the engine reads it as a section about the
+   * axis (`chuckStockOf`), so it is a rotary stock as much as a rod is (#777). The caller states
+   * it because a box's dimensions alone do not say whether the operator means a block or a
+   * plate; absent is false, which keeps the "say a rod" refusal for a box that never said.
+   */
+  block?: boolean;
+  /**
    * #743 D6 — the stock is a DISC, a round blank milled flat. It is round in plan but is cut on
    * its face: the chuck is not offered, and the bed's bracket cannot hold a rim (two points of
    * contact, and clamps on its face cover the face being cut), so tape is the bed's only arm.
@@ -510,11 +517,12 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
       continue;
     }
 
-    // #240 — the machine gives the mount, and this job model can hold it: the ROTARY, but only
-    // round stock. Rectangular stock is the stock's own refusal, so it carries no machine-change
-    // escape — the way out is step 2, not a different mount.
+    // #240 — the machine gives the mount, and this job model can hold it: the ROTARY takes a
+    // rod, or (#1059, #777) a squared BLOCK, whose section turns on the envelope about it. Stock
+    // that is neither is the stock's own refusal, so it carries no machine-change escape — the
+    // way out is step 2, not a different mount.
     if (mechanism === 'rotary') {
-      if (args.round !== true) {
+      if (args.round !== true && args.block !== true) {
         out.push({
           ...base,
           hint: null,
@@ -524,10 +532,17 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
         });
         continue;
       }
-      // #714 — the chuck's own line, the mockup's words: the rod turns, the cutter does not.
+      // #714 — the chuck's own line, the mockup's words: the stock turns, the cutter does not.
+      // #1059 — a block's line states the ENVELOPE its corners turn over, which is the number
+      // that decides whether it fits and the one the CAM's safe height is taken from.
+      const dims = [stock.length, stock.width, stock.thickness].sort((a, b) => a - b);
+      const envelopeMm = Math.hypot(dims[0]!, dims[1]!);
       out.push({
         ...base,
-        hint: 'the rod turns about X; the cutter stays over it',
+        hint:
+          args.round === true
+            ? 'the rod turns about X; the cutter stays over it'
+            : `the block turns about X on its ⌀${fmt(envelopeMm)} mm envelope; the cutter stays over it`,
         disabled: false,
         reason: null,
         escape: null,

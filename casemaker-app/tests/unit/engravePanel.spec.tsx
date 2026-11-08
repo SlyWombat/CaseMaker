@@ -293,6 +293,31 @@ describe('EngravePanel (#205)', () => {
     expect(screen.getByTestId('engrave-label-finding-0-depth-exceeds-stock')).toBeTruthy();
   });
 
+  it('#1059 — a block in the chuck is offered its face operations', () => {
+    // #777 made a squared block a rotary job, and the face CAM reads its section: a 44.5 mm
+    // square bar can be turned, held and cut on its faces, so the Faces step must offer them.
+    act(() => {
+      const base = defaultEngraveJob();
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          stock: { ...base.stock, length: 100, width: 44.5, thickness: 44.5, material: 'hardwood' },
+          workholding: {
+            kind: 'rotary-chuck',
+            rotary: { stickout: 85, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' },
+          },
+          labels: [],
+          shapes: [],
+          toolKey: 'flat-1.0',
+        },
+      });
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-add-face')).toBeTruthy();
+    expect(screen.getByTestId('engrave-add-face-flat')).toBeTruthy();
+    expect(screen.getByTestId('engrave-add-face-faces-all-round')).toBeTruthy();
+  });
+
   it('#726 P4 — the depth ceiling is stated once, at the field', () => {
     render(<EngravePanel />);
     expand('engrave-label');
