@@ -1965,6 +1965,33 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "flip": {
+                "additionalProperties": false,
+                "description": "How this setup turns the stock over; omit for a setup that is not a flip.",
+                "properties": {
+                  "axis": {
+                    "description": "Which horizontal axis the blank turns about.",
+                    "enum": [
+                      "left-right",
+                      "front-back"
+                    ],
+                    "type": "string"
+                  },
+                  "method": {
+                    "description": "How the part is freed for the flip.",
+                    "enum": [
+                      "free-then-flip",
+                      "tabs-in-blank"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "method",
+                  "axis"
+                ],
+                "type": "object"
+              },
               "id": {
                 "description": "Unique setup id; generated when a document does not state one.",
                 "minLength": 1,
@@ -3755,6 +3782,33 @@
             "description": "Registry key of the cutter the face operations run, when it is not the setup’s first cutter.",
             "minLength": 1,
             "type": "string"
+          },
+          "flip": {
+            "additionalProperties": false,
+            "description": "How this setup turns the stock over; omit for a setup that is not a flip.",
+            "properties": {
+              "axis": {
+                "description": "Which horizontal axis the blank turns about.",
+                "enum": [
+                  "left-right",
+                  "front-back"
+                ],
+                "type": "string"
+              },
+              "method": {
+                "description": "How the part is freed for the flip.",
+                "enum": [
+                  "free-then-flip",
+                  "tabs-in-blank"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "method",
+              "axis"
+            ],
+            "type": "object"
           },
           "id": {
             "description": "Unique setup id; generated when a document does not state one.",
@@ -6051,6 +6105,19 @@
             }
           ],
           "description": "The plan shape of round stock (#743): \"cylinder\" for a rod or a tube, \"disc\" for a round blank milled flat; omit for a rectangular blank."
+        },
+        "squareCorners": {
+          "description": "The blank corners that are square, as the Holding step states them; omit when all four are.",
+          "items": {
+            "enum": [
+              "FL",
+              "FR",
+              "BL",
+              "BR"
+            ],
+            "type": "string"
+          },
+          "type": "array"
         },
         "surfaceTouches": {
           "description": "The surface touches and readings; omit when the surface has not been measured.",

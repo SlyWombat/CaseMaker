@@ -28,6 +28,7 @@ import { applyCutterPlanToJob } from '@/engine/cnc/engrave/measuredPick';
 import { writeSetupPlan } from '@/engine/cnc/engrave/setupWork';
 import { withSideGoal, withoutSideGoal } from '@/engine/cnc/engrave/jobSetup';
 import { reholdSetupGoals } from '@/engine/cnc/engrave/goalFlipSetups';
+import { flipPinsForAxis } from '@/engine/cnc/engrave/flipChoice';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { isUnifiedSize, nearestThreadSize, threadClassFor, threadSpec } from '@/engine/cnc/threadTable';
 import { applyHoldAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
@@ -3196,7 +3197,30 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           const { setups: _dropped, ...rest } = job;
           return rest;
         }
-        return { ...job, setups };
+        const next: EngraveJob = { ...job, setups };
+        // #1073 — A CHANGED FLIP AXIS TURNS THE SIDE AFRESH: the side's own goal re-derives
+        // through the new turn, and its stored pins are the SAME physical holes re-expressed in
+        // the new frame. A setups write that does not move an axis changes nothing else.
+        const olds = job.setups ?? [];
+        const axisMoved = setups.some(
+          (s, i) => s.flip !== undefined && olds[i]?.flip !== undefined && s.flip.axis !== olds[i]!.flip!.axis,
+        );
+        if (!axisMoved || next.setups === undefined) return next;
+        const stock = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
+        const sides = reholdSetupGoals(next, stock);
+        const reheld: EngraveJob = sides === null ? next : { ...next, targetObjects: sides };
+        return {
+          ...reheld,
+          setups: reheld.setups!.map((s, i) => {
+            const old = olds[i];
+            if (s.flip === undefined || old?.flip === undefined || s.flip.axis === old.flip.axis || s.pins === undefined) return s;
+            const at = flipPinsForAxis(s.pins.at, { length: job.stock.length, width: job.stock.width }, old.flip.axis, s.flip.axis).map((p) => ({
+              x: Math.round(p.x * 100) / 100,
+              y: Math.round(p.y * 100) / 100,
+            }));
+            return { ...s, pins: { at: [at[0]!, at[1]!] } };
+          }),
+        };
       }),
 
     // #667 — the rest pair, as the setup's second tool. Materialise on first choice: the implicit

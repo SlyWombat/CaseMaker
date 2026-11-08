@@ -590,6 +590,8 @@ export function EngraveSetupsSection({
               viseSource={jobVise(job).source}
               probeName={probeName}
               machineName={machineName}
+              stock={{ length: job.stock.length, width: job.stock.width, ...(job.stock.squareCorners === undefined ? {} : { squareCorners: job.stock.squareCorners }) }}
+              breakthroughMm={job.breakthrough}
               facingPass={index === 0 && job.facing?.enabled === true}
               notice={notice?.index === index ? notice.reason : null}
               remountMinutes={settings.remountMinutes}

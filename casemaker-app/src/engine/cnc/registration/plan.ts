@@ -40,8 +40,11 @@
  */
 
 import { PARK_CLEARANCE_MM } from '@/platform/defaultsClient';
+import { PROBE_RESIDUAL_MM } from '@/engine/cnc/probePlan';
+import type { SetupFlip } from '@/types/engraveJob';
 import { settingsProblem, type RegistrationSettings } from './settings';
 import { planFootprintRegistration } from './footprint';
+import { centrePair } from './centreFind';
 import { MIN_SIDE_DEPTH_MM, SIDE_TOUCH_JAW_MARGIN_MM } from './probe3d';
 
 export type Mount = 'vise' | 'bracket' | 'tape';
@@ -779,4 +782,277 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       notes,
     },
   };
+}
+
+// ────────────────────────────────────────────────────────────────────────────────────────────────
+// #1073 — SIDE 2'S REGISTRATION, PER FLIP METHOD
+// ────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * #1073 — HOW FAR THE TIP'S CENTRE ENTERS A LOCATING BORE, mm below side 2's top. CHOSEN, not
+ * measured (6b's amendment D): the fixture lists it. A job may state its own.
+ */
+export const FLIP_PROBE_ENTRY_DEPTH_MM = 3;
+
+/**
+ * #1073 — the seed's own error allowance added to each sideways search, mm. CHOSEN: the seed touch
+ * only has to put the tip inside the bore; the walls themselves are found by contact, so the
+ * search is the bore's own room plus this allowance for the seed being slightly off.
+ */
+export const FLIP_SEED_SLACK_MM = 1;
+
+/** #1073 — the release after a triggered sideways touch, mm: the house's 3 mm probe-away. */
+export const FLIP_PROBE_AWAY_MM = 3;
+
+/**
+ * #1073 — the least diametral clearance a bore must leave the tip, mm. Below it the tip is pressed
+ * into the wall on the way in and the sideways touches cannot find a wall from the centre.
+ */
+export const FLIP_MIN_BORE_CLEARANCE_MM = 1;
+
+/**
+ * #1073 — SIDE 2'S REGISTRATION, as the flip's method makes it.
+ *
+ * The flip changes what the probe can trust. Both methods read the turn and Y from a pair of
+ * touches across the front edge and seed X from one touch on the fence side; they differ in what
+ * follows:
+ *
+ *   - `tabs-in-blank` (the FRAME method): the two locating bores side 1 left — ⌀5–6, stored as the
+ *     setup's own pins — are entered over their seeded centres and touched sideways +X/−X/+Y/−Y,
+ *     each triggered touch released with `G38.5`. The pair of centres fixes X exactly and its
+ *     midpoint line cross-checks the turn the front pair read.
+ *   - `free-then-flip` (the VENDOR method): the part was freed on side 1 and is posed on its own
+ *     front edge; the pair of touches runs on that straight edge, the fence-side extreme seeds X,
+ *     and there are no bores — a part with no straight edge long enough to read a turn cannot be
+ *     posed against two arms by touches, and is refused by name.
+ *
+ * HOUSE RULE #518: every probe is `G38.3` (a miss is a reading, not an alarm); `G38.5` releases a
+ * trigger. The sideways moves come from `centrePair` — the bore-centre geometry #790 measured on
+ * the bench — so a later executor runs this plan through the centre-find machinery.
+ *
+ * Pure: the expected stock, the hold and the settings in, a plan of touches out.
+ */
+export interface FlipRegistrationInput {
+  /** Which method the setup chose; it decides who frees the part and how side 2 registers. */
+  method: SetupFlip['method'];
+  /**
+   * The expected stock in SIDE 2's work XY: the whole blank's box (frame method), or the freed
+   * part's silhouette box (vendor method).
+   */
+  stock: ExpectedStock;
+  /** Frame method: the two locating bores as side 1 left them, in side 2's work XY — the setup's pins. */
+  holes?: readonly { x: number; y: number }[];
+  /** Frame method: the bores' diameter, mm (⌀5–6 for the wired V2's ⌀2 tip). */
+  boreDiameterMm?: number;
+  /** The probe's tip diameter, mm — the ball the bore walls are read against. */
+  probeTipDiameterMm?: number;
+  /** How far the tip's centre enters each bore — a shop default seeded {@link FLIP_PROBE_ENTRY_DEPTH_MM}. */
+  entryDepthMm?: number;
+  /**
+   * Vendor method: the part's own front edge, as the straight run it really is, in side 2's work
+   * frame, mm along X. A part whose outline is not straight there (a disc) states a run too short
+   * to read a turn on, and the method is refused by name.
+   */
+  frontStraight?: { minX: number; maxX: number };
+  /** Vendor method: the y where the silhouette reaches its leftmost point — the X seed's line.
+   *  Default: the part box's middle. */
+  leftSeedY?: number;
+  /** The touch residual a pair's turn reads at, mm — `registration.probeResidualMm` (#451). */
+  touchResidualMm?: number;
+  settings: RegistrationSettings;
+}
+
+/** One locating bore, as the probe will enter and touch it. */
+export interface FlipHoleFind {
+  /** The seeded centre the probe enters over, side-2 work XY — the stored pin. */
+  at: { x: number; y: number };
+  /** The bore's stated diameter, mm. */
+  boreDiameterMm: number;
+  /** The probe tip's radius, mm — the ball the walls are read against. */
+  ballRadiusMm: number;
+  /** Each sideways touch's search travel from the centre, mm. */
+  searchMm: number;
+  /** How far below side 2's top the tip's centre enters, mm. */
+  entryDepthMm: number;
+  /** The entry plunge's travel from the park height, mm (G91, down): the seek that must find nothing. */
+  plungeMm: number;
+  /** The four sideways touches, in the ruling's order: +X, −X, +Y, −Y. */
+  touches: { axis: 'x' | 'y'; sign: 1 | -1; from: { x: number; y: number }; travelMm: number }[];
+  /** The release after each triggered touch, mm (a G38.5 back along the touched axis). */
+  releaseMm: number;
+  /**
+   * A sideways touch that travels its whole search with NO contact is a MISS, and a miss STOPS
+   * this find by name — a wall not where the pin seeded it means the pin is not where side 1 left
+   * it. (House rule #518 makes the miss a reading rather than an alarm; the reading is still a
+   * stop, never a skip.) The executor must carry this.
+   */
+  onMiss: 'stop-the-find';
+}
+
+/** #1073 — one step of side 2's registration, in the order the probe runs it. */
+export type FlipRegistrationStep =
+  | { kind: 'edge-pair'; purpose: 'y-and-rotation'; scans: [EdgeScan, EdgeScan] }
+  | { kind: 'seed'; purpose: 'x-seed'; scan: EdgeScan }
+  | { kind: 'hole'; purpose: 'x-exact-and-turn-check'; index: 1 | 2; find: FlipHoleFind };
+
+/** #1073 — the turn the bores read, checked against the turn the front pair read. */
+export interface FlipTurnCheck {
+  /** The two bore centres the line is taken between, side-2 work XY. */
+  between: [{ x: number; y: number }, { x: number; y: number }];
+  /** How far apart the bores are, mm. */
+  separationMm: number;
+  /** The angle the stored pin line makes, degrees — what the measured line is compared with. */
+  expectedAngleDeg: number;
+  /**
+   * How far the bores' turn may sit from the front pair's, degrees. DERIVED from the touch
+   * residual: each pair reads its angle to ±2r/separation, so the difference is bounded by the
+   * two summed — not a measured figure.
+   */
+  angleToleranceDeg: number;
+}
+
+export interface FlipRegistrationPlan {
+  method: SetupFlip['method'];
+  steps: FlipRegistrationStep[];
+  /** The bores' turn cross-check; null on the vendor method (no bores). */
+  crossCheck: FlipTurnCheck | null;
+  notes: string[];
+}
+
+export type FlipRegistrationResult = { ok: true; plan: FlipRegistrationPlan } | { ok: false; reason: string };
+
+export function planFlipRegistration(input: FlipRegistrationInput): FlipRegistrationResult {
+  const s = input.settings;
+  const bad = settingsProblem(s);
+  if (bad !== null) return { ok: false, reason: bad };
+  const { stock } = input;
+  if (!(stock.xMax > stock.xMin && stock.yMax > stock.yMin) || !(stock.cornerRadius >= 0)) {
+    return { ok: false, reason: 'the stock has no size to register' };
+  }
+  const vendor = input.method === 'free-then-flip';
+  const keepOff = stock.cornerRadius + s.cornerClearanceMm;
+
+  // THE PAIR THE TURN IS READ BETWEEN, on the front edge — the blank's own edge (frame) or the
+  // straight run of the freed part's outline (vendor).
+  let pairLo: number;
+  let pairHi: number;
+  if (vendor) {
+    if (input.frontStraight === undefined) {
+      return {
+        ok: false,
+        reason: 'the vendor method poses the part on its own front edge — the job does not say how much of that edge is straight',
+      };
+    }
+    const straightMm = r3(input.frontStraight.maxX - input.frontStraight.minX);
+    pairLo = input.frontStraight.minX + keepOff;
+    pairHi = input.frontStraight.maxX - keepOff;
+    if (!(pairHi > pairLo)) {
+      return {
+        ok: false,
+        reason: `the part’s front edge is straight for ${straightMm} mm — too short for two touches kept ${r3(keepOff)} mm clear of its corners; keep it in the blank on tabs`,
+      };
+    }
+  } else {
+    pairLo = stock.xMin + keepOff;
+    pairHi = stock.xMax - keepOff;
+    if (!(pairHi > pairLo)) {
+      return {
+        ok: false,
+        reason: `the blank is ${r3(stock.xMax - stock.xMin)} mm along X — too short for two touches kept ${r3(keepOff)} mm clear of its corners`,
+      };
+    }
+  }
+  const pairSeparation = r3(pairHi - pairLo);
+  const across = r3(stock.yMax - stock.yMin);
+  // The house's own rotation rule (#429): a pair `separation` apart reads the turn to
+  // ±(2 × fineStep/4 × across)/separation — a turn it cannot resolve is not measured.
+  const resolutionMm = r3((2 * (s.fineStepMm / 4) * across) / pairSeparation);
+  if (!(resolutionMm < s.edgeMarginMm)) {
+    return {
+      ok: false,
+      reason: vendor
+        ? `the part’s front edge gives ${pairSeparation} mm between touches: the turn would read to ±${resolutionMm} mm across ${across}, no better than the ${s.edgeMarginMm} mm margin — a shape with no straight edge cannot be posed against two arms by touches; keep it in the blank on tabs`
+        : `the blank’s front edge gives ${pairSeparation} mm between touches: the turn would read to ±${resolutionMm} mm across ${across}, no better than the ${s.edgeMarginMm} mm margin`,
+    };
+  }
+
+  const frontPair: [EdgeScan, EdgeScan] = [
+    scanFor('front', r3(pairLo), stock, s),
+    scanFor('front', r3(pairHi), stock, s),
+  ];
+  const seedY = r3(vendor && input.leftSeedY !== undefined ? input.leftSeedY : (stock.yMin + stock.yMax) / 2);
+  const steps: FlipRegistrationStep[] = [
+    { kind: 'edge-pair', purpose: 'y-and-rotation', scans: frontPair },
+    { kind: 'seed', purpose: 'x-seed', scan: scanFor('left', seedY, stock, s) },
+  ];
+  const notes: string[] = [];
+
+  if (vendor) {
+    notes.push(
+      `the freed part is posed on its own front edge — straight for ${r3((input.frontStraight!.maxX - input.frontStraight!.minX))} mm — ` +
+        'the pair finds Y and the turn, the fence-side extreme seeds X: no bores, no tabs',
+    );
+    return { ok: true, plan: { method: input.method, steps, crossCheck: null, notes } };
+  }
+
+  const { holes, boreDiameterMm, probeTipDiameterMm } = input;
+  if (holes === undefined || holes.length !== 2) {
+    return { ok: false, reason: 'the frame method locates on the two bores side 1 left — this job states no bore centres' };
+  }
+  if (boreDiameterMm === undefined || probeTipDiameterMm === undefined) {
+    return { ok: false, reason: 'the frame method needs the bore diameter and the probe tip diameter to state the sideways touches' };
+  }
+  const clearance = r3(boreDiameterMm - probeTipDiameterMm);
+  if (!(clearance >= FLIP_MIN_BORE_CLEARANCE_MM)) {
+    return {
+      ok: false,
+      reason: `a ⌀${r3(probeTipDiameterMm)} tip in a ⌀${r3(boreDiameterMm)} bore leaves ${clearance} mm of room — the tip cannot touch the walls (needs ${FLIP_MIN_BORE_CLEARANCE_MM} mm); bore ⌀5–6`,
+    };
+  }
+  const entryDepthMm = r3(input.entryDepthMm ?? FLIP_PROBE_ENTRY_DEPTH_MM);
+  // The wall lies (⌀bore − ⌀tip)/2 from the centre; the search adds the seed's own allowance.
+  const searchMm = r3(clearance / 2 + FLIP_SEED_SLACK_MM);
+  const ballRadiusMm = r3(probeTipDiameterMm / 2);
+  const plungeMm = r3(s.parkAboveSurfaceMm + entryDepthMm);
+
+  for (const [i, hole] of holes.entries()) {
+    const at = { x: r3(hole.x), y: r3(hole.y) };
+    const touches = (['x', 'y'] as const).flatMap((axis) =>
+      ([1, -1] as const).map((sign) => {
+        const pair = centrePair('bore', at, axis, sign, searchMm);
+        return { axis, sign, from: pair.from, travelMm: pair.travelMm };
+      }),
+    );
+    steps.push({
+      kind: 'hole',
+      purpose: 'x-exact-and-turn-check',
+      index: (i + 1) as 1 | 2,
+      find: { at, boreDiameterMm, ballRadiusMm, searchMm, entryDepthMm, plungeMm, touches, releaseMm: FLIP_PROBE_AWAY_MM, onMiss: 'stop-the-find' },
+    });
+  }
+
+  // THE TURN CROSS-CHECK: the bores' centre line against the front pair's line. Each pair reads
+  // its angle to ±2r/separation, so the difference is bounded by the sum of the two.
+  const [a, b] = holes;
+  const holeSeparation = Math.hypot(b!.x - a!.x, b!.y - a!.y);
+  if (!(holeSeparation > 0)) {
+    return { ok: false, reason: 'the two bores sit at the same point — they cannot cross-check the turn' };
+  }
+  const residual = input.touchResidualMm ?? PROBE_RESIDUAL_MM;
+  const toleranceRad = (2 * residual) / pairSeparation + (2 * residual) / holeSeparation;
+  const crossCheck: FlipTurnCheck = {
+    between: [a!, b!],
+    separationMm: r3(holeSeparation),
+    expectedAngleDeg: r3((Math.atan2(b!.y - a!.y, b!.x - a!.x) * 180) / Math.PI),
+    angleToleranceDeg: r3((toleranceRad * 180) / Math.PI),
+  };
+
+  notes.push(
+    `side 2 registers on the front edge pair (Y and the turn), a fence-side seed touch for X, then the two ` +
+      `⌀${r3(boreDiameterMm)} bores ${r3(holeSeparation)} mm apart — four sideways touches each, a G38.5 release after every trigger: ` +
+      `exact X and a turn cross-check to ±${crossCheck.angleToleranceDeg}°`,
+    `the tip enters each bore ${entryDepthMm} mm below side 2’s top (chosen, not measured); a trigger on the entry ` +
+      'means the bore is not where the seed says — stop with the reading; a sideways touch that misses its wall stops the find too',
+  );
+  return { ok: true, plan: { method: input.method, steps, crossCheck, notes } };
 }

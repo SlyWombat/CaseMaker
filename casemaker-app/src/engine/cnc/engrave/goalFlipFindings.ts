@@ -17,6 +17,7 @@
 
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import type { Tool } from '@/engine/cnc/tool';
+import { DEFAULT_BREAKTHROUGH } from '@/engine/cnc/sacrificial';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { placeTarget } from './targetPlace';
 import { jobMount, jobTargetObjects, type JobFinding } from './jobSetup';
@@ -29,6 +30,7 @@ import {
 } from './goalCoverage';
 import { goalFlipPlan, sideWords, type FlipPlan } from './goalFlipPlan';
 import { dowelHold } from './goalFlipSetups';
+import { FLIP_BORE_CHIP_CLEARANCE_MM } from './flipChoice';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 
 /** The measure the finding is built from, kept as data so a caller can assert on it. */
@@ -98,8 +100,13 @@ export function sidesSentence(plan: FlipPlan): string {
   return plan.sides.map((s) => sideWords(s.faceUp)).join(', then ');
 }
 
-/** #1068 — the flip's locating holes go this far past the stock's underside, mm. */
-export const FLIP_HOLE_BREAKTHROUGH_MM = 2;
+/**
+ * #1068/#1073 — the flip's locating bore goes this far past the stock's underside, mm: the app's
+ * default breakthrough (#218, 0.3 mm) plus the chip clearance (0.2 mm) — half a millimetre, not
+ * the old 2 mm. A job that states its own breakthrough uses `job.sacrificial.breakthrough` with
+ * the same clearance; this constant is the no-job default the offer's arithmetic falls back on.
+ */
+export const FLIP_HOLE_BREAKTHROUGH_MM = DEFAULT_BREAKTHROUGH + FLIP_BORE_CHIP_CLEARANCE_MM;
 
 /** #1068 — the drawer's one action verb, when the plan can be accepted as the job stands. */
 export const FLIP_ACTION_LABEL = 'Add the flipped setup';
@@ -168,20 +175,24 @@ export function goalFlipFindings(
   // that much material under the stock, and a cutter among the shop's own that can drill them.
   const hold =
     plan.sides.length > 1 ? dowelHold(job, goal, plan.sides[1]!.rotate?.about ?? 'x', tools) : null;
-  const canOffer = plan.sides.length > 1 && hold !== null && underMm >= FLIP_HOLE_BREAKTHROUGH_MM;
+  // #1073 — THE BORE'S DROP PAST THE UNDERSIDE: the job's own breakthrough plus the chip
+  // clearance; the board must be at least that thick (it was 2 mm before the ruling).
+  const boreDropMm = Math.round((job.breakthrough + FLIP_BORE_CHIP_CLEARANCE_MM) * 100) / 100;
+  const canOffer = plan.sides.length > 1 && hold !== null && underMm >= boreDropMm;
   const need =
     plan.sides.length <= 1 || canOffer
       ? undefined
       : hold === null
-        ? 'needs a drill among your cutters — record one in Manage › Tools'
+        ? 'needs a cutter for the ⌀5–6 locating bores — record one in Manage › Tools'
         : 'needs a sacrificial board under the blank';
   const detail =
     hold === null
       ? undefined
       : `${sidesSentence(plan)} — ${plan.sides.length} setups reach ${planWords} of the surface; ` +
         `how much of it the chosen cutter reproduces is the run's own simulation verdict. ` +
-        `The first setup drills two ⌀${hold.diameterMm} mm locating holes ${hold.depthMm} mm deep in ` +
-        `the margin, clear of the part, and the flipped setup registers on them.`;
+        `The first setup bores two ⌀${hold.diameterMm} mm locating holes ${hold.depthMm} mm deep — ` +
+        `through the blank and ${boreDropMm} mm into the board — in the margin, clear of the part, ` +
+        `and the flipped setup registers on them.`;
   return [
     {
       severity: 'warning',

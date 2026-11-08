@@ -22,7 +22,10 @@ import { expandEngraveRow } from '@/store/engraveRowStore';
 import type { PlanMountTap, RegistrationPlan } from '@/engine/cnc/registration/plan';
 import { FACES, type Face, type Mount, type MountSpec, type Setup, machineSize, setupPinReference } from '@/engine/cnc/setups';
 import type { SetupAuthoringFinding, SetupItemsReading } from '@/engine/cnc/setups';
-import type { JobSetup, ViseParams } from '@/types/engraveJob';
+import type { JobSetup, SetupFlip, StockCorner, ViseParams } from '@/types/engraveJob';
+import { defaultFlip } from '@/engine/cnc/engrave/flipDefaults';
+import { flipOrientation } from '@/engine/cnc/engrave/flipChoice';
+import { FlipDiagram } from '@/components/ui/FlipDiagram';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const FIELD_LABEL: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, margin: '4px 0' };
@@ -89,6 +92,10 @@ export interface EngraveSetupRowProps {
   probeName?: string | null;
   /** #603 — the machine's display name, or null when there is no location record. */
   machineName?: string | null;
+  /** #1073 — the seated blank's facts the flip graphic draws: its extents and stated squares. */
+  stock?: { length: number; width: number; squareCorners?: StockCorner[] };
+  /** #1073 — the job's breakthrough rule, mm: the vendor method's groove past the outline. */
+  breakthroughMm?: number;
 }
 
 function holderWords(mount: MountSpec): string {
@@ -460,6 +467,73 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
               )}
               {pinRef !== null && (
                 <>
+                  {/* #1073 — THE FLIP CHOICE AND ITS GRAPHIC: the method, the axis, which way the
+                      blank turns and which corner lands in the fence — never silently applied. */}
+                  {index > 0 && setup.orientation.top === 'bottom' && props.stock !== undefined ? (
+                    <div data-testid={`engrave-setup-flip-${n}`} style={{ marginTop: 8 }}>
+                      {(() => {
+                        const def = defaultFlip({ squareCorners: props.stock!.squareCorners });
+                        const flip = setup.flip ?? { method: def.method, axis: def.axis };
+                        const commit = (method: SetupFlip['method'], axis: SetupFlip['axis']): void => {
+                          props.onReplace({ ...setup, flip: { method, axis }, orientation: flipOrientation(axis) });
+                        };
+                        return (
+                          <>
+                            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 4 }}>
+                              <label style={MUTED}>
+                                Flip method{' '}
+                                <select
+                                  data-testid={`engrave-setup-flip-method-${n}`}
+                                  value={flip.method}
+                                  disabled={!editable}
+                                  onChange={(e) => commit(e.target.value as SetupFlip['method'], flip.axis)}
+                                >
+                                  <option value="tabs-in-blank">Keep the part in the blank on tabs</option>
+                                  <option value="free-then-flip">Free the part, then flip it</option>
+                                </select>
+                              </label>
+                              <label style={MUTED}>
+                                Flip axis{' '}
+                                <select
+                                  data-testid={`engrave-setup-flip-axis-${n}`}
+                                  value={flip.axis}
+                                  disabled={!editable}
+                                  onChange={(e) => commit(flip.method, e.target.value as SetupFlip['axis'])}
+                                >
+                                  <option value="left-right">Left ↔ right</option>
+                                  <option value="front-back">Front ↔ back</option>
+                                </select>
+                              </label>
+                              {setup.flip === undefined ? (
+                                <button
+                                  type="button"
+                                  data-testid={`engrave-setup-flip-use-${n}`}
+                                  disabled={!editable}
+                                  onClick={() => commit(flip.method, flip.axis)}
+                                >
+                                  Use this flip
+                                </button>
+                              ) : null}
+                            </div>
+                            <FlipDiagram
+                              lengthMm={props.stock!.length}
+                              widthMm={props.stock!.width}
+                              flip={flip}
+                              squareCorners={props.stock!.squareCorners}
+                              pins={setup.pins?.at}
+                              breakthroughMm={props.breakthroughMm}
+                            />
+                            <p style={MUTED} data-testid={`engrave-setup-flip-default-method-${n}`}>
+                              Default: {def.methodReason}.
+                            </p>
+                            <p style={MUTED} data-testid={`engrave-setup-flip-default-axis-${n}`}>
+                              Default axis: {def.axisReason}.
+                            </p>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  ) : null}
                   <p style={MUTED} data-testid={`engrave-setup-pins-${n}`}>
                     Pins — <b>{pinRef.words}</b>
                   </p>

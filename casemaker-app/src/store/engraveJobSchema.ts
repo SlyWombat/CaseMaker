@@ -1631,6 +1631,14 @@ const stockObjectSchema = z
     material: z
       .enum(STOCK_MATERIALS)
       .describe('Stock material; selects the feeds/speeds table the job starts from.'),
+    // #1073 — which corners of the blank are square, in the seated (side-1) work frame. OPTIONAL
+    // and NEVER defaulted: absent reads all four (a dimensioned blank), so every document written
+    // before this field keeps its exact shape. Side 1 seats the stated square corner in the
+    // fence; a flipped setup's fenced corner is derived from this list and the chosen axis.
+    squareCorners: z
+      .array(z.enum(['FL', 'FR', 'BL', 'BR']))
+      .optional()
+      .describe('The blank corners that are square, as the Holding step states them; omit when all four are.'),
     // #240 §1 — ROUND STOCK in the rotary chuck. BOTH optional and never defaulted: absent is a
     // rectangle, which is every pre-rotary document, so those jobs round-trip byte-for-byte. The
     // pair is validated together below (`shape` states `diameter`, and the planning box it sits in
@@ -2315,6 +2323,16 @@ const jobSetupSchema = z.object({
     })
     .optional()
     .describe('Instructions for remounting the stock; omit when the setup is never remounted.'),
+  // #1073 — how a flipped setup turns the blank over: the operator's method and axis, and nothing
+  // else. The fenced corner and whether it is square are derived (stock.squareCorners + axis).
+  flip: z
+    .object({
+      method: z.enum(['free-then-flip', 'tabs-in-blank']).describe('How the part is freed for the flip.'),
+      axis: z.enum(['left-right', 'front-back']).describe('Which horizontal axis the blank turns about.'),
+    })
+    .strict()
+    .optional()
+    .describe('How this setup turns the stock over; omit for a setup that is not a flip.'),
   // #723 P2-2 — the flip's stated reference: the two locating pins, in this setup's mounted work XY.
   pins: z
     .object({
