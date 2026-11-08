@@ -15,6 +15,14 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '../../src/engine/fonts/registry';
 
+// #1081 — THE SUITE MUST NOT INHERIT A BOX'S CATALOGUE. The CLI now honours `CM_CATALOGUE` as an
+// explicit catalogue override, and the k3 runner exports that variable for its own scripts: left
+// in place, every CLI-driving spec on that box would resolve Makera's feed tier where the same
+// spec on another box resolves the shop's starting table — the committed receipt fixtures and the
+// bench wall would disagree with themselves. A spec that MEANS to exercise the override sets the
+// variable itself (`catalogueTier1081.spec.ts`).
+delete process.env.CM_CATALOGUE;
+
 const filesDir = path.resolve(process.cwd(), 'src/engine/fonts/files');
 
 for (const key of BUNDLED_FONT_KEYS) {
