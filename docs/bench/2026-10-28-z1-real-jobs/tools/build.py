@@ -678,7 +678,8 @@ def seven_lines(c):
     if design:
         vsecs = (c.get('vendor') or {}).get('seconds')
         rows = [
-            ('coverage of the design', f"{f(v.get('coveragePct'), 2)} % of the drawn band" if v else 'not scored',
+            ('coverage of the design', (f"{f(v.get('coveragePct'), 2)} % of the drawn band" if v.get('coveragePct') is not None
+                                          else 'not scored — a cone is judged by reach and over-cut, not flat coverage') if v else 'not scored',
              f"{f(od.get('coveragePct'), 2)} % of the drawn band" if od else 'refused — no program to score'),
             ('cut outside the design', f"{f(v.get('outsideMm2'), 1)} mm² (max {f(v.get('deepestOutsideMm'), 2)} mm)" if v else 'not scored',
              f"{f(od.get('outsideMm2'), 1)} mm² (max {f(od.get('deepestOutsideMm'), 2)} mm)" if od else 'refused — no program to score'),
@@ -693,7 +694,7 @@ def seven_lines(c):
         allow = ('<p class="notes">Both columns are scored against the same design (our job’s own drawn band) '
                  'and by the same design check; the vendor column is its engraving pass, the operation our job '
                  'performs — its contour and chamfer are a different one and are left out of the design comparison.</p>')
-        if v and v.get('outsideMm2') is not None:
+        if v and v.get('outsideMm2') is not None and v.get('coveragePct') is not None:
             allow += (f"<p class=\"notes\">The vendor’s engraving leaves {f(100 - v.get('coveragePct'), 1)} % of the drawn "
                       f"band above the floor: a 0.3 mm engraver clears a groove inside a band wider than itself — a "
                       f"property of a V-engraving, printed as a fact.</p>")
