@@ -176,7 +176,10 @@ export interface EngraveJobSources {
       | 'surfaceTouches'
       | 'shape'
       | 'diameter'
-      | 'wall',
+      | 'wall'
+      // #1073 — the blank's stated square corners come from the Holding step like every other
+      // stock fact, so their provenance rides the same map.
+      | 'squareCorners',
       FieldSource
     >
   >;
@@ -1879,6 +1882,13 @@ export interface JobSetup {
   /** The directed step into this setup. Absent on the first setup, or where none is needed. */
   remount?: JobSetupRemount;
   /**
+   * #1073 — HOW THIS SETUP'S STOCK WAS TURNED OVER, when this is a flipped setup. OPTIONAL and not
+   * defaulted: absent is a setup the operator never marked as a flip, and every document written
+   * before the field keeps its exact shape. The plan, the holes, the tabs, the release, the
+   * registration and the sheet all read this one record.
+   */
+  flip?: SetupFlip;
+  /**
    * #723 P2-2 — THE FLIP'S STATED REFERENCE: the two locating pins a turned stock sits on, in THIS
    * setup's mounted work XY (origin at the stock's front-left corner as mounted, mm). A setup that
    * states them is registered on the pins rather than on a cut feature or the mount's edge; the
@@ -2033,6 +2043,24 @@ export function planChoiceOf(job: Pick<EngraveJob, 'planChoice'>): PlanChoice {
   return job.planChoice ?? 'owned';
 }
 
+/** #1073 — a blank corner in the seated (side-1) work frame: front/back, left/right. */
+export type StockCorner = 'FL' | 'FR' | 'BL' | 'BR';
+
+/**
+ * #1073 — HOW A TWO-SIDED JOB TURNS OVER, as the operator chose it. The issue body's shape and
+ * nothing else: the fenced corner follows from the axis and the blank's seated corner, and whether
+ * it is square follows from `stock.squareCorners` — both are COMPUTED where they are printed
+ * (graphic, sheet, refusal), never stored. A stored derived boolean is wrong the day the stock
+ * record changes.
+ */
+export interface SetupFlip {
+  /** How the part is freed for the flip: the vendor's freed part, or the frame on tabs. */
+  method: 'free-then-flip' | 'tabs-in-blank';
+  /** Which horizontal axis the blank turns about: left-right (about the front-back axis) or
+   *  front-back (about the left-right axis). */
+  axis: 'left-right' | 'front-back';
+}
+
 export interface EngraveJob {
   schemaVersion: 3;
   /**
@@ -2070,6 +2098,15 @@ export interface EngraveJob {
     width: Mm;
     thickness: Mm;
     material: StockMaterial;
+    /**
+     * #1073 — WHICH CORNERS OF THIS BLANK ARE SQUARE, as the Holding step states them, in the
+     * seated (side-1) work frame. OPTIONAL and not defaulted: absent reads all four square (a
+     * dimensioned blank), and every document written before the field keeps its exact shape. A
+     * blank with ONE right angle (the maintainer's M1 tray) states it here; side 1 seats that
+     * corner in the fence, and a flipped setup's fenced corner is a function of this list and the
+     * chosen axis, computed where it is printed.
+     */
+    squareCorners?: StockCorner[];
     /**
      * The stock's plan shape (#240 §1, `/Rotary.md` R6; #743 D6). ABSENT is a rectangle — every
      * pre-rotary job — and is kept absent through a save/open so those documents round-trip
