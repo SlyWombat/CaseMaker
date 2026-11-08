@@ -188,6 +188,7 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
     clAt,
   });
 
+  console.log('TRAY1 ' + JSON.stringify({ edge: r.edgeBreakFraction, adj: r.adjudicatedFraction, raw: r.cutIntoFraction, rawMax: r.maxCutIntoMm, adjMax: r.adjudicatedMaxMm, adjAt: r.adjudicatedMaxAt, sil: r.silhouetteExcusedCells, silDeep: r.silhouetteDeepest, wall: r.wallNotScoredFraction, shadow: r.shadowNotScoredFraction, ovr: [r.wallOverReliefCells, r.shadowOverReliefCells, r.borderOverReliefCells] }));
   expect(r.cutIntoFraction * 100).toBeCloseTo(6.85, 1);
   // Without the `who` rule the allowance excuses cells on geometry alone: every cell within the
   // V's reach and leg, whichever cutter took it deepest. That reads ~4.95 %, an upper bound.
