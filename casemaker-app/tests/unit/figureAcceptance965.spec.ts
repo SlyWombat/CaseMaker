@@ -71,7 +71,8 @@ const JOBS = join(REPO, 'docs', 'bench', '2026-10-28-z1-real-jobs', 'jobs');
 // conservative placeholder as the product.
 const CATALOGUE = installMakeraCatalogue();
 /** #965 — the owned plan's goal check is opt-in: the default run is ONE plan (the figure set).
- * Set CM_965_TWO_PLANS=1 for the owned→figure-set tradeoff line and its receipt. */
+ * Set CM_965_TWO_PLANS=1 for the scallop tradeoff (the 0.027 mm default beside the job's own)
+ * and the owned→figure-set tradeoff line and its receipt; by default the card plans ONCE. */
 const TWO_PLANS = process.env.CM_965_TWO_PLANS === '1';
 /** #965's adopted ruling (review session, 2026-11-05): the figure line is MEASURED, not passed;
  * the card asserts these measured floors so a regression still fails. */
@@ -437,9 +438,9 @@ for (const figure of FIGURES) {
       // #965/#985 — one run of the figure at a stated finish tolerance, WITH the figure set's long
       // ⌀1 rest and engraver (the crease ruling): plan, post, verify, sweep and judge via
       // `runFigure` (which already does the #948/v4 edge-break-gate check internally), then layer
-      // the scallop tradeoff's own fact (the ball's posted minutes) on top. #965 runs it TWICE —
-      // the job's 0.01 mm and the 0.027 mm default — so the card's scallop tradeoff is measured,
-      // never asserted.
+      // the scallop tradeoff's own fact (the ball's posted minutes) on top. #965 ran it TWICE; by
+      // default the card now plans ONCE (the job's own 0.010 mm) and the 0.027 mm default is
+      // measured only under CM_965_TWO_PLANS=1 (#1054).
       const measureAt = async (finishMm: number | undefined) => {
         const run = await runFigure(figure, job, stlPath!, bytes, planInputFor(job, source, { finishMm, withLongBall: true }), ctx);
         // The ball's own posted minutes — what the scallop buys and what it costs.
@@ -450,13 +451,16 @@ for (const figure of FIGURES) {
       };
 
       const used = await measureAt(FIGURE_FINISH_MM); // the job's stated tolerance
-      // The vendor's default beside it (a job that states no tolerance) — the tradeoff's other side.
-      const byDefault = await measureAt(undefined);
-      // The two runs must really be at DIFFERENT scallops, or the tradeoff below would be a plan
-      // compared with itself: the plan's own note is the proof (a default parameter once made
-      // exactly that mistake and both runs read 0.010).
+      // #1054 — ONE PLAN BY DEFAULT (6b's ruling): the card's own scallop, inside the 1,500 s
+      // budget. The vendor's default beside it is the tradeoff's other side and is measured only
+      // when asked for — CM_965_TWO_PLANS=1 (the same gate as the owned plan below).
+      const byDefault = TWO_PLANS ? await measureAt(undefined) : null;
+      // The runs must really be at the scallops they claim: the plan's own note is the proof (a
+      // default parameter once made exactly that mistake and both runs read 0.010).
       expect(used.notes.join('\n'), 'the job\'s run did not state 0.01 mm').toContain(`${FIGURE_FINISH_MM.toFixed(3)} mm scallop`);
-      expect(byDefault.notes.join('\n'), 'the default run did not state 0.027 mm').toContain(`${DEFAULT_FINISH_SCALLOP_MM.toFixed(3)} mm scallop`);
+      if (byDefault !== null) {
+        expect(byDefault.notes.join('\n'), 'the default run did not state 0.027 mm').toContain(`${DEFAULT_FINISH_SCALLOP_MM.toFixed(3)} mm scallop`);
+      }
 
       // #965 (the review session's ruling, item 3.1): the figure set ADMITS the catalogue's long
       // Ø1 (161032105031) as the rest ball; the owned plan — the house set alone, at the SAME
@@ -521,15 +525,22 @@ for (const figure of FIGURES) {
       // job states FIGURE_FINISH_MM; the vendor's default is 0.027 mm. The card prints the scallop
       // it used, the default, and the ball's posted minutes and the whole-surface coverage at
       // each — both sides measured on this job, so the operator can price the choice.
-      const scallop = {
-        usedMm: FIGURE_FINISH_MM,
-        defaultMm: DEFAULT_FINISH_SCALLOP_MM,
-        atUsed: { finishSeconds: used.finishSeconds, coverage: used.coverage },
-        atDefault: { finishSeconds: byDefault.finishSeconds, coverage: byDefault.coverage },
-      };
+      const scallop = byDefault === null
+        ? {
+            usedMm: FIGURE_FINISH_MM,
+            atUsed: { finishSeconds: used.finishSeconds, coverage: used.coverage },
+          }
+        : {
+            usedMm: FIGURE_FINISH_MM,
+            defaultMm: DEFAULT_FINISH_SCALLOP_MM,
+            atUsed: { finishSeconds: used.finishSeconds, coverage: used.coverage },
+            atDefault: { finishSeconds: byDefault.finishSeconds, coverage: byDefault.coverage },
+          };
       const scallopLine =
-        `#965 ${figure.name} scallop: the job's ${scallop.usedMm.toFixed(3)} mm — finish ${(used.finishSeconds / 60).toFixed(1)} min, coverage ${(used.coverage * 100).toFixed(2)} %; ` +
-        `the ${scallop.defaultMm.toFixed(3)} mm default — finish ${(byDefault.finishSeconds / 60).toFixed(1)} min, coverage ${(byDefault.coverage * 100).toFixed(2)} %`;
+        `#965 ${figure.name} scallop: the job's ${FIGURE_FINISH_MM.toFixed(3)} mm — finish ${(used.finishSeconds / 60).toFixed(1)} min, coverage ${(used.coverage * 100).toFixed(2)} %` +
+        (byDefault === null
+          ? ` (the ${DEFAULT_FINISH_SCALLOP_MM.toFixed(3)} mm default is not measured this run — set CM_965_TWO_PLANS=1 for the tradeoff)`
+          : `; the ${DEFAULT_FINISH_SCALLOP_MM.toFixed(3)} mm default — finish ${(byDefault.finishSeconds / 60).toFixed(1)} min, coverage ${(byDefault.coverage * 100).toFixed(2)} %`);
       console.log(scallopLine);
 
       const out = process.env.CM_965_OUT;
@@ -557,12 +568,12 @@ for (const figure of FIGURES) {
       expect(figureRun.scored.lines.find((l) => l.key === 'coverage')?.oursValue).toBeCloseTo(figureRun.coverage, 9);
       // The ideal is a superset: it can never be worse than the owned plan on the same ruler.
       if (owned !== null) expect(figureRun.coverage).toBeGreaterThanOrEqual(owned.coverage - 1e-9);
-    // #965/#998 — THE SPEC'S STATED BUDGET, not a temporary ceiling. The card measures TWO plans
-    // (the job's 0.010 mm scallop and the 0.027 mm default), so the wall is the two-plan wall:
-    // elephant 977.9 s at 966-collapse 41660656, panther 424.6 s (C's run, #998) — a per-plan
-    // time unchanged from the one-plan wall the "2.5x slowdown" reading compared it with (#998
-    // resolved: the plans are the same speed; the spec plans twice). The ceiling is ~1.5x the
-    // larger wall; a run that crosses it is a regression, not the expected cost.
+    // #965/#998/#1054 — THE SPEC'S STATED BUDGET, not a temporary ceiling. #1054 made the card
+    // plan ONCE by default (the job's 0.010 mm scallop) — 6b's ruling, so the run fits 1,500 s;
+    // the 0.027 mm default and the owned plan are behind CM_965_TWO_PLANS=1. The two-plan walls
+    // on record: elephant 977.9 s at 966-collapse 41660656, panther 424.6 s (C's run, #998) — the
+    // plans are the same speed; the spec simply planned twice. A default run that crosses 1,500 s
+    // is a regression, not the expected cost.
     }, 1_500_000); // #965 — the card measures both scallops (0.01 and the 0.027 default), with the long ⌀1 rest
   });
 }
