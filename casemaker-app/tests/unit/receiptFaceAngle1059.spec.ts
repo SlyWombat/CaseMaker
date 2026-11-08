@@ -80,6 +80,25 @@ describe('#1059 the receipt carries a square chuck job’s face angle', () => {
     expect(faceAngleReceiptFor(rodJob(), where(DATUM))).toBeUndefined();
   });
 
+  it('a two-machine location lends the job its OWN machine’s datum, never the other one’s (C’s review)', () => {
+    const other = {
+      id: 'machine-2',
+      profileId: 'Z2',
+      activeBedProfileId: 'bp-2',
+      bedProfiles: [{ id: 'bp-2', datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null, rotaryFaceAngle: { ...DATUM, value: 9.5 } } }],
+    };
+    const mine = {
+      id: 'machine-1',
+      profileId: 'Z1',
+      activeBedProfileId: 'bp-1',
+      bedProfiles: [{ id: 'bp-1', datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null, rotaryFaceAngle: DATUM } }],
+    };
+    // The OTHER machine is first: an unbound job naming Z1 must still take Z1's 1.25, not 9.5.
+    const two = { machines: [other, mine] } as unknown as LoadedLocation;
+    const job = { ...squareChuckJob(), machineId: 'Z1' };
+    expect(faceAngleReceiptFor(job, two)).toEqual({ degrees: 1.25, residualMm: 0.03 });
+  });
+
   it('the schema takes the field and stays optional (older receipts parse byte-for-byte)', () => {
     const withAngle = { kind: 'job' as const, outDir: '/x', programs: [], coupon: null, pair: null, faceAngle: { degrees: 1.25, residualMm: 0.03 } };
     expect(engraveDetailsSchema.parse(withAngle).faceAngle).toEqual({ degrees: 1.25, residualMm: 0.03 });

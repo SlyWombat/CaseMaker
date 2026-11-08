@@ -412,12 +412,12 @@ interface RunReceipt {
  * dispatcher can run the command without losing the process. The script wrapper turns the returned
  * code into `process.exitCode`.
  */
-/** #1070 — the sheet's bed-held registration: the footprint plan, or the first seat seek. */
 /**
  * #1059 — THE RECEIPT'S FACE-ANGLE FIELD: the square chuck's levelled A zero, read from the bed
- * profile the job was bound to (its `datums.rotaryFaceAngle`), else the machine's active profile.
- * Only a SQUARE section carries one — a round rod has no face to level — and a profile with no
- * datum yields nothing, so those receipts keep their exact shape.
+ * profile the job was bound to (its `datums.rotaryFaceAngle`), else — for an unbound job — the
+ * machine the job names (`machineId`), else any machine that states the datum. Only a SQUARE
+ * section carries one (a round rod has no face to level), and a profile with no datum yields
+ * nothing, so those receipts keep their exact shape.
  */
 export function faceAngleReceiptFor(
   job: EngraveJob,
@@ -425,12 +425,17 @@ export function faceAngleReceiptFor(
 ): { degrees: number; residualMm?: number } | undefined {
   const section = rotaryMapOf(job)?.section;
   if (section === undefined || section.kind !== 'rect') return undefined;
-  const wanted = job.bed?.profileId;
-  for (const machine of where?.machines ?? []) {
+  const wantedProfile = job.bed?.profileId;
+  const machines = [...(where?.machines ?? [])];
+  // #1059 (C's review) — THE JOB'S OWN MACHINE FIRST: a two-machine location must not lend an
+  // unbound job the other machine's face angle.
+  const own = machines.find((m) => job.machineId !== undefined && m.profileId === job.machineId);
+  if (own !== undefined) machines.splice(machines.indexOf(own), 1), machines.unshift(own);
+  for (const machine of machines) {
     const profile =
-      wanted === undefined
+      wantedProfile === undefined
         ? machine.bedProfiles?.find((p) => p.id === machine.activeBedProfileId)
-        : machine.bedProfiles?.find((p) => p.id === wanted);
+        : machine.bedProfiles?.find((p) => p.id === wantedProfile);
     const datum = profile?.datums.rotaryFaceAngle ?? null;
     if (datum === null) continue;
     return datum.residualMm === undefined ? { degrees: datum.value } : { degrees: datum.value, residualMm: datum.residualMm };
@@ -438,6 +443,7 @@ export function faceAngleReceiptFor(
   return undefined;
 }
 
+/** #1070 — the sheet's bed-held registration: the footprint plan, or the first seat seek. */
 export function sheetRegistrationFor(
   job: EngraveJob,
   where: LoadedLocation | null,
