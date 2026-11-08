@@ -87,7 +87,8 @@ describe('#512 bed wizard — S1 to S6, one field per step', () => {
       expect(profile.basedOn).toBe(template.id);
       expect(profile.name).toBe(template.name);
       // The wizard measures nothing: every datum stays null, as the schema requires of the unknown.
-      expect(Object.values(profile.datums)).toEqual([null, null, null, null]);
+      // The face-angle datum (#1059) is the fifth: the wizard invents none of them either.
+      expect(Object.values(profile.datums)).toEqual([null, null, null, null, null]);
       // Every placement names a fixture record the save creates (or reuses).
       for (const placement of profile.placements) {
         expect(res.bed.accessories.some((a) => a.id === placement.fixture)).toBe(true);
@@ -259,28 +260,28 @@ describe('#512 bed wizard — provenance and the measurement list', () => {
     const vise = finalize(draftFrom('default:z1-vise'));
     expect(vise.ok).toBe(true);
     if (!vise.ok) return;
-    // The vise template: 4 measured product constants; the 3 body dimensions and all four datums
-    // and the five bare-bed surface fields unmeasured; 4 standard mountings and 2 tape numbers
-    // defaulted.
+    // The vise template: 4 measured product constants; the 3 body dimensions and all five datums
+    // (the face angle is the fifth, #1059) and the five bare-bed surface fields unmeasured; 4
+    // standard mountings and 2 tape numbers defaulted.
     expect(provenanceTally(vise.bed.profile, vise.bed.accessories)).toEqual({
       measured: 4,
       vendor: 0,
       default: 6,
       typed: 0,
-      unmeasured: 12,
+      unmeasured: 13,
     });
 
     const kit = finalize(draftFrom('default:z1-makera-kit'));
     expect(kit.ok).toBe(true);
     if (!kit.ok) return;
     // The Makera kit: the bracket's two arm numbers are the vendor's; everything else is the
-    // wizard's default or unmeasured (the bracket height, the position and the four datums).
+    // wizard's default or unmeasured (the bracket height, the position and the five datums).
     expect(provenanceTally(kit.bed.profile, kit.bed.accessories)).toEqual({
       measured: 0,
       vendor: 2,
       default: 14,
       typed: 0,
-      unmeasured: 6,
+      unmeasured: 7,
     });
   });
 
