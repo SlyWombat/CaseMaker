@@ -49,3 +49,9 @@ docs/makera/
 
 # Kazoo tool-label records + barcode photos — Makera label text is vendor data, stays local (2026-10-12).
 tool-labels/
+
+# Local run artifacts (batch/QA worktrees) — never sources.
+/out-*/
+/diag-*.log
+/m1trayF*.log
+/setb-*.out
