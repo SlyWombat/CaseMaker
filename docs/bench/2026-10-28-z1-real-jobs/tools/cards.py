@@ -32,6 +32,8 @@ SAMPLES = [
 CARD_NOTES = {
     'ref-wildspirit': 'Makera’s STL is not a closed surface (172 edges shared by more than two '
                       'triangles, even after cleanup); the app refuses it correctly.',
+    'j20': 'Refused at 5d41e1c8a: clamps over the cut (fix in the next batch).',
+    'j22': 'Refused at 5d41e1c8a: clamps over the cut (fix in the next batch).',
 }
 
 CARDS = [
