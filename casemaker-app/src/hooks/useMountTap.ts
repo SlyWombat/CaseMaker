@@ -181,7 +181,10 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
   };
 
   async function tapJaw(
-    tap: { x: number; y: number; fromMachineZ: number } & Pick<PlanMountTap, 'reference' | 'datumOffsetMm'>,
+    tap: { x: number; y: number; fromMachineZ: number } & Pick<PlanMountTap, 'reference' | 'datumOffsetMm'> & {
+        /** #1070 — the plan's own seek bound (the seat press): never search past it. */
+        planTravelMm?: number | null;
+      },
   ): Promise<void> {
     if (inputs.target === null) return;
     // #637 — a second press (the other host's button, or a double press) must not orphan the first
@@ -200,6 +203,12 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator },
         inputs.floor,
         mountKindOf(tap.reference),
+        // #1070 — the probe is stated (null here: the hook's caller carries no instrument object;
+        // the executor releases a triggered tap whatever the instrument), and the seat press's
+        // own bound rides last: a never-triggering tap stops at the band's floor less the scan
+        // reach, not at the machine's work-envelope floor.
+        null,
+        tap.planTravelMm ?? null,
       );
       useMachineTranscriptStore.getState().setRegistration(r.transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n'));
       if (r.ok) {

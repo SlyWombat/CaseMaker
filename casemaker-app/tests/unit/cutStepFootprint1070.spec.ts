@@ -28,6 +28,7 @@ import { planRegistrationAttempt } from '@/components/panels/registrationAttempt
 import { footprintInputFor, seatSeekFor } from '@/engine/cnc/registration/footprintJob';
 import { planFootprintRegistration } from '@/engine/cnc/registration/footprint';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
+import { isSeatPlan, seatTapArgs } from '@/engine/cnc/registration/seatPress';
 import type { EngraveJob } from '@/types/engraveJob';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -209,5 +210,28 @@ describe('#1070 the sheet names the seat seek as the first touch of the day', ()
     expect(text).toContain('bounded Z seek with the wired probe on the wasteboard beside the bracket’s front arm');
     expect(text).toContain('valid only for the probe fitting');
     expect(text).toContain('press Plan registration again');
+  });
+});
+
+describe('#1070 the seat press hands the tap its plan bound (A’s executor aea758abf)', () => {
+  it('the seat tap is bounded at −92.25 (band floor less reach), not the envelope floor', () => {
+    const attempt = planRegistrationAttempt({ ...baseArgs(bracketJob()), mount: { kind: 'bracket', board: true }, bracketSeat: null });
+    if (attempt.kind !== 'plan') throw new Error(JSON.stringify(attempt));
+    expect(isSeatPlan(attempt.plan)).toBe(true);
+    const args = seatTapArgs(attempt.plan);
+    expect(args, 'a seat plan hands the tap args').not.toBeNull();
+    // 11 mm of travel below the start: the tap floor is −81.25 − 11 = −92.25, never the envelope's.
+    expect(args!.planTravelMm).toBeCloseTo(11, 3);
+    expect(args!.fromMachineZ - args!.planTravelMm!).toBeCloseTo(-92.25, 3);
+    expect(args!.fromMachineZ - args!.planTravelMm!).toBeGreaterThan(CALIBRATION.softEndstop.zMin);
+    expect(args!.reference).toBe('bracket-seat');
+    expect(args!.datumOffsetMm).toBe(0);
+  });
+
+  it('a footprint plan is not a seat plan and hands no tap args', () => {
+    const attempt = planRegistrationAttempt({ ...baseArgs(bracketJob()), mount: { kind: 'bracket', board: true } });
+    if (attempt.kind !== 'plan') throw new Error(JSON.stringify(attempt));
+    expect(isSeatPlan(attempt.plan)).toBe(false);
+    expect(seatTapArgs(attempt.plan)).toBeNull();
   });
 });
