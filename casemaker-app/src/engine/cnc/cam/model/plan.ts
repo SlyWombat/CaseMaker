@@ -4025,7 +4025,17 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     opts.signal?.throwIfAborted();
     // #1052 (the 4096/8192 traces) — the rank's ⌀0.5 candidate enters this pipeline and outlives the
     // cap inside it; one row per region and per field build shows which structure grows.
-    memTrace('curved:region', { id: region.id, top: region.zTop, bottom: region.zBottom });
+    memTrace('curved:region', {
+      id: region.id,
+      top: region.zTop,
+      bottom: region.zBottom,
+      area: Number(region.area.toFixed(1)),
+      slope: `${region.slopeDeg[0].toFixed(1)}-${region.slopeDeg[1].toFixed(1)}`,
+      median: Number(region.slopeMedianDeg.toFixed(1)),
+      tris: region.triangles.length,
+      min: boundsOfPolygons(region.footprint).min.map((v) => Number(v.toFixed(1))).join(','),
+      max: boundsOfPolygons(region.footprint).max.map((v) => Number(v.toFixed(1))).join(','),
+    });
     const ball = opts.ball;
     // #982 (the review session's ruling) — NO BALL IN THE SET: the flat finishes the whole curved
     // remainder as a flat-raster, the creases via the rest with the smallest flat. Never a throw.
