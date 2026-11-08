@@ -46,7 +46,9 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
 import type { EngraveJob } from '@/types/engraveJob';
 import { probeInstrumentOf, type RegistrationPlan } from '@/engine/cnc/registration/plan';
-import { seatTapArgs } from '@/engine/cnc/registration/seatPress';
+import { isSeatPlan, seatTapArgs } from '@/engine/cnc/registration/seatPress';
+import { implicitJobSetup, implicitSetupFor, registrationOf } from '@/engine/cnc/registration/implicitSetup';
+import type { MountSpec, Setup } from '@/engine/cnc/setups';
 import { useMountTap } from '@/hooks/useMountTap';
 import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import { summarizeOutcome, summarizePlan } from '@/engine/cnc/registration/summary';
@@ -140,6 +142,8 @@ const n = (v: number): string => String(Math.round(v * 1000) / 1000);
 
 /** #797 follow-up — the plan in one line: where it touches, how many touches, which probe. */
 function proposalLine(plan: RegistrationPlan): string {
+  // #1070 — the seat plan is one touch, named for what it measures.
+  if (isSeatPlan(plan)) return 'the bracket seat — one Z seek on the wasteboard beside the front arm · wired probe';
   const order = ['left', 'front', 'right', 'back'] as const;
   const edges = order.filter((edge) => plan.scans.some((scan) => scan.edge === edge));
   const touches = registrationTouches({ ok: true, plan });
@@ -243,17 +247,30 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   const setupSettings = useMemo(() => setupsSettings(defaults), [defaults]);
   const rotaryEnvelope = useMemo(() => rotaryOf(jobMachine(job, calibration))?.envelope, [job, calibration]);
   const proposal = useMemo<RegistrationAttempt | null>(() => {
-    if (plan !== null || job.setups === undefined || job.setups.length === 0) return null;
-    const savedPlan = planFromSetups(job, setupSettings, rotaryEnvelope);
-    const setup0 = job.setups[0]!;
-    const derived = savedPlan.setups.find(
-      (s) => s.faceUp === faceUpOf(setup0) && s.itemIds.some((id) => setup0.itemIds.includes(id)),
-    );
+    if (plan !== null) return null;
+    // #1070 — NO SAVED-SETUP PREREQUISITE: a bed-held job's setup IS the job. With no
+    // `job.setups[]` the proposal is planned from the stock + mount derived here; approval
+    // materialises that setup with the registration on it, and an unapproved plan writes nothing.
+    let derived: Setup | undefined;
+    let mountForProposal: MountSpec;
+    if (job.setups !== undefined && job.setups.length > 0) {
+      const savedPlan = planFromSetups(job, setupSettings, rotaryEnvelope);
+      const setup0 = job.setups[0]!;
+      derived = savedPlan.setups.find(
+        (s) => s.faceUp === faceUpOf(setup0) && s.itemIds.some((id) => setup0.itemIds.includes(id)),
+      );
+      mountForProposal = setup0.mount;
+    } else {
+      const implicit = implicitSetupFor(job);
+      if (implicit === null) return null;
+      derived = implicit;
+      mountForProposal = implicit.mount;
+    }
     if (derived === undefined) return null;
     return planRegistrationAttempt({
       job,
       setup: derived,
-      mount: setup0.mount,
+      mount: mountForProposal,
       mountDatum,
       mountDatumMismatch: mountDatumMismatchBy,
       mountDatumMismatchName,
@@ -294,12 +311,16 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
       return;
     }
     const setups = job.setups ?? [];
+    // #1070 — the approval MATERIALISES the derived first setup when the job saved none: the
+    // registration lands on it, and nothing is written before this press.
     useEngraveJobStore.getState().setSetups(
-      setups.map((setup, i) =>
-        i === 0
-          ? { ...setup, registration: { method: attempt.method, plan: attempt.plan, expected: attempt.expected } }
-          : setup,
-      ),
+      setups.length === 0
+        ? [implicitJobSetup(job, registrationOf(attempt))]
+        : setups.map((setup, i) =>
+            i === 0
+              ? { ...setup, registration: { method: attempt.method, plan: attempt.plan, expected: attempt.expected } }
+              : setup,
+          ),
     );
     await start(attempt.plan);
   }
