@@ -60,11 +60,17 @@ excuse is a PROOF bounded by the goal's own relief; no class of cells is excused
   or its old name `chamfer`); with no statement — or no `--job` — there is no allowance, which is
   what the app itself does for a job that states none. `edges` defaults to `silhouette` (the part's
   own outline); `all` seeds interior walls too.
+- **Silhouette** (0f's ruling) — a covered cell facing uncovered grid, the part's outline. The
+  design is multi-valued across that edge, so the read is excused only when its depth is within the
+  BLANK's floor (the stock top down to −(thickness + breakthrough), plus 0.005 mm) and the deepest
+  stamp's CL is on the UNCOVERED side, at least r − one cell from the outline. A cut below the blank
+  and a contour that cut the outline from within are COUNTED. One branch, no fallthrough.
 - **Wall / border** — excused only on the straddling proof, and only when the depth is within the
   goal's local relief (max − min of the covered goal top within the largest cutting tool's radius;
-  a border cell counts the stock top as a high side) plus 0.005 mm. The class proof's step TEST also
-  carries that 0.005 mm — the sampled heightfield step can be a hair short of the design floor
-  (measured 0.0004 mm on the tray's 2.885 mm floor) — while the general proof keeps only its 1e-12.
+  with no tool set, one pitch — the cell's own axial neighbours — and a border cell counts the stock
+  top as a high side) plus 0.005 mm. The class proof's step TEST also carries that 0.005 mm — the
+  sampled heightfield step can be a hair short of the design floor (measured 0.0004 mm on the
+  tray's 2.885 mm floor) — while the general proof keeps only its 1e-12.
 - **Wall shadow** — the v5 proof (the V within its leg, or the deepest stamp's CL at the disc's
   rim), bounded by the same relief. A cell that fails the bound is counted, not excused.
 - **Straddling** (v6) — any other cell deeper than 0.1 mm is excused only when the step over its
@@ -73,9 +79,9 @@ excuse is a PROOF bounded by the goal's own relief; no class of cells is excused
 
 The judged figure is `adjudicatedFraction` — the share of covered cells cut below the 0.1 mm floor
 after those exclusions — and it is the app receipt's `details.goal.adjudicatedFraction`. The raw
-figures at 0.01 mm, each excluded class, and the over-relief counters (`wallOverReliefCells`,
-`borderOverReliefCells`, `shadowOverReliefCells`, `overReliefDeepest`) are written beside it, so an
-excuse is never silent.
+figures at 0.01 mm, each excluded class, the over-relief counters (`wallOverReliefCells`,
+`borderOverReliefCells`, `shadowOverReliefCells`, `overReliefDeepest`) and the silhouette's own
+`silhouetteExcusedCells` / `silhouetteDeepest` are written beside it, so an excuse is never silent.
 
 `tools/goal-check-parity.py` is the parity test: given a card run directory (the
 `runs/<sha>/<card>` one `build.py` writes, or any directory with `receipt.json`, `job.json`, the
