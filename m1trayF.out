@@ -1,0 +1,6 @@
+location "My shop": ../../m1-land11/house/location.json — 0 tools from the user's own list, 35 owned cutters
+  default rest.overlapMm = 0.5mm (seeded)
+  default rest.thirdToolPct = 2% (seeded)
+  default rest.visibleDepthMm = 0.1mm (seeded)
+  default toolChange.seconds = 91.4s (seeded)
+Makera's catalogue: ../../m1-land11/house/catalogue.json — 129 cutters, 1328 feed rows, synced 2026-10-18T03:24:13.374Z

@@ -59,6 +59,14 @@ export interface SetupFrame {
   stockTop: number;
   /** The stock's bottom in the setup frame, mm. Without it `contour.frees` is assumed true. */
   stockBottom?: number;
+  /**
+   * #1073 — WHICH HALF TURN PUT THIS FACE UP. `up = [0, 0, -1]` does not say: a VISE's bottom
+   * flip is a half turn about X (`RX180`, y and z negate) while a BRACKET/TAPE one is a half turn
+   * about Y (`RY180`, x and z negate) — both leave `up` at −Z and map XY differently. Absent means
+   * `'x'`, the vise turn every frame written before #1073 meant, so no existing frame changes.
+   * Only meaningful on a flipped frame; a top frame is the identity and ignores it.
+   */
+  flipAxis?: 'x' | 'y';
 }
 
 export interface PocketNode {
@@ -134,8 +142,12 @@ export interface FeatureTree {
   };
 }
 
-/** Rotate the source into the setup frame: `up` becomes +Z (Rodrigues). Triangle order is kept. */
-export function toSetupFrame(mesh: ParsedMesh, up: readonly [number, number, number]): FrameMesh {
+/**
+ * Rotate the source into the setup frame: `up` becomes +Z (Rodrigues). Triangle order is kept.
+ * `flipAxis` (#1073) picks WHICH half turn does it when `up` is −Z — about X (the vise, the
+ * default and every pre-#1073 caller) or about Y (a bracket/tape flip); see `SetupFrame.flipAxis`.
+ */
+export function toSetupFrame(mesh: ParsedMesh, up: readonly [number, number, number], flipAxis: 'x' | 'y' = 'x'): FrameMesh {
   const len = Math.hypot(up[0], up[1], up[2]);
   if (!(len > 0)) throw new Error('cam/model/features: the setup frame has a zero up vector');
   const u = [up[0] / len, up[1] / len, up[2] / len] as const;
@@ -159,10 +171,16 @@ export function toSetupFrame(mesh: ParsedMesh, up: readonly [number, number, num
       positions[i + 2] = z * c + (ax * y - ay * x) * s;
     }
   } else if (c < 0) {
-    // Up is −Z: a half turn about X.
+    // Up is −Z: a half turn — about X by default (RX180: y and z negate), about Y for a
+    // bracket/tape flip (RY180: x and z negate). #1073: up alone cannot tell the two apart.
     for (let i = 0; i < positions.length; i += 3) {
-      positions[i + 1] = -positions[i + 1]!;
-      positions[i + 2] = -positions[i + 2]!;
+      if (flipAxis === 'y') {
+        positions[i] = -positions[i]!;
+        positions[i + 2] = -positions[i + 2]!;
+      } else {
+        positions[i + 1] = -positions[i + 1]!;
+        positions[i + 2] = -positions[i + 2]!;
+      }
     }
   }
   return { positions, indices: mesh.indices };
@@ -179,7 +197,7 @@ export function recogniseFeatures(
   tolIn?: Partial<FeatureTolerances>,
 ): FeatureTree {
   const tol: FeatureTolerances = { ...DEFAULT_FEATURE_TOLERANCES, ...tolIn };
-  const mesh = toSetupFrame(src.triangles, frame.up);
+  const mesh = toSetupFrame(src.triangles, frame.up, frame.flipAxis);
   const triCount = mesh.indices.length / 3;
   if (src.faceId !== undefined && src.faceId.length !== triCount) {
     throw new Error(`cam/model/features: faceId has ${src.faceId.length} entries for ${triCount} triangles`);

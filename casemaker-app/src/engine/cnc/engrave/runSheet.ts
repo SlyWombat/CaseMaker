@@ -55,7 +55,7 @@ import { prismNumbers } from './prism';
 import { vCarveLevels, vCarvePlane, vCarveRowStepover } from '@/engine/cnc/vCarveGeometry';
 import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
 import { axesWord, describeTouch, kindWord, PROBE_SPEC, readsWord, registrationFor, sideWords } from '@/engine/cnc/engrave/registration';
-import { flipFenceFacts, flipZ0, FLIP_BORE_CHIP_CLEARANCE_MM, FLIP_BORE_DIAMETER_MM, type FlipZ0 } from './flipChoice';
+import { flipFenceFacts, flipZ0, FLIP_BORE_DIAMETER_MM, type FlipZ0 } from './flipChoice';
 import { flipDiagramSvg } from './flipDiagram';
 import { FLIP_PROBE_ENTRY_DEPTH_MM } from '@/engine/cnc/registration/plan';
 import {
@@ -267,6 +267,8 @@ export interface RunSheetProgram {
   kind?: 'facing' | 'engrave';
   /** 1-based setup the program cuts. */
   setupIndex: number;
+  /** #1073 — this file is the flip's locating holes (see `EngraveProgram.locating`). */
+  locating?: boolean;
   /** The cutter this file runs. */
   toolKey: string;
   /** The file to load. */
@@ -3946,9 +3948,10 @@ function turnOverSteps(
   const fmtAt = (p: { x: number; y: number }): string => `X ${fmtNum(p.x)}, Y ${fmtNum(p.y)}`;
   const register =
     to.pins !== undefined
-      ? `Register it on the two locating pins: seat the dowel holes setup ${fromIndex} drilled onto pins at ` +
+      ? `Register it on the two locating bores: drop the probe into each hole setup ${fromIndex} bored, at ` +
         `${fmtAt(to.pins.at[0])} and ${fmtAt(to.pins.at[1])} mm, measured from the blank’s front-left corner ` +
-        'as it now sits. Set the work origin there before you cut.'
+        'as it now sits, and touch its wall — the bore’s centre is what the probe reads, from four sides. ' +
+        'Set the work origin there before you cut.'
       : to.remount !== undefined && to.remount.instruction.length > 0
         ? `Register it as the remount says: ${to.remount.instruction.join(' ')}`
         : to.registration !== undefined
@@ -3993,9 +3996,10 @@ function turnOverSteps(
       value: `${facts.fenceCorner} in the fence`,
     });
     // #1073 — the FRAME method's cost, stated: side 1 bored the two locating holes through the
-    // blank, the job's breakthrough and the chip clearance into the board.
+    // blank and the job's breakthrough into the board. Side 2 registers by PROBING THEIR WALLS
+    // from this face; nothing sits in the holes.
     if (to.flip.method === 'tabs-in-blank') {
-      const drop = Math.round((job.breakthrough + FLIP_BORE_CHIP_CLEARANCE_MM) * 100) / 100;
+      const drop = Math.round(job.breakthrough * 100) / 100;
       steps.push({
         text:
           `Side 1 bored two ⌀${FLIP_BORE_DIAMETER_MM} locating holes through the blank and ${fmtNum(drop)} mm into the board; ` +
@@ -5449,6 +5453,21 @@ export function buildRunSheet(
   // last program, so the part is still on it until the file ends. Program 1's own fact (the
   // single-program case); a later program's neck is printed in its own section below.
   cutSteps.push(...neckSawSteps(generated.neck));
+  // #1073 — THE FLIP'S LOCATING HOLES BELONG ON SETUP 1'S PAGE. The operator running setup 1 must
+  // know a second file follows on the same mounting and which cutter it runs — the PROGRAM's own
+  // key, never the job's assumed one (#1079's rule).
+  const locatingProgram = runPrograms.find((program) => program.locating === true);
+  if (locatingProgram !== undefined) {
+    const number = programNumberIn(runPrograms, locatingProgram.nc);
+    const at = number === null ? 'the extra file' : `program ${number}`;
+    cutSteps.push({
+      text:
+        `Setup 1 also bores the two ⌀6 locating holes side 2 registers on — ${at}, ${locatingProgram.nc}, ` +
+        `cut with ${cutterNameForKey(locatingProgram.toolKey)}; the probe enters each hole from side 2 and ` +
+        'touches its wall.',
+      value: `${at} · ⌀6 locating holes`,
+    });
+  }
 
   // ---- per-program Cut sections (#419) ------------------------------------------------------
   // Program 1 is the `cut` section above, fed from the top-level result. Every later ENGRAVING

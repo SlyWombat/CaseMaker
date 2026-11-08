@@ -162,7 +162,9 @@ describe('run sheet — the turn between setups', () => {
     expect(turn.text).toContain('Turn the part over for setup 2.');
     expect(turn.text).toContain('about the machine’s X axis');
     expect(turn.text).toContain('the face now up goes DOWN');
-    expect(turn.text).toContain('Register it on the two locating pins');
+    // #1073 — the frame method registers by PROBING THE BORE WALLS; nothing sits in the holes.
+    expect(turn.text).toContain('Register it on the two locating bores');
+    expect(turn.text).toContain('touch its wall');
     expect(turn.text).toContain('X 10, Y 4');
     // Side 2 of a turned-over goal frees the part: said plainly, right after the turn.
     expect(steps[1]!.text).toBe(

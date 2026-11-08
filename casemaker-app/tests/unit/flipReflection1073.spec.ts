@@ -182,8 +182,10 @@ describe('#1073 the goal and its hold turn over by the same reflection', () => {
     };
     const a = planFor('tabs-in-blank');
     const b = planFor('free-then-flip');
+    // #1073 line 2 — the frame method now BANDS its goals (bandMm + underside); the vendor one
+    // does not. Geometry is what "the method never moves it" is about.
     const placement = (g: EngraveTargetObject) => {
-      const { id: _id, setupId: _setupId, ...rest } = g;
+      const { id: _id, setupId: _setupId, bandMm: _band, underside: _under, ...rest } = g;
       return rest;
     };
     expect(placement(b.goals[1]!)).toEqual(placement(a.goals[1]!));
