@@ -34,6 +34,14 @@
   ],
   "diagnostics": [
     {
+      "code": "feeds-no-catalogue",
+      "guideRow": "feeds-no-catalogue",
+      "severity": "info",
+      "message": "no Makera catalogue beside the location — feeds come from the shop's starting table",
+      "source": "findings",
+      "program": null
+    },
+    {
       "code": "printed-plastic-melts",
       "guideRow": "printed-plastic-melts",
       "severity": "info",
