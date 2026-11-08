@@ -72,7 +72,7 @@ import { machineKey, runContextFor, useMachineRunStore, type RunContext } from '
 import { finishedProgramsFor } from './locationStore';
 import { readFlag } from '@/platform/defaultsClient';
 import { useShopDefaultsStore } from './shopDefaultsStore';
-import { firstRegistrationFor } from './engraveRegistrationStore';
+import { firstRegistrationFor, setupRegistrationFor } from './engraveRegistrationStore';
 import { facingRegistrationBlocker } from './engraveRunGate';
 import { recordUploadedFile } from '@/platform/machineFiles';
 
@@ -245,6 +245,22 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     if (rec === undefined || rec.phase === 'running' || rec.phase === 'uploading') return;
     const file = findFile(rec, index);
     if (file === null || file.done) return;
+
+    // #1088 — A LATER SETUP'S PROGRAM NEEDS THAT SETUP'S REGISTRATION. Side 2 is a different
+    // clamping on the turned blank: setup 1's origin does not describe it, and before this gate
+    // nothing stopped the program — a non-facing flip job would cut side 2 with no registration at
+    // all. Refuse by name, before the vacuum or any line.
+    if (file.setupIndex > 1) {
+      const reg = setupRegistrationFor(rec.jobId, file.setupId, rec.target);
+      if (reg === null || !reg.outcome.usable) {
+        patch(machine, { phase: 'failed', active: null, next: null });
+        say(
+          machine,
+          `Program ${file.index} did not start: setup ${file.setupIndex} is not registered — run the Register step for setup ${file.setupIndex} first.`,
+        );
+        return;
+      }
+    }
 
     patch(machine, { phase: 'starting', active: index, next: null, stopAsked: false, settled: false, stoppedBetween: false });
     const span = programVacuumSpan(file.nc, jobCarriesVacuumWords(rec.files));

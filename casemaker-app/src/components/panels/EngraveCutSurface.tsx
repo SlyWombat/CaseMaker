@@ -43,6 +43,8 @@ import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
 import { cutPlan } from '@/engine/cnc/engrave/cutPlan';
 import { laserLiftFor } from '@/engine/cnc/engrave/laserSurface';
 import { packageStaleness } from '@/engine/cnc/engrave/package';
+import { releaseNext } from '@/engine/cnc/engrave/release';
+import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { formatDuration, registrationTouches } from '@/engine/cnc/plan';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import {
@@ -61,7 +63,12 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { finishedProgramsFor, useLocationStore } from '@/store/locationStore';
 import { machineKey, useMachineRunStore, type RunContext } from '@/store/machineRunStore';
 import { useEngravePackageStore } from '@/store/engravePackageStore';
-import { useEngraveRegistrationStore, useFirstRegistration, useSurfaceSpread } from '@/store/engraveRegistrationStore';
+import {
+  useEngraveRegistrationStore,
+  useFirstRegistration,
+  useSetupRegistration,
+  useSurfaceSpread,
+} from '@/store/engraveRegistrationStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import {
   ROTARY_NO_MODULE_REFUSAL,
@@ -834,6 +841,20 @@ export function EngraveCutSurface({
   const traverseOnly = dryRunLevel === 'traverse';
   const releaseSources = traverseOnly ? runSources.slice(0, 1) : runSources;
   const singleSource = releaseSources[0];
+  /**
+   * #1088 — WHICH SETUP'S PROGRAMS ARE NEXT. The release's next unfinished program is the same
+   * setupIndex the run sheet prints; with no release planned yet, the first frozen source's setup.
+   * The Register card registers THIS setup, and its done state is THIS setup's registration —
+   * side 2 of a flip job must not pass on side 1's record.
+   */
+  const releaseRecord = useEngraveReleaseStore((s) => (target === null ? undefined : s.records[machineKey(target)]));
+  const currentSource =
+    releaseRecord === undefined || releaseRecord.files.length === 0
+      ? (sources[0] ?? null)
+      : (releaseNext(releaseRecord.files) ?? releaseRecord.files.at(-1) ?? null);
+  const currentSetupIndex = currentSource?.setupIndex ?? 1;
+  const currentSetupId = currentSource?.setupId ?? job.setups?.[currentSetupIndex - 1]?.id ?? null;
+  const currentSetupRegistration = useSetupRegistration(job.id, currentSetupId, target);
   // #547 — a dry run must never consume the blank: the single-file run context says so, and the
   // release path sets the same flag per file from `ReleaseProgram.dryRun`.
   const runContextWithDry = dryRunLevel === 'off' ? runContext : { ...runContext, dryRun: true as const };
@@ -1037,8 +1058,12 @@ export function EngraveCutSurface({
   const fitDone = checked && frozen && verdict === 'passed';
   const registrationPlan = job.setups?.[0]?.registration?.plan ?? null;
   // A registration is a measurement on THIS machine; with no machine connected, a record for this
-  // job still says the blank was registered in this session.
-  const registered = firstRegistration !== null || (target === null && anyRegistration !== null);
+  // job still says the blank was registered in this session. #1088 — the record must be the
+  // SELECTED setup's: setup 2 is not registered because setup 1 is. Setup 1 reads exactly as it
+  // always has (`firstRegistration`, the job-keyed entry, including a record written before the
+  // per-setup key existed); a later setup reads its own key and nothing else.
+  const registeredSetup = currentSetupIndex === 1 ? (currentSetupRegistration ?? firstRegistration) : currentSetupRegistration;
+  const registered = registeredSetup !== null || (target === null && currentSetupIndex === 1 && anyRegistration !== null);
   const registeredDone = fitDone && registered;
   const ran =
     registeredDone &&
@@ -1435,7 +1460,7 @@ export function EngraveCutSurface({
         current={currentStep === 2}
         summary={step2Summary}
       >
-        <EngraveRegistrationStep job={job} target={target} />
+        <EngraveRegistrationStep job={job} target={target} setupIndex={currentSetupIndex} />
         {/* #608 / #796 — once the registration measured a tilt, the program made for a flat blank
             must be RE-MADE for the measured tilt before anything is uploaded. A re-make re-runs
             the whole pipeline with the fitted plane and freezes it; a flat fit never shows this

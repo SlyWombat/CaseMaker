@@ -784,10 +784,10 @@ describe('#495 — the registration step', () => {
     expect(sent).toEqual([]);
   });
 
-  it('#1088 — a FLIPPED first setup refuses by name: side 2’s hole registration isn’t built yet, and nothing is sent', () => {
-    // The step runs side 1's routine over setups[0].registration.plan; on a flipped setup those
-    // touches would be aimed at a part no longer in that pose. The hole-registration executor is
-    // #1088's own slice, so until it lands the step refuses — never side 1's touches on side 2.
+  it('#1088 — a FLIPPED first setup with no stated pins refuses by name, and nothing is sent', () => {
+    // Side 2 registers on the two ⌀6 bores side 1 left, and the setup's stored pins are the one
+    // source of where they are. A flipped setup that states none has nothing to aim at: the step
+    // refuses, never re-plans from a guess, and never runs side 1's routine on side 2.
     const plan = makePlan(-56.172);
     const base = jobWithPlan(plan);
     const setup = jobSetups(base)[0]!;
@@ -795,8 +795,7 @@ describe('#495 — the registration step', () => {
     render(<EngraveRegistrationStep job={job} target={TARGET} />);
     const refusal = screen.getByTestId('engrave-registration-flip-refusal');
     expect(refusal.textContent).toContain('side 2');
-    expect(refusal.textContent).toContain('hole registration');
-    expect(refusal.textContent).toContain('isn');
+    expect(refusal.textContent).toContain('locating pins');
     // No Register button of any shape, and the console untouched.
     expect(screen.queryByTestId('engrave-registration-start')).toBeNull();
     expect(screen.queryByTestId('engrave-registration-approve-start')).toBeNull();
@@ -1284,4 +1283,288 @@ describe('#1070 the proposals need no saved setup for a bed-held job', () => {
     expect(button.textContent).toContain('Measure the bracket seat');
     expect(screen.getByTestId('engrave-registration-proposal-line').textContent ?? '').toContain('seat');
   });
+});
+
+describe('#1088 — a flipped setup registers side 2 on the bores', () => {
+  const SURFACE = -67.25; // side 2's top, machine Z: seat −87.25 + the measured 20 mm thickness
+  const SEAT = -87.25;
+  const G54 = { x: 100, y: 50 }; // the frame in force before the run — side 1's origin
+  const BORE_R = 3; // ⌀6
+  const BALL_R = 1; // the probe's measured ⌀2 tip
+  const PINS = [
+    { x: 70, y: 15 },
+    { x: 20, y: 15 },
+  ] as const;
+
+  /** A job whose FIRST setup is the flipped one, on its two stored pins (90 × 60 stock). */
+  function flipJob(): EngraveJob {
+    const base = defaultEngraveJob();
+    const setup = jobSetups(base)[0]!;
+    return {
+      ...base,
+      name: 'flip registration fixture',
+      stock: { ...base.stock, length: 90, width: 60, thickness: 20, material: 'hardwood' },
+      labels: [],
+      shapes: [],
+      setups: [
+        {
+          ...setup,
+          mount: { kind: 'bracket' },
+          flip: { method: 'tabs-in-blank', axis: 'left-right' },
+          pins: { at: [{ ...PINS[0] }, { ...PINS[1] }] },
+        } as never,
+      ],
+    } as EngraveJob;
+  }
+
+  /** The machine: a measured ⌀2 probe, and the bracket's seat datum that probe wrote. */
+  function flipLocation(): void {
+    useLocationStore.setState({
+      status: 'present',
+      etag: '"e1"',
+      reason: null,
+      location: {
+        machines: [
+          {
+            id: 'm1',
+            profileId: 'Z1',
+            address: { host: TARGET.host, port: TARGET.port },
+            bedProfiles: [
+              {
+                id: 'bp1',
+                datums: {
+                  surfaceTopZ: null,
+                  viseJawTopZ: null,
+                  bracketSeatZ: { value: SEAT, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1' },
+                  rotaryAxis: null,
+                },
+                placements: [],
+                surface: null,
+                history: [],
+              },
+            ],
+            activeBedProfileId: 'bp1',
+            history: [],
+            notes: [],
+            observedAt: '2026-11-08T00:00:00.000Z',
+          },
+        ],
+        accessories: [
+          {
+            id: 'fx-probe-1',
+            kind: 'probe',
+            product: 'Makera 3D Probe',
+            variant: 'xyz',
+            unit: { tipDiameterMm: 2, rimOffsetMm: 1, rimOffsetUncertaintyMm: 0.05 },
+            provenance: {},
+            history: [],
+            whereabouts: { kind: 'machine', machineId: 'm1', since: '2026-11-08T00:00:00.000Z' },
+          },
+        ],
+      } as never,
+    });
+  }
+
+  /** The #475 measurement side 1's run left: its highest touch is side 1's top. */
+  function measuredSideOne(job: EngraveJob): void {
+    useEngraveRegistrationStore.getState().measureSurface(job.id, TARGET, {
+      plan: { band: { width: 0.2 } },
+      touches: [{ z: SEAT + 20, x: 20, y: 20, at: 'the cut extent', source: 'spread', id: 't1' }],
+      min: { z: SEAT + 20, x: 20, y: 20, at: 'the cut extent', source: 'spread', id: 't1' },
+      max: { z: SEAT + 20, x: 20, y: 20, at: 'the cut extent', source: 'spread', id: 't1' },
+      spread: 0,
+      drops: { xMm: 0, yMm: 0 },
+      z0: { z: SEAT + 20, touchId: 't1', rule: 'lowest' },
+      fit: { kind: 'plane', offset: SEAT + 20, slopeX: 0, slopeY: 0, residual: 0 },
+      tilt: { xMm: 0, yMm: 0 },
+      ok: true,
+      verdict: 'flat',
+    } as never);
+  }
+
+  /**
+   * The flip executor's conversation. Touches land on the model's own rule (the probe reads the
+   * stock until its centre is the tip's rim past the edge); the two ⌀6 bores sit on the pins in
+   * side-2 WORK XY, and every PRB is MACHINE XY — `G54` right, `G54` back.
+   */
+  function flipController(sentLines: string[], frontZ = SURFACE): MachineConsoleClient {
+    const pos = { x: 0, y: 0, z: 0 };
+    const reply = (text: string): ConsoleSend => ({ ok: true, line: '', text, frames: 1, elapsedMs: 1 });
+    const prb = (z: number, touched: boolean): string =>
+      `[PRB:${(pos.x + G54.x).toFixed(3)},${(pos.y + G54.y).toFixed(3)},${z.toFixed(3)}:${touched ? 1 : 0}]`;
+    /** Material under the ball: the blank, minus the two bores. The corner touches are the front pair. */
+    const materialAt = (x: number, y: number): boolean =>
+      x > -BALL_R && y > -BALL_R && !PINS.some((p) => Math.hypot(x - p.x, y - p.y) <= BORE_R);
+    const topAt = (y: number): number => (y < 5 ? frontZ : SURFACE);
+    return {
+      async open() {
+        return {
+          async send(line: string): Promise<ConsoleSend> {
+            sentLines.push(line);
+            if (line === '?') return reply('<Idle|MPos:0,0,0>');
+            if (line === 'M491') return reply('ok\n[PRB:0,0,-80.000:1]');
+            if (line === 'M119') return reply('X_min:0 Y_min:0 Z_min:0 X_max:0 Y_max:0 Z_max:0 Probe:0');
+            if (['G54', 'G92.1', 'M831', 'M832', 'G90', 'G91'].includes(line)) return reply('ok');
+            let m = /^G53 G0 Z(-?[\d.]+)$/.exec(line);
+            if (m) return (pos.z = Number(m[1])), reply('ok');
+            // The seek's relative lift (G91): `G0 Z<+lift>`, never a drop here.
+            m = /^G0 Z(-?[\d.]+)$/.exec(line);
+            if (m) return (pos.z += Number(m[1])), reply('ok');
+            m = /^G0 X(-?[\d.]+) Y(-?[\d.]+)$/.exec(line);
+            if (m) return (pos.x = Number(m[1])), (pos.y = Number(m[2])), reply('ok');
+            m = /^G38\.3 Z-([\d.]+) F[\d.]+$/.exec(line);
+            if (m) {
+              const target = pos.z - Number(m[1]);
+              const top = topAt(pos.y);
+              if (materialAt(pos.x, pos.y) && top >= target && top <= pos.z) {
+                pos.z = top;
+                return reply(prb(top, true));
+              }
+              pos.z = target;
+              return reply(prb(target, false));
+            }
+            m = /^G38\.3 ([XY])(-?[\d.]+) F[\d.]+$/.exec(line);
+            if (m) {
+              const axis = m[1] === 'X' ? 'x' : 'y';
+              const travel = Number(m[2]);
+              const reach = BORE_R - BALL_R;
+              for (const p of PINS) {
+                const other = axis === 'x' ? pos.y - p.y : pos.x - p.x;
+                const sq = reach * reach - other * other;
+                if (sq < 0) continue;
+                const wall = (axis === 'x' ? p.x : p.y) + Math.sign(travel) * Math.sqrt(sq);
+                const along = axis === 'x' ? pos.x : pos.y;
+                const end = along + travel;
+                const hit = travel > 0 ? wall <= end && wall >= along : wall >= end && wall <= along;
+                if (hit) {
+                  if (axis === 'x') pos.x = wall;
+                  else pos.y = wall;
+                  return reply(prb(pos.z, true));
+                }
+              }
+              if (axis === 'x') pos.x += travel;
+              else pos.y += travel;
+              return reply(prb(pos.z, false));
+            }
+            return reply('ok');
+          },
+          async close() {},
+        };
+      },
+    };
+  }
+
+  it('plans side 2 from the stored pins, runs the flip executor, and the press writes G54 from the bores', async () => {
+    const job = flipJob();
+    flipLocation();
+    measuredSideOne(job);
+    useEngraveJobStore.setState({ job });
+    const lines: string[] = [];
+    setMachineConsoleLoader(async () => flipController(lines));
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    // The card is side 2's: the bores and the carried Z0, never side 1's plan.
+    const card = screen.getByTestId('engrave-registration-flip');
+    expect(card.textContent).toContain('⌀6 bores');
+    expect(card.textContent).toContain('carried side-2 top');
+    expect(screen.queryByTestId('engrave-registration-plan')).toBeNull();
+
+    act(() => {
+      useEngraveRunStore.setState({ acknowledged: true });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-start'));
+    });
+    const verdict = await screen.findByTestId('engrave-registration-verdict', undefined, { timeout: 5000 });
+    expect(verdict.textContent).toContain('Side 2 registered on the bores side 1 left');
+    // Eight sideways touches, each released, and both entry seeks at the pins.
+    expect(lines.filter((l) => /^G38\.3 [XY]/.test(l))).toHaveLength(8);
+    expect(lines.filter((l) => l.startsWith('G38.5')).length).toBeGreaterThanOrEqual(8);
+    // Each bore: the entry seek at its pin, then each sideways touch starts from that pin's centre.
+    expect(lines.filter((l) => /^G0 X(70|20)(\.000)? Y15(\.000)?$/.test(l))).toHaveLength(10);
+
+    // THE PRESS WRITES THE ORIGIN THE BORES STATE: the G54 in force was 100/50 off the work zero.
+    await writeOrigin();
+    const written = screen.getByTestId('engrave-registration-written');
+    const line = /G10 L2 P1 X(-?[\d.]+) Y(-?[\d.]+) Z(-?[\d.]+)/.exec(written.textContent ?? '');
+    expect(line).not.toBeNull();
+    expect(Math.abs(Number(line![1]) - G54.x)).toBeLessThan(0.01);
+    expect(Math.abs(Number(line![2]) - G54.y)).toBeLessThan(0.2);
+    expect(Math.abs(Number(line![3]) - SURFACE)).toBeLessThan(0.01);
+    // #1088 — THE RECORD IS THE SETUP'S OWN: filed under the flipped setup's id, never over the
+    // job-keyed entry (which is side 1's).
+    expect(useEngraveRegistrationStore.getState().records[job.id]).toBeUndefined();
+    expect(useEngraveRegistrationStore.getState().bySetup[`${job.id}::${job.setups![0]!.id}`]).toBeDefined();
+    expect(screen.getByTestId('engrave-registration-recorded').textContent).toContain('Setup 1’s registration recorded');
+  }, 60_000);
+
+  it('routes by the Cut screen’s CURRENT setup: setup 2 is the flipped card and files its own record, setup 1 is the ordinary one', async () => {
+    // A real two-setup flip job: side 1 at setups[0] (registered, as the sheet prints it), the flip
+    // at setups[1]. The card must follow the setup the Cut screen says is next, not setups[0].
+    const sideOne = jobWithPlan(makePlan(-56.172));
+    const flipped = flipJob().setups![0]!;
+    const job: EngraveJob = {
+      ...sideOne,
+      stock: { ...sideOne.stock, length: 90, width: 60, thickness: 20 },
+      setups: [sideOne.setups![0]!, { ...flipped, id: 'setup-flip' }],
+    };
+    flipLocation();
+    measuredSideOne(job);
+    useEngraveJobStore.setState({ job });
+
+    // SETUP 1 SELECTED: the ordinary card, exactly as before — no flip card, side 1's plan named.
+    const one = render(<EngraveRegistrationStep job={job} target={TARGET} setupIndex={1} />);
+    expect(screen.getByTestId('engrave-registration-plan').textContent).toContain('Setup 1');
+    expect(screen.queryByTestId('engrave-registration-flip')).toBeNull();
+    one.unmount();
+
+    // SETUP 2 SELECTED: the flipped card, and the run's record lands under setup 2's own id.
+    const lines: string[] = [];
+    setMachineConsoleLoader(async () => flipController(lines));
+    render(<EngraveRegistrationStep job={job} target={TARGET} setupIndex={2} />);
+    expect(screen.getByTestId('engrave-registration-flip')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-registration-plan')).toBeNull();
+
+    act(() => {
+      useEngraveRunStore.setState({ acknowledged: true });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-start'));
+    });
+    await screen.findByTestId('engrave-registration-verdict', undefined, { timeout: 5000 });
+    await writeOrigin();
+
+    // #1088 — the record is setup 2's, and setup 1's job-keyed record is untouched.
+    const setupRecord = useEngraveRegistrationStore.getState().bySetup[`${job.id}::setup-flip`];
+    expect(setupRecord).toBeDefined();
+    expect(setupRecord!.setupId).toBe('setup-flip');
+    expect(useEngraveRegistrationStore.getState().records[job.id]).toBeUndefined();
+    expect(screen.getByTestId('engrave-registration-recorded').textContent).toContain('Setup 2’s registration recorded');
+  }, 60_000);
+
+  it('a corner Z outside the carried Z0’s band stops the run by name, and no bore is entered', async () => {
+    const job = flipJob();
+    flipLocation();
+    measuredSideOne(job);
+    useEngraveJobStore.setState({ job });
+    const lines: string[] = [];
+    // A chip under the blank's front edge: the corner touches read 0.45 mm below the carried top.
+    setMachineConsoleLoader(async () => flipController(lines, SEAT + 20 - 0.45));
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    act(() => {
+      useEngraveRunStore.setState({ acknowledged: true });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-start'));
+    });
+    const failed = await screen.findByTestId('engrave-registration-failed', undefined, { timeout: 5000 });
+    expect(failed.textContent).toContain('corner Z touches');
+    expect(failed.textContent).toContain('carried Z0');
+    expect(failed.textContent).toContain('no origin is written');
+    // Nothing more measured: no bore was entered and no wall touched, and no Write press exists.
+    expect(lines.filter((l) => /^G38\.3 [XY]/.test(l))).toHaveLength(0);
+    expect(screen.queryByTestId('engrave-registration-write')).toBeNull();
+    expect(useEngraveRegistrationStore.getState().records[job.id]).toBeUndefined();
+  }, 60_000);
 });

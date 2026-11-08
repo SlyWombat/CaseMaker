@@ -61,6 +61,22 @@ export function summarizeOutcome(o: RegistrationOutcome): string {
   if (!o.usable) {
     return `The measurement is not usable, and no origin will be written from it: ${o.problems.join('; ')}.`;
   }
+  // #1088 — SIDE 2 READS ITS OWN SENTENCE: the bores' centres and diameters, their line against the
+  // pins', and the corner touches against the carried top. The side-1 wording below ("the stock is
+  // off by … the margin") would judge a frame this run is replacing.
+  if (o.flip !== undefined) {
+    const f = o.flip;
+    const bores = f.holes.map((h) => `(${n(h.centre.x)}, ${n(h.centre.y)}) ⌀${n(h.diameterMm)} mm`).join(' and ');
+    const cross =
+      f.crossCheck === null
+        ? ''
+        : `; their line reads ${n(f.crossCheck.measuredAngleDeg)}° against the pins' ${n(f.crossCheck.expectedAngleDeg)}° (inside ${n(f.crossCheck.toleranceDeg)}°)`;
+    const carried =
+      f.carried === null || f.carried.band === null
+        ? ''
+        : `; the corner touches read ${f.frontPair.map((p) => `${n(p.surfaceZ)} mm`).join(' and ')} against the carried side-2 top ${n(f.carried.topMachineZ)} mm`;
+    return `Side 2 registered on the bores side 1 left: ${bores}${cross}${carried}. The origin is the bores' midpoint X and the front pair's mean Y — confirmed.`;
+  }
   if (o.currentG54 === null && !o.bracketCheck) {
     return 'The surface was found. X and Y were NOT checked: they are the bracket’s, taken on trust (no confirming touch).';
   }

@@ -69,7 +69,7 @@ import {
   type SurfaceSpreadAssessment,
   type SurfaceSpreadPlan,
 } from '@/engine/cnc/engrave/surfaceSpread';
-import { type EdgeScan, type ProbeSpec, type RegistrationPlan, probeInstrumentOf } from './plan';
+import { type EdgeScan, type ProbeSpec, type RegistrationPlan, probeInstrumentOf, type FlipRegistrationPlan } from './plan';
 import { classifyTouch, lastPrb, type Prb } from './readings';
 import { sideCentreWork, sideTouchAllowed, sideTouchSetup } from './probe3d';
 import { centrePair, readCentrePair, type CentreFindPlan, type CentrePairReading } from './centreFind';
@@ -88,7 +88,16 @@ import {
   FACE_ANGLE_MAX_CORRECTIONS,
   type FaceAnglePlan,
 } from './faceAngle';
-import { computeOutcome, correctionLine, type RegistrationOutcome, type RunData, type ScanRecord, type ScanTouch } from './outcome';
+import {
+  computeOutcome,
+  correctionLine,
+  edgeFrom,
+  type RegistrationOutcome,
+  type RunData,
+  type ScanRecord,
+  type ScanTouch,
+} from './outcome';
+import type { FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
 import { referenceOutcome } from './references';
 import { settingsProblem, SURFACE_LIFT_MM, type RegistrationSettings } from './settings';
 
@@ -2116,4 +2125,355 @@ export async function retouchAndCorrectAfterFacing(
     correction: applied.line,
     transcript,
   };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// #1088 — SIDE 2'S HOLE REGISTRATION: the executor for `planFlipRegistration` (#1073).
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+/** One bore's measured centre, as the flip run reads it. */
+export interface FlipHoleReading {
+  /** 1 or 2 — the pin the find entered, in the plan's order. */
+  index: 1 | 2;
+  /** The seeded centre the probe entered over (side-2 work XY). */
+  seeded: { x: number; y: number };
+  /** The measured centre (side-2 work XY). */
+  centre: { x: number; y: number };
+  /** Each axis's measured span between ball centres and the diameter it states, mm. */
+  spans: { axis: 'x' | 'y'; spanMm: number; diameterMm: number }[];
+}
+
+export interface FlipRunOptions {
+  /**
+   * THE FRAME THE TOUCHES RUN IN: the setup's own side-2 plan data — `seek`, `mount`, `probe`,
+   * `settings`, `surfacePoint`. Its `scans` are NOT run; the flip plan's steps are. (The planner
+   * and the frame plan are separate on purpose: #1073 plans the steps, the setup states the frame.)
+   */
+  ctx: RegistrationPlan;
+  /**
+   * #1073 (6b's amendment A) — THE CARRIED Z0 the corner Z touches are the CHECK of, never the
+   * source of (`flipChoice.flipZ0`). A reading outside its band stops the run with the number
+   * before a bore is entered, so no origin can be written from a blank that is not on its seat.
+   * Null/absent when the job states no carried Z0 or no tolerance — then there is no band to check.
+   */
+  z0?: FlipZ0 | null;
+}
+
+export type FlipRunResult =
+  | {
+      ok: true;
+      /**
+       * The run as the app's registration store and its Write press already read one: the probe's
+       * `M491`, the surface touch, and the scans. `outcome` is the flip's own (the origin from the
+       * bores and the front pair), so the operator's press writes it through `applyCorrection`.
+       */
+      data: RunData;
+      outcome: RegistrationOutcome;
+      mountTap: null;
+      probe: { lengthZ: number; rest: string };
+      /** The front pair: the edge Y it read at each touch, mm (side-2 work Y). */
+      frontPair: { y: number; surfaceZ: number }[];
+      /** The fence-side seed's X, mm (side-2 work X). */
+      seedX: number;
+      holes: FlipHoleReading[];
+      /** The origin the bores and the front pair state (side-2 work XY). */
+      origin: { x: number; y: number };
+      /** The G54 the two bores and the front pair state — what the press writes. */
+      correctedG54: { x: number; y: number };
+      /** The turn the bores' line reads against the front pair's, checked by the plan's own tolerance. */
+      crossCheck: { expectedAngleDeg: number; measuredAngleDeg: number; toleranceDeg: number };
+      /** The surface the front pair found, machine Z. */
+      surfaceZ: number;
+      probeRefZ: number;
+      transcript: Transcript[];
+    }
+  | { ok: false; reason: string; transcript: Transcript[] };
+
+const fff = (p: { x: number; y: number }): string => `${f4(p.x)}, ${f4(p.y)}`;
+
+/**
+ * #1088 — RUN SIDE 2'S REGISTRATION. The plan's order exactly: the front pair (Y and the turn),
+ * the fence-side seed (X), then each bore — an entry plunge that must find NOTHING (a trigger
+ * means the bore is not where the pin seeds it), four sideways touches +X, −X, +Y, −Y from the
+ * seeded pin with a `G38.5` release after every trigger, and a MISS that stops the find by name.
+ * Then the bores' line is cross-checked against the front pair's within the plan's own tolerance;
+ * outside it, nothing more is measured and the run stops with both angles stated.
+ *
+ * The origin is RETURNED, not written: the operator's press writes it (the step's route, exactly
+ * as `runRegistration`'s outcome). Z0 is the front pair's lowest surface reading.
+ */
+export async function runFlipRegistration(
+  flip: FlipRegistrationPlan,
+  opts: FlipRunOptions,
+  deps: ExecDeps,
+): Promise<FlipRunResult> {
+  const ctx = opts.ctx;
+  const s = ctx.settings;
+  // #1088 — THE STOP ALWAYS RELEASES THE STYLUS HERE. Side 2's bores are read with SIDEWAYS touches
+  // whose G38.5 release follows the reading, so a Stop (or a refused line) between the trigger and
+  // the release leaves the ball deflected whatever probe make it is; the epilogue's release is a
+  // G38.5 move that is safe on a mechanical probe too, so this run never gates it on the instrument.
+  const io = session(deps, ctx.seek.fromMachineZ, s.idlePollLimit, true);
+  let powered = false;
+  try {
+    const status = await io.send('?', { timing: STATUS_POLL_TIMING });
+    if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
+    await io.home();
+    await io.send('G54');
+    await io.send('G92.1');
+    if (!(await deps.operator({ kind: 'fit-probe', text: 'Fit the wired probe in the spindle, then continue.' }))) {
+      throw new Stop('stopped: the probe was not fitted');
+    }
+    powered = true;
+    await io.send(PROBE_SUPPLY_ON);
+    const rest = await io.send('M119');
+    if (/Probe:\s*1\b/.test(rest)) throw new Stop('the probe reads touched at rest; check it is seated and plugged in');
+    const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
+    if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading');
+
+    // ── THE FRONT PAIR AND THE SEED: the frame plan's own scans, in the flip plan's own steps. ──
+    const pairStep = flip.steps.find((st) => st.kind === 'edge-pair');
+    const seedStep = flip.steps.find((st) => st.kind === 'seed');
+    if (pairStep === undefined || seedStep === undefined) throw new Stop('the flip plan has no front pair or no seed — re-plan side 2');
+
+    // The surface the scans classify against: the frame plan's seek, from the machine's travel.
+    const band = ctx.seek.band;
+    const surfacePrb = await seekSurface(
+      io,
+      ctx,
+      { min: band.min, max: band.max, at: `down to the stock's top at ${fff(ctx.surfacePoint)}`, expect: 'the stock’s top' },
+      { ceilingMm: band.max },
+    );
+    if (surfacePrb === null || !surfacePrb.touched) {
+      throw new Stop(`the surface seek found nothing at ${fff(ctx.surfacePoint)} — check the part is on the blank and the bed datum is right`);
+    }
+    const surfaceZ = r3(surfacePrb.z);
+    // THE FRAME THE MOVES RAN IN, as every other touch routine derives it: the surface touch's
+    // MACHINE XY less the work point it was sent to (centreFind.ts's rule). A `[PRB:…]` is machine
+    // coordinates whatever G54 says; the bore centres are read back in this frame.
+    const g54 = { x: r3(surfacePrb.x - ctx.surfacePoint.x), y: r3(surfacePrb.y - ctx.surfacePoint.y) };
+    const initialPark = r3(surfaceZ + s.parkAboveSurfaceMm);
+    /**
+     * The edge a bisected scan leaves, from the SAME finding the side-1 outcome builds: between the
+     * last touch on the stock and the first off it, moved back by the probe's effective rim offset
+     * (#430 — the probe triggers with its centre past the edge). A scan that found no edge stops
+     * with its own sentence rather than an assumed coordinate.
+     */
+    const edgeOf = (rec: ScanRecord): number => {
+      const found = edgeFrom(rec, s.tipRadiusMm);
+      if (found.foundAt === null) throw new Stop(found.problem ?? 'a scan of the frame found no edge');
+      return found.foundAt;
+    };
+    const frontPair: { y: number; surfaceZ: number }[] = [];
+    const frontRecs: ScanRecord[] = [];
+    for (const scan of pairStep.scans) {
+      const rec = await scanEdge(io, ctx, scan, initialPark, surfaceZ);
+      frontRecs.push(rec);
+      const first = rec.touches[0];
+      frontPair.push({ y: edgeOf(rec), surfaceZ: r3(first?.prb.z ?? surfaceZ) });
+    }
+
+    // ── THE CARRIED Z0 IS CHECKED HERE, ON THE CORNER TOUCHES (#1073, 6b's amendment A). ──
+    // The corner Z touches are the CHECK of the carried top, never its source: each must read the
+    // carried value inside the surface tolerance. A reading outside the band stops with the numbers
+    // before a bore is entered — a chip under the blank is what it finds — so no origin is written
+    // from a blank that is not on its seat. Z0 is never re-derived from the rough face.
+    const z0 = opts.z0 ?? null;
+    const zBand = z0?.checkBand ?? null;
+    if (z0 !== null && zBand !== null) {
+      const outside = frontPair.filter((p) => p.surfaceZ < zBand.minMm || p.surfaceZ > zBand.maxMm);
+      if (outside.length > 0) {
+        const tolerance = r3((zBand.maxMm - zBand.minMm) / 2);
+        throw new Stop(
+          `the corner Z touches read ${frontPair.map((p) => `${f(p.surfaceZ)} mm`).join(' and ')}, and the carried Z0 says side 2's top is ${f(z0.topMachineZ)} ± ${f(tolerance)} mm ` +
+            `(${f(zBand.minMm)} to ${f(zBand.maxMm)}). A reading outside that band is a chip under the blank or the wrong seat — Z0 is never re-derived from the rough face, and no origin is written from this measurement. Nothing more was measured`,
+        );
+      }
+    }
+
+    const seedRec = await scanEdge(io, ctx, seedStep.scan, initialPark, surfaceZ);
+    const seedX = edgeOf(seedRec);
+
+    // ── THE BORES: the entry seek, then four sideways touches each. ──
+    const holes: FlipHoleReading[] = [];
+    for (const step of flip.steps) {
+      if (step.kind !== 'hole') continue;
+      const find = step.find;
+      const at = find.at;
+      // The entry: from the park, down through the mouth to the touch depth — a SEEK that must
+      // find nothing. A trigger means the bore is not where the pin seeds it.
+      await io.send(`G53 G0 Z${f(ctx.seek.fromMachineZ)}`);
+      await io.send(moveXY(ctx, at.x, at.y));
+      await io.send(`G53 G0 Z${f(initialPark)}`);
+      await io.idle();
+      await io.send('G91');
+      const entry = lastPrb(await io.send(`G38.3 Z-${f(find.plungeMm)} F${f(s.surfaceFastFeed)}`, { missOk: true }));
+      if (entry !== null && entry.touched) {
+        await io.send(probeAwayLine('Z', PROBE_AWAY_MM));
+        await io.send('G90');
+        throw new Stop(
+          `the entry at the seeded centre (${fff(at)}) met material at machine Z ${f(entry.z)} — bore ${step.index} is not where the pin seeds it; check the pin and the stored centres`,
+        );
+      }
+      await io.send('G90');
+      const zMachine = r3(surfaceZ - find.entryDepthMm);
+      const balls: Record<'x' | 'y', [number, number]> = { x: [0, 0], y: [0, 0] };
+      for (const t of find.touches) {
+        await io.send(`G53 G0 Z${f(zMachine)}`);
+        await io.send(moveXY(ctx, t.from.x, t.from.y));
+        await io.idle();
+        io.at(`sideways to the ${t.sign > 0 ? '+' : '−'}${t.axis.toUpperCase()} wall of bore ${step.index}, at machine Z ${f(zMachine)}`);
+        await io.send('G91');
+        const reply = await io.send(`G38.3 ${t.axis.toUpperCase()}${f4(t.travelMm)} F${f(s.touchFeed)}`, { missOk: true });
+        const prb = lastPrb(reply);
+        await io.send('G90');
+        if (prb === null || !prb.touched) {
+          await io.send(`G53 G0 Z${f(ctx.seek.fromMachineZ)}`);
+          throw new Stop(
+            `bore ${step.index} at the seeded centre (${fff(at)}) found no ${t.sign > 0 ? '+' : '−'}${t.axis.toUpperCase()} wall within ${f(find.searchMm)} mm — the pin is not where side 1 left it, or the bore is larger than the search`,
+          );
+        }
+        await io.send('G91');
+        await io.send(probeAwayLine(t.axis === 'x' ? 'X' : 'Y', t.travelMm < 0 ? find.releaseMm : -find.releaseMm));
+        await io.send('G90');
+        // The PRB is MACHINE XY; the work coordinate is it less the frame the moves ran in.
+        const ball = r3((t.axis === 'x' ? prb.x : prb.y) - g54[t.axis]);
+        io.saw({
+          source: 'surface',
+          label: `the ${t.sign > 0 ? '+' : '−'}${t.axis.toUpperCase()} wall of bore ${step.index}`,
+          x: t.axis === 'x' ? ball : at.x,
+          y: t.axis === 'x' ? at.y : ball,
+          z: prb.z,
+          touched: true,
+          kind: 'stock',
+        });
+        if (t.axis === 'x') {
+          if (t.sign > 0) balls.x[1] = ball;
+          else balls.x[0] = ball;
+        } else if (t.sign > 0) balls.y[1] = ball;
+        else balls.y[0] = ball;
+        await io.send(`G53 G0 Z${f(ctx.seek.fromMachineZ)}`);
+      }
+      const rx = readCentrePair('bore', 'x', balls.x[0], balls.x[1], find.ballRadiusMm);
+      const ry = readCentrePair('bore', 'y', balls.y[0], balls.y[1], find.ballRadiusMm);
+      holes.push({
+        index: step.index,
+        seeded: at,
+        centre: { x: rx.centre, y: ry.centre },
+        spans: [
+          { axis: 'x', spanMm: rx.spanMm, diameterMm: rx.diameterMm },
+          { axis: 'y', spanMm: ry.spanMm, diameterMm: ry.diameterMm },
+        ],
+      });
+    }
+    if (holes.length !== 2) throw new Stop('the flip plan does not state both bores — re-plan side 2');
+
+    // ── THE TURN: the bores' line against the front pair's, inside the plan's own tolerance. ──
+    const [a, b] = holes as [FlipHoleReading, FlipHoleReading];
+    const measuredAngleDeg = (Math.atan2(b.centre.y - a.centre.y, b.centre.x - a.centre.x) * 180) / Math.PI;
+    const cc = flip.crossCheck;
+    let cross: { expectedAngleDeg: number; measuredAngleDeg: number; toleranceDeg: number };
+    if (cc !== null) {
+      const off = Math.abs(measuredAngleDeg - cc.expectedAngleDeg);
+      const offWrap = Math.min(off, 360 - off);
+      const toleranceDeg = r3(cc.angleToleranceDeg);
+      cross = { expectedAngleDeg: cc.expectedAngleDeg, measuredAngleDeg: r3(measuredAngleDeg), toleranceDeg };
+      if (offWrap > toleranceDeg) {
+        throw new Stop(
+          `the bores' line reads ${r3(measuredAngleDeg)}° against the ${cc.expectedAngleDeg}° the front pair expects — ${r3(offWrap)}° out, wider than the ${toleranceDeg}° two touch residuals allow. The part is turned; nothing more was measured`,
+        );
+      }
+    } else {
+      cross = { expectedAngleDeg: 0, measuredAngleDeg: r3(measuredAngleDeg), toleranceDeg: 0 };
+    }
+
+    // The origin: X from the bores' midpoint (the exact feature), Y from the front pair's mean —
+    // both in the WORK frame the moves ran in. What the press writes is the G54 that puts those
+    // measured features where the job's side-2 work frame says they are.
+    const frontMeanY = r3(frontPair.reduce((sum, p) => sum + p.y, 0) / Math.max(1, frontPair.length));
+    const pinMid = { x: r3((a.seeded.x + b.seeded.x) / 2), y: r3((a.seeded.y + b.seeded.y) / 2) };
+    const measuredMid = { x: r3((a.centre.x + b.centre.x) / 2), y: r3((a.centre.y + b.centre.y) / 2) };
+    const expectedFrontY = pairStep.scans[0]!.expectedAt;
+    const origin = { x: measuredMid.x, y: frontMeanY };
+    const correctedG54 = {
+      x: r3(g54.x + (measuredMid.x - pinMid.x)),
+      y: r3(g54.y + (frontMeanY - expectedFrontY)),
+    };
+    // The turn the front pair reads: its two found Ys over the line between their touches, in the
+    // same convention `computeOutcome` states a side-1 stock's rotation.
+    const alongPair = pairStep.scans[1]!.along - pairStep.scans[0]!.along;
+    const slope = alongPair === 0 ? 0 : (frontPair[1]!.y - frontPair[0]!.y) / alongPair;
+    const rotationDeg = r3((Math.atan(slope) * 180) / Math.PI);
+    const rotationShiftMm = r3(Math.abs(slope) * (ctx.stock.xMax - ctx.stock.xMin));
+
+    const diameterWord = (h: FlipHoleReading): string =>
+      `bore ${h.index} reads ⌀${f(h.spans[0]!.diameterMm)} across X and ⌀${f(h.spans[1]!.diameterMm)} across Y`;
+    const notes: string[] = [
+      `the two bores side 1 left: ${diameterWord(a)}, ${diameterWord(b)} — both entered over their seeded centres and touched +X, −X, +Y, −Y`,
+      cc === null
+        ? 'the plan states no cross-check for the bores’ turn'
+        : `the bores’ line reads ${r3(measuredAngleDeg)}° against the pins’ ${cc.expectedAngleDeg}° — inside the ${r3(cc.angleToleranceDeg)}° two touch residuals allow`,
+      z0 === null || zBand === null
+        ? 'no carried Z0 with a tolerance was stated, so the corner Z touches were not checked against one'
+        : `the corner Z touches read ${frontPair.map((p) => `${f(p.surfaceZ)}`).join(' and ')} mm against the carried side-2 top ${f(z0.topMachineZ)} ± ${f(r3((zBand.maxMm - zBand.minMm) / 2))} mm — inside the band`,
+      `the origin is the bores’ midpoint X and the front pair’s mean Y; the frame in force during the touches is the one this run corrects`,
+    ];
+    const problems: string[] = [];
+    const outcome: RegistrationOutcome = {
+      edges: [...frontRecs, seedRec].map((rec) => edgeFrom(rec, s.tipRadiusMm)),
+      offset: { x: r3(correctedG54.x - g54.x), y: r3(correctedG54.y - g54.y) },
+      measured: { x: true, y: true },
+      centre: { ...origin },
+      rotationDeg,
+      rotationShiftMm,
+      // The flip's own gates are the entry seek, the four walls, the bore's line and the carried
+      // Z0 — all of them stops above. A returned outcome has therefore passed them, and the margin
+      // this field names on a side-1 run (the deviation from the frame in force) is not a side-2
+      // question: the frame IS what this measurement replaces.
+      withinMargin: true,
+      margin: s.edgeMarginMm,
+      surfaceZ: r3(frontPair.reduce((sum, p) => sum + p.surfaceZ, 0) / Math.max(1, frontPair.length)),
+      probeRefZ: r3(ref.z),
+      seekFromMachineZ: ctx.seek.fromMachineZ,
+      currentG54: g54,
+      correctedG54,
+      usable: problems.length === 0,
+      problems,
+      notes,
+      xyChecked: true,
+      flip: {
+        holes: holes.map((h) => ({
+          seeded: { ...h.seeded },
+          centre: { ...h.centre },
+          diameterMm: h.spans[0]!.diameterMm,
+        })),
+        frontPair: frontPair.map((p) => ({ ...p })),
+        crossCheck: cc === null ? null : { ...cross },
+        carried: z0 === null ? null : { topMachineZ: z0.topMachineZ, band: zBand === null ? null : { ...zBand } },
+        rotationDeg,
+        rotationShiftMm,
+      },
+    };
+    return {
+      ok: true,
+      data: { probeRefZ: r3(ref.z), surface: surfacePrb, scans: [...frontRecs, seedRec] },
+      outcome,
+      mountTap: null,
+      probe: { lengthZ: r3(ref.z), rest },
+      frontPair,
+      seedX,
+      holes,
+      origin,
+      correctedG54,
+      crossCheck: cross,
+      surfaceZ,
+      probeRefZ: r3(ref.z),
+      transcript: io.transcript,
+    };
+  } catch (e) {
+    if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
+    throw e;
+  } finally {
+    if (powered) await io.trySend(PROBE_SUPPLY_OFF);
+  }
 }
