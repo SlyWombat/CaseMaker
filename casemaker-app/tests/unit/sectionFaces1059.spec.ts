@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { Z1 } from '@/engine/cnc/machine';
-import { flatEndMill } from '@/engine/cnc/tool';
+import { cuttingDiameter, flatEndMill } from '@/engine/cnc/tool';
 import type { CutParams } from '@/engine/cnc/feeds';
 import { generateIndexed } from '@/engine/cnc/cam/indexed';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
@@ -181,7 +181,8 @@ describe('#1059 the face CAM reads the block’s own section', () => {
     if (!out.ok) throw new Error(`the sweep refused: ${JSON.stringify(out.diagnostics)}`);
     const s = out.value;
     const span = face.toX - face.fromX;
-    const cutterRadius = TOOL.diameter / 2;
+    // The fixture's own cutting diameter (the engine's resolver, never the raw field: `diameter` is nullable).
+    const cutterRadius = (cuttingDiameter(TOOL) ?? 0) / 2;
     // The cut is the whole flat, 2 mm deep. The plan's span is the CUTTER CENTRE's travel, so the
     // removal reaches one cutter radius past each end (rounded by the pass discs): the slab
     // 44.5 × span × 2 is cut in full, and nothing beyond the tool's own reach is. At the base the
