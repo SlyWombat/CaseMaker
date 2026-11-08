@@ -30,9 +30,13 @@ describe('#1076 the generator watchdog sentence', () => {
     );
   });
 
-  it('the generate and goal-check phases keep their own words', () => {
-    expect(generatorStallSentence(180_000, 'generating', { phase: null, progress: null })).toBe(
-      'The generator stopped reporting for 180 s. Its worker may have stopped.',
+  it('the generate branch names the last stage it heard, and the goal-check branch its own words', () => {
+    expect(generatorStallSentence(180_000, 'generating', { phase: null, progress: null }, 'plan')).toBe(
+      'the generator reported nothing for 180 s — its last stage was "plan"; the worker is alive',
+    );
+    // Nothing heard yet: no stage to name, and the worker is still the fact.
+    expect(generatorStallSentence(180_000, 'generating', { phase: null, progress: null }, null)).toBe(
+      'the generator reported nothing for 180 s; the worker is alive',
     );
     expect(generatorStallSentence(180_000, 'checking', { phase: 'playback', progress: null })).toBe(
       'the goal check has reported nothing for 180 s; the worker is alive',

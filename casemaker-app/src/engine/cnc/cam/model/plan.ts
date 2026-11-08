@@ -1130,6 +1130,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       memTrace('rank:start', { candidates: ordered.length });
       for (const candidate of ordered) {
         memTrace('rank:candidate', { diameterMm: cuttingDiameter(candidate) ?? 0 });
+        // #1076 — THE RANK IS A SILENT STRETCH TO THE CLIENT: each candidate is measured with a
+        // FULL plan (seconds to a minute), and no model-plan boundary fires in between — on the
+        // tray bottom the gap from `features` to the first chain step was 125 s, and the ideal
+        // plan's (a larger house, more candidates) crossed the 180 s watchdog window. One tick
+        // before each measurement keeps the window alive on the slowest machine; progress only,
+        // so the plan's bytes cannot move.
+        opts.onProgress?.({ setupIndex, op: 'sequence', fraction: 0.4 });
         opts.signal?.throwIfAborted();
         let measured: PlanCurvedResult;
         try {

@@ -1847,7 +1847,7 @@ describe('#785 progress and Cancel', () => {
       await vi.advanceTimersByTimeAsync(shopDefault('sim.stallMs').value);
       const s = useEngraveRunStore.getState();
       expect(s.phase).toBe('blocked');
-      expect(s.error).toContain('The generator stopped reporting for');
+      expect(s.error).toContain('the generator reported nothing for');
       // #830 review — a silence while GENERATING is the generator's stop, not the simulation's,
       // and the sentence no longer carries its own "try again" (the press says it).
       expect(s.simStopped).toBe(false);
@@ -1855,6 +1855,47 @@ describe('#785 progress and Cancel', () => {
       expect(cancelled, 'the stuck worker is killed, not left running').toBe(1);
       void done;
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // #1076 — A QUEUED GENERATE IS NOT A DEAD WORKER. The sim worker is shared with the preview and
+  // the measured pick: a generate pressed while they run waits its turn in silence. While that
+  // work is provably in flight the panel says the wait, and the fault window only starts once the
+  // generate itself has spoken.
+  it('a generate queued behind the measured pick says the wait, and faults only when the worker is free and silent', async () => {
+    vi.useFakeTimers();
+    try {
+      let cancelled = 0;
+      setEngraveRunClientLoader(async () => ({
+        engraveGenerate: () => new Promise<EngraveGenerated>(() => undefined),
+        cancelGenerate: () => {
+          cancelled += 1;
+        },
+        simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+      }));
+      // The measured pick is running on the shared worker when Generate is pressed.
+      // The preview build is in flight on the shared worker when Generate is pressed (the pick is
+      // held by the press; the preview keeps updating).
+      useEngravePreviewStore.setState({ status: 'loading' });
+      const done = useEngraveRunStore.getState().generate();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(useEngraveRunStore.getState().phase).toBe('generating');
+      await vi.advanceTimersByTimeAsync(shopDefault('sim.stallMs').value);
+      const queued = useEngraveRunStore.getState();
+      expect(queued.phase, 'a queued generate is not blocked').toBe('generating');
+      expect(queued.progress?.label ?? '').toContain('waiting for the preview');
+      expect(cancelled, 'the healthy, busy worker is not killed').toBe(0);
+      // The preview finishes; the generate is still silent — now the silence is the worker's own.
+      useEngravePreviewStore.setState({ status: 'ready' });
+      await vi.advanceTimersByTimeAsync(shopDefault('sim.stallMs').value);
+      const s = useEngraveRunStore.getState();
+      expect(s.phase).toBe('blocked');
+      expect(s.error).toContain('the worker is alive');
+      expect(cancelled).toBe(1);
+      void done;
+    } finally {
+      useEngravePreviewStore.setState({ status: 'idle' });
       vi.useRealTimers();
     }
   });
