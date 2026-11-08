@@ -98,7 +98,7 @@ import {
 } from '@/engine/cnc/engrave/surfaceSpread';
 import { restSeamSentence } from '@/engine/cnc/engrave/restSettings';
 import { cutterNameForKey, toolDisplayName } from '@/engine/cnc/toolDisplay';
-import { entryFor } from '@/engine/cnc/toolRegistry';
+import { benchCutterFor, entryFor, NO_TOOL_KEY } from '@/engine/cnc/toolRegistry';
 import { finishSourceWords, type FinishSettingSource } from '@/engine/cnc/engrave/finishPass';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, jobVise, viseEnvelope } from '@/engine/cnc/fixture';
@@ -4262,6 +4262,57 @@ export function buildRunSheet(
   // A key the sheet cannot see names nothing: fall back to the job's own cutter rather than print
   // "unknown cutter" as if the file ran one.
   const postedToolName = postedResolved === null || postedResolved === 'unknown cutter' ? null : postedResolved;
+  // #1079 — WHEN THE JOB NAMES NO CUTTER, THE POSTED PROGRAMS DO, AND NOTHING ELSE. A goal/model
+  // job's `toolKey` is empty and its `tool` snapshot may be the PICK's cutter — the toolholder
+  // card's §1 printed a ⌀1.5 × 8 ball while program 1's NC ran a 6×22 flat. So an empty-key job's
+  // §1 takes its cutter(s) from the posted programs: the single distinct one by name when the key
+  // resolves, every program's own when several run, and NO name when the key cannot be resolved
+  // (the NC header's `;@MKR|TOOL` line is the reference). A named job's line is untouched below.
+  const jobNamesCutter = job.toolKey !== NO_TOOL_KEY;
+  const singlePostedName = (key: string): string | null => {
+    if (key === '') return null;
+    const name = cutterNameForKey(key);
+    return name === 'unknown cutter' ? null : name;
+  };
+  const postedCutterStep: RunSheetStep | null = (() => {
+    if (jobNamesCutter) return null;
+    const engraving = (generated.programs ?? []).filter((p) => (p.kind ?? 'engrave') !== 'facing');
+    const distinct = [...new Set(engraving.map((p) => p.toolKey).filter((k) => k !== ''))];
+    if (engraving.length === 0) {
+      return {
+        text: 'The cutter — the job names none and no program list was posted: the file’s NC header (;@MKR|TOOL) names the bit.',
+        value: 'cutting diameter unknown',
+      };
+    }
+    if (distinct.length === 0) {
+      return {
+        text:
+          'The cutter — the job names none and the posted programs carry no key: each file’s NC header ' +
+          '(;@MKR|TOOL) names the bit.',
+        value: 'cutting diameter unknown',
+      };
+    }
+    if (distinct.length === 1) {
+      const only = distinct[0]!;
+      const name = singlePostedName(only);
+      if (name !== null) {
+        const postedTool = benchCutterFor(only);
+        const d = postedTool === null ? null : statedCuttingSize(postedTool);
+        return {
+          text: `The cutter — ${options.toolCase === undefined ? '' : `${options.toolCase} — `}${name} — the cutter the posted programs run.`,
+          value: d === null ? 'cutting diameter unknown' : `⌀ ${fmtNum(d)} mm cutting`,
+        };
+      }
+      return {
+        text:
+          'The cutter — the job names none, and the posted program’s key is not in this shop’s library: ' +
+          'the NC header (;@MKR|TOOL) names the bit.',
+        value: 'cutting diameter unknown',
+      };
+    }
+    const listed = engraving.map((p, i) => `program ${i + 1} — ${singlePostedName(p.toolKey) ?? 'the bit its NC header names'}`);
+    return { text: `The cutter — one for each program: ${listed.join('; ')}.`, value: 'one per program' };
+  })();
   const params = generated.feeds && generated.feeds.ok ? generated.feeds.params : null;
   // #221 — the V-carve facts are resolved ONCE, with the engine's own functions: the cone from the
   // job's cutter, and the colour plane from the print grid the plan carries. A V-carve job is a V
@@ -4337,7 +4388,7 @@ export function buildRunSheet(
         'and regenerate — do not run this file.',
       value: runSheetStockLine(job),
     },
-    {
+    postedCutterStep ?? {
       text: tool
         ? `The cutter — ${options.toolCase === undefined ? '' : `${options.toolCase} — `}${
             postedToolName ?? toolDisplayName(tool)
