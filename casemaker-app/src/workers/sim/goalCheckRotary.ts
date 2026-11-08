@@ -372,6 +372,11 @@ export function checkGoalCutIntoRotary(
   const coverageFraction = withinBoth / n;
   const cutIntoFraction = cutCells / n;
   const coverage = 1 - (leftoverFractions[0] ?? 0);
+  // #1095 — THE VERDICT IS THE FLAT CHECK'S OWN. Zero adjudicated cut-into at the floor AND the
+  // goal's top surface at or above the pass line. #1083 returned `ok: true` unconditionally while
+  // the sentence stated a failure; a rotary part now fails exactly when a flat one would.
+  const coverageOk = coverage + 1e-9 >= passCoverage;
+  const ok = adjudicatedCells === 0 && coverageOk;
 
   // The sentence states the frame and the plate's own caveat: a cell the relief does not cut keeps
   // the stock's surface (a block's flats are inside the envelope by design), and a map cell is
@@ -404,7 +409,7 @@ export function checkGoalCutIntoRotary(
     sectionWords;
 
   return {
-    ok: true,
+    ok,
     ran: true,
     reason: null,
     goalCells: covered,
