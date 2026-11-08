@@ -302,7 +302,9 @@ function ballScallopStepOver(radiusMm: number, bandMm: number, crossDeg: number,
   // #1080 (6b's ruling) — THE TWO COSINES DO DIFFERENT JOBS. The band is a VERTICAL cusp: on a
   // surface at the gradient magnitude theta, a vertical band of `bandMm` is only `bandMm*cos(theta)`
   // along the normal. The cross-row angle alpha then converts the row pitch into pitch along the
-  // surface (a row advances horizontally by `pitch`). One angle cannot do both.
+  // surface (a row advances horizontally by `pitch`). One angle cannot do both. 6b's naming, which
+  // the unit governs: a plane tilted ALONG the rows (its slope along y, alpha ~ 0) moves 1.54 ->
+  // 1.09; a plane tilted ACROSS the rows (alpha = theta_mag) is unchanged from the first slice.
   const cosCross = Math.cos((crossDeg * Math.PI) / 180);
   const bandPrime = bandMm * Math.cos((magDeg * Math.PI) / 180);
   const spacing = cosCross * 2 * Math.sqrt(Math.max(0, 2 * radiusMm * bandPrime - bandPrime * bandPrime));
