@@ -2485,3 +2485,13 @@ function gougeAlongFlat(
   return false;
 }
 
+
+/**
+ * #1086 — A TIMELINE'S CUTTING MOVES, as the sweep itself makes them (#899: on call, from the
+ * packed checkpoints). The goal stamp walks the same moves the column grid was built from, so the
+ * exact read and the column read cannot disagree about what the program cut.
+ */
+export function* timelineCutMoves(timeline: Timeline, rotary: boolean): IterableIterator<CutMove> {
+  const movesOf = checkpointMoves(timeline, rotary);
+  for (let k = 0; k < timeline.checkpoints.length; k++) yield* movesOf(k);
+}

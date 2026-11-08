@@ -83,17 +83,29 @@ export function checkGoalCutIntoRotary(
   section: RotarySection | null,
   opts: GoalCutIntoOptions = {},
   allowance?: RotaryGoalAllowance,
+  /**
+   * #1086 — THE EXACT STAMP on the goal's own grid (`stampRotarySweptField`): when present it is
+   * the VERDICT's read — the cell's remaining radius is what the posted program left there, not
+   * the column grid's max-of-four bracket — and the column read is kept as the stated diagnostic
+   * `columnCutInto`. The stamp needs no cell/facet allowance (it resolves finer than the grid):
+   * only the cut-into floor applies to it.
+   */
+  exact?: Float32Array | null,
 ): GoalCutIntoReport {
   const cutIntoFloorMm = opts.cutIntoFloorMm ?? GOAL_CUT_INTO_FLOOR_MM;
   const passCoverage = opts.passCoverage ?? GOAL_PASS_COVERAGE_FALLBACK;
   const cellMm = allowance?.cellMm ?? 0;
   const facetAt = allowance?.facetAt ?? ((): number => 0);
   const toleranceAt = (designR: number): number => cutIntoFloorMm + cellMm + facetAt(designR);
+  const stamped = exact !== null && exact !== undefined && exact.length === goal.nx * goal.ny ? exact : null;
   const radius = goal.radius;
   const cellArea = goal.pitch * goal.pitch;
   const cells = goal.nx * goal.ny;
   const dOf = new Float64Array(cells);
   const sampled = new Uint8Array(cells);
+  // #1086 — the column read beside the stamp: every covered cell the column grid can answer for.
+  const colDOf = stamped === null ? null : new Float64Array(cells);
+  const colSampled = stamped === null ? null : new Uint8Array(cells);
   const deltas: number[] = [];
   const leftoverCounts = GOAL_LEFTOVER_BANDS_MM.map(() => 0);
   let leftoverVolumeMm3 = 0;
@@ -107,10 +119,17 @@ export function checkGoalCutIntoRotary(
       const k = j * goal.nx + i;
       if (goal.covered[k] !== 1) continue;
       const x = goal.x0 + i * goal.pitch;
-      const cutR = gridRadiusAt(grid, radius, x, arcMm);
-      if (cutR === null) continue; // outside the swept map: not compared, never counted as a pass
+      const colR = gridRadiusAt(grid, radius, x, arcMm);
+      // #1086 — with the stamp every covered cell is compared (the field is defined everywhere);
+      // without it, a cell outside the swept map is not compared and never counted as a pass.
+      if (stamped === null && colR === null) continue;
+      const cutR = stamped === null ? (colR as number) : stamped[k]!;
       covered++;
       const designR = radius + goal.z[k]!;
+      if (colDOf !== null && colSampled !== null && colR !== null) {
+        colDOf[k] = colR - designR;
+        colSampled[k] = 1;
+      }
       const d = cutR - designR; // + leftover, - cut-into: the flat check's own sign convention
       dOf[k] = d;
       sampled[k] = 1;
@@ -137,7 +156,9 @@ export function checkGoalCutIntoRotary(
       // #1083 — a cell is cut into only BEYOND the run's own map tolerance (the cell half-diagonal
       // plus the cutter's facet rise at that radius), the same band the prediction oracle judges by.
       const designRk = radius + goal.z[k]!;
-      if (sampled[k] !== 1 || dOf[k]! >= -toleranceAt(designRk)) continue;
+      // #1086 — the stamp is judged by the floor alone; the column read keeps the run's tolerance.
+      const verdictTolerance = stamped === null ? toleranceAt(designRk) : cutIntoFloorMm;
+      if (sampled[k] !== 1 || dOf[k]! >= -verdictTolerance) continue;
       cutCells++;
       const depth = -dOf[k]!;
       cutVolumeMm3 += depth * cellArea;
@@ -145,6 +166,27 @@ export function checkGoalCutIntoRotary(
         maxCutIntoMm = depth;
         // The map's own coordinates: X mm along the axis, θ in degrees around it.
         maxCutIntoAt = { x: goal.x0 + i * goal.pitch, y: ((goal.y0 + j * goal.pitch) / radius) * (180 / Math.PI) };
+      }
+    }
+  }
+
+  // #1086 — the column read's own cut-into, with the run's tolerance exactly as the pre-stamp
+  // verdict counted it: stated beside the stamp, never the verdict.
+  let columnCells = 0;
+  let columnMax = 0;
+  let columnAt: { x: number; y: number } | null = null;
+  if (colDOf !== null && colSampled !== null) {
+    for (let j = 0; j < goal.ny; j++) {
+      for (let i = 0; i < goal.nx; i++) {
+        const k = j * goal.nx + i;
+        const designRk = radius + goal.z[k]!;
+        if (colSampled[k] !== 1 || colDOf[k]! >= -toleranceAt(designRk)) continue;
+        columnCells++;
+        const depth = -colDOf[k]!;
+        if (depth > columnMax) {
+          columnMax = depth;
+          columnAt = { x: goal.x0 + i * goal.pitch, y: ((goal.y0 + j * goal.pitch) / radius) * (180 / Math.PI) };
+        }
       }
     }
   }
@@ -167,7 +209,9 @@ export function checkGoalCutIntoRotary(
     `goal check on the rotary map: coverage ${pct(coverage)} of the goal's surface — the pass line asks ${pct(passCoverage)} ` +
     `(${pct(leftoverFractions[0] ?? 0)} stands more than ${GOAL_LEFTOVER_BANDS_MM[0]} mm above the goal)` +
     (cutCells === 0 ? '; nothing is cut into the goal' : `; ${pct(cutIntoFraction)} is cut into the goal, up to ${mm3(maxCutIntoMm)} mm`) +
-    `. The comparison is cell by cell on the map's (X, θ) grid at ${Number(goal.pitch.toFixed(3))} mm.` +
+    (stamped === null
+      ? `. The comparison is cell by cell on the map's (X, θ) grid at ${Number(goal.pitch.toFixed(3))} mm.`
+      : `. The comparison is the posted program stamped onto the map's (X, θ) grid at ${Number(goal.pitch.toFixed(3))} mm; the column grid's read is stated beside it.`) +
     sectionWords;
 
   return {
@@ -192,6 +236,7 @@ export function checkGoalCutIntoRotary(
     shadowNotScoredFraction: 0,
     straddlingNotScoredCells: 0,
     straddlingMaxStepMm: 0,
+    ...(colDOf === null ? {} : { columnCutInto: { fraction: columnCells / n, maxMm: columnMax, at: columnAt } }),
     adjudicatedFraction: coverageFraction,
     adjudicatedMaxMm: maxCutIntoMm,
     adjudicatedMaxAt: maxCutIntoAt,

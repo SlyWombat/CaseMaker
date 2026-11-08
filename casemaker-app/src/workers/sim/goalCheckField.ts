@@ -126,7 +126,16 @@ export function goalInputFor(live: SimSession, goal: SimGoalCheck): GoalCheckInp
     } catch (e) {
       return { unchecked: `the goal could not be sampled (${e instanceof Error ? e.message : String(e)})`, ...(goal.opts === undefined ? {} : { opts: goal.opts }) };
     }
-    return { rotaryGoal: field, section: goal.rotary.section, ...(goal.opts === undefined ? {} : { opts: goal.opts }) };
+    // #1086 — THE EXACT STAMP when the session can carry it: the verdict, with the column read
+    // kept as the stated diagnostic. A session that cannot stamp (a replay without a grid) falls
+    // back to the column read alone — the pre-#1086 behaviour, never a silent pass.
+    const exact = live.sweptFieldExactRotary(field);
+    return {
+      rotaryGoal: field,
+      section: goal.rotary.section,
+      ...(exact === null ? {} : { exact }),
+      ...(goal.opts === undefined ? {} : { opts: goal.opts }),
+    };
   }
   // The sweep's capability first, before paying for the goal's sampling: a rotary or refused
   // session cannot stamp it at all (a flat column and an exact sweep both can).
