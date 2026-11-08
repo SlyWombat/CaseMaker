@@ -144,6 +144,16 @@ export function RunSheetView({ sheet, onClose }: { sheet: RunSheet; onClose?: ()
                 </li>
               ))}
             </ol>
+            {/* #1073(a) — THE FLIP DRAWING, on the page of the setup it turns: the same SVG the
+                Setups row shows (`flipDiagramSvg`), so the bench and the app see one picture. */}
+            {section.flipDiagramSvg !== undefined && (
+              <div
+                className="run-sheet-diagram run-sheet-flip"
+                data-testid={`run-sheet-flip-${section.id}`}
+                // Pure string output from `flipDiagramSvg`; no user HTML, only generated geometry.
+                dangerouslySetInnerHTML={{ __html: section.flipDiagramSvg }}
+              />
+            )}
             {/* #489 — the cutter this sheet names, under the section that names it. Monochrome
                 standalone SVG from the same model the app draws. */}
             {section.id === 'need' && sheet.toolProfileSvg !== undefined && (

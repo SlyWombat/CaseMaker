@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flipOrientation, flipZ0 } from '@/engine/cnc/engrave/flipChoice';
 import { buildRunSheet, type RunSheetGenerated } from '@/engine/cnc/engrave/runSheet';
+import { renderRunSheetMarkdown } from '../../scripts/runSheetMarkdown';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 
 const NOW = new Date('2026-11-08T12:00:00Z');
@@ -121,6 +122,27 @@ describe('#1073 the sheet carries side 2’s Z0', () => {
     expect(text).toContain('Z0 on side 2 is CARRIED from side 1');
     expect(text).toContain('never touched on the rough underside');
     expect(text).toContain('are the CHECK of it');
+  });
+
+  it('the setup-2 page carries the DRAWING — the same SVG the Setups row shows, and the markdown prints it', () => {
+    const job = twoSidedJob(true);
+    const sheet = buildRunSheet(job, generated(job), { diagnostics: [] }, NOW, undefined, {
+      flipZ0: { seatMm: -12, thicknessMm: 25, facingMm: 0, toleranceMm: 0.05 },
+      flipPart: { minX: 20, minY: 10, maxX: 80, maxY: 50 },
+    });
+    const cut2 = sheet.sections.find((s) => s.id === 'cut-2');
+    expect(cut2).toBeTruthy();
+    expect(cut2!.flipDiagramSvg).toBeDefined();
+    expect(cut2!.flipDiagramSvg!).toContain('<svg');
+    expect(cut2!.flipDiagramSvg!).toContain('flip-fence-label');
+    expect(cut2!.flipDiagramSvg!).toContain('FR in the fence — not square');
+    // Paper: the markdown keeps the drawing inline, self-contained.
+    const md = renderRunSheetMarkdown(sheet);
+    expect(md).toContain('flip-fence-label');
+    // A job with no flip carries no drawing on its later program's page.
+    const plain = twoSidedJob(false);
+    const plainSheet = buildRunSheet(plain, generated(plain), { diagnostics: [] }, NOW);
+    expect(plainSheet.sections.find((s) => s.id === 'cut-2')!.flipDiagramSvg).toBeUndefined();
   });
 
   it('a job with no flip prints no carried Z0 at all', () => {

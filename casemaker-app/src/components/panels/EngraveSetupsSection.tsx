@@ -63,6 +63,7 @@ import {
   type SetupChange,
 } from '@/engine/cnc/setups';
 import { readDefault } from '@/platform/defaultsClient';
+import { partSilhouetteOf, vendorMethodOffer } from '@/engine/cnc/engrave/flipSilhouette';
 import { machineDisplayName } from '@/platform/locationClient';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 import { EngraveSetupRow } from './EngraveSetupRow';
@@ -126,6 +127,25 @@ export function EngraveSetupsSection({
   const tools = useToolRegistry();
   const reading = useMemo(() => readSetups(job), [job]);
   const settings = useMemo(() => setupsSettings(defaults), [defaults]);
+  // #1073(b) — THE PART'S OUTLINE FOR THE FLIP'S VENDOR AVAILABILITY. Measured from the goal's
+  // mesh on the flip plan's own coverage grid, only when a later bottom-up setup is on screen, so
+  // ordinary jobs pay nothing. The verdict is the registration planner's (the same settings the
+  // Setups step plans under), so the row's "unavailable" and the plan's refusal are one statement.
+  const flipSilhouette = useMemo(() => {
+    const hasFlipCandidate = (job.setups ?? []).some((su) => su.orientation.top === 'bottom');
+    if (!hasFlipCandidate) return null;
+    const goal = jobTargetObjects(job).find((t) => (t.role ?? 'reference') === 'goal' && t.enabled !== false);
+    if (goal === undefined) return null;
+    try {
+      return partSilhouetteOf(goal);
+    } catch {
+      return null;
+    }
+  }, [job]);
+  const flipVendorOffer = useMemo(
+    () => vendorMethodOffer(flipSilhouette, registrationSettings(defaults).settings),
+    [flipSilhouette, defaults],
+  );
   // #598 — the checked-out probe and the measured jaw-top datum, from the machine at the run target.
   const target = useMemo(() => (machine === null ? null : { host: machine.host, port: machine.port }), [machine]);
   // #617 — subscribe to the location store so any write-back (a card tap, a registration frame or
@@ -592,6 +612,8 @@ export function EngraveSetupsSection({
               machineName={machineName}
               stock={{ length: job.stock.length, width: job.stock.width, ...(job.stock.squareCorners === undefined ? {} : { squareCorners: job.stock.squareCorners }) }}
               breakthroughMm={job.breakthrough}
+              partSilhouette={flipSilhouette}
+              vendorOffer={flipVendorOffer}
               facingPass={index === 0 && job.facing?.enabled === true}
               notice={notice?.index === index ? notice.reason : null}
               remountMinutes={settings.remountMinutes}
