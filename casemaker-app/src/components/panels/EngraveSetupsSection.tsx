@@ -12,7 +12,7 @@
  * the row notices. Every plan, every reason and every set of words comes from `engine/cnc/setups`.
  */
 
-import { Fragment, useMemo, useState, type CSSProperties, type JSX } from 'react';
+import { Fragment, useEffect, useMemo, useState, useSyncExternalStore, type CSSProperties, type JSX } from 'react';
 import { ProbeFitDiagram } from '@/components/ui/ProbeFitDiagram';
 import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
@@ -65,6 +65,11 @@ import {
 import { readDefault } from '@/platform/defaultsClient';
 import { partSilhouetteOf, vendorMethodOffer } from '@/engine/cnc/engrave/flipSilhouette';
 import { derivedSetupStock, measuredBlankThickness } from '@/engine/cnc/setups/perSetupStock';
+// #1082 — the derived box is measured through `toPartPlan`, which typesets every label; on the
+// COLD first paint the bundled faces may not be parsed yet, and `resolveFont` throws by design.
+// The section subscribes to the faces landing (the panel already loads them on mount) and derives
+// only once they are up — the stated stock shows meanwhile, never a measurement that would throw.
+import { ensureLabelFontsLoaded, facesLoadedEpoch, labelFontsLoaded, subscribeFacesLoaded } from '@/engine/fonts/registry';
 import { machineRecordByProfile } from '@/store/locationStore';
 import { machineDisplayName } from '@/platform/locationClient';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
@@ -139,7 +144,23 @@ export function EngraveSetupsSection({
   const bedMachine = machineRecordByProfile(job.machineId);
   const bedProfile = bedMachine?.bedProfiles?.find((p) => p.id === bedMachine.activeBedProfileId) ?? null;
   const measuredThickness = measuredBlankThickness(bedProfile);
-  const derivedStock = useMemo(() => derivedSetupStock(job, measuredThickness), [job, measuredThickness]);
+  // #1082 — the label faces must be UP before the derived box can be measured. `ensureLabelFontsLoaded`
+  // is the panel's own mount call (this one is idempotent and joins the in-flight fetch); the epoch
+  // subscription re-runs the memo when a face lands, so the offer is the measured box, never the
+  // estimate. Until then `derivedStock` is null and the row shows the setup's stated stock.
+  const facesEpoch = useSyncExternalStore(subscribeFacesLoaded, facesLoadedEpoch);
+  useEffect(() => {
+    if (labelFontsLoaded(job.labels, job.customFonts ?? [])) return;
+    // Swallowed like the panel's own wait: a face that plainly fails to fetch leaves the offer
+    // absent (there is no honest measurement without the outline), and nothing else breaks.
+    void ensureLabelFontsLoaded(job.labels, job.customFonts ?? []).catch(() => {});
+  }, [job.labels, job.customFonts]);
+  const derivedStock = useMemo(
+    () =>
+      labelFontsLoaded(job.labels, job.customFonts ?? []) ? derivedSetupStock(job, measuredThickness) : null,
+    // The epoch is the memo's cue: a face landing must re-derive even when the job object is unchanged.
+    [job, measuredThickness, facesEpoch],
+  );
   const flipSilhouette = useMemo(() => {
     const hasFlipCandidate = (job.setups ?? []).some((su) => su.orientation.top === 'bottom');
     if (!hasFlipCandidate) return null;
