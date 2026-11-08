@@ -72,7 +72,7 @@ function parsed(solid: ManifoldInstance): ParsedMesh {
   return { positions, indices: Uint32Array.from(m.triVerts), triangleCount: m.triVerts.length / 3, bbox: { min, max } };
 }
 
-function buildPart(): ManifoldInstance {
+function buildPart(withEdgeSliver = false): ManifoldInstance {
   const baseplate = tl.Manifold.cube([FOOT, FOOT, BASE_Z], false);
   // The slab: flat underside at LEG_TOP_Z, sloped top — one continuous top land, no recess beside
   // a peak, so the inter-leg gap stays the only pocket the tree recognises.
@@ -88,7 +88,16 @@ function buildPart(): ManifoldInstance {
     legAt(INSET, FOOT - INSET - LEG),
     legAt(FOOT - INSET - LEG, FOOT - INSET - LEG),
   ];
-  return legs.reduce((acc, leg) => acc.add(leg), baseplate.add(slab));
+  const solid = legs.reduce((acc, leg) => acc.add(leg), baseplate.add(slab));
+  if (!withEdgeSliver) return solid;
+  // #1092 — THE BLOCK-5 SLIVER. A one-cell (0.1 mm) slot through the slab at y 20.0-20.1,
+  // exposing the baseplate's top — a goal surface AT the pocket's floor, but 0.1 mm wide. It is
+  // not a floor the cutter (⌀3.175, r 1.59) can rest on: no disc-sized box of floor cells exists
+  // inside it. The sliver stands beside the slab's own top (the standing body, 16.9 mm above the
+  // floor), and without the safe-spot rule it is a witness that keeps the body's cells in the
+  // rest's region — the exact mechanism of j29's leftover 4.9 x 5.3 mm block.
+  const slot = tl.Manifold.cube([FOOT, 0.1, SLAB_HIGH_TOP_Z - LEG_TOP_Z + 1], false).translate([0, 20, LEG_TOP_Z]);
+  return solid.subtract(slot);
 }
 
 /** A binary STL from the mesh (the goal target's own committed-format path). */
@@ -202,6 +211,26 @@ describe('#1092 a pocket floor plane is only valid where the goal has a surface 
     for (const setup of out.perSetup) {
       // A top setup only: the fixture's design top is stated in the document frame (#970's own
       // stated scope for a single top setup).
+      const [ux, uy, uz] = setup.features.frame.up;
+      if (!(ux === 0 && uy === 0 && uz === 1)) continue;
+      bad.push(...floorPassesBelowGoal(out, setup.features.frame.stockTop, 0.01));
+    }
+    expect(bad, bad.slice(0, 20).join('\n')).toEqual([]);
+  }, 180_000);
+
+  it('a one-cell floor sliver is not a floor: the body beside it must not be cut', async () => {
+    // The block-5 case in miniature: the sliver is AT the pass floor, so an at-or-below witness
+    // test accepts it and keeps the standing body's cells in the rest's region (red on the
+    // 4ba70606 rule); the safe-spot test requires a spot where the WHOLE disc rests on floor, and
+    // a 0.1 mm slot has none (green on 6870107f).
+    const part = parsed(buildPart(true));
+    const goal = goalOf(part);
+    const job = jobOf(goal);
+    const input = await buildModelPlanInputForGoal(job, goal, FLAT6, SHOP, 'top');
+    const out = await planModelCam(input);
+    expect(out.perSetup.length).toBeGreaterThanOrEqual(1);
+    const bad: string[] = [];
+    for (const setup of out.perSetup) {
       const [ux, uy, uz] = setup.features.frame.up;
       if (!(ux === 0 && uy === 0 && uz === 1)) continue;
       bad.push(...floorPassesBelowGoal(out, setup.features.frame.stockTop, 0.01));
