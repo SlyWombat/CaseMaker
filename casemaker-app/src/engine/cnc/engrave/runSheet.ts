@@ -122,7 +122,8 @@ import type { DesignCheckReport } from '@/engine/cnc/engrave/designCheck';
 // `rotaryFreeSpan`): the coverage sentence the sheet and the panel print quotes them, never a
 // second reading of the job.
 import { neckCarriedBy, neckJawClearanceSentence } from '@/engine/cnc/rotary/neck';
-import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
+import { rotaryMapOf, type RotaryMap } from '@/engine/cnc/rotary/wrap';
+import type { RotarySheetDatum } from '@/engine/cnc/rotary/sheetDatum';
 import { orient } from '@/engine/cnc/setups/orient';
 import { turnWords } from '@/engine/cnc/setups/remount';
 import type { EngraveFrameShape, EngraveJob, EngraveMargins, JobStockFinish, ViseParams } from '@/types/engraveJob';
@@ -2455,6 +2456,14 @@ export interface RunSheetOptions {
    */
   toolCase?: string;
   /**
+   * #1059 — THE ROTARY DATUMS, when the job is in the 4th-axis chuck: the measured axis and the
+   * square stock's levelled face angle, read off the bed profile by the caller
+   * (`rotary/sheetDatum.ts` `rotarySheetDatumFor`). The sheet is pure data and builds in realms
+   * with no stores, so it cannot read the profile itself; an absent datum prints "not measured",
+   * never a guessed number. Ignored for every other mount.
+   */
+  rotaryDatum?: RotarySheetDatum;
+  /**
    * Print §5's material-position check (`materialScan.ts`, #391). **OFF, deliberately and for now.**
    *
    * It is the operator-facing half of a feature whose printed steps a review held (review of 36f3837
@@ -4246,6 +4255,99 @@ function pcbBoardSteps(job: EngraveJob, tool: Tool | null): RunSheetStep[] | nul
   return steps;
 }
 
+/** #1059 — the jaws a rotary job is chucked in, in the words Makera's own rule gives them. */
+function rotaryJawWords(mode: string | undefined): string {
+  return mode === 'reverse-inner'
+    ? 'the REVERSE jaws, INNER teeth'
+    : mode === 'reverse-outer'
+      ? 'the REVERSE jaws, OUTER step'
+      : 'the STANDARD jaws';
+}
+
+const datumDate = (iso: string): string => (iso.length >= 10 ? iso.slice(0, 10) : iso);
+
+/**
+ * #1059 — THE MOUNT SECTION FOR A JOB IN THE 4TH-AXIS CHUCK. The vise's pins and jaws are replaced
+ * by the module, the chuck and the two Register measurements. The datums' numbers print when they
+ * were measured; a "not measured" sentence is the honest alternative, never an invented number.
+ */
+function rotaryMountSteps(job: EngraveJob, rotary: RotaryMap, datum: RotarySheetDatum | undefined): RunSheetStep[] {
+  const hold = job.workholding.kind === 'rotary-chuck' ? job.workholding.rotary : null;
+  const stickout = hold?.stickout ?? rotary.stickout;
+  const envelope = fmtNum(2 * rotary.radius);
+  const axis = datum?.axis ?? null;
+  const face = datum?.faceAngle ?? null;
+  return [
+    { text: 'Home the machine, remove any tool, then switch the machine off at its switch.' },
+    { text: 'Take the vise off the pins and fit the 4th-axis module on them — the vise and the module share the pins, so only one is on at a time.' },
+    {
+      text: `Chuck the bar in ${rotaryJawWords(hold?.jawMode)}: grip the stock and leave ${fmtNum(stickout)} mm standing out of the jaws.`,
+      value: `${fmtNum(rotary.length)} mm stock, ${fmtNum(Math.max(0, rotary.length - stickout))} mm in the jaws`,
+    },
+    {
+      text: rotary.tailstock
+        ? 'Bring the tailstock in to the free end and lock it — the job was planned with it holding the end.'
+        : 'Leave the tailstock out: the job was planned with the free end unsupported.',
+    },
+    { text: `The stock turns about X on a ⌀${envelope} mm envelope; the cutter stays over it.` },
+    {
+      text:
+        axis !== null
+          ? `The axis is measured: Y ${fmtNum(axis.y)}, Z ${fmtNum(axis.z)}${axis.radiusMm === null ? '' : `, R ${fmtNum(axis.radiusMm)}`} mm (${datumDate(axis.measuredAt)}).`
+          : 'The axis is not measured on this bed: measure it (Register ▸ Measure the 4th axis) before anything turns.',
+      ...(axis === null ? {} : { record: 'the axis Y and Z (machine)' }),
+    },
+    {
+      text:
+        face !== null
+          ? `The face angle is levelled: ${fmtNum(face.degrees)}° of turn, ${face.residualMm === null ? 'no residual recorded' : `${fmtNum(face.residualMm)} mm residual`} (${datumDate(face.measuredAt)}).`
+          : 'The face angle is not levelled: level it (Register ▸ Measure the face angle) before an indexed cut — otherwise the cut starts from whichever angle the bar lands in.',
+    },
+    { text: 'Switch the machine on.' },
+  ];
+}
+
+/**
+ * #1059 — THE LOAD SECTION FOR A JOB IN THE CHUCK: the stock along X between the jaws, its
+ * stick-out and free end. The vise's jaw-top stand and front-edge gap mean nothing here.
+ */
+function rotaryLoadSteps(job: EngraveJob, rotary: RotaryMap): RunSheetStep[] {
+  const hold = job.workholding.kind === 'rotary-chuck' ? job.workholding.rotary : null;
+  const stickout = hold?.stickout ?? rotary.stickout;
+  return [
+    {
+      text: `Slide the stock into the chuck along X until ${fmtNum(stickout)} mm stands out of the jaws — the file's X starts at the jaws' face.`,
+      record: 'the stick-out (mm)',
+    },
+    {
+      text: rotary.tailstock
+        ? `The free end is at X ${fmtNum(stickout)} mm from the jaws' face, and the tailstock's band ends the cuttable span before it.`
+        : `The free end is at X ${fmtNum(stickout)} mm from the jaws' face; nothing is past it.`,
+    },
+    { text: 'Tighten the jaws and check the bar does not rock or turn by hand.' },
+  ];
+}
+
+/**
+ * #1059 — THE ORIGIN SECTION FOR A JOB IN THE CHUCK: the origin is the AXIS, not a probed corner.
+ * Y and Z come from the measured axis, X0 is the jaws' face the file is measured from, and the A
+ * zero is the stock's own levelled face. What was not measured is said, never assumed.
+ */
+function rotaryOriginSteps(rotary: RotaryMap, datum: RotarySheetDatum | undefined): RunSheetStep[] {
+  const axis = datum?.axis ?? null;
+  const face = datum?.faceAngle ?? null;
+  return [
+    axis !== null
+      ? { text: `Y0 and Z0 are the measured axis: the line runs at Y ${fmtNum(axis.y)} and Z ${fmtNum(axis.z)} (${datumDate(axis.measuredAt)}).` }
+      : { text: 'The axis has not been measured on this bed, so Y0 and Z0 cannot be set to it — measure the axis first (Register ▸ Measure the 4th axis); the cut waits for it.' },
+    { text: `X0 is the jaws’ face: the file's X is measured from it, and the free end is ${fmtNum(rotary.stickout)} mm out.` },
+    { text: 'On a rotary job the Z the machine reads from the axis is the cutter’s distance from the axis line — Z0 is that line, not the top of the stock; do not probe a top face for it.' },
+    face !== null
+      ? { text: `The A zero is the stock's own top face: ${fmtNum(face.degrees)}° of turn brought it level (${face.residualMm === null ? 'residual not recorded' : `${fmtNum(face.residualMm)} mm residual`}), and that position was written as A0.` }
+      : { text: 'The A zero has not been levelled: run the face-angle step (Register ▸ Measure the face angle) so A0 is the stock’s own face, or an indexed cut starts from wherever the bar sits.' },
+  ];
+}
+
 export function buildRunSheet(
   job: EngraveJob,
   generated: RunSheetGenerated,
@@ -4260,6 +4362,9 @@ export function buildRunSheet(
   const margins = effectiveMargins(job, settings);
   const { length, width } = job.stock;
   const vise = jobVise(job);
+  // #1059 — a job in the 4th-axis chuck. Its mount, load and origin sections are the CHUCK's, not
+  // the vise's: the module, the jaws and stick-out, and an origin on the measured axis.
+  const rotary = rotaryMapOf(job);
   // The one funnel all three item lists go through (#214/#215), so a `border`/`frame`/`cutaway`
   // is here too while a `construction` item, a broken reference and a self-intersecting polygon
   // are absent: the sheet describes exactly the cuts the `.nc` makes. `keepOuts` comes off the
@@ -4643,8 +4748,16 @@ export function buildRunSheet(
     },
     { text: 'Switch the machine on.' },
   ];
+  // #1059 — a job in the 4th-axis chuck mounts the MODULE and chucks the bar; the vise's steps are
+  // another machine change entirely, and printing them would send the operator to the wrong fixture.
   const mountSteps: RunSheetStep[] =
-    mount === 'bracket' ? bracketMountSteps : mount === 'tape' ? tapeMountSteps : viseMountSteps;
+    mount === 'bracket'
+      ? bracketMountSteps
+      : mount === 'tape'
+        ? tapeMountSteps
+        : rotary !== null
+          ? rotaryMountSteps(job, rotary, options.rotaryDatum)
+          : viseMountSteps;
 
   // ---- 3 · Load the blank --------------------------------------------------------------------
   const frontGap = -vise.jawStartY;
@@ -4776,7 +4889,9 @@ export function buildRunSheet(
             { text: "Press the blank down onto the tape, square to the bed's front edge, and hold it for a slow count of ten." },
             { text: 'Check the blank cannot slide or rock — the datum comes from its edges, not from a stop.' },
           ] as RunSheetStep[])
-        : ([
+        : rotary !== null
+          ? rotaryLoadSteps(job, rotary)
+          : ([
             {
               text:
                 `The ${onBoard ? "part's " : ''}top face stands ${fmtNum(vise.stockProud)} mm above the jaw tops. ` +
@@ -4888,7 +5003,9 @@ export function buildRunSheet(
     registrationFor(job, options.scan?.tipDiameterMm === undefined ? undefined : { ...PROBE_SPEC, tipDiameter: options.scan.tipDiameterMm });
   const originSteps: RunSheetStep[] = statedOrigin !== undefined
     ? senderOriginSteps(statedOrigin, onBoard)
-    : [
+    : rotary !== null
+      ? rotaryOriginSteps(rotary, options.rotaryDatum)
+      : [
     // #432 review R1 — a facing job probes the origin before any cutter is fitted, and the probe's
     // own reading is what every cutter's Z0 below is worked out against. The step exists only for
     // that job: a plain job may set Z0 with either the probe or the cutter (see the Z0 step).
@@ -5617,7 +5734,6 @@ export function buildRunSheet(
   // simultaneous path asking most of the Z axis). The model is the firmware's, unverified.
   const rotaryFeedSection =
     ((): { id: string; title: string; steps: RunSheetStep[] }[] => {
-      const rotary = rotaryMapOf(job);
       const feeds = generated.feeds;
       if (rotary === null || feeds === null || !feeds.ok) return [];
       const feedMmMin = feeds.params.feed;
@@ -5634,9 +5750,15 @@ export function buildRunSheet(
           title: 'The rotary feed',
           steps: [
             {
+              // #1059 — on a BLOCK the surface speed varies with the angle, and r here is the
+              // ENVELOPE (the corners): the sentence says so rather than naming a radius a flat
+              // face does not have. A round rod keeps its sentence byte for byte.
               text:
-                `The material sees about ${surfaceMmMin} mm/min at r ${r1} mm — the firmware reads F over 2π·r + 30 mm per turn ` +
-                `(from the firmware's model, unverified). F is posted in mm/min; do not convert it yourself.`,
+                rotary.section.kind === 'rect'
+                  ? `The material sees about ${surfaceMmMin} mm/min at its fastest — r ${r1} mm, the envelope the corners turn on; a flat face turns slower. ` +
+                    `The firmware reads F over 2π·r + 30 mm per turn (from the firmware's model, unverified). F is posted in mm/min; do not convert it yourself.`
+                  : `The material sees about ${surfaceMmMin} mm/min at r ${r1} mm — the firmware reads F over 2π·r + 30 mm per turn ` +
+                    `(from the firmware's model, unverified). F is posted in mm/min; do not convert it yourself.`,
             },
           ],
         },
@@ -5664,7 +5786,14 @@ export function buildRunSheet(
     // #1068 — the mount's OWN name: the section title is the first thing the operator reads.
     {
       id: 'mount',
-      title: mount === 'bracket' ? 'Fit the bracket' : mount === 'tape' ? 'Tape the blank down' : 'Mount the vise',
+      title:
+        mount === 'bracket'
+          ? 'Fit the bracket'
+          : mount === 'tape'
+            ? 'Tape the blank down'
+            : rotary !== null
+              ? 'Fit the 4th-axis module'
+              : 'Mount the vise',
       steps: mountSteps,
     },
     ...rotaryFeedSection,

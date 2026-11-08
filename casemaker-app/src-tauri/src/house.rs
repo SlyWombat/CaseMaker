@@ -4406,6 +4406,7 @@ mod tests {
                 vise_jaw_top_z: None,
                 bracket_seat_z: None,
                 rotary_axis: None,
+                rotary_face_angle: None,
             },
             placements: Vec::new(),
             preferred_mounting: Vec::new(),

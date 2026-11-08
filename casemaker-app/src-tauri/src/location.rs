@@ -170,8 +170,28 @@ pub struct MeasuredDatum {
     pub rests_on_stock: Option<bool>,
 }
 
-/// The four datums a profile describes; each is `null` until measured (open question E's bare bed
-/// carries only `surfaceTopZ` when someone measures it).
+/// #1059 — A DATUM MEASURED IN DEGREES, not millimetres: the A work zero of a square stock's OWN
+/// face, as the face-angle step left it. Its own struct rather than {@link MeasuredDatum} so no
+/// reader can take its `value` for a machine Z; `at` is the touch column (machine X and the axis
+/// line's Y) and `residual_mm` is the last touch pair's |Z+ − Z−|.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MeasuredAngleDatum {
+    /// The signed total A turn the step made, degrees.
+    pub value: f64,
+    pub measured_at: String,
+    /// The instrument: `wired-probe`, `fx-probe-3d`, … — never `typed`.
+    pub by: String,
+    /// The touch column, machine XY, when the measurement named one.
+    pub at: Option<[f64; 2]>,
+    /// How level the last pair read, mm. Absent on a reading that did not record one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub residual_mm: Option<f64>,
+}
+
+/// The five datums a profile describes; each is `null` until measured (open question E's bare bed
+/// carries only `surfaceTopZ` when someone measures it). `rotaryFaceAngle` is `null` on every
+/// profile whose square stock has never been levelled in the 4th axis (#1059).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BedDatums {
@@ -179,6 +199,8 @@ pub struct BedDatums {
     pub vise_jaw_top_z: Option<MeasuredDatum>,
     pub bracket_seat_z: Option<MeasuredDatum>,
     pub rotary_axis: Option<MeasuredDatum>,
+    #[serde(default)]
+    pub rotary_face_angle: Option<MeasuredAngleDatum>,
 }
 
 /// What the stock or the fixtures stand on (§1, open question E).
@@ -465,6 +487,40 @@ impl MeasuredDatum {
     }
 }
 
+impl MeasuredAngleDatum {
+    fn validate(&self, machine: &str, profile: &str, what: &str) -> Result<(), HouseError> {
+        if !self.value.is_finite() {
+            return Err(HouseError::BadEntry(format!(
+                "machine {machine}'s bed profile {profile}: {what} is not a number"
+            )));
+        }
+        if self.measured_at.trim().is_empty() {
+            return Err(HouseError::BadEntry(format!(
+                "machine {machine}'s bed profile {profile}: {what} does not say when it was measured"
+            )));
+        }
+        let by = self.by.trim();
+        if by.is_empty() || by.eq_ignore_ascii_case("typed") {
+            return Err(HouseError::BadEntry(format!(
+                "machine {machine}'s bed profile {profile}: {what} must be measured, never typed"
+            )));
+        }
+        if let Some(at) = self.at {
+            if !at.iter().all(|v| v.is_finite()) {
+                return Err(HouseError::BadEntry(format!(
+                    "machine {machine}'s bed profile {profile}: {what} names a point that is not a number"
+                )));
+            }
+        }
+        if self.residual_mm.is_some_and(|v| !v.is_finite()) {
+            return Err(HouseError::BadEntry(format!(
+                "machine {machine}'s bed profile {profile}: {what} carries a residual that is not a number"
+            )));
+        }
+        Ok(())
+    }
+}
+
 impl BedDatums {
     fn validate(&self, machine: &str, profile: &str) -> Result<(), HouseError> {
         for (what, datum) in [
@@ -476,6 +532,9 @@ impl BedDatums {
             if let Some(d) = datum {
                 d.validate(machine, profile, what)?;
             }
+        }
+        if let Some(d) = &self.rotary_face_angle {
+            d.validate(machine, profile, "rotaryFaceAngle")?;
         }
         Ok(())
     }
@@ -1163,6 +1222,7 @@ mod tests {
                 vise_jaw_top_z: None,
                 bracket_seat_z: None,
                 rotary_axis: None,
+                rotary_face_angle: None,
             },
             placements: vec![BedPlacement {
                 id: "pl-vise".into(),
@@ -1274,6 +1334,66 @@ mod tests {
         assert_eq!(v["activeBedProfileId"], serde_json::json!("bp-1"));
         let back: MachineRecord = serde_json::from_value(v).unwrap();
         assert_eq!(back, machine);
+    }
+
+    #[test]
+    fn a_face_angle_datum_round_trips_in_degrees() {
+        // #1059 — the datum the app writes after levelling a square in the 4th axis. `value` is
+        // DEGREES of A turn (never a machine Z), `at` the touch column, `residualMm` the last
+        // pair's |Z+ − Z−|. The house is `deny_unknown_fields`, so a field the app writes and this
+        // struct does not know would refuse the whole write-back — this is the shape it sends.
+        let written = serde_json::json!({
+            "surfaceTopZ": null,
+            "viseJawTopZ": null,
+            "bracketSeatZ": null,
+            "rotaryAxis": null,
+            "rotaryFaceAngle": {
+                "value": -2.35,
+                "measuredAt": "2026-11-08T00:00:00.000Z",
+                "by": "fx-probe-3d",
+                "at": [-106.0, -125.06],
+                "residualMm": 0.012
+            }
+        });
+        let datums: BedDatums = serde_json::from_value(written.clone()).unwrap();
+        datums.validate("m-1", "bp-1").unwrap();
+        let angle = datums.rotary_face_angle.as_ref().unwrap();
+        assert!((angle.value - -2.35).abs() < 1e-9, "value is degrees of turn");
+        assert_eq!(angle.at, Some([-106.0, -125.06]));
+        assert_eq!(angle.residual_mm, Some(0.012));
+        // …and it comes back exactly as it went in.
+        assert_eq!(serde_json::to_value(&datums).unwrap(), written);
+
+        // A datum without a residual omits the key rather than writing null, so an older reading
+        // stays byte-identical through a round trip.
+        let no_residual: BedDatums = serde_json::from_value(serde_json::json!({
+            "rotaryFaceAngle": { "value": 0.0, "measuredAt": "t", "by": "b", "at": null }
+        }))
+        .unwrap();
+        let v = serde_json::to_value(&no_residual).unwrap();
+        assert!(v["rotaryFaceAngle"].get("residualMm").is_none(), "{v}");
+        // Every other datum may be absent: the profile predates them.
+        no_residual.validate("m-1", "bp-1").unwrap();
+    }
+
+    #[test]
+    fn the_face_angle_datum_refuses_an_unknown_key_and_a_typed_instrument() {
+        // The trap the Manager named: an unknown key inside the datum refuses the WHOLE document.
+        let extra = serde_json::json!({
+            "rotaryFaceAngle": { "value": 1.0, "measuredAt": "t", "by": "b", "at": null, "residualMm": 0.01, "typo": 1 }
+        });
+        assert!(serde_json::from_value::<BedDatums>(extra).is_err());
+        // …as does an unknown DATUM key.
+        assert!(serde_json::from_value::<BedDatums>(serde_json::json!({ "rotaryFaceAngles": null })).is_err());
+        // A typed reading is refused on write, like every other datum's.
+        let mut typed: BedDatums = serde_json::from_value(serde_json::json!({
+            "rotaryFaceAngle": { "value": 1.0, "measuredAt": "t", "by": "typed", "at": null }
+        }))
+        .unwrap();
+        assert!(matches!(typed.validate("m-1", "bp-1"), Err(HouseError::BadEntry(_))));
+        typed.rotary_face_angle.as_mut().unwrap().by = "wired-probe".into();
+        typed.rotary_face_angle.as_mut().unwrap().residual_mm = Some(f64::INFINITY);
+        assert!(matches!(typed.validate("m-1", "bp-1"), Err(HouseError::BadEntry(_))));
     }
 
     #[test]

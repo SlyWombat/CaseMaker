@@ -57,6 +57,7 @@ afterEach(() => resetRegistry());
 import type { ThreadPlanFacts, ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
 import type { ProgramSweepSummary } from '@/engine/cnc/engrave/programSweep';
 import type { ProgramEfficiency } from '@/engine/cnc/cam/ir';
+import type { RotarySheetDatum } from '@/engine/cnc/rotary/sheetDatum';
 import { renderRunSheetMarkdown } from '../../scripts/runSheetMarkdown';
 
 const NOW = new Date('2026-10-04T00:00:00Z');
@@ -2555,4 +2556,80 @@ describe('#926 the sheet prints the efficiency measures and warns on the shop th
   });
 
 
+});
+
+// #1059 — A ROTARY JOB'S SHEET IS THE CHUCK'S, NOT THE VISE'S. E's readiness run (2026-11-08)
+// printed "Mount the vise", the pins and jaws, the front-edge gap and three edge touches for a job
+// that runs in the 4th axis, and never named the module, the chuck, the axis or the A datum. These
+// pin the mount/load/origin sections against a rotary job with the datums measured and without
+// them, and keep the vise path byte-identical.
+describe('#1059 a job in the 4th-axis chuck reads the chuck’s mount, load and origin', () => {
+  const rotaryJob = (): EngraveJob => {
+    const base = defaultEngraveJob();
+    return {
+      ...base,
+      stock: { ...base.stock, length: 100, width: 44.5, thickness: 44.5, material: 'hardwood' },
+      workholding: {
+        kind: 'rotary-chuck',
+        rotary: { stickout: 85, gripDiameter: 44.5, jawMode: 'reverse-outer', tailstock: true, source: 'test' },
+      },
+      labels: [],
+      shapes: [],
+    };
+  };
+  const DATUM: RotarySheetDatum = {
+    axis: { y: -125.06, z: -37.71, radiusMm: 31.47, measuredAt: '2026-11-07T00:00:00.000Z' },
+    faceAngle: { degrees: -2.35, residualMm: 0.012, measuredAt: '2026-11-08T00:00:00.000Z' },
+  };
+  const words = (sheet: RunSheet, id: string): string => section(sheet, id).steps.map((s) => `${s.text} ${s.value ?? ''}`).join('\n');
+
+  it('mounts the MODULE and chucks the bar — no vise, no jaw tops, no pins', () => {
+    const sheet = sheetFor(rotaryJob(), NO_SIM, NC, { rotaryDatum: DATUM });
+    expect(section(sheet, 'mount').title).toContain('Fit the 4th-axis module');
+    const mount = words(sheet, 'mount');
+    expect(mount).toContain('4th-axis module');
+    expect(mount).toContain('REVERSE jaws, OUTER step');
+    expect(mount).toContain('85 mm standing out');
+    expect(mount).toContain('tailstock');
+    expect(mount).toContain('envelope');
+    expect(mount).toContain('-125.06');
+    expect(mount).toContain('-37.71');
+    expect(mount).toContain('-2.35');
+    expect(mount).toContain('0.012');
+    for (const viceWord of ['Mount the vise', 'jaw tops', 'locating pins', 'front of the jaws']) {
+      expect(mount, viceWord).not.toContain(viceWord);
+    }
+  });
+
+  it('loads the bar by its stick-out, and sets an origin on the AXIS', () => {
+    const sheet = sheetFor(rotaryJob(), NO_SIM, NC, { rotaryDatum: DATUM });
+    const load = words(sheet, 'load');
+    expect(load).toContain('85 mm stands out');
+    expect(load).not.toContain('front edge');
+    const origin = words(sheet, 'origin');
+    expect(origin).toContain('measured axis');
+    expect(origin).toContain('X0 is the jaws’ face');
+    expect(origin).toContain('A zero');
+    expect(origin).toContain('-2.35');
+    // The vise plan's edge touches and its "already references" line do not print for the chuck.
+    expect(origin).not.toContain('Touch 1 of');
+    expect(origin).not.toContain('already references');
+  });
+
+  it('says what is NOT measured rather than inventing a number', () => {
+    const sheet = sheetFor(rotaryJob(), NO_SIM, NC);
+    const mount = words(sheet, 'mount');
+    expect(mount).toContain('axis is not measured');
+    expect(mount).toContain('face angle is not levelled');
+    const origin = words(sheet, 'origin');
+    expect(origin).toContain('has not been measured');
+    expect(origin).toContain('has not been levelled');
+  });
+
+  it('leaves a vise job’s mount section exactly as it was', () => {
+    const base = defaultEngraveJob();
+    const vise = sheetFor({ ...base, labels: [], shapes: [] }, NO_SIM, NC);
+    expect(section(vise, 'mount').title).toContain('Mount the vise');
+    expect(words(vise, 'mount')).toContain('locating pins');
+  });
 });
