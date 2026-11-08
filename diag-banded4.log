@@ -1,0 +1,37 @@
+=== (a) placed bboxes (side-1 document/work XY) ===
+goal1 (setup 1): {"min":[9.344,10],"max":[145.344,116]} size field {"x":106,"y":136,"z":26} pos {"x":77.344,"y":63,"z":0} rot 90
+goal2 (setup 2): {"min":[14.656,10],"max":[150.656,116]} size field {"x":106,"y":136,"z":26} pos {"x":82.656,"y":63,"z":0} rot 270 rotX 180
+=== (c) mount obstacles (work XY) ===
+  bracket-front-arm | the bracket’s front arm | min [-15,-15] max [85,0] topZ? -15.95
+  bracket-left-arm | the bracket’s left arm | min [-15,-15] max [0,85] topZ? -15.95
+  clamp-1 | the side clamp on the back edge, 55.5 mm in from the left-hand corner | min [55.5,126] max [70.5,138] topZ? 0
+  job boxes: []
+  uncertainty 0.1 jawClearance 1
+=== (d) hold ===
+  hold {"diameterMm":6,"cutter":"inv:kz-o-flute-3-175-42","depthMm":25.3,"at":[{"x":156,"y":37.8},{"x":156,"y":88.2}]}
+  hole (156, 37.8) → part bbox clearance 10.656 mm inside? false
+  hole (156, 88.2) → part bbox clearance 10.656 mm inside? false
+=== (b) side 1: plan + post (the failing run reproduced) ===
+  run true done []
+  plan program 1/9 ops 7 X 7.756 .. 146.931 Y 8.412 .. 117.588
+  plan program 2/9 ops 1 X 88.915 .. 88.976 Y 21.254 .. 21.301
+  plan program 3/9 ops 3 X 23.282 .. 128.909 Y 18.873 .. 20.417
+  plan program 4/9 ops 2 X 64.285 .. 111.017 Y 18.792 .. 21.96
+  plan program 5/9 ops 7 X 11.344 .. 143.544 Y 28.5 .. 97.5
+  plan program 6/9 ops 14 X 12.344 .. 142.131 Y 51.494 .. 74.317
+  plan program 7/9 ops 14 X 12.344 .. 142.022 Y 49.709 .. 76.291
+  plan program 8/9 ops 18 X 12.235 .. 142.549 Y 14.62 .. 111.349
+  plan program 9/9 ops 1 X 7.751 .. 146.936 Y 8.408 .. 117.593
+  posted contour bbox: X 7.756 .. 146.931 Y 8.412 .. 117.588
+  posted op names: [
+  ' Pocket "pocket-6"',
+  ' Pocket "pocket-7"',
+  ' Pocket "pocket-8"',
+  ' Pocket "pocket-9"',
+  ' Pocket "pocket-10"',
+  ' Pocket "pocket-11"',
+  ' Pocket "pocket-12"'
+]
+=== (d) hold vs the posted contour path ===
+  hole (156, 37.8) → nearest posted path point 23.902 mm
+  hole (156, 88.2) → nearest posted path point 23.659 mm

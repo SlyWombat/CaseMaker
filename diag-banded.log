@@ -1,0 +1,28 @@
+=== (a) placed bboxes (side-1 document/work XY) ===
+goal1 (setup 1): {"min":[22,10],"max":[158,116]} size field {"x":106,"y":136,"z":26} pos {"x":90,"y":63,"z":0} rot 90
+goal2 (setup 2): {"min":[2,10],"max":[138,116]} size field {"x":106,"y":136,"z":26} pos {"x":70,"y":63,"z":0} rot 270 rotX 180
+=== (c) mount obstacles (work XY) ===
+  bracket-front-arm | the bracket’s front arm | min [-15,-15] max [85,0] topZ? -15.95
+  bracket-left-arm | the bracket’s left arm | min [-15,-15] max [0,85] topZ? -15.95
+  clamp-1 | the side clamp on the back edge, 55.5 mm in from the left-hand corner | min [55.5,126] max [70.5,138] topZ? 0
+  job boxes: [{"id":"hole-band-left","label":"the counterbored holes' waste band on the left edge","min":[0,0,-25],"max":[10,126,0]}]
+  uncertainty 0.1 jawClearance 1
+=== (d) hold ===
+  hold {"diameterMm":6,"cutter":"inv:kz-o-flute-3-175-42","depthMm":25.3,"at":[{"x":156,"y":37.8},{"x":156,"y":88.2}]}
+  hole (156, 37.8) → part bbox clearance 0 mm inside? true
+  hole (156, 88.2) → part bbox clearance 0 mm inside? true
+=== (b) side 1: plan + post (the failing run reproduced) ===
+  run false verify [
+  'cam/model (#966): setup 1 program 8/9 (inv:kz-o-flute-3-175-25): 1 verifier error(s)'
+]
+  verify: bracket-in-path line 1388 | Contour comes within 0.486 mm of the bracket’s left arm, which sits 15.95 mm below the plate’s top — keep the cut 2.688 mm inside the left edge.
+  posted contour bbox: X 0.408 .. 139.593 Y 8.408 .. 117.593
+  offending move (NC line 1388 ): G1 X2.074 Y10.945
+     1386 G1 X3.023 Y10.001
+     1387 G1 X2.945 Y10.074
+     1388 G1 X2.074 Y10.945
+     1389 G1 X1.912 Y11.135
+     1390 G1 X1.852 Y11.224
+=== (d) hold vs the posted contour path ===
+  hole (156, 37.8) → nearest posted path point 27.835 mm
+  hole (156, 88.2) → nearest posted path point 27.685 mm

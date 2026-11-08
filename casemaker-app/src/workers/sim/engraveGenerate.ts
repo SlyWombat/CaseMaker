@@ -84,7 +84,6 @@ import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach, reachCutterFor }
 import { undersideFloorZ } from '@/engine/cnc/engrave/goalUnderside';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { flipHoldCheck } from '@/engine/cnc/engrave/goalFlipSetups';
-import { flipReflection } from '@/engine/cnc/setups/flip';
 import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { surfacePrimitivesOf } from '@/engine/cnc/engrave/primitiveSurface';
