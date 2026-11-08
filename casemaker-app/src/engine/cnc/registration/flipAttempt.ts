@@ -16,6 +16,9 @@ import type { RegistrationSettings } from './settings';
 import { planFlipRegistration, type FlipRegistrationPlan, type RegistrationPlan } from './plan';
 import { FLIP_BORE_DIAMETER_MM, type FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
 import { flipReflection } from '@/engine/cnc/setups/flip';
+import { flipHoldCheck } from '@/engine/cnc/engrave/goalFlipSetups';
+import type { Tool } from '@/engine/cnc/tool';
+import type { EngraveTargetObject } from '@/types/engraveJob';
 
 export interface FlipAttempt {
   /** The index of the FLIPPED setup in `job.setups`. */
@@ -172,6 +175,13 @@ export interface FlipJobInputs {
   seekFromMachineZ: number;
   /** The carried Z0 — `flipChoice.flipZ0`'s record for this job, or null when it cannot be stated. */
   z0: FlipZ0 | null;
+  /**
+   * #1073/#1088 — SIDE 1'S GOAL and the LOCATION'S TOOLS: `goalFlipSetups.flipHoldCheck` needs them
+   * to state the hold (the part's footprint must clear the bore line; a shop flat must be able to
+   * bore it), and that check is the generator's own call, not a second rule.
+   */
+  goal?: EngraveTargetObject | null;
+  tools?: readonly { key: string; tool: Tool }[];
 }
 
 /**
@@ -186,6 +196,25 @@ export interface FlipJobInputs {
 export function planFlipAttemptForJob(job: EngraveJob, input: FlipJobInputs, setupIndex = 0): FlipAttemptResult {
   const setup = job.setups?.[setupIndex];
   if (setup === undefined || setup.flip === undefined) return null;
+  // THE FRAME METHOD'S HOLES ARE THE GENERATOR'S HOLES (#1073/#1088): the same `flipHoldCheck` the
+  // locating-holes program runs states the hold or refuses it — no margin, no cutter, no stored
+  // pins, or pins that disagree with the hold. The card shows that sentence unchanged; the probe is
+  // never aimed at holes nothing cut.
+  if (setup.flip.method === 'tabs-in-blank') {
+    if (input.goal == null) {
+      return { kind: 'refused', reason: 'this flipped setup has no goal to check its locating hold against — add the part, then register side 2.' };
+    }
+    const check = flipHoldCheck(job, input.goal, setup, input.tools);
+    if (!check.ok) return { kind: 'refused', reason: check.reason };
+    return planFlipAttempt(job, {
+      sideOneBores: check.bores,
+      settings: input.settings,
+      probeTipDiameterMm: input.probeTipDiameterMm,
+      seekFromMachineZ: input.seekFromMachineZ,
+      z0: input.z0,
+      setupIndex,
+    });
+  }
   const pins = setup.pins?.at ?? null;
   if (pins === null) {
     return {

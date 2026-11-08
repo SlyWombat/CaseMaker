@@ -83,8 +83,7 @@ import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach, reachCutterFor } from '@/engine/cnc/engrave/goalReach';
 import { undersideFloorZ } from '@/engine/cnc/engrave/goalUnderside';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
-import { dowelHold } from '@/engine/cnc/engrave/goalFlipSetups';
-import { flipReflection } from '@/engine/cnc/setups/flip';
+import { flipHoldCheck } from '@/engine/cnc/engrave/goalFlipSetups';
 import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { surfacePrimitivesOf } from '@/engine/cnc/engrave/primitiveSurface';
@@ -6270,31 +6269,16 @@ async function locatingHolesProgram(
   if (flip.method !== 'tabs-in-blank') return null;
   // The hold's line runs parallel to the flip's axis — left↔right is the machine's Y, front↔back
   // its X (`planFlipSetups`' own reading, through `orient`).
-  const about = flip.axis === 'left-right' ? 'y' : 'x';
-  const holdOffer = dowelHold(job, firstSide.goal, about, shop.tools ?? []);
-  if (!holdOffer.ok) return { reason: holdOffer.reason };
-  const hold = holdOffer.hold;
+  // ONE SOURCE FOR THE HOLES (#1088): `goalFlipSetups.flipHoldCheck` is the same call the Register
+  // card makes. It holds the hold's own refusal (no cutter, no margin), the stored-pins check and
+  // the reflection — so this program can never post holes the executor will not look for, and the
+  // card can never aim the probe at holes nothing cut.
+  const check = flipHoldCheck(job, firstSide.goal, flipped.setup, shop.tools ?? []);
+  if (!check.ok) return { reason: check.reason };
+  const hold = check.hold;
   const entry = (shop.tools ?? []).find((e) => e.key === hold.cutter) ?? entryFor(hold.cutter);
   if (entry === null) return { reason: `the hold’s cutter “${hold.cutter}” is not in the tool library` };
-  // ONE SOURCE FOR THE HOLES (the Manager's step 4 ruling). Side 2's store is the executor's own
-  // reference: `setups[1].pins` are side 1's bore centres seen from the other side, through the
-  // SAME `flipReflection` the drawing and the probe use. The posted bores come FROM those pins,
-  // reflected back — and a job whose recomputed hold disagrees with them is refused by name, so
-  // this program can never post holes the executor will not look for.
-  const pinsAt = flipped.setup.pins?.at;
-  if (pinsAt === undefined) {
-    return { reason: 'the job states a frame flip but its flipped setup carries no locating pins — re-plan the flip' };
-  }
-  const reflected = pinsAt.map((pin) => flipReflection(pin, { axis: flip.axis }, job.stock.length, job.stock.width));
-  const HOLD_PIN_TOLERANCE_MM = 0.01;
-  for (let i = 0; i < reflected.length; i++) {
-    const stored = reflected[i]!;
-    const computed = hold.at[i]!;
-    if (Math.abs(stored.x - computed.x) > HOLD_PIN_TOLERANCE_MM || Math.abs(stored.y - computed.y) > HOLD_PIN_TOLERANCE_MM) {
-      return { reason: 'the job’s stored pins and the hold disagree — re-plan the flip' };
-    }
-  }
-  const bores: EngraveDrill[] = reflected.map((position, i) => ({
+  const bores: EngraveDrill[] = check.bores.map((position, i) => ({
     kind: 'drill',
     id: `flip-locating-hole-${i + 1}`,
     name: `Locating hole ${i + 1}`,

@@ -34,6 +34,7 @@ import { orient, type Mat } from '@/engine/cnc/setups/orient';
 import type { Face, MountSpec } from '@/engine/cnc/setups/types';
 import { jobMount, jobSetups } from './jobSetup';
 import { flipMatrix, flipOrientation, FLIP_BORE_DIAMETER_MM } from './flipChoice';
+import { flipReflection } from '@/engine/cnc/setups/flip';
 import { newId } from '@/utils/id';
 import type { EngraveJob, EngraveTargetObject, JobSetup, JobSetupPins, SetupFlip } from '@/types/engraveJob';
 import { coverageTriangles, sampleCoverageField, type CoverageMesh } from './goalCoverage';
@@ -440,6 +441,60 @@ export function dowelHold(
       ],
     },
   };
+}
+
+/**
+ * #1073/#1088 — THE LOCATING HOLES, OR WHY THERE ARE NONE. The ONE check the generator (which
+ * POSTS the bores) and the Register card (which AIMS the probe at them) both run, so the program
+ * can never post holes the executor will not look for, and the probe can never be sent to holes
+ * nothing cut:
+ *
+ *   1. the hold must exist — `dowelHold`'s own sentence (no cutter, or the part leaving no margin);
+ *   2. the flipped setup must state its pins (the operator's record of where side 1's bores went);
+ *   3. those pins — reflected back through the SAME `flipReflection` the drawing and the probe use —
+ *      must be the hold's own positions. A disagreement is refused by name: one of the two is
+ *      wrong, and the fix is to re-plan the flip, never to pick one silently.
+ *
+ * `bores` is the reflected set (side 1's work XY) — what the generator posts and what the
+ * registration reflects back into side 2's pins. Every sentence is the generator's own; the card
+ * shows it unchanged.
+ */
+export type FlipHoldCheck =
+  | { ok: true; hold: DowelHold; bores: { x: number; y: number }[] }
+  | { ok: false; reason: string };
+
+/** How far a stored pin may sit from the hold's own bore before it is a different point, mm. */
+export const HOLD_PIN_TOLERANCE_MM = 0.01;
+
+export function flipHoldCheck(
+  job: EngraveJob,
+  goal: EngraveTargetObject,
+  flipped: Pick<JobSetup, 'flip' | 'pins'>,
+  tools?: readonly { key: string; tool: Tool }[],
+): FlipHoldCheck {
+  const flip = flipped.flip;
+  if (flip === undefined) {
+    return { ok: false, reason: 'this setup states no flip — there are no locating bores to check' };
+  }
+  // The hold's line runs parallel to the flip's axis — left↔right is the machine's Y, front↔back
+  // its X (`planFlipSetups`' own reading, through `orient`).
+  const about = flip.axis === 'left-right' ? 'y' : 'x';
+  const offer = dowelHold(job, goal, about, tools);
+  if (!offer.ok) return offer;
+  const hold = offer.hold;
+  const pinsAt = flipped.pins?.at;
+  if (pinsAt === undefined) {
+    return { ok: false, reason: 'the job states a frame flip but its flipped setup carries no locating pins — re-plan the flip' };
+  }
+  const bores = pinsAt.map((pin) => flipReflection(pin, { axis: flip.axis }, job.stock.length, job.stock.width));
+  for (let i = 0; i < bores.length; i++) {
+    const stored = bores[i]!;
+    const computed = hold.at[i]!;
+    if (Math.abs(stored.x - computed.x) > HOLD_PIN_TOLERANCE_MM || Math.abs(stored.y - computed.y) > HOLD_PIN_TOLERANCE_MM) {
+      return { ok: false, reason: 'the job’s stored pins and the hold disagree — re-plan the flip' };
+    }
+  }
+  return { ok: true, hold, bores };
 }
 
 /** The setups and goals a plan adds, or why it cannot be added. */

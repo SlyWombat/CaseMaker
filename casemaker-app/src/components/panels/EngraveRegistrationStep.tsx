@@ -72,7 +72,8 @@ import {
   surfaceMarginWords,
   surfaceSpreadPlan,
 } from '@/engine/cnc/engrave/surfaceSpread';
-import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { isSideGoal, jobTargetObjects, jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { jobVise } from '@/engine/cnc/fixture';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -277,6 +278,15 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const probeName = useMemo(() => probeNameFor(machineRecord), [machineRecord]);
   const setupSettings = useMemo(() => setupsSettings(defaults), [defaults]);
   const rotaryEnvelope = useMemo(() => rotaryOf(jobMachine(job, calibration))?.envelope, [job, calibration]);
+  // #1088 — SIDE 1'S GOAL and the location's tools, for the hold check the generator runs.
+  const tools = useToolRegistry();
+  const flipGoal = useMemo(
+    () => {
+      const goals = jobTargetObjects(job).filter((g) => isSideGoal(g));
+      return goals.find((g) => g.setupId === job.setups?.[0]?.id) ?? goals[0] ?? null;
+    },
+    [job],
+  );
   const proposal = useMemo<RegistrationAttempt | null>(() => {
     if (plan !== null) return null;
     // #1070 — NO SAVED-SETUP PREREQUISITE: a bed-held job's setup IS the job. With no
@@ -362,10 +372,12 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         probeTipDiameterMm: probe?.tip?.diameterMm ?? null,
         seekFromMachineZ,
         z0: carried,
+        goal: flipGoal,
+        tools,
       },
       setupNumber - 1,
     );
-  }, [job, machineRecord, surfaces, probe, seekFromMachineZ, regSettings, setupNumber]);
+  }, [job, machineRecord, surfaces, probe, seekFromMachineZ, regSettings, setupNumber, flipGoal, tools]);
   const [proposalOpen, setProposalOpen] = useState(false);
   // #1070 (C8) — the placed bracket's position press (the bed profile's seed, from the hole grid).
   const [gridBusy, setGridBusy] = useState(false);
