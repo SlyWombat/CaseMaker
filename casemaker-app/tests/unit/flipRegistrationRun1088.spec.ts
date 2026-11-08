@@ -63,7 +63,6 @@ interface FakeOpts {
 
 function fakeMachine(sent: string[], opts: FakeOpts = {}) {
   const reply = (text: string): ConsoleSendResult => ({ kind: 'sent', line: '', text, frames: 1, elapsedMs: 1 });
-  let mode: 'G90' | 'G91' = 'G90';
   const pos = { x: 0, y: 0, z: -3 };
   let sideways = 0;
   /** Material below a point: the blank for y > 0 (and x > 0), minus the bores. */
@@ -79,7 +78,7 @@ function fakeMachine(sent: string[], opts: FakeOpts = {}) {
       if (line === 'G54' || line === 'G92.1' || line === 'M831' || line === 'M832') return reply('ok');
       if (line === 'M119') return reply('X_min:0 Y_min:0 Z_min:0 X_max:0 Y_max:0 Z_max:0 Probe:0');
       if (line === 'M491') return reply('[PRB:0,0,-80.000:1]\nok');
-      if (line === 'G90' || line === 'G91') return (mode = line), reply('ok');
+      if (line === 'G90' || line === 'G91') return reply('ok');
       let m = /^G53 G0 Z(-?[\d.]+)$/.exec(line);
       if (m) return (pos.z = Number(m[1])), reply('ok');
       m = /^G0 X(-?[\d.]+) Y(-?[\d.]+)$/.exec(line);
