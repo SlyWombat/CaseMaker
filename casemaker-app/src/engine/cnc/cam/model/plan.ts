@@ -753,6 +753,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // leaves more than the 0.1 mm band above the goal, inside the pocket's own footprint, as loops
   // (dilated by the ROUNDER in `planPocketsForTree`, which knows the cutter). A field that cannot
   // be stamped falls back to the whole footprint — the floor pass as it was.
+  //
+  // #1092 — AND ONLY WHERE THE GOAL HAS A SURFACE AT THE PASS'S DEPTH. The simulated field says
+  // stock stands above the goal over an overhang too (the elephant's body over pocket-0), but
+  // there the standing material IS the goal's own surface: a floor pass at `region.floorZ` can
+  // only gouge it. Those cells are excluded here (the bound's own margin), so the rest is never
+  // planned for coverage it cannot legitimately recover.
   const restRegion = coverageGoal === undefined
     ? undefined
     : (prefixIrs: readonly ToolpathIR[], region: { id: string; footprint: Polygons; floorZ: number; bounds: { min: [number, number]; max: [number, number] } }): Polygons | null => {
@@ -776,6 +782,15 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           const k = (j0 + j) * goal.nx + (i0 + i);
           if (goal.covered[k] !== 1) return false;
           if (!(cells[k]! - (goal.z[k] as number) > 0.1)) return false;
+          // #1092 — THE DESIGN'S OWN SURFACE IS NOT FLOOR-PASS MATERIAL. A coverage rest cuts at
+          // `region.floorZ`; where the goal's topmost surface sits ABOVE that level, the design
+          // itself stands there (the elephant's body over pocket-0) and any cut is a gouge —
+          // "a plane is only valid where the goal mesh has a surface at that Z". The shadow bound
+          // `pocket()` now also carries would close these cells anyway (the same
+          // `cellBound - margin < levelZ` rule, margin = ARC_CHORD_TOLERANCE_MM); excluding them
+          // here keeps the rest from being planned for coverage it can never legitimately recover,
+          // and from then being stated as an empty pass.
+          if ((goal.z[k] as number) > region.floorZ + ARC_CHORD_TOLERANCE_MM) return false;
           const x = goal.x0 + (i0 + i) * pitch;
           const y = goal.y0 + (j0 + j) * pitch;
           return pointInPolygons(region.footprint, x, y);
@@ -2905,6 +2920,15 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       air: opts.air,
       rapid: opts.rapid,
       boolean: opts.boolean,
+      // #1092 — A REST'S FLOOR PASS IS A POCKET FLOOR PASS, SO IT GETS THE SAME CEILING. The rest's
+      // region is the SIMULATED LEFTOVER (`restRegion` above): the cells the chain so far leaves
+      // above the goal. Over an overhang those cells are exactly the ones the shadow-bounded
+      // primary was RIGHT to leave — the design stands there — so without this bound the rest's one
+      // floor-level pass cuts straight through the goal's own surface: j29's elephant, where the
+      // ⌀3.175 rest planned the whole body down to the pocket floor at −26.104 against a goal of
+      // −1.36 (18.03 % adjudicated cut-into, 24.75 mm). The rule the analyst stated is the bound's
+      // own predicate: a cell is cut only where the design above it is at or below the pass's Z.
+      ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh } }),
     });
     // #962 — A REST THAT CUTS NOTHING OVER LIVE STANDING MATERIAL IS STATED, NEVER SILENT: the
     // mask said cells stand here, and the op produced no toolpath (the region eroded to nothing
