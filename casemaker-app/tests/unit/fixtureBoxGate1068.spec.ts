@@ -88,6 +88,14 @@ describe('#1068-perf the fixture stadium test', () => {
     expect(fixtureStadiumHit([-5, 12, 5], [15, 12, 5], 1, 0, 10, [b])).toBeNull();
     // A move ending inside the box is a hit too.
     expect(fixtureStadiumHit([-5, 5, 5], [5, 5, 5], 1, 0, 10, [b])).not.toBeNull();
+
+    // THE DISCRIMINATING CASE for the old code: a SHORT segment whose ends are both outside and
+    // which clips the box's corner — the 0.5 mm piece subdivision used to rescue the long
+    // through-drive above (a piece endpoint lands inside), so this is the one the crossing test
+    // alone catches. The corner is 0.0707 mm from the segment; r = 0.06 clears the corner test.
+    const near = box([0, 0, 0], [10, 10, 10], 'corner-clip');
+    const clip = fixtureStadiumHit([0.2, -0.1, 5], [-0.1, 0.2, 5], 0.06, 0, 10, [near]);
+    expect(clip, 'a short corner clip was reported as clear').not.toBeNull();
   });
 
   it('the through-drive reaches the sweep as a refusal with the upper-bound message', () => {
