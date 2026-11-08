@@ -159,6 +159,33 @@ describe('#1073 — the locating holes ride setup 1', () => {
     expect(cutText).toContain('touches its wall');
   }, 240_000);
 
+  it('refuses by name when the job’s stored pins and the recomputed hold disagree', async () => {
+    const job = jobForFrustum();
+    const goal = job.targetObject!;
+    const plan = planFlipSetups(job, goal, ['top', 'bottom'], [FLAT_ENTRY], {
+      method: 'tabs-in-blank',
+      axis: 'left-right',
+    });
+    if (!plan.ok) throw new Error(plan.reason);
+    const pins = plan.setups[1]!.pins;
+    if (pins === undefined) throw new Error('the flip plan states no pins to nudge');
+    // A stored pin the executor will read that no longer matches the hold's own geometry: an
+    // edited or stale job. The program refuses rather than posting holes D will not look for.
+    const nudgedPins = { at: [{ x: pins.at[0].x + 0.5, y: pins.at[0].y }, pins.at[1]] as typeof pins.at };
+    const nudged: EngraveJob = {
+      ...job,
+      setups: plan.setups.map((setup, i) => (i === 1 ? { ...setup, pins: nudgedPins } : setup)),
+      targetObjects: plan.goals,
+    };
+    const tl = await getToplevel();
+    const result = await engraveGenerate(tl, nudged, FLAT3, [], null, undefined, { tools: [FLAT_ENTRY] });
+    expect(result.ok).toBe(false);
+    expect(result.stage).toBe('cam');
+    const message = result.errors.map((e) => e.message).join('; ');
+    expect(message).toContain('locating holes (#1073):');
+    expect(message).toContain('stored pins and the hold disagree');
+  }, 240_000);
+
   it('stops the run by name when no owned flat can bore the holes', async () => {
     const job = jobForFrustum();
     const goal = job.targetObject!;

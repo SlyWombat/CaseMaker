@@ -84,6 +84,7 @@ import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach, reachCutterFor }
 import { undersideFloorZ } from '@/engine/cnc/engrave/goalUnderside';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { dowelHold } from '@/engine/cnc/engrave/goalFlipSetups';
+import { flipReflection } from '@/engine/cnc/setups/flip';
 import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { surfacePrimitivesOf } from '@/engine/cnc/engrave/primitiveSurface';
@@ -6120,7 +6121,25 @@ async function locatingHolesProgram(
   }
   const entry = (shop.tools ?? []).find((e) => e.key === hold.cutter) ?? entryFor(hold.cutter);
   if (entry === null) return { reason: `the hold’s cutter “${hold.cutter}” is not in the tool library` };
-  const bores: EngraveDrill[] = hold.at.map((position, i) => ({
+  // ONE SOURCE FOR THE HOLES (the Manager's step 4 ruling). Side 2's store is the executor's own
+  // reference: `setups[1].pins` are side 1's bore centres seen from the other side, through the
+  // SAME `flipReflection` the drawing and the probe use. The posted bores come FROM those pins,
+  // reflected back — and a job whose recomputed hold disagrees with them is refused by name, so
+  // this program can never post holes the executor will not look for.
+  const pinsAt = flipped.setup.pins?.at;
+  if (pinsAt === undefined) {
+    return { reason: 'the job states a frame flip but its flipped setup carries no locating pins — re-plan the flip' };
+  }
+  const reflected = pinsAt.map((pin) => flipReflection(pin, { axis: flip.axis }, job.stock.length, job.stock.width));
+  const HOLD_PIN_TOLERANCE_MM = 0.01;
+  for (let i = 0; i < reflected.length; i++) {
+    const stored = reflected[i]!;
+    const computed = hold.at[i]!;
+    if (Math.abs(stored.x - computed.x) > HOLD_PIN_TOLERANCE_MM || Math.abs(stored.y - computed.y) > HOLD_PIN_TOLERANCE_MM) {
+      return { reason: 'the job’s stored pins and the hold disagree — re-plan the flip' };
+    }
+  }
+  const bores: EngraveDrill[] = reflected.map((position, i) => ({
     kind: 'drill',
     id: `flip-locating-hole-${i + 1}`,
     name: `Locating hole ${i + 1}`,
