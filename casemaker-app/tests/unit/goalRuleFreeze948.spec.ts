@@ -154,7 +154,10 @@ const FROZEN = {
   // #1064 (v7) — the edge-break band seeds only from the edges the job names; the canonical
   // numbers below are the explicit `edges: 'all'` reading, and the default silhouette case is
   // pinned beside them.
-  version: 7,
+  // v8 (#1092) — excuses are proofs bounded by the goal's own relief: B (the border cell, 0.6 mm)
+  // is counted instead of excused, so the adjudicated maximum is 0.6 mm at the border, not 0.4 at
+  // F. The over-relief counters pin the class that was counted instead.
+  version: 8,
   constants: {
     cutIntoFloorMm: 0.01,
     leftoverBandsMm: [0.1, 0.3, 1],
@@ -175,11 +178,12 @@ const FROZEN = {
     goalCells: COVERED,
     raw: { cells: 8, fraction: 8 / COVERED, maxMm: 0.8, at: { x: 17, y: 5 } },
     edgeBreak: { cells: 2, fraction: 2 / COVERED },
-    wall: { cells: 2, fraction: 2 / COVERED },
+    wall: { cells: 1, fraction: 1 / COVERED },
     // v5 — C (0.3 mm, 2 mm behind the wall) states no CL here, so it is adjudicated with F.
     shadow: { cells: 0, fraction: 0 },
     straddling: { cells: 0, maxStepMm: 0 },
-    adjudicated: { cells: 2, fraction: 2 / COVERED, maxMm: 0.4, at: { x: 5, y: 5 } },
+    adjudicated: { cells: 3, fraction: 3 / COVERED, maxMm: 0.6, at: { x: 0, y: 5 } },
+    overRelief: { wall: 0, border: 1, shadow: 0 },
     leftover: { fractions: [4 / COVERED, 2 / COVERED, 1 / COVERED], maxMm: 1.05 },
     coverageFraction: 559 / COVERED,
     ok: false,
@@ -187,6 +191,7 @@ const FROZEN = {
 } as const;
 
 describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
+
   it('is stamped with the frozen version', () => {
     expect(SIMULATOR_VERSION, FREEZE).toBe(FROZEN.version);
   });
@@ -241,10 +246,10 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
       wallShadowRadiusMm: 2,
     });
     expect(r.edgeBreakFraction, FREEZE).toBe(0);
-    expect(r.wallNotScoredFraction, FREEZE).toBe(3 / COVERED);
-    expect(r.adjudicatedFraction, FREEZE).toBe(3 / COVERED);
-    expect(r.adjudicatedMaxMm, FREEZE).toBeCloseTo(0.4, 12);
-    expect(r.adjudicatedMaxAt, FREEZE).toEqual({ x: 5, y: 5 });
+    expect(r.wallNotScoredFraction, FREEZE).toBe(1 / COVERED);
+    expect(r.adjudicatedFraction, FREEZE).toBe(5 / COVERED);
+    expect(r.adjudicatedMaxMm, FREEZE).toBeCloseTo(0.6, 12);
+    expect(r.adjudicatedMaxAt, FREEZE).toEqual({ x: 0, y: 5 });
   });
 
   it('excludes wall cells and the wall shadow in a job that states NO edge break', () => {
@@ -253,9 +258,9 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
     // D (a silhouette wall cell) joins A and B as a wall; E (0.4 mm, inside the shadow, no CL)
     // and C (0.3 mm, behind the wall) are ADJUDICATED at v5 — the shadow excuses nothing without
     // a CL or the V's leg — and F stays adjudicated.
-    expect(r.wallNotScoredFraction, FREEZE).toBe(3 / COVERED);
+    expect(r.wallNotScoredFraction, FREEZE).toBe(1 / COVERED);
     expect(r.shadowNotScoredFraction, FREEZE).toBe(0);
-    expect(r.adjudicatedFraction, FREEZE).toBe(3 / COVERED);
+    expect(r.adjudicatedFraction, FREEZE).toBe(5 / COVERED);
   });
 
   it('treats a step of 0.199 mm as NO design edge and 0.201 as one (strict > 0.2)', () => {
@@ -270,8 +275,10 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
     expect(rUnder.adjudicatedFraction, FREEZE).toBe(1 / 15);
     const over = grid(0.201);
     const rOver = checkGoalCutInto(over, cut(over));
-    expect(rOver.wallNotScoredFraction, FREEZE).toBe(1 / 15);
-    expect(rOver.adjudicatedFraction, FREEZE).toBe(0);
+    // v8 — the wall cell is no longer excused by class: the 0.5 mm read is deeper than the 0.201 mm
+    // step it straddles, so it is COUNTED (the straddling proof cannot reach it).
+    expect(rOver.wallNotScoredFraction, FREEZE).toBe(0);
+    expect(rOver.adjudicatedFraction, FREEZE).toBe(1 / 15);
   });
 
   it('allows edge break at exactly the V bit’s leg, and not a micron deeper', () => {
@@ -283,7 +290,9 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
     expect(exact.wallNotScoredFraction, FREEZE).toBe(0);
     const deeper = checkGoalCutInto(goal, cut(0.500001), allowance);
     expect(deeper.edgeBreakFraction, FREEZE).toBe(0);
-    expect(deeper.wallNotScoredFraction, FREEZE).toBe(1 / 15);
+    // v8 — no longer excused as a wall cell: it is counted.
+    expect(deeper.wallNotScoredFraction, FREEZE).toBe(0);
+    expect(deeper.adjudicatedFraction, FREEZE).toBe(1 / 15);
   });
 
   it('reads the pass line at the first leftover band, inclusive at exactly 0.95', () => {
@@ -384,9 +393,9 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
     // are adjudicated (v5: no CL is stated, so the shadow excuses neither), F too.
     const flatDeepest = checkGoalCutInto(CANON, CANON_TOP, { ...V, wallShadowRadiusMm: 2, whoAt: () => 2 });
     expect(flatDeepest.edgeBreakFraction, FREEZE).toBe(0);
-    expect(flatDeepest.wallNotScoredFraction, FREEZE).toBe(3 / COVERED);
+    expect(flatDeepest.wallNotScoredFraction, FREEZE).toBe(1 / COVERED);
     expect(flatDeepest.shadowNotScoredFraction, FREEZE).toBe(0);
-    expect(flatDeepest.adjudicatedFraction, FREEZE).toBe(3 / COVERED);
+    expect(flatDeepest.adjudicatedFraction, FREEZE).toBe(5 / COVERED);
     // No identity at all is the conservative side: nothing is excused.
     const unknown = checkGoalCutInto(CANON, CANON_TOP, { ...V, wallShadowRadiusMm: 2 });
     expect(unknown.edgeBreakFraction, FREEZE).toBe(0);
@@ -498,8 +507,12 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
     const flat = { edgeBreak: { reachMm: 1, legMm: 1.5375 }, wallShadowRadiusMm: 4 };
     // CL at x = 4.1: its cell is 39 cells (3.9 mm = R − one pitch) from the nearest wall cell.
     const atBound = checkGoalCutInto(goal, top, { ...flat, clAt: () => ({ x: 4.1, y: 4.5 }) });
-    expect(atBound.shadowNotScoredFraction, FREEZE).toBe(1 / (160 * 90));
-    expect(atBound.adjudicatedFraction, FREEZE).toBe(0);
+    // v8 — THE RELIEF CEILING DECIDES FIRST. At this cell the disc (R = 4) reaches the wall's
+    // HIGH side (the land) but not the floor one pitch beyond it, so the goal's own relief there is
+    // 0: the v5 proof alone no longer excuses a 0.3 mm read, and the cell is COUNTED.
+    expect(atBound.shadowNotScoredFraction, FREEZE).toBe(0);
+    expect(atBound.adjudicatedFraction, FREEZE).toBe(1 / (160 * 90));
+    expect(atBound.shadowOverReliefCells, FREEZE).toBe(1);
     // CL at x = 4.2: 38 cells (3.8 mm = R − two pitches) — the rim overlaps the wall line by more
     // than the location error, so the cell is judged.
     const inside = checkGoalCutInto(goal, top, { ...flat, clAt: () => ({ x: 4.2, y: 4.5 }) });

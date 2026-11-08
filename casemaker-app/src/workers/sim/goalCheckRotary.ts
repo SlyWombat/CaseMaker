@@ -192,6 +192,12 @@ export function checkGoalCutIntoRotary(
     shadowNotScoredFraction: 0,
     straddlingNotScoredCells: 0,
     straddlingMaxStepMm: 0,
+    // #1092 (gate v8) — the rotary map has no wall/border/shadow classes to bound: nothing is
+    // excused by class, so there is nothing whose relief could be exceeded.
+    wallOverReliefCells: 0,
+    shadowOverReliefCells: 0,
+    borderOverReliefCells: 0,
+    overReliefDeepest: null,
     adjudicatedFraction: coverageFraction,
     adjudicatedMaxMm: maxCutIntoMm,
     adjudicatedMaxAt: maxCutIntoAt,

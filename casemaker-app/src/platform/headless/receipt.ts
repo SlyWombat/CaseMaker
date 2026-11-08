@@ -198,6 +198,27 @@ export const engraveGoalSchema = z
     shadowNotScoredFraction: z
       .number()
       .describe('Share of covered cells excluded as WALL SHADOW (behind a wall, beyond the sweep’s reach), 0–1.'),
+    wallOverReliefCells: z
+      .number()
+      .int()
+      .describe('#1092 (gate v8) — cut-into cells the WALL class would have excused but which were COUNTED because their depth exceeds the goal’s own relief at the cell.'),
+    shadowOverReliefCells: z
+      .number()
+      .int()
+      .describe('#1092 (gate v8) — the same, for the WALL-SHADOW class.'),
+    borderOverReliefCells: z
+      .number()
+      .int()
+      .describe('#1092 (gate v8) — the same, for the grid-BORDER class.'),
+    overReliefDeepest: z
+      .object({
+        mm: z.number().describe('Depth below the goal at that cell, mm.'),
+        x: z.number().describe('Work-frame X, mm.'),
+        y: z.number().describe('Work-frame Y, mm.'),
+        cls: z.enum(['wall', 'border', 'shadow']).describe('The class that would have excused it.'),
+      })
+      .nullable()
+      .describe('#1092 (gate v8) — the deepest cell a class would have excused and which was counted instead; null when none.'),
     leftoverFractions: z
       .array(z.number())
       .describe('Share of the covered cells standing more than each leftover band (0.1 / 0.3 / 1 mm) above the goal.'),
@@ -656,6 +677,10 @@ export function goalBlockFromReport(report: GoalCutIntoReport): EngraveGoal {
     edgeBreakFraction: report.edgeBreakFraction,
     wallNotScoredFraction: report.wallNotScoredFraction,
     shadowNotScoredFraction: report.shadowNotScoredFraction,
+    wallOverReliefCells: report.wallOverReliefCells,
+    shadowOverReliefCells: report.shadowOverReliefCells,
+    borderOverReliefCells: report.borderOverReliefCells,
+    overReliefDeepest: report.overReliefDeepest,
     leftoverFractions: [...report.leftoverFractions],
     passCoverage: report.passCoverage,
     wholeSurface: extended.wholeSurface ?? null,

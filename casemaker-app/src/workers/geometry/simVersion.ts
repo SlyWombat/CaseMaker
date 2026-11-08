@@ -51,4 +51,13 @@
 // chamfer no longer excuses a V floor pocket's lip at an interior wall unless the job said `all`.
 // The canonical fingerprint keeps its numbers under an explicit `all`; the new default is pinned
 // beside it. The cards carrying this rule's numbers are re-scored in the same commit.
-export const SIMULATOR_VERSION = 7;
+// v8 (#1092) — EXCUSES ARE PROOFS BOUNDED BY THE GOAL'S LOCAL RELIEF. A wall, border or shadow
+// cell is excused only when its depth is no more than the goal's own relief at the cell
+// (max − min of the covered goal top within the shadow radius; a border cell counts the stock top
+// as a high side) plus the straddling slack. Wall and border cells lose their unconditional class
+// excuse and go through the v6 straddling proof with that ceiling; shadow keeps the v5 proof plus
+// the bound. Counted-instead cells are printed (`wallOverReliefCells`, `borderOverReliefCells`,
+// `shadowOverReliefCells`, `overReliefDeepest`) so the excuse is never silent. The rule's
+// fingerprint is re-pinned in `tests/unit/goalRuleFreeze948.spec.ts`; the red-first case is
+// `tests/unit/designCheckRelief.spec.ts`; the cards are re-scored in the same commit.
+export const SIMULATOR_VERSION = 8;

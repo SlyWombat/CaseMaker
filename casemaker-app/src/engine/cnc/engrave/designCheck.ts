@@ -862,6 +862,20 @@ export interface GoalCutIntoReport {
   straddlingNotScoredCells: number;
   /** #996 — the tallest step (mm) among the straddling cells excused; 0 when none. */
   straddlingMaxStepMm: number;
+  /**
+   * #1092 / gate v8 — THE EXCUSE IS A PROOF BOUNDED BY THE GOAL'S OWN RELIEF. A wall, border or
+   * shadow cell is excused only when its depth is no more than the goal's local relief at the cell
+   * (max − min of the covered goal top within the shadow radius; a border cell also counts the
+   * stock top as a high side) plus {@link STRADDLING_SLACK_MM}. These three count the cells whose
+   * CLASS would have excused them and which are COUNTED instead — the excuse is never silent.
+   */
+  wallOverReliefCells: number;
+  /** #1092 — see {@link wallOverReliefCells}. */
+  shadowOverReliefCells: number;
+  /** #1092 — see {@link wallOverReliefCells}. */
+  borderOverReliefCells: number;
+  /** #1092 — the deepest over-relief cell (counted where its class would have excused it). */
+  overReliefDeepest: { mm: number; x: number; y: number; cls: 'wall' | 'border' | 'shadow' } | null;
   /** #955/#964 — the 0.1 mm-floor share AFTER the exclusions (wall and wall shadow always; edge
    *  break when the job states one): the pass line's judged number, 0-1. */
   adjudicatedFraction: number;
@@ -1045,6 +1059,46 @@ function dilateCells(mask: Uint8Array, nx: number, ny: number, pitch: number, ra
 }
 
 /**
+ * #1092 (gate v8) — THE GOAL'S OWN RELIEF AT A CELL: `max − min` of the COVERED goal top over the
+ * sampled cells within `radiusMm` of (x, y). A heightfield mis-reads a cutter near a wall by at
+ * most the wall's own height; this is that height, computed per cell, so an excused cell's depth
+ * is bounded by the geometry it sits on — never by a constant (a 2 mm cap would count a real
+ * artefact at a 20 mm wall; a 20 mm cap would hide a 19 mm gouge at a 1 mm step).
+ *
+ * A BORDER cell adds the STOCK TOP as a high side (`goal.topZ`): beyond the silhouette there is no
+ * goal sample, and the material the rim stands in is the blank at the stock top.
+ *
+ * Only the cells about to be excused call it (a few thousand at most), so the disc walk is cheap;
+ * uncovered cells contribute nothing (the design only exists where it is covered).
+ */
+function reliefAt(goal: GoalHeightfield, x: number, y: number, radiusMm: number, borderCell: boolean): number {
+  const pitch = goal.pitch;
+  const r = Math.ceil(radiusMm / pitch);
+  const ci = Math.round((x - goal.x0) / pitch);
+  const cj = Math.round((y - goal.y0) / pitch);
+  let hi = -Infinity;
+  let lo = Infinity;
+  for (let dj = -r; dj <= r; dj++) {
+    const jj = cj + dj;
+    if (jj < 0 || jj >= goal.ny) continue;
+    for (let di = -r; di <= r; di++) {
+      const ii = ci + di;
+      if (ii < 0 || ii >= goal.nx) continue;
+      if (Math.hypot(di * pitch, dj * pitch) > radiusMm + 1e-9) continue;
+      const kk = jj * goal.nx + ii;
+      if (goal.covered[kk] !== 1) continue;
+      const z = goal.z[kk]!;
+      if (!Number.isFinite(z)) continue;
+      if (z > hi) hi = z;
+      if (z < lo) lo = z;
+    }
+  }
+  if (hi === -Infinity) return 0;
+  if (borderCell && goal.topZ > hi) hi = goal.topZ;
+  return hi - lo;
+}
+
+/**
  * The 3D analogue of {@link checkDesignReach}: compares the ACTUAL swept surface with the GOAL
  * heightfield, not with the app's own cut plan — closing the gap #909 named ("the app's own check
  * passes, because it compares the simulation with the app's plan, not with the goal"). Ported
@@ -1195,6 +1249,42 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   let shadowNotScoredCells = 0;
   let straddlingNotScoredCells = 0;
   let straddlingMaxStepMm = 0;
+  let wallOverReliefCells = 0;
+  let shadowOverReliefCells = 0;
+  let borderOverReliefCells = 0;
+  let overReliefDeepest: GoalCutIntoReport['overReliefDeepest'] = null;
+  // #1092 (gate v8) — THE RELIEF RADIUS IS THE SHADOW RADIUS r (the largest cutter's radius; the
+  // cell class and the stamp artefact share the same disc). A caller with no tool set leaves it
+  // 0, so the excuse needs a depth within the straddling slack — the strict side.
+  const reliefRadiusMm = shadowRadius !== undefined && shadowRadius > 0 ? shadowRadius : 0;
+  const noteOverRelief = (cls: 'wall' | 'border' | 'shadow', depth: number, x: number, y: number): void => {
+    if (cls === 'wall') wallOverReliefCells++;
+    else if (cls === 'border') borderOverReliefCells++;
+    else shadowOverReliefCells++;
+    if (overReliefDeepest === null || depth > overReliefDeepest.mm) overReliefDeepest = { mm: depth, x, y, cls };
+  };
+  // The v6 straddling proof's own step read, shared by the class proofs below (the axial
+  // neighbours; uncovered or off-grid neighbours contribute nothing).
+  const straddleProof = (k: number, i: number, j: number, depth: number): { ok: boolean; step: number } => {
+    const zc = goal.z[k]!;
+    if (!Number.isFinite(zc)) return { ok: false, step: 0 };
+    let hi = zc;
+    let lo = zc;
+    for (const [di, dj] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+      const ci = i + di;
+      const cj = j + dj;
+      if (ci < 0 || cj < 0 || ci >= nx || cj >= ny) continue;
+      const kk = cj * nx + ci;
+      if (sampled[kk] !== 1) continue;
+      const z = goal.z[kk]!;
+      if (!Number.isFinite(z)) continue;
+      if (z > hi) hi = z;
+      if (z < lo) lo = z;
+    }
+    const step = hi - lo;
+    const swept = zc + dOf[k]!;
+    return { ok: step > 0 && step + 1e-12 >= depth && swept >= lo - STRADDLING_SLACK_MM, step };
+  };
   for (let k = 0; k < cells; k++) {
     if (sampled[k] !== 1 || dOf[k]! >= -cutIntoFloorMm) continue;
     const depth = -dOf[k]!;
@@ -1210,11 +1300,26 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       edgeBreakCells++;
       continue;
     }
+    // #1092 (gate v8) — A WALL OR BORDER CELL IS NO LONGER EXCUSED BY CLASS. It goes through the
+    // same straddling proof the v6 rule runs for every other cell, with the goal's own RELIEF at
+    // the cell as the ceiling: a heightfield mis-reads a cutter beside a wall by at most the
+    // wall's height, so a cell deeper than that is a real cut whatever its class. A cell that
+    // fails the proof is COUNTED, and its class's over-relief counter says so.
     if (wall[k] === 1 || border[k] === 1) {
-      excluded[k] = 1;
-      wallNotScoredCells++;
+      const cls: 'wall' | 'border' = wall[k] === 1 ? 'wall' : 'border';
+      const x = goal.x0 + i * goal.pitch;
+      const y = goal.y0 + j * goal.pitch;
+      const relief = reliefAt(goal, x, y, reliefRadiusMm, cls === 'border');
+      const proof = straddleProof(k, i, j, depth);
+      if (proof.ok && depth <= relief + STRADDLING_SLACK_MM + 1e-12) {
+        excluded[k] = 1;
+        wallNotScoredCells++;
+      } else {
+        noteOverRelief(cls, depth, x, y);
+      }
       continue;
     }
+    let shadowOverRelief: { depth: number; x: number; y: number } | null = null;
     if (shadow !== null && shadow[k] === 1 && wall[k] !== 1) {
       const x = goal.x0 + i * goal.pitch;
       const y = goal.y0 + j * goal.pitch;
@@ -1233,9 +1338,15 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
         }
       }
       if (excusedByV || excusedByCl) {
-        excluded[k] = 1;
-        shadowNotScoredCells++;
-        continue;
+        // #1092 (gate v8) — the v5 proof stands, but it is now bounded by the goal's own relief:
+        // a shadow cell deeper than the wall it sits behind is a real cut, not a disc artefact.
+        const relief = reliefAt(goal, x, y, reliefRadiusMm, false);
+        if (depth <= relief + STRADDLING_SLACK_MM + 1e-12) {
+          excluded[k] = 1;
+          shadowNotScoredCells++;
+          continue;
+        }
+        shadowOverRelief = { depth, x, y };
       }
       // v6 (#996) — a shadow cell the v5 rule cannot excuse stays ADJUDICATED, but it is still
       // "about to be judged": the straddling-cell proof below runs for it too. (The organizer's
@@ -1243,39 +1354,22 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     }
     // #996 (gate v6) — THE STRADDLING-CELL EXCUSE, ON PROOF. Only a cell about to be judged
     // reaches here (edge break, wall and shadow have had their say, so a 0.5 mm step stays the wall
-    // class and is never double-counted). The step is read over the centre and the cell's four
-    // corners, each corner the quarter-average of the four cell centres around it (uncovered
-    // neighbours contribute nothing — the design only exists where it is covered).
+    // class and is never double-counted). The step is read over the cell's AXIAL neighbours
+    // (`straddleProof`; the heightfield is cell-centred, so those are the four the cell's edges
+    // face — a diagonal face leaves all four diagonal centres on one side).
     if (depth > ADJUDICATED_FLOOR_MM) {
-      const zc = goal.z[k]!;
-      if (Number.isFinite(zc)) {
-        let hi = zc;
-        let lo = zc;
-        // The heightfield is cell-centred (corners are not sampled), so "the four neighbouring
-        // cell centres" are the AXIAL neighbours — the cells the cell's four edges face. (The
-        // diagonals are not enough: a face running diagonally through a cell leaves all four
-        // diagonal centres on one side, the organizer's own case.) Uncovered or off-grid
-        // neighbours contribute nothing: the design only exists where it is covered.
-        for (const [di, dj] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
-          const ci = i + di;
-          const cj = j + dj;
-          if (ci < 0 || cj < 0 || ci >= nx || cj >= ny) continue;
-          const kk = cj * nx + ci;
-          if (sampled[kk] !== 1) continue;
-          const z = goal.z[kk]!;
-          if (!Number.isFinite(z)) continue;
-          if (z > hi) hi = z;
-          if (z < lo) lo = z;
-        }
-        const step = hi - lo;
-        const swept = zc + dOf[k]!;
-        if (step > 0 && step + 1e-12 >= depth && swept >= lo - STRADDLING_SLACK_MM) {
-          excluded[k] = 1;
-          straddlingNotScoredCells++;
-          if (step > straddlingMaxStepMm) straddlingMaxStepMm = step;
-          continue;
-        }
+      const proof = straddleProof(k, i, j, depth);
+      if (proof.ok) {
+        excluded[k] = 1;
+        straddlingNotScoredCells++;
+        if (proof.step > straddlingMaxStepMm) straddlingMaxStepMm = proof.step;
+        continue;
       }
+    }
+    // #1092 — a shadow cell whose v5 proof passed but whose depth exceeds the goal's relief has
+    // now reached adjudication: its class would have excused it, so the count is not silent.
+    if (shadowOverRelief !== null) {
+      noteOverRelief('shadow', shadowOverRelief.depth, shadowOverRelief.x, shadowOverRelief.y);
     }
   }
 
@@ -1330,10 +1424,19 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     straddlingNotScoredCells > 0
       ? `; ${straddlingNotScoredCells} cell${straddlingNotScoredCells === 1 ? '' : 's'} on a ${straddlingMaxStepMm.toFixed(3)} mm step, excused on proof`
       : '';
+  // #1092 — THE EXCUSE IS PRINTED, NEVER SILENT: cells a class would have excused but which are
+  // COUNTED because they are deeper than the goal's own relief, with the deepest one named.
+  const deepest = overReliefDeepest as { mm: number; x: number; y: number; cls: 'wall' | 'border' | 'shadow' } | null;
+  const overReliefNote =
+    wallOverReliefCells + shadowOverReliefCells + borderOverReliefCells > 0 && deepest !== null
+      ? `; ${wallOverReliefCells + shadowOverReliefCells + borderOverReliefCells} cell(s) a class would have excused are counted instead (wall ${wallOverReliefCells}, border ${borderOverReliefCells}, shadow ${shadowOverReliefCells}; deepest ${deepest.mm.toFixed(3)} mm at ${deepest.x.toFixed(2)}, ${deepest.y.toFixed(2)})`
+      : '';
   const excludedNote =
     edgeBreakCells + wallNotScoredCells + shadowNotScoredCells + straddlingNotScoredCells > 0
-      ? ` (the rim edge break${edgeBreakCells > 0 ? `, ${(edgeBreakFraction * 100).toFixed(2)} % of the goal,` : ''} and ${(wallNotScoredFraction * 100 + shadowNotScoredFraction * 100).toFixed(2)} % of cells the heightfield cannot adjudicate are not counted${straddlingClause})`
-      : '';
+      ? ` (the rim edge break${edgeBreakCells > 0 ? `, ${(edgeBreakFraction * 100).toFixed(2)} % of the goal,` : ''} and ${(wallNotScoredFraction * 100 + shadowNotScoredFraction * 100).toFixed(2)} % of cells the heightfield cannot adjudicate are not counted${straddlingClause}${overReliefNote})`
+      : overReliefNote === ''
+        ? ''
+        : ` (${overReliefNote.replace(/^; /, '')})`;
   // #1064 (d) — MEASURED BESIDE PREDICTED. The plan's own bevel prediction rides in the sentence
   // when the caller supplies it; the measured number is still the verdict.
   const predictedNote =
@@ -1373,6 +1476,10 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     shadowNotScoredFraction,
     straddlingNotScoredCells,
     straddlingMaxStepMm,
+    wallOverReliefCells,
+    shadowOverReliefCells,
+    borderOverReliefCells,
+    overReliefDeepest,
     adjudicatedFraction,
     adjudicatedMaxMm,
     adjudicatedMaxAt,
@@ -1413,6 +1520,10 @@ export function goalCutIntoUnchecked(reason: string, passCoverage: number = GOAL
     wallNotScoredFraction: 0,
     straddlingNotScoredCells: 0,
     straddlingMaxStepMm: 0,
+    wallOverReliefCells: 0,
+    shadowOverReliefCells: 0,
+    borderOverReliefCells: 0,
+    overReliefDeepest: null,
     shadowNotScoredFraction: 0,
     adjudicatedFraction: 0,
     adjudicatedMaxMm: 0,
