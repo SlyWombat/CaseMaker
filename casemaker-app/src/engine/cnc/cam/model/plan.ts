@@ -248,7 +248,7 @@ export interface SetupSpec {
 
 /** #1082 — the box a setup is cut from: its own stock, else the job's blank. */
 export function setupStockOf(
-  input: Pick<ModelPlanInput, 'stock'>,
+  input: { stock: { length: number; width: number; thickness: number } },
   spec: SetupSpec,
 ): { length: number; width: number; thickness: number } {
   return spec.stock ?? { length: input.stock.length, width: input.stock.width, thickness: input.stock.thickness };

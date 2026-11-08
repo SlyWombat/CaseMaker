@@ -74,6 +74,7 @@ describe('#1082 a setup’s own stock', () => {
     if (setup.part.kind !== 'prism') return;
     expect(setup.part.thickness).toBe(25);
     const bb = aabbOfProfile(setup.part.outline);
+    if (bb === null) throw new Error('the part outline has bounds');
     expect(bb.max[0] - bb.min[0]).toBeCloseTo(106, 6);
     expect(bb.max[1] - bb.min[1]).toBeCloseTo(136, 6);
     // A caller with no setup stock gets the blank, exactly as before.
@@ -81,6 +82,7 @@ describe('#1082 a setup’s own stock', () => {
     if (blank.part.kind !== 'prism') return;
     expect(blank.part.thickness).toBe(28);
     const bbb = aabbOfProfile(blank.part.outline);
+    if (bbb === null) throw new Error('the blank outline has bounds');
     expect(bbb.max[0] - bbb.min[0]).toBeCloseTo(120, 6);
     expect(bbb.max[1] - bbb.min[1]).toBeCloseTo(160, 6);
     // No setups at all → the blank.
@@ -125,6 +127,7 @@ describe('#1082 a setup’s own stock', () => {
       if (setup.part.kind !== 'prism') throw new Error('the fixture is a prism job');
       expect(setup.part.thickness).toBe(want.thickness);
       const bb = aabbOfProfile(setup.part.outline);
+      if (bb === null) throw new Error('the part outline has bounds');
       expect(bb.max[0] - bb.min[0]).toBeCloseTo(want.length, 6);
       expect(bb.max[1] - bb.min[1]).toBeCloseTo(want.width, 6);
     }
