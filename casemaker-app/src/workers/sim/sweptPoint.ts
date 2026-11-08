@@ -209,13 +209,14 @@ export function exactSweptFieldTooled(
 }
 
 /**
- * #1086 — THE PAGE'S STAMP IN THE ROTARY MAP FRAME. The goal is a radial field (X, θ → radius);
+ * #1086 — THE PAGE'S STAMP IN THE ROTARY MAP FRAME. The goal is a radial field (X, arc → radius);
  * a cutting move's disc is stamped at each covered map cell as `tip + profile(h)`, with `h` the
- * distance from the move's point in the map plane — the X offset and the angular offset measured
- * as arc at the TIP's radius (the same `zt·Δφ` linearisation the column engine's foot search
- * uses). A cell takes the LOWEST radius any passing sample leaves; a cell no sample reaches keeps
- * the stock's own radius at that row (`initial`). The page's per-move sampling (0.05 mm), the
- * strict footprint edge and the axis clamp are the flat stamp's own rules.
+ * distance from the move's point IN THE MAP PLANE — the X offset and the arc offset at the
+ * design radius, exactly as the CAM's own tip field measures it (the relief is planned on the
+ * unwrapped map, so this is the surface the program's gouge-safety was proven on). A cell takes
+ * the LOWEST radius any passing sample leaves; a cell no sample reaches keeps the stock's own
+ * radius at that row (`initial`). The page's per-move sampling (0.05 mm), the strict footprint
+ * edge and the axis clamp are the flat stamp's own rules.
  */
 export function stampRotarySweptField(
   goal: { nx: number; ny: number; x0: number; y0: number; pitch: number; radius: number },
@@ -236,9 +237,9 @@ export function stampRotarySweptField(
     // A tip at or above the envelope removes nothing (no cell's radius can exceed it).
     if (Math.min(za0, za1) >= radius) continue;
     const dx = m.u1 - m.u0;
-    const daRad = ((m.v1 - m.v0) * Math.PI) / 180;
-    const zMid = Math.max(0, (za0 + za1) / 2);
-    const steps = Math.max(1, Math.ceil((Math.hypot(dx, zMid * daRad) + Math.abs(za1 - za0)) / SAMPLE_MM));
+    // The map's y is arc at the design radius; the move's A is degrees about the axis.
+    const dArcMove = (((m.v1 - m.v0) * Math.PI) / 180) * radius;
+    const steps = Math.max(1, Math.ceil((Math.hypot(dx, dArcMove) + Math.abs(za1 - za0)) / SAMPLE_MM));
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       const z = za0 + (za1 - za0) * t;
@@ -246,18 +247,15 @@ export function stampRotarySweptField(
       const zs = Math.max(0, z); // the axis clamp: a dip below the axis cuts to the axis
       const qx = m.u0 + dx * t;
       const qArc = ((m.v0 + (m.v1 - m.v0) * t) * Math.PI * radius) / 180;
-      // The disc's angular reach at the tip radius, as arc on the goal's own axis (at `radius`).
-      const reachArc = zs > 1e-9 ? (radius * reach) / zs : ny * pitch;
       const iLo = Math.max(0, Math.ceil((qx - reach - x0) / pitch));
       const iHi = Math.min(nx - 1, Math.floor((qx + reach - x0) / pitch));
       if (iLo > iHi) continue;
-      const rows = Math.min(ny, Math.ceil(reachArc / pitch));
+      const rows = Math.min(ny, Math.ceil(reach / pitch));
       const jC = Math.round((qArc - y0) / pitch);
       for (let dj = -rows; dj <= rows; dj++) {
         const j = (((jC + dj) % ny) + ny) % ny;
         const dArc = y0 + (jC + dj) * pitch - qArc;
-        const arcMm = (zs * dArc) / radius; // radians → mm at the tip
-        const arc2 = arcMm * arcMm;
+        const arc2 = dArc * dArc;
         if (arc2 >= Rin2) continue;
         const rowBase = j * nx;
         for (let ii = iLo; ii <= iHi; ii++) {

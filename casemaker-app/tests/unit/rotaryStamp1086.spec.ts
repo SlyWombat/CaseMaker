@@ -13,8 +13,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { flatEndMill } from '@/engine/cnc/tool';
-import type { CutMove } from '@/workers/geometry/columnEngine';
-import type { ColumnGrid } from '@/workers/geometry/columnEngine';
+import type { CutMove, ColumnGrid } from '@/workers/geometry/columnEngine';
 import type { GoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
 import { stampProfile, stampRotarySweptField } from '@/workers/sim/sweptPoint';
 import { checkGoalCutIntoRotary } from '@/workers/sim/goalCheckRotary';
