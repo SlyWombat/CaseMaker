@@ -160,7 +160,6 @@ import { executeProfile } from '../../../src/workers/geometry/evaluateOp';
 import { engravePreviewSvg } from '../engravePreviewSvg';
 import { svgToPng } from '../svgToPng';
 import { efficiencyThresholds, goalPassCoverage, KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
-import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { goalCheckForProgram, type SimGoalCheck } from '../../../src/engine/cnc/engrave/goalCheckInput';
 import { pureGoalObject } from '../../../src/engine/cnc/engrave/jobKind';
 import { goalEdgeBreakOptions } from '../../../src/engine/cnc/engrave/edgeBreak';
