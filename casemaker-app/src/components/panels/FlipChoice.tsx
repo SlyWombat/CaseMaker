@@ -101,7 +101,7 @@ export function FlipChoice(props: FlipChoiceProps): JSX.Element {
             </>
           ) : (
             <>
-              Side 2 cuts the FREED PART: {fmtBox(props.derivedStock)} — derived from side 1's cut extents.{' '}
+              Side 2 cuts the FREED PART: {fmtBox(props.derivedStock)} — derived from side 1’s cut extents.{' '}
               <button
                 type="button"
                 data-testid={`engrave-setup-stock-use-${n}`}
