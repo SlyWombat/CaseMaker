@@ -879,9 +879,11 @@ async function mountTapTouch(
   expectZ: number | null,
   /**
    * #932 — the probe the run has checked out. Required (never defaulted) so a new caller cannot
-   * quietly drop the release: a triggered tap on the 3D probe leaves the stylus down for the lift.
+   * quietly drop the release. #1070 — the release is no longer chosen by the instrument (a
+   * triggered touch is released whatever the probe), but the parameter stays in the contract so
+   * every caller still states which probe the tap is run with.
    */
-  probe: ProbeSpec | null,
+  _probe: ProbeSpec | null,
 ): Promise<Prb | null> {
   await io.idle();
   await io.send(`G53 G0 Z${f(seekFromMachineZ)}`);
@@ -900,8 +902,10 @@ async function mountTapTouch(
         ? fast
         : lastPrb(await io.send(`G38.3 Z-${f(approachZ - floorZ)} F${f(settings.touchFeed)}`, { missOk: true }));
   }
-  // #932 — a triggered tap is released before the relative lift (the 3D probe's stylus is down).
-  if (prb !== null && prb.touched && probeNeedsRelease(probe)) await io.send(probeAwayLine('Z', PROBE_AWAY_MM));
+  // #932/#1070 — a triggered tap is released before the relative lift. 6b's seat ruling: the
+  // wired V2 gets the same G38.5 before the G0 — a triggered touch is released whatever the
+  // instrument, so no lift is ever taken with the tip still on the material.
+  if (prb !== null && prb.touched) await io.send(probeAwayLine('Z', PROBE_AWAY_MM));
   await io.send('G0 Z3');
   await io.send('G90');
   const after = await io.send('M119');
@@ -935,8 +939,19 @@ export async function runMountTap(
    * instrument, so the default is the wired probe's behaviour — unchanged from before this.
    */
   probe: ProbeSpec | null = null,
+  /**
+   * #1070 — THE PLAN'S OWN BOUND, mm of travel below the seek start: the seat press plans its
+   * slow seek from the band floor less the scan reach, and the tap must never search past it.
+   * Absent (a pre-#1070 caller): the work-envelope floor, exactly as before.
+   */
+  planTravelMm: number | null = null,
 ): Promise<MountTapResult> {
   const io = session(deps, seekFromMachineZ, settings.idlePollLimit, probeNeedsRelease(probe));
+  // The floor the tap may reach: the PLAN's bound when it states one, never the envelope's alone.
+  const tapFloorZ =
+    planTravelMm !== null && Number.isFinite(planTravelMm) && planTravelMm > 0
+      ? Math.max(workEnvelopeFloorZ, seekFromMachineZ - planTravelMm)
+      : workEnvelopeFloorZ;
   const bad = settingsProblem(settings);
   if (bad !== null) return { ok: false, reason: `nothing was sent: ${bad}`, transcript: [] };
   /** #789 — whether the probe's supply was (or may have been) switched on, for the closing M832. */
@@ -956,12 +971,12 @@ export async function runMountTap(
     if (/Probe:\s*1\b/.test(rest)) throw new Stop('the probe reads touched at rest; check it is seated and plugged in');
     const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
     if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading');
-    const prb = await mountTapTouch(io, tap, seekFromMachineZ, settings, workEnvelopeFloorZ, null, probe);
+    const prb = await mountTapTouch(io, tap, seekFromMachineZ, settings, tapFloorZ, null, probe);
     if (prb === null || !prb.touched) {
       // The vise's sentence is the bench-tested one and stays byte for byte; the others name their
       // own reference the way the operator sees it.
       const what = mount === 'vise' ? 'jaw top' : mount === 'bracket' ? 'bracket top' : 'axis';
-      throw new Stop(`no ${what} at (${tap.x}, ${tap.y}) down to machine Z ${f(workEnvelopeFloorZ)} — is the ${mount} where the machine record says?`);
+      throw new Stop(`no ${what} at (${tap.x}, ${tap.y}) down to machine Z ${f(tapFloorZ)} — is the ${mount} where the machine record says?`);
     }
     // #519 item 1 — the standalone tap's reading, as it lands.
     io.saw({ source: 'mount-tap', label: null, x: tap.x, y: tap.y, z: prb.z, touched: prb.touched, kind: null });

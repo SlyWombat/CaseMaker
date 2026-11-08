@@ -41,6 +41,7 @@
 
 import { PARK_CLEARANCE_MM } from '@/platform/defaultsClient';
 import { settingsProblem, type RegistrationSettings } from './settings';
+import { planFootprintRegistration } from './footprint';
 import { MIN_SIDE_DEPTH_MM, SIDE_TOUCH_JAW_MARGIN_MM } from './probe3d';
 
 export type Mount = 'vise' | 'bracket' | 'tape';
@@ -239,6 +240,19 @@ export interface PlanInput {
    * reference. Absent on the tape.
    */
   mountTap?: PlanMountTap | null;
+  /**
+   * #1070 — THE CUT REGION'S FOOTPRINT for a bed-held job: its extents in WORK XY and the job's
+   * own edge margin. Present, the plan is the region-extent registration — the front and left
+   * edges touched at the region's ends, the far edges once each as presence proofs, one Z touch
+   * per region corner — and the origin is derived from the touched edges. Absent: every existing
+   * plan is exactly what it was.
+   */
+  region?: { min: [number, number]; max: [number, number]; marginMm: number };
+  /**
+   * #1070 — the machine's soft endstop (the calibration read). Every planned position is checked
+   * against it before any line is sent; `null`/absent says the check could not be made.
+   */
+  softLimits?: { xMin: number; yMin: number; zMin: number } | null;
   /**
    * #619 — the stock's thickness, mm, for the datum path's upper surface bound: a normally mounted
    * blank may stand the full thickness proud of the jaw tops (it need not sit on the ledge), so the
@@ -469,6 +483,72 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
     surfacePoint.y > stock.yMax - inset
   ) {
     return { ok: false, reason: 'the surface point is not well inside the stock' };
+  }
+
+  // #1070 — A BED-HELD JOB IS REGISTERED ON THE CUT REGION'S FOOTPRINT. The region's extents go
+  // in; two touches per bounding edge at them, the far edges once each as presence proofs, one Z
+  // touch per region corner. THE ANCHOR DATUM IS ONLY THE SEED: it puts every planned move in
+  // machine coordinates — and the soft-limit check runs on those before any line — while the
+  // origin itself comes from the touched front and left edge lines, through the existing #525
+  // corner derivation, so a seed error never enters the cut.
+  if (input.region !== undefined) {
+    if (mount !== 'bracket') {
+      return { ok: false, reason: 'the footprint registration is for a bed-held job — this mount has no region to register on' };
+    }
+    const seed = input.bracketOrigin;
+    if (!seed) return { ok: false, reason: 'the bracket mount needs the origin from the machine’s anchor' };
+    const fp = planFootprintRegistration({
+      stock: { length: width, width: depth, thickness: input.stockThicknessMm ?? 0, cornerRadius: stock.cornerRadius },
+      region: { minX: input.region.min[0], minY: input.region.min[1], maxX: input.region.max[0], maxY: input.region.max[1] },
+      marginMm: input.region.marginMm,
+      origin: { x: seed.x, y: seed.y, from: seed.from },
+      softLimits: input.softLimits ?? null,
+      expectedSurface: input.expectedSurface,
+      seekFromMachineZ,
+      probe: { instrument: input.probe?.instrument === 'xyz' ? 'xyz' : 'z-only', tipRadiusMm: s.tipRadiusMm },
+      settings: {
+        scanInsideMm: s.scanInsideMm,
+        scanReachMm: s.scanReachMm,
+        coarseStepMm: s.coarseStepMm,
+        fineStepMm: s.fineStepMm,
+        cornerClearanceMm: s.cornerClearanceMm,
+        parkAboveSurfaceMm: s.parkAboveSurfaceMm,
+        surfaceToleranceMm: s.surfaceToleranceMm,
+      },
+      obstacles: (input.mountObstacles ?? []).map((o) => ({ label: o.label, min: o.min, max: o.max })),
+    });
+    if (!fp.ok) return { ok: false, reason: fp.reason };
+    return {
+      ok: true,
+      plan: {
+        mount,
+        stock,
+        stockThicknessMm: input.stockThicknessMm,
+        surfacePoint: {
+          x: r3((input.region.min[0] + input.region.max[0]) / 2),
+          y: r3((input.region.min[1] + input.region.max[1]) / 2),
+        },
+        seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },
+        mountDatum,
+        probe,
+        mountTap,
+        scans: fp.plan.scans.map((sc) => ({
+          edge: sc.edge,
+          along: sc.along,
+          expectedAt: sc.expectedAt,
+          outward: sc.edge === 'right' || sc.edge === 'back' ? 1 : -1,
+          start: sc.start,
+          limit: sc.limit,
+          coarseStep: s.coarseStepMm,
+          fineStep: s.fineStepMm,
+        })),
+        bracketOrigin: seed,
+        mountObstacles: input.mountObstacles ?? [],
+        settings: s,
+        corner: { id: 'front-left', xEdge: 'left', yEdge: 'front' },
+        notes: fp.plan.notes,
+      },
+    };
   }
 
   const notes: string[] = [];
