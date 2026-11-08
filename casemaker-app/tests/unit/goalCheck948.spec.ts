@@ -444,16 +444,23 @@ describe('#948 the elephant corpus run — zero cut-into is not a pass', () => {
       // away — so the leftover must use the page's rule.
       // #1007 — THE PAGE'S READ ON THE MODEL ENGINE. The old pin (10863/22865 = 0.4750929) was
       // the page's stamp on the OLD engine's program; the model engine posts a different program,
-      // so its leftover at the same 0.1 mm grid and rule is its own measure: 0.3068883, within one
+      // so its leftover at the same 0.1 mm grid and rule is its own measure: 0.3071944, within one
       // cell. #1030 moved it from #1007's 0.3068008: the ball's short joins now ride the CL
       // instead of cutting a ridge's corner (the same change that removed the raw cut-into cell
       // above), so two more cells' material crosses the 0.1 mm band. The message prints the
       // MEASURED fraction — the earlier form printed the difference from the pin, which read as
       // the value and confused the record once.
+      // #1080 (2026-11-08) — THE PIN MOVED BY 7 OF 22,865 CELLS when the finish's step-over began
+      // reading the CROSS-ROW slope instead of the gradient magnitude (3cce4dd83): at the diagonal
+      // feature near X 19-24, Y 38-40 ten cells move by at most 0.025 mm (six cross the 0.1 band at
+      // 0.1003-0.1198, one enters at 0.1054, three go 0.229-0.247 -> 0.252-0.264). Named here
+      // rather than silently: the feature's cusp already stood at 3.5-9x the 0.027 mm scallop before
+      // the change (a pre-existing step-over floor on that feature, not this step-over's doing),
+      // and the card's contract - ok:false on coverage, the sentence naming it - is unchanged.
       const leftoverFraction = report.goalCutInto?.leftoverFractions[0] ?? 0;
       expect(
-        Math.abs(leftoverFraction - 0.3068883),
-        `leftoverFractions[0] measured ${leftoverFraction} (the model engine's pin is 0.3068883 and this compares the difference)`,
+        Math.abs(leftoverFraction - 0.3071944),
+        `leftoverFractions[0] measured ${leftoverFraction} (the model engine's pin is 0.3071944 and this compares the difference)`,
       ).toBeLessThanOrEqual(1 / (report.goalCutInto?.goalCells ?? 1));
     } finally {
       session.dispose();
