@@ -31,13 +31,21 @@ cell cut below the 0.01 mm floor is first EDGE BREAK when a stated V bit's band 
 bit's stamp is the deepest there, and it is no deeper than the bit's leg. Then, in this order, each
 class only for the cells still about to be judged:
 
+  * SILHOUETTE (0f's ruling) — a covered cell facing uncovered grid (including the grid's own edge):
+    the part's outline. The design is multi-valued across it, so the read is excused only when its
+    depth is within the BLANK's floor — the stock top down to −(thickness + breakthrough), plus
+    0.005 mm — AND the deepest stamp's CL is on the UNCOVERED side (its own cell uncovered, or the
+    point off the grid), at least r − one cell from the outline (the exact distance to the nearest
+    wall cell). One branch, no fallthrough: a cut below the blank's floor, or a contour whose CL
+    is inside, is COUNTED. Reported as `silhouetteExcusedCells` / `silhouetteDeepest`.
   * WALL / BORDER — a cell on a > 0.2 mm step between goal cells, or a covered cell on the grid's
     own border (the silhouette where the grid ends at the model). Excused only on the straddling
     proof below, and only when its depth is no more than the goal's own local relief plus 0.005 mm.
     The proof's step test carries that same 0.005 mm (the sampled heightfield step can be a hair
-    short of the design floor); the general proof below keeps only its 1e-12. A cell deeper than
-    the relief is COUNTED (`wallOverReliefCells` / `borderOverReliefCells`), and a wall/border cell
-    is never fed to the shadow class or the general proof.
+    short of the design floor); a border cell also counts the stock top as a high side. The
+    general proof below keeps only its 1e-12. A cell deeper than the relief is COUNTED
+    (`wallOverReliefCells` / `borderOverReliefCells`), and a wall/border cell is never fed to the
+    shadow class or the general proof.
   * WALL SHADOW — a cell within the largest cutting tool's radius of a wall, excused (v5) when the V
     bit cut it within its leg, or the deepest stamp's CL stayed at least that radius less one cell
     from the wall; then bounded by the relief exactly as the wall class is. A cell whose v5 proof
@@ -48,9 +56,10 @@ class only for the cells still about to be judged:
     low side (0.005 mm slack), and the step is real (> 0).
 
 THE GOAL'S OWN RELIEF at a cell is max − min of the COVERED goal top within the shadow radius (the
-largest cutting tool's radius — the same disc the class is about); a border cell also counts the
-stock top as a high side. The excuse is therefore bounded by the geometry the cell sits on, never by
-a constant — the #1092 ruling, gate v8.
+largest cutting tool's radius — the same disc the class is about); with no tool set it is one pitch
+(the cell's own axial neighbours); a border cell also counts the stock top as a high side. The
+excuse is therefore bounded by the geometry the cell sits on, never by a constant — the #1092
+ruling, gate v8.
 
 THE JUDGED FIGURE is the share of covered cells cut below the 0.1 mm floor after those exclusions
 (`adjudicatedFraction`, the app receipt's `details.goal.adjudicatedFraction`); the raw figures at
@@ -412,13 +421,15 @@ def relief_for(G, C, p, nx, ny, ci, cj, is_border, radius, topZ):
     return out
 
 
-def straddle_proof(G, C, H, nx, ny, ki, kj, depth, step_slack_mm=0.0):
+def straddle_proof(G, C, H, nx, ny, ki, kj, depth, step_slack_mm=0.0, include_stock_top=False, topZ=0.0):
     """The app's `straddleProof`: the step over the cell's AXIAL neighbours (uncovered or off-grid
     neighbours contribute nothing), the swept floor at the cell, and whether the proof holds.
     `step_slack_mm` is the rule's own slack in the step test — the wall/border class passes
     STRADDLING_SLACK_MM (the heightfield's sampled step is up to that much short of the design
     floor — measured 0.0004 mm on the tray's 2.885 mm floor, #1092); the general v6 proof keeps
-    0 and its `1e-12` only, unchanged."""
+    0 and its `1e-12` only, unchanged.
+    `include_stock_top` is the border class's high side (#1092): its edge faces uncovered grid,
+    which contributes no sample, so the stock top is the high side the step reads."""
     zc = G[kj, ki]
     hi = zc.copy(); lo = zc.copy()
     for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
@@ -429,6 +440,8 @@ def straddle_proof(G, C, H, nx, ny, ki, kj, depth, step_slack_mm=0.0):
         z = G[jjc, iic]
         hi = np.where(ok & (z > hi), z, hi)
         lo = np.where(ok & (z < lo), z, lo)
+    if include_stock_top:
+        hi = np.where(topZ > hi, topZ, hi)
     step = hi - lo
     swept = H[kj, ki]
     good = (np.isfinite(zc) & (step > 0) & (step + step_slack_mm + 1e-12 >= depth)
@@ -473,7 +486,7 @@ def edge_allowance(eb, tools):
 
 
 def judge(G, C, H, who, clx, cly, gh, stock_thickness, *, allowance=None, shadow_radius=0,
-          programs=None, ideal_programs=None):
+          programs=None, ideal_programs=None, breakthrough=0.0):
     """The gate's rule over one run's folded stamp. Returns the report dict and the masks the map
     needs."""
     ny, nx = G.shape
@@ -493,26 +506,60 @@ def judge(G, C, H, who, clx, cly, gh, stock_thickness, *, allowance=None, shadow
 
     wall = design_edges(G, C, p, minZ - 1.0)
     border = border_cells(C)
-    relief_radius = float(shadow_radius) if shadow_radius and shadow_radius > 0 else 0.0
+    # #1092 (gate v8) — THE SILHOUETTE: a covered cell facing uncovered grid (including the grid's
+    # own edge). The design is multi-valued across that edge, so the outline cut is judged by the
+    # blank's floor and the stamp's CL, not by the design alone (0f's ruling).
+    sil = np.zeros((ny, nx), bool)
+    if C.any():
+        left = np.zeros_like(C); left[:, 1:] = ~C[:, :-1]; left[:, 0] = True
+        right = np.zeros_like(C); right[:, :-1] = ~C[:, 1:]; right[:, -1] = True
+        up = np.zeros_like(C); up[1:, :] = ~C[:-1, :]; up[0, :] = True
+        down = np.zeros_like(C); down[:-1, :] = ~C[1:, :]; down[-1, :] = True
+        sil = C & (left | right | up | down)
+    # The outline's own cells, for the CL's distance to it when the CL leaves the grid (a
+    # contour's tool centre can sit outside the goal's footprint entirely): the app's WALL cells.
+    wall_idx = np.flatnonzero(wall.ravel())
+    wxs = x0 + (wall_idx % nx) * p
+    wys = y0 + (wall_idx // nx) * p
+
+    def outline_distance(qx, qy):
+        """Exact distance (mm) from each CL point to the nearest wall cell's centre — no clamping,
+        so a CL off the grid is measured to the real outline."""
+        if wall_idx.size == 0:
+            return np.full(qx.size, np.inf)
+        out = np.empty(qx.size)
+        CH = max(1, 4_000_000 // wall_idx.size)
+        for s in range(0, qx.size, CH):
+            dx = qx[s:s + CH, None] - wxs[None, :]
+            dy = qy[s:s + CH, None] - wys[None, :]
+            out[s:s + CH] = np.hypot(dx, dy).min(axis=1)
+        return out
+
+    # #1092 — the relief radius is the shadow radius r (the largest cutting tool's radius). A caller
+    # with no tool set has no r: the relief then reads the cell's OWN extent — one pitch, the same
+    # four axial neighbours the straddling proof reads — never a bare zero.
+    relief_radius = float(shadow_radius) if shadow_radius and shadow_radius > 0 else p
+    has_shadow = bool(shadow_radius and shadow_radius > 0)
     band = None
     if allowance is not None and allowance['reachMm'] > 0 and allowance['legMm'] > 0:
         seed = border.copy()
         if allowance['edges'] == 'all':
             seed |= wall
         band = dilate(seed, nx, ny, p, float(allowance['reachMm']))
-    shadow = (dilate(wall, nx, ny, p, relief_radius) & ~wall) if relief_radius > 0 else None
+    shadow = (dilate(wall, nx, ny, p, float(shadow_radius)) & ~wall) if has_shadow else None
     far_from_wall = None
-    if relief_radius > 0:
+    if has_shadow:
         # the v5 CL rule as a dilation: no wall cell is strictly nearer than r − one cell
-        far_from_wall = ~dilate(wall, nx, ny, p, max(relief_radius - p, 0.0), strict=True)
+        far_from_wall = (~dilate(wall, nx, ny, p, max(float(shadow_radius) - p, 0.0), strict=True)).ravel()
 
     excluded = np.zeros(nx * ny, bool)
-    handled = np.zeros(nx * ny, bool)      # a wall/border cell never reaches a later class
+    handled = np.zeros(nx * ny, bool)      # a silhouette or wall/border cell never reaches a later class
     edge_mask = np.zeros(nx * ny, bool)
-    edge_cells = wall_cells = shadow_cells = straddling_cells = 0
+    edge_cells = wall_cells = shadow_cells = straddling_cells = sil_cells = 0
     straddling_max_step = 0.0
     wall_over = shadow_over = border_over = 0
     over_deepest = None
+    sil_deepest = None
     def note_over(cls, d, x, y):
         nonlocal wall_over, shadow_over, border_over, over_deepest
         if cls == 'wall': wall_over += 1
@@ -537,17 +584,63 @@ def judge(G, C, H, who, clx, cly, gh, stock_thickness, *, allowance=None, shadow
         edge_mask[kk[hit]] = True
         edge_cells = int(hit.sum())
 
-    # 2 — WALL / BORDER: the straddling proof, bounded by the goal's own relief at the cell.
+    # 2 — THE SILHOUETTE (gate v8, 0f's ruling). A covered cell facing uncovered grid is the
+    # part's outline: the design is multi-valued across it, so the read is judged by the BLANK's
+    # floor (stock top down to −(thickness + breakthrough)) and the deepest stamp's CL — on the
+    # uncovered side, at least r − one cell from the outline. One branch, no fallthrough: a cut
+    # below the blank's floor, or a contour whose CL is inside, is COUNTED (adjudicated).
     if kk.size:
-        sel = ~excluded[kk]
+        sel = ~excluded[kk] & ~handled[kk]
+        sg = sel & sil.ravel()[kk]
+        if sg.any():
+            cells = kk[sg]
+            handled[cells] = True
+            ceiling = T + float(breakthrough or 0.0)
+            within_floor = dd[sg] <= ceiling + STRADDLING_SLACK_MM + 1e-12
+            # the app's Math.round: floor(v + 0.5)
+            ci = np.floor((Xf[cells] - x0) / p + 0.5).astype(np.int64)
+            cj = np.floor((Yf[cells] - y0) / p + 0.5).astype(np.int64)
+            on_grid = (ci >= 0) & (ci < nx) & (cj >= 0) & (cj < ny)
+            outside = ~on_grid
+            if on_grid.any():
+                outside[on_grid] = ~C[cj[on_grid], ci[on_grid]]
+            outside &= Hf[cells] != 0
+            if has_shadow:
+                dist = outline_distance(Xf[cells], Yf[cells])
+                ok = within_floor & outside & (dist >= float(shadow_radius) - p - 1e-9)
+            else:
+                dist = np.full(cells.size, np.inf)
+                ok = np.zeros(cells.size, bool)
+            excluded[cells[ok]] = True
+            sil_cells = int(ok.sum())
+            if ok.any():
+                # the app replaces only on a STRICTLY deeper cell: the first of equal-deepest wins
+                j0 = int(np.argmax(dd[sg][ok]))
+                dv = float(dist[ok][j0])
+                sil_deepest = {'mm': float(dd[sg][ok][j0]),
+                               'x': float(xs[sg][ok][j0]), 'y': float(ys[sg][ok][j0]),
+                               'clDistanceMm': (round(dv, 3) if np.isfinite(dv) else None)}
+
+    # 3 — WALL / BORDER: the straddling proof, bounded by the goal's own relief at the cell. A
+    # border cell's high side is the stock top (its edge faces uncovered grid).
+    if kk.size:
+        sel = ~excluded[kk] & ~handled[kk]
         wb = sel & (wall_f[kk] | border_f[kk])
         if wb.any():
             cells = kk[wb]
             handled[cells] = True
             is_wall = wall_f[cells]
             is_border = (~is_wall) & border_f[cells]
-            good, _ = straddle_proof(G, C, H, nx, ny, ki[wb], kj[wb], dd[wb],
-                                     step_slack_mm=STRADDLING_SLACK_MM)
+            good = np.zeros(cells.size, bool)
+            if is_wall.any():
+                g1, _ = straddle_proof(G, C, H, nx, ny, ki[wb][is_wall], kj[wb][is_wall],
+                                       dd[wb][is_wall], step_slack_mm=STRADDLING_SLACK_MM)
+                good[is_wall] = g1
+            if is_border.any():
+                g2, _ = straddle_proof(G, C, H, nx, ny, ki[wb][is_border], kj[wb][is_border],
+                                       dd[wb][is_border], step_slack_mm=STRADDLING_SLACK_MM,
+                                       include_stock_top=True, topZ=topZ)
+                good[is_border] = g2
             rel = relief_for(G, C, p, nx, ny, ki[wb], kj[wb], is_border, relief_radius, topZ)
             ok = good & (dd[wb] <= rel + STRADDLING_SLACK_MM + 1e-12)
             excluded[cells[ok]] = True
@@ -557,7 +650,7 @@ def judge(G, C, H, who, clx, cly, gh, stock_thickness, *, allowance=None, shadow
                 for c, d, x, y, w in zip(cells[bad], dd[wb][bad], xs[wb][bad], ys[wb][bad], is_wall[bad]):
                     note_over('wall' if w else 'border', d, x, y)
 
-    # 3 — WALL SHADOW: the v5 proof (the V within its leg, or the CL at the disc's rim), bounded by
+    # 4 — WALL SHADOW: the v5 proof (the V within its leg, or the CL at the disc's rim), bounded by
     # the relief. A cell whose v5 proof passes but whose depth exceeds the relief is remembered and
     # counted only if it then reaches adjudication (the app's order).
     pending_shadow_over = None
@@ -586,7 +679,7 @@ def judge(G, C, H, who, clx, cly, gh, stock_thickness, *, allowance=None, shadow
             if over.size:
                 pending_shadow_over = over
 
-    # 4 — THE STRADDLING PROOF (v6) for every cell still about to be judged, deeper than the floor.
+    # 5 — THE STRADDLING PROOF (v6) for every cell still about to be judged, deeper than the floor.
     if kk.size:
         sel = ~excluded[kk] & ~handled[kk]
         st = sel & (dd > ADJUDICATED_FLOOR_MM)
@@ -659,6 +752,10 @@ def judge(G, C, H, who, clx, cly, gh, stock_thickness, *, allowance=None, shadow
         'shadowOverReliefCells': int(shadow_over),
         'borderOverReliefCells': int(border_over),
         'overReliefDeepest': over_deepest,
+        # the silhouette proof (0f's ruling): cells excused on the blank's floor and the CL
+        'silhouetteExcusedCells': int(sil_cells),
+        'silhouetteExcusedPct': round(sil_cells / n * 100, 2),
+        'silhouetteDeepest': sil_deepest,
         # leftover, on the same raw sign
         'leftover0p1Pct': pct(d > 0.1), 'leftover0p3Pct': pct(d > 0.3), 'leftover1Pct': pct(d > 1),
         'maxLeftoverMm': round(float(max(0.0, d.max())) if d.size else 0.0, 3),
@@ -758,7 +855,8 @@ def run_check(gp, T, out, ncs, *, job=None, mkr=False, dz=0.0, only=None, write=
 
     s, aux = judge(G, C, H, who, clx, cly, gh, T, allowance=allowance,
                    shadow_radius=shadow_R, programs=progs if mkr else ideal_progs,
-                   ideal_programs=ideal_progs)
+                   ideal_programs=ideal_progs,
+                   breakthrough=float((job or {}).get('breakthrough') or 0.0))
     if mkr:
         s['vendorSeconds'] = round(sum((q.get('vendorSeconds') or 0) for q in progs), 1)
         s['unmappedToolNumbers'] = sorted({n for q in progs for n in q['unmappedToolNumbers']})
