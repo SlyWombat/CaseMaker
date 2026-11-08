@@ -18,7 +18,9 @@ afterEach(() => clearTargetObjectMeshCache());
 
 const here = (name: string): string => fileURLToPath(new URL(`../fixtures/goals/${name}`, import.meta.url));
 
-const STOCK = { length: 40, width: 40, thickness: 30 };
+// 50 × 50, not 40 × 40: the sphere's footprint leaves only 3 mm at the +Y edge on a 40 mm
+// blank, and the hold needs its line 4 mm clear of the part (#1073's margin refusal).
+const STOCK = { length: 50, width: 50, thickness: 30 };
 /** The setups engine's box name for the same stock. */
 const BOX = { x: STOCK.length, y: STOCK.width, z: STOCK.thickness };
 
@@ -97,8 +99,8 @@ describe('#872 the flip setup conversion', () => {
       // Same extents (an isometry): 30 mm in every direction for this sphere.
       expect(after.max[0]! - after.min[0]!).toBeCloseTo(before.max[0]! - before.min[0]!, 6);
       expect(after.max[2]! - after.min[2]!).toBeCloseTo(before.max[2]! - before.min[2]!, 6);
-      // Y mirrored about the stock: the centre at 18 goes to 22.
-      expect((after.min[1]! + after.max[1]!) / 2).toBeCloseTo(40 - 18, 6);
+      // Y mirrored about the stock: the centre at 18 goes to 50 − 18 = 32.
+      expect((after.min[1]! + after.max[1]!) / 2).toBeCloseTo(50 - 18, 6);
       // The placement contract holds: its top is `position.z`.
       expect(flipped.position.z).toBeCloseTo(after.max[2]!, 6);
       // A 180° X turn, and Y unchanged.
@@ -123,7 +125,7 @@ describe('#872 the flip setup conversion', () => {
     // The hold: the ⌀6 bore, made by the shop's own long-reach flat, in the margin.
     expect(result.hold).not.toBeNull();
     expect(result.hold!.diameterMm).toBeCloseTo(6, 6);
-    expect(result.hold!.depthMm).toBeCloseTo(STOCK.thickness + 0.5, 6); // #1073 — breakthrough 0.3 + chip 0.2
+    expect(result.hold!.depthMm).toBeCloseTo(STOCK.thickness + 0.3, 6); // #1073 — the job's breakthrough
     expect(result.hold!.cutter).toBe('user:o-flute-3.175-42');
     // Off the centre line (30 / 70 %), so the pin question can tell a 180° spin apart.
     expect(result.hold!.at[0].x).not.toBe(STOCK.length / 2);
@@ -134,7 +136,7 @@ describe('#872 the flip setup conversion', () => {
     const pins = result.setups[1]!.pins;
     expect(pins).toBeDefined();
     expect(pins!.at[0].x).toBeCloseTo(result.hold!.at[0].x, 2);
-    expect(pins!.at[0].y).toBeCloseTo(40 - result.hold!.at[0].y, 2);
+    expect(pins!.at[0].y).toBeCloseTo(50 - result.hold!.at[0].y, 2);
   });
 
   it('with no drill owned, the plan still converts, and says the hold is not stated', async () => {
