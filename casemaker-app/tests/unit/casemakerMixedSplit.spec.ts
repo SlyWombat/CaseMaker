@@ -98,8 +98,7 @@ function mixedJob(): EngraveJob {
 describe('#786 4b the headless run splits a named drill', () => {
   it('posts the drill and the flat as two programs, and says the split', async () => {
     const job = mixedJob();
-    const stem = runSheetFileName(job.name);
-    const stemNoExt = stem.replace(/\.nc$/, '');
+    const stemNoExt = runSheetFileName(job.name).replace(/\.nc$/, '');
     const run = await engrave(job, 'mixed');
 
     expect(
@@ -109,12 +108,14 @@ describe('#786 4b the headless run splits a named drill', () => {
     expect(run.receipt?.ok).toBe(true);
     if (run.receipt?.command !== 'engrave') throw new Error('expected the engrave receipt');
 
-    // Two files: the drill's own program first, the flat's for the pocket second.
-    expect(run.receipt.details.programs.map((p) => p.ncFile)).toEqual([stem, `${stemNoExt}-p2.nc`]);
-    for (const file of [stem, `${stemNoExt}-p2.nc`]) {
+    // Two files: the drill's own program first, the flat's for the pocket second — and under
+    // #1093 a multi-program run numbers program 1 too: `<job>-p1.nc`, `<job>-p2.nc`.
+    const firstFile = `${stemNoExt}-p1.nc`;
+    expect(run.receipt.details.programs.map((p) => p.ncFile)).toEqual([firstFile, `${stemNoExt}-p2.nc`]);
+    for (const file of [firstFile, `${stemNoExt}-p2.nc`]) {
       expect(existsSync(join(run.outDir, file)), `${file} was written`).toBe(true);
     }
-    const first = readFileSync(join(run.outDir, stem), 'utf8');
+    const first = readFileSync(join(run.outDir, firstFile), 'utf8');
     const second = readFileSync(join(run.outDir, `${stemNoExt}-p2.nc`), 'utf8');
     expect(first).toContain(`;@CM|TOOL|key=${DRILL_KEY}`);
     expect(second).not.toContain(`;@CM|TOOL|key=${DRILL_KEY}`);
