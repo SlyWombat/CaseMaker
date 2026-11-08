@@ -157,6 +157,7 @@ import { executeProfile } from '../../../src/workers/geometry/evaluateOp';
 import { engravePreviewSvg } from '../engravePreviewSvg';
 import { svgToPng } from '../svgToPng';
 import { efficiencyThresholds, goalPassCoverage, KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { goalCheckForProgram, type SimGoalCheck } from '../../../src/engine/cnc/engrave/goalCheckInput';
 import { pureGoalObject } from '../../../src/engine/cnc/engrave/jobKind';
 import { goalEdgeBreakOptions } from '../../../src/engine/cnc/engrave/edgeBreak';
@@ -1152,7 +1153,14 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         (key) => (key === job.toolKey ? tool : benchCutterFor(key)),
         generated.programs.map((p) => p.toolKey),
       ),
-    });
+    },
+      // #1083 — a rotary goal is judged on the map: the map's own radius and section ride along
+      // (goalCheckInput must not value-import the CAM, so the caller that has the job supplies it).
+      (() => {
+        const map = rotaryMapOf(job);
+        return map === null ? null : { radius: map.radius, section: map.section };
+      })(),
+    );
     const goalOracles: { index: number; report: OracleReport }[] = [];
     const firstEngraving = generated.programs.findIndex((p) => (p.kind ?? 'engrave') !== 'facing');
     const sweptBox: { load: SimLoadOk | null } = { load: null };
