@@ -560,8 +560,8 @@ describe('#469 the release step', () => {
     await uploadAndStart();
 
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
-    expect(uploaded).toEqual(['Faced-job-p1.nc', 'Faced-job-p2.nc']);
-    expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-p1.nc']);
+    expect(uploaded).toEqual(['Faced-job-face.nc', 'Faced-job.nc']);
+    expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-face.nc']);
     const change = screen.getByTestId('engrave-release-change').textContent ?? '';
     expect(change).toContain('ENGRAVING cutter');
     expect(change).toContain('re-touches the FACED surface with the wired probe');
@@ -626,14 +626,14 @@ describe('#469 the release step', () => {
 
     await screen.findByTestId('engrave-release-done', undefined, { timeout: 15000 });
     expect(sent.filter((l) => l.startsWith('play'))).toEqual([
-      'play /sd/gcodes/Faced-job-p1.nc',
-      'play /sd/gcodes/Faced-job-p2.nc',
+      'play /sd/gcodes/Faced-job-face.nc',
+      'play /sd/gcodes/Faced-job.nc',
     ]);
     // Z0 comes from the MEASURED faced top, and the write is ordered before the engraving program.
     const g10 = sent.filter((l) => l.startsWith('G10 L2'));
     expect(g10).toHaveLength(1);
     expect(g10[0]).toContain('Z-56.666');
-    expect(sent.indexOf(g10[0]!)).toBeLessThan(sent.indexOf('play /sd/gcodes/Faced-job-p2.nc'));
+    expect(sent.indexOf(g10[0]!)).toBeLessThan(sent.indexOf('play /sd/gcodes/Faced-job.nc'));
     const notes = record()?.notes.join('\n') ?? '';
     expect(notes).toContain('faced top measured machine Z -56.666');
     expect(notes).toContain('Z0 for flat-1.0 written');
@@ -656,7 +656,7 @@ describe('#469 the release step', () => {
     const notes = record()?.notes.join('\n') ?? '';
     expect(notes).toContain('outside the expected');
     expect(notes).toContain('No program was played');
-    expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-p1.nc']);
+    expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-face.nc']);
     expect(sent.filter((l) => l.startsWith('G10 L2'))).toHaveLength(0);
     // The face file is the only program that ran; the vacuum was closed after the refusal.
     expect(sent).toContain('M332');
@@ -686,7 +686,7 @@ describe('#469 the release step', () => {
     const notes = record()?.notes.join('\n') ?? '';
     expect(notes).toContain('M491 answered no tool-length reading for the cutter');
     expect(notes).toContain('No program was played');
-    expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-p1.nc']);
+    expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-face.nc']);
     expect(sent.filter((l) => l.startsWith('G10 L2'))).toHaveLength(0);
     expect(sent).toContain('M332');
   }, 30000);
@@ -725,7 +725,7 @@ describe('#469 the release step', () => {
     });
 
     await waitFor(
-      () => expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-p2.nc']),
+      () => expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job.nc']),
       { timeout: 10000 },
     );
     // No probe seek and no second origin write: the top under the re-touch point is now a floor.

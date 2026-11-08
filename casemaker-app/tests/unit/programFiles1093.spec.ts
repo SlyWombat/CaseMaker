@@ -137,3 +137,21 @@ describe('#1093 R2 — programFiles names every file of a run', () => {
     if (parsed.ok) expect(parsed.run.programs).toHaveLength(5);
   });
 });
+
+describe('#1093 — the same names out of Save all and the release store, a faced run included', () => {
+  it('the skim is -face.nc in both lists and the engravings are p1..', () => {
+    const programs = [program(1, { kind: 'facing' }), program(2), program(3)];
+    const sources: ReleaseSource[] = programs.map((p, i) => ({
+      setupIndex: 1,
+      setupId: `setup-${i + 1}`,
+      toolKey: 'inv:flat',
+      ...(p.kind === 'facing' ? { kind: 'facing' as const } : {}),
+      nc: p.nc,
+      hash: `h${i + 1}`,
+      verify: null,
+    }));
+    const released = releasePrograms('badge', sources, []);
+    expect(programFiles(programs, 'badge').map((f) => f.name)).toEqual(released.map((r) => r.filename));
+    expect(released.map((r) => r.filename)).toEqual(['badge-face.nc', 'badge-p1.nc', 'badge-p2.nc']);
+  });
+});

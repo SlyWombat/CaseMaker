@@ -10,7 +10,21 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { releaseFileName } from '@/engine/cnc/engrave/release';
+import { releaseFaceFileName, releaseFileName, releasePrograms, type ReleaseSource } from '@/engine/cnc/engrave/release';
+import { runSheetFaceFileName } from '@/engine/cnc/engrave/runSheet';
+
+function source(kind: 'facing' | undefined, i: number, dryRun = false): ReleaseSource {
+  return {
+    setupIndex: 1,
+    setupId: `setup-${i}`,
+    toolKey: 'inv:flat',
+    ...(kind === undefined ? {} : { kind }),
+    nc: `G1 X${i}\nM2`,
+    hash: `h${i}`,
+    verify: null,
+    ...(dryRun ? { dryRun: true } : {}),
+  };
+}
 
 describe('#1093 R1 — releaseFileName, the one naming function', () => {
   it('one program keeps the job name', () => {
@@ -42,5 +56,49 @@ describe('#1093 R1 — releaseFileName, the one naming function', () => {
     // Unpadded, the sort would put p10..p19 before p2 — the machine's list would play out of order.
     const unpadded = Array.from({ length: 19 }, (_, i) => `m1trayF-banded2-p${i + 1}.nc`);
     expect([...unpadded].sort().slice(0, 3)).toEqual(['m1trayF-banded2-p1.nc', 'm1trayF-banded2-p10.nc', 'm1trayF-banded2-p11.nc']);
+  });
+});
+
+/**
+ * #1093 — THE FACED RUN USES THE SAME NAMES AS EVERYTHING ELSE.
+ *
+ * 0f's ruling: ONE naming function for Save, sheet, release, record and CLI. The release store
+ * used to name by CUT-ORDER position, so a faced run uploaded the skim as `<stem>-p1.nc` and every
+ * engraving one place higher — while Save all, the sheet and the CLI wrote `<stem>-face.nc` and
+ * numbered the engravings p1… (the sheet's own "program N", the skim excluded). The operator
+ * uploaded "-p1" for a file Save calls "-face", and the machine's list did not match the sheet.
+ *
+ * RED at 96becd1fd: the three cases below were `badge-p1/p2/p3`, `badge-p1/p2` and
+ * `badge-dry-p1/dry-p2`.
+ */
+describe('#1093 — a faced run names the skim and numbers the engravings', () => {
+  it('two engravings: the skim is -face, the engravings are p1..p2', () => {
+    const files = releasePrograms('badge', [source('facing', 1), source(undefined, 2), source(undefined, 3)], []);
+    expect(files.map((f) => f.filename)).toEqual(['badge-face.nc', 'badge-p1.nc', 'badge-p2.nc']);
+    // The cut-order index and total stay the machine's program numbering (the skim is program 1).
+    expect(files.map((f) => [f.index, f.total])).toEqual([
+      [1, 3],
+      [2, 3],
+      [3, 3],
+    ]);
+  });
+
+  it('one engraving beside the skim keeps the one-program name', () => {
+    const files = releasePrograms('badge', [source('facing', 1), source(undefined, 2)], []);
+    expect(files.map((f) => f.filename)).toEqual(['badge-face.nc', 'badge.nc']);
+  });
+
+  it('the sheet’s face helper and the release’s are the same rule', () => {
+    expect(runSheetFaceFileName('My job')).toBe(releaseFaceFileName('My job'));
+    expect(runSheetFaceFileName('My job')).toBe('My-job-face.nc');
+  });
+
+  it('a lifted dry run keeps names of its own, for the skim and the program', () => {
+    const files = releasePrograms(
+      'badge',
+      [source('facing', 1, true), source(undefined, 2, true), source(undefined, 3)],
+      [],
+    );
+    expect(files.map((f) => f.filename)).toEqual(['badge-dry-face.nc', 'badge-dry-p1.nc', 'badge-p2.nc']);
   });
 });

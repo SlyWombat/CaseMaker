@@ -1006,7 +1006,18 @@ export function runSheetFrameFileName(jobName: string): string {
  * to a file the save never wrote.
  */
 export function runSheetFaceFileName(jobName: string): string {
-  return `${runSheetFileName(jobName).slice(0, -'.nc'.length)}-face.nc`;
+  return releaseFaceFileName(jobName);
+}
+
+/**
+ * #1093 — THE SKIM'S FILE NAME, by the same rule Save, the sheet, the release store and the CLI
+ * use: `<stem>-face.nc`. The skim is not numbered among the engraving programs, so a faced run's
+ * files are `<stem>-face.nc` + `<stem>-p1.nc` … (one engraving program keeps `<stem>.nc`).
+ * `dryRun` (#547) inserts `-dry` the way `releaseFileName` does, so a lifted skim never overwrites
+ * the real one on the card: `<stem>-dry-face.nc`.
+ */
+export function releaseFaceFileName(jobName: string, dryRun = false): string {
+  return `${releaseStem(jobName)}${dryRun ? '-dry' : ''}-face.nc`;
 }
 
 /**

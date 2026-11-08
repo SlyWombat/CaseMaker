@@ -63,8 +63,8 @@ export interface ReleaseSource {
  * the run sheet can name a multi-program run's files without this module's cycle. Re-exported here
  * because this is where the release step and every existing importer have always found it.
  */
-import { releaseFileName, releaseStem } from './runSheet';
-export { releaseFileName, releaseStem };
+import { releaseFaceFileName, releaseFileName, releaseStem } from './runSheet';
+export { releaseFaceFileName, releaseFileName, releaseStem };
 
 /** One program as the release step lists, names and plays it. */
 export interface ReleaseProgram {
@@ -103,22 +103,33 @@ export function releasePrograms(
   finishedHashes: readonly string[],
 ): ReleaseProgram[] {
   const total = programs.length;
+  // #1093 — THE ENGRAVING PROGRAMS' OWN COUNT: the skim is not numbered among them, exactly as
+  // the sheet's "program N" and the CLI count. A faced run's files are `<stem>-face.nc` plus
+  // `<stem>-p1.nc`…, the same names Save all writes and the sheet prints.
+  const engravingTotal = programs.filter((p) => (p.kind ?? 'engrave') !== 'facing').length;
+  let engravingIndex = 0;
   const done = new Set(finishedHashes);
-  return programs.map((p, i) => ({
-    index: i + 1,
-    total,
-    setupIndex: p.setupIndex,
-    setupId: p.setupId,
-    toolKey: p.toolKey,
-    kind: p.kind,
-    filename: releaseFileName(jobName, i + 1, total, p.dryRun),
-    hash: p.hash,
-    nc: p.nc,
-    verify: p.verify,
-    surfaceCheck: p.surfaceCheck ?? null,
-    done: done.has(p.hash),
-    dryRun: p.dryRun === true,
-  }));
+  return programs.map((p, i) => {
+    const facing = (p.kind ?? 'engrave') === 'facing';
+    if (!facing) engravingIndex += 1;
+    return {
+      index: i + 1,
+      total,
+      setupIndex: p.setupIndex,
+      setupId: p.setupId,
+      toolKey: p.toolKey,
+      kind: p.kind,
+      filename: facing
+        ? releaseFaceFileName(jobName, p.dryRun === true)
+        : releaseFileName(jobName, engravingIndex, engravingTotal, p.dryRun),
+      hash: p.hash,
+      nc: p.nc,
+      verify: p.verify,
+      surfaceCheck: p.surfaceCheck ?? null,
+      done: done.has(p.hash),
+      dryRun: p.dryRun === true,
+    };
+  });
 }
 
 /**

@@ -1,0 +1,146 @@
+{
+  "_note": "#1093 R1 \u2014 set B re-keyed, NOT re-cut: the 14 programs the branch\u2019s CLI writes for the two m1trayB jobs under the one naming rule (m1trayB-top-p1..p9, m1trayB-bottom-p1..p5; p1 is the old <job>.nc). 11 contents are byte-identical to the 2026-11-07 table; the 3 in `changedSince20261107` are the ACCEPTED #1080 generator changes (top p7, top p8, bottom p4), exactly the three the m1-land12 acceptance recorded. Acceptance: 14/14 names, 11/14 contents unchanged, 3/14 the ruled #1080 deltas.",
+  "source": "casemaker cut <job>.cutjob.json --location k3-house/location.json, branch 1093-save-all off m1-land12 f28e0d223, 2026-11-08",
+  "changedSince20261107": [
+    {
+      "name": "m1trayB-top-p7.nc",
+      "old": "5b009edf7a2cf13b9f3e6ddb7c09baea",
+      "new": "a73c4e7c65ec42ae5edc0c653c8cd04a"
+    },
+    {
+      "name": "m1trayB-top-p8.nc",
+      "old": "344897b57a3eb65c99966f17cd711c39",
+      "new": "55d81fffeb6b754e6b7f44b23b6a2925"
+    },
+    {
+      "name": "m1trayB-bottom-p4.nc",
+      "old": "523840ce866a94623e3ad164b41311bf",
+      "new": "91d289d5fc0cf1321bf6ce37dee03e37"
+    }
+  ],
+  "jobs": {
+    "m1trayB-top": {
+      "programs": 9,
+      "files": [
+        {
+          "name": "m1trayB-top-p1.nc",
+          "oldName": "m1trayB-top.nc",
+          "bytes": 124288,
+          "md5": "c674717adeb75440f480580b2628a87e"
+        },
+        {
+          "name": "m1trayB-top-p2.nc",
+          "oldName": "m1trayB-top-p2.nc",
+          "bytes": 1289,
+          "md5": "8cdac279a793ccb1a7bbd6fcb236868d"
+        },
+        {
+          "name": "m1trayB-top-p3.nc",
+          "oldName": "m1trayB-top-p3.nc",
+          "bytes": 2002,
+          "md5": "cf327e2a3cb7c71401905b387cd63985"
+        },
+        {
+          "name": "m1trayB-top-p4.nc",
+          "oldName": "m1trayB-top-p4.nc",
+          "bytes": 6667,
+          "md5": "5275f401e7ad0eda0aeb0439e2ddfc58"
+        },
+        {
+          "name": "m1trayB-top-p5.nc",
+          "oldName": "m1trayB-top-p5.nc",
+          "bytes": 36079,
+          "md5": "5031ba58189dbf2a099ed31b026b69bc"
+        },
+        {
+          "name": "m1trayB-top-p6.nc",
+          "oldName": "m1trayB-top-p6.nc",
+          "bytes": 48410,
+          "md5": "724d4e96463616f54a029f4fdfb1a73d"
+        },
+        {
+          "name": "m1trayB-top-p7.nc",
+          "oldName": "m1trayB-top-p7.nc",
+          "bytes": 217718,
+          "md5": "a73c4e7c65ec42ae5edc0c653c8cd04a"
+        },
+        {
+          "name": "m1trayB-top-p8.nc",
+          "oldName": "m1trayB-top-p8.nc",
+          "bytes": 175695,
+          "md5": "55d81fffeb6b754e6b7f44b23b6a2925"
+        },
+        {
+          "name": "m1trayB-top-p9.nc",
+          "oldName": "m1trayB-top-p9.nc",
+          "bytes": 45454,
+          "md5": "114ed00b170b6ba4a0dd3c5486507009"
+        }
+      ]
+    },
+    "m1trayB-bottom": {
+      "programs": 5,
+      "files": [
+        {
+          "name": "m1trayB-bottom-p1.nc",
+          "oldName": "m1trayB-bottom.nc",
+          "bytes": 35572,
+          "md5": "3673638b938eb759a289d04c66f41e55"
+        },
+        {
+          "name": "m1trayB-bottom-p2.nc",
+          "oldName": "m1trayB-bottom-p2.nc",
+          "bytes": 4299,
+          "md5": "8fd40df1e83ff9c1a11584c3fdab0ca0"
+        },
+        {
+          "name": "m1trayB-bottom-p3.nc",
+          "oldName": "m1trayB-bottom-p3.nc",
+          "bytes": 66337,
+          "md5": "02746724a5a5dc5296e2953b992c4a0f"
+        },
+        {
+          "name": "m1trayB-bottom-p4.nc",
+          "oldName": "m1trayB-bottom-p4.nc",
+          "bytes": 5220613,
+          "md5": "91d289d5fc0cf1321bf6ce37dee03e37"
+        },
+        {
+          "name": "m1trayB-bottom-p5.nc",
+          "oldName": "m1trayB-bottom-p5.nc",
+          "bytes": 2866922,
+          "md5": "6ab42994f33f896ab81dcb926500ec1f"
+        }
+      ]
+    }
+  },
+  "facedJobCardRename": {
+    "_note": "A FACED job\u2019s uploaded names changed with #1093 too: the release store now names programs by the one naming function, as Save all, the sheet and the CLI already did. No set B file is affected (set B has no facing). An operator who cut a faced job from an older build sees the skim\u2019s name change on the card; re-uploading under the new names is the one-time step.",
+    "old": "<stem>-p1.nc = the skim; <stem>-p2.nc \u2026 = the engravings (cut-order numbering, skim included)",
+    "new": "<stem>-face.nc = the skim; <stem>-p1.nc \u2026 = the engravings (numbered among themselves; one engraving = <stem>.nc)",
+    "example": {
+      "job": "Faced-job",
+      "old": [
+        "Faced-job-p1.nc",
+        "Faced-job-p2.nc"
+      ],
+      "new": [
+        "Faced-job-face.nc",
+        "Faced-job.nc"
+      ],
+      "twoEngravings": {
+        "old": [
+          "Faced-job-p1.nc",
+          "Faced-job-p2.nc",
+          "Faced-job-p3.nc"
+        ],
+        "new": [
+          "Faced-job-face.nc",
+          "Faced-job-p1.nc",
+          "Faced-job-p2.nc"
+        ]
+      }
+    },
+    "dryRun": "<stem>-dry-face.nc for a lifted skim; <stem>-dry-p1.nc \u2026 for lifted engravings"
+  }
+}

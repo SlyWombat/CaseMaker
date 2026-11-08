@@ -64,7 +64,6 @@ import {
   releaseNext,
   releasePending,
   releasePrograms,
-  releaseFileName,
   type ReleaseProgram,
   type ReleaseSource,
 } from '@/engine/cnc/engrave/release';
@@ -545,7 +544,9 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
             phase: 'idle',
             files: planned.map((f) => ({
               ...f,
-              filename: releaseFileName(job.name, f.index, f.total),
+              // #1093 — the name `releasePrograms` planned is THE name (one naming function for
+              // Save, sheet, release, record and CLI). Re-deriving it here with a cut-order index
+              // renamed a faced run's skim to `-p1` and shifted every engraving by one.
               upload: 'pending' as const,
               uploadNote: null,
             })),
