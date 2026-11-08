@@ -11,6 +11,7 @@ import {
   isMetalMaterial,
   isPlasticMaterial,
   isPrintedBlankMaterial,
+  isToolingBoardMaterial,
   isWoodMaterial,
 } from '@/engine/cnc/materials';
 import {
@@ -305,6 +306,8 @@ function groupMaterials(options: readonly { value: StockMaterial; label: string 
     { label: 'Metals', options: options.filter((o) => isMetalMaterial(o.value)) },
     // #743 P-1 — the copper-clad board, which is none of the three above.
     { label: 'Circuit board', options: options.filter((o) => isCompositeMaterial(o.value)) },
+    // #1066 — the cast resin tooling board, its own family (no antistatic, no facing).
+    { label: 'Tooling board', options: options.filter((o) => isToolingBoardMaterial(o.value)) },
   ];
   return groups.filter((g) => g.options.length > 0);
 }

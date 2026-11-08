@@ -134,7 +134,8 @@ describe('the vendor material map is exact, name by name (#310, #347)', () => {
     // #347 widened this from two rows to the eight materials the app can name: the wood it always
     // had, plus the two plastics and the four metals a machine profile declares. #743 P-1 added the
     // ninth, which is the vendor's OWN row: a copper-clad board is a material now, so `PCB` is
-    // mapped rather than refused.
+    // mapped rather than refused. #1066 added the tenth the same way: `Epoxy Tooling` answers the
+    // cast resin tooling board, the M1 stock.
     expect(Object.keys(CATALOGUE_MATERIALS).sort()).toEqual([
       '6061 Aluminum',
       '7075 Aluminum',
@@ -142,6 +143,7 @@ describe('the vendor material map is exact, name by name (#310, #347)', () => {
       'Acrylic',
       'Brass',
       'Copper',
+      'Epoxy Tooling',
       'Hardwood',
       'PCB',
       'Softwood',
@@ -158,11 +160,12 @@ describe('the vendor material map is exact, name by name (#310, #347)', () => {
     // The vendor names this app has no material for, plus names that are nearly the vendor's own
     // word: a substring match would read `Hardwood (Oak)` as hardwood and both aluminium names as
     // each other's.
-    // `PCB` was in this list until #743 P-1 gave the board a material of its own; it is mapped now
-    // (the test above), and every other name Makera lists without an app material stays refused.
+    // `PCB` was in this list until #743 P-1 gave the board a material of its own, and `Epoxy
+    // Tooling` until #1066 did the same for the resin board; both are mapped now (the test above),
+    // and every other name Makera lists without an app material stays refused.
     const refused = [
       'MDF', 'PLA', 'Bakelite', 'Delrin', 'Carbon Fiber', 'Polycarbonate',
-      'Epoxy Tooling', 'Synthetic Stone', 'Hardwood (Oak)', 'Softwood (Pine)', 'hardwood',
+      'Synthetic Stone', 'Hardwood (Oak)', 'Softwood (Pine)', 'hardwood',
       'Softwoods', '6061 aluminum', 'Aluminum 6061', 'aluminium-6061', '', 'toString',
       '__proto__', 'constructor',
     ];

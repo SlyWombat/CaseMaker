@@ -1,0 +1,9 @@
+{
+  "kind": "casemaker-catalogue",
+  "schemaVersion": 1,
+  "syncedAt": "2026-10-18T03:24:13.374Z",
+  "tools": [],
+  "feeds": [
+    { "cutterId": "112111313812", "material": "Epoxy Tooling", "rpm": 10000, "feed": 1000, "plungeFeed": 300, "stepDown": 1.0 }
+  ]
+}
