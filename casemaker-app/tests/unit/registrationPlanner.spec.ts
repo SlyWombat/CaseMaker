@@ -941,10 +941,14 @@ describe('#599 the standalone mount tap', () => {
     // must stop there — not at the work-envelope floor — so a probe that never triggers is a miss
     // at the PLAN's floor, with that floor in the sentence.
     const z1 = fakeZ1({ actual: SHIFTED });
-    const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { console: z1.console, operator: yes }, -100, 'vise', null, 11);
+    const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { console: z1.console, operator: yes }, -100, 'bracket', null, 11);
     expect(r.ok).toBe(false);
     expect(z1.lines.filter((l) => l.startsWith('G38.3 Z-'))).toEqual(['G38.3 Z-11 F150']);
-    if (!r.ok) expect(r.reason).toContain('down to machine Z -14');
+    if (!r.ok) {
+      expect(r.reason).toContain('down to machine Z -14');
+      // 6b, C2 review — a BOUNDED bracket tap is the seat press: it names the seat, not the top.
+      expect(r.reason).toContain('no seat (the wasteboard beside the bracket’s front arm)');
+    }
   });
 
   it('#1070 — a triggered tap on the wired probe is released with G38.5 before the lift', async () => {

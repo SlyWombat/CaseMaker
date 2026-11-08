@@ -975,7 +975,16 @@ export async function runMountTap(
     if (prb === null || !prb.touched) {
       // The vise's sentence is the bench-tested one and stays byte for byte; the others name their
       // own reference the way the operator sees it.
-      const what = mount === 'vise' ? 'jaw top' : mount === 'bracket' ? 'bracket top' : 'axis';
+      // #1070 — a BOUNDED tap on a bracket is the SEAT press: what it looks for is the wasteboard
+      // beside the bracket's front arm, not the bracket's top (6b, C2 review).
+      const what =
+        mount === 'vise'
+          ? 'jaw top'
+          : mount === 'bracket'
+            ? planTravelMm !== null
+              ? 'seat (the wasteboard beside the bracket’s front arm)'
+              : 'bracket top'
+            : 'axis';
       throw new Stop(`no ${what} at (${tap.x}, ${tap.y}) down to machine Z ${f(tapFloorZ)} — is the ${mount} where the machine record says?`);
     }
     // #519 item 1 — the standalone tap's reading, as it lands.
