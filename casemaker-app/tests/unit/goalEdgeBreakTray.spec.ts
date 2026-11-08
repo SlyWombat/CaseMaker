@@ -126,14 +126,10 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
     coveredCount: meta.coveredCount,
     resolutionNote: 'tray reference',
   };
+  // E's npy field is the parity reference (the numbers above); the checks read the app's own
+  // tooled stamp, which carries the depth and the CL together (#1092).
   const swept = readNpy(FILES.swept[0]);
   expect(swept.shape).toEqual([meta.ny, meta.nx]);
-  const top = (x: number, y: number): number | null => {
-    const i = Math.round((x - meta.x0) / meta.pitch);
-    const j = Math.round((y - meta.y0) / meta.pitch);
-    if (i < 0 || j < 0 || i >= meta.nx || j >= meta.ny) return null;
-    return swept.data[j * meta.nx + i]!;
-  };
 
   // #964 — THE PAGE'S `who` RULE. E's 3.66 % excuses a cell only where the DEEPEST stamp in it
   // is the V bit. The vendor NC runs four cutters (⌀6 flat, ⌀3.175 flat, ⌀6 ball, ⌀3.175 90°
@@ -179,13 +175,13 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
   // #1064 — E's page rule seeded its band from every design wall; that is the `edges: 'all'`
   // reading, and it is what these numbers are parity with. The default (silhouette) is checked
   // by the next case.
-  // #1092 (gate v8) — the silhouette and shadow proofs read the deepest stamp's own CL: E's npy
-  // field carries no CL, so it comes from the app's tooled stamp of the same NC (the same pair the
-  // app's own check passes).
-  // #1092 (gate v8) — the vendor's outline cut runs through the BLANK (its border row reads 23 mm
-  // below the goal top), so the silhouette ceiling is the slab's own thickness, not the goal's
-  // depth: the 27.2 mm slab this NC was cut from.
-  const r = checkGoalCutInto(goal, top, {
+  // #1092 (gate v8, 0f's ruling) — THE DEPTH AND THE CL COME FROM THE SAME STAMP. E's npy field
+  // carries a depth but no CL; pairing it with a separately assembled CL field mis-attributed the
+  // tray's outline cell (it read a ⌀3.175 CL at (12.80, 3.41) where the ⌀6 T1's move at Y = −1.00
+  // cut it). The app's tooled stamp supplies both, exactly as the app's own check does. The
+  // silhouette ceiling is the slab's own thickness (the outline cut runs through the 27.2 mm
+  // blank), and E's numbers above stay the parity reference the later case pins.
+  const r = checkGoalCutInto(goal, stampField, {
     edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4), edges: 'all' },
     wallShadowRadiusMm: 3,
     stockThicknessMm: 27.2,
@@ -208,9 +204,11 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
 
   // #1064 — THE DEFAULT BAND NAMES THE PART'S SILHOUETTE ONLY. This NC's V strokes are on
   // interior pocket lips: with no `edges: 'all'` in the job, they are cut-into, not edge break.
-  const interior = checkGoalCutInto(goal, top, {
+  const interior = checkGoalCutInto(goal, stampField, {
     edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4) },
     wallShadowRadiusMm: 3,
+    stockThicknessMm: 27.2,
+    clAt,
   });
   expect(interior.edgeBreakFraction).toBe(0);
   expect(interior.adjudicatedFraction).toBeGreaterThan(0);
