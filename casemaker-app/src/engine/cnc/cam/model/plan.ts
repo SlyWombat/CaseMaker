@@ -754,11 +754,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // (dilated by the ROUNDER in `planPocketsForTree`, which knows the cutter). A field that cannot
   // be stamped falls back to the whole footprint — the floor pass as it was.
   //
-  // #1092 — AND ONLY WHERE THE GOAL HAS A SURFACE AT THE PASS'S DEPTH. The simulated field says
+  // #1092 — AND ONLY WHERE THE GOAL HAS A FLOOR AT THE PASS'S DEPTH. The simulated field says
   // stock stands above the goal over an overhang too (the elephant's body over pocket-0), but
   // there the standing material IS the goal's own surface: a floor pass at `region.floorZ` can
-  // only gouge it. Those cells are excluded here (the bound's own margin), so the rest is never
-  // planned for coverage it cannot legitimately recover.
+  // only gouge it. The mask keeps a cell only where a floor the cutter can actually rest on is
+  // within reach (see `safeWithinReach` below), so the rest is never planned for coverage it
+  // cannot legitimately recover.
   const restRegion = coverageGoal === undefined
     ? undefined
     : (prefixIrs: readonly ToolpathIR[], region: { id: string; footprint: Polygons; floorZ: number; bounds: { min: [number, number]; max: [number, number] }; radiusMm: number }): Polygons | null => {
@@ -778,29 +779,21 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         const j1 = Math.min(goal.ny - 1, Math.ceil((region.bounds.max[1] - goal.y0) / pitch));
         if (i1 < i0 || j1 < j0) return null;
         const cells = acc;
-        // #1092 — A COVERAGE REST'S CELL IS VALID ONLY WHERE THE GOAL HAS A SURFACE AT THE PASS'S
-        // OWN DEPTH, WITHIN THE CUTTER'S REACH. A rest cuts at `region.floorZ`; a cell whose
-        // neighbourhood has no goal surface at that Z is not a floor at all — the design stands
-        // above it (a ceiling), and the pass would cut it. The elephant's j29 measured the class
-        // both ways: 18.03 % adjudicated cut-into (24.75 mm) before this rule, and 8.05 % in five
-        // 4.3-4.8 mm blocks after a first, neighbour-count version — those blocks are exactly the
-        // cells with no goal cell at the pass level within the ⌀3.175 rest's radius (the nearest
-        // design surface there sits 0.03-0.5 mm BELOW the level, and "at or below" kept them).
-        // Requiring the surface AT the level (the analyst's own words) also keeps every legitimate
-        // wall-foot strip: set B's m1trayB-top rim cells have the pocket floor 0.1 mm away, so
-        // they stay and the rest's region boundary does not re-flow (9/9 programs byte-identical).
-        const tol = ARC_CHORD_TOLERANCE_MM;
         // #1092 — A REST CUTS A FLOOR THE CUTTER BELONGS ON. A pass at `region.floorZ` is valid
         // only where the goal has a surface at that depth; a single low cell is not a floor. The
         // witness is therefore a SAFE SPOT: a position whose whole cutter disc rests on cells at or
-        // below the pass floor (uncovered cells are the air beyond the part and never block). And a
-        // mask cell is kept only when such a spot lies within the cutter's reach of it. Measured:
-        // the elephant's j29 five-block residue after an at-or-below cell test was one 4.9 x 5.3 mm
-        // component whose 'witnesses' were a one-cell sliver of the goal's own bottom edge 0.086 mm
-        // below the level — no disc fits on it, so this rule drops it; a real pocket floor (set B's
-        // m1trayB-top) has safe spots within reach of its rim, so all nine programs stay byte
-        // identical. The disc is a Chebyshev square of `reach` cells (conservative: it can only
-        // ever mark FEWER spots safe, never more).
+        // below the pass floor (uncovered cells are the air beyond the part and never block). A
+        // mask cell is kept only when such a spot lies within the cutter's reach of it.
+        //
+        // The measured history is the rule's own justification: j29 read 18.03 % adjudicated
+        // cut-into (24.75 mm) with no test at all; a 4-neighbour "closed over" test still left five
+        // 4.3-4.8 mm blocks; an at-or-below cell witness left one 4.9 x 5.3 mm component whose
+        // witnesses were a one-cell sliver of the goal's own bottom edge 0.086 mm below the level.
+        // No disc fits on a 0.1 mm sliver, so the safe-spot test drops it — and a real pocket floor
+        // (set B's m1trayB-top) has disc-fit spots within reach of its rim, so its mask, and all
+        // nine of its programs, stay byte-identical. The disc is a Chebyshev square of `reach`
+        // cells (conservative: it can only ever mark FEWER spots safe, never more).
+        const tol = ARC_CHORD_TOLERANCE_MM;
         const reach = Math.max(1, Math.ceil(region.radiusMm / pitch));
         const pad = reach + 1;
         const pi0 = Math.max(0, i0 - pad);
