@@ -2633,3 +2633,47 @@ describe('#1059 a job in the 4th-axis chuck reads the chuck’s mount, load and 
     expect(words(vise, 'mount')).toContain('locating pins');
   });
 });
+
+/**
+ * #1087 — THE ROTARY FINISH'S SCALLOP, ON PAPER. The sheet states the step the rows were cut at
+ * and the cusp that step leaves BESIDE the cusp the job asks for: the promise and the result in
+ * one clause, from the generator's own `surface3d` facts (never re-derived here). A field grid too
+ * coarse to reach the promise names the grid instead of passing the miss in silence.
+ */
+describe('#1087 the finish’s cusp is stated beside the scallop', () => {
+  const facts = {
+    resolutionNote: 'sampled on a 0.1 mm grid',
+    gridPitchMm: 0.1,
+    gridCells: 629 * 1978,
+    stepDownMm: 1,
+    roughStepOverMm: 0.9,
+    finishStepOverMm: 0.4,
+    finishScallopMm: 0.027,
+    finishCuspMm: 0.0202,
+    stockToLeaveMm: 0.2,
+    roughingLayers: 32,
+    scallop: null,
+    pencil: null,
+    notes: [],
+  };
+
+  const cutWords = (sheet: RunSheet): string =>
+    section(sheet, 'cut').steps.map((s) => `${s.text} ${s.value ?? ''}`).join('\n');
+
+  it('states the achieved cusp beside the stated scallop', () => {
+    const job = dj();
+    const sheet = buildRunSheet(job, { ...stubGenerated(job), surface3d: facts }, NO_SIM, NOW);
+    const cut = cutWords(sheet);
+    expect(cut).toContain('Finishing follows the surface at 0.4 mm step-over');
+    expect(cut).toContain('leaving a 0.02 mm cusp against the 0.027 mm the job asks for');
+  });
+
+  it('names the grid when it could not reach the promise', () => {
+    const job = dj();
+    const limited = { ...facts, finishStepOverMm: 0.5, finishCuspMm: 0.031754, finishGridLimited: true, gridPitchMm: 0.5 };
+    const sheet = buildRunSheet(job, { ...stubGenerated(job), surface3d: limited }, NO_SIM, NOW);
+    const cut = cutWords(sheet);
+    expect(cut).toContain('0.5 mm step-over — the finest the 0.5 mm surface grid allows');
+    expect(cut).toContain('leaving a 0.032 mm cusp against the 0.027 mm the job asks for');
+  });
+});
