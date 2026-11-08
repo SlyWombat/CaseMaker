@@ -1376,6 +1376,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     // UNCOVERED side, at least `r − pitch` from the outline — the same disc-rim proof the shadow
     // class uses. A cut below the blank's floor, or a contour whose CL is inside the silhouette,
     // is COUNTED (and the print says so).
+    let silhouetteFallThrough = false;
     if (silhouette[k] === 1) {
       const x = goal.x0 + i * goal.pitch;
       const y = goal.y0 + j * goal.pitch;
@@ -1405,15 +1406,20 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
         excluded[k] = 1;
         silhouetteExcusedCells++;
         if (silhouetteDeepest === null || depth > silhouetteDeepest.mm) silhouetteDeepest = { mm: depth, x, y, clDistanceMm };
+        continue;
       }
-      continue;
+      // #1092 (0f's follow-up) — A FAILED SILHOUETTE CL TEST FALLS THROUGH to the v6 straddling
+      // proof, exactly as a v5-failed shadow cell does: an OPEN POCKET reaching the rim (the
+      // property parts' 3 mm notch) legitimately has its CL inside the part, and its cells
+      // straddle the notch's step. The silhouette CL test stays; it is just not the only proof.
+      silhouetteFallThrough = true;
     }
-    // #1092 (gate v8) — A WALL OR BORDER CELL IS NO LONGER EXCUSED BY CLASS. It goes through the
-    // same straddling proof the v6 rule runs for every other cell, with the goal's own RELIEF at
-    // the cell as the ceiling: a heightfield mis-reads a cutter beside a wall by at most the
-    // wall's height, so a cell deeper than that is a real cut whatever its class. A cell that
-    // fails the proof is COUNTED, and its class's over-relief counter says so.
-    if (wall[k] === 1 || border[k] === 1) {
+    if (!silhouetteFallThrough && (wall[k] === 1 || border[k] === 1)) {
+      // #1092 (gate v8) — A WALL OR BORDER CELL IS NO LONGER EXCUSED BY CLASS. It goes through the
+      // same straddling proof the v6 rule runs for every other cell, with the goal's own RELIEF at
+      // the cell as the ceiling: a heightfield mis-reads a cutter beside a wall by at most the
+      // wall's height, so a cell deeper than that is a real cut whatever its class. A cell that
+      // fails the proof is COUNTED, and its class's over-relief counter says so.
       const cls: 'wall' | 'border' = wall[k] === 1 ? 'wall' : 'border';
       const x = goal.x0 + i * goal.pitch;
       const y = goal.y0 + j * goal.pitch;
@@ -1430,7 +1436,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       continue;
     }
     let shadowOverRelief: { depth: number; x: number; y: number } | null = null;
-    if (shadow !== null && shadow[k] === 1 && wall[k] !== 1) {
+    if (!silhouetteFallThrough && shadow !== null && shadow[k] === 1 && wall[k] !== 1) {
       const x = goal.x0 + i * goal.pitch;
       const y = goal.y0 + j * goal.pitch;
       const vDeepest = allowance !== undefined && allowance.toolNumber !== undefined

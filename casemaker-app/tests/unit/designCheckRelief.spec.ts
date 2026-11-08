@@ -102,6 +102,45 @@ describe('#1092 (gate v8) — the excuse is bounded by the goal’s own relief',
     expect(report.shadowOverReliefCells).toBe(0);
   });
 
+  it('counts a silhouette cell whose CL is inside with no step to straddle — the CL test is kept', () => {
+    // #1092 (0f's follow-up) — a failed silhouette CL test FALLS THROUGH to the v6 straddling
+    // proof (an open pocket reaching the rim has its CL inside and is excused there). With NO
+    // step to straddle the fall-through cannot excuse it either: the cell is COUNTED.
+    const nx = 20;
+    const ny = 10;
+    const z = new Float32Array(nx * ny);
+    const covered = new Uint8Array(nx * ny);
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) covered[j * nx + i] = i < 10 ? 1 : 0; // covered half: the part
+    }
+    const goal: GoalHeightfield = {
+      nx,
+      ny,
+      x0: 0,
+      y0: 0,
+      pitch: PITCH,
+      topZ: 0,
+      minZ: 0,
+      z,
+      covered,
+      coveredCount: 10 * ny,
+      stockThicknessMm: 5,
+      resolutionNote: 'designCheckRelief1092 silhouette fixture',
+    };
+    const top = (x: number, y: number): number | null => {
+      const i = Math.round(x / PITCH);
+      const j = Math.round(y / PITCH);
+      if (i < 0 || j < 0 || i >= nx || j >= ny || covered[j * nx + i] !== 1) return null;
+      return i === 9 && j === 5 ? -0.5 : 0;
+    };
+    // The CL one millimetre INSIDE the part (cell (7, 5)), not on the uncovered side.
+    const clAt = (): { x: number; y: number } => ({ x: 3.75, y: 2.5 });
+    const report = checkGoalCutInto(goal, top, { wallShadowRadiusMm: 1.5, stockThicknessMm: 5, clAt });
+    expect(report.silhouetteExcusedCells).toBe(0);
+    expect(Math.round(report.adjudicatedFraction * report.goalCells)).toBe(1);
+    expect(report.adjudicatedMaxMm).toBeCloseTo(0.5, 6);
+  });
+
   it('counts the same trench when the CL point is inside it — the relief is a ceiling, not a proof', () => {
     const { goal, reader } = fixture(
       40,

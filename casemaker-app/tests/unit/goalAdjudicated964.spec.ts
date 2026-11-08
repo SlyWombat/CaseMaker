@@ -78,9 +78,9 @@ describe('#964 the gate’s unadjudicable cells, with no edge break stated', () 
     // The exclusions, in a job that states no edge break. v5: wall cells stay excluded; the 13
     // shadow cells state no CL, so they are ADJUDICATED with the other 50.
     expect(r.edgeBreakFraction).toBe(0);
-    // #1092 (gate v8) — 79 of the 80 wall cells are excused on proof; the first one is cut
-    // 2.448 mm, 0.448 mm DEEPER than the 2 mm wall it sits on, so it is COUNTED — a real over-cut
-    // the wall class hid until now (the relief is the wall's own height).
+    // #1092 (gate v8) — 79 of the 80 wall cells are excused on proof; the first one is HAND-SET in
+    // this fixture to 2.448 mm (`CUTS.set(…, k === 0 ? 2.448 : 2.0)`), 0.448 mm past its 2 mm
+    // wall on purpose, so v8's bound counts it — the bound working, not a defect (#1113).
     expect(r.wallNotScoredFraction).toBeCloseTo(79 / N, 12);
     expect(r.shadowNotScoredFraction).toBe(0);
     // The ADJUDICATED reading: 64 cells — the 50 clear ones (0.165 mm), the 13 shadow cells

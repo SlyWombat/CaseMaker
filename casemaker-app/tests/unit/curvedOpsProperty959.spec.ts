@@ -162,16 +162,15 @@ describe('#964 the curved ops cut the design and leave the walls (#959/#960)', (
           coverage,
           `${kind} seed ${seed}: coverage ${(coverage * 100).toFixed(2)} % — the line is 95 %`,
         ).toBeGreaterThanOrEqual(0.95);
-        // #1092 (gate v8, 0f's ruling) — SILHOUETTE CELLS ARE EXCUSED ON PROOF, and the one cell
-        // this plan leaves counted is NAMED, not pinned away: a rim cell whose contour CL sits
-        // inside the silhouette (the proof's CL condition fails there), a real 3 mm rim cut-in.
-        // The corner reads are excused (`silhouetteDeepest` names the deepest); anything beyond
-        // this single cell fails.
+        // #1092 (gate v8, 0f's follow-up) — the notch pocket's cells whose silhouette CL test
+        // fails (an OPEN pocket reaching the rim legitimately has its CL inside the part) FALL
+        // THROUGH to the v6 straddling proof and are excused there: nothing is adjudicated on any
+        // part. A CL inside with NO straddled step still counts — pinned in designCheckRelief.
         const countedCells = Math.round(report.adjudicatedFraction * report.goalCells);
         expect(
           countedCells,
           `${kind} seed ${seed}: ${countedCells} adjudicated cell(s), up to ${report.adjudicatedMaxMm.toFixed(3)} mm at ${JSON.stringify(report.adjudicatedMaxAt)} (raw ${(report.cutIntoFraction * 100).toFixed(2)} %; wall ${(report.wallNotScoredFraction * 100).toFixed(2)} %, shadow ${(report.shadowNotScoredFraction * 100).toFixed(2)} %; silhouette ${report.silhouetteExcusedCells} excused, deepest ${JSON.stringify(report.silhouetteDeepest)})`,
-        ).toBeLessThanOrEqual(1);
+        ).toBe(0);
       }, 600_000);
     }
   }
