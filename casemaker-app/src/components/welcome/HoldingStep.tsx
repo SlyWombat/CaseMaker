@@ -1641,10 +1641,11 @@ export function HoldingStep({
   // The machine-only options have no way out when this build cannot drive a machine; a disabled
   // control with no escape is hidden (A10), not narrated. A writable mount the machine already
   // carries needs no escape and stays on offer.
-  // #934 — HOLDING OFFERS THE VISE ONLY. Registration on tape or in the bracket has not been run
-  // on this machine, so neither is an entry; the code stays behind this flag until each has a
-  // dated bench run. The rotary is unaffected (its programs carry their own bench refusal, #545).
-  const bedOffered = false;
+  // #934 hid the bed mounts — "HOLDING OFFERS THE VISE ONLY", until tape and the bracket each had
+  // a dated bench run. The maintainer's rule lifts the hide: "we test using the program", and the
+  // dated run is 2026-11-08. Both bed mounts are offered again, their row words unchanged; the
+  // rotary is unaffected (its programs carry their own bench refusal, #545).
+  const bedOffered = true;
   const shown = options.filter(
     (o) =>
       (bedOffered || mechanismOf(o.mount) !== 'bed') &&
@@ -1829,7 +1830,9 @@ export function HoldingStep({
   }
 
   function moveClamp(index: number, placement: ClampPlacement): void {
-    const clamps = bracketHold.clamps.map((c, i) => (i === index ? placement : c));
+    // #1068 — the drag states the edge and the place, not the KIND: a side clamp dragged along its
+    // edge must stay a side clamp, so the job's own record is kept and the drag's fields laid over it.
+    const clamps = bracketHold.clamps.map((c, i) => (i === index ? { ...c, ...placement } : c));
     writeBracket({ ...bracketHold, clamps });
   }
 

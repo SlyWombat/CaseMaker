@@ -1230,3 +1230,39 @@ describe('#607 — the Register step of a chuck job carries the axis tap', () =>
     expect(screen.queryByTestId('engrave-rotary-tap')).toBeNull();
   });
 });
+
+describe('#1070 the proposals need no saved setup for a bed-held job', () => {
+  it('a bracket job with setups: [] shows the seat press — nothing walked, nothing saved', () => {
+    const base = defaultEngraveJob();
+    const job: EngraveJob = {
+      ...base,
+      name: 'setups-less 1070',
+      stock: { ...base.stock, length: 160, width: 126, thickness: 25, material: 'hardwood' },
+      labels: [],
+      shapes: [],
+      setups: [],
+      workholding: {
+        kind: 'bracket',
+        bracket: { anchor: 1, variant: 'thin', clamps: [{ edge: 'back', at: 63 }], source: 'default' },
+      },
+    };
+    useEngraveJobStore.setState({ job });
+    resetEngraveRegistrationStore();
+    useEngraveRunStore.setState({ acknowledged: true });
+    beddedLocation();
+    // The machine's anchor-1 calibration with the soft endstop, and the 6 mm wasteboard bed with
+    // NO seat datum yet: the proposal must be the seat press, planned from the job alone.
+    const cal = {
+      frame: { anchor1: [-190.89, -193.83], anchor2Offset: [88.5, 45], clearanceXY: [-11.6, -14.6], clearanceZ: -3, toolrackOffset: [48.8, 181], toolrackZ: -108 },
+      machineId: 'Z1',
+      measuredAt: '2026-11-07T20:00:00.000Z',
+      softEndstop: { enabled: true, xMin: -207, yMin: -206, zMin: -102, source: 'config-get sd' },
+      source: 'config',
+    };
+    useSettingsStore.setState({ machineCalibration: cal as unknown as ReturnType<typeof useSettingsStore.getState>['machineCalibration'] });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    const button = screen.getByTestId('engrave-registration-approve-start') as HTMLButtonElement;
+    expect(button.textContent).toContain('Measure the bracket seat');
+    expect(screen.getByTestId('engrave-registration-proposal-line').textContent ?? '').toContain('seat');
+  });
+});

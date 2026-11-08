@@ -46,6 +46,10 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
 import type { EngraveJob } from '@/types/engraveJob';
 import { probeInstrumentOf, type RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { isSeatPlan, seatTapArgs } from '@/engine/cnc/registration/seatPress';
+import { implicitJobSetup, implicitSetupFor, registrationOf } from '@/engine/cnc/registration/implicitSetup';
+import type { MountSpec, Setup } from '@/engine/cnc/setups';
+import { useMountTap } from '@/hooks/useMountTap';
 import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import { summarizeOutcome, summarizePlan } from '@/engine/cnc/registration/summary';
 import {
@@ -138,6 +142,8 @@ const n = (v: number): string => String(Math.round(v * 1000) / 1000);
 
 /** #797 follow-up — the plan in one line: where it touches, how many touches, which probe. */
 function proposalLine(plan: RegistrationPlan): string {
+  // #1070 — the seat plan is one touch, named for what it measures.
+  if (isSeatPlan(plan)) return 'the bracket seat — one Z seek on the wasteboard beside the front arm · wired probe';
   const order = ['left', 'front', 'right', 'back'] as const;
   const edges = order.filter((edge) => plan.scans.some((scan) => scan.edge === edge));
   const touches = registrationTouches({ ok: true, plan });
@@ -227,21 +233,44 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     [machineRecord, registrations, seekFromMachineZ, job],
   );
   const regSettings = useMemo(() => registrationSettings(defaults, probe).settings, [defaults, probe]);
+  // #1070, 6b's ruling — THE FIRST-RUN SEAT PRESS: a seat plan (one bracket-seat mount tap, no
+  // scans) runs through the STANDALONE tap with the plan's own seek bound, not the registration
+  // executor; its reading is written as the bed profile's bracket seat by the same hook.
+  const seatTapApi = useMountTap({
+    target,
+    settings: regSettings,
+    floor: jobMachine(job, calibration).envelope.z.min,
+    probeId: probe?.id ?? null,
+    successNote: 'the bracket seat is recorded — plan the registration again',
+  });
   const probeName = useMemo(() => probeNameFor(machineRecord), [machineRecord]);
   const setupSettings = useMemo(() => setupsSettings(defaults), [defaults]);
   const rotaryEnvelope = useMemo(() => rotaryOf(jobMachine(job, calibration))?.envelope, [job, calibration]);
   const proposal = useMemo<RegistrationAttempt | null>(() => {
-    if (plan !== null || job.setups === undefined || job.setups.length === 0) return null;
-    const savedPlan = planFromSetups(job, setupSettings, rotaryEnvelope);
-    const setup0 = job.setups[0]!;
-    const derived = savedPlan.setups.find(
-      (s) => s.faceUp === faceUpOf(setup0) && s.itemIds.some((id) => setup0.itemIds.includes(id)),
-    );
+    if (plan !== null) return null;
+    // #1070 — NO SAVED-SETUP PREREQUISITE: a bed-held job's setup IS the job. With no
+    // `job.setups[]` the proposal is planned from the stock + mount derived here; approval
+    // materialises that setup with the registration on it, and an unapproved plan writes nothing.
+    let derived: Setup | undefined;
+    let mountForProposal: MountSpec;
+    if (job.setups !== undefined && job.setups.length > 0) {
+      const savedPlan = planFromSetups(job, setupSettings, rotaryEnvelope);
+      const setup0 = job.setups[0]!;
+      derived = savedPlan.setups.find(
+        (s) => s.faceUp === faceUpOf(setup0) && s.itemIds.some((id) => setup0.itemIds.includes(id)),
+      );
+      mountForProposal = setup0.mount;
+    } else {
+      const implicit = implicitSetupFor(job);
+      if (implicit === null) return null;
+      derived = implicit;
+      mountForProposal = implicit.mount;
+    }
     if (derived === undefined) return null;
     return planRegistrationAttempt({
       job,
       setup: derived,
-      mount: setup0.mount,
+      mount: mountForProposal,
       mountDatum,
       mountDatumMismatch: mountDatumMismatchBy,
       mountDatumMismatchName,
@@ -274,13 +303,24 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
 
   /** #797 follow-up — approve the planner's proposal and start the run in ONE press. */
   async function approveAndStart(attempt: Extract<RegistrationAttempt, { kind: 'plan' }>): Promise<void> {
+    // #1070 — the seat press measures, it does not register: run the one bounded seek and stop
+    // (the hook writes the datum); the registration is planned again against the reading.
+    const seatTap = seatTapArgs(attempt.plan);
+    if (seatTap !== null) {
+      await seatTapApi.tapJaw(seatTap);
+      return;
+    }
     const setups = job.setups ?? [];
+    // #1070 — the approval MATERIALISES the derived first setup when the job saved none: the
+    // registration lands on it, and nothing is written before this press.
     useEngraveJobStore.getState().setSetups(
-      setups.map((setup, i) =>
-        i === 0
-          ? { ...setup, registration: { method: attempt.method, plan: attempt.plan, expected: attempt.expected } }
-          : setup,
-      ),
+      setups.length === 0
+        ? [implicitJobSetup(job, registrationOf(attempt))]
+        : setups.map((setup, i) =>
+            i === 0
+              ? { ...setup, registration: { method: attempt.method, plan: attempt.plan, expected: attempt.expected } }
+              : setup,
+          ),
     );
     await start(attempt.plan);
   }
@@ -457,6 +497,12 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     // #797 follow-up — the Register card approves the planner's proposal and starts in ONE press:
     // the plan it approved is handed here, because the render-time `plan` is still null.
     const effectivePlan = planOverride ?? plan;
+    // #1070 — a stored seat plan still runs as the seat press (the standalone tap, bounded).
+    const seatTap = effectivePlan === null ? null : seatTapArgs(effectivePlan);
+    if (seatTap !== null) {
+      await seatTapApi.tapJaw(seatTap);
+      return;
+    }
     // #797 — the ONE statement at Cut step 1 replaced this step's own at-machine tick.
     const acknowledged = useEngraveRunStore.getState().acknowledged;
     if (target === null || effectivePlan === null || !acknowledged || busy) return;
@@ -896,7 +942,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
             style={{ width: '100%', padding: 7, marginTop: 6, fontWeight: 600 }}
             onClick={() => void approveAndStart(proposal)}
           >
-            Register
+            {seatTapArgs(proposal.plan) === null ? 'Register' : 'Measure the bracket seat'}
           </button>
           <p style={MUTED} data-testid="engrave-registration-proposal-where">
             This is the planner’s proposal; Design → Setups is where it is edited.

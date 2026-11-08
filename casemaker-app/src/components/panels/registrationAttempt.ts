@@ -25,7 +25,8 @@ import {
   defaultClampPlacements,
   type BracketSeatDatum,
 } from '@/engine/cnc/mounts/bracket';
-import type { MountDatum, PlanObstacle, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { planRegistration, type MountDatum, type PlanObstacle, type ProbeSpec, type RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { cutRegionOf, mountObstaclesFor, seatSeekFor, softLimitsOf } from '@/engine/cnc/registration/footprintJob';
 import { bracketTapFor } from '@/engine/cnc/registration/mountContext';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
@@ -105,17 +106,115 @@ export function planRegistrationAttempt(args: {
       reason: 'a disc’s rim registration has not been run on this machine yet — use a rectangular blank',
     };
   }
-  // tape and bracket registration are hidden: refused by name, never planned as the datum path
-  // would (and before any bracket datum work is attempted). The alias keeps the kept branch
-  // below type-checkable rather than narrowing `mount` away.
+  // tape registration is hidden (refused by name); a BRACKET job registers on its cut region's
+  // footprint (#1070 — the maintainer's rule: find the edges of where it will cut, not the blank's).
   const mountKind: MountSpec['kind'] = mount.kind;
   if (mountKind !== 'vise') {
+    if (mountKind === 'tape') {
+      return { kind: 'refused', reason: 'registration on tape has not been run on this machine yet — hold the blank in the vise' };
+    }
+    // #1070 — THE FOOTPRINT PLAN, from the job: two touches per bounding edge at the cut region's
+    // extents, the far edges once each, one Z touch per region corner, every position in machine
+    // coordinates checked against the soft endstop before a line is sent. The anchor-1 bracket
+    // datum only SEEDS the machine coordinates; the touches derive the origin.
+    //
+    // A PLACED bracket has no anchor datum, and this plan's seed IS the anchor: planned anyway it
+    // would send every touch to the wrong machine coordinates and state a seed the sheet denies.
+    // Refused by name until the placed seed is measured (A's later work).
+    // The field lives on land7's BracketHold (#1070 placed bracket); read it defensively so this
+    // branch typechecks on its own line too.
+    if (job.workholding.kind === 'bracket' && (job.workholding.bracket as { placement?: 'anchored' | 'placed' }).placement === 'placed') {
+      return {
+        kind: 'refused',
+        reason:
+          'this bracket is screwed down where you put it, so there is no anchor datum to plan its registration from — ' +
+          'put it on the anchor-1 pins to register from the anchor, or measure its position and register by hand',
+      };
+    }
+    const sizes = bracketSettings(defaults);
+    const anchor = anchorFrom(calibration, job.machineId);
+    if (!anchor.ok) return { kind: 'refused', reason: anchor.reason };
+    const datum = bracketDatum(anchor.anchor, sizes);
+    const obstacles = mountObstaclesFor(job, mount, sizes);
+    // 6b's ruling (#1070) — THE FIRST BRACKET SEAT IS MEASURED BY THE PROGRAM: when the house has
+    // no seat datum (and no legacy default), the press plans ONE bounded Z seek with the wired V2
+    // on the wasteboard beside the front arm; its reading is written as the bed profile's
+    // `bracketSeatZ` and mirrored to the shop default. The band is the 2026-11-07-derived seat,
+    // VERIFIED by the seek.
+    const dims0 = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
+    const under0 = mount.board === true ? (job.sacrificial?.under?.thickness ?? 0) : 0;
+    const expected0 = bracketExpectedSurface(defaults, dims0.z, under0, args.bracketSeat);
+    if (!expected0.ok) {
+      const seat = seatSeekFor({ job, calibration, defaults, probe: args.probe });
+      if (!seat.ok) return { kind: 'refused', reason: seat.reason };
+      const plan: RegistrationPlan = {
+        mount: 'bracket',
+        stock: { xMin: 0, yMin: 0, xMax: dims0.x, yMax: dims0.y, cornerRadius: 0 },
+        stockThicknessMm: dims0.z,
+        surfacePoint: { x: seat.seek.workX, y: seat.seek.workY },
+        seek: {
+          fromMachineZ: seat.seek.fromMachineZ,
+          travelMm: Math.round((seat.seek.fromMachineZ - (seat.seek.band.min - args.settings.scanReachMm)) * 1000) / 1000,
+          band: seat.seek.band,
+        },
+        mountDatum: null,
+        probe: args.probe,
+        mountTap: {
+          x: seat.seek.x,
+          y: seat.seek.y,
+          fromMachineZ: seat.seek.fromMachineZ,
+          label: 'the wasteboard beside the bracket’s front arm (the seat)',
+          reference: 'bracket-seat',
+          expectZ: seat.seek.expectZ,
+          // The reading IS the seat: the touch is on the wasteboard, not the arm.
+          datumOffsetMm: 0,
+        },
+        scans: [],
+        bracketOrigin: { x: datum.x, y: datum.y, from: datum.from, offsetMeasured: datum.offsetMeasured },
+        mountObstacles: obstacles,
+        settings: args.settings,
+        notes: seat.seek.notes,
+      };
+      return {
+        kind: 'plan',
+        method: 'bracket',
+        plan,
+        summary: 'Measure the bracket seat — one Z seek on the wasteboard beside the front arm',
+        expected: 'the seat from the seek, inside ±1.5 mm of the derived value',
+      };
+    }
+    // A's planner (1070-footprint-reg) owns the footprint plan now: ONE planRegistration call with
+    // the region and the soft limits. The seed places the machine coordinates, the #525 corner
+    // derivation gives the origin, and the obstacle check and the soft-limit refusal are its own.
+    const region = cutRegionOf(job);
+    if (region === null) {
+      return { kind: 'refused', reason: 'this job states no cut region to register on — add the part to cut, or register by hand' };
+    }
+    const result = planRegistration(
+      {
+        stock: { xMin: 0, yMin: 0, xMax: dims0.x, yMax: dims0.y, cornerRadius: 0 },
+        mount: 'bracket',
+        expectedSurface: expected0.expectedSurface,
+        seekFromMachineZ: clearanceZOf(jobMachine(job, calibration)) ?? 0,
+        mountDatum: null,
+        probe: args.probe,
+        mountTap: null,
+        stockThicknessMm: dims0.z,
+        bracketOrigin: datum,
+        mountObstacles: obstacles,
+        bracketConfirm: !datum.offsetMeasured,
+        region: { min: [region.minX, region.minY], max: [region.maxX, region.maxY], marginMm: job.edgeMargin },
+        softLimits: softLimitsOf(calibration),
+      },
+      args.settings,
+    );
+    if (!result.ok) return { kind: 'refused', reason: result.reason };
     return {
-      kind: 'refused',
-      reason:
-        mountKind === 'tape'
-          ? 'registration on tape has not been run on this machine yet — hold the blank in the vise'
-          : 'the bracket’s registration has not been run on this machine yet — hold the blank in the vise',
+      kind: 'plan',
+      method: 'bracket',
+      plan: result.plan,
+      summary: summarizePlan(result.plan),
+      expected: expectedWords(result.plan),
     };
   }
   // #845 — a stated machine has no clearance to seek from; the preview it places a tap with is

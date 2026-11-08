@@ -55,7 +55,15 @@ import { textureNumbers, textureStrokes } from './texture';
 import { fluteNumbers, fluteOperationName } from './flute';
 import { prismHeightRefusal, prismNumbers } from './prism';
 import { reliefNumbers } from './relief';
-import { bracketSettings, defaultClampPlacements, validateBracketMount, type ClampPlacement, type StockSize } from '@/engine/cnc/mounts/bracket';
+import {
+  bracketMount,
+  bracketSettings,
+  defaultClampPlacements,
+  validateBracketMount,
+  type ClampPlacement,
+  type MountObstacles,
+  type StockSize,
+} from '@/engine/cnc/mounts/bracket';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type {
@@ -109,6 +117,9 @@ export type JobFindingCode =
   | 'goal-cutter-unfeedable'
   // #1063 — instrument records (probes) are not cutters; the plan states them once, in aggregate.
   | 'goal-cutter-instrument'
+  // #1067 — a V-carved item's flank widens the opening above the colour plane; one info line per
+  // distinct (depth, cutter) pair, naming the items it covers.
+  | 'vcarve-bevel'
   // #740 — a POINTED cutter whose tip the record does not state. A V-bit's tip is the width that
   // reaches the design; for a chamfer and an engraver `diameter` is the shank, so there is no honest
   // geometry sentence to write about the item. Raised where the plane model would otherwise judge
@@ -407,6 +418,8 @@ export type JobFindingCode =
   | 'goal-mold-no-draft'
   // #1019 — the engine-chosen curved rough's stated flat could not reach the region's depth.
   | 'goal-rough-unreachable'
+  // #1052 — a finish op would build past the move cap; the candidate leaves the rank with its number.
+  | 'goal-finish-too-many-moves'
   // #1037 — no cutter in the set reaches a curved region's floor: the finish does not post it.
   | 'goal-finish-unreachable'
   | 'goal-object-no-toolpath'
@@ -449,6 +462,9 @@ export type JobFindingCode =
   // as its own floor pass. Info, one per setup with the ids and the count — never the
   // `goal-region-uncut` warning above, which means material stands.
   | 'goal-pocket-floor-rest'
+  // #943 (10) — the goal's outline is the stock's own footprint: no material around the part, so
+  // no freeing contour is cut. Info; a side-2 job whose stock is the freed part states it.
+  | 'goal-outline-is-stock'
   | 'goal-cutter-substituted'
   | 'goal-skin-standing'
   | 'goal-rim-unbroken'
@@ -594,6 +610,25 @@ export interface JobFinding {
    * is worth offering (the remainder is flat faces).
    */
   goalFlipSides?: Face[];
+  /**
+   * #1068 — on `goal-unreached`, THE DRAWER'S ONE ACTION VERB, when the plan can be accepted as
+   * the job stands ("Add the flipped setup"). A proposal is an action, never a step: the warning's
+   * sentence carries the fact only, and what the flip would involve lives in `goalFlipDetail`.
+   * Absent when the plan exists but this job cannot accept it — `goalFlipNeed` says why.
+   */
+  goalFlipAction?: string;
+  /**
+   * #1068 — on `goal-unreached`, WHAT THE ACTION WOULD INVOLVE, shown only inside the action's own
+   * expansion ("If you add it:"): the sides, the share they reach, the locating holes and the
+   * second setup's registration. Never part of the warning's sentence, never numbered as steps.
+   */
+  goalFlipDetail?: string;
+  /**
+   * #1068 — on `goal-unreached`, WHY NO ACTION IS OFFERED when the plan exists but cannot be
+   * accepted here (the holes would post below the bed, or no owned cutter drills them). In the
+   * operator's words: "needs a sacrificial board under the blank".
+   */
+  goalFlipNeed?: string;
   /**
    * #872 — on `goal-unreached`, the share of the goal's surface the SIDES' union reaches
    * geometrically (0…1). The sentence states it; the panel does not have to recompute it.
@@ -1116,6 +1151,30 @@ function derivedMount(job: EngraveJob): MountSpec {
  */
 export function clampPlacementsFor(job: Pick<EngraveJob, 'workholding'>): ClampPlacement[] | null {
   return job.workholding.kind === 'bracket' ? job.workholding.bracket.clamps : null;
+}
+
+/**
+ * #1068 — THE MOUNT'S OBSTACLES, ONE DERIVATION BOTH DOORS CALL.
+ *
+ * The app's Generate (`engraveRunStore.ts`) and the command line (`scripts/lib/casemaker/
+ * engrave.ts`) must check a job against the same boxes: the bracket's two arms, the job's own
+ * clamps, the fit as their uncertainty, and the job's own obstacle boxes (#1068 — a hole in the
+ * blank the mount cannot know). Until this helper existed the CLI called `bracketMount` not at
+ * all, so a bracket job's program was swept with NO fixture and planned without the mount,
+ * while its run sheet said "Mount the vise".
+ *
+ * The sizes behind the arms and clamps live in the location's defaults, which is why the caller
+ * passes them in: the engine (and the worker) must not pull the defaults client in.
+ */
+export function jobMountObstacles(job: EngraveJob, defaults: ShopDefaults | null): MountObstacles | null {
+  return bracketMount(
+    { x: job.stock.length, y: job.stock.width, z: job.stock.thickness },
+    jobMount(job),
+    defaults,
+    job.sacrificial.under?.thickness ?? 0,
+    clampPlacementsFor(job),
+    job.workholding.kind === 'bracket' ? job.workholding.bracket.obstacles : null,
+  );
 }
 
 /**

@@ -99,9 +99,14 @@ import {
 import type { Tool } from '../../../src/engine/cnc/tool';
 import { toolDisplayName } from '../../../src/engine/cnc/toolDisplay';
 import type { JobFinding } from '../../../src/engine/cnc/engrave/jobSetup';
+import type { LoadedLocation } from '../../../src/platform/headless/bootstrap';
+import type { FootprintPlan } from '../../../src/engine/cnc/registration/footprint';
+import { footprintInputFor, seatSeekFor } from '../../../src/engine/cnc/registration/footprintJob';
+import type { SeatSeek } from '../../../src/engine/cnc/registration/footprintJob';
+import { planFootprintRegistration } from '../../../src/engine/cnc/registration/footprint';
 import type { NodeMeshOutput } from '../../../src/workers/geometry/meshOutput';
 import { Z1 } from '../../../src/engine/cnc/machine';
-import { jobSetups, jobTool, toSetup } from '../../../src/engine/cnc/engrave/jobSetup';
+import { jobMount, jobMountObstacles, jobSetups, jobTool, toSetup } from '../../../src/engine/cnc/engrave/jobSetup';
 // #835 — each setup's own work, measured and written back into that setup only.
 import {
   deadSetupKeys,
@@ -172,6 +177,8 @@ import { renderRunSheetMarkdown } from '../../runSheetMarkdown';
 import { CliExit, isCliExit } from './exit';
 import { commandOutput, HUMAN, type CommandOptions } from './output';
 import { fileReceipt } from './receiptFiles';
+import { setMemTraceSink, setWasmHeapReader, memTrace } from '../../../src/engine/cnc/memTrace';
+import { appendFileSync } from 'node:fs';
 import {
   diagnostic,
   gateForStage,
@@ -213,9 +220,12 @@ interface Args {
   thirdTool?: number;
   location?: string;
   out?: string;
+  /** #1052 — write the per-boundary memory trace (JSONL) to this file. */
+  memTrace?: string;
 }
 
-function parseArgs(argv: string[]): Args {
+/** Exported for the CLI's own spec (#1052): the flag set is pinned by parsing. */
+export function parseArgs(argv: string[]): Args {
   const args: Args = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -257,7 +267,8 @@ function parseArgs(argv: string[]): Args {
         );
       }
       args.thirdTool = parsed.data;
-    } else if (a === '--location') args.location = argv[++i];
+    } else if (a === '--mem-trace') args.memTrace = argv[++i];
+    else if (a === '--location') args.location = argv[++i];
     else if (a === '--turn') {
       const v = argv[++i];
       if (v !== 'ccw' && v !== 'cw') throw new Error(`--turn must be "ccw" or "cw", not "${v}"`);
@@ -401,6 +412,43 @@ interface RunReceipt {
  * dispatcher can run the command without losing the process. The script wrapper turns the returned
  * code into `process.exitCode`.
  */
+/** #1070 — the sheet's bed-held registration: the footprint plan, or the first seat seek. */
+export function sheetRegistrationFor(
+  job: EngraveJob,
+  where: LoadedLocation | null,
+): { footprint?: FootprintPlan; seatSeek?: SeatSeek } {
+  if (where === null || jobMount(job) !== 'bracket') return {};
+  const machine = where.machines[0];
+  const calibration = machine?.calibration;
+  if (calibration === undefined || calibration === null) return {};
+  const probeAccessory = where.accessories.find((a) => a.kind === 'probe' && !/^3d$/i.test((a.variant ?? '').trim()));
+  const unit = (probeAccessory?.unit ?? {}) as Record<string, unknown>;
+  const num = (k: string): number | null => (typeof unit[k] === 'number' ? (unit[k] as number) : null);
+  const tip =
+    probeAccessory === undefined || num('rimOffsetMm') === null
+      ? null
+      : {
+          diameterMm: num('tipDiameterMm') ?? 2,
+          rimOffsetMm: num('rimOffsetMm')!,
+          rimOffsetUncertaintyMm: num('rimOffsetUncertaintyMm') ?? 0.25,
+        };
+  const probe =
+    probeAccessory === undefined ? null : { id: probeAccessory.id, variant: probeAccessory.variant ?? null, instrument: 'z-only' as const, tip };
+  const bed = machine?.bedProfiles?.find((p) => p.id === machine.activeBedProfileId);
+  const seat = bed?.datums?.bracketSeatZ ?? null;
+  const bracketSeat = seat === null || seat === undefined ? null : { value: seat.value, what: 'bracket seat' as const, measuredAt: seat.measuredAt ?? null };
+  const mount = { kind: 'bracket' as const, board: job.sacrificial.under !== null };
+  const input = footprintInputFor({ job, mount, calibration, defaults: where.defaults, probe, bracketSeat });
+  if (input.ok) {
+    const planned = planFootprintRegistration(input.input);
+    if (planned.ok) return { footprint: planned.plan };
+  }
+  // No seat datum (or nothing to plan on it): the sheet's first touch is the seat seek, when the
+  // house can back one.
+  const seatSeek = seatSeekFor({ job, calibration, defaults: where.defaults, probe });
+  return seatSeek.ok ? { seatSeek: seatSeek.seek } : {};
+}
+
 export async function engraveJobMain(argv: string[], options: CommandOptions = HUMAN): Promise<number> {
   const receipt: RunReceipt = {};
   try {
@@ -530,6 +578,19 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     fail(`${(e as Error).message}\n${USAGE}`);
     throw e; // unreachable; `fail` exits
   }
+  // #1052 — THE MEMORY TRACE. Flag or env; rows are appended synchronously so the LAST rows before
+  // an abort (exit 134) are on disk — a buffered stream loses exactly the rows a crash investigation
+  // needs. Off by default: the sink is null and every memTrace call is one null check.
+  const memTracePath = args.memTrace ?? process.env.CASEMAKER_MEM_TRACE;
+  if (typeof memTracePath === 'string' && memTracePath !== '') {
+    setMemTraceSink((line) => {
+      try {
+        appendFileSync(memTracePath, line);
+      } catch {
+        /* the trace must never take the run with it */
+      }
+    });
+  }
   const inputs = [
     args.job,
     args.coupon,
@@ -553,6 +614,16 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   // machine's own, and validates it exactly as the app's import panel does (#412).
   const boot = await bootstrap({ location: args.location }).catch((e: Error) => fail(e.message));
   const tl = boot.manifold;
+  // #1052 — the wasm module's own heap, when it exposes one (the 4,096 MB cap is its own source of
+  // exit 134). Emscripten's modular build may hide HEAP8; the reader then answers null and the row
+  // falls back to `arrayBuffers`, naming which it used.
+  setWasmHeapReader(() => {
+    const m = tl as unknown as { HEAP8?: { buffer?: ArrayBuffer }; HEAPU8?: { buffer?: ArrayBuffer }; wasmMemory?: WebAssembly.Memory };
+    if (m.HEAP8?.buffer !== undefined) return { bytes: m.HEAP8.buffer.byteLength, source: 'HEAP8' as const };
+    if (m.HEAPU8?.buffer !== undefined) return { bytes: m.HEAPU8.buffer.byteLength, source: 'HEAPU8' as const };
+    if (m.wasmMemory?.buffer !== undefined) return { bytes: m.wasmMemory.buffer.byteLength, source: 'wasmMemory' as const };
+    return null;
+  });
   /**
    * The shop's tunable defaults, as the document holds them (#416/#417), or null when this run has no
    * document to read them from — a house file from before the section existed, or no file at all. Null
@@ -576,6 +647,17 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    * in too, so this is the one place the CLI assembles the bag the generator reads.
    */
   const shop: EngraveShopOpts = engraveShopOpts(shopDefaults);
+  /**
+   * #1068 — THE JOB'S MOUNT, DERIVED AS THE APP DERIVES IT. `jobMountObstacles` is the one
+   * derivation `engraveRunStore.ts` calls, so the command line and the browser check a bracket
+   * job against the same boxes: the two arms, the job's own clamps, the fit, and the job's own
+   * obstacles (a hole in the blank, screwed down). Before this the CLI passed NO mount: the plan
+   * lifted over nothing, the verifier had no clamps or arms to refuse, and the sweep loaded a
+   * setup with no fixture — while the run sheet told the operator to mount the vise.
+   *
+   * `null` for a vise or a tape job, exactly as the app's run store gets it.
+   */
+  const mountFor = (job: EngraveJob) => jobMountObstacles(job, shopDefaults);
   /**
    * #922/#947 — THE PICKER'S SHOP, FIELD FOR FIELD. The app's picker
    * (`engravePreviewStore.ts`'s `previewInputs`) hands the measured search a shop WITHOUT the
@@ -958,7 +1040,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     try {
       // #881 — the pipeline is async (a pool can plan the roughing levels); the CLI runs it with
       // no pool, so this is the same serial plan it always was.
-      generated = await engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, shop);
+      // #1068 — the app's Generate sends `mount` inside its shop; the CLI now sends the SAME object
+      // (the mount's boxes reach the plan's travel heights and the program's verifier).
+      generated = await engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, { ...shop, mount: mountFor(job) });
     } catch (e) {
       if (isCliExit(e)) throw e;
       return {
@@ -1092,11 +1176,16 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         cutterFor: (program) =>
           program.toolKey === job.toolKey ? tool : benchCutterFor(program.toolKey),
         load: async ({ program, index, cutter, drillPoint, priorRemoval, priorFields, priorExactRemoval, fromBlank }) => {
+          memTrace('sweep:start', { program: index + 1, kind: program.kind ?? 'engrave', cutter: program.toolKey });
           sweeping =
             (program.kind ?? 'engrave') === 'facing'
               ? `the facing pass (${program.toolKey})`
               : `program ${index + 1} (${program.toolKey})`;
-          return session.load(program.nc, toSetup(job, Z1), cutter, Z1.id, {
+          // #1068 — THE SAME FIXTURE THE APP'S SWEEP LOADS (`engraveRunStore.ts`'s
+          // `toSetup(job, machine, mount?.fixture, bed)`). Without it a bracket job's program was
+          // swept against no fixture at all, so a cutter through the bracket's arm — or through a
+          // hole the job states — was never seen.
+          return session.load(program.nc, toSetup(job, Z1, mountFor(job)?.fixture), cutter, Z1.id, {
             // #734 — the CAM posts a through move to `thickness + breakthrough`, so the sweep's floor
             // must be the same: without it a correct through cut's retract reads as a rapid through
             // material (j17 reproduced the bench's `rapid-through-stock` on 7 vertical retracts).
@@ -1315,6 +1404,13 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       nc: names[i]!.ncFile,
       frameNc: program.frameNc === null ? null : names[i]!.frameFile,
     }));
+    // #1070 — A BED-HELD JOB'S SHEET PRINTS THE FOOTPRINT PLAN (the same plan the Cut step's
+    // attempt runs): read off the job and the loaded house, absent when the house lacks what the
+    // plan needs (the machine's calibration or the wired probe), so an older house keeps the old
+    // registration section rather than a plan it cannot back.
+    const sheetRegistration = sheetRegistrationFor(job, boot.location);
+    const footprint = sheetRegistration.footprint;
+    const seatSeek = sheetRegistration.seatSeek;
     const sheet = buildRunSheet(
       job,
       { ...generated, programs: sheetPrograms },
@@ -1332,7 +1428,17 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       // absent, this is the wall clock the command has always used.
       options.now ?? new Date(),
       MARGIN_DEFAULTS,
-      { ...(opts.sheetOptions ?? {}), efficiencyThresholds: efficiencyThresholds(shopDefaults) },
+      {
+        ...(opts.sheetOptions ?? {}),
+        ...(footprint === undefined ? {} : { footprint }),
+        ...(seatSeek === undefined ? {} : { seatSeek }),
+        efficiencyThresholds: efficiencyThresholds(shopDefaults),
+        // #1068 — §8 names the fixture THIS job's sweep was handed: the bracket's arms and the
+        // job's clamps (and its own obstacle boxes), never the vise's jaws. A vise job leaves it
+        // absent (the sheet derives the vise's own envelope, as it always did); a tape job says
+        // nothing is modelled.
+        fixture: jobMount(job) === 'vise' ? undefined : (mountFor(job)?.fixture ?? null),
+      },
     );
     if (sheet.header.fileName !== names[firstEngraving]!.ncFile) {
       fail(`run sheet file name drifted: expected ${names[firstEngraving]!.ncFile}, got ${sheet.header.fileName}`);

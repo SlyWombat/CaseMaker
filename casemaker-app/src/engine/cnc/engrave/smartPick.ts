@@ -24,6 +24,7 @@
  */
 
 import type { EvaluatedItem, PlanEvaluation } from '@/workers/sim/planEvaluate';
+import { memTrace } from '@/engine/cnc/memTrace';
 import type { CandidatePlan, PinchFact } from '@/workers/sim/planEvaluate';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -725,6 +726,9 @@ export async function smartPick(
   // #834 — a face job's plans have no items to score; their fidelity is the face's (see fidelityOf).
   const exactWhenEmpty = faceWorkOf(job) !== null;
   const plans = candidatePlans(job, tools, catalogue, conditions, table, opts.floors).slice(0, maxCandidates);
+  // #1052 — THE MEASURED SEARCH IS ITS OWN SUSPECT (j27 names no cutter, so this runs before any
+  // plan). The count first, then one row per simulated candidate, then the end.
+  memTrace('pick:start', { candidates: plans.length, finalists: fullFinalists });
   if (plans.length === 0) {
     const candidates = candidateRefusals(job, tools, catalogue, conditions, table);
     // The sentence names every cutter of the right shape and why it is out; the wrong-shaped rest
@@ -749,7 +753,9 @@ export async function smartPick(
   let coarseDone = 0;
   let fullDoneCount = 0;
   let fullTotal = 0;
+  let pickRows = 0;
   const evaluateAsync: AwaitableEvaluate = async (plan, level) => {
+    memTrace('pick:candidate', { index: ++pickRows, level, plan: planKey(plan) });
     if (level === 'coarse') opts.onProgress?.({ level, done: ++coarseDone, total: plans.length });
     else opts.onProgress?.({ level, done: ++fullDoneCount, total: Math.max(fullTotal, fullDoneCount) });
     return evaluate(plan, level);
@@ -836,6 +842,7 @@ export async function smartPick(
     );
   }
   const rule = rulePlan === null ? null : (verdicts.get(planKey(rulePlan)) ?? null);
+  memTrace('pick:end', { evaluated: pickRows, postings: postings.length });
   return { rule, chosen, runnable, bestMeasured, runnerUp, buyThis, considered: all, notes };
 }
 

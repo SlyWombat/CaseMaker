@@ -1263,6 +1263,12 @@ const clampPlacementSchema = z.object({
     .describe(
       "The clamp's centre along its edge, in millimetres from the edge's left end (back edge) or front end (right edge).",
     ),
+  kind: z
+    .enum(['top', 'side'])
+    .optional()
+    .describe(
+      "How the clamp holds: 'top' presses on the stock from above; 'side' pushes it from outside the blank's edge, its top below the stock top. Absent means 'top', so a stored job is unchanged.",
+    ),
 });
 
 /**
@@ -1290,15 +1296,63 @@ const tapeHoldSchema = z.object({
     .describe('Where these tape numbers came from: a default, a saved setup, or a measurement.'),
 });
 
+/**
+ * #1068 — a box the program must not sweep through, stated by the job: a hole already in the
+ * blank (screwed down) that the mount's own obstacles cannot describe. Work frame, Z0 on the
+ * stock's top.
+ */
+const bracketObstacleSchema = z
+  .object({
+    id: z.string().min(1).describe('A stable id for the box, so a finding can name it.'),
+    label: z
+      .string()
+      .min(1)
+      .describe('The box in landmark words — "the counterbored hole, 8 mm in from the left edge".'),
+    min: z
+      .tuple([z.number().finite(), z.number().finite(), z.number().finite()])
+      .describe('The box’s low corner in the work frame: X 0..length, Y 0..width, Z0 on the stock’s top, mm.'),
+    max: z
+      .tuple([z.number().finite(), z.number().finite(), z.number().finite()])
+      .describe('The box’s high corner in the work frame, mm.'),
+  })
+  // #1068 review (6b) — THE FIELD IS FOR FEATURES INSIDE THE BLANK, not for anything that stands
+  // over it. An above-top box would be checked as a fixture solid but could never raise a travel
+  // height (that list is the mount's own obstacles), so a program would plan straight through it;
+  // a clamp-shaped obstruction is the mount's, not the job's. Refused by name at the document.
+  .superRefine((box, ctx) => {
+    if (box.max[2] > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          `an obstacle above the stock's top is not a hole: "${box.label}" reaches Z ${box.max[2]} mm — ` +
+          'state it as a clamp',
+      });
+    }
+  });
+
 /** A job pushed into the bracket's corner and clamped (#707 BM-1, §3.6). */
 const bracketHoldSchema = z.object({
   anchor: z.union([z.literal(1), z.literal(2)]).describe('The anchor the bracket is pinned at; Makera\'s origin is relative to Anchor 1.'),
+  placement: z
+    .enum(['anchored', 'placed'])
+    .optional()
+    .describe(
+      "How the bracket is bolted down. Absent = 'anchored': on the table's pins at the anchor, and the anchor datum is the origin. 'placed': screwed to the MDF wasteboard where the operator put it — no anchor datum; the origin and rotation are probed from the blank.",
+    ),
   variant: z.string().min(1).describe("The bracket fitted, as its fixture record names it — 'thin' is the Makera kit's L-bracket."),
   clamps: z
     .array(clampPlacementSchema)
-    .min(1)
     .max(4)
-    .describe('The clamp places the job was set up with, on the free edges. One to four.'),
+    .describe(
+      'The clamp places the job was set up with, on the free edges. One to four; ZERO only when the ' +
+        'board under the blank is taped (the vendor tray’s side-2 hold — the bracket is then only the fence).',
+    ),
+  obstacles: z
+    .array(bracketObstacleSchema)
+    .optional()
+    .describe(
+      'Boxes the mount cannot know and the program must not sweep through — holes already in the blank, screwed down — in the work frame. Absent means none.',
+    ),
   source: z
     .enum(['default', 'saved', 'measured'])
     .describe('Where these bracket numbers came from: a default, a saved setup, or a measurement.'),
@@ -2532,6 +2586,14 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
     .finite()
     .nonnegative()
     .describe("How far a through cut goes past the blank's bottom face, in millimetres."),
+  // #943 (10) — a flip job's Z0 is carried from the earlier setup, not touched on the cut face:
+  // ABSENT on every ordinary job, so no existing document or sheet changes.
+  z0CarriedFrom: z
+    .object({
+      thicknessMm: z.number().finite().nonnegative().describe("The part's measured thickness from the earlier setup, mm."),
+    })
+    .optional()
+    .describe("Z0 = the earlier setup's Z0 − this thickness; the run sheet says the sawn underside is never touched."),
   // #362's jaw clearance. DEFAULTED, unlike the optional keys below: the shipped value is the 1 mm
   // the jaw check carried as a bare constant before it became a setting (#488), so a job written
   // without this field loads with exactly the clearance it was judged by, and no document changes
@@ -2824,6 +2886,21 @@ const engraveJobV3Schema = engraveJobV2Schema
         code: z.ZodIssueCode.custom,
         path: ['stock', 'wall'],
         message: 'a tube states its wall, in mm',
+      });
+    }
+    // #943 (10) — A BRACKET WITH NO CLAMPS IS A HOLD ONLY WHEN THE PART IS TAPED DOWN. #709 keeps
+    // refusing every other 'none': the machine cannot hold a bracket job with neither clamps nor
+    // tape. The vendor tray's side 2 is the tape case — the bracket is the fence, the tape holds.
+    if (
+      job.workholding.kind === 'bracket' &&
+      job.workholding.bracket.clamps.length === 0 &&
+      job.sacrificial.under?.attach !== 'tape'
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['workholding', 'bracket', 'clamps'],
+        message:
+          "a bracket job with no clamps is held by tape: state sacrificial.under.attach 'tape', or fit one to four clamps",
       });
     }
   });

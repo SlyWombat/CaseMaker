@@ -47,7 +47,9 @@ const PREVIOUS: PreviousSession = {
 };
 
 const MOMENT: CrashMoment = {
-  stoppedAt: new Date(2026, 9, 30, 17, 2).getTime(),
+  // #1072 — "30 Oct at 17:02" is the current year's date, so the dated sentence prints no year and
+  // this fixture's pin stays stable as the calendar moves on.
+  stoppedAt: new Date(new Date().getFullYear(), 9, 30, 17, 2).getTime(),
   work: 'generate',
   stage: 'rough',
   label: 'roughing level 41 of 112',
@@ -60,14 +62,40 @@ function prime(houseOk = false): void {
 }
 
 describe('#787 — the crash banner', () => {
+  it('#1072 — the sentence carries the DATE, so a days-old stop cannot read as tonight', () => {
+    // The sent marker was 2026-11-03T22:58:33.239Z — 17:58 local on the maintainer's machine (EST),
+    // the "17:58" banner. Built from LOCAL components so this pin holds in ANY runner time zone:
+    // the product renders the viewer's local time, and the sentence must carry its date.
+    const stale = new Date(2026, 10, 3, 17, 58).getTime();
+    expect(
+      crashBannerSentence({ stoppedAt: stale, work: null, stage: null, label: null, heapMb: null, lastCrumbAt: stale }),
+    ).toBe('Case Maker stopped unexpectedly on 3 Nov at 17:58. Save a crash report?');
+  });
+
+  it('#1072 — the year is carried only when the stop is not in the current year', () => {
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const moment = (at: number): CrashMoment => ({ stoppedAt: at, work: null, stage: null, label: null, heapMb: null, lastCrumbAt: at });
+    const now = new Date();
+    // A marker from today says today’s date the same way, with no year.
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 5).getTime();
+    expect(crashBannerSentence(moment(today))).toBe(
+      `Case Maker stopped unexpectedly on ${now.getDate()} ${MONTHS[now.getMonth()]} at 09:05. Save a crash report?`,
+    );
+    // An earlier year is named, so the sentence cannot be misread across a year boundary either.
+    const lastYear = now.getFullYear() - 1;
+    expect(crashBannerSentence(moment(new Date(lastYear, 10, 3, 17, 58).getTime()))).toBe(
+      `Case Maker stopped unexpectedly on 3 Nov ${lastYear} at 17:58. Save a crash report?`,
+    );
+  });
+
   it('says when it stopped, what it was doing, the stage and the heap', () => {
     expect(crashBannerSentence(MOMENT)).toBe(
-      'Case Maker stopped unexpectedly at 17:02 while generating (roughing level 41 of 112, heap 3.7 GB). Save a crash report?',
+      'Case Maker stopped unexpectedly on 30 Oct at 17:02 while generating (roughing level 41 of 112, heap 3.7 GB). Save a crash report?',
     );
     // With nothing known but the time, the sentence stays true and quiet.
     expect(
       crashBannerSentence({ stoppedAt: MOMENT.stoppedAt, work: null, stage: null, label: null, heapMb: null, lastCrumbAt: null }),
-    ).toBe('Case Maker stopped unexpectedly at 17:02. Save a crash report?');
+    ).toBe('Case Maker stopped unexpectedly on 30 Oct at 17:02. Save a crash report?');
   });
 
   it('renders only when there is a previous session, and Dismiss puts it away', () => {

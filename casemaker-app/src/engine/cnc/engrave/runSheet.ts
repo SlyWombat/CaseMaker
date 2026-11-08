@@ -8,7 +8,7 @@ import {
   type RapidEstimate,
 } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
-import { itemLabel, jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { itemLabel, jobMount, jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
   idJawReach,
   jawGapFor,
@@ -35,6 +35,7 @@ import {
   zBudgetInputsFor,
   type MarginSettings,
 } from '@/engine/cnc/engrave/depthBounds';
+import type { FixtureEnvelope } from '@/engine/cnc/setup';
 import { printedLayerGridOf } from '@/engine/cnc/layerStack';
 import { statedCuttingSize } from '@/engine/cnc/tool';
 import { cutterLegend, cutterProfileSvg } from '@/engine/cnc/cutterProfile';
@@ -63,6 +64,8 @@ import {
   type MaterialScanSettings,
   type ScanTouch,
 } from '@/engine/cnc/engrave/materialScan';
+import type { FootprintPlan } from '@/engine/cnc/registration/footprint';
+import type { SeatSeek } from '@/engine/cnc/registration/footprintJob';
 import type { FeedsResult } from '@/engine/cnc/feeds';
 // #445 — `ThreadPlanFacts` exists for THIS reader: the half of the CAM's thread plan the sheet
 // prints, with `moves`/the IR/the simulator's spec left out (see the type's own comment).
@@ -339,6 +342,12 @@ export interface RunSheetProgram {
    * Absent/null on every 2.5D program.
    */
   surfaceCheck?: { readonly kind: 'surface' } | null;
+  /**
+   * #1070 — the worker's own verifier report, carried here so the dry-run step can tell a program
+   * that PASSED (and simply has no frame — the model path writes none) from one that failed. The
+   * sheet never printed the report itself; only this fact is read.
+   */
+  verify?: unknown | null;
 }
 
 /**
@@ -1234,28 +1243,35 @@ function buildStackUp(job: EngraveJob): RunSheetStackUp | null {
   }
 
   // The jaws, at their shifted faces — the same faces `viseEnvelope` collides against.
-  boxes.push(
-    {
-      id: 'vise-fixed-jaw',
-      label: 'fixed jaw (left)',
-      minX: -shift.left - vise.fixedJawThickness,
-      maxX: -shift.left,
-      minZ: jawBottomZ,
-      maxZ: jawTopZ,
-      dimension: null,
-      sacrificial: false,
-    },
-    {
-      id: 'vise-moving-jaw',
-      label: 'moving jaw (right)',
-      minX: length + shift.right,
-      maxX: length + shift.right + vise.movingJawThickness,
-      minZ: jawBottomZ,
-      maxZ: jawTopZ,
-      dimension: null,
-      sacrificial: false,
-    },
-  );
+  //
+  // #1068 — ONLY A VISE JOB HAS JAWS. A bracket or taped job's side view is the board, the strips
+  // the job states, and the part; drawing the vise beside it was the same false picture the top
+  // view had. The bracket's own arms are sized by the location's defaults, which this function
+  // does not hold, so they are not drawn — an absent box is honest, a guessed one would not be.
+  if (jobMount(job) === 'vise') {
+    boxes.push(
+      {
+        id: 'vise-fixed-jaw',
+        label: 'fixed jaw (left)',
+        minX: -shift.left - vise.fixedJawThickness,
+        maxX: -shift.left,
+        minZ: jawBottomZ,
+        maxZ: jawTopZ,
+        dimension: null,
+        sacrificial: false,
+      },
+      {
+        id: 'vise-moving-jaw',
+        label: 'moving jaw (right)',
+        minX: length + shift.right,
+        maxX: length + shift.right + vise.movingJawThickness,
+        minZ: jawBottomZ,
+        maxZ: jawTopZ,
+        dimension: null,
+        sacrificial: false,
+      },
+    );
+  }
 
   for (const pos of ['left', 'right'] as const) {
     const strip = sides[pos];
@@ -1339,22 +1355,29 @@ function buildDiagram(job: EngraveJob, plan: PartPlan): RunSheetDiagram {
 
   return {
     stock: { length, width },
-    jaws: [
-      {
-        id: 'vise-fixed-jaw',
-        // The fixed jaw is on the LEFT (/Fabrication.md §7.3); its face is x = 0, shifted out
-        // for sacrificial material (#213 §2).
-        label: 'Fixed jaw (left)',
-        min: [-shift.left - vise.fixedJawThickness, jawMinY],
-        max: [0 - shift.left, jawMaxY],
-      },
-      {
-        id: 'vise-moving-jaw',
-        label: 'Moving jaw (right)',
-        min: [length + shift.right, jawMinY],
-        max: [length + shift.right + vise.movingJawThickness, jawMaxY],
-      },
-    ],
+    // #1068 — THE PICTURE IS THE JOB'S MOUNT TOO. A bracket or taped job has no jaws in the
+    // machine; drawing them beside a sheet that says "Fit the bracket" was a false picture of the
+    // bed. The bracket's own arms are sized by the location's defaults, which this function does
+    // not hold, so they are not drawn: an empty list is honest, a guessed arm would not be.
+    jaws:
+      jobMount(job) === 'vise'
+        ? [
+            {
+              id: 'vise-fixed-jaw',
+              // The fixed jaw is on the LEFT (/Fabrication.md §7.3); its face is x = 0, shifted
+              // out for sacrificial material (#213 §2).
+              label: 'Fixed jaw (left)',
+              min: [-shift.left - vise.fixedJawThickness, jawMinY],
+              max: [0 - shift.left, jawMaxY],
+            },
+            {
+              id: 'vise-moving-jaw',
+              label: 'Moving jaw (right)',
+              min: [length + shift.right, jawMinY],
+              max: [length + shift.right + vise.movingJawThickness, jawMaxY],
+            },
+          ]
+        : [],
     origin: [0, 0],
     items,
     keepOuts,
@@ -1381,7 +1404,16 @@ function isViseDefault(vise: ViseParams): boolean {
  * only when the run's own codes say the check was needed and could not be made, which on a vise
  * job — every obstacle below the stock top — is never.
  */
-function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunSheetSim | null): SimCoverageInput {
+function coverageFor(
+  job: EngraveJob,
+  generated: RunSheetGenerated,
+  sim: RunSheetSim | null,
+  // #1068 — THE FIXTURE THE SWEEP WAS HANDED, when the caller knows it. A bracket job is checked
+  // against its arms, its clamps and its own boxes, not the vise's jaws; naming the vise here was
+  // the same false statement the mount section made. Absent = a caller with no mount in hand, and
+  // the vise's own envelope is stated exactly as before; `null` = nothing is modelled (tape).
+  fixture?: FixtureEnvelope | null,
+): SimCoverageInput {
   const codes = new Set<string>();
   for (const f of generated.findings) codes.add(f.code);
   for (const f of generated.verify?.findings ?? []) codes.add(f.code);
@@ -1393,7 +1425,7 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
     for (const d of program.diagnostics) codes.add(d.code);
     for (const d of program.notes) codes.add(d.code);
   }
-  const envelope = viseEnvelope(job.stock, jobVise(job), job.sacrificial);
+  const envelope = fixture === undefined ? viseEnvelope(job.stock, jobVise(job), job.sacrificial) : fixture;
   return {
     outcome: sim?.outcome ?? 'swept',
     engine: sim?.engine,
@@ -1402,8 +1434,8 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
     ...(sim?.designCheck === undefined ? {} : { designCheck: sim.designCheck }),
     // #743 P-6 — the copper's own verdict, when the run is a board (the sheet names the shorts).
     ...(sim?.copper === undefined ? {} : { copper: sim.copper }),
-    fixtureLabels: envelope.boxes.map((b) => b.label),
-    fixtureSource: envelope.source,
+    fixtureLabels: envelope === null ? [] : envelope.boxes.map((b) => b.label),
+    fixtureSource: envelope === null ? undefined : envelope.source,
     sacrificialModelled: hasSacrificial(job.sacrificial),
     toolName: jobTool(job)?.name ?? null,
     codes: [...codes],
@@ -1666,6 +1698,91 @@ function senderOriginSteps(origin: WorkOrigin, onBoard: boolean): RunSheetStep[]
   ];
 }
 
+/**
+ * #1068 — WHAT THE ORIGIN IS JUDGED AGAINST, in the job's own mount's words. Every program is
+ * checked against the blank and whatever the mount puts in the way; only a vise job has jaws.
+ * `relativeTo` completes the same sentence's "shifts the whole job relative to …".
+ */
+function judgedAgainstWords(job: EngraveJob): { against: string; relativeTo: string } {
+  const mount = jobMount(job);
+  return mount === 'bracket'
+    ? job.workholding.kind === 'bracket' && job.workholding.bracket.clamps.length === 0
+      ? { against: "the bracket's arms", relativeTo: 'both' }
+      : { against: "the bracket's arms and the clamps", relativeTo: 'both' }
+    : mount === 'tape'
+      ? { against: 'the cut', relativeTo: 'the blank' }
+      : { against: 'the jaws', relativeTo: 'both' };
+}
+
+/**
+ * #1070 — §6 FOR A BED-HELD JOB: the cut region's footprint, in the plan's own order. Every
+ * position carries both frames — work XY, which the operator can check against the part, and
+ * machine XY, which the console shows — and the soft-limit statement is the plan's, never a
+ * second reading of the calibration here.
+ */
+function footprintRegistrationSteps(
+  onBoard: boolean,
+  facingRun: boolean,
+  plan: FootprintPlan,
+  /** #1068 — what THIS job's program is judged against, in the mount's own words. */
+  judged: { against: string; relativeTo: string },
+): RunSheetStep[] {
+  const steps: RunSheetStep[] = [
+    {
+      text:
+        "Registration is planned on the cut region's footprint, not the blank's edges: the two touches on each " +
+        "bounding edge sit at the cut's own extents, so a rough or out-of-square edge is stated with the margin " +
+        'it leaves — never a stop. Write each reading down as the console shows it.',
+      value: `${fmtNum(plan.marginMm)} mm margin`,
+    },
+  ];
+  const total = plan.scans.length + plan.corners.length;
+  plan.scans.forEach((s, i) => {
+    const machine = `machine X ${fmtNum(s.machineStart[0])} → ${fmtNum(s.machineLimit[0])}, Y ${fmtNum(s.machineStart[1])} → ${fmtNum(s.machineLimit[1])}`;
+    steps.push({
+      text:
+        `Touch ${i + 1} of ${total}: the ${s.edge} edge at ${fmtNum(s.along)} mm, scanning from ${fmtNum(s.start)} ` +
+        `to ${fmtNum(s.limit)} (${machine}) — ` +
+        (s.purpose === 'extent'
+          ? 'this gives the edge line and its rotation where the cut is.'
+          : 'this proves material exists past the cut; a reading that finds none stops the run.'),
+    });
+  });
+  plan.corners.forEach((c, i) => {
+    steps.push({
+      text:
+        `Touch ${plan.scans.length + i + 1} of ${total}: ${c.why} (work X ${fmtNum(c.x)} Y ${fmtNum(c.y)}; ` +
+        `machine X ${fmtNum(c.machine[0])} Y ${fmtNum(c.machine[1])}) — the surface for the Z band.`,
+    });
+  });
+  steps.push(z0Step(onBoard, facingRun));
+  steps.push({
+    text:
+      'The origin is the front-left corner the two touched edge lines intersect at. The machine coordinates are ' +
+      `seeded from ${plan.origin.from}; the touches correct the seed.`,
+  });
+  // 6b's ruling on the land7 red — THE FOOTPRINT SECTION PLANS WHERE THE TOUCHES GO; IT DOES NOT
+  // SAY WHAT THE CHECKS READ. The same statement the standard §5 origin paragraph carries stays
+  // here, so a placed bracket's sheet says both ("no anchor datum" in §2 and "judges the bracket's
+  // arms and the clamps against it" here), and an anchored footprint sheet keeps it too.
+  steps.push({
+    text:
+      `How well YOU set it is not modelled: the file places the ${onBoard ? 'part' : 'blank'} at this origin and judges ` +
+      `${judged.against} against it, so an origin that is out by a little — or a ${onBoard ? 'part' : 'blank'} ` +
+      'sitting differently from what was measured — shifts the whole job relative to ' +
+      `${judged.relativeTo} without the app knowing. The only X/Y slack for that is this job's edge margin, ` +
+      `${fmtNum(plan.marginMm)} mm, which is the gap the content keeps from a stock edge rather than a locating ` +
+      'tolerance: a cut standing at that margin has used all of it.',
+  });
+  const unread = plan.notes.find((n) => n.includes('soft endstop has not been read'));
+  steps.push({
+    text:
+      unread ??
+      'Every planned position above is inside the machine’s soft endstop — a move past one is refused here, by name, before any line is sent.',
+  });
+  return steps;
+}
+
 function registrationSteps(
   job: EngraveJob,
   onBoard: boolean,
@@ -1677,13 +1794,28 @@ function registrationSteps(
    * engraving cutter's Z0 be worked out from this one reading.
    */
   facingRun: boolean,
+  /** #1070 — the bed-held footprint plan, when the caller has one (see `RunSheetOptions`). */
+  footprint?: FootprintPlan,
+  /** #1070 — the seat seek that must run first, when the seat has never been measured. */
+  seatSeek?: SeatSeek,
 ): RunSheetStep[] {
+  if (footprint === undefined && seatSeek !== undefined) return seatRegistrationSteps(onBoard, facingRun, seatSeek);
+  // #1070 — A BED-HELD JOB IS REGISTERED ON ITS CUT REGION, not the blank's edges: the six scans
+  // and the four corner touches come from the plan the Cut step runs, so paper and console say the
+  // same positions, in machine coordinates.
+  // 6b's ruling on the land7 red: the footprint section does not REPLACE what the program is
+  // judged against — the sheet carries both (a placed bracket's sheet says it has no anchor datum
+  // and still says its checks judge the cut against the bracket's arms and its clamps).
+  if (footprint !== undefined) return footprintRegistrationSteps(onBoard, facingRun, footprint, judgedAgainstWords(job));
   // #743 §4.6/§4.7 — A DISC IS REGISTERED ON ITS RIM, not on a rectangle's edges. Four touches
   // through the centre-lines find the circle's extreme points; the centre sets the origin and the
   // span against the stated ⌀ refuses a different piece. The rectangle's probe-plan touches below
   // would name edges a disc does not have, so the disc branch replaces them outright.
   if (job.stock.shape === 'disc') return discRegistrationSteps(job, onBoard, facingRun);
   const { length, width } = job.stock;
+  // #1068 — the origin paragraph names what THIS job's mount puts in the way (the jaws, the
+  // bracket's arms and clamps, or nothing for tape), never the vise's jaws by default.
+  const judged = judgedAgainstWords(job);
   // #449 — the tip is the shop's measured `registration.tipDiameterMm` when the caller passed the scan
   // settings; `PROBE_SPEC` (the same 2.0 mm, its labelled fallback) otherwise.
   const plan = registrationFor(job, tipDiameterMm === undefined ? undefined : { ...PROBE_SPEC, tipDiameter: tipDiameterMm });
@@ -1703,20 +1835,34 @@ function registrationSteps(
   const steps: RunSheetStep[] = [];
   // What the fixture supplies before any touch. Stated first, because it is what makes the rest of
   // the sequence as short as it is.
-  for (const d of plan.datums) {
+  // #1070 (6b's ruling) — a PLACED bracket supplies no datum: the ±0.05 claim is false and the
+  // anchor would put the origin where the bracket is not. The registration then says what is true:
+  // the touches come from the blank, and a found rotation is re-posted or the bracket squared.
+  const placedBracket = job.workholding.kind === 'bracket' && job.workholding.bracket.placement === 'placed';
+  if (placedBracket) {
     steps.push({
-      text: `The ${kindWord(job.workholding.kind)} already references ${axesWord(d.fixes)} to within ±${fmtNum(d.uncertainty)} mm, before any touch.`,
+      text:
+        'The bracket is screwed to the wasteboard where you put it: there is no anchor datum. The ' +
+        'origin and the rotation are probed from the blank — two touches on the front edge for the ' +
+        'rotation, two on the left edge for X, one on the front edge for Y. A found rotation either ' +
+        'goes back through the re-post or you square the bracket before the clamps are tight.',
     });
+  } else {
+    for (const d of plan.datums) {
+      steps.push({
+        text: `The ${kindWord(job.workholding.kind)} already references ${axesWord(d.fixes)} to within ±${fmtNum(d.uncertainty)} mm, before any touch.`,
+      });
+    }
   }
   // One step per touch, in the plan's own order: rotation's pair first, then whatever the pair did
   // not settle. Named physically, never by coordinate alone.
   plan.touches.forEach((t, i) => {
-    const words = describeTouch(t, length, width);
+    const words = describeTouch(t, length, width, jobMount(job));
     steps.push({
       text: `Touch ${i + 1} of ${plan.touches.length}: ${words.edge}, ${words.where} — this gives ${readsWord(t)}.`,
     });
   });
-  steps.push(z0Step(onBoard, facingRun));
+  steps.push(job.z0CarriedFrom === undefined ? z0Step(onBoard, facingRun) : z0CarriedStep(job.z0CarriedFrom.thicknessMm));
   steps.push({
     text:
       `X0 Y0 Z0 is the top-front-left corner of the ${onBoard ? 'part' : 'blank'}. That leaves the ` +
@@ -1730,9 +1876,9 @@ function registrationSteps(
       // in the model. `edgeMargin` is the X/Y slack the content keeps from a stock edge — it is not
       // a locating tolerance, but it is all there is, so the sheet says so where the origin is set
       // rather than letting it be absorbed into the vise's own uncertainty band.
-      `How well YOU set it is not modelled: the file places the blank at this corner and judges the ` +
-      `jaws against it, so an origin that is out by a little — or a ${onBoard ? 'part' : 'blank'} ` +
-      `sitting differently from what was measured — shifts the whole job relative to both without the ` +
+      `How well YOU set it is not modelled: the file places the blank at this corner and judges ` +
+      `${judged.against} against it, so an origin that is out by a little — or a ${onBoard ? 'part' : 'blank'} ` +
+      `sitting differently from what was measured — shifts the whole job relative to ${judged.relativeTo} without the ` +
       `app knowing. The only X/Y slack for that is this job's edge margin, ${fmtNum(job.edgeMargin)} mm, ` +
       'which is the gap the content keeps from a stock edge rather than a locating tolerance: a cut ' +
       'standing at that margin has used all of it.',
@@ -1742,6 +1888,20 @@ function registrationSteps(
   // writes notes as clauses, and the sheet prints sentences.
   for (const note of plan.notes) steps.push({ text: sentence(note) });
   return steps;
+}
+
+/**
+ * #943 (10) — A FLIP JOB'S Z0 IS CARRIED. The face this job cuts is the sawn underside of an
+ * earlier setup's part; touching it there would measure nothing the job wants, and the datum it
+ * must share with the first side is the FIRST side's Z0, less the part's measured thickness.
+ */
+function z0CarriedStep(thicknessMm: Mm): RunSheetStep {
+  return {
+    text:
+      `Z0 is CARRIED from the earlier setup: Z0 = the earlier setup's Z0 − ${fmtNum(thicknessMm)} mm (the part's ` +
+      'measured thickness). Do not probe or touch the sawn underside — it is the face this job cuts.',
+    record: "the earlier setup's Z0 (mm) and the part's measured thickness (mm)",
+  };
 }
 
 /**
@@ -1803,8 +1963,8 @@ function discRegistrationSteps(job: EngraveJob, onBoard: boolean, facingRun: boo
         `X0 Y0 Z0 is the top-front-left corner of the box around the disc — the registration writes it as the rim’s ` +
         `centre − ${fmtNum(radius)} mm on each axis. The program is never rotated: a disc has no rotation to read, ` +
         'so if the design must line up with something on the disc, put a reference feature on it and register on that. ' +
-        'How well YOU set the origin is not modelled: the file places the blank at this corner and judges the jaws ' +
-        `against it, and this job’s ${fmtNum(job.edgeMargin)} mm edge margin is the gap the content keeps from the rim, ` +
+        `How well YOU set the origin is not modelled: the file places the blank at this corner and judges ` +
+        `${judgedAgainstWords(job).against} against it, and this job’s ${fmtNum(job.edgeMargin)} mm edge margin is the gap the content keeps from the rim, ` +
         'not a locating tolerance.',
     },
   ];
@@ -2320,6 +2480,18 @@ export interface RunSheetOptions {
    */
   scan?: MaterialScanSettings;
   /**
+   * #1070 — THE BED-HELD FOOTPRINT PLAN, when the caller has one (the Cut step's attempt, or the
+   * CLI's own seam): §6 prints the cut region's six scans and four corner Z touches with their
+   * machine coordinates instead of the blank's edge touches. Passed in, never read here — the plan
+   * needs the machine's calibration, which this module does not carry.
+   */
+  footprint?: FootprintPlan;
+  /**
+   * #1070, 6b's ruling — no seat datum yet: §6's FIRST TOUCH OF THE DAY is the one bounded Z seek
+   * that measures it (the plan the Cut step's seat press runs). Passed in, never read here.
+   */
+  seatSeek?: SeatSeek;
+  /**
    * #475 — the shop's `registration.surfaceTouchCount`: how many surface touches the cut regions'
    * extents get. Resolved by the caller from `registrationSettings(defaults).settings`, never read
    * here (this module is in the sim worker's import graph). Absent: the labelled fallback (5).
@@ -2442,6 +2614,13 @@ export interface RunSheetOptions {
    * section prints — an unregistered job's sheet is unchanged.
    */
   found?: { offset: { x: number; y: number }; rotationDeg: number | null };
+  /**
+   * #1068 — THE FIXTURE THE SWEEP WAS HANDED, when the caller knows it. A bracket job is checked
+   * against its arms, its clamps and its own obstacle boxes, and §8 must name those, not the
+   * vise's jaws it has no part of. Absent (every caller without a mount in hand) states the vise's
+   * own envelope exactly as before; `null` states that no fixture is modelled (a tape job).
+   */
+  fixture?: FixtureEnvelope | null;
 }
 
 /** A share as the operator reads it. Rounded to the whole percent: a tenth is not a fact about a cutter. */
@@ -3397,6 +3576,17 @@ function programRunSteps(program: RunSheetProgram, number: number): RunSheetStep
               'check the work origin, so look at the origin and the clamps before you start.',
             bold: true,
           }
+        : program.verify != null
+        ? {
+            // #1070 — a program that VERIFIED but has no frame and no frame error: the model (goal)
+            // path writes no air-trace frames for its programs. Saying "did not pass verification"
+            // here was false and told the operator not to run a good file.
+            text:
+              `There is no frame file for program ${number}: the goal (model) path writes no ` +
+              `air-trace frame. ${program.nc} itself passed verification, so it can still be cut — ` +
+              'look at the origin and the clamps before you start.',
+            bold: true,
+          }
         : {
             text:
               `There is no frame file for program ${number}: it did not pass verification, so the trace ` +
@@ -4064,6 +4254,14 @@ export function buildRunSheet(
   // of telling the operator the bit is 3.175 mm wide. No stated size prints as unknown, not as the
   // shank.
   const diameter = tool ? statedCuttingSize(tool) : null;
+  // #1070 — THE SHEET NAMES THE CUTTER THE POSTED FILE RUNS. The job's `toolKey` is the picker's
+  // DEFAULT; the plan may post a different cutter (the tray's job names a 42 mm-flute flat while
+  // every program runs the 25 mm one), and the sheet said the job's while the NC said the other.
+  const postedToolKey = generated.programs?.find((p) => p.kind !== 'facing')?.toolKey ?? null;
+  const postedResolved = postedToolKey === null || postedToolKey === job.toolKey ? null : cutterNameForKey(postedToolKey);
+  // A key the sheet cannot see names nothing: fall back to the job's own cutter rather than print
+  // "unknown cutter" as if the file ran one.
+  const postedToolName = postedResolved === null || postedResolved === 'unknown cutter' ? null : postedResolved;
   const params = generated.feeds && generated.feeds.ok ? generated.feeds.params : null;
   // #221 — the V-carve facts are resolved ONCE, with the engine's own functions: the cone from the
   // job's cutter, and the colour plane from the print grid the plan carries. A V-carve job is a V
@@ -4141,7 +4339,9 @@ export function buildRunSheet(
     },
     {
       text: tool
-        ? `The cutter — ${options.toolCase === undefined ? '' : `${options.toolCase} — `}${toolDisplayName(tool)}.`
+        ? `The cutter — ${options.toolCase === undefined ? '' : `${options.toolCase} — `}${
+            postedToolName ?? toolDisplayName(tool)
+          }${postedToolName === null ? '' : " — the cutter the posted programs run"}.`
         : 'The cutter named by the job.',
       value: diameter === null ? 'cutting diameter unknown' : `⌀ ${fmtNum(diameter)} mm cutting`,
     },
@@ -4162,7 +4362,8 @@ export function buildRunSheet(
       : [
           {
             text:
-              'The Z1 low-profile vise, and the wired probe that ships with the machine — a mechanical ' +
+              (jobMount(job) === 'vise' ? 'The Z1 low-profile vise, and ' : '') +
+              'the wired probe that ships with the machine — a mechanical ' +
               'touch tip, so it triggers on PLA (measured 2026-10-08, 0.001 mm). The 3D Probe stays in reserve.',
           },
         ]),
@@ -4252,19 +4453,67 @@ export function buildRunSheet(
     });
   }
 
-  // ---- 2 · Mount the vise ---------------------------------------------------------------------
+  // ---- 2 · The mount --------------------------------------------------------------------------
   // The bench issue any step that has NOT been walked at the machine names (see the module note):
   // today that is the held stepped material scan and the rest pass's routine.
   const BENCH_ISSUE = '#443';
+  // #1068 — THE SHEET READS THE JOB'S MOUNT. Every job used to be handed the vise's section,
+  // title and all, so a bracket job told the operator to mount a vise it does not use (and its
+  // program had been swept against no fixture at all — the CLI half of the same defect).
+  const mount = jobMount(job);
+  const tape = job.workholding.kind === 'tape' ? job.workholding.tape : null;
+  const bracket = job.workholding.kind === 'bracket' ? job.workholding.bracket : null;
   // #717 — Makera's low-profile-vise page, in its own order: home, tool out, power off at the
   // machine's switch, the board off, the pins, the jaw off for the six screws, the jaw back on
   // with its locating key seated. The fixed jaw is on the left.
-  const mountSteps: RunSheetStep[] = [
+  const viseMountSteps: RunSheetStep[] = [
     { text: 'Home the machine, remove any tool, then switch the machine off at its switch.' },
     { text: 'Remove the MDF wasteboard. Insert the two 4 × 11 mm locating pins.' },
     { text: 'With the left fixed jaw off, seat the vise on the pins; fasten it with six M5 × 20 screws.' },
     { text: 'Refit the left fixed jaw with its locating key seated. Switch the machine on.' },
   ];
+  // #707 BM-1 — the bracket's own setup: pinned at the job's anchor, the blank into its inside
+  // corner, the job's clamps on the free edges. The QuickStart's order, in physical words.
+  // #1070 (6b's ruling) — A PLACED BRACKET IS NOT PINNED. It is screwed to the MDF wasteboard
+  // where the operator put it: no wasteboard comes out, no dowels, no anchor — and the origin is
+  // probed from the blank, never taken from the anchor.
+  const bracketMountSteps: RunSheetStep[] =
+    bracket?.placement === 'placed'
+      ? [
+          {
+            text:
+              "The bracket is screwed to the wasteboard where you put it — it is not on the table's " +
+              'locating pins and there is no anchor datum.',
+          },
+          { text: "Push the blank's front-left corner into the bracket's inside corner; fit the clamps as stated." },
+          { text: 'The origin is probed, not taken from the anchor.' },
+        ]
+      : [
+          { text: 'Home the machine, remove any tool, then switch the machine off at its switch.' },
+          {
+            // #943 (10), 6b's ruling — WITH A BOARD UNDER THE BLANK THE WASTEBOARD STAYS: the
+            // bracket pins go through it into the anchor, so the step must not send the operator
+            // to remove the very board the job stands on.
+            text:
+              job.sacrificial.under !== null
+                ? `The bracket is pinned at anchor ${bracket?.anchor ?? 1} through the wasteboard with its two 4 mm dowels and screwed down; the wasteboard stays.`
+                : `Remove the MDF wasteboard. Pin the bracket to the bed at anchor ${bracket?.anchor ?? 1} with two 4 mm locating dowels and three M5 × 20 screws.`,
+          },
+          { text: 'Switch the machine on.' },
+        ];
+  // #707 §5 — tape-down: the strips inside the blank's edges and the blank pressed flat.
+  const tapeMountSteps: RunSheetStep[] = [
+    { text: 'Home the machine, remove any tool, then switch the machine off at its switch.' },
+    {
+      text:
+        tape === null
+          ? 'Lay strips of double-sided tape across the bed, just inside where the blank’s edges will land — the edge scans read the bed past them.'
+          : `Lay strips of ${fmtNum(tape.width)} mm double-sided tape across the bed, ${fmtNum(tape.inset)} mm inside where the blank’s edges will land — the edge scans read the bed just past them.`,
+    },
+    { text: 'Switch the machine on.' },
+  ];
+  const mountSteps: RunSheetStep[] =
+    mount === 'bracket' ? bracketMountSteps : mount === 'tape' ? tapeMountSteps : viseMountSteps;
 
   // ---- 3 · Load the blank --------------------------------------------------------------------
   const frontGap = -vise.jawStartY;
@@ -4311,23 +4560,104 @@ export function buildRunSheet(
       }),
     {
       text:
-        `The blank's ${betweenJaws} runs left–right between the jaws. ` +
-        (orientation.top === 'top'
-          ? 'The face to be cut is up.'
-          : `The stock's ${orientation.top} face is up — that is the face to be cut.`),
+        mount === 'vise'
+          ? `The blank's ${betweenJaws} runs left–right between the jaws. ` +
+            (orientation.top === 'top'
+              ? 'The face to be cut is up.'
+              : `The stock's ${orientation.top} face is up — that is the face to be cut.`)
+          : orientation.top === 'top'
+            ? 'The face to be cut is up.'
+            : `The stock's ${orientation.top} face is up — that is the face to be cut.`,
       value: `${fmtNum(betweenJaws === 'length' ? length : width)} mm`,
     },
-    {
-      text:
-        `The ${onBoard ? "part's " : ''}top face stands ${fmtNum(vise.stockProud)} mm above the jaw tops. ` +
-        `${clearanceWords} Record the measured ` +
-        stopWords,
-      record: 'measured stock proud (mm)',
-    },
-    {
-      text: `Push the blank's front edge to where the file expects it: the front edge is ${fmtNum(frontGap)} mm behind the front of the jaws.`,
-    },
-    { text: 'Tighten. Check the blank does not rock.' },
+    // #1068 — THE BLANK GOES WHERE THE MOUNT PUTS IT. The vise's jaw-top clearance and front-edge
+    // offsets are vise facts; a bracket job's datum is its inside corner and its clamps, and a
+    // taped job's is the bed's front edge. The steps below are each mount's own physical acts.
+    ...(mount === 'bracket'
+      ? ([
+          {
+            text:
+              bracket?.placement === 'placed'
+                ? `Push the blank's front-left corner into the bracket's inside corner — the origin is ` +
+                  'probed, not taken from the anchor, so the corner must seat fully.'
+                : `Push the blank's front-left corner into the bracket's inside corner at anchor ${bracket?.anchor ?? 1} — ` +
+                  'the datum is measured from the anchor, so the corner must seat fully.',
+          },
+          // #943 (10), the bench's own note — the blank has been on this board before, and the
+          // screws that held it need not land in the same board holes a second time.
+          ...(under !== null && under.attach === 'screws'
+            ? [
+                {
+                  text:
+                    "The blank's two countersunk screw holes may no longer meet the board's holes after re-seating. " +
+                    (bracket === null || bracket.clamps.length === 0
+                      ? 'If they do not line up, do not drill the board: hold the part with the bracket alone, and put double-sided tape under it as Makera does.'
+                      : 'If they do not line up, do not drill the board: hold the blank with the bracket and the clamp alone, and put double-sided tape under it as Makera does.'),
+                } as RunSheetStep,
+              ]
+            : []),
+          ...(bracket === null || bracket.clamps.length === 0
+            ? // #943 (10) — the vendor's own side-2 hold: the bracket is the fence, the tape is
+              // what keeps the part down.
+              [
+                {
+                  text:
+                    "There are no clamps in this job: lay double-sided tape over most of the part's top face " +
+                    '(it lies face down), press it onto the board and push the part into the bracket’s anchored ' +
+                    'corner, as Makera does.',
+                } as RunSheetStep,
+              ]
+            : bracket.clamps.map(
+                (p, i): RunSheetStep => {
+                  // #1070 — ONE PLACE, ONE SENTENCE. The verifier's warning words this clamp with
+                  // `clampLabel` (near edge, from the corner); the sheet used to name the centre
+                  // from the other end, so one clamp read as two. When the run's fixture envelope
+                  // is in hand its box carries that same label — quote it; the centre-from-the-left
+                  // wording is the fallback for a caller that has no envelope.
+                  const label = options.fixture?.boxes.find((box) => box.id === `clamp-${i + 1}`)?.label ?? null;
+                  // #1068 review (6b) — a TOP clamp presses from above and is checked at the top
+                  // clamp's height; a SIDE clamp pushes from outside the edge with its top below
+                  // the stock's, so the step says that instead. Absent kind = top.
+                  const text =
+                    label !== null
+                      ? p.kind === 'side'
+                        ? `Fit the clamp: ${label} — its top below the stock top; the job was planned with a clamp there.`
+                        : `Fit the clamp: ${label} — the job was planned with a clamp there, checked at the top clamp's height.`
+                      : p.kind === 'side'
+                        ? `Fit the side clamp on the ${p.edge} edge, its top below the stock top, its centre ${fmtNum(p.at)} mm from ${
+                            p.edge === 'back' ? 'the left end' : 'the front end'
+                          } of the edge — the job was planned with a clamp there.`
+                        : `Fit the clamp on the ${p.edge} edge, its centre ${fmtNum(p.at)} mm from ${
+                            p.edge === 'back' ? 'the left end' : 'the front end'
+                          } of the edge — the job was planned with a clamp there, checked at the top clamp's height.`;
+                  return { text };
+                },
+              )),
+          {
+            text:
+              bracket === null || bracket.clamps.length === 0
+                ? 'Check the part does not rock and its corner stays seated.'
+                : 'Tighten the clamps. Check the blank does not rock and its corner stays seated.',
+          },
+        ] as RunSheetStep[])
+      : mount === 'tape'
+        ? ([
+            { text: "Press the blank down onto the tape, square to the bed's front edge, and hold it for a slow count of ten." },
+            { text: 'Check the blank cannot slide or rock — the datum comes from its edges, not from a stop.' },
+          ] as RunSheetStep[])
+        : ([
+            {
+              text:
+                `The ${onBoard ? "part's " : ''}top face stands ${fmtNum(vise.stockProud)} mm above the jaw tops. ` +
+                `${clearanceWords} Record the measured ` +
+                stopWords,
+              record: 'measured stock proud (mm)',
+            },
+            {
+              text: `Push the blank's front edge to where the file expects it: the front edge is ${fmtNum(frontGap)} mm behind the front of the jaws.`,
+            },
+            { text: 'Tighten. Check the blank does not rock.' },
+          ] as RunSheetStep[])),
   ];
 
   // #432 review R1 — A FACING JOB'S ORDER IS PROBE → FACE → RE-TOUCH → ENGRAVE. The origin is
@@ -4446,7 +4776,7 @@ export function buildRunSheet(
           },
         ]
       : []),
-    ...registrationSteps(job, onBoard, options.scan?.tipDiameterMm, facingRun),
+    ...registrationSteps(job, onBoard, options.scan?.tipDiameterMm, facingRun, options.footprint, options.seatSeek),
     // #475 — Z0 is a spread, not a point: print the surface touches across the cut's extents, the
     // band they must land in, and (when the caller has readings) the measured verdict. Additive:
     // a caller that passes no `surfaceTouchCount`/`surfaceReadings` gets the plan and stop rule.
@@ -4970,12 +5300,24 @@ export function buildRunSheet(
     if (code === 'vise-default' && viseWarningAt < 0) viseWarningAt = warnings.length;
     warnings.push({ text: message });
   };
+  /** #1070 — attributed per-program warnings, keyed by code + the message WITHOUT the program
+   * prefix, so nine programs saying the same thing print ONE line naming the programs. */
+  const folded = new Map<string, { code: string; message: string; original: string; programs: number[] }>();
+  const foldAttributed = (code: string, message: string): boolean => {
+    const m = /^program (\d+)(?: \([^)]*\))?: ([\s\S]*)$/.exec(message);
+    if (m === null) return false;
+    const key = `${code}|${m[2]}`;
+    const entry = folded.get(key);
+    if (entry === undefined) folded.set(key, { code, message: m[2]!, original: message, programs: [Number(m[1])] });
+    else if (!entry.programs.includes(Number(m[1]))) entry.programs.push(Number(m[1]));
+    return true;
+  };
   for (const f of [...generated.findings, ...(options.extraFindings ?? [])]) {
     // #737 — the neck step in its program's Cut section already carries this warning at the point
     // of use, with the air-cut instruction. Carrying it here too printed the same warning twice on
     // one sheet; the neck step is the one copy the operator reads beside the cut it describes.
     if (f.code === 'neck-jaw-clearance') continue;
-    if (f.severity === 'warning') pushWarning(f.code, f.message);
+    if (f.severity === 'warning' && !foldAttributed(f.code, f.message)) pushWarning(f.code, f.message);
   }
   if (generated.verify) {
     for (const f of generated.verify.findings) {
@@ -4995,13 +5337,22 @@ export function buildRunSheet(
     for (const d of diagnostics) {
       // #490 — a panel crash is an `error`, but section 8 is where the sheet says what the app
       // could not do, so it is carried beside the warnings rather than dropped.
-      if (d.severity === 'warning' || d.code === PANEL_RENDER_ERROR_CODE) pushWarning(d.code, d.message);
+      if (d.severity === 'warning' && !foldAttributed(d.code, d.message)) pushWarning(d.code, d.message);
+      else if (d.code === PANEL_RENDER_ERROR_CODE) pushWarning(d.code, d.message);
+    }
+    // #1070 — the folded lines: one per distinct message that MORE THAN ONE program raised, naming
+    // the programs. A message only one program raised keeps its own label (AND its cutter) — the
+    // fold exists to stop nine programs saying the same thing, never to strip a single program's
+    // identity.
+    for (const f of folded.values()) {
+      if (f.programs.length === 1) pushWarning(f.code, f.original);
+      else pushWarning(f.code, `programs ${f.programs.sort((a, b) => a - b).join(', ')}: ${f.message}`);
     }
     // #243 — the coverage sentence, from the same builder the Simulate panel prints: which
     // geometry the sweep was given and which it never saw, and whether this run swept at all.
     // It appears whenever a simulation is part of the run (a `sim` is passed), never when the
     // caller says there was none.
-    for (const sentence of coverageDisclaimer(coverageFor(job, generated, sim))) pushWarning('coverage', sentence);
+    for (const sentence of coverageDisclaimer(coverageFor(job, generated, sim, options.fixture))) pushWarning('coverage', sentence);
   }
   // #926 — THE TWO EFFICIENCY THRESHOLDS. Both are shop settings (`location.json`), passed in by
   // the caller; when the caller has none the measures are still printed and nothing is judged,
@@ -5164,7 +5515,12 @@ export function buildRunSheet(
     ...(options.restPass
       ? [{ id: 'rest', title: 'Two tools, one blank', steps: restPassSteps(options.restPass) }]
       : []),
-    { id: 'mount', title: 'Mount the vise', steps: mountSteps },
+    // #1068 — the mount's OWN name: the section title is the first thing the operator reads.
+    {
+      id: 'mount',
+      title: mount === 'bracket' ? 'Fit the bracket' : mount === 'tape' ? 'Tape the blank down' : 'Mount the vise',
+      steps: mountSteps,
+    },
     ...rotaryFeedSection,
     { id: 'load', title: 'Load the blank', steps: loadSteps },
     ...(pcbSteps === null ? [] : [{ id: 'board', title: 'The board', steps: pcbSteps }]),
@@ -5276,7 +5632,13 @@ export function runSheetDiagramSvg(diagram: RunSheetDiagram): string {
   const parts: string[] = [];
   parts.push(
     `<svg xmlns="${SVG_NS}" viewBox="${xmin} ${-ymax} ${xmax - xmin} ${ymax - ymin}" ` +
-      `class="run-sheet-svg" role="img" aria-label="Top view of the stock, the vise jaws and the work origin">`,
+      // #1068 — the label names what the picture actually draws: a bracket or taped job has no
+      // jaws to show.
+      `class="run-sheet-svg" role="img" aria-label="${
+        diagram.jaws.length === 0
+          ? 'Top view of the stock and the work origin'
+          : 'Top view of the stock, the vise jaws and the work origin'
+      }">`,
   );
   parts.push(
     `<defs><marker id="run-sheet-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">` +
@@ -5390,11 +5752,17 @@ export function runSheetStackUpSvg(stackUp: RunSheetStackUp): string {
   const zmin = Math.min(...zs) - STACKUP_PAD;
   const zmax = Math.max(...zs) + STACKUP_PAD;
 
+  // #1068 — the label names what the side view actually draws: a bracket or taped job has no jaws.
+  const hasJaws = stackUp.boxes.some((b) => b.id.startsWith('vise-'));
   const parts: string[] = [];
   parts.push(
     `<svg xmlns="${SVG_NS}" viewBox="${xmin} ${-zmax} ${xmax - xmin} ${zmax - zmin}" ` +
       `class="run-sheet-svg run-sheet-stackup" role="img" ` +
-      `aria-label="Side view of the setup: the vise jaws, the sacrificial board and strips, and the part">`,
+      `aria-label="${
+        hasJaws
+          ? 'Side view of the setup: the vise jaws, the sacrificial board and strips, and the part'
+          : 'Side view of the setup: the sacrificial board and strips, and the part'
+      }">`,
   );
 
   for (const b of stackUp.boxes) {
@@ -5434,4 +5802,44 @@ export function runSheetStackUpSvg(stackUp: RunSheetStackUp): string {
 
   parts.push('</svg>');
   return parts.join('');
+}
+
+/**
+ * #1070, 6b's ruling — THE FIRST TOUCH OF THE DAY. With no seat datum the program's first touch
+ * is the one bounded Z seek on the wasteboard beside the front arm; the footprint touches are
+ * planned on the reading it writes, so the sheet says the press runs twice — once to measure,
+ * once to plan the registration.
+ */
+function seatRegistrationSteps(onBoard: boolean, facingRun: boolean, seek: SeatSeek): RunSheetStep[] {
+  return [
+    {
+      text:
+        'THE FIRST TOUCH OF THE DAY: the bracket seat has not been measured on this machine. The program’s first ' +
+        'touch is one bounded Z seek with the wired probe on the wasteboard beside the bracket’s front arm — the ' +
+        'surface the blank stands on — at work X ' +
+        `${fmtNum(seek.workX)} Y ${fmtNum(seek.workY)} (machine X ${fmtNum(seek.x)} Y ${fmtNum(seek.y)}).`,
+      value: `machine X ${fmtNum(seek.x)} · Y ${fmtNum(seek.y)}`,
+    },
+    {
+      text:
+        `The seat is expected at machine Z ${fmtNum(seek.band.min)} to ${fmtNum(seek.band.max)}. The seek starts at ` +
+        `machine Z ${fmtNum(seek.fromMachineZ)} (above the band) and goes no further than ` +
+        `${fmtNum(seek.band.min - 5)}; a reading outside the band stops the run. ${seek.notes[0] ?? ''}`,
+    },
+    {
+      // 6b's amendment (the maintainer's fact, 2026-11-07).
+      text:
+        'Look at the spot first: bare wasteboard, no screw head or countersink (the board’s screws sit 1 mm below ' +
+        'its surface; a touch on one stores a seat 1 mm low).',
+    },
+    {
+      text:
+        'The reading is written as the bed profile’s bracket seat, and it is valid only for the probe fitting it was ' +
+        'measured with: the press measures every session, and the stored value is only the next session’s expected band.',
+    },
+    z0Step(onBoard, facingRun),
+    {
+      text: 'After the seat is stored, press Plan registration again: the cut region’s footprint touches are planned against the reading.',
+    },
+  ];
 }

@@ -25,6 +25,8 @@ import type { ObstacleBox } from '@/engine/cnc/setup';
 import { cuttingDiameter, flatEndMill, type Tool, isCuttingRecord } from '@/engine/cnc/tool';
 import { coneHeight, isVShape, vCone, type VCone } from '@/engine/cnc/vProfile';
 import { vCarvePassPitch } from '@/engine/cnc/vCarveGeometry';
+import { memTrace } from '@/engine/cnc/memTrace';
+import { PlanFinishTooManyMoves } from './ops/finish';
 import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, resolvedFeedsTable, type CutParams, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
@@ -34,6 +36,8 @@ import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engi
 import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
 import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
+import type { ProfileSpan } from '@/engine/cnc/cam/profile';
+import { GOAL_FIT_TOLERANCE_MM } from '@/engine/cnc/engrave/goalPlacement';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
@@ -177,6 +181,15 @@ export interface OpOutcome {
    * without the gate having to find it. Absent on every op that is not a floor-correct V pocket.
    */
   predictedCutIntoMm?: number;
+  /**
+   * #943 (10) — THE FREEING CONTOUR'S KERF, when that contour is a THROUGH cut (its depth reaches
+   * the stock bottom and so takes the board's breakthrough): the centre path, its tab spans, the
+   * cutter radius and the tab height — the verifier's through-mask shape. `engraveGenerate` feeds
+   * it into `buildThroughMask` so a through contour is accepted at `thickness + breakthrough`
+   * while a tab span still caps the cut at its top. Absent on every other op: a contour that stops
+   * above the stock bottom is a wall, not a through cut, and grants no breakthrough.
+   */
+  throughKerf?: { path: Polygons; spans: ProfileSpan[][]; toolRadius: number; tabHeight: number };
 }
 
 export type RegionKind = 'pocket' | 'island-top' | 'curved' | 'contour' | 'rim';
@@ -229,6 +242,19 @@ export interface SetupSpec {
 
 export interface ModelPlanInput {
   geometry: FeatureSource;
+  /**
+   * #943 (10) — THE JOB'S STATED FREEING TABS (`goal.underside.tabs`), width/height in mm. `count:
+   * 0` frees the part with no tabs (the vendor tray's own side 1). Absent → the pocket chain's
+   * DEFAULT_RELEASE_TABS, so every job that states no underside block posts byte-identically.
+   */
+  freeingTabs?: { count: number; widthMm: number; heightMm: number };
+  /**
+   * #943 (10) — THE JOB'S OWN SETUP COUNT, when this input is one setup of a larger job re-planned
+   * ALONE (the #1017 twin): the single-setup-only rules — the "outline is the stock, no freeing
+   * contour" rule — must read the JOB, not the input that a twin or a caller narrowed. The plan
+   * uses `max(this, input.setups.length)`; absent is the input's own count.
+   */
+  jobSetupCount?: number;
   /**
    * #1041 — THE SEAM'S OWN STATEMENT ABOUT THE HOUSE, when the shop had no inventory or user
    * records and the built-in registry stood in. Stated on the plan's notes, so an operator reading
@@ -516,6 +542,11 @@ export interface PlanModelCamOptions {
    * that names the ideal's measured ball (one leftover statement per card, not two).
    */
   restStatement?: boolean;
+  /**
+   * #1052 — which of `planTwoOutcomes`' two runs this is, for the memory trace's `plan:start` row
+   * (owned or ideal). Absent for a plan the caller runs alone.
+   */
+  planKind?: 'owned' | 'ideal';
 }
 
 /**
@@ -677,6 +708,8 @@ function describeRegistration(setupIndex: number, registration: SetupRegistratio
  * house flats only) — the plan says that too when a caller supplies one.
  */
 export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
+  // #1052 — the flag-gated memory trace (a null check when off): one row at the plan's start.
+  memTrace('plan:start', { plan: opts.planKind ?? 'owned', setups: input.setups.length, house: input.cutters.house.length });
   const tl = await getToplevel();
   const offset = makeClipperOffset(tl);
   const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
@@ -1077,6 +1110,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // #986 (the ruling) — THE RANK'S OWN STATEMENT: every measured candidate's leftover and
     // cycle, the one that won, and the uncapped best as a fact. It rides the plan's notes.
     const ballRankNotes: string[] = [];
+    // #1052 — a candidate whose finish passes the move cap is a stated refusal on the card, not a
+    // silent drop: its own typed statement, one per candidate.
+    const capStatements: PlanStatement[] = [];
     if (coverageGoal !== undefined && goalCoverage !== undefined && ballCandidates.length > 1 && tree.remainder.length > 0) {
       let best: { tool: Tool; leftover: number; cycle: number } | null = null;
       let uncappedBest: { tool: Tool; leftover: number; cycle: number } | null = null;
@@ -1090,7 +1126,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       // for the ideal); the monotone argument is stated here so the early exit is auditable, and a
       // candidate that does TIE keeps the cycle tie-break.
       const ordered = [...ballCandidates].sort((a, b) => (cuttingDiameter(a) ?? 0) - (cuttingDiameter(b) ?? 0));
+      // #1052 — the measured search's shape: the candidate count first, then a row per candidate.
+      memTrace('rank:start', { candidates: ordered.length });
       for (const candidate of ordered) {
+        memTrace('rank:candidate', { diameterMm: cuttingDiameter(candidate) ?? 0 });
         opts.signal?.throwIfAborted();
         let measured: PlanCurvedResult;
         try {
@@ -1101,7 +1140,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             ...curvedOptionsFor(candidate, cutParamsForBall(candidate)),
             finishScallopMm: DEFAULT_FINISH_SCALLOP_MM,
           });
-        } catch {
+        } catch (err) {
+          // #1052 — a candidate whose finish passes the move cap leaves the rank STATED, with its
+          // number; the plan continues with the other candidates.
+          if (err instanceof PlanFinishTooManyMoves) {
+            const text = `${candidate.name || 'the ball'}: ${err.message}`;
+            ballRankNotes.push(text);
+            capStatements.push({ severity: 'warning', code: 'goal-finish-too-many-moves', count: 1, ids: [err.region], text });
+          }
           continue; // a candidate that cannot plan this remainder is not a candidate
         }
         const coverage = goalCoverage(measured.ops.map((o) => o.outcome.ir));
@@ -1194,11 +1240,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // setup's does. (The band is measured from this setup's stock top.)
     const bandReachesBottom = depthBandMm === undefined || depthBandMm + 1e-9 >= -tree.contour.zTo;
     const tabs =
-      input.setups.length <= 1 || !bandReachesBottom
-        ? undefined
-        : setupIndex === input.setups.length - 1
+      input.setups.length > 1 && bandReachesBottom
+        ? setupIndex === input.setups.length - 1
           ? { count: 0, width: DEFAULT_RELEASE_TABS.width, height: DEFAULT_RELEASE_TABS.height }
-          : DEFAULT_RELEASE_TABS;
+          : DEFAULT_RELEASE_TABS
+        : input.freeingTabs === undefined
+          ? undefined
+          : { count: input.freeingTabs.count, width: input.freeingTabs.widthMm, height: input.freeingTabs.heightMm };
 
     // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
     // already-finished surface (this file's own #965 open-item note, below, used to be the whole
@@ -1528,6 +1576,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       return { regions, unreachable, planned, masks };
     };
 
+    // #1052 — the pocket chain's own bracket (A's finding): an abort between plan:start and the
+    // first curved op names the chain, and its end row carries the candidate count.
+    memTrace('chain:start');
     const result = planTreePrograms(tree, {
       offset,
       floorStrips: buildFloorStrips,
@@ -1538,6 +1589,15 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       ...(opts.signal === undefined ? {} : { signal: opts.signal }),
       pockets: noFlatFallback ? null : {
         ...(depthBandMm === undefined ? {} : { depthBandMm }),
+        stockThicknessMm: input.stock.thickness,
+        // #943 (10) — THE OUTLINE-IS-THE-STOCK RULE IS A SINGLE-SETUP RULE. It exists for a side-2
+        // job whose stock IS the freed part; a two-setup job on a blank keeps its freeing contour
+        // on every setup as before (a part that fills the blank in one frame is the 966 multi-setup
+        // case, whose setups each plan their own side of the stock). The count is the JOB's, never
+        // the narrowed input's: #1017's twin re-plans one setup alone and must keep the contour.
+        ...((input.jobSetupCount ?? 0) > 1 || input.setups.length > 1
+          ? {}
+          : { stockFootprintMm: { length: input.stock.length, width: input.stock.width } }),
         houseFlats: flats,
         houseAll: input.cutters.house,
         ...(input.sacrificialBreakthroughMm === undefined ? {} : { sacrificialBreakthroughMm: input.sacrificialBreakthroughMm }),
@@ -1582,6 +1642,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       },
       curved: curvedOptionsFor(ball, cutParamsFor),
     });
+    memTrace('chain:end', { candidates: result.choice.considered?.length ?? 0 });
     opts.signal?.throwIfAborted();
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 0.9 });
 
@@ -1702,7 +1763,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
     // #992 — THE TYPED STATEMENTS: the two planners' own, then this loop's. Every one is the same
     // fact its `notes` line states; the code and severity are what route it to the operator.
-    const statements: PlanStatement[] = [...result.statements, ...freeingStatements, ...fallbackStatements];
+    const statements: PlanStatement[] = [...result.statements, ...freeingStatements, ...fallbackStatements, ...capStatements];
     // #1005 — THE MOULD'S OWN FACTS, from the cavity the plan was handed. The sentences are the old
     // heightfield path's own, word for word (the guide's chapter 8 rows document these codes); the
     // draft number is measured from the part's surface at the seam, because a planar wall has no
@@ -1869,7 +1930,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       }
     }
     if (input.fixture.envelope !== null) {
-      const text = `the ${input.fixture.mount} fixture envelope is not yet wired into the region obstacles — this plan carries none; the posted program is still checked against the same envelope by the sweep`;
+      const text = `the ${input.fixture.mount} fixture envelope is not one of this plan's own region obstacles — the posted program is checked against it by the verifier and the sweep`;
       notes.push(text);
       statements.push({ severity: 'warning', code: 'goal-fixture-unmodelled', count: 1, text });
     }
@@ -1993,6 +2054,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       last.notes.push(statement.text);
     }
   }
+  memTrace('plan:end', { setups: perSetup.length });
   return outcome === undefined ? { perSetup } : { perSetup, outcome };
 }
 
@@ -2336,6 +2398,21 @@ export interface PlanPocketsOptions {
    * named. Absent → the whole depth, every existing caller unchanged.
    */
   depthBandMm?: number;
+  /**
+   * #943 (10) — the blank's own thickness, mm. A THROUGH freeing contour states it to the
+   * contour op, so its tabs are measured from the PART's bottom (`thickness − height`) rather
+   * than from the deeper `thickness + breakthrough` floor the cut itself reaches. Absent → the
+   * op's own default (`depthMm`), every existing caller unchanged.
+   */
+  stockThicknessMm?: number;
+  /**
+   * #943 (10) — the stock's own footprint, mm (work frame, front-left at the origin). When the
+   * goal's outline lies inside it by more than the fit tolerance on some side there is material
+   * around the part to free, and a contour is demanded; when the outline IS the stock's (a side-2
+   * job whose stock is the freed part) no contour is demanded and the plan says so. Absent → the
+   * contour is always demanded, every existing caller unchanged.
+   */
+  stockFootprintMm?: { length: number; width: number };
   stepDownMm: number;
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
   rapid: RapidEstimate;
@@ -2530,17 +2607,24 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #1003 — THE STOCK BOTTOM IS THE FLOOR TOO. A goal taller than its blank (the corpus figure is
   // 41.337 mm on a 40 mm stock) must not free through the vise: the verifier's `cut-too-deep` is
   // the hard gate, and this is the PLAN honouring it — the freeing contour is cut off at the stock
-  // bottom and the clipped millimetres are stated. The sacrificial board's allowance is a separate
-  // input this function does not receive yet (stated, not silently zero). The two floors COMPOSE:
-  // the shallower of the demand, the band and the stock bottom wins.
+  // bottom and the clipped millimetres are stated.
+  //
+  // #943 (10) — A PART THAT REACHES THE STOCK BOTTOM IS A THROUGH CUT, and takes the board's
+  // breakthrough like every other through cut: the floor is the stock bottom PLUS the stated
+  // breakthrough. Stopping at the stock bottom itself left the part held by a skin (the M1 tray's
+  // p9 ended at −25.000 on a 25 mm blank over a board). A contour that stops above the stock
+  // bottom is a wall, not a through cut, and keeps its own demand. The band and the floor COMPOSE
+  // as caps: the shallower of the band and the floor wins, and a goal that runs deeper than the
+  // floor is still clipped at it and stated.
   // #1018 — `tree.frame.stockBottom` is shifted by the SAME door translate `stockTop` is (the
   // door's own doc), so this is already "depth below the stock top", no `z0` subtraction needed.
   const stockBottomZ = tree.frame.stockBottom;
   const stockFloorDepthMm = stockBottomZ === undefined ? undefined : -stockBottomZ;
   const breakthroughMm = opts.sacrificialBreakthroughMm ?? 0;
   const contourFloorDepthMm = stockFloorDepthMm === undefined ? undefined : stockFloorDepthMm + Math.max(0, breakthroughMm);
+  const contourThrough = stockFloorDepthMm !== undefined && contourDepthRawMm >= stockFloorDepthMm - 1e-9;
   const contourDepthMm = Math.min(
-    contourDepthRawMm,
+    contourThrough && contourFloorDepthMm !== undefined ? contourFloorDepthMm : contourDepthRawMm,
     depthBandMm === undefined ? Number.POSITIVE_INFINITY : depthBandMm,
     contourFloorDepthMm === undefined ? Number.POSITIVE_INFINITY : contourFloorDepthMm,
   );
@@ -2622,7 +2706,29 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // solid, not a design edge, so no contour op is demanded against it. `tree.contour.frees`
   // stays what it always was (whether a REAL contour reaches the stock bottom, which decides
   // tabs below) — a different question from whether a contour exists at all.
-  if (!tree.contour.synthetic) {
+  //
+  // #943 (10) — THE OUTLINE IS THE STOCK'S: no material stands outside the goal to free, so no
+  // contour is demanded (the vendor tray's side 2, whose stock IS the freed part). Any side with
+  // more than the fit tolerance of stock beyond the outline means a contour is demanded as before.
+  const outlineIsStock =
+    opts.stockFootprintMm !== undefined &&
+    (() => {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const ring of tree.contour.outline) {
+        for (const [x, y] of ring) {
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+      }
+      const margins = [minX, minY, opts.stockFootprintMm!.length - maxX, opts.stockFootprintMm!.width - maxY];
+      return margins.every((m) => m <= GOAL_FIT_TOLERANCE_MM);
+    })();
+  if (!tree.contour.synthetic && !outlineIsStock) {
     features.push({ id: 'contour', kind: 'contour', depthMm: contourDepthMm });
   }
   const demand = { features };
@@ -2796,6 +2902,12 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         contour: tree.contour,
         region: ref,
         depthMm: contourDepthMm,
+        // #943 (10) — a through contour declares its kerf for the verifier's mask, and states the
+        // PART's own thickness for the tab top: the cut goes `thickness + breakthrough` deep, but
+        // a tab is `height` mm of material above the part's bottom, not above that deeper floor.
+        ...(contourThrough && opts.stockThicknessMm !== undefined
+          ? { thicknessMm: opts.stockThicknessMm, through: true }
+          : {}),
         tabs: opts.tabs ?? DEFAULT_RELEASE_TABS,
         offset: opts.offset,
         params: cutParamsFor(cutter),
@@ -2956,6 +3068,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   const planStep: SequenceOptions['planStep'] = (step, prefix) => {
     const signature = stepKey(step, prefix);
     if (irCache.has(signature)) return irCache.get(signature)!;
+    // #1052 — the pocket chain's own boundary (A's finding): an abort inside it names its step.
+    memTrace('chain:step', { kind: step.kind, cutter: step.cutter.key });
     opts.signal?.throwIfAborted();
     opts.onStep?.(step.kind);
     // The outcome cache uses the SAME key as the IR cache (a rest's regions depend on its prefix),
@@ -3260,6 +3374,16 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #992 — the SAME facts, typed: code, severity and count, so the seam can route them. `notes`
   // keeps every string exactly as before (the failure path joins it, the acceptance reads it).
   const statements: PlanStatement[] = [];
+  // #943 (10) — no material stands outside the goal: the plan states it rather than leaving the
+  // operator to notice a contour program is missing.
+  if (outlineIsStock && !tree.contour.synthetic) {
+    const text = "the part's outline is the stock's — no freeing contour";
+    notes.push(text);
+    statements.push({ severity: 'info', code: 'goal-outline-is-stock', count: 1, text });
+    // …and on the paper too: §2's "What the plan states" is where the operator looks for the
+    // programs' own reasoning.
+    statements.push({ severity: 'sheet', code: 'plan-run', count: 1, text });
+  }
   // #1037 — A PLAN THAT DOES NOT FREE THE PART SAYS SO, WITH THE NUMBERS. When the demand carries
   // a real contour (`tree.contour.synthetic` false) and the CHOSEN sequence has no contour step —
   // no link's stated flute reaches the profile's floor — the profile is not cut and the part stays
@@ -3694,6 +3818,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   const emptyStages = new Map<PlannedOp['kind'], { count: number; deepestMm: number }>();
   const finishKinds = new Map<string, { count: number; minSlope: number; maxSlope: number }>();
   const pushStage = (kind: PlannedOp['kind'], ref: RegionRef, outcome: OpOutcome): void => {
+    // #1052 — one row per op (kind, cutter, moves): the jump between rows is the op's own cost.
+    memTrace('op', {
+      kind,
+      cutter: outcome.cutter,
+      moves: outcome.ir.operations.reduce((n, operation) => n + operation.moves.length, 0),
+    });
     if (outcome.ir.operations.some((operation) => operation.moves.length > 0)) {
       ops.push({ kind, region: ref, outcome });
       return;
@@ -3791,6 +3921,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   });
 
   for (const region of [...tree.remainder, ...(opts.extraRegions ?? [])]) {
+    // #1052 (the 4096/8192 traces) — the rank's ⌀0.5 candidate enters this pipeline and outlives the
+    // cap inside it; one row per region and per field build shows which structure grows.
+    memTrace('curved:region', { id: region.id, top: region.zTop, bottom: region.zBottom });
     const ball = opts.ball;
     // #982 (the review session's ruling) — NO BALL IN THE SET: the flat finishes the whole curved
     // remainder as a flat-raster, the creases via the rest with the smallest flat. Never a throw.
@@ -3851,8 +3984,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const restClSink: { surface?: ReturnType<typeof clSurface> } = {};
     if (flat !== undefined) {
       const flatCl: { surface?: ReturnType<typeof clSurface> } = {};
+      memTrace('curved:stage', { stage: 'rough', cutter: cutterKeyOf(flat), region: roughRegion.id });
       const roughed = attempt('rough', flat, ref, () => {
+        memTrace('cl:build', { cutter: cutterKeyOf(flat), region: roughRegion.id, what: 'flat' });
+        const clFlatStarted = performance.now();
         const clFlat = floorSurface(clSurface(opts.geometry, roughRegion, flat, cuts.stepOver));
+        memTrace('cl:built', { cutter: cutterKeyOf(flat), region: roughRegion.id, what: 'flat', ms: Math.round(performance.now() - clFlatStarted) });
         flatCl.surface = clFlat;
         noteGrid(flat, clFlat);
         return rough({
@@ -3913,6 +4050,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       // rebased levels sat above every mesh-absolute CL value and the mask came out EMPTY (a rest
       // pass silently missing, not merely off-datum). Both go through the plan's one datum here:
       // the region is `base`, the surface is shifted like the flat's.
+      memTrace('curved:stage', { stage: 'rest-flat', cutter: cutterKeyOf(restFlat), region: roughRegion.id });
       attempt('rest', restFlat, ref, () => {
         const restCl = floorSurface(clSurface(opts.geometry, base, restFlat, cuts.stepOver));
         restClSink.surface = restCl;
@@ -4024,7 +4162,10 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     let clBallCache: ReturnType<typeof clSurface> | undefined;
     const clBall = (): ReturnType<typeof clSurface> => {
       if (clBallCache === undefined) {
+        memTrace('cl:build', { cutter: cutterKeyOf(finishCutter), region: roughRegion.id, what: 'finish' });
+        const clStarted = performance.now();
         clBallCache = floorSurface(clSurface(opts.geometry, roughRegion, finishCutter, cuts.stepOver));
+        memTrace('cl:built', { cutter: cutterKeyOf(finishCutter), region: roughRegion.id, what: 'finish', ms: Math.round(performance.now() - clStarted) });
         noteGrid(finishCutter, clBallCache);
       }
       return clBallCache;
@@ -4064,6 +4205,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     let finishOutcome: OpOutcome | null = null;
     let finishError: string | null = null;
     try {
+      memTrace('curved:stage', { stage: 'finish', cutter: cutterKeyOf(finishCutter), region: roughRegion.id });
       finishOutcome = finish({
         cutter: finishCutter,
         region: roughRegion,
@@ -4092,6 +4234,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         rapid: opts.rapid,
     });
     } catch (err) {
+      // #1052 — the move cap is a CANDIDATE decision, not a stage failure: it leaves the rank
+      // with its own sentence (below), never the unplanned list.
+      if (err instanceof PlanFinishTooManyMoves) throw err;
       finishError = err instanceof Error ? err.message : String(err);
     }
     if (finishError !== null) {
@@ -4137,6 +4282,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         if (design === null) return false;
         return b - design > finishBand;
       };
+      memTrace('curved:stage', { stage: 'rest-ball', cutter: cutterKeyOf(restBallTool), region: roughRegion.id });
       attempt('rest', restBallTool, ref, () => finish({
         cutter: restBallTool,
         region: roughRegion,
@@ -4181,6 +4327,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       const vPitch = Math.min(0.5, Math.max(0.1, (cuttingDiameter(vTool) ?? 0) / 4));
       let creaseAdmitted = 0;
       let creaseRefused = 0;
+      memTrace('curved:stage', { stage: 'pencil-v', cutter: cutterKeyOf(vTool), region: roughRegion.id });
       attempt('pencil', vTool, ref, () => {
         // The V's own CL and the previous (rest ball's) CL: the leftover depth at a crease is the
         // material between them — the number the crease rule's width test is stated at.
@@ -4231,6 +4378,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
 
     // 4. PENCIL along the creases the ball's own CL surface leaves — no ball, no pencil: the
     // creases are the rest rule's job (the smallest flat, above).
+    if (ball !== undefined) memTrace('curved:stage', { stage: 'pencil-ball', cutter: cutterKeyOf(ball), region: roughRegion.id });
     if (ball !== undefined) attempt('pencil', ball, ref, () => pencil({
       cutter: ball,
       region,

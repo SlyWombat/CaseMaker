@@ -8092,7 +8092,7 @@
                   "description": "The anchor the bracket is pinned at; Makera's origin is relative to Anchor 1."
                 },
                 "clamps": {
-                  "description": "The clamp places the job was set up with, on the free edges. One to four.",
+                  "description": "The clamp places the job was set up with, on the free edges. One to four; ZERO only when the board under the blank is taped (the vendor tray’s side-2 hold — the bracket is then only the fence).",
                   "items": {
                     "properties": {
                       "at": {
@@ -8107,6 +8107,14 @@
                           "right"
                         ],
                         "type": "string"
+                      },
+                      "kind": {
+                        "description": "How the clamp holds: 'top' presses on the stock from above; 'side' pushes it from outside the blank's edge, its top below the stock top. Absent means 'top', so a stored job is unchanged.",
+                        "enum": [
+                          "top",
+                          "side"
+                        ],
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -8116,8 +8124,70 @@
                     "type": "object"
                   },
                   "maxItems": 4,
-                  "minItems": 1,
                   "type": "array"
+                },
+                "obstacles": {
+                  "description": "Boxes the mount cannot know and the program must not sweep through — holes already in the blank, screwed down — in the work frame. Absent means none.",
+                  "items": {
+                    "properties": {
+                      "id": {
+                        "description": "A stable id for the box, so a finding can name it.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "label": {
+                        "description": "The box in landmark words — \"the counterbored hole, 8 mm in from the left edge\".",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "max": {
+                        "description": "The box’s high corner in the work frame, mm.",
+                        "prefixItems": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ],
+                        "type": "array"
+                      },
+                      "min": {
+                        "description": "The box’s low corner in the work frame: X 0..length, Y 0..width, Z0 on the stock’s top, mm.",
+                        "prefixItems": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ],
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label",
+                      "min",
+                      "max"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "placement": {
+                  "description": "How the bracket is bolted down. Absent = 'anchored': on the table's pins at the anchor, and the anchor datum is the origin. 'placed': screwed to the MDF wasteboard where the operator put it — no anchor datum; the origin and rotation are probed from the blank.",
+                  "enum": [
+                    "anchored",
+                    "placed"
+                  ],
+                  "type": "string"
                 },
                 "source": {
                   "description": "Where these bracket numbers came from: a default, a saved setup, or a measurement.",
@@ -8155,6 +8225,20 @@
           "type": "object"
         }
       ]
+    },
+    "z0CarriedFrom": {
+      "description": "Z0 = the earlier setup's Z0 − this thickness; the run sheet says the sawn underside is never touched.",
+      "properties": {
+        "thicknessMm": {
+          "description": "The part's measured thickness from the earlier setup, mm.",
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "thicknessMm"
+      ],
+      "type": "object"
     }
   },
   "required": [

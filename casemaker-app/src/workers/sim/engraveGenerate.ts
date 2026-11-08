@@ -66,7 +66,7 @@ import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { GOAL_FIT_TOLERANCE_MM } from '@/engine/cnc/engrave/goalPlacement';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
-import { itemLeftUncutMessage, vCone, vDepthLimit, vDepthRefusal, vDepthShortfall, vFluteLength, vTraceDepthRefusal, vTraceDepthWarning, type VCone } from '@/engine/cnc/vProfile';
+import { itemLeftUncutMessage, vCone, vDepthLimit, vDepthRefusal, vDepthShortfall, vFluteLength, vTraceDepthRefusal, vTraceDepthWarning, type VCone, vBevelSentence } from '@/engine/cnc/vProfile';
 import { minimumXyStepMm } from '@/engine/cnc/machine';
 import {
   coreOffsetRadius,
@@ -89,6 +89,7 @@ import { surfacePrimitivesOf } from '@/engine/cnc/engrave/primitiveSurface';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import { closeOpenSheet } from '@/engine/cnc/engrave/closeSheet';
 import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { memTrace } from '@/engine/cnc/memTrace';
 import { mouldSolidOf } from '@/engine/cnc/engrave/mouldSolid';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import {
@@ -231,6 +232,7 @@ import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 // #966 — `generateGoalProgram` plans every goal job through `planModelCam`, the model-driven CAM
 // engine's one entry point.
 import {
+  DEFAULT_RELEASE_TABS,
   MODEL_STOCK_TO_LEAVE_MM,
   type ModelPlanInput,
   type ModelPlanOutput,
@@ -1435,6 +1437,13 @@ function vCarveDepthFindings(plan: PartPlan, tool: Tool, floors: ReadonlyMap<str
   const limit = vDepthLimit(tool);
   if (limit === null) return [];
   const findings: JobFinding[] = [];
+  // #1067 — THE V'S BEVEL, STATED ONCE PER (DEPTH, CUTTER). A V-carved item is exact AT the colour
+  // plane and its flank widens the opening above it by `material x tan(half)` per side; the
+  // operator reads the design as correct and never what the walls cost. One line per distinct
+  // (depth, cutter) pair, naming the items it covers — six labels at one depth are one line, not
+  // six. Inform-only: the CAM, the preview and every refusal are untouched.
+  const cone = vCone(tool);
+  const bevelGroups = new Map<string, { materialMm: number; names: string[]; ids: string[] }>();
   for (const item of plan.engraves) {
     if (item.prism !== undefined) continue;
     // #856 — THE MATERIAL ABOVE THE FLOOR, not the depth below the top. A V-carve inside a pocket
@@ -1457,7 +1466,19 @@ function vCarveDepthFindings(plan: PartPlan, tool: Tool, floors: ReadonlyMap<str
       });
       continue;
     }
-    if (!(material > limit.limitMm + 1e-9)) continue;
+    if (!(material > limit.limitMm + 1e-9)) {
+      // The item fits the cone — the V cuts it, and the bevel is the V's own geometry (#1067).
+      if (cone !== null && cone.tanHalf > 0) {
+        const key = `${material.toFixed(6)}\u0000${tool.id ?? ''}\u0000${String(tool.number ?? '')}`;
+        const group = bevelGroups.get(key);
+        if (group === undefined) bevelGroups.set(key, { materialMm: material, names: [item.name], ids: [item.id] });
+        else {
+          group.names.push(item.name);
+          group.ids.push(item.id);
+        }
+      }
+      continue;
+    }
     // #786 slice 3 — CUT TO THE CONE, INFORMED. Past the cone's height the flank has ended; the
     // cut stops at the height the cone reaches and the sentence states the shortfall. A STATED
     // FLUTE shorter than the cone still refuses: past it there is no cutting edge at all, and the
@@ -1474,6 +1495,16 @@ function vCarveDepthFindings(plan: PartPlan, tool: Tool, floors: ReadonlyMap<str
         ? vDepthRefusal(item.name, material, tool, limit, floor)
         : vDepthShortfall(item.name, material, tool, limit, floor),
     });
+  }
+  if (cone !== null) {
+    for (const group of bevelGroups.values()) {
+      findings.push({
+        severity: 'info',
+        code: 'vcarve-bevel',
+        labelId: group.ids[0]!,
+        message: vBevelSentence(group.names[0]!, group.names.length - 1, group.materialMm * cone.tanHalf, group.materialMm, cone.halfAngleDeg),
+      });
+    }
   }
   for (const trace of plan.traces) {
     let deepest = trace.depth;
@@ -5220,6 +5251,21 @@ export async function buildModelPlanInputForGoal(
   return {
     geometry,
     setups: bandedSetups,
+    // #943 (10) — the JOB's own setup count rides the input, so a caller that re-plans ONE setup
+    // alone (#1017's twin) keeps the two-setup rules: `outline-is-stock` reads this, not the
+    // narrowed input's `setups.length`.
+    jobSetupCount: bandedSetups.length,
+    // #943 (10) — a job that STATES its underside says how its freeing tabs are: `underside.tabs`
+    // as written, or none when the block leaves it out (a part freed by the cut alone, the
+    // vendor tray's own side 1). A job with no underside block keeps the pocket chain's default.
+    ...(goal.underside?.kind !== 'flat'
+      ? {}
+      : {
+          freeingTabs:
+            goal.underside.tabs === undefined
+              ? { count: 0, widthMm: DEFAULT_RELEASE_TABS.width, heightMm: DEFAULT_RELEASE_TABS.height }
+              : { count: goal.underside.tabs.count, widthMm: goal.underside.tabs.widthMm, heightMm: goal.underside.tabs.thicknessMm },
+        }),
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness, material: job.stock.material },
     fixture: { mount, envelope },
     cutters,
@@ -5244,7 +5290,12 @@ export async function buildModelPlanInputForGoal(
     // (`ModelPlanOutput.outcome`): the same 0.1 mm sample the acceptance cards and the gate use.
     // Supplying it ALSO turns on the planner's coverage-first rank — the rank every acceptance
     // measurement has run with since #961 — so production plans the way the cards were measured.
-    goal: sampleGoalHeightfield(goal, { pitchMm: 0.1, stockTopZ: 0 }),
+    goal: (() => {
+      // #1052 — the goal field fixes a plan's cell count; one row with its size.
+      const field = sampleGoalHeightfield(goal, { pitchMm: 0.1, stockTopZ: 0 });
+      memTrace('goal-field', { nx: field.nx, ny: field.ny, cells: field.nx * field.ny, bytes: field.nx * field.ny * 5 });
+      return field;
+    })(),
     // #1023 — the shop's leftover-visibility thresholds reach the plan, with provenance. The
     // location lives on the main thread, so the caller resolves them (the same snapshot the old
     // rest pair reads); absent is the labelled fallback, never a compiled-in "shop" number.
@@ -5447,7 +5498,18 @@ export async function postModelPlan(
   }
 
   const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
-  const limit: DepthLimit = jobDepthLimit(job);
+  // #943 (10) — A THROUGH FREEING CONTOUR GRANTS THE BOARD'S BREAKTHROUGH AT ITS OWN KERF, and
+  // only there: the plan states that kerf (`OpOutcome.throughKerf`, path + tab spans + radius +
+  // tab height), and the verifier's through mask is built from it — the same mask the item
+  // pipeline builds from its cut-outs. Per SETUP, because a two-setup job's second frame is the
+  // flipped one; a setup with no through contour keeps the plain `jobDepthLimit(job)` it had.
+  const depthLimits: DepthLimit[] = output.perSetup.map((p) => {
+    const cutouts = p.ops.flatMap((op) => (op.kind === 'contour' && op.outcome.throughKerf !== undefined ? [op.outcome.throughKerf] : []));
+    if (cutouts.length === 0) return jobDepthLimit(job);
+    const mask = buildThroughMask({ thickness: job.stock.thickness, breakthrough: job.breakthrough, cutouts });
+    return mask === null ? jobDepthLimit(job) : jobDepthLimit(job, undefined, mask);
+  });
+  const limit: DepthLimit = depthLimits[0] ?? jobDepthLimit(job);
   const ctx: PostContext = {
     jobName: job.name,
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
@@ -5517,7 +5579,7 @@ export async function postModelPlan(
         machine: mill,
         tool: ir.tool,
         dialect: postKey(mill),
-        depthLimit: limit,
+        depthLimit: depthLimits[plan.setupIndex] ?? limit,
         minRapidZ: ir.hopZ,
         ...mountCtx(shop.mount, job.jawClearance),
       });
@@ -5726,7 +5788,16 @@ export async function generateGoalProgram(
   // #872 — WHAT THE TOP SETUP LEAVES UNREACHED. Measured geometrically here (faces pointing away,
   // the shadow band) and paired with the flip plan that finishes it; inform-only, so it rides
   // with the findings on every path that posts a program.
-  const coverageFindings = goalFlipFindings(job, goal);
+  //
+  // #1068 — THE SHEET AND THE RECEIPT CARRY THE FACT, and the offer is validated against the same
+  // material the panel's would be: the job's own board, else the bed's wasteboard, else none.
+  const coverageFindings = goalFlipFindings(
+    job,
+    goal,
+    undefined,
+    job.sacrificial.under?.thickness ??
+      (shop.bed?.surface === 'wasteboard' && shop.bed.wasteboardMm !== null ? shop.bed.wasteboardMm : 0),
+  );
 
   if (tool === null) return fail('feeds', 'the job has no usable cutter');
 
@@ -6531,6 +6602,7 @@ export async function engraveGenerate(
    */
   catalogueTools?: readonly Tool[],
 ): Promise<EngraveGenerated> {
+  memTrace('pipeline:start', { job: job.name });
   onProgress?.({ stage: 'prepare', label: 'reading the job' });
   // #786 slice 4c-2 — the same catalogue fill as `engraveRegions`, applied HERE as well so the
   // CAM (which reads the tool after the regions step) and every sub-job cutter use the values the

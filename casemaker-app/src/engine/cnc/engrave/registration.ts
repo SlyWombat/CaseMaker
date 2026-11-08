@@ -33,6 +33,7 @@ import {
 } from '@/engine/cnc/probePlan';
 import { workholdingFor } from './jobSetup';
 import type { EngraveJob } from '@/types/engraveJob';
+import type { Mount } from '@/engine/cnc/setups/types';
 import type { Mm, Vec2 } from '@/types/units';
 
 /**
@@ -126,14 +127,23 @@ export function sideWords(edge: JobSide): string {
  * overlap: an X-parallel edge has its midpoint at y = 0 or y = width, a Y-parallel one at x = 0 or
  * x = length.
  */
-function edgeName(edge: readonly [Vec2, Vec2], length: Mm, width: Mm): string {
+function edgeName(edge: readonly [Vec2, Vec2], length: Mm, width: Mm, mount?: Mount): string {
   const [a, b] = edge;
   const mx = (a[0] + b[0]) / 2;
   const my = (a[1] + b[1]) / 2;
+  // #1070 — THE JAWS ARE THE VISE'S. On any other mount the left/right hints would name a fixed
+  // and a moving jaw the machine does not have; the operator's own left and right still tell the
+  // sides apart. Front and back stay (they are relative to the operator, not to a jaw).
+  const sideHint = (side: JobSide): string =>
+    mount === undefined || mount === 'vise'
+      ? sideWords(side)
+      : side === 'left' || side === 'right'
+        ? `${SIDE_WORDS[side].name} — the one on your ${side}`
+        : sideWords(side);
   if (Math.abs(b[0] - a[0]) >= Math.abs(b[1] - a[1])) {
-    return sideWords(my > width / 2 ? 'back' : 'front');
+    return sideHint(my > width / 2 ? 'back' : 'front');
   }
-  return sideWords(mx > length / 2 ? 'right' : 'left');
+  return sideHint(mx > length / 2 ? 'right' : 'left');
 }
 
 /**
@@ -154,11 +164,11 @@ function alongEdge(t: ProbeTouch): { end: string; mm: number } {
 }
 
 /** A touch's edge and position, as the run sheet states them. */
-export function describeTouch(t: ProbeTouch, length: Mm, width: Mm): TouchWords {
+export function describeTouch(t: ProbeTouch, length: Mm, width: Mm, mount?: Mount): TouchWords {
   const { end, mm } = alongEdge(t);
   const along = Number(mm.toFixed(1));
   return {
-    edge: edgeName(t.edge, length, width),
+    edge: edgeName(t.edge, length, width, mount),
     where:
       Math.abs(mm / t.edgeLength - 0.5) < 0.02
         ? `at about its middle, ${along} mm from the ${end} end`

@@ -61,7 +61,8 @@ export async function planTwoOutcomes(input: ModelPlanInput, opts: PlanModelCamO
       // rest statement still has to tell "none configured" from "configured, none measured".
       catalogueConfigured: input.catalogueConfigured ?? input.cutters.catalogue.length > 0,
     },
-    opts,
+    // #1052 — the trace's plan:start row names which of the two runs it is (6b's round).
+    { ...opts, planKind: 'owned' },
   );
   const ideal = await planIdealOnly(input, opts);
   if (ideal === null) return { owned, ideal: null, defaultPlan: 'owned' };
@@ -91,7 +92,7 @@ export async function planIdealOnly(
   // posts, and it is the owned plan's single statement that names the ideal's measured ball.
   return planModelCam(
     { ...input, cutters: { house: [...input.cutters.house, ...extra], catalogue: [] } },
-    { ...opts, restStatement: false },
+    { ...opts, restStatement: false, planKind: 'ideal' },
   );
 }
 

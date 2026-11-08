@@ -25,6 +25,7 @@
  */
 
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
+import { memTrace } from '@/engine/cnc/memTrace';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import type { RemainderRegion, FeatureSource } from '../features';
@@ -63,6 +64,32 @@ export { FLAT_SURFACE_MAX_SLOPE_DEG };
 /** The share of a region's AREA that must lie under the threshold for the flat to take it. */
 export const FLAT_FINISH_AREA_SHARE = 0.9;
 
+/**
+ * #1052 — THE FINISH'S MOVE CAP. One finish op's IR holds every level's moves; on j27 (the ⌀0.5
+ * ball, a 50 mm region at the r/10 floor) that is ~874k moves per 0.2 mm level — an OOM by
+ * construction at ~250 levels. Above this cap the op refuses BY NAME (the candidate leaves the
+ * rank with its number, the plan continues), never an OOM. The §8.9 rule in code.
+ */
+export const FINISH_MOVE_CAP = 5_000_000;
+
+/** Thrown when a finish op's moves pass the cap; the rank drops the candidate. */
+export class PlanFinishTooManyMoves extends Error {
+  readonly moves: number;
+  readonly region: string;
+  readonly cap: number;
+  /** True when `moves` is the pre-build estimate, not a count of moves already built. */
+  readonly estimated: boolean;
+  constructor(moves: number, region: string, cap = FINISH_MOVE_CAP, estimated = false) {
+    super(
+      `the finish of "${region}" ${estimated ? 'would build about' : 'passed'} ${moves.toLocaleString('en-US')} moves (the cap is ${cap.toLocaleString('en-US')} per op) — a finer scallop or a smaller region, or a larger cutter's band`,
+    );
+    this.name = 'PlanFinishTooManyMoves';
+    this.moves = moves;
+    this.region = region;
+    this.cap = cap;
+    this.estimated = estimated;
+  }
+}
 /** A raster row steeper than this is a wall: not finishable by raster, skipped with a note. */
 const WALL_SKIP_DEG = 80;
 
@@ -158,6 +185,11 @@ export interface FinishOpOptions {
   materialTopAt?: (x: number, y: number) => number | null;
   /** The stock top in this op's datum — the last-resort bound past the footprint (see above). */
   stockTopZMm?: number;
+  /**
+   * #1052 — the move cap for THIS op, default {@link FINISH_MOVE_CAP}. Tests inject a small one
+   * to pin the refusal without building millions of moves; production never passes it.
+   */
+  moveCap?: number;
 }
 
 /**
@@ -567,6 +599,40 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   const cleared: RegionAtZ[] = [];
   let prevExit: DroppedPoint | null = null;
   let prevLevelZ: number | null = null;
+  const cap = opts.moveCap ?? FINISH_MOVE_CAP;
+
+  // #1052 — THE ESTIMATE BEFORE THE BUILD, from the bins and pitches (not from moves already
+  // built): above the cap the op refuses by name and the rank drops the candidate with its
+  // number. Each bin's row pitch is the pitch its own slope earns, so a large shallow region is
+  // not priced at a wall's spacing.
+  {
+    const pointPitch = Math.max(0.005, opts.clSurface.maxSpacingMm);
+    const avgY = opts.region.area / Math.max(1e-9, max[0] - min[0]);
+    let estimated = 0;
+    for (let k = 0; k < binCount; k++) {
+      const binX = min[0] + (k + 0.5) * BIN_MM;
+      const pitchMm = opts.kind === 'ball-scallop'
+        ? (bandSlopeAt(binX) >= WALL_SKIP_DEG ? profile.radiusMm / 10 : bandStepOverAt(binX))
+        : flatRowStepMm;
+      estimated += (BIN_MM * avgY) / (Math.max(1e-6, pitchMm) * pointPitch);
+    }
+    estimated = Math.ceil(estimated * 1.2);
+    if (estimated > cap) throw new PlanFinishTooManyMoves(estimated, opts.region.id, cap, true);
+  }
+
+  // #1052 — EACH CELL ONCE. The level loop's real job was the top-down order, not the cut: a
+  // cell is always cut at its own CL the first time a level passes below it, and the old code
+  // re-rasted the whole span at every level, repeating every cell's cut at its CL for the rest of
+  // the levels (j27: 874k moves/level × 250 levels). The rows are sampled once here and each
+  // point is bucketed into the level whose band holds its CL (`finishMaterial`'s own band),
+  // then each level's runs are toured and emitted in order. The final surface is unchanged —
+  // the band a cell joins IS the level whose pass first reached its CL.
+  const rasterRuns: DroppedPoint[][][] = levels.map(() => []);
+  const rasterCleared: Polygons[] = levels.map(() => []);
+  const levelIndexOf = (z: number): number => {
+    const k = Math.ceil((opts.region.zTop - z) / opts.stepDownMm - 1e-9) - 1;
+    return Math.min(levels.length - 1, Math.max(0, k));
+  };
 
   // A raster row COLLINEAR with a polygon edge is the even-odd tracer's own blind spot: a vertical
   // edge at exactly x contributes no crossing by the half-open rule, so a hole on that line becomes
@@ -575,86 +641,108 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // it on the real part: its offset lands vertical edges on exactly the raster's round x values.
   // The rows start a tenth of a micron off, far below the CL tolerance (0.005 mm), and the blind
   // spot is gone.
-  for (const levelZ of levels) {
-    // 1. COLLECT this level's admitted runs before the first move is posted. The raster's own
-    //    order (row by row, run by run) is NOT the order the runs are cut in: where the mask
-    //    admits sparse strips — the organizer's scoop rims and skirt — consecutive runs of one
-    //    row can be a hundred millimetres apart, and the raster's order pays a full retract
-    //    across the land between them (984 of them, 9,463 s, measured on #962).
-    const levelRuns: DroppedPoint[][] = [];
-    const levelCleared: Polygons = [];
-    // #960 — THE ROWS ARE PHASED FROM THE OLD RASTER'S OWN ORIGIN, and the row AT that origin is
-    // cut (the #960 rewrite dropped it — 24 moves per level, and the tray's 2,411 slot cells).
-    // Each row then advances by its OWN band's scallop step, unless the row guard finds the
-    // stretch not straight — then it snaps to the old grid's next row.
-    for (let x = originX; x <= max[0] + 1e-9; ) {
-      const wallBand = opts.kind === 'ball-scallop' && bandSlopeAt(x) >= WALL_SKIP_DEG;
-      if (wallBand) wallBandsCut++;
-      let stepOverMm = wallBand ? profile.radiusMm / 10 : bandStepOverAt(x);
-      // A region whose OLD step is already the ball's radius/10 floor has no finer grid to offer:
-      // its base raster is the densest the formula allows, so a band at or under it stays ON the
-      // old grid (the organizer's rim cells live exactly there). Everywhere else a finer band may
-      // ride its own phase, and a kinked gap falls back to the old grid.
-      const flooredBase = regionStepOverMm <= profile.radiusMm / 10 + 1e-9;
-      if (flooredBase && stepOverMm <= regionStepOverMm + 1e-9) {
-        const nextOld = oldGridNext(x);
-        if (nextOld > x + 1e-6) stepOverMm = Math.min(stepOverMm, nextOld - x);
-      } else if (stepOverMm > 1e-6 && !clSafeAcross(x, x + stepOverMm)) {
-        const nextOld = oldGridNext(x);
-        if (nextOld > x + 1e-6) stepOverMm = nextOld - x;
-      }
-      const intervals = footprintColumnIntervals(opts.region.footprint, x);
-      for (const interval of intervals) {
-        const [rawY0, rawY1] = interval;
-        // Inset off the footprint's own boundary, a hair, toward the interval's own centre: an
-        // endpoint landing EXACTLY on the polygon edge is where `pointInPolygons`' ray-casting is
-        // ambiguous by convention (`clSurface`'s own gate), not a real gap — advisor's review.
-        const insetY0 = rawY0 + Math.sign(rawY1 - rawY0) * FOOTPRINT_EDGE_INSET_MM;
-        const insetY1 = rawY1 - Math.sign(rawY1 - rawY0) * FOOTPRINT_EDGE_INSET_MM;
-        if (Math.abs(insetY1 - insetY0) <= 1e-9 || (insetY1 - insetY0) * (rawY1 - rawY0) < 0) continue; // the interval is narrower than the inset: nothing to cut
-        const row = dropRow(opts.clSurface, [x, insetY0], [x, insetY1]);
-        const clampedAll = row.map((p) => ({ ...p, z: Math.max(p.z, levelZ) }));
-
-        // ITEM 4a — the row's points are cut only where the plan's mask admits them; each
-        // contiguous admitted run is its own cut, and the gaps between runs are links.
-        const runs: (typeof clampedAll)[] = [];
-        if (opts.maskCells === undefined) {
-          runs.push(clampedAll);
-        } else {
-          let current: typeof clampedAll = [];
-          for (const p of clampedAll) {
-            if (opts.maskCells(p.x, p.y)) current.push(p);
-            else if (current.length > 0) { runs.push(current); current = []; }
-          }
-          if (current.length > 0) runs.push(current);
-        }
-        for (const clamped of runs) {
-          if (clamped.length < 2) continue;
-          levelRuns.push(clamped);
-          levelCleared.push([[x, Math.min(rawY0, rawY1)], [x, Math.max(rawY0, rawY1)]]);
-        }
-      }
-      if (!(stepOverMm > 1e-6)) break;
-      x += stepOverMm;
+  // #1052 — the raster's own progress, every 32 rows: the 10-minute j27 run sits inside ONE
+  // finish() call, so these are the only rows that show the heap's slope.
+  let finishRows = 0;
+  let finishRowTick = 0;
+  // #960 — THE ROWS ARE PHASED FROM THE OLD RASTER'S OWN ORIGIN, and the row AT that origin is
+  // cut (the #960 rewrite dropped it — 24 moves per level, and the tray's 2,411 slot cells).
+  // Each row then advances by its OWN band's scallop step, unless the row guard finds the
+  // stretch not straight — then it snaps to the old grid's next row.
+  for (let x = originX; x <= max[0] + 1e-9; ) {
+    const wallBand = opts.kind === 'ball-scallop' && bandSlopeAt(x) >= WALL_SKIP_DEG;
+    if (wallBand) wallBandsCut++;
+    let stepOverMm = wallBand ? profile.radiusMm / 10 : bandStepOverAt(x);
+    // A region whose OLD step is already the ball's radius/10 floor has no finer grid to offer:
+    // its base raster is the densest the formula allows, so a band at or under it stays ON the
+    // old grid (the organizer's rim cells live exactly there). Everywhere else a finer band may
+    // ride its own phase, and a kinked gap falls back to the old grid.
+    const flooredBase = regionStepOverMm <= profile.radiusMm / 10 + 1e-9;
+    if (flooredBase && stepOverMm <= regionStepOverMm + 1e-9) {
+      const nextOld = oldGridNext(x);
+      if (nextOld > x + 1e-6) stepOverMm = Math.min(stepOverMm, nextOld - x);
+    } else if (stepOverMm > 1e-6 && !clSafeAcross(x, x + stepOverMm)) {
+      const nextOld = oldGridNext(x);
+      if (nextOld > x + 1e-6) stepOverMm = nextOld - x;
     }
-    cleared.push({ z: levelZ, boundary: levelCleared });
+    const intervals = footprintColumnIntervals(opts.region.footprint, x);
+    for (const interval of intervals) {
+      const [rawY0, rawY1] = interval;
+      // Inset off the footprint's own boundary, a hair, toward the interval's own centre: an
+      // endpoint landing EXACTLY on the polygon edge is where `pointInPolygons`' ray-casting is
+      // ambiguous by convention (`clSurface`'s own gate), not a real gap — advisor's review.
+      const insetY0 = rawY0 + Math.sign(rawY1 - rawY0) * FOOTPRINT_EDGE_INSET_MM;
+      const insetY1 = rawY1 - Math.sign(rawY1 - rawY0) * FOOTPRINT_EDGE_INSET_MM;
+      if (Math.abs(insetY1 - insetY0) <= 1e-9 || (insetY1 - insetY0) * (rawY1 - rawY0) < 0) continue; // the interval is narrower than the inset: nothing to cut
+      const row = dropRow(opts.clSurface, [x, insetY0], [x, insetY1]);
 
-    // 2. ORDER the runs so consecutive passes are neighbours, WITH A CONNECTIVITY CONSTRAINT
-    //    (#962): a tour edge must stay inside the CL surface's own reach. The finish's region (the
-    //    scoop ring and the skirt, grown by the ball) is non-convex, and the unconstrained tour
-    //    connected runs whose straight path crossed a bay of the region — where `dropCutter`
-    //    answers nothing, the ride test must refuse, and every such join paid a retract. Measured
-    //    on the organizer: 62 of the ball finish's 87 refusals were exactly these, 71 % of its
-    //    remaining rapids. The edge test is the ride test's own null check, applied to the XY path.
-    const reaches = (ax: number, ay: number, bx: number, by: number): boolean => {
-      const length = Math.hypot(bx - ax, by - ay);
-      const steps = Math.max(1, Math.ceil(length / linkSampleStep));
-      for (let s = 0; s <= steps; s++) {
-        const t = s / steps;
-        if (opts.clSurface.dropCutter(ax + (bx - ax) * t, ay + (by - ay) * t) === null) return false;
+      // ITEM 4a — the row's points are cut only where the plan's mask admits them; each
+      // contiguous admitted run is its own cut, and the gaps between runs are links.
+      const runs: DroppedPoint[][] = [];
+      if (opts.maskCells === undefined) {
+        runs.push(row);
+      } else {
+        let current: DroppedPoint[] = [];
+        for (const p of row) {
+          if (opts.maskCells(p.x, p.y)) current.push(p);
+          else if (current.length > 0) { runs.push(current); current = []; }
+        }
+        if (current.length > 0) runs.push(current);
       }
-      return true;
-    };
+      for (const admitted of runs) {
+        if (admitted.length < 2) continue;
+        // #1052 — split the admitted run by level: a row crossing several bands gives each level
+        // its own sub-run, cut at that level's pass.
+        let segStart = 0;
+        for (let i = 1; i <= admitted.length; i++) {
+          const boundary = i === admitted.length || levelIndexOf(admitted[i]!.z) !== levelIndexOf(admitted[segStart]!.z);
+          if (!boundary) continue;
+          const segment = admitted.slice(segStart, i);
+          if (segment.length >= 2) {
+            const k = levelIndexOf(admitted[segStart]!.z);
+            // #1052 — THE LEVEL'S OWN FLOOR IS STILL A FLOOR: the band a cell joins is the level
+            // whose pass first reached its CL, and its cut is `max(CL, level floor)` exactly as the
+            // per-level clamp stated it. A CL BELOW the region's zBottom (an open mesh's repair
+            // skirt under the sheet) is held at zBottom, never followed under it.
+            const floorZ = levels[k]!;
+            const clamped = segment.some((p) => p.z < floorZ)
+              ? segment.map((p) => (p.z < floorZ ? { ...p, z: floorZ } : p))
+              : segment;
+            rasterRuns[k]!.push(clamped);
+            rasterCleared[k]!.push([[x, Math.min(rawY0, rawY1)], [x, Math.max(rawY0, rawY1)]]);
+          }
+          segStart = i;
+        }
+      }
+    }
+    if (!(stepOverMm > 1e-6)) break;
+    finishRows++;
+    if (++finishRowTick % 32 === 0) {
+      memTrace('finish:row', { rows: finishRows, x: Number(x.toFixed(2)), moves: moves.length });
+    }
+    x += stepOverMm;
+  }
+
+  // 2. ORDER a level's runs so consecutive passes are neighbours, WITH A CONNECTIVITY CONSTRAINT
+  //    (#962): a tour edge must stay inside the CL surface's own reach. The finish's region (the
+  //    scoop ring and the skirt, grown by the ball) is non-convex, and the unconstrained tour
+  //    connected runs whose straight path crossed a bay of the region — where `dropCutter`
+  //    answers nothing, the ride test must refuse, and every such join paid a retract. Measured
+  //    on the organizer: 62 of the ball finish's 87 refusals were exactly these, 71 % of its
+  //    remaining rapids. The edge test is the ride test's own null check, applied to the XY path.
+  const reaches = (ax: number, ay: number, bx: number, by: number): boolean => {
+    const length = Math.hypot(bx - ax, by - ay);
+    const steps = Math.max(1, Math.ceil(length / linkSampleStep));
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      if (opts.clSurface.dropCutter(ax + (bx - ax) * t, ay + (by - ay) * t) === null) return false;
+    }
+    return true;
+  };
+
+  // 3. EMIT one level's runs in tour order, each run entered at the end the tour chose.
+  const emitLevelRuns = (levelZ: number, levelRuns: DroppedPoint[][]): void => {
+    if (levelRuns.length === 0) return;
     const fromXY: [number, number] = prevExit === null ? [min[0], min[1]] : [prevExit.x, prevExit.y];
     const remainingRuns = levelRuns.map((_, k) => k);
     const order: number[] = [];
@@ -699,8 +787,6 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       px = end.x;
       py = end.y;
     }
-
-    // 3. EMIT in tour order, each run entered at the end the tour chose.
     for (let k = 0; k < order.length; k++) {
       let points = levelRuns[order[k]!]!;
       if (reversedOf[k]) points = [...points].reverse();
@@ -730,6 +816,16 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       prevExit = exitPoint;
       prevLevelZ = levelZ;
     }
+    // #1052 — THE CAP, checked per LEVEL so the heap never holds more than one level past it. The
+    // rank drops this candidate with the number; the plan continues (never an OOM).
+    if (moves.length > cap) {
+      throw new PlanFinishTooManyMoves(moves.length, opts.region.id, cap);
+    }
+  };
+
+  for (let k = 0; k < levels.length; k++) {
+    emitLevelRuns(levels[k]!, rasterRuns[k]!);
+    cleared.push({ z: levels[k]!, boundary: rasterCleared[k]! });
   }
 
   if (moves.length > 0) {

@@ -230,7 +230,12 @@ describe.each([
     for (const levelKey of levelsDesc) {
       const deepest = deepestByLevel.get(levelKey)!;
       if (prevDeepest !== null) {
-        expect(prevDeepest - deepest, `level at ${levelKey}: deepest move ${deepest} after previous level's own deepest ${prevDeepest}`).toBeLessThanOrEqual(2 + 1e-3);
+        // #1052 — EACH CELL IS CUT ONCE, in the level whose band holds its CL: a level's deepest
+        // move is the deepest sample INSIDE its band, which sits up to one row's own surface step
+        // above the band floor (this fixture's 1.49 mm rows on a 0.2 slope ≈ 0.3 mm), so the step
+        // between two levels' deepest moves is stepDownMm plus that sampling step — not exactly
+        // stepDownMm, which only held while every level re-rastered the whole span at its floor.
+        expect(prevDeepest - deepest, `level at ${levelKey}: deepest move ${deepest} after previous level's own deepest ${prevDeepest}`).toBeLessThanOrEqual(2 + 0.5);
       }
       prevDeepest = deepest;
     }

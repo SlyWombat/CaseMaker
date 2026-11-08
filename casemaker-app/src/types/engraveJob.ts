@@ -1499,6 +1499,29 @@ export interface TapeHold {
 }
 
 /**
+ * #1068 — A BOX THE PROGRAM MUST NOT SWEEP THROUGH, stated by the job itself.
+ *
+ * The bracket's arms and the clamps are DERIVED from the mount (their sizes are shop defaults);
+ * these are the features only the operator knows about: a hole already in the blank, screwed
+ * down, that the cutter would otherwise pass through. The tray's two counterbored holes in the
+ * left waste were the first of them.
+ *
+ * Work frame, as everywhere in the CAM: X 0..length, Y 0..width, Z0 on the stock's top, down
+ * negative. The box is the material's own extent — for a counterbored hole, the hole from the
+ * bed up to the counterbore's floor, so a cut that reaches the screw head is inside it.
+ */
+export interface BracketObstacle {
+  /** Stable id, so a finding can name it. */
+  id: string;
+  /** In landmark words: "the counterbored hole, 8 mm in from the left edge". */
+  label: string;
+  /** The box's low corner, work frame. */
+  min: [Mm, Mm, Mm];
+  /** The box's high corner, work frame. */
+  max: [Mm, Mm, Mm];
+}
+
+/**
  * A job pushed into the bracket's corner and clamped (#707 BM-1, §3.6).
  *
  * The CLAMP PLACES are the job's own: the CAM, the verifier and the simulation check these, never
@@ -1509,13 +1532,27 @@ export interface TapeHold {
 export interface BracketHold {
   /** The anchor the bracket is pinned at — Makera's origin is "relative to Anchor 1" (§5). */
   anchor: 1 | 2;
+  /**
+   * #1070 (6b's ruling) — HOW the bracket is bolted down. Absent = `anchored`: on the table's
+   * locating pins at {@link anchor}, so the anchor datum is the origin. `placed`: screwed to the
+   * MDF wasteboard where the operator put it — there is NO anchor datum and the ±0.05 claim is
+   * false; the origin and the rotation are probed from the blank (the vise-class datum path).
+   * Absent keeps every stored job byte-identical.
+   */
+  placement?: 'anchored' | 'placed';
   /** The bracket fitted, as its fixture record names it — `thin`, the Makera kit's L-bracket. */
   variant: string;
   /**
    * The clamp places, on the free edges: `back` and `right` (the bracket holds the front and the
-   * left). One to four, in the order the operator sees them.
+   * left). One to four, in the order the operator sees them; ZERO only when the board under the
+   * blank is taped — the vendor tray's side-2 hold, the bracket as the fence only.
    */
   clamps: ClampPlacement[];
+  /**
+   * #1068 — boxes the MOUNT cannot know: holes and fixed features already in the blank, which the
+   * sweep and the verifier must treat as solids. Absent or empty means none.
+   */
+  obstacles?: BracketObstacle[];
   /** Where these came from — the same provenance rule as the vise (decision 28). */
   source: 'default' | 'saved' | 'measured';
 }
@@ -2282,6 +2319,13 @@ export interface EngraveJob {
    * (#213/#218). PROVISIONAL 0.3: enough to part cleanly; measured on the first through-cut.
    */
   breakthrough: Mm;
+  /**
+   * #943 (10) — THIS JOB CUTS THE FLIP OF AN EARLIER ONE AND ITS Z0 IS CARRIED, not touched on
+   * the face to be cut: Z0 = the earlier setup's Z0 − this measured part thickness, mm. The run
+   * sheet states it in the origin step and says the sawn underside is never touched. Absent on
+   * every ordinary job, so every existing sheet is byte-identical.
+   */
+  z0CarriedFrom?: { thicknessMm: Mm };
   /**
    * How far a cut's floor must stay above the vise jaws' TOPS, mm (#362). PROVISIONAL 1.0, the
    * same clearance the jaw check carried as a bare constant before #345's rule moved the number
