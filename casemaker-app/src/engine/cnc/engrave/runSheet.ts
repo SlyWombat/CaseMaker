@@ -5522,10 +5522,23 @@ export function buildRunSheet(
       // #1073(a) — THE FLIP DRAWING ON THIS SETUP'S PAGE: the same SVG the Setups row shows, built
       // for the program's own setup when it states a flip.
       const programSetup = jobSetups(job)[program.setupIndex - 1];
+      // #1082 — THIS SETUP'S OWN STOCK, when the document states (or a flipped setup derives) one:
+      // the page names the box it cuts, its provenance, and the flip drawing uses its extents.
+      const ownStock = programSetup?.stock ?? null;
+      if (opened !== undefined && ownStock !== null) {
+        opened.steps.splice(1, 0, {
+          text:
+            `This setup's stock is ${fmtNum(ownStock.length)} × ${fmtNum(ownStock.width)} × ${fmtNum(ownStock.thickness)} mm` +
+            (ownStock.provenance === 'derived'
+              ? ' — the freed part, derived from side 1’s cut extents; confirm it before the cut'
+              : ' — stated on this setup'),
+          value: ownStock.provenance === 'derived' ? 'derived' : 'stated',
+        });
+      }
       if (opened !== undefined && programSetup?.flip !== undefined) {
         opened.flipDiagramSvg = flipDiagramSvg({
-          lengthMm: job.stock.length,
-          widthMm: job.stock.width,
+          lengthMm: ownStock?.length ?? job.stock.length,
+          widthMm: ownStock?.width ?? job.stock.width,
           flip: programSetup.flip,
           ...(job.stock.squareCorners === undefined ? {} : { squareCorners: job.stock.squareCorners }),
           ...(programSetup.pins === undefined ? {} : { pins: programSetup.pins.at }),

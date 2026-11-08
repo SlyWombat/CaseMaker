@@ -19,6 +19,7 @@
  * sheet, so all three read one plan.
  */
 
+import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -97,6 +98,12 @@ export interface FootprintJobArgs {
   bracketSeat: BracketSeatDatum | null;
   /** #1070 (C8) — the active bed profile's placement seed for a placed bracket (see registrationAttempt). */
   placedSeed?: { x: number; y: number; by: 'grid' | 'touch'; measuredAt: string; at: [number, number] | null; probe: string | null } | null;
+  /**
+   * #1082 — WHICH SETUP'S STOCK THIS REGISTRATION IS ON. The vendor flip's side 2 is the freed
+   * part; a caller that knows the setup passes its index, and the dims/seat read that box. Absent
+   * = the job's blank, exactly as every pre-#1082 caller.
+   */
+  setupIndex?: number;
 }
 
 export type FootprintJobResult = { ok: true; input: FootprintInput } | { ok: false; reason: string };
@@ -150,7 +157,9 @@ export function footprintInputFor(args: FootprintJobArgs): FootprintJobResult {
     datum = bracketDatum(anchor.anchor, sizes);
   }
   // The expected surface is the bracket's seat: the surface beside the mount, measured once.
-  const dims = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
+  // #1082 — the box this registration stands on: the setup's own stock, else the job's blank.
+  const own = stockForSetup(job, args.setupIndex);
+  const dims = { x: own.length, y: own.width, z: own.thickness };
   const under = args.mount.kind === 'bracket' && args.mount.board === true ? (job.sacrificial?.under?.thickness ?? 0) : 0;
   const expected = bracketExpectedSurface(defaults, dims.z, under, args.bracketSeat);
   if (!expected.ok) return { ok: false, reason: expected.reason };

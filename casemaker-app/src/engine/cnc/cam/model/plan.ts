@@ -238,6 +238,20 @@ export interface SetupSpec {
    * region's CL surface at −band, names what is left, and does not tell the contour to release.
    */
   bandMm?: number;
+  /**
+   * #1082 — THE BOX THIS SETUP IS CUT FROM, when it is not the job's blank: the vendor flip's
+   * side 2 is the FREED PART (the jobSetup-side resolver states/derives it). Absent = the job's
+   * blank, exactly as every pre-#1082 plan.
+   */
+  stock?: { length: number; width: number; thickness: number };
+}
+
+/** #1082 — the box a setup is cut from: its own stock, else the job's blank. */
+export function setupStockOf(
+  input: { stock: { length: number; width: number; thickness: number } },
+  spec: SetupSpec,
+): { length: number; width: number; thickness: number } {
+  return spec.stock ?? { length: input.stock.length, width: input.stock.width, thickness: input.stock.thickness };
 }
 
 export interface ModelPlanInput {
@@ -1619,15 +1633,18 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       ...(opts.signal === undefined ? {} : { signal: opts.signal }),
       pockets: noFlatFallback ? null : {
         ...(depthBandMm === undefined ? {} : { depthBandMm }),
-        stockThicknessMm: input.stock.thickness,
+        // #1082 — the setup's own box when it states one (the freed part on side 2).
+        stockThicknessMm: setupStockOf(input, spec).thickness,
         // #943 (10) — THE OUTLINE-IS-THE-STOCK RULE IS A SINGLE-SETUP RULE. It exists for a side-2
         // job whose stock IS the freed part; a two-setup job on a blank keeps its freeing contour
         // on every setup as before (a part that fills the blank in one frame is the 966 multi-setup
         // case, whose setups each plan their own side of the stock). The count is the JOB's, never
         // the narrowed input's: #1017's twin re-plans one setup alone and must keep the contour.
-        ...((input.jobSetupCount ?? 0) > 1 || input.setups.length > 1
+        // #1082 — a setup that STATES its stock IS the freed part: the outline-is-the-stock rule
+        // applies to it even inside a two-setup job (that is the side-2 shape it exists for).
+        ...((spec.stock === undefined && ((input.jobSetupCount ?? 0) > 1 || input.setups.length > 1))
           ? {}
-          : { stockFootprintMm: { length: input.stock.length, width: input.stock.width } }),
+          : { stockFootprintMm: { length: setupStockOf(input, spec).length, width: setupStockOf(input, spec).width } }),
         houseFlats: flats,
         houseAll: input.cutters.house,
         ...(input.sacrificialBreakthroughMm === undefined ? {} : { sacrificialBreakthroughMm: input.sacrificialBreakthroughMm }),

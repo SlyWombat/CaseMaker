@@ -1259,8 +1259,11 @@ export function toSetup(
   machine: Mill,
   fixture?: FixtureEnvelope,
   bed?: BedUnderFacts | null,
+  /** #1082 — the box THIS setup is cut from (its own stock), or absent for the job's blank. */
+  setupStock?: { length: number; width: number; thickness: number },
 ): Setup {
-  const { thickness } = job.stock;
+  const thickness = setupStock?.thickness ?? job.stock.thickness;
+  const box = setupStock === undefined ? job.stock : { ...job.stock, ...setupStock };
   // #240 slice 2 — a ROTARY job's part is a cylinder on the chuck: there is no vise to model, no
   // sacrificial board under it, and the work origin is the axis (`stubSetup` places a cylinder's
   // WCS there — the slice-1 fix). The chuck's facts are the job's own; the jaw diameter is the
@@ -1299,7 +1302,7 @@ export function toSetup(
     // extruded through the thickness, which is the cylinder the sweep starts from. It is a
     // `prism` and not `Setup`'s `cylinder`, because that variant is the ROTARY frame — axis along
     // X, work origin on the axis — and a disc is cut on its face with the origin on the top.
-    { kind: 'prism', outline: flatStockOutline(job.stock), thickness },
+    { kind: 'prism', outline: flatStockOutline(box), thickness },
     workholding,
     // The default job's tool is number 1 (`flat-1.0`); the starting tool is stated because a
     // program cannot know the machine's active tool (/Simulation.md §1.1). The fixture is the

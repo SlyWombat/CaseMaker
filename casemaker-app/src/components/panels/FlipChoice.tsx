@@ -17,6 +17,8 @@ import type { JobSetup, SetupFlip, StockCorner } from '@/types/engraveJob';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const WARN = '#e0c07a';
+const fmtBox = (b: { length: number; width: number; thickness: number }): string =>
+  `${Math.round(b.length * 1000) / 1000} × ${Math.round(b.width * 1000) / 1000} × ${Math.round(b.thickness * 1000) / 1000} mm`;
 
 export interface FlipChoiceProps {
   /** 1-based setup number, for the testids. */
@@ -31,6 +33,12 @@ export interface FlipChoiceProps {
   partSilhouette?: PartSilhouette | null;
   /** The planner's verdict on the vendor method for this part. */
   vendorOffer?: VendorOffer;
+  /**
+   * #1082 — THE FREED PART'S OWN BOX, for the vendor method's side 2 (derived from the part's
+   * extents, `derivedSetupStock`). The operator CONFIRMS it onto the setup, or clears a stated box;
+   * nothing is assumed — the stock a setup states is always the document's own.
+   */
+  derivedStock?: { length: number; width: number; thickness: number } | null;
   onReplace: (next: JobSetup) => void;
 }
 
@@ -80,6 +88,30 @@ export function FlipChoice(props: FlipChoiceProps): JSX.Element {
       {vendorUnavailable ? (
         <p style={{ ...MUTED, color: WARN }} data-testid={`engrave-setup-flip-vendor-unavailable-${n}`}>
           The vendor method is unavailable — {props.vendorOffer!.reason}
+        </p>
+      ) : null}
+      {flip.method === 'free-then-flip' && props.derivedStock !== undefined && props.derivedStock !== null ? (
+        <p style={MUTED} data-testid={`engrave-setup-stock-${n}`}>
+          {setup.stock !== undefined ? (
+            <>
+              This setup's stock: <b>{fmtBox(setup.stock)}</b> ({setup.stock.provenance}).{' '}
+              <button type="button" data-testid={`engrave-setup-stock-clear-${n}`} disabled={!editable} onClick={() => props.onReplace({ ...setup, stock: undefined })}>
+                Clear
+              </button>
+            </>
+          ) : (
+            <>
+              Side 2 cuts the FREED PART: {fmtBox(props.derivedStock)} — derived from side 1’s cut extents.{' '}
+              <button
+                type="button"
+                data-testid={`engrave-setup-stock-use-${n}`}
+                disabled={!editable}
+                onClick={() => props.onReplace({ ...setup, stock: { ...props.derivedStock!, provenance: 'stated' } })}
+              >
+                Use this stock
+              </button>
+            </>
+          )}
         </p>
       ) : null}
       <FlipDiagram

@@ -64,6 +64,8 @@ import {
 } from '@/engine/cnc/setups';
 import { readDefault } from '@/platform/defaultsClient';
 import { partSilhouetteOf, vendorMethodOffer } from '@/engine/cnc/engrave/flipSilhouette';
+import { derivedSetupStock, measuredBlankThickness } from '@/engine/cnc/setups/perSetupStock';
+import { machineRecordByProfile } from '@/store/locationStore';
 import { machineDisplayName } from '@/platform/locationClient';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 import { EngraveSetupRow } from './EngraveSetupRow';
@@ -131,6 +133,13 @@ export function EngraveSetupsSection({
   // mesh on the flip plan's own coverage grid, only when a later bottom-up setup is on screen, so
   // ordinary jobs pay nothing. The verdict is the registration planner's (the same settings the
   // Setups step plans under), so the row's "unavailable" and the plan's refusal are one statement.
+  // #1082 — the freed part's box for the flip's side-2 stock offer (derived from the cut extents).
+  // #1082 — the blank's measured thickness, from the bed profile's own datums (the surface touch
+  // less the bracket seat — the same pair #1073's Z0 reads), when the house has one.
+  const bedMachine = machineRecordByProfile(job.machineId);
+  const bedProfile = bedMachine?.bedProfiles?.find((p) => p.id === bedMachine.activeBedProfileId) ?? null;
+  const measuredThickness = measuredBlankThickness(bedProfile);
+  const derivedStock = useMemo(() => derivedSetupStock(job, measuredThickness), [job, measuredThickness]);
   const flipSilhouette = useMemo(() => {
     const hasFlipCandidate = (job.setups ?? []).some((su) => su.orientation.top === 'bottom');
     if (!hasFlipCandidate) return null;
@@ -614,6 +623,7 @@ export function EngraveSetupsSection({
               breakthroughMm={job.breakthrough}
               partSilhouette={flipSilhouette}
               vendorOffer={flipVendorOffer}
+              derivedStock={derivedStock}
               facingPass={index === 0 && job.facing?.enabled === true}
               notice={notice?.index === index ? notice.reason : null}
               remountMinutes={settings.remountMinutes}
