@@ -5532,6 +5532,12 @@ function seatRegistrationSteps(onBoard: boolean, facingRun: boolean, seek: SeatS
         `${fmtNum(seek.band.min - 5)}; a reading outside the band stops the run. ${seek.notes[0] ?? ''}`,
     },
     {
+      // 6b's amendment (the maintainer's fact, 2026-11-07).
+      text:
+        'Look at the spot first: bare wasteboard, no screw head or countersink (the board’s screws sit 1 mm below ' +
+        'its surface; a touch on one stores a seat 1 mm low).',
+    },
+    {
       text:
         'The reading is written as the bed profile’s bracket seat, and it is valid only for the probe fitting it was ' +
         'measured with: the press measures every session, and the stored value is only the next session’s expected band.',
