@@ -162,6 +162,12 @@ pub struct MeasuredDatum {
     pub by: String,
     /// Where on the bed, in machine XY, when the measurement named a point.
     pub at: Option<[f64; 2]>,
+    /// #1070 (C8) — the SEAT says it is the surface the stock rests on (the seat press touches the
+    /// wasteboard the blank itself stands on): the expected surface then does not add the job's
+    /// under-board again. Omitted when the datum predates the statement, and never set on the
+    /// surface-top fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rests_on_stock: Option<bool>,
 }
 
 /// The four datums a profile describes; each is `null` until measured (open question E's bare bed
@@ -1082,6 +1088,7 @@ mod tests {
             measured_at: "2026-10-15T09:00:00.000Z".into(),
             by: "wired-probe".into(),
             at: Some([-150.0, -150.0]),
+            rests_on_stock: None,
         }
     }
 
@@ -1434,6 +1441,28 @@ mod tests {
         let mut v = serde_json::to_value(a_machine_with_a_bed()).unwrap();
         v["bedProfiles"][0]["datums"]["surfaceTopZ"]["typedBy"] = serde_json::json!("hand");
         let err = serde_json::from_value::<MachineRecord>(v).unwrap_err().to_string();
+        assert!(err.contains("typedBy"), "{err}");
+    }
+
+    /// #1070 (C8) — the seat's statement is a KNOWN key: `restsOnStock` round-trips, and the
+    /// strictness that made this necessary still refuses a key this build has never heard of.
+    #[test]
+    fn a_datum_that_states_it_is_the_stock_surface_round_trips() {
+        let mut datum = a_datum(-85.75);
+        datum.rests_on_stock = Some(true);
+        let v = serde_json::to_value(&datum).unwrap();
+        assert_eq!(v["restsOnStock"], serde_json::json!(true), "the statement is written in camelCase");
+        let back: MeasuredDatum = serde_json::from_value(v.clone()).unwrap();
+        assert_eq!(back, datum);
+
+        // An absent statement stays absent in the file (older datums are untouched).
+        let plain = serde_json::to_value(a_datum(-55.119)).unwrap();
+        assert!(plain.get("restsOnStock").is_none(), "{plain}");
+
+        // And the strictness itself is unchanged: an unknown key on a datum is still refused.
+        let mut unknown = v.clone();
+        unknown["typedBy"] = serde_json::json!("hand");
+        let err = serde_json::from_value::<MeasuredDatum>(unknown).unwrap_err().to_string();
         assert!(err.contains("typedBy"), "{err}");
     }
 
