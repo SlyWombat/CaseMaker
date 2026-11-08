@@ -16,7 +16,7 @@ import type { PreflightCause } from '@/engine/cnc/preflight';
 import { runContextFor } from '@/store/machineRunStore';
 import { stepAtLine } from '@/engine/cnc/playbackClock';
 import { EngraveCutSurface } from './EngraveCutSurface';
-import { saveEngraveProgram, saveText } from '@/engine/exportTrigger';
+import { saveEngraveProgram, saveFilesFolderOrZip, saveText } from '@/engine/exportTrigger';
 import { buildSimStallReport, simStallReportFileName } from '@/engine/jobs/simStallReport';
 import { flightCrumbs } from '@/platform/flightRecorder';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -92,9 +92,17 @@ import {
   voidLimitForItem,
 } from '@/engine/cnc/engrave/partPlan';
 import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, facesLoadedEpoch, labelFontsLoaded, subscribeFacesLoaded } from '@/engine/fonts/registry';
-import { buildRunSheet, type RunSheet } from '@/engine/cnc/engrave/runSheet';
+import { buildRunSheet, type RunSheet, type RunSheetFile } from '@/engine/cnc/engrave/runSheet';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
-import { buildRunRecord, isMeasuredRun, runSeconds, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
+import {
+  buildRunRecord,
+  isMeasuredRun,
+  runRecordFileName,
+  runSeconds,
+  serializeRunRecord,
+} from '@/engine/cnc/engrave/runRecord';
+import { nameProgramsForSheet, nameRestPrograms, programFiles, runSaveFiles } from '@/engine/cnc/engrave/programFiles';
+import { releaseStem } from '@/engine/cnc/engrave/release';
 import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
 import { useRunRecordStore } from '@/store/runRecordStore';
 import { surfaceSpreadFor, firstRegistrationFor } from '@/store/engraveRegistrationStore';
@@ -2522,7 +2530,15 @@ export function EngravePanel(): JSX.Element {
     setSheet(
       buildRunSheet(
         job,
-        generated,
+        // #1093 R1/R3 — the sheet names the files, not their texts: `RunSheetProgram.nc` is "the
+        // file to load", and the app used to hand it the whole program (the CLI substituted names
+        // since #733). The names come from the same table Save-all writes.
+        {
+          ...generated,
+          ...(generated.programs === undefined
+            ? {}
+            : { programs: nameProgramsForSheet(generated.programs, job.name) }),
+        },
         // #408 — the band the prediction was judged to, so the sheet states the tolerance behind its
         // "matches prediction" claim next to the engine sentence. Undefined until the check ran, and
         // the sheet then claims nothing about a comparison.
@@ -2588,7 +2604,10 @@ export function EngravePanel(): JSX.Element {
           toolCase: caseWordsForKey(job.toolKey) ?? undefined,
           // #472 — the two-tool facts the generator measured, so the sheet's second-program section
           // prints the files and numbers this run actually produced rather than re-deriving them.
-          restPass: generated.restPass ?? undefined,
+          restPass:
+            generated.restPass == null
+              ? undefined
+              : nameRestPrograms(generated.restPass, generated.programs ?? [], job.name),
           // #451 — the shop's `runSheet.blankToleranceMm`: how far a measured blank may differ
           // before the sheet says "change the job and regenerate".
           blankToleranceMm: shopDefault('runSheet.blankToleranceMm').value,
@@ -2980,6 +2999,39 @@ export function EngravePanel(): JSX.Element {
   /** #893 — the row's Simulate press: sweep and check the program already on screen. */
   async function simulateProgram(): Promise<void> {
     await run.simulate();
+  }
+
+  /**
+   * #1093 R2 — SAVE ALL: the run's programs leave as one set. The list is `runSaveFiles`' (every
+   * program in cut order, its frame beside it, then the run record), written into a chosen folder
+   * where the browser has a directory picker and as `<stem>-programs.zip` where it has not. The
+   * file bar offers this INSTEAD of Save .nc… whenever the run holds more than one program — one
+   * accidental "program 1 only" save is the defect this replaces.
+   */
+  async function saveAllPrograms(): Promise<void> {
+    const generated = useEngraveRunStore.getState().generated;
+    if (generated?.programs === undefined || generated.programs.length === 0 || saveBlockerText !== null) return;
+    // The record typesets §9's labels, so the main thread's font cache must be seeded first (#180).
+    await ensureLabelFontsLoaded(job.labels, job.customFonts ?? []);
+    const files = runSaveFiles(generated.programs, job.name, {
+      name: runRecordFileName(job.name),
+      bytes: serializeRunRecord(buildRunRecord(job, generated)),
+    });
+    await saveFilesFolderOrZip(files, `${releaseStem(job.name)}-programs.zip`);
+  }
+
+  /**
+   * #1093 R3 — one row of the run sheet's file list: that program's `.nc` and its frame, under the
+   * names the sheet prints (`programFiles`). The bytes are the SAME generate output Save all
+   * writes — never re-derived.
+   */
+  async function saveSheetProgram(number: number): Promise<void> {
+    const generated = useEngraveRunStore.getState().generated;
+    if (generated?.programs === undefined) return;
+    const files = programFiles(generated.programs, job.name).filter(
+      (file) => file.engravingIndex === number,
+    );
+    for (const file of files) await saveText(file.bytes, file.name, 'text/plain');
   }
 
   async function saveProgram(): Promise<void> {
@@ -3579,6 +3631,10 @@ export function EngravePanel(): JSX.Element {
         // the same sentence the footer button carried.
         onSaveProgram={() => void saveProgram()}
         saveProgramBlocker={saveBlockerText}
+        // #1093 R2 — a run of more than one program offers Save all in place of Save .nc…; the
+        // single-program Save stays exactly as it was for a one-program run.
+        onSaveAllPrograms={() => void saveAllPrograms()}
+        programCount={run.generated?.programs?.length ?? null}
         onRunSheet={() => void openRunSheet()}
         runSheetReady={runSheetReady}
         runSheetBlocked={runSheetBlocked}
@@ -5529,7 +5585,14 @@ export function EngravePanel(): JSX.Element {
       </div>
       </footer>
 
-      {sheet && <RunSheetView sheet={sheet} onClose={() => setSheet(null)} />}
+      {sheet && (
+        <RunSheetView
+          sheet={sheet}
+          onClose={() => setSheet(null)}
+          // #1093 R3 — per-program Save lives on the sheet's rows, nowhere else.
+          onSaveProgram={(file: RunSheetFile) => void saveSheetProgram(file.number)}
+        />
+      )}
       {pendingOutline && (
         <EngraveImportDialog
           outline={pendingOutline}

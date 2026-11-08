@@ -767,6 +767,27 @@ export interface RunSheetSection {
   flipDiagramSvg?: string;
 }
 
+/**
+ * #1093 R3 — ONE ROW OF THE RUN'S FILE LIST: the file the operator loads for a program, its frame
+ * when one was produced, and the cutter it runs. The app's sheet view puts a Save beside each row;
+ * the printed sheet and the CLI's `.md` name the same files in the same order.
+ *
+ * Names come from `releaseFileName` (#1093 R1), so a row's file is byte- and name-identical to the
+ * one Save-all writes and the release step uploads.
+ */
+export interface RunSheetFile {
+  /** 1-based, the sheet's "program N" — among the ENGRAVING programs, the skim excluded. */
+  number: number;
+  /** The setup this program cuts. */
+  setupIndex: number;
+  /** The `.nc` file the operator loads. */
+  name: string;
+  /** Its air-trace frame, or null when the program produced none (#747's two absences). */
+  frameName: string | null;
+  /** The cutter, as the sheet names it. */
+  cutter: string;
+}
+
 /** One item's bounding box on the origin diagram, in the STOCK frame, mm. */
 export interface RunSheetDiagramItem {
   id: string;
@@ -906,6 +927,13 @@ export interface RunSheetHeader {
 export interface RunSheet {
   header: RunSheetHeader;
   sections: RunSheetSection[];
+  /**
+   * #1093 R3 — THE RUN'S FILES, in cut order, when the run has more than one program: each file's
+   * name, its frame and its cutter. The app's sheet view puts Save on every row; the file bar's
+   * Save all writes the same set. ABSENT on a one-program run (and on a stored result built before
+   * the program list existed), whose sheet stays byte-identical and whose one Save is the bar's.
+   */
+  files?: RunSheetFile[];
   /** Placed inside section 5 in the view. */
   diagram: RunSheetDiagram;
   /**
@@ -978,7 +1006,18 @@ export function runSheetFrameFileName(jobName: string): string {
  * to a file the save never wrote.
  */
 export function runSheetFaceFileName(jobName: string): string {
-  return `${runSheetFileName(jobName).slice(0, -'.nc'.length)}-face.nc`;
+  return releaseFaceFileName(jobName);
+}
+
+/**
+ * #1093 — THE SKIM'S FILE NAME, by the same rule Save, the sheet, the release store and the CLI
+ * use: `<stem>-face.nc`. The skim is not numbered among the engraving programs, so a faced run's
+ * files are `<stem>-face.nc` + `<stem>-p1.nc` … (one engraving program keeps `<stem>.nc`).
+ * `dryRun` (#547) inserts `-dry` the way `releaseFileName` does, so a lifted skim never overwrites
+ * the real one on the card: `<stem>-dry-face.nc`.
+ */
+export function releaseFaceFileName(jobName: string, dryRun = false): string {
+  return `${releaseStem(jobName)}${dryRun ? '-dry' : ''}-face.nc`;
 }
 
 /**
@@ -1007,6 +1046,41 @@ export function runSheetFileName(jobName: string): string {
     .replace(/[^A-Za-z0-9._-]+/g, '-')
     .replace(/^[-_.]+|[-_.]+$/g, '');
   return `${cleaned || 'engrave-job'}.nc`;
+}
+
+/**
+ * The stem of a job's file names — `runSheetFileName` without its `.nc`.
+ *
+ * #1093 R1 — THE NAMING LIVES HERE, beside the sanitiser it reads, so the sheet can name a
+ * multi-program run's files without importing the release step (which imports this module). The
+ * release step re-exports both functions; every existing importer is unchanged.
+ */
+export function releaseStem(jobName: string): string {
+  return runSheetFileName(jobName).replace(/\.nc$/i, '');
+}
+
+/**
+ * The `.nc` name for program `index` (1-based, cut order) of `total` — THE ONE NAMING FUNCTION
+ * (#1093 R1): Save, the run sheet, the release store, the run record and the CLI all call it.
+ *
+ * ONE PROGRAM keeps `<job>.nc` (`runSheetFileName`), because that is the name the run sheet, Save
+ * and the single-file upload all print, and a one-program job must not gain a suffix for no reason.
+ * MORE THAN ONE gets `<job>-p<n>.nc`, the index ZERO-PADDED to the width of `total`: `p1…p5`,
+ * `p01…p19`. The padding is not cosmetic — the machine's own file list and every OS folder sort by
+ * name, and `p10` sorting before `p2` is how an operator runs the tab release before the cuts.
+ * Program 1 is numbered too: with `<job>.nc` beside `<job>-p2.nc` nothing says the unnumbered file
+ * is first. The face/frame files take their own suffixes, so a program's own suffix cannot collide
+ * with either. `index`/`total` count the ENGRAVING programs (the skim keeps `-face.nc`).
+ *
+ * `dryRun` (#547) inserts `-dry` before the suffix (or the extension): a dry-run variant is a
+ * DIFFERENT file, and it must not overwrite the real program it was lifted from on the card.
+ */
+export function releaseFileName(jobName: string, index: number, total: number, dryRun = false): string {
+  const stem = releaseStem(jobName);
+  const dry = dryRun ? '-dry' : '';
+  if (total <= 1) return `${stem}${dry}.nc`;
+  const width = String(total).length;
+  return `${stem}${dry}-p${String(index).padStart(width, '0')}.nc`;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1548,6 +1622,9 @@ function facingSteps(
   job: EngraveJob,
   generated: RunSheetGenerated,
   faceFile: string,
+  /** #1093 — THE ENGRAVING FILE the skim hands over to: program 1's name (`<job>.nc`, or
+   *  `<job>-p1.nc` on a multi-program run). The steps that say "then load …" name it. */
+  programFile: string,
   /** #877 — a stated GRBL machine: the re-touch and the cutter change are the sender's, no M491. */
   stated: boolean,
 ): RunSheetStep[] {
@@ -1658,12 +1735,12 @@ function facingSteps(
     steps.push({
       text:
         'Take the facing cutter out and fit the engraving cutter — the one this job was designed ' +
-        `around, the cutter ${runSheetFileName(job.name)} was posted for. With it fitted, zero Z in ` +
+        `around, the cutter ${programFile} was posted for. With it fitted, zero Z in ` +
         'your sender on the faced top.',
       record: 'Z zero with the engraving cutter (mm)',
     });
     steps.push({
-      text: `Home again if your sender needs it, then load ${runSheetFileName(job.name)} — the file uses the zero you just set.`,
+      text: `Home again if your sender needs it, then load ${programFile} — the file uses the zero you just set.`,
     });
     return steps;
   }
@@ -1681,7 +1758,7 @@ function facingSteps(
   steps.push({
     text:
       'Home the machine, then take the probe out and fit the engraving cutter — the one this job ' +
-      `was designed around, the cutter ${runSheetFileName(job.name)} was posted for. Run ` +
+      `was designed around, the cutter ${programFile} was posted for. Run ` +
       'tool-length calibration from Studio (M491) and record its PRB: a reading of THIS cutter ' +
       'alone, not yet a Z.',
     code: 'M491',
@@ -1693,7 +1770,7 @@ function facingSteps(
       'the surface again: Z0 = the faced surface Z you just recorded + (the engraving cutter’s PRB ' +
       '− the probe’s PRB recorded when you set the origin). With the engraving cutter fitted, write ' +
       'it with G10 L2: that command zeroes the tool-length offset to the current tool. Home ' +
-      `again once it is written, then load ${runSheetFileName(job.name)}.`,
+      `again once it is written, then load ${programFile}.`,
     value: 'Z0 = faced surface + (engraving PRB − probe PRB)',
     record: 'Z0 for the program (mm)',
   });
@@ -4559,6 +4636,16 @@ export function buildRunSheet(
   const hasProgramList = generated.programs !== undefined;
   const runPrograms = (generated.programs ?? []).filter((program) => (program.kind ?? 'engrave') !== 'facing');
   /**
+   * #1093 R1 — THE FILE OF PROGRAM 1, by the one naming function. A one-program run (and a stored
+   * result with no program list) keeps `<job>.nc`, byte-identical to every sheet before this; a
+   * multi-program run's first file is `<job>-p1.nc`, because no file called `<job>.nc` is written
+   * for it and sending the operator to one would be sending them to nothing.
+   */
+  const firstProgramFile =
+    hasProgramList && runPrograms.length > 0
+      ? releaseFileName(job.name, 1, runPrograms.length)
+      : runSheetFileName(job.name);
+  /**
    * #926 — the sweep's removed volume for the program at `index` in `generated.programs` (the
    * `ProgramSweepSummary.index` is that index). Null when this sheet was handed no run.
    */
@@ -4596,7 +4683,7 @@ export function buildRunSheet(
     jobName: job.name,
     machine: options.machineName ?? machine.name,
     generatedOn: now.toISOString().slice(0, 10),
-    fileName: runSheetFileName(job.name),
+    fileName: firstProgramFile,
     fileHash: nc === null ? '' : sha256Hex(nc).slice(0, 8),
     estimatedTime: generated.cam ? formatDuration(generated.cam.estimatedSeconds) : 'unknown',
     estimatedTimeNote: rapidAssumptionNote(machine.rapidEstimate),
@@ -5796,7 +5883,7 @@ export function buildRunSheet(
           {
             id: 'facing',
             title: 'Face the stock top',
-            steps: facingSteps(job, generated, runSheetFaceFileName(job.name), statedOrigin !== undefined),
+            steps: facingSteps(job, generated, runSheetFaceFileName(job.name), firstProgramFile, statedOrigin !== undefined),
           },
         ];
 
@@ -5910,6 +5997,23 @@ export function buildRunSheet(
     tool === null ? undefined : cutterProfileSvg(tool, { size: 'print', grooveDepth: deepestCut });
   const toolProfileLegend = tool === null ? undefined : (cutterLegend(tool) ?? undefined);
 
+  // #1093 R3 — THE RUN'S FILES, in cut order, for a run of more than one program: the sheet view
+  // puts Save on every row, and the file bar's Save all writes this same set. A one-program run
+  // (or a stored result with no program list) carries no list and keeps its old sheet.
+  const files: RunSheetFile[] | undefined =
+    hasProgramList && runPrograms.length > 1
+      ? runPrograms.map((program, i) => {
+          const name = releaseFileName(job.name, i + 1, runPrograms.length);
+          return {
+            number: i + 1,
+            setupIndex: program.setupIndex,
+            name,
+            frameName: program.frameNc === null ? null : `${name.slice(0, -'.nc'.length)}-frame.nc`,
+            cutter: cutterNameForKey(program.toolKey),
+          };
+        })
+      : undefined;
+
   return {
     header,
     sections,
@@ -5919,6 +6023,7 @@ export function buildRunSheet(
     ...(stackUp ? { stackUp } : null),
     ...(toolProfileSvg === undefined ? null : { toolProfileSvg }),
     ...(toolProfileLegend === undefined ? null : { toolProfileLegend }),
+    ...(files === undefined ? null : { files }),
   };
 }
 

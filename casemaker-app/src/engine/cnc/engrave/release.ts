@@ -19,7 +19,6 @@ import type { EngraveProgramKind } from '@/workers/sim/engraveGenerate';
 import type { EngraveJob, FrozenPackage } from '@/types/engraveJob';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import { verifyCheck, type ProgramCheck, type SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
-import { runSheetFileName } from './runSheet';
 
 /**
  * One approved program as the release step reads it.
@@ -59,28 +58,13 @@ export interface ReleaseSource {
   dryRun?: boolean;
 }
 
-/** The stem of a job's file names — `runSheetFileName` without its `.nc`. */
-export function releaseStem(jobName: string): string {
-  return runSheetFileName(jobName).replace(/\.nc$/i, '');
-}
-
 /**
- * The `.nc` name for program `index` (1-based, cut order) of `total`.
- *
- * ONE PROGRAM keeps `<job>.nc` (`runSheetFileName`), because that is the name the run sheet, Save and
- * the single-file upload all print, and a one-program job must not gain a suffix for no reason.
- * MORE THAN ONE gets `<job>-p<n>.nc`: the face/frame files already take `<job>-face.nc` and
- * `<job>-frame.nc`, so a program's own suffix cannot collide with either.
- *
- * `dryRun` (#547) inserts `-dry` before the suffix (or the extension): a dry-run variant is a
- * DIFFERENT file, and it must not overwrite the real program it was lifted from on the card.
+ * #1093 R1 — THE ONE NAMING FUNCTION now lives beside the sanitiser it reads (`runSheet.ts`), so
+ * the run sheet can name a multi-program run's files without this module's cycle. Re-exported here
+ * because this is where the release step and every existing importer have always found it.
  */
-export function releaseFileName(jobName: string, index: number, total: number, dryRun = false): string {
-  const stem = releaseStem(jobName);
-  const dry = dryRun ? '-dry' : '';
-  if (total <= 1) return `${stem}${dry}.nc`;
-  return `${stem}${dry}-p${index}.nc`;
-}
+import { releaseFaceFileName, releaseFileName, releaseStem } from './runSheet';
+export { releaseFaceFileName, releaseFileName, releaseStem };
 
 /** One program as the release step lists, names and plays it. */
 export interface ReleaseProgram {
@@ -119,22 +103,33 @@ export function releasePrograms(
   finishedHashes: readonly string[],
 ): ReleaseProgram[] {
   const total = programs.length;
+  // #1093 — THE ENGRAVING PROGRAMS' OWN COUNT: the skim is not numbered among them, exactly as
+  // the sheet's "program N" and the CLI count. A faced run's files are `<stem>-face.nc` plus
+  // `<stem>-p1.nc`…, the same names Save all writes and the sheet prints.
+  const engravingTotal = programs.filter((p) => (p.kind ?? 'engrave') !== 'facing').length;
+  let engravingIndex = 0;
   const done = new Set(finishedHashes);
-  return programs.map((p, i) => ({
-    index: i + 1,
-    total,
-    setupIndex: p.setupIndex,
-    setupId: p.setupId,
-    toolKey: p.toolKey,
-    kind: p.kind,
-    filename: releaseFileName(jobName, i + 1, total, p.dryRun),
-    hash: p.hash,
-    nc: p.nc,
-    verify: p.verify,
-    surfaceCheck: p.surfaceCheck ?? null,
-    done: done.has(p.hash),
-    dryRun: p.dryRun === true,
-  }));
+  return programs.map((p, i) => {
+    const facing = (p.kind ?? 'engrave') === 'facing';
+    if (!facing) engravingIndex += 1;
+    return {
+      index: i + 1,
+      total,
+      setupIndex: p.setupIndex,
+      setupId: p.setupId,
+      toolKey: p.toolKey,
+      kind: p.kind,
+      filename: facing
+        ? releaseFaceFileName(jobName, p.dryRun === true)
+        : releaseFileName(jobName, engravingIndex, engravingTotal, p.dryRun),
+      hash: p.hash,
+      nc: p.nc,
+      verify: p.verify,
+      surfaceCheck: p.surfaceCheck ?? null,
+      done: done.has(p.hash),
+      dryRun: p.dryRun === true,
+    };
+  });
 }
 
 /**

@@ -125,6 +125,7 @@ import {
   type RunSheetOptions,
 } from '../../../src/engine/cnc/engrave/runSheet';
 import { releaseFileName } from '../../../src/engine/cnc/engrave/release';
+import { nameRestPrograms } from '../../../src/engine/cnc/engrave/programFiles';
 import { parseEngraveJob } from '../../../src/store/engraveJobSchema';
 import { simulationProblem } from '../../../src/engine/cnc/simGate';
 import {
@@ -485,6 +486,37 @@ export function sheetRegistrationFor(
   // the app's Cut card uses.
   const placedSeed = bracketPlacementSeedFor(machine ?? null);
   return sheetRegistrationPlan({ job, calibration, defaults: where.defaults, probe, bracketSeat, placedSeed });
+}
+
+/** One program as the generator lists it — the CLI's slice of `EngraveGenerated['programs']`. */
+type GeneratedProgram = EngraveGenerated['programs'][number];
+
+/**
+ * The file names for a job's programs, in cut order (#733, #1093 R1).
+ *
+ * THE RUN SHEET NAMES THE FILES, so these are the names the sheet is handed: every ENGRAVING
+ * program by `releaseFileName` (`<job>-p<n>.nc` when there is more than one, `<job>.nc` when it is
+ * the only one), the blank's skim by `runSheetFaceFileName` (`<job>-face.nc`), and each program's
+ * frame beside it (`<program stem>-frame.nc`). The CLI, Save-all, the release store and the record
+ * all read the same rule, so one program cannot have two names.
+ */
+export function programFileNames(
+  jobName: string,
+  programs: readonly GeneratedProgram[],
+): { ncFile: string; frameFile: string | null }[] {
+  const engravingTotal = programs.filter((p) => (p.kind ?? 'engrave') !== 'facing').length;
+  let engravingIndex = 0;
+  return programs.map((program) => {
+    if ((program.kind ?? 'engrave') === 'facing') {
+      // #473 — the skim is its own file; it is never given a frame (its own dry run is the sheet).
+      return { ncFile: runSheetFaceFileName(jobName), frameFile: null };
+    }
+    engravingIndex += 1;
+    // #1093 R1 — ONE NAME FOR EVERY PROGRAM, program 1 included (`<stem>-p1.nc` …): the folder
+    // sorts in cut order, and nothing names a "first" file by omission of its number.
+    const ncFile = releaseFileName(jobName, engravingIndex, engravingTotal);
+    return { ncFile, frameFile: `${ncFile.slice(0, -'.nc'.length)}-frame.nc` };
+  });
 }
 
 export async function engraveJobMain(argv: string[], options: CommandOptions = HUMAN): Promise<number> {
@@ -1390,40 +1422,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     };
   }
 
-  /** One program as the generator returned it, with every field the writer needs. */
-  type GeneratedProgram = EngraveGenerated['programs'][number];
-
   /**
-   * The file names for a job's programs, in cut order (#733).
-   *
-   * THE RUN SHEET NAMES THE FILES, so these names come from its vocabulary: the sheet's header
-   * names `<job>.nc`, its facing section names `<job>-face.nc`, and its later-program sections are
-   * handed the names below. The first ENGRAVING program therefore keeps the job's own file name
-   * (exactly what Save writes for a one-program job), the blank's skim takes `-face`, and only a
-   * later engraving program takes the release step's `-p<n>` suffix (`releaseFileName` owns that
-   * form). A one-program job is byte-identical to what this command wrote before #733.
+   * The file names for a job's programs, in cut order (#733, #1093 R1) — now the module-level
+   * `programFileNames`, which reads `releaseFileName` for EVERY engraving program.
    */
-  function programFileNames(
-    jobName: string,
-    programs: readonly GeneratedProgram[],
-  ): { ncFile: string; frameFile: string | null }[] {
-    const engravingTotal = programs.filter((p) => (p.kind ?? 'engrave') !== 'facing').length;
-    let engravingIndex = 0;
-    return programs.map((program) => {
-      if ((program.kind ?? 'engrave') === 'facing') {
-        // #473 — the skim is its own file; it is never given a frame (its own dry run is the sheet).
-        return { ncFile: runSheetFaceFileName(jobName), frameFile: null };
-      }
-      engravingIndex += 1;
-      const ncFile =
-        engravingIndex === 1
-          ? runSheetFileName(jobName)
-          : releaseFileName(jobName, engravingIndex, engravingTotal);
-      // The frame is named after its program; for program 1 that is `runSheetFrameFileName`'s name.
-      return { ncFile, frameFile: `${ncFile.slice(0, -'.nc'.length)}-frame.nc` };
-    });
-  }
-
   /**
    * Write one prepared job: every program it generated, in cut order — each `.nc`, its frame — plus
    * the job's one run sheet and (for the routes that build a document rather than read one) the job
@@ -2604,7 +2606,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         sheetOptions: {
           reachability: cut,
           unreachable,
-          ...(facts === null ? null : { restPass: facts }),
+          // #1093 — the rest pair's own texts become the file names the sheet reads, so each
+          // program's Cut section is placed by the same names everything else prints.
+          ...(facts === null ? null : { restPass: nameRestPrograms(facts, p1.generated.programs, p1.job.name) }),
           ...(restDepthTagged.length === 0 ? null : { extraFindings: restDepthTagged }),
         },
         preview: true,
