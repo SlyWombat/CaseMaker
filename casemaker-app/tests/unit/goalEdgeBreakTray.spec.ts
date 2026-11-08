@@ -135,43 +135,6 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
     return swept.data[j * meta.nx + i]!;
   };
 
-  // E's checker (goal_check.py, 30da03b6) on this NC, goal and dz:
-  //   cutIntoInclEdgePct 6.85 · edgeBreakPct 3.66 · cutInto0p1Pct 0 · wall 0.30 · shadow 2.45
-  // The 90° chamfer's header: diameter 3.175 (the cone's outer end), tip 0.1, angle 90° → reach
-  // 1.5875 mm, leg (1.5875 − 0.05)/tan45° = 1.5375 mm (the checker's own leg reads 1.538). The
-  // widest cutting tool is the ⌀6 flat/ball → the wall shadow is 3 mm.
-  // #1064 — E's page rule seeded its band from every design wall; that is the `edges: 'all'`
-  // reading, and it is what these numbers are parity with. The default (silhouette) is checked
-  // by the next case.
-  const r = checkGoalCutInto(goal, top, {
-    edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4), edges: 'all' },
-    wallShadowRadiusMm: 3,
-  });
-
-  expect(r.cutIntoFraction * 100).toBeCloseTo(6.85, 1);
-  // Without the `who` rule the allowance excuses cells on geometry alone: every cell within the
-  // V's reach and leg, whichever cutter took it deepest. That reads ~4.95 %, an upper bound.
-  expect(r.edgeBreakFraction * 100).toBeGreaterThan(4.5);
-  expect(r.edgeBreakFraction * 100).toBeLessThan(5.2);
-  expect(r.adjudicatedFraction * 100).toBeCloseTo(0, 6);
-  expect(r.wallNotScoredFraction).toBeGreaterThan(0);
-  // v5 (#970) — the shadow class no longer excuses every cell near a wall: with no CL stated,
-  // a cut cell in the band is either edge break (the 4.95 % above) or adjudicated. The vendor's
-  // tray has no adjudicated cell, so the class reads 0 here; the gated case below carries the CL.
-  expect(r.shadowNotScoredFraction).toBe(0);
-  // The rule's point: the vendor's own program passes line 2 once its rim break is allowed.
-  expect(r.ok).toBe(true);
-
-  // #1064 — THE DEFAULT BAND NAMES THE PART'S SILHOUETTE ONLY. This NC's V strokes are on
-  // interior pocket lips: with no `edges: 'all'` in the job, they are cut-into, not edge break.
-  const interior = checkGoalCutInto(goal, top, {
-    edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4) },
-    wallShadowRadiusMm: 3,
-  });
-  expect(interior.edgeBreakFraction).toBe(0);
-  expect(interior.adjudicatedFraction).toBeGreaterThan(0);
-  expect(interior.adjudicatedFraction).toBeLessThanOrEqual(interior.cutIntoFraction);
-
   // #964 — THE PAGE'S `who` RULE. E's 3.66 % excuses a cell only where the DEEPEST stamp in it
   // is the V bit. The vendor NC runs four cutters (⌀6 flat, ⌀3.175 flat, ⌀6 ball, ⌀3.175 90°
   // chamfer); stamping each checkpoint with the tool it actually ran gives that per-cell identity.
@@ -207,6 +170,48 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
     if (i < 0 || j < 0 || i >= meta.nx || j >= meta.ny) return null;
     return (stamp as NonNullable<typeof stamp>).field[j * meta.nx + i]!;
   };
+
+  // E's checker (goal_check.py, 30da03b6) on this NC, goal and dz:
+  //   cutIntoInclEdgePct 6.85 · edgeBreakPct 3.66 · cutInto0p1Pct 0 · wall 0.30 · shadow 2.45
+  // The 90° chamfer's header: diameter 3.175 (the cone's outer end), tip 0.1, angle 90° → reach
+  // 1.5875 mm, leg (1.5875 − 0.05)/tan45° = 1.5375 mm (the checker's own leg reads 1.538). The
+  // widest cutting tool is the ⌀6 flat/ball → the wall shadow is 3 mm.
+  // #1064 — E's page rule seeded its band from every design wall; that is the `edges: 'all'`
+  // reading, and it is what these numbers are parity with. The default (silhouette) is checked
+  // by the next case.
+  // #1092 (gate v8) — the silhouette and shadow proofs read the deepest stamp's own CL: E's npy
+  // field carries no CL, so it comes from the app's tooled stamp of the same NC (the same pair the
+  // app's own check passes).
+  const r = checkGoalCutInto(goal, top, {
+    edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4), edges: 'all' },
+    wallShadowRadiusMm: 3,
+    clAt,
+  });
+
+  expect(r.cutIntoFraction * 100).toBeCloseTo(6.85, 1);
+  // Without the `who` rule the allowance excuses cells on geometry alone: every cell within the
+  // V's reach and leg, whichever cutter took it deepest. That reads ~4.95 %, an upper bound.
+  expect(r.edgeBreakFraction * 100).toBeGreaterThan(4.5);
+  expect(r.edgeBreakFraction * 100).toBeLessThan(5.2);
+  expect(r.adjudicatedFraction * 100).toBeCloseTo(0, 6);
+  expect(r.wallNotScoredFraction).toBeGreaterThan(0);
+  // v5 (#970) — the shadow class no longer excuses every cell near a wall: with no CL stated,
+  // a cut cell in the band is either edge break (the 4.95 % above) or adjudicated. The vendor's
+  // tray has no adjudicated cell, so the class reads 0 here; the gated case below carries the CL.
+  expect(r.shadowNotScoredFraction).toBe(0);
+  // The rule's point: the vendor's own program passes line 2 once its rim break is allowed.
+  expect(r.ok).toBe(true);
+
+  // #1064 — THE DEFAULT BAND NAMES THE PART'S SILHOUETTE ONLY. This NC's V strokes are on
+  // interior pocket lips: with no `edges: 'all'` in the job, they are cut-into, not edge break.
+  const interior = checkGoalCutInto(goal, top, {
+    edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4) },
+    wallShadowRadiusMm: 3,
+  });
+  expect(interior.edgeBreakFraction).toBe(0);
+  expect(interior.adjudicatedFraction).toBeGreaterThan(0);
+  expect(interior.adjudicatedFraction).toBeLessThanOrEqual(interior.cutIntoFraction);
+
   // #1064 — E's/page numbers are the all-edges reading (see the first case).
   const gated = checkGoalCutInto(goal, stampField, {
     edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4), toolNumber: 4, edges: 'all' },
