@@ -93,6 +93,26 @@ export class PlanFinishTooManyMoves extends Error {
 /** A raster row steeper than this is a wall: not finishable by raster, skipped with a note. */
 const WALL_SKIP_DEG = 80;
 
+/**
+ * #1080 (6b's ruling) — THE CROSS-ROW TRIANGLE SLOPE: |∂z/∂x|, the direction the raster rows
+ * ADVANCE (rows run along y, `x += stepOverMm`). The cusp a row spacing creates is across the
+ * rows only; a wall running ALONG the rows has no cusp between them, and reading its gradient
+ * magnitude pinned every band at the wall's own angle (the bottom job's 60° wall: 46 rings' worth
+ * of rows where the gentle spacing was due).
+ */
+function crossRowSlopeDeg(positions: Float32Array, a: number, b: number, c: number): number {
+  const ux = positions[b]! - positions[a]!;
+  const uy = positions[b + 1]! - positions[a + 1]!;
+  const uz = positions[b + 2]! - positions[a + 2]!;
+  const vx = positions[c]! - positions[a]!;
+  const vy = positions[c + 1]! - positions[a + 1]!;
+  const vz = positions[c + 2]! - positions[a + 2]!;
+  const nx = uy * vz - uz * vy;
+  const nz = ux * vy - uy * vx;
+  if (!(Math.hypot(nx, nz) > 0)) return 0;
+  return (Math.atan(Math.abs(nx) / Math.abs(nz)) * 180) / Math.PI;
+}
+
 /** Triangle slope from its normal: the angle between the normal and +Z, degrees. */
 function triangleSlopeDeg(positions: Float32Array, a: number, b: number, c: number): number {
   const ux = positions[b]! - positions[a]!;
@@ -398,7 +418,8 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       const b = indices[t * 3 + 1]! * 3;
       const c = indices[t * 3 + 2]! * 3;
       const xs = [positions[a]!, positions[b]!, positions[c]!];
-      const slope = triangleSlopeDeg(positions, a, b, c);
+      // #1080 — the CROSS-ROW slope sizes the band (a wall along the rows creates no cusp).
+      const slope = crossRowSlopeDeg(positions, a, b, c);
       const lo = Math.max(min[0], Math.min(...xs));
       const hi = Math.min(max[0], Math.max(...xs));
       const first = Math.floor((lo - min[0]) / BIN_MM);
@@ -432,7 +453,8 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         // mouth); that ridge is the signature, not a left-right difference across the opening.
         if (zl !== null && zr !== null && z0 !== null && z0 - Math.max(zl, zr) > opts.scallopMm) steepest = 90;
         if (z0 === null || zx === null || zy === null) continue;
-        const slope = (Math.atan(Math.hypot((zx - z0) / h, (zy - z0) / h)) * 180) / Math.PI;
+        // #1080 (6b's ruling) — THE CROSS-ROW COMPONENT: |∂z/∂x|, never the gradient magnitude.
+        const slope = (Math.atan(Math.abs((zx - z0) / h)) * 180) / Math.PI;
         if (slope > steepest) steepest = slope;
       }
       binSlope[k] = steepest;

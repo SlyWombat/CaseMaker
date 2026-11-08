@@ -42,6 +42,34 @@ function rampMesh(slope: number, length: number, half: number): FeatureSource {
   };
 }
 
+/** A plane z = slope * y — the same ramp turned so its slope runs ALONG the raster rows. */
+function sweepMesh(slope: number, length: number, half: number): FeatureSource {
+  const x0 = -MESH_MARGIN_MM;
+  const x1 = length + MESH_MARGIN_MM;
+  const y0 = -half - MESH_MARGIN_MM;
+  const y1 = half + MESH_MARGIN_MM;
+  const zw0 = slope * y0;
+  const zw1 = slope * y1;
+  return {
+    triangles: {
+      positions: Float32Array.from([
+        x0, y0, zw0, x1, y0, zw0, x1, y1, zw1,
+        x0, y0, zw0, x1, y1, zw1, x0, y1, zw1,
+      ]),
+      indices: Uint32Array.from([0, 1, 2, 3, 4, 5]),
+      triangleCount: 2,
+      bbox: { min: [x0, y0, Math.min(zw0, zw1)], max: [x1, y1, Math.max(zw0, zw1)] },
+    },
+  };
+}
+
+/** The distinct x values the finish's feed moves visit — one per raster row. */
+function rasterRows(ir: ReturnType<typeof finish>['ir']): number[] {
+  const xs = new Set<number>();
+  for (const op of ir.operations) for (const m of op.moves) if (m.kind === 'feed') xs.add(Number(m.x.toFixed(3)));
+  return [...xs].sort((a, b) => a - b);
+}
+
 const SLOPE = -0.2;
 const LENGTH = 50;
 const HALF = 10;
@@ -347,4 +375,46 @@ describe('#960 finish() — the ball-scallop step-over actually holds the band, 
     expect(worstCusp, `worst measured cusp, mm (band ${BAND_MM} mm, step-over ${(rows[1]!.x - rows[0]!.x).toFixed(4)} mm)`).toBeLessThanOrEqual(BAND_MM + 1e-6);
     expect(worstCusp, `worst measured cusp, mm (band ${BAND_MM} mm, step-over ${(rows[1]!.x - rows[0]!.x).toFixed(4)} mm)`).toBeGreaterThanOrEqual(BAND_MM * 0.9);
   });
+});
+
+
+/**
+ * #1080 — THE SLOPE THE STEP-OVER READS IS THE CROSS-ROW COMPONENT (6b's ruling).
+ *
+ * The finish sizes its step-over from the region's slope per band (#960), but both reads took the
+ * gradient MAGNITUDE: a wall running ALONG the rows pinned every band at its own steep angle even
+ * though no cusp exists across the rows. The reads now take |∂z/∂x| — the direction the rows
+ * advance — so a slope along the rows reads ≈0° and keeps the gentle spacing.
+ */
+describe('#1080 the finish reads the cross-row slope, not the gradient magnitude', () => {
+  const job = (geometry: FeatureSource) => {
+    const surface = clSurface(geometry, rectRegion(0, -100).region, ball6, 3);
+    const deepest = Math.min(
+      surface.dropCutter(LENGTH - PAD - 0.01, -HALF + PAD + 0.01)!,
+      surface.dropCutter(LENGTH - PAD - 0.01, HALF - PAD - 0.01)!,
+    );
+    const { region, regionRef } = rectRegion(0, deepest - 1e-6);
+    return finish({
+      cutter: ball6, region, regionRef, clSurface: clSurface(geometry, region, ball6, 3), kind: 'ball-scallop',
+      scallopMm: 0.1, stepDownMm: 2, feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
+      safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+    });
+  };
+
+  it('a 60° wall ALONG the rows reads ≈0°; the same wall ACROSS the rows reads 60° (6b’s units)', () => {
+    // The wall runs at 60° from horizontal: slope tan(60°) = 1.732. Along the rows the raster
+    // travels at constant Z between rows — no cusp — so the gentle 1.54 mm spacing must stand.
+    // Across the rows the ball at a 0.1 mm cusp needs ~0.54 mm, three times tighter.
+    const steepSlope = Math.tan((60 * Math.PI) / 180);
+    const along = rasterRows(job(sweepMesh(steepSlope, LENGTH, HALF)).ir);
+    const across = rasterRows(job(rampMesh(-steepSlope, LENGTH, HALF)).ir);
+    const gentleStep = 2 * Math.sqrt(2 * 3 * 0.1 - 0.1 * 0.1); // ≈1.536 mm at 0°
+    const gentleRows = Math.floor((LENGTH - 2 * PAD) / gentleStep) + 2;
+    const cos60 = Math.cos((60 * Math.PI) / 180);
+    const steepStep = cos60 * 2 * Math.sqrt(2 * 3 * (0.1 * cos60) - (0.1 * cos60) ** 2); // ≈0.54 mm
+    const steepRows = Math.floor((LENGTH - 2 * PAD) / steepStep) + 2;
+    // RED at the parent: the along-row wall read its magnitude (60°) too and took the steep rows.
+    expect(Math.abs(along.length - gentleRows), `along-row rows ${along.length} vs gentle ~${gentleRows}`).toBeLessThanOrEqual(3);
+    expect(across.length, `across-rows rows ${across.length} vs steep ~${steepRows}`).toBeGreaterThan(along.length + 20);
+  }, 240_000);
 });
