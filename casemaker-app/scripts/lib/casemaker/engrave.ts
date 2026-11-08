@@ -101,6 +101,7 @@ import { toolDisplayName } from '../../../src/engine/cnc/toolDisplay';
 import type { JobFinding } from '../../../src/engine/cnc/engrave/jobSetup';
 import type { LoadedLocation } from '../../../src/platform/headless/bootstrap';
 import { sheetRegistrationPlan } from '../../../src/engine/cnc/registration/footprintJob';
+import { rotarySheetDatumFor } from '../../../src/engine/cnc/rotary/sheetDatum';
 import type { SeatSeek } from '../../../src/engine/cnc/registration/footprintJob';
 import type { FootprintPlan } from '../../../src/engine/cnc/registration/footprint';
 import type { NodeMeshOutput } from '../../../src/workers/geometry/meshOutput';
@@ -1427,6 +1428,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         ...(footprint === undefined ? {} : { footprint }),
         ...(seatSeek === undefined ? {} : { seatSeek }),
         efficiencyThresholds: efficiencyThresholds(shopDefaults),
+        // #1059 — a chuck job's sheet prints the axis and the levelled face angle from the bed
+        // profile it was planned on (absent: the sheet says what is not measured).
+        rotaryDatum: rotarySheetDatumFor(job, boot.location),
         // #1068 — §8 names the fixture THIS job's sweep was handed: the bracket's arms and the
         // job's clamps (and its own obstacle boxes), never the vise's jaws. A vise job leaves it
         // absent (the sheet derives the vise's own envelope, as it always did); a tape job says
