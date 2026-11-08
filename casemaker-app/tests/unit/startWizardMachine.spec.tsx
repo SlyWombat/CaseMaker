@@ -183,7 +183,7 @@ describe('#682 — step 1 is the house’s machine', () => {
     // A freshly shipped profile: nothing has been measured on it yet.
     machine.bedProfiles = machine.bedProfiles!.map((p) => ({
       ...p,
-      datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null },
+      datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null, rotaryFaceAngle: null },
     }));
     useLocationStore.setState({
       status: 'present',

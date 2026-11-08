@@ -342,7 +342,7 @@ export function finalizeDraft(
     createdAt: opts.now,
     basedOn: draft.templateId,
     surface: structuredClone(draft.surface),
-    datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null },
+    datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null, rotaryFaceAngle: null },
     placements,
     preferredMounting,
     consumables: draft.consumables === null ? null : structuredClone(draft.consumables),
@@ -427,6 +427,7 @@ export function unmeasuredList(profile: BedProfile, fixtures: readonly FixtureRe
     viseJawTopZ: 'the jaw top',
     bracketSeatZ: 'the bracket seat',
     rotaryAxis: 'the rotary axis',
+    rotaryFaceAngle: 'the face angle',
   };
   for (const key of Object.keys(profile.datums) as Array<keyof BedProfile['datums']>) {
     if (profile.datums[key] === null) out.push(datumWords[key]);

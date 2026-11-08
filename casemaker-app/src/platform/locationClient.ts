@@ -169,13 +169,26 @@ export const MeasuredDatumSchema = z
   })
   .strict();
 
-/** The four datums a profile describes; each `null` until measured. */
+/**
+ * #1059 — a datum measured in DEGREES: the A work zero of the stock's own face, as the face-angle
+ * step left it. Its own schema because {@link MeasuredDatumSchema} is a machine Z elsewhere and a
+ * reader that renders one as millimetres must never render this one. `value` is the signed total
+ * turn the step made, `at` the touch column (machine X and the axis Y), `residualMm` how level the
+ * last pair read.
+ */
+export const MeasuredAngleDatumSchema = MeasuredDatumSchema.omit({ radiusMm: true, restsOnStock: true }).extend({
+  residualMm: bedNumber.optional(),
+});
+
+/** The five datums a profile describes; each `null` until measured. */
 export const BedDatumsSchema = z
   .object({
     surfaceTopZ: MeasuredDatumSchema.nullable().default(null),
     viseJawTopZ: MeasuredDatumSchema.nullable().default(null),
     bracketSeatZ: MeasuredDatumSchema.nullable().default(null),
     rotaryAxis: MeasuredDatumSchema.nullable().default(null),
+    /** #1059 — the square stock's A zero, degrees; null until the face-angle step has run. */
+    rotaryFaceAngle: MeasuredAngleDatumSchema.nullable().default(null),
   })
   .strict();
 

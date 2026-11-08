@@ -49,7 +49,7 @@ const WASTEBOARD: BedProfile = {
     scars: [],
     lastResurfacedAt: null,
   },
-  datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null },
+  datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null, rotaryFaceAngle: null },
   placements: [
     { id: 'pl-vise', fixture: 'fx-vise', where: { kind: 'pins', pins: 'vise', anchor: null }, count: null, frame: null, seed: null, provenance: {} },
   ],

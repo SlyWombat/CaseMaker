@@ -10,14 +10,15 @@ import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { attachConsole, type ConsoleHandle } from '@/platform/machineConsole';
 import { runMountTap, type OperatorStep } from '@/engine/cnc/registration';
-import { runRotaryTap } from '@/engine/cnc/registration/execute';
+import { runFaceAngle, runRotaryTap } from '@/engine/cnc/registration/execute';
+import { planFaceAngle, type FaceAngleInputs } from '@/engine/cnc/registration/faceAngle';
 import { planRotaryTrial } from '@/engine/cnc/registration/rotaryTap';
 import { rotarySearchMm, rotaryTapPoint } from '@/engine/cnc/mounts/rotary';
 import type { RegistrationSettings } from '@/engine/cnc/registration/settings';
 import type { PlanMountTap } from '@/engine/cnc/registration/plan';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { createFirstBed, machineAt, saveMachineWithRetry, useLocationStore, type MachineUpdate } from '@/store/locationStore';
-import { withBracketSeatDatum, withRotaryAxisDatum, withViseJawTopDatum } from '@/platform/bedProfiles';
+import { withBracketSeatDatum, withRotaryAxisDatum, withRotaryFaceAngleDatum, withViseJawTopDatum } from '@/platform/bedProfiles';
 import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { recordMountReading, recordProbeReading } from '@/engine/cnc/registration/mountContext';
@@ -82,6 +83,27 @@ export interface RotaryAxisTapRequest {
   crownBand: { min: number; max: number };
 }
 
+/**
+ * #1059 — what the face-angle step needs: everything `planFaceAngle` takes (the axis datum, the
+ * stock's section and free span, the machine's clearance and soft limits) plus the touches' feed.
+ * The hook plans it, refuses in words when it does not hold, and writes the datum on success.
+ */
+export interface RotaryFaceAngleTapRequest {
+  inputs: FaceAngleInputs;
+  /** The touches' probe feed, mm/min (the registration settings' own). */
+  touchFeed: number;
+}
+
+/** #1059 — the face-angle step's reading, shown beside the control that ran it. */
+export interface RotaryFaceAngleReport {
+  /** The signed total A turn, degrees. */
+  thetaDeg: number;
+  /** The last pair's |Z+ − Z−|, mm. */
+  residualMm: number;
+  /** How many touch pairs it took (1 = level as found). */
+  passes: number;
+}
+
 /** #607 — the rotary tap's reading, shown beside the control that ran it. */
 export interface RotaryAxisReport {
   axisZ: number;
@@ -118,6 +140,13 @@ export interface MountTapApi {
    * chord; the fitted axis (Z, Y and R) is written to the bed profile's `rotaryAxis` datum.
    */
   tapAxis: (req: RotaryAxisTapRequest) => Promise<void>;
+  /**
+   * #1059 — the face-angle step: two touches either side of the axis, the levelling turn, and the
+   * A work zero written to the bed profile's `rotaryFaceAngle` datum.
+   */
+  tapFaceAngle: (req: RotaryFaceAngleTapRequest) => Promise<void>;
+  /** #1059 — the last face-angle reading, or null before one has run this session. */
+  faceAngle: RotaryFaceAngleReport | null;
   /** #607 — the last axis reading, or null before one has run this session. */
   axis: RotaryAxisReport | null;
   /** The last outcome, shown beside the caller's control. */
@@ -132,6 +161,7 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
   const [note, setNote] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<OperatorStep | null>(null);
   const [axis, setAxis] = useState<RotaryAxisReport | null>(null);
+  const [faceAngle, setFaceAngle] = useState<RotaryFaceAngleReport | null>(null);
   const resolver = useRef<((ok: boolean) => void) | null>(null);
   const handleRef = useRef<ConsoleHandle | null>(null);
   /** The gate token this instance's tap holds, or null when it is not running one. */
@@ -381,5 +411,63 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
     }
   }
 
-  return { tapJaw, tapAxis, axis, note, prompt, resolve };
+  /**
+   * #1059 — THE FACE-ANGLE STEP. The plan is built here, so a refusal is one sentence in the same
+   * note every other tap uses; the run is the executor's; on success the levelled A is written to
+   * the bed profile beside the axis datum it depends on.
+   */
+  async function tapFaceAngle(req: RotaryFaceAngleTapRequest): Promise<void> {
+    if (inputs.target === null) return;
+    const token = {};
+    if (!useMountTapGate.getState().begin(token)) return;
+    tokenRef.current = token;
+    setNote(null);
+    setFaceAngle(null);
+    const handle = attachConsole(inputs.target);
+    handleRef.current = handle;
+    try {
+      const planned = planFaceAngle(req.inputs);
+      if (!planned.ok) {
+        noteNow(planned.reason);
+        return;
+      }
+      const r = await runFaceAngle(
+        { plan: planned, touchFeed: req.touchFeed },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator },
+      );
+      useMachineTranscriptStore.getState().setRegistration(r.transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n'));
+      if (!r.ok) {
+        noteNow(r.reason);
+        return;
+      }
+      setFaceAngle({ thetaDeg: r.thetaDeg, residualMm: r.residualMm, passes: r.readings.length });
+      const held = machineAt(inputs.target);
+      if (held !== null) {
+        const now = new Date().toISOString();
+        const bed = await createFirstBed(held, null, now);
+        const update: MachineUpdate = (current) =>
+          withRotaryFaceAngleDatum(
+            bed(current),
+            { aOffsetDeg: r.thetaDeg, atX: planned.x, axisY: (planned.yPlus + planned.yMinus) / 2, residualMm: r.residualMm },
+            inputs.probeId,
+            now,
+          );
+        const outcome = await saveMachineWithRetry(held, update);
+        if (outcome !== 'ok') {
+          noteNow(
+            `the face was levelled, but the machine record was not saved: ${useLocationStore.getState().writeNote ?? 'the service refused the write'}. Run the step again to write it.`,
+          );
+          return;
+        }
+      }
+      noteNow('the face angle is recorded');
+    } finally {
+      tokenRef.current = null;
+      handleRef.current = null;
+      useMountTapGate.getState().end(token);
+      await handle.close();
+    }
+  }
+
+  return { tapJaw, tapAxis, tapFaceAngle, axis, faceAngle, note, prompt, resolve };
 }

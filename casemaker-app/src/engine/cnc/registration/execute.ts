@@ -81,6 +81,13 @@ import {
   type RotaryCircle,
 } from './rotaryTap';
 import type { LiveTouch } from './liveTouch';
+import {
+  faceAngleLimitProblem,
+  solveFaceAngle,
+  FACE_ANGLE_LEVEL_BAND_MM,
+  FACE_ANGLE_MAX_CORRECTIONS,
+  type FaceAnglePlan,
+} from './faceAngle';
 import { computeOutcome, correctionLine, type RegistrationOutcome, type RunData, type ScanRecord, type ScanTouch } from './outcome';
 import { referenceOutcome } from './references';
 import { settingsProblem, SURFACE_LIFT_MM, type RegistrationSettings } from './settings';
@@ -1394,6 +1401,169 @@ export async function runRotaryTap(opts: RotaryTapOptions, deps: ExecDeps): Prom
         : null;
 
     return { ok: true, circle: solved.circle, residualMm, residualLine, transcript: io.transcript };
+  } catch (e) {
+    if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
+    throw e;
+  } finally {
+    // #789 — the supply goes OFF whatever happened.
+    if (powered) await io.trySend(PROBE_SUPPLY_OFF);
+  }
+}
+
+/** One touch pair of the face-angle step: the two readings and the tilt they state, degrees. */
+export interface FaceAngleReading {
+  /** 0 for the first pair, then one per correction. */
+  pass: number;
+  zPlus: number;
+  zMinus: number;
+  thetaDeg: number;
+}
+
+export type FaceAngleResult =
+  | {
+      ok: true;
+      readings: FaceAngleReading[];
+      /** The TOTAL signed A turn the step made, degrees (−θ of the first reading, then the rest). */
+      thetaDeg: number;
+      /** The last pair's |Z+ − Z−|, mm. */
+      residualMm: number;
+      transcript: Transcript[];
+    }
+  | { ok: false; reason: string; transcript: Transcript[] };
+
+export interface FaceAngleOptions {
+  /** The plan (`registration/faceAngle.ts` `planFaceAngle`) — machine coordinates throughout. */
+  plan: FaceAnglePlan;
+  touchFeed: number;
+  /** How far the ball backs off after a triggered touch before any G0, mm. */
+  releaseMm?: number;
+  /** The level band on |Z+ − Z−|, mm; `FACE_ANGLE_LEVEL_BAND_MM` when absent. */
+  levelBandMm?: number;
+  /** The most corrections before it stops and says so; `FACE_ANGLE_MAX_CORRECTIONS` when absent. */
+  maxCorrections?: number;
+}
+
+/**
+ * #1059 — THE FACE-ANGLE STEP: level a square stock in the 4th axis, then make the levelled
+ * position its A work zero.
+ *
+ * Two touches on the top face at ±d either side of the axis give `θ = atan((Z+ − Z−) / 2d)`; A
+ * turns by −θ; the pair repeats until |Z+ − Z−| is inside the level band; then `G10 L20 P0 A0`
+ * writes the zero. Two safety rules live HERE, in the motion:
+ *
+ *  1. NO A WORD FROM BELOW THE ENVELOPE CLEARANCE. The stock's corner sweeps past the face's
+ *     height as it turns, so every turn is taken from `plan.turnClearanceZ` (the envelope plus the
+ *     CAM's clearance), and {@link turnA} refuses — before sending anything — while the last
+ *     commanded Z is below it. The lift is a `G53 G0 Z`, never the park above the face.
+ *  2. A θ PAST THE SHOP'S LIMIT STOPS THE RUN. The reading is a wrong touch or a wrong mounting;
+ *     turning on it would double the error, so nothing turns.
+ *
+ * The probe session is the axis tap's (#789 supply, #518 `G38.3` only, #790/#932 probe-away before
+ * any G0, `$X` + `G90` on a stop, supply off in `finally`); a miss is a READING, not an alarm.
+ * All placement is MACHINE: the step runs before the job's work offset exists.
+ */
+export async function runFaceAngle(opts: FaceAngleOptions, deps: ExecDeps): Promise<FaceAngleResult> {
+  const { plan } = opts;
+  const release = opts.releaseMm ?? 3;
+  const levelBand = opts.levelBandMm ?? FACE_ANGLE_LEVEL_BAND_MM;
+  const maxCorrections = opts.maxCorrections ?? FACE_ANGLE_MAX_CORRECTIONS;
+  const io = session(deps, plan.seekZ, MAX_IDLE_POLLS, true);
+  let powered = false;
+  /** The last machine Z commanded — what the A-turn guard reads. */
+  let lastZ = plan.seekZ;
+  const atZ = async (z: number): Promise<void> => {
+    await io.send(`G53 G0 Z${f(z)}`);
+    lastZ = z;
+  };
+  /**
+   * SAFETY RULE 1 — an A word may only be sent from at or above the turn clearance. The check runs
+   * against the LAST COMMANDED Z, so a turn can never be taken with the probe still near the
+   * stock, whatever the sequence that got here.
+   */
+  const turnA = async (deg: number): Promise<void> => {
+    if (!(lastZ >= plan.turnClearanceZ - 1e-9)) {
+      throw new Stop(
+        `refusing to turn A from machine Z ${f(lastZ)}: the stock's corner sweeps to the ⌀${f(2 * plan.envelopeRadiusMm)} mm envelope as it turns, so the head must be at ${f(plan.turnClearanceZ)} or higher before any A word`,
+      );
+    }
+    await io.send('G91');
+    await io.send(`G0 A${f4r(deg)}`);
+    await io.send('G90');
+  };
+  try {
+    // #933 — the opening poll is a STATUS poll: a silent link costs 3 s, not the console's 60.
+    const status = await io.send('?', { timing: STATUS_POLL_TIMING });
+    if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
+    await io.home();
+    if (
+      !(await deps.operator({
+        kind: 'fit-probe',
+        text: 'Fit the probe in the spindle — the ball on its cable — then continue.',
+      }))
+    ) {
+      throw new Stop('stopped: the probe was not fitted');
+    }
+    powered = true;
+    await io.send(PROBE_SUPPLY_ON);
+    const rest = await io.send('M119');
+    if (/Probe:\s*1\b/.test(rest)) throw new Stop('the probe reads touched at rest; check it is seated and plugged in');
+    const refPrb = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
+    if (refPrb === null || !refPrb.touched) throw new Stop('M491 answered no tool-length reading');
+
+    /** One touch on the top face at machine Y; returns the ball's machine Z at the hit. */
+    const touch = async (y: number, side: string): Promise<number> => {
+      await atZ(plan.seekZ);
+      await io.send(`G53 G0 X${f(plan.x)} Y${f(y)}`);
+      await atZ(plan.parkZ);
+      await io.idle();
+      const travel = r3(plan.parkZ - plan.bandFloorZ);
+      if (!(travel > 0)) throw new Stop(`the touch has no travel: the park ${f(plan.parkZ)} is not above the band floor ${f(plan.bandFloorZ)}`);
+      await io.at(`down to the top face ${side} of the axis, from machine Z ${f(plan.parkZ)}`);
+      await io.send('G91');
+      const reply = await io.send(`G38.3 Z-${f(travel)} F${f(opts.touchFeed)}`, { missOk: true });
+      const prb = lastPrb(reply);
+      if (prb === null || !prb.touched) {
+        await io.send('G90');
+        throw new Stop(
+          `the touch ${side} of the axis found no face down to machine Z ${f(plan.bandFloorZ)} — check the stock is under the probe and the axis datum is right`,
+        );
+      }
+      await io.send(probeAwayLine('Z', release));
+      await io.send('G90');
+      lastZ = r3(prb.z + release);
+      io.saw({ source: 'mount-tap', label: `the top face ${side} of the axis`, x: plan.x, y, z: r3(prb.z), touched: true, kind: 'stock' });
+      return r3(prb.z);
+    };
+
+    const readings: FaceAngleReading[] = [];
+    let turned = 0;
+    for (let pass = 0; ; pass++) {
+      const zPlus = await touch(plan.yPlus, '+Y');
+      const zMinus = await touch(plan.yMinus, '−Y');
+      const theta = solveFaceAngle(zPlus, zMinus, plan.d);
+      readings.push({ pass, zPlus, zMinus, thetaDeg: r3(theta) });
+      // SAFETY RULE 2 — a reading this large is not a stock the step may turn.
+      const limit = faceAngleLimitProblem(zPlus, zMinus, plan.d, plan.maxDeg);
+      if (limit !== null) throw new Stop(limit);
+      const residual = r3(Math.abs(zPlus - zMinus));
+      if (residual <= levelBand) {
+        // The levelled position IS the A work zero: the program's A words are then relative to
+        // the stock's own face, with nothing to add at the post.
+        await atZ(plan.seekZ);
+        await io.send('G10 L20 P0 A0');
+        return { ok: true, readings, thetaDeg: turned, residualMm: residual, transcript: io.transcript };
+      }
+      if (pass >= maxCorrections) {
+        throw new Stop(
+          `the face did not come level in ${maxCorrections} corrections — the last pair still read ${f(residual)} mm across ${f(2 * plan.d)} mm. ` +
+            'Check the probe is on the stock (not a jaw or the chuck), then run the step again',
+        );
+      }
+      // SAFETY RULE 1 — lift clear of the ENVELOPE, then turn.
+      await atZ(plan.turnClearanceZ);
+      await turnA(-theta);
+      turned = r3(turned - theta);
+    }
   } catch (e) {
     if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
     throw e;

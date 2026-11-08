@@ -644,6 +644,13 @@
       "unit": "mm",
       "note": "chosen, not measured: how far the slow surface touch may travel. It starts 1 mm above the fast touch's hit, so it must travel more than that, and at most 2 mm (never more than 1 mm past the hit), so it stays a capped touch"
     },
+    "registration.faceAngleMaxDeg": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "°",
+      "note": "chosen, not measured: the largest tilt the face-angle step will turn out of a square stock in the 4th axis. A bigger reading is a wrong touch or a wrong mounting, not a turn"
+    },
     "registration.idlePollLimit": {
       "value": 30.0,
       "source": "seeded",

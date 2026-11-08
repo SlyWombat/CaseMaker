@@ -15,6 +15,7 @@ import { resetShopDefaultsStore, useShopDefaultsStore } from '@/store/shopDefaul
 import type { MachineRecord } from '@/platform/locationClient';
 import { useMountTap, useMountTapBusyFlag } from '@/hooks/useMountTap';
 import type { RegistrationSettings } from '@/engine/cnc/registration/settings';
+import type { FaceAngleInputs } from '@/engine/cnc/registration/faceAngle';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -25,7 +26,10 @@ const TARGET = { host: '192.0.2.10', port: 2222 };
 // a `vi.hoisted` block.
 const h = vi.hoisted(() => {
   const close = vi.fn(async (): Promise<void> => {});
-  const attach = vi.fn(() => ({ send: vi.fn(async () => ({ kind: 'ok' as const, reply: '' })), close }));
+  const attach = vi.fn(() => ({
+    send: vi.fn(async (line: string) => (h.state.consoleSend !== null ? h.state.consoleSend(line) : { kind: 'sent' as const, line: '', text: '', frames: 1, elapsedMs: 1 })),
+    close,
+  }));
   return {
     close,
     attach,
@@ -34,6 +38,8 @@ const h = vi.hoisted(() => {
       operatorStarted: false,
       /** #653 — a promise the mocked runner awaits after the operator says Yes (mid-motion). */
       hold: null as Promise<void> | null,
+      /** #1059 — a per-test bench behind `attachConsole` (the face-angle step talks to it for real). */
+      consoleSend: null as null | ((line: string) => Promise<unknown>),
     },
   };
 });
@@ -369,5 +375,177 @@ describe('#653 unmount mid-motion', () => {
 
   afterEach(() => {
     h.state.hold = null;
+  });
+});
+
+// #1059 — THE FACE-ANGLE CLICK PATH: the control the maintainer will press. The executor is
+// tested against its own bench in `faceAngleRun1059.spec.ts`; this drives the SAME path the app
+// runs — the hook plans the inputs, opens the console, prompts for the probe, runs the touches,
+// and writes the datum back to the machine record — with the console mocked at the transport.
+describe('#1059 the face-angle step through the hook', () => {
+  const AXIS = { axisY: -125.06, axisZ: -37.71 };
+
+  function faceInputs(): FaceAngleInputs {
+    return {
+      axis: AXIS,
+      section: { kind: 'rect', width: 44.5, height: 44.5 },
+      jawFaceX: -150,
+      freeEndMm: 85,
+      probeRadiusMm: 0.875,
+      clearanceAboveStockMm: 5,
+      machineClearanceZ: -3,
+      parkAboveSurfaceMm: 3,
+      bandAllowanceMm: 1,
+      softLimits: { xMin: -207, yMin: -206, zMin: -102 },
+      maxDeg: 10,
+    };
+  }
+
+  /** A square whose top face is tilted by `tilt` degrees; an A word changes the tilt. */
+  function bench(tiltStart: number): { send: (line: string) => Promise<unknown>; turns: number[] } {
+    let mode: 'G90' | 'G91' = 'G90';
+    let tilt = tiltStart;
+    const pos = { x: -1, y: -1, z: -3 };
+    const turns: number[] = [];
+    const reply = (text: string) => ({ kind: 'sent' as const, line: '', text, frames: 1, elapsedMs: 1 });
+    const faceTop = AXIS.axisZ + 22.25;
+    const send = async (line: string): Promise<unknown> => {
+      if (line === '?') return reply('<Idle|MPos:0,0,0|WPos:0,0,0>');
+      if (line === '$H') return (pos.x = -1), (pos.y = -1), (pos.z = -3), reply('ok');
+      if (line === 'M119') return reply('Probe:0');
+      if (line === 'M491') return reply('[PRB:0,0,-80.000:1]\nok');
+      if (line === 'M831' || line === 'M832' || line === 'G10 L20 P0 A0' || line === '$X') return reply('ok');
+      if (line === 'G90' || line === 'G91') return (mode = line), reply('ok');
+      let m = /^G53 G0 Z(-?[\d.]+)$/.exec(line);
+      if (m) return (pos.z = Number(m[1])), reply('ok');
+      m = /^G53 G0 X(-?[\d.]+) Y(-?[\d.]+)$/.exec(line);
+      if (m) return (pos.x = Number(m[1])), (pos.y = Number(m[2])), reply('ok');
+      m = /^G0 A(-?[\d.]+)$/.exec(line);
+      if (m) {
+        if (mode !== 'G91') throw new Error('an A turn in absolute mode');
+        turns.push(Number(m[1]));
+        tilt += Number(m[1]);
+        return reply('ok');
+      }
+      m = /^G38\.3 Z-([\d.]+) F[\d.]+$/.exec(line);
+      if (m) {
+        if (mode !== 'G91') throw new Error('a probe in absolute mode');
+        const target = pos.z - Number(m[1]);
+        const face = faceTop + (pos.y - AXIS.axisY) * Math.tan((tilt * Math.PI) / 180);
+        if (face <= pos.z && face >= target) {
+          pos.z = face;
+          return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${face.toFixed(3)}:1]\nok`);
+        }
+        pos.z = target;
+        return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\nok`);
+      }
+      m = /^G38\.5 Z(-?[\d.]+)$/.exec(line);
+      if (m) {
+        pos.z += Number(m[1]);
+        return reply('ok');
+      }
+      return reply('ok');
+    };
+    return { send, turns };
+  }
+
+  function machine(): MachineRecord {
+    return {
+      id: 'm1',
+      profileId: 'Z1',
+      address: { host: TARGET.host, port: TARGET.port },
+      bedProfiles: [
+        {
+          id: 'bp1',
+          datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null, rotaryFaceAngle: null },
+          placements: [],
+          surface: null,
+          history: [],
+        },
+      ],
+      activeBedProfileId: 'bp1',
+      history: [],
+      notes: [],
+      observedAt: '2026-11-08T00:00:00.000Z',
+    } as unknown as MachineRecord;
+  }
+
+  function FaceHost({ inputs = faceInputs() }: { inputs?: FaceAngleInputs }) {
+    const api = useMountTap({ target: TARGET, settings: SETTINGS, floor: -80, probeId: 'probe-1', successNote: 'the face angle is recorded' });
+    const busy = useMountTapBusyFlag();
+    return (
+      <div>
+        <button type="button" data-testid="tap-face" disabled={busy} onClick={() => void api.tapFaceAngle({ inputs, touchFeed: 60 })}>
+          Measure the face angle
+        </button>
+        <span data-testid="face-note">{api.note ?? ''}</span>
+        <span data-testid="face-reading">{api.faceAngle === null ? '' : `${api.faceAngle.thetaDeg}/${api.faceAngle.residualMm}/${api.faceAngle.passes}`}</span>
+        {api.prompt !== null && (
+          <button type="button" data-testid="face-continue" onClick={() => api.resolve(true)}>
+            Continue
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  /** The hook's own console handle, closed and reopened per run — the test reads its turns. */
+  function located(saves: MachineRecord[]): void {
+    useLocationStore.setState({
+      status: 'present',
+      etag: '"e1"',
+      reason: null,
+      location: { machines: [machine()], accessories: [] } as unknown as NonNullable<
+        ReturnType<typeof useLocationStore.getState>['location']
+      >,
+      saveMachine: async (record: MachineRecord) => {
+        saves.push(record);
+        return 'ok' as const;
+      },
+    });
+  }
+
+  afterEach(() => {
+    h.state.consoleSend = null;
+  });
+
+  it('a tilted square: one press, the probe prompt, the turn, and the A zero written back', async () => {
+    const b = bench(2);
+    h.state.consoleSend = b.send;
+    const saves: MachineRecord[] = [];
+    located(saves);
+    render(<FaceHost />);
+    fireEvent.click(screen.getByTestId('tap-face'));
+    await screen.findByTestId('face-continue');
+    fireEvent.click(screen.getByTestId('face-continue'));
+
+    await waitFor(() => expect(screen.getByTestId('face-note').textContent).toBe('the face angle is recorded'));
+    const [theta, residual, passes] = (screen.getByTestId('face-reading').textContent ?? '').split('/');
+    expect(Number(theta)).toBeCloseTo(-2, 2);
+    expect(Number(residual)).toBeCloseTo(0, 6);
+    expect(Number(passes)).toBe(2);
+    // The turn went out, and the datum landed on the active profile in DEGREES with its residual.
+    expect(b.turns).toHaveLength(1);
+    expect(b.turns[0]).toBeCloseTo(-2, 2);
+    expect(saves).toHaveLength(1);
+    const datum = saves[0]!.bedProfiles!.find((p) => p.id === 'bp1')!.datums.rotaryFaceAngle!;
+    expect(datum.value).toBeCloseTo(-2, 2);
+    expect(datum.residualMm).toBeCloseTo(0, 6);
+    expect(datum.by).toBe('probe-1');
+    expect(datum.at).toEqual([-106, -125.06]);
+  });
+
+  it('a refusal is the hook’s note: round stock never turns and writes nothing', async () => {
+    const b = bench(0);
+    h.state.consoleSend = b.send;
+    const saves: MachineRecord[] = [];
+    located(saves);
+    render(<FaceHost inputs={{ ...faceInputs(), section: { kind: 'round', diameter: 44.5 } }} />);
+    fireEvent.click(screen.getByTestId('tap-face'));
+    await waitFor(() => expect(screen.getByTestId('face-note').textContent).toContain('no face to level'));
+    // The plan refused before any motion: nothing turned, no touch ran, no datum was written.
+    expect(b.turns).toHaveLength(0);
+    expect(saves).toHaveLength(0);
+    expect(screen.getByTestId('face-reading').textContent).toBe('');
   });
 });

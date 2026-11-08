@@ -128,6 +128,9 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
     ("registration.coarseStepMm", 1.0, "mm"),
     ("registration.fineStepMm", 0.5, "mm"),
     ("registration.parkAboveSurfaceMm", 3.0, "mm"),
+    // #1059 - the largest tilt the face-angle step will turn out of a square stock in the 4th
+    // axis. CHOSEN, not measured; a larger reading is a wrong touch or a wrong mounting.
+    ("registration.faceAngleMaxDeg", 10.0, "°"),
     ("registration.scanInsideMm", 3.0, "mm"),
     ("registration.scanReachMm", 5.0, "mm"),
     ("registration.cornerClearanceMm", 2.0, "mm"),
@@ -607,6 +610,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "registration.parkAboveSurfaceMm" => Some(need(
             n.is_some_and(|v| (2.0..=30.0).contains(&v)),
             "2 to 30 mm",
+        )),
+        "registration.faceAngleMaxDeg" => Some(need(
+            n.is_some_and(|v| (0.2..=45.0).contains(&v)),
+            "0.2 to 45 degrees",
         )),
         "registration.scanInsideMm" => Some(need(
             n.is_some_and(|v| (0.5..=30.0).contains(&v)),

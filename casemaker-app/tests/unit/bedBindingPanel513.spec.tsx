@@ -159,7 +159,7 @@ describe('#513 Generate binds the job to the bed it is set up on', () => {
     const bed = useEngraveJobStore.getState().job.bed!;
     expect(bed.profileId).toBe(PROFILE.id);
     expect(bed.profileVersion).toBe(profileVersion(PROFILE));
-    expect(bed.datums).toEqual({ surfaceTopZ: null, viseJawTopZ: -56.82, bracketSeatZ: -70.2, rotaryAxis: null });
+    expect(bed.datums).toEqual({ surfaceTopZ: null, viseJawTopZ: -56.82, bracketSeatZ: -70.2, rotaryAxis: null, rotaryFaceAngle: null });
   });
 
   it('a job already bound KEEPS its binding — the changed bed stays visible', async () => {

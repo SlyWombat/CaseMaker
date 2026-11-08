@@ -1396,6 +1396,13 @@ const jobBedBindingSchema = z.object({
       viseJawTopZ: z.number().finite().nullable().describe('The vise jaw top the job was planned against, mm; null when it was unmeasured.'),
       bracketSeatZ: z.number().finite().nullable().describe('The bracket seat the job was planned against, mm; null when it was unmeasured.'),
       rotaryAxis: z.number().finite().nullable().describe('The rotary axis line the job was planned against, mm; null when it was unmeasured.'),
+      // #1059 — absent on a job bound before this datum existed (the same byte-for-byte rule).
+      rotaryFaceAngle: z
+        .number()
+        .finite()
+        .nullable()
+        .optional()
+        .describe('The square stock’s A zero the job was planned against, degrees; null when it was never levelled.'),
     })
     .optional()
     .describe('The datum snapshot the job was planned against; omit on a job bound before the snapshot existed.'),
@@ -2138,6 +2145,15 @@ const registrationSettingsSchema = z.object({
   coarseStepMm: z.number().finite().describe('Coarse search step, in millimetres.'),
   fineStepMm: z.number().finite().describe('Fine search step, in millimetres.'),
   parkAboveSurfaceMm: z.number().finite().describe('Parking height above the surface, in millimetres.'),
+  // #1059 — absent in a plan frozen before this key existed; such a plan is still a valid record
+  // of the registration it was approved with, and the seed is the value every new plan carries.
+  faceAngleMaxDeg: z
+    .number()
+    .finite()
+    .min(0.2)
+    .max(45)
+    .default(10)
+    .describe('The largest tilt the face-angle step will turn out of a square stock, in degrees.'),
   scanInsideMm: z.number().finite().describe('How far inside the expected edge a scan starts, in millimetres.'),
   scanReachMm: z.number().finite().describe('How far a scan may travel, in millimetres.'),
   cornerClearanceMm: z.number().finite().describe('Clearance kept from corners, in millimetres.'),

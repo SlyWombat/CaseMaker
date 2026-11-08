@@ -105,7 +105,8 @@ describe('#513 the profile version and the binding', () => {
     expect(bound).toEqual({
       profileId: 'bp-test',
       profileVersion: '2026-10-16T10:00:00.000Z',
-      datums: { surfaceTopZ: -112.3, viseJawTopZ: null, bracketSeatZ: -70.2, rotaryAxis: null },
+      // #1059 — the face angle is in the snapshot too, in degrees; null until a square is levelled.
+      datums: { surfaceTopZ: -112.3, viseJawTopZ: null, bracketSeatZ: -70.2, rotaryAxis: null, rotaryFaceAngle: null },
     });
   });
 });
