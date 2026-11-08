@@ -2130,6 +2130,15 @@ const registrationSettingsSchema = z.object({
   coarseStepMm: z.number().finite().describe('Coarse search step, in millimetres.'),
   fineStepMm: z.number().finite().describe('Fine search step, in millimetres.'),
   parkAboveSurfaceMm: z.number().finite().describe('Parking height above the surface, in millimetres.'),
+  // #1059 — absent in a plan frozen before this key existed; such a plan is still a valid record
+  // of the registration it was approved with, and the seed is the value every new plan carries.
+  faceAngleMaxDeg: z
+    .number()
+    .finite()
+    .min(0.2)
+    .max(45)
+    .default(10)
+    .describe('The largest tilt the face-angle step will turn out of a square stock, in degrees.'),
   scanInsideMm: z.number().finite().describe('How far inside the expected edge a scan starts, in millimetres.'),
   scanReachMm: z.number().finite().describe('How far a scan may travel, in millimetres.'),
   cornerClearanceMm: z.number().finite().describe('Clearance kept from corners, in millimetres.'),

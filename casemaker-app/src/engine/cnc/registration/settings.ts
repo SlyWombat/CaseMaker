@@ -16,6 +16,11 @@ export interface RegistrationSettings {
   fineStepMm: number;
   /** Where the probe waits between touches: this far above the measured surface. */
   parkAboveSurfaceMm: number;
+  /**
+   * #1059 — the largest tilt the face-angle step will turn out of a square stock, degrees. A
+   * larger reading is a wrong touch or a wrong mounting, so it is refused, never turned.
+   */
+  faceAngleMaxDeg: number;
   /** A scan starts this far INSIDE the expected edge. */
   scanInsideMm: number;
   /** ...and gives up this far PAST it without finding the edge. */
@@ -72,6 +77,7 @@ const KEYS: Record<keyof RegistrationSettings, string> = {
   coarseStepMm: 'registration.coarseStepMm',
   fineStepMm: 'registration.fineStepMm',
   parkAboveSurfaceMm: 'registration.parkAboveSurfaceMm',
+  faceAngleMaxDeg: 'registration.faceAngleMaxDeg',
   scanInsideMm: 'registration.scanInsideMm',
   scanReachMm: 'registration.scanReachMm',
   cornerClearanceMm: 'registration.cornerClearanceMm',
@@ -124,6 +130,8 @@ export function settingsProblem(s: RegistrationSettings): string | null {
   }
   if (s.fineStepMm > s.coarseStepMm) return 'the fine step is coarser than the coarse step';
   if (s.parkAboveSurfaceMm < 2) return 'the park height must be at least 2 mm above the surface';
+  // #1059 — a zero limit would refuse every face-angle turn; the bound is `defaults.rs`'s.
+  if (!(s.faceAngleMaxDeg > 0)) return 'the face-angle limit must be above 0°';
   if (s.surfaceToleranceMm >= s.parkAboveSurfaceMm - PARK_CLEARANCE_MM) {
     return `the surface tolerance (${s.surfaceToleranceMm} mm) must be less than the park height (${s.parkAboveSurfaceMm} mm) less ${PARK_CLEARANCE_MM}`;
   }
