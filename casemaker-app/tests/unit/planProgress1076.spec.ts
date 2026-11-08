@@ -58,11 +58,12 @@ describe('#1076 the rank reports progress per candidate', () => {
     await planModelCam(slopedInput(), { onProgress: (p) => ticks.push(p) });
     const ops = ticks.map((t) => t.op);
     expect(ops, 'the plan reported nothing').toContain('features');
-    // The #986 fixture measures two candidates (⌀2 and ⌀4); each reports before its measurement.
-    const rankTicks = ticks.filter((t) => t.op === 'sequence' && t.fraction === 0.4);
+    // The #986 fixture measures two candidates (⌀2 and ⌀4); each reports before its measurement,
+    // at the rank's own fraction (0.35 — the chain's candidate ticks are 0.4).
+    const rankTicks = ticks.filter((t) => t.op === 'sequence' && t.fraction === 0.35);
     expect(rankTicks.length, `rank ticks: ${JSON.stringify(ops)}`).toBeGreaterThanOrEqual(2);
     // They arrive after the features tick, before the plan's linking end.
-    const first = ticks.findIndex((t) => t.op === 'sequence');
+    const first = ticks.findIndex((t) => t.op === 'sequence' && t.fraction === 0.35);
     expect(first).toBeGreaterThan(ops.indexOf('features'));
     expect(ops.indexOf('linking')).toBeGreaterThan(first);
   }, 240_000);

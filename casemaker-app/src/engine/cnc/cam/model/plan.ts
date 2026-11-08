@@ -1135,8 +1135,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         // tray bottom the gap from `features` to the first chain step was 125 s, and the ideal
         // plan's (a larger house, more candidates) crossed the 180 s watchdog window. One tick
         // before each measurement keeps the window alive on the slowest machine; progress only,
-        // so the plan's bytes cannot move.
-        opts.onProgress?.({ setupIndex, op: 'sequence', fraction: 0.4 });
+        // so the plan's bytes cannot move. Its own fraction (0.35) so the rank's reports are
+        // distinguishable from the chain's (0.4) in a run's progress line and in the pins.
+        opts.onProgress?.({ setupIndex, op: 'sequence', fraction: 0.35 });
         opts.signal?.throwIfAborted();
         let measured: PlanCurvedResult;
         try {
