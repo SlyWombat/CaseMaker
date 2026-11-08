@@ -219,6 +219,19 @@ export const engraveGoalSchema = z
       })
       .nullable()
       .describe('#1092 (gate v8) — the deepest cell a class would have excused and which was counted instead; null when none.'),
+    silhouetteExcusedCells: z
+      .number()
+      .int()
+      .describe('#1092 (gate v8) — covered cells facing uncovered grid (the part’s silhouette) excused on proof: the read no deeper than the blank’s floor and the deepest stamp’s CL on the uncovered side, at least r − pitch from the outline.'),
+    silhouetteDeepest: z
+      .object({
+        mm: z.number().describe('Depth below the goal at the excused cell, mm.'),
+        x: z.number().describe('Work-frame X, mm.'),
+        y: z.number().describe('Work-frame Y, mm.'),
+        clDistanceMm: z.number().describe('The deepest stamp’s CL distance from the outline, mm.'),
+      })
+      .nullable()
+      .describe('#1092 (gate v8) — the deepest silhouette cell excused on proof; null when none.'),
     leftoverFractions: z
       .array(z.number())
       .describe('Share of the covered cells standing more than each leftover band (0.1 / 0.3 / 1 mm) above the goal.'),
@@ -681,6 +694,8 @@ export function goalBlockFromReport(report: GoalCutIntoReport): EngraveGoal {
     shadowOverReliefCells: report.shadowOverReliefCells,
     borderOverReliefCells: report.borderOverReliefCells,
     overReliefDeepest: report.overReliefDeepest,
+    silhouetteExcusedCells: report.silhouetteExcusedCells,
+    silhouetteDeepest: report.silhouetteDeepest,
     leftoverFractions: [...report.leftoverFractions],
     passCoverage: report.passCoverage,
     wholeSurface: extended.wholeSurface ?? null,

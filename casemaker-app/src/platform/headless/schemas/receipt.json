@@ -302,6 +302,47 @@
                   "minimum": -9007199254740991,
                   "type": "integer"
                 },
+                "silhouetteDeepest": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "clDistanceMm": {
+                          "description": "The deepest stamp’s CL distance from the outline, mm.",
+                          "type": "number"
+                        },
+                        "mm": {
+                          "description": "Depth below the goal at the excused cell, mm.",
+                          "type": "number"
+                        },
+                        "x": {
+                          "description": "Work-frame X, mm.",
+                          "type": "number"
+                        },
+                        "y": {
+                          "description": "Work-frame Y, mm.",
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "mm",
+                        "x",
+                        "y",
+                        "clDistanceMm"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "#1092 (gate v8) — the deepest silhouette cell excused on proof; null when none."
+                },
+                "silhouetteExcusedCells": {
+                  "description": "#1092 (gate v8) — covered cells facing uncovered grid (the part’s silhouette) excused on proof: the read no deeper than the blank’s floor and the deepest stamp’s CL on the uncovered side, at least r − pitch from the outline.",
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                },
                 "wallNotScoredFraction": {
                   "description": "Share of covered cells excluded as WALL CELLS (a cell straddling a wall step), 0–1.",
                   "type": "number"
@@ -400,6 +441,8 @@
                 "shadowOverReliefCells",
                 "borderOverReliefCells",
                 "overReliefDeepest",
+                "silhouetteExcusedCells",
+                "silhouetteDeepest",
                 "leftoverFractions",
                 "passCoverage",
                 "wholeSurface",
@@ -930,6 +973,47 @@
                             "minimum": -9007199254740991,
                             "type": "integer"
                           },
+                          "silhouetteDeepest": {
+                            "anyOf": [
+                              {
+                                "properties": {
+                                  "clDistanceMm": {
+                                    "description": "The deepest stamp’s CL distance from the outline, mm.",
+                                    "type": "number"
+                                  },
+                                  "mm": {
+                                    "description": "Depth below the goal at the excused cell, mm.",
+                                    "type": "number"
+                                  },
+                                  "x": {
+                                    "description": "Work-frame X, mm.",
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "description": "Work-frame Y, mm.",
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "mm",
+                                  "x",
+                                  "y",
+                                  "clDistanceMm"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "#1092 (gate v8) — the deepest silhouette cell excused on proof; null when none."
+                          },
+                          "silhouetteExcusedCells": {
+                            "description": "#1092 (gate v8) — covered cells facing uncovered grid (the part’s silhouette) excused on proof: the read no deeper than the blank’s floor and the deepest stamp’s CL on the uncovered side, at least r − pitch from the outline.",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
                           "wallNotScoredFraction": {
                             "description": "Share of covered cells excluded as WALL CELLS (a cell straddling a wall step), 0–1.",
                             "type": "number"
@@ -1028,6 +1112,8 @@
                           "shadowOverReliefCells",
                           "borderOverReliefCells",
                           "overReliefDeepest",
+                          "silhouetteExcusedCells",
+                          "silhouetteDeepest",
                           "leftoverFractions",
                           "passCoverage",
                           "wholeSurface",

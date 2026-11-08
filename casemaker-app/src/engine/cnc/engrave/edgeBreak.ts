@@ -32,7 +32,10 @@ interface GoalEdgeBreakView {
 }
 
 /** What `checkGoalCutInto` takes: the allowance, or nothing when the job states none. */
-export type GoalEdgeBreakOptions = Pick<GoalCutIntoOptions, 'edgeBreak' | 'wallShadowRadiusMm'>;
+export type GoalEdgeBreakOptions = Pick<
+  GoalCutIntoOptions,
+  'edgeBreak' | 'wallShadowRadiusMm' | 'stockThicknessMm' | 'breakthroughMm'
+>;
 
 function statedEdgeBreak(goal: EngraveTargetObject): GoalEdgeBreakView | undefined {
   const target = goal as EngraveTargetObject & {
@@ -100,6 +103,10 @@ export function goalEdgeBreakOptions(
     }
   }
   return {
+    // #1092 (gate v8) — the blank's own depth, for the silhouette proof: the legitimate floor
+    // beside the part is −(thickness + breakthrough).
+    ...(job.stock === undefined ? {} : { stockThicknessMm: job.stock.thickness }),
+    ...(job.breakthrough === undefined ? {} : { breakthroughMm: job.breakthrough }),
     ...(allowance === null ? {} : { edgeBreak: allowance }),
     ...(wallShadowRadiusMm === undefined ? {} : { wallShadowRadiusMm }),
   };

@@ -198,6 +198,9 @@ export function checkGoalCutIntoRotary(
     shadowOverReliefCells: 0,
     borderOverReliefCells: 0,
     overReliefDeepest: null,
+    // #1092 (gate v8) — the rotary map has no stock-top silhouette classes either.
+    silhouetteExcusedCells: 0,
+    silhouetteDeepest: null,
     adjudicatedFraction: coverageFraction,
     adjudicatedMaxMm: maxCutIntoMm,
     adjudicatedMaxAt: maxCutIntoAt,

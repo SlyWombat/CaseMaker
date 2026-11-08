@@ -58,6 +58,11 @@ export interface GoalHeightfield {
   covered: Uint8Array;
   /** How many cells the goal footprint covers. */
   coveredCount: number;
+  /** #1092 (gate v8) — the blank's thickness, mm: the silhouette proof's legitimate floor beside
+   *  the part is `−(thickness + breakthrough)`. Absent on a caller that does not know it. */
+  stockThicknessMm?: number;
+  /** #1092 — the job's breakthrough, mm (the through rule's extra depth at a through feature). */
+  breakthroughMm?: number;
   /** The resolution this field is good to, in words, for the panel/run sheet to quote. */
   resolutionNote: string;
 }
@@ -69,6 +74,10 @@ export interface SampleGoalOpts {
   maxCells?: number | null;
   /** Work Z of the stock top, mm; absent → 0 (the flat frame's own top). */
   stockTopZ?: number;
+  /** The blank's thickness, mm — carried onto the field for the v8 silhouette proof. */
+  stockThicknessMm?: number;
+  /** The job's breakthrough, mm — carried onto the field for the v8 silhouette proof. */
+  breakthroughMm?: number;
   /**
    * #764 — CLEAR AROUND THE GOAL. A goal made as the item is cut only where the mesh's own
    * footprint stands above the stock; the blank around it keeps its full height, so the part ends
@@ -274,7 +283,11 @@ export function sampleGoalHeightfield(
       : `sampled on a ${pitch} mm grid`) +
     (clearBand === null || baseZ === null ? '' : `; cleared ${clearBand} to the part's base plane`);
 
-  return { nx, ny, x0, y0, pitch, topZ, minZ, z, covered, coveredCount, resolutionNote };
+  return {
+    nx, ny, x0, y0, pitch, topZ, minZ, z, covered, coveredCount, resolutionNote,
+    ...(opts.stockThicknessMm === undefined ? {} : { stockThicknessMm: opts.stockThicknessMm }),
+    ...(opts.breakthroughMm === undefined ? {} : { breakthroughMm: opts.breakthroughMm }),
+  };
 }
 
 /**
