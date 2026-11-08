@@ -16,10 +16,12 @@
  * rounding, and the flipped setup cuts the same part from the other side, not a mirrored copy.
  *
  * THE HOLD. A flip is only a plan if setup 1 leaves something for setup 2 to register on: two
- * dowel HOLES, drilled in the stock's margin and OUTSIDE the goal's footprint, named with the
- * diameter of a drill the shop OWNS and a depth through the stock into the board under it. Setup 2
- * records them as its `pins`, carried into its mounted work frame; because the two holes are off
- * the stock's centre line, `pinReference`'s mirror question has one right answer.
+ * ⌀6 locating BORES, bored in the stock's margin and OUTSIDE the goal's footprint, through the
+ * stock and the job's breakthrough into the board under it. Side 2 registers by PROBING THEIR
+ * WALLS from the turned face — the ⌀2 tip enters each hole and touches its wall from the centre;
+ * nothing sits in them. Setup 2 records their centres as its `pins`, carried into its mounted work
+ * frame; because the two bores are off the stock's centre line, `pinReference`'s mirror question
+ * has one right answer.
  */
 
 import { getTools } from '@/engine/cnc/toolRegistry';
@@ -31,7 +33,7 @@ import { targetObjectMesh } from '@/engine/import/targetObject';
 import { orient, type Mat } from '@/engine/cnc/setups/orient';
 import type { Face, MountSpec } from '@/engine/cnc/setups/types';
 import { jobMount, jobSetups } from './jobSetup';
-import { flipMatrix, flipOrientation, FLIP_BORE_CHIP_CLEARANCE_MM, FLIP_BORE_DIAMETER_MM } from './flipChoice';
+import { flipMatrix, flipOrientation, FLIP_BORE_DIAMETER_MM } from './flipChoice';
 import { newId } from '@/utils/id';
 import type { EngraveJob, EngraveTargetObject, JobSetup, JobSetupPins, SetupFlip } from '@/types/engraveJob';
 import { coverageTriangles, sampleCoverageField, type CoverageMesh } from './goalCoverage';
@@ -267,7 +269,7 @@ export function goalForFlip(target: EngraveTargetObject, stock: Box3, axis: Setu
   return goalForSetup(target, stock, asMat3(flipMatrix(axis)));
 }
 
-/** The dowel holes setup 1 leaves: where they go, their diameter and their depth. */
+/** The locating bores setup 1 leaves: where they go, their diameter and their depth. */
 export interface DowelHold {
   /** The BORE's diameter, mm — ⌀6 on the flip path, helically interpolated, not the cutter's own size. */
   diameterMm: number;
@@ -348,9 +350,9 @@ function goalFootprint(target: EngraveTargetObject): { minX: number; maxX: numbe
 }
 
 /**
- * The hold setup 1 must leave for the flip: two dowel holes in the margin, clear of the goal's
- * footprint, on a line parallel to the flip axis and OFF the stock's centre line (so the pin
- * question can tell the right way round from a stock spun 180° about Z).
+ * The hold setup 1 must leave for the flip: two ⌀6 locating bores in the margin, clear of the
+ * goal's footprint, on a line parallel to the flip axis and OFF the stock's centre line (the
+ * probe's own readings then tell the right way round from a stock spun 180° about Z).
  */
 export function dowelHold(
   job: EngraveJob,
@@ -362,10 +364,10 @@ export function dowelHold(
   const W = job.stock.width;
   const f = goalFootprint(target);
   const margin = 4;
-  // #1073 — THROUGH THE BLANK, ITS BREAKTHROUGH AND THE CHIP CLEARANCE: the bore only has to let
-  // the probe in from side 2, so it stops half a millimetre into the board under the blank — the
-  // job's own breakthrough plus `FLIP_BORE_CHIP_CLEARANCE_MM` — never the old 2 mm.
-  const depthMm = Number((job.stock.thickness + job.breakthrough + FLIP_BORE_CHIP_CLEARANCE_MM).toFixed(2));
+  // #1073 — THROUGH THE BLANK AND THE JOB'S BREAKTHROUGH (0f's 2026-11-08 ruling): the bore only
+  // has to let the probe in from side 2, so it stops at the job's own breakthrough past the
+  // underside — 0.3 mm by default — never the old 2 mm, and no extra chip clearance.
+  const depthMm = Number((job.stock.thickness + job.breakthrough).toFixed(2));
   // The cutter must stand the whole bore: the flute reaches the depth, and it is narrower than
   // the ⌀6 bore so the helix can open it. The HOLD states the BORE, never the cutter's size.
   const drill = ownedBoreCutter(tools, depthMm);
@@ -572,7 +574,8 @@ export type UndersideFlipResult = { ok: true; plan: UndersideFlipPlan } | { ok: 
  * (its widest cross-section, `silhouettePlane`); setup 1 cuts down to `plane + tab` and setup 2,
  * the stock turned over, cuts down to `plane − tab` in its own frame. The band between the two
  * floors is the material the tabs are made of — it survives both programs, and the run sheet says
- * to cut them off by hand. Registration is #872's dowel hold (the flipped side sits on its pins).
+ * to cut them off by hand. Registration is #872's locating bores (the flipped side's probe reads
+ * their walls).
  *
  * A goal whose underside is not `flipped-tabs` is refused by name; so is a part too thin for the
  * stated tab band. The bands are the split's own `bandMm` on each side's goal copy, so the
@@ -660,7 +663,7 @@ export function reholdSetupGoals(job: EngraveJob, stock: { x: number; y: number;
 /**
  * #888 — THE BUDGET'S SPLIT, as setups: the goal cut as a top band and a bottom band, each from
  * its own side of the stock (the bottom band with the stock turned over, registered on the same
- * dowel holes #872 uses). Each side's goal copy states its band (`bandMm`), and the generator
+ * locating bores #872 uses). Each side's goal copy states its band (`bandMm`), and the generator
  * floors that side's cut there — so one program per side, each about half the levels, each under
  * the move budget the finding states.
  *

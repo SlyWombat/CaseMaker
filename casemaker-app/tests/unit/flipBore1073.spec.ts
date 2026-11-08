@@ -1,10 +1,10 @@
 /**
- * #1073 — THE LOCATING BORE IS HALF A MILLIMETRE, BORED WITH AN OWNED FLAT.
+ * #1073 — THE LOCATING BORE IS THROUGH THE BLANK AND THE JOB'S BREAKTHROUGH, BORED WITH AN OWNED FLAT.
  *
- * The maintainer asked on 11-07: "why 6 mm into the wasteboard?" (6b's amendment B). The holes
- * exist so the probe can ENTER them from side 2; they need only be THROUGH — the job's own
- * breakthrough rule plus a chip clearance — so the bore stops half a millimetre into the board,
- * and the sheet says so.
+ * The maintainer asked on 11-07: "why 6 mm into the wasteboard?", and 0f's 2026-11-08 ruling
+ * settled it: 0.3 mm into the board is enough. The holes exist so the probe can enter them from
+ * side 2 and touch their WALLS; they need only be THROUGH by the job's own breakthrough rule, so
+ * nothing sits in them and no extra chip clearance is cut.
  *
  * THE BORE IS ⌀6, HELICAL INTERPOLATION, not a drill's own size: the shop is 1/8 in only (#977),
  * so the hole is opened by an owned FLAT NARROWER than the bore, and the flat that wins is the
@@ -21,7 +21,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { clearTargetObjectMeshCache, readTargetObjectFile } from '@/engine/import/targetObject';
-import { FLIP_BORE_CHIP_CLEARANCE_MM, FLIP_BORE_DIAMETER_MM } from '@/engine/cnc/engrave/flipChoice';
+import { FLIP_BORE_DIAMETER_MM } from '@/engine/cnc/engrave/flipChoice';
 import { ownedBoreCutter, planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
@@ -66,8 +66,8 @@ const BALL = entry('user:ball-3.175', flatEndMill(3.175, { shape: 'ball', typeTe
 const K3_SHAPED = [FLAT3, FLAT25, FLAT42, DRILL3, BALL, FLAT6];
 
 describe('#1073 the bore’s cutter is an interpolating flat with the longest reach', () => {
-  it('the 25.5 mm tray bore picks the 42 mm flute; the 25 mm one is half a millimetre short', () => {
-    const pick = ownedBoreCutter(K3_SHAPED, 25.0 + 0.3 + 0.2);
+  it('the 25.3 mm tray bore picks the 42 mm flute; the 25 mm one is 0.3 mm short', () => {
+    const pick = ownedBoreCutter(K3_SHAPED, 25.0 + 0.3);
     expect(pick).toEqual(FLAT42);
     // The same shop, a bore the 25 mm flute could reach: the longer one still wins.
     expect(ownedBoreCutter([FLAT25, FLAT42], 12.5)).toEqual(FLAT42);
@@ -90,17 +90,16 @@ describe('#1073 the bore’s cutter is an interpolating flat with the longest re
   });
 });
 
-describe('#1073 the bore goes half a millimetre into the board', () => {
-  it('the hold states the BORE (⌀6), its cutter, and the blank + breakthrough + chip depth', async () => {
+describe('#1073 the bore goes the blank and the job’s breakthrough into the board', () => {
+  it('the hold states the BORE (⌀6), its cutter, and the blank + breakthrough depth', async () => {
     const { job, goal } = await sphereJob();
     expect(FLIP_BORE_DIAMETER_MM).toBe(6);
-    expect(FLIP_BORE_CHIP_CLEARANCE_MM).toBe(0.2);
     expect(job.breakthrough).toBeCloseTo(0.3, 6);
     const plan = planFlipSetups(job, goal, ['top', 'bottom'], K3_SHAPED);
     if (!plan.ok) throw new Error(plan.reason);
     expect(plan.hold).not.toBeNull();
-    // 12 mm blank + 0.3 breakthrough + 0.2 chip = 12.5 mm, not 14.
-    expect(plan.hold!.depthMm).toBeCloseTo(12.5, 6);
+    // 12 mm blank + 0.3 breakthrough = 12.3 mm, not 14 — and no chip clearance on top.
+    expect(plan.hold!.depthMm).toBeCloseTo(12.3, 6);
     // The hole is the ⌀6 bore; the cutter is the 3.175 mm O-flute that interpolates it.
     expect(plan.hold!.diameterMm).toBeCloseTo(6, 6);
     expect(plan.hold!.cutter).toBe('user:o-flute-3.175-42');
@@ -111,7 +110,7 @@ describe('#1073 the bore goes half a millimetre into the board', () => {
     const shallow: EngraveJob = { ...job, breakthrough: 0.05 };
     const plan = planFlipSetups(shallow, goal, ['top', 'bottom'], K3_SHAPED);
     if (!plan.ok) throw new Error(plan.reason);
-    expect(plan.hold!.depthMm).toBeCloseTo(12.25, 6);
+    expect(plan.hold!.depthMm).toBeCloseTo(12.05, 6);
   });
 
   it('the offer’s sentence states the bore, the half millimetre and the flat', async () => {
@@ -122,8 +121,8 @@ describe('#1073 the bore goes half a millimetre into the board', () => {
     };
     const [finding] = goalFlipFindings(withBoard, goal, K3_SHAPED);
     expect(finding!.goalFlipAction).toBeDefined();
-    expect(finding!.goalFlipDetail).toContain('bores two ⌀6 mm locating holes 12.5 mm deep');
-    expect(finding!.goalFlipDetail).toContain('0.5 mm into the board');
+    expect(finding!.goalFlipDetail).toContain('bores two ⌀6 mm locating holes 12.3 mm deep');
+    expect(finding!.goalFlipDetail).toContain('0.3 mm into the board');
   });
 
   it('a board thinner than the bore’s drop is the need; one that can take it is the action', async () => {
@@ -135,9 +134,9 @@ describe('#1073 the bore goes half a millimetre into the board', () => {
         under: thickness === null ? null : { thickness, overhang: { left: 0, right: 0, front: 0, back: 0 }, attach: 'tape' },
       },
     });
-    const [thin] = goalFlipFindings(withUnder(0.4), goal, K3_SHAPED);
+    const [thin] = goalFlipFindings(withUnder(0.2), goal, K3_SHAPED);
     expect(thin!.goalFlipNeed).toBe('needs a sacrificial board under the blank');
-    const [enough] = goalFlipFindings(withUnder(0.5), goal, K3_SHAPED);
+    const [enough] = goalFlipFindings(withUnder(0.3), goal, K3_SHAPED);
     expect(enough!.goalFlipAction).toBeDefined();
   });
 });

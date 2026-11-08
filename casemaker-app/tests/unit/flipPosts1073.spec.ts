@@ -7,7 +7,7 @@
  *     on them, so C's release op reads one record (bandMm + tab thickness) and side 1 never frees
  *     the part under a running cutter;
  *   - post side 1's two locating bores as BORED ops: ⌀6 helical with the hold's own cutter (the
- *     3.175 × 42 by the longest reach), through the blank and 0.5 mm into the board, at the
+ *     3.175 × 42 by the longest reach), through the blank and its breakthrough into the board, at the
  *     hold's positions — which ride the setup's pins for C's ≥10 mm clearance check.
  *
  * RED at 22d77f195: planFlipSetups writes full-depth goals with no band and the job's own

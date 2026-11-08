@@ -90,8 +90,8 @@ describe('#872 the goal-unreached finding', () => {
     expect(finding!.goalFlipDetail).toMatch(/^top, then bottom/);
     expect(finding!.goalFlipDetail).toMatch(/2 setups reach \d+ % of the surface/);
     expect(finding!.goalFlipDetail).toMatch(/how much of it the chosen cutter reproduces is the run's own simulation verdict/);
-    // #1073 — 12 mm stock + the 0.3 mm breakthrough + the 0.2 mm chip clearance = 12.5 mm.
-    expect(finding!.goalFlipDetail).toMatch(/bores two ⌀6 mm locating holes 12\.5 mm deep — through the blank and 0\.5 mm into the board/);
+    // #1073 — 12 mm stock + the job's 0.3 mm breakthrough = 12.3 mm (0f's 2026-11-08 ruling).
+    expect(finding!.goalFlipDetail).toMatch(/bores two ⌀6 mm locating holes 12\.3 mm deep — through the blank and 0\.3 mm into the board/);
     expect(finding!.goalFlipDetail).toMatch(/in the margin, clear of the part/);
     expect(finding!.goalFlipDetail).toMatch(/the flipped setup registers on them/);
   });
@@ -111,11 +111,12 @@ describe('#872 the goal-unreached finding', () => {
     // The fact still stands, and the plan's sides still ride (the panel's press reads them).
     expect(finding!.goalFlipSides).toEqual(['top', 'bottom']);
     expect(finding!.message).toMatch(/faces away from this setup and is left as stock/);
-    // A board thinner than the bore's own drop (breakthrough 0.3 + chip 0.2 = 0.5 mm) is the same need.
-    expect(goalFlipFindings(withBoard(trayLike, 0.4), goal, [PIN], 0.4)[0]!.goalFlipNeed).toBe(
+    // A board thinner than the bore's own drop (the job's 0.3 mm breakthrough) is the same need.
+    expect(goalFlipFindings(withBoard(trayLike, 0.2), goal, [PIN], 0.2)[0]!.goalFlipNeed).toBe(
       'needs a sacrificial board under the blank',
     );
     // …and a board that can take the breakthrough turns the need into the action.
+    expect(goalFlipFindings(withBoard(trayLike, 0.3), goal, [PIN], 0.3)[0]!.goalFlipAction).toBe(FLIP_ACTION_LABEL);
     expect(goalFlipFindings(withBoard(trayLike, 6), goal, [PIN], 6)[0]!.goalFlipAction).toBe(FLIP_ACTION_LABEL);
   });
 

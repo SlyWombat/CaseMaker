@@ -42,14 +42,6 @@ export const STOCK_CORNERS: readonly StockCorner[] = ['FL', 'FR', 'BL', 'BR'];
  */
 export const FLIP_BORE_DIAMETER_MM = 6;
 
-/**
- * #1073 — the chip clearance the locating bore keeps past the job's breakthrough, mm (6b's
- * amendment B). The bore only has to let the probe enter from side 2, so it stops HALF A
- * MILLIMETRE past the blank's underside (the job's breakthrough, 0.3 by default, + this 0.2),
- * not the old 2 mm — the maintainer's own question on 11-07: "why 6 mm into the wasteboard?".
- */
-export const FLIP_BORE_CHIP_CLEARANCE_MM = 0.2;
-
 /** The corners the blank states as square: the stated set, deduped and canonically ordered, or all
  *  four when the stock states none. Always a fresh array. */
 export function squareCornersOf(stated: StatedSquareCorners): StockCorner[] {

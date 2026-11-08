@@ -30,7 +30,6 @@ import {
 } from './goalCoverage';
 import { goalFlipPlan, sideWords, type FlipPlan } from './goalFlipPlan';
 import { dowelHold } from './goalFlipSetups';
-import { FLIP_BORE_CHIP_CLEARANCE_MM } from './flipChoice';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 
 /** The measure the finding is built from, kept as data so a caller can assert on it. */
@@ -102,11 +101,12 @@ export function sidesSentence(plan: FlipPlan): string {
 
 /**
  * #1068/#1073 — the flip's locating bore goes this far past the stock's underside, mm: the app's
- * default breakthrough (#218, 0.3 mm) plus the chip clearance (0.2 mm) — half a millimetre, not
- * the old 2 mm. A job that states its own breakthrough uses `job.sacrificial.breakthrough` with
- * the same clearance; this constant is the no-job default the offer's arithmetic falls back on.
+ * default breakthrough (#218, 0.3 mm) and nothing more (0f's 2026-11-08 ruling — the earlier
+ * chip-clearance 0.2 is retired, the bore's job is to let the probe's walls-touch in). A job that
+ * states its own breakthrough uses that; this constant is the no-job default the offer's
+ * arithmetic falls back on.
  */
-export const FLIP_HOLE_BREAKTHROUGH_MM = DEFAULT_BREAKTHROUGH + FLIP_BORE_CHIP_CLEARANCE_MM;
+export const FLIP_HOLE_BREAKTHROUGH_MM = DEFAULT_BREAKTHROUGH;
 
 /** #1068 — the drawer's one action verb, when the plan can be accepted as the job stands. */
 export const FLIP_ACTION_LABEL = 'Add the flipped setup';
@@ -175,9 +175,9 @@ export function goalFlipFindings(
   // that much material under the stock, and a cutter among the shop's own that can drill them.
   const hold =
     plan.sides.length > 1 ? dowelHold(job, goal, plan.sides[1]!.rotate?.about ?? 'x', tools) : null;
-  // #1073 — THE BORE'S DROP PAST THE UNDERSIDE: the job's own breakthrough plus the chip
-  // clearance; the board must be at least that thick (it was 2 mm before the ruling).
-  const boreDropMm = Math.round((job.breakthrough + FLIP_BORE_CHIP_CLEARANCE_MM) * 100) / 100;
+  // #1073 — THE BORE'S DROP PAST THE UNDERSIDE: the job's own breakthrough alone (0f's
+  // 2026-11-08 ruling retired the chip clearance); the board must be at least that thick.
+  const boreDropMm = Math.round(job.breakthrough * 100) / 100;
   const canOffer = plan.sides.length > 1 && hold !== null && underMm >= boreDropMm;
   const need =
     plan.sides.length <= 1 || canOffer

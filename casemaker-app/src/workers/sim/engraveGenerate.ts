@@ -486,6 +486,11 @@ export interface EngraveProgram {
   /** 1-based, the operator's "Setup 2". The facing program shares the first setup's index. */
   setupIndex: number;
   setupId: string;
+  /**
+   * #1073 — THIS FILE IS THE FLIP'S LOCATING HOLES (setup 1 only): the two ⌀6 bores side 2's probe
+   * registers on. The run sheet states it on setup 1's page, in this program's own cutter (#1079).
+   */
+  locating?: boolean;
   /** The cutter this file runs — the setup's tool, and the header's `;@CM|TOOL|key=` line. */
   toolKey: string;
   nc: string;
@@ -6068,9 +6073,10 @@ async function generateGoalPrograms(
 /**
  * #1073 — THE LOCATING HOLES, POSTED ON SETUP 1 ONLY.
  *
- * A frame flip (`flip: { method: 'tabs-in-blank' }`) must sit side 2 on two dowels, so setup 1
- * leaves two ⌀6 bores in the blank's margin: through the blank and the job's breakthrough into the
- * board. The hold's own depth (`dowelHold` — the blank, the breakthrough and the chip clearance)
+ * A frame flip (`flip: { method: 'tabs-in-blank' }`) has side 2 register by PROBING THE WALLS of
+ * two ⌀6 bores setup 1 leaves in the blank's margin — the ⌀2 tip enters each hole and touches its
+ * wall from the centre; nothing sits in them. The bores go through the blank and the job's
+ * breakthrough into the board. The hold's own depth (`dowelHold` — the blank plus the breakthrough)
  * is the cutter-reach and board fact the flip finding states; the BORE item is a through hole, cut
  * to the job's own through rule. The holes are a PROGRAM OF THEIR OWN, on the hold's own cutter
  * (the longest-reach owned flat `ownedBoreCutter` chooses, the 3.175 × 42 on this shop).
@@ -6157,12 +6163,15 @@ async function locatingHolesProgram(
     return { reason: why.length === 0 ? 'the bore program was refused' : `the bore program was refused — ${why}` };
   }
   return {
-    program: programOf(one, {
-      setupIndex: firstSide.setupIndex + 1,
-      setupId: firstSide.setup.id,
-      toolKey: entry.key,
-      itemIds: bores.map((b) => b.id),
-    }),
+    program: {
+      ...programOf(one, {
+        setupIndex: firstSide.setupIndex + 1,
+        setupId: firstSide.setup.id,
+        toolKey: entry.key,
+        itemIds: bores.map((b) => b.id),
+      }),
+      locating: true,
+    },
   };
 }
 

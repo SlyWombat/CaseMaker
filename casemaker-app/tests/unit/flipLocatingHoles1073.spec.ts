@@ -1,8 +1,8 @@
 /**
  * #1073 line 2 — THE LOCATING HOLES, POSTED ON SETUP 1 ONLY.
  *
- * A frame flip (`flip: { method: 'tabs-in-blank', axis: 'left-right' }`) must sit side 2 on two
- * dowels, so setup 1 leaves two ⌀6 bores in the blank's margin. They are a program of their own on
+ * A frame flip (`flip: { method: 'tabs-in-blank', axis: 'left-right' }`) has side 2 register by
+ * probing the walls of two ⌀6 bores, so setup 1 leaves them in the blank's margin. They are a program of their own on
  * the hold's cutter, appended after setup 1's last program — built as a drills-only sub-job through
  * the ordinary per-program generator, so setup 2 cannot receive them BY CONSTRUCTION.
  *
@@ -21,11 +21,13 @@ import { describe, expect, it } from 'vitest';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import { planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
+import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
+import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { entry, FLAT3, stl } from './helpers/twoSetupBox966';
 
 const FLAT_ENTRY: ToolLibraryEntry = entry('inv:flat-3', FLAT3);
@@ -90,7 +92,7 @@ function jobForFrustum(): EngraveJob {
     labels: [],
     shapes: [],
     stock: { ...defaultEngraveJob().stock, ...STOCK },
-    // The bores stop half a millimetre into the board: a flip job always has one under the blank.
+    // The bores stop at the job's breakthrough into the board: a flip job always has one under the blank.
     sacrificial: presetPartOnBoard(),
     targetObject: frustumGoal(),
     // A bracket mount turns the stock over about Y: the frame's own RY180 map (#1073 step 0).
@@ -111,6 +113,14 @@ describe('#1073 — the locating holes ride setup 1', () => {
     const hold = plan.hold!;
     expect(hold.at).toHaveLength(2);
 
+    // THE SENTENCE AND THE PROGRAM CARRY THE SAME DEPTH (0f's 2026-11-08 ruling): the bore goes
+    // through the blank and the job's breakthrough, nothing more.
+    const drop = Math.round(job.breakthrough * 100) / 100;
+    const depth = Math.round((job.stock.thickness + job.breakthrough) * 100) / 100;
+    const [offer] = goalFlipFindings(job, goal, [FLAT_ENTRY]);
+    expect(offer?.goalFlipDetail ?? '').toContain(`bores two ⌀6 mm locating holes ${depth} mm deep`);
+    expect(offer?.goalFlipDetail ?? '').toContain(`${drop} mm into the board`);
+
     const sided: EngraveJob = { ...job, setups: plan.setups, targetObjects: plan.goals };
     const tl = await getToplevel();
     const result = await engraveGenerate(tl, sided, FLAT3, [], null, undefined, { tools: [FLAT_ENTRY] });
@@ -127,7 +137,7 @@ describe('#1073 — the locating holes ride setup 1', () => {
     // BOTH holes, in the one program, bored ⌀6 through the blank (thickness + breakthrough).
     expect(locating[0]!.nc).toContain('Locating hole 1');
     expect(locating[0]!.nc).toContain('Locating hole 2');
-    expect(locating[0]!.nc).toContain('⌀6 20.3mm');
+    expect(locating[0]!.nc).toContain(`⌀6 ${depth}mm`);
 
     // Setup 2 cannot receive it: no bore op sits on the flipped side's programs.
     const onSideTwo = result.programs.filter(
@@ -138,6 +148,15 @@ describe('#1073 — the locating holes ride setup 1', () => {
     const lastSideOne = result.programs.filter((program) => program.setupIndex === 1).at(-1)!;
     expect(lastSideOne).toBe(locating[0]);
     expect(result.programs.at(-1)!.setupIndex).toBe(2);
+
+    // THE SHEET'S OWN LINE, ON SETUP 1'S PAGE (step 3): the operator running setup 1 reads that a
+    // second file follows on the same mounting, the file's name, and the cutter — the PROGRAM's own
+    // key (#1079), not the job's assumed one.
+    const sheet = buildRunSheet(sided, result, { diagnostics: [] }, new Date('2026-11-08T00:00:00Z'));
+    const cutText = (sheet.sections.find((section) => section.id === 'cut')?.steps ?? []).map((step) => step.text).join('\n');
+    expect(cutText).toContain('also bores the two ⌀6 locating holes');
+    expect(cutText).toContain(locating[0]!.nc);
+    expect(cutText).toContain('touches its wall');
   }, 240_000);
 
   it('stops the run by name when no owned flat can bore the holes', async () => {
