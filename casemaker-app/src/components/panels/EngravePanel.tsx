@@ -2604,6 +2604,27 @@ export function EngravePanel(): JSX.Element {
               : undefined,
           // #1070 — the footprint plan, or the first seat seek, from the one shared seam.
           ...sheetReg,
+          // #1073 — A FLIP'S CARRIED Z0, in machine terms (6b's amendment A): side 2's top =
+          // seat + the measured thickness (side 1's top touch less the seat) − side 1's facing.
+          // Only when a setup states the flip and the house has measured the seat and the top —
+          // otherwise the sheet prints the rule with the record blanks.
+          ...(() => {
+            if (job.setups?.some((su) => su.flip !== undefined) !== true) return {};
+            const seat = bracketSeatDatumFor(regMachine)?.value;
+            const touches = measuredSpread?.assessment.touches ?? [];
+            if (seat === undefined || touches.length === 0) return {};
+            const top = Math.max(...touches.map((t) => t.z));
+            const thicknessMm = Math.round((top - seat) * 1000) / 1000;
+            if (!(thicknessMm > 0)) return {};
+            return {
+              flipZ0: {
+                seatMm: seat,
+                thicknessMm,
+                facingMm: facing?.enabled === true ? facing.depth : 0,
+                toleranceMm: registrationSettings(shopDefaults).settings.surfaceToleranceMm,
+              },
+            };
+          })(),
         },
       ),
     );

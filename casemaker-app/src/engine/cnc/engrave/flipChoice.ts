@@ -108,3 +108,72 @@ export function flipMatrix(axis: SetupFlip['axis']): Mat {
 export function flipOrientation(axis: SetupFlip['axis']): Orientation {
   return orientationOf(flipMatrix(axis));
 }
+
+/**
+ * #1073 — SIDE 2'S Z0, CARRIED, IN MACHINE TERMS (6b's amendment A).
+ *
+ * "Z0₂ = Z0₁ − T" hides the frame. Side 1's registration gives the blank's top touch; the seat is
+ * the bed datum the seat press measures; side 1 may have faced `facing₁` off the top. After the
+ * turn, the blank's faced old top is the face ON THE SEAT, so side 2's top — the old bottom, the
+ * rough underside nobody touches — sits at:
+ *
+ *     side 2's top (machine Z) = seat + T_measured − facing₁
+ *
+ * where `T_measured` is side 1's top touch less the seat. The SAME arithmetic for the frame and
+ * the vendor method: both put the blank's/part's old bottom on the same seat.
+ *
+ * The corner Z touches on side 2 are the CHECK of the carried value, never its source: they must
+ * read the carried number within the surface tolerance, and a touch outside the band STOPS with
+ * the number — a chip under the blank is what it finds. Z0 is never re-derived from the rough
+ * face.
+ */
+export interface FlipZ0Input {
+  /** The bed's seat datum, machine Z — the datum the seat press measures. */
+  seatMm: number;
+  /** Side 1's top touch less the seat, mm. */
+  thicknessMm: number;
+  /** Side 1's facing depth, mm — 0 by default (plastic never faces). */
+  facingMm?: number;
+  /** The surface tolerance the corner Z check is judged within, mm. */
+  toleranceMm?: number;
+}
+
+export interface FlipZ0 {
+  seatMm: number;
+  thicknessMm: number;
+  facingMm: number;
+  /** Side 2's top in MACHINE Z: seat + T_measured − facing₁. */
+  topMachineZ: number;
+  /** The band the side-2 corner Z touches must land in; null without a stated tolerance. */
+  checkBand: { minMm: number; maxMm: number } | null;
+  /** What the sheet prints: the three numbers, the sum, the carry shorthand and the check rule. */
+  words: string[];
+}
+
+const fmt2 = (n: number): string => n.toFixed(2).replace('-', '−');
+
+export function flipZ0(input: FlipZ0Input): FlipZ0 {
+  const seatMm = input.seatMm;
+  const thicknessMm = input.thicknessMm;
+  const facingMm = input.facingMm ?? 0;
+  const topMachineZ = Math.round((seatMm + thicknessMm - facingMm) * 1000) / 1000;
+  const tolerance = input.toleranceMm;
+  const checkBand =
+    tolerance === undefined || !(tolerance > 0)
+      ? null
+      : { minMm: Math.round((topMachineZ - tolerance) * 1000) / 1000, maxMm: Math.round((topMachineZ + tolerance) * 1000) / 1000 };
+  const words = [
+    `Z0 on side 2 is carried from side 1, never touched on the rough underside — carried from side 1: ` +
+      `Z0₁ − ${fmt2(thicknessMm)} mm. In machine terms side 2’s top sits at seat ${fmt2(seatMm)} + ` +
+      `measured thickness ${fmt2(thicknessMm)} − side 1’s facing ${fmt2(facingMm)} = ${fmt2(topMachineZ)} mm.`,
+    checkBand === null
+      ? 'The corner Z touches on side 2 are the CHECK of that carried value, not its source: a reading outside ' +
+        'the surface tolerance stops with the number — a chip under the blank is what it finds. Z0 is never ' +
+        're-derived from the rough face.'
+      : `The corner Z touches on side 2 are the CHECK of that carried value, not its source: each must read ` +
+        `${fmt2(topMachineZ)} ± ${fmt2(tolerance!)} mm (${fmt2(checkBand.minMm)} to ${fmt2(checkBand.maxMm)}). ` +
+        'A reading outside that band stops with the number — a chip under the blank is what it finds. Z0 is ' +
+        'never re-derived from the rough face.',
+  ];
+  return { seatMm, thicknessMm, facingMm, topMachineZ, checkBand, words };
+}
