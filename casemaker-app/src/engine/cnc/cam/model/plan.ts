@@ -1037,10 +1037,15 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         return usable === null || usable + 1e-9 >= depth;
       }) ?? null;
     };
+    // #1054 — the rank memo: one stage op per distinct (cutter, region, params), read by every
+    // candidate the rank prices and by the chosen plan below. Scoped to this setup (its tree,
+    // geometry and datum), which is exactly what makes the keys sound.
+    const stageMemo = createStageMemo();
     const curvedOptionsFor = (b: Tool | undefined, paramsFor: (tool: Tool) => CutParams): PlanCurvedOptions => ({
       offset,
       safeZMm: SAFE_Z,
       hopZMm: HOP_Z,
+      memo: stageMemo,
       ...(depthBandMm === undefined ? {} : { depthBandMm }),
       geometry: curvedGeometry,
       // #982 — NO FLAT ANYWHERE IN THE HOUSE: the ball stands in for the flat (ball-as-rough,
@@ -1148,10 +1153,16 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             ballRankNotes.push(text);
             capStatements.push({ severity: 'warning', code: 'goal-finish-too-many-moves', count: 1, ids: [err.region], text });
           }
+          // #1054 — a failed candidate's partial ops are its own: nothing may read them later.
+          stageMemo.evictOwner(cutterKeyOf(candidate));
           continue; // a candidate that cannot plan this remainder is not a candidate
         }
         const coverage = goalCoverage(measured.ops.map((o) => o.outcome.ir));
-        if (coverage === null) continue;
+        if (coverage === null) {
+          // #1054 — a candidate with no stamp is no candidate: its memoised ops die with it.
+          stageMemo.evictOwner(cutterKeyOf(candidate));
+          continue;
+        }
         const leftover = coverage.leftoverCells / Math.max(1, coverage.coveredCells);
         const cycle = measured.ops.reduce(
           (n, o) => n + o.outcome.ir.operations.reduce((k, op) => k + (op.estimatedSeconds ?? 0), 0),
@@ -1166,13 +1177,24 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         const diameterMm = cuttingDiameter(candidate) ?? 0;
         measuredRows.push(`⌀${diameterMm.toFixed(2)} mm ${candidate.name}: leftover ${(leftover * 100).toFixed(2)} %, cycle ${cycle.toFixed(0)} s`);
         if (best === null || leftover < best.leftover - 1e-9 || (Math.abs(leftover - best.leftover) <= 1e-9 && cycle < best.cycle)) {
+          // #1054 — the memo keeps the incumbent's ops only: a replaced best is evicted, so the
+          // rank never holds more than the best candidate's work plus the one being measured.
+          if (best !== null) stageMemo.evictOwner(cutterKeyOf(best.tool));
           best = { tool: candidate, leftover, cycle };
           continue;
         }
-        // Coarser and not better: stop. Every remaining candidate is coarser still.
+        // Coarser and not better: stop. Every remaining candidate is coarser still. The monotone
+        // premise is exact for the FINISH, not for the plan the rank measures: each candidate's
+        // plan carries its own rest ball (the #1054 elephant: ⌀2 gets the long ⌀1 rest, ⌀1 gets
+        // none), and there a coarser candidate won on leftover (10.25 % vs 10.34 %). The break
+        // therefore fires only on a strict non-improvement — the measured winner is the plan.
+        stageMemo.evictOwner(cutterKeyOf(candidate));
         if (leftover > best.leftover + 1e-9) break;
       }
       if (best !== null) ball = best.tool;
+      // #1054 — the rank's own end row: the per-candidate timing measured above reads up to here,
+      // and every op row AFTER it belongs to the chosen plan (the memo's hits included).
+      memTrace('rank:end', { candidates: measuredRows.length, chosen: best === null ? '' : cutterKeyOf(best.tool) });
       // The rank's statement: the measured candidates, the winner, and the uncapped best as a fact.
       const chosen = best === null ? 'no candidate could plan the remainder — the pre-#986 pick stands' : `${best.tool.name} (leftover ${(best.leftover * 100).toFixed(2)} %, cycle ${best.cycle.toFixed(0)} s)`;
       ballRankNotes.push(
@@ -3763,6 +3785,12 @@ export interface PlanCurvedOptions {
   facing?: 'off' | 'on';
   /** The shared flat/ball slope parameter (#959); absent → `FLAT_SURFACE_MAX_SLOPE_DEG`'s provisional value. */
   flatSurfaceMaxSlopeDeg?: number;
+  /**
+   * #1054 — one stage op per distinct (cutter, region, params), shared by the ball rank's
+   * candidate passes and the chosen plan ({@link StageMemo}). Absent → every call plans its own,
+   * exactly as before (the pre-#1054 behaviour).
+   */
+  memo?: StageMemo;
 }
 
 export interface PlanCurvedResult {
@@ -3775,6 +3803,59 @@ export interface PlanCurvedResult {
   clGrid: { cutterKey: string; toleranceMm: number; minSpacingMm: number; maxSpacingMm: number }[];
   /** #959 item 5 — every stage that threw, per region/rim, and the stages a failed rough skipped. */
   unplanned: SequenceStepFailure[];
+}
+
+/** #1054 — one memoised stage op: its outcome, the CL surface a later stage's mask reads, and the
+ *  candidates whose passes have used it. An op is shared by every caller whose key matches, so the
+ *  entry carries one owner PER USER and dies when the last of them is evicted. */
+export interface StageMemoEntry {
+  outcome: OpOutcome;
+  cl?: ReturnType<typeof clSurface>;
+  /** A SUCCESSFUL stage's own `unplanned` statements — only the crease pass emits one. */
+  unplanned?: SequenceStepFailure[];
+  /** The CL-grid fact the stage's surface recorded (`clGrid`), replayed when the CL is not rebuilt. */
+  grid?: PlanCurvedResult['clGrid'][number];
+  /** Every candidate whose pass read this op (the rank's eviction is by this set). */
+  owners: Set<string>;
+}
+
+/**
+ * #1054 — THE RANK MEMO. Every rank candidate is a FULL plan today, so each candidate re-plans
+ * the rough and the rest the previous one just built (and the chosen plan plans the winner a
+ * third time). One stage op per distinct (cutter, region, params) is enough: the second caller
+ * with the same key reads the first one's op, CL surface included, and the rank's losers are
+ * evicted by owner so the cache never holds more than the incumbent's ops plus the current
+ * candidate's. A shared op names every candidate that read it, so evicting a loser leaves the
+ * winner's own copy standing. Scoped to ONE setup's tree/geometry by construction (region ids and
+ * cutter keys); created in `planModelCam` and passed to the rank's and the chosen plan's
+ * `planCurvedForTree`.
+ */
+export interface StageMemo {
+  /** The op for `key`, if planned; a hit records `owner` as one of the entry's users. */
+  get(key: string, owner: string): StageMemoEntry | undefined;
+  set(key: string, entry: StageMemoEntry): void;
+  /** Drops every op no candidate but `owner` has used — the rank's losers never reach the chosen plan. */
+  evictOwner(owner: string): void;
+}
+
+export function createStageMemo(): StageMemo {
+  const entries = new Map<string, StageMemoEntry>();
+  return {
+    get: (key, owner) => {
+      const entry = entries.get(key);
+      if (entry !== undefined) entry.owners.add(owner);
+      return entry;
+    },
+    set: (key, entry) => {
+      entries.set(key, entry);
+    },
+    evictOwner: (owner) => {
+      for (const [key, entry] of entries) {
+        entry.owners.delete(owner);
+        if (entry.owners.size === 0) entries.delete(key);
+      }
+    },
+  };
 }
 
 function regionRefOf(id: string, kind: RegionKind, footprint: Polygons, topZ: number, bottomZ: number): RegionRef {
@@ -3817,12 +3898,15 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   // accumulated per kind and stated once, with a count and the deepest ground among the regions.
   const emptyStages = new Map<PlannedOp['kind'], { count: number; deepestMm: number }>();
   const finishKinds = new Map<string, { count: number; minSlope: number; maxSlope: number }>();
-  const pushStage = (kind: PlannedOp['kind'], ref: RegionRef, outcome: OpOutcome): void => {
+  const pushStage = (kind: PlannedOp['kind'], ref: RegionRef, outcome: OpOutcome, reused = false): void => {
     // #1052 — one row per op (kind, cutter, moves): the jump between rows is the op's own cost.
+    // #1054 — `reused: 1` marks a memo hit: the op was planned for an earlier caller (and paid
+    // for there), so the row counts the plan's ops without double-counting its work.
     memTrace('op', {
       kind,
       cutter: outcome.cutter,
       moves: outcome.ir.operations.reduce((n, operation) => n + operation.moves.length, 0),
+      ...(reused ? { reused: 1 } : {}),
     });
     if (outcome.ir.operations.some((operation) => operation.moves.length > 0)) {
       ops.push({ kind, region: ref, outcome });
@@ -3858,14 +3942,17 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   const designTopAt = (x: number, y: number): number | null => topSurfaceAt(binsForMask(), x, y);
   const clGrid: PlanCurvedResult['clGrid'] = [];
   const noteGrid = (cutter: Tool, surface: ReturnType<typeof clSurface>): void => {
-    const key = cutterKeyOf(cutter);
-    if (clGrid.some((entry) => entry.cutterKey === key)) return;
-    clGrid.push({
-      cutterKey: key,
+    noteGridEntry({
+      cutterKey: cutterKeyOf(cutter),
       toleranceMm: surface.toleranceMm,
       minSpacingMm: surface.minSpacingMm,
       maxSpacingMm: surface.maxSpacingMm,
     });
+  };
+  // #1054 — a memo hit does not rebuild the CL, so the grid fact it recorded rides the entry.
+  const noteGridEntry = (entry: PlanCurvedResult['clGrid'][number]): void => {
+    if (clGrid.some((known) => known.cutterKey === entry.cutterKey)) return;
+    clGrid.push(entry);
   };
   // #1018 — ONE DATUM NOW, not shimmed here: `region.zTop`/`zBottom` and every `clSurface` CL
   // height already come from `tree`/`opts.geometry`, both built from the door-shifted mesh
@@ -3921,6 +4008,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   });
 
   for (const region of [...tree.remainder, ...(opts.extraRegions ?? [])]) {
+    // #1054 — one check per region as well as per stage: a memo hit skips `attempt`'s own check,
+    // and a hit-heavy pass must still honour the caller's stop.
+    opts.signal?.throwIfAborted();
     // #1052 (the 4096/8192 traces) — the rank's ⌀0.5 candidate enters this pipeline and outlives the
     // cap inside it; one row per region and per field build shows which structure grows.
     memTrace('curved:region', { id: region.id, top: region.zTop, bottom: region.zBottom });
@@ -3969,6 +4059,28 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const roughRef = roughRegion === base
       ? ref
       : regionRefOf(region.id, 'curved', roughRegion.footprint, base.zTop, base.zBottom);
+    // #1054 — THE MEMO'S KEYS: one per stage, over everything that decides the op — its own
+    // cutter, this region (grown by the FINISH cutter's radius on an outer surface, so the finish
+    // cutter is in every key), and the scalar options the stage is called with. The closures
+    // (offset, masks, materialTopAt) are functions of this same tree/geometry, which the memo is
+    // scoped to; the key names their inputs instead.
+    const finishCutterKey = cutterKeyOf(finishCutter);
+    const regionMemoKey = `${region.id}@${isOuterSurface ? finishRadius0.toFixed(4) : 'base'}`;
+    const stageKey = (stage: string, cutterKey: string, rest: Record<string, unknown>, deps: readonly string[] = []): string =>
+      `${stage}|${cutterKey}|${regionMemoKey}|${deps.join('|')}|${JSON.stringify(rest)}`;
+    const memoHit = (key: string): StageMemoEntry | undefined => opts.memo?.get(key, finishCutterKey);
+    const memoStore = (
+      key: string,
+      outcome: OpOutcome,
+      extra?: { cl?: ReturnType<typeof clSurface>; unplanned?: SequenceStepFailure[]; grid?: PlanCurvedResult['clGrid'][number] },
+    ): void =>
+      opts.memo?.set(key, {
+        outcome,
+        owners: new Set([finishCutterKey]),
+        ...(extra?.cl === undefined ? {} : { cl: extra.cl }),
+        ...(extra?.unplanned === undefined ? {} : { unplanned: extra.unplanned }),
+        ...(extra?.grid === undefined ? {} : { grid: extra.grid }),
+      });
     // 1. THE FLAT Z-steps the region to its own CL, leaving the band — #869/#966: absent (ball
     // alone, no rough tool chosen for this goal), there is nothing to pre-clear and no band to
     // leave; the ball takes the region's own full depth in one pass below (step 3's `depth`
@@ -3984,15 +4096,40 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const restClSink: { surface?: ReturnType<typeof clSurface> } = {};
     if (flat !== undefined) {
       const flatCl: { surface?: ReturnType<typeof clSurface> } = {};
+      const flatParams = paramsFor(flat);
+      // #1054 — the rough's key: exactly the options the op is called with (its CL surface is built
+      // from the same facts, and `cutPointInRegion` is the ball-as-rough flag).
+      const roughKey = stageKey('rough', cutterKeyOf(flat), {
+        stepDown: flatParams.stepDown,
+        band: opts.bandMm,
+        stepOver: opts.stepOverMm === undefined ? null : Math.min(opts.stepOverMm, (cuttingDiameter(flat) ?? 0) / 2),
+        feeds: feedsOf(flatParams),
+        safeZ: opts.safeZMm,
+        hopZ: opts.hopZMm,
+        toolNumber: opts.toolNumberFor(flat),
+        rpm: flatParams.rpm,
+        air: opts.air,
+        rapid: opts.rapid,
+        startFrom: opts.startFrom ?? null,
+        cutPointInRegion: opts.ball !== undefined && opts.ball === flat,
+      });
+      const roughMemo = memoHit(roughKey);
+      if (roughMemo !== undefined) {
+        // The CL surface rides the entry: a later stage's mask (and the rest's CL difference)
+        // reads the very same field the first caller's did.
+        flatCl.surface = roughMemo.cl;
+        if (roughMemo.cl !== undefined) noteGrid(flat, roughMemo.cl);
+        pushStage('rough', roughRef, roughMemo.outcome, true);
+      }
       memTrace('curved:stage', { stage: 'rough', cutter: cutterKeyOf(flat), region: roughRegion.id });
-      const roughed = attempt('rough', flat, ref, () => {
+      const roughed = roughMemo !== undefined ? true : attempt('rough', flat, ref, () => {
         memTrace('cl:build', { cutter: cutterKeyOf(flat), region: roughRegion.id, what: 'flat' });
         const clFlatStarted = performance.now();
         const clFlat = floorSurface(clSurface(opts.geometry, roughRegion, flat, cuts.stepOver));
         memTrace('cl:built', { cutter: cutterKeyOf(flat), region: roughRegion.id, what: 'flat', ms: Math.round(performance.now() - clFlatStarted) });
         flatCl.surface = clFlat;
         noteGrid(flat, clFlat);
-        return rough({
+        const out = rough({
           cutter: flat,
           region: roughRegion,
           regionRef: roughRef,
@@ -4025,6 +4162,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           stockTopZMm: 0,
           ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
         });
+        memoStore(roughKey, out, { cl: clFlat });
+        return out;
       });
       prevCl = flatCl.surface;
       if (!roughed || prevCl === undefined) {
@@ -4050,39 +4189,63 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       // rebased levels sat above every mesh-absolute CL value and the mask came out EMPTY (a rest
       // pass silently missing, not merely off-datum). Both go through the plan's one datum here:
       // the region is `base`, the surface is shifted like the flat's.
-      memTrace('curved:stage', { stage: 'rest-flat', cutter: cutterKeyOf(restFlat), region: roughRegion.id });
-      attempt('rest', restFlat, ref, () => {
-        const restCl = floorSurface(clSurface(opts.geometry, base, restFlat, cuts.stepOver));
-        restClSink.surface = restCl;
-        noteGrid(restFlat, restCl);
-        return rest({
-          cutter: restFlat,
-          region: base,
-          regionRef: ref,
-          prevClSurface: prevCl,
-          clSurface: restCl,
-          // #990 — the rest flat's own row, not `primary`'s (or `flat`'s): it is SMALLER than
-          // both by construction, so its own feeds-band step-down is finer too.
-          stepDownMm: paramsFor(restFlat).stepDown,
-          stockToLeaveMm: opts.bandMm,
-          // The rest flat is SMALLER than the primary: the plan-level step-over is the primary's
-          // (half a ⌀6 is 3 mm), and handing that to a ⌀3.175 rest is more than its own radius —
-          // `pocketLoops` refuses it by name ('step-over 3 mm exceeds the 1.5875 mm tool radius').
-          // The rest takes the smaller of the stated step-over and its own radius.
-          stepOverMm: opts.stepOverMm === undefined
-            ? undefined
-            : Math.min(opts.stepOverMm, (cuttingDiameter(restFlat) ?? 0) / 2),
-          feeds: feedsOf(paramsFor(restFlat)),
-          offset: opts.offset,
-          safeZMm: opts.safeZMm,
-          hopZMm: opts.hopZMm,
-          toolNumber: opts.toolNumberFor(restFlat),
-          spindleRpm: paramsFor(restFlat).rpm,
-          air: opts.air,
-          rapid: opts.rapid,
-          ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
-        });
+      // #1054 — keyed by the rest flat AND the flat whose CL it reads (the rest's own `prevClSurface`).
+      const restFlatKey = stageKey('rest-flat', cutterKeyOf(restFlat), {
+        flat: flat === undefined ? '-' : cutterKeyOf(flat),
+        stepDown: paramsFor(restFlat).stepDown,
+        band: opts.bandMm,
+        stepOver: opts.stepOverMm === undefined ? null : Math.min(opts.stepOverMm, (cuttingDiameter(restFlat) ?? 0) / 2),
+        feeds: feedsOf(paramsFor(restFlat)),
+        safeZ: opts.safeZMm,
+        hopZ: opts.hopZMm,
+        toolNumber: opts.toolNumberFor(restFlat),
+        rpm: paramsFor(restFlat).rpm,
+        air: opts.air,
+        rapid: opts.rapid,
+        startFrom: opts.startFrom ?? null,
       });
+      const restMemo = memoHit(restFlatKey);
+      if (restMemo !== undefined) {
+        restClSink.surface = restMemo.cl;
+        if (restMemo.cl !== undefined) noteGrid(restFlat, restMemo.cl);
+        pushStage('rest', ref, restMemo.outcome, true);
+      } else {
+        memTrace('curved:stage', { stage: 'rest-flat', cutter: cutterKeyOf(restFlat), region: roughRegion.id });
+        attempt('rest', restFlat, ref, () => {
+          const restCl = floorSurface(clSurface(opts.geometry, base, restFlat, cuts.stepOver));
+          restClSink.surface = restCl;
+          noteGrid(restFlat, restCl);
+          const out = rest({
+            cutter: restFlat,
+            region: base,
+            regionRef: ref,
+            prevClSurface: prevCl,
+            clSurface: restCl,
+            // #990 — the rest flat's own row, not `primary`'s (or `flat`'s): it is SMALLER than
+            // both by construction, so its own feeds-band step-down is finer too.
+            stepDownMm: paramsFor(restFlat).stepDown,
+            stockToLeaveMm: opts.bandMm,
+            // The rest flat is SMALLER than the primary: the plan-level step-over is the primary's
+            // (half a ⌀6 is 3 mm), and handing that to a ⌀3.175 rest is more than its own radius —
+            // `pocketLoops` refuses it by name ('step-over 3 mm exceeds the 1.5875 mm tool radius').
+            // The rest takes the smaller of the stated step-over and its own radius.
+            stepOverMm: opts.stepOverMm === undefined
+              ? undefined
+              : Math.min(opts.stepOverMm, (cuttingDiameter(restFlat) ?? 0) / 2),
+            feeds: feedsOf(paramsFor(restFlat)),
+            offset: opts.offset,
+            safeZMm: opts.safeZMm,
+            hopZMm: opts.hopZMm,
+            toolNumber: opts.toolNumberFor(restFlat),
+            spindleRpm: paramsFor(restFlat).rpm,
+            air: opts.air,
+            rapid: opts.rapid,
+            ...(opts.startFrom === undefined ? {} : { startFrom: opts.startFrom }),
+          });
+          memoStore(restFlatKey, out, { cl: restCl });
+          return out;
+        });
+      }
     }
 
     // ITEM 4a — THE FINISH'S MASK: leftover = the flat's CL − the design > band, dilated by the
@@ -4204,9 +4367,36 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // has always cut.
     let finishOutcome: OpOutcome | null = null;
     let finishError: string | null = null;
-    try {
+    // #1054 — the finish's key: the cutter, the kind, the scallop, the depth, and the mask's own
+    // inputs (what stands after the rough and the rest, and the ball's footprint).
+    const finishKey = stageKey('finish', cutterKeyOf(finishCutter), {
+      kind: finishKind,
+      scallop: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
+      flatFallback: ball === undefined,
+      depth,
+      mask: [
+        flat === undefined ? '-' : cutterKeyOf(flat),
+        restFlat === undefined ? '-' : cutterKeyOf(restFlat),
+        roughStepDown,
+        finishBand,
+        ballRadiusForMask,
+        extraMask === undefined ? 'auto' : 'extra',
+      ],
+      feeds: feedsOf(paramsFor(finishCutter)),
+      safeZ: opts.safeZMm,
+      hopZ: opts.hopZMm,
+      toolNumber: opts.toolNumberFor(finishCutter),
+      rpm: paramsFor(finishCutter).rpm,
+      air: opts.air,
+      rapid: opts.rapid,
+    });
+    const finishMemo = memoHit(finishKey);
+    if (finishMemo !== undefined) {
+      if (finishMemo.grid !== undefined) noteGridEntry(finishMemo.grid);
+      finishOutcome = finishMemo.outcome;
+    } else try {
       memTrace('curved:stage', { stage: 'finish', cutter: cutterKeyOf(finishCutter), region: roughRegion.id });
-      finishOutcome = finish({
+      const out = finish({
         cutter: finishCutter,
         region: roughRegion,
         regionRef: roughRef,
@@ -4232,7 +4422,21 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         spindleRpm: paramsFor(finishCutter).rpm,
         air: opts.air,
         rapid: opts.rapid,
-    });
+      });
+      // The CL grid the surface recorded rides the entry: a hit does not rebuild the CL.
+      memoStore(finishKey, out, {
+        ...(clBallCache === undefined
+          ? {}
+          : {
+              grid: {
+                cutterKey: cutterKeyOf(finishCutter),
+                toleranceMm: clBallCache.toleranceMm,
+                minSpacingMm: clBallCache.minSpacingMm,
+                maxSpacingMm: clBallCache.maxSpacingMm,
+              },
+            }),
+      });
+      finishOutcome = out;
     } catch (err) {
       // #1052 — the move cap is a CANDIDATE decision, not a stage failure: it leaves the rank
       // with its own sentence (below), never the unplanned list.
@@ -4256,7 +4460,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         // No move of the region is posted: the rest and pencil passes ride this finish's CL.
         continue;
       }
-      pushStage('finish', ref, finishOutcome!);
+      pushStage('finish', ref, finishOutcome!, finishMemo !== undefined);
     }
 
     let restBallCl: ReturnType<typeof clSurface> | undefined;
@@ -4282,27 +4486,53 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         if (design === null) return false;
         return b - design > finishBand;
       };
-      memTrace('curved:stage', { stage: 'rest-ball', cutter: cutterKeyOf(restBallTool), region: roughRegion.id });
-      attempt('rest', restBallTool, ref, () => finish({
-        cutter: restBallTool,
-        region: roughRegion,
-        regionRef: roughRef,
-        clSurface: (restBallCl = clSurface(opts.geometry, roughRegion, restBallTool, cuts.stepOver)),
+      // #1054 — keyed by the rest ball, the finish ball whose CL its mask reads, and the mask's
+      // own band/radius facts.
+      const restBallKey = stageKey('rest-ball', cutterKeyOf(restBallTool), {
         kind: finishKind,
-        mesh: opts.geometry.triangles,
-        scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
-        maskCells: (x, y) => maskCellsExact(afterBallLeftover, restRing, x, y),
-        materialTopAt: designTopAt,
-        stockTopZMm: 0,
-        stepDownMm: depth,
+        scallop: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
+        depth,
+        mask: [ballMaskRadiusMm, finishBand],
         feeds: feedsOf(paramsFor(restBallTool)),
-        safeZMm: opts.safeZMm,
-        hopZMm: opts.hopZMm,
+        safeZ: opts.safeZMm,
+        hopZ: opts.hopZMm,
         toolNumber: opts.toolNumberFor(restBallTool),
-        spindleRpm: paramsFor(restBallTool).rpm,
+        rpm: paramsFor(restBallTool).rpm,
         air: opts.air,
         rapid: opts.rapid,
-      }));
+      }, [finishCutterKey]);
+      const restBallMemo = memoHit(restBallKey);
+      if (restBallMemo !== undefined) {
+        // The crease pass rides this CL; a memo hit must hand it over exactly as the miss does.
+        restBallCl = restBallMemo.cl;
+        pushStage('rest', ref, restBallMemo.outcome, true);
+      } else {
+        memTrace('curved:stage', { stage: 'rest-ball', cutter: cutterKeyOf(restBallTool), region: roughRegion.id });
+        attempt('rest', restBallTool, ref, () => {
+          const out = finish({
+            cutter: restBallTool,
+            region: roughRegion,
+            regionRef: roughRef,
+            clSurface: (restBallCl = clSurface(opts.geometry, roughRegion, restBallTool, cuts.stepOver)),
+            kind: finishKind,
+            mesh: opts.geometry.triangles,
+            scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
+            maskCells: (x, y) => maskCellsExact(afterBallLeftover, restRing, x, y),
+            materialTopAt: designTopAt,
+            stockTopZMm: 0,
+            stepDownMm: depth,
+            feeds: feedsOf(paramsFor(restBallTool)),
+            safeZMm: opts.safeZMm,
+            hopZMm: opts.hopZMm,
+            toolNumber: opts.toolNumberFor(restBallTool),
+            spindleRpm: paramsFor(restBallTool).rpm,
+            air: opts.air,
+            rapid: opts.rapid,
+          });
+          memoStore(restBallKey, out, { cl: restBallCl });
+          return out;
+        });
+      }
     }
 
     // 3c. THE CREASE PASS (#965, the review session's step 2; the vendor's own figure method): a
@@ -4327,71 +4557,115 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       const vPitch = Math.min(0.5, Math.max(0.1, (cuttingDiameter(vTool) ?? 0) / 4));
       let creaseAdmitted = 0;
       let creaseRefused = 0;
-      memTrace('curved:stage', { stage: 'pencil-v', cutter: cutterKeyOf(vTool), region: roughRegion.id });
-      attempt('pencil', vTool, ref, () => {
-        // The V's own CL and the previous (rest ball's) CL: the leftover depth at a crease is the
-        // material between them — the number the crease rule's width test is stated at.
-        //
-        // #961 (the gate on 961-wiring-r) — BUILT INSIDE THE `attempt`: a V whose cone the house
-        // does not state (the organizer's catalogue row) has no drop-cutter profile and
-        // `clSurface` throws by name; the crease must be STATED in `unplanned` with that reason,
-        // never refuse the whole job. The throw used to sit above the attempt and escaped.
-        const vCl = clSurface(opts.geometry, roughRegion, vTool, cuts.stepOver);
-        const out = pencil({
-          cutter: vTool,
-          region: roughRegion,
-          regionRef: roughRef,
-          clSurface: vCl,
-          gridPitchMm: vPitch,
-          admitCrease: (i, j, z, leftSlopeDeg, rightSlopeDeg) => {
-            const x = roughRef.bounds.min[0] + i * vPitch;
-            const y = roughRef.bounds.min[1] + j * vPitch;
-            const prev = prevCl.dropCutter(x, y);
-            const depth = prev === null ? 0 : Math.max(0, prev - z);
-            const fits = creaseFits(vTool, { leftSlopeDeg, rightSlopeDeg, depthMm: depth });
-            if (fits.reachable) creaseAdmitted++;
-            else creaseRefused++;
-            return fits.reachable;
-          },
-          feeds: feedsOf(paramsFor(vTool)),
-          safeZMm: opts.safeZMm,
-          hopZMm: opts.hopZMm,
-          toolNumber: opts.toolNumberFor(vTool),
-          spindleRpm: paramsFor(vTool).rpm,
-          air: opts.air,
-          rapid: opts.rapid,
-        });
-        const emitted = out.ir.operations.some((operation) => operation.moves.length > 0);
-        if (!emitted) {
-          // Stated, never a silent skip: no crease on this region passed the admission.
-          unplanned.push({
-            kind: 'pencil',
-            cutterKey: cutterKeyOf(vTool),
-            regionIds: [ref.id],
-            reason: `the crease pass was admitted at no crease this region (${creaseAdmitted} admitted, ${creaseRefused} refused by the crease rule) — nothing emitted`,
-          });
-        }
-        return out;
+      // #1054 — keyed by the V and the CL chain it rides (the rest ball's when there is one, else
+      // the finish ball's), which `restBallCl`/`clBall()` carry.
+      const creaseKey = stageKey('pencil-v', cutterKeyOf(vTool), {
+        prevCl: opts.restBall !== undefined && restBallCl !== undefined ? `rest:${cutterKeyOf(opts.restBall)}` : `ball:${finishCutterKey}`,
+        pitch: vPitch,
+        feeds: feedsOf(paramsFor(vTool)),
+        safeZ: opts.safeZMm,
+        hopZ: opts.hopZMm,
+        toolNumber: opts.toolNumberFor(vTool),
+        rpm: paramsFor(vTool).rpm,
+        air: opts.air,
+        rapid: opts.rapid,
       });
+      const creaseMemo = memoHit(creaseKey);
+      if (creaseMemo !== undefined) {
+        // The "nothing emitted" statement is the stage's own output: replay it, never re-plan.
+        if (creaseMemo.unplanned !== undefined) unplanned.push(...creaseMemo.unplanned);
+        pushStage('pencil', ref, creaseMemo.outcome, true);
+      } else {
+        memTrace('curved:stage', { stage: 'pencil-v', cutter: cutterKeyOf(vTool), region: roughRegion.id });
+        attempt('pencil', vTool, ref, () => {
+          // The V's own CL and the previous (rest ball's) CL: the leftover depth at a crease is the
+          // material between them — the number the crease rule's width test is stated at.
+          //
+          // #961 (the gate on 961-wiring-r) — BUILT INSIDE THE `attempt`: a V whose cone the house
+          // does not state (the organizer's catalogue row) has no drop-cutter profile and
+          // `clSurface` throws by name; the crease must be STATED in `unplanned` with that reason,
+          // never refuse the whole job. The throw used to sit above the attempt and escaped.
+          const vCl = clSurface(opts.geometry, roughRegion, vTool, cuts.stepOver);
+          const out = pencil({
+            cutter: vTool,
+            region: roughRegion,
+            regionRef: roughRef,
+            clSurface: vCl,
+            gridPitchMm: vPitch,
+            admitCrease: (i, j, z, leftSlopeDeg, rightSlopeDeg) => {
+              const x = roughRef.bounds.min[0] + i * vPitch;
+              const y = roughRef.bounds.min[1] + j * vPitch;
+              const prev = prevCl.dropCutter(x, y);
+              const depth = prev === null ? 0 : Math.max(0, prev - z);
+              const fits = creaseFits(vTool, { leftSlopeDeg, rightSlopeDeg, depthMm: depth });
+              if (fits.reachable) creaseAdmitted++;
+              else creaseRefused++;
+              return fits.reachable;
+            },
+            feeds: feedsOf(paramsFor(vTool)),
+            safeZMm: opts.safeZMm,
+            hopZMm: opts.hopZMm,
+            toolNumber: opts.toolNumberFor(vTool),
+            spindleRpm: paramsFor(vTool).rpm,
+            air: opts.air,
+            rapid: opts.rapid,
+          });
+          const emitted = out.ir.operations.some((operation) => operation.moves.length > 0);
+          const stageUnplanned: SequenceStepFailure[] = [];
+          if (!emitted) {
+            // Stated, never a silent skip: no crease on this region passed the admission.
+            const entry: SequenceStepFailure = {
+              kind: 'pencil',
+              cutterKey: cutterKeyOf(vTool),
+              regionIds: [ref.id],
+              reason: `the crease pass was admitted at no crease this region (${creaseAdmitted} admitted, ${creaseRefused} refused by the crease rule) — nothing emitted`,
+            };
+            unplanned.push(entry);
+            stageUnplanned.push(entry);
+          }
+          memoStore(creaseKey, out, { unplanned: stageUnplanned });
+          return out;
+        });
+      }
       }
     }
 
     // 4. PENCIL along the creases the ball's own CL surface leaves — no ball, no pencil: the
     // creases are the rest rule's job (the smallest flat, above).
-    if (ball !== undefined) memTrace('curved:stage', { stage: 'pencil-ball', cutter: cutterKeyOf(ball), region: roughRegion.id });
-    if (ball !== undefined) attempt('pencil', ball, ref, () => pencil({
-      cutter: ball,
-      region,
-      regionRef: ref,
-      clSurface: clBall(),
-      feeds: feedsOf(paramsFor(ball)),
-      safeZMm: opts.safeZMm,
-      hopZMm: opts.hopZMm,
-      toolNumber: opts.toolNumberFor(ball),
-      spindleRpm: paramsFor(ball).rpm,
-      air: opts.air,
-      rapid: opts.rapid,
-    }));
+    if (ball !== undefined) {
+      const pencilKey = stageKey('pencil-ball', cutterKeyOf(ball), {
+        feeds: feedsOf(paramsFor(ball)),
+        safeZ: opts.safeZMm,
+        hopZ: opts.hopZMm,
+        toolNumber: opts.toolNumberFor(ball),
+        rpm: paramsFor(ball).rpm,
+        air: opts.air,
+        rapid: opts.rapid,
+      });
+      const pencilMemo = memoHit(pencilKey);
+      if (pencilMemo !== undefined) {
+        pushStage('pencil', ref, pencilMemo.outcome, true);
+      } else {
+        memTrace('curved:stage', { stage: 'pencil-ball', cutter: cutterKeyOf(ball), region: roughRegion.id });
+        attempt('pencil', ball, ref, () => {
+          const out = pencil({
+            cutter: ball,
+            region,
+            regionRef: ref,
+            clSurface: clBall(),
+            feeds: feedsOf(paramsFor(ball)),
+            safeZMm: opts.safeZMm,
+            hopZMm: opts.hopZMm,
+            toolNumber: opts.toolNumberFor(ball),
+            spindleRpm: paramsFor(ball).rpm,
+            air: opts.air,
+            rapid: opts.rapid,
+          });
+          memoStore(pencilKey, out);
+          return out;
+        });
+      }
+    }
   }
 
   // THE SKIN PASS (#959, 2026-11-05 ruling): the stock stands above the part top and the job asks
