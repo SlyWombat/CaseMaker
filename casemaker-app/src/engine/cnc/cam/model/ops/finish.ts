@@ -408,9 +408,13 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // skipping lost the organizer 10 points.
   const BIN_MM = 0.25;
   const binCount = Math.max(1, Math.ceil((max[0] - min[0]) / BIN_MM));
-  const binSlope = new Float64Array(binCount).fill(Number.NaN);
+  // #1080 (6b's straight-strip gate) — BOTH triangle reads per bin: the cross-row component and
+  // the gradient magnitude. Which one sizes the band is the CL block's call, per bin.
+  const binCrossSlope = new Float64Array(binCount).fill(Number.NaN);
+  const binMagSlope = new Float64Array(binCount).fill(Number.NaN);
   if (opts.mesh === undefined) {
-    binSlope.fill(opts.region.slopeDeg[1]);
+    binCrossSlope.fill(opts.region.slopeDeg[1]);
+    binMagSlope.fill(opts.region.slopeDeg[1]);
   } else {
     const { positions, indices } = opts.mesh;
     for (const t of opts.region.triangles) {
@@ -418,17 +422,19 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       const b = indices[t * 3 + 1]! * 3;
       const c = indices[t * 3 + 2]! * 3;
       const xs = [positions[a]!, positions[b]!, positions[c]!];
-      // #1080 — the CROSS-ROW slope sizes the band (a wall along the rows creates no cusp).
-      const slope = crossRowSlopeDeg(positions, a, b, c);
+      const cross = crossRowSlopeDeg(positions, a, b, c);
+      const mag = triangleSlopeDeg(positions, a, b, c);
       const lo = Math.max(min[0], Math.min(...xs));
       const hi = Math.min(max[0], Math.max(...xs));
       const first = Math.floor((lo - min[0]) / BIN_MM);
       const last = Math.floor((hi - min[0]) / BIN_MM);
       for (let k = Math.max(0, first); k <= Math.min(binCount - 1, last); k++) {
-        if (!(binSlope[k]! >= slope)) binSlope[k] = slope;
+        if (!(binCrossSlope[k]! >= cross)) binCrossSlope[k] = cross;
+        if (!(binMagSlope[k]! >= mag)) binMagSlope[k] = mag;
       }
     }
   }
+  const binSlope = new Float64Array(binCount);
   // #960 — AND THE CL SURFACE'S OWN SLOPE per bin, sampled from the surface the rows actually
   // follow: the ball's CL is what turns a cliff into a shoulder over the cutter's radius, so a
   // bin's triangle slopes alone under-read it. Both reads are kept, the steeper wins.
@@ -438,12 +444,21 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     const radius = profile.radiusMm;
     for (let k = 0; k < binCount; k++) {
       const xc = min[0] + (k + 0.5) * BIN_MM;
-      let steepest = Number.isNaN(binSlope[k]!) ? 0 : binSlope[k]!;
+      let cross = Number.isNaN(binCrossSlope[k]!) ? 0 : binCrossSlope[k]!;
+      let mag = Number.isNaN(binMagSlope[k]!) ? 0 : binMagSlope[k]!;
+      // #1080 (6b's straight-strip gate) — the cross-row component is right only where the CL is
+      // a STRAIGHT ramp in x across the strip. The test is the second difference over the row
+      // sampling, |z(xc+h) − 2·z(xc) + z(xc−h)|, at each of the strip's y samples: over the
+      // scallop, the bin crosses a ridge or a valley, the ball rides the kink, and the bin keeps
+      // the gradient magnitude (the pre-#1080 read, so every card's leftover is what it was).
+      let straight = true;
+      let mouth = false;
       for (let s = 0; s < ys; s++) {
         const y = min[1] + ((s + 0.5) / ys) * (max[1] - min[1]);
         const z0 = opts.clSurface.dropCutter(xc, y);
         const zx = opts.clSurface.dropCutter(xc + h, y);
         const zy = opts.clSurface.dropCutter(xc, y + h);
+        const zm = opts.clSurface.dropCutter(xc - h, y);
         // #960 — A POCKET MOUTH inside the cutter's own reach: the ball rides the shoulders across
         // the opening, so any row over it leaves the mouth's depth standing and the rows' phase
         // decides how much. Those bands keep the old dense floor so nothing is lost.
@@ -451,13 +466,16 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         const zr = opts.clSurface.dropCutter(xc + radius, y);
         // A ball bridging a gap sits HIGHER than its neighbours (the CL is a local ridge over the
         // mouth); that ridge is the signature, not a left-right difference across the opening.
-        if (zl !== null && zr !== null && z0 !== null && z0 - Math.max(zl, zr) > opts.scallopMm) steepest = 90;
+        if (zl !== null && zr !== null && z0 !== null && z0 - Math.max(zl, zr) > opts.scallopMm) mouth = true;
+        if (z0 === null || zx === null || zm === null) straight = false;
+        else if (Math.abs(zx - 2 * z0 + zm) > opts.scallopMm) straight = false;
         if (z0 === null || zx === null || zy === null) continue;
-        // #1080 (6b's ruling) — THE CROSS-ROW COMPONENT: |∂z/∂x|, never the gradient magnitude.
-        const slope = (Math.atan(Math.abs((zx - z0) / h)) * 180) / Math.PI;
-        if (slope > steepest) steepest = slope;
+        const crossSlope = (Math.atan(Math.abs((zx - z0) / h)) * 180) / Math.PI;
+        const magSlope = (Math.atan(Math.hypot((zx - z0) / h, (zy - z0) / h)) * 180) / Math.PI;
+        if (crossSlope > cross) cross = crossSlope;
+        if (magSlope > mag) mag = magSlope;
       }
-      binSlope[k] = steepest;
+      binSlope[k] = mouth ? 90 : straight ? cross : mag;
     }
   }
   // #960 — the band's slope is the STEEPEST within a small window: a cliff's cell lies in the next
