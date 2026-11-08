@@ -707,6 +707,7 @@ export function installCaseMakerTestApi(): void {
               viseJawTopZ: null,
               bracketSeatZ: null,
               rotaryAxis: null,
+              rotaryFaceAngle: null,
             },
             placements: [],
             preferredMounting: [],

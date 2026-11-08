@@ -1580,6 +1580,11 @@ export interface JobBedBinding {
     viseJawTopZ: number | null;
     bracketSeatZ: number | null;
     rotaryAxis: number | null;
+    /**
+     * #1059 — the square stock's A zero the job was planned against, DEGREES (null = never
+     * levelled). Optional because a job bound before this datum existed has no entry for it.
+     */
+    rotaryFaceAngle?: number | null;
   };
 }
 

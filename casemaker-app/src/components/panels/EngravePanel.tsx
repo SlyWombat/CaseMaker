@@ -126,6 +126,7 @@ import type { PcbAlignmentOffer } from '@/engine/import/pcbAlignment';
 import { pcbReHoldNote } from '@/engine/import/pcbHold';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
+import { rotarySheetDatumFor } from '@/engine/cnc/rotary/sheetDatum';
 import { defaultFaceOperation, faceSpanMm } from '@/engine/cnc/rotary/faceOps';
 import { FaceOperationRow } from './FaceOperationRow';
 import { groupRejections, isActionableRejection, shouldGroupCatalogueRows } from './recommendationRejections';
@@ -2556,6 +2557,9 @@ export function EngravePanel(): JSX.Element {
           dialectName,
           statedOrigin,
           ...(sheetProbe === null ? {} : { probeInstrument: probeInstrumentOf(sheetProbe) }),
+          // #1059 — a chuck job's sheet prints the axis and the levelled face angle from the bed
+          // profile it was planned on; "not measured" when the datums are absent.
+          rotaryDatum: rotarySheetDatumFor(job, machineRecord === null ? null : { machines: [machineRecord] }),
           mountName,
           bedName,
           found:

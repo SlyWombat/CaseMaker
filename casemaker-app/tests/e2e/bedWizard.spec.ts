@@ -208,7 +208,7 @@ test('#512 — the first-run wizard walks S0 → S6 with every measurement skipp
   };
   expect(profile.name).toBe('Kit bed');
   expect(profile.surface.kind).toBe('wasteboard');
-  expect(profile.datums).toEqual({ surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null });
+  expect(profile.datums).toEqual({ surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null, rotaryFaceAngle: null });
   expect(profile.placements.map((p) => p.where.kind).sort()).toEqual(['anchor', 'free']);
   expect(saved.activeBedProfileId).toBe(profile.id);
   // The bracket and the two clamps are the house's accessories, checked out to this machine.

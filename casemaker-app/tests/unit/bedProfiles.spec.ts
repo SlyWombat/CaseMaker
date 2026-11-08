@@ -252,7 +252,7 @@ describe('#511 the Bed block\'s pure actions', () => {
     expect(profile.name).toBe('Bed changed 2026-10-19');
     expect(profile.basedOn).toBe(active.id);
     // Every datum cleared — whatever changed, nothing measured on the old bed still holds.
-    expect(profile.datums).toEqual({ surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null });
+    expect(profile.datums).toEqual({ surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null, rotaryFaceAngle: null });
     // The cleared datums are listed by name, and the surface's scars go with the surface datum.
     expect(cleared).toEqual(['bracket seat', 'surface scars']);
     expect(profile.surface.scars).toEqual([]);

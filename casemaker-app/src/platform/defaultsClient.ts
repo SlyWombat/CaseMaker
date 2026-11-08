@@ -119,6 +119,9 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'registration.coarseStepMm': { label: 'scan coarse step', unit: 'mm', rule: z.number().min(0.1).max(10), fallback: 1.0 },
   'registration.fineStepMm': { label: 'scan fine step', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },
   'registration.parkAboveSurfaceMm': { label: 'park height above the surface', unit: 'mm', rule: z.number().min(2).max(30), fallback: 3.0 },
+  // #1059 — the largest tilt the face-angle step will turn out of a square stock in the 4th axis.
+  // A larger reading is a wrong touch or a wrong mounting, not a turn.
+  'registration.faceAngleMaxDeg': { label: 'face angle, largest correction', unit: '°', rule: z.number().min(0.2).max(45), fallback: 10 },
   'registration.scanInsideMm': { label: 'scan start inside the edge', unit: 'mm', rule: z.number().min(0.5).max(30), fallback: 3.0 },
   'registration.scanReachMm': { label: 'scan reach past the edge', unit: 'mm', rule: z.number().min(0.5).max(50), fallback: 5.0 },
   'registration.cornerClearanceMm': { label: 'clearance from a rounded corner', unit: 'mm', rule: z.number().min(0).max(30), fallback: 2.0 },
