@@ -210,4 +210,41 @@ describe('#1073 — the locating holes ride setup 1', () => {
     expect(message).toContain('locating holes (#1073):');
     expect(message).toContain('no owned flat end mill');
   }, 240_000);
+
+  it('refuses a frame flip whose goals carry no band — the saved m1trayF shape', async () => {
+    const job = jobForFrustum();
+    const goal = job.targetObject!;
+    const plan = planFlipSetups(job, goal, ['top', 'bottom'], [FLAT_ENTRY], {
+      method: 'tabs-in-blank',
+      axis: 'left-right',
+    });
+    if (!plan.ok) throw new Error(plan.reason);
+    // The saved-job shape: the flip is stated but WIP 1's band was never written on the goals
+    // (any job saved before it, or a hand-edit). Side 2 would post with no release and no
+    // instruction, so the run stops before anything posts.
+    const unbanded = plan.goals.map((g) => ({ ...g, bandMm: undefined, underside: { ...(g.underside ?? {}), kind: 'flat' as const } }));
+    const sided: EngraveJob = { ...job, setups: plan.setups, targetObjects: unbanded };
+    const tl = await getToplevel();
+    const result = await engraveGenerate(tl, sided, FLAT3, [], null, undefined, { tools: [FLAT_ENTRY] });
+    expect(result.ok).toBe(false);
+    expect(result.stage).toBe('findings');
+    expect(result.errors.map((e) => e.message).join('; ')).toContain(
+      'flip (#1073): the job states a frame flip but its goals carry no tab band — re-plan the flip',
+    );
+    expect(result.programs).toHaveLength(0);
+  }, 240_000);
+
+  it('the banded twin posts', async () => {
+    const job = jobForFrustum();
+    const goal = job.targetObject!;
+    const plan = planFlipSetups(job, goal, ['top', 'bottom'], [FLAT_ENTRY], {
+      method: 'tabs-in-blank',
+      axis: 'left-right',
+    });
+    if (!plan.ok) throw new Error(plan.reason);
+    const sided: EngraveJob = { ...job, setups: plan.setups, targetObjects: plan.goals };
+    const tl = await getToplevel();
+    const result = await engraveGenerate(tl, sided, FLAT3, [], null, undefined, { tools: [FLAT_ENTRY] });
+    expect(result.ok, result.errors.map((e) => e.message).join('; ')).toBe(true);
+  }, 240_000);
 });

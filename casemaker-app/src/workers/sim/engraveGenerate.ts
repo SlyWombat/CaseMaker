@@ -6124,6 +6124,30 @@ async function generateGoalPrograms(
   /** #1038 — the same stage channel `generateGoalProgram` takes, passed to each side's plan. */
   onProgress?: EngraveProgressFn,
 ): Promise<EngraveGenerated> {
+  // #1073 — A FRAME FLIP NEEDS ITS BAND BEFORE ANYTHING POSTS. `flip: { method: 'tabs-in-blank' }`
+  // means side 1 stops above the part's silhouette plane and side 2 below it, so a band of stock
+  // holds the part on tabs C's release then cuts. A job whose goals carry no band — saved before
+  // WIP 1, or hand-edited — would post side 2 with no release and no instruction: the part comes
+  // free under the cutter, or is left with nothing holding it. That is the bench-safety hole the
+  // analyst ruled must never happen, so it is refused by name HERE, before any side is planned.
+  const flippedSide = sides.find((side) => side.setup.flip !== undefined);
+  if (flippedSide?.setup.flip?.method === 'tabs-in-blank') {
+    const banded = (side: GoalSide): boolean =>
+      side.goal.bandMm !== undefined && side.goal.bandMm > 0 && side.goal.underside?.kind === 'flipped-tabs';
+    if (sides.some((side) => !banded(side))) {
+      return {
+        ...emptyGoalResult(),
+        ok: false,
+        stage: 'findings',
+        findings: [],
+        feeds: null,
+        cam: null,
+        nc: null,
+        verify: null,
+        errors: [{ stage: 'findings', message: 'flip (#1073): the job states a frame flip but its goals carry no tab band — re-plan the flip' }],
+      };
+    }
+  }
   // A goal program's check is its `surfaceCheck` (there is no verifier report), and the single-goal
   // path already builds each program with it — so each side's programs are those programs with the
   // side's setup on them, never a field-by-field copy that could drop the check. A side can be
