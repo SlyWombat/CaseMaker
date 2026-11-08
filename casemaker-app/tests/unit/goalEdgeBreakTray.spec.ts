@@ -182,9 +182,13 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
   // #1092 (gate v8) — the silhouette and shadow proofs read the deepest stamp's own CL: E's npy
   // field carries no CL, so it comes from the app's tooled stamp of the same NC (the same pair the
   // app's own check passes).
+  // #1092 (gate v8) — the vendor's outline cut runs through the BLANK (its border row reads 23 mm
+  // below the goal top), so the silhouette ceiling is the slab's own thickness, not the goal's
+  // depth: the 27.2 mm slab this NC was cut from.
   const r = checkGoalCutInto(goal, top, {
     edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4), edges: 'all' },
     wallShadowRadiusMm: 3,
+    stockThicknessMm: 27.2,
     clAt,
   });
 
