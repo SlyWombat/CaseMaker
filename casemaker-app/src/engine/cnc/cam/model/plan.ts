@@ -789,28 +789,63 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         // Requiring the surface AT the level (the analyst's own words) also keeps every legitimate
         // wall-foot strip: set B's m1trayB-top rim cells have the pocket floor 0.1 mm away, so
         // they stay and the rest's region boundary does not re-flow (9/9 programs byte-identical).
-        const reach = Math.max(0, Math.ceil(region.radiusMm / pitch));
         const tol = ARC_CHORD_TOLERANCE_MM;
-        /** Does the goal reach the pass's own floor (or deeper) within the cutter's reach? That is
-         *  where a floor pass has something to cut; without it the cell is under a ceiling. */
-        const floorWithinReach = (i: number, j: number): boolean => {
-          for (let dj = -reach; dj <= reach; dj++) {
-            const jj = j0 + j + dj;
-            if (jj < 0 || jj >= goal.ny) continue;
-            for (let di = -reach; di <= reach; di++) {
-              const ii = i0 + i + di;
-              if (ii < 0 || ii >= goal.nx) continue;
-              const kk = jj * goal.nx + ii;
-              if (goal.covered[kk] !== 1) continue;
-              if ((goal.z[kk] as number) > region.floorZ + tol) continue;
-              // The witness must be a cell THIS pass would cut: floor outside the pocket's own
-              // footprint (a deeper land at the part's edge) does not justify cutting the rim of
-              // the region this pass is confined to.
-              if (!pointInPolygons(region.footprint, goal.x0 + ii * pitch, goal.y0 + jj * pitch)) continue;
-              return true;
+        // #1092 — A REST CUTS A FLOOR THE CUTTER BELONGS ON. A pass at `region.floorZ` is valid
+        // only where the goal has a surface at that depth; a single low cell is not a floor. The
+        // witness is therefore a SAFE SPOT: a position whose whole cutter disc rests on cells at or
+        // below the pass floor (uncovered cells are the air beyond the part and never block). And a
+        // mask cell is kept only when such a spot lies within the cutter's reach of it. Measured:
+        // the elephant's j29 five-block residue after an at-or-below cell test was one 4.9 x 5.3 mm
+        // component whose 'witnesses' were a one-cell sliver of the goal's own bottom edge 0.086 mm
+        // below the level — no disc fits on it, so this rule drops it; a real pocket floor (set B's
+        // m1trayB-top) has safe spots within reach of its rim, so all nine programs stay byte
+        // identical. The disc is a Chebyshev square of `reach` cells (conservative: it can only
+        // ever mark FEWER spots safe, never more).
+        const reach = Math.max(1, Math.ceil(region.radiusMm / pitch));
+        const pad = reach + 1;
+        const pi0 = Math.max(0, i0 - pad);
+        const pi1 = Math.min(goal.nx - 1, i1 + pad);
+        const pj0 = Math.max(0, j0 - pad);
+        const pj1 = Math.min(goal.ny - 1, j1 + pad);
+        const W = pi1 - pi0 + 1;
+        const H = pj1 - pj0 + 1;
+        // bad: a covered cell whose goal stands ABOVE the pass floor — the disc must never cover it.
+        const bad = new Uint8Array(W * H);
+        for (let jj = 0; jj < H; jj++) {
+          for (let ii = 0; ii < W; ii++) {
+            const k = (pj0 + jj) * goal.nx + (pi0 + ii);
+            if (goal.covered[k] === 1 && (goal.z[k] as number) > region.floorZ + tol) bad[jj * W + ii] = 1;
+          }
+        }
+        // Prefix sums over `bad`, then `safe` (a disc-sized box with no bad cell), then over `safe`.
+        const W1 = W + 1;
+        const pre = (src: Uint8Array): Int32Array => {
+          const P = new Int32Array(W1 * (H + 1));
+          for (let jj = 0; jj < H; jj++) {
+            for (let ii = 0; ii < W; ii++) {
+              P[(jj + 1) * W1 + (ii + 1)] = src[jj * W + ii]! + P[jj * W1 + (ii + 1)]! + P[(jj + 1) * W1 + ii]! - P[jj * W1 + ii]!;
             }
           }
-          return false;
+          return P;
+        };
+        const boxSum = (P: Int32Array, x0: number, y0: number, x1: number, y1: number): number =>
+          P[(y1 + 1) * W1 + (x1 + 1)]! - P[y0 * W1 + (x1 + 1)]! - P[(y1 + 1) * W1 + x0]! + P[y0 * W1 + x0]!;
+        const badPre = pre(bad);
+        const safe = new Uint8Array(W * H);
+        for (let jj = 0; jj < H; jj++) {
+          for (let ii = 0; ii < W; ii++) {
+            const x0 = Math.max(0, ii - reach), x1 = Math.min(W - 1, ii + reach);
+            const y0 = Math.max(0, jj - reach), y1 = Math.min(H - 1, jj + reach);
+            if (boxSum(badPre, x0, y0, x1, y1) === 0) safe[jj * W + ii] = 1;
+          }
+        }
+        const safePre = pre(safe);
+        const safeWithinReach = (i: number, j: number): boolean => {
+          const ii = i0 + i - pi0;
+          const jj = j0 + j - pj0;
+          const x0 = Math.max(0, ii - pad), x1 = Math.min(W - 1, ii + pad);
+          const y0 = Math.max(0, jj - pad), y1 = Math.min(H - 1, jj + pad);
+          return boxSum(safePre, x0, y0, x1, y1) > 0;
         };
         const inside = (i: number, j: number): boolean => {
           const k = (j0 + j) * goal.nx + (i0 + i);
@@ -820,20 +855,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           const y = goal.y0 + (j0 + j) * pitch;
           // The footprint is the cheap gate; only a cell inside the pocket can be cut.
           if (!pointInPolygons(region.footprint, x, y)) return false;
-          // #1092 — A COVERAGE REST CUTS A FLOOR, NOT A CEILING. A rest cuts at `region.floorZ`.
-          // Where the design already sits AT or BELOW that depth the pass removes stock and leaves
-          // the design — never a gouge, so the cell stays (this also keeps set B's nested pocket-6
-          // rim, whose neighbouring design is a deeper cavity). Where the design stands ABOVE the
-          // depth the cell is a ceiling UNLESS the goal reaches the pass's own floor within the
-          // cutter's reach — there the cell is the floor's own rim/wall foot, which the rest's disc
-          // reaches tangentially (set B's wall-foot strips: the floor is 0.1 mm away, so the mask
-          // is unchanged and all nine programs stay byte-identical). Without that witness the pass
-          // cuts the design itself: the elephant's j29, where 18.03 % of the goal was adjudicated
-          // cut-into (24.75 mm) at pocket-0's floor of −26.104 — and where a first, neighbour-count
-          // version of this rule still left five 4.3-4.8 mm blocks, exactly the cells with no goal
-          // cell at or below the floor within the ⌀3.175 rest's radius.
-          if ((goal.z[k] as number) <= region.floorZ + tol) return true;
-          return floorWithinReach(i, j);
+          return safeWithinReach(i, j);
         };
         return cellPolygons(inside, i1 - i0 + 1, j1 - j0 + 1, goal.x0 + i0 * pitch, goal.y0 + j0 * pitch, pitch);
       };
