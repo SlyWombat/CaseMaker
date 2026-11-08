@@ -168,9 +168,16 @@ describe('#1073 — a setup’s contour posts in its own frame', () => {
         'M332',
         'M2',
       ].join('\n');
+    const refused = (x: string): boolean => verifyProgram(prog(x), ctx).findings.some((f) => f.code === 'bracket-in-path');
     // 0.408 mm from the arm's face: inside radius 1.5875 + fit 0.1 + clearance 1 = 2.6875 → refused.
-    expect(verifyProgram(prog('0.408'), ctx).findings.some((f) => f.code === 'bracket-in-path')).toBe(true);
-    // 4.2 mm out: the same cut is clear of the arm.
-    expect(verifyProgram(prog('4.2'), ctx).findings.some((f) => f.code === 'bracket-in-path')).toBe(false);
+    // This is the side NEAR the arm, whichever side it is: on placement A it is side 2 (the flip
+    // mirrors the part to 1.99 mm off the left edge); on the mirrored placement it is side 1. The
+    // rule reads the same boxes either way — 0f's ruling: flipReflection reflects the blank's
+    // contents (goal, bands, bores, release path), never fixtures or stock.
+    expect(refused('0.408')).toBe(true);
+    // The side AWAY from the arm (4.688 mm clear, 2 mm beyond the requirement) posts. Under the
+    // mirrored placement the ROLES swap — the refused program belongs to side 1 and the posted one
+    // to side 2 — but every call the verifier makes is the one above: same boxes, same rule.
+    expect(refused('4.688')).toBe(false);
   });
 });
