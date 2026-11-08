@@ -51,6 +51,9 @@ import {
 } from '@/engine/cnc/engrave/oracle';
 import { computeCopperTopology, type PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
 import { checkDesignReach, checkGoalCutInto, goalCutIntoUnchecked, type DesignCheckItem, type GoalCutIntoOptions } from '@/engine/cnc/engrave/designCheck';
+import { checkGoalCutIntoRotary } from './goalCheckRotary';
+import type { GoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
+import type { RotarySection } from '@/engine/cnc/rotary/wrap';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
@@ -538,6 +541,15 @@ export type GoalCheckInput =
       sweptTopExact?: ResultTop;
       opts?: GoalCutIntoOptions;
     }
+  | {
+      /**
+       * #1083 — A ROTARY GOAL, ON THE MAP: the goal's radial field (the CAM's own sampler) paired
+       * with the live column grid. The comparison (`goalCheckRotary.ts`) reads radii per (X, θ).
+       */
+      rotaryGoal: GoalRadialField;
+      section: RotarySection | null;
+      opts?: GoalCutIntoOptions;
+    }
   | { unchecked: string; opts?: GoalCutIntoOptions };
 
 export interface SimSession {
@@ -626,6 +638,11 @@ export interface SimSession {
    * rotary/refused session (`goalInputFor`).
    */
   canStampGoal(): boolean;
+  /**
+   * #1083 — whether the live sweep is a ROTARY column, whose grid can be compared with a goal's
+   * radial field (`goalCheckRotary.ts`). Cheap, so a caller skips the radial sampling otherwise.
+   */
+  canStampRotaryGoal(): boolean;
   /**
    * #857 — the region the CURRENT sweep has cut at or below `zSlice` (work frame), with the band
    * the oracle would judge it in: the same slice the volumetric comparison reads, handed to a
@@ -1341,10 +1358,22 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     const goalCutInto =
       'unchecked' in goal
         ? goalCutIntoUnchecked(goal.unchecked, goal.opts?.passCoverage)
-        : checkGoalCutInto(goal.heightfield, goal.sweptTop ?? null, {
-            ...goal.opts,
-            ...(goal.sweptTopExact === undefined ? {} : { leftoverTop: goal.sweptTopExact }),
-          });
+        : 'rotaryGoal' in goal
+          ? ((): ReturnType<typeof goalCutIntoUnchecked> => {
+              // #1083 — THE ROTARY COMPARISON, on the live column grid and the goal's radial field.
+              const l = live;
+              if (l === null || l.kind !== 'column' || l.column.grid.kind !== 'rotary') {
+                return goalCutIntoUnchecked(
+                  'the rotary goal was not compared — the live sweep is not on the rotary map',
+                  goal.opts?.passCoverage,
+                );
+              }
+              return checkGoalCutIntoRotary(goal.rotaryGoal, l.column.grid, goal.section, goal.opts ?? {});
+            })()
+          : checkGoalCutInto(goal.heightfield, goal.sweptTop ?? null, {
+              ...goal.opts,
+              ...(goal.sweptTopExact === undefined ? {} : { leftoverTop: goal.sweptTopExact }),
+            });
     return { ...report, goalCutInto, ok: report.ok && goalCutInto.ok };
   };
 
@@ -1500,6 +1529,12 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
   const canStampGoal = (): boolean => {
     const l = live;
     return l !== null && (l.kind === 'swept' || (l.kind === 'column' && l.column.grid.kind === 'flat'));
+  };
+  // #1083 — the rotary map's own stamp: a column grid in (X, θ) of radii, which the goal's radial
+  // field is compared with cell by cell.
+  const canStampRotaryGoal = (): boolean => {
+    const l = live;
+    return l !== null && l.kind === 'column' && l.column.grid.kind === 'rotary';
   };
   const stampSource = (): { timeline: Timeline; tool: Tool } | null => {
     const l = live;
@@ -1728,6 +1763,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     sweptWhoExact,
     sweptClExact,
     canStampGoal,
+    canStampRotaryGoal,
     dispose,
     get loaded() {
       return live !== null;

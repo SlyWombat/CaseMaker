@@ -14,6 +14,7 @@
  */
 
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { rotaryMapOf, type RotarySection } from '@/engine/cnc/rotary/wrap';
 import { pureGoalObject } from './jobKind';
 import type { GoalCutIntoOptions } from './designCheck';
 
@@ -41,7 +42,16 @@ export type GoalCheckTarget = Pick<
  * with the check's own options (`passCoverage`, #948), which the caller reads from the shop.
  */
 export type SimGoalCheck =
-  | { target: GoalCheckTarget; opts?: GoalCutIntoOptions }
+  | {
+      target: GoalCheckTarget;
+      /**
+       * #1083 — A ROTARY GOAL IS COMPARED ON THE MAP. The relief's material lives in (X, θ) with
+       * radii, so the worker samples the goal's radial field at this radius and pairs it with the
+       * live column grid; absent, the goal is the flat heightfield check it always was.
+       */
+      rotary?: { radius: number; section: RotarySection | null };
+      opts?: GoalCutIntoOptions;
+    }
   | { unchecked: string; opts?: GoalCutIntoOptions };
 
 /**
@@ -69,8 +79,13 @@ export function goalCheckForProgram(
     };
   }
   const { sha256, format, data, position, rotation, rotationX, rotationY, size, relief, scale, goalMode } = goal;
+  // #1083 — a goal held in the rotary chuck is judged from the radial field against the map's own
+  // column grid, so the sample's own frame facts ride along (the section names the stock's surface
+  // between the flats, which a cell the relief never cuts keeps).
+  const rotary = rotaryMapOf(job);
   return {
     target: { sha256, format, data, position, rotation, rotationX, rotationY, size, relief, scale, goalMode },
+    ...(rotary === null ? {} : { rotary: { radius: rotary.radius, section: rotary.section } }),
     ...(opts === undefined ? {} : { opts }),
   };
 }
