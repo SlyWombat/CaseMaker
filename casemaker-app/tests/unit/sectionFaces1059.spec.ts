@@ -181,6 +181,7 @@ describe('#1059 the face CAM reads the block’s own section', () => {
     if (!out.ok) throw new Error(`the sweep refused: ${JSON.stringify(out.diagnostics)}`);
     const s = out.value;
     const span = face.toX - face.fromX;
+    if (TOOL.diameter === null) throw new Error('the fixture cutter states no diameter');
     const cutterRadius = TOOL.diameter / 2;
     // The cut is the whole flat, 2 mm deep. The plan's span is the CUTTER CENTRE's travel, so the
     // removal reaches one cutter radius past each end (rounded by the pass discs): the slab

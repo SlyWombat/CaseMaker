@@ -1396,6 +1396,13 @@ const jobBedBindingSchema = z.object({
       viseJawTopZ: z.number().finite().nullable().describe('The vise jaw top the job was planned against, mm; null when it was unmeasured.'),
       bracketSeatZ: z.number().finite().nullable().describe('The bracket seat the job was planned against, mm; null when it was unmeasured.'),
       rotaryAxis: z.number().finite().nullable().describe('The rotary axis line the job was planned against, mm; null when it was unmeasured.'),
+      // #1059 — absent on a job bound before this datum existed (the same byte-for-byte rule).
+      rotaryFaceAngle: z
+        .number()
+        .finite()
+        .nullable()
+        .optional()
+        .describe('The square stock’s A zero the job was planned against, degrees; null when it was never levelled.'),
     })
     .optional()
     .describe('The datum snapshot the job was planned against; omit on a job bound before the snapshot existed.'),

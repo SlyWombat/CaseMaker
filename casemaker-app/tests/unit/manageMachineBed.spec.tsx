@@ -87,7 +87,7 @@ describe('#511 the Bed block', () => {
     // A fresh copy, so the null datums do not leak into the shared fixture for later tests.
     m.bedProfiles = m.bedProfiles!.map((p) => ({
       ...p,
-      datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null },
+      datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null, rotaryFaceAngle: null },
     }));
     render(<MachineBed machine={m} />);
 

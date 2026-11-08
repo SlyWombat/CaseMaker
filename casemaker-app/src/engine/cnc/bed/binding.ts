@@ -61,6 +61,8 @@ export function bindJob(profile: BedProfile): JobBedBinding {
       viseJawTopZ: datumValue(profile.datums.viseJawTopZ),
       bracketSeatZ: datumValue(profile.datums.bracketSeatZ),
       rotaryAxis: datumValue(profile.datums.rotaryAxis),
+      // #1059 — degrees, not millimetres: a re-levelled square invalidates a bound job's A zero.
+      rotaryFaceAngle: datumValue(profile.datums.rotaryFaceAngle),
     },
   };
 }
@@ -68,18 +70,22 @@ export function bindJob(profile: BedProfile): JobBedBinding {
 /** One way the bed moved under a job, in words. */
 export interface BedDifference {
   /** Which datum (or the profile itself). */
-  what: 'profile' | 'version' | 'surfaceTopZ' | 'viseJawTopZ' | 'bracketSeatZ' | 'rotaryAxis';
+  what: 'profile' | 'version' | 'surfaceTopZ' | 'viseJawTopZ' | 'bracketSeatZ' | 'rotaryAxis' | 'rotaryFaceAngle';
   text: string;
 }
 
-const DATUM_WORD: Readonly<Record<'surfaceTopZ' | 'viseJawTopZ' | 'bracketSeatZ' | 'rotaryAxis', string>> = {
+const DATUM_WORD: Readonly<Record<'surfaceTopZ' | 'viseJawTopZ' | 'bracketSeatZ' | 'rotaryAxis' | 'rotaryFaceAngle', string>> = {
   surfaceTopZ: 'surface top',
   viseJawTopZ: 'jaw top',
   bracketSeatZ: 'bracket seat',
   rotaryAxis: 'rotary axis',
+  // #1059 — the datum is in degrees; the sentence says so rather than "mm".
+  rotaryFaceAngle: 'face angle',
 };
 
 const mm = (v: number): string => `${Number(v.toFixed(3))} mm`;
+/** The face angle's own unit: degrees of A turn, never millimetres. */
+const deg = (v: number): string => `${Number(v.toFixed(3))}°`;
 
 /**
  * The differences between the bed a job was planned on and the bed the machine has now, in words.
@@ -109,13 +115,16 @@ export function diffBed(
   const out: BedDifference[] = [];
   const snapshot = jobBed.datums;
   if (snapshot !== undefined) {
-    for (const key of ['surfaceTopZ', 'viseJawTopZ', 'bracketSeatZ', 'rotaryAxis'] as const) {
+    for (const key of ['surfaceTopZ', 'viseJawTopZ', 'bracketSeatZ', 'rotaryAxis', 'rotaryFaceAngle'] as const) {
       const before = snapshot[key];
+      // A snapshot written before this datum existed says nothing about it — not "it moved".
+      if (before === undefined) continue;
       const now = datumValue(active.datums[key]);
       if (before === now) continue;
-      if (before === null && now !== null) out.push({ what: key, text: `the ${DATUM_WORD[key]} is now measured at ${mm(now)}` });
-      else if (before !== null && now === null) out.push({ what: key, text: `the ${DATUM_WORD[key]} (${mm(before)}) is unmeasured now` });
-      else out.push({ what: key, text: `the ${DATUM_WORD[key]} moved from ${mm(before as number)} to ${mm(now as number)}` });
+      const unit = key === 'rotaryFaceAngle' ? deg : mm;
+      if (before === null && now !== null) out.push({ what: key, text: `the ${DATUM_WORD[key]} is now measured at ${unit(now)}` });
+      else if (before !== null && now === null) out.push({ what: key, text: `the ${DATUM_WORD[key]} (${unit(before)}) is unmeasured now` });
+      else out.push({ what: key, text: `the ${DATUM_WORD[key]} moved from ${unit(before as number)} to ${unit(now as number)}` });
     }
   }
   if (out.length === 0) out.push({ what: 'version', text: 'the bed profile was edited since this job was set up' });
