@@ -249,6 +249,7 @@ import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances, PlanStatement }
 // single `top` `SetupSpec` below (`buildModelPlanInputForGoal`'s own doc on why).
 import { buildSetupSpecs, frameForFace } from '@/engine/cnc/cam/model/setups';
 import type { Mount, MountSpec } from '@/engine/cnc/setups/types';
+import { setupStockFor } from '@/engine/cnc/setups/perSetupStock';
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import { base64ToArrayBuffer } from '@/engine/import/base64';
 import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
@@ -5254,13 +5255,21 @@ export async function buildModelPlanInputForGoal(
   // #999 — the tri-state passes through unchanged: undefined = the engine chooses, null = ball alone.
   const curvedRoughTool: Tool | null | undefined = validateGoalRoughTool(goal.roughToolKey, shop.tools ?? [], goal.id).tool;
 
+  // #1082 stage 2 — EACH SETUP'S OWN STOCK (the vendor flip's side 2 is the freed part): the
+  // document's stated box, or a flipped setup's derived one, attached by index; absent, the spec
+  // keeps reading the job's blank exactly as before.
+  const setupsWithStock: SetupSpec[] = bandedSetups.map((spec, i) => {
+    const own = setupStockFor(job, job.setups?.[i], null);
+    return own === null ? spec : { ...spec, stock: { length: own.length, width: own.width, thickness: own.thickness } };
+  });
+
   return {
     geometry,
-    setups: bandedSetups,
+    setups: setupsWithStock,
     // #943 (10) — the JOB's own setup count rides the input, so a caller that re-plans ONE setup
     // alone (#1017's twin) keeps the two-setup rules: `outline-is-stock` reads this, not the
     // narrowed input's `setups.length`.
-    jobSetupCount: bandedSetups.length,
+    jobSetupCount: setupsWithStock.length,
     // #943 (10) — a job that STATES its underside says how its freeing tabs are: `underside.tabs`
     // as written, or none when the block leaves it out (a part freed by the cut alone, the
     // vendor tray's own side 1). A job with no underside block keeps the pocket chain's default.
