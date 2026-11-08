@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import { planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
+import { flatEndMill } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
@@ -139,4 +140,27 @@ describe('#1073 — the locating holes ride setup 1', () => {
     expect(result.programs.at(-1)!.setupIndex).toBe(2);
   }, 240_000);
 
+  it('stops the run by name when no owned flat can bore the holes', async () => {
+    const job = jobForFrustum();
+    const goal = job.targetObject!;
+    // A shop with no flat at all: the hold cannot be made, and the run must NOT carry on without
+    // it — side 2 could never register, and the operator would only find out at the bench.
+    const ball = flatEndMill(2, { number: 2, id: 'ball-2', name: 'ball-2', shape: 'ball' });
+    const ballEntry = entry('inv:ball-2', ball);
+    const plan = planFlipSetups(job, goal, ['top', 'bottom'], [ballEntry], {
+      method: 'tabs-in-blank',
+      axis: 'left-right',
+    });
+    if (!plan.ok) throw new Error(plan.reason);
+    expect(plan.hold).toBeNull();
+
+    const sided: EngraveJob = { ...job, setups: plan.setups, targetObjects: plan.goals };
+    const tl = await getToplevel();
+    const result = await engraveGenerate(tl, sided, FLAT3, [], null, undefined, { tools: [ballEntry] });
+    expect(result.ok).toBe(false);
+    expect(result.stage).toBe('cam');
+    const message = result.errors.map((e) => e.message).join('; ');
+    expect(message).toContain('locating holes (#1073):');
+    expect(message).toContain('no owned flat end mill');
+  }, 240_000);
 });

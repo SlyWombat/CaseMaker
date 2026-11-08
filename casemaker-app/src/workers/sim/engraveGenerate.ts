@@ -6036,8 +6036,26 @@ async function generateGoalPrograms(
   const programs: EngraveProgram[] = [...firstPrograms];
   // #1073 — THE LOCATING HOLES RIDE SETUP 1, AFTER ITS LAST PROGRAM. Appended HERE, once, before
   // the loop over the later sides: setup 2 cannot receive this file by construction.
+  //
+  // A dropped locating program is a STOP, never a silent skip: without the bores side 2 cannot
+  // register, and the operator would only find out at the bench. The refusal names the reason in
+  // the same words the rest of the run uses, and the programs generated so far stay on the result.
   const locating = await locatingHolesProgram(tl, job, sides, feedCatalogue, calibration, margins, shop);
-  if (locating !== null) programs.push(locating);
+  if (locating !== null) {
+    if ('reason' in locating) {
+      return {
+        ...first,
+        ok: false,
+        stage: 'cam',
+        cam: null,
+        nc: null,
+        verify: null,
+        programs,
+        errors: [{ stage: 'cam', message: `locating holes (#1073): ${locating.reason}` }],
+      };
+    }
+    programs.push(locating.program);
+  }
   for (const side of sides.slice(1)) {
     const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue });
     const sideList = sidePrograms(one, side);
@@ -6060,8 +6078,12 @@ async function generateGoalPrograms(
  * THE SUB-JOB IS THE MECHANISM, exactly as every other program is made (#419 J3): a copy of the
  * job carrying only these two drills, handed to `generateOneProgram` — so the bore is planned,
  * posted and verified by the same CAM, post and verifier as the rest of the run, and the operator
- * loads it like any other file. Null when the job states no frame flip, or when no owned flat can
- * bore the hole.
+ * loads it like any other file.
+ *
+ * NULL ONLY WHEN THERE IS NOTHING TO DO: no flip, or the vendor method (which registers on the
+ * freed part's silhouette and bores nothing). A frame flip that HAS a hold but cannot cut it is a
+ * `reason`, and the caller stops the run by name — a silent skip would send the operator to the
+ * bench with no holes to register on.
  */
 async function locatingHolesProgram(
   tl: ManifoldToplevel,
@@ -6071,7 +6093,7 @@ async function locatingHolesProgram(
   calibration: MachineCalibration | null,
   margins: EngraveMargins,
   shop: EngraveShopOpts,
-): Promise<EngraveProgram | null> {
+): Promise<{ program: EngraveProgram } | { reason: string } | null> {
   const firstSide = sides[0];
   const flipped = sides[1];
   const flip = flipped?.setup.flip;
@@ -6083,9 +6105,15 @@ async function locatingHolesProgram(
   // its X (`planFlipSetups`' own reading, through `orient`).
   const about = flip.axis === 'left-right' ? 'y' : 'x';
   const hold = dowelHold(job, firstSide.goal, about, shop.tools ?? []);
-  if (hold === null) return null;
+  if (hold === null) {
+    return {
+      reason:
+        'no owned flat end mill can bore the two ⌀6 locating holes — record a flat narrower than the bore, ' +
+        'one whose stated reach covers the hole’s depth (Manage › Tools)',
+    };
+  }
   const entry = (shop.tools ?? []).find((e) => e.key === hold.cutter) ?? entryFor(hold.cutter);
-  if (entry === null) return null;
+  if (entry === null) return { reason: `the hold’s cutter “${hold.cutter}” is not in the tool library` };
   const bores: EngraveDrill[] = hold.at.map((position, i) => ({
     kind: 'drill',
     id: `flip-locating-hole-${i + 1}`,
@@ -6124,13 +6152,18 @@ async function locatingHolesProgram(
     substitution: undefined,
   };
   const one = await generateOneProgram(tl, sub, entry.tool, catalogue, calibration, margins, shop, 'whole', false);
-  if (!(one.ok && one.nc !== null && one.verify !== null)) return null;
-  return programOf(one, {
-    setupIndex: firstSide.setupIndex + 1,
-    setupId: firstSide.setup.id,
-    toolKey: entry.key,
-    itemIds: bores.map((b) => b.id),
-  });
+  if (!(one.ok && one.nc !== null && one.verify !== null)) {
+    const why = one.errors.map((e) => e.message).join('; ');
+    return { reason: why.length === 0 ? 'the bore program was refused' : `the bore program was refused — ${why}` };
+  }
+  return {
+    program: programOf(one, {
+      setupIndex: firstSide.setupIndex + 1,
+      setupId: firstSide.setup.id,
+      toolKey: entry.key,
+      itemIds: bores.map((b) => b.id),
+    }),
+  };
 }
 
 /**
