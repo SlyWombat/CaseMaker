@@ -32,14 +32,15 @@ import { entry, FLAT3, stl } from './helpers/twoSetupBox966';
 
 const FLAT_ENTRY: ToolLibraryEntry = entry('inv:flat-3', FLAT3);
 
-/** A 30 × 20 × 20 part on a 40 × 30 × 20 blank: 10 mm of X margin for the hold's two bores. */
-const STOCK = { length: 40, width: 30, thickness: 20 };
+/** A 60 × 40 × 20 part on an 80 × 50 × 20 blank: X margin for the hold's bores, and room for
+ *  the tab release's 4 bridges (≥ 15 mm from the corners, ≥ 10 mm from the bores). */
+const STOCK = { length: 80, width: 50, thickness: 20 };
 
 type V = [number, number, number];
 type Tri = [V, V, V];
 
 /**
- * A closed frustum: bottom 20 × 12 at z −20, WIDEST 30 × 20 at z −10, top 16 × 10 at z 0.
+ * A closed frustum: bottom 40 × 24 at z −20, WIDEST 60 × 40 at z −10, top 32 × 20 at z 0.
  *
  * The shape a flip's tab band needs: the widest cross-section sits strictly INSIDE the part (a
  * plain box's is its own top face, where `flipTabBands` refuses a band). Its widest outline is a
@@ -53,9 +54,9 @@ function frustumTris(): Tri[] {
     [x, y, z],
     [-x, y, z],
   ];
-  const B = ring(10, 6, -20);
-  const M = ring(15, 10, -10);
-  const T = ring(8, 5, 0);
+  const B = ring(20, 12, -20);
+  const M = ring(30, 20, -10);
+  const T = ring(16, 10, 0);
   const quad = (out: Tri[], a: V, b: V, c: V, d: V): void => {
     out.push([a, b, c], [a, c, d]);
   };
@@ -78,8 +79,8 @@ function frustumGoal(): EngraveTargetObject {
     format: 'stl',
     sha256: 'd'.repeat(64),
     data: stl(frustumTris()),
-    size: { x: 30, y: 20, z: 20 },
-    position: { x: 20, y: 15, z: 0 },
+    size: { x: 60, y: 40, z: 20 },
+    position: { x: 40, y: 25, z: 0 },
     rotation: 0,
     enabled: true,
     role: 'goal',
