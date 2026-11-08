@@ -250,15 +250,16 @@ describe('#733 a job posts one program per cutter', () => {
     if (run.receipt!.command !== 'engrave') throw new Error('expected the engrave receipt');
     const details = run.receipt!.details;
 
-    // Two programs, in cut order, named the way the run sheet and the release step name them: the
-    // first keeps the job's own file name, a later one takes `-p<n>`.
-    expect(details.programs.map((p) => p.ncFile)).toEqual([stem, `${stemNoExt}-p2.nc`]);
-    for (const file of [stem, `${stemNoExt}-p2.nc`]) {
+    // Two programs, in cut order, named by the ONE rule (#1093 R1): more than one program numbers
+    // every one of them, zero-padded to the width of the total — the unnumbered `<job>.nc` is
+    // written only when the job holds a single program.
+    expect(details.programs.map((p) => p.ncFile)).toEqual([`${stemNoExt}-p1.nc`, `${stemNoExt}-p2.nc`]);
+    for (const file of [`${stemNoExt}-p1.nc`, `${stemNoExt}-p2.nc`]) {
       expect(existsSync(join(run.outDir, file)), `${file} was written`).toBe(true);
     }
 
     // Each file names the cutter it was posted for, and the two are genuinely different programs.
-    const first = readFileSync(join(run.outDir, stem), 'utf8');
+    const first = readFileSync(join(run.outDir, `${stemNoExt}-p1.nc`), 'utf8');
     const second = readFileSync(join(run.outDir, `${stemNoExt}-p2.nc`), 'utf8');
     expect(first).toContain(`;@CM|TOOL|key=${FIRST}`);
     expect(second).toContain(`;@CM|TOOL|key=${SECOND}`);
@@ -721,7 +722,8 @@ describe('#760 a job that names no cutter is given one, the way the design route
     // setup 2 may be a pair (its own cutter count is the search's answer, not this test's).
     if (run.receipt?.command !== 'engrave') throw new Error('expected the engrave receipt');
     const files = run.receipt.details.programs.map((p) => p.ncFile);
-    expect(files[0]).toBe(`${stem}.nc`);
+    // #1093 R1 — a two-program run's first file is `-p1.nc`, not the unnumbered `<job>.nc`.
+    expect(files[0]).toBe(`${stem}-p1.nc`);
     expect(files.length).toBeGreaterThanOrEqual(2);
     for (const file of files) expect(existsSync(join(run.outDir, file)), file).toBe(true);
   });

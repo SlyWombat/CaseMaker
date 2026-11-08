@@ -435,6 +435,60 @@ export function finishBallCandidates(house: readonly Tool[], deepestMm: number):
   return withLegacy(longest === undefined ? [] : [longest]);
 }
 
+/**
+ * #1111 R2 — A TIE IS DECIDED BY STATED KEYS, NEVER BY THE ORDER THE HOUSE ARRIVED IN.
+ *
+ * Two candidates that finish the remainder equally well (the same leftover within 1e-9 and the
+ * same cycle within 1e-9) used to keep whichever was measured first — and "first" was the registry
+ * order, which differed between the app and the CLI (catalogue order vs inventory order), so the
+ * two doors posted the same toolpath under different cutters' headers (the M1 tray's ⌀3.175 ball).
+ *
+ * The keys, in this order:
+ *  1. FEED-ROW PROVENANCE — a row measured on this machine beats a table row for the same material;
+ *  2. REACH MARGIN — `fluteLength − deepest feed Z of the candidate's own programs`, larger wins; a
+ *     cutter that states no flute has margin 0 and loses to any stated one. A tie at 0.387 mm is
+ *     inside the Z-datum uncertainty (#1017/#1018's unmeasured jaw tops), so margin is a safety
+ *     fact the plan can read, unlike stiffness or finish, which the shop states by what it owns;
+ *  3. THE REGISTRY KEY, lexical — the last resort, so the pick is total and reproducible.
+ */
+export interface BallTieKeys {
+  measured: number;
+  margin: number;
+  key: string;
+}
+
+function ballTieKeys(input: ModelPlanInput, tool: Tool, ops: readonly { outcome: OpOutcome }[]): BallTieKeys {
+  const catalogue = input.feedCatalogue ?? feedCatalogueSnapshot();
+  const resolved = feedsFor(catalogue, input.stock.material, feedsToolForSurface(tool), Z1);
+  let deepest = 0;
+  for (const op of ops) {
+    for (const operation of op.outcome.ir.operations) {
+      for (const move of operation.moves) if (move.kind !== 'rapid') deepest = Math.max(deepest, -move.z);
+    }
+  }
+  return {
+    measured: resolved.ok && resolved.entry.status === 'measured' ? 1 : 0,
+    margin: (tool.fluteLength ?? 0) - deepest,
+    key: cutterKeyOf(tool),
+  };
+}
+
+/** Positive when `a` beats `b`; #1111 R2's order: measured feeds, reach margin, the key. */
+export function ballTieDecision(a: BallTieKeys, b: BallTieKeys): number {
+  if (a.measured !== b.measured) return a.measured - b.measured;
+  if (Math.abs(a.margin - b.margin) > 1e-9) return a.margin - b.margin;
+  return a.key < b.key ? 1 : a.key > b.key ? -1 : 0;
+}
+
+/** The sentence the rank row carries when a tie decided the pick — the keys it was decided on. */
+export function ballTieSentence(winner: Tool, w: BallTieKeys, loser: Tool, l: BallTieKeys): string {
+  const why =
+    w.measured !== l.measured
+      ? `feeds measured on this machine against ${loser.name}'s table row`
+      : `${w.margin.toFixed(2)} mm of reach margin against ${l.margin.toFixed(2)} mm`;
+  return `tie on leftover and cycle — chose ${winner.name} (${w.key}) for ${why}`;
+}
+
 export interface PlanOutcome {
   coverage: number | null;
   /**
@@ -1137,9 +1191,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // silent drop: its own typed statement, one per candidate.
     const capStatements: PlanStatement[] = [];
     if (coverageGoal !== undefined && goalCoverage !== undefined && ballCandidates.length > 1 && tree.remainder.length > 0) {
-      let best: { tool: Tool; leftover: number; cycle: number } | null = null;
+      let best: { tool: Tool; leftover: number; cycle: number; tie: BallTieKeys } | null = null;
       let uncappedBest: { tool: Tool; leftover: number; cycle: number } | null = null;
       const measuredRows: string[] = [];
+      /** #1111 R2 — the sentence for the tie that decided the pick, when one did. */
+      let tieStatement: string | null = null;
       // #986 — MEASURE THE LIKELY WINNER FIRST, THEN STOP AT THE FIRST NON-IMPROVEMENT. Candidates
       // are ordered FINE → COARSE, because leftover is monotone in the diameter: a smaller ball
       // reaches deeper into a crease, so it leaves no more than a larger one on the same remainder.
@@ -1202,11 +1258,32 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         }
         const diameterMm = cuttingDiameter(candidate) ?? 0;
         measuredRows.push(`⌀${diameterMm.toFixed(2)} mm ${candidate.name}: leftover ${(leftover * 100).toFixed(2)} %, cycle ${cycle.toFixed(0)} s`);
+        // #1111 R2 — the candidate's own tie keys, read while its ops are still in hand (the memo
+        // evicts a replaced incumbent's work).
+        const tie = ballTieKeys(input, candidate, measured.ops);
         if (best === null || leftover < best.leftover - 1e-9 || (Math.abs(leftover - best.leftover) <= 1e-9 && cycle < best.cycle)) {
           // #1054 — the memo keeps the incumbent's ops only: a replaced best is evicted, so the
           // rank never holds more than the best candidate's work plus the one being measured.
           if (best !== null) stageMemo.evictOwner(cutterKeyOf(best.tool));
-          best = { tool: candidate, leftover, cycle };
+          best = { tool: candidate, leftover, cycle, tie };
+          continue;
+        }
+        // #1111 R2 — EQUAL OUTCOME IS NOT A REASON TO KEEP THE FIRST ARRIVAL. When leftover and
+        // cycle are the same, the stated keys decide; the sentence names what won it.
+        if (Math.abs(leftover - best.leftover) <= 1e-9 && Math.abs(cycle - best.cycle) <= 1e-9) {
+          const candidateWins = ballTieDecision(tie, best.tie) > 0;
+          tieStatement = ballTieSentence(
+            candidateWins ? candidate : best.tool,
+            candidateWins ? tie : best.tie,
+            candidateWins ? best.tool : candidate,
+            candidateWins ? best.tie : tie,
+          );
+          if (candidateWins) {
+            stageMemo.evictOwner(cutterKeyOf(best.tool));
+            best = { tool: candidate, leftover, cycle, tie };
+          } else {
+            stageMemo.evictOwner(cutterKeyOf(candidate));
+          }
           continue;
         }
         // Coarser and not better: stop. Every remaining candidate is coarser still. The monotone
@@ -1225,6 +1302,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       const chosen = best === null ? 'no candidate could plan the remainder — the pre-#986 pick stands' : `${best.tool.name} (leftover ${(best.leftover * 100).toFixed(2)} %, cycle ${best.cycle.toFixed(0)} s)`;
       ballRankNotes.push(
         `ball rank: measured ${measuredRows.length} candidate(s) — ${measuredRows.join('; ')}. Chosen: ${chosen}.` +
+          (tieStatement === null ? '' : ` ${tieStatement}.`) +
           (uncappedBest !== null && (best === null || uncappedBest.tool !== best.tool)
             ? ` The uncapped best is ${uncappedBest.tool.name} (leftover ${(uncappedBest.leftover * 100).toFixed(2)} %, cycle ${uncappedBest.cycle.toFixed(0)} s).`
             : ''),

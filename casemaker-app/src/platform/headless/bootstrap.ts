@@ -453,6 +453,12 @@ export interface HeadlessBootstrapOptions {
    * means `location.json`, then `house.json`, then no document at all.
    */
   location?: string;
+  /**
+   * #1111 R1 — the catalogue to register beside the location's own tools, when the caller names
+   * one (the CLI's `--catalogue`). Absent means the `catalogue.json` beside the chosen location,
+   * else the app's default data directory — the same sibling rule `loadCatalogue` already uses.
+   */
+  catalogue?: string;
 }
 
 export interface HeadlessBootstrap {
@@ -460,16 +466,46 @@ export interface HeadlessBootstrap {
   manifold: ManifoldToplevel;
   /** The document that was read, or null when this machine has none. */
   location: LoadedLocation | null;
+  /** #1111 — the catalogue registered beside the location's tools, or null when none was read. */
+  catalogue: LoadedCatalogue | null;
 }
 
 /**
  * Everything a headless run needs before it resolves a cutter or builds geometry: the wasm module,
  * the bundled fonts, and the machine's own document in the registry. Safe to call more than once
  * per process — the wasm and the fonts are initialised only on the first call.
+ *
+ * #1111 R1 — AND MAKERA'S CATALOGUE, BESIDE THE LOCATION'S OWN TOOLS. The app's registry is
+ * built-ins + the house service's `cat:` definitions + the inventory's `inv:` possessions; the CLI
+ * registered only the location's own list, so its candidate set carried no `cat:` entry — its IDEAL
+ * plan ran without the catalogue, and its owned order differed from the app's. Both doors now
+ * build the registry from the same three tiers.
+ *
+ * A catalogue that is present but unreadable does NOT stop the boot: the registry is a convenience
+ * for every command, and the command that actually PLANS with the catalogue (`engrave`) reads it
+ * itself and refuses the run with its own receipt (#722/#732 — `casemaker cut` on a broken
+ * catalogue still answers one parseable receipt naming the failure). Swallowing it here changed
+ * nothing about that path and would otherwise make `casemaker location tools` fail on a document
+ * it never uses.
  */
 export async function bootstrap(options: HeadlessBootstrapOptions = {}): Promise<HeadlessBootstrap> {
   const tl = await manifold();
   seedFonts();
   const location = loadLocation(options.location);
-  return { manifold: tl, location };
+  const siblingCatalogue = location === null ? undefined : joinPath(dirnamePath(location.path), CATALOGUE_FILE);
+  let catalogue: LoadedCatalogue | null = null;
+  try {
+    catalogue = loadCatalogue(options.catalogue ?? siblingCatalogue);
+  } catch (e) {
+    // A catalogue the reader refuses is the planning command's refusal to state, not boot's (see
+    // this function's doc): register the location's own tiers and let `engrave` answer with its
+    // receipt. Anything that is not a catalogue-document error is still a defect and rethrows.
+    if (!(e instanceof CatalogueDocumentError)) throw e;
+    catalogue = null;
+  }
+  // The tiers, in the app's own shape: the location's own list first, the catalogue beside it as
+  // `cat:` definitions. `dedupeCutterEntries` orders the result canonically (#1111 R2), so the
+  // concatenation order here is not a fact any pick can read.
+  setRegistry([...(location?.tools ?? []), ...(catalogue?.tools ?? [])]);
+  return { manifold: tl, location, catalogue };
 }

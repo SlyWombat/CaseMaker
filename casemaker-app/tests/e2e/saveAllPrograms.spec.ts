@@ -8,10 +8,11 @@
 //
 // The zip's five `.nc` files must be BYTE-IDENTICAL to set B — the CLI's own output for this job
 // (`fixtures/m1trayB/setB-md5.json`, the #1093 re-keyed table) — proving the app's Save, the CLI
-// and the release store name and write the same files. ONE exception is pinned and named: p5's
-// tool identity differs because the two doors carry different owned sets (#1111); its toolpath is
-// compared with those lines masked. The run sheet must name five programs with five Save buttons,
-// and the file bar must offer NO single-program Save for a run of five.
+// and the release store name and write the same files. All five are strict since #1111: the app
+// and the CLI order the owned set canonically and decide a same-diameter tie by stated keys, so
+// the ⌀3.175 finish is the 22 mm ball on both doors (this walk is #1111's gate). The run sheet must
+// name five programs with five Save buttons, and the file bar must offer NO single-program Save
+// for a run of five.
 //
 // WHY THE HOUSE IS A FIXTURE: no real house service runs in the e2e web build, and the tray's
 // bytes depend on the shop's cutters and feed rows (a run without them posts the starting table —
@@ -44,8 +45,8 @@ const SETB = JSON.parse(read('setB-md5.json')) as {
         oldName: string;
         bytes: number;
         md5: string;
-        /** #1111 — this program's TOOLPATH is equal; its tool-identity lines are not (see the file). */
-        toolIdentityMayDiffer?: { issue: number; maskedMd5: string; maskedLines: number };
+        /** #1111 — present on a file whose tool identity may legitimately differ (none today). */
+        toolIdentityMayDiffer?: { issue: number; maskedMd5: number | string; maskedLines: number };
       }[];
     }
   >;
@@ -68,33 +69,6 @@ async function menuItem(page: import('@playwright/test').Page, testid: string) {
 
 function md5(bytes: Uint8Array): string {
   return createHash('md5').update(bytes).digest('hex');
-}
-
-/**
- * #1111 — THE THREE TOOL-IDENTITY LINE KINDS a different cutter record moves: the `;@MKR|TOOL|`
- * header, the `;@CM|TOOL|key=` line and the `; T<n>-` name comment. Everything else in the file —
- * every motion line — is the program. Masking them is how this walk can say "same toolpath,
- * another ⌀3.175 ball" about a program whose bytes legitimately differ between the two doors.
- */
-const TOOL_IDENTITY_LINES = [/^;@MKR\|TOOL\|/, /^;@CM\|TOOL\|key=/, /^; T\d+-/];
-
-function maskToolIdentity(text: string): { masked: string; count: number } {
-  const lines = text.split('\n');
-  let count = 0;
-  const masked = lines.map((line) => {
-    if (!TOOL_IDENTITY_LINES.some((re) => re.test(line))) return line;
-    count += 1;
-    return '; <tool identity>';
-  });
-  return { masked: masked.join('\n'), count };
-}
-
-function toolpathMd5(bytes: Uint8Array): string {
-  return md5(new TextEncoder().encode(maskToolIdentity(new TextDecoder().decode(bytes)).masked));
-}
-
-function maskedLineCount(bytes: Uint8Array): number {
-  return maskToolIdentity(new TextDecoder().decode(bytes)).count;
 }
 
 test('#1093 — Save all writes all five programs, byte-identical to set B, and the sheet offers each one', async ({
@@ -222,24 +196,9 @@ test('#1093 — Save all writes all five programs, byte-identical to set B, and 
   expect(one.suggestedFilename()).toBe(`${JOB_NAME}-p4.nc`);
   await page.getByTestId('run-sheet-close').click();
 
-  // THE CROSS-DOOR CHECK — the app's files against set B, the CLI's own output for this job.
-  //
-  // p1–p4 are byte-identical. p5 is THE SAME TOOLPATH with a different cutter RECORD: the app's
-  // owned plan carries the house catalogue's definitions as well as the 35 owned cutters, so its
-  // finish pick chose inv:kz-ball-nose-m-3-175-10 (10 mm flute, metal) where the CLI's
-  // location-only registry chose inv:kz-ball-nose-3-175-22 (22 mm) — #1111, filed from this walk.
-  // The data file carries the masked md5 of that toolpath, so the check stays exact about the
-  // thing #1093 owns (the file bytes the app saves) while naming the seam #1111 owns.
+  // THE CROSS-DOOR CHECK — the app's files against set B, the CLI's own output for this job, all
+  // five strictly byte-identical (#1111's gate; the walk found the p5 divergence).
   for (const file of SETB_BOTTOM.files) {
-    const bytes = zip[file.name]!;
-    const differs = file.toolIdentityMayDiffer;
-    if (differs !== undefined) {
-      expect(toolpathMd5(bytes), `${file.name}’s toolpath equals set B’s (tool identity masked, #${differs.issue})`).toBe(
-        differs.maskedMd5,
-      );
-      expect(maskedLineCount(bytes), `${file.name} masks exactly the tool-identity lines`).toBe(differs.maskedLines);
-    } else {
-      expect(md5(bytes), `${file.name} equals set B’s ${file.oldName}`).toBe(file.md5);
-    }
+    expect(md5(zip[file.name]!), `${file.name} equals set B’s ${file.oldName}`).toBe(file.md5);
   }
 });

@@ -121,20 +121,26 @@ export const ToolLibrarySchema = z.array(ToolLibraryEntrySchema).superRefine((li
 export type ToolLibraryEntry = z.infer<typeof ToolLibraryEntrySchema>;
 
 /**
- * #922 — ONE PHYSICAL CUTTER, ONE ENTRY.
+ * #922 — ONE PHYSICAL CUTTER, ONE ENTRY. #1111 — IN A CANONICAL ORDER.
  *
  * The house serves the same cutter twice: a `cat:` definition from the catalogue and an `inv:`
  * possession from the inventory (the elephant stick's ⌀0.5 ball is `cat:019c049a-…` and
  * `inv:lib-161032055031`, physical id 161032055031). The app's registry and the CLI's
  * `--location` one order the two differently, and a pick that takes the first equal-geometry
  * candidate then posts the same program under different `;@CM|TOOL|key=` headers on the two
- * doors.
+ * doors (#1111's M1-tray ⌀3.175 finish: the metal 10 mm flute on the app, the 22 mm on the CLI).
  *
  * This is the one identity rule: dedupe by the physical cutter's `id`, keeping the OWNED key —
  * `inv:` (the inventory), then `user:` — over the catalogue's `cat:` definition, and a `cat:`
  * entry only when nothing owns the cutter. A cutter with no id is identified by its key, so
- * distinct entries never collapse. The first occurrence's position is kept, so an already-unique
- * list is returned unchanged.
+ * distinct entries never collapse.
+ *
+ * THE RESULT IS ORDERED CANONICALLY, NEVER BY ARRIVAL (#1111 R2): tier (`inv:` → `user:` →
+ * `cat:` → built-in), then key, lexical. Before this, the Map kept the FIRST occurrence's slot, so
+ * a surviving `inv:` entry stood where its `cat:` twin arrived — catalogue order in the app,
+ * inventory order on the CLI — and any tie that kept the first candidate became a two-door
+ * disagreement. Arrival order is data about how the documents happened to be concatenated; it is
+ * not a fact about the cutters.
  */
 export function dedupeCutterEntries(entries: readonly ToolLibraryEntry[]): ToolLibraryEntry[] {
   const rank = (key: string): number =>
@@ -147,7 +153,12 @@ export function dedupeCutterEntries(entries: readonly ToolLibraryEntry[]): ToolL
     if (held === undefined) best.set(id, { entry, rank: r });
     else if (r > held.rank) best.set(id, { entry, rank: r });
   }
-  return [...best.values()].map((b) => b.entry);
+  /** #1111 R2 — the canonical tier: owned first, the catalogue's definitions after, built-ins last. */
+  const tier = (key: string): number =>
+    key.startsWith('inv:') ? 0 : key.startsWith('user:') ? 1 : key.startsWith('cat:') ? 2 : 3;
+  return [...best.values()]
+    .map((b) => b.entry)
+    .sort((a, b) => tier(a.key) - tier(b.key) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 }
 
 export const TOOL_LIBRARY: readonly ToolLibraryEntry[] = [

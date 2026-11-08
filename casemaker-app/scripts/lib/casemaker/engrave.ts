@@ -686,7 +686,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   // Before ANY job resolves a cutter: `jobTool` reads the registry, so the machine's own documents
   // have to be in it first. The bootstrap reads the document the args named (`--location`) or the
   // machine's own, and validates it exactly as the app's import panel does (#412).
-  const boot = await bootstrap({ location: args.location }).catch((e: Error) => fail(e.message));
+  // #1111 R1 — and the catalogue beside it (or the one `--catalogue` names), so the registry holds
+  // the same three tiers the app's does before `engraveShopOpts` takes its snapshot.
+  const boot = await bootstrap({ location: args.location, ...(args.catalogue === undefined ? {} : { catalogue: args.catalogue }) }).catch((e: Error) => fail(e.message));
   const tl = boot.manifold;
   // #1052 — the wasm module's own heap, when it exposes one (the 4,096 MB cap is its own source of
   // exit 134). Emscripten's modular build may hide HEAP8; the reader then answers null and the row
@@ -1136,7 +1138,14 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       // no pool, so this is the same serial plan it always was.
       // #1068 — the app's Generate sends `mount` inside its shop; the CLI now sends the SAME object
       // (the mount's boxes reach the plan's travel heights and the program's verifier).
-      generated = await engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, { ...shop, mount: mountFor(job) });
+      generated = await engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, { ...shop, mount: mountFor(job) },
+        // #1111 R1 — THE IDEAL'S CANDIDATE SET, the same list the app sends: every tool the
+        // registry holds (the catalogue's `cat:` definitions included, registered at boot). Without
+        // it the CLI's ideal plan has no catalogue candidates and its tradeoff line differs from
+        // the app's.
+        undefined,
+        getTools().map((entry) => entry.tool),
+      );
     } catch (e) {
       if (isCliExit(e)) throw e;
       return {

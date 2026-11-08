@@ -1,5 +1,5 @@
 {
-  "_note": "#1093 R1 \u2014 set B re-keyed, NOT re-cut: the 14 programs the branch\u2019s CLI writes for the two m1trayB jobs under the one naming rule (m1trayB-top-p1..p9, m1trayB-bottom-p1..p5; p1 is the old <job>.nc). 11 contents are byte-identical to the 2026-11-07 table; the 3 in `changedSince20261107` are the ACCEPTED #1080 generator changes (top p7, top p8, bottom p4). The e2e also reads the table as the cross-door check: the app\u2019s Save all against the CLI\u2019s output. One program, bottom p5, carries a `toolIdentityMayDiffer` entry \u2014 the two doors\u2019 owned sets differ and pick a different \u23003.175 ball (#1111); its toolpath is compared with the three tool-identity line kinds masked.",
+  "_note": "#1093 R1 \u2014 set B re-keyed, NOT re-cut: the 14 programs the CLI writes for the two m1trayB jobs under the one naming rule (m1trayB-top-p1..p9, m1trayB-bottom-p1..p5; p1 is the old <job>.nc). 11 contents are byte-identical to the 2026-11-07 table; the 3 in `changedSince20261107` are the ACCEPTED #1080 generator changes (top p7, top p8, bottom p4). The e2e reads the table as the cross-door check: the app\u2019s Save all against the CLI\u2019s output. Since #1111 both doors order the owned set canonically and decide a tie by stated keys, so bottom p5 is compared STRICTLY like the other thirteen.",
   "source": "casemaker cut <job>.cutjob.json --location k3-house/location.json, branch 1093-save-all off m1-land12 f28e0d223, 2026-11-08",
   "changedSince20261107": [
     {
@@ -109,13 +109,7 @@
           "name": "m1trayB-bottom-p5.nc",
           "oldName": "m1trayB-bottom-p5.nc",
           "bytes": 2866922,
-          "md5": "6ab42994f33f896ab81dcb926500ec1f",
-          "toolIdentityMayDiffer": {
-            "issue": 1111,
-            "maskedMd5": "a53829db86062852d1a1ba2efc43f82a",
-            "maskedLines": 3,
-            "why": "The app's owned plan carries the house catalogue's definitions as well as the owned cutters, so its cost-ranked finish pick chose inv:kz-ball-nose-m-3-175-10 (3.175 ball, 10 mm flute, metal); the CLI's --location registry carries only the location's own tools, so it chose inv:kz-ball-nose-3-175-22 (3.175 ball, 22 mm flute). Same toolpath: with the three tool-identity lines masked the bytes are identical. See #1111 (not ready, 0f's fields)."
-          }
+          "md5": "6ab42994f33f896ab81dcb926500ec1f"
         }
       ]
     }
