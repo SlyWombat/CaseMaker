@@ -15,6 +15,7 @@ import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { Z1 } from '@/engine/cnc/machine';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { setupStockOf } from '@/engine/cnc/cam/model/plan';
+import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 
 /** A blank 120×160×28 whose side 1 frees a 106×136 part; setup 2 is the vendor flip. */
@@ -92,6 +93,18 @@ describe('#1082 a setup’s own stock', () => {
     expect(setupStockOf(input, own)).toEqual({ length: 106, width: 136, thickness: 25 });
     const blank = { frame: {} as never, underside: 'flatOnStockBottom' as const };
     expect(setupStockOf(input, blank)).toEqual({ length: 120, width: 160, thickness: 28 });
+  });
+
+  it('#1082 stage 2 — the depth limit follows the setup’s own thickness', () => {
+    const job = flipJob(); // blank 120×160×28
+    const at = (t?: number) => jobDepthLimit(job, undefined, undefined, undefined, t)(60, 80);
+    const blank = at();
+    const part = at(25);
+    if (blank === null || part === null) throw new Error('the fixture has a depth limit');
+    // The limit is the depth available below the top: a thinner setup stock bounds it shallower.
+    expect(part).toBeLessThan(blank);
+    expect(part).toBe(25);
+    expect(blank).toBe(28);
   });
 
   it('the resolver: the STATED box wins; a non-flip setup has none', () => {

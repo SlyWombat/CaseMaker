@@ -2052,8 +2052,16 @@ export function sweptCuts(job: EngraveJob, plan: PartPlan = toPartPlan(job, { un
  * house's to override. It is passed in rather than looked up because this module must stay free of
  * the settings store — the panel and the worker each resolve it once and hand the same number here.
  */
-export function jobDepthLimit(job: EngraveJob, margin?: Mm, through?: ThroughMask, bedBoardMm?: number | null): DepthLimit {
-  const sacrificial = sacrificialDepthLimit(job.stock, job.sacrificial, {
+export function jobDepthLimit(
+  job: EngraveJob,
+  margin?: Mm,
+  through?: ThroughMask,
+  bedBoardMm?: number | null,
+  /** #1082 — the SETUP's stock thickness when it is not the job's blank (the freed part). */
+  stockThicknessMm?: number | null,
+): DepthLimit {
+  const stock = stockThicknessMm === undefined || stockThicknessMm === null ? job.stock : { ...job.stock, thickness: stockThicknessMm };
+  const sacrificial = sacrificialDepthLimit(stock, job.sacrificial, {
     minFloor: job.minFloor,
     breakthrough: job.breakthrough,
     ...(through === undefined ? {} : { through }),
