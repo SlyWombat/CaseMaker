@@ -125,9 +125,11 @@ def check(name, s, expect):
 
 # --- the gate's rule (v6/v8), straight on the judge — no NC, no location ---------------------
 
-def judge_on(z, cov, cuts, *, who=None, allowance=None, shadow_radius=0.0, thickness=5.0):
+def judge_on(z, cov, cuts, *, who=None, allowance=None, shadow_radius=0.0, thickness=5.0,
+             breakthrough=0.0, cl=None):
     """`z`/`cov` (ny, nx); `cuts` = [(j, i, depth)] is the stamp that reached that far below the
-    goal at that cell (every other cell untouched at the stock top). Returns the report."""
+    goal at that cell (every other cell untouched at the stock top). `cl` = (j, i, x, y) — the
+    deepest stamp's cutter-location point at that cell. Returns the report."""
     z = np.asarray(z, np.float32).astype(np.float64)
     ny, nx = z.shape
     cov = np.asarray(cov, bool)
@@ -136,10 +138,14 @@ def judge_on(z, cov, cuts, *, who=None, allowance=None, shadow_radius=0.0, thick
         H[j, i] = z[j, i] - d
     w = np.zeros((ny, nx), np.uint8) if who is None else np.asarray(who, np.uint8)
     X = np.zeros((ny, nx)); Y = np.zeros((ny, nx))
+    if cl is not None:
+        points = cl if isinstance(cl, list) else [cl]
+        for j, i, x, y in points:
+            X[j, i] = x; Y[j, i] = y
     gh = {'nx': nx, 'ny': ny, 'x0': 0.0, 'y0': 0.0, 'pitch': PITCH, 'topZ': 0.0,
           'minZ': float(z[cov].min()) if cov.any() else 0.0}
     s, _ = GC.judge(z, cov, H, w, X, Y, gh, thickness, allowance=allowance,
-                    shadow_radius=shadow_radius)
+                    shadow_radius=shadow_radius, breakthrough=breakthrough)
     return s
 
 
@@ -149,17 +155,28 @@ def step_goal(nx, ny, hi_z, lo_z, i_step):
     return np.where(ii < i_step, hi_z, lo_z), np.ones((ny, nx), bool)
 
 
+def pocket_goal():
+    """A covered 8 × 6 mm island at -0.5 in the 20 × 10 mm grid: its edge is the silhouette, and
+    designEdgeCells marks the island's ring as WALL cells (the silhouette step)."""
+    jj, ii = np.mgrid[0:NY, 0:NX]
+    cov = (ii >= 60) & (ii <= 140) & (jj >= 20) & (jj <= 80)
+    return np.where(cov, -0.5, 0.0), cov
+
+
 def fixture_wall_relief(shadow_radius):
-    """D/E — the v8 relief ceiling on a wall cell, with and without the tool's disc."""
+    """D — the v8 relief ceiling on a wall cell, with and without the tool's disc."""
     z, cov = step_goal(60, 40, -1.0, -2.0, 30)          # a 1.0 mm step at i = 29 | 30
     s = judge_on(z, cov, [(20, 29, 0.5), (10, 30, 2.5)], shadow_radius=shadow_radius)
     return s
 
 
-def fixture_border_relief():
-    """F — a grid-border cell (the silhouette) deeper than the relief: counted, not excused."""
-    z = np.full((30, 40), -0.5)
-    return judge_on(z, np.ones_like(z, bool), [(0, 10, 2.0)], shadow_radius=1.0)
+def fixture_silhouette(depth, cl_xy, *, shadow_radius=1.0, thickness=2.0, breakthrough=0.3):
+    """S — the outline cell on the island's edge (j=50, i=60), cut `depth` below the goal, its
+    deepest stamp's CL at `cl_xy` (work mm)."""
+    z, cov = pocket_goal()
+    return judge_on(z, cov, [(50, 60, depth)], shadow_radius=shadow_radius,
+                    thickness=thickness, breakthrough=breakthrough,
+                    cl=(50, 60, cl_xy[0], cl_xy[1]))
 
 
 def fixture_straddle(depth):
@@ -240,18 +257,40 @@ def main():
                                    'shadowNotScoredCells': 0, 'adjudicatedCells': 1,
                                    'adjudicatedMaxMm': 2.5, 'adjudicatedFraction': round(1 / 2400, 6)})
         assert s['overReliefDeepest']['cls'] == 'wall' and approx(s['overReliefDeepest']['mm'], 2.5), s['overReliefDeepest']
-        # D0 — with NO tool disc the relief is 0, so even the 0.5 mm cell is counted: and a counted
-        # wall cell never reaches the general straddling proof (it would have excused it).
+        # D0 — with NO tool disc the relief is one PITCH (the cell's own axial neighbours), so the
+        # 0.5 mm cell is still excused on proof and the 2.5 mm cell is still counted.
         s = fixture_wall_relief(0.0)
-        check('D0 wall relief, no tool disc', s, {'wallNotScoredCells': 0, 'wallOverReliefCells': 2,
-                                                  'straddlingNotScoredCells': 0, 'adjudicatedCells': 2,
-                                                  'adjudicatedMaxMm': 2.5})
-        # E — a border cell: the stock top is a high side, relief = 0.5 mm; a 2.0 mm cut is counted.
-        s = fixture_border_relief()
-        check('E border relief', s, {'borderOverReliefCells': 1, 'wallOverReliefCells': 0,
-                                     'wallNotScoredCells': 0, 'adjudicatedCells': 1,
-                                     'adjudicatedMaxMm': 2.0})
-        assert s['overReliefDeepest']['cls'] == 'border', s['overReliefDeepest']
+        check('D0 wall relief, no tool disc (the pitch disc)', s, {'wallNotScoredCells': 1,
+                                                                   'wallOverReliefCells': 1,
+                                                                   'straddlingNotScoredCells': 0,
+                                                                   'adjudicatedCells': 1,
+                                                                   'adjudicatedMaxMm': 2.5})
+        # S — THE SILHOUETTE (0f's ruling), on the island's outline cell, T=2, breakthrough=0.3:
+        # the blank's floor is 2.3 mm below the stock top; the CL must also be on the UNCOVERED side
+        # and at least r − one cell (0.9 mm) from the outline.
+        s = fixture_silhouette(0.2, (4.9, 5.0))
+        check('S silhouette excused', s, {'silhouetteExcusedCells': 1, 'adjudicatedCells': 0,
+                                          'wallNotScoredCells': 0, 'wallOverReliefCells': 0,
+                                          'borderOverReliefCells': 0})
+        assert approx(s['silhouetteDeepest']['mm'], 0.2) and approx(
+            s['silhouetteDeepest']['clDistanceMm'], 1.0), s['silhouetteDeepest']
+        # the CL inside the part: a contour that cut the outline from within is COUNTED
+        s = fixture_silhouette(0.2, (6.5, 5.0))
+        check('S silhouette, CL inside', s, {'silhouetteExcusedCells': 0, 'adjudicatedCells': 1,
+                                             'adjudicatedMaxMm': 0.2, 'wallOverReliefCells': 0,
+                                             'borderOverReliefCells': 0})
+        # deeper than the blank's floor: COUNTED whatever the CL
+        s = fixture_silhouette(2.5, (4.9, 5.0))
+        check('S silhouette, below the blank floor', s, {'silhouetteExcusedCells': 0,
+                                                         'adjudicatedCells': 1,
+                                                         'adjudicatedMaxMm': 2.5})
+        # the CL on the uncovered side but at the disc's rim, inside r − one cell: COUNTED
+        s = fixture_silhouette(0.2, (5.6, 5.0))
+        check('S silhouette, CL too near the outline', s, {'silhouetteExcusedCells': 0,
+                                                           'adjudicatedCells': 1})
+        # no tool set: no r, so the silhouette is never excused (the app needs the CL and r)
+        s = fixture_silhouette(0.2, (4.9, 5.0), shadow_radius=0.0)
+        check('S silhouette, no tool radius', s, {'silhouetteExcusedCells': 0, 'adjudicatedCells': 1})
         # G — the general v6 proof: on a 0.11 mm step, a 0.105 mm read is excused on proof; a
         # 0.112 mm read is NOT (the general proof carries no 0.005 mm slack — the class proof does);
         # a 0.2 mm read is not.
@@ -276,12 +315,15 @@ def main():
         assert a.pop('edges') == 'all' and a.pop('defaultEdges') == 'silhouette', a
         check('H allowance', a, {'reach': 1.5875, 'leg': 1.5375, 'number': 3})
         # I — the who gate: with the allowance's number 2, a cell whose deepest stamp is T2 is edge
-        # break; the same cell stamped by anything else falls to the border class and is counted.
+        # break; the same cell stamped by anything else falls to the SILHOUETTE branch (it faces
+        # uncovered off-grid) and is counted, its CL inside the part.
         h = fixture_who_gate()
         check('I who gate, V deepest', h['hit'], {'edgeBreakCells': 1, 'adjudicatedCells': 0,
                                                   'borderOverReliefCells': 0})
         check('I who gate, other cutter', h['miss'], {'edgeBreakCells': 0,
-                                                      'borderOverReliefCells': 1,
+                                                      'silhouetteExcusedCells': 0,
+                                                      'borderOverReliefCells': 0,
+                                                      'wallOverReliefCells': 0,
                                                       'adjudicatedCells': 1,
                                                       'adjudicatedMaxMm': 0.2})
         # K — the whole path, with and without the job's statement: the same V cut is edge break
