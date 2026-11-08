@@ -287,17 +287,25 @@ function depthLevels(zTop: number, zBottom: number, stepDownMm: number): number[
  * R; two centres `stepOverMm` apart horizontally are `stepOverMm * cos(theta)` apart ALONG that
  * line; the normal-direction cusp between them is the sagitta `R - sqrt(R^2 - (d/2)^2)` for their
  * half-spacing `d = stepOverMm * cos(theta)`, and the VERTICAL cusp (what `bandMm` states) is that
- * normal cusp divided by `cos(theta)` again. Solving `bandMm = (R - sqrt(R^2 - (stepOverMm *
- * cos(theta) / 2)^2)) / cos(theta)` for `stepOverMm` gives the closed form below. Measured
- * red-first (`finishOp960.spec.ts`) against an ALL-rows cusp scan (not just the bracketing pair)
- * on the tray's own 18° ramp: 1.4254mm step-over for a 3mm-radius ball and a 0.1mm band, cusp
- * 0.1000mm — confirmed, not assumed.
+ * normal cusp divided by a cosine again. #1080 (6b's ruling): THE TWO COSINES ARE DIFFERENT
+ * ANGLES — the vertical band is converted to the normal cusp by the gradient MAGNITUDE (the
+ * surface's own tilt), while the row pitch is converted to pitch along the surface by the
+ * CROSS-ROW component (the direction the rows advance). With one angle doing both jobs a wall
+ * along the rows read its magnitude and lost the rows it never needed; with the split, the closed
+ * form is `stepOver = cos(alpha) * 2 * sqrt(2R*h_n - h_n^2)` at `h_n = band * cos(theta_mag)`.
+ * Measured red-first (`finishOp960.spec.ts`) against an ALL-rows cusp scan (not just the
+ * bracketing pair) on the tray's own 18° ramp: 1.4254mm step-over for a 3mm-radius ball and a
+ * 0.1mm band, cusp 0.1000mm — confirmed, not assumed.
  */
-function ballScallopStepOver(radiusMm: number, bandMm: number, steepestSlopeDeg: number): number {
+function ballScallopStepOver(radiusMm: number, bandMm: number, crossDeg: number, magDeg: number): number {
   if (!(radiusMm > 0) || !(bandMm > 0) || bandMm >= radiusMm) return Math.max(radiusMm, 0.1);
-  const cosTheta = Math.cos((steepestSlopeDeg * Math.PI) / 180);
-  const bandPrime = bandMm * cosTheta;
-  const spacing = cosTheta * 2 * Math.sqrt(Math.max(0, 2 * radiusMm * bandPrime - bandPrime * bandPrime));
+  // #1080 (6b's ruling) — THE TWO COSINES DO DIFFERENT JOBS. The band is a VERTICAL cusp: on a
+  // surface at the gradient magnitude theta, a vertical band of `bandMm` is only `bandMm*cos(theta)`
+  // along the normal. The cross-row angle alpha then converts the row pitch into pitch along the
+  // surface (a row advances horizontally by `pitch`). One angle cannot do both.
+  const cosCross = Math.cos((crossDeg * Math.PI) / 180);
+  const bandPrime = bandMm * Math.cos((magDeg * Math.PI) / 180);
+  const spacing = cosCross * 2 * Math.sqrt(Math.max(0, 2 * radiusMm * bandPrime - bandPrime * bandPrime));
   // THE PROPERTY SEEDS FOUND THIS: as the steepest slope approaches vertical the closed form
   // collapses to ZERO — and `finish()`'s raster advances `x += stepOverMm`, so the op never
   // returns. A vertical face is not finished by spending raster rows on it at all (the wall is the
@@ -475,6 +483,8 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         if (crossSlope > cross) cross = crossSlope;
         if (magSlope > mag) mag = magSlope;
       }
+      // #1080 — the magnitude read, CL included, is the bin's theta_mag whatever the gate chose.
+      binMagSlope[k] = mag;
       binSlope[k] = mouth ? 90 : straight ? cross : mag;
     }
   }
@@ -507,11 +517,25 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     : flatRasterStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1]);
   const regionStepOverMm =
     opts.kind === 'ball-scallop'
-      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1])
+      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1], opts.region.slopeDeg[1])
       : flatRowStepMm;
+  // #1080 — the band's two reads, each the STEEPEST within the cutter's reach window: alpha (the
+  // cross-row component, the gate's per-bin choice) and theta_mag (the gradient magnitude from the
+  // same bin fill, whatever the gate chose there).
+  const bandMagAt = (x: number): number => {
+    const k = Math.min(binCount - 1, Math.max(0, Math.floor((x - min[0]) / BIN_MM)));
+    let best = 0;
+    for (let d = -WINDOW_BINS; d <= WINDOW_BINS; d++) {
+      const kk = k + d;
+      if (kk < 0 || kk >= binCount) continue;
+      const v = binMagSlope[kk]!;
+      if (!Number.isNaN(v) && v > best) best = v;
+    }
+    return best;
+  };
   const bandStepOverAt = (x: number): number =>
     opts.kind === 'ball-scallop'
-      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, bandSlopeAt(x))
+      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, bandSlopeAt(x), bandMagAt(x))
       : flatRowStepMm;
   let wallBandsCut = 0;
 

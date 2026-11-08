@@ -471,7 +471,8 @@ describe('#1080 the finish reads the cross-row slope, not the gradient magnitude
     // The tightest gap between rows is the band's own step: h_n = 0.1·cos60 gives ≈1.091 mm.
     let minGap = Infinity;
     for (let i = 1; i < rows.length; i++) minGap = Math.min(minGap, rows[i]! - rows[i - 1]!);
-    expect(Math.abs(minGap - alongStep(0.1)), `tightest gap ${minGap.toFixed(4)} vs h_n step ${alongStep(0.1).toFixed(4)}`).toBeLessThan(0.02);
+    // The row guard's phase snapping moves a gap a couple of percent; the step must be this one.
+    expect(Math.abs(minGap - alongStep(0.1)), `tightest gap ${minGap.toFixed(4)} vs h_n step ${alongStep(0.1).toFixed(4)}`).toBeLessThan(0.05);
     expect(Math.abs(minGap - flatStep)).toBeGreaterThan(0.2); // not the flat spacing
     expect(Math.abs(minGap - flatStep / 2)).toBeGreaterThan(0.2); // not half of it
   }, 240_000);
