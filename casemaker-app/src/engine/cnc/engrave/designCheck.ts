@@ -1265,7 +1265,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   };
   // The v6 straddling proof's own step read, shared by the class proofs below (the axial
   // neighbours; uncovered or off-grid neighbours contribute nothing).
-  const straddleProof = (k: number, i: number, j: number, depth: number): { ok: boolean; step: number } => {
+  const straddleProof = (k: number, i: number, j: number, depth: number, stepSlackMm = 0): { ok: boolean; step: number } => {
     const zc = goal.z[k]!;
     if (!Number.isFinite(zc)) return { ok: false, step: 0 };
     let hi = zc;
@@ -1283,7 +1283,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     }
     const step = hi - lo;
     const swept = zc + dOf[k]!;
-    return { ok: step > 0 && step + 1e-12 >= depth && swept >= lo - STRADDLING_SLACK_MM, step };
+    return { ok: step > 0 && step + stepSlackMm + 1e-12 >= depth && swept >= lo - STRADDLING_SLACK_MM, step };
   };
   for (let k = 0; k < cells; k++) {
     if (sampled[k] !== 1 || dOf[k]! >= -cutIntoFloorMm) continue;
@@ -1310,7 +1310,9 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       const x = goal.x0 + i * goal.pitch;
       const y = goal.y0 + j * goal.pitch;
       const relief = reliefAt(goal, x, y, reliefRadiusMm, cls === 'border');
-      const proof = straddleProof(k, i, j, depth);
+      // The rule's own slack absorbs the heightfield's sampling of the step (measured 0.0004 mm on
+      // the tray's 2.885 mm floor): the design floor and the sampled one differ by less than it.
+      const proof = straddleProof(k, i, j, depth, STRADDLING_SLACK_MM);
       if (proof.ok && depth <= relief + STRADDLING_SLACK_MM + 1e-12) {
         excluded[k] = 1;
         wallNotScoredCells++;
