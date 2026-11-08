@@ -28,7 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 W = os.path.dirname(HERE)                      # docs/bench/2026-10-28-z1-real-jobs
 JOBS = os.path.join(W, 'jobs')
 sys.path.insert(0, HERE)
-from cards import CARDS, APPENDIX, SAMPLES      # noqa: E402
+from cards import CARDS, APPENDIX, SAMPLES, CARD_NOTES      # noqa: E402
 from references import REFS, PARKED, RAPID_XY_MM_MIN, RAPID_Z_MM_MIN   # noqa: E402
 REF_BY_ID = {r['id']: r for r in REFS}
 
@@ -58,6 +58,8 @@ def arg_parse():
                                           '(the candidate-engine section, tools/candidate_section.py)')
     p.add_argument('--only', help='comma-separated card ids (debug)')
     p.add_argument('--timeout', type=int, default=1800, help='seconds per job (default 1800)')
+    p.add_argument('--page-only', action='store_true',
+                   help='assemble the page and manifest from the cached cards; run nothing')
     return p.parse_args()
 
 
@@ -876,6 +878,7 @@ def page(cards, args, sha, loc, cat):
     <h2>{html.escape(c['title'])}</h2>
     <p class="src">{html.escape(c['id'])} · source: {html.escape(c.get('source', ''))}</p>
     {('<p class="notes">' + html.escape(vof(c).get('ref', {}).get('note', '')) + '</p>') if vof(c) and vof(c).get('ref', {}).get('note') else ''}
+    {('<p class="notes">' + html.escape(c.get('note') or '') + '</p>') if c.get('note') else ''}
   </div>
   <p><span class="pill {pill_cls}">{pill_txt}</span> <span class="notes">{html.escape(c.get('sentence') or '')}</span></p>
   <div class="frames">{figs}</div>
@@ -911,7 +914,7 @@ def main():
     loc = read_json(args.location) or {}
     cat = read_json(args.catalogue) or {}
     only = set(args.only.split(',')) if args.only else None
-    todo = [c for c in CARDS if not only or c['id'] in only]
+    todo = [] if args.page_only else [c for c in CARDS if not only or c['id'] in only]
     os.makedirs(args.out, exist_ok=True)
     out_cards = []
     for i, c in enumerate(todo, 1):
@@ -940,6 +943,11 @@ def main():
         cached = read_json(os.path.join(args.out, 'runs', sha, c['id'], 'card.json'))
         if cached:
             page_cards.append(cached)
+    # The curated note is applied here, by card id, so a page-only regen over cached card.json
+    # carries it without re-running a card.
+    for c in page_cards:
+        if CARD_NOTES.get(c['id']):
+            c['note'] = CARD_NOTES[c['id']]
     page_path = os.path.join(args.out, 'page.html')
     open(page_path, 'w').write(page(page_cards, args, sha, loc, cat))
     manifest = {'sha': sha, 'candidate': bool(getattr(args, 'candidate', False)), 'builtAt': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),

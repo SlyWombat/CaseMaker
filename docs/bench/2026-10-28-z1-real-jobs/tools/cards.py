@@ -26,6 +26,14 @@ SAMPLES = [
     ('S5', 941, 'Chamfer the top edges, then a through-slot', 'job file committed (card s5); cut at bench session S6'),
 ]
 
+# Per-card text the computed sentence would otherwise bury, by card id. Two kinds only: a fact
+# about the input (a refusal that is correct is stated as a fact, not as an app defect), and a
+# known deviation with its issue number. Cards whose sentence already says it plainly stay out.
+CARD_NOTES = {
+    'ref-wildspirit': 'Makera’s STL is not a closed surface (172 edges shared by more than two '
+                      'triangles, even after cleanup); the app refuses it correctly.',
+}
+
 CARDS = [
     dict(id='j01', title='Aluminium Top Clamp, the Z1’s preloaded first job', job='j01-topclamp-alu.json',
          kind='reference', input='committed', material='aluminium',
