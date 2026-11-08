@@ -6196,7 +6196,9 @@ async function faceItemProgram(args: {
   if (!one.ok || one.camIr === undefined) {
     return { operations: [], predicted: [], findings, errored: findings.some((f) => f.severity === 'error') || !one.ok };
   }
-  const floorZ = radius - frame.depth;
+  // #1059 — the face's plane is the SECTION's surface at this index less the face's depth; a
+  // block's flat is below the envelope the cutter clears.
+  const floorZ = (frame.surfaceRadius ?? radius) - frame.depth;
   const safe = radius + SAFE_Z;
   const rapid = jobMachine(job, calibration).rapidEstimate;
   const operations: CamOperation[] = one.camIr.operations.map((op) => {
@@ -6219,6 +6221,7 @@ async function faceItemProgram(args: {
     ...p,
     a: frame.a,
     depth: frame.depth + p.depth,
+    ...(frame.surfaceRadius !== undefined ? { surfaceRadius: frame.surfaceRadius } : {}),
     polygons: p.polygons.map((pts) => pts.map(([x, y]) => [frame.from + x, y - chord / 2] as OraclePoint)),
   }));
   return { operations, predicted, findings, errored: false };

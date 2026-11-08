@@ -32,7 +32,7 @@ import { memTrace } from '@/engine/cnc/memTrace';
 import { eventLine, eventStoreOf } from '@/engine/cnc/gcode/eventStore';
 import { DIAGNOSTIC_CAP } from '@/engine/cnc/emulator/timeline';
 import { partToWork } from '@/engine/cnc/frames';
-import type { FixtureEnvelope, ObstacleBox, Setup, Workholding } from '@/engine/cnc/setup';
+import type { FixtureEnvelope, ObstacleBox, PartSpec, Setup, Workholding } from '@/engine/cnc/setup';
 import { holderOf, type Mill } from '@/engine/cnc/machine';
 import { inflate } from '@/engine/cnc/fixture';
 import { ROTARY_JAW_KEEP_OUT_MM } from '@/engine/cnc/rotary/wrap';
@@ -500,6 +500,33 @@ export function unionCapsules(tl: ManifoldToplevel, polys: Polygon[]): CrossSect
 export function stockFromSetup(tl: ManifoldToplevel, setup: Setup): { stock: ManifoldInstance; topZ: number } | SweepDiagnostic {
   const part = setup.part;
   if (part.kind === 'cylinder') {
+    // #1059 — A BLOCK IN THE CHUCK IS ITS OWN SECTION, not its turned envelope. `part.section`
+    // has carried the block's width × height since #777 (a square bar is its own shape about the
+    // axis; the envelope only bounds the swing). The exact sweeper must build THAT solid — a
+    // 44.5 square swept as a ⌀62.93 rod reads the wrong volume, the wrong top height (31.47
+    // against 22.25) and air where every A-held face's cut starts.
+    const section = part.section;
+    if (section?.kind === 'rect') {
+      if (!(section.width > 0) || !(section.height > 0)) {
+        return { severity: 'error', code: 'stock-invalid', message: `stock section must have a positive width and height, got ${section.width} × ${section.height}` };
+      }
+      if (!(part.length > 0)) {
+        return { severity: 'error', code: 'stock-invalid', message: `stock length must be positive, got ${part.length}` };
+      }
+      // Centred on the AXIS — the work origin sits on it (`stubSetup`) — so X ∈ [0, L] and the
+      // section runs ± half each way about Y and Z, the same frame the cylinder path builds.
+      // The placement's Rz and translation apply exactly as they do to a rod.
+      const raw = tl.Manifold.cube([part.length, section.width, section.height], true);
+      const alongX = raw.translate([part.length / 2, 0, 0]);
+      raw.delete();
+      const origin = partToWork(setup, [0, 0, 0]);
+      const rotated = alongX.rotate([0, 0, setup.placement.rotationZ]);
+      alongX.delete();
+      const stock = rotated.translate([origin[0], origin[1], origin[2]]);
+      rotated.delete();
+      const bb = stock.boundingBox();
+      return { stock, topZ: bb.max[2] };
+    }
     const radius = part.diameter / 2;
     if (!(radius > 0)) {
       return { severity: 'error', code: 'stock-invalid', message: `stock diameter must be positive, got ${part.diameter}` };
@@ -537,6 +564,45 @@ export function stockFromSetup(tl: ManifoldToplevel, setup: Setup): { stock: Man
   rotated.delete();
   const bb = stock.boundingBox();
   return { stock, topZ: bb.max[2] };
+}
+
+/**
+ * #1059 — THE STOCK'S DECLARED SECTION against the SOLID built for it, IN THE STOCK'S OWN FRAME.
+ *
+ * `stockFromSetup` builds a rect section's box about the axis and then applies the placement's
+ * Rz, so a world-frame read of the Y/Z extents is the section only when `rotationZ` is 0: at 90°
+ * the WORLD X/Y extents are the section's — rotated with the length — and reading Y as the width
+ * would see the stock's LENGTH there and falsely refuse a correct block (6b's review of the first
+ * gate). The expected world extents are therefore the L × w × h box turned by `rotationZ`, all
+ * three axes compared:
+ *
+ *   X' = L·|cos| + w·|sin|,   Y' = L·|sin| + w·|cos|,   Z' = h.
+ *
+ * A rod built for a declared block fails this at every rotation (its Y/Z are the ⌀ envelope), which
+ * is the regression this gate exists to catch: a block job is never swept on a rod's solid.
+ * Null for anything that is not a block, and for a solid that matches its declaration.
+ */
+export function stockSectionMismatch(part: PartSpec, rotationZ: number, stock: ManifoldInstance): SweepDiagnostic | null {
+  if (part.kind !== 'cylinder') return null;
+  const section = part.section;
+  if (section?.kind !== 'rect') return null;
+  const rad = (rotationZ * Math.PI) / 180;
+  const c = Math.abs(Math.cos(rad));
+  const s = Math.abs(Math.sin(rad));
+  const expected = [part.length * c + section.width * s, part.length * s + section.width * c, section.height];
+  const bb = stock.boundingBox();
+  const got = [bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]];
+  const near = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-6;
+  if (near(got[0]!, expected[0]!) && near(got[1]!, expected[1]!) && near(got[2]!, expected[2]!)) return null;
+  const r3 = (v: number): string => String(Number(v.toFixed(3)));
+  return {
+    severity: 'error',
+    code: 'rotary-stock-section',
+    message:
+      `the stock built for this job is ${r3(got[0]!)} × ${r3(got[1]!)} × ${r3(got[2]!)} mm (X × Y × Z), but the job states a ` +
+      `${r3(part.length)} mm long ${r3(section.width)} × ${r3(section.height)} mm block at rotationZ ${r3(rotationZ)}° ` +
+      `(expected ${r3(expected[0]!)} × ${r3(expected[1]!)} × ${r3(expected[2]!)}) — a block job is never swept on a rod's solid`,
+  };
 }
 
 /**
@@ -1517,6 +1583,15 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   const st = stockFromSetup(tl, setup);
   if (isDiag(st)) return { ok: false, diagnostics: [st] };
   let { stock, topZ } = st;
+  // #1059 — THE SECTION IS PART OF THE STOCK'S IDENTITY. The gates above check the stock's KIND
+  // against the program's frame; this one re-reads the SOLID that was built against the section
+  // the setup declares, so a builder regression or a new caller cannot let a W × H block ride a
+  // round solid again (the one place a square can be "wrong but green", #1059 item 2).
+  const sectionMismatch = stockSectionMismatch(setup.part, setup.placement.rotationZ, stock);
+  if (sectionMismatch !== null) {
+    stock.delete();
+    return { ok: false, diagnostics: [sectionMismatch] };
+  }
 
   // A REST PASS (#410): the material the PREVIOUS program left is the material this one starts
   // from. Seed the stock with it once, here, and everything downstream reads the truth rather

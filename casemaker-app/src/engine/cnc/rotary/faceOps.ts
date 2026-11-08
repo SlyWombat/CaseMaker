@@ -33,7 +33,7 @@ import type { OraclePredicted, OraclePoint } from '@/engine/cnc/engrave/oracle';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { cuttingDiameter, cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
-import { rotaryFreeSpan, type RotaryMap } from './wrap';
+import { rotaryFreeSpan, sectionRadiusAt, sectionWords, type RotaryMap, type RotarySection } from './wrap';
 
 /** The width of a face at a depth below the surface, mm: the chord of the turned circle. */
 export function faceChordMm(radiusMm: Mm, depthMm: Mm): Mm {
@@ -41,6 +41,49 @@ export function faceChordMm(radiusMm: Mm, depthMm: Mm): Mm {
   const inner = r - Math.max(0, depthMm);
   if (!(r > 0) || inner < 0) return 0;
   return 2 * Math.sqrt(Math.max(0, r * r - inner * inner));
+}
+
+/**
+ * The chord of a RECT section by the plane `y·sinθ + z·cosθ = p`, mm — the length of that line
+ * inside the rectangle `|y| ≤ width/2`, `|z| ≤ height/2`. Solved as two linear clips (one per
+ * edge pair) along the line's own direction, so θ at 0 and 90° need no special case.
+ */
+function rectChordMm(width: Mm, height: Mm, theta: number, p: Mm): Mm {
+  const halfW = width / 2;
+  const halfH = height / 2;
+  const s = Math.sin(theta);
+  const c = Math.cos(theta);
+  // The line's points are q(t) = p·(sinθ, cosθ) + t·(cosθ, −sinθ); clip t against each pair.
+  let lo = -Infinity;
+  let hi = Infinity;
+  const clip = (centre: number, dir: number, half: number): boolean => {
+    if (Math.abs(dir) < 1e-12) return Math.abs(centre) <= half + 1e-9;
+    const t1 = (-half - centre) / dir;
+    const t2 = (half - centre) / dir;
+    lo = Math.max(lo, Math.min(t1, t2));
+    hi = Math.min(hi, Math.max(t1, t2));
+    return true;
+  };
+  if (!clip(p * s, c, halfW)) return 0;
+  if (!clip(p * c, -s, halfH)) return 0;
+  return hi > lo ? hi - lo : 0;
+}
+
+/**
+ * #1059 — A FACE'S WIDTH IS THE SECTION'S OWN, not the turned circle's. The face at index `a`
+ * cuts down from the stock's surface THERE — `sectionRadiusAt(section, a)` — and is as wide as
+ * the section at `depth` below it. On a ROUND rod this is exactly {@link faceChordMm} (the
+ * surface is the envelope at every angle); on a BLOCK it is the flat's own side at A 0 (44.5 mm
+ * on a 44.5 mm square, where the circle's chord is 22.07) and the corner's chord at A 45 (2 mm
+ * one millimetre below the corner, where the circle's is 15.34).
+ */
+export function sectionFaceChordMm(section: RotarySection, a: number, depthMm: Mm): Mm {
+  const theta = (a * Math.PI) / 180;
+  const surface = sectionRadiusAt(section, theta);
+  const p = surface - Math.max(0, depthMm);
+  if (!(surface > 0) || p < 0) return 0;
+  if (section.kind === 'round') return 2 * Math.sqrt(Math.max(0, surface * surface - p * p));
+  return rectChordMm(section.width, section.height, theta, p);
 }
 
 /** Three decimal places — enough for a stated size, and no float dust on a face operation. */
@@ -103,7 +146,9 @@ function facePrediction(face: IndexedFace, cutterRadiusMm: Mm, stepOverMm: Mm): 
   for (const y of facePassYs(face.width ?? 0, cutterRadiusMm, stepOverMm)) {
     capsule(polygons, face.fromX, y, face.toX, y, cutterRadiusMm, n);
   }
-  return { a: face.a, depth: face.depth, polygons };
+  // #1059 — the depth is below the SECTION's surface at this index; the oracle judges the level
+  // at that surface, not at the stock's top (see `indexedFaceOracle`).
+  return { a: face.a, depth: face.depth, polygons, ...(face.surfaceRadius !== undefined ? { surfaceRadius: face.surfaceRadius } : {}) };
 }
 
 /** One cross-hole's prediction: the hole the cutter plunges, at the face it is drilled from. */
@@ -130,6 +175,11 @@ export interface FaceFrame {
   to: Mm;
   /** The face's width across Y, mm — its chord at `depth`. */
   chord: Mm;
+  /**
+   * #1059 — the stock's own surface at this index, mm, when it is not the envelope (a block):
+   * the face's plane is `surfaceRadius − depth`, and a cut lifted onto the face starts there.
+   */
+  surfaceRadius?: Mm;
   /** The cuts on the face, in the face's own frame (see `EngraveFaceItem`). */
   items: readonly EngraveFaceItem[];
 }
@@ -245,13 +295,31 @@ export function planFaceCuts(
   const predicted: OraclePredicted[] = [];
 
   const addFace = (a: number, depth: Mm, items: readonly EngraveFaceItem[]): void => {
-    const width = faceChordMm(radius, depth);
-    const face: IndexedFace = { a, fromX: span.from, toX: span.to, depth, ...(width > 0 ? { width } : {}) };
+    // #1059 — the surface THIS index cuts from and the section's own chord there. A round rod
+    // reads the envelope and `faceChordMm`, exactly as before; a block reads its section.
+    const surface = sectionRadiusAt(map.section, (a * Math.PI) / 180);
+    const width = sectionFaceChordMm(map.section, a, depth);
+    const face: IndexedFace = {
+      a,
+      fromX: span.from,
+      toX: span.to,
+      depth,
+      ...(width > 0 ? { width } : {}),
+      ...(map.section.kind === 'rect' ? { surfaceRadius: surface } : {}),
+    };
     faces.push(face);
     // #833 — A HOLE is a PLUNGE at the face's index, like a cross-hole but stopping at its depth
     // below the plane: the program's hole list carries it, and the cutter decides its size.
     const surfaceItems = items.filter((it) => it.kind !== 'hole');
-    frames.push({ a, depth, from: span.from, to: span.to, chord: width, items: surfaceItems });
+    frames.push({
+      a,
+      depth,
+      from: span.from,
+      to: span.to,
+      chord: width,
+      ...(map.section.kind === 'rect' ? { surfaceRadius: surface } : {}),
+      items: surfaceItems,
+    });
     predicted.push(facePrediction(face, cutterRadius, params.stepOver));
     for (const item of items) {
       if (item.kind === 'hole') {
@@ -276,12 +344,12 @@ export function planFaceCuts(
       const halfH = (item.kind === 'pocket' ? (item.height ?? 0) / 2 : item.kind === 'hole' ? (item.diameter ?? 0) / 2 : (item.size ?? 0) / 2);
       const along = item.x;
       const across = Math.abs(item.y);
-      if (!(item.depth > 0) || depth + item.depth >= radius) {
+      if (!(item.depth > 0) || depth + item.depth >= surface) {
         findings.push({
           severity: 'error',
           code: 'face-item-too-deep',
           labelId: item.id,
-          message: `The ${faceItemWord(item)} on the face at A ${num(a)}° is ${num(item.depth)} mm below the face, and the face is ${num(depth)} mm deep: together they reach the ${num(radius)} mm radius the rod turns on. Make the cut shallower.`,
+          message: `The ${faceItemWord(item)} on the face at A ${num(a)}° is ${num(item.depth)} mm below the face, and the face is ${num(depth)} mm deep: together they reach the ${num(surface)} mm radius the stock has there. Make the cut shallower.`,
         });
         continue;
       }
@@ -299,12 +367,15 @@ export function planFaceCuts(
   for (const op of ops) {
     if (op.kind === 'flat') {
       const depth = op.depth ?? 0;
-      if (!(depth > 0) || depth >= radius) {
+      // #1059 — the depth is read against the surface at THIS index: on a block at A 0 that is
+      // the section's half-height, so a depth the envelope would allow can still reach the axis.
+      const surface = sectionRadiusAt(map.section, (op.a * Math.PI) / 180);
+      if (!(depth > 0) || depth >= surface) {
         findings.push({
           severity: 'error',
           code: 'face-too-deep',
           labelId: op.id,
-          message: `The flat at A ${num(op.a)}° is ${num(depth)} mm deep on a ${num(radius)} mm radius; a face keeps its floor above the axis, so its depth is under ${num(radius)} mm.`,
+          message: `The flat at A ${num(op.a)}° is ${num(depth)} mm deep on a ${num(surface)} mm radius; a face keeps its floor above the axis, so its depth is under ${num(surface)} mm.`,
         });
         continue;
       }
@@ -321,13 +392,12 @@ export function planFaceCuts(
     } else if (op.kind === 'faces-all-round') {
       const count = op.count ?? 0;
       const acrossFlats = op.acrossFlats ?? 0;
-      const depth = radius - acrossFlats / 2;
-      if (!(count >= 3) || !(acrossFlats > 0) || !(depth > 0)) {
+      if (!(count >= 3) || !(acrossFlats > 0) || !(acrossFlats / 2 < radius)) {
         findings.push({
           severity: 'error',
           code: 'face-too-deep',
           labelId: op.id,
-          message: `${num(acrossFlats)} mm across flats is not inside a ${num(2 * radius)} mm rod: ${count} evenly spaced faces need an across-flats above 0 and under ⌀${num(2 * radius)} mm.`,
+          message: `${num(acrossFlats)} mm across flats is not inside ${sectionWords(map.section)}: ${count} evenly spaced faces need an across-flats above 0 and under ⌀${num(2 * radius)} mm.`,
         });
         continue;
       }
@@ -340,7 +410,39 @@ export function planFaceCuts(
         });
         continue;
       }
-      for (let k = 0; k < count; k++) addFace(op.a + (k * 360) / count, depth, op.items ?? []);
+      // #1059 — THE DEPTH IS PER FACE. Each face cuts from the surface at ITS OWN index down to
+      // the one across-flats plane: on a round rod every index is the same radius, so this is the
+      // single `R − acrossFlats/2` it always was; on a block the four flats are already at that
+      // plane (depth 0 — the square → octagon corner removal) and only the corners remove stock.
+      const items = op.items ?? [];
+      let cuts = 0;
+      let widest = 0;
+      for (let k = 0; k < count; k++) {
+        const a = op.a + (k * 360) / count;
+        const surface = sectionRadiusAt(map.section, (a * Math.PI) / 180);
+        widest = Math.max(widest, surface);
+        const depth = surface - acrossFlats / 2;
+        if (depth > 1e-9) {
+          addFace(a, depth, items);
+          cuts++;
+        } else if (items.length > 0) {
+          // A cut cannot live on a face that is not cut: name the face and the way out.
+          findings.push({
+            severity: 'error',
+            code: 'face-item-no-face',
+            labelId: op.id,
+            message: `The ${faceItemWord(items[0]!)} on the face at A ${num(a)}° cannot be cut: that face is already at the ${num(acrossFlats)} mm across-flats, so there is no face to cut it into. Set a smaller across-flats, or move the cut to a face this ring removes.`,
+          });
+        }
+      }
+      if (cuts === 0) {
+        findings.push({
+          severity: 'error',
+          code: 'face-too-deep',
+          labelId: op.id,
+          message: `${num(acrossFlats)} mm across flats is already the stock's own surface at every one of ${count} faces: there is no stock to remove. Set an across-flats smaller than ${num(2 * widest)} mm.`,
+        });
+      }
     } else {
       const diameter = op.diameter ?? 0;
       const cutterDiameter = cuttingDiameter(tool) ?? 2 * cutterRadius;

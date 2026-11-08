@@ -551,6 +551,17 @@ operation is constant-Z 2.5D and sweeps exactly as today; its removal solid is r
 The one structural prerequisite is R4 (a run breaks when A changes). A flat cut on a round stock is a
 CSG the exact path already does well.
 
+**Amended 2026-11-08 (#1059) — the stock is the SECTION.** A block in the chuck is a prism of the
+stock's own section turned about the axis (`{kind:'cylinder', section}`, #777), and the sweeper
+builds it so: a 44.5 mm square bar sweeps as 44.5 × 44.5 × L, not as its ⌀62.93 envelope. The face
+CAM reads the same section: the cut plane at index `A` is `sectionRadiusAt(section, A) − depth` (a
+flat at A 0 on that bar is at Z 22.25, where the envelope is 9.22 mm of air above it), the face's
+width is the SECTION's chord there (`sectionFaceChordMm`: the flat's own 44.5 mm side, and a corner
+at A 45 is `2 × depth` wide), a ring's depth is per face (the four flats of a square → octagon are
+already at the across-flats and are not cut), and the oracle judges each face from that same
+surface. Safe and hop heights stay on the ENVELOPE: a turn is taken clear of the stock's highest
+point at any index, which on a block is the corner.
+
 ### 4.7 What stays refused
 
 By name, with the step and the reason: `Y ≠ 0` on any move while a rotary job is active (R1);

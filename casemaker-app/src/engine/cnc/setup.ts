@@ -243,7 +243,17 @@ function machinePlacement(part: PartSpec, machine: Mill, zTop: Mm): Vec3 {
  * placed `at[1]` is already it.
  */
 export function stubSetup(part: PartSpec, workholding: Workholding, overrides: Partial<Setup> = {}, machine?: Mill): Setup {
-  const zTop = part.kind === 'prism' ? part.thickness : part.kind === 'cylinder' ? part.diameter / 2 : 0;
+  // #1059 — a CYLINDER with a BLOCK's section (a square bar in the chuck) has its top at the
+  // section's half-height, not at the envelope radius (`diameter / 2`, the diagonal's half, which
+  // is air above a flat face). The stub fits the part to the machine by this height.
+  const zTop =
+    part.kind === 'prism'
+      ? part.thickness
+      : part.kind === 'cylinder'
+        ? part.section?.kind === 'rect'
+          ? part.section.height / 2
+          : part.diameter / 2
+        : 0;
   // Without a machine the stub sits at the machine origin, which is fine for the frame
   // maths and useless on a real Z1, whose origin is the far top corner of a NEGATIVE
   // envelope (every +X move would leave it). With one, the part's extent is fitted inside the

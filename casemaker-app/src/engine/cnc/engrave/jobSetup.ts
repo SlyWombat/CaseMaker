@@ -563,8 +563,11 @@ export type JobFindingCode =
   | 'face-no-room'
   | 'cross-hole-cutter'
   // #833 — a cut ON a face that does not fit it, or reaches the axis with the face's own depth.
+  // #1059 — a cut declared on a face of a ring that the stock is already AT (a block's flats in a
+  // square → octagon), so there is no face to cut it into.
   | 'face-item-off-face'
   | 'face-item-too-deep'
+  | 'face-item-no-face'
   | 'face-hole-cutter'
   // #849 — a mixed job with a neck cuts the map items, the faces, then the neck: one line states
   // that order (`neck-after-faces`, info), and a face cut that reaches into the neck's section is
