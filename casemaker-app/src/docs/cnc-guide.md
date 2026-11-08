@@ -1863,6 +1863,7 @@ simulation does report about one is the sweep's own list, next:
 | `feed-refused` | error | The requested feed is so far above the ceiling it was refused rather than clamped. | Use a sane feed. |
 | `rpm-refused` | error | The requested spindle speed is so far above the ceiling it was refused. | Use a sane spindle speed. |
 | `catalogue-ignored` | warning | Makera's own table states a number this job cannot use — a `0` (Studio writes one into a column it never filled) or a speed past the ceiling — so that one field comes from the app's starting table instead of from Makera. The job cuts; it does not fail. | Nothing. If every cut of this material reads this way, the vendor's row is not the one you want — set your own value for that field. |
+| `feeds-no-catalogue` | info | The headless run found no Makera catalogue — `catalogue.json` beside the `--location` document, in the app's data directory, or the file `--catalogue`/`CM_CATALOGUE` names — so every feed, plunge and step-down came from the shop's starting table. The same job can post different numbers under Makera's rows (the tray bottom's rough: F400 with 0.6 mm levels against the delivered F1000 with 1.0 mm). | Nothing if the starting table is intended. Otherwise sync the catalogue beside the location, or name the file with `--catalogue <catalogue.json>` or `CM_CATALOGUE`. |
 
 **Adaptive clearing of a metal pocket** (CAM). A **shape pocket in
 metal** cut by a flat end mill is planned by this strategy: the cutter enters on a helix (or a ramp where
