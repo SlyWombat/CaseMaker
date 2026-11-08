@@ -821,11 +821,19 @@ function indexedFaceOracle(tl: ManifoldToplevel, l: { timeline: Timeline; sweep:
     const faceSolid: ManifoldHandle | null = turned.length === 0 ? null : turned.length === 1 ? (turned[0] as ManifoldHandle) : tl.Manifold.union(turned);
     try {
       const facePredicted = predicted.filter((p) => faceKey(p.a) === a);
+      // #1059 — THE FRAME'S TOP IS THE SURFACE THE FACE CUT FROM. On a round rod that is `zTop`
+      // (the stock's radius) at every index; a BLOCK's corner face stands at the envelope while
+      // its flat stands at the section's half-height, so the prediction states which and the
+      // levels are measured below THAT. All of a face's predictions share one surface.
+      const faceTop = facePredicted.find((p) => p.surfaceRadius !== undefined)?.surfaceRadius ?? zTop;
       // #729 — a face the program CUT that no prediction names. `computeOracle` has no level to
       // ask it at, so it would come back empty and pass; judge it at a shallow level below the
-      // face instead, and any removal there is cut the plan never asked for.
+      // face instead, and any removal there is cut the plan never asked for. With no prediction
+      // there is no stated surface: the solid's own top IS the face it was cut from (a turned
+      // corner stands above `zTop`), so the shallow level is measured below that.
       if (facePredicted.length === 0 && faceSolid !== null) {
-        const z = zTop - UNPLANNED_FACE_DEPTH_MM;
+        const top = faceSolid.boundingBox().max[2];
+        const z = top - UNPLANNED_FACE_DEPTH_MM;
         const slice = removalSliceAt(faceSolid)(z + ORACLE_SLICE_LIFT_MM);
         if (slice !== null) {
           try {
@@ -852,7 +860,7 @@ function indexedFaceOracle(tl: ManifoldToplevel, l: { timeline: Timeline; sweep:
         facePredicted,
         band,
         undefined,
-        zTop,
+        faceTop,
       );
       ok = ok && report.ok;
       if (report.areaFloor !== undefined) areaFloor = areaFloor === undefined ? report.areaFloor : Math.max(areaFloor, report.areaFloor);

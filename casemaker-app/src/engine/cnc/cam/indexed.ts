@@ -55,13 +55,26 @@ export interface IndexedFace {
    * #241 slice 2 — THE FACE'S WIDTH ACROSS Y, mm, centred on Y 0, for a FACE POCKET. Absent (or
    * not wider than the cutter) is one pass over the axis, the shape every pre-slice-2 caller and
    * every §6 fixture states. Present and wider, the face is cut by several X passes stepping over
-   * in Y at the SAME `Z = radius − depth`, which is a plane on a turned stock: A is held constant,
+   * in Y at the SAME `Z = surface − depth`, which is a plane on a turned stock: A is held constant,
    * so the machine is an ordinary 3-axis mill for the whole run and Y is an ordinary axis.
    *
-   * The CALLER owns the chord: a flat `d` deep on radius R is `2√(R² − (R − d)²)` wide, and a
-   * width wider than the stock is clamped here rather than cutting air.
+   * The CALLER owns the chord: a flat `d` deep on a rod of radius R is `2√(R² − (R − d)²)` wide
+   * (`faceChordMm`), and on a BLOCK it is the section's own chord at that index
+   * (`sectionFaceChordMm`). A width wider than the stock is clamped here rather than cutting air.
    */
   width?: Mm;
+  /**
+   * #1059 — THE STOCK'S OWN SURFACE AT THIS INDEX, mm: the radius the face cuts down FROM. Absent
+   * is the spec's `radius`, which is every ROUND rod (a circle's surface is the envelope at every
+   * angle) and every pre-#1059 caller. A BLOCK states it, because its surface is the section's
+   * edge, not the turned envelope: at A 0 on a 44.5 mm square it is 22.25, and the envelope radius
+   * 31.47 is air 9.22 mm above the face.
+   *
+   * It moves the CUT plane only, `Z = surfaceRadius − depth`. The safe and hop heights stay on the
+   * spec's `radius` (the envelope): a turn is taken with the cutter clear of the stock's HIGHEST
+   * point at any index, which on a block is the corner, not the flat.
+   */
+  surfaceRadius?: Mm;
 }
 
 /** A cross-feature at one index angle: a plunge on the axis plane, through the stock if deep enough. */
@@ -122,6 +135,9 @@ export function facePassYs(width: Mm, cutterRadius: Mm, stepOver: Mm): number[] 
  */
 function faceMoves(face: IndexedFace, radius: Mm, params: CutParams, cutterRadius: Mm): CamMove[] {
   const { a, fromX, toX } = face;
+  // #1059 — the cut plane is the SECTION's surface at this index; safe and hop are the ENVELOPE's,
+  // which is the stock's highest point as the chuck turns (see `IndexedFace.surfaceRadius`).
+  const surface = face.surfaceRadius ?? radius;
   const safe = radius + SAFE_Z;
   const hop = radius + HOP_Z;
   const ys = facePassYs(face.width ?? 0, cutterRadius, params.stepOver);
@@ -135,8 +151,8 @@ function faceMoves(face: IndexedFace, radius: Mm, params: CutParams, cutterRadiu
       if (atZ !== safe) moves.push({ kind: 'rapid', x: atX, y: atY, z: safe, a });
       moves.push({ kind: 'rapid', x: fromX, y, z: safe, a });
       moves.push({ kind: 'rapid', x: fromX, y, z: hop, a });
-      moves.push({ kind: 'feed', x: fromX, y, z: radius + z, f: params.plungeFeed, a });
-      moves.push({ kind: 'feed', x: toX, y, z: radius + z, f: params.feed, a });
+      moves.push({ kind: 'feed', x: fromX, y, z: surface + z, f: params.plungeFeed, a });
+      moves.push({ kind: 'feed', x: toX, y, z: surface + z, f: params.feed, a });
       moves.push({ kind: 'rapid', x: toX, y, z: hop, a });
       atX = toX;
       atY = y;
@@ -193,6 +209,19 @@ export function generateIndexed(spec: IndexedSpec): ToolpathIR {
       assertFinite('face.width', face.width);
       if (!(face.width > 0)) throw new Error(`generateIndexed: the face at A${face.a} states a width of ${face.width} mm; a face pocket is wider than nothing`);
       if (face.width > 2 * radius) throw new Error(`generateIndexed: the face at A${face.a} is ${face.width} mm wide, wider than the stock (⌀2×${radius} mm)`);
+    }
+    if (face.surfaceRadius !== undefined) {
+      assertFinite('face.surfaceRadius', face.surfaceRadius);
+      if (!(face.surfaceRadius > 0)) throw new Error(`generateIndexed: the face at A${face.a} states a surface radius of ${face.surfaceRadius} mm; a stock's surface is above its axis`);
+      // #1059 — the section's surface can never be outside the turned envelope.
+      if (face.surfaceRadius > radius + 1e-6) {
+        throw new Error(`generateIndexed: the face at A${face.a} states a ${face.surfaceRadius} mm surface radius, outside the ${radius} mm envelope the stock turns in`);
+      }
+      // A face whose floor is at or below the axis has no plane to cut to (the caller refuses
+      // this in operator words; here it is the move that would be written).
+      if (face.depth >= face.surfaceRadius) {
+        throw new Error(`generateIndexed: the face at A${face.a} is ${face.depth} mm deep on a ${face.surfaceRadius} mm surface radius, so its floor is at or below the axis`);
+      }
     }
     const moves = faceMoves(face, radius, params, cutterRadius);
     operations.push({

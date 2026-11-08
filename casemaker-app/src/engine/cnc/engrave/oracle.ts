@@ -165,6 +165,13 @@ export interface OraclePredicted {
    */
   a?: number;
   /**
+   * #1059 — the stock's own surface at {@link a}, mm, when it is not the turned envelope: a
+   * BLOCK's face at A 0 is judged from the section's half-height (22.25 on a 44.5 mm square), not
+   * from the 31.47 mm envelope, which is air above it. Absent is the envelope — every round rod,
+   * where the surface is the same radius at every index.
+   */
+  surfaceRadius?: number;
+  /**
    * #667 — the document item this prediction describes, when it has one. The oracle does not read
    * it; a caller that must re-state the prediction for ONE program (a rest pair's rough-only file
    * splits only some entries) matches entries to items by it. Absent on a thread/groove entry a
