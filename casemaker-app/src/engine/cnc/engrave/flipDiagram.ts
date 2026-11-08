@@ -13,6 +13,7 @@ import type { SetupFlip, StockCorner } from '@/types/engraveJob';
 
 import { flipFenceFacts, FLIP_BORE_DIAMETER_MM } from './flipChoice';
 import { FLIP_PROBE_ENTRY_DEPTH_MM } from '@/engine/cnc/registration/plan';
+import { flipReflection } from '@/engine/cnc/setups/flip';
 
 export interface FlipDiagramProps {
   /** The blank's seated extents, mm. */
@@ -48,10 +49,8 @@ const esc = (s: string): string =>
   s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 const n = (v: number): string => String(Math.round(v * 1000) / 1000);
 
-/** One side-1 work point in side 2's frame (the flip's own reflection). */
-function reflect(p: { x: number; y: number }, flip: SetupFlip, lengthMm: number, widthMm: number): { x: number; y: number } {
-  return flip.axis === 'left-right' ? { x: lengthMm - p.x, y: p.y } : { x: p.x, y: widthMm - p.y };
-}
+/** One side-1 work point in side 2's frame — the ONE reflection (`setups/flip.ts`'s). */
+const reflect = flipReflection;
 
 interface PanelProps {
   title: string;

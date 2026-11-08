@@ -15,6 +15,7 @@ import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 import type { RegistrationSettings } from './settings';
 import { planFlipRegistration, type FlipRegistrationPlan, type RegistrationPlan } from './plan';
 import { FLIP_BORE_DIAMETER_MM, type FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
+import { flipReflection } from '@/engine/cnc/setups/flip';
 
 export interface FlipAttempt {
   /** The index of the FLIPPED setup in `job.setups`. */
@@ -38,8 +39,10 @@ export const PIN_REFLECTION_TOLERANCE_MM = 0.05;
 
 /**
  * #1088 — ONE SOURCE FOR THE HOLES. Side 2's pins ARE side 1's posted bore centres seen from the
- * other side: a flip about the left-right axis reflects Y through the stock's width, one about
- * front-back reflects X through its length. The planner's `holes` are always these reflected
+ * other side — `setups/flip.ts` `flipReflection`'s mapping, the SAME one the flip drawing uses:
+ * left-right mirrors X through the length, front-back mirrors Y through the width. A stored pin
+ * copy that disagrees with the reflection is refused by name rather than measured on. The
+ * planner's `holes` are always these reflected
  * bores; a setup that also stores `pins` may state them, but a stored copy that disagrees with
  * the reflection is refused by name rather than measured on.
  */
@@ -48,9 +51,10 @@ export function reflectedPins(
   axis: 'left-right' | 'front-back',
   stock: { xMax: number; yMax: number },
 ): { x: number; y: number }[] {
-  return bores.map((b) =>
-    axis === 'left-right' ? { x: r3(b.x), y: r3(stock.yMax - b.y) } : { x: r3(stock.xMax - b.x), y: r3(b.y) },
-  );
+  return bores.map((b) => {
+    const r = flipReflection(b, { axis }, stock.xMax, stock.yMax);
+    return { x: r3(r.x), y: r3(r.y) };
+  });
 }
 
 const r3 = (v: number): number => Math.round(v * 1000) / 1000;

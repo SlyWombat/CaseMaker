@@ -51,14 +51,27 @@ const INPUT = () => ({
 });
 
 describe('#1088 side 2’s pins are side 1’s bores, reflected', () => {
-  it('the reflection: left-right reflects Y through the width; front-back reflects X through the length', () => {
+  it('the reflection: left-right mirrors X through the length; front-back mirrors Y through the width', () => {
     expect(reflectedPins(BORES, 'left-right', STOCK)).toEqual([
+      { x: 70, y: 15 },
+      { x: 20, y: 15 },
+    ]);
+    expect(reflectedPins(BORES, 'front-back', STOCK)).toEqual([
       { x: 20, y: 45 },
       { x: 70, y: 45 },
     ]);
-    expect(reflectedPins(BORES, 'front-back', STOCK)).toEqual([
-      { x: 70, y: 15 },
-      { x: 20, y: 15 },
+  });
+
+  it('m1trayF’s real numbers: a bore at X 156 on a 160 blank is a pin at X 4, Y unchanged', () => {
+    // The tray's own side-1 hold: (156, 37.8) and (156, 88.2) on side 1 → (4, 37.8)/(4, 88.2)
+    // on side 2 (the Manager's bench numbers, the flip left-right through 160).
+    const trayBores = [
+      { x: 156, y: 37.8 },
+      { x: 156, y: 88.2 },
+    ];
+    expect(reflectedPins(trayBores, 'left-right', { xMax: 160, yMax: 126 })).toEqual([
+      { x: 4, y: 37.8 },
+      { x: 4, y: 88.2 },
     ]);
   });
 
@@ -71,13 +84,13 @@ describe('#1088 side 2’s pins are side 1’s bores, reflected', () => {
   });
 
   it('a stored pin set that agrees is accepted; one that disagrees is refused by name with both', () => {
-    const agreeing = planFlipAttempt(flipJob([{ x: 20, y: 45 }, { x: 70, y: 45 }]), INPUT());
+    const agreeing = planFlipAttempt(flipJob([{ x: 70, y: 15 }, { x: 20, y: 15 }]), INPUT());
     expect(agreeing?.kind).toBe('plan');
-    const wrong = planFlipAttempt(flipJob([{ x: 20, y: 15 }, { x: 70, y: 15 }]), INPUT());
+    const wrong = planFlipAttempt(flipJob([{ x: 20, y: 45 }, { x: 70, y: 45 }]), INPUT());
     expect(wrong?.kind).toBe('refused');
     if (wrong?.kind !== 'refused') return;
-    expect(wrong.reason).toContain('(20, 15)');
     expect(wrong.reason).toContain('(20, 45)');
+    expect(wrong.reason).toContain('(70, 15)');
     expect(wrong.reason).toContain('disagree');
   });
 
