@@ -17,8 +17,12 @@ import { presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import { planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import { engraveGenerate, mountInSideFrame } from '@/workers/sim/engraveGenerate';
-import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
+import { engraveGenerate } from '@/workers/sim/engraveGenerate';
+import { Z1 } from '@/engine/cnc/machine';
+import { flatEndMill } from '@/engine/cnc/tool';
+import { rectProfile } from '@/engine/compiler/profile';
+import { stubSetup } from '@/engine/cnc/setup';
+import { stockDepthLimit, verifyProgram, type VerifyContext } from '@/engine/cnc/verify';
 import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
 import { entry, FLAT3, stl } from './helpers/twoSetupBox966';
 
@@ -132,31 +136,41 @@ describe('#1073 — a setup’s contour posts in its own frame', () => {
     expect(Math.abs(one.min[0] - two.min[0])).toBeGreaterThan(5);
   }, 240_000);
 
-  it('a flipped setup reads the mount in its own mirrored work frame', () => {
-    // The old twin's false clash, as the rule it was: the bracket's left arm is machine geometry,
-    // but a side-2 program's XY are side 2's work coordinates. Stated in THAT frame the arm is at
-    // X 160..175 on a 160 mm blank — 0.486 mm from a side-2 cut at 0.4 in side 1's frame is no
-    // longer a clash, because in side 2's frame the cut is at 159.6.
-    const mount: MountObstacles = {
-      uncertainty: 0.1,
-      obstacles: [
-        { id: 'bracket-left-arm', kind: 'bracket', label: 'the bracket’s left arm', fix: 'keep clear', edge: 'left', min: [-15, -15], max: [0, 85], topZ: -15.95 },
-      ],
-      fixture: {
-        source: 'default',
-        uncertainty: 0.1,
-        boxes: [{ id: 'bracket-left-arm', label: 'the bracket’s left arm', min: [-15, -15, -25], max: [0, 85, -15.95] }],
-      },
+  it('a side-2 cut within the clearance of the left arm is refused — the arms are machine-fixed', () => {
+    // Side 2's program is in its own work frame, and the operator re-seats the blank's new left
+    // edge against the SAME left arm in the same anchored corner: the arm is at X ≤ 0 in THAT
+    // frame too. This is the check that caught the old twin's side-2 contour at X 0.408 — a real
+    // clash (its part was 2 mm from the arm), never a frame error. Reflecting the arm to X 160..175
+    // would move it where it physically is not and let a real collision pass.
+    const leftArm = { id: 'bracket-left-arm', kind: 'bracket' as const, label: 'the bracket’s left arm', fix: 'move the part right', edge: 'left' as const, min: [-15, -15] as [number, number], max: [0, 85] as [number, number], topZ: -15.95 };
+    const ctx: VerifyContext = {
+      setup: stubSetup({ kind: 'prism', outline: rectProfile(160, 126), thickness: 25 }, { kind: 'anchor-bracket', anchor: 1, offset: [0, 0] }, { startingTool: 1 }, Z1),
+      machine: Z1,
+      tool: flatEndMill(3.175),
+      depthLimit: stockDepthLimit({ length: 160, width: 126, thickness: 25 }, 1),
+      minRapidZ: 1,
+      mountObstacles: { obstacles: [leftArm], uncertainty: 0.1, clearance: 1 },
     };
-    const lr = mountInSideFrame(mount, { method: 'tabs-in-blank', axis: 'left-right' }, { length: 160, width: 126 });
-    expect(lr.obstacles[0]!.min).toEqual([160, -15]);
-    expect(lr.obstacles[0]!.max).toEqual([175, 85]);
-    expect(lr.obstacles[0]!.topZ).toBe(-15.95);
-    expect(lr.fixture.boxes[0]!.min).toEqual([160, -15, -25]);
-    expect(lr.fixture.boxes[0]!.max).toEqual([175, 85, -15.95]);
-    // Front↔back mirrors Y through the width; X is untouched.
-    const fb = mountInSideFrame(mount, { method: 'tabs-in-blank', axis: 'front-back' }, { length: 160, width: 126 });
-    expect(fb.obstacles[0]!.min).toEqual([-15, 41]);
-    expect(fb.obstacles[0]!.max).toEqual([0, 141]);
+    const prog = (x: string): string =>
+      [
+        'G90 G21',
+        'T1 M6',
+        'M331',
+        'G53 G0 Z-3',
+        'S12000 M3',
+        ';@MKR|TOOLPATH|number=1|tool_number=1|name=Contour 14.0mm',
+        'G0 X10 Y20',
+        'G0 Z-16',
+        `G1 X${x} Y20 F300`,
+        'G1 X10 Y20 F300',
+        'G0 Z13',
+        'M5',
+        'M332',
+        'M2',
+      ].join('\n');
+    // 0.408 mm from the arm's face: inside radius 1.5875 + fit 0.1 + clearance 1 = 2.6875 → refused.
+    expect(verifyProgram(prog('0.408'), ctx).findings.some((f) => f.code === 'bracket-in-path')).toBe(true);
+    // 4.2 mm out: the same cut is clear of the arm.
+    expect(verifyProgram(prog('4.2'), ctx).findings.some((f) => f.code === 'bracket-in-path')).toBe(false);
   });
 });
