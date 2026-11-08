@@ -4042,8 +4042,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // scoped to; the key names their inputs instead.
     const finishCutterKey = cutterKeyOf(finishCutter);
     const regionMemoKey = `${region.id}@${isOuterSurface ? finishRadius0.toFixed(4) : 'base'}`;
-    const stageKey = (stage: string, cutterKey: string, rest: Record<string, unknown>): string =>
-      `${stage}|${cutterKey}|${regionMemoKey}|${finishCutterKey}|${JSON.stringify(rest)}`;
+    const stageKey = (stage: string, cutterKey: string, rest: Record<string, unknown>, deps: readonly string[] = []): string =>
+      `${stage}|${cutterKey}|${regionMemoKey}|${deps.join('|')}|${JSON.stringify(rest)}`;
     const memoHit = (key: string): StageMemoEntry | undefined => opts.memo?.get(key);
     const memoStore = (
       key: string,
@@ -4355,6 +4355,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         roughStepDown,
         finishBand,
         ballRadiusForMask,
+        extraMask === undefined ? 'auto' : 'extra',
       ],
       feeds: feedsOf(paramsFor(finishCutter)),
       safeZ: opts.safeZMm,
@@ -4446,8 +4447,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         if (design === null) return false;
         return b - design > finishBand;
       };
-      // #1054 — keyed by the rest ball, the finish ball whose CL its mask reads (in `stageKey`),
-      // and the mask's own band/radius facts.
+      // #1054 — keyed by the rest ball, the finish ball whose CL its mask reads, and the mask's
+      // own band/radius facts.
       const restBallKey = stageKey('rest-ball', cutterKeyOf(restBallTool), {
         kind: finishKind,
         scallop: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
@@ -4460,7 +4461,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         rpm: paramsFor(restBallTool).rpm,
         air: opts.air,
         rapid: opts.rapid,
-      });
+      }, [finishCutterKey]);
       const restBallMemo = memoHit(restBallKey);
       if (restBallMemo !== undefined) {
         // The crease pass rides this CL; a memo hit must hand it over exactly as the miss does.
