@@ -472,12 +472,23 @@ function arcRangesOverlap(a0: number, a1: number, b0: number, b1: number, perime
  * A requested tab with no edge long enough is not placed and is counted in `unplaceable`; the
  * CAM reports it as `tab-unplaceable` rather than silently cutting the part free. Overlapping
  * placements are also counted unplaceable: two tabs in one place are one tab, not two.
+ *
+ * #1073 — `targets` replaces the equal-interval targets with one arc position per tab (the
+ * release pass computes its own, because its corner/bore clearances are not evenly spaced). The
+ * edge choice, the span-on-one-edge rule and the overlap rule are the SAME as before.
  */
 export function placeTabs(
   contour: readonly (readonly [number, number])[],
   count: number,
   widthMm: number,
   toolRadius: number,
+  /**
+   * #1073 — EXPLICIT ARC POSITIONS for each tab's centre, instead of equal intervals. The flip
+   * release's bridges must satisfy the corner/bore rules, and equal spacing can put a short side's
+   * bridge too near a corner; the release computes each centre where the rules leave room and
+   * hands them in. `undefined` keeps the equal-arc default for every other caller unchanged.
+   */
+  targets?: readonly number[],
 ): TabPlacement {
   const { segments, perimeter } = segmentsOf(contour);
   const spanLength = widthMm + 2 * toolRadius;
@@ -489,7 +500,7 @@ export function placeTabs(
   let unplaceable = 0;
   for (let k = 0; k < count; k++) {
     // Mid-interval targets, so the first tab is not forced onto the contour's start vertex.
-    const target = ((k + 0.5) / count) * perimeter;
+    const target = targets?.[k] ?? ((k + 0.5) / count) * perimeter;
     let best: { startArc: number; endArc: number; distance: number } | null = null;
     for (const edge of edges) {
       if (edge.end - edge.start < spanLength - 1e-9) continue;
@@ -559,8 +570,10 @@ function arcDistance(from: number, to: number, perimeter: number): number {
   return d < 0 ? d + perimeter : d;
 }
 
-/** The moves for one contour at one Z, crossing its tab spans above the tab top when needed. */
-function contourMoves(
+/** The moves for one contour at one Z, crossing its tab spans above the tab top when needed.
+ *  #1073 — exported for the flipped setup's tab release: it cuts a band, not a top-down depth, so
+ *  it walks its own Z levels and reuses this contour/tab mechanism rather than a second one. */
+export function contourMoves(
   contour: Polygons[number],
   z: number,
   tabTopZ: number,

@@ -471,6 +471,10 @@ export type JobFindingCode =
   // #943 (10) — the goal's outline is the stock's own footprint: no material around the part, so
   // no freeing contour is cut. Info; a side-2 job whose stock is the freed part states it.
   | 'goal-outline-is-stock'
+  // #1073 — the flipped side's tab release is not posted because that side cut no freeing contour
+  // (the outline is the stock's): no band surrounds the part, so it is not held by tabs. Info, so
+  // the run sheet's missing hand-cut step is stated rather than silent.
+  | 'tab-release-skipped'
   | 'goal-cutter-substituted'
   | 'goal-skin-standing'
   | 'goal-rim-unbroken'

@@ -2089,6 +2089,41 @@ describe('runSheet — every program gets its own Cut section (#419)', () => {
     expect(sectionText(sheet, 'cut')).not.toContain(OTHER_NC);
   });
 
+  it('leaves the flip release’s bridges as the last hand-cut step, with their positions', () => {
+    // #1073 — the flipped setup's last program is the tab release. The part is held by its
+    // bridges and nothing else, so the sheet's last physical action is cutting them by hand
+    // AFTER the machine is homed, with the positions the file was planned at.
+    const job = dj();
+    const generated: RunSheetGenerated = {
+      ...stubGenerated(job),
+      programs: [
+        program(NC, `${NC}\n;frame\n`, ENGR),
+        program(OTHER_NC, OTHER_FRAME, ENGR, {
+          tabRelease: {
+            count: 4,
+            widthMm: 8,
+            heightMm: 2,
+            at: [
+              { x: 12.5, y: 21.6 },
+              { x: 31.4, y: 21.6 },
+              { x: -31.4, y: -21.6 },
+              { x: -12.5, y: -21.6 },
+            ],
+          },
+        }),
+      ],
+    };
+    const steps = section(buildRunSheet(job, generated, NO_SIM, NOW), 'cut-2').steps;
+    const step = steps[steps.length - 1]!;
+    expect(step.text).toContain('The part is held by 4 tabs');
+    expect(step.text).toContain('cut them with a flush-cut saw or knife after the machine is homed');
+    expect(step.text).toContain('then dress the stubs');
+    expect(step.text).toContain('X 12.5, Y 21.6');
+    expect(step.text).toContain('X -31.4, Y -21.6');
+    expect(step.value).toContain('8 mm wide');
+    expect(step.value).toContain('2 mm thick');
+  });
+
   it('warns, bold, when a later program has no frame file', () => {
     const job = dj();
     const generated: RunSheetGenerated = {
