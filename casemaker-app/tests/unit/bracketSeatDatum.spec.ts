@@ -18,13 +18,15 @@ import { fileURLToPath } from 'node:url';
 
 import { LocationViewSchema, type BedProfile, type MachineRecord } from '@/platform/locationClient';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
-import { bracketSeatDatumFor } from '@/engine/cnc/registration/mountContext';
+import { bracketPlacementSeedFor, bracketSeatDatumFor } from '@/engine/cnc/registration/mountContext';
+import { gridSeeds } from '@/engine/cnc/registration/placing';
 import {
   bracketExpectedSurface,
   bracketSeat,
   type BracketSeatDatum,
 } from '@/engine/cnc/mounts/bracket';
 import type { ShopDefaults } from '@/platform/defaultsClient';
+import { withBracketPlacementSeed } from '@/platform/bedProfiles';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -105,6 +107,47 @@ describe('#509 the bracket seat comes from the bed profile', () => {
       expect(refused.reason).toContain('the bed profile’s bracket seat');
       expect(refused.reason).toContain('touch the surface beside the bracket once with the probe');
     }
+  });
+});
+
+describe('#1070 (C8) a PLACED bracket’s seed — the bed profile states where it sits', () => {
+  const bracketPlacement = (seed: BedProfile['placements'][number]['seed']): BedProfile['placements'][number] => ({
+    id: 'pl-bracket',
+    fixture: 'fx-bracket-thin',
+    where: { kind: 'free' as const, pins: null, anchor: null },
+    count: null,
+    frame: null,
+    seed,
+    provenance: {},
+  });
+
+  it('the bed’s hole grid admits exactly one bracket position — anchor 1’s own corner', () => {
+    const seeds = gridSeeds();
+    expect(seeds).toHaveLength(1);
+    expect(seeds[0]!.x).toBeCloseTo(-190.89, 2);
+    expect(seeds[0]!.y).toBeCloseTo(-193.83, 2);
+    expect(seeds[0]!.quarter).toBe(0);
+  });
+
+  it('a stated placement seeds a placed job; an unstated profile does not', () => {
+    const stated = machineWith({});
+    stated.bedProfiles = [{ ...stated.bedProfiles![0]!, placements: [bracketPlacement({ x: -182.0, y: -194.6, by: 'touch', measuredAt: '2026-11-08T00:00:00.000Z', at: [-182.0, -194.6], probe: 'fx-probe-1' })] }];
+    expect(bracketPlacementSeedFor(stated)).toMatchObject({ x: -182.0, y: -194.6, by: 'touch' });
+    const unstated = machineWith({});
+    unstated.bedProfiles = [{ ...unstated.bedProfiles![0]!, placements: [bracketPlacement(null)] }];
+    expect(bracketPlacementSeedFor(unstated)).toBeNull();
+  });
+
+  it('the writer states it on the active profile — adding the placement, then updating it in place', () => {
+    const before = machineWith({});
+    const first = withBracketPlacementSeed(before, { x: -190.89, y: -193.829, by: 'grid' }, '2026-11-08T01:00:00.000Z');
+    expect(bracketPlacementSeedFor(first)).toMatchObject({ x: -190.89, y: -193.829, by: 'grid', measuredAt: '2026-11-08T01:00:00.000Z' });
+    const placements = first.bedProfiles![0]!.placements;
+    expect(placements.filter((p) => p.fixture === 'fx-bracket-thin')).toHaveLength(1);
+
+    const second = withBracketPlacementSeed(first, { x: -182.0, y: -194.6, by: 'touch', at: { x: -182.0, y: -194.6 }, probe: 'fx-probe-1' }, '2026-11-08T02:00:00.000Z');
+    expect(bracketPlacementSeedFor(second)).toMatchObject({ x: -182.0, y: -194.6, by: 'touch', probe: 'fx-probe-1' });
+    expect(second.bedProfiles![0]!.placements.filter((p) => p.fixture === 'fx-bracket-thin')).toHaveLength(1);
   });
 });
 

@@ -100,6 +100,7 @@ import type { Tool } from '../../../src/engine/cnc/tool';
 import { toolDisplayName } from '../../../src/engine/cnc/toolDisplay';
 import type { JobFinding } from '../../../src/engine/cnc/engrave/jobSetup';
 import type { LoadedLocation } from '../../../src/platform/headless/bootstrap';
+import { bracketPlacementSeedFor } from '../../../src/engine/cnc/registration/mountContext';
 import { sheetRegistrationPlan } from '../../../src/engine/cnc/registration/footprintJob';
 import type { SeatSeek } from '../../../src/engine/cnc/registration/footprintJob';
 import type { FootprintPlan } from '../../../src/engine/cnc/registration/footprint';
@@ -440,7 +441,10 @@ export function sheetRegistrationFor(
   const bracketSeat = seat === null || seat === undefined ? null : { value: seat.value, what: 'bracket seat' as const, measuredAt: seat.measuredAt ?? null, ...(seat.restsOnStock === true ? { restsOnStock: true } : {}) };
   // #1070, 6b's ruling (C8) — THE ONE SEAM: the app's sheet and this one plan their registration
   // through the same function; this wrapper only resolves the boot's location into its arguments.
-  return sheetRegistrationPlan({ job, calibration, defaults: where.defaults, probe, bracketSeat });
+  // #1070 (C8) — a placed bracket's seed is the bed profile's placement, read by the same helper
+  // the app's Cut card uses.
+  const placedSeed = bracketPlacementSeedFor(machine ?? null);
+  return sheetRegistrationPlan({ job, calibration, defaults: where.defaults, probe, bracketSeat, placedSeed });
 }
 
 export async function engraveJobMain(argv: string[], options: CommandOptions = HUMAN): Promise<number> {

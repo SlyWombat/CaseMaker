@@ -40,6 +40,7 @@ import {
   probeNameFor,
   surfaceTopDatumFor,
   bracketSeatDatumFor,
+  bracketPlacementSeedFor,
 } from '@/engine/cnc/registration/mountContext';
 import { useMountTap, useMountTapBusyFlag } from '@/hooks/useMountTap';
 import {
@@ -146,6 +147,7 @@ export function EngraveSetupsSection({
   // #509 — the bracket's seat from the ACTIVE bed profile (bracket seat, else surface top; the
   // shop-default fallback lives in the engine for one release).
   const bracketSeat = useMemo(() => bracketSeatDatumFor(machineRecord), [machineRecord]);
+  const placedSeed = useMemo(() => bracketPlacementSeedFor(machineRecord), [machineRecord]);
   // #599 — the mount tap point (machine XY), from the placement frame or the newest usable registration.
   const registrations = useEngraveRegistrationStore((s) => s.records);
   const seekFromMachineZ = useMemo(() => clearanceZOf(jobMachine(job, calibration)) ?? 0, [job, calibration]);
@@ -612,6 +614,7 @@ export function EngraveSetupsSection({
                   mountDatumMismatchName,
                   surfaceTopZ,
                   bracketSeat,
+                  placedSeed,
                   probe,
                   probeName,
                   mountTap,

@@ -253,6 +253,22 @@ const PlacementFrameSchema = z
   })
   .strict();
 
+/** #1070 (C8) — a placed bracket's position, stated with where the statement came from. */
+export const BracketSeedSchema = z
+  .object({
+    /** The bracket's inside corner (the stock's front-left corner), machine XY. */
+    x: bedNumber,
+    y: bedNumber,
+    /** `grid`: the bed's hole pattern admitted exactly one position; `touch`: measured + confirmed. */
+    by: z.enum(['grid', 'touch']),
+    measuredAt: bedText,
+    /** The machine XY the reading was taken at, when it was a touch. */
+    at: z.tuple([bedNumber, bedNumber]).nullable().default(null),
+    /** The probe accessory the touch was taken with. */
+    probe: bedText.nullable().default(null),
+  })
+  .strict();
+
 /** One fixture put on the bed: position and orientation only; the shape is the fixture's. */
 export const BedPlacementSchema = z
   .object({
@@ -261,6 +277,14 @@ export const BedPlacementSchema = z
     where: PlacementWhereSchema,
     count: z.number().int().positive().nullable().default(null),
     frame: PlacementFrameSchema.nullable().default(null),
+    /**
+     * #1070 (C8, the placed bracket) — WHERE A SCREWED-DOWN BRACKET'S INSIDE CORNER SITS, machine
+     * XY. A fact of the BENCH (shared by every job until someone moves the bracket), not of the
+     * job: `by: 'grid'` when the bed's hole pattern admits exactly one position and the bracket
+     * was found on it, `by: 'touch'` when the position was measured and the operator confirmed it.
+     * Absent until measured; a placed job then refuses by name.
+     */
+    seed: BracketSeedSchema.nullable().default(null),
     provenance: bedProvenance.default({}),
   })
   .strict();

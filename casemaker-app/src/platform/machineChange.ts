@@ -545,6 +545,7 @@ export function planMountChange(args: MountChangeArgs): MountChangeOutcome {
       where: { kind: 'pins', pins: to, anchor: null },
       count: null,
       frame: null,
+      seed: null,
       provenance: {},
     });
   }
@@ -567,6 +568,7 @@ export function planMountChange(args: MountChangeArgs): MountChangeOutcome {
       where: { kind: 'anchor', anchor: bracketAnchor, pins: null },
       count: null,
       frame: null,
+      seed: null,
       provenance: {},
     });
   }

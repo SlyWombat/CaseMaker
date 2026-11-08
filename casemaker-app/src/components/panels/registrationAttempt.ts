@@ -73,6 +73,12 @@ export function planRegistrationAttempt(args: {
   surfaceTopZ: { value: number } | null;
   /** #509 — the active bed profile's seat beside the bracket (its bracket seat, else its surface top). */
   bracketSeat: BracketSeatDatum | null;
+  /**
+   * #1070 (C8) — the active bed profile's PLACEMENT SEED for a placed bracket (its inside corner,
+   * machine XY, and where the statement came from), or null when the profile states none. Read
+   * with `bracketPlacementSeedFor`; ignored by the anchored path.
+   */
+  placedSeed?: { x: number; y: number; by: 'grid' | 'touch'; measuredAt: string; at: [number, number] | null; probe: string | null } | null;
   probe: ProbeSpec | null;
   /** #603 — the checked-out probe's display name (its product), or null when none is checked out. */
   probeName: string | null;
@@ -115,26 +121,38 @@ export function planRegistrationAttempt(args: {
     }
     // #1070 — THE FOOTPRINT PLAN, from the job: two touches per bounding edge at the cut region's
     // extents, the far edges once each, one Z touch per region corner, every position in machine
-    // coordinates checked against the soft endstop before a line is sent. The anchor-1 bracket
-    // datum only SEEDS the machine coordinates; the touches derive the origin.
+    // coordinates checked against the soft endstop before a line is sent. The seed places the
+    // machine coordinates; the touches derive the origin.
     //
-    // A PLACED bracket has no anchor datum, and this plan's seed IS the anchor: planned anyway it
-    // would send every touch to the wrong machine coordinates and state a seed the sheet denies.
-    // Refused by name until the placed seed is measured (A's later work).
-    // The field lives on land7's BracketHold (#1070 placed bracket); read it defensively so this
-    // branch typechecks on its own line too.
-    if (job.workholding.kind === 'bracket' && (job.workholding.bracket as { placement?: 'anchored' | 'placed' }).placement === 'placed') {
-      return {
-        kind: 'refused',
-        reason:
-          'this bracket is screwed down where you put it, so there is no anchor datum to plan its registration from — ' +
-          'put it on the anchor-1 pins to register from the anchor, or measure its position and register by hand',
-      };
-    }
+    // A PLACED bracket (6b's ruling, C8) takes its seed from the ACTIVE BED PROFILE's placement of
+    // the bracket — a fact of the bench, shared by every job until someone moves it — never from
+    // the anchor it is not on. A profile that states none refuses by name, pointing at where the
+    // statement lives. The field lives on land7's BracketHold; read it defensively.
+    const placed = job.workholding.kind === 'bracket' && (job.workholding.bracket as { placement?: 'anchored' | 'placed' }).placement === 'placed';
     const sizes = bracketSettings(defaults);
-    const anchor = anchorFrom(calibration, job.machineId);
-    if (!anchor.ok) return { kind: 'refused', reason: anchor.reason };
-    const datum = bracketDatum(anchor.anchor, sizes);
+    let datum: { x: number; y: number; from: string; offsetMeasured: boolean };
+    if (placed) {
+      const seed = args.placedSeed ?? null;
+      if (seed === null) {
+        return {
+          kind: 'refused',
+          reason:
+            'this bracket is screwed down where you put it, and the active bed profile does not state where — ' +
+            'measure the bracket’s position into the bed profile’s placement (its five holes on the bed’s hole grid, or one confirmed touch), ' +
+            'or put it on the anchor-1 pins',
+        };
+      }
+      datum = {
+        x: seed.x,
+        y: seed.y,
+        from: seed.by === 'grid' ? 'the bed’s hole grid at the bracket’s five holes — the one position the grid admits' : 'the position measured and confirmed in the bed profile’s placement',
+        offsetMeasured: seed.by === 'touch',
+      };
+    } else {
+      const anchor = anchorFrom(calibration, job.machineId);
+      if (!anchor.ok) return { kind: 'refused', reason: anchor.reason };
+      datum = bracketDatum(anchor.anchor, sizes);
+    }
     const obstacles = mountObstaclesFor(job, mount, sizes);
     // 6b's ruling (#1070) — THE FIRST BRACKET SEAT IS MEASURED BY THE PROGRAM: when the house has
     // no seat datum (and no legacy default), the press plans ONE bounded Z seek with the wired V2
@@ -145,7 +163,8 @@ export function planRegistrationAttempt(args: {
     const under0 = mount.board === true ? (job.sacrificial?.under?.thickness ?? 0) : 0;
     const expected0 = bracketExpectedSurface(defaults, dims0.z, under0, args.bracketSeat);
     if (!expected0.ok) {
-      const seat = seatSeekFor({ job, calibration, defaults, probe: args.probe });
+      // The seat point is measured from the plan's own seed — a placed bracket's placement, else the anchor.
+      const seat = seatSeekFor({ job, calibration, defaults, probe: args.probe, origin: datum });
       if (!seat.ok) return { kind: 'refused', reason: seat.reason };
       const plan: RegistrationPlan = {
         mount: 'bracket',

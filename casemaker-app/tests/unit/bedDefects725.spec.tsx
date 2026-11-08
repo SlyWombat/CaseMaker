@@ -128,6 +128,7 @@ function bedMachine(opts: { anchor?: boolean; bare?: boolean; vise?: boolean; ro
         fixture: 'fx-rotary-1',
         where: { kind: 'pins', pins: 'rotary', anchor: null },
         count: null,
+        seed: null,
         frame: null,
         provenance: {},
       },
@@ -140,6 +141,7 @@ function bedMachine(opts: { anchor?: boolean; bare?: boolean; vise?: boolean; ro
       fixture: 'fx-bracket-thin',
       where: { kind: 'anchor', anchor: 1, pins: null },
       count: null,
+      seed: null,
       frame: null,
       provenance: {},
     });

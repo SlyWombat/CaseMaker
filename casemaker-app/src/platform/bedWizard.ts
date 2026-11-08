@@ -321,6 +321,7 @@ export function finalizeDraft(
       where: savedWhere(placement.where),
       count: placement.count,
       frame: null,
+      seed: null,
       provenance: {},
     });
   }

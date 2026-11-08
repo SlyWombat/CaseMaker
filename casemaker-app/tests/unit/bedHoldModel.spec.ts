@@ -51,7 +51,7 @@ const WASTEBOARD: BedProfile = {
   },
   datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null },
   placements: [
-    { id: 'pl-vise', fixture: 'fx-vise', where: { kind: 'pins', pins: 'vise', anchor: null }, count: null, frame: null, provenance: {} },
+    { id: 'pl-vise', fixture: 'fx-vise', where: { kind: 'pins', pins: 'vise', anchor: null }, count: null, frame: null, seed: null, provenance: {} },
   ],
   preferredMounting: [],
   consumables: {
@@ -84,7 +84,7 @@ const BRACKETED: BedProfile = {
   id: 'bp-bracket',
   placements: [
     ...WASTEBOARD.placements,
-    { id: 'pl-bracket', fixture: 'fx-bracket-thin', where: { kind: 'anchor', anchor: 1, pins: null }, count: null, frame: null, provenance: {} },
+    { id: 'pl-bracket', fixture: 'fx-bracket-thin', where: { kind: 'anchor', anchor: 1, pins: null }, count: null, frame: null, seed: null, provenance: {} },
   ],
 };
 
