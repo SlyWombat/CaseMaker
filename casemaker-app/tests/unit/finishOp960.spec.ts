@@ -443,20 +443,37 @@ describe('#1080 the finish reads the cross-row slope, not the gradient magnitude
   };
 
   it('a 60° wall ALONG the rows reads ≈0°; the same wall ACROSS the rows reads 60° (6b’s units)', () => {
-    // The wall runs at 60° from horizontal: slope tan(60°) = 1.732. Along the rows the raster
-    // travels at constant Z between rows — no cusp — so the gentle 1.54 mm spacing must stand.
-    // Across the rows the ball at a 0.1 mm cusp needs ~0.54 mm, three times tighter.
+    // The wall runs at 60° from horizontal: slope tan(60°) = 1.732. Along the rows the cross-row
+    // component is 0, so the pitch conversion is the identity — but the band is a VERTICAL cusp,
+    // and on a 60° surface a 0.1 mm vertical band is only 0.05 mm along the normal (6b's split
+    // cosines, #1080): the along-row spacing is 2*sqrt(2R*h_n - h_n^2) with h_n = band*cos 60°,
+    // ≈1.091 mm — neither the flat 1.536 mm nor half of it. Across the rows the ball at a 0.1 mm
+    // cusp needs ~0.545 mm, as before.
     const steepSlope = Math.tan((60 * Math.PI) / 180);
     const along = rasterRows(job(sweepMesh(steepSlope, LENGTH, HALF)).ir);
     const across = rasterRows(job(rampMesh(-steepSlope, LENGTH, HALF)).ir);
-    const gentleStep = 2 * Math.sqrt(2 * 3 * 0.1 - 0.1 * 0.1); // ≈1.536 mm at 0°
-    const gentleRows = Math.floor((LENGTH - 2 * PAD) / gentleStep) + 2;
     const cos60 = Math.cos((60 * Math.PI) / 180);
-    const steepStep = cos60 * 2 * Math.sqrt(2 * 3 * (0.1 * cos60) - (0.1 * cos60) ** 2); // ≈0.54 mm
+    const normalBand = 0.1 * cos60;
+    const alongStep = 2 * Math.sqrt(2 * 3 * normalBand - normalBand ** 2); // ≈1.091 mm
+    const alongRows = Math.floor((LENGTH - 2 * PAD) / alongStep) + 2;
+    const steepStep = cos60 * 2 * Math.sqrt(2 * 3 * (0.1 * cos60) - (0.1 * cos60) ** 2); // ≈0.545 mm
     const steepRows = Math.floor((LENGTH - 2 * PAD) / steepStep) + 2;
-    // RED at the parent: the along-row wall read its magnitude (60°) too and took the steep rows.
-    expect(Math.abs(along.length - gentleRows), `along-row rows ${along.length} vs gentle ~${gentleRows}`).toBeLessThanOrEqual(3);
+    expect(Math.abs(along.length - alongRows), `along-row rows ${along.length} vs h_n step ~${alongRows}`).toBeLessThanOrEqual(3);
     expect(across.length, `across-rows rows ${across.length} vs steep ~${steepRows}`).toBeGreaterThan(along.length + 20);
+  }, 240_000);
+
+  it('the split cosines, in units: a 60° along-row plane gives the h_n = band·cos60 step, neither the flat spacing nor half of it', () => {
+    const steepSlope = Math.tan((60 * Math.PI) / 180);
+    const rows = rasterRows(job(sweepMesh(steepSlope, LENGTH, HALF)).ir);
+    const cos60 = Math.cos((60 * Math.PI) / 180);
+    const alongStep = (band: number) => 2 * Math.sqrt(2 * 3 * (band * cos60) - (band * cos60) ** 2);
+    const flatStep = 2 * Math.sqrt(2 * 3 * 0.1 - 0.1 * 0.1); // ≈1.536 mm
+    // The tightest gap between rows is the band's own step: h_n = 0.1·cos60 gives ≈1.091 mm.
+    let minGap = Infinity;
+    for (let i = 1; i < rows.length; i++) minGap = Math.min(minGap, rows[i]! - rows[i - 1]!);
+    expect(Math.abs(minGap - alongStep(0.1)), `tightest gap ${minGap.toFixed(4)} vs h_n step ${alongStep(0.1).toFixed(4)}`).toBeLessThan(0.02);
+    expect(Math.abs(minGap - flatStep)).toBeGreaterThan(0.2); // not the flat spacing
+    expect(Math.abs(minGap - flatStep / 2)).toBeGreaterThan(0.2); // not half of it
   }, 240_000);
 });
 
