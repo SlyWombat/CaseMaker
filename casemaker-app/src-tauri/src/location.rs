@@ -1371,6 +1371,33 @@ mod tests {
     }
 
     #[test]
+    fn the_app_serialisers_machine_record_parses_in_the_house() {
+        // #1059 — THE SHAPE THE APP ACTUALLY SENDS, not one written by hand. The fixture is the
+        // app's own serialiser output (`MachineRecordSchema.parse` then `JSON.stringify`): one
+        // profile with the face angle MEASURED and one carrying the app's `null`, because
+        // `BedDatums` is `deny_unknown_fields` and a field it did not know would refuse the whole
+        // write-back.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tests/unit/fixtures/machine-faceangle-ts.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{} should be readable: {e}", path.display()));
+        assert!(
+            raw.contains("\"rotaryFaceAngle\": null"),
+            "the app writes the key as null, not omitted"
+        );
+        let machine: MachineRecord = serde_json::from_str(&raw).unwrap();
+        machine.validate().unwrap();
+        let profiles = machine.bed_profiles.as_ref().expect("the fixture carries bed profiles");
+        let measured = profiles.iter().find(|p| p.id == "bp-face-angle").expect("the measured profile");
+        let datum = measured.datums.rotary_face_angle.as_ref().expect("the measured face angle");
+        assert!((datum.value - -2.35).abs() < 1e-9, "the value is degrees of turn");
+        assert_eq!(datum.residual_mm, Some(0.012));
+        assert_eq!(datum.at, Some([-106.0, -125.06]));
+        let unmeasured = profiles.iter().find(|p| p.id == "bp-null").expect("the null profile");
+        assert!(unmeasured.datums.rotary_face_angle.is_none(), "null parses as not measured");
+    }
+
+    #[test]
     fn a_scar_off_the_board_is_refused_on_write_and_still_loads() {
         // #509 — the footprint check is a WRITE rule. The same machine LOADS (validate) around a
         // stray scar — a location saved before the rule must not lock the shop out of its own
