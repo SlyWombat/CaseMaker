@@ -3783,7 +3783,8 @@
                   "aluminium-6061",
                   "aluminium-7075",
                   "brass",
-                  "copper"
+                  "copper",
+                  "epoxy-tooling"
                 ],
                 "type": "string"
               },
@@ -6189,7 +6190,8 @@
                 "aluminium-6061",
                 "aluminium-7075",
                 "brass",
-                "copper"
+                "copper",
+                "epoxy-tooling"
               ],
               "type": "string"
             },
@@ -6462,7 +6464,8 @@
                 "aluminium-6061",
                 "aluminium-7075",
                 "brass",
-                "copper"
+                "copper",
+                "epoxy-tooling"
               ],
               "type": "string"
             },

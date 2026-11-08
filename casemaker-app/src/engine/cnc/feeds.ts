@@ -695,14 +695,15 @@ export const FeedCatalogueSchema = z.array(
 /**
  * The vendor's material names, mapped to this app's `StockMaterial` (#310, widened by #347).
  *
- * `t_MaterialList` names fifteen materials; this app has a word for eight of them. The mapping is
+ * `t_MaterialList` names fifteen materials; this app has a word for nine of them. The mapping is
  * by EXACT name and nothing else — a name that is not a key here is REFUSED, the row is not used,
  * rather than guessed at by substring. So a future `Hardwood (Oak)` cannot silently become
  * `hardwood`, an `Aluminum 6061` in the vendor's own other order is not read as our `6061 Aluminum`,
- * and `Bakelite`, `Carbon Fiber`, `Epoxy Tooling`, `Synthetic Stone`, `Delrin` and `Polycarbonate`
- * — which this app has no material for, and therefore no starting row and no gate for — can never
- * be answered as something else. `PCB` was in that list until #743 P-1 gave it a material of its
- * own, so Makera's own rows for a copper-clad board can answer a PCB job.
+ * and `Bakelite`, `Carbon Fiber`, `Synthetic Stone`, `Delrin` and `Polycarbonate` — which this app
+ * has no material for, and therefore no starting row and no gate for — can never be answered as
+ * something else. `PCB` was in that list until #743 P-1 gave it a material of its own, so Makera's
+ * own rows for a copper-clad board can answer a PCB job; `Epoxy Tooling` left it the same way in
+ * #1066, whose board the M1 stock is.
  *
  * The metals are where the exactness earns its keep (#347): `6061 Aluminum` and `7075 Aluminum` map
  * to TWO different materials, so a 7075 row can never answer a 6061 job. One `aluminium` key would
@@ -719,6 +720,8 @@ export const CATALOGUE_MATERIALS: Readonly<Record<string, StockMaterial>> = {
   Copper: 'copper',
   // #743 P-1 — the vendor's own word for a copper-clad board.
   PCB: 'pcb',
+  // #1066 — the vendor's own word for the cast resin tooling board.
+  'Epoxy Tooling': 'epoxy-tooling',
 };
 
 /**
@@ -1148,7 +1151,10 @@ function catalogueProvenance(
   snapshot: FeedCatalogue,
   mappedFor: StockMaterial | null,
 ): string {
-  const material = catalogueMaterialFor(row.material) ?? row.material;
+  // The material in the APP'S OWN WORDS (#1066): an id like `epoxy-tooling` in a sentence is the
+  // schema's word, not the operator's; an unmapped vendor name has no label and stands as itself.
+  const appMaterial = catalogueMaterialFor(row.material);
+  const material = appMaterial === null ? row.material : MATERIAL_LABELS[appMaterial];
   const fromCoupon = entry.status === 'measured';
   const mapped =
     mappedFor === null

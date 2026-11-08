@@ -72,6 +72,8 @@ export const STOCK_MATERIALS = [
   'aluminium-7075',
   'brass',
   'copper',
+  // #1066 — a cast resin board, none of the three poles above. Its own class below.
+  'epoxy-tooling',
 ] as const satisfies readonly StockMaterial[];
 
 /**
@@ -105,6 +107,8 @@ export const MATERIAL_LABELS: Readonly<Record<StockMaterial, string>> = {
   'aluminium-7075': 'Aluminium 7075',
   brass: 'Brass',
   copper: 'Copper',
+  // #1066 — the M1 stock's own name, as the operator's paper and the receipt print it.
+  'epoxy-tooling': 'Epoxy tooling board',
 };
 
 /**
@@ -159,18 +163,31 @@ export function isConductiveMaterial(material: StockMaterial): boolean {
 }
 
 /**
- * Is this stock a plastic — everything {@link STOCK_MATERIALS} can name that is neither a wood nor a
- * metal nor a composite? The complement of the three poles the rules below state, so the answer is
- * derived from those lists rather than a fourth list that would have to be kept in step with them.
+ * #1066 — the resin tooling boards: a cast board (epoxy + filler), not a plastic for the antistatic
+ * rule, not a wood for the facing rule's exception, and not a composite sheet like FR-4. Listed
+ * rather than derived, for the reason {@link isMetalMaterial} gives.
+ */
+export const TOOLING_BOARD_MATERIALS = ['epoxy-tooling'] as const satisfies readonly StockMaterial[];
+
+/** Is this stock a tooling board (a cast resin board)? See {@link TOOLING_BOARD_MATERIALS}. */
+export function isToolingBoardMaterial(material: StockMaterial): boolean {
+  return TOOLING_BOARD_MATERIALS.some((board) => board === material);
+}
+
+/**
+ * Is this stock a plastic — everything {@link STOCK_MATERIALS} can name that is neither a wood, a
+ * metal, a composite board nor a tooling board? The complement of the four poles the lists above
+ * state, so the answer is derived from those lists rather than a fifth list that would have to be
+ * kept in step with them.
  *
  * It exists because ONE rule needs it: the antistatic (static-removal) accessory is switched on for
- * plastic jobs only (#564) — cutting a plastic builds static charge on the swarf; a wood or a metal
- * does not, and must not get the accessory words. A material added to {@link STOCK_MATERIALS} later
- * therefore reads as plastic by default unless someone deliberately says it is a wood, a metal or a
- * composite, which is the safe direction for a rule that switches a device on.
+ * plastic jobs only (#564) — cutting a plastic builds static charge on the swarf; a wood, a metal,
+ * a composite or a resin board does not, and must not get the accessory words. A material added to
+ * {@link STOCK_MATERIALS} later therefore reads as plastic by default unless someone deliberately
+ * says it is one of the four, which is the safe direction for a rule that switches a device on.
  */
 export function isPlasticMaterial(material: StockMaterial): boolean {
-  return !isWoodMaterial(material) && !isMetalMaterial(material) && !isCompositeMaterial(material);
+  return !isWoodMaterial(material) && !isMetalMaterial(material) && !isCompositeMaterial(material) && !isToolingBoardMaterial(material);
 }
 
 /**
