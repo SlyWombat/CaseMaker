@@ -130,11 +130,21 @@ export function goalInputFor(live: SimSession, goal: SimGoalCheck): GoalCheckInp
     // kept as the stated diagnostic. A session that cannot stamp (a replay without a grid) falls
     // back to the column read alone — the pre-#1086 behaviour, never a silent pass.
     const exact = live.sweptFieldExactRotary(field);
+    // #1086 — THE WALL-SHADOW RULE'S CL, in the map frame: the same v5 read the flat check makes
+    // (`checkGoalCutInto`'s `clAt`), where `x` is map X and `y` the map arc at the design radius.
+    // The session's stamp carries the CL; without one the shadow cells stay adjudicated (the
+    // conservative side, exactly as on the flat path).
+    const exactCl =
+      goal.opts?.wallShadowRadiusMm === undefined || exact === null ? null : live.sweptClExactRotary(field);
+    const opts =
+      goal.opts === undefined
+        ? undefined
+        : { ...goal.opts, ...(exactCl === null ? {} : { clAt: exactCl }) };
     return {
       rotaryGoal: field,
       section: goal.rotary.section,
       ...(exact === null ? {} : { exact }),
-      ...(goal.opts === undefined ? {} : { opts: goal.opts }),
+      ...(opts === undefined ? {} : { opts }),
     };
   }
   // The sweep's capability first, before paying for the goal's sampling: a rotary or refused

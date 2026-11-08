@@ -880,7 +880,7 @@ export interface GoalCutIntoReport {
  * neighbouring goal cells (a wall), or the model's silhouette (a covered cell beside an uncovered
  * one). Both sides of a step are marked, as E's `goal_check.py` does.
  */
-const GOAL_EDGE_STEP_MM = 0.2;
+export const GOAL_EDGE_STEP_MM = 0.2;
 
 /**
  * #996 — THE STRADDLING-CELL EXCUSE, ON PROOF (gate v6). A cell whose CENTRE sits on a vertical
@@ -900,7 +900,7 @@ export const STRADDLING_SLACK_MM = 0.005;
 
 /** #996 — the adjudicated floor, mm: a cut shallower than this is raw-only (never judged), so the
  *  straddling excuse (and its printed count) applies exactly to the cells the gate would judge. */
-const ADJUDICATED_FLOOR_MM = 0.1;
+export const ADJUDICATED_FLOOR_MM = 0.1;
 
 function designEdgeCells(goal: GoalHeightfield): Uint8Array {
   const { nx, ny, covered, z } = goal;
@@ -975,7 +975,7 @@ function wallDistances(goal: GoalHeightfield, wall: Uint8Array): Float32Array {
  * Felzenszwalb's 1-D squared-distance passes over the mask (O(n), exact — never the 8 % of a
  * chamfer approximation, because the shadow rule compares against the radius at its boundary).
  */
-function wallDistanceField(wall: Uint8Array, nx: number, ny: number, pitch: number): Float32Array {
+export function wallDistanceField(wall: Uint8Array, nx: number, ny: number, pitch: number): Float32Array {
   const INF = 1e20;
   const f = new Float64Array(nx * ny);
   for (let k = 0; k < f.length; k++) f[k] = wall[k] === 1 ? 0 : INF;

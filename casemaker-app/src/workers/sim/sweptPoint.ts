@@ -224,8 +224,31 @@ export function stampRotarySweptField(
   moves: Iterable<CutMove>,
   profile: StampProfile,
 ): Float32Array | null {
+  return stampRotarySweptFieldDetail(goal, initial, moves, profile)?.field ?? null;
+}
+
+/**
+ * #1086 — THE ROTARY STAMP WITH ITS CUTTER LOCATION, the map frame's twin of {@link StampedTop}.
+ * `clX` is the sample's map X, `clY` its map arc (mm at the design radius): the point at which the
+ * cutter's tip stood when it left that cell's lowest remaining radius. The goal check's wall-shadow
+ * rule reads it exactly as the flat check reads its own CL (v5, #970).
+ */
+export interface RotaryStampedTop {
+  field: Float32Array;
+  clX: Float32Array;
+  clY: Float32Array;
+}
+
+export function stampRotarySweptFieldDetail(
+  goal: { nx: number; ny: number; x0: number; y0: number; pitch: number; radius: number },
+  initial: (j: number) => number,
+  moves: Iterable<CutMove>,
+  profile: StampProfile,
+): RotaryStampedTop | null {
   const { nx, ny, x0, y0, pitch, radius } = goal;
   const field = new Float32Array(nx * ny);
+  const clX = new Float32Array(nx * ny);
+  const clY = new Float32Array(nx * ny);
   for (let j = 0; j < ny; j++) field.fill(initial(j), j * nx, (j + 1) * nx);
   const reach = profile.radius;
   const Rin = Math.max(reach - EDGE_EPS_MM, 0);
@@ -264,11 +287,15 @@ export function stampRotarySweptField(
           if (d2 >= Rin2) continue;
           const v = zs + profile.profile(Math.sqrt(d2));
           const k = rowBase + ii;
-          if (v < field[k]!) field[k] = v;
+          if (v < field[k]!) {
+            field[k] = v;
+            clX[k] = qx;
+            clY[k] = qArc;
+          }
           stamped++;
         }
       }
     }
   }
-  return stamped === 0 ? null : field;
+  return stamped === 0 ? null : { field, clX, clY };
 }
