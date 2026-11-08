@@ -105,6 +105,8 @@ describe('#1073 the sheet carries side 2’s Z0', () => {
     expect(text).toContain('The corner in the fence is FR');
     expect(text).toContain('NOT one of the blank’s square corners');
     expect(text).toContain('its right edge comes round to the fence side');
+    // #1073 — the front arm holds an edge that is NOT square: STATED, not refused.
+    expect(text).toContain('that edge is NOT one of the blank’s square edges');
     expect(text).toContain('carried from side 1: Z0₁ − 25.00 mm');
     expect(text).toContain('= 13.00 mm');
     expect(text).toContain('12.95 to 13.05');

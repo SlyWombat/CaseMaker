@@ -55,7 +55,8 @@ import { prismNumbers } from './prism';
 import { vCarveLevels, vCarvePlane, vCarveRowStepover } from '@/engine/cnc/vCarveGeometry';
 import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
 import { axesWord, describeTouch, kindWord, PROBE_SPEC, readsWord, registrationFor, sideWords } from '@/engine/cnc/engrave/registration';
-import { flipFenceFacts, flipZ0, type FlipZ0 } from './flipChoice';
+import { flipFenceFacts, flipZ0, FLIP_BORE_CHIP_CLEARANCE_MM, FLIP_BORE_DIAMETER_MM, type FlipZ0 } from './flipChoice';
+import { FLIP_PROBE_ENTRY_DEPTH_MM } from '@/engine/cnc/registration/plan';
 import {
   alongWord,
   inOutWord,
@@ -3950,16 +3951,36 @@ function turnOverSteps(
   // sheet's own words about the turn, from the identical derivation the graphic uses.
   if (to.flip !== undefined) {
     const facts = flipFenceFacts({ squareCorners: job.stock.squareCorners }, to.flip);
+    const squared = new Set(facts.squareCorners);
+    const edgeSquare = (a: 'FL' | 'FR' | 'BL' | 'BR', b: 'FL' | 'FR' | 'BL' | 'BR'): boolean => squared.has(a) && squared.has(b);
+    // #1073 — THE EDGE THAT MEETS THE FRONT ARM is the blank's front edge on left↔right and its
+    // BACK edge on front↔back. A rough edge there is STATED, never refused: the front pair still
+    // reads the line it really is.
+    const frontEdgeSquare = to.flip.axis === 'left-right' ? edgeSquare('FL', 'FR') : edgeSquare('BL', 'BR');
     const edges =
-      to.flip.axis === 'left-right'
+      (to.flip.axis === 'left-right'
         ? 'the blank’s front edge stays on the front arm, and its right edge comes round to the fence side'
-        : 'the blank’s back edge comes round to the front arm, and its left edge stays on the fence side';
+        : 'the blank’s back edge comes round to the front arm, and its left edge stays on the fence side') +
+      (frontEdgeSquare
+        ? ''
+        : ' — that edge is NOT one of the blank’s square edges, so it only roughly squares the part to the axis: the front pair reads the line it really is');
     steps.push({
       text:
         `The corner in the fence is ${facts.fenceCorner} — ` +
         `${facts.squareInFence ? 'one of the blank’s square corners' : 'NOT one of the blank’s square corners'} — and ${edges}.`,
       value: `${facts.fenceCorner} in the fence`,
     });
+    // #1073 — the FRAME method's cost, stated: side 1 bored the two locating holes through the
+    // blank, the job's breakthrough and the chip clearance into the board.
+    if (to.flip.method === 'tabs-in-blank') {
+      const drop = Math.round((job.breakthrough + FLIP_BORE_CHIP_CLEARANCE_MM) * 100) / 100;
+      steps.push({
+        text:
+          `Side 1 bored two ⌀${FLIP_BORE_DIAMETER_MM} locating holes through the blank and ${fmtNum(drop)} mm into the board; ` +
+          `the probe enters each from this face ${FLIP_PROBE_ENTRY_DEPTH_MM} mm down, and side 2’s last shallow pass is the tab release.`,
+        value: `⌀${FLIP_BORE_DIAMETER_MM} bores · ${fmtNum(drop)} mm past the blank`,
+      });
+    }
   }
   // #1073 — SIDE 2'S Z0 IS CARRIED (6b's amendment A): the rough underside is never touched. The
   // three numbers and the sum when the caller has them; the rule and the blanks when it does not.
