@@ -23,6 +23,7 @@ import {
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import {
   ENGRAVE_PICK_DEBOUNCE_MS,
+  ENGRAVE_PREVIEW_DEBOUNCE_MS,
   setEngravePreviewClientLoader,
   useEngravePreviewStore,
 } from '@/store/engravePreviewStore';
@@ -1874,10 +1875,23 @@ describe('#785 progress and Cancel', () => {
         },
         simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
       }));
-      // The measured pick is running on the shared worker when Generate is pressed.
-      // The preview build is in flight on the shared worker when Generate is pressed (the pick is
-      // held by the press; the preview keeps updating).
-      useEngravePreviewStore.setState({ status: 'loading' });
+      // Start from an unheld measurement (an earlier test may leave the generate pending).
+      useEngravePreviewStore.getState().releaseMeasurement();
+      useEngravePreviewStore.getState().dispose();
+      // The PREVIEW build is a real call in flight on the shared worker when Generate is pressed
+      // (the pick is held by the press; the preview keeps updating).
+      let releasePreview: () => void = () => undefined;
+      const previewPending = new Promise<null>((resolve) => {
+        releasePreview = () => resolve(null);
+      });
+      setEngravePreviewClientLoader(async () => ({
+        engravePreview: () => previewPending,
+        engraveSmartPick: async () => null,
+      }));
+      const jobNow = useEngraveJobStore.getState().job;
+      useEngravePreviewStore.getState().request(jobNow);
+      await vi.advanceTimersByTimeAsync(ENGRAVE_PREVIEW_DEBOUNCE_MS + 1);
+      expect(useEngravePreviewStore.getState().status).toBe('loading');
       const done = useEngraveRunStore.getState().generate();
       await vi.advanceTimersByTimeAsync(0);
       expect(useEngraveRunStore.getState().phase).toBe('generating');
@@ -1887,7 +1901,8 @@ describe('#785 progress and Cancel', () => {
       expect(queued.progress?.label ?? '').toContain('waiting for the preview');
       expect(cancelled, 'the healthy, busy worker is not killed').toBe(0);
       // The preview finishes; the generate is still silent — now the silence is the worker's own.
-      useEngravePreviewStore.setState({ status: 'ready' });
+      releasePreview();
+      await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(shopDefault('sim.stallMs').value);
       const s = useEngraveRunStore.getState();
       expect(s.phase).toBe('blocked');
@@ -1895,7 +1910,67 @@ describe('#785 progress and Cancel', () => {
       expect(cancelled).toBe(1);
       void done;
     } finally {
+      setEngravePreviewClientLoader(null);
       useEngravePreviewStore.setState({ status: 'idle' });
+      vi.useRealTimers();
+    }
+  });
+
+  // #1076 — THE PRESS ITSELF CLEARS THE PICK'S STATUS. The generate holds the measured pick
+  // (`holdMeasurement` writes `measuredStatus: 'idle'`) to supersede it, but the picked plan's
+  // worker call keeps running to its next candidate boundary — so the store says "idle" while the
+  // shared worker is still occupied, and the old watchdog read that silence as a dead generator.
+  // The wait must be read from the CALL in flight, not from the status the press erased.
+  it('a generate behind a pick whose status the press cleared says the wait, and faults once the pick ends', async () => {
+    vi.useFakeTimers();
+    try {
+      useEngravePreviewStore.getState().releaseMeasurement();
+      useEngravePreviewStore.getState().dispose();
+      const jobNow = useEngraveJobStore.getState().job;
+      useEngraveJobStore.setState({ job: { ...jobNow, tool: flatEndMill(3.175, { name: '3.175 mm flat end' }) } });
+      let releasePick: () => void = () => undefined;
+      const pickPending = new Promise<null>((resolve) => {
+        releasePick = () => resolve(null);
+      });
+      setEngravePreviewClientLoader(async () => ({
+        engravePreview: async () => null,
+        engraveSmartPick: () => pickPending,
+        cancelEngravePick: () => undefined,
+      }));
+      const job = useEngraveJobStore.getState().job;
+      void useEngravePreviewStore.getState().measureNow(job); // the pick call starts on the worker
+      await vi.advanceTimersByTimeAsync(0);
+      expect(useEngravePreviewStore.getState().measuredStatus).toBe('measuring');
+
+      let cancelled = 0;
+      setEngraveRunClientLoader(async () => ({
+        engraveGenerate: () => new Promise<EngraveGenerated>(() => undefined),
+        cancelGenerate: () => {
+          cancelled += 1;
+        },
+        simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+      }));
+      const done = useEngraveRunStore.getState().generate();
+      await vi.advanceTimersByTimeAsync(0);
+      // The press supersedes the pick's state, but not its worker call.
+      expect(useEngravePreviewStore.getState().measuredStatus).toBe('idle');
+      await vi.advanceTimersByTimeAsync(shopDefault('sim.stallMs').value);
+      const queued = useEngraveRunStore.getState();
+      expect(queued.phase, 'the shared worker is busy — this is not a dead generator').toBe('generating');
+      expect(queued.progress?.label ?? '').toContain('the measured pick');
+      expect(cancelled, 'the healthy, busy worker is not killed').toBe(0);
+      // The pick finishes: now the silence is the generator's own and the fault window applies.
+      releasePick();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(shopDefault('sim.stallMs').value);
+      expect(useEngraveRunStore.getState().phase).toBe('blocked');
+      expect(cancelled).toBe(1);
+      void done;
+    } finally {
+      setEngravePreviewClientLoader(null);
+      // The generate is left pending: release the hold so the next test can request a preview.
+      useEngravePreviewStore.getState().releaseMeasurement();
+      useEngravePreviewStore.getState().dispose();
       vi.useRealTimers();
     }
   });

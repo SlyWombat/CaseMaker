@@ -166,6 +166,13 @@ export interface EngravePreviewState {
    * answer — a preview-only client, an error, or an edit that superseded the run.
    */
   measureNow: (job: EngraveJob) => Promise<EngravePickSummary | null>;
+  /**
+   * #1076 — WHAT THE SHARED SIM WORKER IS BUSY WITH RIGHT NOW, read from calls actually in
+   * flight — never from a status a press may have cleared. The preview build and the measured
+   * pick both occupy the one worker; a Generate pressed while they run waits its turn in silence,
+   * and the run store's silence watchdog asks this to tell a queue from a dead generator.
+   */
+  workerOccupant: () => 'the preview' | 'the measured pick' | null;
   /** Cancel any pending rebuild and forget the preview. */
   dispose: () => void;
 }
@@ -173,6 +180,12 @@ export interface EngravePreviewState {
 let timer: ReturnType<typeof setTimeout> | null = null;
 let pickTimer: ReturnType<typeof setTimeout> | null = null;
 let seq = 0;
+// #1076 — THE WORKER'S REAL OCCUPANCY. A counter around each call that runs ON the shared sim
+// worker, incremented before the call and decremented when it settles. The store's STATUSES are
+// the panel's view (a press clears the pick's status without stopping its call); only these
+// counters answer "is the worker busy right now".
+let previewCalls = 0;
+let pickCalls = 0;
 
 /** #766 D — measured answers by `smartPickKey`, kept across edits that cannot stale them. */
 const picks = new Map<string, EngravePickSummary>();
@@ -261,16 +274,22 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
     try {
       const client = await clientLoader();
       const inputs = previewInputs(job);
-      const preview = await client.engravePreview(
-        job,
-        inputs.tools,
-        inputs.catalogue,
-        mine,
-        inputs.margins,
-        inputs.conditions,
-        inputs.shop,
-        inputs.residuals,
-      );
+      previewCalls += 1;
+      let preview: Awaited<ReturnType<typeof client.engravePreview>>;
+      try {
+        preview = await client.engravePreview(
+          job,
+          inputs.tools,
+          inputs.catalogue,
+          mine,
+          inputs.margins,
+          inputs.conditions,
+          inputs.shop,
+          inputs.residuals,
+        );
+      } finally {
+        previewCalls = Math.max(0, previewCalls - 1);
+      }
       if (mine !== seq) return; // superseded by a newer request
       // `preview === null` means the worker saw a newer generation already; keep the last one.
       // §5.7 — a new preview is shown at its as-cut end: the scrub was a view of the old result,
@@ -333,24 +352,30 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
         // as well as to the panel, the same events feeding both.
         noteWorkStart('smart-pick');
         noteStage('smart-pick', 'candidates', 'measuring candidate plans');
-        const summary = await client.engraveSmartPick(
-          job,
-          inputs.tools,
-          inputs.catalogue,
-          mine,
-          inputs.conditions,
-          inputs.shop,
-          (progress) => {
-            if (mine === seq) set({ measuredProgress: progress });
-            noteFlightProgress(
-              'smart-pick',
-              'candidates',
-              progress.done,
-              progress.total,
-              `measuring ${progress.level} candidates ${progress.done} of ${progress.total}`,
-            );
-          },
-        );
+        pickCalls += 1;
+        let summary: Awaited<ReturnType<typeof client.engraveSmartPick>>;
+        try {
+          summary = await client.engraveSmartPick(
+            job,
+            inputs.tools,
+            inputs.catalogue,
+            mine,
+            inputs.conditions,
+            inputs.shop,
+            (progress) => {
+              if (mine === seq) set({ measuredProgress: progress });
+              noteFlightProgress(
+                'smart-pick',
+                'candidates',
+                progress.done,
+                progress.total,
+                `measuring ${progress.level} candidates ${progress.done} of ${progress.total}`,
+              );
+            },
+          );
+        } finally {
+          pickCalls = Math.max(0, pickCalls - 1);
+        }
         noteWorkEnd('smart-pick', 'done');
         if (summary === null) {
           // Superseded inside the worker; a newer request owns the state (or the rule stands).
@@ -408,17 +433,23 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
         const forKeys = deadSetupKeys(job, inputs.tools, index);
         noteWorkStart('smart-pick');
         noteStage('smart-pick', 'candidates', `measuring setup ${index + 1}'s work`);
-        const pick = await client.engraveSmartPick(
-          sub,
-          inputs.tools,
-          inputs.catalogue,
-          mine,
-          inputs.conditions,
-          inputs.shop,
-          (progress) => {
-            if (mine === seq) set({ measuredProgress: progress });
-          },
-        );
+        pickCalls += 1;
+        let pick: Awaited<ReturnType<typeof client.engraveSmartPick>>;
+        try {
+          pick = await client.engraveSmartPick(
+            sub,
+            inputs.tools,
+            inputs.catalogue,
+            mine,
+            inputs.conditions,
+            inputs.shop,
+            (progress) => {
+              if (mine === seq) set({ measuredProgress: progress });
+            },
+          );
+        } finally {
+          pickCalls = Math.max(0, pickCalls - 1);
+        }
         if (mine !== seq) return null; // superseded by a newer request (or a dispose)
         if (pick !== null) answers.push({ setupIndex: index, forKeys, pick });
       }
@@ -557,6 +588,14 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
         pickTimer = null;
       }
       return runPick(job, mine, jobFingerprintNow);
+    },
+    workerOccupant() {
+      // #1076 — the call in flight, not a status: a press clears `measuredStatus` while the pick
+      // keeps running on the worker, and a superseded preview's status can stay "loading" long
+      // after its call ended. These counters move only when a call actually starts and settles.
+      if (previewCalls > 0) return 'the preview';
+      if (pickCalls > 0) return 'the measured pick';
+      return null;
     },
     dispose() {
       seq += 1;

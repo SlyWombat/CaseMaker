@@ -697,16 +697,12 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // preview and the measured pick; a generate pressed while they run waits its turn in
           // silence. While that work is provably in flight, say the wait and keep the clock
           // running — the fault window starts once the generate itself has spoken.
-          const preview = useEngravePreviewStore.getState();
-          // The PREVIEW is the one that keeps running under a Generate (the pick is held): a
-          // preview build in flight is the shared worker's occupant. The pick is named too, for
-          // a client whose hold has not landed yet.
-          const occupant =
-            preview.status === 'loading'
-              ? 'the preview'
-              : preview.measuredStatus === 'measuring'
-                ? 'the measured pick'
-                : null;
+          // #1076 — THE OCCUPANT IS READ FROM THE CALL IN FLIGHT. The press itself clears the
+          // pick's `measuredStatus` (`holdMeasurement`) while the pick's worker call keeps running
+          // to its next candidate boundary, and a superseded preview's status can read "loading"
+          // after its call ended; both statuses misname the worker's state at this instant, so the
+          // preview store counts its own calls and answers from those.
+          const occupant = useEngravePreviewStore.getState().workerOccupant();
           if (occupant !== null) {
             set({ progress: { stage: 'prepare', label: `waiting for ${occupant} to finish — the worker is busy` } });
             recordCrumb({ kind: 'progress', data: { source: 'generate-queue', message: `waiting for ${occupant}` } });
