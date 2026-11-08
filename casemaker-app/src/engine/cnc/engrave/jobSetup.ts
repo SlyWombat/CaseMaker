@@ -423,6 +423,9 @@ export type JobFindingCode =
   // #1037 — no cutter in the set reaches a curved region's floor: the finish does not post it.
   | 'goal-finish-unreachable'
   | 'goal-object-no-toolpath'
+  // #1084 — a job carrying faces AND a goal: the faces program would post and the goal be dropped.
+  // Refused by name until #1085's mixed dispatch cuts the two as the two programs they are.
+  | 'faces-with-goal'
   // #829 — THE 3D CHAMFER THE GOAL ASKS FOR. `goal-chamfer-no-cutter` is the WARNING that names
   // why no V program was posted (no V-bit chosen, one the library does not hold, or one with no
   // cone/feeds), and `goal-chamfer-no-rim` the WARNING that the mesh has no top rim to bevel.
@@ -1351,7 +1354,7 @@ function sacrificialWithBedBoard(job: EngraveJob, bed?: BedUnderFacts | null): E
 export function validateGoalObject(
   target: EngraveTargetObject,
   stock: { length: number; width: number; thickness: number },
-  opts: { mixed?: boolean; minFloor?: number; edgeMargin?: number } = {},
+  opts: { mixed?: boolean; minFloor?: number; edgeMargin?: number; rotary?: boolean } = {},
 ): JobFinding[] {
   const findings: JobFinding[] = [];
   const { length, width, thickness } = stock;
@@ -1421,6 +1424,13 @@ export function validateGoalObject(
           `Generate cuts it as it is. Scale the part down, use a thicker blank, or put a sacrificial board under it.`,
       });
     }
+  } else if (opts.rotary === true) {
+    // #1084 — A ROTARY GOAL IS NOT A BOX-FRAME GOAL. Its section is centred on the chuck's axis by
+    // construction, and the stock it is turned from is the cylinder the section circumscribes, not
+    // the blank's corner-anchored box: the box-frame test below would read half of every
+    // axis-centred goal as "past the front edge" and promise a refusal ("Generate refuses it before
+    // building the toolpath") the rotary relief path never makes. That path clips the goal to the
+    // rod and states the remainder with `goal-rotary-oversize`, which owns this judgement.
   } else {
     // #784 — A GOAL LARGER THAN THE BLANK IS INFORMED, NOT REFUSED. What lies outside is named
     // per axis and side; Generate cuts the goal CLIPPED to the blank (the sampler intersects its
@@ -1963,6 +1973,7 @@ export function validateJob(
           mixed: pureGoalObject(job) === null,
           minFloor: job.minFloor,
           edgeMargin: job.edgeMargin,
+          rotary: job.workholding.kind === 'rotary-chuck',
         }),
       );
     } else {
