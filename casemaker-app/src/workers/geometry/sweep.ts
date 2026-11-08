@@ -623,6 +623,130 @@ export function boxSolid(tl: ManifoldToplevel, box: ObstacleBox): ManifoldInstan
 }
 
 /**
+ * #1068-perf — THE EXACT FIXTURE HIT, CLOSED FORM (6b's ruling, 2026-11-07).
+ *
+ * The cutter is a vertical cylinder of radius r; a straight move sweeps a stadium in XY — the
+ * move's own segment, grown by r — over its Z interval. A hit is the 2D distance from that
+ * segment to the box's XY rectangle below r, with the Z intervals overlapping. No Manifold
+ * boolean is built, so a bracket job's sweep costs arithmetic per move instead of a wasm
+ * intersection (the puck: 862 s with one boolean per move, against 3.9 s without a fixture).
+ *
+ * A move that changes Z is cut into pieces {@link FIXTURE_Z_PIECE_MM} long, each tested with its
+ * own tip Z: the only conservatism is that step (a piece's lowest tip is applied across the
+ * piece's whole XY travel), never more. The volume returned is the boxes' own XY-overlap area
+ * times the Z overlap — an UPPER BOUND on the stadium's, labelled as such in the diagnostic; the
+ * column engine states the same figure (`columnFixtureHit`).
+ */
+export const FIXTURE_Z_PIECE_MM = 0.5;
+
+/** Distance from a point to a segment, 2D. */
+function pointSegmentDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0;
+  return Math.hypot(ax + t * dx - px, ay + t * dy - py);
+}
+
+/** Distance from a point to an axis-aligned rectangle in XY, 2D. */
+function pointRectDistance(px: number, py: number, box: ObstacleBox): number {
+  const dx = Math.max(box.min[0] - px, 0, px - box.max[0]);
+  const dy = Math.max(box.min[1] - py, 0, py - box.max[1]);
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * Does the segment touch or cross the rectangle? Liang–Barsky's slab clip: a segment whose
+ * ENDPOINTS are both outside can still pass THROUGH the box (6b's read: (−5,5)→(15,5) across
+ * X 0…10 is a full drive-through, and the corner/endpoint distances alone report 5 mm of air).
+ */
+function segmentCrossesRect(x0: number, y0: number, x1: number, y1: number, box: ObstacleBox): boolean {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  let t0 = 0;
+  let t1 = 1;
+  const clip = (p: number, q: number): boolean => {
+    if (p === 0) return q >= 0;
+    const r = q / p;
+    if (p < 0) {
+      if (r > t1) return false;
+      if (r > t0) t0 = r;
+    } else {
+      if (r < t0) return false;
+      if (r < t1) t1 = r;
+    }
+    return true;
+  };
+  return (
+    clip(-dx, x0 - box.min[0]) &&
+    clip(dx, box.max[0] - x0) &&
+    clip(-dy, y0 - box.min[1]) &&
+    clip(dy, box.max[1] - y0)
+  );
+}
+
+/**
+ * The exact stadium test: the move's XY segment grown by `radius` against each box's XY
+ * rectangle, with the Z interval of the piece overlapping the box's. Returns the box with the
+ * largest overlap bound, or null.
+ */
+export function fixtureStadiumHit(
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+  /** The cutter's radius, already grown by the move's own margin. */
+  radius: number,
+  /** The spindle-off proximity margin, so the Z band matches the old body's grown bottom. */
+  margin: number,
+  /** The column's top, absolute (the tool body rises from the tip to here). */
+  zHi: number,
+  boxes: readonly ObstacleBox[],
+): { box: ObstacleBox; volume: number } | null {
+  // A level move is one piece (its own Z span is exact); a Z-changing move is cut at the step.
+  const pieces =
+    from[2] === to[2]
+      ? 1
+      : Math.max(1, Math.ceil(Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]) / FIXTURE_Z_PIECE_MM));
+  let best: ObstacleBox | null = null;
+  let bestVolume = 0;
+  for (let k = 0; k < pieces; k++) {
+    const t0 = k / pieces;
+    const t1 = (k + 1) / pieces;
+    const x0 = from[0] + (to[0] - from[0]) * t0;
+    const y0 = from[1] + (to[1] - from[1]) * t0;
+    const z0 = from[2] + (to[2] - from[2]) * t0;
+    const x1 = from[0] + (to[0] - from[0]) * t1;
+    const y1 = from[1] + (to[1] - from[1]) * t1;
+    const z1 = from[2] + (to[2] - from[2]) * t1;
+    const pieceZLo = Math.min(z0, z1) - margin;
+    for (const box of boxes) {
+      if (zHi <= box.min[2] || pieceZLo >= box.max[2]) continue;
+      // A segment that crosses the rectangle is at distance 0 (both endpoints may be outside).
+      const d = segmentCrossesRect(x0, y0, x1, y1, box)
+        ? 0
+        : Math.min(
+        pointSegmentDistance(box.min[0], box.min[1], x0, y0, x1, y1),
+        pointSegmentDistance(box.max[0], box.min[1], x0, y0, x1, y1),
+        pointSegmentDistance(box.min[0], box.max[1], x0, y0, x1, y1),
+        pointSegmentDistance(box.max[0], box.max[1], x0, y0, x1, y1),
+        pointRectDistance(x0, y0, box),
+        pointRectDistance(x1, y1, box),
+      );
+      if (!(d < radius)) continue;
+      // The reported figure: the box-overlap bound, the same one the column engine states.
+      const ox = Math.min(Math.max(x0, x1) + radius, box.max[0]) - Math.max(Math.min(x0, x1) - radius, box.min[0]);
+      const oy = Math.min(Math.max(y0, y1) + radius, box.max[1]) - Math.max(Math.min(y0, y1) - radius, box.min[1]);
+      const oz = Math.min(zHi, box.max[2]) - Math.max(pieceZLo, box.min[2]);
+      const volume = Math.max(0, ox) * Math.max(0, oy) * Math.max(0, oz);
+      if (best === null || volume > bestVolume) {
+        best = box;
+        bestVolume = volume;
+      }
+    }
+  }
+  return best === null ? null : { box: best, volume: bestVolume };
+}
+
+/**
  * The fixture's boxes, inflated by the envelope's uncertainty, with the tallest box named
  * (#204/#923). Extracted so the column engine can build the identical obstacle set — same
  * boxes, same inflation, same "which one is tallest" — without needing a Manifold handle: this
@@ -845,7 +969,14 @@ export function checkAirMoves(
   onPhase: ((phase: 'air' | 'air-done') => void) | undefined = undefined,
   /** #1048 — a tick every {@link AIR_PROGRESS_EVERY} tested moves, so the phase is never silence. */
   onAirProgress: ((done: number, total: number) => void) | undefined = undefined,
-): { diagnostics: SweepDiagnostic[]; gouges: Gouge[]; checked: number; rechecked: number; cleared: number; budgetExceeded: boolean } {
+  /**
+   * #1068-perf — THE FIXTURE'S BOXES, pre-inflated, as the gate before the exact boolean: a move
+   * whose own swept box clears every box cannot hit the fixture, so the boolean (a Manifold op per
+   * move) is skipped for it. Empty means no gate (a caller that passes only the union keeps the
+   * exact check on every move).
+   */
+  fixtureBoxes: readonly ObstacleBox[] = [],
+): { diagnostics: SweepDiagnostic[]; gouges: Gouge[]; checked: number; rechecked: number; cleared: number; budgetExceeded: boolean; fixtureBooleans: number } {
   const diagnostics: SweepDiagnostic[] = [];
   const gouges: Gouge[] = [];
   const nCap = segmentsForRadius(radius);
@@ -859,18 +990,20 @@ export function checkAirMoves(
   const zTop = Math.max(topZ, fixtureTop) + OVERSHOOT_MM;
   // "Entirely above everything that can be hit": the stock top, and the fixture when there is one.
   const reachTop = fixture === null ? topZ : Math.max(topZ, fixtureTop);
-  // Whether the step-7 retract shortcut (below) is sound for this sweep (#204 follow-up). It is
-  // sound while the retract is contained in check (a)'s checkpoint column — and check (a) only
-  // tests a column that rises from the stock top, which contains the retract exactly when the
-  // fixture's top sits at or below the stock top. A fixture rising above the top is outside that
-  // column and can be hit by a retract the shortcut would wave through, so whenever one is
-  // present the shortcut is disabled and those rapids take the normal path instead: body built
-  // and tested against both stock and fixture. Computed once here, not per move.
+  // Whether the step-7 retract shortcut (below) is sound against the COLUMN (#204 follow-up): the
+  // retract is contained in check (a)'s checkpoint column only while the fixture's top sits at or
+  // below the stock top. #1068-perf — that rule is only the fallback for a union-only caller now:
+  // with the fixture's boxes in hand the retract itself is proven clear analytically (below), so a
+  // bracket's arms above the stock top no longer send every retract down the full exact path — the
+  // puck's ~100k retracts paid a body + a stock boolean + a fixture boolean each (862 s against
+  // 3.9 s without a fixture).
   const retractCoveredByColumn = fixture === null || fixtureTop <= topZ;
   let checked = 0;
   let rechecked = 0;
   let cleared = 0;
   let budgetExceeded = false;
+  // #1068-perf — the fixture booleans this pass ran; the gate's own count, for the unit pin.
+  let fixtureBooleans = 0;
   const overBudget = (): boolean => deadline !== null && performance.now() > deadline;
 
   // #194 step 7. Most air moves are a retract straight up out of the cut just made, and that
@@ -1029,7 +1162,26 @@ export function checkAirMoves(
     // which fails as soon as a fixture rises above the stock top (#204 follow-up).
     // A TURN is never a plain retract (#241): the move may climb in Z and still sweep a sector
     // of material at other angles, which the cut's own column does not cover.
-    if (!turn && retractCoveredByColumn && mv.kind === 'rapid' && mv.to[2] > mv.from[2] && mv.to[0] === mv.from[0] && mv.to[1] === mv.from[1]) {
+    const retractGeom =
+      !turn && mv.kind === 'rapid' && mv.to[2] > mv.from[2] && mv.to[0] === mv.from[0] && mv.to[1] === mv.from[1];
+    // #1068-perf — A RETRACT IS PROVEN CLEAR OF THE FIXTURE, not disqualified by it: the exact
+    // stadium test over the vertical leg is arithmetic (see `fixtureStadiumHit`), so the shortcut
+    // survives a clamp or arm above the stock top. A retract that would meet a box falls through
+    // to the full path below and is reported there. The union-only caller keeps the old rule.
+    const retractClearsFixture =
+      !retractGeom || fixture === null
+        ? true
+        : fixtureBoxes.length === 0
+          ? retractCoveredByColumn
+          : fixtureStadiumHit(
+              [mv.from[0], mv.from[1], mv.from[2] - margin],
+              [mv.to[0], mv.to[1], mv.to[2] - margin],
+              radius + margin,
+              margin,
+              zTop + margin,
+              fixtureBoxes,
+            ) === null;
+    if (retractGeom && retractClearsFixture) {
       const end = cutEndByStep.get(mv.step - 1);
       if (end && mv.from[0] === end[0] && mv.from[1] === end[1] && mv.from[2] === end[2]) {
         cleared++;
@@ -1061,9 +1213,25 @@ export function checkAirMoves(
     // solids are exact — the body a hull of cylinders, the fixture a union of boxes — so
     // anything above float dust is real, no derived floor needed.
     if (fixture !== null) {
-      // #653 — the fixture is unsheared too: the lifted move's body, when this is a surface un-lift.
-      const fixtureBody =
-        mv.lifted === undefined
+      // #1068-perf — THE EXACT STADIUM TEST, no Manifold body and no boolean (6b's ruling): the
+      // cutter's vertical cylinder swept along the move against each pre-inflated box. The old
+      // per-move boolean was the whole cost of a bracket job's sweep once the CLI handed it its
+      // fixture (#1068): the fixture's boxes stand along the blank's free edges, the cuts run
+      // those edges, so nearly every move paid one — and on the shared manifold runtime those
+      // booleans crawl (the puck: 862 s against 3.9 s without a fixture).
+      if (fixtureBoxes.length > 0) {
+        const h = fixtureStadiumHit(real.from, real.to, radius + margin, margin, zTop + margin, fixtureBoxes);
+        if (h !== null && h.volume > SLIVER_MM3) {
+          pushFixture(
+            spindleOff
+              ? { severity: 'error', code: 'feed-into-fixture', message: `line ${mv.line}: a feed move with the spindle off drives the tool ${formatVolume(h.volume)} mm³ into the fixture (an upper bound)` }
+              : { severity: 'error', code: 'rapid-into-fixture', message: `line ${mv.line}: a rapid drives the tool ${formatVolume(h.volume)} mm³ into the fixture (an upper bound)` },
+          );
+        }
+      } else {
+        // A caller that passes only the union keeps the exact boolean answer (#204's own path).
+        // #653 — the fixture is unsheared too: the lifted move's body, when this is a surface un-lift.
+        const fixtureBody = mv.lifted === undefined
           ? body
           : sweptToolBody(
               tl,
@@ -1073,16 +1241,18 @@ export function checkAirMoves(
               spindleOff ? nMargin : nCap,
               zTop + margin,
             );
-      const fhit = fixtureBody.intersect(fixture);
-      const fvol = fhit.volume();
-      fhit.delete();
-      if (fixtureBody !== body) fixtureBody.delete();
-      if (fvol > SLIVER_MM3) {
-        pushFixture(
-          spindleOff
-            ? { severity: 'error', code: 'feed-into-fixture', message: `line ${mv.line}: a feed move with the spindle off drives the tool ${formatVolume(fvol)} mm³ into the fixture` }
-            : { severity: 'error', code: 'rapid-into-fixture', message: `line ${mv.line}: a rapid drives the tool ${formatVolume(fvol)} mm³ into the fixture` },
-        );
+        fixtureBooleans++;
+        const fhit = fixtureBody.intersect(fixture);
+        const fvol = fhit.volume();
+        fhit.delete();
+        if (fixtureBody !== body) fixtureBody.delete();
+        if (fvol > SLIVER_MM3) {
+          pushFixture(
+            spindleOff
+              ? { severity: 'error', code: 'feed-into-fixture', message: `line ${mv.line}: a feed move with the spindle off drives the tool ${formatVolume(fvol)} mm³ into the fixture` }
+              : { severity: 'error', code: 'rapid-into-fixture', message: `line ${mv.line}: a rapid drives the tool ${formatVolume(fvol)} mm³ into the fixture` },
+          );
+        }
       }
     }
     // #241 — the MATERIAL is in the STOCK frame, so the tool body meets it turned by `−a`. A move
@@ -1189,7 +1359,7 @@ export function checkAirMoves(
   // #1056 — the phase is OVER, and that is its own fact: silence after this point (the post-loop
   // meshes) is reported as "after the rapid-move check finished", not as a slow rapid-move check.
   onPhase?.('air-done');
-  return { diagnostics, gouges, checked, rechecked, cleared, budgetExceeded };
+  return { diagnostics, gouges, checked, rechecked, cleared, budgetExceeded, fixtureBooleans };
 }
 
 /**
@@ -1692,7 +1862,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // window can only condemn finished work, never a hang) and the check's own MAX_AIR_CHECKS cap
   // already bounds the phase. A move the cap leaves unchecked is an ERROR in its own words
   // (#925, `air-moves-unchecked`), never a `sweep-stalled`.
-  const air = checkAirMoves(tl, airMaterial, topZ, bedZ, timeline.airMoves, timeline.checkpoints, radius, null, fixture, fixtureTop, (d) => fixtureDiag.push(d), proximity, opts?.onPhase, opts?.onProgress);
+  const air = checkAirMoves(tl, airMaterial, topZ, bedZ, timeline.airMoves, timeline.checkpoints, radius, null, fixture, fixtureTop, (d) => fixtureDiag.push(d), proximity, opts?.onPhase, opts?.onProgress, prepared.boxes);
   if (airMaterial !== stock) airMaterial.delete();
   const msAir = performance.now() - a0;
   diagnostics.push(...air.diagnostics);
