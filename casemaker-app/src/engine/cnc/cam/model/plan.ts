@@ -4335,14 +4335,17 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const depth = flat === undefined ? paramsFor(ball ?? finishCutter).stepDown : Math.max(opts.stepDownMm, base.zTop - base.zBottom);
 
     // #1074 — A PLANE INSIDE A CURVED REGION IS A POCKET FLOOR. `finishKindFor` judges the WHOLE
-    // region (FLAT_FINISH_AREA_SHARE of its 3D area under the flat threshold), so a recess whose
-    // floor is flat and whose walls are rounded is one curved field: the ball rasters the plane at
-    // the scallop step-over (the M1 tray's bottom recess, p4: 10.3 m and 6,607 s). The floor is
-    // found from the design's own top — the modal height over the region's footprint — and the
-    // cells where the FLAT's CL rests at that height are its own: the flat takes them in one floor
-    // pass, and the ball's mask excludes exactly those, keeping the walls, the fillets and the
-    // flat's foot band (where its disc already climbs the wall, its CL stands proud of the face).
-    // The pencil and the rest are untouched; with no flat or no ball the region is planned as before.
+    // region (FLAT_FINISH_AREA_SHARE of its 3D area under the flat threshold), so a region that is
+    // mostly a plane but ringed by rounded walls is one curved field: the ball rasters the plane at
+    // the scallop step-over where a flat would take it in one floor pass at its own step-over.
+    // (The M1 tray's bottom recess has no such region — its ceiling is already a 2.5D pocket and
+    // the ball's region is the part's outer wall ring, which the trace row below states per
+    // region.) The floor is found from the design's own top — the modal height over the region's
+    // footprint — and the cells where the FLAT's CL rests at that height are its own: the flat
+    // takes them in one floor pass, and the ball's mask excludes exactly those, keeping the walls,
+    // the fillets and the flat's foot band (where its disc already climbs the wall, its CL stands
+    // proud of the face). The pencil and the rest are untouched; with no flat or no ball the
+    // region is planned as before.
     const FLOOR_DETECT_PITCH_MM = 0.5;
     const FLOOR_LEVEL_TOL_MM = 0.05;
     const FLOOR_AREA_SHARE = 0.3;

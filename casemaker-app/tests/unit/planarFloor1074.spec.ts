@@ -1,12 +1,14 @@
 /**
- * #1074 — A FLAT FLOOR INSIDE A CURVED REGION IS A POCKET FLOOR, NOT A BALL FINISH. The tray's
- * bottom recess is a plane at one height with rounded walls; the curved pipeline finishes the WHOLE
- * region with the ball (p4: a ⌀2 ball at the scallop step-over over the entire face, 10.3 m and
- * 6,607 s), although a flat would take the floor in one pass.
+ * #1074 — A FLAT FLOOR INSIDE A CURVED REGION IS A POCKET FLOOR, NOT A BALL FINISH. When one
+ * region is mostly a plane but ringed by rounded walls, finishKindFor judges the whole region and
+ * gives the ball a scallop raster over the plane where a flat would take it in one pass. (The M1
+ * tray's bottom job has no such region — its ceiling is already a 2.5D pocket and the ball's
+ * region is the part's outer wall ring, which the plan's own `floor:detect` trace row states — so
+ * the mechanism is pinned here, on a fixture.)
  *
  * The fixture: a flat floor at z=0 over [0,10]×[0,7] and a 45° wall up to z=3 over [7,10] — a
  * curved region (the flat share is 62 % of the 3D area, under the #960 90 % line) with a plane
- * inside it. RED today: the ball rasters the floor; no flat floor pass exists.
+ * inside it. RED at b32bf2a3c: the ball rasters the floor and no flat floor pass exists.
  */
 
 import { describe, expect, it } from 'vitest';
