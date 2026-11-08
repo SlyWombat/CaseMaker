@@ -159,7 +159,7 @@ function holePrediction(hole: IndexedHole, cutterRadiusMm: Mm): OraclePredicted 
     const t = (2 * Math.PI * i) / n;
     disc.push([hole.x + cutterRadiusMm * Math.cos(t), cutterRadiusMm * Math.sin(t)]);
   }
-  return { a: hole.a, depth: hole.depth, polygons: [disc] };
+  return { a: hole.a, depth: hole.depth, polygons: [disc], ...(hole.surfaceRadius !== undefined ? { surfaceRadius: hole.surfaceRadius } : {}) };
 }
 
 /**
@@ -465,7 +465,16 @@ export function planFaceCuts(
       }
       const free = rotaryFreeSpan(map);
       const x = op.atX ?? free.centre;
-      const hole: IndexedHole = { a: op.a, x, depth: 2 * radius + Math.max(0, job.breakthrough) };
+      // #1059 — a through cross-hole is 2 × the surface at ITS index deep: from the section's
+      // edge at A to the far edge at −A. On a block at A 0 that is 44.5 on the 44.5 bar, not the
+      // envelope's 62.93 (which plunged 9.2 mm of air past the block's underside).
+      const surface = sectionRadiusAt(map.section, (op.a * Math.PI) / 180);
+      const hole: IndexedHole = {
+        a: op.a,
+        x,
+        depth: 2 * surface + Math.max(0, job.breakthrough),
+        ...(map.section.kind === 'rect' ? { surfaceRadius: surface } : {}),
+      };
       holes.push(hole);
       predicted.push(holePrediction(hole, cutterRadius));
     }
@@ -524,38 +533,66 @@ export function faceCutIntoNeck(
 ): JobFinding | null {
   const eps = 1e-6;
   const over = (from: number, to: number): boolean => from < neck.toMm - eps && to > neck.fromMm + eps;
-  const deeper = (depth: number): boolean => depth > neck.depthMm + eps;
+  // #1059 — COMPARE FLOORS, NOT DEPTHS BELOW A SURFACE. A face's floor is the surface at its own
+  // index less its depth; the neck's floor is `diameter / 2` above the axis whichever way it was
+  // turned. On a round rod every surface is the envelope, so this is exactly `depth > depthMm`.
+  const neckFloor = neck.diameterMm / 2;
+  const surfaceAt = (a: number): Mm => sectionRadiusAt(map.section, (a * Math.PI) / 180);
+  const eatsNeck = (floor: Mm): boolean => floor < neckFloor - eps;
   const span = faceSpanMm(map, cutterRadiusMm);
   const free = rotaryFreeSpan(map);
-  const sentence = (what: string, depth: number, from: number, to: number): JobFinding => ({
+  const sentence = (what: string, at: number, depth: number, from: number, to: number, tip?: string): JobFinding => ({
     severity: 'error',
     code: 'face-cuts-neck',
     message:
       `${what} cuts into the neck for parting: it reaches ${num(depth)} mm below the surface between X ${num(Math.max(from, neck.fromMm))} and ` +
-      `X ${num(Math.min(to, neck.toMm))} mm, and the neck keeps ⌀${num(neck.diameterMm)} mm there (${num(neck.depthMm)} mm below the surface), ` +
-      `so less than the neck would hold the part. Keep the cut shallower than ${num(neck.depthMm)} mm or clear of X ${num(neck.fromMm)}–${num(neck.toMm)} mm, or move the neck.`,
+      `X ${num(Math.min(to, neck.toMm))} mm, and the neck keeps ⌀${num(neck.diameterMm)} mm there (${
+        map.section.kind === 'round' ? `${num(neck.depthMm)} mm below the surface` : `its floor ${num(neckFloor)} mm from the axis`
+      }), ` +
+      `so less than the neck would hold the part. ${tip ?? `Keep the cut shallower than ${num(surfaceAt(at) - neckFloor)} mm`} or clear of X ${num(neck.fromMm)}–${num(neck.toMm)} mm, or move the neck.`,
   });
   for (const op of job.faces ?? []) {
     if (op.kind === 'cross-hole') {
       const x = op.atX ?? free.centre;
       const half = Math.max((op.diameter ?? 0) / 2, cutterRadiusMm);
       // A cross-hole goes through the axis: inside the span it always cuts the neck's section.
-      if (over(x - half, x + half)) return { ...sentence(`The cross-hole at A ${num(op.a)}°`, 2 * map.radius, x - half, x + half), labelId: op.id };
+      if (over(x - half, x + half)) {
+        return { ...sentence(`The cross-hole at A ${num(op.a)}°`, op.a, 2 * surfaceAt(op.a), x - half, x + half), labelId: op.id };
+      }
       continue;
     }
-    const depth = op.kind === 'flat' ? (op.depth ?? 0) : map.radius - (op.acrossFlats ?? 0) / 2;
     const name = op.kind === 'flat' ? `The flat at A ${num(op.a)}°` : `The ${op.count ?? 0} flats ${num(op.acrossFlats ?? 0)} mm across`;
+    // A flat's floor is the surface at its index less its depth. A ring's faces ALL cut to the
+    // across-flats plane, so its floor is `acrossFlats / 2` at every index it removes; the deep
+    // reading is the largest surface it cuts from, which is the face the sentence names.
+    let floor: Mm;
+    let at = op.a;
+    if (op.kind === 'flat') {
+      floor = surfaceAt(op.a) - (op.depth ?? 0);
+    } else {
+      floor = (op.acrossFlats ?? 0) / 2;
+      const count = op.count ?? 0;
+      if (count >= 3) {
+        for (let k = 0; k < count; k++) {
+          const a = op.a + (k * 360) / count;
+          if (surfaceAt(a) > surfaceAt(at)) at = a;
+        }
+      }
+    }
+    // On a block the knob is the across-flats, not a depth: the ring cuts every face to that plane.
+    const tip =
+      op.kind === 'faces-all-round' && map.section.kind === 'rect' ? `Keep the across-flats above ${num(2 * neckFloor)} mm` : undefined;
     const faceFrom = span.from - cutterRadiusMm;
     const faceTo = span.to + cutterRadiusMm;
-    if (deeper(depth) && over(faceFrom, faceTo)) return { ...sentence(name, depth, faceFrom, faceTo), labelId: op.id };
+    if (eatsNeck(floor) && over(faceFrom, faceTo)) return { ...sentence(name, at, surfaceAt(at) - floor, faceFrom, faceTo, tip), labelId: op.id };
     for (const item of op.items ?? []) {
-      const reach = depth + item.depth;
-      if (!deeper(reach)) continue;
+      const itemFloor = floor - item.depth;
+      if (!eatsNeck(itemFloor)) continue;
       const half =
         item.kind === 'pocket' ? (item.width ?? 0) / 2 : item.kind === 'hole' ? Math.max((item.diameter ?? 0) / 2, cutterRadiusMm) : Number.POSITIVE_INFINITY;
       const from = Number.isFinite(half) ? span.from + item.x - half : faceFrom;
       const to = Number.isFinite(half) ? span.from + item.x + half : faceTo;
-      if (over(from, to)) return { ...sentence(`The ${faceItemWord(item)} on ${name.charAt(0).toLowerCase()}${name.slice(1)}`, reach, from, to), labelId: item.id };
+      if (over(from, to)) return { ...sentence(`The ${faceItemWord(item)} on ${name.charAt(0).toLowerCase()}${name.slice(1)}`, at, surfaceAt(at) - itemFloor, from, to, tip), labelId: item.id };
     }
   }
   return null;

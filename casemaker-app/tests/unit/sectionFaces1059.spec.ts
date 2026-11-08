@@ -24,7 +24,7 @@ import type { CutParams } from '@/engine/cnc/feeds';
 import { generateIndexed } from '@/engine/cnc/cam/indexed';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { buildTimeline, parseGcode, stubSetup, type Setup } from '@/engine/cnc';
-import { faceChordMm, planFaceCuts } from '@/engine/cnc/rotary/faceOps';
+import { faceChordMm, faceCutIntoNeck, planFaceCuts, type FaceNeckSpan } from '@/engine/cnc/rotary/faceOps';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { createSimSession } from '@/workers/sim/session';
 import { sweepTimeline, type SweepResult } from '@/workers/geometry/sweep';
@@ -44,13 +44,13 @@ const HOLD = { kind: 'rotary-chuck' as const, jawDiameter: SIDE, stickout: 85 };
 const setup = (): Setup =>
   stubSetup({ kind: 'cylinder', diameter: 2 * ENVELOPE_R, length: LENGTH, section: SECTION }, HOLD);
 
-/** A 44.5 mm square bar, 100 mm long, in the chuck: a shape-less box with no rod form. */
-function block(faces: EngraveFaceOp[]): EngraveJob {
+/** A bar in the chuck: a shape-less box with no rod form, so the chuck reads its section. */
+function block(faces: EngraveFaceOp[], dims: { width: number; thickness: number } = { width: SIDE, thickness: SIDE }): EngraveJob {
   const base = defaultEngraveJob();
   return {
     ...base,
     name: 'faces on a block',
-    stock: { length: LENGTH, width: SIDE, thickness: SIDE, material: 'hardwood' },
+    stock: { length: LENGTH, width: dims.width, thickness: dims.thickness, material: 'hardwood' },
     workholding: {
       kind: 'rotary-chuck',
       rotary: { stickout: 85, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' },
@@ -204,4 +204,73 @@ describe('#1059 the face CAM reads the block’s own section', () => {
     }
     session.dispose();
   }, 240_000);
+});
+
+describe('#1059 the cross-hole and the neck read the section too', () => {
+  it('a cross-hole at A 0 is 2 × the section’s surface deep and plunges to the block’s far side', () => {
+    const job = block([{ id: 'h', kind: 'cross-hole', a: 0, diameter: 3.175 }]);
+    const map = rotaryMapOf(job)!;
+    const plan = planFaceCuts(job, map, TOOL, PARAMS);
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    const hole = plan.plan.holes[0]!;
+    // Through the 44.5 mm block: from the 22.25 surface to the far side at −22.25. At the base
+    // this stated the envelope's 62.93 mm, plunging 9.22 mm of air past the block's underside.
+    expect(hole.surfaceRadius).toBeCloseTo(HALF, 9);
+    expect(hole.depth).toBeCloseTo(SIDE + job.breakthrough, 6);
+    expect(plan.plan.predicted[0]!.surfaceRadius).toBeCloseTo(HALF, 9);
+
+    const ir = generateIndexed({ radius: map.radius, holes: plan.plan.holes, tool: TOOL, params: PARAMS, rapid: Z1.rapidEstimate });
+    const plunge = ir.operations[0]!.moves.find((m) => m.kind === 'feed')!;
+    // …and the breakthrough past the far surface, never short of it.
+    expect(plunge.z).toBeCloseTo(-HALF - job.breakthrough, 6);
+  });
+
+  it('a cross-hole at A 90 reads the section’s OTHER face: 60 × 30 bar, 30 mm from the axis', () => {
+    // The section is 60 wide × 30 high. At A 0 the hole enters the 30 mm face (15 above the
+    // axis); at A 90 it turns to the 60 mm one (30). The depth follows the index, not the stock.
+    const job = block([{ id: 'h', kind: 'cross-hole', a: 90, diameter: 3.175 }], { width: 60, thickness: 30 });
+    const map = rotaryMapOf(job)!;
+    expect(map.section).toEqual({ kind: 'rect', width: 60, height: 30 });
+    const plan = planFaceCuts(job, map, TOOL, PARAMS);
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    const hole = plan.plan.holes[0]!;
+    expect(hole.surfaceRadius).toBeCloseTo(30, 9);
+    expect(hole.depth).toBeCloseTo(60 + job.breakthrough, 6);
+
+    const zero = planFaceCuts(block([{ id: 'h', kind: 'cross-hole', a: 0, diameter: 3.175 }], { width: 60, thickness: 30 }), map, TOOL, PARAMS);
+    expect(zero.ok).toBe(true);
+    if (zero.ok) {
+      expect(zero.plan.holes[0]!.surfaceRadius).toBeCloseTo(15, 9);
+      expect(zero.plan.holes[0]!.depth).toBeCloseTo(30 + job.breakthrough, 6);
+    }
+  });
+
+  it('the neck check compares FLOORS: a 13 mm flat at A 0 eats a ⌀20 neck in the bar', () => {
+    // ⌀20 leaves a floor 10 mm above the axis. A flat 13 mm deep at A 0 bottoms out at
+    // 22.25 − 13 = 9.25 mm — through the neck — although it is nowhere near the 21.47 mm the
+    // envelope-based check compared against. One millimetre shallower is clear.
+    const eating = block([flat('deep', 0, 13)]);
+    const eatingMap = rotaryMapOf(eating)!;
+    const neck: FaceNeckSpan = { fromMm: 3, toMm: 9, depthMm: eatingMap.radius - 10, diameterMm: 20 };
+    const f = faceCutIntoNeck(eating, eatingMap, neck, 5);
+    expect(f?.code).toBe('face-cuts-neck');
+    expect(f?.labelId).toBe('deep');
+    expect(f?.message).toContain('13 mm below the surface between X 3 and X 9 mm');
+    expect(f?.message).toContain('⌀20 mm');
+    expect(f?.message).toContain('shallower than 12.25 mm');
+
+    const clear = block([flat('shallow', 0, 12)]);
+    expect(faceCutIntoNeck(clear, rotaryMapOf(clear)!, neck, 5)).toBeNull();
+  });
+
+  it('a cross-hole in the neck’s span states the block’s through depth, not the envelope’s', () => {
+    const job = block([{ id: 'x', kind: 'cross-hole', a: 0, diameter: 3.175, atX: 6 }]);
+    const map = rotaryMapOf(job)!;
+    const neck: FaceNeckSpan = { fromMm: 3, toMm: 9, depthMm: map.radius - 10, diameterMm: 20 };
+    const f = faceCutIntoNeck(job, map, neck, 5);
+    expect(f?.code).toBe('face-cuts-neck');
+    expect(f?.message).toContain('44.5 mm below the surface');
+  });
 });

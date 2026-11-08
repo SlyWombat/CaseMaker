@@ -89,6 +89,12 @@ export interface IndexedHole {
    * exactly on the far surface is a knife edge, so pass a little more.
    */
   depth: Mm;
+  /**
+   * #1059 — the stock's own surface at this index, mm (`IndexedFace.surfaceRadius`): a block's
+   * cross-hole enters the section's edge, not the turned envelope. Absent = the spec's `radius`
+   * (every round rod). The plunge runs from the surface down `depth`.
+   */
+  surfaceRadius?: Mm;
 }
 
 export interface IndexedSpec {
@@ -168,10 +174,13 @@ function faceMoves(face: IndexedFace, radius: Mm, params: CutParams, cutterRadiu
 /** The moves of one hole: rapid in at the safe height, one plunge, retract. */
 function holeMoves(hole: IndexedHole, radius: Mm, params: CutParams): CamMove[] {
   const { a, x } = hole;
+  // #1059 — the plunge starts at the SECTION's surface at this index; the safe height stays the
+  // envelope's (the stock's highest point as the chuck turns).
+  const surface = hole.surfaceRadius ?? radius;
   const safe = radius + SAFE_Z;
   return [
     { kind: 'rapid', x, y: 0, z: safe, a },
-    { kind: 'feed', x, y: 0, z: radius - hole.depth, f: params.plungeFeed, a },
+    { kind: 'feed', x, y: 0, z: surface - hole.depth, f: params.plungeFeed, a },
     { kind: 'rapid', x, y: 0, z: safe, a },
   ];
 }
@@ -239,6 +248,14 @@ export function generateIndexed(spec: IndexedSpec): ToolpathIR {
     assertFinite('hole.a', hole.a);
     assertFinite('hole.x', hole.x);
     if (!(hole.depth > 0)) throw new Error(`generateIndexed: the hole at A${hole.a} must cut a positive depth, got ${hole.depth} mm`);
+    if (hole.surfaceRadius !== undefined) {
+      assertFinite('hole.surfaceRadius', hole.surfaceRadius);
+      if (!(hole.surfaceRadius > 0)) throw new Error(`generateIndexed: the hole at A${hole.a} states a surface radius of ${hole.surfaceRadius} mm; a stock's surface is above its axis`);
+      // #1059 — the section's surface can never be outside the turned envelope.
+      if (hole.surfaceRadius > radius + 1e-6) {
+        throw new Error(`generateIndexed: the hole at A${hole.a} states a ${hole.surfaceRadius} mm surface radius, outside the ${radius} mm envelope the stock turns in`);
+      }
+    }
     const moves = holeMoves(hole, radius, params);
     operations.push({
       number: number++,
