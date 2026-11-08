@@ -10,7 +10,10 @@ import { describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
-import { derivedSetupStock, setupStockFor } from '@/engine/cnc/setups/perSetupStock';
+import { derivedSetupStock, setupStockFor, stockForSetup } from '@/engine/cnc/setups/perSetupStock';
+import { toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { Z1 } from '@/engine/cnc/machine';
+import { aabbOfProfile } from '@/engine/compiler/profile';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 
 /** A blank 120×160×28 whose side 1 frees a 106×136 part; setup 2 is the vendor flip. */
@@ -57,6 +60,29 @@ describe('#1082 a setup’s own stock', () => {
     expect(derivedSetupStock(flipJob(), 25)).toEqual({ length: 106, width: 136, thickness: 25, provenance: 'derived' });
     // No house measurement → the blank's stated thickness.
     expect(derivedSetupStock(flipJob(), null)).toMatchObject({ length: 106, width: 136, thickness: 28, provenance: 'derived' });
+  });
+
+  it('#1082 stage 2 — toSetup builds the part from the SETUP’s stock, not the blank', () => {
+    const job = flipJob();
+    // The resolver hands a caller the setup's box; the engine part must be that box.
+    const box = stockForSetup(job, 0, 25);
+    expect(box).toEqual({ length: 106, width: 136, thickness: 25 });
+    const setup = toSetup(job, Z1, undefined, null, box);
+    expect(setup.part.kind).toBe('prism');
+    if (setup.part.kind !== 'prism') return;
+    expect(setup.part.thickness).toBe(25);
+    const bb = aabbOfProfile(setup.part.outline);
+    expect(bb.max[0] - bb.min[0]).toBeCloseTo(106, 6);
+    expect(bb.max[1] - bb.min[1]).toBeCloseTo(136, 6);
+    // A caller with no setup stock gets the blank, exactly as before.
+    const blank = toSetup(job, Z1);
+    if (blank.part.kind !== 'prism') return;
+    expect(blank.part.thickness).toBe(28);
+    const bbb = aabbOfProfile(blank.part.outline);
+    expect(bbb.max[0] - bbb.min[0]).toBeCloseTo(120, 6);
+    expect(bbb.max[1] - bbb.min[1]).toBeCloseTo(160, 6);
+    // No setups at all → the blank.
+    expect(stockForSetup({ ...job, setups: undefined } as EngraveJob, 0, 25)).toEqual({ length: 120, width: 160, thickness: 28 });
   });
 
   it('the resolver: the STATED box wins; a non-flip setup has none', () => {

@@ -42,3 +42,21 @@ export function setupStockFor(
   if (setup.flip === undefined) return null;
   return derivedSetupStock(job, measuredThicknessMm);
 }
+
+/**
+ * #1082 stage 2 — THE BOX A SETUP IS CUT FROM, resolved for a caller that knows the setup: the
+ * setup's stated box, else its derived freed part, else the JOB'S BLANK — so every pre-#1082
+ * caller gets exactly the three numbers it read before.
+ */
+export function stockForSetup(
+  job: EngraveJob,
+  setupIndex: number | undefined,
+  measuredThicknessMm: number | null,
+): { length: number; width: number; thickness: number } {
+  const setups = job.setups ?? [];
+  const setup = setupIndex === undefined ? undefined : setups[setupIndex];
+  const own = setupStockFor(job, setup, measuredThicknessMm);
+  return own === null
+    ? { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness }
+    : { length: own.length, width: own.width, thickness: own.thickness };
+}
