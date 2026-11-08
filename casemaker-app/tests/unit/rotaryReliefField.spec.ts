@@ -76,6 +76,75 @@ function cell(f: ReturnType<typeof sampleGoalRadialField>, x: number, arc: numbe
   return j * f.nx + i;
 }
 
+/**
+ * #1096 — A TRIANGLE THAT SPANS THE SEAM IS CAST AT ITS OWN ROW'S ANGLE.
+ *
+ * The footprint raster casts row `jj` (the UNWRAPPED index, negative when the triangle's first
+ * vertex has a negative φ) at `(jj · pitch) / radius − seam`, but RECORDS the hit in the WRAPPED
+ * row `j = jj mod ny`. The grid does not close — `ny = ceil(2πR / pitch)`, so `ny · pitch` is up to
+ * one cell MORE than the circumference — and a negative `jj` is therefore cast that fraction of a
+ * cell (δ = ny − 2πR/pitch cells) away from the row it is written to. A triangle that straddles
+ * the seam from the negative side is sampled δ cells off its row; at a cliff (the panther's
+ * near-axis facets at θ 178–182°) the row reads the wrong radius entirely — the 36 pinholes.
+ *
+ * The fixture: a ⌀26 stock (R 13.005, chosen so 2πR/pitch = 817.13 → ny 818 and δ ≈ 0.87 cells)
+ * around a radius-10 body, with a narrow radius-12 ridge whose two facets lie exactly across
+ * φ = ±180°. The first facet's first vertex is just past π (atan2 gives it a negative angle), so
+ * the base build casts its rows δ off — the seam row then reads the body (10) instead of the ridge
+ * (12). The same mesh with the seam turned half a turn (position.y = πR) puts the ridge at the
+ * map's start with positive unwrapped rows, and reads the ridge correctly — which is the
+ * acceptance's invariance: one mesh, two placements, the same radius at its ridge row.
+ */
+describe('#1096 — the seam rows are cast at their own angle', () => {
+  const PITCH = 0.1;
+  const R = 13.005; // stock radius (⌀26.01): the row grid does not close over the circumference
+  const BODY = 10;
+  const RIDGE = 12;
+
+  /** The body (a full-circle radius-10 solid) plus a radius-12 ridge across the seam. */
+  function seamTris(): { tris: Tri[]; peak: { theta: number; j0: number } } {
+    // The first row at or past the far side of the seam (φ = π); the ridge is centred on it.
+    const j0 = Math.ceil((Math.PI * R) / PITCH);
+    const theta = (j0 * PITCH) / R; // its map angle, just past π
+    const h = 0.6 * (PITCH / R); // half a ridge: only this row's grid point falls inside
+    const tris = sideTris(() => BODY, 10, TAU, 360);
+    const x0 = -5;
+    const x1 = 5;
+    const at = (x: number, a: number): V => [x, RIDGE * Math.sin(a), RIDGE * Math.cos(a)];
+    // a0 is just PAST π, so atan2 gives it a NEGATIVE angle — the unwrapped footprint starts
+    // negative, which is the whole mechanism.
+    const a0 = theta + h;
+    const a1 = theta - h;
+    tris.push([at(x0, a0), at(x1, a0), at(x1, a1)]);
+    tris.push([at(x0, a0), at(x1, a1), at(x0, a1)]);
+    return { tris, peak: { theta, j0 } };
+  }
+
+  const size = { x: 10, y: 2 * RIDGE, z: 2 * RIDGE };
+
+  it('reads the ridge at the seam row, and at the row the half-turn placement puts it on', () => {
+    const { tris, peak } = seamTris();
+    const placed = goal(tris, size); // seam 0: the ridge straddles φ = ±180°
+    const turned = { ...placed, position: { ...placed.position, y: Math.PI * R } }; // seam half a turn
+
+    const f0 = sampleGoalRadialField(placed, R, { pitchMm: PITCH });
+    const f1 = sampleGoalRadialField(turned, R, { pitchMm: PITCH });
+    // The half-turn placement's rows are POSITIVE at the same physical ridge, so the base build
+    // samples it correctly — the control that isolates the bug to the negative-φ rows.
+    const peakRow1 = cell(f1, 50, 0);
+    expect(f1.z[peakRow1]).toBeCloseTo(RIDGE - R, 3);
+    // The seam placement must read the same ridge radius at its own row. At the base it reads the
+    // body (10) instead of the ridge (12): the row was cast δ ≈ 0.87 cells off.
+    const ridgeRow0 = cell(f0, 50, peak.j0 * PITCH);
+    expect(f0.z[ridgeRow0]).toBeCloseTo(RIDGE - R, 3);
+    // The two placements' rows are a fraction of a cell apart, so the chord hit differs by 1e-4 mm.
+    expect(f0.z[ridgeRow0]).toBeCloseTo(f1.z[peakRow1] as number, 3);
+    // The rows either side are the body: the ridge is one row wide, not a smear.
+    expect(f0.z[cell(f0, 50, (peak.j0 - 1) * PITCH)]).toBeCloseTo(BODY - R, 3);
+    expect(f0.z[cell(f0, 50, (peak.j0 + 1) * PITCH)]).toBeCloseTo(BODY - R, 3);
+  });
+});
+
 describe('#723 R-1 — a solid of revolution reads back as its own radius', () => {
   const R = 10; // ⌀20 stock
 
