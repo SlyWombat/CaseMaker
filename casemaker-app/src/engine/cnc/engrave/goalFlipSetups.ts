@@ -28,11 +28,12 @@ import { placeTarget } from './targetPlace';
 import { applyMat, placedSize, rotationMatrix, targetTurns, type Mat3 } from './targetScale';
 import { silhouettePlane, UNDERSIDE_TAB_THICKNESS_MM } from './goalUnderside';
 import { targetObjectMesh } from '@/engine/import/targetObject';
-import { orient } from '@/engine/cnc/setups/orient';
+import { orient, type Mat } from '@/engine/cnc/setups/orient';
 import type { Face, MountSpec } from '@/engine/cnc/setups/types';
 import { jobMount, jobSetups } from './jobSetup';
+import { flipMatrix, flipOrientation } from './flipChoice';
 import { newId } from '@/utils/id';
-import type { EngraveJob, EngraveTargetObject, JobSetup, JobSetupPins } from '@/types/engraveJob';
+import type { EngraveJob, EngraveTargetObject, JobSetup, JobSetupPins, SetupFlip } from '@/types/engraveJob';
 import { coverageTriangles, sampleCoverageField, type CoverageMesh } from './goalCoverage';
 
 const DEG = Math.PI / 180;
@@ -251,6 +252,21 @@ export function goalForSetup(target: EngraveTargetObject, stock: Box3, R: Mat3):
   };
 }
 
+/** The setups engine's flat row-major matrix, from `orient`'s row-pair form. */
+function asMat3(m: Mat): Mat3 {
+  return m.flat() as unknown as Mat3;
+}
+
+/**
+ * #1073 — THE SIDE-2 GOAL FOR A STATED FLIP: the side-1 goal through the axis's own turn
+ * (`flipMatrix`), placed by the SAME isometry `goalForSetup` already applies. The tab band and the
+ * release follow because they ride the goal copy; the holes follow through `pinsFor`'s same
+ * transform. One matrix, never a second hand-written mirror.
+ */
+export function goalForFlip(target: EngraveTargetObject, stock: Box3, axis: SetupFlip['axis']): EngraveTargetObject {
+  return goalForSetup(target, stock, asMat3(flipMatrix(axis)));
+}
+
 /** The dowel holes setup 1 leaves: where they go, their diameter and their depth. */
 export interface DowelHold {
   /** Diameter of the drill the shop OWNS that makes the holes, mm. */
@@ -372,16 +388,31 @@ export type FlipSetupsResult =
  * Convert a plan's faces into the document's side setups. Side 1 is the job's current setup,
  * materialised with its goal; each later side gets the goal in its own work frame and a setup
  * with the orientation, the mount and — where the hold exists — the pin reference.
+ *
+ * #1073 — `flip` is the operator's stated turn over. When given, the ONE later side is the stock's
+ * bottom turned by the chosen axis (not the mount's default half turn), the side-1 goal and the
+ * hold go through that same reflection, and the later setup stores the choice verbatim. A flip
+ * choice describes exactly one turn over, so a plan of more than two sides, or a second side that
+ * is not the bottom, is refused by name rather than half-turned.
  */
 export function planFlipSetups(
   job: EngraveJob,
   target: EngraveTargetObject,
   faces: readonly Face[],
   tools?: readonly { key: string; tool: Tool }[],
+  flip?: SetupFlip,
 ): FlipSetupsResult {
   if (faces.length < 2) return { ok: false, reason: 'a flip plan needs at least two sides' };
   if (job.setups !== undefined) return { ok: false, reason: 'this job already states its setups' };
   if (faces[0] !== 'top') return { ok: false, reason: 'the job’s first setup is not the stock’s top face' };
+  if (flip !== undefined) {
+    if (faces.length !== 2) {
+      return { ok: false, reason: 'the flip choice states one turn over — a plan with two sides' };
+    }
+    if (faces[1] !== 'bottom') {
+      return { ok: false, reason: 'the flip choice turns the stock over — the second side is its bottom face' };
+    }
+  }
   const mount: MountSpec = { kind: jobMount(job) };
   const stock: Box3 = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
   const base = jobSetups(job)[0];
@@ -389,10 +420,24 @@ export function planFlipSetups(
 
   const firstTurn = orient(faces[0]!, mount, stock);
   if (!firstTurn.ok) return { ok: false, reason: firstTurn.reason };
-  const laterTurns = faces.slice(1).map((face) => {
-    const turned = orient(face, mount, stock);
-    return { face, turned };
-  });
+  const laterTurns: { face: Face; turned: ReturnType<typeof orient> }[] =
+    flip !== undefined
+      ? [
+          {
+            face: faces[1]!,
+            turned: {
+              ok: true,
+              matrix: flipMatrix(flip.axis),
+              orientation: flipOrientation(flip.axis),
+              // The half turn's own axis: left↔right is the machine's Y, front↔back its X.
+              rotate: { about: flip.axis === 'left-right' ? 'y' : 'x', degrees: 180 },
+            },
+          },
+        ]
+      : faces.slice(1).map((face) => {
+          const turned = orient(face, mount, stock);
+          return { face, turned };
+        });
   for (const { turned } of laterTurns) {
     if (!turned.ok) return { ok: false, reason: turned.reason };
   }
@@ -431,6 +476,8 @@ export function planFlipSetups(
       itemIds: [goal.id],
       tools: [job.toolKey],
       ...(pins === undefined ? {} : { pins }),
+      // #1073 — the operator's choice, stored verbatim on the setup it turns.
+      ...(flip === undefined ? {} : { flip }),
     });
   }
   return { ok: true, setups, goals, hold };
@@ -515,9 +562,16 @@ export function reholdSetupGoals(job: EngraveJob, stock: { x: number; y: number;
     const faceUp = setup.orientation.top;
     if (faceUp === 'top') return goal;
     try {
-      const turned = orient(faceUp, setup.mount, stock);
-      if (!turned.ok) return goal;
-      const R = turned.matrix.flat() as unknown as Mat3;
+      // #1073 — a setup that states its flip turns by the chosen axis, not the mount's default
+      // half turn: front↔back on a bracket is a real choice, and the re-hold must keep it.
+      let R: Mat3;
+      if (setup.flip !== undefined && faceUp === 'bottom') {
+        R = asMat3(flipMatrix(setup.flip.axis));
+      } else {
+        const turned = orient(faceUp, setup.mount, stock);
+        if (!turned.ok) return goal;
+        R = turned.matrix.flat() as unknown as Mat3;
+      }
       const placed = goalForSetup(base, stock, R);
       const moved: EngraveTargetObject = { ...placed, id: goal.id, setupId: setup.id };
       if (goal.bandMm !== undefined) moved.bandMm = goal.bandMm;

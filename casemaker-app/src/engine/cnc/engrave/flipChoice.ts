@@ -24,6 +24,8 @@
  * graphic, the sheet and the vendor method's refusal all say so from this one answer.
  */
 
+import { orient, orientationOf, type Mat } from '@/engine/cnc/setups/orient';
+import type { Orientation } from '@/engine/cnc/setups/types';
 import type { SetupFlip, StockCorner } from '@/types/engraveJob';
 
 /** The blank's stated square corners in the seated work frame; `undefined` reads all four. */
@@ -66,4 +68,27 @@ export function flipFenceFacts(
   const squareCorners = squareCornersOf(stock.squareCorners);
   const fenceCorner = fenceCornerFor(flip.axis);
   return { fenceCorner, squareInFence: squareCorners.includes(fenceCorner), squareCorners };
+}
+
+/**
+ * #1073 — THE FLIP'S TURN, as the machine makes it: the stock→machine half turn a hand performs
+ * when it turns the blank over. left↔right is RY180 (x → −x, z → −z), front↔back is RX180
+ * (y → −y, z → −z); both are proper rotations, never mirrors. Read from `orient`, the one place
+ * that decides which axis a bottom-up mount turns about, so this cannot drift from the setup
+ * engine's own matrices: the bracket's half turn IS left↔right and the vise's IS front↔back
+ * (`flipAxisOf` states the same pairing).
+ */
+export function flipMatrix(axis: SetupFlip['axis']): Mat {
+  const turned = orient('bottom', { kind: axis === 'left-right' ? 'bracket' : 'vise' }, { x: 1, y: 1, z: 1 });
+  if (!turned.ok) throw new Error(`a bottom-up ${axis} flip must be holdable: ${turned.reason}`);
+  return turned.matrix;
+}
+
+/**
+ * #1073 — the orientation record a flipped setup carries: which stock face sits at each machine
+ * face. `top`/`bottom` swap under either axis; left↔right swaps the left/right pair, front↔back
+ * the front/back pair. Derived from the same matrix the goal and the holes go through.
+ */
+export function flipOrientation(axis: SetupFlip['axis']): Orientation {
+  return orientationOf(flipMatrix(axis));
 }
