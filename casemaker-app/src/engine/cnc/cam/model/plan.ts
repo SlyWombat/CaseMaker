@@ -2920,15 +2920,16 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       air: opts.air,
       rapid: opts.rapid,
       boolean: opts.boolean,
-      // #1092 — A REST'S FLOOR PASS IS A POCKET FLOOR PASS, SO IT GETS THE SAME CEILING. The rest's
-      // region is the SIMULATED LEFTOVER (`restRegion` above): the cells the chain so far leaves
-      // above the goal. Over an overhang those cells are exactly the ones the shadow-bounded
-      // primary was RIGHT to leave — the design stands there — so without this bound the rest's one
-      // floor-level pass cuts straight through the goal's own surface: j29's elephant, where the
-      // ⌀3.175 rest planned the whole body down to the pocket floor at −26.104 against a goal of
-      // −1.36 (18.03 % adjudicated cut-into, 24.75 mm). The rule the analyst stated is the bound's
-      // own predicate: a cell is cut only where the design above it is at or below the pass's Z.
-      ...(opts.shadowMesh === undefined ? {} : { aboveMaterial: { mesh: opts.shadowMesh } }),
+      // #1092 — NO `aboveMaterial` ON THIS CALL, ON PURPOSE. The rest's pass runs at the node's own
+      // floor, and the exact per-cell ceiling trims one mask cell at EVERY wall foot (the cell's
+      // plane max reads the wall it touches). Those wall-foot strips are precisely what a rest
+      // exists to clean: bounding this call removed two 12 mm strips at the floor level from set
+      // B's m1trayB-top p5 (a measured coverage loss, not a gouge), because a 1.85 mm-wide leftover
+      // strip stops being ringable once its edge is trimmed. The overhang gouge #1092 reports is
+      // stopped one level up, at the mask that asks for the pass at all: `restRegion` above now
+      // excludes every cell whose goal top sits above the floor Z — the analyst's rule, "a plane is
+      // only valid where the goal has a surface at that depth" — so j29's body cells never enter
+      // this pass's region and the rest is not planned for them.
     });
     // #962 — A REST THAT CUTS NOTHING OVER LIVE STANDING MATERIAL IS STATED, NEVER SILENT: the
     // mask said cells stand here, and the op produced no toolpath (the region eroded to nothing
