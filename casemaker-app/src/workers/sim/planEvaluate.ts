@@ -45,6 +45,7 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { readDefault } from '@/platform/defaultsClient';
 import { vCone, vDepthLimit } from '@/engine/cnc/vProfile';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { goalCheckForProgram } from '@/engine/cnc/engrave/goalCheckInput';
 import { goalInputFor } from './goalCheckField';
 import { jobFingerprint } from '@/engine/cnc/engrave/package';
@@ -705,9 +706,15 @@ function sweepPlan(
       // oracle does), so a plan that gouges the goal cannot pass on the plan alone.
       if (i === gen.programs.length - 1) {
         // #948 — the same pass line the run's own oracle uses, read from the shop opts here.
-        const goal = goalCheckForProgram(applied, gen.surface3d != null, {
-          passCoverage: readDefault(ctx.shop.defaults ?? null, 'goal.passCoverage').value,
-        });
+        const rotaryGoalMap = rotaryMapOf(applied);
+        const goal = goalCheckForProgram(
+          applied,
+          gen.surface3d != null,
+          {
+            passCoverage: readDefault(ctx.shop.defaults ?? null, 'goal.passCoverage').value,
+          },
+          rotaryGoalMap === null ? null : { radius: rotaryGoalMap.radius, section: rotaryGoalMap.section },
+        );
         report = session.oracle(
           gen.predicted,
           null,

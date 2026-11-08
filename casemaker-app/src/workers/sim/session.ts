@@ -51,9 +51,9 @@ import {
 } from '@/engine/cnc/engrave/oracle';
 import { computeCopperTopology, type PcbCopperTopologyInput } from '@/engine/cnc/engrave/pcbTopology';
 import { checkDesignReach, checkGoalCutInto, goalCutIntoUnchecked, type DesignCheckItem, type GoalCutIntoOptions } from '@/engine/cnc/engrave/designCheck';
-import { checkGoalCutIntoRotary } from './goalCheckRotary';
-import type { GoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
-import type { RotarySection } from '@/engine/cnc/rotary/wrap';
+import { checkGoalCutIntoRotary, type RotaryGoalAllowance } from './goalCheckRotary';
+import type { GoalRadialField } from '@/engine/cnc/rotary/radialField';
+import { angleToArc, type RotarySection } from '@/engine/cnc/rotary/wrap';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
@@ -65,7 +65,7 @@ type CrossSectionInstance = InstanceType<ManifoldToplevel['CrossSection']>;
 import { manifoldOfTriangles, meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
 import { boxSolid, isDenseForExactSweep, sweepTimeline, unliftTimeline, type SweepDiagnostic, type SweepOpts, type SweepResult, type SweepStats } from '../geometry/sweep';
-import { columnSweep, type ColumnSweepOk, type DrillPointDefault } from '../geometry/columnEngine';
+import { columnSweep, rotaryFacetTerm, type ColumnSweepOk, type DrillPointDefault } from '../geometry/columnEngine';
 import { checkpointStoreOf } from '@/engine/cnc/emulator/checkpointStore';
 import { eventStoreOf } from '@/engine/cnc/gcode/eventStore';
 import type { ParseResult } from '@/engine/cnc/gcode/types';
@@ -1368,7 +1368,17 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
                   goal.opts?.passCoverage,
                 );
               }
-              return checkGoalCutIntoRotary(goal.rotaryGoal, l.column.grid, goal.section, goal.opts ?? {});
+              // #1083 — the run's OWN map tolerance: the cell's half-diagonal in map millimetres
+              // plus the cutter's facet rise at the cell's radius, the two terms the prediction
+              // oracle judges by (a column model cannot resolve better than the grid it is read on).
+              const grid = l.column.grid;
+              const radius = l.column.radius;
+              const cutter = l.column.cutter;
+              const allowance: RotaryGoalAllowance = {
+                cellMm: Math.hypot(grid.du, angleToArc(grid.dv, radius)) / 2,
+                facetAt: (tipR: number) => rotaryFacetTerm(cutter, tipR, Math.max(0, radius - tipR)),
+              };
+              return checkGoalCutIntoRotary(goal.rotaryGoal, grid, goal.section, goal.opts ?? {}, allowance);
             })()
           : checkGoalCutInto(goal.heightfield, goal.sweptTop ?? null, {
               ...goal.opts,

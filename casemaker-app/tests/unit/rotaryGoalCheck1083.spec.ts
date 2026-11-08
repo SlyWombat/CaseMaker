@@ -102,6 +102,17 @@ describe('#1083 the rotary goal check', () => {
     expect(report.sentence).toContain('stands more than');
   });
 
+  it("the run's own map tolerance is not cut-into: a facet-sized under-read passes, a real gouge counts", () => {
+    // The column model cannot resolve better than its grid: half a cell plus the cutter's facet
+    // rise. The same tolerance the prediction oracle judges by is the check's floor here.
+    const allowance = { cellMm: 0.1, facetAt: (): number => 0.3 };
+    const mild = checkGoalCutIntoRotary(goalField(), grid((_i, j) => goalRadiusAt(0, j) - 0.2), null, {}, allowance);
+    expect(mild.cutIntoFraction).toBe(0);
+    const deep = checkGoalCutIntoRotary(goalField(), grid((_i, j) => goalRadiusAt(0, j) - 0.7), null, {}, allowance);
+    expect(deep.cutIntoFraction).toBeGreaterThan(0);
+    expect(deep.maxCutIntoMm).toBeCloseTo(0.7, 6);
+  });
+
   it('a goal cell outside the swept map is not compared and never counted as a pass', () => {
     const narrow: ColumnGrid = { ...grid((i, j) => goalRadiusAt(i, j)), nu: 25, nv: NY };
     // Rebuild the narrower grid's h at its own nu: only the first 25 X columns were swept.

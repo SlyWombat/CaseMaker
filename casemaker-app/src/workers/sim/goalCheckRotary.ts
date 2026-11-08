@@ -23,7 +23,7 @@
  */
 
 import type { RotarySection } from '@/engine/cnc/rotary/wrap';
-import type { GoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
+import type { GoalRadialField } from '@/engine/cnc/rotary/radialField';
 import type { ColumnGrid } from '@/workers/geometry/columnEngine';
 import {
   GOAL_CUT_INTO_FLOOR_MM,
@@ -62,14 +62,33 @@ function gridRadiusAt(grid: ColumnGrid, radius: number, x: number, arcMm: number
   return Math.max(at(i0, j0), at(i0 + 1, j0), at(i0, j1), at(i0 + 1, j1));
 }
 
+/**
+ * The run's own map tolerance, so the check judges by the resolution the grid actually has — the
+ * same two terms the rotary PREDICTION oracle carries (`computeRotaryOracle`): a cell's
+ * half-diagonal in map millimetres, and the cutter's facet rise at the cell's own radius (a ball's
+ * sphere-cap edge, a V's cone edge; zero for a flat). Without it, every steep feature's column
+ * model reads a few tenths below the design and the check would call the model's own
+ * discretisation "cut-into" — the #1059 readiness run read 66 % that way.
+ */
+export interface RotaryGoalAllowance {
+  /** The cell's half-diagonal in map millimetres (`hypot(du, arc(dv))/2`). */
+  cellMm: number;
+  /** The facet rise at a tip radius, mm (0 for a flat, a ball's edge, a V's cone edge). */
+  facetAt: (tipRadiusMm: number) => number;
+}
+
 export function checkGoalCutIntoRotary(
   goal: GoalRadialField,
   grid: ColumnGrid,
   section: RotarySection | null,
   opts: GoalCutIntoOptions = {},
+  allowance?: RotaryGoalAllowance,
 ): GoalCutIntoReport {
   const cutIntoFloorMm = opts.cutIntoFloorMm ?? GOAL_CUT_INTO_FLOOR_MM;
   const passCoverage = opts.passCoverage ?? GOAL_PASS_COVERAGE_FALLBACK;
+  const cellMm = allowance?.cellMm ?? 0;
+  const facetAt = allowance?.facetAt ?? ((): number => 0);
+  const toleranceAt = (designR: number): number => cutIntoFloorMm + cellMm + facetAt(designR);
   const radius = goal.radius;
   const cellArea = goal.pitch * goal.pitch;
   const cells = goal.nx * goal.ny;
@@ -103,7 +122,7 @@ export function checkGoalCutIntoRotary(
         leftoverVolumeMm3 += d * cellArea;
         maxLeftover = Math.max(maxLeftover, d);
       }
-      if (Math.abs(d) <= cutIntoFloorMm) withinBoth++;
+      if (Math.abs(d) <= toleranceAt(designR)) withinBoth++;
     }
   }
 
@@ -115,7 +134,10 @@ export function checkGoalCutIntoRotary(
   for (let j = 0; j < goal.ny; j++) {
     for (let i = 0; i < goal.nx; i++) {
       const k = j * goal.nx + i;
-      if (sampled[k] !== 1 || dOf[k]! >= -cutIntoFloorMm) continue;
+      // #1083 — a cell is cut into only BEYOND the run's own map tolerance (the cell half-diagonal
+      // plus the cutter's facet rise at that radius), the same band the prediction oracle judges by.
+      const designRk = radius + goal.z[k]!;
+      if (sampled[k] !== 1 || dOf[k]! >= -toleranceAt(designRk)) continue;
       cutCells++;
       const depth = -dOf[k]!;
       cutVolumeMm3 += depth * cellArea;

@@ -24,7 +24,7 @@
  */
 
 import { isMold, moldHeightfield, sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
-import { sampleGoalRadialField, type GoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
+import { sampleGoalRadialField, type GoalRadialField } from '@/engine/cnc/rotary/radialField';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import type { GoalCheckTarget, SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
 import type { GoalCheckInput, SimSession } from './session';

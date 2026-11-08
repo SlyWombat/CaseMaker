@@ -30,6 +30,7 @@ import {
 } from '@/platform/flightRecorder';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { goalCheckForProgram, type SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
 import { pureGoalObject } from '@/engine/cnc/engrave/jobKind';
 import { goalEdgeBreakOptions } from '@/engine/cnc/engrave/edgeBreak';
@@ -1157,14 +1158,22 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // comparison for it), and the old early return skipped the oracle — so the run judged
           // the finish program's sweep alone, and the run's one goal field (the page stamps every
           // program onto it) never received the rest pass's cuts.
-          const goal = goalCheckForProgram(job, pureGoalObject(job) !== null, {
-            passCoverage: goalPassCoverage(shopDefaults),
-            // #1064 (d) — the plan's own bevel prediction, stated beside the measurement.
-            ...(generated.plan?.outcome?.predictedCutIntoMm == null
-              ? {}
-              : { predictedCutIntoMm: generated.plan.outcome.predictedCutIntoMm }),
-            ...goalEdge,
-          });
+          const rotaryGoalMap = rotaryMapOf(job);
+          const goal = goalCheckForProgram(
+            job,
+            pureGoalObject(job) !== null,
+            {
+              passCoverage: goalPassCoverage(shopDefaults),
+              // #1064 (d) — the plan's own bevel prediction, stated beside the measurement.
+              ...(generated.plan?.outcome?.predictedCutIntoMm == null
+                ? {}
+                : { predictedCutIntoMm: generated.plan.outcome.predictedCutIntoMm }),
+              ...goalEdge,
+            },
+            // #1083 — a rotary goal is judged on the map; the store holds the job, so the map's
+            // own radius and section ride along (goalCheckInput must not import the CAM).
+            rotaryGoalMap === null ? null : { radius: rotaryGoalMap.radius, section: rotaryGoalMap.section },
+          );
           const goalOnly = goal !== undefined && (predicted === undefined || predicted.length === 0);
           if (predicted === undefined && !goalOnly) return;
           if (!isFirst && predicted !== undefined && predicted.length === 0 && !goalOnly) return;
