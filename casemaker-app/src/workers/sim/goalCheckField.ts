@@ -24,6 +24,7 @@
  */
 
 import { isMold, moldHeightfield, sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { sampleGoalRadialField, type GoalRadialField } from '@/engine/cnc/rotary/radialField';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import type { GoalCheckTarget, SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
 import type { GoalCheckInput, SimSession } from './session';
@@ -81,8 +82,52 @@ export function goalHeightfieldFor(target: GoalCheckTarget): GoalHeightfield {
  * does on a flat column. Such a job is CHECKED from the stamp alone — the conservative column
  * diagnostic is stated absent — rather than reading `unchecked` on the jobs the gate judges.
  */
+/** #1083 — the rotary goal's radial field, cached by the same identity the flat field uses. */
+let rotaryFieldCache: { key: string; field: GoalRadialField } | null = null;
+
+function rotaryFieldKey(target: GoalCheckTarget, radius: number): string {
+  return JSON.stringify([
+    target.sha256,
+    target.format,
+    target.position,
+    target.rotation,
+    target.rotationX ?? 0,
+    target.rotationY ?? 0,
+    target.size,
+    target.scale ?? null,
+    radius,
+    GOAL_CHECK_PITCH_MM,
+  ]);
+}
+
+export function rotaryGoalFieldFor(target: GoalCheckTarget, radius: number): GoalRadialField {
+  const key = rotaryFieldKey(target, radius);
+  if (rotaryFieldCache !== null && rotaryFieldCache.key === key) return rotaryFieldCache.field;
+  const field = sampleGoalRadialField(target, radius, { pitchMm: GOAL_CHECK_PITCH_MM, maxCells: GOAL_CHECK_MAX_CELLS });
+  rotaryFieldCache = { key, field };
+  return field;
+}
+
 export function goalInputFor(live: SimSession, goal: SimGoalCheck): GoalCheckInput {
   if ('unchecked' in goal) return { unchecked: goal.unchecked };
+  // #1083 — A ROTARY GOAL IS JUDGED ON THE MAP: the goal's own radial field against the live
+  // column grid, the same two references the relief's plan was built from.
+  if (goal.rotary !== undefined) {
+    if (!live.canStampRotaryGoal()) {
+      return {
+        unchecked:
+          'the rotary goal was not compared — the live sweep is not on the rotary map (no column grid to read its radii from)',
+        ...(goal.opts === undefined ? {} : { opts: goal.opts }),
+      };
+    }
+    let field: GoalRadialField;
+    try {
+      field = rotaryGoalFieldFor(goal.target, goal.rotary.radius);
+    } catch (e) {
+      return { unchecked: `the goal could not be sampled (${e instanceof Error ? e.message : String(e)})`, ...(goal.opts === undefined ? {} : { opts: goal.opts }) };
+    }
+    return { rotaryGoal: field, section: goal.rotary.section, ...(goal.opts === undefined ? {} : { opts: goal.opts }) };
+  }
   // The sweep's capability first, before paying for the goal's sampling: a rotary or refused
   // session cannot stamp it at all (a flat column and an exact sweep both can).
   if (!live.canStampGoal()) {

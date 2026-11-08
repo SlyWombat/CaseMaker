@@ -14,6 +14,7 @@
  */
 
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import type { RotarySection } from '@/engine/cnc/rotary/wrap';
 import { pureGoalObject } from './jobKind';
 import type { GoalCutIntoOptions } from './designCheck';
 
@@ -41,7 +42,16 @@ export type GoalCheckTarget = Pick<
  * with the check's own options (`passCoverage`, #948), which the caller reads from the shop.
  */
 export type SimGoalCheck =
-  | { target: GoalCheckTarget; opts?: GoalCutIntoOptions }
+  | {
+      target: GoalCheckTarget;
+      /**
+       * #1083 — A ROTARY GOAL IS COMPARED ON THE MAP. The relief's material lives in (X, θ) with
+       * radii, so the worker samples the goal's radial field at this radius and pairs it with the
+       * live column grid; absent, the goal is the flat heightfield check it always was.
+       */
+      rotary?: { radius: number; section: RotarySection | null };
+      opts?: GoalCutIntoOptions;
+    }
   | { unchecked: string; opts?: GoalCutIntoOptions };
 
 /**
@@ -58,6 +68,12 @@ export function goalCheckForProgram(
   job: EngraveJob,
   goalProgram: boolean,
   opts?: GoalCutIntoOptions,
+  /**
+   * #1083 — the job's rotary map, from the CALLER: this module is a #964 gate root and must not
+   * value-import `rotary/wrap` (its chain reaches `cam/ir`). A caller with the CAM
+   * (`engraveRunStore`, `planEvaluate`) passes `rotaryMapOf(job)`'s radius and section.
+   */
+  rotary?: { radius: number; section: RotarySection | null } | null,
 ): SimGoalCheck | undefined {
   if (!goalProgram) return undefined;
   const goal = pureGoalObject(job);
@@ -69,8 +85,12 @@ export function goalCheckForProgram(
     };
   }
   const { sha256, format, data, position, rotation, rotationX, rotationY, size, relief, scale, goalMode } = goal;
+  // #1083 — a goal held in the rotary chuck is judged from the radial field against the map's own
+  // column grid, so the sample's own frame facts ride along (the section names the stock's surface
+  // between the flats, which a cell the relief never cuts keeps).
   return {
     target: { sha256, format, data, position, rotation, rotationX, rotationY, size, relief, scale, goalMode },
+    ...(rotary === undefined || rotary === null ? {} : { rotary }),
     ...(opts === undefined ? {} : { opts }),
   };
 }
