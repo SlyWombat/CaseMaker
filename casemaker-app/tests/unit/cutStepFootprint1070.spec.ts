@@ -150,6 +150,16 @@ describe('#1070 the Cut step plans a bracket job on its cut region', () => {
     expect(attempt.kind).toBe('refused');
     if (attempt.kind === 'refused') expect(attempt.reason).toContain('registration on tape');
   });
+
+  it('a PLACED bracket is refused by name — the plan’s seed is the anchor it does not have', () => {
+    const job = bracketJob();
+    if (job.workholding.kind !== 'bracket') throw new Error('the fixture is a bracket job');
+    // The field lives on land7's BracketHold; read defensively so this line typechecks alone.
+    (job.workholding.bracket as { placement?: 'anchored' | 'placed' }).placement = 'placed';
+    const attempt = attemptFor(job);
+    expect(attempt.kind, JSON.stringify(attempt)).toBe('refused');
+    if (attempt.kind === 'refused') expect(attempt.reason).toContain('no anchor datum');
+  });
 });
 
 describe('#1070 the sheet’s §6 prints the footprint plan', () => {

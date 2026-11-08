@@ -117,6 +117,20 @@ export function planRegistrationAttempt(args: {
     // extents, the far edges once each, one Z touch per region corner, every position in machine
     // coordinates checked against the soft endstop before a line is sent. The anchor-1 bracket
     // datum only SEEDS the machine coordinates; the touches derive the origin.
+    //
+    // A PLACED bracket has no anchor datum, and this plan's seed IS the anchor: planned anyway it
+    // would send every touch to the wrong machine coordinates and state a seed the sheet denies.
+    // Refused by name until the placed seed is measured (A's later work).
+    // The field lives on land7's BracketHold (#1070 placed bracket); read it defensively so this
+    // branch typechecks on its own line too.
+    if (job.workholding.kind === 'bracket' && (job.workholding.bracket as { placement?: 'anchored' | 'placed' }).placement === 'placed') {
+      return {
+        kind: 'refused',
+        reason:
+          'this bracket is screwed down where you put it, so there is no anchor datum to plan its registration from — ' +
+          'put it on the anchor-1 pins to register from the anchor, or measure its position and register by hand',
+      };
+    }
     const sizes = bracketSettings(defaults);
     const anchor = anchorFrom(calibration, job.machineId);
     if (!anchor.ok) return { kind: 'refused', reason: anchor.reason };
