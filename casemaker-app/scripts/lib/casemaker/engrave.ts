@@ -104,6 +104,7 @@ import { sheetRegistrationPlan } from '../../../src/engine/cnc/registration/foot
 import type { SeatSeek } from '../../../src/engine/cnc/registration/footprintJob';
 import type { FootprintPlan } from '../../../src/engine/cnc/registration/footprint';
 import type { NodeMeshOutput } from '../../../src/workers/geometry/meshOutput';
+import { rotaryMapOf } from '../../../src/engine/cnc/rotary/wrap';
 import { Z1 } from '../../../src/engine/cnc/machine';
 import { jobMount, jobMountObstacles, jobSetups, jobTool, toSetup } from '../../../src/engine/cnc/engrave/jobSetup';
 // #835 — each setup's own work, measured and written back into that setup only.
@@ -412,6 +413,31 @@ interface RunReceipt {
  * code into `process.exitCode`.
  */
 /** #1070 — the sheet's bed-held registration: the footprint plan, or the first seat seek. */
+/**
+ * #1059 — THE RECEIPT'S FACE-ANGLE FIELD: the square chuck's levelled A zero, read from the bed
+ * profile the job was bound to (its `datums.rotaryFaceAngle`), else the machine's active profile.
+ * Only a SQUARE section carries one — a round rod has no face to level — and a profile with no
+ * datum yields nothing, so those receipts keep their exact shape.
+ */
+export function faceAngleReceiptFor(
+  job: EngraveJob,
+  where: LoadedLocation | null,
+): { degrees: number; residualMm?: number } | undefined {
+  const section = rotaryMapOf(job)?.section;
+  if (section === undefined || section.kind !== 'rect') return undefined;
+  const wanted = job.bed?.profileId;
+  for (const machine of where?.machines ?? []) {
+    const profile =
+      wanted === undefined
+        ? machine.bedProfiles?.find((p) => p.id === machine.activeBedProfileId)
+        : machine.bedProfiles?.find((p) => p.id === wanted);
+    const datum = profile?.datums.rotaryFaceAngle ?? null;
+    if (datum === null) continue;
+    return datum.residualMm === undefined ? { degrees: datum.value } : { degrees: datum.value, residualMm: datum.residualMm };
+  }
+  return undefined;
+}
+
 export function sheetRegistrationFor(
   job: EngraveJob,
   where: LoadedLocation | null,
@@ -481,6 +507,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   // #513 — the bed the job was set up on, when the document names one (the design and coupon
   // routes build their own jobs and name none).
   let bed: NonNullable<EngraveDetails['bed']> | null = null;
+  // #1059 — the square chuck's levelled face angle from the bound profile's datum, when the job
+  // is a square-chuck job and the datum exists (see `faceAngleReceiptFor`).
+  let faceAngle: NonNullable<EngraveDetails['faceAngle']> | undefined;
   let runOk = true;
   let runStage: string | null = null;
   let runGate: Receipt['gate'] = null;
@@ -546,6 +575,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         pair,
         ...(runGoal === undefined || runGoal === null ? {} : { goal: runGoal }),
         ...(bed === null ? {} : { bed }),
+        ...(faceAngle === undefined ? {} : { faceAngle }),
       },
     });
   }
@@ -1862,6 +1892,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // #513 — the job's bed binding rides into the receipt, so a run can be matched to the bed it
     // was planned against even when the machine's active profile has changed since.
     bed = parsed.job.bed === undefined ? null : { profileId: parsed.job.bed.profileId, profileVersion: parsed.job.bed.profileVersion };
+    // #1059 — A SQUARE CHUCK JOB'S FACE ANGLE, from the bound profile's datum (absent for every
+    // other mount and for a job nothing was levelled on).
+    faceAngle = faceAngleReceiptFor(parsed.job, boot.location);
     // #766 — A JOB THAT NAMES NO CUTTER IS GIVEN ONE BY SIMULATION. The rules that came before
     // (area share #762, item kind, the tightest raised gap #760/#765) each failed on a real job;
     // this path now runs the measured search: plausible kind-valid plans are generated

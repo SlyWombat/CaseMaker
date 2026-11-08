@@ -310,6 +310,16 @@ export const engraveDetailsSchema = z
           'or a document written before jobs were bound to a bed). Omitted by receipts written ' +
           'before this field existed — a committed receipt parses to itself, byte for byte.',
       ),
+    // #1059 — the square chuck's A zero the run was levelled to, from the bound profile's datum.
+    // Omitted for every other mount and for a square job nothing was levelled on, so those
+    // receipts stay byte-identical.
+    faceAngle: z
+      .object({
+        degrees: z.number().finite().describe('The square stock’s face angle — the rotary A zero — in degrees, as the bed profile’s datum states it.'),
+        residualMm: z.number().finite().optional().describe('The levelling run’s own residual, mm, when the datum recorded one.'),
+      })
+      .optional()
+      .describe('The face-angle datum a square chuck job was planned against; omitted otherwise. A new optional field does not bump RECEIPT_VERSION.'),
   })
   .describe('The job command’s own details.');
 
