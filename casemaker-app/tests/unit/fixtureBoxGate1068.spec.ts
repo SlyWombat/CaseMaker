@@ -77,6 +77,41 @@ describe('#1068-perf the fixture stadium test', () => {
     expect(pass(-0.1), 'a pass 0.1 mm inside the radius was not reported').not.toBeNull();
   });
 
+  it('a move that drives THROUGH the box with both endpoints outside is a hit (6b’s read)', () => {
+    const b = box([0, 0, 0], [10, 10, 10], 'through');
+    // (−5,5) → (15,5), r = 1: both endpoints are 5 mm from the rectangle, but the cutter drives
+    // straight through the clamp.
+    const through = fixtureStadiumHit([-5, 5, 5], [15, 5, 5], 1, 0, 10, [b]);
+    expect(through, 'a through-drive was reported as clear').not.toBeNull();
+    expect(through!.box.id).toBe('through');
+    // The same move one clamp-width away at Y = 12 is clear.
+    expect(fixtureStadiumHit([-5, 12, 5], [15, 12, 5], 1, 0, 10, [b])).toBeNull();
+    // A move ending inside the box is a hit too.
+    expect(fixtureStadiumHit([-5, 5, 5], [5, 5, 5], 1, 0, 10, [b])).not.toBeNull();
+
+    // THE DISCRIMINATING CASE for the old code: a SHORT segment whose ends are both outside and
+    // which clips the box's corner — the 0.5 mm piece subdivision used to rescue the long
+    // through-drive above (a piece endpoint lands inside), so this is the one the crossing test
+    // alone catches. The corner is 0.0707 mm from the segment; r = 0.06 clears the corner test.
+    const near = box([0, 0, 0], [10, 10, 10], 'corner-clip');
+    const clip = fixtureStadiumHit([0.2, -0.1, 5], [-0.1, 0.2, 5], 0.06, 0, 10, [near]);
+    expect(clip, 'a short corner clip was reported as clear').not.toBeNull();
+  });
+
+  it('the through-drive reaches the sweep as a refusal with the upper-bound message', () => {
+    const stock = tl.Manifold.cube([20, 20, 10], true).translate([0, 0, -5]);
+    const throughBox = box([0, 0, 1], [10, 10, 4], 'through');
+    const fixture = tl.Manifold.cube([10, 10, 3], true).translate([5, 5, 2.5]);
+    const moves = [{ line: 7, kind: 'rapid' as const, from: [-5, 5, 1] as [number, number, number], to: [15, 5, 1] as [number, number, number], step: 0 }];
+    const pushed: ReturnType<typeof checkAirMoves>['diagnostics'] = [];
+    checkAirMoves(tl, stock, 0, -10, moves, [], 1, null, fixture, 2, (d) => pushed.push(d), 0, undefined, undefined, [throughBox]);
+    const hit = pushed.find((d) => d.code === 'rapid-into-fixture');
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain('(an upper bound)');
+    fixture.delete();
+    stock.delete();
+  });
+
   it('the reported volume is the box-overlap bound the column engine states', () => {
     const b = box([0, 0, 0], [4, 4, 4]);
     const hit = fixtureStadiumHit([-1, 2, 1], [5, 2, 1], 1, 0, 4, [b]);
