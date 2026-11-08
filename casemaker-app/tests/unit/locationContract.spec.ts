@@ -14,6 +14,7 @@ import {
   LOCATION_KIND,
   LocationDocSchema,
   LocationViewSchema,
+  MachineRecordSchema,
   checkLocationImport,
 } from '@/platform/locationClient';
 import { parseFixturesStrict, parseMarginsStrict } from '@/store/settingsStore';
@@ -236,6 +237,28 @@ describe('the location contract (#412)', () => {
       { ...(good[1] as Record<string, unknown>), id: 'feed-overlap', minDiameter: 1.0 },
     ];
     expect(LocationDocSchema.safeParse({ ...older, feeds: overlap }).success).toBe(false);
+  });
+
+  it('#1059 — a location written before the face-angle datum parses, and the datum reads null', () => {
+    // THE LIVE k3 DOCUMENT HAS NO `rotaryFaceAngle` ON ANY DATUM. The view is lenient PER MACHINE,
+    // so a schema that did not default the key would put the shop's own machine in
+    // `unreadableMachines` rather than refusing the whole location — the app would lose its bed
+    // silently. The key must default null on every path that reads or writes a record.
+    const raw = doc();
+    const view = LocationViewSchema.safeParse(raw);
+    expect(view.success, JSON.stringify(view.error?.issues)).toBe(true);
+    expect(view.data!.unreadableMachines).toEqual([]);
+    expect(view.data!.machines[0]!.bedProfiles![0]!.datums.rotaryFaceAngle).toBeNull();
+
+    // The import path (strict, whole document).
+    const imported = LocationDocSchema.safeParse(raw);
+    expect(imported.success, JSON.stringify(imported.error?.issues)).toBe(true);
+    expect(imported.data!.machines[0]!.bedProfiles![0]!.datums.rotaryFaceAngle).toBeNull();
+
+    // The record write path, which checks a machine against this schema before it is sent.
+    const record = MachineRecordSchema.safeParse(raw.machines[0]);
+    expect(record.success, JSON.stringify(record.error?.issues)).toBe(true);
+    expect(record.data!.bedProfiles![0]!.datums.rotaryFaceAngle).toBeNull();
   });
 
   it('leaves a house file, and anything else, to the service to judge', () => {
