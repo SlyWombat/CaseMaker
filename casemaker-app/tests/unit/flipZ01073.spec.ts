@@ -63,7 +63,8 @@ function twoSidedJob(withFlip: boolean): EngraveJob {
     pins: { at: [{ x: 30, y: 56 }, { x: 70, y: 56 }] },
     ...(withFlip ? { flip: { method: 'tabs-in-blank' as const, axis: 'left-right' as const } } : {}),
   });
-  return { ...base, setups: [setup(), second] };
+  // The maintainer’s one-right-angle blank: the fenced corner on side 2 is NOT square.
+  return { ...base, stock: { ...base.stock, squareCorners: ['FL'] }, setups: [setup(), second] };
 }
 
 function generated(job: EngraveJob): RunSheetGenerated {
@@ -100,6 +101,10 @@ describe('#1073 the sheet carries side 2’s Z0', () => {
   it('a flip’s setup-2 page prints the three numbers and the sum', () => {
     const text = cutTwoText(twoSidedJob(true), { flipZ0: { seatMm: -12, thicknessMm: 25, facingMm: 0, toleranceMm: 0.05 } });
     expect(text).toContain('Z0 on side 2 is carried from side 1');
+    // #1073 — the sheet's edge words: which former edge meets which arm, and the fenced corner.
+    expect(text).toContain('The corner in the fence is FR');
+    expect(text).toContain('NOT one of the blank’s square corners');
+    expect(text).toContain('its right edge comes round to the fence side');
     expect(text).toContain('carried from side 1: Z0₁ − 25.00 mm');
     expect(text).toContain('= 13.00 mm');
     expect(text).toContain('12.95 to 13.05');

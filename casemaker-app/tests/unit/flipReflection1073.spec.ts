@@ -27,6 +27,7 @@ import type { Mat3 } from '@/engine/cnc/engrave/targetScale';
 import { flipMatrix, flipOrientation } from '@/engine/cnc/engrave/flipChoice';
 import { det, orient, orientationOf } from '@/engine/cnc/setups/orient';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 
 afterEach(() => clearTargetObjectMeshCache());
@@ -65,9 +66,10 @@ async function sphereJob(): Promise<{ job: EngraveJob; goal: EngraveTargetObject
   return { job, goal };
 }
 
-const DRILL: { key: string; tool: Tool } = {
-  key: 'user:drill-2.5',
-  tool: flatEndMill(2.5, { name: '2.5 mm drill', shape: 'drill', typeText: 'Drill', tipDiameter: 2.5, diameter: 2.5 }),
+/** #1073 — the bore's cutter: a long-reach flat that interpolates the ⌀6 bore (a drill cannot). */
+const BORE_MILL: { key: string; tool: Tool } = {
+  key: 'user:o-flute-3.175-42',
+  tool: flatEndMill(3.175, { name: '1/8 in O-flute, 42 mm flute', fluteLength: 42 }),
 };
 
 const M3 = (axis: 'left-right' | 'front-back'): Mat3 => flipMatrix(axis).flat() as unknown as Mat3;
@@ -155,7 +157,7 @@ describe('#1073 the goal and its hold turn over by the same reflection', () => {
   it('the plan stores the choice on the later setup and turns everything by it', async () => {
     const { job, goal } = await sphereJob();
     const flip = { method: 'tabs-in-blank', axis: 'front-back' } as const;
-    const plan = planFlipSetups(job, goal, ['top', 'bottom'], [DRILL], flip);
+    const plan = planFlipSetups(job, goal, ['top', 'bottom'], [BORE_MILL], flip);
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
     // The record is exactly the operator's choice, on the later setup only.
@@ -174,7 +176,7 @@ describe('#1073 the goal and its hold turn over by the same reflection', () => {
   it('the method never moves geometry: both methods place the same goal and pins', async () => {
     const { job, goal } = await sphereJob();
     const planFor = (method: 'tabs-in-blank' | 'free-then-flip') => {
-      const p = planFlipSetups(job, goal, ['top', 'bottom'], [DRILL], { method, axis: 'left-right' });
+      const p = planFlipSetups(job, goal, ['top', 'bottom'], [BORE_MILL], { method, axis: 'left-right' });
       if (!p.ok) throw new Error(p.reason);
       return p;
     };
@@ -193,18 +195,43 @@ describe('#1073 the goal and its hold turn over by the same reflection', () => {
   it('a flip choice is one turn over: it needs exactly two sides, the second the bottom', async () => {
     const { job, goal } = await sphereJob();
     const flip = { method: 'tabs-in-blank', axis: 'left-right' } as const;
-    const three = planFlipSetups(job, goal, ['top', 'bottom', 'back'], [DRILL], flip);
+    const three = planFlipSetups(job, goal, ['top', 'bottom', 'back'], [BORE_MILL], flip);
     expect(three.ok).toBe(false);
     if (!three.ok) expect(three.reason).toContain('two');
-    const side = planFlipSetups(job, goal, ['top', 'left'], [DRILL], flip);
+    const side = planFlipSetups(job, goal, ['top', 'left'], [BORE_MILL], flip);
     expect(side.ok).toBe(false);
     if (!side.ok) expect(side.reason).toContain('bottom');
+  });
+
+  it('switching the stored axis re-places the goal and re-expresses the pins in the new frame', async () => {
+    const { job, goal } = await sphereJob();
+    const flip = { method: 'tabs-in-blank', axis: 'left-right' } as const;
+    const plan = planFlipSetups(job, goal, ['top', 'bottom'], [BORE_MILL], flip);
+    if (!plan.ok) throw new Error(plan.reason);
+    const twoSided: EngraveJob = { ...job, targetObject: undefined, targetObjects: plan.goals, setups: plan.setups };
+    const firstPins = twoSided.setups![1]!.pins!.at;
+    useEngraveJobStore.setState({ job: twoSided });
+    const flipped = twoSided.setups!.map((s, i) =>
+      i === 1 ? { ...s, flip: { method: 'tabs-in-blank' as const, axis: 'front-back' as const } } : s,
+    );
+    useEngraveJobStore.getState().setSetups(flipped);
+    const after = useEngraveJobStore.getState().job;
+    // The side's goal re-derives through the NEW turn: front↔back mirrors Y about the blank.
+    expect(after.targetObjects![1]!.position.x).toBeCloseTo(26, 6);
+    expect(after.targetObjects![1]!.position.y).toBeCloseTo(STOCK.width - 19, 6);
+    // The pins are the same physical holes in the new frame: undo left↔right, apply front↔back.
+    const pins = after.setups![1]!.pins!.at;
+    firstPins.forEach((p, i) => {
+      const side1 = { x: STOCK.length - p.x, y: p.y };
+      expect(pins[i]!.x).toBeCloseTo(side1.x, 2);
+      expect(pins[i]!.y).toBeCloseTo(STOCK.width - side1.y, 2);
+    });
   });
 
   it('a stored front↔back choice survives a thickness change: the re-hold turns by the axis', async () => {
     const { job, goal } = await sphereJob();
     const flip = { method: 'tabs-in-blank', axis: 'front-back' } as const;
-    const plan = planFlipSetups(job, goal, ['top', 'bottom'], [DRILL], flip);
+    const plan = planFlipSetups(job, goal, ['top', 'bottom'], [BORE_MILL], flip);
     if (!plan.ok) throw new Error(plan.reason);
     const twoSided: EngraveJob = { ...job, targetObject: undefined, targetObjects: plan.goals, setups: plan.setups };
     const before = twoSided.targetObjects!;

@@ -110,6 +110,29 @@ export function flipOrientation(axis: SetupFlip['axis']): Orientation {
 }
 
 /**
+ * #1073 — THE STORED PINS WHEN THE AXIS CHANGES. The holes are physical and fixed in side 1;
+ * the setup's work frame is a reflection of it, so a pin's side-1 position is recovered through
+ * the OLD axis's reflection and placed through the NEW one (each reflection is an involution of
+ * the same box: x → L − x, or y → W − y).
+ */
+export function flipPinsForAxis(
+  pins: readonly { x: number; y: number }[],
+  stock: { length: number; width: number },
+  from: SetupFlip['axis'],
+  to: SetupFlip['axis'],
+): { x: number; y: number }[] {
+  const toSide1 = (p: { x: number; y: number }) => ({
+    x: from === 'left-right' ? stock.length - p.x : p.x,
+    y: from === 'front-back' ? stock.width - p.y : p.y,
+  });
+  const toFrame = (p: { x: number; y: number }) => ({
+    x: to === 'left-right' ? stock.length - p.x : p.x,
+    y: to === 'front-back' ? stock.width - p.y : p.y,
+  });
+  return pins.map((p) => toFrame(toSide1(p)));
+}
+
+/**
  * #1073 — SIDE 2'S Z0, CARRIED, IN MACHINE TERMS (6b's amendment A).
  *
  * "Z0₂ = Z0₁ − T" hides the frame. Side 1's registration gives the blank's top touch; the seat is

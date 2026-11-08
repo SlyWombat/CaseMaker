@@ -55,7 +55,7 @@ import { prismNumbers } from './prism';
 import { vCarveLevels, vCarvePlane, vCarveRowStepover } from '@/engine/cnc/vCarveGeometry';
 import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
 import { axesWord, describeTouch, kindWord, PROBE_SPEC, readsWord, registrationFor, sideWords } from '@/engine/cnc/engrave/registration';
-import { flipZ0, type FlipZ0 } from './flipChoice';
+import { flipFenceFacts, flipZ0, type FlipZ0 } from './flipChoice';
 import {
   alongWord,
   inOutWord,
@@ -3946,6 +3946,21 @@ function turnOverSteps(
       bold: true,
     },
   ];
+  // #1073 — WHICH FORMER EDGE MEETS WHICH ARM, AND WHETHER THE FENCED CORNER IS SQUARE: the
+  // sheet's own words about the turn, from the identical derivation the graphic uses.
+  if (to.flip !== undefined) {
+    const facts = flipFenceFacts({ squareCorners: job.stock.squareCorners }, to.flip);
+    const edges =
+      to.flip.axis === 'left-right'
+        ? 'the blank’s front edge stays on the front arm, and its right edge comes round to the fence side'
+        : 'the blank’s back edge comes round to the front arm, and its left edge stays on the fence side';
+    steps.push({
+      text:
+        `The corner in the fence is ${facts.fenceCorner} — ` +
+        `${facts.squareInFence ? 'one of the blank’s square corners' : 'NOT one of the blank’s square corners'} — and ${edges}.`,
+      value: `${facts.fenceCorner} in the fence`,
+    });
+  }
   // #1073 — SIDE 2'S Z0 IS CARRIED (6b's amendment A): the rough underside is never touched. The
   // three numbers and the sum when the caller has them; the rule and the blanks when it does not.
   if (to.flip !== undefined) {
