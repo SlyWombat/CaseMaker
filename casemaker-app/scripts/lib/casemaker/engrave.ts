@@ -194,6 +194,8 @@ import {
   type ReceiptProvenance,
   type ReceiptRefusal,
 } from '../../../src/platform/headless/receipt';
+// #1084 — the app's Save .nc gate for a rotary-held job, quoted by the door that does not apply it.
+import { ROTARY_UNMEASURED_REFUSAL } from '../../../src/store/engraveRunGate';
 
 // The wasm module, the bundled fonts and the machine's own document are the shared headless
 // bootstrap (#476). It runs once the arguments are parsed, below — before ANY job resolves a
@@ -1856,6 +1858,15 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     const parsed = parseEngraveJob(raw);
     if (!parsed.ok) {
       return stop(invalidJob(`${path} is not a valid engrave job:\n  ${parsed.errors.join('\n  ')}`));
+    }
+    // #1084 — THE APP'S SAVE GATE, STATED BY THE DOOR THAT DOES NOT APPLY IT. This command writes
+    // .nc files and never runs `saveBlocker`; for a job held in the rotary chuck the app's Save .nc
+    // is disabled until the module's #238 rows are measured. The run still generates (this is the
+    // generation door; the bench's run passes the app's Save), and says so once — the same exported
+    // sentence the app shows.
+    if (parsed.job.workholding.kind === 'rotary-chuck') {
+      out.progress(ROTARY_UNMEASURED_REFUSAL);
+      runDiagnostics.push(diagnostic('rotary-unmeasured', 'info', ROTARY_UNMEASURED_REFUSAL, 'findings', null));
     }
     outDir = args.out ?? dirname(path);
     mkdirSync(outDir, { recursive: true });

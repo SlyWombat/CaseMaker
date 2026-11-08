@@ -5752,7 +5752,11 @@ export async function generateGoalProgram(
   // `goal-object-oversize`/zero-volume check (#533) never reaches a goal that is surfaced here.
   // Run the SAME validation and refuse an unmakeable goal with its blocking finding, rather than
   // sampling and posting a program the Cut gate would otherwise have to catch with no finding.
-  const goalFindings = validateGoalObject(goal, job.stock, { minFloor: job.minFloor, edgeMargin: job.edgeMargin });
+  const goalFindings = validateGoalObject(goal, job.stock, {
+    minFloor: job.minFloor,
+    edgeMargin: job.edgeMargin,
+    rotary: job.workholding.kind === 'rotary-chuck',
+  });
   const blocking = goalFindings.filter((f) => f.severity === 'error');
   if (blocking.length > 0) {
     return {
@@ -6724,6 +6728,25 @@ export async function engraveGenerate(
   // mounting, the wrapped one first and the indexed one after, and `setupPrograms` appends the
   // face ref the per-ref loop below turns into `generateFaceProgram`.
   if ((job.faces ?? []).length > 0 && !jobHasItems(job)) {
+    // #1084 — FACES AND A GOAL IS TWO PROGRAMS, AND ONE FILE CANNOT BE BOTH. This branch returns
+    // before the goal dispatch below, so a job carrying both used to post the faces and drop the
+    // goal with no sentence (#1085's mixed dispatch — faces, then the relief from the PROCESSED
+    // section — is the real fix). Until it exists the job refuses by name.
+    if (pureGoalObject(job) !== null) {
+      const message =
+        'this job has faces and a goal; only the faces would post — cut them as two jobs: the faces first, then the goal';
+      return {
+        ...emptyGoalResult(),
+        ok: false,
+        stage: 'findings',
+        findings: [{ severity: 'error', code: 'faces-with-goal', message }],
+        feeds: null,
+        cam: null,
+        nc: null,
+        verify: null,
+        errors: [{ stage: 'findings', message }],
+      };
+    }
     return generateFaceProgram(tl, job, tool, catalogue, calibration, margins, shop);
   }
 
