@@ -10,12 +10,18 @@
  * The number beside a flat is the CHORD the face is at that depth (`rotary/faceOps.ts`): the face
  * is exactly that wide, and the CAM steps over in Y to cut it. It is stated here because the width
  * is a consequence of the depth, not a field — and a person setting a D-flat wants to see it.
+ *
+ * #1059 — ON A BLOCK THE WIDTH IS THE SECTION'S, not the turned circle's, and a ring's faces do
+ * not share one depth: each face cuts from its own surface down to the across-flats plane, so the
+ * ring states ONE LINE PER DISTINCT DEPTH (the flats of a square → octagon are already at the
+ * plane and have nothing to cut). The row never says "rod" on a block.
  */
 
 import { useState, type CSSProperties, type JSX } from 'react';
 import type { EngraveFaceItem, EngraveFaceOp } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
-import { defaultFaceItem, faceChordMm, faceItemWords, faceOperationWords } from '@/engine/cnc/rotary/faceOps';
+import { defaultFaceItem, faceItemWords, faceOperationWords, sectionFaceChordMm } from '@/engine/cnc/rotary/faceOps';
+import { sectionRadiusAt, type RotarySection } from '@/engine/cnc/rotary/wrap';
 
 const ROW: CSSProperties = { borderTop: '1px solid #22272d', padding: '6px 2px', fontSize: 12, color: '#c8d3de' };
 const SUMMARY: CSSProperties = { cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'baseline' };
@@ -30,6 +36,12 @@ export interface FaceOperationRowProps {
   index: number;
   /** The stock's radius, mm — the flat's chord is stated against it. */
   radiusMm: Mm;
+  /**
+   * #1059 — the stock's section about the axis, when the job has one: a block's face is the
+   * SECTION's chord at its index, not the envelope circle's. Absent (no map yet) is a round rod
+   * of `radiusMm`, which is every pre-#1059 caller.
+   */
+  section?: RotarySection;
   /** The face's cuttable length along X, mm — where its cuts' centres are measured from. */
   lengthMm: Mm;
   /** The job cutter's diameter, mm — a cross-hole and a hole come out at it. */
@@ -86,6 +98,7 @@ export function FaceOperationRow({
   face,
   index,
   radiusMm,
+  section: sectionProp,
   lengthMm,
   cutterDiameterMm,
   onChange,
@@ -98,7 +111,40 @@ export function FaceOperationRow({
   // engraving with no text is not a cut the CAM can make.
   const [words, setWords] = useState('');
   const [addingText, setAddingText] = useState(false);
-  const chord = face.kind === 'flat' ? faceChordMm(radiusMm, face.depth ?? 0) : faceChordMm(radiusMm, radiusMm - (face.acrossFlats ?? 0) / 2);
+  const section: RotarySection = sectionProp ?? { kind: 'round', diameter: 2 * radiusMm };
+  const stockWords = section.kind === 'round' ? `a ⌀${num(2 * radiusMm)} mm rod` : `a ${num(section.width)} × ${num(section.height)} mm block`;
+  // #1059 — a ring's faces are grouped by the depth each cuts to: on a rod there is one group, on
+  // a block (a square → octagon) the flats are already at the across-flats and only the corners
+  // cut. The widths are the SECTION's chord at each face's own index.
+  const ring =
+    face.kind === 'faces-all-round'
+      ? (() => {
+          const count = face.count ?? 0;
+          const acrossFlats = face.acrossFlats ?? 0;
+          if (!(count >= 3) || !(acrossFlats > 0)) return null;
+          const lines: { angles: number[]; depth: number; width: Mm }[] = [];
+          for (let k = 0; k < count; k++) {
+            const a = face.a + (k * 360) / count;
+            const depth = sectionRadiusAt(section, (a * Math.PI) / 180) - acrossFlats / 2;
+            const width = sectionFaceChordMm(section, a, Math.max(0, depth));
+            const line = lines.find((l) => Math.abs(l.depth - depth) < 0.005);
+            if (line === undefined) lines.push({ angles: [a], depth, width });
+            else line.angles.push(a);
+          }
+          return lines.sort((x, y) => y.depth - x.depth);
+        })()
+      : null;
+  // The default cut's chord is the NARROWEST face it repeats on, so a pocket or text that fits
+  // one face fits every face of the ring.
+  const cutWidths =
+    face.kind === 'flat'
+      ? [sectionFaceChordMm(section, face.a, face.depth ?? 0)]
+      : (ring ?? []).filter((l) => l.depth > 1e-9).map((l) => l.width);
+  const chord = cutWidths.length === 0 ? 0 : Math.min(...cutWidths);
+  const angleWords = (angles: number[]): string => {
+    const words = angles.map((a) => `${num(a)}°`);
+    return words.length <= 1 ? (words[0] ?? '') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`;
+  };
   return (
     <details style={ROW} data-testid={`engrave-face-row-${index}`}>
       <summary style={SUMMARY} data-testid={`engrave-face-summary-${index}`}>
@@ -158,11 +204,23 @@ export function FaceOperationRow({
           Remove
         </button>
       </div>
-      <p style={NOTE} data-testid={`engrave-face-note-${index}`}>
-        {face.kind === 'cross-hole'
-          ? 'A cross-hole is drilled through the rod at this angle, in one plunge.'
-          : `The face is ${num(chord)} mm wide at this depth on a ⌀${num(2 * radiusMm)} mm rod; the passes step across it while the stock is held at the angle.`}
-      </p>
+      {face.kind === 'cross-hole' ? (
+        <p style={NOTE} data-testid={`engrave-face-note-${index}`}>
+          A cross-hole is drilled through the {section.kind === 'round' ? 'rod' : 'block'} at this angle, in one plunge.
+        </p>
+      ) : face.kind === 'flat' ? (
+        <p style={NOTE} data-testid={`engrave-face-note-${index}`}>
+          {`The face is ${num(chord)} mm wide at this depth on ${stockWords}; the passes step across it while the stock is held at the angle.`}
+        </p>
+      ) : (
+        (ring ?? []).map((line, i) => (
+          <p key={line.depth} style={NOTE} data-testid={`engrave-face-note-${index}${i === 0 ? '' : `-${i}`}`}>
+            {line.depth > 1e-9
+              ? `Faces at ${angleWords(line.angles)} are ${num(line.width)} mm wide and ${num(line.depth)} mm deep on ${stockWords}; the passes step across each while the stock is held at the angle.`
+              : `Faces at ${angleWords(line.angles)} are already at the ${num(face.acrossFlats ?? 0)} mm across-flats — nothing to cut there.`}
+          </p>
+        ))
+      )}
       {face.kind !== 'cross-hole' && (
         <div style={{ margin: '6px 0 0 2px' }} data-testid={`engrave-face-add-${index}`}>
           <span style={{ ...UNIT }}>Add on this face</span>
