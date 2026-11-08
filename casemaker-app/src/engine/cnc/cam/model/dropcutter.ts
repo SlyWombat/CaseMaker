@@ -378,11 +378,6 @@ export function dropCutterHeight(profile: CutterProfile, mesh: DropCutterMesh, x
       const end = cellStart[c + 1]!;
       for (let s = cellStart[c]!; s < end; s++) {
         const t = cellTriangles[s]!;
-        // #1054 — THE SORTED CELL'S EARLY EXIT: the cell's entries descend by `maxZ`, and the CL
-        // is `max(maxZ − heightAt(ρ))` with `heightAt ≥ 0` on every profile — an entry at or
-        // below the running best, and every later entry of this cell, cannot beat it. Exact: the
-        // answer is a maximum, so the scan order cannot change it.
-        if (triangles.maxZ[t]! <= best) break;
         if (stamp[t] === generation) continue;
         stamp[t] = generation;
         const tMinX = triangles.minX[t]!, tMaxX = triangles.maxX[t]!;

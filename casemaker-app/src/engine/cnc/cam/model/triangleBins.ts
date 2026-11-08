@@ -169,24 +169,6 @@ export function buildTriangleBins(mesh: DropCutterMesh, cellMm?: number): Triang
   const fill = new Int32Array(cells);
   for (let t = 0; t < n; t++) visit(t, (c) => { cellTriangles[cellStart[c]! + fill[c]!] = t; fill[c]! += 1; });
   void cellOf;
-  // #1054 — EACH CELL'S SLICE SORTED BY `maxZ`, DESCENDING. The CL answer is
-  // `max(maxZ − heightAt(ρ))` and `heightAt(ρ) ≥ 0` for every profile, so once a running best
-  // reaches an entry's `maxZ`, neither it nor any later entry of this sorted cell can beat it —
-  // the drop-cutter's sweep stops on one comparison instead of testing the whole stack (the
-  // elephant's ⌀6 queries read 17,153 slots for 5,065 unique triangles). The answer is a
-  // maximum, so the order cannot change it: byte-identical plans.
-  {
-    const sortScratch: number[] = [];
-    for (let c = 0; c < cells; c++) {
-      const start = cellStart[c]!;
-      const end = cellStart[c + 1]!;
-      if (end - start < 2) continue;
-      sortScratch.length = 0;
-      for (let s = start; s < end; s++) sortScratch.push(cellTriangles[s]!);
-      sortScratch.sort((a, b) => triangles.maxZ[b]! - triangles.maxZ[a]!);
-      cellTriangles.set(sortScratch, start);
-    }
-  }
   // #970 — per cell, the max over its own registered triangles' `maxZ` (the CSR range already
   // built above), the cheap bound a query prunes whole cells with before reading any triangle.
   const cellMaxZ = new Float64Array(cells).fill(-Infinity);

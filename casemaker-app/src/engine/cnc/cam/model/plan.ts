@@ -2289,10 +2289,6 @@ function topSurfaceAt(bins: TriangleBins, x: number, y: number): number | null {
   const indices = bins.mesh.indices;
   let best: number | null = null;
   for (const t of binnedReachableTriangles(bins, x, y, 0)) {
-    // #1054 — the plane's height at any interior point is a barycentric combination of its
-    // vertices, so it never exceeds the triangle's own `maxZ`: an entry at or below the running
-    // best cannot raise it. Exact (a maximum, order-independent); the cells are `maxZ`-sorted.
-    if (bins.triangles.maxZ[t]! <= (best ?? Number.NEGATIVE_INFINITY)) continue;
     const i0 = indices[t * 3]! * 3;
     const i1 = indices[t * 3 + 1]! * 3;
     const i2 = indices[t * 3 + 2]! * 3;
