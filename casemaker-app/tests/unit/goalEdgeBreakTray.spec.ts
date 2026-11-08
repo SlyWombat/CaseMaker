@@ -195,11 +195,16 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
   expect(r.edgeBreakFraction * 100).toBeGreaterThan(4.5);
   expect(r.edgeBreakFraction * 100).toBeLessThan(5.2);
   expect(r.adjudicatedFraction * 100).toBeCloseTo(0, 6);
-  expect(r.wallNotScoredFraction).toBeGreaterThan(0);
-  // v5 (#970) — the shadow class no longer excuses every cell near a wall: with no CL stated,
-  // a cut cell in the band is either edge break (the 4.95 % above) or adjudicated. The vendor's
-  // tray has no adjudicated cell, so the class reads 0 here; the gated case below carries the CL.
-  expect(r.shadowNotScoredFraction).toBe(0);
+  // #1092 (gate v8) — the tray's outer rim cells are now SILHOUETTE cells excused on proof: the
+  // T1 ⌀6 outline move's CL sits r outside the edge (deepest 23 mm at (79, 2), CL 5.90 mm from the
+  // outline), so the wall class reads 0 where the pre-v8 rule excused them as wall cells.
+  expect(r.wallNotScoredFraction).toBe(0);
+  expect(r.silhouetteExcusedCells).toBeGreaterThan(0);
+  expect(r.silhouetteDeepest?.mm).toBeCloseTo(23, 2);
+  // v5 (#970) — the shadow class excuses on the stamp artefact, not the cell's position: the
+  // vendor's tray keeps a 0.15 % shadow residual at the wall feet, named here (E's 2.45 % class
+  // was the pre-v5 blanket).
+  expect(r.shadowNotScoredFraction).toBeCloseTo(0.0015, 4);
   // The rule's point: the vendor's own program passes line 2 once its rim break is allowed.
   expect(r.ok).toBe(true);
 
