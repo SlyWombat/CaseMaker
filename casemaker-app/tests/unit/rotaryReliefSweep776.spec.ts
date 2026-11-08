@@ -173,7 +173,12 @@ describe('#776 — the lobed-shaft relief', () => {
         },
       }),
     );
-    expect(out.count).toBeGreaterThan(50_000); // this is the cut-resolution program, not the e2e's coarse one
+    // #1094 — THE PIN IS A RESOLUTION CLASS, NOT A MOVE COUNT. The rough's tip is the ball's
+    // drop-cutter field now (#1094), and its own hand-in measured the rough falling 2,186,720 →
+    // 1,796,862 moves (−17.8 %) because the old per-cell clamp let the ball's flank cut walls it
+    // could not enter; this fixture's swept cut count follows to 45,498. The coarse case stays in
+    // the hundreds, so 40,000 still separates the cut-resolution program from the e2e's coarse one.
+    expect(out.count).toBeGreaterThan(40_000); // this is the cut-resolution program, not the e2e's coarse one
     expect(out.stats.removedVolume).toBeGreaterThan(0);
     // Progress is the panel's "sweeping k / n checkpoints" and the worker's cancel signal; the
     // last report must be the whole program, not a prefix.
