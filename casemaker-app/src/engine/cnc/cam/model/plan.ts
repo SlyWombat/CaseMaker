@@ -3802,7 +3802,8 @@ export interface PlanCurvedResult {
 }
 
 /** #1054 — one memoised stage op: its outcome, the CL surface a later stage's mask reads, and the
- *  finish cutter (the rank candidate) whose region/CL it was planned for. */
+ *  candidates whose passes have used it. An op is shared by every caller whose key matches, so the
+ *  entry carries one owner PER USER and dies when the last of them is evicted. */
 export interface StageMemoEntry {
   outcome: OpOutcome;
   cl?: ReturnType<typeof clSurface>;
@@ -3810,7 +3811,8 @@ export interface StageMemoEntry {
   unplanned?: SequenceStepFailure[];
   /** The CL-grid fact the stage's surface recorded (`clGrid`), replayed when the CL is not rebuilt. */
   grid?: PlanCurvedResult['clGrid'][number];
-  owner: string;
+  /** Every candidate whose pass read this op (the rank's eviction is by this set). */
+  owners: Set<string>;
 }
 
 /**
@@ -3819,25 +3821,35 @@ export interface StageMemoEntry {
  * third time). One stage op per distinct (cutter, region, params) is enough: the second caller
  * with the same key reads the first one's op, CL surface included, and the rank's losers are
  * evicted by owner so the cache never holds more than the incumbent's ops plus the current
- * candidate's. Scoped to ONE setup's tree/geometry by construction (region ids and cutter keys);
- * created in `planModelCam` and passed to the rank's and the chosen plan's `planCurvedForTree`.
+ * candidate's. A shared op names every candidate that read it, so evicting a loser leaves the
+ * winner's own copy standing. Scoped to ONE setup's tree/geometry by construction (region ids and
+ * cutter keys); created in `planModelCam` and passed to the rank's and the chosen plan's
+ * `planCurvedForTree`.
  */
 export interface StageMemo {
-  get(key: string): StageMemoEntry | undefined;
+  /** The op for `key`, if planned; a hit records `owner` as one of the entry's users. */
+  get(key: string, owner: string): StageMemoEntry | undefined;
   set(key: string, entry: StageMemoEntry): void;
-  /** Drops every op planned for one candidate — the rank's losers never reach the chosen plan. */
+  /** Drops every op no candidate but `owner` has used — the rank's losers never reach the chosen plan. */
   evictOwner(owner: string): void;
 }
 
 export function createStageMemo(): StageMemo {
   const entries = new Map<string, StageMemoEntry>();
   return {
-    get: (key) => entries.get(key),
+    get: (key, owner) => {
+      const entry = entries.get(key);
+      if (entry !== undefined) entry.owners.add(owner);
+      return entry;
+    },
     set: (key, entry) => {
       entries.set(key, entry);
     },
     evictOwner: (owner) => {
-      for (const [key, entry] of entries) if (entry.owner === owner) entries.delete(key);
+      for (const [key, entry] of entries) {
+        entry.owners.delete(owner);
+        if (entry.owners.size === 0) entries.delete(key);
+      }
     },
   };
 }
@@ -4052,7 +4064,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const regionMemoKey = `${region.id}@${isOuterSurface ? finishRadius0.toFixed(4) : 'base'}`;
     const stageKey = (stage: string, cutterKey: string, rest: Record<string, unknown>, deps: readonly string[] = []): string =>
       `${stage}|${cutterKey}|${regionMemoKey}|${deps.join('|')}|${JSON.stringify(rest)}`;
-    const memoHit = (key: string): StageMemoEntry | undefined => opts.memo?.get(key);
+    const memoHit = (key: string): StageMemoEntry | undefined => opts.memo?.get(key, finishCutterKey);
     const memoStore = (
       key: string,
       outcome: OpOutcome,
@@ -4060,7 +4072,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     ): void =>
       opts.memo?.set(key, {
         outcome,
-        owner: finishCutterKey,
+        owners: new Set([finishCutterKey]),
         ...(extra?.cl === undefined ? {} : { cl: extra.cl }),
         ...(extra?.unplanned === undefined ? {} : { unplanned: extra.unplanned }),
         ...(extra?.grid === undefined ? {} : { grid: extra.grid }),
@@ -4444,7 +4456,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         // No move of the region is posted: the rest and pencil passes ride this finish's CL.
         continue;
       }
-      pushStage('finish', ref, finishOutcome!);
+      pushStage('finish', ref, finishOutcome!, finishMemo !== undefined);
     }
 
     let restBallCl: ReturnType<typeof clSurface> | undefined;
