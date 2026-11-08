@@ -57,7 +57,7 @@ import { angleToArc, type RotarySection } from '@/engine/cnc/rotary/wrap';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
-import { exactSweptFieldTooled } from './sweptPoint';
+import { exactSweptFieldTooled, stampProfile, stampRotarySweptFieldDetail, type RotaryStampedTop } from './sweptPoint';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import type { CarriedField } from '../geometry/carriedField';
 
@@ -65,7 +65,7 @@ type CrossSectionInstance = InstanceType<ManifoldToplevel['CrossSection']>;
 import { manifoldOfTriangles, meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
 import { boxSolid, isDenseForExactSweep, sweepTimeline, unliftTimeline, type SweepDiagnostic, type SweepOpts, type SweepResult, type SweepStats } from '../geometry/sweep';
-import { columnSweep, rotaryFacetTerm, type ColumnSweepOk, type DrillPointDefault } from '../geometry/columnEngine';
+import { columnSweep, rotaryFacetTerm, timelineCutMoves, type ColumnSweepOk, type DrillPointDefault } from '../geometry/columnEngine';
 import { checkpointStoreOf } from '@/engine/cnc/emulator/checkpointStore';
 import { eventStoreOf } from '@/engine/cnc/gcode/eventStore';
 import type { ParseResult } from '@/engine/cnc/gcode/types';
@@ -548,6 +548,12 @@ export type GoalCheckInput =
        */
       rotaryGoal: GoalRadialField;
       section: RotarySection | null;
+      /**
+       * #1086 — THE EXACT STAMP on the goal's own (X, θ) grid, when the session could produce it
+       * (`sweptFieldExactRotary`): the verdict's read. Absent or null falls back to the column
+       * grid — the pre-#1086 read, kept for callers that only have a grid.
+       */
+      exact?: Float32Array | null;
       opts?: GoalCutIntoOptions;
     }
   | { unchecked: string; opts?: GoalCutIntoOptions };
@@ -616,6 +622,19 @@ export interface SimSession {
    * unknown.
    */
   sweptFieldExact(goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): Float32Array | null;
+  /**
+   * #1086 — THE ROTARY STAMP: the same page read in the map frame — each cutting move's disc
+   * stamped onto the goal's (X, θ) grid, the cell's value the lowest remaining RADIUS any passing
+   * sample leaves, a cell no sample reaches at the stock's own radius at that row. Null when the
+   * live sweep is not a rotary column grid.
+   */
+  sweptFieldExactRotary(goal: { nx: number; ny: number; x0: number; y0: number; pitch: number; radius: number }): Float32Array | null;
+  /**
+   * #1086 — WHERE the rotary stamp's deepest cut stood, per goal cell: the map (X, arc) point of
+   * the sample that left that cell's lowest remaining radius, null outside the grid. The goal
+   * check's wall-shadow rule reads it (the map frame's `sweptClExact`).
+   */
+  sweptClExactRotary(goal: { nx: number; ny: number; x0: number; y0: number; pitch: number; radius: number }): ((x: number, arc: number) => { x: number; y: number } | null) | null;
   /**
    * #964 — WHO left each cell's lowest reach: the tool number of the program folded deepest into
    * {@link sweptFieldExact}'s field at that cell (0 = untouched), as a sampler on the goal's grid.
@@ -1378,7 +1397,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
                 cellMm: Math.hypot(grid.du, angleToArc(grid.dv, radius)) / 2,
                 facetAt: (tipR: number) => rotaryFacetTerm(cutter, tipR, Math.max(0, radius - tipR)),
               };
-              return checkGoalCutIntoRotary(goal.rotaryGoal, grid, goal.section, goal.opts ?? {}, allowance);
+              return checkGoalCutIntoRotary(goal.rotaryGoal, grid, goal.section, goal.opts ?? {}, allowance, goal.exact ?? null);
             })()
           : checkGoalCutInto(goal.heightfield, goal.sweptTop ?? null, {
               ...goal.opts,
@@ -1614,6 +1633,48 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
   };
   const sweptFieldExact = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): Float32Array | null =>
     sweptStamp(goal)?.field ?? null;
+  // #1086 — the rotary stamp, cached on the live sweep and the goal grid (the same one-shot
+  // pattern the flat field uses: the goal check calls it once per load per goal).
+  let rotaryExactFor: object | null = null;
+  let rotaryExactKey = '';
+  let rotaryExactValue: RotaryStampedTop | null = null;
+  const rotaryStamp = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number; radius: number }): RotaryStampedTop | null => {
+    const l = live;
+    if (l === null || l.kind !== 'column' || l.column.grid.kind !== 'rotary') return null;
+    const key = `${goal.nx},${goal.ny},${goal.x0},${goal.y0},${goal.pitch},${goal.radius}`;
+    if (rotaryExactFor === l && rotaryExactKey === key) return rotaryExactValue;
+    const grid = l.column.grid;
+    const initialByV = grid.initialByV;
+    rotaryExactValue = stampRotarySweptFieldDetail(
+      goal,
+      (j) => initialByV?.[j] ?? grid.initial,
+      timelineCutMoves(l.timeline, true),
+      stampProfile(l.tool),
+    );
+    rotaryExactFor = l;
+    rotaryExactKey = key;
+    return rotaryExactValue;
+  };
+  const sweptFieldExactRotary = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number; radius: number }): Float32Array | null =>
+    rotaryStamp(goal)?.field ?? null;
+  // #1086 — THE MAP-FRAME CL for the goal check's wall-shadow rule: where the cutter's tip stood
+  // when it left each cell's lowest radius, on the goal's own (X, arc) grid. Rows wrap (the map is
+  // periodic); X does not. Null on the same sessions the field is null on.
+  const sweptClExactRotary = (
+    goal: { nx: number; ny: number; x0: number; y0: number; pitch: number; radius: number },
+  ): ((x: number, arc: number) => { x: number; y: number } | null) | null => {
+    const stamp = rotaryStamp(goal);
+    if (stamp === null) return null;
+    const { nx, ny, x0, y0, pitch } = goal;
+    const { clX, clY } = stamp;
+    return (x, arc) => {
+      const i = Math.round((x - x0) / pitch);
+      const jRaw = Math.round((arc - y0) / pitch);
+      const j = ((jRaw % ny) + ny) % ny;
+      if (i < 0 || i >= nx) return null;
+      return { x: clX[j * nx + i]!, y: clY[j * nx + i]! };
+    };
+  };
   const sweptWhoExact = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): ((x: number, y: number) => number | null) | null => {
     const stamp = sweptStamp(goal);
     if (stamp === null) return null;
@@ -1770,6 +1831,8 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     levelCut,
     sweptTop,
     sweptFieldExact,
+    sweptFieldExactRotary,
+    sweptClExactRotary,
     sweptWhoExact,
     sweptClExact,
     canStampGoal,
