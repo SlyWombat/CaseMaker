@@ -31,7 +31,7 @@
  *     but not for a CAM or POST refusal, and a refusal with no reason is useless in the panel.
  */
 
-import { planChoiceOf, type EngraveFaceItem, type EngraveItem, type EngraveJob, type EngraveMargins, type EngraveRectShape, type EngraveShape, type EngraveTargetObject } from '@/types/engraveJob';
+import { planChoiceOf, type EngraveDrill, type EngraveFaceItem, type EngraveItem, type EngraveJob, type EngraveMargins, type EngraveRectShape, type EngraveShape, type EngraveTargetObject } from '@/types/engraveJob';
 import type { TextFont } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
@@ -83,6 +83,7 @@ import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach, reachCutterFor } from '@/engine/cnc/engrave/goalReach';
 import { undersideFloorZ } from '@/engine/cnc/engrave/goalUnderside';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
+import { dowelHold } from '@/engine/cnc/engrave/goalFlipSetups';
 import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { surfacePrimitivesOf } from '@/engine/cnc/engrave/primitiveSurface';
@@ -4999,9 +5000,8 @@ export async function buildModelPlanInputForGoal(
   if (mould !== null && sideFace === 'bottom') {
     // #1073 — the inverse below is the VISE's RX180 (`y → −y`) only. A bracket/tape mount turns
     // the stock over about Y instead, and the mould's authored frame has never been checked
-    // against that turn; refuse by name rather than post a mirrored cavity. (Today every such job
-    // is refused one line later anyway by `frameForFace`; this keeps the refusal when the bottom
-    // frame becomes available to a bracket mount.)
+    // against that turn; refuse by name rather than post a mirrored cavity. This is the ONLY guard
+    // for a bracket-mount mould bottom — `frameForFace` now builds that frame.
     if (jobMount(job) !== 'vise') {
       throw new Error(
         `cam/model seam (#1073): a mould's bottom-flip pre-turn is wired for the vise's X half turn only — the ${jobMount(job)} mount turns the stock over about Y`,
@@ -5968,10 +5968,12 @@ export async function generateGoalProgram(
  * A side that fails stops the run and is returned with the programs generated before it.
  */
 async function generateGoalPrograms(
+  tl: ManifoldToplevel,
   job: EngraveJob,
   sides: readonly GoalSide[],
   tool: Tool | null,
   calibration: MachineCalibration | null,
+  margins: EngraveMargins,
   shop: EngraveShopOpts,
   // #1047 — every side's plan resolves against the same rows (required, `[]` when no catalogue).
   feedCatalogue: readonly FeedCatalogueRow[],
@@ -6032,6 +6034,10 @@ async function generateGoalPrograms(
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
+  // #1073 — THE LOCATING HOLES RIDE SETUP 1, AFTER ITS LAST PROGRAM. Appended HERE, once, before
+  // the loop over the later sides: setup 2 cannot receive this file by construction.
+  const locating = await locatingHolesProgram(tl, job, sides, feedCatalogue, calibration, margins, shop);
+  if (locating !== null) programs.push(locating);
   for (const side of sides.slice(1)) {
     const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue });
     const sideList = sidePrograms(one, side);
@@ -6039,6 +6045,92 @@ async function generateGoalPrograms(
     programs.push(...sideList);
   }
   return { ...first, programs };
+}
+
+/**
+ * #1073 — THE LOCATING HOLES, POSTED ON SETUP 1 ONLY.
+ *
+ * A frame flip (`flip: { method: 'tabs-in-blank' }`) must sit side 2 on two dowels, so setup 1
+ * leaves two ⌀6 bores in the blank's margin: through the blank and the job's breakthrough into the
+ * board. The hold's own depth (`dowelHold` — the blank, the breakthrough and the chip clearance)
+ * is the cutter-reach and board fact the flip finding states; the BORE item is a through hole, cut
+ * to the job's own through rule. The holes are a PROGRAM OF THEIR OWN, on the hold's own cutter
+ * (the longest-reach owned flat `ownedBoreCutter` chooses, the 3.175 × 42 on this shop).
+ *
+ * THE SUB-JOB IS THE MECHANISM, exactly as every other program is made (#419 J3): a copy of the
+ * job carrying only these two drills, handed to `generateOneProgram` — so the bore is planned,
+ * posted and verified by the same CAM, post and verifier as the rest of the run, and the operator
+ * loads it like any other file. Null when the job states no frame flip, or when no owned flat can
+ * bore the hole.
+ */
+async function locatingHolesProgram(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  sides: readonly GoalSide[],
+  catalogue: readonly FeedCatalogueRow[],
+  calibration: MachineCalibration | null,
+  margins: EngraveMargins,
+  shop: EngraveShopOpts,
+): Promise<EngraveProgram | null> {
+  const firstSide = sides[0];
+  const flipped = sides[1];
+  const flip = flipped?.setup.flip;
+  if (firstSide === undefined || flipped === undefined || flip === undefined) return null;
+  // Only the FRAME method leaves a hold: the vendor method registers on the freed part's own
+  // silhouette, no bore enters the blank.
+  if (flip.method !== 'tabs-in-blank') return null;
+  // The hold's line runs parallel to the flip's axis — left↔right is the machine's Y, front↔back
+  // its X (`planFlipSetups`' own reading, through `orient`).
+  const about = flip.axis === 'left-right' ? 'y' : 'x';
+  const hold = dowelHold(job, firstSide.goal, about, shop.tools ?? []);
+  if (hold === null) return null;
+  const entry = (shop.tools ?? []).find((e) => e.key === hold.cutter) ?? entryFor(hold.cutter);
+  if (entry === null) return null;
+  const bores: EngraveDrill[] = hold.at.map((position, i) => ({
+    kind: 'drill',
+    id: `flip-locating-hole-${i + 1}`,
+    name: `Locating hole ${i + 1}`,
+    position: { x: position.x, y: position.y },
+    rotation: 0,
+    // A THROUGH bore, not a blind one at the hold's depth: the verifier's through mask is the
+    // only thing that permits a cut past the blank's underside (a blind 25.5 mm bore is refused
+    // `cut-too-deep` at every move), and the through rule cuts `thickness + breakthrough` — 0.3
+    // into the board on this shop. The hold's own depth stays the reach/board fact.
+    depth: hold.depthMm,
+    enabled: true,
+    through: true,
+    mode: 'bore',
+    diameter: hold.diameterMm,
+  }));
+  const sub: EngraveJob = {
+    ...job,
+    setups: undefined,
+    faces: undefined,
+    targetObject: undefined,
+    targetObjects: undefined,
+    labels: [],
+    shapes: [],
+    combined: [],
+    traces: [],
+    vectors: [],
+    primitives: [],
+    keepOuts: [],
+    cutouts: [],
+    chamfers: [],
+    threads: [],
+    drills: bores,
+    toolKey: entry.key,
+    tool: entry.tool,
+    substitution: undefined,
+  };
+  const one = await generateOneProgram(tl, sub, entry.tool, catalogue, calibration, margins, shop, 'whole', false);
+  if (!(one.ok && one.nc !== null && one.verify !== null)) return null;
+  return programOf(one, {
+    setupIndex: firstSide.setupIndex + 1,
+    setupId: firstSide.setup.id,
+    toolKey: entry.key,
+    itemIds: bores.map((b) => b.id),
+  });
 }
 
 /**
@@ -6845,7 +6937,7 @@ export async function engraveGenerate(
           ],
         };
       }
-      return { ...(await generateGoalPrograms(job, sides, tool, calibration, shop, catalogue, catalogueTools, onProgress)), surface: null };
+      return { ...(await generateGoalPrograms(tl, job, sides, tool, calibration, margins, shop, catalogue, catalogueTools, onProgress)), surface: null };
     }
   }
   const goal = job.setups === undefined ? pureGoalObject(job) : null;
