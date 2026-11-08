@@ -1,0 +1,247 @@
+{
+  "id": "machine-1a2b3c",
+  "profileId": "Z1",
+  "name": "Makera_Z1_000000",
+  "nickname": null,
+  "serial": null,
+  "firmware": null,
+  "address": {
+    "host": "192.0.2.10",
+    "port": 2222
+  },
+  "calibration": {
+    "machineId": "Z1",
+    "frame": {
+      "anchor1": [
+        -190,
+        -193
+      ],
+      "anchor2Offset": [
+        90,
+        45
+      ],
+      "toolrackOffset": [
+        181,
+        1
+      ],
+      "clearanceXY": [
+        -9,
+        -12
+      ],
+      "clearanceZ": -3,
+      "toolrackZ": -100
+    },
+    "softEndstop": {
+      "enabled": true,
+      "xMin": -200,
+      "yMin": -200,
+      "zMin": -100,
+      "source": "config-get sd"
+    },
+    "source": "config-get sd on 192.0.2.10",
+    "measuredAt": "2026-10-14T10:00:00.000Z"
+  },
+  "fixtures": {
+    "vise": {
+      "stockProud": 1.5,
+      "fixedJawThickness": 10,
+      "movingJawThickness": 10,
+      "jawLength": 100,
+      "jawStartY": -10,
+      "source": "measured",
+      "uncertainty": 0.1,
+      "seat": "ledge",
+      "measuredAt": "2026-10-13T12:00:00.000Z"
+    }
+  },
+  "margins": {
+    "boundaryMargin": 0.2,
+    "zTolerance": 0.05,
+    "minFloor": 0.1,
+    "edgeMargin": 0.5,
+    "breakthrough": 0.1,
+    "jawClearance": 1,
+    "source": "user"
+  },
+  "power": {
+    "provider": "home-assistant",
+    "baseUrl": "http://homeassistant.local:8123",
+    "entityId": "switch.makera_cnc"
+  },
+  "wasteboard": {
+    "thickness": 10,
+    "thicknessSource": "measured",
+    "measuredAt": "2026-10-15T07:00:00.000Z",
+    "lastResurfacedAt": null,
+    "scars": [
+      {
+        "x": -150,
+        "y": -150,
+        "width": 40,
+        "height": 20,
+        "at": "2026-10-15T08:00:00.000Z",
+        "jobId": "job-1"
+      }
+    ]
+  },
+  "finishedPrograms": [],
+  "bedProfiles": [
+    {
+      "id": "bp-face-angle",
+      "name": "Current bed (migrated 2026-10-15)",
+      "createdAt": "2026-10-15T09:00:00.000Z",
+      "basedOn": null,
+      "surface": {
+        "kind": "wasteboard",
+        "material": null,
+        "length": null,
+        "width": null,
+        "thickness": 10,
+        "position": null,
+        "provenance": {
+          "thickness": "measured:2026-10-15T07:00:00.000Z"
+        },
+        "scars": [
+          {
+            "x": -150,
+            "y": -150,
+            "width": 40,
+            "height": 20,
+            "at": "2026-10-15T08:00:00.000Z",
+            "jobId": "job-1"
+          }
+        ],
+        "lastResurfacedAt": null
+      },
+      "datums": {
+        "surfaceTopZ": null,
+        "viseJawTopZ": {
+          "value": -56.82,
+          "measuredAt": "2026-10-23T00:00:00.000Z",
+          "by": "fx-probe-1",
+          "at": null
+        },
+        "bracketSeatZ": {
+          "value": -70.2,
+          "measuredAt": "2026-10-16T10:00:00.000Z",
+          "by": "wired-probe",
+          "at": null
+        },
+        "rotaryAxis": null,
+        "rotaryFaceAngle": {
+          "value": -2.35,
+          "measuredAt": "2026-11-08T00:00:00.000Z",
+          "by": "fx-probe-3d",
+          "at": [
+            -106,
+            -125.06
+          ],
+          "residualMm": 0.012
+        }
+      },
+      "placements": [
+        {
+          "id": "pl-vise",
+          "fixture": "fx-vise-1",
+          "where": {
+            "kind": "pins",
+            "pins": "vise",
+            "anchor": null
+          },
+          "count": null,
+          "frame": {
+            "fixedJawFaceX": -181.2,
+            "jawStartY": -203.5
+          },
+          "provenance": {
+            "fixedJawFaceX": "measured:2026-10-23T00:00:00.000Z",
+            "jawStartY": "typed"
+          }
+        }
+      ],
+      "preferredMounting": [],
+      "consumables": null,
+      "history": [
+        {
+          "at": "2026-10-15T09:00:00.000Z",
+          "what": "created by migrating the wasteboard, the vise settings and the bracket seat"
+        }
+      ]
+    },
+    {
+      "id": "bp-null",
+      "name": "Current bed (migrated 2026-10-15)",
+      "createdAt": "2026-10-15T09:00:00.000Z",
+      "basedOn": null,
+      "surface": {
+        "kind": "wasteboard",
+        "material": null,
+        "length": null,
+        "width": null,
+        "thickness": 10,
+        "position": null,
+        "provenance": {
+          "thickness": "measured:2026-10-15T07:00:00.000Z"
+        },
+        "scars": [
+          {
+            "x": -150,
+            "y": -150,
+            "width": 40,
+            "height": 20,
+            "at": "2026-10-15T08:00:00.000Z",
+            "jobId": "job-1"
+          }
+        ],
+        "lastResurfacedAt": null
+      },
+      "datums": {
+        "surfaceTopZ": null,
+        "viseJawTopZ": {
+          "value": -56.82,
+          "measuredAt": "2026-10-23T00:00:00.000Z",
+          "by": "fx-probe-1",
+          "at": null
+        },
+        "bracketSeatZ": {
+          "value": -70.2,
+          "measuredAt": "2026-10-16T10:00:00.000Z",
+          "by": "wired-probe",
+          "at": null
+        },
+        "rotaryAxis": null,
+        "rotaryFaceAngle": null
+      },
+      "placements": [
+        {
+          "id": "pl-vise",
+          "fixture": "fx-vise-1",
+          "where": {
+            "kind": "pins",
+            "pins": "vise",
+            "anchor": null
+          },
+          "count": null,
+          "frame": {
+            "fixedJawFaceX": -181.2,
+            "jawStartY": -203.5
+          },
+          "provenance": {
+            "fixedJawFaceX": "measured:2026-10-23T00:00:00.000Z",
+            "jawStartY": "typed"
+          }
+        }
+      ],
+      "preferredMounting": [],
+      "consumables": null,
+      "history": [
+        {
+          "at": "2026-10-15T09:00:00.000Z",
+          "what": "created by migrating the wasteboard, the vise settings and the bracket seat"
+        }
+      ]
+    }
+  ],
+  "activeBedProfileId": "bp-face-angle",
+  "updatedAt": "2026-10-15T09:00:00.000Z"
+}
