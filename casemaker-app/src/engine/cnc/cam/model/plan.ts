@@ -4368,7 +4368,10 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           total++;
         }
       }
-      if (total === 0) return null;
+      if (total === 0) {
+        memTrace('floor:detect', { region: roughRegion.id, total: 0, found: 0 });
+        return null;
+      }
       let mode = 0;
       let modeCount = 0;
       for (const [bucket, count] of counts) {
@@ -4378,7 +4381,6 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         }
       }
       const share = modeCount / total;
-      if (share < FLOOR_AREA_SHARE) return null;
       let sum = 0;
       for (let i = 0; i < buckets.length; i++) if (buckets[i] === mode) sum += heights[i]!;
       const level = sum / modeCount;
@@ -4400,6 +4402,13 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         }
       }
       const slopeDeg = (Math.atan(steepest) * 180) / Math.PI;
+      const top = [...counts]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([bucket, count]) => `${(bucket * 2 * FLOOR_LEVEL_TOL_MM).toFixed(2)}:${count}`)
+        .join(',');
+      memTrace('floor:detect', { region: roughRegion.id, total, share: Number(share.toFixed(3)), level: Number(level.toFixed(3)), slope: Number(slopeDeg.toFixed(2)), top, found: share >= FLOOR_AREA_SHARE ? 1 : 0 });
+      if (share < FLOOR_AREA_SHARE) return null;
       const mask = (x: number, y: number): boolean => {
         const design = designTopAt(x, y);
         if (design === null || Math.abs(design - level) > FLOOR_LEVEL_TOL_MM) return false;
