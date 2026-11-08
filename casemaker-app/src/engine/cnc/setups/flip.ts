@@ -139,3 +139,19 @@ export function setupPinReference(
   if (setup.pins === undefined) return null;
   return pinReference(setup.pins, size, { setupIndex, about: flipAxisOf(setup) ?? undefined });
 }
+
+/**
+ * #1088 — ONE REFLECTION, for the graphic and the probe. A flip's own mapping of a side-1 work
+ * point into side 2's frame: a LEFT-RIGHT flip mirrors X through the stock's length (the part
+ * turns over about an axis running left-right), a FRONT-BACK one mirrors Y through its width.
+ * `flipDiagram.ts` draws with this and the registration's pins are reflected with it, so the
+ * picture and the probe cannot disagree.
+ */
+export function flipReflection(
+  p: { x: number; y: number },
+  flip: { axis: 'left-right' | 'front-back' },
+  lengthMm: number,
+  widthMm: number,
+): { x: number; y: number } {
+  return flip.axis === 'left-right' ? { x: lengthMm - p.x, y: p.y } : { x: p.x, y: widthMm - p.y };
+}
