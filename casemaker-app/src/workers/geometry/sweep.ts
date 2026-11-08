@@ -656,6 +656,36 @@ function pointRectDistance(px: number, py: number, box: ObstacleBox): number {
 }
 
 /**
+ * Does the segment touch or cross the rectangle? Liang–Barsky's slab clip: a segment whose
+ * ENDPOINTS are both outside can still pass THROUGH the box (6b's read: (−5,5)→(15,5) across
+ * X 0…10 is a full drive-through, and the corner/endpoint distances alone report 5 mm of air).
+ */
+function segmentCrossesRect(x0: number, y0: number, x1: number, y1: number, box: ObstacleBox): boolean {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  let t0 = 0;
+  let t1 = 1;
+  const clip = (p: number, q: number): boolean => {
+    if (p === 0) return q >= 0;
+    const r = q / p;
+    if (p < 0) {
+      if (r > t1) return false;
+      if (r > t0) t0 = r;
+    } else {
+      if (r < t0) return false;
+      if (r < t1) t1 = r;
+    }
+    return true;
+  };
+  return (
+    clip(-dx, x0 - box.min[0]) &&
+    clip(dx, box.max[0] - x0) &&
+    clip(-dy, y0 - box.min[1]) &&
+    clip(dy, box.max[1] - y0)
+  );
+}
+
+/**
  * The exact stadium test: the move's XY segment grown by `radius` against each box's XY
  * rectangle, with the Z interval of the piece overlapping the box's. Returns the box with the
  * largest overlap bound, or null.
@@ -671,10 +701,11 @@ export function fixtureStadiumHit(
   zHi: number,
   boxes: readonly ObstacleBox[],
 ): { box: ObstacleBox; volume: number } | null {
-  const pieces = Math.max(
-    1,
-    Math.ceil(Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]) / FIXTURE_Z_PIECE_MM),
-  );
+  // A level move is one piece (its own Z span is exact); a Z-changing move is cut at the step.
+  const pieces =
+    from[2] === to[2]
+      ? 1
+      : Math.max(1, Math.ceil(Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]) / FIXTURE_Z_PIECE_MM));
   let best: ObstacleBox | null = null;
   let bestVolume = 0;
   for (let k = 0; k < pieces; k++) {
@@ -689,9 +720,10 @@ export function fixtureStadiumHit(
     const pieceZLo = Math.min(z0, z1) - margin;
     for (const box of boxes) {
       if (zHi <= box.min[2] || pieceZLo >= box.max[2]) continue;
-      // Two convex sets: the minimum distance is a rect corner against the segment, or the
-      // segment's endpoint against the rectangle. The lesser of the two families is exact.
-      let d = Math.min(
+      // A segment that crosses the rectangle is at distance 0 (both endpoints may be outside).
+      const d = segmentCrossesRect(x0, y0, x1, y1, box)
+        ? 0
+        : Math.min(
         pointSegmentDistance(box.min[0], box.min[1], x0, y0, x1, y1),
         pointSegmentDistance(box.max[0], box.min[1], x0, y0, x1, y1),
         pointSegmentDistance(box.min[0], box.max[1], x0, y0, x1, y1),
