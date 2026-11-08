@@ -132,11 +132,13 @@
    "clamps": [
     {
      "edge": "back",
-     "at": 70
+     "at": 70,
+     "kind": "side"
     },
     {
      "edge": "right",
-     "at": 31
+     "at": 31,
+     "kind": "side"
     }
    ],
    "source": "default"
