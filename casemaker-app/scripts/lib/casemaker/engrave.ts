@@ -219,6 +219,8 @@ interface Args {
   /** #436 — the third-tool threshold, as a PERCENT of the design's own removal area. */
   thirdTool?: number;
   location?: string;
+  /** #1081 — Makera's catalogue document, when it is not the `--location` file's sibling. */
+  catalogue?: string;
   out?: string;
   /** #1052 — write the per-boundary memory trace (JSONL) to this file. */
   memTrace?: string;
@@ -269,6 +271,7 @@ export function parseArgs(argv: string[]): Args {
       args.thirdTool = parsed.data;
     } else if (a === '--mem-trace') args.memTrace = argv[++i];
     else if (a === '--location') args.location = argv[++i];
+    else if (a === '--catalogue') args.catalogue = argv[++i];
     else if (a === '--turn') {
       const v = argv[++i];
       if (v !== 'ccw' && v !== 'cw') throw new Error(`--turn must be "ccw" or "cw", not "${v}"`);
@@ -292,6 +295,8 @@ const USAGE =
   '       casemaker cut --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]\n' +
   '              [--rest <key|none>] [--overlap <mm>] [--third-tool <pct>] [--out <dir>]\n' +
   '       [--location <location.json|house.json>]  (any input; default: the app’s own location)\n' +
+  '       [--catalogue <catalogue.json>]  (Makera’s feed rows; default: beside the --location file,\n' +
+  '              or the app’s own data directory; CM_CATALOGUE names it too)\n' +
   '       (casemaker engrave is the same command under its old name; the receipt is the same)';
 
 /** A pipeline that stopped, as the receipt needs it (#478). `stage` is null when none ran. */
@@ -706,11 +711,22 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   // has never synced Makera's library runs on. The stop still answers `--json` with one receipt
   // (#478), naming the catalogue and the validation failure: `fail()` threw before `emit()` and
   // left stdout empty, which is the same hole #733 item 3 closed for the job document.
+  // #1081 — AND WHEN THERE IS NONE, THE RUN SAYS SO. This miss used to be silent: the same job
+  // posted the shop's starting table while the app's Generate used Makera's rows (the tray
+  // bottom's rough: F400 with 0.6 mm levels against the delivered F1000 with 1.0 mm — 44,830 s
+  // against 18,619 s, #1074's record). `--catalogue` (or `CM_CATALOGUE`) names the document where
+  // the sibling convention cannot; the miss is stated once, in the output and in the receipt, and
+  // the run continues on the starting table exactly as it did before.
+  const statedCatalogue =
+    args.catalogue !== undefined
+      ? args.catalogue
+      : typeof process.env.CM_CATALOGUE === 'string' && process.env.CM_CATALOGUE.trim() !== ''
+        ? process.env.CM_CATALOGUE
+        : undefined;
+  const siblingCatalogue = boot.location === null ? undefined : join(dirname(boot.location.path), 'catalogue.json');
   let catalogue: LoadedCatalogue | null;
   try {
-    catalogue = loadCatalogue(
-      boot.location === null ? undefined : join(dirname(boot.location.path), 'catalogue.json'),
-    );
+    catalogue = loadCatalogue(statedCatalogue ?? siblingCatalogue);
   } catch (e) {
     return stop(invalidDocument('invalid-catalogue', `Makera's catalogue ${(e as Error).message}`));
   }
@@ -723,6 +739,15 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       `Makera's catalogue: ${catalogue.path} — ${cutters} cutter${cutters === 1 ? '' : 's'}, ` +
         `${rows} feed row${rows === 1 ? '' : 's'}${catalogue.syncedOn === null ? '' : `, synced ${catalogue.syncedOn}`}`,
     );
+  } else {
+    const where =
+      statedCatalogue !== undefined
+        ? `no Makera catalogue at ${statedCatalogue} — feeds come from the shop's starting table`
+        : siblingCatalogue !== undefined
+          ? "no Makera catalogue beside the location — feeds come from the shop's starting table"
+          : "no Makera catalogue in the app's data directory — feeds come from the shop's starting table";
+    out.progress(where);
+    runDiagnostics.push(diagnostic('feeds-no-catalogue', 'info', where, 'findings', null));
   }
 
   const readJson = (path: string): unknown => {
