@@ -761,7 +761,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // planned for coverage it cannot legitimately recover.
   const restRegion = coverageGoal === undefined
     ? undefined
-    : (prefixIrs: readonly ToolpathIR[], region: { id: string; footprint: Polygons; floorZ: number; bounds: { min: [number, number]; max: [number, number] } }): Polygons | null => {
+    : (prefixIrs: readonly ToolpathIR[], region: { id: string; footprint: Polygons; floorZ: number; bounds: { min: [number, number]; max: [number, number] }; radiusMm: number }): Polygons | null => {
         let acc: Float32Array | null = null;
         for (const ir of prefixIrs) {
           const field = stampedField(ir);
@@ -778,41 +778,62 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         const j1 = Math.min(goal.ny - 1, Math.ceil((region.bounds.max[1] - goal.y0) / pitch));
         if (i1 < i0 || j1 < j0) return null;
         const cells = acc;
+        // #1092 — A COVERAGE REST'S CELL IS VALID ONLY WHERE THE GOAL HAS A SURFACE AT THE PASS'S
+        // OWN DEPTH, WITHIN THE CUTTER'S REACH. A rest cuts at `region.floorZ`; a cell whose
+        // neighbourhood has no goal surface at that Z is not a floor at all — the design stands
+        // above it (a ceiling), and the pass would cut it. The elephant's j29 measured the class
+        // both ways: 18.03 % adjudicated cut-into (24.75 mm) before this rule, and 8.05 % in five
+        // 4.3-4.8 mm blocks after a first, neighbour-count version — those blocks are exactly the
+        // cells with no goal cell at the pass level within the ⌀3.175 rest's radius (the nearest
+        // design surface there sits 0.03-0.5 mm BELOW the level, and "at or below" kept them).
+        // Requiring the surface AT the level (the analyst's own words) also keeps every legitimate
+        // wall-foot strip: set B's m1trayB-top rim cells have the pocket floor 0.1 mm away, so
+        // they stay and the rest's region boundary does not re-flow (9/9 programs byte-identical).
+        const reach = Math.max(0, Math.ceil(region.radiusMm / pitch));
+        const tol = ARC_CHORD_TOLERANCE_MM;
+        /** Does the goal reach the pass's own floor (or deeper) within the cutter's reach? That is
+         *  where a floor pass has something to cut; without it the cell is under a ceiling. */
+        const floorWithinReach = (i: number, j: number): boolean => {
+          for (let dj = -reach; dj <= reach; dj++) {
+            const jj = j0 + j + dj;
+            if (jj < 0 || jj >= goal.ny) continue;
+            for (let di = -reach; di <= reach; di++) {
+              const ii = i0 + i + di;
+              if (ii < 0 || ii >= goal.nx) continue;
+              const kk = jj * goal.nx + ii;
+              if (goal.covered[kk] !== 1) continue;
+              if ((goal.z[kk] as number) > region.floorZ + tol) continue;
+              // The witness must be a cell THIS pass would cut: floor outside the pocket's own
+              // footprint (a deeper land at the part's edge) does not justify cutting the rim of
+              // the region this pass is confined to.
+              if (!pointInPolygons(region.footprint, goal.x0 + ii * pitch, goal.y0 + jj * pitch)) continue;
+              return true;
+            }
+          }
+          return false;
+        };
         const inside = (i: number, j: number): boolean => {
           const k = (j0 + j) * goal.nx + (i0 + i);
           if (goal.covered[k] !== 1) return false;
           if (!(cells[k]! - (goal.z[k] as number) > 0.1)) return false;
-          // #1092 — THE DESIGN'S OWN SURFACE IS NOT FLOOR-PASS MATERIAL. A coverage rest cuts at
-          // `region.floorZ`; where the goal's topmost surface sits ABOVE that level, the design
-          // itself stands there (the elephant's body over pocket-0) and any cut is a gouge —
-          // "a plane is only valid where the goal mesh has a surface at that Z". The shadow bound
-          // `pocket()` now also carries would close these cells anyway (the same
-          // `cellBound - margin < levelZ` rule, margin = ARC_CHORD_TOLERANCE_MM); excluding them
-          // here keeps the rest from being planned for coverage it can never legitimately recover,
-          // and from then being stated as an empty pass.
           const x = goal.x0 + (i0 + i) * pitch;
           const y = goal.y0 + (j0 + j) * pitch;
-          // #1092 — AN OCCLUDING CEILING IS EXCLUDED; A RIM THAT TOUCHES FLOOR IS NOT. A coverage
-          // rest cuts at `region.floorZ`; where the goal's topmost surface sits ABOVE that level
-          // the design itself stands there and the pass would cut it — the elephant's body over
-          // pocket-0 (goal −1.36 against a floor of −26.104, 18.03 % adjudicated cut-into,
-          // 24.75 mm). "Above the level" alone is not enough, though: the pocket's own rim reads
-          // above the level at the cell that touches the wall, and excluding it re-flows (or
-          // drops) the rest's wall-foot strips — set B's m1trayB-top p5 measured exactly that.
-          // The distinguishing question is whether the cell is UNDER the surface or AT its edge:
-          // an occluded cell has every 4-neighbour above the level too (the design closes over it);
-          // a rim cell always has a floor neighbour (the material the pass is meant to cut).
-          if ((goal.z[k] as number) > region.floorZ + ARC_CHORD_TOLERANCE_MM) {
-            const nx1 = i1 - i0;
-            const ny1 = j1 - j0;
-            const above = (ii: number, jj: number): boolean => {
-              if (ii < 0 || jj < 0 || ii > nx1 || jj > ny1) return false; // the grid edge: not a proven ceiling
-              const kk = (j0 + jj) * goal.nx + (i0 + ii);
-              return goal.covered[kk] === 1 && (goal.z[kk] as number) > region.floorZ + ARC_CHORD_TOLERANCE_MM;
-            };
-            if (above(i - 1, j) && above(i + 1, j) && above(i, j - 1) && above(i, j + 1)) return false;
-          }
-          return pointInPolygons(region.footprint, x, y);
+          // The footprint is the cheap gate; only a cell inside the pocket can be cut.
+          if (!pointInPolygons(region.footprint, x, y)) return false;
+          // #1092 — A COVERAGE REST CUTS A FLOOR, NOT A CEILING. A rest cuts at `region.floorZ`.
+          // Where the design already sits AT or BELOW that depth the pass removes stock and leaves
+          // the design — never a gouge, so the cell stays (this also keeps set B's nested pocket-6
+          // rim, whose neighbouring design is a deeper cavity). Where the design stands ABOVE the
+          // depth the cell is a ceiling UNLESS the goal reaches the pass's own floor within the
+          // cutter's reach — there the cell is the floor's own rim/wall foot, which the rest's disc
+          // reaches tangentially (set B's wall-foot strips: the floor is 0.1 mm away, so the mask
+          // is unchanged and all nine programs stay byte-identical). Without that witness the pass
+          // cuts the design itself: the elephant's j29, where 18.03 % of the goal was adjudicated
+          // cut-into (24.75 mm) at pocket-0's floor of −26.104 — and where a first, neighbour-count
+          // version of this rule still left five 4.3-4.8 mm blocks, exactly the cells with no goal
+          // cell at or below the floor within the ⌀3.175 rest's radius.
+          if ((goal.z[k] as number) <= region.floorZ + tol) return true;
+          return floorWithinReach(i, j);
         };
         return cellPolygons(inside, i1 - i0 + 1, j1 - j0 + 1, goal.x0 + i0 * pitch, goal.y0 + j0 * pitch, pitch);
       };
@@ -2546,7 +2567,15 @@ export interface PlanPocketsOptions {
    */
   restRegion?: (
     prefixIrs: readonly ToolpathIR[],
-    region: { id: string; footprint: Polygons; floorZ: number; bounds: { min: [number, number]; max: [number, number] } },
+    region: {
+      id: string;
+      footprint: Polygons;
+      floorZ: number;
+      bounds: { min: [number, number]; max: [number, number] };
+      /** #1092 — the rest cutter's own radius: the reach within which the goal must have a surface
+       *  at `floorZ` for this pass to be a floor pass rather than a cut through a ceiling. */
+      radiusMm: number;
+    },
   ) => Polygons | null;
   /**
    * #943's ruling — the probed stock top (see {@link ModelPlanInput.stockProbes}): the facing
@@ -2883,7 +2912,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     let regionPolys = node.region;
     if (opts.restRegion !== undefined) {
       if (prefixIrs.length === 0) return null; // nothing planned before it: no leftover to cut
-      const mask = opts.restRegion(prefixIrs, { id, footprint: node.region, floorZ, bounds: ref.bounds });
+      const mask = opts.restRegion(prefixIrs, { id, footprint: node.region, floorZ, bounds: ref.bounds, radiusMm: radius });
       if (mask === null || mask.length === 0) return null;
       // #962 — THE DILATION: 2r + 0.25, MEASURED. `2r + stepOver + 0.25` grew the leftover mask
       // ~4.2 mm on a ⌀3.175 and the rings swept that grown area: the integration tip's tray rest
