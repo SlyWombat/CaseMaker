@@ -536,10 +536,15 @@ test('a part wider than the rod is clipped to it, warned on the run sheet, and S
   if (!(await step1.evaluate((el) => (el as HTMLDetailsElement).open))) {
     await page.getByTestId('engrave-cut-step-1-summary').click();
   }
-  // #948 review — the goal no one compared is never a silent pass: the step's own line says so.
-  await expect(page.getByTestId('engrave-cut-step-1-summary')).toContainText(
-    'Program checked — the goal was not compared (',
-  );
+  // #1083 — THE ROTARY GOAL IS COMPARED NOW, CLIPPED OR NOT. The goal check carries the run's
+  // own rotary map and judges by the grid's tolerance, so this oversize job's report is a
+  // verdict ('matches the design': what the rod can carry was cut to the design's map) instead of
+  // the pre-#1083 'the goal was not compared'. The clipping itself is still stated where it
+  // belongs — the `goal-rotary-oversize` warning below — and the clipped part is still drawn.
+  const step1Summary = page.getByTestId('engrave-cut-step-1-summary');
+  await expect(step1Summary).toContainText('Program checked');
+  await expect(step1Summary).toContainText('matches the design');
+  await expect(step1Summary).not.toContainText('was not compared');
   await page.getByTestId('engrave-cut-details').locator('summary').click();
   const warning = page.locator('[data-testid$="-goal-rotary-oversize"]');
   await expect(warning).toBeVisible();
