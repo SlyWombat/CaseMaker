@@ -31,7 +31,7 @@
  *     but not for a CAM or POST refusal, and a refusal with no reason is useless in the panel.
  */
 
-import { planChoiceOf, type EngraveDrill, type EngraveFaceItem, type EngraveItem, type EngraveJob, type EngraveMargins, type EngraveRectShape, type EngraveShape, type EngraveTargetObject } from '@/types/engraveJob';
+import { planChoiceOf, type EngraveDrill, type EngraveFaceItem, type EngraveItem, type EngraveJob, type EngraveMargins, type EngraveRectShape, type EngraveShape, type EngraveTargetObject, type SetupFlip } from '@/types/engraveJob';
 import type { TextFont } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
@@ -6108,6 +6108,46 @@ export async function generateGoalProgram(
  * The top-level fields describe the first program, exactly as every multi-program result does.
  * A side that fails stops the run and is returned with the programs generated before it.
  */
+/**
+ * #1073 — THE MOUNT, READ IN THE FLIPPED SETUP'S WORK FRAME. The bracket's arms and the clamps are
+ * machine geometry, but a posted program's XY are the SETUP's own work coordinates: side 2's origin
+ * is re-zeroed on the turned blank, so its frame is the flip's mirror of side 1's. The verifier and
+ * the sweep check a program against the mount, so the mount's boxes are stated in the SAME frame
+ * here — `flipReflection`'s mapping (x → L − x left↔right, y → W − y front↔back) — never a claim
+ * that the machine moved. Without it, the old m1trayF twin's side-2 contour (its part at 2..138 in
+ * its own frame) tripped the verifier's left arm at X ≤ 0, 0.486 mm away.
+ */
+function reflectXY(
+  min: [number, number],
+  max: [number, number],
+  flip: SetupFlip,
+  stock: { length: number; width: number },
+): { min: [number, number]; max: [number, number] } {
+  const a = flipReflection({ x: min[0], y: min[1] }, { axis: flip.axis }, stock.length, stock.width);
+  const c = flipReflection({ x: max[0], y: max[1] }, { axis: flip.axis }, stock.length, stock.width);
+  return { min: [Math.min(a.x, c.x), Math.min(a.y, c.y)], max: [Math.max(a.x, c.x), Math.max(a.y, c.y)] };
+}
+
+/** The same reflection for a 3D box (the sweep's fixture envelope keeps its Z extents). */
+function reflectXYZ(
+  min: [number, number, number],
+  max: [number, number, number],
+  flip: SetupFlip,
+  stock: { length: number; width: number },
+): { min: [number, number, number]; max: [number, number, number] } {
+  const xy = reflectXY([min[0], min[1]], [max[0], max[1]], flip, stock);
+  return { min: [xy.min[0], xy.min[1], min[2]], max: [xy.max[0], xy.max[1], max[2]] };
+}
+
+/** One flipped setup's mount: every box re-stated in that setup's work frame. */
+export function mountInSideFrame(mount: MountObstacles, flip: SetupFlip, stock: { length: number; width: number }): MountObstacles {
+  return {
+    ...mount,
+    obstacles: mount.obstacles.map((box) => ({ ...box, ...reflectXY(box.min, box.max, flip, stock) })),
+    fixture: { ...mount.fixture, boxes: mount.fixture.boxes.map((box) => ({ ...box, ...reflectXYZ(box.min, box.max, flip, stock) })) },
+  };
+}
+
 async function generateGoalPrograms(
   tl: ManifoldToplevel,
   job: EngraveJob,
@@ -6181,17 +6221,22 @@ async function generateGoalPrograms(
   const sideFaceFor = (side: GoalSide): 'top' | 'bottom' | undefined => (isMold(side.goal) ? undefined : faceOfSide(side));
   const shopForSide = (side: GoalSide): EngraveShopOpts => {
     const keys = side.setup.tools ?? [];
-    if (keys.length === 0) return shop;
-    const have = new Set((shop.tools ?? []).map((e) => e.key));
-    const extra: ToolLibraryEntry[] = [];
-    for (const key of keys) {
-      if (have.has(key)) continue;
-      const entry = entryFor(key);
-      if (entry === null) continue;
-      have.add(key);
-      extra.push(entry);
-    }
-    return extra.length === 0 ? shop : { ...shop, tools: [...(shop.tools ?? []), ...extra] };
+    const base = (() => {
+      if (keys.length === 0) return shop;
+      const have = new Set((shop.tools ?? []).map((e) => e.key));
+      const extra: ToolLibraryEntry[] = [];
+      for (const key of keys) {
+        if (have.has(key)) continue;
+        const entry = entryFor(key);
+        if (entry === null) continue;
+        have.add(key);
+        extra.push(entry);
+      }
+      return extra.length === 0 ? shop : { ...shop, tools: [...(shop.tools ?? []), ...extra] };
+    })();
+    const flip = side.setup.flip;
+    if (flip === undefined || base.mount === undefined || base.mount === null) return base;
+    return { ...base, mount: mountInSideFrame(base.mount, flip, job.stock) };
   };
 
   const firstSide = sides[0]!;
