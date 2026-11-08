@@ -17,7 +17,8 @@ import { presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import { planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import { engraveGenerate } from '@/workers/sim/engraveGenerate';
+import { engraveGenerate, mountInSideFrame } from '@/workers/sim/engraveGenerate';
+import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
 import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
 import { entry, FLAT3, stl } from './helpers/twoSetupBox966';
 
@@ -130,4 +131,32 @@ describe('#1073 — a setup’s contour posts in its own frame', () => {
     // is the mirror defect this spec exists for.
     expect(Math.abs(one.min[0] - two.min[0])).toBeGreaterThan(5);
   }, 240_000);
+
+  it('a flipped setup reads the mount in its own mirrored work frame', () => {
+    // The old twin's false clash, as the rule it was: the bracket's left arm is machine geometry,
+    // but a side-2 program's XY are side 2's work coordinates. Stated in THAT frame the arm is at
+    // X 160..175 on a 160 mm blank — 0.486 mm from a side-2 cut at 0.4 in side 1's frame is no
+    // longer a clash, because in side 2's frame the cut is at 159.6.
+    const mount: MountObstacles = {
+      uncertainty: 0.1,
+      obstacles: [
+        { id: 'bracket-left-arm', kind: 'bracket', label: 'the bracket’s left arm', fix: 'keep clear', edge: 'left', min: [-15, -15], max: [0, 85], topZ: -15.95 },
+      ],
+      fixture: {
+        source: 'default',
+        uncertainty: 0.1,
+        boxes: [{ id: 'bracket-left-arm', label: 'the bracket’s left arm', min: [-15, -15, -25], max: [0, 85, -15.95] }],
+      },
+    };
+    const lr = mountInSideFrame(mount, { method: 'tabs-in-blank', axis: 'left-right' }, { length: 160, width: 126 });
+    expect(lr.obstacles[0]!.min).toEqual([160, -15]);
+    expect(lr.obstacles[0]!.max).toEqual([175, 85]);
+    expect(lr.obstacles[0]!.topZ).toBe(-15.95);
+    expect(lr.fixture.boxes[0]!.min).toEqual([160, -15, -25]);
+    expect(lr.fixture.boxes[0]!.max).toEqual([175, 85, -15.95]);
+    // Front↔back mirrors Y through the width; X is untouched.
+    const fb = mountInSideFrame(mount, { method: 'tabs-in-blank', axis: 'front-back' }, { length: 160, width: 126 });
+    expect(fb.obstacles[0]!.min).toEqual([-15, 41]);
+    expect(fb.obstacles[0]!.max).toEqual([0, 141]);
+  });
 });

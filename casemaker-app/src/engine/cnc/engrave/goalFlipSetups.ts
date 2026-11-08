@@ -531,8 +531,11 @@ export function planFlipSetups(
 
   const holdResult = dowelHold(job, target, flipAbout, tools);
   // A STATED FRAME FLIP cannot be planned without its hold: the refusal is the hold's own words.
-  // A plain two-side plan (no flip stated) keeps the old lenient reading — no hold, no pins.
-  if (!holdResult.ok && flip !== undefined) return { ok: false, reason: holdResult.reason };
+  // The VENDOR method needs no hold (it registers on the freed part's silhouette), and a plain
+  // two-side plan (no flip stated) keeps the old lenient reading — no hold, no pins.
+  if (!holdResult.ok && flip !== undefined && flip.method === 'tabs-in-blank') {
+    return { ok: false, reason: holdResult.reason };
+  }
   const hold = holdResult.ok ? holdResult.hold : null;
 
   // #1073 line 2 — A FRAME FLIP LEAVES THE PART ON TABS: both sides' goals are banded about the
