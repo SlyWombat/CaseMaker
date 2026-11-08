@@ -34,7 +34,9 @@ afterEach(() => clearTargetObjectMeshCache());
 
 const here = (name: string): string => fileURLToPath(new URL(`../fixtures/goals/${name}`, import.meta.url));
 
-const STOCK = { length: 44, width: 36, thickness: 20 };
+// 44 × 44, not 44 × 36, and the sphere at x 20: the hold's line sits 4 mm inside the stock's
+// edge, and the part must stay 4 mm clear of it on BOTH axes (front-back's line is on Y).
+const STOCK = { length: 44, width: 44, thickness: 20 };
 const BOX = { x: STOCK.length, y: STOCK.width, z: STOCK.thickness };
 
 async function sphereJob(): Promise<{ job: EngraveJob; goal: EngraveTargetObject }> {
@@ -49,7 +51,7 @@ async function sphereJob(): Promise<{ job: EngraveJob; goal: EngraveTargetObject
     data: read.data,
     size: read.size,
     // Right of centre in X and back of centre in Y, so either reflection is distinguishable.
-    position: { x: 26, y: 19, z: 0 },
+    position: { x: 20, y: 19, z: 0 },
     rotation: 0,
     enabled: true,
     role: 'goal',
@@ -142,11 +144,11 @@ describe('#1073 the goal and its hold turn over by the same reflection', () => {
     const { goal } = await sphereJob();
     const lr = goalForFlip(goal, BOX, 'left-right');
     const fb = goalForFlip(goal, BOX, 'front-back');
-    // The sphere is 30 mm across; its centre was at (26, 19).
-    expect(lr.position.x).toBeCloseTo(44 - 26, 6);
+    // The sphere is 30 mm across; its centre was at (20, 19).
+    expect(lr.position.x).toBeCloseTo(44 - 20, 6);
     expect(lr.position.y).toBeCloseTo(19, 6);
-    expect(fb.position.x).toBeCloseTo(26, 6);
-    expect(fb.position.y).toBeCloseTo(36 - 19, 6);
+    expect(fb.position.x).toBeCloseTo(20, 6);
+    expect(fb.position.y).toBeCloseTo(44 - 19, 6);
     // Both are 180° turns of the same object: about X either way, and about Z for left↔right only.
     expect(Math.abs(lr.rotationX ?? 0)).toBeCloseTo(180, 6);
     expect(Math.abs(lr.rotation)).toBeCloseTo(180, 6);
@@ -168,8 +170,8 @@ describe('#1073 the goal and its hold turn over by the same reflection', () => {
     // The hole line runs along X (front↔back): both holes share a y, and the pins mirror in Y.
     expect(plan.hold!.at[0].y).toBeCloseTo(plan.hold!.at[1].y, 9);
     const pins = plan.setups[1]!.pins!;
-    expect(pins.at[0].y).toBeCloseTo(36 - plan.hold!.at[0].y, 2);
-    expect(pins.at[1].y).toBeCloseTo(36 - plan.hold!.at[1].y, 2);
+    expect(pins.at[0].y).toBeCloseTo(44 - plan.hold!.at[0].y, 2);
+    expect(pins.at[1].y).toBeCloseTo(44 - plan.hold!.at[1].y, 2);
     expect(pins.at[0].x).toBeCloseTo(plan.hold!.at[0].x, 2);
   });
 
@@ -219,7 +221,7 @@ describe('#1073 the goal and its hold turn over by the same reflection', () => {
     useEngraveJobStore.getState().setSetups(flipped);
     const after = useEngraveJobStore.getState().job;
     // The side's goal re-derives through the NEW turn: front↔back mirrors Y about the blank.
-    expect(after.targetObjects![1]!.position.x).toBeCloseTo(26, 6);
+    expect(after.targetObjects![1]!.position.x).toBeCloseTo(20, 6);
     expect(after.targetObjects![1]!.position.y).toBeCloseTo(STOCK.width - 19, 6);
     // The pins are the same physical holes in the new frame: undo left↔right, apply front↔back.
     const pins = after.setups![1]!.pins!.at;
@@ -240,8 +242,8 @@ describe('#1073 the goal and its hold turn over by the same reflection', () => {
     const thinner = reholdSetupGoals(twoSided, { x: STOCK.length, y: STOCK.width, z: STOCK.thickness - 5 });
     expect(thinner).not.toBeNull();
     // A front↔back side mirrors in Y — the mount's bracket default would have mirrored in X.
-    expect(thinner![1]!.position.x).toBeCloseTo(26, 6);
-    expect(thinner![1]!.position.y).toBeCloseTo(36 - 19, 6);
+    expect(thinner![1]!.position.x).toBeCloseTo(20, 6);
+    expect(thinner![1]!.position.y).toBeCloseTo(44 - 19, 6);
     // The goal sits on the flipped top, which the thinner stock moves down 5 mm in that frame.
     expect(thinner![1]!.position.z).toBeCloseTo(before[1]!.position.z + 5, 6);
   });
