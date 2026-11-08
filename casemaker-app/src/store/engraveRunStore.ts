@@ -474,6 +474,31 @@ export interface EngraveRunState {
 class SimulationStopped extends Error {}
 
 let seq = 0;
+/**
+ * #1076 — THE GENERATOR WATCHDOG'S SENTENCE, as the app actually knows things. A sweep that goes
+ * quiet is inside one synchronous geometry call: the sentence names the checkpoint the stream was
+ * in (when the stream has one) and says the worker is alive, rather than guessing it stopped.
+ * Silence alone cannot prove a fault; a genuinely dead worker rejects its pending call by name.
+ */
+export function generatorStallSentence(
+  stallMs: number,
+  during: EngraveRunPhase,
+  sim: { phase: string | null; progress: { done: number; total: number } | null },
+): string {
+  const seconds = Math.round(stallMs / 1000);
+  // #830 review — a silence while the CAM generates is the generator stopping, and is said
+  // without the simulation's frame.
+  if (during !== 'simulating' && during !== 'checking') {
+    return `The generator stopped reporting for ${seconds} s. Its worker may have stopped.`;
+  }
+  if (during === 'checking') return `the goal check has reported nothing for ${seconds} s; the worker is alive`;
+  const at =
+    sim.phase === 'sweep' && sim.progress !== null && sim.progress.total > 0 && sim.progress.done < sim.progress.total
+      ? ` — checkpoint ${sim.progress.done + 1} of ${sim.progress.total} is inside one geometry call`
+      : '';
+  return `no checkpoint completed in ${seconds} s${at}; the worker is alive`;
+}
+
 /** #785 — the loaded client (so Cancel can terminate the worker without a second import). */
 let activeClient: EngraveRunClient | null = null;
 /** #785 — the phase the panel was in before this run, restored on Cancel. */
@@ -664,6 +689,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         // generates is the generator stopping, and is said without that frame.
         const during = get().phase;
         const inSimulation = during === 'simulating' || during === 'checking';
+        // #1076 — WHAT THE SIM STREAM LAST SAID. A sweep that goes quiet is inside one
+        // synchronous geometry call; the sentence names the checkpoint it was in (when the
+        // stream has one) and says the worker is alive, instead of guessing that it stopped.
+        const sim = useSimStore.getState();
         recordCrumb({
           kind: 'error',
           data: { source: 'generate-stall', message: `no stage for ${seconds} s (last: ${lastStage ?? 'the press'})` },
@@ -676,9 +705,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           generated: get().generated,
           phase: 'blocked',
           simStopped: inSimulation,
-          error: inSimulation
-            ? `its worker stopped answering after ${seconds} s`
-            : `The generator stopped reporting for ${seconds} s. Its worker may have stopped.`,
+          error: generatorStallSentence(stallMs, during, { phase: sim.phase, progress: sim.progress }),
         });
       }, stallMs);
     };
