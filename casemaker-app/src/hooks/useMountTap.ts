@@ -21,6 +21,7 @@ import { withBracketSeatDatum, withRotaryAxisDatum, withViseJawTopDatum } from '
 import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { recordMountReading, recordProbeReading } from '@/engine/cnc/registration/mountContext';
+import { SEAT_DERIVED } from '@/engine/cnc/registration/footprintJob';
 
 /**
  * #637 — ONE TAP AT A TIME, ACROSS HOSTS. The hook is used by the Setups row and by the machine
@@ -181,7 +182,10 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
   };
 
   async function tapJaw(
-    tap: { x: number; y: number; fromMachineZ: number } & Pick<PlanMountTap, 'reference' | 'datumOffsetMm'>,
+    tap: { x: number; y: number; fromMachineZ: number } & Pick<PlanMountTap, 'reference' | 'datumOffsetMm'> & {
+        /** #1070 — the plan's own seek bound (the seat press): never search past it. */
+        planTravelMm?: number | null;
+      },
   ): Promise<void> {
     if (inputs.target === null) return;
     // #637 — a second press (the other host's button, or a double press) must not orphan the first
@@ -200,6 +204,12 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator },
         inputs.floor,
         mountKindOf(tap.reference),
+        // #1070 — the probe is stated (null here: the hook's caller carries no instrument object;
+        // the executor releases a triggered tap whatever the instrument), and the seat press's
+        // own bound rides last: a never-triggering tap stops at the band's floor less the scan
+        // reach, not at the machine's work-envelope floor.
+        null,
+        tap.planTravelMm ?? null,
       );
       useMachineTranscriptStore.getState().setRegistration(r.transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n'));
       if (r.ok) {
@@ -208,14 +218,19 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
           const now = new Date().toISOString();
           // #595 — the tap's reading lands on the mount's OWN record as well: the unit's record is
           // the one the planner prefers (`mountDatumFor`), and a measurement that happened must not
-          // depend on the bed write below succeeding. A bracket tap reads the arm's TOP; the bed
-          // datum is the seat one height down.
-          await recordMountReading(
-            record,
-            tap.reference === 'bracket-seat' ? 'bracket' : 'vise',
-            { z: r.z, at: r.at },
-            inputs.probeId,
-          );
+          // depend on the bed write below succeeding.
+          // #1070, 6b's amendment — THE SEAT PRESS NEVER WRITES THE UNIT'S bracketTopZ. That key is
+          // the arm's TOP (15.05 mm above the seat); the seat press reads the WASTEBOARD, so with
+          // no offset the reading IS the seat and belongs to the bed profile alone. (An arm-top
+          // tap — offset stated — still records the unit reading one height down, as #607 built it.)
+          if (!(tap.reference === 'bracket-seat' && (tap.datumOffsetMm ?? 0) === 0)) {
+            await recordMountReading(
+              record,
+              tap.reference === 'bracket-seat' ? 'bracket' : 'vise',
+              { z: r.z, at: r.at },
+              inputs.probeId,
+            );
+          }
           // #613 — a no-profile machine gets its first bed here; the datum then lands as designed.
           // #650 — the bed and the datum are an update folded onto the record the service holds; a
           // stale guard re-applies them to the re-read record rather than re-sending this window's
@@ -241,7 +256,7 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
               source: 'measured',
               setAt: now,
               unit: 'mm',
-              note: 'tapped on the bracket’s front arm',
+              note: 'the seat: tapped on the wasteboard beside the bracket’s front arm',
             });
             if (!saved) {
               noteNow(
@@ -265,7 +280,15 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
           // #601 — the probe's last M491 length and M119 rest ride on the checked-out probe accessory.
           await recordProbeReading(record, r.probe);
         }
-        noteNow(inputs.successNote);
+        // #1070, 6b's amendment — the SEAT press's note carries the reading against the derived
+        // band: the operator sees the number that is now stored, not just that something was.
+        if (tap.reference === 'bracket-seat' && (tap.datumOffsetMm ?? 0) === 0) {
+          const offset = Math.round((r.z - SEAT_DERIVED.machineZ) * 1000) / 1000;
+          const where = offset === 0 ? 'the derived value' : `${Math.abs(offset).toFixed(2)} mm ${offset > 0 ? 'above' : 'below'} the derived ${SEAT_DERIVED.machineZ}`;
+          noteNow(`the bracket seat is recorded at machine Z ${r.z} (${where}) — plan the registration again`);
+        } else {
+          noteNow(inputs.successNote);
+        }
       } else {
         noteNow(r.reason);
       }

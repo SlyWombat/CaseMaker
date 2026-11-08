@@ -99,6 +99,11 @@ import {
 import type { Tool } from '../../../src/engine/cnc/tool';
 import { toolDisplayName } from '../../../src/engine/cnc/toolDisplay';
 import type { JobFinding } from '../../../src/engine/cnc/engrave/jobSetup';
+import type { LoadedLocation } from '../../../src/platform/headless/bootstrap';
+import type { FootprintPlan } from '../../../src/engine/cnc/registration/footprint';
+import { footprintInputFor, seatSeekFor } from '../../../src/engine/cnc/registration/footprintJob';
+import type { SeatSeek } from '../../../src/engine/cnc/registration/footprintJob';
+import { planFootprintRegistration } from '../../../src/engine/cnc/registration/footprint';
 import type { NodeMeshOutput } from '../../../src/workers/geometry/meshOutput';
 import { Z1 } from '../../../src/engine/cnc/machine';
 import { jobMount, jobMountObstacles, jobSetups, jobTool, toSetup } from '../../../src/engine/cnc/engrave/jobSetup';
@@ -407,6 +412,43 @@ interface RunReceipt {
  * dispatcher can run the command without losing the process. The script wrapper turns the returned
  * code into `process.exitCode`.
  */
+/** #1070 — the sheet's bed-held registration: the footprint plan, or the first seat seek. */
+export function sheetRegistrationFor(
+  job: EngraveJob,
+  where: LoadedLocation | null,
+): { footprint?: FootprintPlan; seatSeek?: SeatSeek } {
+  if (where === null || jobMount(job) !== 'bracket') return {};
+  const machine = where.machines[0];
+  const calibration = machine?.calibration;
+  if (calibration === undefined || calibration === null) return {};
+  const probeAccessory = where.accessories.find((a) => a.kind === 'probe' && !/^3d$/i.test((a.variant ?? '').trim()));
+  const unit = (probeAccessory?.unit ?? {}) as Record<string, unknown>;
+  const num = (k: string): number | null => (typeof unit[k] === 'number' ? (unit[k] as number) : null);
+  const tip =
+    probeAccessory === undefined || num('rimOffsetMm') === null
+      ? null
+      : {
+          diameterMm: num('tipDiameterMm') ?? 2,
+          rimOffsetMm: num('rimOffsetMm')!,
+          rimOffsetUncertaintyMm: num('rimOffsetUncertaintyMm') ?? 0.25,
+        };
+  const probe =
+    probeAccessory === undefined ? null : { id: probeAccessory.id, variant: probeAccessory.variant ?? null, instrument: 'z-only' as const, tip };
+  const bed = machine?.bedProfiles?.find((p) => p.id === machine.activeBedProfileId);
+  const seat = bed?.datums?.bracketSeatZ ?? null;
+  const bracketSeat = seat === null || seat === undefined ? null : { value: seat.value, what: 'bracket seat' as const, measuredAt: seat.measuredAt ?? null };
+  const mount = { kind: 'bracket' as const, board: job.sacrificial.under !== null };
+  const input = footprintInputFor({ job, mount, calibration, defaults: where.defaults, probe, bracketSeat });
+  if (input.ok) {
+    const planned = planFootprintRegistration(input.input);
+    if (planned.ok) return { footprint: planned.plan };
+  }
+  // No seat datum (or nothing to plan on it): the sheet's first touch is the seat seek, when the
+  // house can back one.
+  const seatSeek = seatSeekFor({ job, calibration, defaults: where.defaults, probe });
+  return seatSeek.ok ? { seatSeek: seatSeek.seek } : {};
+}
+
 export async function engraveJobMain(argv: string[], options: CommandOptions = HUMAN): Promise<number> {
   const receipt: RunReceipt = {};
   try {
@@ -1362,6 +1404,13 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       nc: names[i]!.ncFile,
       frameNc: program.frameNc === null ? null : names[i]!.frameFile,
     }));
+    // #1070 — A BED-HELD JOB'S SHEET PRINTS THE FOOTPRINT PLAN (the same plan the Cut step's
+    // attempt runs): read off the job and the loaded house, absent when the house lacks what the
+    // plan needs (the machine's calibration or the wired probe), so an older house keeps the old
+    // registration section rather than a plan it cannot back.
+    const sheetRegistration = sheetRegistrationFor(job, boot.location);
+    const footprint = sheetRegistration.footprint;
+    const seatSeek = sheetRegistration.seatSeek;
     const sheet = buildRunSheet(
       job,
       { ...generated, programs: sheetPrograms },
@@ -1381,6 +1430,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       MARGIN_DEFAULTS,
       {
         ...(opts.sheetOptions ?? {}),
+        ...(footprint === undefined ? {} : { footprint }),
+        ...(seatSeek === undefined ? {} : { seatSeek }),
         efficiencyThresholds: efficiencyThresholds(shopDefaults),
         // #1068 — §8 names the fixture THIS job's sweep was handed: the bracket's arms and the
         // job's clamps (and its own obstacle boxes), never the vise's jaws. A vise job leaves it
