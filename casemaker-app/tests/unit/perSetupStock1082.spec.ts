@@ -107,6 +107,39 @@ describe('#1082 a setup’s own stock', () => {
     expect(blank).toBe(28);
   });
 
+  it('#1082 stage 2 — THE VENDOR-FLIP FIXTURE: every seam reads setup 2 as the freed part', () => {
+    // Setup 1 cuts a 106×136 part from a 120×160×28 blank; setup 2 is the flip, its stock the part.
+    const base = flipJob();
+    const setup1 = { ...base.setups![0]!, flip: undefined } as unknown as JobSetup;
+    const setup2 = {
+      ...base.setups![0]!,
+      stock: { length: 106, width: 136, thickness: 25, provenance: 'stated' as const },
+    } as unknown as JobSetup;
+    const job = { ...base, setups: [setup1, setup2] } as unknown as EngraveJob;
+
+    // 1. the engine part (toSetup) is the part's box on setup 2, the blank on setup 1;
+    for (const [index, want] of [[0, { length: 120, width: 160, thickness: 28 }], [1, { length: 106, width: 136, thickness: 25 }]] as const) {
+      const box = stockForSetup(job, index, null);
+      expect(box).toEqual(want);
+      const setup = toSetup(job, Z1, undefined, null, box);
+      if (setup.part.kind !== 'prism') throw new Error('the fixture is a prism job');
+      expect(setup.part.thickness).toBe(want.thickness);
+      const bb = aabbOfProfile(setup.part.outline);
+      expect(bb.max[0] - bb.min[0]).toBeCloseTo(want.length, 6);
+      expect(bb.max[1] - bb.min[1]).toBeCloseTo(want.width, 6);
+    }
+    // 2. the model plan's per-setup box;
+    expect(setupStockOf({ stock: { ...job.stock } }, { frame: {} as never, underside: 'flatOnStockBottom', stock: { length: 106, width: 136, thickness: 25 } })).toEqual({
+      length: 106,
+      width: 136,
+      thickness: 25,
+    });
+    // 3. the depth limit follows setup 2's 25 mm;
+    const limitAt = (t: number) => jobDepthLimit(job, undefined, undefined, undefined, t)(60, 80);
+    expect(limitAt(25)).toBe(25);
+    expect(limitAt(28)).toBe(28);
+  });
+
   it('the resolver: the STATED box wins; a non-flip setup has none', () => {
     const job = flipJob();
     const stated = { length: 100, width: 130, thickness: 24, provenance: 'stated' as const };
