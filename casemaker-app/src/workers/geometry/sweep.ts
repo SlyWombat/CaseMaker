@@ -28,6 +28,7 @@
 
 import type { Timeline, Checkpoint, AirMove, ToolState } from '@/engine/cnc/emulator/timeline';
 import { CheckpointStore, checkpointStoreOf } from '@/engine/cnc/emulator/checkpointStore';
+import { memTrace } from '@/engine/cnc/memTrace';
 import { eventLine, eventStoreOf } from '@/engine/cnc/gcode/eventStore';
 import { DIAGNOSTIC_CAP } from '@/engine/cnc/emulator/timeline';
 import { partToWork } from '@/engine/cnc/frames';
@@ -1688,6 +1689,15 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   let done = 0;
   for (let idx = 0; idx < total; idx++) {
     const cp = timeline.checkpoints[idx] as Checkpoint;
+    // #1076 — THE CHECKPOINT TRACE (one row before, one after): what the checkpoint is about to
+    // build — its moves and their feed length — then how long the synchronous build took. A
+    // client's silent window lands BETWEEN the start row and the next row, so this is what names
+    // the one geometry call the worker was inside when it went quiet.
+    let feedMm = 0;
+    for (let i = 0; i + 3 < cp.xy.length; i += 4) {
+      feedMm += Math.hypot((cp.xy[i + 2] as number) - (cp.xy[i] as number), (cp.xy[i + 3] as number) - (cp.xy[i + 1] as number));
+    }
+    memTrace('sweep:checkpoint-start', { k: idx + 1, of: total, moves: cp.steps.length, feedMm: Math.round(feedMm * 10) / 10 });
     // A checkpoint at or above the top of the stock removes nothing: the vendor's rotary files
     // feed at Z = +30 over a cylinder, and a stub prism has nothing there.
     if (cp.z >= topZ) {
@@ -1811,6 +1821,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
     done = idx + 1;
     const tookMs = performance.now() - lastProgressAt;
     lastProgressAt = performance.now();
+    memTrace('sweep:checkpoint', { k: done, ms: Math.round(tookMs) });
     opts?.onProgress?.(done, total);
     if (stallMs !== undefined && tookMs >= stallMs) slowCheckpoints.push({ checkpoint: done, ms: tookMs });
   }

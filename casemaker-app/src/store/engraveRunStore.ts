@@ -474,12 +474,41 @@ export interface EngraveRunState {
 class SimulationStopped extends Error {}
 
 let seq = 0;
+/**
+ * #1076 — THE GENERATOR WATCHDOG'S SENTENCE, as the app actually knows things. A sweep that goes
+ * quiet is inside one synchronous geometry call: the sentence names the checkpoint the stream was
+ * in (when the stream has one) and says the worker is alive, rather than guessing it stopped.
+ * Silence alone cannot prove a fault; a genuinely dead worker rejects its pending call by name.
+ */
+export function generatorStallSentence(
+  stallMs: number,
+  during: EngraveRunPhase,
+  sim: { phase: string | null; progress: { done: number; total: number } | null },
+  lastStage: string | null = null,
+): string {
+  const seconds = Math.round(stallMs / 1000);
+  // #830 review — a silence while the CAM generates is said without the simulation's frame.
+  // #1076 (the review gate) — and it names the last stage the recorder heard, as a fact, and
+  // says the worker is alive: a synchronous plan call is not a dead worker.
+  if (during !== 'simulating' && during !== 'checking') {
+    return `the generator reported nothing for ${seconds} s${lastStage === null ? '' : ` — its last stage was "${lastStage}"`}; the worker is alive`;
+  }
+  if (during === 'checking') return `the goal check has reported nothing for ${seconds} s; the worker is alive`;
+  const at =
+    sim.phase === 'sweep' && sim.progress !== null && sim.progress.total > 0 && sim.progress.done < sim.progress.total
+      ? ` — checkpoint ${sim.progress.done + 1} of ${sim.progress.total} is inside one geometry call`
+      : '';
+  return `no checkpoint completed in ${seconds} s${at}; the worker is alive`;
+}
+
 /** #785 — the loaded client (so Cancel can terminate the worker without a second import). */
 let activeClient: EngraveRunClient | null = null;
 /** #785 — the phase the panel was in before this run, restored on Cancel. */
 let phaseBeforeRun: EngraveRunPhase = 'idle';
 /** #785 — the last stage the recorder heard, so a stage change is a stage crumb, not progress. */
 let lastStage: string | null = null;
+/** #1076 — whether THIS run's own progress has been heard yet (the queue clock's switch). */
+let heardGenerateProgress = false;
 
 export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
   const empty = {
@@ -662,8 +691,34 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         // #830 review — WHAT went quiet decides what the panel says. A silence while the SWEEP
         // runs is a stopped simulation (no verdict for any program); a silence while the CAM
         // generates is the generator stopping, and is said without that frame.
+        if (!heardGenerateProgress) {
+          // #1076 — A QUEUED GENERATE IS NOT A DEAD WORKER. The sim worker is shared with the
+          // preview and the measured pick; a generate pressed while they run waits its turn in
+          // silence. While that work is provably in flight, say the wait and keep the clock
+          // running — the fault window starts once the generate itself has spoken.
+          const preview = useEngravePreviewStore.getState();
+          // The PREVIEW is the one that keeps running under a Generate (the pick is held): a
+          // preview build in flight is the shared worker's occupant. The pick is named too, for
+          // a client whose hold has not landed yet.
+          const occupant =
+            preview.status === 'loading'
+              ? 'the preview'
+              : preview.measuredStatus === 'measuring'
+                ? 'the measured pick'
+                : null;
+          if (occupant !== null) {
+            set({ progress: { stage: 'prepare', label: `waiting for ${occupant} to finish — the worker is busy` } });
+            recordCrumb({ kind: 'progress', data: { source: 'generate-queue', message: `waiting for ${occupant}` } });
+            armStall();
+            return;
+          }
+        }
         const during = get().phase;
         const inSimulation = during === 'simulating' || during === 'checking';
+        // #1076 — WHAT THE SIM STREAM LAST SAID. A sweep that goes quiet is inside one
+        // synchronous geometry call; the sentence names the checkpoint it was in (when the
+        // stream has one) and says the worker is alive, instead of guessing that it stopped.
+        const sim = useSimStore.getState();
         recordCrumb({
           kind: 'error',
           data: { source: 'generate-stall', message: `no stage for ${seconds} s (last: ${lastStage ?? 'the press'})` },
@@ -676,9 +731,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           generated: get().generated,
           phase: 'blocked',
           simStopped: inSimulation,
-          error: inSimulation
-            ? `its worker stopped answering after ${seconds} s`
-            : `The generator stopped reporting for ${seconds} s. Its worker may have stopped.`,
+          error: generatorStallSentence(stallMs, during, { phase: sim.phase, progress: sim.progress }, lastStage),
         });
       }, stallMs);
     };
@@ -689,11 +742,13 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         // #893 — nothing to generate: the program the row shows is this job's own.
         generated = priorGenerated as EngraveGenerated;
       } else {
+      heardGenerateProgress = false;
       armStall();
       // #785 — every stage report is BOTH the panel's progress and a flight-recorder crumb: one
       // event stream, two readers. A stage change is a crumb of its own (the marker moves with it);
       // a count inside a stage is progress. #830 — every report re-arms the silence watchdog.
       const onProgress = (progress: EngraveProgress): void => {
+        heardGenerateProgress = true;
         armStall();
         if (mine === seq) set({ progress });
         if (lastStage !== progress.stage) {
