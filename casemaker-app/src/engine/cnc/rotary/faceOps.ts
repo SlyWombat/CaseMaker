@@ -33,7 +33,7 @@ import type { OraclePredicted, OraclePoint } from '@/engine/cnc/engrave/oracle';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { cuttingDiameter, cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
-import { rotaryFreeSpan, rotaryMapOf, sectionRadiusAt, sectionWords, type RotaryMap, type RotarySection } from './wrap';
+import { rotaryFreeSpan, rotaryMapOf, sectionRadiusAt, sectionWords, type RotaryCutFace, type RotaryMap, type RotarySection } from './wrap';
 
 /** The width of a face at a depth below the surface, mm: the chord of the turned circle. */
 export function faceChordMm(radiusMm: Mm, depthMm: Mm): Mm {
@@ -84,6 +84,36 @@ export function sectionFaceChordMm(section: RotarySection, a: number, depthMm: M
   if (!(surface > 0) || p < 0) return 0;
   if (section.kind === 'round') return 2 * Math.sqrt(Math.max(0, surface * surface - p * p));
   return rectChordMm(section.width, section.height, theta, p);
+}
+
+/**
+ * #1085 — THE SECTION THE FACES LEAVE. A relief cut after the faces is planned from the stock
+ * those cuts make — the octagon after an A 45 corner ring on a square, not the square's corners.
+ * Each `flat` and each cutting face of a `faces-all-round` is a plane at a fixed distance from
+ * the axis; the section is the smallest radius under the stock's own sides and every such plane.
+ *
+ * The depths read the ORIGINAL section, exactly as {@link planFaceCuts} reads them: every op cuts
+ * the stock as it was mounted, in one program. Returns the section unchanged when no op cuts.
+ */
+export function processedSectionOf(section: RotarySection, faces: readonly EngraveFaceOp[]): RotarySection {
+  if (section.kind !== 'rect') return section;
+  const cutFaces: RotaryCutFace[] = [];
+  for (const op of faces) {
+    if (op.kind === 'flat') {
+      const a = (op.a * Math.PI) / 180;
+      const distance = sectionRadiusAt(section, a) - (op.depth ?? 0);
+      if ((op.depth ?? 0) > 0 && distance > 0) cutFaces.push({ a, distance });
+    } else if (op.kind === 'faces-all-round') {
+      const count = op.count ?? 0;
+      const acrossFlats = op.acrossFlats ?? 0;
+      if (!(count >= 3) || !(acrossFlats > 0)) continue;
+      for (let k = 0; k < count; k++) {
+        const a = ((op.a + (k * 360) / count) * Math.PI) / 180;
+        if (sectionRadiusAt(section, a) - acrossFlats / 2 > 1e-9) cutFaces.push({ a, distance: acrossFlats / 2 });
+      }
+    }
+  }
+  return cutFaces.length === 0 ? section : { ...section, cutFaces };
 }
 
 /** Three decimal places — enough for a stated size, and no float dust on a face operation. */

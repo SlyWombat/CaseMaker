@@ -424,8 +424,11 @@ export type JobFindingCode =
   | 'goal-finish-unreachable'
   | 'goal-object-no-toolpath'
   // #1084 — a job carrying faces AND a goal: the faces program would post and the goal be dropped.
-  // Refused by name until #1085's mixed dispatch cuts the two as the two programs they are.
+  // Refused by name when the job is not a rotary cut (one file cannot be both). #1085 — a ROTARY
+  // job with both posts two programs instead, and `faces-before-relief` states the order and the
+  // section the relief is planned from (the octagon the corner cuts leave, not the block's corners).
   | 'faces-with-goal'
+  | 'faces-before-relief'
   // #829 — THE 3D CHAMFER THE GOAL ASKS FOR. `goal-chamfer-no-cutter` is the WARNING that names
   // why no V program was posted (no V-bit chosen, one the library does not hold, or one with no
   // cone/feeds), and `goal-chamfer-no-rim` the WARNING that the mesh has no top rim to bevel.

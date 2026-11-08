@@ -221,7 +221,7 @@ import {
 import { generateIndexed } from '@/engine/cnc/cam/indexed';
 import type { FaceFrame } from '@/engine/cnc/rotary/faceOps';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
-import { faceCutIntoNeck, faceJobRefusal, planFaceCuts } from '@/engine/cnc/rotary/faceOps';
+import { faceCutIntoNeck, faceJobRefusal, planFaceCuts, processedSectionOf } from '@/engine/cnc/rotary/faceOps';
 import { rotaryMapOf, toRotaryIR } from '@/engine/cnc/rotary/wrap';
 import { rotaryFreeSpan, freeEndSentence, tailstockSentence, throughCentreSentence } from '@/engine/cnc/rotary/wrap';
 import { generateRotaryReliefIR, reliefKeepOutX, sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
@@ -6735,11 +6735,43 @@ export async function engraveGenerate(
   // mounting, the wrapped one first and the indexed one after, and `setupPrograms` appends the
   // face ref the per-ref loop below turns into `generateFaceProgram`.
   if ((job.faces ?? []).length > 0 && !jobHasItems(job)) {
-    // #1084 — FACES AND A GOAL IS TWO PROGRAMS, AND ONE FILE CANNOT BE BOTH. This branch returns
-    // before the goal dispatch below, so a job carrying both used to post the faces and drop the
-    // goal with no sentence (#1085's mixed dispatch — faces, then the relief from the PROCESSED
-    // section — is the real fix). Until it exists the job refuses by name.
-    if (pureGoalObject(job) !== null) {
+    const goal = pureGoalObject(job);
+    // #1085 — FACES AND A GOAL IS TWO PROGRAMS, CORNERS FIRST. One file cannot be both the
+    // indexed face program and a relief, so the two are cut and posted in order in one mounting:
+    // the faces, then the relief — planned from the SECTION THE FACES LEAVE (the octagon after an
+    // A 45 corner ring, not the block's 31.466 mm corners).
+    if (goal !== null && rotaryMapOf(job) !== null) {
+      const faces = await generateFaceProgram(tl, job, tool, catalogue, calibration, margins, shop);
+      if (!faces.ok) return faces;
+      const rotary = rotaryMapOf(job)!;
+      const processed = processedSectionOf(rotary.section, job.faces ?? []);
+      const relief = generateRotaryGoalProgram(job, goal, { ...rotary, section: processed }, tool, catalogue, calibration, shop);
+      if (!relief.ok) {
+        return { ...relief, findings: dedupeFindings([...faces.findings, ...relief.findings]), programs: [] };
+      }
+      const cutFaces = processed.kind === 'rect' ? (processed.cutFaces ?? []) : [];
+      const nearest = cutFaces.reduce((m, c) => Math.min(m, c.distance), Infinity);
+      const orderFinding: JobFinding = {
+        severity: 'info',
+        code: 'faces-before-relief',
+        message:
+          `This job is cut as two programs: the faces first (${cutFaces.length} indexed cut${cutFaces.length === 1 ? '' : 's'}), ` +
+          `then the relief — and the relief is planned from the section the faces leave, not the block's corners: ` +
+          `the cut faces stand ${Number(nearest.toFixed(3))} mm from the axis, where the block's corners stood at ` +
+          `${Number(rotary.radius.toFixed(3))} mm.`,
+      };
+      return {
+        ...faces,
+        surface: null,
+        findings: dedupeFindings([...faces.findings, ...relief.findings, orderFinding]),
+        programs: [...faces.programs, ...relief.programs],
+        surface3d: relief.surface3d ?? null,
+      };
+    }
+    // #1084 — FACES AND A GOAL, AND ONE FILE CANNOT BE BOTH. The faces branch returns before the
+    // goal dispatch below, so a job carrying both used to post the faces and drop the goal with no
+    // sentence. A job that is not a rotary cut still refuses by name.
+    if (goal !== null) {
       const message =
         'this job has faces and a goal; only the faces would post — cut them as two jobs: the faces first, then the goal';
       return {

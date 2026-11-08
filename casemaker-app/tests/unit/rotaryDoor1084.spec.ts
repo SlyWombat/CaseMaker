@@ -124,14 +124,14 @@ describe('#1084 the rotary door states the Save gate', () => {
     expect(receipt!.diagnostics.filter((d) => d.code === 'rotary-unmeasured')).toHaveLength(0);
   });
 
-  it('faces and a goal together refuse by name — never post the faces and drop the goal', async () => {
+  it('faces and a goal together never post the faces and drop the goal — the mixed dispatch cuts both, or nothing', async () => {
+    // #1085 replaced the stopgap refusal with the two-program dispatch: the faces are cut first,
+    // then the relief — which on this fixture (no mesh bytes) stops at the goal's own sentence.
+    // NOTHING posts: #1084's requirement (never the faces alone, silently) still holds.
     const { code, receipt } = await cliCut(facesGoalJob(), 'faces-goal');
     expect(code).toBe(1);
     expect(receipt).not.toBeNull();
-    const refusals = receipt!.diagnostics.filter((d) => d.code === 'faces-with-goal');
-    expect(refusals).toHaveLength(1);
-    expect(refusals[0]!.severity).toBe('error');
-    expect(refusals[0]!.message).toContain('this job has faces and a goal');
+    expect(receipt!.diagnostics.filter((d) => d.code === 'faces-with-goal')).toHaveLength(0);
     const programs = (receipt!.details as { programs?: unknown[] }).programs ?? [];
     expect(programs).toHaveLength(0);
   });
