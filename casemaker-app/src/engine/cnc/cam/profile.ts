@@ -559,8 +559,10 @@ function arcDistance(from: number, to: number, perimeter: number): number {
   return d < 0 ? d + perimeter : d;
 }
 
-/** The moves for one contour at one Z, crossing its tab spans above the tab top when needed. */
-function contourMoves(
+/** The moves for one contour at one Z, crossing its tab spans above the tab top when needed.
+ *  #1073 — exported for the flipped setup's tab release: it cuts a band, not a top-down depth, so
+ *  it walks its own Z levels and reuses this contour/tab mechanism rather than a second one. */
+export function contourMoves(
   contour: Polygons[number],
   z: number,
   tabTopZ: number,
