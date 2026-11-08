@@ -274,6 +274,27 @@ export function surfaceTopDatumFor(
  * engine then falls back to the legacy shop default `bracket.seatMachineZ` for one release
  * (`bracketSeatReading` in `mounts/bracket.ts`).
  */
+/**
+ * #1077 — MAY A SURFACE TOP STAND IN FOR THE BRACKET SEAT? Only when it is about the surface the
+ * profile describes NOW and was not taken for another mount:
+ *   - a reading from the SAME registration pass as the vise jaw top (identical instant) is a vised
+ *     blank's top, not the surface beside the bracket (k3's −55.119 case);
+ *   - a reading OLDER than the profile's current surface measurement (its `surface.provenance`
+ *     `measured:<ISO>`) describes a surface that has since been covered or changed.
+ * With no recorded surface measurement there is nothing to contradict the datum, and it stands.
+ */
+function surfaceTopStandsForSeat(surface: { measuredAt: string }, profile: BedProfile): boolean {
+  const vise = profile.datums.viseJawTopZ ?? null;
+  const at = Date.parse(surface.measuredAt);
+  if (vise !== null && Number.isFinite(at) && Date.parse(vise.measuredAt) === at) return false;
+  const measured = /^measured:(.+)$/.exec(profile.surface?.provenance?.['thickness'] ?? '');
+  if (measured !== null) {
+    const coveredAt = Date.parse(measured[1]!);
+    if (Number.isFinite(at) && Number.isFinite(coveredAt) && at < coveredAt) return false;
+  }
+  return true;
+}
+
 export function bracketSeatDatumFor(machine: MachineRecord | null): {
   value: number;
   what: 'bracket seat' | 'surface top';
@@ -293,7 +314,7 @@ export function bracketSeatDatumFor(machine: MachineRecord | null): {
   // surface the stock rests on (no under-board added again); the surface-top fallback never says so.
   if (usable(seat)) return { value: seat!.value, what: 'bracket seat', measuredAt: seat!.measuredAt, ...(seat!.restsOnStock === true ? { restsOnStock: true } : {}) };
   const surface = profile.datums.surfaceTopZ ?? null;
-  if (usable(surface)) return { value: surface!.value, what: 'surface top', measuredAt: surface!.measuredAt };
+  if (usable(surface) && surfaceTopStandsForSeat(surface!, profile)) return { value: surface!.value, what: 'surface top', measuredAt: surface!.measuredAt };
   return null;
 }
 
