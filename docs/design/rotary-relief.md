@@ -105,6 +105,16 @@ findings built on it (later slice) say, in the operator's words:
   is the default: its scallop is measured across the same grid the field is known on, and it
   reuses the flat finish's tip field. The spiral is the fluidity suite's shape (#756) and is the
   option for a long part where a full turn between X steps would waste time.
+- **#1087 — THE FINISH'S STEP IS THE JOB'S CUSP, NOT THE FEEDS ROW'S FRACTION.** The rows are spaced
+  by `ballScallopStepOver` from the stated scallop (a stated finishing pitch converts on the
+  finishing ball, #985's rule; absent, the engine's 0.027 mm default), FLOORED to the field's grid:
+  the raster's rows are grid indices, and a step rounded up is a step coarser than the promise
+  (0.4616 mm on a 0.1 mm grid is 0.4 mm, not 0.5 — whose cusp 0.032 mm would miss 0.027). The
+  sheet states the cusp the step leaves beside the scallop the job asks for, and names the grid
+  when it could not reach it. The feeds row's 45 % fraction (0.9 mm on a ⌀2, a 0.107 mm cusp) is
+  above the goal check's 0.1 mm band, so a covering pass read 6.35 % standing. A flat finishing
+  cutter keeps the feeds row's step: a flat leaves no ball scallop to promise on a flat floor, and
+  the relief does not model its slope-dependent staircase.
 - Both passes emit MAP-space moves; `toRotaryIR` turns them into `(X, A, Z)`, lifting rapids clear
   of the stock (the rotary clearance rule) exactly as the wrapped text and pocket programs do.
 - The finishing tip must stay above the axis: `z_tip = r_goal ≥ minRadius > 0` is R8's condition at

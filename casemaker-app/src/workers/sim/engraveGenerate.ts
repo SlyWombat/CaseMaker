@@ -167,7 +167,9 @@ import type { BedUnderFacts } from '@/engine/cnc/engrave/jobSetup';
 import { generateChamfer, type ChamferCut } from '@/engine/cnc/cam/chamfer';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, efficiencyOf, estimateCycleSeconds, estimateCycleTerms, HOP_Z, SAFE_Z, raiseTravelOver, toolNumberFor, travelHeightOver, travelStatsOf, type CamMove, type CamOperation, type CamPassStep, type CycleTerms, type ProgramEfficiency, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import { ballScallopCusp } from '@/engine/cnc/ballScallop';
 import { DEFAULT_STOCK_TO_LEAVE_MM, type SurfaceFeeds } from '@/engine/cnc/cam/surfaceFinishTipField';
+import { DEFAULT_FINISH_SCALLOP_MM } from '@/engine/cnc/cam/model/ops/finish';
 import { type PostContext, type PostResult, type VacuumSpan } from '@/engine/cnc/post/z1';
 import { postFor, postKey, postOriginFor } from '@/engine/cnc/post';
 import { appendThumbnail, planViewPng, simulationTopViewPng } from '@/engine/cnc/post/thumbnail';
@@ -4844,6 +4846,15 @@ export function generateRotaryGoalProgram(
     roughStepOver: settings.roughStepOverMm ?? resolved.params.stepOver,
     finishStepOver: settings.finishStepOverMm ?? resolved.params.stepOver,
   };
+  // #1087 — THE FINISH HOLDS THE JOB'S SCALLOP, not the feeds row's 45 % step-over (0.9 mm on a
+  // ⌀2 ball leaves a 0.107 mm cusp — over the goal check's 0.1 mm band, so a covering pass read
+  // 6.35 % standing). A stated finishing PITCH converts to the cusp it leaves on THIS ball
+  // (#985's rule: a pitch is honoured as a pitch); nothing stated → the engine's 0.027 mm default.
+  // The relief takes its row step from that cusp and quantises it down to the field grid.
+  const finishScallopMm =
+    settings.finishStepOverMm === undefined
+      ? DEFAULT_FINISH_SCALLOP_MM
+      : ballScallopCusp((cuttingDiameter(tool) ?? 0) / 2, settings.finishStepOverMm);
   let relief: ReturnType<typeof generateRotaryReliefIR>;
   try {
     relief = generateRotaryReliefIR({
@@ -4856,6 +4867,7 @@ export function generateRotaryGoalProgram(
       air: job.cutOverride?.air ?? true,
       feeds,
       rapid: mill.rapidEstimate,
+      finishScallopMm,
       ...(stockToLeaveMm === undefined ? {} : { stockToLeaveMm }),
     });
   } catch (e) {
@@ -4919,7 +4931,13 @@ export function generateRotaryGoalProgram(
       gridCells: field.nx * field.ny,
       stepDownMm: feeds.stepDown,
       roughStepOverMm: feeds.roughStepOver,
-      finishStepOverMm: feeds.finishStepOver,
+      // #1087 — the step the rows were ACTUALLY cut at (the scallop rule floored to the grid),
+      // and the cusp it leaves beside the cusp the job asks for; the sheet prints both. A flat
+      // finishing cutter states no scallop (the relief reports null), so the old sentence stands.
+      finishStepOverMm: relief.finish.stepOverMm,
+      ...(relief.finish.scallopMm === null ? {} : { finishScallopMm: relief.finish.scallopMm }),
+      ...(relief.finish.cuspMm === null ? {} : { finishCuspMm: relief.finish.cuspMm }),
+      ...(relief.finish.gridLimited ? { finishGridLimited: true } : {}),
       stockToLeaveMm: allowance,
       roughingLayers: relief.roughingLayers,
       scallop: null,

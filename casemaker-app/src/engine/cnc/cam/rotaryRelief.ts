@@ -45,6 +45,7 @@ import type { GoalRadialField } from '@/engine/cnc/rotary/radialField';
 
 import type { Tool } from '@/engine/cnc/tool';
 import { cuttingDiameter } from '@/engine/cnc/tool';
+import { ballScallopCusp, ballScallopStepOver } from '../ballScallop';
 import {
   DEFAULT_STOCK_TO_LEAVE_MM,
   finishTipField,
@@ -141,6 +142,26 @@ export interface RotaryReliefArgs {
   stockToLeaveMm?: number;
   /** The finishing tip field's budget; absent → the tool's own unit ceiling ({@link maxTipOpsFor}). */
   maxFinishTipOps?: number;
+  /**
+   * #1087 — THE CUSP THE FINISH PROMISES, mm. When present the finish's row step comes from this
+   * scallop (`ballScallopStepOver`) instead of `feeds.finishStepOver`, quantised DOWN to the
+   * field's grid — never rounded up, because the raster's rows are grid indices and a step coarser
+   * than the promise leaves more than the job asked for. Absent keeps the caller's own step
+   * (every direct caller before the field).
+   */
+  finishScallopMm?: number;
+}
+
+/** #1087 — the finish's row step, and the cusp it leaves, as the run sheet quotes them. */
+export interface RotaryReliefFinish {
+  /** The step-over the finish's rows are cut at, mm — a whole number of field cells. */
+  stepOverMm: number;
+  /** The cusp that step leaves on a flat, mm; null when the caller stated no scallop. */
+  cuspMm: number | null;
+  /** The cusp the caller asked the finish to hold, mm; null when none was stated. */
+  scallopMm: number | null;
+  /** True when the field grid could not reach the asked cusp (one cell alone is coarser). */
+  gridLimited: boolean;
 }
 
 export interface RotaryReliefResult {
@@ -156,6 +177,31 @@ export interface RotaryReliefResult {
    * when nothing was clipped). The job path states the clip; the moves are all right of the line.
    */
   clippedFromX: number | null;
+  /** #1087 — the finish's row step and cusp, one rule with the sheet's own line. */
+  finish: RotaryReliefFinish;
+}
+
+/**
+ * #1087 — THE FINISH'S ROW STEP FROM THE STATED SCALLOP. The exact step is the ball-scallop
+ * closed form at zero slopes (the surface between two adjacent rows of a turned part is flat in
+ * the direction the rows step); the raster can only take whole grid cells, so the step FLOORS —
+ * 0.4616 mm on a 0.1 mm grid is 4 cells = 0.4 mm, never 5 cells = 0.5, whose cusp (0.032 mm)
+ * would miss the promise. A grid too coarse for even one cell under the promise is stated, not
+ * hidden (`gridLimited`).
+ */
+export function reliefFinishStepOver(
+  ballRadiusMm: number,
+  scallopMm: number,
+  gridPitchMm: number,
+): { stepOverMm: number; cuspMm: number; gridLimited: boolean } {
+  const exact = ballScallopStepOver(ballRadiusMm, scallopMm, 0, 0);
+  const cells = Math.max(1, Math.floor(exact / gridPitchMm + 1e-9));
+  const stepOverMm = cells * gridPitchMm;
+  return {
+    stepOverMm,
+    cuspMm: ballScallopCusp(ballRadiusMm, stepOverMm),
+    gridLimited: stepOverMm > exact + 1e-9,
+  };
 }
 
 /**
@@ -226,10 +272,26 @@ export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResu
   // Finishing: the flat goal's parallel finish over the map view.
   // The map's around axis is a circle: the tip field's rows WRAP, or the pass on the seam rides
   // on the stock's surface and leaves the allowance standing in one hairline column.
+  // #1087 — THE ROWS STEP AT THE STATED SCALLOP when the caller states one AND the finish is a
+  // BALL: the exact step from the cusp, floored to the field's grid (never rounded up — a row is
+  // a grid index). A flat leaves no ball scallop to promise on a flat floor (its cusp is
+  // slope-dependent) and a bull's is its corner radius's, which the relief does not model, so
+  // those keep the caller's step and state no cusp.
+  const finishRule =
+    args.finishScallopMm === undefined || tool.shape !== 'ball'
+      ? null
+      : reliefFinishStepOver(toolRadius, args.finishScallopMm, hf.pitch);
   const tip = finishTipField(hf, surfaceTool, args.maxFinishTipOps ?? maxTipOpsFor(surfaceTool), {
     wrapRows: true,
   });
-  const finish = finishingMoves(hf, tip, feeds, hf.pitch, SAFE_Z, HOP_Z);
+  const finish = finishingMoves(
+    hf,
+    tip,
+    finishRule === null ? feeds : { ...feeds, finishStepOver: finishRule.stepOverMm },
+    hf.pitch,
+    SAFE_Z,
+    HOP_Z,
+  );
   const finishing: CamOperation = {
     number: 2,
     name: `[T${args.toolNumber}] rotary 3D finish`,
@@ -260,6 +322,14 @@ export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResu
     roughingLayers: rough.layers,
     radius: field.radius,
     clippedFromX,
+    // #1087 — what the finish's rows were ACTUALLY cut at, and the cusp that step leaves: the
+    // sheet quotes these numbers, never a second resolution of the same rule.
+    finish: {
+      stepOverMm: finishRule?.stepOverMm ?? feeds.finishStepOver,
+      cuspMm: finishRule?.cuspMm ?? null,
+      scallopMm: args.finishScallopMm ?? null,
+      gridLimited: finishRule?.gridLimited ?? false,
+    },
   };
 }
 

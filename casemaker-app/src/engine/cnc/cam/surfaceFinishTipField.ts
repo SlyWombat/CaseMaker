@@ -57,7 +57,6 @@ export interface SurfaceFeeds {
   finishStepOver: number;
 }
 
-
 function coveredRuns(hf: GoalHeightfield, j: number, only?: Uint8Array | null): [number, number][] {
   const { nx, covered } = hf;
   const runs: [number, number][] = [];
