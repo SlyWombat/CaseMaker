@@ -450,10 +450,15 @@ describe('#948 the elephant corpus run — zero cut-into is not a pass', () => {
       // above), so two more cells' material crosses the 0.1 mm band. The message prints the
       // MEASURED fraction — the earlier form printed the difference from the pin, which read as
       // the value and confused the record once.
+      // #1080 (6b, 2026-11-08) — THE FINISH'S SPLIT-COSINE STEP-OVER RE-PINS TWO CELLS. Both sit
+      // at the 0.1 mm band's edge and cross it by less than a micron, well under the sweep's CL
+      // tolerance (5 um — the bar: a pin may move only by cells whose delta is below it):
+      //   (19.276, 40.031): 0.09974 -> 0.10003  (delta 0.29 um)
+      //   (24.276, 39.931): 0.09940 -> 0.10013  (delta 0.73 um)
       const leftoverFraction = report.goalCutInto?.leftoverFractions[0] ?? 0;
       expect(
-        Math.abs(leftoverFraction - 0.3068883),
-        `leftoverFractions[0] measured ${leftoverFraction} (the model engine's pin is 0.3068883 and this compares the difference)`,
+        Math.abs(leftoverFraction - 0.3069757),
+        `leftoverFractions[0] measured ${leftoverFraction} (the model engine's pin is 0.3069757 and this compares the difference)`,
       ).toBeLessThanOrEqual(1 / (report.goalCutInto?.goalCells ?? 1));
     } finally {
       session.dispose();

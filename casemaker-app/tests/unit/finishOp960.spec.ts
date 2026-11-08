@@ -42,6 +42,75 @@ function rampMesh(slope: number, length: number, half: number): FeatureSource {
   };
 }
 
+/** A plane z = slope * y — the same ramp turned so its slope runs ALONG the raster rows. */
+function sweepMesh(slope: number, length: number, half: number): FeatureSource {
+  const x0 = -MESH_MARGIN_MM;
+  const x1 = length + MESH_MARGIN_MM;
+  const y0 = -half - MESH_MARGIN_MM;
+  const y1 = half + MESH_MARGIN_MM;
+  const zw0 = slope * y0;
+  const zw1 = slope * y1;
+  return {
+    triangles: {
+      positions: Float32Array.from([
+        x0, y0, zw0, x1, y0, zw0, x1, y1, zw1,
+        x0, y0, zw0, x1, y1, zw1, x0, y1, zw1,
+      ]),
+      indices: Uint32Array.from([0, 1, 2, 3, 4, 5]),
+      triangleCount: 2,
+      bbox: { min: [x0, y0, Math.min(zw0, zw1)], max: [x1, y1, Math.max(zw0, zw1)] },
+    },
+  };
+}
+
+/** A V-ridge along the diagonal y = x, its two faces at `slope` — the diagonal crease of 6b's rule. */
+function creaseMesh(slope: number, length: number, half: number): FeatureSource {
+  const x0 = -MESH_MARGIN_MM;
+  const x1 = length + MESH_MARGIN_MM;
+  const y0 = -half - MESH_MARGIN_MM;
+  const y1 = half + MESH_MARGIN_MM;
+  const steps = 1;
+  const nx = Math.ceil((x1 - x0) / steps);
+  const ny = Math.ceil((y1 - y0) / steps);
+  const pos: number[] = [];
+  const idx: number[] = [];
+  const zOf = (x: number, y: number): number => slope * Math.abs(x - y);
+  for (let i = 0; i <= nx; i++) {
+    for (let j = 0; j <= ny; j++) {
+      const x = x0 + (i / nx) * (x1 - x0);
+      const y = y0 + (j / ny) * (y1 - y0);
+      pos.push(x, y, zOf(x, y));
+    }
+  }
+  const at = (i: number, j: number): number => i * (ny + 1) + j;
+  for (let i = 0; i < nx; i++) {
+    for (let j = 0; j < ny; j++) {
+      idx.push(at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j), at(i + 1, j + 1), at(i, j + 1));
+    }
+  }
+  let zmin = Infinity;
+  let zmax = -Infinity;
+  for (let k = 2; k < pos.length; k += 3) {
+    zmin = Math.min(zmin, pos[k]!);
+    zmax = Math.max(zmax, pos[k]!);
+  }
+  return {
+    triangles: {
+      positions: Float32Array.from(pos),
+      indices: Uint32Array.from(idx),
+      triangleCount: idx.length / 3,
+      bbox: { min: [x0, y0, zmin], max: [x1, y1, zmax] },
+    },
+  };
+}
+
+/** The distinct x values the finish's feed moves visit — one per raster row. */
+function rasterRows(ir: ReturnType<typeof finish>['ir']): number[] {
+  const xs = new Set<number>();
+  for (const op of ir.operations) for (const m of op.moves) if (m.kind === 'feed') xs.add(Number(m.x.toFixed(3)));
+  return [...xs].sort((a, b) => a - b);
+}
+
 const SLOPE = -0.2;
 const LENGTH = 50;
 const HALF = 10;
@@ -347,4 +416,105 @@ describe('#960 finish() — the ball-scallop step-over actually holds the band, 
     expect(worstCusp, `worst measured cusp, mm (band ${BAND_MM} mm, step-over ${(rows[1]!.x - rows[0]!.x).toFixed(4)} mm)`).toBeLessThanOrEqual(BAND_MM + 1e-6);
     expect(worstCusp, `worst measured cusp, mm (band ${BAND_MM} mm, step-over ${(rows[1]!.x - rows[0]!.x).toFixed(4)} mm)`).toBeGreaterThanOrEqual(BAND_MM * 0.9);
   });
+});
+
+
+/**
+ * #1080 — THE SLOPE THE STEP-OVER READS IS THE CROSS-ROW COMPONENT (6b's ruling).
+ *
+ * The finish sizes its step-over from the region's slope per band (#960), but both reads took the
+ * gradient MAGNITUDE: a wall running ALONG the rows pinned every band at its own steep angle even
+ * though no cusp exists across the rows. The reads now take |∂z/∂x| — the direction the rows
+ * advance — so a slope along the rows reads ≈0° and keeps the gentle spacing.
+ */
+describe('#1080 the finish reads the cross-row slope, not the gradient magnitude', () => {
+  const job = (geometry: FeatureSource) => {
+    const surface = clSurface(geometry, rectRegion(0, -100).region, ball6, 3);
+    const deepest = Math.min(
+      surface.dropCutter(LENGTH - PAD - 0.01, -HALF + PAD + 0.01)!,
+      surface.dropCutter(LENGTH - PAD - 0.01, HALF - PAD - 0.01)!,
+    );
+    const { region, regionRef } = rectRegion(0, deepest - 1e-6);
+    return finish({
+      cutter: ball6, region, regionRef, clSurface: clSurface(geometry, region, ball6, 3), kind: 'ball-scallop',
+      scallopMm: 0.1, stepDownMm: 2, feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
+      safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+    });
+  };
+
+  it('a 60° wall ALONG the rows reads ≈0°; the same wall ACROSS the rows reads 60° (6b’s units)', () => {
+    // The wall runs at 60° from horizontal: slope tan(60°) = 1.732. Along the rows the cross-row
+    // component is 0, so the pitch conversion is the identity — but the band is a VERTICAL cusp,
+    // and on a 60° surface a 0.1 mm vertical band is only 0.05 mm along the normal (6b's split
+    // cosines, #1080): the along-row spacing is 2*sqrt(2R*h_n - h_n^2) with h_n = band*cos 60°,
+    // ≈1.091 mm — neither the flat 1.536 mm nor half of it. Across the rows the ball at a 0.1 mm
+    // cusp needs ~0.545 mm, as before.
+    const steepSlope = Math.tan((60 * Math.PI) / 180);
+    const along = rasterRows(job(sweepMesh(steepSlope, LENGTH, HALF)).ir);
+    const across = rasterRows(job(rampMesh(-steepSlope, LENGTH, HALF)).ir);
+    const cos60 = Math.cos((60 * Math.PI) / 180);
+    const normalBand = 0.1 * cos60;
+    const alongStep = 2 * Math.sqrt(2 * 3 * normalBand - normalBand ** 2); // ≈1.091 mm
+    const alongRows = Math.floor((LENGTH - 2 * PAD) / alongStep) + 2;
+    const steepStep = cos60 * 2 * Math.sqrt(2 * 3 * (0.1 * cos60) - (0.1 * cos60) ** 2); // ≈0.545 mm
+    const steepRows = Math.floor((LENGTH - 2 * PAD) / steepStep) + 2;
+    expect(Math.abs(along.length - alongRows), `along-row rows ${along.length} vs h_n step ~${alongRows}`).toBeLessThanOrEqual(3);
+    expect(across.length, `across-rows rows ${across.length} vs steep ~${steepRows}`).toBeGreaterThan(along.length + 20);
+  }, 240_000);
+
+  it('the split cosines, in units: a 60° along-row plane gives the h_n = band·cos60 step, neither the flat spacing nor half of it', () => {
+    const steepSlope = Math.tan((60 * Math.PI) / 180);
+    const rows = rasterRows(job(sweepMesh(steepSlope, LENGTH, HALF)).ir);
+    const cos60 = Math.cos((60 * Math.PI) / 180);
+    const alongStep = (band: number) => 2 * Math.sqrt(2 * 3 * (band * cos60) - (band * cos60) ** 2);
+    const flatStep = 2 * Math.sqrt(2 * 3 * 0.1 - 0.1 * 0.1); // ≈1.536 mm
+    // The tightest gap between rows is the band's own step: h_n = 0.1·cos60 gives ≈1.091 mm.
+    let minGap = Infinity;
+    for (let i = 1; i < rows.length; i++) minGap = Math.min(minGap, rows[i]! - rows[i - 1]!);
+    // The row guard's phase snapping moves a gap a couple of percent; the step must be this one.
+    expect(Math.abs(minGap - alongStep(0.1)), `tightest gap ${minGap.toFixed(4)} vs h_n step ${alongStep(0.1).toFixed(4)}`).toBeLessThan(0.05);
+    expect(Math.abs(minGap - flatStep)).toBeGreaterThan(0.2); // not the flat spacing
+    expect(Math.abs(minGap - flatStep / 2)).toBeGreaterThan(0.2); // not half of it
+  }, 240_000);
+});
+
+/**
+ * #1080 (6b's follow-up ruling) — THE STRAIGHT-STRIP GATE.
+ *
+ * The cross-row component is right only where the strip's CL is STRAIGHT across it. The test is
+ * the second difference across the row sampling, |z(xc+h) − 2·z(xc) + z(xc−h)| over the strip's y
+ * samples: above the job's scallop the bin is not a straight run and takes the gradient-magnitude
+ * read again — the pre-#1080 read, so every card's leftover is what it was.
+ */
+describe('#1080 the cross-row read is gated on a straight strip', () => {
+  const job = (geometry: FeatureSource) => {
+    const surface = clSurface(geometry, rectRegion(0, -100).region, ball6, 3);
+    const deepest = Math.min(
+      surface.dropCutter(LENGTH - PAD - 0.01, -HALF + PAD + 0.01)!,
+      surface.dropCutter(LENGTH - PAD - 0.01, HALF - PAD - 0.01)!,
+    );
+    const { region, regionRef } = rectRegion(0, deepest - 1e-6);
+    return finish({
+      cutter: ball6, region, regionRef, clSurface: clSurface(geometry, region, ball6, 3), kind: 'ball-scallop',
+      scallopMm: 0.1, stepDownMm: 2, feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
+      safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+    });
+  };
+
+  it('a diagonal crease bin is not straight and reads the magnitude: its rows take the finer spacing', () => {
+    // The V-ridge's faces are at 60°; the cross-row read sees 60° (the vertex sample's face), the
+    // magnitude atan(tan60·√2) = 67.79°. The second difference at the crease is 2·slope·h = 0.35 mm,
+    // far over the 0.1 mm scallop, so the bin takes the magnitude and its rows the finer step.
+    const steepSlope = Math.tan((60 * Math.PI) / 180);
+    const rows = rasterRows(job(creaseMesh(steepSlope, LENGTH, HALF)).ir);
+    expect(rows.length).toBeGreaterThan(2);
+    let minGap = Infinity;
+    for (let i = 1; i < rows.length; i++) minGap = Math.min(minGap, rows[i]! - rows[i - 1]!);
+    const magDeg = (Math.atan(steepSlope * Math.SQRT2) * 180) / Math.PI;
+    const cosT = Math.cos((magDeg * Math.PI) / 180);
+    const magStep = cosT * 2 * Math.sqrt(2 * 3 * (0.1 * cosT) - (0.1 * cosT) ** 2);
+    // RED at 3cce4dd83: the crease's bins read 60° and the tightest gap is the 0.54 mm step; the
+    // magnitude's is 0.36 mm. The allowance covers the row guard's snap to the old grid.
+    expect(minGap, `tightest row gap ${minGap.toFixed(3)} mm against the magnitude's ${magStep.toFixed(3)} mm`).toBeLessThan(magStep * 1.15);
+  }, 240_000);
 });

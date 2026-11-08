@@ -93,6 +93,26 @@ export class PlanFinishTooManyMoves extends Error {
 /** A raster row steeper than this is a wall: not finishable by raster, skipped with a note. */
 const WALL_SKIP_DEG = 80;
 
+/**
+ * #1080 (6b's ruling) — THE CROSS-ROW TRIANGLE SLOPE: |∂z/∂x|, the direction the raster rows
+ * ADVANCE (rows run along y, `x += stepOverMm`). The cusp a row spacing creates is across the
+ * rows only; a wall running ALONG the rows has no cusp between them, and reading its gradient
+ * magnitude pinned every band at the wall's own angle (the bottom job's 60° wall: 46 rings' worth
+ * of rows where the gentle spacing was due).
+ */
+function crossRowSlopeDeg(positions: Float32Array, a: number, b: number, c: number): number {
+  const ux = positions[b]! - positions[a]!;
+  const uy = positions[b + 1]! - positions[a + 1]!;
+  const uz = positions[b + 2]! - positions[a + 2]!;
+  const vx = positions[c]! - positions[a]!;
+  const vy = positions[c + 1]! - positions[a + 1]!;
+  const vz = positions[c + 2]! - positions[a + 2]!;
+  const nx = uy * vz - uz * vy;
+  const nz = ux * vy - uy * vx;
+  if (!(Math.hypot(nx, nz) > 0)) return 0;
+  return (Math.atan(Math.abs(nx) / Math.abs(nz)) * 180) / Math.PI;
+}
+
 /** Triangle slope from its normal: the angle between the normal and +Z, degrees. */
 function triangleSlopeDeg(positions: Float32Array, a: number, b: number, c: number): number {
   const ux = positions[b]! - positions[a]!;
@@ -267,17 +287,27 @@ function depthLevels(zTop: number, zBottom: number, stepDownMm: number): number[
  * R; two centres `stepOverMm` apart horizontally are `stepOverMm * cos(theta)` apart ALONG that
  * line; the normal-direction cusp between them is the sagitta `R - sqrt(R^2 - (d/2)^2)` for their
  * half-spacing `d = stepOverMm * cos(theta)`, and the VERTICAL cusp (what `bandMm` states) is that
- * normal cusp divided by `cos(theta)` again. Solving `bandMm = (R - sqrt(R^2 - (stepOverMm *
- * cos(theta) / 2)^2)) / cos(theta)` for `stepOverMm` gives the closed form below. Measured
- * red-first (`finishOp960.spec.ts`) against an ALL-rows cusp scan (not just the bracketing pair)
- * on the tray's own 18° ramp: 1.4254mm step-over for a 3mm-radius ball and a 0.1mm band, cusp
- * 0.1000mm — confirmed, not assumed.
+ * normal cusp divided by a cosine again. #1080 (6b's ruling): THE TWO COSINES ARE DIFFERENT
+ * ANGLES — the vertical band is converted to the normal cusp by the gradient MAGNITUDE (the
+ * surface's own tilt), while the row pitch is converted to pitch along the surface by the
+ * CROSS-ROW component (the direction the rows advance). With one angle doing both jobs a wall
+ * along the rows read its magnitude and lost the rows it never needed; with the split, the closed
+ * form is `stepOver = cos(alpha) * 2 * sqrt(2R*h_n - h_n^2)` at `h_n = band * cos(theta_mag)`.
+ * Measured red-first (`finishOp960.spec.ts`) against an ALL-rows cusp scan (not just the
+ * bracketing pair) on the tray's own 18° ramp: 1.4254mm step-over for a 3mm-radius ball and a
+ * 0.1mm band, cusp 0.1000mm — confirmed, not assumed.
  */
-function ballScallopStepOver(radiusMm: number, bandMm: number, steepestSlopeDeg: number): number {
+function ballScallopStepOver(radiusMm: number, bandMm: number, crossDeg: number, magDeg: number): number {
   if (!(radiusMm > 0) || !(bandMm > 0) || bandMm >= radiusMm) return Math.max(radiusMm, 0.1);
-  const cosTheta = Math.cos((steepestSlopeDeg * Math.PI) / 180);
-  const bandPrime = bandMm * cosTheta;
-  const spacing = cosTheta * 2 * Math.sqrt(Math.max(0, 2 * radiusMm * bandPrime - bandPrime * bandPrime));
+  // #1080 (6b's ruling) — THE TWO COSINES DO DIFFERENT JOBS. The band is a VERTICAL cusp: on a
+  // surface at the gradient magnitude theta, a vertical band of `bandMm` is only `bandMm*cos(theta)`
+  // along the normal. The cross-row angle alpha then converts the row pitch into pitch along the
+  // surface (a row advances horizontally by `pitch`). One angle cannot do both. 6b's naming, which
+  // the unit governs: a plane tilted ALONG the rows (its slope along y, alpha ~ 0) moves 1.54 ->
+  // 1.09; a plane tilted ACROSS the rows (alpha = theta_mag) is unchanged from the first slice.
+  const cosCross = Math.cos((crossDeg * Math.PI) / 180);
+  const bandPrime = bandMm * Math.cos((magDeg * Math.PI) / 180);
+  const spacing = cosCross * 2 * Math.sqrt(Math.max(0, 2 * radiusMm * bandPrime - bandPrime * bandPrime));
   // THE PROPERTY SEEDS FOUND THIS: as the steepest slope approaches vertical the closed form
   // collapses to ZERO — and `finish()`'s raster advances `x += stepOverMm`, so the op never
   // returns. A vertical face is not finished by spending raster rows on it at all (the wall is the
@@ -388,9 +418,13 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // skipping lost the organizer 10 points.
   const BIN_MM = 0.25;
   const binCount = Math.max(1, Math.ceil((max[0] - min[0]) / BIN_MM));
-  const binSlope = new Float64Array(binCount).fill(Number.NaN);
+  // #1080 (6b's straight-strip gate) — BOTH triangle reads per bin: the cross-row component and
+  // the gradient magnitude. Which one sizes the band is the CL block's call, per bin.
+  const binCrossSlope = new Float64Array(binCount).fill(Number.NaN);
+  const binMagSlope = new Float64Array(binCount).fill(Number.NaN);
   if (opts.mesh === undefined) {
-    binSlope.fill(opts.region.slopeDeg[1]);
+    binCrossSlope.fill(opts.region.slopeDeg[1]);
+    binMagSlope.fill(opts.region.slopeDeg[1]);
   } else {
     const { positions, indices } = opts.mesh;
     for (const t of opts.region.triangles) {
@@ -398,16 +432,19 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       const b = indices[t * 3 + 1]! * 3;
       const c = indices[t * 3 + 2]! * 3;
       const xs = [positions[a]!, positions[b]!, positions[c]!];
-      const slope = triangleSlopeDeg(positions, a, b, c);
+      const cross = crossRowSlopeDeg(positions, a, b, c);
+      const mag = triangleSlopeDeg(positions, a, b, c);
       const lo = Math.max(min[0], Math.min(...xs));
       const hi = Math.min(max[0], Math.max(...xs));
       const first = Math.floor((lo - min[0]) / BIN_MM);
       const last = Math.floor((hi - min[0]) / BIN_MM);
       for (let k = Math.max(0, first); k <= Math.min(binCount - 1, last); k++) {
-        if (!(binSlope[k]! >= slope)) binSlope[k] = slope;
+        if (!(binCrossSlope[k]! >= cross)) binCrossSlope[k] = cross;
+        if (!(binMagSlope[k]! >= mag)) binMagSlope[k] = mag;
       }
     }
   }
+  const binSlope = new Float64Array(binCount);
   // #960 — AND THE CL SURFACE'S OWN SLOPE per bin, sampled from the surface the rows actually
   // follow: the ball's CL is what turns a cliff into a shoulder over the cutter's radius, so a
   // bin's triangle slopes alone under-read it. Both reads are kept, the steeper wins.
@@ -417,12 +454,21 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     const radius = profile.radiusMm;
     for (let k = 0; k < binCount; k++) {
       const xc = min[0] + (k + 0.5) * BIN_MM;
-      let steepest = Number.isNaN(binSlope[k]!) ? 0 : binSlope[k]!;
+      let cross = Number.isNaN(binCrossSlope[k]!) ? 0 : binCrossSlope[k]!;
+      let mag = Number.isNaN(binMagSlope[k]!) ? 0 : binMagSlope[k]!;
+      // #1080 (6b's straight-strip gate) — the cross-row component is right only where the CL is
+      // a STRAIGHT ramp in x across the strip. The test is the second difference over the row
+      // sampling, |z(xc+h) − 2·z(xc) + z(xc−h)|, at each of the strip's y samples: over the
+      // scallop, the bin crosses a ridge or a valley, the ball rides the kink, and the bin keeps
+      // the gradient magnitude (the pre-#1080 read, so every card's leftover is what it was).
+      let straight = true;
+      let mouth = false;
       for (let s = 0; s < ys; s++) {
         const y = min[1] + ((s + 0.5) / ys) * (max[1] - min[1]);
         const z0 = opts.clSurface.dropCutter(xc, y);
         const zx = opts.clSurface.dropCutter(xc + h, y);
         const zy = opts.clSurface.dropCutter(xc, y + h);
+        const zm = opts.clSurface.dropCutter(xc - h, y);
         // #960 — A POCKET MOUTH inside the cutter's own reach: the ball rides the shoulders across
         // the opening, so any row over it leaves the mouth's depth standing and the rows' phase
         // decides how much. Those bands keep the old dense floor so nothing is lost.
@@ -430,12 +476,18 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         const zr = opts.clSurface.dropCutter(xc + radius, y);
         // A ball bridging a gap sits HIGHER than its neighbours (the CL is a local ridge over the
         // mouth); that ridge is the signature, not a left-right difference across the opening.
-        if (zl !== null && zr !== null && z0 !== null && z0 - Math.max(zl, zr) > opts.scallopMm) steepest = 90;
+        if (zl !== null && zr !== null && z0 !== null && z0 - Math.max(zl, zr) > opts.scallopMm) mouth = true;
+        if (z0 === null || zx === null || zm === null) straight = false;
+        else if (Math.abs(zx - 2 * z0 + zm) > opts.scallopMm) straight = false;
         if (z0 === null || zx === null || zy === null) continue;
-        const slope = (Math.atan(Math.hypot((zx - z0) / h, (zy - z0) / h)) * 180) / Math.PI;
-        if (slope > steepest) steepest = slope;
+        const crossSlope = (Math.atan(Math.abs((zx - z0) / h)) * 180) / Math.PI;
+        const magSlope = (Math.atan(Math.hypot((zx - z0) / h, (zy - z0) / h)) * 180) / Math.PI;
+        if (crossSlope > cross) cross = crossSlope;
+        if (magSlope > mag) mag = magSlope;
       }
-      binSlope[k] = steepest;
+      // #1080 — the magnitude read, CL included, is the bin's theta_mag whatever the gate chose.
+      binMagSlope[k] = mag;
+      binSlope[k] = mouth ? 90 : straight ? cross : mag;
     }
   }
   // #960 — the band's slope is the STEEPEST within a small window: a cliff's cell lies in the next
@@ -467,11 +519,25 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     : flatRasterStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1]);
   const regionStepOverMm =
     opts.kind === 'ball-scallop'
-      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1])
+      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, opts.region.slopeDeg[1], opts.region.slopeDeg[1])
       : flatRowStepMm;
+  // #1080 — the band's two reads, each the STEEPEST within the cutter's reach window: alpha (the
+  // cross-row component, the gate's per-bin choice) and theta_mag (the gradient magnitude from the
+  // same bin fill, whatever the gate chose there).
+  const bandMagAt = (x: number): number => {
+    const k = Math.min(binCount - 1, Math.max(0, Math.floor((x - min[0]) / BIN_MM)));
+    let best = 0;
+    for (let d = -WINDOW_BINS; d <= WINDOW_BINS; d++) {
+      const kk = k + d;
+      if (kk < 0 || kk >= binCount) continue;
+      const v = binMagSlope[kk]!;
+      if (!Number.isNaN(v) && v > best) best = v;
+    }
+    return best;
+  };
   const bandStepOverAt = (x: number): number =>
     opts.kind === 'ball-scallop'
-      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, bandSlopeAt(x))
+      ? ballScallopStepOver(profile.radiusMm, opts.scallopMm, bandSlopeAt(x), bandMagAt(x))
       : flatRowStepMm;
   let wallBandsCut = 0;
 
