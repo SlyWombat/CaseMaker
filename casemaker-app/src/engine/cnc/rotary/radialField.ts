@@ -247,7 +247,12 @@ export function sampleGoalRadialField(
       // footprint lives in MAP angle (the seam already added); the GEOMETRY's own angle is that
       // less the seam, because the mesh itself is not rotated — the map is.
       const j = ((jj % ny) + ny) % ny;
-      const ang = (jj * pitch) / radius - seam;
+      // #1096 — THE ROW'S OWN ANGLE, not the unwrapped index's. `ny = ceil(2πR / pitch)` makes
+      // `ny · pitch` up to one cell MORE than the circumference, so a negative `jj` (a triangle
+      // whose first vertex has a negative φ) cast at `jj · pitch / radius` is up to a cell off the
+      // row `j` it is recorded in — at a cliff that reads the wrong radius entirely (the panther's
+      // 36 near-axis pinholes). The retry pass below already casts this way.
+      const ang = (j * pitch) / radius - seam;
       for (let i = iLo; i <= iHi; i++) record(j * nx + i, rayHit(t, x0 + i * pitch, ang));
     }
   }
