@@ -3,9 +3,11 @@
 // margin verdict, write the origin only from a measurement inside the margin, and record the
 // outcome in #494's seam. The console is a fake client; nothing reaches a machine.
 
+import { readFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { jobVise } from '@/engine/cnc/fixture';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
   setMachineConsoleLoader,
   type ConsoleSend,
@@ -18,6 +20,7 @@ import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { BUNDLED_FONT_KEYS, clearFontCacheForTest, registerBundledFontBytes } from '@/engine/fonts/registry';
 import { defaultRotaryChuck } from '@/engine/cnc/engrave/setupFlow';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
@@ -1283,5 +1286,98 @@ describe('#1070 the proposals need no saved setup for a bed-held job', () => {
     const button = screen.getByTestId('engrave-registration-approve-start') as HTMLButtonElement;
     expect(button.textContent).toContain('Measure the bracket seat');
     expect(screen.getByTestId('engrave-registration-proposal-line').textContent ?? '').toContain('seat');
+  });
+});
+
+/**
+ * #1082 — THE REGISTER CARD MUST SURVIVE THE COLD PAINT TOO. Its proposal is planned in a
+ * render-time memo (`planRegistrationAttempt` → `cutRegionOf` → `toPartPlan` → `resolveFont`);
+ * with the bundled faces not yet parsed, `resolveFont` throws by design and the Cut surface
+ * would fall into its boundary exactly as the Setups section did. The card waits for the faces
+ * and proposes once they land.
+ */
+function reloadBundledFonts(): void {
+  const dir = resolvePath(process.cwd(), 'src/engine/fonts/files');
+  for (const key of BUNDLED_FONT_KEYS) {
+    const buf = readFileSync(resolvePath(dir, `${key}.ttf`));
+    registerBundledFontBytes(key, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+  }
+}
+
+describe('#1082 the Register card on a cold first paint', () => {
+  afterEach(() => reloadBundledFonts());
+
+  it('renders before the label faces are loaded, then proposes once they land', async () => {
+    const base = defaultEngraveJob();
+    const job: EngraveJob = {
+      ...base,
+      name: 'cold-paint bracket',
+      stock: { ...base.stock, length: 160, width: 126, thickness: 25, material: 'hardwood' },
+      labels: defaultEngraveJob().labels,
+      shapes: [],
+      setups: [],
+      workholding: {
+        kind: 'bracket',
+        bracket: { anchor: 1, variant: 'thin', clamps: [{ edge: 'back', at: 63 }], source: 'default' },
+      },
+    };
+    useEngraveJobStore.setState({ job });
+    resetEngraveRegistrationStore();
+    useEngraveRunStore.setState({ acknowledged: true });
+    // A bed profile whose bracket seat IS measured: the proposal goes past the seat press and
+    // reads the job's cut region — the call that typesets the labels.
+    useLocationStore.setState({
+      status: 'present',
+      etag: '"e-seat"',
+      reason: null,
+      location: {
+        machines: [
+          {
+            id: 'm-seat',
+            profileId: 'Z1',
+            address: { host: TARGET.host, port: TARGET.port },
+            bedProfiles: [
+              {
+                id: 'bp-seat',
+                datums: {
+                  surfaceTopZ: null,
+                  viseJawTopZ: null,
+                  bracketSeatZ: { value: -56.8, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1', at: null },
+                  rotaryAxis: null,
+                },
+                placements: [],
+                surface: null,
+                history: [],
+              },
+            ],
+            activeBedProfileId: 'bp-seat',
+            history: [],
+            notes: [],
+            observedAt: '2026-11-08T00:00:00.000Z',
+          },
+        ],
+        accessories: [],
+      } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>,
+    });
+    const cal = {
+      frame: { anchor1: [-190.89, -193.83], anchor2Offset: [88.5, 45], clearanceXY: [-11.6, -14.6], clearanceZ: -3, toolrackOffset: [48.8, 181], toolrackZ: -108 },
+      machineId: 'Z1',
+      measuredAt: '2026-11-08T00:00:00.000Z',
+      softEndstop: { enabled: true, xMin: -207, yMin: -206, zMin: -102, source: 'config-get sd' },
+      source: 'config',
+    };
+    useSettingsStore.setState({ machineCalibration: cal as unknown as ReturnType<typeof useSettingsStore.getState>['machineCalibration'] });
+    clearFontCacheForTest();
+    // Before the fix this render throws out of the proposal memo (the same resolveFont guard).
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    expect(screen.getByTestId('engrave-registration')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-registration-proposal')).toBeNull();
+    // A face lands: the memo re-plans and the card states its proposal (a plan or its refusal).
+    act(() => reloadBundledFonts());
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId('engrave-registration-proposal') ?? screen.queryByTestId('engrave-registration-no-plan'),
+      ).toBeTruthy(),
+    );
   });
 });

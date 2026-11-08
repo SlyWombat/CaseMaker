@@ -43,7 +43,7 @@
  * sheet, which prints the measured landing range.
  */
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type JSX } from 'react';
 import type { EngraveJob } from '@/types/engraveJob';
 import { probeInstrumentOf, type RegistrationPlan } from '@/engine/cnc/registration/plan';
 import { isSeatPlan, seatTapArgs } from '@/engine/cnc/registration/seatPress';
@@ -121,6 +121,11 @@ import { useMachineStore } from '@/store/machineStore';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
+// #1082 — the proposal is planned through the part plan, which typesets every label; on a cold
+// paint of the Cut surface the bundled faces may not be parsed yet and `resolveFont` throws by
+// design. Wait for the faces (this card may be the first thing the operator opens) and propose
+// once they land — the same guard the Setups section carries.
+import { ensureLabelFontsLoaded, facesLoadedEpoch, labelFontsLoaded, subscribeFacesLoaded } from '@/engine/fonts/registry';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const BOX: CSSProperties = {
@@ -266,8 +271,18 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   const probeName = useMemo(() => probeNameFor(machineRecord), [machineRecord]);
   const setupSettings = useMemo(() => setupsSettings(defaults), [defaults]);
   const rotaryEnvelope = useMemo(() => rotaryOf(jobMachine(job, calibration))?.envelope, [job, calibration]);
+  // #1082 — THE PROPOSAL WAITS FOR THE LABEL FACES. `planRegistrationAttempt` reads the job's cut
+  // region (`toPartPlan` → `labelProfile` → `resolveFont`), and on the cold first paint the
+  // bundled faces may not be parsed: deriving then throws out of this memo and the Cut surface
+  // falls into its boundary. The epoch subscription re-plans once a face lands.
+  const facesEpoch = useSyncExternalStore(subscribeFacesLoaded, facesLoadedEpoch);
+  useEffect(() => {
+    if (labelFontsLoaded(job.labels, job.customFonts ?? [])) return;
+    void ensureLabelFontsLoaded(job.labels, job.customFonts ?? []).catch(() => {});
+  }, [job.labels, job.customFonts]);
   const proposal = useMemo<RegistrationAttempt | null>(() => {
     if (plan !== null) return null;
+    if (!labelFontsLoaded(job.labels, job.customFonts ?? [])) return null;
     // #1070 — NO SAVED-SETUP PREREQUISITE: a bed-held job's setup IS the job. With no
     // `job.setups[]` the proposal is planned from the stock + mount derived here; approval
     // materialises that setup with the registration on it, and an unapproved plan writes nothing.
@@ -319,6 +334,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     defaults,
     calibration,
     regSettings,
+    // #1082 — a face landing must re-plan (the job object is unchanged when it does).
+    facesEpoch,
   ]);
   const [proposalOpen, setProposalOpen] = useState(false);
   // #1070 (C8) — the placed bracket's position press (the bed profile's seed, from the hole grid).
