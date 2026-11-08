@@ -56,6 +56,7 @@ import { vCarveLevels, vCarvePlane, vCarveRowStepover } from '@/engine/cnc/vCarv
 import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
 import { axesWord, describeTouch, kindWord, PROBE_SPEC, readsWord, registrationFor, sideWords } from '@/engine/cnc/engrave/registration';
 import { flipFenceFacts, flipZ0, FLIP_BORE_CHIP_CLEARANCE_MM, FLIP_BORE_DIAMETER_MM, type FlipZ0 } from './flipChoice';
+import { flipDiagramSvg } from './flipDiagram';
 import { FLIP_PROBE_ENTRY_DEPTH_MM } from '@/engine/cnc/registration/plan';
 import {
   alongWord,
@@ -738,6 +739,12 @@ export interface RunSheetSection {
   id: string;
   title: string;
   steps: RunSheetStep[];
+  /**
+   * #1073(a) — THE FLIP DRAWING ON THE SETUP'S PAGE, as standalone SVG markup: the same string the
+   * Setups row draws (`flipDiagramSvg`), carried for the program whose setup states the flip.
+   * ABSENT on every other section, so those sheets are byte-identical.
+   */
+  flipDiagramSvg?: string;
 }
 
 /** One item's bounding box on the origin diagram, in the STOCK frame, mm. */
@@ -2510,6 +2517,12 @@ export interface RunSheetOptions {
    * rule with the record blanks instead of the sum.
    */
   flipZ0?: { seatMm: number; thicknessMm: number; facingMm?: number; toleranceMm?: number };
+  /**
+   * #1073(a) — THE FREED PART'S EXTENTS for the sheet's flip drawing (the vendor method's outline),
+   * measured by the caller (`partSilhouetteOf`). Absent: the drawing shows the blank and the bores
+   * only, exactly as it does when no silhouette is known.
+   */
+  flipPart?: { minX: number; minY: number; maxX: number; maxY: number } | null;
   /**
    * #475 — the shop's `registration.surfaceTouchCount`: how many surface touches the cut regions'
    * extents get. Resolved by the caller from `registrationSettings(defaults).settings`, never read
@@ -5443,7 +5456,7 @@ export function buildRunSheet(
   // `drill` block, a rest program's measured pair, or — for any other program — its file, CAM
   // summary and frame. The run is the files played in order, so the sections are the physical
   // order too: after program 1 finishes, the operator meets program 2's swap (or bit) here.
-  const programSections: { id: string; title: string; steps: RunSheetStep[] }[] = [];
+  const programSections: RunSheetSection[] = [];
   // The turn between setups opens the first section of the next setup. A board's own section
   // already states its turn, and a rotary job's turns are the A axis's, so neither repeats it here.
   // A 3D goal turned over to cut its other side has nothing left holding the part once that side
@@ -5506,6 +5519,20 @@ export function buildRunSheet(
       }
       const opened = programSections[sectionStart];
       if (opened !== undefined && turn.length > 0) opened.steps = [...turn, ...opened.steps];
+      // #1073(a) — THE FLIP DRAWING ON THIS SETUP'S PAGE: the same SVG the Setups row shows, built
+      // for the program's own setup when it states a flip.
+      const programSetup = jobSetups(job)[program.setupIndex - 1];
+      if (opened !== undefined && programSetup?.flip !== undefined) {
+        opened.flipDiagramSvg = flipDiagramSvg({
+          lengthMm: job.stock.length,
+          widthMm: job.stock.width,
+          flip: programSetup.flip,
+          ...(job.stock.squareCorners === undefined ? {} : { squareCorners: job.stock.squareCorners }),
+          ...(programSetup.pins === undefined ? {} : { pins: programSetup.pins.at }),
+          breakthroughMm: job.breakthrough,
+          part: options.flipPart ?? null,
+        });
+      }
       // #926 — every program states its own efficiency, not only program 1's, and it goes right
       // after the section's opening sentence ("Program N is …"): the section's last step must stay
       // the last physical action (the saw, "Stay at the machine").

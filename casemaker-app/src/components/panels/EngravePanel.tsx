@@ -57,7 +57,8 @@ import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
 import { efficiencyThresholds, readDefault } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
-import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobMount, jobSetups, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobMount, jobSetups, jobTargetObjects, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { partSilhouetteOf } from '@/engine/cnc/engrave/flipSilhouette';
 // #835 — one setup's own work, measured and written back into that setup only.
 import { deadSetupKeys, replacementCutter } from '@/engine/cnc/engrave/setupWork';
 import { measureFingerprint } from '@/engine/cnc/engrave/measuredPick';
@@ -2609,6 +2610,19 @@ export function EngravePanel(): JSX.Element {
               : undefined,
           // #1070 — the footprint plan, or the first seat seek, from the one shared seam.
           ...sheetReg,
+          // #1073(a) — THE FREED PART'S EXTENTS for the sheet's flip drawing: measured the same
+          // way the Setups row measures them, only when a setup states the flip.
+          ...(() => {
+            if (job.setups?.some((su) => su.flip !== undefined) !== true) return {};
+            const goal = jobTargetObjects(job).find((t) => (t.role ?? 'reference') === 'goal' && t.enabled !== false);
+            if (goal === undefined) return {};
+            try {
+              const sil = partSilhouetteOf(goal);
+              return sil === null ? {} : { flipPart: sil.box };
+            } catch {
+              return {};
+            }
+          })(),
           // #1073 — A FLIP'S CARRIED Z0, in machine terms (6b's amendment A): side 2's top =
           // seat + the measured thickness (side 1's top touch less the seat) − side 1's facing.
           // Only when a setup states the flip and the house has measured the seat and the top —
