@@ -929,7 +929,9 @@ describe('#747 the frame is traced inside the envelope, and never gates a verifi
     shape.diameter = 5;
     shape.depth = 2;
     shape.position = { x: 199, y: 67 };
-    for (const clamp of hold.bracket.clamps) clamp.at = clamp.edge === 'back' ? 100 : 67;
+    // #1068 — the clamps must clear the pocket this test draws (a ⌀5 at (199, 67) on the right
+    // edge): the CLI now checks the mount it states, and a right clamp at 67 would sit over it.
+    for (const clamp of hold.bracket.clamps) clamp.at = clamp.edge === 'back' ? 100 : 20;
     writeFileSync(join(SCRATCH, 'fx-frame-outside.json'), JSON.stringify(job, null, 2));
 
     const { code, receipt } = await cut('fx-frame-outside.json', SCRATCH);
