@@ -165,44 +165,48 @@ interface BodyPart {
 
 /**
  * THE BODY, AS THE PARTS THAT CAN COLLIDE — each a drop-cutter profile standing at its own height
- * above the tip (#1092):
- *  - A FLAT: ONE flat cylinder of `max(cutting radius, handle radius)` from the tip — the #970
- *    stand-in, kept. On a flat the shank sits directly above the cutting edges, so a tip-height
- *    cylinder is exact for the cutting body and merely conservative above it.
- *  - A BALL: up to THREE parts, in the tool's own order. The ball's own round profile (tip at the
- *    posted z); the NECK — a cylinder of the CUTTING radius from the ball's centre (`z + R`) up to
- *    the stated shoulder length, which is what a ball nose actually is above its equator; and only
- *    then the SHANK — a cylinder of the handle's radius, its lowest point at the SHOULDER LENGTH,
- *    never lower. Two measured corrections over the old single-cylinder stand-in, which stood the
- *    handle's radius in AT THE TIP: (a) that over-cut by the shank radius on every sloped move —
- *    110,486 findings over 1 mm on the elephant at 7a7bac78c, burying the real 20.9 mm gouge;
- *    (b) standing the handle at the ball's CENTRE alone still put a synthetic ⌀2 ball's ⌀3.175
- *    shoulder on every wall (56,677 findings over 1 mm) — a ball nose's shank starts at its stated
- *    shoulder (the job's is "6*2*30.5": ⌀2 to 30.5 mm, only then ⌀6), and with no shoulder stated
- *    the centre is the conservative floor.
+ * above the posted tip (#1092), in the tool's own order:
+ *  - THE CUTTING SHAPE: `profileOf`'s own profile at the tip — a flat's cylinder, a ball's sphere,
+ *    a V's cone. This is exact for all three; the old single-cylinder stand-in instead stood the
+ *    handle's radius in AT THE TIP, which over-cut by the shank radius on every sloped move
+ *    (110,486 findings over 1 mm on the elephant at 7a7bac78c, burying the real gouge), and it
+ *    reported a 90° chamfer's own cone height (1.537 mm) as a collision.
+ *  - A BALL'S NECK: the cutting radius from the ball's centre (`z + R`) up to the stated shoulder
+ *    — what a ball nose is above its equator, wider than the sphere there.
+ *  - THE SHANK: the handle's radius, its lowest point at the stated SHOULDER LENGTH, never lower
+ *    (a ball with none stated falls back to its centre). A ball nose's shank starts at its
+ *    shoulder — the job's own is "6*2*30.5": ⌀2 to 30.5 mm, only then ⌀6 — and standing it lower
+ *    put that ⌀6 body on every steep wall.
  * `null` only when the cutter has no drop-cutter profile at all (`profileOf`'s own stated scope).
  */
 function bodyParts(tool: Tool): BodyPart[] | null {
   const base = profileOf(tool);
   if (base === null) return null;
+  const R = base.radiusMm;
   const shankRadius = tool.handleDiameter !== null && tool.handleDiameter > 0 ? tool.handleDiameter / 2 : 0;
-  if (tool.shape === 'ball') {
-    const R = base.radiusMm;
-    const shoulder = tool.shoulderLength ?? tool.fluteLength;
-    const shoulderMm = shoulder !== null && shoulder > R ? shoulder : R;
-    const parts: BodyPart[] = [{ profile: base, zOffsetMm: 0, label: 'ball' }];
-    if (shoulderMm > R + 1e-9) {
-      const neck: CutterProfile = { radiusMm: R, flatRadiusMm: R, kind: 'flat' };
-      parts.push({ profile: neck, zOffsetMm: R, label: 'neck' });
-    }
-    if (shankRadius > R + 1e-9) {
-      const shank: CutterProfile = { radiusMm: shankRadius, flatRadiusMm: shankRadius, kind: 'flat' };
-      parts.push({ profile: shank, zOffsetMm: shoulderMm, label: 'shank' });
-    }
-    return parts;
+  const shoulder = tool.shoulderLength ?? tool.fluteLength;
+  const shoulderMm = shoulder !== null && shoulder > 0 ? shoulder : null;
+  // (1) THE CUTTING SHAPE ITSELF, exactly `profileOf`'s own — a flat's cylinder, a ball's sphere,
+  // a V's cone. Standing a V in as a flat of its outer radius at the tip reported the cone's own
+  // height (1.537 mm on the 90° chamfer) as a collision, a pure model artefact.
+  const parts: BodyPart[] = [{ profile: base, zOffsetMm: 0, label: tool.shape === 'ball' ? 'ball' : 'cutting' }];
+  // (2) A BALL'S NECK: the cutting diameter continues as a cylinder from the ball's centre up to
+  // the shoulder — wider than the sphere above its equator.
+  if (tool.shape === 'ball' && shoulderMm !== null && shoulderMm > R + 1e-9) {
+    const neck: CutterProfile = { radiusMm: R, flatRadiusMm: R, kind: 'flat' };
+    parts.push({ profile: neck, zOffsetMm: R, label: 'neck' });
   }
-  const radiusMm = Math.max(base.radiusMm, shankRadius);
-  return [{ profile: { radiusMm, flatRadiusMm: radiusMm, kind: 'flat' }, zOffsetMm: 0, label: 'body' }];
+  // (3) THE SHANK, only when the handle is wider than the cutting shape, and never lower than the
+  // stated shoulder. With no shoulder stated a ball's shank starts at its centre (the
+  // conservative floor); any other shape starts at its cutting shape's own top (a V's cone
+  // height), which is exact for a cone and the stated fallback for a flat.
+  if (shankRadius > R + 1e-9) {
+    const coneHeightMm = base.kind === 'cone' ? (R - base.flatRadiusMm) / (base.tanHalfAngle ?? 1) : 0;
+    const startMm = shoulderMm ?? (tool.shape === 'ball' ? R : coneHeightMm);
+    const shank: CutterProfile = { radiusMm: shankRadius, flatRadiusMm: shankRadius, kind: 'flat' };
+    parts.push({ profile: shank, zOffsetMm: startMm, label: 'shank' });
+  }
+  return parts;
 }
 
 interface Collision {
