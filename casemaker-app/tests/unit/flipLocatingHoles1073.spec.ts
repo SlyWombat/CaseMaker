@@ -198,17 +198,10 @@ describe('#1073 — the locating holes ride setup 1', () => {
       method: 'tabs-in-blank',
       axis: 'left-right',
     });
-    if (!plan.ok) throw new Error(plan.reason);
-    expect(plan.hold).toBeNull();
-
-    const sided: EngraveJob = { ...job, setups: plan.setups, targetObjects: plan.goals };
-    const tl = await getToplevel();
-    const result = await engraveGenerate(tl, sided, FLAT3, [], null, undefined, { tools: [ballEntry] });
-    expect(result.ok).toBe(false);
-    expect(result.stage).toBe('cam');
-    const message = result.errors.map((e) => e.message).join('; ');
-    expect(message).toContain('locating holes (#1073):');
-    expect(message).toContain('no owned flat end mill');
+    // A stated frame flip cannot be planned without a hold: the plan refuses in the hold's words,
+    // so a job with no cutter able to bore the holes never reaches the bench half-registerable.
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.reason).toContain('no owned flat end mill can bore the two ⌀6 locating holes');
   }, 240_000);
 
   it('refuses a frame flip whose goals carry no band — the saved m1trayF shape', async () => {

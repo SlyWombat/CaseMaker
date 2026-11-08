@@ -124,7 +124,7 @@ describe('#872 the goal-unreached finding', () => {
     const { job, goal } = await goalOf('near-sphere.stl');
     const [finding] = goalFlipFindings(withBoard(job, 6), goal, []);
     expect(finding!.goalFlipAction).toBeUndefined();
-    expect(finding!.goalFlipNeed).toBe('needs a cutter for the ⌀5–6 locating bores — record one in Manage › Tools');
+    expect(finding!.goalFlipNeed).toContain('no owned flat end mill can bore the two ⌀6 locating holes');
   });
 
   it('the accepted fact is the sheet’s line too — its warnings section states it verbatim', async () => {

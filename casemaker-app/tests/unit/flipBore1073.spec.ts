@@ -22,9 +22,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { clearTargetObjectMeshCache, readTargetObjectFile } from '@/engine/import/targetObject';
 import { FLIP_BORE_DIAMETER_MM } from '@/engine/cnc/engrave/flipChoice';
-import { ownedBoreCutter, planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
+import { dowelHold, ownedBoreCutter, planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import { boxTarget } from './helpers/twoSetupBox966';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 
 afterEach(() => clearTargetObjectMeshCache());
@@ -138,5 +139,33 @@ describe('#1073 the bore goes the blank and the job’s breakthrough into the bo
     expect(thin!.goalFlipNeed).toBe('needs a sacrificial board under the blank');
     const [enough] = goalFlipFindings(withUnder(0.3), goal, K3_SHAPED);
     expect(enough!.goalFlipAction).toBeDefined();
+  });
+});
+
+describe('#1073 the hold refuses when the part leaves no margin', () => {
+  it('m1trayF’s real numbers: part X 22..158 on a 160 mm blank — the line at 156 would be on the part', () => {
+    // The tray's own goal: a 106 × 136 part at (90, 63), rotated 90° — its placed bbox is X
+    // 22..158, Y 10..116 on the 160 × 126 blank. The left-right hold line sits at L − 4 = 156,
+    // which is INSIDE the part; before the fix it was clamped there silently.
+    const goal: EngraveTargetObject = { ...boxTarget('tray-margin-1073', 106, 136, 25), position: { x: 90, y: 63, z: 0 }, rotation: 90 };
+    const base = defaultEngraveJob();
+    const job: EngraveJob = { ...base, labels: [], shapes: [], stock: { ...base.stock, length: 160, width: 126, thickness: 25, material: 'hardwood' }, targetObject: goal };
+    const hold = dowelHold(job, goal, 'y', K3_SHAPED);
+    expect(hold.ok).toBe(false);
+    if (!hold.ok) {
+      expect(hold.reason).toContain('the part reaches X 158 on a 160 mm long blank');
+      expect(hold.reason).toContain('need 4 mm clear of it');
+      expect(hold.reason).toContain('the hold line at X 156 would be on the part');
+    }
+  });
+
+  it('a part that fits keeps its hold, in the margin', async () => {
+    const { job, goal } = await sphereJob();
+    const hold = dowelHold(job, goal, 'x', K3_SHAPED);
+    expect(hold.ok).toBe(true);
+    if (hold.ok) {
+      // The sphere sits at Y 15..45 on a 60 mm wide blank: the line is at W − 4 = 56, clear of it.
+      expect(hold.hold.at.map((p) => p.y)).toEqual([56, 56]);
+    }
   });
 });
