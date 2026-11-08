@@ -3992,6 +3992,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   });
 
   for (const region of [...tree.remainder, ...(opts.extraRegions ?? [])]) {
+    // #1054 — one check per region as well as per stage: a memo hit skips `attempt`'s own check,
+    // and a hit-heavy pass must still honour the caller's stop.
+    opts.signal?.throwIfAborted();
     // #1052 (the 4096/8192 traces) — the rank's ⌀0.5 candidate enters this pipeline and outlives the
     // cap inside it; one row per region and per field build shows which structure grows.
     memTrace('curved:region', { id: region.id, top: region.zTop, bottom: region.zBottom });
