@@ -958,13 +958,13 @@ export function checkAirMoves(
   const zTop = Math.max(topZ, fixtureTop) + OVERSHOOT_MM;
   // "Entirely above everything that can be hit": the stock top, and the fixture when there is one.
   const reachTop = fixture === null ? topZ : Math.max(topZ, fixtureTop);
-  // Whether the step-7 retract shortcut (below) is sound for this sweep (#204 follow-up). It is
-  // sound while the retract is contained in check (a)'s checkpoint column — and check (a) only
-  // tests a column that rises from the stock top, which contains the retract exactly when the
-  // fixture's top sits at or below the stock top. A fixture rising above the top is outside that
-  // column and can be hit by a retract the shortcut would wave through, so whenever one is
-  // present the shortcut is disabled and those rapids take the normal path instead: body built
-  // and tested against both stock and fixture. Computed once here, not per move.
+  // Whether the step-7 retract shortcut (below) is sound against the COLUMN (#204 follow-up): the
+  // retract is contained in check (a)'s checkpoint column only while the fixture's top sits at or
+  // below the stock top. #1068-perf — that rule is only the fallback for a union-only caller now:
+  // with the fixture's boxes in hand the retract itself is proven clear analytically (below), so a
+  // bracket's arms above the stock top no longer send every retract down the full exact path — the
+  // puck's ~100k retracts paid a body + a stock boolean + a fixture boolean each (862 s against
+  // 3.9 s without a fixture).
   const retractCoveredByColumn = fixture === null || fixtureTop <= topZ;
   let checked = 0;
   let rechecked = 0;
@@ -1130,7 +1130,26 @@ export function checkAirMoves(
     // which fails as soon as a fixture rises above the stock top (#204 follow-up).
     // A TURN is never a plain retract (#241): the move may climb in Z and still sweep a sector
     // of material at other angles, which the cut's own column does not cover.
-    if (!turn && retractCoveredByColumn && mv.kind === 'rapid' && mv.to[2] > mv.from[2] && mv.to[0] === mv.from[0] && mv.to[1] === mv.from[1]) {
+    const retractGeom =
+      !turn && mv.kind === 'rapid' && mv.to[2] > mv.from[2] && mv.to[0] === mv.from[0] && mv.to[1] === mv.from[1];
+    // #1068-perf — A RETRACT IS PROVEN CLEAR OF THE FIXTURE, not disqualified by it: the exact
+    // stadium test over the vertical leg is arithmetic (see `fixtureStadiumHit`), so the shortcut
+    // survives a clamp or arm above the stock top. A retract that would meet a box falls through
+    // to the full path below and is reported there. The union-only caller keeps the old rule.
+    const retractClearsFixture =
+      !retractGeom || fixture === null
+        ? true
+        : fixtureBoxes.length === 0
+          ? retractCoveredByColumn
+          : fixtureStadiumHit(
+              [mv.from[0], mv.from[1], mv.from[2] - margin],
+              [mv.to[0], mv.to[1], mv.to[2] - margin],
+              radius + margin,
+              margin,
+              zTop + margin,
+              fixtureBoxes,
+            ) === null;
+    if (retractGeom && retractClearsFixture) {
       const end = cutEndByStep.get(mv.step - 1);
       if (end && mv.from[0] === end[0] && mv.from[1] === end[1] && mv.from[2] === end[2]) {
         cleared++;
