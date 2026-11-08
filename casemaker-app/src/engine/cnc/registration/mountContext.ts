@@ -278,6 +278,7 @@ export function bracketSeatDatumFor(machine: MachineRecord | null): {
   value: number;
   what: 'bracket seat' | 'surface top';
   measuredAt: string | null;
+  restsOnStock?: boolean;
 } | null {
   if (machine === null || machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;
   const profile = machine.bedProfiles.find((p) => p.id === machine.activeBedProfileId);
@@ -288,7 +289,9 @@ export function bracketSeatDatumFor(machine: MachineRecord | null): {
   // A profile written before a datum existed has no key for it at all, so `?? null` here is the
   // absence the type promises; `usable` treats null and undefined the same.
   const seat = profile.datums.bracketSeatZ ?? null;
-  if (usable(seat)) return { value: seat!.value, what: 'bracket seat', measuredAt: seat!.measuredAt };
+  // #1070 (C8) — the statement travels WITH the datum: a seat written by the press says it is the
+  // surface the stock rests on (no under-board added again); the surface-top fallback never says so.
+  if (usable(seat)) return { value: seat!.value, what: 'bracket seat', measuredAt: seat!.measuredAt, ...(seat!.restsOnStock === true ? { restsOnStock: true } : {}) };
   const surface = profile.datums.surfaceTopZ ?? null;
   if (usable(surface)) return { value: surface!.value, what: 'surface top', measuredAt: surface!.measuredAt };
   return null;

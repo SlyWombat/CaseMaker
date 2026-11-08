@@ -232,7 +232,9 @@ export function withBracketSeatDatum(
             ...p,
             datums: {
               ...p.datums,
-              bracketSeatZ: { value: seat.z, measuredAt: now, by, at: [seat.at.x, seat.at.y] },
+              // #1070 (C8) — the statement: this seat IS the surface the stock rests on (the
+              // wasteboard beside the bracket's front arm), so the under-board is not added again.
+              bracketSeatZ: { value: seat.z, measuredAt: now, by, at: [seat.at.x, seat.at.y], restsOnStock: true },
             },
             history: [...p.history, { at: now, what }],
           }

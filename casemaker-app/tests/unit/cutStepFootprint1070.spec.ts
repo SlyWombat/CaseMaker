@@ -105,6 +105,32 @@ function attemptFor(job: EngraveJob) {
   return planRegistrationAttempt({ ...baseArgs(job), mount: { kind: 'bracket', board: true } });
 }
 
+describe('#1070 the seat is the board the blank rests on (the gate’s ruling, C8)', () => {
+  /** The tray job as delivered: a 6 mm under-board fixed with screws. */
+  const withUnder = (job: EngraveJob): EngraveJob => ({
+    ...job,
+    sacrificial: { ...job.sacrificial, under: { thickness: 6, overhang: { left: 0, right: 0, front: 0, back: 0 }, attach: 'screws' } },
+  });
+
+  it('a seat that SAYS it is the surface the stock rests on does not add the under again', () => {
+    const job = withUnder(bracketJob());
+    const seat = { value: -85.75, what: 'bracket seat' as const, measuredAt: '2026-11-08T00:00:00.000Z', restsOnStock: true };
+    const input = footprintInputFor({ ...baseArgs(job), mount: { kind: 'bracket', board: true }, bracketSeat: seat });
+    if (!input.ok) throw new Error(input.reason);
+    // The seat press measured the wasteboard the blank stands on: −85.75 + the stock's 25 = −60.75.
+    // The job's 6 mm under IS that board — adding it again would expect −54.75 and miss by 6 mm.
+    expect(input.input.expectedSurface.machineZ).toBe(-60.75);
+  });
+
+  it('a legacy seat with no statement keeps the under-board (seat = the bed, a board on top)', () => {
+    const job = withUnder(bracketJob());
+    const seat = { value: -85.75, what: 'surface top' as const, measuredAt: '2026-11-08T00:00:00.000Z' };
+    const input = footprintInputFor({ ...baseArgs(job), mount: { kind: 'bracket', board: true }, bracketSeat: seat });
+    if (!input.ok) throw new Error(input.reason);
+    expect(input.input.expectedSurface.machineZ).toBe(-54.75); // −85.75 + 6 + 25
+  });
+});
+
 describe('#1070 the Cut step plans a bracket job on its cut region', () => {
   it('a bracket job is a PLAN, not the "hold the blank in the vise" refusal', () => {
     const attempt = attemptFor(bracketJob());

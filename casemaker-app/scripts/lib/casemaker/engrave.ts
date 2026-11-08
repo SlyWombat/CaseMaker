@@ -435,7 +435,9 @@ export function sheetRegistrationFor(
     probeAccessory === undefined ? null : { id: probeAccessory.id, variant: probeAccessory.variant ?? null, instrument: 'z-only' as const, tip };
   const bed = machine?.bedProfiles?.find((p) => p.id === machine.activeBedProfileId);
   const seat = bed?.datums?.bracketSeatZ ?? null;
-  const bracketSeat = seat === null || seat === undefined ? null : { value: seat.value, what: 'bracket seat' as const, measuredAt: seat.measuredAt ?? null };
+  // #1070 (C8) — the seat's own statement travels with it: a seat the press wrote is the surface
+  // the stock rests on, so the expected top does not add the under-board again.
+  const bracketSeat = seat === null || seat === undefined ? null : { value: seat.value, what: 'bracket seat' as const, measuredAt: seat.measuredAt ?? null, ...(seat.restsOnStock === true ? { restsOnStock: true } : {}) };
   // #1070, 6b's ruling (C8) — THE ONE SEAM: the app's sheet and this one plan their registration
   // through the same function; this wrapper only resolves the boot's location into its arguments.
   return sheetRegistrationPlan({ job, calibration, defaults: where.defaults, probe, bracketSeat });

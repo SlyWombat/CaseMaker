@@ -218,6 +218,14 @@ export interface BracketSeatDatum {
   what: 'bracket seat' | 'surface top';
   /** When it was measured, ISO, or null for a legacy reading that did not carry a date. */
   measuredAt: string | null;
+  /**
+   * #1070 (C8, the gate's ruling) — THE DATUM SAYS IT IS THE SURFACE THE STOCK RESTS ON. The seat
+   * press touches the wasteboard beside the bracket's front arm, and the blank stands on that same
+   * board: a seat written with this flag set already includes the board the job calls its
+   * sacrificial under, so `bracketExpectedSurface` must not add that thickness again. Absent on
+   * readings taken before the flag existed — those keep the old under-board arithmetic.
+   */
+  restsOnStock?: boolean;
 }
 
 /**
@@ -228,16 +236,18 @@ export interface BracketSeatDatum {
 function bracketSeatReading(
   map: ShopDefaults | null,
   bedSeat: BracketSeatDatum | null,
-): { value: number; source: string; setAt: string | null } | null {
+): { value: number; source: string; setAt: string | null; restsOnStock: boolean } | null {
   if (bedSeat !== null) {
-    return { value: bedSeat.value, source: `the bed profile’s ${bedSeat.what}`, setAt: bedSeat.measuredAt };
+    return { value: bedSeat.value, source: `the bed profile’s ${bedSeat.what}`, setAt: bedSeat.measuredAt, restsOnStock: bedSeat.restsOnStock === true };
   }
   // #509 — THE LEGACY SHOP DEFAULT, KEPT FOR ONE RELEASE (removed in 1.1). A shop whose bracket
   // seat was tapped before bed profiles carried one still has the reading under
   // `bracket.seatMachineZ`; reading it keeps their bracket path working through this release. The
   // datum write-back (`writeBracketSeat`) has mirrored both since #607, so a machine that has
-  // tapped since then resolves from the profile above and never reaches this line.
-  return readMeasured(map, 'bracket.seatMachineZ');
+  // tapped since then resolves from the profile above and never reaches this line. It never
+  // carries the rests-on-stock statement — it predates it, and the old arithmetic applies.
+  const legacy = readMeasured(map, 'bracket.seatMachineZ');
+  return legacy === null ? null : { ...legacy, restsOnStock: false };
 }
 
 /**
@@ -262,11 +272,15 @@ export function bracketExpectedSurface(
       reason: 'where the stock sits beside the bracket has not been measured (the bed profile’s bracket seat): touch the surface beside the bracket once with the probe and save it as the bed profile’s seat',
     };
   }
-  const under = underMm > 0 ? ` + ${underMm} mm under the stock` : '';
+  // #1070 (C8, the gate's ruling) — A SEAT THAT SAYS IT IS THE SURFACE THE STOCK RESTS ON already
+  // includes the board under the blank: the under thickness is NOT added again. Older readings
+  // (no statement) keep the legacy arithmetic.
+  const countedUnder = seat.restsOnStock ? 0 : underMm;
+  const under = countedUnder > 0 ? ` + ${countedUnder} mm under the stock` : '';
   return {
     ok: true,
     expectedSurface: {
-      machineZ: r3(seat.value + underMm + stockThickness),
+      machineZ: r3(seat.value + countedUnder + stockThickness),
       from: `the surface beside the bracket at machine Z ${seat.value} (${seat.source}${seat.setAt ? `, ${seat.setAt.slice(0, 10)}` : ''})${under} + the stock’s ${stockThickness} mm`,
     },
   };

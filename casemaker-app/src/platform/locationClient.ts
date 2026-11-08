@@ -160,6 +160,12 @@ export const MeasuredDatumSchema = z
      * one-point datums (a surface top, a jaw top, a bracket seat).
      */
     radiusMm: bedNumber.nullable().optional(),
+    /**
+     * #1070 (C8) — THE SEAT SAYS IT IS THE SURFACE THE STOCK RESTS ON: the seat press touches the
+     * wasteboard the blank itself stands on, so the expected surface must not add the job's
+     * under-board again. Written true by the seat write-back; absent on older readings.
+     */
+    restsOnStock: z.boolean().optional(),
   })
   .strict();
 
