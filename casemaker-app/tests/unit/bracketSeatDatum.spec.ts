@@ -107,3 +107,36 @@ describe('#509 the bracket seat comes from the bed profile', () => {
     }
   });
 });
+
+describe('#1077 a surface top seeds the bracket seat only when it is about the CURRENT surface', () => {
+  // The fixture profile: surface thickness measured 2026-10-15T07:00, a vise jaw top recorded
+  // 2026-10-23T00:00 (one vise registration).
+  const VISE_AT = BASE_PROFILE.datums.viseJawTopZ!.measuredAt;
+
+  it('a reading from the VISE registration never stands in for the bracket seat', () => {
+    useLocationStore.setState({ status: 'present', location: VIEW, etag: '"e1"' });
+    // The k3 case: the surface top shares its instant with the vise jaw top — it is a vised
+    // blank's top, not the surface beside the bracket. The seat must come from the press instead.
+    const seat = bracketSeatDatumFor(machineWith({ surfaceTopZ: datum(-55.119, 'fx-probe-1', VISE_AT), bracketSeatZ: null }));
+    expect(seat).toBeNull();
+  });
+
+  it('a reading OLDER than the profile’s current surface measurement never seeds', () => {
+    useLocationStore.setState({ status: 'present', location: VIEW, etag: '"e1"' });
+    // Measured 2026-10-10, before the 10 mm board the profile now describes (2026-10-15): it
+    // describes a surface that is gone.
+    const seat = bracketSeatDatumFor(machineWith({ surfaceTopZ: datum(-112.3, 'fx-probe-1', '2026-10-10T00:00:00.000Z'), bracketSeatZ: null }));
+    expect(seat).toBeNull();
+  });
+
+  it('a genuine post-measurement reading still answers, and the bracket seat still wins over it', () => {
+    useLocationStore.setState({ status: 'present', location: VIEW, etag: '"e1"' });
+    const current = machineWith({ surfaceTopZ: datum(-112.3, 'fx-probe-1', '2026-10-18T10:00:00.000Z'), bracketSeatZ: null });
+    expect(bracketSeatDatumFor(current)).toMatchObject({ value: -112.3, what: 'surface top' });
+    const withSeat = machineWith({
+      surfaceTopZ: datum(-112.3, 'fx-probe-1', '2026-10-18T10:00:00.000Z'),
+      bracketSeatZ: datum(-70.5, 'fx-probe-1', '2026-10-10T00:00:00.000Z'),
+    });
+    expect(bracketSeatDatumFor(withSeat)).toMatchObject({ value: -70.5, what: 'bracket seat' });
+  });
+});
