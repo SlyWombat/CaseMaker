@@ -135,7 +135,7 @@ describe('#1070 the planner routes an anchored bed-held job to the footprint', (
     expectedSurface: { machineZ: -51.69, from: 'the bracket’s seat, one touch beside it' },
     seekFromMachineZ: -3,
     stockThicknessMm: 25,
-    bracketOrigin: { x: -190.89, y: -193.83, from: 'anchor 1 read from the machine', uncertainty: 0.1, offsetMeasured: false },
+    bracketOrigin: { x: -190.89, y: -193.83, from: 'anchor 1 read from the machine', offsetMeasured: false },
     mountObstacles: [],
     region: { min: [22, 10], max: [158, 116], marginMm: 1 },
     softLimits: { xMin: -207, yMin: -206, zMin: -102 },
