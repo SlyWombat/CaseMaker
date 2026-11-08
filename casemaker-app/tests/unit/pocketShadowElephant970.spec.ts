@@ -57,8 +57,24 @@ const ENV = 'CM_ELEPHANT_STL';
 
 const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
 const FLAT3175: Tool = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' });
-const BALL2: Tool = { ...flatEndMill(2, { number: 3, id: 'ball-2', name: 'ball-2' }), typeText: 'Ball Nose', shape: 'ball' };
-const BALL05: Tool = { ...flatEndMill(0.5, { number: 4, id: 'ball-0.5', name: 'ball-0.5' }), typeText: 'Ball Nose', shape: 'ball' };
+// The figure set's long-reach engraving balls. Their SHOULDER is stated (30.5 mm) because the
+// body check stands the shank at it: the job's own ball is the catalogue's "6*2*30.5" — ⌀2 cutting
+// to 30.5 mm, only then the ⌀6 shank — and a synthetic ball that states no shoulder forces the
+// conservative centre-height stand-in, which put a ⌀3.175 shoulder on every steep wall (#1092).
+const BALL2: Tool = {
+  ...flatEndMill(2, { number: 3, id: 'ball-2', name: 'ball-2' }),
+  typeText: 'Ball Nose',
+  shape: 'ball',
+  fluteLength: 30.5,
+  shoulderLength: 30.5,
+};
+const BALL05: Tool = {
+  ...flatEndMill(0.5, { number: 4, id: 'ball-0.5', name: 'ball-0.5' }),
+  typeText: 'Ball Nose',
+  shape: 'ball',
+  fluteLength: 30.5,
+  shoulderLength: 30.5,
+};
 const HOUSE = [FLAT6, FLAT3175, BALL2, BALL05];
 
 /** The collection floor: the job's own finish tolerance (`tolerances.finishMm` below), i.e.
@@ -127,12 +143,17 @@ interface BodyPart {
  *  - A FLAT: ONE flat cylinder of `max(cutting radius, handle radius)` from the tip — the #970
  *    stand-in, kept. On a flat the shank sits directly above the cutting edges, so a tip-height
  *    cylinder is exact for the cutting body and merely conservative above it.
- *  - A BALL: TWO parts. The ball's own round profile (its tip at the posted z), and the SHANK — a
- *    flat cylinder of the handle's radius whose lowest point is the BALL'S CENTRE, `z + R`, not
- *    the tip: the shank is a cylinder that begins where the ball's radius ends. Standing that
- *    cylinder in AT THE TIP (the old single-cylinder stand-in) over-cut by the shank radius times
- *    the local slope on every sloped move — 110,486 findings over 1 mm on the elephant at
- *    7a7bac78c, all of it that artefact, burying the real 20.9 mm gouge.
+ *  - A BALL: up to THREE parts, in the tool's own order. The ball's own round profile (tip at the
+ *    posted z); the NECK — a cylinder of the CUTTING radius from the ball's centre (`z + R`) up to
+ *    the stated shoulder length, which is what a ball nose actually is above its equator; and only
+ *    then the SHANK — a cylinder of the handle's radius, its lowest point at the SHOULDER LENGTH,
+ *    never lower. Two measured corrections over the old single-cylinder stand-in, which stood the
+ *    handle's radius in AT THE TIP: (a) that over-cut by the shank radius on every sloped move —
+ *    110,486 findings over 1 mm on the elephant at 7a7bac78c, burying the real 20.9 mm gouge;
+ *    (b) standing the handle at the ball's CENTRE alone still put a synthetic ⌀2 ball's ⌀3.175
+ *    shoulder on every wall (56,677 findings over 1 mm) — a ball nose's shank starts at its stated
+ *    shoulder (the job's is "6*2*30.5": ⌀2 to 30.5 mm, only then ⌀6), and with no shoulder stated
+ *    the centre is the conservative floor.
  * `null` only when the cutter has no drop-cutter profile at all (`profileOf`'s own stated scope).
  */
 function bodyParts(tool: Tool): BodyPart[] | null {
@@ -140,10 +161,17 @@ function bodyParts(tool: Tool): BodyPart[] | null {
   if (base === null) return null;
   const shankRadius = tool.handleDiameter !== null && tool.handleDiameter > 0 ? tool.handleDiameter / 2 : 0;
   if (tool.shape === 'ball') {
+    const R = base.radiusMm;
+    const shoulder = tool.shoulderLength ?? tool.fluteLength;
+    const shoulderMm = shoulder !== null && shoulder > R ? shoulder : R;
     const parts: BodyPart[] = [{ profile: base, zOffsetMm: 0, label: 'ball' }];
-    if (shankRadius > base.radiusMm + 1e-9) {
+    if (shoulderMm > R + 1e-9) {
+      const neck: CutterProfile = { radiusMm: R, flatRadiusMm: R, kind: 'flat' };
+      parts.push({ profile: neck, zOffsetMm: R, label: 'neck' });
+    }
+    if (shankRadius > R + 1e-9) {
       const shank: CutterProfile = { radiusMm: shankRadius, flatRadiusMm: shankRadius, kind: 'flat' };
-      parts.push({ profile: shank, zOffsetMm: base.radiusMm, label: 'shank' });
+      parts.push({ profile: shank, zOffsetMm: shoulderMm, label: 'shank' });
     }
     return parts;
   }
