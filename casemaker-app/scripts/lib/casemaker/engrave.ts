@@ -412,6 +412,10 @@ export function sheetRegistrationFor(
   where: LoadedLocation | null,
 ): { footprint?: FootprintPlan; seatSeek?: SeatSeek } {
   if (where === null || jobMount(job) !== 'bracket') return {};
+  // A PLACED bracket has no anchor datum: the C2 footprint plan is seeded FROM the anchor, so it
+  // would state a seed the sheet's own §2 denies. The placed job keeps the pre-C2 §5 (which says
+  // the origin is probed) until A's placed seed lands.
+  if (job.workholding.kind === 'bracket' && (job.workholding.bracket as { placement?: 'anchored' | 'placed' }).placement === 'placed') return {};
   const machine = where.machines[0];
   const calibration = machine?.calibration;
   if (calibration === undefined || calibration === null) return {};

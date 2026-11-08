@@ -8,7 +8,7 @@ import {
   type RapidEstimate,
 } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
-import { itemLabel, jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { itemLabel, jobMount, jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
   idJawReach,
   jawGapFor,
@@ -1674,7 +1674,15 @@ function senderOriginSteps(origin: WorkOrigin, onBoard: boolean): RunSheetStep[]
  * machine XY, which the console shows — and the soft-limit statement is the plan's, never a
  * second reading of the calibration here.
  */
-function footprintRegistrationSteps(onBoard: boolean, facingRun: boolean, plan: FootprintPlan): RunSheetStep[] {
+/** The mount the file judges the origin against, in the mount's own words (this branch predates
+ *  land6's shared helper; the words match it). */
+function judgedWords(job: EngraveJob): string {
+  if (jobMount(job) !== 'bracket') return 'the mount';
+  const clamps = job.workholding.kind === 'bracket' ? job.workholding.bracket.clamps : [];
+  return clamps.length === 0 ? "the bracket's arms" : "the bracket's arms and the clamps";
+}
+
+function footprintRegistrationSteps(job: EngraveJob, onBoard: boolean, facingRun: boolean, plan: FootprintPlan): RunSheetStep[] {
   const steps: RunSheetStep[] = [
     {
       text:
@@ -1707,7 +1715,9 @@ function footprintRegistrationSteps(onBoard: boolean, facingRun: boolean, plan: 
   steps.push({
     text:
       'The origin is the front-left corner the two touched edge lines intersect at. The machine coordinates are ' +
-      `seeded from ${plan.origin.from}; the touches correct the seed.`,
+      `seeded from ${plan.origin.from}; the touches correct the seed. The file places the part at this origin and ` +
+      `judges ${judgedWords(job)} against it — an origin out by a little, or a part sitting ` +
+      'differently from what was measured, shifts the whole job relative to both.',
   });
   const unread = plan.notes.find((n) => n.includes('soft endstop has not been read'));
   steps.push({
@@ -1738,7 +1748,7 @@ function registrationSteps(
   // #1070 — A BED-HELD JOB IS REGISTERED ON ITS CUT REGION, not the blank's edges: the six scans
   // and the four corner touches come from the plan the Cut step runs, so paper and console say the
   // same positions, in machine coordinates.
-  if (footprint !== undefined) return footprintRegistrationSteps(onBoard, facingRun, footprint);
+  if (footprint !== undefined) return footprintRegistrationSteps(job, onBoard, facingRun, footprint);
   // #743 §4.6/§4.7 — A DISC IS REGISTERED ON ITS RIM, not on a rectangle's edges. Four touches
   // through the centre-lines find the circle's extreme points; the centre sets the origin and the
   // span against the stated ⌀ refuses a different piece. The rectangle's probe-plan touches below
