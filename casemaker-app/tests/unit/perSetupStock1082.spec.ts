@@ -65,9 +65,10 @@ describe('#1082 a setup’s own stock', () => {
   });
 
   it('#1082 stage 2 — toSetup builds the part from the SETUP’s stock, not the blank', () => {
-    const job = flipJob();
-    // The resolver hands a caller the setup's box; the engine part must be that box.
-    const box = stockForSetup(job, 0, 25);
+    const base = flipJob();
+    // A STATED box (the derived one is an offer until the operator presses).
+    const job = { ...base, setups: [{ ...base.setups![0]!, stock: { length: 106, width: 136, thickness: 25, provenance: 'stated' as const } }] } as EngraveJob;
+    const box = stockForSetup(job, 0);
     expect(box).toEqual({ length: 106, width: 136, thickness: 25 });
     const setup = toSetup(job, Z1, undefined, null, box);
     expect(setup.part.kind).toBe('prism');
@@ -86,7 +87,7 @@ describe('#1082 a setup’s own stock', () => {
     expect(bbb.max[0] - bbb.min[0]).toBeCloseTo(120, 6);
     expect(bbb.max[1] - bbb.min[1]).toBeCloseTo(160, 6);
     // No setups at all → the blank.
-    expect(stockForSetup({ ...job, setups: undefined } as EngraveJob, 0, 25)).toEqual({ length: 120, width: 160, thickness: 28 });
+    expect(stockForSetup({ ...job, setups: undefined } as EngraveJob, 0)).toEqual({ length: 120, width: 160, thickness: 28 });
   });
 
   it('#1082 stage 2 — the model plan reads a setup’s own stock box', () => {
@@ -121,7 +122,7 @@ describe('#1082 a setup’s own stock', () => {
 
     // 1. the engine part (toSetup) is the part's box on setup 2, the blank on setup 1;
     for (const [index, want] of [[0, { length: 120, width: 160, thickness: 28 }], [1, { length: 106, width: 136, thickness: 25 }]] as const) {
-      const box = stockForSetup(job, index, null);
+      const box = stockForSetup(job, index);
       expect(box).toEqual(want);
       const setup = toSetup(job, Z1, undefined, null, box);
       if (setup.part.kind !== 'prism') throw new Error('the fixture is a prism job');

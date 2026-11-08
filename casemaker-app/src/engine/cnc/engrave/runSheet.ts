@@ -122,7 +122,6 @@ import type { DesignCheckReport } from '@/engine/cnc/engrave/designCheck';
 // `rotaryFreeSpan`): the coverage sentence the sheet and the panel print quotes them, never a
 // second reading of the job.
 import { neckCarriedBy, neckJawClearanceSentence } from '@/engine/cnc/rotary/neck';
-import { setupStockFor } from '@/engine/cnc/setups/perSetupStock';
 import { rotaryMapOf, type RotaryMap } from '@/engine/cnc/rotary/wrap';
 import type { RotarySheetDatum } from '@/engine/cnc/rotary/sheetDatum';
 import { orient } from '@/engine/cnc/setups/orient';
@@ -5525,7 +5524,7 @@ export function buildRunSheet(
       const programSetup = jobSetups(job)[program.setupIndex - 1];
       // #1082 — THIS SETUP'S OWN STOCK, when the document states (or a flipped setup derives) one:
       // the page names the box it cuts, its provenance, and the flip drawing uses its extents.
-      const ownStock = setupStockFor(job, programSetup, null);
+      const ownStock = programSetup?.stock ?? null;
       if (opened !== undefined && ownStock !== null) {
         opened.steps.splice(1, 0, {
           text:

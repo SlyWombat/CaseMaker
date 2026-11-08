@@ -51,11 +51,13 @@ export function setupStockFor(
 export function stockForSetup(
   job: EngraveJob,
   setupIndex: number | undefined,
-  measuredThicknessMm: number | null,
 ): { length: number; width: number; thickness: number } {
   const setups = job.setups ?? [];
   const setup = setupIndex === undefined ? undefined : setups[setupIndex];
-  const own = setupStockFor(job, setup, measuredThicknessMm);
+  // #1082 — STATED ONLY. The derived freed part is an OFFER the operator confirms in the flip row;
+  // a reader that derived it here would silently re-plan every existing vendor-flip job (the
+  // delivered tray NCs are byte-identical precisely because nothing was confirmed on them).
+  const own = setup?.stock ?? null;
   return own === null
     ? { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness }
     : { length: own.length, width: own.width, thickness: own.thickness };

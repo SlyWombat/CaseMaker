@@ -158,7 +158,7 @@ export function footprintInputFor(args: FootprintJobArgs): FootprintJobResult {
   }
   // The expected surface is the bracket's seat: the surface beside the mount, measured once.
   // #1082 — the box this registration stands on: the setup's own stock, else the job's blank.
-  const own = stockForSetup(job, args.setupIndex, null);
+  const own = stockForSetup(job, args.setupIndex);
   const dims = { x: own.length, y: own.width, z: own.thickness };
   const under = args.mount.kind === 'bracket' && args.mount.board === true ? (job.sacrificial?.under?.thickness ?? 0) : 0;
   const expected = bracketExpectedSurface(defaults, dims.z, under, args.bracketSeat);

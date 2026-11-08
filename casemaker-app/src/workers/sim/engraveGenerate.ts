@@ -249,7 +249,7 @@ import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances, PlanStatement }
 // single `top` `SetupSpec` below (`buildModelPlanInputForGoal`'s own doc on why).
 import { buildSetupSpecs, frameForFace } from '@/engine/cnc/cam/model/setups';
 import type { Mount, MountSpec } from '@/engine/cnc/setups/types';
-import { setupStockFor, stockForSetup } from '@/engine/cnc/setups/perSetupStock';
+import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import { base64ToArrayBuffer } from '@/engine/import/base64';
 import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
@@ -5259,7 +5259,7 @@ export async function buildModelPlanInputForGoal(
   // document's stated box, or a flipped setup's derived one, attached by index; absent, the spec
   // keeps reading the job's blank exactly as before.
   const setupsWithStock: SetupSpec[] = bandedSetups.map((spec, i) => {
-    const own = setupStockFor(job, job.setups?.[i], null);
+    const own = job.setups?.[i]?.stock ?? null;
     return own === null ? spec : { ...spec, stock: { length: own.length, width: own.width, thickness: own.thickness } };
   });
 
@@ -5521,7 +5521,7 @@ export async function postModelPlan(
   const depthLimits: DepthLimit[] = output.perSetup.map((p, i) => {
     // #1082 — the depth limit is the SETUP's: its own stock box (the freed part on side 2), else
     // the blank. The through mask's thickness is the same box's.
-    const thickness = stockForSetup(job, i, null).thickness;
+    const thickness = stockForSetup(job, i).thickness;
     const cutouts = p.ops.flatMap((op) => (op.kind === 'contour' && op.outcome.throughKerf !== undefined ? [op.outcome.throughKerf] : []));
     if (cutouts.length === 0) return jobDepthLimit(job, undefined, undefined, undefined, thickness);
     const mask = buildThroughMask({ thickness, breakthrough: job.breakthrough, cutouts });
