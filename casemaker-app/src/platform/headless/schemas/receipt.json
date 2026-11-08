@@ -99,6 +99,23 @@
               ],
               "description": "The coupon summary, or null for a job or design run."
             },
+            "faceAngle": {
+              "description": "The face-angle datum a square chuck job was planned against; omitted otherwise. A new optional field does not bump RECEIPT_VERSION.",
+              "properties": {
+                "degrees": {
+                  "description": "The square stock’s face angle — the rotary A zero — in degrees, as the bed profile’s datum states it.",
+                  "type": "number"
+                },
+                "residualMm": {
+                  "description": "The levelling run’s own residual, mm, when the datum recorded one.",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "degrees"
+              ],
+              "type": "object"
+            },
             "goal": {
               "description": "The run’s combined goal check, for a goal job; omitted otherwise.",
               "properties": {
