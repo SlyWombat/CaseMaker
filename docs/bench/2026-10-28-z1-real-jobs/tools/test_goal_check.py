@@ -194,6 +194,25 @@ def fixture_who_gate():
     return {'hit': hit, 'miss': miss}
 
 
+V_TOOL = (';@MKR|TOOL|number=1|id=v|name=test V|type=V-Bit|handlediameter=3.175|sticklength=0|'
+          'shoulderlength=0|flutelength=0|diameter=3.175|tipdiameter=0.1|cornerradius=0|'
+          'angle=90|halfAngle=45')
+
+
+def fixture_edge_break(tmp, stated):
+    """K — the whole path: a 90° V cuts a 0.2 mm groove into a flat floor 0.25 mm inside the grid's
+    border. With the job's edge break stated the groove is edge break and nothing is adjudicated;
+    with no statement at all it is judged."""
+    prefix = os.path.join(tmp, 'goal-edgebreak-' + ('stated' if stated else 'plain'))
+    goal(prefix, np.ones((NY, NX), bool), -0.5)
+    nc = prefix + '.nc'
+    open(nc, 'w').write('\n'.join([
+        V_TOOL, 'G90 G21', 'S10000 M3', 'G0 X2 Y0.25 Z5', 'G1 Z-0.7 F200', 'G1 X8 F300',
+        'G0 Z5', 'M2', '']))
+    job = {'targetObject': {'edgeBreak': {'widthMm': 0.5}}} if stated else None
+    return GC.run_check(prefix, T, os.path.join(tmp, 'out-edgebreak'), [nc], job=job, write=False)
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix='goal-check-selftest-') as tmp:
         # A — a plunge: the disc's lattice points strictly inside r = 1.0; max depth exactly 1 mm.
@@ -265,6 +284,15 @@ def main():
                                                       'borderOverReliefCells': 1,
                                                       'adjudicatedCells': 1,
                                                       'adjudicatedMaxMm': 0.2})
+        # K — the whole path, with and without the job's statement: the same V cut is edge break
+        # when the job states one (inside the V's leg, on the silhouette band) and judged when not.
+        k = fixture_edge_break(tmp, True)
+        check('K edge break, stated', k, {'edgeBreakToolNumber': 1, 'edgeBreakLegMm': 1.5375,
+                                          'edgeBreakReachMm': 1.5875, 'adjudicatedCells': 0})
+        assert k['edgeBreakStated'] is True and k['edgeBreakCells'] > 0, k['edgeBreakCells']
+        k = fixture_edge_break(tmp, False)
+        assert k['edgeBreakStated'] is False and k['edgeBreakCells'] == 0, k['edgeBreakCells']
+        assert k['adjudicatedCells'] > 0, 'the groove must be judged when the job states no edge break'
     print('all fixtures hold')
 
 
