@@ -278,6 +278,47 @@ export function withRotaryAxisDatum(
 }
 
 /**
+ * #1059 — THE FACE-ANGLE DATUM: the A work zero of the square stock's own face, as the two-touch
+ * step levelled it. `value` is the signed total turn (degrees); `at` is the touch column — the
+ * machine X the touches ran at and the axis line's Y; `residualMm` is the last pair's |Z+ − Z−`.
+ * A later mounting must not inherit it silently, so the write carries its own timestamp and
+ * instrument like every other datum.
+ */
+export function withRotaryFaceAngleDatum(
+  machine: MachineRecord,
+  face: { aOffsetDeg: number; atX: number; axisY: number; residualMm: number },
+  probeId: string | null,
+  now: string,
+): MachineRecord {
+  const profileId = machine.activeBedProfileId;
+  if (profileId === undefined) return machine;
+  const by = probeId ?? 'wired-probe';
+  const what = `rotary face angle levelled: ${face.aOffsetDeg}° of turn, ${face.residualMm} mm residual`;
+  return {
+    ...machine,
+    bedProfiles: machine.bedProfiles?.map((p) =>
+      p.id === profileId
+        ? {
+            ...p,
+            datums: {
+              ...p.datums,
+              rotaryFaceAngle: {
+                value: face.aOffsetDeg,
+                measuredAt: now,
+                by,
+                at: [face.atX, face.axisY] as [number, number],
+                residualMm: face.residualMm,
+              },
+            },
+            history: [...p.history, { at: now, what }],
+          }
+        : p,
+    ),
+    updatedAt: now,
+  };
+}
+
+/**
  * The new keys for a machine that has not been migrated, or null when there is nothing to migrate
  * (no wasteboard, no vise, no measured bracket seat) or the bed is already described. Nothing is
  * deleted: every legacy key stays exactly where it was.
@@ -439,6 +480,8 @@ export function bedFromLegacy(
       viseJawTopZ: null,
       bracketSeatZ: seat,
       rotaryAxis: null,
+      // #1059 — no migration writes a face angle either: it is measured per mounting.
+      rotaryFaceAngle: null,
     },
     placements,
     // No source records a preferred mounting; an empty list is the honest answer, not a guess.
@@ -555,6 +598,7 @@ export function firstRegistrationBed(
       viseJawTopZ: null,
       bracketSeatZ: null,
       rotaryAxis: null,
+      rotaryFaceAngle: null,
     },
     placements: [
       {
@@ -674,7 +718,7 @@ export function changedBedProfile(
     name: `Bed changed ${day}`,
     createdAt: now,
     basedOn: active.id,
-    datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null },
+    datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null, rotaryFaceAngle: null },
     // Scars belong to the surface instance; a changed bed's surface is a new instance.
     surface: { ...active.surface, scars: [] },
     // Placements stay (the fixtures are still on the bed), their frames re-measured in the wizard.

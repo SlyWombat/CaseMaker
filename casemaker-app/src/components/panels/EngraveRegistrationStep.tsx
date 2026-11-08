@@ -102,6 +102,7 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { clearanceZOf, rotaryOf } from '@/engine/cnc/machine';
 import { planRegistrationAttempt } from './registrationAttempt';
 import { RotaryAxisTap } from '@/components/manage/RotaryAxisTap';
+import { RotaryFaceAngleTap } from '@/components/manage/RotaryFaceAngleTap';
 import type { RegistrationAttempt } from './EngraveSetupRow';
 import {
   viseFrameFromRegistration,
@@ -910,6 +911,16 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         machineRecord !== null &&
         job.workholding.kind === 'rotary-chuck' && (
           <RotaryAxisTap machine={machineRecord} testIdPrefix="engrave-rotary-tap" />
+        )}
+
+      {/* #1059 — THE SQUARE'S FACE ANGLE, under the axis row it measures against: two touches level
+          the stock and the levelled position becomes its A zero. The row offers itself only for
+          square stock (a rod has no face to level). Hidden with the axis row while a run owns the
+          machine. */}
+      {(phase === 'idle' || phase === 'failed' || phase === 'recorded') &&
+        machineRecord !== null &&
+        job.workholding.kind === 'rotary-chuck' && (
+          <RotaryFaceAngleTap machine={machineRecord} job={job} testIdPrefix="engrave-rotary-face-angle" />
         )}
 
       {plan === null && proposal !== null && proposal.kind === 'plan' && (
