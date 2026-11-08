@@ -420,7 +420,29 @@ def run_card(c, args, sha, cat):
     job = run_job if run_job != job else job   # the design check and goal reader take the same bytes
     # A receipt that exists but is EMPTY is a crashed command's leavings, not a result: retrying a
     # card must re-run the CLI (j28 was stuck on a 0-byte receipt from a failed first attempt).
-    if not os.path.exists(receipt_path) or os.path.getsize(receipt_path) == 0:
+    # A NON-EMPTY receipt is only a result for the input that wrote it: when the job file's own
+    # sha256 has moved since (the cards' jobs were synced from main after a first pass), the old
+    # receipt is stale and the card must re-run. Size alone kept today's first-pass answer.
+    def stale_receipt():
+        if not os.path.exists(receipt_path) or os.path.getsize(receipt_path) == 0:
+            return True
+        try:
+            rec = read_json(receipt_path, {}) or {}
+            got = next((i.get('sha256') for i in (rec.get('inputs') or [])
+                        if (i.get('path') or '').endswith(os.path.basename(run_job))
+                        or (i.get('path') or '') == run_job), None)
+        except (OSError, ValueError):
+            return True
+        if got is None:
+            return True
+        import hashlib
+        try:
+            want = hashlib.sha256(open(run_job, 'rb').read()).hexdigest()
+        except OSError:
+            return True
+        return got != want
+
+    if stale_receipt():
         r = sh(['npm', 'run', '-s', 'casemaker', '--', 'cut', run_job, '--out', rundir,
                 '--json', '--location', loc], os.path.join(args.repo, 'casemaker-app'), args.timeout)
         open(receipt_path, 'w').write(r['stdout'])
