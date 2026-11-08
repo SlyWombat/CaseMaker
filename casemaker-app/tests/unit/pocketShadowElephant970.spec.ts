@@ -28,15 +28,14 @@
  * for the figures today is a single top setup, so the scope is not a real limitation yet, only
  * stated rather than silently assumed.
  *
- * TWO MODES, and they see different classes (#1092):
- *  - PER-BRANCH (no `CM_ELEPHANT_LOCATION`): plans with the card's picked ten cutters
- *    (`CARD_CUTTERS`). It covers the FLAT-ROUGHING class only, threshold 0.7 mm; it does NOT see
- *    the rest-pass class (the card's 24.747 mm over-cut), because re-feeding the card's picked
- *    cutters re-plans its chain and the rest is no longer the ⌀3.175 flat's.
- *  - NIGHTLY (`K3_ELEPHANT=1` sets `CM_ELEPHANT_LOCATION` to the job's demo location — 134 cutter
- *    records — and the catalogue's feed rows): the plan consumes the job's own inventory and
- *    reproduces the card's chain, so THIS mode asserts the rest-pass class (red at 7a7bac78c with
- *    the ⌀3.175 flat rest's 24.7 mm class; green on #1092's fix).
+ * SCOPE (#1092). This PER-BRANCH guard plans with the card's picked ten cutters (`CARD_CUTTERS`)
+ * and covers the FLAT-ROUGHING class only, threshold 0.7 mm — just above the measured 0.603 mm
+ * ceiling at 7a7bac78c. It does NOT see the rest-pass class (the card's 24.747 mm over-cut): the
+ * rest is cut by the app's multi-stage route (engrave/restPass.ts's `restJobFor` over the first
+ * program's own remainder), which a single `planModelCam` call never reaches — not with the picked
+ * cutters and not with the job's full 134-cutter inventory (both measured, both pass). That class
+ * is guarded by ~/casemaker-manager/nightly-j29.sh, which runs the j29 CARD and asserts its goal
+ * check. Do not read a pass here as covering it.
  *
  * WITHOUT `CM_ELEPHANT_STL` this SKIPS CLEANLY (one `it` stating why), the same pattern every other
  * figure-gated spec in this suite uses — this repo holds no figure meshes. Session E or F runs it
@@ -49,7 +48,6 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { installMakeraCatalogue } from '../tools/makeraCatalogue';
 import { parseStl, type ParsedMesh } from '@/engine/import/stlParser';
 import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
@@ -65,17 +63,13 @@ const REPO = join(APP, '..');
 const JOBS = join(REPO, 'docs', 'bench', '2026-10-28-z1-real-jobs', 'jobs');
 const JOB_FILE = 'j29-elephant-stick.json';
 const ENV = 'CM_ELEPHANT_STL';
-/** #1092 — the NIGHTLY mode: the job's own demo location (134 cutter records), so the guard's
- * plan consumes the same inventory the j29 card's plan did. Without it the guard runs the
- * PER-BRANCH mode over the card's picked ten cutters (see `CARD_CUTTERS`). */
-const ENV_LOCATION = 'CM_ELEPHANT_LOCATION';
 
 /**
  * #1092 — THE PER-BRANCH INVENTORY: the ten cutters the j29 card's programs name (their
  * `;@MKR|TOOL` headers at 5d41e1c8a). It is a DETERMINISTIC, fast set that covers the
  * flat-roughing class; it does NOT reproduce the card's chain — the chain's picks are its OUTPUT,
  * and re-feeding them re-plans the sequence (the rest is no longer the ⌀3.175 flat's), which is
- * why the rest-pass class is the NIGHTLY mode's job (`CM_ELEPHANT_LOCATION`, the real inventory).
+ * why the rest-pass class is the nightly j29 card's job (`nightly-j29.sh`), not this check's.
  * Geometry is the record's own: tip, shank, shoulder (the shank-collision limit) and, for the
  * chamfer, its included angle.
  */
@@ -117,33 +111,6 @@ const CARD_CUTTERS: Tool[] = [
   cardTool({ number: 9, id: 'kz-chamfer-90', name: 'Chamfering Bit - 1/8" Shank 90°', typeText: 'Chamfer', shape: 'chamfer', cuttingMm: 3.175, tipMm: 0.1, handleMm: 3.175, shoulderMm: null, angleDeg: 90 }),
   cardTool({ number: 10, id: 'lib-111011313832-2', name: '3.175*32mm Flat End', typeText: 'Flat End', shape: 'flat', cuttingMm: 3.175, handleMm: 3.175, shoulderMm: 32 }),
 ];
-
-/**
- * #1092 — THE NIGHTLY INVENTORY: the job's own demo location's records, read from
- * `CM_ELEPHANT_LOCATION` when the nightly sets it. The card's chain consumes an INVENTORY; the ten
- * cutters its programs name are that chain's OUTPUT, and feeding them back in (`CARD_CUTTERS`)
- * re-plans a different sequence — the rest is no longer the ⌀3.175 flat's, so the per-branch mode
- * cannot see the rest-pass class. Null when the variable is unset: the per-branch mode.
- */
-function locationCutters(): Tool[] | null {
-  const path = process.env[ENV_LOCATION];
-  if (path === undefined) return null;
-  if (!fs.existsSync(path)) throw new Error(`${ENV_LOCATION}: missing ${path}`);
-  const doc = JSON.parse(fs.readFileSync(path, 'utf8')) as {
-    inventory?: { tool?: Tool }[];
-    tools?: { tool?: Tool }[];
-  };
-  const tools = (doc.inventory ?? doc.tools ?? [])
-    .map((row) => row.tool)
-    .filter((tool): tool is Tool => tool !== undefined && tool.shape !== 'unknown');
-  if (tools.length === 0) throw new Error(`${ENV_LOCATION}: no cutter records in ${path}`);
-  return tools;
-}
-const LOCATION_CUTTERS = locationCutters();
-/** The nightly mode needs the catalogue's feed rows for those records; the per-branch mode's ten
- * cutters resolve without it. The door is installed for its side effect (the global feed
- * catalogue); when the file is missing it states so and the plan names any cutter it cannot feed. */
-if (LOCATION_CUTTERS !== null) installMakeraCatalogue();
 
 /** The collection floor: the job's own finish tolerance (`tolerances.finishMm` below), i.e.
  * numerical slack, not a tuned number. Everything above it is gathered, then judged. */
@@ -196,7 +163,7 @@ function planInputFor(job: EngraveJob, source: { triangles: ParsedMesh }): Model
       material: job.stock.material,
     },
     fixture: { mount: job.workholding.kind === 'vise' ? 'vise' : 'tape', envelope: job.workholding.kind === 'vise' ? viseEnvelope(job.stock, jobVise(job), job.sacrificial) : null },
-    cutters: { house: LOCATION_CUTTERS ?? CARD_CUTTERS, catalogue: [] },
+    cutters: { house: CARD_CUTTERS, catalogue: [] },
     tolerances: { finishMm: 0.01 },
     edgeBreak: { legMm: 0 },
   };
@@ -318,7 +285,7 @@ function shankCollisions(
 }
 
 describe.skipIf(process.env[ENV] === undefined)(
-  `#970/#966 the elephant — no top-setup body reaches below the real mesh (${LOCATION_CUTTERS === null ? 'per-branch: the flat-roughing class; the rest-pass class is the nightly run' : 'nightly: the job’s own cutter inventory, the rest-pass class included'})${process.env[ENV] === undefined ? ` (set ${ENV})` : ''}`,
+  `#970/#966 the elephant — no top-setup body reaches below the real mesh (per-branch: the flat-roughing class; the rest-pass class is the nightly j29 card)${process.env[ENV] === undefined ? ` (set ${ENV})` : ''}`,
   () => {
   it(
     'every posted feed point, checked with the body’s own parts, stays at or above the real design surface',
