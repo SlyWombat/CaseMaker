@@ -1,0 +1,9 @@
+location "My shop": /home/dave/projects/cm-wt/setb-house/location.json — 0 tools from the user's own list, 35 owned cutters
+  default rest.overlapMm = 0.5mm (seeded)
+  default rest.thirdToolPct = 2% (seeded)
+  default rest.visibleDepthMm = 0.1mm (seeded)
+  default toolChange.seconds = 91.4s (seeded)
+Makera's catalogue: /home/dave/projects/cm-wt/setb-house/catalogue.json — 129 cutters, 1328 feed rows, synced 2026-10-18T03:24:13.374Z
+  ERROR bracket-in-path: Contour comes within 0.486 mm of the bracket’s left arm, which sits 15.95 mm below the plate’s top — keep the cut 2.688 mm inside the left edge.
+  !! stopped at verify
+  !! cam/model (#966): setup 1 program 8/9 (inv:kz-o-flute-3-175-25): 1 verifier error(s)
