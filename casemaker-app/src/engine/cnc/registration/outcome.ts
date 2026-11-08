@@ -151,6 +151,29 @@ export interface RegistrationOutcome {
   /** Why not, one sentence each. Empty when usable. */
   problems: string[];
   notes: string[];
+  /**
+   * #1088 — SIDE 2'S REGISTRATION, as the bores and the front pair measured it. Present only on a
+   * flipped setup's run; the outcome's `offset`/`centre`/`rotationDeg` are that run's own readings,
+   * and its `withinMargin` is TRUE because the flip's gates are stops inside the run (the entry
+   * seek, the four walls, the bores' line, the carried Z0), not a deviation from a frame the
+   * measurement itself replaces.
+   */
+  flip?: FlipOutcomeFacts;
+}
+
+/** #1088 — what a side-2 flip registration measured, in the sentences the Cut step prints. */
+export interface FlipOutcomeFacts {
+  /** Each bore: the seeded pin it entered over, the centre it measured (WORK XY), and its diameter. */
+  holes: { seeded: { x: number; y: number }; centre: { x: number; y: number }; diameterMm: number }[];
+  /** The front pair's found edge Y (WORK) and the surface Z each corner touch read (machine Z). */
+  frontPair: { y: number; surfaceZ: number }[];
+  /** The bores' line against the pins', inside the plan's own tolerance. Null on a plan that has none. */
+  crossCheck: { expectedAngleDeg: number; measuredAngleDeg: number; toleranceDeg: number } | null;
+  /** The carried Z0 the corner touches were checked against, when the job stated one with a band. */
+  carried: { topMachineZ: number; band: { minMm: number; maxMm: number } | null } | null;
+  /** The turn the front pair read, degrees, and how far it moves the stock's far end, mm. */
+  rotationDeg: number;
+  rotationShiftMm: number;
 }
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;

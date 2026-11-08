@@ -1,21 +1,26 @@
 /**
  * #1088 — SIDE 2'S HOLE REGISTRATION, against a fake machine: the plan's steps in order, a missed
- * bore wall stopping by name, and an alarm mid-run stopping with nothing more sent.
+ * bore wall stopping by name, an alarm mid-run stopping with nothing more sent, the origin read in
+ * the WORK frame whatever G54 is in force, and the carried Z0 checked on the corner touches.
  *
  * The fake models side 2's blank as the planner expects it: the front edge at Y = 0, the part on
  * its top at machine Z −5, and two ⌀5 bores at (12, 30) and (32, 30) whose walls a ⌀2 ball meets
- * with its centre 1.5 mm from the bore's centre.
+ * with its centre 1.5 mm from the bore's centre. Its touches land on the model's own rule — the
+ * probe reads the stock until its centre is the tip's rim past the edge — so the executor's edge
+ * correction is exercised, not assumed.
  */
 import { describe, expect, it } from 'vitest';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
 import { runFlipRegistration } from '@/engine/cnc/registration/execute';
 import { planFlipRegistration } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
+import { flipZ0 } from '@/engine/cnc/engrave/flipChoice';
 import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
 
 const SURFACE_Z = -5;
 const R_BALL = 1; // ⌀2 tip
 const BORE_R = 2.5; // ⌀5
+const RIM = registrationSettings(null).settings.tipRadiusMm;
 const BORES = [
   { x: 12, y: 30 },
   { x: 32, y: 30 },
@@ -59,21 +64,26 @@ interface FakeOpts {
   missingPlusXBore?: 1 | 2;
   /** ALARM the Nth sideways touch (1-based over the whole run). */
   alarmAtTouch?: number;
+  /** The G54 in force when the run starts — the touches' PRBs are machine XY, this much off work. */
+  g54?: { x: number; y: number };
 }
 
 function fakeMachine(sent: string[], opts: FakeOpts = {}) {
+  const g54 = opts.g54 ?? { x: 0, y: 0 };
   const reply = (text: string): ConsoleSendResult => ({ kind: 'sent', line: '', text, frames: 1, elapsedMs: 1 });
+  const prb = (z: number, touched: boolean): string =>
+    `[PRB:${(pos.x + g54.x).toFixed(3)},${(pos.y + g54.y).toFixed(3)},${z.toFixed(3)}:${touched ? 1 : 0}]\nok`;
   const pos = { x: 0, y: 0, z: -3 };
   let sideways = 0;
-  /** Material below a point: the blank for y > 0 (and x > 0), minus the bores. */
+  /** The ball's rim: the probe reads the stock until its centre is this far past the edge. */
   const materialAt = (x: number, y: number): boolean => {
-    if (!(y > 0 && x > 0)) return false;
+    if (!(y > -RIM && x > -RIM)) return false;
     return !BORES.some((b) => Math.hypot(x - b.x, y - b.y) <= BORE_R);
   };
   const console = {
     async send(line: string): Promise<ConsoleSendResult> {
       sent.push(line);
-      if (line === '?') return reply('<Idle|MPos:0,0,0|WPos:0,0,0>');
+      if (line === '?') return reply(`<Idle|MPos:${(pos.x + g54.x).toFixed(3)},${(pos.y + g54.y).toFixed(3)},${pos.z.toFixed(3)}|WPos:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}>`);
       if (line === '$H') return (pos.x = 0), (pos.y = 0), (pos.z = -3), reply('ok');
       if (line === 'G54' || line === 'G92.1' || line === 'M831' || line === 'M832') return reply('ok');
       if (line === 'M119') return reply('X_min:0 Y_min:0 Z_min:0 X_max:0 Y_max:0 Z_max:0 Probe:0');
@@ -88,10 +98,10 @@ function fakeMachine(sent: string[], opts: FakeOpts = {}) {
         const target = pos.z - Number(m[1]);
         if (materialAt(pos.x, pos.y) && SURFACE_Z >= target && SURFACE_Z <= pos.z) {
           pos.z = SURFACE_Z;
-          return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${SURFACE_Z.toFixed(3)}:1]\nok`);
+          return reply(prb(SURFACE_Z, true));
         }
         pos.z = target;
-        return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\nok`);
+        return reply(prb(target, false));
       }
       m = /^G38\.3 ([XY])(-?[\d.]+) F[\d.]+$/.exec(line);
       if (m) {
@@ -117,12 +127,12 @@ function fakeMachine(sent: string[], opts: FakeOpts = {}) {
           if (hit) {
             if (axis === 'x') pos.x = wall;
             else pos.y = wall;
-            return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}:1]\nok`);
+            return reply(prb(pos.z, true));
           }
         }
         if (axis === 'x') pos.x += travel;
         else pos.y += travel;
-        return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}:0]\nok`);
+        return reply(prb(pos.z, false));
       }
       // The probe-away (a G38.5 back along the touched axis) and anything else: ok.
       if (line.startsWith('G38.5')) return reply('ok');
@@ -137,11 +147,14 @@ const deps = (console: ReturnType<typeof fakeMachine>) => ({
   operator: async () => true,
 });
 
+/** The carried Z0, as the job states it: side 2's top at the fake's surface, ± 0.3 mm. */
+const Z0 = () => flipZ0({ seatMm: SURFACE_Z, thicknessMm: 0, toleranceMm: 0.3 });
+
 describe('#1088 the flip registration executor', () => {
   it('runs the plan’s steps in order: guards, the front pair, the seed, then each bore’s four touches', async () => {
     const sent: string[] = [];
     const machine = fakeMachine(sent);
-    const r = await runFlipRegistration(flipPlan(), { ctx: ctx() }, deps(machine) as never);
+    const r = await runFlipRegistration(flipPlan(), { ctx: ctx(), z0: Z0() }, deps(machine) as never);
     expect(r.ok, r.ok ? '' : r.reason).toBe(true);
     if (!r.ok) return;
     // The measured bores: the fake's walls put the centres within a touch of the truth.
@@ -150,6 +163,16 @@ describe('#1088 the flip registration executor', () => {
       expect(Math.abs(h.centre.x - BORES[i]!.x)).toBeLessThan(0.3);
       expect(Math.abs(h.centre.y - BORES[i]!.y)).toBeLessThan(0.3);
     }
+    // The edge correction is exercised: the found front edge is the stock's own Y ≈ 0, not a raw
+    // bracket midpoint that is one rim short of it.
+    expect(Math.abs(r.frontPair[0]!.y)).toBeLessThan(0.3);
+    // The outcome the press writes: the origin at the bores' midpoint, X and Y, and the run's own
+    // gates passed (the entry seeks, the eight walls, the line, the carried Z0).
+    expect(r.outcome.usable).toBe(true);
+    expect(r.outcome.flip?.holes).toHaveLength(2);
+    expect(r.correctedG54.x).toBeCloseTo(0, 2);
+    // Y is the front pair's mean: as exact as the scan's own bisection (half a fine step).
+    expect(Math.abs(r.correctedG54.y)).toBeLessThan(0.2);
     // THE ORDER, on the lines actually sent.
     const at = (re: RegExp): number => sent.findIndex((l) => re.test(l));
     const marks = [
@@ -175,10 +198,46 @@ describe('#1088 the flip registration executor', () => {
     expect(sent.filter((l) => l.startsWith('G38.5')).length).toBeGreaterThanOrEqual(8);
   }, 60_000);
 
+  it('reads the origin in the WORK frame whatever G54 was in force', async () => {
+    const sent: string[] = [];
+    // The machine holds a G54 10 mm right and 5 mm back of the work zero the moves are sent in.
+    const machine = fakeMachine(sent, { g54: { x: 10, y: 5 } });
+    const r = await runFlipRegistration(flipPlan(), { ctx: ctx(), z0: Z0() }, deps(machine) as never);
+    expect(r.ok, r.ok ? '' : r.reason).toBe(true);
+    if (!r.ok) return;
+    // The bores' centres are WORK XY: the PRBs are machine, and the run subtracts the frame.
+    for (const [i, h] of r.holes.entries()) {
+      expect(Math.abs(h.centre.x - BORES[i]!.x)).toBeLessThan(0.3);
+      expect(Math.abs(h.centre.y - BORES[i]!.y)).toBeLessThan(0.3);
+    }
+    // The G54 the press writes is the one that puts those bores on their pins' work positions.
+    expect(r.correctedG54.x).toBeCloseTo(10, 2);
+    expect(Math.abs(r.correctedG54.y - 5)).toBeLessThan(0.2);
+    expect(r.outcome.correctedG54).toEqual(r.correctedG54);
+    expect(r.outcome.currentG54).toEqual({ x: 10, y: 5 });
+  }, 60_000);
+
+  it('a corner Z reading outside the carried Z0’s band stops by name before any bore is entered', async () => {
+    const sent: string[] = [];
+    const machine = fakeMachine(sent);
+    // The carried top says the blank sits 5 mm above where its corner touches read — a chip under
+    // the blank (or the wrong seat) is what this finds.
+    const carried = flipZ0({ seatMm: SURFACE_Z + 5, thicknessMm: 0, toleranceMm: 0.3 });
+    const r = await runFlipRegistration(flipPlan(), { ctx: ctx(), z0: carried }, deps(machine) as never);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain('corner Z touches');
+    expect(r.reason).toContain('carried Z0');
+    expect(r.reason).toContain('no origin is written');
+    // NOTHING MORE MEASURED: no bore was entered and no wall was touched — the stop is at the corners.
+    expect(sent.filter((l) => /^G38\.3 [XY]/.test(l))).toHaveLength(0);
+    expect(sent.filter((l) => /^G0 X12/.test(l))).toHaveLength(0);
+  }, 60_000);
+
   it('a missed bore wall stops the find by name, and nothing more is sent', async () => {
     const sent: string[] = [];
     const machine = fakeMachine(sent, { missingPlusXBore: 2 });
-    const r = await runFlipRegistration(flipPlan(), { ctx: ctx() }, deps(machine) as never);
+    const r = await runFlipRegistration(flipPlan(), { ctx: ctx(), z0: Z0() }, deps(machine) as never);
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toContain('bore 2');
@@ -191,7 +250,7 @@ describe('#1088 the flip registration executor', () => {
   it('an alarm mid-run stops with nothing more sent beyond the epilogue', async () => {
     const sent: string[] = [];
     const machine = fakeMachine(sent, { alarmAtTouch: 6 });
-    const r = await runFlipRegistration(flipPlan(), { ctx: ctx() }, deps(machine) as never);
+    const r = await runFlipRegistration(flipPlan(), { ctx: ctx(), z0: Z0() }, deps(machine) as never);
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toContain('ALARM');
