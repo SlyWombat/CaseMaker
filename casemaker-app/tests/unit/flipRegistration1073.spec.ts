@@ -81,6 +81,8 @@ describe('#1073 the frame method registers on the front pair, the X seed and two
         expect(Math.abs(t.travelMm)).toBeCloseTo(2.5, 6);
       }
       expect(find!.releaseMm).toBe(3);
+      // #518 makes a miss a reading, not an alarm — but a missed wall still STOPS the find.
+      expect(find!.onMiss).toBe('stop-the-find');
     }
   });
 

@@ -880,6 +880,13 @@ export interface FlipHoleFind {
   touches: { axis: 'x' | 'y'; sign: 1 | -1; from: { x: number; y: number }; travelMm: number }[];
   /** The release after each triggered touch, mm (a G38.5 back along the touched axis). */
   releaseMm: number;
+  /**
+   * A sideways touch that travels its whole search with NO contact is a MISS, and a miss STOPS
+   * this find by name — a wall not where the pin seeded it means the pin is not where side 1 left
+   * it. (House rule #518 makes the miss a reading rather than an alarm; the reading is still a
+   * stop, never a skip.) The executor must carry this.
+   */
+  onMiss: 'stop-the-find';
 }
 
 /** #1073 — one step of side 2's registration, in the order the probe runs it. */
@@ -1020,7 +1027,7 @@ export function planFlipRegistration(input: FlipRegistrationInput): FlipRegistra
       kind: 'hole',
       purpose: 'x-exact-and-turn-check',
       index: (i + 1) as 1 | 2,
-      find: { at, boreDiameterMm, ballRadiusMm, searchMm, entryDepthMm, plungeMm, touches, releaseMm: FLIP_PROBE_AWAY_MM },
+      find: { at, boreDiameterMm, ballRadiusMm, searchMm, entryDepthMm, plungeMm, touches, releaseMm: FLIP_PROBE_AWAY_MM, onMiss: 'stop-the-find' },
     });
   }
 
@@ -1045,7 +1052,7 @@ export function planFlipRegistration(input: FlipRegistrationInput): FlipRegistra
       `⌀${r3(boreDiameterMm)} bores ${r3(holeSeparation)} mm apart — four sideways touches each, a G38.5 release after every trigger: ` +
       `exact X and a turn cross-check to ±${crossCheck.angleToleranceDeg}°`,
     `the tip enters each bore ${entryDepthMm} mm below side 2’s top (chosen, not measured); a trigger on the entry ` +
-      'means the bore is not where the seed says — stop with the reading',
+      'means the bore is not where the seed says — stop with the reading; a sideways touch that misses its wall stops the find too',
   );
   return { ok: true, plan: { method: input.method, steps, crossCheck, notes } };
 }
