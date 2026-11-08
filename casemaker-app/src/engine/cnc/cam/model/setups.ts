@@ -32,6 +32,7 @@ import type { CoverageMesh, CoverageOptions } from '@/engine/cnc/engrave/goalCov
 import type { ParsedMesh } from '@/engine/import/stlParser';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import type { CamMove, ToolpathIR } from '../ir';
+import { orient } from '@/engine/cnc/setups/orient';
 import { toSetupFrame, type FeatureSource, type FeatureTree, type PocketNode, type SetupFrame } from './features';
 import type { SetupSpec } from './plan';
 
@@ -110,21 +111,29 @@ export function buildSetupSpecs(input: BuildSetupsInput): BuildSetupsResult {
 }
 
 /**
- * `Face` → `SetupFrame`, for exactly the two faces `buildSetupSpecs` ever offers. `toSetupFrame`'s
- * own degenerate case for `up = [0, 0, -1]` (`features.ts`) is a half turn about X — the SAME turn
- * `setups/orient.ts`'s `orient('bottom', mount, size)` returns for a VISE mount (`RX180`). A
- * bracket/tape mount's own bottom-flip is `RY180` (about Y) instead, which `documentXY` below does
- * NOT reproduce — stated here, not guessed, by refusing rather than posting a silently-wrong map.
+ * `Face` → `SetupFrame`, for exactly the two faces `buildSetupSpecs` ever offers. WHICH half turn
+ * turns the stock over is `setups/orient.ts`'s own decision, asked here rather than second-guessed:
+ * `orient('bottom', mount, size)` gives the VISE's half turn about X (`RX180`) and a bracket/tape
+ * mount's half turn about Y (`RY180`). The frame carries that axis (#1073) and every reader below —
+ * `toSetupFrame`, `documentXY`, `rotatedGeometryFor` — branches on it, because `up = [0, 0, -1]`
+ * alone cannot tell the two turns apart. A vise frame keeps the exact shape it had before #1073
+ * (`flipAxis` absent = `'x'`).
  */
 export function frameForFace(face: Face, mount: MountSpec, stockTopZ: number, thicknessMm: number): SetupFrame {
   if (face === 'top') return { up: [0, 0, 1], stockTop: stockTopZ, stockBottom: stockTopZ - thicknessMm };
   if (face === 'bottom') {
-    if (mount.kind !== 'vise') {
-      throw new Error(
-        `cam/model/setups: a 'bottom' setup is only wired for a vise mount (#965 stated scope) — a ${mount.kind} mount's own flip needs its own document-frame map`,
-      );
+    // `orient`'s bottom branch never reads the size — only its side-face branch does.
+    const turn = orient('bottom', mount, { x: 1, y: 1, z: 1 });
+    const flipAxis = turn.ok ? turn.rotate?.about : undefined;
+    if (flipAxis !== 'x' && flipAxis !== 'y') {
+      throw new Error(`cam/model/setups: orient() gave no half turn for the stock's bottom on a ${mount.kind} mount`);
     }
-    return { up: [0, 0, -1], stockTop: thicknessMm - stockTopZ, stockBottom: -stockTopZ };
+    return {
+      up: [0, 0, -1],
+      stockTop: thicknessMm - stockTopZ,
+      stockBottom: -stockTopZ,
+      ...(flipAxis === 'x' ? {} : { flipAxis }),
+    };
   }
   throw new Error(`cam/model/setups: '${face}' is not one of the two faces this build offers (#965 stated scope: top/bottom only)`);
 }
@@ -132,8 +141,9 @@ export function frameForFace(face: Face, mount: MountSpec, stockTopZ: number, th
 /**
  * The setup-local XY → DOCUMENT (world) XY map, for exactly the two frames `frameForFace` builds.
  * `up = [0, 0, 1]` is the identity (the job's own orientation IS the document frame). `up =
- * [0, 0, -1]` is `toSetupFrame`'s own half turn about X — X unchanged, Y (and Z) negate — so a
- * flipped setup's local Y is the document's Y, mirrored; Z is never part of this map (a posted
+ * [0, 0, -1]` is `toSetupFrame`'s own half turn: about X for a vise frame — X unchanged, Y (and Z)
+ * negate — or about Y for a bracket/tape frame (#1073) — X (and Z) negate, Y unchanged. The frame's
+ * `flipAxis` picks which, absent meaning the vise's X. Z is never part of this map (a posted
  * program's Z is a MACHINE height, re-probed per setup — `SAFE_Z`/`HOP_Z`/the pocket chain's own
  * `z0` rebase — never a world coordinate, flipped setup or not).
  *
@@ -153,7 +163,11 @@ export function frameForFace(face: Face, mount: MountSpec, stockTopZ: number, th
 export function documentXY(frame: SetupFrame, x: number, y: number, offset: readonly [number, number] = [0, 0]): [number, number] {
   const [ux, uy, uz] = frame.up;
   if (ux === 0 && uy === 0 && uz === 1) return [x + offset[0], y + offset[1]];
-  if (ux === 0 && uy === 0 && uz === -1) return [x + offset[0], -y + offset[1]];
+  if (ux === 0 && uy === 0 && uz === -1) {
+    // The inverse of the same half turn `toSetupFrame` applies — the two turns a bottom frame can
+    // mean differ exactly here (#1073): RX180 negates y, RY180 negates x.
+    return frame.flipAxis === 'y' ? [-x + offset[0], y + offset[1]] : [x + offset[0], -y + offset[1]];
+  }
   throw new Error(`cam/model/setups: documentXY has no map for up = [${frame.up.join(', ')}] (#965 stated scope: axis-aligned top/bottom only)`);
 }
 
@@ -194,7 +208,7 @@ export function mapIRToDocument(ir: ToolpathIR, frame: SetupFrame, offset: reado
 export function rotatedGeometryFor(geometry: FeatureSource, frame: SetupFrame): FeatureSource {
   const [ux, uy, uz] = frame.up;
   if (ux === 0 && uy === 0 && uz === 1) return geometry;
-  const rotated = toSetupFrame(geometry.triangles, frame.up);
+  const rotated = toSetupFrame(geometry.triangles, frame.up, frame.flipAxis);
   const positions = Float32Array.from(rotated.positions);
   let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
   for (let i = 0; i < positions.length; i += 3) {
@@ -256,6 +270,9 @@ export function shiftToStockTop(geometry: FeatureSource, frame: SetupFrame): { g
     geometry: { ...geometry, triangles },
     frame: {
       up: frame.up,
+      // #1073 — the half turn's axis rides through this shim too; dropping it here would silently
+      // turn a bracket flip back into the vise's map for everything downstream.
+      ...(frame.flipAxis === undefined ? {} : { flipAxis: frame.flipAxis }),
       stockTop: 0,
       ...(frame.stockBottom === undefined ? {} : { stockBottom: frame.stockBottom - frame.stockTop }),
     },

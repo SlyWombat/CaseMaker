@@ -4997,6 +4997,16 @@ export async function buildModelPlanInputForGoal(
   // it the plan saw the cavity facing the table and posted no op at all (measured then
   // pinned in `setupDatumGuard.spec.ts`).
   if (mould !== null && sideFace === 'bottom') {
+    // #1073 — the inverse below is the VISE's RX180 (`y → −y`) only. A bracket/tape mount turns
+    // the stock over about Y instead, and the mould's authored frame has never been checked
+    // against that turn; refuse by name rather than post a mirrored cavity. (Today every such job
+    // is refused one line later anyway by `frameForFace`; this keeps the refusal when the bottom
+    // frame becomes available to a bracket mount.)
+    if (jobMount(job) !== 'vise') {
+      throw new Error(
+        `cam/model seam (#1073): a mould's bottom-flip pre-turn is wired for the vise's X half turn only — the ${jobMount(job)} mount turns the stock over about Y`,
+      );
+    }
     const pos = mould.mesh.positions;
     for (let i = 0; i < pos.length; i += 3) {
       pos[i + 1] = -pos[i + 1]!;

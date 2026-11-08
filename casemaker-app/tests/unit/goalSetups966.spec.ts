@@ -19,14 +19,20 @@
  * refuses by name rather than guessing a nominal origin. That is a CORRECT, pre-existing #965
  * refusal this fix does not touch — case 1 proves the fix turns "silently wrong" into "loudly
  * refuses," which is the whole point; case 2 proves the SAME thing through a different, deliberately
- * engineered mechanism (a bracket mount, where this module's own documented scope gap on
- * `documentXY`'s bottom-flip map fires) so the refusal path is shown from two independent causes,
- * not read as a fluke of one geometry.
+ * engineered mechanism (a goal whose open boundary cannot be closed) so the refusal
+ * path is shown from two independent causes, not read as a fluke of one geometry.
+ *
+ * #1073 UPDATE: case 2 used to fire the bracket-mount bottom refusal (`frameForFace`'s own stated
+ * #965 scope gap). That gap is now CLOSED — a bracket/tape bottom builds the RY180 frame — and the
+ * new contract is pinned in `flipFrameRy180_1073.spec.ts`; case 2 keeps its real purpose with the
+ * open boundary's own named refusal as the second cause.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
+import { clearTargetObjectMeshCache, readTargetObjectFile } from '@/engine/import/targetObject';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
@@ -212,23 +218,37 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
   );
 
   it(
-    'CASE 2 — a second, independent refusal mechanism: a bracket mount cannot even BUILD the second setup, and that refuses by name too, never silently drops to one setup',
+    'CASE 2 — a second, independent refusal mechanism: a goal whose open boundary cannot be closed refuses by name inside `buildModelPlanInputForGoal`, before `planModelCam` ever runs',
     async () => {
-      // `frameForFace` (`cam/model/setups.ts`) states its own scope explicitly: the vise's bottom
-      // flip is a half turn about X, which `documentXY` reproduces; a bracket/tape mount's own
-      // bottom flip is a half turn about Y instead, which this module does NOT yet map — so it
-      // throws, by name, rather than posting a silently-wrong document-frame map. This fires
-      // during `buildModelPlanInputForGoal` itself (before `planModelCam` ever runs), which is
-      // exactly the function #966-goal-setups changed — proving ITS OWN new call to
-      // `buildSetupSpecs` propagates a genuine refusal rather than swallowing it.
-      const job: EngraveJob = {
-        ...jobFor(sphereGoal(), SPHERE_STOCK),
-        workholding: { kind: 'bracket', bracket: { anchor: 1, variant: 'thin', clamps: [], source: 'default' } },
+      // #1073 LIFTED THIS CASE'S ORIGINAL MECHANISM: `frameForFace` now maps a bracket/tape
+      // mount's bottom flip (the RY180 half turn) instead of refusing it, so "a bracket mount
+      // cannot even BUILD the second setup" is gone BY DESIGN — the new contract is pinned in
+      // `flipFrameRy180_1073.spec.ts`. What this case is FOR survives: a refusal raised inside
+      // `buildModelPlanInputForGoal` ITSELF — the function #966-goal-setups changed — must
+      // propagate as a named 'cam' finding, never a bare stack trace and never `ok: true`.
+      //
+      // The trigger is now `closeOpenSheet`'s own named refusal: this fixture's boundary is not a
+      // set of simple loops, so the skirt cannot close it and the seam refuses by name rather than
+      // handing the kernel a non-manifold sheet.
+      const bytes = readFileSync(fileURLToPath(new URL('../fixtures/goals/open-shell.stl', import.meta.url)));
+      const read = await readTargetObjectFile(new File([bytes], 'open-shell.stl'), 'g-open-shell-966');
+      if (!read.ok) throw new Error(read.error);
+      const goal: EngraveTargetObject = {
+        id: read.id,
+        name: read.name,
+        format: read.format,
+        sha256: read.sha256,
+        data: read.data,
+        size: read.size,
+        position: { x: 20, y: 20, z: 0 },
+        rotation: 0,
+        enabled: true,
+        role: 'goal',
       };
-      const goal = job.targetObject!;
+      const job: EngraveJob = jobFor(goal, { length: 40, width: 40, thickness: 30 });
 
       await expect(buildModelPlanInputForGoal(job, goal, BALL, SHOP)).rejects.toThrow(
-        /a 'bottom' setup is only wired for a vise mount \(#965 stated scope\)/,
+        /goal-mesh-unclosable: a boundary vertex .* has more than one outgoing boundary edge/,
       );
 
       // The same thing, through the real seam: a named 'cam'-stage refusal, never `ok: true`.
@@ -241,7 +261,7 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
       expect(result.errors).toHaveLength(1);
       const message = result.errors[0]!.message;
       expect(message).toContain('cam/model seam (#966): could not build a ModelPlanInput');
-      expect(message).toContain("a 'bottom' setup is only wired for a vise mount (#965 stated scope)");
+      expect(message).toContain('goal-mesh-unclosable');
       expect(message).not.toMatch(/\n\s+at /);
     },
     90_000,
