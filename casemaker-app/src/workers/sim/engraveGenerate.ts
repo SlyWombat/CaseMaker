@@ -80,7 +80,7 @@ import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
 import { cutterOnMetalLine, cutterRefusedOnMaterial } from '@/engine/cnc/engrave/cutterMaterial';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
-import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach } from '@/engine/cnc/engrave/goalReach';
+import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach, reachCutterFor } from '@/engine/cnc/engrave/goalReach';
 import { undersideFloorZ } from '@/engine/cnc/engrave/goalUnderside';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
@@ -5094,7 +5094,13 @@ export async function buildModelPlanInputForGoal(
   // stated band (#888) wins over the reach-derived one, exactly as the old path's `topBandMm`
   // does. Absent: no band, the pre-#988 plan byte-identical. (#1037 removed the seam's own early
   // whole-goal reach refusal; the plan's finisher gate states an unreachable region instead.)
-  const cutterReach = knownReach(tool, shop.tools ?? []);
+  // #1075 — THE BAND'S CUTTER IS THE SHOP'S REACH, NOT THE FINISH PICK'S: under `cutWithinReach`
+  // the picked finisher's own reach must not become the job's depth limit (the toolholder: a
+  // ⌀1.5 x 8 ball picked, band 7, 87 % of the goal left). The chosen cutter is kept when it
+  // already reaches the goal's need; a stated band or the underside floor still wins below.
+  const reachOwnedTools = [...(shop.tools ?? []).map((e) => e.tool), ...(tool === null ? [] : [tool])];
+  const reachTool = tool === null ? null : reachCutterFor(goal, tool, reachOwnedTools, shop.tools ?? []);
+  const cutterReach = reachTool === null ? null : knownReach(reachTool, shop.tools ?? []);
   const goalDepth = placedSize(goal).z;
   const reachBandMm =
     cutterReach !== null && goalDepth > cutterReach.mm + 1e-9 && goal.cutWithinReach === true
@@ -5784,7 +5790,8 @@ export async function generateGoalProgram(
   // record does not state is the INFO `goal-reach-unrecorded` (never a refusal; the sweep's holder
   // gate is the guard), and `cutWithinReach`'s band (#988) is untouched because it is the
   // operator's choice about the CHOSEN cutter's reach, not a verdict on the goal.
-  const reachFindings = goalReachFindings(goal, tool, ownedTools, shop.tools ?? []);
+  // #1075 — the reach row speaks the cutter the BAND belongs to, so the warning and the plan cannot disagree.
+  const reachFindings = goalReachFindings(goal, tool === null ? null : reachCutterFor(goal, tool, ownedTools, shop.tools ?? []), ownedTools, shop.tools ?? []);
   // #872 — WHAT THE TOP SETUP LEAVES UNREACHED. Measured geometrically here (faces pointing away,
   // the shadow band) and paired with the flip plan that finishes it; inform-only, so it rides
   // with the findings on every path that posts a program.
