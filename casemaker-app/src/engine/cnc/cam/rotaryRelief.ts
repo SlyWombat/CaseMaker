@@ -196,8 +196,23 @@ export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResu
   const { field: cutField, clippedFromX } = clipFieldX(field, reliefKeepOutX(tool));
   const hf = radialFieldAsHeightfield(cutField);
 
-  // Roughing: the A sweeps at stepped radii, from the stock's own section surface.
-  const rough = aSweepRoughing(cutField, feeds, allowance, args.section);
+  // #1094 — THE ROUGH'S DROP-CUTTER TIP FIELD, COMPUTED ONCE. The A-sweep's per-cell clamp sees
+  // only the cell's own angle, so the ball's flank cuts the wall beside a near-axis cell (a
+  // narrow gap the cutter cannot enter): a 0.3 mm cell beside an 11.5 mm body is roughed to 0.5 mm
+  // and the ball's flank removes the body. The finish's own tip field is the gouge-safe rule — the
+  // tip lifted to clear every cell of the ball's disc — so the rough uses the same stencil on the
+  // goal-plus-allowance surface: `z' = min(0, z + allowance)`. One pass, shared by every layer.
+  const roughHf: GoalHeightfield = {
+    ...hf,
+    z: Float32Array.from(hf.z, (v) => Math.min(0, v + allowance)),
+  };
+  const roughTip = finishTipField(roughHf, surfaceTool, args.maxFinishTipOps ?? DEFAULT_MAX_FINISH_TIP_OPS, {
+    wrapRows: true,
+  });
+
+  // Roughing: the A sweeps at stepped radii, from the stock's own section surface. Each layer's
+  // floor stays; the tip never goes below the drop-cutter field's own value.
+  const rough = aSweepRoughing(cutField, feeds, allowance, args.section, roughTip);
   const roughing: CamOperation = {
     number: 1,
     name: `[T${args.toolNumber}] rotary 3D rough — ${allowance} mm to leave`,
@@ -257,10 +272,12 @@ function aSweepRoughing(
   field: GoalRadialField,
   feeds: SurfaceFeeds,
   allowance: number,
-  section?: RotarySection,
+  section: RotarySection | undefined,
+  /** #1094 — the drop-cutter tip of the goal-plus-allowance, computed once by the caller. */
+  roughTip: Float32Array,
 ): { moves: CamMove[]; layers: number } {
   const moves: CamMove[] = [];
-  const { nx, ny, pitch, x0, z, covered } = field;
+  const { nx, ny, pitch, x0, covered } = field;
   const minZ = field.minRadius - field.radius;
   if (!(feeds.stepDown > 0)) {
     throw new Error(`a rotary relief's roughing needs a positive step-down; the feeds gave ${feeds.stepDown} mm`);
@@ -296,7 +313,10 @@ function aSweepRoughing(
         const jj = j % ny;
         const idx = jj * nx + i;
         const y = j * pitch;
-        const clamp = covered[idx] === 1 ? (z[idx] as number) + allowance : 0;
+        // #1094 — the precomputed drop-cutter tip of the goal+allowance. It is the max over the
+        // ball's whole disc, so it includes the cell's own `z + allowance`; the layer floor below
+        // is unchanged.
+        const clamp = covered[idx] === 1 ? (roughTip[idx] as number) : 0;
         const tip = Math.max(L, clamp);
         // A cut needs the goal's coverage AND a tip below the stock's own surface at this angle.
         const cut = covered[idx] === 1 && tip < stockSurface(jj) - 1e-9;
