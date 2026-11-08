@@ -500,6 +500,33 @@ export function unionCapsules(tl: ManifoldToplevel, polys: Polygon[]): CrossSect
 export function stockFromSetup(tl: ManifoldToplevel, setup: Setup): { stock: ManifoldInstance; topZ: number } | SweepDiagnostic {
   const part = setup.part;
   if (part.kind === 'cylinder') {
+    // #1059 — A BLOCK IN THE CHUCK IS ITS OWN SECTION, not its turned envelope. `part.section`
+    // has carried the block's width × height since #777 (a square bar is its own shape about the
+    // axis; the envelope only bounds the swing). The exact sweeper must build THAT solid — a
+    // 44.5 square swept as a ⌀62.93 rod reads the wrong volume, the wrong top height (31.47
+    // against 22.25) and air where every A-held face's cut starts.
+    const section = part.section;
+    if (section?.kind === 'rect') {
+      if (!(section.width > 0) || !(section.height > 0)) {
+        return { severity: 'error', code: 'stock-invalid', message: `stock section must have a positive width and height, got ${section.width} × ${section.height}` };
+      }
+      if (!(part.length > 0)) {
+        return { severity: 'error', code: 'stock-invalid', message: `stock length must be positive, got ${part.length}` };
+      }
+      // Centred on the AXIS — the work origin sits on it (`stubSetup`) — so X ∈ [0, L] and the
+      // section runs ± half each way about Y and Z, the same frame the cylinder path builds.
+      // The placement's Rz and translation apply exactly as they do to a rod.
+      const raw = tl.Manifold.cube([part.length, section.width, section.height], true);
+      const alongX = raw.translate([part.length / 2, 0, 0]);
+      raw.delete();
+      const origin = partToWork(setup, [0, 0, 0]);
+      const rotated = alongX.rotate([0, 0, setup.placement.rotationZ]);
+      alongX.delete();
+      const stock = rotated.translate([origin[0], origin[1], origin[2]]);
+      rotated.delete();
+      const bb = stock.boundingBox();
+      return { stock, topZ: bb.max[2] };
+    }
     const radius = part.diameter / 2;
     if (!(radius > 0)) {
       return { severity: 'error', code: 'stock-invalid', message: `stock diameter must be positive, got ${part.diameter}` };
@@ -1517,6 +1544,29 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   const st = stockFromSetup(tl, setup);
   if (isDiag(st)) return { ok: false, diagnostics: [st] };
   let { stock, topZ } = st;
+  // #1059 — THE SECTION IS PART OF THE STOCK'S IDENTITY. The gates above check the stock's KIND
+  // against the program's frame; this one re-reads the SOLID that was built against the section
+  // the setup declares, so a builder regression or a new caller cannot let a W × H block ride a
+  // round solid again (the one place a square can be "wrong but green", #1059 item 2).
+  const declared = setup.part.kind === 'cylinder' ? setup.part.section : undefined;
+  if (declared?.kind === 'rect') {
+    const sb = stock.boundingBox();
+    const gotW = sb.max[1] - sb.min[1];
+    const gotH = sb.max[2] - sb.min[2];
+    if (Math.abs(gotW - declared.width) > 1e-6 || Math.abs(gotH - declared.height) > 1e-6) {
+      stock.delete();
+      return {
+        ok: false,
+        diagnostics: [
+          {
+            severity: 'error',
+            code: 'rotary-stock-section',
+            message: `the stock built for this job is ${gotW.toFixed(3)} × ${gotH.toFixed(3)} mm about the axis, but the job states a ${declared.width} × ${declared.height} mm block — a block job is never swept on a rod's solid`,
+          },
+        ],
+      };
+    }
+  }
 
   // A REST PASS (#410): the material the PREVIOUS program left is the material this one starts
   // from. Seed the stock with it once, here, and everything downstream reads the truth rather
