@@ -537,14 +537,26 @@ test('a part wider than the rod is clipped to it, warned on the run sheet, and S
     await page.getByTestId('engrave-cut-step-1-summary').click();
   }
   // #1083 — THE ROTARY GOAL IS COMPARED NOW, CLIPPED OR NOT. The goal check carries the run's
-  // own rotary map and judges by the grid's tolerance, so this oversize job's report is a
-  // verdict ('matches the design': what the rod can carry was cut to the design's map) instead of
-  // the pre-#1083 'the goal was not compared'. The clipping itself is still stated where it
-  // belongs — the `goal-rotary-oversize` warning below — and the clipped part is still drawn.
+  // own rotary map and judges by the grid's tolerance instead of the pre-#1083 'the goal was
+  // not compared'.
+  //
+  // #1095 — AND THE CLIPPED PART FAILS IT, HONESTLY. The verdict is the flat rule: zero
+  // adjudicated cut-into AND the goal's top surface at or above the pass line. A part wider than
+  // the rod is clipped at the rod's surface, so the outermost 2 mm of the goal is never
+  // reproduced: the check measures 34.18 % top-surface coverage against the 95 % pass line, with
+  // 0 % cut-into, and says so instead of claiming a match. The clipping itself is still stated
+  // where it belongs — the `goal-rotary-oversize` warning below — and the clipped part is still
+  // drawn (asserted above).
   const step1Summary = page.getByTestId('engrave-cut-step-1-summary');
-  await expect(step1Summary).toContainText('Program checked');
-  await expect(step1Summary).toContainText('matches the design');
+  await expect(step1Summary).toContainText('did not pass');
+  await expect(step1Summary).not.toContainText('matches the design');
   await expect(step1Summary).not.toContainText('was not compared');
+  // The failure's own line: the coverage the check measured, judged against the pass line — not
+  // a cut into the design (the raw reading below says 0 % cut-into).
+  const goalLine = page.getByTestId('engrave-cut-goal');
+  await expect(goalLine).toHaveAttribute('data-state', 'coverage');
+  await expect(goalLine).toContainText(/Covers [\d.]+ % of the design’s top surface \(the pass line is 95 %\)/);
+  await expect(page.getByTestId('engrave-cut-goal-raw')).toContainText(/0 % cut-into/);
   await page.getByTestId('engrave-cut-details').locator('summary').click();
   const warning = page.locator('[data-testid$="-goal-rotary-oversize"]');
   await expect(warning).toBeVisible();
