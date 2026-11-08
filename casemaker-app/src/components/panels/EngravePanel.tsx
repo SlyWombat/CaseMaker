@@ -3229,8 +3229,10 @@ export function EngravePanel(): JSX.Element {
   const roundStock = job.stock.shape === 'cylinder';
   // #241 slice 2 — the face operations' frame: the chuck's radius (what a flat's chord is measured
   // against), and whether this job can carry one at all.
-  const rotaryChuck = roundStock && job.workholding.kind === 'rotary-chuck';
+  // #1059 — a BLOCK in the chuck carries them too (#777): the map exists for any stock the chuck
+  // holds, so the Faces step is offered whenever `rotaryMapOf` reads one, not only on a rod.
   const rotaryFaceMap = rotaryMapOf(job);
+  const rotaryChuck = rotaryFaceMap !== null;
   const faceRadiusMm = rotaryFaceMap?.radius ?? Math.max(job.stock.width, job.stock.thickness) / 2;
   // #833 — the face frame's two measures: the cuttable span (one cutter radius clear of each
   // band) and the job cutter's diameter (a hole comes out at it).

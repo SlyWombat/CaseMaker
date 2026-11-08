@@ -33,7 +33,7 @@ import type { OraclePredicted, OraclePoint } from '@/engine/cnc/engrave/oracle';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { cuttingDiameter, cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
-import { rotaryFreeSpan, sectionRadiusAt, sectionWords, type RotaryMap, type RotarySection } from './wrap';
+import { rotaryFreeSpan, rotaryMapOf, sectionRadiusAt, sectionWords, type RotaryMap, type RotarySection } from './wrap';
 
 /** The width of a face at a depth below the surface, mm: the chord of the turned circle. */
 export function faceChordMm(radiusMm: Mm, depthMm: Mm): Mm {
@@ -492,12 +492,15 @@ export function planFaceCuts(
 export function faceJobRefusal(job: EngraveJob): JobFinding | null {
   const ops = job.faces ?? [];
   if (ops.length === 0) return null;
-  if (job.workholding.kind !== 'rotary-chuck' || job.stock.shape !== 'cylinder') {
+  // #1059 — the gate is "the chuck holds this stock", read by the same classifier the map uses:
+  // a ROD or a BLOCK (#777) in the chuck, and never a disc. A block's faces are indexed cuts on
+  // its section exactly as a rod's are on its cylinder.
+  if (rotaryMapOf(job) === null) {
     return {
       severity: 'error',
       code: 'face-needs-chuck',
       message:
-        'Faces are cut on round stock held in the rotary chuck, and this job is held in the vise. Change the holding in the Holding step, or remove the face operations.',
+        'Faces are cut on stock held in the rotary chuck, and this job is not held in the chuck. Change the holding in the Holding step, or remove the face operations.',
     };
   }
   return null;

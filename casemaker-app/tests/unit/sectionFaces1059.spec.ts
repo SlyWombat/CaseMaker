@@ -24,7 +24,7 @@ import type { CutParams } from '@/engine/cnc/feeds';
 import { generateIndexed } from '@/engine/cnc/cam/indexed';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { buildTimeline, parseGcode, stubSetup, type Setup } from '@/engine/cnc';
-import { faceChordMm, faceCutIntoNeck, planFaceCuts, type FaceNeckSpan } from '@/engine/cnc/rotary/faceOps';
+import { faceChordMm, faceCutIntoNeck, faceJobRefusal, planFaceCuts, type FaceNeckSpan } from '@/engine/cnc/rotary/faceOps';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { createSimSession } from '@/workers/sim/session';
 import { sweepTimeline, type SweepResult } from '@/workers/geometry/sweep';
@@ -62,6 +62,16 @@ function block(faces: EngraveFaceOp[], dims: { width: number; thickness: number 
 }
 
 const flat = (id: string, a: number, depth: number): EngraveFaceOp => ({ id, kind: 'flat', a, depth });
+
+describe('#1059 a block in the chuck is a face job', () => {
+  it('faceJobRefusal accepts it — the refusal is for a job not in the chuck, or a disc', () => {
+    const job = block([flat('f0', 0, 1)]);
+    expect(faceJobRefusal(job)).toBeNull();
+    // Still refused where the chuck cannot hold it: the same job in the vise.
+    const vise = { ...job, workholding: defaultEngraveJob().workholding };
+    expect(faceJobRefusal(vise)?.code).toBe('face-needs-chuck');
+  });
+});
 /** The feeds row is not this slice's subject: the geometry is, so the passes are stated. */
 const PARAMS: CutParams = { rpm: 12000, feed: 800, plungeFeed: 200, stepDown: 2, stepOver: 5, peck: 1, air: true };
 const ctx = (): PostContext => ({

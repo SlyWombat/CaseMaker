@@ -1601,6 +1601,9 @@ export function HoldingStep({
         boardMm,
         rotaryEnvelope,
         round: job.stockEntry?.form === 'rod' || job.stock.shape === 'cylinder',
+        // #1059 — a BLOCK is a rotary stock (#777): the engine's own classifier says which box
+        // the chuck reads as a section, so the wizard cannot disagree with what Generate will do.
+        block: chuckStockOf(job)?.kind === 'block',
         // #743 D6 — a disc is round in plan but NOT a rod: the chuck and the bracket refuse it.
         disc: job.stock.shape === 'disc',
         tape,
