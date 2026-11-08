@@ -1842,6 +1842,26 @@ export interface JobSetupRemount {
  * `RegistrationPlan`, and `RemountStep.confirm`'s shape), so there is one meaning of a mount, of a
  * face orientation and of a registration plan across the planner and the document.
  */
+/**
+ * #1082 — A SETUP'S OWN STOCK, when it differs from the job's blank (the vendor flip's side 2 is
+ * the freed part). The box is the stock's own extent; the Z datum is the flip's carried Z0 (#1073),
+ * not re-stated here.
+ *
+ * OPTIONAL on the setup and NOT defaulted: absent is the job's blank, byte-identical for every
+ * document written before the field. `provenance` says where the box came from — derived from side
+ * 1's freed extents (the design silhouette the plan cut), or stated by the operator (which wins).
+ */
+export interface SetupStock {
+  /** The stock's extent along the work X, mm. */
+  length: number;
+  /** The stock's extent along the work Y, mm. */
+  width: number;
+  /** The stock's own thickness, mm (T_measured when the house has it, else the blank's stated one). */
+  thickness: number;
+  /** `derived` = side 1's freed extents; `stated` = the operator's own numbers. */
+  provenance: 'derived' | 'stated';
+}
+
 export interface JobSetup {
   /**
    * Stable within the job. Creation sites mint it with `newId('setup')`, like every other item id
@@ -1893,6 +1913,12 @@ export interface JobSetup {
    * registration and the sheet all read this one record.
    */
   flip?: SetupFlip;
+  /**
+   * #1082 — THIS SETUP'S OWN STOCK when it is not the job's blank: the vendor flip's side 2 is
+   * the freed part. OPTIONAL and not defaulted (absent = the blank, every earlier document
+   * unchanged). See {@link SetupStock}.
+   */
+  stock?: SetupStock;
   /**
    * #723 P2-2 — THE FLIP'S STATED REFERENCE: the two locating pins a turned stock sits on, in THIS
    * setup's mounted work XY (origin at the stock's front-left corner as mounted, mm). A setup that

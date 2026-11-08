@@ -2302,6 +2302,15 @@ const remountConfirmSchema = z.object({
     .describe('Index of the correct answer in options.'),
 });
 
+const setupStockSchema = z
+  .object({
+    length: z.number().finite().positive().describe('The setup’s stock extent along the work X, mm (#1082).'),
+    width: z.number().finite().positive().describe('The setup’s stock extent along the work Y, mm.'),
+    thickness: z.number().finite().positive().describe('The setup’s stock thickness, mm (measured when the house has it, else the blank’s stated one).'),
+    provenance: z.enum(['derived', 'stated']).describe('`derived` = side 1’s freed extents; `stated` = the operator’s own numbers (which win).'),
+  })
+  .strict();
+
 const jobSetupSchema = z.object({
   // The schema mints a setup id exactly as it mints `EngraveJob.id`: a document written before the
   // field existed (or a hand-built setup) gains one on parse rather than failing to load.
@@ -2349,6 +2358,12 @@ const jobSetupSchema = z.object({
     .strict()
     .optional()
     .describe('How this setup turns the stock over; omit for a setup that is not a flip.'),
+  // #1082 — this setup's own stock (the vendor flip's side 2 is the freed part). OPTIONAL and not
+  // defaulted: absent is the job's blank, so every document written before the field keeps its
+  // exact shape.
+  stock: setupStockSchema
+    .optional()
+    .describe('This setup’s own stock when it is not the job’s blank; omit for the blank.'),
   // #723 P2-2 — the flip's stated reference: the two locating pins, in this setup's mounted work XY.
   pins: z
     .object({
