@@ -4025,6 +4025,7 @@ export function EngravePanel(): JSX.Element {
           face={face}
           index={i}
           radiusMm={faceRadiusMm}
+          section={rotaryFaceMap?.section}
           lengthMm={faceSpanLengthMm}
           cutterDiameterMm={faceCutterD}
           onChange={(patch) => useEngraveJobStore.getState().updateFaceOperation(face.id, patch)}
