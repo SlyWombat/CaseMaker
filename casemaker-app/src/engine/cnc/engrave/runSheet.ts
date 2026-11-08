@@ -312,6 +312,11 @@ export interface RunSheetProgram {
    */
   through?: RunSheetThroughFacts | null;
   /**
+   * #1073 — THE FLIP RELEASE'S BRIDGES when THIS program is the flipped setup's release.
+   * Structurally the worker's `TabReleaseProgramFacts`; absent on every other program.
+   */
+  tabRelease?: RunSheetTabReleaseFacts | null;
+  /**
    * #668 — the bores THIS program helices to size, when it has any. Structurally the worker's
    * `BoreProgramFacts`, so the generated object is assignable unchanged; absent on every program
    * that cuts no bore and on a result stored by an older build.
@@ -401,6 +406,19 @@ export interface RunSheetThroughFacts {
     /** Spans it could not place; a non-zero count is a finding, never a silent omission. */
     unplaceable: number;
   }[];
+}
+
+/**
+ * #1073 — WHAT THE FLIP RELEASE LEAVES HOLDING THE PART: the bridges, their size, and their
+ * centres in the release setup's work frame. Structurally `TabReleaseProgramFacts` from
+ * `engraveGenerate`, so the generated program is assignable unchanged and the sheet prints the
+ * positions the file was cut with rather than a second derivation.
+ */
+export interface RunSheetTabReleaseFacts {
+  count: number;
+  widthMm: number;
+  heightMm: number;
+  at: readonly { x: number; y: number }[];
 }
 
 /**
@@ -3696,6 +3714,26 @@ function throughCutSteps(facts: RunSheetThroughFacts | null | undefined): RunShe
 }
 
 /**
+ * #1073 — THE FLIP RELEASE'S BRIDGES. The release file leaves the part held by these tabs and
+ * nothing else, so the cutting-off is the section's LAST physical action: after the machine is
+ * homed, cut them with a flush-cut saw or knife, then dress the stubs. The positions are the
+ * plan's own tab centres — the same ones the file's lifts were placed at.
+ */
+function tabReleaseSteps(facts: RunSheetTabReleaseFacts | null | undefined): RunSheetStep[] {
+  if (facts === null || facts === undefined || facts.count <= 0) return [];
+  const at = facts.at.map((p) => `X ${fmtNum(p.x)}, Y ${fmtNum(p.y)}`).join('; ');
+  const them = facts.count === 1 ? 'it' : 'them';
+  return [
+    {
+      text:
+        `The part is held by ${facts.count} tab${facts.count === 1 ? '' : 's'} — cut ${them} with a flush-cut saw or knife ` +
+        `after the machine is homed, then dress the stubs. The tab centres in this setup’s work frame are ${at} mm.`,
+      value: `${facts.count} tab${facts.count === 1 ? '' : 's'} · ${fmtNum(facts.widthMm)} mm wide · ${fmtNum(facts.heightMm)} mm thick`,
+    },
+  ];
+}
+
+/**
  * #737 — the saw step for a rotary part left on a neck. It belongs to the program that cut the
  * neck, and it is the LAST physical action of that file: the neck is cut to depth all the way
  * round, and the part is sawn through it after the program ends.
@@ -3840,6 +3878,9 @@ function engraveProgramSectionSteps(program: RunSheetProgram, number: number): R
     ...programRunSteps(program, number),
     ...throughCutSteps(program.through),
     ...neckSawSteps(program.neck),
+    // #1073 — the release's bridges are cut by hand once the machine is homed: the last physical
+    // action of the flipped setup's last file.
+    ...tabReleaseSteps(program.tabRelease),
   ];
 }
 

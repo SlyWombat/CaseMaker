@@ -588,8 +588,12 @@ const RIM_CLOSE_TOL_MM = 0.01;
  * diameter (the same substitution #669 makes for a chamfer without a V row), which is a shallower
  * step-down and a slower feed than this cutter could take — the conservative side. The
  * substitution is returned so the plan STATES it, never posts it silently.
+ *
+ * #1073 — EXPORTED for a program the plan does not create itself: the flip's tab release posts
+ * beside the plan's own programs, and its feeds must be the SAME row this resolver gave that
+ * program's contour flat (the release cuts the band the contour's floor left).
  */
-function resolvedCutParams(input: ModelPlanInput, tool: Tool): { params: CutParams; substitution: string | null } {
+export function resolvedCutParams(input: ModelPlanInput, tool: Tool): { params: CutParams; substitution: string | null } {
   // #1047 — the caller's rows, never this realm's snapshot: the worker and the CLI both hold an
   // empty module state however carefully the main thread filled its own (#324, `feeds.ts`).
   const catalogue = input.feedCatalogue ?? feedCatalogueSnapshot();

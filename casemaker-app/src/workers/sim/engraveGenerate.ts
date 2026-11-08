@@ -43,7 +43,7 @@ import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { version as CAM_VERSION } from '../../../package.json';
 import { dialectOf, type Mill } from '@/engine/cnc/machine';
 import { jobMachine, type MachineCalibration } from '@/engine/cnc/calibration';
-import { catalogueCoverageFor, feedsFor, feedsToolForSurface, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { catalogueCoverageFor, feedsFor, feedsToolForSurface, type CutParams, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 // #922 — the one call shape every `shop.feeds ?? undefined` resolution below now uses: one options
 // object (`shop`, already built by whichever caller — the worker or the CLI) instead of that
 // fragment copied at each site. See the module doc in `engrave/feeds.ts`.
@@ -81,7 +81,7 @@ import { cutterOnMetalLine, cutterRefusedOnMaterial } from '@/engine/cnc/engrave
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach, reachCutterFor } from '@/engine/cnc/engrave/goalReach';
-import { undersideFloorZ } from '@/engine/cnc/engrave/goalUnderside';
+import { undersideFloorZ, UNDERSIDE_TAB_THICKNESS_MM } from '@/engine/cnc/engrave/goalUnderside';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
@@ -234,11 +234,15 @@ import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 import {
   DEFAULT_RELEASE_TABS,
   MODEL_STOCK_TO_LEAVE_MM,
+  resolvedCutParams,
   type ModelPlanInput,
   type ModelPlanOutput,
   type PlannedOp,
   type SetupSpec,
 } from '@/engine/cnc/cam/model/plan';
+// #1073 — the flip's tab release: the band cut's plan and the program it posts as.
+import { planTabRelease, tabReleaseIr, type TabReleaseProgramFacts } from '@/engine/cnc/engrave/tabRelease';
+import { tabSettings } from '@/engine/cnc/cam/tabSettings';
 // #961 — the two-plan run: the OWNED plan posts, the ideal rides beside it for the card's tradeoff.
 import { planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
 import { comparePlanOutcomes, type PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
@@ -548,6 +552,12 @@ export interface EngraveProgram {
    * as a whole (a job may cut its regions with one tool and its profiles with another).
    */
   through?: ThroughCutFacts | null;
+  /**
+   * #1073 — THE FLIP RELEASE'S BRIDGES when THIS program is the flipped setup's release: how many,
+   * their width and the material left, and their centres in this setup's work XY. Null on every
+   * other program: the sheet's "cut the tabs by hand" step belongs to the file that leaves them.
+   */
+  tabRelease?: TabReleaseProgramFacts | null;
   /**
    * #668 — the bore facts when THIS program helices a hole to size. Null on every other file: the
    * run sheet's pitch step belongs to the program that cuts the wall, not to the run as a whole.
@@ -5410,6 +5420,12 @@ export interface PostModelPlanFindings {
   modelRoughFindings: JobFinding[];
   chamferFindings: JobFinding[];
   /**
+   * #1073 — THE FLIP RELEASE the CALLER appended to the plan's own last program list:
+   * `generateGoalProgram` plans it and states its bridges here, so this tail can stamp them on the
+   * posted program (the run sheet's last step prints them). Absent on every other job.
+   */
+  tabRelease?: TabReleaseProgramFacts | null;
+  /**
    * #961 — THE TWO-PLAN RUN beside the plan that posts: the ideal `ModelPlanOutput` and the
    * material tradeoff between it and the owned plan. They ride the findings because they are
    * computed BEFORE this tail (the head chooses which plan posts), and the tail stamps them onto
@@ -5428,7 +5444,7 @@ export async function postModelPlan(
   output: ModelPlanOutput,
   findings: PostModelPlanFindings,
 ): Promise<EngraveGenerated> {
-  const { goalFindings, reachFindings, coverageFindings, modelRoughFindings, chamferFindings, planIdeal = null, planTradeoff = null } = findings;
+  const { goalFindings, reachFindings, coverageFindings, modelRoughFindings, chamferFindings, tabRelease = null, planIdeal = null, planTradeoff = null } = findings;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -5637,6 +5653,11 @@ export async function postModelPlan(
         frameVerify: null,
         programHash: programHash(posted.text),
         cam: summarize(ir, mill.rapidEstimate),
+        // #1073 — the release is the LAST program of the LAST setup; its bridges ride with it so
+        // the sheet's last step prints the positions the file was cut with.
+        ...(tabRelease !== null && plan === output.perSetup[output.perSetup.length - 1] && i === plan.programs.length - 1
+          ? { tabRelease }
+          : {}),
       });
     }
   }
@@ -5695,6 +5716,74 @@ export async function postModelPlan(
     // when the job is a mould; every other goal job gets the plan's own numbers here, because the
     // heightfield engine that used to fill this block is gone (the #966 removal).
     surface3d: mouldFacts ?? goalSurfaceFactsFromPlan(output),
+  };
+}
+
+/**
+ * #1073 — THE FLIPPED SETUP'S RELEASE PROGRAM, built from the plan's own records. The goal carries
+ * the band (`bandMm`) and the underside's tab thickness; the plan's freeing contour states the
+ * flat that cut down to that floor; the release then cuts the band that floor left through
+ * everywhere except the four bridges (`planTabRelease`). Returns `ir: null` when the setup has no
+ * freeing contour — its outline IS the stock's, so no band exists to release (the #1082
+ * outline-is-stock case, stated by the plan itself).
+ */
+async function flipReleaseProgram(
+  job: EngraveJob,
+  goal: EngraveTargetObject,
+  shop: EngraveShopOpts,
+  input: ModelPlanInput,
+  output: ModelPlanOutput,
+  rapid: RapidEstimate,
+): Promise<
+  { ok: true; ir: ToolpathIR | null; facts: TabReleaseProgramFacts | null } | { ok: false; reason: string }
+> {
+  const plan = output.perSetup[output.perSetup.length - 1];
+  if (plan === undefined) return { ok: true, ir: null, facts: null };
+  const contour = plan.ops.find((op) => op.kind === 'contour');
+  if (contour === undefined) return { ok: true, ir: null, facts: null };
+  const flat = contour.outcome.ir.tool;
+  const diameter = cuttingDiameter(flat) ?? 0;
+  if (!(diameter > 0)) {
+    return { ok: false, reason: `the contour flat “${flat.name}” states no cutting diameter, so the band has no release path` };
+  }
+  let params: CutParams;
+  try {
+    ({ params } = resolvedCutParams(input, flat));
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  }
+  // The tab's WIDTH and COUNT are the shop's (the k3 default is 8 wide × 2 thick — data, not
+  // code); its THICKNESS is the band's own half-thickness, because the tab is the material the
+  // release leaves at the bottom of that band. A goal that states its own tab spec wins.
+  const defaults = tabSettings(shop.defaults ?? null).settings;
+  const stated = goal.underside?.tabs;
+  const half = Math.max(0.2, stated?.thicknessMm ?? UNDERSIDE_TAB_THICKNESS_MM);
+  const tabs = {
+    count: stated?.count ?? defaults.count,
+    widthMm: stated?.widthMm ?? defaults.widthMm,
+    heightMm: stated?.thicknessMm ?? Math.min(defaults.heightMm, half),
+  };
+  // The holes this setup is registered on, in THIS setup's work XY: the goal's own setup id is
+  // the side's (the plan's per-setup index is not — a per-side run plans one setup).
+  const pins = (job.setups ?? []).find((setup) => setup.id === goal.setupId)?.pins ?? null;
+  const release = planTabRelease({
+    goal,
+    pins,
+    toolRadiusMm: diameter / 2,
+    tabs,
+    params,
+    offset: makeClipperOffset(await getToplevel()),
+  });
+  if (!release.ok) return { ok: false, reason: release.reason };
+  return {
+    ok: true,
+    ir: tabReleaseIr(release.plan, flat, params, rapid, `${goal.id}#tab-release`),
+    facts: {
+      count: release.plan.placement.spans.length,
+      widthMm: tabs.widthMm,
+      heightMm: tabs.heightMm,
+      at: release.plan.tabCentres.map(([x, y]) => ({ x, y })),
+    },
   };
 }
 
@@ -5939,12 +6028,29 @@ export async function generateGoalProgram(
   } catch (e) {
     return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
   }
+  // #1073 — THE FLIP'S RELEASE IS THE FLIPPED SETUP'S LAST PROGRAM. It is appended to the plan's
+  // own program list, so the existing post/verify loop posts it after everything else — same
+  // `postFor`/`verifyProgram` pair, and the setup's vacuum span ends on it. Only a flipped setup
+  // whose goal carries the flipped-tabs underside AND a band activates this; every other job's
+  // program list (and bytes) is untouched. A refusal stops the run: a part whose tabs cannot be
+  // placed must not be cut free under the cutter.
+  let tabRelease: TabReleaseProgramFacts | null = null;
+  if (sideFace === 'bottom' && goal.underside?.kind === 'flipped-tabs' && goal.bandMm !== undefined && goal.bandMm > 0) {
+    const release = await flipReleaseProgram(job, goal, shop, input, output, jobMachine(job, calibration).rapidEstimate);
+    if (!release.ok) return fail('cam', `tab release (#1073): ${release.reason}`, null, output);
+    if (release.ir !== null) {
+      const lastSetup = output.perSetup[output.perSetup.length - 1];
+      if (lastSetup !== undefined) lastSetup.programs.push(release.ir);
+      tabRelease = release.facts;
+    }
+  }
   return await postModelPlan(job, goal, tool, calibration, shop, output, {
     goalFindings,
     reachFindings,
     coverageFindings,
     modelRoughFindings,
     chamferFindings,
+    tabRelease,
     planIdeal,
     planTradeoff,
   });
