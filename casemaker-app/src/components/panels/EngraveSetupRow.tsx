@@ -99,6 +99,8 @@ export interface EngraveSetupRowProps {
   partSilhouette?: PartSilhouette | null;
   /** #1073(b) — the registration planner's verdict on the vendor method for this part. */
   vendorOffer?: VendorOffer;
+  /** #1082 — the freed part's box, for the flip's side-2 stock confirm (`derivedSetupStock`). */
+  derivedStock?: { length: number; width: number; thickness: number } | null;
 }
 
 function holderWords(mount: MountSpec): string {
@@ -481,6 +483,7 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
                       breakthroughMm={props.breakthroughMm}
                       partSilhouette={props.partSilhouette}
                       vendorOffer={props.vendorOffer}
+                      derivedStock={props.derivedStock}
                       onReplace={props.onReplace}
                     />
                   ) : null}

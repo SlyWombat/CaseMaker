@@ -64,6 +64,7 @@ import {
 } from '@/engine/cnc/setups';
 import { readDefault } from '@/platform/defaultsClient';
 import { partSilhouetteOf, vendorMethodOffer } from '@/engine/cnc/engrave/flipSilhouette';
+import { derivedSetupStock } from '@/engine/cnc/setups/perSetupStock';
 import { machineDisplayName } from '@/platform/locationClient';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 import { EngraveSetupRow } from './EngraveSetupRow';
@@ -131,6 +132,8 @@ export function EngraveSetupsSection({
   // mesh on the flip plan's own coverage grid, only when a later bottom-up setup is on screen, so
   // ordinary jobs pay nothing. The verdict is the registration planner's (the same settings the
   // Setups step plans under), so the row's "unavailable" and the plan's refusal are one statement.
+  // #1082 — the freed part's box for the flip's side-2 stock offer (derived from the cut extents).
+  const derivedStock = useMemo(() => derivedSetupStock(job, null), [job]);
   const flipSilhouette = useMemo(() => {
     const hasFlipCandidate = (job.setups ?? []).some((su) => su.orientation.top === 'bottom');
     if (!hasFlipCandidate) return null;
@@ -614,6 +617,7 @@ export function EngraveSetupsSection({
               breakthroughMm={job.breakthrough}
               partSilhouette={flipSilhouette}
               vendorOffer={flipVendorOffer}
+              derivedStock={derivedStock}
               facingPass={index === 0 && job.facing?.enabled === true}
               notice={notice?.index === index ? notice.reason : null}
               remountMinutes={settings.remountMinutes}
