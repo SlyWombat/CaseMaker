@@ -78,15 +78,25 @@ function panelXml(props: PanelProps): string {
   };
   const c = corners[props.corner];
   const part = props.partMarks ?? null;
+  // THE BLANK'S RECTANGLE IN PANEL TERMS. The map turns work y UP, so the work origin `a` sits at
+  // the panel's BOTTOM-left and the far corner `b` at its TOP-right: `a.x < b.x` but `a.y > b.y`.
+  // A rect always grows right and down from its own corner, so it starts at the MINIMUM corner and
+  // takes the ABSOLUTE span on both axes. Building it from `b` with `a.x − b.x` gave a −98 px width
+  // on a 160 mm blank, and Chrome drops a negative-width rect — the blank had no outline at all
+  // (A's rehearsal, 2026-11-08).
+  const x0 = Math.min(a.x, b.x);
+  const y0 = Math.min(a.y, b.y);
+  const w = Math.abs(b.x - a.x);
+  const h = Math.abs(b.y - a.y);
   const out: string[] = [];
   out.push(
     `<g data-testid="flip-panel-${props.title.startsWith('Before') ? 'before' : 'after'}">`,
     `<text x="${n(props.ox + FLIP_DIAGRAM_PANEL_W / 2)}" y="${n(props.oy + 10)}" fill="${INK}" font-size="11" text-anchor="middle">${esc(props.title)}</text>`,
     // The bracket's two arms: along the front edge and the left edge.
-    `<rect x="${n(a.x - 7)}" y="${n(a.y)}" width="${n(b.x - a.x + 14)}" height="7" fill="#3a4048" data-testid="flip-arm-front"/>`,
-    `<rect x="${n(a.x - 7)}" y="${n(b.y)}" width="7" height="${n(a.y - b.y)}" fill="#3a4048" data-testid="flip-arm-left"/>`,
+    `<rect x="${n(x0 - 7)}" y="${n(y0 + h)}" width="${n(w + 14)}" height="7" fill="#3a4048" data-testid="flip-arm-front"/>`,
+    `<rect x="${n(x0 - 7)}" y="${n(y0)}" width="7" height="${n(h)}" fill="#3a4048" data-testid="flip-arm-left"/>`,
     // The blank.
-    `<rect x="${n(b.x)}" y="${n(b.y)}" width="${n(a.x - b.x)}" height="${n(a.y - b.y)}" fill="none" stroke="${INK}" stroke-width="1.2"/>`,
+    `<rect x="${n(x0)}" y="${n(y0)}" width="${n(w)}" height="${n(h)}" fill="none" stroke="${INK}" stroke-width="1.2"/>`,
   );
   for (const k of props.squares) {
     out.push(`<rect x="${n(corners[k].x - 2.5)}" y="${n(corners[k].y - 2.5)}" width="5" height="5" fill="${GOOD}" data-testid="flip-square-${k}"/>`);
