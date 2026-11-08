@@ -261,3 +261,9 @@ export function seatSeekFor(args: {
     },
   };
 }
+
+/** The machine's soft endstop as the planner's check takes it — null when it has not been read. */
+export function softLimitsOf(calibration: MachineCalibration | undefined): { xMin: number; yMin: number; zMin: number } | null {
+  const endstop = calibration?.softEndstop;
+  return endstop !== undefined && endstop !== null && endstop.enabled ? { xMin: endstop.xMin, yMin: endstop.yMin, zMin: endstop.zMin } : null;
+}

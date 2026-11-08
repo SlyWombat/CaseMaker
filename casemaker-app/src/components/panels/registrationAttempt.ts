@@ -25,10 +25,8 @@ import {
   defaultClampPlacements,
   type BracketSeatDatum,
 } from '@/engine/cnc/mounts/bracket';
-import type { MountDatum, PlanObstacle, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
-import { footprintInputFor, mountObstaclesFor, seatSeekFor } from '@/engine/cnc/registration/footprintJob';
-import { planFootprintRegistration } from '@/engine/cnc/registration/footprint';
-import { footprintToRegistrationPlan } from '@/engine/cnc/registration/footprintPlan';
+import { planRegistration, type MountDatum, type PlanObstacle, type ProbeSpec, type RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { cutRegionOf, mountObstaclesFor, seatSeekFor, softLimitsOf } from '@/engine/cnc/registration/footprintJob';
 import { bracketTapFor } from '@/engine/cnc/registration/mountContext';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
@@ -171,28 +169,39 @@ export function planRegistrationAttempt(args: {
         expected: 'the seat from the seek, inside ±1.5 mm of the derived value',
       };
     }
-    const footprint = footprintInputFor({
-      job,
-      mount,
-      calibration,
-      defaults,
-      probe: args.probe,
-      mountObstacles: obstacles,
-      bracketSeat: args.bracketSeat,
-    });
-    if (!footprint.ok) return { kind: 'refused', reason: footprint.reason };
-    const result = planFootprintRegistration(footprint.input);
+    // A's planner (1070-footprint-reg) owns the footprint plan now: ONE planRegistration call with
+    // the region and the soft limits. The seed places the machine coordinates, the #525 corner
+    // derivation gives the origin, and the obstacle check and the soft-limit refusal are its own.
+    const region = cutRegionOf(job);
+    if (region === null) {
+      return { kind: 'refused', reason: 'this job states no cut region to register on — add the part to cut, or register by hand' };
+    }
+    const result = planRegistration(
+      {
+        stock: { xMin: 0, yMin: 0, xMax: dims0.x, yMax: dims0.y, cornerRadius: 0 },
+        mount: 'bracket',
+        expectedSurface: expected0.expectedSurface,
+        seekFromMachineZ: clearanceZOf(jobMachine(job, calibration)) ?? 0,
+        mountDatum: null,
+        probe: args.probe,
+        mountTap: null,
+        stockThicknessMm: dims0.z,
+        bracketOrigin: datum,
+        mountObstacles: obstacles,
+        bracketConfirm: !datum.offsetMeasured,
+        region: { min: [region.minX, region.minY], max: [region.maxX, region.maxY], marginMm: job.edgeMargin },
+        softLimits: softLimitsOf(calibration),
+      },
+      args.settings,
+    );
     if (!result.ok) return { kind: 'refused', reason: result.reason };
-    const plan = footprintToRegistrationPlan({
-      input: footprint.input,
+    return {
+      kind: 'plan',
+      method: 'bracket',
       plan: result.plan,
-      mount: 'bracket',
-      settings: args.settings,
-      probe: args.probe,
-      obstacles,
-      offsetMeasured: datum.offsetMeasured,
-    });
-    return { kind: 'plan', method: mount.kind, plan, summary: summarizePlan(plan), expected: expectedWords(plan) };
+      summary: summarizePlan(result.plan),
+      expected: expectedWords(result.plan),
+    };
   }
   // #845 — a stated machine has no clearance to seek from; the preview it places a tap with is
   // only run where a connected Makera machine exists, and the 0 is never used to place a touch.
