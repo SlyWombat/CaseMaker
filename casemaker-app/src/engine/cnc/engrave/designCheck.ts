@@ -1495,7 +1495,18 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       for (let i = 0; i < nx && out.length < 16; i++) {
         const k = j * nx + i;
         if (sampled[k] !== 1 || dOf[k]! >= -0.1 || excluded[k] === 1) continue;
-        out.push(`(${(goal.x0 + i * goal.pitch).toFixed(2)},${(goal.y0 + j * goal.pitch).toFixed(2)}) d=${(-dOf[k]!).toFixed(3)} wall=${wall[k]} border=${border[k]} sil=${silhouette[k]}`);
+        const xx = goal.x0 + i * goal.pitch;
+        const yy = goal.y0 + j * goal.pitch;
+        const cl = opts.clAt?.(xx, yy) ?? null;
+        let clInfo = 'cl=-';
+        if (cl !== null) {
+          const ci = Math.round((cl.x - goal.x0) / goal.pitch);
+          const cj = Math.round((cl.y - goal.y0) / goal.pitch);
+          const onGrid = ci >= 0 && cj >= 0 && ci < nx && cj < ny;
+          const cov = onGrid ? goal.covered[cj * nx + ci] : -1;
+          clInfo = `cl=(${cl.x.toFixed(2)},${cl.y.toFixed(2)}) cov=${cov} dist=${outlineDistance(cl.x, cl.y).toFixed(2)}`;
+        }
+        out.push(`(${xx.toFixed(2)},${yy.toFixed(2)}) d=${(-dOf[k]!).toFixed(3)} wall=${wall[k]} border=${border[k]} sil=${silhouette[k]} ${clInfo}`);
       }
     }
     console.log('GOALDBG adjudicated ' + out.join(' | '));
