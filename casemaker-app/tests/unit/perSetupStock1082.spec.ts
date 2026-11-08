@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
-import { derivedSetupStock, setupStockFor, stockForSetup } from '@/engine/cnc/setups/perSetupStock';
+import { derivedSetupStock, measuredBlankThickness, setupStockFor, stockForSetup } from '@/engine/cnc/setups/perSetupStock';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { Z1 } from '@/engine/cnc/machine';
 import { aabbOfProfile } from '@/engine/compiler/profile';
@@ -138,6 +138,17 @@ describe('#1082 a setup’s own stock', () => {
     const limitAt = (t: number) => jobDepthLimit(job, undefined, undefined, undefined, t)(60, 80);
     expect(limitAt(25)).toBe(25);
     expect(limitAt(28)).toBe(28);
+  });
+
+  it('#1082 stage 2 — the measured thickness is the surface touch less the bracket seat', () => {
+    // The SAME two datums #1073's side-2 Z0 reads; the difference is the blank's measured thickness.
+    expect(measuredBlankThickness({ datums: { surfaceTopZ: { value: -48.2 }, bracketSeatZ: { value: -72.4 } } })).toBeCloseTo(24.2, 6);
+    // Either datum missing, or a non-positive difference, is no measurement at all.
+    expect(measuredBlankThickness({ datums: { surfaceTopZ: { value: -48.2 }, bracketSeatZ: null } })).toBeNull();
+    expect(measuredBlankThickness({ datums: { surfaceTopZ: null, bracketSeatZ: { value: -72.4 } } })).toBeNull();
+    expect(measuredBlankThickness(null)).toBeNull();
+    // And the derived box takes it when the caller has it.
+    expect(derivedSetupStock(flipJob(), 24.2)).toMatchObject({ thickness: 24.2, provenance: 'derived' });
   });
 
   it('the resolver: the STATED box wins; a non-flip setup has none', () => {

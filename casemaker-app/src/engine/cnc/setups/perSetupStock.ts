@@ -60,3 +60,19 @@ export function stockForSetup(
     ? { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness }
     : { length: own.length, width: own.width, thickness: own.thickness };
 }
+
+/**
+ * #1082 — THE BLANK'S MEASURED THICKNESS, from the bed profile: the registration's measured
+ * top-surface touch less the measured bracket seat — the SAME two datums #1073's side-2 Z0 reads
+ * (`flipChoice.flipZ0`), so the number is reused, never re-derived here. Null unless the house has
+ * both (then the box uses the stated thickness and says so).
+ */
+export function measuredBlankThickness(
+  profile: { datums?: { surfaceTopZ?: { value: number } | null; bracketSeatZ?: { value: number } | null } } | null | undefined,
+): number | null {
+  const top = profile?.datums?.surfaceTopZ ?? null;
+  const seat = profile?.datums?.bracketSeatZ ?? null;
+  if (top === null || seat === null) return null;
+  const t = top.value - seat.value;
+  return Number.isFinite(t) && t > 0 ? Math.round(t * 1000) / 1000 : null;
+}
