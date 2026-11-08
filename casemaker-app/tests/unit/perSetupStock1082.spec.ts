@@ -14,6 +14,7 @@ import { derivedSetupStock, setupStockFor, stockForSetup } from '@/engine/cnc/se
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { Z1 } from '@/engine/cnc/machine';
 import { aabbOfProfile } from '@/engine/compiler/profile';
+import { setupStockOf } from '@/engine/cnc/cam/model/plan';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 
 /** A blank 120×160×28 whose side 1 frees a 106×136 part; setup 2 is the vendor flip. */
@@ -83,6 +84,14 @@ describe('#1082 a setup’s own stock', () => {
     expect(bbb.max[1] - bbb.min[1]).toBeCloseTo(160, 6);
     // No setups at all → the blank.
     expect(stockForSetup({ ...job, setups: undefined } as EngraveJob, 0, 25)).toEqual({ length: 120, width: 160, thickness: 28 });
+  });
+
+  it('#1082 stage 2 — the model plan reads a setup’s own stock box', () => {
+    const input = { stock: { length: 120, width: 160, thickness: 28, material: 'hardwood' } };
+    const own = { frame: {} as never, underside: 'flatOnStockBottom' as const, stock: { length: 106, width: 136, thickness: 25 } };
+    expect(setupStockOf(input, own)).toEqual({ length: 106, width: 136, thickness: 25 });
+    const blank = { frame: {} as never, underside: 'flatOnStockBottom' as const };
+    expect(setupStockOf(input, blank)).toEqual({ length: 120, width: 160, thickness: 28 });
   });
 
   it('the resolver: the STATED box wins; a non-flip setup has none', () => {
