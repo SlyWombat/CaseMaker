@@ -3,6 +3,8 @@
 // reason; these specs pin what the section SHOWS and that nothing is written until the person does
 // it (render is never a write), plus the two approvals the run needs.
 
+import { readFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { jobVise } from '@/engine/cnc/fixture';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -14,6 +16,7 @@ import { resetEngraveRows, useEngraveRowStore } from '@/store/engraveRowStore';
 import { useMachineStore, resetMachineStore } from '@/store/machineStore';
 import { useLocationStore, resetLocationStore } from '@/store/locationStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { BUNDLED_FONT_KEYS, clearFontCacheForTest, registerBundledFontBytes } from '@/engine/fonts/registry';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { resetRegistry, setInventoryEntries } from '@/engine/cnc/toolRegistry';
@@ -690,5 +693,64 @@ describe('#589 the surface tolerance — shown with the recommendation, writable
       expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
     });
     expect(stored['registration.surfaceToleranceMm']).toMatchObject({ value: 1, source: 'chosen' });
+  });
+});
+
+/**
+ * #1082 — THE COLD FIRST PAINT MUST NOT TYPESET. The derived freed-part box is measured through
+ * `toPartPlan`, which resolves each label's face; on a first render before `ensureFontsLoaded`
+ * has finished, `resolveFont` throws its "not loaded" guard and the whole engrave panel falls
+ * into its error boundary (A's m1-land11 e2e: one stack, 69 failing tests). The section must
+ * render with the faces absent, show the stated stock meanwhile, and derive the offer once a
+ * face lands.
+ */
+/** Re-seed every bundled face from disk — the same seam `tests/setup/fonts.ts` starts with. */
+function reloadBundledFonts(): void {
+  const dir = resolvePath(process.cwd(), 'src/engine/fonts/files');
+  for (const key of BUNDLED_FONT_KEYS) {
+    const buf = readFileSync(resolvePath(dir, `${key}.ttf`));
+    registerBundledFontBytes(key, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+  }
+}
+
+describe('#1082 the derived stock on a cold first paint', () => {
+  afterEach(() => reloadBundledFonts());
+
+  it('renders before the label faces are loaded, then derives the box once they land', async () => {
+    const job = twoSetupJob();
+    // A flip row that offers the freed-part stock, and the default job's Barlow-bold labels —
+    // exactly the paint that threw.
+    job.setups![1]!.flip = { method: 'free-then-flip', axis: 'left-right' };
+    job.setups![1]!.pins = { at: [{ x: 10, y: 15 }, { x: 10, y: 45 }] };
+    job.labels = defaultEngraveJob().labels;
+    act(() => useEngraveJobStore.setState({ job }));
+    clearFontCacheForTest();
+    // Before the fix this render throws out of `derivedSetupStock` (the e2e's error boundary).
+    render(<EngraveSetupsSection />);
+    expect(screen.getByTestId('engrave-setups')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('engrave-setup-expand-2'));
+    // Nothing is measured yet, so no derived offer is claimed.
+    expect(screen.queryByTestId('engrave-setup-stock-2')).toBeNull();
+    // A face lands: the section re-derives, and the offer is exact (the faces are loaded now).
+    act(() => reloadBundledFonts());
+    await waitFor(() => expect(screen.getByTestId('engrave-setup-stock-2')).toBeTruthy());
+    expect(screen.getByTestId('engrave-setup-stock-2').textContent).toContain('derived from side 1’s cut extents');
+  });
+
+  it('shows a setup’s STATED stock on the cold paint, without the derived offer', () => {
+    const job = twoSetupJob();
+    job.setups![1]!.flip = { method: 'free-then-flip', axis: 'left-right' };
+    job.setups![1]!.pins = { at: [{ x: 10, y: 15 }, { x: 10, y: 45 }] };
+    job.setups![1]!.stock = { length: 90, width: 50, thickness: 12, provenance: 'stated' };
+    job.labels = defaultEngraveJob().labels;
+    act(() => useEngraveJobStore.setState({ job }));
+    clearFontCacheForTest();
+    render(<EngraveSetupsSection />);
+    fireEvent.click(screen.getByTestId('engrave-setup-expand-2'));
+    // The stated box is a document fact — it never waits for a measurement.
+    const line = screen.getByTestId('engrave-setup-stock-2');
+    expect(line.textContent).toContain("This setup's stock");
+    expect(line.textContent).toContain('90');
+    expect(screen.queryByTestId('engrave-setup-stock-use-2')).toBeNull();
   });
 });

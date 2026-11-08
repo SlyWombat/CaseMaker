@@ -124,6 +124,17 @@ export function registerBundledFontBytes(key: string, bytes: ArrayBuffer): void 
 
 const pendingLoads = new Map<string, Promise<void>>();
 
+/**
+ * Test hook (#1082) — the app's COLD FIRST PAINT: every face forgotten, so a spec can render a
+ * labelled job before `ensureFontsLoaded` has run. `resolveFont` then throws its "not loaded"
+ * guard, exactly as the first render does in a fresh browser tab; the hook exists so the render
+ * path that must survive that paint can be exercised without a real network miss.
+ */
+export function clearFontCacheForTest(): void {
+  parsedCache.clear();
+  pendingLoads.clear();
+}
+
 /** Fetch and parse one bundled font (or join an in-flight load of it). */
 function loadBundledFont(key: string): Promise<void> {
   const inflight = pendingLoads.get(key);
