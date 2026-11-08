@@ -54,11 +54,14 @@ import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import { summarizeOutcome, summarizePlan } from '@/engine/cnc/registration/summary';
 import {
   applyCorrection,
+  runFlipRegistration,
   runRegistration,
   type ApplyResult,
   type OperatorStep,
   type RunResult,
 } from '@/engine/cnc/registration/execute';
+import { planFlipAttemptForJob, type FlipAttemptResult } from '@/engine/cnc/registration/flipAttempt';
+import { flipZ0, type FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
 import { attachConsole, STATUS_POLL_TIMING, type ConsoleHandle } from '@/platform/machineConsole';
 import { stopProgram, stopSettings, type StopOutcome } from '@/platform/machineStop';
 import { controllerState } from '@/platform/machineUpload';
@@ -164,18 +167,13 @@ function proposalLine(plan: RegistrationPlan): string {
 }
 
 /**
- * #1088 — A FLIPPED SETUP IS SIDE 2's, AND SIDE 2 REGISTERS ON THE BORES. This step runs side 1's
- * routine (`runRegistration` over `setups[0].registration.plan`); on a flipped setup those touches
- * would be aimed at a part that is no longer in that pose. The hole-registration executor is
- * #1088's own slice, so until it lands the step REFUSES by name and sends nothing.
+ * #1088 — A FLIPPED SETUP IS SIDE 2's, AND SIDE 2 REGISTERS ON THE BORES. The step's side-1 routine
+ * (`runRegistration` over `setups[0].registration.plan`) would aim its touches at a part that is no
+ * longer in that pose, so a flipped setup runs `runFlipRegistration` over the flip plan instead —
+ * built here from the setup's stored pins and the carried Z0 (see `planFlipAttemptForJob`), never
+ * from side 1's plan. A flip this job cannot state (no pins, no measured probe tip, no carried Z0)
+ * is refused by name and sends nothing.
  */
-function flipRefusal(job: EngraveJob): string | null {
-  if (job.setups?.[0]?.flip === undefined) return null;
-  return (
-    'This setup flips the part, so its registration is side 2’s — and side 2’s hole registration isn’t built yet. ' +
-    'Nothing was sent: the touches here would be side 1’s, aimed at a part that is no longer in that pose.'
-  );
-}
 
 /** The plan the Setups section approved for the job's first setup, or why there is none. */
 function approvedPlan(job: EngraveJob): { plan: RegistrationPlan | null; why: string | null } {
@@ -245,6 +243,9 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   const bracketSeat = useMemo(() => bracketSeatDatumFor(machineRecord), [machineRecord]);
   const placedSeed = useMemo(() => bracketPlacementSeedFor(machineRecord), [machineRecord]);
   const registrations = useEngraveRegistrationStore((s) => s.records);
+  // #1088 — the cut-extent measurement side 1's run left: its highest reading is side 1's top, the
+  // thickness the carried Z0 is stated from (the same source the sheet's flipZ0 reads).
+  const surfaces = useEngraveRegistrationStore((s) => s.surfaces);
   // #845 — a stated machine holds no probe and has no clearance to seek from: this step's actions
   // need a connected Makera machine, which is null for one (`MACHINE_RUN_ELSEWHERE` on its card).
   const seekFromMachineZ = useMemo(() => clearanceZOf(jobMachine(job, calibration)) ?? 0, [job, calibration]);
@@ -320,6 +321,37 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     calibration,
     regSettings,
   ]);
+  /**
+   * #1088 — SIDE 2'S PLAN, from the job: the flipped setup's stored pins (side 1's bores reflected
+   * back — the ONE source), the checked-out probe's measured tip, the machine's travel height, and
+   * the carried Z0 the corner touches are the CHECK of (6b's amendment A: seat + measured thickness
+   * − side 1's facing, from the same numbers the sheet prints). Null on a job with no flipped setup.
+   */
+  const flipAttempt = useMemo<FlipAttemptResult>(() => {
+    // The Cut step's side-1 path reads setups[0]; a flip job whose setup 0 is the flipped one is
+    // side 2's, and this step registers it on its bores instead. A flip on a LATER setup is routed
+    // by whoever mounts this card (the Cut screen's own setup source), not planned here.
+    if (job.setups?.[0]?.flip === undefined) return null;
+    const seat = bracketSeatDatumFor(machineRecord)?.value;
+    const touches = surfaces[job.id]?.assessment.touches ?? [];
+    const top = touches.length === 0 ? null : Math.max(...touches.map((t) => t.z));
+    const thicknessMm = seat === undefined || top === null ? null : Math.round((top - seat) * 1000) / 1000;
+    const carried: FlipZ0 | null =
+      seat === undefined || thicknessMm === null || !(thicknessMm > 0)
+        ? null
+        : flipZ0({
+            seatMm: seat,
+            thicknessMm,
+            facingMm: job.facing?.enabled === true ? job.facing.depth : 0,
+            toleranceMm: regSettings.surfaceToleranceMm,
+          });
+    return planFlipAttemptForJob(job, {
+      settings: regSettings,
+      probeTipDiameterMm: probe?.tip?.diameterMm ?? null,
+      seekFromMachineZ,
+      z0: carried,
+    });
+  }, [job, machineRecord, surfaces, probe, seekFromMachineZ, regSettings]);
   const [proposalOpen, setProposalOpen] = useState(false);
   // #1070 (C8) — the placed bracket's position press (the bed profile's seed, from the hole grid).
   const [gridBusy, setGridBusy] = useState(false);
@@ -405,6 +437,12 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   const frameSavedRef = useRef(false);
   /** #652 — the vise's typed jaw start the run measured against, so a later edit cannot move it. */
   const runJawStartYRef = useRef<number | null>(null);
+  /**
+   * #1088 — whether the measurement that is showing came from the FLIP executor. Side 2's G54 is
+   * not the vise's placement frame (that record describes where the bed's fixed jaw is), so the
+   * acceptance must not write it back as one, and the result block says what was recorded.
+   */
+  const [flipRun, setFlipRun] = useState(false);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -538,9 +576,94 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     }
   }
 
+  /**
+   * #1088 — SIDE 2'S RUN. The same console, prompts, Stop, narration and touch recording as side 1,
+   * over `runFlipRegistration` and the setup's own frame — and nothing of side 1's bed writes: the
+   * origin this run states is written by the operator's press (`writeOrigin`), never as the vise's
+   * placement frame.
+   */
+  async function startFlip(attempt: Extract<FlipAttemptResult, { kind: 'plan' }>): Promise<void> {
+    if (target === null || !statementGiven || busy) return;
+    // #1088 — NOTHING OF SIDE 1'S RECORD IS CLEARED. It is what the carried Z0 was stated from and
+    // what the release gate reads; a second side's run is a new measurement of the SAME blank, not
+    // a new clamping of it.
+    setPhase('running');
+    setResult(null);
+    setWritten(null);
+    setHomeNote(null);
+    setError(null);
+    setNarration(null);
+    stopRef.current = false;
+    setStopOutcome(null);
+    runPlanRef.current = attempt.attempt.ctx;
+    setFlipRun(true);
+    frameSavedRef.current = false;
+    useRegistrationTouchesStore.getState().reset(job.id);
+    const handle = attachConsole(target);
+    handleRef.current = handle;
+    try {
+      const r = await runFlipRegistration(
+        attempt.attempt.plan,
+        { ctx: attempt.attempt.ctx, z0: attempt.attempt.z0 },
+        {
+          console: { send: (line, timing) => handle.send(line, timing) },
+          // #933 — the operator's Stop is checked before every line, exactly as side 1's run.
+          stopRequested: () => stopRef.current,
+          // The Cut step-1 statement already names the probe, so the fit-probe ask is answered by it.
+          operator: (step) => (step.kind === 'fit-probe' ? Promise.resolve(true) : askOperator(step)),
+          onStep: (sentence) => {
+            if (aliveRef.current) setNarration(sentence);
+            useRegistrationTouchesStore.getState().setStep(sentence);
+          },
+          onTouch: (touch) => useRegistrationTouchesStore.getState().add(touch),
+        },
+      );
+      if (!aliveRef.current) {
+        if (!r.ok) await homeAfterStop(handle);
+        handleRef.current = null;
+        await handle.close();
+        return;
+      }
+      if (!r.ok) {
+        const note = stopRef.current ? null : await homeAfterStop(handle);
+        if (!aliveRef.current) {
+          handleRef.current = null;
+          await handle.close();
+          return;
+        }
+        setResult(r);
+        setHomeNote(note);
+        setPhase('failed');
+        handleRef.current = null;
+        await handle.close();
+        return;
+      }
+      setResult(r);
+      setPhase('measured');
+      if (writerRefusal(r.outcome) !== null) {
+        handleRef.current = null;
+        await handle.close();
+      }
+    } catch (e) {
+      if (!aliveRef.current) {
+        handleRef.current = null;
+        await handle.close();
+        return;
+      }
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase('failed');
+      handleRef.current = null;
+      await handle.close();
+    }
+  }
+
   async function start(planOverride?: RegistrationPlan): Promise<void> {
-    // #1088 — a flipped setup has no executor yet: never attach the console for side 1's routine.
-    if (flipRefusal(job) !== null) return;
+    // #1088 — a flipped setup has its own executor: never side 1's routine on side 2.
+    if (flipAttempt?.kind === 'plan') {
+      await startFlip(flipAttempt);
+      return;
+    }
+    if (flipAttempt?.kind === 'refused') return;
     // #797 follow-up — the Register card approves the planner's proposal and starts in ONE press:
     // the plan it approved is handed here, because the render-time `plan` is still null.
     const effectivePlan = planOverride ?? plan;
@@ -570,6 +693,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     // not change what the record says was approved and run.
     runPlanRef.current = effectivePlan;
     frameSavedRef.current = false;
+    setFlipRun(false);
     runJawStartYRef.current = jobVise(job).jawStartY;
     // #519 item 1 — a new run's readings replace the last run's dots and table, and they are
     // stamped with this job so a layer left from another job is never drawn as this one's.
@@ -849,7 +973,10 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
       // accepting the found position, so both land here, with the origin they belong to. A frame
       // whose measurement-time save failed is retried the same way. `frameSavedRef` is what keeps
       // the ordinary in-margin write from landing twice.
-      if (!frameSavedRef.current && runPlan.mount === 'vise') {
+      // #1088 — NEVER FROM A FLIP RUN: side 2's G54 corrects the work frame for the turned blank; the
+      // placement frame records where the bed's fixed jaw is, and writing side 2's origin there would
+      // aim every later jaw tap and plan at the flipped pose.
+      if (!frameSavedRef.current && !flipRun && runPlan.mount === 'vise') {
         const machine = machineAt(target);
         if (machine !== null) {
           const now = new Date().toISOString();
@@ -883,6 +1010,18 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
             );
           }
         }
+      }
+      // #1088 — SIDE 2'S ORIGIN IS WRITTEN, BUT NOT INTO SIDE 1'S RECORD. `FirstRegistration` is
+      // keyed by JOB and its plan/outcome are what the release gate and the post-facing re-touch
+      // read for side 1; writing side 2's measurement there would replace them. A flip job needs a
+      // per-setup record (named follow-up on #1088) — until then, the recorded sentence below says
+      // exactly what was and was not written.
+      if (flipRun) {
+        setWritten(a);
+        setPhase('recorded');
+        handleRef.current = null;
+        await handle.close();
+        return;
       }
       record(
         job.id,
@@ -924,6 +1063,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     setError(null);
     setPrompt(null);
     setDiscAnswer(null);
+    setFlipRun(false);
   }
 
   const outcome = result?.ok === true ? result.outcome : null;
@@ -932,16 +1072,16 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   const marginOnly = outcome !== null && marginRefusal(outcome);
   const data = result?.ok === true ? result.data : null;
 
-  // #1088 — the flipped setup's refusal replaces the whole card: no plan, no proposal, no press.
-  const flipWhy = flipRefusal(job);
-  if (flipWhy !== null) {
+  // #1088 — a flipped setup the job cannot state (no pins, no measured tip, no carried Z0) keeps the
+  // refusal card: no plan, no press, nothing sent.
+  if (flipAttempt?.kind === 'refused') {
     return (
       <div data-testid="engrave-registration" data-phase="idle" data-state="flipped" style={{ ...BOX, marginTop: 8 }}>
         <h3 style={{ margin: '0 0 4px', fontSize: 12, fontWeight: 600, color: '#c8d3de' }}>
           Registration — find the stock, then set the origin
         </h3>
         <p style={{ ...MUTED, color: WARN }} data-testid="engrave-registration-flip-refusal">
-          {flipWhy}
+          {flipAttempt.reason}
         </p>
       </div>
     );
@@ -984,7 +1124,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           <RotaryFaceAngleTap machine={machineRecord} job={job} testIdPrefix="engrave-rotary-face-angle" />
         )}
 
-      {plan === null && proposal !== null && proposal.kind === 'plan' && (
+      {flipAttempt === null && plan === null && proposal !== null && proposal.kind === 'plan' && (
         <div
           data-testid="engrave-registration-proposal"
           style={{ border: '1px solid #2a2f36', borderRadius: 4, padding: 8, margin: '6px 0' }}
@@ -1021,7 +1161,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           </p>
         </div>
       )}
-      {plan === null && proposal !== null && proposal.kind !== 'plan' && (
+      {flipAttempt === null && plan === null && proposal !== null && proposal.kind !== 'plan' && (
         <p style={{ ...MUTED, color: WARN }} data-testid="engrave-registration-no-plan">
           {proposal.kind === 'refused' ? proposal.reason : proposal.message}
         </p>
@@ -1029,7 +1169,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
       {/* #1070 (C8) — THE PLACED BRACKET'S POSITION, stored where it lives: the bed profile.
           The grid's one admitting corner is offered when the bracket is off the pins; the touch
           route needs the machine and lands with the first bench session (named follow-up). */}
-      {plan === null &&
+      {flipAttempt === null &&
+        plan === null &&
         proposal !== null &&
         proposal.kind === 'refused' &&
         job.workholding.kind === 'bracket' &&
@@ -1051,26 +1192,64 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
             )}
           </>
         )}
-      {plan === null && proposal === null && why !== null && (
+      {flipAttempt === null && plan === null && proposal === null && why !== null && (
         <p style={{ ...MUTED, color: WARN }} data-testid="engrave-registration-no-plan">
           {why}
         </p>
       )}
 
-      {plan !== null && (
+      {/* #1088 — SIDE 2'S PLAN AND PRESS. The bores side 1 left, the four sideways touches each, and
+          the carried Z0 the corner touches are checked against; the press runs the flip executor. */}
+      {flipAttempt?.kind === 'plan' && (
+        <div
+          data-testid="engrave-registration-flip"
+          style={{ border: '1px solid #2a2f36', borderRadius: 4, padding: 8, margin: '6px 0' }}
+        >
+          <p style={{ ...MUTED, margin: 0, color: '#c8d3de' }} data-testid="engrave-registration-flip-plan">
+            Side 2 · {flipAttempt.attempt.plan.notes[0] ?? 'the two locating bores side 1 left'}
+          </p>
+          {flipAttempt.attempt.plan.notes.slice(1).map((note, i) => (
+            <p key={i} style={MUTED} data-testid="engrave-registration-flip-note">
+              {note}
+            </p>
+          ))}
+          <p style={MUTED} data-testid="engrave-registration-flip-z0">
+            {flipAttempt.attempt.z0 === null || flipAttempt.attempt.z0.checkBand === null
+              ? 'No carried Z0 with a tolerance is stated, so the corner Z touches are not checked against one — register side 1 first.'
+              : `The corner Z touches check the carried side-2 top ${flipAttempt.attempt.z0.topMachineZ} ± ${Math.round(((flipAttempt.attempt.z0.checkBand.maxMm - flipAttempt.attempt.z0.checkBand.minMm) / 2) * 1000) / 1000} mm; a reading outside that band stops the run before a bore is entered.`}
+          </p>
+          {(phase === 'idle' || phase === 'failed' || phase === 'recorded') && target !== null && (
+            <button
+              type="button"
+              data-testid="engrave-registration-start"
+              disabled={!statementGiven}
+              style={{ width: '100%', padding: 7, marginTop: 6 }}
+              onClick={() => void start()}
+            >
+              {phase === 'idle' ? 'Register side 2' : 'Register side 2 again'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {(plan !== null || flipAttempt?.kind === 'plan') && (
         <>
-          <p style={{ ...MUTED, color: '#c8d3de' }} data-testid="engrave-registration-plan">
-            Setup 1 · {job.setups?.[0]?.registration?.expected ?? 'the approved plan'}
-          </p>
-          <p style={MUTED} data-testid="engrave-registration-plan-summary">
-            {summarizePlan(plan)}
-          </p>
+          {flipAttempt === null && plan !== null && (
+            <>
+              <p style={{ ...MUTED, color: '#c8d3de' }} data-testid="engrave-registration-plan">
+                Setup 1 · {job.setups?.[0]?.registration?.expected ?? 'the approved plan'}
+              </p>
+              <p style={MUTED} data-testid="engrave-registration-plan-summary">
+                {summarizePlan(plan)}
+              </p>
+            </>
+          )}
 
           {/* #934 — THE CENTRE-FIND (bore / boss / round part) is a 3D-probe routine the bench has
               not run; the planner refuses the instrument and the entry is hidden with it. The
               component and its plan stay in the tree for the branch's own bench issue. */}
 
-          {(phase === 'idle' || phase === 'failed' || phase === 'recorded') && target !== null && (
+          {flipAttempt === null && (phase === 'idle' || phase === 'failed' || phase === 'recorded') && target !== null && (
             <>
               {/* #797 — the at-machine statement is the ONE statement at Cut step 1 (which names
                   the probe), so this step asks nothing of its own; it reads whether it was given. */}
@@ -1330,7 +1509,9 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
                 Origin written: <code>{written.line}</code>
               </p>
               <p style={MUTED} data-testid="engrave-registration-recorded">
-                Registration recorded for the release step, with the plan that was approved.
+                {flipRun
+                  ? 'Side 2’s origin is written. It is not recorded against the release gate yet: the registration record holds side 1’s measurement, and a per-setup record is #1088’s named follow-up.'
+                  : 'Registration recorded for the release step, with the plan that was approved.'}
               </p>
             </div>
           )}

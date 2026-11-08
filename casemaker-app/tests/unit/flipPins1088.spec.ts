@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flipZ0 } from '@/engine/cnc/engrave/flipChoice';
-import { reflectedPins, planFlipAttempt } from '@/engine/cnc/registration/flipAttempt';
+import { reflectedPins, planFlipAttempt, planFlipAttemptForJob } from '@/engine/cnc/registration/flipAttempt';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 
@@ -101,5 +101,30 @@ describe('#1088 side 2’s pins are side 1’s bores, reflected', () => {
     // A non-flip job is not this function's business.
     const plain = flipJob();
     expect(planFlipAttempt({ ...plain, setups: [plain.setups![0]!] }, INPUT())).toBeNull();
+  });
+
+  it('#1088 — the app-side attempt comes from the job’s own stored pins, and refuses without them', () => {
+    // The stored pair IS side 2's frame; the plan's holes are exactly those pins (the reflection is
+    // its own inverse), so the probe is aimed at what the job says side 1 left.
+    // The Cut step's card is the flipped setup's own; its first setup states the flip and the pins.
+    const base = flipJob([{ x: 70, y: 15 }, { x: 20, y: 15 }]);
+    const job = { ...base, setups: [base.setups![1]!] };
+    const r = planFlipAttemptForJob(job, INPUT());
+    expect(r?.kind).toBe('plan');
+    if (r?.kind !== 'plan') return;
+    const finds = r.attempt.plan.steps.flatMap((s) => (s.kind === 'hole' ? [s.find.at] : []));
+    expect(finds).toEqual([
+      { x: 70, y: 15 },
+      { x: 20, y: 15 },
+    ]);
+    // No stored pins: refused by name, never re-planned from a guess.
+    const bare = flipJob();
+    const refused = planFlipAttemptForJob({ ...bare, setups: [bare.setups![1]!] }, INPUT());
+    expect(refused?.kind).toBe('refused');
+    if (refused?.kind !== 'refused') return;
+    expect(refused.reason).toContain('locating pins');
+    // A job whose first setup is not flipped is side 1's, and not this helper's business.
+    const plain = flipJob();
+    expect(planFlipAttemptForJob({ ...plain, setups: [plain.setups![0]!] }, INPUT())).toBeNull();
   });
 });

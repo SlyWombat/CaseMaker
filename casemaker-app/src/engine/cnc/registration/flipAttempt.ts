@@ -153,3 +153,41 @@ export function planFlipAttempt(job: EngraveJob, input: FlipAttemptInput): FlipA
   } as unknown as RegistrationPlan;
   return { kind: 'plan', attempt: { setupIndex: index, plan: plan.plan, ctx, z0: input.z0, boreDiameterMm: FLIP_BORE_DIAMETER_MM } };
 }
+
+/** The app-side inputs a flip attempt needs that the document does not state directly. */
+export interface FlipJobInputs {
+  settings: RegistrationSettings;
+  /** The checked-out probe's measured tip, mm; null when no tip is measured. */
+  probeTipDiameterMm: number | null;
+  /** The machine's travel clearance, machine Z. */
+  seekFromMachineZ: number;
+  /** The carried Z0 — `flipChoice.flipZ0`'s record for this job, or null when it cannot be stated. */
+  z0: FlipZ0 | null;
+}
+
+/**
+ * #1088 — THE FLIP ATTEMPT FROM THE JOB ITSELF, for the Cut step's Register on a flipped setup.
+ * The ONE source of the holes is the flipped setup's STORED PINS (`JobSetup.pins`, written by
+ * `planFlipSetups` from side 1's locating hold): they are side 1's bores seen from side 2, and
+ * `flipReflection` is its own inverse, so the bores planFlipAttempt reflects back are exactly the
+ * pins the job states. A setup that states no pins has nothing to register on and is refused by
+ * name — never re-planned from a guess. Null when the FIRST setup is not flipped: the Cut step's
+ * side-1 path is unchanged, and a flip on a later setup is routed by the caller.
+ */
+export function planFlipAttemptForJob(job: EngraveJob, input: FlipJobInputs): FlipAttemptResult {
+  const setup = job.setups?.[0];
+  if (setup === undefined || setup.flip === undefined) return null;
+  const pins = setup.pins?.at ?? null;
+  if (pins === null) {
+    return {
+      kind: 'refused',
+      reason:
+        'this flipped setup states no locating pins, so side 2 has nothing to register on — plan the flip again (Design → Setups) so the two ⌀6 bores side 1 leaves are on the setup, then register side 2.',
+    };
+  }
+  const length0 = setup.stock?.length ?? job.stock.length;
+  const width0 = setup.stock?.width ?? job.stock.width;
+  // The stored pair is side 2's frame; the bores are the same physical points seen from side 1.
+  const sideOneBores = reflectedPins(pins, setup.flip.axis, { xMax: length0, yMax: width0 });
+  return planFlipAttempt(job, { ...input, sideOneBores });
+}
