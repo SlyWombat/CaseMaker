@@ -81,7 +81,7 @@ import { cutterOnMetalLine, cutterRefusedOnMaterial } from '@/engine/cnc/engrave
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { entryFor, getTools } from '@/engine/cnc/toolRegistry';
 import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach, reachCutterFor } from '@/engine/cnc/engrave/goalReach';
-import { undersideFloorZ, UNDERSIDE_TAB_THICKNESS_MM } from '@/engine/cnc/engrave/goalUnderside';
+import { undersideFloorZ } from '@/engine/cnc/engrave/goalUnderside';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
@@ -241,7 +241,7 @@ import {
   type SetupSpec,
 } from '@/engine/cnc/cam/model/plan';
 // #1073 — the flip's tab release: the band cut's plan and the program it posts as.
-import { planTabRelease, tabReleaseIr, type TabReleaseProgramFacts } from '@/engine/cnc/engrave/tabRelease';
+import { bandHalfThicknessMm, planTabRelease, tabReleaseIr, type TabReleaseProgramFacts } from '@/engine/cnc/engrave/tabRelease';
 import { tabSettings } from '@/engine/cnc/cam/tabSettings';
 // #961 — the two-plan run: the OWNED plan posts, the ideal rides beside it for the card's tradeoff.
 import { planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
@@ -5426,6 +5426,12 @@ export interface PostModelPlanFindings {
    */
   tabRelease?: TabReleaseProgramFacts | null;
   /**
+   * #1073 — THE RELEASE'S OWN STATEMENTS when there is no release program (the outline is the
+   * stock's, so no band surrounds the part). They ride the findings on every return, so the sheet's
+   * missing hand-cut step is stated rather than silent.
+   */
+  tabReleaseFindings?: JobFinding[];
+  /**
    * #961 — THE TWO-PLAN RUN beside the plan that posts: the ideal `ModelPlanOutput` and the
    * material tradeoff between it and the owned plan. They ride the findings because they are
    * computed BEFORE this tail (the head chooses which plan posts), and the tail stamps them onto
@@ -5444,7 +5450,7 @@ export async function postModelPlan(
   output: ModelPlanOutput,
   findings: PostModelPlanFindings,
 ): Promise<EngraveGenerated> {
-  const { goalFindings, reachFindings, coverageFindings, modelRoughFindings, chamferFindings, tabRelease = null, planIdeal = null, planTradeoff = null } = findings;
+  const { goalFindings, reachFindings, coverageFindings, modelRoughFindings, chamferFindings, tabRelease = null, tabReleaseFindings = [], planIdeal = null, planTradeoff = null } = findings;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -5629,7 +5635,7 @@ export async function postModelPlan(
           ...base,
           ok: false,
           stage: 'verify',
-          findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...modelRoughFindings, ...chamferFindings, ...documentFindings(), ...planFindings]),
+          findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...modelRoughFindings, ...chamferFindings, ...tabReleaseFindings, ...documentFindings(), ...planFindings]),
           feeds: null,
           cam: null,
           nc: posted.text,
@@ -5702,7 +5708,7 @@ export async function postModelPlan(
     ...base,
     ok: true,
     stage: 'done',
-    findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...modelRoughFindings, ...chamferFindings, ...documentFindings(), ...planFindings]),
+    findings: dedupeFindings([...goalFindings, ...reachFindings, ...coverageFindings, ...modelRoughFindings, ...chamferFindings, ...tabReleaseFindings, ...documentFindings(), ...planFindings]),
     feeds: null,
     cam: first.cam,
     nc: first.nc,
@@ -5720,12 +5726,29 @@ export async function postModelPlan(
 }
 
 /**
+ * #1073 — THE RELEASE'S ABSENCE, STATED. A flipped setup whose goal states a band and the
+ * flipped-tabs underside, but whose plan cut no freeing contour, has no band of stock around the
+ * part to release — so no release program is posted and the run sheet prints no hand-cut step.
+ * This sentence says that instead of leaving the absence silent.
+ */
+export function tabReleaseSkippedFinding(goal: EngraveTargetObject): JobFinding {
+  return {
+    severity: 'info',
+    code: 'tab-release-skipped',
+    labelId: goal.id,
+    message:
+      'No tab release is posted: the plan cut no freeing contour around this side — the outline is the stock’s — ' +
+      'so no band of stock surrounds the part and it is not held by tabs.',
+  };
+}
+
+/**
  * #1073 — THE FLIPPED SETUP'S RELEASE PROGRAM, built from the plan's own records. The goal carries
- * the band (`bandMm`) and the underside's tab thickness; the plan's freeing contour states the
- * flat that cut down to that floor; the release then cuts the band that floor left through
- * everywhere except the four bridges (`planTabRelease`). Returns `ir: null` when the setup has no
- * freeing contour — its outline IS the stock's, so no band exists to release (the #1082
- * outline-is-stock case, stated by the plan itself).
+ * the band (`bandMm`) and the underside's band half-thickness; the plan's freeing contour states
+ * the flat that cut down to that floor; the release then cuts the band that floor left through
+ * everywhere except the bridges (`planTabRelease`). When the setup has no freeing contour — its
+ * outline IS the stock's, so no band surrounds the part — it returns `ir: null` AND a stated
+ * finding, so the absence of the hand-cut step is never silent (the #1082 outline-is-stock case).
  */
 async function flipReleaseProgram(
   job: EngraveJob,
@@ -5735,12 +5758,13 @@ async function flipReleaseProgram(
   output: ModelPlanOutput,
   rapid: RapidEstimate,
 ): Promise<
-  { ok: true; ir: ToolpathIR | null; facts: TabReleaseProgramFacts | null } | { ok: false; reason: string }
+  { ok: true; ir: ToolpathIR | null; facts: TabReleaseProgramFacts | null; findings: JobFinding[] } | { ok: false; reason: string }
 > {
   const plan = output.perSetup[output.perSetup.length - 1];
-  if (plan === undefined) return { ok: true, ir: null, facts: null };
-  const contour = plan.ops.find((op) => op.kind === 'contour');
-  if (contour === undefined) return { ok: true, ir: null, facts: null };
+  const contour = plan?.ops.find((op) => op.kind === 'contour');
+  if (plan === undefined || contour === undefined) {
+    return { ok: true, ir: null, facts: null, findings: [tabReleaseSkippedFinding(goal)] };
+  }
   const flat = contour.outcome.ir.tool;
   const diameter = cuttingDiameter(flat) ?? 0;
   if (!(diameter > 0)) {
@@ -5752,16 +5776,18 @@ async function flipReleaseProgram(
   } catch (e) {
     return { ok: false, reason: e instanceof Error ? e.message : String(e) };
   }
-  // The tab's WIDTH and COUNT are the shop's (the k3 default is 8 wide × 2 thick — data, not
-  // code); its THICKNESS is the band's own half-thickness, because the tab is the material the
-  // release leaves at the bottom of that band. A goal that states its own tab spec wins.
+  // THE BRIDGE = THE SHOP'S TAB, capped at the band's FULL thickness. The goal's
+  // `underside.tabs.thicknessMm` is the band's HALF-thickness (F's plane ± it), never a tab
+  // height; on this hardwood tray the band is 2 × 1 = 2 mm and the shop's 2 mm tab is the whole
+  // band. Count and width are the goal's stated tab spec when it has one, else the shop's defaults
+  // (the k3 default is 8 wide — data, not code).
   const defaults = tabSettings(shop.defaults ?? null).settings;
   const stated = goal.underside?.tabs;
-  const half = Math.max(0.2, stated?.thicknessMm ?? UNDERSIDE_TAB_THICKNESS_MM);
+  const bandThickness = 2 * bandHalfThicknessMm(goal);
   const tabs = {
     count: stated?.count ?? defaults.count,
     widthMm: stated?.widthMm ?? defaults.widthMm,
-    heightMm: stated?.thicknessMm ?? Math.min(defaults.heightMm, half),
+    heightMm: Math.min(defaults.heightMm, bandThickness),
   };
   // The holes this setup is registered on, in THIS setup's work XY: the goal's own setup id is
   // the side's (the plan's per-setup index is not — a per-side run plans one setup).
@@ -5784,6 +5810,7 @@ async function flipReleaseProgram(
       heightMm: tabs.heightMm,
       at: release.plan.tabCentres.map(([x, y]) => ({ x, y })),
     },
+    findings: [],
   };
 }
 
@@ -6035,6 +6062,7 @@ export async function generateGoalProgram(
   // program list (and bytes) is untouched. A refusal stops the run: a part whose tabs cannot be
   // placed must not be cut free under the cutter.
   let tabRelease: TabReleaseProgramFacts | null = null;
+  let tabReleaseFindings: JobFinding[] = [];
   if (sideFace === 'bottom' && goal.underside?.kind === 'flipped-tabs' && goal.bandMm !== undefined && goal.bandMm > 0) {
     const release = await flipReleaseProgram(job, goal, shop, input, output, jobMachine(job, calibration).rapidEstimate);
     if (!release.ok) return fail('cam', `tab release (#1073): ${release.reason}`, null, output);
@@ -6043,6 +6071,7 @@ export async function generateGoalProgram(
       if (lastSetup !== undefined) lastSetup.programs.push(release.ir);
       tabRelease = release.facts;
     }
+    tabReleaseFindings = release.findings;
   }
   return await postModelPlan(job, goal, tool, calibration, shop, output, {
     goalFindings,
@@ -6051,6 +6080,7 @@ export async function generateGoalProgram(
     modelRoughFindings,
     chamferFindings,
     tabRelease,
+    tabReleaseFindings,
     planIdeal,
     planTradeoff,
   });

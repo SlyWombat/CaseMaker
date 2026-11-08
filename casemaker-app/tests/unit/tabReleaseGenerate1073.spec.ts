@@ -14,7 +14,7 @@ import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { planUndersideFlip } from '@/engine/cnc/engrave/goalFlipSetups';
-import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
+import { generateGoalProgram, tabReleaseSkippedFinding } from '@/workers/sim/engraveGenerate';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ShopDefaults } from '@/platform/defaultsClient';
@@ -44,15 +44,8 @@ function stl(tris: Tri[]): string {
   return Buffer.from(new Uint8Array(buf)).toString('base64');
 }
 
-/** The flared prism: 60 × 30 at both ends, 80 × 40 at the middle (z −10). */
-function flaredStl(): string {
-  const rect = (hx: number, hy: number, z: number): V[] => [
-    [-hx, -hy, z],
-    [hx, -hy, z],
-    [hx, hy, z],
-    [-hx, hy, z],
-  ];
-  const solid = tl.Manifold.hull([...rect(30, 15, -20), ...rect(40, 20, -10), ...rect(30, 15, 0)]);
+/** A manifold solid as a binary STL body (the import door reads the same bytes). */
+function stlOfManifold(solid: { getMesh: () => { vertProperties: Float32Array; triVerts: Uint32Array } }): string {
   const mesh = solid.getMesh();
   const vp = mesh.vertProperties;
   const tv = mesh.triVerts;
@@ -62,6 +55,22 @@ function flaredStl(): string {
     tris.push([p(0), p(1), p(2)]);
   }
   return stl(tris);
+}
+
+/** The flared prism: `end` rectangles at both ends, `mid` at the middle (z −10). */
+function flaredStl(
+  end: [number, number] = [30, 15],
+  mid: [number, number] = [40, 20],
+): string {
+  const rect = (hx: number, hy: number, z: number): V[] => [
+    [-hx, -hy, z],
+    [hx, -hy, z],
+    [hx, hy, z],
+    [-hx, hy, z],
+  ];
+  return stlOfManifold(
+    tl.Manifold.hull([...rect(end[0], end[1], -20), ...rect(mid[0], mid[1], -10), ...rect(end[0], end[1], 0)]),
+  );
 }
 
 /** The k3 shop's tab default as DATA — 8 wide × 2 thick — the release must read, not bake in. */
@@ -84,7 +93,7 @@ function fixture(): { job: EngraveJob; side1: EngraveTargetObject; side2: Engrav
     enabled: true,
     role: 'goal',
     // No tabs block: the press writes only the kind, so the release's count/width must come from
-    // the SHOP's defaults (below) and its height from the band's own half-thickness.
+    // the SHOP's defaults (below) and its height from the band's full thickness.
     underside: { kind: 'flipped-tabs' },
   };
   const baseJob = defaultEngraveJob();
@@ -118,7 +127,8 @@ describe('#1073 — the release posts as the flipped setup’s last program', ()
     expect(release.tabRelease).toBeDefined();
     expect(release.tabRelease!.count).toBe(4);
     expect(release.tabRelease!.widthMm).toBe(8); // the shop default, as data
-    expect(release.tabRelease!.heightMm).toBe(1); // the goal's band half — the material left
+    // The bridge is the FULL band (2 × the goal's 1 mm half): on the tray, 2 mm thick.
+    expect(release.tabRelease!.heightMm).toBe(2);
     expect(release.tabRelease!.at).toHaveLength(4);
     for (const p of release.tabRelease!.at) expect(Number.isFinite(p.x) && Number.isFinite(p.y)).toBe(true);
     // The file is the release, and the earlier programs are not it.
@@ -156,4 +166,17 @@ describe('#1073 — the release posts as the flipped setup’s last program', ()
     expect(out.ok, out.errors?.map((e) => e.message).join('; ')).toBe(true);
     expect(out.programs.every((p) => p.tabRelease === undefined)).toBe(true);
   }, 120_000);
+
+  it('states the release’s absence when the flipped side cut no freeing contour', () => {
+    // The job-level trigger is a side-2 setup whose stock IS the freed part (#1082) with no
+    // contour in its plan; that plan's shape is the #1082 acceptance's own. The finding's sentence
+    // is pinned here so the sheet's missing hand-cut step is never silent.
+    const finding = tabReleaseSkippedFinding({ id: 'g-exact' } as EngraveTargetObject);
+    expect(finding.severity).toBe('info');
+    expect(finding.code).toBe('tab-release-skipped');
+    expect(finding.labelId).toBe('g-exact');
+    expect(finding.message).toContain('the outline is the stock’s');
+    expect(finding.message).toContain('not held by tabs');
+    expect(finding.message).toContain('No tab release is posted');
+  });
 });

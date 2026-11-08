@@ -62,6 +62,16 @@ export interface TabReleaseTabs {
   heightMm: number;
 }
 
+/**
+ * THE BAND'S HALF-THICKNESS a goal states, mm — `underside.tabs.thicknessMm`, the record F's flip
+ * plan writes (plane ± this, so the band is twice it), else the labelled default the flip plan
+ * itself uses. NOT a tab height: the goal's tabs block states the band, and the bridge's own
+ * height is the shop's tab height capped at the band's full thickness.
+ */
+export function bandHalfThicknessMm(goal: EngraveTargetObject): number {
+  return Math.max(0.2, goal.underside?.tabs?.thicknessMm ?? UNDERSIDE_TAB_THICKNESS_MM);
+}
+
 export interface TabReleaseInput {
   /** The flipped setup's goal copy: its `bandMm` (the cut floor) and the underside tab band. */
   goal: EngraveTargetObject;
@@ -453,15 +463,17 @@ export function planTabRelease(input: TabReleaseInput): TabReleaseResult {
         '(the flip plan’s own job) and the release follows',
     };
   }
-  const half = Math.max(0.2, goal.underside?.tabs?.thicknessMm ?? UNDERSIDE_TAB_THICKNESS_MM);
+  const half = bandHalfThicknessMm(goal);
   const bandThickness = 2 * half;
-  if (!(tabs.heightMm > 0) || tabs.heightMm >= bandThickness - 1e-9) {
+  // The bridge is the material the release leaves across the band: its height may be the WHOLE
+  // band (the ruling's "the bridge is the full band") or less, but never more than the band.
+  if (!(tabs.heightMm > 0) || tabs.heightMm > bandThickness + 1e-9) {
     return {
       ok: false,
       code: 'tab-release-no-tabs',
       reason:
-        `a ${r3(tabs.heightMm)} mm tab does not fit the ${r3(bandThickness)} mm band: the tab is the material left at the ` +
-        'bottom of the release cut, so it must be thinner than the band itself',
+        `a ${r3(tabs.heightMm)} mm tab is thicker than the ${r3(bandThickness)} mm band: the tab is the material left across ` +
+        'the band, so it cannot be thicker than the band itself',
     };
   }
   const mesh = goalWorkMesh(goal);
