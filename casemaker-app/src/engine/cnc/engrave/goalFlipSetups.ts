@@ -404,6 +404,27 @@ export type FlipSetupsResult =
   | { ok: false; reason: string };
 
 /**
+ * #1073 line 2 — THE TAB BAND'S NUMBERS, in one place. The plane is the goal's widest cross-section
+ * (`silhouettePlane`); side 1 stops the band ABOVE it and side 2 at the same band BELOW it, in
+ * each side's own top-down depth. The tab thickness is the goal's stated `underside.tabs`, else
+ * the default — the same number C's release op reads (default 1 mm).
+ */
+export function flipTabBands(
+  target: EngraveTargetObject,
+): { plane: number; tab: number; band1: number; band2: number } | { reason: string } {
+  const plane = silhouettePlane(target);
+  if (plane === null) return { reason: 'the goal’s mesh could not be read, so its widest line is unknown' };
+  const tab = Math.max(0.2, target.underside?.tabs?.thicknessMm ?? UNDERSIDE_TAB_THICKNESS_MM);
+  const minZ = target.position.z - placedSize(target).z;
+  const band1 = Number((target.position.z - (plane + tab)).toFixed(3));
+  const band2 = Number((plane - tab - minZ).toFixed(3));
+  if (!(band1 > 0) || !(band2 > 0)) {
+    return { reason: `a ${Number(tab.toFixed(2))} mm tab band does not fit inside this part at its widest line` };
+  }
+  return { plane, tab, band1, band2 };
+}
+
+/**
  * Convert a plan's faces into the document's side setups. Side 1 is the job's current setup,
  * materialised with its goal; each later side gets the goal in its own work frame and a setup
  * with the orientation, the mount and — where the hold exists — the pin reference.
@@ -466,10 +487,36 @@ export function planFlipSetups(
 
   const hold = dowelHold(job, target, flipAbout, tools);
 
+  // #1073 line 2 — A FRAME FLIP LEAVES THE PART ON TABS: both sides' goals are banded about the
+  // part's silhouette plane, and both state the underside record C's release op reads — one
+  // record, as the issue demands. The vendor method and a plain two-side plan write no bands.
+  let band: { band1: number; band2: number; underside: NonNullable<EngraveTargetObject['underside']> } | null = null;
+  if (flip !== undefined && flip.method === 'tabs-in-blank') {
+    const b = flipTabBands(target);
+    if ('reason' in b) return { ok: false, reason: b.reason };
+    band = {
+      band1: b.band1,
+      band2: b.band2,
+      underside: {
+        ...(target.underside ?? {}),
+        kind: 'flipped-tabs',
+        source: 'user',
+        // The thickness the band was cut to is written only when the goal states tabs; a goal
+        // that states none keeps C's op's own default (1 mm), the same number used here.
+        ...(target.underside?.tabs === undefined ? {} : { tabs: { ...target.underside.tabs, thicknessMm: b.tab } }),
+      },
+    };
+  }
+
   const setups: JobSetup[] = [];
   const goals: EngraveTargetObject[] = [];
 
-  const firstGoal: EngraveTargetObject = { ...target, id: newId('goal'), setupId: base.id };
+  const firstGoal: EngraveTargetObject = {
+    ...target,
+    id: newId('goal'),
+    setupId: base.id,
+    ...(band === null ? {} : { bandMm: band.band1, underside: band.underside }),
+  };
   goals.push(firstGoal);
   setups.push({
     id: base.id,
@@ -485,7 +532,12 @@ export function planFlipSetups(
     // `orient` returns [row, row, row]; this module works on the flat row-major form.
     const R = turned.matrix.flat() as unknown as Mat3;
     const placed = goalForSetup(target, stock, R);
-    const goal: EngraveTargetObject = { ...placed, id: newId('goal'), setupId: id };
+    const goal: EngraveTargetObject = {
+      ...placed,
+      id: newId('goal'),
+      setupId: id,
+      ...(band === null ? {} : { bandMm: band.band2, underside: band.underside }),
+    };
     goals.push(goal);
     const pins = hold === null ? undefined : pinsFor(hold, stock, R);
     setups.push({
@@ -534,15 +586,9 @@ export function planUndersideFlip(
   if (target.underside?.kind !== 'flipped-tabs') {
     return { ok: false, reason: 'this goal is not set to be cut from both sides' };
   }
-  const plane = silhouettePlane(target);
-  if (plane === null) return { ok: false, reason: 'the goal’s mesh could not be read, so its widest line is unknown' };
-  const tab = Math.max(0.2, target.underside.tabs?.thicknessMm ?? UNDERSIDE_TAB_THICKNESS_MM);
-  const minZ = target.position.z - placedSize(target).z;
-  const band1 = Number((target.position.z - (plane + tab)).toFixed(3));
-  const band2 = Number((plane - tab - minZ).toFixed(3));
-  if (!(band1 > 0) || !(band2 > 0)) {
-    return { ok: false, reason: `a ${Number(tab.toFixed(2))} mm tab band does not fit inside this part at its widest line` };
-  }
+  const b = flipTabBands(target);
+  if ('reason' in b) return { ok: false, reason: b.reason };
+  const { plane, tab, band1, band2 } = b;
   const base = planFlipSetups(job, target, ['top', 'bottom'], tools);
   if (!base.ok) return base;
   return {
