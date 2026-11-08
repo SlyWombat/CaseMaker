@@ -25,6 +25,7 @@ import { surfaceSpreadPlan } from '@/engine/cnc/engrave/surfaceSpread';
 import { planRegistration, type RegistrationPlan } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
+import { boxTarget } from './helpers/twoSetupBox966';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import {
   firstRegistrationFor,
@@ -791,11 +792,15 @@ describe('#495 — the registration step', () => {
     const plan = makePlan(-56.172);
     const base = jobWithPlan(plan);
     const setup = jobSetups(base)[0]!;
-    const job: EngraveJob = { ...base, setups: [{ ...setup, flip: { method: 'tabs-in-blank', axis: 'left-right' } }] };
+    const job: EngraveJob = {
+      ...base,
+      targetObject: { ...boxTarget('small-part', 20, 20, 3), sha256: 'c'.repeat(64), position: { x: 19.05, y: 38.1, z: 0 } },
+      setups: [{ ...setup, flip: { method: 'tabs-in-blank', axis: 'left-right' } }],
+    };
     render(<EngraveRegistrationStep job={job} target={TARGET} />);
     const refusal = screen.getByTestId('engrave-registration-flip-refusal');
-    expect(refusal.textContent).toContain('side 2');
-    expect(refusal.textContent).toContain('locating pins');
+    expect(refusal.textContent).toContain('carries no locating pins');
+    expect(refusal.textContent).toContain('re-plan the flip');
     // No Register button of any shape, and the console untouched.
     expect(screen.queryByTestId('engrave-registration-start')).toBeNull();
     expect(screen.queryByTestId('engrave-registration-approve-start')).toBeNull();
@@ -1291,10 +1296,17 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
   const G54 = { x: 100, y: 50 }; // the frame in force before the run — side 1's origin
   const BORE_R = 3; // ⌀6
   const BALL_R = 1; // the probe's measured ⌀2 tip
+  // THE HOLD'S OWN POSITIONS (#1073/#1088): a 60 × 30 part at (45, 20) on the 90 × 60 blank leaves
+  // the +X margin clear, so the left-right hold line sits at X 86 with bores at Y 18 and 42;
+  // reflected left-right those ARE side 2's pins.
   const PINS = [
-    { x: 70, y: 15 },
-    { x: 20, y: 15 },
+    { x: 4, y: 18 },
+    { x: 4, y: 42 },
   ] as const;
+  /** The part whose footprint the hold check measures (the generator's own fixture shape). */
+  function flipGoal(): EngraveJob['targetObject'] {
+    return { ...boxTarget('flip-part', 60, 30, 20), position: { x: 45, y: 20, z: 0 } };
+  }
 
   /** A job whose FIRST setup is the flipped one, on its two stored pins (90 × 60 stock). */
   function flipJob(): EngraveJob {
@@ -1306,6 +1318,7 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
       stock: { ...base.stock, length: 90, width: 60, thickness: 20, material: 'hardwood' },
       labels: [],
       shapes: [],
+      targetObject: flipGoal(),
       setups: [
         {
           ...setup,
@@ -1481,7 +1494,7 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
     expect(lines.filter((l) => /^G38\.3 [XY]/.test(l))).toHaveLength(8);
     expect(lines.filter((l) => l.startsWith('G38.5')).length).toBeGreaterThanOrEqual(8);
     // Each bore: the entry seek at its pin, then each sideways touch starts from that pin's centre.
-    expect(lines.filter((l) => /^G0 X(70|20)(\.000)? Y15(\.000)?$/.test(l))).toHaveLength(10);
+    expect(lines.filter((l) => /^G0 X4(\.000)? Y(18|42)(\.000)?$/.test(l))).toHaveLength(10);
 
     // THE PRESS WRITES THE ORIGIN THE BORES STATE: the G54 in force was 100/50 off the work zero.
     await writeOrigin();
@@ -1506,6 +1519,7 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
     const job: EngraveJob = {
       ...sideOne,
       stock: { ...sideOne.stock, length: 90, width: 60, thickness: 20 },
+      targetObject: flipGoal(),
       setups: [sideOne.setups![0]!, { ...flipped, id: 'setup-flip' }],
     };
     flipLocation();
@@ -1541,6 +1555,38 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
     expect(useEngraveRegistrationStore.getState().records[job.id]).toBeUndefined();
     expect(screen.getByTestId('engrave-registration-recorded').textContent).toContain('Setup 2’s registration recorded');
   }, 60_000);
+
+  it('#1088 — a hold whose line would land on the part refuses the card, in the hold’s own words', () => {
+    // The part fills the blank: its footprint reaches X 85 and the left-right hold line sits at
+    // X 86, which needs 4 mm clear of it — no margin. The generator refuses this hold; the card
+    // must refuse with the SAME sentence, or the probe would aim at bores nothing cut.
+    const job: EngraveJob = {
+      ...flipJob(),
+      targetObject: { ...boxTarget('oversized-part', 80, 50, 20), sha256: 'b'.repeat(64), position: { x: 45, y: 30, z: 0 } },
+    };
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    const refusal = screen.getByTestId('engrave-registration-flip-refusal');
+    expect(refusal.textContent).toContain('the part reaches X 85 on a 90 mm long blank');
+    expect(refusal.textContent).toContain('the hold line at X 86 would be on the part');
+    expect(screen.queryByTestId('engrave-registration-start')).toBeNull();
+    expect(sent).toEqual([]);
+  });
+
+  it('#1088 — stored pins that disagree with the hold refuse the card, by name', () => {
+    // One pin 1 mm off the hold's own position: one of the two records is wrong, and the fix is a
+    // re-plan, never a silent pick. Same sentence as the generator's.
+    const base = flipJob();
+    const setup = base.setups![0]!;
+    const job: EngraveJob = {
+      ...base,
+      setups: [{ ...setup, pins: { at: [{ x: 5, y: 18 }, { x: 4, y: 42 }] } } as never],
+    };
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    const refusal = screen.getByTestId('engrave-registration-flip-refusal');
+    expect(refusal.textContent).toContain('the job’s stored pins and the hold disagree — re-plan the flip');
+    expect(screen.queryByTestId('engrave-registration-start')).toBeNull();
+    expect(sent).toEqual([]);
+  });
 
   it('a corner Z outside the carried Z0’s band stops the run by name, and no bore is entered', async () => {
     const job = flipJob();
