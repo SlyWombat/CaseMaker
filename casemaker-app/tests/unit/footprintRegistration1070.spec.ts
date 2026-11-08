@@ -12,6 +12,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { planFootprintRegistration, type FootprintInput } from '@/engine/cnc/registration/footprint';
+import { planRegistration, type PlanInput } from '@/engine/cnc/registration/plan';
+import { registrationSettings } from '@/engine/cnc/registration/settings';
 
 /** The tray, as the job and the demo machine state it. */
 const TRAY: FootprintInput = {
@@ -122,5 +124,47 @@ describe('#1070 footprint registration', () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toContain('the clamp on the back edge');
+  });
+});
+
+describe('#1070 the planner routes an anchored bed-held job to the footprint', () => {
+  /** The tray as the planner sees it: the stock's box, the anchor seed, no obstacles. */
+  const plannerInput: PlanInput = {
+    stock: { xMin: 0, yMin: 0, xMax: 160, yMax: 126, cornerRadius: 0 },
+    mount: 'bracket',
+    expectedSurface: { machineZ: -51.69, from: 'the bracket’s seat, one touch beside it' },
+    seekFromMachineZ: -3,
+    stockThicknessMm: 25,
+    bracketOrigin: { x: -190.89, y: -193.83, from: 'anchor 1 read from the machine', uncertainty: 0.1, offsetMeasured: false },
+    mountObstacles: [],
+    region: { min: [22, 10], max: [158, 116], marginMm: 1 },
+    softLimits: { xMin: -207, yMin: -206, zMin: -102 },
+  };
+  const settings = registrationSettings(null).settings;
+
+  it('the plan’s scans are the region-extent touches, with the corner origin derivation', () => {
+    const r = planRegistration(plannerInput, settings);
+    expect(r.ok, r.ok ? '' : r.reason).toBe(true);
+    if (!r.ok) return;
+    expect(r.plan.scans.map((sc) => [sc.edge, sc.along])).toEqual([
+      ['front', 22],
+      ['front', 158],
+      ['left', 10],
+      ['left', 116],
+      ['right', 116],
+      ['back', 158],
+    ]);
+    // The origin comes from the touched front/left lines (#525's corner path), not from the seed.
+    expect(r.plan.corner).toEqual({ id: 'front-left', xEdge: 'left', yEdge: 'front' });
+    // The seed is still the machine datum the moves are sent from.
+    expect(r.plan.bracketOrigin).toMatchObject({ x: -190.89, y: -193.83 });
+    expect(r.plan.surfacePoint).toEqual({ x: 90, y: 63 });
+  });
+
+  it('a seed that would put a planned touch past the soft endstop is refused, not planned', () => {
+    const r = planRegistration({ ...plannerInput, bracketOrigin: { ...plannerInput.bracketOrigin!, x: -204 } }, settings);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain('soft endstop X -207');
   });
 });
