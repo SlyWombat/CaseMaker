@@ -623,6 +623,98 @@ export function boxSolid(tl: ManifoldToplevel, box: ObstacleBox): ManifoldInstan
 }
 
 /**
+ * #1068-perf — THE EXACT FIXTURE HIT, CLOSED FORM (6b's ruling, 2026-11-07).
+ *
+ * The cutter is a vertical cylinder of radius r; a straight move sweeps a stadium in XY — the
+ * move's own segment, grown by r — over its Z interval. A hit is the 2D distance from that
+ * segment to the box's XY rectangle below r, with the Z intervals overlapping. No Manifold
+ * boolean is built, so a bracket job's sweep costs arithmetic per move instead of a wasm
+ * intersection (the puck: 862 s with one boolean per move, against 3.9 s without a fixture).
+ *
+ * A move that changes Z is cut into pieces {@link FIXTURE_Z_PIECE_MM} long, each tested with its
+ * own tip Z: the only conservatism is that step (a piece's lowest tip is applied across the
+ * piece's whole XY travel), never more. The volume returned is the boxes' own XY-overlap area
+ * times the Z overlap — an UPPER BOUND on the stadium's, labelled as such in the diagnostic; the
+ * column engine states the same figure (`columnFixtureHit`).
+ */
+export const FIXTURE_Z_PIECE_MM = 0.5;
+
+/** Distance from a point to a segment, 2D. */
+function pointSegmentDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0;
+  return Math.hypot(ax + t * dx - px, ay + t * dy - py);
+}
+
+/** Distance from a point to an axis-aligned rectangle in XY, 2D. */
+function pointRectDistance(px: number, py: number, box: ObstacleBox): number {
+  const dx = Math.max(box.min[0] - px, 0, px - box.max[0]);
+  const dy = Math.max(box.min[1] - py, 0, py - box.max[1]);
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * The exact stadium test: the move's XY segment grown by `radius` against each box's XY
+ * rectangle, with the Z interval of the piece overlapping the box's. Returns the box with the
+ * largest overlap bound, or null.
+ */
+export function fixtureStadiumHit(
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+  /** The cutter's radius, already grown by the move's own margin. */
+  radius: number,
+  /** The spindle-off proximity margin, so the Z band matches the old body's grown bottom. */
+  margin: number,
+  /** The column's top, absolute (the tool body rises from the tip to here). */
+  zHi: number,
+  boxes: readonly ObstacleBox[],
+): { box: ObstacleBox; volume: number } | null {
+  const pieces = Math.max(
+    1,
+    Math.ceil(Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]) / FIXTURE_Z_PIECE_MM),
+  );
+  let best: ObstacleBox | null = null;
+  let bestVolume = 0;
+  for (let k = 0; k < pieces; k++) {
+    const t0 = k / pieces;
+    const t1 = (k + 1) / pieces;
+    const x0 = from[0] + (to[0] - from[0]) * t0;
+    const y0 = from[1] + (to[1] - from[1]) * t0;
+    const z0 = from[2] + (to[2] - from[2]) * t0;
+    const x1 = from[0] + (to[0] - from[0]) * t1;
+    const y1 = from[1] + (to[1] - from[1]) * t1;
+    const z1 = from[2] + (to[2] - from[2]) * t1;
+    const pieceZLo = Math.min(z0, z1) - margin;
+    for (const box of boxes) {
+      if (zHi <= box.min[2] || pieceZLo >= box.max[2]) continue;
+      // Two convex sets: the minimum distance is a rect corner against the segment, or the
+      // segment's endpoint against the rectangle. The lesser of the two families is exact.
+      let d = Math.min(
+        pointSegmentDistance(box.min[0], box.min[1], x0, y0, x1, y1),
+        pointSegmentDistance(box.max[0], box.min[1], x0, y0, x1, y1),
+        pointSegmentDistance(box.min[0], box.max[1], x0, y0, x1, y1),
+        pointSegmentDistance(box.max[0], box.max[1], x0, y0, x1, y1),
+        pointRectDistance(x0, y0, box),
+        pointRectDistance(x1, y1, box),
+      );
+      if (!(d < radius)) continue;
+      // The reported figure: the box-overlap bound, the same one the column engine states.
+      const ox = Math.min(Math.max(x0, x1) + radius, box.max[0]) - Math.max(Math.min(x0, x1) - radius, box.min[0]);
+      const oy = Math.min(Math.max(y0, y1) + radius, box.max[1]) - Math.max(Math.min(y0, y1) - radius, box.min[1]);
+      const oz = Math.min(zHi, box.max[2]) - Math.max(pieceZLo, box.min[2]);
+      const volume = Math.max(0, ox) * Math.max(0, oy) * Math.max(0, oz);
+      if (best === null || volume > bestVolume) {
+        best = box;
+        bestVolume = volume;
+      }
+    }
+  }
+  return best === null ? null : { box: best, volume: bestVolume };
+}
+
+/**
  * The fixture's boxes, inflated by the envelope's uncertainty, with the tallest box named
  * (#204/#923). Extracted so the column engine can build the identical obstacle set — same
  * boxes, same inflation, same "which one is tallest" — without needing a Manifold handle: this
@@ -1070,24 +1162,23 @@ export function checkAirMoves(
     // solids are exact — the body a hull of cylinders, the fixture a union of boxes — so
     // anything above float dust is real, no derived floor needed.
     if (fixture !== null) {
-      // #1068-perf — THE BOX GATE. The exact check below is a Manifold intersect per move, and on a
-      // long bracket job's sweep that is tens of thousands of them; every one of them is against a
-      // fixture whose own boxes are mostly along the edges. The same conservative box-vs-box test
-      // the column engine already answers with (`columnFixtureHit`: the move's swept box, tool
-      // radius grown, against each pre-inflated box) says when the boolean cannot find anything —
-      // a diagonal corner it clears by could only ADD a collision, never miss one. Only moves near
-      // a box pay the boolean.
-      const nearFixture =
-        fixtureBoxes.length === 0 ||
-        columnFixtureHit(
-          [real.from[0], real.from[1]],
-          [real.to[0], real.to[1]],
-          radius + margin,
-          zLo,
-          zTop + margin,
-          fixtureBoxes,
-        ) !== null;
-      if (nearFixture) {
+      // #1068-perf — THE EXACT STADIUM TEST, no Manifold body and no boolean (6b's ruling): the
+      // cutter's vertical cylinder swept along the move against each pre-inflated box. The old
+      // per-move boolean was the whole cost of a bracket job's sweep once the CLI handed it its
+      // fixture (#1068): the fixture's boxes stand along the blank's free edges, the cuts run
+      // those edges, so nearly every move paid one — and on the shared manifold runtime those
+      // booleans crawl (the puck: 862 s against 3.9 s without a fixture).
+      if (fixtureBoxes.length > 0) {
+        const h = fixtureStadiumHit(real.from, real.to, radius + margin, margin, zTop + margin, fixtureBoxes);
+        if (h !== null && h.volume > SLIVER_MM3) {
+          pushFixture(
+            spindleOff
+              ? { severity: 'error', code: 'feed-into-fixture', message: `line ${mv.line}: a feed move with the spindle off drives the tool ${formatVolume(h.volume)} mm³ into the fixture (an upper bound)` }
+              : { severity: 'error', code: 'rapid-into-fixture', message: `line ${mv.line}: a rapid drives the tool ${formatVolume(h.volume)} mm³ into the fixture (an upper bound)` },
+          );
+        }
+      } else {
+        // A caller that passes only the union keeps the exact boolean answer (#204's own path).
         // #653 — the fixture is unsheared too: the lifted move's body, when this is a surface un-lift.
         const fixtureBody = mv.lifted === undefined
           ? body
