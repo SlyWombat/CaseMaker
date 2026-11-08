@@ -163,6 +163,20 @@ function proposalLine(plan: RegistrationPlan): string {
   return `${list}, then the top · ${touchWords} · ${probeWords}`;
 }
 
+/**
+ * #1088 — A FLIPPED SETUP IS SIDE 2's, AND SIDE 2 REGISTERS ON THE BORES. This step runs side 1's
+ * routine (`runRegistration` over `setups[0].registration.plan`); on a flipped setup those touches
+ * would be aimed at a part that is no longer in that pose. The hole-registration executor is
+ * #1088's own slice, so until it lands the step REFUSES by name and sends nothing.
+ */
+function flipRefusal(job: EngraveJob): string | null {
+  if (job.setups?.[0]?.flip === undefined) return null;
+  return (
+    'This setup flips the part, so its registration is side 2’s — and side 2’s hole registration isn’t built yet. ' +
+    'Nothing was sent: the touches here would be side 1’s, aimed at a part that is no longer in that pose.'
+  );
+}
+
 /** The plan the Setups section approved for the job's first setup, or why there is none. */
 function approvedPlan(job: EngraveJob): { plan: RegistrationPlan | null; why: string | null } {
   if (job.setups === undefined) {
@@ -525,6 +539,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   }
 
   async function start(planOverride?: RegistrationPlan): Promise<void> {
+    // #1088 — a flipped setup has no executor yet: never attach the console for side 1's routine.
+    if (flipRefusal(job) !== null) return;
     // #797 follow-up — the Register card approves the planner's proposal and starts in ONE press:
     // the plan it approved is handed here, because the render-time `plan` is still null.
     const effectivePlan = planOverride ?? plan;
@@ -915,6 +931,21 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   const refusal = outcome === null ? null : writerRefusal(outcome);
   const marginOnly = outcome !== null && marginRefusal(outcome);
   const data = result?.ok === true ? result.data : null;
+
+  // #1088 — the flipped setup's refusal replaces the whole card: no plan, no proposal, no press.
+  const flipWhy = flipRefusal(job);
+  if (flipWhy !== null) {
+    return (
+      <div data-testid="engrave-registration" data-phase="idle" data-state="flipped" style={{ ...BOX, marginTop: 8 }}>
+        <h3 style={{ margin: '0 0 4px', fontSize: 12, fontWeight: 600, color: '#c8d3de' }}>
+          Registration — find the stock, then set the origin
+        </h3>
+        <p style={{ ...MUTED, color: WARN }} data-testid="engrave-registration-flip-refusal">
+          {flipWhy}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div

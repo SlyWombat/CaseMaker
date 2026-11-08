@@ -784,6 +784,25 @@ describe('#495 — the registration step', () => {
     expect(sent).toEqual([]);
   });
 
+  it('#1088 — a FLIPPED first setup refuses by name: side 2’s hole registration isn’t built yet, and nothing is sent', () => {
+    // The step runs side 1's routine over setups[0].registration.plan; on a flipped setup those
+    // touches would be aimed at a part no longer in that pose. The hole-registration executor is
+    // #1088's own slice, so until it lands the step refuses — never side 1's touches on side 2.
+    const plan = makePlan(-56.172);
+    const base = jobWithPlan(plan);
+    const setup = jobSetups(base)[0]!;
+    const job: EngraveJob = { ...base, setups: [{ ...setup, flip: { method: 'tabs-in-blank', axis: 'left-right' } }] };
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    const refusal = screen.getByTestId('engrave-registration-flip-refusal');
+    expect(refusal.textContent).toContain('side 2');
+    expect(refusal.textContent).toContain('hole registration');
+    expect(refusal.textContent).toContain('isn');
+    // No Register button of any shape, and the console untouched.
+    expect(screen.queryByTestId('engrave-registration-start')).toBeNull();
+    expect(screen.queryByTestId('engrave-registration-approve-start')).toBeNull();
+    expect(sent).toEqual([]);
+  });
+
   it('runs nothing without a machine target', () => {
     const plan = makePlan(-56.172);
     render(<EngraveRegistrationStep job={jobWithPlan(plan)} target={null} />);
