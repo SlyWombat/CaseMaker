@@ -170,6 +170,19 @@ def main():
             d = abs(a_cov - t_cov)
             print(f'    top-surface coverage    {a_cov * 100:.4f} % (app) vs {t_cov * 100:.4f} % '
                   f'(checker) — Δ {d * 100:.4f} pp' + ('  NOISY' if d > tol else ''))
+        # #1092 — the silhouette proof's own count and the removed classes' counters.
+        app_sil = app.get('silhouetteExcusedCells')
+        if app_sil is not None:
+            diff = abs(float(app_sil) - float(s['silhouetteExcusedCells']))
+            print(f'    silhouette excused      {app_sil} (app) vs {s["silhouetteExcusedCells"]} '
+                  f'(checker) — Δ {diff:g} cell(s) of {n}'
+                  + ('  NOISY' if diff / n > tol else ''))
+            app_deep = app.get('silhouetteDeepest')
+            if app_deep or s['silhouetteDeepest']:
+                fmt = (lambda v: 'null' if not v else
+                       f"{v['mm']:.3f} mm at {v['x']:.2f}, {v['y']:.2f} (CL {v['clDistanceMm']} mm)")
+                print(f'    silhouette deepest      {fmt(app_deep)} (app) vs '
+                      f'{fmt(s["silhouetteDeepest"])} (checker)')
         deepest = s.get('overReliefDeepest')
         print(f'    over-relief: wall {s["wallOverReliefCells"]}, border {s["borderOverReliefCells"]}, '
               f'shadow {s["shadowOverReliefCells"]}'
