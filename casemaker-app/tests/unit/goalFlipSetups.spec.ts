@@ -119,7 +119,7 @@ describe('#872 the flip setup conversion', () => {
     // The hold: the shop's own 2.5 mm drill, through the stock into the board, in the margin.
     expect(result.hold).not.toBeNull();
     expect(result.hold!.diameterMm).toBeCloseTo(2.5, 6);
-    expect(result.hold!.depthMm).toBeCloseTo(STOCK.thickness + 2, 6);
+    expect(result.hold!.depthMm).toBeCloseTo(STOCK.thickness + 0.5, 6); // #1073 — breakthrough 0.3 + chip 0.2
     expect(result.hold!.cutter).toBe('user:drill-2.5');
     // Off the centre line (30 / 70 %), so the pin question can tell a 180° spin apart.
     expect(result.hold!.at[0].x).not.toBe(STOCK.length / 2);
