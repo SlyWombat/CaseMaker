@@ -350,16 +350,29 @@ function goalFootprint(target: EngraveTargetObject): { minX: number; maxX: numbe
 }
 
 /**
+ * #1073 — THE HOLD, OR WHY THERE IS NONE. `dowelHold` used to CLAMP its line to the stock's edge
+ * minus the margin even when the part reached past that line, so a part that nearly fills the
+ * blank got its locating bores INSIDE the part (m1trayF: part X 22..158 on a 160 mm blank, the
+ * line clamped to X 156). The line is a refusal now, named and numbered, never a silent clamp.
+ */
+export type DowelHoldResult = { ok: true; hold: DowelHold } | { ok: false; reason: string };
+
+/**
  * The hold setup 1 must leave for the flip: two ⌀6 locating bores in the margin, clear of the
  * goal's footprint, on a line parallel to the flip axis and OFF the stock's centre line (the
  * probe's own readings then tell the right way round from a stock spun 180° about Z).
+ *
+ * The line sits at the stock's edge less `margin` (4 mm), and the part's own footprint must stay
+ * `margin` clear of it — the holes are ⌀6, so their rim comes 3 mm in from that line and the part
+ * keeps 1 mm from the rim. A part that reaches past that leaves no margin at all, and this
+ * refuses by name rather than posting holes in the part.
  */
 export function dowelHold(
   job: EngraveJob,
   target: EngraveTargetObject,
   about: 'x' | 'y',
   tools?: readonly { key: string; tool: Tool }[],
-): DowelHold | null {
+): DowelHoldResult {
   const L = job.stock.length;
   const W = job.stock.width;
   const f = goalFootprint(target);
@@ -371,32 +384,61 @@ export function dowelHold(
   // The cutter must stand the whole bore: the flute reaches the depth, and it is narrower than
   // the ⌀6 bore so the helix can open it. The HOLD states the BORE, never the cutter's size.
   const drill = ownedBoreCutter(tools, depthMm);
-  if (drill === null) return null;
+  if (drill === null) {
+    return {
+      ok: false,
+      reason:
+        'no owned flat end mill can bore the two ⌀6 locating holes — record a flat narrower than the bore, ' +
+        'one whose stated reach covers the hole’s depth (Manage › Tools)',
+    };
+  }
   if (about === 'x') {
     // The line runs along X, in the +Y margin behind the part.
-    const y = Math.min(W - margin, Math.max(f.maxY + margin, W - margin));
-    const yEdge = Math.max(margin, Math.min(y, W - margin));
+    const yEdge = Number((W - margin).toFixed(2));
+    if (!(yEdge - f.maxY >= margin)) {
+      return {
+        ok: false,
+        reason:
+          `the part reaches Y ${f.maxY} on a ${W} mm wide blank, and the ⌀${FLIP_BORE_DIAMETER_MM} locating ` +
+          `bores need ${margin} mm clear of it — the hold line at Y ${yEdge} would be on the part. ` +
+          'Widen the blank or move the part',
+      };
+    }
     return {
+      ok: true,
+      hold: {
+        diameterMm: FLIP_BORE_DIAMETER_MM,
+        cutter: drill.key,
+        depthMm,
+        // Off the centre line: 30 % and 70 % of the stock, never 50 %.
+        at: [
+          { x: Number((L * 0.3).toFixed(2)), y: yEdge },
+          { x: Number((L * 0.7).toFixed(2)), y: yEdge },
+        ],
+      },
+    };
+  }
+  const xEdge = Number((L - margin).toFixed(2));
+  if (!(xEdge - f.maxX >= margin)) {
+    return {
+      ok: false,
+      reason:
+        `the part reaches X ${f.maxX} on a ${L} mm long blank, and the ⌀${FLIP_BORE_DIAMETER_MM} locating ` +
+        `bores need ${margin} mm clear of it — the hold line at X ${xEdge} would be on the part. ` +
+        'Widen the blank or move the part',
+    };
+  }
+  return {
+    ok: true,
+    hold: {
       diameterMm: FLIP_BORE_DIAMETER_MM,
       cutter: drill.key,
       depthMm,
-      // Off the centre line: 30 % and 70 % of the stock, never 50 %.
       at: [
-        { x: Number((L * 0.3).toFixed(2)), y: Number(yEdge.toFixed(2)) },
-        { x: Number((L * 0.7).toFixed(2)), y: Number(yEdge.toFixed(2)) },
+        { x: xEdge, y: Number((W * 0.3).toFixed(2)) },
+        { x: xEdge, y: Number((W * 0.7).toFixed(2)) },
       ],
-    };
-  }
-  const x = Math.min(L - margin, Math.max(f.maxX + margin, L - margin));
-  const xEdge = Math.max(margin, Math.min(x, L - margin));
-  return {
-    diameterMm: FLIP_BORE_DIAMETER_MM,
-    cutter: drill.key,
-    depthMm,
-    at: [
-      { x: Number(xEdge.toFixed(2)), y: Number((W * 0.3).toFixed(2)) },
-      { x: Number(xEdge.toFixed(2)), y: Number((W * 0.7).toFixed(2)) },
-    ],
+    },
   };
 }
 
@@ -487,7 +529,11 @@ export function planFlipSetups(
   // must be on a line parallel to it.
   const flipAbout = laterTurns[0]!.turned.ok ? (laterTurns[0]!.turned.rotate?.about ?? 'x') : 'x';
 
-  const hold = dowelHold(job, target, flipAbout, tools);
+  const holdResult = dowelHold(job, target, flipAbout, tools);
+  // A STATED FRAME FLIP cannot be planned without its hold: the refusal is the hold's own words.
+  // A plain two-side plan (no flip stated) keeps the old lenient reading — no hold, no pins.
+  if (!holdResult.ok && flip !== undefined) return { ok: false, reason: holdResult.reason };
+  const hold = holdResult.ok ? holdResult.hold : null;
 
   // #1073 line 2 — A FRAME FLIP LEAVES THE PART ON TABS: both sides' goals are banded about the
   // part's silhouette plane, and both state the underside record C's release op reads — one

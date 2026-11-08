@@ -32,7 +32,7 @@ afterEach(() => {
 
 const here = (name: string): string => fileURLToPath(new URL(`../fixtures/goals/${name}`, import.meta.url));
 
-const STOCK = { length: 40, width: 40, thickness: 30 };
+const STOCK = { length: 50, width: 50, thickness: 30 };
 const BORE_MILL: { key: string; tool: Tool } = {
   key: 'user:o-flute-3.175-42',
   tool: flatEndMill(3.175, { name: '1/8 in O-flute, 42 mm flute', fluteLength: 42 }),

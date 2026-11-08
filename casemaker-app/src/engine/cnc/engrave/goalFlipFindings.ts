@@ -173,8 +173,10 @@ export function goalFlipFindings(
       : '';
   // THE OFFER, VALIDATED BEFORE IT IS MADE. The locating holes reach `thickness + 2`: they need
   // that much material under the stock, and a cutter among the shop's own that can drill them.
-  const hold =
+  const holdOffer =
     plan.sides.length > 1 ? dowelHold(job, goal, plan.sides[1]!.rotate?.about ?? 'x', tools) : null;
+  const hold = holdOffer !== null && holdOffer.ok ? holdOffer.hold : null;
+  const holdReason = holdOffer !== null && !holdOffer.ok ? holdOffer.reason : null;
   // #1073 — THE BORE'S DROP PAST THE UNDERSIDE: the job's own breakthrough alone (0f's
   // 2026-11-08 ruling retired the chip clearance); the board must be at least that thick.
   const boreDropMm = Math.round(job.breakthrough * 100) / 100;
@@ -182,8 +184,8 @@ export function goalFlipFindings(
   const need =
     plan.sides.length <= 1 || canOffer
       ? undefined
-      : hold === null
-        ? 'needs a cutter for the ⌀5–6 locating bores — record one in Manage › Tools'
+      : holdReason !== null
+        ? holdReason
         : 'needs a sacrificial board under the blank';
   const detail =
     hold === null

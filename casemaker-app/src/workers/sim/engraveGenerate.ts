@@ -6271,14 +6271,9 @@ async function locatingHolesProgram(
   // The hold's line runs parallel to the flip's axis — left↔right is the machine's Y, front↔back
   // its X (`planFlipSetups`' own reading, through `orient`).
   const about = flip.axis === 'left-right' ? 'y' : 'x';
-  const hold = dowelHold(job, firstSide.goal, about, shop.tools ?? []);
-  if (hold === null) {
-    return {
-      reason:
-        'no owned flat end mill can bore the two ⌀6 locating holes — record a flat narrower than the bore, ' +
-        'one whose stated reach covers the hole’s depth (Manage › Tools)',
-    };
-  }
+  const holdOffer = dowelHold(job, firstSide.goal, about, shop.tools ?? []);
+  if (!holdOffer.ok) return { reason: holdOffer.reason };
+  const hold = holdOffer.hold;
   const entry = (shop.tools ?? []).find((e) => e.key === hold.cutter) ?? entryFor(hold.cutter);
   if (entry === null) return { reason: `the hold’s cutter “${hold.cutter}” is not in the tool library` };
   // ONE SOURCE FOR THE HOLES (the Manager's step 4 ruling). Side 2's store is the executor's own
