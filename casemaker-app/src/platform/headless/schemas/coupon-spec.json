@@ -34,6 +34,17 @@
                   ],
                   "description": "The rotary axis line the job was planned against, mm; null when it was unmeasured."
                 },
+                "rotaryFaceAngle": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The square stock’s A zero the job was planned against, degrees; null when it was never levelled."
+                },
                 "surfaceTopZ": {
                   "anyOf": [
                     {
@@ -2706,6 +2717,13 @@
                                 "description": "Margin kept from the stock edge, in millimetres.",
                                 "type": "number"
                               },
+                              "faceAngleMaxDeg": {
+                                "default": 10,
+                                "description": "The largest tilt the face-angle step will turn out of a square stock, in degrees.",
+                                "maximum": 45,
+                                "minimum": 0.2,
+                                "type": "number"
+                              },
                               "fineStepMm": {
                                 "description": "Fine search step, in millimetres.",
                                 "type": "number"
@@ -4495,6 +4513,13 @@
                           },
                           "edgeMarginMm": {
                             "description": "Margin kept from the stock edge, in millimetres.",
+                            "type": "number"
+                          },
+                          "faceAngleMaxDeg": {
+                            "default": 10,
+                            "description": "The largest tilt the face-angle step will turn out of a square stock, in degrees.",
+                            "maximum": 45,
+                            "minimum": 0.2,
                             "type": "number"
                           },
                           "fineStepMm": {
