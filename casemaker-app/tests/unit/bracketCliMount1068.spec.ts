@@ -64,7 +64,7 @@ interface JobBox {
   max: [number, number, number];
 }
 
-async function cut(job: EngraveJob, name: string): Promise<CutRun> {
+async function cut(job: EngraveJob, name: string, location: string = LOCATION): Promise<CutRun> {
   const outDir = join(SCRATCH, name);
   mkdirSync(outDir, { recursive: true });
   const jobPath = join(outDir, 'job.json');
@@ -81,7 +81,7 @@ async function cut(job: EngraveJob, name: string): Promise<CutRun> {
       },
     },
   };
-  const code = await engraveJobMain([jobPath, '--out', outDir, '--location', LOCATION], options);
+  const code = await engraveJobMain([jobPath, '--out', outDir, '--location', location], options);
   return { code, receipt, outDir, progress };
 }
 
@@ -306,13 +306,43 @@ describe('#1068 a bracket job through the command line is checked against its mo
    * the operator put it, so: no wasteboard comes out, no dowels, no anchor, and the "already
    * references X, Y and rotation to within ±0.05 mm" claim is false — the origin is probed.
    */
-  it('a PLACED bracket is screwed to the wasteboard and its origin probed, never anchored', async () => {
+  it('a PLACED bracket is screwed to the wasteboard and its position stated, never anchored', async () => {
     const job = bracketJob({
       shape: pocket('clear', 50, 50, 20, 10, 1),
       clamps: [{ edge: 'back', at: 90 }],
       placement: 'placed',
     });
-    const run = await cut(job, 'placed-sheet');
+    // #1070 (C8) — a placed bracket's seed is a fact of the BED PROFILE: the bench states the
+    // bracket's position there (here the grid's one admitting corner). Without it the sheet says
+    // so instead of planning; with it, the footprint §6 is planned from the stated position.
+    const located = JSON.parse(readFileSync(LOCATION, 'utf8')) as {
+      machines: { bedProfiles: { placements: unknown[]; id: string }[]; activeBedProfileId: string }[];
+    };
+    const placedLocation = join(SCRATCH, 'placed-location.json');
+    const profile = located.machines[0]!.bedProfiles.find((p) => p.id === located.machines[0]!.activeBedProfileId)!;
+    profile.placements.push({
+      id: 'pl-bracket',
+      fixture: 'fx-bracket-thin',
+      where: { kind: 'free', pins: null, anchor: null },
+      count: null,
+      frame: null,
+      seed: { x: -190.89, y: -193.829, by: 'grid', measuredAt: '2026-11-08T00:00:00.000Z', at: null, probe: null },
+      provenance: {},
+    });
+    // The bracket's fixture record must exist in the location for the placement to name it.
+    (located as unknown as { accessories: unknown[] }).accessories.push({
+      id: 'fx-bracket-thin',
+      kind: 'bracket',
+      product: 'makera-z1-low-profile-bracket',
+      variant: 'thin',
+      constants: {},
+      unit: {},
+      provenance: {},
+      whereabouts: { kind: 'machine', machineId: located.machines[0] && (located.machines[0] as unknown as { id: string }).id, since: '2026-11-07T00:00:00.000Z' },
+      history: [{ at: '2026-11-07T00:00:00.000Z', what: 'fitted' }],
+    });
+    writeFileSync(placedLocation, JSON.stringify(located, null, 2) + '\n');
+    const run = await cut(job, 'placed-sheet', placedLocation);
     expect(
       run.code,
       JSON.stringify({ refusals: run.receipt?.refusals ?? null, diagnostics: diagnosticsOf(run) }, null, 2),
@@ -320,9 +350,13 @@ describe('#1068 a bracket job through the command line is checked against its mo
     if (run.receipt === null || run.receipt.command !== 'engrave') throw new Error('expected the engrave receipt');
     const sheetFile = run.receipt.details.programs[0]!.sheet?.file;
     const sheet = readFileSync(join(run.outDir, sheetFile!), 'utf8');
+    // #1070 (C8) — the sheet says ONE origin story: the bracket is not on the pins and its
+    // position is the one the bed profile states; the old "no anchor datum / probed, not taken
+    // from the anchor" pair is gone (it contradicted the footprint §6 that followed it).
     expect(sheet).toContain('The bracket is screwed to the wasteboard where you put it');
-    expect(sheet).toContain('The origin is probed, not taken from the anchor');
-    expect(sheet).toContain('there is no anchor datum');
+    expect(sheet).toContain('the active bed profile states for the bracket');
+    expect(sheet).not.toContain('there is no anchor datum');
+    expect(sheet).not.toContain('The origin is probed, not taken from the anchor');
     expect(sheet).not.toContain('Remove the MDF wasteboard');
     expect(sheet).not.toContain('Pin the bracket to the bed at anchor');
     expect(sheet).not.toContain('inside corner at anchor');

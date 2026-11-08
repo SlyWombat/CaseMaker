@@ -319,6 +319,29 @@ export function bracketSeatDatumFor(machine: MachineRecord | null): {
 }
 
 /**
+ * #1070 (C8) — THE PLACED BRACKET'S SEED, from the active bed profile's placement of the bracket.
+ *
+ * A bracket screwed down away from the pins has no anchor datum; where it sits is a fact of the
+ * BENCH, stored on the profile as the bracket fixture's placement (`seed`), shared by every job
+ * until someone moves it. Null when the profile states none — the caller then refuses by name
+ * (or, when the bed's hole grid admits exactly one position, offers to store that one).
+ */
+export function bracketPlacementSeedFor(machine: MachineRecord | null): {
+  x: number;
+  y: number;
+  by: 'grid' | 'touch';
+  measuredAt: string;
+  at: [number, number] | null;
+  probe: string | null;
+} | null {
+  if (machine === null || machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;
+  const profile = machine.bedProfiles.find((p) => p.id === machine.activeBedProfileId);
+  if (profile === undefined) return null;
+  const placement = profile.placements.find((p) => p.fixture === 'fx-bracket-thin' && p.seed !== null && p.seed !== undefined);
+  return placement?.seed ?? null;
+}
+
+/**
  * #599/#607 — the mount tap point (machine XY) for the VISE, from the bed placement or the newest
  * registration, with the #607 fields filled in for the executor and the write-back.
  */

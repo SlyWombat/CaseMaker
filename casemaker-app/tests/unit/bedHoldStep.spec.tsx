@@ -89,6 +89,7 @@ function bedMachine(opts: { anchor?: boolean; anchorAt?: 1 | 2; bare?: boolean; 
       fixture: 'fx-bracket-thin',
       where: { kind: 'anchor', anchor: opts.anchorAt ?? 1, pins: null },
       count: null,
+      seed: null,
       frame: null,
       provenance: {},
     });

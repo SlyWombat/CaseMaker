@@ -77,6 +77,7 @@ function rotaryMachine(): MachineRecord {
       fixture: 'fx-rotary-1',
       where: { kind: 'pins', pins: 'rotary', anchor: null },
       count: null,
+      seed: null,
       frame: null,
       provenance: {},
     },

@@ -43,7 +43,7 @@ import { jobTopFaceCached, NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/
 import { millModelById, workOriginOf } from '@/engine/cnc/machine';
 import { machineDisplayName } from '@/platform/locationClient';
 import { machineAt, machineRecordByProfile, saveMachineWithRetry, useLocationStore } from '@/store/locationStore';
-import { bracketSeatDatumFor, mountNameFor, probeFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
+import { bracketPlacementSeedFor, bracketSeatDatumFor, mountNameFor, probeFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
 import { sheetRegistrationPlan } from '@/engine/cnc/registration/footprintJob';
 import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import { findingFix, fixActionLabel, fixIsOffered, type PanelFix } from './findingFix';
@@ -2508,6 +2508,7 @@ export function EngravePanel(): JSX.Element {
       defaults: shopDefaults ?? null,
       probe: probeFor(regMachine),
       bracketSeat: bracketSeatDatumFor(regMachine),
+      placedSeed: bracketPlacementSeedFor(regMachine),
     });
     // #513 — the Bed line: the machine's active profile, worded by the job's own mount so the
     // datum printed is the one this job's registration will read.

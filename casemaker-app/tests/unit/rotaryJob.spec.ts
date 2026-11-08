@@ -382,6 +382,7 @@ describe('the Holding step’s rotary option (#240 §2)', () => {
         fixture: ROTARY.id,
         where: { kind: 'pins', pins: 'rotary', anchor: null },
         count: null,
+        seed: null,
         frame: { fixedJawFaceX: -181.2, jawStartY: -203.5 },
         provenance: { fixedJawFaceX: 'typed', jawStartY: 'typed' },
       },

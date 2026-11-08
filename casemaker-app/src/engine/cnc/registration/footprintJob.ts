@@ -95,6 +95,8 @@ export interface FootprintJobArgs {
   mountObstacles?: readonly PlanObstacle[];
   /** #509 — the active bed profile's seat beside the bracket. */
   bracketSeat: BracketSeatDatum | null;
+  /** #1070 (C8) — the active bed profile's placement seed for a placed bracket (see registrationAttempt). */
+  placedSeed?: { x: number; y: number; by: 'grid' | 'touch'; measuredAt: string; at: [number, number] | null; probe: string | null } | null;
 }
 
 export type FootprintJobResult = { ok: true; input: FootprintInput } | { ok: false; reason: string };
@@ -121,9 +123,32 @@ export function footprintInputFor(args: FootprintJobArgs): FootprintJobResult {
     return { ok: false, reason: 'this job states no cut region to register on — add the part to cut, or register by hand' };
   }
   const sizes = bracketSettings(defaults);
-  const anchor = anchorFrom(calibration, job.machineId);
-  if (!anchor.ok) return { ok: false, reason: anchor.reason };
-  const datum = bracketDatum(anchor.anchor, sizes);
+  // #1070 (C8) — the seed is the ANCHOR for an anchored bracket and the BED PROFILE'S PLACEMENT
+  // for a placed one (the same rule the Cut step plans by; one seam, no second derivation). A
+  // placed job whose profile states no position cannot be seeded.
+  const placed = job.workholding.kind === 'bracket' && (job.workholding.bracket as { placement?: 'anchored' | 'placed' }).placement === 'placed';
+  let datum: { x: number; y: number; from: string; offsetMeasured: boolean };
+  if (placed) {
+    const seed = args.placedSeed ?? null;
+    if (seed === null) {
+      return {
+        ok: false,
+        reason:
+          'this bracket is screwed down where you put it, and the active bed profile does not state where — ' +
+          'measure the bracket’s position into the bed profile’s placement (its five holes on the bed’s hole grid, or one confirmed touch), or put it on the anchor-1 pins',
+      };
+    }
+    datum = {
+      x: seed.x,
+      y: seed.y,
+      from: seed.by === 'grid' ? 'the bed’s hole grid at the bracket’s five holes — the one position the grid admits' : 'the position measured and confirmed in the bed profile’s placement',
+      offsetMeasured: seed.by === 'touch',
+    };
+  } else {
+    const anchor = anchorFrom(calibration, job.machineId);
+    if (!anchor.ok) return { ok: false, reason: anchor.reason };
+    datum = bracketDatum(anchor.anchor, sizes);
+  }
   // The expected surface is the bracket's seat: the surface beside the mount, measured once.
   const dims = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
   const under = args.mount.kind === 'bracket' && args.mount.board === true ? (job.sacrificial?.under?.thickness ?? 0) : 0;
@@ -217,11 +242,21 @@ export function seatSeekFor(args: {
   calibration: MachineCalibration | undefined;
   defaults: ShopDefaults | null;
   probe: ProbeSpec | null;
+  /**
+   * #1070 (C8) — the origin the seat point is measured from: a PLACED bracket's comes from the bed
+   * profile's placement, an anchored one's from the anchor datum (the default here).
+   */
+  origin?: { x: number; y: number } | null;
 }): SeatSeekResult {
   const sizes = bracketSettings(args.defaults);
-  const anchor = anchorFrom(args.calibration, args.job.machineId);
-  if (!anchor.ok) return { ok: false, reason: anchor.reason };
-  const datum = bracketDatum(anchor.anchor, sizes);
+  let datum: { x: number; y: number };
+  if (args.origin !== undefined && args.origin !== null) {
+    datum = args.origin;
+  } else {
+    const anchor = anchorFrom(args.calibration, args.job.machineId);
+    if (!anchor.ok) return { ok: false, reason: anchor.reason };
+    datum = bracketDatum(anchor.anchor, sizes);
+  }
   const settings = registrationSettings(args.defaults, args.probe).settings;
   // Past the front arm's free end (x), in front of the stock (y): open wasteboard, no arm, no
   // blank, no clamp (the clamps are on the back edge).
@@ -286,17 +321,25 @@ export function sheetRegistrationPlan(args: {
   defaults: ShopDefaults | null;
   probe: ProbeSpec | null;
   bracketSeat: BracketSeatDatum | null;
+  /** #1070 (C8) — the bed profile's placement seed for a placed bracket. */
+  placedSeed?: { x: number; y: number; by: 'grid' | 'touch'; measuredAt: string; at: [number, number] | null; probe: string | null } | null;
 }): { footprint?: FootprintPlan; seatSeek?: SeatSeek } {
-  const { job, calibration, defaults, probe, bracketSeat } = args;
+  const { job, calibration, defaults, probe, bracketSeat, placedSeed } = args;
   if (jobMount(job) !== 'bracket') return {};
   const mount: MountSpec = { kind: 'bracket', board: job.sacrificial.under !== null };
-  const input = footprintInputFor({ job, mount, calibration, defaults, probe, bracketSeat });
+  const input = footprintInputFor({ job, mount, calibration, defaults, probe, bracketSeat, placedSeed });
   if (input.ok) {
     const planned = planFootprintRegistration(input.input);
     if (planned.ok) return { footprint: planned.plan };
   }
   // No seat datum (or nothing to plan on it): the sheet's first touch is the seat seek, when the
-  // house can back one.
-  const seatSeek = seatSeekFor({ job, calibration, defaults, probe });
+  // house can back one. Its point is measured from the plan's seed — a placed bracket's own.
+  const placed = job.workholding.kind === 'bracket' && (job.workholding.bracket as { placement?: 'anchored' | 'placed' }).placement === 'placed';
+  // #1070 (C8) — a PLACED bracket with no stated position prints NO registration block at all:
+  // neither a footprint plan nor a seat point can be placed without the bracket's position, and a
+  // block seeded from the anchor it is not on is the contradiction this replaced.
+  if (placed && (placedSeed === null || placedSeed === undefined)) return {};
+  const origin = placed && placedSeed !== null && placedSeed !== undefined ? { x: placedSeed.x, y: placedSeed.y } : null;
+  const seatSeek = seatSeekFor({ job, calibration, defaults, probe, origin });
   return seatSeek.ok ? { seatSeek: seatSeek.seek } : {};
 }

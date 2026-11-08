@@ -4474,19 +4474,20 @@ export function buildRunSheet(
   ];
   // #707 BM-1 — the bracket's own setup: pinned at the job's anchor, the blank into its inside
   // corner, the job's clamps on the free edges. The QuickStart's order, in physical words.
-  // #1070 (6b's ruling) — A PLACED BRACKET IS NOT PINNED. It is screwed to the MDF wasteboard
-  // where the operator put it: no wasteboard comes out, no dowels, no anchor — and the origin is
-  // probed from the blank, never taken from the anchor.
+  // #1070 (6b's ruling, C8) — A PLACED BRACKET IS NOT PINNED. It is screwed to the MDF wasteboard
+  // where the operator put it, and its POSITION comes from the active bed profile's placement of
+  // the bracket (stated once: the bed's hole grid where it admits the bracket, else a confirmed
+  // touch). The origin follows that statement; the touches check the blank's corner and the seam.
   const bracketMountSteps: RunSheetStep[] =
     bracket?.placement === 'placed'
       ? [
           {
             text:
-              "The bracket is screwed to the wasteboard where you put it — it is not on the table's " +
-              'locating pins and there is no anchor datum.',
+              'The bracket is screwed to the wasteboard where you put it — it is not on the table’s ' +
+              'locating pins. Its position is the one the active bed profile states for the bracket.',
           },
           { text: "Push the blank's front-left corner into the bracket's inside corner; fit the clamps as stated." },
-          { text: 'The origin is probed, not taken from the anchor.' },
+          { text: 'The origin follows that stated position; the touches check the blank’s corner and the seam.' },
         ]
       : [
           { text: 'Home the machine, remove any tool, then switch the machine off at its switch.' },
@@ -4578,8 +4579,8 @@ export function buildRunSheet(
           {
             text:
               bracket?.placement === 'placed'
-                ? `Push the blank's front-left corner into the bracket's inside corner — the origin is ` +
-                  'probed, not taken from the anchor, so the corner must seat fully.'
+                ? `Push the blank's front-left corner into the bracket's inside corner — the origin ` +
+                  'follows the position the bed profile states for the bracket, so the corner must seat fully.'
                 : `Push the blank's front-left corner into the bracket's inside corner at anchor ${bracket?.anchor ?? 1} — ` +
                   'the datum is measured from the anchor, so the corner must seat fully.',
           },

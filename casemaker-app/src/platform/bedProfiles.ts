@@ -245,6 +245,56 @@ export function withBracketSeatDatum(
 }
 
 /**
+ * #1070 (C8) — write a PLACED bracket's stated position onto the active bed profile.
+ *
+ * The seed is a fact of the bench: where the bracket's inside corner sits in machine XY, and how
+ * that was stated (`grid`: the bed's hole pattern admitted exactly one position; `touch`: it was
+ * measured and the operator confirmed it). Written after the operator CONFIRMS, never before —
+ * the seat press's pattern. Adds the bracket's placement when the profile has none, so a placed
+ * bracket can be stated on a bed that never carried an anchored one.
+ */
+export function withBracketPlacementSeed(
+  machine: MachineRecord,
+  seed: { x: number; y: number; by: 'grid' | 'touch'; at?: { x: number; y: number } | null; probe?: string | null },
+  now: string,
+): MachineRecord {
+  const profileId = machine.activeBedProfileId;
+  if (profileId === undefined) return machine;
+  const stored = {
+    x: seed.x,
+    y: seed.y,
+    by: seed.by,
+    measuredAt: now,
+    at: seed.at === undefined || seed.at === null ? null : ([seed.at.x, seed.at.y] as [number, number]),
+    probe: seed.probe ?? null,
+  };
+  const what = `bracket position stated (${seed.by}) at machine X ${seed.x} Y ${seed.y}`;
+  return {
+    ...machine,
+    bedProfiles: machine.bedProfiles?.map((p) => {
+      if (p.id !== profileId) return p;
+      const has = p.placements.some((pl) => pl.fixture === 'fx-bracket-thin');
+      const placements = has
+        ? p.placements.map((pl) => (pl.fixture === 'fx-bracket-thin' ? { ...pl, seed: stored } : pl))
+        : [
+            ...p.placements,
+            {
+              id: 'pl-bracket',
+              fixture: 'fx-bracket-thin',
+              where: { kind: 'free' as const, pins: null, anchor: null },
+              count: null,
+              frame: null,
+              seed: stored,
+              provenance: {},
+            },
+          ];
+      return { ...p, placements, history: [...p.history, { at: now, what }] };
+    }),
+    updatedAt: now,
+  };
+}
+
+/**
  * #607 — write the measured ROTARY AXIS onto the active bed profile's `rotaryAxis` datum: the axis
  * height in `value`, the axis line's Y in `at`, and the chuck body's measured radius beside it.
  * The datum is the fitted circle (`solveRotaryCircle`), never a typed offset.
@@ -376,6 +426,7 @@ export function bedFromLegacy(
       fixture: 'fx-vise-1',
       where: { kind: 'pins', pins: 'vise', anchor: null },
       count: null,
+      seed: null,
       frame,
       provenance:
         registration === null
@@ -563,6 +614,7 @@ export function firstRegistrationBed(
         where: { kind: 'pins', pins: 'vise', anchor: null },
         count: null,
         frame,
+        seed: null,
         provenance:
           registration === null
             ? {}

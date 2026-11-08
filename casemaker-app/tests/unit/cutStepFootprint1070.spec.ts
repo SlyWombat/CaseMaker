@@ -131,6 +131,42 @@ describe('#1070 the seat is the board the blank rests on (the gate’s ruling, C
   });
 });
 
+describe('#1070 a PLACED bracket (the gate’s ruling, C8)', () => {
+  const placedJob = (): EngraveJob => {
+    const job = bracketJob();
+    if (job.workholding.kind !== 'bracket') throw new Error('the fixture is a bracket job');
+    (job.workholding.bracket as { placement?: 'anchored' | 'placed' }).placement = 'placed';
+    return job;
+  };
+  const gridSeed = { x: -190.89, y: -193.829, by: 'grid' as const, measuredAt: '2026-11-08T00:00:00.000Z', at: null, probe: null };
+  const touchSeed = { x: -182.0, y: -194.6, by: 'touch' as const, measuredAt: '2026-11-08T00:00:00.000Z', at: [-182.0, -194.6] as [number, number], probe: 'fx-probe-1' };
+
+  it('a stored GRID seed plans from it, the origin not measured', () => {
+    const attempt = planRegistrationAttempt({ ...baseArgs(placedJob()), mount: { kind: 'bracket', board: true }, placedSeed: gridSeed });
+    expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    expect(attempt.plan.bracketOrigin).toMatchObject({ x: -190.89, y: -193.829, offsetMeasured: false });
+    expect(attempt.plan.bracketOrigin!.from).toContain('hole grid');
+  });
+
+  it('a stored TOUCH seed plans from the measured origin', () => {
+    const attempt = planRegistrationAttempt({ ...baseArgs(placedJob()), mount: { kind: 'bracket', board: true }, placedSeed: touchSeed });
+    expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    expect(attempt.plan.bracketOrigin).toMatchObject({ x: -182.0, y: -194.6, offsetMeasured: true });
+    expect(attempt.plan.bracketOrigin!.from).toContain('measured');
+  });
+
+  it('no stored seed refuses by name, naming the bed profile’s placement', () => {
+    const attempt = planRegistrationAttempt({ ...baseArgs(placedJob()), mount: { kind: 'bracket', board: true }, placedSeed: null });
+    expect(attempt.kind, JSON.stringify(attempt)).toBe('refused');
+    if (attempt.kind === 'refused') {
+      expect(attempt.reason).toContain('bed profile');
+      expect(attempt.reason).toContain('placement');
+    }
+  });
+});
+
 describe('#1070 the Cut step plans a bracket job on its cut region', () => {
   it('a bracket job is a PLAN, not the "hold the blank in the vise" refusal', () => {
     const attempt = attemptFor(bracketJob());
@@ -177,14 +213,17 @@ describe('#1070 the Cut step plans a bracket job on its cut region', () => {
     if (attempt.kind === 'refused') expect(attempt.reason).toContain('registration on tape');
   });
 
-  it('a PLACED bracket is refused by name — the plan’s seed is the anchor it does not have', () => {
+  it('a PLACED bracket with no stated placement is refused by name — and the refusal says where to state it', () => {
     const job = bracketJob();
     if (job.workholding.kind !== 'bracket') throw new Error('the fixture is a bracket job');
     // The field lives on land7's BracketHold; read defensively so this line typechecks alone.
     (job.workholding.bracket as { placement?: 'anchored' | 'placed' }).placement = 'placed';
     const attempt = attemptFor(job);
     expect(attempt.kind, JSON.stringify(attempt)).toBe('refused');
-    if (attempt.kind === 'refused') expect(attempt.reason).toContain('no anchor datum');
+    if (attempt.kind === 'refused') {
+      expect(attempt.reason).toContain('bed profile');
+      expect(attempt.reason).toContain('placement');
+    }
   });
 });
 

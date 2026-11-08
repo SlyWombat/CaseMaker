@@ -78,6 +78,7 @@ import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import {
   createFirstBed,
   machineAt,
+  machineRecordByProfile,
   saveMachineWithRetry,
   useLocationStore,
   visePlacementFrameOf,
@@ -86,6 +87,7 @@ import {
 import {
   accessoryNameFor,
   bracketSeatDatumFor,
+  bracketPlacementSeedFor,
   mountDatumFor,
   mountDatumMismatch,
   mountTapFor,
@@ -105,12 +107,14 @@ import { RotaryAxisTap } from '@/components/manage/RotaryAxisTap';
 import type { RegistrationAttempt } from './EngraveSetupRow';
 import {
   viseFrameFromRegistration,
+  withBracketPlacementSeed,
   withBracketSeatDatum,
   withSurfaceTopDatum,
   withViseJawTopDatum,
   withVisePlacementFrame,
 } from '@/platform/bedProfiles';
 import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
+import { gridSeeds } from '@/engine/cnc/registration/placing';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
@@ -224,6 +228,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   const surfaceTopZ = useMemo(() => surfaceTopDatumFor(machineRecord), [machineRecord]);
   // #509 — the bracket's seat from the ACTIVE bed profile (bracket seat, else surface top).
   const bracketSeat = useMemo(() => bracketSeatDatumFor(machineRecord), [machineRecord]);
+  const placedSeed = useMemo(() => bracketPlacementSeedFor(machineRecord), [machineRecord]);
   const registrations = useEngraveRegistrationStore((s) => s.records);
   // #845 — a stated machine holds no probe and has no clearance to seek from: this step's actions
   // need a connected Makera machine, which is null for one (`MACHINE_RUN_ELSEWHERE` on its card).
@@ -276,6 +281,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
       mountDatumMismatchName,
       surfaceTopZ,
       bracketSeat,
+      placedSeed,
       probe,
       probeName,
       mountTap,
@@ -300,6 +306,30 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
     regSettings,
   ]);
   const [proposalOpen, setProposalOpen] = useState(false);
+  // #1070 (C8) — the placed bracket's position press (the bed profile's seed, from the hole grid).
+  const [gridBusy, setGridBusy] = useState(false);
+  const [gridNote, setGridNote] = useState<string | null>(null);
+  const stateBracketFromGrid = async (): Promise<void> => {
+    const seeds = gridSeeds();
+    const rec = machineRecord ?? machineRecordByProfile(job.machineId);
+    if (rec === null || seeds.length !== 1) return;
+    const seed = seeds[0]!;
+    setGridBusy(true);
+    setGridNote(null);
+    try {
+      const now = new Date().toISOString();
+      const outcome = await saveMachineWithRetry(rec, (current) => withBracketPlacementSeed(current, { x: seed.x, y: seed.y, by: 'grid' }, now));
+      setGridNote(
+        outcome === 'ok'
+          ? `Stated: the bracket’s corner at machine X ${seed.x} Y ${seed.y}, from the bed’s hole grid.`
+          : 'The bed profile was not saved — check the house connection and try again.',
+      );
+    } catch (e) {
+      setGridNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGridBusy(false);
+    }
+  };
 
   /** #797 follow-up — approve the planner's proposal and start the run in ONE press. */
   async function approveAndStart(attempt: Extract<RegistrationAttempt, { kind: 'plan' }>): Promise<void> {
@@ -954,6 +984,31 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
           {proposal.kind === 'refused' ? proposal.reason : proposal.message}
         </p>
       )}
+      {/* #1070 (C8) — THE PLACED BRACKET'S POSITION, stored where it lives: the bed profile.
+          The grid's one admitting corner is offered when the bracket is off the pins; the touch
+          route needs the machine and lands with the first bench session (named follow-up). */}
+      {plan === null &&
+        proposal !== null &&
+        proposal.kind === 'refused' &&
+        job.workholding.kind === 'bracket' &&
+        (job.workholding.bracket as { placement?: 'anchored' | 'placed' }).placement === 'placed' && (
+          <>
+            <button
+              type="button"
+              data-testid="engrave-state-bracket-from-grid"
+              disabled={gridBusy || gridSeeds().length !== 1 || machineRecordByProfile(job.machineId) === null}
+              style={{ marginTop: 6 }}
+              onClick={() => void stateBracketFromGrid()}
+            >
+              {gridSeeds().length === 1 ? 'State the bracket’s position from the bed’s hole grid' : 'The hole grid admits no single position — measure the bracket by hand'}
+            </button>
+            {gridNote !== null && (
+              <p style={MUTED} data-testid="engrave-state-bracket-note">
+                {gridNote}
+              </p>
+            )}
+          </>
+        )}
       {plan === null && proposal === null && why !== null && (
         <p style={{ ...MUTED, color: WARN }} data-testid="engrave-registration-no-plan">
           {why}

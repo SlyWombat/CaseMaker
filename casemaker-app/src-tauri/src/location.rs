@@ -258,6 +258,27 @@ pub struct PlacementFrame {
     pub jaw_start_y: Option<f64>,
 }
 
+/// #1070 (C8) — a PLACED bracket's inside corner, as the bed profile states it. A fact of the
+/// bench: `by: "grid"` when the bed's hole pattern admits exactly one position and the bracket
+/// was found on it, `by: "touch"` when it was measured and confirmed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BracketSeed {
+    pub x: f64,
+    pub y: f64,
+    pub by: BracketSeedBy,
+    pub measured_at: String,
+    pub at: Option<[f64; 2]>,
+    pub probe: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BracketSeedBy {
+    Grid,
+    Touch,
+}
+
 /// One fixture PUT ON the bed (§1). It adds position and orientation only; the drawn shape is the
 /// fixture record's.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -271,6 +292,10 @@ pub struct BedPlacement {
     /// Two top clamps are one placement with `count: 2`.
     pub count: Option<u32>,
     pub frame: Option<PlacementFrame>,
+    /// #1070 (C8) — the placed bracket's stated position; absent until measured, and absent on
+    /// every other fixture's placement.
+    #[serde(default)]
+    pub seed: Option<BracketSeed>,
     #[serde(default)]
     pub provenance: std::collections::BTreeMap<String, String>,
 }
@@ -1152,6 +1177,7 @@ mod tests {
                     fixed_jaw_face_x: Some(-0.1),
                     jaw_start_y: Some(-10.0),
                 }),
+                seed: None,
                 provenance: [("fixedJawFaceX".to_string(), "measured:2026-10-17".to_string())].into(),
             }],
             preferred_mounting: vec![PreferredMounting {
@@ -1393,6 +1419,7 @@ mod tests {
             },
             count: None,
             frame: None,
+            seed: None,
             provenance: Default::default(),
         });
         loc.machines.push(machine);
@@ -1464,6 +1491,43 @@ mod tests {
         unknown["typedBy"] = serde_json::json!("hand");
         let err = serde_json::from_value::<MeasuredDatum>(unknown).unwrap_err().to_string();
         assert!(err.contains("typedBy"), "{err}");
+    }
+
+    /// #1070 (C8) — a placed bracket's seed is a KNOWN key on a placement: it round-trips with
+    /// its `by` word, an unknown key inside it is refused, and a placement without one is
+    /// unchanged in the file.
+    #[test]
+    fn a_placement_seed_round_trips_and_stays_strict() {
+        let mut v = serde_json::to_value(a_machine_with_a_bed()).unwrap();
+        v["bedProfiles"][0]["placements"] = serde_json::json!([{
+            "id": "pl-bracket",
+            "fixture": "fx-bracket-thin",
+            "where": { "kind": "free", "pins": null, "anchor": null },
+            "count": null,
+            "frame": null,
+            "seed": { "x": -190.89, "y": -193.83, "by": "grid", "measuredAt": "2026-11-08T00:00:00.000Z", "at": null, "probe": null },
+            "provenance": {}
+        }]);
+        let machine: MachineRecord = serde_json::from_value(v.clone()).unwrap();
+        let seed = machine.bed_profiles.as_ref().unwrap()[0].placements[0].seed.clone().unwrap();
+        assert_eq!(seed.by, BracketSeedBy::Grid);
+        assert_eq!(seed.x, -190.89);
+        let back = serde_json::to_value(&machine).unwrap();
+        assert_eq!(back["bedProfiles"][0]["placements"][0]["seed"]["by"], serde_json::json!("grid"));
+
+        let mut unknown = v.clone();
+        unknown["bedProfiles"][0]["placements"][0]["seed"]["typedBy"] = serde_json::json!("hand");
+        let err = serde_json::from_value::<MachineRecord>(unknown).unwrap_err().to_string();
+        assert!(err.contains("typedBy"), "{err}");
+
+        // A placement with no seed writes none (every other fixture's placement is untouched).
+        let mut none = v.clone();
+        none["bedProfiles"][0]["placements"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("seed");
+        let plain: MachineRecord = serde_json::from_value(none).unwrap();
+        assert!(plain.bed_profiles.as_ref().unwrap()[0].placements[0].seed.is_none());
     }
 
     #[test]

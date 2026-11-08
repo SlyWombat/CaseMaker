@@ -66,7 +66,7 @@ describe('#743 holding a disc', () => {
       ...base,
       placements: [
         ...base.placements,
-        { id: 'pl-bracket', fixture: 'fx-bracket-thin', where: { kind: 'anchor', anchor: 1, pins: null }, count: null, frame: null, provenance: {} },
+        { id: 'pl-bracket', fixture: 'fx-bracket-thin', where: { kind: 'anchor', anchor: 1, pins: null }, count: null, frame: null, seed: null, provenance: {} },
       ],
       preferredMounting: [{ stock: 'plate', mount: { placement: 'pl-bracket', manner: 'corner+clamps' } }],
     };
