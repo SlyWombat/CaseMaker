@@ -1,3 +1,4 @@
+import { strToU8, zipSync } from 'fflate';
 import { useProjectStore } from '@/store/projectStore';
 import { useJobStore } from '@/store/jobStore';
 import { useSettingsStore, type ExportFormat } from '@/store/settingsStore';
@@ -118,6 +119,57 @@ export async function saveEngraveProgram(
   if (frameNc !== null) await saveText(frameNc, runSheetFrameFileName(jobName), 'text/plain');
   if (facingNc !== null) await saveText(facingNc, runSheetFaceFileName(jobName), 'text/plain');
   if (runRecord !== null) await saveText(runRecord, runRecordFileName(jobName), 'application/json');
+}
+
+/**
+ * #1093 R2 — A RUN'S FILES LEAVE TOGETHER. Where a directory picker exists (Chromium, and the
+ * Tauri shell's WebView2) the operator chooses a folder and every file is written into it under
+ * its own name — the card's own layout, ready to upload. Everywhere else (Firefox, and the e2e
+ * browser, which has no dialog to complete) the same files are downloaded as ONE zip,
+ * `<stem>-programs.zip`, so a multi-program run is never a row of separate download prompts.
+ *
+ * The caller hands in the list from `programFiles`/`runSaveFiles`: this helper names nothing.
+ * Cancelling the folder picker writes nothing and downloads nothing (`'cancelled'`).
+ */
+/**
+ * #1093 R2 — THE ARCHIVE Save all writes when there is no directory picker: every file under its
+ * own name, stored (not deflated) so the bytes an operator unzips are the bytes the machine
+ * plays. Pure, so the archive's contents are checked without a browser download.
+ */
+export function programFilesZip(files: readonly { name: string; bytes: string }[]): Uint8Array {
+  return zipSync(
+    Object.fromEntries(files.map((file) => [file.name, strToU8(file.bytes)])),
+    { level: 0 },
+  );
+}
+
+export async function saveFilesFolderOrZip(
+  files: readonly { name: string; bytes: string }[],
+  zipName: string,
+): Promise<'folder' | 'zip' | 'cancelled'> {
+  type DirectoryPicker = () => Promise<FileSystemDirectoryHandle>;
+  const w = window as Window & { showDirectoryPicker?: DirectoryPicker };
+  // E2E runs take the zip path: headless Chromium exposes the picker but there is no native
+  // dialog to complete, exactly as `saveBlob` says for the file picker.
+  const isE2E = import.meta.env.VITE_E2E === '1' || import.meta.env.MODE === 'test';
+  if (!isE2E && typeof w.showDirectoryPicker === 'function') {
+    try {
+      const dir = await w.showDirectoryPicker();
+      for (const file of files) {
+        const handle = await dir.getFileHandle(file.name, { create: true });
+        const writable = await handle.createWritable();
+        await writable.write(new Blob([file.bytes], { type: 'text/plain' }));
+        await writable.close();
+      }
+      return 'folder';
+    } catch (err) {
+      // The operator cancelled the folder dialog: nothing is written, and no zip surprises them.
+      if (err instanceof DOMException && err.name === 'AbortError') return 'cancelled';
+      console.warn('showDirectoryPicker failed; falling back to a zip download', err);
+    }
+  }
+  await saveBlob(new Blob([programFilesZip(files) as BlobPart], { type: 'application/zip' }), zipName);
+  return 'zip';
 }
 
 async function saveBlob(blob: Blob, filename: string): Promise<void> {

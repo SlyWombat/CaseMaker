@@ -3,11 +3,12 @@
 // ONLY when the job has sacrificial material. The sheet data and the SVG string are covered by
 // `runSheet.spec.ts`; this file proves the view puts it on the page — or leaves it off.
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { jobVise } from '@/engine/cnc/fixture';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { RunSheetView } from '@/components/panels/RunSheetView';
 import { buildRunSheet, type RunSheet, type RunSheetGenerated, type RunSheetOptions } from '@/engine/cnc/engrave/runSheet';
+import { nameProgramsForSheet } from '@/engine/cnc/engrave/programFiles';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 
 // #516 item 5 — the default job no longer seeds a cutter; the recommendation names `flat-1.0`.
@@ -170,5 +171,53 @@ describe('#788 the run sheet draws the head diagram where it asks for the probe'
   it('draws nothing when no step asks for a probe', () => {
     render(<RunSheetView sheet={sheetWithProbeStep(null)} />);
     expect(screen.queryByTestId('run-sheet-probe-fit')).toBeNull();
+  });
+});
+
+// #1093 R3 — the run's file list: one row per program, each with its own Save; the rows print
+// without the buttons for a caller that has no bytes, and a one-program sheet has no list at all.
+describe('#1093 the sheet’s file list', () => {
+  function multiSheet(): RunSheet {
+    const job = dj();
+    const raw = [1, 2, 3].map((i) => ({
+      setupIndex: 1,
+      toolKey: 'flat-1.0',
+      nc: `G21 G90\n;program ${i}\nM2`,
+      frameNc: i === 2 ? 'G21 G90\n;frame\nM2' : null,
+      cam: null,
+    }));
+    const generated = {
+      findings: [],
+      feeds: null,
+      cam: null,
+      nc: raw[0]!.nc,
+      verify: null,
+      frameNc: null,
+      programs: nameProgramsForSheet(raw, job.name),
+    } as RunSheetGenerated;
+    return buildRunSheet(job, generated, { diagnostics: [] }, NOW);
+  }
+
+  it('renders one Save per row, named for the program it writes', () => {
+    const onSave = vi.fn();
+    render(<RunSheetView sheet={multiSheet()} onSaveProgram={onSave} />);
+    const files = screen.getByTestId('run-sheet-files');
+    expect(files.textContent).toContain('Program 2 is Untitled-job-p2.nc');
+    expect(files.textContent).toContain('Untitled-job-p2-frame.nc');
+    for (const i of [1, 2, 3]) expect(screen.getByTestId(`run-sheet-save-${i}`)).toBeTruthy();
+    fireEvent.click(screen.getByTestId('run-sheet-save-2'));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0]![0]).toMatchObject({ number: 2, name: 'Untitled-job-p2.nc', frameName: 'Untitled-job-p2-frame.nc' });
+  });
+
+  it('prints the rows without buttons when the caller has no bytes to save', () => {
+    render(<RunSheetView sheet={multiSheet()} />);
+    expect(screen.getByTestId('run-sheet-file-1')).toBeTruthy();
+    expect(screen.queryByTestId('run-sheet-save-1')).toBeNull();
+  });
+
+  it('a one-program sheet carries no file list', () => {
+    render(<RunSheetView sheet={sheetFor(dj())} onSaveProgram={vi.fn()} />);
+    expect(screen.queryByTestId('run-sheet-files')).toBeNull();
   });
 });

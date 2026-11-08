@@ -239,6 +239,26 @@
   fill: #a00;
 }
 
+/* #1093 R3 — the run's file list under the header: each row names one program's file, and the
+   Save beside it is a screen action. Kept off the printed page (the names stay). */
+.run-sheet-files {
+  margin: 0 0 10px;
+}
+
+.run-sheet-save {
+  margin-left: 8px;
+  padding: 1px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+@media print {
+  .run-sheet-save {
+    display: none !important;
+  }
+}
+
 @media print {
   @page {
     margin: 12mm;

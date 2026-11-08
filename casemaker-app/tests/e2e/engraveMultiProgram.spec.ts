@@ -112,9 +112,11 @@ test('#744 — a later program’s cutter collision blocks Save, naming that pro
   await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'cross', {
     timeout: 180_000,
   });
-  await expect(await menuItem(page, 'engrave-save')).toBeDisabled();
+  await expect(await menuItem(page, 'engrave-save-all')).toBeDisabled();
   // #803 — the reason is the File ▾ item's own tooltip (the menu is open from the disabled check).
-  const blocked = page.getByTestId('engrave-save');
+  // #1093 R2 — a two-program run offers Save all, never a single-program Save.
+  const blocked = page.getByTestId('engrave-save-all');
+  expect(await page.getByTestId('engrave-save').count()).toBe(0);
   const facingSentence = `the facing pass (${SHORT_WORDS})`;
   await expect(blocked).toHaveAttribute('title', new RegExp(facingSentence.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   await expect(blocked).toHaveAttribute('title', /shoulder length of 0\.1/);

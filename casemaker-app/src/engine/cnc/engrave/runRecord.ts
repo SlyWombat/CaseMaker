@@ -24,6 +24,7 @@
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { recordDepths, runSheetFileName, sha256Hex, type RunSheetGenerated } from '@/engine/cnc/engrave/runSheet';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { programFiles } from '@/engine/cnc/engrave/programFiles';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
@@ -68,6 +69,19 @@ export interface RunRecordEfficiency {
   tourExcess: number | null;
 }
 
+/** #1093 R4 — one program of the run, as the record lists it: its file, its hash, its frame. */
+export interface RunRecordProgram {
+  /** 1-based cut order (`releaseFileName`'s index). */
+  index: number;
+  /** 1-based setup the program cuts. */
+  setupIndex: number;
+  ncFile: string;
+  /** First 8 hex of SHA-256 of this program's `.nc`. */
+  ncHash: string;
+  /** `<ncFile stem>-frame.nc` when this program produced one; null where it has none. */
+  frameFile: string | null;
+}
+
 /**
  * One finished run (#277). Everything above `generatedOn` is the app's; everything below is a
  * person's, and every field of it is `null` in the file Save writes.
@@ -81,6 +95,13 @@ export interface RunRecord {
   ncFile: string;
   /** First 8 hex of SHA-256 of the `.nc` text — the hash the run sheet printed (#207). */
   ncHash: string;
+  /**
+   * #1093 R4 — EVERY PROGRAM'S FILE AND HASH, in cut order. The top-level `ncFile`/`ncHash` above
+   * stay as program 1's, kept for every record written before this field and for the readers that
+   * only want the first file; a record of one program carries the same pair here. Absent on an old
+   * record, which is read as the one program its top-level pair describes.
+   */
+  programs?: RunRecordProgram[];
   /** The cutter the job named, and its cutting diameter, mm. */
   tool: string | null;
   cuttingDiameter: number | null;
@@ -172,12 +193,28 @@ export function buildRunRecord(
 ): RunRecord {
   const tool = jobTool(job);
   const nc = generated.nc;
+  // #1093 R4 — the run's files, named once (`programFiles`) so the record, Save and the release
+  // cannot disagree about what a program's file is called.
+  const runPrograms = generated.programs ?? [];
+  const files = programFiles(runPrograms, job.name);
+  const frameOf = new Map(files.filter((f) => f.kind === 'frame').map((f) => [f.index, f.name] as const));
   return {
     kind: RUN_RECORD_KIND,
     schemaVersion: RUN_RECORD_SCHEMA_VERSION,
     job: job.name,
     ncFile: runSheetFileName(job.name),
     ncHash: nc === null ? '' : sha256Hex(nc).slice(0, 8),
+    programs: files
+      // #473/#1093 — every program of the run, the blank's skim included: it is a file the operator
+      // loads, so the record names it and hashes it like the rest.
+      .filter((f) => f.kind === 'nc' || f.kind === 'facing')
+      .map((f) => ({
+        index: f.index,
+        setupIndex: runPrograms[f.index - 1]?.setupIndex ?? 1,
+        ncFile: f.name,
+        ncHash: sha256Hex(f.bytes).slice(0, 8),
+        frameFile: frameOf.get(f.index) ?? null,
+      })),
     tool: tool?.name ?? null,
     cuttingDiameter: tool ? cuttingDiameter(tool) : null,
     estimatedSeconds: generated.cam?.estimatedSeconds ?? null,
@@ -412,6 +449,21 @@ export function parseRunRecord(raw: unknown): RunRecordParseResult {
     job: r.job,
     ncFile: r.ncFile,
     ncHash: typeof r.ncHash === 'string' ? r.ncHash : '',
+    // #1093 R4 — absent on a record written before the field: read as the one program the
+    // top-level pair describes, so an old file never fails to open.
+    ...(Array.isArray(r.programs)
+      ? {
+          programs: (r.programs as unknown[])
+            .filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
+            .map((x) => ({
+              index: numberOrNull(x.index) ?? 0,
+              setupIndex: numberOrNull(x.setupIndex) ?? 1,
+              ncFile: typeof x.ncFile === 'string' ? x.ncFile : '',
+              ncHash: typeof x.ncHash === 'string' ? x.ncHash : '',
+              frameFile: typeof x.frameFile === 'string' ? x.frameFile : null,
+            })),
+        }
+      : {}),
     tool: typeof r.tool === 'string' ? r.tool : null,
     cuttingDiameter: numberOrNull(r.cuttingDiameter),
     estimatedSeconds: numberOrNull(r.estimatedSeconds),

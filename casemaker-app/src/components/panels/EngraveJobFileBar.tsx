@@ -57,6 +57,15 @@ export interface EngraveJobFileBarProps {
   onSaveProgram?: () => void;
   /** The sentence that keeps Save .nc… closed, or null when it may be pressed. */
   saveProgramBlocker?: string | null;
+  /**
+   * #1093 R2 — THE RUN'S WHOLE FILE SET. Handed in with `programCount`; when the run holds more
+   * than one program this replaces Save .nc… (which writes program 1 only — the defect #1093 is
+   * about). It writes every program into a chosen folder, or one `<stem>-programs.zip` where the
+   * browser has no directory picker.
+   */
+  onSaveAllPrograms?: () => void;
+  /** How many programs the generated run holds, or null when nothing is generated. */
+  programCount?: number | null;
   onRunSheet?: () => void;
   runSheetReady?: boolean;
   runSheetBlocked?: boolean;
@@ -68,6 +77,8 @@ export function EngraveJobFileBar({
   designReading = false,
   onSaveProgram,
   saveProgramBlocker = null,
+  onSaveAllPrograms,
+  programCount = null,
   onRunSheet,
   runSheetReady = false,
   runSheetBlocked = false,
@@ -246,27 +257,47 @@ export function EngraveJobFileBar({
                 {designReading ? 'Reading the design…' : 'Read a design (.3mf)…'}
               </button>
             )}
-            {(onSaveProgram !== undefined || onRunSheet !== undefined || onOpenRecord !== undefined) && (
+            {(onSaveProgram !== undefined || onSaveAllPrograms !== undefined || onRunSheet !== undefined || onOpenRecord !== undefined) && (
               <div role="separator" style={{ borderTop: '1px solid #2c3540', margin: '3px 0' }} />
             )}
-            {onSaveProgram !== undefined && (
+            {onSaveAllPrograms !== undefined && programCount !== null && programCount > 1 ? (
+              // #1093 R2 — a multi-program run offers the WHOLE SET, and no single-program Save:
+              // writing program 1 alone is how the rest of the run used to be stranded in the app.
               <button
                 type="button"
                 role="menuitem"
-                data-testid="engrave-save"
+                data-testid="engrave-save-all"
                 disabled={saveProgramBlocker !== null}
                 title={
                   saveProgramBlocker !== null
-                    ? // #803 — the reason Save is closed lives HERE, on the item, not as a
-                      // sentence under the footer's primary about a button not on screen.
-                      `Save is disabled — ${saveProgramBlocker}${/[.!?]$/.test(saveProgramBlocker) ? '' : '.'}`
-                    : 'Save the generated program to carry it to the Cut step, or to open in Makera Studio.'
+                    ? `Save all is disabled — ${saveProgramBlocker}${/[.!?]$/.test(saveProgramBlocker) ? '' : '.'}`
+                    : `Save the run's ${programCount} programs — every file the machine plays, in cut order, into a folder you choose (or one zip).`
                 }
                 style={MENU_ITEM}
-                onClick={() => choose(onSaveProgram)}
+                onClick={() => choose(onSaveAllPrograms)}
               >
-                Save .nc…
+                Save all ({programCount} programs)…
               </button>
+            ) : (
+              onSaveProgram !== undefined && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-testid="engrave-save"
+                  disabled={saveProgramBlocker !== null}
+                  title={
+                    saveProgramBlocker !== null
+                      ? // #803 — the reason Save is closed lives HERE, on the item, not as a
+                        // sentence under the footer's primary about a button not on screen.
+                        `Save is disabled — ${saveProgramBlocker}${/[.!?]$/.test(saveProgramBlocker) ? '' : '.'}`
+                      : 'Save the generated program to carry it to the Cut step, or to open in Makera Studio.'
+                  }
+                  style={MENU_ITEM}
+                  onClick={() => choose(onSaveProgram)}
+                >
+                  Save .nc…
+                </button>
+              )
             )}
             {onRunSheet !== undefined && (
               <button
