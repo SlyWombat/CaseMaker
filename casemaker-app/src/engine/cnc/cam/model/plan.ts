@@ -3808,6 +3808,8 @@ export interface StageMemoEntry {
   cl?: ReturnType<typeof clSurface>;
   /** A SUCCESSFUL stage's own `unplanned` statements — only the crease pass emits one. */
   unplanned?: SequenceStepFailure[];
+  /** The CL-grid fact the stage's surface recorded (`clGrid`), replayed when the CL is not rebuilt. */
+  grid?: PlanCurvedResult['clGrid'][number];
   owner: string;
 }
 
@@ -3924,14 +3926,17 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   const designTopAt = (x: number, y: number): number | null => topSurfaceAt(binsForMask(), x, y);
   const clGrid: PlanCurvedResult['clGrid'] = [];
   const noteGrid = (cutter: Tool, surface: ReturnType<typeof clSurface>): void => {
-    const key = cutterKeyOf(cutter);
-    if (clGrid.some((entry) => entry.cutterKey === key)) return;
-    clGrid.push({
-      cutterKey: key,
+    noteGridEntry({
+      cutterKey: cutterKeyOf(cutter),
       toleranceMm: surface.toleranceMm,
       minSpacingMm: surface.minSpacingMm,
       maxSpacingMm: surface.maxSpacingMm,
     });
+  };
+  // #1054 — a memo hit does not rebuild the CL, so the grid fact it recorded rides the entry.
+  const noteGridEntry = (entry: PlanCurvedResult['clGrid'][number]): void => {
+    if (clGrid.some((known) => known.cutterKey === entry.cutterKey)) return;
+    clGrid.push(entry);
   };
   // #1018 — ONE DATUM NOW, not shimmed here: `region.zTop`/`zBottom` and every `clSurface` CL
   // height already come from `tree`/`opts.geometry`, both built from the door-shifted mesh
@@ -4048,13 +4053,14 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const memoStore = (
       key: string,
       outcome: OpOutcome,
-      extra?: { cl?: ReturnType<typeof clSurface>; unplanned?: SequenceStepFailure[] },
+      extra?: { cl?: ReturnType<typeof clSurface>; unplanned?: SequenceStepFailure[]; grid?: PlanCurvedResult['clGrid'][number] },
     ): void =>
       opts.memo?.set(key, {
         outcome,
         owner: finishCutterKey,
         ...(extra?.cl === undefined ? {} : { cl: extra.cl }),
         ...(extra?.unplanned === undefined ? {} : { unplanned: extra.unplanned }),
+        ...(extra?.grid === undefined ? {} : { grid: extra.grid }),
       });
     // 1. THE FLAT Z-steps the region to its own CL, leaving the band — #869/#966: absent (ball
     // alone, no rough tool chosen for this goal), there is nothing to pre-clear and no band to
@@ -4366,8 +4372,10 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       rapid: opts.rapid,
     });
     const finishMemo = memoHit(finishKey);
-    if (finishMemo !== undefined) finishOutcome = finishMemo.outcome;
-    else try {
+    if (finishMemo !== undefined) {
+      if (finishMemo.grid !== undefined) noteGridEntry(finishMemo.grid);
+      finishOutcome = finishMemo.outcome;
+    } else try {
       memTrace('curved:stage', { stage: 'finish', cutter: cutterKeyOf(finishCutter), region: roughRegion.id });
       const out = finish({
         cutter: finishCutter,
@@ -4396,7 +4404,19 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         air: opts.air,
         rapid: opts.rapid,
       });
-      memoStore(finishKey, out);
+      // The CL grid the surface recorded rides the entry: a hit does not rebuild the CL.
+      memoStore(finishKey, out, {
+        ...(clBallCache === undefined
+          ? {}
+          : {
+              grid: {
+                cutterKey: cutterKeyOf(finishCutter),
+                toleranceMm: clBallCache.toleranceMm,
+                minSpacingMm: clBallCache.minSpacingMm,
+                maxSpacingMm: clBallCache.maxSpacingMm,
+              },
+            }),
+      });
       finishOutcome = out;
     } catch (err) {
       // #1052 — the move cap is a CANDIDATE decision, not a stage failure: it leaves the rank
