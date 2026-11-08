@@ -63,9 +63,18 @@ export const ROTARY_MAX_LENGTH_MM = 150;
  * radius is {@link sectionEnvelopeRadius}; the stock's own surface, at a given angle, is
  * {@link sectionRadiusAt}.
  */
+/** #1085 — a face the job's face operations cut off the stock: the plane at `distance` mm from the
+ * axis, its normal at angle `a`. Absent on a stock no face operation has cut. */
+export interface RotaryCutFace {
+  /** The plane's normal angle, radians from +Z toward +Y — the face op's A. */
+  a: number;
+  /** The plane's distance from the chuck's axis, mm (an across-flats half, or a flat's floor). */
+  distance: number;
+}
+
 export type RotarySection =
   | { kind: 'round'; diameter: number }
-  | { kind: 'rect'; width: number; height: number };
+  | { kind: 'rect'; width: number; height: number; cutFaces?: readonly RotaryCutFace[] };
 
 /** The section's circumscribed radius: a rod's radius, or half a block's diagonal, mm. */
 export function sectionEnvelopeRadius(section: RotarySection): number {
@@ -85,7 +94,14 @@ export function sectionRadiusAt(section: RotarySection, theta: number): number {
   const c = Math.abs(Math.cos(theta));
   const alongY = s > 1e-12 ? a / s : Infinity;
   const alongZ = c > 1e-12 ? b / c : Infinity;
-  return Math.min(alongY, alongZ);
+  let radius = Math.min(alongY, alongZ);
+  // #1085 — the cut faces bound the section too: after the corner cuts the stock is the octagon
+  // they leave, and the relief roughs from ITS surface, not the square's corners.
+  for (const cut of section.cutFaces ?? []) {
+    const k = Math.abs(Math.cos(theta - cut.a));
+    if (k > 1e-12) radius = Math.min(radius, cut.distance / k);
+  }
+  return radius;
 }
 
 /** The section in the operator's words: "a ⌀20 mm rod", "a 20 × 30 mm block (⌀36.06 envelope)". */
