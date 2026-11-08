@@ -55,27 +55,53 @@ const JOBS = join(REPO, 'docs', 'bench', '2026-10-28-z1-real-jobs', 'jobs');
 const JOB_FILE = 'j29-elephant-stick.json';
 const ENV = 'CM_ELEPHANT_STL';
 
-const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-const FLAT3175: Tool = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' });
-// The figure set's long-reach engraving balls. Their SHOULDER is stated (30.5 mm) because the
-// body check stands the shank at it: the job's own ball is the catalogue's "6*2*30.5" — ⌀2 cutting
-// to 30.5 mm, only then the ⌀6 shank — and a synthetic ball that states no shoulder forces the
-// conservative centre-height stand-in, which put a ⌀3.175 shoulder on every steep wall (#1092).
-const BALL2: Tool = {
-  ...flatEndMill(2, { number: 3, id: 'ball-2', name: 'ball-2' }),
-  typeText: 'Ball Nose',
-  shape: 'ball',
-  fluteLength: 30.5,
-  shoulderLength: 30.5,
-};
-const BALL05: Tool = {
-  ...flatEndMill(0.5, { number: 4, id: 'ball-0.5', name: 'ball-0.5' }),
-  typeText: 'Ball Nose',
-  shape: 'ball',
-  fluteLength: 30.5,
-  shoulderLength: 30.5,
-};
-const HOUSE = [FLAT6, FLAT3175, BALL2, BALL05];
+/**
+ * #1092 — THE CARD'S OWN CUTTERS, as its receipt names them. The guard plans with exactly the
+ * inventory the j29 card's plan actually picked (the ten programs' `;@MKR|TOOL` headers at
+ * 5d41e1c8a), so the chain has nothing else to choose and reproduces the card's own sequence —
+ * in particular the ⌀3.175×32 flat rest, the cutter whose body made the real 24.747 mm over-cut.
+ * The earlier synthetic four-tool set let the chain rest with a ball instead, so the guard could
+ * not see the card's defect at all. Geometry is the record's own: tip, shank, shoulder (the
+ * shank-collision limit) and, for the chamfer, its included angle.
+ */
+function cardTool(o: {
+  number: number;
+  id: string;
+  name: string;
+  typeText: string;
+  shape: Tool['shape'];
+  cuttingMm: number;
+  /** `tipdiameter` when the record's tip differs from its body (the chamfer's 0.1 mm point). */
+  tipMm?: number;
+  handleMm: number;
+  /** `shoulderlength` from the record; null where Makera leaves it empty (the chamfer). */
+  shoulderMm: number | null;
+  angleDeg?: number;
+}): Tool {
+  return {
+    ...flatEndMill(o.cuttingMm, { number: o.number, id: o.id, name: o.name }),
+    ...(o.tipMm === undefined ? {} : { tipDiameter: o.tipMm }),
+    typeText: o.typeText,
+    shape: o.shape,
+    handleDiameter: o.handleMm,
+    fluteLength: o.shoulderMm,
+    shoulderLength: o.shoulderMm,
+    ...(o.angleDeg === undefined ? {} : { angle: o.angleDeg }),
+  };
+}
+
+const CARD_CUTTERS: Tool[] = [
+  cardTool({ number: 1, id: 'lib-111031606032', name: '6*32mm Flat End', typeText: 'Flat End', shape: 'flat', cuttingMm: 6, handleMm: 6, shoulderMm: 32 }),
+  cardTool({ number: 2, id: 'lib-112121405017', name: '4*17mm Flat End(Metal)', typeText: 'Flat End', shape: 'flat', cuttingMm: 4, handleMm: 4, shoulderMm: 17 }),
+  cardTool({ number: 3, id: 'lib-111011313832', name: '3.175*32mm Flat End', typeText: 'Flat End', shape: 'flat', cuttingMm: 3.175, handleMm: 3.175, shoulderMm: 32 }),
+  cardTool({ number: 4, id: 'lib-111031605022', name: '6*22mm Flat End', typeText: 'Flat End', shape: 'flat', cuttingMm: 6, handleMm: 6, shoulderMm: 22 }),
+  cardTool({ number: 5, id: 'lib-161032055031', name: '6*0.5*30.5mm Ball Nose Engraving', typeText: 'Ball Nose Engraving', shape: 'ball', cuttingMm: 0.5, handleMm: 6, shoulderMm: 30.5 }),
+  cardTool({ number: 6, id: 'lib-131032605022', name: '6*22mm Ball Nose', typeText: 'Ball Nose', shape: 'ball', cuttingMm: 6, handleMm: 6, shoulderMm: 22 }),
+  cardTool({ number: 7, id: 'lib-112131606030', name: '6*30mm Flat End(Metal)', typeText: 'Flat End', shape: 'flat', cuttingMm: 6, handleMm: 6, shoulderMm: 30 }),
+  cardTool({ number: 8, id: 'lib-111031605525', name: '6*25mm Flat End', typeText: 'Flat End', shape: 'flat', cuttingMm: 6, handleMm: 6, shoulderMm: 25 }),
+  cardTool({ number: 9, id: 'kz-chamfer-90', name: 'Chamfering Bit - 1/8" Shank 90°', typeText: 'Chamfer', shape: 'chamfer', cuttingMm: 3.175, tipMm: 0.1, handleMm: 3.175, shoulderMm: null, angleDeg: 90 }),
+  cardTool({ number: 10, id: 'lib-111011313832-2', name: '3.175*32mm Flat End', typeText: 'Flat End', shape: 'flat', cuttingMm: 3.175, handleMm: 3.175, shoulderMm: 32 }),
+];
 
 /** The collection floor: the job's own finish tolerance (`tolerances.finishMm` below), i.e.
  * numerical slack, not a tuned number. Everything above it is gathered, then judged. */
@@ -121,7 +147,7 @@ function planInputFor(job: EngraveJob, source: { triangles: ParsedMesh }): Model
       material: job.stock.material,
     },
     fixture: { mount: job.workholding.kind === 'vise' ? 'vise' : 'tape', envelope: job.workholding.kind === 'vise' ? viseEnvelope(job.stock, jobVise(job), job.sacrificial) : null },
-    cutters: { house: HOUSE, catalogue: [] },
+    cutters: { house: CARD_CUTTERS, catalogue: [] },
     tolerances: { finishMm: 0.01 },
     edgeBreak: { legMm: 0 },
   };
