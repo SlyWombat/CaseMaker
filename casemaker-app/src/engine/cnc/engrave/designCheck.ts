@@ -1489,6 +1489,17 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     }
   }
 
+  if (process.env.CM_GOAL_DEBUG === '1') {
+    const out: string[] = [];
+    for (let j = 0; j < ny && out.length < 16; j++) {
+      for (let i = 0; i < nx && out.length < 16; i++) {
+        const k = j * nx + i;
+        if (sampled[k] !== 1 || dOf[k]! >= -0.1 || excluded[k] === 1) continue;
+        out.push(`(${(goal.x0 + i * goal.pitch).toFixed(2)},${(goal.y0 + j * goal.pitch).toFixed(2)}) d=${(-dOf[k]!).toFixed(3)} wall=${wall[k]} border=${border[k]} sil=${silhouette[k]}`);
+      }
+    }
+    console.log('GOALDBG adjudicated ' + out.join(' | '));
+  }
   // THE ADJUDICATED SET — the gate's reading, and what the pass and the sentence judge, in every
   // goal job: the 0.1 mm floor after the unadjudicable cells are excluded (and the edge break,
   // when the job states one).
