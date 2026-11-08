@@ -790,9 +790,28 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           // `cellBound - margin < levelZ` rule, margin = ARC_CHORD_TOLERANCE_MM); excluding them
           // here keeps the rest from being planned for coverage it can never legitimately recover,
           // and from then being stated as an empty pass.
-          if ((goal.z[k] as number) > region.floorZ + ARC_CHORD_TOLERANCE_MM) return false;
           const x = goal.x0 + (i0 + i) * pitch;
           const y = goal.y0 + (j0 + j) * pitch;
+          // #1092 — AN OCCLUDING CEILING IS EXCLUDED; A RIM THAT TOUCHES FLOOR IS NOT. A coverage
+          // rest cuts at `region.floorZ`; where the goal's topmost surface sits ABOVE that level
+          // the design itself stands there and the pass would cut it — the elephant's body over
+          // pocket-0 (goal −1.36 against a floor of −26.104, 18.03 % adjudicated cut-into,
+          // 24.75 mm). "Above the level" alone is not enough, though: the pocket's own rim reads
+          // above the level at the cell that touches the wall, and excluding it re-flows (or
+          // drops) the rest's wall-foot strips — set B's m1trayB-top p5 measured exactly that.
+          // The distinguishing question is whether the cell is UNDER the surface or AT its edge:
+          // an occluded cell has every 4-neighbour above the level too (the design closes over it);
+          // a rim cell always has a floor neighbour (the material the pass is meant to cut).
+          if ((goal.z[k] as number) > region.floorZ + ARC_CHORD_TOLERANCE_MM) {
+            const nx1 = i1 - i0;
+            const ny1 = j1 - j0;
+            const above = (ii: number, jj: number): boolean => {
+              if (ii < 0 || jj < 0 || ii > nx1 || jj > ny1) return false; // the grid edge: not a proven ceiling
+              const kk = (j0 + jj) * goal.nx + (i0 + ii);
+              return goal.covered[kk] === 1 && (goal.z[kk] as number) > region.floorZ + ARC_CHORD_TOLERANCE_MM;
+            };
+            if (above(i - 1, j) && above(i + 1, j) && above(i, j - 1) && above(i, j + 1)) return false;
+          }
           return pointInPolygons(region.footprint, x, y);
         };
         return cellPolygons(inside, i1 - i0 + 1, j1 - j0 + 1, goal.x0 + i0 * pitch, goal.y0 + j0 * pitch, pitch);
