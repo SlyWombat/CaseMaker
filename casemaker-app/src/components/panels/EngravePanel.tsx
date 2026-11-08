@@ -43,7 +43,8 @@ import { jobTopFaceCached, NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/
 import { millModelById, workOriginOf } from '@/engine/cnc/machine';
 import { machineDisplayName } from '@/platform/locationClient';
 import { machineRecordByProfile, saveMachineWithRetry, useLocationStore } from '@/store/locationStore';
-import { mountNameFor, probeFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
+import { bracketSeatDatumFor, mountNameFor, probeFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
+import { sheetRegistrationPlan } from '@/engine/cnc/registration/footprintJob';
 import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import { findingFix, fixActionLabel, fixIsOffered, type PanelFix } from './findingFix';
 import { operatorRunError } from './runErrorWords';
@@ -2494,6 +2495,16 @@ export function EngravePanel(): JSX.Element {
     // checked out means none drawn.
     const sheetProbe = machineRecord === null ? null : probeFor(machineRecord);
     const mountName = mountNameFor(machineRecord, job.workholding.kind);
+    // #1070, 6b's ruling (C8) — THE SHEET'S REGISTRATION IS THE CARD'S SEAM: the same shared
+    // function the CLI's sheet calls, fed the same four inputs the Cut card plans from (the
+    // calibration, the checked-out probe, the shop defaults, the bed's seat datum).
+    const sheetReg = sheetRegistrationPlan({
+      job,
+      calibration: calibration ?? undefined,
+      defaults: shopDefaults ?? null,
+      probe: sheetProbe,
+      bracketSeat: bracketSeatDatumFor(machineRecord),
+    });
     // #513 — the Bed line: the machine's active profile, worded by the job's own mount so the
     // datum printed is the one this job's registration will read.
     const activeBed = activeProfileOf(machineRecord);
@@ -2587,6 +2598,8 @@ export function EngravePanel(): JSX.Element {
                   estimatedSeconds: lastMeasured.estimatedSeconds,
                 }
               : undefined,
+          // #1070 — the footprint plan, or the first seat seek, from the one shared seam.
+          ...sheetReg,
         },
       ),
     );

@@ -25,7 +25,7 @@ import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { ProbeSpec } from '@/engine/cnc/registration/plan';
 import type { Setup } from '@/engine/cnc/setups';
 import { planRegistrationAttempt } from '@/components/panels/registrationAttempt';
-import { footprintInputFor, seatSeekFor } from '@/engine/cnc/registration/footprintJob';
+import { footprintInputFor, seatSeekFor, sheetRegistrationPlan } from '@/engine/cnc/registration/footprintJob';
 import { planFootprintRegistration } from '@/engine/cnc/registration/footprint';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { isSeatPlan, seatTapArgs } from '@/engine/cnc/registration/seatPress';
@@ -209,6 +209,21 @@ describe('#1070 the first seat is measured by the program (6b’s ruling)', () =
 });
 
 describe('#1070 the sheet names the seat seek as the first touch of the day', () => {
+  it('the app sheet’s one seam: the shared plan for the tray job and house prints the seat block', () => {
+    const job = bracketJob();
+    // The app's call site resolves the same four inputs the Cut card plans from (calibration,
+    // probe, defaults, seat): on this house the datum is not usable by the checked-out probe, so
+    // the card — and now the sheet — take the seat branch.
+    const reg = sheetRegistrationPlan({ job, calibration: CALIBRATION, defaults: null, probe: PROBE, bracketSeat: null });
+    expect(reg.footprint).toBeUndefined();
+    expect(reg.seatSeek?.band).toEqual({ min: -87.25, max: -84.25 });
+    const stub = { findings: [], feeds: null, cam: null, nc: '', verify: null, frameNc: null } as unknown as Parameters<typeof buildRunSheet>[1];
+    const sheet = buildRunSheet(job, stub, null, new Date('2026-11-08T00:00:00Z'), undefined, { ...reg });
+    const text = sheet.sections.flatMap((s2) => s2.steps.map((step) => step.text)).join('\n');
+    expect(text).toContain('THE FIRST TOUCH OF THE DAY');
+    expect(text).toContain('bounded Z seek with the wired probe on the wasteboard beside the bracket’s front arm');
+  });
+
   it('no seat datum: §6 opens with the one bounded seek, then says to plan again', () => {
     const job = bracketJob();
     const seat = seatSeekFor({ job, calibration: CALIBRATION, defaults: null, probe: PROBE });

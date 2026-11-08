@@ -100,10 +100,9 @@ import type { Tool } from '../../../src/engine/cnc/tool';
 import { toolDisplayName } from '../../../src/engine/cnc/toolDisplay';
 import type { JobFinding } from '../../../src/engine/cnc/engrave/jobSetup';
 import type { LoadedLocation } from '../../../src/platform/headless/bootstrap';
-import type { FootprintPlan } from '../../../src/engine/cnc/registration/footprint';
-import { footprintInputFor, seatSeekFor } from '../../../src/engine/cnc/registration/footprintJob';
+import { sheetRegistrationPlan } from '../../../src/engine/cnc/registration/footprintJob';
 import type { SeatSeek } from '../../../src/engine/cnc/registration/footprintJob';
-import { planFootprintRegistration } from '../../../src/engine/cnc/registration/footprint';
+import type { FootprintPlan } from '../../../src/engine/cnc/registration/footprint';
 import type { NodeMeshOutput } from '../../../src/workers/geometry/meshOutput';
 import { Z1 } from '../../../src/engine/cnc/machine';
 import { jobMount, jobMountObstacles, jobSetups, jobTool, toSetup } from '../../../src/engine/cnc/engrave/jobSetup';
@@ -437,16 +436,9 @@ export function sheetRegistrationFor(
   const bed = machine?.bedProfiles?.find((p) => p.id === machine.activeBedProfileId);
   const seat = bed?.datums?.bracketSeatZ ?? null;
   const bracketSeat = seat === null || seat === undefined ? null : { value: seat.value, what: 'bracket seat' as const, measuredAt: seat.measuredAt ?? null };
-  const mount = { kind: 'bracket' as const, board: job.sacrificial.under !== null };
-  const input = footprintInputFor({ job, mount, calibration, defaults: where.defaults, probe, bracketSeat });
-  if (input.ok) {
-    const planned = planFootprintRegistration(input.input);
-    if (planned.ok) return { footprint: planned.plan };
-  }
-  // No seat datum (or nothing to plan on it): the sheet's first touch is the seat seek, when the
-  // house can back one.
-  const seatSeek = seatSeekFor({ job, calibration, defaults: where.defaults, probe });
-  return seatSeek.ok ? { seatSeek: seatSeek.seek } : {};
+  // #1070, 6b's ruling (C8) — THE ONE SEAM: the app's sheet and this one plan their registration
+  // through the same function; this wrapper only resolves the boot's location into its arguments.
+  return sheetRegistrationPlan({ job, calibration, defaults: where.defaults, probe, bracketSeat });
 }
 
 export async function engraveJobMain(argv: string[], options: CommandOptions = HUMAN): Promise<number> {

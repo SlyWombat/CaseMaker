@@ -31,7 +31,8 @@ import { targetObjectMesh } from '@/engine/import/targetObject';
 import { surfaceSpreadPlan } from '@/engine/cnc/engrave/surfaceSpread';
 import type { PlanObstacle, ProbeSpec } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
-import type { FootprintBox, FootprintInput, FootprintScanSettings } from '@/engine/cnc/registration/footprint';
+import { planFootprintRegistration, type FootprintBox, type FootprintInput, type FootprintPlan, type FootprintScanSettings } from '@/engine/cnc/registration/footprint';
+import { jobMount } from '@/engine/cnc/engrave/jobSetup';
 import type { MountSpec } from '@/engine/cnc/setups';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 
@@ -266,4 +267,36 @@ export function seatSeekFor(args: {
 export function softLimitsOf(calibration: MachineCalibration | undefined): { xMin: number; yMin: number; zMin: number } | null {
   const endstop = calibration?.softEndstop;
   return endstop !== undefined && endstop !== null && endstop.enabled ? { xMin: endstop.xMin, yMin: endstop.yMin, zMin: endstop.zMin } : null;
+}
+
+// -------------------------------------------------------------------------------------------------
+// #1070, 6b's ruling (C8): THE SHEET'S REGISTRATION IS ONE SEAM.
+
+/**
+ * The footprint plan (or, with no seat datum, the first seat seek) a bed-held job's sheet prints.
+ *
+ * ONE derivation, two callers: the app's File ▸ Run sheet hands `buildRunSheet` exactly this, and
+ * the CLI's `sheetRegistrationFor` resolves its `LoadedLocation` into the same arguments and calls
+ * it — so the sheet cannot disagree with the Cut card, which plans through the same footprint code.
+ * PURE: the caller resolves the calibration, probe, defaults and seat (the store, or the boot).
+ */
+export function sheetRegistrationPlan(args: {
+  job: EngraveJob;
+  calibration: MachineCalibration | undefined;
+  defaults: ShopDefaults | null;
+  probe: ProbeSpec | null;
+  bracketSeat: BracketSeatDatum | null;
+}): { footprint?: FootprintPlan; seatSeek?: SeatSeek } {
+  const { job, calibration, defaults, probe, bracketSeat } = args;
+  if (jobMount(job) !== 'bracket') return {};
+  const mount: MountSpec = { kind: 'bracket', board: job.sacrificial.under !== null };
+  const input = footprintInputFor({ job, mount, calibration, defaults, probe, bracketSeat });
+  if (input.ok) {
+    const planned = planFootprintRegistration(input.input);
+    if (planned.ok) return { footprint: planned.plan };
+  }
+  // No seat datum (or nothing to plan on it): the sheet's first touch is the seat seek, when the
+  // house can back one.
+  const seatSeek = seatSeekFor({ job, calibration, defaults, probe });
+  return seatSeek.ok ? { seatSeek: seatSeek.seek } : {};
 }
