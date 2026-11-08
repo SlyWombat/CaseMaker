@@ -26,7 +26,7 @@ import {
   type BracketSeatDatum,
 } from '@/engine/cnc/mounts/bracket';
 import type { MountDatum, PlanObstacle, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
-import { footprintInputFor, mountObstaclesFor } from '@/engine/cnc/registration/footprintJob';
+import { footprintInputFor, mountObstaclesFor, seatSeekFor } from '@/engine/cnc/registration/footprintJob';
 import { planFootprintRegistration } from '@/engine/cnc/registration/footprint';
 import { footprintToRegistrationPlan } from '@/engine/cnc/registration/footprintPlan';
 import { bracketTapFor } from '@/engine/cnc/registration/mountContext';
@@ -124,6 +124,53 @@ export function planRegistrationAttempt(args: {
     if (!anchor.ok) return { kind: 'refused', reason: anchor.reason };
     const datum = bracketDatum(anchor.anchor, sizes);
     const obstacles = mountObstaclesFor(job, mount, sizes);
+    // 6b's ruling (#1070) — THE FIRST BRACKET SEAT IS MEASURED BY THE PROGRAM: when the house has
+    // no seat datum (and no legacy default), the press plans ONE bounded Z seek with the wired V2
+    // on the wasteboard beside the front arm; its reading is written as the bed profile's
+    // `bracketSeatZ` and mirrored to the shop default. The band is the 2026-11-07-derived seat,
+    // VERIFIED by the seek.
+    const dims0 = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
+    const under0 = mount.board === true ? (job.sacrificial?.under?.thickness ?? 0) : 0;
+    const expected0 = bracketExpectedSurface(defaults, dims0.z, under0, args.bracketSeat);
+    if (!expected0.ok) {
+      const seat = seatSeekFor({ job, calibration, defaults, probe: args.probe });
+      if (!seat.ok) return { kind: 'refused', reason: seat.reason };
+      const plan: RegistrationPlan = {
+        mount: 'bracket',
+        stock: { xMin: 0, yMin: 0, xMax: dims0.x, yMax: dims0.y, cornerRadius: 0 },
+        stockThicknessMm: dims0.z,
+        surfacePoint: { x: seat.seek.workX, y: seat.seek.workY },
+        seek: {
+          fromMachineZ: seat.seek.fromMachineZ,
+          travelMm: Math.round((seat.seek.fromMachineZ - (seat.seek.band.min - args.settings.scanReachMm)) * 1000) / 1000,
+          band: seat.seek.band,
+        },
+        mountDatum: null,
+        probe: args.probe,
+        mountTap: {
+          x: seat.seek.x,
+          y: seat.seek.y,
+          fromMachineZ: seat.seek.fromMachineZ,
+          label: 'the wasteboard beside the bracket’s front arm (the seat)',
+          reference: 'bracket-seat',
+          expectZ: seat.seek.expectZ,
+          // The reading IS the seat: the touch is on the wasteboard, not the arm.
+          datumOffsetMm: 0,
+        },
+        scans: [],
+        bracketOrigin: { x: datum.x, y: datum.y, from: datum.from, offsetMeasured: datum.offsetMeasured },
+        mountObstacles: obstacles,
+        settings: args.settings,
+        notes: seat.seek.notes,
+      };
+      return {
+        kind: 'plan',
+        method: 'bracket',
+        plan,
+        summary: 'Measure the bracket seat — one Z seek on the wasteboard beside the front arm',
+        expected: 'the seat from the seek, inside ±1.5 mm of the derived value',
+      };
+    }
     const footprint = footprintInputFor({
       job,
       mount,

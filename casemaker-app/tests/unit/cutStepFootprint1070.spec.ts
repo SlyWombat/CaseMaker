@@ -25,7 +25,7 @@ import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { ProbeSpec } from '@/engine/cnc/registration/plan';
 import type { Setup } from '@/engine/cnc/setups';
 import { planRegistrationAttempt } from '@/components/panels/registrationAttempt';
-import { footprintInputFor } from '@/engine/cnc/registration/footprintJob';
+import { footprintInputFor, seatSeekFor } from '@/engine/cnc/registration/footprintJob';
 import { planFootprintRegistration } from '@/engine/cnc/registration/footprint';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import type { EngraveJob } from '@/types/engraveJob';
@@ -167,5 +167,47 @@ describe('#1070 the sheet’s §6 prints the footprint plan', () => {
     expect(text).toContain('the surface for the Z band');
     expect(text).toContain('inside the machine’s soft endstop');
     expect(text).not.toContain('already references');
+  });
+});
+
+describe('#1070 the first seat is measured by the program (6b’s ruling)', () => {
+  it('with no seat datum the press plans ONE bounded Z seek on the wasteboard beside the front arm', () => {
+    const attempt = planRegistrationAttempt({ ...baseArgs(bracketJob()), mount: { kind: 'bracket', board: true }, bracketSeat: null });
+    expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    const plan = attempt.plan;
+    expect(plan.mountTap?.reference).toBe('bracket-seat');
+    // The reading IS the seat: no datum offset.
+    expect(plan.mountTap?.datumOffsetMm).toBe(0);
+    expect(plan.mountTap?.expectZ).toBe(-85.75);
+    expect(plan.seek.band).toEqual({ min: -87.25, max: -84.25 });
+    // Starts above the band.
+    expect(plan.seek.fromMachineZ).toBe(-81.25);
+    // The point: the wasteboard past the front arm's free end, in front of the stock.
+    expect(plan.mountTap!.x).toBeGreaterThan(CALIBRATION.softEndstop.xMin);
+    expect(plan.mountTap!.y).toBeGreaterThan(CALIBRATION.softEndstop.yMin);
+    // The bound: no further than the band's floor less the scan reach, inside the soft endstop.
+    expect(plan.seek.travelMm).toBeCloseTo(-81.25 - (-92.25), 3);
+    expect(-92.25).toBeGreaterThan(CALIBRATION.softEndstop.zMin);
+    const notes = plan.notes.join('\n');
+    expect(notes).toContain('derived from the 2026-11-07 touch');
+    expect(notes).toContain('valid only for the probe fitting');
+    expect(notes).toContain('measures every session');
+    expect(notes).toContain('arm top 15');
+  });
+});
+
+describe('#1070 the sheet names the seat seek as the first touch of the day', () => {
+  it('no seat datum: §6 opens with the one bounded seek, then says to plan again', () => {
+    const job = bracketJob();
+    const seat = seatSeekFor({ job, calibration: CALIBRATION, defaults: null, probe: PROBE });
+    if (!seat.ok) throw new Error(seat.reason);
+    const stub = { findings: [], feeds: null, cam: null, nc: '', verify: null, frameNc: null } as unknown as Parameters<typeof buildRunSheet>[1];
+    const sheet = buildRunSheet(job, stub, null, new Date('2026-11-08T00:00:00Z'), undefined, { seatSeek: seat.seek });
+    const text = sheet.sections.flatMap((s2) => s2.steps.map((step) => step.text)).join('\n');
+    expect(text).toContain('THE FIRST TOUCH OF THE DAY');
+    expect(text).toContain('bounded Z seek with the wired probe on the wasteboard beside the bracket’s front arm');
+    expect(text).toContain('valid only for the probe fitting');
+    expect(text).toContain('press Plan registration again');
   });
 });

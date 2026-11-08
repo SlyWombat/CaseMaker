@@ -64,6 +64,7 @@ import {
   type ScanTouch,
 } from '@/engine/cnc/engrave/materialScan';
 import type { FootprintPlan } from '@/engine/cnc/registration/footprint';
+import type { SeatSeek } from '@/engine/cnc/registration/footprintJob';
 import type { FeedsResult } from '@/engine/cnc/feeds';
 // #445 — `ThreadPlanFacts` exists for THIS reader: the half of the CAM's thread plan the sheet
 // prints, with `moves`/the IR/the simulator's spec left out (see the type's own comment).
@@ -1730,7 +1731,10 @@ function registrationSteps(
   facingRun: boolean,
   /** #1070 — the bed-held footprint plan, when the caller has one (see `RunSheetOptions`). */
   footprint?: FootprintPlan,
+  /** #1070 — the seat seek that must run first, when the seat has never been measured. */
+  seatSeek?: SeatSeek,
 ): RunSheetStep[] {
+  if (footprint === undefined && seatSeek !== undefined) return seatRegistrationSteps(onBoard, facingRun, seatSeek);
   // #1070 — A BED-HELD JOB IS REGISTERED ON ITS CUT REGION, not the blank's edges: the six scans
   // and the four corner touches come from the plan the Cut step runs, so paper and console say the
   // same positions, in machine coordinates.
@@ -2383,6 +2387,11 @@ export interface RunSheetOptions {
    * needs the machine's calibration, which this module does not carry.
    */
   footprint?: FootprintPlan;
+  /**
+   * #1070, 6b's ruling — no seat datum yet: §6's FIRST TOUCH OF THE DAY is the one bounded Z seek
+   * that measures it (the plan the Cut step's seat press runs). Passed in, never read here.
+   */
+  seatSeek?: SeatSeek;
   /**
    * #475 — the shop's `registration.surfaceTouchCount`: how many surface touches the cut regions'
    * extents get. Resolved by the caller from `registrationSettings(defaults).settings`, never read
@@ -4510,7 +4519,7 @@ export function buildRunSheet(
           },
         ]
       : []),
-    ...registrationSteps(job, onBoard, options.scan?.tipDiameterMm, facingRun, options.footprint),
+    ...registrationSteps(job, onBoard, options.scan?.tipDiameterMm, facingRun, options.footprint, options.seatSeek),
     // #475 — Z0 is a spread, not a point: print the surface touches across the cut's extents, the
     // band they must land in, and (when the caller has readings) the measured verdict. Additive:
     // a caller that passes no `surfaceTouchCount`/`surfaceReadings` gets the plan and stop rule.
@@ -5498,4 +5507,38 @@ export function runSheetStackUpSvg(stackUp: RunSheetStackUp): string {
 
   parts.push('</svg>');
   return parts.join('');
+}
+
+/**
+ * #1070, 6b's ruling — THE FIRST TOUCH OF THE DAY. With no seat datum the program's first touch
+ * is the one bounded Z seek on the wasteboard beside the front arm; the footprint touches are
+ * planned on the reading it writes, so the sheet says the press runs twice — once to measure,
+ * once to plan the registration.
+ */
+function seatRegistrationSteps(onBoard: boolean, facingRun: boolean, seek: SeatSeek): RunSheetStep[] {
+  return [
+    {
+      text:
+        'THE FIRST TOUCH OF THE DAY: the bracket seat has not been measured on this machine. The program’s first ' +
+        'touch is one bounded Z seek with the wired probe on the wasteboard beside the bracket’s front arm — the ' +
+        'surface the blank stands on — at work X ' +
+        `${fmtNum(seek.workX)} Y ${fmtNum(seek.workY)} (machine X ${fmtNum(seek.x)} Y ${fmtNum(seek.y)}).`,
+      value: `machine X ${fmtNum(seek.x)} · Y ${fmtNum(seek.y)}`,
+    },
+    {
+      text:
+        `The seat is expected at machine Z ${fmtNum(seek.band.min)} to ${fmtNum(seek.band.max)}. The seek starts at ` +
+        `machine Z ${fmtNum(seek.fromMachineZ)} (above the band) and goes no further than ` +
+        `${fmtNum(seek.band.min - 5)}; a reading outside the band stops the run. ${seek.notes[0] ?? ''}`,
+    },
+    {
+      text:
+        'The reading is written as the bed profile’s bracket seat, and it is valid only for the probe fitting it was ' +
+        'measured with: the press measures every session, and the stored value is only the next session’s expected band.',
+    },
+    z0Step(onBoard, facingRun),
+    {
+      text: 'After the seat is stored, press Plan registration again: the cut region’s footprint touches are planned against the reading.',
+    },
+  ];
 }

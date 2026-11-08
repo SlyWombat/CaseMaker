@@ -101,7 +101,8 @@ import { toolDisplayName } from '../../../src/engine/cnc/toolDisplay';
 import type { JobFinding } from '../../../src/engine/cnc/engrave/jobSetup';
 import type { LoadedLocation } from '../../../src/platform/headless/bootstrap';
 import type { FootprintPlan } from '../../../src/engine/cnc/registration/footprint';
-import { footprintInputFor } from '../../../src/engine/cnc/registration/footprintJob';
+import { footprintInputFor, seatSeekFor } from '../../../src/engine/cnc/registration/footprintJob';
+import type { SeatSeek } from '../../../src/engine/cnc/registration/footprintJob';
 import { planFootprintRegistration } from '../../../src/engine/cnc/registration/footprint';
 import type { NodeMeshOutput } from '../../../src/workers/geometry/meshOutput';
 import { Z1 } from '../../../src/engine/cnc/machine';
@@ -405,12 +406,15 @@ interface RunReceipt {
  * dispatcher can run the command without losing the process. The script wrapper turns the returned
  * code into `process.exitCode`.
  */
-/** #1070 — the sheet's footprint plan for a bed-held job, or undefined when the house cannot back it. */
-export function footprintPlanForSheet(job: EngraveJob, where: LoadedLocation | null): FootprintPlan | undefined {
-  if (where === null || jobMount(job) !== 'bracket') return undefined;
+/** #1070 — the sheet's bed-held registration: the footprint plan, or the first seat seek. */
+export function sheetRegistrationFor(
+  job: EngraveJob,
+  where: LoadedLocation | null,
+): { footprint?: FootprintPlan; seatSeek?: SeatSeek } {
+  if (where === null || jobMount(job) !== 'bracket') return {};
   const machine = where.machines[0];
   const calibration = machine?.calibration;
-  if (calibration === undefined || calibration === null) return undefined;
+  if (calibration === undefined || calibration === null) return {};
   const probeAccessory = where.accessories.find((a) => a.kind === 'probe' && !/^3d$/i.test((a.variant ?? '').trim()));
   const unit = (probeAccessory?.unit ?? {}) as Record<string, unknown>;
   const num = (k: string): number | null => (typeof unit[k] === 'number' ? (unit[k] as number) : null);
@@ -429,9 +433,14 @@ export function footprintPlanForSheet(job: EngraveJob, where: LoadedLocation | n
   const bracketSeat = seat === null || seat === undefined ? null : { value: seat.value, what: 'bracket seat' as const, measuredAt: seat.measuredAt ?? null };
   const mount = { kind: 'bracket' as const, board: job.sacrificial.under !== null };
   const input = footprintInputFor({ job, mount, calibration, defaults: where.defaults, probe, bracketSeat });
-  if (!input.ok) return undefined;
-  const planned = planFootprintRegistration(input.input);
-  return planned.ok ? planned.plan : undefined;
+  if (input.ok) {
+    const planned = planFootprintRegistration(input.input);
+    if (planned.ok) return { footprint: planned.plan };
+  }
+  // No seat datum (or nothing to plan on it): the sheet's first touch is the seat seek, when the
+  // house can back one.
+  const seatSeek = seatSeekFor({ job, calibration, defaults: where.defaults, probe });
+  return seatSeek.ok ? { seatSeek: seatSeek.seek } : {};
 }
 
 export async function engraveJobMain(argv: string[], options: CommandOptions = HUMAN): Promise<number> {
@@ -1352,7 +1361,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // attempt runs): read off the job and the loaded house, absent when the house lacks what the
     // plan needs (the machine's calibration or the wired probe), so an older house keeps the old
     // registration section rather than a plan it cannot back.
-    const footprint = footprintPlanForSheet(job, boot.location);
+    const sheetRegistration = sheetRegistrationFor(job, boot.location);
+    const footprint = sheetRegistration.footprint;
+    const seatSeek = sheetRegistration.seatSeek;
     const sheet = buildRunSheet(
       job,
       { ...generated, programs: sheetPrograms },
@@ -1370,7 +1381,12 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       // absent, this is the wall clock the command has always used.
       options.now ?? new Date(),
       MARGIN_DEFAULTS,
-      { ...(opts.sheetOptions ?? {}), ...(footprint === undefined ? {} : { footprint }), efficiencyThresholds: efficiencyThresholds(shopDefaults) },
+      {
+        ...(opts.sheetOptions ?? {}),
+        ...(footprint === undefined ? {} : { footprint }),
+        ...(seatSeek === undefined ? {} : { seatSeek }),
+        efficiencyThresholds: efficiencyThresholds(shopDefaults),
+      },
     );
     if (sheet.header.fileName !== names[firstEngraving]!.ncFile) {
       fail(`run sheet file name drifted: expected ${names[firstEngraving]!.ncFile}, got ${sheet.header.fileName}`);

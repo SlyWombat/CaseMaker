@@ -170,3 +170,94 @@ export function footprintInputFor(args: FootprintJobArgs): FootprintJobResult {
     },
   };
 }
+
+// -------------------------------------------------------------------------------------------------
+// #1070, 6b's ruling — THE FIRST BRACKET SEAT IS A BOUNDED Z SEEK, planned here.
+
+/**
+ * The seat the 2026-11-07 wiring left behind, mm machine Z: the wired-V2 blank top (−60.75 at
+ * TLO −14.068) less the 25 mm blank. The seek VERIFIES it; the number only bounds the band.
+ */
+export const SEAT_DERIVED = {
+  machineZ: -85.75,
+  toleranceMm: 1.5,
+  from: 'derived from the 2026-11-07 touch (wired-V2 blank top −60.75, TLO −14.068, less the 25 mm blank), verified by the seek',
+  /** The bracket's arm-top figure the ledger holds (measured 2026-10-18) — recorded, not used in the seek. */
+  armTopMm: 15.0,
+} as const;
+
+export interface SeatSeek {
+  /** The touch point, machine XY: the wasteboard beside the bracket's front arm. */
+  x: number;
+  y: number;
+  /** The same point, work XY (for the sheet's "where it is" words). */
+  workX: number;
+  workY: number;
+  fromMachineZ: number;
+  expectZ: number;
+  band: { min: number; max: number };
+  notes: string[];
+}
+
+export type SeatSeekResult = { ok: true; seek: SeatSeek } | { ok: false; reason: string };
+
+/**
+ * #1070 — the seat seek: ONE bounded Z touch with the wired V2 on the wasteboard beside the
+ * bracket's front arm (past its free end, in front of the stock — the surface the blank stands
+ * on). It starts `parkAboveSurfaceMm` above the band's top, expects the derived seat, and its
+ * bound is the band's floor less the scan reach; the executor's own G38.3/G38.5 line and the
+ * registration's touch feed are what send it, under the machine's soft endstop like every touch.
+ *
+ * The reading IS the seat (the touch is on the wasteboard, not the arm), so the datum is written
+ * without an offset — and it is valid only for the probe fitting the run measured it with.
+ */
+export function seatSeekFor(args: {
+  job: EngraveJob;
+  calibration: MachineCalibration | undefined;
+  defaults: ShopDefaults | null;
+  probe: ProbeSpec | null;
+}): SeatSeekResult {
+  const sizes = bracketSettings(args.defaults);
+  const anchor = anchorFrom(args.calibration, args.job.machineId);
+  if (!anchor.ok) return { ok: false, reason: anchor.reason };
+  const datum = bracketDatum(anchor.anchor, sizes);
+  const settings = registrationSettings(args.defaults, args.probe).settings;
+  // Past the front arm's free end (x), in front of the stock (y): open wasteboard, no arm, no
+  // blank, no clamp (the clamps are on the back edge).
+  const workX = sizes.settings.armLengthX + settings.tipRadiusMm + 5;
+  const workY = -sizes.settings.armWidth / 2;
+  const x = Math.round((datum.x + workX) * 1000) / 1000;
+  const y = Math.round((datum.y + workY) * 1000) / 1000;
+  const band = {
+    min: Math.round((SEAT_DERIVED.machineZ - SEAT_DERIVED.toleranceMm) * 1000) / 1000,
+    max: Math.round((SEAT_DERIVED.machineZ + SEAT_DERIVED.toleranceMm) * 1000) / 1000,
+  };
+  const fromMachineZ = Math.round((band.max + settings.parkAboveSurfaceMm) * 1000) / 1000;
+  const endstop = args.calibration?.softEndstop;
+  if (endstop !== undefined && endstop !== null && endstop.enabled) {
+    if (x < endstop.xMin || y < endstop.yMin) {
+      return { ok: false, reason: `the seat touch at machine X ${x} Y ${y} is past the machine's soft endstop (${endstop.xMin}, ${endstop.yMin}) — move the blank's corner, or measure the seat by hand` };
+    }
+    if (band.min - settings.scanReachMm < endstop.zMin) {
+      return { ok: false, reason: `the seat seek could reach machine Z ${band.min - settings.scanReachMm}, past the machine's soft endstop Z ${endstop.zMin}` };
+    }
+  }
+  return {
+    ok: true,
+    seek: {
+      x,
+      y,
+      workX: Math.round(workX * 1000) / 1000,
+      workY: Math.round(workY * 1000) / 1000,
+      fromMachineZ,
+      expectZ: SEAT_DERIVED.machineZ,
+      band,
+      notes: [
+        `the seat is expected at machine Z ${SEAT_DERIVED.machineZ} ± ${SEAT_DERIVED.toleranceMm} — ${SEAT_DERIVED.from}`,
+        `the seek starts at machine Z ${fromMachineZ} (above the band) and goes no further than ${Math.round((band.min - settings.scanReachMm) * 1000) / 1000} (the band's floor less the ${settings.scanReachMm} mm scan reach)`,
+        `the reading is the seat itself — the touch is on the wasteboard beside the front arm, not on the arm (arm top ${SEAT_DERIVED.armTopMm} mm, the ledger's 2026-10-18 measurement, is recorded and not used here)`,
+        'the seat is valid only for the probe fitting this run measures it with: the press measures every session, and the stored value is only the next session’s expected band',
+      ],
+    },
+  };
+}
