@@ -42,7 +42,7 @@ import { jobFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { jobTopFaceCached, NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { millModelById, workOriginOf } from '@/engine/cnc/machine';
 import { machineDisplayName } from '@/platform/locationClient';
-import { machineRecordByProfile, saveMachineWithRetry, useLocationStore } from '@/store/locationStore';
+import { machineAt, machineRecordByProfile, saveMachineWithRetry, useLocationStore } from '@/store/locationStore';
 import { bracketSeatDatumFor, mountNameFor, probeFor, probeNameFor } from '@/engine/cnc/registration/mountContext';
 import { sheetRegistrationPlan } from '@/engine/cnc/registration/footprintJob';
 import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
@@ -2497,13 +2497,17 @@ export function EngravePanel(): JSX.Element {
     const mountName = mountNameFor(machineRecord, job.workholding.kind);
     // #1070, 6b's ruling (C8) — THE SHEET'S REGISTRATION IS THE CARD'S SEAM: the same shared
     // function the CLI's sheet calls, fed the same four inputs the Cut card plans from (the
-    // calibration, the checked-out probe, the shop defaults, the bed's seat datum).
+    // calibration, the checked-out probe, the shop defaults, the bed's seat datum) — and the same
+    // MACHINE RECORD: the card resolves the connected machine BY ADDRESS (`machineAt(target)`), so
+    // the sheet does too, and a dry run with no machine connected takes the card's seat branch
+    // instead of reading a bed datum off a record the card never saw.
+    const regMachine = measuredMachine === null ? null : machineAt(measuredMachine);
     const sheetReg = sheetRegistrationPlan({
       job,
       calibration: calibration ?? undefined,
       defaults: shopDefaults ?? null,
-      probe: sheetProbe,
-      bracketSeat: bracketSeatDatumFor(machineRecord),
+      probe: probeFor(regMachine),
+      bracketSeat: bracketSeatDatumFor(regMachine),
     });
     // #513 — the Bed line: the machine's active profile, worded by the job's own mount so the
     // datum printed is the one this job's registration will read.
