@@ -1720,7 +1720,13 @@ function judgedAgainstWords(job: EngraveJob): { against: string; relativeTo: str
  * machine XY, which the console shows — and the soft-limit statement is the plan's, never a
  * second reading of the calibration here.
  */
-function footprintRegistrationSteps(onBoard: boolean, facingRun: boolean, plan: FootprintPlan): RunSheetStep[] {
+function footprintRegistrationSteps(
+  onBoard: boolean,
+  facingRun: boolean,
+  plan: FootprintPlan,
+  /** #1068 — what THIS job's program is judged against, in the mount's own words. */
+  judged: { against: string; relativeTo: string },
+): RunSheetStep[] {
   const steps: RunSheetStep[] = [
     {
       text:
@@ -1755,6 +1761,19 @@ function footprintRegistrationSteps(onBoard: boolean, facingRun: boolean, plan: 
       'The origin is the front-left corner the two touched edge lines intersect at. The machine coordinates are ' +
       `seeded from ${plan.origin.from}; the touches correct the seed.`,
   });
+  // 6b's ruling on the land7 red — THE FOOTPRINT SECTION PLANS WHERE THE TOUCHES GO; IT DOES NOT
+  // SAY WHAT THE CHECKS READ. The same statement the standard §5 origin paragraph carries stays
+  // here, so a placed bracket's sheet says both ("no anchor datum" in §2 and "judges the bracket's
+  // arms and the clamps against it" here), and an anchored footprint sheet keeps it too.
+  steps.push({
+    text:
+      `How well YOU set it is not modelled: the file places the ${onBoard ? 'part' : 'blank'} at this origin and judges ` +
+      `${judged.against} against it, so an origin that is out by a little — or a ${onBoard ? 'part' : 'blank'} ` +
+      'sitting differently from what was measured — shifts the whole job relative to ' +
+      `${judged.relativeTo} without the app knowing. The only X/Y slack for that is this job's edge margin, ` +
+      `${fmtNum(plan.marginMm)} mm, which is the gap the content keeps from a stock edge rather than a locating ` +
+      'tolerance: a cut standing at that margin has used all of it.',
+  });
   const unread = plan.notes.find((n) => n.includes('soft endstop has not been read'));
   steps.push({
     text:
@@ -1784,7 +1803,10 @@ function registrationSteps(
   // #1070 — A BED-HELD JOB IS REGISTERED ON ITS CUT REGION, not the blank's edges: the six scans
   // and the four corner touches come from the plan the Cut step runs, so paper and console say the
   // same positions, in machine coordinates.
-  if (footprint !== undefined) return footprintRegistrationSteps(onBoard, facingRun, footprint);
+  // 6b's ruling on the land7 red: the footprint section does not REPLACE what the program is
+  // judged against — the sheet carries both (a placed bracket's sheet says it has no anchor datum
+  // and still says its checks judge the cut against the bracket's arms and its clamps).
+  if (footprint !== undefined) return footprintRegistrationSteps(onBoard, facingRun, footprint, judgedAgainstWords(job));
   // #743 §4.6/§4.7 — A DISC IS REGISTERED ON ITS RIM, not on a rectangle's edges. Four touches
   // through the centre-lines find the circle's extreme points; the centre sets the origin and the
   // span against the stated ⌀ refuses a different piece. The rectangle's probe-plan touches below
