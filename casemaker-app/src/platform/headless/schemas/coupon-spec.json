@@ -2980,6 +2980,42 @@
                     ],
                     "type": "object"
                   },
+                  "stock": {
+                    "additionalProperties": false,
+                    "description": "This setup’s own stock when it is not the job’s blank; omit for the blank.",
+                    "properties": {
+                      "length": {
+                        "description": "The setup’s stock extent along the work X, mm (#1082).",
+                        "exclusiveMinimum": 0,
+                        "type": "number"
+                      },
+                      "provenance": {
+                        "description": "`derived` = side 1’s freed extents; `stated` = the operator’s own numbers (which win).",
+                        "enum": [
+                          "derived",
+                          "stated"
+                        ],
+                        "type": "string"
+                      },
+                      "thickness": {
+                        "description": "The setup’s stock thickness, mm (measured when the house has it, else the blank’s stated one).",
+                        "exclusiveMinimum": 0,
+                        "type": "number"
+                      },
+                      "width": {
+                        "description": "The setup’s stock extent along the work Y, mm.",
+                        "exclusiveMinimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "length",
+                      "width",
+                      "thickness",
+                      "provenance"
+                    ],
+                    "type": "object"
+                  },
                   "toolItems": {
                     "additionalProperties": {
                       "items": {
@@ -4802,6 +4838,42 @@
                 "required": [
                   "instruction",
                   "confirm"
+                ],
+                "type": "object"
+              },
+              "stock": {
+                "additionalProperties": false,
+                "description": "This setup’s own stock when it is not the job’s blank; omit for the blank.",
+                "properties": {
+                  "length": {
+                    "description": "The setup’s stock extent along the work X, mm (#1082).",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  "provenance": {
+                    "description": "`derived` = side 1’s freed extents; `stated` = the operator’s own numbers (which win).",
+                    "enum": [
+                      "derived",
+                      "stated"
+                    ],
+                    "type": "string"
+                  },
+                  "thickness": {
+                    "description": "The setup’s stock thickness, mm (measured when the house has it, else the blank’s stated one).",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  "width": {
+                    "description": "The setup’s stock extent along the work Y, mm.",
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "length",
+                  "width",
+                  "thickness",
+                  "provenance"
                 ],
                 "type": "object"
               },
