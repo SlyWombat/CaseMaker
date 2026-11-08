@@ -87,8 +87,8 @@ function feedPoints(outcome: { ir: { operations: { moves: Move[] }[] } }): { x: 
   return out;
 }
 
-/** The floor's inner face: well away from the wall at y = 7 and from the region's edges. */
-const onFloor = (p: { x: number; y: number }): boolean => p.x > 1.5 && p.x < 8.5 && p.y > 1.5 && p.y < 5.5;
+/** The floor's inner face: clear of the wall's foot band (the flat's disc climbs it within R=3 mm of y=7) and of the region's edges. */
+const onFloor = (p: { x: number; y: number }): boolean => p.x > 1.5 && p.x < 8.5 && p.y > 1.5 && p.y < 3.5;
 
 describe('#1074 a flat floor inside a curved region', () => {
   it('plans the floor as a flat pass and leaves the ball the walls', () => {

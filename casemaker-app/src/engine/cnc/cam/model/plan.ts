@@ -4316,6 +4316,168 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // `maskCells === undefined` case already means ("the plan admits every point of every row").
     const extraMask = opts.extraRegionMasks?.get(region.id);
     const maskCells = extraMask ?? (flat === undefined ? undefined : (x: number, y: number): boolean => maskCellsExact(leftoverAbove, maskRing, x, y));
+    // #869/#966, SAFETY (the review's finding, item 1): "the ball alone" never meant one pass at
+    // the region's own full depth into untouched stock — that is the exact full-depth bite this
+    // file's own #959 item 5 and "THE REVIEW'S SAFETY FINDING" (above) exist to prevent. WITH a
+    // rough ahead, one level is enough (it already stepped down to within the band). With NONE,
+    // the ball must step down on its OWN row, same as a rough would, over as many levels as the
+    // region's depth needs.
+    const depth = flat === undefined ? paramsFor(ball ?? finishCutter).stepDown : Math.max(opts.stepDownMm, base.zTop - base.zBottom);
+
+    // #1074 — A PLANE INSIDE A CURVED REGION IS A POCKET FLOOR. `finishKindFor` judges the WHOLE
+    // region (FLAT_FINISH_AREA_SHARE of its 3D area under the flat threshold), so a recess whose
+    // floor is flat and whose walls are rounded is one curved field: the ball rasters the plane at
+    // the scallop step-over (the M1 tray's bottom recess, p4: 10.3 m and 6,607 s). The floor is
+    // found from the design's own top — the modal height over the region's footprint — and the
+    // cells where the FLAT's CL rests at that height are its own: the flat takes them in one floor
+    // pass, and the ball's mask excludes exactly those, keeping the walls, the fillets and the
+    // flat's foot band (where its disc already climbs the wall, its CL stands proud of the face).
+    // The pencil and the rest are untouched; with no flat or no ball the region is planned as before.
+    const FLOOR_DETECT_PITCH_MM = 0.5;
+    const FLOOR_LEVEL_TOL_MM = 0.05;
+    const FLOOR_AREA_SHARE = 0.3;
+    const floorFace = ((): {
+      level: number;
+      slopeDeg: number;
+      share: number;
+      mask: (x: number, y: number) => boolean;
+      flat: Tool;
+      rest: ReturnType<typeof clSurface>;
+    } | null => {
+      if (flat === undefined || prevCl === undefined || ball === undefined) return null;
+      const surface = prevCl;
+      const { min: [x0, y0], max: [x1, y1] } = roughRef.bounds;
+      const nx = Math.max(1, Math.ceil((x1 - x0) / FLOOR_DETECT_PITCH_MM));
+      const ny = Math.max(1, Math.ceil((y1 - y0) / FLOOR_DETECT_PITCH_MM));
+      const buckets = new Int32Array(nx * ny).fill(-1);
+      const heights = new Float64Array(nx * ny);
+      const counts = new Map<number, number>();
+      let total = 0;
+      for (let ix = 0; ix < nx; ix++) {
+        const x = x0 + (ix + 0.5) * FLOOR_DETECT_PITCH_MM;
+        for (let iy = 0; iy < ny; iy++) {
+          const y = y0 + (iy + 0.5) * FLOOR_DETECT_PITCH_MM;
+          if (!pointInPolygons(roughRegion.footprint, x, y)) continue;
+          const z = designTopAt(x, y);
+          if (z === null) continue;
+          const i = ix * ny + iy;
+          heights[i] = z;
+          const bucket = Math.round(z / (2 * FLOOR_LEVEL_TOL_MM));
+          buckets[i] = bucket;
+          counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+          total++;
+        }
+      }
+      if (total === 0) return null;
+      let mode = 0;
+      let modeCount = 0;
+      for (const [bucket, count] of counts) {
+        if (count > modeCount) {
+          mode = bucket;
+          modeCount = count;
+        }
+      }
+      const share = modeCount / total;
+      if (share < FLOOR_AREA_SHARE) return null;
+      let sum = 0;
+      for (let i = 0; i < buckets.length; i++) if (buckets[i] === mode) sum += heights[i]!;
+      const level = sum / modeCount;
+      // The face's own steepest slope, from its INTERIOR cells only: a boundary cell's neighbour
+      // is the wall, not the floor.
+      let steepest = 0;
+      for (let ix = 1; ix < nx - 1; ix++) {
+        for (let iy = 1; iy < ny - 1; iy++) {
+          const i = ix * ny + iy;
+          if (buckets[i] !== mode) continue;
+          const ixm = (ix - 1) * ny + iy;
+          const ixp = (ix + 1) * ny + iy;
+          const iym = ix * ny + iy - 1;
+          const iyp = ix * ny + iy + 1;
+          if (buckets[ixm] !== mode || buckets[ixp] !== mode || buckets[iym] !== mode || buckets[iyp] !== mode) continue;
+          const gx = (heights[ixp]! - heights[ixm]!) / (2 * FLOOR_DETECT_PITCH_MM);
+          const gy = (heights[iyp]! - heights[iym]!) / (2 * FLOOR_DETECT_PITCH_MM);
+          steepest = Math.max(steepest, Math.hypot(gx, gy));
+        }
+      }
+      const slopeDeg = (Math.atan(steepest) * 180) / Math.PI;
+      const mask = (x: number, y: number): boolean => {
+        const design = designTopAt(x, y);
+        if (design === null || Math.abs(design - level) > FLOOR_LEVEL_TOL_MM) return false;
+        const rest = surface.dropCutter(x, y);
+        return rest !== null && Math.abs(rest - level) <= FLOOR_LEVEL_TOL_MM;
+      };
+      return { level, slopeDeg, share, mask, flat, rest: surface };
+    })();
+    let floorPlanned = false;
+    if (floorFace !== null) {
+      // The flat's raster sizes its rows from the REGION's own steepest slope — the floor face's
+      // here, not the whole region's (which the rounded walls would price as a wall).
+      const floorRegion: RemainderRegion = {
+        ...roughRegion,
+        slopeDeg: [floorFace.slopeDeg, floorFace.slopeDeg],
+        slopeMedianDeg: floorFace.slopeDeg,
+      };
+      // #1054 — keyed by the flat, the face the mask rests on, and the op's own numbers.
+      const floorKey = stageKey('floor', cutterKeyOf(floorFace.flat), {
+        kind: 'flat-raster',
+        scallop: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
+        level: Number(floorFace.level.toFixed(3)),
+        slope: Number(floorFace.slopeDeg.toFixed(3)),
+        depth,
+        feeds: feedsOf(paramsFor(floorFace.flat)),
+        safeZ: opts.safeZMm,
+        hopZ: opts.hopZMm,
+        toolNumber: opts.toolNumberFor(floorFace.flat),
+        rpm: paramsFor(floorFace.flat).rpm,
+        air: opts.air,
+        rapid: opts.rapid,
+      });
+      const floorMemo = memoHit(floorKey);
+      const opsBefore = ops.length;
+      if (floorMemo !== undefined) {
+        pushStage('finish', ref, floorMemo.outcome, true);
+        floorPlanned = ops.length > opsBefore;
+      } else {
+        const planned = attempt('finish', floorFace.flat, ref, () => {
+          const out = finish({
+            cutter: floorFace.flat,
+            region: floorRegion,
+            regionRef: roughRef,
+            clSurface: floorFace.rest,
+            kind: 'flat-raster',
+            mesh: opts.geometry.triangles,
+            scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
+            maskCells: floorFace.mask,
+            materialTopAt: designTopAt,
+            stockTopZMm: 0,
+            stepDownMm: depth,
+            feeds: feedsOf(paramsFor(floorFace.flat)),
+            safeZMm: opts.safeZMm,
+            hopZMm: opts.hopZMm,
+            toolNumber: opts.toolNumberFor(floorFace.flat),
+            spindleRpm: paramsFor(floorFace.flat).rpm,
+            air: opts.air,
+            rapid: opts.rapid,
+          });
+          memoStore(floorKey, out);
+          return out;
+        });
+        // An empty floor op cut nothing: the ball keeps the floor (the note above states it).
+        floorPlanned = planned && ops.length > opsBefore;
+      }
+      if (floorPlanned) {
+        const text =
+          `"${region.id}": the floor — ${Math.round(floorFace.share * 100)} % of the region at one height — is a pocket floor: ` +
+          `the ${floorFace.flat.name || floorFace.flat.shape} takes it at its own step-over, and the ${finishCutter.name || finishCutter.shape} finishes only the walls and fillets`;
+        notes.push(text);
+        statements.push({ severity: 'info', code: 'goal-plan-tradeoff', count: 1, ids: [region.id], text });
+      }
+    }
+    // #1074 — the ball's mask: what the base mask admits, minus the floor only when that pass is
+    // actually posted (an empty floor op leaves the ball the whole region, as before).
+    const ballMaskCells = floorPlanned && floorFace !== null
+      ? (x: number, y: number): boolean => !floorFace.mask(x, y) && (maskCells === undefined || maskCells(x, y))
+      : maskCells;
 
     // 3. THE BALL'S ONE FINAL LEVEL: a single pass at the region's depth takes the band.
     //
@@ -4345,13 +4507,6 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       }
       return clBallCache;
     };
-    // #869/#966, SAFETY (the review's finding, item 1): "the ball alone" never meant one pass at
-    // the region's own full depth into untouched stock — that is the exact full-depth bite this
-    // file's own #959 item 5 and "THE REVIEW'S SAFETY FINDING" (above) exist to prevent. WITH a
-    // rough ahead, one level is enough (it already stepped down to within the band). With NONE,
-    // the ball must step down on its OWN row, same as a rough would, over as many levels as the
-    // region's depth needs.
-    const depth = flat === undefined ? paramsFor(ball ?? finishCutter).stepDown : Math.max(opts.stepDownMm, base.zTop - base.zBottom);
     // #960 — FLAT OR BALL BY THE REGION'S OWN SLOPE, with the threshold stated on the plan; the
     // constant is a parameter (shared with C's #959 skin pass) while the picture decides 1.9° vs 7.1°.
     // #982 — with no ball the slope limit is lifted: the flat raster covers the WHOLE remainder.
@@ -4393,6 +4548,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         finishBand,
         ballRadiusForMask,
         extraMask === undefined ? 'auto' : 'extra',
+        // #1074 — a floor the flat took changes the ball's mask (its cells are excluded).
+        floorPlanned ? 'floor' : '-',
       ],
       feeds: feedsOf(paramsFor(finishCutter)),
       safeZ: opts.safeZMm,
@@ -4417,7 +4574,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         mesh: opts.geometry.triangles,
         scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
         ...(ball === undefined ? { flatFallback: true } : {}),
-        maskCells,
+        maskCells: ballMaskCells,
         // #962 — the material field's answers past the region's own reach (the linker's disc and the
         // down-leg floor reach up to a cutter radius outside it): the goal/mesh top there, which is
         // the honest bound a wall or land beside a low region demands, and the stock top where the
