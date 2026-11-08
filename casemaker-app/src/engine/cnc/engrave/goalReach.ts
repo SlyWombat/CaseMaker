@@ -102,6 +102,28 @@ export function longestKnownReach(
 }
 
 /**
+ * #1075 — THE CUTTER THE BAND BELONGS TO. Under `cutWithinReach` the band truncates the WHOLE job
+ * to one reach, so the reach must be the shop's best among the cutters the run can use — not the
+ * finish pick's. The picker prices fidelity and does not know its choice becomes the job's depth
+ * limit (the toolholder: a ⌀1.5 x 8 ball picked, a 7 mm band, 87 % of the goal left standing at
+ * −10). The chosen cutter is kept when it already reaches the goal's need, so a shop whose pick IS
+ * the longest sees no change. Stated bands and the underside floor win upstream and are untouched.
+ */
+export function reachCutterFor(
+  goal: EngraveTargetObject,
+  chosen: Tool,
+  owned: readonly Tool[],
+  entries: readonly ToolLibraryEntry[],
+): Tool {
+  if (goal.cutWithinReach !== true) return chosen;
+  const chosenReach = knownReach(chosen, entries);
+  if (chosenReach === null) return chosen;
+  if (goalSideNeedMm(goal) <= chosenReach.mm + 1e-9) return chosen;
+  const longest = longestKnownReach(owned, entries);
+  return longest !== null && longest.reach.mm > chosenReach.mm + 1e-9 ? longest.tool : chosen;
+}
+
+/**
  * How deep below the STOCK TOP the cutter must go to reach the goal's lowest surface, mm — the
  * number the holder must clear. It equals the goal's own height only when the goal's top sits at
  * the stock top (the default placement): a goal sunk into the blank needs that much more, and one

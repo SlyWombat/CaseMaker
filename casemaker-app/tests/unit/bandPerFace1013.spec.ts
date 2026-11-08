@@ -147,6 +147,38 @@ describe('#1013 the depth band is per face', () => {
     expect(notesOf(bottomOut)).toContain("Cut only the stock's bottom 9 mm");
   }, 240_000);
 
+  it('#1075 under cutWithinReach the band follows the SHOP’s longest reach, not the finish pick’s', async () => {
+    // The finish pick is a 10 mm-flute flat (band 9). The shop also owns a 14 mm-flute flat: the
+    // goal is 20 mm deep, so the pick's reach would truncate 11 mm of it — the band must be the
+    // shop's longest reach (13), not the pick's 9.
+    const goal = goalOf(20, { cutWithinReach: true });
+    const job = jobOf(goal, 20);
+    const LONG_FLAT: Tool = flatEndMill(6, { number: 2, id: 'flat-6-long', name: 'flat-6 (14 mm flute)', fluteLength: 14 });
+    const shop: EngraveShopOpts = {
+      tools: [entry('inv:flat-6', FLAT), entry('inv:flat-6-long', LONG_FLAT)],
+    };
+    const input = await buildModelPlanInputForGoal(job, goal, REACH_TOOL, shop, 'top');
+    // RED at the parent: 9 — the picked finisher's own reach bounded the job.
+    expect(input.setups[0]!.bandMm).toBeCloseTo(13, 6);
+    const out = await planModelCam(input);
+    expect(deepest(out)).toBeGreaterThanOrEqual(-13 - 1e-6);
+    expect(deepest(out)).toBeLessThanOrEqual(-12.5);
+  }, 240_000);
+
+  it('#1075 a shop whose reach COVERS the goal needs no band at all', async () => {
+    // The same job with a 22 mm-flute owned flat: the reach covers the goal, so no truncation and
+    // no band (the plan cuts the goal's own 20 mm floor).
+    const goal = goalOf(20, { cutWithinReach: true });
+    const job = jobOf(goal, 20);
+    const COVERING: Tool = flatEndMill(6, { number: 2, id: 'flat-6-cover', name: 'flat-6 (22 mm flute)', fluteLength: 22 });
+    const shop: EngraveShopOpts = { tools: [entry('inv:flat-6', FLAT), entry('inv:flat-6-cover', COVERING)] };
+    const input = await buildModelPlanInputForGoal(job, goal, REACH_TOOL, shop, 'top');
+    expect(input.setups[0]!.bandMm).toBeUndefined();
+    const out = await planModelCam(input);
+    expect(deepest(out)).toBeLessThanOrEqual(-19.9);
+    expect(deepest(out)).toBeGreaterThanOrEqual(-20 - 1e-6);
+  }, 240_000);
+
   it('a plane that leaves the flipped side nothing to cut is refused by name', async () => {
     // The underside floor at the blank's own bottom: the flipped side has nothing left to remove.
     const plinthZero = goalOf(20, { underside: { kind: 'plinth', plinthMm: 0 } });
