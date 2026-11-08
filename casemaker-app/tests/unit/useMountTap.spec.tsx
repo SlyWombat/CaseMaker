@@ -283,7 +283,10 @@ describe('#642 the bracket-seat write-back', () => {
     expect(shop[0]!.key).toBe('bracket.seatMachineZ');
     expect(shop[0]!.value.value).toBeCloseTo(-65.32, 3);
     expect(shop[0]!.value.source).toBe('measured');
-    expect(shop[0]!.value.note).toContain('tapped on the bracket');
+    // #1070 (C2, 6b) — the bracket seat's note names the surface it was tapped on: the wasteboard
+    // beside the bracket's front arm, not the bracket's top (the reading is one bracket height
+    // above the seat). The pre-amendment wording ("tapped on the bracket") was wrong on the bench.
+    expect(shop[0]!.value.note).toContain('tapped on the wasteboard beside the bracket’s front arm');
     await waitFor(() => expect(screen.getByTestId('note-setups').textContent).toBe('the seat was recorded'));
   });
 
