@@ -32,7 +32,7 @@ import { memTrace } from '@/engine/cnc/memTrace';
 import { eventLine, eventStoreOf } from '@/engine/cnc/gcode/eventStore';
 import { DIAGNOSTIC_CAP } from '@/engine/cnc/emulator/timeline';
 import { partToWork } from '@/engine/cnc/frames';
-import type { FixtureEnvelope, ObstacleBox, Setup, Workholding } from '@/engine/cnc/setup';
+import type { FixtureEnvelope, ObstacleBox, PartSpec, Setup, Workholding } from '@/engine/cnc/setup';
 import { holderOf, type Mill } from '@/engine/cnc/machine';
 import { inflate } from '@/engine/cnc/fixture';
 import { ROTARY_JAW_KEEP_OUT_MM } from '@/engine/cnc/rotary/wrap';
@@ -564,6 +564,45 @@ export function stockFromSetup(tl: ManifoldToplevel, setup: Setup): { stock: Man
   rotated.delete();
   const bb = stock.boundingBox();
   return { stock, topZ: bb.max[2] };
+}
+
+/**
+ * #1059 — THE STOCK'S DECLARED SECTION against the SOLID built for it, IN THE STOCK'S OWN FRAME.
+ *
+ * `stockFromSetup` builds a rect section's box about the axis and then applies the placement's
+ * Rz, so a world-frame read of the Y/Z extents is the section only when `rotationZ` is 0: at 90°
+ * the WORLD X/Y extents are the section's — rotated with the length — and reading Y as the width
+ * would see the stock's LENGTH there and falsely refuse a correct block (6b's review of the first
+ * gate). The expected world extents are therefore the L × w × h box turned by `rotationZ`, all
+ * three axes compared:
+ *
+ *   X' = L·|cos| + w·|sin|,   Y' = L·|sin| + w·|cos|,   Z' = h.
+ *
+ * A rod built for a declared block fails this at every rotation (its Y/Z are the ⌀ envelope), which
+ * is the regression this gate exists to catch: a block job is never swept on a rod's solid.
+ * Null for anything that is not a block, and for a solid that matches its declaration.
+ */
+export function stockSectionMismatch(part: PartSpec, rotationZ: number, stock: ManifoldInstance): SweepDiagnostic | null {
+  if (part.kind !== 'cylinder') return null;
+  const section = part.section;
+  if (section?.kind !== 'rect') return null;
+  const rad = (rotationZ * Math.PI) / 180;
+  const c = Math.abs(Math.cos(rad));
+  const s = Math.abs(Math.sin(rad));
+  const expected = [part.length * c + section.width * s, part.length * s + section.width * c, section.height];
+  const bb = stock.boundingBox();
+  const got = [bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]];
+  const near = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-6;
+  if (near(got[0]!, expected[0]!) && near(got[1]!, expected[1]!) && near(got[2]!, expected[2]!)) return null;
+  const r3 = (v: number): string => String(Number(v.toFixed(3)));
+  return {
+    severity: 'error',
+    code: 'rotary-stock-section',
+    message:
+      `the stock built for this job is ${r3(got[0]!)} × ${r3(got[1]!)} × ${r3(got[2]!)} mm (X × Y × Z), but the job states a ` +
+      `${r3(part.length)} mm long ${r3(section.width)} × ${r3(section.height)} mm block at rotationZ ${r3(rotationZ)}° ` +
+      `(expected ${r3(expected[0]!)} × ${r3(expected[1]!)} × ${r3(expected[2]!)}) — a block job is never swept on a rod's solid`,
+  };
 }
 
 /**
@@ -1548,24 +1587,10 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // against the program's frame; this one re-reads the SOLID that was built against the section
   // the setup declares, so a builder regression or a new caller cannot let a W × H block ride a
   // round solid again (the one place a square can be "wrong but green", #1059 item 2).
-  const declared = setup.part.kind === 'cylinder' ? setup.part.section : undefined;
-  if (declared?.kind === 'rect') {
-    const sb = stock.boundingBox();
-    const gotW = sb.max[1] - sb.min[1];
-    const gotH = sb.max[2] - sb.min[2];
-    if (Math.abs(gotW - declared.width) > 1e-6 || Math.abs(gotH - declared.height) > 1e-6) {
-      stock.delete();
-      return {
-        ok: false,
-        diagnostics: [
-          {
-            severity: 'error',
-            code: 'rotary-stock-section',
-            message: `the stock built for this job is ${gotW.toFixed(3)} × ${gotH.toFixed(3)} mm about the axis, but the job states a ${declared.width} × ${declared.height} mm block — a block job is never swept on a rod's solid`,
-          },
-        ],
-      };
-    }
+  const sectionMismatch = stockSectionMismatch(setup.part, setup.placement.rotationZ, stock);
+  if (sectionMismatch !== null) {
+    stock.delete();
+    return { ok: false, diagnostics: [sectionMismatch] };
   }
 
   // A REST PASS (#410): the material the PREVIOUS program left is the material this one starts

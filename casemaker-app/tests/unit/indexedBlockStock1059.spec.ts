@@ -18,7 +18,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
-import { stockFromSetup, sweepTimeline, type SweepResult } from '@/workers/geometry/sweep';
+import { stockFromSetup, stockSectionMismatch, sweepTimeline, type SweepResult } from '@/workers/geometry/sweep';
 import { generateIndexed, type IndexedSpec } from '@/engine/cnc/cam/indexed';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { buildTimeline, parseGcode, stubSetup, Z1, type Setup } from '@/engine/cnc';
@@ -104,6 +104,24 @@ describe('#1059 a square bar sweeps as the block it is', () => {
     expect(s.result.boundingBox().max[2]).toBeCloseTo(HALF, 3);
     dispose(s);
   }, 240_000);
+
+  it('the section gate reads the stock in its own frame: a 90° block passes, a rod under a block declaration refuses', () => {
+    // 6b's review — the gate first read the WORLD Y/Z extents, so at rotationZ 90° it saw the
+    // stock's LENGTH as its width and refused a correct block. The expected extents are the
+    // declared box turned by rotationZ: X = w, Y = L, Z = h at 90°.
+    const rotated = stubSetup(STOCK, HOLD, { placement: { origin: [0, 0, 0], rotationZ: 90, source: 'stub' } });
+    const st = stockFromSetup(tl, rotated);
+    if ('severity' in st) throw new Error(st.message);
+    expect(stockSectionMismatch(rotated.part, rotated.placement.rotationZ, st.stock)).toBeNull();
+    st.stock.delete();
+    // The OLD builder's solid — a rod of the ⌀ envelope — under the same block declaration is
+    // refused at every rotation (its Y/Z are the envelope, not the section).
+    const rod = tl.Manifold.cylinder(LENGTH, ENVELOPE_D / 2, ENVELOPE_D / 2, 32, false).rotate([0, 90, 0]);
+    const bad = stockSectionMismatch(STOCK, 0, rod);
+    rod.delete();
+    expect(bad?.code).toBe('rotary-stock-section');
+    expect(bad?.message).toContain('a block job is never swept on a rod');
+  }, 120_000);
 
   it('a section with no width or height is refused by name, not swept', () => {
     const bad = stubSetup({ ...STOCK, section: { kind: 'rect', width: 0, height: SIDE } }, HOLD);
