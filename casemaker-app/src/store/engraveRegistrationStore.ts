@@ -30,6 +30,12 @@ import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
 
 export interface FirstRegistration {
   jobId: string;
+  /**
+   * #1088 — THE SETUP THIS REGISTRATION MEASURED. Absent on a record written by an older caller
+   * (and on the job-keyed `records[jobId]` entry, which is the job's FIRST setup by definition).
+   * Side 2 of a flip job records under its own setup id, so side 1's readers keep reading side 1.
+   */
+  setupId?: string | null;
   /** Where it was measured. A reading on another machine is not this machine's stock. */
   target: { host: string; port: number };
   /** The approved plan the registration ran, kept so the re-touch uses the same choreography. */
@@ -63,10 +69,33 @@ export interface SurfaceSpreadMeasurement {
 }
 
 interface EngraveRegistrationState {
+  /**
+   * THE JOB'S FIRST SETUP, keyed by job — the entry every existing reader means by "the
+   * registration" (`firstRegistrationFor`, the release gate, the post-facing re-touch, the bed's
+   * mount-tap readers). #1088 writes this entry from the first setup and never from a later one.
+   */
   records: Record<string, FirstRegistration>;
+  /**
+   * #1088 — EVERY SETUP'S REGISTRATION, keyed by job AND setup (`registrationKey`). A flip job's
+   * side 2 lands here (and its side 1 lands here too, beside the job-keyed entry), so a per-setup
+   * reader — the Register card's done state, the release gate on a later setup's program — asks a
+   * question that has one setup as its answer.
+   */
+  bySetup: Record<string, FirstRegistration>;
   surfaces: Record<string, SurfaceSpreadMeasurement>;
   record: (
     jobId: string,
+    target: { host: string; port: number },
+    plan: RegistrationPlan,
+    outcome: RegistrationOutcome,
+    surface?: { plane: { offset: number; slopeX: number; slopeY: number }; z0: number } | null,
+    /** The setup this registration measured; given, the record is also filed under it. */
+    setupId?: string | null,
+  ) => void;
+  /** #1088 — file a LATER setup's registration (side 2's) without touching the job-keyed entry. */
+  recordSetup: (
+    jobId: string,
+    setupId: string,
     target: { host: string; port: number },
     plan: RegistrationPlan,
     outcome: RegistrationOutcome,
@@ -81,16 +110,38 @@ interface EngraveRegistrationState {
   clear: (jobId: string) => void;
 }
 
+/** #1088 — the per-setup key: a job id and a setup id cannot collide with a job id alone. */
+export const registrationKey = (jobId: string, setupId: string): string => `${jobId}::${setupId}`;
+
 export const useEngraveRegistrationStore = create<EngraveRegistrationState>((set) => ({
   records: {},
+  bySetup: {},
   surfaces: {},
 
-  record: (jobId, target, plan, outcome, surface = null) =>
+  record: (jobId, target, plan, outcome, surface = null, setupId = null) =>
+    set((s) => {
+      const rec: FirstRegistration = {
+        jobId,
+        ...(setupId === null ? {} : { setupId }),
+        target: { host: target.host, port: target.port },
+        plan,
+        outcome,
+        surface: surface === null ? null : { plane: { ...surface.plane }, z0: surface.z0 },
+        measuredAt: new Date().toISOString(),
+      };
+      return {
+        records: { ...s.records, [jobId]: rec },
+        ...(setupId === null ? {} : { bySetup: { ...s.bySetup, [registrationKey(jobId, setupId)]: rec } }),
+      };
+    }),
+
+  recordSetup: (jobId, setupId, target, plan, outcome, surface = null) =>
     set((s) => ({
-      records: {
-        ...s.records,
-        [jobId]: {
+      bySetup: {
+        ...s.bySetup,
+        [registrationKey(jobId, setupId)]: {
           jobId,
+          setupId,
           target: { host: target.host, port: target.port },
           plan,
           outcome,
@@ -112,9 +163,11 @@ export const useEngraveRegistrationStore = create<EngraveRegistrationState>((set
     set((s) => {
       const records = { ...s.records };
       delete records[jobId];
+      const prefix = `${jobId}::`;
+      const bySetup = Object.fromEntries(Object.entries(s.bySetup).filter(([key]) => !key.startsWith(prefix)));
       const surfaces = { ...s.surfaces };
       delete surfaces[jobId];
-      return { records, surfaces };
+      return { records, bySetup, surfaces };
     }),
 }));
 
@@ -173,7 +226,31 @@ function matchingSurface(
   return rec.target.host === target.host && rec.target.port === target.port ? rec : null;
 }
 
+/**
+ * #1088 — ONE SETUP'S REGISTRATION for this machine, or null: the per-setup question the Register
+ * card and the release gate's setup check ask. Setup 1's record is also in `records[jobId]`, so
+ * this and `firstRegistrationFor` answer the same thing for setup 1.
+ */
+export function setupRegistrationFor(
+  jobId: string,
+  setupId: string,
+  target: { host: string; port: number },
+): FirstRegistration | null {
+  return matching(useEngraveRegistrationStore.getState().bySetup[registrationKey(jobId, setupId)], target);
+}
+
+/** The same question as a render subscription, so a later registration updates the card. */
+export function useSetupRegistration(
+  jobId: string,
+  setupId: string | null,
+  target: { host: string; port: number } | null,
+): FirstRegistration | null {
+  return useEngraveRegistrationStore((s) =>
+    setupId === null || target === null ? null : matching(s.bySetup[registrationKey(jobId, setupId)], target),
+  );
+}
+
 /** Test seam: forget every registration and every cut-extent measurement. */
 export function resetEngraveRegistrationStore(): void {
-  useEngraveRegistrationStore.setState({ records: {}, surfaces: {} });
+  useEngraveRegistrationStore.setState({ records: {}, bySetup: {}, surfaces: {} });
 }

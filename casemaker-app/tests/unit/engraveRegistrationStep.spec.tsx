@@ -1491,10 +1491,55 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
     expect(Math.abs(Number(line![1]) - G54.x)).toBeLessThan(0.01);
     expect(Math.abs(Number(line![2]) - G54.y)).toBeLessThan(0.2);
     expect(Math.abs(Number(line![3]) - SURFACE)).toBeLessThan(0.01);
-    // SIDE 1'S RECORD IS NOT REPLACED: the store is keyed by job, so side 2's measurement is shown
-    // and written but not recorded there (the per-setup record is #1088's follow-up).
+    // #1088 — THE RECORD IS THE SETUP'S OWN: filed under the flipped setup's id, never over the
+    // job-keyed entry (which is side 1's).
     expect(useEngraveRegistrationStore.getState().records[job.id]).toBeUndefined();
-    expect(screen.getByTestId('engrave-registration-recorded').textContent).toContain('not recorded against the release gate');
+    expect(useEngraveRegistrationStore.getState().bySetup[`${job.id}::${job.setups![0]!.id}`]).toBeDefined();
+    expect(screen.getByTestId('engrave-registration-recorded').textContent).toContain('Setup 1’s registration recorded');
+  }, 60_000);
+
+  it('routes by the Cut screen’s CURRENT setup: setup 2 is the flipped card and files its own record, setup 1 is the ordinary one', async () => {
+    // A real two-setup flip job: side 1 at setups[0] (registered, as the sheet prints it), the flip
+    // at setups[1]. The card must follow the setup the Cut screen says is next, not setups[0].
+    const sideOne = jobWithPlan(makePlan(-56.172));
+    const flipped = flipJob().setups![0]!;
+    const job: EngraveJob = {
+      ...sideOne,
+      stock: { ...sideOne.stock, length: 90, width: 60, thickness: 20 },
+      setups: [sideOne.setups![0]!, { ...flipped, id: 'setup-flip' }],
+    };
+    flipLocation();
+    measuredSideOne(job);
+    useEngraveJobStore.setState({ job });
+
+    // SETUP 1 SELECTED: the ordinary card, exactly as before — no flip card, side 1's plan named.
+    const one = render(<EngraveRegistrationStep job={job} target={TARGET} setupIndex={1} />);
+    expect(screen.getByTestId('engrave-registration-plan').textContent).toContain('Setup 1');
+    expect(screen.queryByTestId('engrave-registration-flip')).toBeNull();
+    one.unmount();
+
+    // SETUP 2 SELECTED: the flipped card, and the run's record lands under setup 2's own id.
+    const lines: string[] = [];
+    setMachineConsoleLoader(async () => flipController(lines));
+    render(<EngraveRegistrationStep job={job} target={TARGET} setupIndex={2} />);
+    expect(screen.getByTestId('engrave-registration-flip')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-registration-plan')).toBeNull();
+
+    act(() => {
+      useEngraveRunStore.setState({ acknowledged: true });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-start'));
+    });
+    await screen.findByTestId('engrave-registration-verdict', undefined, { timeout: 5000 });
+    await writeOrigin();
+
+    // #1088 — the record is setup 2's, and setup 1's job-keyed record is untouched.
+    const setupRecord = useEngraveRegistrationStore.getState().bySetup[`${job.id}::setup-flip`];
+    expect(setupRecord).toBeDefined();
+    expect(setupRecord!.setupId).toBe('setup-flip');
+    expect(useEngraveRegistrationStore.getState().records[job.id]).toBeUndefined();
+    expect(screen.getByTestId('engrave-registration-recorded').textContent).toContain('Setup 2’s registration recorded');
   }, 60_000);
 
   it('a corner Z outside the carried Z0’s band stops the run by name, and no bore is entered', async () => {

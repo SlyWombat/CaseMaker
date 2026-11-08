@@ -191,6 +191,28 @@ function seedRegistration(job: EngraveJob, outcome: RegistrationOutcome = FIRST_
   useEngraveRegistrationStore.getState().record(job.id, TARGET, planned.plan, outcome);
 }
 
+/**
+ * #1088 — a LATER setup's registration (side 2's), filed under its own setup id. The Run gate
+ * requires THIS record for a program whose setupIndex is above 1; setup 1's job-keyed record does
+ * not stand in for it.
+ */
+function seedSetupRegistration(job: EngraveJob, setupId: string, outcome: RegistrationOutcome = FIRST_OUTCOME): void {
+  const { settings } = registrationSettings(null);
+  const planned = planRegistration(
+    {
+      stock: { xMin: 0, yMin: 0, xMax: 38.1, yMax: 76.2, cornerRadius: 3 },
+      mount: 'vise',
+      expectedSurface: { machineZ: outcome.surfaceZ, from: 'the turned blank, as registered' },
+      seekFromMachineZ: outcome.seekFromMachineZ,
+      fixtureBelowSurfaceMm: 0.72,
+      cutCentre: { x: 24, y: 43 },
+    },
+    settings,
+  );
+  if (!planned.ok) throw new Error(planned.reason);
+  useEngraveRegistrationStore.getState().recordSetup(job.id, setupId, TARGET, planned.plan, outcome);
+}
+
 const sent: string[] = [];
 const uploaded: string[] = [];
 
@@ -452,7 +474,10 @@ describe('#469 the release step', () => {
   });
 
   it('uploads every program, plays them in order, and sends no vacuum word between them', async () => {
-    renderStep(twoSetupJob());
+    const job = twoSetupJob();
+    // #1088 — program 2 is setup 2's, and a later setup's program now needs that setup's record.
+    seedSetupRegistration(job, 'setup-2');
+    renderStep(job);
     await uploadAndStart();
 
     // #419 decision 4 — every file the release plays owns the vacuum span, including the middle
@@ -788,7 +813,10 @@ describe('#469 the release step', () => {
     setHouseClientLoader(async () => client);
     await useLocationStore.getState().refresh();
 
-    renderStep(twoSetupJob());
+    const job = twoSetupJob();
+    // #1088 — the resume plays program 2, which is setup 2's and needs setup 2's record.
+    seedSetupRegistration(job, 'setup-2');
+    renderStep(job);
     fireEvent.click(await screen.findByTestId('engrave-release-upload'));
     fireEvent.click(screen.getByTestId('engrave-release-upload-confirm-send'));
     await screen.findByTestId('engrave-release-start');
@@ -806,6 +834,26 @@ describe('#469 the release step', () => {
     expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Two-setup-job-p2.nc']);
     // Program 2 carries M332 only; the vacuum was off before the resume, so the step switches it on.
     expect(sent).toContain('M331');
+  }, 30000);
+
+  it('#1088 — setup 2’s program refuses by name until setup 2 is registered, and nothing is played', async () => {
+    // Setup 1 is registered; setup 2 is NOT. Before this gate, program 2 played with no registration
+    // at all — a non-facing flip job would cut side 2 off side 1's record, or off nothing.
+    const job = twoSetupJob();
+    seedRegistration(job);
+    renderStep(job, [P1, P2]);
+    await uploadAndStart();
+    await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+    fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
+    fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
+    const before = sent.length;
+    fireEvent.click(screen.getByTestId('engrave-release-change-done'));
+
+    await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 5000 });
+    expect(record()?.notes.join('\n')).toContain('setup 2 is not registered — run the Register step for setup 2 first.');
+    // NOTHING SENT AT ALL: no play line, no vacuum word, no home — the gate is before every line.
+    expect(sent.slice(before)).toEqual([]);
+    expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Two-setup-job-p1.nc']);
   }, 30000);
 
   it('an unticked Resume is disabled and sends nothing', async () => {
@@ -861,7 +909,9 @@ describe('#469 the release step', () => {
   }, 30000);
 
   it('a start that fails after M331 says the vacuum is on and closes the span', async () => {
-    renderStep(twoSetupJob());
+    const job = twoSetupJob();
+    seedSetupRegistration(job, 'setup-2'); // #1088 — setup 2 is registered; this test is not the gate.
+    renderStep(job);
     await uploadAndStart();
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
 

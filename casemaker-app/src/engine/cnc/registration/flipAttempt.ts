@@ -62,6 +62,11 @@ const r3 = (v: number): number => Math.round(v * 1000) / 1000;
 export interface FlipAttemptInput {
   /** Side 1's posted bore centres, mounted work XY — the ONE source of the holes. */
   sideOneBores: readonly { x: number; y: number }[] | null;
+  /**
+   * #1088 — WHICH setup is the flipped one. Absent: the first setup that states a flip. The Cut
+   * screen names the setup whose programs are next, so a two-setup flip job registers setups[1].
+   */
+  setupIndex?: number;
   settings: RegistrationSettings;
   /** The checked-out probe's measured tip, mm; null when none is resolved. */
   probeTipDiameterMm: number | null;
@@ -72,8 +77,12 @@ export interface FlipAttemptInput {
 }
 
 /** The flipped setup, or null. Exactly the setup a flip job registers side 2 on. */
-export function flippedSetup(job: EngraveJob): { index: number; setup: JobSetup } | null {
+export function flippedSetup(job: EngraveJob, setupIndex?: number): { index: number; setup: JobSetup } | null {
   const setups = job.setups ?? [];
+  if (setupIndex !== undefined) {
+    const setup = setups[setupIndex];
+    return setup !== undefined && setup.flip !== undefined ? { index: setupIndex, setup } : null;
+  }
   for (let i = 0; i < setups.length; i++) {
     const setup = setups[i]!;
     if (setup.flip !== undefined) return { index: i, setup };
@@ -82,7 +91,7 @@ export function flippedSetup(job: EngraveJob): { index: number; setup: JobSetup 
 }
 
 export function planFlipAttempt(job: EngraveJob, input: FlipAttemptInput): FlipAttemptResult {
-  const flipped = flippedSetup(job);
+  const flipped = flippedSetup(job, input.setupIndex);
   if (flipped === null) return null;
   const { setup, index } = flipped;
   if (input.sideOneBores === null || input.sideOneBores.length !== 2) {
@@ -171,11 +180,11 @@ export interface FlipJobInputs {
  * `planFlipSetups` from side 1's locating hold): they are side 1's bores seen from side 2, and
  * `flipReflection` is its own inverse, so the bores planFlipAttempt reflects back are exactly the
  * pins the job states. A setup that states no pins has nothing to register on and is refused by
- * name — never re-planned from a guess. Null when the FIRST setup is not flipped: the Cut step's
- * side-1 path is unchanged, and a flip on a later setup is routed by the caller.
+ * name — never re-planned from a guess. Null when the named setup (default: the first) is not
+ * flipped: the Cut step's ordinary path is unchanged.
  */
-export function planFlipAttemptForJob(job: EngraveJob, input: FlipJobInputs): FlipAttemptResult {
-  const setup = job.setups?.[0];
+export function planFlipAttemptForJob(job: EngraveJob, input: FlipJobInputs, setupIndex = 0): FlipAttemptResult {
+  const setup = job.setups?.[setupIndex];
   if (setup === undefined || setup.flip === undefined) return null;
   const pins = setup.pins?.at ?? null;
   if (pins === null) {
@@ -189,5 +198,5 @@ export function planFlipAttemptForJob(job: EngraveJob, input: FlipJobInputs): Fl
   const width0 = setup.stock?.width ?? job.stock.width;
   // The stored pair is side 2's frame; the bores are the same physical points seen from side 1.
   const sideOneBores = reflectedPins(pins, setup.flip.axis, { xMax: length0, yMax: width0 });
-  return planFlipAttempt(job, { ...input, sideOneBores });
+  return planFlipAttempt(job, { ...input, sideOneBores, setupIndex });
 }

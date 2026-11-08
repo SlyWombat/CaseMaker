@@ -142,6 +142,13 @@ export interface EngraveRegistrationStepProps {
   job: EngraveJob;
   /** Where the machine was last reached, or null. The step cannot do anything without one. */
   target: { host: string; port: number } | null;
+  /**
+   * #1088 — WHICH SETUP'S PROGRAMS ARE NEXT, 1-based — the Cut screen's own setup source (the index
+   * the run sheet prints, from the release's next unfinished program). A flipped setup registers on
+   * its bores; any other setup keeps the step's existing path, whose plan is setup 1's. Defaults to
+   * setup 1 for every caller that has no such notion.
+   */
+  setupIndex?: number;
 }
 
 type Phase = 'idle' | 'running' | 'measured' | 'writing' | 'recorded' | 'failed';
@@ -222,8 +229,11 @@ function marginRefusal(outcome: RegistrationOutcome): boolean {
   return measuredXY && !outcome.withinMargin;
 }
 
-export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStepProps): JSX.Element {
+export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: EngraveRegistrationStepProps): JSX.Element {
   const { plan, why } = approvedPlan(job);
+  const setupNumber = Number.isInteger(setupIndex) && setupIndex >= 1 ? setupIndex : 1;
+  /** The setup the Cut screen says is next; its id is where its registration is filed. */
+  const selectedSetup = job.setups?.[setupNumber - 1] ?? null;
   // #797 follow-up — THE REGISTER CARD HOLDS THE ACTION. With no approved plan, the planner's
   // proposal is computed HERE, from the same machine record, shop defaults and engine call the
   // Setups section previews, and shown in one line. One press approves it and starts the run;
@@ -328,10 +338,10 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
    * − side 1's facing, from the same numbers the sheet prints). Null on a job with no flipped setup.
    */
   const flipAttempt = useMemo<FlipAttemptResult>(() => {
-    // The Cut step's side-1 path reads setups[0]; a flip job whose setup 0 is the flipped one is
-    // side 2's, and this step registers it on its bores instead. A flip on a LATER setup is routed
-    // by whoever mounts this card (the Cut screen's own setup source), not planned here.
-    if (job.setups?.[0]?.flip === undefined) return null;
+    // #1088 — THE CUT SCREEN'S CURRENT SETUP decides: the setup whose programs are next is the one
+    // this card registers. A flipped one (the bench's setups[1]) registers on its bores; every other
+    // setup keeps the step's existing path below, unchanged.
+    if (job.setups?.[setupNumber - 1]?.flip === undefined) return null;
     const seat = bracketSeatDatumFor(machineRecord)?.value;
     const touches = surfaces[job.id]?.assessment.touches ?? [];
     const top = touches.length === 0 ? null : Math.max(...touches.map((t) => t.z));
@@ -345,13 +355,17 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
             facingMm: job.facing?.enabled === true ? job.facing.depth : 0,
             toleranceMm: regSettings.surfaceToleranceMm,
           });
-    return planFlipAttemptForJob(job, {
-      settings: regSettings,
-      probeTipDiameterMm: probe?.tip?.diameterMm ?? null,
-      seekFromMachineZ,
-      z0: carried,
-    });
-  }, [job, machineRecord, surfaces, probe, seekFromMachineZ, regSettings]);
+    return planFlipAttemptForJob(
+      job,
+      {
+        settings: regSettings,
+        probeTipDiameterMm: probe?.tip?.diameterMm ?? null,
+        seekFromMachineZ,
+        z0: carried,
+      },
+      setupNumber - 1,
+    );
+  }, [job, machineRecord, surfaces, probe, seekFromMachineZ, regSettings, setupNumber]);
   const [proposalOpen, setProposalOpen] = useState(false);
   // #1070 (C8) — the placed bracket's position press (the bed profile's seed, from the hole grid).
   const [gridBusy, setGridBusy] = useState(false);
@@ -403,6 +417,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
   }
 
   const record = useEngraveRegistrationStore((s) => s.record);
+  /** #1088 — a later setup's registration is filed under its own setup id, never the job's. */
+  const recordSetup = useEngraveRegistrationStore((s) => s.recordSetup);
   // #797 — the one statement at Cut step 1 covers this step's probe-fitted ask.
   const statementGiven = useEngraveRunStore((s) => s.acknowledged);
   const measureSurface = useEngraveRegistrationStore((s) => s.measureSurface);
@@ -1017,6 +1033,9 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
       // per-setup record (named follow-up on #1088) — until then, the recorded sentence below says
       // exactly what was and was not written.
       if (flipRun) {
+        if (selectedSetup !== null) {
+          recordSetup(job.id, selectedSetup.id, target, runPlan, result.outcome, null);
+        }
         setWritten(a);
         setPhase('recorded');
         handleRef.current = null;
@@ -1031,6 +1050,8 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
         // #608 — carry the fitted tilt (plane + reference Z0) on the record when the measurement
         // fits one; a flat fit records null, so the Cut step re-posts only when there is a tilt.
         result.spread === undefined ? null : surfaceFitForPost(result.spread),
+        // #1088 — the setup this registration measured, so a per-setup reader asks and gets setup 1.
+        job.setups?.[0]?.id ?? null,
       );
       setWritten(a);
       setPhase('recorded');
@@ -1510,7 +1531,7 @@ export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStep
               </p>
               <p style={MUTED} data-testid="engrave-registration-recorded">
                 {flipRun
-                  ? 'Side 2’s origin is written. It is not recorded against the release gate yet: the registration record holds side 1’s measurement, and a per-setup record is #1088’s named follow-up.'
+                  ? `Setup ${setupNumber}’s registration recorded for the release step — side 2’s origin is written from the bores and the front pair.`
                   : 'Registration recorded for the release step, with the plan that was approved.'}
               </p>
             </div>
