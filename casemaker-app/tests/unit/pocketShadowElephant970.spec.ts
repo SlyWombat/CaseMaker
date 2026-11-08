@@ -335,7 +335,10 @@ describe.skipIf(process.env[ENV] === undefined)(
             .join('\n'),
       ).toEqual([]);
     },
-    600_000,
+    // The elephant's own plan plus the per-move body check measured ~5.5 min on an idle 16-core
+    // box and crossed 600 s under two concurrent suites (the check had finished; the timer had
+    // not). 20 min is this spec's stated budget, matching the figure acceptance case's wall.
+    1_200_000,
   );
 });
 
