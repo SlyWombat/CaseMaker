@@ -41,6 +41,12 @@ export function renderRunSheetMarkdown(s: RunSheet, footerNote?: string): string
       out.push('');
       out.push(runSheetDiagramSvg(s.diagram));
     }
+    // #1073(a) — the flip drawing sits on its own setup's page, the same SVG string the app's
+    // section carries; markdown keeps it inline, self-contained.
+    if (section.flipDiagramSvg !== undefined) {
+      out.push('');
+      out.push(section.flipDiagramSvg);
+    }
     // #489 — the cutter drawing belongs under the section that names the cutter, matching the
     // app's RunSheetView. Markdown keeps the SVG inline; it is self-contained.
     if (section.id === 'need' && s.toolProfileSvg !== undefined) {
