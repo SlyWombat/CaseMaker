@@ -34,6 +34,22 @@ export type StatedSquareCorners = readonly StockCorner[] | undefined;
 /** Canonical order — the corners are printed and read in one order. */
 export const STOCK_CORNERS: readonly StockCorner[] = ['FL', 'FR', 'BL', 'BR'];
 
+/**
+ * #1073 — THE LOCATING BORE'S DIAMETER, mm. The bore is not a drill's own size: it is HELICAL
+ * INTERPOLATION of an owned flat (the maintainer's shop is 1/8 in only — #977), and ⌀6 is the
+ * hole the wired V2's ⌀2 tip enters with room to touch its walls from the centre. The hold's
+ * `diameterMm` is this bore; the cutter is whatever flat bores it.
+ */
+export const FLIP_BORE_DIAMETER_MM = 6;
+
+/**
+ * #1073 — the chip clearance the locating bore keeps past the job's breakthrough, mm (6b's
+ * amendment B). The bore only has to let the probe enter from side 2, so it stops HALF A
+ * MILLIMETRE past the blank's underside (the job's breakthrough, 0.3 by default, + this 0.2),
+ * not the old 2 mm — the maintainer's own question on 11-07: "why 6 mm into the wasteboard?".
+ */
+export const FLIP_BORE_CHIP_CLEARANCE_MM = 0.2;
+
 /** The corners the blank states as square: the stated set, deduped and canonically ordered, or all
  *  four when the stock states none. Always a fresh array. */
 export function squareCornersOf(stated: StatedSquareCorners): StockCorner[] {

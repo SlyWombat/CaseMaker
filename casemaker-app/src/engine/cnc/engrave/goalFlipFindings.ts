@@ -29,7 +29,8 @@ import {
   type CoverageMesh,
 } from './goalCoverage';
 import { goalFlipPlan, sideWords, type FlipPlan } from './goalFlipPlan';
-import { dowelHold, FLIP_BORE_CHIP_CLEARANCE_MM } from './goalFlipSetups';
+import { dowelHold } from './goalFlipSetups';
+import { FLIP_BORE_CHIP_CLEARANCE_MM } from './flipChoice';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 
 /** The measure the finding is built from, kept as data so a caller can assert on it. */

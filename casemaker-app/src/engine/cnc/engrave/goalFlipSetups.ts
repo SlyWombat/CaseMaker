@@ -31,7 +31,7 @@ import { targetObjectMesh } from '@/engine/import/targetObject';
 import { orient, type Mat } from '@/engine/cnc/setups/orient';
 import type { Face, MountSpec } from '@/engine/cnc/setups/types';
 import { jobMount, jobSetups } from './jobSetup';
-import { flipMatrix, flipOrientation } from './flipChoice';
+import { flipMatrix, flipOrientation, FLIP_BORE_CHIP_CLEARANCE_MM, FLIP_BORE_DIAMETER_MM } from './flipChoice';
 import { newId } from '@/utils/id';
 import type { EngraveJob, EngraveTargetObject, JobSetup, JobSetupPins, SetupFlip } from '@/types/engraveJob';
 import { coverageTriangles, sampleCoverageField, type CoverageMesh } from './goalCoverage';
@@ -269,9 +269,9 @@ export function goalForFlip(target: EngraveTargetObject, stock: Box3, axis: Setu
 
 /** The dowel holes setup 1 leaves: where they go, their diameter and their depth. */
 export interface DowelHold {
-  /** Diameter of the cutter the shop OWNS that makes the bore, mm (⌀5–6 on the flip path). */
+  /** The BORE's diameter, mm — ⌀6 on the flip path, helically interpolated, not the cutter's own size. */
   diameterMm: number;
-  /** The cutter's registry key, for the sentence. */
+  /** The cutter's registry key that bores it, for the sentence. */
   cutter: string;
   /** Through the stock, through the job's breakthrough and the chip clearance — into the board, mm. */
   depthMm: number;
@@ -279,56 +279,54 @@ export interface DowelHold {
   at: [{ x: number; y: number }, { x: number; y: number }];
 }
 
-/**
- * #1073 — the chip clearance the locating bore keeps past the job's breakthrough, mm (6b's
- * amendment B). The bore only has to let the probe enter from side 2, so it stops HALF A
- * MILLIMETRE past the blank's underside (breakthrough 0.3 + this 0.2), not the old 2 mm — the
- * maintainer's own question on 11-07: "why 6 mm into the wasteboard?".
- */
-export const FLIP_BORE_CHIP_CLEARANCE_MM = 0.2;
+/** The tool's stated reach, mm — the SHOULDER when it states one, else the FLUTE (the #785 rule);
+ *  null when the record states neither and the reach is simply unknown. */
+function statedReachMm(tool: Tool): number | null {
+  const positive = (v: number | null): number | null => (v !== null && Number.isFinite(v) && v > 0 ? v : null);
+  return positive(tool.shoulderLength) ?? positive(tool.fluteLength);
+}
 
 /**
- * #911/#1073 — THE CUTTER THE LOCATING BORES ARE MADE WITH. A pin's hole, not the catalogue's
- * finest: the first cut picked the NARROWEST drill, which on a shop that owns a 0.2 mm one
- * proposed ⌀0.2 × 35 locating holes — a hole no dowel fits and no hand can find.
+ * #1073 — THE CUTTER THE LOCATING BORES ARE MADE WITH.
  *
- * The bore is ⌀5–6 — the wired V2's ⌀2 tip needs the room to touch its walls — and it is bored
- * with an owned FLAT, because the owned drills have no hardwood rows. So the LARGEST flat in
- * ⌀5–6 wins. When the shop has none that size the chain stays honest, never empty: a ⌀5–6 drill
- * (a plastic shop may feed it), then a drill or a flat a locating pin is made for (⌀2.5–6, the
- * largest), then the narrowest drill, then a small flat — a job is never left without a hold it
- * could actually use.
+ * The bore is ⌀6 and it is HELICAL INTERPOLATION, not a drill's own size — the maintainer's shop
+ * is 1/8 in only (#977), so there is no ⌀5–6 cutter to find, and a ⌀6 drill could not make the
+ * hole the wired V2's ⌀2 tip enters with room anyway. A flat SMALLER than the bore bores it out
+ * on a helix; the one that must win is the OWNED FLAT WITH THE LONGEST REACH, because the flute
+ * has to stand the whole depth of the bore (the M1 tray's 25.5 mm is why the 3.175 × 42 exists).
+ *
+ * The rule: among owned flats narrower than the bore, the longest stated reach that reaches the
+ * depth wins (ties to the larger diameter, so the bore takes fewer orbits). A record that states
+ * no reach at all is kept as the fallback — the #785 rule treats an unknown reach as an assumption
+ * to state, not a refusal — and only a shop with no qualifying flat at all returns null.
+ *
+ * #911 stands in spirit: the first cut picked the narrowest tool and proposed ⌀0.2 holes; a hold
+ * must be a hole a probe can enter.
  */
-export function ownedBoreCutter(tools?: readonly { key: string; tool: Tool }[]): { tool: Tool; key: string } | null {
+export function ownedBoreCutter(
+  tools?: readonly { key: string; tool: Tool }[],
+  needDepthMm = 0,
+): { tool: Tool; key: string } | null {
   const entries = tools ?? getTools();
-  let boreMill: { tool: Tool; key: string; d: number } | null = null;
-  let boreDrill: { tool: Tool; key: string; d: number } | null = null;
-  let pinDrill: { tool: Tool; key: string; d: number } | null = null;
-  let pinMill: { tool: Tool; key: string; d: number } | null = null;
-  let anyDrill: { tool: Tool; key: string; d: number } | null = null;
-  let smallMill: { tool: Tool; key: string; d: number } | null = null;
+  let reaches: { tool: Tool; key: string; d: number; reach: number } | null = null;
+  let unknown: { tool: Tool; key: string; d: number } | null = null;
   for (const entry of entries) {
+    if (entry.tool.shape !== 'flat') continue;
     const d = cuttingDiameter(entry.tool);
     if (d === null || !(d > 0)) continue;
-    const pinSized = d >= 2.5 && d <= 6;
-    const boreSized = d >= 5 && d <= 6;
-    if (entry.tool.shape === 'drill') {
-      if (anyDrill === null || d < anyDrill.d) anyDrill = { tool: entry.tool, key: entry.key, d };
-      if (pinSized && (pinDrill === null || d > pinDrill.d)) pinDrill = { tool: entry.tool, key: entry.key, d };
-      if (boreSized && (boreDrill === null || d > boreDrill.d)) boreDrill = { tool: entry.tool, key: entry.key, d };
+    // A flat AT the bore's size cannot interpolate it — it would rub, not cut, the wall.
+    if (!(d < FLIP_BORE_DIAMETER_MM)) continue;
+    const reach = statedReachMm(entry.tool);
+    if (reach === null) {
+      if (unknown === null || d > unknown.d) unknown = { tool: entry.tool, key: entry.key, d };
       continue;
     }
-    if (entry.tool.shape === 'flat' && boreSized && (boreMill === null || d > boreMill.d)) {
-      boreMill = { tool: entry.tool, key: entry.key, d };
-    }
-    if (entry.tool.shape === 'flat' && pinSized && (pinMill === null || d > pinMill.d)) {
-      pinMill = { tool: entry.tool, key: entry.key, d };
-    }
-    if (entry.tool.shape === 'flat' && d <= 6 && (smallMill === null || d < smallMill.d)) {
-      smallMill = { tool: entry.tool, key: entry.key, d };
+    if (reach < needDepthMm) continue;
+    if (reaches === null || reach > reaches.reach || (reach === reaches.reach && d > reaches.d)) {
+      reaches = { tool: entry.tool, key: entry.key, d, reach };
     }
   }
-  const best = boreMill ?? boreDrill ?? pinDrill ?? pinMill ?? anyDrill ?? smallMill;
+  const best = reaches ?? unknown;
   return best === null ? null : { tool: best.tool, key: best.key };
 }
 
@@ -360,10 +358,6 @@ export function dowelHold(
   about: 'x' | 'y',
   tools?: readonly { key: string; tool: Tool }[],
 ): DowelHold | null {
-  const drill = ownedBoreCutter(tools);
-  if (drill === null) return null;
-  const diameter = cuttingDiameter(drill.tool);
-  if (diameter === null || !(diameter > 0)) return null;
   const L = job.stock.length;
   const W = job.stock.width;
   const f = goalFootprint(target);
@@ -372,12 +366,16 @@ export function dowelHold(
   // the probe in from side 2, so it stops half a millimetre into the board under the blank — the
   // job's own breakthrough plus `FLIP_BORE_CHIP_CLEARANCE_MM` — never the old 2 mm.
   const depthMm = Number((job.stock.thickness + job.breakthrough + FLIP_BORE_CHIP_CLEARANCE_MM).toFixed(2));
+  // The cutter must stand the whole bore: the flute reaches the depth, and it is narrower than
+  // the ⌀6 bore so the helix can open it. The HOLD states the BORE, never the cutter's size.
+  const drill = ownedBoreCutter(tools, depthMm);
+  if (drill === null) return null;
   if (about === 'x') {
     // The line runs along X, in the +Y margin behind the part.
     const y = Math.min(W - margin, Math.max(f.maxY + margin, W - margin));
     const yEdge = Math.max(margin, Math.min(y, W - margin));
     return {
-      diameterMm: diameter,
+      diameterMm: FLIP_BORE_DIAMETER_MM,
       cutter: drill.key,
       depthMm,
       // Off the centre line: 30 % and 70 % of the stock, never 50 %.
@@ -390,7 +388,7 @@ export function dowelHold(
   const x = Math.min(L - margin, Math.max(f.maxX + margin, L - margin));
   const xEdge = Math.max(margin, Math.min(x, L - margin));
   return {
-    diameterMm: diameter,
+    diameterMm: FLIP_BORE_DIAMETER_MM,
     cutter: drill.key,
     depthMm,
     at: [

@@ -91,7 +91,7 @@ describe('#872 the goal-unreached finding', () => {
     expect(finding!.goalFlipDetail).toMatch(/2 setups reach \d+ % of the surface/);
     expect(finding!.goalFlipDetail).toMatch(/how much of it the chosen cutter reproduces is the run's own simulation verdict/);
     // #1073 — 12 mm stock + the 0.3 mm breakthrough + the 0.2 mm chip clearance = 12.5 mm.
-    expect(finding!.goalFlipDetail).toMatch(/bores two ⌀3 mm locating holes 12\.5 mm deep — through the blank and 0\.5 mm into the board/);
+    expect(finding!.goalFlipDetail).toMatch(/bores two ⌀6 mm locating holes 12\.5 mm deep — through the blank and 0\.5 mm into the board/);
     expect(finding!.goalFlipDetail).toMatch(/in the margin, clear of the part/);
     expect(finding!.goalFlipDetail).toMatch(/the flipped setup registers on them/);
   });

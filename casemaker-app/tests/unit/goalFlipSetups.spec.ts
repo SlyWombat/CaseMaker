@@ -71,9 +71,13 @@ function placedBox(target: EngraveTargetObject): { min: number[]; max: number[] 
   return { min, max };
 }
 
-const DRILL: { key: string; tool: Tool } = {
-  key: 'user:drill-2.5',
-  tool: flatEndMill(2.5, { name: '2.5 mm drill', shape: 'drill', typeText: 'Drill', tipDiameter: 2.5, diameter: 2.5 }),
+/**
+ * #1073 — the bore's cutter: a 1/8 in O-flute whose 42 mm flute stands the whole 30.5 mm bore.
+ * (It bores ⌀6 by helical interpolation; the hold's diameter is the BORE, not this cutter.)
+ */
+const BORE_MILL: { key: string; tool: Tool } = {
+  key: 'user:o-flute-3.175-42',
+  tool: flatEndMill(3.175, { name: '1/8 in O-flute, 42 mm flute', fluteLength: 42 }),
 };
 
 describe('#872 the flip setup conversion', () => {
@@ -105,7 +109,7 @@ describe('#872 the flip setup conversion', () => {
 
   it('the plan becomes two setups with two goals, and the second names the hold’s pins', async () => {
     const { job, goal } = await sphereJob();
-    const result = planFlipSetups(job, goal, ['top', 'bottom'], [DRILL]);
+    const result = planFlipSetups(job, goal, ['top', 'bottom'], [BORE_MILL]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.setups).toHaveLength(2);
@@ -116,11 +120,11 @@ describe('#872 the flip setup conversion', () => {
     expect(result.setups[0]!.itemIds).toEqual([result.goals[0]!.id]);
     expect(result.setups[1]!.itemIds).toEqual([result.goals[1]!.id]);
 
-    // The hold: the shop's own 2.5 mm drill, through the stock into the board, in the margin.
+    // The hold: the ⌀6 bore, made by the shop's own long-reach flat, in the margin.
     expect(result.hold).not.toBeNull();
-    expect(result.hold!.diameterMm).toBeCloseTo(2.5, 6);
+    expect(result.hold!.diameterMm).toBeCloseTo(6, 6);
     expect(result.hold!.depthMm).toBeCloseTo(STOCK.thickness + 0.5, 6); // #1073 — breakthrough 0.3 + chip 0.2
-    expect(result.hold!.cutter).toBe('user:drill-2.5');
+    expect(result.hold!.cutter).toBe('user:o-flute-3.175-42');
     // Off the centre line (30 / 70 %), so the pin question can tell a 180° spin apart.
     expect(result.hold!.at[0].x).not.toBe(STOCK.length / 2);
     // Behind the part: the goal's footprint ends at y 33 (18 ± 15), so the line sits clear.
@@ -144,7 +148,7 @@ describe('#872 the flip setup conversion', () => {
 
   it('a job that already states its setups is left alone', async () => {
     const { job, goal } = await sphereJob();
-    const result = planFlipSetups({ ...job, setups: [] }, goal, ['top', 'bottom'], [DRILL]);
+    const result = planFlipSetups({ ...job, setups: [] }, goal, ['top', 'bottom'], [BORE_MILL]);
     expect(result.ok).toBe(false);
   });
 });
@@ -153,7 +157,7 @@ describe('#891 — the sides follow the blank', () => {
   /** A two-side job from the sphere, as the one press would write it. */
   async function twoSideJob(): Promise<EngraveJob> {
     const { job, goal } = await sphereJob();
-    const plan = planFlipSetups(job, goal, ['top', 'bottom'], [DRILL]);
+    const plan = planFlipSetups(job, goal, ['top', 'bottom'], [BORE_MILL]);
     if (!plan.ok) throw new Error(plan.reason);
     return { ...job, targetObject: undefined, targetObjects: plan.goals, setups: plan.setups };
   }
