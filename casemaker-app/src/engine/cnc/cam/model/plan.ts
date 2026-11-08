@@ -1183,7 +1183,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           best = { tool: candidate, leftover, cycle };
           continue;
         }
-        // Coarser and not better: stop. Every remaining candidate is coarser still.
+        // Coarser and not better: stop. Every remaining candidate is coarser still. The monotone
+        // premise is exact for the FINISH, not for the plan the rank measures: each candidate's
+        // plan carries its own rest ball (the #1054 elephant: ⌀2 gets the long ⌀1 rest, ⌀1 gets
+        // none), and there a coarser candidate won on leftover (10.25 % vs 10.34 %). The break
+        // therefore fires only on a strict non-improvement — the measured winner is the plan.
         stageMemo.evictOwner(cutterKeyOf(candidate));
         if (leftover > best.leftover + 1e-9) break;
       }
