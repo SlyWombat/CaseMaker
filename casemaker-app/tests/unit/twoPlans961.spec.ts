@@ -163,6 +163,12 @@ describe('#975 the tradeoff line — one line, outcome terms, only when material
     expect(cmp.differences.find((d) => d.bound === 'verdicts')!.material).toBe(true);
   });
 
+  it('#1123 item 6 — the line names what it compares: the owned plan vs the catalogue ideal', () => {
+    const cmp = comparePlanOutcomes(card(SCORE()), card(SCORE({ cycleSeconds: 700 })));
+    expect(cmp.material).toBe(true);
+    expect(cmp.line).toMatch(/^owned plan vs catalogue ideal: /);
+  });
+
   it('#961 — the app compares two measured outcomes with no scored card: the verdicts row is stated, never assumed', () => {
     const owned = SCORE();
     // Same numbers without a card: nothing material, and the verdicts row says why it is silent.

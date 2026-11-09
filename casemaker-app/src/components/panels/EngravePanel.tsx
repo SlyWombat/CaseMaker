@@ -103,6 +103,7 @@ import {
   serializeRunRecord,
 } from '@/engine/cnc/engrave/runRecord';
 import { nameProgramsForSheet, nameRestPrograms, programFiles, runSaveFiles } from '@/engine/cnc/engrave/programFiles';
+import { runCycleSeconds } from '@/engine/cnc/engrave/runCycle';
 import { releaseStem } from '@/engine/cnc/engrave/release';
 import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
 import { useRunRecordStore } from '@/store/runRecordStore';
@@ -2830,7 +2831,10 @@ export function EngravePanel(): JSX.Element {
    * says in words that it is an estimate.
    */
   // #726 P7 — "about" is the estimate word; "(estimated)" said it a second time on every time.
-  const runTimeText = cam === null ? null : `about ${formatDuration(cam.estimatedSeconds)}`;
+  // #1123 item 6 — THE RUN'S CYCLE, ONE SOURCE (the plan outcome's figure; the first program's
+  // summary only for a result that states none).
+  const runCycle = runCycleSeconds(run.generated);
+  const runTimeText = runCycle === null ? null : `about ${formatDuration(runCycle)}`;
 
   // #793 — the idle state says nothing. The four ticks are drawn only while a run works or after
   // one it produced: a fresh job showed four "not … yet" rows under a button that had not been

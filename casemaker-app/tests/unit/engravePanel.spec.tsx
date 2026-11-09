@@ -193,6 +193,54 @@ describe('EngravePanel (#205)', () => {
     }
   });
 
+  // #1123 item 6 — THE RUN'S CYCLE, ONE SOURCE. A multi-program run's first program is not the
+  // run: the Ready card states the PLAN outcome's cycle — the same number the Cut step's tradeoff
+  // compares — never `cam.estimatedSeconds` (program 1 alone) when the plan states one.
+  it('#1123 item 6 — the Ready card states the plan outcome’s cycle, not program 1’s alone', () => {
+    const before = useEngraveRunStore.getState().generated;
+    const posted = (toolKey: string): EngraveProgram =>
+      ({ setupIndex: 1, setupId: 'setup-1', toolKey, nc: '', verify: null }) as EngraveProgram;
+    try {
+      act(() => {
+        useEngraveRunStore.setState({
+          staleSince: null,
+          generated: {
+            ok: true,
+            stage: 'done',
+            findings: [],
+            feeds: null,
+            threads: null,
+            cam: { operations: 1, cuttingMoves: 1, estimatedSeconds: 4_920, passes: 1 },
+            nc: 'G90\nM02',
+            verify: null,
+            frameNc: null,
+            frameVerify: null,
+            facingNc: null,
+            facingVerify: null,
+            facingToolKey: null,
+            facingError: null,
+            facingCam: null,
+            predicted: [],
+            designItems: [],
+            programs: [posted('inv:kz-o-flute-3-175-25'), posted('inv:kz-ball-nose-3-175-22')],
+            errors: [],
+            plan: { perSetup: [], outcome: { cycleSeconds: 7_368 } },
+          } as unknown as EngraveGenerated,
+        });
+      });
+      render(<EngravePanel />);
+      const time = screen.getByTestId('engrave-run-time').textContent ?? '';
+      // 122.8 min — the plan's own cycle (all programs plus its tool changes), the tradeoff's
+      // owned figure. Program 1 alone (82 min) is not the run and must not be stated as it.
+      expect(time).toBe('about 2 h 03 min');
+      expect(time).not.toContain('1 h 22 min');
+    } finally {
+      act(() => {
+        useEngraveRunStore.setState({ generated: before });
+      });
+    }
+  });
+
   // #1051/#930 — TWO POSTED CUTTERS CAN SHARE A DISPLAY NAME (a catalogue row and the shop's own
   // copy of the same bit). A clash says which TIER each came from — a word, never the key — and a
   // cutter with no clash carries no tier word at all.

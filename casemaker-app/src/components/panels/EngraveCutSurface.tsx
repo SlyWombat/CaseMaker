@@ -45,6 +45,7 @@ import { laserLiftFor } from '@/engine/cnc/engrave/laserSurface';
 import { packageStaleness } from '@/engine/cnc/engrave/package';
 import { releaseNext } from '@/engine/cnc/engrave/release';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { runCycleSeconds } from '@/engine/cnc/engrave/runCycle';
 import { formatDuration, registrationTouches } from '@/engine/cnc/plan';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import {
@@ -1103,8 +1104,10 @@ export function EngraveCutSurface({
   // 6 min 8 s the two steps printed was that plan total, not this cut's time. The steps print the
   // PROGRAM's cycle estimate instead, in the same words the Generate row and the simulator use
   // (#688); the setup-inclusive total stays in the plan's own fold, where the phase table names it.
-  const cutEstimate =
-    generated?.cam == null ? null : `about ${formatDuration(generated.cam.estimatedSeconds)}`;
+  // #1123 item 6 — THE RUN'S CYCLE, ONE SOURCE: the plan outcome's number where the result states
+  // one (the same figure the tradeoff line compares), else the first program's summary.
+  const cutCycle = runCycleSeconds(generated);
+  const cutEstimate = cutCycle === null ? null : `about ${formatDuration(cutCycle)}`;
 
   // #796 — THE ONE READINESS LINE. Checked and Frozen were two steps whose summaries said the
   // same thing twice ("1 program · about 13 min 25 s" and "12:46 · the programs match the
@@ -1351,7 +1354,7 @@ export function EngraveCutSurface({
         )}
         {idealPlan.status === 'ready' && (planTradeoff === null || !planTradeoff.material) && (
           <section style={{ ...BOX, marginTop: 6 }} data-testid="engrave-plan-no-difference">
-            <p style={MUTED}>with every bit the app knows: no material difference</p>
+            <p style={MUTED}>owned plan vs catalogue ideal: no material difference</p>
           </section>
         )}
         {planTradeoff?.material && planTradeoff.line !== null && (
