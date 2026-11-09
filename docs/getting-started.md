@@ -17,6 +17,11 @@ Case Maker runs two ways:
 
 Either way opens to the same welcome page.
 
+For the CNC side, use a **64-bit browser**: the planner needs 64-bit address space.
+On Windows on ARM, Edge is the native ARM64 build; `chrome://version` or `edge://version` shows
+whether the browser is 64-bit. A 32-bit browser is refused at Generate with a plain sentence,
+before planning starts.
+
 ## 2. Open the app
 
 The welcome page offers four things to make:

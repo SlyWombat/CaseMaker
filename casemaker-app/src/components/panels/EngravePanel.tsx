@@ -49,6 +49,7 @@ import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import { findingFix, fixActionLabel, fixIsOffered, type PanelFix } from './findingFix';
 import { operatorRunError } from './runErrorWords';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
+import { useRendererVerdict } from '@/hooks/useRendererVerdict';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize, type Tool, isCuttingRecord } from '@/engine/cnc/tool';
 import { tierOf } from '@/engine/cnc/toolTiers';
@@ -853,6 +854,8 @@ function simulationStoppedWords(error: string): string {
 
 export function EngravePanel(): JSX.Element {
   const job = useEngraveJobStore((s) => s.job);
+  // #1124 — the page's 32-bit/address-limited verdict; the blocker and the press both read it.
+  const rendererVerdict = useRendererVerdict();
   const setJobMargins = useEngraveJobStore((s) => s.setJobMargins);
   const updateLabel = useEngraveJobStore((s) => s.updateLabel);
   const removeLabel = useEngraveJobStore((s) => s.removeLabel);
@@ -1890,6 +1893,10 @@ export function EngravePanel(): JSX.Element {
    * missing row, never for a refused override or a cutter no CAM here can use.
    */
   const generateBlocker: GenerateBlocker | null = (() => {
+    // #1124 — THE RENDERER FIRST: no job change can give a 32-bit or address-limited renderer
+    // the planner's ~704 MiB, and generating anyway dies mid-plan in the ball rank. The verdict
+    // starts as 'checking' (no blocker) and lands shortly after the app's first render.
+    if (rendererVerdict.refusal !== null) return { sentence: rendererVerdict.refusal.sentence, fix: null };
     const finding = errors[0];
     if (finding !== undefined) {
       return { sentence: sentenceCase(finding.message), fix: findingFix(finding) };
@@ -2968,6 +2975,9 @@ export function EngravePanel(): JSX.Element {
   }`;
 
   async function generate(): Promise<void> {
+    // #1124 — the blocker at the button says why; this is the belt for the paths that call the
+    // press directly (Try again, stale-regenerate) while the verdict is a refusal.
+    if (rendererVerdict.refusal !== null) return;
     // #516 item 5 — the first Generate recommends the cutter for a tool-less job, so one press both
     // picks the tool and builds the program (the sacrificial swatch reads the sim scene it loads).
     // A tool the operator chose or measured is left alone.
