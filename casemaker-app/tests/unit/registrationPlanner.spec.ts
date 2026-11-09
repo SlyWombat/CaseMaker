@@ -27,6 +27,7 @@ import {
   runMountTap,
   summarizeOutcome,
   summarizePlan,
+  type EdgeScan,
   type ExpectedStock,
   type MountDatum,
   type PlanInput,
@@ -1552,7 +1553,30 @@ describe('#427 the bracket: XY from the datum, an optional confirming touch', ()
   /** A clamp on the back edge, 15 mm in from the left-hand corner, 12 mm above the stock. */
   const CLAMP = { kind: 'clamp' as const, label: 'the clamp on the back edge, 15 mm in from the left-hand corner', min: [12, 68] as [number, number], max: [27, 98] as [number, number], topZ: 12 };
   const ARM = { kind: 'bracket' as const, label: 'the bracket’s left arm', min: [-10, -10] as [number, number], max: [0, 100] as [number, number], topZ: 5 };
-  const confirm = (over: Partial<PlanInput> = {}) => plan('bracket', { bracketConfirm: true, mountObstacles: [CLAMP, ARM], ...over });
+  /**
+   * #1133 — THE STORED SHAPE OF A PRE-#1133 PLAN. The planner no longer scans an edge on a bracket
+   * (a hold that fixes X, Y and rotation has nothing to find), but a plan SAVED before #1133 still
+   * carries the old confirming right/back scans, and the executor must still honour them — so the
+   * bracket-check tests below build that shape explicitly.
+   */
+  const legacyScan = (edge: 'right' | 'back', along: number): EdgeScan => {
+    const expectedAt = edge === 'right' ? BLANK.xMax : BLANK.yMax;
+    return {
+      edge,
+      along,
+      expectedAt,
+      outward: 1,
+      start: expectedAt - S.scanInsideMm,
+      limit: expectedAt + S.scanReachMm,
+      oppositeAt: edge === 'right' ? BLANK.xMin : BLANK.yMin,
+      coarseStep: S.coarseStepMm,
+      fineStep: S.fineStepMm,
+    };
+  };
+  const confirm = (over: Partial<PlanInput> = {}): RegistrationPlan => ({
+    ...plan('bracket', { mountObstacles: [CLAMP, ARM], ...over }),
+    scans: [legacyScan('right', 38.1), legacyScan('back', 19.05)],
+  });
   const asked: string[] = [];
   const operator = async (step: { kind: string; text: string }) => (asked.push(`${step.kind}: ${step.text}`), true);
 
@@ -1580,10 +1604,17 @@ describe('#427 the bracket: XY from the datum, an optional confirming touch', ()
     expect(applied.ok && applied.line).toMatch(/^G10 L2 P1 X-181\.550 Y-184\.800 /);
   });
 
-  it('the bracket’s offset unmeasured: the confirming touch is required', () => {
+  it('the bracket’s offset unmeasured: the plan still runs, with the origin taken on trust (#1133)', () => {
+    // #1133 — a bracket hold fixes X, Y and rotation; there is no confirming edge find to require
+    // and no "approve the confirming touch" refusal. The plan's origin carries its provenance and
+    // uncertainty, and the outcome reports X/Y as NOT checked.
     const unmeasured = { x: G54.x, y: G54.y, from: 'anchor 1 + a default offset', offsetMeasured: false };
-    expect(planRegistration(input('bracket', { bracketOrigin: unmeasured }), S)).toMatchObject({ ok: false, reason: expect.stringContaining('approve the confirming touch') });
-    expect(planRegistration(input('bracket', { bracketOrigin: unmeasured, bracketConfirm: true }), S)).toMatchObject({ ok: true });
+    const r = planRegistration(input('bracket', { bracketOrigin: unmeasured }), S);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.plan.scans).toEqual([]);
+    expect(r.plan.bracketOrigin).toMatchObject({ offsetMeasured: false });
+    expect(summarizePlan(r.plan)).toContain('the bracket fixes X and Y');
   });
 
   it('refuses without the mount’s obstacles, with a top at the travel height, or with the surface point under a clamp', () => {
@@ -1615,24 +1646,18 @@ describe('#427 the bracket: XY from the datum, an optional confirming touch', ()
     });
   });
 
-  it('the confirm scans the RIGHT and BACK edges — the arms are on the left and front — clear of the clamps', () => {
-    const open = plan('bracket', { bracketConfirm: true });
-    expect(open.scans.map((s) => [s.edge, s.along])).toEqual([
-      ['right', 38.1],
-      ['back', 19.05],
-    ]);
-    const p = confirm();
-    const back = p.scans.find((s) => s.edge === 'back')!;
-    const grow = S.tipRadiusMm + S.cornerClearanceMm;
-    expect(back.along < CLAMP.min[0] - grow || back.along > CLAMP.max[0] + grow).toBe(true);
-    expect(back.along).toBeGreaterThan(ARM.max[0] + grow);
-    // The plan names the clamps it assumes.
-    expect(summarizePlan(p)).toContain('It assumes the clamp on the back edge, 15 mm in from the left-hand corner');
-    const wall = { ...CLAMP, min: [-5, 70] as [number, number], max: [45, 90] as [number, number] };
-    expect(planRegistration(input('bracket', { bracketConfirm: true, mountObstacles: [wall] }), S)).toMatchObject({
-      ok: false,
-      reason: expect.stringContaining('register without the confirming touch'),
-    });
+  it('#1133 — no bracket plan scans an edge, whatever the confirm field says', () => {
+    // #1070/#427's confirming right/back scans are gone: a bracket hold fixes X, Y and rotation,
+    // so the plan is the surface touch only. `bracketConfirm` is accepted and ignored.
+    for (const over of [{}, { bracketConfirm: true }]) {
+      const p = plan('bracket', over);
+      expect(p.scans, JSON.stringify(over)).toEqual([]);
+      expect(p.corner).toBeUndefined();
+    }
+    // The plan still names the clamps it assumes, so the operator's confirm-mount step keeps its words.
+    expect(summarizePlan(plan('bracket', { mountObstacles: [CLAMP, ARM] }))).toContain(
+      'It assumes the clamp on the back edge, 15 mm in from the left-hand corner',
+    );
   });
 
   it('the operator confirms the clamps before anything moves sideways; a no stops it', async () => {
