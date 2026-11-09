@@ -300,6 +300,8 @@ interface Props {
   generateBlocker?: string | null;
   /** #1123 review — a restored run not yet compared against settled house reads. */
   restoreChecking?: boolean;
+  /** #1132 — the stale-program action will only re-freeze the existing programs. */
+  refreezeOnly?: boolean;
 }
 
 /** #796 — the card's one action; the tests assert it was pressed rather than freezing here. */
@@ -328,6 +330,7 @@ function Harness(props: Props) {
       onGenerate={props.onGenerate ?? generateSpy}
       generateBlocker={props.generateBlocker ?? null}
       restoreChecking={props.restoreChecking ?? false}
+      refreezeOnly={props.refreezeOnly ?? false}
     />
   );
 }
@@ -1229,6 +1232,30 @@ describe('#656 from the cutter prompt to the cut', () => {
     expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain(
       'checking the restored run against this shop',
     );
+  });
+
+  it('#1132 — the stale-program action says Re-freeze when only the registration changed', () => {
+    const job = plannedJob();
+    const sansPlan = {
+      ...job,
+      setups: [{ ...jobSetups(job)[0]!, registration: undefined }],
+    } as EngraveJob;
+    const pkg = frozen(sansPlan, [P1]);
+    // `staleSince` keeps the freeze-on-green effect out of the way: the box is what Cut shows
+    // once the run is already on screen, which is exactly when the label matters.
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true, refreezeOnly: true, staleSince: 1 });
+    expect(screen.getByTestId('engrave-package-generate').textContent).toBe('Re-freeze');
+  });
+
+  it('#1132 — the same action is an ordinary Generate for any other staleness', () => {
+    const job = plannedJob();
+    const sansPlan = {
+      ...job,
+      setups: [{ ...jobSetups(job)[0]!, registration: undefined }],
+    } as EngraveJob;
+    const pkg = frozen(sansPlan, [P1]);
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true, refreezeOnly: false, staleSince: 1 });
+    expect(screen.getByTestId('engrave-package-generate').textContent).toBe('Generate');
   });
 
   it('leaves a multi-program job to the release flow, with the disclosure open', () => {

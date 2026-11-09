@@ -56,6 +56,8 @@ import {
 } from '@/engine/cnc/engrave/pcbTopology';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { getTools, benchCutterFor } from '@/engine/cnc/toolRegistry';
+import { packageStaleness } from '@/engine/cnc/engrave/package';
+import { useEngravePackageStore } from './engravePackageStore';
 import { dedupeCutterEntries } from '@/engine/cnc/toolLibrary';
 import type { PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
 import type { PlanOutcome } from '@/engine/cnc/cam/model/plan';
@@ -1370,6 +1372,19 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       idealLastRequest?.();
     },
     generate: async (surface?: SurfacePostFit | null) => {
+      // #1132 — a registration approved after Generate is a RE-FREEZE, not a re-plan: the
+      // existing programs are the bytes a full regenerate would post, and the worker is never
+      // started. A re-post against a fitted surface (a real input change) skips this.
+      if (surface === undefined || surface === null) {
+        const openJob = useEngraveJobStore.getState().job;
+        if (registrationOnlyRefreeze(openJob, get())) {
+          const current = get().generated;
+          if (current !== null) {
+            const refrozen = await useEngravePackageStore.getState().freeze(openJob, current.programs);
+            if (refrozen.ok) return;
+          }
+        }
+      }
       const token = Symbol('generate');
       runHold = token;
       runEpoch += 1;
@@ -1501,12 +1516,10 @@ export function runShopSignature(): string {
  * `current` is a spec seam: the caller may state the stamps instead of making the stores produce
  * them (the persistence spec compares a fabricated run against a changed feeds stamp).
  */
-export function recheckRunInputs(current?: EngraveRunInputs): void {
-  const run = useEngraveRunStore.getState();
-  if (run.inputs === null || run.generated === null) return;
+export function currentRunInputStamps(): EngraveRunInputs {
   const job = useEngraveJobStore.getState().job;
   const settings = useSettingsStore.getState();
-  const stamps = current ?? runInputs({
+  return runInputs({
     job,
     margins: effectiveMargins(job, settings.margins),
     calibration: settings.machineCalibration ?? null,
@@ -1517,12 +1530,57 @@ export function recheckRunInputs(current?: EngraveRunInputs): void {
     conditions: inventoryConditions(),
     surface: useEngraveRegistrationStore.getState().records[job.id]?.surface ?? null,
   });
-  for (const key of RUN_INPUT_ORDER) {
-    if (stamps[key] !== run.inputs[key]) {
-      markStale(key);
-      return;
-    }
+}
+
+/**
+ * #1123/#1132 — every input the run stamped that no longer matches the stores as they stand now,
+ * in `RUN_INPUT_ORDER`. This is the precise "did anything the program depends on move?" test; the
+ * restore's recheck and the registration-only re-freeze both read it.
+ */
+export function movedRunInputs(current?: EngraveRunInputs): EngraveInputKey[] {
+  const run = useEngraveRunStore.getState();
+  if (run.inputs === null) return [];
+  const stamps = current ?? currentRunInputStamps();
+  return RUN_INPUT_ORDER.filter((key) => stamps[key] !== run.inputs![key]);
+}
+
+export function recheckRunInputs(current?: EngraveRunInputs): void {
+  const run = useEngraveRunStore.getState();
+  if (run.inputs === null || run.generated === null) return;
+  const moved = movedRunInputs(current);
+  if (moved[0] !== undefined) markStale(moved[0]);
+}
+
+/** The one package-staleness sentence #1132 may act on (package.ts's own wording). */
+const REGISTRATION_STALE_REASON = 'the registration changed since it was frozen';
+
+/**
+ * #1132 — THE ONLY CHANGE SINCE THE RUN IS THE REGISTRATION. The bench approved a registration
+ * between Generate and Cut and every press cost a 12-minute re-plan, because #796 made Generate
+ * the only action and the stale package offered no re-freeze. The registration is probe
+ * choreography, not cutting: the program fingerprint and every planner input are unchanged, so
+ * the existing programs can be re-frozen with the new registration — the same bytes a full
+ * regenerate would post (determinism, #577), with no worker started.
+ *
+ * The checks are deliberately in cheap-to-expensive order: the package has to exist and be stale
+ * for EXACTLY the registration reason; the run's programs have to be the ones the package froze;
+ * and no planner input may have moved (`movedRunInputs`). Anything else is an ordinary Generate.
+ */
+export function registrationOnlyRefreeze(
+  job: EngraveJob,
+  run: Pick<EngraveRunState, 'generated' | 'staleSince' | 'restoreChecking' | 'inputs'>,
+  currentInputs?: EngraveRunInputs,
+): boolean {
+  const pkg = job.package;
+  if (pkg === undefined) return false;
+  if (run.generated === null || run.generated.ok !== true || run.generated.programs.length === 0) return false;
+  if (run.staleSince !== null || run.restoreChecking || run.inputs === null) return false;
+  if (packageStaleness(pkg, job).reason !== REGISTRATION_STALE_REASON) return false;
+  if (pkg.programs.length !== run.generated.programs.length) return false;
+  for (let i = 0; i < pkg.programs.length; i++) {
+    if (pkg.programs[i]!.hash !== run.generated.programs[i]!.programHash) return false;
   }
+  return movedRunInputs(currentInputs).length === 0;
 }
 
 /**

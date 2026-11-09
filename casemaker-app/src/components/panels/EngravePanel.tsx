@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSPro
 import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
-import { useEngraveRunStore, firstRunError, gateViewFor, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker, type EngraveRunState } from '@/store/engraveRunStore';
+import { useEngraveRunStore, firstRunError, gateViewFor, releaseBlocker, registrationOnlyRefreeze, runErrorCodes, saveBlocker, uploadBlocker, type EngraveRunState } from '@/store/engraveRunStore';
 import { ROTARY_UNMEASURED_REFUSAL } from '@/store/engraveRunGate';
 import { useMachineStore } from '@/store/machineStore';
 import { useSimStore } from '@/store/simStore';
@@ -2869,6 +2869,10 @@ export function EngravePanel(): JSX.Element {
     rowSimulated === 'tick' &&
     rowOracle === 'tick';
 
+  // #1132 — when the only change since the run is the registration, the stale-program action
+  // re-freezes the existing programs; the button says so instead of claiming a re-plan.
+  const refreezeOnly = registrationOnlyRefreeze(job, run);
+
   const runTicks = (
     <>
       <RunTick testid="engrave-run-toolpath" state={rowToolpath} label={rowToolpathText} />
@@ -5654,6 +5658,7 @@ export function EngravePanel(): JSX.Element {
               onGenerate={() => void generate()}
               generateBlocker={generateBlocker?.sentence ?? null}
               restoreChecking={run.restoreChecking}
+              refreezeOnly={refreezeOnly}
             />
           </>
         )

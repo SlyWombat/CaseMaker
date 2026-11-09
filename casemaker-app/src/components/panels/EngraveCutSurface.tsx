@@ -266,6 +266,11 @@ export interface EngraveCutSurfaceProps {
    * stay off until the deferred recheck has run.
    */
   restoreChecking: boolean;
+  /**
+   * #1132 — the only change since the run is the registration, so the stale-program action
+   * re-freezes the existing programs instead of re-planning. Its words say so.
+   */
+  refreezeOnly: boolean;
 }
 
 /** The map from the live Generate: each program's FNV key to the report that gated that text. */
@@ -565,6 +570,7 @@ export function EngraveCutSurface({
   onGenerate,
   generateBlocker,
   restoreChecking,
+  refreezeOnly,
 }: EngraveCutSurfaceProps): JSX.Element {
   const freeze = useEngravePackageStore((s) => s.freeze);
   const openManage = useManageModeStore((s) => s.openManage);
@@ -1408,10 +1414,15 @@ export function EngraveCutSurface({
               type="button"
               data-testid="engrave-package-generate"
               disabled={generateBlocker !== null}
+              title={
+                refreezeOnly
+                  ? 'Freeze the existing programs with the new registration — no re-planning.'
+                  : undefined
+              }
               style={{ width: '100%', padding: 7, marginTop: 6 }}
               onClick={onGenerate}
             >
-              Generate
+              {refreezeOnly ? 'Re-freeze' : 'Generate'}
             </button>
           )}
           {pkg !== null && !packageCurrent && !mountMismatch && generateBlocker !== null && (
