@@ -66,7 +66,7 @@ function bracketJob(): EngraveJob {
         enabled: true,
       },
     ],
-    workholding: { kind: 'bracket', bracket: { anchor: 1, variant: 'thin', clamps: [{ edge: 'back', at: 63 }], source: 'default' } },
+    workholding: { kind: 'bracket', bracket: { anchor: 1, variant: 'thin', clamps: [{ edge: 'back', at: 55.5 }], source: 'default' } },
   };
 }
 
@@ -160,6 +160,39 @@ describe('#1133 a bracket hold plans one top touch', () => {
     expect(point.x).toBeGreaterThanOrEqual(lim.xMin);
     expect(point.y).toBeGreaterThanOrEqual(lim.yMin);
     expect(point.band.min).toBeGreaterThanOrEqual(lim.zMin);
+  });
+
+  // #1133 review — THE ACCEPTANCE CASE, in numbers. On the set B tray stock with the bench's
+  // clamp, the maintainer's own probe point (0f: machine −175, −35 — work (15.89, 158.83), 32.8 mm
+  // behind the blank's back edge) must be ACCEPTED by the rule, the chosen point must be at least
+  // as close as it, and the old 7.5 mm-in-front point must be REJECTED.
+  it('0f’s bench point is accepted, the chosen point is at least as close, and the old in-front point is rejected', () => {
+    const job = bracketJob();
+    const seek = seatSeekFor({ job, calibration: CALIBRATION, defaults: null, probe: PROBE });
+    expect(seek.ok, JSON.stringify(seek)).toBe(true);
+    if (!seek.ok) return;
+    const head = headEnvelopeOf(Z1)!.radiusMm;
+    const need = head + 2;
+    const distance = (wx: number, wy: number): number => {
+      const box: { min: [number, number]; max: [number, number] } = { min: [0, 0], max: [job.stock.length, job.stock.width] };
+      return Math.hypot(Math.max(box.min[0] - wx, 0, wx - box.max[0]), Math.max(box.min[1] - wy, 0, wy - box.max[1]));
+    };
+    // 0f's point, in work coordinates under the bench's anchor: clear by 32.83 mm — inside the rule.
+    const zeroF = { x: -175 - CALIBRATION.frame.anchor1[0], y: -35 - CALIBRATION.frame.anchor1[1] };
+    expect(distance(zeroF.x, zeroF.y)).toBeGreaterThanOrEqual(need);
+    // The chosen point is no farther from the blank than 0f's: with the height-filtered envelope the
+    // app does not over-clear the way the 46 mm reading did.
+    const chosen = seek.seek;
+    expect(distance(chosen.workX, chosen.workY)).toBeLessThanOrEqual(distance(zeroF.x, zeroF.y) + 1e-9);
+    expect(chosen.workY).toBeLessThanOrEqual(zeroF.y + 1e-9);
+    // The old point — armWidth/2 (5 mm) in front of the blank at the arm's end — is REJECTED by the
+    // same rule: the head would sit over the taller stock.
+    const sizes = bracketSettings(null);
+    const oldPoint = { x: sizes.settings.armLengthX + SETTINGS.tipRadiusMm + 5, y: -sizes.settings.armWidth / 2 };
+    expect(distance(oldPoint.x, oldPoint.y)).toBeLessThan(need);
+    // And the chosen point is the seat the plan would touch (machine coordinates land on the board).
+    expect(chosen.x).toBeCloseTo(CALIBRATION.frame.anchor1[0] + chosen.workX, 6);
+    expect(chosen.y).toBeCloseTo(CALIBRATION.frame.anchor1[1] + chosen.workY, 6);
   });
 
   it('the arm check is dropped with one plain line when the arm cannot host a head-clearing point', () => {
