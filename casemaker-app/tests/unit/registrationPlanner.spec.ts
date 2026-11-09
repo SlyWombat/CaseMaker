@@ -93,6 +93,21 @@ describe('#430 the settings come from the shop defaults', () => {
 });
 
 describe('#430 the plan', () => {
+  // #1123 item 29 — a plan with NO scans must not narrate a scan: the bracket plan whose offset was
+  // measured only touches the surface, and read "then scan no edge scan (the bracket fixes X and Y)
+  // — bracketing each edge and bisecting …".
+  it('#1123 item 29 — a plan with no scans says nothing about scanning', () => {
+    const p = plan('bracket');
+    expect(p.scans).toEqual([]);
+    const summary = summarizePlan(p);
+    expect(summary).not.toContain('no edge scan');
+    expect(summary).not.toContain('bracketing each edge');
+    expect(summary).not.toContain('then scan');
+    // What it DOES do is still said: the surface touch, then home.
+    expect(summary).toContain("touch the surface at the cut area's centre");
+    expect(summary).toContain('home when finished');
+  });
+
   it('vise: the left edge and the front edge; the surface at the cut area’s centre', () => {
     const p = plan('vise', { cutCentre: { x: 19, y: 40 } });
     expect(p.scans.map((s) => [s.edge, s.along])).toEqual([
