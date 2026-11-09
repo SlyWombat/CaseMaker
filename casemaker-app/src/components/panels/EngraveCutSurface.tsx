@@ -308,8 +308,15 @@ function surfaceChecksByHash(generated: EngraveGenerated | null): Map<string, Su
  * machine. A turn restates the job's box through the hold; the items stay on their part face (a
  * face turned to a side is stated, with the one press that moves them up), and the frozen program
  * is older than the design from that moment on, with the reason that says the stock was turned.
+ *
+ * #1123 item 16 (bench, 2026-11-09) — THE EXPANDER WAITS FOR A CUT. Before anything is cut there is
+ * nothing turned and nothing to restate; on side 1 of a fresh job the open "I turned the stock…"
+ * was noise in the step. `hasCut` is the surface's own finished-program read (the machine's
+ * finished list plus the document's run log), so the control appears exactly when a turn is a real
+ * next action.
  */
-function TurnStockControl({ job }: { job: EngraveJob }): JSX.Element {
+function TurnStockControl({ job, hasCut }: { job: EngraveJob; hasCut: boolean }): JSX.Element | null {
+  if (!hasCut) return null;
   const current = jobHold(job);
   const form = job.stock.shape === 'disc' ? 'disc' : (job.stockEntry?.form ?? 'plate');
   const holds = formHolds(form);
@@ -1014,7 +1021,11 @@ export function EngraveCutSurface({
   const reservation = ((): { line: string; detail: string | null } | null => {
     if (pkg === null) return null;
     if (pkg.stockEntryId === null) {
-      return { line: 'You’re supplying this stock yourself, so no blank needs to be held.', detail: null };
+      // #1123 item 7 (bench, 2026-11-09) — THE SHELF FACT, NOT A HOLDING CLAIM. The old sentence
+      // ("You're supplying this stock yourself, so no blank needs to be held") read as "nothing
+      // holds the blank" on a bracket job whose blank is clamped in the bracket. This states only
+      // what is true of the shelf: the blank is not on it.
+      return { line: 'This blank is not on the shelf — nothing to take from it.', detail: null };
     }
     const shelf = shelfItems.find((item) => item.id === pkg.stockEntryId) ?? null;
     const held = shelf?.reservations.find((entry) => entry.jobId === job.id) ?? null;
@@ -1364,8 +1375,14 @@ export function EngraveCutSurface({
           </div>
         )}
         {/* #783 — I TURNED THE STOCK: the holds, at the machine, in the step that runs before
-            registration. A turn restates the box; the program goes stale with its own reason. */}
-        <TurnStockControl job={job} />
+            registration. A turn restates the box; the program goes stale with its own reason.
+            #1123 item 16 — only after something has been cut, and only THIS package's programs:
+            `finishedHashes` also carries the MACHINE's finished list (every job ever run there),
+            so a bare non-empty check would open the expander on a fresh job that never cut. */}
+        <TurnStockControl
+          job={job}
+          hasCut={pkg !== null && pkg.programs.some((program) => finishedHashes.includes(program.hash))}
+        />
         {/* #795 — THE STATEMENT IS THE STEP'S FIRST LINE. The clearance acknowledgement used to sit
             at the foot of the step, under the gate's fold; it is what the operator must say about
             THIS step, so it reads before the details rather than after them. */}

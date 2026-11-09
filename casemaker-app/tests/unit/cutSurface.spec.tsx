@@ -529,8 +529,12 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.queryByTestId('engrave-package-state')).toBeNull();
     // #550 — the package key lives on the element as data, not in the rendered sentence.
     expect(screen.getByTestId('engrave-package').getAttribute('data-key')).toBe(pkg.hash);
-    // The job's stock is not a shelf entry: nothing was taken, and the line says so in operator terms.
-    expect(screen.getByTestId('engrave-package-reservation').textContent).toContain('no blank needs to be held');
+    // #1123 item 7 — the job's stock is not a shelf entry: the line states the SHELF fact (nothing
+    // was taken), never the old holding claim ("no blank needs to be held"), which read as
+    // "nothing holds the blank" on a mount job.
+    const reservationLine = screen.getByTestId('engrave-package-reservation').textContent ?? '';
+    expect(reservationLine).toContain('This blank is not on the shelf — nothing to take from it.');
+    expect(reservationLine).not.toContain('no blank needs to be held');
   });
 
   it('the Run step quotes the rotary bench sentence the gates refuse with (#724 W5)', () => {
@@ -1911,5 +1915,53 @@ describe('#986 the card reads the background comparison', () => {
     expect(screen.getByTestId('engrave-plan-no-difference').textContent).toBe(
       'owned plan vs catalogue ideal: no material difference',
     );
+  });
+});
+
+// #1123 items 7 and 16 (bench, 2026-11-09) — the shelf fact vs the holding claim, and the turn-stock
+// expander before anything has been cut.
+describe('#1123 the Fit-and-clamp card’s wording', () => {
+  it('item 7 — a bracket job states the shelf fact, never "nothing holds the blank"', () => {
+    const job = defaultEngraveJob();
+    job.setups = [{ ...jobSetups(job)[0]!, mount: { kind: 'bracket' } }];
+    const pkg = frozen(job, [P1]);
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
+    const line = screen.getByTestId('engrave-package-reservation').textContent ?? '';
+    // The shelf fact, and only it: the old sentence read as "nothing holds the blank" on a job
+    // whose blank is clamped in the bracket.
+    expect(line).toContain('This blank is not on the shelf — nothing to take from it.');
+    expect(line).not.toContain('no blank needs to be held');
+    expect(line).not.toContain('supplying this stock yourself');
+  });
+
+  it('item 16 — the "I turned the stock…" expander waits until something has been cut', () => {
+    const job = defaultEngraveJob();
+    const pkg = frozen(job, [P1]);
+    const view = draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
+    // Side 1, nothing cut yet: no expander.
+    expect(screen.queryByTestId('engrave-cut-turn-stock')).toBeNull();
+    // A finished program that is NOT this package's (the machine's finished list is machine-wide)
+    // is not a cut of this job: the expander stays closed.
+    act(() => {
+      useEngraveJobStore.setState({
+        job: {
+          ...job,
+          runLog: [{ programHash: 'not-this-package', setupIndex: 1, setupId: 'setup-1', toolKey: 'flat-1.0', at: AT, outcome: 'finished' }],
+        },
+      });
+    });
+    view.show({ job, report: reportOf(), pkg, generated: generated([P1]) });
+    expect(screen.queryByTestId('engrave-cut-turn-stock')).toBeNull();
+    // THIS package's program finished: the expander is the operator's next action.
+    act(() => {
+      useEngraveJobStore.setState({
+        job: {
+          ...job,
+          runLog: [{ programHash: pkg.programs[0]!.hash, setupIndex: 1, setupId: 'setup-1', toolKey: 'flat-1.0', at: AT, outcome: 'finished' }],
+        },
+      });
+    });
+    view.show({ job, report: reportOf(), pkg, generated: generated([P1]) });
+    expect(screen.getByTestId('engrave-cut-turn-stock')).toBeTruthy();
   });
 });
