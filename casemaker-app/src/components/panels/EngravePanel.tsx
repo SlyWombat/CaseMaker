@@ -16,6 +16,7 @@ import type { PreflightCause } from '@/engine/cnc/preflight';
 import { runContextFor } from '@/store/machineRunStore';
 import { stepAtLine } from '@/engine/cnc/playbackClock';
 import { EngraveCutSurface } from './EngraveCutSurface';
+import { CutterList, postedCuttersFor, type PostedCutter } from './CutterList';
 import { saveEngraveProgram, saveFilesFolderOrZip, saveText } from '@/engine/exportTrigger';
 import { buildSimStallReport, simStallReportFileName } from '@/engine/jobs/simStallReport';
 import { flightCrumbs } from '@/platform/flightRecorder';
@@ -63,7 +64,7 @@ import { partSilhouetteOf } from '@/engine/cnc/engrave/flipSilhouette';
 import { deadSetupKeys, replacementCutter } from '@/engine/cnc/engrave/setupWork';
 import { measureFingerprint } from '@/engine/cnc/engrave/measuredPick';
 import { jobReachFindings } from '@/engine/cnc/engrave/goalReach';
-import { benchCutterFor, toolForIn, toolForJob } from '@/engine/cnc/toolRegistry';
+import { toolForIn, toolForJob } from '@/engine/cnc/toolRegistry';
 import { bedUnderFacts, machineForJob, switchActiveProfile } from '@/platform/bedProfiles';
 import { vDepthLimit } from '@/engine/cnc/vProfile';
 // #513 — the bed a job was set up on: binding, version diff and the findings that say so.
@@ -2339,38 +2340,21 @@ export function EngravePanel(): JSX.Element {
   // DISPLAY form (resolved through the ONE bench resolver, #1032); the key stays on the run sheet.
   // Two cutters can share a display name — a catalogue row and the shop's own copy of the same bit
   // — so a clash says which TIER each came from: a word, never the key.
-  const cutterTierWord = (toolKey: string): string =>
-    toolKey.startsWith('inv:')
-      ? 'inventory'
-      : toolKey.startsWith('user:')
-        ? 'your library'
-        : toolKey.startsWith('cat:')
-          ? 'catalogue'
-          : 'built-in';
-  const postedCutterLine = ((): string | null => {
-    // A STALE RESULT DOES NOT DESCRIBE THIS JOB: the line falls back to the advice until the plan
-    // is generated again.
+  // #1123 item 5 — ONE LIST OF POSTED CUTTERS, AS ROWS. The Job line is a COUNT; the rows below
+  // it name the cutters in program order (the interactive checklist — ticks, replacements, the Cut
+  // gate — is #1127's promotion of this niggle).
+  const postedCutters: PostedCutter[] = ((): PostedCutter[] => {
+    // A STALE RESULT DOES NOT DESCRIBE THIS JOB: the list only stands while the run matches it.
     const programs = run.staleSince === null && run.generated?.ok === true ? run.generated.programs : null;
-    if (programs === null || programs.length === 0) return null;
-    const seen = new Set<string>();
-    const cutters: { key: string; name: string }[] = [];
-    for (const program of programs) {
-      if (seen.has(program.toolKey)) continue;
-      seen.add(program.toolKey);
-      const posted = benchCutterFor(program.toolKey);
-      cutters.push({ key: program.toolKey, name: posted === null ? 'unknown cutter' : toolDisplayName(posted) });
-    }
-    const named = new Map<string, number>();
-    for (const cutter of cutters) named.set(cutter.name, (named.get(cutter.name) ?? 0) + 1);
-    return cutters
-      .map((cutter) => ((named.get(cutter.name) ?? 0) > 1 ? `${cutter.name} (${cutterTierWord(cutter.key)})` : cutter.name))
-      .join(' · ');
+    return programs === null || programs.length === 0 ? [] : postedCuttersFor(programs);
   })();
+  const cutterCountWords =
+    postedCutters.length === 0 ? null : `${postedCutters.length} cutter${postedCutters.length === 1 ? '' : 's'} — see the list`;
   // #807 — "no cutter chosen" only when nothing can choose: while the measured search runs (or
   // its answer is waiting to be applied), the line says the app is choosing.
   const cutterVerdict =
-    postedCutterLine !== null
-      ? postedCutterLine
+    cutterCountWords !== null
+      ? cutterCountWords
       : tool !== null
         ? [toolDisplayName(tool), cutterProvenance, cutterFidelity, catalogueNote, substitutionNote, setupSubstitutionNote === '' ? null : setupSubstitutionNote]
             .filter((w): w is string => w !== null)
@@ -3786,6 +3770,8 @@ export function EngravePanel(): JSX.Element {
           ›
         </button>
       </div>
+      {/* #1123 item 5 — the ONE cutter list: a row per distinct cutter, in program order. */}
+      <CutterList cutters={postedCutters} />
 
       {/* #1010 — A SETUP'S DEAD CUTTER IS OFFERED BESIDE THE CUTTER LINE, never substituted. The
           measured answer for that setup is drawn with its press; taking it writes THAT setup only
@@ -4452,9 +4438,9 @@ export function EngravePanel(): JSX.Element {
       <Group
         testid="engrave-group-cutter"
         title="Cutter"
-        // #798 — the group's own summary is the verdict; it defaults CLOSED and opens from the
-        // Job card's `›` (or this summary).
-        summary={cutterVerdict}
+        // #798 — the group's own summary is the fact while closed; #1123 item 5 — after a run it
+        // is the COUNT (the list's rows carry the cutters), before one the advice line.
+        summary={cutterCountWords === null ? cutterVerdict : `${postedCutters.length} cutter${postedCutters.length === 1 ? '' : 's'}`}
         {...groupProps('engrave-group-cutter', false)}
       >
       {/* 3 — tool */}

@@ -170,11 +170,20 @@ describe('EngravePanel (#205)', () => {
       });
       render(<EngravePanel />);
       const line = screen.getByTestId('engrave-cutter-line').textContent ?? '';
+      // #1123 item 5 — THE JOB LINE IS A COUNT; the ONE list below it carries the rows.
+      expect(line).toContain('2 cutters — see the list');
+      const rows = screen.getAllByTestId('engrave-cutter-row');
+      expect(rows).toHaveLength(2);
       // Cut order, each cutter once (the flute's second program is not a second cutter) — and the
       // display form only: no key, and no tier word because no two cutters share a name.
-      expect(line).toContain('⌀ 3.175 mm flat end · 25 mm flute · ⌀ 3.175 mm ball · 22 mm flute');
-      expect(line).not.toContain('inv:');
-      expect(line).not.toContain('(inventory)');
+      expect(rows[0]!.textContent).toContain('p01, p03');
+      expect(rows[0]!.textContent).toContain('⌀ 3.175 mm flat end · 25 mm flute');
+      expect(rows[1]!.textContent).toContain('p02');
+      expect(rows[1]!.textContent).toContain('⌀ 3.175 mm ball · 22 mm flute');
+      for (const row of rows) {
+        expect(row.textContent).not.toContain('inv:');
+        expect(row.textContent).not.toContain('(inventory)');
+      }
       expect(line).not.toContain('choosing…');
     } finally {
       act(() => {
@@ -234,13 +243,22 @@ describe('EngravePanel (#205)', () => {
       });
       render(<EngravePanel />);
       const line = screen.getByTestId('engrave-cutter-line').textContent ?? '';
-      expect(line).toContain(`${three} (inventory) · ${three} (catalogue) · ${three} (your library)`);
+      // #1123 item 5 — the count on the Job line; the list's rows carry the names and their tiers.
+      expect(line).toContain('5 cutters — see the list');
+      const rows = screen.getAllByTestId('engrave-cutter-row');
+      expect(rows).toHaveLength(5);
+      expect(rows[0]!.textContent).toContain(`${three} (inventory)`);
+      expect(rows[1]!.textContent).toContain(`${three} (catalogue)`);
+      expect(rows[2]!.textContent).toContain(`${three} (your library)`);
       // The built-in's key is a code token too: its clash says "built-in", never `flat-1.0`.
-      expect(line).toContain('⌀ 1 mm flat end (built-in) · ⌀ 1 mm flat end (inventory)');
-      expect(line).not.toContain('flat-1.0');
-      expect(line).not.toContain('cat:');
-      expect(line).not.toContain('user:');
-      expect(line).not.toContain('inv:');
+      expect(rows[3]!.textContent).toContain('⌀ 1 mm flat end (built-in)');
+      expect(rows[4]!.textContent).toContain('⌀ 1 mm flat end (inventory)');
+      for (const row of rows) {
+        expect(row.textContent).not.toContain('flat-1.0');
+        expect(row.textContent).not.toContain('cat:');
+        expect(row.textContent).not.toContain('user:');
+        expect(row.textContent).not.toContain('inv:');
+      }
     } finally {
       act(() => {
         useEngraveRunStore.setState({ generated: before });
