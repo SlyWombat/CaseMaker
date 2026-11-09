@@ -218,6 +218,17 @@ export interface RasterRun {
  * The ring is sampled every `spacingMm` (vertices included), and the stretches whose samples are
  * all safe come back as OPEN runs; a ring with no unsafe sample comes back as one CLOSED run —
  * the untouched path, byte for byte. The caller traces open runs without the closing return.
+ *
+ * WHY THE SAMPLING CANNOT MISS A REAL WALL (the spacing the callers pass): `rough.ts` passes
+ * `max(clSurface.minSpacingMm, min(0.25 mm, stepOver / 4))` — 0.25 mm on a ⌀3.175 pass (step-over
+ * ~1.43 mm). The unsafe cells are the level mask's OWN cells at its pitch
+ * (`gridPitchFor(stepOver, radius)`, clamped to 0.1–0.6 mm; ~0.357 mm there), and a mask cell
+ * whose target stands above the level excludes itself and its 3×3 block from the mask — so the
+ * unsafe stretch along a ring is at least one mask cell (~0.36 mm) long, wider than the 0.25 mm
+ * sample. A sub-cell sliver cannot create an unsafe band the mask leaves standing: the 3×3 max
+ * raises the cells around it first. `splitUnsafeRuns` (the band skim) needs no spacing at all —
+ * it tests every point of its runs, which are the mask grid's own points. A future caller whose
+ * mask pitch exceeds 2 × its sample spacing must align the two.
  */
 /**
  * #1135 — split a per-point run (each point carrying its own Z) at positions where the cutter's
