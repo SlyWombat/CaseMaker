@@ -24,7 +24,7 @@
  * position, and the lost layer appears only at as-cut because it is a claim about the final result.
  */
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, type JSX } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
@@ -35,6 +35,7 @@ import { useVisePlacementFrame } from '@/store/locationStore';
 import { useFirstRegistration } from '@/store/engraveRegistrationStore';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { useSimStore } from '@/store/simStore';
+import { designExtents, type DesignExtents } from './liveRun';
 import { useViewportStore, isEngraveItemSelected } from '@/store/viewportStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { EngravePreviewChamferBand, EngravePreviewLost, EngravePreviewOutline } from '@/workers/sim/engravePreview';
@@ -909,7 +910,7 @@ function StockOutline({ geom }: { geom: THREE.BufferGeometry }) {
   );
 }
 
-export function EngravePreview() {
+export function EngravePreview({ uncut = false }: { uncut?: boolean } = {}): JSX.Element | null {
   const preview = useEngravePreviewStore((s) => s.preview);
   // §5.7 — the design ↔ as-cut slider's position. `null` (the store's default and its state after
   // every rebuild) means the finished preview, which is what this component drew before the slider.
@@ -971,7 +972,9 @@ export function EngravePreview() {
 
   // Hooks run before the early return; the geometry is null until the first preview lands, and it
   // is replaced (with its old geometry disposed) whenever the slider settles on another stage.
-  const scrub = preview ? scrubStateAt(preview, scrubStage) : null;
+  // #1123-36 — the LIVE view draws the uncut stage (the faced blank); the finished preview and the
+  // operator's own scrub position return as soon as the machine is idle.
+  const scrub = preview ? scrubStateAt(preview, uncut ? 0 : scrubStage) : null;
   // The MAP stock geometry is built for both views: the Stock view uses the same scrub state's
   // existence to know there is a body to draw, and replaces the coarse wrapped prism with a
   // cylinder (a wrapped rectangular prism has four corners around, not a round rod).
@@ -981,6 +984,10 @@ export function EngravePreview() {
   const maxDepth = stock.thickness - minFloor;
 
   if (!preview || !scrub || !stockGeom) return null;
+
+  // #1123-38 — the design's extents, named as the bounding box they are, drawn on the blank while
+  // the machine is live so the cutter's position against the part's edge is readable.
+  const liveExtents = uncut ? designExtents(preview) : null;
 
   const axisLen = Math.max(8, Math.min(Math.min(stock.length, stock.width) * AXIS_FRACTION, 25));
   // A floor belongs to a cut that has happened. Drawing a deep floor over a stock state that has
@@ -1029,6 +1036,8 @@ export function EngravePreview() {
             />
           </mesh>
         )}
+
+        {liveExtents !== null && <DesignExtentsOutline extents={liveExtents} />}
 
         {/* #811 — a ghosted stock loses its silhouette; the blank's edges stay drawn crisply so
             the operator can still read where the stock is. Flat stock only: the rotary views have
@@ -1167,5 +1176,33 @@ export function EngravePreview() {
         </Html>
       )}
     </group>
+  );
+}
+
+
+/**
+ * #1123-38 — the design's extents as one bright rectangle on the blank's top (work frame). It is
+ * the BOUNDING BOX the readout names, not the design's outline at any point: it exists so the
+ * cutter's position against the part's edge is obvious during a run.
+ */
+function DesignExtentsOutline({ extents }: { extents: DesignExtents }): JSX.Element {
+  const geom = useMemo(() => {
+    const z = 0.06;
+    const { minX, maxX, minY, maxY } = extents;
+    const points = new Float32Array([
+      minX, minY, z, maxX, minY, z,
+      maxX, minY, z, maxX, maxY, z,
+      maxX, maxY, z, minX, maxY, z,
+      minX, maxY, z, minX, minY, z,
+    ]);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(points, 3));
+    return g;
+  }, [extents.minX, extents.maxX, extents.minY, extents.maxY]);
+  useEffect(() => () => geom.dispose(), [geom]);
+  return (
+    <lineSegments geometry={geom} name="engrave-live-extents">
+      <lineBasicMaterial color="#f0d79b" />
+    </lineSegments>
   );
 }
