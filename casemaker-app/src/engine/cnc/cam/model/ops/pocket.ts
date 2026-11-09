@@ -216,6 +216,13 @@ export interface PocketOpOptions {
    * the old (unextended) behaviour, stated by the caller, not silently assumed.
    */
   openOutline?: Polygons;
+  /**
+   * #1092 — THE REGION IS CUTTER-CENTRE SPACE. A coverage rest's admissible positions (the goal's
+   * tip field at or below the pass level, within reach of what the previous cutter left standing)
+   * are already centre positions, so the ring trace and the reachability field must NOT inset by
+   * the cutter radius again. Absent on every real pocket: unchanged.
+   */
+  centreSpace?: boolean;
   boolean?: { union: BooleanFn; subtract: BooleanFn };
   /**
    * #966 — the real design mesh, ALREADY ROTATED into this setup's own frame (the SAME one
@@ -617,7 +624,10 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
   // claims a column is cleared to `floorZ` when a shadow stopped it short.
   const floorSafeRegion = ceilingMaskAt === null ? region : intersectWithRegion(ceilingMaskAt(opts.node.floorZ));
 
-  const open = fullyReachable(floorSafeRegion, opts.offset, toolRadius);
+  // #1092 — a centre-space region is already the set of positions the cutter's disc may occupy, so
+  // neither the ring trace nor this reachability erosion may inset it again.
+  const loopInset = opts.centreSpace === true ? 0 : toolRadius;
+  const open = loopInset > 0 ? fullyReachable(floorSafeRegion, opts.offset, loopInset) : floorSafeRegion;
 
   // A's review 6622610124, finding 1: the free space EVERY same-level or level-to-level link must
   // stay inside is `open` (finding 5's own reachable area), NOT a second erosion of `region` —
@@ -671,7 +681,7 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
     // `floorZ` and `mouthZ` is still correctly cut down to it, then excluded from every level past
     // that, never cut deeper than its own real obstruction allows.
     const levelRegion = ceilingMaskAt === null ? region : intersectWithRegion(ceilingMaskAt(z));
-    const steps = pocketLoops(levelRegion, toolRadius, opts.stepOverMm, opts.offset);
+    const steps = pocketLoops(levelRegion, toolRadius, opts.stepOverMm, opts.offset, undefined, loopInset);
     for (const [stepIndex, step] of steps.entries()) {
       const loops = orderedRings(step, comingFrom());
       for (const loop of loops) {

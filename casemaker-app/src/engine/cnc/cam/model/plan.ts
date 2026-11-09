@@ -44,6 +44,7 @@ import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanFindingStatement, PlanSheetStatement, PlanStatement, StockProbes } from './types';
 import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { byKeyPendingNote, pickAmongEquals, pickDecisionSentence, pickKeysFor, REACH_MARGIN_FALLBACK_MM, type PickKeys } from './pickAmongEquals';
+import { finishTipField, DEFAULT_MAX_FINISH_TIP_OPS } from '@/engine/cnc/cam/surfaceFinishTipField';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, isAbortError, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
 import { fullyReachable, pocket } from './ops/pocket';
@@ -791,9 +792,39 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // leaves more than the 0.1 mm band above the goal, inside the pocket's own footprint, as loops
   // (dilated by the ROUNDER in `planPocketsForTree`, which knows the cutter). A field that cannot
   // be stamped falls back to the whole footprint — the floor pass as it was.
+  //
+  // #1092 — The mask returned here is CUTTER-CENTRE space: the positions where the rest cutter's
+  // own tip over the goal reaches the pass level AND standing material is within its radius. It is
+  // traced without a radius inset (`pocket()`'s `centreSpace`); see the two-space rule below.
+  // #1092 — THE REST'S TWO SPACES (0f's rule, 2026-11-08). What the previous cutter left standing
+  // is MATERIAL space (its stamp above the pass level); where the rest cutter's CENTRE may sit is
+  // CL space (the cutter's own tip over the GOAL at or below that level). Folding both into one
+  // cell mask and insetting it is what moved the error between a legitimate tangent wall-foot
+  // strip and a disc buried under the body for five rounds; they are separate sets, and the path
+  // is their intersection, traced without a further radius inset (`pocket()`'s `centreSpace`).
+  const restTipCache = new Map<string, Float32Array>();
+  const restTipField = (cutter: Tool): Float32Array | null => {
+    if (coverageGoal === undefined) return null;
+    const key = cutterKeyOf(cutter);
+    const hit = restTipCache.get(key);
+    if (hit !== undefined) return hit;
+    // The finish's own gouge-safe drop over the goal: the lowest tip that keeps the whole cutter
+    // at or above the real surface under it. A region floor never enters here.
+    // `GoalCellField` lacks the sampling metadata `finishTipField` reads; the datum is the plan's
+    // own (stock-top-relative), so the uncovered sentinel is the stock top, 0.
+    let coveredCount = 0;
+    for (const c of coverageGoal.covered) if (c === 1) coveredCount++;
+    const field = finishTipField(
+      { ...coverageGoal, topZ: 0, minZ: 0, coveredCount, resolutionNote: '' },
+      { radius: (cuttingDiameter(cutter) ?? 0) / 2, ball: cutter.shape === 'ball' },
+      DEFAULT_MAX_FINISH_TIP_OPS,
+    );
+    restTipCache.set(key, field);
+    return field;
+  };
   const restRegion = coverageGoal === undefined
     ? undefined
-    : (prefixIrs: readonly ToolpathIR[], region: { id: string; footprint: Polygons; floorZ: number; bounds: { min: [number, number]; max: [number, number] } }): Polygons | null => {
+    : (prefixIrs: readonly ToolpathIR[], region: { id: string; footprint: Polygons; floorZ: number; bounds: { min: [number, number]; max: [number, number] }; radiusMm: number; cutter: Tool }): Polygons | null => {
         let acc: Float32Array | null = null;
         for (const ir of prefixIrs) {
           const field = stampedField(ir);
@@ -801,7 +832,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           if (acc === null) acc = Float32Array.from(field);
           else for (let k = 0; k < acc.length; k++) if (field[k]! < acc[k]!) acc[k] = field[k]!;
         }
-        if (acc === null) return region.footprint;
+        if (acc === null) return null; // nothing stamped: no standing material to clean
         const goal = coverageGoal;
         const pitch = goal.pitch;
         const i0 = Math.max(0, Math.floor((region.bounds.min[0] - goal.x0) / pitch));
@@ -809,14 +840,63 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         const j0 = Math.max(0, Math.floor((region.bounds.min[1] - goal.y0) / pitch));
         const j1 = Math.min(goal.ny - 1, Math.ceil((region.bounds.max[1] - goal.y0) / pitch));
         if (i1 < i0 || j1 < j0) return null;
+        const tip = restTipField(region.cutter);
+        if (tip === null) return null;
+        const floorZ = region.floorZ;
+        const tol = ARC_CHORD_TOLERANCE_MM; // finish-class rest: stockToLeaveMm is 0
+        // ε — what counts as "standing": the finish's own 0.1 mm band (#961/#962's number, the
+        // same one the chain's own rank prices). A step-over scallop inside the band is finished
+        // already; only material the previous cutter genuinely left above it is work.
+        const STANDING_BAND_MM = 0.1;
         const cells = acc;
+        const reach = Math.max(1, Math.ceil(region.radiusMm / pitch));
+        // L — the previous cutter's stamp above the level (material space), on a padded grid so the
+        // reach question can be answered with prefix sums instead of a per-cell disc scan.
+        const pad = reach;
+        const pi0 = Math.max(0, i0 - pad);
+        const pi1 = Math.min(goal.nx - 1, i1 + pad);
+        const pj0 = Math.max(0, j0 - pad);
+        const pj1 = Math.min(goal.ny - 1, j1 + pad);
+        const W = pi1 - pi0 + 1;
+        const H = pj1 - pj0 + 1;
+        const standing = new Uint8Array(W * H);
+        for (let jj = 0; jj < H; jj++) {
+          for (let ii = 0; ii < W; ii++) {
+            const k = (pj0 + jj) * goal.nx + (pi0 + ii);
+            if (cells[k]! > floorZ + STANDING_BAND_MM) standing[jj * W + ii] = 1;
+          }
+        }
+        const W1 = W + 1;
+        const pre = (src: Uint8Array): Int32Array => {
+          const P = new Int32Array(W1 * (H + 1));
+          for (let jj = 0; jj < H; jj++) {
+            for (let ii = 0; ii < W; ii++) {
+              P[(jj + 1) * W1 + (ii + 1)] = src[jj * W + ii]! + P[jj * W1 + (ii + 1)]! + P[(jj + 1) * W1 + ii]! - P[jj * W1 + ii]!;
+            }
+          }
+          return P;
+        };
+        const boxSum = (P: Int32Array, x0: number, y0: number, x1: number, y1: number): number =>
+          P[(y1 + 1) * W1 + (x1 + 1)]! - P[y0 * W1 + (x1 + 1)]! - P[(y1 + 1) * W1 + x0]! + P[y0 * W1 + x0]!;
+        const standingPre = pre(standing);
+        const standingWithinReach = (i: number, j: number): boolean => {
+          const ii = i0 + i - pi0;
+          const jj = j0 + j - pj0;
+          const x0 = Math.max(0, ii - pad), x1 = Math.min(W - 1, ii + pad);
+          const y0 = Math.max(0, jj - pad), y1 = Math.min(H - 1, jj + pad);
+          return boxSum(standingPre, x0, y0, x1, y1) > 0;
+        };
         const inside = (i: number, j: number): boolean => {
           const k = (j0 + j) * goal.nx + (i0 + i);
           if (goal.covered[k] !== 1) return false;
-          if (!(cells[k]! - (goal.z[k] as number) > 0.1)) return false;
+          // A — CL space: the rest cutter's tip over the GOAL is at or below the pass level. The
+          // region's floor never admits a move; the goal does.
+          if (tip[k]! > floorZ + tol) return false;
           const x = goal.x0 + (i0 + i) * pitch;
           const y = goal.y0 + (j0 + j) * pitch;
-          return pointInPolygons(region.footprint, x, y);
+          if (!pointInPolygons(region.footprint, x, y)) return false;
+          // The centre must also be within the rest cutter's reach of what is actually standing.
+          return standingWithinReach(i, j);
         };
         return cellPolygons(inside, i1 - i0 + 1, j1 - j0 + 1, goal.x0 + i0 * pitch, goal.y0 + j0 * pitch, pitch);
       };
@@ -2619,7 +2699,16 @@ export interface PlanPocketsOptions {
    */
   restRegion?: (
     prefixIrs: readonly ToolpathIR[],
-    region: { id: string; footprint: Polygons; floorZ: number; bounds: { min: [number, number]; max: [number, number] } },
+    region: {
+      id: string;
+      footprint: Polygons;
+      floorZ: number;
+      bounds: { min: [number, number]; max: [number, number] };
+      /** #1092 — the rest cutter itself: its radius is the reach, and its own tip field over the
+       *  GOAL is the CL-space admissibility test (0f's rule, 2026-11-08). */
+      cutter: Tool;
+      radiusMm: number;
+    },
   ) => Polygons | null;
   /**
    * #943's ruling — the probed stock top (see {@link ModelPlanInput.stockProbes}): the facing
@@ -2954,37 +3043,31 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       }
     }
     let regionPolys = node.region;
+    let centreSpace = false;
     if (opts.restRegion !== undefined) {
       if (prefixIrs.length === 0) return null; // nothing planned before it: no leftover to cut
-      const mask = opts.restRegion(prefixIrs, { id, footprint: node.region, floorZ, bounds: ref.bounds });
+      const mask = opts.restRegion(prefixIrs, { id, footprint: node.region, floorZ, bounds: ref.bounds, radiusMm: radius, cutter });
       if (mask === null || mask.length === 0) return null;
-      // #962 — THE DILATION: 2r + 0.25, MEASURED. `2r + stepOver + 0.25` grew the leftover mask
-      // ~4.2 mm on a ⌀3.175 and the rings swept that grown area: the integration tip's tray rest
-      // spent 601 s of feed over cells the prefix already held within the band. But `r + 0.25`
-      // is WORSE, not tighter: `pocketLoops` erodes the region by r before it rings it, so a
-      // strip grown only to r leaves a region narrower than the cutter's diameter and the rest
-      // emits NO toolpath at all for that pocket — six of the tray's seven lost their pass
-      // outright and coverage fell 99.34 → 99.03 %. The tray sweep brackets the threshold at
-      // exactly 2r (3.15 mm: 99.30 %; 3.20 mm: 99.34 %; 2r = 3.175): the grown strip needs to be
-      // a cutter diameter wide for the eroded ring to exist. So the dilation is 2r — the ring's
-      // own inset plus the reach the cell needs — plus 0.25 mm of margin; the grown region is
-      // still clipped back to the pocket's own mouth (A ∩ B = A \ (A \ B)). Tray at this value:
-      // coverage 99.344 % (identical to the over-grown tip), rapid 660.6 s vs its 732.3 s.
-      regionPolys = opts.offset(mask, opts.restDilationMm ?? 2 * radius + 0.25);
-      if (regionPolys.length === 0) return null;
+      // #1092 (0f's two-space rule, 2026-11-08) — THE MASK IS ALREADY CUTTER-CENTRE SPACE: the
+      // rest cutter's tip over the goal at or below the pass level, within its radius of what the
+      // previous cutter left standing. It is therefore NOT dilated and `pocket()` traces it WITHOUT
+      // the radius inset (`centreSpace`); the old 2r + 0.25 material-space dilation and its radius
+      // erosion were two opposite shims around the missing CL-space test. Still clipped to the
+      // pocket's own mouth, so a rest never cuts outside the region the chain assigned it.
+      regionPolys = mask;
       if (opts.boolean !== undefined) {
-        const clipped = opts.boolean.subtract(regionPolys, opts.boolean.subtract(regionPolys, node.region));
-        // #962 — the mask holds standing cells but nothing of it survives at this pocket's own
-        // mouth: a planned pass that would cut nothing, STATED rather than silently dropped
-        // (the same silence the r-only dilation produced when `pocketLoops` could not ring).
-        if (clipped.length === 0) {
+        regionPolys = opts.boolean.subtract(mask, opts.boolean.subtract(mask, node.region));
+        // The centre mask holds admissible positions but none inside this pocket's own mouth: a
+        // planned pass that would cut nothing, STATED rather than silently dropped (#962's rule,
+        // kept through the #1092 rewrite).
+        if (regionPolys.length === 0) {
           throw new Error(
-            `the rest's leftover mask has standing cells but none of it survives inside this pocket at the ` +
-              `cutter's radius (${radius} mm) — standing material outside the mask's reach is left uncut`,
+            `the rest's admissible centres exist but none of them survives inside this pocket at the ` +
+              `cutter's reach (${radius} mm) — standing material outside the mask's reach is left uncut`,
           );
         }
-        regionPolys = clipped;
       }
+      centreSpace = true;
     }
     const restNode: PocketNode = {
       ...node,
@@ -3012,6 +3095,17 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       air: opts.air,
       rapid: opts.rapid,
       boolean: opts.boolean,
+      centreSpace,
+      // #1092 — NO `aboveMaterial` ON THIS CALL, ON PURPOSE. The rest's pass runs at the node's own
+      // floor, and the exact per-cell ceiling trims one mask cell at EVERY wall foot (the cell's
+      // plane max reads the wall it touches). Those wall-foot strips are precisely what a rest
+      // exists to clean: bounding this call removed two 12 mm strips at the floor level from set
+      // B's m1trayB-top p5 (a measured coverage loss, not a gouge), because a 1.85 mm-wide leftover
+      // strip stops being ringable once its edge is trimmed. The overhang gouge #1092 reports is
+      // stopped one level up, at the mask that asks for the pass at all: `restRegion` above now
+      // excludes every cell whose goal top sits above the floor Z — the analyst's rule, "a plane is
+      // only valid where the goal has a surface at that depth" — so j29's body cells never enter
+      // this pass's region and the rest is not planned for them.
     });
     // #962 — A REST THAT CUTS NOTHING OVER LIVE STANDING MATERIAL IS STATED, NEVER SILENT: the
     // mask said cells stand here, and the op produced no toolpath (the region eroded to nothing

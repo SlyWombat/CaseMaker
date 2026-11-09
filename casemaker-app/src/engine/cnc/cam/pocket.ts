@@ -207,6 +207,12 @@ export function pocketLoops(
   stepOver: number,
   offset: OffsetFn,
   maxStepOver: number = toolRadius,
+  /**
+   * #1092 — THE FIRST RING'S OWN INSET, defaulting to `toolRadius` (every pocket). A coverage rest
+   * traces a region that is ALREADY in cutter-centre space (its admissible positions), so its first
+   * ring is the region itself — inset 0 — and only the step-over spacing applies below it.
+   */
+  firstInsetMm: number = toolRadius,
 ): Polygons[] {
   if (!(toolRadius > 0)) {
     throw new Error(`pocketLoops: toolRadius must be > 0, got ${toolRadius} mm`);
@@ -227,7 +233,7 @@ export function pocketLoops(
   const rings: Polygons[] = [];
   const maxRings = Math.ceil(maxExtent(simple) / stepOver) + 4;
   let ring = 0;
-  let current = offset(simple, -toolRadius);
+  let current = offset(simple, -firstInsetMm);
   while (!isEmptyRegion(current)) {
     rings.push(current);
     if (rings.length > maxRings) {
@@ -237,7 +243,7 @@ export function pocketLoops(
       );
     }
     ring += 1;
-    current = offset(simple, -(toolRadius + ring * stepOver));
+    current = offset(simple, -(firstInsetMm + ring * stepOver));
   }
   return rings;
 }
