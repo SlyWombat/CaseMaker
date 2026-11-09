@@ -5314,6 +5314,17 @@ export function EngravePanel(): JSX.Element {
             It used to be one tooltip for two causes, "Fix the errors above first.", which could
             be — and was — shown beside "0 errors" (audit B9). */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+          {run.restoreNote !== null && (
+            // #1123 — a stored run that could not be restored says why, once, where Generate is.
+            // It is not a finding (the job is fine) and it carries no Fix: the action is the
+            // Generate button below it.
+            <span
+              data-testid="engrave-run-restore-note"
+              style={{ fontSize: 12, lineHeight: 1.45, color: '#c8d3de' }}
+            >
+              {run.restoreNote}
+            </span>
+          )}
           <button
             type="button"
             data-testid="engrave-generate"

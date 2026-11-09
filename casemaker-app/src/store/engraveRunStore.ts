@@ -56,6 +56,7 @@ import {
 } from '@/engine/cnc/engrave/pcbTopology';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { getTools, benchCutterFor } from '@/engine/cnc/toolRegistry';
+import { dedupeCutterEntries } from '@/engine/cnc/toolLibrary';
 import type { PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
 import type { PlanOutcome } from '@/engine/cnc/cam/model/plan';
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
@@ -70,6 +71,7 @@ import {
   machineKey,
   marginsKey,
   runInputs,
+  RUN_INPUT_ORDER,
   shopKey,
   surfaceKey,
   type EngraveInputKey,
@@ -421,6 +423,18 @@ export interface EngraveRunState {
    * so the next Generate can compare (the oracle row names the input a verdict flip followed).
    */
   inputs: EngraveRunInputs | null;
+  /**
+   * #1123 — THE SHOP THIS RUN WAS GENERATED IN, as a signature of the house reads that were live
+   * at the press (the location's and the tool registry's statuses and ETags). A run stored for a
+   * reload restores only while this still matches; a changed shop is stated, never silently
+   * re-used. Null before a Generate.
+   */
+  shopSignature: string | null;
+  /**
+   * #1123 — THE PLAIN LINE after a reload found a stored run it could not restore (a different
+   * shop, or a different build). Null when there is nothing to say. Cleared by the next Generate.
+   */
+  restoreNote: string | null;
   /** #581 — the inputs that differ from the previous Generate's; empty on the first run. */
   changedSinceLast: EngraveInputKey[];
   /** #581 — the previous Generate's oracle verdict, so a ✓↔× flip can say what changed. */
@@ -528,6 +542,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     staleSince: null as number | null,
     staleReason: null as EngraveInputKey | null,
     inputs: null as EngraveRunInputs | null,
+    shopSignature: null as string | null,
+    restoreNote: null as string | null,
     changedSinceLast: [] as EngraveInputKey[],
     previousVerdict: null as boolean | null,
     error: null as string | null,
@@ -665,6 +681,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     });
     set({
       inputs,
+      shopSignature: runShopSignature(),
+      restoreNote: null,
       changedSinceLast: previousInputs === null ? [] : changedInputs(previousInputs, inputs),
       previousVerdict,
     });
@@ -1324,6 +1342,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     staleSince: null,
     staleReason: null,
     inputs: null,
+    shopSignature: null,
+    restoreNote: null,
     changedSinceLast: [],
     previousVerdict: null,
     error: null,
@@ -1444,6 +1464,54 @@ function markStale(reason: EngraveInputKey): void {
 }
 
 /**
+ * #1123 — THE SHOP'S IDENTITY AT THE PRESS. The house's own validators are the reference (a
+ * 304-re-read is the same shop); the statuses are part of it because a page that could not reach
+ * the house ('absent') is a different shop from one that read it ('present'), even when both
+ * carry no validator. Stored with the run, compared after a reload by `store/runPersistence`.
+ */
+export function runShopSignature(): string {
+  const location = useLocationStore.getState();
+  const tools = useToolRegistryStore.getState();
+  return [
+    `location:${location.status}:${location.etag ?? ''}`,
+    `tools:${tools.status}:${tools.etag ?? ''}`,
+    `feeds:${tools.feedEtag ?? ''}`,
+    `inventory:${tools.inventoryEtag ?? ''}`,
+  ].join('|');
+}
+
+/**
+ * #1123 — RECHECK A RESTORED RUN. The watchers above fire on store CHANGES; after a reload the
+ * stores are already settled, so nothing would fire and a restored run would read as matching
+ * even when its margins, machine frame, shop, feeds, catalogue, cutters or fitted surface moved
+ * while the app was closed. Compare every input now, and mark the first that moved stale (the
+ * same marks, with the same first-reason rule).
+ */
+export function recheckRunInputs(): void {
+  const run = useEngraveRunStore.getState();
+  if (run.inputs === null || run.generated === null) return;
+  const job = useEngraveJobStore.getState().job;
+  const settings = useSettingsStore.getState();
+  const current = runInputs({
+    job,
+    margins: effectiveMargins(job, settings.margins),
+    calibration: settings.machineCalibration ?? null,
+    shopDefaults: useShopDefaultsStore.getState().defaults,
+    feeds: resolvedFeedsTable().table,
+    catalogue: feedCatalogueRows(),
+    tools: dedupeCutterEntries(getTools()),
+    conditions: inventoryConditions(),
+    surface: useEngraveRegistrationStore.getState().records[job.id]?.surface ?? null,
+  });
+  for (const key of RUN_INPUT_ORDER) {
+    if (current[key] !== run.inputs[key]) {
+      markStale(key);
+      return;
+    }
+  }
+}
+
+/**
  * #642 — SUBSCRIBE TO WHAT THE STAMP STAMPS. The gates read the #581 stamp, but only the job and the
  * machine frame were watched: the shop defaults, the feeds table, the synced catalogue, the cutters'
  * conditions and the registration's fitted surface could all move after Generate and leave Save and
@@ -1477,7 +1545,9 @@ useToolRegistryStore.subscribe((state, prev) => {
   // engine snapshots are installed before the store's set, so they are read here as they now stand.
   if (state.entries === prev.entries && state.feedCount === prev.feedCount && state.items === prev.items) return;
   staleIfMoved('catalogue', catalogueKey(feedCatalogueRows()));
-  staleIfMoved('cutters', cuttersKey(getTools(), inventoryConditions()));
+  // #1123 — the RUN stamped `cutters` from the deduped list `engraveShopOpts` hands the worker;
+  // comparing the raw registry here marked every restored run stale for a list the run never saw.
+  staleIfMoved('cutters', cuttersKey(dedupeCutterEntries(getTools()), inventoryConditions()));
 });
 
 useEngraveRegistrationStore.subscribe((state, prev) => {
