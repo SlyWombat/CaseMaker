@@ -592,20 +592,24 @@ async function runImportOnly(sample: ManifestSample, ctx: { root: string; out: s
   const reportPath = join(ensureDir(join(ctx.out, sample.id)), 'import.json');
   const tail = extname(sample.path).toLowerCase();
   if (tail === '.3mf') {
-    // units-3mf: the importer assumes millimetres (no unit is read), so the row states the
-    // assumption and the bbox the file's bare numbers produced — that is the sample's point.
+    // units-3mf: the unit the model DECLARES and the factor #1130 applied, then the bbox those
+    // numbers produced — the row states both (`mm (default)` when the model states none).
     try {
       const raw = readFileSync(path);
       const mesh = parse3MF(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
+      const statedUnit = mesh.unit.stated ?? 'mm (default)';
       const size = {
         x: Number((mesh.bbox.max[0] - mesh.bbox.min[0]).toFixed(3)),
         y: Number((mesh.bbox.max[1] - mesh.bbox.min[1]).toFixed(3)),
         z: Number((mesh.bbox.max[2] - mesh.bbox.min[2]).toFixed(3)),
       };
-      writeFileSync(reportPath, `${JSON.stringify({ assumedUnit: 'mm', size, triangles: mesh.triangleCount }, null, 2)}\n`);
+      writeFileSync(
+        reportPath,
+        `${JSON.stringify({ unit: statedUnit, mmPerUnit: mesh.unit.mmPerUnit, size, triangles: mesh.triangleCount }, null, 2)}\n`,
+      );
       return {
         purpose: sample.purpose,
-        import: stage('pass', `3MF read as mm (the importer assumes millimetres): ${size.x} × ${size.y} × ${size.z} mm, ${mesh.triangleCount} triangles`, fileReceipt(reportPath)),
+        import: stage('pass', `3MF unit ${statedUnit} (${mesh.unit.mmPerUnit} mm per unit): ${size.x} × ${size.y} × ${size.z} mm, ${mesh.triangleCount} triangles`, fileReceipt(reportPath)),
         plan: stage('n/a', 'units-3mf is an import-only sample', null),
         check: stage('n/a', 'units-3mf is an import-only sample', null),
       };
