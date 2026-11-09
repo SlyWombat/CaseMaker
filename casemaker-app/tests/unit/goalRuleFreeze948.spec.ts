@@ -242,6 +242,9 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
   // scope too (the seed that used to catch it was only `edges: 'all'`'s wall), while E — an
   // interior wall, not a silhouette — stays judged. A job that states `edges: 'all'` reads the
   // canonical 2-cell edge break above; the default reads D alone.
+  // DECISION (0f, 2026-11-08, signed with the v8 freeze): THROUGH-HOLE RIMS ARE SILHOUETTE for the
+  // edge-break seed — D moves because the hole rim is an INNER silhouette and its break lies inside
+  // the 0.5 mm leg.
   it('the default edge scope names the part’s silhouette — D is edge break, E is judged', () => {
     const r = checkGoalCutInto(CANON, CANON_TOP, {
       edgeBreak: { reachMm: 1.5, legMm: 0.5 },
