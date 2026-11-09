@@ -113,10 +113,19 @@ describe('#962 — a rest that cuts nothing is STATED, never silent', () => {
     const result = plan(outside);
     // AND the r-too-small class itself, driven through the dilation option: a 0.2 mm standing
     // strip that the op cannot ring — exactly what the tray's 0.58 mm lands did at r + 0.25.
+    // #1092 (0f's two-space rule) — the mask is CUTTER-CENTRE space and is traced WITHOUT the
+    // radius inset, so the old r + 0.25 failure class (a thin standing strip the inset could not
+    // ring) no longer exists: a thin centre-space mask IS traceable and must post moves, never a
+    // silent zero-move op. The "cannot enter" case is now an empty admissible set, which is the
+    // mask the callback returns empty (dropped) — the stated case kept below is the mask whose
+    // positions all fall outside the pocket.
     const thin: [number, number][][] = [[[10, 10], [14, 10], [14, 10.2], [10, 10.2]]];
-    const tooSmall = plan(thin, 0);
-    expect(tooSmall.unplanned.filter((f) => f.kind === 'rest').length, `unplanned: ${JSON.stringify(tooSmall.unplanned)}`).toBeGreaterThan(0);
-    expect(tooSmall.unplanned.find((f) => f.kind === 'rest')!.reason).toMatch(/eroded to nothing/i);
+    const thinResult = plan(thin, 0);
+    const thinRest = thinResult.ops.filter((op) => op.outcome.ir.tool.id === 'flat-3.175');
+    expect(
+      thinRest.every((op) => op.outcome.ir.operations.every((o) => o.moves.length > 0)),
+      'a thin centre-space mask must be traced, never posted as an empty op',
+    ).toBe(true);
     const restProgram = result.ops.filter((op) => op.outcome.ir.tool.id === 'flat-3.175');
     // Either the op is dropped from the ops (its planning threw) or it emits moves; an op with
     // ZERO moves on non-empty standing material is the silent failure this pins against.
