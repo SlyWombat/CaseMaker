@@ -9,9 +9,10 @@
  *
  * So a surface that judges the machine keeps it in step WHILE IT IS ON SCREEN: one re-read on
  * {@link LOCATION_POLL_MS} while the tab is visible, one when the tab becomes visible again, and
- * one when the change-the-machine wizard closes. The store's `refresh()` is the same read the
- * connect makes — it sets `status` and `etag` from the service's answer, so a real change changes
- * the etag the persisted-run signature is keyed on (#1123 item 11, case-maker-46).
+ * one when the change-the-machine wizard closes. The store's `poll()` is the read that is safe to
+ * repeat: it takes a new record (a real change changes the etag the persisted-run signature is
+ * keyed on — #1123 item 11, case-maker-46), keeps the same object when the validator has not moved,
+ * and on a dropped request keeps the last good record rather than blanking the machine for a blip.
  *
  * A build with no house service (the hosted web site) answered `absent` at connect and is not
  * polled: there is nothing there that can start answering, and a poll would be one request per
@@ -41,7 +42,7 @@ export function useLocationPoll(): void {
         return;
       }
       inFlight = true;
-      void store.refresh().finally(() => {
+      void store.poll().finally(() => {
         inFlight = false;
         if (again) {
           again = false;

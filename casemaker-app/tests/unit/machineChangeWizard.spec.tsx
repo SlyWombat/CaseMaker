@@ -158,7 +158,11 @@ interface Write {
 }
 
 /** The house service as this wizard uses it: one location read, machine and accessory PUTs. */
-function fakeHouse(state: { view: LocationView; writes: Write[] }): HouseClient {
+function fakeHouse(state: { view: LocationView; writes: Write[]; version: number }): HouseClient {
+  // The real service's validator is computed over the served bytes, so every write moves it
+  // (`house_api`'s json_with_etag). A freeze-frame `"e1"` made the post-write re-read look like
+  // "nothing changed" once the store stopped churning on an equal validator (#1123-12 review).
+  // The version lives on the shared STATE: the loader factory builds a client per request.
   return {
     probe: async (): Promise<HouseProbe> => ({ kind: 'present', health: HEALTH, base: '' }),
     tools: async () => ({ kind: 'ok', etag: '"t1"', entries: [] }),
@@ -166,12 +170,13 @@ function fakeHouse(state: { view: LocationView; writes: Write[] }): HouseClient 
     inventory: async () => ({ kind: 'ok', etag: '"i1"', items: [] }),
     call: async (method, path, body): Promise<HouseCall> => {
       if (method === 'GET' && path === '/location') {
-        return { kind: 'ok', text: JSON.stringify(state.view), etag: '"e1"' };
+        return { kind: 'ok', text: JSON.stringify(state.view), etag: `"e${state.version}"` };
       }
       state.writes.push({ method, path, body });
       if (method === 'PUT' && path.startsWith('/location/machines/')) {
         const record = body as MachineRecord;
         state.view = { ...state.view, machines: state.view.machines.map((m) => (m.id === record.id ? record : m)) };
+        state.version += 1;
         return { kind: 'ok', text: '' };
       }
       if (method === 'PUT' && path.startsWith('/location/accessories/')) {
@@ -183,6 +188,7 @@ function fakeHouse(state: { view: LocationView; writes: Write[] }): HouseClient 
             ? accessories.map((a) => (a.id === record.id ? record : a))
             : [...accessories, record],
         };
+        state.version += 1;
         return { kind: 'ok', text: '' };
       }
       return { kind: 'ok', text: '' };
@@ -212,8 +218,8 @@ function fakeMachine(opts: {
   return { lines };
 }
 
-function seedLocation(seed: MachineRecord = machine()): { view: LocationView; writes: Write[] } {
-  const state = { view: view(seed), writes: [] as Write[] };
+function seedLocation(seed: MachineRecord = machine()): { view: LocationView; writes: Write[]; version: number } {
+  const state = { view: view(seed), writes: [] as Write[], version: 1 };
   setHouseClientLoader(async () => fakeHouse(state));
   useLocationStore.setState({
     status: 'present',
