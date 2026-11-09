@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, type JSX } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
@@ -31,6 +31,9 @@ import { jobVise } from '@/engine/cnc/fixture';
 import { visePlacementFrame } from '@/store/locationStore';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import { pathBounds } from './simGeometry';
+import { designExtents, liveEdgeWords, liveFromStores, sceneFor, useLiveMachine } from './liveRun';
+import { useMachineStore } from '@/store/machineStore';
+import { readStatusLine } from '@/platform/desktop/protocol';
 
 ensureZUp();
 
@@ -124,8 +127,11 @@ function activeSceneBoundsFromStores(): { center: THREE.Vector3; diag: number } 
   const sim = useSimStore.getState();
   const simActive = isSimSceneActive(sim);
   // The engrave section owns the viewport exactly when no simulation does (#205); a simulation
-  // that is still up keeps the camera, so the two branches can never both be fenced.
-  const engraveActive = !simActive && useViewportStore.getState().activeSidebarSection === 'cnc-engrave';
+  // that is still up keeps the camera, so the two branches can never both be fenced. #1123-36: a
+  // LIVE machine in the CNC section borrows it from a loaded simulation (the same rule SceneMeshes
+  // draws), so the camera frames the blank the operator is watching, not the finished picture.
+  const scene = sceneFor(simActive, useViewportStore.getState().activeSidebarSection === 'cnc-engrave', liveFromStores());
+  const engraveActive = scene === 'engrave';
   // #557 — the machine bed plate in the WORK frame, so the camera frames the real envelope. Only
   // computed while the engrave section owns the viewport (the case view frames its own nodes).
   const bedBox: SceneBox | null = engraveActive
@@ -141,7 +147,7 @@ function activeSceneBoundsFromStores(): { center: THREE.Vector3; diag: number } 
     : null;
   return activeSceneBounds({
     nodes: useJobStore.getState().nodes,
-    simBoxes: simActive ? simBoxesOf(sim) : null,
+    simBoxes: scene === 'sim' ? simBoxesOf(sim) : null,
     engraveBoxes: engraveActive ? engraveBoxesOf(useEngravePreviewStore.getState().preview, bedBox) : null,
   });
 }
@@ -433,6 +439,9 @@ export function Viewport() {
   // which sits at exactly z = 0 too. Hidden while either CNC view owns the viewport (#197, #205).
   const simActive = useSimStore(isSimSceneActive);
   const engraveActive = useViewportStore((s) => s.activeSidebarSection === 'cnc-engrave');
+  // #1123-36 — the live scene rule, the same one SceneMeshes draws.
+  const live = useLiveMachine();
+  const scene = sceneFor(simActive, engraveActive, live);
   const onPointerDown = useNoSelectWhileOrbiting();
   // #361 — the wrapper the legends are anchored to, and the toolbar whose height they have to clear.
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -478,7 +487,7 @@ export function Viewport() {
           <AutoFrame />
           <DesignReframe />
           <ViewportCameraController />
-          {!simActive && !engraveActive && <GridFloor />}
+          {scene === 'case' && <GridFloor />}
           <SceneMeshes />
         </Canvas>
         {/* #349 — the engrave depth legend rides over the canvas as DOM, like the transport, rather
@@ -487,15 +496,17 @@ export function Viewport() {
             viewport from a loaded simulation (`SceneMeshes`, and `activeSceneBounds` above), so the
             depth legend must not paint over a scene it does not describe — as DOM it did not follow
             the scene the way it did while it lived inside `EngravePreview` (review of ebf38c5). */}
-        {engraveActive && !simActive && <EngraveLegend />}
+        {scene === 'engrave' && <EngraveLegend />}
         {/* #716 — a rotary job's Map | Stock switch and its ⌀/around read-out, beside the legend.
             Null for a flat job, so the flat preview's chrome is unchanged. */}
-        {engraveActive && !simActive && <RotaryViewControls />}
+        {scene === 'engrave' && <RotaryViewControls />}
+        {/* #1123-38 — the live readout: positions only, never a verdict. */}
+        {scene === 'engrave' && live && <LiveRunReadout />}
         {/* #349 — the simulation's sacrificial swatch, the same move. */}
-        {simActive && <SimLegend />}
+        {scene === 'sim' && <SimLegend />}
         {/* #198 — the transport rides over the bottom of the canvas while a simulation owns the
             scene. It renders itself null otherwise, so no guard is needed here. */}
-        <SimTransport />
+        {scene === 'sim' && <SimTransport />}
       </div>
       {/* #526 — the live machine in one line under the viewport whenever a machine is remembered.
           It renders itself null until machineStore carries a machine, so no guard is needed here. */}
@@ -503,6 +514,40 @@ export function Viewport() {
       {/* #528 — the dock band under the viewport for what the machine said. Renders itself null
           until there is transcript content. */}
       <MachineDock />
+    </div>
+  );
+}
+
+
+/**
+ * #1123-38 — the live readout over the viewport: the tool centre, the design's extents and the
+ * tool's distance from the nearest extent. Positions only; no claim about what is being cut.
+ */
+function LiveRunReadout(): JSX.Element | null {
+  const machine = useMachineStore((s) => s.machine);
+  const preview = useEngravePreviewStore((s) => s.preview);
+  const line = machine?.statusLine ?? (machine?.status == null ? null : readStatusLine(machine.status));
+  const words = liveEdgeWords(line?.wpos ?? null, designExtents(preview));
+  if (words === null) return null;
+  return (
+    <div
+      data-testid="live-run-readout"
+      style={{
+        position: 'absolute',
+        top: 8,
+        left: 8,
+        maxWidth: 560,
+        padding: '4px 8px',
+        fontSize: 12,
+        lineHeight: 1.4,
+        color: '#c8d3de',
+        background: 'rgba(16, 21, 27, 0.85)',
+        border: '1px solid #2a2f36',
+        borderRadius: 4,
+        pointerEvents: 'none',
+      }}
+    >
+      {words}
     </div>
   );
 }

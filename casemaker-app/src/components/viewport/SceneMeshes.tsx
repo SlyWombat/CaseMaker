@@ -12,6 +12,7 @@ import { HatPlaceholderMeshes } from './HatPlaceholderMeshes';
 import { isAlternativeNode } from '@/engine/exporters/parts';
 import { TOOLBOX_BIN_NODE_ID, TOOLBOX_LID_NODE_ID } from '@/engine/compiler/toolbox';
 import { isSimSceneActive, useSimStore } from '@/store/simStore';
+import { sceneFor, useLiveMachine } from './liveRun';
 import { SimMeshes } from './SimMeshes';
 import { EngravePreview } from './EngravePreview';
 
@@ -270,7 +271,11 @@ export function SceneMeshes() {
   // #205 — the engrave preview owns the viewport only while its section is open; a simulation
   // that is still up takes precedence (the sim meshes are what the camera is framed on).
   const engraveActive = useViewportStore((s) => s.activeSidebarSection === 'cnc-engrave');
-  if (simActive) return <SimMeshes />;
-  if (engraveActive) return <EngravePreview />;
+  // #1123-36 — EXCEPT while the machine is live: the finished simulation would lie about the
+  // material under the cutter, so the preview shows the uncut blank and the live tool instead.
+  const live = useLiveMachine();
+  const scene = sceneFor(simActive, engraveActive, live);
+  if (scene === 'sim') return <SimMeshes />;
+  if (scene === 'engrave') return <EngravePreview uncut={live} />;
   return <CaseMeshes />;
 }
