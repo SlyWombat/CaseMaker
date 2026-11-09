@@ -185,6 +185,11 @@ describe('EngravePanel (#205)', () => {
         expect(row.textContent).not.toContain('(inventory)');
       }
       expect(line).not.toContain('choosing…');
+      // #1127 — this run has no frozen package yet (its first look at Cut freezes it), so a tick
+      // would have nowhere to be recorded: the rows stay readable and the controls wait.
+      for (const row of rows) {
+        expect((row.querySelector('input[type="checkbox"]') as HTMLInputElement).disabled).toBe(true);
+      }
     } finally {
       act(() => {
         useEngraveRunStore.setState({ generated: before });

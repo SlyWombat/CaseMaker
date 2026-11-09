@@ -2350,6 +2350,8 @@ export function EngravePanel(): JSX.Element {
     const programs = run.staleSince === null && run.generated?.ok === true ? run.generated.programs : null;
     return programs === null || programs.length === 0 ? [] : cutterChecklistRows(programs);
   })();
+  /** #1127 — the run a tick is recorded against: the frozen package, once Cut has frozen this run. */
+  const checklistHash = job.package?.hash;
   const cutterCountWords =
     cutterRows.length === 0 ? null : `${cutterRows.length} cutter${cutterRows.length === 1 ? '' : 's'} — see the list`;
   // #807 — "no cutter chosen" only when nothing can choose: while the measured search runs (or
@@ -3780,11 +3782,14 @@ export function EngravePanel(): JSX.Element {
           it goes through the job (the whole-run regenerate follows with its estimate). */}
       <CutterChecklist
         rows={cutterRows}
-        entries={job.package === undefined ? undefined : job.cutterChecklist?.[job.package.hash]}
+        entries={checklistHash === undefined ? undefined : job.cutterChecklist?.[checklistHash]}
+        // #1127 — a tick is recorded against THE RUN (the frozen package's hash), so before this
+        // run has been frozen (its first look at Cut) a tick has nowhere to be kept: the rows stay
+        // readable and the controls wait rather than toggling back on themselves.
+        disabled={checklistHash === undefined}
         onSet={(key, entry) => {
-          const hash = job.package?.hash;
-          if (hash === undefined) return;
-          useEngraveJobStore.getState().setCutterChecklistEntry(hash, key, entry);
+          if (checklistHash === undefined) return;
+          useEngraveJobStore.getState().setCutterChecklistEntry(checklistHash, key, entry);
           if (entry?.state === 'replaced' && entry.replacedWith !== undefined) {
             useEngraveJobStore.getState().replaceCutter(key, entry.replacedWith);
           }
