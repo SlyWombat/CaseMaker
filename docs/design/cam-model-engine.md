@@ -865,12 +865,20 @@ the cutter's disc tells them apart.
 The region's floor is a lower bound on `z` only; it never admits a move (j29's pocket-0 floor was stated
 −26.1 where the goal is −1.36 — a separate region defect the rule must be correct with or without).
 
-**Two amendments on landing.** The drop-cutter primitive moves to a neutral module (`cam/dropTip.ts`)
-so the planner never imports the gate's `surfaceFinishTipField` (#964's reverse import rule); and the tip
-is computed **per rest region** (bbox + r, reading goal cells to + 2r, cached per cutter × region) — a
-whole-goal field at 0.1 mm needs 1.2e9 reads against a 3e8 budget and silently refused every region. A
-budget refusal is a stated finding, `rest-region-over-budget` (warning when the coverage line still
-passes, error when it fails because of it), joined to the plan's leftover statement (#1023).
+**Three amendments on landing.** The drop-cutter primitive moves to a neutral module (`cam/dropTip.ts`)
+so the planner never imports the gate's `surfaceFinishTipField` (#964's reverse import rule). The tip is
+computed **per rest region**: `restTipField` builds its window on the region's bbox grown by
+`2·radius + pitch`, copies the goal cells inside it, and caches the field per `(cutter key | region id)` —
+a whole-goal field at 0.1 mm needed 1.2e9 stencil reads against the 3e8 budget of the time and silently
+refused every region. And the field is an **exact grey-scale dilation**, not a brute stencil: for a flat
+cutter a sliding-window maximum along each row of the disc (van Herk/Gil-Werman — 33 rows for a ⌀3.175 at
+0.1 mm where the stencil counted 853 cells, bit-identical because a maximum over the same values is
+order-independent); the ball keeps the stencil. The budget therefore has **two units with their own
+ceilings**: FLAT = grid cells × rows in the disc against **150 M**; BALL = covered cells × stencil cells
+against **300 M**. A budget refusal is a stated finding, `rest-region-over-budget`, typed on the plan's
+last setup — error when the shop's coverage line (`restVisibility.share`, fallback
+`REST_MACHINING_FALLBACK.thirdToolFraction`) is crossed, warning under it — joined with the finish's
+measured leftover (#1023), with its row in the CNC guide.
 
 **Evidence.** j29 card: cut-into 0.0 %, blocks 1–5 absent (dave-1 and k3). Set B: top p5 does more of the
 rest work it owed (leftover > 1 mm 0.21 → 0.13 %, volume −31 %, cut-into unchanged at 0), bottom p2 +0.7 s,
