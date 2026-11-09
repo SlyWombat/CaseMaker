@@ -1447,28 +1447,34 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
           clDistanceMm = onGrid ? outlineDistance(cl.x, cl.y) : outlineDistance(cl.x, cl.y);
         }
       }
-      // #1092 (0f's inward-witness ruling) — A ONE-CELL BOUNDARY ARTEFACT: a silhouette cell whose
-      // INWARD neighbour — an axial neighbour that is fully covered (not itself a silhouette cell)
-      // — is NOT cut below its own design within the rule's slack. The stamp's disc spans both
-      // cells, so a real cut of this depth would also read at the inward neighbour; when it does
-      // not, the boundary cell's read is an artefact of the grid's edge. The CL proof stays; the
-      // witness is an alternative, and it still sits under the stated blank's ceiling (R-a).
+      // #1092 (0f's inward-witness ruling, amended to EVERY candidate 2026-11-09) — A ONE-CELL
+      // BOUNDARY ARTEFACT: a silhouette cell ALL of whose fully covered part-side axial neighbours
+      // (covered, not itself a silhouette cell) are NOT cut below their own design within the
+      // rule's slack. The stamp's disc spans the cells, so a real cut of this depth would also read
+      // at every inward neighbour; when it does not, the boundary cell's read is an artefact of the
+      // grid's edge. ANY cut candidate fails the witness; a cell with NO candidate has no witness.
+      // The CL proof stays; the witness is an alternative, and it sits under the stated blank's
+      // ceiling (R-a).
       let witnessOk = false;
       if (ceiling !== null) {
+        let candidates = 0;
+        let allUncut = true;
         for (const [di, dj] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
           const ci = i + di;
           const cj = j + dj;
           if (ci < 0 || cj < 0 || ci >= nx || cj >= ny) continue;
           const kk = cj * nx + ci;
           if (goal.covered[kk] !== 1 || silhouette[kk] === 1) continue; // fully covered, inward
+          candidates++;
           const xn = goal.x0 + ci * goal.pitch;
           const yn = goal.y0 + cj * goal.pitch;
           const topN = verdictTop(xn, yn) ?? (sweptTop === null ? null : sweptTop(xn, yn));
-          if (topN !== null && topN >= goal.z[kk]! - STRADDLING_SLACK_MM) {
-            witnessOk = true;
+          if (topN === null || !(topN >= goal.z[kk]! - STRADDLING_SLACK_MM)) {
+            allUncut = false;
             break;
           }
         }
+        witnessOk = candidates > 0 && allUncut;
       }
       const clProofOk =
         clOutside &&
