@@ -23,14 +23,14 @@
 
 import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
 import type { Tool } from '@/engine/cnc/tool';
-import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import type { FeatureSource, RemainderRegion } from './features';
 import { dropCutterHeight, profileOf, type DropCutterMesh } from './dropcutter';
+import { footprintIndex } from './footprintIndex';
 
 export interface ClSurface {
   /**
    * The CL height at (x, y); `null` outside the region's footprint (a hair on its boundary still
-   * counts as inside — see `onBoundary`) or where no triangle lies within the cutter's reach.
+   * counts as inside — see the footprint guard below) or where no triangle lies within the cutter's reach.
    * `reach()`'s face rule is a CALLER's admission test, never a gate inside this query (E's review
    * of #1033 corrected the old wording, which claimed one).
    */
@@ -80,37 +80,20 @@ export interface ReachResult {
  * own edge still sees the wall/land beside it, not air past the region's own footprint boundary.
  */
 /**
- * Exactly on the footprint's own boundary. `pointInPolygons` answers "outside" for a point lying
- * ON a vertical edge (ray casting's own convention, `pocket.ts`), while the raster's interval
- * tracer counts that same column as inside — the disagreement surfaced as `dropRow`'s "footprint
- * notch" on the organizer's grown finish region, whose offset lands vertical edges on exactly the
- * raster's round x values. A point on the boundary is the region's own edge, so it is reachable.
- * Guarded by the footprint's bbox, so a genuinely outside point costs one rectangle test.
+ * THE FOOTPRINT GUARD. A point exactly on the region's own boundary is reachable:
+ * `pointInPolygons` answers "outside" for a point lying ON a vertical edge (ray casting's own
+ * convention, `pocket.ts`), while the raster's interval tracer counts that same column as inside —
+ * the disagreement surfaced as `dropRow`'s "footprint notch" on the organizer's grown finish
+ * region, whose offset lands vertical edges on exactly the raster's round x values.
+ *
+ * #1134 — the two tests (even-odd membership and the boundary distance) are the SAME predicates
+ * `pointInPolygons` and the pre-#1134 `onBoundary` answered, now behind `footprintIndex`: the
+ * mask asks the CL 18 times per cell and the sequence pricing asks thousands of cells, so the
+ * old full edge scan per query (with the bbox rebuilt every call) was 40 % of the ideal half's
+ * profile. The index keeps every comparison and the distance rule unchanged and buckets the
+ * edges by the rows their y-range covers; the equivalence test proves the answers point for
+ * point.
  */
-function onBoundary(footprint: readonly (readonly [number, number][])[], x: number, y: number, eps = 1e-9): boolean {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const ring of footprint) {
-    for (const [px, py] of ring) {
-      if (px < minX) minX = px;
-      if (px > maxX) maxX = px;
-      if (py < minY) minY = py;
-      if (py > maxY) maxY = py;
-    }
-  }
-  if (x < minX - eps || x > maxX + eps || y < minY - eps || y > maxY + eps) return false;
-  for (const ring of footprint) {
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const [x1, y1] = ring[j]!;
-      const [x2, y2] = ring[i]!;
-      const dx = x2 - x1;
-      const dy = y2 - y1;
-      const len2 = dx * dx + dy * dy;
-      const t = len2 > 0 ? Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / len2)) : 0;
-      if (Math.hypot(x - (x1 + t * dx), y - (y1 + t * dy)) <= eps) return true;
-    }
-  }
-  return false;
-}
 
 /**
  * #1129 — THE SAMPLE FLOOR, DERIVED AND STATED (defaults over knobs). Before this, `clSurface`
@@ -178,9 +161,12 @@ export function clSurface(
       ? 2 * Math.sqrt(2 * profile.curveRadiusMm * toleranceMm - toleranceMm * toleranceMm)
       : profile.radiusMm;
   let sampleCount = 0;
+  // #1134 — the footprint guard is indexed ONCE per surface: the mask and the sequence pricing
+  // ask thousands of points of it, and the raw scan was 40 % of the ideal half's profile.
+  const footprint = footprintIndex(region.footprint);
   return {
     dropCutter(x, y) {
-      if (!pointInPolygons(region.footprint, x, y) && !onBoundary(region.footprint, x, y)) return null;
+      if (!footprint.contains(x, y) && !footprint.within(x, y)) return null;
       sampleCount++;
       return dropCutterHeight(profile, mesh, x, y);
     },
