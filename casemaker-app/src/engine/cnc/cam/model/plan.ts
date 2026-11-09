@@ -841,6 +841,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       }
     }
     const ops = coveredCount * stencilCellsFor(radius, pitch);
+    if (process.env.CM_1092_BUDGET_DEBUG) {
+      const b = region.bounds;
+      console.error(`[resttip] ${region.id} bbox=[${b.min[0].toFixed(1)},${b.min[1].toFixed(1)}]-[${b.max[0].toFixed(1)},${b.max[1].toFixed(1)}] r=${radius.toFixed(3)} covered=${coveredCount} stencil=${stencilCellsFor(radius, pitch)} ops=${ops} budget=${DEFAULT_MAX_FINISH_TIP_OPS} refused=${ops > DEFAULT_MAX_FINISH_TIP_OPS}`);
+    }
     if (ops > DEFAULT_MAX_FINISH_TIP_OPS) {
       restBudgetFindings.push({ id: region.id, cutter, ops, budget: DEFAULT_MAX_FINISH_TIP_OPS });
       return null;
@@ -3167,6 +3171,12 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       // only valid where the goal has a surface at that depth" — so j29's body cells never enter
       // this pass's region and the rest is not planned for them.
     });
+    if (process.env.CM_1092_BUDGET_DEBUG) {
+      let mv = 0;
+      let minZ = 0;
+      for (const o of restOutcome.ir.operations) for (const m of o.moves) { mv++; if (m.z < minZ) minZ = m.z; }
+      console.error(`[restplan] ${id} floorZ=${floorZ.toFixed(3)} centreSpace=${centreSpace} regionPolys=${regionPolys.length} moves=${mv} minZ=${minZ.toFixed(3)}`);
+    }
     // #962 — A REST THAT CUTS NOTHING OVER LIVE STANDING MATERIAL IS STATED, NEVER SILENT: the
     // mask said cells stand here, and the op produced no toolpath (the region eroded to nothing
     // at the cutter's radius — the failure a too-small dilation produced on six of the tray's
