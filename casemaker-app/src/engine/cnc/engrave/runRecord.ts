@@ -26,6 +26,8 @@ import { recordDepths, runSheetFileName, sha256Hex, type RunSheetGenerated } fro
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { programFiles } from '@/engine/cnc/engrave/programFiles';
 import { cuttingDiameter } from '@/engine/cnc/tool';
+import { cutterNameForKey } from '@/engine/cnc/toolDisplay';
+import { distinctCutterKeys, settledCutterEntry } from '@/engine/cnc/engrave/cutterChecklist';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
@@ -86,6 +88,18 @@ export interface RunRecordProgram {
  * One finished run (#277). Everything above `generatedOn` is the app's; everything below is a
  * person's, and every field of it is `null` in the file Save writes.
  */
+/** #1127 — one cutter's state in the run record. */
+export interface RunRecordCutter {
+  key: string;
+  name: string;
+  /** 1-based program numbers this cutter serves. */
+  programs: number[];
+  state: 'located' | 'replaced';
+  /** The replacement's display name, when replaced. */
+  replacedWith?: string;
+  at: string;
+}
+
 export interface RunRecord {
   kind: typeof RUN_RECORD_KIND;
   schemaVersion: number;
@@ -102,6 +116,12 @@ export interface RunRecord {
    * record, which is read as the one program its top-level pair describes.
    */
   programs?: RunRecordProgram[];
+  /**
+   * #1127 — THE BITS LAID OUT, at the moment the record was written: per distinct cutter in program
+   * order, whether the operator had it located or had replaced it with another owned cutter. A
+   * non-byte record of the checklist (the state itself lives on the job, keyed by the package).
+   */
+  cutterChecklist?: RunRecordCutter[];
   /** The cutter the job named, and its cutting diameter, mm. */
   tool: string | null;
   cuttingDiameter: number | null;
@@ -196,6 +216,37 @@ export function buildRunRecord(
   // #1093 R4 — the run's files, named once (`programFiles`) so the record, Save and the release
   // cannot disagree about what a program's file is called.
   const runPrograms = generated.programs ?? [];
+  // #1127 — the checklist as it stood: the job's state for THIS package, one row per distinct
+  // cutter in program order. Absent when the job has no checklist for the run.
+  const checklistEntries =
+    job.package === undefined ? undefined : job.cutterChecklist?.[job.package.hash];
+  const checklistKeys = distinctCutterKeys(runPrograms).map((key) => {
+    const programs = runPrograms.flatMap((program, index) => (program.toolKey === key ? [index + 1] : []));
+    return { key, programs };
+  });
+  const cutterChecklist: RunRecordCutter[] | undefined =
+    checklistEntries === undefined
+      ? undefined
+      : checklistKeys
+          .map((row): RunRecordCutter | null => {
+            // Settled by the row's own entry, or by the replacement that stands in for it after
+            // the whole-run regenerate (#1127's gate must not forget a replacement it asked for).
+            const entry = settledCutterEntry(checklistEntries, row.key);
+            if (entry === undefined) return null;
+            const replacedWith =
+              entry.state === 'replaced' && entry.replacedWith !== undefined && entry.replacedWith !== row.key
+                ? cutterNameForKey(entry.replacedWith)
+                : undefined;
+            return {
+              key: row.key,
+              name: cutterNameForKey(row.key),
+              programs: row.programs,
+              state: entry.state,
+              ...(replacedWith === undefined ? {} : { replacedWith }),
+              at: entry.at,
+            };
+          })
+          .filter((row): row is RunRecordCutter => row !== null);
   const files = programFiles(runPrograms, job.name);
   const frameOf = new Map(files.filter((f) => f.kind === 'frame').map((f) => [f.index, f.name] as const));
   return {
@@ -215,6 +266,7 @@ export function buildRunRecord(
         ncHash: sha256Hex(f.bytes).slice(0, 8),
         frameFile: frameOf.get(f.index) ?? null,
       })),
+    ...(cutterChecklist === undefined ? {} : { cutterChecklist }),
     tool: tool?.name ?? null,
     cuttingDiameter: tool ? cuttingDiameter(tool) : null,
     estimatedSeconds: generated.cam?.estimatedSeconds ?? null,
@@ -443,6 +495,31 @@ export function parseRunRecord(raw: unknown): RunRecordParseResult {
     depths.push({ id: row.id, name: row.name, planned: row.planned, measured });
   }
 
+  // #1127 — the bits-laid-out rows, read back as written. Tolerant like the other derived
+  // sections: a row that is not a cutter record is dropped, never a reason to refuse the file (the
+  // record's own content is the person's readings; this is history).
+  const cutterChecklist: RunRecordCutter[] | undefined = Array.isArray(r.cutterChecklist)
+    ? (r.cutterChecklist as unknown[])
+        .filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
+        .filter(
+          (x) =>
+            typeof x.key === 'string' &&
+            typeof x.name === 'string' &&
+            typeof x.at === 'string' &&
+            (x.state === 'located' || x.state === 'replaced'),
+        )
+        .map((x) => ({
+          key: x.key as string,
+          name: x.name as string,
+          programs: Array.isArray(x.programs)
+            ? (x.programs as unknown[]).filter((n): n is number => typeof n === 'number' && Number.isInteger(n))
+            : [],
+          state: x.state as 'located' | 'replaced',
+          ...(typeof x.replacedWith === 'string' ? { replacedWith: x.replacedWith } : {}),
+          at: x.at as string,
+        }))
+    : undefined;
+
   const run: RunRecord = {
     kind: RUN_RECORD_KIND,
     schemaVersion: RUN_RECORD_SCHEMA_VERSION,
@@ -464,6 +541,7 @@ export function parseRunRecord(raw: unknown): RunRecordParseResult {
             })),
         }
       : {}),
+    ...(cutterChecklist === undefined ? {} : { cutterChecklist }),
     tool: typeof r.tool === 'string' ? r.tool : null,
     cuttingDiameter: numberOrNull(r.cuttingDiameter),
     estimatedSeconds: numberOrNull(r.estimatedSeconds),

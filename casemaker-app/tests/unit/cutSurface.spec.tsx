@@ -329,9 +329,28 @@ function Harness(props: Props) {
   );
 }
 
+/** #1127 — a package whose cutters are all ticked, so tests about OTHER behaviours are not gated. */
+function withChecklistTicked(job: EngraveJob, pkg: FrozenPackage): EngraveJob {
+  const keys = [...new Set(pkg.programs.map((program) => program.toolKey))];
+  return {
+    ...job,
+    cutterChecklist: { [pkg.hash]: Object.fromEntries(keys.map((key) => [key, { state: 'located' as const, at: AT }])) },
+  };
+}
+
+/** #1127 — tick every cutter of the package the surface just froze (the store's job). */
+function tickChecklistForStoredPackage(): void {
+  const job = useEngraveJobStore.getState().job;
+  const pkg = job.package;
+  if (pkg === undefined) return;
+  const keys = [...new Set(pkg.programs.map((program) => program.toolKey))];
+  const entries = Object.fromEntries(keys.map((key) => [key, { state: 'located' as const, at: AT }]));
+  useEngraveJobStore.setState({ job: { ...job, cutterChecklist: { ...(job.cutterChecklist ?? {}), [pkg.hash]: entries } } });
+}
+
 function draw(props: Props) {
   // #425 — the document owns the package. Seed the open job so a freeze has somewhere to land.
-  useEngraveJobStore.setState({ job: props.pkg === null ? props.job : { ...props.job, package: props.pkg } });
+  useEngraveJobStore.setState({ job: props.pkg === null ? props.job : withChecklistTicked({ ...props.job, package: props.pkg }, props.pkg) });
   const rendered = render(<Harness {...props} />);
   return { ...rendered, show: (p: Props) => rendered.rerender(<Harness {...p} />) };
 }
@@ -929,6 +948,7 @@ describe('#419 §3 the Cut surface', () => {
     draw({ job, report: reportOf(), pkg: null, generated: made });
     giveStatement();
     await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
+    act(() => tickChecklistForStoredPackage());
 
     // The dome route is shown with the recipe and the operator's tick; no tilt re-post section.
     expect(screen.getByTestId('engrave-cut-dome-g32')).toBeTruthy();
@@ -968,6 +988,7 @@ describe('#419 §3 the Cut surface', () => {
     draw({ job, report: reportOf(), pkg: null, generated: made });
     giveStatement();
     await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
+    act(() => tickChecklistForStoredPackage());
 
     // The tick is the operator saying "the grid was run for THIS clamping".
     fireEvent.click(screen.getByTestId('engrave-cut-dome-g32-ack'));
@@ -1014,6 +1035,7 @@ describe('#419 §3 the Cut surface', () => {
     draw({ job, report: reportOf(), pkg: null, generated: made });
     giveStatement();
     await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
+    act(() => tickChecklistForStoredPackage());
 
     // The alternative route carries the computed miss (here 0.4 + 0 − 0.2 = 0.2 mm at the centre).
     const accept = screen.getByTestId('engrave-cut-dome-accept-floor') as HTMLInputElement;
@@ -1072,6 +1094,7 @@ describe('#419 §3 the Cut surface', () => {
       'matches the design',
     );
     expect(screen.getByTestId('engrave-package').dataset.state).toBe('current');
+    act(() => tickChecklistForStoredPackage());
   });
 
   // #724 W6 — THE FROZEN MOUNT READS THE FRAME. A chuck job's derived setup carries the setups
@@ -1091,6 +1114,7 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.queryByTestId('engrave-cut-mount')).toBeNull();
     expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).not.toContain('no longer holds');
     expect(screen.getByTestId('engrave-package').dataset.state).toBe('current');
+    act(() => tickChecklistForStoredPackage());
   });
 
   it('#724 W6 — on a machine holding the vise, a rotary-framed package names the rotary', () => {
@@ -1662,5 +1686,37 @@ describe('#986 the card reads the background comparison', () => {
     expect(screen.getByTestId('engrave-plan-no-difference').textContent).toBe(
       'owned plan vs catalogue ideal: no material difference',
     );
+  });
+});
+
+// #1127 — the checklist at the machine: the Load is gated until every bit is accounted for.
+describe('#1127 the cutter checklist gates the Cut step', () => {
+  it('the first Load waits until every cutter is located or replaced', async () => {
+    const job = defaultEngraveJob();
+    const made = generated([P1]);
+    passRun();
+    draw({ job, report: reportOf(), pkg: null, generated: made });
+    giveStatement();
+    await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
+    // Nothing ticked: the blocker names the missing row, and the Load is disabled.
+    expect(screen.getByTestId('engrave-upload-blocked').textContent).toContain('0 of 1 cutters located');
+    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(true);
+    act(() => tickChecklistForStoredPackage());
+    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('the ONE Cut press waits too — the same rows gate the one-screen path', async () => {
+    const job = defaultEngraveJob();
+    const made = generated([P1]);
+    passRun();
+    draw({ job, report: reportOf(), pkg: null, generated: made });
+    giveStatement();
+    await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
+    const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
+    expect(go.disabled).toBe(true);
+    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('0 of 1 cutters located');
+    act(() => tickChecklistForStoredPackage());
+    expect(go.disabled).toBe(false);
+    expect(screen.queryByTestId('engrave-cut-go-blocked')).toBeNull();
   });
 });

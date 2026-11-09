@@ -2498,7 +2498,28 @@ export interface EngraveJob {
    * remains the machine's record of what finished on it, and the two are not duplicates.
    */
   runLog?: JobRunLogEntry[];
+  /**
+   * #1127 — THE CUTTER CHECKLIST, kept with the run. Keyed by the frozen package's hash (one
+   * checklist per run), then by the cutter's registry key: whether the operator has that bit
+   * LOCATED (tick) or REPLACED it with another owned cutter. HARD RULE (the Manager's ruling): this
+   * is NOT a byte input — it is outside `jobFingerprint` and every staleness compare, so ticking a
+   * box never stales a program and never calls a worker. The shape stays stable for #1126's
+   * house-side runs.
+   */
+  cutterChecklist?: CutterChecklist;
 }
+
+/** One cutter's place in #1127's checklist: in hand, or replaced with another owned cutter. */
+export interface CutterChecklistEntry {
+  state: 'located' | 'replaced';
+  /** The replacement cutter's registry key, when `state` is `replaced` (never a display name). */
+  replacedWith?: string;
+  /** ISO 8601, when the operator set it. */
+  at: string;
+}
+
+/** #1127 — package hash → cutter key → entry. A run's checklist, never a byte input. */
+export type CutterChecklist = Record<string, Record<string, CutterChecklistEntry>>;
 
 /**
  * The forms a job's stock can take (#418, #683, #713). A disc, a rod and a tube are round, but the

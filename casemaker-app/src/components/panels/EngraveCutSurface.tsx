@@ -116,6 +116,8 @@ import {
 import { openMachineChange } from '@/components/machine-change';
 import { EngravePreflight } from './EngravePreflight';
 import { EngraveMachineUpload } from './EngraveMachineUpload';
+import { CutterChecklist, cutterChecklistRows, missingCuttersWords } from './CutterChecklist';
+import type { CutterChecklistEntry } from '@/types/engraveJob';
 import { EngraveReleaseStep } from './EngraveReleaseStep';
 import { MachineStrip } from './MachineStrip';
 import { RunPlanView } from './RunPlanView';
@@ -737,6 +739,9 @@ export function EngraveCutSurface({
       void freeze(job, fresh.programs, registrationSurface).then((result) => {
         if (result.ok) {
           setFreezeError(null);
+          if (pkg !== null && pkg.hash !== result.package.hash) {
+            useEngraveJobStore.getState().migrateCutterChecklist(pkg.hash, result.package.hash);
+          }
         } else {
           setFreezeError(result.reason);
         }
@@ -935,6 +940,11 @@ export function EngraveCutSurface({
     void freeze(job, generated.programs).then((result) => {
       if (result.ok) {
         setFreezeError(null);
+        // #1127 — the cutter checklist follows the run: the entries recorded under the package this
+        // Generate replaced move to the new run's hash (a replaced row stays replaced).
+        if (pkg !== null && pkg.hash !== result.package.hash) {
+          useEngraveJobStore.getState().migrateCutterChecklist(pkg.hash, result.package.hash);
+        }
       } else {
         setFreezeError(result.reason);
       }
@@ -957,6 +967,25 @@ export function EngraveCutSurface({
         : cutPlan({ job, pkg, finishedHashes, defaults, overrides }),
     [job, pkg, finishedHashes, defaults, overrides],
   );
+
+  // #1127 — THE CUTTER CHECKLIST AT THE MACHINE. The same rows the Job panel shows, with the
+  // operator's located/replaced state, and the gate: the first Load and the cut do not start until
+  // every bit is accounted for. Ticking is never a byte input (outside the fingerprint); a
+  // replacement writes the cutter into the job and the whole-run regenerate follows.
+  const checklistRows = useMemo(
+    () => (pkg === null ? [] : cutterChecklistRows(pkg.programs.map((program) => ({ toolKey: program.toolKey })))),
+    [pkg],
+  );
+  const checklistEntries = pkg === null ? undefined : job.cutterChecklist?.[pkg.hash];
+  const cutterChecklistBlocker = pkg === null ? null : missingCuttersWords(checklistRows, checklistEntries);
+  const setChecklistEntry = (key: string, entry: CutterChecklistEntry | null): void => {
+    const hash = pkg?.hash;
+    if (hash === undefined) return;
+    useEngraveJobStore.getState().setCutterChecklistEntry(hash, key, entry);
+    if (entry?.state === 'replaced' && entry.replacedWith !== undefined) {
+      useEngraveJobStore.getState().replaceCutter(key, entry.replacedWith);
+    }
+  };
 
   // #796 — a stale program has ONE action: Generate. There is no re-freeze press; the generate
   // that replaces the program freezes it (see the freeze effect above).
@@ -1521,6 +1550,11 @@ export function EngraveCutSurface({
       </Step>
 
       <Step number={3} title="Start cut" done={ran} current={currentStep === 3} summary={step3Summary}>
+        {/* #1127 — the cutter checklist, at the machine: one row per bit, located or replaced; the
+            Load and the cut are gated on every row being settled. */}
+        {pkg !== null && checklistRows.length > 0 && (
+          <CutterChecklist rows={checklistRows} entries={checklistEntries} onSet={setChecklistEntry} />
+        )}
         {plan === null ? (
           <p style={MUTED} data-testid="engrave-cut-not-ready">
             Generate the program in step 1 before starting it.
@@ -1581,7 +1615,15 @@ export function EngraveCutSurface({
                   filename={releaseFileName(job.name, 1, 1, false)}
                   oracle={runOracle}
                   blocker={
-                    step1Blocker ?? programBlocker ?? ackBlocker ?? uploadBlocker ?? missingReportBlocker ?? surfaceGate
+                    step1Blocker ??
+                    programBlocker ??
+                    ackBlocker ??
+                    uploadBlocker ??
+                    missingReportBlocker ??
+                    surfaceGate ??
+                    // #1127 — the ONE Cut press is the first Load: no bit goes to the machine
+                    // until every row of the checklist is located or replaced.
+                    cutterChecklistBlocker
                   }
                   dome={domeProps}
                   domeBlocker={domeG32Blocker}
@@ -1657,7 +1699,8 @@ export function EngraveCutSurface({
                         releaseBlocker ??
                         missingReportBlocker ??
                         surfaceGate ??
-                        domeG32Blocker
+                        domeG32Blocker ??
+                        cutterChecklistBlocker
                       }
                       onProgramLine={onProgramLine}
                     />
@@ -1670,7 +1713,8 @@ export function EngraveCutSurface({
                         uploadBlocker ??
                         missingReportBlocker ??
                         surfaceGate ??
-                        domeG32Blocker
+                        domeG32Blocker ??
+                        cutterChecklistBlocker
                       }
                       machine={machine}
                       program={

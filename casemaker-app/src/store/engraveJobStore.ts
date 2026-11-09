@@ -114,6 +114,8 @@ import type {
   ViseParams,
   EngraveSetupSubstitution,
   PlanChoice,
+  CutterChecklist,
+  CutterChecklistEntry,
 } from '@/types/engraveJob';
 import { pruneRunLog } from '@/engine/cnc/engrave/package';
 import {
@@ -1444,6 +1446,25 @@ export interface EngraveJobState {
    * reaches.
    */
   setJobMargins: (margins: EngraveMargins | null) => void;
+  /**
+   * #1127 — record one cutter's checklist state for a run (the frozen package's hash), or clear it
+   * with null. NEVER a byte input: `cutterChecklist` is outside `jobFingerprint` and every
+   * staleness compare, so this write must not stale a program or call a worker.
+   */
+  setCutterChecklistEntry: (packageHash: string, cutterKey: string, entry: CutterChecklistEntry | null) => void;
+  /**
+   * #1127 — REPLACE A CUTTER IN THE WHOLE PLAN. The bench operator's "I don't have this bit, use
+   * that one" is a BYTE input (the cutter is part of the plan): the job's own cutter and every
+   * setup's tool list take the replacement key, and the frozen package goes stale, so the Cut
+   * screen's Generate offers the whole-run regenerate with its cost before the press.
+   */
+  replaceCutter: (fromKey: string, toKey: string) => void;
+  /**
+   * #1127 — the checklist follows the run across a re-freeze: entries recorded under the package
+   * this Generate replaced move to the new package's hash, so a replaced row stays replaced. No
+   * entry, no write.
+   */
+  migrateCutterChecklist: (fromHash: string, toHash: string) => void;
   /**
    * #961 — THE OPERATOR'S PLAN CHOICE (the card's tradeoff control). `'owned'` is the default and
    * is written as ABSENCE — a job with no choice follows the default the rule states, so a future
@@ -3399,6 +3420,40 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         }
         return { ...job, planChoice: choice };
       }),
+
+    migrateCutterChecklist: (fromHash, toHash) =>
+      apply((job) => {
+        if (fromHash === toHash) return job;
+        const entries = job.cutterChecklist?.[fromHash];
+        if (entries === undefined) return job;
+        const next: CutterChecklist = { ...job.cutterChecklist, [toHash]: entries };
+        delete next[fromHash];
+        return { ...job, cutterChecklist: next };
+      }),
+
+    setCutterChecklistEntry: (packageHash, cutterKey, entry) =>
+      apply((job) => {
+        const current: CutterChecklist = job.cutterChecklist ?? {};
+        const run = { ...(current[packageHash] ?? {}) };
+        if (entry === null) delete run[cutterKey];
+        else run[cutterKey] = entry;
+        const next: CutterChecklist = { ...current };
+        if (Object.keys(run).length === 0) delete next[packageHash];
+        else next[packageHash] = run;
+        const { cutterChecklist: _dropped, ...rest } = job;
+        return Object.keys(next).length === 0 ? rest : { ...rest, cutterChecklist: next };
+      }),
+
+    replaceCutter: (fromKey, toKey) =>
+      apply((job) => ({
+        ...job,
+        ...(job.toolKey === fromKey ? { toolKey: toKey, tool: resolveTool(toKey) } : {}),
+        ...(job.setups === undefined
+          ? {}
+          : { setups: job.setups.map((setup) => ({ ...setup, tools: setup.tools.map((key) => (key === fromKey ? toKey : key)) })) }),
+        // A replacement is the operator overriding the substitute: the substitution sentence goes.
+        substitution: undefined,
+      })),
 
     setJobMargins: (margins) =>
       apply((job) => {

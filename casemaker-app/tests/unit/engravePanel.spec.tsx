@@ -3247,6 +3247,27 @@ describe('EngravePanel — the release step routing (#469)', () => {
     fireEvent.click(screen.getByTestId('engrave-ack'));
   }
 
+  /**
+   * #1127 — THE FIRST LOAD IS GATED ON THE CUTTER CHECKLIST. These tests are about which surface
+   * the panel offers, not about the gate, so they account for every bit the way an operator does;
+   * the gate itself is asserted in `cutterChecklist1127.spec.tsx` and the Cut-step spec.
+   */
+  async function locateEveryCutter(): Promise<void> {
+    await waitFor(() => expect(useEngraveJobStore.getState().job.package).toBeDefined());
+    const job = useEngraveJobStore.getState().job;
+    const pkg = job.package;
+    if (pkg === undefined) throw new Error('the freeze wrote no package');
+    const keys = [...new Set(pkg.programs.map((p) => p.toolKey))];
+    const entries = Object.fromEntries(
+      keys.map((key) => [key, { state: 'located' as const, at: '2026-11-09T11:58:00.000Z' }]),
+    );
+    act(() => {
+      useEngraveJobStore.setState({
+        job: { ...job, cutterChecklist: { ...(job.cutterChecklist ?? {}), [pkg.hash]: entries } },
+      });
+    });
+  }
+
   beforeEach(() => {
     caps.canReachMachine = true;
     resetCncMode();
@@ -3264,6 +3285,7 @@ describe('EngravePanel — the release step routing (#469)', () => {
 
   it('routes a multi-program job to the release step, not the single-file upload', async () => {
     show(generated([program(1, 'flat-1.0'), program(2, 'flat-3.175x12-metal')]));
+    await locateEveryCutter();
 
     expect(await screen.findByTestId('engrave-release')).toBeTruthy();
     // The one-file upload is not offered beside it: there would be two run panels and one of them

@@ -83,6 +83,11 @@ function fingerprintView(job: EngraveJob): unknown {
   const view: Record<string, unknown> = { ...job };
   delete view.package;
   delete view.runLog;
+  // #1127 — THE CUTTER CHECKLIST IS NOT A BYTE INPUT (the Manager's ruling): ticking a bit (or
+  // replacing one — the replacement regenerates through the JOB, so the job's own fields move)
+  // must never stale a frozen program. Outside the fingerprint and every staleness compare; the
+  // same strip is in #1132's fingerprintView.
+  delete view.cutterChecklist;
   // #621 — the measured flatness is the registration's OUTCOME (the blank's bow), not a change to
   // the cutting program; a found position must not stale a frozen package.
   if (view.stock !== undefined) {
