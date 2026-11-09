@@ -102,6 +102,20 @@ CM_LOCATION=<the location the card ran with> \
   ~/casemaker-manager/venv/bin/python tools/goal-check-parity.py runs/<sha>/j29 runs/<sha>/ref-tray70
 ```
 
+**Declared diagnostic — j29's shadow-over-relief count (2026-11-09).** The parity passes the hard
+test on every fixture: j29 (adjudicated 25.7924 % both, **0 cells of 156,996**; silhouette
+unavailable 360 → 0 on both sides after #1092's ruling-(a) wiring fix, the judged number unmoved)
+and ref-tray70-tape (0 both, **0 cells of 1,441,121**). One diagnostic counter does not match on
+j29: `shadowOverReliefCells` is 3,166 in the checker against 4,264 in the app receipt (wall
+7,561/7,561 and border 0/0 agree exactly; the tray is 0/0 on both sides). The input to that counter
+is the deepest stamp's CL — the app takes it from its simulator timeline, the checker from the
+raw-NC walk — and near a wall two overlapping passes can swap which sample is deepest, flipping the
+v5 disc-rim test on cells that stay adjudicated either way. It cannot move the adjudicated figure:
+forcing every shadow CL "far" moves the count to 19,407, so the app's value lies inside the
+reachable range, and the adjudicated sets agree cell for cell. It is declared here, not reconciled;
+a `CM_GOAL_DEBUG=1` GOALCELL dump (one row per adjudicated cell with its CL and both wall distances)
+is the way to diff the 1,098 CLs directly if it is ever worth doing.
+
 `tools/test_goal_check.py` pins the rule on synthetic fields with hand-known answers: the strict
 stamp edge, a clean pocket, a boundary-tangent contour, the relief ceiling on wall and border cells,
 the class ordering, the who gate, the edge-break allowance from the statement, and the two
