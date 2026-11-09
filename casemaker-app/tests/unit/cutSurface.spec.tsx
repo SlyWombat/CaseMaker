@@ -1907,6 +1907,9 @@ describe('#986 the card reads the background comparison', () => {
     });
     view.show({ job, report: reportOf(), pkg: null, generated: generated([P1]) });
     expect(screen.queryByTestId('engrave-plan-comparing')).toBeNull();
-    expect(screen.getByTestId('engrave-plan-no-difference')).toBeTruthy();
+    // #1123 item 6 — the sentence names what it compares, in words.
+    expect(screen.getByTestId('engrave-plan-no-difference').textContent).toBe(
+      'owned plan vs catalogue ideal: no material difference',
+    );
   });
 });

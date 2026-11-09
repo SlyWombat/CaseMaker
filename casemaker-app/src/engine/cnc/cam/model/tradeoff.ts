@@ -233,7 +233,7 @@ export function comparePlanOutcomes(
   const line =
     materialRows.length === 0
       ? null
-      : `with every bit the app knows: ${materialRows.map((d) => d.reading).join('; ')}`;
+      : `owned plan vs catalogue ideal: ${materialRows.map((d) => d.reading).join('; ')}`;
   return { material: materialRows.length > 0, line, differences };
 }
 
