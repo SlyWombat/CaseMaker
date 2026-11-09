@@ -93,6 +93,8 @@ export function registrationFor(
     probe?: ProbeSpec | null;
     /** #599 — the mount tap point (machine XY), computed by the caller from the bed placement. */
     mountTap?: { x: number; y: number; fromMachineZ: number; label: string } | null;
+    /** #1133 — where the surface touch should land, work XY: the cut area's centre. */
+    cutCentre?: { x: number; y: number };
     bracketOrigin?: BracketOrigin;
     /** Bracket (#427): the clamps and arms as placed, and whether to take the confirming touch. */
     mountObstacles?: PlanObstacle[];
@@ -102,8 +104,6 @@ export function registrationFor(
      * edges through the centre-lines instead of the rectangle's one-sided edges.
      */
     disc?: { diameterMm: number };
-    /** Hotfix (bench 2026-11-09) — where the surface touch should land, work XY: the cut area's centre. */
-    cutCentre?: { x: number; y: number };
   },
   settings: RegistrationSettings,
 ): { plan: PlanResult; references: ReferenceFeature[] } {

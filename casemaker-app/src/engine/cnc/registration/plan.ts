@@ -599,12 +599,13 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       (o) => surfacePoint.x > o.min[0] - grow && surfacePoint.x < o.max[0] + grow && surfacePoint.y > o.min[1] - grow && surfacePoint.y < o.max[1] + grow,
     );
     if (under) return { ok: false, reason: `the surface touch point is at ${under.label}: move the clamp, or touch the stock somewhere clear of it` };
-    // HOTFIX (bench 2026-11-09) — A BRACKET HOLD FIXES X, Y AND ROTATION: the plan is the SURFACE
-    // TOUCH and nothing else. The confirming right/back edge scans (and the refusal that demanded
-    // them when the bracket's offset was unmeasured) are gone from this mount: on the bench the
-    // bracket plan probed the arm-side edges from the waste band, read an old bore or the clamp and
-    // refused at "corner 27.606° out of square". The origin is the bracket's own
-    // (`bracketOrigin`), carried with its uncertainty; `bracketConfirm` is accepted and ignored.
+    // #1133 — A BRACKET HOLD FIXES X, Y AND ROTATION (repeat 0.05 mm, fit 0.1 mm): the plan is the
+    // SURFACE TOUCH and nothing else. #1070's footprint find — two touches per edge at the cut
+    // region's extents — was the vise's kind of plan, and the old right/back "confirming" scans
+    // went with it: on a bracket nothing scans. The origin is the bracket's own
+    // (`bracketOrigin`), carried with its uncertainty, and the outcome says X and Y were taken on
+    // trust. `bracketConfirm` is accepted and ignored so callers written against the old shape
+    // still compile; there is no edge-find branch left to reach.
     notes.push(`the bracket fixes X and Y: the origin is ${input.bracketOrigin.from}; only the surface is touched`);
   } else {
     /** Vise, #517: the stock sits below the jaw tops, so a jaw reads HIGH past the gripped edge — and that is the edge. */

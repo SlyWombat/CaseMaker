@@ -1629,7 +1629,9 @@ describe('#427 the bracket: XY from the datum, an optional confirming touch', ()
     if (!r.ok) return;
     expect(r.plan.scans).toEqual([]);
     expect(r.plan.bracketOrigin).toMatchObject({ offsetMeasured: false });
-    expect(summarizePlan(r.plan)).toContain('the bracket fixes X and Y');
+    // #1123 item 29 + #1133 — no scans means the sentence names none (the old scan clause is gone).
+    expect(summarizePlan(r.plan)).toContain("touch the surface at the cut area's centre");
+    expect(summarizePlan(r.plan)).not.toContain('then scan');
   });
 
   it('refuses without the mount’s obstacles, with a top at the travel height, or with the surface point under a clamp', () => {

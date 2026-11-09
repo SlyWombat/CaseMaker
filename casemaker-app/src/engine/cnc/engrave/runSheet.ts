@@ -6300,7 +6300,7 @@ export function runSheetStackUpSvg(stackUp: RunSheetStackUp): string {
 
 /**
  * #1070, 6b's ruling — THE FIRST TOUCH OF THE DAY. With no seat datum the program's first touch
- * is the one bounded Z seek on the wasteboard beside the front arm; the footprint touches are
+ * is the one bounded Z seek on the wasteboard beside the blank; the footprint touches are
  * planned on the reading it writes, so the sheet says the press runs twice — once to measure,
  * once to plan the registration.
  */
@@ -6309,7 +6309,7 @@ function seatRegistrationSteps(onBoard: boolean, facingRun: boolean, seek: SeatS
     {
       text:
         'THE FIRST TOUCH OF THE DAY: the bracket seat has not been measured on this machine. The program’s first ' +
-        'touch is one bounded Z seek with the wired probe on the wasteboard beside the bracket’s front arm — the ' +
+        'touch is one bounded Z seek with the wired probe on the wasteboard beside the blank — the ' +
         'surface the blank stands on — at work X ' +
         `${fmtNum(seek.workX)} Y ${fmtNum(seek.workY)} (machine X ${fmtNum(seek.x)} Y ${fmtNum(seek.y)}).`,
       value: `machine X ${fmtNum(seek.x)} · Y ${fmtNum(seek.y)}`,

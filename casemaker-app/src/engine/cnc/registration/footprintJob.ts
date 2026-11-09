@@ -23,8 +23,8 @@ import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { clearanceZOf } from '@/engine/cnc/machine';
-import { anchorFrom, bracketDatum, bracketExpectedSurface, bracketObstacles, bracketSettings, clampObstacles, defaultClampPlacements, type BracketSeatDatum } from '@/engine/cnc/mounts/bracket';
+import { clearanceZOf, headEnvelopeOf } from '@/engine/cnc/machine';
+import { anchorFrom, bracketDatum, bracketExpectedSurface, bracketObstacles, bracketSettings, bracketTapPoint, clampObstacles, defaultClampPlacements, type BracketSeatDatum } from '@/engine/cnc/mounts/bracket';
 import { clampPlacementsFor } from '@/engine/cnc/engrave/jobSetup';
 import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
 import { rotatedExtents, targetTurns } from '@/engine/cnc/engrave/targetScale';
@@ -213,6 +213,12 @@ export function footprintInputFor(args: FootprintJobArgs): FootprintJobResult {
  * The seat the 2026-11-07 wiring left behind, mm machine Z: the wired-V2 blank top (−60.75 at
  * TLO −14.068) less the 25 mm blank. The seek VERIFIES it; the number only bounds the band.
  */
+/** The modelled probe head's widest body when a machine states no head envelope (#554's nut stub). */
+const PROBE_HEAD_RADIUS_MM = 4;
+
+/** #1133 — the margin the seat point leaves beyond the head envelope (the ruling's 2 mm). */
+const SEAT_HEAD_MARGIN_MM = 2;
+
 export const SEAT_DERIVED = {
   machineZ: -85.75,
   toleranceMm: 1.5,
@@ -222,7 +228,7 @@ export const SEAT_DERIVED = {
 } as const;
 
 export interface SeatSeek {
-  /** The touch point, machine XY: the wasteboard beside the bracket's front arm. */
+  /** The touch point, machine XY: the nearest spot on the seat plane whose head envelope clears everything. */
   x: number;
   y: number;
   /** The same point, work XY (for the sheet's "where it is" words). */
@@ -237,11 +243,13 @@ export interface SeatSeek {
 export type SeatSeekResult = { ok: true; seek: SeatSeek } | { ok: false; reason: string };
 
 /**
- * #1070 — the seat seek: ONE bounded Z touch with the wired V2 on the wasteboard beside the
- * bracket's front arm (past its free end, in front of the stock — the surface the blank stands
- * on). It starts `parkAboveSurfaceMm` above the band's top, expects the derived seat, and its
- * bound is the band's floor less the scan reach; the executor's own G38.3/G38.5 line and the
- * registration's touch feed are what send it, under the machine's soft endstop like every touch.
+ * #1070/#1133 — the seat seek: ONE bounded Z touch with the wired V2 on the wasteboard beside
+ * the blank — the nearest spot on the seat plane where the HEAD's envelope clears the stock and
+ * every fixture by 2 mm (the bench refused the old point 5–7.5 mm in front of the blank: the head,
+ * not the tip, would have hit the taller wood). It starts `parkAboveSurfaceMm` above the band's
+ * top, expects the derived seat, and its bound is the band's floor less the scan reach; the
+ * executor's own G38.3/G38.5 line and the registration's touch feed are what send it, under the
+ * machine's soft endstop like every touch.
  *
  * The reading IS the seat (the touch is on the wasteboard, not the arm), so the datum is written
  * without an offset — and it is valid only for the probe fitting the run measured it with.
@@ -267,12 +275,67 @@ export function seatSeekFor(args: {
     datum = bracketDatum(anchor.anchor, sizes);
   }
   const settings = registrationSettings(args.defaults, args.probe).settings;
-  // Past the front arm's free end (x), in front of the stock (y): open wasteboard, no arm, no
-  // blank, no clamp (the clamps are on the back edge).
-  const workX = sizes.settings.armLengthX + settings.tipRadiusMm + 5;
-  const workY = -sizes.settings.armWidth / 2;
+  // #1133 — THE SEAT POINT IS CHOSEN, NOT OFFSET. The old point sat armWidth/2 (5–7.5 mm) in
+  // front of the blank; the bench refused it because the HEAD — not the probe tip — would hit the
+  // taller stock. The point is now the nearest spot on the seat plane beside the bracket where the
+  // head's envelope clears the stock AND every fixture footprint by a 2 mm margin, inside the
+  // machine's soft limits.
+  const head = headEnvelopeOf(jobMachine(args.job, args.calibration));
+  const headRadius = head?.radiusMm ?? PROBE_HEAD_RADIUS_MM;
+  const need = Math.round((headRadius + SEAT_HEAD_MARGIN_MM) * 1000) / 1000;
+  const own = stockForSetup(args.job, undefined);
+  const mount: MountSpec = { kind: 'bracket', board: args.job.sacrificial.under !== null };
+  const obstacles = mountObstaclesFor(args.job, mount, sizes);
+  const stockBox = { min: [0, 0] as [number, number], max: [own.length, own.width] as [number, number] };
+  const clearOf = (px: number, py: number, box: { min: [number, number]; max: [number, number] }): number =>
+    Math.hypot(Math.max(box.min[0] - px, 0, px - box.max[0]), Math.max(box.min[1] - py, 0, py - box.max[1]));
+  // The nearest point to the blank, then the one nearest the arm's old aim — a deterministic
+  // choice, so the plan and the sheet cannot disagree about where the touch is.
+  const aimX = sizes.settings.armLengthX + settings.tipRadiusMm + 5;
+  const aimY = -sizes.settings.armWidth / 2;
+  const endstopOf = args.calibration?.softEndstop;
+  const limitsOn = endstopOf !== undefined && endstopOf !== null && endstopOf.enabled;
+  // #1133 review — the MACHINE's envelope bounds the search on the far side too: a candidate past
+  // xMax/yMax is off the bed's reach, however clear it is of the stock.
+  const reach = jobMachine(args.job, args.calibration).envelope;
+  let best: { workX: number; workY: number; fromStock: number; fromAim: number } | null = null;
+  for (let wy = 0; wy <= own.width + need * 2; wy += 1) {
+    for (let wx = 0; wx <= own.length + need * 2; wx += 1) {
+      const fromStock = clearOf(wx, wy, stockBox);
+      if (fromStock + 1e-9 < need) continue;
+      if (obstacles.some((o) => clearOf(wx, wy, o) + 1e-9 < need)) continue;
+      if (limitsOn && (datum.x + wx < endstopOf.xMin || datum.y + wy < endstopOf.yMin)) continue;
+      if (datum.x + wx > reach.x.max || datum.y + wy > reach.y.max) continue;
+      const fromAim = Math.hypot(wx - aimX, wy - aimY);
+      if (
+        best === null ||
+        fromStock < best.fromStock - 1e-9 ||
+        (Math.abs(fromStock - best.fromStock) <= 1e-9 && fromAim < best.fromAim)
+      ) {
+        best = { workX: wx, workY: wy, fromStock, fromAim };
+      }
+    }
+  }
+  if (best === null) {
+    return {
+      ok: false,
+      reason: `no point on the seat plane beside the bracket clears the head envelope (${headRadius} mm${head === null ? ', the modelled probe head' : ''}) by ${SEAT_HEAD_MARGIN_MM} mm within the machine's reach — measure the seat by hand and enter it, or move the blank`,
+    };
+  }
+  const workX = best.workX;
+  const workY = best.workY;
   const x = Math.round((datum.x + workX) * 1000) / 1000;
   const y = Math.round((datum.y + workY) * 1000) / 1000;
+  // #1133 — THE ARM CHECK. It is offered only when a point on the arm clears by the same rule;
+  // with a real head on the 10 mm arm it usually cannot, and the plan says so in one line.
+  const armPoint = bracketTapPoint(datum, sizes.settings);
+  const armWork = { x: armPoint.x - datum.x, y: armPoint.y - datum.y };
+  const armClear =
+    clearOf(armWork.x, armWork.y, stockBox) + 1e-9 >= need &&
+    obstacles.every((o) => clearOf(armWork.x, armWork.y, o) + 1e-9 >= need);
+  const armLine = armClear
+    ? null
+    : 'the arm is too narrow for the head to touch it beside this stock';
   const band = {
     min: Math.round((SEAT_DERIVED.machineZ - SEAT_DERIVED.toleranceMm) * 1000) / 1000,
     max: Math.round((SEAT_DERIVED.machineZ + SEAT_DERIVED.toleranceMm) * 1000) / 1000,
@@ -298,9 +361,11 @@ export function seatSeekFor(args: {
       expectZ: SEAT_DERIVED.machineZ,
       band,
       notes: [
+        `the seat point (work ${Math.round(workX * 1000) / 1000}, ${Math.round(workY * 1000) / 1000}) clears the stock and every fixture by ${need} mm — the head's ${headRadius} mm envelope${head === null ? ' (the modelled probe head; the machine states none)' : ` (${head.source})`} plus ${SEAT_HEAD_MARGIN_MM} mm`,
+        ...(armLine === null ? [] : [armLine]),
         `the seat is expected at machine Z ${SEAT_DERIVED.machineZ} ± ${SEAT_DERIVED.toleranceMm} — ${SEAT_DERIVED.from}`,
         `the seek starts at machine Z ${fromMachineZ} (above the band) and goes no further than ${Math.round((band.min - settings.scanReachMm) * 1000) / 1000} (the band's floor less the ${settings.scanReachMm} mm scan reach)`,
-        `the reading is the seat itself — the touch is on the wasteboard beside the front arm, not on the arm (arm top ${SEAT_DERIVED.armTopMm} mm, the ledger's 2026-10-18 measurement, is recorded and not used here)`,
+        `the reading is the seat itself — the touch is on open wasteboard beside the blank (arm top ${SEAT_DERIVED.armTopMm} mm, the ledger's 2026-10-18 measurement, is recorded and not used here)`,
         'the seat is valid only for the probe fitting this run measures it with: the press measures every session, and the stored value is only the next session’s expected band',
       ],
     },
