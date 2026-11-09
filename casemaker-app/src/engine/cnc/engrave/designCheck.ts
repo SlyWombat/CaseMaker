@@ -890,6 +890,12 @@ export interface GoalCutIntoReport {
   silhouetteExcusedCells: number;
   /** #1092 — the deepest silhouette cell excused and its CL's distance from the outline, mm. */
   silhouetteDeepest: { mm: number; x: number; y: number; clDistanceMm: number } | null;
+  /**
+   * #1092 (0f's R-a ruling) — silhouette cells COUNTED because the proof was UNAVAILABLE: no stock
+   * thickness is stated (neither the job's nor the goal's), so the blank's floor is unknown. There
+   * is no silent `topZ − minZ` fallback; the sentence names the count.
+   */
+  silhouetteUnavailableCells: number;
   /** #955/#964 — the 0.1 mm-floor share AFTER the exclusions (wall and wall shadow always; edge
    *  break when the job states one): the pass line's judged number, 0-1. */
   adjudicatedFraction: number;
@@ -1247,17 +1253,41 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   // EDGE-BREAK allowance depends on the job's own `edgeBreak` (a stated V bit's reach and leg).
   const wall = designEdgeCells(goal);
   const border = borderCells(goal);
+  // #1092 — THE SILHOUETTE: a covered cell facing uncovered grid. The design is multi-valued across
+  // that edge (material one side, the blank the other), so the outline cut is judged by the blank's
+  // own floor and the stamp's CL, not by the design alone (0f's ruling). It is computed HERE because
+  // the EDGE-BREAK BAND seeds from it (0f's R-b ruling, 2026-11-08).
+  const silhouette = new Uint8Array(cells);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const k = j * nx + i;
+      if (goal.covered[k] !== 1) continue;
+      for (const [di, dj] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+        const ci = i + di;
+        const cj = j + dj;
+        if (ci < 0 || cj < 0 || ci >= nx || cj >= ny || goal.covered[cj * nx + ci] !== 1) {
+          silhouette[k] = 1;
+          break;
+        }
+      }
+    }
+  }
   // THE PART'S OWN SILHOUETTE IS A DESIGN EDGE (the manager's sanction, #959): it is the edge an
-  // edge break exists for. The band seeds from `wall ∪ border`, so the chamfer's legitimate break
-  // of the outer rim is excused like any interior edge's — without it, cells just inside the rim
-  // were adjudicated even though the nearest wall was 0.10 mm away, inside a 1.5875 mm reach. The
-  // WALL SHADOW still seeds from `wall` alone (a different question, measured separately).
-  // #1064 — THE BAND SEEDS ONLY FROM THE EDGES THE JOB NAMED: the part's silhouette by default,
-  // every interior design wall only when the statement says `all`. A rim chamfer no longer excuses
-  // a V floor pocket's lip at an interior wall without the job having said so.
+  // edge break exists for. The WALL SHADOW still seeds from `wall` alone (a different question,
+  // measured separately). #1064 — THE BAND SEEDS ONLY FROM THE EDGES THE JOB NAMED: the part's
+  // silhouette by default, every interior design wall only when the statement says `all`. A rim
+  // chamfer no longer excuses a V floor pocket's lip at an interior wall without the job saying so.
+  // #1092 (0f's R-b ruling, 2026-11-08) — THE DEFAULT SEED IS THE DESIGN SILHOUETTE, NOT THE GRID
+  // BORDER. The old seed used `borderCells()` alone — the GRID's outer row — which coincides with
+  // the part's silhouette only when the goal grid ends at the model. A goal with an uncovered
+  // margin (the ops tray door) seeded nothing, so the plan's own V rim chamfer was counted as
+  // cut-into (368 cells). The seed now adds the silhouette mask; `all` adds every design wall as
+  // before. The change only ADDS excuses, and each still passes `whoOk` and the V's own leg below.
   const bandEdges = opts.edgeBreak?.edges ?? 'silhouette';
   const bandSeed = new Uint8Array(cells);
-  for (let k = 0; k < cells; k++) if (border[k] === 1 || (bandEdges === 'all' && wall[k] === 1)) bandSeed[k] = 1;
+  for (let k = 0; k < cells; k++) {
+    if (border[k] === 1 || silhouette[k] === 1 || (bandEdges === 'all' && wall[k] === 1)) bandSeed[k] = 1;
+  }
   const shadowRadius = opts.wallShadowRadiusMm;
   const shadow =
     shadowRadius !== undefined && shadowRadius > 0
@@ -1287,30 +1317,15 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   let overReliefDeepest: GoalCutIntoReport['overReliefDeepest'] = null;
   let silhouetteExcusedCells = 0;
   let silhouetteDeepest: GoalCutIntoReport['silhouetteDeepest'] = null;
+  // #1092 (0f's R-a ruling) — silhouette cells COUNTED because the proof was unavailable (no
+  // stated stock thickness). Never excused on a guessed ceiling; the sentence names them.
+  let silhouetteUnavailableCells = 0;
   // #1092 (gate v8) — THE RELIEF RADIUS IS THE SHADOW RADIUS r (the largest cutter's radius; the
   // cell class and the stamp artefact share the same disc). A caller with no tool set has no r:
   // the relief then reads the cell's OWN extent — one pitch, the same four axial neighbours the
   // straddling proof reads — so a class proof still measures the local step (the v6 behaviour
   // callers without a cutter rely on), never a bare zero.
   const reliefRadiusMm = shadowRadius !== undefined && shadowRadius > 0 ? shadowRadius : goal.pitch;
-  // #1092 — THE SILHOUETTE: a covered cell facing uncovered grid. The design is multi-valued across
-  // that edge (material one side, the blank the other), so the outline cut is judged by the blank's
-  // own floor and the stamp's CL, not by the design alone (0f's ruling).
-  const silhouette = new Uint8Array(cells);
-  for (let j = 0; j < ny; j++) {
-    for (let i = 0; i < nx; i++) {
-      const k = j * nx + i;
-      if (goal.covered[k] !== 1) continue;
-      for (const [di, dj] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
-        const ci = i + di;
-        const cj = j + dj;
-        if (ci < 0 || cj < 0 || ci >= nx || cj >= ny || goal.covered[cj * nx + ci] !== 1) {
-          silhouette[k] = 1;
-          break;
-        }
-      }
-    }
-  }
   // The outline's own cells, for the CL's distance to it when the CL point leaves the grid (a
   // contour's tool centre can sit outside the goal's footprint entirely). Cached per point.
   const outlineCells: { x: number; y: number }[] = [];
@@ -1395,12 +1410,19 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     // class uses. A cut below the blank's floor, or a contour whose CL is inside the silhouette,
     // is COUNTED (and the print says so).
     let silhouetteFallThrough = false;
+    let silhouetteUnavailable = false;
     if (silhouette[k] === 1) {
       const x = goal.x0 + i * goal.pitch;
       const y = goal.y0 + j * goal.pitch;
-      const thickness = opts.stockThicknessMm ?? goal.stockThicknessMm ?? goal.topZ - goal.minZ;
+      // #1092 (0f's R-a ruling, 2026-11-08) — NO SILENT FALLBACK. The ceiling is the blank's floor,
+      // which needs a STATED stock thickness (the job's stock, or the goal's own). The old fallback
+      // `topZ − minZ` is not a thickness: it reads the goal's own z-range, smaller than the blank
+      // wherever the design is shallow, and it silently counted rim cells the proof would excuse.
+      // With no stated thickness the proof is UNAVAILABLE: never excused on a guessed ceiling, and
+      // when the cell is counted the report names it (`silhouetteUnavailableCells`).
+      const statedThickness = opts.stockThicknessMm ?? goal.stockThicknessMm;
       const breakthrough = opts.breakthroughMm ?? goal.breakthroughMm ?? 0;
-      const ceiling = thickness + breakthrough; // stock top − (the blank's floor)
+      const ceiling = statedThickness === undefined ? null : statedThickness + breakthrough;
       let clDistanceMm: number | null = null;
       let clOutside = false;
       if (opts.clAt !== undefined && shadowRadius !== undefined) {
@@ -1415,7 +1437,9 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
           clDistanceMm = onGrid ? outlineDistance(cl.x, cl.y) : outlineDistance(cl.x, cl.y);
         }
       }
-      if (
+      if (ceiling === null) {
+        silhouetteUnavailable = true;
+      } else if (
         depth <= ceiling + STRADDLING_SLACK_MM + 1e-12 &&
         clOutside &&
         clDistanceMm !== null &&
@@ -1426,10 +1450,11 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
         if (silhouetteDeepest === null || depth > silhouetteDeepest.mm) silhouetteDeepest = { mm: depth, x, y, clDistanceMm };
         continue;
       }
-      // #1092 (0f's follow-up) — A FAILED SILHOUETTE CL TEST FALLS THROUGH to the v6 straddling
-      // proof, exactly as a v5-failed shadow cell does: an OPEN POCKET reaching the rim (the
-      // property parts' 3 mm notch) legitimately has its CL inside the part, and its cells
-      // straddle the notch's step. The silhouette CL test stays; it is just not the only proof.
+      // #1092 (0f's follow-up) — A FAILED SILHOUETTE CL TEST (or a proof with no stated thickness)
+      // FALLS THROUGH to the v6 straddling proof, exactly as a v5-failed shadow cell does: an OPEN
+      // POCKET reaching the rim (the property parts' 3 mm notch) legitimately has its CL inside the
+      // part, and its cells straddle the notch's step. The silhouette CL test stays; it is just not
+      // the only proof.
       silhouetteFallThrough = true;
     }
     if (!silhouetteFallThrough && (wall[k] === 1 || border[k] === 1)) {
@@ -1505,6 +1530,9 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     if (shadowOverRelief !== null) {
       noteOverRelief('shadow', shadowOverRelief.depth, shadowOverRelief.x, shadowOverRelief.y);
     }
+    // #1092 (0f's R-a ruling) — the cell is counted, and its silhouette proof never ran because the
+    // stock thickness was not stated: name the count, never let it read as a clean proof.
+    if (silhouetteUnavailable) silhouetteUnavailableCells++;
   }
 
   // #1092 — a data dump for the analyst (a guarded diagnostic; no behaviour change). Enabled by
@@ -1624,17 +1652,24 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     silhouetteExcusedCells > 0 && silhouetteDeepest !== null
       ? `; ${silhouetteExcusedCells} silhouette cell(s) excused on proof (deepest ${silhouetteDeepest.mm.toFixed(3)} mm at ${silhouetteDeepest.x.toFixed(2)}, ${silhouetteDeepest.y.toFixed(2)}; CL ${silhouetteDeepest.clDistanceMm.toFixed(3)} mm from the outline)`
       : '';
+  // #1092 (0f's R-a ruling) — NO SILENT FALLBACK: when silhouette cells exist and no stock
+  // thickness is stated, the proof was unavailable and the counted rim cells are named.
+  const silhouetteUnavailableNote =
+    silhouetteUnavailableCells > 0
+      ? `; silhouette proof unavailable — stock thickness not stated; ${silhouetteUnavailableCells} rim cell(s) counted`
+      : '';
   const overReliefNote =
     wallOverReliefCells + shadowOverReliefCells + borderOverReliefCells > 0 && deepest !== null
       ? `; ${wallOverReliefCells + shadowOverReliefCells + borderOverReliefCells} cell(s) a class would have excused are counted instead (wall ${wallOverReliefCells}, border ${borderOverReliefCells}, shadow ${shadowOverReliefCells}; deepest ${deepest.mm.toFixed(3)} mm at ${deepest.x.toFixed(2)}, ${deepest.y.toFixed(2)})`
       : '';
   const excludedNote =
     edgeBreakCells + wallNotScoredCells + shadowNotScoredCells + straddlingNotScoredCells > 0 ||
-    wallOverReliefCells + shadowOverReliefCells + borderOverReliefCells + silhouetteExcusedCells > 0
-      ? ` (the rim edge break${edgeBreakCells > 0 ? `, ${(edgeBreakFraction * 100).toFixed(2)} % of the goal,` : ''} and ${(wallNotScoredFraction * 100 + shadowNotScoredFraction * 100).toFixed(2)} % of cells the heightfield cannot adjudicate are not counted${straddlingClause}${overReliefNote}${silhouetteNote})`
-      : overReliefNote === '' && silhouetteNote === ''
+    wallOverReliefCells + shadowOverReliefCells + borderOverReliefCells + silhouetteExcusedCells > 0 ||
+    silhouetteUnavailableCells > 0
+      ? ` (the rim edge break${edgeBreakCells > 0 ? `, ${(edgeBreakFraction * 100).toFixed(2)} % of the goal,` : ''} and ${(wallNotScoredFraction * 100 + shadowNotScoredFraction * 100).toFixed(2)} % of cells the heightfield cannot adjudicate are not counted${straddlingClause}${overReliefNote}${silhouetteNote}${silhouetteUnavailableNote})`
+      : overReliefNote === '' && silhouetteNote === '' && silhouetteUnavailableNote === ''
         ? ''
-        : ` (${(overReliefNote + silhouetteNote).replace(/^; /, '')})`;
+        : ` (${(overReliefNote + silhouetteNote + silhouetteUnavailableNote).replace(/^; /, '')})`;
   // #1064 (d) — MEASURED BESIDE PREDICTED. The plan's own bevel prediction rides in the sentence
   // when the caller supplies it; the measured number is still the verdict.
   const predictedNote =
@@ -1680,6 +1715,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     overReliefDeepest,
     silhouetteExcusedCells,
     silhouetteDeepest,
+    silhouetteUnavailableCells,
     adjudicatedFraction,
     adjudicatedMaxMm,
     adjudicatedMaxAt,
@@ -1726,6 +1762,7 @@ export function goalCutIntoUnchecked(reason: string, passCoverage: number = GOAL
     overReliefDeepest: null,
     silhouetteExcusedCells: 0,
     silhouetteDeepest: null,
+    silhouetteUnavailableCells: 0,
     shadowNotScoredFraction: 0,
     adjudicatedFraction: 0,
     adjudicatedMaxMm: 0,

@@ -232,6 +232,10 @@ export const engraveGoalSchema = z
       })
       .nullable()
       .describe('#1092 (gate v8) — the deepest silhouette cell excused on proof; null when none.'),
+    silhouetteUnavailableCells: z
+      .number()
+      .int()
+      .describe('#1092 (0f’s R-a ruling) — silhouette cells COUNTED because the proof was unavailable: no stock thickness is stated, so the blank’s floor is unknown. There is no silent topZ − minZ fallback; the sentence names the count.'),
     leftoverFractions: z
       .array(z.number())
       .describe('Share of the covered cells standing more than each leftover band (0.1 / 0.3 / 1 mm) above the goal.'),
@@ -696,6 +700,7 @@ export function goalBlockFromReport(report: GoalCutIntoReport): EngraveGoal {
     overReliefDeepest: report.overReliefDeepest,
     silhouetteExcusedCells: report.silhouetteExcusedCells,
     silhouetteDeepest: report.silhouetteDeepest,
+    silhouetteUnavailableCells: report.silhouetteUnavailableCells,
     leftoverFractions: [...report.leftoverFractions],
     passCoverage: report.passCoverage,
     wholeSurface: extended.wholeSurface ?? null,

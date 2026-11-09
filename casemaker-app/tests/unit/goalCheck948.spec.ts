@@ -913,6 +913,7 @@ describe('#1035 — the goal coverage verdict is the last program’s, the cut-i
     overReliefDeepest: null,
     silhouetteExcusedCells: 0,
     silhouetteDeepest: null,
+    silhouetteUnavailableCells: 0,
     adjudicatedFraction: 0,
     adjudicatedMaxMm: 0,
     adjudicatedMaxAt: null,

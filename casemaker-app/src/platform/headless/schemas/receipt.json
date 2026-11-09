@@ -343,6 +343,12 @@
                   "minimum": -9007199254740991,
                   "type": "integer"
                 },
+                "silhouetteUnavailableCells": {
+                  "description": "#1092 (0f’s R-a ruling) — silhouette cells COUNTED because the proof was unavailable: no stock thickness is stated, so the blank’s floor is unknown. There is no silent topZ − minZ fallback; the sentence names the count.",
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                },
                 "wallNotScoredFraction": {
                   "description": "Share of covered cells excluded as WALL CELLS (a cell straddling a wall step), 0–1.",
                   "type": "number"
@@ -443,6 +449,7 @@
                 "overReliefDeepest",
                 "silhouetteExcusedCells",
                 "silhouetteDeepest",
+                "silhouetteUnavailableCells",
                 "leftoverFractions",
                 "passCoverage",
                 "wholeSurface",
@@ -1014,6 +1021,12 @@
                             "minimum": -9007199254740991,
                             "type": "integer"
                           },
+                          "silhouetteUnavailableCells": {
+                            "description": "#1092 (0f’s R-a ruling) — silhouette cells COUNTED because the proof was unavailable: no stock thickness is stated, so the blank’s floor is unknown. There is no silent topZ − minZ fallback; the sentence names the count.",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
                           "wallNotScoredFraction": {
                             "description": "Share of covered cells excluded as WALL CELLS (a cell straddling a wall step), 0–1.",
                             "type": "number"
@@ -1114,6 +1127,7 @@
                           "overReliefDeepest",
                           "silhouetteExcusedCells",
                           "silhouetteDeepest",
+                          "silhouetteUnavailableCells",
                           "leftoverFractions",
                           "passCoverage",
                           "wholeSurface",

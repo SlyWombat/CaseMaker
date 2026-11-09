@@ -17,6 +17,8 @@
  *  3. the same trench with the CL point INSIDE the trench (less than r from the wall): the v5
  *     proof fails and the cells are counted — the relief is a ceiling, never a substitute for the
  *     proof.
+ *  4. a silhouette cell with NO stated stock thickness: counted, with the sentence naming the
+ *     unavailable proof (0f's R-a: no `topZ − minZ` fallback).
  */
 import { describe, expect, it } from 'vitest';
 
@@ -139,6 +141,40 @@ describe('#1092 (gate v8) — the excuse is bounded by the goal’s own relief',
     expect(report.silhouetteExcusedCells).toBe(0);
     expect(Math.round(report.adjudicatedFraction * report.goalCells)).toBe(1);
     expect(report.adjudicatedMaxMm).toBeCloseTo(0.5, 6);
+  });
+
+  it('counts a silhouette cell with NO stated stock thickness — the proof is unavailable, never guessed (R-a)', () => {
+    // #1092 (0f's R-a ruling, 2026-11-08) — the blank's floor is `−(thickness + breakthrough)`; with
+    // no stated thickness the ceiling is unknown. There is NO `topZ − minZ` fallback: the cell is
+    // counted and the sentence says the proof was unavailable. The SAME cell, with the thickness
+    // stated and a CL that passes, is excused — so the difference is the statement, not the geometry.
+    const nx = 20;
+    const ny = 10;
+    const z = new Float32Array(nx * ny);
+    const covered = new Uint8Array(nx * ny);
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) covered[j * nx + i] = i < 10 ? 1 : 0;
+    }
+    const goal: GoalHeightfield = {
+      nx, ny, x0: 0, y0: 0, pitch: PITCH, topZ: 0, minZ: 0, z, covered, coveredCount: 10 * ny,
+      resolutionNote: 'designCheckRelief1092 silhouette fixture (no stated thickness)',
+    };
+    const top = (x: number, y: number): number | null => {
+      const i = Math.round(x / PITCH);
+      const j = Math.round(y / PITCH);
+      if (i < 0 || j < 0 || i >= nx || j >= ny || covered[j * nx + i] !== 1) return null;
+      return i === 9 && j === 5 ? -0.5 : 0;
+    };
+    // The CL on the UNCOVERED side, 1.0 mm from the wall ring (r − pitch = 1.0): the v5 test passes.
+    const clAt = (): { x: number; y: number } => ({ x: 12 * PITCH, y: 2.5 });
+    const stated = checkGoalCutInto(goal, top, { wallShadowRadiusMm: 1.5, stockThicknessMm: 5, clAt });
+    expect(stated.silhouetteExcusedCells).toBe(1);
+    expect(stated.silhouetteUnavailableCells).toBe(0);
+    const unstated = checkGoalCutInto(goal, top, { wallShadowRadiusMm: 1.5, clAt });
+    expect(unstated.silhouetteUnavailableCells).toBe(1);
+    expect(Math.round(unstated.adjudicatedFraction * unstated.goalCells)).toBe(1);
+    expect(unstated.sentence).toContain('silhouette proof unavailable — stock thickness not stated');
+    expect(unstated.sentence).toContain('rim cell(s) counted');
   });
 
   it('counts the same trench when the CL point is inside it — the relief is a ceiling, not a proof', () => {

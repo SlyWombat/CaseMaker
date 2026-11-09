@@ -198,9 +198,11 @@ export function checkGoalCutIntoRotary(
     shadowOverReliefCells: 0,
     borderOverReliefCells: 0,
     overReliefDeepest: null,
-    // #1092 (gate v8) — the rotary map has no stock-top silhouette classes either.
+    // #1092 (gate v8) — the rotary map has no stock-top silhouette classes either, so no rim cell
+    // can be counted for an unavailable silhouette proof.
     silhouetteExcusedCells: 0,
     silhouetteDeepest: null,
+    silhouetteUnavailableCells: 0,
     adjudicatedFraction: coverageFraction,
     adjudicatedMaxMm: maxCutIntoMm,
     adjudicatedMaxAt: maxCutIntoAt,

@@ -208,42 +208,63 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
   // The rule's point: the vendor's own program passes line 2 once its rim break is allowed.
   expect(r.ok).toBe(true);
 
-  // #1064 — THE DEFAULT BAND NAMES THE PART'S SILHOUETTE ONLY. This NC's V strokes are on
-  // interior pocket lips: with no `edges: 'all'` in the job, they are cut-into, not edge break.
+  // #1064 — THE DEFAULT BAND NAMES THE PART'S SILHOUETTE ONLY. #1092 (0f's R-b ruling, 2026-11-08)
+  // — the seed is the v8 DESIGN SILHOUETTE (∪ the grid border), not the grid border alone: the V's
+  // rim strokes within its reach and leg are edge break even when the goal grid has a margin, while
+  // the interior pocket lips — walls, not silhouette — are still cut-into, not excused.
   const interior = checkGoalCutInto(goal, stampField, {
     edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4) },
     wallShadowRadiusMm: 3,
     stockThicknessMm: 27.2,
     clAt,
   });
-  expect(interior.edgeBreakFraction).toBe(0);
+  expect(interior.edgeBreakFraction).toBeGreaterThan(0);
+  expect(interior.edgeBreakFraction).toBeLessThan(r.edgeBreakFraction);
   expect(interior.adjudicatedFraction).toBeGreaterThan(0);
   expect(interior.adjudicatedFraction).toBeLessThanOrEqual(interior.cutIntoFraction);
 
   // #1064 — E's/page numbers are the all-edges reading (see the first case).
+  // #1092 (0f's R-a ruling) — THE SLAB'S THICKNESS IS STATED. The silhouette proof's ceiling is the
+  // blank's floor (stock top down to −(thickness + breakthrough)); without a stated thickness the
+  // proof is UNAVAILABLE and the rim cells are counted (the case below pins that sentence). This
+  // call is the same job as the first case and must judge the same rim.
   const gated = checkGoalCutInto(goal, stampField, {
     edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4), toolNumber: 4, edges: 'all' },
     whoAt,
     clAt,
     wallShadowRadiusMm: 3,
+    stockThicknessMm: 27.2,
   });
   // E's own reading on this NC: edgeBreakPct 3.66, cutInto0p1Pct 0.
   expect(gated.edgeBreakFraction * 100).toBeGreaterThan(3.5);
   expect(gated.edgeBreakFraction * 100).toBeLessThan(3.85);
-  // v5 (#970) — THE RESIDUAL, PINNED AS THE FINDING IT IS. With the CL stated, 0.008 % of the
-  // grid (≈ 90 cells, deepest 0.364 mm at (104.9, 38.5)) sits in the shadow band, is NOT the V's
-  // deepest cut (so not edge break) and has a CL within the shadow radius — the rule adjudicates
-  // it. These are the heightfield's wall-FOOT cells: a cutter on a pocket floor, 2.7–3.0 mm from
-  // the wall, has its disc's rim over a LAND cell whose goal height is the wall's top, so the
-  // stamp reads 0.1–0.36 mm below the goal where the wall physically prevents any cut. E's
-  // checker reads this NC as 0 because it excludes the whole shadow class. The vendor's own card
-  // therefore reads `ok: false` under v5 at this residual — reported on #943, with the refinement
-  // option (excuse the cell when a wall cell lies between the CL and it), for the manager's
-  // ruling. A consistent stamp supplies the field, the who map and the CL here, as the session's
-  // folded stamp does; E's npy field cannot carry a CL.
+  // v5 (#970) — THE RESIDUAL, PINNED AS THE FINDING IT IS, ITS CLASS NAMED (0f, 2026-11-08):
+  // 115 cells (0.008 % of the 1,441,118 covered cells, deepest 0.3636 mm) sit in the SHADOW class
+  // where NEITHER v5 sub-proof holds — the deepest stamp is not the V within its leg, and the CL
+  // sits 2.791 mm from the wall, 0.109 mm short of the r − pitch = 2.9 test. These are the
+  // heightfield's wall-FOOT cells: a cutter on a pocket floor, 2.7–3.0 mm from the wall, has its
+  // disc's rim over a LAND cell whose goal height is the wall's top, so the stamp reads 0.1–0.36 mm
+  // below the goal where the wall physically prevents any cut. E's checker reads this NC as 0
+  // because it excludes the whole shadow class; the vendor's own card therefore reads `ok: false`
+  // at this residual (reported on #943). With the slab's thickness stated (0f's R-a), the rim
+  // cells are silhouette-excused and this class is all that remains counted.
   expect(gated.edgeBreakFraction * 100).toBeCloseTo(3.81, 2);
   expect(gated.shadowNotScoredFraction * 100).toBeCloseTo(0.1506, 3);
   expect(gated.adjudicatedFraction * 100).toBeCloseTo(0.008, 2);
   expect(gated.adjudicatedMaxMm).toBeCloseTo(0.364, 3);
   expect(gated.ok).toBe(false);
+
+  // #1092 (0f's R-a ruling) — NO SILENT FALLBACK. The same call WITHOUT a stated thickness cannot
+  // run the silhouette proof (the blank's floor is unknown; there is no topZ − minZ guess): the rim
+  // cells are counted, and the sentence says exactly why and how many.
+  const noThickness = checkGoalCutInto(goal, stampField, {
+    edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4), toolNumber: 4, edges: 'all' },
+    whoAt,
+    clAt,
+    wallShadowRadiusMm: 3,
+  });
+  expect(noThickness.silhouetteUnavailableCells).toBeGreaterThan(1000);
+  expect(noThickness.sentence).toContain('silhouette proof unavailable — stock thickness not stated');
+  expect(noThickness.sentence).toContain('rim cell(s) counted');
+  expect(noThickness.adjudicatedFraction).toBeGreaterThan(gated.adjudicatedFraction);
 });

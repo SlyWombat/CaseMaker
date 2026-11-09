@@ -650,6 +650,7 @@ describe('#953 the receipt carries the goal report', () => {
     overReliefDeepest: null,
     silhouetteExcusedCells: 0,
     silhouetteDeepest: null,
+    silhouetteUnavailableCells: 0,
     shadowNotScoredFraction: 0.001,
     leftoverFractions: [0.162, 0.02, 0.001],
     passCoverage: 0.95,
