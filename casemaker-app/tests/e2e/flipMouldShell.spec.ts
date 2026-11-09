@@ -55,11 +55,12 @@ test('#754/#723 — a two-side mouse shell opens, posts the model engine’s fou
   await expect(page.getByTestId('engrave-job-file-name')).toContainText('mouse-shell-two-sides');
 
   // The document is the SIDES form: setup 1's goal is the outside, setup 2's the inside mold.
-  // The sides list lives in the folded Hold group (#799); the chosen cutter is above the fold.
+  // The sides list lives in the folded Setups group (#1123 item 27); the chosen cutter is above
+  // the fold.
   await expect(page.getByTestId('engrave-cutter-line')).toContainText(/ball/);
   await expect(page.getByTestId('engrave-cutter-line')).toContainText('chosen by you');
-  const hold = page.getByTestId('engrave-group-hold');
-  if ((await hold.getAttribute('open')) === null) await page.getByTestId('engrave-group-hold-summary').click();
+  const setupsGroup = page.getByTestId('engrave-group-setups');
+  if ((await setupsGroup.getAttribute('open')) === null) await page.getByTestId('engrave-group-setups-summary').click();
   await expect(page.getByTestId('engrave-setups')).toBeVisible();
   await expect(page.getByTestId('engrave-side-goal-0')).toContainText('mouse-shell.stl');
   await expect(page.getByTestId('engrave-side-goal-1')).toContainText('mouse-shell-inside.stl');

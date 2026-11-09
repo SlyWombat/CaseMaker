@@ -5116,6 +5116,18 @@ export function EngravePanel(): JSX.Element {
         )}
       </div>
 
+      </Group>
+
+      {/* #1123 item 27 — SETUPS IS ITS OWN GROUP. It used to sit at the bottom of the Hold group,
+          after "Waste board … Save as my setup", and the maintainer could not find it at the bench.
+          Same Group pattern as Job/Cutter/Hold: a header with the count while closed, the setup
+          rows (Plan registration / Re-plan / Use this plan) inside. */}
+      <Group
+        testid="engrave-group-setups"
+        title="Setups"
+        summary={`${setups.length} setup${setups.length === 1 ? '' : 's'}`}
+        {...groupProps('engrave-group-setups', false)}
+      >
       <EngraveSetupsSection
         onPickGoal={(setupId) => {
           // The SAME goal reader as Surface a mesh: a side's goal is a goal, with a setup on it.
