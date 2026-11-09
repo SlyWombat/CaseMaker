@@ -398,14 +398,24 @@ interface CutRun {
 
 function runCut(jobPath: string, outDir: string, opts: { location: string | null; catalogue: string | null; timeoutMs: number }): CutRun {
   ensureDir(outDir);
-  const args = [join(APP, 'scripts', 'casemaker.mjs'), 'cut', jobPath, '--out', outDir, '--json'];
+  // scripts/casemaker.ts through tsx, the way the bin starts it — but WITHOUT the bin's own
+  // spawnSync layer: a timeout must reach the process that is actually planning, or a hung sample
+  // leaves an orphaned CLI behind (observed: one kept grinding an hour after its harness died).
+  const tsxEntry = import.meta.resolve('tsx');
+  const args = ['--import', tsxEntry, join(APP, 'scripts', 'casemaker.ts'), 'cut', jobPath, '--out', outDir, '--json'];
   if (opts.location !== null) args.push('--location', opts.location);
   if (opts.catalogue !== null) args.push('--catalogue', opts.catalogue);
   let rc = 0;
   let stdout = '';
   let stderr = '';
   try {
-    stdout = execFileSync(process.execPath, args, { cwd: APP, encoding: 'utf8', timeout: opts.timeoutMs, maxBuffer: 256 * 1024 * 1024 });
+    stdout = execFileSync(process.execPath, args, {
+      cwd: APP,
+      encoding: 'utf8',
+      timeout: opts.timeoutMs,
+      maxBuffer: 256 * 1024 * 1024,
+      env: { ...process.env, TSX_TSCONFIG_PATH: join(APP, 'tsconfig.scripts.json') },
+    });
   } catch (error) {
     const e = error as { status?: number; stdout?: string; stderr?: string; message?: string };
     rc = e.status ?? 1;
