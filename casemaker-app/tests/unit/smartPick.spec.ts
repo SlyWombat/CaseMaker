@@ -305,6 +305,20 @@ describe('#1134 the pick caps its full evaluations', () => {
     expect(fullyEvaluated).toContain(planKey(rule));
   });
 
+  it('when no capped finalist posts, the search promotes further candidates and states it', async () => {
+    const cutterKey = (plan: CandidatePlan): string => plan.cutters.map((c) => c.key).join('+');
+    const promised = 'inv:flat-1';
+    const evaluate: Evaluate = (plan, level) => {
+      const base = verdict(cutterKey(plan) === promised ? 0.05 : 0.9);
+      if (level === 'coarse' || cutterKey(plan) === promised) return base;
+      return { ...base, ok: false, refusal: 'refused for the test' };
+    };
+    const pick = picked(await smartPick(coinJob(), entries(), [], evaluate));
+    expect(pick.runnable, pick.notes.join(' ')).not.toBeNull();
+    expect(cutterKey(pick.chosen.plan)).toBe(promised);
+    expect(pick.notes.join(' ')).toMatch(/none of the first \d+ fully planned candidate/);
+  });
+
   it('with fullFinalists 1 the rule’s plan is the one full evaluation', async () => {
     const levels: ('coarse' | 'full')[] = [];
     const evaluate: Evaluate = (_plan, level) => {

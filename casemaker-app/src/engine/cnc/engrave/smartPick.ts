@@ -835,6 +835,25 @@ export async function smartPick(
   }
   fullTotal = plannedFinalists.length;
   for (const finalist of plannedFinalists) await full(finalist.plan);
+  // POSTING FIRST, AFTER THE CAP (the Manager's review of e03156484) — the promotion loop stays,
+  // but only in its own rare case: when NOTHING among the capped finalists posts (the rule's plan
+  // included), the search keeps promoting candidates in the objective's order until one posts, so
+  // a job is never refused while a posting plan exists. The common case never pays this, and the
+  // note STATES that the cap was exceeded and why.
+  const postsSoFar = (): boolean => [...verdicts.entries()].some(([k, s]) => fullDone.has(k) && s.evaluation.ok);
+  if (!postsSoFar()) {
+    for (const candidate of ordered()) {
+      const key = planKey(candidate.plan);
+      if (fullDone.has(key)) continue;
+      await full(candidate.plan);
+      if (verdicts.get(key)!.evaluation.ok) {
+        notes.push(
+          `none of the first ${plannedFinalists.length} fully planned candidate${plannedFinalists.length === 1 ? '' : 's'} posted; promoted ${key} until one did`,
+        );
+        break;
+      }
+    }
+  }
   const all = ordered();
   const postings = all.filter((s) => fullDone.has(planKey(s.plan)) && s.evaluation.ok);
   const bestMeasured = all[0]!;
