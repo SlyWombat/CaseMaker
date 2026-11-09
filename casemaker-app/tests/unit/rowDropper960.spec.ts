@@ -264,6 +264,8 @@ describe('#960 dropRow() — an off-centre kink the midpoint alone cannot see', 
       dropCutter: (x) => ridge(x),
       toleranceMm: 0.005,
       minSpacingMm: 0.005,
+      minSpacingSource: 'derived',
+      minSpacingFromStepOverMm: 0.05,
       maxSpacingMm: 0.346,
       sampleCount: 0,
     };
@@ -309,6 +311,8 @@ describe('#957/#960 dropRow() — direction-canonical: either end first gives th
       dropCutter: (x) => ridge(x),
       toleranceMm: 0.005,
       minSpacingMm: 0.005,
+      minSpacingSource: 'derived',
+      minSpacingFromStepOverMm: 0.05,
       maxSpacingMm: 0.346,
       sampleCount: 0,
     };
