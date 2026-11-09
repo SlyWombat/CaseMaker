@@ -44,7 +44,7 @@ import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanFindingStatement, PlanSheetStatement, PlanStatement, StockProbes } from './types';
 import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { byKeyPendingNote, pickAmongEquals, pickDecisionSentence, pickKeysFor, REACH_MARGIN_FALLBACK_MM, type PickKeys } from './pickAmongEquals';
-import { finishTipField, DEFAULT_MAX_FINISH_TIP_OPS } from '@/engine/cnc/cam/surfaceFinishTipField';
+import { finishTipField, stencilCellsFor, DEFAULT_MAX_FINISH_TIP_OPS } from '../dropTip';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, isAbortError, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
 import { fullyReachable, pocket } from './ops/pocket';
@@ -802,25 +802,57 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // cell mask and insetting it is what moved the error between a legitimate tangent wall-foot
   // strip and a disc buried under the body for five rounds; they are separate sets, and the path
   // is their intersection, traced without a further radius inset (`pocket()`'s `centreSpace`).
-  const restTipCache = new Map<string, Float32Array>();
-  const restTipField = (cutter: Tool): Float32Array | null => {
+  // #1092 — THE TIP FIELD IS COMPUTED PER REST REGION (0f's land14 ruling): a whole-goal field is
+  // O(covered cells × stencil), and at a 0.1 mm goal grid a ⌀3.175 rest overruns the budget on a
+  // large part (the #959 tray would need 1.23e9, the organizer 2.21e9), refusing every rest region
+  // there. Each region's field is built on its bbox + 2r (the stencil's own reach), cached per
+  // (cutter, region). The grid is never coarsened and the budget never raised; a region that still
+  // overruns is a STATED finding (`rest-region-over-budget`), never a silent refusal.
+  const restTipCache = new Map<string, { gi0: number; gj0: number; nx: number; ny: number; tip: Float32Array }>();
+  const restBudgetFindings: { id: string; cutter: Tool; ops: number; budget: number }[] = [];
+  const restTipField = (
+    cutter: Tool,
+    region: { id: string; bounds: { min: [number, number]; max: [number, number] }; radiusMm: number },
+  ): { gi0: number; gj0: number; nx: number; ny: number; tip: Float32Array } | null => {
     if (coverageGoal === undefined) return null;
-    const key = cutterKeyOf(cutter);
+    const key = `${cutterKeyOf(cutter)}|${region.id}`;
     const hit = restTipCache.get(key);
     if (hit !== undefined) return hit;
-    // The finish's own gouge-safe drop over the goal: the lowest tip that keeps the whole cutter
-    // at or above the real surface under it. A region floor never enters here.
-    // `GoalCellField` lacks the sampling metadata `finishTipField` reads; the datum is the plan's
-    // own (stock-top-relative), so the uncovered sentinel is the stock top, 0.
+    const goal = coverageGoal;
+    const pitch = goal.pitch;
+    const radius = (cuttingDiameter(cutter) ?? 0) / 2;
+    const margin = 2 * radius + pitch;
+    const gi0 = Math.max(0, Math.floor((region.bounds.min[0] - margin - goal.x0) / pitch));
+    const gi1 = Math.min(goal.nx - 1, Math.ceil((region.bounds.max[0] + margin - goal.x0) / pitch));
+    const gj0 = Math.max(0, Math.floor((region.bounds.min[1] - margin - goal.y0) / pitch));
+    const gj1 = Math.min(goal.ny - 1, Math.ceil((region.bounds.max[1] + margin - goal.y0) / pitch));
+    const nx = gi1 - gi0 + 1;
+    const ny = gj1 - gj0 + 1;
+    if (!(nx > 0 && ny > 0)) return null;
+    const z = new Float32Array(nx * ny);
+    const covered = new Uint8Array(nx * ny);
     let coveredCount = 0;
-    for (const c of coverageGoal.covered) if (c === 1) coveredCount++;
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        const src = (gj0 + j) * goal.nx + (gi0 + i);
+        z[j * nx + i] = goal.z[src]!;
+        covered[j * nx + i] = goal.covered[src]!;
+        if (goal.covered[src] === 1) coveredCount++;
+      }
+    }
+    const ops = coveredCount * stencilCellsFor(radius, pitch);
+    if (ops > DEFAULT_MAX_FINISH_TIP_OPS) {
+      restBudgetFindings.push({ id: region.id, cutter, ops, budget: DEFAULT_MAX_FINISH_TIP_OPS });
+      return null;
+    }
     const field = finishTipField(
-      { ...coverageGoal, topZ: 0, minZ: 0, coveredCount, resolutionNote: '' },
-      { radius: (cuttingDiameter(cutter) ?? 0) / 2, ball: cutter.shape === 'ball' },
+      { nx, ny, x0: goal.x0 + gi0 * pitch, y0: goal.y0 + gj0 * pitch, pitch, z, covered, topZ: 0, minZ: 0, coveredCount, resolutionNote: '' },
+      { radius, ball: cutter.shape === 'ball' },
       DEFAULT_MAX_FINISH_TIP_OPS,
     );
-    restTipCache.set(key, field);
-    return field;
+    const entry = { gi0, gj0, nx, ny, tip: field };
+    restTipCache.set(key, entry);
+    return entry;
   };
   const restRegion = coverageGoal === undefined
     ? undefined
@@ -840,8 +872,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         const j0 = Math.max(0, Math.floor((region.bounds.min[1] - goal.y0) / pitch));
         const j1 = Math.min(goal.ny - 1, Math.ceil((region.bounds.max[1] - goal.y0) / pitch));
         if (i1 < i0 || j1 < j0) return null;
-        const tip = restTipField(region.cutter);
-        if (tip === null) return null;
+        const tips = restTipField(region.cutter, region);
+        if (tips === null) return null; // the region was refused (stated under rest-region-over-budget)
         const floorZ = region.floorZ;
         const tol = ARC_CHORD_TOLERANCE_MM; // finish-class rest: stockToLeaveMm is 0
         // ε — what counts as "standing": the finish's own 0.1 mm band (#961/#962's number, the
@@ -890,8 +922,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           const k = (j0 + j) * goal.nx + (i0 + i);
           if (goal.covered[k] !== 1) return false;
           // A — CL space: the rest cutter's tip over the GOAL is at or below the pass level. The
-          // region's floor never admits a move; the goal does.
-          if (tip[k]! > floorZ + tol) return false;
+          // region's floor never admits a move; the goal does. The field is the region's own crop
+          // (bbox + 2r), read at this cell's global index.
+          const ti = i0 + i - tips.gi0;
+          const tj = j0 + j - tips.gj0;
+          if (ti < 0 || tj < 0 || ti >= tips.nx || tj >= tips.ny) return false;
+          if (tips.tip[tj * tips.nx + ti]! > floorZ + tol) return false;
           const x = goal.x0 + (i0 + i) * pitch;
           const y = goal.y0 + (j0 + j) * pitch;
           if (!pointInPolygons(region.footprint, x, y)) return false;
@@ -2241,6 +2277,30 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       last.statements.push(statement);
       // The dump's prose carries the same line; the card's notes are what a reviewer reads.
       last.notes.push(statement.text);
+    }
+  }
+  // #1092 (0f's land14 ruling) — A REST REGION REFUSED FOR THE TIP BUDGET IS STATED, NEVER SILENT.
+  // The region, the cutter, the evaluations it needs against the budget, and the way out; joined to
+  // #1023's leftover sentence wth the plan's own measured leftover. Severity rides the coverage
+  // line the shop already sets (`restVisibility.share`): over it, the refusal is why the finish is
+  // short and the finding is an ERROR; under it, a WARNING.
+  if (restBudgetFindings.length > 0 && perSetup.length > 0) {
+    const last = perSetup[perSetup.length - 1]!;
+    const visShare = input.restVisibility?.share ?? REST_MACHINING_FALLBACK.thirdToolFraction;
+    const share = outcome === undefined || outcome.coverage === null ? 1 : 1 - outcome.coverage;
+    const severity: 'warning' | 'error' = share > visShare ? 'error' : 'warning';
+    for (const f of restBudgetFindings) {
+      const d = cuttingDiameter(f.cutter) ?? 0;
+      const label = `${f.cutter.name || f.cutter.shape}${d > 0 ? ` (⌀${diaWord(d)} mm)` : ''}`;
+      const text =
+        `rest region "${f.id}" (${label}) could not be planned: its drop-tip field needs ` +
+        `${f.ops} evaluations, over the ${f.budget} budget — left uncut. Coarsen the goal grid, ` +
+        `narrow the region, or use a larger rest cutter` +
+        (outcome !== undefined && outcome.coverage !== null
+          ? `; the finish leaves up to ${outcome.leftoverAboveMm.toFixed(2)} mm standing over ${shareWord(1 - outcome.coverage)} % of the goal`
+          : '');
+      last.statements.push({ severity, code: 'rest-region-over-budget', count: 1, ids: [f.id], text });
+      last.notes.push(text);
     }
   }
   // #1042 — the seam's typed house statement, once (a job's cutter is the job's, not a setup's).
