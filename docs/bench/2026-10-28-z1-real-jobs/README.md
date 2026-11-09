@@ -112,9 +112,13 @@ is the deepest stamp's CL — the app takes it from its simulator timeline, the 
 raw-NC walk — and near a wall two overlapping passes can swap which sample is deepest, flipping the
 v5 disc-rim test on cells that stay adjudicated either way. It cannot move the adjudicated figure:
 forcing every shadow CL "far" moves the count to 19,407, so the app's value lies inside the
-reachable range, and the adjudicated sets agree cell for cell. It is declared here, not reconciled;
-a `CM_GOAL_DEBUG=1` GOALCELL dump (one row per adjudicated cell with its CL and both wall distances)
-is the way to diff the 1,098 CLs directly if it is ever worth doing.
+reachable range, and the adjudicated sets agree cell for cell. It was then diffed against a
+`CM_GOAL_DEBUG=1` GOALCELL dump (2026-11-09; 40,493 adjudicated cells, one row each, 30,116 of them
+shadow-class): on the 2,832 cells only the app counts, the app's CL sits 2.9–4.2 mm from the
+outline where the checker's, at the same cell and the same z, sits 0.3–2.8 mm — a mean CL
+displacement of 2.4 mm, far beyond the 0.05 mm sampling pitch. So the two stamps pick different
+winners among equal-depth samples (the tie rule is the same; the sample sets are not): declared,
+and not reconcilable without making the page walk the simulator's own timeline.
 
 `tools/test_goal_check.py` pins the rule on synthetic fields with hand-known answers: the strict
 stamp edge, a clean pocket, a boundary-tangent contour, the relief ceiling on wall and border cells,
