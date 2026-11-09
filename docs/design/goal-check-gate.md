@@ -78,8 +78,10 @@ A covered cell whose axial neighbour is uncovered grid is the part's own side fa
 stock top to the **legitimate floor beside the part**: `−T`, or `−(T + breakthrough)` where the verifier's
 through rule allows a cut into the board there. It is excused only when **both** hold: the depth is within
 that step (+ slack) **and** the deepest stamp's CL at the cell lies on the **uncovered side** of the outline,
-at least `r − pitch` from it — **or** the **inward witness** holds: **every** fully covered axial neighbour on
-the part side (two at a corner) is not cut below its own design + slack, so the disc did not enter the part —
+at least `r − pitch` from it — **or** the **inward witness** holds: **every** covered axial neighbour on
+the part side (two at a corner; covered = the goal has a value there, whether or not that neighbour is itself
+an outline cell — on an outline that runs along a lattice row the whole inward row is) is not cut below its own
+design + slack, so the disc did not enter the part —
 one cut neighbour fails the witness, and a cell with no fully covered part-side neighbour has none. The witness exists
 because the CL-distance test assumes the outline lies on a cell boundary; on a curved or steep edge the true
 edge sits anywhere inside the boundary cell, which carries the part's height (the cell-MAX rule, #1003) and the
