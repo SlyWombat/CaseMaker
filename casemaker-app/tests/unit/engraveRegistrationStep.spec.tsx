@@ -26,6 +26,8 @@ import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { surfaceSpreadPlan } from '@/engine/cnc/engrave/surfaceSpread';
 import { planRegistration, type RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { summarizePlan } from '@/engine/cnc/registration/summary';
+import { canonicalJson } from '@/engine/cnc/engrave/package';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { boxTarget } from './helpers/twoSetupBox966';
@@ -1637,7 +1639,8 @@ describe('#1082 the Register card on a cold first paint', () => {
       stock: { ...base.stock, length: 160, width: 126, thickness: 25, material: 'hardwood' },
       labels: defaultEngraveJob().labels,
       shapes: [],
-      setups: [],
+      // `setups` is left undefined so jobSetups() materialises the implicit setup (with its
+      // orientation) that the approved plan is attached to.
       workholding: {
         kind: 'bracket',
         bracket: { anchor: 1, variant: 'thin', clamps: [{ edge: 'back', at: 63 }], source: 'default' },
@@ -1701,5 +1704,104 @@ describe('#1082 the Register card on a cold first paint', () => {
         screen.queryByTestId('engrave-registration-proposal') ?? screen.queryByTestId('engrave-registration-no-plan'),
       ).toBeTruthy(),
     );
+  });
+});
+
+
+describe('#1123-28 — the Register card never silently runs a stored plan the planner no longer proposes', () => {
+  afterEach(() => reloadBundledFonts());
+
+  it('shows the approved plan and the current proposal, and Use the new plan replaces it in place', async () => {
+    const base = defaultEngraveJob();
+    const job: EngraveJob = {
+      ...base,
+      name: 'bracket plan drift',
+      stock: { ...base.stock, length: 160, width: 126, thickness: 25, material: 'hardwood' },
+      labels: defaultEngraveJob().labels,
+      shapes: [],
+      // `setups` is left undefined so jobSetups() materialises the implicit setup (with its
+      // orientation) that the approved plan is attached to.
+      workholding: {
+        kind: 'bracket',
+        bracket: { anchor: 1, variant: 'thin', clamps: [{ edge: 'back', at: 63 }], source: 'default' },
+      },
+    };
+    // The plan approved on the older planner (a footprint-shaped plan for this job).
+    const oldPlan = makePlan(-56.8);
+    const approved: EngraveJob = {
+      ...job,
+      setups: [
+        {
+          ...jobSetups(job)[0]!,
+          mount: { kind: 'bracket' },
+          registration: { method: 'bracket', plan: oldPlan, expected: 'the older approved footprint plan' },
+        },
+      ],
+    };
+    useEngraveJobStore.setState({ job: approved });
+    resetEngraveRegistrationStore();
+    useEngraveRunStore.setState({ acknowledged: true });
+    useLocationStore.setState({
+      status: 'present',
+      etag: '"e-seat"',
+      reason: null,
+      location: {
+        machines: [
+          {
+            id: 'm-seat',
+            profileId: 'Z1',
+            address: { host: TARGET.host, port: TARGET.port },
+            bedProfiles: [
+              {
+                id: 'bp-seat',
+                datums: {
+                  surfaceTopZ: null,
+                  viseJawTopZ: null,
+                  bracketSeatZ: { value: -56.8, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1', at: null },
+                  rotaryAxis: null,
+                },
+                placements: [],
+                surface: null,
+                history: [],
+              },
+            ],
+            activeBedProfileId: 'bp-seat',
+            history: [],
+            notes: [],
+            observedAt: '2026-11-08T00:00:00.000Z',
+          },
+        ],
+        accessories: [],
+      } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>,
+    });
+    useSettingsStore.setState({
+      machineCalibration: {
+        frame: { anchor1: [-190.89, -193.83], anchor2Offset: [88.5, 45], clearanceXY: [-11.6, -14.6], clearanceZ: -3, toolrackOffset: [48.8, 181], toolrackZ: -108 },
+        machineId: 'Z1',
+        measuredAt: '2026-11-08T00:00:00.000Z',
+        softEndstop: { enabled: true, xMin: -207, yMin: -206, zMin: -102, source: 'config-get sd' },
+        source: 'config',
+      } as unknown as ReturnType<typeof useSettingsStore.getState>['machineCalibration'],
+    });
+    reloadBundledFonts();
+
+    render(<EngraveRegistrationStep job={approved} target={TARGET} />);
+    const drift = await screen.findByTestId('engrave-registration-plan-drift');
+    // It says the approved plan is not what the planner now proposes, quoting the approved one…
+    expect(drift.textContent).toContain(summarizePlan(oldPlan));
+    // …and shows the current proposal beside it.
+    const now = screen.getByTestId('engrave-registration-plan-drift-now');
+    expect(now.textContent).toContain('Now proposed');
+    expect(now.textContent).not.toContain(summarizePlan(oldPlan));
+
+    fireEvent.click(screen.getByTestId('engrave-registration-use-new-plan'));
+    // The stored approval is replaced in place — never silently left as the old plan.
+    const written = useEngraveJobStore.getState().job.setups![0]!.registration!.plan;
+    expect(canonicalJson(written)).not.toBe(canonicalJson(oldPlan));
+
+    // With the new plan approved, the card no longer reports a difference.
+    cleanup();
+    render(<EngraveRegistrationStep job={useEngraveJobStore.getState().job} target={TARGET} />);
+    await waitFor(() => expect(screen.queryByTestId('engrave-registration-plan-drift')).toBeNull());
   });
 });

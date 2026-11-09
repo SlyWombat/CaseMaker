@@ -25,7 +25,7 @@
 
 import { create } from 'zustand';
 import type { EngraveJob } from '@/types/engraveJob';
-import { freezePackage, type FrozenPackage, type PackageProgramInput } from '@/engine/cnc/engrave/package';
+import { freezePackage, jobFingerprint, legacyJobFingerprint, setupApprovalDrift, type FrozenPackage, type PackageProgramInput } from '@/engine/cnc/engrave/package';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useStockStore } from './stockStore';
 
@@ -114,6 +114,41 @@ export const useEngravePackageStore = create<EngravePackageState>()((_set, get) 
   },
 }));
 
+/** A frozen package's programs, in the freeze input's own shape (its bytes are already the truth). */
+function frozenProgramInputs(pkg: FrozenPackage): PackageProgramInput[] {
+  return pkg.programs.map((p) => ({
+    setupIndex: p.setupIndex,
+    setupId: p.setupId,
+    toolKey: p.toolKey,
+    nc: p.nc,
+    programHash: p.hash,
+    frameNc: p.frameNc,
+    ...(p.frame === undefined ? {} : { frame: p.frame }),
+  }));
+}
+
+/**
+ * #1132 (maintainer's rule) — RE-FREEZE AT THE WRITE, AND UPGRADE ON OPEN.
+ *
+ * Two things make a stored package's record lag the job without any byte change:
+ *  - a registration approval / re-plan / setup-2 write (`setupApprovalDrift`), and
+ *  - a package frozen by an older build under the pre-#1132 fingerprint (`legacyJobFingerprint`),
+ *    which must not read as "the job changed" and cost a surprise regenerate on the first open.
+ * Both are fixed the same way: re-freeze the package's OWN programs with the current job — same
+ * bytes, no worker — which brings the setups and the stored hash up to date.
+ *
+ * Called from the job subscription below (so the approval write itself does it), once on module
+ * open for a hydrated job, and as a guard wherever a package is read after a load (Cut/Save/Upload).
+ */
+export async function refreshStoredPackage(job: EngraveJob): Promise<boolean> {
+  const pkg = job.package;
+  if (pkg === undefined) return false;
+  const legacyUpgrade = pkg.jobHash === legacyJobFingerprint(job) && pkg.jobHash !== jobFingerprint(job);
+  if (!legacyUpgrade && !setupApprovalDrift(pkg, job)) return false;
+  const result = await useEngravePackageStore.getState().freeze(job, frozenProgramInputs(pkg), pkg.surface ?? null);
+  return result.ok;
+}
+
 /**
  * Keep the compatibility view in step with the document. Subscribing (rather than reading inside
  * the selector) is what makes the Cut panel re-render when a freeze writes the block; the block
@@ -123,7 +158,16 @@ useEngraveJobStore.subscribe((state, previous) => {
   if (state.job.package !== previous.job.package || state.job.id !== previous.job.id) {
     useEngravePackageStore.setState({ packages: documentPackages() });
   }
+  // #1132 — the write itself (an approval, a re-plan, setup 2's plan) re-freezes the package's
+  // setups. The re-freeze writes the package, whose setups now match, so this settles in one pass.
+  if (state.job !== previous.job && state.job.package !== undefined) {
+    void refreshStoredPackage(state.job);
+  }
 });
+
+// #1132 migration — OPEN: a job hydrated from storage may carry a package frozen by an older
+// build (or a drifted setups block). Refresh it once, silently, before anything reads the record.
+void refreshStoredPackage(useEngraveJobStore.getState().job);
 
 /**
  * Take the job's blank, quantity one — a job cuts one blank.

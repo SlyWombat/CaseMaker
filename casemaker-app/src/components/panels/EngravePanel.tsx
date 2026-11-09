@@ -5664,6 +5664,8 @@ export function EngravePanel(): JSX.Element {
               onGenerate={() => void generate()}
               generateBlocker={generateBlocker?.sentence ?? null}
               restoreChecking={run.restoreChecking}
+              staleReason={run.staleReason}
+              lastGenerateMs={run.lastGenerateMs}
             />
           </>
         )

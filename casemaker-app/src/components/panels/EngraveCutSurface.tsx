@@ -64,7 +64,8 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { finishedProgramsFor, useLocationStore } from '@/store/locationStore';
 import { useLocationPoll } from '@/hooks/useLocationPoll';
 import { machineKey, useMachineRunStore, type RunContext } from '@/store/machineRunStore';
-import { useEngravePackageStore } from '@/store/engravePackageStore';
+import { refreshStoredPackage, useEngravePackageStore } from '@/store/engravePackageStore';
+import { inputLabel, staleSentence, type EngraveInputKey } from '@/engine/cnc/engrave/runInputs';
 import {
   useEngraveRegistrationStore,
   useFirstRegistration,
@@ -277,6 +278,10 @@ export interface EngraveCutSurfaceProps {
    * stay off until the deferred recheck has run.
    */
   restoreChecking: boolean;
+  /** #1132 — the run's own named changed input, when the panel knows it. */
+  staleReason?: EngraveInputKey | null;
+  /** #1132 — the last Generate's duration on this job (ms); null when it has never been timed. */
+  lastGenerateMs?: number | null;
 }
 
 /** The map from the live Generate: each program's FNV key to the report that gated that text. */
@@ -576,6 +581,8 @@ export function EngraveCutSurface({
   onGenerate,
   generateBlocker,
   restoreChecking,
+  staleReason = null,
+  lastGenerateMs = null,
 }: EngraveCutSurfaceProps): JSX.Element {
   const freeze = useEngravePackageStore((s) => s.freeze);
   const openManage = useManageModeStore((s) => s.openManage);
@@ -798,6 +805,14 @@ export function EngraveCutSurface({
 
   const green = report.firstBlocking === null;
   const staleness = pkg === null ? null : packageStaleness(pkg, job);
+  // #1132 — the one changed thing, in the operator's words. The stock is the bench's case; the
+  // run's named input is precise when it exists, and the package's own reason is the fallback.
+  const changedWords =
+    staleReason === null
+      ? 'the design changed'
+      : staleReason === 'hold'
+        ? 'the stock changed'
+        : `${inputLabel(staleReason)} changed`;
   // #695 — THE FROZEN JOB'S MOUNT, AGAINST THE MACHINE'S ACTIVE BED. The package stores the
   // setup's mount (`JobSetup.mount`); the machine record's active profile either holds it or does
   // not, read by the SAME predicate #693's wizard uses (`profileHolds`). A package whose mount has
@@ -960,6 +975,13 @@ export function EngraveCutSurface({
       }
     });
   }, [green, pkg, packageCurrent, generatedReady, generated, job, staleSince, freeze]);
+
+  // #1132 — a package whose record lags the job (a registration approval, or a legacy hash from an
+  // older build) is refreshed here as a guard on Cut/Save/Upload; the write path already does it.
+  // The bytes are unchanged, so nothing stales; this only brings the record up to date.
+  useEffect(() => {
+    if (pkg !== null) void refreshStoredPackage(job);
+  }, [pkg, job]);
 
   const finishedHashes = useMemo(() => {
     // #425 §6 — the machine's finished list and the DOCUMENT's run log both answer "not new". The
@@ -1421,7 +1443,14 @@ export function EngraveCutSurface({
           {pkg !== null && !packageCurrent && !mountMismatch && (
             <p style={WARN} data-testid="engrave-package-state">
               The program is older than the design —{' '}
-              {staleness?.reason ?? 'the job changed since it was generated.'}
+              {staleReason !== null ? `${staleSentence(staleReason)}.` : (staleness?.reason ?? 'the job changed since it was generated.')}
+            </p>
+          )}
+          {pkg !== null && !packageCurrent && !mountMismatch && (
+            <p style={MUTED} data-testid="engrave-package-regenerate-cost">
+              {lastGenerateMs === null
+                ? `Regenerate (${changedWords}).`
+                : `Regenerate — about ${Math.max(1, Math.round(lastGenerateMs / 60_000))} min (last Generate on this job).`}
             </p>
           )}
           {pkg !== null && !packageCurrent && !mountMismatch && (
@@ -1432,7 +1461,7 @@ export function EngraveCutSurface({
               style={{ width: '100%', padding: 7, marginTop: 6 }}
               onClick={onGenerate}
             >
-              Generate
+              Regenerate
             </button>
           )}
           {pkg !== null && !packageCurrent && !mountMismatch && generateBlocker !== null && (

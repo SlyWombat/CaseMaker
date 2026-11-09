@@ -17,6 +17,7 @@ import { programHash } from '@/engine/cnc/programHash';
 import {
   canonicalJson,
   freezePackage,
+  setupApprovalDrift,
   jobFingerprint,
   packageHash,
   packageStaleness,
@@ -141,11 +142,10 @@ describe('the package engine (#419 §4)', () => {
     expect(packageStaleness(made.package, { ...job, id: 'job-other' }).stale).toBe(true);
   });
 
-  it('a registration-plan change stales the package but not the program fingerprint (#574)', () => {
-    // F6: approving the registration plan after Generate. The plan lives in the setups'
-    // `registration`; the cutting program does not depend on it, so the Generate must stay current
-    // while the frozen package goes stale — letting the Cut screen offer a re-freeze, not a
-    // dead-end "changed since generated".
+  it('a registration-plan change never stales the program; it is approval drift (#1132 supersedes #574)', () => {
+    // The maintainer's rule (2026-11-09): approvals and registrations are not program bytes. The
+    // fingerprint ignores the probe choreography, and the package goes on reading current; the
+    // stored setups are brought up to date by the eager re-freeze at the write.
     const job = defaultEngraveJob();
     const setup = jobSetups(job)[0]!;
     const sansPlan: EngraveJob = { ...job, setups: [{ ...setup }] as NonNullable<EngraveJob['setups']> };
@@ -156,16 +156,12 @@ describe('the package engine (#419 §4)', () => {
       ] as unknown as NonNullable<EngraveJob['setups']>,
     };
 
-    // The program fingerprint ignores the probe choreography.
     expect(jobFingerprint(approved)).toBe(jobFingerprint(sansPlan));
 
-    // …but the package frozen from the unplanned job is stale against the approved one, and the
-    // reason names the plan.
     const made = freezePackage(sansPlan, [program('G21\nM2\n')], AT);
     if (!made.ok) throw new Error(made.reason);
-    const st = packageStaleness(made.package, approved);
-    expect(st.stale).toBe(true);
-    expect(st.reason).toContain('the registration changed');
+    expect(packageStaleness(made.package, approved)).toEqual({ stale: false, reason: null });
+    expect(setupApprovalDrift(made.package, approved)).toBe(true);
   });
 
   it('#621 — the measured flatness (the registration’s outcome) does not stale the package', () => {

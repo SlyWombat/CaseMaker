@@ -34,6 +34,7 @@ import type { SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRunStore, saveBlocker } from '@/store/engraveRunStore';
 import { useRegistrationPromptStore } from '@/store/registrationPromptStore';
+import type { EngraveInputKey } from '@/engine/cnc/engrave/runInputs';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
 import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
@@ -360,6 +361,9 @@ interface Props {
   generateBlocker?: string | null;
   /** #1123 review — a restored run not yet compared against settled house reads. */
   restoreChecking?: boolean;
+  /** #1132 — the run's named changed input and the last Generate's duration, as the panel hands them. */
+  staleReason?: EngraveInputKey | null;
+  lastGenerateMs?: number | null;
 }
 
 /** #796 — the card's one action; the tests assert it was pressed rather than freezing here. */
@@ -388,6 +392,8 @@ function Harness(props: Props) {
       onGenerate={props.onGenerate ?? generateSpy}
       generateBlocker={props.generateBlocker ?? null}
       restoreChecking={props.restoreChecking ?? false}
+      staleReason={props.staleReason ?? null}
+      lastGenerateMs={props.lastGenerateMs ?? null}
     />
   );
 }
@@ -854,6 +860,27 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.queryByTestId('engrave-cut-plan')).toBeNull();
   });
 
+  it('#1132 — with no timed Generate the cost is stated without a number', async () => {
+    const job = shelfJob();
+    const pkg = frozen(job, [P1]);
+    const edited: EngraveJob = { ...job, stock: { ...job.stock, length: job.stock.length + 1 } };
+    draw({ job: edited, report: reportOf(), pkg, generated: generated([P1]), staleSince: 1, staleReason: 'hold' });
+    const cost = await screen.findByTestId('engrave-package-regenerate-cost');
+    expect(screen.getByTestId('engrave-package-state').textContent).toContain('the stock was turned since it was generated');
+    expect(cost.textContent).toBe('Regenerate (the stock changed).');
+    expect(cost.textContent).not.toContain('min');
+    expect(screen.getByTestId('engrave-package-generate').textContent).toBe('Regenerate');
+  });
+
+  it('#1132 — a timed Generate is quoted as the honest cost, never a guess', async () => {
+    const job = shelfJob();
+    const pkg = frozen(job, [P1]);
+    const edited: EngraveJob = { ...job, stock: { ...job.stock, length: job.stock.length + 1 } };
+    draw({ job: edited, report: reportOf(), pkg, generated: generated([P1]), staleSince: 1, staleReason: 'hold', lastGenerateMs: 720_000 });
+    const cost = await screen.findByTestId('engrave-package-regenerate-cost');
+    expect(cost.textContent).toBe('Regenerate — about 12 min (last Generate on this job).');
+  });
+
   it('keeps a stale program and its blank, and replaces it only through Generate', async () => {
     const job = shelfJob();
     const pkg = frozen(job, [P1]);
@@ -878,7 +905,7 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.getByTestId('engrave-package-reservation').textContent).toContain('held for you');
 
     const regenerate = screen.getByTestId('engrave-package-generate') as HTMLButtonElement;
-    expect(regenerate.textContent).toBe('Generate');
+    expect(regenerate.textContent).toBe('Regenerate');
     expect(regenerate.disabled).toBe(false);
     // Nothing moved on staleness alone.
     expect(storedPackage(job).hash).toBe(pkg.hash);
@@ -1384,15 +1411,13 @@ describe('#656 from the cutter prompt to the cut', () => {
     expect(screen.getByTestId('engrave-cut-plan')).toBeTruthy();
   });
 
-  it('#1123 review — Generate does not wait on the restored-run check; Cut does', () => {
+  it('#1123 review — Generate does not wait on the restored-run check', () => {
     const job = plannedJob();
-    const sansPlan = {
-      ...job,
-      setups: [{ ...jobSetups(job)[0]!, registration: undefined }],
-    } as EngraveJob;
-    const pkg = frozen(sansPlan, [P1]);
+    const pkg = frozen(job, [P1]);
+    // A byte change makes the package stale (the box is the stale-program card)…
+    const edited: EngraveJob = { ...job, stock: { ...job.stock, length: job.stock.length + 1 } };
     draw({
-      job,
+      job: edited,
       report: reportOf(),
       pkg,
       generated: generated([P1]),
@@ -1400,10 +1425,10 @@ describe('#656 from the cutter prompt to the cut', () => {
       restoreChecking: true,
       staleSince: 1,
     });
-    // A hung house must never leave the operator unable to regenerate: the stale-program Generate
-    // is live while the restored run is still being checked; only the Cut press waits.
+    // …and a hung house must never leave the operator unable to regenerate: the stale-program
+    // Generate is live while the restored run is still being checked; only the Cut press waits
+    // (asserted in the test above).
     expect((screen.getByTestId('engrave-package-generate') as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('#1123 review — a restored run is unverified until the shop reads settle: the Cut press is off', () => {

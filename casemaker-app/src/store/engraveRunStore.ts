@@ -448,6 +448,12 @@ export interface EngraveRunState {
   changedSinceLast: EngraveInputKey[];
   /** #581 — the previous Generate's oracle verdict, so a ✓↔× flip can say what changed. */
   previousVerdict: boolean | null;
+  /**
+   * #1132 — how long the last Generate took on this job (ms), measured by the generate action.
+   * The Cut card's honest cost ("about N min (last Generate on this job)") reads it; null until a
+   * Generate has completed in this browser.
+   */
+  lastGenerateMs: number | null;
   /** A thrown failure from any stage that is not already a finding (generate, load, oracle). */
   error: string | null;
   /** #785 — the current stage's words while a run works ("roughing level 41 of 112"), else null. */
@@ -1357,6 +1363,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     restoreChecking: false,
     changedSinceLast: [],
     previousVerdict: null,
+    lastGenerateMs: null,
     error: null,
     progress: null,
     simProgram: null,
@@ -1370,6 +1377,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       idealLastRequest?.();
     },
     generate: async (surface?: SurfacePostFit | null) => {
+      const startedAt = Date.now();
       const token = Symbol('generate');
       runHold = token;
       runEpoch += 1;
@@ -1382,6 +1390,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           runHold = null;
           useEngravePreviewStore.getState().releaseMeasurement();
         }
+        // #1132 — the honest cost the Cut card quotes for a regenerate.
+        set({ lastGenerateMs: Date.now() - startedAt });
       }
     },
     /** #893 — re-run the sweep and the check for the program already on screen. */
@@ -1425,7 +1435,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         runHold = null;
         useEngravePreviewStore.getState().releaseMeasurement();
       }
-      set({ generated: null, ...empty, phase: 'idle' });
+      set({ generated: null, ...empty, lastGenerateMs: null, phase: 'idle' });
     },
   };
 });
@@ -1501,12 +1511,10 @@ export function runShopSignature(): string {
  * `current` is a spec seam: the caller may state the stamps instead of making the stores produce
  * them (the persistence spec compares a fabricated run against a changed feeds stamp).
  */
-export function recheckRunInputs(current?: EngraveRunInputs): void {
-  const run = useEngraveRunStore.getState();
-  if (run.inputs === null || run.generated === null) return;
+export function currentRunInputStamps(): EngraveRunInputs {
   const job = useEngraveJobStore.getState().job;
   const settings = useSettingsStore.getState();
-  const stamps = current ?? runInputs({
+  return runInputs({
     job,
     margins: effectiveMargins(job, settings.margins),
     calibration: settings.machineCalibration ?? null,
@@ -1517,12 +1525,25 @@ export function recheckRunInputs(current?: EngraveRunInputs): void {
     conditions: inventoryConditions(),
     surface: useEngraveRegistrationStore.getState().records[job.id]?.surface ?? null,
   });
-  for (const key of RUN_INPUT_ORDER) {
-    if (stamps[key] !== run.inputs[key]) {
-      markStale(key);
-      return;
-    }
-  }
+}
+
+/**
+ * #1123/#1132 — every input the run stamped that no longer matches the stores as they stand now,
+ * in `RUN_INPUT_ORDER`. This is the precise "did anything the program depends on move?" test; the
+ * restore's recheck and the registration-only re-freeze both read it.
+ */
+export function movedRunInputs(current?: EngraveRunInputs): EngraveInputKey[] {
+  const run = useEngraveRunStore.getState();
+  if (run.inputs === null) return [];
+  const stamps = current ?? currentRunInputStamps();
+  return RUN_INPUT_ORDER.filter((key) => stamps[key] !== run.inputs![key]);
+}
+
+export function recheckRunInputs(current?: EngraveRunInputs): void {
+  const run = useEngraveRunStore.getState();
+  if (run.inputs === null || run.generated === null) return;
+  const moved = movedRunInputs(current);
+  if (moved[0] !== undefined) markStale(moved[0]);
 }
 
 /**

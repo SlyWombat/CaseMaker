@@ -53,6 +53,7 @@ import type { MountSpec, Setup } from '@/engine/cnc/setups';
 import { useMountTap } from '@/hooks/useMountTap';
 import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import { summarizeOutcome, summarizePlan } from '@/engine/cnc/registration/summary';
+import { canonicalJson } from '@/engine/cnc/engrave/package';
 import {
   applyCorrection,
   runFlipRegistration,
@@ -303,7 +304,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     void ensureLabelFontsLoaded(job.labels, job.customFonts ?? []).catch(() => {});
   }, [job.labels, job.customFonts]);
   const proposal = useMemo<RegistrationAttempt | null>(() => {
-    if (plan !== null) return null;
+    // #1123-28 — THE PROPOSAL IS COMPUTED EVEN WHEN A PLAN IS APPROVED: the card has to be able
+    // to say that the stored approved plan is not what the planner now proposes for this job.
     if (!labelFontsLoaded(job.labels, job.customFonts ?? [])) return null;
     // #1070 — NO SAVED-SETUP PREREQUISITE: a bed-held job's setup IS the job. With no
     // `job.setups[]` the proposal is planned from the stock + mount derived here; approval
@@ -396,6 +398,12 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       setupNumber - 1,
     );
   }, [job, machineRecord, surfaces, probe, seekFromMachineZ, regSettings, setupNumber, flipGoal, tools]);
+  // #1123-28 — the stored plan the operator approved, next to the planner's CURRENT proposal.
+  // A changed planner (a build, a machine record) can make them differ; the card says so and
+  // offers the new plan in place rather than silently running the old one.
+  const proposalPlan = proposal?.kind === 'plan' ? proposal : null;
+  const planDrift = plan !== null && proposalPlan !== null && canonicalJson(plan) !== canonicalJson(proposalPlan.plan);
+
   const [proposalOpen, setProposalOpen] = useState(false);
   // #1070 (C8) — the placed bracket's position press (the bed profile's seed, from the hole grid).
   const [gridBusy, setGridBusy] = useState(false);
@@ -422,18 +430,13 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     }
   };
 
-  /** #797 follow-up — approve the planner's proposal and start the run in ONE press. */
-  async function approveAndStart(attempt: Extract<RegistrationAttempt, { kind: 'plan' }>): Promise<void> {
-    // #1070 — the seat press measures, it does not register: run the one bounded seek and stop
-    // (the hook writes the datum); the registration is planned again against the reading.
-    const seatTap = seatTapArgs(attempt.plan);
-    if (seatTap !== null) {
-      await seatTapApi.tapJaw(seatTap);
-      return;
-    }
+  /**
+   * #1070 — write an approval onto the open job's first setup (materialising the derived setup
+   * when the job saved none), without starting anything. #1123-28 uses the same write for "Use
+   * the new plan": the stored plan is replaced in place, then Start runs the new one.
+   */
+  function approvePlan(attempt: Extract<RegistrationAttempt, { kind: 'plan' }>): void {
     const setups = job.setups ?? [];
-    // #1070 — the approval MATERIALISES the derived first setup when the job saved none: the
-    // registration lands on it, and nothing is written before this press.
     useEngraveJobStore.getState().setSetups(
       setups.length === 0
         ? [implicitJobSetup(job, registrationOf(attempt))]
@@ -443,6 +446,18 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               : setup,
           ),
     );
+  }
+
+  /** #797 follow-up — approve the planner's proposal and start the run in ONE press. */
+  async function approveAndStart(attempt: Extract<RegistrationAttempt, { kind: 'plan' }>): Promise<void> {
+    // #1070 — the seat press measures, it does not register: run the one bounded seek and stop
+    // (the hook writes the datum); the registration is planned again against the reading.
+    const seatTap = seatTapArgs(attempt.plan);
+    if (seatTap !== null) {
+      await seatTapApi.tapJaw(seatTap);
+      return;
+    }
+    approvePlan(attempt);
     await start(attempt.plan);
   }
 
@@ -1300,6 +1315,28 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               <p style={MUTED} data-testid="engrave-registration-plan-summary">
                 {summarizePlan(plan)}
               </p>
+              {planDrift && proposalPlan !== null && (
+                <div
+                  data-testid="engrave-registration-plan-drift"
+                  style={{ border: '1px solid #6b5a2a', borderRadius: 4, padding: 8, margin: '6px 0' }}
+                >
+                  <p style={{ ...MUTED, color: WARN, margin: 0 }} data-testid="engrave-registration-plan-drift-sentence">
+                    This approved plan is not the one the planner now proposes for this job.
+                    Approved: {summarizePlan(plan)}
+                  </p>
+                  <p style={MUTED} data-testid="engrave-registration-plan-drift-now">
+                    Now proposed: {summarizePlan(proposalPlan.plan)}
+                  </p>
+                  <button
+                    type="button"
+                    data-testid="engrave-registration-use-new-plan"
+                    style={{ marginTop: 6 }}
+                    onClick={() => approvePlan(proposalPlan)}
+                  >
+                    Use the new plan
+                  </button>
+                </div>
+              )}
             </>
           )}
 
