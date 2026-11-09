@@ -411,9 +411,18 @@ export interface MountObstacle {
 /** Makera's QuickStart: the top clamps hold the far corner. Two on the back edge, each in from a corner. */
 export function defaultClampPlacements(stock: StockSize, s: BracketSettings): ClampPlacement[] {
   const half = s.clamp.width / 2;
+  const left = r3(s.clamp.inFromCorner + half);
+  const right = r3(stock.x - s.clamp.inFromCorner - half);
+  // #1123 item 13 — A NARROW BLANK TAKES ONE CLAMP. Two clamps are placed in from the two back
+  // corners; when the blank is not wide enough for both, the right one lands at or behind the left,
+  // and both labels read the same corner ("1 mm in from the left-hand corner" twice). Below the
+  // fitting width — the two `at` values would meet at 2·inFromCorner + width — one clamp holds the
+  // middle of the back edge instead. This is the Holding step's default drawing on whatever stock
+  // the job store persisted; the job's own clamp set is untouched.
+  if (right <= left) return [{ edge: 'back', at: r3(stock.x / 2) }];
   return [
-    { edge: 'back', at: r3(s.clamp.inFromCorner + half) },
-    { edge: 'back', at: r3(stock.x - s.clamp.inFromCorner - half) },
+    { edge: 'back', at: left },
+    { edge: 'back', at: right },
   ];
 }
 
