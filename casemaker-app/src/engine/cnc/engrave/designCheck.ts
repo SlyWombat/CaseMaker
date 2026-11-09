@@ -1503,6 +1503,35 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     }
   }
 
+  // #1092 — a data dump for the analyst (a guarded diagnostic; no behaviour change). Enabled by
+  // CM_GOAL_DEBUG=1 through globalThis so this module needs no Node typings.
+  const debugFlag = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.CM_GOAL_DEBUG;
+  if (debugFlag === '1') {
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        const k = j * nx + i;
+        if (sampled[k] !== 1 || dOf[k]! >= -ADJUDICATED_FLOOR_MM || excluded[k] === 1) continue;
+        const x = goal.x0 + i * goal.pitch;
+        const y = goal.y0 + j * goal.pitch;
+        const depth = -dOf[k]!;
+        const cl = opts.clAt?.(x, y) ?? null;
+        let clTxt = ',-,-,-,-';
+        if (cl !== null) {
+          const ci = Math.round((cl.x - goal.x0) / goal.pitch);
+          const cj = Math.round((cl.y - goal.y0) / goal.pitch);
+          const onGrid = ci >= 0 && cj >= 0 && ci < nx && cj < ny;
+          const cov = onGrid ? goal.covered[cj * nx + ci] : -1;
+          clTxt = `,${cl.x.toFixed(3)},${cl.y.toFixed(3)},${cov},${outlineDistance(cl.x, cl.y).toFixed(3)}`;
+        }
+        const who = opts.whoAt?.(x, y) ?? -1;
+        const proof = straddleProof(k, i, j, depth);
+        const isShadow = shadow !== null && shadow[k] === 1 ? 1 : 0;
+        console.log(
+          `GOALCELL,${x.toFixed(3)},${y.toFixed(3)},${depth.toFixed(4)},${wall[k]},${border[k]},${silhouette[k]},${isShadow},${who},${proof.step.toFixed(4)}${clTxt}`,
+        );
+      }
+    }
+  }
   // THE ADJUDICATED SET — the gate's reading, and what the pass and the sentence judge, in every
   // goal job: the 0.1 mm floor after the unadjudicable cells are excluded (and the edge break,
   // when the job states one).
