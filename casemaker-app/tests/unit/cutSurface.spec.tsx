@@ -1688,12 +1688,24 @@ describe('#1123 the Fit-and-clamp card’s wording', () => {
     const view = draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
     // Side 1, nothing cut yet: no expander.
     expect(screen.queryByTestId('engrave-cut-turn-stock')).toBeNull();
-    // A finished program is a cut: the expander is the operator's next action.
+    // A finished program that is NOT this package's (the machine's finished list is machine-wide)
+    // is not a cut of this job: the expander stays closed.
     act(() => {
       useEngraveJobStore.setState({
         job: {
           ...job,
-          runLog: [{ programHash: P1.programHash, setupIndex: 1, setupId: 'setup-1', toolKey: 'flat-1.0', at: AT, outcome: 'finished' }],
+          runLog: [{ programHash: 'not-this-package', setupIndex: 1, setupId: 'setup-1', toolKey: 'flat-1.0', at: AT, outcome: 'finished' }],
+        },
+      });
+    });
+    view.show({ job, report: reportOf(), pkg, generated: generated([P1]) });
+    expect(screen.queryByTestId('engrave-cut-turn-stock')).toBeNull();
+    // THIS package's program finished: the expander is the operator's next action.
+    act(() => {
+      useEngraveJobStore.setState({
+        job: {
+          ...job,
+          runLog: [{ programHash: pkg.programs[0]!.hash, setupIndex: 1, setupId: 'setup-1', toolKey: 'flat-1.0', at: AT, outcome: 'finished' }],
         },
       });
     });

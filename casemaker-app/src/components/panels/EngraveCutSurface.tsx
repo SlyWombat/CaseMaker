@@ -1321,8 +1321,13 @@ export function EngraveCutSurface({
         )}
         {/* #783 — I TURNED THE STOCK: the holds, at the machine, in the step that runs before
             registration. A turn restates the box; the program goes stale with its own reason.
-            #1123 item 16 — only after something has been cut (`finishedHashes`). */}
-        <TurnStockControl job={job} hasCut={finishedHashes.length > 0} />
+            #1123 item 16 — only after something has been cut, and only THIS package's programs:
+            `finishedHashes` also carries the MACHINE's finished list (every job ever run there),
+            so a bare non-empty check would open the expander on a fresh job that never cut. */}
+        <TurnStockControl
+          job={job}
+          hasCut={pkg !== null && pkg.programs.some((program) => finishedHashes.includes(program.hash))}
+        />
         {/* #795 — THE STATEMENT IS THE STEP'S FIRST LINE. The clearance acknowledgement used to sit
             at the foot of the step, under the gate's fold; it is what the operator must say about
             THIS step, so it reads before the details rather than after them. */}
