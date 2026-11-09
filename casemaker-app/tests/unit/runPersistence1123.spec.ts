@@ -1,18 +1,19 @@
 // @vitest-environment jsdom
 // #1123 item 11 — a 12-minute Generate survives a reload.
 //
-// The stored run is keyed by (job sha, build, shop signature). Red-first behaviours:
-//   - the same job, build and shop restore the programs/receipt/checks/simulation verdicts;
-//   - a different shop, or a different build, does NOT restore — and says so in one plain line,
-//     so the work never vanishes silently (the bench's bracket placement changed the location
-//     etag and is exactly this case);
+// The stored run is keyed by (job sha, build). Red-first behaviours:
+//   - the same job and build restore the programs/receipt/checks/simulation verdicts;
+//   - a shop ETag moving WITHOUT an input change (a finished program writes the location record)
+//     does NOT refuse the run: it restores and stays current;
+//   - a changed feeds table restores the run and marks it stale with the ordinary 'feeds' reason;
+//   - only another build's record does not restore, and says so in one plain line;
 //   - an in-flight run is warned about before a reload drops it.
 import { beforeEach, describe, expect, it } from 'vitest';
-import { useEngraveRunStore } from '@/store/engraveRunStore';
+import { runShopSignature, useEngraveRunStore } from '@/store/engraveRunStore';
+import { useLocationStore } from '@/store/locationStore';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import {
   BUILD_CHANGED_NOTE,
-  SHOP_CHANGED_NOTE,
   persistRunNow,
   restoreOpenRun,
   runBuildId,
@@ -68,7 +69,7 @@ function record(over: Partial<StoredRunRecord> = {}): StoredRunRecord {
   const shopSignature = over.shopSignature ?? 'shop-a';
   const jobSha = over.jobSha ?? 'job-sha-1';
   return {
-    id: `${jobSha}:${build}:${shopSignature}`,
+    id: `${jobSha}:${build}`,
     jobSha,
     build,
     shopSignature,
@@ -96,7 +97,7 @@ const exact = (io: RunRecordIO) => ({
   settle: false,
   jobSha: 'job-sha-1',
   build: runBuildId(),
-  shopSignature: 'shop-a',
+  currentInputs: INPUTS,
 });
 
 beforeEach(() => {
@@ -120,13 +121,28 @@ describe('#1123 item 11 — a generated run is restored while its key matches', 
     expect(run.simProgram).toBeNull();
   });
 
-  it('a different shop does not restore, and says why in one plain line', async () => {
-    const io = memoryIO([record({ shopSignature: 'shop-old' })]);
-    expect(await restoreOpenRun({ ...exact(io), shopSignature: 'shop-new' })).toBe('shop-changed');
+  it('a location-record write that moves only the ETag (a finished program) does not stop the restore', async () => {
+    // The bench case: cutting p01 appends to the location's finishedPrograms, which moves the
+    // location ETag. That is not an input the run stamped, so the run must come back and stay
+    // current — the shop signature is a diagnostic, never a key.
+    useLocationStore.setState({ status: 'present', etag: 'etag-before-the-cut', location: null, reason: null });
+    const io = memoryIO([record({ shopSignature: runShopSignature() })]);
+    useLocationStore.setState({ etag: 'etag-after-the-finished-program' });
+    expect(await restoreOpenRun(exact(io))).toBe('restored');
     const run = useEngraveRunStore.getState();
-    expect(run.generated).toBeNull();
-    expect(run.restoreNote).toBe(SHOP_CHANGED_NOTE);
-    expect(SHOP_CHANGED_NOTE).toBe('The generated run was made for a different shop setup; generate again');
+    expect(run.generated).toEqual(GENERATED);
+    expect(run.staleSince).toBeNull();
+    expect(run.staleReason).toBeNull();
+    expect(run.restoreNote).toBeNull();
+  });
+
+  it('a changed FEEDS table restores the run and marks it stale with the ordinary named reason', async () => {
+    const io = memoryIO([record()]);
+    expect(await restoreOpenRun({ ...exact(io), currentInputs: { ...INPUTS, feeds: 'f-changed' } })).toBe('restored');
+    const run = useEngraveRunStore.getState();
+    expect(run.generated).toEqual(GENERATED);
+    expect(run.staleSince).not.toBeNull();
+    expect(run.staleReason).toBe('feeds');
   });
 
   it('a different build does not restore, and says why', async () => {
@@ -180,7 +196,7 @@ describe('#1123 item 11 — saving a settled run', () => {
       build: runBuildId(),
       shopSignature: 'shop-a',
     });
-    expect(io.written[0]!.id).toBe(`job-sha-1:${runBuildId()}:shop-a`);
+    expect(io.written[0]!.id).toBe(`job-sha-1:${runBuildId()}`);
   });
 
   it('does not write before there is a settled run', async () => {

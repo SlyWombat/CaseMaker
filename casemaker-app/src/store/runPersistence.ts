@@ -6,21 +6,23 @@
  * is not a document the operator saved, so nothing kept it. This module puts it in IndexedDB and
  * restores it while its key still matches:
  *
- *     job sha  ·  build  ·  shop signature
+ *     job sha  ·  build
  *
  *   - the JOB SHA is the run's own `inputs.job` — the jobFingerprint the Generate stamped, so an
  *     edit after Generate is a different job and its run is not offered back;
  *   - the BUILD is `__APP_VERSION__` + `__BUILD_COMMIT__`; a new build may read the stored result
- *     differently, so it is not restored across builds;
- *   - the SHOP SIGNATURE is the house reads' own identity at the press
- *     (`engraveRunStore.runShopSignature`): location/registry statuses and ETags. A bracket placed
- *     between sessions changes the location ETag — exactly the bench case — and that run is no
- *     longer the shop's current run.
+ *     differently, so it is not restored across builds.
  *
- * A MISMATCH IS NEVER SILENT. When a stored run exists for this job and build but the shop cannot
- * match it (or only another build's record exists), the run store carries one plain sentence —
- * "The generated run was made for a different shop setup; generate again" — instead of the work
- * simply vanishing. The note clears on the next Generate.
+ * THE SHOP IS NOT A KEY (review, 2026-11-09). An ETag moves for reasons that do not make the run
+ * wrong — finishing a program appends to the location record, an inventory note or a probe value
+ * writes, D's location poll sees an unrelated edit. The stored run keeps `shopSignature` as a
+ * DIAGNOSTIC only; the precise test is `recheckRunInputs()`, which compares every input the run
+ * actually stamped (margins, machine frame, shop defaults, feeds, catalogue, cutters, conditions,
+ * surface) once after restoring and marks the first that moved with the ordinary named stale line.
+ *
+ * A BUILD MISMATCH IS NEVER SILENT. When only another build's record exists for this job, the run
+ * store carries one plain sentence — "The generated run was made by a different build of the app;
+ * generate again" — instead of the work simply vanishing. The note clears on the next Generate.
  *
  * Storage is IndexedDB (not localStorage): a 19-program tray run is megabytes of NC text, and the
  * job autosave's ~5 MB quota is already shared with the job. The IO is injectable so a spec runs
@@ -28,14 +30,13 @@
  */
 
 import { useEngraveJobStore } from './engraveJobStore';
-import { useEngraveRunStore, recheckRunInputs, runShopSignature, type EngraveRunState } from './engraveRunStore';
+import { useEngraveRunStore, recheckRunInputs, type EngraveRunState } from './engraveRunStore';
 import { useToolRegistryStore } from './toolRegistryStore';
 import { useLocationStore } from './locationStore';
 import { jobFingerprint } from '@/engine/cnc/engrave/package';
+import type { EngraveRunInputs } from '@/engine/cnc/engrave/runInputs';
 import type { EngraveJob } from '@/types/engraveJob';
 
-/** The plain line when the shop moved under a stored run. */
-export const SHOP_CHANGED_NOTE = 'The generated run was made for a different shop setup; generate again';
 /** The plain line when the stored run belongs to another build. */
 export const BUILD_CHANGED_NOTE = 'The generated run was made by a different build of the app; generate again';
 
@@ -79,7 +80,7 @@ export interface RunRecordIO {
   listByJob: (jobSha: string) => Promise<StoredRunRecord[]>;
 }
 
-export type RunRestoreOutcome = 'restored' | 'none' | 'shop-changed' | 'build-changed' | 'busy';
+export type RunRestoreOutcome = 'restored' | 'none' | 'build-changed' | 'busy';
 
 export interface RestoreRunOptions {
   /** The open job. Defaults to the job store's. */
@@ -87,8 +88,9 @@ export interface RestoreRunOptions {
   /** Its fingerprint, when a caller already has it (the spec passes one). */
   jobSha?: string;
   build?: string;
-  shopSignature?: string;
   io?: RunRecordIO;
+  /** A spec seam: the stamps the current stores would produce (see `recheckRunInputs`). */
+  currentInputs?: EngraveRunInputs;
   /** False skips waiting for the house reads (the spec). */
   settle?: boolean;
   waitMs?: number;
@@ -187,11 +189,6 @@ export function runBuildId(): string {
   return `${version}+${commit}`;
 }
 
-/** The shop signature as the stores stand now (the run store records it at Generate). */
-export function currentShopSignature(): string {
-  return runShopSignature();
-}
-
 /** The durable half of a run state, as plain data ready for IndexedDB. */
 export function snapshotRun(state: EngraveRunState): PersistedRunState {
   return {
@@ -230,7 +227,7 @@ export async function persistRunNow(
   if (state.phase !== 'ready' && state.phase !== 'blocked') return null;
   const build = runBuildId();
   const record: StoredRunRecord = {
-    id: `${state.inputs.job}:${build}:${state.shopSignature}`,
+    id: `${state.inputs.job}:${build}`,
     jobSha: state.inputs.job,
     build,
     shopSignature: state.shopSignature,
@@ -319,12 +316,10 @@ async function waitForShopSettled(ms: number): Promise<boolean> {
 export async function restoreOpenRun(options: RestoreRunOptions = {}): Promise<RunRestoreOutcome> {
   const run = useEngraveRunStore.getState();
   if (run.phase !== 'idle' || run.generated !== null) return 'busy';
-  if (options.settle !== false) {
-    const settled = await waitForShopSettled(options.waitMs ?? 3000);
-    // A house that has not answered yet cannot be compared: skip silently rather than telling the
-    // operator their run was made for another shop when this page merely does not know yet.
-    if (!settled) return 'none';
-  }
+  // Wait briefly for the reads the RECHECK compares. An unanswered house no longer blocks the
+  // restore (the key is job+build): restore anyway, skip the one-shot comparison, and let the live
+  // watchers judge each input as its store settles.
+  const settled = options.settle === false ? true : await waitForShopSettled(options.waitMs ?? 3000);
   const job = options.job ?? useEngraveJobStore.getState().job;
   const jobSha = options.jobSha ?? jobFingerprint(job);
   const build = options.build ?? runBuildId();
@@ -336,22 +331,24 @@ export async function restoreOpenRun(options: RestoreRunOptions = {}): Promise<R
     return 'none';
   }
   if (records.length === 0) return 'none';
-  const shop = options.shopSignature ?? currentShopSignature();
-  const exact = records.find((record) => record.build === build && record.shopSignature === shop);
-  if (exact !== undefined) {
-    useEngraveRunStore.setState({
-      ...exact.state,
-      progress: null,
-      simProgram: null,
-      error: null,
-      simStopped: false,
-      restoreNote: null,
-    });
-    if (options.recheck !== false) recheckRunInputs();
-    return 'restored';
+  const sameBuild = records
+    .filter((record) => record.build === build)
+    .sort((a, b) => (a.savedAt < b.savedAt ? 1 : -1));
+  if (sameBuild.length === 0) {
+    useEngraveRunStore.setState({ restoreNote: BUILD_CHANGED_NOTE });
+    return 'build-changed';
   }
-  const sameBuild = records.find((record) => record.build === build);
-  const note = sameBuild !== undefined ? SHOP_CHANGED_NOTE : BUILD_CHANGED_NOTE;
-  useEngraveRunStore.setState({ restoreNote: note });
-  return sameBuild !== undefined ? 'shop-changed' : 'build-changed';
+  // The latest run this build stored for the job. The shop is not consulted: the recheck below is
+  // the precise test, and an ETag moved by a record write must not throw the run away.
+  const record = sameBuild[0]!;
+  useEngraveRunStore.setState({
+    ...record.state,
+    progress: null,
+    simProgram: null,
+    error: null,
+    simStopped: false,
+    restoreNote: null,
+  });
+  if (options.recheck !== false && settled) recheckRunInputs(options.currentInputs);
+  return 'restored';
 }

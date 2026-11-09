@@ -425,14 +425,16 @@ export interface EngraveRunState {
   inputs: EngraveRunInputs | null;
   /**
    * #1123 — THE SHOP THIS RUN WAS GENERATED IN, as a signature of the house reads that were live
-   * at the press (the location's and the tool registry's statuses and ETags). A run stored for a
-   * reload restores only while this still matches; a changed shop is stated, never silently
-   * re-used. Null before a Generate.
+   * at the press (the location's and the tool registry's statuses and ETags). A DIAGNOSTIC on the
+   * stored run, never a restore key: ETags move for record writes that do not change the program
+   * (a finished program, an inventory note). The precise test is `recheckRunInputs`, which
+   * compares the inputs the run really stamped. Null before a Generate.
    */
   shopSignature: string | null;
   /**
-   * #1123 — THE PLAIN LINE after a reload found a stored run it could not restore (a different
-   * shop, or a different build). Null when there is nothing to say. Cleared by the next Generate.
+   * #1123 — THE PLAIN LINE after a reload found a stored run it could not restore (only another
+   * build's record exists). Null when there is nothing to say. Cleared by the next Generate. A
+   * moved shop is not a refusal: the restored run is marked stale with its named input instead.
    */
   restoreNote: string | null;
   /** #581 — the inputs that differ from the previous Generate's; empty on the first run. */
@@ -1486,13 +1488,16 @@ export function runShopSignature(): string {
  * even when its margins, machine frame, shop, feeds, catalogue, cutters or fitted surface moved
  * while the app was closed. Compare every input now, and mark the first that moved stale (the
  * same marks, with the same first-reason rule).
+ *
+ * `current` is a spec seam: the caller may state the stamps instead of making the stores produce
+ * them (the persistence spec compares a fabricated run against a changed feeds stamp).
  */
-export function recheckRunInputs(): void {
+export function recheckRunInputs(current?: EngraveRunInputs): void {
   const run = useEngraveRunStore.getState();
   if (run.inputs === null || run.generated === null) return;
   const job = useEngraveJobStore.getState().job;
   const settings = useSettingsStore.getState();
-  const current = runInputs({
+  const stamps = current ?? runInputs({
     job,
     margins: effectiveMargins(job, settings.margins),
     calibration: settings.machineCalibration ?? null,
@@ -1504,7 +1509,7 @@ export function recheckRunInputs(): void {
     surface: useEngraveRegistrationStore.getState().records[job.id]?.surface ?? null,
   });
   for (const key of RUN_INPUT_ORDER) {
-    if (current[key] !== run.inputs[key]) {
+    if (stamps[key] !== run.inputs[key]) {
       markStale(key);
       return;
     }
