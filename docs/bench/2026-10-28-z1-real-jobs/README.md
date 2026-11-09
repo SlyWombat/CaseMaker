@@ -64,10 +64,13 @@ excuse is a PROOF bounded by the goal's own relief; no class of cells is excused
   design is multi-valued across that edge, so the read is excused only when a stock thickness is
   STATED (the job's, or the goal's — no `topZ − minZ` guess; without one the proof is UNAVAILABLE
   and the cells are counted and named, R-a), the depth is within the BLANK's floor (the stock top
-  down to −(thickness + breakthrough), plus 0.005 mm), and the deepest stamp's CL is on the
-  UNCOVERED side, at least r − one cell from the outline. A failed cell FALLS THROUGH to the
-  general straddling proof (never to the wall/border or shadow classes); a cut below the blank
-  that no proof excuses is COUNTED.
+  down to −(thickness + breakthrough), plus 0.005 mm), and either the deepest stamp's CL is on the
+  UNCOVERED side, at least r − one cell from the outline, OR the INWARD WITNESS holds: every fully
+  covered part-side axial neighbour is uncut (its swept top at or above its own design less the
+  slack) and at least one such candidate exists — one cut candidate fails the witness. A failed
+  cell FALLS THROUGH to the general straddling proof (never to the wall/border or shadow classes);
+  a cut below the blank that no proof excuses is COUNTED. Witness-only excusals are counted in
+  `silhouetteByWitnessCells`; the CL-excused ones in `silhouetteExcusedCells`.
 - **Wall / border** — excused only on the straddling proof, and only when the depth is within the
   goal's local relief (max − min of the covered goal top within the largest cutting tool's radius;
   with no tool set, one pitch — the cell's own axial neighbours; the stock top is a high side for a
@@ -101,24 +104,6 @@ branch that carries the rule.
 CM_LOCATION=<the location the card ran with> \
   ~/casemaker-manager/venv/bin/python tools/goal-check-parity.py runs/<sha>/j29 runs/<sha>/ref-tray70
 ```
-
-**Declared diagnostic — j29's shadow-over-relief count (2026-11-09).** The parity passes the hard
-test on every fixture: j29 (adjudicated 25.7924 % both, **0 cells of 156,996**; silhouette
-unavailable 360 → 0 on both sides after #1092's ruling-(a) wiring fix, the judged number unmoved)
-and ref-tray70-tape (0 both, **0 cells of 1,441,121**). One diagnostic counter does not match on
-j29: `shadowOverReliefCells` is 3,166 in the checker against 4,264 in the app receipt (wall
-7,561/7,561 and border 0/0 agree exactly; the tray is 0/0 on both sides). The input to that counter
-is the deepest stamp's CL — the app takes it from its simulator timeline, the checker from the
-raw-NC walk — and near a wall two overlapping passes can swap which sample is deepest, flipping the
-v5 disc-rim test on cells that stay adjudicated either way. It cannot move the adjudicated figure:
-forcing every shadow CL "far" moves the count to 19,407, so the app's value lies inside the
-reachable range, and the adjudicated sets agree cell for cell. It was then diffed against a
-`CM_GOAL_DEBUG=1` GOALCELL dump (2026-11-09; 40,493 adjudicated cells, one row each, 30,116 of them
-shadow-class): on the 2,832 cells only the app counts, the app's CL sits 2.9–4.2 mm from the
-outline where the checker's, at the same cell and the same z, sits 0.3–2.8 mm — a mean CL
-displacement of 2.4 mm, far beyond the 0.05 mm sampling pitch. So the two stamps pick different
-winners among equal-depth samples (the tie rule is the same; the sample sets are not): declared,
-and not reconcilable without making the page walk the simulator's own timeline.
 
 `tools/test_goal_check.py` pins the rule on synthetic fields with hand-known answers: the strict
 stamp edge, a clean pocket, a boundary-tangent contour, the relief ceiling on wall and border cells,
