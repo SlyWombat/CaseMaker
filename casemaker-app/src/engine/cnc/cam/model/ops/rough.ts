@@ -23,7 +23,7 @@
 
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
-import { pocketLoops, type OffsetFn, type Polygons } from '@/engine/cnc/cam/pocket';
+import { pocketLoops, safeRasterRuns, splitUnsafeRuns, type OffsetFn, type Polygons } from '@/engine/cnc/cam/pocket';
 import { tourNearest } from '@/engine/cnc/cam/tour';
 import { clearedGroundZ, DEFAULT_SHORT_HOP_DIAMETERS, link, pathClClear, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
 import { followLinearCutSurface, ridesCutSurface } from '../rideTest';
@@ -303,6 +303,16 @@ function traceRing(ring: readonly [number, number][], z: number, feedMmPerMin: n
   return moves;
 }
 
+/** #1135 — trace an OPEN safe run: no closing return to its first point. */
+function traceRun(points: readonly [number, number][], z: number, feedMmPerMin: number): ToolpathIR['operations'][number]['moves'] {
+  const moves: ToolpathIR['operations'][number]['moves'] = [];
+  for (let i = 1; i < points.length; i++) {
+    const p = points[i]!;
+    moves.push({ kind: 'feed', x: p[0], y: p[1], z, f: feedMmPerMin });
+  }
+  return moves;
+}
+
 export function rough(opts: RoughOpOptions): OpOutcome {
   const toolRadius = (cuttingDiameter(opts.cutter) ?? 0) / 2;
   if (!(toolRadius > 0)) {
@@ -393,6 +403,9 @@ export function rough(opts: RoughOpOptions): OpOutcome {
   const comingFrom = (): readonly [number, number] => (prevExit === null ? (opts.startFrom ?? [0, 0]) : [prevExit[0], prevExit[1]]);
 
   let cutLevels = 0;
+  // #1135 — the guard's sample spacing along a ring: fine enough to catch a wall between
+  // vertices, coarse enough that a long raster does not pay a drop-cutter query per 0.05 mm.
+  const guardSpacing = Math.max(opts.clSurface.minSpacingMm, Math.min(0.25, stepOver / 4));
   for (const z of depthPasses(opts.region.zTop, opts.region.zBottom, opts.stepDownMm)) {
     const polygons = maskLoops(target, nx, ny, min[0], min[1], pitch, z, margin, cutPoint);
     if (polygons.length === 0) continue;
@@ -403,23 +416,37 @@ export function rough(opts: RoughOpOptions): OpOutcome {
       const loops = orderedRings(step, comingFrom());
       for (const loop of loops) {
         const ring = rotatedToEntry(loop, comingFrom());
-        const start = ring[0]!;
-        if (prevExit === null) {
-          moves.push({ kind: 'rapid', x: start[0], y: start[1], z: opts.hopZMm });
-          moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
-        } else {
-          const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
-          const landing: LinkPoint = { x: start[0], y: start[1], z: prevExit[2] };
-          // The horizontal part links at the level just FINISHED, where the field is honest;
-          // the descent is always a plain feed at plungeFeed, never a diagonal at cutting rate.
-          moves.push(...link(from, landing, { ...linkOptionsFor(prevLevelZ ?? prevExit[2]), landingClearedZMm: landingClearedZ }));
-          if (z !== prevLevelZ) moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
+        // #1135 — THE DISC GUARD: a ring point whose cutter disc reaches material above this
+        // level would gouge it. `safeRasterRuns` (the shared rule, pocket.ts) splits the ring at
+        // those points; a ring with no such point comes back closed and byte-identical.
+        const unsafeAt = (x: number, y: number): boolean => {
+          // #1135 — UNCLIPPED: the guard must read the surface beside the region too. The
+          // footprint-clipped query answers null off the region and the material a disc can reach
+          // there is exactly what this guard exists for.
+          const cl = (opts.clSurface.dropCutterUnclipped ?? opts.clSurface.dropCutter)(x, y);
+          return cl !== null && cl > z + 1e-6;
+        };
+        for (const run of safeRasterRuns(ring, unsafeAt, guardSpacing)) {
+          const points = run.points;
+          const start = points[0]!;
+          if (prevExit === null) {
+            moves.push({ kind: 'rapid', x: start[0], y: start[1], z: opts.hopZMm });
+            moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
+          } else {
+            const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
+            const landing: LinkPoint = { x: start[0], y: start[1], z: prevExit[2] };
+            // The horizontal part links at the level just FINISHED, where the field is honest;
+            // the descent is always a plain feed at plungeFeed, never a diagonal at cutting rate.
+            moves.push(...link(from, landing, { ...linkOptionsFor(prevLevelZ ?? prevExit[2]), landingClearedZMm: landingClearedZ }));
+            if (z !== prevLevelZ) moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
+          }
+          moves.push(...(run.closed ? traceRing(points, z, opts.feeds.feedMmPerMin) : traceRun(points, z, opts.feeds.feedMmPerMin)));
+          const entry: [number, number, number] = [start[0], start[1], z];
+          const runExit: [number, number, number] = [points[points.length - 1]![0], points[points.length - 1]![1], z];
+          passes.push({ z, boundary: [points], cleared: { z, boundary: polygons }, entry, exit: runExit });
+          prevExit = run.closed ? entry : runExit;
+          prevLevelZ = z;
         }
-        moves.push(...traceRing(ring, z, opts.feeds.feedMmPerMin));
-        const entry: [number, number, number] = [start[0], start[1], z];
-        passes.push({ z, boundary: [ring], cleared: { z, boundary: polygons }, entry, exit: entry });
-        prevExit = entry;
-        prevLevelZ = z;
       }
     }
     cleared.push({ z, boundary: polygons });
@@ -626,7 +653,16 @@ export function rough(opts: RoughOpOptions): OpOutcome {
   const tourFrom: readonly [number, number] = prevExit === null ? (opts.startFrom ?? [min[0], min[1]]) : [prevExit[0], prevExit[1]];
   for (const step of tourSkimRuns(skimRunList, tourFrom)) {
     const pts = skimRunList[step.index]!;
-    skimEmit(step.reversed ? [...pts].reverse() : pts);
+    const ordered = step.reversed ? [...pts].reverse() : pts;
+    // #1135 — THE DISC GUARD for the band skim: its points carry per-cell Z, and the grid's
+    // five-sample CL can miss a wall under the cutter's disc between samples. A point whose
+    // exact CL at that position is above its Z is not emitted; the run breaks there and the
+    // material above it is left for the ball, exactly as a level pass leaves a guarded cell.
+    const safe = splitUnsafeRuns(ordered, (x, y, z) => {
+      const cl = (opts.clSurface.dropCutterUnclipped ?? opts.clSurface.dropCutter)(x, y);
+      return cl !== null && cl > z + 1e-6;
+    });
+    for (const run of safe) skimEmit(run);
   }
 
   const lastMove = moves[moves.length - 1];
@@ -834,6 +870,8 @@ export function skin(opts: SkinOpOptions): OpOutcome {
   let prevExit: [number, number, number] | null = null;
   const comingFrom = (): readonly [number, number] => (prevExit === null ? (opts.startFrom ?? [0, 0]) : [prevExit[0], prevExit[1]]);
   let cutLevels = 0;
+  // #1135 — the guard's sample spacing (see the rough's own).
+  const guardSpacing = Math.max(opts.clSurface.minSpacingMm, Math.min(0.25, stepOver / 4));
   for (const z of depthPasses(0, -opts.skinMm, opts.stepDownMm)) {
     const masked = new Float64Array(nx * ny);
     for (let k = 0; k < target.length; k++) {
@@ -853,25 +891,37 @@ export function skin(opts: SkinOpOptions): OpOutcome {
       const loops = orderedRings(step, comingFrom());
       for (const loop of loops) {
         const ring = rotatedToEntry(loop, comingFrom());
-        const start = ring[0]!;
-        if (prevExit === null) {
-          moves.push({ kind: 'rapid', x: start[0], y: start[1], z: opts.hopZMm });
-          moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
-        } else {
-          const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
-          const landing: LinkPoint = { x: start[0], y: start[1], z: prevExit[2] };
-          // #970 — B's link audit: `standing` is a GRID, and a rise between its samples is
-          // invisible to `linkIsClear`. Prove the centre line against the CL surface itself; a
-          // negative short hop refuses the stay-down without touching the shared rule, so
-          // link() still emits its own retract (vertical legs, hop floor) when the proof fails.
-          const clClear = pathClClear(from, landing, (x, y) => opts.clSurface.dropCutter(x, y), Math.max(pitch / 4, 0.05), opts.clSurface.toleranceMm);
-          moves.push(...link(from, landing, { ...(clClear ? linkOptionsFor : { ...linkOptionsFor, shortHopMm: -1 }) }));
-          if (z !== prevExit[2]) moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
+        // #1135 — THE DISC GUARD, the same shared rule the rough uses: a ring point whose disc
+        // reaches material above this level would gouge it; a safe ring is byte-identical.
+        const unsafeAt = (x: number, y: number): boolean => {
+          // #1135 — UNCLIPPED: the guard must read the surface beside the region too. The
+          // footprint-clipped query answers null off the region and the material a disc can reach
+          // there is exactly what this guard exists for.
+          const cl = (opts.clSurface.dropCutterUnclipped ?? opts.clSurface.dropCutter)(x, y);
+          return cl !== null && cl > z + 1e-6;
+        };
+        for (const run of safeRasterRuns(ring, unsafeAt, guardSpacing)) {
+          const points = run.points;
+          const start = points[0]!;
+          if (prevExit === null) {
+            moves.push({ kind: 'rapid', x: start[0], y: start[1], z: opts.hopZMm });
+            moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
+          } else {
+            const from: LinkPoint = { x: prevExit[0], y: prevExit[1], z: prevExit[2] };
+            const landing: LinkPoint = { x: start[0], y: start[1], z: prevExit[2] };
+            // #970 — B's link audit: `standing` is a GRID, and a rise between its samples is
+            // invisible to `linkIsClear`. Prove the centre line against the CL surface itself; a
+            // negative short hop refuses the stay-down without touching the shared rule, so
+            // link() still emits its own retract (vertical legs, hop floor) when the proof fails.
+            const clClear = pathClClear(from, landing, (x, y) => opts.clSurface.dropCutter(x, y), Math.max(pitch / 4, 0.05), opts.clSurface.toleranceMm);
+            moves.push(...link(from, landing, { ...(clClear ? linkOptionsFor : { ...linkOptionsFor, shortHopMm: -1 }) }));
+            if (z !== prevExit[2]) moves.push({ kind: 'feed', x: start[0], y: start[1], z, f: opts.feeds.plungeFeedMmPerMin });
+          }
+          moves.push(...(run.closed ? traceRing(points, z, opts.feeds.feedMmPerMin) : traceRun(points, z, opts.feeds.feedMmPerMin)));
+          const entry: [number, number, number] = [start[0], start[1], z];
+          passes.push({ z, boundary: [points], cleared: { z, boundary: polygons }, entry, exit: entry });
+          prevExit = entry;
         }
-        moves.push(...traceRing(ring, z, opts.feeds.feedMmPerMin));
-        const entry: [number, number, number] = [start[0], start[1], z];
-        passes.push({ z, boundary: [ring], cleared: { z, boundary: polygons }, entry, exit: entry });
-        prevExit = entry;
       }
     }
     cleared.push({ z, boundary: polygons });

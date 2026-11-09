@@ -201,6 +201,89 @@ function maxExtent(region: Polygons): number {
  * throwing. An offset that never empties is a bug, not a long job, and a pocket that runs
  * forever is worse than one that refuses.
  */
+/** #1135 — one safe stretch of a raster ring: the cutter-centre points to trace. */
+export interface RasterRun {
+  points: [number, number][];
+  /** True when the whole ring was safe and the run is the ring itself (byte-identical path). */
+  closed: boolean;
+}
+
+/**
+ * #1135 — THE DISC GUARD, ONE PLACE FOR EVERY LEVEL RASTER. A level pass cuts at a constant Z; a
+ * ring point is a cutter-centre position whose disc (radius `toolRadius`) sweeps the material under
+ * it. If any material under that disc stands ABOVE the pass level (`unsafeAt` says so), cutting at
+ * that position is a gouge — the organizer's 0.194 mm wall-foot cell, where a simplified mask
+ * boundary let the ⌀3.175 disc edge cross into a cell whose CL was above the pass.
+ *
+ * The ring is sampled every `spacingMm` (vertices included), and the stretches whose samples are
+ * all safe come back as OPEN runs; a ring with no unsafe sample comes back as one CLOSED run —
+ * the untouched path, byte for byte. The caller traces open runs without the closing return.
+ */
+/**
+ * #1135 — split a per-point run (each point carrying its own Z) at positions where the cutter's
+ * disc would reach material above that point's Z. The rough's band skim cuts at a per-cell CL, so
+ * its runs cannot use the single-level `safeRasterRuns`; this is the same rule over a Z-polylines.
+ */
+export function splitUnsafeRuns(
+  points: readonly [number, number, number][],
+  unsafeAt: (x: number, y: number, z: number) => boolean,
+): [number, number, number][][] {
+  const runs: [number, number, number][][] = [];
+  let current: [number, number, number][] = [];
+  for (const p of points) {
+    if (unsafeAt(p[0], p[1], p[2])) {
+      if (current.length >= 2) runs.push(current);
+      current = [];
+    } else {
+      current.push(p);
+    }
+  }
+  if (current.length >= 2) runs.push(current);
+  return runs;
+}
+
+export function safeRasterRuns(
+  ring: readonly [number, number][],
+  unsafeAt: (x: number, y: number) => boolean,
+  spacingMm: number,
+): RasterRun[] {
+  if (ring.length < 2) return [];
+  const step = Math.max(spacingMm, 1e-6);
+  const samples: [number, number][] = [];
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i]!;
+    const b = ring[(i + 1) % ring.length]!;
+    samples.push([a[0], a[1]]);
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (!(len > step)) continue;
+    const n = Math.floor(len / step);
+    for (let k = 1; k <= n; k++) {
+      const t = (k * step) / len;
+      if (t >= 1) break;
+      samples.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+    }
+  }
+  const n = samples.length;
+  if (n < 2) return [];
+  const unsafe = samples.map(([x, y]) => unsafeAt(x, y));
+  if (!unsafe.some(Boolean)) return [{ points: ring.map((p) => [p[0], p[1]] as [number, number]), closed: true }];
+  let firstUnsafe = 0;
+  while (firstUnsafe < n && !unsafe[firstUnsafe]) firstUnsafe++;
+  const runs: [number, number][][] = [];
+  let current: [number, number][] = [];
+  for (let k = 1; k <= n; k++) {
+    const idx = (firstUnsafe + k) % n;
+    if (unsafe[idx]) {
+      if (current.length >= 2) runs.push(current);
+      current = [];
+    } else {
+      current.push(samples[idx]!);
+    }
+  }
+  if (current.length >= 2) runs.push(current);
+  return runs.map((points) => ({ points, closed: false }));
+}
+
 export function pocketLoops(
   region: Polygons,
   toolRadius: number,
