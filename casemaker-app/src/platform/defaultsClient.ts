@@ -386,6 +386,16 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // `engraveGeometry.ts`'s LOST_DETAIL_RATIO_FALLBACK.
   'engrave.lostDetailWarnRatio': { label: 'share of an item a cutter must keep before detail is lost (chosen)', unit: 'x', rule: z.number().min(0.1).max(1), fallback: 0.9 },
   // ── #451 engrave findings (end)
+  // ── #1111 reach margin (begin) — the safety gate a cutter's own flute must clear past the deepest
+  // cut it serves. RECOMMENDED 1.0 mm, not measured: it covers #1017/#1018's Z-datum class and the
+  // unmeasured jaw tops' ±0.5 mm, and it separates the tray's 0.387 mm-flute ball (refused) from the
+  // 12.4 mm one. Read by the #986 ball rank's tie (`pickAmongEquals`); once the gate passes, a
+  // remaining tie falls to the cutter key, stated "by key, pending #1114" — which cutter among
+  // equals a plan SHOULD prefer is the maintainer's policy call, not this setting's. The other
+  // same-diameter sites keep their pre-#1111 order under the canonical one. Fallback =
+  // `pickAmongEquals.ts`'s REACH_MARGIN_FALLBACK_MM.
+  'reach.marginMm': { label: 'reach margin a cutter’s flute needs past the deepest cut it serves (recommended 1.0 mm)', unit: 'mm', rule: z.number().min(0).max(10), fallback: 1.0 },
+  // ── #1111 reach margin (end)
   // ── #451 blank band fill (begin) — how much of a free band the seeded line takes. CHOSEN, not
   // measured: it trades cap height against the clearance the dome and the print want. Read by
   // `engraveJobStore`'s two seed routes and passed in; Fallback = `blankLabelSeed.ts`'s

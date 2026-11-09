@@ -344,6 +344,10 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // ── #451 engrave findings (begin) — the `item-detail-lost` bar: chosen, not measured.
     ("engrave.lostDetailWarnRatio", 0.9, "x", "chosen, not measured: the share of an item's area a cutter must reach before the item is called detail-lost"),
     // ── #451 engrave findings (end)
+    // ── #1111 reach margin — RECOMMENDED 1.0 mm, not measured (the Z-datum class + the unmeasured
+    // jaw tops); `defaultsClient.ts` states the same bounds and fallback.
+    ("reach.marginMm", 1.0, "mm", "recommended, not measured: the reach margin a cutter's own flute must clear past the deepest cut it serves (the Z-datum class and the unmeasured jaw tops)"),
+    // ── #1111 reach margin (end)
     // ── #451 blank band fill (begin) — chosen, not measured, and `defaultsClient.ts` states the same
     // bounds and fallback. It trades cap height against the clearance the dome and the print want.
     ("engrave.blankBandFill", 0.7, "x", "chosen, not measured: how much of a free band the seeded line takes, as a share of it; more fill means a taller cap and less clearance"),
@@ -1055,6 +1059,12 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "engrave.lostDetailWarnRatio" => Some(need(
             n.is_some_and(|v| (0.1..=1.0).contains(&v)),
             "0.1 to 1, the share of the item's area kept",
+        )),
+        // ── #1111 reach margin — `defaultsClient.ts` states the same bounds (0 to 10 mm). Zero is
+        // allowed: it turns the gate off rather than refusing every cutter.
+        "reach.marginMm" => Some(need(
+            n.is_some_and(|v| (0.0..=10.0).contains(&v)),
+            "0 to 10 mm",
         )),
         // ── #451 blank band fill — a share of the band, so it runs to 1; above 0, or no line is seeded.
         "engrave.blankBandFill" => Some(need(

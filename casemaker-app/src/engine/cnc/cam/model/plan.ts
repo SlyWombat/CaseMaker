@@ -41,8 +41,9 @@ import { GOAL_FIT_TOLERANCE_MM } from '@/engine/cnc/engrave/goalPlacement';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
-import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanFindingStatement, PlanStatement, StockProbes } from './types';
+import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanFindingStatement, PlanSheetStatement, PlanStatement, StockProbes } from './types';
 import { MOLD_DRAFT_LIMIT_DEG } from './types';
+import { byKeyPendingNote, pickAmongEquals, pickDecisionSentence, pickKeysFor, REACH_MARGIN_FALLBACK_MM, type PickKeys } from './pickAmongEquals';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, isAbortError, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
 import { fullyReachable, pocket } from './ops/pocket';
@@ -257,6 +258,11 @@ export function setupStockOf(
 export interface ModelPlanInput {
   geometry: FeatureSource;
   /**
+   * #1111 — THE SHOP'S REACH-MARGIN GATE, mm (`reach.marginMm`, recommended 1.0). A ball tie is
+   * decided by the gate, then by the cutter key ("by key, pending #1114"). Absent = 1.0 mm.
+   */
+  reachMarginMm?: number;
+  /**
    * #943 (10) — THE JOB'S STATED FREEING TABS (`goal.underside.tabs`), width/height in mm. `count:
    * 0` frees the part with no tabs (the vendor tray's own side 1). Absent → the pocket chain's
    * DEFAULT_RELEASE_TABS, so every job that states no underside block posts byte-identically.
@@ -433,6 +439,20 @@ export function finishBallCandidates(house: readonly Tool[], deepestMm: number):
   if (reaching.length > 0) return withLegacy(reaching);
   const longest = [...all].sort((a, b) => (b.fluteLength ?? 0) - (a.fluteLength ?? 0))[0];
   return withLegacy(longest === undefined ? [] : [longest]);
+}
+
+/**
+ * #1111 — THE CANDIDATE'S OWN DEEPEST FEED Z, mm below the stock top: the depth its reach margin is
+ * measured against (`fluteLength − deepest`). Zero on a candidate that cut nothing.
+ */
+function deepestFeedMm(ops: readonly { outcome: OpOutcome }[]): number {
+  let deepest = 0;
+  for (const op of ops) {
+    for (const operation of op.outcome.ir.operations) {
+      for (const move of operation.moves) if (move.kind !== 'rapid') deepest = Math.max(deepest, -move.z);
+    }
+  }
+  return deepest;
 }
 
 export interface PlanOutcome {
@@ -864,6 +884,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // setup 0 has run, which no setup ever observes (setup 0 never reads it).
   let setup0Tree: FeatureTree | null = null;
 
+  // #1111 — the reach-margin gate the ball tie reads (one number for the whole plan).
+  const reachMarginMm = input.reachMarginMm ?? REACH_MARGIN_FALLBACK_MM;
   for (let setupIndex = 0; setupIndex < input.setups.length; setupIndex++) {
     opts.signal?.throwIfAborted();
     const spec = input.setups[setupIndex]!;
@@ -920,8 +942,27 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // figures' 26 mm relief; the house's 0.5 ball states no flute length at all and failed on
     // reach in the review's own measurement, so it can never qualify. No new op: the rest runs the
     // finish's machinery over the ball's own leftover mask.
-    const restBallFor = (chosen: Tool | undefined): Tool | undefined =>
-      balls.find((t) => t !== chosen && (t.fluteLength ?? 0) >= deepestRemainderMm - 1e-9);
+    // #1111 (0f's (c)) — the row a same-diameter pick states while the policy is open (#1114).
+    // Declared before its first referrer (`restBallFor`): a later `const` would sit in that
+    // helper's temporal dead zone when the #986 rank calls it (#1019's own lesson below).
+    const sameDiameterNotes: string[] = [];
+    const noteSameDiameter = (chosen: Tool, rival: Tool | undefined): void => {
+      if (rival === undefined || sameDiameterNotes.length > 0) return;
+      sameDiameterNotes.push(byKeyPendingNote(chosen, rival));
+    };
+    const restBallFor = (chosen: Tool | undefined): Tool | undefined => {
+      const reaches = (t: Tool): boolean => (t.fluteLength ?? 0) >= deepestRemainderMm - 1e-9;
+      const rest = balls.find((t) => t !== chosen && reaches(t));
+      // #1111 (c) — a second ball of the rest ball's diameter that also reaches would be separated
+      // by the canonical order alone; the row says so while the policy is open (#1114).
+      if (rest !== undefined) {
+        noteSameDiameter(
+          rest,
+          balls.find((t) => t !== rest && t !== chosen && cuttingDiameter(t) === cuttingDiameter(rest) && reaches(t)),
+        );
+      }
+      return rest;
+    };
     // #989 — THE RIM STAGE TAKES THE PINNED V when the caller names one (`pinned.chamfer`, the
     // cutterKeyOf key the goal seam derives from its own chamfer request); otherwise the first
     // chamfer/engraving in the house, as before. A pin the house cannot answer is a caller bug,
@@ -1050,10 +1091,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       // already stock-top-relative: the depth below the stock top is `-zBottom` (frame.stockTop
       // reads 0 here), no rebase added.
       const depth = -r.zBottom;
-      return flats.find((t) => {
+      const reaches = (t: Tool): boolean => {
         const usable = usableLengthMm(t);
         return usable === null || usable + 1e-9 >= depth;
-      }) ?? null;
+      };
+      const chosen = flats.find(reaches) ?? null;
+      if (chosen !== null) {
+        // #1111 (c) — two flats of one diameter that both reach are separated by the canonical
+        // order (key); the row says so while the policy is open (#1114).
+        noteSameDiameter(chosen, flats.find((t) => t !== chosen && cuttingDiameter(t) === cuttingDiameter(chosen) && reaches(t)));
+      }
+      return chosen;
     };
     // #1054 — the rank memo: one stage op per distinct (cutter, region, params), read by every
     // candidate the rank prices and by the chosen plan below. Scoped to this setup (its tree,
@@ -1137,9 +1185,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // silent drop: its own typed statement, one per candidate.
     const capStatements: PlanStatement[] = [];
     if (coverageGoal !== undefined && goalCoverage !== undefined && ballCandidates.length > 1 && tree.remainder.length > 0) {
-      let best: { tool: Tool; leftover: number; cycle: number } | null = null;
+      let best: { tool: Tool; leftover: number; cycle: number; tie: PickKeys } | null = null;
       let uncappedBest: { tool: Tool; leftover: number; cycle: number } | null = null;
       const measuredRows: string[] = [];
+      /** #1111 R2 — the sentence for the tie that decided the pick, when one did. */
+      let tieStatement: string | null = null;
       // #986 — MEASURE THE LIKELY WINNER FIRST, THEN STOP AT THE FIRST NON-IMPROVEMENT. Candidates
       // are ordered FINE → COARSE, because leftover is monotone in the diameter: a smaller ball
       // reaches deeper into a crease, so it leaves no more than a larger one on the same remainder.
@@ -1202,11 +1252,38 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         }
         const diameterMm = cuttingDiameter(candidate) ?? 0;
         measuredRows.push(`⌀${diameterMm.toFixed(2)} mm ${candidate.name}: leftover ${(leftover * 100).toFixed(2)} %, cycle ${cycle.toFixed(0)} s`);
+        // #1111 R2 — the candidate's own tie keys, read while its ops are still in hand (the memo
+        // evicts a replaced incumbent's work).
+        const tie = pickKeysFor(candidate, {
+          material: input.stock.material,
+          ...(input.feedCatalogue === undefined ? {} : { catalogue: input.feedCatalogue }),
+          deepestMm: deepestFeedMm(measured.ops),
+        });
         if (best === null || leftover < best.leftover - 1e-9 || (Math.abs(leftover - best.leftover) <= 1e-9 && cycle < best.cycle)) {
           // #1054 — the memo keeps the incumbent's ops only: a replaced best is evicted, so the
           // rank never holds more than the best candidate's work plus the one being measured.
           if (best !== null) stageMemo.evictOwner(cutterKeyOf(best.tool));
-          best = { tool: candidate, leftover, cycle };
+          best = { tool: candidate, leftover, cycle, tie };
+          continue;
+        }
+        // #1111 R2 — EQUAL OUTCOME IS NOT A REASON TO KEEP THE FIRST ARRIVAL. When leftover and
+        // cycle are the same, the stated keys decide; the sentence names what won it.
+        if (Math.abs(leftover - best.leftover) <= 1e-9 && Math.abs(cycle - best.cycle) <= 1e-9) {
+          const candidateWins = pickAmongEquals(tie, best.tie, reachMarginMm) > 0;
+          tieStatement = pickDecisionSentence(
+            candidateWins ? candidate : best.tool,
+            candidateWins ? tie : best.tie,
+            candidateWins ? best.tool : candidate,
+            candidateWins ? best.tie : tie,
+            reachMarginMm,
+            'tie on leftover and cycle',
+          );
+          if (candidateWins) {
+            stageMemo.evictOwner(cutterKeyOf(best.tool));
+            best = { tool: candidate, leftover, cycle, tie };
+          } else {
+            stageMemo.evictOwner(cutterKeyOf(candidate));
+          }
           continue;
         }
         // Coarser and not better: stop. Every remaining candidate is coarser still. The monotone
@@ -1225,6 +1302,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       const chosen = best === null ? 'no candidate could plan the remainder — the pre-#986 pick stands' : `${best.tool.name} (leftover ${(best.leftover * 100).toFixed(2)} %, cycle ${best.cycle.toFixed(0)} s)`;
       ballRankNotes.push(
         `ball rank: measured ${measuredRows.length} candidate(s) — ${measuredRows.join('; ')}. Chosen: ${chosen}.` +
+          (tieStatement === null ? '' : ` ${tieStatement}.`) +
           (uncappedBest !== null && (best === null || uncappedBest.tool !== best.tool)
             ? ` The uncapped best is ${uncappedBest.tool.name} (leftover ${(uncappedBest.leftover * 100).toFixed(2)} %, cycle ${uncappedBest.cycle.toFixed(0)} s).`
             : ''),
@@ -1789,6 +1867,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // #986 (the ruling) — the ball rank's own statement: the measured candidates, the winner and
     // the uncapped best, so the operator sees what the cap cost.
     notes.push(...ballRankNotes);
+    // #1111 (c) — every same-diameter pick decided by the canonical order is stated as such.
+    notes.push(...sameDiameterNotes);
     // #982 (the review session's ruling) — the two cutter fallbacks, stated on the card in
     // outcome terms (the measured coverage/cycle numbers are the acceptance card's; the plan
     // states the method and the tradeoff it implies). #992 — each is typed: a cut made by a
@@ -1814,7 +1894,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
     // #992 — THE TYPED STATEMENTS: the two planners' own, then this loop's. Every one is the same
     // fact its `notes` line states; the code and severity are what route it to the operator.
-    const statements: PlanStatement[] = [...result.statements, ...freeingStatements, ...fallbackStatements, ...capStatements];
+    const statements: PlanStatement[] = [
+      ...result.statements,
+      ...freeingStatements,
+      ...fallbackStatements,
+      ...capStatements,
+      ...sameDiameterNotes.map((text): PlanSheetStatement => ({ severity: 'sheet', code: 'plan-run', count: 1, text })),
+    ];
     // #1005 — THE MOULD'S OWN FACTS, from the cavity the plan was handed. The sentences are the old
     // heightfield path's own, word for word (the guide's chapter 8 rows document these codes); the
     // draft number is measured from the part's surface at the seam, because a planar wall has no
@@ -3650,6 +3736,13 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       : `the freeing cut (contour) is posted LAST on ${choice.freeing.cutterKey} — a RETURN tool change back to it after ${lastChainCutter}, priced in the cycle; ${lastChainCutter} cannot take the profile (flute or stated shape)`;
     notes.push(text);
     statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
+  }
+  // #1111 (c) — THE PRIMARY PICK'S ROW: the chain's own price and step signature are the pre-#1111
+  // order (unchanged); where two same-diameter primaries tied on price and the canonical order's
+  // keys separated them, the sheet says so, pending the policy issue (#1114).
+  if (choice.pickNote !== undefined && choice.pickNote !== null) {
+    notes.push(choice.pickNote);
+    statements.push({ severity: 'sheet', code: 'plan-run', text: choice.pickNote, count: 1 });
   }
 
   const sequence: SequencedCutter[] = choice.cost.entries.map((entry) => {

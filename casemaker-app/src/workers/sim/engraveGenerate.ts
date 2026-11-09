@@ -277,6 +277,13 @@ export type EngraveStage = 'findings' | 'feeds' | 'cam' | 'post' | 'verify' | 'd
 export interface EngraveShopOpts {
   lostDetailWarnRatio?: number | null;
   /**
+   * #1111 — THE REACH-MARGIN GATE, mm (`reach.marginMm`, recommended 1.0): a cutter's own flute must
+   * clear the deepest cut it serves by this much, or the pick among equals leaves it out. Resolved
+   * on the caller's side by `engraveShopOpts`, like every other shop number; absent uses the
+   * labelled fallback (1.0 mm) — the same value `pickAmongEquals` holds.
+   */
+  reachMarginMm?: number | null;
+  /**
    * #833 — this program is a SUB-PROGRAM of a face cut: its stock is a model of the face plane,
    * not a blank the operator mounts, so the holding findings (the tape's coverage, the vise's
    * grip) are not facts about anything and are not raised. The face program's own holding is the
@@ -5309,6 +5316,8 @@ export async function buildModelPlanInputForGoal(
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness, material: job.stock.material },
     fixture: { mount, envelope },
     cutters,
+    // #1111 — the shop's reach-margin gate, for every pick among equals in the plan.
+    ...(shop.reachMarginMm === undefined || shop.reachMarginMm === null ? {} : { reachMarginMm: shop.reachMarginMm }),
     ...(houseNote === undefined ? {} : { houseNote }),
     ...(houseStatement === undefined ? {} : { houseStatement }),
     chosenTool: tool, // #1044 — the caller's cutter stays a candidate even if its feeds cannot resolve

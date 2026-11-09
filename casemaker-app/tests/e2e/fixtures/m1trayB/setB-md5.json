@@ -1,21 +1,28 @@
 {
-  "_note": "#1093 R1 \u2014 set B re-keyed, NOT re-cut: the 14 programs the branch\u2019s CLI writes for the two m1trayB jobs under the one naming rule (m1trayB-top-p1..p9, m1trayB-bottom-p1..p5; p1 is the old <job>.nc). 11 contents are byte-identical to the 2026-11-07 table; the 3 in `changedSince20261107` are the ACCEPTED #1080 generator changes (top p7, top p8, bottom p4). The e2e also reads the table as the cross-door check: the app\u2019s Save all against the CLI\u2019s output. One program, bottom p5, carries a `toolIdentityMayDiffer` entry \u2014 the two doors\u2019 owned sets differ and pick a different \u23003.175 ball (#1111); its toolpath is compared with the three tool-identity line kinds masked.",
-  "source": "casemaker cut <job>.cutjob.json --location k3-house/location.json, branch 1093-save-all off m1-land12 f28e0d223, 2026-11-08",
+  "_note": "#1093 R1 + #1111 \u2014 set B, VERSIONED WITH THE RULE (13 files: top p1..p9, bottom p1..p4). The programs both jobs post under the one naming rule and the #1111 rule above. vs the 2026-11-07 table: 11 contents identical; the changes are the accepted #1080 deltas (top p7, top p8) and #1111 (top p6 now runs the 25 mm O-flute; the bottom's curved rough joined its pocket program, so 5 programs became 4 and p1 was rewritten \u2014 set B's p5 became p4). Goal check identical (98.4 % within 0.01 mm, leftovers 0.90/0.72/0.41 %, cut-into 0); run estimate 2 h 08 \u2192 2 h 21 min, one bit change fewer. The e2e reads this table as the cross-door check.",
+  "tableVersion": "1111-1",
+  "rule": "#1111 (0f comment 6729368477): (a) the canonical owned order \u2014 tier (inv: \u2192 user: \u2192 cat: \u2192 built-in), then key \u2014 so both doors see one list; (b) the ball tie needs the reach-margin gate (flute \u2212 deepest cut \u2265 reach.marginMm, recommendation 1.0 mm) while any candidate passes, and a remaining tie falls to the key, printed \"by key, pending #1114\"; (c) the sequence primary, the curved rough's flat and the rest ball keep their pre-#1111 order under the canonical order, stated as \"same diameter: by key, pending #1114\" \u2014 WITHIN THIS RULE the bottom posts 4 programs (rough + pocket on the 25 mm O-flute) and the top 9. Which cutter among equals a plan SHOULD prefer is the open policy issue #1114 (stiffness vs reach vs bit changes vs time), with three measured plans as evidence.",
+  "source": "casemaker cut <job>.cutjob.json --location k3-house/location.json, branch 1111-canonical-owned off m1-land13",
   "changedSince20261107": [
     {
-      "name": "m1trayB-top-p7.nc",
-      "old": "5b009edf7a2cf13b9f3e6ddb7c09baea",
-      "new": "a73c4e7c65ec42ae5edc0c653c8cd04a"
+      "name": "m1trayB-top-p6.nc",
+      "old": "724d4e96463616f54a029f4fdfb1a73d",
+      "new": "90221d576fa54974b61ec32ee0f5f6db"
     },
     {
-      "name": "m1trayB-top-p8.nc",
-      "old": "344897b57a3eb65c99966f17cd711c39",
-      "new": "55d81fffeb6b754e6b7f44b23b6a2925"
+      "name": "m1trayB-bottom-p1.nc",
+      "old": "3673638b938eb759a289d04c66f41e55",
+      "new": "a052318ff9644cab390ba11de395fc8b"
+    },
+    {
+      "name": "m1trayB-bottom-p3.nc",
+      "old": "02746724a5a5dc5296e2953b992c4a0f",
+      "new": "91d289d5fc0cf1321bf6ce37dee03e37"
     },
     {
       "name": "m1trayB-bottom-p4.nc",
-      "old": "523840ce866a94623e3ad164b41311bf",
-      "new": "91d289d5fc0cf1321bf6ce37dee03e37"
+      "old": "91d289d5fc0cf1321bf6ce37dee03e37",
+      "new": "6ab42994f33f896ab81dcb926500ec1f"
     }
   ],
   "jobs": {
@@ -24,98 +31,73 @@
       "files": [
         {
           "name": "m1trayB-top-p1.nc",
-          "oldName": "m1trayB-top.nc",
           "bytes": 124288,
           "md5": "c674717adeb75440f480580b2628a87e"
         },
         {
           "name": "m1trayB-top-p2.nc",
-          "oldName": "m1trayB-top-p2.nc",
           "bytes": 1289,
           "md5": "8cdac279a793ccb1a7bbd6fcb236868d"
         },
         {
           "name": "m1trayB-top-p3.nc",
-          "oldName": "m1trayB-top-p3.nc",
           "bytes": 2002,
           "md5": "cf327e2a3cb7c71401905b387cd63985"
         },
         {
           "name": "m1trayB-top-p4.nc",
-          "oldName": "m1trayB-top-p4.nc",
           "bytes": 6667,
           "md5": "5275f401e7ad0eda0aeb0439e2ddfc58"
         },
         {
           "name": "m1trayB-top-p5.nc",
-          "oldName": "m1trayB-top-p5.nc",
           "bytes": 36079,
           "md5": "5031ba58189dbf2a099ed31b026b69bc"
         },
         {
           "name": "m1trayB-top-p6.nc",
-          "oldName": "m1trayB-top-p6.nc",
-          "bytes": 48410,
-          "md5": "724d4e96463616f54a029f4fdfb1a73d"
+          "bytes": 48388,
+          "md5": "90221d576fa54974b61ec32ee0f5f6db"
         },
         {
           "name": "m1trayB-top-p7.nc",
-          "oldName": "m1trayB-top-p7.nc",
           "bytes": 217718,
           "md5": "a73c4e7c65ec42ae5edc0c653c8cd04a"
         },
         {
           "name": "m1trayB-top-p8.nc",
-          "oldName": "m1trayB-top-p8.nc",
           "bytes": 175695,
           "md5": "55d81fffeb6b754e6b7f44b23b6a2925"
         },
         {
           "name": "m1trayB-top-p9.nc",
-          "oldName": "m1trayB-top-p9.nc",
           "bytes": 45454,
           "md5": "114ed00b170b6ba4a0dd3c5486507009"
         }
       ]
     },
     "m1trayB-bottom": {
-      "programs": 5,
+      "programs": 4,
       "files": [
         {
           "name": "m1trayB-bottom-p1.nc",
-          "oldName": "m1trayB-bottom.nc",
-          "bytes": 35572,
-          "md5": "3673638b938eb759a289d04c66f41e55"
+          "bytes": 100890,
+          "md5": "a052318ff9644cab390ba11de395fc8b"
         },
         {
           "name": "m1trayB-bottom-p2.nc",
-          "oldName": "m1trayB-bottom-p2.nc",
           "bytes": 4299,
           "md5": "8fd40df1e83ff9c1a11584c3fdab0ca0"
         },
         {
           "name": "m1trayB-bottom-p3.nc",
-          "oldName": "m1trayB-bottom-p3.nc",
-          "bytes": 66337,
-          "md5": "02746724a5a5dc5296e2953b992c4a0f"
-        },
-        {
-          "name": "m1trayB-bottom-p4.nc",
-          "oldName": "m1trayB-bottom-p4.nc",
           "bytes": 5220613,
           "md5": "91d289d5fc0cf1321bf6ce37dee03e37"
         },
         {
-          "name": "m1trayB-bottom-p5.nc",
-          "oldName": "m1trayB-bottom-p5.nc",
+          "name": "m1trayB-bottom-p4.nc",
           "bytes": 2866922,
-          "md5": "6ab42994f33f896ab81dcb926500ec1f",
-          "toolIdentityMayDiffer": {
-            "issue": 1111,
-            "maskedMd5": "a53829db86062852d1a1ba2efc43f82a",
-            "maskedLines": 3,
-            "why": "The app's owned plan carries the house catalogue's definitions as well as the owned cutters, so its cost-ranked finish pick chose inv:kz-ball-nose-m-3-175-10 (3.175 ball, 10 mm flute, metal); the CLI's --location registry carries only the location's own tools, so it chose inv:kz-ball-nose-3-175-22 (3.175 ball, 22 mm flute). Same toolpath: with the three tool-identity lines masked the bytes are identical. See #1111 (not ready, 0f's fields)."
-          }
+          "md5": "6ab42994f33f896ab81dcb926500ec1f"
         }
       ]
     }

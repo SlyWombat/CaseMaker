@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { dedupeCutterEntries } from '@/engine/cnc/toolLibrary';
 import { resetRegistry, getTools } from '@/engine/cnc/toolRegistry';
 import { BUNDLED_FONTS, labelFontsLoaded } from '@/engine/fonts/registry';
 import {
@@ -202,5 +203,71 @@ describe('#732 the house catalogue reader', () => {
     expect(() => loadCatalogue(badFeeds)).toThrow(
       `${badFeeds} does not match its own schema: "feeds" is not a feed catalogue:`,
     );
+  });
+});
+
+// #1111 R1 — BOTH DOORS BUILD THE REGISTRY FROM THE SAME THREE TIERS. The app's registry is
+// built-ins + the house service's `cat:` rows + the inventory's `inv:` rows; the CLI's bootstrap
+// registered only the location's own list, so its candidate set carried no `cat:` entry (its IDEAL
+// plan ran without the catalogue) and its arrival order differed. The catalogue beside the
+// location is now registered as `cat:` definitions, and `dedupeCutterEntries` puts the result in
+// one canonical order whichever way the two lists arrive.
+describe('#1111 the bootstrap registers the catalogue beside the location', () => {
+  const CATALOGUE = {
+    kind: 'casemaker-catalogue',
+    schemaVersion: 1,
+    syncedAt: '2026-10-20T08:00:00.000Z',
+    tools: [
+      {
+        key: 'cat:fixture-1111-flat',
+        provenance: 'fixture',
+        contentHash: 'fixture',
+        tool: {
+          number: 2,
+          id: '111011313825',
+          name: 'fixture 3.175 flat',
+          typeText: 'Flat End',
+          shape: 'flat',
+          handleDiameter: 3.175,
+          tipDiameter: 3.175,
+          diameter: 3.175,
+          cornerRadius: 0,
+          angle: 0,
+          halfAngle: 0,
+          fluteLength: 25,
+          shoulderLength: null,
+          stickout: null,
+          centreCutting: null,
+        },
+      },
+    ],
+    feeds: [],
+  };
+
+  const tier = (key: string): number =>
+    key.startsWith('inv:') ? 0 : key.startsWith('user:') ? 1 : key.startsWith('cat:') ? 2 : 3;
+
+  it('adds the catalogue’s cat: definitions, in one canonical order', async () => {
+    const dir = mkdtempSync(join(scratch, 'cat-loc-'));
+    const locationPath = join(dir, 'location.json');
+    writeFileSync(locationPath, JSON.stringify(LOCATION));
+    writeFileSync(join(dir, 'catalogue.json'), JSON.stringify(CATALOGUE));
+
+    const boot = await bootstrap({ location: locationPath });
+    expect(boot.catalogue?.tools.map((t) => t.key)).toEqual(['cat:fixture-1111-flat']);
+    expect(getTools().map((t) => t.key)).toContain('cat:fixture-1111-flat');
+    // The shop's list — the one every pick reads — is the dedupe's canonical order: owned tiers
+    // first, the catalogue's definitions after, the built-ins last, whatever order the documents
+    // were concatenated in.
+    const keys = dedupeCutterEntries(getTools()).map((t) => t.key);
+    expect(keys).toContain('cat:fixture-1111-flat');
+    expect(keys.some((k) => k.startsWith('inv:'))).toBe(true);
+    expect(keys.map(tier)).toEqual([...keys.map(tier)].sort((a, b) => a - b));
+  });
+
+  it('a location with no catalogue beside it is unchanged', async () => {
+    const boot = await bootstrap({ location: FIXTURE });
+    expect(boot.catalogue).toBeNull();
+    expect(getTools().filter((t) => t.key.startsWith('cat:'))).toEqual([]);
   });
 });
