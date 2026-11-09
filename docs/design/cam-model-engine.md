@@ -840,6 +840,109 @@ boolean-on-sections lesson. Description only, no source copied.
 
 ---
 
+## 10. Rulings since the landing (2026-11-06 → 2026-11-09) — the design record
+
+*Added 2026-11-09 by the review session from the rulings on #1041, #1073, #1092, #1093, #1094, #1096,
+#1097, #1111, #1114 and #1115. Each entry: the rule, why, where it lives, and its status. The threads
+on those issues hold the measurements; this section holds the decisions.*
+
+### 10.1 The rest op is two spaces, not one mask (#1092, landed on `1092-plane-is-goal-surface` fd79ac9f, in land14)
+
+`ops/rest.ts` stated "rest by CL difference" and then sampled it as one cell mask pocketed with
+`pocketLoops`' radius inset. Five rounds of cell predicates (a per-cell `aboveMaterial` ceiling,
+goal-top-above-floor, closed-over, a reach witness, a safe-spot test) traded the same two cases against
+each other: set B's 12 mm wall-foot strips (correct work, must be kept) and j29's buried discs (20 mm
+into the body, must be killed). In cell space those are the same thing — a cell beside higher goal; only
+the cutter's disc tells them apart.
+
+**The rule.** For a rest level `z`, previous cutter P (radius R), rest cutter N (radius r):
+- **work, material space:** `L(z)` = cells where P's **stamp** (its CL surface dilated by its own disc —
+  the `MaterialField` the linking reads) stands above `z`;
+- **admissible centres, CL space:** `A(z)` = cells where N's **drop-cutter tip over the goal**
+  (`finishTipField`'s primitive: nearest-point stencil, ball rise where N is a ball) is `≤ z + stockToLeave`
+  — over the goal, never a region floor;
+- **path:** `A(z) ∩ dilate(L(z), r)`, traced without a radius inset; links through `link()` as before.
+The region's floor is a lower bound on `z` only; it never admits a move (j29's pocket-0 floor was stated
+−26.1 where the goal is −1.36 — a separate region defect the rule must be correct with or without).
+
+**Two amendments on landing.** The drop-cutter primitive moves to a neutral module (`cam/dropTip.ts`)
+so the planner never imports the gate's `surfaceFinishTipField` (#964's reverse import rule); and the tip
+is computed **per rest region** (bbox + r, reading goal cells to + 2r, cached per cutter × region) — a
+whole-goal field at 0.1 mm needs 1.2e9 reads against a 3e8 budget and silently refused every region. A
+budget refusal is a stated finding, `rest-region-over-budget` (warning when the coverage line still
+passes, error when it fails because of it), joined to the plan's leftover statement (#1023).
+
+**Evidence.** j29 card: cut-into 0.0 %, blocks 1–5 absent (dave-1 and k3). Set B: top p5 does more of the
+rest work it owed (leftover > 1 mm 0.21 → 0.13 %, volume −31 %, cut-into unchanged at 0), bottom p2 +0.7 s,
+the other 12 byte-identical — accepted and re-keyed on the land14 tree. Red-first specs: the tangent
+strip (CL at `wall − r` along every wall), the one-cell sliver beside a body (no move whose disc covers
+body), the region lie (same output).
+
+### 10.2 The owned set, one list, and the pick among equals (#1041 landed; #1111 narrowed; #1114/#1115 open)
+
+- **Owned = `inv:` + `user:` + the chosen tool; `cat:` never enters the owned plan; built-ins only when the
+  inventory is empty, stated on the plan** (#1041, landed 2026-11-07).
+- **Both doors see one list** (#1111). The app's registry (built-ins + the house's `cat:` + `inv:`) and the
+  CLI's (`--location`, no catalogue) held the same 35 owned cutters in **different orders**:
+  `dedupeCutterEntries` keeps the `inv:` entry but in its `cat:` twin's position, and the ball rank's
+  stable sort let the first same-diameter cutter win. Rule: dedupe returns a **canonical order** (tier, then
+  key); the CLI registers the catalogue as `cat:` too (ideal-plan parity); the ball rank's tie requires a
+  **reach-margin gate** — `fluteLength − deepest cut ≥ reachMarginMm` (shop setting, recommendation 1.0 mm,
+  from the Z-datum class) — so the 10 mm ball with 0.387 mm of margin at 9.613 mm deep loses to the 22.
+- **What is NOT ruled: which cutter wins among equals that all pass the gate.** Three stated keys each
+  produced a different tray plan (longest flute → a 42 mm O-flute roughing on a 1/8" shank; shortest
+  sufficient → two new bits; key order → the 4-program plan). That is a shop-policy question — stiffness,
+  reach, bit changes or time — and it changes which bits the maintainer loads, so it went to him as
+  **#1114** with the three measured plans. Until it is answered, `chooseSequence`'s primary,
+  `reachingFlatFor` and `restBallFor` pick by the canonical order and the rank row says so: "same diameter:
+  by key, pending #1114" (#1115 adds the row text). Set B's table is versioned with the rule (13 files on
+  the land14 tree).
+- **Lesson:** "same set" is not "same list"; a rank that stable-sorts a registry snapshot inherits arrival
+  order as a silent key; every tie names its key on the sheet.
+
+### 10.3 Program files: one name, in cut order (#1093, landed in land13)
+
+`releaseFileName(stem, index, total)` is the only function that names a program file — Save, the run sheet,
+the release store, the run record and the CLI all read it: `total ≤ 1 → <stem>.nc`; otherwise
+`<stem>-p<index>.nc` with the index **zero-padded to the width of `total`** (`p1…p5`, `p01…p19`), because
+the machine's file list and every folder sort by name and `p10` before `p2` is how a tab release runs before
+the cuts. With N > 1 the file bar offers **Save all** only (a folder where a directory picker exists, else
+a zip, from one `programFiles()` list the release store also uses); per-program Save lives on the sheet's
+rows; the run record lists every program's name and hash (program 1's fields kept for back-compat); a frame
+file sits beside every program that produced one. One file per setup was ruled out: it would change the
+release's per-file vacuum span and bit-change pause, and Makera Studio plays one file at a time anyway.
+
+### 10.4 The rotary rough's clamp is a drop-cutter tip, once (#1094; #1096, #1097)
+
+`aSweepRoughing` clamped each cell at `max(layer, goal + allowance)` — the cell's own angle only — so the
+ball's flank cut 11 mm into the panther's body beside a near-axis cell. Rule: **one** precomputed
+drop-cutter tip of the goal-plus-allowance (`finishTipField` over the radial map with `wrapRows`), and each
+layer reads `max(layer, tip)` — not a per-layer stencil (G's measured 12.97 s) and not a 1-D angular clamp
+(9 mm residuals). The receipt's 83 % "coverage" on the gouging rough was the flank reading as within
+tolerance; the honest standing stock has three causes none of which is the rough's: the ⌀2 ball's 0.107 mm
+cusp at 0.9 mm step-over against a 0.1 mm band, a goal whose axis runs alongside the body (39.5 % of the map
+hit by no ray, 11.25 % within 2 mm of the axis — **#1097**, a design question), and tight concavities.
+The 36 near-axis "pinholes" were the sampler's: seam-straddling footprints cast 0.164° (1.6 cells) off their
+row because `ny·pitch ≠ 2πR` (**#1096**, landed in land13: the row's own angle).
+
+### 10.5 The flip: the fixture is never reflected (#1073)
+
+`flipReflection` reflects the blank's **contents** — the goal copy, the tab bands, the locating bores
+(X 156 → 4 on a 160 blank), the release path — never the fixture or the stock envelope. The bracket's arm
+and back clamp are bolted to the bed; the operator re-seats the turned blank's new left edge against the
+same arm, and side 2's origin is that corner (the pins at X 4 say the same), so the arm is at X ≤ 0 in side
+2's frame exactly as in side 1's. A side-2 `bracket-in-path` that side 1 passed is the flip working:
+side 1's right margin becomes the margin against the arm. Also ruled: the locating bores are through holes
+cut to the job's through rule (`thickness + breakthrough`, 0.3 mm into the board); the chip clearance was a
+blind-bore number with no object; the finding, the sheet and the NC say one depth.
+
+### 10.6 Verdicts never excuse silence
+
+A plan that drops a region, a cutter or a run must say why on the page, whatever the coverage line reads:
+land14's tray passed at 98.80 % while every rest region had been refused for budget. New diagnostic codes
+get their row in the CNC guide (the house rule, enforced by `cncGuide.spec.ts`).
+
+
 ## Status
 
 The full history of this note's amendments (what changed, when, on whose review, and why) moved to
