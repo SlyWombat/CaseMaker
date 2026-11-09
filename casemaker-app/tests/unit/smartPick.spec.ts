@@ -280,3 +280,39 @@ describe('#829 a goal’s chamfer enters the measured plans', () => {
     expect(applied.targetObject?.chamfer?.toolKey).toBe(V_01.key);
   });
 });
+
+describe('#1134 the pick caps its full evaluations', () => {
+  const entries = () => tools([FLAT_2, FLAT_1, FLAT_06, V_01]);
+
+  it('fully plans at most fullFinalists, states the cut, and keeps the rule’s plan in the cap', async () => {
+    const levels: ('coarse' | 'full')[] = [];
+    const evaluate: Evaluate = (_plan, level) => {
+      levels.push(level);
+      return verdict(1);
+    };
+    const job = coinJob();
+    const pick = picked(await smartPick(job, entries(), [], evaluate));
+    const fulls = levels.filter((l) => l === 'full').length;
+    expect(fulls).toBeGreaterThan(0);
+    expect(fulls).toBeLessThanOrEqual(3);
+    // The ruling's own statement: "12 tied, 3 fully planned" — here the tie is every finalist and
+    // the count printed is the one actually planned.
+    expect(pick.notes.join(' ')).toMatch(/\d+ tied, \d+ fully planned/);
+    expect(pick.notes.join(' ')).toContain(`, ${fulls} fully planned`);
+    // #766's structural floor: the rule's plan is one of the plans that gets a full evaluation.
+    const rule = rulePlanOf(job, entries(), [])!;
+    const fullyEvaluated = pick.considered.filter((s) => s.evaluation.seconds !== null).map((s) => planKey(s.plan));
+    expect(fullyEvaluated).toContain(planKey(rule));
+  });
+
+  it('with fullFinalists 1 the rule’s plan is the one full evaluation', async () => {
+    const levels: ('coarse' | 'full')[] = [];
+    const evaluate: Evaluate = (_plan, level) => {
+      levels.push(level);
+      return verdict(1);
+    };
+    const pick = picked(await smartPick(coinJob(), entries(), [], evaluate, { fullFinalists: 1 }));
+    expect(levels.filter((l) => l === 'full').length).toBe(1);
+    expect(pick.notes.join(' ')).toMatch(/\d+ tied, 1 fully planned/);
+  });
+});
