@@ -1085,6 +1085,10 @@ function dilateCells(mask: Uint8Array, nx: number, ny: number, pitch: number, ra
  * Only the cells about to be excused call it (a few thousand at most), so the disc walk is cheap;
  * uncovered cells contribute nothing (the design only exists where it is covered).
  */
+function depths_ceiling(depth: number, thicknessMm: number, breakthroughMm: number): boolean {
+  return depth <= thicknessMm + breakthroughMm + STRADDLING_SLACK_MM + 1e-12;
+}
+
 function reliefAt(goal: GoalHeightfield, x: number, y: number, radiusMm: number, borderCell: boolean): number {
   const pitch = goal.pitch;
   const r = Math.ceil(radiusMm / pitch);
@@ -1507,27 +1511,55 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   // CM_GOAL_DEBUG=1 through globalThis so this module needs no Node typings.
   const debugFlag = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.CM_GOAL_DEBUG;
   if (debugFlag === '1') {
+    const thicknessD = opts.stockThicknessMm ?? goal.stockThicknessMm ?? goal.topZ - goal.minZ;
+    const breakthroughD = opts.breakthroughMm ?? goal.breakthroughMm ?? 0;
+    const clAtD = opts.clAt;
+    const whoAtD = opts.whoAt;
     for (let j = 0; j < ny; j++) {
       for (let i = 0; i < nx; i++) {
         const k = j * nx + i;
         if (sampled[k] !== 1 || dOf[k]! >= -ADJUDICATED_FLOOR_MM || excluded[k] === 1) continue;
         const x = goal.x0 + i * goal.pitch;
         const y = goal.y0 + j * goal.pitch;
+        const designZ = goal.z[k]!;
+        const sweptZ = designZ + dOf[k]!;
         const depth = -dOf[k]!;
-        const cl = opts.clAt?.(x, y) ?? null;
-        let clTxt = ',-,-,-,-';
+        const who = whoAtD?.(x, y) ?? -1;
+        const cl = clAtD?.(x, y) ?? null;
+        let clX = Number.NaN;
+        let clY = Number.NaN;
+        let clCov = -2;
+        let clWallDist = Number.NaN;
         if (cl !== null) {
+          clX = cl.x;
+          clY = cl.y;
           const ci = Math.round((cl.x - goal.x0) / goal.pitch);
           const cj = Math.round((cl.y - goal.y0) / goal.pitch);
           const onGrid = ci >= 0 && cj >= 0 && ci < nx && cj < ny;
-          const cov = onGrid ? goal.covered[cj * nx + ci] : -1;
-          clTxt = `,${cl.x.toFixed(3)},${cl.y.toFixed(3)},${cov},${outlineDistance(cl.x, cl.y).toFixed(3)}`;
+          clCov = onGrid ? goal.covered[cj * nx + ci]! : -1;
+          clWallDist = outlineDistance(cl.x, cl.y);
         }
-        const who = opts.whoAt?.(x, y) ?? -1;
+        const cellWallDist = wallDist === null ? Number.NaN : wallDist[k]!;
         const proof = straddleProof(k, i, j, depth);
         const isShadow = shadow !== null && shadow[k] === 1 ? 1 : 0;
+        // The excuses, in the order the rule tries them, each with the value that decided it.
+        const bandHit = band !== null && band[k] === 1 ? 1 : 0;
+        const whoOkD = band === null || allowance === undefined || allowance.toolNumber === undefined || who === allowance.toolNumber ? 1 : 0;
+        const legOkD = allowance !== undefined && depth <= allowance.legMm + 1e-9 ? 1 : 0;
+        const reliefD = reliefAt(goal, x, y, reliefRadiusMm, border[k] === 1);
+        const ceilOkD = depths_ceiling(depth, thicknessD, breakthroughD) ? 1 : 0;
+        const silClOkD = cl !== null && clCov !== 1 && clWallDist >= (shadowRadius ?? goal.pitch) - goal.pitch - 1e-9 ? 1 : 0;
+        const shadowVD = allowance !== undefined && allowance.toolNumber !== undefined && who === allowance.toolNumber && depth <= allowance.legMm + 1e-9 ? 1 : 0;
+        const shadowClD = cl !== null && shadowRadius !== undefined && clWallDist >= shadowRadius - goal.pitch - 1e-9 ? 1 : 0;
         console.log(
-          `GOALCELL,${x.toFixed(3)},${y.toFixed(3)},${depth.toFixed(4)},${wall[k]},${border[k]},${silhouette[k]},${isShadow},${who},${proof.step.toFixed(4)}${clTxt}`,
+          [
+            'GOALCELL',
+            x.toFixed(3), y.toFixed(3), designZ.toFixed(4), sweptZ.toFixed(4), depth.toFixed(4),
+            who, cl === null ? '' : clX.toFixed(3), cl === null ? '' : clY.toFixed(3), cl === null ? '' : String(clCov), cl === null ? '' : clWallDist.toFixed(3),
+            Number.isNaN(cellWallDist) ? '' : cellWallDist.toFixed(3),
+            wall[k], border[k], silhouette[k], isShadow, proof.step.toFixed(4), proof.ok ? 1 : 0,
+            bandHit, whoOkD, legOkD, reliefD.toFixed(4), reliefRadiusMm.toFixed(4), ceilOkD, silClOkD, shadowVD, shadowClD,
+          ].join(','),
         );
       }
     }
