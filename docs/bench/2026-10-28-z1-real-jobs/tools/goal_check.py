@@ -639,8 +639,8 @@ def judge(G, C, H, who, clx, cly, gh, stock_thickness, *, allowance=None, shadow
             else:
                 dist = np.full(cells.size, np.inf)
                 cl_ok = np.zeros(cells.size, bool)
-            # 0f's INWARD WITNESS, ruled (iii): for a silhouette cell, EVERY fully covered
-            # part-side axial neighbour (covered, and not itself a silhouette cell) must be UNCUT —
+            # 0f's INWARD WITNESS, ruled (iii) then amended: for a silhouette cell, EVERY covered
+            # part-side axial neighbour (silhouette neighbours included, 2026-11-09) must be UNCUT —
             # its swept top at or above its own design less the rule's slack — and at least one such
             # candidate must exist. Any candidate cut fails the witness; no candidate means no
             # witness. The stamp's disc spans both cells, so a real cut of the cell's depth would
@@ -659,7 +659,9 @@ def judge(G, C, H, who, clx, cly, gh, stock_thickness, *, allowance=None, shadow
                     inb = (ii >= 0) & (ii < nx) & (jj >= 0) & (jj < ny)
                     iic = np.clip(ii, 0, nx - 1)
                     jjc = np.clip(jj, 0, ny - 1)
-                    cand = inb & C[jjc, iic] & ~sil[jjc, iic]
+                    # 0f's amendment: EVERY covered part-side axial neighbour is a candidate,
+                    # including one that is itself a silhouette cell.
+                    cand = inb & C[jjc, iic]
                     uncut = H[jjc, iic] >= G[jjc, iic] - STRADDLING_SLACK_MM
                     any_cand |= cand
                     all_uncut &= (~cand) | uncut

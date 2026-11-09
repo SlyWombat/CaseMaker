@@ -375,6 +375,24 @@ def main():
                                                        'silhouetteByWitnessCells': 0,
                                                        'adjudicatedCells': 2,
                                                        'adjudicatedMaxMm': 1.0})
+        # ... and 0f's amendment: a candidate that is ITSELF a silhouette cell counts too. On the
+        # island, (51, 60) is a silhouette axial neighbour of (50, 60); uncut it leaves the witness
+        # standing, cut 1 mm it fails it.
+        z, cov = pocket_goal()
+        s = judge_on(z, cov, [(50, 60, 0.2), (51, 60, 0.0)], shadow_radius=1.0,
+                     thickness=2.0, breakthrough=0.3, cl=(50, 60, 6.5, 5.0))
+        check('N witness: silhouette candidate uncut', s, {'silhouetteExcusedCells': 1,
+                                                           'silhouetteByWitnessCells': 1,
+                                                           'adjudicatedCells': 0})
+        # both cells need a real CL inside the part: an unset (0, 0) lies off the island, which
+        # would read as an uncovered-side CL and excuse the cut candidate itself.
+        s = judge_on(z, cov, [(50, 60, 0.2), (51, 60, 1.0)], shadow_radius=1.0,
+                     thickness=2.0, breakthrough=0.3,
+                     cl=[(50, 60, 6.5, 5.0), (51, 60, 6.5, 5.0)])
+        check('N witness: silhouette candidate cut 1 mm', s, {'silhouetteExcusedCells': 0,
+                                                              'silhouetteByWitnessCells': 0,
+                                                              'adjudicatedCells': 2,
+                                                              'adjudicatedMaxMm': 1.0})
         # T — the relief disc reaching uncovered grid makes the stock top the high side: the rim
         # strip's shadow cell is excused on relief 0.5 mm, not counted on a bare 0.
         s = fixture_shadow_stock_top()
