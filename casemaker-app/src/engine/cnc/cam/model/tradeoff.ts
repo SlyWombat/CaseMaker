@@ -25,8 +25,24 @@ export interface PlanOutcomeScore {
   cutInto: {
     /** The judged cut-into share, 0..1 (null when the checker did not adjudicate). */
     adjudicatedFraction: number | null;
-    /** The deepest cut below the goal, mm — NULL when the caller did not judge cut-into. */
+    /** The deepest cut below the goal, mm — the RAW figure; NULL when the caller did not judge
+     *  cut-into. Advisory: the superset gate gates on {@link adjudicatedMaxMm} below. */
     maxMm: number | null;
+    /**
+     * #1092 (0f's ruling, 2026-11-09) — the deepest cut among the ADJUDICATED cells, mm. The
+     * deepest-cut row compares THIS: the raw maximum includes cells the goal check excludes by
+     * proof (a wall cell, the wall shadow, an edge break), where a difference is a reading
+     * artefact, not a worse plan. Null/absent when the source cannot adjudicate (a page-JSON
+     * card) — the row then falls back to `maxMm` and states the raw reading.
+     */
+    adjudicatedMaxMm?: number | null;
+    /**
+     * #1092 — the class the RAW deepest cell was excused as, when the checker excluded it. The
+     * raw pair is printed beside the judged pair with this class, never gated.
+     */
+    rawMaxExclusion?: string | null;
+    /** #1092 — where the raw deepest cell is, when the source carries a coordinate. */
+    maxAt?: { x: number; y: number } | null;
   };
   /** The plan's own cycle estimate, seconds. */
   cycleSeconds: number;
@@ -254,6 +270,30 @@ export interface OutcomeWorsening {
   reading: string;
 }
 
+/** #1092 — a compact millimetre reading: `0`, `3`, `10.8`, `0.42` — never `0.00` for a zero. */
+function mmText(mm: number): string {
+  return String(Number(mm.toFixed(2)));
+}
+
+/** The goal check's exclusion classes, as the row names them when it prints the excused raw pair. */
+const EXCUSE_WORDS: Record<string, string> = {
+  wall: ' at a wall cell',
+  border: ' at a border cell',
+  shadow: ' at a wall-shadow cell',
+  silhouette: ' at a silhouette cell',
+  edgeBreak: ' at an edge-break cell',
+  straddling: ' at a straddling cell',
+};
+
+/** WHERE the raw maximum sits: the class the checker excused it as, else its coordinate, else nothing. */
+function excusedAt(cut: PlanOutcomeScore['cutInto']): string {
+  const cls = cut.rawMaxExclusion;
+  const words = cls === undefined || cls === null ? undefined : EXCUSE_WORDS[cls];
+  if (words !== undefined) return words;
+  const at = cut.maxAt;
+  return at !== undefined && at !== null ? ` at ${mmText(at.x)}, ${mmText(at.y)}` : '';
+}
+
 export function idealWorsenings(
   owned: PlanOutcomeScore,
   ideal: PlanOutcomeScore,
@@ -290,11 +330,37 @@ export function idealWorsenings(
     });
   }
 
-  // The deepest-cut row needs BOTH sides judged; an unjudged side leaves the row absent, exactly
-  // as the share row does — never a different quantity under this name.
+  // #1092 (0f's ruling, 2026-11-09) — THE DEEPEST-CUT ROW IS GATED ON THE ADJUDICATED MAXIMUM.
+  // The raw maximum includes cells the goal check excludes by proof (a wall cell, the wall shadow,
+  // an edge break, a straddling cell): a raw difference there is a reading artefact, not a worse
+  // plan, and it must not decide the superset gate. The raw pair is still PRINTED beside the judged
+  // pair, with the class the excluded cell was excused as, and is never gated. A side that cannot
+  // adjudicate (a page-JSON card, no `adjudicatedMaxMm`) keeps the raw reading it always had.
+  const ownedAdjMm = owned.cutInto.adjudicatedMaxMm;
+  const idealAdjMm = ideal.cutInto.adjudicatedMaxMm;
   const ownedDepthMm = owned.cutInto.maxMm;
   const idealDepthMm = ideal.cutInto.maxMm;
-  if (ownedDepthMm !== null && idealDepthMm !== null) {
+  if (ownedAdjMm !== undefined && ownedAdjMm !== null && idealAdjMm !== undefined && idealAdjMm !== null) {
+    const worseBy = idealAdjMm - ownedAdjMm;
+    const materialByAdjudicated = worseBy > threshold.geometryMm + 1e-9;
+    // The raw pair earns its parenthetical only when it reads WORSE than the judged pair — i.e.
+    // exactly when the old (raw) rule would have failed the ideal on an excluded cell.
+    const rawWorse = ownedDepthMm !== null && idealDepthMm !== null
+      && idealDepthMm - ownedDepthMm > threshold.geometryMm + 1e-9
+      && !materialByAdjudicated;
+    const rawNote = rawWorse
+      ? ` (raw ${mmText(ownedDepthMm!)} → ${mmText(idealDepthMm!)} mm${excusedAt(ideal.cutInto)}, excused)`
+      : '';
+    rows.push({
+      outcome: 'deepestCut',
+      bound: 'geometryMm',
+      owned: ownedAdjMm,
+      ideal: idealAdjMm,
+      worseBy,
+      material: materialByAdjudicated,
+      reading: `ideal deepest adjudicated cut ${mmText(ownedAdjMm)} → ${mmText(idealAdjMm)} mm${rawNote}`,
+    });
+  } else if (ownedDepthMm !== null && idealDepthMm !== null) {
     const worseBy = idealDepthMm - ownedDepthMm;
     rows.push({
       outcome: 'deepestCut',

@@ -905,6 +905,14 @@ export interface GoalCutIntoReport {
   /** #964 — WHERE the adjudicated deepest cell is, in the work frame; null when the adjudicated
    *  set is empty. The card names a cell the pass actually judged, not an excluded one. */
   adjudicatedMaxAt: { x: number; y: number } | null;
+  /**
+   * #1092 (0f's ruling, 2026-11-09) — THE CLASS THE RAW DEEPEST CELL WAS EXCUSED AS, when the
+   * adjudication excluded it: the deepest-cut tradeoff row prints the raw pair beside the judged
+   * pair with this class, so a raw excursion on an artefact cell is readable and never gated. Null
+   * when the raw maximum was itself adjudicated, or nothing was cut into. Additive (optional):
+   * reports from before the ruling simply do not carry it.
+   */
+  rawMaxExclusion?: 'edgeBreak' | 'silhouette' | 'wall' | 'border' | 'shadow' | 'straddling' | null;
   medianDeltaMm: number;
   sentence: string;
 }
@@ -1306,6 +1314,10 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   const allowanceActive = allowance !== undefined && allowance.reachMm > 0 && allowance.legMm > 0;
   const band = allowanceActive ? dilateCells(bandSeed, nx, ny, goal.pitch, allowance.reachMm) : null;
   const excluded = new Uint8Array(cells);
+  // #1092 (0f's ruling) — WHY each excluded cell was excused, as a code (1 edge break, 2
+  // silhouette, 3 wall, 4 border, 5 shadow, 6 straddling), so the raw-maximum cell's class can be
+  // stated rather than guessed. 0 = not excluded.
+  const excludedBy = new Uint8Array(cells);
   let edgeBreakCells = 0;
   let wallNotScoredCells = 0;
   let shadowNotScoredCells = 0;
@@ -1400,6 +1412,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       || opts.whoAt?.(goal.x0 + i * goal.pitch, goal.y0 + j * goal.pitch) === allowance.toolNumber;
     if (band !== null && band[k] === 1 && depth <= allowance!.legMm + 1e-9 && whoOk) {
       excluded[k] = 1;
+      excludedBy[k] = 1;
       edgeBreakCells++;
       continue;
     }
@@ -1446,6 +1459,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
         clDistanceMm >= (shadowRadius ?? goal.pitch) - goal.pitch - 1e-9
       ) {
         excluded[k] = 1;
+        excludedBy[k] = 2;
         silhouetteExcusedCells++;
         if (silhouetteDeepest === null || depth > silhouetteDeepest.mm) silhouetteDeepest = { mm: depth, x, y, clDistanceMm };
         continue;
@@ -1472,6 +1486,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       const proof = straddleProof(k, i, j, depth, STRADDLING_SLACK_MM, cls === 'border');
       if (proof.ok && depth <= relief + STRADDLING_SLACK_MM + 1e-12) {
         excluded[k] = 1;
+        excludedBy[k] = cls === 'wall' ? 3 : 4;
         wallNotScoredCells++;
       } else {
         noteOverRelief(cls, depth, x, y);
@@ -1502,6 +1517,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
         const relief = reliefAt(goal, x, y, reliefRadiusMm, false);
         if (depth <= relief + STRADDLING_SLACK_MM + 1e-12) {
           excluded[k] = 1;
+          excludedBy[k] = 5;
           shadowNotScoredCells++;
           continue;
         }
@@ -1520,6 +1536,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       const proof = straddleProof(k, i, j, depth);
       if (proof.ok) {
         excluded[k] = 1;
+        excludedBy[k] = 6;
         straddlingNotScoredCells++;
         if (proof.step > straddlingMaxStepMm) straddlingMaxStepMm = proof.step;
         continue;
@@ -1615,6 +1632,26 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     }
   }
 
+  // #1092 (0f's ruling, 2026-11-09) — THE RAW MAXIMUM'S CELL, AS A CLASS. The deepest raw cut is
+  // often a cell the adjudication excuses by proof; the deepest-cut tradeoff row prints the raw
+  // pair with this class so a reader can tell the artefact from a gouge without re-running the
+  // check. Null when the raw max was itself adjudicated (nothing excused), or nothing was cut into.
+  let rawMaxExclusion: GoalCutIntoReport['rawMaxExclusion'] = null;
+  if (rawMaxCutIntoAt !== null) {
+    const ri = Math.round((rawMaxCutIntoAt.x - goal.x0) / goal.pitch);
+    const rj = Math.round((rawMaxCutIntoAt.y - goal.y0) / goal.pitch);
+    if (ri >= 0 && rj >= 0 && ri < nx && rj < ny) {
+      const code = excludedBy[rj * nx + ri]!;
+      rawMaxExclusion =
+        code === 1 ? 'edgeBreak'
+          : code === 2 ? 'silhouette'
+            : code === 3 ? 'wall'
+              : code === 4 ? 'border'
+                : code === 5 ? 'shadow'
+                  : code === 6 ? 'straddling'
+                    : null;
+    }
+  }
   deltas.sort((a, b) => a - b);
   const medianDeltaMm = deltas.length === 0 ? 0 : deltas[Math.floor(deltas.length / 2)]!;
   const cutIntoFraction = rawCutCells / n;
@@ -1719,6 +1756,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     adjudicatedFraction,
     adjudicatedMaxMm,
     adjudicatedMaxAt,
+    rawMaxExclusion,
     sentence,
   };
 }
@@ -1767,6 +1805,7 @@ export function goalCutIntoUnchecked(reason: string, passCoverage: number = GOAL
     adjudicatedFraction: 0,
     adjudicatedMaxMm: 0,
     adjudicatedMaxAt: null,
+    rawMaxExclusion: null,
     sentence: `goal check: not run — ${reason}. Nothing was compared against the goal here, so this is not a pass.`,
   };
 }

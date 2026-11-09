@@ -422,6 +422,9 @@ export type JobFindingCode =
   | 'goal-finish-too-many-moves'
   // #1037 — no cutter in the set reaches a curved region's floor: the finish does not post it.
   | 'goal-finish-unreachable'
+  // #1092 — a rest region's per-region drop-tip field exceeds the op budget: the region is left
+  // uncut; warning when the coverage line still passes, error when it fails because of it.
+  | 'rest-region-over-budget'
   | 'goal-object-no-toolpath'
   // #1084 — a job carrying faces AND a goal: the faces program would post and the goal be dropped.
   // Refused by name when the job is not a rotary cut (one file cannot be both). #1085 — a ROTARY

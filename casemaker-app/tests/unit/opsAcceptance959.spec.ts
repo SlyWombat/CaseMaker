@@ -745,6 +745,10 @@ function writeAcceptance(
       // gouge or an artefact the rule should name — the coordinate is what lets a reader check it
       // against the part's own feature layout.
       maxAt: report.maxCutIntoAt,
+      // #1092 (0f's ruling) — the deepest-cut tradeoff row is judged on the ADJUDICATED maximum;
+      // the raw pair above stays printed beside it, with the class the raw cell was excused as.
+      adjudicatedMaxMm: report.adjudicatedMaxMm,
+      rawMaxExclusion: report.rawMaxExclusion ?? null,
     };
     const ours: ProgramScore = {
       label: name,
