@@ -162,6 +162,8 @@ import { engravePreviewSvg } from '../engravePreviewSvg';
 import { svgToPng } from '../svgToPng';
 import { efficiencyThresholds, goalPassCoverage, KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
 import { goalCheckForProgram, type SimGoalCheck } from '../../../src/engine/cnc/engrave/goalCheckInput';
+// #1134 — the pick's measured owned plan, handed through to the cut.
+import type { ModelPlanOutput } from '../../../src/engine/cnc/cam/model/plan';
 import { pureGoalObject } from '../../../src/engine/cnc/engrave/jobKind';
 import { goalEdgeBreakOptions } from '../../../src/engine/cnc/engrave/edgeBreak';
 import { goalInputFor } from '../../../src/workers/sim/goalCheckField';
@@ -756,6 +758,13 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     feeds: resolvedFeedsTable().table,
     defaults: shopDefaults,
   };
+  /**
+   * #1134 — THE PICK'S MEASURED OWNED PLAN, waited for by the run. `chooseCutters` fully evaluates
+   * its finalists (a real `engraveGenerate` on the run shop); the winning evaluation's plan IS the
+   * owned plan the cut would have planned, so `runJob` hands it through and the owned half is not
+   * planned a second time. Reset whenever the chosen plan is invalidated (a setup substitution).
+   */
+  let reusedOwnedPlan: ModelPlanOutput | null = null;
   if (boot.location !== null) {
     const where = boot.location;
     recordInput(where.path);
@@ -1127,7 +1136,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    * material that sweep says was removed. So the pipeline runs twice, with the second sweep seeded by
    * the first's result, and only then is anything written.
    */
-  async function prepare(job: EngraveJob, opts: { priorRemoval?: NodeMeshOutput } = {}): Promise<PrepareResult> {
+  async function prepare(
+    job: EngraveJob,
+    opts: { priorRemoval?: NodeMeshOutput; reusedOwnedPlan?: ModelPlanOutput | null } = {},
+  ): Promise<PrepareResult> {
     // #732 — the house catalogue read above is the SAME list the app's worker is handed: the
     // vendor's row for this cutter and material answers before the starting table, and the
     // machine's clamp still has the last word (a thread's S/F comes through #445's
@@ -1149,6 +1161,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // the app's.
         undefined,
         getTools().map((entry) => entry.tool),
+        // #1134 — the pick's winning full plan IS the cut's owned plan: post it, do not re-plan.
+        { ...(opts.reusedOwnedPlan === undefined || opts.reusedOwnedPlan === null ? {} : { reusedOwnedPlan: opts.reusedOwnedPlan }) },
       );
     } catch (e) {
       if (isCliExit(e)) throw e;
@@ -1718,9 +1732,16 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       reachability?: Reachability;
       unreachable?: { row: ReachRow; cutters: number }[];
       preview?: boolean;
+      /** #1134 — the pick's measured owned plan (see `prepare`). */
+      reusedOwnedPlan?: ModelPlanOutput | null;
     },
   ): Promise<JobResult> {
-    const prepared = await prepare(job);
+    const prepared = await prepare(
+      job,
+      opts.reusedOwnedPlan === undefined || opts.reusedOwnedPlan === null
+        ? {}
+        : { reusedOwnedPlan: opts.reusedOwnedPlan },
+    );
     if (!prepared.ok) return prepared;
     const sampling = samplingRows(prepared.generated);
     if (sampling !== undefined) runSampling = sampling;
@@ -1873,6 +1894,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           catalogue: catalogueRows,
           conditions: inventoryConditions(),
           shop: pickShop,
+          // #1134 — the FULL evaluations plan the program the cut would post: the run shop, mount
+          // included. The pick's own score keeps the picker's shop (the both-doors rule, #947).
+          runShop: { ...shop, mount: mountFor(job) },
           floors: supportingFloors(tl, toPartPlan(job)),
         });
         const searchMs = Date.now() - searchStart;
@@ -1934,6 +1958,11 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
               toolItems: Object.fromEntries(chosen.plan.cutters.map((c) => [c.key, [...c.items]])),
             },
           ];
+        }
+        // #1134 — the pick's winning full plan is the cut's owned plan: hand it to the run.
+        reusedOwnedPlan = chosen.evaluation.ownedPlan ?? null;
+        if (reusedOwnedPlan !== null) {
+          out.progress(`  reuse     the pick's plan reused — the cut posts the measured plan, not a re-plan`);
         }
       } else {
         const reach = scanReach(job);
@@ -2057,12 +2086,21 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
             `  substitute setup ${setupIndex + 1}   ${dead} is not in the tool library; ${to.key} cuts that setup’s work`,
           );
         }
+
+        const before = parsed.job;
         parsed.job = writeSetupPlan(parsed.job, tools, setupIndex, chosen.plan.cutters);
+        // #1134 — a substituted setup changes the job, so the pick's plan is stale: say so and
+        // fall back to planning the cut.
+        if (parsed.job !== before && reusedOwnedPlan !== null) {
+          out.progress('  reuse     discarded — the setup substitution changed the job; the cut plans it again');
+          reusedOwnedPlan = null;
+        }
       }
     }
     const result = await runJob(parsed.job, outDir, {
       writeJobDocument: false,
       note: `*Generated from \`${basename(path)}\` by \`casemaker engrave\`; the app’s \`RunSheetView\` renders the same \`buildRunSheet\` structure. No result is recorded here.*`,
+      reusedOwnedPlan,
     });
     if (result.ok) {
       programs.push(...result.programs);
@@ -2765,6 +2803,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
 
     const result = await runJob(built.job, outDir, {
       writeJobDocument: false,
+      reusedOwnedPlan,
       note:
         `*Built from ${paths.map((p) => `\`${basename(p)}\``).join(', ')} by ` +
         `\`casemaker cut --from-gerber\` (#743 P-4b): the copper, the isolation band, every hole, ` +

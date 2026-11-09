@@ -44,6 +44,25 @@ export interface TwoPlanOutput {
   defaultPlan: 'owned';
 }
 
+/** #1134 — the handoffs `planTwoOutcomes` accepts. */
+export interface TwoPlanOptions {
+  /**
+   * THE PICK'S MEASURED OWNED PLAN (#1134). The smart pick fully evaluates its finalists with
+   * `engraveGenerate`; the winning evaluation's plan IS the cut's owned plan, so the cut hands it
+   * through here and the owned half is not planned a second time. The reused plan was computed
+   * from the same input this call builds (the pick's own evaluation plans the owned half with the
+   * catalogue CONFIGURED — see `EngraveGenerateOptions.ownedOnly` — so the statements match too).
+   * `null`/absent: plan it here as before.
+   */
+  reusedOwned?: ModelPlanOutput | null;
+  /**
+   * THE OWNED HALF ONLY (#1134). The pick's full evaluation needs a real plan, but not the ideal
+   * comparison; skipping the ideal keeps each finalist at one plan's cost while the catalogue stays
+   * CONFIGURED in the input, so the plan a finalist stores is the plan the cut would have planned.
+   */
+  ownedOnly?: boolean;
+}
+
 /**
  * Run the cost-ranked plan twice — owned and ideal — and return both.
  *
@@ -52,8 +71,12 @@ export interface TwoPlanOutput {
  * owned set and the catalogue, with the pin DROPPED: the ideal answers "what would the best
  * available bit do", not "what would the operator's pin do".
  */
-export async function planTwoOutcomes(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<TwoPlanOutput> {
-  const owned = await planModelCam(
+export async function planTwoOutcomes(
+  input: ModelPlanInput,
+  opts: PlanModelCamOptions = {},
+  two: TwoPlanOptions = {},
+): Promise<TwoPlanOutput> {
+  const owned = two.reusedOwned ?? await planModelCam(
     {
       ...input,
       cutters: { house: input.cutters.house, catalogue: [], ...(input.cutters.pinned === undefined ? {} : { pinned: input.cutters.pinned }) },
@@ -64,6 +87,7 @@ export async function planTwoOutcomes(input: ModelPlanInput, opts: PlanModelCamO
     // #1052 — the trace's plan:start row names which of the two runs it is (6b's round).
     { ...opts, planKind: 'owned' },
   );
+  if (two.ownedOnly === true) return { owned, ideal: null, defaultPlan: 'owned' };
   const ideal = await planIdealOnly(input, opts);
   if (ideal === null) return { owned, ideal: null, defaultPlan: 'owned' };
   return { owned: enrichOwnedRestStatement(owned, ideal, input), ideal, defaultPlan: 'owned' };

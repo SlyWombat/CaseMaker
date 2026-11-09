@@ -57,6 +57,23 @@ describe('#961/#975 the two plans', () => {
     expect(JSON.stringify(two.owned)).toBe(JSON.stringify(directOwned));
   }, 120_000);
 
+  it('#1134 — a reused owned plan is posted as-is, and the ideal still runs beside it', async () => {
+    const planInput = input([flat6, ball6, v90], [smallFlat]);
+    const two = await planTwoOutcomes(planInput);
+    expect(two.ideal).not.toBeNull();
+    // The pick's measured owned plan handed through: the owned half is not planned again, the
+    // ideal still runs, and the result is the same plan the first call produced.
+    const reused = await planTwoOutcomes(planInput, {}, { reusedOwned: two.owned });
+    expect(JSON.stringify(reused.owned)).toBe(JSON.stringify(two.owned));
+    expect(reused.ideal).not.toBeNull();
+    expect(JSON.stringify(reused.ideal)).toBe(JSON.stringify(two.ideal));
+    // The pick's own evaluation shape: owned half only, planned exactly as the owned run does.
+    const ownedOnly = await planTwoOutcomes(planInput, {}, { ownedOnly: true });
+    expect(ownedOnly.ideal).toBeNull();
+    const directOwned = await planModelCam({ ...planInput, cutters: { house: planInput.cutters.house, catalogue: [] } });
+    expect(JSON.stringify(ownedOnly.owned)).toBe(JSON.stringify(directOwned));
+  }, 120_000);
+
   it('never refuses where an owned tool can do the job — even when the catalogue carries a better bit', async () => {
     // The owned set plans the sloped part's pockets (the baseline planStageCatch959 pins that);
     // the catalogue offers a ⌀1 flat that corners better. The OWNED plan must still plan the

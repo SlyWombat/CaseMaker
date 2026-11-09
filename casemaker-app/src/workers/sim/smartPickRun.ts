@@ -54,6 +54,10 @@ export interface EngravePickInputs {
   catalogue: readonly FeedCatalogueRow[];
   conditions: ReadonlyMap<string, ConditionSummary> | null;
   shop: EngraveShopOpts;
+  /** #1134 — THE SHOP GENERATE USES, when it differs from the picker's (`EvalContext.runShop`):
+   * the full evaluation plans the program the cut would post, so the pick's winning plan can be
+   * handed to the cut byte for byte. Absent: the pick shop, as before. */
+  runShop?: EngraveShopOpts | null;
   /** The caller's own table, when it is not the shop's `feeds` (the worker sends it explicitly). */
   table?: readonly FeedsEntry[] | null;
   /**
@@ -74,6 +78,7 @@ export function pickContext(inputs: EngravePickInputs): EvalContext {
     tools: dedupeCutterEntries(inputs.tools),
     catalogue: inputs.catalogue,
     shop: inputs.shop,
+    runShop: inputs.runShop ?? null,
     calibration: null,
     conditions: inputs.conditions,
     table: inputs.table ?? inputs.shop.feeds ?? null,
