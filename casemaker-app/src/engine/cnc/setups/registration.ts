@@ -93,6 +93,8 @@ export function registrationFor(
     probe?: ProbeSpec | null;
     /** #599 — the mount tap point (machine XY), computed by the caller from the bed placement. */
     mountTap?: { x: number; y: number; fromMachineZ: number; label: string } | null;
+    /** #1133 — where the surface touch should land, work XY: the cut area's centre. */
+    cutCentre?: { x: number; y: number };
     bracketOrigin?: BracketOrigin;
     /** Bracket (#427): the clamps and arms as placed, and whether to take the confirming touch. */
     mountObstacles?: PlanObstacle[];
@@ -123,6 +125,7 @@ export function registrationFor(
       bracketConfirm: input.bracketConfirm,
       // #743 — a disc keeps its own four-edge plan; a rectangle's input has no `disc`.
       ...(input.disc !== undefined ? { disc: input.disc } : {}),
+      ...(input.cutCentre !== undefined ? { cutCentre: input.cutCentre } : {}),
     },
     settings,
   );

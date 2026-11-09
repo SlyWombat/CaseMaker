@@ -830,15 +830,17 @@ export const Z1: MillProfile = {
   // #1133 — THE HEAD, measured from Makera's own public model: `Machine_Design_Files/
   // Makera-Z1_Simplified_4Axis.step` (github.com/MakeraInc/CarveraProfiles; sha256
   // b7df28bcc66a1923457211e610579848ea25b1b950fcdcb19d969747888dfd12; vendor file, never
-  // committed). Its head-sized solids measure 92.0 mm across their widest horizontal axis
-  // (a 92 × 71 × 45 body and a 92 × 60.5 × 75.4 one); the assembly transforms were not resolved by
-  // this read, so the ENVELOPE takes the widest of them (92 mm) as a conservative diameter:
-  // radius 46 mm. It is a DEFAULT in the #1092 sense — stated, with provenance — and #943's bench
-  // agenda carries the caliper line that replaces it with a measured nose.
+  // committed). ONE HEIGHT FILTER: only a body that can come DOWN within the stock's height plus
+  // clearance above the tip can ever hit the stock, and the Z carriage/housing sits far above that
+  // band. Of the head-sized solids the one inside the band measures 52 × 57 × 67 mm, so the
+  // envelope is its widest half-extent: radius 28.5 mm. (The 92 mm bodies are the carriage and are
+  // excluded by that filter — the #1133 review's correction.) It lands the seat point about where
+  // the maintainer probed by hand (0f, machine (−175, −35)), and #943's bench agenda carries the
+  // caliper line that replaces it with a measured nose.
   headEnvelope: {
-    radiusMm: 46,
+    radiusMm: 28.5,
     source:
-      'Makera’s public Z1 model (Machine_Design_Files/Makera-Z1_Simplified_4Axis.step, sha256 b7df28bc…): its head-sized solids measure 92.0 mm across their widest horizontal axis, taken as a conservative diameter (radius 46 mm); the assembly transforms were not resolved, so this is an upper bound, not a calipered nose — #943 owes the caliper',
+      'Makera’s public Z1 model (Machine_Design_Files/Makera-Z1_Simplified_4Axis.step, sha256 b7df28bc…), height-filtered to the bodies that can descend within the stock’s height plus clearance above the tip: the one in that band measures 52 × 57 × 67 mm, taken as a 57 mm diameter (radius 28.5 mm); the assembly transforms were not resolved, so it is a model reading, not a calipered nose — #943 owes the caliper',
   },
   // The 4th-axis figures (#237, /Rotary.md §3.5), each with its own provenance (#238). After the
   // 2026-10-27 evidence pass (/Rotary.md §9) every source names Makera's own artifact: the shipped

@@ -124,7 +124,7 @@ describe('#1133 a bracket hold plans one top touch', () => {
   it('the Z1 states a head envelope with its provenance (a product constant, not a knob)', () => {
     const env = headEnvelopeOf(Z1);
     expect(env).not.toBeNull();
-    expect(env!.radiusMm).toBe(46);
+    expect(env!.radiusMm).toBe(28.5);
     expect(env!.source).toContain('Makera-Z1_Simplified_4Axis.step');
     expect(env!.source).toContain('b7df28bc');
   });

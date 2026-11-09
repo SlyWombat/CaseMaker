@@ -22,7 +22,7 @@ import {
   type BracketSeatDatum,
 } from '@/engine/cnc/mounts/bracket';
 import type { MountDatum, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
-import { mountObstaclesFor, seatSeekFor } from '@/engine/cnc/registration/footprintJob';
+import { cutRegionOf, mountObstaclesFor, seatSeekFor } from '@/engine/cnc/registration/footprintJob';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
 import { referenceOpenings, registrationFor, type MountSpec, type Setup } from '@/engine/cnc/setups';
@@ -195,10 +195,14 @@ export function planRegistrationAttempt(args: {
     // 0.05 mm, fit 0.1 mm), so with the seat measured there is nothing to find: no edge scans, no
     // corner derivation, and no mount tap (the seat datum the profile holds IS the reference — a
     // tap would re-measure it). #1070's footprint find was the vise's kind of plan.
+    // #1133 review — the ONE touch is at the CUT AREA'S centre, not the blank's (the bench job's
+    // is (77.34, 63)): the region's own centre, when the job states a region.
+    const region = cutRegionOf(job);
     const result = registrationFor(
       setup,
       mount,
       {
+        ...(region === null ? {} : { cutCentre: { x: (region.minX + region.maxX) / 2, y: (region.minY + region.maxY) / 2 } }),
         // `registrationFor` adds the stock's height this way up to the seat; take it back off the
         // expected surface so the two statements cannot drift.
         seatMachineZ: expected0.expectedSurface.machineZ - dims0.z,

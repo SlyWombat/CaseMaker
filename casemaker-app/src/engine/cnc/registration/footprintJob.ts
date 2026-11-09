@@ -295,6 +295,9 @@ export function seatSeekFor(args: {
   const aimY = -sizes.settings.armWidth / 2;
   const endstopOf = args.calibration?.softEndstop;
   const limitsOn = endstopOf !== undefined && endstopOf !== null && endstopOf.enabled;
+  // #1133 review — the MACHINE's envelope bounds the search on the far side too: a candidate past
+  // xMax/yMax is off the bed's reach, however clear it is of the stock.
+  const reach = jobMachine(args.job, args.calibration).envelope;
   let best: { workX: number; workY: number; fromStock: number; fromAim: number } | null = null;
   for (let wy = 0; wy <= own.width + need * 2; wy += 1) {
     for (let wx = 0; wx <= own.length + need * 2; wx += 1) {
@@ -302,6 +305,7 @@ export function seatSeekFor(args: {
       if (fromStock + 1e-9 < need) continue;
       if (obstacles.some((o) => clearOf(wx, wy, o) + 1e-9 < need)) continue;
       if (limitsOn && (datum.x + wx < endstopOf.xMin || datum.y + wy < endstopOf.yMin)) continue;
+      if (datum.x + wx > reach.x.max || datum.y + wy > reach.y.max) continue;
       const fromAim = Math.hypot(wx - aimX, wy - aimY);
       if (
         best === null ||
