@@ -101,6 +101,7 @@ import {
 } from '@/engine/cnc/engrave/surfaceSpread';
 import { restSeamSentence } from '@/engine/cnc/engrave/restSettings';
 import { cutterNameForKey, toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { distinctCutterKeys, settledCutterEntry } from '@/engine/cnc/engrave/cutterChecklist';
 import { benchCutterFor, entryFor, NO_TOOL_KEY } from '@/engine/cnc/toolRegistry';
 import { finishSourceWords, type FinishSettingSource } from '@/engine/cnc/engrave/finishPass';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
@@ -4470,6 +4471,40 @@ function rotaryOriginSteps(rotary: RotaryMap, datum: RotarySheetDatum | undefine
   ];
 }
 
+/**
+ * #1127 — the checklist's line for the run sheet: how many of the run's cutters the operator had
+ * laid out, and when (the latest state's clock), or the rows still to fit. Null when the job
+ * carries no checklist for this package.
+ */
+export function bitsLaidOutWords(job: EngraveJob, programs: readonly { toolKey: string }[]): string | null {
+  const hash = job.package?.hash;
+  const entries = hash === undefined ? undefined : job.cutterChecklist?.[hash];
+  if (entries === undefined) return null;
+  const keys = distinctCutterKeys(programs);
+  if (keys.length === 0) return null;
+  // A row settled by a REPLACEMENT is found through it too (`settledCutterEntry`): after the
+  // whole-run regenerate the entry still names the original cutter, while the program posts the
+  // substitute.
+  const entriesFor = new Map(
+    keys.map((key) => [key, settledCutterEntry(entries, key)] as const),
+  );
+  const settled = keys.filter((key) => entriesFor.get(key) !== undefined);
+  const at = settled
+    .map((key) => entriesFor.get(key)!.at)
+    .sort()
+    .at(-1);
+  const time = (() => {
+    if (at === undefined) return null;
+    const d = new Date(at);
+    if (Number.isNaN(d.getTime())) return null;
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  })();
+  const placed = `bits laid out: ${settled.length} of ${keys.length}${time === null ? '' : ` at ${time}`}`;
+  if (settled.length === keys.length) return `${placed}.`;
+  const missing = keys.filter((key) => !settled.includes(key)).map((key) => cutterNameForKey(key));
+  return `${placed} — fit: ${missing.join(', ')}.`;
+}
+
 export function buildRunSheet(
   job: EngraveJob,
   generated: RunSheetGenerated,
@@ -5116,6 +5151,12 @@ export function buildRunSheet(
             'is fitted, that line does nothing.',
         },
       ];
+
+  // #1127 — THE BITS LAID OUT, from the job's checklist for this run (absent when none was
+  // recorded): the operator's own statement of what is in hand, on the paper that goes to the
+  // machine — "bits laid out: 7 of 7 at 11:58", or the rows still to fit.
+  const bitsWords = bitsLaidOutWords(job, generated.programs ?? []);
+  if (bitsWords !== null) cutterSteps.unshift({ text: bitsWords });
 
   // ---- 5 · Set the work origin ---------------------------------------------------------------
   // #391 — where the origin IS, then how the operator checks it against the blank actually in the

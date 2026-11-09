@@ -17,7 +17,7 @@ import { runContextFor } from '@/store/machineRunStore';
 import { stepAtLine } from '@/engine/cnc/playbackClock';
 import { EngraveCutSurface } from './EngraveCutSurface';
 import { RunLogFold } from './RunLogFold';
-import { CutterList, postedCuttersFor, type PostedCutter } from './CutterList';
+import { CutterChecklist, cutterChecklistRows, type CutterChecklistRow } from './CutterChecklist';
 import { saveEngraveProgram, saveFilesFolderOrZip, saveText } from '@/engine/exportTrigger';
 import { buildSimStallReport, simStallReportFileName } from '@/engine/jobs/simStallReport';
 import { flightCrumbs } from '@/platform/flightRecorder';
@@ -2354,13 +2354,16 @@ export function EngravePanel(): JSX.Element {
   // #1123 item 5 — ONE LIST OF POSTED CUTTERS, AS ROWS. The Job line is a COUNT; the rows below
   // it name the cutters in program order (the interactive checklist — ticks, replacements, the Cut
   // gate — is #1127's promotion of this niggle).
-  const postedCutters: PostedCutter[] = ((): PostedCutter[] => {
+  // #1127 — the interactive checklist: cam's rows (#1123 item 5) plus the operator's state.
+  const cutterRows: CutterChecklistRow[] = ((): CutterChecklistRow[] => {
     // A STALE RESULT DOES NOT DESCRIBE THIS JOB: the list only stands while the run matches it.
     const programs = run.staleSince === null && run.generated?.ok === true ? run.generated.programs : null;
-    return programs === null || programs.length === 0 ? [] : postedCuttersFor(programs);
+    return programs === null || programs.length === 0 ? [] : cutterChecklistRows(programs);
   })();
+  /** #1127 — the run a tick is recorded against: the frozen package, once Cut has frozen this run. */
+  const checklistHash = job.package?.hash;
   const cutterCountWords =
-    postedCutters.length === 0 ? null : `${postedCutters.length} cutter${postedCutters.length === 1 ? '' : 's'} — see the list`;
+    cutterRows.length === 0 ? null : `${cutterRows.length} cutter${cutterRows.length === 1 ? '' : 's'} — see the list`;
   // #807 — "no cutter chosen" only when nothing can choose: while the measured search runs (or
   // its answer is waiting to be applied), the line says the app is choosing.
   // #1123 item 8 — A CUT ON BORROWED FEEDS SAYS SO ON THE CUTTER LINE, not only in the fold: the
@@ -3801,8 +3804,24 @@ export function EngravePanel(): JSX.Element {
           ›
         </button>
       </div>
-      {/* #1123 item 5 — the ONE cutter list: a row per distinct cutter, in program order. */}
-      <CutterList cutters={postedCutters} />
+      {/* #1127 — the cutter checklist: one row per distinct cutter, in program order, with the
+          operator's located/replaced state. Ticking is never a byte input; a replacement is, and
+          it goes through the job (the whole-run regenerate follows with its estimate). */}
+      <CutterChecklist
+        rows={cutterRows}
+        entries={checklistHash === undefined ? undefined : job.cutterChecklist?.[checklistHash]}
+        // #1127 — a tick is recorded against THE RUN (the frozen package's hash), so before this
+        // run has been frozen (its first look at Cut) a tick has nowhere to be kept: the rows stay
+        // readable and the controls wait rather than toggling back on themselves.
+        disabled={checklistHash === undefined}
+        onSet={(key, entry) => {
+          if (checklistHash === undefined) return;
+          useEngraveJobStore.getState().setCutterChecklistEntry(checklistHash, key, entry);
+          if (entry?.state === 'replaced' && entry.replacedWith !== undefined) {
+            useEngraveJobStore.getState().replaceCutter(key, entry.replacedWith);
+          }
+        }}
+      />
 
       {/* #1010 — A SETUP'S DEAD CUTTER IS OFFERED BESIDE THE CUTTER LINE, never substituted. The
           measured answer for that setup is drawn with its press; taking it writes THAT setup only
@@ -4471,7 +4490,7 @@ export function EngravePanel(): JSX.Element {
         title="Cutter"
         // #798 — the group's own summary is the fact while closed; #1123 item 5 — after a run it
         // is the COUNT (the list's rows carry the cutters), before one the advice line.
-        summary={cutterCountWords === null ? cutterVerdict : `${postedCutters.length} cutter${postedCutters.length === 1 ? '' : 's'}`}
+        summary={cutterCountWords === null ? cutterVerdict : `${cutterRows.length} cutter${cutterRows.length === 1 ? '' : 's'}`}
         {...groupProps('engrave-group-cutter', false)}
       >
       {/* 3 — tool */}

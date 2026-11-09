@@ -2847,6 +2847,24 @@ const engraveJobV3Schema = engraveJobV2Schema
       .array(jobRunLogEntrySchema)
       .optional()
       .describe('Programs already run from this document; omit for none.'),
+    // #1127 — the cutter checklist, per run (the frozen package's hash). NOT a byte input: outside
+    // `jobFingerprint` and every staleness compare (ticking a box never stales a program).
+    cutterChecklist: z
+      .record(
+        z.string(),
+        z.record(
+          z.string(),
+          z
+            .object({
+              state: z.enum(['located', 'replaced']).describe('Whether the bit is in hand (located) or another owned cutter stands in for it (replaced).'),
+              replacedWith: z.string().optional().describe("The replacement cutter's registry key, when state is replaced."),
+              at: z.string().describe('ISO 8601, when the operator set this row.'),
+            })
+            .describe('One cutter row: located, or replaced with another owned cutter.'),
+        ),
+      )
+      .optional()
+      .describe('Per run (package hash) and cutter key: whether the bit is located or replaced (#1127); never a byte input.'),
     // #435 — 3D primitives and the reference object they are positioned against. BOTH OPTIONAL and
     // not defaulted, so every document that predates them keeps its exact shape and parses
     // unchanged; `schemaVersion` stays 3 because nothing existing is renamed or retyped.

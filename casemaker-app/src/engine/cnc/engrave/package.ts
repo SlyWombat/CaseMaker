@@ -87,9 +87,11 @@ function programFingerprintView(job: EngraveJob): unknown {
   // and the Cut strip's spindle-blower switch are choices about what to run, not what to cut.
   delete view.planChoice;
   delete view.blowWithVacuum;
-  // #1127 (E) — the cutter checklist is a per-package work record the operator ticks, not a program
-  // input. Stripped here before the field even lands on this branch, so the two lists agree: ticking
-  // a cutter box never stales a program and never calls a worker.
+  // #1127 — THE CUTTER CHECKLIST IS NOT A BYTE INPUT (the Manager's ruling): ticking a bit (or
+  // replacing one — the replacement regenerates through the JOB, so the job's own fields move)
+  // must never stale a frozen program. Outside the fingerprint and every staleness compare; the
+  // same strip is in #1132's fingerprintView. The checklist is a per-package work record the
+  // operator ticks, not a program input: ticking a cutter box never calls a worker.
   delete view.cutterChecklist;
   // #621 — the measured flatness is the registration's OUTCOME (the blank's bow), not a change to
   // the cutting program; a found position must not stale a frozen package.
