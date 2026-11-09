@@ -845,7 +845,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // designCheck's CM_GOAL_DEBUG) reads it through globalThis.
     if ((globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.CM_1092_BUDGET_DEBUG !== undefined) {
       const b = region.bounds;
-      console.error(`[resttip] ${region.id} bbox=[${b.min[0].toFixed(1)},${b.min[1].toFixed(1)}]-[${b.max[0].toFixed(1)},${b.max[1].toFixed(1)}] r=${radius.toFixed(3)} covered=${coveredCount} stencil=${stencilCellsFor(radius, pitch)} ops=${ops} budget=${DEFAULT_MAX_FINISH_TIP_OPS} refused=${ops > DEFAULT_MAX_FINISH_TIP_OPS}`);
+      console.error(`[resttip] cutter=${cutterKeyOf(region.cutter)} ${region.id} bbox=[${b.min[0].toFixed(1)},${b.min[1].toFixed(1)}]-[${b.max[0].toFixed(1)},${b.max[1].toFixed(1)}] r=${radius.toFixed(3)} covered=${coveredCount} stencil=${stencilCellsFor(radius, pitch)} ops=${ops} budget=${DEFAULT_MAX_FINISH_TIP_OPS} refused=${ops > DEFAULT_MAX_FINISH_TIP_OPS}`);
     }
     if (ops > DEFAULT_MAX_FINISH_TIP_OPS) {
       restBudgetFindings.push({ id: region.id, cutter, ops, budget: DEFAULT_MAX_FINISH_TIP_OPS });
@@ -3179,7 +3179,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       let mv = 0;
       let minZ = 0;
       for (const o of restOutcome.ir.operations) for (const m of o.moves) { mv++; if (m.z < minZ) minZ = m.z; }
-      console.error(`[restplan] ${id} floorZ=${floorZ.toFixed(3)} centreSpace=${centreSpace} regionPolys=${regionPolys.length} moves=${mv} minZ=${minZ.toFixed(3)}`);
+      console.error(`[restplan] cutter=${cutterKeyOf(cutter)} ${id} floorZ=${floorZ.toFixed(3)} centreSpace=${centreSpace} regionPolys=${regionPolys.length} moves=${mv} minZ=${minZ.toFixed(3)}`);
     }
     // #962 — A REST THAT CUTS NOTHING OVER LIVE STANDING MATERIAL IS STATED, NEVER SILENT: the
     // mask said cells stand here, and the op produced no toolpath (the region eroded to nothing
