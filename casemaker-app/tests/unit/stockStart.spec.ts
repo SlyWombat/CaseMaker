@@ -718,15 +718,43 @@ describe('#418 review fixes', () => {
     expect(plain3mfProblem(model('', MESH, '<item objectid="1"/>'))).toBeNull();
   });
 
-  it('inches, components, a scaled or turned build, and several items are refused by name', () => {
-    expect(plain3mfProblem(model('unit="inch"', MESH, '<item objectid="1"/>'))).toMatch(/in inchs?, and only millimetres/);
+  // #1131 — the parser applies the model's unit and every build/component transform, so a
+  // non-millimetre model and a scaled or turned build are no longer refusals at this door: the
+  // stock is measured from the transformed mesh.
+  it('a non-mm unit and a scaled or turned build item are plain now', () => {
+    expect(plain3mfProblem(model('unit="inch"', MESH, '<item objectid="1"/>'))).toBeNull();
+    expect(plain3mfProblem(model('', MESH, '<item objectid="1" transform="2 0 0 0 2 0 0 0 2 0 0 0"/>'))).toBeNull();
+    expect(plain3mfProblem(model('', MESH, '<item objectid="1" transform="0 1 0 -1 0 0 0 0 1 0 0 0"/>'))).toBeNull();
+  });
+
+  it('components, several items and several meshes are still refused — stock is one piece', () => {
     expect(
       plain3mfProblem(model('', `${MESH}<object id="2"><components><component objectid="1"/></components></object>`, '<item objectid="2"/>')),
     ).toMatch(/components/);
-    expect(plain3mfProblem(model('', MESH, '<item objectid="1" transform="2 0 0 0 2 0 0 0 2 0 0 0"/>'))).toMatch(/scales or turns/);
-    expect(plain3mfProblem(model('', MESH, '<item objectid="1" transform="0 1 0 -1 0 0 0 0 1 0 0 0"/>'))).toMatch(/scales or turns/);
     expect(plain3mfProblem(model('', MESH, '<item objectid="1"/><item objectid="1"/>'))).toMatch(/2 items/);
     expect(plain3mfProblem(model('', `${MESH}${MESH.replace('id="1"', 'id="3"')}`, '<item objectid="1"/>'))).toMatch(/2 mesh objects/);
+  });
+
+  it('a centimetre 3MF reads as stock at its real size, and the door states the reading (#1130/#1131)', async () => {
+    // A 10 × 6 × 1.2 cm prism — 100 × 60 × 12 mm. Duplicated vertices are welded by the stock
+    // reader, as every triangle soup's are.
+    const tris = prism([[0, 0], [10, 0], [10, 6], [0, 6]], 0, 1.2);
+    const verts: number[][] = [];
+    const trisXml: string[] = [];
+    for (const t of tris) {
+      const base = verts.length;
+      for (const v of t) verts.push(v);
+      trisXml.push(`<triangle v1="${base}" v2="${base + 1}" v3="${base + 2}"/>`);
+    }
+    const body =
+      '<object id="1" type="model"><mesh><vertices>' +
+      verts.map(([x, y, z]) => `<vertex x="${x}" y="${y}" z="${z}"/>`).join('') +
+      `</vertices><triangles>${trisXml.join('')}</triangles></mesh></object>`;
+    const read = await readStockFile(
+      new File([model('unit="centimeter"', body, '<item objectid="1"/>')], 'cm-blank.3mf'),
+    );
+    expect(read).toMatchObject({ kind: 'mesh', length: 100, width: 60, thickness: 12 });
+    if (read.kind === 'mesh') expect(read.note).toContain('read as centimetres');
   });
 
   it('the shipped demo lines are not the person’s items; anything else is', () => {

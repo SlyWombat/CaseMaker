@@ -24,7 +24,7 @@ import { parseStl, type ParsedMesh } from './stlParser';
 import { objUnitSentence, parseObj } from './objParser';
 import { unzipSync } from 'fflate';
 import { sha256HexBytes } from './sha256';
-import { parse3MF } from './threeMfParser';
+import { parse3MF, threeMfUnitSentence } from './threeMfParser';
 import { parsePrusaThreeMf } from './prusa3mf';
 import { MAX_DESIGN_FILE_BYTES } from './designLimits';
 
@@ -305,21 +305,20 @@ function rotatedRectangle(xyz: number[], maxZ: number, tol: number, topArea: num
 }
 
 /**
- * What a plain 3MF carries that `parse3MF` does not apply (#418 review): a model unit other than
- * millimetres, an object built from `<components>`, more than one mesh object, more than one build
- * item, or a build transform that is more than a translation. Any of them would read the stock at
- * the wrong size or the wrong turn, silently — so the file is refused with which one it is. A
- * translation is harmless: only the mesh's extents are taken. Null when the file is plain.
+ * What a 3MF carries that a STOCK cannot be: more than one mesh object, a build that places more
+ * than one item, or an object assembled from components — stock is one piece in one place.
+ *
+ * #1131 — the unit and the build transform are no longer refusals: `parse3MF` applies the model's
+ * unit and every component/build transform before the stock measures the mesh, so a centimetre or
+ * rotated single mesh reads correctly. Components stay refused here because this door wants a
+ * single piece and the holder's placement count is not read at this layer (the parser composes
+ * them for the goal and enclosure doors, which take a whole scene). Null when the file is plain.
  */
 export function plain3mfProblem(bytes: ArrayBuffer): string | null {
   const zip = unzipSync(new Uint8Array(bytes));
   const entry = zip['3D/3dmodel.model'] ?? zip['3d/3dmodel.model'];
   if (!entry) return null; // parse3MF names the missing entry itself
   const xml = new TextDecoder('utf-8').decode(entry);
-  const unit = /<model\b[^>]*\bunit="([^"]*)"/.exec(xml)?.[1];
-  if (unit !== undefined && unit !== 'millimeter') {
-    return `its model is in ${unit}s, and only millimetres are read as stock — export it in mm`;
-  }
   if (/<components\b/.test(xml)) {
     return 'its object is assembled from components, which are not read as stock — export one merged mesh';
   }
@@ -327,15 +326,6 @@ export function plain3mfProblem(bytes: ArrayBuffer): string | null {
   if (meshes > 1) return `it holds ${meshes} mesh objects — stock is one piece; export just the blank`;
   const items = [...xml.matchAll(/<item\b[^>]*>/g)].map((m) => m[0]);
   if (items.length > 1) return `its build places ${items.length} items — stock is one piece in one place`;
-  const transform = items[0] === undefined ? undefined : /\btransform="([^"]*)"/.exec(items[0])?.[1];
-  if (transform !== undefined) {
-    const m = transform.trim().split(/\s+/).map(Number);
-    const identity = [1, 0, 0, 0, 1, 0, 0, 0, 1];
-    if (m.length !== 12 || m.some((v) => !Number.isFinite(v))) return `its build transform cannot be read ("${transform}")`;
-    if (identity.some((v, i) => Math.abs(m[i]! - v) > 1e-6)) {
-      return 'its build transform scales or turns the object, which is not applied here — apply it in the slicer and export again';
-    }
-  }
   return null;
 }
 
@@ -430,7 +420,15 @@ export async function readStockFile(file: File): Promise<StockFileRead> {
       mesh = parsed;
       note = objUnitSentence(name, parsed.unit);
     } else {
-      mesh = isStl ? parseStl(bytes) : parse3MF(bytes);
+      if (isStl) {
+        mesh = parseStl(bytes);
+      } else {
+        // #1130 — the parser applies the model's unit; a non-mm reading is a fact the operator
+        // should see, the same sentence the goal door shows. #1131 — transforms are applied too.
+        const parsed = parse3MF(bytes);
+        mesh = parsed;
+        if (parsed.unit.mmPerUnit !== 1) note = threeMfUnitSentence(name, parsed.unit);
+      }
     }
     const read = meshAsStock(mesh);
     if (!read.ok) return { kind: 'refused', name, reason: read.reason };
