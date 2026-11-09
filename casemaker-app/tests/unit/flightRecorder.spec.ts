@@ -126,7 +126,15 @@ describe('#787 — the session marker', () => {
     const crumbs = new FakeCrumbs();
     crumbs.stored = oldCrumbs;
     const marks = new FakeMarker();
-    marks.value = marker({ work: 'generate', stage: 'plan', label: 'roughing level 41 of 112' });
+    // #1122 — the leftover marker is THIS build's own last run (same version and commit), so the
+    // banner may report it. A marker from another build is the test below.
+    marks.value = marker({
+      appVersion: '2.1.0',
+      commit: null,
+      work: 'generate',
+      stage: 'plan',
+      label: 'roughing level 41 of 112',
+    });
     setFlightCrumbIO(crumbs);
     setFlightMarkerIO(marks);
 
@@ -141,6 +149,28 @@ describe('#787 — the session marker', () => {
     expect(moment.label).toBe('roughing level 41 of 112');
     expect(moment.heapMb).toBe(3_800);
     expect(lastWorkFacts(previous!)?.jobName).toBe('mouse');
+  });
+
+  // #1122 item 4 — THE BANNER IS FOR THIS INSTALL’S LAST RUN, not for any crash this browser
+  // profile ever saw. The maintainer installed a new build and the door opened under yesterday's
+  // crash banner, from the published build. The marker carries its build (version + commit); a
+  // marker whose build is not this one is not this install's last run, so it is not reported.
+  it('#1122 — a marker left by another build opens the door clean', async () => {
+    const oldCrumbs: Crumb[] = [
+      { at: 1_100, kind: 'work', work: 'generate', stage: 'start', data: { jobName: 'mouse' } },
+    ];
+    const crumbs = new FakeCrumbs();
+    crumbs.stored = oldCrumbs;
+    const marks = new FakeMarker();
+    // Same version, different commit: the published build and this one.
+    marks.value = marker({ appVersion: '2.1.0', commit: 'published' });
+    setFlightCrumbIO(crumbs);
+    setFlightMarkerIO(marks);
+
+    const previous = await startFlightRecorder({ appVersion: '2.1.0', commit: 'dev', now: 9_000 });
+    expect(previous).toBeNull();
+    // The fresh session's marker is written at once, so the stale record cannot resurrect.
+    expect(marks.value?.commit).toBe('dev');
   });
 
   it('the work notes move the marker, and a clean exit clears it', async () => {

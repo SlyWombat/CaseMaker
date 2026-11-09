@@ -79,8 +79,10 @@ function primeCrash(): void {
   marker.value = {
     id: 's-crashed',
     startedAt: CRASHED[0]!.at,
-    appVersion: '1.0.0',
-    commit: 'abc1234',
+    // #1122 item 4 — the leftover marker is THIS build's own last run, so the banner reports it.
+    // These are vitest's build defines (`vitest.config.ts`), the identity `init()` compares against.
+    appVersion: '0.0.0-test',
+    commit: 'testcommit',
     work: 'generate',
     stage: 'rough',
     label: 'roughing level 41 of 112',

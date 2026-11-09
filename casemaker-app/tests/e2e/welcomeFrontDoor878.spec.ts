@@ -11,6 +11,14 @@ test.setTimeout(120_000);
 
 const DOORS = ['welcome-door-print', 'welcome-door-racks', 'welcome-door-toolboxes', 'welcome-door-cnc'] as const;
 
+// #1123 item 1 — the tile is the control; this is its action label (a span inside it now).
+const ACTION: Record<(typeof DOORS)[number], string> = {
+  'welcome-door-print': 'welcome-start-case',
+  'welcome-door-racks': 'welcome-start-rack',
+  'welcome-door-toolboxes': 'welcome-start-toolbox',
+  'welcome-door-cnc': 'welcome-start-cnc',
+};
+
 async function cardBoxes(page: Page): Promise<Array<{ x: number; y: number; width: number; height: number }>> {
   const boxes = [];
   for (const id of DOORS) {
@@ -28,7 +36,10 @@ test('the four cards are there, each with a picture, a headline and one action',
     await expect(card).toBeVisible();
     await expect(card.locator('svg[role="img"]')).toHaveCount(1);
     await expect(card.getByRole('heading', { level: 2 })).toBeVisible();
-    await expect(card.getByRole('button')).toHaveCount(1);
+    // #1123 item 1 — the whole tile is the control; its action label sits inside it.
+    await expect(card).toHaveAttribute('role', 'button');
+    await expect(card).toHaveAttribute('tabindex', '0');
+    await expect(card.getByTestId(ACTION[id])).toBeVisible();
   }
   await expect(page.getByTestId('welcome-hero')).toContainText('Design it. Print it. Cut it.');
   // The quiet row keeps the starters; the catalog is still below.
@@ -83,7 +94,7 @@ test('one row on a wide desktop, two by two at tablet width, a column on a phone
   for (const b of boxes) expect(Math.abs(b.y - rowY)).toBeLessThan(2);
   for (let i = 1; i < boxes.length; i++) expect(boxes[i]!.x).toBeGreaterThan(boxes[i - 1]!.x);
   // All four above the fold, action included.
-  for (const id of DOORS) await expect(page.getByTestId(id).getByRole('button')).toBeInViewport();
+  for (const id of DOORS) await expect(page.getByTestId(ACTION[id])).toBeInViewport();
 
   await page.setViewportSize({ width: 1024, height: 768 });
   boxes = await cardBoxes(page);

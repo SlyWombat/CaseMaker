@@ -344,7 +344,16 @@ export async function startFlightRecorder(opts: {
   const io = crumbIO ?? defaultCrumbs();
   const storedMarker = (markerIO ?? defaultMarker()).read();
   const previousCrumbs = await io.load();
-  const previous: PreviousSession | null = storedMarker === null ? null : { marker: storedMarker, crumbs: previousCrumbs };
+  // #1122 item 4 — A MARKER IS THIS INSTALL'S LAST RUN ONLY WHEN THIS BUILD LEFT IT. The marker
+  // carries the build that wrote it (version + commit); a crash left by the published build must
+  // not open a freshly installed build's door under yesterday's banner. A marker from THIS build
+  // is still this installation's last run however old the crash is, and is reported.
+  const previous: PreviousSession | null =
+    storedMarker === null ||
+    storedMarker.appVersion !== opts.appVersion ||
+    (storedMarker.commit ?? null) !== (opts.commit ?? null)
+      ? null
+      : { marker: storedMarker, crumbs: previousCrumbs };
 
   ring = [];
   ringBytes = 0;

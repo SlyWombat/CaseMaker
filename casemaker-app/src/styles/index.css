@@ -1374,6 +1374,8 @@ body, html, #root {
   border: 1px solid color-mix(in srgb, var(--cap-accent) 28%, var(--cm-color-outline-variant));
   border-radius: 14px;
   box-shadow: var(--wb-shadow);
+  /* #1123 — the whole tile is the control, so the whole tile says so. */
+  cursor: pointer;
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
 .wb-cap:hover,
@@ -1382,6 +1384,13 @@ body, html, #root {
   border-color: color-mix(in srgb, var(--cap-accent) 70%, var(--cm-color-outline-variant));
   box-shadow: var(--wb-shadow-lift), 0 0 0 1px color-mix(in srgb, var(--cap-accent) 35%, transparent);
 }
+/* Keyboard focus lands on the card itself: one visible ring, the same for every tile. */
+.wb-cap:focus-visible {
+  outline: 2px solid var(--cap-accent);
+  outline-offset: 3px;
+}
+/* The action label answers a hover anywhere on the card, not only over the label. */
+.wb-cap:hover .wb-cap__action { filter: brightness(1.15); }
 .wb-cap--cases { --cap-accent: var(--cm-color-primary); --cap-accent-strong: var(--cm-color-primary-container); }
 .wb-cap--racks { --cap-accent: var(--cm-color-secondary); --cap-accent-strong: var(--cm-color-secondary); }
 .wb-cap--toolboxes { --cap-accent: var(--cm-color-tertiary); --cap-accent-strong: var(--cm-color-tertiary); }
