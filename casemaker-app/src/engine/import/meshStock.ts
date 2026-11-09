@@ -358,7 +358,7 @@ export type StockFileRead =
       width: number;
       thickness: number;
       shape?: 'disc';
-      /** #825 — an OBJ's unit reading, in one sentence (see `objParser.objUnitSentence`). */
+      /** #825/#1130 — an OBJ's or 3MF's unit reading, in one sentence (see the parser's sentence). */
       note?: string;
     }
   /**
