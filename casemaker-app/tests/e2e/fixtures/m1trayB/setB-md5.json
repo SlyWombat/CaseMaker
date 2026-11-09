@@ -1,8 +1,8 @@
 {
-  "_note": "#1093 R1 + #1111 \u2014 set B, VERSIONED WITH THE RULE (13 files: top p1..p9, bottom p1..p4). The programs both jobs post under the one naming rule and the #1111 rule above. vs the 2026-11-07 table: 11 contents identical; the changes are the accepted #1080 deltas (top p7, top p8) and #1111 (top p6 now runs the 25 mm O-flute; the bottom's curved rough joined its pocket program, so 5 programs became 4 and p1 was rewritten \u2014 set B's p5 became p4). Goal check identical (98.4 % within 0.01 mm, leftovers 0.90/0.72/0.41 %, cut-into 0); run estimate 2 h 08 \u2192 2 h 21 min, one bit change fewer. The e2e reads this table as the cross-door check.",
-  "tableVersion": "1111-1",
-  "rule": "#1111 (0f comment 6729368477): (a) the canonical owned order \u2014 tier (inv: \u2192 user: \u2192 cat: \u2192 built-in), then key \u2014 so both doors see one list; (b) the ball tie needs the reach-margin gate (flute \u2212 deepest cut \u2265 reach.marginMm, recommendation 1.0 mm) while any candidate passes, and a remaining tie falls to the key, printed \"by key, pending #1114\"; (c) the sequence primary, the curved rough's flat and the rest ball keep their pre-#1111 order under the canonical order, stated as \"same diameter: by key, pending #1114\" \u2014 WITHIN THIS RULE the bottom posts 4 programs (rough + pocket on the 25 mm O-flute) and the top 9. Which cutter among equals a plan SHOULD prefer is the open policy issue #1114 (stiffness vs reach vs bit changes vs time), with three measured plans as evidence.",
-  "source": "casemaker cut <job>.cutjob.json --location k3-house/location.json, branch 1111-canonical-owned off m1-land13",
+  "_note": "#1093 R1 + #1111 + #1092 \u2014 set B, VERSIONED WITH THE RULES (13 files: top p1..p9, bottom p1..p4). The programs both jobs post under the one naming rule, #1111's canonical owned order with the ball reach-margin gate, and #1092's two-space rest rule. vs tableVersion 1111-1: 11 contents identical; #1092 rewrote the rest's two programs \u2014 top p5 and bottom p2 \u2014 to cut material work with the pocket floor a cutter-centre-space mask (see changedSince1111-1). The 2026-11-07 deltas (#1080's top p7/p8, #1111's top p6 25 mm O-flute and the bottom's 5\u21924 programs) stay recorded in changedSince20261107. The e2e reads this table as the cross-door check.",
+  "tableVersion": "1092-1",
+  "rule": "#1111 (0f comment 6729368477): (a) the canonical owned order \u2014 tier (inv: \u2192 user: \u2192 cat: \u2192 built-in), then key \u2014 so both doors see one list; (b) the ball tie needs the reach-margin gate (flute \u2212 deepest cut \u2265 reach.marginMm, recommendation 1.0 mm) while any candidate passes, and a remaining tie falls to the key, printed \"by key, pending #1114\"; (c) the sequence primary, the curved rough's flat and the rest ball keep their pre-#1111 order under the canonical order, stated as \"same diameter: by key, pending #1114\" \u2014 WITHIN THIS RULE the bottom posts 4 programs (rough + pocket on the 25 mm O-flute) and the top 9. Which cutter among equals a plan SHOULD prefer is the open policy issue #1114 (stiffness vs reach vs bit changes vs time), with three measured plans as evidence. (d) #1092 (cam, 0f's two-space rule): a rest cuts material work and CL-space centres \u2014 its floor mask is already cutter-centre space (no radius inset); a rest cuts only a floor the cutter belongs on, and a one-cell sliver is not a floor.",
+  "source": "casemaker cut <job>.cutjob.json --location k3-house/location.json, branch m1-land14 @ 07862b7f7 (main a575c26eb + #1111 ebdb53b7d + #1092 fd79ac9f2), 2026-11-08",
   "changedSince20261107": [
     {
       "name": "m1trayB-top-p6.nc",
@@ -23,6 +23,18 @@
       "name": "m1trayB-bottom-p4.nc",
       "old": "91d289d5fc0cf1321bf6ce37dee03e37",
       "new": "6ab42994f33f896ab81dcb926500ec1f"
+    }
+  ],
+  "changedSince1111-1": [
+    {
+      "name": "m1trayB-top-p5.nc",
+      "old": "5031ba58189dbf2a099ed31b026b69bc",
+      "new": "5d5a8990c4abcafb00a625f6559e6d09"
+    },
+    {
+      "name": "m1trayB-bottom-p2.nc",
+      "old": "8fd40df1e83ff9c1a11584c3fdab0ca0",
+      "new": "cda22e0642867d40819d111baf09b4f6"
     }
   ],
   "jobs": {
@@ -51,8 +63,8 @@
         },
         {
           "name": "m1trayB-top-p5.nc",
-          "bytes": 36079,
-          "md5": "5031ba58189dbf2a099ed31b026b69bc"
+          "bytes": 48344,
+          "md5": "5d5a8990c4abcafb00a625f6559e6d09"
         },
         {
           "name": "m1trayB-top-p6.nc",
@@ -86,8 +98,8 @@
         },
         {
           "name": "m1trayB-bottom-p2.nc",
-          "bytes": 4299,
-          "md5": "8fd40df1e83ff9c1a11584c3fdab0ca0"
+          "bytes": 4233,
+          "md5": "cda22e0642867d40819d111baf09b4f6"
         },
         {
           "name": "m1trayB-bottom-p3.nc",
