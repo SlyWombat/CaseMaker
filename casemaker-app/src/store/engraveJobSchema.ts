@@ -894,6 +894,9 @@ const surfaceSettingsSchema = z
     roughStepOverMm: z.number().finite().positive().max(20).optional().describe('Roughing raster pitch between scan lines, in millimetres; omit for the feeds row’s step-over.'),
     finishStepOverMm: z.number().finite().positive().max(20).optional().describe('Finishing raster pitch between scan lines, in millimetres; omit for the feeds row’s step-over.'),
     gridPitchMm: z.number().finite().min(0.02).max(2).optional().describe('Heightfield sampling pitch on both axes, in millimetres; omit for the shop’s flat-grid Y pitch.'),
+    // #1129 — the row sampler’s floor: the plan derives min(step-over / 10, 0.05 mm) when absent,
+    // never below the chord tolerance. A stated value must still be a sampling spacing.
+    minSpacingMm: z.number().finite().min(0.005).max(1).optional().describe('The adaptive row sampler’s floor, in millimetres; omit to derive it as min(step-over / 10, 0.05 mm), never below 0.005 mm.'),
     stockToLeaveMm: z.number().finite().min(0).max(2).optional().describe('Roughing allowance left on the goal surface, in millimetres; omit for the shop’s finish stock-to-leave.'),
     // #671 — the two extra finishing passes. Strict schema: a key not listed here is stripped, so
     // these MUST live here or the engine never sees them (the #219/#285 trap).

@@ -560,6 +560,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   // #1059 — the square chuck's levelled face angle from the bound profile's datum, when the job
   // is a square-chuck job and the datum exists (see `faceAngleReceiptFor`).
   let faceAngle: NonNullable<EngraveDetails['faceAngle']> | undefined;
+  // #1129 — the model plan's sampling facts (the row sampler's floor, per cutter, and where it came
+  // from). Set by the run that generated the programs; absent on a non-model plan.
+  let runSampling: EngraveDetails['sampling'] | undefined;
   let runOk = true;
   let runStage: string | null = null;
   let runGate: Receipt['gate'] = null;
@@ -626,6 +629,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         ...(runGoal === undefined || runGoal === null ? {} : { goal: runGoal }),
         ...(bed === null ? {} : { bed }),
         ...(faceAngle === undefined ? {} : { faceAngle }),
+        ...(runSampling === undefined ? {} : { sampling: runSampling }),
       },
     });
   }
@@ -1681,6 +1685,30 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   }
 
   /** Generate, verify, simulate and write one job — the two calls above, in order. */
+  /**
+   * #1129 — THE RECEIPT'S SAMPLING ROWS: the plan's `clGrid`, deduped by cutter and sorted, so the
+   * value the row sampler stopped at — and whether the job stated it — is on the receipt rather
+   * than only in the sheet.
+   */
+  function samplingRows(generated: EngraveGenerated): EngraveDetails['sampling'] {
+    const rows = (generated.plan?.perSetup ?? []).flatMap((setup) => setup.clGrid);
+    const byCutter = new Map<string, NonNullable<EngraveDetails['sampling']>[number]>();
+    for (const row of rows) {
+      const kept = byCutter.get(row.cutterKey);
+      if (kept === undefined) {
+        byCutter.set(row.cutterKey, {
+          cutterKey: row.cutterKey,
+          toleranceMm: row.toleranceMm,
+          minSpacingMm: row.minSpacingMm,
+          maxSpacingMm: row.maxSpacingMm,
+          minSpacingSource: row.minSpacingSource,
+          minSpacingFromStepOverMm: row.minSpacingFromStepOverMm,
+        });
+      }
+    }
+    return byCutter.size === 0 ? undefined : [...byCutter.values()].sort((a, b) => (a.cutterKey < b.cutterKey ? -1 : a.cutterKey > b.cutterKey ? 1 : 0));
+  }
+
   async function runJob(
     job: EngraveJob,
     outDir: string,
@@ -1694,6 +1722,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   ): Promise<JobResult> {
     const prepared = await prepare(job);
     if (!prepared.ok) return prepared;
+    const sampling = samplingRows(prepared.generated);
+    if (sampling !== undefined) runSampling = sampling;
     return {
       ok: true,
       ...writeProgram(prepared, outDir, {

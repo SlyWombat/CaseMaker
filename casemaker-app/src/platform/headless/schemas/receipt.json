@@ -1297,6 +1297,53 @@
                 "type": "object"
               },
               "type": "array"
+            },
+            "sampling": {
+              "description": "The model plan’s row-sampling floor per cutter (#1129); omitted when no model plan ran.",
+              "items": {
+                "description": "One cutter’s sampling facts.",
+                "properties": {
+                  "cutterKey": {
+                    "description": "The cutter this CL surface belongs to.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxSpacingMm": {
+                    "description": "The coarsest spacing a row starts at.",
+                    "type": "number"
+                  },
+                  "minSpacingFromStepOverMm": {
+                    "description": "The step-over the derived floor divided by 10 (the job’s own number either way).",
+                    "type": "number"
+                  },
+                  "minSpacingMm": {
+                    "description": "The floor: no row segment is subdivided finer than this.",
+                    "type": "number"
+                  },
+                  "minSpacingSource": {
+                    "description": "Whether the floor was derived from the step-over or stated by the job.",
+                    "enum": [
+                      "derived",
+                      "stated"
+                    ],
+                    "type": "string"
+                  },
+                  "toleranceMm": {
+                    "description": "The chord tolerance the sampler accepts segments at — the ACCEPTANCE rule, not the floor.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "cutterKey",
+                  "toleranceMm",
+                  "minSpacingMm",
+                  "maxSpacingMm",
+                  "minSpacingSource",
+                  "minSpacingFromStepOverMm"
+                ],
+                "type": "object"
+              },
+              "type": "array"
             }
           },
           "required": [

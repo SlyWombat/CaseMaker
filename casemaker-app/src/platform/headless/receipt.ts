@@ -362,6 +362,25 @@ export const engraveDetailsSchema = z
       })
       .optional()
       .describe('The face-angle datum a square chuck job was planned against; omitted otherwise. A new optional field does not bump RECEIPT_VERSION.'),
+    // #1129 — THE ROW SAMPLER'S FLOOR, per cutter, and where it came from. The model plan's
+    // adaptive sampling stops refining a row at `minSpacingMm`; before #1129 that floor was the
+    // chord tolerance (0.005 mm) and a 59 mm plate never finished. Omitted for a job with no
+    // model plan (an item job), so those receipts stay byte-identical.
+    sampling: z
+      .array(
+        z
+          .object({
+            cutterKey: z.string().min(1).describe('The cutter this CL surface belongs to.'),
+            toleranceMm: z.number().finite().describe('The chord tolerance the sampler accepts segments at — the ACCEPTANCE rule, not the floor.'),
+            minSpacingMm: z.number().finite().describe('The floor: no row segment is subdivided finer than this.'),
+            maxSpacingMm: z.number().finite().describe('The coarsest spacing a row starts at.'),
+            minSpacingSource: z.enum(['derived', 'stated']).describe('Whether the floor was derived from the step-over or stated by the job.'),
+            minSpacingFromStepOverMm: z.number().finite().describe('The step-over the derived floor divided by 10 (the job’s own number either way).'),
+          })
+          .describe('One cutter’s sampling facts.'),
+      )
+      .optional()
+      .describe('The model plan’s row-sampling floor per cutter (#1129); omitted when no model plan ran.'),
   })
   .describe('The job command’s own details.');
 
