@@ -179,6 +179,33 @@ def fixture_silhouette(depth, cl_xy, *, shadow_radius=1.0, thickness=2.0, breakt
                     cl=(50, 60, cl_xy[0], cl_xy[1]))
 
 
+def stepped_island_goal():
+    """The island with its rim column (i = 60) 0.5 mm proud of the floor: the outline cell's axial
+    neighbour is a real step, so a failed silhouette can be excused by the general v6 proof."""
+    jj, ii = np.mgrid[0:NY, 0:NX]
+    cov = (ii >= 60) & (ii <= 140) & (jj >= 20) & (jj <= 80)
+    z = np.where(cov, -0.8, 0.0)
+    z = np.where(cov & (ii == 60), -0.3, z)
+    return z, cov
+
+
+def fixture_silhouette_fallthrough(depth=0.2):
+    """U — a silhouette cell whose CL is INSIDE the part: the silhouette proof fails, and the cell
+    falls through to the general straddling proof (the notch/pocket case, 0f's follow-up)."""
+    z, cov = stepped_island_goal()
+    return judge_on(z, cov, [(50, 60, depth)], shadow_radius=1.0, thickness=2.0, breakthrough=0.3,
+                    cl=(50, 60, 6.5, 5.0))
+
+
+def fixture_shadow_stock_top(depth=0.2):
+    """T — a wall-shadow cell one step inside the island's rim: its relief disc reaches uncovered
+    grid, so the stock top is the high side (0.5 mm), not a bare 0 — the rim strip's wall-foot
+    cells (0f's v8 follow-up)."""
+    z, cov = pocket_goal()
+    return judge_on(z, cov, [(50, 61, depth)], shadow_radius=1.0, thickness=5.0,
+                    cl=(50, 61, 7.0, 5.0))
+
+
 def fixture_straddle(depth):
     """G — the general v6 proof on a 0.11 mm step (not a wall: the class needs > 0.2 mm)."""
     z, cov = step_goal(60, 40, -0.50, -0.61, 30)
@@ -291,6 +318,25 @@ def main():
         # no tool set: no r, so the silhouette is never excused (the app needs the CL and r)
         s = fixture_silhouette(0.2, (4.9, 5.0), shadow_radius=0.0)
         check('S silhouette, no tool radius', s, {'silhouetteExcusedCells': 0, 'adjudicatedCells': 1})
+        # R-a — no STATED stock thickness: the proof is UNAVAILABLE, the cell is counted, and the
+        # count is named; never a guessed ceiling.
+        s = fixture_silhouette(0.2, (4.9, 5.0), thickness=None)
+        check('S silhouette, no stated thickness', s, {'silhouetteExcusedCells': 0,
+                                                       'silhouetteUnavailableCells': 1,
+                                                       'adjudicatedCells': 1})
+        # U — the fall-through: a silhouette cell whose CL is inside fails the silhouette CL test
+        # and is excused by the GENERAL straddling proof across the rim's step (0f's follow-up).
+        s = fixture_silhouette_fallthrough()
+        check('U silhouette falls through to straddling', s, {'silhouetteExcusedCells': 0,
+                                                              'straddlingNotScoredCells': 1,
+                                                              'wallNotScoredCells': 0,
+                                                              'adjudicatedCells': 0})
+        # T — the relief disc reaching uncovered grid makes the stock top the high side: the rim
+        # strip's shadow cell is excused on relief 0.5 mm, not counted on a bare 0.
+        s = fixture_shadow_stock_top()
+        check('T shadow cell, relief sees the blank', s, {'shadowNotScoredCells': 1,
+                                                          'shadowOverReliefCells': 0,
+                                                          'adjudicatedCells': 0})
         # G — the general v6 proof: on a 0.11 mm step, a 0.105 mm read is excused on proof; a
         # 0.112 mm read is NOT (the general proof carries no 0.005 mm slack — the class proof does);
         # a 0.2 mm read is not.
