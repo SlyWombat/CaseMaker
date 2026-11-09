@@ -110,7 +110,9 @@ export interface RegistrationConsole {
  * F500), so the default 800 ms quiet would close the reply long before the slow `[PRB]` reading
  * lands. A longer quiet keeps the reader open across the probe moves.
  */
-const PROBE_TIMING: Partial<ConsoleTiming> = { quietMs: 20_000 };
+// #1123 item 17 — EXPORTED so the bench harness's restatement (`tools/z1/probeTiming.mjs`) can be
+// held to it by a spec: a probe line's default reply window must be the app's own length.
+export const PROBE_TIMING: Partial<ConsoleTiming> = { quietMs: 20_000 };
 
 /**
  * #789 — THE PROBE CONNECTOR'S SUPPLY. `M831`/`M832` switch the toolsensor output (`switch.toolsensor`,
