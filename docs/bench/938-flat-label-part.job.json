@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 3,
+  "id": "job-938-flat-label-part",
+  "name": "Milestone 1 sample 2 part: two-line flat-cutter label at the measured row (#938)",
+  "machineId": "Z1",
+  "stock": {
+    "length": 36,
+    "width": 100,
+    "thickness": 36,
+    "material": "hardwood"
+  },
+  "labels": [
+    {
+      "id": "line-measured",
+      "text": "MEASURED",
+      "font": "barlow",
+      "weight": "bold",
+      "size": 11,
+      "position": { "x": 12, "y": 50 },
+      "rotation": 90,
+      "depth": 1.0,
+      "enabled": true
+    },
+    {
+      "id": "line-hardwood",
+      "text": "HARDWOOD",
+      "font": "barlow",
+      "weight": "bold",
+      "size": 11,
+      "position": { "x": 24, "y": 50 },
+      "rotation": 90,
+      "depth": 1.0,
+      "enabled": true
+    }
+  ],
+  "shapes": [],
+  "toolKey": "flat-1.0",
+  "workholding": {
+    "kind": "vise",
+    "vise": {
+      "stockProud": 16,
+      "seat": "floor",
+      "fixedJawThickness": 10,
+      "movingJawThickness": 10,
+      "jawLength": 100,
+      "jawStartY": -10,
+      "source": "default",
+      "uncertainty": 0.5
+    }
+  },
+  "minFloor": 1,
+  "edgeMargin": 1,
+  "sacrificial": {
+    "under": null,
+    "sides": {
+      "left": null,
+      "right": null,
+      "front": null,
+      "back": null
+    },
+    "source": "default"
+  },
+  "breakthrough": 0.3,
+  "jawClearance": 1,
+  "customFonts": [],
+  "facing": {
+    "enabled": false,
+    "depth": 0,
+    "source": "user"
+  }
+}

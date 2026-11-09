@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 3,
+  "id": "job-936-groove-coupon",
+  "name": "Milestone 1 S2 pre-coupon: groove coupon on the stick's end (#936)",
+  "machineId": "Z1",
+  "stock": {
+    "length": 36,
+    "width": 100,
+    "thickness": 36,
+    "material": "hardwood"
+  },
+  "labels": [],
+  "shapes": [
+    {
+      "id": "groove-stroke",
+      "kind": "rect",
+      "position": {
+        "x": 18,
+        "y": 8
+      },
+      "rotation": 0,
+      "width": 30,
+      "height": 1.0,
+      "depth": 0.5,
+      "cornerRadius": 0,
+      "enabled": true
+    },
+    {
+      "id": "groove-flat",
+      "kind": "rect",
+      "position": {
+        "x": 18,
+        "y": 14
+      },
+      "rotation": 0,
+      "width": 30,
+      "height": 2.5,
+      "depth": 1.0,
+      "cornerRadius": 0,
+      "enabled": true
+    }
+  ],
+  "toolKey": "flat-1.0",
+  "workholding": {
+    "kind": "vise",
+    "vise": {
+      "stockProud": 16,
+      "seat": "floor",
+      "fixedJawThickness": 10,
+      "movingJawThickness": 10,
+      "jawLength": 100,
+      "jawStartY": -10,
+      "source": "default",
+      "uncertainty": 0.5
+    }
+  },
+  "minFloor": 1,
+  "edgeMargin": 1,
+  "sacrificial": {
+    "under": null,
+    "sides": {
+      "left": null,
+      "right": null,
+      "front": null,
+      "back": null
+    },
+    "source": "default"
+  },
+  "breakthrough": 0.3,
+  "jawClearance": 1,
+  "customFonts": [],
+  "facing": {
+    "enabled": false,
+    "depth": 0,
+    "source": "user"
+  }
+}
