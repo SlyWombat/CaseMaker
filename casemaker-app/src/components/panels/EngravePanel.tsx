@@ -2862,6 +2862,7 @@ export function EngravePanel(): JSX.Element {
   const runReady =
     !blocked &&
     !running &&
+    !run.restoreChecking &&
     run.staleSince === null &&
     rowToolpath === 'tick' &&
     rowVerified === 'tick' &&
@@ -5314,6 +5315,16 @@ export function EngravePanel(): JSX.Element {
             It used to be one tooltip for two causes, "Fix the errors above first.", which could
             be — and was — shown beside "0 errors" (audit B9). */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+          {run.restoreChecking && (
+            // #1123 review — a restored run whose inputs have not been compared against settled
+            // reads is not offered as current: no Cut…, and Generate waits for the check.
+            <span
+              data-testid="engrave-run-restore-checking"
+              style={{ fontSize: 12, lineHeight: 1.45, color: '#c8d3de' }}
+            >
+              Checking the restored run against this shop…
+            </span>
+          )}
           {run.restoreNote !== null && (
             // #1123 — a stored run that could not be restored says why, once, where Generate is.
             // It is not a finding (the job is fine) and it carries no Fix: the action is the
@@ -5332,7 +5343,7 @@ export function EngravePanel(): JSX.Element {
             // job, that step is Cut, so the same primary slot switches mode instead of offering
             // a second Generate. `data-action` names which press it is.
             data-action={runReady ? 'cut' : 'generate'}
-            disabled={runReady ? false : blocked || running || !simEnabled}
+            disabled={runReady ? false : blocked || running || !simEnabled || run.restoreChecking}
             title={
               runReady
                 ? 'Go to Cut — the program is generated, checked, simulated and matched against the design.'
@@ -5642,6 +5653,7 @@ export function EngravePanel(): JSX.Element {
               // #796 — the stale-program card's one action is the same Generate the footer carries.
               onGenerate={() => void generate()}
               generateBlocker={generateBlocker?.sentence ?? null}
+              restoreChecking={run.restoreChecking}
             />
           </>
         )

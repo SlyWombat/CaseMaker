@@ -309,6 +309,40 @@ async function waitForShopSettled(ms: number): Promise<boolean> {
   return shopSettled();
 }
 
+/** The one deferred recheck waiting for the house reads; cleanup when it has run. */
+let deferredRecheck: (() => void) | null = null;
+
+/**
+ * #1123 review — RECHECK WHEN THE READS SETTLE. Restoring with the house still reading used to
+ * skip the one-shot comparison and rely on the live watchers; but a watcher fires only on a store
+ * CHANGE after the restore, so an input whose store had already settled (margins, the fitted
+ * surface, a house store that answered first) was never compared. Wait for the reads, then run
+ * the same comparison once. No timeout and no skip: an unsettled house keeps the run unverified
+ * (`restoreChecking`), never falsely current.
+ */
+function deferRecheck(restoredInputs: EngraveRunInputs | null, currentInputs?: EngraveRunInputs): void {
+  if (deferredRecheck !== null) return;
+  let unsubTool: (() => void) | null = null;
+  let unsubLocation: (() => void) | null = null;
+  const cleanup = (): void => {
+    unsubTool?.();
+    unsubLocation?.();
+    deferredRecheck = null;
+  };
+  const run = (): void => {
+    if (!shopSettled()) return;
+    cleanup();
+    // A new run (or another restore) replaced the restored one: nothing of ours to verify.
+    if (useEngraveRunStore.getState().inputs !== restoredInputs) return;
+    useEngraveRunStore.setState({ restoreChecking: false });
+    recheckRunInputs(currentInputs);
+  };
+  unsubTool = useToolRegistryStore.subscribe(run);
+  unsubLocation = useLocationStore.subscribe(run);
+  deferredRecheck = cleanup;
+  run(); // the reads may have settled between the wait ending and this subscription
+}
+
 /**
  * Restore the stored run for the open job, after the first render. Called once at boot; a run
  * already generated in this session is never overwritten ('busy').
@@ -348,7 +382,12 @@ export async function restoreOpenRun(options: RestoreRunOptions = {}): Promise<R
     error: null,
     simStopped: false,
     restoreNote: null,
+    // Unverified until the comparison has run against settled reads (review, 2026-11-09).
+    restoreChecking: options.recheck !== false && !settled,
   });
-  if (options.recheck !== false && settled) recheckRunInputs(options.currentInputs);
+  if (options.recheck !== false) {
+    if (settled) recheckRunInputs(options.currentInputs);
+    else deferRecheck(record.state.inputs, options.currentInputs);
+  }
   return 'restored';
 }

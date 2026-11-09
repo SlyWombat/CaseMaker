@@ -298,6 +298,8 @@ interface Props {
   /** #796 — the panel's Generate action and its blocker sentence. */
   onGenerate?: () => void;
   generateBlocker?: string | null;
+  /** #1123 review — a restored run not yet compared against settled house reads. */
+  restoreChecking?: boolean;
 }
 
 /** #796 — the card's one action; the tests assert it was pressed rather than freezing here. */
@@ -325,6 +327,7 @@ function Harness(props: Props) {
       releaseBlocker={props.releaseBlocker ?? null}
       onGenerate={props.onGenerate ?? generateSpy}
       generateBlocker={props.generateBlocker ?? null}
+      restoreChecking={props.restoreChecking ?? false}
     />
   );
 }
@@ -1192,6 +1195,18 @@ describe('#656 from the cutter prompt to the cut', () => {
     // The expert path is there, unchanged, folded.
     expect((screen.getByTestId('engrave-cut-expert') as HTMLDetailsElement).open).toBe(false);
     expect(screen.getByTestId('engrave-cut-plan')).toBeTruthy();
+  });
+
+  it('#1123 review — a restored run is unverified until the shop reads settle: the Cut press is off', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    useEngraveRunStore.setState({ oracle: OK_ORACLE as never });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true, restoreChecking: true });
+    fireEvent.click(screen.getByTestId('engrave-ack'));
+    expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain(
+      'checking the restored run against this shop',
+    );
   });
 
   it('leaves a multi-program job to the release flow, with the disclosure open', () => {

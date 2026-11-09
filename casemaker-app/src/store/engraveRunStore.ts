@@ -437,6 +437,13 @@ export interface EngraveRunState {
    * moved shop is not a refusal: the restored run is marked stale with its named input instead.
    */
   restoreNote: string | null;
+  /**
+   * #1123 review — A RESTORED RUN IS UNVERIFIED UNTIL ITS RECHECK RUNS. When the house reads had
+   * not settled at restore time, `recheckRunInputs()` is deferred until they do; while this is
+   * true the result must not be offered as current (no Cut press, no Cut… primary). It clears
+   * when the deferred recheck runs; a moved input then marks the ordinary stale reason.
+   */
+  restoreChecking: boolean;
   /** #581 — the inputs that differ from the previous Generate's; empty on the first run. */
   changedSinceLast: EngraveInputKey[];
   /** #581 — the previous Generate's oracle verdict, so a ✓↔× flip can say what changed. */
@@ -546,6 +553,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     inputs: null as EngraveRunInputs | null,
     shopSignature: null as string | null,
     restoreNote: null as string | null,
+    restoreChecking: false,
     changedSinceLast: [] as EngraveInputKey[],
     previousVerdict: null as boolean | null,
     error: null as string | null,
@@ -1346,6 +1354,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     inputs: null,
     shopSignature: null,
     restoreNote: null,
+    restoreChecking: false,
     changedSinceLast: [],
     previousVerdict: null,
     error: null,

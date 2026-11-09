@@ -260,6 +260,12 @@ export interface EngraveCutSurfaceProps {
   onGenerate: () => void;
   /** The Design footer's own blocker sentence for Generate, when there is one (#803: no dead button). */
   generateBlocker: string | null;
+  /**
+   * #1123 review — a run restored from durable storage whose inputs have not yet been compared
+   * against settled house reads. It is not current: the Cut press and the stale-program Generate
+   * stay off until the deferred recheck has run.
+   */
+  restoreChecking: boolean;
 }
 
 /** The map from the live Generate: each program's FNV key to the report that gated that text. */
@@ -558,6 +564,7 @@ export function EngraveCutSurface({
   onLiveStatus,
   onGenerate,
   generateBlocker,
+  restoreChecking,
 }: EngraveCutSurfaceProps): JSX.Element {
   const freeze = useEngravePackageStore((s) => s.freeze);
   const openManage = useManageModeStore((s) => s.openManage);
@@ -1084,7 +1091,9 @@ export function EngraveCutSurface({
     step1Blocking?.message ?? (!green && !onlyPackageStale ? 'Clear step 1 first.' : null);
   // #796 — one name for "the program that is this design's": the Start cut screen and the one
   // press both read it, and it is a program now, not a frozen package.
-  const programBlocker = frozen
+  const programBlocker = restoreChecking
+    ? 'checking the restored run against this shop…'
+    : frozen
     ? null
     : pkg === null
       ? 'Generate the program in step 1 before starting it.'
@@ -1398,7 +1407,7 @@ export function EngraveCutSurface({
             <button
               type="button"
               data-testid="engrave-package-generate"
-              disabled={generateBlocker !== null}
+              disabled={generateBlocker !== null || restoreChecking}
               style={{ width: '100%', padding: 7, marginTop: 6 }}
               onClick={onGenerate}
             >

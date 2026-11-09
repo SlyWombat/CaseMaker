@@ -11,6 +11,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { runShopSignature, useEngraveRunStore } from '@/store/engraveRunStore';
 import { useLocationStore } from '@/store/locationStore';
+import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import {
   BUILD_CHANGED_NOTE,
@@ -103,6 +104,9 @@ const exact = (io: RunRecordIO) => ({
 beforeEach(() => {
   useEngraveRunStore.getState().reset();
   setRunRecordIO(null);
+  // A settled, service-less shop by default; the unsettled test sets its own.
+  useToolRegistryStore.setState({ status: 'absent' });
+  useLocationStore.setState({ status: 'absent', etag: null, location: null });
 });
 
 describe('#1123 item 11 — a generated run is restored while its key matches', () => {
@@ -134,6 +138,42 @@ describe('#1123 item 11 — a generated run is restored while its key matches', 
     expect(run.staleSince).toBeNull();
     expect(run.staleReason).toBeNull();
     expect(run.restoreNote).toBeNull();
+  });
+
+  it('an unsettled house keeps the restored run unverified until the reads settle, then compares every input', async () => {
+    useToolRegistryStore.setState({ status: 'checking' });
+    useLocationStore.setState({ status: 'unknown' });
+    const io = memoryIO([record()]);
+    const outcome = await restoreOpenRun({
+      ...exact(io),
+      settle: true,
+      waitMs: 20,
+      currentInputs: { ...INPUTS, margins: 'm-changed' },
+    });
+    expect(outcome).toBe('restored');
+    const before = useEngraveRunStore.getState();
+    expect(before.generated).toEqual(GENERATED);
+    expect(before.restoreChecking).toBe(true);
+    expect(before.staleSince).toBeNull();
+    // The reads settle (a no-service build answers 'absent'); the deferred comparison runs once.
+    useToolRegistryStore.setState({ status: 'absent' });
+    const after = useEngraveRunStore.getState();
+    expect(after.restoreChecking).toBe(false);
+    expect(after.staleSince).not.toBeNull();
+    expect(after.staleReason).toBe('margins');
+  });
+
+  it('the deferred comparison clears the unverified state when nothing moved', async () => {
+    useToolRegistryStore.setState({ status: 'checking' });
+    useLocationStore.setState({ status: 'unknown' });
+    const io = memoryIO([record()]);
+    expect(await restoreOpenRun({ ...exact(io), settle: true, waitMs: 20 })).toBe('restored');
+    expect(useEngraveRunStore.getState().restoreChecking).toBe(true);
+    useToolRegistryStore.setState({ status: 'absent' });
+    const after = useEngraveRunStore.getState();
+    expect(after.restoreChecking).toBe(false);
+    expect(after.staleSince).toBeNull();
+    expect(after.staleReason).toBeNull();
   });
 
   it('a changed FEEDS table restores the run and marks it stale with the ordinary named reason', async () => {
