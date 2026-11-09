@@ -599,47 +599,14 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       (o) => surfacePoint.x > o.min[0] - grow && surfacePoint.x < o.max[0] + grow && surfacePoint.y > o.min[1] - grow && surfacePoint.y < o.max[1] + grow,
     );
     if (under) return { ok: false, reason: `the surface touch point is at ${under.label}: move the clamp, or touch the stock somewhere clear of it` };
-    if (!input.bracketConfirm && !input.bracketOrigin.offsetMeasured) {
-      return {
-        ok: false,
-        reason: 'the first touch confirms the bracket’s position: approve the confirming touch, or measure the bracket’s offset from the anchor',
-      };
-    }
-    if (!input.bracketConfirm) {
-      notes.push(`the bracket fixes X and Y: the origin is ${input.bracketOrigin.from}; only the surface is touched`);
-    } else {
-      const ys = span(stock.yMin, stock.yMax, 'right');
-      if (typeof ys === 'string') return { ok: false, reason: ys };
-      const xs = span(stock.xMin, stock.xMax, 'back');
-      if (typeof xs === 'string') return { ok: false, reason: xs };
-      // A line clear of every clamp and arm, grown by the probe's rim and the corner clearance.
-      const clearLine = (edge: 'right' | 'back', lo: number, hi: number): number | null => {
-        const scan = scanFor(edge, (lo + hi) / 2, stock, s);
-        const [a, b] = [Math.min(scan.start, scan.limit), Math.max(scan.start, scan.limit)];
-        const mid = (lo + hi) / 2;
-        const candidates = Array.from({ length: 9 }, (_, i) => lo + ((hi - lo) * i) / 8).sort((p, q) => Math.abs(p - mid) - Math.abs(q - mid));
-        for (const c of [mid, ...candidates]) {
-          const hits = mountObstacles.some((r) => {
-            const [across, along] = edge === 'right' ? ([0, 1] as const) : ([1, 0] as const);
-            return r.max[across] + grow > a && r.min[across] - grow < b && c > r.min[along] - grow && c < r.max[along] + grow;
-          });
-          if (!hits) return r3(c);
-        }
-        return null;
-      };
-      const yRight = clearLine('right', ys.lo, ys.hi);
-      const xBack = clearLine('back', xs.lo, xs.hi);
-      if (yRight === null || xBack === null) {
-        return {
-          ok: false,
-          reason: `no line across the ${yRight === null ? 'right' : 'back'} edge stays clear of the clamps: move a clamp, or register without the confirming touch`,
-        };
-      }
-      scans.push(scanFor('right', yRight, stock, s), scanFor('back', xBack, stock, s));
-      notes.push(
-        `the bracket fixes X and Y: the origin is ${input.bracketOrigin.from}; the right and back edges are scanned only to confirm the stock is pushed into the corner (they carry its size error too), and never move the origin`,
-      );
-    }
+    // #1133 — A BRACKET HOLD FIXES X, Y AND ROTATION (repeat 0.05 mm, fit 0.1 mm): the plan is the
+    // SURFACE TOUCH and nothing else. #1070's footprint find — two touches per edge at the cut
+    // region's extents — was the vise's kind of plan, and the old right/back "confirming" scans
+    // went with it: on a bracket nothing scans. The origin is the bracket's own
+    // (`bracketOrigin`), carried with its uncertainty, and the outcome says X and Y were taken on
+    // trust. `bracketConfirm` is accepted and ignored so callers written against the old shape
+    // still compile; there is no edge-find branch left to reach.
+    notes.push(`the bracket fixes X and Y: the origin is ${input.bracketOrigin.from}; only the surface is touched`);
   } else {
     /** Vise, #517: the stock sits below the jaw tops, so a jaw reads HIGH past the gripped edge — and that is the edge. */
     let jawAboveStock = false;

@@ -75,7 +75,11 @@ function bracketJob(): EngraveJob {
 function setupFor(job: EngraveJob): Setup {
   return {
     index: 0,
-    rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+    rotation: [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
     stockBefore: {
       bounds: { min: [0, 0, -job.stock.thickness], max: [job.stock.length, job.stock.width, 0] },
       cuts: [],
@@ -168,41 +172,32 @@ describe('#1070 a PLACED bracket (the gate’s ruling, C8)', () => {
 });
 
 describe('#1070 the Cut step plans a bracket job on its cut region', () => {
-  it('a bracket job is a PLAN, not the "hold the blank in the vise" refusal', () => {
+  // #1133 — SUPERSEDED FOR THE CUT STEP: a bracket hold fixes X, Y and rotation, so the plan is
+  // ONE top touch — no edge scans, no corner derivation. #1070's footprint planner still exists
+  // (and is covered below through `footprintInputFor`/`planFootprintRegistration`), but the
+  // Register card no longer plans it; the bench's four-edge proposal was this mount's wrong plan.
+  it('a bracket job is a PLAN with one top touch and no edge finds (#1133)', () => {
     const attempt = attemptFor(bracketJob());
     expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
     if (attempt.kind !== 'plan') return;
-    // The touches: two per bounding edge at the REGION's extents, then the far edges once each.
-    const extents = attempt.plan.scans.filter((s) => s.edge === 'front' || s.edge === 'left');
-    expect(extents.map((s) => [s.edge, s.along])).toEqual([
-      ['front', 40],
-      ['front', 140],
-      ['left', 18],
-      ['left', 108],
-    ]);
-    expect(attempt.plan.scans.map((s) => s.edge)).toEqual(['front', 'front', 'left', 'left', 'right', 'back']);
-    // #525 — the origin is the corner the two touched edge lines intersect at.
-    expect(attempt.plan.corner).toEqual({ id: 'front-left', xEdge: 'left', yEdge: 'front' });
+    expect(attempt.plan.scans).toEqual([]);
+    expect(attempt.plan.corner).toBeUndefined();
+    expect(attempt.plan.mountTap).toBeNull();
     expect(attempt.plan.bracketOrigin?.offsetMeasured).toBe(false);
-    expect(attempt.summary).toContain('bracket');
+    expect(attempt.summary).toContain('bracket fixes X and Y');
+    expect(attempt.expected).toContain('XY from the bracket');
   });
 
-  it('every planned touch is in machine coordinates inside the soft endstop', () => {
+  it('the plan’s one touch is inside the soft endstop (#1133: no scans to check)', () => {
     const attempt = attemptFor(bracketJob());
     if (attempt.kind !== 'plan') throw new Error(JSON.stringify(attempt));
     const plan = attempt.plan;
-    // The anchor-1 seed places the machine coordinates: work (0,0) is machine (−190.89, −193.83).
-    const x0 = plan.bracketOrigin!.x;
-    const y0 = plan.bracketOrigin!.y;
+    expect(plan.scans).toEqual([]);
     const lim = CALIBRATION.softEndstop;
     expect(lim.enabled).toBe(true);
-    for (const s of plan.scans) {
-      const at = (v: number): [number, number] => (s.edge === 'left' || s.edge === 'right' ? [x0 + v, y0 + s.along] : [x0 + s.along, y0 + v]);
-      for (const [x, y] of [at(s.start), at(s.limit)]) {
-        expect(x, `${s.edge} scan X ${x} past the endstop`).toBeGreaterThanOrEqual(lim.xMin);
-        expect(y, `${s.edge} scan Y ${y} past the endstop`).toBeGreaterThanOrEqual(lim.yMin);
-      }
-    }
+    // The anchor-1 seed places the machine coordinates: work (0,0) is machine (−190.89, −193.83).
+    expect(plan.bracketOrigin!.x + plan.surfacePoint.x).toBeGreaterThanOrEqual(lim.xMin);
+    expect(plan.bracketOrigin!.y + plan.surfacePoint.y).toBeGreaterThanOrEqual(lim.yMin);
     expect(plan.seek.band.min).toBeGreaterThanOrEqual(lim.zMin);
   });
 
@@ -247,7 +242,7 @@ describe('#1070 the sheet’s §6 prints the footprint plan', () => {
 });
 
 describe('#1070 the first seat is measured by the program (6b’s ruling)', () => {
-  it('with no seat datum the press plans ONE bounded Z seek on the wasteboard beside the front arm', () => {
+  it('with no seat datum the press plans ONE bounded Z seek on the wasteboard beside the blank (#1133 chooses the point)', () => {
     const attempt = planRegistrationAttempt({ ...baseArgs(bracketJob()), mount: { kind: 'bracket', board: true }, bracketSeat: null });
     expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
     if (attempt.kind !== 'plan') return;
@@ -259,7 +254,7 @@ describe('#1070 the first seat is measured by the program (6b’s ruling)', () =
     expect(plan.seek.band).toEqual({ min: -87.25, max: -84.25 });
     // Starts above the band.
     expect(plan.seek.fromMachineZ).toBe(-81.25);
-    // The point: the wasteboard past the front arm's free end, in front of the stock.
+    // The point: chosen on open board, clear of the stock and every fixture by the head envelope.
     expect(plan.mountTap!.x).toBeGreaterThan(CALIBRATION.softEndstop.xMin);
     expect(plan.mountTap!.y).toBeGreaterThan(CALIBRATION.softEndstop.yMin);
     // The bound: no further than the band's floor less the scan reach, inside the soft endstop.
@@ -286,7 +281,7 @@ describe('#1070 the sheet names the seat seek as the first touch of the day', ()
     const sheet = buildRunSheet(job, stub, null, new Date('2026-11-08T00:00:00Z'), undefined, { ...reg });
     const text = sheet.sections.flatMap((s2) => s2.steps.map((step) => step.text)).join('\n');
     expect(text).toContain('THE FIRST TOUCH OF THE DAY');
-    expect(text).toContain('bounded Z seek with the wired probe on the wasteboard beside the bracket’s front arm');
+    expect(text).toContain('bounded Z seek with the wired probe on the wasteboard beside the blank');
   });
 
   it('no seat datum: §6 opens with the one bounded seek, then says to plan again', () => {
@@ -297,7 +292,7 @@ describe('#1070 the sheet names the seat seek as the first touch of the day', ()
     const sheet = buildRunSheet(job, stub, null, new Date('2026-11-08T00:00:00Z'), undefined, { seatSeek: seat.seek });
     const text = sheet.sections.flatMap((s2) => s2.steps.map((step) => step.text)).join('\n');
     expect(text).toContain('THE FIRST TOUCH OF THE DAY');
-    expect(text).toContain('bounded Z seek with the wired probe on the wasteboard beside the bracket’s front arm');
+    expect(text).toContain('bounded Z seek with the wired probe on the wasteboard beside the blank');
     expect(text).toContain('valid only for the probe fitting');
     expect(text).toContain('press Plan registration again');
   });
@@ -318,7 +313,7 @@ describe('#1070 the seat press hands the tap its plan bound (A’s executor aea7
     expect(args!.datumOffsetMm).toBe(0);
   });
 
-  it('a footprint plan is not a seat plan and hands no tap args', () => {
+  it('the measured-seat plan is not a seat plan and hands no tap args (#1133: no tap at all)', () => {
     const attempt = planRegistrationAttempt({ ...baseArgs(bracketJob()), mount: { kind: 'bracket', board: true } });
     if (attempt.kind !== 'plan') throw new Error(JSON.stringify(attempt));
     expect(isSeatPlan(attempt.plan)).toBe(false);

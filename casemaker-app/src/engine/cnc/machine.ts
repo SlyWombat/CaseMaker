@@ -450,6 +450,17 @@ export interface MillProfile extends MachineIdentity {
     };
   };
   /**
+   * #1133 — THE HEAD'S ENVELOPE: the widest body around the spindle that can come down within the
+   * probe-touch height above the tool tip, as a RADIUS. It is what a registration's seat tap must
+   * clear — the collet nut alone is not the head (the bench refused a point 7.5 mm in front of the
+   * stock because the HEAD, not the tip, would hit the taller wood).
+   *
+   * A PRODUCT CONSTANT for a shipped machine (every Z1 is the same unit), never a shop knob;
+   * `source` says where the number came from. Absent when the machine states none, and then a
+   * caller chooses the point it can prove or says the envelope is unknown — it never invents one.
+   */
+  headEnvelope?: { radiusMm: Mm; source: string };
+  /**
    * The collet nut — the widest thing above the cutter (#204). `null` = not measured yet (#208),
    * which makes the sweep say clearance "cannot be proven" rather than guess. Do not invent a
    * number here: a guessed nut either hides a real crash or refuses a good tool.
@@ -816,6 +827,19 @@ export const Z1: MillProfile = {
   // and the depth gate at `shoulderLength` keeps it out of the stock. `null` stays the honest
   // value; it matters only for an obstacle that rises above the stock top.
   holder: null,
+  // #1133 — THE HEAD, measured from Makera's own public model: `Machine_Design_Files/
+  // Makera-Z1_Simplified_4Axis.step` (github.com/MakeraInc/CarveraProfiles; sha256
+  // b7df28bcc66a1923457211e610579848ea25b1b950fcdcb19d969747888dfd12; vendor file, never
+  // committed). Its head-sized solids measure 92.0 mm across their widest horizontal axis
+  // (a 92 × 71 × 45 body and a 92 × 60.5 × 75.4 one); the assembly transforms were not resolved by
+  // this read, so the ENVELOPE takes the widest of them (92 mm) as a conservative diameter:
+  // radius 46 mm. It is a DEFAULT in the #1092 sense — stated, with provenance — and #943's bench
+  // agenda carries the caliper line that replaces it with a measured nose.
+  headEnvelope: {
+    radiusMm: 46,
+    source:
+      'Makera’s public Z1 model (Machine_Design_Files/Makera-Z1_Simplified_4Axis.step, sha256 b7df28bc…): its head-sized solids measure 92.0 mm across their widest horizontal axis, taken as a conservative diameter (radius 46 mm); the assembly transforms were not resolved, so this is an upper bound, not a calipered nose — #943 owes the caliper',
+  },
   // The 4th-axis figures (#237, /Rotary.md §3.5), each with its own provenance (#238). After the
   // 2026-10-27 evidence pass (/Rotary.md §9) every source names Makera's own artifact: the shipped
   // config (`configZ1.default`), Studio's `ControllerConfig.txt`, the library database's
@@ -1003,6 +1027,11 @@ export const CARVERA_AIR: MillProfile = {
 export interface MillModel extends MachineIdentity {
   process: 'mill';
   /**
+   * #1133 — the head envelope a seat tap must clear, when the model states one. A stated (GRBL)
+   * machine usually does not: absent is "unknown", and the caller says so rather than inventing.
+   */
+  headEnvelope?: { radiusMm: Mm; source: string };
+  /**
    * #845 — `'unread'`: a vendor model whose controller frame has not been read yet (connect it
    * once). `'stated'`: a GRBL machine whose values the OWNER stated and which this app never
    * connects to — export only — so there is no frame to read and none is invented.
@@ -1098,6 +1127,15 @@ export const GRBL_FORMATTING: MachineDialect = {
  */
 export function holderOf(machine: Mill): HolderProfile | null {
   return machine.frameState === 'read' ? machine.holder : null;
+}
+
+/**
+ * #1133 — THE HEAD ENVELOPE a registration's seat tap must clear, or null when the machine states
+ * none. Read from the profile only: it is a product constant of the machine, not a measurement of
+ * this shop's setup (the holder is the part that is calipered per unit).
+ */
+export function headEnvelopeOf(machine: Mill): { radiusMm: number; source: string } | null {
+  return machine.headEnvelope ?? null;
 }
 
 /**

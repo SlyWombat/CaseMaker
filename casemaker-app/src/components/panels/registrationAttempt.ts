@@ -14,29 +14,18 @@
 import { jobMachine } from '@/engine/cnc/calibration';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import { clearanceZOf } from '@/engine/cnc/machine';
-import { clampPlacementsFor } from '@/engine/cnc/engrave/jobSetup';
 import {
   anchorFrom,
   bracketDatum,
   bracketExpectedSurface,
-  bracketObstacles,
   bracketSettings,
-  clampObstacles,
-  defaultClampPlacements,
   type BracketSeatDatum,
 } from '@/engine/cnc/mounts/bracket';
-import { planRegistration, type MountDatum, type PlanObstacle, type ProbeSpec, type RegistrationPlan } from '@/engine/cnc/registration/plan';
-import { cutRegionOf, mountObstaclesFor, seatSeekFor, softLimitsOf } from '@/engine/cnc/registration/footprintJob';
-import { bracketTapFor } from '@/engine/cnc/registration/mountContext';
+import type { MountDatum, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { mountObstaclesFor, seatSeekFor } from '@/engine/cnc/registration/footprintJob';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
-import {
-  machineSize,
-  referenceOpenings,
-  registrationFor,
-  type MountSpec,
-  type Setup,
-} from '@/engine/cnc/setups';
+import { referenceOpenings, registrationFor, type MountSpec, type Setup } from '@/engine/cnc/setups';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { RegistrationAttempt } from './EngraveSetupRow';
@@ -156,7 +145,7 @@ export function planRegistrationAttempt(args: {
     const obstacles = mountObstaclesFor(job, mount, sizes);
     // 6b's ruling (#1070) — THE FIRST BRACKET SEAT IS MEASURED BY THE PROGRAM: when the house has
     // no seat datum (and no legacy default), the press plans ONE bounded Z seek with the wired V2
-    // on the wasteboard beside the front arm; its reading is written as the bed profile's
+    // on open wasteboard beside the blank (chosen clear of the head); its reading is written as the bed profile's
     // `bracketSeatZ` and mirrored to the shop default. The band is the 2026-11-07-derived seat,
     // VERIFIED by the seek.
     const dims0 = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
@@ -182,7 +171,7 @@ export function planRegistrationAttempt(args: {
           x: seat.seek.x,
           y: seat.seek.y,
           fromMachineZ: seat.seek.fromMachineZ,
-          label: 'the wasteboard beside the bracket’s front arm (the seat)',
+          label: 'the wasteboard beside the blank (the bracket seat)',
           reference: 'bracket-seat',
           expectZ: seat.seek.expectZ,
           // The reading IS the seat: the touch is on the wasteboard, not the arm.
@@ -198,35 +187,30 @@ export function planRegistrationAttempt(args: {
         kind: 'plan',
         method: 'bracket',
         plan,
-        summary: 'Measure the bracket seat — one Z seek on the wasteboard beside the front arm',
+        summary: 'Measure the bracket seat — one Z seek on the wasteboard beside the blank',
         expected: 'the seat from the seek, inside ±1.5 mm of the derived value',
       };
     }
-    // A's planner (1070-footprint-reg) owns the footprint plan now: ONE planRegistration call with
-    // the region and the soft limits. The seed places the machine coordinates, the #525 corner
-    // derivation gives the origin, and the obstacle check and the soft-limit refusal are its own.
-    const region = cutRegionOf(job);
-    if (region === null) {
-      return { kind: 'refused', reason: 'this job states no cut region to register on — add the part to cut, or register by hand' };
-    }
-    const result = planRegistration(
+    // #1133 — THE PLAN IS THE SURFACE TOUCH. A bracket hold fixes X, Y and rotation (repeat
+    // 0.05 mm, fit 0.1 mm), so with the seat measured there is nothing to find: no edge scans, no
+    // corner derivation, and no mount tap (the seat datum the profile holds IS the reference — a
+    // tap would re-measure it). #1070's footprint find was the vise's kind of plan.
+    const result = registrationFor(
+      setup,
+      mount,
       {
-        stock: { xMin: 0, yMin: 0, xMax: dims0.x, yMax: dims0.y, cornerRadius: 0 },
-        mount: 'bracket',
-        expectedSurface: expected0.expectedSurface,
+        // `registrationFor` adds the stock's height this way up to the seat; take it back off the
+        // expected surface so the two statements cannot drift.
+        seatMachineZ: expected0.expectedSurface.machineZ - dims0.z,
         seekFromMachineZ: clearanceZOf(jobMachine(job, calibration)) ?? 0,
-        mountDatum: null,
-        probe: args.probe,
-        mountTap: null,
-        stockThicknessMm: dims0.z,
+        cornerRadius: 0,
         bracketOrigin: datum,
         mountObstacles: obstacles,
-        bracketConfirm: !datum.offsetMeasured,
-        region: { min: [region.minX, region.minY], max: [region.maxX, region.maxY], marginMm: job.edgeMargin },
-        softLimits: softLimitsOf(calibration),
+        mountTap: null,
+        probe: args.probe,
       },
       args.settings,
-    );
+    ).plan;
     if (!result.ok) return { kind: 'refused', reason: result.reason };
     return {
       kind: 'plan',
@@ -241,44 +225,10 @@ export function planRegistrationAttempt(args: {
   const seekFromMachineZ = clearanceZOf(jobMachine(job, calibration)) ?? 0;
   let input: Parameters<typeof registrationFor>[2];
 
-  if (mount.kind === 'bracket') {
-    const sizes = bracketSettings(defaults);
-    const anchor = anchorFrom(calibration, job.machineId);
-    if (!anchor.ok) return { kind: 'refused', reason: anchor.reason };
-    const datum = bracketDatum(anchor.anchor, sizes);
-    const dims = machineSize(setup.rotation, setup.stockBefore.bounds);
-    const under = mount.board === true ? (job.sacrificial?.under?.thickness ?? 0) : 0;
-    // #607 — the bracket's tap: its front arm's top, and the seat the reading measures back. The
-    // expected top comes from the measured seat, so it is null until the seat has been tapped once.
-    const tap = bracketTapFor({ calibration, machineId: job.machineId, seekFromMachineZ, defaults, bedSeat: args.bracketSeat });
-    // The engine's expected-surface read also carries the refusal when the seat was never measured.
-    // #607 — the tap cannot stand in for that first seat: `bracketTapFor` has no point until the
-    // seat AND the arm's own top are measured, so an unmeasured seat keeps the sentence that says
-    // how to measure it (one touch on the surface beside the bracket).
-    const expected = bracketExpectedSurface(defaults, dims.z, under, args.bracketSeat);
-    if (!expected.ok) return { kind: 'refused', reason: expected.reason };
-    const stock = { x: dims.x, y: dims.y, z: dims.z };
-    // #707 BM-1 — the registration's confirm scans are planned around the JOB's clamps (the default
-    // pair only when the job states none), so the taps it offers match the clamps on the machine.
-    const placementFor = clampPlacementsFor(job);
-    const obstacles: PlanObstacle[] = [
-      ...clampObstacles(stock, placementFor ?? defaultClampPlacements(stock, sizes.settings), sizes.settings),
-      ...bracketObstacles(stock, sizes.settings, under),
-    ].map((o) => ({ kind: o.kind, label: o.label, min: o.min, max: o.max, topZ: o.topZ }));
-    input = {
-      // `registrationFor` adds the stock's height this way up to the seat; take it back off the
-      // expected surface so the two statements cannot drift.
-      seatMachineZ: expected.expectedSurface.machineZ - dims.z,
-      seekFromMachineZ,
-      cornerRadius: STOCK_CORNER_RADIUS_MM,
-      bracketOrigin: datum,
-      mountObstacles: obstacles,
-      bracketConfirm: !datum.offsetMeasured,
-      // #607 — confirm the bracket on its own arm before the stock is found (a no-op per the
-      // executor until the tap has an expected top).
-      mountTap: tap,
-    };
-  } else if (mount.kind === 'vise' && args.mountDatum !== null) {
+  // #1133 — the old #607 bracket branch that stood here (its front-arm tap and edge scans) was
+  // unreachable: every bracket mount returns from the branch above. It is gone with the edge finds
+  // it carried; `bracketRegistration1133.spec.ts` pins that a bracket plan has no scans.
+  if (mount.kind === 'vise' && args.mountDatum !== null) {
     // #598 — the datum path: no seat input; the surface is the measured jaw top + the stock's proud
     // height (`registrationFor` works it out), and the probe is carried for the record. #599 — the
     // mount tap needs the fixed jaw's machine XY; without a frame there is nothing to tap.
