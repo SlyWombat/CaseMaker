@@ -102,6 +102,8 @@ export function registrationFor(
      * edges through the centre-lines instead of the rectangle's one-sided edges.
      */
     disc?: { diameterMm: number };
+    /** Hotfix (bench 2026-11-09) — where the surface touch should land, work XY: the cut area's centre. */
+    cutCentre?: { x: number; y: number };
   },
   settings: RegistrationSettings,
 ): { plan: PlanResult; references: ReferenceFeature[] } {
@@ -123,6 +125,7 @@ export function registrationFor(
       bracketConfirm: input.bracketConfirm,
       // #743 — a disc keeps its own four-edge plan; a rectangle's input has no `disc`.
       ...(input.disc !== undefined ? { disc: input.disc } : {}),
+      ...(input.cutCentre !== undefined ? { cutCentre: input.cutCentre } : {}),
     },
     settings,
   );
