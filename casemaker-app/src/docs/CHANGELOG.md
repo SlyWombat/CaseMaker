@@ -111,6 +111,10 @@ This block catches the changelog up with the Milestone 1 landings: the CAM rebui
 - **The panel names every route a program was seeded from** ([#1050](https://github.com/SlyWombat/CaseMaker/issues/1050)): a removal-mesh seed is stated, not silent.
 - **One registration procedure on the operator path** ([#934](https://github.com/SlyWombat/CaseMaker/issues/934)): Holding offers the vise only, and the untested branches (the 3D probe instrument, corner and centre finding, tape, bracket, disc rims, the typed seat) are refused at the operator seam with a sentence instead of appearing as controls, their guide sections reading "Planned"; a tilt verdict no longer re-posts on its own — the Cut step offers "Register again" or "Follow the tilt" — and the house's sticks are planed stock, so the first job does not face.
 
+**Files and the mesh door.**
+
+- **A 3MF's material attributes and its declared unit are read** ([#1130](https://github.com/SlyWombat/CaseMaker/issues/1130)): a file whose triangles name a material after their indices (`pid`/`p1`, the 3MF material extension) no longer reads as "no triangles found" — the Escutcheon sample (5,208 triangles) imports again — and `<model unit="…">` is read and applied once, so a non-millimetre model imports at its true size and the door states the reading it used ("read as centimetres (10 mm per unit)"). An enclosure project holding a centimetre 3MF asset now renders at its true size — 10× the size it used to show — which is the correction, not a regression; a unit the core spec does not define is refused by name.
+
 **Save all and the file names.**
 
 - **Save all writes every program of a run** ([#1093](https://github.com/SlyWombat/CaseMaker/issues/1093)): the file bar offers "Save all (N programs)…" — a folder where the browser has one, else one `<job>-programs.zip` — every program's name comes from the one `releaseFileName` (zero-padded `<job>-p01.nc` … in cut order), the run sheet's per-program rows each save their own file, and the run record lists the programs' hashes.
