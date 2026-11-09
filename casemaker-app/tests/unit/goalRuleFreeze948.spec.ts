@@ -236,18 +236,20 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
     expect(r.cutIntoVolumeMm3, FREEZE).toBeCloseTo(2.99, 9);
   });
 
-  // #1064 (v7) — THE DEFAULT BAND NAMES THE PART'S SILHOUETTE ONLY. On the canonical fixture the
-  // hole's silhouette is a WALL cell (not the grid border) and E sits at an interior wall, so
-  // with the default edge scope the allowance excuses nothing here: both are judged or wall, and
-  // only a job that states `edges: 'all'` reads the canonical 2-cell edge break above.
-  it('the default edge scope excuses nothing at the interior wall — D is wall, E is judged', () => {
+  // #1064 (v7) — THE DEFAULT BAND NAMES THE PART'S SILHOUETTE ONLY. #1092 (0f's R-b ruling,
+  // 2026-11-08) — the seed IS the design silhouette (∪ the grid border), not the grid border alone:
+  // on the canonical fixture the hole's silhouette D is therefore edge break under the default
+  // scope too (the seed that used to catch it was only `edges: 'all'`'s wall), while E — an
+  // interior wall, not a silhouette — stays judged. A job that states `edges: 'all'` reads the
+  // canonical 2-cell edge break above; the default reads D alone.
+  it('the default edge scope names the part’s silhouette — D is edge break, E is judged', () => {
     const r = checkGoalCutInto(CANON, CANON_TOP, {
       edgeBreak: { reachMm: 1.5, legMm: 0.5 },
       wallShadowRadiusMm: 2,
     });
-    expect(r.edgeBreakFraction, FREEZE).toBe(0);
+    expect(r.edgeBreakFraction, FREEZE).toBe(1 / COVERED);
     expect(r.wallNotScoredFraction, FREEZE).toBe(1 / COVERED);
-    expect(r.adjudicatedFraction, FREEZE).toBe(5 / COVERED);
+    expect(r.adjudicatedFraction, FREEZE).toBe(4 / COVERED);
     expect(r.adjudicatedMaxMm, FREEZE).toBeCloseTo(0.6, 12);
     expect(r.adjudicatedMaxAt, FREEZE).toEqual({ x: 0, y: 5 });
   });

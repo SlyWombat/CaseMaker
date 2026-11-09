@@ -209,17 +209,18 @@ maybe('the app’s rule passes the tray: 6.85 % raw, 0 adjudicated, edge break a
   expect(r.ok).toBe(true);
 
   // #1064 — THE DEFAULT BAND NAMES THE PART'S SILHOUETTE ONLY. #1092 (0f's R-b ruling, 2026-11-08)
-  // — the seed is the v8 DESIGN SILHOUETTE (∪ the grid border), not the grid border alone: the V's
-  // rim strokes within its reach and leg are edge break even when the goal grid has a margin, while
-  // the interior pocket lips — walls, not silhouette — are still cut-into, not excused.
+  // — the seed is the v8 DESIGN SILHOUETTE (∪ the grid border), not the grid border alone. On THIS
+  // NC that still excuses nothing: the rim break is the ⌀6 T1 contour (23 mm, past the leg, and
+  // silhouetted on its own proof), while the V's strokes are on interior pocket lips — walls, not
+  // silhouette — which stay judged. The seed's effect is pinned on the ops tray door's own plan
+  // (opsAcceptance959), where a V chamfer breaks an open rim.
   const interior = checkGoalCutInto(goal, stampField, {
     edgeBreak: { reachMm: 3.175 / 2, legMm: (3.175 / 2 - 0.1 / 2) / Math.tan(Math.PI / 4) },
     wallShadowRadiusMm: 3,
     stockThicknessMm: 27.2,
     clAt,
   });
-  expect(interior.edgeBreakFraction).toBeGreaterThan(0);
-  expect(interior.edgeBreakFraction).toBeLessThan(r.edgeBreakFraction);
+  expect(interior.edgeBreakFraction).toBe(0);
   expect(interior.adjudicatedFraction).toBeGreaterThan(0);
   expect(interior.adjudicatedFraction).toBeLessThanOrEqual(interior.cutIntoFraction);
 
