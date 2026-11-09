@@ -61,6 +61,7 @@ import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { useSettingsStore } from '@/store/settingsStore';
 import { finishedProgramsFor, useLocationStore } from '@/store/locationStore';
+import { useLocationPoll } from '@/hooks/useLocationPoll';
 import { machineKey, useMachineRunStore, type RunContext } from '@/store/machineRunStore';
 import { useEngravePackageStore } from '@/store/engravePackageStore';
 import {
@@ -568,6 +569,9 @@ export function EngraveCutSurface({
   // profile id), not the house's first: two machines hold two beds.
   const locationView = useLocationStore((s) => s.location);
   const locationMachine = useMemo(() => machineForJob(locationView, job.machineId), [locationView, job.machineId]);
+  // #1123-12 — the machine record is re-read while this step is on screen (an interval, a return
+  // to the tab, and the change wizard's close), so a shop change never needs a reload.
+  useLocationPoll();
   // #788 — the probe the job will register with, from the machine it targets: null when no probe
   // is checked out, and the diagram then stays away.
   const jobProbeInstrument = useMemo(() => {

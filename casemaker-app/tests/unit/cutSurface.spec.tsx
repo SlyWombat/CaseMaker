@@ -40,6 +40,7 @@ import { useRunRecordStore } from '@/store/runRecordStore';
 import { buildRunRecord, withActualSeconds } from '@/engine/cnc/engrave/runRecord';
 import { clearStoredBaseline, resetLocationStore, useLocationStore } from '@/store/locationStore';
 import { resetMachineChange, useMachineChangeStore } from '@/store/machineChangeStore';
+import { LOCATION_POLL_MS } from '@/hooks/useLocationPoll';
 import { resetManageMode, useManageModeStore } from '@/store/manageModeStore';
 import { resetStockStore, useStockStore } from '@/store/stockStore';
 import type { EngraveJob } from '@/types/engraveJob';
@@ -285,6 +286,47 @@ function locationWith(active: 'vise' | 'rotary', probe: '3d' | 'wired' | null = 
   } as unknown as LocationView;
 }
 
+/**
+ * #1123-12 — the same machine, as the SERVICE serves it: a schema-valid `GET /location` body, so the
+ * surface's re-read parses instead of being refused. `active` names the profile on the pins.
+ */
+function locationJson(active: 'vise' | 'rotary'): string {
+  const profile = (mount: 'vise' | 'rotary') => ({
+    id: `bp-${mount}`,
+    name: `${mount} bed`,
+    createdAt: AT,
+    surface: { kind: 'bare-bed' as const },
+    datums: {},
+    placements: [
+      {
+        id: `pl-${mount}`,
+        fixture: `fx-${mount}`,
+        where: { kind: 'pins' as const, pins: mount, anchor: null },
+        count: null,
+        frame: null,
+        provenance: {},
+      },
+    ],
+  });
+  return JSON.stringify({
+    kind: 'casemaker-location',
+    schemaVersion: 1,
+    id: 'loc-695',
+    name: 'House',
+    createdAt: AT,
+    machines: [
+      {
+        id: 'machine-695',
+        updatedAt: AT,
+        address: { host: TARGET.host, port: TARGET.port },
+        bedProfiles: [profile('vise'), profile('rotary')],
+        activeBedProfileId: `bp-${active}`,
+      },
+    ],
+    accessories: [],
+  });
+}
+
 interface Props {
   job: EngraveJob;
   report: PreflightHubReport;
@@ -338,11 +380,17 @@ function draw(props: Props) {
 
 let shelfItems: StockItem[];
 let uploads: { filename: string; content: string }[];
+/** #1123-12 — what the house's `GET /location` answers next; null keeps the fake's empty body. */
+let houseLocationJson: string | null;
+/** #1123-12 — how many times the surface has asked the house for the location. */
+let locationReads: number;
 
 beforeEach(() => {
   generateSpy.mockClear();
   uploads = [];
   shelfItems = [shelfItem()];
+  houseLocationJson = null;
+  locationReads = 0;
   resetRunConfirmStore();
   resetMachineRunStore();
   resetStartWizard();
@@ -362,6 +410,10 @@ beforeEach(() => {
   let version = 1;
   const client = {
     call: async (method: string, path: string, body?: unknown): Promise<HouseCall> => {
+      if (method === 'GET' && path === '/location') {
+        locationReads += 1;
+        if (houseLocationJson !== null) return { kind: 'ok', text: houseLocationJson, etag: '"loc-live"' };
+      }
       if (method === 'GET' && path === '/stock') {
         return { kind: 'ok', text: JSON.stringify(shelfItems), etag: `"s-${version}"` };
       }
@@ -1114,6 +1166,74 @@ describe('#419 §3 the Cut surface', () => {
       frozen: true,
       frozenMount: 'rotary',
     });
+  });
+
+  // #1123-12 — THE LOCATION IS NOT READ ONCE. At the bench the house's machine record gained the
+  // bracket out of band (another window, the API workaround), and Cut kept the stale "nothing on
+  // the pins" until a full reload — which then lost the 12-minute run. The Cut step keeps the
+  // record in step while it is on screen: a re-read when Change the machine closes, and one on a
+  // visible interval.
+  it('#1123-12 — closing Change the machine re-reads the location, so a house change needs no reload', async () => {
+    const job = defaultEngraveJob();
+    const pkg = frozen(job, [P1]);
+    // The machine holds the rotary; the package was frozen for the vise.
+    useLocationStore.setState({ status: 'present', location: locationWith('rotary'), etag: '"loc-rotary"' } as never);
+    passRun();
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('no longer holds the vise');
+
+    // The operator opens the change wizard; while it is up, the house's record is changed out of
+    // band, so the next read says the vise is on the pins.
+    fireEvent.click(screen.getByTestId('engrave-cut-change-machine'));
+    houseLocationJson = locationJson('vise');
+    act(() => useMachineChangeStore.getState().close());
+
+    await waitFor(() => expect(screen.queryByTestId('engrave-cut-mount')).toBeNull());
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('matches the design');
+    // The record this step now judges is the one the service holds, validator included — the
+    // persisted-run signature (a shop change changes this etag) stays honest.
+    expect(locationReads).toBe(1);
+    expect(useLocationStore.getState().etag).toBe('"loc-live"');
+  });
+
+  it('#1123-12 — the Cut step re-reads the location on a visible interval, so a shop change arrives without a reload', async () => {
+    const job = defaultEngraveJob();
+    const pkg = frozen(job, [P1]);
+    useLocationStore.setState({ status: 'present', location: locationWith('rotary'), etag: '"loc-rotary"' } as never);
+    passRun();
+    vi.useFakeTimers();
+    try {
+      draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
+      expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('no longer holds the vise');
+
+      houseLocationJson = locationJson('vise');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(LOCATION_POLL_MS);
+      });
+      expect(screen.queryByTestId('engrave-cut-mount')).toBeNull();
+      expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('matches the design');
+      expect(locationReads).toBe(1);
+      expect(useLocationStore.getState().etag).toBe('"loc-live"');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('#1123-12 — a build with no house service is never polled', async () => {
+    const job = defaultEngraveJob();
+    // The hosted web build answered `absent` at connect: there is nothing to keep in step, and a
+    // poll would be one request per interval from every visitor.
+    useLocationStore.setState({ status: 'absent', location: null, etag: null } as never);
+    vi.useFakeTimers();
+    try {
+      draw({ job, report: reportOf(), pkg: null, generated: generated([P1]) });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(LOCATION_POLL_MS * 3);
+      });
+      expect(locationReads).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
