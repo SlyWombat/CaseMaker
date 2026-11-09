@@ -42,7 +42,7 @@ import type { FeatureKind, FeatureOverrides } from '@/engine/cnc/plan';
 import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
 import { cutPlan } from '@/engine/cnc/engrave/cutPlan';
 import { laserLiftFor } from '@/engine/cnc/engrave/laserSurface';
-import { packageStaleness } from '@/engine/cnc/engrave/package';
+import { packageStaleness, setupApprovalDrift } from '@/engine/cnc/engrave/package';
 import { releaseNext } from '@/engine/cnc/engrave/release';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { formatDuration, registrationTouches } from '@/engine/cnc/plan';
@@ -62,7 +62,8 @@ import { flatEndMill } from '@/engine/cnc/tool';
 import { useSettingsStore } from '@/store/settingsStore';
 import { finishedProgramsFor, useLocationStore } from '@/store/locationStore';
 import { machineKey, useMachineRunStore, type RunContext } from '@/store/machineRunStore';
-import { useEngravePackageStore } from '@/store/engravePackageStore';
+import { refreezeApprovalDrift, useEngravePackageStore } from '@/store/engravePackageStore';
+import { inputLabel, staleSentence, type EngraveInputKey } from '@/engine/cnc/engrave/runInputs';
 import {
   useEngraveRegistrationStore,
   useFirstRegistration,
@@ -266,11 +267,10 @@ export interface EngraveCutSurfaceProps {
    * stay off until the deferred recheck has run.
    */
   restoreChecking: boolean;
-  /**
-   * #1132 — the only change since the run is the registration, so the stale-program action
-   * re-freezes the existing programs instead of re-planning. Its words say so.
-   */
-  refreezeOnly: boolean;
+  /** #1132 — the run's own named changed input, when the panel knows it. */
+  staleReason?: EngraveInputKey | null;
+  /** #1132 — the last Generate's duration on this job (ms); null when it has never been timed. */
+  lastGenerateMs?: number | null;
 }
 
 /** The map from the live Generate: each program's FNV key to the report that gated that text. */
@@ -570,7 +570,8 @@ export function EngraveCutSurface({
   onGenerate,
   generateBlocker,
   restoreChecking,
-  refreezeOnly,
+  staleReason = null,
+  lastGenerateMs = null,
 }: EngraveCutSurfaceProps): JSX.Element {
   const freeze = useEngravePackageStore((s) => s.freeze);
   const openManage = useManageModeStore((s) => s.openManage);
@@ -790,6 +791,14 @@ export function EngraveCutSurface({
 
   const green = report.firstBlocking === null;
   const staleness = pkg === null ? null : packageStaleness(pkg, job);
+  // #1132 — the one changed thing, in the operator's words. The stock is the bench's case; the
+  // run's named input is precise when it exists, and the package's own reason is the fallback.
+  const changedWords =
+    staleReason === null
+      ? 'the design changed'
+      : staleReason === 'hold'
+        ? 'the stock changed'
+        : `${inputLabel(staleReason)} changed`;
   // #695 — THE FROZEN JOB'S MOUNT, AGAINST THE MACHINE'S ACTIVE BED. The package stores the
   // setup's mount (`JobSetup.mount`); the machine record's active profile either holds it or does
   // not, read by the SAME predicate #693's wizard uses (`profileHolds`). A package whose mount has
@@ -952,6 +961,14 @@ export function EngraveCutSurface({
       }
     });
   }, [green, pkg, packageCurrent, generatedReady, generated, job, staleSince, freeze]);
+
+  // #1132 — a package whose frozen setups lag the job's registrations is re-frozen here as a
+  // guard on Cut/Save/Upload (the approval write already does it eagerly). The bytes are unchanged,
+  // so nothing stales; this only brings the stored setups up to the job's.
+  const approvalsDrifted = pkg !== null && setupApprovalDrift(pkg, job);
+  useEffect(() => {
+    if (approvalsDrifted) void refreezeApprovalDrift(job);
+  }, [approvalsDrifted, job]);
 
   const finishedHashes = useMemo(() => {
     // #425 §6 — the machine's finished list and the DOCUMENT's run log both answer "not new". The
@@ -1406,7 +1423,14 @@ export function EngraveCutSurface({
           {pkg !== null && !packageCurrent && !mountMismatch && (
             <p style={WARN} data-testid="engrave-package-state">
               The program is older than the design —{' '}
-              {staleness?.reason ?? 'the job changed since it was generated.'}
+              {staleReason !== null ? `${staleSentence(staleReason)}.` : (staleness?.reason ?? 'the job changed since it was generated.')}
+            </p>
+          )}
+          {pkg !== null && !packageCurrent && !mountMismatch && (
+            <p style={MUTED} data-testid="engrave-package-regenerate-cost">
+              {lastGenerateMs === null
+                ? `Regenerate (${changedWords}).`
+                : `Regenerate — about ${Math.max(1, Math.round(lastGenerateMs / 60_000))} min (last Generate on this job).`}
             </p>
           )}
           {pkg !== null && !packageCurrent && !mountMismatch && (
@@ -1414,15 +1438,10 @@ export function EngraveCutSurface({
               type="button"
               data-testid="engrave-package-generate"
               disabled={generateBlocker !== null}
-              title={
-                refreezeOnly
-                  ? 'Freeze the existing programs with the new registration — no re-planning.'
-                  : undefined
-              }
               style={{ width: '100%', padding: 7, marginTop: 6 }}
               onClick={onGenerate}
             >
-              {refreezeOnly ? 'Re-freeze' : 'Generate'}
+              Regenerate
             </button>
           )}
           {pkg !== null && !packageCurrent && !mountMismatch && generateBlocker !== null && (

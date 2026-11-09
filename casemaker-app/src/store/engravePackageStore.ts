@@ -25,7 +25,7 @@
 
 import { create } from 'zustand';
 import type { EngraveJob } from '@/types/engraveJob';
-import { freezePackage, type FrozenPackage, type PackageProgramInput } from '@/engine/cnc/engrave/package';
+import { freezePackage, setupApprovalDrift, type FrozenPackage, type PackageProgramInput } from '@/engine/cnc/engrave/package';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useStockStore } from './stockStore';
 
@@ -114,6 +114,36 @@ export const useEngravePackageStore = create<EngravePackageState>()((_set, get) 
   },
 }));
 
+/** A frozen package's programs, in the freeze input's own shape (its bytes are already the truth). */
+function frozenProgramInputs(pkg: FrozenPackage): PackageProgramInput[] {
+  return pkg.programs.map((p) => ({
+    setupIndex: p.setupIndex,
+    setupId: p.setupId,
+    toolKey: p.toolKey,
+    nc: p.nc,
+    programHash: p.hash,
+    frameNc: p.frameNc,
+    ...(p.frame === undefined ? {} : { frame: p.frame }),
+  }));
+}
+
+/**
+ * #1132 (maintainer's rule) — RE-FREEZE AT THE WRITE. A registration approval, a re-plan or a
+ * setup-2 write changes no program bytes, so it must not stale the package; but the package's
+ * stored `setups` would otherwise lag the job, and the sheet, Save/Upload and the Register card
+ * read that record. This re-freezes the package's OWN programs with the current job: same bytes,
+ * same package key, the setups block brought up to date, no worker.
+ *
+ * Called from the job subscription below (so the approval write itself does it) and as a guard
+ * wherever a package is read after a load (Cut/Save/Upload).
+ */
+export async function refreezeApprovalDrift(job: EngraveJob): Promise<boolean> {
+  const pkg = job.package;
+  if (pkg === undefined || !setupApprovalDrift(pkg, job)) return false;
+  const result = await useEngravePackageStore.getState().freeze(job, frozenProgramInputs(pkg), pkg.surface ?? null);
+  return result.ok;
+}
+
 /**
  * Keep the compatibility view in step with the document. Subscribing (rather than reading inside
  * the selector) is what makes the Cut panel re-render when a freeze writes the block; the block
@@ -122,6 +152,11 @@ export const useEngravePackageStore = create<EngravePackageState>()((_set, get) 
 useEngraveJobStore.subscribe((state, previous) => {
   if (state.job.package !== previous.job.package || state.job.id !== previous.job.id) {
     useEngravePackageStore.setState({ packages: documentPackages() });
+  }
+  // #1132 — the write itself (an approval, a re-plan, setup 2's plan) re-freezes the package's
+  // setups. The re-freeze writes the package, whose setups now match, so this settles in one pass.
+  if (state.job !== previous.job && state.job.package !== undefined && setupApprovalDrift(state.job.package, state.job)) {
+    void refreezeApprovalDrift(state.job);
   }
 });
 

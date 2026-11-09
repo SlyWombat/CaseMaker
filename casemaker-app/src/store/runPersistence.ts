@@ -61,6 +61,7 @@ export type PersistedRunState = Pick<
   | 'inputs'
   | 'changedSinceLast'
   | 'previousVerdict'
+  | 'lastGenerateMs'
   | 'shopSignature'
 >;
 
@@ -210,6 +211,7 @@ export function snapshotRun(state: EngraveRunState): PersistedRunState {
     inputs: state.inputs,
     changedSinceLast: state.changedSinceLast,
     previousVerdict: state.previousVerdict,
+    lastGenerateMs: state.lastGenerateMs,
     shopSignature: state.shopSignature,
   };
 }

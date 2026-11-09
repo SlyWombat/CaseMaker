@@ -60,6 +60,7 @@ function runState(over: Partial<PersistedRunState> = {}): PersistedRunState {
     inputs: INPUTS,
     changedSinceLast: [],
     previousVerdict: null,
+    lastGenerateMs: null,
     shopSignature: 'shop-a',
     ...over,
   } as PersistedRunState;

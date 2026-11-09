@@ -83,6 +83,14 @@ function fingerprintView(job: EngraveJob): unknown {
   const view: Record<string, unknown> = { ...job };
   delete view.package;
   delete view.runLog;
+  // #1132 — NON-BYTE JOB FIELDS (maintainer's rule, 2026-11-09): the owned-vs-ideal plan choice
+  // and the Cut strip's spindle-blower switch are choices about what to run, not what to cut.
+  delete view.planChoice;
+  delete view.blowWithVacuum;
+  // #1127 (E) — the cutter checklist is a per-package work record the operator ticks, not a program
+  // input. Stripped here before the field even lands on this branch, so the two lists agree: ticking
+  // a cutter box never stales a program and never calls a worker.
+  delete view.cutterChecklist;
   // #621 — the measured flatness is the registration's OUTCOME (the blank's bow), not a change to
   // the cutting program; a found position must not stale a frozen package.
   if (view.stock !== undefined) {
@@ -106,17 +114,19 @@ function fingerprintView(job: EngraveJob): unknown {
     if (Object.keys(sources).length === 0) delete view.sources;
     else view.sources = sources;
   }
-  // #574 — the registration plan (setups[*].registration) is the PROBE choreography, not the
-  // cutting program. Approving it after Generate must stale the frozen package but NOT the
-  // Generate (the .nc is unchanged), so the Cut screen can offer a re-freeze in place. Strip it
-  // from the program fingerprint; `packageStaleness` compares the stored setups separately.
-  if (Array.isArray(view.setups)) {
-    view.setups = view.setups.map((setup) => {
-      const withoutRegistration: Record<string, unknown> = { ...(setup as Record<string, unknown>) };
-      delete withoutRegistration.registration;
-      return withoutRegistration;
-    });
-  }
+  // #574/#1132 — the registration plan (setups[*].registration) is the PROBE choreography, not
+  // the cutting program; it never changes the .nc, so it is stripped from the fingerprint.
+  //
+  // AND THE SETUPS ARE THE RESOLVED ONES. A job that never saved setups and the same job after an
+  // approval materialised its implicit setup are the SAME cutting plan; fingerprinting the raw
+  // `job.setups` field made the materialisation itself move the hash, which is exactly the bench's
+  // "approving the registration staled the program" (finding 23). `jobSetups` resolves both
+  // spellings to one list; the approval is then the only difference, and it is stripped.
+  view.setups = jobSetups(job).map((setup) => {
+    const withoutRegistration: Record<string, unknown> = { ...(setup as unknown as Record<string, unknown>) };
+    delete withoutRegistration.registration;
+    return withoutRegistration;
+  });
   const sourceFiles = view.sourceFiles;
   if (Array.isArray(sourceFiles)) {
     view.sourceFiles = sourceFiles.map((source: { embedded?: unknown } & Record<string, unknown>) => {
@@ -246,12 +256,10 @@ export function packageStaleness(pkg: FrozenPackage, job: EngraveJob): PackageSt
     }
     return { stale: true, reason: 'the job changed since it was frozen' };
   }
-  // #574 — the registration plan is NOT in the program fingerprint (it does not change the .nc),
-  // but it IS in the stored setups: a plan approved after the freeze stales the package, and the
-  // reason names it so the Cut screen can offer a re-freeze rather than a re-generate.
-  if (!sameRegistration(pkg.setups, jobSetups(job))) {
-    return { stale: true, reason: 'the registration changed since it was frozen' };
-  }
+  // #1132 (maintainer's rule) — REGISTRATIONS ARE NOT BYTES. Any setup's approved plan (setup 2's
+  // flip plan included) is probe choreography: it does not change the .nc, so it must never stale
+  // the program. The package's stored setups are re-frozen in place at the write instead
+  // (`setupApprovalDrift` below); this function deliberately does not compare them.
   // #925 — a package frozen under a sweep/oracle bug reads "current" forever once the bug is
   // fixed, because the job and the program bytes never moved: the simulator version the package
   // was frozen under is compared too. A package that cannot SHOW a version at all — frozen before
@@ -268,6 +276,21 @@ export function packageStaleness(pkg: FrozenPackage, job: EngraveJob): PackageSt
     return { stale: true, reason: 'the simulator changed since it was frozen' };
   }
   return { stale: false, reason: null };
+}
+
+/**
+ * #1132 — THE PACKAGE'S FROZEN SETUPS CARRY AN OLDER REGISTRATION THAN THE JOB'S. The bytes are
+ * unchanged (the fingerprint and the programs still match, the simulator is this build's), so this
+ * is NOT staleness: the caller re-freezes the SAME programs with the current setups, at the write,
+ * with no worker. Any setup's registration counts — setup 2's flip plan is never read by its
+ * executor, but the package's stored record should still say what the job holds.
+ */
+export function setupApprovalDrift(pkg: FrozenPackage, job: EngraveJob): boolean {
+  if (pkg.jobId !== job.id) return false;
+  if (pkg.programs.length === 0) return false;
+  if (jobFingerprint(job) !== pkg.jobHash) return false;
+  if (frozenSimVersion(pkg) !== SIMULATOR_VERSION) return false;
+  return !sameRegistration(pkg.setups, jobSetups(job));
 }
 
 /** Whether two setup lists carry the SAME registration plans, by value — the #574 package-only half. */
