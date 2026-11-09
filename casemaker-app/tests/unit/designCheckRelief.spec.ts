@@ -220,6 +220,42 @@ describe('#1092 (gate v8) — the excuse is bounded by the goal’s own relief',
     expect(report.sentence).toContain('inward witness');
   });
 
+  it('counts a corner cell with ONE inward candidate cut 1 mm and the other uncut — EVERY candidate must be uncut (0f iii)', () => {
+    // #1092 (0f's amended witness, 2026-11-09): the witness excuses only when ALL fully covered
+    // part-side axial neighbours are uncut. Cell (9,5) is a silhouette cell with TWO candidates —
+    // (8,5) and (9,4) — because the uncovered cells are the diagonal pair (10,5) and (9,6). One
+    // candidate reads 1 mm deep, so the witness fails and the boundary cell is COUNTED.
+    const nx = 20;
+    const ny = 10;
+    const z = new Float32Array(nx * ny);
+    const covered = new Uint8Array(nx * ny);
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        const hole = (i === 10 && j === 5) || (i === 9 && j === 6);
+        covered[j * nx + i] = hole ? 0 : 1;
+      }
+    }
+    const goal: GoalHeightfield = {
+      nx, ny, x0: 0, y0: 0, pitch: PITCH, topZ: 0, minZ: 0, z, covered, coveredCount: nx * ny - 2,
+      stockThicknessMm: 40,
+      resolutionNote: 'designCheckRelief1092 corner-witness fixture',
+    };
+    const top = (x: number, y: number): number | null => {
+      const i = Math.round(x / PITCH);
+      const j = Math.round(y / PITCH);
+      if (i < 0 || j < 0 || i >= nx || j >= ny || covered[j * nx + i] !== 1) return null;
+      if (i === 9 && j === 5) return -10; // the boundary cell
+      if (i === 9 && j === 4) return -1; // ONE candidate cut 1 mm
+      return 0; // (8,5), the other candidate, is uncut
+    };
+    const clAt = (): { x: number; y: number } => ({ x: 4.5, y: 2.5 });
+    const report = checkGoalCutInto(goal, top, { wallShadowRadiusMm: 1.5, stockThicknessMm: 40, clAt });
+    expect(report.silhouetteByWitnessCells).toBe(0);
+    // (9,5) stays counted, and (9,4) — the cut candidate — is counted too.
+    expect(Math.round(report.adjudicatedFraction * report.goalCells)).toBe(2);
+    expect(report.adjudicatedMaxMm).toBeCloseTo(10, 6);
+  });
+
   it('counts the same boundary cell when the inward row is deep too — the witness does not excuse a real cut', () => {
     const { goal, top } = boundaryFixture(10); // the inward neighbour is cut as deep
     const clAt = (): { x: number; y: number } => ({ x: 4.5, y: 2.5 });
