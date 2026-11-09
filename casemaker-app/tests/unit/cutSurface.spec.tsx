@@ -33,6 +33,7 @@ import { resetEngraveRegistrationStore, useEngraveRegistrationStore } from '@/st
 import type { SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRunStore, saveBlocker } from '@/store/engraveRunStore';
+import { useRegistrationPromptStore } from '@/store/registrationPromptStore';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
 import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
@@ -407,6 +408,26 @@ function storedPackage(job: EngraveJob): FrozenPackage {
 }
 
 describe('#419 §3 the Cut surface', () => {
+  it('#hotfix — a live registration prompt keeps its step open and cannot be folded', () => {
+    const job = defaultEngraveJob();
+    draw({ job, report: reportOf(), pkg: null, generated: null });
+    const step2 = screen.getByTestId('engrave-cut-step-2') as HTMLDetailsElement;
+    // Nothing is fitted, so the Register step is not current and starts folded…
+    expect(step2.open).toBe(false);
+    // …but a live operator prompt forces it open.
+    act(() => {
+      useRegistrationPromptStore.getState().setPending(true);
+    });
+    expect(step2.open).toBe(true);
+    // …and a close attempt is undone while the prompt waits.
+    step2.open = false;
+    fireEvent(step2, new Event('toggle'));
+    expect(step2.open).toBe(true);
+    act(() => {
+      useRegistrationPromptStore.getState().setPending(false);
+    });
+  });
+
   it('freezes on green, once, and says what the package holds and what the shelf did', async () => {
     const job = defaultEngraveJob();
     const made = generated([P1]);
