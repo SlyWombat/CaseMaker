@@ -78,9 +78,15 @@ A covered cell whose axial neighbour is uncovered grid is the part's own side fa
 stock top to the **legitimate floor beside the part**: `−T`, or `−(T + breakthrough)` where the verifier's
 through rule allows a cut into the board there. It is excused only when **both** hold: the depth is within
 that step (+ slack) **and** the deepest stamp's CL at the cell lies on the **uncovered side** of the outline,
-at least `r − pitch` from it. Depth alone cannot tell a lateral cut into the part's side from the contour's
-flank artefact; the CL can. A CL one radius inside the outline at full depth is a cut-in and counts. The
-check needs the stock thickness for this proof (`stockThicknessMm`, `breakthroughMm`); when a job states
+at least `r − pitch` from it — **or** the **inward witness** holds: the first fully covered axial neighbour on
+the part side is not cut below its own design + slack, so the disc did not enter the part. The witness exists
+because the CL-distance test assumes the outline lies on a cell boundary; on a curved or steep edge the true
+edge sits anywhere inside the boundary cell, which carries the part's height (the cell-MAX rule, #1003) and the
+base's depth (the stamp's nearest-point rule) at once — the figure corpus's (44.8, 26.8) read 10 mm "cut" with
+its whole inward row untouched. The two excuses are printed apart (`silhouetteExcusedCells`,
+`silhouetteByWitnessCells`). Depth alone cannot tell a lateral cut into the part's side from the contour's
+flank artefact; the CL or the neighbour can. A CL one radius inside the outline at full depth with a cut inward
+neighbour is a cut-in and counts. The check needs the stock thickness for this proof (`stockThicknessMm`, `breakthroughMm`); when a job states
 no edge break those fields still travel (the early return that dropped them was fixed post-freeze).
 
 ### 2.4 Wall and border cells → the straddling proof
