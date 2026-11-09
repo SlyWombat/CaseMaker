@@ -1857,6 +1857,8 @@ export const millProfileSchema = z.object({
     }),
   }),
   holder: holderSchema.nullable(),
+  // #1133 — the head envelope, when the model states one (the Z1 does; a stated machine may not).
+  headEnvelope: z.object({ radiusMm: finite.positive(), source: z.string().min(1) }).optional(),
   rotary: rotarySchema.optional(),
   // #530 — the machine's own camera, when it serves one: an OPTIONAL sourced endpoint, the rotary
   // block's shape. A port is positive (port 0 is no endpoint), the path is absolute, and `source`
