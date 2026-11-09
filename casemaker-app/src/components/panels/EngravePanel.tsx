@@ -5014,14 +5014,18 @@ export function EngravePanel(): JSX.Element {
         >
           Part on a larger board
         </button>
-        <button
-          type="button"
-          data-testid="engrave-sac-preset-strips"
-          title="6 mm strips between the jaws, left and right, flush with the part."
-          onClick={() => applySacrificial(presetJawStrips())}
-        >
-          Strips between the jaws
-        </button>
+        {/* #1123 item 37 — A BRACKET HAS NO JAWS. The strips preset is the vise's own geometry;
+            offering it on a bracket or tape job was vise wording on a holding that has none. */}
+        {jobMount(job) === 'vise' && (
+          <button
+            type="button"
+            data-testid="engrave-sac-preset-strips"
+            title="6 mm strips between the jaws, left and right, flush with the part."
+            onClick={() => applySacrificial(presetJawStrips())}
+          >
+            Strips between the jaws
+          </button>
+        )}
       </div>
 
       <label style={{ ...FIELD_LABEL, marginTop: 6 }}>

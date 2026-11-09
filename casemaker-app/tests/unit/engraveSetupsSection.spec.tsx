@@ -560,7 +560,9 @@ describe('#471 registration — planned only after approval, refused with the en
     expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('Home, fit the wired probe');
   });
 
-  it('#603 the row names the checked-out probe and the machine', () => {
+  // #1123 item 37 — the machine's nickname is not a per-setup fact: it repeated on every row as
+  // a stray "Zoomba" tag, while the checked-out probe IS the row's own (its registration uses it).
+  it('#603/#1123 item 37 — the row names the checked-out probe, never the machine', () => {
     useMachineStore.setState({ machine: OBS });
     useLocationStore.setState({
       location: {
@@ -576,7 +578,7 @@ describe('#471 registration — planned only after approval, refused with the en
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
 
-    expect(screen.getByTestId('engrave-setup-machine-1').textContent).toBe('Zoomba');
+    expect(screen.queryByTestId('engrave-setup-machine-1')).toBeNull();
     expect(screen.getByTestId('engrave-setup-probe-1').textContent).toBe('Makera Wired Probe V2');
   });
 
