@@ -183,6 +183,11 @@ def main():
                        f"{v['mm']:.3f} mm at {v['x']:.2f}, {v['y']:.2f} (CL {v['clDistanceMm']} mm)")
                 print(f'    silhouette deepest      {fmt(app_deep)} (app) vs '
                       f'{fmt(s["silhouetteDeepest"])} (checker)')
+        app_un = app.get('silhouetteUnavailableCells')
+        if app_un is not None:
+            diff = abs(float(app_un) - float(s['silhouetteUnavailableCells']))
+            print(f'    silhouette unavailable  {app_un} (app) vs {s["silhouetteUnavailableCells"]} '
+                  f'(checker) — Δ {diff:g} cell(s)' + ('  NOISY' if diff / n > tol else ''))
         deepest = s.get('overReliefDeepest')
         print(f'    over-relief: wall {s["wallOverReliefCells"]}, border {s["borderOverReliefCells"]}, '
               f'shadow {s["shadowOverReliefCells"]}'
