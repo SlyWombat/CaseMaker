@@ -1092,15 +1092,25 @@ function reliefAt(goal: GoalHeightfield, x: number, y: number, radiusMm: number,
   const cj = Math.round((y - goal.y0) / pitch);
   let hi = -Infinity;
   let lo = Infinity;
+  let sawOutside = false;
   for (let dj = -r; dj <= r; dj++) {
     const jj = cj + dj;
-    if (jj < 0 || jj >= goal.ny) continue;
+    if (jj < 0 || jj >= goal.ny) {
+      sawOutside = true;
+      continue;
+    }
     for (let di = -r; di <= r; di++) {
       const ii = ci + di;
-      if (ii < 0 || ii >= goal.nx) continue;
+      if (ii < 0 || ii >= goal.nx) {
+        sawOutside = true;
+        continue;
+      }
       if (Math.hypot(di * pitch, dj * pitch) > radiusMm + 1e-9) continue;
       const kk = jj * goal.nx + ii;
-      if (goal.covered[kk] !== 1) continue;
+      if (goal.covered[kk] !== 1) {
+        sawOutside = true;
+        continue;
+      }
       const z = goal.z[kk]!;
       if (!Number.isFinite(z)) continue;
       if (z > hi) hi = z;
@@ -1108,7 +1118,11 @@ function reliefAt(goal: GoalHeightfield, x: number, y: number, radiusMm: number,
     }
   }
   if (hi === -Infinity) return 0;
-  if (borderCell && goal.topZ > hi) hi = goal.topZ;
+  // #1092 — THE STOCK TOP IS THE HIGH SIDE WHEREVER THE BLANK IS WITHIN REACH: a border cell, or
+  // any cell whose relief disc reaches uncovered grid (the part's rim shadow band included). The
+  // heightfield skips uncovered cells, so without this the rim's shadow strip read a relief of 0
+  // and every wall-foot cell inside it was counted (the vendor tray's 8.32 % band).
+  if ((borderCell || sawOutside) && goal.topZ > hi) hi = goal.topZ;
   return hi - lo;
 }
 
