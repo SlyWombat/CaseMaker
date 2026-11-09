@@ -189,8 +189,13 @@ def main():
             print(f'    silhouette unavailable  {app_un} (app) vs {s["silhouetteUnavailableCells"]} '
                   f'(checker) — Δ {diff:g} cell(s)' + ('  NOISY' if diff / n > tol else ''))
         deepest = s.get('overReliefDeepest')
+        app_wall = app.get('wallOverReliefCells')
+        app_shadow = app.get('shadowOverReliefCells')
+        app_border = app.get('borderOverReliefCells')
+        app_note = (f' [app: wall {app_wall}, border {app_border}, shadow {app_shadow}]'
+                    if app_wall is not None else '')
         print(f'    over-relief: wall {s["wallOverReliefCells"]}, border {s["borderOverReliefCells"]}, '
-              f'shadow {s["shadowOverReliefCells"]}'
+              f'shadow {s["shadowOverReliefCells"]}' + app_note
               + (f'; deepest {deepest["mm"]:.3f} mm at {deepest["x"]:.2f}, {deepest["y"]:.2f} '
                  f'({deepest["cls"]})' if deepest else ''))
         print(f'    edge break: {"stated" if s["edgeBreakStated"] else "not stated"}'
