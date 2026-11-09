@@ -60,6 +60,8 @@ This block catches the changelog up with the Milestone 1 landings: the CAM rebui
 - **Pockets too small for any flat or ball get the V bit already in the set** ([#975](https://github.com/SlyWombat/CaseMaker/issues/975)): the tray's digits are cut.
 - **Clearing with no flat in the set falls back to the ball** ([#982](https://github.com/SlyWombat/CaseMaker/issues/982)): the job is planned, not refused.
 
+- **Epoxy tooling board is a stock material** ([#1066](https://github.com/SlyWombat/CaseMaker/issues/1066)): the wizard's material list offers it, Makera's `Epoxy Tooling` feed rows answer for it, and the run sheet prints the material in the app's own words ("100 × 100 × 10 mm Epoxy tooling board").
+
 **Cutting correctness on the model engine.**
 
 - **A pocket op no longer cuts 22 mm of air under the material above its level** ([#970](https://github.com/SlyWombat/CaseMaker/issues/970)): the elephant's pocket stays in its pocket.
@@ -94,6 +96,7 @@ This block catches the changelog up with the Milestone 1 landings: the CAM rebui
 
 **Generation, the sweep and the run.**
 
+- **A Generate pressed before the preview settles waits its turn and completes** ([#1076](https://github.com/SlyWombat/CaseMaker/issues/1076)): the watchdog counts the calls actually on the shared worker, so the queue says "waiting for the measured pick to finish — the worker is busy" and the run carries on to Cut instead of dying at the 180 s window.
 - **Generate reports its stage on the M1 tray** ([#1038](https://github.com/SlyWombat/CaseMaker/issues/1038)): the silence watchdog no longer stops it at ~190 s, and Generate stops trying to connect to a machine.
 - **Generate no longer waits on a machine connect that fails** ([#1039](https://github.com/SlyWombat/CaseMaker/issues/1039)): the 502 no longer leaves rows pending for 180 s.
 - **The tray's sweep ticks often enough for the panel to reach its verdict** ([#1048](https://github.com/SlyWombat/CaseMaker/issues/1048)): the app's 30 s window is no longer starved.
@@ -105,11 +108,20 @@ This block catches the changelog up with the Milestone 1 landings: the CAM rebui
 - **The planner's stated rulings reach the operator** ([#992](https://github.com/SlyWombat/CaseMaker/issues/992)): statements that were test-only are findings and run-sheet lines.
 - **The panel names every route a program was seeded from** ([#1050](https://github.com/SlyWombat/CaseMaker/issues/1050)): a removal-mesh seed is stated, not silent.
 
+**Save all and the file names.**
+
+- **Save all writes every program of a run** ([#1093](https://github.com/SlyWombat/CaseMaker/issues/1093)): the file bar offers "Save all (N programs)…" — a folder where the browser has one, else one `<job>-programs.zip` — every program's name comes from the one `releaseFileName` (zero-padded `<job>-p01.nc` … in cut order), the run sheet's per-program rows each save their own file, and the run record lists the programs' hashes.
+
 **Rotary and the headless CLI.**
 
 - **No rotary move enters the chuck/jaw band at any Z** ([#1061](https://github.com/SlyWombat/CaseMaker/issues/1061)): the keep-out is a rule on the plan, not an allowance in verify.
 - **The CLI's rotary .nc respects the app's Save gate** ([#1084](https://github.com/SlyWombat/CaseMaker/issues/1084)): and goal-object-oversize no longer fires falsely on an axis-centred rotary goal.
 - **A missing catalogue beside the location is stated by the CLI** ([#1081](https://github.com/SlyWombat/CaseMaker/issues/1081)): no more silent planning in the starting table (the 44,830 s vs 18,619 s case).
+
+- **The rotary goal's cut-into verdict is an exact stamp** ([#1086](https://github.com/SlyWombat/CaseMaker/issues/1086)): the rotary map's cells are adjudicated against the design's own stamp rather than the column grid read through the map tolerance, so the tail is judged (the panther's 14.89 % column reading becomes 23.02 % adjudicated).
+- **The rotary 3D rough no longer gouges the design walls** ([#1094](https://github.com/SlyWombat/CaseMaker/issues/1094)): the A-sweep reads one precomputed drop-cutter tip field; the panther's exact stamp reads 0 cut-into, and the rough posts ~390k fewer moves while the finish bytes stay identical.
+- **The rotary verdict's ok follows the flat rule** ([#1095](https://github.com/SlyWombat/CaseMaker/issues/1095)): a rotary part passes only when the adjudicated cut-into is 0 and coverage meets the 95 % line, so the panther now reports a failure with the coverage reason instead of a green ok beside its own bad sentence.
+- **The rotary radial sampler casts seam rows at their own wrapped angle** ([#1096](https://github.com/SlyWombat/CaseMaker/issues/1096)): the 1.6-cell offset is gone, and the panther's 36 near-axis pinholes read 0.
 
 **The flip.**
 
