@@ -253,6 +253,53 @@ describe('#975 the superset rule — the ideal is never MATERIALLY worse', () =>
   });
 });
 
+/**
+ * #1092 (0f's ruling, 2026-11-09) — THE DEEPEST-CUT ROW IS GATED ON THE ADJUDICATED MAXIMUM.
+ *
+ * The organizer's ideal plan posts the deep rest moves the owned plan does not, and its RAW deepest
+ * cut reads 3.0 → 10.0 mm — but that cell is one the goal check excludes by proof (a wall cell),
+ * and the ADJUDICATED maximum is 0 on both sides. A superset gate that compared the raw maxima
+ * failed the ideal for a reading artefact. The ruling: the row compares the adjudicated maxima; the
+ * raw pair is still printed beside the judged pair, with the class the cell was excused as, and is
+ * never gated.
+ */
+describe('#1092 (0f’s ruling) — the deepest row is judged on the adjudicated maximum', () => {
+  it('an ideal whose raw maximum got deeper while its adjudicated maximum held is not material — the raw pair is printed as excused', () => {
+    const owned = SCORE({ cutInto: { ...SCORE().cutInto, maxMm: 3, adjudicatedMaxMm: 0 } });
+    const ideal = SCORE({ cutInto: { ...SCORE().cutInto, maxMm: 10, adjudicatedMaxMm: 0, rawMaxExclusion: 'wall' } });
+    const rows = idealWorsenings(owned, ideal);
+    const deep = rows.find((r) => r.outcome === 'deepestCut')!;
+    expect(deep.material, JSON.stringify(deep)).toBe(false);
+    expect(deep.owned).toBe(0);
+    expect(deep.ideal).toBe(0);
+    expect(deep.reading).toBe('ideal deepest adjudicated cut 0 → 0 mm (raw 3 → 10 mm at a wall cell, excused)');
+    expect(rows.filter((w) => w.material)).toEqual([]);
+  });
+
+  it('still catches a real adjudicated worsening past the bound, and then prints no excuse', () => {
+    const owned = SCORE({ cutInto: { ...SCORE().cutInto, maxMm: 0.2, adjudicatedMaxMm: 0.05 } });
+    const ideal = SCORE({ cutInto: { ...SCORE().cutInto, maxMm: 0.5, adjudicatedMaxMm: 0.31 } });
+    const worse = idealWorsenings(owned, ideal).filter((w) => w.material);
+    expect(worse.map((w) => w.outcome)).toEqual(['deepestCut']);
+    expect(worse[0]!.reading).toBe('ideal deepest adjudicated cut 0.05 → 0.31 mm');
+  });
+
+  it('names the excluded cell’s own class — a shadow cell is not called a wall cell', () => {
+    const owned = SCORE({ cutInto: { ...SCORE().cutInto, maxMm: 3, adjudicatedMaxMm: 0 } });
+    const ideal = SCORE({ cutInto: { ...SCORE().cutInto, maxMm: 10, adjudicatedMaxMm: 0, rawMaxExclusion: 'shadow' } });
+    const deep = idealWorsenings(owned, ideal).find((r) => r.outcome === 'deepestCut')!;
+    expect(deep.reading).toBe('ideal deepest adjudicated cut 0 → 0 mm (raw 3 → 10 mm at a wall-shadow cell, excused)');
+  });
+
+  it('falls back to the raw maximum when a side cannot adjudicate (a page-JSON card), stated as before', () => {
+    const owned = SCORE();
+    const deep = SCORE({ cutInto: { ...SCORE().cutInto, maxMm: 0.31 } });
+    const row = idealWorsenings(owned, deep).find((w) => w.outcome === 'deepestCut')!;
+    expect(row.material).toBe(true);
+    expect(row.reading).toBe('deepest cut 0.11 mm');
+  });
+});
+
 describe('#1062 the tradeoff line states a predicted bevel when the two plans differ', () => {
   /** A minimal scored side; `predictedCutIntoMm` is the plan's own V-floor prediction. */
   const bevelSide = (bevel: number | null) => ({

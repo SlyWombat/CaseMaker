@@ -96,6 +96,25 @@ describe('#964 the gate’s unadjudicable cells, with no edge break stated', () 
     expect(r.sentence).toContain('not counted');
   });
 
+  it('#1092 (0f’s ruling) — the raw maximum’s cell is reported with the class it was excused as', () => {
+    // The deepest cut is a WALL cell shallow enough for the v8 proof to excuse (1.0 mm against the
+    // 2 mm step), so the raw maximum is excluded and the adjudicated maximum is the clear set's
+    // 0.165 mm. The tradeoff row prints the raw pair with this class — never gated, but named.
+    const cuts = new Map<number, number>();
+    for (let k = 0; k < 80; k++) cuts.set((40 + k) * NX + 149, k === 0 ? 1.0 : 0.4);
+    cuts.set(100 * NX + 250, 0.165);
+    const tops = (x: number, y: number): number | null => {
+      const i = Math.round((x - GOAL.x0) / PITCH);
+      const j = Math.round((y - GOAL.y0) / PITCH);
+      if (i < 0 || j < 0 || i >= NX || j >= NY) return null;
+      return (GOAL.z[j * NX + i] as number) - (cuts.get(j * NX + i) ?? 0);
+    };
+    const r = checkGoalCutInto(GOAL, tops, { wallShadowRadiusMm: SHADOW_R });
+    expect(r.maxCutIntoMm).toBeCloseTo(1.0, 6);
+    expect(r.adjudicatedMaxMm).toBeCloseTo(0.165, 6);
+    expect(r.rawMaxExclusion).toBe('wall');
+  });
+
   it('v5 — the shadow class is excused on the stamp artefact, not on the cell’s position', () => {
     // The deepest cutter's CL stated 3 mm clear of the wall (x = 18 against a wall at x = 15):
     // the disc's rim covered the 13 cells, so they are the stamp artefact E's rule excuses.
