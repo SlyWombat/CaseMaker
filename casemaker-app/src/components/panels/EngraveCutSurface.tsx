@@ -42,7 +42,7 @@ import type { FeatureKind, FeatureOverrides } from '@/engine/cnc/plan';
 import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
 import { cutPlan } from '@/engine/cnc/engrave/cutPlan';
 import { laserLiftFor } from '@/engine/cnc/engrave/laserSurface';
-import { packageStaleness, setupApprovalDrift } from '@/engine/cnc/engrave/package';
+import { packageStaleness } from '@/engine/cnc/engrave/package';
 import { releaseNext } from '@/engine/cnc/engrave/release';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { formatDuration, registrationTouches } from '@/engine/cnc/plan';
@@ -62,7 +62,7 @@ import { flatEndMill } from '@/engine/cnc/tool';
 import { useSettingsStore } from '@/store/settingsStore';
 import { finishedProgramsFor, useLocationStore } from '@/store/locationStore';
 import { machineKey, useMachineRunStore, type RunContext } from '@/store/machineRunStore';
-import { refreezeApprovalDrift, useEngravePackageStore } from '@/store/engravePackageStore';
+import { refreshStoredPackage, useEngravePackageStore } from '@/store/engravePackageStore';
 import { inputLabel, staleSentence, type EngraveInputKey } from '@/engine/cnc/engrave/runInputs';
 import {
   useEngraveRegistrationStore,
@@ -962,13 +962,12 @@ export function EngraveCutSurface({
     });
   }, [green, pkg, packageCurrent, generatedReady, generated, job, staleSince, freeze]);
 
-  // #1132 — a package whose frozen setups lag the job's registrations is re-frozen here as a
-  // guard on Cut/Save/Upload (the approval write already does it eagerly). The bytes are unchanged,
-  // so nothing stales; this only brings the stored setups up to the job's.
-  const approvalsDrifted = pkg !== null && setupApprovalDrift(pkg, job);
+  // #1132 — a package whose record lags the job (a registration approval, or a legacy hash from an
+  // older build) is refreshed here as a guard on Cut/Save/Upload; the write path already does it.
+  // The bytes are unchanged, so nothing stales; this only brings the record up to date.
   useEffect(() => {
-    if (approvalsDrifted) void refreezeApprovalDrift(job);
-  }, [approvalsDrifted, job]);
+    if (pkg !== null) void refreshStoredPackage(job);
+  }, [pkg, job]);
 
   const finishedHashes = useMemo(() => {
     // #425 §6 — the machine's finished list and the DOCUMENT's run log both answer "not new". The

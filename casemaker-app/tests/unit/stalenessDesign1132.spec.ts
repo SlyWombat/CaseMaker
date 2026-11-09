@@ -11,10 +11,14 @@ import { jobVise } from '@/engine/cnc/fixture';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import {
   freezePackage,
+  jobFingerprint,
+  legacyJobFingerprint,
+  packageHash,
   packageStaleness,
   setupApprovalDrift,
   type PackageProgramInput,
 } from '@/engine/cnc/engrave/package';
+import { SIMULATOR_VERSION } from '@/workers/geometry/simVersion';
 import { programHash } from '@/engine/cnc/programHash';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { resetEngravePackageStore } from '@/store/engravePackageStore';
@@ -150,5 +154,68 @@ describe('#1132 — byte changes still stale the program', () => {
     const made = freezePackage(job, [program()], AT);
     if (!made.ok) throw new Error(made.reason);
     expect(packageStaleness(made.package, change(job)).stale).toBe(true);
+  });
+});
+
+
+describe('#1132 migration — a package frozen under the old fingerprint stays current and upgrades on open', () => {
+  /** The fixture whose hash was captured on the pre-#1132 build (da9a7c600): `aa7181a2`. */
+  const LEGACY_FIXTURE_HASH = '8ec66ccc';
+
+  function migrationFixture(): EngraveJob {
+    const job = defaultEngraveJob();
+    job.id = 'migration-fixture';
+    job.name = 'migration fixture';
+    job.labels = [];
+    job.shapes = [];
+    job.combined = [];
+    job.traces = [];
+    job.vectors = [];
+    job.drills = [];
+    job.threads = [];
+    job.primitives = [];
+    job.cutouts = [];
+    job.chamfers = [];
+    job.keepOuts = [];
+    job.targetObjects = [];
+    job.targetObject = undefined;
+    job.customFonts = [];
+    job.setups = undefined;
+    return job;
+  }
+
+  it('reproduces the old build’s hash and treats its packages as current', () => {
+    const job = migrationFixture();
+    expect(legacyJobFingerprint(job)).toBe(LEGACY_FIXTURE_HASH);
+    expect(jobFingerprint(job)).not.toBe(LEGACY_FIXTURE_HASH);
+
+    const made = freezePackage(job, [program()], AT);
+    if (!made.ok) throw new Error(made.reason);
+    const legacyPkg = {
+      ...made.package,
+      jobHash: LEGACY_FIXTURE_HASH,
+      hash: packageHash(LEGACY_FIXTURE_HASH, made.package.programs, SIMULATOR_VERSION),
+    };
+    expect(packageStaleness(legacyPkg, job)).toEqual({ stale: false, reason: null });
+  });
+
+  it('upgrades the stored hash on open, with the same programs and no worker', async () => {
+    const job = migrationFixture();
+    const made = freezePackage(job, [program()], AT);
+    if (!made.ok) throw new Error(made.reason);
+    const legacyPkg = {
+      ...made.package,
+      jobHash: LEGACY_FIXTURE_HASH,
+      hash: packageHash(LEGACY_FIXTURE_HASH, made.package.programs, SIMULATOR_VERSION),
+    };
+    useEngraveJobStore.setState({ job: { ...job, package: legacyPkg } });
+    // The open's refresh starts from the store write; let its microtasks land.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const open = useEngraveJobStore.getState().job;
+    const newHash = jobFingerprint(open);
+    expect(open.package!.jobHash).toBe(newHash);
+    expect(open.package!.hash).toBe(packageHash(newHash, made.package.programs, SIMULATOR_VERSION));
+    expect(open.package!.programs).toEqual(made.package.programs);
+    expect(packageStaleness(open.package!, open)).toEqual({ stale: false, reason: null });
   });
 });

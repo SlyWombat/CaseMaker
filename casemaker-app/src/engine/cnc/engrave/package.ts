@@ -79,7 +79,7 @@ export function canonicalJson(value: unknown): string {
  * derived provenance, not a program input — their `sha256` is kept, so a CHANGED source still
  * moves the fingerprint while embedding the same file later does not.
  */
-function fingerprintView(job: EngraveJob): unknown {
+function programFingerprintView(job: EngraveJob): unknown {
   const view: Record<string, unknown> = { ...job };
   delete view.package;
   delete view.runLog;
@@ -138,9 +138,60 @@ function fingerprintView(job: EngraveJob): unknown {
   return view;
 }
 
+/**
+ * #1132 migration — THE PRE-#1132 FINGERPRINT, verbatim: the raw `job.setups` field (registration
+ * stripped), and none of the later non-byte strips. A package frozen by an older build carries a
+ * `jobHash` from this view; upgrading must not read it as "the job changed" and cost a surprise
+ * regenerate (including the maintainer's mid-flip tray). Used ONLY by `packageStaleness` and
+ * `setupApprovalDrift` as the second accepted hash, and by the open-time refresh that upgrades the
+ * stored hash silently.
+ */
+function legacyFingerprintView(job: EngraveJob): unknown {
+  const view: Record<string, unknown> = { ...job };
+  delete view.package;
+  delete view.runLog;
+  if (view.stock !== undefined) {
+    const stock = { ...(view.stock as Record<string, unknown>) };
+    delete stock.flatness;
+    view.stock = stock;
+  }
+  if (view.sources !== undefined) {
+    const sources = { ...(view.sources as Record<string, unknown>) };
+    if (sources.stock !== undefined) {
+      const stock = { ...(sources.stock as Record<string, unknown>) };
+      delete stock.flatness;
+      if (Object.keys(stock).length === 0) delete sources.stock;
+      else sources.stock = stock;
+    }
+    if (Object.keys(sources).length === 0) delete view.sources;
+    else view.sources = sources;
+  }
+  if (Array.isArray(view.setups)) {
+    view.setups = view.setups.map((setup) => {
+      const withoutRegistration: Record<string, unknown> = { ...(setup as Record<string, unknown>) };
+      delete withoutRegistration.registration;
+      return withoutRegistration;
+    });
+  }
+  const sourceFiles = view.sourceFiles;
+  if (Array.isArray(sourceFiles)) {
+    view.sourceFiles = sourceFiles.map((source: { embedded?: unknown } & Record<string, unknown>) => {
+      const withoutBytes: Record<string, unknown> = { ...source };
+      delete withoutBytes.embedded;
+      return withoutBytes;
+    });
+  }
+  return view;
+}
+
 /** FNV over the job's program-relevant data — name, stock, items, setups, margins, cutter, facing. */
 export function jobFingerprint(job: EngraveJob): string {
-  return programHash(canonicalJson(fingerprintView(job)));
+  return programHash(canonicalJson(programFingerprintView(job)));
+}
+
+/** The fingerprint older builds wrote into their packages (see {@link legacyFingerprintView}). */
+export function legacyJobFingerprint(job: EngraveJob): string {
+  return programHash(canonicalJson(legacyFingerprintView(job)));
 }
 
 /** Why a freeze was refused, or the package it made. */
@@ -248,7 +299,9 @@ export function packageStaleness(pkg: FrozenPackage, job: EngraveJob): PackageSt
     return { stale: true, reason: 'the frozen plan belongs to a different job' };
   }
   if (pkg.programs.length === 0) return { stale: true, reason: 'nothing was frozen for this job yet' };
-  if (jobFingerprint(job) !== pkg.jobHash) {
+  // #1132 migration — a package frozen by an older build carries the legacy hash; it is current
+  // until the open-time refresh upgrades it (same programs), so the upgrade costs no regenerate.
+  if (jobFingerprint(job) !== pkg.jobHash && legacyJobFingerprint(job) !== pkg.jobHash) {
     // #783 — a turned stock is named as such, not folded into "the job changed": the package
     // knows the hold it was frozen in, and the operator turned it at the machine.
     if (pkg.hold !== undefined && !sameHold(pkg.hold, jobHold(job))) {
@@ -288,7 +341,7 @@ export function packageStaleness(pkg: FrozenPackage, job: EngraveJob): PackageSt
 export function setupApprovalDrift(pkg: FrozenPackage, job: EngraveJob): boolean {
   if (pkg.jobId !== job.id) return false;
   if (pkg.programs.length === 0) return false;
-  if (jobFingerprint(job) !== pkg.jobHash) return false;
+  if (jobFingerprint(job) !== pkg.jobHash && legacyJobFingerprint(job) !== pkg.jobHash) return false;
   if (frozenSimVersion(pkg) !== SIMULATOR_VERSION) return false;
   return !sameRegistration(pkg.setups, jobSetups(job));
 }
