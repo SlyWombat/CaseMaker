@@ -132,6 +132,8 @@ export function shopFeedsTable(): readonly FeedsEntry[] {
  */
 export function engraveShopOpts(defaults: ShopDefaults | null): {
   lostDetailWarnRatio: number;
+  /** #1111 — `reach.marginMm`: the gate a cutter's flute must clear past the deepest cut it serves. */
+  reachMarginMm: number;
   peckClearanceMm: number;
   defaults: ShopDefaults | null;
   feeds: readonly FeedsEntry[];
@@ -148,6 +150,7 @@ export function engraveShopOpts(defaults: ShopDefaults | null): {
 } {
   return {
     lostDetailWarnRatio: readDefault(defaults, 'engrave.lostDetailWarnRatio').value,
+    reachMarginMm: readDefault(defaults, 'reach.marginMm').value,
     peckClearanceMm: readDefault(defaults, 'drill.peckClearanceMm').value,
     defaults,
     feeds: shopFeedsTable(),

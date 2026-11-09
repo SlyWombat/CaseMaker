@@ -1,18 +1,16 @@
 /**
- * #1111 R2 — A TIE ON OUTCOME IS DECIDED BY STATED KEYS, NOT BY THE ORDER THE HOUSE ARRIVED IN.
+ * #1111 — THE PLAN'S PICKS AMONG EQUALS, ON THE ENGINE.
  *
- * The app's and the CLI's owned sets are the same 35 cutters; they arrived in different orders (the
- * app's registry is catalogue-ordered, the CLI's inventory-ordered), and a pick that kept the first
- * equal-geometry candidate posted the same toolpath under different cutters' headers — the M1
- * tray's ⌀3.175 finish chose a 10 mm-flute metal ball on the app and the 22 mm on the CLI (#1093's
- * e2e found it).
+ * The key-level cases (the reach-margin gate, the by-key row) live in `pickAmongEquals.spec.ts`.
+ * This file proves the plan uses them:
  *
- * The keys, in this order: feeds measured on this machine (over a table row); the larger reach
- * margin (`fluteLength − deepest cut`, a cutter with no stated flute counting as 0); and finally the
- * registry key, lexical. The rank row names the keys it was decided on.
+ *  - the M1 tray's two ⌀3.175 balls, in either house order, end on the same ball — at a shallow cut
+ *    both pass the gate and the KEY decides; the row says "by key, pending #1114";
+ *  - a part with two same-diameter flats keeps the pre-#1111 order under the canonical house order
+ *    (0f's (c)), and the sheet says "same diameter: by key, pending #1114".
  *
- * RED before the change: `ballTieDecision`/`ballTieSentence` did not exist, equal candidates kept
- * the first measured, and the tray's two orders chose different balls.
+ * RED before #1111: the two house orders chose different balls (the first in arrival order), and a
+ * same-diameter flat was chosen by list position with nothing stated.
  */
 import { createHash } from 'node:crypto';
 
@@ -22,64 +20,19 @@ import { tl } from './helpers/manifoldExec';
 import { buildRandomPart } from '../tools/randomParts';
 import { buildBinaryStl } from '@/workers/export/stlBinary';
 import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
-import {
-  ballTieDecision,
-  ballTieSentence,
-  planModelCam,
-  type BallTieKeys,
-  type ModelPlanInput,
-} from '@/engine/cnc/cam/model/plan';
+import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import type { EngraveTargetObject } from '@/types/engraveJob';
-
-const keys = (over: Partial<BallTieKeys> = {}): BallTieKeys => ({
-  measured: 0,
-  margin: 10,
-  key: 'inv:kz-ball-nose-3-175-22',
-  ...over,
-});
-
-describe('#1111 R2 — the tie keys, in their stated order', () => {
-  it('a row measured on this machine beats a table row, whatever the margins', () => {
-    const measured = keys({ measured: 1, margin: 0.4, key: 'inv:kz-ball-nose-m-3-175-10' });
-    const table = keys({ measured: 0, margin: 12.4 });
-    expect(ballTieDecision(measured, table)).toBeGreaterThan(0);
-    expect(ballTieDecision(table, measured)).toBeLessThan(0);
-  });
-
-  it('the larger reach margin wins when neither feeds row is measured', () => {
-    const longFlute = keys({ margin: 12.4 });
-    const shortFlute = keys({ margin: 0.4, key: 'inv:kz-ball-nose-m-3-175-10' });
-    expect(ballTieDecision(longFlute, shortFlute)).toBeGreaterThan(0);
-    expect(ballTieDecision(shortFlute, longFlute)).toBeLessThan(0);
-  });
-
-  it('the registry key is the last resort — lexically smaller wins — and equal is equal', () => {
-    const a = keys({ key: 'inv:kz-ball-nose-3-175-22' });
-    const b = keys({ key: 'inv:kz-ball-nose-m-3-175-10' });
-    expect(ballTieDecision(a, b)).toBeGreaterThan(0);
-    expect(ballTieDecision(b, a)).toBeLessThan(0);
-    expect(ballTieDecision(a, keys({}))).toBe(0);
-  });
-
-  it('the sentence names what won: the measured row, or the two margins', () => {
-    const ten: Tool = { ...flatEndMill(3.175, { id: '132112313810', name: 'metal 10' }), shape: 'ball', fluteLength: 10 };
-    const twentyTwo: Tool = { ...flatEndMill(3.175, { id: '131012313822', name: 'plain 22' }), shape: 'ball', fluteLength: 22 };
-    const marginSentence = ballTieSentence(twentyTwo, keys({ margin: 12.4 }), ten, keys({ margin: 0.4 }));
-    expect(marginSentence).toContain('tie on leftover and cycle');
-    expect(marginSentence).toContain('reach margin');
-    expect(marginSentence).toContain('inv:kz-ball-nose-3-175-22');
-    const measuredSentence = ballTieSentence(ten, keys({ measured: 1, margin: 0.4 }), twentyTwo, keys({ margin: 12.4 }));
-    expect(measuredSentence).toContain('measured on this machine');
-  });
-});
 
 describe('#1111 R2 — the tray’s ⌀3.175 finish is the same ball whichever way the house arrives', () => {
   const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
   const ten: Tool = { ...flatEndMill(3.175, { number: 3, id: '132112313810', name: 'metal 10' }), shape: 'ball', typeText: 'Ball Nose', fluteLength: 10 };
   const twentyTwo: Tool = { ...flatEndMill(3.175, { number: 4, id: '131012313822', name: 'plain 22' }), shape: 'ball', typeText: 'Ball Nose', fluteLength: 22 };
 
-  async function plan(house: Tool[]): Promise<{ finishCutters: Set<string>; allCutters: Set<string>; rank: string | null }> {
+  const flat25: Tool = { ...flatEndMill(3.175, { number: 5, id: 'inv:kz-o-flute-3-175-25', name: '25 mm O-flute' }), fluteLength: 25 };
+  const flat12: Tool = { ...flatEndMill(3.175, { number: 6, id: 'inv:kz-o-flute-m-3-175-12', name: '12 mm O-flute' }), fluteLength: 12 };
+
+  async function plan(house: Tool[]): Promise<{ finishCutters: Set<string>; allCutters: Set<string>; rank: string | null; notes: string; primaryCutter: string | null }> {
     const part = buildRandomPart(1, 'sloped', tl);
     const stl = buildBinaryStl([{ positions: part.mesh.positions, indices: part.mesh.indices }]);
     const bytes = Buffer.from(stl);
@@ -113,22 +66,38 @@ describe('#1111 R2 — the tray’s ⌀3.175 finish is the same ball whichever w
       finishCutters: new Set(ops.filter((op) => op.kind === 'finish' || op.kind === 'pencil').map((op) => op.outcome.cutter)),
       allCutters: new Set(ops.map((op) => op.outcome.cutter)),
       rank: output.perSetup.flatMap((s) => s.notes).find((n) => n.startsWith('ball rank')) ?? null,
+      notes: output.perSetup.flatMap((s) => s.notes).join('\n'),
+      primaryCutter: output.perSetup[0]?.sequence[0]?.cutterKey ?? null,
     };
   }
 
-  it('the 22 mm flute is chosen in both house orders, and the tie row names its reach margin', async () => {
+  it('the same ball is chosen in both house orders, and the tie row says what decided it', async () => {
     const tenFirst = await plan([flat6, ten, twentyTwo]);
     const longFirst = await plan([flat6, twentyTwo, ten]);
+    // This fixture is 10 mm thick: BOTH 3.175 balls pass the 1.0 mm gate (10 mm and 22 mm of flute
+    // against a 4.7 mm cut), so the KEY decides — '131012313822' before '132112313810' — whichever
+    // way they arrived. The tray's own 9.613 mm cut is the gate case (the 10 mm ball's 0.387 mm
+    // margin fails), pinned with the keys in `pickAmongEquals.spec.ts`.
     for (const run of [tenFirst, longFirst]) {
-      // The FINISH (and its pencil) run on the 22 mm ball whichever way the two arrived. The metal
-      // 10 mm MAY still appear — it is the #965 rest ball — so only the finish ops name the pick.
-      expect(run.finishCutters.has('131012313822'), 'the 22 mm ball cuts the finish').toBe(true);
-      expect(run.finishCutters.has('132112313810'), 'the 10 mm metal ball is not the finish').toBe(false);
-      if (run.rank !== null) expect(run.rank).toContain('reach margin');
+      expect(run.finishCutters.has('131012313822'), 'the by-key ball cuts the finish').toBe(true);
+      expect(run.finishCutters.has('132112313810'), 'the other ball is not the finish').toBe(false);
     }
-    // The tie is what decided the first order (the legacy append puts both same-diameter balls in
-    // the rank); the second has one candidate of that diameter and needs no tie-break.
-    expect(tenFirst.rank).toContain('tie on leftover and cycle');
-    expect(longFirst.rank).toBeNull();
+    // Where the rank ties, the row says the key decided and names the policy issue.
+    const ranked = [tenFirst, longFirst].filter((run) => run.rank !== null);
+    expect(ranked.length, 'the two-ball rank ran').toBeGreaterThan(0);
+    for (const run of ranked) {
+      expect(run.rank).toContain('tie on leftover and cycle');
+      expect(run.rank).toContain('by key, pending #1114');
+    }
+  }, 300_000);
+
+  it('a same-diameter flat tie keeps the pre-#1111 order and the sheet says by key, pending #1114', async () => {
+    // Two ⌀3.175 flats in the canonical house order ('…-3-175-25' sorts before '…-m-…-12'); the
+    // primary and the curved flat keep the pre-#1111 pick — the 25 — and the row states that the
+    // order decided, pending the policy issue (0f's (c)).
+    const run = await plan([flat25, flat12, twentyTwo]);
+    expect(run.primaryCutter).toBe('inv:kz-o-flute-3-175-25');
+    expect(run.notes).toContain('same diameter');
+    expect(run.notes).toContain('pending #1114');
   }, 300_000);
 });

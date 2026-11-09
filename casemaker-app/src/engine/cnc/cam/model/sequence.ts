@@ -52,6 +52,7 @@ import {
   type ToolpathIR,
 } from '../ir';
 import { PlanMetadataInconsistentError } from './planMeta';
+import { byKeyPendingNote } from './pickAmongEquals';
 
 /** The op kinds the engine's plan carries (`PlannedOp['kind']` on #956's interface). */
 export type PlannedOpKind = 'pocket' | 'contour' | 'rough' | 'rest' | 'finish' | 'pencil' | 'chamfer' | 'skin';
@@ -333,6 +334,12 @@ export interface SequenceChoice {
    * nothing). Empty when every step planned.
    */
   unplanned: SequenceStepFailure[];
+  /**
+   * #1111 (0f's (c)) — the row a PRIMARY pick among same-diameter cutters states: the priced rank
+   * tied and the step signature (the keys) decided. The behaviour is the pre-#1111 one; the row
+   * says "by key, pending #1114" so the provisional choice is visible.
+   */
+  pickNote?: string | null;
 }
 
 const EPS = 1e-9;
@@ -1062,6 +1069,23 @@ export function chooseSequence(
     }
   }
   feasible.sort((a, b) => compareRank(rankOf(a), rankOf(b)));
+  // #1111 (c) — the same-diameter row for the PRIMARY pick: no behaviour change (the rank's own
+  // keys and the step signature are exactly the pre-#1111 order); the row states that the canonical
+  // key order is what separated two equal chains, pending the policy issue (#1114).
+  let pickNote: string | null = null;
+  if (feasible.length > 1) {
+    const first = feasible[0]!;
+    const second = feasible[1]!;
+    const ra = rankOf(first);
+    const rb = rankOf(second);
+    let priceTies = true;
+    for (let i = 0; i < 7; i++) if (ra[i] !== rb[i]) { priceTies = false; break; }
+    const t1 = first.sequence.steps[0]?.cutter.tool;
+    const t2 = second.sequence.steps[0]?.cutter.tool;
+    if (priceTies && t1 !== undefined && t2 !== undefined && cuttingDiameter(t1) === cuttingDiameter(t2)) {
+      pickNote = byKeyPendingNote(t1, t2);
+    }
+  }
 
   if (feasible.length === 0) {
     throw new Error(
@@ -1125,6 +1149,7 @@ export function chooseSequence(
     unreachable,
     freeing,
     unplanned: best.failures,
+    ...(pickNote === null ? {} : { pickNote }),
   };
 }
 

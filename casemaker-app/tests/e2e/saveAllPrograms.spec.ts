@@ -6,13 +6,14 @@
 // `fixtures/m1trayB/house.json`: the 129 Makera cutters, the 1 328 feed rows and the 35 owned
 // cutters the published app read), acknowledges the Cut statement, and presses *Save all*.
 //
-// The zip's five `.nc` files must be BYTE-IDENTICAL to set B — the CLI's own output for this job
-// (`fixtures/m1trayB/setB-md5.json`, the #1093 re-keyed table) — proving the app's Save, the CLI
-// and the release store name and write the same files. All five are strict since #1111: the app
+// The zip's `.nc` files must be BYTE-IDENTICAL to set B — the CLI's own output for this job
+// (`fixtures/m1trayB/setB-md5.json`, the #1111 re-keyed table) — proving the app's Save, the CLI
+// and the release store name and write the same files. All four are strict since #1111: the app
 // and the CLI order the owned set canonically and decide a same-diameter tie by stated keys, so
-// the ⌀3.175 finish is the 22 mm ball on both doors (this walk is #1111's gate). The run sheet must
-// name five programs with five Save buttons, and the file bar must offer NO single-program Save
-// for a run of five.
+// the ⌀3.175 finish is the 22 mm ball on both doors (this walk is #1111's gate) — and within that
+// rule the job posts four programs, not the old five: the curved rough joined its pocket program.
+// The run sheet must name every program with its own Save button, and the file bar must offer NO
+// single-program Save for the run.
 //
 // WHY THE HOUSE IS A FIXTURE: no real house service runs in the e2e web build, and the tray's
 // bytes depend on the shop's cutters and feed rows (a run without them posts the starting table —
@@ -42,11 +43,8 @@ const SETB = JSON.parse(read('setB-md5.json')) as {
       programs: number;
       files: {
         name: string;
-        oldName: string;
         bytes: number;
         md5: string;
-        /** #1111 — present on a file whose tool identity may legitimately differ (none today). */
-        toolIdentityMayDiffer?: { issue: number; maskedMd5: number | string; maskedLines: number };
       }[];
     }
   >;
@@ -71,7 +69,7 @@ function md5(bytes: Uint8Array): string {
   return createHash('md5').update(bytes).digest('hex');
 }
 
-test('#1093 — Save all writes all five programs, byte-identical to set B, and the sheet offers each one', async ({
+test('#1093 — Save all writes every program of the run, byte-identical to set B, and the sheet offers each one', async ({
   cm,
   page,
 }, testInfo) => {
@@ -134,7 +132,7 @@ test('#1093 — Save all writes all five programs, byte-identical to set B, and 
   await chooser.setFiles(jobPath);
   await expect(page.getByTestId('engrave-job-notice')).toContainText(`Opened ${JOB_NAME}.cutjob.json.`);
 
-  // GENERATE — five programs, swept and checked in cut order.
+  // GENERATE — the run's programs, swept and checked in cut order.
   await expect(page.getByTestId('engrave-generate')).toBeEnabled({ timeout: 60_000 });
   await page.getByTestId('engrave-generate').click();
   await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'tick', { timeout: 1_500_000 });
@@ -179,7 +177,7 @@ test('#1093 — Save all writes all five programs, byte-identical to set B, and 
     expect(createHash('sha256').update(bytes).digest('hex').slice(0, 8), `${program.ncFile} hash`).toBe(program.ncHash);
   }
 
-  // THE SHEET — five programs, five Saves, each row naming its own file.
+  // THE SHEET — every program, one Save each, each row naming its own file.
   await page.getByTestId('cnc-mode-design').click();
   await (await menuItem(page, 'engrave-run-sheet')).click();
   await expect(page.getByTestId('run-sheet')).toBeVisible();
@@ -188,6 +186,13 @@ test('#1093 — Save all writes all five programs, byte-identical to set B, and 
     await expect(page.getByTestId(`run-sheet-file-${i}`)).toContainText(`${JOB_NAME}-p${i}.nc`);
     await expect(page.getByTestId(`run-sheet-save-${i}`)).toBeVisible();
   }
+  // #1111 — THE SAME-DIAMETER PICK IS STATED ON THE SHEET as provisional: the canonical order's
+  // keys separated the ⌀3.175 flats, and the row says "same diameter … by key, pending #1114"
+  // (the policy for which cutter among equals a plan should prefer is the maintainer's, #1114).
+  const plan = page.locator('[data-section-id="plan"]');
+  // The sheet's `sentence()` capitalises a note's first letter, so the row reads "Same diameter".
+  await expect(plan).toContainText(/same diameter/i);
+  await expect(plan).toContainText('pending #1114');
   // One row's own Save writes that program, and only that program.
   const [one] = await Promise.all([
     page.waitForEvent('download', { timeout: 60_000 }),
@@ -197,8 +202,8 @@ test('#1093 — Save all writes all five programs, byte-identical to set B, and 
   await page.getByTestId('run-sheet-close').click();
 
   // THE CROSS-DOOR CHECK — the app's files against set B, the CLI's own output for this job, all
-  // five strictly byte-identical (#1111's gate; the walk found the p5 divergence).
+  // four strictly byte-identical (#1111's gate; the first walk found the owned-set divergence).
   for (const file of SETB_BOTTOM.files) {
-    expect(md5(zip[file.name]!), `${file.name} equals set B’s ${file.oldName}`).toBe(file.md5);
+    expect(md5(zip[file.name]!), `${file.name} equals set B’s ${file.name}`).toBe(file.md5);
   }
 });

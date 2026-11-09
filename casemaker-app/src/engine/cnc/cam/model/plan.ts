@@ -41,8 +41,9 @@ import { GOAL_FIT_TOLERANCE_MM } from '@/engine/cnc/engrave/goalPlacement';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
-import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanFindingStatement, PlanStatement, StockProbes } from './types';
+import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanFindingStatement, PlanSheetStatement, PlanStatement, StockProbes } from './types';
 import { MOLD_DRAFT_LIMIT_DEG } from './types';
+import { byKeyPendingNote, pickAmongEquals, pickDecisionSentence, pickKeysFor, REACH_MARGIN_FALLBACK_MM, type PickKeys } from './pickAmongEquals';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, isAbortError, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
 import { fullyReachable, pocket } from './ops/pocket';
@@ -257,6 +258,11 @@ export function setupStockOf(
 export interface ModelPlanInput {
   geometry: FeatureSource;
   /**
+   * #1111 — THE SHOP'S REACH-MARGIN GATE, mm (`reach.marginMm`, recommended 1.0). A ball tie is
+   * decided by the gate, then by the cutter key ("by key, pending #1114"). Absent = 1.0 mm.
+   */
+  reachMarginMm?: number;
+  /**
    * #943 (10) — THE JOB'S STATED FREEING TABS (`goal.underside.tabs`), width/height in mm. `count:
    * 0` frees the part with no tabs (the vendor tray's own side 1). Absent → the pocket chain's
    * DEFAULT_RELEASE_TABS, so every job that states no underside block posts byte-identically.
@@ -436,57 +442,17 @@ export function finishBallCandidates(house: readonly Tool[], deepestMm: number):
 }
 
 /**
- * #1111 R2 — A TIE IS DECIDED BY STATED KEYS, NEVER BY THE ORDER THE HOUSE ARRIVED IN.
- *
- * Two candidates that finish the remainder equally well (the same leftover within 1e-9 and the
- * same cycle within 1e-9) used to keep whichever was measured first — and "first" was the registry
- * order, which differed between the app and the CLI (catalogue order vs inventory order), so the
- * two doors posted the same toolpath under different cutters' headers (the M1 tray's ⌀3.175 ball).
- *
- * The keys, in this order:
- *  1. FEED-ROW PROVENANCE — a row measured on this machine beats a table row for the same material;
- *  2. REACH MARGIN — `fluteLength − deepest feed Z of the candidate's own programs`, larger wins; a
- *     cutter that states no flute has margin 0 and loses to any stated one. A tie at 0.387 mm is
- *     inside the Z-datum uncertainty (#1017/#1018's unmeasured jaw tops), so margin is a safety
- *     fact the plan can read, unlike stiffness or finish, which the shop states by what it owns;
- *  3. THE REGISTRY KEY, lexical — the last resort, so the pick is total and reproducible.
+ * #1111 — THE CANDIDATE'S OWN DEEPEST FEED Z, mm below the stock top: the depth its reach margin is
+ * measured against (`fluteLength − deepest`). Zero on a candidate that cut nothing.
  */
-export interface BallTieKeys {
-  measured: number;
-  margin: number;
-  key: string;
-}
-
-function ballTieKeys(input: ModelPlanInput, tool: Tool, ops: readonly { outcome: OpOutcome }[]): BallTieKeys {
-  const catalogue = input.feedCatalogue ?? feedCatalogueSnapshot();
-  const resolved = feedsFor(catalogue, input.stock.material, feedsToolForSurface(tool), Z1);
+function deepestFeedMm(ops: readonly { outcome: OpOutcome }[]): number {
   let deepest = 0;
   for (const op of ops) {
     for (const operation of op.outcome.ir.operations) {
       for (const move of operation.moves) if (move.kind !== 'rapid') deepest = Math.max(deepest, -move.z);
     }
   }
-  return {
-    measured: resolved.ok && resolved.entry.status === 'measured' ? 1 : 0,
-    margin: (tool.fluteLength ?? 0) - deepest,
-    key: cutterKeyOf(tool),
-  };
-}
-
-/** Positive when `a` beats `b`; #1111 R2's order: measured feeds, reach margin, the key. */
-export function ballTieDecision(a: BallTieKeys, b: BallTieKeys): number {
-  if (a.measured !== b.measured) return a.measured - b.measured;
-  if (Math.abs(a.margin - b.margin) > 1e-9) return a.margin - b.margin;
-  return a.key < b.key ? 1 : a.key > b.key ? -1 : 0;
-}
-
-/** The sentence the rank row carries when a tie decided the pick — the keys it was decided on. */
-export function ballTieSentence(winner: Tool, w: BallTieKeys, loser: Tool, l: BallTieKeys): string {
-  const why =
-    w.measured !== l.measured
-      ? `feeds measured on this machine against ${loser.name}'s table row`
-      : `${w.margin.toFixed(2)} mm of reach margin against ${l.margin.toFixed(2)} mm`;
-  return `tie on leftover and cycle — chose ${winner.name} (${w.key}) for ${why}`;
+  return deepest;
 }
 
 export interface PlanOutcome {
@@ -918,6 +884,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // setup 0 has run, which no setup ever observes (setup 0 never reads it).
   let setup0Tree: FeatureTree | null = null;
 
+  // #1111 — the reach-margin gate the ball tie reads (one number for the whole plan).
+  const reachMarginMm = input.reachMarginMm ?? REACH_MARGIN_FALLBACK_MM;
   for (let setupIndex = 0; setupIndex < input.setups.length; setupIndex++) {
     opts.signal?.throwIfAborted();
     const spec = input.setups[setupIndex]!;
@@ -974,8 +942,27 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // figures' 26 mm relief; the house's 0.5 ball states no flute length at all and failed on
     // reach in the review's own measurement, so it can never qualify. No new op: the rest runs the
     // finish's machinery over the ball's own leftover mask.
-    const restBallFor = (chosen: Tool | undefined): Tool | undefined =>
-      balls.find((t) => t !== chosen && (t.fluteLength ?? 0) >= deepestRemainderMm - 1e-9);
+    // #1111 (0f's (c)) — the row a same-diameter pick states while the policy is open (#1114).
+    // Declared before its first referrer (`restBallFor`): a later `const` would sit in that
+    // helper's temporal dead zone when the #986 rank calls it (#1019's own lesson below).
+    const sameDiameterNotes: string[] = [];
+    const noteSameDiameter = (chosen: Tool, rival: Tool | undefined): void => {
+      if (rival === undefined || sameDiameterNotes.length > 0) return;
+      sameDiameterNotes.push(byKeyPendingNote(chosen, rival));
+    };
+    const restBallFor = (chosen: Tool | undefined): Tool | undefined => {
+      const reaches = (t: Tool): boolean => (t.fluteLength ?? 0) >= deepestRemainderMm - 1e-9;
+      const rest = balls.find((t) => t !== chosen && reaches(t));
+      // #1111 (c) — a second ball of the rest ball's diameter that also reaches would be separated
+      // by the canonical order alone; the row says so while the policy is open (#1114).
+      if (rest !== undefined) {
+        noteSameDiameter(
+          rest,
+          balls.find((t) => t !== rest && t !== chosen && cuttingDiameter(t) === cuttingDiameter(rest) && reaches(t)),
+        );
+      }
+      return rest;
+    };
     // #989 — THE RIM STAGE TAKES THE PINNED V when the caller names one (`pinned.chamfer`, the
     // cutterKeyOf key the goal seam derives from its own chamfer request); otherwise the first
     // chamfer/engraving in the house, as before. A pin the house cannot answer is a caller bug,
@@ -1104,10 +1091,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       // already stock-top-relative: the depth below the stock top is `-zBottom` (frame.stockTop
       // reads 0 here), no rebase added.
       const depth = -r.zBottom;
-      return flats.find((t) => {
+      const reaches = (t: Tool): boolean => {
         const usable = usableLengthMm(t);
         return usable === null || usable + 1e-9 >= depth;
-      }) ?? null;
+      };
+      const chosen = flats.find(reaches) ?? null;
+      if (chosen !== null) {
+        // #1111 (c) — two flats of one diameter that both reach are separated by the canonical
+        // order (key); the row says so while the policy is open (#1114).
+        noteSameDiameter(chosen, flats.find((t) => t !== chosen && cuttingDiameter(t) === cuttingDiameter(chosen) && reaches(t)));
+      }
+      return chosen;
     };
     // #1054 — the rank memo: one stage op per distinct (cutter, region, params), read by every
     // candidate the rank prices and by the chosen plan below. Scoped to this setup (its tree,
@@ -1191,7 +1185,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // silent drop: its own typed statement, one per candidate.
     const capStatements: PlanStatement[] = [];
     if (coverageGoal !== undefined && goalCoverage !== undefined && ballCandidates.length > 1 && tree.remainder.length > 0) {
-      let best: { tool: Tool; leftover: number; cycle: number; tie: BallTieKeys } | null = null;
+      let best: { tool: Tool; leftover: number; cycle: number; tie: PickKeys } | null = null;
       let uncappedBest: { tool: Tool; leftover: number; cycle: number } | null = null;
       const measuredRows: string[] = [];
       /** #1111 R2 — the sentence for the tie that decided the pick, when one did. */
@@ -1260,7 +1254,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         measuredRows.push(`⌀${diameterMm.toFixed(2)} mm ${candidate.name}: leftover ${(leftover * 100).toFixed(2)} %, cycle ${cycle.toFixed(0)} s`);
         // #1111 R2 — the candidate's own tie keys, read while its ops are still in hand (the memo
         // evicts a replaced incumbent's work).
-        const tie = ballTieKeys(input, candidate, measured.ops);
+        const tie = pickKeysFor(candidate, {
+          material: input.stock.material,
+          ...(input.feedCatalogue === undefined ? {} : { catalogue: input.feedCatalogue }),
+          deepestMm: deepestFeedMm(measured.ops),
+        });
         if (best === null || leftover < best.leftover - 1e-9 || (Math.abs(leftover - best.leftover) <= 1e-9 && cycle < best.cycle)) {
           // #1054 — the memo keeps the incumbent's ops only: a replaced best is evicted, so the
           // rank never holds more than the best candidate's work plus the one being measured.
@@ -1271,12 +1269,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         // #1111 R2 — EQUAL OUTCOME IS NOT A REASON TO KEEP THE FIRST ARRIVAL. When leftover and
         // cycle are the same, the stated keys decide; the sentence names what won it.
         if (Math.abs(leftover - best.leftover) <= 1e-9 && Math.abs(cycle - best.cycle) <= 1e-9) {
-          const candidateWins = ballTieDecision(tie, best.tie) > 0;
-          tieStatement = ballTieSentence(
+          const candidateWins = pickAmongEquals(tie, best.tie, reachMarginMm) > 0;
+          tieStatement = pickDecisionSentence(
             candidateWins ? candidate : best.tool,
             candidateWins ? tie : best.tie,
             candidateWins ? best.tool : candidate,
             candidateWins ? best.tie : tie,
+            reachMarginMm,
+            'tie on leftover and cycle',
           );
           if (candidateWins) {
             stageMemo.evictOwner(cutterKeyOf(best.tool));
@@ -1867,6 +1867,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // #986 (the ruling) — the ball rank's own statement: the measured candidates, the winner and
     // the uncapped best, so the operator sees what the cap cost.
     notes.push(...ballRankNotes);
+    // #1111 (c) — every same-diameter pick decided by the canonical order is stated as such.
+    notes.push(...sameDiameterNotes);
     // #982 (the review session's ruling) — the two cutter fallbacks, stated on the card in
     // outcome terms (the measured coverage/cycle numbers are the acceptance card's; the plan
     // states the method and the tradeoff it implies). #992 — each is typed: a cut made by a
@@ -1892,7 +1894,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
     // #992 — THE TYPED STATEMENTS: the two planners' own, then this loop's. Every one is the same
     // fact its `notes` line states; the code and severity are what route it to the operator.
-    const statements: PlanStatement[] = [...result.statements, ...freeingStatements, ...fallbackStatements, ...capStatements];
+    const statements: PlanStatement[] = [
+      ...result.statements,
+      ...freeingStatements,
+      ...fallbackStatements,
+      ...capStatements,
+      ...sameDiameterNotes.map((text): PlanSheetStatement => ({ severity: 'sheet', code: 'plan-run', count: 1, text })),
+    ];
     // #1005 — THE MOULD'S OWN FACTS, from the cavity the plan was handed. The sentences are the old
     // heightfield path's own, word for word (the guide's chapter 8 rows document these codes); the
     // draft number is measured from the part's surface at the seam, because a planar wall has no
@@ -3728,6 +3736,13 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       : `the freeing cut (contour) is posted LAST on ${choice.freeing.cutterKey} — a RETURN tool change back to it after ${lastChainCutter}, priced in the cycle; ${lastChainCutter} cannot take the profile (flute or stated shape)`;
     notes.push(text);
     statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
+  }
+  // #1111 (c) — THE PRIMARY PICK'S ROW: the chain's own price and step signature are the pre-#1111
+  // order (unchanged); where two same-diameter primaries tied on price and the canonical order's
+  // keys separated them, the sheet says so, pending the policy issue (#1114).
+  if (choice.pickNote !== undefined && choice.pickNote !== null) {
+    notes.push(choice.pickNote);
+    statements.push({ severity: 'sheet', code: 'plan-run', text: choice.pickNote, count: 1 });
   }
 
   const sequence: SequencedCutter[] = choice.cost.entries.map((entry) => {
