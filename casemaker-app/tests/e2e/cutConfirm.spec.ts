@@ -87,6 +87,14 @@ test('#656 — the one screen names the frozen program and cutter, and ONE state
   fs.mkdirSync(statementDir, { recursive: true });
   await page.screenshot({ path: path.join(statementDir, 'one-statement.png') });
   await ack.check();
+  // #1127 — THE ONE PRESS IS ALSO THE FIRST LOAD: the statement alone does not arm it, because a
+  // program is not uploaded until every bit on the cut step's checklist is located (or replaced).
+  // The rows live in step 3 beside the press, so the step is opened here and left open below.
+  await page.getByTestId('engrave-cut-step-3-summary').click();
+  const cutterRows = page.getByTestId('engrave-cutter-row');
+  const cutterCount = await cutterRows.count();
+  expect(cutterCount, 'the checklist has a row per distinct cutter').toBeGreaterThan(0);
+  for (let i = 0; i < cutterCount; i++) await cutterRows.nth(i).getByRole('checkbox').check();
   await expect(go).toBeEnabled();
   await expect(details).not.toHaveAttribute('open');
   // #796 — THE THREE-STEP CUT, in the state the operator sees after a real Generate: step 1's
@@ -106,7 +114,10 @@ test('#656 — the one screen names the frozen program and cutter, and ONE state
   await expect(details).toHaveAttribute('open');
   await details.locator('summary').first().click();
   await expect(details).not.toHaveAttribute('open');
-  await page.getByTestId('engrave-cut-step-3-summary').click();
+  const step3 = page.getByTestId('engrave-cut-step-3');
+  if (!(await step3.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await page.getByTestId('engrave-cut-step-3-summary').click();
+  }
   await expect(page.getByTestId('engrave-cut-confirm')).toBeVisible({ timeout: 30_000 });
 
   const frozen = await page.evaluate(() => window.__caseMaker!.getFrozenProgram());
