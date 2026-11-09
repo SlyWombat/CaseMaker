@@ -43,7 +43,8 @@ import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFram
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanFindingStatement, PlanSheetStatement, PlanStatement, StockProbes } from './types';
 import { MOLD_DRAFT_LIMIT_DEG } from './types';
-import { byKeyPendingNote, pickAmongEquals, pickDecisionSentence, pickKeysFor, REACH_MARGIN_FALLBACK_MM, type PickKeys } from './pickAmongEquals';
+import { pickAmongEquals, pickDecisionSentence, pickKeysFor, pickKeysOf, pickNote as pickNoteSentence, REACH_MARGIN_FALLBACK_MM, type PickKeys } from './pickAmongEquals';
+import { BIT_CHANGE_KEYS, bitChangePriceSeconds, bitChangeShapeSentence, bitChangeStanding, flatBitChangeRule, type BitChangeRule } from './bitChange';
 import { finishTipField, discRowCountFor, stencilCellsFor, tipFieldOpsFor, maxTipOpsFor } from '../dropTip';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, isAbortError, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
@@ -424,15 +425,20 @@ export interface ModelPlanInput {
  * which balls are worth measuring, and it never consults catalogue order.
  */
 export function finishBallCandidates(house: readonly Tool[], deepestMm: number): Tool[] {
-  const byDiameter = new Map<number, Tool>();
+  // #1114 — EVERY ball that reaches is a candidate, not one per diameter. The pre-#1114 rule kept
+  // the longest flute of each diameter ("more flute is better"); the maintainer's rule makes the
+  // SHORTEST SUFFICIENT flute the stiffest adequate tool, and that is only expressible if the
+  // shorter same-diameter ball is measured too. Duplicates of one cutter key are collapsed.
+  const seen = new Set<string>();
+  const all: Tool[] = [];
   for (const tool of house) {
     if (tool.shape !== 'ball') continue;
-    const diameter = cuttingDiameter(tool) ?? 0;
-    if (!(diameter > 0)) continue;
-    const current = byDiameter.get(diameter);
-    if (current === undefined || (tool.fluteLength ?? 0) > (current.fluteLength ?? 0)) byDiameter.set(diameter, tool);
+    if (!((cuttingDiameter(tool) ?? 0) > 0)) continue;
+    const key = cutterKeyOf(tool);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    all.push(tool);
   }
-  const all = [...byDiameter.values()];
   const reaching = all.filter((tool) => (tool.fluteLength ?? 0) + 1e-9 >= deepestMm);
   // #986 (C's pre-read) — THE SUPERSET HOLDS BY DIAMETER, NOT BY TOOL OBJECT: two sets can differ
   // in which balls their reach filters keep, so the PRE-#986 PICK (largest diameter, first in the
@@ -506,8 +512,10 @@ export interface ModelPlanOutput {
  * The PUBLIC cost wrapper `SetupPlan.sequence[].cost` carries — distinct from `sequence.ts`'s own
  * internal `CycleCost` (which sums to a bare `estimateSeconds: number`, not a `CycleTerms` object).
  * `terms` is #927's real type (`ir.ts`) on this cutter's posted, concatenated `ToolpathIR`;
- * `toolChangeSeconds`/`totalSeconds` wrap it per C's cost ruling; `toolChanges` is optional — the
- * ruling's wrapper does not require the count, though C's module states it.
+ * `toolChangeSeconds`/`totalSeconds` wrap it per C's cost ruling — since #1114
+ * `toolChangeSeconds` is the SUM of the changes charged to this cutter, each priced from the
+ * program before it, not a count × a flat allowance; `toolChanges` is optional — the ruling's
+ * wrapper does not require the count, though C's module states it.
  */
 export interface CycleCost {
   terms: CycleTerms;
@@ -734,6 +742,17 @@ function describeRegistration(setupIndex: number, registration: SetupRegistratio
   );
 }
 
+/** #1114 — a duration as the operator reads it on the sheet. */
+function formatSpan(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const rest = total % 60;
+  if (hours > 0) return minutes === 0 ? `${hours} h` : `${hours} h ${minutes} min`;
+  if (minutes > 0) return rest === 0 ? `${minutes} min` : `${minutes} min ${rest} s`;
+  return `${rest} s`;
+}
+
 /**
  * THE ENTRY (#956 §3.0, filled in on F's check suite finding it still threw). One whole job — every
  * setup, every feature the tree recognises — planned through the model engine and returned as
@@ -758,7 +777,16 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const tl = await getToplevel();
   const offset = makeClipperOffset(tl);
   const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
-  const toolChangeSeconds = readDefault(liveShopDefaults(), 'toolChange.seconds').value;
+  const defaults = liveShopDefaults();
+  const toolChangeSeconds = readDefault(defaults, 'toolChange.seconds').value;
+  // #1114 — THE BIT-CHANGE RULE: a change is priced from the program before it (the shop's four
+  // settings; the recommendations stand in for a shop that states none).
+  const bitChange: BitChangeRule = {
+    attendedMinutes: readDefault(defaults, BIT_CHANGE_KEYS.attendedMinutes).value,
+    attendedChangeSeconds: readDefault(defaults, BIT_CHANGE_KEYS.attendedChangeSeconds).value,
+    walkAwayMinutes: readDefault(defaults, BIT_CHANGE_KEYS.walkAwayMinutes).value,
+    returnMinutes: readDefault(defaults, BIT_CHANGE_KEYS.returnMinutes).value,
+  };
   // #961 — THE SIMULATED OUTCOME'S STAMP. With a goal supplied, every candidate the picker prices
   // is posted and stamped exactly as the goal check does, and the cells its sweep leaves above the
   // 0.1 mm band are counted — the rank's first key. The goal is the caller's (the job's target),
@@ -1060,19 +1088,20 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // the wall-foot fillet (the ball's radius) as the tradeoff. Only a set with NO round cutter at
     // all is refused, by name.
     const noFlatFallback = flats.length === 0;
-    const primary = flats[0] ?? balls[0];
-    if (primary === undefined) {
+    const firstRound = flats[0] ?? balls[0];
+    if (firstRound === undefined) {
       throw new Error(
         unfeedableStatements.length > 0
           ? `cam/model/plan: no cutter in the set has cutting parameters for ${input.stock.material}`
           : 'cam/model/plan: the house states no flat end mill and no ball nose with a cutting diameter — no round cutter can plan this part',
       );
     }
-    // #986 — THE FINISHING BALL IS RANKED, NOT SIZED. Candidates are one ball per cutting
-    // diameter (the longest flute of each), reach-filtered against this setup's deepest remainder;
-    // the measured rank below prices them by finish + stamp and keeps the best. The old
-    // "largest diameter, first in catalogue order" rule is the DEFAULT when there is no goal grid
-    // to measure against — the documented pre-#986 behaviour, and this base pick.
+    // #986 — THE FINISHING BALL IS RANKED, NOT SIZED. Candidates are every ball that reaches this
+    // setup's deepest remainder (#1114: one per diameter would hide the shorter same-diameter
+    // flute the pick now prefers); the measured rank below prices them by finish + stamp and keeps
+    // the best. The old "largest diameter, first in catalogue order" rule is the DEFAULT when
+    // there is no goal grid to measure against — the documented pre-#986 behaviour, and this base
+    // pick.
     const deepestRemainderMm = tree.remainder.reduce((m, r) => Math.max(m, r.zTop - r.zBottom), 0);
     const ballCandidates = finishBallCandidates(candidateHouse, deepestRemainderMm);
     let ball = balls[0];
@@ -1082,27 +1111,64 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // figures' 26 mm relief; the house's 0.5 ball states no flute length at all and failed on
     // reach in the review's own measurement, so it can never qualify. No new op: the rest runs the
     // finish's machinery over the ball's own leftover mask.
-    // #1111 (0f's (c)) — the row a same-diameter pick states while the policy is open (#1114).
-    // Declared before its first referrer (`restBallFor`): a later `const` would sit in that
-    // helper's temporal dead zone when the #986 rank calls it (#1019's own lesson below).
+    // #1114 — the row a same-diameter pick states: the decider it used. Declared before its first
+    // referrer (`restBallFor`): a later `const` would sit in that helper's temporal dead zone when
+    // the #986 rank calls it (#1019's own lesson below).
     const sameDiameterNotes: string[] = [];
-    const noteSameDiameter = (chosen: Tool, rival: Tool | undefined): void => {
+    const noteSameDiameter = (chosen: Tool, rival: Tool | undefined, deepestMm: number): void => {
       if (rival === undefined || sameDiameterNotes.length > 0) return;
-      sameDiameterNotes.push(byKeyPendingNote(chosen, rival));
+      sameDiameterNotes.push(
+        pickNoteSentence(chosen, rival, pickKeysOf(chosen, deepestMm), pickKeysOf(rival, deepestMm), reachMarginMm),
+      );
     };
+    // The pick among the cutters of one kind that reach: the gate, the shortest sufficient flute,
+    // then the key — the one rule, everywhere (#1114).
+    const bestOf = (candidates: readonly Tool[], deepestMm: number): Tool | undefined =>
+      candidates.reduce<Tool | undefined>(
+        (best, t) => best === undefined
+          || pickAmongEquals(pickKeysOf(t, deepestMm), pickKeysOf(best, deepestMm), reachMarginMm) > 0
+          ? t
+          : best,
+        undefined,
+      );
     const restBallFor = (chosen: Tool | undefined): Tool | undefined => {
       const reaches = (t: Tool): boolean => (t.fluteLength ?? 0) >= deepestRemainderMm - 1e-9;
-      const rest = balls.find((t) => t !== chosen && reaches(t));
-      // #1111 (c) — a second ball of the rest ball's diameter that also reaches would be separated
-      // by the canonical order alone; the row says so while the policy is open (#1114).
+      const candidates = balls.filter((t) => t !== chosen && reaches(t));
+      const rest = bestOf(candidates, deepestRemainderMm);
+      // A second ball of the rest ball's diameter that also reaches: the row states what decided.
       if (rest !== undefined) {
         noteSameDiameter(
           rest,
-          balls.find((t) => t !== rest && t !== chosen && cuttingDiameter(t) === cuttingDiameter(rest) && reaches(t)),
+          candidates.find((t) => t !== rest && cuttingDiameter(t) === cuttingDiameter(rest)),
+          deepestRemainderMm,
         );
       }
       return rest;
     };
+    // #1114/#1115 — THE CURVED PIPELINE'S PRIMARY IS A PICK, NOT A LIST HEAD: among the flats whose
+    // own stated reach covers the deepest remainder, the gate → the shortest sufficient flute →
+    // the LARGER DIAMETER (stiffer) → the lower priced stage → the key. The pool stays every flat
+    // that reaches: a narrow channel the big flat cannot enter is a legitimate reason for a small
+    // flat, and the site's own `reaches` filter is what expresses it. The diameter key is what
+    // keeps an equal-flute tie from handing the curved rough to a ⌀2 that is both less stiff and
+    // slower than a ⌀3.175 (the tray bottom's +28 min for the same outcome, the Manager's ruling).
+    // When none reaches, the list head stands and the ball roughs what the flat cannot (the old
+    // behaviour, unchanged). The row states the decider whenever a same-diameter rival was passed.
+    const primary = ((): Tool => {
+      if (flats.length === 0) return firstRound;
+      const reaches = (t: Tool): boolean => {
+        const usable = t.shoulderLength ?? t.fluteLength;
+        return usable === null || usable + 1e-9 >= deepestRemainderMm;
+      };
+      const candidates = flats.filter(reaches);
+      const chosen = bestOf(candidates, deepestRemainderMm) ?? firstRound;
+      noteSameDiameter(
+        chosen,
+        candidates.find((t) => t !== chosen && cuttingDiameter(t) === cuttingDiameter(chosen)),
+        deepestRemainderMm,
+      );
+      return chosen;
+    })();
     // #989 — THE RIM STAGE TAKES THE PINNED V when the caller names one (`pinned.chamfer`, the
     // cutterKeyOf key the goal seam derives from its own chamfer request); otherwise the first
     // chamfer/engraving in the house, as before. A pin the house cannot answer is a caller bug,
@@ -1235,11 +1301,16 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         const usable = usableLengthMm(t);
         return usable === null || usable + 1e-9 >= depth;
       };
-      const chosen = flats.find(reaches) ?? null;
+      // #1114 — among the flats that reach THIS region, the gate → the shortest sufficient flute →
+      // the key; the row states which one decided.
+      const candidates = flats.filter(reaches);
+      const chosen = bestOf(candidates, depth) ?? null;
       if (chosen !== null) {
-        // #1111 (c) — two flats of one diameter that both reach are separated by the canonical
-        // order (key); the row says so while the policy is open (#1114).
-        noteSameDiameter(chosen, flats.find((t) => t !== chosen && cuttingDiameter(t) === cuttingDiameter(chosen) && reaches(t)));
+        noteSameDiameter(
+          chosen,
+          candidates.find((t) => t !== chosen && cuttingDiameter(t) === cuttingDiameter(chosen)),
+          depth,
+        );
       }
       return chosen;
     };
@@ -1399,6 +1470,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           material: input.stock.material,
           ...(input.feedCatalogue === undefined ? {} : { catalogue: input.feedCatalogue }),
           deepestMm: deepestFeedMm(measured.ops),
+          // #1114 — the candidate's own measured cycle is the priced stage the pick's last key
+          // reads when the flute, the diameter and the gate all tie.
+          priceSeconds: cycle,
         });
         if (best === null || leftover < best.leftover - 1e-9 || (Math.abs(leftover - best.leftover) <= 1e-9 && cycle < best.cycle)) {
           // #1054 — the memo keeps the incumbent's ops only: a replaced best is evicted, so the
@@ -1879,6 +1953,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         feeds,
         rapid: Z1.rapidEstimate,
         toolChangeSeconds,
+        // #1114 — the sequence's ties and its priced changes both read the new rule.
+        bitChange,
+        reachMarginMm,
         spindleRpm: pocketParams.rpm,
         air: true,
         boolean,
@@ -1958,28 +2035,61 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // Programs ONE PER RUN, in execution order — the same rule `planPocketsForTree` states: a run
     // starts when the cutter key changes, so a cutter's two non-contiguous visits never merge.
     const programs: ToolpathIR[] = [];
+    const programKeys: string[] = [];
     let run: { key: string; ir: ToolpathIR } | null = null;
     for (const op of batchedOps) {
       if (run !== null && run.key !== op.outcome.cutter) {
         programs.push(run.ir);
+        programKeys.push(run.key);
         run = null;
       }
       run = run === null ? { key: op.outcome.cutter, ir: op.outcome.ir } : { key: run.key, ir: concatToolpathIR(run.ir, op.outcome.ir) };
     }
-    if (run !== null) programs.push(run.ir);
-
-    let totalCostSeconds = 0;
-    for (let p = 0; p < programs.length; p++) {
-      totalCostSeconds += estimateCycleTerms(programs[p]!, Z1.rapidEstimate).totalSeconds;
-      if (p > 0) totalCostSeconds += toolChangeSeconds;
+    if (run !== null) {
+      programs.push(run.ir);
+      programKeys.push(run.key);
     }
 
+    // #1114 — EVERY CHANGE IS PRICED FROM THE PROGRAM BEFORE IT, and both numbers are stated:
+    // the program's own duration is what decides whether the operator was still at the machine.
+    const programSeconds = programs.map((ir) => estimateCycleTerms(ir, Z1.rapidEstimate).totalSeconds);
+    const bitChanges: { after: string; before: string; afterSeconds: number; priceSeconds: number }[] = [];
+    let cuttingSeconds = 0;
+    let changeTotalSeconds = 0;
+    for (let p = 0; p < programs.length; p++) {
+      cuttingSeconds += programSeconds[p]!;
+      if (p === 0) continue;
+      const priceSeconds = bitChangePriceSeconds(bitChange, programSeconds[p - 1]!);
+      changeTotalSeconds += priceSeconds;
+      bitChanges.push({
+        after: programs[p - 1]!.tool.name,
+        before: programs[p]!.tool.name,
+        afterSeconds: programSeconds[p - 1]!,
+        priceSeconds,
+      });
+    }
+    const totalCostSeconds = cuttingSeconds + changeTotalSeconds;
+    const bitChangeNotes: string[] = bitChanges.map((change) =>
+      `the bit change before ${change.before} comes after ${change.after}'s ${formatSpan(change.afterSeconds)} program — priced ${formatSpan(change.priceSeconds)} (${bitChangeStanding(bitChange, change.afterSeconds)})`,
+    );
+    if (bitChanges.length > 0) {
+      bitChangeNotes.push(
+        `the run's cycle is ${formatSpan(totalCostSeconds)}: cutting and rapids ${formatSpan(cuttingSeconds)}, bit changes ${formatSpan(changeTotalSeconds)} in ${bitChanges.length} change${bitChanges.length === 1 ? '' : 's'}; ${bitChangeShapeSentence(bitChange)}`,
+      );
+    }
+
+    // #1114 — one row per pick: the chain's own pickNote already states the primary's decider, so
+    // a same-diameter note with the same words is not printed twice.
+    const resultNoteSet = new Set(result.notes);
+    const freshSameDiameterNotes = sameDiameterNotes.filter((text) => !resultNoteSet.has(text));
     const notes = [
       ...(input.houseNote === undefined ? [] : [input.houseNote]),
       ...earlyNotes,
       ...result.notes,
       ...emptyStages,
       ...freeingNotes,
+      ...freshSameDiameterNotes,
+      ...bitChangeNotes,
     ];
     // #988 — the setup's band, stated once: the depth cut and what the tree's deepest demand
     // leaves below it. (The seam carries the old path's `goal-cut-top-band` warning already; this
@@ -2040,7 +2150,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       ...freeingStatements,
       ...fallbackStatements,
       ...capStatements,
-      ...sameDiameterNotes.map((text): PlanSheetStatement => ({ severity: 'sheet', code: 'plan-run', count: 1, text })),
+      ...freshSameDiameterNotes.map((text): PlanSheetStatement => ({ severity: 'sheet', code: 'plan-run', count: 1, text })),
+      // #1114 — the priced bit changes and the run's cycle, on the sheet (§2).
+      ...bitChangeNotes.map((text): PlanSheetStatement => ({ severity: 'sheet', code: 'plan-run', count: 1, text })),
     ];
     // #1005 — THE MOULD'S OWN FACTS, from the cavity the plan was handed. The sentences are the old
     // heightfield path's own, word for word (the guide's chapter 8 rows document these codes); the
@@ -2724,6 +2836,10 @@ export interface PlanPocketsOptions {
   rapid: RapidEstimate;
   /** The shop's `toolChange.seconds` (#858) — #961's own per-change allowance, not a default here. */
   toolChangeSeconds: number;
+  /** #1114 — the shop's bit-change rule: a change is priced from the program before it. */
+  bitChange?: BitChangeRule;
+  /** #1114 — the shop's `reach.marginMm`, the gate a same-diameter tie's candidates must clear. */
+  reachMarginMm?: number;
   spindleRpm: number;
   air: boolean;
   /** The card's "vendor + 1" cutter budget (`SequenceOptions.maxCutters`). Absent → no cap. */
@@ -3451,10 +3567,13 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // that in fact needs no pocket-chain cutter at all (#869's ball-alone relief, #966's open-mesh
   // relief). Guarded here, not in `sequence.ts`, so the general-purpose chooser stays untouched.
   const choice: SequenceChoice = demand.features.length === 0
-    ? { steps: [], cost: { entries: [], estimateSeconds: 0, toolChanges: 0, toolChangeSeconds: 0, totalSeconds: 0 }, considered: [], unreachable: [], freeing: null, unplanned: [] }
+    ? { steps: [], cost: { entries: [], estimateSeconds: 0, toolChanges: 0, changeSeconds: 0, changes: [], totalSeconds: 0 }, considered: [], unreachable: [], freeing: null, unplanned: [] }
     : chooseSequence(demand, cutters, {
     rapid: opts.rapid,
     toolChangeSeconds: opts.toolChangeSeconds,
+    // #1114 — the sequence's priced changes and its same-diameter tie rule.
+    ...(opts.bitChange === undefined ? {} : { bitChange: opts.bitChange }),
+    ...(opts.reachMarginMm === undefined ? {} : { reachMarginMm: opts.reachMarginMm }),
     planStep,
     maxCutters: opts.maxCutters,
     ...(opts.onCandidate === undefined ? {} : { onCandidate: opts.onCandidate }),
@@ -3924,9 +4043,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     notes.push(text);
     statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
   }
-  // #1111 (c) — THE PRIMARY PICK'S ROW: the chain's own price and step signature are the pre-#1111
-  // order (unchanged); where two same-diameter primaries tied on price and the canonical order's
-  // keys separated them, the sheet says so, pending the policy issue (#1114).
+  // #1114 — THE PRIMARY PICK'S ROW: two same-diameter chains tied through every priced key, and
+  // the row names the decider the pick used (the gate, the shortest sufficient flute, or the key).
   if (choice.pickNote !== undefined && choice.pickNote !== null) {
     notes.push(choice.pickNote);
     statements.push({ severity: 'sheet', code: 'plan-run', text: choice.pickNote, count: 1 });
@@ -3946,8 +4064,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       cutterKey: entry.cutterKey,
       cost: {
         terms,
-        toolChangeSeconds: entry.toolChangeSeconds,
-        totalSeconds: terms.totalSeconds + entry.toolChanges * entry.toolChangeSeconds,
+        // #1114 — the changes are already PRICED (each from its preceding program); the entry
+        // carries their sum, not a count × a flat allowance.
+        toolChangeSeconds: entry.changeSeconds,
+        totalSeconds: terms.totalSeconds + entry.changeSeconds,
         toolChanges: entry.toolChanges,
       },
       pinned: stepCutter?.pinned ?? false,
@@ -3965,12 +4085,20 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     if (choice.steps.some((s) => s.cutter.key === run.cutterKey)) continue;
     sequenced.add(run.cutterKey);
     const terms = estimateCycleTerms(run.ir, opts.rapid);
+    // #1114 — this run's one change is priced from the program that posts before it.
+    const at = programs.findIndex((p) => p.cutterKey === run.cutterKey);
+    const previous = at > 0 ? programs[at - 1] : undefined;
+    const precedingSeconds = previous === undefined ? 0 : estimateCycleTerms(previous.ir, opts.rapid).totalSeconds;
+    const changePrice = bitChangePriceSeconds(
+      opts.bitChange ?? flatBitChangeRule(opts.toolChangeSeconds),
+      precedingSeconds,
+    );
     sequence.push({
       cutterKey: run.cutterKey,
       cost: {
         terms,
-        toolChangeSeconds: opts.toolChangeSeconds,
-        totalSeconds: terms.totalSeconds + opts.toolChangeSeconds,
+        toolChangeSeconds: changePrice,
+        totalSeconds: terms.totalSeconds + changePrice,
         toolChanges: 1,
       },
       pinned: false,
@@ -5613,7 +5741,7 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
         unplanned: [],
         choice: {
           steps: [],
-          cost: { entries: [], estimateSeconds: 0, toolChanges: 0, toolChangeSeconds: 0, totalSeconds: 0 },
+          cost: { entries: [], estimateSeconds: 0, toolChanges: 0, changeSeconds: 0, changes: [], totalSeconds: 0 },
           considered: [],
           unreachable: [],
           freeing: null,

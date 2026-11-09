@@ -52,7 +52,8 @@ import {
   type ToolpathIR,
 } from '../ir';
 import { PlanMetadataInconsistentError } from './planMeta';
-import { byKeyPendingNote } from './pickAmongEquals';
+import { bitChangePriceSeconds, flatBitChangeRule, type BitChangeRule } from './bitChange';
+import { pickAmongEquals, pickKeysOf, pickNote as pickNoteSentence, REACH_MARGIN_FALLBACK_MM } from './pickAmongEquals';
 
 /** The op kinds the engine's plan carries (`PlannedOp['kind']` on #956's interface). */
 export type PlannedOpKind = 'pocket' | 'contour' | 'rough' | 'rest' | 'finish' | 'pencil' | 'chamfer' | 'skin';
@@ -152,8 +153,10 @@ export interface CandidateSequence {
 
 /**
  * One cutter's price. `estimateSeconds` is #927's own terms on that cutter's posted moves;
- * `toolChanges` is 0 for the loaded first cutter and 1 for every cutter after it; the total adds
- * the shop's allowance. This is the `CycleCost` #956's `SetupPlan.sequence[]` carries.
+ * `toolChanges` counts the changes charged to this cutter (0 for the loaded first cutter, 1 for
+ * every later visit); `changeSeconds` is what those changes are PRICED at (#1114 — each change's
+ * price comes from the program before it, not a flat allowance). This is the `CycleCost` #956's
+ * `SetupPlan.sequence[]` carries.
  */
 export interface CycleCost {
   cutterKey: string;
@@ -161,10 +164,22 @@ export interface CycleCost {
   estimateSeconds: number;
   /** Changes charged to this cutter: 0 for the first, 1 for each cutter after it. */
   toolChanges: number;
-  /** The shop's `toolChange.seconds` used, s. */
-  toolChangeSeconds: number;
-  /** `estimateSeconds + toolChanges × toolChangeSeconds`. */
+  /** #1114 — Σ the prices of those changes, s (each priced from its preceding program). */
+  changeSeconds: number;
+  /** `estimateSeconds + changeSeconds`. */
   totalSeconds: number;
+}
+
+/** #1114 — one bit change and what the program before it cost the operator. */
+export interface PricedChange {
+  /** The program the change follows: its cutter key. */
+  afterCutterKey: string;
+  /** The cutter the change loads. */
+  beforeCutterKey: string;
+  /** The preceding program's own cycle estimate, s. */
+  afterSeconds: number;
+  /** What this change is priced at, s. */
+  priceSeconds: number;
 }
 
 /** A whole sequence's price. */
@@ -172,7 +187,10 @@ export interface SequenceCost {
   entries: CycleCost[];
   estimateSeconds: number;
   toolChanges: number;
-  toolChangeSeconds: number;
+  /** #1114 — Σ every change's price, s. */
+  changeSeconds: number;
+  /** #1114 — every change, in execution order, with the program it follows. */
+  changes: PricedChange[];
   totalSeconds: number;
 }
 
@@ -187,8 +205,16 @@ export type PlanStep = (step: SequenceStep, prefix?: readonly SequenceStep[]) =>
 export interface SequenceOptions {
   /** The machine's rapid model, #927's timing. */
   rapid: RapidEstimate;
-  /** The shop's `toolChange.seconds` (#858). */
+  /**
+   * #1114 — THE SHOP'S BIT-CHANGE RULE: a change costs by the price curve from the program
+   * before it. When absent, `toolChangeSeconds` is the pre-#1114 flat allowance (every change the
+   * same), so a caller with no durations to price against is unchanged.
+   */
+  bitChange?: BitChangeRule;
+  /** The shop's `toolChange.seconds` (#858) — the flat fallback when `bitChange` is absent. */
   toolChangeSeconds: number;
+  /** #1114 — the shop's `reach.marginMm`: the gate a tie's candidates must clear. */
+  reachMarginMm?: number;
   /** Build the step's moves; the op implementations, or a stand-in. */
   planStep: PlanStep;
   /** Whether a cutter's feeds are rowed or the labelled fallback; absent → rowed. */
@@ -335,9 +361,9 @@ export interface SequenceChoice {
    */
   unplanned: SequenceStepFailure[];
   /**
-   * #1111 (0f's (c)) — the row a PRIMARY pick among same-diameter cutters states: the priced rank
-   * tied and the step signature (the keys) decided. The behaviour is the pre-#1111 one; the row
-   * says "by key, pending #1114" so the provisional choice is visible.
+   * #1114 — the row a PRIMARY pick among same-diameter cutters states: two chains tied through
+   * every priced key, and `pickAmongEquals` decided (the reach-margin gate, the shortest
+   * sufficient flute, or the key). The row names the decider; no policy is pending.
    */
   pickNote?: string | null;
 }
@@ -738,37 +764,41 @@ export function candidateSequences(
       for (const ball of ballChoices) {
         for (const chamfer of chamferChoices) {
           for (const free of freeChoices) {
-            const steps = base.slice();
-            if (ball !== null) {
-              steps.push({
-                kind: 'finish',
-                role: 'ball',
-                cutter: choiceOf(ball, pinned.finish === ball.key),
-                regionIds: curvedFeatures.map((f) => f.id),
-              });
+            const ballStep: SequenceStep | null = ball === null ? null : {
+              kind: 'finish',
+              role: 'ball',
+              cutter: choiceOf(ball, pinned.finish === ball.key),
+              regionIds: curvedFeatures.map((f) => f.id),
+            };
+            const chamferStep: SequenceStep | null = chamfer === null ? null : {
+              kind: 'chamfer',
+              role: 'chamfer',
+              cutter: choiceOf(chamfer, pinned.chamfer === chamfer.key),
+              regionIds: rimFeatures.map((f) => f.id),
+            };
+            const contourStep: SequenceStep | null = free === null ? null : {
+              kind: 'contour',
+              role: 'flat',
+              cutter: choiceOf(free.cutter, pinned.contour === free.cutter.key),
+              regionIds: contourFeatures.map((f) => f.id),
+            };
+            // #1114 — ORDERING IS PRICED WORK. The ball finish and the rim chamfer are independent
+            // (different regions, no prefix dependence); both orders are offered when both exist,
+            // and the priced rank decides which one changes bits after the shorter program. The
+            // freeing contour stays LAST in either order (the part must be held throughout).
+            const orders: (SequenceStep | null)[][] = ballStep !== null && chamferStep !== null
+              ? [[ballStep, chamferStep], [chamferStep, ballStep]]
+              : [[ballStep, chamferStep]];
+            for (const order of orders) {
+              const steps = [...base, ...order.filter((s): s is SequenceStep => s !== null)];
+              if (contourStep !== null) steps.push(contourStep);
+              const unreachable = free !== null || contourFeatures.length === 0
+                ? unreachablePockets
+                : [...unreachablePockets, ...contourFeatures.map((f) => f.id)];
+              const covered = new Set(coveredNow);
+              if (free !== null) for (const f of contourFeatures) covered.add(f.id);
+              add(steps, unreachable, covered);
             }
-            if (chamfer !== null) {
-              steps.push({
-                kind: 'chamfer',
-                role: 'chamfer',
-                cutter: choiceOf(chamfer, pinned.chamfer === chamfer.key),
-                regionIds: rimFeatures.map((f) => f.id),
-              });
-            }
-            if (free !== null) {
-              steps.push({
-                kind: 'contour',
-                role: 'flat',
-                cutter: choiceOf(free.cutter, pinned.contour === free.cutter.key),
-                regionIds: contourFeatures.map((f) => f.id),
-              });
-            }
-            const unreachable = free !== null || contourFeatures.length === 0
-              ? unreachablePockets
-              : [...unreachablePockets, ...contourFeatures.map((f) => f.id)];
-            const covered = new Set(coveredNow);
-            if (free !== null) for (const f of contourFeatures) covered.add(f.id);
-            add(steps, unreachable, covered);
           }
         }
       }
@@ -801,17 +831,27 @@ export function candidateSequences(
  * step's cutter is loaded, and a cutter that comes BACK after another ran (the deferred freeing
  * contour returning to the primary, when the chain chose that) costs a second change to load it
  * again. Counting one change per cutter key — the older model — under-priced exactly that return.
+ *
+ * #1114 — AND THE CHANGE IS PRICED FROM THE PROGRAM BEFORE IT. Consecutive steps on one cutter
+ * post as ONE program; the change after them is priced from that program's whole duration (the
+ * operator has been standing there for all of it, or has walked away). A step that failed to plan
+ * posts nothing, so it neither lengthens the run nor stands before a change.
  */
 export function priceSequence(
   sequence: CandidateSequence,
-  opts: Pick<SequenceOptions, 'rapid' | 'toolChangeSeconds' | 'planStep'>,
+  opts: Pick<SequenceOptions, 'rapid' | 'planStep'> & { bitChange?: BitChangeRule; toolChangeSeconds?: number },
 ): PricedSequence | null {
+  const rule = opts.bitChange ?? flatBitChangeRule(opts.toolChangeSeconds ?? 0);
   const seconds = new Map<string, number>();
   const order: string[] = [];
-  const changes = new Map<string, number>();
+  const changeCounts = new Map<string, number>();
+  const changeSeconds = new Map<string, number>();
+  const pricedChanges: PricedChange[] = [];
   const planned: SequenceStep[] = [];
   const failures: SequenceStepFailure[] = [];
   let previous: string | null = null;
+  /** The current program's own duration: consecutive steps on `previous`'s cutter. */
+  let runSeconds = 0;
   for (let i = 0; i < sequence.steps.length; i++) {
     const step = sequence.steps[i]!;
     let ir: ToolpathIR | null;
@@ -843,31 +883,43 @@ export function priceSequence(
     const total = estimateCycleTerms(ir, opts.rapid).totalSeconds;
     seconds.set(key, (seconds.get(key) ?? 0) + total);
     if (!order.includes(key)) order.push(key);
-    if (previous !== null && previous !== key) changes.set(key, (changes.get(key) ?? 0) + 1);
+    if (previous !== null && previous !== key) {
+      // #1114 — the program that just ended is the one the operator was watching; its own
+      // duration sets this change's price.
+      const priceSeconds = bitChangePriceSeconds(rule, runSeconds);
+      changeCounts.set(key, (changeCounts.get(key) ?? 0) + 1);
+      changeSeconds.set(key, (changeSeconds.get(key) ?? 0) + priceSeconds);
+      pricedChanges.push({ afterCutterKey: previous, beforeCutterKey: key, afterSeconds: runSeconds, priceSeconds });
+      runSeconds = 0;
+    }
+    runSeconds += total;
     previous = key;
     planned.push(step);
   }
   if (order.length === 0) return null;
   const entries: CycleCost[] = order.map((key) => {
     const estimateSeconds = seconds.get(key) ?? 0;
-    const toolChanges = changes.get(key) ?? 0;
+    const toolChanges = changeCounts.get(key) ?? 0;
+    const priced = changeSeconds.get(key) ?? 0;
     return {
       cutterKey: key,
       estimateSeconds,
       toolChanges,
-      toolChangeSeconds: opts.toolChangeSeconds,
-      totalSeconds: estimateSeconds + toolChanges * opts.toolChangeSeconds,
+      changeSeconds: priced,
+      totalSeconds: estimateSeconds + priced,
     };
   });
   const estimateSeconds = entries.reduce((sum, e) => sum + e.estimateSeconds, 0);
   const toolChanges = entries.reduce((sum, e) => sum + e.toolChanges, 0);
+  const totalChangeSeconds = entries.reduce((sum, e) => sum + e.changeSeconds, 0);
   return {
     cost: {
       entries,
       estimateSeconds,
       toolChanges,
-      toolChangeSeconds: opts.toolChangeSeconds,
-      totalSeconds: entries.reduce((sum, e) => sum + e.totalSeconds, 0),
+      changeSeconds: totalChangeSeconds,
+      changes: pricedChanges,
+      totalSeconds: estimateSeconds + totalChangeSeconds,
     },
     steps: planned,
     failures,
@@ -937,17 +989,6 @@ function comparePriceBaseline(
   return a[5]! < b[5]! ? -1 : a[5]! > b[5]! ? 1 : 0;
 }
 
-function compareRank(
-  a: readonly [number, number, number, number, number, number, number, string],
-  b: readonly [number, number, number, number, number, number, number, string],
-): number {
-  for (let i = 0; i < 7; i++) {
-    if (a[i]! < b[i]!) return -1;
-    if (a[i]! > b[i]!) return 1;
-  }
-  return a[7]! < b[7]! ? -1 : a[7]! > b[7]! ? 1 : 0;
-}
-
 /**
  * The picker: every pruned candidate priced, then the first by rank — house before catalogue,
  * rowed before fallback, cheapest within the group. A pinned key is a constraint, not a preference
@@ -979,7 +1020,7 @@ export function chooseSequence(
     if (sequence.steps.length === 0) {
       return {
         sequence,
-        priced: { cost: { entries: [], estimateSeconds: 0, toolChanges: 0, toolChangeSeconds: 0, totalSeconds: 0 }, steps: [], failures: [] },
+        priced: { cost: { entries: [], estimateSeconds: 0, toolChanges: 0, changeSeconds: 0, changes: [], totalSeconds: 0 }, steps: [], failures: [] },
         coverage: null,
       };
     }
@@ -1068,10 +1109,36 @@ export function chooseSequence(
       }
     }
   }
-  feasible.sort((a, b) => compareRank(rankOf(a), rankOf(b)));
-  // #1111 (c) — the same-diameter row for the PRIMARY pick: no behaviour change (the rank's own
-  // keys and the step signature are exactly the pre-#1111 order); the row states that the canonical
-  // key order is what separated two equal chains, pending the policy issue (#1114).
+  // #1114 — A TIE THROUGH THE PRICED KEYS IS THE PICK'S: the reach-margin gate, then the shortest
+  // sufficient flute, then the key (`pickAmongEquals`), before the chain signature's own key order.
+  // The rank's keys 0..6 (completeness, coverage, failures, house/rowed, priced cycle) are
+  // unchanged; only a tie through all of them reaches the pick.
+  const deepestFeatureMm = demand.features.reduce((m, f) => Math.max(m, f.depthMm ?? 0), 0);
+  const reachMarginMm = opts.reachMarginMm ?? REACH_MARGIN_FALLBACK_MM;
+  const primaryOf = (r: RankedSequence): Tool | undefined => r.sequence.steps[0]?.cutter.tool;
+  const compareRanked = (a: RankedSequence, b: RankedSequence): number => {
+    const ra = rankOf(a);
+    const rb = rankOf(b);
+    for (let i = 0; i < 7; i++) {
+      if (ra[i]! < rb[i]!) return -1;
+      if (ra[i]! > rb[i]!) return 1;
+    }
+    const ta = primaryOf(a);
+    const tb = primaryOf(b);
+    if (ta !== undefined && tb !== undefined && cuttingDiameter(ta) === cuttingDiameter(tb)) {
+      const picked = pickAmongEquals(
+        // The chains' own priced stage time is the pick's last key before the signature.
+        pickKeysOf(ta, deepestFeatureMm, a.cost.estimateSeconds),
+        pickKeysOf(tb, deepestFeatureMm, b.cost.estimateSeconds),
+        reachMarginMm,
+      );
+      if (picked !== 0) return picked > 0 ? -1 : 1;
+    }
+    return ra[7]! < rb[7]! ? -1 : ra[7]! > rb[7]! ? 1 : 0;
+  };
+  feasible.sort(compareRanked);
+  // #1114 — the row still exists, but it states the DECIDER (the gate, the shortest sufficient
+  // flute, or the key) instead of deferring to a policy issue.
   let pickNote: string | null = null;
   if (feasible.length > 1) {
     const first = feasible[0]!;
@@ -1080,10 +1147,17 @@ export function chooseSequence(
     const rb = rankOf(second);
     let priceTies = true;
     for (let i = 0; i < 7; i++) if (ra[i] !== rb[i]) { priceTies = false; break; }
-    const t1 = first.sequence.steps[0]?.cutter.tool;
-    const t2 = second.sequence.steps[0]?.cutter.tool;
-    if (priceTies && t1 !== undefined && t2 !== undefined && cuttingDiameter(t1) === cuttingDiameter(t2)) {
-      pickNote = byKeyPendingNote(t1, t2);
+    const t1 = primaryOf(first);
+    const t2 = primaryOf(second);
+    if (priceTies && t1 !== undefined && t2 !== undefined && cuttingDiameter(t1) === cuttingDiameter(t2)
+        && (t1.id ?? t1.name) !== (t2.id ?? t2.name)) {
+      pickNote = pickNoteSentence(
+        t1,
+        t2,
+        pickKeysOf(t1, deepestFeatureMm),
+        pickKeysOf(t2, deepestFeatureMm),
+        reachMarginMm,
+      );
     }
   }
 

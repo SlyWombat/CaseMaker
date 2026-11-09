@@ -1703,6 +1703,34 @@
       "setAt": null,
       "unit": "mm",
       "note": "recommended, not measured: the reach margin a cutter's own flute must clear past the deepest cut it serves (the Z-datum class and the unmeasured jaw tops)"
+    },
+    "bitChange.attendedMinutes": {
+      "value": 5.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "min",
+      "note": "recommended, not measured: a program up to this long leaves the operator at the machine, so the change after it costs only the attended change"
+    },
+    "bitChange.attendedChangeSeconds": {
+      "value": 120.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "recommended, not measured: what a bit change costs while the operator is still at the machine — fit by hand plus the M491 touch, rounded to two minutes"
+    },
+    "bitChange.walkAwayMinutes": {
+      "value": 30.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "min",
+      "note": "recommended, not measured: a program at least this long means the operator has left; the maintainer's own number for when people walk away"
+    },
+    "bitChange.returnMinutes": {
+      "value": 15.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "min",
+      "note": "recommended, not measured: the operator's walk back to the machine, added to the attended cost once they have left"
     }
   },
   "accessories": [

@@ -436,6 +436,15 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // as one number: the run plan's own bit change (fit by hand + M491). A plan with one more cutter
     // must save at least this much cutting time before it is chosen.
     ("toolChange.seconds", 91.4, "s", "chosen, not measured as one number: what the measured cutter search charges a plan for each tool change. It is the run plan's own bit change: fitting the cutter by hand (plan.fitCutterSeconds, 60 s, chosen) plus the M491 tool-length touch (plan.toolLengthSeconds, 31.4 s, measured on 2026-10-15). The first timed bit change replaces it"),
+    // ── #1114 — THE BIT-CHANGE PRICE (begin). The maintainer's ruling (2026-11-09): a bit change's
+    // price depends on the program before it — attended while the operator is there, a return once
+    // they have walked away. All four are RECOMMENDATIONS (the thresholds rule); `bitChange.ts` and
+    // `defaultsClient.ts` state the same curve, bounds and fallbacks.
+    ("bitChange.attendedMinutes", 5.0, "min", "recommended, not measured: a program up to this long leaves the operator at the machine, so the change after it costs only the attended change"),
+    ("bitChange.attendedChangeSeconds", 120.0, "s", "recommended, not measured: what a bit change costs while the operator is still at the machine — fit by hand plus the M491 touch, rounded to two minutes"),
+    ("bitChange.walkAwayMinutes", 30.0, "min", "recommended, not measured: a program at least this long means the operator has left; the maintainer's own number for when people walk away"),
+    ("bitChange.returnMinutes", 15.0, "min", "recommended, not measured: the operator's walk back to the machine, added to the attended cost once they have left"),
+    // ── #1114 — THE BIT-CHANGE PRICE (end)
     // #250 — the finish pass's stock-to-leave. Chosen, not measured: about one printed layer at the
     // common layer height, and small enough that a 1 mm flat still has a roughing cut. The first
     // bench cut that inspects a finished floor replaces it.
@@ -662,6 +671,25 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "toolChange.seconds" => Some(need(
             n.is_some_and(|v| (1.0..=3600.0).contains(&v)),
             "1 to 3600 seconds",
+        )),
+        // #1114 — the four bit-change numbers. Zero is allowed on every one (a shop may make the
+        // change free, or attend every program); the upper bounds are well past any bench
+        // observation. `bitChange.ts` handles thresholds that meet or invert.
+        "bitChange.attendedMinutes" => Some(need(
+            n.is_some_and(|v| (0.0..=240.0).contains(&v)),
+            "0 to 240 minutes",
+        )),
+        "bitChange.attendedChangeSeconds" => Some(need(
+            n.is_some_and(|v| (0.0..=3600.0).contains(&v)),
+            "0 to 3600 seconds",
+        )),
+        "bitChange.walkAwayMinutes" => Some(need(
+            n.is_some_and(|v| (0.0..=600.0).contains(&v)),
+            "0 to 600 minutes",
+        )),
+        "bitChange.returnMinutes" => Some(need(
+            n.is_some_and(|v| (0.0..=240.0).contains(&v)),
+            "0 to 240 minutes",
         )),
         // #250 — an allowance wider than a millimetre is a second roughing cut, not a finish
         // allowance; zero is allowed and turns the split off.

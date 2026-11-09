@@ -172,8 +172,11 @@ describe('#961 choose by cost', () => {
   it("picks the tray's vendor set in order, ≤ vendor + 1 cutters", () => {
     const choice = chooseSequence(TRAY, { house: Object.values(VENDOR), catalogue: [] }, opts());
     const cutters = [...new Set(choice.steps.map((s) => s.cutter.key))];
-    expect(cutters).toEqual(['t6', 't3', 'b6', 'c90']);
-    expect(choice.steps.map((s) => s.kind)).toEqual(['pocket', 'rough', 'rest', 'finish', 'chamfer']);
+    // #1114 — the rim chamfer and the ball finish are offered in BOTH orders (they are
+    // independent); here the two chains price the same, so the signature's key order decides and
+    // the chamfer runs before the ball (the longer finish program is nearer the end of the run).
+    expect(cutters).toEqual(['t6', 't3', 'c90', 'b6']);
+    expect(choice.steps.map((s) => s.kind)).toEqual(['pocket', 'rough', 'rest', 'chamfer', 'finish']);
     expect(cutters.length).toBeLessThanOrEqual(4 + 1);
     expect(choice.steps.every((s) => s.cutter.house)).toBe(true);
   });
