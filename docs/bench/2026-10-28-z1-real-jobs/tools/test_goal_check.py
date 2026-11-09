@@ -194,8 +194,29 @@ def fixture_silhouette_fallthrough(depth=0.2):
     """U — a silhouette cell whose CL is INSIDE the part: the silhouette proof fails, and the cell
     falls through to the general straddling proof (the notch/pocket case, 0f's follow-up)."""
     z, cov = stepped_island_goal()
-    return judge_on(z, cov, [(50, 60, depth)], shadow_radius=1.0, thickness=2.0, breakthrough=0.3,
-                    cl=(50, 60, 6.5, 5.0))
+    # the inward neighbour dips 0.006 mm (below the raw floor, but enough to fail the witness),
+    # so the silhouette's only excuse left is the general straddling proof across the rim's step.
+    return judge_on(z, cov, [(50, 60, depth), (50, 61, 0.006)], shadow_radius=1.0, thickness=2.0,
+                    breakthrough=0.3, cl=(50, 60, 6.5, 5.0))
+
+
+def notch_goal():
+    """A fully covered grid with ONE uncovered cell (the notch at i=59, j=50): its inward cell
+    (50, 60) is a silhouette cell with three fully covered part-side candidates — (61, 50) and
+    (60, 49) / (60, 51)."""
+    z = np.full((NY, NX), -0.5)
+    cov = np.ones((NY, NX), bool)
+    cov[50, 59] = False
+    return z, cov
+
+
+def fixture_notch(dips):
+    """N — the inward witness, ruled (iii): ALL fully covered part-side candidates must be uncut.
+    `dips` = [(j, i, depth)] marks candidates as cut (a depth below 0.01 is not itself a raw-cut
+    cell, so it only feeds the witness test)."""
+    z, cov = notch_goal()
+    return judge_on(z, cov, [(50, 60, 0.2)] + list(dips), shadow_radius=1.0, thickness=2.0,
+                    breakthrough=0.3, cl=(50, 60, 6.5, 5.0))
 
 
 def fixture_shadow_stock_top(depth=0.2):
@@ -297,28 +318,36 @@ def main():
         # the blank's floor is 2.3 mm below the stock top; the CL must also be on the UNCOVERED side
         # and at least r − one cell (0.9 mm) from the outline.
         s = fixture_silhouette(0.2, (4.9, 5.0))
-        check('S silhouette excused', s, {'silhouetteExcusedCells': 1, 'adjudicatedCells': 0,
-                                          'wallNotScoredCells': 0, 'wallOverReliefCells': 0,
-                                          'borderOverReliefCells': 0})
+        check('S silhouette excused (CL proof)', s, {'silhouetteExcusedCells': 1,
+                                                     'silhouetteByWitnessCells': 0,
+                                                     'adjudicatedCells': 0,
+                                                     'wallNotScoredCells': 0,
+                                                     'wallOverReliefCells': 0,
+                                                     'borderOverReliefCells': 0})
         assert approx(s['silhouetteDeepest']['mm'], 0.2) and approx(
             s['silhouetteDeepest']['clDistanceMm'], 1.0), s['silhouetteDeepest']
-        # the CL inside the part: a contour that cut the outline from within is COUNTED
+        # the CL inside the part: the CL proof fails, but the INWARD WITNESS excuses — the first
+        # fully covered inward neighbour is uncut, so the boundary read is the grid's edge.
         s = fixture_silhouette(0.2, (6.5, 5.0))
-        check('S silhouette, CL inside', s, {'silhouetteExcusedCells': 0, 'adjudicatedCells': 1,
-                                             'adjudicatedMaxMm': 0.2, 'wallOverReliefCells': 0,
-                                             'borderOverReliefCells': 0})
+        check('S silhouette, CL inside excused by the witness', s, {
+            'silhouetteExcusedCells': 1, 'silhouetteByWitnessCells': 1, 'adjudicatedCells': 0,
+            'wallOverReliefCells': 0, 'borderOverReliefCells': 0})
+        assert s['silhouetteDeepest'] is None, s['silhouetteDeepest']
         # deeper than the blank's floor: COUNTED whatever the CL
         s = fixture_silhouette(2.5, (4.9, 5.0))
         check('S silhouette, below the blank floor', s, {'silhouetteExcusedCells': 0,
                                                          'adjudicatedCells': 1,
                                                          'adjudicatedMaxMm': 2.5})
-        # the CL on the uncovered side but at the disc's rim, inside r − one cell: COUNTED
+        # the CL on the uncovered side but at the disc's rim, inside r − one cell: the CL proof
+        # fails, and the witness still excuses (its inward neighbour is uncut).
         s = fixture_silhouette(0.2, (5.6, 5.0))
-        check('S silhouette, CL too near the outline', s, {'silhouetteExcusedCells': 0,
-                                                           'adjudicatedCells': 1})
-        # no tool set: no r, so the silhouette is never excused (the app needs the CL and r)
+        check('S silhouette, CL near the rim, excused by the witness', s, {
+            'silhouetteExcusedCells': 1, 'silhouetteByWitnessCells': 1, 'adjudicatedCells': 0})
+        # no tool set: no r, so the CL proof is unavailable — but the witness does not need r,
+        # only the stated blank, so the cell is still excused on the inward neighbour.
         s = fixture_silhouette(0.2, (4.9, 5.0), shadow_radius=0.0)
-        check('S silhouette, no tool radius', s, {'silhouetteExcusedCells': 0, 'adjudicatedCells': 1})
+        check('S silhouette, no tool radius, witness alone', s, {
+            'silhouetteExcusedCells': 1, 'silhouetteByWitnessCells': 1, 'adjudicatedCells': 0})
         # R-a — no STATED stock thickness: the proof is UNAVAILABLE, the cell is counted, and the
         # count is named; never a guessed ceiling.
         s = fixture_silhouette(0.2, (4.9, 5.0), thickness=None)
@@ -329,9 +358,23 @@ def main():
         # and is excused by the GENERAL straddling proof across the rim's step (0f's follow-up).
         s = fixture_silhouette_fallthrough()
         check('U silhouette falls through to straddling', s, {'silhouetteExcusedCells': 0,
+                                                              'silhouetteByWitnessCells': 0,
                                                               'straddlingNotScoredCells': 1,
                                                               'wallNotScoredCells': 0,
                                                               'adjudicatedCells': 0})
+        # N — the inward witness, ruled (iii). A one-cell notch makes (50, 60) a silhouette cell
+        # with three fully covered part-side candidates; all uncut → excused.
+        s = fixture_notch([])
+        check('N witness: all candidates uncut', s, {'silhouetteExcusedCells': 1,
+                                                     'silhouetteByWitnessCells': 1,
+                                                     'adjudicatedCells': 0})
+        # ... but ONE candidate cut 1 mm fails the witness (any candidate cut → no excuse), and the
+        # notch cell is counted (the cut candidate is a real cut of its own and counts too).
+        s = fixture_notch([(50, 61, 1.0)])
+        check('N witness: one candidate cut 1 mm', s, {'silhouetteExcusedCells': 0,
+                                                       'silhouetteByWitnessCells': 0,
+                                                       'adjudicatedCells': 2,
+                                                       'adjudicatedMaxMm': 1.0})
         # T — the relief disc reaching uncovered grid makes the stock top the high side: the rim
         # strip's shadow cell is excused on relief 0.5 mm, not counted on a bare 0.
         s = fixture_shadow_stock_top()
@@ -367,12 +410,15 @@ def main():
         h = fixture_who_gate()
         check('I who gate, V deepest', h['hit'], {'edgeBreakCells': 1, 'adjudicatedCells': 0,
                                                   'borderOverReliefCells': 0})
+        # ... and with another cutter it is not edge break: the silhouette branch takes it, its
+        # inward neighbour is uncut, so the inward witness excuses it (the who gate still rules the
+        # edge break itself — edgeBreakCells stays 0).
         check('I who gate, other cutter', h['miss'], {'edgeBreakCells': 0,
-                                                      'silhouetteExcusedCells': 0,
+                                                      'silhouetteExcusedCells': 1,
+                                                      'silhouetteByWitnessCells': 1,
                                                       'borderOverReliefCells': 0,
                                                       'wallOverReliefCells': 0,
-                                                      'adjudicatedCells': 1,
-                                                      'adjudicatedMaxMm': 0.2})
+                                                      'adjudicatedCells': 0})
         # K — the whole path, with and without the job's statement: the same V cut is edge break
         # when the job states one (inside the V's leg, on the silhouette band) and judged when not.
         k = fixture_edge_break(tmp, True)

@@ -64,10 +64,13 @@ excuse is a PROOF bounded by the goal's own relief; no class of cells is excused
   design is multi-valued across that edge, so the read is excused only when a stock thickness is
   STATED (the job's, or the goal's — no `topZ − minZ` guess; without one the proof is UNAVAILABLE
   and the cells are counted and named, R-a), the depth is within the BLANK's floor (the stock top
-  down to −(thickness + breakthrough), plus 0.005 mm), and the deepest stamp's CL is on the
-  UNCOVERED side, at least r − one cell from the outline. A failed cell FALLS THROUGH to the
-  general straddling proof (never to the wall/border or shadow classes); a cut below the blank
-  that no proof excuses is COUNTED.
+  down to −(thickness + breakthrough), plus 0.005 mm), and either the deepest stamp's CL is on the
+  UNCOVERED side, at least r − one cell from the outline, OR the INWARD WITNESS holds: every fully
+  covered part-side axial neighbour is uncut (its swept top at or above its own design less the
+  slack) and at least one such candidate exists — one cut candidate fails the witness. A failed
+  cell FALLS THROUGH to the general straddling proof (never to the wall/border or shadow classes);
+  a cut below the blank that no proof excuses is COUNTED. Witness-only excusals are counted in
+  `silhouetteByWitnessCells`; the CL-excused ones in `silhouetteExcusedCells`.
 - **Wall / border** — excused only on the straddling proof, and only when the depth is within the
   goal's local relief (max − min of the covered goal top within the largest cutting tool's radius;
   with no tool set, one pitch — the cell's own axial neighbours; the stock top is a high side for a

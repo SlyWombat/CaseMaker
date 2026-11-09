@@ -39,7 +39,12 @@ class only for the cells still about to be judged:
     the deepest stamp's CL is on the UNCOVERED side (its own cell uncovered, or the point off the
     grid), at least r − one cell from the outline (the exact distance to the nearest wall cell). A
     failed cell FALLS THROUGH to the general straddling proof below — never to the wall/border or
-    shadow classes. Reported as `silhouetteExcusedCells` / `silhouetteDeepest`.
+    shadow classes. A second, independent excuse is the INWARD WITNESS (0f's (iii) ruling): EVERY
+    fully covered part-side axial neighbour (covered, not itself a silhouette cell) must be uncut —
+    its swept top at or above its own design less the slack — and at least one such candidate must
+    exist; any candidate cut fails the witness, no candidate means no witness. Reported as
+    `silhouetteExcusedCells` / `silhouetteDeepest` (the CL-excused) and
+    `silhouetteByWitnessCells` (the witness-only excusals).
   * WALL / BORDER — a cell on a > 0.2 mm step between goal cells, or a covered cell on the grid's
     own border (the silhouette where the grid ends at the model). Excused only on the straddling
     proof below, and only when its depth is no more than the goal's own local relief plus 0.005 mm.
@@ -570,6 +575,7 @@ def judge(G, C, H, who, clx, cly, gh, stock_thickness, *, allowance=None, shadow
     handled = np.zeros(nx * ny, bool)      # a silhouette or wall/border cell never reaches a later class
     edge_mask = np.zeros(nx * ny, bool)
     edge_cells = wall_cells = shadow_cells = straddling_cells = sil_cells = 0
+    sil_by_witness = 0
     straddling_max_step = 0.0
     wall_over = shadow_over = border_over = 0
     over_deepest = None
@@ -629,19 +635,49 @@ def judge(G, C, H, who, clx, cly, gh, stock_thickness, *, allowance=None, shadow
             outside &= Hf[cells] != 0
             if has_shadow:
                 dist = outline_distance(Xf[cells], Yf[cells])
-                ok = within_floor & outside & (dist >= float(shadow_radius) - p - 1e-9)
+                cl_ok = outside & (dist >= float(shadow_radius) - p - 1e-9)
             else:
                 dist = np.full(cells.size, np.inf)
-                ok = np.zeros(cells.size, bool)
+                cl_ok = np.zeros(cells.size, bool)
+            # 0f's INWARD WITNESS, ruled (iii): for a silhouette cell, EVERY fully covered
+            # part-side axial neighbour (covered, and not itself a silhouette cell) must be UNCUT —
+            # its swept top at or above its own design less the rule's slack — and at least one such
+            # candidate must exist. Any candidate cut fails the witness; no candidate means no
+            # witness. The stamp's disc spans both cells, so a real cut of the cell's depth would
+            # read at the neighbour too; when none does, the boundary read is the grid's edge
+            # (#1003's cell-max class). Evaluated only under a stated blank (R-a); the CL proof
+            # stays as the first alternative.
+            witness = np.zeros(cells.size, bool)
+            if ceiling is not None:
+                any_cand = np.zeros(cells.size, bool)
+                all_uncut = np.ones(cells.size, bool)
+                ki_s = ki[sg]
+                kj_s = kj[sg]
+                for ddi, ddj in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    ii = ki_s + ddi
+                    jj = kj_s + ddj
+                    inb = (ii >= 0) & (ii < nx) & (jj >= 0) & (jj < ny)
+                    iic = np.clip(ii, 0, nx - 1)
+                    jjc = np.clip(jj, 0, ny - 1)
+                    cand = inb & C[jjc, iic] & ~sil[jjc, iic]
+                    uncut = H[jjc, iic] >= G[jjc, iic] - STRADDLING_SLACK_MM
+                    any_cand |= cand
+                    all_uncut &= (~cand) | uncut
+                witness = any_cand & all_uncut
+            ok = within_floor & (cl_ok | witness)
             excluded[cells[ok]] = True
             sil_cells = int(ok.sum())
-            if ok.any():
+            # the app's deepest is the deepest CL-excused cell only; a witness-only excusal has no
+            # CL distance to name, so it counts in silhouetteByWitnessCells instead.
+            cl_ok_cells = ok & cl_ok
+            if cl_ok_cells.any():
                 # the app replaces only on a STRICTLY deeper cell: the first of equal-deepest wins
-                j0 = int(np.argmax(dd[sg][ok]))
-                dv = float(dist[ok][j0])
-                sil_deepest = {'mm': float(dd[sg][ok][j0]),
-                               'x': float(xs[sg][ok][j0]), 'y': float(ys[sg][ok][j0]),
+                j0 = int(np.argmax(dd[sg][cl_ok_cells]))
+                dv = float(dist[cl_ok_cells][j0])
+                sil_deepest = {'mm': float(dd[sg][cl_ok_cells][j0]),
+                               'x': float(xs[sg][cl_ok_cells][j0]), 'y': float(ys[sg][cl_ok_cells][j0]),
                                'clDistanceMm': (round(dv, 3) if np.isfinite(dv) else None)}
+            sil_by_witness = int((ok & ~cl_ok).sum())
             sil_fail[cells[~ok]] = True
 
     # 3 — WALL / BORDER: the straddling proof, bounded by the goal's own relief at the cell. A
@@ -785,6 +821,7 @@ def judge(G, C, H, who, clx, cly, gh, stock_thickness, *, allowance=None, shadow
         'silhouetteExcusedPct': round(sil_cells / n * 100, 2),
         'silhouetteDeepest': sil_deepest,
         'silhouetteUnavailableCells': int(sil_unavail_cells),
+        'silhouetteByWitnessCells': int(sil_by_witness),
         # leftover, on the same raw sign
         'leftover0p1Pct': pct(d > 0.1), 'leftover0p3Pct': pct(d > 0.3), 'leftover1Pct': pct(d > 1),
         'maxLeftoverMm': round(float(max(0.0, d.max())) if d.size else 0.0, 3),
