@@ -6,6 +6,123 @@ All notable changes to Case Maker. The project follows the [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Milestone 1 close-out — the rebuilt engine, the gate and the flip (2026-11-05 → 2026-11-09)
+
+This block catches the changelog up with the Milestone 1 landings: the CAM rebuild on the model engine, the goal-check gate's versions, and the operator-facing fixes that followed. One entry per closed issue; test-only and internal-only closures are listed at the end with their reasons.
+
+**The rebuilt CAM engine (cam/model).**
+
+- **The model engine replaces the heightfield planner** ([#956](https://github.com/SlyWombat/CaseMaker/issues/956)): one CAM plans a goal mesh or STEP from a cutter-location surface — Z-level roughing, slope finishing, a cost-ranked cutter sequence and stay-down linking — ported from Kiri:Moto (MIT) with OpenCamLib as the algorithm reference; everything else in this list is a cell of it.
+- **The cutter-location surface by drop-cutter** ([#957](https://github.com/SlyWombat/CaseMaker/issues/957)): flat, ball, bull and V cutters sample the goal triangles, and every operation reads that one CL surface.
+- **Planar-face recognition** ([#958](https://github.com/SlyWombat/CaseMaker/issues/958)): pockets, islands, contour, rims and the curved remainder are recognised from the mesh or STEP the job carries.
+- **Z-level roughing and rest** ([#959](https://github.com/SlyWombat/CaseMaker/issues/959)): stock minus the CL surface is roughed in levels, the rest is cut by CL difference, and feature pockets and the contour are cut with tabs.
+- **Finishing by slope** ([#960](https://github.com/SlyWombat/CaseMaker/issues/960)): flat-following raster on shallow ground, the ball at a constant scallop on steep ground, pencil on the creases and a chamfer on the rims.
+- **The cutter sequence chosen by cost** ([#961](https://github.com/SlyWombat/CaseMaker/issues/961)): the largest flat first, smaller flats for the rest, the ball to finish and the chamfer for rims — the plan a job posts is the cheapest it can prove.
+- **Stay-down linking** ([#962](https://github.com/SlyWombat/CaseMaker/issues/962)): adjacent passes link without a retract, clearance is per region and the tour order is planned, not left to the post.
+- **The rebuilt engine's job model and UI seams** ([#963](https://github.com/SlyWombat/CaseMaker/issues/963)): features, sequence and linking read in the operator's words on the panel and the sheet, and the budget presses are gone.
+- **The rebuild is integrated and the old engine removed** ([#966](https://github.com/SlyWombat/CaseMaker/issues/966)): every reference card is re-scored on the model engine, and the heightfield planner no longer ships.
+- **A goal taller than its blank is cut to the stock bottom** ([#1003](https://github.com/SlyWombat/CaseMaker/issues/1003)): the plan knows the stock bottom, so a goal that reaches past the blank frees at the stock's underside instead of cutting below it.
+- **One Z datum inside planModelCam** ([#1018](https://github.com/SlyWombat/CaseMaker/issues/1018)): the mesh is shifted to stock-top-relative at the door and the ± z0 / zOffsetMm shims are deleted — the class behind the earlier datum faults.
+- **The goal's mould flag, its sides and its underside floor cross the model seam** ([#1005](https://github.com/SlyWombat/CaseMaker/issues/1005), [#1006](https://github.com/SlyWombat/CaseMaker/issues/1006)): moulds, two-sided jobs and an underside floor are planned by the model engine, not only stated by the job.
+- **The goal-check report and surface facts ride the model path** ([#1007](https://github.com/SlyWombat/CaseMaker/issues/1007)): the run result carries the check's report, so the Cut card and the receipt can state the verdict.
+- **closeOpenSheet no longer overflows the stack** ([#1015](https://github.com/SlyWombat/CaseMaker/issues/1015)): a 125k+ triangle mesh (the 12 MB dragon) reaches CAM instead of dying at the door.
+- **The manifold-3d glue's per-vertex leak is patched** ([#1022](https://github.com/SlyWombat/CaseMaker/issues/1022)): each polygons→CrossSection conversion and each toPolygons stops leaking, ending the per-cell wasm abort.
+- **The per-cell Clipper form no longer aborts under accumulated state** ([#1024](https://github.com/SlyWombat/CaseMaker/issues/1024)): the captured call replays clean in a fresh process, and the planner's cells no longer inherit a poisoned state.
+- **A non-finite vertex at the mesh door is refused before the booleans** ([#1029](https://github.com/SlyWombat/CaseMaker/issues/1029)): one NaN/Infinity in a user's STL or 3MF no longer reaches Clipper or Manifold.
+- **A knife-edge shared by four triangles is split, not refused** ([#993](https://github.com/SlyWombat/CaseMaker/issues/993)): the organizer's shipped STL opens, with the non-manifold edge split rather than the door refusing it.
+- **Fillets are read as fillets, not modelled chamfers** ([#994](https://github.com/SlyWombat/CaseMaker/issues/994)): the wall test reads where the wall contact is, so a curved rim is not cut as a V along its curves.
+- **A user's STEP keeps its B-rep identity** ([#991](https://github.com/SlyWombat/CaseMaker/issues/991)): the door no longer drops faceId and tessellates at display defaults, so the cards represent the app.
+- **An SVG stroke with a width is a region** ([#968](https://github.com/SlyWombat/CaseMaker/issues/968)): the painted band is cut, not its centre line — the coasters and badge reference cards.
+
+**The goal-check gate.**
+
+- **The goal cut-into check runs in the app** ([#948](https://github.com/SlyWombat/CaseMaker/issues/948)): the swept top of a goal program and the goal heightfield reach the oracle, and 3D goals are judged, not just 2.5D.
+- **Gate v6 — a cut-into cell on a vertical step can be excused on proof** ([#996](https://github.com/SlyWombat/CaseMaker/issues/996)): corners span the step and the swept centre is not below the design's low side; the count is printed, and SIMULATOR_VERSION moves to 6.
+- **The STL row is gated on all seven lines, as the STEP row is** ([#995](https://github.com/SlyWombat/CaseMaker/issues/995)): both rows must pass, so a mesh job is held to the same verdict as a B-rep one.
+- **The edge-break allowance seeds only from design walls** ([#1064](https://github.com/SlyWombat/CaseMaker/issues/1064)): a stated rim chamfer no longer excuses V bevels on interior pocket lips.
+- **ref-toolholder's plan covers its goal's top surface** ([#1075](https://github.com/SlyWombat/CaseMaker/issues/1075)): the 86.93 % standing reading is fixed, and the card reads the plan's real coverage.
+
+**Feeds, cutters and the owned set.**
+
+- **The owned plan's house is the owned set** ([#1041](https://github.com/SlyWombat/CaseMaker/issues/1041)): built-in and catalogue twins no longer enter the "owned" M1 tray plan beside their `inv:` rows.
+- **A chosen unowned tool is stated as such** ([#1042](https://github.com/SlyWombat/CaseMaker/issues/1042)): an unowned cutter entering the owned plan's house is named, never silent.
+- **The cutter plan picks from the owned set and judges the ball by reach** ([#1051](https://github.com/SlyWombat/CaseMaker/issues/1051)): no catalogue ball the shop does not own is named for a 3D goal.
+- **The wizard's reach gate judges the ball by the goal's depth** ([#1037](https://github.com/SlyWombat/CaseMaker/issues/1037)): the M1 tray passes with the owned set (the ball's 4.2 mm reach, not the goal's full depth).
+- **One candidate with no feeds row no longer refuses the whole job** ([#1044](https://github.com/SlyWombat/CaseMaker/issues/1044)): the plan proceeds without that cutter instead of refusing the aluminium job.
+- **The model plan sees Makera's catalogue rows** ([#1047](https://github.com/SlyWombat/CaseMaker/issues/1047)): the caller's feed rows reach the worker, so the plan's numbers are the catalogue's.
+- **The ideal plan reuses the owned plan** ([#1049](https://github.com/SlyWombat/CaseMaker/issues/1049)): a press no longer re-plans the owned plan (~450 s saved on the tray).
+- **Every cutter gets its own feed, step-down and RPM** ([#990](https://github.com/SlyWombat/CaseMaker/issues/990)): a non-primary cutter no longer inherits the primary flat's numbers.
+- **The ideal plan picks the finishing ball by outcome** ([#986](https://github.com/SlyWombat/CaseMaker/issues/986)): the catalogue's largest ball no longer bridges the panther when a smaller one finishes it.
+- **The cutter picker hides the built-ins when the shop has its own records** ([#1065](https://github.com/SlyWombat/CaseMaker/issues/1065)): the list matches the house set.
+- **Probes are not cutters** ([#1063](https://github.com/SlyWombat/CaseMaker/issues/1063)): instrument records are excluded from the house set and the picker, with one aggregate statement.
+- **An owned-only run names the ball that would take the leftover** ([#1027](https://github.com/SlyWombat/CaseMaker/issues/1027)): "about ⌀N" from the leftover's own inscribed diameter, with both thresholds' provenance.
+- **A pocket no owned cutter can enter is stated unreachable** ([#1019](https://github.com/SlyWombat/CaseMaker/issues/1019)): the mould side's floor patch no longer refuses the whole job.
+- **Pockets too small for any flat or ball get the V bit already in the set** ([#975](https://github.com/SlyWombat/CaseMaker/issues/975)): the tray's digits are cut.
+- **Clearing with no flat in the set falls back to the ball** ([#982](https://github.com/SlyWombat/CaseMaker/issues/982)): the job is planned, not refused.
+
+**Cutting correctness on the model engine.**
+
+- **A pocket op no longer cuts 22 mm of air under the material above its level** ([#970](https://github.com/SlyWombat/CaseMaker/issues/970)): the elephant's pocket stays in its pocket.
+- **A complex pocket's rim stays closed at branch points** ([#974](https://github.com/SlyWombat/CaseMaker/issues/974)): the rim chain no longer leaves an un-chamfered opening.
+- **Skim joins follow the radius** ([#978](https://github.com/SlyWombat/CaseMaker/issues/978)): a staircase point no longer puts the flat's disc over neighbouring material.
+- **planModelCam has a size pre-flight guard** ([#981](https://github.com/SlyWombat/CaseMaker/issues/981)): an oversized plan is measured before it is attempted.
+- **The finish scallop seat no longer receives a step-over or an allowance** ([#985](https://github.com/SlyWombat/CaseMaker/issues/985)): the seat is a tolerance, and the finish reads it as one.
+- **A skirt-closed relief no longer demands a contour** ([#987](https://github.com/SlyWombat/CaseMaker/issues/987)): a synthetic outline is not a design edge, and the job posts its two programs.
+- **The model engine honours cutWithinReach** ([#988](https://github.com/SlyWombat/CaseMaker/issues/988)): a goal past the flute cuts its top band instead of refusing.
+- **The goal's chamfer reaches the model engine** ([#989](https://github.com/SlyWombat/CaseMaker/issues/989)): a chamfer goal posts its bevel, with a finding when the cone cannot reach.
+- **A chamfer the cone cannot reach is stated with both widths** ([#1012](https://github.com/SlyWombat/CaseMaker/issues/1012)): chamfer-too-wide says what the goal asked and what the cutter can do.
+- **A skim join keeps its clearance beside a slope** ([#1001](https://github.com/SlyWombat/CaseMaker/issues/1001)): the 0.186 mm cut into the slope beside the join is gone.
+- **A retract feeds from the landing the op actually cut** ([#1002](https://github.com/SlyWombat/CaseMaker/issues/1002)): no op retracts from the stock top when its landing is lower.
+- **The finish mask measures what the rough left** ([#1014](https://github.com/SlyWombat/CaseMaker/issues/1014)): ball-only goal jobs no longer leave shallow slopes as the rough's terraces.
+- **The pocket mask refines sub-cell fillets and steps** ([#1020](https://github.com/SlyWombat/CaseMaker/issues/1020)): the exact cell bound's one-cell band is closed.
+- **A strip floor narrower than the floor ring has an owner** ([#1021](https://github.com/SlyWombat/CaseMaker/issues/1021)): the tray's divider strip is cut instead of standing as the scoops' cusp.
+- **The finish states the leftover no owned ball takes** ([#1023](https://github.com/SlyWombat/CaseMaker/issues/1023)): millimetres, share and the ball that would take it, with the shop's visibility thresholds.
+- **A strip's ball floor pass reaches where the drop-cutter says it is reachable** ([#1026](https://github.com/SlyWombat/CaseMaker/issues/1026)): the planned pass and the fit's reach agree.
+- **A ball finish join is sampled at the crease** ([#1030](https://github.com/SlyWombat/CaseMaker/issues/1030)): the short diagonal join no longer crosses CL creases 0.011–0.014 mm under the exact CL.
+- **Finish joins that leave the region's footprint are routed inside it** ([#1033](https://github.com/SlyWombat/CaseMaker/issues/1033)): or proven against the neighbouring CL, never left to retract/hop out.
+- **An absent rough tool means the engine chooses** ([#999](https://github.com/SlyWombat/CaseMaker/issues/999)): a goal job is not cut by the ball alone (the tray's 98.61 → 60.38 % regression is gone).
+- **A cross-setup removal mesh keeps the same setup's field carry** ([#1034](https://github.com/SlyWombat/CaseMaker/issues/1034)): side 2's finish sweeps the carried blank, not the bare blank.
+- **A planar face inside a curved remainder is planned as its own floor pass** ([#1074](https://github.com/SlyWombat/CaseMaker/issues/1074)): the general planar-face capability, with the tray's cost claim on #1080.
+- **A seeded island sits on its pocket floor** ([#969](https://github.com/SlyWombat/CaseMaker/issues/969)): the seeded property part is a solid on the floor, not one floating 1 mm above it.
+- **The depth band is per face** ([#1013](https://github.com/SlyWombat/CaseMaker/issues/1013)): a plinth or underside band on a flipped setup clamps its own plane (T − band), not the first face's.
+- **The V pocket's floor pass no longer cuts the wall top** ([#1062](https://github.com/SlyWombat/CaseMaker/issues/1062)): the 90° V's flank keeps its 0.52 mm clear of the pocket wall.
+- **A colour-plane V-carved stroke states its bevel** ([#1067](https://github.com/SlyWombat/CaseMaker/issues/1067)): the bevel is a findings line with its guide row.
+- **The bracket mount carries its own facts** ([#1068](https://github.com/SlyWombat/CaseMaker/issues/1068)): the CLI no longer drops the bracket's clamp obstacle for the vise default, clamps can sit on the left edge, and the stock void is modelled.
+- **A goal fitted to the stick is accepted** ([#1045](https://github.com/SlyWombat/CaseMaker/issues/1045)): the "0.0 mm past the left edge" refusal no longer refuses a fitted goal.
+- **The elephant figure case meets its 25-minute budget** ([#1054](https://github.com/SlyWombat/CaseMaker/issues/1054)): the two mandatory plans no longer cost ≈190 min of CAM each.
+- **The ideal plan's cost and the seeded routes are stated** ([#1049](https://github.com/SlyWombat/CaseMaker/issues/1049), [#1050](https://github.com/SlyWombat/CaseMaker/issues/1050)): the owned plan is not re-planned, and a program says every route it was seeded from.
+
+**Generation, the sweep and the run.**
+
+- **Generate reports its stage on the M1 tray** ([#1038](https://github.com/SlyWombat/CaseMaker/issues/1038)): the silence watchdog no longer stops it at ~190 s, and Generate stops trying to connect to a machine.
+- **Generate no longer waits on a machine connect that fails** ([#1039](https://github.com/SlyWombat/CaseMaker/issues/1039)): the 502 no longer leaves rows pending for 180 s.
+- **The tray's sweep ticks often enough for the panel to reach its verdict** ([#1048](https://github.com/SlyWombat/CaseMaker/issues/1048)): the app's 30 s window is no longer starved.
+- **The sweep's air phase no longer leaves a 30 s void** ([#1056](https://github.com/SlyWombat/CaseMaker/issues/1056)): the panel stops blaming the machine for the air gate's silence.
+- **The spindle air blow is an operator option, on by default** ([#1060](https://github.com/SlyWombat/CaseMaker/issues/1060)): M331.1 switches on with the vacuum.
+- **The app accepts the model engine's built-in cutter keys** ([#1032](https://github.com/SlyWombat/CaseMaker/issues/1032)): a posted program whose key is `tool.id ?? tool.name` reaches the sweep.
+- **The Cut hub's scopes are keyed by the program's own tool** ([#1036](https://github.com/SlyWombat/CaseMaker/issues/1036)): a healthy run is not blocked when the plan substitutes the job's cutter.
+- **A from-blank retry keeps the run-wide goal fold** ([#1040](https://github.com/SlyWombat/CaseMaker/issues/1040)): the tape card reads the run, not the last program.
+- **The planner's stated rulings reach the operator** ([#992](https://github.com/SlyWombat/CaseMaker/issues/992)): statements that were test-only are findings and run-sheet lines.
+- **The panel names every route a program was seeded from** ([#1050](https://github.com/SlyWombat/CaseMaker/issues/1050)): a removal-mesh seed is stated, not silent.
+
+**Rotary and the headless CLI.**
+
+- **No rotary move enters the chuck/jaw band at any Z** ([#1061](https://github.com/SlyWombat/CaseMaker/issues/1061)): the keep-out is a rule on the plan, not an allowance in verify.
+- **The CLI's rotary .nc respects the app's Save gate** ([#1084](https://github.com/SlyWombat/CaseMaker/issues/1084)): and goal-object-oversize no longer fires falsely on an axis-centred rotary goal.
+- **A missing catalogue beside the location is stated by the CLI** ([#1081](https://github.com/SlyWombat/CaseMaker/issues/1081)): no more silent planning in the starting table (the 44,830 s vs 18,619 s case).
+
+**The flip.**
+
+- **The underside-flip press is gated on the same canOffer as the flip offer** ([#1071](https://github.com/SlyWombat/CaseMaker/issues/1071)): the press appears only when the plan can offer it.
+
+**Bench records.**
+
+- **The anchor bracket and clamps are calipered** ([#444](https://github.com/SlyWombat/CaseMaker/issues/444)): the nine numbers #427 seeded as unmeasured are measured and recorded in the machine's own record.
+
+**Skipped — test-only, internal-only, or no behaviour change** (listed so the sweep is auditable):
+
+- #964 — the rebuilt engine's specs and parity harness (test-only); #997 — two-setup plans exceed the tests' 90 s limits (test budget); #998 — the plan-slowdown bisect (investigation, no behaviour change); #1004 — retire the `modelSetupsOverride` flag (internal refactor); #1008 — re-pin `goalRestPass` (test-only); #1009 — delete the goal-program-too-big family (dead code and tests); #1010 — rewrite the demo pins (test-only); #1011 — re-pin `modelGoldenPins` (test-only); #1016 — re-pin `SIMULATOR_VERSION` in a spec (test-only); #1017 — the Z-datum guard spec (test-only); #1031 — stale `pocketShadowInvariant` pin (test-only); #1035 — three e2e reds at the collapse (test-only); #1043 — remove dead panel branches (internal cleanup); #1058 — re-pin the panther floor (test-only, no engine change); #1072 — the k3 "crash report" was the stale Nov 3 banner (investigation, no change); #1108 — the door's lead-with-cutting layout (closed as a design question, no landing); #971 — the #927 bench timing question (bench record); #973 — B's inputs staged on davebook-5 (infrastructure).
+
 ### Documentation
 
 - **The in-app docs caught up with the panel/CNC wave, and every capability got a committed demo sample with a numbered walkthrough** ([#548](https://github.com/SlyWombat/CaseMaker/issues/548)): the CNC guide and the user manual now describe Design mode as **Job / Hold / Cutter** with the sticky Generate footer (#521/#523/#524), the cutter as a per-program **recommendation** confirmed at the run with the upload's "Which cutter is fitted?" selector (#516/#537), the live machine in the **status strip** and the dock's **Transcript** tab (#526/#528), **bed profiles** and the Machines card's **Bed** block (#509/#511), limits/safe heights/vise geometry on the **machine and accessory records** (#448/#451), and 3D surfacing from a **goal mesh** (#534). New walkthroughs cover the simulator, the engrave job, board/case export and the headless CLI against the committed `docs/bench/` samples.
