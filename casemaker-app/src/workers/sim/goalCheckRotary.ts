@@ -449,6 +449,9 @@ export function checkGoalCutIntoRotary(
     silhouetteExcusedCells: 0,
     silhouetteDeepest: null,
     silhouetteUnavailableCells: 0,
+    // #1092 (0f's inward-witness ruling) — the witness sub-count is the flat check's silhouette
+    // proof; the rotary map's silhouette class is the wall/border class above, so it states zero.
+    silhouetteByWitnessCells: 0,
     medianDeltaMm,
     sentence,
   };
