@@ -26,8 +26,17 @@
 /** The diagnostic code the guide's chapter 8 carries a row for (the cnc-guide spec scans this). */
 export const BROWSER_32_BIT_CODE = 'browser-32-bit';
 
-/** The plain sentence the Generate button carries, verbatim from the issue. */
+/** Bitness 32: the browser states the cause, and the remedy is a different browser. */
 export const BROWSER_32_BIT_SENTENCE = 'This browser is 32-bit; the planner needs a 64-bit browser';
+
+/**
+ * The probe failed on a renderer that did NOT say 32-bit (bitness 64, or no answer): the browser
+ * may already BE 64-bit, so the 32-bit sentence would be false and "install a 64-bit browser"
+ * would send the operator to an install they already have. The remedy is free memory first, a
+ * different browser second.
+ */
+export const BROWSER_MEMORY_SHORT_SENTENCE =
+  "This browser can't reserve the memory the planner needs (about 700 MiB); close other tabs or use a 64-bit browser";
 
 export interface RendererRefusal {
   code: typeof BROWSER_32_BIT_CODE;
@@ -36,8 +45,9 @@ export interface RendererRefusal {
 }
 
 /**
- * The one refusal both signals raise. `code: 'browser-32-bit'` is written here literally because
- * `tests/unit/cncGuide.spec.ts` scans `src/engine/cnc` for `code: '…'` and requires a guide row.
+ * The two refusals both signals raise, sharing the one code. `code: 'browser-32-bit'` is written
+ * here literally because `tests/unit/cncGuide.spec.ts` scans `src/engine/cnc` for `code: '…'` and
+ * requires a guide row.
  */
 export const BROWSER_32_BIT_REFUSAL: RendererRefusal = {
   code: 'browser-32-bit',
@@ -45,11 +55,18 @@ export const BROWSER_32_BIT_REFUSAL: RendererRefusal = {
   sentence: BROWSER_32_BIT_SENTENCE,
 };
 
+export const BROWSER_MEMORY_SHORT_REFUSAL: RendererRefusal = {
+  code: 'browser-32-bit',
+  severity: 'error',
+  sentence: BROWSER_MEMORY_SHORT_SENTENCE,
+};
+
 /**
  * The ball rank's measured peak on `m1trayF-banded2` (MB): E's 703.7 MiB of ArrayBuffers at
  * "planning: sequence — setup 1, 35 %", the stage the bench died in. It is the floor the probe
  * must be able to reserve; it is not the plan's total appetite, so a pass is necessary, not
- * sufficient.
+ * sufficient. #1125 (E) caps the rank's stamp cache and lowers this peak — restate this floor
+ * from that landing's own measurement when it lands.
  */
 export const PLANNER_PEAK_FLOOR_MB = 704;
 
@@ -143,14 +160,16 @@ export async function readRendererBitness(
 
 /**
  * The verdict Generate needs: a refusal, or null when this renderer can do the planner's work.
- * Bitness '32' short-circuits before the probe; every other answer takes the probe.
+ * Bitness '32' short-circuits before the probe and gets its own sentence; every other answer
+ * takes the probe, and a failed probe gets the memory sentence (the browser may already be
+ * 64-bit — the message must not claim otherwise).
  */
 export async function detectRendererRefusal(
   nav: NavigableNavigator = undefined,
   probe: () => ProbeResult = probeAddressSpace,
 ): Promise<RendererRefusal | null> {
   if ((await readRendererBitness(nav)) === '32') return BROWSER_32_BIT_REFUSAL;
-  return probe().ok ? null : BROWSER_32_BIT_REFUSAL;
+  return probe().ok ? null : BROWSER_MEMORY_SHORT_REFUSAL;
 }
 
 /** `undefined` means "read the global navigator" — the call site does not have to pass one. */

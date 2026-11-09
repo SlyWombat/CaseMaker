@@ -4,6 +4,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   BROWSER_32_BIT_SENTENCE,
+  BROWSER_MEMORY_SHORT_SENTENCE,
   PLANNER_PEAK_FLOOR_MB,
   PROBE_CHUNK_MB,
   detectRendererRefusal,
@@ -67,10 +68,21 @@ describe('#1124 — a 32-bit renderer is refused before Generate', () => {
 });
 
 describe('#1124 — the probe catches an address-limited renderer', () => {
-  it('bitness 64 whose probe cannot reserve the floor is refused', async () => {
+  it('bitness 64 whose probe fails gets the memory sentence, never the 32-bit claim', async () => {
     const refusal = await detectRendererRefusal(navWithBitness('64'), failed);
     expect(refusal?.code).toBe('browser-32-bit');
-    expect(refusal?.sentence).toBe(BROWSER_32_BIT_SENTENCE);
+    expect(refusal?.sentence).toBe(BROWSER_MEMORY_SHORT_SENTENCE);
+    expect(refusal?.sentence).toBe(
+      "This browser can't reserve the memory the planner needs (about 700 MiB); close other tabs or use a 64-bit browser",
+    );
+    // A 64-bit browser told to "install a 64-bit browser" would be sent to an install it has.
+    expect(refusal?.sentence).not.toBe(BROWSER_32_BIT_SENTENCE);
+  });
+
+  it('a browser that cannot state its bitness and fails the probe gets the memory sentence too', async () => {
+    const refusal = await detectRendererRefusal(navWithBitness(null), failed);
+    expect(refusal?.code).toBe('browser-32-bit');
+    expect(refusal?.sentence).toBe(BROWSER_MEMORY_SHORT_SENTENCE);
   });
 
   it('a browser that cannot state its bitness still passes when the probe reserves the floor', async () => {
