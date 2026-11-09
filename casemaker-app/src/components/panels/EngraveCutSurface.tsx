@@ -1192,6 +1192,10 @@ export function EngraveCutSurface({
     const targetMount = mountTargetFor(frozenMount);
     openMachineChange({
       ...(targetMount === undefined ? {} : { target: targetMount }),
+      // #1123 item 9 — a job held on the bracket needs the FIT, not just the bare bed: the gate
+      // reads `profileHolds(active, 'bracket')`, which is true only once the anchor placement is
+      // written, and the wizard's fit step (#718) is what writes it (and the fixture's record).
+      ...(frozenMount === 'bracket' ? { fitBracket: true } : {}),
       forJob: {
         name: job.name,
         holding: `made for ${jobMountWords(frozenMount)}`,

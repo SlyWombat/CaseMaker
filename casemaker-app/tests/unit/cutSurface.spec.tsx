@@ -18,7 +18,7 @@ import { setMachineUploadLoader } from '@/platform/machineUpload';
 import { programHash } from '@/platform/machineRun';
 import { StockItemSchema, type StockItem } from '@/platform/stockClient';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
+import { defaultBracketHold, jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { planRegistration } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { freezePackage, type FrozenPackage } from '@/engine/cnc/engrave/package';
@@ -106,6 +106,21 @@ function generated(programs: EngraveProgram[]): EngraveGenerated {
 
 /** #931 — a run that PASSED: the state the green-surface tests intend (never simulated otherwise). */
 const OK_ORACLE = { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } };
+
+/**
+ * #1123 item 9 — a job held on the anchor bracket: the frozen mount the Cut banner must ask the
+ * wizard to restore. The bench job was one of these, and the wizard dead-ended on the bare bed.
+ */
+function bracketJob(): EngraveJob {
+  const base = defaultEngraveJob();
+  return {
+    ...base,
+    workholding: {
+      kind: 'bracket',
+      bracket: defaultBracketHold({ x: base.stock.length, y: base.stock.width, z: base.stock.thickness }, null),
+    },
+  };
+}
 
 function passRun(): void {
   useEngraveRunStore.setState({
@@ -246,7 +261,7 @@ function machineObservation(): MachineObservation {
  * #695 — a location whose machine has a vise profile and a rotary profile, with `active` one of
  * them. The frozen job's setup mount is the vise, so the rotary-active record is the disagreement.
  */
-function locationWith(active: 'vise' | 'rotary', probe: '3d' | 'wired' | null = null): LocationView {
+function locationWith(active: 'vise' | 'rotary' | 'bed', probe: '3d' | 'wired' | null = null): LocationView {
   const placement = (mount: 'vise' | 'rotary') => ({
     id: `pl-${mount}`,
     fixture: `fx-${mount}`,
@@ -263,8 +278,10 @@ function locationWith(active: 'vise' | 'rotary', probe: '3d' | 'wired' | null = 
         bedProfiles: [
           { id: 'bp-vise', placements: [placement('vise')], datums: {} },
           { id: 'bp-rotary', placements: [placement('rotary')], datums: {} },
+          // #1123 item 9 — nothing on the pins: the bed the bench's bracket job was frozen against.
+          { id: 'bp-bed', placements: [], datums: {} },
         ],
-        activeBedProfileId: active === 'vise' ? 'bp-vise' : 'bp-rotary',
+        activeBedProfileId: `bp-${active}`,
       },
     ],
     accessories:
@@ -1234,6 +1251,35 @@ describe('#419 §3 the Cut surface', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // #1123 item 9 — THE BENCH DEAD END. The tray job was made for the bracket and clamps, the
+  // machine had nothing on the pins, and Cut's Change the machine opened the wizard asking for
+  // the BARE BED: step 1 answered "Nothing on the pins is already on the machine" and offered only
+  // vise/rotary, so the only way through was the house API. The banner's action must ask for the
+  // bracket FIT (#718's step), which is what `profileHolds('bracket')` reads afterwards.
+  it('#1123 item 9 — a bracket job’s Change the machine asks for the bracket fit, not the bare bed', () => {
+    const job = bracketJob();
+    const pkg = frozen(job, [P1]);
+    // Nothing on the pins, the bare bed active — the bench machine before the workaround.
+    useLocationStore.setState({ status: 'present', location: locationWith('bed'), etag: '"loc-bed"' } as never);
+    passRun();
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
+
+    const sentence = screen.getByTestId('engrave-cut-mount-sentence').textContent ?? '';
+    expect(sentence).toContain('made for the bracket and clamps');
+    expect(sentence).toContain('nothing on the pins');
+
+    fireEvent.click(screen.getByTestId('engrave-cut-change-machine'));
+    const request = useMachineChangeStore.getState().request;
+    expect(request.target).toBe('bed');
+    expect(request.fitBracket).toBe(true);
+    expect(request.forJob).toEqual({
+      name: job.name,
+      holding: 'made for the bracket and clamps',
+      frozen: true,
+      frozenMount: 'bracket',
+    });
   });
 });
 
