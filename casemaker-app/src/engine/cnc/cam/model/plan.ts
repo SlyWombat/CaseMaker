@@ -841,7 +841,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       }
     }
     const ops = coveredCount * stencilCellsFor(radius, pitch);
-    if (process.env.CM_1092_BUDGET_DEBUG) {
+    // `process` is typed out of the web target's app tsconfig; the codebase's own pattern (memTrace,
+    // designCheck's CM_GOAL_DEBUG) reads it through globalThis.
+    if ((globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.CM_1092_BUDGET_DEBUG !== undefined) {
       const b = region.bounds;
       console.error(`[resttip] ${region.id} bbox=[${b.min[0].toFixed(1)},${b.min[1].toFixed(1)}]-[${b.max[0].toFixed(1)},${b.max[1].toFixed(1)}] r=${radius.toFixed(3)} covered=${coveredCount} stencil=${stencilCellsFor(radius, pitch)} ops=${ops} budget=${DEFAULT_MAX_FINISH_TIP_OPS} refused=${ops > DEFAULT_MAX_FINISH_TIP_OPS}`);
     }
@@ -3171,7 +3173,9 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       // only valid where the goal has a surface at that depth" — so j29's body cells never enter
       // this pass's region and the rest is not planned for them.
     });
-    if (process.env.CM_1092_BUDGET_DEBUG) {
+    // `process` is typed out of the web target's app tsconfig; the codebase's own pattern (memTrace,
+    // designCheck's CM_GOAL_DEBUG) reads it through globalThis.
+    if ((globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.CM_1092_BUDGET_DEBUG !== undefined) {
       let mv = 0;
       let minZ = 0;
       for (const o of restOutcome.ir.operations) for (const m of o.moves) { mv++; if (m.z < minZ) minZ = m.z; }
