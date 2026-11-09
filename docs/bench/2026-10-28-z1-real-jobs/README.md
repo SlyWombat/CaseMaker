@@ -49,6 +49,64 @@ Not reproducible here, so listed on the page and not cards: j06 (the wolf model 
 (rotary carving cannot be described yet), j09 (PCB, needs a login), j26 (posted NC halves with no
 design to check them against).
 
+## The goal check's proofs, one rule with the app (gate v8, #1092)
+
+Since #1092 the page's checker (`tools/goal_check.py`) applies the same proof set as the app's
+`checkGoalCutInto` (`casemaker-app/src/engine/cnc/engrave/designCheck.ts`), cell for cell. Every
+excuse is a PROOF bounded by the goal's own relief; no class of cells is excused by name.
+
+- **Edge break** — only when the job states one: a V bit's band, that bit's own leg, and that bit's
+  stamp the deepest at the cell. `--job <job.json>` reads the statement (`targetObject.edgeBreak`,
+  or its old name `chamfer`); with no statement — or no `--job` — there is no allowance, which is
+  what the app itself does for a job that states none. The band seeds the DESIGN silhouette (the
+  part's outline, plus the grid border) — 0f's R-b; `edges: all` adds every interior wall.
+- **Silhouette** (0f's ruling) — a covered cell facing uncovered grid, the part's outline. The
+  design is multi-valued across that edge, so the read is excused only when a stock thickness is
+  STATED (the job's, or the goal's — no `topZ − minZ` guess; without one the proof is UNAVAILABLE
+  and the cells are counted and named, R-a), the depth is within the BLANK's floor (the stock top
+  down to −(thickness + breakthrough), plus 0.005 mm), and the deepest stamp's CL is on the
+  UNCOVERED side, at least r − one cell from the outline. A failed cell FALLS THROUGH to the
+  general straddling proof (never to the wall/border or shadow classes); a cut below the blank
+  that no proof excuses is COUNTED.
+- **Wall / border** — excused only on the straddling proof, and only when the depth is within the
+  goal's local relief (max − min of the covered goal top within the largest cutting tool's radius;
+  with no tool set, one pitch — the cell's own axial neighbours; the stock top is a high side for a
+  border cell OR any cell whose disc reaches uncovered grid) plus 0.005 mm. The class proof's step
+  TEST also carries that 0.005 mm — the sampled heightfield step can be a hair short of the design
+  floor (measured 0.0004 mm on the tray's 2.885 mm floor) — while the general proof keeps only its
+  1e-12.
+- **Wall shadow** — the v5 proof (the V within its leg, or the deepest stamp's CL at the disc's
+  rim), bounded by the same relief. A cell that fails the bound is counted, not excused.
+- **Straddling** (v6) — any other cell deeper than 0.1 mm is excused only when the step over its
+  axial neighbours is at least as tall as the read intrusion and the swept floor is at the design's
+  low side.
+
+The judged figure is `adjudicatedFraction` — the share of covered cells cut below the 0.1 mm floor
+after those exclusions — and it is the app receipt's `details.goal.adjudicatedFraction`. The raw
+figures at 0.01 mm, each excluded class, the over-relief counters (`wallOverReliefCells`,
+`borderOverReliefCells`, `shadowOverReliefCells`, `overReliefDeepest`) and the silhouette's own
+`silhouetteExcusedCells` / `silhouetteDeepest` / `silhouetteUnavailableCells` are written beside it,
+so an excuse is never silent.
+
+`tools/goal-check-parity.py` is the parity test: given a card run directory (the
+`runs/<sha>/<card>` one `build.py` writes, or any directory with `receipt.json`, `job.json`, the
+goal heightfield pair and the posted programs), it re-runs the checker over the same programs and
+the same goal grid and compares the two goal blocks. The adjudicated fraction must agree within
+**0.01 %** of the covered cells (#1092's acceptance); the raw figure and each class are printed
+beside it and called out when they are noisier. A run whose receipt was written before gate v8
+reports the old rule and is expected to disagree — the parity is run on a fresh card run of the
+branch that carries the rule.
+
+```sh
+CM_LOCATION=<the location the card ran with> \
+  ~/casemaker-manager/venv/bin/python tools/goal-check-parity.py runs/<sha>/j29 runs/<sha>/ref-tray70
+```
+
+`tools/test_goal_check.py` pins the rule on synthetic fields with hand-known answers: the strict
+stamp edge, a clean pocket, a boundary-tangent contour, the relief ceiling on wall and border cells,
+the class ordering, the who gate, the edge-break allowance from the statement, and the two
+step-test slacks. Run it with the bench venv before a page rebuild.
+
 ---
 
 This run replaces `docs/bench/2026-10-27-z1-typical-jobs/` as the record of whether Case Maker can make the 18 typical jobs and the seven jobs of the second set. The 2026-10-27 run counted "a program was written and passed its own simulation" as success, and most of its inputs were stand-ins that did not resemble the parts. In this run, each job models the part in the maker's photo or file. Every card was then compared by eye with that photo. The cards were first run on 2026-10-28; the **2026-10-29 re-run on main 207e8a11** is the current verdict, and the first-run tables below are kept as history.
