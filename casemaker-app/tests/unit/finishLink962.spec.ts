@@ -52,6 +52,8 @@ const flatSurface: ClSurface = {
   dropCutter: (x, y) => (x >= X0 && x <= X1 && y >= Y0 && y <= Y1 ? FLAT_Z : null),
   toleranceMm: 0.005,
   minSpacingMm: 0.1,
+  minSpacingSource: 'derived',
+  minSpacingFromStepOverMm: 1,
   maxSpacingMm: 0.5,
   sampleCount: 0,
 };

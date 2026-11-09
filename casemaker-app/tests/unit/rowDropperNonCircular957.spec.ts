@@ -227,6 +227,8 @@ describe('#957 the stated guarantee limit — a feature narrower than span/4 sli
       dropCutter: (x) => (Math.abs(x - RIDGE_X) < RIDGE_WIDTH / 2 ? RIDGE_HEIGHT : 0),
       toleranceMm: 0.005,
       minSpacingMm: 0.01,
+      minSpacingSource: 'derived',
+      minSpacingFromStepOverMm: 0.1,
       maxSpacingMm: 0.5,
       sampleCount: 0,
     };
