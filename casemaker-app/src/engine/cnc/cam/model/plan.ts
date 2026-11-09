@@ -961,9 +961,18 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           let acc: Float32Array | null = null;
           for (const ir of irs) {
             const field = stampedField(ir);
-            if (field === null) continue;
+            if (field === null) {
+              stampCache.delete(ir);
+              continue;
+            }
             if (acc === null) acc = Float32Array.from(field);
             else for (let k = 0; k < acc.length; k++) if (field[k]! < acc[k]!) acc[k] = field[k]!;
+            // #1125 — THE FIELD DIES WITH ITS FOLD. Retaining every measured candidate's IR fields
+            // in `stampCache` accumulated ~700 MiB by the tray's `rank:end` (#1124's measurement;
+            // the biggest single field is ~5.5 MiB over the 1,444,021-cell goal, so the AGGREGATE
+            // is what exhausts a 32-bit renderer). The fold needs each field once; a later caller
+            // that re-encounters the same IR re-stamps it (the memo keeps the IR, not its field).
+            stampCache.delete(ir);
           }
           if (acc === null) return null;
           let covered = 0;
@@ -1367,6 +1376,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           stageMemo.evictOwner(cutterKeyOf(candidate));
           continue; // a candidate that cannot plan this remainder is not a candidate
         }
+        // #1125 — `goalCoverage` evicts each IR's field as it folds it (see the fold loop): the
+        // rank's retained stamp fields were the aggregate behind #1124's 703.7 MiB peak.
         const coverage = goalCoverage(measured.ops.map((o) => o.outcome.ir));
         if (coverage === null) {
           // #1054 — a candidate with no stamp is no candidate: its memoised ops die with it.
