@@ -5343,7 +5343,7 @@ export function EngravePanel(): JSX.Element {
             // job, that step is Cut, so the same primary slot switches mode instead of offering
             // a second Generate. `data-action` names which press it is.
             data-action={runReady ? 'cut' : 'generate'}
-            disabled={runReady ? false : blocked || running || !simEnabled || run.restoreChecking}
+            disabled={runReady ? false : blocked || running || !simEnabled}
             title={
               runReady
                 ? 'Go to Cut — the program is generated, checked, simulated and matched against the design.'

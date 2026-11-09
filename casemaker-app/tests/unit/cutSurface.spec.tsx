@@ -1197,6 +1197,28 @@ describe('#656 from the cutter prompt to the cut', () => {
     expect(screen.getByTestId('engrave-cut-plan')).toBeTruthy();
   });
 
+  it('#1123 review — Generate does not wait on the restored-run check; Cut does', () => {
+    const job = plannedJob();
+    const sansPlan = {
+      ...job,
+      setups: [{ ...jobSetups(job)[0]!, registration: undefined }],
+    } as EngraveJob;
+    const pkg = frozen(sansPlan, [P1]);
+    draw({
+      job,
+      report: reportOf(),
+      pkg,
+      generated: generated([P1]),
+      canDrive: true,
+      restoreChecking: true,
+      staleSince: 1,
+    });
+    // A hung house must never leave the operator unable to regenerate: the stale-program Generate
+    // is live while the restored run is still being checked; only the Cut press waits.
+    expect((screen.getByTestId('engrave-package-generate') as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('#1123 review — a restored run is unverified until the shop reads settle: the Cut press is off', () => {
     const job = plannedJob();
     const pkg = frozen(job, [P1]);

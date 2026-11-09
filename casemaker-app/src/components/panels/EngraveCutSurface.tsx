@@ -1407,7 +1407,7 @@ export function EngraveCutSurface({
             <button
               type="button"
               data-testid="engrave-package-generate"
-              disabled={generateBlocker !== null || restoreChecking}
+              disabled={generateBlocker !== null}
               style={{ width: '100%', padding: 7, marginTop: 6 }}
               onClick={onGenerate}
             >
