@@ -464,6 +464,10 @@ function fakeZ1(opts: {
         return reply('ok');
       }
       if (/^G10 L2 P1 /.test(line)) return reply('ok');
+      // #1123 item 31 — the tool-number record, in Studio's own no-space form (`M493.2T8888`,
+      // docs/bench/2026-10-30-3d-probe-survey.md:34). The firmware takes it as a tool-table write
+      // and answers `ok`; the fake accepts it so the origin write can be pinned end to end.
+      if (/^M493\.2T\d+$/.test(line)) return reply('ok');
       return reply(`error:unexpected line ${line}`);
     },
   };
@@ -1023,6 +1027,31 @@ describe('#430 the executor, on a fake machine', () => {
     if (!applied.ok) throw new Error(applied.reason);
     expect(z1.lines.slice(before)).toEqual(['$H', 'M491', applied.line, '$H']);
     expect(applied.line.endsWith('Z-59.272')).toBe(true);
+  });
+
+  // #1123 items 31/34 — THE WRITE RECORDS THE FITTED CUTTER and the fit sentence names it. The
+  // bench's side-2 run stopped at the program's `T1 M6` in `<Tool|>` because the controller still
+  // held the probe's 8888; `M493.2 T<n>` makes that tool change a no-op.
+  it('#1123 items 31/34 — records the cutter’s tool number and names the cutter in the fit step', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED });
+    const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    const before = z1.lines.length;
+    const asked: string[] = [];
+    const applied = await applyCorrection(
+      r.outcome,
+      {
+        console: z1.console,
+        operator: async (s) => {
+          asked.push(s.text);
+          return s.kind === 'fit-cutter' ? z1.fitCutter() : true;
+        },
+      },
+      { confirmed: true, cutter: '⌀0.3 mm flat end', toolNumber: 1 },
+    );
+    if (!applied.ok) throw new Error(applied.reason);
+    expect(asked.some((t) => t.includes('⌀0.3 mm flat end'))).toBe(true);
+    expect(z1.lines.slice(before)).toEqual(['$H', 'M491', 'M493.2T1', applied.line, '$H']);
   });
 
   it('refuses to write an origin from a measurement that is not whole', async () => {

@@ -6,6 +6,10 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useManageModeStore } from '@/store/manageModeStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
+import { attachConsole } from '@/platform/machineConsole';
+import { unlockMachine } from '@/platform/machineUnlock';
+import { toolNumberFor } from '@/engine/cnc/cam/ir';
+import { toolContinuePlan } from './machineStripActions';
 import { accessoriesFor, machineRecordByAddress, machineRecordByProfile } from '@/store/locationStore';
 import { MILL_MODELS } from '@/engine/cnc/machine';
 import { machineDisplayName } from '@/platform/locationClient';
@@ -414,8 +418,14 @@ export function MachineStatusStrip(): JSX.Element | null {
   // the number the program gave the job's cutter names that cutter; anything else needs ONE table
   // entry with that number (two built-ins share a default number, and guessing between them would
   // be the old merge in another form).
+  // #1123 item 35 — A FITTED CUTTER IS NOT THE PROBE. During a registration the probe owns the
+  // label — until the machine reports the number the PROGRAM gives this job's cutter (the write's
+  // `M493.2 T<n>`): then the cutter is fitted and recorded, and the strip names it.
+  const jobToolNumber = jobCutter === null ? null : toolNumberFor(jobCutter);
   const machineTool = registrationActive
-    ? (probeNameFor(record) ?? 'probe')
+    ? toolNumber !== null && jobToolNumber !== null && toolNumber === jobToolNumber
+      ? toolDisplayName(jobCutter!)
+      : (probeNameFor(record) ?? 'probe')
     : toolNumber === null
       ? cutter
       : machineToolName(toolNumber, (n) => {
@@ -430,6 +440,40 @@ export function MachineStatusStrip(): JSX.Element | null {
   const mismatch = registrationActive
     ? null
     : spindleMismatchWords(cutter, jobCutter?.number ?? null, toolNumber, machineTool);
+  // #1123 items 32/33 — THE STRIP'S ONE-LINE RECOVERY. The firmware's `Tool` state is the program
+  // waiting for `M490.2` (Continue); an alarm is cleared with `$X` (Unlock), and Home is the
+  // bench's "home when finished". The strip is visible in the Cut step, where both are met, so
+  // they live here rather than only in Manage › Machines.
+  // SOURCES: docs/cnc-guide.md's command table — `M490.1`/`M490.2` are the manual-tool-change
+  // operator handshake; `machineRun.ts`'s #655 comment (the `Tool` state resumes on `M490.2`);
+  // `platform/machineUnlock.ts` (`$X`, the firmware's alarm clear, offered only against Alarm —
+  // Z1-Firmware-Dialect.md §11.9); `MachineStop.tsx` (`$H`, the bench's home-when-finished).
+  const toolContinue = async (): Promise<void> => {
+    const entry = useMachineRunStore.getState().runs[machineKey(machine)] ?? null;
+    const plan = toolContinuePlan(entry);
+    if (plan === 'none') return;
+    if (plan === 'request') {
+      useMachineRunStore.getState().requestToolContinue(machineKey(machine));
+      return;
+    }
+    const session = attachConsole({ host: machine.host, port: machine.port });
+    try {
+      await session.send('M490.2');
+    } finally {
+      await session.close();
+    }
+  };
+  const unlock = async (): Promise<void> => {
+    await unlockMachine({ host: machine.host, port: machine.port });
+  };
+  const home = async (): Promise<void> => {
+    const session = attachConsole({ host: machine.host, port: machine.port });
+    try {
+      await session.send('$H');
+    } finally {
+      await session.close();
+    }
+  };
   const toolTitle = [
     jobCutter?.name ?? null,
     toolNumber !== null ? `T${toolNumber}` : null,
@@ -684,6 +728,40 @@ export function MachineStatusStrip(): JSX.Element | null {
           style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', color: '#e0a0a0' }}
         >
           {reason}
+        </span>
+      )}
+      {/* #1123 items 32/33 — the two recoveries, where their words are. */}
+      {line?.state === 'Tool' && (
+        <button
+          type="button"
+          data-testid="machine-status-tool-continue"
+          title="The machine is waiting for the cutter — send M490.2 and let the program resume."
+          style={{ flex: 'none', padding: '2px 8px', fontSize: 11 }}
+          onClick={() => void toolContinue()}
+        >
+          Continue (M490.2)
+        </button>
+      )}
+      {state === 'Alarm' && (
+        <span style={{ display: 'inline-flex', gap: 4, flex: 'none' }}>
+          <button
+            type="button"
+            data-testid="machine-status-unlock"
+            title="Clear the alarm lock — $X, sent only to a machine that reports Alarm."
+            style={{ padding: '2px 8px', fontSize: 11 }}
+            onClick={() => void unlock()}
+          >
+            Unlock ($X)
+          </button>
+          <button
+            type="button"
+            data-testid="machine-status-home"
+            title="Home the machine — $H. Clear the alarm first; an alarm refuses motion."
+            style={{ padding: '2px 8px', fontSize: 11 }}
+            onClick={() => void home()}
+          >
+            Home ($H)
+          </button>
         </span>
       )}
       {/* #652 — a machine that stopped answering shows NO live-looking numbers: the last WPos/MPos

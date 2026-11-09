@@ -2021,10 +2021,23 @@ export async function applyCorrection(
     /**
      * #473 — the cutter the G10 write is for, by the name the screen shows. The post-facing flow
      * passes the ENGRAVING cutter: the facing cutter is still in the spindle from the skim, and the
-     * whole point of the `M491` below is to calibrate the cutter the next program runs. Omitted on
-     * the registration path, whose sentence stays the generic one.
+     * whole point of the `M491` below is to calibrate the cutter the next program runs.
      */
     cutter?: string;
+    /**
+     * #1123 item 31 — THE PROGRAM'S FIRST TOOL NUMBER. After the cutter's `M491` the controller
+     * still holds whatever tool it last recorded (after a registration that is the probe's
+     * `T8888`), so the program's first `T<n> M6` stops the job in `<Tool|>` until a hand at the
+     * console. `M493.2 T<n>` records the fitted cutter's number, making that `M6` a no-op.
+     * Absent: no tool line is sent (a caller that has no program, e.g. the standalone centre-find).
+     */
+    toolNumber?: number;
+    /**
+     * #1123 item 34 — the cutter fitted is the ENGRAVING one after a facing pass, so the fit
+     * sentence names it as such and warns against refitting the facing cutter. Absent on an
+     * ordinary registration write: the sentence names the cutter but claims no facing pass.
+     */
+    afterFacing?: boolean;
   },
 ): Promise<ApplyResult> {
   const io = session(deps, outcome.seekFromMachineZ);
@@ -2039,12 +2052,23 @@ export async function applyCorrection(
     const fit =
       consent.cutter === undefined
         ? 'Take the probe out, fit the cutter, then continue.'
-        : `Take the probe out, fit the ENGRAVING cutter — ${consent.cutter} — not the facing cutter, then continue.`;
+        : consent.afterFacing === true
+          ? `Take the probe out, fit the ENGRAVING cutter — ${consent.cutter} — not the facing cutter, then continue.`
+          : `Take the probe out, fit the cutter — ${consent.cutter} — then continue.`;
     if (!(await deps.operator({ kind: 'fit-cutter', text: fit }))) {
       throw new Stop('stopped: the cutter was not fitted');
     }
     const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
     if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading for the cutter');
+    // #1123 item 31 — RECORD THE FITTED CUTTER'S TOOL NUMBER before the origin is written. The
+    // bench's side-2 run stopped at the program's `T1 M6` with `<Tool|>` because the controller
+    // still held the probe's 8888; this line makes that tool change a no-op.
+    // SOURCE: docs/bench/2026-10-30-3d-probe-survey.md:34 — Studio's own prep for a probe is
+    // `M493.2T8888` (NO space; the firmware rejects `M493.2 T1` as an unexpected line — the fake
+    // machine's own dialect refuses it, and 0f's 2026-11-09 bench record shows the controller
+    // holding 8888 into `T1 M6`). docs/reverse/makera-studio/03 is a one-row block table for
+    // M493–M496 and does not add syntax.
+    if (consent.toolNumber !== undefined) await io.send(`M493.2T${consent.toolNumber}`);
     const line = correctionLine(outcome, ref.z);
     await io.send(line);
     await io.home();
@@ -2114,7 +2138,7 @@ export async function retouchAndCorrectAfterFacing(
   const applied = await applyCorrection(
     retouch.outcome,
     deps,
-    { confirmed: consent.confirmed, cutter: opts.engravingCutter },
+    { confirmed: consent.confirmed, cutter: opts.engravingCutter, afterFacing: true },
   );
   const transcript = [...retouch.transcript, ...applied.transcript];
   if (!applied.ok) return { ok: false, step: 'correction', reason: applied.reason, transcript };
