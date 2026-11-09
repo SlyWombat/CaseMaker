@@ -4627,6 +4627,47 @@ function emptyGoalResult(): Omit<EngraveGenerated, 'ok' | 'stage' | 'findings' |
  * rotary program is authored, generated, simulated and saved, and its RUN waits for the module's
  * measurement; this function never decides that, the run gate does.
  */
+/**
+ * #1097 — THE X SPANS OF THE NEAR-AXIS CELLS' COMPONENTS on the rotary map (4-connected, wrapping
+ * in the arc). The finding names the spans so a reader can see WHERE the surface lies inside the
+ * ball's reach, not only how much of it does.
+ */
+function nearAxisXRanges(
+  field: { nx: number; ny: number; x0: number; pitch: number },
+  mask: Uint8Array,
+): { from: number; to: number }[] {
+  const { nx, ny, x0, pitch } = field;
+  const seen = new Uint8Array(mask.length);
+  const out: { from: number; to: number }[] = [];
+  const stack: number[] = [];
+  for (let start = 0; start < mask.length; start++) {
+    if (mask[start] !== 1 || seen[start] === 1) continue;
+    let minI = nx;
+    let maxI = -1;
+    seen[start] = 1;
+    stack.push(start);
+    while (stack.length > 0) {
+      const k = stack.pop()!;
+      const i = k % nx;
+      const j = (k - i) / nx;
+      if (i < minI) minI = i;
+      if (i > maxI) maxI = i;
+      const neighbours = [[i + 1, j], [i - 1, j], [i, (j + 1) % ny], [i, (j - 1 + ny) % ny]] as const;
+      for (const [ii, jj] of neighbours) {
+        if (ii < 0 || ii >= nx) continue;
+        const kk = jj * nx + ii;
+        if (mask[kk] === 1 && seen[kk] === 0) {
+          seen[kk] = 1;
+          stack.push(kk);
+        }
+      }
+    }
+    out.push({ from: x0 + minI * pitch, to: x0 + maxI * pitch });
+  }
+  out.sort((a, b) => a.from - b.from);
+  return out;
+}
+
 export function generateRotaryGoalProgram(
   job: EngraveJob,
   goal: EngraveTargetObject,
@@ -4716,6 +4757,68 @@ export function generateRotaryGoalProgram(
         `(X ≥ 3 mm), and the first ${Number((keepOutX - field.x0).toFixed(3))} mm of the goal is not cut.`,
       labelId: goal.id,
     });
+  }
+  // #1097 — THE PLACEMENT IS NOT A ONE-RADIUS RELIEF, STATED. Where the axis passes outside the
+  // body, the rays meet air and the stock stands as a block; where the surface comes within the
+  // finishing ball's own radius, no ball can cut it. Both are the PLACEMENT's geometry, known at
+  // generate time from the field; the share the finish actually leaves standing is the goal
+  // block's number after the run, and the sentence names the two so they are never confused.
+  // Informed, never refused: the program posts.
+  {
+    const cells = field.nx * field.ny;
+    const coveredCells = field.coveredCount;
+    const unsampledFraction = cells === 0 ? 0 : 1 - coveredCells / cells;
+    const reachLimitMm = tool.shape === 'ball' ? (cuttingDiameter(tool) ?? 0) / 2 : 0;
+    // 2 mm is the descriptive band #1097 reports ("within 2 mm of the axis"); it refuses nothing.
+    const nearMask = new Uint8Array(cells);
+    let nearCells = 0;
+    let unreachableCells = 0;
+    let closest = Infinity;
+    for (let k = 0; k < cells; k++) {
+      if (field.covered[k] !== 1) continue;
+      const r = field.radius + field.z[k]!;
+      if (r < closest) closest = r;
+      if (r < 2) {
+        nearMask[k] = 1;
+        nearCells++;
+      }
+      if (reachLimitMm > 0 && r < reachLimitMm) unreachableCells++;
+    }
+    if (unsampledFraction > 0 || nearCells > 0) {
+      const closestRadiusMm = Number.isFinite(closest) ? closest : field.radius;
+      const nearAxisFraction = coveredCells === 0 ? 0 : nearCells / coveredCells;
+      const unreachableFraction = coveredCells === 0 ? 0 : unreachableCells / coveredCells;
+      const ranges = nearAxisXRanges(field, nearMask);
+      const pct = (v: number): string => `${(v * 100).toFixed(2)} %`;
+      const rangeText =
+        ranges.length === 0
+          ? ''
+          : ` (X ${ranges
+              .map((r) => `${Number(r.from.toFixed(2))}–${Number(r.to.toFixed(2))}`)
+              .join(', ')} mm)`;
+      findings.push({
+        severity: 'warning',
+        code: 'goal-rotary-unreachable',
+        labelId: goal.id,
+        rotaryUnreachable: {
+          unsampledFraction,
+          nearAxisFraction,
+          nearAxisXRangesMm: ranges,
+          unreachableFraction,
+          reachLimitMm,
+          closestRadiusMm,
+        },
+        message:
+          `The goal "${goal.name}" is not a one-radius relief: ${pct(unsampledFraction)} of its map is air beside the ` +
+          `body that no ray reaches, so the stock stands there as it is; and ${pct(nearAxisFraction)} of the covered ` +
+          `surface lies within 2 mm of the axis${rangeText}, closest approach r ${Number(closestRadiusMm.toFixed(3))} mm` +
+          (reachLimitMm > 0
+            ? ` — a rotary relief cannot cut below the ⌀${Number((2 * reachLimitMm).toFixed(3))} ball's own radius, so ` +
+              `${pct(unreachableFraction)} of it stands whatever the finish`
+            : '') +
+          `. The program posts; what the finish leaves standing is the goal block's number after the run.`,
+      });
+    }
   }
   const xEnd = field.x0 + (field.nx - 1) * field.pitch;
   if (xEnd > span.to) {

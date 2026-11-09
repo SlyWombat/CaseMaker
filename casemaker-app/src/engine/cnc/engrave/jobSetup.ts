@@ -538,6 +538,10 @@ export type JobFindingCode =
   // #1061 — the goal's first millimetres lie inside the chuck/jaws keep-out: they are CLIPPED, not
   // cut (a warning; the sibling of `goal-rotary-oversize`).
   | 'goal-rotary-in-chuck'
+  // #1097 — THE PLACEMENT IS NOT A ONE-RADIUS RELIEF, STATED: air beside the body (cells no ray
+  // reaches) and surface inside the finishing ball's own radius. Informed, never refused; the
+  // run's standing share is the goal block's, not this finding's.
+  | 'goal-rotary-unreachable'
   | 'rotary-unsupported'
   | 'wrap-into-clamp'
   | 'wrap-off-free-end'
@@ -659,6 +663,23 @@ export interface JobFinding {
    * brings the part to the rod; absent on every other finding.
    */
   goalRadiusMm?: number;
+  /**
+   * #1097 — on `goal-rotary-unreachable`, the placement's OWN geometry, computed from the goal's
+   * radial field at generate time (never the run's result): the share of the map no ray reaches
+   * (`unsampledFraction`, where the stock stands as a block), the share of the covered surface
+   * within 2 mm of the axis (`nearAxisFraction`) with its X components (`nearAxisXRangesMm`), and
+   * the share inside the finishing ball's own radius (`unreachableFraction`, with
+   * `reachLimitMm` = the ball's radius and the closest approach). Shares are fractions 0–1. The
+   * share the FINISH leaves standing after the run is the goal block's leftover, never this.
+   */
+  rotaryUnreachable?: {
+    unsampledFraction: number;
+    nearAxisFraction: number;
+    nearAxisXRangesMm: { from: number; to: number }[];
+    unreachableFraction: number;
+    reachLimitMm: number;
+    closestRadiusMm: number;
+  };
   /**
    * #743 P-5 — on `isolation-short`, the owned engraver whose tip would open the measured gap at
    * the isolation's depth, and its tip's diameter, mm. The panel's one-click fix assigns it to the
