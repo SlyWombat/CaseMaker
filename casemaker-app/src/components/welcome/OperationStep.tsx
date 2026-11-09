@@ -189,6 +189,20 @@ export function OperationStep({
   const [rotaryPicked, setRotaryPicked] = useState<RotaryOperationId | null>(() =>
     seed === null ? (workExists ? null : 'engrave') : rotaryPickOf(seed),
   );
+  // #1123 item 3 — PICKED BY THE OPERATOR. The mockup highlights Engrave text for a job with no
+  // work; that highlight is a default, not an answer. Until a chip is clicked (or the step is
+  // re-opened with the answer it had), an empty Engrave text is "nothing picked": the primary
+  // finishes with the empty job instead of waiting for invented text. Picking the chip keeps the
+  // amber sentence and the hold.
+  const [pickedByOperator, setPickedByOperator] = useState(seed !== null);
+  const pickFlat = (id: OperationTypeId): void => {
+    setPicked(id);
+    setPickedByOperator(true);
+  };
+  const pickRotary = (id: RotaryOperationId): void => {
+    setRotaryPicked(id);
+    setPickedByOperator(true);
+  };
   const [reads, setReads] = useState<'along' | 'around'>(
     seed?.type === 'engrave' && seed.reads !== undefined ? seed.reads : 'along',
   );
@@ -306,7 +320,14 @@ export function OperationStep({
           : picked === null
             ? null
             : { type: picked };
-  const unblock = operationCreateBlocked(choice);
+  // #1123 item 3 — the highlighted-but-untouched Engrave text is nothing picked: report null, so
+  // the shell's primary creates the empty job and no amber sentence is drawn.
+  const untouchedEngrave =
+    !pickedByOperator &&
+    (rotary ? rotaryPicked === 'engrave' : picked === 'engrave') &&
+    text.trim() === '';
+  const reportedChoice = untouchedEngrave ? null : choice;
+  const unblock = operationCreateBlocked(reportedChoice);
   // #874 — the sentence names the FIELD it is about, so it renders in that chip's own field box,
   // directly under the field, never at the foot of the step 300 px away from the Text input.
   const unblockLine =
@@ -326,9 +347,9 @@ export function OperationStep({
   // still holds the empty answer (so Create is disabled with no words). The layout effect hands the
   // answer over in the same commit, before paint, so the button and its sentence never disagree.
   useLayoutEffect(() => {
-    onChoiceChange(choice);
+    onChoiceChange(reportedChoice);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picked, text, depth, font, surface, makeMold, pcbImported, pcbBoard, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, selectedSide, faceAngle, faceDepth, facesCount, facesAcross, holeDiameter, onChoiceChange]);
+  }, [picked, pickedByOperator, text, depth, font, surface, makeMold, pcbImported, pcbBoard, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, selectedSide, faceAngle, faceDepth, facesCount, facesAcross, holeDiameter, onChoiceChange]);
 
   async function readPcbSet(files: File[]): Promise<void> {
     setPcbSummary(null);
@@ -430,14 +451,14 @@ export function OperationStep({
       {rotary ? (
         <RotaryOperationPicker
           selected={rotaryPicked}
-          onPick={setRotaryPicked}
+          onPick={pickRotary}
           testidFor={(id) => `start-wizard-op-rotary-${id}`}
         />
       ) : (
         <OperationPicker
           mode="select"
           testidFor={(id) => `engrave-setup-what-${id}`}
-          onPick={setPicked}
+          onPick={pickFlat}
           surfaceAllowed={fresh || !jobHasItems(job)}
           selected={picked}
         />

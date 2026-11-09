@@ -77,12 +77,21 @@ test('Toolboxes opens the toolbox designer', async ({ cm, page }) => {
   await expect(page.getByTestId('toolbox-panel')).toBeVisible({ timeout: 30_000 });
 });
 
-test('CNC cutting opens the wizard over the page', async ({ cm, page }) => {
+test('CNC cutting opens the wizard over the CNC workspace, and ✕ leaves the operator there', async ({
+  cm,
+  page,
+}) => {
   await cm.ready();
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
+  // #1123 item 2 — entering CNC leaves the door at once: the Job panel is the screen behind the
+  // wizard, so closing it does not strand the operator back on the welcome page.
+  await expect(page.getByTestId('welcome-overlay')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
   await page.getByTestId('start-wizard-close').click();
-  await expect(page.getByTestId('welcome-overlay')).toBeVisible();
+  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
+  await expect(page.getByTestId('welcome-overlay')).toHaveCount(0);
 });
 
 test('one row on a wide desktop, two by two at tablet width, a column on a phone', async ({ cm, page }) => {

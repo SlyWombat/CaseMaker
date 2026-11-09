@@ -14,6 +14,7 @@ import { useRecentJobsStore } from '@/store/recentJobsStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { openRecentJob } from '@/store/openRecentJob';
 import { openDoorFile } from '@/store/openDoorFile';
+import { enterCncWorkspace } from '@/store/enterCncWorkspace';
 import { listBoards, type RegisteredBoard } from '@/library/registry';
 import {
   listTemplates,
@@ -360,6 +361,12 @@ export function WelcomeOverlay() {
     searchRef.current?.focus({ preventScroll: true });
   };
 
+  /** #1123 item 2 — the wizard is an overlay ON the CNC workspace, so ✕ leaves the operator there. */
+  const enterCnc = () => {
+    enterCncWorkspace();
+    openWizard();
+  };
+
   /** #1122 — a file dropped on the door takes Load's route: project, job, or one sentence. */
   const onDropFile = async (e: DragEvent<HTMLDivElement>): Promise<void> => {
     e.preventDefault();
@@ -536,7 +543,7 @@ export function WelcomeOverlay() {
                 className="wb-cap wb-cap--cnc"
                 data-testid="welcome-door-cnc"
                 title="Check for a machine, pick what you are making, then set up the cut"
-                {...tile(() => openWizard())}
+                {...tile(enterCnc)}
               >
                 <div className="wb-cap__art">
                   <CncArt title="A CNC spindle cutting a pocket in a block of stock, the toolpath on its floor" />
@@ -585,7 +592,10 @@ export function WelcomeOverlay() {
                     type="button"
                     className="wb-door__link"
                     data-testid={`welcome-starter-${starter.id}`}
-                    onClick={() => openWizard('machine', starter.id)}
+                    onClick={() => {
+                      enterCncWorkspace();
+                      openWizard('machine', starter.id);
+                    }}
                   >
                     {starter.label}
                   </button>

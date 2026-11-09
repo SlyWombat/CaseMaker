@@ -91,11 +91,13 @@ describe('the four capability cards', () => {
     await waitFor(() => expect(useViewportStore.getState().activeSidebarSection).toBe('toolbox'));
   });
 
-  it('CNC opens the cutting wizard over the page', () => {
+  it('CNC opens the cutting wizard over the CNC workspace', () => {
     render(<WelcomeOverlay />);
     fireEvent.click(screen.getByTestId('welcome-start-cnc'));
     expect(useStartWizardStore.getState().open).toBe(true);
-    expect(useProjectStore.getState().welcomeMode).toBe(true);
+    // #1123 item 2 — entering CNC leaves the door: the wizard is an overlay on the Job panel.
+    expect(useProjectStore.getState().welcomeMode).toBe(false);
+    expect(useViewportStore.getState().activeSidebarSection).toBe('cnc-engrave');
   });
 
   // #1123 item 1 — THE WHOLE TILE IS THE CONTROL. The maintainer pressed the picture and the
@@ -107,7 +109,8 @@ describe('the four capability cards', () => {
     expect(picture).not.toBeNull();
     fireEvent.click(picture!);
     expect(useStartWizardStore.getState().open).toBe(true);
-    expect(useProjectStore.getState().welcomeMode).toBe(true);
+    // The same entry as the label: the workspace is entered (item 2).
+    expect(useProjectStore.getState().welcomeMode).toBe(false);
   });
 
   it('#1123 — the Cases tile’s picture hands the cursor to the board search, like its label', () => {
