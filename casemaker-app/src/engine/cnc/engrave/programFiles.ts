@@ -39,7 +39,7 @@ export interface ProgramFile {
   engravingIndex: number;
   name: string;
   bytes: string;
-  kind: 'nc' | 'frame' | 'facing' | 'record';
+  kind: 'nc' | 'frame' | 'facing' | 'record' | 'log';
 }
 
 /**
@@ -145,8 +145,14 @@ export function runSaveFiles(
   programs: readonly ProgramFilesSource[],
   jobName: string,
   runRecord: { name: string; bytes: string } | null,
+  /** #1123 item 4 — the run's stage log (`<job>-run.log`); absent writes no log. */
+  runLog: { name: string; bytes: string } | null = null,
 ): ProgramFile[] {
   const files = programFiles(programs, jobName);
-  if (runRecord === null) return files;
-  return [...files, { index: files.length + 1, engravingIndex: 0, name: runRecord.name, bytes: runRecord.bytes, kind: 'record' }];
+  const withRecord =
+    runRecord === null
+      ? files
+      : [...files, { index: files.length + 1, engravingIndex: 0, name: runRecord.name, bytes: runRecord.bytes, kind: 'record' as const }];
+  if (runLog === null) return withRecord;
+  return [...withRecord, { index: withRecord.length + 1, engravingIndex: 0, name: runLog.name, bytes: runLog.bytes, kind: 'log' as const }];
 }

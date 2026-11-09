@@ -16,6 +16,7 @@ import type { PreflightCause } from '@/engine/cnc/preflight';
 import { runContextFor } from '@/store/machineRunStore';
 import { stepAtLine } from '@/engine/cnc/playbackClock';
 import { EngraveCutSurface } from './EngraveCutSurface';
+import { RunLogFold } from './RunLogFold';
 import { saveEngraveProgram, saveFilesFolderOrZip, saveText } from '@/engine/exportTrigger';
 import { buildSimStallReport, simStallReportFileName } from '@/engine/jobs/simStallReport';
 import { flightCrumbs } from '@/platform/flightRecorder';
@@ -33,7 +34,7 @@ import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds'
 import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
 import { TOOL_GROUPS, toolDisplay, toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
-import { setupSubstitutionOfferSentence, setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/engrave/substitution';
+import { feedsProxyNotes, setupSubstitutionOfferSentence, setupSubstitutionSentence, substitutionSentence } from '@/engine/cnc/engrave/substitution';
 import { useHouseStore } from '@/store/houseStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -97,10 +98,12 @@ import { registrationSettings } from '@/engine/cnc/registration/settings';
 import {
   buildRunRecord,
   isMeasuredRun,
+  runLogFileName,
   runRecordFileName,
   runSeconds,
   serializeRunRecord,
 } from '@/engine/cnc/engrave/runRecord';
+import { serializeRunLog } from '@/engine/cnc/engrave/runLog';
 import { nameProgramsForSheet, nameRestPrograms, programFiles, runSaveFiles } from '@/engine/cnc/engrave/programFiles';
 import { releaseStem } from '@/engine/cnc/engrave/release';
 import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
@@ -2368,9 +2371,13 @@ export function EngravePanel(): JSX.Element {
   })();
   // #807 — "no cutter chosen" only when nothing can choose: while the measured search runs (or
   // its answer is waiting to be applied), the line says the app is choosing.
+  // #1123 item 8 — A CUT ON BORROWED FEEDS SAYS SO ON THE CUTTER LINE, not only in the fold: the
+  // plan's own substitution statements carry the borrowed row's diameter.
+  const feedsNotes =
+    run.staleSince === null && run.generated?.ok === true ? feedsProxyNotes(run.generated.planStatements ?? []) : [];
   const cutterVerdict =
     postedCutterLine !== null
-      ? postedCutterLine
+      ? [postedCutterLine, ...feedsNotes].join(' · ')
       : tool !== null
         ? [toolDisplayName(tool), cutterProvenance, cutterFidelity, catalogueNote, substitutionNote, setupSubstitutionNote === '' ? null : setupSubstitutionNote]
             .filter((w): w is string => w !== null)
@@ -3013,10 +3020,14 @@ export function EngravePanel(): JSX.Element {
     if (generated?.programs === undefined || generated.programs.length === 0 || saveBlockerText !== null) return;
     // The record typesets §9's labels, so the main thread's font cache must be seeded first (#180).
     await ensureLabelFontsLoaded(job.labels, job.customFonts ?? []);
-    const files = runSaveFiles(generated.programs, job.name, {
-      name: runRecordFileName(job.name),
-      bytes: serializeRunRecord(buildRunRecord(job, generated)),
-    });
+    const log = useEngraveRunStore.getState().log;
+    const files = runSaveFiles(
+      generated.programs,
+      job.name,
+      { name: runRecordFileName(job.name), bytes: serializeRunRecord(buildRunRecord(job, generated)) },
+      // #1123 item 4 — the run log goes with the record, inside the same Save all.
+      log.length === 0 ? null : { name: runLogFileName(job.name), bytes: serializeRunLog(log, `${job.name} — run log`) },
+    );
     await saveFilesFolderOrZip(files, `${releaseStem(job.name)}-programs.zip`);
   }
 
@@ -3050,6 +3061,7 @@ export function EngravePanel(): JSX.Element {
     // cache has to be seeded first, exactly as `openRunSheet` does above (#180). The two `.nc`s do
     // not need it, but they are written in the same breath.
     await ensureLabelFontsLoaded(job.labels, job.customFonts ?? []);
+    const log = useEngraveRunStore.getState().log;
     await saveEngraveProgram(
       generated.nc,
       generated.frameNc,
@@ -3058,6 +3070,8 @@ export function EngravePanel(): JSX.Element {
       // #432 slice 3 — the facing file goes with them when the worker produced one: the run sheet's
       // facing section sends the operator to `<job>-face.nc`, so it has to be written here.
       generated.facingNc,
+      // #1123 item 4 — the run log is written beside the record it belongs to.
+      log.length === 0 ? null : { name: runLogFileName(job.name), bytes: serializeRunLog(log, `${job.name} — run log`) },
     );
   }
 
@@ -5360,6 +5374,9 @@ export function EngravePanel(): JSX.Element {
               </button>
             </span>
           )}
+          {/* #1123 item 4 — THE RUN LOG, beside the progress line and kept after the run: every
+              stage tick with its clock time and duration. Folded, so it never crowds Generate. */}
+          <RunLogFold log={run.log} />
           {run.phase === 'blocked' && run.error !== null && (
             // #830 — the run stopped with a reason that is not a finding: the worker died, or it
             // went quiet past the stall limit. Say it HERE, once, and offer the one action that

@@ -5473,6 +5473,8 @@ export async function postModelPlan(
   shop: EngraveShopOpts,
   output: ModelPlanOutput,
   findings: PostModelPlanFindings,
+  /** #1123 item 4 — the posting/verify stage ticks the run log records. */
+  onProgress?: EngraveProgressFn,
 ): Promise<EngraveGenerated> {
   const { goalFindings, reachFindings, coverageFindings, modelRoughFindings, chamferFindings, tabRelease = null, tabReleaseFindings = [], planIdeal = null, planTradeoff = null } = findings;
   const base = emptyGoalResult();
@@ -5629,6 +5631,9 @@ export async function postModelPlan(
       const span: VacuumSpan =
         plan.programs.length === 1 ? 'whole' : i === 0 ? 'first' : i === plan.programs.length - 1 ? 'last' : 'middle';
       const programLabel = `setup ${setupIndex} program ${i + 1}/${plan.programs.length} (${toolKey})`;
+      // #1123 item 4 — every stage tick the log holds: posting and verifying are one line per
+      // program, the same words the progress line would show.
+      onProgress?.({ stage: 'post', label: `posting ${programLabel}` });
       let posted: PostResult;
       try {
         posted = postFor(mill)(ir, { ...ctx, toolKey }, { vacuum: span });
@@ -5672,6 +5677,7 @@ export async function postModelPlan(
           errors: [{ stage: 'verify', message: `cam/model (#966): ${programLabel}: ${verifyErrors.length} verifier error(s)` }],
         };
       }
+      onProgress?.({ stage: 'verify', label: `verified ${programLabel}` });
       programs.push({
         setupIndex,
         setupId,
@@ -6097,17 +6103,21 @@ export async function generateGoalProgram(
     }
     tabReleaseFindings = release.findings;
   }
-  return await postModelPlan(job, goal, tool, calibration, shop, output, {
-    goalFindings,
-    reachFindings,
-    coverageFindings,
-    modelRoughFindings,
-    chamferFindings,
-    tabRelease,
-    tabReleaseFindings,
-    planIdeal,
-    planTradeoff,
-  });
+  return await postModelPlan(
+    job, goal, tool, calibration, shop, output,
+    {
+      goalFindings,
+      reachFindings,
+      coverageFindings,
+      modelRoughFindings,
+      chamferFindings,
+      tabRelease,
+      tabReleaseFindings,
+      planIdeal,
+      planTradeoff,
+    },
+    onProgress,
+  );
 }
 
 /**

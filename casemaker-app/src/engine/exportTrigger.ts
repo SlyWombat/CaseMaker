@@ -114,11 +114,14 @@ export async function saveEngraveProgram(
   jobName: string,
   runRecord: string | null = null,
   facingNc: string | null = null,
+  /** #1123 item 4 — the run's stage log, written beside the record it belongs to. */
+  runLog: { name: string; bytes: string } | null = null,
 ): Promise<void> {
   await saveText(nc, runSheetFileName(jobName), 'text/plain');
   if (frameNc !== null) await saveText(frameNc, runSheetFrameFileName(jobName), 'text/plain');
   if (facingNc !== null) await saveText(facingNc, runSheetFaceFileName(jobName), 'text/plain');
   if (runRecord !== null) await saveText(runRecord, runRecordFileName(jobName), 'application/json');
+  if (runLog !== null) await saveText(runLog.bytes, runLog.name, 'text/plain');
 }
 
 /**

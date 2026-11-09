@@ -134,6 +134,13 @@ export interface PlanFindingStatement {
   count?: number;
   /** The region/rim ids behind a grouped statement — the detail, never a line each. */
   ids?: string[];
+  /**
+   * #1123 item 8 — for `goal-cutter-substituted` from a FEED-ROW PROXY: the borrowed row's
+   * diameter, mm (the material's largest covered row answered the cutter). The main view's cutter
+   * line prints the compact visible note from it ("feeds: borrowed from the 3.2 mm row — slow");
+   * the full sentence stays in `text`.
+   */
+  feedsProxyMm?: number;
 }
 
 export interface PlanSheetStatement {
