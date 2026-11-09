@@ -256,6 +256,63 @@ describe('#1092 (gate v8) — the excuse is bounded by the goal’s own relief',
     expect(report.adjudicatedMaxMm).toBeCloseTo(10, 6);
   });
 
+  it('excuses an outline-row cell whose inward neighbour is ITSELF a silhouette cell — the figure geometry (0f)', () => {
+    // #1092 (0f's figure case): the inward neighbour of (44.8, 26.8) is (44.7, 26.8), which is
+    // itself covered, wall, border and SILHOUETTE — the outline runs along its other side. "Fully
+    // covered" therefore means material present, not "non-silhouette": a one-cell-wide covered
+    // strip is the minimal reproduction. RED if covered silhouette neighbours are filtered out.
+    const nx = 20;
+    const ny = 10;
+    const z = new Float32Array(nx * ny);
+    const covered = new Uint8Array(nx * ny);
+    for (let i = 0; i < nx; i++) covered[5 * nx + i] = 1; // one-cell-wide row: every cell silhouette
+    const goal: GoalHeightfield = {
+      nx, ny, x0: 0, y0: 0, pitch: PITCH, topZ: 0, minZ: 0, z, covered, coveredCount: nx,
+      stockThicknessMm: 40,
+      resolutionNote: 'designCheckRelief1092 outline-row fixture',
+    };
+    const top = (x: number, y: number): number | null => {
+      const i = Math.round(x / PITCH);
+      const j = Math.round(y / PITCH);
+      if (i < 0 || j < 0 || i >= nx || j >= ny || covered[j * nx + i] !== 1) return null;
+      return i === 9 && j === 5 ? -10 : 0; // the boundary cell reads 10 mm; its neighbours uncut
+    };
+    const clAt = (): { x: number; y: number } => ({ x: 2.5, y: 2.5 });
+    const report = checkGoalCutInto(goal, top, { wallShadowRadiusMm: 1.5, stockThicknessMm: 40, clAt });
+    expect(report.silhouetteByWitnessCells).toBe(1);
+    expect(report.adjudicatedFraction).toBe(0);
+    expect(report.sentence).toContain('inward witness');
+  });
+
+  it('counts the outline-row cell when that silhouette neighbour is cut 1 mm — the conservative side (0f)', () => {
+    // The same one-cell strip: the neighbour (8,5) is ITSELF a silhouette cell and reads 1 mm deep.
+    // If it were the same boundary artefact it would read deep and fail the witness; a cut > slack
+    // anywhere among the covered candidates fails it, so (9,5) is counted.
+    const nx = 20;
+    const ny = 10;
+    const z = new Float32Array(nx * ny);
+    const covered = new Uint8Array(nx * ny);
+    for (let i = 0; i < nx; i++) covered[5 * nx + i] = 1;
+    const goal: GoalHeightfield = {
+      nx, ny, x0: 0, y0: 0, pitch: PITCH, topZ: 0, minZ: 0, z, covered, coveredCount: nx,
+      stockThicknessMm: 40,
+      resolutionNote: 'designCheckRelief1092 outline-row fixture (neighbour cut)',
+    };
+    const top = (x: number, y: number): number | null => {
+      const i = Math.round(x / PITCH);
+      const j = Math.round(y / PITCH);
+      if (i < 0 || j < 0 || i >= nx || j >= ny || covered[j * nx + i] !== 1) return null;
+      if (i === 9 && j === 5) return -10;
+      if (i === 8 && j === 5) return -1; // the silhouette candidate, cut 1 mm
+      return 0;
+    };
+    const clAt = (): { x: number; y: number } => ({ x: 2.5, y: 2.5 });
+    const report = checkGoalCutInto(goal, top, { wallShadowRadiusMm: 1.5, stockThicknessMm: 40, clAt });
+    expect(report.silhouetteByWitnessCells).toBe(0);
+    expect(Math.round(report.adjudicatedFraction * report.goalCells)).toBe(2); // (9,5) and (8,5)
+    expect(report.adjudicatedMaxMm).toBeCloseTo(10, 6);
+  });
+
   it('counts the same boundary cell when the inward row is deep too — the witness does not excuse a real cut', () => {
     const { goal, top } = boundaryFixture(10); // the inward neighbour is cut as deep
     const clAt = (): { x: number; y: number } => ({ x: 4.5, y: 2.5 });
