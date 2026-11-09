@@ -2058,17 +2058,19 @@ export async function applyCorrection(
     if (!(await deps.operator({ kind: 'fit-cutter', text: fit }))) {
       throw new Stop('stopped: the cutter was not fitted');
     }
-    const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
-    if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading for the cutter');
-    // #1123 item 31 — RECORD THE FITTED CUTTER'S TOOL NUMBER before the origin is written. The
-    // bench's side-2 run stopped at the program's `T1 M6` with `<Tool|>` because the controller
-    // still held the probe's 8888; this line makes that tool change a no-op.
-    // SOURCE: docs/bench/2026-10-30-3d-probe-survey.md:34 — Studio's own prep for a probe is
+    // #1123 item 31 — RECORD THE FITTED CUTTER'S TOOL NUMBER **BEFORE** the cutter's `M491`, so
+    // the M491 measures the cutter under its own number (the survey's order). The bench's side-2
+    // run stopped at the program's `T1 M6` with `<Tool|>` because the controller still held the
+    // probe's 8888; this line makes that tool change a no-op.
+    // SOURCE: docs/bench/2026-10-30-3d-probe-survey.md:34 — Studio's own prep before its M491 is
     // `M493.2T8888` (NO space; the firmware rejects `M493.2 T1` as an unexpected line — the fake
     // machine's own dialect refuses it, and 0f's 2026-11-09 bench record shows the controller
     // holding 8888 into `T1 M6`). docs/reverse/makera-studio/03 is a one-row block table for
-    // M493–M496 and does not add syntax.
+    // M493–M496 and does not add syntax. Order: "before" is the safe default until 0f's machine
+    // test confirms whether M493.2 zeroes the TLO (the maintainer's ruling, 2026-11-09).
     if (consent.toolNumber !== undefined) await io.send(`M493.2T${consent.toolNumber}`);
+    const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
+    if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading for the cutter');
     const line = correctionLine(outcome, ref.z);
     await io.send(line);
     await io.home();

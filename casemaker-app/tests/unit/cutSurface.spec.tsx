@@ -1249,6 +1249,53 @@ describe('#819 the finished screen', () => {
     expect(screen.getByTestId('engrave-cut-go')).toBeTruthy();
   });
 
+  // #1123 item 39 — THE DONE CARD IS FOR A FINISHED JOB, NOT A FINISHED PROGRAM. At the bench a
+  // 20-program release ended program 1 and the done card owned the whole Cut screen; only a new
+  // run's prepare clears the entry's end, and that press lived in the steps the card replaced, so
+  // "Run program 2 of 20" was unreachable without a hard reload.
+  it('#1123 item 39 — a run that ended with programs left keeps the next program’s press reachable', async () => {
+    const job = plannedJob();
+    // A 20-program release: the bench's side-1 job (19 programs left after program 1).
+    const programs20 = Array.from({ length: 20 }, (_, i) => {
+      const nc = `G90 ; program ${i + 1}\nM02`;
+      return { ...P1, nc, programHash: programHash(nc), verify: VERIFY };
+    });
+    const pkg = frozen(job, programs20);
+    const sources = frozenReleaseSources(job, pkg, new Map(programs20.map((p) => [p.programHash, VERIFY])));
+    const machine = machineKey(TARGET);
+    // Plan the REAL record (the step re-plans on mount; the same hashes merge and keep the phase),
+    // then put it where the bench was: program 1 finished, the bit change waiting for program 2.
+    act(() => useEngraveReleaseStore.getState().plan(TARGET, job, sources));
+    const rec = useEngraveReleaseStore.getState().records[machine]!;
+    act(() =>
+      useEngraveReleaseStore.setState({
+        records: {
+          [machine]: {
+            ...rec,
+            phase: 'bit-change',
+            active: 1,
+            next: 2,
+            files: rec.files.map((f, i) => ({ ...f, done: i === 0, upload: 'uploaded' as const })),
+          },
+        },
+      }),
+    );
+    useMachineRunStore.setState({ runs: { [machine]: ended(job.id) } as never });
+    passRun();
+    const prepare = vi.spyOn(useMachineRunStore.getState(), 'prepare');
+    draw({ job, report: reportOf(), pkg, generated: generated(programs20), canDrive: true });
+    giveStatement();
+
+    // The steps own the screen — the done card does not — and the next program's press is there.
+    expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
+    expect(screen.getByTestId('engrave-cut-run-ended').textContent).toContain('of 20 programs finished');
+    expect(screen.getByTestId('engrave-release-change-done').textContent).toBe('Run program 2 of 20');
+    fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
+    fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
+    fireEvent.click(screen.getByTestId('engrave-release-change-done'));
+    await waitFor(() => expect(prepare).toHaveBeenCalled());
+  });
+
   // #927 — THE DONE CARD'S ONE TIME LINE. The last measured run of this job's program, against the
   // estimate that run's own record carries: 270 s against 250 s is 8 % over.
   it('#927 prints the last measured run against its record’s estimate, and says so when there is none', () => {

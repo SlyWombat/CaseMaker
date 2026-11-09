@@ -1031,7 +1031,9 @@ describe('#430 the executor, on a fake machine', () => {
 
   // #1123 items 31/34 — THE WRITE RECORDS THE FITTED CUTTER and the fit sentence names it. The
   // bench's side-2 run stopped at the program's `T1 M6` in `<Tool|>` because the controller still
-  // held the probe's 8888; `M493.2 T<n>` makes that tool change a no-op.
+  // held the probe's 8888; `M493.2T<n>` makes that tool change a no-op. It goes BEFORE the cutter's
+  // M491 (the survey's order), so the M491 measures the cutter under its own number — the
+  // maintainer's ruling 2026-11-09, pending 0f's machine test.
   it('#1123 items 31/34 — records the cutter’s tool number and names the cutter in the fit step', async () => {
     const z1 = fakeZ1({ actual: SHIFTED });
     const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
@@ -1044,14 +1046,14 @@ describe('#430 the executor, on a fake machine', () => {
         console: z1.console,
         operator: async (s) => {
           asked.push(s.text);
-          return s.kind === 'fit-cutter' ? z1.fitCutter() : true;
+          return s.kind === 'fit-cutter' ? (z1.fitCutter(), true) : true;
         },
       },
       { confirmed: true, cutter: '⌀0.3 mm flat end', toolNumber: 1 },
     );
     if (!applied.ok) throw new Error(applied.reason);
     expect(asked.some((t) => t.includes('⌀0.3 mm flat end'))).toBe(true);
-    expect(z1.lines.slice(before)).toEqual(['$H', 'M491', 'M493.2T1', applied.line, '$H']);
+    expect(z1.lines.slice(before)).toEqual(['$H', 'M493.2T1', 'M491', applied.line, '$H']);
   });
 
   it('refuses to write an origin from a measurement that is not whole', async () => {
