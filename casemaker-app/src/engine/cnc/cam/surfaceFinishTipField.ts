@@ -20,8 +20,18 @@ import type { CamMove } from './ir';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 
 // #1092 (0f's land14 ruling) — the drop-cutter tip primitive now lives in the neutral
-// `cam/dropTip.ts`; this module keeps its name and public surface and re-exports it.
-export { finishTipField, DEFAULT_MAX_FINISH_TIP_OPS } from './dropTip';
+// `cam/dropTip.ts`; this module keeps its name and public surface and re-exports it. The fast
+// flat dilation's own unit and row count travel with it, so the plan's budget statement and the
+// field's check read one definition.
+export {
+  finishTipField,
+  DEFAULT_MAX_FINISH_TIP_OPS,
+  DEFAULT_MAX_FINISH_TIP_ROW_OPS,
+  discRowCountFor,
+  maxTipOpsFor,
+  stencilCellsFor,
+  tipFieldOpsFor,
+} from './dropTip';
 export type { SurfaceTool } from './dropTip';
 
 /** The roughing allowance when the caller states none, mm — labelled, not measured (slice F). */

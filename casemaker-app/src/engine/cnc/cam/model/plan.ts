@@ -44,7 +44,7 @@ import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanFindingStatement, PlanSheetStatement, PlanStatement, StockProbes } from './types';
 import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { byKeyPendingNote, pickAmongEquals, pickDecisionSentence, pickKeysFor, REACH_MARGIN_FALLBACK_MM, type PickKeys } from './pickAmongEquals';
-import { finishTipField, stencilCellsFor, DEFAULT_MAX_FINISH_TIP_OPS } from '../dropTip';
+import { finishTipField, discRowCountFor, stencilCellsFor, tipFieldOpsFor, maxTipOpsFor } from '../dropTip';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, isAbortError, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
 import { fullyReachable, pocket } from './ops/pocket';
@@ -803,13 +803,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // strip and a disc buried under the body for five rounds; they are separate sets, and the path
   // is their intersection, traced without a further radius inset (`pocket()`'s `centreSpace`).
   // #1092 — THE TIP FIELD IS COMPUTED PER REST REGION (0f's land14 ruling): a whole-goal field is
-  // O(covered cells × stencil), and at a 0.1 mm goal grid a ⌀3.175 rest overruns the budget on a
-  // large part (the #959 tray would need 1.23e9, the organizer 2.21e9), refusing every rest region
-  // there. Each region's field is built on its bbox + 2r (the stencil's own reach), cached per
-  // (cutter, region). The grid is never coarsened and the budget never raised; a region that still
-  // overruns is a STATED finding (`rest-region-over-budget`), never a silent refusal.
+  // O(cells × the rest cutter's disc), and at a 0.1 mm goal grid a ⌀3.175 rest overruns the budget
+  // on a large part. Each region's field is built on its bbox + 2r (the disc's own reach), cached
+  // per (cutter, region). The grid is never coarsened and the budget never raised; a region that
+  // still overruns is a STATED finding (`rest-region-over-budget`), never a silent refusal.
+  //
+  // #1092 (0f's fast-dilation ruling, 2026-11-09) — THE FLAT FIELD IS THE EXACT ROW DILATION, and
+  // its unit is GRID CELLS × ROWS IN THE DISC (33 rows for ⌀3.175 at 0.1 mm; the stencil's 853 was
+  // the old brute cost). A ball keeps the stencil unit until its own fast path lands. The plan's
+  // count and the field's own check call one helper, so they cannot disagree.
   const restTipCache = new Map<string, { gi0: number; gj0: number; nx: number; ny: number; tip: Float32Array }>();
-  const restBudgetFindings: { id: string; cutter: Tool; ops: number; budget: number }[] = [];
+  const restBudgetFindings: { id: string; cutter: Tool; ops: number; unit: string; budget: number }[] = [];
   const restTipField = (
     cutter: Tool,
     region: { id: string; bounds: { min: [number, number]; max: [number, number] }; radiusMm: number },
@@ -840,22 +844,30 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         if (goal.covered[src] === 1) coveredCount++;
       }
     }
-    const ops = coveredCount * stencilCellsFor(radius, pitch);
+    const surfaceTool = { radius, ball: cutter.shape === 'ball' };
+    const rows = discRowCountFor(radius, pitch);
+    const ops = tipFieldOpsFor(surfaceTool, nx, ny, coveredCount, pitch);
+    const unit = surfaceTool.ball ? 'covered cells × stencil cells' : 'grid cells × rows in the disc';
+    const budget = maxTipOpsFor(surfaceTool);
     // `process` is typed out of the web target's app tsconfig; the codebase's own pattern (memTrace,
     // designCheck's CM_GOAL_DEBUG) reads it through globalThis.
+    const t0 = performance.now();
     if ((globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.CM_1092_BUDGET_DEBUG !== undefined) {
       const b = region.bounds;
-      console.error(`[resttip] cutter=${cutterKeyOf(cutter)} ${region.id} bbox=[${b.min[0].toFixed(1)},${b.min[1].toFixed(1)}]-[${b.max[0].toFixed(1)},${b.max[1].toFixed(1)}] r=${radius.toFixed(3)} covered=${coveredCount} stencil=${stencilCellsFor(radius, pitch)} ops=${ops} budget=${DEFAULT_MAX_FINISH_TIP_OPS} refused=${ops > DEFAULT_MAX_FINISH_TIP_OPS}`);
+      console.error(`[resttip] cutter=${cutterKeyOf(cutter)} ${region.id} bbox=[${b.min[0].toFixed(1)},${b.min[1].toFixed(1)}]-[${b.max[0].toFixed(1)},${b.max[1].toFixed(1)}] r=${radius.toFixed(3)} covered=${coveredCount} grid=${nx}x${ny} rows=${rows} stencil=${stencilCellsFor(radius, pitch)} ops=${ops} unit=${unit} budget=${budget} refused=${ops > budget}`);
     }
-    if (ops > DEFAULT_MAX_FINISH_TIP_OPS) {
-      restBudgetFindings.push({ id: region.id, cutter, ops, budget: DEFAULT_MAX_FINISH_TIP_OPS });
+    if (ops > budget) {
+      restBudgetFindings.push({ id: region.id, cutter, ops, unit, budget });
       return null;
     }
     const field = finishTipField(
       { nx, ny, x0: goal.x0 + gi0 * pitch, y0: goal.y0 + gj0 * pitch, pitch, z, covered, topZ: 0, minZ: 0, coveredCount, resolutionNote: '' },
-      { radius, ball: cutter.shape === 'ball' },
-      DEFAULT_MAX_FINISH_TIP_OPS,
+      surfaceTool,
+      budget,
     );
+    if ((globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.CM_1092_BUDGET_DEBUG !== undefined) {
+      console.error(`[resttip-ms] ${region.id} ms=${(performance.now() - t0).toFixed(1)}`);
+    }
     const entry = { gi0, gj0, nx, ny, tip: field };
     restTipCache.set(key, entry);
     return entry;
@@ -2300,7 +2312,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       const label = `${f.cutter.name || f.cutter.shape}${d > 0 ? ` (⌀${diaWord(d)} mm)` : ''}`;
       const text =
         `rest region "${f.id}" (${label}) could not be planned: its drop-tip field needs ` +
-        `${f.ops} evaluations, over the ${f.budget} budget — left uncut. Coarsen the goal grid, ` +
+        `${f.ops} evaluations (${f.unit}), over the ${f.budget} budget — left uncut. Coarsen the goal grid, ` +
         `narrow the region, or use a larger rest cutter` +
         (outcome !== undefined && outcome.coverage !== null
           ? `; the finish leaves up to ${outcome.leftoverAboveMm.toFixed(2)} mm standing over ${shareWord(1 - outcome.coverage)} % of the goal`
