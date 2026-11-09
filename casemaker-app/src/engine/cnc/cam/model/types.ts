@@ -92,6 +92,10 @@ export type PlanFindingCode =
   // #1037 — no cutter in the set reaches a curved region's floor: the finish does not post the
   // region, and the sentence names the region, the floor and the finisher's usable length.
   | 'goal-finish-unreachable'
+  // #1092 — a rest region's per-region drop-tip field exceeds the op budget: the region is left
+  // uncut and the finding names the region, the cutter, the evaluations against the budget and the
+  // way out (warning when the coverage line still passes, error when it fails because of it).
+  | 'rest-region-over-budget'
   // #1005 — the mould's own four. Rim and floor are the goal validator's
   // (`validateGoalObject`); one-sided and no-draft are the plan's, from its own solid.
   | 'goal-mold-rim'
@@ -120,7 +124,10 @@ export type PlanSheetCode = 'plan-setup' | 'plan-run';
 export type PlanStatement = PlanFindingStatement | PlanSheetStatement;
 
 export interface PlanFindingStatement {
-  severity: 'warning' | 'info';
+  // #1092 (0f's land14 ruling) — a plan finding may be an ERROR: the rest-region tip budget is
+  // stated as a warning when the finish's own coverage line still passes, and as an error when
+  // that refusal is why the line fails.
+  severity: 'error' | 'warning' | 'info';
   code: PlanFindingCode;
   text: string;
   /** How many causes/regions this one statement covers (the #962 grouping). */

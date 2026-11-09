@@ -72,17 +72,36 @@ export interface CutIntoScore {
   shadowNotScoredFraction: number | null;
   /** Advisory: the 0.01 mm-floor figure before exclusions, 0..1. */
   rawFraction: number | null;
-  /** The deepest cut below the goal, mm (advisory). */
+  /** The deepest cut below the goal, mm — the RAW figure, before any exclusion (advisory). */
   maxMm: number;
   /**
-   * WHERE the deepest ADJUDICATED cell is, in the work frame — present only when the checker ran
-   * on the real report (`GoalCutIntoReport.maxCutIntoAt`), which `cutIntoFromPage`'s page-JSON
-   * source never carries. Null when nothing survived adjudication; undefined when the source has
-   * no notion of a coordinate at all. A depth alone ("0.01 mm") does not say whether a residue is
-   * a real gouge or an artefact the rule should name — the location is what lets a reader check.
+   * WHERE the RAW deepest cell is, in the work frame — present only when the checker ran on the
+   * real report (`GoalCutIntoReport.maxCutIntoAt`), which `cutIntoFromPage`'s page-JSON source
+   * never carries. Null when nothing was cut into; undefined when the source has no notion of a
+   * coordinate at all. A depth alone ("0.01 mm") does not say whether a residue is a real gouge
+   * or an artefact the rule should name — the location is what lets a reader check.
    */
   maxAt?: { x: number; y: number } | null;
+  /**
+   * #1092 (0f's ruling, 2026-11-09) — THE JUDGED DEPTH: the deepest cut among the ADJUDICATED
+   * cells, mm (`GoalCutIntoReport.adjudicatedMaxMm`). The superset gate's deepest-cut row compares
+   * THIS, never `maxMm` above: the raw maximum includes cells the checker excludes by proof, so a
+   * raw difference there is a reading artefact, not a worse plan. Null/absent when the source
+   * cannot adjudicate (a page-JSON card) — the row then falls back to `maxMm` and states it as the
+   * raw reading it is.
+   */
+  adjudicatedMaxMm?: number | null;
+  /**
+   * #1092 — THE CLASS THE RAW DEEPEST CELL WAS EXCUSED AS, when the checker excluded it (`maxMm`'s
+   * own cell): the raw pair is printed beside the judged pair with this class, so a reader can
+   * tell an artefact from a gouge without re-running the check. Null/absent when the raw maximum
+   * was itself judged, or the source does not classify.
+   */
+  rawMaxExclusion?: RawMaxExclusion | null;
 }
+
+/** The goal check's exclusion classes, as the raw deepest cell can be excused as. */
+export type RawMaxExclusion = 'edgeBreak' | 'silhouette' | 'wall' | 'border' | 'shadow' | 'straddling';
 
 /** How a program was posted — line 7's input. */
 export interface PostsAsFiled {
