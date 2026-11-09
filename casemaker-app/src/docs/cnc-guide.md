@@ -1993,6 +1993,14 @@ one of the app's screens did not finish drawing.
 |---|---|---|---|
 | `panel-render-error` | error | The Cut panel or its setup flow threw while drawing. The message is the throw's own message and the panel's name; in a dev build the console prints the component stack. The rest of the window keeps working. | Press **Reload the panel**. If it throws again, report it with the console's component stack. |
 
+**This page's browser** (planner). Not a finding about the job: the page's renderer cannot reserve
+the memory the planner needs — a 32-bit browser, or a 64-bit one under severe memory pressure. The
+Generate button carries the sentence instead of starting a run that would die in the ball rank:
+
+| Code | Severity | What it means in plain words | What to do |
+|---|---|---|---|
+| `browser-32-bit` | error | The page runs in a 32-bit browser, or in one that cannot reserve the planner's roughly 704 MiB of address space. Planning a 3D goal would stop partway through with "Array buffer allocation failed", so Generate is refused before it starts, with the sentence "This browser is 32-bit; the planner needs a 64-bit browser". | Open the app in a 64-bit browser. On Windows on ARM, Edge is the native ARM64 build; `chrome://version` (or `edge://version`) says whether the browser is 64-bit. |
+
 **Running a job without the app** (headless). The command-line surface is `casemaker`
 (§8.6): `cut`, `export`, `location`, `readback` and the `machine` subcommands all run in Node.
 One capability needs the app's browser environment and is refused by name rather than throwing
