@@ -183,6 +183,11 @@ def main():
                        f"{v['mm']:.3f} mm at {v['x']:.2f}, {v['y']:.2f} (CL {v['clDistanceMm']} mm)")
                 print(f'    silhouette deepest      {fmt(app_deep)} (app) vs '
                       f'{fmt(s["silhouetteDeepest"])} (checker)')
+        app_wit = app.get('silhouetteByWitnessCells')
+        if app_wit is not None:
+            diff = abs(float(app_wit) - float(s['silhouetteByWitnessCells']))
+            print(f'    silhouette by witness   {app_wit} (app) vs {s["silhouetteByWitnessCells"]} '
+                  f'(checker) — Δ {diff:g} cell(s)' + ('  NOISY' if diff / n > tol else ''))
         app_un = app.get('silhouetteUnavailableCells')
         if app_un is not None:
             diff = abs(float(app_un) - float(s['silhouetteUnavailableCells']))
