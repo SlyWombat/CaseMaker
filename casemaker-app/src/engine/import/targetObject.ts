@@ -21,7 +21,7 @@ import type { EngraveTargetObject } from '@/types/engraveJob';
 import { arrayBufferToBase64 } from './base64';
 import { parseStl, type ParsedMesh } from './stlParser';
 import { objUnitSentence, parseObj } from './objParser';
-import { parse3MF } from './threeMfParser';
+import { parse3MF, threeMfUnitSentence } from './threeMfParser';
 import { decodePng } from './png';
 import { DEFAULT_RELIEF_DEPTH_MM } from '@/engine/cnc/engrave/relief';
 
@@ -195,8 +195,15 @@ export async function readTargetObjectFile(
       const parsed = parseObj(bytes);
       mesh = parsed;
       note = objUnitSentence(file.name, parsed.unit);
+    } else if (format === '3mf') {
+      // #1130 — a 3MF declares its unit on `<model unit="…">`, and the parser converts it. A unit
+      // other than the millimetre default was a reading the file imposed, so the door states it;
+      // a millimetre file needs no note (its numbers are already the app's millimetres).
+      const parsed = parse3MF(bytes);
+      mesh = parsed;
+      if (parsed.unit.mmPerUnit !== 1) note = threeMfUnitSentence(file.name, parsed.unit);
     } else {
-      mesh = format === '3mf' ? parse3MF(bytes) : parseStl(bytes);
+      mesh = parseStl(bytes);
     }
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
