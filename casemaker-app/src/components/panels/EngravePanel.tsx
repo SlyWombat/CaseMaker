@@ -1894,7 +1894,7 @@ export function EngravePanel(): JSX.Element {
    */
   const generateBlocker: GenerateBlocker | null = (() => {
     // #1124 — THE RENDERER FIRST: no job change can give a 32-bit or address-limited renderer
-    // the planner's ~704 MiB, and generating anyway dies mid-plan in the ball rank. The verdict
+    // the planner's ~454 MiB, and generating anyway dies mid-plan in the ball rank. The verdict
     // starts as 'checking' (no blocker) and lands shortly after the app's first render.
     if (rendererVerdict.refusal !== null) return { sentence: rendererVerdict.refusal.sentence, fix: null };
     const finding = errors[0];

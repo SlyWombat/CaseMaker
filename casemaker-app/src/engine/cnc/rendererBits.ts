@@ -3,8 +3,9 @@
  *
  * The bench's failure (2026-11-09): planning `m1trayF-banded2` in a 32-bit x86 Chrome under
  * Windows ARM64 emulation died at "planning: sequence — setup 1, 35 %" with "Array buffer
- * allocation failed". The 35 % tick is the ball rank, which accumulates ~704 MiB of per-IR
- * stamp fields (measured: peak 703.7 MiB, the largest single buffer ~5.5 MiB) — no single
+ * allocation failed". The 35 % tick is the ball rank, which accumulated ~704 MiB of per-IR
+ * stamp fields before #1125's stamp cap (measured: peak 703.7 MiB; 454 MiB after the cap on
+ * Set B — the floor below; the largest single buffer ~5.5 MiB) — no single
  * allocation is pathological; a 32-bit renderer's address space is what runs out. The same
  * failure happened on land13 and land14, so it is the environment, not a regression.
  *
@@ -19,7 +20,7 @@
  * app in a 64-bit browser — and the app offers no Fix control, because it cannot install one.
  *
  * The probe is SKIPPED when bitness says 32: there is nothing left to learn, and the hopeless
- * renderer should not be asked for another 704 MiB. When bitness says 64 (or cannot answer) the
+ * renderer should not be asked for another 454 MiB. When bitness says 64 (or cannot answer) the
  * probe still runs, because a 64-bit browser under real memory pressure is address-limited too.
  */
 
@@ -36,7 +37,7 @@ export const BROWSER_32_BIT_SENTENCE = 'This browser is 32-bit; the planner need
  * different browser second.
  */
 export const BROWSER_MEMORY_SHORT_SENTENCE =
-  "This browser can't reserve the memory the planner needs (about 700 MiB); close other tabs or use a 64-bit browser";
+  "This browser can't reserve the memory the planner needs (about 450 MiB); close other tabs or use a 64-bit browser";
 
 export interface RendererRefusal {
   code: typeof BROWSER_32_BIT_CODE;
@@ -62,13 +63,13 @@ export const BROWSER_MEMORY_SHORT_REFUSAL: RendererRefusal = {
 };
 
 /**
- * The ball rank's measured peak on `m1trayF-banded2` (MB): E's 703.7 MiB of ArrayBuffers at
- * "planning: sequence — setup 1, 35 %", the stage the bench died in. It is the floor the probe
- * must be able to reserve; it is not the plan's total appetite, so a pass is necessary, not
- * sufficient. #1125 (E) caps the rank's stamp cache and lowers this peak — restate this floor
- * from that landing's own measurement when it lands.
+ * The planner's measured address-space floor (MB): the ball rank's peak AFTER #1125's stamp cap.
+ * The bench's death (2026-11-09) was at "planning: sequence — setup 1, 35 %", E's 703.7 MiB of
+ * ArrayBuffers; with the stamp cap in place E's Set B measurement of the same stage is 454 MiB,
+ * and that is the floor the probe must be able to reserve (the manager's landing note). It is
+ * not the plan's total appetite, so a pass is necessary, not sufficient.
  */
-export const PLANNER_PEAK_FLOOR_MB = 704;
+export const PLANNER_PEAK_FLOOR_MB = 454;
 
 /**
  * The plan's largest single ArrayBuffer is ~5.5 MiB. The probe reserves the floor in 8 MiB rows,
@@ -88,7 +89,7 @@ export interface ProbeResult {
 /**
  * Reserve the planner's floor in chunks, then release every chunk. The allocation is synchronous
  * and only reserves address space (the buffers are never written), so a 64-bit browser pays a
- * brief virtual-memory reservation, not 704 MiB of resident memory.
+ * brief virtual-memory reservation, not 454 MiB of resident memory.
  *
  * `allocate` is injectable so a unit test can fail the probe without a hostile renderer.
  */
@@ -207,7 +208,7 @@ function publish(next: RendererVerdict): void {
 
 /**
  * Start the check, once per page. Called from `main.tsx` AFTER the first render: the probe
- * reserves ~704 MiB of address space for a moment and must not delay first paint.
+ * reserves ~454 MiB of address space for a moment and must not delay first paint.
  *
  * A detector that throws is treated as "cannot tell" (`ok`): the check is a guard, and a broken
  * guard must not disable Generate on a healthy browser.

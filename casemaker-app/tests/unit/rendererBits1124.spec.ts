@@ -55,7 +55,7 @@ describe('#1124 — a 32-bit renderer is refused before Generate', () => {
     expect(refusal!.code).toBe('browser-32-bit');
     expect(refusal!.sentence).toBe(BROWSER_32_BIT_SENTENCE);
     expect(refusal!.sentence).toBe('This browser is 32-bit; the planner needs a 64-bit browser');
-    // Asking a hopeless renderer for another 704 MiB would be the only thing left to learn: nothing.
+    // Asking a hopeless renderer for another 454 MiB would be the only thing left to learn: nothing.
     expect(probed).toBe(false);
   });
 
@@ -73,7 +73,7 @@ describe('#1124 — the probe catches an address-limited renderer', () => {
     expect(refusal?.code).toBe('browser-32-bit');
     expect(refusal?.sentence).toBe(BROWSER_MEMORY_SHORT_SENTENCE);
     expect(refusal?.sentence).toBe(
-      "This browser can't reserve the memory the planner needs (about 700 MiB); close other tabs or use a 64-bit browser",
+      "This browser can't reserve the memory the planner needs (about 450 MiB); close other tabs or use a 64-bit browser",
     );
     // A 64-bit browser told to "install a 64-bit browser" would be sent to an install it has.
     expect(refusal?.sentence).not.toBe(BROWSER_32_BIT_SENTENCE);
@@ -125,7 +125,7 @@ describe('#1124 — the probe reserves the floor in chunks and releases them', (
   });
 
   it('the floor is the measured ball-rank peak and the chunk is the plan-scale buffer', () => {
-    expect(PLANNER_PEAK_FLOOR_MB).toBe(704);
+    expect(PLANNER_PEAK_FLOOR_MB).toBe(454);
     expect(PROBE_CHUNK_MB).toBe(8);
   });
 });
