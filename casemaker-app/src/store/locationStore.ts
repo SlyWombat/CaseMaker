@@ -103,6 +103,11 @@ export interface LocationState {
   /** Where the depth margins live (#447). */
   marginsHome: MarginsHome;
   refresh: () => Promise<void>;
+  /**
+   * #1123-12 — the PERIODIC read a visible surface makes (the Cut step's poll). Same read as
+   * `refresh`; what a failed answer does is the difference (see the implementation).
+   */
+  poll: () => Promise<void>;
   /** `stale` is a 412/428: the location was re-read, and the caller should merge and retry. */
   saveMachine: (record: MachineRecord) => Promise<'ok' | 'stale' | 'failed'>;
   /** #601 — create or replace one accessory record. `stale` is a 412/428, as `saveMachine`'s is. */
@@ -118,6 +123,27 @@ export interface LocationState {
   recordFinishedProgram: (machineId: string, hash: string) => Promise<{ ok: boolean; added: boolean; text: string }>;
 }
 
+/**
+ * #1123-12 review — TAKE A GOOD READ WITHOUT CHURN. A periodic read that answers the same validator
+ * is the same location: writing a freshly parsed object anyway would re-render every surface that
+ * memoises on it every 10 s, for nothing. The ETag is computed over the served bytes, so equality
+ * is byte-identity; a null validator cannot say that and is always taken.
+ */
+function takeLocation(
+  set: (partial: Partial<LocationState>) => void,
+  get: () => LocationState,
+  location: LocationView,
+  etag: string | null,
+): void {
+  const state = get();
+  if (etag !== null && state.status === 'present' && state.location !== null && state.etag === etag) {
+    // A failed read may have left a note on a record that is still good: the next good read clears it.
+    if (state.reason !== null) set({ reason: null });
+    return;
+  }
+  set({ status: 'present', location, etag, reason: null });
+}
+
 export const useLocationStore = create<LocationState>((set, get) => ({
   status: 'unknown',
   location: null,
@@ -130,7 +156,7 @@ export const useLocationStore = create<LocationState>((set, get) => ({
   refresh: async () => {
     const res = await houseLocation();
     if (res.kind === 'ok') {
-      set({ status: 'present', location: res.location, etag: res.etag, reason: null });
+      takeLocation(set, get, res.location, res.etag);
     } else {
       set({
         status: res.kind === 'absent' ? 'absent' : 'error',
@@ -139,6 +165,24 @@ export const useLocationStore = create<LocationState>((set, get) => ({
         reason: res.kind === 'absent' ? res.reason : res.detail,
       });
     }
+  },
+
+  poll: async () => {
+    const res = await houseLocation();
+    if (res.kind === 'ok') {
+      takeLocation(set, get, res.location, res.etag);
+      return;
+    }
+    if (res.kind === 'absent') {
+      // The service is not there: that is an answer, the same connect would give, so it replaces.
+      set({ status: 'absent', location: null, etag: null, reason: res.reason });
+      return;
+    }
+    // A DROPPED REQUEST IS NOT THE LOCATION GOING AWAY. One lost answer (Wi-Fi, a service restart)
+    // must not blank the machine on the Cut step, and must not move the validator a persisted run's
+    // shop signature is keyed on (#1123 item 11). Keep the last good record and say what the read
+    // could not confirm; the next good answer clears the note.
+    set({ reason: res.detail });
   },
 
   saveMachine: async (record) => {

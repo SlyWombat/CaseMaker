@@ -158,7 +158,11 @@ interface Write {
 }
 
 /** The house service as this wizard uses it: one location read, machine and accessory PUTs. */
-function fakeHouse(state: { view: LocationView; writes: Write[] }): HouseClient {
+function fakeHouse(state: { view: LocationView; writes: Write[]; version: number }): HouseClient {
+  // The real service's validator is computed over the served bytes, so every write moves it
+  // (`house_api`'s json_with_etag). A freeze-frame `"e1"` made the post-write re-read look like
+  // "nothing changed" once the store stopped churning on an equal validator (#1123-12 review).
+  // The version lives on the shared STATE: the loader factory builds a client per request.
   return {
     probe: async (): Promise<HouseProbe> => ({ kind: 'present', health: HEALTH, base: '' }),
     tools: async () => ({ kind: 'ok', etag: '"t1"', entries: [] }),
@@ -166,12 +170,13 @@ function fakeHouse(state: { view: LocationView; writes: Write[] }): HouseClient 
     inventory: async () => ({ kind: 'ok', etag: '"i1"', items: [] }),
     call: async (method, path, body): Promise<HouseCall> => {
       if (method === 'GET' && path === '/location') {
-        return { kind: 'ok', text: JSON.stringify(state.view), etag: '"e1"' };
+        return { kind: 'ok', text: JSON.stringify(state.view), etag: `"e${state.version}"` };
       }
       state.writes.push({ method, path, body });
       if (method === 'PUT' && path.startsWith('/location/machines/')) {
         const record = body as MachineRecord;
         state.view = { ...state.view, machines: state.view.machines.map((m) => (m.id === record.id ? record : m)) };
+        state.version += 1;
         return { kind: 'ok', text: '' };
       }
       if (method === 'PUT' && path.startsWith('/location/accessories/')) {
@@ -183,6 +188,7 @@ function fakeHouse(state: { view: LocationView; writes: Write[] }): HouseClient 
             ? accessories.map((a) => (a.id === record.id ? record : a))
             : [...accessories, record],
         };
+        state.version += 1;
         return { kind: 'ok', text: '' };
       }
       return { kind: 'ok', text: '' };
@@ -212,8 +218,8 @@ function fakeMachine(opts: {
   return { lines };
 }
 
-function seedLocation(seed: MachineRecord = machine()): { view: LocationView; writes: Write[] } {
-  const state = { view: view(seed), writes: [] as Write[] };
+function seedLocation(seed: MachineRecord = machine()): { view: LocationView; writes: Write[]; version: number } {
+  const state = { view: view(seed), writes: [] as Write[], version: 1 };
   setHouseClientLoader(async () => fakeHouse(state));
   useLocationStore.setState({
     status: 'present',
@@ -717,6 +723,64 @@ describe('#693 walking the change', () => {
     );
     expect(bracketWrite).toBeDefined();
     expect((bracketWrite!.body as FixtureRecord).variant).toBe('thin');
+  });
+
+  // #1123 item 9 — THE WIZARD'S OWN STEP 1. At the bench the bracket job's Change the machine
+  // dead-ended: the caller asked for the bare bed, step 1 said "Nothing on the pins is already on
+  // the machine", and only vise/rotary were offered. The bracket is Makera's kit fixture whose
+  // record the fit creates, so the offer does not depend on the house owning one yet.
+  it('#1123 item 9 — a bare bed with no bracket can be given one from step 1, registering the fixture', async () => {
+    const base = machine();
+    const bareBed = { ...base, bedProfiles: [{ ...base.bedProfiles![0]!, placements: [], preferredMounting: [] }] };
+    const state = seedLocation(bareBed);
+    fakeMachine({ status: () => sent('?', IDLE) });
+    // Manage's entry: no target was asked for, so step 1 is the chooser.
+    openMachineChange();
+    render(<MachineChangeWizard />);
+
+    const targets = await screen.findByTestId('machine-change-targets');
+    expect(state.view.accessories?.some((a) => a.kind === 'bracket')).toBe(false);
+    fireEvent.click(within(targets).getByTestId('machine-change-target-bracket'));
+
+    // 1 · the bracket at anchor 1, the anchor a choice here (Makera's default is 1).
+    await screen.findByTestId('machine-change-what');
+    expect(screen.getByTestId('machine-change-title').textContent).toContain('Bracket at anchor 1 on');
+    expect(screen.getByTestId('machine-change-what').textContent).toContain('bracket at anchor 1');
+    expect((screen.getByTestId('machine-change-bracket-anchor') as HTMLSelectElement).value).toBe('1');
+
+    // 2 · the machine stays ON for a bracket fit — the light line is here, not after a power-on.
+    // Choosing a target in step 1 reads Home afresh (#728), so the operator homes here.
+    await screen.findByTestId('machine-change-home-line');
+    fireEvent.click(screen.getByTestId('machine-change-home'));
+    await waitFor(() => expect(screen.getByTestId('machine-change-home-line').getAttribute('data-done')).toBe('true'));
+    fireEvent.click(screen.getByTestId('machine-change-light'));
+    await waitFor(() => expect(screen.getByTestId('machine-change-light-line').getAttribute('data-done')).toBe('true'));
+    fireEvent.click(screen.getByTestId('machine-change-checked'));
+
+    // 3 is the empty line (nothing was on the pins); 4 is the fit.
+    await screen.findByTestId('machine-change-fit');
+    expect(screen.getByTestId('machine-change-step-3').getAttribute('data-state')).toBe('done');
+    expect(screen.getByTestId('machine-change-step-4').textContent).toContain('Fit the bracket');
+    expect(screen.getByTestId('machine-change-fit').textContent).toContain(
+      "the thin L-bracket into anchor 1's corner",
+    );
+    for (let i = 0; i < 4; i++) clickCheck(`machine-change-fit-${i}`);
+    fireEvent.click(screen.getByTestId('machine-change-fit-done'));
+
+    // 5 · the write carries the anchor placement and registers the fixture the house did not have.
+    fireEvent.click(await screen.findByTestId('machine-change-confirm-button'));
+    await screen.findByTestId('machine-change-record');
+    const machineWrite = state.writes.find((w) => w.method === 'PUT' && w.path.startsWith('/location/machines/'));
+    expect(machineWrite).toBeDefined();
+    const written = machineWrite!.body as MachineRecord;
+    const fresh = written.bedProfiles!.find((p) => p.id === written.activeBedProfileId)!;
+    expect(fresh.placements).toEqual([
+      expect.objectContaining({ id: 'pl-bracket', where: expect.objectContaining({ kind: 'anchor', anchor: 1 }) }),
+    ]);
+    const bracketWrite = state.writes.find(
+      (w) => w.method === 'PUT' && w.path === '/location/accessories/fx-bracket-thin',
+    );
+    expect(bracketWrite).toBeDefined();
   });
 
   it('#725 P14 — a jaw datum the active bed MEASURED reads “measured”, not “shipped value”', async () => {

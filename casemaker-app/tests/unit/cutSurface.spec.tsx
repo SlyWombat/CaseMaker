@@ -18,7 +18,7 @@ import { setMachineUploadLoader } from '@/platform/machineUpload';
 import { programHash } from '@/platform/machineRun';
 import { StockItemSchema, type StockItem } from '@/platform/stockClient';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
+import { defaultBracketHold, jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { planRegistration } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { freezePackage, type FrozenPackage } from '@/engine/cnc/engrave/package';
@@ -41,6 +41,7 @@ import { useRunRecordStore } from '@/store/runRecordStore';
 import { buildRunRecord, withActualSeconds } from '@/engine/cnc/engrave/runRecord';
 import { clearStoredBaseline, resetLocationStore, useLocationStore } from '@/store/locationStore';
 import { resetMachineChange, useMachineChangeStore } from '@/store/machineChangeStore';
+import { LOCATION_POLL_MS } from '@/hooks/useLocationPoll';
 import { resetManageMode, useManageModeStore } from '@/store/manageModeStore';
 import { resetStockStore, useStockStore } from '@/store/stockStore';
 import type { EngraveJob } from '@/types/engraveJob';
@@ -106,6 +107,21 @@ function generated(programs: EngraveProgram[]): EngraveGenerated {
 
 /** #931 — a run that PASSED: the state the green-surface tests intend (never simulated otherwise). */
 const OK_ORACLE = { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } };
+
+/**
+ * #1123 item 9 — a job held on the anchor bracket: the frozen mount the Cut banner must ask the
+ * wizard to restore. The bench job was one of these, and the wizard dead-ended on the bare bed.
+ */
+function bracketJob(): EngraveJob {
+  const base = defaultEngraveJob();
+  return {
+    ...base,
+    workholding: {
+      kind: 'bracket',
+      bracket: defaultBracketHold({ x: base.stock.length, y: base.stock.width, z: base.stock.thickness }, null),
+    },
+  };
+}
 
 function passRun(): void {
   useEngraveRunStore.setState({
@@ -246,7 +262,7 @@ function machineObservation(): MachineObservation {
  * #695 — a location whose machine has a vise profile and a rotary profile, with `active` one of
  * them. The frozen job's setup mount is the vise, so the rotary-active record is the disagreement.
  */
-function locationWith(active: 'vise' | 'rotary', probe: '3d' | 'wired' | null = null): LocationView {
+function locationWith(active: 'vise' | 'rotary' | 'bed', probe: '3d' | 'wired' | null = null): LocationView {
   const placement = (mount: 'vise' | 'rotary') => ({
     id: `pl-${mount}`,
     fixture: `fx-${mount}`,
@@ -263,8 +279,10 @@ function locationWith(active: 'vise' | 'rotary', probe: '3d' | 'wired' | null = 
         bedProfiles: [
           { id: 'bp-vise', placements: [placement('vise')], datums: {} },
           { id: 'bp-rotary', placements: [placement('rotary')], datums: {} },
+          // #1123 item 9 — nothing on the pins: the bed the bench's bracket job was frozen against.
+          { id: 'bp-bed', placements: [], datums: {} },
         ],
-        activeBedProfileId: active === 'vise' ? 'bp-vise' : 'bp-rotary',
+        activeBedProfileId: `bp-${active}`,
       },
     ],
     accessories:
@@ -284,6 +302,47 @@ function locationWith(active: 'vise' | 'rotary', probe: '3d' | 'wired' | null = 
             },
           ],
   } as unknown as LocationView;
+}
+
+/**
+ * #1123-12 — the same machine, as the SERVICE serves it: a schema-valid `GET /location` body, so the
+ * surface's re-read parses instead of being refused. `active` names the profile on the pins.
+ */
+function locationJson(active: 'vise' | 'rotary'): string {
+  const profile = (mount: 'vise' | 'rotary') => ({
+    id: `bp-${mount}`,
+    name: `${mount} bed`,
+    createdAt: AT,
+    surface: { kind: 'bare-bed' as const },
+    datums: {},
+    placements: [
+      {
+        id: `pl-${mount}`,
+        fixture: `fx-${mount}`,
+        where: { kind: 'pins' as const, pins: mount, anchor: null },
+        count: null,
+        frame: null,
+        provenance: {},
+      },
+    ],
+  });
+  return JSON.stringify({
+    kind: 'casemaker-location',
+    schemaVersion: 1,
+    id: 'loc-695',
+    name: 'House',
+    createdAt: AT,
+    machines: [
+      {
+        id: 'machine-695',
+        updatedAt: AT,
+        address: { host: TARGET.host, port: TARGET.port },
+        bedProfiles: [profile('vise'), profile('rotary')],
+        activeBedProfileId: `bp-${active}`,
+      },
+    ],
+    accessories: [],
+  });
 }
 
 interface Props {
@@ -339,11 +398,17 @@ function draw(props: Props) {
 
 let shelfItems: StockItem[];
 let uploads: { filename: string; content: string }[];
+/** #1123-12 — what the house's `GET /location` answers next; null keeps the fake's empty body. */
+let houseLocationJson: string | null;
+/** #1123-12 — how many times the surface has asked the house for the location. */
+let locationReads: number;
 
 beforeEach(() => {
   generateSpy.mockClear();
   uploads = [];
   shelfItems = [shelfItem()];
+  houseLocationJson = null;
+  locationReads = 0;
   resetRunConfirmStore();
   resetMachineRunStore();
   resetStartWizard();
@@ -363,6 +428,10 @@ beforeEach(() => {
   let version = 1;
   const client = {
     call: async (method: string, path: string, body?: unknown): Promise<HouseCall> => {
+      if (method === 'GET' && path === '/location') {
+        locationReads += 1;
+        if (houseLocationJson !== null) return { kind: 'ok', text: houseLocationJson, etag: '"loc-live"' };
+      }
       if (method === 'GET' && path === '/stock') {
         return { kind: 'ok', text: JSON.stringify(shelfItems), etag: `"s-${version}"` };
       }
@@ -1134,6 +1203,103 @@ describe('#419 §3 the Cut surface', () => {
       holding: 'made for the rotary',
       frozen: true,
       frozenMount: 'rotary',
+    });
+  });
+
+  // #1123-12 — THE LOCATION IS NOT READ ONCE. At the bench the house's machine record gained the
+  // bracket out of band (another window, the API workaround), and Cut kept the stale "nothing on
+  // the pins" until a full reload — which then lost the 12-minute run. The Cut step keeps the
+  // record in step while it is on screen: a re-read when Change the machine closes, and one on a
+  // visible interval.
+  it('#1123-12 — closing Change the machine re-reads the location, so a house change needs no reload', async () => {
+    const job = defaultEngraveJob();
+    const pkg = frozen(job, [P1]);
+    // The machine holds the rotary; the package was frozen for the vise.
+    useLocationStore.setState({ status: 'present', location: locationWith('rotary'), etag: '"loc-rotary"' } as never);
+    passRun();
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('no longer holds the vise');
+
+    // The operator opens the change wizard; while it is up, the house's record is changed out of
+    // band, so the next read says the vise is on the pins.
+    fireEvent.click(screen.getByTestId('engrave-cut-change-machine'));
+    houseLocationJson = locationJson('vise');
+    act(() => useMachineChangeStore.getState().close());
+
+    await waitFor(() => expect(screen.queryByTestId('engrave-cut-mount')).toBeNull());
+    expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('matches the design');
+    // The record this step now judges is the one the service holds, validator included — the
+    // persisted-run signature (a shop change changes this etag) stays honest.
+    expect(locationReads).toBe(1);
+    expect(useLocationStore.getState().etag).toBe('"loc-live"');
+  });
+
+  it('#1123-12 — the Cut step re-reads the location on a visible interval, so a shop change arrives without a reload', async () => {
+    const job = defaultEngraveJob();
+    const pkg = frozen(job, [P1]);
+    useLocationStore.setState({ status: 'present', location: locationWith('rotary'), etag: '"loc-rotary"' } as never);
+    passRun();
+    vi.useFakeTimers();
+    try {
+      draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
+      expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('no longer holds the vise');
+
+      houseLocationJson = locationJson('vise');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(LOCATION_POLL_MS);
+      });
+      expect(screen.queryByTestId('engrave-cut-mount')).toBeNull();
+      expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('matches the design');
+      expect(locationReads).toBe(1);
+      expect(useLocationStore.getState().etag).toBe('"loc-live"');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('#1123-12 — a build with no house service is never polled', async () => {
+    const job = defaultEngraveJob();
+    // The hosted web build answered `absent` at connect: there is nothing to keep in step, and a
+    // poll would be one request per interval from every visitor.
+    useLocationStore.setState({ status: 'absent', location: null, etag: null } as never);
+    vi.useFakeTimers();
+    try {
+      draw({ job, report: reportOf(), pkg: null, generated: generated([P1]) });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(LOCATION_POLL_MS * 3);
+      });
+      expect(locationReads).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // #1123 item 9 — THE BENCH DEAD END. The tray job was made for the bracket and clamps, the
+  // machine had nothing on the pins, and Cut's Change the machine opened the wizard asking for
+  // the BARE BED: step 1 answered "Nothing on the pins is already on the machine" and offered only
+  // vise/rotary, so the only way through was the house API. The banner's action must ask for the
+  // bracket FIT (#718's step), which is what `profileHolds('bracket')` reads afterwards.
+  it('#1123 item 9 — a bracket job’s Change the machine asks for the bracket fit, not the bare bed', () => {
+    const job = bracketJob();
+    const pkg = frozen(job, [P1]);
+    // Nothing on the pins, the bare bed active — the bench machine before the workaround.
+    useLocationStore.setState({ status: 'present', location: locationWith('bed'), etag: '"loc-bed"' } as never);
+    passRun();
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
+
+    const sentence = screen.getByTestId('engrave-cut-mount-sentence').textContent ?? '';
+    expect(sentence).toContain('made for the bracket and clamps');
+    expect(sentence).toContain('nothing on the pins');
+
+    fireEvent.click(screen.getByTestId('engrave-cut-change-machine'));
+    const request = useMachineChangeStore.getState().request;
+    expect(request.target).toBe('bed');
+    expect(request.fitBracket).toBe(true);
+    expect(request.forJob).toEqual({
+      name: job.name,
+      holding: 'made for the bracket and clamps',
+      frozen: true,
+      frozenMount: 'bracket',
     });
   });
 });

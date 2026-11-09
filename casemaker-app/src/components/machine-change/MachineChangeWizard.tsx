@@ -223,6 +223,10 @@ function Wizard({
   const job = request.forJob ?? null;
 
   const [target, setTarget] = useState<MachineMountKind | null>(request.target ?? null);
+  // #1123 item 9 — the operator can ask for the BRACKET from step 1, not only through a caller's
+  // `fitBracket` request: a bed job's bench visit dead-ended because the only offers were
+  // vise/rotary and the bare bed it already had.
+  const [wantsBracket, setWantsBracket] = useState(request.fitBracket === true);
   const [view, setView] = useState<number | null>(null);
 
   const [answer, setAnswer] = useState<MachineAnswer | null>(null);
@@ -270,10 +274,14 @@ function Wizard({
     machine === null || target === null ? null : surfaceChangeFor(machine, target);
   const plannedWasteboard: 'off' | 'back' | null =
     confirmed?.result.wasteboard ?? plannedSurface?.wasteboard ?? null;
-  // #718 — the bracket's fit step appears only when the job asked for the bracket AND the active
+  // #718 — the bracket's fit step appears only when the change asks for the bracket AND the active
   // profile carries no bracket at an anchor; it writes the placement (and the fixture's record).
+  // #1123 item 9 — step 1 offers the fit itself whenever the bed carries no anchor: the bracket is
+  // Makera's kit fixture, and the fit registers its record when the house has none yet, so the
+  // offer does not wait on the house owning one.
   const activeHasAnchor = active?.placements.some((p) => p.where.kind === 'anchor') ?? false;
-  const bracketFit = request.fitBracket === true && target === 'bed' && !activeHasAnchor;
+  const bracketFit = wantsBracket && target === 'bed' && !activeHasAnchor;
+  const bracketOffer = !activeHasAnchor;
   // #725 W14 — once the change is written, the bracket is a FACT of the result, not of the request:
   // `bracketFit` turns false as soon as the new profile carries the anchor, so the headline and the
   // record would read "Bed unchanged" after a bracket-only Confirm. Read the result first.
@@ -470,6 +478,24 @@ function Wizard({
   };
   const advance = (): void => setView(null);
   const back = (): void => setView(Math.max(1, shown - 1));
+  /**
+   * #728 — a new target is a new change: the light, Home and the power cycle are read afresh,
+   * never carried over from the last choice. #1123 item 9 — the bracket is chosen here too, as
+   * "the bare bed PLUS the fit", which is the change the plan writes.
+   */
+  const beginChange = (nextTarget: MachineMountKind, bracket: boolean): void => {
+    setWantsBracket(bracket);
+    setTarget(nextTarget);
+    setHome(NOT_DONE);
+    setLight(NOT_DONE);
+    setPoweredOff(false);
+    setTakenOff(false);
+    setFitted(false);
+    setOffChecks([]);
+    setOnChecks([]);
+    setDatumChoice(null);
+    advance();
+  };
 
   // ── Confirm: the one write ───────────────────────────────────────────────────────────────────
   async function confirm(): Promise<void> {
@@ -726,7 +752,7 @@ function Wizard({
             {shown === 1 ? (
               <div className="mc-choice" data-testid="machine-change-targets">
                 <span className="mc-meta">On the machine now: {MACHINE_MOUNT_WORDS[shownFrom]}</span>
-                {targetMountsFor(machine, accessories).length === 0 ? (
+                {targetMountsFor(machine, accessories).length === 0 && !bracketOffer ? (
                   <span className="mc-hint">This house has no other fixture to fit.</span>
                 ) : (
                   <span className="mc-btns">
@@ -736,24 +762,23 @@ function Wizard({
                         type="button"
                         className="mc-btn"
                         data-testid={`machine-change-target-${m}`}
-                        onClick={() => {
-                          setTarget(m);
-                          // #728 — a new target is a new change: the light, Home and the power
-                          // cycle are read afresh, never carried over from the last choice.
-                          setHome(NOT_DONE);
-                          setLight(NOT_DONE);
-                          setPoweredOff(false);
-                          setTakenOff(false);
-                          setFitted(false);
-                          setOffChecks([]);
-                          setOnChecks([]);
-                          setDatumChoice(null);
-                          advance();
-                        }}
+                        onClick={() => beginChange(m, false)}
                       >
                         {MACHINE_MOUNT_WORDS[m]}
                       </button>
                     ))}
+                    {/* #1123 item 9 — the bracket at an anchor (1 or 2 is the choice above it): a
+                        bare-bed change that also fits Makera's L-bracket and registers it. */}
+                    {bracketOffer ? (
+                      <button
+                        type="button"
+                        className="mc-btn"
+                        data-testid="machine-change-target-bracket"
+                        onClick={() => beginChange('bed', true)}
+                      >
+                        Bracket at anchor 1 / 2
+                      </button>
+                    ) : null}
                   </span>
                 )}
                 {targetError !== null ? (

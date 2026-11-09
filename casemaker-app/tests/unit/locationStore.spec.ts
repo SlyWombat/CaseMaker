@@ -79,7 +79,17 @@ const OBSERVATION: MachineObservation = {
 };
 
 /** The service's location, held in the fake: machines plus a validator that moves on every write. */
-function fakeService(initial: MachineRecord[] = [], hooks: { afterPut?: (machines: unknown[]) => void; failPuts?: () => boolean } = {}) {
+function fakeService(
+  initial: MachineRecord[] = [],
+  hooks: {
+    afterPut?: (machines: unknown[]) => void;
+    failPuts?: () => boolean;
+    /** #1123-12 review — the next `GET /location` dies before an answer (a Wi-Fi blip). */
+    failReads?: () => boolean;
+    /** #1123-12 review — the next read finds no service at all (a different answer entirely). */
+    absentReads?: () => boolean;
+  } = {},
+) {
   let machines: unknown[] = initial.map((m) => JSON.parse(JSON.stringify(m)));
   let version = 1;
   const puts: MachineRecord[] = [];
@@ -115,7 +125,11 @@ function fakeService(initial: MachineRecord[] = [], hooks: { afterPut?: (machine
     feeds: async () => ({ kind: 'absent', reason: 'none' }),
     inventory: async () => ({ kind: 'ok', etag: '"i"', items: [] }),
     call: async (method, path, body, opts): Promise<HouseCall> => {
-      if (method === 'GET' && path === '/location') return { kind: 'ok', text: view(), etag: etag() };
+      if (method === 'GET' && path === '/location') {
+        if (hooks.absentReads?.()) return { kind: 'absent', reason: 'no house service answered' };
+        if (hooks.failReads?.()) return { kind: 'error', detail: 'no answer within 2000 ms' };
+        return { kind: 'ok', text: view(), etag: etag() };
+      }
       if (method === 'PUT' && path.startsWith('/location/machines/')) {
         if (hooks.failPuts?.()) return { kind: 'refused', status: 500, message: 'the service could not write the location' };
         if (opts?.ifMatch !== etag()) {
@@ -674,5 +688,75 @@ describe('#636/#650 saveMachineWithRetry', () => {
 
     expect(await saveMachineWithRetry(ours, (current) => current)).toBe('failed');
     expect(useLocationStore.getState().writeNote).toContain('no longer in the location');
+  });
+});
+
+// #1123-12 review — THE PERIODIC READ IS NOT THE CONNECT READ. The Cut step now polls the location
+// every 10 s; a poll that treats one dropped request like "the location is gone" would blank the
+// machine mid-session — and, because the store's etag is what a persisted run's shop signature
+// carries, a blip would also make a good run read as stale. A poll takes what it is told, but only
+// SAYS what it could not confirm.
+describe('#1123-12 review — the periodic location read', () => {
+  function machine(): MachineRecord {
+    return {
+      id: 'm1',
+      profileId: 'Z1',
+      nickname: null,
+      address: { host: '192.0.2.10', port: 2222 },
+      bedProfiles: [],
+      updatedAt: '2026-10-15T00:00:00.000Z',
+    } as unknown as MachineRecord;
+  }
+
+  it('keeps the last good record and etag when a poll gets no answer', async () => {
+    let failing = false;
+    fakeService([machine()], { failReads: () => failing });
+    await useLocationStore.getState().poll();
+    const good = useLocationStore.getState();
+    expect(good.status).toBe('present');
+    expect(good.etag).toBe('"loc-1"');
+    const record = good.location;
+    expect(record).not.toBeNull();
+
+    failing = true;
+    await useLocationStore.getState().poll();
+
+    const after = useLocationStore.getState();
+    // The record the step judges — and the validator a persisted run is keyed on — are untouched…
+    expect(after.status).toBe('present');
+    expect(after.location).toBe(record);
+    expect(after.etag).toBe('"loc-1"');
+    // …and the failure is still said, so a repeated blip is not silent.
+    expect(after.reason).toContain('no answer');
+  });
+
+  it('keeps the same location object when the validator has not moved', async () => {
+    fakeService([machine()]);
+    await useLocationStore.getState().poll();
+    const first = useLocationStore.getState().location;
+    expect(first).not.toBeNull();
+    await useLocationStore.getState().poll();
+    expect(useLocationStore.getState().location).toBe(first);
+  });
+
+  it('takes a new validator’s record, and an absent answer still replaces', async () => {
+    let absent = false;
+    const service = fakeService([machine()], { absentReads: () => absent });
+    await useLocationStore.getState().poll();
+    const first = useLocationStore.getState().location;
+
+    service.writeElsewhere({ nickname: 'renamed by another window' });
+    await useLocationStore.getState().poll();
+    const renamed = useLocationStore.getState().location;
+    expect(renamed).not.toBe(first);
+    expect(renamed?.machines[0]?.nickname).toBe('renamed by another window');
+
+    // A service that is GONE is an answer, not a blip: the record goes, as it does at connect.
+    absent = true;
+    await useLocationStore.getState().poll();
+    const after = useLocationStore.getState();
+    expect(after.status).toBe('absent');
+    expect(after.location).toBeNull();
+    expect(after.etag).toBeNull();
   });
 });

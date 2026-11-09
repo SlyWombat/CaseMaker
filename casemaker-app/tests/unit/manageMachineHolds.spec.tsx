@@ -54,7 +54,7 @@ function zoomba(): LocationView {
  * `let` captured inside the factory would be reset between the write and the re-read.
  */
 function statefulClient(
-  state: { location: LocationView },
+  state: { location: LocationView; version: number },
   record: (method: string, path: string, body: unknown, ifMatch: string | null | undefined) => void,
 ): HouseClient {
   return {
@@ -64,17 +64,22 @@ function statefulClient(
     inventory: async () => ({ kind: 'ok', etag: '"i1"', items: [] }),
     call: async (method, path, body, opts): Promise<HouseCall> => {
       if (method === 'GET' && path === '/location') {
-        return { kind: 'ok', text: JSON.stringify(state.location), etag: '"e1"' };
+        // The real service's validator is computed over the served bytes and moves with every
+        // write (`house_api`'s json_with_etag); a frozen one made a real re-read look unchanged
+        // once the store stopped churning on an equal validator (#1123-12 review).
+        return { kind: 'ok', text: JSON.stringify(state.location), etag: `"e${state.version}"` };
       }
       if (method === 'PUT' && path.startsWith('/location/accessories/')) {
         const acc = body as FixtureRecord;
         state.location = { ...state.location, accessories: (state.location.accessories ?? []).map((a) => (a.id === acc.id ? acc : a)) };
+        state.version += 1;
         record(method, path, body, opts?.ifMatch);
         return { kind: 'ok', text: '' };
       }
       if (method === 'PUT' && path.startsWith('/location/machines/')) {
         const m = body as MachineRecord;
         state.location = { ...state.location, machines: state.location.machines.map((x) => (x.id === m.id ? m : x)) };
+        state.version += 1;
         record(method, path, body, opts?.ifMatch);
         return { kind: 'ok', text: '' };
       }
@@ -127,7 +132,7 @@ describe('#602 — the machine card names and holds', () => {
 
   it('Return moves a held accessory to the box, and the location (the Accessories scope) agrees', async () => {
     const calls: Array<{ method: string; path: string; body: unknown; ifMatch: string | null | undefined }> = [];
-    const state = { location: zoomba() };
+    const state = { location: zoomba(), version: 1 };
     setHouseClientLoader(async () => statefulClient(state, (method, path, body, ifMatch) => calls.push({ method, path, body, ifMatch })));
     seed();
     render(<MachinesScope />);
@@ -149,7 +154,7 @@ describe('#602 — the machine card names and holds', () => {
 
   it('editing the nickname writes the machine record, guarded on the location', async () => {
     const calls: Array<{ method: string; path: string; body: unknown; ifMatch: string | null | undefined }> = [];
-    const state = { location: zoomba() };
+    const state = { location: zoomba(), version: 1 };
     setHouseClientLoader(async () => statefulClient(state, (method, path, body, ifMatch) => calls.push({ method, path, body, ifMatch })));
     seed();
     render(<MachinesScope />);
