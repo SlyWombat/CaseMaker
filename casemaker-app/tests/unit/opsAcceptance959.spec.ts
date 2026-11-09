@@ -442,9 +442,15 @@ function edgeBreakAllowance(): Pick<GoalCutIntoOptions, 'edgeBreak' | 'wallShado
 function stampedTop(
   runs: readonly { cutterKey: string; text: string; ir: ToolpathIR }[],
   goal: GoalHeightfield,
-): { top: ResultTop; whoAt: (x: number, y: number) => number | null } {
+): { top: ResultTop; whoAt: (x: number, y: number) => number | null; clAt: (x: number, y: number) => { x: number; y: number } | null } {
   let acc: Float32Array | null = null;
   let who: Uint8Array | null = null;
+  // #1092 (0f's R-b parity ask) — the CL of the SAME stamp that set the depth folds with the field
+  // and the identity (lowest reach wins, ties keep the earlier run), exactly the session's fold.
+  // The silhouette branch reads it; the band fix already excuses the rim chamfer, so this changes
+  // none of those cells — it makes the helper's inputs match production (`goalCheckField.ts`).
+  let clXs: Float32Array | null = null;
+  let clYs: Float32Array | null = null;
   for (const run of runs) {
     const parsed = parseGcode(run.text);
     const part = setupFromHeader(parsed.header).patch.part;
@@ -460,24 +466,31 @@ function stampedTop(
     const timeline = buildTimeline(parsed, setup, Z1);
     const stamp = exactSweptFieldTooled(goal, timeline, () => run.ir.tool);
     if (stamp === null) throw new Error(`#959 goal check: ${run.cutterKey} produced no exact stamp`);
-    if (acc === null || who === null) {
+    if (acc === null || who === null || clXs === null || clYs === null) {
       acc = Float32Array.from(stamp.field);
       who = Uint8Array.from(stamp.who);
+      clXs = Float32Array.from(stamp.clX);
+      clYs = Float32Array.from(stamp.clY);
     } else {
       // #948/v4 — the per-run who maps fold with the field, lowest reach wins (the session's own
       // fold): the cell's cutter is the one whose stamp took it deepest, which is what the V gate
-      // reads. A tie keeps the earlier run's identity, as `session.ts`'s fold does.
+      // reads. A tie keeps the earlier run's identity, as `session.ts`'s fold does. #1092 — the
+      // CL point folds with them, from the same winning stamp.
       for (let k = 0; k < acc.length; k++) {
         if (stamp.field[k]! < acc[k]!) {
           acc[k] = stamp.field[k]!;
           who[k] = stamp.who[k]!;
+          clXs[k] = stamp.clX[k]!;
+          clYs[k] = stamp.clY[k]!;
         }
       }
     }
   }
-  if (acc === null || who === null) throw new Error('#959 goal check: no programs to stamp');
+  if (acc === null || who === null || clXs === null || clYs === null) throw new Error('#959 goal check: no programs to stamp');
   const field: Float32Array = acc;
   const identity: Uint8Array = who;
+  const clX: Float32Array = clXs;
+  const clY: Float32Array = clYs;
   const cell = (x: number, y: number): number | null => {
     const i = Math.round((x - goal.x0) / goal.pitch);
     const j = Math.round((y - goal.y0) / goal.pitch);
@@ -492,6 +505,13 @@ function stampedTop(
     whoAt: (x: number, y: number) => {
       const k = cell(x, y);
       return k === null ? null : identity[k]!;
+    },
+    // The same stamp's CL, absent where no cut stamped the cell (field 0) — the session's own
+    // `sweptClExact` contract.
+    clAt: (x: number, y: number) => {
+      const k = cell(x, y);
+      if (k === null || field[k] === 0) return null;
+      return { x: clX[k]!, y: clY[k]! };
     },
   };
 }
@@ -709,6 +729,9 @@ function writeAcceptance(
       passCoverage: 0.95,
       ...edgeBreakAllowance(),
       whoAt: stamped.whoAt,
+      // #1092 (0f's R-b parity ask) — production supplies the CL whenever the job states a wall
+      // shadow radius (`goalCheckField.ts`); the helper now matches it.
+      clAt: stamped.clAt,
     });
     const coverage = 1 - (report.leftoverFractions[0] ?? 0);
     const cutInto: CutIntoScore = {
@@ -1490,6 +1513,10 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     // the goal sees as land — 0.5 mm into ground it never exposes (0.13 % adjudicated). With rims
     // covered from above skipped, that cell is not cut and the coverage that made the rebuild's
     // jump stays; the OTHER rims (real, open edges) are still broken.
+    // #1092 (0f's R-b ruling, 2026-11-08) — THE OPEN RIMS' CHAMFER IS EDGE BREAK, ITS CLASS NAMED:
+    // the band seeds the DESIGN SILHOUETTE (∪ the grid border), so the V's rim strokes within its
+    // reach and leg are excused (`whoOk` still holds — the V is the deepest stamp there) and the
+    // residual returns to 0. The cells are the 368 counted before the seed included the silhouette.
     expect(measured, 'the tray measured nothing').not.toBeNull();
     expect(measured!.adjudicatedFraction, 'the chamfer cut a rim that is covered from above').toBe(0);
     // #961 (the maintainer's 11-05 ruling): the 1-point line is 98.52 % against the vendor's

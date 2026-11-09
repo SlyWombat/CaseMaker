@@ -29,7 +29,7 @@ import { Z1 } from '@/engine/cnc/machine';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { parseGcode, setupFromHeader, stubSetup } from '@/engine/cnc';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
-import { exactSweptField } from '@/workers/sim/sweptPoint';
+import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
 import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { checkGoalCutInto } from '@/engine/cnc/engrave/designCheck';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
@@ -72,8 +72,15 @@ function postContextFor(part: RandomPart): PostContext {
 }
 
 /** The lower envelope of every posted program's cutter at each goal cell. */
-function wholeSurfaceTop(programs: readonly { ir: ToolpathIR; text: string }[], field: GoalHeightfield): ResultTop {
+function wholeSurfaceTop(
+  programs: readonly { ir: ToolpathIR; text: string }[],
+  field: GoalHeightfield,
+): { top: ResultTop; clAt: (x: number, y: number) => { x: number; y: number } | null } {
   let acc: Float32Array | null = null;
+  // #1092 (gate v8) — the deepest stamp's own CL point per cell, for the silhouette proof: the
+  // tooled field carries clX/clY beside the height, the same data the app's `sweptClExact` reads.
+  let clX: Float32Array | null = null;
+  let clY: Float32Array | null = null;
   for (const program of programs) {
     const parsed = parseGcode(program.text);
     const part = setupFromHeader(parsed.header).patch.part;
@@ -81,18 +88,42 @@ function wholeSurfaceTop(programs: readonly { ir: ToolpathIR; text: string }[], 
       throw new Error('#964 curved property: a posted program carries no rectangular stock header');
     }
     const setup = stubSetup(part, { kind: 'tape-down', contact: part.outline }, { startingTool: 1 }, Z1);
-    const stamp = exactSweptField(field, buildTimeline(parsed, setup, Z1), program.ir.tool);
-    if (stamp === null) continue;
-    if (acc === null) acc = Float32Array.from(stamp);
-    else for (let k = 0; k < acc.length; k++) if (stamp[k]! < acc[k]!) acc[k] = stamp[k]!;
+    const stamped = exactSweptFieldTooled(field, buildTimeline(parsed, setup, Z1), () => program.ir.tool);
+    if (stamped === null) continue;
+    const stamp = stamped.field;
+    if (acc === null) {
+      acc = Float32Array.from(stamp);
+      clX = Float32Array.from(stamped.clX);
+      clY = Float32Array.from(stamped.clY);
+    } else {
+      for (let k = 0; k < acc.length; k++) {
+        if (stamp[k]! < acc[k]!) {
+          acc[k] = stamp[k]!;
+          clX![k] = stamped.clX[k]!;
+          clY![k] = stamped.clY[k]!;
+        }
+      }
+    }
   }
-  if (acc === null) throw new Error('#964 curved property: no posted program removed anything');
+  if (acc === null || clX === null || clY === null) throw new Error('#964 curved property: no posted program removed anything');
   const top = acc;
-  return (x, y) => {
+  const clXs = clX;
+  const clYs = clY;
+  const cell = (x: number, y: number): number | null => {
     const i = Math.round((x - field.x0) / field.pitch);
     const j = Math.round((y - field.y0) / field.pitch);
     if (i < 0 || j < 0 || i >= field.nx || j >= field.ny) return null;
-    return top[j * field.nx + i]!;
+    return j * field.nx + i;
+  };
+  return {
+    top: (x, y) => {
+      const k = cell(x, y);
+      return k === null ? null : top[k]!;
+    },
+    clAt: (x, y) => {
+      const k = cell(x, y);
+      return k === null ? null : { x: clXs[k]!, y: clYs[k]! };
+    },
   };
 }
 
@@ -117,16 +148,28 @@ describe('#964 the curved ops cut the design and leave the walls (#959/#960)', (
         expect(programs.length, `${kind} seed ${seed}: the plan posted no program`).toBeGreaterThan(0);
 
         const field = sampleGoalHeightfield(part.target, { pitchMm: 0.1, stockTopZ: 0 });
-        const top = wholeSurfaceTop(programs, field);
-        const report = checkGoalCutInto(field, top, { passCoverage: 0.95, wallShadowRadiusMm: 3 });
+        const { top, clAt } = wholeSurfaceTop(programs, field);
+        // #1092 (gate v8) — the silhouette proof's floor beside the part is the BLANK's:
+        // −(stock thickness + breakthrough), from the job this part planned as.
+        const report = checkGoalCutInto(field, top, {
+          passCoverage: 0.95,
+          wallShadowRadiusMm: 3,
+          stockThicknessMm: part.stock.thickness,
+          clAt,
+        });
         const coverage = 1 - (report.leftoverFractions[0] ?? 0);
         expect(
           coverage,
           `${kind} seed ${seed}: coverage ${(coverage * 100).toFixed(2)} % — the line is 95 %`,
         ).toBeGreaterThanOrEqual(0.95);
+        // #1092 (gate v8, 0f's follow-up) — the notch pocket's cells whose silhouette CL test
+        // fails (an OPEN pocket reaching the rim legitimately has its CL inside the part) FALL
+        // THROUGH to the v6 straddling proof and are excused there: nothing is adjudicated on any
+        // part. A CL inside with NO straddled step still counts — pinned in designCheckRelief.
+        const countedCells = Math.round(report.adjudicatedFraction * report.goalCells);
         expect(
-          report.adjudicatedFraction,
-          `${kind} seed ${seed}: ${(report.adjudicatedFraction * 100).toFixed(2)} % of cells cut below the adjudicated goal (raw ${(report.cutIntoFraction * 100).toFixed(2)} % at the 0.01 floor, adjudicated max ${report.adjudicatedMaxMm.toFixed(3)} mm at ${JSON.stringify(report.adjudicatedMaxAt)}; wall ${(report.wallNotScoredFraction * 100).toFixed(2)} %, shadow ${(report.shadowNotScoredFraction * 100).toFixed(2)} % excluded)`,
+          countedCells,
+          `${kind} seed ${seed}: ${countedCells} adjudicated cell(s), up to ${report.adjudicatedMaxMm.toFixed(3)} mm at ${JSON.stringify(report.adjudicatedMaxAt)} (raw ${(report.cutIntoFraction * 100).toFixed(2)} %; wall ${(report.wallNotScoredFraction * 100).toFixed(2)} %, shadow ${(report.shadowNotScoredFraction * 100).toFixed(2)} %; silhouette ${report.silhouetteExcusedCells} excused, deepest ${JSON.stringify(report.silhouetteDeepest)})`,
         ).toBe(0);
       }, 600_000);
     }

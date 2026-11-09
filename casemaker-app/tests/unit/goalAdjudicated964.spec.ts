@@ -78,15 +78,19 @@ describe('#964 the gate’s unadjudicable cells, with no edge break stated', () 
     // The exclusions, in a job that states no edge break. v5: wall cells stay excluded; the 13
     // shadow cells state no CL, so they are ADJUDICATED with the other 50.
     expect(r.edgeBreakFraction).toBe(0);
-    expect(r.wallNotScoredFraction).toBeCloseTo(80 / N, 12);
+    // #1092 (gate v8) — 79 of the 80 wall cells are excused on proof; the first one is HAND-SET in
+    // this fixture to 2.448 mm (`CUTS.set(…, k === 0 ? 2.448 : 2.0)`), 0.448 mm past its 2 mm
+    // wall on purpose, so v8's bound counts it — the bound working, not a defect (#1113).
+    expect(r.wallNotScoredFraction).toBeCloseTo(79 / N, 12);
     expect(r.shadowNotScoredFraction).toBe(0);
-    // The ADJUDICATED reading: 63 cells — the 50 clear ones (deepest 0.165 mm at (25, 10), still
-    // the maximum) and the 13 shadow cells (0.3 mm each).
-    expect(r.adjudicatedFraction).toBeCloseTo(63 / N, 12);
-    expect(r.adjudicatedFraction * 100).toBeCloseTo(0.0645, 3);
-    expect(r.adjudicatedMaxMm).toBeCloseTo(0.3, 6);
-    expect(r.adjudicatedMaxAt!.x).toBeCloseTo(15.1, 9); // the first shadow cell (v5)
+    // The ADJUDICATED reading: 64 cells — the 50 clear ones (0.165 mm), the 13 shadow cells
+    // (0.3 mm each) and that one wall cell, now the maximum.
+    expect(r.adjudicatedFraction).toBeCloseTo(64 / N, 12);
+    expect(r.adjudicatedFraction * 100).toBeCloseTo(0.0656, 3);
+    expect(r.adjudicatedMaxMm).toBeCloseTo(2.448, 6);
+    expect(r.adjudicatedMaxAt!.x).toBeCloseTo(14.9, 9); // the deep wall cell
     expect(r.adjudicatedMaxAt!.y).toBeCloseTo(4, 9);
+    expect(r.overReliefDeepest).toMatchObject({ mm: 2.448, cls: 'wall' });
     // And the gate judges on that reading, not on the raw one.
     expect(r.ok).toBe(false);
     expect(r.sentence).toContain('not counted');
@@ -97,12 +101,14 @@ describe('#964 the gate’s unadjudicable cells, with no edge break stated', () 
     // the disc's rim covered the 13 cells, so they are the stamp artefact E's rule excuses.
     const r = checkGoalCutInto(GOAL, top, { wallShadowRadiusMm: SHADOW_R, clAt: () => ({ x: 18, y: 4 }) });
     expect(r.shadowNotScoredFraction).toBeCloseTo(13 / N, 12);
-    expect(r.adjudicatedFraction).toBeCloseTo(50 / N, 12);
-    expect(r.adjudicatedMaxMm).toBeCloseTo(0.165, 6);
+    // #1092 — the 50 clear cells plus the one deep wall cell (2.448 mm, counted: deeper than its
+    // own 2 mm relief).
+    expect(r.adjudicatedFraction).toBeCloseTo(51 / N, 12);
+    expect(r.adjudicatedMaxMm).toBeCloseTo(2.448, 6);
     // A CL at the wall's base excuses nothing: the same 13 cells are adjudicated at 0.3 mm.
     const atWall = checkGoalCutInto(GOAL, top, { wallShadowRadiusMm: SHADOW_R, clAt: () => ({ x: 15, y: 4 }) });
     expect(atWall.shadowNotScoredFraction).toBe(0);
-    expect(atWall.adjudicatedFraction).toBeCloseTo(63 / N, 12);
+    expect(atWall.adjudicatedFraction).toBeCloseTo(64 / N, 12);
   });
 
   it('a clean program still passes: nothing adjudicated, coverage above the line', () => {

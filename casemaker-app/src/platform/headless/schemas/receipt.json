@@ -127,6 +127,12 @@
                   "description": "The deepest cut among the ADJUDICATED cells, mm — after the wall, wall-shadow and (when the job states one) edge-break exclusions; 0 when none. The raw deepest cut is `maxCutIntoMm`.",
                   "type": "number"
                 },
+                "borderOverReliefCells": {
+                  "description": "#1092 (gate v8) — the same, for the grid-BORDER class.",
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                },
                 "columnCutInto": {
                   "anyOf": [
                     {
@@ -222,6 +228,46 @@
                   "description": "The deepest cut into the goal, mm.",
                   "type": "number"
                 },
+                "overReliefDeepest": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "cls": {
+                          "description": "The class that would have excused it.",
+                          "enum": [
+                            "wall",
+                            "border",
+                            "shadow"
+                          ],
+                          "type": "string"
+                        },
+                        "mm": {
+                          "description": "Depth below the goal at that cell, mm.",
+                          "type": "number"
+                        },
+                        "x": {
+                          "description": "Work-frame X, mm.",
+                          "type": "number"
+                        },
+                        "y": {
+                          "description": "Work-frame Y, mm.",
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "mm",
+                        "x",
+                        "y",
+                        "cls"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "#1092 (gate v8) — the deepest cell a class would have excused and which was counted instead; null when none."
+                },
                 "passCoverage": {
                   "description": "The coverage the pass line asks for, 0–1 — the shop’s own `goal.passCoverage`.",
                   "type": "number"
@@ -250,9 +296,68 @@
                   "description": "Share of covered cells excluded as WALL SHADOW (behind a wall, beyond the sweep’s reach), 0–1.",
                   "type": "number"
                 },
+                "shadowOverReliefCells": {
+                  "description": "#1092 (gate v8) — the same, for the WALL-SHADOW class.",
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                },
+                "silhouetteDeepest": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "clDistanceMm": {
+                          "description": "The deepest stamp’s CL distance from the outline, mm.",
+                          "type": "number"
+                        },
+                        "mm": {
+                          "description": "Depth below the goal at the excused cell, mm.",
+                          "type": "number"
+                        },
+                        "x": {
+                          "description": "Work-frame X, mm.",
+                          "type": "number"
+                        },
+                        "y": {
+                          "description": "Work-frame Y, mm.",
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "mm",
+                        "x",
+                        "y",
+                        "clDistanceMm"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "#1092 (gate v8) — the deepest silhouette cell excused on proof; null when none."
+                },
+                "silhouetteExcusedCells": {
+                  "description": "#1092 (gate v8) — covered cells facing uncovered grid (the part’s silhouette) excused on proof: the read no deeper than the blank’s floor and the deepest stamp’s CL on the uncovered side, at least r − pitch from the outline.",
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                },
+                "silhouetteUnavailableCells": {
+                  "description": "#1092 (0f’s R-a ruling) — silhouette cells COUNTED because the proof was unavailable: no stock thickness is stated, so the blank’s floor is unknown. There is no silent topZ − minZ fallback; the sentence names the count.",
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                },
                 "wallNotScoredFraction": {
                   "description": "Share of covered cells excluded as WALL CELLS (a cell straddling a wall step), 0–1.",
                   "type": "number"
+                },
+                "wallOverReliefCells": {
+                  "description": "#1092 (gate v8) — cut-into cells the WALL class would have excused but which were COUNTED because their depth exceeds the goal’s own relief at the cell.",
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
                 },
                 "wholeSurface": {
                   "anyOf": [
@@ -338,6 +443,13 @@
                 "edgeBreakFraction",
                 "wallNotScoredFraction",
                 "shadowNotScoredFraction",
+                "wallOverReliefCells",
+                "shadowOverReliefCells",
+                "borderOverReliefCells",
+                "overReliefDeepest",
+                "silhouetteExcusedCells",
+                "silhouetteDeepest",
+                "silhouetteUnavailableCells",
                 "leftoverFractions",
                 "passCoverage",
                 "wholeSurface",
@@ -693,6 +805,12 @@
                             "description": "The deepest cut among the ADJUDICATED cells, mm — after the wall, wall-shadow and (when the job states one) edge-break exclusions; 0 when none. The raw deepest cut is `maxCutIntoMm`.",
                             "type": "number"
                           },
+                          "borderOverReliefCells": {
+                            "description": "#1092 (gate v8) — the same, for the grid-BORDER class.",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
                           "columnCutInto": {
                             "anyOf": [
                               {
@@ -788,6 +906,46 @@
                             "description": "The deepest cut into the goal, mm.",
                             "type": "number"
                           },
+                          "overReliefDeepest": {
+                            "anyOf": [
+                              {
+                                "properties": {
+                                  "cls": {
+                                    "description": "The class that would have excused it.",
+                                    "enum": [
+                                      "wall",
+                                      "border",
+                                      "shadow"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "mm": {
+                                    "description": "Depth below the goal at that cell, mm.",
+                                    "type": "number"
+                                  },
+                                  "x": {
+                                    "description": "Work-frame X, mm.",
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "description": "Work-frame Y, mm.",
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "mm",
+                                  "x",
+                                  "y",
+                                  "cls"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "#1092 (gate v8) — the deepest cell a class would have excused and which was counted instead; null when none."
+                          },
                           "passCoverage": {
                             "description": "The coverage the pass line asks for, 0–1 — the shop’s own `goal.passCoverage`.",
                             "type": "number"
@@ -816,9 +974,68 @@
                             "description": "Share of covered cells excluded as WALL SHADOW (behind a wall, beyond the sweep’s reach), 0–1.",
                             "type": "number"
                           },
+                          "shadowOverReliefCells": {
+                            "description": "#1092 (gate v8) — the same, for the WALL-SHADOW class.",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "silhouetteDeepest": {
+                            "anyOf": [
+                              {
+                                "properties": {
+                                  "clDistanceMm": {
+                                    "description": "The deepest stamp’s CL distance from the outline, mm.",
+                                    "type": "number"
+                                  },
+                                  "mm": {
+                                    "description": "Depth below the goal at the excused cell, mm.",
+                                    "type": "number"
+                                  },
+                                  "x": {
+                                    "description": "Work-frame X, mm.",
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "description": "Work-frame Y, mm.",
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "mm",
+                                  "x",
+                                  "y",
+                                  "clDistanceMm"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "#1092 (gate v8) — the deepest silhouette cell excused on proof; null when none."
+                          },
+                          "silhouetteExcusedCells": {
+                            "description": "#1092 (gate v8) — covered cells facing uncovered grid (the part’s silhouette) excused on proof: the read no deeper than the blank’s floor and the deepest stamp’s CL on the uncovered side, at least r − pitch from the outline.",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "silhouetteUnavailableCells": {
+                            "description": "#1092 (0f’s R-a ruling) — silhouette cells COUNTED because the proof was unavailable: no stock thickness is stated, so the blank’s floor is unknown. There is no silent topZ − minZ fallback; the sentence names the count.",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
                           "wallNotScoredFraction": {
                             "description": "Share of covered cells excluded as WALL CELLS (a cell straddling a wall step), 0–1.",
                             "type": "number"
+                          },
+                          "wallOverReliefCells": {
+                            "description": "#1092 (gate v8) — cut-into cells the WALL class would have excused but which were COUNTED because their depth exceeds the goal’s own relief at the cell.",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
                           },
                           "wholeSurface": {
                             "anyOf": [
@@ -904,6 +1121,13 @@
                           "edgeBreakFraction",
                           "wallNotScoredFraction",
                           "shadowNotScoredFraction",
+                          "wallOverReliefCells",
+                          "shadowOverReliefCells",
+                          "borderOverReliefCells",
+                          "overReliefDeepest",
+                          "silhouetteExcusedCells",
+                          "silhouetteDeepest",
+                          "silhouetteUnavailableCells",
                           "leftoverFractions",
                           "passCoverage",
                           "wholeSurface",

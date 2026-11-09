@@ -434,6 +434,21 @@ export function checkGoalCutIntoRotary(
     adjudicatedFraction: adjudicatedCells / n,
     adjudicatedMaxMm,
     adjudicatedMaxAt,
+    // #1092 (gate v8) — THE OVER-RELIEF COUNTERS ARE THE FLAT CHECK'S. The rotary map's class
+    // exclusions are its own #1094 proofs — wall/border by class (`wallNotScoredFraction`), the
+    // wall shadow on the v5 CL proof (`shadowNotScoredFraction`), the #996 straddling step — and
+    // those cells are counted and printed in the fields above. v8's counted-instead counters are
+    // not reproduced here, so they state zero rather than a number this check did not measure.
+    wallOverReliefCells: 0,
+    shadowOverReliefCells: 0,
+    borderOverReliefCells: 0,
+    overReliefDeepest: null,
+    // #1092 (gate v8) — the rotary map has no stock-top silhouette class of its own (its rim cells
+    // are the wall/border class above), so no rim cell is counted for an unavailable silhouette
+    // proof.
+    silhouetteExcusedCells: 0,
+    silhouetteDeepest: null,
+    silhouetteUnavailableCells: 0,
     medianDeltaMm,
     sentence,
   };
