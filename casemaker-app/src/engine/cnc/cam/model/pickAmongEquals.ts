@@ -91,13 +91,15 @@ export function pickAmongEquals(a: PickKeys, b: PickKeys, minMarginMm: number): 
   const aPass = passesReachGate(a, minMarginMm);
   const bPass = passesReachGate(b, minMarginMm);
   if (aPass !== bPass) return aPass ? 1 : -1;
-  // The flute, the diameter and the price are stiffness/economy preferences among SUFFICIENT
-  // cutters only.
-  if (aPass) {
-    if (a.flute !== b.flute) return a.flute < b.flute ? 1 : -1;
-    if (a.diameter !== b.diameter) return a.diameter > b.diameter ? 1 : -1;
-    if (a.priceSeconds !== b.priceSeconds) return a.priceSeconds < b.priceSeconds ? 1 : -1;
-  }
+  // The FLUTE is a stiffness preference among SUFFICIENT cutters only ("the shortest sufficient
+  // flute"): when neither passes, no flute length is adequate and the key does not read it.
+  if (aPass && a.flute !== b.flute) return a.flute < b.flute ? 1 : -1;
+  // The DIAMETER and the PRICE hold whatever the gate said — the stiffer cutter and the cheaper
+  // stage are better even when the plan must state that no candidate clears the margin. (A pair
+  // of fluteless flats otherwise fell to the key, which handed the strip builder a ⌀2 "primary"
+  // where the ⌀6 was stiffer — the #1021 test caught it.)
+  if (a.diameter !== b.diameter) return a.diameter > b.diameter ? 1 : -1;
+  if (a.priceSeconds !== b.priceSeconds) return a.priceSeconds < b.priceSeconds ? 1 : -1;
   return a.key < b.key ? 1 : a.key > b.key ? -1 : 0;
 }
 
@@ -111,10 +113,10 @@ export function deciderOf(winner: PickKeys, loser: PickKeys, minMarginMm: number
   if (wPass && winner.flute !== loser.flute) {
     return `the shortest sufficient flute (${formatFlute(winner.flute)} against ${formatFlute(loser.flute)})`;
   }
-  if (wPass && winner.diameter !== loser.diameter) {
-    return `the larger diameter (${winner.diameter.toFixed(2)} mm against ${loser.diameter.toFixed(2)} mm — the stiffer adequate tool at the same flute)`;
+  if (winner.diameter !== loser.diameter) {
+    return `the larger diameter (${winner.diameter.toFixed(2)} mm against ${loser.diameter.toFixed(2)} mm — the stiffer adequate tool)`;
   }
-  if (wPass && winner.priceSeconds !== loser.priceSeconds) {
+  if (winner.priceSeconds !== loser.priceSeconds) {
     return `the lower priced stage (${formatPrice(winner.priceSeconds)} against ${formatPrice(loser.priceSeconds)})`;
   }
   return `the cutter key (${winner.key} before ${loser.key})`;
