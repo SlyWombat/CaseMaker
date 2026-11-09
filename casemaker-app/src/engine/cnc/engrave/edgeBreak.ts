@@ -84,7 +84,22 @@ export function goalEdgeBreakOptions(
 
   const goal = pureGoalObject(job);
   const stated = goal === null ? undefined : statedEdgeBreak(goal);
-  if (stated === undefined) return wallShadowRadiusMm === undefined ? {} : { wallShadowRadiusMm };
+  // #1092 (0f's R-a wiring ruling, 2026-11-08) — THE BLANK FIELDS ARE BUILT FIRST, from one
+  // source, so the early return carries them exactly as the final return does. The silhouette
+  // proof's ceiling is the job's own stated blank; the early return above it predates the
+  // silhouette proof, and it dropped the blank on every job without an edge break — j29's receipt
+  // read silhouetteUnavailableCells 360 with "stock thickness not stated" on a job that states
+  // 36 mm. Wiring, not the rule: the freeze is unchanged.
+  const blank = {
+    ...(job.stock === undefined ? {} : { stockThicknessMm: job.stock.thickness }),
+    ...(job.breakthrough === undefined ? {} : { breakthroughMm: job.breakthrough }),
+  };
+  if (stated === undefined) {
+    return {
+      ...blank,
+      ...(wallShadowRadiusMm === undefined ? {} : { wallShadowRadiusMm }),
+    };
+  }
 
   const pinned = stated.toolKey === undefined ? null : toolFor(stated.toolKey);
   let allowance: { reachMm: number; legMm: number; toolNumber?: number; edges: 'silhouette' | 'all' } | null = null;
@@ -104,9 +119,9 @@ export function goalEdgeBreakOptions(
   }
   return {
     // #1092 (gate v8) — the blank's own depth, for the silhouette proof: the legitimate floor
-    // beside the part is −(thickness + breakthrough).
-    ...(job.stock === undefined ? {} : { stockThicknessMm: job.stock.thickness }),
-    ...(job.breakthrough === undefined ? {} : { breakthroughMm: job.breakthrough }),
+    // beside the part is −(thickness + breakthrough). Built first (`blank`), shared with the early
+    // return above.
+    ...blank,
     ...(allowance === null ? {} : { edgeBreak: allowance }),
     ...(wallShadowRadiusMm === undefined ? {} : { wallShadowRadiusMm }),
   };
