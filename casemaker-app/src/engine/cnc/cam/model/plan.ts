@@ -845,7 +845,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // designCheck's CM_GOAL_DEBUG) reads it through globalThis.
     if ((globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.CM_1092_BUDGET_DEBUG !== undefined) {
       const b = region.bounds;
-      console.error(`[resttip] cutter=${cutterKeyOf(region.cutter)} ${region.id} bbox=[${b.min[0].toFixed(1)},${b.min[1].toFixed(1)}]-[${b.max[0].toFixed(1)},${b.max[1].toFixed(1)}] r=${radius.toFixed(3)} covered=${coveredCount} stencil=${stencilCellsFor(radius, pitch)} ops=${ops} budget=${DEFAULT_MAX_FINISH_TIP_OPS} refused=${ops > DEFAULT_MAX_FINISH_TIP_OPS}`);
+      console.error(`[resttip] cutter=${cutterKeyOf(cutter)} ${region.id} bbox=[${b.min[0].toFixed(1)},${b.min[1].toFixed(1)}]-[${b.max[0].toFixed(1)},${b.max[1].toFixed(1)}] r=${radius.toFixed(3)} covered=${coveredCount} stencil=${stencilCellsFor(radius, pitch)} ops=${ops} budget=${DEFAULT_MAX_FINISH_TIP_OPS} refused=${ops > DEFAULT_MAX_FINISH_TIP_OPS}`);
     }
     if (ops > DEFAULT_MAX_FINISH_TIP_OPS) {
       restBudgetFindings.push({ id: region.id, cutter, ops, budget: DEFAULT_MAX_FINISH_TIP_OPS });
