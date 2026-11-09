@@ -169,6 +169,14 @@ export function runRecordFileName(jobName: string): string {
   return `${runSheetFileName(jobName).slice(0, -'.nc'.length)}-run.json`;
 }
 
+/**
+ * #1123 item 4 — THE RUN LOG'S FILE, beside the record: `<job>-run.log`. The log is the run's own
+ * stage ticks with times and durations (`runLog.ts`), written wherever the record is written.
+ */
+export function runLogFileName(jobName: string): string {
+  return `${runSheetFileName(jobName).slice(0, -'.nc'.length)}-run.log`;
+}
+
 /** The line every record file carries, telling the operator what to fill and what to do next. */
 export const RUN_RECORD_INSTRUCTIONS =
   'Fill the measured half after the cut: cutOn (YYYY-MM-DD) and minutes are the wall clock, ' +

@@ -39,6 +39,7 @@ import { createNodeTransport } from './transport.node.mjs';
 import * as P from '../../src/platform/desktop/protocol.ts';
 import { CAMERA_PORT, captureFrames, replayTimelapse, saveFrame } from './camera.mjs';
 import { BENCH_DEFAULTS, describeBenchDefaults, readBenchDefaults } from './benchDefaults.mjs';
+import { replyTimingFor } from './probeTiming.mjs';
 
 /** Flags that never take a value. Without this, `--effective <key>` swallows the key as its value. */
 const BOOLEAN_FLAGS = new Set(['json', 'help', 'effective', 'i-am-at-the-machine', 'all', 'sh', 'reconnect']);
@@ -149,8 +150,8 @@ line per distinct machine. Nothing is decided from field 4: it is an observation
 
 MOTION AND THE CONSOLE (#302). Two commands send a line you typed, which can move the machine:
 
-  node tools/z1/z1.mjs send    <host> "<line>" --i-am-at-the-machine [--trace <file>]
-  node tools/z1/z1.mjs console <host> [--i-am-at-the-machine] [--interval <ms>] [--trace <file>]
+  node tools/z1/z1.mjs send    <host> "<line>" --i-am-at-the-machine [--first-reply <ms>] [--quiet <ms>] [--max <ms>] [--trace <file>]
+  node tools/z1/z1.mjs console <host> [--i-am-at-the-machine] [--interval <ms>] [--first-reply <ms>] [--quiet <ms>] [--max <ms>] [--trace <file>]
   node tools/z1/z1.mjs run     <host> <path> --i-am-at-the-machine [--interval <ms>] [--no-progress <ms>] [--capture <file>] [--trace <file>] [--json]
 
 \`send\` refuses to run without --i-am-at-the-machine (/Fabrication.md §8: motion needs a person at
@@ -161,6 +162,11 @@ no reset or flashing; the realtime bytes are not wired — the physical stop is 
 sent and every reply is appended to a trace file (default docs/bench/traces/<date>-console.log), so a
 session is a recorded trace. A typed line is never repeated, queued or retried: \`run\` is the one
 command that sends anything on its own, and only because it was asked to watch the job it started.
+
+A PROBE LINE GETS A LONGER WINDOW (#1123 item 17). \`M491\` and the \`G38\` family reply with
+\`[PRB]\` readings only after a slow probe move, so they default to first reply 15 s, quiet 20 s
+(the app's own \`PROBE_TIMING\`) and max 30 s; every other line keeps 3 s / 0.8 s / 15 s. Explicit
+\`--first-reply/--quiet/--max\` always win.
 
 ONE LINE IS ONE COMMAND, and a PIPED console is the status poll alone (#386). Feeding a program
 through the console line by line faulted the controller on 2026-10-12 (\`ALARM: Mainboard did not
@@ -216,12 +222,16 @@ function trace(file, text) {
 /** Send one line through an open console session, echo and record both sides. */
 async function sendTraced(session, file, line, flags, opts = {}) {
   const at = new Date().toISOString();
+  // #1123 item 17 — A PROBE LINE GETS A PROBE-LENGTH WINDOW unless the operator states one: the
+  // default 3 s/0.8 s closes the reader before M491/G38's `[PRB]` replies land (bench, 2026-11-09).
+  // `replyTimingFor` holds the probe window to the app's own PROBE_TIMING; explicit flags win.
+  const timing = replyTimingFor(line);
   let out;
   try {
     out = await session.send(line, {
-      firstReplyMs: num(flags['first-reply'], 3000),
-      quietMs: num(flags.quiet, 800),
-      maxMs: num(flags.max, 15000),
+      firstReplyMs: num(flags['first-reply'], timing.firstReplyMs),
+      quietMs: num(flags.quiet, timing.quietMs),
+      maxMs: num(flags.max, timing.maxMs),
       ...(opts.window ?? {}),
     });
   } catch (error) {

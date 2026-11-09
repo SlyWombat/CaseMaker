@@ -40,6 +40,7 @@ import type { SimDiagnostic } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { SimStatus } from './simStore';
 import { jobMountObstacles, jobSetups, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { appendRunLog, type RunLogEntry } from '@/engine/cnc/engrave/runLog';
 import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
 import { carrySeedsForSetup, carriedMaps, orient, type CarrySetup } from '@/engine/cnc/setups';
 import type { CarriedField, FlatField } from '@/workers/geometry/carriedField';
@@ -459,6 +460,12 @@ export interface EngraveRunState {
   /** #785 — the current stage's words while a run works ("roughing level 41 of 112"), else null. */
   progress: EngraveProgress | null;
   /**
+   * #1123 item 4 — EVERY STAGE TICK OF THIS RUN, with its timestamp and duration (`runLog.ts`).
+   * The log fold beside the progress line reads it, and the run's `<job>-run.log` is serialized
+   * from it; a new run resets it.
+   */
+  log: RunLogEntry[];
+  /**
    * #830 — WHICH PROGRAM OF THE SWEEP IS RUNNING while `phase === 'simulating'`: the simulation's
    * own stage, so the panel never shows a bare "Working…" through a multi-program sweep.
    */
@@ -539,6 +546,8 @@ let phaseBeforeRun: EngraveRunPhase = 'idle';
 let lastStage: string | null = null;
 /** #1076 — whether THIS run's own progress has been heard yet (the queue clock's switch). */
 let heardGenerateProgress = false;
+/** #1123 item 4 — when THIS run started, so the log's first tick's duration is the run's own clock. */
+let logStartedAt = 0;
 
 export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
   const empty = {
@@ -564,6 +573,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     previousVerdict: null as boolean | null,
     error: null as string | null,
     progress: null as EngraveProgress | null,
+    log: [] as RunLogEntry[],
     simProgram: null as { index: number; count: number } | null,
     simStopped: false,
   };
@@ -604,6 +614,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     noteWorkStart('generate', generateFacts(job));
     const previousVerdict = before.oracle === null ? null : before.oracle.ok;
     const previousInputs = before.inputs;
+    // #1123 item 4 — a SIMULATE-ONLY press re-checks the program an earlier Generate posted, so
+    // its log CONTINUES that run's rather than erasing the stages that made the program.
+    const priorLog = simulateOnly ? get().log : [];
+    logStartedAt = Date.now();
     set({
       ...empty,
       phase: simulateOnly ? 'simulating' : 'generating',
@@ -611,6 +625,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // #785 — a name from the FIRST frame: the worker's own first stage can be seconds away (the
       // module and its wasm load), and "Working…" with no words is the complaint this issue is.
       progress: simulateOnly ? null : { stage: 'prepare', label: 'starting the worker' },
+      // #1123 item 4 — the log opens with the first tick so the fold is never blank mid-run.
+      log: simulateOnly
+        ? appendRunLog(priorLog, 'simulating the existing program', logStartedAt, logStartedAt)
+        : appendRunLog([], 'starting the worker', logStartedAt, logStartedAt),
     });
 
     // ONE machine per run (#297): the saved frame is read once, here, and handed to the generator
@@ -781,7 +799,11 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       const onProgress = (progress: EngraveProgress): void => {
         heardGenerateProgress = true;
         armStall();
-        if (mine === seq) set({ progress });
+        if (mine === seq) {
+          // #1123 item 4 — every stage tick is also a log line (one per stage; a percentage of
+          // the same stage appends nothing — `appendRunLog`'s own dedupe).
+          set({ progress, log: appendRunLog(get().log, progress.label, Date.now(), logStartedAt) });
+        }
         if (lastStage !== progress.stage) {
           lastStage = progress.stage;
           noteStage('generate', progress.stage, progress.label);
@@ -807,7 +829,13 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       }
     } catch (e) {
       clearStall();
-      if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
+      if (mine === seq) {
+        set({
+          phase: 'blocked',
+          error: e instanceof Error ? e.message : String(e),
+          log: appendRunLog(get().log, `stopped: ${e instanceof Error ? e.message : String(e)}`, Date.now(), logStartedAt),
+        });
+      }
       noteWorkEnd('generate', 'failed');
       activeClient = null;
       return;
@@ -903,7 +931,11 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       return;
     }
 
-    set({ phase: 'simulating', progress: null });
+    set({
+      phase: 'simulating',
+      progress: null,
+      log: appendRunLog(get().log, 'simulating the programs in cut order', Date.now(), logStartedAt),
+    });
 
     // #744 — ONE SWEEP PER PROGRAM, IN CUT ORDER, ON THE STOCK THE EARLIER ONES LEFT. The walk is
     // the command line's own (`engine/cnc/engrave/programSweep.ts`, #733 item 4 extracted, so the
@@ -1016,7 +1048,12 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         load: async ({ program, index, cutter, drillPoint, priorRemoval, priorExactRemoval, fromBlank }) => {
           // #830 — the simulation's own stage: which program of the sweep is being simulated, so
           // the panel never shows a bare "Working…" through a multi-program sweep.
-          if (mine === seq) set({ simProgram: { index: index + 1, count: generated.programs.length } });
+          if (mine === seq) {
+            set({
+              simProgram: { index: index + 1, count: generated.programs.length },
+              log: appendRunLog(get().log, `simulating program ${index + 1} of ${generated.programs.length}`, Date.now(), logStartedAt),
+            });
+          }
           // #896 — AND IT IS IN THE FLIGHT RECORDER, which logged nothing during a simulation: a
           // crash report could not say which program was sweeping, or how far it got.
           const label = programLabel(generated.programs, index);
@@ -1292,6 +1329,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
 
     set({
       phase: 'checking',
+      log: appendRunLog(get().log, 'checking the result against the goal and the design', Date.now(), logStartedAt),
       simStatus: 'ready',
       simDiagnostics,
       pathOnly: false,
@@ -1366,6 +1404,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     lastGenerateMs: null,
     error: null,
     progress: null,
+    log: [] as RunLogEntry[],
     simProgram: null,
     simStopped: false,
     // #893 — THE RUN HOLDS THE MEASURED PICK: it writes the cutter plan into the job, and a job

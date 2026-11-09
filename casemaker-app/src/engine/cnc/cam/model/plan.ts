@@ -628,7 +628,10 @@ const RIM_CLOSE_TOL_MM = 0.01;
  * beside the plan's own programs, and its feeds must be the SAME row this resolver gave that
  * program's contour flat (the release cuts the band the contour's floor left).
  */
-export function resolvedCutParams(input: ModelPlanInput, tool: Tool): { params: CutParams; substitution: string | null } {
+export function resolvedCutParams(
+  input: ModelPlanInput,
+  tool: Tool,
+): { params: CutParams; substitution: string | null; substitutionMm?: number } {
   // #1047 — the caller's rows, never this realm's snapshot: the worker and the CLI both hold an
   // empty module state however carefully the main thread filled its own (#324, `feeds.ts`).
   const catalogue = input.feedCatalogue ?? feedCatalogueSnapshot();
@@ -661,6 +664,8 @@ export function resolvedCutParams(input: ModelPlanInput, tool: Tool): { params: 
           `${tool.name || tool.id || `${cuttingDiameter(tool)} mm cutter`}: no starting row covers its diameter — ` +
           `${input.stock.material}'s largest covered row (${largest.maxDiameter} mm) answered, its step-down and feed ` +
           'being the conservative side',
+        // #1123 item 8 — the borrowed row's diameter, typed: the cutter line prints the visible note.
+        substitutionMm: largest.maxDiameter,
       };
     }
   }
@@ -675,10 +680,14 @@ export function resolvedCutParams(input: ModelPlanInput, tool: Tool): { params: 
  * row proxy cannot answer for it (`resolvedCutParams` throws), the primary's already-resolved
  * numbers stand in instead — stated in a note, never silently.
  */
-function toolCutParams(input: ModelPlanInput, tool: Tool, primaryParams: CutParams): { params: CutParams; note: string | null } {
+function toolCutParams(
+  input: ModelPlanInput,
+  tool: Tool,
+  primaryParams: CutParams,
+): { params: CutParams; note: string | null; noteMm?: number } {
   try {
-    const { params, substitution } = resolvedCutParams(input, tool);
-    return { params, note: substitution };
+    const { params, substitution, substitutionMm } = resolvedCutParams(input, tool);
+    return { params, note: substitution, ...(substitutionMm === undefined ? {} : { noteMm: substitutionMm }) };
   } catch (err) {
     const label = tool.name || tool.id || `${tool.shape} cutter`;
     const reason = err instanceof Error ? err.message : String(err);
@@ -1195,12 +1204,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // throw the old code raised here was the refusal the ruling forbids.
     const finishFlat = flats.length > 0 ? flats[flats.length - 1] : undefined;
 
-    const { params: pocketParams, substitution } = resolvedCutParams(input, primary);
+    const { params: pocketParams, substitution, substitutionMm } = resolvedCutParams(input, primary);
     const feeds = { feedMmPerMin: pocketParams.feed, plungeFeedMmPerMin: pocketParams.plungeFeed };
 
     // THE REVIEW'S FINDING (item 8): the ball and the V each get their OWN catalogue row — not
     // the primary flat's, reused as every tool's numbers before this.
-    const toolSubstitutions: string[] = substitution === null ? [] : [substitution];
+    // #1123 item 8 — the note carries the borrowed row's diameter when it came from a feed proxy.
+    const toolSubstitutions: { text: string; feedsProxyMm?: number }[] =
+      substitution === null ? [] : [{ text: substitution, ...(substitutionMm === undefined ? {} : { feedsProxyMm: substitutionMm }) }];
     const vbitParams = vbit === undefined ? null : toolCutParams(input, vbit, pocketParams);
 
     // #985/#965 — THE STATED TOLERANCE, as a function of the ball: a stated cusp (`finishMm`)
@@ -1538,10 +1549,16 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // AFTER the rank, so a candidate that won gets its own catalogue row, never the default's.
     const restBall = restBallFor(ball);
     const ballParams = ball === undefined ? null : toolCutParams(input, ball, pocketParams);
-    if (ballParams?.note !== null && ballParams?.note !== undefined) toolSubstitutions.push(ballParams.note);
-    if (vbitParams?.note !== null && vbitParams?.note !== undefined) toolSubstitutions.push(vbitParams.note);
+    if (ballParams?.note !== null && ballParams?.note !== undefined) {
+      toolSubstitutions.push({ text: ballParams.note, ...(ballParams.noteMm === undefined ? {} : { feedsProxyMm: ballParams.noteMm }) });
+    }
+    if (vbitParams?.note !== null && vbitParams?.note !== undefined) {
+      toolSubstitutions.push({ text: vbitParams.note, ...(vbitParams.noteMm === undefined ? {} : { feedsProxyMm: vbitParams.noteMm }) });
+    }
     const restBallParams = restBall === undefined ? null : toolCutParams(input, restBall, pocketParams);
-    if (restBallParams?.note !== null && restBallParams?.note !== undefined) toolSubstitutions.push(restBallParams.note);
+    if (restBallParams?.note !== null && restBallParams?.note !== undefined) {
+      toolSubstitutions.push({ text: restBallParams.note, ...(restBallParams.noteMm === undefined ? {} : { feedsProxyMm: restBallParams.noteMm }) });
+    }
     // #990 — EVERY OTHER CUTTER GETS ITS OWN ROW TOO: a rest flat, the goal's own
     // `curvedRoughTool`, a smaller skin/rest flat — anything in the house that differs from
     // `primary` was silently handed `pocketParams` (the primary's feed/step-down/RPM) until now.
@@ -1558,11 +1575,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       if (key === primaryKey) return pocketParams;
       const cached = otherParams.get(key);
       if (cached !== undefined) return cached;
-      const { params, note } = toolCutParams(input, tool, pocketParams);
+      const { params, note, noteMm } = toolCutParams(input, tool, pocketParams);
       otherParams.set(key, params);
       if (note !== null && !notedOthers.has(key)) {
         notedOthers.add(key);
-        toolSubstitutions.push(note);
+        toolSubstitutions.push({ text: note, ...(noteMm === undefined ? {} : { feedsProxyMm: noteMm }) });
       }
       return params;
     };
@@ -2125,7 +2142,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           : `Cut only the stock's ${face} ${mm3(depthBandMm)} mm; nothing of the goal is below the band`,
       );
     }
-    notes.push(...toolSubstitutions);
+    notes.push(...toolSubstitutions.map((entry) => entry.text));
     // #986 (the ruling) — the ball rank's own statement: the measured candidates, the winner and
     // the uncapped best, so the operator sees what the cap cost.
     notes.push(...ballRankNotes);
@@ -2207,9 +2224,15 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             },
       );
     }
-    for (const text of toolSubstitutions) {
+    for (const substitution of toolSubstitutions) {
       // A cutter cut with another tool's numbers (a fallback/proxy feed row) changes the cut.
-      statements.push({ severity: 'warning', code: 'goal-cutter-substituted', count: 1, text });
+      statements.push({
+        severity: 'warning',
+        code: 'goal-cutter-substituted',
+        count: 1,
+        text: substitution.text,
+        ...(substitution.feedsProxyMm === undefined ? {} : { feedsProxyMm: substitution.feedsProxyMm }),
+      });
     }
     if (ballUncutIds.length > 0) {
       // #982/#992 — the no-flat fallback's ball cannot enter a pocket narrower than its radius:

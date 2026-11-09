@@ -38,6 +38,25 @@ export function setupSubstitutionSentence(s: EngraveSetupSubstitution): string {
 }
 
 /**
+ * #1123 item 8 — THE BORROWED-FEEDS NOTE FOR THE CUTTER ROW. A bit with no catalogue row for this
+ * material runs on the material's largest covered row (the conservative side); the plan states it
+ * as a `goal-cutter-substituted` finding, and the statement now carries the borrowed row's
+ * diameter (`feedsProxyMm`). The main view's cutter line prints this compact note — the finding's
+ * full sentence stays in the fold and the sheet — because a doubled cycle is explained nowhere
+ * if only the fold says it.
+ */
+export function feedsProxyNotes(
+  statements: readonly { code: string; feedsProxyMm?: number }[],
+): string[] {
+  const mms: number[] = [];
+  for (const statement of statements) {
+    if (statement.code !== 'goal-cutter-substituted' || statement.feedsProxyMm === undefined) continue;
+    if (!mms.includes(statement.feedsProxyMm)) mms.push(statement.feedsProxyMm);
+  }
+  return mms.map((mm) => `feeds: borrowed from the ${mm} mm row — slow`);
+}
+
+/**
  * #1010 — THE OFFER, BEFORE THE PRESS. The same facts without claiming anything was done: the
  * measured answer is drawn beside the operator's cutter, and "is used instead" would be a lie
  * until they press it. "Setup 2: your inv:gone is not in the tool library — the 1 mm flat end
