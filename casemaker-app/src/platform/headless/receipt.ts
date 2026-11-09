@@ -236,7 +236,7 @@ export const engraveGoalSchema = z
       .number()
       .int()
       .describe('#1092 (0f’s R-a ruling) — silhouette cells COUNTED because the proof was unavailable: no stock thickness is stated, so the blank’s floor is unknown. There is no silent topZ − minZ fallback; the sentence names the count.'),
-    silhouetteWitnessCells: z
+    silhouetteByWitnessCells: z
       .number()
       .int()
       .describe('#1092 (0f’s inward-witness ruling) — silhouette cells excused because their first fully covered inward neighbour is not cut below its own design within the rule’s slack: a one-cell boundary artefact of the grid’s edge.'),
@@ -705,7 +705,7 @@ export function goalBlockFromReport(report: GoalCutIntoReport): EngraveGoal {
     silhouetteExcusedCells: report.silhouetteExcusedCells,
     silhouetteDeepest: report.silhouetteDeepest,
     silhouetteUnavailableCells: report.silhouetteUnavailableCells,
-    silhouetteWitnessCells: report.silhouetteWitnessCells,
+    silhouetteByWitnessCells: report.silhouetteByWitnessCells,
     leftoverFractions: [...report.leftoverFractions],
     passCoverage: report.passCoverage,
     wholeSurface: extended.wholeSurface ?? null,

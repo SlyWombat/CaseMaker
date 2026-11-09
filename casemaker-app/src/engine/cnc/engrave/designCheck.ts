@@ -902,7 +902,7 @@ export interface GoalCutIntoReport {
    * within the rule's slack: the stamp's disc spans both cells, so a real cut of that depth would
    * also read there; the boundary cell's read is a one-cell artefact of the grid's edge.
    */
-  silhouetteWitnessCells: number;
+  silhouetteByWitnessCells: number;
   /** #955/#964 — the 0.1 mm-floor share AFTER the exclusions (wall and wall shadow always; edge
    *  break when the job states one): the pass line's judged number, 0-1. */
   adjudicatedFraction: number;
@@ -1329,7 +1329,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   let silhouetteUnavailableCells = 0;
   // #1092 (0f's inward-witness ruling) — silhouette cells excused because their fully covered
   // inward neighbour is uncut (a one-cell boundary artefact); named in the sentence.
-  let silhouetteWitnessCells = 0;
+  let silhouetteByWitnessCells = 0;
   // #1092 (gate v8) — THE RELIEF RADIUS IS THE SHADOW RADIUS r (the largest cutter's radius; the
   // cell class and the stamp artefact share the same disc). A caller with no tool set has no r:
   // the relief then reads the cell's OWN extent — one pitch, the same four axial neighbours the
@@ -1482,7 +1482,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
         if (clProofOk && clDistanceMm !== null) {
           if (silhouetteDeepest === null || depth > silhouetteDeepest.mm) silhouetteDeepest = { mm: depth, x, y, clDistanceMm };
         } else {
-          silhouetteWitnessCells++;
+          silhouetteByWitnessCells++;
         }
         continue;
       }
@@ -1696,8 +1696,8 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       : '';
   // #1092 (0f's inward-witness ruling) — the boundary artefacts excused by the witness are named.
   const silhouetteWitnessNote =
-    silhouetteWitnessCells > 0
-      ? `; ${silhouetteWitnessCells} boundary cell(s) excused on the inward witness (the fully covered inward neighbour is uncut)`
+    silhouetteByWitnessCells > 0
+      ? `; ${silhouetteByWitnessCells} boundary cell(s) excused on the inward witness (the fully covered inward neighbour is uncut)`
       : '';
   const overReliefNote =
     wallOverReliefCells + shadowOverReliefCells + borderOverReliefCells > 0 && deepest !== null
@@ -1757,7 +1757,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     silhouetteExcusedCells,
     silhouetteDeepest,
     silhouetteUnavailableCells,
-    silhouetteWitnessCells,
+    silhouetteByWitnessCells,
     adjudicatedFraction,
     adjudicatedMaxMm,
     adjudicatedMaxAt,
@@ -1805,7 +1805,7 @@ export function goalCutIntoUnchecked(reason: string, passCoverage: number = GOAL
     silhouetteExcusedCells: 0,
     silhouetteDeepest: null,
     silhouetteUnavailableCells: 0,
-    silhouetteWitnessCells: 0,
+    silhouetteByWitnessCells: 0,
     shadowNotScoredFraction: 0,
     adjudicatedFraction: 0,
     adjudicatedMaxMm: 0,

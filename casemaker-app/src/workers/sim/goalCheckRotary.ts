@@ -203,7 +203,7 @@ export function checkGoalCutIntoRotary(
     silhouetteExcusedCells: 0,
     silhouetteDeepest: null,
     silhouetteUnavailableCells: 0,
-    silhouetteWitnessCells: 0,
+    silhouetteByWitnessCells: 0,
     adjudicatedFraction: coverageFraction,
     adjudicatedMaxMm: maxCutIntoMm,
     adjudicatedMaxAt: maxCutIntoAt,

@@ -302,6 +302,12 @@
                   "minimum": -9007199254740991,
                   "type": "integer"
                 },
+                "silhouetteByWitnessCells": {
+                  "description": "#1092 (0f’s inward-witness ruling) — silhouette cells excused because their first fully covered inward neighbour is not cut below its own design within the rule’s slack: a one-cell boundary artefact of the grid’s edge.",
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                },
                 "silhouetteDeepest": {
                   "anyOf": [
                     {
@@ -345,12 +351,6 @@
                 },
                 "silhouetteUnavailableCells": {
                   "description": "#1092 (0f’s R-a ruling) — silhouette cells COUNTED because the proof was unavailable: no stock thickness is stated, so the blank’s floor is unknown. There is no silent topZ − minZ fallback; the sentence names the count.",
-                  "maximum": 9007199254740991,
-                  "minimum": -9007199254740991,
-                  "type": "integer"
-                },
-                "silhouetteWitnessCells": {
-                  "description": "#1092 (0f’s inward-witness ruling) — silhouette cells excused because their first fully covered inward neighbour is not cut below its own design within the rule’s slack: a one-cell boundary artefact of the grid’s edge.",
                   "maximum": 9007199254740991,
                   "minimum": -9007199254740991,
                   "type": "integer"
@@ -456,7 +456,7 @@
                 "silhouetteExcusedCells",
                 "silhouetteDeepest",
                 "silhouetteUnavailableCells",
-                "silhouetteWitnessCells",
+                "silhouetteByWitnessCells",
                 "leftoverFractions",
                 "passCoverage",
                 "wholeSurface",
@@ -987,6 +987,12 @@
                             "minimum": -9007199254740991,
                             "type": "integer"
                           },
+                          "silhouetteByWitnessCells": {
+                            "description": "#1092 (0f’s inward-witness ruling) — silhouette cells excused because their first fully covered inward neighbour is not cut below its own design within the rule’s slack: a one-cell boundary artefact of the grid’s edge.",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
                           "silhouetteDeepest": {
                             "anyOf": [
                               {
@@ -1030,12 +1036,6 @@
                           },
                           "silhouetteUnavailableCells": {
                             "description": "#1092 (0f’s R-a ruling) — silhouette cells COUNTED because the proof was unavailable: no stock thickness is stated, so the blank’s floor is unknown. There is no silent topZ − minZ fallback; the sentence names the count.",
-                            "maximum": 9007199254740991,
-                            "minimum": -9007199254740991,
-                            "type": "integer"
-                          },
-                          "silhouetteWitnessCells": {
-                            "description": "#1092 (0f’s inward-witness ruling) — silhouette cells excused because their first fully covered inward neighbour is not cut below its own design within the rule’s slack: a one-cell boundary artefact of the grid’s edge.",
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
@@ -1141,7 +1141,7 @@
                           "silhouetteExcusedCells",
                           "silhouetteDeepest",
                           "silhouetteUnavailableCells",
-                          "silhouetteWitnessCells",
+                          "silhouetteByWitnessCells",
                           "leftoverFractions",
                           "passCoverage",
                           "wholeSurface",

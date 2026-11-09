@@ -143,7 +143,7 @@ describe('#1092 (gate v8) — the excuse is bounded by the goal’s own relief',
     // The CL one millimetre INSIDE the part (cell (7, 5)), not on the uncovered side.
     const clAt = (): { x: number; y: number } => ({ x: 3.75, y: 2.5 });
     const report = checkGoalCutInto(goal, top, { wallShadowRadiusMm: 1.5, stockThicknessMm: 5, clAt });
-    expect(report.silhouetteWitnessCells).toBe(1);
+    expect(report.silhouetteByWitnessCells).toBe(1);
     expect(report.silhouetteExcusedCells).toBe(1);
     expect(report.adjudicatedFraction).toBe(0);
     expect(report.sentence).toContain('inward witness');
@@ -214,7 +214,7 @@ describe('#1092 (gate v8) — the excuse is bounded by the goal’s own relief',
     // (flat ground): only the witness separates this from a real cut.
     const clAt = (): { x: number; y: number } => ({ x: 4.5, y: 2.5 });
     const report = checkGoalCutInto(goal, top, { wallShadowRadiusMm: 1.5, stockThicknessMm: 40, clAt });
-    expect(report.silhouetteWitnessCells).toBe(1);
+    expect(report.silhouetteByWitnessCells).toBe(1);
     expect(report.silhouetteExcusedCells).toBe(1);
     expect(report.adjudicatedFraction).toBe(0);
     expect(report.sentence).toContain('inward witness');
@@ -224,7 +224,7 @@ describe('#1092 (gate v8) — the excuse is bounded by the goal’s own relief',
     const { goal, top } = boundaryFixture(10); // the inward neighbour is cut as deep
     const clAt = (): { x: number; y: number } => ({ x: 4.5, y: 2.5 });
     const report = checkGoalCutInto(goal, top, { wallShadowRadiusMm: 1.5, stockThicknessMm: 40, clAt });
-    expect(report.silhouetteWitnessCells).toBe(0);
+    expect(report.silhouetteByWitnessCells).toBe(0);
     // Both the boundary cell and the inward cell are counted at 10 mm.
     expect(Math.round(report.adjudicatedFraction * report.goalCells)).toBe(2);
     expect(report.adjudicatedMaxMm).toBeCloseTo(10, 6);
