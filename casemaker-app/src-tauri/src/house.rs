@@ -1511,6 +1511,11 @@ impl HouseStore {
                 if record.active_bed_profile_id.is_none() {
                     record.active_bed_profile_id = existing.active_bed_profile_id.clone();
                 }
+                // #1123-40 — the same rule for the registration memos: a client that does not know
+                // the section (or has none yet) sends no key, and must not wipe what is stored.
+                if record.registrations.is_none() {
+                    record.registrations = existing.registrations.clone();
+                }
                 *existing = record;
             }
             None => {
@@ -3681,6 +3686,7 @@ mod tests {
             power: None,
             wasteboard: None,
             finished_programs: Vec::new(),
+            registrations: None,
             updated_at: "2026-10-15T00:00:00.000Z".into(),
         }
     }
@@ -3832,6 +3838,48 @@ mod tests {
         let (_, etag) = store.location().await.unwrap();
         let bad = MachineRecord { margins: Some(serde_json::json!("lots")), ..a_machine("m-2") };
         assert!(matches!(store.put_machine(bad, Some(&etag)).await, Err(HouseError::BadEntry(_))));
+    }
+
+    #[tokio::test]
+    async fn a_machine_record_carries_its_registration_memos_and_an_absent_section_keeps_them() {
+        let (_dir, store) = store();
+        let (_, etag) = store.location().await.unwrap();
+        // #1123-40 — one memo per job setup, exactly as the client sent it.
+        let memo = serde_json::json!([{
+            "jobId": "job-1",
+            "setupId": "setup-1",
+            "setupIndex": 1,
+            "writtenG54": { "x": 9.344, "y": 3.001 },
+            "writtenAt": "2026-11-09T14:00:00.000Z",
+            "registration": {
+                "plan": { "at": { "x": 24, "y": 43 } },
+                "outcome": { "correctedG54": { "x": 9.344, "y": 3.001 } },
+                "surface": null,
+                "measuredAt": "2026-11-09T13:59:00.000Z"
+            }
+        }]);
+        let record = MachineRecord { registrations: Some(memo.clone()), ..a_machine("m-1") };
+        store.put_machine(record, Some(&etag)).await.unwrap();
+        let (bytes, etag) = store.location().await.unwrap();
+        let view: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(view["machines"][0]["registrations"], memo, "the memo round-trips verbatim");
+
+        // A machine PUT from a client that has no memo for this machine sends NO key: what is
+        // stored is kept, the same rule the bed's absent keys follow.
+        let mut next = a_machine("m-1");
+        next.firmware = Some("1.1.2".into());
+        store.put_machine(next, Some(&etag)).await.unwrap();
+        let (bytes, _) = store.location().await.unwrap();
+        let view: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(view["machines"][0]["registrations"], memo);
+
+        // A machine that never had one carries no key at all: an older document round-trips unchanged.
+        let (_, etag) = store.location().await.unwrap();
+        store.put_machine(a_machine("m-2"), Some(&etag)).await.unwrap();
+        let (bytes, _) = store.location().await.unwrap();
+        let view: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let m2 = view["machines"].as_array().unwrap().iter().find(|m| m["id"] == "m-2").unwrap();
+        assert!(m2.get("registrations").is_none(), "{m2}");
     }
 
     #[tokio::test]

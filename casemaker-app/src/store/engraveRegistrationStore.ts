@@ -12,10 +12,13 @@
  * settings. A plan re-derived later could differ from the one the operator approved (a shop default
  * may have moved). Storing the plan with the outcome keeps one registration, as it was run.
  *
- * THIS IS SESSION STATE, NOT JOB DATA. The outcome is a measurement on ONE machine, in its machine
- * coordinates; it is deliberately not written into the job document and not persisted. A reload
- * forgets it, and the release gate then refuses a faced job until it is registered again — the
- * honest answer, because nobody can claim the old reading still describes the stock on the table.
+ * THIS IS SESSION STATE, AND THE HOUSE KEEPS A COPY (#1123-40). The outcome is a measurement on ONE
+ * machine, in its machine coordinates; it is never written into the job document. Since #1123-40 the
+ * registration step also files a MEMO on the house's machine record (`machines[].registrations`,
+ * keyed by job + setup), carrying the G54 X/Y its origin write left in the controller. A reload
+ * restores the record only while the machine's live G54 X/Y still matches that memo; when it does
+ * not, nothing is restored and the card says both pairs — the honest answer, because a moved origin
+ * or a different blank must be measured again, not remembered.
  *
  * WHAT REMAINS FOR THE UI. The registration step itself: a surface that calls `runRegistration`
  * (`engine/cnc/registration/execute.ts`) with a plan from the setup and, on success, calls
@@ -55,6 +58,17 @@ export interface FirstRegistration {
    * the blank on the table; the laser's panel prints this so the operator sees how old the reading is.
    */
   measuredAt: string;
+  /**
+   * #1123-40 — how this record got here, when it did not come from a run in THIS session: the memo
+   * on the house's machine record was restored after the machine's live G54 X/Y was checked against
+   * the G54 its origin write left. `g54` is that live reading, `checkedAt` the clock at the check.
+   * Absent on a record a run made in this session.
+   */
+  restored?: {
+    checkedAt: string;
+    g54: { x: number; y: number };
+    setupIndex: number;
+  };
 }
 
 /**
@@ -101,6 +115,13 @@ interface EngraveRegistrationState {
     outcome: RegistrationOutcome,
     surface?: { plane: { offset: number; slopeX: number; slopeY: number }; z0: number } | null,
   ) => void;
+  /**
+   * #1123-40 — put a side-1 record back from the house's memo, EXACTLY as it was measured (its own
+   * `measuredAt`, not now). When the record names its setup it is filed there too, as `record` does.
+   */
+  restoreJob: (rec: FirstRegistration) => void;
+  /** #1123-40 — put a later setup's (side 2's) record back; side 1's job-keyed entry is untouched. */
+  restoreSetup: (rec: FirstRegistration) => void;
   /** #475 — remember what the cut-extent touches measured, independent of whether an origin was written. */
   measureSurface: (
     jobId: string,
@@ -150,6 +171,20 @@ export const useEngraveRegistrationStore = create<EngraveRegistrationState>((set
         },
       },
     })),
+
+  restoreJob: (rec) =>
+    set((s) => ({
+      records: { ...s.records, [rec.jobId]: rec },
+      ...(rec.setupId == null
+        ? {}
+        : { bySetup: { ...s.bySetup, [registrationKey(rec.jobId, rec.setupId)]: rec } }),
+    })),
+
+  restoreSetup: (rec) => {
+    const setupId = rec.setupId;
+    if (setupId == null) return;
+    set((s) => ({ bySetup: { ...s.bySetup, [registrationKey(rec.jobId, setupId)]: rec } }));
+  },
 
   measureSurface: (jobId, target, assessment) =>
     set((s) => ({
