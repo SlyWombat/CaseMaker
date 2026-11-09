@@ -244,9 +244,69 @@ material actually sits on the machine.
 ![A block of stock held in a vise, with the work-origin corner marked and arrows naming the X, Y and Z axes from that corner](img/cnc-work-origin-holding.svg)
 *Work origin and holding: where zero is, and what's holding the stock.*
 
+**Generating.** Pressing **Generate** while the app is still building its preview (or the plan's
+measured pick) does not fail: the progress line says "waiting for the measured pick to finish — the
+worker is busy", and the run continues as soon as the worker is free. The app's own stall watchdog
+starts only after the generate itself has spoken.
+
 **Simulating.** Generate always runs a full simulated pass before a job is considered ready — a
 pass that doesn't match the design, or that the chosen cutter can't physically reach, is refused
 rather than silently produced.
+
+### Jobs with several programs
+
+A job can post more than one program — one per cutter or setup the plan runs, in cut order. With more
+than one program the file bar offers **Save all (N programs)…** instead of a single Save: it writes
+every file the machine plays, in cut order, into a folder you choose (or one `<job>-programs.zip`
+where the browser has no folder picker). The names are the sheet's own — `<job>-p01.nc`,
+`<job>-p02.nc`, … with the number zero-padded to the last program's width, so `p10` sorts after
+`p09` on the machine's file list — and a program that produced an air-trace frame has
+`<job>-pNN-frame.nc` beside it. The run sheet lists each program with its own cut, its cutter and
+its own **Save** row, so one file can still be saved on its own; the run record travels with the set
+and lists every program's name and hash.
+
+### Two-sided jobs (the flip)
+
+A two-sided job cuts some of the part from the stock's top and the rest from its underside, planned
+from one job. Setup 1 cuts the top and leaves a **locating hold** in the stock's margin: two ⌀6
+through holes, cut by their own program at the end of setup 1 — the sheet's setup-1 page says
+"Setup 1 also bores the two ⌀6 locating holes side 2 registers on — program N, `<file>`; the probe
+enters each hole from side 2 and touches its wall". Setup 2 cuts the turned blank, held by a **tab
+band** so the part stays in the blank for the second side.
+
+Turn the stock over exactly as setup 2's page says ("Turn the part over for setup 2 … about the
+machine's Y axis (front to back)"), re-seat the edge against the same bracket arm, then press
+**Register**. Side 2's card registers on the two bores: the probe enters each from the centre and
+touches its wall — four sideways touches per bore, with a G38.5 release after every trigger — and
+the corner Z touches check the carried side-2 top against the surface tolerance. A setup-2 file does
+not run before that registration: the release refuses with "Program N did not start: setup 2 is not
+registered — run the Register step for setup 2 first." The card also refuses by name when the job
+cannot state its locating pins or its carried Z0, and when no probe tip is measured on the machine
+("no probe tip is measured on this machine — measure it in Manage › Accessories, then register
+side 2").
+
+Last, free the part: the flipped setup's last step is the **hand-cut tabs** — "The part is held by
+4 tabs — cut them with a flush-cut saw or knife after the machine is homed, then dress the stubs" —
+with the tab centres printed in the setup's work frame (4 tabs · 8 mm wide · 2 mm thick on the
+shop's default band). Cut them only after the machine is home and the program has ended.
+
+### Rotary jobs
+
+A relief cut on the 4th axis is checked like any other goal: the goal check compares the swept
+surface with the design and states **coverage** against the shop's 95 % pass line and the
+**adjudicated cut-into** share (with the deepest cell and where it is), and the verdict fails when
+either holds it. A relief placed too close to the axis for the sampler to reach every cell is the
+finding **`goal-rotary-unreachable`**, with the share of the map it could not sample; the exact
+per-part ruling is coming in land15, and until then the finding names that share rather than passing
+silently.
+
+### Materials
+
+Besides the woods, plastics and metals, the material list includes **Epoxy tooling board** — the
+100 × 100 × 10 mm cast resin board the M1 stock uses. The run sheet and the receipt print the
+material in the app's words ("Epoxy tooling board"), and the feeds come from Makera's own
+`Epoxy Tooling` rows for that cutter; a cutter with no row in that material is stated unfeedable
+rather than guessed.
 
 ### Exporting from FreeCAD
 

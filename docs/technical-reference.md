@@ -161,6 +161,61 @@ machine or an accessory owns lives on its record, never hard-coded in a screen**
 | `engine/cnc/engrave/goalHeightfield.ts` | `sampleGoalHeightfield` turns a **goal mesh** (#534) into a top-Z heightfield — one top-Z per cell, undercuts unrepresentable. Planning now goes through `cam/model` (#966); this sampler survives as the goal-check/coverage/thumbnail machinery's own measurement of the mesh, not a CAM stage. |
 | `engine/cnc/bedScene.ts` | The viewport's machine-frame picture of the bed + fixtures (the `BedScene` the Bed block renders), drawn from the same records and constants — not hand-placed. |
 
+### The model engine — `src/engine/cnc/cam/model/`
+
+The CNC planner is the model-driven engine (#956/#966): a goal mesh or STEP is planned from a
+cutter-location surface, never from a heightfield. The design record is
+`docs/design/cam-model-engine.md`; `plan.ts` is the one entry point.
+
+| Module | Purpose |
+| :--- | :--- |
+| `cam/model/plan.ts` | The one entry point, `planModelCam`: features → CL surface → ops → sequence → linking → post, per setup (§3.0 of the design record). |
+| `cam/model/types.ts` | The `ModelPlanInput`/`ModelPlanOutput` fields with no other home; `CutterCandidates` stays `sequence.ts`'s. |
+| `cam/model/features.ts` | Planar-face recognition (#958): pockets, islands, contour, rims and the curved remainder from a STEP or mesh. |
+| `cam/model/clsurface.ts` | The cutter-location surface by drop-cutter (#957) — the surface every op reads. |
+| `cam/model/dropcutter.ts` | The exact CL height a flat, ball, bull or V cutter reaches at one (x, y) against the triangles. |
+| `cam/model/triangleBins.ts` | The spatial bin that keeps the drop-cutter's triangle query cheap. |
+| `cam/model/rowDropper.ts` | Adaptive drop-cutter sampling along a raster row (the path side of §2). |
+| `cam/model/ops/` | The operation set: `pocket.ts`, `contour.ts`, `rough.ts`, `rest.ts`, `finish.ts`, `pencil.ts`, `chamfer.ts`, and `rasterMask.ts` (the grid→loop stitching both masks need). |
+| `cam/model/finishMask.ts` | The finish's per-point leftover rule and its ball footprint (#970). |
+| `cam/model/sequence.ts` | The cutter sequence chosen by cost (#961), with the rank row's stated key. |
+| `cam/model/linking.ts` | Stay-down linking, the region tour and the shared op/material contract (#962). |
+| `cam/model/rideTest.ts` | The ride test a join uses over a cut surface (#962). |
+| `cam/model/pickAmongEquals.ts` | The ball rank's tie: the reach-margin gate first, then the canonical key (#1111). |
+| `cam/model/settings.ts` | The engine parameters the stages read as settings, not constants (#959/#960). |
+| `cam/model/setups.ts` | Multi-setup planning on the model engine (#965). |
+| `cam/model/twoPlans.ts` | The owned plan and the ideal plan, each planned from its own set (#975). |
+| `cam/model/tradeoff.ts` | The owned-versus-ideal tradeoff line, stated only when it is material (#975). |
+| `cam/model/wholeSurface.ts` | The whole-surface union across `perSetup` (#965). |
+| `cam/model/planMeta.ts` | The plan's per-op recorded metadata, checked against its own moves (#1025). |
+
+### The goal check — SIMULATOR_VERSION 8
+
+A posted program is **stamped** onto the goal's heightfield and the gate reads two numbers side by
+side: the **raw** share cut deeper than 0.01 mm and the **adjudicated** share after the cells a
+heightfield cannot judge are excused **on proof** — every excused class counted and printed beside
+the verdict (#948/#964/#970/#996/#1064/#1086/#1092). v8's proofs are the **per-cell relief bound**
+(no excuse may forgive deeper than the goal's own local relief), the **silhouette proof** with its
+**inward witness** (every covered part-side neighbour untouched) or the CL-distance test, the v6
+straddling proof for wall and border cells, and the edge-break band seeded from the design
+silhouette ∪ the grid border. There is **one oracle**: the receipt's goal block is the verdict;
+`goal_check.py` is a diagnostic and is never quoted as the number. The rule and its version ladder
+are frozen on `docs/design/goal-check-gate.md`; `tests/unit/goalRuleFreeze948.spec.ts` pins the
+fingerprint, and `cncGuide.spec.ts` holds every diagnostic code to its guide row.
+
+### Program files and the owned set
+
+`releaseFileName(stem, index, total)` (`engine/cnc/engrave/runSheet.ts`) is the **one** naming
+function — Save, Save all, the run sheet, the release store, the run record and the CLI all read
+it. A single-program run keeps `<stem>.nc`; a multi-program run is `<stem>-p<n>.nc` with the index
+**zero-padded to the width of `total`** (`p1…p5`, `p01…p19`), so the machine's file list sorts in
+cut order. The owned plan is planned from the owned set — `inv:` + `user:` + the chosen tool,
+built-ins only when the inventory is empty, `cat:` never (#1041) — and both the app and the CLI
+see one list in a canonical order (#1111). Two ball candidates equal on the rank's own keys are
+separated by the **reach-margin gate** (`fluteLength − deepest cut ≥ reachMarginMm`, shop setting,
+recommendation 1.0 mm), then by the canonical key; the row says "same diameter: by key, pending
+#1114" until the maintainer's shop-policy answer lands — #1114's priced bit change is coming.
+
 ### Test API — `window.__caseMaker`
 
 Activated by `VITE_E2E=1` or `MODE=test`. The full surface is documented in `src/testing/windowApi.ts`. Highlights:
