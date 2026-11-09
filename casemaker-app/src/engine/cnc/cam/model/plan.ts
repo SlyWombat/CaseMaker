@@ -50,7 +50,7 @@ import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, s
 import { fullyReachable, pocket } from './ops/pocket';
 import { assertOwnPocketMetadata, PlanMetadataInconsistentError } from './planMeta';
 import { roughLeftAbove } from './ops/rough';
-import { clSurface, creaseFits } from './clsurface';
+import { clSurface, creaseFits , type ClGridEntry } from './clsurface';
 import { dropCutterHeight, profileOf, type CutterProfile, type DropCutterMesh } from './dropcutter';
 import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
 
@@ -69,7 +69,7 @@ import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
  * The opposite setup's solid sits at or below its own `dropCutterHeight` at the SAME document
  * (world) point (#957's drop-cutter, read off the design mesh itself — the same ground truth
  * `rough`/`rest`/`finish` already trust for "where the final surface is," not `SetupPlan.clGrid`,
- * which carries only `{toleranceMm, minSpacingMm, maxSpacingMm}` per cutter and no sampled height
+ * which carries only `{toleranceMm, minSpacingMm, maxSpacingMm, minSpacingSource, minSpacingFromStepOverMm}` per cutter and no sampled height
  * at all). This setup's cut stays safe while it never reaches past that same world height, less a
  * numerical-noise margin (the SAME chord-tolerance bound `PROFILE_OFFSET_GUARD_MM`/
  * `ARC_CHORD_TOLERANCE_MM` already uses elsewhere, not a new tuned number):
@@ -258,6 +258,12 @@ export function setupStockOf(
 
 export interface ModelPlanInput {
   geometry: FeatureSource;
+  /**
+   * #1129 — THE JOB'S STATED SAMPLING FLOOR (`surface.minSpacingMm`), mm. Absent → each CL surface
+   * derives it as `min(its step-over / 10, 0.05 mm)`, never below the chord tolerance; the floor
+   * and its source are recorded per cutter on the plan's `clGrid` and stated in the receipt.
+   */
+  minSampleSpacingMm?: number | null;
   /**
    * #1111 — THE SHOP'S REACH-MARGIN GATE, mm (`reach.marginMm`, recommended 1.0). A ball tie is
    * decided by the gate, then by the cutter key ("by key, pending #1114"). Absent = 1.0 mm.
@@ -525,7 +531,7 @@ export interface SetupPlan {
   setupIndex: number;
   features: FeatureTree;
   /** Grid resolution per cutter/op — renamed from `clSurface` to avoid colliding with `clsurface.ts`'s exported function of that name. */
-  clGrid: { cutterKey: string; toleranceMm: number; minSpacingMm: number; maxSpacingMm: number }[];
+  clGrid: ClGridEntry[];
   ops: PlannedOp[];
   sequence: SequencedCutter[];
   linking: { rapidsCount: number; hopsCount: number; airFractionPct: number };
@@ -1288,6 +1294,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       // when the job states neither.
       finishScallopMm: statedCuspFor(b) ?? DEFAULT_FINISH_SCALLOP_MM,
       stepOverMm: pocketParams.stepOver,
+      ...(input.minSampleSpacingMm == null ? {} : { minSampleSpacingMm: input.minSampleSpacingMm }),
       feeds,
       cutParamsFor: paramsFor,
       rapid: Z1.rapidEstimate,
@@ -1520,7 +1527,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // The opposite setup's "finished surface" is read straight off the SAME design mesh
     // (`input.geometry`, rotated into ITS frame — `rotatedGeometryFor`, the same helper `curvedGeometry`
     // above uses) via a real drop-cutter height (`dropcutter.ts`, #957) — not `clGrid` (it carries
-    // only `{toleranceMm, minSpacingMm, maxSpacingMm}` per cutter, a report of what was sampled,
+    // only `{toleranceMm, minSpacingMm, maxSpacingMm, minSpacingSource, minSpacingFromStepOverMm}` per cutter, a report of what was sampled,
     // never the sampled heights themselves, so it cannot answer "how deep is safe at (x, y)").
     // Re-querying the mesh directly is the SAME ground truth `rough`/`rest`/`finish` already trust
     // for "where the final surface is," not a second, divergent source.
@@ -1723,7 +1730,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
                   slopeMedianDeg: 0,
                   in: 'top',
                 };
-                const cl = clSurface(curvedGeometry, fitRegion, ball, pocketParams.stepOver);
+                const cl = clSurface(curvedGeometry, fitRegion, ball, pocketParams.stepOver, input.minSampleSpacingMm ?? null);
                 let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
                 for (const ring of kept) {
                   for (const [x, y] of ring) {
@@ -4064,6 +4071,8 @@ export interface PlanCurvedOptions {
   flatFinishMaxSlopeDeg?: number;
   /** The rings' spacing; absent → the flat's own radius. */
   stepOverMm?: number;
+  /** #1129 — the job's stated `surface.minSpacingMm`; absent → derived per cutter (see `ModelPlanInput`). */
+  minSampleSpacingMm?: number | null;
   /** `flat`'s own feed/plunge — kept as the fallback every tool used before the review's finding
    * below named it: the ball and the V each cut at a DIFFERENT diameter and want their own
    * catalogue row, not the flat's. */
@@ -4106,7 +4115,7 @@ export interface PlanCurvedResult {
   /** #992 — `notes`, typed: one statement per cause with its code, severity and count. */
   statements: PlanStatement[];
   /** `SetupPlan.clGrid`'s entries — every CL surface this pipeline sampled, one per cutter that built one. */
-  clGrid: { cutterKey: string; toleranceMm: number; minSpacingMm: number; maxSpacingMm: number }[];
+  clGrid: ClGridEntry[];
   /** #959 item 5 — every stage that threw, per region/rim, and the stages a failed rough skipped. */
   unplanned: SequenceStepFailure[];
 }
@@ -4253,6 +4262,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       toleranceMm: surface.toleranceMm,
       minSpacingMm: surface.minSpacingMm,
       maxSpacingMm: surface.maxSpacingMm,
+      minSpacingSource: surface.minSpacingSource,
+      minSpacingFromStepOverMm: surface.minSpacingFromStepOverMm,
     });
   };
   // #1054 — a memo hit does not rebuild the CL, so the grid fact it recorded rides the entry.
@@ -4441,7 +4452,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       const roughed = roughMemo !== undefined ? true : attempt('rough', flat, ref, () => {
         memTrace('cl:build', { cutter: cutterKeyOf(flat), region: roughRegion.id, what: 'flat' });
         const clFlatStarted = performance.now();
-        const clFlat = floorSurface(clSurface(opts.geometry, roughRegion, flat, cuts.stepOver));
+        const clFlat = floorSurface(clSurface(opts.geometry, roughRegion, flat, cuts.stepOver, opts.minSampleSpacingMm ?? null));
         memTrace('cl:built', { cutter: cutterKeyOf(flat), region: roughRegion.id, what: 'flat', ms: Math.round(performance.now() - clFlatStarted) });
         flatCl.surface = clFlat;
         noteGrid(flat, clFlat);
@@ -4528,7 +4539,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       } else {
         memTrace('curved:stage', { stage: 'rest-flat', cutter: cutterKeyOf(restFlat), region: roughRegion.id });
         attempt('rest', restFlat, ref, () => {
-          const restCl = floorSurface(clSurface(opts.geometry, base, restFlat, cuts.stepOver));
+          const restCl = floorSurface(clSurface(opts.geometry, base, restFlat, cuts.stepOver, opts.minSampleSpacingMm ?? null));
           restClSink.surface = restCl;
           noteGrid(restFlat, restCl);
           const out = rest({
@@ -4817,7 +4828,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       if (clBallCache === undefined) {
         memTrace('cl:build', { cutter: cutterKeyOf(finishCutter), region: roughRegion.id, what: 'finish' });
         const clStarted = performance.now();
-        clBallCache = floorSurface(clSurface(opts.geometry, roughRegion, finishCutter, cuts.stepOver));
+        clBallCache = floorSurface(clSurface(opts.geometry, roughRegion, finishCutter, cuts.stepOver, opts.minSampleSpacingMm ?? null));
         memTrace('cl:built', { cutter: cutterKeyOf(finishCutter), region: roughRegion.id, what: 'finish', ms: Math.round(performance.now() - clStarted) });
         noteGrid(finishCutter, clBallCache);
       }
@@ -4918,6 +4929,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
                 toleranceMm: clBallCache.toleranceMm,
                 minSpacingMm: clBallCache.minSpacingMm,
                 maxSpacingMm: clBallCache.maxSpacingMm,
+                minSpacingSource: clBallCache.minSpacingSource,
+                minSpacingFromStepOverMm: clBallCache.minSpacingFromStepOverMm,
               },
             }),
       });
@@ -4998,7 +5011,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
             cutter: restBallTool,
             region: roughRegion,
             regionRef: roughRef,
-            clSurface: (restBallCl = clSurface(opts.geometry, roughRegion, restBallTool, cuts.stepOver)),
+            clSurface: (restBallCl = clSurface(opts.geometry, roughRegion, restBallTool, cuts.stepOver, opts.minSampleSpacingMm ?? null)),
             kind: finishKind,
             mesh: opts.geometry.triangles,
             scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
@@ -5070,7 +5083,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           // does not state (the organizer's catalogue row) has no drop-cutter profile and
           // `clSurface` throws by name; the crease must be STATED in `unplanned` with that reason,
           // never refuse the whole job. The throw used to sit above the attempt and escaped.
-          const vCl = clSurface(opts.geometry, roughRegion, vTool, cuts.stepOver);
+          const vCl = clSurface(opts.geometry, roughRegion, vTool, cuts.stepOver, opts.minSampleSpacingMm ?? null);
           const out = pencil({
             cutter: vTool,
             region: roughRegion,
@@ -5183,7 +5196,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // starting at that mouth, never removes) is taken here. The first attempt excluded the pocket
     // footprints and left that skin standing: the tray's coverage fell 0.77 %.
     attempt('skin', flat, skinRef, () => {
-      const skinCl = clSurface(opts.geometry, skinRegion, flat, cuts.stepOver);
+      const skinCl = clSurface(opts.geometry, skinRegion, flat, cuts.stepOver, opts.minSampleSpacingMm ?? null);
       return skin({
         cutter: flat,
         regionRef: skinRef,
@@ -5468,7 +5481,7 @@ export interface PlanTreeResult {
   /** `SetupPlan.sequence` — the pocket chain's priced cutters, unchanged from `planPocketsForTree`. */
   sequence: SequencedCutter[];
   /** `SetupPlan.clGrid` — the CL surfaces the curved stages sampled. */
-  clGrid: { cutterKey: string; toleranceMm: number; minSpacingMm: number; maxSpacingMm: number }[];
+  clGrid: ClGridEntry[];
   unreachable: string[];
   notes: string[];
   /** #992 — the pocket and curved planners' statements, in the same order as `notes`. */

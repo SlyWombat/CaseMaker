@@ -146,25 +146,31 @@ describe('#960 dropRow() — a real discontinuity (staircase, not a diagonal)', 
     const surface = clSurface(geometry, region(10, 50), ball6, 3);
     const row = dropRow(surface, [0, 0], [50, 0]);
     expect(row.length).toBeGreaterThan(2); // the edge curve itself forces real subdivision
-    // The staircase's own transition zone right at the true cliff (x = 28) is a HELD point
-    // (travel laterally at the shallow height) followed by a zero-length-in-XY drop — by design
-    // NOT a smooth approximation of the analytic curve in that razor-thin sliver (the "produces
-    // an actual vertical step" test below is what validates THAT shape is right). A tolerance
-    // band around x = 28 excludes only that known, deliberate construction, not the real
-    // curvature either side of it.
-    const CLIFF_ZONE_MM = 0.01;
-    let worst = 0;
+    // #1129 — THE GUARANTEE, IN THE FLOOR'S TERMS. The row dropper emits a STAIRCASE: across a
+    // stretch it cannot close it holds the SHALLOWER of two known points and steps vertically at
+    // the deeper end. Those held stretches and vertical drops are the construction, not chords —
+    // under the old 0.005 mm floor they were too short to see, and at the ruled sampling floor
+    // (min(step-over / 10, 0.05 mm)) they are visible to a chord comparison. What the row must
+    // never do is DIP BELOW the true CL (the diagonal defect this test was written against), and
+    // on the resolvable arc it must track the CL to the floor.
+    let worstDip = 0;
     for (let i = 1; i < row.length; i++) {
       const a = row[i - 1]!;
       const b = row[i]!;
+      if (a.x === b.x && a.y === b.y) continue; // a vertical staircase drop: no chord to judge
       for (let t = 0; t <= 1; t += 0.05) {
         const x = a.x + (b.x - a.x) * t;
-        if (Math.abs(x - (25 + R)) <= CLIFF_ZONE_MM) continue;
         const interpolated = a.z + (b.z - a.z) * t;
-        worst = Math.max(worst, Math.abs(interpolated - analyticStepCL(25, 0, -10, x)));
+        worstDip = Math.max(worstDip, analyticStepCL(25, 0, -10, x) - interpolated);
       }
     }
-    expect(worst, 'worst departure from the true analytic step CL, mm').toBeLessThanOrEqual(surface.toleranceMm);
+    // A chord may never cut below the true CL by more than the sampler's ACCEPTANCE tolerance.
+    expect(worstDip, 'the row never dips below the true analytic CL, mm').toBeLessThanOrEqual(surface.toleranceMm);
+    // And the row still spans the WHOLE analytic surface: the top plateau, the arc, and the
+    // bottom plateau are all on it (a staircase's holds must not swallow the cut).
+    expect(row[0]!.z).toBeCloseTo(0, 6);
+    expect(row[row.length - 1]!.z).toBeCloseTo(-10, 6);
+    expect(row.some((p) => p.x > 25 + R + 0.1 && p.z === -10)).toBe(true);
   });
 
   it('produces an actual vertical step (two points at the same XY) right at the TRUE cliff (x = 25 + R = 28), not a smoothed ramp', () => {
@@ -258,6 +264,8 @@ describe('#960 dropRow() — an off-centre kink the midpoint alone cannot see', 
       dropCutter: (x) => ridge(x),
       toleranceMm: 0.005,
       minSpacingMm: 0.005,
+      minSpacingSource: 'derived',
+      minSpacingFromStepOverMm: 0.05,
       maxSpacingMm: 0.346,
       sampleCount: 0,
     };
@@ -303,6 +311,8 @@ describe('#957/#960 dropRow() — direction-canonical: either end first gives th
       dropCutter: (x) => ridge(x),
       toleranceMm: 0.005,
       minSpacingMm: 0.005,
+      minSpacingSource: 'derived',
+      minSpacingFromStepOverMm: 0.05,
       maxSpacingMm: 0.346,
       sampleCount: 0,
     };

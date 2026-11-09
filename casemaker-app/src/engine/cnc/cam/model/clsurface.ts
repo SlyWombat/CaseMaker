@@ -46,8 +46,18 @@ export interface ClSurface {
    */
   dropCutterUnclipped?(x: number, y: number): number | null;
   toleranceMm: number;
+  /**
+   * #1129 — THE ADAPTIVE SAMPLER'S FLOOR: no row segment is subdivided finer than this. It is NOT
+   * the chord tolerance (which stays the ACCEPTANCE rule): a derived sampling spacing —
+   * `min(finishStepOver / 10, 0.05 mm)`, never below {@link ARC_CHORD_TOLERANCE_MM} — unless the
+   * job states `surface.minSpacingMm`. See {@link minSampleSpacingFor}.
+   */
   minSpacingMm: number;
   maxSpacingMm: number;
+  /** #1129 — where {@link minSpacingMm} came from: the job's stated value, or the step-over derivation. */
+  minSpacingSource: MinSpacingSource;
+  /** #1129 — the finish step-over the derived floor divided by 10 (the number the receipt states). */
+  minSpacingFromStepOverMm: number;
   /** How many drop-cutter evaluations this surface took to build — a report number, not a budget (§6: no caps on geometry, a stall guard only). */
   sampleCount: number;
 }
@@ -102,13 +112,61 @@ function onBoundary(footprint: readonly (readonly [number, number][])[], x: numb
   return false;
 }
 
-export function clSurface(geometry: FeatureSource, region: RemainderRegion, cutter: Tool, _stepOverMm: number): ClSurface {
+/**
+ * #1129 — THE SAMPLE FLOOR, DERIVED AND STATED (defaults over knobs). Before this, `clSurface`
+ * passed the CHORD TOLERANCE (0.005 mm) as the row-dropper's minimum spacing: a geometry
+ * acceptance number used as a sampling floor, so every kink subdivided a row to 5 µm — 1.72 M
+ * drop-cutter queries and 1.42 B edge-search evaluations in 72 s on a 59 mm plate (#1129's
+ * profile). The floor is now a sampling spacing: the job's own `surface.minSpacingMm` when stated,
+ * else `min(stepOver / 10, 0.05 mm)` (a tenth of the raster pitch, capped at 0.05 mm — fine enough
+ * that the staircase rule still catches real discontinuities, coarse enough not to chase the
+ * heightfield's own noise), never below the chord tolerance. The chord tolerance keeps governing
+ * ACCEPTANCE in `dropRow`; only the floor moved.
+ */
+export const MIN_SAMPLE_SPACING_CAP_MM = 0.05;
+
+export type MinSpacingSource = 'derived' | 'stated';
+
+export interface MinSampleSpacing {
+  mm: number;
+  source: MinSpacingSource;
+  /** The step-over the derived floor divided by 10; the job's own numbers either way. */
+  fromStepOverMm: number;
+}
+
+/** #1129 — one cutter's recorded sampling facts: the plan's `clGrid` entry, and the receipt's `sampling` row. */
+export interface ClGridEntry {
+  cutterKey: string;
+  toleranceMm: number;
+  minSpacingMm: number;
+  maxSpacingMm: number;
+  minSpacingSource: MinSpacingSource;
+  minSpacingFromStepOverMm: number;
+}
+
+export function minSampleSpacingFor(stepOverMm: number, statedMm?: number | null): MinSampleSpacing {
+  if (statedMm !== undefined && statedMm !== null && Number.isFinite(statedMm) && statedMm > 0) {
+    return { mm: Math.max(statedMm, ARC_CHORD_TOLERANCE_MM), source: 'stated', fromStepOverMm: stepOverMm };
+  }
+  const derived = Math.min(stepOverMm / 10, MIN_SAMPLE_SPACING_CAP_MM);
+  return { mm: Math.max(derived, ARC_CHORD_TOLERANCE_MM), source: 'derived', fromStepOverMm: stepOverMm };
+}
+
+export function clSurface(
+  geometry: FeatureSource,
+  region: RemainderRegion,
+  cutter: Tool,
+  stepOverMm: number,
+  /** #1129 — the job's stated `surface.minSpacingMm`, when it states one. */
+  statedMinSpacingMm?: number | null,
+): ClSurface {
   const profile = profileOf(cutter);
   if (profile === null) {
     throw new Error(`cam/model/clsurface: ${cutter.name || cutter.shape} has no drop-cutter profile for a CL surface`);
   }
   const mesh: DropCutterMesh = geometry.triangles;
   const toleranceMm = ARC_CHORD_TOLERANCE_MM;
+  const spacing = minSampleSpacingFor(stepOverMm, statedMinSpacingMm);
   // The sagitta bound (the same closed form `finishStepOverForCusp`, surface3d.ts, derives for the
   // scallop band — here for the GEOMETRIC sampling tolerance instead): the largest spacing that
   // keeps a straight-line interpolation within `toleranceMm` of the cutter's own curved profile. A
@@ -134,7 +192,9 @@ export function clSurface(geometry: FeatureSource, region: RemainderRegion, cutt
       return dropCutterHeight(profile, mesh, x, y);
     },
     toleranceMm,
-    minSpacingMm: toleranceMm,
+    minSpacingMm: spacing.mm,
+    minSpacingSource: spacing.source,
+    minSpacingFromStepOverMm: spacing.fromStepOverMm,
     maxSpacingMm,
     get sampleCount() {
       return sampleCount;

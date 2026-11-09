@@ -874,6 +874,14 @@ export interface EngraveSurfaceSettings {
   /** Heightfield sampling pitch (both axes), mm. Default: the shop's `sim.columnFlatPitchYMm`. */
   gridPitchMm?: Mm;
   /**
+   * #1129 — THE ADAPTIVE ROW SAMPLER'S FLOOR, mm: no row segment is subdivided finer than this.
+   * Absent (the default) derives it as `min(the running cutter's step-over / 10, 0.05 mm)`, never
+   * below the chord tolerance (0.005 mm); the plan records the value and its source per cutter and
+   * the receipt states them. This is a sampling spacing, not the chord tolerance that governs
+   * acceptance.
+   */
+  minSpacingMm?: Mm;
+  /**
    * #764 — what is cleared AROUND an item goal, so the part is not left in a pit of stock. `'ring'`
    * (the default when absent) cuts a band at least one cutter diameter wide around the part down
    * to its base plane; `'whole'` clears the whole blank; `'none'` keeps the pre-#764 cut. Ignored

@@ -56,6 +56,8 @@ function vCl(): ClSurface {
     dropCutter: (x: number): number | null => (x >= 0 && x <= 20 ? designZ(x) : null),
     toleranceMm: 0.005,
     minSpacingMm: 0.005,
+    minSpacingSource: 'derived',
+    minSpacingFromStepOverMm: 0.05,
     maxSpacingMm: 0.3,
     sampleCount: 0,
   };
@@ -66,7 +68,7 @@ function vCl(): ClSurface {
 describe('#965 the crease pre-gate — hasValley()', () => {
   it('sees the groove as a valley and a flat plate as none', () => {
     expect(hasValley(vCl(), bounds, 0.1)).toBe(true);
-    const flat: ClSurface = { dropCutter: (x: number) => (x >= 0 && x <= 20 ? PLATE : null), toleranceMm: 0.005, minSpacingMm: 0.005, maxSpacingMm: 0.3, sampleCount: 0 };
+    const flat: ClSurface = { dropCutter: (x: number) => (x >= 0 && x <= 20 ? PLATE : null), toleranceMm: 0.005, minSpacingMm: 0.005, minSpacingSource: 'derived', minSpacingFromStepOverMm: 0.05, maxSpacingMm: 0.3, sampleCount: 0 };
     expect(hasValley(flat, bounds, 0.1)).toBe(false);
   });
 });

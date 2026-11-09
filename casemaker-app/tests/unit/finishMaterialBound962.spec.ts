@@ -29,6 +29,8 @@ const clSurface: ClSurface = {
   dropCutter: (x, y) => (x >= 0 && x <= 10 && y >= 0 && y <= 10 ? -2.5 : null),
   toleranceMm: 0.005,
   minSpacingMm: 0.1,
+  minSpacingSource: 'derived',
+  minSpacingFromStepOverMm: 1,
   maxSpacingMm: 0.5,
   sampleCount: 0,
 };
@@ -94,6 +96,8 @@ describe("#962 — B's repro: a stay-down feed through a taller neighbour is ref
     dropCutter: (x, y) => (x >= 0 && x <= 10 && y >= 0 && y <= 10 ? -5.5 : null),
     toleranceMm: 0.005,
     minSpacingMm: 0.1,
+    minSpacingSource: 'derived',
+    minSpacingFromStepOverMm: 1,
     maxSpacingMm: 0.5,
     sampleCount: 0,
   };

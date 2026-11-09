@@ -44,7 +44,7 @@ const zAt = (y: number): number => -SLOPE * (y - Y0);
 const TIP_RISE = BALL_R * (1 / Math.cos(Math.atan(SLOPE)) - 1);
 
 function surface(drop: (x: number, y: number) => number | null): ClSurface {
-  return { dropCutter: drop, toleranceMm: 0.005, minSpacingMm: 0.1, maxSpacingMm: 0.5, sampleCount: 0 };
+  return { dropCutter: drop, toleranceMm: 0.005, minSpacingMm: 0.1, minSpacingSource: 'derived', minSpacingFromStepOverMm: 1, maxSpacingMm: 0.5, sampleCount: 0 };
 }
 
 const inside = (x: number, y: number): boolean => x >= X0 && x <= X1 && y >= Y0 && y <= Y1;

@@ -288,7 +288,14 @@ function edgeContactMax(x0: number, y0: number, z0: number, x1: number, y1: numb
   let d = a + GOLDEN * (b - a);
   let fc = f(c);
   let fd = f(d);
-  for (let i = 0; i < 80 && b - a > 1e-12; i++) {
+  // #1129 — THE SEARCH STOPS AT A PHYSICAL TOLERANCE. The parameter `s` spans the edge's own
+  // reach interval, so the interval's LENGTH along the edge is (b − a) × the edge's length; stop
+  // once that is 1e-3 mm (the Z the fixtures and the NC judge at) instead of running to a 1e-12
+  // parameter width — the pre-#1129 loop spent ~2–3× the f-evaluations needed for the accuracy
+  // anything downstream can use. A zero-length edge keeps the old parameter tolerance.
+  const edgeLenMm = Math.hypot(x1 - x0, y1 - y0);
+  const sTolerance = edgeLenMm > 0 ? 1e-3 / edgeLenMm : 1e-12;
+  for (let i = 0; i < 80 && b - a > sTolerance; i++) {
     if (fc > fd) {
       b = d;
       d = c;

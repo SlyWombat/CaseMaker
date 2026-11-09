@@ -27,6 +27,8 @@ function surfaceOf(f: (x: number) => number): ClSurface {
     dropCutter: (x, y) => (Math.abs(x) > HALF || Math.abs(y) > HALF ? null : f(x)),
     toleranceMm: 0.01,
     minSpacingMm: 0.1,
+    minSpacingSource: 'derived',
+    minSpacingFromStepOverMm: 1,
     maxSpacingMm: 0.5,
     sampleCount: 0,
   };

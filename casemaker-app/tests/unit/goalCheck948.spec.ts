@@ -455,10 +455,17 @@ describe('#948 the elephant corpus run — zero cut-into is not a pass', () => {
       // tolerance (5 um — the bar: a pin may move only by cells whose delta is below it):
       //   (19.276, 40.031): 0.09974 -> 0.10003  (delta 0.29 um)
       //   (24.276, 39.931): 0.09940 -> 0.10013  (delta 0.73 um)
+      // #1129 (2026-11-09) — THE ROW SAMPLER'S FLOOR MOVES THE PIN BY 36 CELLS, BY CONSTRUCTION.
+      // The floor is now a sampling spacing, min(step-over / 10, 0.05 mm) floored at the chord
+      // tolerance, instead of the chord tolerance (0.005 mm) itself, so a cell within 50 um of a
+      // ridge's 0.1 mm band can cross it where the 5 um walk did not: 0.3069757 -> 0.3085502, 36
+      // of 22 865 cells (+0.16 pt leftover). That exceeds #1080's 5 um bar by construction — the
+      // ruled floor is ten times it — and the verdict is untouched: ok:false on coverage, the same
+      // sentence, zero adjudicated cut-into.
       const leftoverFraction = report.goalCutInto?.leftoverFractions[0] ?? 0;
       expect(
-        Math.abs(leftoverFraction - 0.3069757),
-        `leftoverFractions[0] measured ${leftoverFraction} (the model engine's pin is 0.3069757 and this compares the difference)`,
+        Math.abs(leftoverFraction - 0.3085502),
+        `leftoverFractions[0] measured ${leftoverFraction} (the model engine's pin is 0.3085502 and this compares the difference)`,
       ).toBeLessThanOrEqual(1 / (report.goalCutInto?.goalCells ?? 1));
     } finally {
       session.dispose();

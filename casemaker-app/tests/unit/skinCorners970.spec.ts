@@ -31,6 +31,8 @@ describe('#970 skinTargetGrid — a wall straddling a cell', () => {
     dropCutter: (x) => (x < WALL_X ? HIGH : LOW),
     toleranceMm: 0.01,
     minSpacingMm: 0.1,
+    minSpacingSource: 'derived',
+    minSpacingFromStepOverMm: 1,
     maxSpacingMm: 1,
     sampleCount: 0,
   };

@@ -6735,6 +6735,12 @@
                   "minimum": 0.02,
                   "type": "number"
                 },
+                "minSpacingMm": {
+                  "description": "The adaptive row sampler’s floor, in millimetres; omit to derive it as min(step-over / 10, 0.05 mm), never below 0.005 mm.",
+                  "maximum": 1,
+                  "minimum": 0.005,
+                  "type": "number"
+                },
                 "pencil": {
                   "description": "Add a pencil pass along the concave creases after the scallop; omit for off.",
                   "type": "boolean"
@@ -7089,6 +7095,12 @@
                     "description": "Heightfield sampling pitch on both axes, in millimetres; omit for the shop’s flat-grid Y pitch.",
                     "maximum": 2,
                     "minimum": 0.02,
+                    "type": "number"
+                  },
+                  "minSpacingMm": {
+                    "description": "The adaptive row sampler’s floor, in millimetres; omit to derive it as min(step-over / 10, 0.05 mm), never below 0.005 mm.",
+                    "maximum": 1,
+                    "minimum": 0.005,
                     "type": "number"
                   },
                   "pencil": {

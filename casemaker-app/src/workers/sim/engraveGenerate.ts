@@ -5297,6 +5297,9 @@ export async function buildModelPlanInputForGoal(
 
   return {
     geometry,
+    // #1129 — THE JOB'S STATED SAMPLING FLOOR rides the input; absent, each CL surface derives it
+    // from its step-over (see `clsurface.ts`'s `minSampleSpacingFor`).
+    ...(goal.surface?.minSpacingMm === undefined ? {} : { minSampleSpacingMm: goal.surface.minSpacingMm }),
     setups: setupsWithStock,
     // #943 (10) — the JOB's own setup count rides the input, so a caller that re-plans ONE setup
     // alone (#1017's twin) keeps the two-setup rules: `outline-is-stock` reads this, not the
@@ -5398,11 +5401,22 @@ function goalSurfaceFactsFromPlan(output: ModelPlanOutput): GoalSurfaceFacts {
   const finishStepDownMm = passStep(finishOp);
   const roughStepOverMm = pitchOf(roughOp?.outcome.cutter ?? '');
   const finishStepOverMm = pitchOf(finishOp?.outcome.cutter ?? '');
+  // #1129 — THE ROW SAMPLER'S FLOOR, STATED WITH ITS SOURCE beside the grid facts: the operator
+  // reading the sheet learns the finest spacing the rows were sampled at and why it is that number.
+  const floor = spacings.length === 0 ? null : spacings.reduce((a, b) => (a.minSpacingMm <= b.minSpacingMm ? a : b));
+  const floorWords =
+    floor === null
+      ? ''
+      : `; the rows sample no finer than ${floor.minSpacingMm.toFixed(3)} mm (` +
+        (floor.minSpacingSource === 'stated'
+          ? 'the job’s own surface.minSpacingMm'
+          : `derived from the ${floor.minSpacingFromStepOverMm.toFixed(3)} mm step-over ÷ 10, capped at 0.050 mm`) +
+        ')';
   return {
     resolutionNote:
       pitchMax === null || pitchMin === null
         ? 'the model plan states no cutter-location grid — no curved surface stage ran'
-        : `the model plan's cutter-location grid, ${pitchMin}–${pitchMax} mm spacing`,
+        : `the model plan's cutter-location grid, ${pitchMin}–${pitchMax} mm spacing${floorWords}`,
     ...(pitchMax === null ? {} : { gridPitchMm: pitchMax }),
     ...(stepDownMm === null ? {} : { stepDownMm }),
     ...(roughingLayers === null ? {} : { roughingLayers }),

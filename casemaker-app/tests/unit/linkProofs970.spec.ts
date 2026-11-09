@@ -65,7 +65,7 @@ describe('#970 link sites — a buried rise under a stay-down link', () => {
     const RIDGE_LO = 13.2;
     const RIDGE_HI = 13.8;
     const clAt = (x: number, _y: number): number => (x >= RIDGE_LO && x <= RIDGE_HI ? -0.5 : base(x));
-    const cl: ClSurface = { dropCutter: clAt, toleranceMm: 0.005, minSpacingMm: 0.005, maxSpacingMm: 0.3, sampleCount: 0 };
+    const cl: ClSurface = { dropCutter: clAt, toleranceMm: 0.005, minSpacingMm: 0.005, minSpacingSource: 'derived', minSpacingFromStepOverMm: 0.05, maxSpacingMm: 0.3, sampleCount: 0 };
     const outline: Polygons = [[[0, 0], [40, 0], [40, 20], [0, 20]]];
     const regionRef: RegionRef = {
       id: 'skin-link',
@@ -126,8 +126,8 @@ describe('#970 link sites — a buried rise under a stay-down link', () => {
       if (x >= RIDGE_LO && x <= RIDGE_HI) return PREV_HIGH;
       return x <= 10 || x >= 16 ? PREV_HIGH : PREV_LOW;
     };
-    const prevCl: ClSurface = { dropCutter: prevClAt, toleranceMm: 0.005, minSpacingMm: 0.005, maxSpacingMm: 0.3, sampleCount: 0 };
-    const nextCl: ClSurface = { dropCutter: () => NEXT, toleranceMm: 0.005, minSpacingMm: 0.005, maxSpacingMm: 0.3, sampleCount: 0 };
+    const prevCl: ClSurface = { dropCutter: prevClAt, toleranceMm: 0.005, minSpacingMm: 0.005, minSpacingSource: 'derived', minSpacingFromStepOverMm: 0.05, maxSpacingMm: 0.3, sampleCount: 0 };
+    const nextCl: ClSurface = { dropCutter: () => NEXT, toleranceMm: 0.005, minSpacingMm: 0.005, minSpacingSource: 'derived', minSpacingFromStepOverMm: 0.05, maxSpacingMm: 0.3, sampleCount: 0 };
     const bounds: Box2 = { min: [0, 0], max: [40, 20] };
     const nx = Math.floor((bounds.max[0] - bounds.min[0]) / LEV_GRID) + 1;
     const ny = Math.floor((bounds.max[1] - bounds.min[1]) / LEV_GRID) + 1;
@@ -209,7 +209,7 @@ describe('#970 link sites — a buried rise under a stay-down link', () => {
       if (Math.abs(x - WALL_X) <= 0.03) return WALL;
       return y >= 3 && y <= 9 ? BAND : -10;
     };
-    const cl: ClSurface = { dropCutter: clAt, toleranceMm: 0.005, minSpacingMm: 0.005, maxSpacingMm: 0.3, sampleCount: 0 };
+    const cl: ClSurface = { dropCutter: clAt, toleranceMm: 0.005, minSpacingMm: 0.005, minSpacingSource: 'derived', minSpacingFromStepOverMm: 0.05, maxSpacingMm: 0.3, sampleCount: 0 };
     const bounds: Box2 = { min: [0, 0], max: [12, 12] };
     const region: RemainderRegion = {
       id: 'skim-link',

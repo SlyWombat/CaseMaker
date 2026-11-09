@@ -1,8 +1,8 @@
 {
-  "_note": "#1093 R1 + #1111 + #1092 \u2014 set B, VERSIONED WITH THE RULES (13 files: top p1..p9, bottom p1..p4). The programs both jobs post under the one naming rule, #1111's canonical owned order with the ball reach-margin gate, and #1092's two-space rest rule. vs tableVersion 1111-1: 11 contents identical; #1092 rewrote the rest's two programs \u2014 top p5 and bottom p2 \u2014 to cut material work with the pocket floor a cutter-centre-space mask (see changedSince1111-1). The 2026-11-07 deltas (#1080's top p7/p8, #1111's top p6 25 mm O-flute and the bottom's 5\u21924 programs) stay recorded in changedSince20261107. The e2e reads this table as the cross-door check.",
-  "tableVersion": "1092-1",
+  "_note": "#1093 R1 + #1111 + #1092 + #1129 \u2014 set B, VERSIONED WITH THE RULES (13 files: top p1..p9, bottom p1..p4). The programs both jobs post under the one naming rule, #1111\u2019s canonical owned order with the ball reach-margin gate, and #1092\u2019s two-space rest rule. vs tableVersion 1092-1: 9 of 13 contents identical; #1129 changed the four ball-finish programs \u2014 top p7/p8 and bottom p3/p4 \u2014 because the row sampler\u2019s floor is now a sampling spacing, min(step-over/10, 0.05 mm) floored at the chord tolerance (0.005 mm), instead of the chord tolerance itself, and the edge-contact search stops at a 1e-3 mm interval (see changedSince1092-1). top p7/p8 are surface-identical on a 0.5 mm raster (max |\u0394z| 0.0000 mm on 4 800 / 3 850 shared cells, 0 cells off by > 0.01 mm); bottom p3/p4 differ on 591 / 195 of 14 338 / 14 079 shared cells, every changed cell on the shallower side (max 0.646 / 3.299 mm at cells straddling walls; 172 / 10 cells > 0.1 mm), and never deeper. Every program\u2019s goal verdict is unchanged: pass, adjudicated max 0.000 mm, 0 over-relief cells, 0 cut-into; the goal sentence moved only on the bottom (98.4 \u2192 98.2 % of the goal within 0.01 mm; the top reads 96.4 % both). The 2026-11-07 deltas (#1080\u2019s top p7/p8, #1111\u2019s top p6 25 mm O-flute and the bottom\u2019s 5\u21924 programs) stay recorded in changedSince20261107. The e2e reads this table as the cross-door check.",
+  "tableVersion": "1129-1",
   "rule": "#1111 (0f comment 6729368477): (a) the canonical owned order \u2014 tier (inv: \u2192 user: \u2192 cat: \u2192 built-in), then key \u2014 so both doors see one list; (b) the ball tie needs the reach-margin gate (flute \u2212 deepest cut \u2265 reach.marginMm, recommendation 1.0 mm) while any candidate passes, and a remaining tie falls to the key, printed \"by key, pending #1114\"; (c) the sequence primary, the curved rough's flat and the rest ball keep their pre-#1111 order under the canonical order, stated as \"same diameter: by key, pending #1114\" \u2014 WITHIN THIS RULE the bottom posts 4 programs (rough + pocket on the 25 mm O-flute) and the top 9. Which cutter among equals a plan SHOULD prefer is the open policy issue #1114 (stiffness vs reach vs bit changes vs time), with three measured plans as evidence. (d) #1092 (cam, 0f's two-space rule): a rest cuts material work and CL-space centres \u2014 its floor mask is already cutter-centre space (no radius inset); a rest cuts only a floor the cutter belongs on, and a one-cell sliver is not a floor.",
-  "source": "casemaker cut <job>.cutjob.json --location k3-house/location.json, branch m1-land14 @ 07862b7f7 (main a575c26eb + #1111 ebdb53b7d + #1092 fd79ac9f2), 2026-11-08",
+  "source": "casemaker cut <job>.cutjob.json --location setb-house/location.json, branch 1129-sampler-floor @ e19512673 (main ca17680be + #1129 aaec2879b floor + e19512673 edge search), 2026-11-09",
   "changedSince20261107": [
     {
       "name": "m1trayB-top-p6.nc",
@@ -73,13 +73,13 @@
         },
         {
           "name": "m1trayB-top-p7.nc",
-          "bytes": 217718,
-          "md5": "a73c4e7c65ec42ae5edc0c653c8cd04a"
+          "bytes": 200122,
+          "md5": "ee46eba48da7b8ee30f2ce0ea8843dec"
         },
         {
           "name": "m1trayB-top-p8.nc",
-          "bytes": 175695,
-          "md5": "55d81fffeb6b754e6b7f44b23b6a2925"
+          "bytes": 161747,
+          "md5": "f60f59bd392c2ce896a151c326ce64df"
         },
         {
           "name": "m1trayB-top-p9.nc",
@@ -103,13 +103,13 @@
         },
         {
           "name": "m1trayB-bottom-p3.nc",
-          "bytes": 5220613,
-          "md5": "91d289d5fc0cf1321bf6ce37dee03e37"
+          "bytes": 3246780,
+          "md5": "1eb40dd9989dbb02298a5a41772c5d12"
         },
         {
           "name": "m1trayB-bottom-p4.nc",
-          "bytes": 2866922,
-          "md5": "6ab42994f33f896ab81dcb926500ec1f"
+          "bytes": 1958079,
+          "md5": "259fd058816fb9740304ffff2af31be5"
         }
       ]
     }
@@ -142,5 +142,27 @@
       }
     },
     "dryRun": "<stem>-dry-face.nc for a lifted skim; <stem>-dry-p1.nc \u2026 for lifted engravings"
-  }
+  },
+  "changedSince1092-1": [
+    {
+      "name": "m1trayB-top-p7.nc",
+      "old": "a73c4e7c65ec42ae5edc0c653c8cd04a",
+      "new": "ee46eba48da7b8ee30f2ce0ea8843dec"
+    },
+    {
+      "name": "m1trayB-top-p8.nc",
+      "old": "55d81fffeb6b754e6b7f44b23b6a2925",
+      "new": "f60f59bd392c2ce896a151c326ce64df"
+    },
+    {
+      "name": "m1trayB-bottom-p3.nc",
+      "old": "91d289d5fc0cf1321bf6ce37dee03e37",
+      "new": "1eb40dd9989dbb02298a5a41772c5d12"
+    },
+    {
+      "name": "m1trayB-bottom-p4.nc",
+      "old": "6ab42994f33f896ab81dcb926500ec1f",
+      "new": "259fd058816fb9740304ffff2af31be5"
+    }
+  ]
 }

@@ -139,6 +139,8 @@ describe('#959 rough — the analytic dome', () => {
     },
     toleranceMm: 0.01,
     minSpacingMm: 0.1,
+    minSpacingSource: 'derived',
+    minSpacingFromStepOverMm: 1,
     maxSpacingMm: 0.5,
     sampleCount: 0,
   };

@@ -22,6 +22,8 @@ const CREASE: ClSurface = {
   dropCutter: (x: number) => (x > 0.08 && x < 0.25 ? 0 : -0.02),
   toleranceMm: 0.005,
   minSpacingMm: 0.05,
+  minSpacingSource: 'derived',
+  minSpacingFromStepOverMm: 0.5,
   maxSpacingMm: 0.1,
   sampleCount: 0,
 };
@@ -31,6 +33,8 @@ const FLAT: ClSurface = {
   dropCutter: () => -1,
   toleranceMm: 0.005,
   minSpacingMm: 0.05,
+  minSpacingSource: 'derived',
+  minSpacingFromStepOverMm: 0.5,
   maxSpacingMm: 0.1,
   sampleCount: 0,
 };

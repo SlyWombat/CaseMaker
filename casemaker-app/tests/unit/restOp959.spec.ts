@@ -41,6 +41,8 @@ function pocketCl(radius: number): ClSurface {
     },
     toleranceMm: 0.01,
     minSpacingMm: 0.1,
+    minSpacingSource: 'derived',
+    minSpacingFromStepOverMm: 1,
     maxSpacingMm: 0.5,
     get sampleCount() {
       return sampleCount;
