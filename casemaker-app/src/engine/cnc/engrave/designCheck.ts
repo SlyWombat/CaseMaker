@@ -896,6 +896,13 @@ export interface GoalCutIntoReport {
    * is no silent `topZ − minZ` fallback; the sentence names the count.
    */
   silhouetteUnavailableCells: number;
+  /**
+   * #1092 (0f's inward-witness ruling) — silhouette cells excused because their first FULLY
+   * COVERED inward neighbour (a non-silhouette axial neighbour) is not cut below its own design
+   * within the rule's slack: the stamp's disc spans both cells, so a real cut of that depth would
+   * also read there; the boundary cell's read is a one-cell artefact of the grid's edge.
+   */
+  silhouetteWitnessCells: number;
   /** #955/#964 — the 0.1 mm-floor share AFTER the exclusions (wall and wall shadow always; edge
    *  break when the job states one): the pass line's judged number, 0-1. */
   adjudicatedFraction: number;
@@ -1320,6 +1327,9 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   // #1092 (0f's R-a ruling) — silhouette cells COUNTED because the proof was unavailable (no
   // stated stock thickness). Never excused on a guessed ceiling; the sentence names them.
   let silhouetteUnavailableCells = 0;
+  // #1092 (0f's inward-witness ruling) — silhouette cells excused because their fully covered
+  // inward neighbour is uncut (a one-cell boundary artefact); named in the sentence.
+  let silhouetteWitnessCells = 0;
   // #1092 (gate v8) — THE RELIEF RADIUS IS THE SHADOW RADIUS r (the largest cutter's radius; the
   // cell class and the stamp artefact share the same disc). A caller with no tool set has no r:
   // the relief then reads the cell's OWN extent — one pitch, the same four axial neighbours the
@@ -1437,17 +1447,43 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
           clDistanceMm = onGrid ? outlineDistance(cl.x, cl.y) : outlineDistance(cl.x, cl.y);
         }
       }
-      if (ceiling === null) {
-        silhouetteUnavailable = true;
-      } else if (
-        depth <= ceiling + STRADDLING_SLACK_MM + 1e-12 &&
+      // #1092 (0f's inward-witness ruling) — A ONE-CELL BOUNDARY ARTEFACT: a silhouette cell whose
+      // INWARD neighbour — an axial neighbour that is fully covered (not itself a silhouette cell)
+      // — is NOT cut below its own design within the rule's slack. The stamp's disc spans both
+      // cells, so a real cut of this depth would also read at the inward neighbour; when it does
+      // not, the boundary cell's read is an artefact of the grid's edge. The CL proof stays; the
+      // witness is an alternative, and it still sits under the stated blank's ceiling (R-a).
+      let witnessOk = false;
+      if (ceiling !== null) {
+        for (const [di, dj] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+          const ci = i + di;
+          const cj = j + dj;
+          if (ci < 0 || cj < 0 || ci >= nx || cj >= ny) continue;
+          const kk = cj * nx + ci;
+          if (goal.covered[kk] !== 1 || silhouette[kk] === 1) continue; // fully covered, inward
+          const xn = goal.x0 + ci * goal.pitch;
+          const yn = goal.y0 + cj * goal.pitch;
+          const topN = verdictTop(xn, yn) ?? (sweptTop === null ? null : sweptTop(xn, yn));
+          if (topN !== null && topN >= goal.z[kk]! - STRADDLING_SLACK_MM) {
+            witnessOk = true;
+            break;
+          }
+        }
+      }
+      const clProofOk =
         clOutside &&
         clDistanceMm !== null &&
-        clDistanceMm >= (shadowRadius ?? goal.pitch) - goal.pitch - 1e-9
-      ) {
+        clDistanceMm >= (shadowRadius ?? goal.pitch) - goal.pitch - 1e-9;
+      if (ceiling === null) {
+        silhouetteUnavailable = true;
+      } else if (depth <= ceiling + STRADDLING_SLACK_MM + 1e-12 && (clProofOk || witnessOk)) {
         excluded[k] = 1;
         silhouetteExcusedCells++;
-        if (silhouetteDeepest === null || depth > silhouetteDeepest.mm) silhouetteDeepest = { mm: depth, x, y, clDistanceMm };
+        if (clProofOk && clDistanceMm !== null) {
+          if (silhouetteDeepest === null || depth > silhouetteDeepest.mm) silhouetteDeepest = { mm: depth, x, y, clDistanceMm };
+        } else {
+          silhouetteWitnessCells++;
+        }
         continue;
       }
       // #1092 (0f's follow-up) — A FAILED SILHOUETTE CL TEST (or a proof with no stated thickness)
@@ -1658,6 +1694,11 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     silhouetteUnavailableCells > 0
       ? `; silhouette proof unavailable — stock thickness not stated; ${silhouetteUnavailableCells} rim cell(s) counted`
       : '';
+  // #1092 (0f's inward-witness ruling) — the boundary artefacts excused by the witness are named.
+  const silhouetteWitnessNote =
+    silhouetteWitnessCells > 0
+      ? `; ${silhouetteWitnessCells} boundary cell(s) excused on the inward witness (the fully covered inward neighbour is uncut)`
+      : '';
   const overReliefNote =
     wallOverReliefCells + shadowOverReliefCells + borderOverReliefCells > 0 && deepest !== null
       ? `; ${wallOverReliefCells + shadowOverReliefCells + borderOverReliefCells} cell(s) a class would have excused are counted instead (wall ${wallOverReliefCells}, border ${borderOverReliefCells}, shadow ${shadowOverReliefCells}; deepest ${deepest.mm.toFixed(3)} mm at ${deepest.x.toFixed(2)}, ${deepest.y.toFixed(2)})`
@@ -1666,10 +1707,10 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     edgeBreakCells + wallNotScoredCells + shadowNotScoredCells + straddlingNotScoredCells > 0 ||
     wallOverReliefCells + shadowOverReliefCells + borderOverReliefCells + silhouetteExcusedCells > 0 ||
     silhouetteUnavailableCells > 0
-      ? ` (the rim edge break${edgeBreakCells > 0 ? `, ${(edgeBreakFraction * 100).toFixed(2)} % of the goal,` : ''} and ${(wallNotScoredFraction * 100 + shadowNotScoredFraction * 100).toFixed(2)} % of cells the heightfield cannot adjudicate are not counted${straddlingClause}${overReliefNote}${silhouetteNote}${silhouetteUnavailableNote})`
-      : overReliefNote === '' && silhouetteNote === '' && silhouetteUnavailableNote === ''
+      ? ` (the rim edge break${edgeBreakCells > 0 ? `, ${(edgeBreakFraction * 100).toFixed(2)} % of the goal,` : ''} and ${(wallNotScoredFraction * 100 + shadowNotScoredFraction * 100).toFixed(2)} % of cells the heightfield cannot adjudicate are not counted${straddlingClause}${overReliefNote}${silhouetteNote}${silhouetteWitnessNote}${silhouetteUnavailableNote})`
+      : overReliefNote === '' && silhouetteNote === '' && silhouetteUnavailableNote === '' && silhouetteWitnessNote === ''
         ? ''
-        : ` (${(overReliefNote + silhouetteNote + silhouetteUnavailableNote).replace(/^; /, '')})`;
+        : ` (${(overReliefNote + silhouetteNote + silhouetteWitnessNote + silhouetteUnavailableNote).replace(/^; /, '')})`;
   // #1064 (d) — MEASURED BESIDE PREDICTED. The plan's own bevel prediction rides in the sentence
   // when the caller supplies it; the measured number is still the verdict.
   const predictedNote =
@@ -1716,6 +1757,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     silhouetteExcusedCells,
     silhouetteDeepest,
     silhouetteUnavailableCells,
+    silhouetteWitnessCells,
     adjudicatedFraction,
     adjudicatedMaxMm,
     adjudicatedMaxAt,
@@ -1763,6 +1805,7 @@ export function goalCutIntoUnchecked(reason: string, passCoverage: number = GOAL
     silhouetteExcusedCells: 0,
     silhouetteDeepest: null,
     silhouetteUnavailableCells: 0,
+    silhouetteWitnessCells: 0,
     shadowNotScoredFraction: 0,
     adjudicatedFraction: 0,
     adjudicatedMaxMm: 0,

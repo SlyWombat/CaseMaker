@@ -19,6 +19,9 @@
  *     proof.
  *  4. a silhouette cell with NO stated stock thickness: counted, with the sentence naming the
  *     unavailable proof (0f's R-a: no `topZ − minZ` fallback).
+ *  5. the INWARD WITNESS (0f, 2026-11-09): a one-cell boundary artefact — a deep silhouette read
+ *     whose fully covered inward neighbour is uncut — is excused; a real cut whose inward row is
+ *     deep too is counted.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -104,10 +107,12 @@ describe('#1092 (gate v8) — the excuse is bounded by the goal’s own relief',
     expect(report.shadowOverReliefCells).toBe(0);
   });
 
-  it('counts a silhouette cell whose CL is inside with no step to straddle — the CL test is kept', () => {
-    // #1092 (0f's follow-up) — a failed silhouette CL test FALLS THROUGH to the v6 straddling
-    // proof (an open pocket reaching the rim has its CL inside and is excused there). With NO
-    // step to straddle the fall-through cannot excuse it either: the cell is COUNTED.
+  it('a silhouette cell whose CL is inside and whose inward neighbour is uncut is the WITNESS case (superseding the old count)', () => {
+    // #1092 (0f's follow-up, then SUPERSEDED by 0f's inward-witness ruling 2026-11-09): this
+    // fixture is exactly a one-cell boundary artefact — the 0.5 mm read sits on the silhouette cell
+    // with an uncut fully covered inward neighbour — so the witness now excuses it; the CL test
+    // staying (below) is why the witness had to be added. A real cut is the pair below, where the
+    // inward row is deep: that one is counted.
     const nx = 20;
     const ny = 10;
     const z = new Float32Array(nx * ny);
@@ -138,9 +143,10 @@ describe('#1092 (gate v8) — the excuse is bounded by the goal’s own relief',
     // The CL one millimetre INSIDE the part (cell (7, 5)), not on the uncovered side.
     const clAt = (): { x: number; y: number } => ({ x: 3.75, y: 2.5 });
     const report = checkGoalCutInto(goal, top, { wallShadowRadiusMm: 1.5, stockThicknessMm: 5, clAt });
-    expect(report.silhouetteExcusedCells).toBe(0);
-    expect(Math.round(report.adjudicatedFraction * report.goalCells)).toBe(1);
-    expect(report.adjudicatedMaxMm).toBeCloseTo(0.5, 6);
+    expect(report.silhouetteWitnessCells).toBe(1);
+    expect(report.silhouetteExcusedCells).toBe(1);
+    expect(report.adjudicatedFraction).toBe(0);
+    expect(report.sentence).toContain('inward witness');
   });
 
   it('counts a silhouette cell with NO stated stock thickness — the proof is unavailable, never guessed (R-a)', () => {
@@ -175,6 +181,53 @@ describe('#1092 (gate v8) — the excuse is bounded by the goal’s own relief',
     expect(Math.round(unstated.adjudicatedFraction * unstated.goalCells)).toBe(1);
     expect(unstated.sentence).toContain('silhouette proof unavailable — stock thickness not stated');
     expect(unstated.sentence).toContain('rim cell(s) counted');
+  });
+
+  // #1092 (0f's inward-witness ruling) — RED before the witness exists: a ONE-CELL BOUNDARY
+  // ARTEFACT (the silhouette cell reads 10 mm deep, its fully covered inward neighbour is uncut)
+  // is excused, while a REAL cut whose inward row is also deep is counted. The CL test cannot
+  // separate them — the fixture's CL is inside the part in both cases.
+  const boundaryFixture = (inwardDepth: number): { goal: GoalHeightfield; top: (x: number, y: number) => number | null } => {
+    const nx = 20;
+    const ny = 10;
+    const z = new Float32Array(nx * ny);
+    const covered = new Uint8Array(nx * ny);
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) covered[j * nx + i] = i < 10 ? 1 : 0;
+    const goal: GoalHeightfield = {
+      nx, ny, x0: 0, y0: 0, pitch: PITCH, topZ: 0, minZ: 0, z, covered, coveredCount: 10 * ny,
+      resolutionNote: 'designCheckRelief1092 inward-witness fixture',
+    };
+    const top = (x: number, y: number): number | null => {
+      const i = Math.round(x / PITCH);
+      const j = Math.round(y / PITCH);
+      if (i < 0 || j < 0 || i >= nx || j >= ny || covered[j * nx + i] !== 1) return null;
+      if (i === 9 && j === 5) return -10; // the boundary cell: a 10 mm read
+      if (i === 8 && j === 5) return -inwardDepth; // the fully covered inward neighbour
+      return 0;
+    };
+    return { goal, top };
+  };
+
+  it('excuses a one-cell boundary artefact when the inward neighbour is uncut (inward witness)', () => {
+    const { goal, top } = boundaryFixture(0); // inward neighbour at its design
+    // The CL sits INSIDE the part, so the CL proof cannot excuse, and the step proof cannot either
+    // (flat ground): only the witness separates this from a real cut.
+    const clAt = (): { x: number; y: number } => ({ x: 4.5, y: 2.5 });
+    const report = checkGoalCutInto(goal, top, { wallShadowRadiusMm: 1.5, stockThicknessMm: 40, clAt });
+    expect(report.silhouetteWitnessCells).toBe(1);
+    expect(report.silhouetteExcusedCells).toBe(1);
+    expect(report.adjudicatedFraction).toBe(0);
+    expect(report.sentence).toContain('inward witness');
+  });
+
+  it('counts the same boundary cell when the inward row is deep too — the witness does not excuse a real cut', () => {
+    const { goal, top } = boundaryFixture(10); // the inward neighbour is cut as deep
+    const clAt = (): { x: number; y: number } => ({ x: 4.5, y: 2.5 });
+    const report = checkGoalCutInto(goal, top, { wallShadowRadiusMm: 1.5, stockThicknessMm: 40, clAt });
+    expect(report.silhouetteWitnessCells).toBe(0);
+    // Both the boundary cell and the inward cell are counted at 10 mm.
+    expect(Math.round(report.adjudicatedFraction * report.goalCells)).toBe(2);
+    expect(report.adjudicatedMaxMm).toBeCloseTo(10, 6);
   });
 
   it('counts the same trench when the CL point is inside it — the relief is a ceiling, not a proof', () => {

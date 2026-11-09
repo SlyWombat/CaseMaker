@@ -349,6 +349,12 @@
                   "minimum": -9007199254740991,
                   "type": "integer"
                 },
+                "silhouetteWitnessCells": {
+                  "description": "#1092 (0f’s inward-witness ruling) — silhouette cells excused because their first fully covered inward neighbour is not cut below its own design within the rule’s slack: a one-cell boundary artefact of the grid’s edge.",
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                },
                 "wallNotScoredFraction": {
                   "description": "Share of covered cells excluded as WALL CELLS (a cell straddling a wall step), 0–1.",
                   "type": "number"
@@ -450,6 +456,7 @@
                 "silhouetteExcusedCells",
                 "silhouetteDeepest",
                 "silhouetteUnavailableCells",
+                "silhouetteWitnessCells",
                 "leftoverFractions",
                 "passCoverage",
                 "wholeSurface",
@@ -1027,6 +1034,12 @@
                             "minimum": -9007199254740991,
                             "type": "integer"
                           },
+                          "silhouetteWitnessCells": {
+                            "description": "#1092 (0f’s inward-witness ruling) — silhouette cells excused because their first fully covered inward neighbour is not cut below its own design within the rule’s slack: a one-cell boundary artefact of the grid’s edge.",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
                           "wallNotScoredFraction": {
                             "description": "Share of covered cells excluded as WALL CELLS (a cell straddling a wall step), 0–1.",
                             "type": "number"
@@ -1128,6 +1141,7 @@
                           "silhouetteExcusedCells",
                           "silhouetteDeepest",
                           "silhouetteUnavailableCells",
+                          "silhouetteWitnessCells",
                           "leftoverFractions",
                           "passCoverage",
                           "wholeSurface",
