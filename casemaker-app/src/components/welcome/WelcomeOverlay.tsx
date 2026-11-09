@@ -1,11 +1,20 @@
 import { featureSim } from '@/platform/features';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+} from 'react';
 import { useProjectStore, clearHistory } from '@/store/projectStore';
 import { useLibraryStore, refreshStaleSources, type ImportResult } from '@/store/libraryStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
 import { useRecentJobsStore } from '@/store/recentJobsStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { openRecentJob } from '@/store/openRecentJob';
+import { openDoorFile } from '@/store/openDoorFile';
+import { enterCncWorkspace } from '@/store/enterCncWorkspace';
 import { listBoards, type RegisteredBoard } from '@/library/registry';
 import {
   listTemplates,
@@ -109,6 +118,30 @@ function fmtMm(v: number): string {
   return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/\.?0+$/, '');
 }
 
+/**
+ * #1123 item 1 — THE WHOLE TILE IS THE CONTROL. The card itself is the button (a `<button>` may not
+ * wrap the heading and the paragraph it must contain), and the primary action stays inside it as a
+ * span, visually the same label. Pointer or Enter/Space, the same action fires.
+ */
+function tile(action: () => void): {
+  role: 'button';
+  tabIndex: number;
+  onClick: () => void;
+  onKeyDown: (e: KeyboardEvent<HTMLElement>) => void;
+} {
+  return {
+    role: 'button',
+    tabIndex: 0,
+    onClick: action,
+    onKeyDown: (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        action();
+      }
+    },
+  };
+}
+
 function connectorInventory(board: BoardProfile): Array<{ label: string; count: number }> {
   const counts = new Map<ComponentKind, number>();
   for (const c of board.components) {
@@ -194,6 +227,8 @@ export function WelcomeOverlay() {
   const recents = useRecentJobsStore((s) => s.jobs);
   const [openingRecent, setOpeningRecent] = useState<string | null>(null);
   const [recentError, setRecentError] = useState<string | null>(null);
+  // #1122 — a dropped file that is neither a project nor a job, in one sentence.
+  const [dropError, setDropError] = useState<string | null>(null);
 
   // Refresh week-old source caches in the background on first mount (#132).
   useEffect(() => {
@@ -326,6 +361,25 @@ export function WelcomeOverlay() {
     searchRef.current?.focus({ preventScroll: true });
   };
 
+  /** #1123 item 2 — the wizard is an overlay ON the CNC workspace, so ✕ leaves the operator there. */
+  const enterCnc = () => {
+    enterCncWorkspace();
+    openWizard();
+  };
+
+  /** #1122 — a file dropped on the door takes Load's route: project, job, or one sentence. */
+  const onDropFile = async (e: DragEvent<HTMLDivElement>): Promise<void> => {
+    e.preventDefault();
+    const f = e.dataTransfer?.files?.[0];
+    if (!f) return;
+    try {
+      const result = await openDoorFile({ text: await f.text(), name: f.name, handle: null });
+      setDropError(result.ok ? null : result.error);
+    } catch (error) {
+      setDropError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   /** #680 — reopen a recent job. On success the project flips welcome mode off, so this overlay goes. */
   const openRecent = async (recent: (typeof recents)[number]): Promise<void> => {
     if (openingRecent !== null) return;
@@ -354,7 +408,15 @@ export function WelcomeOverlay() {
     : [];
 
   return (
-    <div className="welcome-overlay" data-testid="welcome-overlay">
+    <div
+      className="welcome-overlay"
+      data-testid="welcome-overlay"
+      onDragOver={(e) => {
+        // #1122 — a file drop needs the default prevented; only files are taken.
+        if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
+      }}
+      onDrop={(e) => void onDropFile(e)}
+    >
       <div className="wb">
         {/* #878 — the front door. The hero names the product in one line; the four cards are the
             capabilities, each with its own picture and one way in. The library controls sit to
@@ -405,86 +467,93 @@ export function WelcomeOverlay() {
           />
         </header>
 
+        {/* #1122 — a file dropped on the door was neither a project nor a job: one sentence, and
+            the schema/parse detail stayed in the console. */}
+        {dropError !== null && (
+          <div className="wb-notice wb-notice--err" data-testid="welcome-drop-error">
+            <span>{dropError}</span>
+            <button onClick={() => setDropError(null)} aria-label="Dismiss">
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* The four doors (#680, #878). The print cards build a project straight away or lead to
             the board catalog; the CNC card opens the cutting wizard over this page (`start-wizard`),
             so the operator is in the job and nowhere else. A build with no CNC section offers no
             cutting door (#343). */}
         <ul className="wb-caps" data-testid="welcome-doors" aria-label="What Case Maker makes">
           <li>
-            <article className="wb-cap wb-cap--cases" data-testid="welcome-door-print">
+            <article
+              className="wb-cap wb-cap--cases"
+              data-testid="welcome-door-print"
+              title="Jump to the board catalog below"
+              {...tile(goToBoards)}
+            >
               <div className="wb-cap__art">
                 <CasesArt title="An open enclosure with a board inside and the port cut-outs in its wall" />
               </div>
               <span className="wb-eyebrow">{CAPABILITY_COPY.cases.eyebrow}</span>
               <h2>{CAPABILITY_COPY.cases.title}</h2>
               <p>{CAPABILITY_COPY.cases.text}</p>
-              <button
-                type="button"
-                className="wb-btn wb-btn--primary wb-cap__action"
-                onClick={goToBoards}
-                data-testid="welcome-start-case"
-                title="Jump to the board catalog below"
-              >
+              <span className="wb-btn wb-btn--primary wb-cap__action" data-testid="welcome-start-case">
                 {CAPABILITY_COPY.cases.action}
-              </button>
+              </span>
             </article>
           </li>
           <li>
-            <article className="wb-cap wb-cap--racks" data-testid="welcome-door-racks">
+            <article
+              className="wb-cap wb-cap--racks"
+              data-testid="welcome-door-racks"
+              title="Open the rack designer with the 10-inch mini rack"
+              {...tile(() => void startProjectType('mini-rack-10in', 'rack'))}
+            >
               <div className="wb-cap__art">
                 <RacksArt title="A 10-inch rack frame with U-rails, two shelves and a switch on the lower shelf" />
               </div>
               <span className="wb-eyebrow">{CAPABILITY_COPY.racks.eyebrow}</span>
               <h2>{CAPABILITY_COPY.racks.title}</h2>
               <p>{CAPABILITY_COPY.racks.text}</p>
-              <button
-                type="button"
-                className="wb-btn wb-btn--primary wb-cap__action"
-                onClick={() => void startProjectType('mini-rack-10in', 'rack')}
-                data-testid="welcome-start-rack"
-                title="Open the rack designer with the 10-inch mini rack"
-              >
+              <span className="wb-btn wb-btn--primary wb-cap__action" data-testid="welcome-start-rack">
                 {CAPABILITY_COPY.racks.action}
-              </button>
+              </span>
             </article>
           </li>
           <li>
-            <article className="wb-cap wb-cap--toolboxes" data-testid="welcome-door-toolboxes">
+            <article
+              className="wb-cap wb-cap--toolboxes"
+              data-testid="welcome-door-toolboxes"
+              title="Open the toolbox designer with the stacking toolbox"
+              {...tile(() => void startProjectType('toolbox', 'toolbox'))}
+            >
               <div className="wb-cap__art">
                 <ToolboxesArt title="A stacked toolbox bin with a divided tray of sockets and bits, its lid lifted" />
               </div>
               <span className="wb-eyebrow">{CAPABILITY_COPY.toolboxes.eyebrow}</span>
               <h2>{CAPABILITY_COPY.toolboxes.title}</h2>
               <p>{CAPABILITY_COPY.toolboxes.text}</p>
-              <button
-                type="button"
-                className="wb-btn wb-btn--primary wb-cap__action"
-                onClick={() => void startProjectType('toolbox', 'toolbox')}
-                data-testid="welcome-start-toolbox"
-                title="Open the toolbox designer with the stacking toolbox"
-              >
+              <span className="wb-btn wb-btn--primary wb-cap__action" data-testid="welcome-start-toolbox">
                 {CAPABILITY_COPY.toolboxes.action}
-              </button>
+              </span>
             </article>
           </li>
           {featureSim && (
             <li>
-              <article className="wb-cap wb-cap--cnc" data-testid="welcome-door-cnc">
+              <article
+                className="wb-cap wb-cap--cnc"
+                data-testid="welcome-door-cnc"
+                title="Check for a machine, pick what you are making, then set up the cut"
+                {...tile(enterCnc)}
+              >
                 <div className="wb-cap__art">
                   <CncArt title="A CNC spindle cutting a pocket in a block of stock, the toolpath on its floor" />
                 </div>
                 <span className="wb-eyebrow">{CAPABILITY_COPY.cnc.eyebrow}</span>
                 <h2>{CAPABILITY_COPY.cnc.title}</h2>
                 <p>{CAPABILITY_COPY.cnc.text}</p>
-                <button
-                  type="button"
-                  className="wb-btn wb-btn--primary wb-cap__action"
-                  onClick={() => openWizard()}
-                  data-testid="welcome-start-cnc"
-                  title="Check for a machine, pick what you are making, then set up the cut"
-                >
+                <span className="wb-btn wb-btn--primary wb-cap__action" data-testid="welcome-start-cnc">
                   {CAPABILITY_COPY.cnc.action}
-                </button>
+                </span>
               </article>
             </li>
           )}
@@ -523,7 +592,10 @@ export function WelcomeOverlay() {
                     type="button"
                     className="wb-door__link"
                     data-testid={`welcome-starter-${starter.id}`}
-                    onClick={() => openWizard('machine', starter.id)}
+                    onClick={() => {
+                      enterCncWorkspace();
+                      openWizard('machine', starter.id);
+                    }}
                   >
                     {starter.label}
                   </button>

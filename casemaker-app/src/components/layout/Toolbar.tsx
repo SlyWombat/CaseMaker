@@ -10,11 +10,12 @@ import { useSettingsStore } from '@/store/settingsStore';
 import {
   downloadProjectJson,
   fileSystemAccessAvailable,
-  openProjectViaPicker,
-  readProjectFromFile,
+  openTextFileViaPicker,
   saveProjectViaPicker,
   type ProjectFileHandle,
 } from '@/store/persistence';
+import { JOB_FILE_TYPE } from '@/engine/cnc/engrave/jobFile';
+import { DOOR_FILE_TYPE, openDoorFile } from '@/store/openDoorFile';
 import { DocsModal } from '@/components/docs/DocsModal';
 import { SettingsMenu } from '@/components/layout/SettingsMenu';
 import { PartsMenu } from '@/components/layout/PartsMenu';
@@ -64,7 +65,6 @@ function useIsCompactBar(): boolean {
 
 export function Toolbar() {
   const project = useProjectStore((s) => s.project);
-  const setProject = useProjectStore((s) => s.setProject);
   const showWelcome = useProjectStore((s) => s.showWelcome);
   // While the welcome overlay is up, the store still holds the LAST project
   // (or the createDefaultProject placeholder) — Save / Save as / Export
@@ -76,6 +76,8 @@ export function Toolbar() {
   const welcomeMode = useProjectStore((s) => s.welcomeMode);
   const exportFormat = useSettingsStore((s) => s.exportFormat);
   const fileInput = useRef<HTMLInputElement | null>(null);
+  // #1122 — the door's dedicated job picker, beside Load.
+  const jobFileInput = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [docsOpen, setDocsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -146,47 +148,91 @@ export function Toolbar() {
     }
   }, [project, fsaAvailable]);
 
+  /**
+   * #1122 — one file from the door, routed by kind. A project opens as today; a cutting job opens
+   * through its own sequence (blank, job, Job panel). A refusal is one sentence in the bar, never a
+   * schema dump.
+   */
+  const openDoorPicked = useCallback(
+    async (picked: {
+      text: string;
+      name: string;
+      handle: ProjectFileHandle | null;
+    }): Promise<void> => {
+      const result = await openDoorFile(picked);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      // A project's picker handle is what Save writes back through; a job's handle is recorded by
+      // its own file store inside `openDoorFile`.
+      fileHandleRef.current = result.kind === 'project' ? picked.handle : null;
+      setError(null);
+      // #311 — a file was opened: the Manage surface is left, so what was just loaded is what is
+      // drawn. Both entry points into a project do this, and a job takes the same exit.
+      closeManage();
+    },
+    [closeManage],
+  );
+
   const onLoadClick = useCallback(async () => {
     if (!fsaAvailable) {
       fileInput.current?.click();
       return;
     }
     try {
-      const { project: loaded, handle } = await openProjectViaPicker();
-      setProject(loaded);
-      clearHistory();
-      fileHandleRef.current = handle;
-      setError(null);
-      // #311 — a project was opened: the Manage surface is left, so what was just loaded is what is
-      // drawn. Both entry points into a project do this (`onFileChange` is the other), because the
-      // mode is about the house and the load is about the project.
-      closeManage();
+      const picked = await openTextFileViaPicker(DOOR_FILE_TYPE);
+      if (picked === null) return;
+      await openDoorPicked(picked);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [fsaAvailable, setProject, closeManage]);
+  }, [fsaAvailable, openDoorPicked]);
+
+  const onOpenJobClick = useCallback(async () => {
+    if (!fsaAvailable) {
+      jobFileInput.current?.click();
+      return;
+    }
+    try {
+      const picked = await openTextFileViaPicker(JOB_FILE_TYPE);
+      if (picked === null) return;
+      await openDoorPicked(picked);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [fsaAvailable, openDoorPicked]);
 
   const onFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const f = e.target.files?.[0];
       if (!f) return;
       try {
-        const loaded = await readProjectFromFile(f);
-        setProject(loaded);
-        clearHistory();
-        // Fallback path: no handle, so subsequent Save behaves like Save As.
-        fileHandleRef.current = null;
-        setError(null);
-        // #311 — same as the picker path: opening a project leaves the Manage surface.
-        closeManage();
+        await openDoorPicked({ text: await f.text(), name: f.name, handle: null });
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (fileInput.current) fileInput.current.value = '';
       }
     },
-    [setProject, closeManage],
+    [openDoorPicked],
+  );
+
+  const onJobFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      try {
+        await openDoorPicked({ text: await f.text(), name: f.name, handle: null });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (jobFileInput.current) jobFileInput.current.value = '';
+      }
+    },
+    [openDoorPicked],
   );
 
   const onNew = useCallback(() => {
@@ -292,11 +338,22 @@ export function Toolbar() {
     <button
       onClick={onLoadClick}
       data-testid="load-project"
-      title="Load a project from a .caseproj.json file"
+      title="Load a project or a cutting job (.caseproj.json or .cutjob.json)"
     >
       📂 <span className="btn-label">Load</span>
     </button>
   );
+  // #1122 — the door's second file door: a returning user with a job file never meets the wizard.
+  // It is a CNC door, so it is gated with the CNC card and the rest of the house (#343).
+  const openJobBtn = featureSim ? (
+    <button
+      onClick={onOpenJobClick}
+      data-testid="open-job-door"
+      title="Open a cutting job from a .cutjob.json file"
+    >
+      📄 <span className="btn-label">Open a job</span>
+    </button>
+  ) : null;
   const exportBtn = (
     <button
       onClick={onExport}
@@ -340,11 +397,20 @@ export function Toolbar() {
     <input
       ref={fileInput}
       type="file"
-      accept=".json,.caseproj.json,application/json"
+      accept=".json,.caseproj.json,.cutjob.json,application/json"
       onChange={onFileChange}
       data-testid="load-project-input"
     />
   );
+  const jobFileInputEl = featureSim ? (
+    <input
+      ref={jobFileInput}
+      type="file"
+      accept=".cutjob.json,.json,application/json"
+      onChange={onJobFileChange}
+      data-testid="open-job-door-input"
+    />
+  ) : null;
 
   // The welcome page (#878): nothing has been chosen yet, so the job's chrome — Undo, Redo, Save,
   // Save as, Export, Parts, and the ⋯ menu that holds them on a phone — has nothing to act on and
@@ -359,9 +425,11 @@ export function Toolbar() {
       <div className="toolbar-buttons toolbar-buttons--welcome" data-testid="toolbar-welcome">
         {manageBtn}
         {loadBtn}
+        {openJobBtn}
         {docsBtn}
         {settingsBtn}
         {fileInputEl}
+        {jobFileInputEl}
         {error && <span style={{ color: '#ff8888', fontSize: 12 }}>{error}</span>}
         {docsOpen && <DocsModal initialId="user-manual" onClose={() => setDocsOpen(false)} />}
       </div>

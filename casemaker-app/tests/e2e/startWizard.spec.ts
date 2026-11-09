@@ -40,6 +40,9 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
     'The house’s stock: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
   );
   await page.getByTestId('start-wizard-close').click();
+  // #1123 item 2 — ✕ leaves the operator in the CNC workspace, not on the door. The starters are
+  // the door's, so this walk reloads (a fresh load opens there) before taking one.
+  await cm.ready();
   await page.getByTestId('welcome-starter-blank').click();
 
   // Step 3 — the SAME modal, one counter: the project is made and the mount question follows.
@@ -103,14 +106,34 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
   await expect(page.getByTestId('part-problem')).toContainText('too big for a 100 × 60 mm blank');
 });
 
-test('the wizard opens over an empty welcome screen and closes without making anything', async ({ cm, page }) => {
+test('the wizard opens over the CNC workspace, and closes leaving the operator there', async ({ cm, page }) => {
   await cm.ready();
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await page.getByTestId('start-wizard-close').click();
   await expect(page.getByTestId('start-wizard')).toHaveCount(0);
-  // Still on the welcome screen: the wizard is a way in, not a mode.
-  await expect(page.getByTestId('welcome-overlay')).toBeVisible();
+  // #1123 item 2 — ✕ puts the wizard away, not the operator: the Job panel is the screen behind it.
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
+  await expect(page.getByTestId('welcome-overlay')).toHaveCount(0);
+});
+
+test('step 2 with nothing picked creates the empty job and lands on the Job panel (#1123 item 3)', async ({
+  cm,
+  page,
+}) => {
+  await cm.ready();
+  await page.getByTestId('welcome-start-cnc').click();
+  await page.getByTestId('start-wizard-next').click();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText(
+    'Step 2 of 4 · What are you cutting?',
+  );
+  // Nothing picked: the press CREATES the empty job instead of waiting for invented text.
+  await expect(page.getByTestId('start-wizard-operation-next')).toHaveText('Create the job');
+  await page.getByTestId('start-wizard-operation-next').click();
+  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
+  await expect(page.getByTestId('engrave-job-file-name')).toContainText('Untitled job');
+  await expect(page.getByTestId('welcome-overlay')).toHaveCount(0);
 });
 
 // #897 — A MESH GOAL SIZES ITS BLANK. The question comes first, so the file is read before the

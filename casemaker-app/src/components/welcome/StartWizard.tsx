@@ -291,7 +291,10 @@ export function StartWizard(): JSX.Element {
   const [mountBlocked, setMountBlocked] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  const [confirmReplace, setConfirmReplace] = useState<{ pending: PendingStock; items: number } | null>(null);
+  // #1123 item 3 — what a confirmation press runs. The stock step's replace question and the
+  // operation step's empty job share the one box (and the one sentence), so the pending action
+  // travels with the count instead of the box living inside a single step.
+  const [confirmReplace, setConfirmReplace] = useState<{ run: () => void; items: number } | null>(null);
 
   /**
    * #890 — A NEW JOB HAS STARTED (step 2 created its project). The previous session's crash
@@ -449,11 +452,6 @@ export function StartWizard(): JSX.Element {
   // says Done while this run is finishing the step it came to edit, and the holding block gates
   // it like every other exit (#713 review, #897).
   const doneStep = reEntry && step === initialStep && step === 'stock' && confirmReplace === null;
-  // #874 — a job that already has work opens the question with nothing picked, and pressing the
-  // primary then adds nothing: it FINISHES, so it says Done until a chip is picked. A chip picked
-  // turns it back into the add. #897 — a run that has not started its job yet is NOT idle on the
-  // shipped demo lines the stock step will replace.
-  const operationIdle = step === 'operation' && hasOperations && jobStarted && operationChoice === null;
 
   // `probeMachine` resolves every failure into one of its four outcomes, so there is nothing to
   // catch here: a thrown probe would be a bug in the probe, not an error to swallow.
@@ -772,7 +770,7 @@ export function StartWizard(): JSX.Element {
     if (replaces) {
       const items = jobItemCount(current);
       if (items > 0) {
-        setConfirmReplace({ pending, items });
+        setConfirmReplace({ run: () => applyStock(pending), items });
         return;
       }
     }
@@ -790,6 +788,44 @@ export function StartWizard(): JSX.Element {
       return;
     }
     if (step === 'holding') closeWizard();
+  }
+
+  /**
+   * #1123 item 3 — THE EMPTY JOB. Nothing was picked on the question, so there is no operation to
+   * make: the wizard creates the job with an empty design and closes onto the Job panel, where
+   * Open job… and Add operation are. A job that already carries real work is asked first — the same
+   * replacement question (and sentence) the stock step raises.
+   */
+  function createEmptyJob(): void {
+    const items = jobItemCount(useEngraveJobStore.getState().job);
+    if (items > 0) {
+      setConfirmReplace({ items, run: createEmptyJobNow });
+      return;
+    }
+    createEmptyJobNow();
+  }
+
+  function createEmptyJobNow(): void {
+    const store = useEngraveJobStore.getState();
+    const machineId = store.job.machineId;
+    // A NEW document: the machine chosen in step 1 is kept, everything else is the shipped
+    // default — and the demo lines are cleared, because they are not this operator's work.
+    store.reset();
+    store.setMachine(machineId);
+    const fresh = useEngraveJobStore.getState().job;
+    useEngraveJobStore.getState().replace({ ...fresh, labels: [], shapes: [] });
+    const job = useEngraveJobStore.getState().job;
+    const project = blankProjectForStock(job.stock);
+    if (project === null) {
+      setStartError('the blank template is missing from this build');
+      return;
+    }
+    setProject(project); // also flips welcomeMode off
+    clearHistory();
+    setSection('cnc-engrave');
+    noteJobStarted();
+    closeWizard();
+    void scheduleImmediate(project);
   }
 
   /** The last step's Create: make the operation, open its row and land in Design. */
@@ -875,9 +911,14 @@ export function StartWizard(): JSX.Element {
         setStep('operation');
         break;
       case 'operation':
-        // A job that already has work and nothing newly picked: the button says Done and finishes.
-        if (operationIdle) createOperation(null);
-        else setStep('stock');
+        // #1123 item 3 — nothing picked: an existing job finishes (adds nothing), a new run creates
+        // the empty job. The question must not demand invented work to be passable.
+        if (operationChoice === null) {
+          if (jobStarted) createOperation(null);
+          else createEmptyJob();
+          break;
+        }
+        setStep('stock');
         break;
       case 'stock':
         leaveStock();
@@ -917,34 +958,6 @@ export function StartWizard(): JSX.Element {
       {step === 'stock' && (
         <>
           <StockStep seed={stockSeed} onPending={onStockPending} />
-          {confirmReplace !== null && (
-            <div
-              data-testid="start-wizard-replace-confirm"
-              style={{ border: '1px solid #7a5a28', background: '#241d12', borderRadius: 4, padding: 6, marginTop: 6 }}
-            >
-              <p style={{ ...MUTED, color: '#e0c07a', margin: 0 }}>
-                The job open now has {confirmReplace.items} item{confirmReplace.items === 1 ? '' : 's'} on it. A new
-                project starts a new job, and there is one job here until save and open land — starting
-                replaces it, and its items are lost.
-              </p>
-              <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                <button
-                  type="button"
-                  data-testid="start-wizard-replace-yes"
-                  onClick={() => {
-                    const p = confirmReplace.pending;
-                    setConfirmReplace(null);
-                    applyStock(p);
-                  }}
-                >
-                  Replace it
-                </button>
-                <button type="button" data-testid="start-wizard-replace-no" onClick={() => setConfirmReplace(null)}>
-                  Keep it
-                </button>
-              </div>
-            </div>
-          )}
           {startError !== null && (
             <p style={{ ...MUTED, color: '#f0b4ad' }} data-testid="start-wizard-start-error">
               {startError}
@@ -1046,6 +1059,35 @@ export function StartWizard(): JSX.Element {
           {/* #490 — a throw in a step used to blank the hand-off; the body has its own boundary so a
               broken step leaves the modal (and its Close) in place. */}
           <PanelErrorBoundary name="Cut setup flow">{stepContent}</PanelErrorBoundary>
+          {/* #1123 item 3 — the replacement question, on whichever step raised it: the stock step's
+              chosen blank, or the operation step's empty job. Both replace the job open now. */}
+          {confirmReplace !== null && (
+            <div
+              data-testid="start-wizard-replace-confirm"
+              style={{ border: '1px solid #7a5a28', background: '#241d12', borderRadius: 4, padding: 6, marginTop: 6 }}
+            >
+              <p style={{ ...MUTED, color: '#e0c07a', margin: 0 }}>
+                The job open now has {confirmReplace.items} item{confirmReplace.items === 1 ? '' : 's'} on it.
+                Starting a new job replaces it; save it first to keep its items.
+              </p>
+              <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                <button
+                  type="button"
+                  data-testid="start-wizard-replace-yes"
+                  onClick={() => {
+                    const run = confirmReplace.run;
+                    setConfirmReplace(null);
+                    run();
+                  }}
+                >
+                  Replace it
+                </button>
+                <button type="button" data-testid="start-wizard-replace-no" onClick={() => setConfirmReplace(null)}>
+                  Keep it
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* #348 — the actions are their own region, not a row tucked under the last field: a native
@@ -1125,16 +1167,21 @@ export function StartWizard(): JSX.Element {
               </button>
             )}
             {step === 'operation' && (
-              // #897 — the question only walks on to the blank it sizes; the creating button is
-              // the last step's. A job with work and nothing picked still finishes here (Done).
+              // #897 — the question only walks on to the blank it sizes when something was picked;
+              // the creating button is the last step's. #1123 item 3 — with nothing picked the
+              // press creates the empty job (a new run) or finishes an existing one.
               <button
                 type="button"
                 className="sw-btn sw-btn--primary"
                 data-testid="start-wizard-operation-next"
-                disabled={operationCreateBlocked(operationChoice) !== null || (operationChoice === null && !hasOperations)}
+                disabled={operationChoice !== null && operationCreateBlocked(operationChoice) !== null}
                 onClick={next}
               >
-                {wizardNextLabel('operation', reEntry, operationIdle)}
+                {operationChoice === null
+                  ? jobStarted
+                    ? 'Done'
+                    : 'Create the job'
+                  : wizardNextLabel('operation', reEntry)}
               </button>
             )}
           </div>

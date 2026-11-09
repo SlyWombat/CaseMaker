@@ -1,31 +1,20 @@
 /**
  * #680 — open a recent job from the welcome door.
  *
- * The same three moves the wizard makes when it creates a project, from the other direction: the
- * document replaces the open job (only when it parses), the blank project is sized to the job's own
- * stock, and the Design surface opens on the job. There is no file picker and no bound handle: the
- * recent carries the document's text, so the job opens in any build.
- *
- * THE FILE BAR IS TOLD THE TRUTH. The bound file is not known here — the entry is a snapshot, not a
- * live handle — so the bar shows the recent's file name with no handle: Save asks for a file (Save
- * as…), exactly as it does for a downloaded job. The notice says WHEN the snapshot was taken, so an
- * operator saving over a file another session has moved on since knows what they are overwriting.
- * `newJob()` runs first so a handle from the job that was open before this one is released before
- * the document is replaced (its autosave must not write this job over the previous file).
+ * A recent is a SNAPSHOT: the text it carries, not a live file handle. The open sequence is the
+ * door's own (`openJobFromText`, #1122), so this module only says where the text comes from and
+ * what the file bar's notice says: the bound file is not known here, so the bar shows the recent's
+ * file name with no handle — Save asks for a file (Save as…), exactly as it does for a downloaded
+ * job. The notice says WHEN the snapshot was taken, so an operator saving over a file another
+ * session has moved on since knows what they are overwriting.
  */
 
-import { parseJobFile, serializeJobFile } from '@/engine/cnc/engrave/jobFile';
-import { scheduleImmediate } from '@/engine/jobs/JobScheduler';
-import { blankProjectForStock } from '@/library/blankProject';
-import { rememberSaved, useEngraveJobFileStore } from './engraveJobFileStore';
-import { useEngraveJobStore } from './engraveJobStore';
-import { clearHistory, useProjectStore } from './projectStore';
-import { useViewportStore } from './viewportStore';
+import { openJobFromText, type OpenJobResult } from './openJobFromText';
 import { recentJobText, recentSavedAtWords, type RecentJob } from './recentJobsStore';
 
-export type OpenRecentResult = { ok: true } | { ok: false; error: string };
+export type OpenRecentResult = OpenJobResult;
 
-/** Reopen one recent job: fetch its snapshot, parse, replace, build its blank, land in Design. */
+/** Reopen one recent job: fetch its snapshot, then the door's job-open sequence. */
 export async function openRecentJob(recent: RecentJob): Promise<OpenRecentResult> {
   const text = await recentJobText(recent.fileName);
   if (text === null) {
@@ -34,41 +23,11 @@ export async function openRecentJob(recent: RecentJob): Promise<OpenRecentResult
       error: 'the saved copy of this job is no longer available — open it from its file',
     };
   }
-  const parsed = await parseJobFile(text);
-  if (!parsed.ok) {
-    return { ok: false, error: parsed.errors[0] ?? 'the file is not a job document' };
-  }
-  const project = blankProjectForStock(parsed.job.stock);
-  if (project === null) {
-    return { ok: false, error: 'the blank template is missing from this build' };
-  }
-
-  // A previous job's bound file must let go before the document changes, or its debounced autosave
-  // would write this job into that file. `newJob` cancels it and clears the handle.
-  useEngraveJobFileStore.getState().newJob();
-  useEngraveJobStore.getState().replace(parsed.job);
-  // The bar's own records for the opened document, as `open()` sets them — minus the handle.
-  // #728 — the saved text is the document as opened: a mesh fingerprint corrected on the way in
-  // is the one recorded, and the dirty marker compares against it without re-parsing.
-  const saved = serializeJobFile(parsed.job);
-  rememberSaved(parsed.job, saved);
-  const opened = `Opened ${recent.name}${recentSavedAtWords(recent.at)}.`;
-  useEngraveJobFileStore.setState({
-    handle: null,
+  return openJobFromText({
+    text,
     fileName: recent.fileName,
-    savedText: saved,
-    dirty: false,
-    notice:
-      parsed.meshNote == null
-        ? { kind: 'ok', text: opened }
-        : { kind: 'warning', text: `${opened} ${parsed.meshNote}` },
-    packageError: parsed.package !== null && !parsed.package.ok ? parsed.package.reason : null,
-    sourceError: parsed.sourceError,
+    handle: null,
+    savedAt: null,
+    opened: `Opened ${recent.name}${recentSavedAtWords(recent.at)}.`,
   });
-
-  useProjectStore.getState().setProject(project); // also flips welcomeMode off
-  clearHistory();
-  useViewportStore.getState().setActiveSidebarSection('cnc-engrave');
-  await scheduleImmediate(project);
-  return { ok: true };
 }

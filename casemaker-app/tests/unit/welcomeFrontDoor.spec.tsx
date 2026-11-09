@@ -55,7 +55,11 @@ describe('the four capability cards', () => {
       expect(art, `${id} has an illustration`).not.toBeNull();
       expect(art?.getAttribute('aria-label')?.length ?? 0).toBeGreaterThan(10);
       expect(within(card).getByRole('heading', { level: 2 }).textContent?.trim().split(/\s+/).length).toBeLessThanOrEqual(5);
-      expect(within(card).getAllByRole('button')).toHaveLength(1);
+      // #1123 item 1 — the whole tile is the control: the card itself is the button, and the
+      // action label is inside it (a span — a button may not nest inside a button).
+      expect(card.getAttribute('role')).toBe('button');
+      expect(card.getAttribute('tabindex')).toBe('0');
+      expect(card.querySelector('button')).toBeNull();
     }
     const doors = screen.getByTestId('welcome-doors');
     // Operator copy names no issue and no internal file.
@@ -87,10 +91,33 @@ describe('the four capability cards', () => {
     await waitFor(() => expect(useViewportStore.getState().activeSidebarSection).toBe('toolbox'));
   });
 
-  it('CNC opens the cutting wizard over the page', () => {
+  it('CNC opens the cutting wizard over the CNC workspace', () => {
     render(<WelcomeOverlay />);
     fireEvent.click(screen.getByTestId('welcome-start-cnc'));
     expect(useStartWizardStore.getState().open).toBe(true);
+    // #1123 item 2 — entering CNC leaves the door: the wizard is an overlay on the Job panel.
+    expect(useProjectStore.getState().welcomeMode).toBe(false);
+    expect(useViewportStore.getState().activeSidebarSection).toBe('cnc-engrave');
+  });
+
+  // #1123 item 1 — THE WHOLE TILE IS THE CONTROL. The maintainer pressed the picture and the
+  // title and nothing happened; only the small button at the foot acted. The picture must be the
+  // same way in as the button, for every tile.
+  it('#1123 — a click on the picture fires the same action as the button', () => {
+    render(<WelcomeOverlay />);
+    const picture = screen.getByTestId('welcome-door-cnc').querySelector('svg[role="img"]');
+    expect(picture).not.toBeNull();
+    fireEvent.click(picture!);
+    expect(useStartWizardStore.getState().open).toBe(true);
+    // The same entry as the label: the workspace is entered (item 2).
+    expect(useProjectStore.getState().welcomeMode).toBe(false);
+  });
+
+  it('#1123 — the Cases tile’s picture hands the cursor to the board search, like its label', () => {
+    render(<WelcomeOverlay />);
+    const picture = screen.getByTestId('welcome-door-print').querySelector('svg[role="img"]');
+    fireEvent.click(picture!);
+    expect(document.activeElement).toBe(screen.getByTestId('welcome-search'));
     expect(useProjectStore.getState().welcomeMode).toBe(true);
   });
 });

@@ -83,9 +83,13 @@ describe('#752 the rotary Operation step', () => {
 
   it('asks Engrave text for its text and Reads, along by default', () => {
     const onChoice = renderStep();
+    // #1123 item 3 — the highlighted Engrave text is a default, not a pick: nothing is reported
+    // until it (or another chip) is clicked. Its one field and Reads are drawn meanwhile.
+    expect(lastChoice(onChoice)).toBeNull();
+    expect((screen.getByTestId('start-wizard-op-reads-select') as HTMLSelectElement).value).toBe('along');
+    fireEvent.click(screen.getByTestId('start-wizard-op-rotary-engrave'));
     expect(lastChoice(onChoice)).toMatchObject({ type: 'engrave', text: '', reads: 'along' });
     expect(operationCreateBlocked(lastChoice(onChoice))).toBe('Type the text to engrave.');
-    expect((screen.getByTestId('start-wizard-op-reads-select') as HTMLSelectElement).value).toBe('along');
     fireEvent.change(screen.getByTestId('start-wizard-op-reads-select'), { target: { value: 'around' } });
     expect(lastChoice(onChoice)).toMatchObject({ type: 'engrave', text: '', reads: 'around' });
     fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Zoomba' } });
