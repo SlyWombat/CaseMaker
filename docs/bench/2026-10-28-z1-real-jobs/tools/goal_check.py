@@ -500,7 +500,7 @@ def edge_allowance(eb, tools):
 
 
 def judge(G, C, H, who, clx, cly, gh, stock_thickness, *, allowance=None, shadow_radius=0,
-          programs=None, ideal_programs=None, breakthrough=0.0):
+          programs=None, ideal_programs=None, breakthrough=0.0, silhouette_thickness=None):
     """The gate's rule over one run's folded stamp. Returns the report dict and the masks the map
     needs."""
     ny, nx = G.shape
@@ -612,7 +612,8 @@ def judge(G, C, H, who, clx, cly, gh, stock_thickness, *, allowance=None, shadow
         sg = sel & sil.ravel()[kk]
         if sg.any():
             cells = kk[sg]
-            ceiling = None if T is None else T + float(breakthrough or 0.0)
+            ceiling = (None if silhouette_thickness is None
+                       else float(silhouette_thickness) + float(breakthrough or 0.0))
             if ceiling is not None:
                 within_floor = dd[sg] <= ceiling + STRADDLING_SLACK_MM + 1e-12
             else:
@@ -881,10 +882,17 @@ def run_check(gp, T, out, ncs, *, job=None, mkr=False, dz=0.0, only=None, write=
         allowance = edge_allowance(stated_edge_break(job), tools_used)
         ideal_progs = progs
 
+    # 0f's R-a ruling (a), 2026-11-08: the JOB'S STOCK IS A VALID STATEMENT of the blank's depth,
+    # whether or not an edge break is stated. The app's `goalEdgeBreakOptions` used to drop the
+    # thickness on its no-edge-break early return — a wiring oversight (E's j29 receipt counted 360
+    # rim cells "unavailable" for a job that states its blank); E is fixing that branch, so the
+    # mirror states the thickness whenever the job does.
+    stated_thickness = T
     s, aux = judge(G, C, H, who, clx, cly, gh, T, allowance=allowance,
                    shadow_radius=shadow_R, programs=progs if mkr else ideal_progs,
                    ideal_programs=ideal_progs,
-                   breakthrough=float((job or {}).get('breakthrough') or 0.0))
+                   breakthrough=float((job or {}).get('breakthrough') or 0.0),
+                   silhouette_thickness=stated_thickness)
     if mkr:
         s['vendorSeconds'] = round(sum((q.get('vendorSeconds') or 0) for q in progs), 1)
         s['unmappedToolNumbers'] = sorted({n for q in progs for n in q['unmappedToolNumbers']})

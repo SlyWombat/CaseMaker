@@ -145,7 +145,8 @@ def judge_on(z, cov, cuts, *, who=None, allowance=None, shadow_radius=0.0, thick
     gh = {'nx': nx, 'ny': ny, 'x0': 0.0, 'y0': 0.0, 'pitch': PITCH, 'topZ': 0.0,
           'minZ': float(z[cov].min()) if cov.any() else 0.0}
     s, _ = GC.judge(z, cov, H, w, X, Y, gh, thickness, allowance=allowance,
-                    shadow_radius=shadow_radius, breakthrough=breakthrough)
+                    shadow_radius=shadow_radius, breakthrough=breakthrough,
+                    silhouette_thickness=thickness)
     return s
 
 
