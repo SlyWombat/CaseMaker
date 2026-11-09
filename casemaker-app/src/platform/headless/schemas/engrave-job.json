@@ -854,6 +854,45 @@
       },
       "type": "array"
     },
+    "cutterChecklist": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "description": "One cutter row: located, or replaced with another owned cutter.",
+          "properties": {
+            "at": {
+              "description": "ISO 8601, when the operator set this row.",
+              "type": "string"
+            },
+            "replacedWith": {
+              "description": "The replacement cutter's registry key, when state is replaced.",
+              "type": "string"
+            },
+            "state": {
+              "description": "Whether the bit is in hand (located) or another owned cutter stands in for it (replaced).",
+              "enum": [
+                "located",
+                "replaced"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "at"
+          ],
+          "type": "object"
+        },
+        "propertyNames": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "description": "Per run (package hash) and cutter key: whether the bit is located or replaced (#1127); never a byte input.",
+      "propertyNames": {
+        "type": "string"
+      },
+      "type": "object"
+    },
     "drills": {
       "description": "Plunge-drilled holes and hole arrays; omit for none.",
       "items": {

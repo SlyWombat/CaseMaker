@@ -2851,11 +2851,13 @@ const engraveJobV3Schema = engraveJobV2Schema
         z.string(),
         z.record(
           z.string(),
-          z.object({
-            state: z.enum(['located', 'replaced']),
-            replacedWith: z.string().optional(),
-            at: z.string(),
-          }),
+          z
+            .object({
+              state: z.enum(['located', 'replaced']).describe('Whether the bit is in hand (located) or another owned cutter stands in for it (replaced).'),
+              replacedWith: z.string().optional().describe("The replacement cutter's registry key, when state is replaced."),
+              at: z.string().describe('ISO 8601, when the operator set this row.'),
+            })
+            .describe('One cutter row: located, or replaced with another owned cutter.'),
         ),
       )
       .optional()
