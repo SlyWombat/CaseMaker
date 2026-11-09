@@ -207,8 +207,13 @@ describe('#955/V2-2 the gate parameters come from the job, not the CAM', () => {
   });
   const ball = flatEndMill(6, { shape: 'ball', typeText: 'Ball End', tipDiameter: 6 });
 
-  function job(edgeBreak?: { widthMm: number; toolKey?: string }): EngraveJob {
+  function job(
+    edgeBreak?: { widthMm: number; toolKey?: string },
+    blank?: { thicknessMm?: number; breakthroughMm?: number },
+  ): EngraveJob {
     return {
+      ...(blank?.thicknessMm === undefined ? {} : { stock: { thickness: blank.thicknessMm } }),
+      ...(blank?.breakthroughMm === undefined ? {} : { breakthrough: blank.breakthroughMm }),
       targetObject: {
         role: 'goal',
         enabled: true,
@@ -236,6 +241,53 @@ describe('#955/V2-2 the gate parameters come from the job, not the CAM', () => {
   it('no stated edge break → no allowance (the existing pins keep their reading)', () => {
     const opts = goalEdgeBreakOptions(job(), () => null, ['c90']);
     expect(opts.edgeBreak).toBeUndefined();
+  });
+
+  // #1092 (0f's R-a wiring ruling, 2026-11-08) — RED before the fix. The blank fields were built
+  // only at the final return, so a job with NO edge break dropped the blank it DOES state; j29's
+  // receipt read silhouetteUnavailableCells 360 with "stock thickness not stated" on a job that
+  // states 36 mm. The early return must carry the blank exactly as the final return does.
+  it('a job with no edge break still states its blank to the gate', () => {
+    const opts = goalEdgeBreakOptions(job(undefined, { thicknessMm: 36, breakthroughMm: 0.3 }), () => null, ['c90']);
+    expect(opts.edgeBreak).toBeUndefined();
+    expect(opts.stockThicknessMm).toBe(36);
+    expect(opts.breakthroughMm).toBe(0.3);
+  });
+
+  // The j29-shaped reading: the same job's silhouette cells go through the PROOF (not the R-a
+  // unavailable path) when the blank is stated. Red before the wiring fix: without the blank the
+  // ceiling is null, the proof never runs, and the 0.5 mm rim cut is counted as unavailable.
+  it('the stated blank makes the silhouette proof available — the rim cut is proven, not counted', () => {
+    const nx = 20;
+    const ny = 10;
+    const p = 0.5;
+    const z = new Float32Array(nx * ny);
+    const covered = new Uint8Array(nx * ny);
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) covered[j * nx + i] = i < 10 ? 1 : 0;
+    const goalField: GoalHeightfield = {
+      nx, ny, x0: 0, y0: 0, pitch: p, topZ: 0, minZ: 0, z, covered, coveredCount: 10 * ny,
+      resolutionNote: 'goalEdgeBreak R-a wiring fixture',
+    };
+    const top = (x: number, y: number): number | null => {
+      const i = Math.round(x / p);
+      const j = Math.round(y / p);
+      if (i < 0 || j < 0 || i >= nx || j >= ny || covered[j * nx + i] !== 1) return null;
+      return i === 9 && j === 5 ? -0.5 : 0;
+    };
+    // The CL on the UNCOVERED side, 3.0 mm from the outline ring (r − pitch = 2.5): the v5 test passes.
+    const clAt = (): { x: number; y: number } => ({ x: 8, y: 2.5 });
+    const flat6 = flatEndMill(6);
+    const opts = goalEdgeBreakOptions(
+      job(undefined, { thicknessMm: 36, breakthroughMm: 0.3 }),
+      (key) => (key === 'flat6' ? flat6 : null),
+      ['flat6'],
+    );
+    expect(opts.wallShadowRadiusMm).toBe(3);
+    const r = checkGoalCutInto(goalField, top, { ...opts, clAt });
+    expect(r.silhouetteUnavailableCells).toBe(0);
+    expect(r.silhouetteExcusedCells).toBe(1);
+    expect(r.adjudicatedFraction).toBe(0);
+    expect(r.sentence).not.toContain('silhouette proof unavailable');
   });
 
   it('the stated edge break resolves its pinned V bit and the run’s widest tool for the shadow', () => {
