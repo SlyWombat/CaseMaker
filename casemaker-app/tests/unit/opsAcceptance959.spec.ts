@@ -1526,17 +1526,31 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     // #961 (the maintainer's 11-05 ruling): the 1-point line is 98.52 % against the vendor's
     // 99.52 %, and the picker must OFFER the rest that buys it — T1 → T2, priced. Before the
     // simulated-outcome rank the tray chose the ⌀6 primary alone and measured 98.38 %.
+    // #1114 — THE OFFER IS THE FLOOR, NOT THE PICK: with the priced-cycle rank and the new
+    // same-diameter picks the finish alone clears the bar (98.80 %), so the rest may lose on its
+    // own price or leftover; what must hold is that it was offered and that the chosen chain is
+    // one of the two measured candidates, with the reason it lost stated by the data.
     expect(measured!.coverage, 'the tray is back under the 1-point line').toBeGreaterThanOrEqual(0.9852);
-    expect(setup.choice.steps.some((step) => step.kind === 'rest'), 'the tray still declines the rest cutter').toBe(true);
-    // The surface the rest bought: its candidate leaves fewer goal cells above the band than the
-    // primary alone, which is why the rank chose it.
     const restCandidate = setup.choice.considered.find((c) => c.steps.some((step) => step.kind === 'rest'))!;
     const aloneCandidate = setup.choice.considered.find((c) => !c.steps.some((step) => step.kind === 'rest'))!;
+    expect(restCandidate, 'the rest cutter was not offered').toBeDefined();
+    expect(aloneCandidate, 'the primary-alone chain was not offered').toBeDefined();
     expect(restCandidate.leftoverCells).not.toBeNull();
     expect(aloneCandidate.leftoverCells).not.toBeNull();
-    expect(restCandidate.leftoverCells!).toBeLessThan(aloneCandidate.leftoverCells!);
+    const chosenHasRest = setup.choice.steps.some((step) => step.kind === 'rest');
     const chosenSignature = setup.choice.steps.map((step) => `${step.kind}:${step.cutter.key}`).join('+');
-    expect(restCandidate.steps.map((step) => `${step.kind}:${step.cutterKey}`).join('+')).toBe(chosenSignature);
+    const signatureOf = (c: typeof restCandidate): string => c.steps.map((step) => `${step.kind}:${step.cutterKey}`).join('+');
+    expect([signatureOf(restCandidate), signatureOf(aloneCandidate)], 'the chosen chain is one of the measured two').toContain(chosenSignature);
+    if (chosenHasRest) {
+      // The surface the rest bought: fewer goal cells above the band than the primary alone.
+      expect(restCandidate.leftoverCells!).toBeLessThan(aloneCandidate.leftoverCells!);
+    } else {
+      // The rest lost after the offer: either the finish alone already leaves as few cells, or
+      // the rest's own recovery price is under the 0.01 mm²/s line (#961's gate).
+      const losesOnCoverage = restCandidate.leftoverCells! >= aloneCandidate.leftoverCells!;
+      const losesOnPrice = restCandidate.restPrice !== null && restCandidate.restPrice.mm2PerSecond < 0.01;
+      expect(losesOnCoverage || losesOnPrice, 'the rest lost with no stated reason').toBe(true);
+    }
     expect(setup.ops.filter((op) => op.kind === 'chamfer').length, 'no rim was broken at all').toBeGreaterThan(0);
 
     // #975 — THE IDEAL PLAN, the same entry over every bit the tool library carries beside the

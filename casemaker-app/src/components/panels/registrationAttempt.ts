@@ -25,8 +25,8 @@ import {
   defaultClampPlacements,
   type BracketSeatDatum,
 } from '@/engine/cnc/mounts/bracket';
-import { planRegistration, type MountDatum, type PlanObstacle, type ProbeSpec, type RegistrationPlan } from '@/engine/cnc/registration/plan';
-import { cutRegionOf, mountObstaclesFor, seatSeekFor, softLimitsOf } from '@/engine/cnc/registration/footprintJob';
+import type { MountDatum, PlanObstacle, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { cutRegionOf, mountObstaclesFor, seatSeekFor } from '@/engine/cnc/registration/footprintJob';
 import { bracketTapFor } from '@/engine/cnc/registration/mountContext';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
@@ -202,31 +202,31 @@ export function planRegistrationAttempt(args: {
         expected: 'the seat from the seek, inside ±1.5 mm of the derived value',
       };
     }
-    // A's planner (1070-footprint-reg) owns the footprint plan now: ONE planRegistration call with
-    // the region and the soft limits. The seed places the machine coordinates, the #525 corner
-    // derivation gives the origin, and the obstacle check and the soft-limit refusal are its own.
+    // HOTFIX (bench 2026-11-09) — ONE TOP TOUCH AT THE CUT AREA'S CENTRE. A bracket hold fixes
+    // X, Y and rotation, so with the seat measured the plan is the surface touch and nothing else:
+    // no edge scans, no corner derivation, no mount tap. XY is the anchor plus the bracket's
+    // offset (the `datum` above); #1070's footprint find was the wrong plan for this mount and its
+    // arm-side edges read the clamp and an old bore from the waste band.
     const region = cutRegionOf(job);
-    if (region === null) {
-      return { kind: 'refused', reason: 'this job states no cut region to register on — add the part to cut, or register by hand' };
-    }
-    const result = planRegistration(
+    const result = registrationFor(
+      setup,
+      mount,
       {
-        stock: { xMin: 0, yMin: 0, xMax: dims0.x, yMax: dims0.y, cornerRadius: 0 },
-        mount: 'bracket',
-        expectedSurface: expected0.expectedSurface,
+        // HOTFIX — the ONE touch is at the cut area's centre (the bench job's is (77.34, 63)), not
+        // the blank's: the region's own centre, when the job states one.
+        ...(region === null ? {} : { cutCentre: { x: (region.minX + region.maxX) / 2, y: (region.minY + region.maxY) / 2 } }),
+        // `registrationFor` adds the stock's height this way up to the seat; take it back off the
+        // expected surface so the two statements cannot drift.
+        seatMachineZ: expected0.expectedSurface.machineZ - dims0.z,
         seekFromMachineZ: clearanceZOf(jobMachine(job, calibration)) ?? 0,
-        mountDatum: null,
-        probe: args.probe,
-        mountTap: null,
-        stockThicknessMm: dims0.z,
+        cornerRadius: 0,
         bracketOrigin: datum,
         mountObstacles: obstacles,
-        bracketConfirm: !datum.offsetMeasured,
-        region: { min: [region.minX, region.minY], max: [region.maxX, region.maxY], marginMm: job.edgeMargin },
-        softLimits: softLimitsOf(calibration),
+        mountTap: null,
+        probe: args.probe,
       },
       args.settings,
-    );
+    ).plan;
     if (!result.ok) return { kind: 'refused', reason: result.reason };
     return {
       kind: 'plan',

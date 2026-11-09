@@ -1,168 +1,39 @@
 {
-  "_note": "#1093 R1 + #1111 + #1092 + #1129 \u2014 set B, VERSIONED WITH THE RULES (13 files: top p1..p9, bottom p1..p4). The programs both jobs post under the one naming rule, #1111\u2019s canonical owned order with the ball reach-margin gate, and #1092\u2019s two-space rest rule. vs tableVersion 1092-1: 9 of 13 contents identical; #1129 changed the four ball-finish programs \u2014 top p7/p8 and bottom p3/p4 \u2014 because the row sampler\u2019s floor is now a sampling spacing, min(step-over/10, 0.05 mm) floored at the chord tolerance (0.005 mm), instead of the chord tolerance itself, and the edge-contact search stops at a 1e-3 mm interval (see changedSince1092-1). top p7/p8 are surface-identical on a 0.5 mm raster (max |\u0394z| 0.0000 mm on 4 800 / 3 850 shared cells, 0 cells off by > 0.01 mm); bottom p3/p4 differ on 591 / 195 of 14 338 / 14 079 shared cells, every changed cell on the shallower side (max 0.646 / 3.299 mm at cells straddling walls; 172 / 10 cells > 0.1 mm), and never deeper. Every program\u2019s goal verdict is unchanged: pass, adjudicated max 0.000 mm, 0 over-relief cells, 0 cut-into; the goal sentence moved only on the bottom (98.4 \u2192 98.2 % of the goal within 0.01 mm; the top reads 96.4 % both). The 2026-11-07 deltas (#1080\u2019s top p7/p8, #1111\u2019s top p6 25 mm O-flute and the bottom\u2019s 5\u21924 programs) stay recorded in changedSince20261107. The e2e reads this table as the cross-door check.",
-  "tableVersion": "1129-1",
-  "rule": "#1111 (0f comment 6729368477): (a) the canonical owned order \u2014 tier (inv: \u2192 user: \u2192 cat: \u2192 built-in), then key \u2014 so both doors see one list; (b) the ball tie needs the reach-margin gate (flute \u2212 deepest cut \u2265 reach.marginMm, recommendation 1.0 mm) while any candidate passes, and a remaining tie falls to the key, printed \"by key, pending #1114\"; (c) the sequence primary, the curved rough's flat and the rest ball keep their pre-#1111 order under the canonical order, stated as \"same diameter: by key, pending #1114\" \u2014 WITHIN THIS RULE the bottom posts 4 programs (rough + pocket on the 25 mm O-flute) and the top 9. Which cutter among equals a plan SHOULD prefer is the open policy issue #1114 (stiffness vs reach vs bit changes vs time), with three measured plans as evidence. (d) #1092 (cam, 0f's two-space rule): a rest cuts material work and CL-space centres \u2014 its floor mask is already cutter-centre space (no radius inset); a rest cuts only a floor the cutter belongs on, and a one-cell sliver is not a floor.",
-  "source": "casemaker cut <job>.cutjob.json --location setb-house/location.json, branch 1129-sampler-floor @ e19512673 (main ca17680be + #1129 aaec2879b floor + e19512673 edge search), 2026-11-09",
-  "changedSince20261107": [
-    {
-      "name": "m1trayB-top-p6.nc",
-      "old": "724d4e96463616f54a029f4fdfb1a73d",
-      "new": "90221d576fa54974b61ec32ee0f5f6db"
-    },
-    {
-      "name": "m1trayB-bottom-p1.nc",
-      "old": "3673638b938eb759a289d04c66f41e55",
-      "new": "a052318ff9644cab390ba11de395fc8b"
-    },
-    {
-      "name": "m1trayB-bottom-p3.nc",
-      "old": "02746724a5a5dc5296e2953b992c4a0f",
-      "new": "91d289d5fc0cf1321bf6ce37dee03e37"
-    },
-    {
-      "name": "m1trayB-bottom-p4.nc",
-      "old": "91d289d5fc0cf1321bf6ce37dee03e37",
-      "new": "6ab42994f33f896ab81dcb926500ec1f"
-    }
+  "_note": "#1093 R1 + #1111 + #1092 + #1129 + #1114 + #1135 — set B, VERSIONED WITH THE RULES (11 files: top p1..p8, bottom p1..p3). vs tableVersion 1129-1: the bit change is now priced from the program before it and one pickAmongEquals decides every same-diameter tie (#1114), and a level pass no longer cuts where the cutter's disc reaches a CL above it (#1135's wall-foot guard). Programs: top 9 → 8 (the 3.175 flat's curved-rough program is gone; the ⌀1.5 × 6 flat takes the rough and the ⌀3.175 ball × 10 / ⌀1 × 4 ball finish), bottom 4 → 3 (the 0.9 flat's program and the 25 mm primary are gone: rough + pocket on the ⌀3.175 × 12, finish on the ⌀3.175 ball × 22, rest/pencil on the ⌀2 ball × 12). Goal verdicts: every program passes; no cell cut more than 0.1 mm into the goal; the bottom sentence reads 98.2 % within 0.01 mm (was 98.4 %; the wall-foot guard leaves a little more standing at the walls, and #1129's sampler floor moves the ball programs) with leftovers 0.9194 / 0.7211 / 0.4122 %, and the top reads 97.6 % (was 96.4 % at 1129-1; #1114's picks buy the extra coverage). The e2e reads this table as the cross-door check.",
+  "tableVersion": "1114-1",
+  "rule": "#1114 (the maintainer's decision, 2026-11-09) + #1135 (the Manager's wall-foot ruling). (a) A BIT CHANGE IS PRICED FROM THE PROGRAM BEFORE IT: attendedChangeSeconds (rec. 120 s) while the preceding program is at most attendedMinutes (rec. 5); returnMinutes (rec. 15) on top from walkAwayMinutes (rec. 30) on; a smooth 3t² − 2t³ rise between; the sheet prints each change with its price and the preceding program. (b) PLANS COMPETE ON THE PRICED CYCLE; ties after price go the reach-margin gate (≥ reach.marginMm, rec. 1.0 mm) → the shortest sufficient flute → the larger diameter (the stiffer adequate tool) → the lower priced stage → the key — ONE pickAmongEquals at every site (the ball rank, the sequence primary, the curved flat, the rest ball). No 'pending #1114' rows remain; every same-diameter pick states its decider. (c) ORDERING IS PRICED WORK: the ball finish and the rim chamfer are offered in both orders (the freeing contour stays last). (d) A LEVEL PASS IS EMITTED ONLY WHERE THE CUTTER'S DISC CLEARS THE CL ABOVE IT (#1135): the rough's Z-levels and band skim and the skin all use one shared rule (`safeRasterRuns` / `splitUnsafeRuns`), so a wall-foot cell can no longer be cut by a pass meant for the floor beside it.",
+  "source": "casemaker cut <job>.cutjob.json --location k3-house/location.json, branch 1114-priced-bit-change @ 06c1374d5 (main c411cd8d2 + #1129 89691097f + #1135 67afaa7d7 + #1114), 2026-11-09",
+  "changedSince1129": [
+    { "job": "m1trayB-top", "name": "m1trayB-top-p5.nc", "old": "5d5a8990…", "oldBytes": 48344, "new": "8590bf68c8298b8f752b19ebac085b33", "newBytes": 187222 },
+    { "job": "m1trayB-top", "name": "m1trayB-top-p6.nc", "old": "90221d576fa54974b61ec32ee0f5f6db", "oldBytes": 48388, "new": "c554cdd25c1875f5f47f61081a131e10", "newBytes": 200144 },
+    { "job": "m1trayB-top", "name": "m1trayB-top-p7.nc", "old": "ee46eba4…", "oldBytes": 200122, "new": "f38d4859d22da8d99c30fc38be45384b", "newBytes": 373662 },
+    { "job": "m1trayB-top", "name": "m1trayB-top-p8.nc", "old": "f60f59bd…", "oldBytes": 161747, "new": "114ed00b170b6ba4a0dd3c5486507009", "newBytes": 45454 },
+    { "job": "m1trayB-bottom", "name": "m1trayB-bottom-p1.nc", "old": "a052318ff9644cab390ba11de395fc8b", "oldBytes": 100890, "new": "1b368039f8cc8087033b92e2a5a68f62", "newBytes": 100912 },
+    { "job": "m1trayB-bottom", "name": "m1trayB-bottom-p2.nc", "old": "cda22e06…", "oldBytes": 4233, "new": "5217422ee680f77f751e8a25278fa5a1", "newBytes": 1958074 },
+    { "job": "m1trayB-bottom", "name": "m1trayB-bottom-p3.nc", "old": "1eb40dd9…", "oldBytes": 3246780, "new": "e5f5bc692f9e47256235ac962394b59d", "newBytes": 3146573 }
   ],
-  "changedSince1111-1": [
-    {
-      "name": "m1trayB-top-p5.nc",
-      "old": "5031ba58189dbf2a099ed31b026b69bc",
-      "new": "5d5a8990c4abcafb00a625f6559e6d09"
-    },
-    {
-      "name": "m1trayB-bottom-p2.nc",
-      "old": "8fd40df1e83ff9c1a11584c3fdab0ca0",
-      "new": "cda22e0642867d40819d111baf09b4f6"
-    }
-  ],
+  "_droppedFrom1129": "m1trayB-top-p9.nc (114ed00b…, the contour — now top p8) and m1trayB-bottom-p2.nc (cda22e06…, the 0.9 flat) + m1trayB-bottom-p4.nc (259fd058…, the 22 ball's run — now bottom p2). Where the 1129-1 md5 is known the full value is quoted; the rest carry its sha prefix.",
   "jobs": {
     "m1trayB-top": {
-      "programs": 9,
+      "programs": 8,
       "files": [
-        {
-          "name": "m1trayB-top-p1.nc",
-          "bytes": 124288,
-          "md5": "c674717adeb75440f480580b2628a87e"
-        },
-        {
-          "name": "m1trayB-top-p2.nc",
-          "bytes": 1289,
-          "md5": "8cdac279a793ccb1a7bbd6fcb236868d"
-        },
-        {
-          "name": "m1trayB-top-p3.nc",
-          "bytes": 2002,
-          "md5": "cf327e2a3cb7c71401905b387cd63985"
-        },
-        {
-          "name": "m1trayB-top-p4.nc",
-          "bytes": 6667,
-          "md5": "5275f401e7ad0eda0aeb0439e2ddfc58"
-        },
-        {
-          "name": "m1trayB-top-p5.nc",
-          "bytes": 48344,
-          "md5": "5d5a8990c4abcafb00a625f6559e6d09"
-        },
-        {
-          "name": "m1trayB-top-p6.nc",
-          "bytes": 48388,
-          "md5": "90221d576fa54974b61ec32ee0f5f6db"
-        },
-        {
-          "name": "m1trayB-top-p7.nc",
-          "bytes": 200122,
-          "md5": "ee46eba48da7b8ee30f2ce0ea8843dec"
-        },
-        {
-          "name": "m1trayB-top-p8.nc",
-          "bytes": 161747,
-          "md5": "f60f59bd392c2ce896a151c326ce64df"
-        },
-        {
-          "name": "m1trayB-top-p9.nc",
-          "bytes": 45454,
-          "md5": "114ed00b170b6ba4a0dd3c5486507009"
-        }
+        { "name": "m1trayB-top-p1.nc", "bytes": 124288, "md5": "c674717adeb75440f480580b2628a87e", "note": "pocket/rough on the ⌀3.175 × 42 O-flute — 7 ops, 51 min 40 s" },
+        { "name": "m1trayB-top-p2.nc", "bytes": 1289, "md5": "8cdac279a793ccb1a7bbd6fcb236868d", "note": "⌀1 × 7 flat — 14 s" },
+        { "name": "m1trayB-top-p3.nc", "bytes": 2002, "md5": "cf327e2a3cb7c71401905b387cd63985", "note": "⌀0.9 flat — 22 s" },
+        { "name": "m1trayB-top-p4.nc", "bytes": 6667, "md5": "5275f401e7ad0eda0aeb0439e2ddfc58", "note": "⌀0.6 × 3 flat — 29 s" },
+        { "name": "m1trayB-top-p5.nc", "bytes": 187222, "md5": "8590bf68c8298b8f752b19ebac085b33", "note": "curved rough on the ⌀1.5 × 6 flat — shortest sufficient over the XCAN 1.5 × 8; 16 min 33 s" },
+        { "name": "m1trayB-top-p6.nc", "bytes": 200144, "md5": "c554cdd25c1875f5f47f61081a131e10", "note": "finish on the ⌀3.175 ball × 10 — shortest sufficient (both 3.175 balls pass the top's cuts); 6 min" },
+        { "name": "m1trayB-top-p7.nc", "bytes": 373662, "md5": "f38d4859d22da8d99c30fc38be45384b", "note": "rest/pencil on the ⌀1 × 4 ball — 7 min 17 s" },
+        { "name": "m1trayB-top-p8.nc", "bytes": 45454, "md5": "114ed00b170b6ba4a0dd3c5486507009", "note": "the freeing contour, RETURN on the ⌀3.175 × 42 O-flute — 14 min 47 s" }
       ]
     },
     "m1trayB-bottom": {
-      "programs": 4,
+      "programs": 3,
       "files": [
-        {
-          "name": "m1trayB-bottom-p1.nc",
-          "bytes": 100890,
-          "md5": "a052318ff9644cab390ba11de395fc8b"
-        },
-        {
-          "name": "m1trayB-bottom-p2.nc",
-          "bytes": 4233,
-          "md5": "cda22e0642867d40819d111baf09b4f6"
-        },
-        {
-          "name": "m1trayB-bottom-p3.nc",
-          "bytes": 3246780,
-          "md5": "1eb40dd9989dbb02298a5a41772c5d12"
-        },
-        {
-          "name": "m1trayB-bottom-p4.nc",
-          "bytes": 1958079,
-          "md5": "259fd058816fb9740304ffff2af31be5"
-        }
+        { "name": "m1trayB-bottom-p1.nc", "bytes": 100912, "md5": "1b368039f8cc8087033b92e2a5a68f62", "note": "rough + pocket on the ⌀3.175 × 12 metal O-flute — the primary satisfies the shortest sufficient flute; 2 ops, 2 h 21 min" },
+        { "name": "m1trayB-bottom-p2.nc", "bytes": 1958074, "md5": "5217422ee680f77f751e8a25278fa5a1", "note": "finish on the ⌀3.175 ball × 22 — the gate refuses the 10 mm flute at the 9.613 mm cut (0.387 mm margin); 57 min 13 s" },
+        { "name": "m1trayB-bottom-p3.nc", "bytes": 3146573, "md5": "e5f5bc692f9e47256235ac962394b59d", "note": "rest/pencil on the ⌀2 ball × 12 — the shortest sufficient rest ball; 1 h 26 min" }
       ]
     }
-  },
-  "facedJobCardRename": {
-    "_note": "A FACED job\u2019s uploaded names changed with #1093 too: the release store now names programs by the one naming function, as Save all, the sheet and the CLI already did. No set B file is affected (set B has no facing). An operator who cut a faced job from an older build sees the skim\u2019s name change on the card; re-uploading under the new names is the one-time step.",
-    "old": "<stem>-p1.nc = the skim; <stem>-p2.nc \u2026 = the engravings (cut-order numbering, skim included)",
-    "new": "<stem>-face.nc = the skim; <stem>-p1.nc \u2026 = the engravings (numbered among themselves; one engraving = <stem>.nc)",
-    "example": {
-      "job": "Faced-job",
-      "old": [
-        "Faced-job-p1.nc",
-        "Faced-job-p2.nc"
-      ],
-      "new": [
-        "Faced-job-face.nc",
-        "Faced-job.nc"
-      ],
-      "twoEngravings": {
-        "old": [
-          "Faced-job-p1.nc",
-          "Faced-job-p2.nc",
-          "Faced-job-p3.nc"
-        ],
-        "new": [
-          "Faced-job-face.nc",
-          "Faced-job-p1.nc",
-          "Faced-job-p2.nc"
-        ]
-      }
-    },
-    "dryRun": "<stem>-dry-face.nc for a lifted skim; <stem>-dry-p1.nc \u2026 for lifted engravings"
-  },
-  "changedSince1092-1": [
-    {
-      "name": "m1trayB-top-p7.nc",
-      "old": "a73c4e7c65ec42ae5edc0c653c8cd04a",
-      "new": "ee46eba48da7b8ee30f2ce0ea8843dec"
-    },
-    {
-      "name": "m1trayB-top-p8.nc",
-      "old": "55d81fffeb6b754e6b7f44b23b6a2925",
-      "new": "f60f59bd392c2ce896a151c326ce64df"
-    },
-    {
-      "name": "m1trayB-bottom-p3.nc",
-      "old": "91d289d5fc0cf1321bf6ce37dee03e37",
-      "new": "1eb40dd9989dbb02298a5a41772c5d12"
-    },
-    {
-      "name": "m1trayB-bottom-p4.nc",
-      "old": "6ab42994f33f896ab81dcb926500ec1f",
-      "new": "259fd058816fb9740304ffff2af31be5"
-    }
-  ]
+  }
 }

@@ -44,6 +44,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type JSX } from 'react';
+import { useRegistrationPromptStore } from '@/store/registrationPromptStore';
 import type { EngraveJob } from '@/types/engraveJob';
 import { probeInstrumentOf, type RegistrationPlan } from '@/engine/cnc/registration/plan';
 import { isSeatPlan, seatTapArgs } from '@/engine/cnc/registration/seatPress';
@@ -537,6 +538,13 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       transcript.length > 0 ? transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n') : null,
     );
   }, [written, result, setRegistrationTranscript]);
+
+  // #hotfix — publish the one boolean the Cut surface needs: a live prompt is waiting. The Step
+  // that holds this card forces itself open while it is set, whatever `currentStep` says.
+  useEffect(() => {
+    useRegistrationPromptStore.getState().setPending(busy && prompt !== null);
+    return () => useRegistrationPromptStore.getState().setPending(false);
+  }, [busy, prompt]);
 
   function askOperator(step: OperatorStep): Promise<boolean> {
     if (!aliveRef.current) return Promise.resolve(false);

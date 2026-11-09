@@ -1,13 +1,13 @@
 /**
- * #1111 — THE PLAN'S PICKS AMONG EQUALS, ON THE ENGINE.
+ * #1111/#1114 — THE PLAN'S PICKS AMONG EQUALS, ON THE ENGINE.
  *
- * The key-level cases (the reach-margin gate, the by-key row) live in `pickAmongEquals.spec.ts`.
- * This file proves the plan uses them:
+ * The key-level cases (the reach-margin gate, the shortest sufficient flute, the key) live in
+ * `pickAmongEquals.spec.ts`. This file proves the plan uses them:
  *
  *  - the M1 tray's two ⌀3.175 balls, in either house order, end on the same ball — at a shallow cut
- *    both pass the gate and the KEY decides; the row says "by key, pending #1114";
- *  - a part with two same-diameter flats keeps the pre-#1111 order under the canonical house order
- *    (0f's (c)), and the sheet says "same diameter: by key, pending #1114".
+ *    both pass the gate and the SHORTER FLUTE wins (the stiffest adequate tool);
+ *  - a part with two same-diameter flats picks by the same rule — the shorter sufficient flute —
+ *    and the sheet states the decider.
  *
  * RED before #1111: the two house orders chose different balls (the first in arrival order), and a
  * same-diameter flat was chosen by list position with nothing stated.
@@ -75,29 +75,29 @@ describe('#1111 R2 — the tray’s ⌀3.175 finish is the same ball whichever w
     const tenFirst = await plan([flat6, ten, twentyTwo]);
     const longFirst = await plan([flat6, twentyTwo, ten]);
     // This fixture is 10 mm thick: BOTH 3.175 balls pass the 1.0 mm gate (10 mm and 22 mm of flute
-    // against a 4.7 mm cut), so the KEY decides — '131012313822' before '132112313810' — whichever
-    // way they arrived. The tray's own 9.613 mm cut is the gate case (the 10 mm ball's 0.387 mm
-    // margin fails), pinned with the keys in `pickAmongEquals.spec.ts`.
+    // against a 4.7 mm cut), so the SHORTER FLUTE wins — 132112313810 (10 mm) over 131012313822
+    // (22 mm) — whichever way they arrived (#1114: the stiffest adequate tool). The tray's own
+    // 9.613 mm cut is the gate case (the 10 mm ball's 0.387 mm margin fails), pinned with the keys
+    // in `pickAmongEquals.spec.ts`.
     for (const run of [tenFirst, longFirst]) {
-      expect(run.finishCutters.has('131012313822'), 'the by-key ball cuts the finish').toBe(true);
-      expect(run.finishCutters.has('132112313810'), 'the other ball is not the finish').toBe(false);
+      expect(run.finishCutters.has('132112313810'), 'the shortest sufficient ball cuts the finish').toBe(true);
+      expect(run.finishCutters.has('131012313822'), 'the other ball is not the finish').toBe(false);
     }
-    // Where the rank ties, the row says the key decided and names the policy issue.
+    // Where the rank ties, the row names the decider.
     const ranked = [tenFirst, longFirst].filter((run) => run.rank !== null);
     expect(ranked.length, 'the two-ball rank ran').toBeGreaterThan(0);
     for (const run of ranked) {
       expect(run.rank).toContain('tie on leftover and cycle');
-      expect(run.rank).toContain('by key, pending #1114');
+      expect(run.rank).toContain('shortest sufficient flute');
     }
   }, 300_000);
 
-  it('a same-diameter flat tie keeps the pre-#1111 order and the sheet says by key, pending #1114', async () => {
-    // Two ⌀3.175 flats in the canonical house order ('…-3-175-25' sorts before '…-m-…-12'); the
-    // primary and the curved flat keep the pre-#1111 pick — the 25 — and the row states that the
-    // order decided, pending the policy issue (0f's (c)).
+  it('a same-diameter flat tie picks the shorter sufficient flute, and the sheet states the decider', async () => {
+    // Two ⌀3.175 flats; both reach the part's remainder, so the 12’s shorter flute wins over the
+    // 25’s (#1114). The row states the decider instead of a pending policy.
     const run = await plan([flat25, flat12, twentyTwo]);
-    expect(run.primaryCutter).toBe('inv:kz-o-flute-3-175-25');
+    expect(run.primaryCutter).toBe('inv:kz-o-flute-m-3-175-12');
     expect(run.notes).toContain('same diameter');
-    expect(run.notes).toContain('pending #1114');
+    expect(run.notes).toContain('shortest sufficient flute');
   }, 300_000);
 });

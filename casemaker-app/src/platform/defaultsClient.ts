@@ -475,6 +475,36 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(1).max(3600),
     fallback: 91.4,
   },
+  // ── #1114 — THE BIT-CHANGE PRICE (begin). The maintainer's ruling (2026-11-09): a bit change is
+  // not a constant — its price depends on the program before it, because people walk away during a
+  // long one. Four shop settings, all RECOMMENDATIONS (the thresholds rule); the curve is
+  // `bitChange.ts`'s (smooth step between the two thresholds), and the model plan prices every
+  // change with them. `defaults.rs` states the same bounds and fallbacks.
+  'bitChange.attendedMinutes': {
+    label: 'a program up to this long leaves the operator at the machine (recommended 5 min)',
+    unit: 'min',
+    rule: z.number().min(0).max(240),
+    fallback: 5,
+  },
+  'bitChange.attendedChangeSeconds': {
+    label: 'what a bit change costs while the operator is there (recommended 120 s)',
+    unit: 's',
+    rule: z.number().min(0).max(3600),
+    fallback: 120,
+  },
+  'bitChange.walkAwayMinutes': {
+    label: 'a program at least this long means the operator has left (recommended 30 min)',
+    unit: 'min',
+    rule: z.number().min(0).max(600),
+    fallback: 30,
+  },
+  'bitChange.returnMinutes': {
+    label: "the operator's return, on top of the attended cost, once they have left (recommended 15 min)",
+    unit: 'min',
+    rule: z.number().min(0).max(240),
+    fallback: 15,
+  },
+  // ── #1114 — THE BIT-CHANGE PRICE (end)
   // #847 — a 3D finish's leftover is INFORMATION until it is deep enough to see: a ridge shallower
   // than this reads as a witness mark, one past it as a step. The share half of the same judgement
   // is `rest.thirdToolPct` above — a leftover that big is a real part of what the goal removes.

@@ -43,6 +43,7 @@ import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
 import { cutPlan } from '@/engine/cnc/engrave/cutPlan';
 import { laserLiftFor } from '@/engine/cnc/engrave/laserSurface';
 import { packageStaleness } from '@/engine/cnc/engrave/package';
+import { useRegistrationPromptStore } from '@/store/registrationPromptStore';
 import { releaseNext } from '@/engine/cnc/engrave/release';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { formatDuration, registrationTouches } from '@/engine/cnc/plan';
@@ -175,6 +176,7 @@ function Step({
   done,
   current,
   summary,
+  forceOpen = false,
   children,
 }: {
   number: number;
@@ -182,6 +184,8 @@ function Step({
   done: boolean;
   current: boolean;
   summary: string;
+  /** #hotfix — a live prompt lives here: the step opens and cannot be folded while it waits. */
+  forceOpen?: boolean;
   children: ReactNode;
 }) {
   // `null` follows the current step; a boolean is the operator's own fold/unfold since then. When
@@ -192,14 +196,20 @@ function Step({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the override is keyed to the step's current-ness; `current` is a boolean, so tagging the override would restore it when the step becomes current again after a round trip, which this reset must not do
     setManual(null);
   }, [current]);
-  const open = manual ?? current;
+  const open = forceOpen || (manual ?? current);
   return (
     <details
       data-testid={`engrave-cut-step-${number}`}
       open={open}
       onToggle={(e) => {
-        const now = (e.currentTarget as HTMLDetailsElement).open;
-        setManual(now === current ? null : now);
+        const el = e.currentTarget as HTMLDetailsElement;
+        // #hotfix — a live prompt owns the fold: a close attempt is undone immediately, and the
+        // manual override is not recorded, so the step stays open until the prompt is answered.
+        if (forceOpen) {
+          if (!el.open) el.open = true;
+          return;
+        }
+        setManual(el.open === current ? null : el.open);
       }}
       style={{ marginTop: 6, borderTop: '1px solid #2a2f36', paddingTop: 4 }}
     >
@@ -1071,6 +1081,9 @@ export function EngraveCutSurface({
     pkg.programs.length > 0 &&
     pkg.programs.every((program) => finishedHashes.includes(program.hash));
   const currentStep = !fitDone ? 1 : !registeredDone ? 2 : !ran ? 3 : 0;
+  // #hotfix — while the registration executor waits at a prompt, the step holding it stays open
+  // even if `currentStep` fell back to 1 (a Register press can stale the package).
+  const registrationPromptPending = useRegistrationPromptStore((s) => s.pending);
 
   // #689 review — THE START-CUT STEP STAYS VISIBLE, BUT WHAT IT USED TO REQUIRE IS A BLOCKER on
   // every control. Since #689 the step renders even when the check is red or the program is stale;
@@ -1459,6 +1472,7 @@ export function EngraveCutSurface({
         done={registeredDone}
         current={currentStep === 2}
         summary={step2Summary}
+        forceOpen={registrationPromptPending}
       >
         <EngraveRegistrationStep job={job} target={target} setupIndex={currentSetupIndex} />
         {/* #608 / #796 — once the registration measured a tilt, the program made for a flat blank
