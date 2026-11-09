@@ -21,9 +21,13 @@ export function summarizePlan(plan: RegistrationPlan): string {
       `and bisecting to ${n(s.fineStepMm)} mm, stopping at the first touch that falls into the opening, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.`
     );
   }
+  // #1123 item 29 — a plan with NO scans (a bracket whose offset was measured: the bracket fixes
+  // X and Y, only the surface is touched) narrates NO scan. Before this, the empty case fed the
+  // sentence its own words — "then scan no edge scan (the bracket fixes X and Y) — bracketing each
+  // edge and bisecting …", which reads as a garbled instruction to do something impossible.
   const edges =
     plan.scans.length === 0
-      ? 'no edge scan (the bracket fixes X and Y)'
+      ? ''
       : plan.disc !== undefined
         ? `the disc’s rim at its centre-lines — left, right, front and back — so each touch finds the extreme point of the circle (the centre is the midpoint of each opposite pair, the diameter the span)`
         : plan.mount === 'bracket'
@@ -49,11 +53,15 @@ export function summarizePlan(plan: RegistrationPlan): string {
         : ` the fixed-jaw top is tapped first and checked against the stored datum${
             plan.mountDatum == null ? '' : ` (${n(plan.mountDatum.jawTopZ)})`
           };`;
+  const scanClause =
+    plan.scans.length === 0
+      ? ''
+      : `; then scan ${edges} — bracketing each edge and bisecting to ${n(s.fineStepMm)} mm, ` +
+        `stopping at the first touch off the stock, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm`;
   return (
     `Home, fit ${probeWords} and measure it (M491);${tap}` +
     ` touch the surface at the cut area's centre ` +
-    `(${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}); then scan ${edges} — bracketing each edge ` +
-    `and bisecting to ${n(s.fineStepMm)} mm, stopping at the first touch off the stock, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.${assumes}`
+    `(${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)})${scanClause}; home when finished.${assumes}`
   );
 }
 
