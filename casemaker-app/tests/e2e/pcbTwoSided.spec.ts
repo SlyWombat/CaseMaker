@@ -119,10 +119,10 @@ test('a two-layer Gerber set becomes a two-setup board that generates on both fa
   expect(panel).toContain('Isolate the top copper');
   expect(panel).toContain('Isolate the bottom copper');
   expect(panel).toContain('Cut out the board');
-  // The Setups list lives in the Hold group, closed by default.
-  const hold = page.getByTestId('engrave-group-hold');
-  if (!(await hold.evaluate((el) => (el as HTMLDetailsElement).open))) {
-    await page.getByTestId('engrave-group-hold-summary').click();
+  // #1123 item 27 — the Setups list is its own group, closed by default.
+  const setupsGroup = page.getByTestId('engrave-group-setups');
+  if (!(await setupsGroup.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await page.getByTestId('engrave-group-setups-summary').click();
   }
   await expect(page.getByTestId('engrave-setup-2')).toBeVisible();
   await expect(page.getByTestId('engrave-setup-face-words-2')).toContainText(/bottom/i);

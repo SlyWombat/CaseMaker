@@ -4264,6 +4264,23 @@ describe('EngravePanel — the Design main path (#686)', () => {
     expect(screen.getByTestId('engrave-footer')).toBeTruthy();
   });
 
+  // #1123 item 27 — THE SETUPS SECTION IS ITS OWN GROUP. At the bench it rendered inside the
+  // Design tab's Hold group, after "Waste board … Save as my setup", and the maintainer could not
+  // find "Setups" at all. It is a group in the same pattern as Job/Cutter/Hold, holding the setups
+  // section and its rows.
+  it('#1123 item 27 — Setups is its own group in the Design tab, not buried in Hold', () => {
+    render(<EngravePanel />);
+    const group = screen.getByTestId('engrave-group-setups');
+    // The group holds the setups section, and the Hold group no longer does.
+    expect(group.querySelector('[data-testid="engrave-setups"]')).not.toBeNull();
+    expect(screen.getByTestId('engrave-group-hold').querySelector('[data-testid="engrave-setups"]')).toBeNull();
+    // Its summary states the setup count while closed (the same fact-while-closed rule as the rest).
+    expect(screen.getByTestId('engrave-group-setups-summary').textContent).toContain('setup');
+    // Opening it with its own summary shows the setup row.
+    fireEvent.click(screen.getByTestId('engrave-group-setups-summary'));
+    expect(screen.getByTestId('engrave-setup-1')).toBeTruthy();
+  });
+
   it('prints the last save as a clock time, and an unsaved job as words (#686 §1)', () => {
     // The bar's one formatting rule: `saved 09:14` from the store's timestamp, and the words
     // before there is one. The widget is the e2e's business; this is the text it prints.
