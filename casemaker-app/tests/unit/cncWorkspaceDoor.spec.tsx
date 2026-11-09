@@ -12,7 +12,7 @@
  * door remains the screen behind it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { EngravePanel } from '@/components/panels/EngravePanel';
 import { StartWizard } from '@/components/welcome/StartWizard';
 import { WelcomeOverlay } from '@/components/welcome/WelcomeOverlay';
@@ -74,6 +74,7 @@ afterEach(() => {
 
 describe('#1123 item 2 — the wizard is an overlay on the CNC workspace', () => {
   it('the CNC door leaves the door behind: the Job panel is under the wizard, and stays after ✕', () => {
+    const before = useProjectStore.getState().project;
     render(<DoorHost />);
 
     fireEvent.click(screen.getByTestId('welcome-start-cnc'));
@@ -84,18 +85,32 @@ describe('#1123 item 2 — the wizard is an overlay on the CNC workspace', () =>
     expect(useViewportStore.getState().activeSidebarSection).toBe('cnc-engrave');
     expect(screen.queryByTestId('welcome-overlay')).toBeNull();
     expect(screen.getByTestId('engrave-panel')).toBeTruthy();
-    // …on a blank sized to the job it will hold, so the Job panel has a part to draw.
-    const job = useEngraveJobStore.getState().job;
-    const blank = useProjectStore.getState().project.case.blank;
-    expect(blank?.enabled).toBe(true);
-    expect(blank?.width).toBeCloseTo(job.stock.length, 6);
-    expect(blank?.height).toBeCloseTo(job.stock.width, 6);
-    expect(blank?.thickness).toBeCloseTo(job.stock.thickness, 6);
+    // …and the project is the one that was there, object for object: entering CNC never replaces
+    // it (the wizard's stock step is where a new job's blank project is made, after its question).
+    expect(useProjectStore.getState().project).toBe(before);
 
     // ✕ puts the wizard away, not the operator: the Job panel remains the screen.
     fireEvent.click(screen.getByTestId('start-wizard-close'));
     expect(screen.queryByTestId('start-wizard')).toBeNull();
     expect(screen.getByTestId('engrave-panel')).toBeTruthy();
+    expect(useProjectStore.getState().welcomeMode).toBe(false);
+    expect(useViewportStore.getState().activeSidebarSection).toBe('cnc-engrave');
+  });
+
+  it('a real project behind the door is kept, not replaced, when CNC is entered', () => {
+    // The review's hypothetical: welcomeMode on over an enclosure. No shipped path produces this
+    // (New resets the project; boot starts on the placeholder), but entering CNC must not be able
+    // to eat an enclosure if one ever is.
+    act(() => {
+      useProjectStore.getState().loadBuiltinBoard('rpi-4b');
+      useProjectStore.setState({ welcomeMode: true });
+    });
+    const real = useProjectStore.getState().project;
+    render(<DoorHost />);
+
+    fireEvent.click(screen.getByTestId('welcome-start-cnc'));
+
+    expect(useProjectStore.getState().project).toBe(real);
     expect(useProjectStore.getState().welcomeMode).toBe(false);
     expect(useViewportStore.getState().activeSidebarSection).toBe('cnc-engrave');
   });

@@ -1067,9 +1067,8 @@ export function StartWizard(): JSX.Element {
               style={{ border: '1px solid #7a5a28', background: '#241d12', borderRadius: 4, padding: 6, marginTop: 6 }}
             >
               <p style={{ ...MUTED, color: '#e0c07a', margin: 0 }}>
-                The job open now has {confirmReplace.items} item{confirmReplace.items === 1 ? '' : 's'} on it. A new
-                project starts a new job, and there is one job here until save and open land — starting
-                replaces it, and its items are lost.
+                The job open now has {confirmReplace.items} item{confirmReplace.items === 1 ? '' : 's'} on it.
+                Starting a new job replaces it; save it first to keep its items.
               </p>
               <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                 <button
