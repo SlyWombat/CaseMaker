@@ -52,7 +52,7 @@ async function fakeHouse(page: Page): Promise<void> {
       },
       datums: {
         surfaceTopZ: null,
-        viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe', at: null },
+        viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe', at: null, probeRefZ: -80 },
         bracketSeatZ: null,
         rotaryAxis: null,
       },

@@ -648,6 +648,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
       },
       hasFinishedPrograms: true,
       lastRecordedTopMachineZ: recorded,
+      lastRecordedTopProbeRefZ: -76.063,
     });
     if (!r.ok) throw new Error(r.reason);
     const presses = asked.filter((s) => s.kind === 'derived-surface');
@@ -671,6 +672,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
       },
       hasFinishedPrograms: true,
       lastRecordedTopMachineZ: EXPECTED,
+      lastRecordedTopProbeRefZ: -76.063,
     });
     if (!r.ok) throw new Error(r.reason);
     const presses = asked.filter((s) => s.kind === 'derived-surface');

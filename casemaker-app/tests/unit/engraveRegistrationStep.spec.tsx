@@ -1144,7 +1144,7 @@ describe('#797 follow-up — the Register card proposes the plan it runs', () =>
                 id: 'bp-proposal',
                 datums: {
                   surfaceTopZ: null,
-                  viseJawTopZ: { value: -57.491, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-1', at: null },
+                  viseJawTopZ: { value: -57.491, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-1', at: null , probeRefZ: -80 },
                   bracketSeatZ: null,
                   rotaryAxis: null,
                 },
@@ -1252,7 +1252,7 @@ describe('#607 — the Register step of a chuck job carries the axis tap', () =>
               {
                 id: 'bp-rotary',
                 datums: {
-                  surfaceTopZ: { value: -76, measuredAt: '2026-10-31T00:00:00.000Z', by: 'fx-probe-3d', at: null },
+                  surfaceTopZ: { value: -76, measuredAt: '2026-10-31T00:00:00.000Z', by: 'fx-probe-3d', at: null , probeRefZ: -80 },
                   viseJawTopZ: null,
                   bracketSeatZ: null,
                   rotaryAxis: null,
@@ -1400,7 +1400,7 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
                 datums: {
                   surfaceTopZ: null,
                   viseJawTopZ: null,
-                  bracketSeatZ: { value: SEAT, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1' },
+                  bracketSeatZ: { value: SEAT, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1' , probeRefZ: -80 },
                   rotaryAxis: null,
                 },
                 placements: [],
@@ -1449,7 +1449,7 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
       tilt: { xMm: 0, yMm: 0 },
       ok: true,
       verdict: 'flat',
-    } as never);
+    } as never, -80);
   }
 
   /**
@@ -1727,7 +1727,7 @@ describe('#1082 the Register card on a cold first paint', () => {
                 datums: {
                   surfaceTopZ: null,
                   viseJawTopZ: null,
-                  bracketSeatZ: { value: -56.8, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1', at: null },
+                  bracketSeatZ: { value: -56.8, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1', at: null, probeRefZ: -80 },
                   rotaryAxis: null,
                 },
                 placements: [],
@@ -1817,7 +1817,7 @@ describe('#1123-28 — the Register card never silently runs a stored plan the p
                 datums: {
                   surfaceTopZ: null,
                   viseJawTopZ: null,
-                  bracketSeatZ: { value: -56.8, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1', at: null },
+                  bracketSeatZ: { value: -56.8, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1', at: null, probeRefZ: -80 },
                   rotaryAxis: null,
                 },
                 placements: [],

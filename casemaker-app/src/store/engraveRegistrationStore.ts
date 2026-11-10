@@ -80,6 +80,12 @@ export interface SurfaceSpreadMeasurement {
   jobId: string;
   target: { host: string; port: number };
   assessment: SurfaceSpreadAssessment;
+  /**
+   * #1189 — the probe's M491 at the run that measured this spread. The assessment's Z values are
+   * raw machine Z in that seating; the flip's carried top is derived from them, so the reference
+   * travels here too (absent on a measurement restored or written without one).
+   */
+  probeRefZ?: number | null;
 }
 
 interface EngraveRegistrationState {
@@ -127,6 +133,8 @@ interface EngraveRegistrationState {
     jobId: string,
     target: { host: string; port: number },
     assessment: SurfaceSpreadAssessment,
+    /** #1189 — the run's M491, the seating the assessment's Z values belong to. */
+    probeRefZ?: number | null,
   ) => void;
   clear: (jobId: string) => void;
 }
@@ -186,11 +194,11 @@ export const useEngraveRegistrationStore = create<EngraveRegistrationState>((set
     set((s) => ({ bySetup: { ...s.bySetup, [registrationKey(rec.jobId, setupId)]: rec } }));
   },
 
-  measureSurface: (jobId, target, assessment) =>
+  measureSurface: (jobId, target, assessment, probeRefZ = null) =>
     set((s) => ({
       surfaces: {
         ...s.surfaces,
-        [jobId]: { jobId, target: { host: target.host, port: target.port }, assessment },
+        [jobId]: { jobId, target: { host: target.host, port: target.port }, assessment, probeRefZ },
       },
     })),
 

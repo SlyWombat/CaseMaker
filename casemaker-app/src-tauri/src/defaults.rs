@@ -152,6 +152,9 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
     // #1179 B — two touches on a blank that has been cut must agree to this, mm (the analyst's
     // 0.1): a cut floor, an old hole or a chip cannot agree with the real top to 0.1 mm.
     ("registration.cutBlankAgreeMm", 0.1, "mm"),
+    // #1179 amendment (2026-11-10) — a check reading may stand this far above the band and still be
+    // a reading (chips on the blank); beyond it, it is a clamp or fixture and stops the run.
+    ("registration.cutBlankAboveBandMm", 5.0, "mm"),
     // #1179 D — a measured top may imply a thickness up to this far from the job's before the
     // Register step says so; 0.1 mm matches the touch-agreement rule beside it.
     ("registration.thicknessNoteMm", 0.1, "mm"),
@@ -764,6 +767,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "registration.cutBlankAgreeMm" => Some(need(
             n.is_some_and(|v| (0.01..=1.0).contains(&v)),
             "0.01 to 1 mm",
+        )),
+        "registration.cutBlankAboveBandMm" => Some(need(
+            n.is_some_and(|v| (0.5..=50.0).contains(&v)),
+            "0.5 to 50 mm",
         )),
         "registration.thicknessNoteMm" => Some(need(
             n.is_some_and(|v| (0.01..=2.0).contains(&v)),

@@ -72,6 +72,8 @@ function locationView(machineOverride: Record<string, unknown> | null = null): u
     by: 'fx-probe-1',
     at: [-175, -35],
     restsOnStock: true,
+    // #1189 — the probe's M491 when the seat was measured (the fake console's own reading).
+    probeRefZ: -80,
   };
   profile.placements = (profile.placements ?? []).filter(
     (pl) => ((pl as { where?: { kind?: string } }).where?.kind ?? '') !== 'pins',

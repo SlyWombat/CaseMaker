@@ -82,6 +82,9 @@ function locationView(finished: readonly string[]): unknown {
     at: [-175, -35],
     // The seat IS the surface the stock rests on, so the under board is not added again.
     restsOnStock: true,
+    // #1189 — the probe's M491 when the seat was measured (the fake console's own reading): a
+    // datum from the same seating, so the plan's band is unchanged.
+    probeRefZ: -80,
   };
   profile.placements = (profile.placements ?? []).filter(
     (pl) => ((pl as { where?: { kind?: string } }).where?.kind ?? '') !== 'pins',

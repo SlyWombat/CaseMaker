@@ -82,6 +82,12 @@ export interface RunData {
     /** reading + depth — the top this touch implies, or null without a reading. */
     impliedMachineZ: number | null;
     missed: 'no-contact' | 'below-band' | null;
+    /**
+     * #1179 amendment (2026-11-10) — the reading stood ABOVE the band's ceiling by this much (mm):
+     * something on the blank (chips, a clamp) met the probe. It is a READING, recorded and never
+     * part of an agreeing pair; the run moves to the next check. Absent on an in-band reading.
+     */
+    aboveBandMm?: number | null;
   }[];
 }
 
@@ -174,6 +180,8 @@ export interface RegistrationOutcome {
     /** reading + depth — the top this touch implies, or null without a reading. */
     impliedMachineZ: number | null;
     missed: 'no-contact' | 'below-band' | null;
+    /** #1179 amendment — how far above the band this reading stood (see `RunData.surfaceChecks`). */
+    aboveBandMm?: number | null;
   }[];
   probeRefZ: number;
   /**

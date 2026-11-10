@@ -84,7 +84,7 @@ function setupFor(job: EngraveJob): Setup {
 
 function attemptFor(
   job: EngraveJob,
-  seat: { value: number; what: 'bracket seat'; measuredAt: string } | null,
+  seat: { value: number; what: 'bracket seat'; measuredAt: string; probeRefZ?: number | null } | null,
   over: Partial<Parameters<typeof planRegistrationAttempt>[0]> = {},
 ) {
   return planRegistrationAttempt({
@@ -106,7 +106,7 @@ function attemptFor(
   });
 }
 
-const MEASURED_SEAT = { value: -85.788, what: 'bracket seat' as const, measuredAt: '2026-11-09T17:00:00.000Z' };
+const MEASURED_SEAT = { value: -85.788, what: 'bracket seat' as const, measuredAt: '2026-11-09T17:00:00.000Z', probeRefZ: -76.063 };
 
 describe('#1133 a bracket hold plans one top touch', () => {
   it('with a measured seat: one Z touch, no edge finds, and no tap at all', () => {

@@ -1779,6 +1779,13 @@
       "setAt": null,
       "unit": "mm",
       "note": "#1179 D \u2014 a measured top may imply a thickness up to this far from the job\u2019s before the Register note says so"
+    },
+    "registration.cutBlankAboveBandMm": {
+      "value": 5.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "#1179 amendment (2026-11-10) \u2014 a check reading may stand this far above the band (chips); beyond it, a clamp stops the run"
     }
   },
   "accessories": [

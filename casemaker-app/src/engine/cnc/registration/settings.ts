@@ -61,6 +61,13 @@ export interface RegistrationSettings {
    */
   cutBlankAgreeMm?: number;
   /**
+   * #1179 amendment (2026-11-10) — a check reading ABOVE the band is a reading (something lying on
+   * the blank: chips, a burr) up to this far above the band's ceiling; the run records it and moves
+   * on. Beyond it, it is a clamp or a fixture and still stops. OPTIONAL on an older stored plan;
+   * {@link CUT_BLANK_ABOVE_BAND_FALLBACK_MM} answers then.
+   */
+  cutBlankAboveBandMm?: number;
+  /**
    * #475 — how many surface touches the cut regions' extents get, beyond the registration-point
    * touch. At least 5, so the centre and both extents on each axis are read; seeded 5.
    */
@@ -89,6 +96,12 @@ export interface RegistrationSettings {
  */
 export const CUT_BLANK_AGREE_FALLBACK_MM = 0.1;
 
+/**
+ * #1179 amendment — the labelled fallback for the above-band limit, mm: an older stored plan has no
+ * key; the shop's own default (`registration.cutBlankAboveBandMm`) is the same number.
+ */
+export const CUT_BLANK_ABOVE_BAND_FALLBACK_MM = 5;
+
 /** The lift between the fast and the slow surface touch (`G0 Z1`), mm. Compiled: the sequence's own. */
 export const SURFACE_LIFT_MM = 1;
 /** The furthest the slow surface touch may go past the fast touch's reading, mm (#449 review). Compiled. */
@@ -110,6 +123,7 @@ const KEYS: Record<keyof RegistrationSettings, string> = {
   tipDiameterMm: 'registration.tipDiameterMm',
   surfaceToleranceMm: 'registration.surfaceToleranceMm',
   cutBlankAgreeMm: 'registration.cutBlankAgreeMm',
+  cutBlankAboveBandMm: 'registration.cutBlankAboveBandMm',
   surfaceTouchCount: 'registration.surfaceTouchCount',
   edgeMarginMm: 'registration.edgeMarginMm',
   surfaceSeekMm: 'registration.surfaceSeekMm',
@@ -165,6 +179,11 @@ export function settingsProblem(s: RegistrationSettings): string | null {
     (!(s.cutBlankAgreeMm > 0) || s.cutBlankAgreeMm > s.surfaceToleranceMm)
   ) {
     return `the cut-blank agreement (${s.cutBlankAgreeMm} mm) must be above 0 and at most the surface tolerance (${s.surfaceToleranceMm} mm)`;
+  }
+  // #1179 amendment — a non-positive limit would turn every above-band reading into a stop,
+  // including the chips the amendment exists for.
+  if (s.cutBlankAboveBandMm !== undefined && !(s.cutBlankAboveBandMm > 0)) {
+    return 'the cut-blank above-band limit must be above 0 mm';
   }
   if (s.surfaceToleranceMm >= s.parkAboveSurfaceMm - PARK_CLEARANCE_MM) {
     return `the surface tolerance (${s.surfaceToleranceMm} mm) must be less than the park height (${s.parkAboveSurfaceMm} mm) less ${PARK_CLEARANCE_MM}`;

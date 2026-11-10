@@ -131,8 +131,9 @@ export function planRegistrationAttempt(args: {
   mountDatumMismatch: string | null;
   /** #640 — the same probe, by NAME, for the sentence (the id stays for the wiring). */
   mountDatumMismatchName: string | null;
-  /** #619 — the measured surface-top datum; when present the plan expects the found top, not the ledge estimate. */
-  surfaceTopZ: { value: number } | null;
+  /** #619 — the measured surface-top datum; when present the plan expects the found top, not the ledge estimate.
+   *  #1189 — with the probe's reference it was measured at. */
+  surfaceTopZ: { value: number; probeRefZ?: number | null } | null;
   /** #509 — the active bed profile's seat beside the bracket (its bracket seat, else its surface top). */
   bracketSeat: BracketSeatDatum | null;
   /**
@@ -291,6 +292,19 @@ export function planRegistrationAttempt(args: {
         expected: 'the seat from the seek, inside ±1.5 mm of the derived value',
       };
     }
+    // #1189 — A DATUM MEASURED BEFORE THE PROBE WAS LAST FITTED IS NOT TRUSTED ACROSS THE REFIT.
+    // The seat is a raw machine Z: a probe that sits 1.145 mm further out (the bench, 2026-11-10)
+    // makes every surface trigger that much higher, and using the old number would stop a good
+    // blank or accept a wrong one. The card asks for the one-touch re-measure (the same action
+    // Manage offers); the re-measure writes the probe's reference and the question never returns.
+    if (expected0.expectedSurface.probeRefZ === null) {
+      return {
+        kind: 'refused',
+        reason:
+          'the bracket seat on file was measured before the probe was last fitted, so it cannot anchor a surface band now — ' +
+          'measure it again with the probe as it sits (Manage › the machine › Measure the seat beside the bracket — one touch), then register again',
+      };
+    }
     // #1133 — THE PLAN IS THE SURFACE TOUCH. A bracket hold fixes X, Y and rotation (repeat
     // 0.05 mm, fit 0.1 mm), so with the seat measured there is nothing to find: no edge scans, no
     // corner derivation, and no mount tap (the seat datum the profile holds IS the reference — a
@@ -306,6 +320,10 @@ export function planRegistrationAttempt(args: {
         // `registrationFor` adds the stock's height this way up to the seat; take it back off the
         // expected surface so the two statements cannot drift.
         seatMachineZ: expected0.expectedSurface.machineZ - dims0.z,
+        // #1189 — the seat datum's reference, so the executor corrects the band once the probe's
+        // M491 is known (the bench's refit shift).
+        seatProbeRefZ: expected0.expectedSurface.probeRefZ,
+        seatProbeRefLabel: 'the seat',
         seekFromMachineZ: clearanceZOf(jobMachine(job, calibration)) ?? 0,
         cornerRadius: 0,
         bracketOrigin: datum,
@@ -355,6 +373,25 @@ export function planRegistrationAttempt(args: {
     // mount tap needs the fixed jaw's machine XY; without a frame there is nothing to tap.
     if (args.mountTap === null) {
       return { kind: 'refused', reason: 'place the vise, or register once from the fixed jaw, so the app knows where it is' };
+    }
+    // #1189 — a datum measured before the probe was last fitted cannot anchor the band. The
+    // surface top is the expected top when present; the jaw top is the seek's floor and ceiling
+    // datum, so BOTH have to carry a reference. Ask for the one-touch re-measure and stop.
+    if (args.surfaceTopZ !== null && args.surfaceTopZ.probeRefZ == null) {
+      return {
+        kind: 'refused',
+        reason:
+          'the surface top on file was measured before the probe was last fitted, so it cannot anchor a surface band now — ' +
+          'measure it again with the probe as it sits (Manage › the machine › Run a surface registration), then register again',
+      };
+    }
+    if (args.mountDatum.probeRefZ == null) {
+      return {
+        kind: 'refused',
+        reason:
+          'the jaw top on file was measured before the probe was last fitted, so it cannot bound the surface seek now — ' +
+          'tap the fixed jaw again with the probe as it sits (Manage › the machine › Tap the fixed jaw), then register again',
+      };
     }
     input = { seekFromMachineZ, cornerRadius: STOCK_CORNER_RADIUS_MM, mountDatum: args.mountDatum, surfaceTopZ: args.surfaceTopZ, probe: args.probe, mountTap: args.mountTap };
   } else {

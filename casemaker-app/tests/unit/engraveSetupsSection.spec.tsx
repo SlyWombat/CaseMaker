@@ -77,7 +77,7 @@ const DATUM_LOCATION = {
       bedProfiles: [
         {
           id: 'bp-1',
-          datums: { viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-1', at: null } },
+          datums: { viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-1', at: null , probeRefZ: -80 } },
           placements: [
             { id: 'pl-vise', fixture: 'fx-vise-1', where: { kind: 'pins', pins: 'vise', anchor: null }, count: null, frame: { fixedJawFaceX: -181.2, jawStartY: -203.5 }, provenance: {} },
           ],
@@ -428,7 +428,7 @@ describe('#471 registration — planned only after approval, refused with the en
                 ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!,
                 datums: {
                   ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!.datums,
-                  viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-old', at: null },
+                  viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-old', at: null , probeRefZ: -80 },
                 },
               },
             ],
@@ -473,7 +473,7 @@ describe('#471 registration — planned only after approval, refused with the en
                 ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!,
                 datums: {
                   ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!.datums,
-                  viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe', at: null },
+                  viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe', at: null , probeRefZ: -80 },
                 },
                 history: [],
               },

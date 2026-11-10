@@ -35,6 +35,16 @@ export const CUT_BLANK_FLAT_MM = 0.02;
 export const CUT_BLANK_MAX_POINTS = 5;
 /** The extra reach past a cutter's radius that a floor must be clear of other depths, mm. */
 export const CUT_BLANK_FLAT_REACH_MM = 1;
+/**
+ * #1179 amendment (2026-11-10) — THE FIRST CHECKS PREFER THE INSIDE. Chips and burrs collect
+ * against the bracket's arms and the stock's edges, so the first three check points are chosen at
+ * least this far in from every edge when the uncut area allows; the 3 mm hard margin stays the
+ * absolute limit, and a blank too narrow for the inset falls back to it.
+ */
+export const CUT_BLANK_PREFERRED_INSET_MM = 10;
+/** #1179 amendment — a point this close to TWO edges is "in a corner", avoided for the first three
+ *  when enough mid-edge points exist (the bench's first touch was the front-left corner). */
+export const CUT_BLANK_CORNER_ZONE_MM = 15;
 
 export interface StockRaster {
   xMin: number;
@@ -364,7 +374,11 @@ export function cutBlankCandidatesFromMap(input: {
       ? floor
       : floor.filter((cell) => cell.depthMm <= input.probe.tipLengthMm! + 1e-9);
   const centre = { x: map.x0Mm + (map.cols * map.cellMm) / 2, y: map.y0Mm + (map.rows * map.cellMm) / 2, depthMm: 0 };
-  const chosen = [...spread(top, CUT_BLANK_MAX_POINTS, centre)];
+  // #1179 amendment — the first three away from the edges/corners, then the rest of the top, then
+  // floors fill what is left.
+  const chosen = [...spreadPreferred(top, Math.min(3, CUT_BLANK_MAX_POINTS), { xMin: map.x0Mm, yMin: map.y0Mm, xMax: xEnd, yMax: yEnd }, centre)];
+  const restTop = top.filter((cell) => !chosen.includes(cell));
+  chosen.push(...spread(restTop, CUT_BLANK_MAX_POINTS - chosen.length, centre));
   if (chosen.length < CUT_BLANK_MAX_POINTS) {
     chosen.push(...spread(usableFloor, CUT_BLANK_MAX_POINTS - chosen.length, centre));
   }
@@ -378,6 +392,40 @@ interface Cell {
 }
 
 const dist = (a: Cell, b: Cell): number => Math.hypot(a.x - b.x, a.y - b.y);
+
+/**
+ * #1179 amendment — THE FIRST TOUCHES, CHOSEN AWAY FROM THE EDGES AND CORNERS.
+ *
+ * The old order was farthest-from-centre, which always answers the four corners — exactly where
+ * chips are swept and where the bench's 2026-11-10 registration stopped on a pile above the top.
+ * The first `count` points come from cells at least `CUT_BLANK_PREFERRED_INSET_MM` in from every
+ * edge, then (when enough qualify) not within the corner zone of two edges. Only a blank whose
+ * uncut area is too narrow for that falls back to the 3 mm margin. The spread rule still applies
+ * WITHIN whichever pool qualifies.
+ */
+function spreadPreferred(
+  cells: readonly Cell[],
+  count: number,
+  bounds: { xMin: number; yMin: number; xMax: number; yMax: number },
+  centre: Cell,
+): Cell[] {
+  const insetAtLeast = (mm: number): Cell[] =>
+    cells.filter(
+      (c) => c.x >= bounds.xMin + mm - 1e-9 && c.x <= bounds.xMax - mm + 1e-9 && c.y >= bounds.yMin + mm - 1e-9 && c.y <= bounds.yMax - mm + 1e-9,
+    );
+  let pool: readonly Cell[] = cells;
+  const inset = insetAtLeast(CUT_BLANK_PREFERRED_INSET_MM);
+  if (inset.length >= count) {
+    pool = inset;
+    const away = inset.filter((c) => {
+      const nearX = Math.min(c.x - bounds.xMin, bounds.xMax - c.x) <= CUT_BLANK_CORNER_ZONE_MM;
+      const nearY = Math.min(c.y - bounds.yMin, bounds.yMax - c.y) <= CUT_BLANK_CORNER_ZONE_MM;
+      return !(nearX && nearY);
+    });
+    if (away.length >= count) pool = away;
+  }
+  return spread(pool, count, centre);
+}
 
 /** Farthest-point sampling from the stock's centre: spread the points as far as the cells allow. */
 function spread(cells: readonly Cell[], max: number, centre: Cell): Cell[] {
@@ -473,8 +521,11 @@ export function cutBlankCandidates(input: {
     }
   }
   const centre = { x: (raster.xMin + raster.xMax) / 2, y: (raster.yMin + raster.yMax) / 2, depthMm: 0 };
-  // Uncut top first; floors fill what the top cannot.
-  const chosen = [...spread(top, CUT_BLANK_MAX_POINTS, centre)];
+  // Uncut top first; floors fill what the top cannot. #1179 amendment — the first three come from
+  // the preferred inset (away from the edges and corners) when the uncut area supplies them.
+  const chosen = [...spreadPreferred(top, Math.min(3, CUT_BLANK_MAX_POINTS), raster, centre)];
+  const restTop = top.filter((cell) => !chosen.includes(cell));
+  chosen.push(...spread(restTop, CUT_BLANK_MAX_POINTS - chosen.length, centre));
   if (chosen.length < CUT_BLANK_MAX_POINTS) chosen.push(...spread(floor, CUT_BLANK_MAX_POINTS - chosen.length, centre));
   return {
     points: chosen.map((c) => ({ x: c.x, y: c.y, depthMm: c.depthMm })),
