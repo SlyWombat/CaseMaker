@@ -3,7 +3,7 @@
 
 import { fileURLToPath } from 'node:url';
 
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse } from './fixtures/caseMaker';
 
 test.setTimeout(240_000);
 
@@ -16,7 +16,8 @@ test('#1099 — the file is drawn, then the part on the blank, then in the hold'
   await page.getByTestId('start-wizard-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
 
-  // Step 2 — pick the mesh chip, choose the file, and the read state draws it.
+  // Step 2 — #1100's cards open the step; the mesh chip lives behind *Something else…*.
+  await openSomethingElse(page);
   await page.getByTestId('engrave-setup-what-surface').click();
   await page.getByTestId('start-wizard-op-surface-file').setInputFiles(STL);
   await expect(page.getByTestId('start-wizard-op-surface-name')).toHaveText('thin-wall-box.stl');
