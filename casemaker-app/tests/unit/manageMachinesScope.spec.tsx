@@ -11,7 +11,7 @@
 
 import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MachinesScope } from '@/components/manage/MachinesScope';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -474,17 +474,17 @@ describe('#828 a Carvera record with its frame stated', () => {
 // #884/#1173A — THE MACHINE CARD'S OUTPUTS ARE THE PROFILE'S, AND THE ROWS CLAIM NOTHING. On the Z1
 // the external output IS the vacuum (observed twice on the bench), and the 3D probe is wired and
 // powered through M831, so the wireless-probe charger has nothing attached. #1173A's manager ruling
-// (2026-11-10) is that NO switch row reads the machine's own state — not from the status line's S:
-// fields and not from the diagnose C: field — so every row says what this app last sent, and the
-// card states once why.
+// (2026-11-10) is that a switch row does not read the status line's S: fields as output state: it
+// says what this app last sent. The ONE observed exception is the charger's diagnose `C:` input,
+// which the machine reports; its row says "reported by the machine" in its own words.
 describe('#884 the machine card’s outputs are the profile’s', () => {
-  it('the Z1 shows one vacuum/external-output row, no charger, and “not reported” once', () => {
+  it('the Z1 shows one vacuum/external-output row, no charger, and the rule stated once', () => {
     caps.drive = true;
     withMachine();
     render(<MachinesScope />);
     expect(screen.getAllByTestId('manage-accessory-unreported')).toHaveLength(1);
     expect(screen.getByTestId('manage-accessory-unreported').textContent).toBe(
-      'These outputs are not reported by the machine; each row says only what this app last sent.',
+      'These outputs are not reported by the machine; each row says only what this app last sent. The probe charger is the exception: where the machine reports it, its row says so.',
     );
     // One plug, named for both facts; the separate external-output row is gone.
     expect(screen.getByTestId('manage-vacuum').textContent).toContain(
@@ -497,7 +497,7 @@ describe('#884 the machine card’s outputs are the profile’s', () => {
     expect(screen.getByTestId('manage-vacuum-state').textContent).toBe('not sent this session');
   });
 
-  it('another machine keeps its own wiring, and the charger still claims only what was sent', () => {
+  it('another machine keeps its own wiring; the charger row reads the machine’s own report', () => {
     caps.drive = true;
     useMachineStore.setState({
       machine: { ...Z1_RECORD, profileId: 'CARVERA' },
@@ -505,15 +505,21 @@ describe('#884 the machine card’s outputs are the profile’s', () => {
       reason: null,
       checkedAt: '2026-10-09T06:00:00.000Z',
     });
-    // The heartbeat's diagnose line carries the charger's input in its C: field. It is NOT read as
-    // the row's state: the manager's rule is one sentence for every switch row.
-    useMachineStore.getState().noteDiagnoseLine('<Idle|C:1|E:1,1,1,1,1,1|P:0,0|I:0|RSSI:-50>');
     render(<MachinesScope />);
     expect(screen.getByTestId('manage-vacuum').textContent).toContain('Vacuum');
     expect(screen.getByTestId('manage-accessory-external-output')).toBeTruthy();
+    // Before the machine has answered `diagnose`, the ordinary row wording.
+    expect(screen.getByTestId('manage-accessory-wp-charge-state').textContent).toBe(
+      'not sent this session',
+    );
+    // The heartbeat's diagnose line carries the charger's input in its C: field — observed, so the
+    // row says so, in its own words, and never as if this app had sent it.
+    act(() => {
+      useMachineStore.getState().noteDiagnoseLine('<Idle|C:1|E:1,1,1,1,1,1|P:0,0|I:0|RSSI:-50>');
+    });
     const charger = screen.getByTestId('manage-accessory-wp-charge-state');
-    expect(charger.textContent).toBe('not sent this session');
-    expect(charger.getAttribute('data-mode')).toBe('unknown');
+    expect(charger.textContent).toBe('reported by the machine: on');
+    expect(charger.getAttribute('data-mode')).toBe('on');
   });
 });
 

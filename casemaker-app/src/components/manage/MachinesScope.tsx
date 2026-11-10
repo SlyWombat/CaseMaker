@@ -434,9 +434,11 @@ export function MachinesScope() {
                 (`tools/z1/power.sh` is a person's act) and nothing polls — so the switch stops
                 claiming the moment anything reaches the machine again, and not before. */}
             {/* #1173A item 5 — the machine does not report these outputs, so a row says only what
-                this app last sent it; the sentence is stated once here rather than on every row. */}
+                this app last sent it; the sentence is stated once here rather than on every row.
+                The probe charger is the one observed exception and its row says so. */}
             <p className="hint" data-testid="manage-accessory-unreported">
               These outputs are not reported by the machine; each row says only what this app last sent.
+              The probe charger is the exception: where the machine reports it, its row says so.
             </p>
             <MachineVacuum
               key={`${machine.host}:${machine.port}@${machine.observedAt}`}
