@@ -118,7 +118,12 @@ test('the wizard opens over the CNC workspace, and closes leaving the operator t
   await expect(page.getByTestId('welcome-overlay')).toHaveCount(0);
 });
 
-test('step 2 with nothing picked creates the empty job and lands on the Job panel (#1123 item 3)', async ({
+// #1107 — SUPERSEDES #1123 item 3's empty job ON A NEW RUN. The press with nothing picked used to
+// create the empty job; now the empty job is a RE-ENTRY's Done, and a new run must pick what to
+// make first. The walk: the press refuses with its reason, and a pick lets the SAME press walk on
+// to the blank — where an item was picked, the wizard is the way to its stock, not out of it.
+// (#1123 item 3's empty-job door is unit-pinned in operationCreate.spec.ts for re-entry.)
+test('step 2 refuses a new run with nothing picked, and a pick walks on (#1107 supersedes #1123 item 3)', async ({
   cm,
   page,
 }) => {
@@ -128,12 +133,19 @@ test('step 2 with nothing picked creates the empty job and lands on the Job pane
   await expect(page.getByTestId('start-wizard-progress')).toHaveText(
     'Step 2 of 4 · What are you cutting?',
   );
-  // Nothing picked: the press CREATES the empty job instead of waiting for invented text.
-  await expect(page.getByTestId('start-wizard-operation-next')).toHaveText('Create the job');
-  await page.getByTestId('start-wizard-operation-next').click();
-  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
-  await expect(page.getByTestId('engrave-panel')).toBeVisible();
-  await expect(page.getByTestId('engrave-job-file-name')).toContainText('Untitled job');
+  // Nothing picked: the primary still reads Create the job, and it carries its reason.
+  const next = page.getByTestId('start-wizard-operation-next');
+  await expect(next).toHaveText('Create the job');
+  await expect(next).toBeDisabled();
+  await expect(next).toHaveAttribute('title', 'Pick what to make first.');
+
+  // A pick opens the door: the sign card, its text typed, then the SAME press walks on to Stock.
+  await page.getByTestId('start-wizard-preset-sign').click();
+  await page.getByTestId('start-wizard-preset-text').fill('ZOOMBA');
+  await expect(next).toBeEnabled();
+  await next.click();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
+  await expect(page.getByTestId('start-wizard')).toBeVisible();
   await expect(page.getByTestId('welcome-overlay')).toHaveCount(0);
 });
 

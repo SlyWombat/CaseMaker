@@ -1293,8 +1293,13 @@ export function StartWizard(): JSX.Element {
                 data-testid="start-wizard-operation-next"
                 // #1107 — nothing picked on a NEW run is refused (the dowel starter's old trap);
                 // a re-entry's Done finishes without adding an item. #1123's empty job remains for
-                // the re-entry door only.
+                // the re-entry door only. The reason is the button's own title: with nothing
+                // picked the step draws no sentence (its line speaks for a picked item), so a
+                // disabled control would otherwise say nothing at all.
                 disabled={operationCreateBlocked(operationChoice, { reEntry: jobStarted }) !== null}
+                title={
+                  operationCreateBlocked(operationChoice, { reEntry: jobStarted }) ?? undefined
+                }
                 onClick={next}
               >
                 {operationChoice === null
