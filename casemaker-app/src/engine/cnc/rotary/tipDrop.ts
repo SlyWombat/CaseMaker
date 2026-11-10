@@ -53,7 +53,10 @@ export function rotaryTipFieldOpsFor(field: GoalRadialField, tool: RotaryTipTool
   const rows = Math.ceil((reachAngle * field.radius) / field.pitch) + 1;
   const cols = Math.ceil(tool.radius / field.pitch) + 1;
   const columns = (2 * rows + 1) * (2 * cols + 1);
-  return field.coveredCount * columns * TIP_BISECTION_STEPS;
+  // A ball takes the closed form: ONE evaluation per column. Every other shape bisects, and the
+  // unit states the work honestly (the iteration constant is folded in).
+  const perColumn = tool.ball ? 1 : TIP_BISECTION_STEPS;
+  return field.coveredCount * columns * perColumn;
 }
 
 /**
