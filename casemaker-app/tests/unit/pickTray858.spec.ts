@@ -13,12 +13,7 @@
 // job file and library rows (fixtures/pick857).
 
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-import { tl } from './helpers/manifoldExec';
-import { parseEngraveJob } from '@/store/engraveJobSchema';
 import {
   FIDELITY_TIE,
   TOOL_CHANGE_SECONDS,
@@ -27,53 +22,10 @@ import {
   smartPick,
   type ScoredPlan,
 } from '@/engine/cnc/engrave/smartPick';
-import { clearPlanEvaluations, evaluatePlan, type CandidatePlan, type PlanEvaluation } from '@/workers/sim/planEvaluate';
-import { KNOWN_DEFAULTS, ShopDefaultsSchema, readDefault } from '@/platform/defaultsClient';
-import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import type { EngraveJob } from '@/types/engraveJob';
+import type { CandidatePlan, PlanEvaluation } from '@/workers/sim/planEvaluate';
+import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
 import { picked } from './helpers/picked';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const DIR = join(HERE, 'fixtures', 'pick857');
-
-function tray(): EngraveJob {
-  const parsed = parseEngraveJob(JSON.parse(readFileSync(join(DIR, 'j13-tool-tray.json'), 'utf8')));
-  if (!parsed.ok) throw new Error(parsed.errors.join('\n'));
-  return parsed.job;
-}
-
-const CLEAR = 'inv:kz-o-flute-3-175-25';
-const FINE = 'flat-1.0';
-const FIXTURE_TOOLS = JSON.parse(readFileSync(join(DIR, 'tools.json'), 'utf8')) as ToolLibraryEntry[];
-/**
- * #1149 T2 — the built-in 1 mm flat counts as OWNED only when the shop holds the same cutter; this
- * fixture's inventory piece is the twin that makes it so (#454's correspondence). The cost case
- * below needs both contesting plans all-owned, so it passes this twin beside the built-in.
- * (#1137's owned-first objective, merged into land16, is what makes the missing twin visible: on
- * #1149's own branch the test passed without it because no plan was ranked by ownership.)
- */
-const OWNED_1MM = FIXTURE_TOOLS.find((t) => t.key === 'inv:kz-corn-1-7')!;
-const TOOLS: ToolLibraryEntry[] = [
-  ...FIXTURE_TOOLS.filter((t) => t.key === CLEAR),
-  OWNED_1MM,
-  TOOL_LIBRARY.find((t) => t.key === FINE)!,
-];
-const SEED = readDefault(
-  ShopDefaultsSchema.parse((JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as { defaults: unknown }).defaults),
-  'toolChange.seconds',
-);
-
-const keys = (s: ScoredPlan): string => s.plan.cutters.map((c) => c.key).join('+');
-
-async function pickFor(job: EngraveJob) {
-  clearPlanEvaluations();
-  const ctx = { tl, tools: TOOLS, catalogue: [], shop: { tools: TOOLS }, calibration: null };
-  return picked(
-    await smartPick(job, TOOLS, [], async (p: CandidatePlan, level) => await evaluatePlan(job, p, ctx, { level }), {
-      toolChangeSeconds: SEED.value,
-    }),
-  );
-}
+import { CLEAR, FINE, OWNED_1MM, SEED, TOOLS, keys, pickFor, tray } from './helpers/pickTray858';
 
 describe('#858 a tool change has a cost, and time decides at equal fidelity', () => {
   it('toolChange.seconds is a seeded shop default with a stated source, and the search’s fallback is the seed', () => {
@@ -127,26 +79,4 @@ describe('#858 a tool change has a cost, and time decides at equal fidelity', ()
     expect(pick.considered.map(keys).slice(0, 3)).toEqual([CLEAR, `${CLEAR}+${FINE}`, FINE]);
   });
 
-  it('tight bin corners: the ⌀3.175 clear with a ⌀1 rest wins, at about a quarter of the ⌀1’s time', { timeout: 900_000 }, async () => {
-    // Four of the tray's bins with 0.6 mm corners: the ⌀3.175 leaves each corner 0.46 mm² short,
-    // past the tie, so the rest pass is what reproduces the design.
-    const job = tray();
-    const keep = new Set(['bin0', 'bin1', 'bin2', 'bin3']);
-    job.shapes = job.shapes
-      .filter((s) => keep.has(s.id))
-      .map((s) => (s.kind === 'rect' ? { ...s, cornerRadius: 0.6 } : s));
-    job.combined = [];
-    job.drills = [];
-    job.cutouts = [];
-    const pick = await pickFor(job);
-    expect(pick.runnable, pick.notes.join(' ')).not.toBeNull();
-    const byKeys = new Map(pick.considered.map((s) => [keys(s), s] as const));
-    const single = byKeys.get(CLEAR)!;
-    const fine = byKeys.get(FINE)!;
-    expect(single.worstFidelity).toBeLessThan(fine.worstFidelity - FIDELITY_TIE);
-    expect(keys(pick.chosen)).toBe(`${CLEAR}+${FINE}`);
-    const cost = (s: ScoredPlan) => planCostSeconds(s.evaluation, SEED.value);
-    // About 51 min 34 s for the pair (one change at the seed included) against 3 h 8 min for the ⌀1.
-    expect(cost(pick.chosen) / cost(fine)).toBeCloseTo(0.274, 2);
-  });
 });
