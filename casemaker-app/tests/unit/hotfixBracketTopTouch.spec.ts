@@ -109,7 +109,10 @@ describe('HOTFIX — a bracket job plans exactly one top touch', () => {
     expect(plan.bracketOrigin!.from).toContain('anchor');
     expect(plan.bracketOrigin!.x).toBeCloseTo(CALIBRATION.frame.anchor1[0], 3);
     expect(plan.bracketOrigin!.y).toBeCloseTo(CALIBRATION.frame.anchor1[1], 3);
-    expect(attempt.summary).toContain('the bracket fixes X and Y');
+    // #1123 item 29 + #1133 — a no-scan plan narrates the touch and no scan (the old clause read
+    // as a garbled instruction).
+    expect(attempt.summary).toContain("touch the surface at the cut area's centre");
+    expect(attempt.summary).not.toContain('then scan');
     expect(attempt.expected).toContain('XY from the bracket');
   });
 

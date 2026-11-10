@@ -118,7 +118,9 @@ describe('#1133 a bracket hold plans one top touch', () => {
     // X and Y are the bracket's own — the plan says so instead of touching for them.
     expect(plan.bracketOrigin).not.toBeNull();
     expect(attempt.expected).toContain('XY from the bracket');
-    expect(attempt.summary).toContain('the bracket fixes X and Y');
+    // #1123 item 29 + #1133 — no scans means the sentence names none.
+    expect(attempt.summary).toContain("touch the surface at the cut area's centre");
+    expect(attempt.summary).not.toContain('then scan');
   });
 
   it('the Z1 states a head envelope with its provenance (a product constant, not a knob)', () => {
