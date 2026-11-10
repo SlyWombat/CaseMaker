@@ -291,12 +291,19 @@ export function attachConsole(target: MachineConsoleTarget): ConsoleHandle {
         send = await opened.session.send(line, { ...currentConsoleTiming(), ...timing });
       } catch (e) {
         // `tcpRead` rejects when the peer closed the connection, so a dead socket arrives here rather
-        // than as an outcome. The SESSION is dropped — the LINE never is: the next press opens a fresh
-        // one, so a dropped link (the controller left the network, or `power.sh on --cycle`) costs one
-        // press instead of a trip out to Manage → Machines and back (#386). Re-sending the failed line
-        // here would be the app moving the machine again on its own, which is the thing this module
-        // must not do.
+        // than as an outcome. THE SESSION IS CLOSED, NOT DROPPED — bench blocker 2026-11-10: the
+        // Rust relay keeps a connection until `tcpClose`, so `session = null` alone leaked an
+        // ESTABLISHED socket to the controller on every failed action (the analyst saw 2 after a
+        // failed Register, 4 after Home, with no browser attached). The LINE is never re-sent: the
+        // next press opens a fresh session, so a dropped link costs one press instead of a trip out
+        // to Manage → Machines and back (#386). Re-sending the failed line here would be the app
+        // moving the machine again on its own, which is the thing this module must not do.
         session = null;
+        try {
+          await opened.session.close();
+        } catch {
+          // A socket that failed its read is dead; closing it must not mask the error above.
+        }
         return { kind: 'error', line, detail: reasonOf(e) };
       }
       // Output that arrived with no line in flight is passed along as its own field, never folded

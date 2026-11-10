@@ -2053,6 +2053,35 @@ describe('#1123-40 — the registration survives a reload, keyed by job + setup 
   });
 });
 
+describe('#bench-2026-11-10 — the card closes its console when it unmounts', () => {
+  it('leaving the card at measured closes the session (no stranded ESTABLISHED socket)', async () => {
+    const plan = makePlan(-55.131);
+    const job = jobWithPlan(plan);
+    install(plan);
+    let closes = 0;
+    const inner = controller(plan, sent, {});
+    setMachineConsoleLoader(async () => ({
+      async open(target: Parameters<typeof inner.open>[0], timing: Parameters<typeof inner.open>[1]) {
+        const session = await inner.open(target, timing);
+        return {
+          send: (line: string, t: Parameters<typeof session.send>[1]) => session.send(line, t),
+          close: async () => {
+            closes += 1;
+            await session.close();
+          },
+        };
+      },
+    }));
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    await runStep();
+    // The run ended at `measured`; its console is still held for the write press.
+    expect(closes).toBe(0);
+    cleanup();
+    await waitFor(() => expect(closes, 'the unmount closed the console').toBe(1));
+  });
+});
+
 describe('#1179 — blank identity on the Register card', () => {
   // The analyst's fields (issue comment 6776457695): the guard reads the BLANK, and the card
   // offers "This is a new blank". These cases drive the real card with the machine record's own
