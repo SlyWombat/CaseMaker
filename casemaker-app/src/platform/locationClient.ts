@@ -123,7 +123,29 @@ export const FinishedCutMapSchema = z.object({
 });
 export type FinishedCutMap = z.infer<typeof FinishedCutMapSchema>;
 
-export const FinishedRunSchema = z.object({
+/**
+ * #1179 — the house is Rust: every `Option` is serialised as `null`, never omitted (the same rule
+ * the machine record's own nullable fields follow: "the client's schema reads null as 'not
+ * stated'"). The run record's schema expresses "not stated" as an ABSENT key, so a record the
+ * service hands back is stripped of its nulls before parsing — otherwise one absent optional (the
+ * finish-write's `g54 {x, y}` has no `z`) makes the whole MACHINE unreadable after program 1.
+ * Stripping reads BOTH wire shapes: a record written with absent keys and one written with nulls.
+ */
+function nullsToAbsent(raw: unknown): unknown {
+  if (Array.isArray(raw)) return raw.map(nullsToAbsent);
+  if (raw !== null && typeof raw === 'object') {
+    return Object.fromEntries(
+      Object.entries(raw as Record<string, unknown>)
+        .filter(([, value]) => value !== null)
+        .map(([key, value]) => [key, nullsToAbsent(value)]),
+    );
+  }
+  return raw;
+}
+
+export const FinishedRunSchema = z.preprocess(
+  nullsToAbsent,
+  z.object({
   hash: z.string().min(1),
   jobId: z.string().min(1).optional(),
   jobName: z.string().optional(),
@@ -145,7 +167,8 @@ export const FinishedRunSchema = z.object({
     .optional(),
   registration: FinishedRunRegistrationSchema.optional(),
   cutMap: FinishedCutMapSchema.nullable().optional(),
-});
+  }),
+);
 export type FinishedRun = z.infer<typeof FinishedRunSchema>;
 
 export const MachineAddressSchema = z.object({
