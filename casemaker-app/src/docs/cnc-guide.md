@@ -756,6 +756,22 @@ Below the groups sits a **sticky Generate footer** — the findings as a count t
 the fold. The **status strip** under the viewport and the dock's **Transcript** tab (§5.7, §5.9)
 carry the live machine; nothing about the machine's state lives in the rail any more.
 
+**Where Generate runs.** When the house service can run the engine — the desktop app's own service,
+or the shop's — Generate happens there: the page sends the job and follows the service's own
+progress, **Cancel** aborts it, and a shop that changed under the page is refused by name rather
+than planned against. When no service can run it, the page plans the job itself exactly as before;
+the run, the plan and the Cut step cannot tell which path produced it.
+
+**What Generate hands back, and when.** The cutting programs are the owned plan — the one cut with
+the location's own bits — and they come as soon as that plan has planned, posted, verified and
+simulated; the candidate the measured pick fully planned is that plan, reused rather than re-planned,
+and the plan notes say how far the pick searched ("12 tied, 3 fully planned — the rest are ordered by
+the cheap estimate and scored coarse only"). The comparison with every bit the app knows is planned
+afterwards, on its own worker, so it is never queued ahead of the simulation or the sweep: the plan
+card reads "comparing the plans…" until the tradeoff — or "no material difference" — lands. On the
+tray the programs are ready in about 2.5–7 minutes. On the CLI and the house service the pick's
+capped finalists evaluate as one batch on worker threads; the page's own path is unchanged.
+
 **1. Where, and on which machine?** The **Start** wizard's first screen is a **Machine** picker
 on every build — one entry today, the **Makera Z1** — with the network **check** under it in the
 desktop build. The picker writes the job's machine and nothing else. The work area, the spindle
@@ -1176,7 +1192,12 @@ console or from Studio; fit the blank and confirm it stands proud of the jaws; s
 origin with the wired probe, or run the registration step on the Cut page. The run sheet prints
 the sequence for the job you generated.
 
-**The desktop build can take it from there.** A job that produced **more than one program** is
+**The desktop build can take it from there.** Every job opens with an **air walk** and every
+program is followed by a **cleaning pass**, both on by default: ordinary verified files the release
+plays — the walk traces the stock's outline at the sweep height before the first cut, the cleaning
+pass rasters the stock after each program — and their time is folded into the plan's estimate. The
+Cut step offers **Clean now** for a sweep on demand; a shop that wants neither turns them off
+(`run.airWalkBeforeCut`, `run.cleanAfterProgram`). A job that produced **more than one program** is
 handed to the **release step**: it uploads the frozen list (a first press lists the
 target, every file and the total bytes; only a second press sends), plays the programs in cut
 order, and stops at the **bit change** with the next cutter, its `M491` reading and the Z0
@@ -1192,6 +1213,11 @@ across the bit change** and is closed only when the run stops; a stop always sen
 one-program job keeps the single-file upload. Either way the machine is named before anything is
 written, and **Stop** is the app's abort — the machine's own button and the plug remain the real
 stops. The app does not switch the machine on or off: the plug is a physical act.
+
+**While a program runs**, the viewport shows the uncut blank with the live tool at the machine's
+position and darkens the area already cut, and the Cut step states how far the program is and —
+after a few seconds — about how long is left, from the app's own clock: pauses and bit changes are
+left out, and the controller's own third `P:` field is never read as a clock.
 
 **Pause** sits beside Stop while a program runs: it sends the controller's own `suspend` at
 the run's next status poll, the strip reads **Paused**, and the transcript records the line and the
@@ -1423,6 +1449,14 @@ it, you never edit it. **Yours** is a cutter you own whose definition you change
 a different reach out of the collet. **Owned** is a physical cutter in your drawer, with a quantity
 and the code printed on its box.
 
+**A piece's condition, and when it is not planable.** Each copy you own carries a condition — new,
+used, worn, broken or **lost** — and the panel states the honest split ("1 of 2 usable · 1
+unknown"): a copy nobody has described is **unknown**, not assumed usable and not assumed in its
+box. **Lost** and **broken** pieces are never chosen for a plan, and the exclusion is stated
+wherever a cutter is refused or a reach is judged ("marked broken or lost"). An undescribed piece
+stays planable — the shop holds it — but its wear is stated as unknown, never assumed. **Owned**
+means a piece is on the shelf: a clone or a built-in with no inventory piece is not owned.
+
 **Changing a vendor's cutter: clone, never edit.** A catalogue row states what Makera says about
 that cutter, and that is not yours to rewrite. Changing anything makes a **clone** — a *Yours* row
 that keeps the numbers it was copied from and records, in a sentence, what it was cloned from. The
@@ -1448,6 +1482,11 @@ doors and in the inventory editor alike: a person holding the box owns at least 
 screen that shows the rule is the screen that would otherwise refuse the blank it produced itself
 . Registering makes an **Owned** row and leaves the definition
 Makera's. **Clone** copies the selected row.
+
+**Taking something away takes two presses.** Remove from inventory, Remove this definition, a feed
+row, Forget this machine and Remove the switch each open a sentence naming exactly what goes, with a
+danger press and Cancel; the first press sends nothing.
+
 **Sync catalogue** re-reads Makera Studio's library on this PC. A sync can succeed and still
 have something to say — a library file it could not read and replaced, feed rows whose cells Studio
 left empty — and those sentences are listed under the result, below the counts, where they stay
@@ -1470,8 +1509,11 @@ words, when it was checked, and the profile it resolved. **Check for a machine**
 field sit in the header — the same probe the Start wizard uses, two doors onto it — and **Check
 again** re-runs it. The **"my machine" file** (Export / Import) moves here. A card for printers is
 drawn muted, claiming no connection, because Machines reads as everything that makes a part.
-**Forget** is the only thing here that writes. Bench power is deliberately *not* here: switching
-the machine on is a physical act, not a setting.
+**Forget** is the only thing here that writes. The card follows the heartbeat: a machine that stops
+answering reads **unreachable**, with the last time it was heard, rather than the last check's
+**found · checked**. **Clear alarm** appears only while the controller's status line reads
+**Alarm**, and clears the lock without homing or moving anything. Bench power is deliberately
+*not* here: switching the machine on is a physical act, not a setting.
 
 **The Bed block.** The machine's card also holds its **bed** — the machine's *active
 bed profile*: its name and date, a one-line summary of the surface (bare bed / wasteboard /

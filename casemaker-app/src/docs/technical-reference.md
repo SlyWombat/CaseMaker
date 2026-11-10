@@ -188,6 +188,7 @@ cutter-location surface, never from a heightfield. The design record is
 | `cam/model/tradeoff.ts` | The owned-versus-ideal tradeoff line, stated only when it is material (#975). |
 | `cam/model/wholeSurface.ts` | The whole-surface union across `perSetup` (#965). |
 | `cam/model/planMeta.ts` | The plan's per-op recorded metadata, checked against its own moves (#1025). |
+| `cam/model/boundedCache.ts` | A FIFO-bounded memo for values whose key is the data; `plan.ts`'s stamped-field cache uses it (#1147). |
 
 ### The goal check — SIMULATOR_VERSION 8
 
@@ -675,3 +676,4 @@ GitHub only reads workflows from the repository root's `.github/workflows/`, and
 - **Worker count:** one geometry worker, one export worker. A pool wouldn't help since rebuilds are latest-wins.
 - **Bundle:** main app code is ~53 KB; Three.js is the bulk at 896 KB (gzip 239 KB). Code-splitting is configured in `vite.config.ts` `build.rolldownOptions.output.manualChunks`.
 - **Debounce:** slider drags are 200 ms trailing-debounced. Discrete actions (button clicks, board swap, port drop) dispatch immediately.
+- **The planner's stamp cache is bounded.** A goal-grid stamp field is 5.51 MiB on the tray's goal (1,444,021 cells × 4 B), and the sequence picker folds every candidate chain's steps through the goal coverage. Unbounded retention held one field per unique step IR — 299 steps, ~1.8 GiB of chain memory on set B's top; caching nothing re-stamped shared IRs per candidate (1202 s of chain against 834). `BoundedCache` keeps the reuse under a hard ceiling (32 fields, ~176 MiB): measured on set B's top, 32 fields read 909 s / 613 MiB of chain against the unbounded 901 s / 1831 MiB, and all four variants are md5-identical to the #1114-1 pin. The whole-run peak under any bounded variant is the sweep (~692 MB), not the cache.
