@@ -358,6 +358,8 @@ describe('#255 protocol — file upload', () => {
       dataRequest(2),
       dataRequest(3),
       encodeFrame(PTYPE_FILE_END, EMPTY),
+      // The read-back that follows FILE_END: the machine's own digest of the exact path.
+      encodeFrame(0x90, utf8(`${md5Hex(content)}/sd/gcodes/badge.nc`)),
     );
     const outcome = await runUpload(transport, 1, '/sd/gcodes/badge.nc', content, { packetSize, inactivityMs: 50 });
     expect(outcome).toEqual({ ok: true, bytes: 9, packets: 3, alreadyPresent: false });
@@ -502,6 +504,62 @@ describe('#255 protocol — file upload', () => {
     expect(outcome.detail).toContain('disk full');
   });
 
+  // THE READ-BACK. FILE_END says the machine finished writing, not that the bytes it holds are the
+  // program: the controller's own md5sum is the independent half. A mismatch refuses the upload, so
+  // the run cannot start on a file nobody verified.
+  it('reads the file back after FILE_END and REFUSES a mismatching digest', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(
+      encodeFrame(PTYPE_FILE_VIEW, EMPTY),
+      dataRequest(1),
+      dataRequest(2),
+      dataRequest(3),
+      encodeFrame(PTYPE_FILE_END, EMPTY),
+      encodeFrame(0x90, utf8(`${md5Hex(new Uint8Array([9, 9, 9]))}/sd/gcodes/badge.nc`)),
+    );
+    const outcome = await runUpload(transport, 1, '/sd/gcodes/badge.nc', content, { packetSize, inactivityMs: 50 });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe('refused');
+    expect(outcome.detail).toBe('the file on the machine does not match the program — nothing will run');
+    // The check was made on the EXACT path the program was written to.
+    const asked = decodeAll(transport.writes).at(-1);
+    expect(decodeText(asked?.data ?? EMPTY)).toBe('md5sum /sd/gcodes/badge.nc');
+  });
+
+  it('reads the file back after FILE_END and passes a matching digest', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(
+      encodeFrame(PTYPE_FILE_VIEW, EMPTY),
+      dataRequest(1),
+      dataRequest(2),
+      dataRequest(3),
+      encodeFrame(PTYPE_FILE_END, EMPTY),
+      encodeFrame(0x90, utf8(`${md5Hex(content)}/sd/gcodes/badge.nc`)),
+    );
+    const outcome = await runUpload(transport, 1, '/sd/gcodes/badge.nc', content, { packetSize, inactivityMs: 50 });
+    expect(outcome).toEqual({ ok: true, bytes: 9, packets: 3, alreadyPresent: false });
+    const asked = decodeAll(transport.writes).at(-1);
+    expect(decodeText(asked?.data ?? EMPTY)).toBe('md5sum /sd/gcodes/badge.nc');
+  });
+
+  it('skips the read-back when the caller says the on-card form is unobserved', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(
+      encodeFrame(PTYPE_FILE_VIEW, EMPTY),
+      dataRequest(1),
+      encodeFrame(PTYPE_FILE_END, EMPTY),
+    );
+    const outcome = await runUpload(transport, 1, '/sd/gcodes/badge.nc.bin', content, {
+      packetSize,
+      inactivityMs: 50,
+      readBack: false,
+    });
+    expect(outcome).toEqual({ ok: true, bytes: 9, packets: 1, alreadyPresent: false });
+    const asked = decodeAll(transport.writes).filter((f) => decodeText(f.data).startsWith('md5sum'));
+    expect(asked).toHaveLength(0);
+  });
+
   it('re-sends the exact previous data frame on a retry', async () => {
     const transport = new FakeTransport();
     transport.queueRead(
@@ -510,6 +568,7 @@ describe('#255 protocol — file upload', () => {
       encodeFrame(PTYPE_FILE_RETRY, EMPTY),
       dataRequest(2),
       encodeFrame(PTYPE_FILE_END, EMPTY),
+      encodeFrame(0x90, utf8(`${md5Hex(content)}/sd/gcodes/badge.nc`)),
     );
     const outcome = await runUpload(transport, 1, '/sd/gcodes/badge.nc', content, { packetSize, inactivityMs: 50 });
     expect(outcome.ok).toBe(true);

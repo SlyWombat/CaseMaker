@@ -190,6 +190,8 @@ describe('#255 machine bridge — actions', () => {
       encodeFrame(PTYPE_FILE_VIEW, EMPTY),
       encodeFrame(PTYPE_FILE_DATA, u32be(1)),
       encodeFrame(PTYPE_FILE_END, EMPTY),
+      // The post-FILE_END read-back: the machine's own digest of the exact path.
+      encodeFrame(0x90, utf8(`${md5Hex(CONTENT)}/sd/gcodes/badge.nc`)),
     );
     const program = asVerifiedProgram('badge.nc', CONTENT, verifyCheck(okReport));
     expect(program).not.toBeNull();
@@ -257,6 +259,8 @@ describe('#255 machine bridge — actions', () => {
         encodeFrame(PTYPE_FILE_VIEW, EMPTY),
         encodeFrame(PTYPE_FILE_DATA, u32be(1)),
         encodeFrame(PTYPE_FILE_END, EMPTY),
+        // The read-back hashes what the machine STORES — the compressed stream.
+        encodeFrame(0x90, utf8(`${md5Hex(packed!)}/sd/gcodes/badge.nc.bin`)),
       );
       const program = asVerifiedProgram('badge.nc', BIG, verifyCheck(okReport))!;
       const outcome = await uploadVerifiedProgram({ host: '10.0.0.1', port: 2222 }, program, {
@@ -271,11 +275,19 @@ describe('#255 machine bridge — actions', () => {
       // The digest is of what the machine STORES — the compressed stream, not the original program.
       expect(sent.md5s[0]).toBe(md5Hex(packed!));
       expect(sent.payload).toEqual(packed!);
+      // NO read-back for a `.bin`: the on-card form is unobserved until the bench records it.
+      const asked = decodeAll(transport.writes).filter((f) => decodeText(f.data).startsWith('md5sum'));
+      expect(asked).toHaveLength(0);
     });
 
     it('leaves a small program plain even when compression is asked for', async () => {
       const transport = new FakeTransport();
-      transport.queueRead(encodeFrame(PTYPE_FILE_VIEW, EMPTY), encodeFrame(PTYPE_FILE_DATA, u32be(1)), encodeFrame(PTYPE_FILE_END, EMPTY));
+      transport.queueRead(
+        encodeFrame(PTYPE_FILE_VIEW, EMPTY),
+        encodeFrame(PTYPE_FILE_DATA, u32be(1)),
+        encodeFrame(PTYPE_FILE_END, EMPTY),
+        encodeFrame(0x90, utf8(`${md5Hex(CONTENT)}/sd/gcodes/badge.nc`)),
+      );
       const program = asVerifiedProgram('badge.nc', CONTENT, verifyCheck(okReport))!;
       const outcome = await uploadVerifiedProgram({ host: '10.0.0.1', port: 2222 }, program, { transport, packetSize: 8, compress: 'quicklz' });
       expect(outcome.ok).toBe(true);
@@ -291,10 +303,11 @@ describe('#255 machine bridge — actions', () => {
         encodeFrame(PTYPE_FILE_VIEW, EMPTY),
         encodeFrame(PTYPE_FILE_DATA, u32be(1)),
         encodeFrame(PTYPE_FILE_CANCEL, utf8('Error: unknown file type')),
-        // Second attempt (plain): an ordinary accepted transfer.
+        // Second attempt (plain): an ordinary accepted transfer, read back as the plain file.
         encodeFrame(PTYPE_FILE_VIEW, EMPTY),
         encodeFrame(PTYPE_FILE_DATA, u32be(1)),
         encodeFrame(PTYPE_FILE_END, EMPTY),
+        encodeFrame(0x90, utf8(`${md5Hex(BIG)}/sd/gcodes/badge.nc`)),
       );
       const program = asVerifiedProgram('badge.nc', BIG, verifyCheck(okReport))!;
       const outcome = await uploadVerifiedProgram({ host: '10.0.0.1', port: 2222 }, program, {
