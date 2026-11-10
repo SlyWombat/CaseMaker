@@ -4,10 +4,11 @@
 // third `P:` value. The 2026-11-09 bench samples showed that field is not seconds: the same
 // ~5-minute program read 1,776 at ~25 s in and 4,641 at ~4 min. Here the fake controller reports
 // `P:…,50,4641` and `P:…,100,4641` throughout; the run must record a few seconds, not 77 minutes.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleClient } from '@/platform/machineConsole';
 import { machineKey, resetMachineRunStore, useMachineRunStore } from '@/store/machineRunStore';
 import { runClockSeconds } from '@/engine/cnc/engrave/runProgress';
+import { advanceUntil } from './helpers/fakeTime';
 
 const TARGET = { host: '192.0.2.10', port: 2222 };
 const KEY = machineKey(TARGET);
@@ -42,11 +43,13 @@ function controller(runFor = 2): MachineConsoleClient {
 const settings = { pollMs: 2000, noProgressMs: 600_000, missLimit: 5 };
 
 beforeEach(() => {
+  vi.useFakeTimers();
   sent.length = 0;
   resetMachineRunStore();
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   setMachineConsoleLoader(null);
   resetMachineRunStore();
 });
@@ -54,13 +57,13 @@ afterEach(() => {
 async function runOnce(): Promise<void> {
   useMachineRunStore.getState().prepare(TARGET, 'job.nc', 'hash-1', { nc: 'M02\n' });
   useMachineRunStore.getState().start(TARGET, settings);
-  const deadline = Date.now() + 20_000;
-  while (Date.now() < deadline) {
-    const entry = useMachineRunStore.getState().runs[KEY];
-    if (entry?.outcome !== null && entry?.outcome !== undefined) return;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  throw new Error('the run did not end');
+  await advanceUntil(
+    () => {
+      const entry = useMachineRunStore.getState().runs[KEY];
+      expect(entry?.outcome ?? null).not.toBeNull();
+    },
+    { timeoutMs: 20_000 },
+  );
 }
 
 describe('#1145 — the run records OUR clock, not the controller’s third P: field', () => {

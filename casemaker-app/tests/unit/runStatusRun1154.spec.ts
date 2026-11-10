@@ -8,9 +8,10 @@
  * FAKE CONTROLLER: the replies below are the shapes the Z1 answers (the bench's status line), and
  * nothing here touches a machine.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleClient } from '@/platform/machineConsole';
+import { advanceUntil } from './helpers/fakeTime';
 import { programHash } from '@/platform/machineRun';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { freezePackage } from '@/engine/cnc/engrave/package';
@@ -95,20 +96,21 @@ function z1(): MachineConsoleClient {
 }
 
 async function waitForEnd(): Promise<void> {
-  for (let i = 0; i < 150; i += 1) {
-    if (useMachineRunStore.getState().runs[M]?.end) return;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(`the run did not end: ${JSON.stringify(useMachineRunStore.getState().runs[M]?.outcome)}`);
+  await advanceUntil(
+    () => expect(useMachineRunStore.getState().runs[M]?.end ?? null).not.toBeNull(),
+    { timeoutMs: 20_000 },
+  );
 }
 
 beforeEach(() => {
+  vi.useFakeTimers();
   setMachineConsoleLoader(async () => z1());
   setRunEndIO(quietIO());
   resetMachineRunStore();
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   setMachineConsoleLoader(null);
   setRunEndIO(null);
 });
