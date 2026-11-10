@@ -5781,7 +5781,7 @@ describe('#1046 EngravePanel — the standard-balls press', () => {
   };
   const NO_BALL_TAIL =
     ' The ball that would take it is measured from the cutter catalogue — none of its balls takes this leftover (Manage → Tools).';
-  const seed = (message: string, plan: unknown): void => {
+  const seed = (message: string, planTiming: unknown): void => {
     act(() => {
       useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), labels: [], shapes: [], targetObject: goal } });
       useEngraveRunStore.setState({
@@ -5805,7 +5805,9 @@ describe('#1046 EngravePanel — the standard-balls press', () => {
           predicted: [],
           programs: [],
           errors: [],
-          plan,
+          // #1046 — the timing is a SIDE CHANNEL beside the plan, never in its JSON.
+          plan: { perSetup: [] },
+          planTiming,
         } as unknown as EngraveGenerated,
         simStatus: 'ready',
         simDiagnostics: [],
@@ -5821,8 +5823,8 @@ describe('#1046 EngravePanel — the standard-balls press', () => {
   };
 
   it('states the expected cost from the last result’s timings, and the press runs Generate with the ladder', async () => {
-    const plan = { perSetup: [], planMs: 450_000, finishStageMs: 36_000, finishBallDiameterMm: 6 };
-    seed('The finish with the 6 mm ball nose leaves up to 2.42 mm standing over 21 % of the goal.' + NO_BALL_TAIL, plan);
+    const planTiming = { planMs: 450_000, finishStageMs: 36_000, finishBallDiameterMm: 6 };
+    seed('The finish with the 6 mm ball nose leaves up to 2.42 mm standing over 21 % of the goal.' + NO_BALL_TAIL, planTiming);
     render(<EngravePanel />);
     const drawer = openDrawer();
     const press = drawer.querySelector('[data-testid="engrave-goal-measure-balls"]') as HTMLButtonElement;
@@ -5848,7 +5850,6 @@ describe('#1046 EngravePanel — the standard-balls press', () => {
 
   it('a stale run’s rest line is not shown as current — no run line, no press', () => {
     seed('The finish with the 6 mm ball nose leaves up to 2.42 mm standing over 21 % of the goal.' + NO_BALL_TAIL, {
-      perSetup: [],
       planMs: 450_000,
       finishStageMs: 36_000,
       finishBallDiameterMm: 6,
@@ -5860,7 +5861,6 @@ describe('#1046 EngravePanel — the standard-balls press', () => {
     // 6b's condition (#1046) — the job moves after Generate: the run's leftover sentence is stale,
     // so it is not shown beside live document findings and the press goes with it.
     seed('The finish with the 6 mm ball nose leaves up to 2.42 mm standing over 21 % of the goal.' + NO_BALL_TAIL, {
-      perSetup: [],
       planMs: 450_000,
       finishStageMs: 36_000,
       finishBallDiameterMm: 6,
@@ -5875,7 +5875,7 @@ describe('#1046 EngravePanel — the standard-balls press', () => {
   });
 
   it('a result with no timings says to run Generate first, and a measured catalogue ball shows no press at all', () => {
-    seed('The finish with the 6 mm ball nose leaves up to 2.42 mm standing over 21 % of the goal.' + NO_BALL_TAIL, { perSetup: [] });
+    seed('The finish with the 6 mm ball nose leaves up to 2.42 mm standing over 21 % of the goal.' + NO_BALL_TAIL, null);
     render(<EngravePanel />);
     const drawer = openDrawer();
     const press = drawer.querySelector('[data-testid="engrave-goal-measure-balls"]') as HTMLButtonElement;
@@ -5884,7 +5884,6 @@ describe('#1046 EngravePanel — the standard-balls press', () => {
     cleanup();
     // The enriched form names the catalogue's measured ball — the ladder is not offered.
     seed('The finish with the 6 mm ball nose leaves up to 2.42 mm standing over 21 % of the goal. The catalogue’s 2 mm ball nose (⌀2 mm) would: leftover 6.5 %, -120 s of cycle (measured).', {
-      perSetup: [],
       planMs: 1,
       finishStageMs: 1,
       finishBallDiameterMm: 6,

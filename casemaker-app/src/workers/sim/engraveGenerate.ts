@@ -238,6 +238,7 @@ import {
   resolvedCutParams,
   type ModelPlanInput,
   type ModelPlanOutput,
+  type PlanTiming,
   type PlannedOp,
   type SetupSpec,
 } from '@/engine/cnc/cam/model/plan';
@@ -764,6 +765,14 @@ export interface EngraveGenerated {
    * D's run store reads `(generated as {plan?: …}).plan?.perSetup` speculatively.
    */
   plan?: ModelPlanOutput | null;
+  /**
+   * #1046 — THE PLAN'S WALL TIME, BESIDE THE PLAN AND NEVER IN IT (the landing review's side
+   * channel). The press quotes the ladder's expected cost from the last Generate's measured
+   * numbers; two runs of the same plan differ in the clock, so this field is kept out of `plan`'s
+   * JSON, where every "the same plan" identity pin compares bytes. Absent on a refusal before the
+   * plan was measured.
+   */
+  planTiming?: PlanTiming | null;
   /**
    * #992 — THE PLAN'S TYPED STATEMENTS, carried for the run sheet. `warning`/`info` statements
    * also become `findings` below (the panel's route); the `sheet`-class ones never reach the
@@ -5592,6 +5601,8 @@ export async function postModelPlan(
   findings: PostModelPlanFindings,
   /** #1123 item 4 — the posting/verify stage ticks the run log records. */
   onProgress?: EngraveProgressFn,
+  /** #1046 — the owned plan's wall time, carried beside the plan (never inside its JSON). */
+  planTiming?: PlanTiming | null,
 ): Promise<EngraveGenerated> {
   const { goalFindings, reachFindings, coverageFindings, modelRoughFindings, chamferFindings, tabRelease = null, tabReleaseFindings = [], planIdeal = null, planTradeoff = null } = findings;
   const base = emptyGoalResult();
@@ -5611,6 +5622,7 @@ export async function postModelPlan(
     nc: null,
     verify: null,
     plan,
+    ...(planTiming === undefined || planTiming === null ? {} : { planTiming }),
     planIdeal,
     planTradeoff,
     errors: [{ stage, message }],
@@ -5788,6 +5800,7 @@ export async function postModelPlan(
           verify,
           programs: [...programs],
           plan: output,
+          ...(planTiming === undefined || planTiming === null ? {} : { planTiming }),
           planIdeal,
           planTradeoff,
           planStatements,
@@ -5862,6 +5875,7 @@ export async function postModelPlan(
     verify: first.verify,
     programs,
     plan: output,
+    ...(planTiming === undefined || planTiming === null ? {} : { planTiming }),
     planIdeal,
     planTradeoff,
     planStatements,
@@ -6184,6 +6198,9 @@ export async function generateGoalProgram(
   let output: ModelPlanOutput;
   let planIdeal: ModelPlanOutput | null = null;
   let planTradeoff: PlanTradeoff | null = null;
+  // #1046 — the owned plan's timing, from the plan's own sink (the first callback: the owned run
+  // goes first, the ideal second; the ladder's surcharge is the OWNED plan's).
+  let planTiming: PlanTiming | null = null;
   try {
     // #1038 — the planner's stage reports reach the run (see this function's `opts.onProgress`).
     const two = await planTwoOutcomes(input, {
@@ -6199,6 +6216,10 @@ export async function generateGoalProgram(
       ...(signal === undefined ? {} : { signal }),
       // #1046 — the owned plan measures the rungs only when the caller asked.
       ...(restLadder === true ? { restLadder: true } : {}),
+      // #1046 — the wall time goes to a side channel, never into the plan's JSON.
+      onTiming: (t: PlanTiming) => {
+        if (planTiming === null) planTiming = t;
+      },
     });
     // The operator's recorded choice is what cuts (`planChoiceOf` reads it, owned by default); the
     // ideal posts only when it exists.
@@ -6243,6 +6264,7 @@ export async function generateGoalProgram(
       planTradeoff,
     },
     onProgress,
+    planTiming,
   );
 }
 

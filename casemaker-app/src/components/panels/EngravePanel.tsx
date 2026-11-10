@@ -5336,7 +5336,7 @@ export function EngravePanel(): JSX.Element {
                     (f.message.includes('none of its balls takes this leftover') || f.message.includes('none is configured for this shop')) && (() => {
                       const estimateMs = run.generated?.plan === undefined || run.generated?.plan === null
                         ? null
-                        : restLadderEstimateMs(run.generated.plan);
+                        : restLadderEstimateMs(run.generated.planTiming);
                       return (
                         <span style={{ flexShrink: 0, marginLeft: 'auto' }}>
                           <button

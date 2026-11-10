@@ -21,6 +21,7 @@ import {
   REST_LADDER_RUNGS_MM,
   type ModelPlanInput,
   type ModelPlanOutput,
+  type PlanTiming,
 } from '@/engine/cnc/cam/model/plan';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
@@ -116,20 +117,28 @@ async function plateInput(): Promise<ModelPlanInput> {
 }
 
 describe('#1046 the plan states its own wall time (dump only)', () => {
-  it('planMs, finishStageMs and the finishing ball are measured, and the estimate is their formula', async () => {
-    const plan = await planModelCam(await plateInput());
-    expect(typeof plan.planMs, 'the whole plan is timed').toBe('number');
-    expect(plan.planMs!).toBeGreaterThanOrEqual(0);
-    expect(typeof plan.finishStageMs, 'the finish stage is timed').toBe('number');
-    expect(plan.finishStageMs!).toBeGreaterThan(0);
+  it('the timing is measured on the caller’s sink — never in the plan JSON — and the estimate is its formula', async () => {
+    let timing: PlanTiming | null = null;
+    const plan = await planModelCam(await plateInput(), { onTiming: (t) => { timing = t; } });
+    expect(timing, 'the plan reports its timing to the caller’s sink').not.toBeNull();
+    expect(timing!.planMs, 'the whole plan is timed').toBeGreaterThanOrEqual(0);
+    expect(timing!.finishStageMs, 'the finish stage is timed').toBeGreaterThan(0);
     // The finishing ball the rest statement judged: the ⌀6 the plan runs.
-    expect(plan.finishBallDiameterMm).toBeCloseTo(6, 6);
+    expect(timing!.finishBallDiameterMm).toBeCloseTo(6, 6);
+    // THE PLAN'S JSON IS CLEAN (the landing review's k3 reds): two runs differ in the clock, so a
+    // wall-clock field inside the plan would break every "the same plan" identity pin.
+    expect(JSON.stringify(plan)).not.toContain('planMs');
+    expect(JSON.stringify(plan)).not.toContain('finishStageMs');
+    expect(JSON.stringify(plan)).not.toContain('finishBallDiameterMm');
 
     // The one formula both callers quote: the owned plan again plus Σ√(D_finish/d) × the finish.
-    const rungs = REST_LADDER_RUNGS_MM.filter((d) => d < plan.finishBallDiameterMm! - 1e-9);
+    const rungs = REST_LADDER_RUNGS_MM.filter((d) => d < timing!.finishBallDiameterMm - 1e-9);
     expect(rungs.length).toBe(6);
-    const scale = rungs.reduce((n, d) => n + Math.sqrt(plan.finishBallDiameterMm! / d), 0);
-    expect(restLadderEstimateMs(plan)).toBeCloseTo(plan.planMs! + scale * plan.finishStageMs!, 6);
+    const scale = rungs.reduce((n, d) => n + Math.sqrt(timing!.finishBallDiameterMm / d), 0);
+    expect(restLadderEstimateMs(timing)).toBeCloseTo(timing!.planMs + scale * timing!.finishStageMs, 6);
+    // No timing at all (a reloaded job, an older result): null, never a guessed constant.
+    expect(restLadderEstimateMs(null)).toBeNull();
+    expect(restLadderEstimateMs(undefined)).toBeNull();
   }, 300_000);
 
   it('the timing never reaches a statement, a note or a program: the flag-off plan’s words are unchanged', async () => {
@@ -139,17 +148,20 @@ describe('#1046 the plan states its own wall time (dump only)', () => {
     for (const line of words) expect(line).not.toMatch(/\d+\s?ms\b/);
     // The ladder's own variables are the only readers: a plan with no timing answers null.
     const bare: ModelPlanOutput = { perSetup: plan.perSetup };
-    expect(restLadderEstimateMs(bare)).toBeNull();
+    // The plan object itself carries no timing field to read.
+    expect('planMs' in bare).toBe(false);
+    expect(restLadderEstimateMs(null)).toBeNull();
   }, 300_000);
 
   it('the ladder run is priced from the plain finish, not from its own rung passes', async () => {
     // A ladder run's finishStageMs is its OWN (the rungs re-plan the finish); what the press quotes
     // comes from the last plain Generate. This pins that a ladder plan still measures its own
     // finish stage rather than summing the rung passes into it.
-    const plan = await planModelCam(await plateInput(), { restLadder: true });
+    let timing: PlanTiming | null = null;
+    const plan = await planModelCam(await plateInput(), { restLadder: true, onTiming: (t) => { timing = t; } });
     expect(plan.ladderRows?.length).toBeGreaterThan(0);
-    expect(plan.finishStageMs!).toBeGreaterThan(0);
-    expect(restLadderEstimateMs(plan)).not.toBeNull();
+    expect(timing!.finishStageMs).toBeGreaterThan(0);
+    expect(restLadderEstimateMs(timing)).not.toBeNull();
   }, 300_000);
 
 

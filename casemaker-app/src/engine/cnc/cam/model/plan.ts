@@ -513,20 +513,24 @@ export interface ModelPlanOutput {
    * rung whose own leftover is under the shop's visibility thresholds). Never a plan candidate.
    */
   ladderRows?: LadderRow[];
-  /**
-   * #1046 — WALL TIME, IN THE DUMP ONLY. `planMs` is the whole plan's; `finishStageMs` is the
-   * curved finish attempts' (the same quantity a ladder re-run repeats per rung). No statement,
-   * NC byte or card line reads them: the run-sheet press uses them to state the ladder's expected
-   * cost BEFORE running it, from the last Generate's measured numbers (never a constant).
-   */
-  planMs?: number;
-  finishStageMs?: number;
-  /**
-   * #1046 — the finishing ball the rest statement judged, mm: the `D_finish` in the ladder's cost
-   * estimate (Σ√(D_finish/d) per rung). Stated here because the plan is where `finishingBallOf`
-   * runs; a reader of the result cannot recover it from the cutters' keys.
-   */
-  finishBallDiameterMm?: number;
+}
+
+/**
+ * #1046 — A PLAN'S WALL TIME, A SIDE CHANNEL (landing review, 2026-11-10).
+ *
+ * The timing is measured for the ladder's cost estimate and must NEVER enter the plan JSON: two
+ * runs of the same plan differ in wall-clock numbers by nature, and every "these two plans are
+ * the same plan" identity pin (and any byte compare of a plan dump) would break on a number that
+ * says nothing about the part. `planModelCam` hands it to `PlanModelCamOptions.onTiming`; the
+ * goal pipeline carries it on `EngraveGenerated.planTiming`, beside the plan, for the press.
+ */
+export interface PlanTiming {
+  /** The whole plan's wall time, ms. */
+  planMs: number;
+  /** The curved finish attempts' wall time, ms — the stage a ladder rung repeats. */
+  finishStageMs: number;
+  /** The finishing ball the plan ran, mm — the `D_finish` in the ladder's estimate. */
+  finishBallDiameterMm: number;
 }
 
 /**
@@ -644,6 +648,11 @@ export interface PlanModelCamOptions {
    * ball is still the one the plan chooses.
    */
   restLadder?: boolean;
+  /**
+   * #1046 — the plan's wall-time read, OUT of the plan's JSON (see `PlanTiming`). Called once at
+   * the end of a plan that ran a finishing ball; the caller carries it beside the plan.
+   */
+  onTiming?: (timing: PlanTiming) => void;
 }
 
 /**
@@ -2634,12 +2643,18 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // same list); absent when the ladder did not run.
   const result: ModelPlanOutput = outcome === undefined ? { perSetup } : { perSetup, outcome };
   if (ladderRowsAll !== undefined) result.ladderRows = ladderRowsAll;
-  // #1046 — the timing read (dump only) and the finishing ball the ladder's estimate scales.
-  result.planMs = Math.round(performance.now() - planStartedAt);
-  result.finishStageMs = Math.round(finishStageMs);
+  // #1046 — the timing read and the finishing ball the ladder's estimate scales go to the CALLER'S
+  // SINK, never into `result`: two runs of the same plan differ in the clock, and every plan
+  // identity pin compares the JSON.
   const finishBall = finishingBallOf(perSetup);
   const finishBallD = finishBall === null ? null : cuttingDiameter(finishBall);
-  if (finishBallD !== null && finishBallD !== undefined && finishBallD > 0) result.finishBallDiameterMm = finishBallD;
+  if (finishBallD !== null && finishBallD !== undefined && finishBallD > 0) {
+    opts.onTiming?.({
+      planMs: Math.round(performance.now() - planStartedAt),
+      finishStageMs: Math.round(finishStageMs),
+      finishBallDiameterMm: finishBallD,
+    });
+  }
   return result;
 }
 
@@ -2649,17 +2664,15 @@ const allPockets = (nodes: PocketNode[]): PocketNode[] => nodes.flatMap((n) => [
 export const REST_LADDER_RUNGS_MM = [4, 3, 2, 1.5, 1, 0.5] as const;
 
 /**
- * #1046 — THE LADDER'S EXPECTED COST, ms, from a plan the last Generate measured: the owned plan
- * again PLUS Σ√(D_finish/d) × the finish stage, over the rungs finer than the finishing ball (the
- * #1028 shape — a rung's finish scales with the cutter diameter's square root). NULL when the
- * plan carries no timing (a reloaded job, an older result): the press then says "run Generate
- * first" rather than quoting a constant.
+ * #1046 — THE LADDER'S EXPECTED COST, ms, from the last Generate's own measured `PlanTiming`: the
+ * owned plan again PLUS Σ√(D_finish/d) × the finish stage, over the rungs finer than the finishing
+ * ball (the #1028 shape — a rung's finish scales with the cutter diameter's square root). NULL
+ * when the caller carries no timing (a reloaded job, an older result): the press then says "run
+ * Generate first" rather than quoting a constant.
  */
-export function restLadderEstimateMs(
-  plan: Pick<ModelPlanOutput, 'planMs' | 'finishStageMs' | 'finishBallDiameterMm'>,
-): number | null {
-  const { planMs, finishStageMs, finishBallDiameterMm } = plan;
-  if (planMs === undefined || finishStageMs === undefined || finishBallDiameterMm === undefined) return null;
+export function restLadderEstimateMs(timing: PlanTiming | null | undefined): number | null {
+  if (timing === null || timing === undefined) return null;
+  const { planMs, finishStageMs, finishBallDiameterMm } = timing;
   if (!(finishBallDiameterMm > 0)) return null;
   const rungs = REST_LADDER_RUNGS_MM.filter((r) => r < finishBallDiameterMm - 1e-9);
   const scale = rungs.reduce((n, r) => n + Math.sqrt(finishBallDiameterMm / r), 0);
