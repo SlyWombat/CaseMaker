@@ -62,6 +62,35 @@ function goalWords(f: GoalFacts): string {
 }
 
 /**
+ * #1157 — A GOAL THE STAGING CANNOT REPRODUCE IS A FEASIBILITY VERDICT, NOT A BARE FAIL.
+ *
+ * When a receipt says the goal cannot be reached from its setup (`goal-unreached`: the shares that
+ * face away or sit in shadow) and names regions deeper than the longest ball's reach
+ * (`goal-finish-unreachable`), the check's note leads with those numbers. A 3D bevel gear staged
+ * as a one-setup relief cannot meet the pass line by construction; the output should say so, with
+ * the plan's own measure, rather than read as a plan that merely failed.
+ *
+ * Returns null when the receipt carries no `goal-unreached` — an ordinary check keeps its note.
+ */
+export function feasibilityNote(diagnostics: readonly Record<string, unknown>[]): string | null {
+  const unreached = diagnostics.find((d) => d['code'] === 'goal-unreached');
+  if (unreached === undefined) return null;
+  const reach = diagnostics.filter((d) => d['code'] === 'goal-finish-unreachable');
+  const floors = reach
+    .map((d) => /floor ([\d.]+) mm below the stock top/.exec(String(d['message'] ?? ''))?.[1])
+    .filter((v): v is string => v !== undefined);
+  const parts = [`feasibility — ${String(unreached['message'] ?? 'the goal cannot be reproduced from one top setup')}`];
+  if (reach.length > 0) {
+    parts.push(
+      `${reach.length} region${reach.length === 1 ? ' is' : 's are'} deeper than the longest ball's reach${
+        floors.length === 0 ? '' : ` (${floors.join('/')} mm below the stock top)`
+      }.`,
+    );
+  }
+  return parts.join(' ');
+}
+
+/**
  * The sample's check verdict from its programs' goal blocks, in program order — or `null` when no
  * program carried one (the harness records that as `n/a`).
  */
