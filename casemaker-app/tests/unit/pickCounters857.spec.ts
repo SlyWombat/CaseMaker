@@ -4,67 +4,26 @@
 // corn cannot enter the 'e' of "Software" and only partly opens its 'a', so those counters stand at
 // full height. The fidelity measure counted the pinches between letters and nothing inside them.
 //
-// The evaluator now measures every enclosed counter of a raised glyph — its area, and the part of
-// it left standing — from the SWEPT run at half the relief's depth (the coarse level uses the
-// cutter-width model), and the search ranks the counters before the pinches. These tests run the
-// real Manifold, generator and sweep on the demo's own coin and its own library rows
-// (fixtures/pick857: the job file and seven inventory cutters copied from the demo bench).
+// The evaluator now measures every enclosed counter of a raised glyph — its area, and the part of it
+// left standing — from the SWEPT run at half the relief's depth (the coarse level uses the
+// cutter-width model), and the search ranks the counters before the pinches. This file checks the
+// evaluator's numbers against an independent sweep of the same plan on the demo's own coin and its
+// own library rows (fixtures/pick857). #1180 split the ranking test into its own file so the two run
+// on parallel workers; `helpers/pick857.ts` is the fixture both share.
 
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { tl } from './helpers/manifoldExec';
-import { parseEngraveJob } from '@/store/engraveJobSchema';
-import { smartPick, COUNTER_TIE_MM2, planKey } from '@/engine/cnc/engrave/smartPick';
-import { applyCutterPlan, clearPlanEvaluations, evaluatePlan, type CandidatePlan, type PlanEvaluation } from '@/workers/sim/planEvaluate';
+import { applyCutterPlan, clearPlanEvaluations } from '@/workers/sim/planEvaluate';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
+import { COUNTER_TIE_MM2 } from '@/engine/cnc/engrave/smartPick';
 import { counterRegion } from '@/workers/sim/engraveGeometry';
 import { createSimSession } from '@/workers/sim/session';
 import { executeProfile } from '@/workers/geometry/evaluateOp';
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { jobMachine } from '@/engine/cnc/calibration';
-import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import type { EngraveJob } from '@/types/engraveJob';
-import { picked } from './helpers/picked';
-
-const DIR = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pick857');
-
-function coin(): EngraveJob {
-  const parsed = parseEngraveJob(JSON.parse(readFileSync(join(DIR, 'j04-coin-pla-proxy.json'), 'utf8')));
-  if (!parsed.ok) throw new Error(parsed.errors.join('\n'));
-  return parsed.job;
-}
-
-const ALL = JSON.parse(readFileSync(join(DIR, 'tools.json'), 'utf8')) as ToolLibraryEntry[];
-const FLAT_3175 = 'inv:lib-111011313817';
-const CORN_19 = 'inv:lib-111218193810';
-const CORN_06 = 'inv:kz-corn-0-6-3';
-const V_03 = 'inv:lib-121032035020'; // 6 mm shank, 0.3 mm tip, 20° included
-const TOOLS = ALL.filter((t) => [FLAT_3175, CORN_19, CORN_06, V_03].includes(t.key));
-
-const plan = (first: string, rest: string): CandidatePlan => ({
-  cutters: [
-    { key: first, items: ['clear'] },
-    { key: rest, items: [] },
-  ],
-  source: { [first]: 'owned', [rest]: 'owned' },
-});
-const CORN_PLAN = plan(CORN_19, CORN_06);
-const V_PLAN = plan(FLAT_3175, V_03);
-
-const ctx = { tl, tools: TOOLS, catalogue: [], shop: { tools: TOOLS }, calibration: null };
-const evaluate = async (job: EngraveJob, p: CandidatePlan, level: 'coarse' | 'full'): Promise<PlanEvaluation> =>
-  await evaluatePlan(job, p, ctx, { level });
-
-const counterOf = (e: PlanEvaluation, char: string) => {
-  const item = e.items.find((i) => i.id === 'clear')!;
-  return (item.counters ?? []).filter((c) => c.char === char);
-};
-const standing = (e: PlanEvaluation): number =>
-  e.items.reduce((sum, i) => sum + (i.counters ?? []).reduce((s, c) => s + c.standingMm2, 0), 0);
+import { CORN_19, CORN_PLAN, TOOLS, V_PLAN, coin, counterOf, evaluate, standing } from './helpers/pick857';
 
 describe('#857 a raised glyph’s counters count in the pick', () => {
   it('the corn rest leaves the e of "Software" filled; the V opens it — and the number is the sweep’s', { timeout: 300_000 }, async () => {
@@ -143,29 +102,5 @@ describe('#857 a raised glyph’s counters count in the pick', () => {
     cut.delete();
     expect(sweptE, 'the e was found in the design').not.toBeNull();
     expect(e[0]!.standingMm2).toBeCloseTo(sweptE!, 2);
-  });
-
-  it('the coin’s ranking: a ⌀0.3 V rest wins over every corn-rest plan, because it keeps the counters open', { timeout: 600_000 }, async () => {
-    clearPlanEvaluations();
-    const job = coin();
-    // #1134 caps the default full evaluations at 3; this case MEASURES the ranking across the
-    // corn-rest plans too, so it asks for enough finalists to time every candidate (the cap's own
-    // behaviour is pinned in smartPick.spec.ts).
-    const pick = picked(await smartPick(job, TOOLS, [], (p, level) => evaluate(job, p, level), { maxCandidates: 16, fullFinalists: 20 }));
-    expect(pick.runnable, pick.notes.join(' ')).not.toBeNull();
-    // The V rest after a clearance flat: the search's answer, not a rule's. Which flat clears is the
-    // run time's call (with this four-cutter library the ⌀1.9 is in the V pairings and is faster;
-    // the demo's full library pairs the V with the ⌀3.175 clearances only).
-    expect(pick.chosen.plan.cutters.at(-1)?.key).toBe(V_03);
-    expect([FLAT_3175, CORN_19]).toContain(pick.chosen.plan.cutters[0]?.key);
-    expect(pick.chosen.counterStandingMm2 ?? 0).toBeLessThanOrEqual(COUNTER_TIE_MM2);
-    // Every corn-rest plan the search posted leaves visible counters, and ranks below.
-    const order = pick.considered.map((s) => planKey(s.plan));
-    const cornPlans = pick.considered.filter((s) => s.evaluation.ok && s.evaluation.seconds !== null && s.plan.cutters.at(-1)?.key === CORN_06);
-    expect(cornPlans.length).toBeGreaterThan(0);
-    for (const s of cornPlans) {
-      expect(s.counterStandingMm2 ?? 0, planKey(s.plan)).toBeGreaterThan(COUNTER_TIE_MM2);
-      expect(order.indexOf(planKey(s.plan))).toBeGreaterThan(order.indexOf(planKey(pick.chosen.plan)));
-    }
   });
 });
