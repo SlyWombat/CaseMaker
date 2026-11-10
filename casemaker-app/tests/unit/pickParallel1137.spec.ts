@@ -110,7 +110,7 @@ const OVER: Record<string, Partial<PlanEvaluation>> = {
   'inv:flat-2+inv:flat-1': { toolChanges: 1, seconds: 90 },
 };
 
-const evaluate: Evaluate = (plan, level) => verdict(SCORES[keyOf(plan)] ?? 0.05, OVER[keyOf(plan)]);
+const evaluate: Evaluate = (plan) => verdict(SCORES[keyOf(plan)] ?? 0.05, OVER[keyOf(plan)]);
 
 /** The answers a caller can observe, flattened for an equality assertion. */
 function observable(pick: SmartPick): unknown {
@@ -170,7 +170,7 @@ describe('#1137 the finalists run as one batch', () => {
     const seen: { level: string; plans: number }[] = [];
     const many: EvaluateMany = async (plans, level) => {
       seen.push({ level, plans: plans.length });
-      return plans.map((plan) => verdict(1));
+      return plans.map(() => verdict(1));
     };
     await smartPick(coinJob(), TOOLS, [], evaluate, { evaluateMany: many });
     expect(seen).toHaveLength(1);
@@ -183,7 +183,7 @@ describe('#1137 the finalists run as one batch', () => {
     let called = 0;
     const many: EvaluateMany = async (plans) => {
       called++;
-      return plans.map((plan) => verdict(1));
+      return plans.map(() => verdict(1));
     };
     const pick = picked(await smartPick(coinJob(), TOOLS, [], evaluate, { fullFinalists: 1, evaluateMany: many }));
     expect(called).toBe(0);

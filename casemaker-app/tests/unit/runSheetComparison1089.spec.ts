@@ -5,7 +5,7 @@
  * comparison was deferred (the CLI's --defer-ideal) or is still running (the app's late ideal).
  * No comparison → no step, so every sheet without one stays byte-identical.
  */
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { buildRunSheet, type RunSheet, type RunSheetGenerated } from '@/engine/cnc/engrave/runSheet';
@@ -28,7 +28,7 @@ const MINOR: PlanTradeoff = {
   ],
 };
 
-function sheetWith(comparison: Parameters<typeof buildRunSheet>[5]['comparison']): RunSheet {
+function sheetWith(comparison: NonNullable<Parameters<typeof buildRunSheet>[5]>['comparison']): RunSheet {
   const job = defaultEngraveJob();
   const generated: RunSheetGenerated = {
     findings: [],

@@ -63,7 +63,7 @@ const CATALOGUE: FeedCatalogueRow[] = [
 ];
 
 const CONDITIONS = new Map<string, ConditionSummary>([
-  ['flat-3.175x12-metal', { best: 'new', usable: 2, note: null }],
+  ['flat-3.175x12-metal', { best: 'new', usable: 2, unknown: 0, known: 2, note: null }],
 ]);
 
 const SURFACE: SurfacePostFit = { plane: { offset: 0.12, slopeX: 0.001, slopeY: -0.002 }, z0: -0.35 };
@@ -139,9 +139,9 @@ describe('#581 the input stamp', () => {
 
   it('moves for a condition that changes the pick, not for the note that describes it', () => {
     const base = cuttersKey(TOOL_LIBRARY, CONDITIONS);
-    const renoted = cuttersKey(TOOL_LIBRARY, new Map([['flat-3.175x12-metal', { best: 'new', usable: 2, note: 'a worn copy exists' }]]));
+    const renoted = cuttersKey(TOOL_LIBRARY, new Map([['flat-3.175x12-metal', { best: 'new', usable: 2, unknown: 0, known: 2, note: 'a worn copy exists' }]]));
     expect(renoted).toBe(base);
-    const worn = cuttersKey(TOOL_LIBRARY, new Map([['flat-3.175x12-metal', { best: 'worn', usable: 2, note: null }]]));
+    const worn = cuttersKey(TOOL_LIBRARY, new Map([['flat-3.175x12-metal', { best: 'worn', usable: 2, unknown: 0, known: 2, note: null }]]));
     expect(worn).not.toBe(base);
   });
 
@@ -173,7 +173,7 @@ describe('#581 the input stamp', () => {
     const catalogue = { ...sources(), catalogue: [{ ...CATALOGUE[0]!, rpm: 13000 }] };
     expect(changedInputs(base, runInputs(catalogue))).toEqual(['catalogue']);
 
-    const cutters = { ...sources(), conditions: new Map([['flat-3.175x12-metal', { best: 'broken' as const, usable: 0, note: null }]]) };
+    const cutters = { ...sources(), conditions: new Map([['flat-3.175x12-metal', { best: 'broken' as const, usable: 0, unknown: 0, known: 0, note: null }]]) };
     expect(changedInputs(base, runInputs(cutters))).toEqual(['cutters']);
 
     const surface = { ...sources(), surface: SURFACE };

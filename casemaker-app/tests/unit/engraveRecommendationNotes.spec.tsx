@@ -326,7 +326,7 @@ describe('the panel’s Why? list (#687)', () => {
     const adopted = candidate({
       key: 'flat-1.0',
       excluded: 'broken',
-      condition: { best: 'broken', usable: 0, note: '…', ...shopCopies },
+      condition: { best: 'broken', usable: 0, unknown: 0, known: 0, note: '…', ...shopCopies },
     });
     // `PICK` shares this key, so it is the only candidate: two rows with one test id would make
     // the query ambiguous rather than test anything.

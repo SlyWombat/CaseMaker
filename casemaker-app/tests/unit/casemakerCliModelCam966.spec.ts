@@ -220,14 +220,15 @@ describe('#966 the headless CLI generate path posts a goal job through cam/model
     const job = goalJob();
     const { code, receipt, outDir } = await cliCut(job, 'model-cam-defer', locationDoc(), ['--defer-ideal']);
     expect(code, JSON.stringify(receipt)).toBe(0);
-    expect(receipt!.details.comparison).toEqual({ deferred: true });
+    if (receipt === null || receipt.command !== 'engrave') throw new Error('the CLI run wrote no engrave receipt');
+    expect(receipt.details.comparison).toEqual({ deferred: true });
     const sheetText = readFileSync(join(outDir, `${runSheetFileName(job.name).replace(/\.nc$/, '')}-run-sheet.md`), 'utf8');
     expect(sheetText).toContain('The ideal comparison is deferred');
     expect(sheetText).toContain('--defer-ideal');
     // #1089 acceptance — THE STATEMENT MUST NOT MOVE A BYTE: the deferred run posts the same
     // programs as the default run above (both post the owned plan).
-    expect(receipt!.details.programs.length).toBe(defaultProgramTexts.length);
-    const deferredTexts = receipt!.details.programs.map((program) => readFileSync(join(outDir, program.ncFile), 'utf8'));
+    expect(receipt.details.programs.length).toBe(defaultProgramTexts.length);
+    const deferredTexts = receipt.details.programs.map((program) => readFileSync(join(outDir, program.ncFile), 'utf8'));
     expect(deferredTexts).toEqual(defaultProgramTexts);
   }, 180_000);
   // "flag unset: the default is still off — ... through the old engine" is deleted here, not
