@@ -16,9 +16,6 @@ afterEach(() => setMachineConsoleLoader(null));
 
 const TARGET = { host: '192.168.10.43', port: 2222 };
 const IDLE = '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128>';
-const RUNNING = '<Run|MPos:1.0000,2.0000,-1.0000|Bf:14,128|S:12031|P:389,90,88>';
-const MID_JOB = '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128|S:12031|P:389,90,88>';
-const ALARM = '<Alarm|MPos:0.0000,0.0000,0.0000>';
 
 
 const status = (text: string): ((line: string) => ConsoleSend) => (line) =>
