@@ -19,7 +19,11 @@ export const test = base.extend<{ cm: CaseMakerHandle }>({
       page,
       async ready() {
         await page.goto('/', { waitUntil: 'domcontentloaded' });
-        await page.waitForLoadState('networkidle', { timeout: 30_000 });
+        // #1181 — NO `networkidle`. It waits on every connection, and a cold Vite transform graph
+        // under four workers can keep them open past its 30 s timeout: three bedDefects725 tests
+        // failed exactly this way on a first parallel run and passed on the immediate rerun. The
+        // app's own ready signal is the next line (the test API exists), and `waitForIdle` below
+        // drains its work; neither needs the network to fall silent.
         await page.waitForFunction(() => Boolean(window.__caseMaker?.apiVersion === 1), undefined, {
           timeout: 30_000,
         });
