@@ -158,38 +158,64 @@ export function flatFloorMask(
   raster: StockRaster,
   programs: readonly CutProgramInput[],
   fallbackRadiusMm: number,
-  tipRadiusMm: number,
+  probe: ProbeBody,
   depth: Float32Array = depthRaster(raster, programs, fallbackRadiusMm),
 ): Uint8Array {
-  const nearMin = new Float32Array(raster.nx * raster.ny).fill(Infinity);
-  const nearMax = new Float32Array(raster.nx * raster.ny).fill(-Infinity);
-  for (const program of programs) {
-    if (!program.finished) continue;
-    const reach = radiusOf(program, fallbackRadiusMm) + Math.max(0, tipRadiusMm) + CUT_BLANK_FLAT_REACH_MM;
-    for (const move of movesOf(program)) {
-      const { i0, i1, j0, j1 } = boundsOf(raster, move.a, move.b, reach);
-      for (let j = j0; j <= j1; j++) {
-        const y = cellY(raster, j);
-        for (let i = i0; i <= i1; i++) {
-          const at = j * raster.nx + i;
-          if (distanceToSegment2d(cellX(raster, i), y, move.a, move.b) > reach + 1e-9) continue;
-          if (move.depthMm < nearMin[at]!) nearMin[at] = move.depthMm;
-          if (move.depthMm > nearMax[at]!) nearMax[at] = move.depthMm;
+  // Two reaches: the tip's (a shallow touch) and the body's (a touch deeper than the tip's length,
+  // when the body's diameter is recorded). A deep cell with no body number is never a candidate.
+  const tipRadius = Math.max(0, probe.tipRadiusMm);
+  const bodyRadius = probe.bodyDiameterMm !== null && probe.bodyDiameterMm !== undefined && probe.bodyDiameterMm > 0
+    ? probe.bodyDiameterMm / 2
+    : null;
+  const near = (reachRadius: number) => {
+    const min = new Float32Array(raster.nx * raster.ny).fill(Infinity);
+    const max = new Float32Array(raster.nx * raster.ny).fill(-Infinity);
+    for (const program of programs) {
+      if (!program.finished) continue;
+      const reach = radiusOf(program, fallbackRadiusMm) + reachRadius + CUT_BLANK_FLAT_REACH_MM;
+      for (const move of movesOf(program)) {
+        const { i0, i1, j0, j1 } = boundsOf(raster, move.a, move.b, reach);
+        for (let j = j0; j <= j1; j++) {
+          const y = cellY(raster, j);
+          for (let i = i0; i <= i1; i++) {
+            const at = j * raster.nx + i;
+            if (distanceToSegment2d(cellX(raster, i), y, move.a, move.b) > reach + 1e-9) continue;
+            if (move.depthMm < min[at]!) min[at] = move.depthMm;
+            if (move.depthMm > max[at]!) max[at] = move.depthMm;
+          }
         }
       }
     }
-  }
+    return { min, max };
+  };
+  const byTip = near(tipRadius);
+  const byBody = bodyRadius === null ? null : near(bodyRadius);
   const flat = new Uint8Array(raster.nx * raster.ny);
   for (let at = 0; at < flat.length; at++) {
-    const near = nearMax[at]!;
-    if (near === -Infinity) {
+    const own = depth[at]!;
+    const deep = probe.tipLengthMm !== null && probe.tipLengthMm !== undefined && own > probe.tipLengthMm + 1e-9;
+    const chosen = deep ? (byBody === null ? null : byBody) : byTip;
+    if (chosen === null) {
+      // The body would enter this floor and its size is not recorded: not a candidate.
+      flat[at] = 0;
+      continue;
+    }
+    const nearMax = chosen.max[at]!;
+    if (nearMax === -Infinity) {
       flat[at] = 1;
       continue;
     }
-    const own = depth[at]!;
-    flat[at] = near - own <= CUT_BLANK_FLAT_MM + 1e-9 && own - nearMin[at]! <= CUT_BLANK_FLAT_MM + 1e-9 ? 1 : 0;
+    flat[at] =
+      nearMax - own <= CUT_BLANK_FLAT_MM + 1e-9 && own - chosen.min[at]! <= CUT_BLANK_FLAT_MM + 1e-9 ? 1 : 0;
   }
   return flat;
+}
+
+/** The probe's entering geometry (#1179 B): the tip, and the body a deep floor is entered by. */
+export interface ProbeBody {
+  tipRadiusMm: number;
+  tipLengthMm?: number | null;
+  bodyDiameterMm?: number | null;
 }
 
 /**
@@ -263,16 +289,32 @@ function spread(cells: readonly Cell[], max: number, centre: Cell): Cell[] {
 export function cutBlankCandidates(input: {
   raster: StockRaster;
   programs: readonly CutProgramInput[];
-  tipRadiusMm: number;
+  /** The probe's entering geometry: its tip, and the body a deep floor is entered by. */
+  probe: ProbeBody;
   fallbackRadiusMm: number;
   obstacles: readonly CutBlankObstacle[];
   edgeMarginMm?: number;
-}): { points: SurfacePointCandidate[]; earlierCutsKnown: boolean } {
+}): { points: SurfacePointCandidate[]; earlierCutsKnown: boolean; floorsRestricted: string | null } {
   const { raster, programs, obstacles } = input;
   const margin = input.edgeMarginMm ?? CUT_BLANK_EDGE_MARGIN_MM;
   const earlierCutsKnown = programs.some((program) => program.finished);
   const depth = earlierCutsKnown ? depthRaster(raster, programs, input.fallbackRadiusMm) : null;
-  const flat = earlierCutsKnown ? flatFloorMask(raster, programs, input.fallbackRadiusMm, input.tipRadiusMm, depth ?? undefined) : null;
+  // #1179 B (analyst) — a floor deeper than the tip's length is entered by the probe's BODY: it is
+  // only a candidate when the body's diameter is recorded. An unrecorded tip length keeps to the
+  // uncut top, and the note says the floor points were not used.
+  const tipLengthKnown = input.probe.tipLengthMm !== null && input.probe.tipLengthMm !== undefined;
+  const bodyKnown = input.probe.bodyDiameterMm !== null && input.probe.bodyDiameterMm !== undefined && input.probe.bodyDiameterMm > 0;
+  const deepest = depth === null ? 0 : depth.reduce((max, d) => (d > max ? d : max), 0);
+  const floorsRestricted = !earlierCutsKnown
+    ? null
+    : !tipLengthKnown
+      ? 'the probe’s body/tip length is not recorded, so only the uncut top was used as a check point'
+      : !bodyKnown && tipLengthKnown && deepest > input.probe.tipLengthMm! + 1e-9
+        ? `the probe’s body diameter is not recorded, so floors deeper than the tip’s ${input.probe.tipLengthMm} mm were not used as check points`
+        : null;
+  const flat = earlierCutsKnown && tipLengthKnown
+    ? flatFloorMask(raster, programs, input.fallbackRadiusMm, input.probe, depth ?? undefined)
+    : null;
   const outside = earlierCutsKnown ? null : cutFootprintMask(raster, programs, input.fallbackRadiusMm);
   const top: Cell[] = [];
   const floor: Cell[] = [];
@@ -302,5 +344,6 @@ export function cutBlankCandidates(input: {
   return {
     points: chosen.map((c) => ({ x: c.x, y: c.y, depthMm: c.depthMm })),
     earlierCutsKnown,
+    floorsRestricted,
   };
 }

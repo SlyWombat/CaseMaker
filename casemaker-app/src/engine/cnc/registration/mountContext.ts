@@ -92,7 +92,18 @@ export function probeFor(machine: MachineRecord | null): ProbeSpec | null {
     diameterMm === null || rimOffsetMm === null || rimOffsetUncertaintyMm === null
       ? null
       : { diameterMm, rimOffsetMm, rimOffsetUncertaintyMm };
-  return { id: acc.id, variant, instrument: probeInstrument(variant), tip };
+  // #1179 B — the probe's body, when the record states it: a floor deeper than the tip's length is
+  // entered by the body, and only then is it a candidate for a cut blank's check.
+  const tipLengthMm = mountNum(acc.unit.tipLengthMm);
+  const bodyDiameterMm = mountNum(acc.unit.bodyDiameterMm);
+  return {
+    id: acc.id,
+    variant,
+    instrument: probeInstrument(variant),
+    tip,
+    ...(tipLengthMm === null ? {} : { tipLengthMm }),
+    ...(bodyDiameterMm === null ? {} : { bodyDiameterMm }),
+  };
 }
 
 /** #603 — the checked-out probe's display name (its product), or null when none is checked out. */

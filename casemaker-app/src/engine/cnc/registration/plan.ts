@@ -129,6 +129,15 @@ export interface ProbeSpec {
   instrument?: ProbeInstrument;
   /** The measured tip, or null when this instrument's tip has never been measured. */
   tip: { diameterMm: number; rimOffsetMm: number; rimOffsetUncertaintyMm: number } | null;
+  /**
+   * #1179 B — the probe's BODY: how far the tip sticks out (`tipLengthMm`) and the stem/body
+   * diameter above it. A floor deeper than the tip's length is entered by the body, and is only a
+   * candidate when the body's diameter is recorded (or the floor is within the tip's length).
+   * Absent on every record that never measured them — the candidate choice then keeps to the
+   * uncut top and says so.
+   */
+  tipLengthMm?: number | null;
+  bodyDiameterMm?: number | null;
 }
 
 /** How a probe can touch: straight down only, or sideways as well (#525). */
@@ -344,6 +353,12 @@ export interface RegistrationPlan {
    * record says so (the points are assumed uncut, d = 0).
    */
   surfaceChecksUnknown?: true;
+  /**
+   * #1179 B — why the check points are the uncut top only (the probe's body/tip length is not
+   * recorded, so a floor could not be entered safely). Present only when that restricted the
+   * choice; the run's note carries the sentence.
+   */
+  surfaceChecksProbeNote?: string;
   /** The surface touch: from the machine's travel height (`seekFromMachineZ`), at most this far down; and the band a reading must land in. */
   seek: { fromMachineZ: number; travelMm: number; band: { min: number; max: number } };
   /** #598 — the measured mount datum the seek is a search from, or null on the legacy seat path. */

@@ -63,7 +63,7 @@ function cutBlankCheckPoints(
   plan: RegistrationPlan,
   largestOwnedDiameterMm: number,
   finishedHashes: readonly string[],
-): { points: { x: number; y: number; depthMm: number }[]; earlierCutsKnown: boolean } {
+): { points: { x: number; y: number; depthMm: number }[]; earlierCutsKnown: boolean; floorsRestricted: string | null } {
   const raster = stockRaster(plan.stock);
   const fallbackRadiusMm = (Number.isFinite(largestOwnedDiameterMm) && largestOwnedDiameterMm > 0 ? largestOwnedDiameterMm : 0) / 2;
   const finished = new Set(finishedHashes);
@@ -81,7 +81,11 @@ function cutBlankCheckPoints(
   return cutBlankCandidates({
     raster,
     programs,
-    tipRadiusMm: plan.settings.tipRadiusMm,
+    probe: {
+      tipRadiusMm: plan.settings.tipRadiusMm,
+      tipLengthMm: plan.probe?.tipLengthMm ?? null,
+      bodyDiameterMm: plan.probe?.bodyDiameterMm ?? null,
+    },
     fallbackRadiusMm,
     obstacles: plan.mountObstacles.map((o) => ({ min: o.min, max: o.max })),
   });
@@ -276,7 +280,7 @@ export function planRegistrationAttempt(args: {
     const checks =
       args.cutBlank === true
         ? cutBlankCheckPoints(job, result.plan, args.largestOwnedDiameterMm ?? 0, args.finishedHashes ?? [])
-        : { points: [], earlierCutsKnown: true };
+        : { points: [], earlierCutsKnown: true, floorsRestricted: null };
     const plan =
       checks.points.length === 0
         ? result.plan
@@ -284,6 +288,7 @@ export function planRegistrationAttempt(args: {
             ...result.plan,
             surfaceChecks: checks.points,
             ...(checks.earlierCutsKnown ? {} : { surfaceChecksUnknown: true as const }),
+            ...(checks.floorsRestricted === null ? {} : { surfaceChecksProbeNote: checks.floorsRestricted }),
           };
     return {
       kind: 'plan',

@@ -2465,7 +2465,7 @@ describe('#1179 B the cut blank’s top is measured on known depths, never asked
           }
           if (/^G38\.3 Z-[\d.]+ F[\d.]+$/.test(line)) {
             if (zByWork.has(key())) {
-              const z = zByWork.get(key());
+              const z = zByWork.get(key()) ?? null;
               const text =
                 z === null
                   ? `[PRB:${lastX.toFixed(3)},${lastY.toFixed(3)},-70.000:0]\nok`
@@ -2562,12 +2562,9 @@ describe('#1179 B the cut blank’s top is measured on known depths, never asked
     ]);
     const { console } = pointedConsole(map);
     const r = await runRegistration(withChecks(PTS), { console, operator: yes });
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.reason).toContain('could not be proved');
-      expect(r.reason).toContain('found nothing');
-    }
-    expect(r.outcome === undefined).toBe(true);
+    if (r.ok) throw new Error('expected the five readings not to prove a top');
+    expect(r.reason).toContain('could not be proved');
+    expect(r.reason).toContain('found nothing');
   });
 
   it('a floor candidate is sought in a band shifted by its depth, and its implied top is recovered', async () => {

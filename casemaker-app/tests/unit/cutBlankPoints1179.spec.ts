@@ -54,12 +54,12 @@ describe('#1179 the depth of a finished program’s floor', () => {
       finished: true,
     };
     const depthUneven = depthRaster(RASTER, [uneven], 2);
-    const flatUneven = flatFloorMask(RASTER, [uneven], 2, TIP_R, depthUneven);
+    const flatUneven = flatFloorMask(RASTER, [uneven], 2, { tipRadiusMm: TIP_R, tipLengthMm: 10 }, depthUneven);
     expect(flatUneven[at(RASTER, 50, 20)]).toBe(0);
     // One uniform fill is flat across its floor.
     const even = { nc: fillNc(20, 80, 20, 40, 1, 2), cutterRadiusMm: 2, finished: true };
     const depthEven = depthRaster(RASTER, [even], 2);
-    const flatEven = flatFloorMask(RASTER, [even], 2, TIP_R, depthEven);
+    const flatEven = flatFloorMask(RASTER, [even], 2, { tipRadiusMm: TIP_R, tipLengthMm: 10 }, depthEven);
     expect(flatEven[at(RASTER, 50, 30)]).toBe(1);
     expect(depthEven[at(RASTER, 50, 30)]).toBeCloseTo(2, 6);
   });
@@ -75,7 +75,7 @@ describe('#1179 candidate points on a cut blank', () => {
   it('with finished programs: the uncut top first, then flat floors (depth carried)', () => {
     // A finished fill across the middle; the top remains at both ends.
     const program = { nc: fillNc(20, 80, 10, 50, 1, 2), cutterRadiusMm: 2, finished: true };
-    const known = cutBlankCandidates({ raster: RASTER, programs: [program], tipRadiusMm: TIP_R, fallbackRadiusMm: 2, obstacles: [] });
+    const known = cutBlankCandidates({ raster: RASTER, programs: [program], probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 }, fallbackRadiusMm: 2, obstacles: [] });
     expect(known.earlierCutsKnown).toBe(true);
     expect(known.points.length).toBeGreaterThanOrEqual(2);
     // Every top point is outside the filled RECTANGLE grown by the cutter radius; floors carry 2 mm.
@@ -95,7 +95,7 @@ describe('#1179 candidate points on a cut blank', () => {
     const unknown = cutBlankCandidates({
       raster: RASTER,
       programs: [program],
-      tipRadiusMm: TIP_R,
+      probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
       fallbackRadiusMm: 2,
       obstacles: [],
     });
@@ -113,7 +113,7 @@ describe('#1179 candidate points on a cut blank', () => {
     const points = cutBlankCandidates({
       raster: RASTER,
       programs: [],
-      tipRadiusMm: TIP_R,
+      probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
       fallbackRadiusMm: 2,
       obstacles: [{ min: [40, 20], max: [60, 40] }],
     }).points;
@@ -131,11 +131,34 @@ describe('#1179 candidate points on a cut blank', () => {
     expect(points.length).toBeLessThanOrEqual(CUT_BLANK_MAX_POINTS);
   });
 
+  it('a floor deeper than the tip needs the probe’s body: without it the uncut top only, with a note', () => {
+    // The whole top is a 2 mm floor; the probe's tip sticks out 1 mm, so the body enters.
+    const deep = { nc: fillNc(0, 100, 0, 60, 1, 2), cutterRadiusMm: 2, finished: true };
+    const noBody = cutBlankCandidates({
+      raster: RASTER,
+      programs: [deep],
+      probe: { tipRadiusMm: TIP_R, tipLengthMm: 1 },
+      fallbackRadiusMm: 2,
+      obstacles: [],
+    });
+    expect(noBody.points).toEqual([]);
+    expect(noBody.floorsRestricted).toContain('body diameter is not recorded');
+    const withBody = cutBlankCandidates({
+      raster: RASTER,
+      programs: [deep],
+      probe: { tipRadiusMm: TIP_R, tipLengthMm: 1, bodyDiameterMm: 4 },
+      fallbackRadiusMm: 2,
+      obstacles: [],
+    });
+    expect(withBody.points.length).toBeGreaterThanOrEqual(2);
+    expect(withBody.points[0]!.depthMm).toBeCloseTo(2, 6);
+  });
+
   it('offers no candidate when the mount’s obstacles leave nothing', () => {
     const points = cutBlankCandidates({
       raster: RASTER,
       programs: [],
-      tipRadiusMm: TIP_R,
+      probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
       fallbackRadiusMm: 2,
       obstacles: [{ min: [0, 0], max: [100, 60] }],
     }).points;

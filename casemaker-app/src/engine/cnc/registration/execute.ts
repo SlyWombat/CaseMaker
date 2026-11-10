@@ -2209,7 +2209,8 @@ export async function runRegistration(
         `the top was measured on a cut blank: ${read}; the accepted implied top is machine Z ${f(slow.z)} (${cutBlankOutlier === null ? 'the higher of two agreeing touches or the level three agree on' : `three checks agree; the lone high reading implied ${f(cutBlankOutlier.machineZ)} at (${f(cutBlankOutlier.at.x)}, ${f(cutBlankOutlier.at.y)}) is a chip or an unrecorded floor and was not used`})` +
           (plan.surfaceChecksUnknown === true
             ? ' — the earlier plan’s cuts are not recorded, so the check points are outside today’s footprint and assumed uncut'
-            : ''),
+            : '') +
+          (plan.surfaceChecksProbeNote === undefined ? '' : ` — ${plan.surfaceChecksProbeNote}`),
       );
       if (spreadPlan !== undefined) {
         outcome.notes.push(
