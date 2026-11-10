@@ -110,3 +110,28 @@ describe('#1143 the touch estimate counts the executor’s method', () => {
     expect(touchesOf(bracket)).toBe(1);
   });
 });
+
+describe('#1179 the cut-blank plan’s check points are touches', () => {
+  // #1179 blank identity: a cut-blank plan carries `surfaceChecks` and the executor touches them
+  // (three to start, up to five) instead of one surface touch. The header must count what the
+  // machine will actually do — it read "1 touch" while the card measured three.
+  const checks = (n: number) => Array.from({ length: n }, (_, i) => ({ x: i + 1, y: i + 1, depthMm: 0 }));
+
+  it('replaces the single surface touch with the plan’s checks, keeping each scan’s cost', () => {
+    const base = plan({ mount: 'tape', fixtureBelowSurfaceMm: undefined });
+    expect(base.scans).toHaveLength(3);
+    expect(touchesOf(base)).toBe(7); // 1 surface touch + 3 sideways scans
+    expect(touchesOf({ ...base, surfaceChecks: checks(3) })).toBe(9); // 3 checks + 6
+    expect(touchesOf({ ...base, surfaceChecks: checks(5) })).toBe(11); // the cap: 5 checks + 6
+    expect(touchesOf({ ...base, surfaceChecks: checks(2) })).toBe(8); // only two points exist: 2 + 6
+    // No checks: the single touch, exactly as before.
+    expect(touchesOf({ ...base, surfaceChecks: [] })).toBe(7);
+    expect(touchesOf({ ...base, surfaceChecks: undefined })).toBe(7);
+  });
+
+  it('a bracket cut-blank plan (no scans) counts its checks alone — the bench’s “Register · 3 touches”', () => {
+    const p = plan({ mount: 'tape', fixtureBelowSurfaceMm: undefined });
+    const bracketLike = { ...p, scans: [], surfaceChecks: checks(3) };
+    expect(touchesOf(bracketLike)).toBe(3);
+  });
+});

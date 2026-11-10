@@ -274,6 +274,11 @@ test('#1179 blank identity — a no-id job on a legacy machine: three touches, t
   const banner = page.getByTestId('engrave-registration-blank');
   await expect(banner).toContainText('may have been cut', { timeout: 60_000 });
   await expect(page.getByTestId('engrave-registration-new-blank')).toBeVisible();
+  // The step header counts the touches the executor will make (#1179/#1143): the cut-blank plan's
+  // check points, never "1 touch".
+  const stepHeader = page.getByTestId('engrave-cut-step-2-summary');
+  await expect(stepHeader).toContainText(/[2-5] touches/);
+  await expect(stepHeader).not.toContainText('1 touch');
 
   // The measurement: the checks are touched (at least three) and agree on the bench's top.
   await expect(page.getByTestId('engrave-registration-notes')).toContainText('the top was measured on a cut blank', {
@@ -289,7 +294,10 @@ test('#1179 blank identity — a no-id job on a legacy machine: three touches, t
   await page.getByTestId('engrave-registration-new-blank').click();
   await expect(page.getByTestId('engrave-registration-blank-note')).toContainText('A new blank', { timeout: 60_000 });
   const written = house.writtenMachine();
-  expect(Object.keys((written?.currentBlank as Record<string, string>) ?? {}).length, 'the mint wrote currentBlank').toBe(1);
+  expect(
+    Object.keys((written?.currentBlank as Record<string, string>) ?? {}).length,
+    `the mint wrote currentBlank — machine the fake received: ${JSON.stringify(written)}`,
+  ).toBe(1);
   await expect(page.getByTestId('engrave-registration-blank')).toHaveCount(0);
 
   // The stored plan (a cut-blank plan) is not what the planner now proposes for the fresh blank:
