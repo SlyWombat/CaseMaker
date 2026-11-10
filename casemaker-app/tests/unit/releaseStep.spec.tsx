@@ -544,6 +544,28 @@ describe('#469 the release step', () => {
     ]);
   }, 30000);
 
+  it('#1123-42 — shows the running program’s percent, time left and the next bit change on the Cut step', async () => {
+    // Program 1 reports `P:10,20,5` for four polls: 20 % at 5 s elapsed → about 20 s left, long
+    // enough to read before the bit change (polls are 2 s apart).
+    setMachineConsoleLoader(async () => controller(4));
+    renderStep(twoSetupJob());
+    await uploadAndStart();
+
+    // The line exists at once ("running, no percentage yet"); the first poll brings the reading.
+    const live = await screen.findByTestId('engrave-release-live-progress', undefined, { timeout: 10000 });
+    await waitFor(() => expect(live.textContent).toBe('Program 1 of 2 is 20 % done — about 20 s left.'), { timeout: 10000 });
+    expect(live.getAttribute('data-percent')).toBe('20');
+    // The next program needs the other cutter; the line names the program and the cutter.
+    const next = screen.getByTestId('engrave-release-next-change');
+    expect(next.textContent).toContain('Next bit change: program 2 of 2');
+    expect(next.textContent).toContain('flat-3.175x12-metal');
+
+    // At the pause the progress line belongs to the run that just ended, not the one being set up.
+    await screen.findByTestId('engrave-release-change', undefined, { timeout: 20000 });
+    expect(screen.queryByTestId('engrave-release-live-progress')).toBeNull();
+    expect(screen.queryByTestId('engrave-release-next-change')).toBeNull();
+  }, 30000);
+
   // #934 — THE POST-FACING RE-TOUCH IS HIDDEN until its bench run. The faced-run branch below is
   // skipped, not deleted, and returns behind its own issue; a job with facing on is refused at the
   // release with the sentence this test pins.
