@@ -18,6 +18,8 @@ test.setTimeout(600_000);
 const ROOT = path.resolve(process.cwd(), '..');
 const OUT = path.join(ROOT, 'docs', 'bench', 'img', '2026-10-31-goal-transform');
 const WORK = path.join(process.cwd(), 'test-results', 'goal-transform');
+/** #1181 — one job file per open: a fixed name let parallel workers clobber each other's job. */
+let openSerial = 0;
 
 type V = [number, number, number];
 
@@ -81,11 +83,15 @@ function tallJob(): EngraveJob {
 
 async function openJob(page: Page, job: EngraveJob): Promise<void> {
   fs.mkdirSync(WORK, { recursive: true });
-  const file = path.join(WORK, 'tall-goal.job.json');
+  const file = path.join(WORK, `tall-goal-${process.pid}-${openSerial++}.job.json`);
   fs.writeFileSync(file, JSON.stringify(job));
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
+    // #1181 — the board's scheduled work finishes BEFORE the file is opened, so the file's own
+    // placement is the last write: under four workers this test met a re-seat that undid the
+    // goal's x 36 and turned a refusal into a 37-minute plan.
+    await window.__caseMaker!.waitForIdle();
   });
   await page.getByTestId('sidebar-button-cnc-engrave').click();
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
@@ -94,6 +100,8 @@ async function openJob(page: Page, job: EngraveJob): Promise<void> {
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('engrave-job-open').click()]);
   await chooser.setFiles(file);
   await expect(page.getByTestId('engrave-job-file-name')).toContainText(job.name);
+  // …and the open's own work settles too, before a test reads the job or presses Generate.
+  await page.evaluate(() => window.__caseMaker!.waitForIdle());
 }
 
 async function shoot(page: Page, name: string): Promise<void> {
@@ -230,6 +238,12 @@ test('#949 — the CAM refusal sentence reaches the operator, before any toolpat
   job.targetObject!.position.x = 36;
   await openJob(page, job);
   await expect(page.getByTestId('engrave-target-row-0')).toBeVisible();
+  // The job's OWN placement is what this test refuses on: name it here, so a re-seat fails with
+  // the position it moved to instead of surfacing as a two-minute wait for a sentence.
+  expect(
+    await page.evaluate(() => window.__caseMaker!.engraveTargetPlacement()?.position.x),
+    'the opened job keeps the goal at x 36',
+  ).toBe(36);
 
   await page.getByTestId('engrave-generate').click();
   const errors = page.getByTestId('engrave-run-errors');
