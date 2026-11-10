@@ -2525,3 +2525,50 @@ describe('#986 the press and the failure path', () => {
     }
   }, 60_000);
 });
+
+// ── #1046 — THE LADDER'S PRESS PATH ────────────────────────────────────────────────────────────
+describe('#1046 the ladder ask reaches the pipeline', () => {
+  const cleanGen = (): EngraveGenerated => ({
+    ok: true,
+    stage: 'done',
+    findings: [],
+    feeds: null,
+    threads: null,
+    cam: null,
+    verify: null,
+    surface3d: null,
+    frameNc: null,
+    frameVerify: null,
+    facingNc: null,
+    facingVerify: null,
+    facingToolKey: null,
+    facingError: null,
+    facingCam: null,
+    predicted: [],
+    programs: [],
+    errors: [],
+    nc: ';@MKR|BEGIN\nG21 G90\nM02',
+  } as unknown as EngraveGenerated);
+
+  it('generate(null, { restLadder: true }) passes the flag as the pipeline’s restLadder argument', async () => {
+    let seen: unknown = 'unset';
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async (...args: unknown[]) => {
+        seen = args[8];
+        return cleanGen();
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({ loadProgram: async () => { useSimStore.setState({ status: 'ready', diagnostics: [], pathOnly: false }); return swept(); } });
+    try {
+      await useEngraveRunStore.getState().generate(null, { restLadder: true });
+      expect(seen, 'the press asks the owned plan to measure the rungs').toBe(true);
+      // A plain Generate stays the pre-#1046 call: the flag is off, never left as the last press's.
+      await useEngraveRunStore.getState().generate();
+      expect(seen).toBe(false);
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+    }
+  }, 60_000);
+});

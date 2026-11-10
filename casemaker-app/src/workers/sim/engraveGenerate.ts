@@ -243,6 +243,7 @@ import {
   type RankMeasureRequest,
   type ModelPlanInput,
   type ModelPlanOutput,
+  type PlanTiming,
   type PlannedOp,
   type SetupSpec,
 } from '@/engine/cnc/cam/model/plan';
@@ -769,6 +770,14 @@ export interface EngraveGenerated {
    * D's run store reads `(generated as {plan?: …}).plan?.perSetup` speculatively.
    */
   plan?: ModelPlanOutput | null;
+  /**
+   * #1046 — THE PLAN'S WALL TIME, BESIDE THE PLAN AND NEVER IN IT (the landing review's side
+   * channel). The press quotes the ladder's expected cost from the last Generate's measured
+   * numbers; two runs of the same plan differ in the clock, so this field is kept out of `plan`'s
+   * JSON, where every "the same plan" identity pin compares bytes. Absent on a refusal before the
+   * plan was measured.
+   */
+  planTiming?: PlanTiming | null;
   /**
    * #992 — THE PLAN'S TYPED STATEMENTS, carried for the run sheet. `warning`/`info` statements
    * also become `findings` below (the panel's route); the `sheet`-class ones never reach the
@@ -5621,6 +5630,8 @@ export async function postModelPlan(
   findings: PostModelPlanFindings,
   /** #1123 item 4 — the posting/verify stage ticks the run log records. */
   onProgress?: EngraveProgressFn,
+  /** #1046 — the owned plan's wall time, carried beside the plan (never inside its JSON). */
+  planTiming?: PlanTiming | null,
 ): Promise<EngraveGenerated> {
   const { goalFindings, reachFindings, coverageFindings, modelRoughFindings, chamferFindings, tabRelease = null, tabReleaseFindings = [], planIdeal = null, planTradeoff = null } = findings;
   const base = emptyGoalResult();
@@ -5640,6 +5651,7 @@ export async function postModelPlan(
     nc: null,
     verify: null,
     plan,
+    ...(planTiming === undefined || planTiming === null ? {} : { planTiming }),
     planIdeal,
     planTradeoff,
     errors: [{ stage, message }],
@@ -5828,6 +5840,7 @@ export async function postModelPlan(
           verify,
           programs: [...programs],
           plan: output,
+          ...(planTiming === undefined || planTiming === null ? {} : { planTiming }),
           planIdeal,
           planTradeoff,
           planStatements,
@@ -5902,6 +5915,7 @@ export async function postModelPlan(
     verify: first.verify,
     programs,
     plan: output,
+    ...(planTiming === undefined || planTiming === null ? {} : { planTiming }),
     planIdeal,
     planTradeoff,
     planStatements,
@@ -6052,9 +6066,16 @@ export async function generateGoalProgram(
      * the serial rank.
      */
     measureRankCandidates?: (request: RankMeasureRequest) => RankMeasureHandle;
+    /**
+     * #1046 — THE VIRTUAL LADDER, ON DEMAND. The run-sheet press and the CLI's `--rest-ladder`
+     * ask the OWNED plan to measure the standard rungs (`PlanModelCamOptions.restLadder`); the
+     * ideal is never re-planned with it (`planTwoOutcomes` keeps `restLadder: false` on the
+     * reference run). Absent/false: the pre-#1046 plan, byte-identical.
+     */
+    restLadder?: boolean;
   },
 ): Promise<EngraveGenerated> {
-  const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue, reusedOwnedPlan, ownedOnly, deferIdeal, measureRankCandidates } = opts;
+  const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue, reusedOwnedPlan, ownedOnly, deferIdeal, measureRankCandidates, restLadder } = opts;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -6239,6 +6260,9 @@ export async function generateGoalProgram(
   let planIdeal: ModelPlanOutput | null = null;
   let planTradeoff: PlanTradeoff | null = null;
   let idealDeferred = false;
+  // #1046 — the owned plan's timing, from the plan's own sink (the first callback: the owned run
+  // goes first, the ideal second; the ladder's surcharge is the OWNED plan's).
+  let planTiming: PlanTiming | null = null;
   try {
     // #1038 — the planner's stage reports reach the run (see this function's `opts.onProgress`).
     const planOpts: PlanModelCamOptions = {
@@ -6254,6 +6278,13 @@ export async function generateGoalProgram(
       ...(signal === undefined ? {} : { signal }),
       // #1151 Phase 2 — the rank seam rides every plan this door runs (the deferred ideal too).
       ...(measureRankCandidates === undefined ? {} : { measureRankCandidates }),
+      // #1046 — the owned plan measures the rungs only when the caller asked (the ideal run
+      // strips it in `planIdealOnly`).
+      ...(restLadder === true ? { restLadder: true } : {}),
+      // #1046 — the wall time goes to a side channel, never into the plan's JSON.
+      onTiming: (t: PlanTiming) => {
+        if (planTiming === null) planTiming = t;
+      },
     };
     const reuseTwo = reusedOwnedPlan === undefined || reusedOwnedPlan === null ? {} : { reusedOwned: reusedOwnedPlan };
     if (deferIdeal === true && planChoiceOf(job) !== 'ideal') {
@@ -6313,6 +6344,7 @@ export async function generateGoalProgram(
       planTradeoff,
     },
     onProgress,
+    planTiming,
   );
   // #1151 — the deferred flag rides OUTSIDE the plan: the plan/programs above are the owned plan's,
   // final; the caller owes the ideal half and a tradeoff update.
@@ -6341,7 +6373,7 @@ async function generateGoalPrograms(
   /** #1038 — the same stage channel `generateGoalProgram` takes, passed to each side's plan. */
   onProgress?: EngraveProgressFn,
   /** #1134 — the pick's handoffs, passed to each side's plan. #1151 — `deferIdeal` and the rank
-   * seam ride the same options object on every side. */
+   * seam ride the same options object on every side; #1046's ladder choice rides it too. */
   options: EngraveGenerateOptions = {},
 ): Promise<EngraveGenerated> {
   // #1073 — A FRAME FLIP NEEDS ITS BAND BEFORE ANYTHING POSTS. `flip: { method: 'tabs-in-blank' }`
@@ -6416,7 +6448,7 @@ async function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}), ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }), ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }) });
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}), ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }), ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }), ...(options.restLadder === true ? { restLadder: true } : {}) });
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
@@ -6443,7 +6475,7 @@ async function generateGoalPrograms(
     programs.push(locating.program);
   }
   for (const side of sides.slice(1)) {
-    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}), ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }), ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }) });
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}), ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }), ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }), ...(options.restLadder === true ? { restLadder: true } : {}) });
     const sideList = sidePrograms(one, side);
     if (sideList === null) return { ...one, programs };
     programs.push(...sideList);
@@ -7156,6 +7188,8 @@ export interface EngraveGenerateOptions {
   deferIdeal?: boolean;
   /** #1151 Phase 2 — the rank seam; absent (the app's worker) keeps the serial rank. */
   measureRankCandidates?: (request: RankMeasureRequest) => RankMeasureHandle;
+  /** #1046 — the virtual ladder on the OWNED plan (the run-sheet press, the CLI's flag). */
+  restLadder?: boolean;
 }
 
 export async function engraveGenerate(
@@ -7173,7 +7207,7 @@ export async function engraveGenerate(
    */
   catalogueTools?: readonly Tool[],
   /** #1134 — the pick's handoffs (see {@link EngraveGenerateOptions}); #1151 — `deferIdeal` and
-   * the rank seam ride the same object. */
+   * the rank seam ride the same object; #1046 — the ladder choice does too. */
   options: EngraveGenerateOptions = {},
 ): Promise<EngraveGenerated> {
   memTrace('pipeline:start', { job: job.name });
@@ -7406,6 +7440,7 @@ export async function engraveGenerate(
         ...(options.ownedOnly === true ? { ownedOnly: true } : {}),
         ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }),
         ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }),
+        ...(options.restLadder === true ? { restLadder: true } : {}),
       })),
       surface: null,
     };

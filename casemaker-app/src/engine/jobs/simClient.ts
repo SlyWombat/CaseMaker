@@ -690,6 +690,8 @@ export const engraveGenerate = (
    * CLI leaves it off: today's two-plan run, and its receipt, are unchanged.
    */
   deferIdeal?: boolean,
+  /** #1046 — the virtual ladder, on demand (the run-sheet press). Off/absent: unchanged bytes. */
+  restLadder?: boolean,
 ): Promise<EngraveGenerated> =>
   guarded(
     getSimApi().engraveGenerate(
@@ -702,6 +704,7 @@ export const engraveGenerate = (
       onProgress === undefined ? undefined : Comlink.proxy(onProgress),
       catalogueTools,
       deferIdeal,
+      restLadder,
     ),
   );
 

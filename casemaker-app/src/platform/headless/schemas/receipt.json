@@ -246,6 +246,42 @@
                   "description": "Share of covered cells excluded as EDGE BREAK (a V bit within its reach of a design edge, no deeper than its leg), 0–1.",
                   "type": "number"
                 },
+                "ladder": {
+                  "description": "#1046 — the standard rest rungs the virtual ladder measured on this run (`--rest-ladder`); omitted when the ladder did not run. The statement beside them names the rung that takes the leftover.",
+                  "items": {
+                    "properties": {
+                      "cycleSeconds": {
+                        "description": "The rung’s own finish cycle estimate, seconds.",
+                        "type": "number"
+                      },
+                      "diameterMm": {
+                        "description": "The standard rung’s ball diameter, mm.",
+                        "type": "number"
+                      },
+                      "feedsSource": {
+                        "description": "Where the rung’s feeds came from — a virtual rung has no catalogue row.",
+                        "type": "string"
+                      },
+                      "leftoverAboveMm": {
+                        "description": "The deepest leftover the rung leaves, mm.",
+                        "type": "number"
+                      },
+                      "leftoverShare": {
+                        "description": "The share of the goal the rung leaves standing, 0–1.",
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "diameterMm",
+                      "leftoverShare",
+                      "leftoverAboveMm",
+                      "cycleSeconds",
+                      "feedsSource"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
                 "leftoverFractions": {
                   "description": "Share of the covered cells standing more than each leftover band (0.1 / 0.3 / 1 mm) above the goal.",
                   "items": {
@@ -930,6 +966,42 @@
                           "edgeBreakFraction": {
                             "description": "Share of covered cells excluded as EDGE BREAK (a V bit within its reach of a design edge, no deeper than its leg), 0–1.",
                             "type": "number"
+                          },
+                          "ladder": {
+                            "description": "#1046 — the standard rest rungs the virtual ladder measured on this run (`--rest-ladder`); omitted when the ladder did not run. The statement beside them names the rung that takes the leftover.",
+                            "items": {
+                              "properties": {
+                                "cycleSeconds": {
+                                  "description": "The rung’s own finish cycle estimate, seconds.",
+                                  "type": "number"
+                                },
+                                "diameterMm": {
+                                  "description": "The standard rung’s ball diameter, mm.",
+                                  "type": "number"
+                                },
+                                "feedsSource": {
+                                  "description": "Where the rung’s feeds came from — a virtual rung has no catalogue row.",
+                                  "type": "string"
+                                },
+                                "leftoverAboveMm": {
+                                  "description": "The deepest leftover the rung leaves, mm.",
+                                  "type": "number"
+                                },
+                                "leftoverShare": {
+                                  "description": "The share of the goal the rung leaves standing, 0–1.",
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "diameterMm",
+                                "leftoverShare",
+                                "leftoverAboveMm",
+                                "cycleSeconds",
+                                "feedsSource"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
                           },
                           "leftoverFractions": {
                             "description": "Share of the covered cells standing more than each leftover band (0.1 / 0.3 / 1 mm) above the goal.",

@@ -4,6 +4,7 @@ import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
 import { useEngraveRunStore, firstRunError, gateViewFor, releaseBlocker, runErrorCodes, saveBlocker, uploadBlocker, type EngraveRunState } from '@/store/engraveRunStore';
+import { restLadderEstimateMs } from '@/engine/cnc/cam/model/plan';
 import { ROTARY_UNMEASURED_REFUSAL } from '@/store/engraveRunGate';
 import { useMachineStore } from '@/store/machineStore';
 import { useSimStore } from '@/store/simStore';
@@ -1225,6 +1226,18 @@ export function EngravePanel(): JSX.Element {
     // with unmeasured datums is NOT reported per job (every fresh bed is unmeasured); the cards and
     // the Start line say it once.
     ...bedFindings({ job, machine: locationMachine, mount: jobMount(job) }),
+    // #1046 — THE RUN'S OWN LEFTOVER LINE, WHERE ITS ACTION LIVES. `goal-rest-uncut`/`-pass` are
+    // plan statements on the LAST run (the printed sheet carries them in §8), and they carry the
+    // goal's labelId; the drawer is where the presses stand, so the job-level list shows them too
+    // (labelId cleared) — the ladder's press hangs off that line.
+    // 6b's condition (#1046): the RUN's lines follow the run's staleness — a stale plan's leftover
+    // sentence must never sit beside live document findings as if it were current, so it is shown
+    // only while `staleSince` is null (and with it the ladder's press).
+    ...(useEngraveRunStore.getState().staleSince === null
+      ? (useEngraveRunStore.getState().generated?.findings ?? [])
+          .filter((f) => f.code === 'goal-rest-uncut' || f.code === 'goal-rest-pass')
+          .map((f) => ({ ...f, labelId: undefined }))
+      : []),
   ]);
   const jobFindings = findings.filter((f) => f.labelId === undefined);
   // A cutter this app can write an answer to: a house definition or an owned cutter. A catalogue
@@ -2060,6 +2073,22 @@ export function EngravePanel(): JSX.Element {
    * work frame), then Generate runs on the whole job. Nothing is written for a plan the setups
    * engine refuses: the reason is shown beside the goal instead.
    */
+  /**
+   * #1046 — THE LADDER'S ONE PRESS. The rest statement says no ball it knows takes the leftover;
+   * measuring the standard rungs answers it. The EXPECTED COST is stated before the press from
+   * the last Generate's own measured numbers (`restLadderEstimateMs`: the owned plan again plus
+   * Σ√(D_finish/d) × its finish stage), never a constant. The run is a normal Generate with
+   * `restLadder: true` under the same watchdog and stale guard; the ideal is not re-planned.
+   *
+   * WHERE IT RUNS. The press does not plan by itself: it calls the run store's `generate`, the one
+   * door every Generate press uses — so the page's own planner today and the house's runs service
+   * when #1126 offers one are one choice made in one place, and this press follows it without a
+   * second path. This build has no house runs path, so it runs in the page; the button says so.
+   */
+  const measureStandardBalls = (): void => {
+    void run.generate(null, { restLadder: true });
+  };
+
   const addFlipPlan = (finding: JobFinding): void => {
     const sides = finding.goalFlipSides;
     const goal = job.targetObject;
@@ -5317,6 +5346,36 @@ export function EngravePanel(): JSX.Element {
                       {f.goalFlipNeed}
                     </span>
                   )}
+                  {/* #1046 — the leftover nothing owned answers: press to measure the standard
+                      balls, with the expected cost from the last Generate's measured timings. The
+                      two sentence forms below are exactly the rest statement's "no measured ball"
+                      tails (plan.ts `restStatementForPlan`); once the ladder runs, the sentence
+                      names a standard ball and the press is gone. */}
+                  {f.code === 'goal-rest-uncut' && job.targetObject?.id === f.targetId &&
+                    (f.message.includes('none of its balls takes this leftover') || f.message.includes('none is configured for this shop')) && (() => {
+                      const estimateMs = run.generated?.plan === undefined || run.generated?.plan === null
+                        ? null
+                        : restLadderEstimateMs(run.generated.planTiming);
+                      return (
+                        <span style={{ flexShrink: 0, marginLeft: 'auto' }}>
+                          <button
+                            type="button"
+                            data-testid="engrave-goal-measure-balls"
+                            disabled={estimateMs === null}
+                            title={
+                              estimateMs === null
+                                ? 'the last result carries no timings — run Generate first'
+                                : 'plans a new Generate in this browser — this build has no house runs service'
+                            }
+                            onClick={measureStandardBalls}
+                          >
+                            {estimateMs === null
+                              ? 'Run Generate first'
+                              : `Measure the standard balls (about ${Math.max(1, Math.round(estimateMs / 60_000))} min)`}
+                          </button>
+                        </span>
+                      );
+                    })()}
                   {/* #786 slice 4c-2 — the plunge question, answered in place. The write goes to
                       the cutter's own record (user: or inv:), and the answer is asked once per
                       cutter, ever; until then the hole is left out of the programs. */}

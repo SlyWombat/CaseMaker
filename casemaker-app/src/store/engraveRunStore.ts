@@ -163,6 +163,8 @@ export type EngraveRunClient = {
      * has posted and says `idealDeferred`; the store then starts the comparison below.
      */
     deferIdeal?: boolean,
+    /** #1046 — the virtual ladder, on demand (the run sheet's press). Off/absent: unchanged. */
+    restLadder?: boolean,
   ) => Promise<EngraveGenerated>;
   // #924 activation — the generator's own raw design items ride the oracle call the same way
   // `predicted` does; additive, so a caller that sends none runs exactly as it did before.
@@ -493,7 +495,11 @@ export interface EngraveRunState {
    */
   simStopped: boolean;
   /** Run the whole pipeline for the job as it is NOW. `surface` (#608) re-posts against a tilt. */
-  generate: (surface?: SurfacePostFit | null) => Promise<void>;
+  /**
+   * #1046 — `restLadder` asks the OWNED plan to measure the standard rungs on this run (the run
+   * sheet's press); absent, the run is byte-identical to the pre-#1046 one.
+   */
+  generate: (surface?: SurfacePostFit | null, opts?: { restLadder?: boolean }) => Promise<void>;
   /** #893 — simulate and check the program already generated, without generating again. */
   simulate: () => Promise<void>;
   /**
@@ -609,7 +615,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
   // long before the ideal (minutes later) resolves, so the ideal would always be dropped.
   let runEpoch = 0;
 
-  async function run(surface: SurfacePostFit | null = null, opts: { simulateOnly?: boolean } = {}): Promise<void> {
+  async function run(surface: SurfacePostFit | null = null, opts: { simulateOnly?: boolean; restLadder?: boolean } = {}): Promise<void> {
     // #893 — SIMULATE ONLY: the program is already this job's, so the run starts at the sweep.
     // A stale program (or one that never posted) has nothing this press can honestly check.
     const simulateOnly = opts.simulateOnly === true;
@@ -868,6 +874,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           getTools().map((entry) => entry.tool),
           // #1151 (#1134(c)) — the cut never waits on the comparison; the ideal is started below.
           true,
+          // #1046 — the run sheet's press asks the owned plan to measure the ladder.
+          opts.restLadder === true,
         );
       } finally {
         clearStall();
@@ -1475,14 +1483,14 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     comparePlans: () => {
       idealLastRequest?.();
     },
-    generate: async (surface?: SurfacePostFit | null) => {
+    generate: async (surface?: SurfacePostFit | null, opts?: { restLadder?: boolean }) => {
       const startedAt = Date.now();
       const token = Symbol('generate');
       runHold = token;
       runEpoch += 1;
       useEngravePreviewStore.getState().holdMeasurement();
       try {
-        await run(surface ?? null);
+        await run(surface ?? null, opts === undefined ? {} : { ...opts });
       } finally {
         // A newer run (or a cancel) may own the hold by now: only its owner releases it.
         if (runHold === token) {
