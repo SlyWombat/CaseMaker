@@ -27,6 +27,7 @@
  * permanent regression guard, never merged into part 2's own claim.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { once } from './helpers/once';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -206,7 +207,7 @@ describe('#966 end-state, part 2 — a goal needing two setups posts both, never
     // (engraveGenerate.ts) makes them — not a re-implementation, the literal production functions.
     const { goal, stock } = await buildDatumGoal();
     const job = jobFor(goal, stock);
-    const input = await buildModelPlanInputForGoal(job, goal, BALL, SHOP);
+    const input = await once('goalInput:datum', () => buildModelPlanInputForGoal(job, goal, BALL, SHOP));
 
     // `buildModelPlanInputForGoal` now calls the real `buildSetupSpecs`/`goalFlipPlan` decision
     // (966-goal-setups, c099c5cc) instead of hardcoding a single top setup — confirmed directly,
@@ -226,7 +227,7 @@ describe('#966 end-state, part 2 — a goal needing two setups posts both, never
 
     // Confirms the same fact the previous case established: the seam's own input genuinely
     // carries two setups for this job.
-    const input = await buildModelPlanInputForGoal(job, goal, BALL, SHOP);
+    const input = await once('goalInput:datum', () => buildModelPlanInputForGoal(job, goal, BALL, SHOP));
     expect(input.setups).toHaveLength(2);
 
     const result = await generateGoalProgram(job, goal, BALL, null, { shop: SHOP });
