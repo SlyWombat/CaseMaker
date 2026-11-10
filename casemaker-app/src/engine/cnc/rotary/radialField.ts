@@ -176,12 +176,22 @@ export function sampleGoalRadialField(
   rBound = rBound * 1.001 + 1e-6;
 
   const EPS = 1e-9;
+  /** mm: a shared edge or a coplanar pair is one crossing, and R is a boundary. */
+  const CROSS = 1e-5;
   /**
    * The farthest hit of the ray (ox, 0, 0) + t·(0, sin φ, cos φ) on triangle `t`, or 0. When
    * `crossings` is given, every positive hit along the ray is pushed onto it — the #1164 rule needs
-   * the whole crossing list, not just the farthest.
+   * the whole crossing list, not just the farthest. `flags.degenerate` is set when a triangle is
+   * EDGE-ON to the ray (det ≈ 0): the ray may run along a mesh edge or in a face's plane, where an
+   * intersection is missed or double-counted, so parity cannot be trusted on that ray alone.
    */
-  const rayHit = (t: number, ox: number, ang: number, crossings?: number[]): number => {
+  const rayHit = (
+    t: number,
+    ox: number,
+    ang: number,
+    crossings?: number[],
+    flags?: { degenerate: boolean },
+  ): number => {
     const ax = tri[t * 9]!, ay = tri[t * 9 + 1]!, az = tri[t * 9 + 2]!;
     const bx = tri[t * 9 + 3]!, by = tri[t * 9 + 4]!, bz = tri[t * 9 + 5]!;
     const cx = tri[t * 9 + 6]!, cy = tri[t * 9 + 7]!, cz = tri[t * 9 + 8]!;
@@ -193,7 +203,10 @@ export function sampleGoalRadialField(
     const py = dz * e2x;
     const pz = -dy * e2x;
     const det = e1x * px + e1y * py + e1z * pz;
-    if (Math.abs(det) < EPS) return 0;
+    if (Math.abs(det) < EPS) {
+      if (flags !== undefined) flags.degenerate = true;
+      return 0;
+    }
     const inv = 1 / det;
     const tx = ox - ax, ty = -ay, tz = -az;
     const u = (tx * px + ty * py + tz * pz) * inv;
@@ -210,6 +223,32 @@ export function sampleGoalRadialField(
     const hit = r >= -EPS && r <= rBound ? Math.max(0, r) : 0;
     if (hit > 0 && crossings !== undefined) crossings.push(hit);
     return hit;
+  };
+
+  /**
+   * #1164 — one ray's class against the rod: `inside` (the material is there at R, so the goal is
+   * the rod), `below` (outside at R; `below` is the outermost crossing under R), or `none` (the
+   * design has nothing inside the rod on this ray). `degenerate` is set when a triangle is edge-on
+   * to the ray or two crossings merge, where the crossing count may be 0 or 2 read as 1.
+   */
+  const classifyRay = (ox: number, ang: number): { kind: 'inside' | 'below' | 'none'; below: number; degenerate: boolean } => {
+    const hits: number[] = [];
+    const flags = { degenerate: false };
+    for (let t = 0; t < triCount; t++) rayHit(t, ox, ang, hits, flags);
+    hits.sort((a, b) => a - b);
+    const crossings: number[] = [];
+    for (const h of hits) {
+      const prev = crossings[crossings.length - 1];
+      if (prev === undefined || h - prev > CROSS) crossings.push(h);
+      else flags.degenerate = true; // two surfaces read as one: the truth may be 0 or 2, not 1
+    }
+    let beyond = 0;
+    let below = 0;
+    for (const h of crossings) {
+      if (h > radius + CROSS) beyond += 1;
+      else if (h < radius - CROSS) below = h; // sorted: ends on the outermost crossing below R
+    }
+    return { kind: beyond % 2 === 1 ? 'inside' : below > 0 ? 'below' : 'none', below, degenerate: flags.degenerate };
   };
   /** The farthest hit over every triangle, or 0. */
   const rayHitAll = (ox: number, ang: number): number => {
@@ -300,35 +339,40 @@ export function sampleGoalRadialField(
   // inside the solid at R (the clip stands); an even count means it is outside, and the goal is the
   // outermost crossing below R. No crossing below R means the design has nothing inside the rod on
   // that ray: the cell is uncovered and the stock stands.
-  const CROSS = 1e-5; // mm: a shared edge or a coplanar pair is one crossing, and R is a boundary.
+  //
+  // DEGENERATE RAYS (analyst review, 2026-11-10). A ray along a mesh edge (det ≈ 0, at every vertex
+  // angle and the seam) can miss an intersection, and a silhouette edge merged by CROSS reads two
+  // crossings as one — either flips the parity. For a cell whose centre ray is degenerate, the
+  // class comes from the two quarter-cell offsets the retry pass already uses; if they disagree the
+  // clip at R stands (conservative: the planner then stands off rather than cutting in). This is
+  // the one place a disagreement is resolved in favour of the rod, and it is stated here.
+  let oversizeCells = 0;
   for (let idx = 0; idx < z.length; idx++) {
     if (covered[idx] !== 1 || rawMax[idx]! <= radius + CROSS) continue;
+    oversizeCells += 1;
     const j = Math.floor(idx / nx);
     const i = idx - j * nx;
     const ang = (j * pitch) / radius - seam;
     const ox = x0 + i * pitch;
-    const hits: number[] = [];
-    for (let t = 0; t < triCount; t++) rayHit(t, ox, ang, hits);
-    hits.sort((a, b) => a - b);
-    const crossings: number[] = [];
-    for (const h of hits) {
-      if (crossings.length === 0 || h - crossings[crossings.length - 1]! > CROSS) crossings.push(h);
+    const centre = classifyRay(ox, ang);
+    let chosen = centre;
+    if (centre.degenerate) {
+      const left = classifyRay(ox, ang - angStep);
+      const right = classifyRay(ox, ang + angStep);
+      if (left.kind !== right.kind) continue; // disagree: the conservative clip at R stands
+      chosen = { kind: left.kind, below: Math.max(left.below, right.below), degenerate: false };
     }
-    let beyond = 0;
-    let below = 0;
-    for (const h of crossings) {
-      if (h > radius + CROSS) beyond += 1;
-      else if (h < radius - CROSS) below = h; // sorted: ends on the outermost crossing below R
-    }
-    // Odd: the ray is inside the solid at R — the rod is filled, and the existing clip is right.
-    if (beyond % 2 === 1) continue;
-    if (below <= 0) {
+    if (chosen.kind === 'inside') continue;
+    if (chosen.kind === 'none') {
       // Nothing of the design inside the rod on this ray: the stock's surface stands, uncovered.
       covered[idx] = 0;
       z[idx] = 0;
       continue;
     }
-    z[idx] = below - radius;
+    z[idx] = chosen.below - radius;
+    // #1164 review — the rewritten radius is a GOAL radius, so the reach bound must see it: a
+    // groove floor below every outermost hit the raster recorded is the nearest thing to the axis.
+    if (chosen.below < minR) minR = chosen.below;
   }
 
   let coveredCount = 0;
@@ -343,7 +387,14 @@ export function sampleGoalRadialField(
       ? `sampled on a ${pitch.toFixed(4)} mm grid around a ⌀${Number((2 * radius).toFixed(3))} mm rod ` +
         `(coarsened from the requested ${requestedPitch} mm: the map would need ${nx * ny} cells, over the ${maxCells}-cell cap)`
       : `sampled on a ${pitch} mm grid around a ⌀${Number((2 * radius).toFixed(3))} mm rod`) +
-    `; one map cell is ${Number(((pitch / radius) * (180 / Math.PI)).toFixed(3))}° of A`;
+    `; one map cell is ${Number(((pitch / radius) * (180 / Math.PI)).toFixed(3))}° of A` +
+    // #1164 review — the second pass's cost in its algorithm's unit, stated as the tip field states
+    // its own: every beyond-rod cell re-cast against every triangle. A 100k-triangle oversize mesh
+    // is then a number the reader can see, not an unexplained wait.
+    (oversizeCells === 0
+      ? ''
+      : `; the design ∩ rod rule re-cast ${oversizeCells} beyond-rod cell(s) against ${triCount} triangle(s) ` +
+        `(${oversizeCells * triCount} ray–triangle tests)`);
 
   return { nx, ny, x0, y0: 0, pitch, radius, minRadius, maxRadius, z, covered, coveredCount, resolutionNote };
 }

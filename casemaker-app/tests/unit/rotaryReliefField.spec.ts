@@ -235,9 +235,30 @@ describe('#1164 — the field is the design ∩ the rod', () => {
     const f = sampleGoalRadialField(goal([...ring(5), ...ring(11), ...ring(13)], SPAN), R, { pitchMm: PITCH });
     const k = cell(f, 50, 0);
     expect(f.covered[k]).toBe(1);
-    expect(f.z[k]).toBeCloseTo(5 - R, 3);
+    expect(f.z[k]).toBeCloseTo(5 - R, 2);
     // The warning keeps the TRUE reach: the sleeve is still stated as oversize.
     expect(f.maxRadius).toBeGreaterThanOrEqual(13 - 0.01);
+    // #1164 review — the reach bound follows the rewritten values: the groove floor is the nearest
+    // thing to the axis, nearer than any outermost hit the raster recorded.
+    expect(f.minRadius).toBeCloseTo(5, 2);
+    // The second pass's cost is stated in its own unit, as the tip field states its own.
+    expect(f.resolutionNote).toContain('beyond-rod cell(s) against');
+    expect(f.resolutionNote).toContain('ray–triangle tests');
+  });
+
+  it('a degenerate ray at a low-poly vertex is decided by its quarter-cell neighbours', () => {
+    // Four-segment rings put a vertex at every quadrant, so the seam cell's ray (angle 0) runs
+    // exactly along the shared edge of two faces on every ring: det ≈ 0 and coincident hits, where
+    // a naive parity reads one crossing instead of two (or none). The quarter-cell offsets see
+    // ordinary faces; both agree the design inside the rod is the groove.
+    const low = (r: number): Tri[] => sideTris(() => r, 20, TAU, 4);
+    const f = sampleGoalRadialField(goal([...low(5), ...low(11), ...low(13)], SPAN), R, { pitchMm: PITCH });
+    const k = cell(f, 50, 0);
+    expect(f.covered[k]).toBe(1);
+    // The quarter-cell rays land on the 4-gon's flat, so they read the chord slightly inside the
+    // ideal radius — the groove, not the rod surface (0) and not an uncovered cell.
+    expect(f.z[k]!).toBeGreaterThan(5 - R - 0.1);
+    expect(f.z[k]!).toBeLessThanOrEqual(5 - R + 1e-6);
   });
 
   it('a mesh whose material fills the rod samples R, not a surface below it', () => {
