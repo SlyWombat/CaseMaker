@@ -499,7 +499,17 @@ export interface EngraveRunState {
    * #1046 — `restLadder` asks the OWNED plan to measure the standard rungs on this run (the run
    * sheet's press); absent, the run is byte-identical to the pre-#1046 one.
    */
-  generate: (surface?: SurfacePostFit | null, opts?: { restLadder?: boolean }) => Promise<void>;
+  generate: (
+    surface?: SurfacePostFit | null,
+    opts?: {
+      restLadder?: boolean;
+      /**
+       * #1123 item 52 — the press probe's warning, recorded as the run log's first line: the line
+       * is cleared from beside Generate when the run ends, so the Log is where it lives after.
+       */
+      memoryWarning?: string | null;
+    },
+  ) => Promise<void>;
   /** #893 — simulate and check the program already generated, without generating again. */
   simulate: () => Promise<void>;
   /**
@@ -615,7 +625,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
   // long before the ideal (minutes later) resolves, so the ideal would always be dropped.
   let runEpoch = 0;
 
-  async function run(surface: SurfacePostFit | null = null, opts: { simulateOnly?: boolean; restLadder?: boolean } = {}): Promise<void> {
+  async function run(
+    surface: SurfacePostFit | null = null,
+    opts: { simulateOnly?: boolean; restLadder?: boolean; memoryWarning?: string | null } = {},
+  ): Promise<void> {
     // #893 — SIMULATE ONLY: the program is already this job's, so the run starts at the sweep.
     // A stale program (or one that never posted) has nothing this press can honestly check.
     const simulateOnly = opts.simulateOnly === true;
@@ -638,6 +651,12 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // its log CONTINUES that run's rather than erasing the stages that made the program.
     const priorLog = simulateOnly ? get().log : [];
     logStartedAt = Date.now();
+    // #1123 item 52 — the press warning is the run's FIRST log line (the panel's line beside
+    // Generate clears when the run ends; the Log keeps what the run was told).
+    const memoryWarning = opts.memoryWarning ?? null;
+    const openingLog = simulateOnly
+      ? appendRunLog(priorLog, 'simulating the existing program', logStartedAt, logStartedAt)
+      : appendRunLog([], 'starting the worker', logStartedAt, logStartedAt);
     set({
       ...empty,
       phase: simulateOnly ? 'simulating' : 'generating',
@@ -646,9 +665,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // module and its wasm load), and "Working…" with no words is the complaint this issue is.
       progress: simulateOnly ? null : { stage: 'prepare', label: 'starting the worker' },
       // #1123 item 4 — the log opens with the first tick so the fold is never blank mid-run.
-      log: simulateOnly
-        ? appendRunLog(priorLog, 'simulating the existing program', logStartedAt, logStartedAt)
-        : appendRunLog([], 'starting the worker', logStartedAt, logStartedAt),
+      log: memoryWarning === null ? openingLog : [{ at: logStartedAt, ms: 0, label: memoryWarning }, ...openingLog],
     });
 
     // ONE machine per run (#297): the saved frame is read once, here, and handed to the generator

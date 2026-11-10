@@ -836,6 +836,26 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.getByTestId('engrave-cut-ack').querySelector('[data-testid="probe-fit-diagram"]')).toBeNull();
   });
 
+  it('#1123-55 — the statement names the job’s own hold: a bracket job says the bracket, not the vise', () => {
+    const job = bracketJob();
+    const pkg = frozen(job, [P1]);
+    useEngraveRunStore.setState({
+      oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } } as never,
+      acknowledged: false,
+    });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    const statement = () =>
+      screen.getByTestId('engrave-cut-ack').querySelector('label')!.textContent ?? '';
+    expect(statement()).toContain("the bracket's arms and its 2 clamps");
+    expect(statement()).not.toContain('vise');
+
+    // The words follow the mount, so a vise job still says the vise.
+    cleanup();
+    const viseJob = plannedJob();
+    draw({ job: viseJob, report: reportOf(), pkg: frozen(viseJob, [P1]), generated: generated([P1]), canDrive: true });
+    expect(statement()).toContain('to the vise, and to the tool');
+  });
+
   it('#796 — a program older than the design disables the one-screen press and the upload until Generate', () => {
     const job = plannedJob();
     const pkg = frozen(job, [P1]);
@@ -2142,6 +2162,19 @@ describe('#1123 the Fit-and-clamp card’s wording', () => {
     expect(line).toContain('This blank is not on the shelf — nothing to take from it.');
     expect(line).not.toContain('no blank needs to be held');
     expect(line).not.toContain('supplying this stock yourself');
+  });
+
+  it('#1123-57 — the shelf fact is Know: folded, not a boxed line with no action', () => {
+    const job = defaultEngraveJob();
+    const pkg = frozen(job, [P1]);
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
+    // The blank was not a shelf pick, so there is nothing to take and nothing to do: the fact is
+    // information, and it reads the way the Know band reads — a closed fold, opened on demand.
+    const shelf = screen.getByTestId('engrave-package-reservation');
+    expect(shelf.tagName).toBe('DETAILS');
+    expect((shelf as HTMLDetailsElement).open).toBe(false);
+    expect(shelf.getAttribute('data-band')).toBe('know');
+    expect(shelf.textContent).toContain('This blank is not on the shelf — nothing to take from it.');
   });
 
   it('item 16 — the "I turned the stock…" expander waits until something has been cut', () => {

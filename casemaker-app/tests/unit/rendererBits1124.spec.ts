@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   BROWSER_32_BIT_SENTENCE,
   BROWSER_MEMORY_SHORT_WARNING,
+  clearRendererWarning,
   PLANNER_PEAK_FLOOR_MB,
   PROBE_CHUNK_MB,
   getRendererVerdict,
@@ -95,6 +96,15 @@ describe('#1124 — a failed startup probe is retried, and the press is the verd
     expect(landed.refusal).toBeNull();
     expect(landed.state).toBe('checking');
     expect(landed.warning).toBe(BROWSER_MEMORY_SHORT_WARNING);
+  });
+
+  it('#1123-52 — the press warning is cleared for the next screen, and only the warning', async () => {
+    startRendererCheck(navWithBitness('64'), failed, { wait: noWait });
+    await nextVerdict();
+    await recheckRendererForGenerate(navWithBitness('64'), failed);
+    expect(getRendererVerdict().warning).toBe(BROWSER_MEMORY_SHORT_WARNING);
+    clearRendererWarning();
+    expect(getRendererVerdict()).toEqual({ state: 'checking', refusal: null, warning: null });
   });
 
   it('the press re-probe that passes clears the page to ok', async () => {

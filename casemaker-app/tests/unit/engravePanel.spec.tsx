@@ -24,6 +24,8 @@ import {
   useEngraveRegistrationStore,
 } from '@/store/engraveRegistrationStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { recheckRendererForGenerate, resetRendererCheck } from '@/engine/cnc/rendererBits';
+
 import {
   setEngravePreviewClientLoader,
   useEngravePreviewStore,
@@ -6017,5 +6019,21 @@ describe('#1046 EngravePanel — the standard-balls press', () => {
     render(<EngravePanel />);
     openDrawer();
     expect(screen.queryByTestId('engrave-goal-measure-balls')).toBeNull();
+  });
+});
+
+// #1123 item 52 — THE MEMORY WARNING BELONGS TO ITS RUN. The press probe's line stays beside
+// Generate while the run is in flight; when the run settles it comes down (the run's Log keeps it,
+// recorded as its first line).
+describe('#1123-52 the memory warning', () => {
+  afterEach(() => resetRendererCheck());
+
+  it('is shown while its run is in flight, and comes down when the run settles', async () => {
+    await recheckRendererForGenerate(undefined, () => ({ ok: false, reservedMb: 0, failedAtMb: 0 }));
+    useEngraveRunStore.setState({ phase: 'generating' });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-generate-memory-warning').textContent).toContain('450 MiB');
+    act(() => useEngraveRunStore.setState({ phase: 'ready' }));
+    expect(screen.queryByTestId('engrave-generate-memory-warning')).toBeNull();
   });
 });

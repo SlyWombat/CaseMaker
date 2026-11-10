@@ -60,6 +60,7 @@ import type {
   EngraveJob,
   JobStockFinish,
   JobStockForm,
+  JobWorkholding,
   StockMaterial,
   TapeHold,
 } from '@/types/engraveJob';
@@ -954,6 +955,36 @@ export function bedHoldLine(
     );
   }
   return null;
+}
+
+/**
+ * #1123-55 — WHAT THE CUT STEP'S CLEARANCE CHECK IS AGAINST, in the job's own words.
+ *
+ * The statement in Cut step 1 asked every operator to check "clearance to the vise", including a
+ * bracket job whose blank was clamped in the bracket — a vise that was not on the machine. The
+ * words are read from the job's mount record, the same record {@link bedHoldLine} above is built
+ * from, so the Hold line and the statement name one hold: the bracket's arms and the clamps that
+ * are actually on the blank, the bed a taped blank sits on, the chuck (and the tailstock) of a
+ * rotary job.
+ */
+export function clearanceHoldWords(held: JobWorkholding): string {
+  switch (held.kind) {
+    case 'vise':
+      return 'the vise';
+    case 'tape':
+      return 'the bed';
+    case 'rotary-chuck':
+      return held.rotary.tailstock ? 'the chuck and the tailstock' : 'the chuck';
+    case 'bracket': {
+      const count = held.bracket.clamps.length;
+      if (count === 0) return "the bracket's arms";
+      return count === 1
+        ? "the bracket's arms and the clamp"
+        : `the bracket's arms and its ${count} clamps`;
+    }
+    default:
+      return 'the fixture';
+  }
 }
 
 /** The thinnest house board a through cut needs on this surface, mm; null when the house has none. */

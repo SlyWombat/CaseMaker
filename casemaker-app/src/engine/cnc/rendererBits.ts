@@ -281,6 +281,17 @@ export async function recheckRendererForGenerate(
 }
 
 /**
+ * #1123 item 52 — THE WARNING BELONGS TO ITS RUN. The press probe publishes it beside Generate;
+ * the run recorded it in its Log at the start, so once that run ends the line must not stay on the
+ * panel. Only the warning is cleared: a refusal (a 32-bit browser) is a fact about the page and
+ * stands.
+ */
+export function clearRendererWarning(): void {
+  if (verdict.warning === null) return;
+  publish({ ...verdict, warning: null });
+}
+
+/**
  * Whether the STARTUP check ran and BOTH its probes failed. The press re-probes only then —
  * 'checking' also covers a page that never ran the check (a test harness, an embedded panel),
  * and that is not a failure to act on.
