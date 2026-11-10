@@ -393,6 +393,15 @@ function recordProgramOutcome(context: RunContext | null, outcome: RunOutcome): 
 
 export interface RunEntry {
   running: boolean;
+  /**
+   * #1153 — THE RUN'S OWN IDENTITY. A run's asynchronous tail (its outcome and its end-of-run write)
+   * must write only onto the entry it belongs to: `prepare` issues a fresh id, and a late write from
+   * a run whose entry has since been replaced is DROPPED — never merged into the run now on the
+   * machine. The bench shape is Stop, then Try again quickly: the stopped run's end-of-run write is
+   * still in flight (it runs after the console is closed) when the retry is prepared under the same
+   * machine key, and without this it landed on the retry's entry.
+   */
+  runId: number;
   filename: string;
   /** The hash of the program that was uploaded — the once-per-program confirmation's key (Q17). */
   programHash: string;
@@ -458,6 +467,9 @@ export function machineKey(target: { host: string; port: number }): string {
 /** The Stop/Pause flags a watch reads at its boundaries — outside zustand, so reading never re-renders. */
 const flags = new Map<string, { stop: boolean; pauseAsk: PauseAction | null }>();
 
+/** The next run's identity, issued by `prepare` (#1153). Never reused within a session. */
+let runSeq = 0;
+
 export const useMachineRunStore = create<MachineRunState>((set, get) => {
   const patch = (machine: string, p: Partial<RunEntry>) =>
     set((s) => {
@@ -480,6 +492,7 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
         runs: {
           ...s.runs,
           [machine]: {
+            runId: ++runSeq,
             running: false,
             filename,
             programHash,
@@ -501,6 +514,17 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
       const machine = machineKey(target);
       const prepared = get().runs[machine];
       if (!prepared || prepared.running) return false;
+      const runId = prepared.runId;
+      /**
+       * #1153 — A WRITE FROM THIS RUN. Dropped the moment the entry belongs to another run (a retry
+       * prepared while this run's tail is in flight) or to nothing (a reset). The run's own outcome
+       * and end-of-run write go through here; nothing a dead run learns may surface under the run
+       * now on the machine.
+       */
+      const patchRun = (p: Partial<RunEntry>) => {
+        if (get().runs[machine]?.runId !== runId) return;
+        patch(machine, p);
+      };
       const f: { stop: boolean; pauseAsk: PauseAction | null } = { stop: false, pauseAsk: null };
       flags.set(machine, f);
       patch(machine, { running: true, progress: null, lines: [], outcome: null, stopAsked: false, paused: false, toolWaiting: null, end: null });
@@ -512,8 +536,10 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
         prepared.context?.blow === true &&
         (targetMachineId2 === null || MACHINES[targetMachineId2]?.capabilities.blow === true);
       void (async () => {
+        /** This run's outcome, whether or not the entry still belongs to it (#1153). */
+        let outcome: RunOutcome | null = null;
         try {
-          const outcome = await runProgram(prepared.filename, {
+          outcome = await runProgram(prepared.filename, {
             session,
             settings,
             // #419 Q-E — a file that carries its own words owns the vacuum; a middle file of a
@@ -542,14 +568,14 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
             },
             onEvent: (e) => {
               const entry = get().runs[machine];
-              if (!entry) return;
-              if (e.kind === 'poll') patch(machine, { progress: e.progress });
-              else if (e.kind === 'note') patch(machine, { lines: [...entry.lines, `(${e.text})`] });
+              if (entry === undefined || entry.runId !== runId) return;
+              if (e.kind === 'poll') patchRun({ progress: e.progress });
+              else if (e.kind === 'note') patchRun({ lines: [...entry.lines, `(${e.text})`] });
               else if (e.kind === 'sent' && e.line !== '?') {
-                patch(machine, { lines: [...entry.lines, `> ${e.line}  ${e.reply.trim().split('\n')[0] ?? ''}`] });
-              } else if (e.kind === 'missed') patch(machine, { lines: [...entry.lines, `(no status reply ${e.misses})`] });
+                patchRun({ lines: [...entry.lines, `> ${e.line}  ${e.reply.trim().split('\n')[0] ?? ''}`] });
+              } else if (e.kind === 'missed') patchRun({ lines: [...entry.lines, `(no status reply ${e.misses})`] });
               else if (e.kind === 'paused') {
-                patch(machine, {
+                patchRun({
                   paused: true,
                   lines: [
                     ...entry.lines,
@@ -559,7 +585,7 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
                   ],
                 });
               } else if (e.kind === 'tool-waiting') {
-                patch(machine, {
+                patchRun({
                   toolWaiting: { awaited: e.awaited },
                   lines: [
                     ...entry.lines,
@@ -569,9 +595,9 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
                   ],
                 });
               } else if (e.kind === 'tool-continued') {
-                patch(machine, { toolWaiting: null });
+                patchRun({ toolWaiting: null });
               } else if (e.kind === 'resumed') {
-                patch(machine, {
+                patchRun({
                   paused: false,
                   lines: [
                     ...entry.lines,
@@ -583,9 +609,10 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
               }
             },
           });
-          patch(machine, { outcome });
+          patchRun({ outcome });
         } catch (e) {
-          patch(machine, { outcome: { kind: 'refused', reason: e instanceof Error ? e.message : String(e) } });
+          outcome = { kind: 'refused', reason: e instanceof Error ? e.message : String(e) };
+          patchRun({ outcome });
         } finally {
           // The run is over BEFORE the end-of-run saves: the console is closed and the panel stops
           // reading "Running…" while the shelf and the inventory are written (#414 review).
@@ -593,10 +620,11 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
           // word is the suspended RUN's, and nothing is suspended once the run is over (the
           // machine's own state, Idle, is what it reads then).
           await session.close();
-          patch(machine, { running: false, paused: false });
+          patchRun({ running: false, paused: false });
         }
         // Once per run: this runs once per `start`, and `end` is cleared only by the next one.
-        const outcome = get().runs[machine]?.outcome ?? null;
+        // #1153 — the outcome is the RUN's, not whatever entry exists now; the shelf and inventory
+        // writes below are what the machine did and stand even if a retry has been prepared.
         if (outcome === null) return;
         // #425 §6 — the document's resume fact, written once per run end, before the shelf writes.
         recordProgramOutcome(prepared.context ?? null, outcome);
@@ -606,18 +634,23 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
         } catch (e) {
           end = { kind: 'nothing', lines: [`The end of the run could not be worked out: ${e instanceof Error ? e.message : String(e)}`], offcut: null, stockQuestion: null };
         }
+        // #1153 — THE END-OF-RUN WRITE IS THE RUN'S TOO. If the entry now belongs to another run (a
+        // retry prepared under the same machine key while this end was being worked out), drop it:
+        // the retry's panel must not show this run's offcut or stock question.
+        const still = get().runs[machine];
+        if (still === undefined || still.runId !== runId) return;
         const ctx = prepared.context;
-        const open = get().runs[machine]?.pendingStock ?? null;
+        const open = still.pendingStock ?? null;
         if (end.stockQuestion === 'ask' && ctx?.stockEntryId && ctx.jobId) {
           if (open === null || (open.entryId === ctx.stockEntryId && open.jobId === ctx.jobId)) {
-            patch(machine, { end, pendingStock: { entryId: ctx.stockEntryId, jobId: ctx.jobId } });
+            patchRun({ end, pendingStock: { entryId: ctx.stockEntryId, jobId: ctx.jobId } });
           } else {
             // One question at a time: the older one stays open, and this run says it is waiting behind it.
-            patch(machine, {
+            patchRun({
               end: { ...end, lines: [...end.lines, `An earlier stopped run's question (was ${open.entryId} used by ${open.jobId}?) is still open: answer it first, then this run's stock (${ctx.stockEntryId}) stays reserved until you mark it.`] },
             });
           }
-        } else patch(machine, { end });
+        } else patchRun({ end });
       })();
       return true;
     },

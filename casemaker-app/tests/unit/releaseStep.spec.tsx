@@ -15,7 +15,7 @@ import {
   type HouseClient,
 } from '@/platform/houseClient';
 import { MachineRecordSchema, type MachineRecord } from '@/platform/locationClient';
-import { describeRun, programHash } from '@/platform/machineRun';
+import { describeRun, programHash, runSettings } from '@/platform/machineRun';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { resetInventoryConditions, setInventoryConditions, type ToolCopy } from '@/engine/cnc/toolCondition';
@@ -1098,6 +1098,58 @@ describe('#469 the release step', () => {
     answer({ ok: true, text: '' });
     await keeping;
     expect(useMachineRunStore.getState().runs[key]).toBeUndefined();
+  });
+
+  // #1153 — THE SAME MACHINE KEY IS NOT THE SAME RUN. The bench shape is Stop, then Try again
+  // quickly: the stopped run's end-of-run write is still in flight (it runs after the console is
+  // closed) when the retry is prepared under the same key. Without a run identity that late write
+  // landed on the RETRY's entry — the mechanism behind the flaky #1123-41 alarm test. The tail must
+  // be dropped; the retry keeps its own (still empty) end.
+  it('a previous run’s late end cannot touch the next run’s entry', async () => {
+    const key = machineKey(TARGET);
+    const calls: string[] = [];
+    let openGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+    setRunEndIO({
+      ...runEndIO([]),
+      // A known machine, so the finished-program record is actually written (and can be held).
+      machineIdFor: () => 'm-1',
+      // Run A's end-of-run write is held mid-flight here. (B's context has no stock, so its end
+      // never calls this; the marker below shows A's end reached its last awaited step.)
+      recordFinishedProgram: async () => {
+        await gate;
+        return { ok: true, added: true, text: '' };
+      },
+      consume: async () => {
+        calls.push('A:consume');
+        return { ok: true, text: '' };
+      },
+    });
+
+    // A plays and finishes; its outcome is set, its end-of-run write is still held.
+    const ctxA: RunContext = { nc: 'G0 X1 Y1\nM02\n', programHash: 'hash-A', jobId: 'job-A', stockEntryId: 'stock-A' };
+    expect(useMachineRunStore.getState().prepare(TARGET, 'A.nc', 'hash-A', ctxA)).toBe(true);
+    expect(useMachineRunStore.getState().start(TARGET, runSettings(null))).toBe(true);
+    await waitFor(() => expect(useMachineRunStore.getState().runs[key]?.running).toBe(false), { timeout: 15000 });
+    expect(useMachineRunStore.getState().runs[key]?.outcome?.kind).toBe('finished');
+    expect(useMachineRunStore.getState().runs[key]?.end).toBeNull();
+
+    // The retry is prepared under the same key while A's write is held; its program keeps running
+    // for the length of this test, so nothing of B's own can fill B's end.
+    setMachineConsoleLoader(async () => controller(200));
+    const ctxB: RunContext = { nc: 'G0 X1 Y1\nM02\n', programHash: 'hash-B' };
+    expect(useMachineRunStore.getState().prepare(TARGET, 'B.nc', 'hash-B', ctxB)).toBe(true);
+    expect(useMachineRunStore.getState().start(TARGET, runSettings(null))).toBe(true);
+
+    // A's write lands now, after B was prepared. It belongs to A: B's entry must be untouched.
+    openGate();
+    await waitFor(() => expect(calls).toContain('A:consume'), { timeout: 10000 });
+    const b = useMachineRunStore.getState().runs[key]!;
+    expect(b.filename).toBe('B.nc');
+    expect(b.end).toBeNull();
+    expect(b.outcome).toBeNull();
   });
 });
 
