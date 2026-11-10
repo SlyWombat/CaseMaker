@@ -62,6 +62,18 @@ export type Evaluate = (plan: CandidatePlan, level: 'coarse' | 'full') => PlanEv
 /** The evaluator as the loops below consume it: always a promise, whichever form the caller bound. */
 type AwaitableEvaluate = (plan: CandidatePlan, level: 'coarse' | 'full') => Promise<PlanEvaluation>;
 
+/**
+ * #1137 — THE BATCH EVALUATOR: the caller's budgeted pool evaluates the capped finalists in
+ * parallel (CLI worker threads; a pool of workers in the browser). Results are POSITIONAL —
+ * `results[i]` is the evaluation of `plans[i]` — and may complete in any order. The search folds
+ * them into the same verdict map the serial path uses, and the choice is the same because
+ * `byObjective` is a total order and no evaluation reads another's verdict.
+ *
+ * The contract is exact: one result per plan, in plan order. A short or long array is a pool bug
+ * and throws rather than silently dropping a finalist.
+ */
+export type EvaluateMany = (plans: readonly CandidatePlan[], level: 'full') => Promise<readonly PlanEvaluation[]>;
+
 /** Where a plan's cutters come from. `inv:` keys are the shop's own; catalogue entries are bought. */
 export function sourceOf(entry: ToolLibraryEntry): 'owned' | 'catalogue' {
   return entry.key.startsWith('cat:') ? 'catalogue' : 'owned';
@@ -121,6 +133,13 @@ export interface SmartPickOptions {
    * and the flight recorder has a crumb even if the tab dies in the next evaluation.
    */
   onProgress?: (p: { level: 'coarse' | 'full'; done: number; total: number }) => void;
+  /**
+   * #1137 — evaluate the capped finalists as ONE batch, through the caller's budgeted pool.
+   * Absent: the serial loop, unchanged (the caller's memory budget said one at a time, or there is
+   * no pool). The batch is never larger than `fullFinalists`; the promotion loop below stays
+   * serial because it is conditional on results. See {@link EvaluateMany}.
+   */
+  evaluateMany?: EvaluateMany;
   /**
    * #858 — the shop's `toolChange.seconds`, resolved by the caller: what each tool change adds to a
    * plan's cost. Absent: the labelled fallback {@link TOOL_CHANGE_SECONDS}.
@@ -834,7 +853,29 @@ export async function smartPick(
     );
   }
   fullTotal = plannedFinalists.length;
-  for (const finalist of plannedFinalists) await full(finalist.plan);
+  // #1137 — THE CAPPED FINALISTS RUN AS ONE BATCH when the caller's pool allows it (the pool's
+  // size IS the caller's memory budget; with no pool, or a budget of one, the serial loop below is
+  // unchanged). Each result is folded exactly as `full()` folds it; the verdict map is keyed by
+  // plan, so completion order cannot move the choice — `byObjective` is a total order.
+  const pendingFinalists = plannedFinalists.filter((s) => !fullDone.has(planKey(s.plan)));
+  if (opts.evaluateMany === undefined || pendingFinalists.length <= 1) {
+    for (const finalist of plannedFinalists) await full(finalist.plan);
+  } else {
+    // The same "the next evaluation starts here" crumb the serial path leaves, once per finalist,
+    // so a tab that dies mid-batch shows which plans were in flight.
+    for (const finalist of pendingFinalists) {
+      memTrace('pick:candidate', { index: ++pickRows, level: 'full', plan: planKey(finalist.plan) });
+      opts.onProgress?.({ level: 'full', done: ++fullDoneCount, total: fullTotal });
+    }
+    const results = await opts.evaluateMany(pendingFinalists.map((s) => s.plan), 'full');
+    if (results.length !== pendingFinalists.length) {
+      throw new Error(`the batch evaluator answered ${results.length} of ${pendingFinalists.length} finalists`);
+    }
+    pendingFinalists.forEach((finalist, i) => {
+      verdicts.set(planKey(finalist.plan), toScored(finalist.plan, results[i]!, exactWhenEmpty));
+      fullDone.add(planKey(finalist.plan));
+    });
+  }
   // POSTING FIRST, AFTER THE CAP (the Manager's review of e03156484) — the promotion loop stays,
   // but only in its own rare case: when NOTHING among the capped finalists posts (the rule's plan
   // included), the search keeps promoting candidates in the objective's order until one posts, so

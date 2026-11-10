@@ -32,6 +32,7 @@ import {
   smartPick,
   type CandidatePlan,
   type Evaluate,
+  type EvaluateMany,
   type SmartPick,
   type SmartPickOptions,
   type SmartPickRefusal,
@@ -104,11 +105,16 @@ export function evaluatePickPlan(
  * The engine's search for this job, with the context's conditions/table and the shop's own
  * `toolChangeSeconds` (the app's picker and the CLI read it from the same location setting).
  * `evaluate` is for the worker's cancellation guard; the CLI passes nothing.
+ *
+ * #1137 — `evaluateMany` is the caller's pool (the CLI's worker threads today; house-side
+ * generation takes the same seam). Absent (or a pool of one) the finalists run serially, exactly
+ * as before.
  */
 export function pickForEngrave(
   inputs: EngravePickInputs,
   opts: SmartPickOptions = {},
   evaluate?: Evaluate,
+  evaluateMany?: EvaluateMany,
 ): Promise<SmartPick | SmartPickRefusal> {
   const ctx = pickContext(inputs);
   return smartPick(
@@ -122,6 +128,7 @@ export function pickForEngrave(
         : { toolChangeSeconds: inputs.shop.toolChangeSeconds }),
       // #940 — the same floors the candidate filter reads, from the inputs, never a second path.
       ...(inputs.floors === undefined || inputs.floors === null ? {} : { floors: inputs.floors }),
+      ...(evaluateMany === undefined ? {} : { evaluateMany }),
       ...opts,
     },
     ctx.conditions,
