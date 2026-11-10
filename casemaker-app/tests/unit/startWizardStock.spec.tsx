@@ -301,9 +301,8 @@ describe('the material-first start (#418)', () => {
     fireEvent.change(screen.getByTestId('start-wizard-stock-finish'), { target: { value: 'rough' } });
 
     // One line on the step, not a paragraph (#683, A8): plastic is cut as it is.
-    expect(screen.getByTestId('start-wizard-stock-finish-hint').textContent).toContain(
-      'plastic is cut as it is; wood and metal are faced first',
-    );
+    // #1105 — the plastic family's own hint: cut as it is, no facing.
+    expect(screen.getByTestId('start-wizard-stock-finish-hint').textContent).toContain('is cut as it is; no facing');
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
@@ -495,9 +494,11 @@ describe('the material-first start (#418)', () => {
     const select = screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement;
     expect(select.value).toBe('hardwood');
     const groups = Array.from(select.querySelectorAll('optgroup'));
-    // #1066 — the tooling board is its own family: not a plastic, a wood or a metal.
-    expect(groups.map((g) => g.label)).toEqual(['Plastics', 'Woods', 'Metals', 'Circuit board', 'Tooling board']);
-    const plastics = Array.from(groups[0]!.querySelectorAll('option')).map((o) => o.value);
+    // #1105 — the vocabulary in the order a woodworker reads it: Woods first, then the cast
+    // boards (#1066's tooling board), the plastics, the metals and the copper-clad board.
+    expect(groups.map((g) => g.label)).toEqual(['Woods', 'Boards & foams', 'Plastics', 'Metals', 'Circuit board']);
+    const plasticsGroup = groups.find((g) => g.label === 'Plastics')!;
+    const plastics = Array.from(plasticsGroup.querySelectorAll('option')).map((o) => o.value);
     expect(plastics[plastics.length - 1]).toBe('plastic'); // "plastic (unspecified)" is last
     expect(plastics).not.toContain('softwood');
     // #875 — the hint that restated the optgroups is gone: what the select shows is the answer.

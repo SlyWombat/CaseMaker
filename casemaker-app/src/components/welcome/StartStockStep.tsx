@@ -5,15 +5,7 @@ import { isShippedDemoLabelSet } from '@/engine/cnc/engrave/blankLabelSeed';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { materialOptionsFor } from '@/engine/cnc/engrave/setupFlow';
 import type { Mill } from '@/engine/cnc/machine';
-import {
-  MATERIAL_LABELS,
-  isCompositeMaterial,
-  isMetalMaterial,
-  isPlasticMaterial,
-  isPrintedBlankMaterial,
-  isToolingBoardMaterial,
-  isWoodMaterial,
-} from '@/engine/cnc/materials';
+import { MATERIAL_LABELS, isPrintedBlankMaterial, materialFamilyOf } from '@/engine/cnc/materials';
 import {
   PCB_COPPER_MM,
   ROD_VISE_MAX_LENGTH_MM,
@@ -151,7 +143,22 @@ const FINISH_OPTIONS: readonly { value: JobStockFinish; label: string }[] = [
   { value: 'printed', label: 'printed' },
   { value: 'unknown', label: 'not known' },
 ];
-const FINISH_HINT = 'plastic is cut as it is; wood and metal are faced first';
+/**
+ * #1105 — THE FINISH HINT IS THE MATERIAL'S OWN. The old one said "plastic is cut as it is; wood
+ * and metal are faced first" under a hardwood seed that was already `finished`, so it contradicted
+ * the default. The family decides the sentence, and a board (#1066) is neither a wood nor a
+ * plastic.
+ */
+function finishHintFor(material: StockMaterial): string {
+  const family = materialFamilyOf(material);
+  if (family === 'wood') {
+    return `${MATERIAL_LABELS[material]}: faced first unless you say it is planed — facing takes the top skim before the design.`;
+  }
+  if (family === 'metal') {
+    return `${MATERIAL_LABELS[material]}: faced first unless the face is already machined — facing takes the top skim before the design.`;
+  }
+  return `${MATERIAL_LABELS[material]} is cut as it is; no facing.`;
+}
 
 interface FormDef {
   id: JobStockForm;
@@ -299,19 +306,29 @@ interface MaterialGroup {
  * it is the bought laminate's material, the one word that says nothing about what it is.
  */
 function groupMaterials(options: readonly { value: StockMaterial; label: string }[]): MaterialGroup[] {
-  const plastics = options.filter((o) => isPlasticMaterial(o.value) && o.value !== 'plastic');
-  const unspecified = options.find((o) => o.value === 'plastic');
-  if (unspecified !== undefined) plastics.push(unspecified);
-  const groups: MaterialGroup[] = [
-    { label: 'Plastics', options: plastics },
-    { label: 'Woods', options: options.filter((o) => isWoodMaterial(o.value)) },
-    { label: 'Metals', options: options.filter((o) => isMetalMaterial(o.value)) },
-    // #743 P-1 — the copper-clad board, which is none of the three above.
-    { label: 'Circuit board', options: options.filter((o) => isCompositeMaterial(o.value)) },
-    // #1066 — the cast resin tooling board, its own family (no antistatic, no facing).
-    { label: 'Tooling board', options: options.filter((o) => isToolingBoardMaterial(o.value)) },
+  // #1105 — THE VOCABULARY IN THE ORDER A WOODWORKER READS IT: Woods first, then the cast boards
+  // and foams (#1066's tooling board), then the plastics, metals and the copper-clad board. The
+  // family is the material's own record (`materialFamilyOf`), not a set of predicates here.
+  const order = [
+    { family: 'wood' as const, label: 'Woods' },
+    { family: 'board' as const, label: 'Boards & foams' },
+    { family: 'plastic' as const, label: 'Plastics' },
+    { family: 'metal' as const, label: 'Metals' },
+    { family: 'pcb' as const, label: 'Circuit board' },
   ];
-  return groups.filter((g) => g.options.length > 0);
+  return order
+    .map(({ family, label }) => {
+      const inFamily = options.filter((o) => materialFamilyOf(o.value) === family);
+      if (family !== 'plastic') return { label, options: inFamily };
+      // "plastic (unspecified)" goes LAST in Plastics — it is the bought laminate's material, the
+      // one word that says nothing about what it is.
+      const unspecified = inFamily.find((o) => o.value === 'plastic');
+      return {
+        label,
+        options: [...inFamily.filter((o) => o.value !== 'plastic'), ...(unspecified === undefined ? [] : [unspecified])],
+      };
+    })
+    .filter((g) => g.options.length > 0);
 }
 
 /** The picture under each form: the mockup's own seven drawings, one line each. */
@@ -408,6 +425,10 @@ export function StartStockStep({
   // on the screen so the number is read rather than hidden in this file.
   const [copper, setCopper] = useState(String(PCB_COPPER_MM));
   const [copperTouched, setCopperTouched] = useState(false);
+  // #1105 — mm/in. The JOB stays in mm (the rule the issue states); inches are a typing unit and
+  // the sentence under the fields states both numbers once a value is entered that way.
+  const [unit, setUnit] = useState<'mm' | 'in'>('mm');
+  const [lastInch, setLastInch] = useState<string | null>(null);
   const [shelfId, setShelfId] = useState<string | null>(null);
   const [save, setSave] = useState(false);
   const [fileRead, setFileRead] = useState<{ read: StockFileRead; file: File } | null>(null);
@@ -423,6 +444,8 @@ export function StartStockStep({
 
   const shelf = useMemo(() => shelfFor(items, material), [items, material]);
   const shelfOk = shelfStatus === 'present';
+  // #1105 — the cards show EVERY shelf row; the ones in another material are greyed, not hidden.
+  const shelfOther = useMemo(() => items.filter((i) => i.material !== material), [items, material]);
   // A pick that is already on the shelf is not "kept" again; a loaded file is not typed either.
   const canKeep = shelfOk && shelfId === null && fileRead === null;
 
@@ -539,6 +562,30 @@ export function StartStockStep({
     setFileRead(null);
   }
 
+  /** #1105 — the field as the chosen unit shows it: mm as stored, inches to 3 decimals. */
+  function shownDim(key: StockSizeKey): string {
+    const raw = dims[key];
+    if (unit === 'mm' || raw.trim() === '') return raw;
+    const mm = Number(raw);
+    return Number.isFinite(mm) ? String(Number((mm / 25.4).toFixed(3))) : raw;
+  }
+
+  /** #1105 — typing in inches stores mm (3 decimals) and states both numbers; mm is unchanged. */
+  function editShownDim(key: StockSizeKey, value: string): void {
+    if (unit === 'mm' || value.trim() === '') {
+      editDim(key, value);
+      return;
+    }
+    const inches = Number(value);
+    if (!Number.isFinite(inches)) {
+      editDim(key, value);
+      return;
+    }
+    const mm = Math.round(inches * 25.4 * 1000) / 1000;
+    setLastInch(`${value} in = ${mm} mm`);
+    editDim(key, String(mm));
+  }
+
   /** A shelf entry fills the form, its numbers and its finish; the fields stay editable. */
   function pickShelf(item: StockItem): void {
     setShelfId(item.id);
@@ -546,6 +593,19 @@ export function StartStockStep({
     setForm(item.form as JobStockForm);
     setDims(dimsFromItem(item));
     setFinish(item.finish);
+    setSave(false);
+  }
+
+  /** #1105 — the step-2 proposal is a card like a shelf row: picking it returns to the app's own
+   *  numbers after an edit, so "From your design" is a choice and not only a starting point. */
+  function pickProposal(): void {
+    if (seed === undefined) return;
+    setMaterial(seed.material);
+    setForm(seed.form);
+    setDims(dimsFromSeed(seed));
+    setFinish(seed.finish);
+    setShelfId(null);
+    setFileRead(null);
     setSave(false);
   }
 
@@ -590,6 +650,88 @@ export function StartStockStep({
 
   return (
     <div data-testid="start-wizard-step-stock" style={{ marginTop: 8 }}>
+      {/* #1105 — PICK A BLANK FIRST. The step-2 proposal is a card; the shelf's rows are cards
+          across ALL materials, the ones that do not match the selected material greyed rather than
+          hidden (a PLA user still learns the shelf holds hardwood). */}
+      {(seed?.computed === true || (shelfOk && items.length > 0)) && (
+        <div data-testid="start-wizard-blank-cards" style={{ marginTop: 4, marginBottom: 8 }}>
+          <p style={{ ...MUTED, margin: '0 0 3px' }}>Pick a blank</p>
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 4 }}>
+            {seed?.computed === true && (
+              <li>
+                <button
+                  type="button"
+                  data-testid="start-wizard-blank-card-design"
+                  aria-pressed={shelfId === null && fileRead === null && seededNumbers}
+                  onClick={pickProposal}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: 4,
+                    border: shelfId === null && fileRead === null && seededNumbers ? '1px solid #5a8abf' : undefined,
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: '#cfe' }}>
+                    <strong>From your design</strong> — {formLabel(seed.form).toLowerCase()}{' '}
+                    {fmt(seed.length)} × {fmt(seed.width)} × {fmt(seed.thickness)} mm{' '}
+                    {MATERIAL_LABELS[seed.material]}
+                  </div>
+                  {seed.sentence !== undefined && <div style={MUTED}>{seed.sentence}</div>}
+                </button>
+              </li>
+            )}
+            {shelfOk &&
+              items.map((item) => {
+                const matches = item.material === material;
+                const why = matches
+                  ? shelfPickProblem(item, machine)
+                  : `a ${MATERIAL_LABELS[item.material]} blank — choose ${MATERIAL_LABELS[item.material]} above to use it`;
+                const picked = shelfId === item.id;
+                const held = item.quantity - item.reservations.reduce((a, r) => a + r.quantity, 0);
+                return (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      data-testid={`start-wizard-shelf-item-${item.id}`}
+                      data-state={matches ? (why === null ? 'ok' : 'refused') : 'other'}
+                      aria-pressed={picked}
+                      disabled={why !== null}
+                      onClick={() => pickShelf(item)}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: 4,
+                        border: picked ? '1px solid #5a8abf' : undefined,
+                        opacity: why === null ? 1 : 0.6,
+                      }}
+                    >
+                      <div style={{ fontSize: 12, color: '#cfe' }}>
+                        {`${MATERIAL_LABELS[item.material]} ${
+                          isJobForm(item.form) ? formLabel(item.form).toLowerCase() : item.form
+                        } `}
+                        {sizeText(item)}
+                        {item.quantity > 0 &&
+                          ` · ${item.quantity} on the shelf${held < item.quantity ? ` (${held} free)` : ''}`}
+                        {item.capMm != null && ` · cap ${text(item.capMm)} (${item.capSource})`}
+                      </div>
+                      {item.notes && <div style={MUTED}>{item.notes}</div>}
+                      {why !== null && (
+                        <div style={REFUSED} data-testid={`start-wizard-shelf-item-${item.id}-reason`}>
+                          {why}
+                        </div>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+          </ul>
+          {shelfOk && shelfOther.length > 0 && (
+            <p style={MUTED} data-testid="start-wizard-shelf-other">
+              The shelf also holds {shelfOther.length} blank{shelfOther.length === 1 ? '' : 's'} in other materials.
+            </p>
+          )}
+        </div>
+      )}
       <label style={{ ...MUTED, display: 'block' }}>
         <span>Material</span>
         <select
@@ -640,6 +782,29 @@ export function StartStockStep({
       </p>
 
       <p style={{ ...MUTED, margin: '8px 0 0' }}>Size</p>
+      {/* #1105 — mm / in beside Size: the job stays mm, inches are a typing unit. */}
+      <span
+        data-testid="start-wizard-size-unit"
+        role="group"
+        aria-label="Size units"
+        style={{ ...MUTED, display: 'inline-flex', alignItems: 'baseline', gap: 4, margin: '2px 0 0' }}
+      >
+        {/* The section label above already says Size (#1105 review): the toggle is only the unit. */}
+        <button
+          type="button"
+          data-testid="start-wizard-size-mm"
+          aria-pressed={unit === 'mm'}
+          onClick={() => {
+            setUnit('mm');
+            setLastInch(null);
+          }}
+        >
+          mm
+        </button>
+        <button type="button" data-testid="start-wizard-size-in" aria-pressed={unit === 'in'} onClick={() => setUnit('in')}>
+          in
+        </button>
+      </span>
       {/* #1099 — the numbers get the picture beside them: the part's footprint on this blank, its
           margins, and the warning when a typed number no longer holds it. */}
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -663,10 +828,10 @@ export function StartStockStep({
                     style={SIZE_INPUT}
                     data-testid={`start-wizard-make-${key}`}
                     aria-label={`Stock ${SIZE_LABELS[key]}`}
-                    value={dims[key]}
-                    onChange={(e) => editDim(key, e.target.value)}
+                    value={shownDim(key)}
+                    onChange={(e) => editShownDim(key, e.target.value)}
                   />
-                  mm
+                  {unit}
                 </span>
               </label>
             ))}
@@ -678,6 +843,13 @@ export function StartStockStep({
           </div>
         )}
       </div>
+      </div>
+      {/* #1105 — an inch entry states both numbers: the typed inches and the stored millimetres. */}
+      {unit === 'in' && lastInch !== null && (
+        <p style={MUTED} data-testid="start-wizard-stock-size-both">
+          {lastInch}
+        </p>
+      )}
       {/* #743 P-1 — a PCB's copper: the cap every depth rule reads (D2). */}
       {material === 'pcb' && (
         <label style={{ ...MUTED, display: 'flex', gap: 4, alignItems: 'center', marginTop: 6 }}>
@@ -749,56 +921,8 @@ export function StartStockStep({
         </select>
       </div>
       <p style={MUTED} data-testid="start-wizard-stock-finish-hint">
-        {FINISH_HINT}
+        {finishHintFor(material)}
       </p>
-
-      {shelfOk && shelf.length > 0 && (
-        <div data-testid="start-wizard-shelf" style={{ marginTop: 8 }}>
-          <p style={{ ...MUTED, margin: '0 0 3px' }}>Shelf</p>
-          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 4 }}>
-            {shelf.map((item) => {
-              const why = shelfPickProblem(item, machine);
-              const picked = shelfId === item.id;
-              const held = item.quantity - item.reservations.reduce((a, r) => a + r.quantity, 0);
-              return (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    data-testid={`start-wizard-shelf-item-${item.id}`}
-                    data-state={why === null ? 'ok' : 'refused'}
-                    aria-pressed={picked}
-                    disabled={why !== null}
-                    onClick={() => pickShelf(item)}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: 4,
-                      border: picked ? '1px solid #5a8abf' : undefined,
-                      opacity: why === null ? 1 : 0.6,
-                    }}
-                  >
-                    <div style={{ fontSize: 12, color: '#cfe' }}>
-                      {`${MATERIAL_LABELS[item.material]} ${
-                        isJobForm(item.form) ? formLabel(item.form).toLowerCase() : item.form
-                      } `}
-                      {sizeText(item)}
-                      {item.quantity > 0 &&
-                        ` · ${item.quantity} on the shelf${held < item.quantity ? ` (${held} free)` : ''}`}
-                      {item.capMm != null && ` · cap ${text(item.capMm)} (${item.capSource})`}
-                    </div>
-                    {item.notes && <div style={MUTED}>{item.notes}</div>}
-                    {why !== null && (
-                      <div style={REFUSED} data-testid={`start-wizard-shelf-item-${item.id}-reason`}>
-                        {why}
-                      </div>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
 
       {canKeep && (
         <label style={{ ...MUTED, display: 'flex', gap: 4, alignItems: 'center', marginTop: 4 }}>
