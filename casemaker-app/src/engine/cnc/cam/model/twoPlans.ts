@@ -21,7 +21,9 @@
  */
 
 import { enrichOwnedRestStatement, planModelCam, type PlanModelCamOptions, type ModelPlanInput, type ModelPlanOutput, type PlanOutcome } from './plan';
+import { cutterKeyOf } from './sequence';
 import { comparePlanOutcomes, type PlanTradeoff } from './tradeoff';
+import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Tool } from '@/engine/cnc/tool';
 
 export type PlanKind = 'owned' | 'ideal';
@@ -42,6 +44,27 @@ export interface TwoPlanOutput {
   ideal: ModelPlanOutput | null;
   /** The ruling's default: the owned plan, always. Stated here so no caller re-decides it. */
   defaultPlan: 'owned';
+}
+
+/**
+ * #1134 — REBIND THE PICK'S TOOL OBJECTS TO THE CUT'S OWN. The seam's post resolves a program's
+ * header key from the SHOP's own tool objects (`postModelPlan`'s `registryKeyOf` is a Map keyed by
+ * object identity: the registry key when the very object is a shop entry's tool, else
+ * `cutterKeyOf`). The pick's plan was planned from the pick's own input; its programs carry that
+ * input's tool objects. Handed through unchanged, a house tool the pick's shop knew could post its
+ * registry key where the cut's re-plan posts its raw identity — the same program under a different
+ * `;@CM|TOOL|key=` header (measured on the Set B bottom through the pick: the 4 mm ball posted
+ * `cat:…` from the reused plan and its tool id from the re-plan). Rebinding each program's tool to
+ * the CUT input's house object restores the re-plan's own resolution, header included.
+ */
+function rebindToolsToHouse(plan: ModelPlanOutput, house: readonly Tool[]): ModelPlanOutput {
+  const byIdentity = new Map<string, Tool>();
+  for (const tool of house) byIdentity.set(cutterKeyOf(tool), tool);
+  const rebind = (ir: ToolpathIR): ToolpathIR => {
+    const twin = byIdentity.get(cutterKeyOf(ir.tool));
+    return twin === undefined || twin === ir.tool ? ir : { ...ir, tool: twin };
+  };
+  return { ...plan, perSetup: plan.perSetup.map((setup) => ({ ...setup, programs: setup.programs.map(rebind) })) };
 }
 
 /** #1134 — the handoffs `planTwoOutcomes` accepts. */
@@ -76,7 +99,10 @@ export async function planTwoOutcomes(
   opts: PlanModelCamOptions = {},
   two: TwoPlanOptions = {},
 ): Promise<TwoPlanOutput> {
-  const owned = two.reusedOwned ?? await planModelCam(
+  const reused = two.reusedOwned === undefined || two.reusedOwned === null
+    ? null
+    : rebindToolsToHouse(two.reusedOwned, input.cutters.house);
+  const owned = reused ?? await planModelCam(
     {
       ...input,
       cutters: { house: input.cutters.house, catalogue: [], ...(input.cutters.pinned === undefined ? {} : { pinned: input.cutters.pinned }) },

@@ -162,6 +162,8 @@ import { engravePreviewSvg } from '../engravePreviewSvg';
 import { svgToPng } from '../svgToPng';
 import { efficiencyThresholds, goalPassCoverage, KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
 import { goalCheckForProgram, type SimGoalCheck } from '../../../src/engine/cnc/engrave/goalCheckInput';
+// #1134 — the one cutter-plan write-back (measuredPick's body), shared with the evaluator.
+import { applyCutterPlan } from '../../../src/workers/sim/planEvaluate';
 // #1134 — the pick's measured owned plan, handed through to the cut.
 import type { ModelPlanOutput } from '../../../src/engine/cnc/cam/model/plan';
 import { pureGoalObject } from '../../../src/engine/cnc/engrave/jobKind';
@@ -1940,25 +1942,19 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
               `${chosen.plan.cutters.slice(1).map((c) => c.key).join(', ')} takes the rest — one program per cutter`,
           );
         }
-        job.toolKey = chosen.plan.cutters[0]!.key;
-        // #869 — a goal's flat rough is part of the plan the search MEASURED, so it is written
-        // into the goal before generation (and cleared when the plan has none): the run posts
-        // exactly the programs its verdict was scored on.
-        if (job.targetObject !== undefined && (chosen.plan.goalRoughKey !== undefined || job.targetObject.roughToolKey !== undefined)) {
-          const { roughToolKey: _stale, ...rest } = job.targetObject;
-          job.targetObject =
-            chosen.plan.goalRoughKey === undefined ? rest : { ...rest, roughToolKey: chosen.plan.goalRoughKey };
+        // #760/#762/#869/#1134 — THE ONE WRITE-BACK. `applyCutterPlan` is `measuredPick`'s body:
+        // the SAME function the evaluator applies before it generates and the Design panel uses
+        // when it writes an answer back. The CLI had its own copy, and the copies had already
+        // drifted where it matters most: a pure goal with no rough gets `roughToolKey: null`
+        // ("ball alone") from the canonical write-back, while this copy DELETED the key ("the
+        // engine chooses the rough") — so the cut re-planned a different job than the pick had
+        // measured (a curved rough the measured plan did not have). Applying the canonical
+        // write-back, in place, makes the job the cut runs the job the pick planned.
+        const applied = applyCutterPlan(job, chosen.plan);
+        for (const key of Object.keys(job) as (keyof EngraveJob)[]) {
+          if (!(key in applied)) delete job[key];
         }
-        if (chosen.plan.cutters.length > 1) {
-          const setup = jobSetups(job)[0]!;
-          job.setups = [
-            {
-              ...setup,
-              tools: chosen.plan.cutters.map((c) => c.key),
-              toolItems: Object.fromEntries(chosen.plan.cutters.map((c) => [c.key, [...c.items]])),
-            },
-          ];
-        }
+        Object.assign(job, applied);
         // #1134 — the pick's winning full plan is the cut's owned plan: hand it to the run.
         reusedOwnedPlan = chosen.evaluation.ownedPlan ?? null;
         if (reusedOwnedPlan !== null) {
