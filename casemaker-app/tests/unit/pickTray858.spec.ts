@@ -45,16 +45,19 @@ function tray(): EngraveJob {
 const CLEAR = 'inv:kz-o-flute-3-175-25';
 const FINE = 'flat-1.0';
 const FIXTURE_TOOLS = JSON.parse(readFileSync(join(DIR, 'tools.json'), 'utf8')) as ToolLibraryEntry[];
-const TOOLS: ToolLibraryEntry[] = [
-  ...FIXTURE_TOOLS.filter((t) => t.key === CLEAR),
-  TOOL_LIBRARY.find((t) => t.key === FINE)!,
-];
 /**
  * #1149 T2 — the built-in 1 mm flat counts as OWNED only when the shop holds the same cutter; this
  * fixture's inventory piece is the twin that makes it so (#454's correspondence). The cost case
  * below needs both contesting plans all-owned, so it passes this twin beside the built-in.
+ * (#1137's owned-first objective, merged into land16, is what makes the missing twin visible: on
+ * #1149's own branch the test passed without it because no plan was ranked by ownership.)
  */
 const OWNED_1MM = FIXTURE_TOOLS.find((t) => t.key === 'inv:kz-corn-1-7')!;
+const TOOLS: ToolLibraryEntry[] = [
+  ...FIXTURE_TOOLS.filter((t) => t.key === CLEAR),
+  OWNED_1MM,
+  TOOL_LIBRARY.find((t) => t.key === FINE)!,
+];
 const SEED = readDefault(
   ShopDefaultsSchema.parse((JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as { defaults: unknown }).defaults),
   'toolChange.seconds',
