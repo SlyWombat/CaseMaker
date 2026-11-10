@@ -148,10 +148,13 @@ describe('the header toolbar hides the print project’s file actions on a CNC p
     render(<Toolbar />);
     for (const id of PRINT_ONLY) expect(q(id), id).not.toBeNull();
 
-    // New is the one that needs no picker: it asks, then leaves the project behind (#311).
+    // New is the one that needs no picker: it asks in the APP's dialog (#1123-48 — never
+    // window.confirm), then leaves the project behind (#311).
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     fireEvent.click(screen.getByTestId('new-project'));
-    expect(confirm).toHaveBeenCalled();
+    expect(confirm, 'the browser confirm is not used').not.toHaveBeenCalled();
+    expect(screen.getByTestId('new-project-confirm')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('new-project-confirm-yes'));
     expect(useProjectStore.getState().welcomeMode).toBe(true);
     confirm.mockRestore();
   });

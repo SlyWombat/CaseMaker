@@ -17,10 +17,12 @@
  */
 
 import { useProjectStore } from './projectStore';
+import { markWorkedOn } from './homeSession';
 import { useViewportStore } from './viewportStore';
 
 /** Enter the CNC workspace: the Job panel, over the project the store already holds. */
 export function enterCncWorkspace(): void {
+  markWorkedOn();
   const projects = useProjectStore.getState();
   // The same project object: this flips welcomeMode off and changes no field of the project.
   if (projects.welcomeMode) projects.setProject(projects.project);
