@@ -5684,6 +5684,9 @@ export async function postModelPlan(
       labelId: goal.id,
       message: s.text,
       ...(s.count === undefined ? {} : { count: s.count }),
+      // #1128 — the borrowed-row fact travels with the finding: it is what tells the Cut step a
+      // feeds proxy (Check) from a cutter substitution (Know).
+      ...(s.feedsProxyMm === undefined ? {} : { feedsProxyMm: s.feedsProxyMm }),
     }));
   // #966 ROUND 3 — THE CUTOVER NOW COVERS MULTI-SETUP. `planModelCam` ran and returned a
   // `SetupPlan` per setup (#965's registration/freeing-cl work, underneath); every setup's own

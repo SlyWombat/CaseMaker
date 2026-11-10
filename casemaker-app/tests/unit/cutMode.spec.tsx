@@ -145,7 +145,9 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
     // The Design stack is gone, not merely covered.
     expect(screen.queryByTestId('engrave-stock-edit')).toBeNull();
     expect(screen.getByTestId('engrave-preflight').getAttribute('data-state')).toBe('blocked');
-    expect(screen.getByTestId('engrave-preflight-summary').textContent).toContain('blocking');
+    // #1128 — the count line names what to DO, not how many warnings were carried.
+    expect(screen.getByTestId('engrave-preflight-summary').textContent).toContain('1 to do');
+    expect(screen.getByTestId('engrave-preflight-do').getAttribute('data-count')).toBe('1');
     // `collect()` was actually asked: the run gate names the missing program in its own words, and
     // the code travels on the row as data, not as rendered prose (#550).
     expect(screen.getByTestId(/^engrave-preflight-row-\d+-no-generate$/).getAttribute('data-code')).toBe('no-generate');
@@ -161,8 +163,10 @@ describe('EngravePanel — the Design/Cut switch (#419 §3)', () => {
     openCut();
 
     expect(screen.getByTestId('engrave-preflight').getAttribute('data-state')).toBe('clear');
-    expect(screen.getByTestId('engrave-preflight-summary').textContent).toContain('nothing blocking');
-    expect(screen.getByTestId('engrave-preflight-scope-0')).toBeTruthy();
+    // #1128 — an empty Do band is the green statement; the Know fold still carries its count.
+    expect(screen.getByTestId('engrave-preflight-summary').textContent).toContain('0 to do');
+    expect(screen.getByTestId('engrave-preflight-do').getAttribute('data-count')).toBe('0');
+    expect(screen.getByTestId('engrave-preflight-check').getAttribute('data-count')).toBe('0');
 
     // Back to Design is never dead, green or red.
     fireEvent.click(screen.getByTestId('engrave-back-to-design'));

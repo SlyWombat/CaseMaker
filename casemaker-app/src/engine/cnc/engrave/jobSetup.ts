@@ -624,6 +624,13 @@ export interface JobFinding {
   /** The item (label or shape) a finding points at, when it is about one item. */
   labelId?: string;
   /**
+   * #1123 item 8 / #1128 — on a `goal-cutter-substituted` finding from a FEED-ROW PROXY: the
+   * borrowed row's diameter, mm. The fact a cutter was swapped and the fact its cut runs on another
+   * diameter's numbers are different instructions to the operator, and the Cut step's bands split
+   * on it (a substitution is Know; borrowed feeds are Check).
+   */
+  feedsProxyMm?: number;
+  /**
    * #785 — the GOAL target object a finding is about, when it is about one (the panel's per-goal
    * presses patch the goal the sentence names).
    */

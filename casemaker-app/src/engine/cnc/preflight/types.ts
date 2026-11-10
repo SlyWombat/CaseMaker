@@ -173,4 +173,53 @@ export interface PreflightRow {
   owner: PreflightOwner;
   /** Where to go to fix it, as far as the owner already knows — see {@link PreflightCause}. */
   cause: PreflightCause;
+  /**
+   * #1123 item 8 / #1128 — a `goal-cutter-substituted` row from a FEED-ROW PROXY: the borrowed
+   * row's diameter, mm. The fact is what separates "the cutter was swapped" (Know) from "the cut
+   * runs on another diameter's numbers" (Check) — see {@link bandFor}.
+   */
+  feedsProxyMm?: number;
+}
+
+// ---------------------------------------------------------------------------------------------
+// #1128 — DO / CHECK / KNOW: THE BAND THE CUT STEP READS.
+//
+// Severity says how bad a finding is; the band says WHAT THE OPERATOR DOES ABOUT IT. The two are
+// different questions, so a warning can be a Check (it changes what happens on the bed) or a Know
+// (coverage, a tradeoff, a substitution). The band is metadata, never a new check: nothing here
+// changes a severity, a code, or what blocks the run.
+
+/** Do = act now; Check = read before cutting; Know = information. */
+export type FindingBand = 'do' | 'check' | 'know';
+
+/**
+ * THE CODES WHOSE BAND IS NOT THEIR SEVERITY'S DEFAULT. Everything else follows
+ * {@link DEFAULT_BAND} — that fallback is deliberate: a code the table does not name is graded by
+ * the owner's own severity, so the long tail of warnings lands in Check and infos in Know without
+ * a hand-written line each. The entries here are the codes where the bench's rule says otherwise.
+ */
+export const FINDING_BANDS: Readonly<Partial<Record<string, FindingBand>>> = {
+  // The plan's substitution line ("the job names X; the run posts Y") is information about a
+  // decision already made — a warning by severity, a Know by band (#1128 item 4). The feeds-proxy
+  // variant is split out by `bandFor` below.
+  'goal-cutter-substituted': 'know',
+  // Coverage of this setup: a number to know, not a warning to act on (#1128 item 1).
+  'goal-unreached': 'know',
+};
+
+/** The severity's own band, for every code the table does not name. */
+export const DEFAULT_BAND: Readonly<Record<PreflightSeverity, FindingBand>> = {
+  error: 'do',
+  warning: 'check',
+  info: 'know',
+};
+
+/**
+ * The band one row is read in. A feeds-proxy substitution is the Check the issue names ("borrowed
+ * feeds") even though its code's own line is the substitution Know; everything else is the table,
+ * else its severity.
+ */
+export function bandFor(row: Pick<PreflightRow, 'severity' | 'code' | 'feedsProxyMm'>): FindingBand {
+  if (row.code === 'goal-cutter-substituted' && row.feedsProxyMm !== undefined) return 'check';
+  return FINDING_BANDS[row.code] ?? DEFAULT_BAND[row.severity];
 }
