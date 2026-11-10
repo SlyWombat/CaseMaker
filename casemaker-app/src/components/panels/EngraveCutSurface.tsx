@@ -41,6 +41,7 @@ import type { VerifyReport } from '@/engine/cnc/verify';
 import type { FeatureKind, FeatureOverrides } from '@/engine/cnc/plan';
 import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
 import { cutPlan } from '@/engine/cnc/engrave/cutPlan';
+import { restartNotice } from '@/engine/cnc/engrave/restart';
 import { laserLiftFor } from '@/engine/cnc/engrave/laserSurface';
 import { packageStaleness } from '@/engine/cnc/engrave/package';
 import { useRegistrationPromptStore } from '@/store/registrationPromptStore';
@@ -62,7 +63,7 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { useSettingsStore } from '@/store/settingsStore';
-import { finishedProgramsFor, useLocationStore } from '@/store/locationStore';
+import { finishedProgramsFor, finishedRunsFor, useLocationStore } from '@/store/locationStore';
 import { useLocationPoll } from '@/hooks/useLocationPoll';
 import { machineKey, useMachineRunStore, type RunContext } from '@/store/machineRunStore';
 import { refreshStoredPackage, useEngravePackageStore } from '@/store/engravePackageStore';
@@ -1064,6 +1065,26 @@ export function EngraveCutSurface({
     [job, pkg, finishedHashes, defaults, overrides],
   );
 
+  // #1179 slice A — WHAT THIS BLANK HAS ALREADY BEEN THROUGH. The machine's finished-run records
+  // are compared with the package on screen: the same plan is today's ✓/resume and says nothing;
+  // a different plan for this job speaks from the record (and cutting starts at program 1); hashes
+  // with no record say only that the machine has cut before. The location subscription is a
+  // dependency ON PURPOSE — the record is re-read on every location change, not once per target.
+  const restart = useMemo(
+    () =>
+      pkg === null || target === null
+        ? null
+        : restartNotice({
+            jobId: job.id,
+            packageKey: pkg.hash,
+            packageHashes: pkg.programs.map((program) => program.hash),
+            programCount: pkg.programs.length,
+            runs: finishedRunsFor(target),
+            machineHashes: finishedProgramsFor(target),
+          }),
+    [job.id, pkg, target, locationView],
+  );
+
   // #1127 — THE CUTTER CHECKLIST AT THE MACHINE. The same rows the Job panel shows, with the
   // operator's located/replaced state, and the gate: the first Load and the cut do not start until
   // every bit is accounted for. Ticking is never a byte input (outside the fingerprint); a
@@ -1386,6 +1407,20 @@ export function EngraveCutSurface({
           </span>
           <RunLogFold log={runLog} />
         </section>
+      )}
+      {/* #1179 slice A — THE BLANK HAS BEEN CUT BEFORE, AND THE APP SAYS SO. One line above the
+          steps: same plan → nothing (the ✓ rows speak); a changed plan → the record's own sentence,
+          with cutting starting at program 1; an unattributable record → the weak, true claim. The
+          done rows themselves are untouched: they are hash intersections with THIS package, so a
+          different plan's programs are never marked done. */}
+      {restart !== null && (
+        <p
+          style={{ ...MUTED, margin: '8px 0 0', color: '#c8d3de' }}
+          data-testid="engrave-cut-restart"
+          data-kind={restart.kind}
+        >
+          {restart.sentence}
+        </p>
       )}
       {/* #524/#689 — the Cut surface as a four-line checklist: Checked → Frozen → Register the
           blank → Run. Each line is one sentence; only the step the operator is on has a body. */}
