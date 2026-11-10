@@ -52,7 +52,9 @@ async function wizardGoal(page: import('@playwright/test').Page, file: string, s
 /** Open a `<details>` fold only if it is closed — a blind summary click toggles it shut. */
 async function openFold(page: import('@playwright/test').Page, testid: string): Promise<void> {
   const fold = page.getByTestId(testid);
-  if ((await fold.getAttribute('open')) === null) await fold.locator('summary').click();
+  // #1180 — the fold's OWN summary is the first one: a nested `<details>` (the flip offer's “If you
+  // add it:” under the findings) adds a second `<summary>`, and a bare locator matches both.
+  if ((await fold.getAttribute('open')) === null) await fold.locator('summary').first().click();
 }
 
 /**
