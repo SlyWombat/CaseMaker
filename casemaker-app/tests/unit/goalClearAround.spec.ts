@@ -147,7 +147,7 @@ describe('#764 — the item goal is cleared around itself', () => {
     const { tl } = await import('./helpers/manifoldExec');
     const j = job(goal(zOut));
     const catalogue = [flatEndMill(1.5, { shape: 'ball', name: '1.5 mm ball nose (catalogue)' })];
-    const deferred = await engraveGenerate(tl, j, BALL_TOOL, [], null, undefined, {}, undefined, catalogue, true);
+    const deferred = await engraveGenerate(tl, j, BALL_TOOL, [], null, undefined, {}, undefined, catalogue, { deferIdeal: true });
     expect(deferred.ok).toBe(true);
     expect(deferred.idealDeferred).toBe(true);
     expect(deferred.planIdeal ?? null, 'the ideal was not run').toBeNull();
@@ -166,7 +166,7 @@ describe('#764 — the item goal is cleared around itself', () => {
     const { tl } = await import('./helpers/manifoldExec');
     const j = { ...job(goal(zOut)), planChoice: 'ideal' as const };
     const catalogue = [flatEndMill(1.5, { shape: 'ball', name: '1.5 mm ball nose (catalogue)' })];
-    const result = await engraveGenerate(tl, j, BALL_TOOL, [], null, undefined, {}, undefined, catalogue, true);
+    const result = await engraveGenerate(tl, j, BALL_TOOL, [], null, undefined, {}, undefined, catalogue, { deferIdeal: true });
     expect(result.ok).toBe(true);
     expect(result.idealDeferred ?? false).toBe(false);
     expect(result.planIdeal ?? null).not.toBeNull();
