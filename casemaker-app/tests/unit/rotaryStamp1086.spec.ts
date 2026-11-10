@@ -38,6 +38,9 @@ function goalField(): GoalRadialField {
     z: new Float32Array(NX * NY),
     covered: new Uint8Array(NX * NY).fill(1),
     coveredCount: NX * NY,
+    // #1164 (b) — a synthetic field casts no beyond-rod cells.
+    recastCells: 0,
+    degenerateCells: 0,
     resolutionNote: 'synthetic',
   };
 }

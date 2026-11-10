@@ -171,6 +171,9 @@ describe('#777 the relief roughs from the section, not the envelope', () => {
       z: new Float32Array(nx * ny).fill(9 - radius),
       covered: new Uint8Array(nx * ny).fill(1),
       coveredCount: nx * ny,
+      // #1164 (b) — a synthetic field casts no beyond-rod cells.
+      recastCells: 0,
+      degenerateCells: 0,
       resolutionNote: 'test',
     };
     const out = generateRotaryReliefIR({

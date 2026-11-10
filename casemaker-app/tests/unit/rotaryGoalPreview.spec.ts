@@ -92,6 +92,9 @@ function analyticField(): GoalRadialField {
     z,
     covered,
     coveredCount: nx * ny,
+    // #1164 (b) — a synthetic field casts no beyond-rod cells.
+    recastCells: 0,
+    degenerateCells: 0,
     resolutionNote: 'test',
   };
 }

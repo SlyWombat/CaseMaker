@@ -29,7 +29,8 @@ function goalField(): GoalRadialField {
   for (let j = GROOVE_ROWS[0]; j < GROOVE_ROWS[1]; j++) {
     for (let i = 0; i < NX; i++) z[j * NX + i] = -GROOVE_DEPTH;
   }
-  return { nx: NX, ny: NY, x0: 0, y0: 0, pitch: PITCH, radius: R, minRadius: R - GROOVE_DEPTH, maxRadius: R, z, covered, coveredCount: NX * NY, resolutionNote: 'synthetic' };
+  // #1164 (b) — a synthetic field casts no beyond-rod cells.
+  return { nx: NX, ny: NY, x0: 0, y0: 0, pitch: PITCH, radius: R, minRadius: R - GROOVE_DEPTH, maxRadius: R, z, covered, coveredCount: NX * NY, recastCells: 0, degenerateCells: 0, resolutionNote: 'synthetic' };
 }
 
 /** The sweep's grid, its columns set where the program cut. */
