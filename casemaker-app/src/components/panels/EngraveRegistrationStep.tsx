@@ -264,6 +264,15 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const defaults = useShopDefaultsStore((s) => s.defaults);
   const calibration = useSettingsStore((s) => s.machineCalibration);
   const machineRecord = target === null ? null : machineAt(target);
+  // #1166 — HAS THIS JOB FINISHED PROGRAMS ON THIS MACHINE? The machine record's own list plus the
+  // job's run log — the release store's `done` union, so the two places progress is written are read
+  // the same way here. The executor offers the bracket's derived top only when something has cut.
+  const hasFinishedPrograms = useMemo(
+    () =>
+      (machineRecord?.finishedPrograms ?? []).length > 0 ||
+      (job.runLog ?? []).some((entry) => entry.outcome === 'finished'),
+    [machineRecord, job.runLog],
+  );
   const probe = useMemo(() => probeFor(machineRecord), [machineRecord]);
   const mountDatum = useMemo(() => mountDatumFor(machineRecord), [machineRecord]);
   const mountDatumMismatchBy = useMemo(() => mountDatumMismatch(machineRecord), [machineRecord]);
@@ -918,6 +927,9 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           // The at-machine tick already names the probe, so the executor's first prompt is answered
           // by it; every other step (the bracket's clamps, the cutter) is a fresh press.
           operator: (step) => (step.kind === 'fit-probe' ? Promise.resolve(true) : askOperator(step)),
+          // #1166 — the bracket's surface seek may offer the DERIVED top (seat + stock thickness)
+          // when the plan's point has been cut away, but only if this job has actually cut here.
+          hasFinishedPrograms,
           // #587 — the executor narrates each step as it moves; surface it live.
           onStep: (sentence) => {
             if (aliveRef.current) setNarration(sentence);
