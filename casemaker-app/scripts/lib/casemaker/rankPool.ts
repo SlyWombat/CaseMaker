@@ -16,6 +16,10 @@
 import { cpus } from 'node:os';
 import { Worker } from 'node:worker_threads';
 
+import { cutterKeyOf } from '@/engine/cnc/cam/model/sequence';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import type { Tool } from '@/engine/cnc/tool';
+
 import type {
   ModelPlanInput,
   RankMeasureHandle,
@@ -55,6 +59,20 @@ export function rankWorkerCap(env: NodeJS.ProcessEnv = process.env): number {
   const byEnv = raw === undefined ? undefined : Number(raw);
   const core = Math.max(1, Math.min(8, cpus().length - 1));
   return Number.isInteger(byEnv) && byEnv! > 0 ? Math.min(byEnv!, core) : core;
+}
+
+/**
+ * #1151 Phase 2 follow-up (C's land16 check) — THE WORKER'S HOUSE AS REGISTRY ENTRIES. `setRegistry`
+ * takes `ToolLibraryEntry[]`, not bare tools, and a registry built from the wrong shape is exactly
+ * how a key lookup silently misses. The key is the identity a posted program stamps
+ * (`cutterKeyOf` = the tool's id, else its name) — what the plan and the rank read back.
+ */
+export function rankHouseEntries(house: readonly Tool[]): ToolLibraryEntry[] {
+  return house.map((tool) => ({
+    key: cutterKeyOf(tool),
+    tool,
+    provenance: 'the rank worker’s own model input (the house the plan was given)',
+  }));
 }
 
 /** What one candidate's promise carries; `unconsumed` lets `cancel` swallow an abandoned promise. */

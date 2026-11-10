@@ -5,7 +5,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { rankPoolSeam, rankWorkerCap } from '../../scripts/lib/casemaker/rankPool';
+import { rankHouseEntries, rankPoolSeam, rankWorkerCap } from '../../scripts/lib/casemaker/rankPool';
+import { entryFor, resetRegistry, resolveTool, setRegistry } from '../../src/engine/cnc/toolRegistry';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import type { ModelPlanInput, RankMeasureRequest } from '@/engine/cnc/cam/model/plan';
 
@@ -37,6 +38,23 @@ describe('#1151 Phase 2 — the rank pool', () => {
     handle.cancel();
     expect(metrics.map((m) => (m.kind === 'measured' ? m.leftover : null))).toEqual([0.02, 0.04, 0.06]);
     expect(metrics.map((m) => (m.kind === 'measured' ? m.cycle : null))).toEqual([2, 4, 6]);
+  });
+
+  // C's land16 check — `setRegistry` takes ToolLibraryEntry[], not bare tools; a registry built
+  // from the wrong shape is how a key lookup silently misses. This is the worker's own seeding.
+  it('seeds the worker’s registry with the house’s own keys — entries, not bare tools', () => {
+    const house = [tool('inv:lib-a'), tool('inv:lib-b')];
+    const entries = rankHouseEntries(house);
+    expect(entries.map((e) => e.key)).toEqual(['inv:lib-a', 'inv:lib-b']);
+    expect(entries.every((e) => typeof e.provenance === 'string' && e.provenance !== '')).toBe(true);
+    setRegistry(entries);
+    try {
+      // The engine's own lookups resolve the house's keys: the shape is what the registry wants.
+      expect(entryFor('inv:lib-a')?.tool.name).toBe('inv:lib-a');
+      expect(resolveTool('inv:lib-b')?.name).toBe('inv:lib-b');
+    } finally {
+      resetRegistry();
+    }
   });
 
   it('a refusing worker rejects that candidate’s metric', async () => {

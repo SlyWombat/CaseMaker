@@ -18,7 +18,7 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '@/engine/fonts/registry';
 import { setRegistry } from '@/engine/cnc/toolRegistry';
 import { planModelCam, type RankMeasurement } from '@/engine/cnc/cam/model/plan';
-import type { RankWorkerInput, RankWorkerReply } from './rankPool';
+import { rankHouseEntries, type RankWorkerInput, type RankWorkerReply } from './rankPool';
 
 const task = workerData as RankWorkerInput;
 const port = parentPort;
@@ -30,7 +30,8 @@ for (const key of BUNDLED_FONT_KEYS) {
   const bytes = readFileSync(new URL(`../../../src/engine/fonts/files/${key}.ttf`, import.meta.url));
   registerBundledFontBytes(key, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
 }
-setRegistry(task.input.cutters.house);
+// The registry takes ENTRIES, keyed by the identity a posted program stamps (`cutterKeyOf`).
+setRegistry(rankHouseEntries(task.input.cutters.house));
 
 const reply = (msg: RankWorkerReply): void => port.postMessage(msg);
 
