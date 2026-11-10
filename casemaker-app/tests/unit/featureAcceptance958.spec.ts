@@ -26,10 +26,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+import { placedTree as loadPlacedTree } from './helpers/trayAcceptance';
 
-import { tl } from './helpers/manifoldExec';
-import { stepToMesh } from '@/engine/import/stepMesh';
-import { recogniseFeatures, type FeatureTree, type PocketNode } from '@/engine/cnc/cam/model/features';
+import { type FeatureTree, type PocketNode } from '@/engine/cnc/cam/model/features';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { DEFAULT_FEATURE_TOLERANCES, classifyPatches, patchesFromFaces, type FrameMesh } from '@/engine/cnc/cam/model/features/patches';
 
@@ -148,22 +147,9 @@ function expectLevels(tree: FeatureTree, modelTop: number, want: number[], confi
 const placedMeshes = new Map<FeatureTree, { positions: Float32Array; indices: Uint32Array; faceId?: Uint32Array }>();
 
 async function placedTree(file: string, stock: [number, number], modelTop: number): Promise<FeatureTree> {
-  const bytes = fs.readFileSync(file);
-  const read = await stepToMesh(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 'recognition');
-  const { min, max } = read.mesh.bbox;
-  const dx = stock[0] / 2 - (min[0] + max[0]) / 2;
-  const dy = stock[1] / 2 - (min[1] + max[1]) / 2;
-  const dz = modelTop - max[2];
-  const positions = Float32Array.from(read.mesh.positions);
-  for (let i = 0; i < positions.length; i += 3) {
-    positions[i] = positions[i]! + dx;
-    positions[i + 1] = positions[i + 1]! + dy;
-    positions[i + 2] = positions[i + 2]! + dz;
-  }
-  const mesh = { ...read.mesh, positions };
-  const tree = recogniseFeatures({ triangles: mesh, faceId: read.faceId }, { up: [0, 0, 1], stockTop: 0 }, tl);
-  placedMeshes.set(tree, { positions, indices: read.mesh.indices, ...(read.faceId ? { faceId: read.faceId } : {}) });
-  return tree;
+  const placed = await loadPlacedTree(file, stock, modelTop);
+  placedMeshes.set(placed.tree, { positions: placed.mesh.positions, indices: placed.mesh.indices, ...(placed.faceId ? { faceId: placed.faceId } : {}) });
+  return placed.tree;
 }
 
 /** Floor parts at a depth below the model top (top land at depth 0). */

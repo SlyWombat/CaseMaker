@@ -20,64 +20,15 @@ import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
 import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import { flatEndMill } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { buildModelPlanInputForGoal, generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { setMemTraceSink } from '@/engine/cnc/memTrace';
+import { notchedPlate } from './helpers/meshes';
+import { BALL6_NOTCHED_LONG as BALL6 } from './helpers/goalFixtures';
 
-type P = [number, number, number];
-type Tri2 = [[number, number], [number, number], [number, number]];
-
-function stlBase64(tris: readonly (readonly [P, P, P])[]): string {
-  const bytes = new Uint8Array(84 + tris.length * 50);
-  const dv = new DataView(bytes.buffer);
-  dv.setUint32(80, tris.length, true);
-  let off = 84;
-  for (const [a, b, c] of tris) {
-    for (let k = 0; k < 3; k++) dv.setFloat32(off + k * 4, 0, true);
-    off += 12;
-    for (const p of [a, b, c]) {
-      dv.setFloat32(off, p[0], true);
-      dv.setFloat32(off + 4, p[1], true);
-      dv.setFloat32(off + 8, p[2], true);
-      off += 12;
-    }
-    dv.setUint16(off, 0, true);
-    off += 2;
-  }
-  return Buffer.from(bytes).toString('base64');
-}
 
 /** The #1023/#1028 plate: 20 × 10 × 5 with a 6 mm-wide V notch. */
-function notchedPlate(): string {
-  const A: [number, number] = [0, 0];
-  const B: [number, number] = [20, 0];
-  const C: [number, number] = [20, 5];
-  const D: [number, number] = [13, 5];
-  const E: [number, number] = [10, 0.5];
-  const F: [number, number] = [7, 5];
-  const G: [number, number] = [0, 5];
-  const section = [A, B, C, D, E, F, G];
-  const depth = 10;
-  const capTris: Tri2[] = [[C, D, E], [B, C, E], [A, B, E], [G, A, E], [E, F, G]];
-  const cap = (y: number): readonly (readonly [P, P, P])[] =>
-    capTris.map(([a, b, c]) => (y === 0
-      ? [[a[0], y, a[1]], [b[0], y, b[1]], [c[0], y, c[1]]]
-      : [[a[0], y, a[1]], [c[0], y, c[1]], [b[0], y, b[1]]])) as readonly (readonly [P, P, P])[];
-  const sideTris: (readonly [P, P, P])[] = [];
-  for (let i = 0; i < section.length; i++) {
-    const a = section[i]!;
-    const b = section[(i + 1) % section.length]!;
-    const a0: P = [a[0], 0, a[1]];
-    const b0: P = [b[0], 0, b[1]];
-    const a1: P = [a[0], depth, a[1]];
-    const b1: P = [b[0], depth, b[1]];
-    sideTris.push([a0, a1, b1], [a0, b1, b0]);
-  }
-  return stlBase64([...cap(0), ...cap(depth), ...sideTris]);
-}
-
-const BALL6: Tool = { ...flatEndMill(6), name: '6 mm ball nose', shape: 'ball', typeText: 'Ball', diameter: 6, cornerRadius: 3, fluteLength: 40 };
 const SHOP_FEEDS = [
   {
     material: 'pla' as const,

@@ -46,6 +46,8 @@ import type { MountSpec } from '@/engine/cnc/setups/types';
 import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
 import { valueImportClosure } from '../tools/importGraph';
 import { buildDatumGoal, datumFeatureSource } from './helpers/datumTwoSetup966';
+import { stl } from './helpers/meshes';
+import { BALL_2_Q966 as BALL, FLAT_3_Q966 as FLAT } from './helpers/goalFixtures';
 
 afterEach(() => {
   clearTargetObjectMeshCache();
@@ -59,24 +61,6 @@ afterEach(() => {
 // trick `camModelSeam966.spec.ts`'s dome fixture uses). ────────────────────────────────────────
 type V = [number, number, number];
 type Tri = [V, V, V];
-
-function stl(tris: readonly Tri[]): string {
-  const buf = new ArrayBuffer(84 + tris.length * 50);
-  const dv = new DataView(buf);
-  dv.setUint32(80, tris.length, true);
-  let off = 84;
-  for (const t of tris) {
-    off += 12;
-    for (const v of t) {
-      dv.setFloat32(off, v[0], true);
-      dv.setFloat32(off + 4, v[1], true);
-      dv.setFloat32(off + 8, v[2], true);
-      off += 12;
-    }
-    off += 2;
-  }
-  return Buffer.from(new Uint8Array(buf)).toString('base64');
-}
 
 function entry(key: string, tool: Tool): ToolLibraryEntry {
   return { key, tool: { ...tool, id: key, number: null }, provenance: 'test fixture' };
@@ -92,8 +76,6 @@ function jobFor(target: EngraveTargetObject, stock: { length: number; width: num
   };
 }
 
-const BALL: Tool = flatEndMill(2, { number: 1, id: 'ball-2', name: 'ball-2', shape: 'ball', typeText: 'Ball Nose' });
-const FLAT: Tool = flatEndMill(3, { number: 2, id: 'flat-3', name: 'flat-3' });
 const SHOP: EngraveShopOpts = { tools: [entry('inv:ball-2', BALL), entry('inv:flat-3', FLAT)] };
 
 // A small dome goal — the #764 shell formula at stick scale (`camModelSeam966.spec.ts`'s own

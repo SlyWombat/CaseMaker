@@ -29,6 +29,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { loadStepMesh } from './helpers/trayAcceptance';
 
 import { tl } from './helpers/manifoldExec';
 import { makeClipperOffset } from '../../src/engine/cnc/cam/engraveJob';
@@ -38,8 +39,6 @@ import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import type { RapidEstimate } from '../../src/engine/cnc/cam/ir';
 import type { Polygons } from '../../src/engine/cnc/cam/pocket';
 import { buildRandomPart, type PartKind } from '../tools/randomParts';
-import fs from 'node:fs';
-import { stepToMesh } from '../../src/engine/import/stepMesh';
 import { recogniseFeatures } from '../../src/engine/cnc/cam/model/features';
 import { planModelCam, type ModelPlanInput } from '../../src/engine/cnc/cam/model/plan';
 import type { CamMove } from '../../src/engine/cnc/cam/ir';
@@ -364,8 +363,7 @@ const CHAMFER3175: Tool = {
 };
 
 async function realPartViolations(stepPath: string, centre: [number, number], topZ: number, stockWH: [number, number]): Promise<{ edge: EdgeViolation[]; depth: DepthViolation[] }> {
-  const bytes = fs.readFileSync(stepPath);
-  const read = await stepToMesh(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 'recognition');
+  const read = await loadStepMesh(stepPath);
   const lo: [number, number, number] = [Infinity, Infinity, Infinity];
   const hi: [number, number, number] = [-Infinity, -Infinity, -Infinity];
   const positions = Float32Array.from(read.mesh.positions);

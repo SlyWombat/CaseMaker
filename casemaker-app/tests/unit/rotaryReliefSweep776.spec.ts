@@ -23,30 +23,13 @@ import { parseGcode } from '@/engine/cnc/gcode/interpreter';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
 import { columnSweep, type ColumnSweepOk, type ColumnOutcome } from '@/workers/geometry/columnEngine';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { stl } from './helpers/meshes';
 
 type V = [number, number, number];
 type Tri = [V, V, V];
 const TAU = Math.PI * 2;
 const ROD_RADIUS = 10;
 const LENGTH = 20;
-
-function stl(tris: Tri[]): string {
-  const buf = new ArrayBuffer(84 + tris.length * 50);
-  const dv = new DataView(buf);
-  dv.setUint32(80, tris.length, true);
-  let off = 84;
-  for (const t of tris) {
-    off += 12;
-    for (const v of t) {
-      dv.setFloat32(off, v[0], true);
-      dv.setFloat32(off + 4, v[1], true);
-      dv.setFloat32(off + 8, v[2], true);
-      off += 12;
-    }
-    off += 2;
-  }
-  return Buffer.from(new Uint8Array(buf)).toString('base64');
-}
 
 /** The lobed side, as rings along the axis: r(θ) at every station (the e2e's own mesh). */
 function lobedSide(maxLobe: number, length = LENGTH, rings = 20, seg = 144): Tri[] {
