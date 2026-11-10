@@ -179,6 +179,11 @@ import { isMold } from '@/engine/cnc/engrave/goalHeightfield';
 // retirement because `generateRotaryGoalProgram` below (rotary relief, out of #966's scope)
 // constructs one.
 import { FRAME_Z, runSheetFileName, runSheetFrameFileName, type GoalSurfaceFacts } from '@/engine/cnc/engrave/runSheet';
+// #1136 — THE PARTIAL POST. The pure planner answers WHICH setups a replacement touches and
+// whether a partial post is admissible; this file is the only place that can then post the
+// affected setups while carrying the frozen ones (the ref loop, the vacuum spans and the final
+// assembly all live here).
+import { partialRegenPlan, partialRegenSentence, type PartialRegenOk } from '@/engine/cnc/engrave/partialRegen';
 import type { FixtureEnvelope, Setup } from '@/engine/cnc/setup';
 import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
 import { unfacedBands } from '@/engine/cnc/mounts/inPath';
@@ -7065,6 +7070,17 @@ export async function engraveGenerate(
    * owned plan is run.
    */
   catalogueTools?: readonly Tool[],
+  /**
+   * #1136 — THE PARTIAL POST'S CARRY: the result the job's frozen package was cut from, when the
+   * caller still holds it. A cutter replacement is a byte input, so a generate after one would
+   * normally re-post the WHOLE run; with this result in hand and the job's own `cutterSubstitutions`
+   * as the only change since the freeze, only the affected setups re-post and every other frozen
+   * program rides over VERBATIM (same `nc`, same `programHash`), with its own verifier report and
+   * facts still attached. Absent, or inapplicable (a design change beside the replacement, a
+   * face/surface/neck-apart run, a different program count), the whole run re-posts as today and
+   * the result says so.
+   */
+  previous?: EngraveGenerated,
 ): Promise<EngraveGenerated> {
   memTrace('pipeline:start', { job: job.name });
   onProgress?.({ stage: 'prepare', label: 'reading the job' });
@@ -7472,8 +7488,84 @@ export async function engraveGenerate(
   const spanAt = (index: number): VacuumSpan =>
     runLength === 1 ? 'whole' : index === 0 ? 'first' : index === runLength - 1 ? 'last' : 'middle';
 
+  // #1136 — A CUTTER REPLACEMENT IS POSTED PARTIALLY WHEN IT IS THE ONLY CHANGE SINCE THE FREEZE.
+  //
+  // The planner owns "is this allowed": the job with an EMPTY substitution map must still
+  // fingerprint to the frozen package, the affected setups are exactly those whose resolved tool
+  // list moved, and a replacement that would merge two refs is refused. This is the posting half:
+  // the loop below still walks EVERY ref (the vacuum spans and the run length are the whole run's),
+  // but only the affected setups generate. The others are carried from `previous` — the result the
+  // package was frozen around — so their `nc` and `programHash` are the frozen ones by construction.
+  //
+  // The structural refusals are deliberate: a FACE or SURFACE ref adds programs outside a setup's
+  // own block, and a neck posted APART adds a file after every ref, so the per-setup compose below
+  // could not promise the frozen order. Those runs re-post whole, and the result says so.
+  const frozen = job.package;
+  const hasSubstitutions =
+    job.cutterSubstitutions !== undefined && Object.keys(job.cutterSubstitutions).length > 0;
+  const partialPlan = hasSubstitutions && frozen !== undefined ? partialRegenPlan(job, frozen) : null;
+  const partialEligible =
+    partialPlan !== null &&
+    partialPlan.ok &&
+    previous !== undefined &&
+    previous.ok &&
+    frozen !== undefined &&
+    previous.programs.length === frozen.programs.length &&
+    previous.programs.every((program, i) => program.programHash === frozen.programs[i]!.hash) &&
+    !neckApart &&
+    !refs.some((ref) => ref.faces === true || ref.surface === true) &&
+    frozen.programs.length === refs.length + (previous.facingNc === null ? 0 : 1);
+  const partial = partialEligible
+    ? {
+        plan: partialPlan as PartialRegenOk,
+        previous: previous as EngraveGenerated,
+        affected: new Set((partialPlan as PartialRegenOk).affectedSetupIds),
+        carryBySetup: new Map<string, EngraveProgram[]>(),
+      }
+    : null;
+  if (partial !== null) {
+    for (const setup of setups) {
+      if (partial.affected.has(setup.id)) continue;
+      partial.carryBySetup.set(
+        setup.id,
+        partial.previous.programs.filter((program) => program.setupId === setup.id),
+      );
+    }
+  }
+  // THE FALLBACK IS STATED, NEVER SILENT. A generate asked to replace a cutter that cannot go
+  // partial says why, in the info lane, and the whole run re-posts. A map that changes nothing is
+  // not a replacement and says nothing.
+  const partialStatement: JobFinding | null = !hasSubstitutions
+    ? null
+    : partial !== null
+      ? {
+          severity: 'info',
+          code: 'partial-regen',
+          message: `Cutter replacement: ${partialRegenSentence(partial.plan, frozen!)}.`,
+        }
+      : partialPlan !== null && !partialPlan.ok && partialPlan.reason === 'no setup posts a different cutter'
+        ? null
+        : {
+            severity: 'info',
+            code: 'partial-regen',
+            message:
+              `Cutter replacement is not partial: ` +
+              `${(partialPlan !== null && !partialPlan.ok
+                ? partialPlan.reason
+                : previous === undefined
+                  ? 'no previous Generate result to carry'
+                  : 'this run has face, surface or neck files a partial post cannot carry'
+              ).replace(/ — re-post the whole run$/, '')} — re-posting the whole run.`,
+          };
+
   for (let s = 0; s < setups.length; s++) {
     const group = refs.filter((ref) => ref.setupIndex === s + 1);
+    // #1136 — an unaffected setup does not generate: its frozen programs are carried verbatim.
+    // `cursor` still advances over its refs, so the affected programs keep the RUN's vacuum spans.
+    if (partial !== null && !partial.affected.has(setups[s]!.id)) {
+      cursor += group.length;
+      continue;
+    }
     // #434 — A DRILL BIT IS NEVER A REST CUTTER. The setup's refs are partitioned into maximal
     // runs that keep their order: a drill ref is ONE program in place, and a run of end-mill refs
     // takes #472's model exactly as before (one program, or rough + measured rest). Partitioning
@@ -7607,19 +7699,25 @@ export async function engraveGenerate(
   // become the run's last word; regenerating only the boundary files keeps every other byte where
   // it was.
   // #849 — the neck file posted apart is the run's last file, after every face file.
-  const total = posted.length + posted.filter((program) => program.one.neckApart != null).length;
-  // #881 — a for loop, not `forEach`: re-making a program is async now (the generator is).
-  for (const [i, program] of posted.entries()) {
-    const want: VacuumSpan = total === 1 ? 'whole' : i === 0 ? 'first' : i === total - 1 ? 'last' : 'middle';
-    if (want === program.span) continue;
-    const next = await program.make(want);
-    if (next.ok && next.nc !== null && next.verify !== null) {
-      // #865 — the settled program replaces its attempt, so `attempts` still names every posted
-      // file (the unposted ones carry their findings untagged).
-      const at = attempts.indexOf(program.one);
-      if (at >= 0) attempts[at] = next;
-      program.one = next;
-      program.span = want;
+  // #1136 — A PARTIAL POST DOES NOT SETTLE. The affected programs were posted with the FULL run's
+  // spans (`spanAt` over every ref), and the carried ones keep the bytes they were frozen with; a
+  // program count that moved would mean the frozen order cannot be kept, and the count check below
+  // re-posts the whole run instead of silently re-spanning a carried file.
+  if (partial === null) {
+    const total = posted.length + posted.filter((program) => program.one.neckApart != null).length;
+    // #881 — a for loop, not `forEach`: re-making a program is async now (the generator is).
+    for (const [i, program] of posted.entries()) {
+      const want: VacuumSpan = total === 1 ? 'whole' : i === 0 ? 'first' : i === total - 1 ? 'last' : 'middle';
+      if (want === program.span) continue;
+      const next = await program.make(want);
+      if (next.ok && next.nc !== null && next.verify !== null) {
+        // #865 — the settled program replaces its attempt, so `attempts` still names every posted
+        // file (the unposted ones carry their findings untagged).
+        const at = attempts.indexOf(program.one);
+        if (at >= 0) attempts[at] = next;
+        program.one = next;
+        program.span = want;
+      }
     }
   }
 
@@ -7639,6 +7737,7 @@ export async function engraveGenerate(
   // check never fires because no program was asked to carry it. Refuse the run itself here, so the
   // panels' "the part stays on a neck" sentence is never shown for a neck nothing cut.
   if (
+    partial === null &&
     stopped === undefined &&
     rotaryNeckOf(job) !== null &&
     !posted.some((p) => p.one.neck != null || p.one.neckApart?.neck != null)
@@ -7651,7 +7750,7 @@ export async function engraveGenerate(
     });
   }
   const restErrors = restFindings.filter((f) => f.severity === 'error');
-  const programs: EngraveProgram[] = [
+  const postedPrograms: EngraveProgram[] = [
     ...posted.flatMap((program) => {
       // #473 — the face file is the run's first program, then the setup's own. Only the first
       // program builds it (`generateOneProgram`'s `withFacing`), so only the first posted one can
@@ -7667,12 +7766,81 @@ export async function engraveGenerate(
     // #849 — and the neck file closes the run.
     ...neckFiles.map((file) => programOf(file.one, file.ref)),
   ];
+
+  // #1136 — THE COMPOSED RUN, in the package's own cut order: each setup contributes either its
+  // carried frozen programs (unaffected) or the ones just posted (affected). The frozen order is a
+  // promise of the issue, so the compose VERIFIES it: every block's program count and cutter
+  // sequence must be what the package froze. A rest pass that dropped a file, a facing file that
+  // appeared or vanished, or any other change to the program list re-posts the WHOLE run — never a
+  // partial assemble that silently renumbers what follows.
+  let programs: EngraveProgram[] = postedPrograms;
+  if (partial !== null) {
+    const frozenBlocks = new Map<string, PartialRegenOk['carry'][number][]>();
+    for (const program of frozen!.programs) {
+      const block = frozenBlocks.get(program.setupId) ?? [];
+      block.push({
+        setupIndex: program.setupIndex,
+        setupId: program.setupId,
+        toolKey: program.toolKey,
+        nc: program.nc,
+        frameNc: program.frameNc,
+        programHash: program.hash,
+        ...(program.frame === undefined ? {} : { frame: program.frame }),
+      });
+      frozenBlocks.set(program.setupId, block);
+    }
+    const composed: EngraveProgram[] = [];
+    for (const setup of setups) {
+      const expected = frozenBlocks.get(setup.id) ?? [];
+      const isAffected = partial.affected.has(setup.id);
+      const block = isAffected
+        ? postedPrograms.filter((program) => program.setupId === setup.id)
+        : (partial.carryBySetup.get(setup.id) ?? []);
+      // The program COUNT is the frozen one — a rest pass that dropped a file would renumber
+      // everything after it. On an UNAFFECTED setup the cutters must match the frozen list too;
+      // on an affected one the cutter is exactly what the replacement may change.
+      const sameBlock =
+        block.length === expected.length &&
+        (isAffected || block.every((program, i) => program.toolKey === expected[i]!.toolKey));
+      if (!sameBlock) {
+        // The affected generation changed the program list the package froze: a partial compose
+        // cannot keep the order and names. Re-post the whole run, with the substitution map in the
+        // job exactly as it is.
+        return await engraveGenerate(tl, job, tool, catalogue, calibration, margins, shop, onProgress, catalogueTools);
+      }
+      composed.push(...block);
+    }
+    programs = composed;
+  }
   // #865 — EACH PROGRAM'S OWN FINDINGS, TAGGED WITH THE PROGRAM THEY BELONG TO. The first
   // program's findings are the design-level ones the operator already reads on the job; a later
   // program's are prefixed `program N (cutter):` and a copy identical to a design-level finding is
   // dropped rather than repeated. An attempt that posted no program (a refused stage, an empty
   // rest) keeps its findings untagged: there is no file to put them on.
   const postedOnes = new Set(posted.map((program) => program.one));
+  // #1136 — WHAT THE CARRIED HALF ADDS to the composed list's findings, and what the press did.
+  // The per-program findings are recomputed below over the COMPOSED list, so the places they were
+  // tagged for the affected programs are dropped here; a finding that lives only on the JOB (a core
+  // warning from a carried setup's rest pass, a catalogue fill) has no program to appear on and is
+  // carried as it was. The statement is the operator's own line: partial, or why it is not.
+  const partialFindings: JobFinding[] = [];
+  if (partial !== null) {
+    const affectedIndices = new Set(
+      programs.map((program, i) => (partial.affected.has(program.setupId) ? i : -1)).filter((i) => i >= 0),
+    );
+    const taggedForAffected = (finding: JobFinding): boolean => {
+      const match = /^program (\d+) \(/.exec(finding.message);
+      return match !== null && affectedIndices.has(Number(match[1]) - 1);
+    };
+    const findingKey = (finding: JobFinding): string => `${finding.code}|${finding.labelId ?? ''}|${finding.message}`;
+    const previousProgramKeys = new Set(
+      partial.previous.programs.flatMap((program) => (program.findings ?? []).map(findingKey)),
+    );
+    partialFindings.push(
+      ...partial.previous.findings.filter((finding) => !previousProgramKeys.has(findingKey(finding)) && !taggedForAffected(finding)),
+    );
+  }
+  if (partialStatement !== null) partialFindings.push(partialStatement);
   const designFindings = dedupeFindings([
     ...catalogueFindings,
     ...(programs[0]?.findings ?? attempts[0]?.findings ?? []),
@@ -7681,6 +7849,7 @@ export async function engraveGenerate(
     ...holeNoCutterFindings(job, shop.tools ?? getTools()),
     ...(neckFiles.length === 0 ? [] : [neckAfterFacesFinding()]),
     ...restFindings,
+    ...partialFindings,
   ]);
   const programFindings: JobFinding[] = [];
   programs.forEach((program, i) => {
@@ -7699,10 +7868,24 @@ export async function engraveGenerate(
     }
   });
   const unpostedFindings = attempts.filter((one) => !postedOnes.has(one)).flatMap((one) => one.findings);
+  // #1136 — THE TOP-LEVEL ADAPTER DESCRIBES THE RUN'S FIRST PROGRAM, as it always has. In a partial
+  // post that program may be a carried one: its bytes and facts are the previous result's program 1,
+  // so the whole adapter block comes from there. The JOB-level plan fields are this generate's —
+  // the plan was recomputed with the replacement, and it is the same plan whichever program moved.
+  const firstCarried = partial !== null && programs[0] !== undefined && !partial.affected.has(programs[0].setupId);
+  const top: Omit<EngraveGenerated, 'programs'> = firstCarried ? { ...partial!.previous } : first;
   return {
     // The adapter: the top-level fields describe the FIRST program, which is the file the panels
     // upload, simulate and save today. Multi-program upload is #419 §3's, not this slice's.
-    ...first,
+    ...top,
+    ...(partial === null
+      ? {}
+      : {
+          plan: first.plan,
+          planStatements: first.planStatements,
+          planIdeal: first.planIdeal,
+          planTradeoff: first.planTradeoff,
+        }),
     ok: stopped === undefined && restErrors.length === 0,
     stage: stopped?.stage ?? (restErrors.length > 0 ? 'findings' : 'done'),
     findings: dedupeFindings([...designFindings, ...programFindings, ...unpostedFindings]),
@@ -7710,7 +7893,7 @@ export async function engraveGenerate(
     // #623 — the frame the programs were posted against; the panel loads the simulation with it.
     surface: shop.surface ?? null,
     programs,
-    restPass,
+    restPass: firstCarried ? partial!.previous.restPass : restPass,
   };
 }
 

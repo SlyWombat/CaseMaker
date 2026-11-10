@@ -32,7 +32,7 @@ import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle'
 import type { DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { goalCheckForProgram, type SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
-import { pureGoalObject } from '@/engine/cnc/engrave/jobKind';
+import { jobHasItems, pureGoalObject } from '@/engine/cnc/engrave/jobKind';
 import { goalEdgeBreakOptions } from '@/engine/cnc/engrave/edgeBreak';
 import { goalPassCoverage } from '@/platform/defaultsClient';
 import type { ProgramOracle } from './engraveRunGate';
@@ -145,6 +145,11 @@ export type EngraveRunClient = {
      * library). Absent means no ideal: `planIdeal` stays null and only the owned plan is run.
      */
     catalogueTools?: readonly Tool[],
+    /**
+     * #1136 — the result the job's frozen package was cut from, when a cutter replacement is the
+     * only change. The worker carries its unaffected programs byte-for-byte.
+     */
+    previous?: EngraveGenerated,
   ) => Promise<EngraveGenerated>;
   // #924 activation — the generator's own raw design items ride the oracle call the same way
   // `predicted` does; additive, so a caller that sends none runs exactly as it did before.
@@ -713,13 +718,38 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       conditions: shop.conditions ?? new Map(),
       surface,
     });
+    const shopSignature = runShopSignature();
     set({
       inputs,
-      shopSignature: runShopSignature(),
+      shopSignature,
       restoreNote: null,
       changedSinceLast: previousInputs === null ? [] : changedInputs(previousInputs, inputs),
       previousVerdict,
     });
+    // #1136 — THE PARTIAL POST'S CARRY. A cutter replacement is a job edit, so the run is stale for
+    // 'job'; the result the frozen package was cut from still describes every program the
+    // replacement does not touch. The generator decides whether the substitution is the ONLY job
+    // change (its own fingerprint comparison against the package). This side refuses to hand it a
+    // result produced under DIFFERENT numbers the fingerprint cannot see — machine, margins, shop —
+    // because the carried programs' bytes and verifier reports were posted against those.
+    const previousForPartial =
+      !simulateOnly &&
+      before.staleSince !== null &&
+      before.staleReason === 'job' &&
+      before.generated !== null &&
+      before.generated.ok &&
+      job.cutterSubstitutions !== undefined &&
+      // The partial post is the multi-setup ITEM pipeline's (the goal and legacy paths never read
+      // the carry); a job outside it is not handed a result it cannot use.
+      job.setups !== undefined &&
+      jobHasItems(job) &&
+      before.inputs !== null &&
+      before.shopSignature !== null &&
+      before.inputs.machine === inputs.machine &&
+      before.inputs.margins === inputs.margins &&
+      before.shopSignature === shopSignature
+        ? before.generated
+        : undefined;
 
     let client: EngraveRunClient;
     let generated: EngraveGenerated;
@@ -822,7 +852,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       try {
         // #961 — the ideal plan's candidate set: the app's own tool library (the same list every
         // picker shows, the house `cat:` rows included). The worker cannot see it from its realm.
-        generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop, onProgress, getTools().map((entry) => entry.tool));
+        generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop, onProgress, getTools().map((entry) => entry.tool), previousForPartial);
       } finally {
         clearStall();
       }

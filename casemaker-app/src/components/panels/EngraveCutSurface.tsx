@@ -43,6 +43,7 @@ import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
 import { cutPlan } from '@/engine/cnc/engrave/cutPlan';
 import { laserLiftFor } from '@/engine/cnc/engrave/laserSurface';
 import { packageStaleness } from '@/engine/cnc/engrave/package';
+import { partialRegenPlan, partialRegenSentence } from '@/engine/cnc/engrave/partialRegen';
 import { useRegistrationPromptStore } from '@/store/registrationPromptStore';
 import { releaseNext, releasePending } from '@/engine/cnc/engrave/release';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
@@ -864,6 +865,18 @@ export function EngraveCutSurface({
         ? 'nothing on the pins'
         : `the ${machineNow.toLowerCase()}`;
   const packageCurrent = pkg !== null && staleness?.stale === false;
+  // #1136 — THE REGENERATE AFTER A CUTTER REPLACEMENT IS PARTIAL, AND ITS COST SAYS SO. The plan is
+  // the engine's own (the same call the generator makes), so the line below names exactly the
+  // programs the press will re-post and no others. No admissible plan: the whole-run line is
+  // unchanged.
+  const partialRegen = useMemo(
+    () => (pkg === null || job.cutterSubstitutions === undefined ? null : partialRegenPlan(job, pkg)),
+    [job, pkg],
+  );
+  const partialRegenRepost =
+    partialRegen?.ok === true && pkg !== null
+      ? pkg.programs.filter((program) => partialRegen.affectedSetupIds.includes(program.setupId)).length
+      : null;
   const reports = useMemo(() => reportsByHash(generated), [generated]);
   const surfaceChecks = useMemo(() => surfaceChecksByHash(generated), [generated]);
   const sources: ReleaseSource[] = useMemo(
@@ -1505,9 +1518,16 @@ export function EngraveCutSurface({
           )}
           {pkg !== null && !packageCurrent && !mountMismatch && (
             <p style={MUTED} data-testid="engrave-package-regenerate-cost">
-              {lastGenerateMs === null
-                ? `Regenerate (${changedWords}).`
-                : `Regenerate — about ${Math.max(1, Math.round(lastGenerateMs / 60_000))} min (last Generate on this job).`}
+              {partialRegen?.ok === true && partialRegenRepost !== null
+                ? lastGenerateMs === null
+                  ? `Regenerate — ${partialRegenSentence(partialRegen, pkg)}.`
+                  : `Regenerate — ${partialRegenSentence(partialRegen, pkg)}; about ${Math.max(
+                      1,
+                      Math.round((lastGenerateMs * partialRegenRepost) / Math.max(1, pkg.programs.length) / 60_000),
+                    )} min, scaled from the last Generate on this job.`
+                : lastGenerateMs === null
+                  ? `Regenerate (${changedWords}).`
+                  : `Regenerate — about ${Math.max(1, Math.round(lastGenerateMs / 60_000))} min (last Generate on this job).`}
             </p>
           )}
           {pkg !== null && !packageCurrent && !mountMismatch && (

@@ -40,6 +40,27 @@ export interface PartialRegenNo {
 
 export type PartialRegenPlan = PartialRegenOk | PartialRegenNo;
 
+/**
+ * THE COST THE OPERATOR AGREES TO, in one sentence: how much of the run a partial post re-posts,
+ * and how much rides over unchanged. It names only the affected programs' setups — the operator's
+ * "is this the bit I am replacing?" check — never the whole run's cost when only a part moves.
+ *
+ * The sentence is the Cut screen's regenerate line and the Generate result's own statement, so the
+ * two cannot say different things about the same plan.
+ */
+export function partialRegenSentence(plan: PartialRegenOk, pkg: FrozenPackage): string {
+  const affected = new Set(plan.affectedSetupIds);
+  const repost = pkg.programs.filter((program) => affected.has(program.setupId)).length;
+  const total = pkg.programs.length;
+  const carried = total - repost;
+  const setupWords =
+    plan.affectedSetups.length === 1 ? `setup ${plan.affectedSetups[0]}` : `setups ${plan.affectedSetups.join(', ')}`;
+  return (
+    `${repost} of ${total} program${total === 1 ? '' : 's'} re-post (${setupWords}); ` +
+    `the other ${carried} ${carried === 1 ? 'rides' : 'ride'} over unchanged`
+  );
+}
+
 /** A setup's byte-relevant cutter facts: its tool list in order and its face cutter. */
 function toolsOf(setup: { tools: readonly string[]; faceToolKey?: string }): string {
   return JSON.stringify([setup.tools, setup.faceToolKey ?? null]);

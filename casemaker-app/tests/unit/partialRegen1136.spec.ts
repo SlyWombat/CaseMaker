@@ -9,8 +9,13 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { jobFingerprint } from '@/engine/cnc/engrave/package';
 import { replacementProblem, withCutterReplacement } from '@/engine/cnc/engrave/cutterChecklist';
-import { partialRegenPlan } from '@/engine/cnc/engrave/partialRegen';
+import { partialRegenPlan, partialRegenSentence } from '@/engine/cnc/engrave/partialRegen';
 import { freezePackage, type PackageProgramInput } from '@/engine/cnc/engrave/package';
+import { engraveGenerate } from '@/workers/sim/engraveGenerate';
+import { flatEndMill } from '@/engine/cnc/tool';
+import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import { tl } from './helpers/manifoldExec';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 
 const IDENTITY = { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' } as const;
@@ -158,6 +163,98 @@ describe('#1136 stage 2a — which programs a replacement touches, and whether i
     const base = job();
     const pkg = frozen(base);
     expect(partialRegenPlan(base, pkg)).toMatchObject({ ok: false });
+  });
+});
+
+describe('#1136 stage 2b — the partial post carries the untouched programs byte for byte', () => {
+  const TOOL_B_KEY = 'user:flat-1-b';
+  const TOOL_C_KEY = 'user:flat-0.8-c';
+  const tools: ToolLibraryEntry[] = [
+    { key: TOOL_B_KEY, tool: flatEndMill(1.0, { name: '1 mm flat (setup B)' }), provenance: 'test' },
+    { key: TOOL_C_KEY, tool: flatEndMill(0.8, { name: '0.8 mm flat (setup C)' }), provenance: 'test' },
+    ...TOOL_LIBRARY,
+  ];
+
+  /** Two setups, one label each: setup 1's program then setup 2's, in cut order. */
+  function twoSetupJob(): EngraveJob {
+    const j = defaultEngraveJob();
+    j.toolKey = 'flat-1.0';
+    const [a, b] = j.labels.map((l) => l.id);
+    j.setups = [setup('s1', [a!], ['flat-1.0']), setup('s2', [b!], [TOOL_B_KEY])];
+    return j;
+  }
+
+  it('re-posts only the affected setup, and the estimate names only its programs', async () => {
+    const job = twoSetupJob();
+    const generate = (j: EngraveJob, previous?: Parameters<typeof engraveGenerate>[9]) =>
+      engraveGenerate(tl, j, jobTool(j), [], null, undefined, { tools }, undefined, undefined, previous);
+
+    const full = await generate(job);
+    expect(
+      full.ok,
+      JSON.stringify({ stage: full.stage, errors: full.errors, findings: full.findings.filter((f) => f.severity === 'error') }),
+    ).toBe(true);
+    expect(full.programs.map((p) => p.setupId)).toEqual(['s1', 's2']);
+
+    const made = freezePackage(job, full.programs, '2026-11-10T00:00:00.000Z');
+    if (!made.ok) throw new Error(made.reason);
+    const pkg = made.package;
+    const frozenJob: EngraveJob = { ...job, package: pkg };
+    const replaced = withCutterReplacement(frozenJob, TOOL_B_KEY, TOOL_C_KEY);
+
+    const plan = partialRegenPlan(replaced, pkg);
+    if (!plan.ok) throw new Error(plan.reason);
+    expect(plan.affectedSetups).toEqual([2]);
+    expect(partialRegenSentence(plan, pkg)).toContain('1 of 2 program');
+    expect(partialRegenSentence(plan, pkg)).toContain('setup 2');
+    expect(partialRegenSentence(plan, pkg)).toContain('the other 1 rides over unchanged');
+
+    const partial = await generate(replaced, full);
+    expect(
+      partial.ok,
+      JSON.stringify({ stage: partial.stage, errors: partial.errors, findings: partial.findings.filter((f) => f.severity === 'error') }),
+    ).toBe(true);
+    // THE PROMISE: the unaffected program's text and key are the frozen ones, byte for byte.
+    expect(partial.programs.map((p) => p.setupId)).toEqual(['s1', 's2']);
+    expect(partial.programs[0]!.nc).toBe(full.programs[0]!.nc);
+    expect(partial.programs[0]!.programHash).toBe(full.programs[0]!.programHash);
+    // The replaced setup really re-posts, with the replacement named.
+    expect(partial.programs[1]!.toolKey).toBe(TOOL_C_KEY);
+    expect(partial.programs[1]!.nc).not.toBe(full.programs[1]!.nc);
+    // The operator is told what the press will do, and only that.
+    const statement = partial.findings.find((f) => f.code === 'partial-regen');
+    expect(statement?.severity).toBe('info');
+    expect(statement?.message).toContain('1 of 2 program');
+    expect(statement?.message).toContain('setup 2');
+    // The freeze still covers the whole run, in the same order.
+    const frozenAgain = freezePackage(replaced, partial.programs, '2026-11-10T00:01:00.000Z');
+    if (!frozenAgain.ok) throw new Error(frozenAgain.reason);
+    expect(frozenAgain.package.programs).toHaveLength(pkg.programs.length);
+    expect(frozenAgain.package.programs.map((p) => p.setupId)).toEqual(pkg.programs.map((p) => p.setupId));
+    expect(frozenAgain.package.programs[0]!.hash).toBe(pkg.programs[0]!.hash);
+    expect(frozenAgain.package.programs[1]!.hash).not.toBe(pkg.programs[1]!.hash);
+    expect(frozenAgain.package.hash).not.toBe(pkg.hash);
+  });
+
+  it('a design change beside the replacement re-posts the whole run, stated', async () => {
+    const job = twoSetupJob();
+    const generate = (j: EngraveJob, previous?: Parameters<typeof engraveGenerate>[9]) =>
+      engraveGenerate(tl, j, jobTool(j), [], null, undefined, { tools }, undefined, undefined, previous);
+    const full = await generate(job);
+    expect(full.ok).toBe(true);
+    const made = freezePackage(job, full.programs, '2026-11-10T00:00:00.000Z');
+    if (!made.ok) throw new Error(made.reason);
+    const replaced = withCutterReplacement({ ...job, package: made.package }, TOOL_B_KEY, TOOL_C_KEY);
+    // A design edit, not a cutter one: the substitution is no longer the only change.
+    const changed: EngraveJob = { ...replaced, labels: replaced.labels.map((l, i) => (i === 0 ? { ...l, text: 'CASED' } : l)) };
+
+    const fallback = await generate(changed, full);
+    expect(fallback.ok).toBe(true);
+    const statement = fallback.findings.find((f) => f.code === 'partial-regen');
+    expect(statement?.message).toContain('whole run');
+    // A full re-post is byte-for-byte the run a generate with no carry produces.
+    const fresh = await generate({ ...changed, package: undefined });
+    expect(fallback.programs.map((p) => p.programHash)).toEqual(fresh.programs.map((p) => p.programHash));
   });
 });
 

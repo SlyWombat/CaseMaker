@@ -684,6 +684,11 @@ export const engraveGenerate = (
    * stores. Absent means no ideal — `planIdeal` stays null and only the owned plan is run.
    */
   catalogueTools?: readonly Tool[],
+  /**
+   * #1136 — the result the job's frozen package was cut from. A cutter replacement then re-posts
+   * only the affected setups and carries the other programs byte-for-byte.
+   */
+  previous?: EngraveGenerated,
 ): Promise<EngraveGenerated> =>
   guarded(
     getSimApi().engraveGenerate(
@@ -695,6 +700,7 @@ export const engraveGenerate = (
       shop,
       onProgress === undefined ? undefined : Comlink.proxy(onProgress),
       catalogueTools,
+      previous,
     ),
   );
 

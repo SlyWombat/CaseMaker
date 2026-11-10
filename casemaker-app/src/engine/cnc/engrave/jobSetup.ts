@@ -151,6 +151,10 @@ export type JobFindingCode =
   // no CAM here could use it). INFO: the sentence names whose cutter it was, why, and what is in
   // the spindle now, with a one-click way back to the cutter list.
   | 'cutter-substituted'
+  // #1136 — a cutter replacement re-posts ONLY the programs whose setup's cutter moved, carrying
+  // every other program's bytes and key; the sentence is the cost the press spends. INFO: a
+  // fallback that cannot keep the frozen run says so and re-posts the whole run.
+  | 'partial-regen'
   // #786 slice 4a-2 — a cone or sphere primitive is cut by a 3D surface program (the region CAM
   // cannot cut a sloped wall or a curved floor). INFO: the sentence names the primitive and the
   // grid, and says what the finish is; the primitives' old refusals are gone.
