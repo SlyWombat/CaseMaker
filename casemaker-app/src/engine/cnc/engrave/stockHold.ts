@@ -227,6 +227,28 @@ export function holdWordsFor(form: JobStockForm, hold: StockHold, part: PartDims
   return holdWords(hold, part);
 }
 
+/**
+ * #1101 — THE HOLD'S WORDS FOLLOW THE MOUNT. A block's axes are "between the jaws / along them"
+ * only under the VISE; on the bed they are left-right / front-back; the rotary has one axis and no
+ * cards at all. The geometry (`StockHold`) is unchanged — this is only its sentence.
+ */
+export function holdWordsForMount(
+  mechanism: 'vise' | 'bed' | 'rotary',
+  form: JobStockForm,
+  hold: StockHold,
+  part: PartDims,
+): string {
+  if (mechanism !== 'bed') return holdWordsFor(form, hold, part);
+  if (form === 'rod' || form === 'tube') {
+    if (hold.z === 'length') return 'standing on its end';
+    if (hold.y === 'length') return 'lying across, on the curve';
+    return 'flat ends left to right';
+  }
+  if (form === 'disc') return hold.z === 'thickness' ? 'flat side up' : 'on its edge';
+  // A block on the bed: X is left-right, Y is front-back. No jaw is in the sentence.
+  return `${num(part[hold.z])} mm up · ${num(part[hold.x])} mm left to right (${num(part[hold.y])} mm front to back)`;
+}
+
 function num(v: number): string {
   return String(Number(v.toFixed(2)));
 }

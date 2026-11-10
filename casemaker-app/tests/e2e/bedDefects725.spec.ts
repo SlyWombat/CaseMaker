@@ -224,6 +224,16 @@ test('#725 B7/W11 — a through cut taped on the wasteboard generates; a bare be
   // The taped default is written on arrival, with the wasteboard as what is under it.
   await expect(page.getByTestId('engrave-setup-mount-bed-tape')).toBeChecked();
   await expect(page.getByTestId('engrave-setup-bed-fields-bed-tape')).toContainText('wasteboard');
+
+  // #1101 — UNDER TAPE THE FOLD SPEAKS THE BED'S WORDS: one "Which way round" fold, hold cards
+  // reading left to right / front to back, and no jaw in the cards.
+  const holdFold = page.getByTestId('engrave-setup-hold-fold');
+  await expect(holdFold.locator('summary')).toContainText('Which way round');
+  await holdFold.locator('summary').click();
+  const holdCards = page.getByTestId('engrave-setup-orientation-holds');
+  await expect(holdCards).toContainText('left to right');
+  await expect(holdCards).not.toContainText('jaw');
+  await page.screenshot({ path: 'test-results/1101-holding-tape.png' });
   // The last step's button is the create (#897); the pocket was the answer at step 2.
   await page.getByTestId('engrave-setup-next').click();
 

@@ -691,7 +691,7 @@ describe('#684 — the picture, the folds, and the technical provenance', () => 
     seedLocation(machineWith(null));
     openHolding(printed);
 
-    const fold = screen.getByTestId('engrave-setup-orientation') as HTMLDetailsElement;
+    const fold = screen.getByTestId('engrave-setup-hold-fold') as HTMLDetailsElement;
     expect(fold.open).toBe(false);
     fireEvent.click(fold.querySelector('summary')!);
     expect(fold.open).toBe(true);
@@ -756,7 +756,9 @@ describe('#684 — the picture, the folds, and the technical provenance', () => 
     );
 
     // Stated facts, not a control (A10): nothing to choose inside the fold, and no codes.
-    expect(fold.querySelectorAll('select, input, button')).toHaveLength(0);
+    // #1101 — the landmark pictures carry no controls; the hold cards beside them are the fold's
+    // own choice, so scope the statement to the pictures.
+    expect(screen.getByTestId('engrave-setup-orientation-pictures').querySelectorAll('select, input, button')).toHaveLength(0);
     expect(fold.textContent).not.toMatch(/left end/i);
     expect(fold.textContent).not.toMatch(/vise-default|#\d/);
   });
@@ -955,7 +957,7 @@ describe('#783 the hold choice', () => {
     const fold = screen.getByTestId('engrave-setup-hold-fold') as HTMLDetailsElement;
     expect(fold.open).toBe(false);
     // The summary carries the answer, so the shut fold still says which way the part sits.
-    expect(fold.querySelector('summary')!.textContent).toContain('Which way round the part sits —');
+    expect(fold.querySelector('summary')!.textContent).toContain('Which way round —');
     openFold();
     // Six permutations, each a picture and its words.
     const buttons = screen.getByTestId('engrave-setup-orientation-holds').querySelectorAll('button[aria-pressed]');

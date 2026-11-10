@@ -69,7 +69,7 @@ test('#875 — phone step 3: the picture first, the hold fold shut with its answ
   // The orientation fold opens CLOSED, and its summary carries the chosen hold's words.
   const fold = page.getByTestId('engrave-setup-hold-fold');
   await expect(fold).not.toHaveAttribute('open', '');
-  await expect(fold.locator('summary')).toContainText('Which way round the part sits —');
+  await expect(fold.locator('summary')).toContainText('Which way round —');
   await expect(fold.locator('summary')).toContainText('mm');
   // The six cards are folded away until it is opened.
   await expect(page.getByTestId('engrave-setup-hold-length-width-thickness')).not.toBeVisible();
