@@ -253,10 +253,18 @@ export function sampleGoalRadialField(
    * design has nothing inside the rod on this ray). `degenerate` is set when a triangle is edge-on
    * to the ray or two crossings merge, where the crossing count may be 0 or 2 read as 1.
    */
-  const classifyRay = (ox: number, ang: number): { kind: 'inside' | 'below' | 'none'; below: number; degenerate: boolean } => {
+  const classifyRay = (
+    ox: number,
+    ang: number,
+    candidatesFor: readonly number[] | null,
+  ): { kind: 'inside' | 'below' | 'none'; below: number; degenerate: boolean } => {
     const hits: number[] = [];
     const flags = { degenerate: false };
-    for (let t = 0; t < triCount; t++) rayHit(t, ox, ang, hits, flags);
+    if (candidatesFor === null) {
+      for (let t = 0; t < triCount; t++) rayHit(t, ox, ang, hits, flags);
+    } else {
+      for (const t of candidatesFor) rayHit(t, ox, ang, hits, flags);
+    }
     hits.sort((a, b) => a - b);
     const crossings: number[] = [];
     for (const h of hits) {
@@ -281,6 +289,47 @@ export function sampleGoalRadialField(
     }
     return best;
   };
+  /**
+   * #1164 (b) — THE TRIANGLES A CELL CAN SEE. The rule needs the cell ray's full crossing list,
+   * but casting it against every triangle once per oversize cell is O(cells × triangles): the
+   * oversize lobed shaft at the goal check's 0.1 mm pitch is 42 210 cells × 5 760 triangles =
+   * 9.4 s, and the Cut screen waits in 'simulating…' (the e2e's 5 s). The raster already visits
+   * every (triangle, cell) pair its footprint can hit, so the candidates are collected there for
+   * free: a triangle that hits the ray is necessarily in the cell's footprint. Cells the retry
+   * pass filled, or a mesh with a degenerate full-wrap triangle, keep the exhaustive path — they
+   * are the hairline cases, not the hot one.
+   */
+  const candidates = new Map<number, number[]>();
+  const retried = new Uint8Array(nx * ny);
+  let skippedWrap = false;
+  /**
+   * A FACE SQUARE TO THE AXIS IS PARALLEL TO EVERY RADIAL RAY, so the in-plane test in `rayHit`
+   * is angle-independent for it: a whole x column is degenerate, not just the cells whose
+   * footprint happens to include that cap triangle. (The end-cap fixture expects exactly `ny`
+   * cells; the candidate index alone found 124 of 126 because two seam cells had no cap triangle
+   * in their angular slice.) Mark those columns once, from the triangles themselves.
+   */
+  const inPlaneColumn = new Uint8Array(nx);
+  for (let t = 0; t < triCount; t++) {
+    const ay = tri[t * 9 + 1]!;
+    const az = tri[t * 9 + 2]!;
+    const e1x = tri[t * 9 + 3]! - tri[t * 9]!;
+    const e1y = tri[t * 9 + 4]! - ay;
+    const e1z = tri[t * 9 + 5]! - az;
+    const e2x = tri[t * 9 + 6]! - tri[t * 9]!;
+    const e2y = tri[t * 9 + 7]! - ay;
+    const e2z = tri[t * 9 + 8]! - az;
+    const ny = e1z * e2x - e1x * e2z;
+    const nz = e1x * e2y - e1y * e2x;
+    // The normal is along X only when the triangle's vertices share an x (a cap square to the
+    // axis); then every radial ray is parallel to its plane.
+    if (ny !== 0 || nz !== 0) continue;
+    const nxNormal = e1y * e2z - e1z * e2y;
+    if (nxNormal === 0) continue;
+    const at = tri[t * 9]!;
+    const i = Math.round((at - x0) / pitch);
+    if (i >= 0 && i < nx && Math.abs(x0 + i * pitch - at) < 1e-6) inPlaneColumn[i] = 1;
+  }
   const record = (idx: number, r: number): void => {
     if (r <= 0) return;
     if (r > rawMax[idx]!) rawMax[idx] = r;
@@ -316,7 +365,11 @@ export function sampleGoalRadialField(
     const iHi = Math.min(nx - 1, Math.ceil((Math.max(ax, bx, cx) - x0) / pitch));
     const pLo = Math.min(pa, pb, pc);
     const pHi = Math.max(pa, pb, pc);
-    if (pHi - pLo > 2 * Math.PI) continue; // a degenerate wrap; no honest footprint
+    if (pHi - pLo > 2 * Math.PI) {
+      // A degenerate wrap has no honest footprint; the exhaustive classifier is the safe path.
+      skippedWrap = true;
+      continue;
+    }
     const jLo = Math.floor((pLo * radius) / pitch);
     const jHi = Math.ceil((pHi * radius) / pitch);
     for (let jj = jLo; jj <= jHi; jj++) {
@@ -330,7 +383,15 @@ export function sampleGoalRadialField(
       // row `j` it is recorded in — at a cliff that reads the wrong radius entirely (the panther's
       // 36 near-axis pinholes). The retry pass below already casts this way.
       const ang = (j * pitch) / radius - seam;
-      for (let i = iLo; i <= iHi; i++) record(j * nx + i, rayHit(t, x0 + i * pitch, ang));
+      for (let i = iLo; i <= iHi; i++) {
+        const idx = j * nx + i;
+        // The cell's candidate triangles, collected as the raster visits them. A wrapping
+        // footprint can reach the same cell twice; the list stays a set.
+        const list = candidates.get(idx);
+        if (list === undefined) candidates.set(idx, [t]);
+        else if (!list.includes(t)) list.push(t);
+        record(idx, rayHit(t, x0 + i * pitch, ang));
+      }
     }
   }
 
@@ -349,6 +410,8 @@ export function sampleGoalRadialField(
       if (covered[up] !== 1 && covered[down] !== 1) continue;
       const ang = (j * pitch) / radius - seam;
       const ox = x0 + i * pitch;
+      // A retry-filled cell has no trustworthy candidate list: classify it exhaustively.
+      retried[idx] = 1;
       record(idx, Math.max(rayHitAll(ox, ang - angStep), rayHitAll(ox, ang + angStep)));
     }
   }
@@ -377,12 +440,18 @@ export function sampleGoalRadialField(
     const i = idx - j * nx;
     const ang = (j * pitch) / radius - seam;
     const ox = x0 + i * pitch;
-    const centre = classifyRay(ox, ang);
+    const cellCandidates = candidates.get(idx) ?? [];
+    // The exhaustive path is kept for the cases the candidate index cannot represent exactly.
+    const list =
+      skippedWrap || retried[idx] === 1 || cellCandidates.length === 0 ? null : cellCandidates;
+    const centre = classifyRay(ox, ang, list);
     let chosen = centre;
-    if (centre.degenerate) {
+    if (centre.degenerate || inPlaneColumn[i] === 1) {
       degenerateCells += 1;
-      const left = classifyRay(ox, ang - angStep);
-      const right = classifyRay(ox, ang + angStep);
+      // The offsets are a QUARTER cell away — inside the same row's angular band — so every
+      // triangle they can hit is already in this cell's candidate list.
+      const left = classifyRay(ox, ang - angStep, list);
+      const right = classifyRay(ox, ang + angStep, list);
       if (left.kind !== right.kind) continue; // disagree: the conservative clip at R stands
       chosen = { kind: left.kind, below: Math.max(left.below, right.below), degenerate: false };
     }
