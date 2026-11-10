@@ -241,7 +241,15 @@ function sphereTarget(r = 8, rings = 10, segs = 20): EngraveTargetObject {
   };
 }
 
-function goalJob(target: EngraveTargetObject, tool: Tool = BALL, toolKey = 'inv:ball-2'): EngraveJob {
+/** `stock` lets a case that is not about the blank's size sit clear of the vise jaws (#1117):
+ *  these #992 cases are about the plan's statements, not holding, and a near-full blank on the
+ *  default vise now — rightly — refuses a freeing contour whose rim is inside the 6 mm shank. */
+function goalJob(
+  target: EngraveTargetObject,
+  tool: Tool = BALL,
+  toolKey = 'inv:ball-2',
+  stock: Partial<EngraveJob['stock']> = {},
+): EngraveJob {
   const base = defaultEngraveJob();
   return {
     ...base,
@@ -251,7 +259,7 @@ function goalJob(target: EngraveTargetObject, tool: Tool = BALL, toolKey = 'inv:
     targetObject: target,
     toolKey,
     tool,
-    stock: { ...base.stock, length: 40, width: 40, thickness: 20, material: 'hardwood' },
+    stock: { ...base.stock, length: 40, width: 40, thickness: 20, material: 'hardwood', ...stock },
   };
 }
 
@@ -259,7 +267,10 @@ describe('#992 — the seam routes the plan statements', () => {
   it('on the success path: warning/info statements become findings, sheet statements ride the run sheet', async () => {
     try {
       const target = goalTarget();
-      const out = await generateGoalProgram(goalJob(target), target, BALL, null, { shop: SHOP });
+      // Room from the stock's edge (#1117): the statement seam is what this case pins; on the
+      // 40 mm blank the freeing contour's rim sat inside the default vise's 6 mm shank.
+      const job = goalJob(target, BALL, 'inv:ball-2', { length: 80, width: 80 });
+      const out = await generateGoalProgram(job, target, BALL, null, { shop: SHOP });
       expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
       // A job that asks for no bevel states it as an INFO finding (the planner's own sentence).
       const noEdge = out.findings.find((f) => f.code === 'goal-no-edge-break');
@@ -276,7 +287,7 @@ describe('#992 — the seam routes the plan statements', () => {
       expect(out.planStatements?.some((s) => s.severity === 'sheet')).toBe(true);
       expect(out.findings.some((f) => (f.code as string).startsWith('plan-'))).toBe(false);
       // …and the run sheet prints them in its own section, through `sentence()`.
-      const sheet = buildRunSheet(goalJob(target), out, null);
+      const sheet = buildRunSheet(job, out, null);
       const section = sheet.sections.find((s) => s.id === 'plan');
       expect(section, `sections: ${sheet.sections.map((s) => s.id).join(', ')}`).toBeDefined();
       const text = section!.steps.map((s) => s.text).join(' ');
@@ -294,7 +305,9 @@ describe('#992 — the seam routes the plan statements', () => {
       // program case"), the plan states the rims stay sharp — and #992 makes that statement the
       // operator's info finding, beside #989's own goal-chamfer-no-cutter warning.
       const target = { ...goalTarget(), chamfer: { widthMm: 0.5 } };
-      const out = await generateGoalProgram(goalJob(target), target, BALL, null, { shop: SHOP });
+      // Room from the stock's edge (#1117), as the success-path case above.
+      const job = goalJob(target, BALL, 'inv:ball-2', { length: 80, width: 80 });
+      const out = await generateGoalProgram(job, target, BALL, null, { shop: SHOP });
       expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
       const noEdge = out.findings.find((f) => f.code === 'goal-no-edge-break');
       expect(noEdge, `findings: ${out.findings.map((f) => f.code).join(', ')}`).toBeDefined();
