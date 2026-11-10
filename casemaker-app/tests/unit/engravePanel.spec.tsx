@@ -5770,6 +5770,8 @@ describe('#1065 the cutter picker', () => {
     expect(values).toContain('flat-1.0');
     expect(values).toContain('flat-3.175x12-metal');
     expect(values).not.toContain('cat:p1065');
+  });
+});
 
 // ── #1046 — THE LADDER'S PRESS ON goal-rest-uncut ─────────────────────────────────────────────
 describe('#1046 EngravePanel — the standard-balls press', () => {

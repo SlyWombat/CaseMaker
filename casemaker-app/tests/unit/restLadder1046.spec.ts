@@ -154,14 +154,16 @@ describe('#1046 the plan states its own wall time (dump only)', () => {
 
 
   it('the posted NC bytes with the flag off are the pre-#1046 bytes (hashed), so the timing fields change no card', async () => {
-    // The Manager's ask: prove the flag-off program is byte-identical to the base commit's, by the
-    // NC TEXT — not only the plan JSON minus timings. The hash was measured by running this same
-    // case with the eight src files checked out at the #1046 base (c369d54ef).
+    // The Manager's ask: prove the flag-off program is byte-identical to MAIN's, by the NC TEXT —
+    // not only the plan JSON minus timings. The hash was re-measured for the rebased branch the
+    // same way the original was: this exact case run with the plan/pipeline sources checked out at
+    // the branch's base, now main 0022a093b (the old #1046-base hash d9aa7461 predates main's
+    // #1129/#1151 landings, which moved the plate's own NC). Flag off == main, byte for byte.
     const target = goalTarget();
     const job = goalJob(target);
     const out = await generateGoalProgram(job, target, BALL6, null, { shop: { tools: [], feeds: SHOP_FEEDS } });
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(out.nc).not.toBeNull();
-    expect(createHash('sha256').update(out.nc!, 'utf8').digest('hex')).toBe('d9aa746147f445bd0d60ab87c7c392ac163fef44146364115665111604bda6e9');
+    expect(createHash('sha256').update(out.nc!, 'utf8').digest('hex')).toBe('25ba7602f1cac4a05094f88b6ea938122deaa1db1bf83d1e43d2953684c2a00f');
   }, 300_000);
 });

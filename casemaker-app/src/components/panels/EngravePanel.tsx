@@ -2078,6 +2078,11 @@ export function EngravePanel(): JSX.Element {
    * the last Generate's own measured numbers (`restLadderEstimateMs`: the owned plan again plus
    * Σ√(D_finish/d) × its finish stage), never a constant. The run is a normal Generate with
    * `restLadder: true` under the same watchdog and stale guard; the ideal is not re-planned.
+   *
+   * WHERE IT RUNS. The press does not plan by itself: it calls the run store's `generate`, the one
+   * door every Generate press uses — so the page's own planner today and the house's runs service
+   * when #1126 offers one are one choice made in one place, and this press follows it without a
+   * second path. This build has no house runs path, so it runs in the page; the button says so.
    */
   const measureStandardBalls = (): void => {
     void run.generate(null, { restLadder: true });
@@ -5338,7 +5343,11 @@ export function EngravePanel(): JSX.Element {
                             type="button"
                             data-testid="engrave-goal-measure-balls"
                             disabled={estimateMs === null}
-                            title={estimateMs === null ? 'the last result carries no timings — run Generate first' : undefined}
+                            title={
+                              estimateMs === null
+                                ? 'the last result carries no timings — run Generate first'
+                                : 'plans a new Generate in this browser — this build has no house runs service'
+                            }
                             onClick={measureStandardBalls}
                           >
                             {estimateMs === null
