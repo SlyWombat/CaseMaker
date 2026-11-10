@@ -22,6 +22,14 @@
 import { HOUSE_API_PATH, houseRequest, type HouseFailure } from './houseClient';
 import { houseBaseUrl } from './houseBaseUrl';
 
+/**
+ * The runs API moves whole job documents and whole generated documents, not the small house
+ * records `houseRequest`'s no-service default is sized for (2 s). A twenty-minute run's result can
+ * be tens of megabytes over the LAN; the submit body can be a design job's meshes. Thirty seconds
+ * still calls a dead service dead.
+ */
+const RUNS_TIMEOUT_MS = 30_000;
+
 export interface RunsKey {
   jobSha: string;
   build: string;
@@ -83,7 +91,7 @@ function parseJson<T>(text: string): { ok: true; value: T } | { ok: false; detai
 
 /** Submit a job. The service validates the shop's ETag (412 when it moved) and the queue (429). */
 export async function submitRun(body: { job: unknown; shopEtag?: string | null }): Promise<RunsSubmit> {
-  const res = await houseRequest('POST', '/runs', body);
+  const res = await houseRequest('POST', '/runs', body, { timeoutMs: RUNS_TIMEOUT_MS });
   if (res.kind !== 'ok') return res;
   const parsed = parseJson<{ runId: string; queuePosition: number; key: RunsKey }>(res.text);
   if (!parsed.ok) return { kind: 'error', detail: parsed.detail };
@@ -92,7 +100,7 @@ export async function submitRun(body: { job: unknown; shopEtag?: string | null }
 
 /** Read the run's snapshot. */
 export async function readRun(id: string): Promise<RunRead> {
-  const res = await houseRequest('GET', `/runs/${encodeURIComponent(id)}`);
+  const res = await houseRequest('GET', `/runs/${encodeURIComponent(id)}`, undefined, { timeoutMs: RUNS_TIMEOUT_MS });
   if (res.kind !== 'ok') return res;
   const parsed = parseJson<RunSnapshot>(res.text);
   return parsed.ok ? { kind: 'ok', run: parsed.value } : { kind: 'error', detail: parsed.detail };
@@ -106,7 +114,7 @@ export type RunGenerated = { kind: 'ok'; generated: unknown } | HouseFailure;
  * panel settles a house run with it exactly as it settles an in-page one.
  */
 export async function readRunGenerated(id: string): Promise<RunGenerated> {
-  const res = await houseRequest('GET', `/runs/${encodeURIComponent(id)}/generated`);
+  const res = await houseRequest('GET', `/runs/${encodeURIComponent(id)}/generated`, undefined, { timeoutMs: RUNS_TIMEOUT_MS });
   if (res.kind !== 'ok') return res;
   const parsed = parseJson<unknown>(res.text);
   return parsed.ok ? { kind: 'ok', generated: parsed.value } : { kind: 'error', detail: parsed.detail };
@@ -114,7 +122,7 @@ export async function readRunGenerated(id: string): Promise<RunGenerated> {
 
 /** Cancel the run: the service terminates and reaps its child; the state settles 'cancelled'. */
 export async function cancelRun(id: string): Promise<RunCancel> {
-  const res = await houseRequest('POST', `/runs/${encodeURIComponent(id)}/cancel`);
+  const res = await houseRequest('POST', `/runs/${encodeURIComponent(id)}/cancel`, undefined, { timeoutMs: RUNS_TIMEOUT_MS });
   if (res.kind !== 'ok') return res;
   const parsed = parseJson<{ state: RunState }>(res.text);
   return parsed.ok ? { kind: 'ok', state: parsed.value.state } : { kind: 'error', detail: parsed.detail };
