@@ -241,9 +241,8 @@ describe('#1164 — the field is the design ∩ the rod', () => {
     // #1164 review — the reach bound follows the rewritten values: the groove floor is the nearest
     // thing to the axis, nearer than any outermost hit the raster recorded.
     expect(f.minRadius).toBeCloseTo(5, 2);
-    // The second pass's cost is stated in its own unit, as the tip field states its own.
-    expect(f.resolutionNote).toContain('beyond-rod cell(s) against');
-    expect(f.resolutionNote).toContain('ray–triangle tests');
+    // The second pass's work is a field, not an operator sentence.
+    expect(f.recastCells).toBeGreaterThan(0);
   });
 
   it('a degenerate ray at a low-poly vertex is decided by its quarter-cell neighbours', () => {
@@ -259,6 +258,47 @@ describe('#1164 — the field is the design ∩ the rod', () => {
     // ideal radius — the groove, not the rod surface (0) and not an uncovered cell.
     expect(f.z[k]!).toBeGreaterThan(5 - R - 0.1);
     expect(f.z[k]!).toBeLessThanOrEqual(5 - R + 1e-6);
+    // And the offsets were actually taken: the centre ray's coincident shared-edge hits merged.
+    expect(f.degenerateCells).toBeGreaterThan(0);
+  });
+
+  it('a face square to the axis is only parallel, not degenerate', () => {
+    // An end cap normal to X lies parallel to EVERY radial ray. Flagging that as degenerate would
+    // send every beyond-rod cell down the quarter-cell path (3x the work, a quarter-cell bias
+    // everywhere). The ray must also lie IN the face's plane; at mid-span it does not.
+    const fine = (r: number): Tri[] => sideTris(() => r, 20, TAU, 360);
+    const cap = (r: number, x: number, seg = 32): Tri[] => {
+      const tris: Tri[] = [];
+      for (let i = 0; i < seg; i++) {
+        const a0 = (i / seg) * TAU;
+        const a1 = ((i + 1) / seg) * TAU;
+        tris.push([
+          [x, 0, 0],
+          [x, r * Math.sin(a0), r * Math.cos(a0)],
+          [x, r * Math.sin(a1), r * Math.cos(a1)],
+        ]);
+      }
+      return tris;
+    };
+    // The seam is shifted half a cell so no sampled row sits exactly on a ring vertex; without
+    // that every row-0 cell would merge its shared-edge hits and be degenerate for that reason.
+    const placed = goal([...fine(5), ...fine(11), ...fine(13), ...cap(13, -10)], SPAN, {
+      position: { x: 50, y: PITCH / 2, z: 0 },
+    });
+    const f = sampleGoalRadialField(placed, R, { pitchMm: PITCH });
+    expect(f.recastCells).toBeGreaterThan(0);
+    // ONLY the cap's own plane is degenerate — the one x column at x = −10, where the ray really
+    // does lie in the cap. Every other beyond-rod cell classifies from its centre ray. Under the
+    // wide flag this would be every recast cell (3x the work, a quarter-cell bias everywhere).
+    expect(f.degenerateCells).toBe(f.ny);
+    expect(f.degenerateCells).toBeLessThan(f.recastCells);
+    expect(f.z[cell(f, 50, 0)]).toBeCloseTo(5 - R, 2);
+    // The control without the cap: no cell is degenerate at all, so the one column above is the
+    // cap's and not the seam-shift's.
+    const plain = sampleGoalRadialField(goal([...fine(5), ...fine(11), ...fine(13)], SPAN, {
+      position: { x: 50, y: PITCH / 2, z: 0 },
+    }), R, { pitchMm: PITCH });
+    expect(plain.degenerateCells).toBe(0);
   });
 
   it('a mesh whose material fills the rod samples R, not a surface below it', () => {

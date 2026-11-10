@@ -69,6 +69,15 @@ export interface GoalRadialField {
   /** The smallest / largest radius any ray hit, mm. `radius` when no ray hit anything. */
   minRadius: number;
   maxRadius: number;
+  /**
+   * #1164 — how many beyond-rod cells the design ∩ rod rule re-cast against the mesh. The second
+   * pass's work in its own unit (cells × triangles): a field over a large oversize mesh shows the
+   * cost here, not in the operator's resolution sentence.
+   */
+  recastCells: number;
+  /** #1164 — of `recastCells`, how many were classified from the quarter-cell offsets (a
+   * degenerate centre ray: in a face's plane, or a silhouette edge merged by the crossing merge). */
+  degenerateCells: number;
   z: Float32Array;
   /** 1 where at least one triangle's ray was hit, else 0 (the stock's surface stands). */
   covered: Uint8Array;
@@ -204,7 +213,20 @@ export function sampleGoalRadialField(
     const pz = -dy * e2x;
     const det = e1x * px + e1y * py + e1z * pz;
     if (Math.abs(det) < EPS) {
-      if (flags !== undefined) flags.degenerate = true;
+      // #1164 review — PARALLEL IS NOT DEGENERATE. A face square to the axis (an end cap, a flat
+      // normal to X) is parallel to every radial ray; flagging those would send every beyond-rod
+      // cell down the quarter-cell path (3x the work and a quarter-cell bias everywhere). The ray
+      // is degenerate only when it also LIES IN the triangle's plane.
+      if (flags !== undefined) {
+        const nx = e1y * e2z - e1z * e2y;
+        const ny = e1z * e2x - e1x * e2z;
+        const nz = e1x * e2y - e1y * e2x;
+        const len = Math.hypot(nx, ny, nz);
+        if (len > 0) {
+          const distance = Math.abs((ox - ax) * (nx / len) - ay * (ny / len) - az * (nz / len));
+          if (distance < 1e-6) flags.degenerate = true;
+        }
+      }
       return 0;
     }
     const inv = 1 / det;
@@ -347,6 +369,7 @@ export function sampleGoalRadialField(
   // clip at R stands (conservative: the planner then stands off rather than cutting in). This is
   // the one place a disagreement is resolved in favour of the rod, and it is stated here.
   let oversizeCells = 0;
+  let degenerateCells = 0;
   for (let idx = 0; idx < z.length; idx++) {
     if (covered[idx] !== 1 || rawMax[idx]! <= radius + CROSS) continue;
     oversizeCells += 1;
@@ -357,6 +380,7 @@ export function sampleGoalRadialField(
     const centre = classifyRay(ox, ang);
     let chosen = centre;
     if (centre.degenerate) {
+      degenerateCells += 1;
       const left = classifyRay(ox, ang - angStep);
       const right = classifyRay(ox, ang + angStep);
       if (left.kind !== right.kind) continue; // disagree: the conservative clip at R stands
@@ -387,14 +411,22 @@ export function sampleGoalRadialField(
       ? `sampled on a ${pitch.toFixed(4)} mm grid around a ⌀${Number((2 * radius).toFixed(3))} mm rod ` +
         `(coarsened from the requested ${requestedPitch} mm: the map would need ${nx * ny} cells, over the ${maxCells}-cell cap)`
       : `sampled on a ${pitch} mm grid around a ⌀${Number((2 * radius).toFixed(3))} mm rod`) +
-    `; one map cell is ${Number(((pitch / radius) * (180 / Math.PI)).toFixed(3))}° of A` +
-    // #1164 review — the second pass's cost in its algorithm's unit, stated as the tip field states
-    // its own: every beyond-rod cell re-cast against every triangle. A 100k-triangle oversize mesh
-    // is then a number the reader can see, not an unexplained wait.
-    (oversizeCells === 0
-      ? ''
-      : `; the design ∩ rod rule re-cast ${oversizeCells} beyond-rod cell(s) against ${triCount} triangle(s) ` +
-        `(${oversizeCells * triCount} ray–triangle tests)`);
+    `; one map cell is ${Number(((pitch / radius) * (180 / Math.PI)).toFixed(3))}° of A`;
 
-  return { nx, ny, x0, y0: 0, pitch, radius, minRadius, maxRadius, z, covered, coveredCount, resolutionNote };
+  return {
+    nx,
+    ny,
+    x0,
+    y0: 0,
+    pitch,
+    radius,
+    minRadius,
+    maxRadius,
+    recastCells: oversizeCells,
+    degenerateCells,
+    z,
+    covered,
+    coveredCount,
+    resolutionNote,
+  };
 }
