@@ -2050,6 +2050,17 @@ export function validateJob(
     drillIsBit && drillAngle !== null && drillAngle.ok && drillDiameter !== null && drillDiameter > 0
       ? pointLength(drillDiameter, drillAngle.deg)
       : 0;
+  /**
+   * #1140 — the point a CUTTER's tip adds below its full diameter, from that cutter's own record:
+   * a drill bit's cone, 0 for a flat. The hole checks below read the cutter their setup assigns;
+   * this keeps the tip depth honest for whichever bit actually drills.
+   */
+  const pointLengthFor = (cutter: Tool | null): number => {
+    if (cutter === null || cutter.shape !== 'drill') return 0;
+    const diameter = cuttingDiameter(cutter);
+    const angle = drillPointAngle(cutter, drillPoint ?? { deg: DRILL_POINT_FALLBACK_DEG, source: 'fallback' });
+    return diameter !== null && diameter > 0 && angle.ok ? pointLength(diameter, angle.deg) : 0;
+  };
   // #218 — one gate for every through cut. The board must exist AND leave a millimetre under the
   // breakthrough; without it a through cut is a cut into the vise. `throughDepth` is the work
   // depth a through cut reaches, the same number `toPartPlan` gives every through region and
@@ -2298,20 +2309,24 @@ export function validateJob(
       if (!throughReady) {
         const board = throughBoardFinding(drill.id, who, job, bed);
         if (board !== null) findings.push(board);
-      } else if (
-        drillTool !== null &&
-        drillTool.fluteLength !== null &&
-        drillTool.fluteLength > 0 &&
-        throughDepth > drillTool.fluteLength
-      ) {
-        findings.push({
-          severity: 'error',
-          code: 'through-tool-reach',
-          labelId: drill.id,
-          message:
-            `${who} cuts through to ${fmt3(throughDepth)} mm, past the ${drillTool.fluteLength} mm ` +
-            `flute of "${drillTool.name}"; the flutes would be buried and chips could not clear.`,
-        });
+      } else {
+        // #1140 — the HOLE's own drill answers for its reach; the job's cutter never drills it.
+        const cutter = itemCutter(drill.id);
+        if (
+          cutter !== null &&
+          cutter.fluteLength !== null &&
+          cutter.fluteLength > 0 &&
+          throughDepth > cutter.fluteLength
+        ) {
+          findings.push({
+            severity: 'error',
+            code: 'through-tool-reach',
+            labelId: drill.id,
+            message:
+              `${who} cuts through to ${fmt3(throughDepth)} mm, past the ${cutter.fluteLength} mm ` +
+              `flute of "${cutter.name}"; the flutes would be buried and chips could not clear.`,
+          });
+        }
       }
     } else if (depthAtFloor > floorAllowed) {
       // #786 slice 5 — the same rule for a drill: the sentence states the floor or breakthrough,
@@ -3255,72 +3270,90 @@ export function validateJob(
   // cutter, so a centre-cutting proof is not what it needs, and the question must not be asked
   // about one. The check below is the PLUNGE drills' only (`mode` absent means a drill).
   const plungeDrills = enabledDrills.filter((d) => (d.mode ?? 'drill') !== 'bore');
-  if (plungeDrills.length > 0 && drillTool) {
-    if (drillTool.centreCutting === false) {
-      // #786 slice 4c-2 — ANSWERED NO: the hole is left out, like the unanswered one. The job is not
-      // refused for a hole this cutter cannot plunge — every other cut still posts, and a drill
-      // bit or a centre-cutting mill is the way to cut it.
-      const holes = plungeDrills.map(drillOperationName);
-      findings.push({
-        severity: 'warning',
-        code: 'plunge-unproven',
-        // ONE hole wears the finding on its own row (the `⚠` the operator reads where the hole
-        // is, and where the Yes/No sits); several holes get ONE job-level question naming the
-        // count, so a ten-hole job is not ten copies of the same sentence.
-        ...(plungeDrills.length === 1 ? { labelId: plungeDrills[0]!.id } : {}),
-        message:
-          `"${drillTool.name}" is recorded as NOT centre-cutting, so ` +
-          `${holes.length === 1 ? holes[0] : `${holes.length} plunge holes`} ` +
-          `${holes.length === 1 ? 'is' : 'are'} left out of the programs — every other cut still ` +
-          `posts. Use a centre-cutting end mill, or a drill bit, for the plunge.`,
-      });
-    } else if (drillTool.centreCutting === null && !drillIsBit) {
-      // A DRILL BIT is centre-cutting by construction (#434): its point is the cutting end, so
-      // the flat cutter's unproven-plunge warning would be a false doubt. The explicit `false`
-      // above still fires: a record that says so is a contradiction worth showing.
-      //
-      // #786 slice 4c-2 — THE UNKNOWN IS ASKED, IN PLACE, ONCE PER CUTTER, AND THE CUT POSTS.
-      // An unrecorded cutter is not a refusal (#220's rule): the hole is programmed with the
-      // uncertainty named, and the answer goes on the cutter's own record — so this sentence is
-      // shown once per cutter, ever, not once per job. Withholding the unanswered hole deleted
-      // every drill's own operation from jobs whose cutter had never been asked (the engrave e2e
-      // found it); an ANSWERED "no" is the only claim that leaves the hole out.
-      const holes = plungeDrills.map(drillOperationName);
-      findings.push({
-        severity: 'warning',
-        code: 'plunge-unproven',
-        // See the answered-`no` branch above: one hole carries the question on its row; several
-        // ask once, job-level, with the count.
-        ...(plungeDrills.length === 1 ? { labelId: plungeDrills[0]!.id } : {}),
-        message:
-          `Is the ${toolDisplayName(drillTool).split(' · ')[0]!} centre-cutting? Nothing on its ` +
-          `record says so, and this job plunges ` +
-          `${holes.length === 1 ? holes[0] : `${holes.length} plunge holes`} straight into the ` +
-          `stock: a cutter that cannot plunge needs a pilot hole or a drill bit, so answer once ` +
-          `on the cutter — the cut posts either way until the record says it cannot.`,
-      });
+  if (plungeDrills.length > 0) {
+    // #1140 — EACH HOLE'S OWN CUTTER ANSWERS the centre-cutting question. A board's holes are
+    // drilled by the cutters its setups assign them (a drill bit, or a flat end mill of the
+    // hole's size), not by the job's first cutter; the job's own is the fallback for a hole no
+    // setup claims. Holes are grouped by their cutter so a ten-hole job is still one question
+    // per cutter, not ten copies of it.
+    const byCutter = new Map<string, { cutter: Tool; holes: typeof enabledDrills }>();
+    for (const drill of plungeDrills) {
+      const cutter = itemCutter(drill.id);
+      if (cutter === null) continue;
+      const key = assignedCutterKey(job, drill.id) ?? job.toolKey;
+      const group = byCutter.get(key);
+      if (group === undefined) byCutter.set(key, { cutter, holes: [drill] });
+      else group.holes.push(drill);
+    }
+    for (const { cutter, holes: group } of byCutter.values()) {
+      const holes = group.map(drillOperationName);
+      if (cutter.centreCutting === false) {
+        // #786 slice 4c-2 — ANSWERED NO: the hole is left out, like the unanswered one. The job is
+        // not refused for a hole this cutter cannot plunge — every other cut still posts, and a
+        // drill bit or a centre-cutting mill is the way to cut it.
+        findings.push({
+          severity: 'warning',
+          code: 'plunge-unproven',
+          // ONE hole wears the finding on its own row (the `⚠` the operator reads where the hole
+          // is, and where the Yes/No sits); several holes get ONE job-level question naming the
+          // count, so a ten-hole job is not ten copies of the same sentence.
+          ...(group.length === 1 ? { labelId: group[0]!.id } : {}),
+          message:
+            `"${cutter.name}" is recorded as NOT centre-cutting, so ` +
+            `${holes.length === 1 ? holes[0] : `${holes.length} plunge holes`} ` +
+            `${holes.length === 1 ? 'is' : 'are'} left out of the programs — every other cut still ` +
+            `posts. Use a centre-cutting end mill, or a drill bit, for the plunge.`,
+        });
+      } else if (cutter.centreCutting === null && cutter.shape !== 'drill') {
+        // A DRILL BIT is centre-cutting by construction (#434): its point is the cutting end, so
+        // the flat cutter's unproven-plunge warning would be a false doubt. The explicit `false`
+        // above still fires: a record that says so is a contradiction worth showing.
+        //
+        // #786 slice 4c-2 — THE UNKNOWN IS ASKED, IN PLACE, ONCE PER CUTTER, AND THE CUT POSTS.
+        // An unrecorded cutter is not a refusal (#220's rule): the hole is programmed with the
+        // uncertainty named, and the answer goes on the cutter's own record — so this sentence is
+        // shown once per cutter, ever, not once per job. Withholding the unanswered hole deleted
+        // every drill's own operation from jobs whose cutter had never been asked (the engrave e2e
+        // found it); an ANSWERED "no" is the only claim that leaves the hole out.
+        findings.push({
+          severity: 'warning',
+          code: 'plunge-unproven',
+          // See the answered-`no` branch above: one hole carries the question on its row; several
+          // ask once, job-level, with the count.
+          ...(group.length === 1 ? { labelId: group[0]!.id } : {}),
+          message:
+            `Is the ${toolDisplayName(cutter).split(' · ')[0]!} centre-cutting? Nothing on its ` +
+            `record says so, and this job plunges ` +
+            `${holes.length === 1 ? holes[0] : `${holes.length} plunge holes`} straight into the ` +
+            `stock: a cutter that cannot plunge needs a pilot hole or a drill bit, so answer once ` +
+            `on the cutter — the cut posts either way until the record says it cannot.`,
+        });
+      }
     }
     // A peck must fit inside the flute: beyond it the chips have nowhere to go. A drill bit's
-    // TIP is the deepest point, so the whole tip depth — hole plus point — has to fit.
-    if (drillTool.fluteLength !== null && drillTool.fluteLength > 0) {
-      for (const drill of enabledDrills) {
-        // A through drill's reach is judged by `through-tool-reach` against the board depth, not
-        // against `drill.depth` (which it does not use). One owner for the number.
-        if (drill.through) continue;
-        const needed = drill.depth + drillPointLength;
-        if (needed > drillTool.fluteLength) {
-          findings.push({
-            severity: 'error',
-            code: 'drill-too-deep',
-            labelId: drill.id,
-            message: drillIsBit
+    // TIP is the deepest point, so the whole tip depth — hole plus point — has to fit. #1140: the
+    // flute and the point are the HOLE's own cutter's.
+    for (const drill of enabledDrills) {
+      // A through drill's reach is judged by `through-tool-reach` against the board depth, not
+      // against `drill.depth` (which it does not use). One owner for the number.
+      if (drill.through) continue;
+      const cutter = itemCutter(drill.id);
+      if (cutter === null || cutter.fluteLength === null || !(cutter.fluteLength > 0)) continue;
+      const point = pointLengthFor(cutter);
+      const needed = drill.depth + point;
+      if (needed > cutter.fluteLength) {
+        findings.push({
+          severity: 'error',
+          code: 'drill-too-deep',
+          labelId: drill.id,
+          message:
+            cutter.shape === 'drill'
               ? `${drillOperationName(drill)} needs ${fmt3(needed)} mm of flute (the ${fmt3(drill.depth)} mm ` +
-                `hole plus its ${fmt3(drillPointLength)} mm point), past the ${drillTool.fluteLength} mm ` +
-                `flute of "${drillTool.name}": once the flutes are buried, chips cannot clear.`
-              : `${drillOperationName(drill)} drills ${drill.depth} mm, past the ${drillTool.fluteLength} mm ` +
-                `flute of "${drillTool.name}": once the flutes are buried, chips cannot clear.`,
-          });
-        }
+                `hole plus its ${fmt3(point)} mm point), past the ${cutter.fluteLength} mm ` +
+                `flute of "${cutter.name}": once the flutes are buried, chips cannot clear.`
+              : `${drillOperationName(drill)} drills ${drill.depth} mm, past the ${cutter.fluteLength} mm ` +
+                `flute of "${cutter.name}": once the flutes are buried, chips cannot clear.`,
+        });
       }
     }
     // #434 — a drill bit is the cutter of a DRILL-ONLY program. This is checked here, on the job's
@@ -3328,7 +3361,7 @@ export function validateJob(
     // generator judges each setup's sub-job (which carries one materialised cutter) with this same
     // function. A legacy document pairing the drill with a region, trace or thread would otherwise
     // reach the drill branch with work the bit cannot do.
-    if (drillIsBit && job.setups === undefined) {
+    if (drillTool !== null && drillIsBit && job.setups === undefined) {
       const otherWork: string[] = [
         ...enabled.map(itemLabel),
         ...enabledTraces.map(traceOperationName),

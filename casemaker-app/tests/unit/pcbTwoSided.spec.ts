@@ -606,4 +606,69 @@ describe('#1140 the shape gates judge the cutter a setup assigns to the item', (
     const stripped = { ...job, setups: job.setups!.map((s) => ({ ...s, toolItems: undefined })) };
     expect(validateJob(stripped, null, { tools: bench }).some((f) => f.code === 'bore-needs-end-mill')).toBe(true);
   });
+
+  it('judges a hole’s through reach by its own drill, not the job’s cutter', async () => {
+    // The 0.8 mm holes are drilled by a bit whose own flute is 1 mm — shorter than the 1.6 mm
+    // board plus its breakthrough. The job's cutter is the engraver (flute 12), which never
+    // touches these holes; judging by it passed a hole its own drill cannot clear.
+    const shortDrill: ToolLibraryEntry = {
+      key: 'inv:d08',
+      provenance: 'test',
+      tool: flatEndMill(0.8, {
+        id: 'pcb-drill-0-8',
+        name: 'PCB drill 0.8 mm, short flute (e2e)',
+        shape: 'drill',
+        tipDiameter: 0.8,
+        diameter: 0.8,
+        fluteLength: 1,
+      }),
+    };
+    const bench = [engraver, shortDrill, bit('inv:d10', 'pcb-drill-1-0', 1.0), corn];
+    const built = await buildPcbJob(tl, SET(), { blank: BLANK, tabs: TABS, tools: bench, catalogue: ROWS });
+    if (!built.ok) throw new Error(built.error);
+    const job = built.job;
+    job.tool = engraver.tool;
+    // The 0.8 mm holes are the short drill's own items.
+    const holes = (job.drills ?? []).filter((d) => d.diameter !== undefined && Math.abs(d.diameter - 0.8) < 1e-9);
+    expect(holes.length).toBeGreaterThan(0);
+    expect(job.setups!.some((s) => (s.toolItems?.['inv:d08'] ?? []).some((id) => holes.some((h) => h.id === id)))).toBe(true);
+    const { validateJob } = await import('@/engine/cnc/engrave/jobSetup');
+    const reach = validateJob(job, null, { tools: bench }).filter((f) => f.code === 'through-tool-reach');
+    expect(reach.map((f) => f.labelId)).toEqual(expect.arrayContaining(holes.map((h) => h.id)));
+    expect(reach[0]!.message).toContain('1 mm flute');
+    expect(reach[0]!.message).toContain('PCB drill 0.8 mm, short flute (e2e)');
+    // With no assignment the job's engraver answers, and its 12 mm flute clears the board.
+    const stripped = { ...job, setups: job.setups!.map((s) => ({ ...s, toolItems: undefined })) };
+    expect(validateJob(stripped, null, { tools: bench }).some((f) => f.code === 'through-tool-reach')).toBe(false);
+  });
+
+  it('asks the centre-cutting question of the flat that drills the holes, not the job’s engraver', async () => {
+    // No 0.8 mm bit in the bench: the 0.8 mm holes are drilled by a 0.8 mm FLAT end mill whose
+    // record does not answer centre-cutting. The question belongs to that cutter and those holes.
+    const slotMill: ToolLibraryEntry = {
+      key: 'inv:slot-0-8',
+      provenance: 'test',
+      tool: flatEndMill(0.8, {
+        id: 'pcb-slot-0-8',
+        name: 'PCB slot mill 0.8 mm (e2e)',
+        shape: 'flat',
+        tipDiameter: 0.8,
+        diameter: 0.8,
+        fluteLength: 12,
+        centreCutting: null,
+      }),
+    };
+    const bench = [engraver, slotMill, bit('inv:d10', 'pcb-drill-1-0', 1.0), corn];
+    const built = await buildPcbJob(tl, SET(), { blank: BLANK, tabs: TABS, tools: bench, catalogue: ROWS });
+    if (!built.ok) throw new Error(built.error);
+    const job = built.job;
+    job.tool = engraver.tool;
+    const { validateJob } = await import('@/engine/cnc/engrave/jobSetup');
+    const asks = validateJob(job, null, { tools: bench }).filter((f) => f.code === 'plunge-unproven');
+    expect(asks).toHaveLength(1);
+    // The question is asked of the assigned slot mill — displayed the way every cutter is named
+    // (`toolDisplayName`) — and not of the job's engraver, which never drills a hole here.
+    expect(asks[0]!.message).toContain('⌀ 0.8 mm flat end');
+    expect(asks[0]!.message).not.toContain('engraver');
+  });
 });
