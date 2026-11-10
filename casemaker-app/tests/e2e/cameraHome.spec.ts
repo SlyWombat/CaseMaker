@@ -3,35 +3,12 @@
 // clearance frame (`coordinate.clearance_x/y/z`). The move itself is proved against the fake
 // console in `machineCameraHome.spec.ts`; this file pins the pane's wiring and its guard's words.
 
-import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures/caseMaker';
+import { rememberMachine } from './fixtures/rememberMachine';
 
 const IDLE = '<Idle|MPos:0,0,0|WPos:0,0,0>';
 const RUNNING = '<Run|MPos:1,2,-1|WPos:1,2,-1|P:120,40,88>';
 
-/** Put a machine on screen without one — the observation a probe would have written. */
-async function rememberMachine(page: Page, line: string, busy: boolean): Promise<void> {
-  await page.evaluate(
-    ({ text, isBusy }) => {
-      window.__caseMaker!.setMachine(
-        {
-          name: 'QA Z1',
-          host: '192.0.2.10',
-          port: 2222,
-          busy: isBusy,
-          ip: null,
-          mac: null,
-          status: text,
-          profileId: 'Z1',
-          observedAt: '2026-10-25T00:00:00.000Z',
-          notes: [],
-        },
-        text,
-      );
-    },
-    { text: line, isBusy: busy },
-  );
-}
 
 test('#770 the camera pane offers one fixed move, only on an idle machine', async ({ cm, page }) => {
   await cm.ready();

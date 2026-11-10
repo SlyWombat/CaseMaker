@@ -8,68 +8,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
 import { lanServerPort } from '../../scripts/e2ePort';
-import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { test, expect } from './fixtures/caseMaker';
 import { installFakeConsole } from './fixtures/fakeConsole';
+import { prepareFakeRun } from './fixtures/generatedRun';
 
 // #821/#867 — the machine console is reached in a bundle that carries the bridge: the desktop bundle served to a browser.
 test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
 test.setTimeout(300_000);
 
 const OUT = path.join(path.resolve(process.cwd(), '..'), 'docs', 'bench', 'img', '2026-10-31-pause-resume');
-const STATUS = '<Idle|MPos:0,0,0|WPos:0,0,0|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>';
-
-async function rememberMachine(page: Page): Promise<void> {
-  await page.evaluate((line) => {
-    window.__caseMaker!.setMachine(
-      {
-        name: 'QA Z1',
-        host: '192.0.2.10',
-        port: 2222,
-        busy: false,
-        ip: null,
-        mac: null,
-        status: line,
-        profileId: 'Z1',
-        observedAt: '2026-10-25T00:00:00.000Z',
-        notes: [],
-      },
-      line,
-    );
-  }, STATUS);
-}
-
-/** A generated program, Cut with its ONE statement given, and the run entry prepared. */
-async function prepareFakeRun(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
-    window.__caseMaker!.engraveReset();
-  });
-  await rememberMachine(page);
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
-  await expect(page.getByTestId('engrave-panel')).toBeVisible();
-
-  await openCutterGroup(page);
-  await page.getByTestId('engrave-tool').selectOption('flat-1.0');
-  await page.getByTestId('engrave-generate').click();
-  await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
-  await page.getByTestId('cnc-mode-cut').click();
-  await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
-
-  const step1 = page.getByTestId('engrave-cut-step-1');
-  if (!(await step1.evaluate((el) => (el as HTMLDetailsElement).open))) {
-    await page.getByTestId('engrave-cut-step-1-summary').click();
-  }
-  await page.getByTestId('engrave-ack').check();
-  const step3 = page.getByTestId('engrave-cut-step-3');
-  if (!(await step3.evaluate((el) => (el as HTMLDetailsElement).open))) {
-    await page.getByTestId('engrave-cut-step-3-summary').click();
-  }
-  await expect(page.getByTestId('engrave-cut-confirm')).toBeVisible({ timeout: 30_000 });
-  const prepared = await page.evaluate(() =>
-    window.__caseMaker!.machineRunPrepare('192.0.2.10', 2222, 'job.nc', 'M03\nM05\n'),
-  );
-  expect(prepared, 'the machine run entry is prepared').toBe(true);
-}
 
 async function shoot(page: Page, name: string): Promise<void> {
   fs.mkdirSync(OUT, { recursive: true });

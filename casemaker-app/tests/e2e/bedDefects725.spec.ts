@@ -22,42 +22,11 @@
 // runs again. The other #934 entries above stay hidden behind their own issues; a walk that ever
 // reaches one must be skipped with that reason, not this one.
 
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures/caseMaker';
+import { locationDocument, locationView, serveHouse } from './fixtures/fakeHouse';
 
 test.setTimeout(300_000);
-
-type Doc = {
-  kind: string;
-  schemaVersion: number;
-  id: string;
-  name: string;
-  createdAt: string;
-  migratedFrom?: string | null;
-  machines: Array<Record<string, unknown> & { bedProfiles?: Array<Record<string, unknown>> }>;
-  accessories: Array<Record<string, unknown>>;
-  stock?: unknown;
-  inventory?: unknown;
-  defaults?: Record<string, unknown>;
-};
-
-const DOC = JSON.parse(
-  readFileSync(fileURLToPath(new URL('../unit/fixtures/location-doc.json', import.meta.url)), 'utf8'),
-) as Doc;
-
-const HEALTH = {
-  ok: true,
-  schemaVersion: 1,
-  hasCatalogue: false,
-  feedRows: 0,
-  materialSpecRows: 0,
-  catalogueSyncedAt: null,
-  lastSync: null,
-  problems: [],
-  warnings: [],
-};
 
 const BARE_SURFACE = {
   kind: 'bare-bed',
@@ -93,10 +62,10 @@ const ROTARY_FX = {
  * The fixture's machine with nothing on the pins, the bed's wasteboard measured (or bare), and the
  * bracket at anchor 1 when `anchor` — the same shapes the unit fixtures seed.
  */
-function locationView(opts: { anchor: boolean; bare?: boolean }): unknown {
-  const doc = JSON.parse(JSON.stringify(DOC)) as Doc;
+function defectsView(opts: { anchor: boolean; bare?: boolean }): unknown {
+  const doc = locationDocument();
   const machine = doc.machines[0]!;
-  const profile = machine.bedProfiles![0]!;
+  const profile = (machine.bedProfiles as Array<Record<string, unknown>>)[0]!;
   profile.placements = (profile.placements as unknown[]).filter(
     (pl) => ((pl as { where?: { kind?: string } }).where?.kind ?? '') !== 'pins',
   );
@@ -114,38 +83,13 @@ function locationView(opts: { anchor: boolean; bare?: boolean }): unknown {
     ? { ...BARE_SURFACE }
     : { ...(profile.surface as object), length: 300, width: 200, position: { frontLeft: [20, 30], frame: 'machine' } };
   profile.consumables = BOARDS_AND_TAPE;
-  return {
-    kind: doc.kind,
-    schemaVersion: doc.schemaVersion,
-    id: doc.id,
-    name: doc.name,
-    createdAt: doc.createdAt,
-    migratedFrom: doc.migratedFrom ?? null,
-    machines: doc.machines,
-    accessories: [...doc.accessories, ROTARY_FX],
-  };
+  doc.accessories = [...doc.accessories, ROTARY_FX];
+  return locationView(doc);
 }
 
-/** The exercise's fake house: health, the catalogue lists, the defaults and the location. */
-async function fakeHouse(page: Page, view: unknown): Promise<void> {
-  await page.route('**/api/v1/**', async (route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname.replace(/^.*\/api\/v1/, '');
-    const json = (body: unknown): Promise<void> =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        headers: { etag: '"e1"' },
-        body: JSON.stringify(body),
-      });
-    if (path === '/health') return json(HEALTH);
-    if (path === '/tools') return json([]);
-    if (path === '/inventory') return json(DOC.inventory ?? []);
-    if (path === '/stock') return json(DOC.stock ?? []);
-    if (path === '/defaults') return json(DOC.defaults ?? {});
-    if (path === '/location') return json(view);
-    return route.fulfill({ status: 404, body: '' });
-  });
+/** The house for one walk: the view above, and the fixture's own lists beside it. */
+async function fakeHouse(page: Page, opts: { anchor: boolean; bare?: boolean }): Promise<void> {
+  await serveHouse(page, { location: defectsView(opts), fromSharedDocument: true });
 }
 
 /** Door → stock, typed: the operator's own plate. Leaves the wizard on the Holding step. */
@@ -172,7 +116,7 @@ async function runPhase(page: Page): Promise<{ phase: string; stage: string | nu
 }
 
 test('#725 B4/W1 — a clamp in the Tray’s path is named at Generate, and its Fix opens Holding', async ({ cm, page }) => {
-  await fakeHouse(page, locationView({ anchor: true }));
+  await fakeHouse(page, { anchor: true });
   await cm.ready();
   await typePlate(page, [100, 60, 6]);
 
@@ -217,7 +161,7 @@ test('#725 B4/W1 — a clamp in the Tray’s path is named at Generate, and its 
 });
 
 test('#725 B7/W11 — a through cut taped on the wasteboard generates; a bare bed says the design’s sentence', async ({ cm, page }) => {
-  await fakeHouse(page, locationView({ anchor: false }));
+  await fakeHouse(page, { anchor: false });
   await cm.ready();
   await typePlate(page, [80, 60, 2]);
 
@@ -266,7 +210,7 @@ test('#725 B7/W11 — a through cut taped on the wasteboard generates; a bare be
 });
 
 test('#725 B6 — hovering a mount row previews it without moving the wizard’s controls', async ({ cm, page }) => {
-  await fakeHouse(page, locationView({ anchor: true }));
+  await fakeHouse(page, { anchor: true });
   await cm.ready();
   await typePlate(page, [100, 60, 6]);
 
@@ -287,7 +231,7 @@ test('#725 B6 — hovering a mount row previews it without moving the wizard’s
 });
 
 test('#725 W11 — a bare bed with no board under it says what to put there', async ({ cm, page }) => {
-  await fakeHouse(page, locationView({ anchor: false, bare: true }));
+  await fakeHouse(page, { anchor: false, bare: true });
   await cm.ready();
   await typePlate(page, [80, 60, 2]);
 

@@ -4,56 +4,20 @@
 // Y −180, Z −50 — shows the measured Y, Z and R beside the check chord's residual, and writes the
 // reading to the active bed profile's `rotaryAxis` datum. Screenshot under
 // docs/bench/img/2026-10-31-rotary-tap/.
-import { readFileSync } from 'node:fs';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 import { lanServerPort } from '../../scripts/e2ePort';
 import { test, expect } from './fixtures/caseMaker';
 import { installFakeConsole } from './fixtures/fakeConsole';
+import { locationDocument, locationView, serveHouse, type House, type Json } from './fixtures/fakeHouse';
 
 test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
 test.setTimeout(180_000);
 
 const OUT = path.join(path.resolve(process.cwd(), '..'), 'docs', 'bench', 'img', '2026-10-31-rotary-tap');
 
-type Json = Record<string, unknown>;
-type Doc = {
-  kind: string;
-  schemaVersion: number;
-  id: string;
-  name: string;
-  createdAt: string;
-  machines: Json[];
-  accessories: Json[];
-  defaults?: Record<string, unknown>;
-  inventory?: unknown;
-  stock?: unknown;
-};
-
-const DOC = JSON.parse(
-  readFileSync(fileURLToPath(new URL('../unit/fixtures/location-doc.json', import.meta.url)), 'utf8'),
-) as Doc;
-
 const NOW = '2026-10-31T00:00:00.000Z';
-
-const HEALTH = {
-  ok: true,
-  schemaVersion: 1,
-  hasCatalogue: false,
-  feedRows: 0,
-  materialSpecRows: 0,
-  catalogueSyncedAt: null,
-  lastSync: null,
-  problems: [],
-  warnings: [],
-};
-
-interface House {
-  /** The machine record the service now holds (the latest machine PUT). */
-  machine(): Json & { bedProfiles?: Json[]; activeBedProfileId?: string };
-}
 
 /**
  * A one-machine house: the fixture's Z1 with a read frame and an ACTIVE bed profile whose surface
@@ -61,7 +25,7 @@ interface House {
  * Every handler keeps the served document current, so the tap's PUT is what a later read sees.
  */
 async function fakeHouse(page: Page): Promise<House> {
-  const raw = JSON.parse(JSON.stringify(DOC)) as Doc;
+  const raw = locationDocument();
   const machine = raw.machines[0]!;
   machine.address = { host: '192.0.2.10', port: 2222 };
   machine.fixtures = null;
@@ -107,52 +71,15 @@ async function fakeHouse(page: Page): Promise<House> {
     whereabouts: { kind: 'machine', machineId: machine.id, since: NOW },
     history: [],
   };
-  const view: { kind: string; schemaVersion: number; id: string; name: string; createdAt: string; migratedFrom: null; machines: Json[]; accessories: Json[] } = {
-    kind: raw.kind,
-    schemaVersion: 1,
-    id: raw.id,
-    name: raw.name,
-    createdAt: raw.createdAt,
-    migratedFrom: null,
-    machines: [machine],
-    accessories: [probe, module],
-  };
+  raw.machines = [machine];
+  raw.accessories = [probe, module];
 
-  await page.route('**/api/v1/**', async (route) => {
-    const req = route.request();
-    const url = new URL(req.url());
-    const pathname = url.pathname.replace(/^.*\/api\/v1/, '');
-    const json = (body: unknown): Promise<void> =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        headers: { etag: '"e1"' },
-        body: JSON.stringify(body),
-      });
-
-    if (pathname === '/health') return json(HEALTH);
-    if (pathname === '/tools') return json([]);
-    if (pathname === '/inventory') return json(raw.inventory ?? []);
-    if (pathname === '/stock') return json(raw.stock ?? []);
-    if (pathname === '/defaults') return json(raw.defaults ?? {});
-    if (pathname === '/location' && req.method() === 'GET') return json(view);
-
-    const machinePath = /^\/location\/machines\/(.+)$/.exec(pathname);
-    if (machinePath !== null && req.method() === 'PUT') {
-      const record = req.postDataJSON() as Json;
-      view.machines = view.machines.map((m) => (m.id === record.id ? record : m));
-      return json({ ok: true });
-    }
-    const accessoryPath = /^\/location\/accessories\/(.+)$/.exec(pathname);
-    if (accessoryPath !== null && req.method() === 'PUT') {
-      const record = req.postDataJSON() as Json;
-      view.accessories = [...view.accessories.filter((a) => a.id !== record.id), record];
-      return json({ ok: true });
-    }
-    return route.fulfill({ status: 404, body: '' });
+  return serveHouse(page, {
+    // The fixture's view as the old copy built it: no `defaults` section on `/location`.
+    location: locationView(raw),
+    fromSharedDocument: true,
+    writes: 'applied',
   });
-
-  return { machine: () => view.machines[0] as Json & { bedProfiles?: Json[]; activeBedProfileId?: string } };
 }
 
 test('#607 — the module card measures the axis and writes rotaryAxis', async ({ cm, page }) => {

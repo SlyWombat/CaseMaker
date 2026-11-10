@@ -3,14 +3,20 @@
 // The web e2e build has no house service, so this walk serves the four read endpoints from a
 // fixture and takes the picture of the list the maintainer asked for. It also pins the two facts
 // the slice changed: the header counts the five OWNED bits, and the list opens on them (the
-// catalogue switch is off by default).
+// catalogue switch is off by default). #1180 S2 — the fixture is `serveHouse`, the one house.
 import { mkdirSync } from 'node:fs';
 import { test, expect } from './fixtures/caseMaker';
-import { installFakeHouse } from './fixtures/fakeHouse';
+import { BITS_INVENTORY, houseHealth, serveHouse } from './fixtures/fakeHouse';
 
 test('#1172A — Manage > Tools opens on your bits, counted', async ({ cm, page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await installFakeHouse(page);
+  await serveHouse(page, {
+    health: houseHealth({ build: 'v-test' }),
+    feeds: [],
+    inventory: BITS_INVENTORY,
+    writes: 'accepted',
+    unserved: 'continue',
+  });
   await cm.ready();
 
   await page.getByTestId('manage-open').click();

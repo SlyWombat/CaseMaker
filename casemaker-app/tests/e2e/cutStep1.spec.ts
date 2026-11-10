@@ -11,6 +11,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures/caseMaker';
+import { houseHealth, locationDocument, serveHouse } from './fixtures/fakeHouse';
+import { generateOnce } from './fixtures/generatedRun';
 
 test.setTimeout(240_000);
 
@@ -23,11 +25,10 @@ const OUT = path.join(path.resolve(process.cwd(), '..'), 'docs', 'bench', 'img',
  * case — Makera's "unplug the wired probe… connect the 3D probe cable" line belongs to it.
  */
 function locationWith3dProbe(): unknown {
-  const doc = JSON.parse(
-    fs.readFileSync(path.join(process.cwd(), 'tests', 'unit', 'fixtures', 'location-doc.json'), 'utf8'),
-  ) as { machines: { id: string }[]; accessories: { id: string; whereabouts: unknown }[] };
+  const doc = locationDocument();
   const machineId = doc.machines[0]!.id;
-  for (const a of doc.accessories) {
+  const accessories = doc.accessories as { id: string; whereabouts: unknown }[];
+  for (const a of accessories) {
     if (a.id === 'fx-probe-3d') a.whereabouts = { kind: 'machine', machineId, since: '2026-10-23T00:00:00.000Z' };
     if (a.id === 'fx-probe-1') a.whereabouts = { kind: 'box' };
   }
@@ -36,77 +37,18 @@ function locationWith3dProbe(): unknown {
 
 /** The house the web build asks for: the lists it reads, and the location with the 3D probe. */
 async function fakeHouse(page: Page): Promise<void> {
-  await page.route('**/api/v1/**', async (route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname.replace(/^.*\/api\/v1/, '');
-    const json = (body: unknown): Promise<void> =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        headers: { etag: '"e1"' },
-        body: JSON.stringify(body),
-      });
-    const doc = locationWith3dProbe() as { inventory?: unknown; stock?: unknown; defaults?: unknown };
-    if (path === '/health') {
-      return json({
-        ok: true,
-        schemaVersion: 1,
-        build: 'e2e',
-        hasCatalogue: false,
-        feedRows: 0,
-        materialSpecRows: 0,
-        catalogueSyncedAt: null,
-        lastSync: null,
-        problems: [],
-        warnings: [],
-      });
-    }
-    if (path === '/tools') return json([]);
-    if (path === '/inventory') return json(doc.inventory ?? []);
-    if (path === '/stock') return json(doc.stock ?? []);
-    if (path === '/defaults') return json(doc.defaults ?? {});
-    if (path === '/location') return json(locationWith3dProbe());
-    return route.fulfill({ status: 404, body: '' });
+  await serveHouse(page, {
+    health: houseHealth({ build: 'e2e' }),
+    location: locationWith3dProbe(),
+    fromSharedDocument: true,
   });
-}
-
-/** A status line with the monitor fields the state popover reads, for the machine observation. */
-const STATUS = '<Idle|MPos:0,0,0|WPos:0,0,0|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>';
-
-async function rememberMachine(page: Page): Promise<void> {
-  await page.evaluate((line) => {
-    window.__caseMaker!.setMachine(
-      {
-        name: 'QA Z1',
-        host: '192.0.2.10',
-        port: 2222,
-        busy: false,
-        ip: null,
-        mac: null,
-        status: line,
-        profileId: 'Z1',
-        observedAt: '2026-10-25T00:00:00.000Z',
-        notes: [],
-      },
-      line,
-    );
-  }, STATUS);
 }
 
 test('#795 — the statement leads step 1, and ‹ Design sits beside the switch', async ({ cm, page }) => {
   await fakeHouse(page);
   await cm.ready();
-  await page.evaluate(async () => {
-    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
-    window.__caseMaker!.engraveReset();
-  });
-  await rememberMachine(page);
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
-  await expect(page.getByTestId('engrave-panel')).toBeVisible();
-
-  // Generate a real program: the clearance statement belongs to a job that has one.
-  await page.getByTestId('engrave-generate').click();
-  await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
+  // A real program: the clearance statement belongs to a job that has one.
+  await generateOnce(page);
 
   // On Design there is no way back to Design.
   await expect(page.getByTestId('engrave-back-to-design')).toHaveCount(0);

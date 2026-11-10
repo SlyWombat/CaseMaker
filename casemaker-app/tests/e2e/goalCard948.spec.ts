@@ -40,6 +40,7 @@ import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 
 import { test, expect } from './fixtures/caseMaker';
+import { serveHouse } from './fixtures/fakeHouse';
 
 test.setTimeout(1_500_000);
 
@@ -132,20 +133,15 @@ async function fakeHouse(page: Page): Promise<void> {
     machines: doc.machines,
     accessories: doc.accessories,
   };
-  await page.route('**/api/v1/**', async (route) => {
-    const req = route.request();
-    const path = new URL(req.url()).pathname.replace(/^.*\/api\/v1/, '');
-    const json = (body: unknown): Promise<void> =>
-      route.fulfill({ status: 200, contentType: 'application/json', headers: { etag: '"e1"' }, body: JSON.stringify(body) });
-    if (path === '/health') return json({ ...HEALTH, feedRows: catalogue.feeds.length, hasCatalogue: true });
-    if (path === '/tools') return json(catalogue.tools);
-    if (path === '/feeds') return json(catalogue.feeds);
-    if (path === '/inventory') return json(demo.inventory);
-    if (path === '/stock') return json(demo.stock ?? []);
-    if (path === '/defaults') return json(demo.defaults ?? {});
-    if (path === '/location' && req.method() === 'GET') return json(view);
-    if (req.method() !== 'GET') return json({ ok: true });
-    return route.fulfill({ status: 404, body: '' });
+  await serveHouse(page, {
+    health: { ...HEALTH, feedRows: catalogue.feeds.length, hasCatalogue: true },
+    tools: catalogue.tools,
+    feeds: catalogue.feeds,
+    inventory: demo.inventory,
+    stock: demo.stock ?? [],
+    defaults: demo.defaults ?? {},
+    location: view,
+    writes: 'ok',
   });
 }
 
