@@ -52,6 +52,8 @@ import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { geometryFromMesh, SACRIFICIAL_COLOR, segmentGeometry } from './simGeometry';
 import { fittedTool, toolPlacement } from './liveMachineTool';
 import { LiveToolHead } from './LiveToolHead';
+// #1141 phase 2a — the cut swath: what the running program has cut so far, on the live blank.
+import { LiveSwath } from './LiveSwath';
 import { TouchMarkers } from './TouchMarkers';
 import { floorColor, LOST_COLOR, REGISTRATION_COLOR, STOCK_COLOR, VOID_COLOR, WARNING_COLOR } from './engraveRamp';
 import { hatchSegments } from './engraveHatch';
@@ -1038,6 +1040,11 @@ export function EngravePreview({ uncut = false }: { uncut?: boolean } = {}): JSX
         )}
 
         {liveExtents !== null && <DesignExtentsOutline extents={liveExtents} />}
+
+        {/* #1141 phase 2a — the live program's cut swath. Flat stock only: the rotary views draw
+            their own wrapped frame, and a flat footprint over a turned rod would describe a
+            machine the job is not on. */}
+        {uncut && rotary === null && <LiveSwath machineKey={machineKey} />}
 
         {/* #811 — a ghosted stock loses its silhouette; the blank's edges stay drawn crisply so
             the operator can still read where the stock is. Flat stock only: the rotary views have
