@@ -7,7 +7,12 @@ come up most. For a first run in ten minutes, see **Getting Started** instead.
 
 Case Maker runs in a browser at **<https://electricrv.ca/casemaker>**, no install, or as a desktop
 app you download and run — either way opens to the same welcome page. The desktop app adds
-offline use and, on a machine with a CNC attached, direct control of the cut.
+offline use and, on a machine with a CNC attached, direct control of the cut. Use a **64-bit
+browser**: the planner needs about 450 MiB of memory at once, so a 32-bit browser is refused
+before Generate (the app says so and nothing runs), a startup memory check that fails is retried
+once, and a Generate pressed after a failed check warns beside the button — it still runs. If the
+planner runs out of memory mid-run the message says so; close other tabs, or switch to a 64-bit
+browser.
 
 **Saving and loading.** **Save** writes a project file holding the whole parametric model — board,
 case parameters, ports, external assets — or, for a CNC job, the stock, the cutter and every
@@ -252,6 +257,64 @@ starts only after the generate itself has spoken.
 **Simulating.** Generate always runs a full simulated pass before a job is considered ready — a
 pass that doesn't match the design, or that the chosen cutter can't physically reach, is refused
 rather than silently produced.
+
+### The Cut step: the checklist and the press
+
+The **Cut** step takes a checked job to a running program. It lists the run's programs in cut
+order, shows the steps that need you — **Register**, then a **Load** press per program — and puts
+the job's own card beside them. The single-file job keeps one **Load**; a job with several
+programs uses the release step (see below). After a reload the step rebuilds from the machine's
+record of finished programs, so the next press names the program still to cut rather than starting
+the run again.
+
+**The cutter checklist.** The run's cutters are a checklist, not a paragraph: each bit is ticked
+**located** (it is in hand) or **replaced** — with another cutter the shop owns of the same shape
+and cutting diameter. The checklist is per run: it is kept against the frozen program set, so
+regenerating the job starts a fresh one that follows the new cutters. It gates the **first Load**
+in every place that load happens — the one-press Cut, the single-file upload and the multi-program
+release — and the blocker speaks last, after any more specific registration or facing sentence.
+A replacement is a change to the job: the app re-posts the whole run, with its cost, before the
+press. Ticking bits never changes a program.
+
+**Setups.** A multi-setup job's **Setups** is its own group on the Design tab (Plan registration,
+Re-plan, Use this plan) — separate from the Hold answers, closed by default with the setup count
+on its head, so it is not buried under the waste-board settings.
+
+### When a program needs regenerating
+
+A program goes **stale** only when something that changes its bytes has changed — the design, the
+stock, the cutter. Approving a registration, re-planning, changing the owned-versus-ideal choice
+or the Cut strip's toggles never stales it: the app re-freezes the run's stored setups instantly,
+without re-posting. When a program is stale its card names the changed thing and the honest cost
+before the press, and the press reads **Regenerate (the stock changed)** until it has a number.
+
+### Registration, kept across a reload
+
+A bracket job registers on **one top touch at the cut area's centre** — the bracket already fixes
+X, Y and rotation, so nothing scans an edge, and the plan says exactly that. On any mount the
+registration is kept on the machine's record once written, so a reload does not force a full
+re-register: the Register card restores it while the machine's live work offset still matches the
+written origin within 0.01 mm, and says **register again** when the origin moved, the machine is
+unreachable or another machine answers. A restored registration states its scope — *G54 X/Y
+verified at the time it was written; Z as written then* — because the live Z offset carries the
+tool length, not the surface.
+
+### Progress while a program runs
+
+While a program plays, the Cut step says how far it is and what is next: the controller's own
+percentage and the time it implies. Before the machine has reported a percentage the line says so
+rather than inventing a time; at 100 % it reads **finishing** rather than "0 s left"; a paused run
+says the time is what is left when it resumes. At the bit-change pause the line steps aside — the
+**Change** panel already names the next cutter.
+
+### The vacuum and the air
+
+The run switches the machine's **direct outputs**: `M851` for the vacuum (`M852` off) and `M811`
+for the air at the spindle (`M812` off). A job-owned span states them before **every** program and
+only the span's end switches them off, so a retry after an alarm never runs dry, and a refused
+start turns off exactly what it switched on. The antistatic keeps its own `M331.4`/`M332.4` pair.
+The program text itself still carries `M331`/`M332` — on the machine those are *auto modes* that
+follow the spindle, which is why the run states the direct outputs itself.
 
 ### Jobs with several programs
 
