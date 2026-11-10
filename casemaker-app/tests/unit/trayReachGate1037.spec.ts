@@ -21,7 +21,6 @@ import { describe, expect, it } from 'vitest';
 import { stepToMesh } from '@/engine/import/stepMesh';
 import { buildBinaryStl } from '@/workers/export/stlBinary';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { DEFAULT_VISE, seatedVise } from '@/engine/cnc/fixture';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -71,7 +70,10 @@ function trayJob(target: EngraveTargetObject): EngraveJob {
     shapes: [],
     drills: [],
     stock: { length: 110, width: 140, thickness: 27.2, material: 'hardwood' },
-    workholding: { kind: 'vise', vise: seatedVise(DEFAULT_VISE, 27.2), sacrificial: null },
+    // #1117 — THE MOUNT IS INCIDENTAL TO WHAT THIS CASE PROVES: the reach gate and the contour's
+    // ×42 assignment on the real tray. Tape keeps the tray, the blank and the program; the vise's
+    // jaw was never part of the proof, and the #1117 check rightly refuses a 0.4 mm rim on it.
+    workholding: { kind: 'tape', tape: { width: 20, thickness: 0.1, inset: 2, where: null, squareTo: 'front', source: 'default' } },
     toolKey: 'inv:owned-2',
     targetObject: target,
   } as EngraveJob;
