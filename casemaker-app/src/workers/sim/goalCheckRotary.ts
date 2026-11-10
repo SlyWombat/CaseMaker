@@ -22,7 +22,7 @@
  * sentence names the frame so a reader never compares it with a plate's.
  */
 
-import type { RotarySection } from '@/engine/cnc/rotary/wrap';
+import { sectionRadiusAt, type RotarySection } from '@/engine/cnc/rotary/wrap';
 import type { GoalRadialField } from '@/engine/cnc/rotary/radialField';
 import type { ColumnGrid } from '@/workers/geometry/columnEngine';
 import {
@@ -162,6 +162,59 @@ function dilateMap(mask: Uint8Array, nx: number, ny: number, pitch: number, radi
   return out;
 }
 
+/**
+ * #1116 (option B — read-only) — THE GOAL'S OWN RELIEF AT A MAP CELL, in the map frame.
+ *
+ * `max − min` of the covered goal top over the disc of `reliefRadiusMm` (the flat check's
+ * `reliefAt`, ported to the map's (X, arc) frame). The stock's own surface joins the high side
+ * where the disc reaches an uncovered cell or runs off an X end — `sectionRadiusAt` at the cell's
+ * own angle (the analyst's answer 1: a block's flats are inside the envelope, #777, so a bare
+ * `z = 0` would be wrong), in radius-offset units. Rows wrap: the seam is not an edge, and a disc
+ * crossing it reads the cells on the other side exactly as any others.
+ *
+ * The metric is the map frame's, which the analyst ruled acceptable for option B's instrument and
+ * to be labelled as such in its output; the rule in #1164 slice (c) uses the true lateral metric
+ * at the cell's radius (`ρ·sin Δθ`).
+ */
+export function reliefAtMapCell(
+  goal: GoalRadialField,
+  section: RotarySection | null,
+  i: number,
+  j: number,
+  reliefRadiusMm: number,
+): number {
+  const pitch = goal.pitch;
+  const r = Math.ceil(reliefRadiusMm / pitch);
+  let hi = -Infinity;
+  let lo = Infinity;
+  let sawOutside = false;
+  for (let dj = -r; dj <= r; dj++) {
+    const jj = (((j + dj) % goal.ny) + goal.ny) % goal.ny;
+    for (let di = -r; di <= r; di++) {
+      const ii = i + di;
+      if (ii < 0 || ii >= goal.nx) {
+        sawOutside = true;
+        continue;
+      }
+      if (Math.hypot(di * pitch, dj * pitch) > reliefRadiusMm + 1e-9) continue;
+      const kk = jj * goal.nx + ii;
+      if (goal.covered[kk] !== 1) {
+        sawOutside = true;
+        continue;
+      }
+      const z = goal.z[kk]!;
+      if (!Number.isFinite(z)) continue;
+      if (z > hi) hi = z;
+      if (z < lo) lo = z;
+    }
+  }
+  if (hi === -Infinity) return 0;
+  // The stock's surface at the cell's own angle, as a radius offset from the design radius.
+  const stockOffset = section === null ? 0 : sectionRadiusAt(section, (goal.y0 + j * pitch) / goal.radius) - goal.radius;
+  if (sawOutside && stockOffset > hi) hi = stockOffset;
+  return hi - lo;
+}
+
 export function checkGoalCutIntoRotary(
   goal: GoalRadialField,
   grid: ColumnGrid,
@@ -250,6 +303,95 @@ export function checkGoalCutIntoRotary(
     // The map's own coordinates: X mm along the axis, θ in degrees around it.
     y: ((goal.y0 + j * goal.pitch) / radius) * (180 / Math.PI),
   });
+
+  // #1116 (OPTION B, THE MANAGER'S 2026-11-10 RULING) — THE V8 RELIEF BOUND, MEASURED BUT NOT
+  // APPLIED. The rotary map still excuses its wall/border and shadow cells; these counters report
+  // the cells gate v8's rule WOULD count instead, without changing the verdict, the adjudicated
+  // set or the sentence. #1164 slice (c) re-reads the same instrument on the true-geometry stamp
+  // before the bound is applied. The relief disc is the map frame's (the analyst's answer 3:
+  // acceptable for B, labelled in the output); the rule uses the true lateral metric.
+  const reliefRadiusMm = shadowRadius !== undefined && shadowRadius > 0 ? shadowRadius : goal.pitch;
+  const reliefDebug =
+    (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+      ?.CM_ROTARY_RELIEF_DEBUG === '1';
+  /** The stock's own surface at a row's angle, as a radius offset (the flat check's `topZ`). */
+  const stockOffsetAt = (j: number): number =>
+    section === null ? 0 : sectionRadiusAt(section, (goal.y0 + j * goal.pitch) / radius) - radius;
+  const reliefAtMap = (i: number, j: number): number => reliefAtMapCell(goal, section, i, j, reliefRadiusMm);
+  /**
+   * The #996 straddle proof, in the map frame, with flat's class-proof options: a border's high
+   * side is the stock's surface, and `stepSlackMm` absorbs the heightfield's sampling of the step.
+   * The non-class call site passes neither — exactly the old proof.
+   */
+  const straddleProofAt = (
+    k: number,
+    i: number,
+    j: number,
+    depth: number,
+    stepSlackMm = 0,
+    includeStockSurface = false,
+  ): { ok: boolean; step: number } => {
+    const zc = goal.z[k]!;
+    if (!Number.isFinite(zc)) return { ok: false, step: 0 };
+    let hi = zc;
+    let lo = zc;
+    for (const [di, dj] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+      const ci = i + di;
+      if (ci < 0 || ci >= goal.nx) continue;
+      const cj = ((j + dj) % goal.ny + goal.ny) % goal.ny;
+      const kk = cj * goal.nx + ci;
+      if (sampled[kk] !== 1) continue;
+      const zz = goal.z[kk]!;
+      if (!Number.isFinite(zz)) continue;
+      if (zz > hi) hi = zz;
+      if (zz < lo) lo = zz;
+    }
+    if (includeStockSurface && stockOffsetAt(j) > hi) hi = stockOffsetAt(j);
+    const step = hi - lo;
+    const sweptOffset = zc + dOf[k]!;
+    return { ok: step > 0 && step + stepSlackMm + 1e-12 >= depth && sweptOffset >= lo - STRADDLING_SLACK_MM, step };
+  };
+  let wallOverReliefCells = 0;
+  let shadowOverReliefCells = 0;
+  let borderOverReliefCells = 0;
+  let overReliefDeepest: { mm: number; x: number; y: number; cls: 'wall' | 'border' | 'shadow' } | null = null;
+  const noteOverRelief = (cls: 'wall' | 'border' | 'shadow', depth: number, at: { x: number; y: number }): void => {
+    if (cls === 'wall') wallOverReliefCells++;
+    else if (cls === 'border') borderOverReliefCells++;
+    else shadowOverReliefCells++;
+    if (overReliefDeepest === null || depth > overReliefDeepest.mm) overReliefDeepest = { mm: depth, x: at.x, y: at.y, cls };
+  };
+  /** The analyst's evidence line, one per about-to-be-excused cell; labelled map-frame for B. */
+  const reliefLine = (
+    cls: 'wall' | 'border' | 'shadow',
+    i: number,
+    j: number,
+    depth: number,
+    relief: number,
+    step: number,
+    wouldCount: boolean,
+  ): void => {
+    if (!reliefDebug) return;
+    const at = mapAt(i, j);
+    console.log(
+      [
+        'ROTARYRELIEF',
+        'map-frame',
+        cls,
+        at.x.toFixed(3),
+        at.y.toFixed(3),
+        depth.toFixed(4),
+        relief.toFixed(4),
+        step.toFixed(4),
+        wouldCount ? 1 : 0,
+      ].join(','),
+    );
+  };
+  if (reliefDebug) {
+    console.log(
+      `ROTARYRELIEF-HEADER,instrument=map-frame,reliefRadiusMm=${reliefRadiusMm.toFixed(4)},pitchMm=${goal.pitch.toFixed(4)}`,
+    );
+  }
   let cutCells = 0;
   let cutVolumeMm3 = 0;
   let maxCutIntoMm = 0;
@@ -280,6 +422,15 @@ export function checkGoalCutIntoRotary(
       // #955/#964 — A CELL ON A DESIGN STEP IS THE HEIGHTFIELD'S OWN BLIND CLASS: excluded from
       // the adjudicated set, counted and printed, never silently a pass.
       if (edges.wall[k] === 1 || edges.border[k] === 1) {
+        // #1116 B — what gate v8 would count here, measured read-only: the class's own proof
+        // (flat's straddle, the border's high side at the stock surface) AND the relief ceiling.
+        // A failure of either is a counted cell under the rule; the cell stays excluded here.
+        const cls: 'wall' | 'border' = edges.wall[k] === 1 ? 'wall' : 'border';
+        const relief = reliefAtMap(i, j);
+        const proof = straddleProofAt(k, i, j, depth, STRADDLING_SLACK_MM, cls === 'border');
+        const bounded = proof.ok && depth <= relief + STRADDLING_SLACK_MM + 1e-12;
+        if (!bounded) noteOverRelief(cls, depth, mapAt(i, j));
+        reliefLine(cls, i, j, depth, relief, proof.step, !bounded);
         excluded[k] = 1;
         wallNotScoredCells++;
         continue;
@@ -301,6 +452,15 @@ export function checkGoalCutIntoRotary(
           }
         }
         if (excusedByCl) {
+          // #1116 B — measured read-only. Flat's precedence for a shadow cell over the relief:
+          // the straddle proof first (an excused there is a straddling cell, not a counted
+          // shadow), then the counted shadow. The cell stays excluded; the verdict is unchanged.
+          const relief = reliefAtMap(i, j);
+          const over = depth > relief + STRADDLING_SLACK_MM + 1e-12;
+          const proof = over && depth > ADJUDICATED_FLOOR_MM ? straddleProofAt(k, i, j, depth) : { ok: false, step: 0 };
+          const wouldCount = over && !proof.ok;
+          if (wouldCount) noteOverRelief('shadow', depth, mapAt(i, j));
+          reliefLine('shadow', i, j, depth, relief, proof.step, wouldCount);
           excluded[k] = 1;
           shadowNotScoredCells++;
           continue;
@@ -311,29 +471,12 @@ export function checkGoalCutIntoRotary(
       // design's low side, so nothing was cut that the design keeps. Rows wrap; uncovered
       // neighbours contribute nothing (the design exists only where it is covered).
       if (depth > ADJUDICATED_FLOOR_MM) {
-        const zc = goal.z[k]!;
-        if (Number.isFinite(zc)) {
-          let hi = zc;
-          let lo = zc;
-          for (const [di, dj] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
-            const ci = i + di;
-            if (ci < 0 || ci >= goal.nx) continue;
-            const cj = ((j + dj) % goal.ny + goal.ny) % goal.ny;
-            const kk = cj * goal.nx + ci;
-            if (sampled[kk] !== 1) continue;
-            const zz = goal.z[kk]!;
-            if (!Number.isFinite(zz)) continue;
-            if (zz > hi) hi = zz;
-            if (zz < lo) lo = zz;
-          }
-          const step = hi - lo;
-          const swept = designRk + dOf[k]!;
-          if (step > 0 && step + 1e-12 >= depth && swept >= radius + lo - STRADDLING_SLACK_MM) {
-            excluded[k] = 1;
-            straddlingNotScoredCells++;
-            if (step > straddlingMaxStepMm) straddlingMaxStepMm = step;
-            continue;
-          }
+        const proof = straddleProofAt(k, i, j, depth);
+        if (proof.ok) {
+          excluded[k] = 1;
+          straddlingNotScoredCells++;
+          if (proof.step > straddlingMaxStepMm) straddlingMaxStepMm = proof.step;
+          continue;
         }
       }
       // THE ADJUDICATED SET — the gate's reading after the unadjudicable cells above.
@@ -434,18 +577,18 @@ export function checkGoalCutIntoRotary(
     adjudicatedFraction: adjudicatedCells / n,
     adjudicatedMaxMm,
     adjudicatedMaxAt,
-    // #1092 (gate v8) — THE OVER-RELIEF COUNTERS ARE THE FLAT CHECK'S. The rotary map's class
-    // exclusions are its own #1094 proofs — wall/border by class (`wallNotScoredFraction`), the
-    // wall shadow on the v5 CL proof (`shadowNotScoredFraction`), the #996 straddling step — and
-    // those cells are counted and printed in the fields above. v8's counted-instead counters are
-    // not reproduced here, so they state zero rather than a number this check did not measure.
-    wallOverReliefCells: 0,
-    shadowOverReliefCells: 0,
-    borderOverReliefCells: 0,
-    overReliefDeepest: null,
-    // #1092 (gate v8) — the rotary map has no stock-top silhouette class of its own (its rim cells
-    // are the wall/border class above), so no rim cell is counted for an unavailable silhouette
-    // proof.
+    // #1116 (option B, read-only) — THE OVER-RELIEF COUNTERS ARE MEASURED, NOT APPLIED. Each is
+    // the number of cells the class still excludes but that gate v8's relief rule WOULD count —
+    // the class's own proof AND the relief ceiling, with flat's precedence. `ok`, the adjudicated
+    // set and the sentence are unchanged; #1164 slice (c) re-reads this instrument on the true-
+    // geometry stamp and then applies the bound.
+    wallOverReliefCells,
+    shadowOverReliefCells,
+    borderOverReliefCells,
+    overReliefDeepest,
+    // #1116 answer 2 — the rotary map has no separate silhouette class: its rim is the wall/border
+    // class with the stock's surface as the high side. These three zeros mean NOT APPLICABLE, not
+    // "measured zero", and are pinned as such in slice (c)'s freeze fixture.
     silhouetteExcusedCells: 0,
     silhouetteDeepest: null,
     silhouetteUnavailableCells: 0,
