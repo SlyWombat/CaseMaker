@@ -170,6 +170,7 @@ import { engravePreviewSvg } from '../engravePreviewSvg';
 import { svgToPng } from '../svgToPng';
 import { efficiencyThresholds, goalPassCoverage, KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
 import { goalCheckForProgram, type SimGoalCheck } from '../../../src/engine/cnc/engrave/goalCheckInput';
+import { goalCauseFacts, goalCauseOf } from '../../../src/engine/cnc/engrave/goalCause';
 // #1134 — the one cutter-plan write-back (measuredPick's body), shared with the evaluator.
 import { applyCutterPlan } from '../../../src/workers/sim/planEvaluate';
 // #1134 — the pick's measured owned plan, handed through to the cut.
@@ -1705,6 +1706,16 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // program removes FROM THAT STOCK, not a second blank.
     const written: EngraveProgram[] = [];
     const laterDiagnostics: ReceiptDiagnostic[] = [];
+    // #1165 — THE VERDICT'S CAUSE, read from the staging facts the plan already stated (the
+    // goal-unreached finding's top-setup share, the refused finishes' floor/usable pairs). It rides
+    // ONLY the block that IS the run's verdict — the last program whose check ran, the same block
+    // `emit()` copies to `details.goal` — never an intermediate rough pass's block, whose leftover
+    // is by design.
+    const causeFacts = goalCauseFacts(prepared.generated.findings, prepared.generated.planStatements ?? []);
+    const verdictIndex = prepared.goalOracles.reduce(
+      (last, oracle) => (oracle.report.goalCutInto === undefined ? last : Math.max(last, oracle.index)),
+      -1,
+    );
     const sheetEntry = writeSheet
       ? { file: `${stem}-run-sheet.md`, ncHash: sheet.header.fileHash, estimatedTime: sheet.header.estimatedTime }
       : null;
@@ -1729,7 +1740,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           ? undefined
           : goalCutInto === undefined
             ? null
-            : goalBlockFromReport(goalCutInto);
+            : goalBlockFromReport(
+                goalCutInto,
+                i === verdictIndex ? goalCauseOf(goalCutInto, causeFacts) : null,
+              );
       written.push({
         name: job.name,
         stage: generated.stage,

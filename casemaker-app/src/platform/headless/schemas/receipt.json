@@ -173,6 +173,10 @@
             "goal": {
               "description": "The run’s combined goal check, for a goal job; omitted otherwise.",
               "properties": {
+                "addressableFraction": {
+                  "description": "#1165 — the share of the goal this staging’s own top setup can address, 0–1 — a DIAGNOSTIC beside the judged coverage, never the verdict. Present with `causeClass`, or when the run stated the share on a failing check.",
+                  "type": "number"
+                },
                 "adjudicatedFraction": {
                   "description": "Share of covered cells at the 0.1 mm floor AFTER edge break, wall cells and wall shadow are excluded, 0–1 — the pass line’s judged number. Wall cells and the wall shadow are excluded in every goal job; edge break only when the job states one.",
                   "type": "number"
@@ -186,6 +190,15 @@
                   "maximum": 9007199254740991,
                   "minimum": -9007199254740991,
                   "type": "integer"
+                },
+                "causeClass": {
+                  "description": "#1165 — WHY a goal verdict under the pass line missed: `setup-infeasible` (this staging cannot address enough of the goal), `shop-infeasible` (a refused floor stands beyond the longest usable cutter reach), or `plan-shortfall` (addressable and reachable, and still not cut — the only engine defect). Absent on a pass and on an unchecked comparison, so those receipts stay byte-identical.",
+                  "enum": [
+                    "setup-infeasible",
+                    "shop-infeasible",
+                    "plan-shortfall"
+                  ],
+                  "type": "string"
                 },
                 "columnCutInto": {
                   "anyOf": [
@@ -894,6 +907,10 @@
                       {
                         "description": "The goal check’s report.",
                         "properties": {
+                          "addressableFraction": {
+                            "description": "#1165 — the share of the goal this staging’s own top setup can address, 0–1 — a DIAGNOSTIC beside the judged coverage, never the verdict. Present with `causeClass`, or when the run stated the share on a failing check.",
+                            "type": "number"
+                          },
                           "adjudicatedFraction": {
                             "description": "Share of covered cells at the 0.1 mm floor AFTER edge break, wall cells and wall shadow are excluded, 0–1 — the pass line’s judged number. Wall cells and the wall shadow are excluded in every goal job; edge break only when the job states one.",
                             "type": "number"
@@ -907,6 +924,15 @@
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
+                          },
+                          "causeClass": {
+                            "description": "#1165 — WHY a goal verdict under the pass line missed: `setup-infeasible` (this staging cannot address enough of the goal), `shop-infeasible` (a refused floor stands beyond the longest usable cutter reach), or `plan-shortfall` (addressable and reachable, and still not cut — the only engine defect). Absent on a pass and on an unchecked comparison, so those receipts stay byte-identical.",
+                            "enum": [
+                              "setup-infeasible",
+                              "shop-infeasible",
+                              "plan-shortfall"
+                            ],
+                            "type": "string"
                           },
                           "columnCutInto": {
                             "anyOf": [

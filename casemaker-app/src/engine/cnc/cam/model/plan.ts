@@ -5464,7 +5464,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         const text =
           `"${region.id}": not finished — floor ${cutFloorMm} mm below the stock top, the ${cutterName}'s usable length ${finisherReach} mm, no cutter in the set reaches it — use a longer-flute cutter, or let a ball finish it`;
         notes.push(text);
-        statements.push({ severity: 'warning', code: 'goal-finish-unreachable', count: 1, ids: [region.id], text });
+        statements.push({ severity: 'warning', code: 'goal-finish-unreachable', count: 1, ids: [region.id], text, floorMm: cutFloorMm, usableMm: finisherReach });
         // No move of the region is posted: the rest and pencil passes ride this finish's CL.
         continue;
       }
