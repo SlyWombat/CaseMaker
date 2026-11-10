@@ -9,6 +9,7 @@ import {
   cutterChecklistComplete,
   cutterChecklistRows,
   missingCuttersWords,
+  type CutterChecklistRow,
 } from '@/components/panels/CutterChecklist';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { buildRunRecord, parseRunRecordText } from '@/engine/cnc/engrave/runRecord';
@@ -44,6 +45,47 @@ function jobWithClean(): EngraveJob {
 afterEach(() => {
   cleanup();
   resetRegistry();
+});
+
+describe('#1123 item 49 — one fixed four-column grid for the rows', () => {
+  /** Ten rows, one with a name that wraps and a 6 mm shank — the artboard's hard case. */
+  function tenRows(): CutterChecklistRow[] {
+    return Array.from({ length: 10 }, (_, i) => ({
+      key: `inv:t${i}`,
+      name: i === 3 ? '⌀6 mm flat end · 15 mm flute · 6 mm shank and a long enough name to wrap' : `⌀${i + 1}.0 mm flat end`,
+      programs: i === 3 ? [10, 16, 17] : [i * 3 + 1, i * 3 + 2],
+      shankMm: i === 3 ? 6 : 3.175,
+    }));
+  }
+
+  it('every row is four cells of ONE shared four-track grid, not its own auto-sized grid', () => {
+    // jsdom has no layout, so the component test pins the CONTRACT (the shared tracks and the four
+    // cells); the equal-left-edges check on real bounding boxes is the e2e (after the bench).
+    render(<CutterChecklist rows={tenRows()} entries={undefined} disabled={false} onSet={() => {}} />);
+    const grid = screen.getByTestId('engrave-cutter-grid');
+    expect(grid.style.gridTemplateColumns).toBe('72px minmax(0, 1fr) 84px 132px');
+    const rows = screen.getAllByTestId('engrave-cutter-row');
+    expect(rows).toHaveLength(10);
+    for (const row of rows) {
+      expect(row.style.display).toBe('contents');
+      const cells = Array.from(row.children);
+      expect(cells).toHaveLength(4);
+      expect(cells[0]!.textContent).toMatch(/^p\d{2}/);
+      expect(cells[1]!.textContent).toContain('flat end');
+      expect(cells[2]!.querySelector('input[type="checkbox"]')).not.toBeNull();
+      expect(cells[3]!.tagName).toBe('SELECT');
+    }
+  });
+
+  it('a state line wraps under the bit, inside its own cell', () => {
+    const rows = tenRows();
+    const entries = { [rows[0]!.key]: { state: 'located' as const, at: '2026-11-10T00:00:00.000Z' } };
+    render(<CutterChecklist rows={rows} entries={entries} disabled={false} onSet={() => {}} />);
+    const first = screen.getAllByTestId('engrave-cutter-row')[0]!;
+    const bitCell = first.children[1]!;
+    expect(bitCell.textContent).toContain('located');
+    expect(bitCell.querySelector('[data-testid="engrave-cutter-state-inv:t0"]')?.textContent).toBe('located');
+  });
 });
 
 describe('#1127 the cutter checklist', () => {

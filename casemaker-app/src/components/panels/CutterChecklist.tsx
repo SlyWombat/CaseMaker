@@ -78,7 +78,26 @@ function replacementsFor(row: CutterChecklistRow): { key: string; name: string }
     .map((entry) => ({ key: entry.key, name: toolDisplayName(entry.tool) }));
 }
 
-const ROW: React.CSSProperties = { display: 'grid', gridTemplateColumns: '56px 1fr auto auto auto', gap: 8, alignItems: 'center', fontSize: 12 };
+/**
+ * #1123 item 49 — ONE GRID FOR THE WHOLE LIST, not one grid per row. Each `<li>` was its own grid
+ * with `auto` tracks, so every row's select and checkbox started at the x its own bit name ended
+ * at. The `<ul>` is the grid now: four fixed tracks (programs, bit, located, replace) shared by
+ * every row, each `<li>` a `display: contents` so its cells land in those tracks. The programs
+ * track is sized for the widest label the list prints ("p10, p16, p17"); the bit track takes the
+ * wrap; the two controls keep their edges down the whole list.
+ */
+const LIST: React.CSSProperties = {
+  listStyle: 'none',
+  margin: 0,
+  padding: 0,
+  display: 'grid',
+  gridTemplateColumns: '72px minmax(0, 1fr) 84px 132px',
+  columnGap: 8,
+  rowGap: 3,
+  alignItems: 'center',
+  fontSize: 12,
+};
+const ROW: React.CSSProperties = { display: 'contents' };
 const MUTED_ROW = { color: '#9aa4b0', fontSize: 11 } as const;
 
 /**
@@ -109,7 +128,7 @@ export function CutterChecklist({
   const missing = missingCuttersWords(rows, entries);
   return (
     <div data-testid="engrave-cutter-checklist" style={{ display: 'grid', gap: 6 }}>
-      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 3 }}>
+      <ul data-testid="engrave-cutter-grid" style={LIST}>
         {rows.map((row) => {
           const entry = settledCutterEntry(entries, row.key);
           const located = entry?.state === 'located';
@@ -124,9 +143,21 @@ export function CutterChecklist({
               <span style={{ color: '#9aa4b0', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 11 }}>
                 {row.programs.map((n) => `p${String(n).padStart(2, '0')}`).join(', ')}
               </span>
-              <span>
+              <span style={{ minWidth: 0 }}>
                 {row.name}
                 {shankWords !== null && <span style={MUTED_ROW} data-testid={`engrave-cutter-shank-${row.key}`}> · {shankWords}</span>}
+                {/* #1123 item 49 — the state line wraps UNDER the bit, inside its own cell, never
+                    under the programs or the controls. */}
+                {replaced !== undefined && (
+                  <span style={{ ...MUTED_ROW, display: 'block' }} data-testid={`engrave-cutter-state-${row.key}`}>
+                    {isTheSubstitute ? 'replaced' : `replaced: ${replacements.find((c) => c.key === replaced)?.name ?? replaced}`}
+                  </span>
+                )}
+                {located && (
+                  <span style={{ ...MUTED_ROW, display: 'block' }} data-testid={`engrave-cutter-state-${row.key}`}>
+                    located
+                  </span>
+                )}
               </span>
               <label style={{ ...MUTED_ROW, display: 'flex', alignItems: 'center', gap: 4 }}>
                 <input
@@ -158,16 +189,6 @@ export function CutterChecklist({
                   </option>
                 ))}
               </select>
-              {replaced !== undefined && (
-                <span style={MUTED_ROW} data-testid={`engrave-cutter-state-${row.key}`}>
-                  {isTheSubstitute ? 'replaced' : `replaced: ${replacements.find((c) => c.key === replaced)?.name ?? replaced}`}
-                </span>
-              )}
-              {located && (
-                <span style={MUTED_ROW} data-testid={`engrave-cutter-state-${row.key}`}>
-                  located
-                </span>
-              )}
             </li>
           );
         })}
