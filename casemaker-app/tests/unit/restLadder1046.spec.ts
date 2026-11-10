@@ -14,6 +14,7 @@
 import { createHash } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
+import { once } from './helpers/once';
 
 import {
   planModelCam,
@@ -61,9 +62,12 @@ function goalJob(target: EngraveTargetObject): EngraveJob {
 }
 
 async function plateInput(): Promise<ModelPlanInput> {
-  const target = goalTarget();
-  const job = goalJob(target);
-  return await buildModelPlanInputForGoal(job, target, BALL6, { tools: [], feeds: SHOP_FEEDS });
+  // #1180 B1 — one default plate input per file; every case plans from the same blank.
+  return once('plate:default', async () => {
+    const target = goalTarget();
+    const job = goalJob(target);
+    return await buildModelPlanInputForGoal(job, target, BALL6, { tools: [], feeds: SHOP_FEEDS });
+  });
 }
 
 describe('#1046 the plan states its own wall time (dump only)', () => {

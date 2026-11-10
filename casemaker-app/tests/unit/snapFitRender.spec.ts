@@ -4,6 +4,7 @@
 // could collapse the lip subtraction to zero triangles, leaving the user with
 // an invisible lid.
 import { describe, it, expect } from 'vitest';
+import { countOps } from './helpers/printModel';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { defaultSnapCatchesForCase } from '@/engine/compiler/snapCatches';
 import { buildSnapFitLid } from '@/engine/compiler/lid';
@@ -12,13 +13,6 @@ import { createDefaultProject } from '@/store/projectStore';
 import { listBuiltinBoardIds } from '@/library';
 import type { BuildOp } from '@/engine/compiler/buildPlan';
 import type { CaseParameters, BoardProfile } from '@/types';
-
-function countOps(op: BuildOp, kind: BuildOp['kind']): number {
-  let n = op.kind === kind ? 1 : 0;
-  if ('child' in op && op.child) n += countOps(op.child, kind);
-  if ('children' in op) for (const c of op.children) n += countOps(c, kind);
-  return n;
-}
 
 function flattenCubes(op: BuildOp): Array<{ size: [number, number, number] }> {
   const out: Array<{ size: [number, number, number] }> = [];

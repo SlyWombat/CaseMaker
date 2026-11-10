@@ -6,6 +6,7 @@
 // matching cases stack with the ridge inside the groove and no interference.
 
 import { describe, it, expect } from 'vitest';
+import { probeMaterial } from './helpers/printModel';
 
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { computeShellDims } from '@/engine/compiler/caseShell';
@@ -45,14 +46,6 @@ function volume(op: BuildOp): number {
   const m = exec(op);
   const v = m.volume();
   m.delete();
-  return v;
-}
-
-function probeMaterial(op: BuildOp, p: [number, number, number]): number {
-  const box = translate(p, cube([1, 1, 1], true));
-  const hit = exec(intersection([op, box]));
-  const v = hit.volume();
-  hit.delete();
   return v;
 }
 

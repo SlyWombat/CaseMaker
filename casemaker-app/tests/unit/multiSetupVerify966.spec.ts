@@ -53,6 +53,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { once } from './helpers/once';
 import { generateGoalProgram, buildModelPlanInputForGoal, postModelPlan, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import { planModelCam } from '@/engine/cnc/cam/model/plan';
 // The box fixture is `multiSetup966.spec.ts`'s own — factored into a shared helper so this spec
@@ -216,7 +217,7 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
   it('#1003 the flipped setup’s curved-0 rough and finish cut below 0 — a silent under-cut cannot pass again', async () => {
     const { goal, stock } = await buildDatumGoal();
     const job = jobForGoal(goal, stock);
-    const input = await buildModelPlanInputForGoal(job, goal, BALL, DATUM_SHOP);
+    const input = await once('goalInput:datum', () => buildModelPlanInputForGoal(job, goal, BALL, DATUM_SHOP));
     expect(input.setups).toHaveLength(2);
     const output = await planModelCam(input);
     const flipped = output.perSetup.find((s) => s.setupIndex === 1);
@@ -241,7 +242,7 @@ describe('#966 — every program a multi-setup goal posts passes the real verifi
   it('two-setup DATUM goal: every posted program, both setups, carries a VerifyReport with zero error-severity findings', async () => {
     const { goal, stock } = await buildDatumGoal();
     const job = jobForGoal(goal, stock);
-    const input = await buildModelPlanInputForGoal(job, goal, BALL, DATUM_SHOP);
+    const input = await once('goalInput:datum', () => buildModelPlanInputForGoal(job, goal, BALL, DATUM_SHOP));
     expect(input.setups).toHaveLength(2);
 
     const result = await generateGoalProgram(job, goal, BALL, null, { shop: DATUM_SHOP });

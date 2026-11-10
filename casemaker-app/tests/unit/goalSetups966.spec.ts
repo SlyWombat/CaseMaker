@@ -38,6 +38,7 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { buildModelPlanInputForGoal, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import { planModelCam } from '@/engine/cnc/cam/model/plan';
+import { once } from './helpers/once';
 import { buildSetupSpecs } from '@/engine/cnc/cam/model/setups';
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
 import type { ParsedMesh } from '@/engine/import/stlParser';
@@ -149,7 +150,7 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
       // case above: two setups, top then the flip.
       const job = jobFor(sphereGoal(), SPHERE_STOCK);
       const goal = job.targetObject!;
-      const input = await buildModelPlanInputForGoal(job, goal, BALL, SHOP);
+      const input = await once('goalInput:sphere+shop', () => buildModelPlanInputForGoal(job, goal, BALL, SHOP));
       expect(input.setups).toHaveLength(2);
       expect(input.setups[0]!.frame.up).toEqual([0, 0, 1]);
       expect(input.setups[1]!.frame.up).toEqual([0, 0, -1]);
@@ -166,7 +167,7 @@ describe('#966 — buildModelPlanInputForGoal calls the real #965 setup decision
       // `registerSetupOrigin` in `cam/model/setups.ts`) before it can plan it.
       const job = jobFor(sphereGoal(), SPHERE_STOCK);
       const goal = job.targetObject!;
-      const input = await buildModelPlanInputForGoal(job, goal, BALL, SHOP);
+      const input = await once('goalInput:sphere+shop', () => buildModelPlanInputForGoal(job, goal, BALL, SHOP));
       expect(input.setups).toHaveLength(2);
 
       // CONFIRMED by running this exact call (2026-11-04): a bare UV sphere carries neither a

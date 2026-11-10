@@ -9,6 +9,7 @@
 // fails here rather than on the plate.
 
 import { describe, it, expect } from 'vitest';
+import { bodies, probeMaterial } from './helpers/printModel';
 
 import {
   STRAP_DEPTH,
@@ -29,21 +30,6 @@ function boundsOf(op: BuildOp): Aabb {
   const b = m.boundingBox();
   m.delete();
   return { min: [...b.min], max: [...b.max] } as Aabb;
-}
-
-function bodies(op: BuildOp): number {
-  const m = exec(op);
-  const n = m.decompose().filter((c) => c.volume() > 0).length;
-  m.delete();
-  return n;
-}
-
-function probeMaterial(op: BuildOp, p: [number, number, number]): number {
-  const box = translate(p, cube([1, 1, 1], true));
-  const hit = exec(intersection([op, box]));
-  const v = hit.volume();
-  hit.delete();
-  return v;
 }
 
 function slab(w: number, d: number, h: number): BuildOp {

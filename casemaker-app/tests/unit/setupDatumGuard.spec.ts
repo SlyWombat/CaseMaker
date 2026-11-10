@@ -138,11 +138,13 @@ function withoutContour(ir: ToolpathIR): ToolpathIR {
 
 /** The twin congruence: op kinds per cutter, each op's own Z range and feed count, and the posted
  *  NC byte-for-byte (the non-first contour excepted, #965's opposite-side bound). */
-async function assertCongruent(input: ModelPlanInput): Promise<void> {
+async function assertCongruent(input: ModelPlanInput, planned?: Awaited<ReturnType<typeof planModelCam>>): Promise<void> {
   const nonzero = input.setups.filter((s) => Math.abs(s.frame.stockTop) > 1e-9);
   expect(nonzero.length, 'the fixture no longer states a non-zero stock top').toBeGreaterThan(0);
 
-  const baseline = (await planModelCam(input)).perSetup;
+  // #1180 — a caller that already planned this input hands its plan in; the mould case plans the
+  // SAME input for its non-vacuity line, and planning it twice was 20 s of nothing.
+  const baseline = (planned ?? (await planModelCam(input))).perSetup;
   for (let i = 0; i < input.setups.length; i++) {
     const setup = baseline[i]!;
     const stockTop = input.setups[i]!.frame.stockTop;
@@ -243,7 +245,7 @@ describe('#1017 — every setup plans the same on a stockTop ≠ 0 frame as its 
     // for this guard to mean anything.
     const planned = await planModelCam(input);
     expect(planned.perSetup.flatMap((s) => s.ops).length, 'the mould plans no ops — the guard would be vacuous').toBeGreaterThan(0);
-    await assertCongruent(input);
+    await assertCongruent(input, planned);
   }, 300_000);
 
   it('a stated band lands on each face’s own plane — 6 mm on top, 24 mm on the flipped side', async () => {

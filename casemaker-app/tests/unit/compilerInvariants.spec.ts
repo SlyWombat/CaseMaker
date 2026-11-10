@@ -87,6 +87,21 @@ function projectsToTest(): Array<{ label: string; build: () => Project }> {
   return out;
 }
 
+/**
+ * #1180 B1 — ONE compile per case for every invariant that only READS the plan. The matrix ran 52
+ * cases × 13 invariants and compiled the same project inside each `it` (~380 compiles); the plans
+ * are immutable under these assertions, so the cache changes WHEN the compile happens, never what
+ * is asserted. Invariant 2 deliberately compiles a SECOND plan to compare against.
+ */
+const planCache = new Map<string, BuildPlan>();
+function planOf(c: { label: string; build: () => Project }): BuildPlan {
+  const cached = planCache.get(c.label);
+  if (cached !== undefined) return cached;
+  const plan = compileProject(c.build());
+  planCache.set(c.label, plan);
+  return plan;
+}
+
 /** A stand is a different archetype: a frame + foot, no cavity and no lid. The
  * shell/lid invariants below don't apply to it — it gets its own (Invariant 8)
  * plus stand.spec.ts. Everything archetype-agnostic (purity, placementReport,
@@ -159,7 +174,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
     // the open-ended set of extras is a feature, not a regression.
     for (const c of cases) {
       it(`${c.label}: nodes include shell + lid (extras allowed)`, () => {
-        const plan = compileProject(c.build());
+        const plan = planOf(c);
         const ids = plan.nodes.map((n) => n.id);
         expect(ids).toContain('shell');
         expect(ids).toContain('lid');
@@ -170,7 +185,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
   describe('Invariant 2: compileProject is pure — two calls produce structurally identical plans', () => {
     for (const c of allCases) {
       it(`${c.label}: identical node count + ids on two calls`, () => {
-        const a = compileProject(c.build());
+        const a = planOf(c);
         const b = compileProject(c.build());
         // Structural identity: same node IDs in the same order. Deep-equal
         // of BuildOp trees is too strict (mesh primitives carry
@@ -195,7 +210,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
           project.hats ?? [],
           () => undefined,
         );
-        const plan = compileProject(project);
+        const plan = planOf(c);
         const shell = plan.nodes.find((n) => n.id === 'shell')!;
         const bb = bboxOf(shell.op);
         // The shell body has cutouts (which bbox doesn't see — bboxOf
@@ -216,7 +231,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
   describe('Invariant 4: smartCutoutDecisions are part of the plan output (#51)', () => {
     for (const c of allCases) {
       it(`${c.label}: plan.smartCutoutDecisions is an array`, () => {
-        const plan = compileProject(c.build());
+        const plan = planOf(c);
         expect(Array.isArray(plan.smartCutoutDecisions)).toBe(true);
       });
     }
@@ -225,7 +240,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
   describe('Invariant 5: placementReport is attached to every plan (#51)', () => {
     for (const c of allCases) {
       it(`${c.label}: plan.placementReport.issues is an array`, () => {
-        const plan = compileProject(c.build());
+        const plan = planOf(c);
         expect(plan.placementReport).toBeDefined();
         expect(Array.isArray(plan.placementReport!.issues)).toBe(true);
       });
@@ -235,7 +250,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
   describe('Invariant 6: shell node tree contains no zero-extent cube / empty union / empty difference', () => {
     for (const c of cases) {
       it(`${c.label}: shell BuildPlan tree is well-formed`, () => {
-        const plan = compileProject(c.build());
+        const plan = planOf(c);
         const shell = plan.nodes.find((n) => n.id === 'shell')!;
         assertWellFormed(shell.op, `${c.label} shell`);
       });
@@ -245,7 +260,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
   describe('Invariant 7: lid node tree is well-formed', () => {
     for (const c of cases) {
       it(`${c.label}: lid BuildPlan tree is well-formed`, () => {
-        const plan = compileProject(c.build());
+        const plan = planOf(c);
         const lid = plan.nodes.find((n) => n.id === 'lid')!;
         assertWellFormed(lid.op, `${c.label} lid`);
       });
@@ -258,7 +273,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
   describe('Invariant 8: stand archetype emits well-formed parts, all grounded at z = 0', () => {
     for (const c of standCases) {
       it(`${c.label}: stand parts well-formed and grounded`, () => {
-        const plan = compileProject(c.build());
+        const plan = planOf(c);
         const ids = plan.nodes.map((n) => n.id);
         // Desk → one fused part. Wall → the body and the plate it snaps onto.
         // Pocket → the one shelf the module nests into.
@@ -290,7 +305,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
   describe('Invariant 9: rack archetype emits the structural set, all above z = 0', () => {
     for (const c of rackCases) {
       it(`${c.label}: rack parts well-formed and grounded`, () => {
-        const plan = compileProject(c.build());
+        const plan = planOf(c);
         const ids = plan.nodes.map((n) => n.id);
         for (const required of ['rack-side-left', 'rack-side-right', 'rack-bottom', 'rack-top']) {
           expect(ids).toContain(required);
@@ -310,7 +325,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
   describe('Invariant 10: badge archetype emits two congruent colour bands', () => {
     for (const c of badgeCases) {
       it(`${c.label}: badge parts well-formed and congruent`, () => {
-        const plan = compileProject(c.build());
+        const plan = planOf(c);
         expect(plan.nodes.map((n) => n.id)).toEqual(['badge-bottom', 'badge-top']);
         const bottom = aabbOfOp(plan.nodes[0]!.op)!;
         const top = aabbOfOp(plan.nodes[1]!.op)!;
@@ -333,7 +348,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
   describe('Invariant 11: tool-insert archetype emits one grounded plate', () => {
     for (const c of insertCases) {
       it(`${c.label}: insert plate well-formed and grounded`, () => {
-        const plan = compileProject(c.build());
+        const plan = planOf(c);
         expect(plan.nodes.map((n) => n.id)).toEqual(['insert-plate']);
         for (const n of plan.nodes) {
           assertWellFormed(n.op, `${c.label} ${n.id}`);
@@ -352,7 +367,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
   describe('Invariant 12: bare-blank archetype emits one centred grounded plate', () => {
     for (const c of blankCases) {
       it(`${c.label}: blank plate well-formed, centred and grounded`, () => {
-        const plan = compileProject(c.build());
+        const plan = planOf(c);
         expect(plan.nodes.map((n) => n.id)).toEqual(['blank']);
         for (const n of plan.nodes) {
           assertWellFormed(n.op, `${c.label} ${n.id}`);
@@ -379,7 +394,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
     for (const c of toolboxCases) {
       it(`${c.label}: bin grounded on the bed, lid seated on its ledge`, () => {
         const project = c.build();
-        const plan = compileProject(project);
+        const plan = planOf(c);
         expect(plan.nodes.map((n) => n.id)).toEqual(['toolbox-bin', 'toolbox-lid']);
         for (const n of plan.nodes) {
           assertWellFormed(n.op, `${c.label} ${n.id}`);

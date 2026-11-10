@@ -3,6 +3,7 @@
 // and that compileProject succeeds with seal enabled.
 
 import { describe, it, expect } from 'vitest';
+import { bodies, probeMaterial } from './helpers/printModel';
 import {
   MIN_SEAL_RING_WIDTH,
   MIN_SEAL_WEB,
@@ -22,25 +23,6 @@ import { intersection, cube, translate, type BuildOp } from '@/engine/compiler/b
 import { createDefaultProject } from '@/store/projectStore';
 import type { CaseParameters } from '@/types';
 import { exec } from './helpers/manifoldExec';
-
-/** Positive-volume bodies in a solid. `decompose()` counts sealed voids as
- *  components too (negative volume), and they are not printed parts. */
-function bodies(op: BuildOp): number {
-  const m = exec(op);
-  const n = m.decompose().filter((c) => c.volume() > 0).length;
-  m.delete();
-  return n;
-}
-
-/** Volume of `op` ∩ a `size` cube centred on `p` — full volume ⇒ material
- *  there, 0 ⇒ void. The cube has to fit inside the feature being probed: the
- *  channel is 0.8 mm tall, so a 1 mm cube straddles its floor. */
-function probeMaterial(op: BuildOp, p: [number, number, number], size = 1): number {
-  const hit = exec(intersection([op, translate(p, cube([size, size, size], true))]));
-  const v = hit.volume();
-  hit.delete();
-  return v;
-}
 
 const SEAL: NonNullable<CaseParameters['seal']> = {
   enabled: true,

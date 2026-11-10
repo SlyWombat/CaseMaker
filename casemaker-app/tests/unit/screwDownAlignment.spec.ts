@@ -1,16 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { countOps } from './helpers/printModel';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { validateScrewDownAlignment } from '@/engine/compiler/validation';
 import { createDefaultProject } from '@/store/projectStore';
 import { listBuiltinBoardIds } from '@/library';
 import type { BuildOp } from '@/engine/compiler/buildPlan';
-
-function countOps(op: BuildOp, kind: BuildOp['kind']): number {
-  let n = op.kind === kind ? 1 : 0;
-  if ('child' in op && op.child) n += countOps(op.child, kind);
-  if ('children' in op) for (const c of op.children) n += countOps(c, kind);
-  return n;
-}
 
 describe('Issue #21 — screw-down lid posts + validation', () => {
   it('every built-in board produces no validation errors with default screw-down config', () => {

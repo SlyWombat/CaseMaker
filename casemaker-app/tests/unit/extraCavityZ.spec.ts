@@ -1,16 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { countOps } from './helpers/printModel';
 import { computeShellDims } from '@/engine/compiler/caseShell';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { findTemplate } from '@/library/templates';
 import { getBuiltinHat } from '@/library/hats';
 import type { BuildOp } from '@/engine/compiler/buildPlan';
-
-function countOps(op: BuildOp, kind: BuildOp['kind']): number {
-  let n = op.kind === kind ? 1 : 0;
-  if ('child' in op && op.child) n += countOps(op.child, kind);
-  if ('children' in op) for (const c of op.children) n += countOps(c, kind);
-  return n;
-}
 
 describe('Extra cavity height (#36)', () => {
   it('extraCavityZ = N grows outerZ by exactly N', () => {

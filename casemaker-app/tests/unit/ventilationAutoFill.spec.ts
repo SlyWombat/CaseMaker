@@ -1,14 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { countOps } from './helpers/printModel';
 import { useProjectStore, createDefaultProject } from '@/store/projectStore';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import type { BuildOp } from '@/engine/compiler/buildPlan';
-
-function countOps(op: BuildOp, kind: BuildOp['kind']): number {
-  let n = op.kind === kind ? 1 : 0;
-  if ('child' in op && op.child) n += countOps(op.child, kind);
-  if ('children' in op) for (const c of op.children) n += countOps(c, kind);
-  return n;
-}
 
 describe('Issue #33 — enabling ventilation auto-fills coverage and pattern', () => {
   beforeEach(() => {

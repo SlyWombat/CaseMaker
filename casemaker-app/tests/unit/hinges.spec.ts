@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { bodies, countOps, makeBoard } from './helpers/printModel';
 import { buildHingeOps, HARDWARE_SCREW } from '@/engine/compiler/hinges';
 import { FASTENERS } from '@/engine/compiler/fasteners';
 import { hardwareForProject } from '@/engine/exporters/hardwareList';
@@ -11,13 +12,6 @@ import { computeLidDims } from '@/engine/compiler/lid';
 import { exec } from './helpers/manifoldExec';
 import type { BoardProfile, CaseParameters, HingeFeature } from '@/types';
 import type { BuildOp } from '@/engine/compiler/buildPlan';
-
-function countOps(op: BuildOp, kind: BuildOp['kind']): number {
-  let n = op.kind === kind ? 1 : 0;
-  if ('child' in op && op.child) n += countOps(op.child, kind);
-  if ('children' in op) for (const c of op.children) n += countOps(c, kind);
-  return n;
-}
 
 /** Walk down the single-subtree spine of an op to its bottom solid. */
 function bottom(op: BuildOp): BuildOp {
@@ -44,31 +38,6 @@ function offsetOf(op: BuildOp): [number, number, number] {
     else if (cur.kind === 'rotate') cur = cur.child;
     else throw new Error(`no placement under ${cur.kind}`);
   }
-}
-
-/** Positive-volume bodies in a solid. `decompose()` also reports sealed voids
- *  (negative volume), which are not printed parts (see Manifold component notes). */
-function bodies(op: BuildOp): number {
-  const m = exec(op);
-  const n = m.decompose().filter((c) => c.volume() > 0).length;
-  m.delete();
-  return n;
-}
-
-
-function makeBoard(x: number, y: number): BoardProfile {
-  return {
-    id: `t-${x}x${y}`,
-    name: 'T',
-    manufacturer: 'T',
-    pcb: { size: { x, y, z: 1.6 } },
-    mountingHoles: [{ id: 'h1', x: 5, y: 5, diameter: 2.5 }],
-    components: [],
-    defaultStandoffHeight: 3,
-    recommendedZClearance: 10,
-    source: 'https://example.com',
-    builtin: false,
-  };
 }
 
 const baseCase: CaseParameters = {

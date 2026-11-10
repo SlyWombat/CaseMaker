@@ -14,6 +14,7 @@
  * #1027 plain absence.
  */
 import { describe, expect, it } from 'vitest';
+import { once } from './helpers/once';
 
 import { planModelCam, type ModelPlanInput, type ModelPlanOutput } from '@/engine/cnc/cam/model/plan';
 import { planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
@@ -56,10 +57,14 @@ function goalJob(target: EngraveTargetObject): EngraveJob {
 }
 
 async function plateInput(shop: Parameters<typeof buildModelPlanInputForGoal>[3], tool: Tool = BALL6): Promise<{ input: ModelPlanInput; target: EngraveTargetObject; job: EngraveJob }> {
-  const target = goalTarget();
-  const job = goalJob(target);
-  const input = await buildModelPlanInputForGoal(job, target, tool, shop);
-  return { input, target, job };
+  // #1180 B1 — the same plate + shop is built by several cases; once per file by its own key.
+  const key = `plate:${tool.id}:${shop.tools.map((t) => t.key).sort().join('+')}:${shop.feeds.length}`;
+  return once(key, async () => {
+    const target = goalTarget();
+    const job = goalJob(target);
+    const input = await buildModelPlanInputForGoal(job, target, tool, shop);
+    return { input, target, job };
+  });
 }
 
 type LadderRowView = { diameterMm: number; leftoverShare: number; leftoverAboveMm: number; cycleSeconds: number };

@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
 import { buildRandomPart } from '../tools/randomParts';
+import { once } from './helpers/once';
 import { planModelCam, type ModelPlanInput } from '../../src/engine/cnc/cam/model/plan';
 import { planOwnedOnly, planTwoOutcomes } from '../../src/engine/cnc/cam/model/twoPlans';
 import { cutterKeyOf } from '../../src/engine/cnc/cam/model/sequence';
@@ -29,12 +30,15 @@ const smallFlat: Tool = flatEndMill(1, { number: 9, id: 'flat-1', name: 'flat-1'
 const flat3175: Tool = flatEndMill(3.175, { number: 4, id: 'flat-3.175', name: 'flat-3.175' });
 
 /** The `sloped` random part (seed 1) — the same working synthetic mesh the #959 plan specs use. */
+/** #1180 B1 — the synthetic part is deterministic; build its mesh ONCE per file. Every `input()`
+ *  may still be fresh (cheap) — the triangles are shared and read-only under the planners. */
+const PART = buildRandomPart(1, 'sloped', tl);
+
 function input(owned: Tool[], catalogue: Tool[]): ModelPlanInput {
-  const part = buildRandomPart(1, 'sloped', tl);
   return {
-    geometry: { triangles: part.mesh },
-    setups: [{ frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -part.stock.thickness }, underside: 'flatOnStockBottom' }],
-    stock: { length: part.stock.length, width: part.stock.width, thickness: part.stock.thickness, material: 'hardwood' },
+    geometry: { triangles: PART.mesh },
+    setups: [{ frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -PART.stock.thickness }, underside: 'flatOnStockBottom' }],
+    stock: { length: PART.stock.length, width: PART.stock.width, thickness: PART.stock.thickness, material: 'hardwood' },
     fixture: { mount: 'tape', envelope: null },
     cutters: { house: owned, catalogue },
     tolerances: { finishMm: 0.01 },
@@ -46,32 +50,32 @@ describe('#961/#975 the two plans', () => {
   it('runs the sequence twice — owned and ideal — and the owned plan is the default', async () => {
     const owned = [flat6, ball6, v90];
     const planInput = input(owned, [smallFlat]);
-    const two = await planTwoOutcomes(planInput);
+    const two = await once('two:standard', () => planTwoOutcomes(planInput));
     expect(two.defaultPlan).toBe('owned');
     expect(two.owned.perSetup.length).toBeGreaterThan(0);
     expect(two.ideal).not.toBeNull();
     // The ideal run is exactly `planModelCam` over the union set — same entry, same options.
-    const directIdeal = await planModelCam({ ...planInput, cutters: { house: [...owned, smallFlat], catalogue: [] } });
+    const directIdeal = await once('direct:ideal', () => planModelCam({ ...planInput, cutters: { house: [...owned, smallFlat], catalogue: [] } }));
     expect(JSON.stringify(two.ideal)).toBe(JSON.stringify(directIdeal));
     // And the owned run is `planModelCam` over the owned set alone — the catalogue never leaks in.
-    const directOwned = await planModelCam({ ...planInput, cutters: { house: owned, catalogue: [] } });
+    const directOwned = await once('direct:owned', () => planModelCam({ ...planInput, cutters: { house: owned, catalogue: [] } }));
     expect(JSON.stringify(two.owned)).toBe(JSON.stringify(directOwned));
   }, 120_000);
 
   it('#1134 — a reused owned plan is posted as-is, and the ideal still runs beside it', async () => {
     const planInput = input([flat6, ball6, v90], [smallFlat]);
-    const two = await planTwoOutcomes(planInput);
+    const two = await once('two:standard', () => planTwoOutcomes(planInput));
     expect(two.ideal).not.toBeNull();
     // The pick's measured owned plan handed through: the owned half is not planned again, the
     // ideal still runs, and the result is the same plan the first call produced.
-    const reused = await planTwoOutcomes(planInput, {}, { reusedOwned: two.owned });
+    const reused = await once('two:standard:reused', () => planTwoOutcomes(planInput, {}, { reusedOwned: two.owned }));
     expect(JSON.stringify(reused.owned)).toBe(JSON.stringify(two.owned));
     expect(reused.ideal).not.toBeNull();
     expect(JSON.stringify(reused.ideal)).toBe(JSON.stringify(two.ideal));
     // The pick's own evaluation shape: owned half only, planned exactly as the owned run does.
-    const ownedOnly = await planTwoOutcomes(planInput, {}, { ownedOnly: true });
+    const ownedOnly = await once('two:standard:ownedOnly', () => planTwoOutcomes(planInput, {}, { ownedOnly: true }));
     expect(ownedOnly.ideal).toBeNull();
-    const directOwned = await planModelCam({ ...planInput, cutters: { house: planInput.cutters.house, catalogue: [] } });
+    const directOwned = await once('direct:owned', () => planModelCam({ ...planInput, cutters: { house: planInput.cutters.house, catalogue: [] } }));
     expect(JSON.stringify(ownedOnly.owned)).toBe(JSON.stringify(directOwned));
   }, 120_000);
 
@@ -100,7 +104,7 @@ describe('#961/#975 the two plans', () => {
   it('#1151 — planOwnedOnly is the owned half, exactly', async () => {
     const owned = [flat6, ball6, v90];
     const planInput = input(owned, [smallFlat]);
-    const only = await planOwnedOnly(planInput);
+    const only = await once('planOwnedOnly:standard', () => planOwnedOnly(planInput));
     const directOwned = await planModelCam({ ...planInput, cutters: { house: owned, catalogue: [] }, catalogueConfigured: true });
     expect(JSON.stringify(only)).toBe(JSON.stringify(directOwned));
   }, 120_000);
@@ -110,7 +114,7 @@ describe('#961/#975 the two plans', () => {
     // the catalogue offers a ⌀1 flat that corners better. The OWNED plan must still plan the
     // pockets with no refusal — the ruling's point 2 — and the ideal is the reference beside it.
     const planInput = input([flat6, flat3175, ball6], [smallFlat]);
-    const two = await planTwoOutcomes(planInput);
+    const two = await once('two:mid', () => planTwoOutcomes(planInput));
     const ownedUnplanned = two.owned.perSetup.flatMap((setup) => setup.unplanned);
     expect(ownedUnplanned, JSON.stringify(ownedUnplanned)).toEqual([]);
     expect(two.owned.perSetup[0]!.ops.some((op) => op.kind === 'pocket')).toBe(true);
@@ -123,7 +127,7 @@ describe('#961/#975 the two plans', () => {
     // single tail and a smaller catalogue bit could push the owned rest out (the tray's ⌀3.175,
     // #975 review); this is the fast pin of that property.
     const planInput = input([flat6, flat3175, ball6], [smallFlat]);
-    const two = await planTwoOutcomes(planInput);
+    const two = await once('two:mid', () => planTwoOutcomes(planInput));
     const sig = (steps: readonly { kind: string; cutterKey?: string; cutter?: { key: string } }[]): string =>
       steps.map((step) => `${step.kind}:${step.cutterKey ?? step.cutter?.key ?? '?'}`).join('+');
     const ownedSig = sig(two.owned.perSetup[0]!.choice.steps);

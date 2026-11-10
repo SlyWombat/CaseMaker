@@ -5,6 +5,7 @@
  * the turn-over that keeps a casting the right way round.
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { once } from './helpers/once';
 
 const backing = new Map<string, string>();
 (globalThis as unknown as { localStorage: Storage }).localStorage = {
@@ -141,7 +142,7 @@ describe('#721 — generate → simulate → match', () => {
     const item = await generateGoalProgram(asItem, asItem.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} });
     expect(item.ok).toBe(true);
     const asMold = job({ goalMode: 'mold' });
-    const mold = await generateGoalProgram(asMold, asMold.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} });
+    const mold = await once('mold:dome:generate', () => generateGoalProgram(asMold, asMold.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} }));
     expect(mold.ok).toBe(true);
     expect(mold.programs).toHaveLength(1);
     // The deepest Z in each program: the item's rim sits R below the top; the bowl's centre too.
@@ -202,7 +203,7 @@ describe('#721 — generate → simulate → match', () => {
     expect(warn?.message).toMatch(/a wall at 90(\.0)?°/);
     // A hemisphere's wall curves away from vertical within a cell of the rim: no warning.
     const dome = job({ goalMode: 'mold' });
-    const domeOut = await generateGoalProgram(dome, dome.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} });
+    const domeOut = await once('mold:dome:generate', () => generateGoalProgram(dome, dome.targetObject!, flatEndMill(1, { shape: 'ball' }), null, { shop: {} }));
     expect(domeOut.findings.some((f) => f.code === 'goal-mold-no-draft')).toBe(false);
   });
 });
