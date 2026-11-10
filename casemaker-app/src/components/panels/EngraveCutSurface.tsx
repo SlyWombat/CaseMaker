@@ -633,6 +633,11 @@ export function EngraveCutSurface({
 }: EngraveCutSurfaceProps): JSX.Element {
   const freeze = useEngravePackageStore((s) => s.freeze);
   const openManage = useManageModeStore((s) => s.openManage);
+  // #1191 — a run restored from another build: its origin line, and the background plan compare.
+  const restoreNote = useEngraveRunStore((s) => s.restoreNote);
+  const buildCompare = useEngraveRunStore((s) => s.buildCompare);
+  const compareRestoredPlan = useEngraveRunStore((s) => s.compareRestoredPlan);
+  const keepRestoredPlan = useEngraveRunStore((s) => s.keepRestoredPlan);
   const shelfItems = useStockStore((s) => s.items);
   const defaults = useShopDefaultsStore((s) => s.defaults);
   // #695 — the machine RECORD (not the LAN observation): the bed profile the wizard writes is the
@@ -1065,6 +1070,17 @@ export function EngraveCutSurface({
     const machineFinished = target === null ? [] : finishedProgramsFor(target);
     return [...new Set([...machineFinished, ...logged])];
   }, [target, job.runLog]);
+  // #1191 — "NOT YET STARTED" IS ABOUT THIS PACKAGE. `finishedHashes` also carries every program
+  // the machine has ever cut, so a bare non-empty check would say a fresh blank had started.
+  const packageStarted =
+    pkg !== null && pkg.programs.some((program) => finishedHashes.includes(program.hash));
+  // #1191 — A RESTORED RUN NOBODY HAS STARTED MAY BE COMPARED. After the cross-build re-check has
+  // finished, this build plans the job once in the BACKGROUND and compares hashes; the restored
+  // run is untouched while it runs (keeping is the default), and a different plan is an offer.
+  useEffect(() => {
+    if (restoreNote === null || restoreChecking || buildCompare !== null || packageStarted) return;
+    void compareRestoredPlan();
+  }, [restoreNote, restoreChecking, buildCompare, packageStarted, compareRestoredPlan]);
   const plan = useMemo(
     () =>
       pkg === null
@@ -1453,6 +1469,26 @@ export function EngraveCutSurface({
           document.querySelector<HTMLElement>('[data-testid="engrave-registration"]')?.scrollIntoView({ block: 'center' });
         }}
       />
+      {/* #1191 — THIS BUILD PLANS THE JOB DIFFERENTLY, AND THAT IS THE OPERATOR'S CALL. Identical
+          plans say nothing; a different one is an offer, never a forced re-plan. Keeping is the
+          default: the restored programs stay on the blank until the operator presses. */}
+      {buildCompare?.status === 'different' && (
+        <section style={{ ...BOX, marginTop: 6 }} data-testid="engrave-build-compare">
+          <p style={MUTED} data-testid="engrave-build-compare-sentence">
+            This build plans this job differently ({buildCompare.changed} of {buildCompare.total}{' '}
+            program{buildCompare.total === 1 ? '' : 's'} changed) — keep the programs you have, or
+            use the new plan.
+          </p>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <button type="button" data-testid="engrave-build-compare-keep" onClick={keepRestoredPlan}>
+              Keep these programs
+            </button>
+            <button type="button" data-testid="engrave-build-compare-use" onClick={onGenerate}>
+              Use the new plan
+            </button>
+          </div>
+        </section>
+      )}
       {/* #524/#689 — the Cut surface as a four-line checklist: Checked → Frozen → Register the
           blank → Run. Each line is one sentence; only the step the operator is on has a body. */}
       <Step number={1} title="Fit and clamp" done={fitDone} current={currentStep === 1} summary={step1Summary}>
