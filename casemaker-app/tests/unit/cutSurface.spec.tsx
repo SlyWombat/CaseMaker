@@ -1296,6 +1296,54 @@ describe('#819 the finished screen', () => {
     await waitFor(() => expect(prepare).toHaveBeenCalled());
   });
 
+  // #1123 item 39 follow-up — A HARD RELOAD LOSES THE IN-MEMORY RECORD *AND* THE ENTRY'S END. The
+  // manager's question (2026-11-09): releaseFinished treats an absent record as finished — does the
+  // done card pre-empt after a reload? No: neither the release store nor the machine-run store is
+  // persisted, so no end survives to feed the card; and the Release step's mount plan rebuilds the
+  // record from the DURABLE finished list (the house's machine record + the job's run log). This
+  // test pins that rebuild: record absent, program 1 finished, the next program is 2.
+  it('#1123 item 39 — after a reload the step re-plans from the finished hashes and the card cannot pre-empt', async () => {
+    const job = plannedJob();
+    const programs20 = Array.from({ length: 20 }, (_, i) => {
+      const nc = `G90 ; program ${i + 1}\nM02`;
+      return { ...P1, nc, programHash: programHash(nc), verify: VERIFY };
+    });
+    const pkg = frozen(job, programs20);
+    // The durable half of the reload: the house's machine record knows program 1 finished; nothing
+    // in memory exists (no release record, no machine-run entry/end).
+    useLocationStore.setState({
+      status: 'present',
+      etag: '"e1"',
+      reason: null,
+      location: {
+        machines: [
+          {
+            id: 'm1',
+            name: 'Z1',
+            profileId: 'Z1',
+            address: { host: TARGET.host, port: TARGET.port },
+            bedProfiles: [],
+            accessories: [],
+            finishedPrograms: [programs20[0]!.programHash],
+            updatedAt: '2026-11-09T00:00:00.000Z',
+          },
+        ],
+        accessories: [],
+      } as unknown as LocationView,
+    });
+    draw({ job, report: reportOf(), pkg, generated: generated(programs20), canDrive: true });
+    giveStatement();
+    // The Release step's mount plan rebuilds the record: program 1 done, the next is 2.
+    await waitFor(() => {
+      const rec = useEngraveReleaseStore.getState().records[machineKey(TARGET)];
+      expect(rec?.files[0]?.done).toBe(true);
+    });
+    const files = useEngraveReleaseStore.getState().records[machineKey(TARGET)]!.files;
+    expect(files.find((f) => !f.done)?.index).toBe(2);
+    // And the steps own the screen: the done card cannot pre-empt after a reload.
+    expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
+  });
+
   // #927 — THE DONE CARD'S ONE TIME LINE. The last measured run of this job's program, against the
   // estimate that run's own record carries: 270 s against 250 s is 8 % over.
   it('#927 prints the last measured run against its record’s estimate, and says so when there is none', () => {
