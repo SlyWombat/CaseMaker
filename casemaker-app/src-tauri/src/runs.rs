@@ -1143,13 +1143,22 @@ exec sleep 30
         }
 
         fn service(node: PathBuf, root: PathBuf, max_queue: usize) -> Router {
+            service_timed(node, root, max_queue, Duration::from_secs(30))
+        }
+
+        fn service_timed(
+            node: PathBuf,
+            root: PathBuf,
+            max_queue: usize,
+            wall_clock: Duration,
+        ) -> Router {
             let config = RunsConfig {
                 node: node.clone(),
                 cli: node,
                 root,
                 concurrency: 1,
                 max_queue,
-                wall_clock: Duration::from_secs(30),
+                wall_clock,
                 retention: Duration::from_secs(60),
             };
             // The production submit route lives in `house_api` (the shop ETag check owns that
@@ -1281,6 +1290,25 @@ exec sleep 30
                 .await
                 .expect("the route answers");
             assert_eq!(res.status(), StatusCode::NOT_FOUND);
+        }
+
+        #[tokio::test]
+        async fn a_run_past_the_wall_clock_is_killed_and_states_the_finding() {
+            let dir = tempfile::tempdir().expect("a temp dir");
+            let node = script(dir.path(), SLOW_NODE);
+            let root = dir.path().join("runs");
+            let app = service_timed(node, root, 8, Duration::from_secs(1));
+
+            let (status, reply) = submit(&app, json!({ "name": "slow" })).await;
+            assert_eq!(status, StatusCode::ACCEPTED);
+            let id = reply["runId"].as_str().expect("a run id").to_owned();
+            let started = std::time::Instant::now();
+            let snap = settle(&app, &id).await;
+            assert_eq!(snap["state"], "failed", "{snap}");
+            let finding = snap["finding"].as_str().unwrap_or("");
+            assert!(finding.contains("wall-clock cap"), "{finding}");
+            // The child was killed, not waited out: the fake sleeps 30 s.
+            assert!(started.elapsed() < Duration::from_secs(15), "took {:?}", started.elapsed());
         }
 
         #[tokio::test]
