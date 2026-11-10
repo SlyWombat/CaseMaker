@@ -82,6 +82,11 @@ async function fakeHouse(page: Page): Promise<House> {
     accessories: [] as Json[],
   };
 
+  // #1123-12 — THE ETAG MOVES WITH THE BYTES. The real service's location ETag is the hash of the
+  // served document (`house.rs`), so every write changes it; the store skips a re-render when a
+  // read answers the ETag it already holds. A fake that serves one fixed ETag while its document
+  // changes promises "same bytes" and the write never reaches the card.
+  let etag = 1;
   await page.route('**/api/v1/**', async (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -90,7 +95,7 @@ async function fakeHouse(page: Page): Promise<House> {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        headers: { etag: '"e1"' },
+        headers: { etag: `"e${etag}"` },
         body: JSON.stringify(body),
       });
 
@@ -105,17 +110,20 @@ async function fakeHouse(page: Page): Promise<House> {
     if (machinePath !== null && req.method() === 'PUT') {
       const record = req.postDataJSON() as Json;
       view.machines = view.machines.map((m) => (m.id === record.id ? record : m));
+      etag += 1;
       return json({ ok: true });
     }
     const accessoryPath = /^\/location\/accessories\/(.+)$/.exec(path);
     if (accessoryPath !== null && req.method() === 'PUT') {
       const record = req.postDataJSON() as Json;
       view.accessories = [...view.accessories.filter((a) => a.id !== record.id), record];
+      etag += 1;
       return json({ ok: true });
     }
     if (accessoryPath !== null && req.method() === 'DELETE') {
       const id = decodeURIComponent(accessoryPath[1]!);
       view.accessories = view.accessories.filter((a) => a.id !== id);
+      etag += 1;
       return json({ ok: true });
     }
     return route.fulfill({ status: 404, body: '' });

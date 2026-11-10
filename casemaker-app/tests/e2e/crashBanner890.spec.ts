@@ -35,13 +35,30 @@ const HEALTH = {
   warnings: [],
 };
 
-/** Leave a crashed session's marker where the recorder reads it, before any app code runs. */
-async function seedCrash(page: Page): Promise<void> {
+/**
+ * Leave a crashed session's marker where the recorder reads it, before any app code runs.
+ *
+ * #1122 item 4 — a marker counts as THIS installation's last run only when it names the build that
+ * wrote it (`appVersion` + `commit`). The fixture cannot know the build's identity before the app
+ * has run, so the first load is asked: the recorder writes its own session marker at startup, and
+ * that marker's identity is copied into the crash fixture. The reseed goes through an init script,
+ * because the dying page's unload removes the marker on the way out — writing it now would be
+ * erased by the very reload that should read it.
+ */
+async function seedCrash(page: Page, cm: { ready: () => Promise<void> }): Promise<void> {
+  await cm.ready();
+  await page.waitForFunction((key) => window.localStorage.getItem(key) !== null, MARKER_KEY, {
+    timeout: 15_000,
+  });
+  const own = JSON.parse(
+    (await page.evaluate((key) => window.localStorage.getItem(key), MARKER_KEY))!,
+  ) as { appVersion?: string; commit?: string | null };
+  if (typeof own.appVersion !== 'string') throw new Error('the recorder wrote no build identity');
   await page.addInitScript(
     ([key, marker]) => {
       window.localStorage.setItem(key!, marker!);
     },
-    [MARKER_KEY, JSON.stringify(MARKER)],
+    [MARKER_KEY, JSON.stringify({ ...MARKER, appVersion: own.appVersion, commit: own.commit ?? null })],
   );
 }
 
@@ -88,7 +105,7 @@ async function boxes(page: Page): Promise<Boxes> {
 }
 
 test('#890 — the banner sits above the workspace, and the three panels keep their columns', async ({ cm, page }) => {
-  await seedCrash(page);
+  await seedCrash(page, cm);
   await openWorkspace(page, cm);
 
   const banner = page.getByTestId('crash-banner');
@@ -120,7 +137,7 @@ test('#890 — the banner sits above the workspace, and the three panels keep th
 });
 
 test('#890 — a new job dismisses the previous session’s crash prompt', async ({ cm, page }) => {
-  await seedCrash(page);
+  await seedCrash(page, cm);
   await cm.ready();
   await expect(page.getByTestId('crash-banner')).toBeVisible();
 
@@ -144,7 +161,7 @@ test('#890 — a sent report shows its confirmation, then the banner goes', asyn
     route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ path: 'crash-reports/crash-2-0.json' }) }),
   );
   await page.route('**/api/v1/tools**', (route) => route.fulfill({ status: 404, body: '' }));
-  await seedCrash(page);
+  await seedCrash(page, cm);
   await cm.ready();
 
   const banner = page.getByTestId('crash-banner');

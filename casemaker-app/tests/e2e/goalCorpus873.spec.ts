@@ -112,7 +112,7 @@ test.describe('the goal corpus, desktop', () => {
     // #948 — THE GOAL CHECK'S OWN VERDICT, IN D'S WORDS. The figure's sweep does leave a cell cut
     // 0.023 mm below the goal (at 65, 43.7) — but since #964/#1003 that cell is UN-ADJUDICABLE (a
     // wall region: a cell closes where design of any facing stands above the level), so the JUDGED
-    // reading is 0 mm cut-into and the run is a cross on its coverage (88.64 % against the 95 %
+    // reading is 0 mm cut-into and the run is a cross on its coverage (88.41 % against the 95 %
     // line), not on a cut-into sentence. The raw reading is still printed beside the judged one,
     // and this spec asserts both: the exclusions hide nothing.
     expect(verdict, 'the figure fails its pass line — a cross, not a ready program').toBe('cross');
@@ -122,10 +122,12 @@ test.describe('the goal corpus, desktop', () => {
     await page.getByTestId('cnc-mode-cut').evaluate((el) => (el as HTMLElement).click());
     await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
     await expect(page.getByTestId('engrave-cut-goal')).toHaveAttribute('data-state', 'coverage');
-    // Measured 2026-11-06 on 966-collapse; the judge states the coverage it measured against the
-    // pass line it judged (#948), never a 0 mm cut-into that never happened.
+    // Measured 2026-11-06 on 966-collapse (88.64 %), re-measured on land15 2026-11-09 at 88.41 %
+    // after #1129's derived sampler floor refined the measured surface. The judge states the
+    // coverage it measured against the pass line it judged (#948), never a 0 mm cut-into that never
+    // happened; this spec pins the judge's own measured value, not a target.
     await expect(page.getByTestId('engrave-cut-goal')).toHaveText(
-      'Covers 88.64 % of the design’s top surface (the pass line is 95 %)',
+      'Covers 88.41 % of the design’s top surface (the pass line is 95 %)',
     );
     // #964 — the raw reading beside the judged one, and it is the wall that moves: the deepest RAW
     // cell is a wall column 10 mm below the goal at (44.8, 26.8) — un-adjudicable under #1003's

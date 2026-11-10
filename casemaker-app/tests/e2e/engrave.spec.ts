@@ -246,18 +246,21 @@ test('the run sheet opens for a verified job, names the saved file, and prints w
   await expect(await menuItem(page, 'engrave-run-sheet')).toBeEnabled();
   await acknowledgeClearance(page);
 
-  // Save writes THREE files (#273, #277): the job, the frame beside it, then the run record. Awaiting
-  // only the first download is what let the frame go missing unnoticed.
+  // Save writes FOUR files (#273, #277, #1123 item 4): the job, the frame beside it, the run
+  // record, then the run's stage log. Awaiting only the first download is what let the frame go
+  // missing unnoticed.
   const downloads: string[] = [];
   page.on('download', (d) => downloads.push(d.suggestedFilename()));
   await (await menuItem(page, 'engrave-save')).click();
-  await expect.poll(() => downloads.length).toBe(3);
+  await expect.poll(() => downloads.length).toBe(4);
   const suggested = downloads[0]!;
   expect(suggested).toMatch(/\.nc$/);
   expect(suggested).not.toContain('-frame.nc');
   expect(downloads[1]).toBe(suggested.replace(/\.nc$/, '-frame.nc'));
   // The record sits beside the program, named after it, and cannot be mistaken for it.
   expect(downloads[2]).toBe(suggested.replace(/\.nc$/, '-run.json'));
+  // #1123 item 4 — the run's stage log rides with the record it belongs to.
+  expect(downloads[3]).toBe(suggested.replace(/\.nc$/, '-run.log'));
 
   // …is the name the sheet prints.
   await (await menuItem(page, 'engrave-run-sheet')).click();
@@ -301,7 +304,7 @@ test('a filled run record shows its measured run beside the estimate', async ({ 
   const downloads: { name: string; file: Download }[] = [];
   page.on('download', (d) => downloads.push({ name: d.suggestedFilename(), file: d }));
   await (await menuItem(page, 'engrave-save')).click();
-  await expect.poll(() => downloads.length).toBe(3);
+  await expect.poll(() => downloads.length).toBe(4);
 
   const ncFile = downloads[0]!.name;
   const record = downloads.find((d) => d.name.endsWith('-run.json'))!;

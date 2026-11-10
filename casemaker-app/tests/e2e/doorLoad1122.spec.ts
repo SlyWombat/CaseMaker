@@ -10,6 +10,9 @@ import { readFileSync } from 'node:fs';
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures/caseMaker';
 
+/** #1123 item 10 — the one record that says the CNC workspace was open (`workspaceSession.ts`). */
+const WORKSPACE_KEY = 'casemaker.workspace.v1';
+
 /** #686 — every job-file command is the File menu's; open it if it is not already. */
 async function fileMenu(page: Page, testid: string): Promise<void> {
   const menu = page.getByTestId('engrave-file-menu');
@@ -40,7 +43,10 @@ test('#1122 — Load opens a .cutjob.json from the door and lands on the Job pan
   const doc = JSON.parse(readFileSync(savedPath!, 'utf8')) as { name: string; stock: unknown };
   expect(doc.stock).toBeDefined();
 
-  // Back to the door (a fresh load opens there), and open it with ONE press of Load.
+  // Back to the door, and open it with ONE press of Load. #1123 item 10 means a reload comes back
+  // to the workspace that was open, so the session record is cleared for this navigation: a fresh
+  // load — no record — is what opens the door.
+  await page.addInitScript((key) => window.localStorage.removeItem(key), WORKSPACE_KEY);
   await cm.ready();
   await expect(page.getByTestId('welcome-overlay')).toBeVisible();
   const [chooser] = await Promise.all([

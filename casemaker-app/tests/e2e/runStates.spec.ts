@@ -140,7 +140,9 @@ test('#801/#806 — the run panel running, paused, and its Done card, on a fake 
   await expect(page.getByTestId('engrave-cut-go')).toHaveCount(0);
   await expect(page.getByTestId('engrave-run-start')).toHaveCount(0);
   await expect(page.getByTestId('engrave-cut-step-1')).toHaveCount(0);
-  await expect(runPanel.getByTestId('engrave-run-outcome')).toHaveText('Vacuum off; homed.');
+  // #1123 item 41 — the output is the DIRECT command (M852), not the M331 auto mode, and the
+  // sentence names the code it sent.
+  await expect(runPanel.getByTestId('engrave-run-outcome')).toHaveText('Vacuum off (M852); homed.');
   await expect(done.locator('p')).toHaveCount(2); // the title and the one line
   await expect(done.locator('button')).toHaveCount(1); // Cut another
   await expect(runPanel.getByTestId('engrave-run-another')).toBeVisible();

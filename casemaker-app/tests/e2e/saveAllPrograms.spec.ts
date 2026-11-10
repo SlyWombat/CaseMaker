@@ -171,8 +171,13 @@ test('#1093 — Save all writes every program of the run, byte-identical to set 
   // Keep what the app wrote: when a byte comparison fails, the file itself is the evidence.
   for (const [name, bytes] of Object.entries(zip)) writeFileSync(testInfo.outputPath(name), bytes);
 
-  // Every program of set B, by name and by byte, plus the run record — and nothing else.
-  const expectedNames = [...SETB_BOTTOM.files.map((f) => f.name), `${JOB_NAME}-run.json`].sort();
+  // Every program of set B, by name and by byte, plus the run record and its stage log (#1123
+  // item 4: the log is written with the record it belongs to) — and nothing else.
+  const expectedNames = [
+    ...SETB_BOTTOM.files.map((f) => f.name),
+    `${JOB_NAME}-run.json`,
+    `${JOB_NAME}-run.log`,
+  ].sort();
   expect(Object.keys(zip).sort(), 'the zip holds exactly the run’s files').toEqual(expectedNames);
 
   // #1093 R4 — THE RECORD LISTS EVERY PROGRAM, and every hash is its own file's: the app's save
