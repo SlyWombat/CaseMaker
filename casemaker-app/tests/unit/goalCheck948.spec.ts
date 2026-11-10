@@ -108,6 +108,35 @@ function goalJob(target: EngraveTargetObject, stock: { length: number; width: nu
   };
 }
 
+/**
+ * #1180 — THE RELIEF RUN, ONCE. Two cases below (the corpus report and the deliberate gouge) read
+ * the same `relief-plate.stl`, build the same target/job and run `generate()` — the gouge test then
+ * splices into the SAME posted program. They shared nothing and paid for the generation twice; the
+ * memo makes the second case reuse the first's run. Nothing else in the file touches it.
+ */
+let reliefPromise: Promise<{
+  stock: { length: number; width: number; thickness: number };
+  target: EngraveTargetObject;
+  job: EngraveJob;
+  g: Awaited<ReturnType<typeof generate>>;
+}> | null = null;
+function reliefRun(): Promise<{
+  stock: { length: number; width: number; thickness: number };
+  target: EngraveTargetObject;
+  job: EngraveJob;
+  g: Awaited<ReturnType<typeof generate>>;
+}> {
+  reliefPromise ??= (async () => {
+    const stock = { length: 80, width: 50, thickness: 20 };
+    const imported = await read('relief-plate.stl');
+    const target = targetOf(imported, stock);
+    const job = goalJob(target, stock);
+    const g = await generate(tl, job);
+    return { stock, target, job, g };
+  })();
+  return reliefPromise;
+}
+
 describe('#948 the goal check’s plain input', () => {
   it('states a multi-side goal unchecked rather than comparing the wrong frame', async () => {
     const imported = await read('relief-plate.stl');
@@ -570,11 +599,7 @@ describe('#948 the live session’s swept top', () => {
 
   // #966 triage — #1007: the model path attaches no surface/goal-check report.
   it('a corpus goal’s report carries the goal check the page’s checker computes', async () => {
-    const stock = { length: 80, width: 50, thickness: 20 };
-    const imported = await read('relief-plate.stl');
-    const target = targetOf(imported, stock);
-    const job = goalJob(target, stock);
-    const g = await generate(tl, job);
+    const { job, g } = await reliefRun();
     expect(g.ok, g.errors.map((e) => e.message).join('; ')).toBe(true);
     // #1007 — the carrier: `runSheet`'s surface steps and the goal-check marker read this.
     expect(g.surface3d).toBeDefined();
@@ -664,11 +689,7 @@ describe('#948 the live session’s swept top', () => {
   it('catches a deliberate gouge: a feed 0.2 mm below the goal reads back as cut-into', async () => {
     // The acceptance's positive case: a program that DOES cut into the goal must not read as a
     // pass. The same posted relief program, with one plunge spliced in over the part's top face.
-    const stock = { length: 80, width: 50, thickness: 20 };
-    const imported = await read('relief-plate.stl');
-    const target = targetOf(imported, stock);
-    const job = goalJob(target, stock);
-    const g = await generate(tl, job);
+    const { target, job, g } = await reliefRun();
     expect(g.ok, g.errors.map((e) => e.message).join('; ')).toBe(true);
     // #1007 — THE GOUGE IS GOAL-RELATIVE AND THE RUN IS EVERY PROGRAM. The old splice asked for
     // Z −0.2 in absolute machine Z; on the model program the relief's goal at (40, 25) is far
