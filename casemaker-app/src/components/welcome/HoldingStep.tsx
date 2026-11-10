@@ -53,7 +53,7 @@ import { drawnVise } from '@/engine/cnc/drawnVise';
 import { drawnRotary } from '@/engine/cnc/drawnRotary';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { rotaryCapability } from '@/engine/cnc/machine';
-import { chuckStockOf } from '@/engine/cnc/stockStart';
+import { chuckStockOf, isJobForm, isRoundStock } from '@/engine/cnc/stockStart';
 import { formLabel } from '@/engine/cnc/stockStart';
 import {
   bracketSettings,
@@ -1611,7 +1611,8 @@ export function HoldingStep({
         stock: answers.stock,
         boardMm,
         rotaryEnvelope,
-        round: job.stockEntry?.form === 'rod' || job.stock.shape === 'cylinder',
+        // #1104 — a ROD or a TUBE is round stock, one predicate: the footer and these rows agree.
+        round: (job.stockEntry?.form !== undefined && isJobForm(job.stockEntry.form) && isRoundStock(job.stockEntry.form)) || job.stock.shape === 'cylinder',
         // #1059 — a BLOCK is a rotary stock (#777): the engine's own classifier says which box
         // the chuck reads as a section, so the wizard cannot disagree with what Generate will do.
         block: chuckStockOf(job)?.kind === 'block',

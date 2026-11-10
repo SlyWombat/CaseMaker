@@ -402,6 +402,16 @@ export function isJobForm(form: string): form is JobStockForm {
 }
 
 /**
+ * #1104 — A ROD OR A TUBE IS ROUND STOCK, one predicate everywhere: the vise holds it standing on
+ * its end, the chuck turns it, and tape does not hold it. Before this the wizard's footer read a
+ * tube as round while the Holding step did not, so a tube could show an enabled vise row behind a
+ * blocked Create.
+ */
+export function isRoundStock(form: JobStockForm): boolean {
+  return form === 'rod' || form === 'tube';
+}
+
+/**
  * Why a form cannot be a job's stock, or null. A disc, a rod and a tube ARE offered (#683, #713).
  * A rod longer than the vise's grip is the rotary's: it is not a refusal at all — the form's own
  * sentence says so ({@link rodGripProblem}) and Next goes on to Holding, which writes the chuck.
