@@ -204,7 +204,7 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByTestId('start-wizard-op-surface-file')).toHaveCount(0);
       await expect(page.getByTestId('start-wizard-operation-next')).toBeDisabled();
       await expect(page.getByTestId('start-wizard-create-unblock')).toHaveText(
-        "Choose the board's Gerber and drill files.",
+        "Pick the board's Gerber and drill files.",
       );
 
       // The circuit board's Gerbers: the set named in the row with Change.

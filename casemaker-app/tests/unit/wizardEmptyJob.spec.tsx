@@ -79,7 +79,7 @@ describe('#1123 item 3 — nothing picked creates the empty job', () => {
     openAtQuestion();
     fireEvent.click(screen.getByTestId('engrave-setup-what-engrave'));
     expect(primary().disabled).toBe(true);
-    expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe('Type the text to engrave.');
+    expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe('Type the text to engrave — for example, a name.');
 
     fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Zoomba' } });
     expect(primary().disabled).toBe(false);

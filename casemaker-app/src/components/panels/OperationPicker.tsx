@@ -103,11 +103,14 @@ export function OperationPicker({
                   data-testid={testidFor(t.id)}
                   aria-pressed={mode === 'select' ? on : undefined}
                   disabled={disabled}
-                  title={t.blurb}
                   style={disabled ? SELECTION_CHIP_DISABLED : on ? SELECTION_CHIP_ON : SELECTION_CHIP}
                   onClick={() => onPick(t.id)}
                 >
-                  {t.label}
+                  <span style={{ display: 'block' }}>{t.label}</span>
+                  {/* #1109 — the blurb is VISIBLE help, not a title: touch and keyboard see it. */}
+                  <span style={{ display: 'block', fontSize: 10, opacity: 0.75, lineHeight: 1.3, textAlign: 'left' }}>
+                    {t.blurb}
+                  </span>
                 </button>
               );
             })}

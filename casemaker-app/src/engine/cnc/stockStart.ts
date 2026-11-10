@@ -447,7 +447,8 @@ export function boxProblem(box: StockBox, machine: SizedMachine): string | null 
   const names = { length: 'length', width: 'width', thickness: 'thickness' } as const;
   for (const key of ['length', 'width', 'thickness'] as const) {
     const v = box[key];
-    if (!Number.isFinite(v) || v <= 0) return `the ${names[key]} needs a number in mm, above 0`;
+    // #1109 — the blocker proposes a value.
+    if (!Number.isFinite(v) || v <= 0) return `${names[key].charAt(0).toUpperCase()}${names[key].slice(1)} needs a size — type a number above 0 (for example 80)`;
   }
   const t = travel(machine);
   if (box.length > t.length) {
@@ -482,7 +483,7 @@ export function formSizeProblem(form: JobStockForm, size: StockSize, machine: Mi
   for (const key of STOCK_SIZE_FIELDS[form]) {
     const v = size[key];
     if (v === null || v === undefined || !Number.isFinite(v) || v <= 0) {
-      return `the ${key} needs a number in mm, above 0`;
+      return `${key.charAt(0).toUpperCase()}${key.slice(1)} needs a size — type a number above 0 (for example 80)`;
     }
   }
   if (form === 'rod' || form === 'tube') return rotaryEnvelopeProblem(size, machine);

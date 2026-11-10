@@ -10,42 +10,42 @@ import type { OperationChoice } from './OperationStep';
 export function operationCreateBlocked(choice: OperationChoice | null): string | null {
   if (choice === null) return null;
   if (choice.type === 'engrave') {
-    if (choice.text.trim() === '') return 'Type the text to engrave.';
-    if (!Number.isFinite(choice.depth) || choice.depth <= 0) return 'Depth must be above 0 mm.';
+    if (choice.text.trim() === '') return 'Type the text to engrave — for example, a name.';
+    if (!Number.isFinite(choice.depth) || choice.depth <= 0) return 'Depth needs a size above 0 — 0.5 mm engraves; 3 mm pockets.';
     return null;
   }
   // The mesh is the operation's one field; Create waits for a file that read cleanly.
-  if (choice.type === 'surface') return choice.target === null ? 'Choose the mesh to surface.' : null;
+  if (choice.type === 'surface') return choice.target === null ? 'Pick the mesh to surface — a .stl or .step file.' : null;
   // #1098 — a drawing IS the field, so it is always read; only Pocket it asks for a number.
   if (choice.type === 'outline') {
     if (choice.use === 'pocket') {
       return choice.depth === undefined || !Number.isFinite(choice.depth) || choice.depth <= 0
-        ? 'Depth must be above 0 mm.'
+        ? 'Depth needs a size above 0 — 0.5 mm engraves; 3 mm pockets.'
         : null;
     }
     return null;
   }
   // #874 — a board's one field is its Gerber and drill set. There is nothing for Create to ADD
   // once it reads (the files wrote the items), so this is the whole gate.
-  if (choice.type === 'pcb') return choice.imported ? null : "Choose the board's Gerber and drill files.";
+  if (choice.type === 'pcb') return choice.imported ? null : "Pick the board's Gerber and drill files.";
   // #752 — a rotary flute's field is its length, and a length is a positive number.
   if (choice.type === 'flute' && choice.lengthMm !== undefined) {
-    return !Number.isFinite(choice.lengthMm) || choice.lengthMm <= 0 ? 'The flute needs a length above 0 mm.' : null;
+    return !Number.isFinite(choice.lengthMm) || choice.lengthMm <= 0 ? 'The flute needs a length above 0 — type a number in mm.' : null;
   }
   // #241 slice 2 — the face group's one field each. A flat's depth is a positive number; a ring
   // is at least three faces with a positive across-flats; a cross-hole's diameter is above 0. An
   // index is any finite number of degrees (it unwinds, so it may pass a turn).
   if (choice.type === 'flat') {
-    if (!Number.isFinite(choice.a)) return 'Give the face an angle, in degrees.';
-    return !Number.isFinite(choice.depth) || choice.depth <= 0 ? 'Depth must be above 0 mm.' : null;
+    if (!Number.isFinite(choice.a)) return 'Give the face an angle in degrees — type a number (for example 45).';
+    return !Number.isFinite(choice.depth) || choice.depth <= 0 ? 'Depth needs a size above 0 — 0.5 mm engraves; 3 mm pockets.' : null;
   }
   if (choice.type === 'faces-all-round') {
-    if (!Number.isInteger(choice.count) || choice.count < 3) return 'Faces all round needs at least 3 faces.';
-    return !Number.isFinite(choice.acrossFlats) || choice.acrossFlats <= 0 ? 'Across flats must be above 0 mm.' : null;
+    if (!Number.isInteger(choice.count) || choice.count < 3) return 'Faces all round needs at least 3 — type 6 for a hex.';
+    return !Number.isFinite(choice.acrossFlats) || choice.acrossFlats <= 0 ? 'Across flats needs a size above 0 — type a number in mm (for example 15).' : null;
   }
   if (choice.type === 'cross-hole') {
-    if (!Number.isFinite(choice.a)) return 'Give the hole an angle, in degrees.';
-    return !Number.isFinite(choice.diameter) || choice.diameter <= 0 ? 'The hole needs a diameter above 0 mm.' : null;
+    if (!Number.isFinite(choice.a)) return 'Give the hole an angle in degrees — type a number (for example 45).';
+    return !Number.isFinite(choice.diameter) || choice.diameter <= 0 ? 'The hole needs a diameter above 0 — type a number in mm.' : null;
   }
   return null;
 }
