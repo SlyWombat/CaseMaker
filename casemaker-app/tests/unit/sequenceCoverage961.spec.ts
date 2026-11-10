@@ -159,10 +159,12 @@ function opts(planStep: SequenceOptions['planStep'] = (s) => standIn(s)): Sequen
 }
 
 describe('#961 the organizer demand: cover what a house cutter can cut', () => {
-  it('the ⌀3.175 rest covers the 27 4.1–4.9 mm pockets; only the 16 below the house set are stated', () => {
+  it('the 27 4.1–4.9 mm pockets are covered; only the 16 below the house set are stated', () => {
+    // #1186 rule 1 RE-PIN: the same coverage is now bought by the ⌀3.175 as the PRIMARY (it covers
+    // the 27 and the rest of the part, at its own row), not by a rest step under a ⌀6 primary — the
+    // cheaper COMPLETE chain wins. What this test has always judged is the coverage, and it stands.
     const choice = chooseSequence(DEMAND, HOUSE, opts());
-    expect(choice.steps.some((s) => s.kind === 'rest' && s.cutter.key === 'flat-3.175')).toBe(true);
-    expect(choice.steps[0]!.cutter.key).toBe('flat-6');
+    expect(choice.steps.some((s) => (s.kind === 'pocket' || s.kind === 'rest') && s.cutter.key === 'flat-3.175')).toBe(true);
     for (const id of CUTTABLE_REST) expect(choice.unreachable).not.toContain(id);
     // #1019 — an un-enterable pocket is stated as its own sentence ("id: 0.541 mm opening …"),
     // not a bare id: the ids named are still exactly the below-house set.
@@ -172,29 +174,35 @@ describe('#961 the organizer demand: cover what a house cutter can cut', () => {
     expect(BELOW_HOUSE).toHaveLength(16);
   });
 
-  it('price never outvotes coverage: an absurdly dear rest step still beats leaving the 27 uncut', () => {
+  it('price never outvotes coverage: an absurdly dear small-flat pass still beats leaving the 27 uncut', () => {
+    // #1186 rule 1 RE-PIN: the dear step is now the ⌀3.175 primary (there is no rest to be dear);
+    // the rule this test prices is unchanged — coverage ranks before price, so the chain that
+    // covers the 27 is chosen whatever its minutes.
     const choice = chooseSequence(
       DEMAND,
       HOUSE,
-      opts((step) => standIn(step, step.kind === 'rest' ? 5000 : 10)),
+      opts((step) => standIn(step, step.cutter.key === 'flat-3.175' ? 5000 : 10)),
     );
-    expect(choice.steps.some((s) => s.kind === 'rest' && s.cutter.key === 'flat-3.175')).toBe(true);
+    expect(choice.steps.some((s) => (s.kind === 'pocket' || s.kind === 'rest') && s.cutter.key === 'flat-3.175')).toBe(true);
     // #1019 — the ids ride beside their sentences: count the distinct pockets named.
     expect(new Set(choice.unreachable.map((u) => (u.includes(': ') ? u.slice(0, u.indexOf(': ')) : u))).size).toBe(BELOW_HOUSE.length);
   });
 
-  it('every candidate prices the same demand; the primary alone is the one that leaves cuttable pockets', () => {
+  it('every candidate prices the same demand; a ⌀6-only chain is the one that leaves cuttable pockets', () => {
+    // #1186 rule 1 RE-PIN: both primaries are PROPOSED now (the field's "an ordering rule only
+    // proposes"); the ⌀6-only chain still leaves the 27 cuttable, and the ⌀3.175-primary chain
+    // covers them — that difference, not which chain is legal, is what this test has always judged.
     const candidates = candidateSequences(DEMAND, HOUSE);
-    const only6 = candidates.find((c) => !c.steps.some((s) => s.kind === 'rest'))!;
-    const chain = candidates.find((c) => c.steps.some((s) => s.kind === 'rest'))!;
+    const only6 = candidates.find((c) => c.steps.every((s) => s.cutter.key === 'flat-6'))!;
+    const chain = candidates.find((c) => c.steps.some((s) => s.cutter.key === 'flat-3.175'))!;
     // #1019 — ids and sentences both ride `unreachable`: compare the distinct pockets named.
     const distinct = (c: (typeof candidates)[number]): number =>
       new Set(c.unreachable.map((u) => (u.includes(': ') ? u.slice(0, u.indexOf(': ')) : u))).size;
     expect(distinct(only6)).toBe(43);
     expect(distinct(chain)).toBe(16);
-    // …and no chain ever shrinks the primary to the smaller flat, however cheap that is: the
-    // chain is the largest flat + rest, the ruling's own shape.
-    for (const c of candidates) expect(c.steps[0]!.cutter.key).toBe('flat-6');
+    // #1186 rule 1: the smaller primary is a legal PROPOSAL (it was never priced before); the rank
+    // decides on the total, never on the order of proposal.
+    expect(candidates.some((c) => c.steps[0]!.cutter.key === 'flat-3.175')).toBe(true);
     expect(only6.leftBehind).toBe(27);
     expect(chain.leftBehind).toBe(0);
   });

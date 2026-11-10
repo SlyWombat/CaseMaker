@@ -207,7 +207,8 @@ describe('#1062 the #669 body proxy is judged on the owned record, never on an i
     // The substitution answers a diameter, never a shape: a drill keeps its own refusal.
     expect(unfeedable, 'a drill was made feedable by a flat proxy').toContain('Drill');
     expect(codes, 'the substitution that fed the corn is not stated').toContain('goal-cutter-substituted');
-    expect(last.notes.join(' | ')).toContain('largest covered row (3.2 mm)');
+    // #1186 rule 4 — the borrow is stated once for the plan, naming the bits and the row.
+    expect(last.notes.join(' | ')).toContain("the 3.2 mm row's slower feed");
     // The corn is the set's only flat, so its own numbers cut the pocket floor.
     const ops = plan.perSetup.flatMap((s) => s.ops);
     expect(ops.some((op) => op.outcome.ir.tool.name === CORN.name), 'the corn cut no op').toBe(true);
