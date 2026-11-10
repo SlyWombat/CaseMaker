@@ -15,6 +15,7 @@
  */
 
 import { featureSim } from '@/platform/features';
+import { cancelActiveHouseRun, houseEngraveGenerate, houseGenerationAvailable } from '@/platform/houseGenerate';
 import { create } from 'zustand';
 import type { EngraveJob, EngraveMargins, EngraveTargetObject } from '@/types/engraveJob';
 import type { Tool } from '@/engine/cnc/tool';
@@ -799,6 +800,33 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     };
     try {
       client = await clientLoader();
+      // #1126 — GENERATE ON THE HOUSE WHEN THE SERVICE CAN RUN IT. The probe is a runtime fact:
+      // a service without its CLI answers `runs: false`, a host without a service answers nothing,
+      // and either way the in-page worker runs exactly as it did. The house client keeps every
+      // other call (the sim session, the oracle) on the browser client; only the generation moves,
+      // and the ideal compare is left out because the CLI's own Generate already ran both outcomes
+      // and returned the tradeoff on the result.
+      if (!simulateOnly && mine === seq && (await houseGenerationAvailable())) {
+        const base = client;
+        const { engravePlanIdeal: _idealOnTheBrowser, ...rest } = base;
+        client = {
+          ...rest,
+          engraveGenerate: (jobArg, toolArg, catalogueArg, calibrationArg, marginsArg, shopArg, onProgressArg) =>
+            houseEngraveGenerate({
+              job: jobArg,
+              tool: toolArg,
+              catalogue: catalogueArg,
+              calibration: calibrationArg,
+              margins: marginsArg,
+              ...(shopArg === undefined ? {} : { shop: shopArg }),
+              ...(onProgressArg === undefined ? {} : { onProgress: onProgressArg }),
+            }),
+          cancelGenerate: () => {
+            cancelActiveHouseRun();
+            base.cancelGenerate?.();
+          },
+        };
+      }
       activeClient = client;
       if (simulateOnly) {
         // #893 — nothing to generate: the program the row shows is this job's own.

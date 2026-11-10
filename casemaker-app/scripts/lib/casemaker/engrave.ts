@@ -150,7 +150,13 @@ import {
   type ReachRow,
 } from '../../../src/engine/cnc/engrave/reachability';
 import { MARGIN_DEFAULTS } from '../../../src/engine/cnc/engrave/depthBounds';
-import { engraveRegions, measureEngraving, raisedTextMeasure, supportingFloors } from '../../../src/workers/sim/engraveGenerate';
+import {
+  engraveRegions,
+  measureEngraving,
+  raisedTextMeasure,
+  supportingFloors,
+  type EngraveProgressFn,
+} from '../../../src/workers/sim/engraveGenerate';
 import { cuttingDiameter } from '../../../src/engine/cnc/tool';
 import type { CutParams, FeedCatalogueRow } from '../../../src/engine/cnc/feeds';
 // #922 — the one call shape feeds/step-down/rpm resolution now goes through, and the table this
@@ -250,6 +256,13 @@ interface Args {
    * rank, byte-identical); the house service asks for it on the planning box.
    */
   parallelRank?: boolean;
+  /**
+   * #1126 — write the run's whole `EngraveGenerated` document (the plain-data result the browser's
+   * worker returns) to this file as JSON. The house service asks for it beside the receipt and the
+   * programs so the panel can settle a house run exactly as it settles an in-page one; the receipt
+   * stays the human/machine summary it has always been.
+   */
+  generated?: string;
 }
 
 /** Exported for the CLI's own spec (#1052): the flag set is pinned by parsing. */
@@ -298,6 +311,7 @@ export function parseArgs(argv: string[]): Args {
     } else if (a === '--defer-ideal') args.deferIdeal = true;
     else if (a === '--parallel-rank') args.parallelRank = true;
     else if (a === '--mem-trace') args.memTrace = argv[++i];
+    else if (a === '--generated') args.generated = argv[++i];
     else if (a === '--location') args.location = argv[++i];
     else if (a === '--catalogue') args.catalogue = argv[++i];
     else if (a === '--turn') {
@@ -316,8 +330,25 @@ function fail(message: string): never {
   throw new CliExit(1);
 }
 
+/**
+ * #1126 — THE `--events` PROGRESS CALLBACK. The engine already reports its stages as plain
+ * `EngraveProgress` objects (`stage`, `label`, `done`, `total`) to the browser's worker; with
+ * `--events` the CLI hands the same callback to the generator and writes each object to stderr as
+ * one JSON line. Nothing is re-worded or re-derived here: the service's runs API relays these
+ * objects, and the panel reads them with the very type it reads the worker's with.
+ *
+ * Human progress lines (`out.progress`, the pick words and advisories) ride as `note` frames from
+ * `commandOutput`, so stderr is JSON and only JSON in this mode.
+ */
+export function eventProgress(options: CommandOptions): EngraveProgressFn | undefined {
+  if (options.events !== true) return undefined;
+  return (progress) => {
+    process.stderr.write(`${JSON.stringify(progress)}\n`);
+  };
+}
+
 const USAGE =
-  'usage: casemaker cut <job.json> [--out <dir>] [--defer-ideal] [--parallel-rank]\n' +
+  'usage: casemaker cut <job.json> [--out <dir>] [--defer-ideal] [--parallel-rank] [--generated <path>]\n' +
   '       casemaker cut --coupon <coupon-spec.json> [--out <dir>]\n' +
   '       casemaker cut --from-gerber <file> [<file> ...] --blank <L>x<W>x<T> [--out <dir>]\n' +
   '       casemaker cut --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]\n' +
@@ -562,6 +593,8 @@ export async function engraveJobMain(argv: string[], options: CommandOptions = H
 
 async function engraveJobBody(argv: string[], options: CommandOptions, receipt: RunReceipt): Promise<number> {
   const out = commandOutput(options);
+  /** #1126 — present only with `--events`; handed to every generator call below. */
+  const engineEvents = eventProgress(options);
   // The run's receipt accumulates as the command works; NOTHING here prints a result line —
   // `out.emitReceipt` renders the whole block from this object at the end (#478).
   const runInputs: ReceiptFile[] = [];
@@ -1180,11 +1213,13 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       // #1068 — the app's Generate sends `mount` inside its shop; the CLI now sends the SAME object
       // (the mount's boxes reach the plan's travel heights and the program's verifier).
       generated = await engraveGenerate(tl, job, jobTool(job), catalogueRows, null, undefined, { ...shop, mount: mountFor(job) },
+        // #1126 — with `--events`, the engine's own stage objects go to stderr unchanged; without
+        // it this is the same `undefined` the CLI always passed.
+        engineEvents,
         // #1111 R1 — THE IDEAL'S CANDIDATE SET, the same list the app sends: every tool the
         // registry holds (the catalogue's `cat:` definitions included, registered at boot). Without
         // it the CLI's ideal plan has no catalogue candidates and its tradeoff line differs from
         // the app's.
-        undefined,
         getTools().map((entry) => entry.tool),
         // #1134 — the pick's winning full plan IS the cut's owned plan: post it, do not re-plan.
         // #1151 — owned plan first when the flag is set (false is today's two-plan run and
@@ -1793,6 +1828,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       preview?: boolean;
       /** #1134 — the pick's measured owned plan (see `prepare`). */
       reusedOwnedPlan?: ModelPlanOutput | null;
+      /** #1126 — write the run's whole generated document here (JSON). */
+      generatedFile?: string;
     },
   ): Promise<JobResult> {
     const prepared = await prepare(
@@ -1802,6 +1839,11 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         : { reusedOwnedPlan: opts.reusedOwnedPlan },
     );
     if (!prepared.ok) return prepared;
+    if (opts.generatedFile !== undefined) {
+      // The browser's worker returns this same plain-data object; the house writes it beside the
+      // programs so the panel settles a house run exactly as it settles an in-page one.
+      writeFileSync(opts.generatedFile, JSON.stringify(prepared.generated));
+    }
     const sampling = samplingRows(prepared.generated);
     if (sampling !== undefined) runSampling = sampling;
     return {
@@ -2154,6 +2196,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       writeJobDocument: false,
       note: `*Generated from \`${basename(path)}\` by \`casemaker engrave\`; the app’s \`RunSheetView\` renders the same \`buildRunSheet\` structure. No result is recorded here.*`,
       reusedOwnedPlan,
+      // #1126 — the house's runs API asks for the whole result beside the receipt and programs.
+      ...(args.generated === undefined ? {} : { generatedFile: args.generated }),
     });
     if (result.ok) {
       programs.push(...result.programs);

@@ -27,6 +27,7 @@ mod machine_api;
 mod machine_profiles;
 mod server;
 mod power;
+mod runs;
 mod stock;
 mod tool_copy;
 mod wasteboard;

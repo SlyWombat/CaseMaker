@@ -50,6 +50,16 @@ use std::sync::Arc;
 pub fn routes(store: Arc<HouseStore>) -> Router {
     Router::new()
         .route("/api/v1/health", get(health))
+        // #1126 — house-side generation. Submit lives here because the shop ETag is checked against
+        // this state's store; the read/follow/cancel/program routes live in `runs.rs` and are merged
+        // after `with_state` (they carry their own state, and merging before would ask axum to
+        // merge two different state types).
+        .route(
+            "/api/v1/runs",
+            post(submit_run).layer(axum::extract::DefaultBodyLimit::max(
+                crate::runs::MAX_RUN_BODY_BYTES,
+            )),
+        )
         .route("/api/v1/tools", get(list_tools).post(create_tool))
         .route("/api/v1/tools/*key", patch(update_tool).delete(delete_tool))
         .route("/api/v1/inventory", get(list_inventory).post(create_inventory))
@@ -120,6 +130,33 @@ pub fn routes(store: Arc<HouseStore>) -> Router {
         .route("/api/v1/catalogue/import", post(import_catalogue))
         .route("/api/v1/*rest", any(api_not_found))
         .with_state(store)
+        .merge(crate::runs::router())
+}
+
+/// #1126 — submit a generation run to the house.
+///
+/// THE SHOP ETAG IS A SUBMIT-TIME PRECONDITION, never the run's key: the ETag moves on every
+/// finished-program write, so a run keyed on it would be lost after program 1 (#1123-11). A page
+/// that names the version it read is refused with 412 when it has moved; the run itself is keyed
+/// `(jobSha, build)` and a restored run is judged by its own inputs.
+async fn submit_run(
+    State(store): State<Arc<HouseStore>>,
+    axum::Json(body): axum::Json<serde_json::Value>,
+) -> Response<Body> {
+    if let Some(wanted) = body.get("shopEtag").and_then(serde_json::Value::as_str) {
+        match store.location().await {
+            Ok((_, etag)) => {
+                if etag != wanted {
+                    return error_response(HouseError::StalePrecondition(
+                        "the shop changed since this page read it — read it again and press Generate"
+                            .to_owned(),
+                    ));
+                }
+            }
+            Err(e) => return error_response(e),
+        }
+    }
+    crate::runs::submit(&body)
 }
 
 fn status_for(e: &HouseError) -> StatusCode {
