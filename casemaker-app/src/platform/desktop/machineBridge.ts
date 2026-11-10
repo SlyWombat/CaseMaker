@@ -477,9 +477,30 @@ export async function uploadVerifiedProgram(
   // is QuickLZ level 1 and the destination gains a `.bin` suffix. The MD5 step inside `runUpload`
   // hashes the SAME bytes the machine stores — the compressed stream for this attempt — so the
   // machine's "I already hold this file" check compares like with like.
+  // #1179 C — READ-BACK → REMOVE → UPLOAD → VERIFY. A read-back mismatch means a file we did not
+  // write is at the path (the upload may not overwrite) or our write did not land: remove the stale
+  // file with the app's own `rm` and upload once more. If the delete is refused (its acceptance on
+  // the card is unobserved) the upload refuses too — a stale same-named file is never played.
+  const sendVerified = async (path: string, content: Uint8Array): Promise<UploadOutcome> => {
+    const first = await send(path, content);
+    if (first.ok || first.reason !== 'refused' || first.mismatch !== true) return first;
+    const removed = await deleteSdFile(target, path, {
+      transport,
+      connectTimeoutMs: opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS,
+    });
+    if (!removed.ok) {
+      return {
+        ok: false,
+        reason: 'refused',
+        detail: `${first.detail} (removing the stale file failed: ${removed.detail})`,
+      };
+    }
+    return send(path, content);
+  };
+
   const wanted = opts.compress === 'quicklz' && program.content.length > QUICKLZ_UPLOAD_THRESHOLD;
   const packed = wanted ? quicklzCompress(program.content) : null;
-  if (packed === null) return send(destination, program.content);
+  if (packed === null) return sendVerified(destination, program.content);
 
   // NO READ-BACK FOR A `.bin`: what the controller stores (the compressed stream, or a decompressed
   // file under another name) is unobserved until the bench records its `md5sum`. The plain path is

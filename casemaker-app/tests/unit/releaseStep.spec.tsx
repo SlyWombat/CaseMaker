@@ -8,6 +8,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { EngraveReleaseStep } from '@/components/panels/EngraveReleaseStep';
 import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleClient } from '@/platform/machineConsole';
 import { setMachineUploadLoader } from '@/platform/machineUpload';
+import { recordUploadedFile, setMachineFilesLoader } from '@/platform/machineFiles';
 import {
   HOUSE_SCHEMA_VERSION,
   setHouseClientLoader,
@@ -27,6 +28,7 @@ import {
   releaseFileName,
   releasePrograms,
   releasePending,
+  releaseStem,
   type ReleaseSource,
 } from '@/engine/cnc/engrave/release';
 import { freezePackage } from '@/engine/cnc/engrave/package';
@@ -389,6 +391,7 @@ afterEach(async () => {
   resetInventoryConditions();
   setMachineConsoleLoader(null);
   setMachineUploadLoader(null);
+  setMachineFilesLoader(null);
   setHouseClientLoader(null);
   setRunEndIO(null);
 });
@@ -1274,6 +1277,92 @@ describe('#491 the release step names the cutter’s case', () => {
     const rec = record();
     expect(rec?.files[0]?.upload).toBe('uploaded');
     expect((rec?.notes ?? []).join('\n')).not.toContain('no verifier report');
+  });
+});
+
+describe('#1179 C — the files on the card belong to the package', () => {
+  it('removes this job’s other-package files after upload and leaves what the app did not upload', async () => {
+    const stem = releaseStem('Two setup job');
+    const removed: string[] = [];
+    const legacy = `${stem}-p01.nc`;
+    const otherKey = `${stem}-feedface-p01.nc`;
+    const unrecorded = `${stem}-deadbee1-p02.nc`;
+    const anotherJob = `another-job-deadbeef-p01.nc`;
+    setMachineFilesLoader(async () => ({
+      list: async () => ({
+        kind: 'listed' as const,
+        entries: [legacy, otherKey, unrecorded, anotherJob].map((name) => ({ name, size: 10, modified: null, directory: false })),
+      }),
+      remove: async (_target, name) => {
+        removed.push(name);
+        return { kind: 'deleted' as const, name, detail: 'deleted' };
+      },
+    }));
+    // The ledger remembers what this app uploaded: yesterday's keyless file and the other key's
+    // file were written by this app, so they may go; the third was not, so it must be LEFT.
+    recordUploadedFile(TARGET.host, legacy);
+    recordUploadedFile(TARGET.host, otherKey);
+
+    renderStep(twoSetupJob());
+    await uploadOnly();
+
+    expect(removed).toEqual([legacy, otherKey]);
+    const notes = (record()?.notes ?? []).join('\n');
+    expect(notes).toContain(`Removed 2 files from an earlier plan: ${legacy}, ${otherKey}.`);
+    expect(notes).toContain('Left on the card');
+    expect(notes).toContain(unrecorded);
+    expect(notes).not.toContain(anotherJob);
+  });
+});
+
+describe('#1179 C — the play line is the package-keyed file', () => {
+  it('plays the keyed path and never a legacy same-named file left on the card', async () => {
+    const job = twoSetupJob();
+    seedSetupRegistration(job, 'setup-2');
+    const made = freezePackage(job, [P1, P2], '2026-10-17T14:02:00.000Z');
+    if (!made.ok) throw new Error(made.reason);
+    const withPackage = { ...job, package: made.package } as EngraveJob;
+    const key = made.package.hash;
+    const stem = releaseStem('Two setup job');
+    const legacy = `${stem}-p1.nc`;
+    // Yesterday's keyless file is already on the card; the ledger attributes it to this app, so
+    // the cleanup removes it. The PLAY must name the keyed path either way.
+    const removed: string[] = [];
+    setMachineFilesLoader(async () => ({
+      list: async () => ({
+        kind: 'listed' as const,
+        entries: [{ name: legacy, size: 10, modified: null, directory: false }],
+      }),
+      remove: async (_target, name) => {
+        removed.push(name);
+        return { kind: 'deleted' as const, name, detail: 'deleted' };
+      },
+    }));
+    recordUploadedFile(TARGET.host, legacy);
+    useEngraveJobStore.setState({ job: withPackage });
+    const reports = new Map([
+      [P1.programHash, VERIFY],
+      [P2.programHash, VERIFY],
+    ] as const);
+    const runPlan = cutPlan({ job: withPackage, pkg: made.package, finishedHashes: [], defaults: null });
+    render(
+      <EngraveReleaseStep
+        target={TARGET}
+        job={withPackage}
+        programs={frozenReleaseSources(withPackage, made.package, reports)}
+        runPlan={runPlan}
+        blocker={null}
+      />,
+    );
+    await uploadAndStart();
+    await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+
+    const keyedName = `${stem}-${key}-p1.nc`;
+    expect(uploaded).toContain(keyedName);
+    expect(sent.filter((l) => l.startsWith('play'))).toEqual([`play /sd/gcodes/${keyedName}`]);
+    // The legacy same-named file is gone, and it was never played.
+    expect(removed).toEqual([legacy]);
+    expect(sent.join('\n')).not.toContain(`play /sd/gcodes/${legacy}`);
   });
 });
 

@@ -907,7 +907,13 @@ export type UploadOutcome =
       /** #562 — a compressed attempt was refused and the plain file was sent instead, in words. */
       fallback?: string;
     }
-  | { ok: false; reason: 'refused' | 'timeout' | 'error'; detail: string };
+  | {
+      ok: false;
+      reason: 'refused' | 'timeout' | 'error';
+      detail: string;
+      /** #1179 C — the transfer ended but the read-back digest was not ours: the file is removable. */
+      mismatch?: true;
+    };
 
 export interface UploadOptions {
   packetSize?: number;
@@ -1152,6 +1158,7 @@ export async function runUpload(
           ok: false,
           reason: 'refused',
           detail: 'the file on the machine does not match the program — nothing will run',
+          mismatch: true,
         };
       }
       return { ok: true, bytes: content.length, packets: lastSeq, alreadyPresent: false };

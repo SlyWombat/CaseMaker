@@ -1018,8 +1018,13 @@ export function runSheetFaceFileName(jobName: string): string {
  * `dryRun` (#547) inserts `-dry` the way `releaseFileName` does, so a lifted skim never overwrites
  * the real one on the card: `<stem>-dry-face.nc`.
  */
-export function releaseFaceFileName(jobName: string, dryRun = false): string {
-  return `${releaseStem(jobName)}${dryRun ? '-dry' : ''}-face.nc`;
+/** #1179 C — a package's key, when it has one, as the name segment every file of it carries. */
+function packageKeySuffix(packageKey?: string | null): string {
+  return typeof packageKey === 'string' && /^[0-9a-f]{8}$/i.test(packageKey) ? `-${packageKey.toLowerCase()}` : '';
+}
+
+export function releaseFaceFileName(jobName: string, dryRun = false, packageKey?: string | null): string {
+  return `${releaseStem(jobName)}${packageKeySuffix(packageKey)}${dryRun ? '-dry' : ''}-face.nc`;
 }
 
 /**
@@ -1077,8 +1082,14 @@ export function releaseStem(jobName: string): string {
  * `dryRun` (#547) inserts `-dry` before the suffix (or the extension): a dry-run variant is a
  * DIFFERENT file, and it must not overwrite the real program it was lifted from on the card.
  */
-export function releaseFileName(jobName: string, index: number, total: number, dryRun = false): string {
-  const stem = releaseStem(jobName);
+export function releaseFileName(
+  jobName: string,
+  index: number,
+  total: number,
+  dryRun = false,
+  packageKey?: string | null,
+): string {
+  const stem = `${releaseStem(jobName)}${packageKeySuffix(packageKey)}`;
   const dry = dryRun ? '-dry' : '';
   if (total <= 1) return `${stem}${dry}.nc`;
   const width = String(total).length;
