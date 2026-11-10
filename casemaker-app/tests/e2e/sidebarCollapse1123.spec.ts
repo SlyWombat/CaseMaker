@@ -18,10 +18,10 @@ async function openWorkspace(page: Page): Promise<void> {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
-  await expect(page.getByTestId('engrave-panel')).toBeVisible();
-  // The job autosave and the workspace record land on the same store changes; item 10's reload
-  // restore reads them.
+  // #1123-59 — the CASE workspace's rail is where the full section list lives; entering CNC
+  // reduces it to the project's own-part editor, Job, Simulate and Export. The collapse is the
+  // same control in both, so the geometry is measured here.
+  await expect(page.getByTestId('sidebar-button-board')).toBeVisible();
   await page.waitForTimeout(500);
 }
 
@@ -72,14 +72,18 @@ test('#1123-47 — collapse narrows the rail to its icons and widens the canvas 
   expect(dotAfter).toBe(dotBefore);
 
   // Every section still opens from its icon, and the open one carries its pressed state.
-  const buttons = page.locator('[data-testid^="sidebar-button-"]');
-  const count = await buttons.count();
-  expect(count, 'a shell project has a full rail').toBeGreaterThan(5);
-  for (let i = 0; i < count; i++) {
-    const id = (await buttons.nth(i).getAttribute('data-testid'))!.replace('sidebar-button-', '');
-    await buttons.nth(i).click();
+  // (#1123-59: opening Job switches the rail to the CNC list; the CNC entries are each still
+  // reachable, and the case sections themselves are what this loop proves open from an icon.)
+  const ids = (
+    await page
+      .locator('[data-testid^="sidebar-button-"]')
+      .evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')!.replace('sidebar-button-', '')))
+  );
+  expect(ids.length, 'a shell project has a full case rail').toBeGreaterThan(5);
+  for (const id of ids) {
+    await page.getByTestId(`sidebar-button-${id}`).click();
     await expect(page.getByTestId(`context-section-${id}`)).toBeVisible();
-    await expect(buttons.nth(i)).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId(`sidebar-button-${id}`)).toHaveAttribute('aria-pressed', 'true');
   }
   const activeTestId = await page
     .locator('[data-testid^="sidebar-button-"][aria-pressed="true"]')
@@ -96,6 +100,10 @@ test('#1123-47 — collapse narrows the rail to its icons and widens the canvas 
 test('#1123-47 — the collapsed rail is remembered across a reload', async ({ cm, page }) => {
   await cm.ready();
   await openWorkspace(page);
+  // Item 10's reload restore is the CNC workspace's: enter the job before reloading.
+  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
+  await page.waitForTimeout(500);
   await page.getByTestId('sidebar-collapse').click();
   await expect(page.getByTestId('sidebar')).toHaveClass(/sidebar--icons/);
   expect(await page.evaluate((key) => localStorage.getItem(key), SIDEBAR_LS_KEY)).toBe('true');
@@ -118,10 +126,9 @@ test('#1123-47 — below 640 px the rail is the phone drawer, with no collapse c
   // Collapse at a desktop width first: the preference must not turn the phone drawer into icons.
   await page.getByTestId('sidebar-collapse').click();
   await expect(page.getByTestId('sidebar')).toHaveClass(/sidebar--icons/);
-  // Leave the section closed: on a phone an open section auto-opens the right drawer over the
-  // left handle, which is a different (pre-existing) behaviour than the one under test here.
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
-  await expect(page.getByTestId('context-section-cnc-engrave')).toHaveCount(0);
+  // No section is open in this case workspace: on a phone an open section auto-opens the right
+  // drawer over the left handle, which is a different (pre-existing) behaviour than this one.
+  await expect(page.getByTestId('context-section-board')).toHaveCount(0);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId('sidebar-collapse')).toHaveCount(0);
