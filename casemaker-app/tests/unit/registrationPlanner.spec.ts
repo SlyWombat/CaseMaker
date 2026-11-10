@@ -587,6 +587,137 @@ describe('#585 the typed seat’s guarded deeper search', () => {
   });
 });
 
+describe('#1166 the bracket’s derived top where finished programs have cut', () => {
+  // A bracket plan exists only off a MEASURED seat (`bracketExpectedSurface` refuses without one),
+  // so the plan's expected surface IS the bracket's own top: the seat + the stock's thickness. An
+  // earlier program has cut the plan's surface point away; the bounded seek misses, and with
+  // finished programs on the job the Register card offers ONE press — the derived top — instead of
+  // failing. The record says DERIVED, never touched. Vise/tape and a job with no finished program
+  // keep today's stop.
+  const EXPECTED = SURFACE; // plan('bracket')'s expected surface: the bracket's own top
+  const MISS_AT = 'found nothing down to machine Z -56.572';
+  const derivedPress = (z: number): string =>
+    `no surface where the plan expected it — finished programs have cut here; use the bracket's own top: seat + stock thickness = ${z.toFixed(3)}`;
+
+  it('a no-contact seek offers the derived top once; confirming continues and records it as derived', async () => {
+    // The stock is not under the plan's surface point (the point has been cut away).
+    const z1 = fakeZ1({ actual: { ...BLANK, xMin: 200, xMax: 238 } });
+    const asked: { kind: string; text: string }[] = [];
+    const r = await runRegistration(plan('bracket'), {
+      console: z1.console,
+      operator: async (step) => {
+        asked.push(step);
+        return true;
+      },
+      hasFinishedPrograms: true,
+    });
+    if (!r.ok) throw new Error(r.reason);
+    const presses = asked.filter((s) => s.kind === 'derived-surface');
+    expect(presses).toHaveLength(1);
+    expect(presses[0]!.text).toBe(derivedPress(EXPECTED));
+    // NOTHING TOUCHED IT: the record carries the derived top, at the machine XY the seek was sent.
+    expect(r.data.surfaceDerived).toBe('bracket-top');
+    expect(r.data.surface.touched).toBe(false);
+    expect(r.data.surface.z).toBeCloseTo(EXPECTED, 3);
+    expect(r.data.surface.x).toBeCloseTo(G54.x + 19.05, 3);
+    expect(r.data.surface.y).toBeCloseTo(G54.y + 38.1, 3);
+    expect(r.outcome.surfaceDerived).toBe('bracket-top');
+    expect(r.outcome.surfaceZ).toBeCloseTo(EXPECTED, 3);
+    expect(r.outcome.notes.join(' ')).toContain('DERIVED');
+  });
+
+  it('a reading BELOW the band offers the same press', async () => {
+    const z1 = fakeZ1({ actual: BLANK });
+    let firstZProbe = true;
+    const belowBand = {
+      async send(line: string, timing?: Partial<ConsoleTiming>): Promise<ConsoleSendResult> {
+        // The controller stops past its commanded floor (deceleration/overshoot): a real touch,
+        // below the band the plan bounded the seek to.
+        if (firstZProbe && /^G38\.3 Z-/.test(line)) {
+          firstZProbe = false;
+          return { kind: 'sent', line, text: '[PRB:-162.5,-146.7,-56.9:1]\nok', frames: 1, elapsedMs: 1 };
+        }
+        return z1.console.send(line, timing);
+      },
+    };
+    const asked: { kind: string; text: string }[] = [];
+    const r = await runRegistration(plan('bracket'), {
+      console: belowBand,
+      operator: async (step) => {
+        asked.push(step);
+        return true;
+      },
+      hasFinishedPrograms: true,
+    });
+    if (!r.ok) throw new Error(r.reason);
+    expect(asked.filter((s) => s.kind === 'derived-surface')).toHaveLength(1);
+    expect(r.outcome.surfaceDerived).toBe('bracket-top');
+  });
+
+  it('with NO finished programs the miss keeps today’s stop and offers nothing', async () => {
+    const z1 = fakeZ1({ actual: { ...BLANK, xMin: 200, xMax: 238 } });
+    const asked: string[] = [];
+    const r = await runRegistration(plan('bracket'), {
+      console: z1.console,
+      operator: async (step) => {
+        asked.push(step.kind);
+        return true;
+      },
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain(MISS_AT);
+    expect(asked).not.toContain('derived-surface');
+  });
+
+  it('declining the press stops with the seek’s own sentence', async () => {
+    const z1 = fakeZ1({ actual: { ...BLANK, xMin: 200, xMax: 238 } });
+    const r = await runRegistration(plan('bracket'), {
+      console: z1.console,
+      operator: async (step) => step.kind !== 'derived-surface',
+      hasFinishedPrograms: true,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain(MISS_AT);
+  });
+
+  it('a SEAT-SEEK plan (no measured seat) keeps today’s stop — its point is beside the blank', async () => {
+    // The seat-seek plan's surface point is on the wasteboard, OUTSIDE the stock; its band is the
+    // seat's expectation, not the stock's top. Even with finished programs, no derived top exists.
+    const seatSeek = { ...plan('bracket'), surfacePoint: { x: -30, y: -30 } };
+    const z1 = fakeZ1({ actual: BLANK }); // no stock under (−30, −30) either
+    const asked: string[] = [];
+    const r = await runRegistration(seatSeek, {
+      console: z1.console,
+      operator: async (step) => {
+        asked.push(step.kind);
+        return true;
+      },
+      hasFinishedPrograms: true,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain(MISS_AT);
+    expect(asked).not.toContain('derived-surface');
+  });
+
+  it('a reading ABOVE the band stays a stop — the press is never offered', async () => {
+    // Something stands 2 mm over the whole top: not a cut-away surface, and a derived top cannot
+    // explain it. Today's stop keeps its sentence.
+    const z1 = fakeZ1({ actual: BLANK, clamp: { xMin: 0, xMax: 38.1 } });
+    const asked: string[] = [];
+    const r = await runRegistration(plan('bracket'), {
+      console: z1.console,
+      operator: async (step) => {
+        asked.push(step.kind);
+        return true;
+      },
+      hasFinishedPrograms: true,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('outside the expected');
+    expect(asked).not.toContain('derived-surface');
+  });
+});
+
 describe('#599 the mount tap', () => {
   const TAP = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
   const JAW: MountDatum = { jawTopZ: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };

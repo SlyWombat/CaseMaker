@@ -123,6 +123,21 @@ describe('#1133 a bracket hold plans one top touch', () => {
     expect(attempt.summary).not.toContain('then scan');
   });
 
+  it('#1166 with NO measured seat: there is no stock top to derive — the card plans the seat seek', () => {
+    // The derived-top press's number IS the bracket's own top (seat + the stock's thickness). With
+    // no measured seat there is no such top, so today's behaviour stays: the card plans the ONE
+    // bounded seat seek beside the blank, and its surface point is NOT on the stock (the executor's
+    // own guard for it — see registrationPlanner's #1166 suite).
+    const attempt = attemptFor(bracketJob(), null);
+    expect(attempt.kind).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    expect(attempt.summary).toContain('Measure the bracket seat');
+    const p = attempt.plan.surfacePoint;
+    const onStock =
+      p.x > attempt.plan.stock.xMin && p.x < attempt.plan.stock.xMax && p.y > attempt.plan.stock.yMin && p.y < attempt.plan.stock.yMax;
+    expect(onStock).toBe(false);
+  });
+
   it('the Z1 states a head envelope with its provenance (a product constant, not a knob)', () => {
     const env = headEnvelopeOf(Z1);
     expect(env).not.toBeNull();

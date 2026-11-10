@@ -56,6 +56,13 @@ export interface RunData {
   probeRefZ: number;
   surface: Prb;
   scans: ScanRecord[];
+  /**
+   * #1166 — THE SURFACE WAS NOT TOUCHED. Present only when the run used the bracket's own top
+   * (the measured seat + the stock's thickness) after the plan's surface point was found cut away:
+   * `surface` then carries the DERIVED point (machine XY where the seek was sent, the derived Z)
+   * with `touched: false`, and the outcome says so.
+   */
+  surfaceDerived?: 'bracket-top';
 }
 
 /**
@@ -127,6 +134,13 @@ export interface RegistrationOutcome {
   withinMargin: boolean;
   margin: number;
   surfaceZ: number;
+  /**
+   * #1166 — the surface was DERIVED, not touched: the bracket's own top (its measured seat + the
+   * stock's thickness), chosen by the operator after the plan's surface point was found cut away.
+   * Absent on every ordinary run, where `surfaceZ` is a probe reading. This is the record's own
+   * statement of the difference; the note in `notes` says it in the operator's words.
+   */
+  surfaceDerived?: 'bracket-top';
   probeRefZ: number;
   /**
    * The plan's seek height, in MACHINE Z — the resolved machine's `toolChange.clearanceZ` it sought from
@@ -493,6 +507,14 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
     Math.abs(offset.y) <= s.edgeMarginMm &&
     (rotationShiftMm === null || rotationShiftMm <= s.edgeMarginMm);
   notes.push(`edges are corrected by the measured ${s.tipRadiusMm} mm effective rim offset`);
+  // #1166 — THE DERIVED TOP IS SAID ON THE RECORD, in the operator's own terms. It is not a touch
+  // and the sheet/panel must not read as one: nothing met the probe, and the value is the bracket's
+  // own top (the plan's expected surface = the measured seat + the stock's thickness).
+  if (data.surfaceDerived === 'bracket-top') {
+    notes.push(
+      `the surface is the bracket’s own top, DERIVED from its measured seat + the stock’s thickness (machine Z ${n2(data.surface.z)}) — nothing touched it; earlier programs have cut the plan’s surface point away`,
+    );
+  }
   return {
     edges,
     offset,
@@ -510,6 +532,7 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
     withinMargin,
     margin: s.edgeMarginMm,
     surfaceZ: data.surface.z,
+    ...(data.surfaceDerived === undefined ? {} : { surfaceDerived: data.surfaceDerived }),
     probeRefZ: data.probeRefZ,
     seekFromMachineZ: plan.seek.fromMachineZ,
     currentG54: onBracket ? null : g54InForce,
@@ -523,12 +546,15 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
 /**
  * Z0 for the cutter: the surface + (cutter PRB − reference PRB) — #387.
  *
- * `outcome.surfaceZ` is always a MEASURED surface. After a facing pass (#432 slice 4, decision 4:
- * probe → face → re-touch → engrave) it is the re-touch's reading, not the first probe's: a skim
- * never takes exactly its nominal depth (spindle growth, deflection, a tilted blank), so the datum
- * is measured again on the faced top and fed back through `{...outcome, surfaceZ: measured}` rather
- * than computed by subtracting the depth. The expected surface — the first reading minus the depth
- * posted — is the re-touch's BAND, which is what `retouchSurface` checks the measurement against.
+ * `outcome.surfaceZ` is a MEASURED surface — with one stated exception (#1166): a bracket run that
+ * the operator continued on the DERIVED top carries `surfaceDerived`, and the Z0 is then the
+ * bracket's own top (the measured seat + the stock's thickness), not a probe reading. After a facing
+ * pass (#432 slice 4, decision 4: probe → face → re-touch → engrave) it is the re-touch's reading,
+ * not the first probe's: a skim never takes exactly its nominal depth (spindle growth, deflection, a
+ * tilted blank), so the datum is measured again on the faced top and fed back through
+ * `{...outcome, surfaceZ: measured}` rather than computed by subtracting the depth. The expected
+ * surface — the first reading minus the depth posted — is the re-touch's BAND, which is what
+ * `retouchSurface` checks the measurement against.
  */
 export function cutterZ0(outcome: Pick<RegistrationOutcome, 'surfaceZ' | 'probeRefZ'>, cutterRefZ: number): number {
   return r3(outcome.surfaceZ + (cutterRefZ - outcome.probeRefZ));
