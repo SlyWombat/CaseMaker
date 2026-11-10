@@ -42,10 +42,14 @@ import { CutterProfile } from '@/components/ui/CutterProfile';
 import { caseSwatch, copyCaseSummary, distinctCases } from '@/engine/cnc/caseColour';
 import type { ToolCopy } from '@/engine/cnc/toolCondition';
 import type { InventoryItem } from '@/platform/houseClient';
+import { haveWords, ownedCounts, possessionSearchText } from './bitsList';
+import { MILL_MODELS } from '@/engine/cnc/machine';
+import { machineDisplayName, type MachineRecord } from '@/platform/locationClient';
+import { useLocationStore } from '@/store/locationStore';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useHouseStore, useLastSync } from '@/store/houseStore';
 import { useFeedTableStore } from '@/store/feedTableStore';
-import { useManageModeStore, type TierFilter } from '@/store/manageModeStore';
+import { useManageModeStore } from '@/store/manageModeStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { DocsModal } from '@/components/docs/DocsModal';
 import { formatStamp, mm, NOT_APPLICABLE } from './display';
@@ -56,13 +60,8 @@ import { FeedsPane, FeedEditor } from './FeedsTable';
 /** How many catalogue rows the untouched list draws before it says how many it is not drawing. */
 const CATALOGUE_PREVIEW = 8;
 
-const CHIPS: Array<{ id: TierFilter; label: string }> = [
-  { id: 'all', label: 'all' },
-  { id: 'owned', label: 'owned' },
-  { id: 'yours', label: 'yours' },
-  { id: 'catalogue', label: 'catalogue' },
-  { id: 'builtin', label: 'built-in' },
-];
+/** One stable empty list: a fresh `[]` from a selector re-renders without end. */
+const NO_MACHINES: readonly MachineRecord[] = [];
 
 /**
  * The one structured fact an owned row shows under its name: the code(s) on the box (#500).
@@ -151,17 +150,32 @@ export function ToolsScope() {
     return map;
   }, [items]);
 
+  // #1172 — the header counts the bits the operator OWNS (the inventory), and the Have column
+  // names the machine a piece is in.
+  const owned = useMemo(() => ownedCounts(items), [items]);
+  const machines = useLocationStore((s) => s.location?.machines ?? NO_MACHINES);
+  const machineName = (id: string): string => {
+    const machine = machines.find((m) => m.id === id);
+    if (machine === undefined) return id;
+    const profile = machine.profileId != null ? MILL_MODELS[machine.profileId] : undefined;
+    return machineDisplayName(machine, profile) ?? machine.profileId ?? machine.id;
+  };
+
   // The tiers, then the filter. Both the counts line and the table read the same filtered list, so
   // what the line says and what is drawn underneath it cannot disagree.
   const counts = tierCounts(tools);
   const query = search.trim();
   const narrowing = query.length > 0 || tier !== 'all';
   const groups = useMemo(() => {
-    const text = (e: ToolLibraryEntry) =>
-      toolSearchText(
-        e,
-        (itemsByKey.get(e.key)?.codes ?? []).map((c) => c.value),
+    const text = (e: ToolLibraryEntry) => {
+      const possession = itemsByKey.get(e.key);
+      // #1172 item 2 — the case colour, the words on the case and the place it is kept are part of
+      // what the row can be found by, not only the cutter's numbers.
+      return (
+        toolSearchText(e, (possession?.codes ?? []).map((c) => c.value)) +
+        (possession === undefined ? '' : ` ${possessionSearchText(possession)}`)
       );
+    };
     return groupByTier(tools)
       .filter((g) => tier === 'all' || g.tier === tier)
       .map((g) => ({
@@ -270,6 +284,11 @@ export function ToolsScope() {
         <div className="mhead">
           <div>
             <h3>Tools</h3>
+            {pane === 'cutters' && (
+              <p className="hint" data-testid="manage-bits-counts">
+                {owned.kinds} kinds · {owned.pieces} pieces · {owned.broken} broken · {owned.lost} lost
+              </p>
+            )}
             <p>
               {pane === 'cutters'
                 ? 'Every cutter a job can name, and where each definition came from. Makera’s rows are read-only — clone one to rename it or to note what you measured. The built-ins are always here, service or not.'
@@ -432,24 +451,23 @@ export function ToolsScope() {
           <input
             className="fld fld--text"
             type="text"
-            placeholder="Search name, code or size…"
-            aria-label="Search the tool list"
+            placeholder="Search by size, shape, colour, name, code or place…"
+            aria-label="Search your bits"
             data-testid="manage-search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          {CHIPS.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className={`chip${tier === c.id ? ' chip--on' : ''}`}
-              data-testid={`manage-chip-${c.id}`}
-              aria-pressed={tier === c.id}
-              onClick={() => setTier(c.id)}
-            >
-              {c.label}
-            </button>
-          ))}
+          {/* #1172 item 1 — your bits are the list; the catalogue and the built-ins sit behind
+              this switch, off by default. */}
+          <label className="hint" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              data-testid="manage-show-catalogue"
+              checked={tier !== 'owned'}
+              onChange={(e) => setTier(e.target.checked ? 'all' : 'owned')}
+            />
+            also show bits you could buy ({counts.catalogue})
+          </label>
           <span className="mcount" data-testid="manage-counts">
             {tools.length} definition{tools.length === 1 ? '' : 's'}
             {TIER_ORDER.map((t) => ` · ${counts[t]} ${TIER_TAG[t]}`).join('')}
@@ -469,7 +487,7 @@ export function ToolsScope() {
                 <th className="num">Flute</th>
                 <th className="num">Shoulder</th>
                 <th className="num">Stick-out</th>
-                <th className="num">Qty</th>
+                <th className="num">Have</th>
                 <th>Case</th>
                 <th>From</th>
               </tr>
@@ -490,6 +508,7 @@ export function ToolsScope() {
                     selectedKey={selectedKey}
                     onSelect={select}
                     profileScale={profileScale}
+                    machineName={machineName}
                     more={capped ? g.entries.length - drawn.length : 0}
                   />
                 );
@@ -579,6 +598,7 @@ function Rows({
   selectedKey,
   onSelect,
   profileScale,
+  machineName,
   more,
 }: {
   tier: ToolTier;
@@ -589,6 +609,8 @@ function Rows({
   onSelect: (key: string) => void;
   /** The one px/mm every thumbnail in this table shares (#489 review). */
   profileScale: number;
+  /** #1172 — the Have column names the machine a piece is in. */
+  machineName: (id: string) => string;
   more: number;
 }) {
   return (
@@ -641,8 +663,8 @@ function Rows({
             <td className={dim(t.fluteLength)}>{mm(t.fluteLength)}</td>
             <td className={dim(t.shoulderLength)}>{mm(t.shoulderLength)}</td>
             <td className={dim(t.stickout)}>{mm(t.stickout)}</td>
-            <td className={possession === null ? 'num dim' : 'num'}>
-              {possession === null ? NOT_APPLICABLE : possession.quantity}
+            <td className={possession === null ? 'num dim' : 'num'} data-testid={`manage-tools-have-${entry.key}`}>
+              {possession === null ? NOT_APPLICABLE : haveWords(possession, machineName)}
             </td>
             <td data-testid={`manage-tools-case-${entry.key}`}>
               <CaseCell copies={possession?.copies ?? []} />
