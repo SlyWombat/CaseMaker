@@ -13,7 +13,8 @@ import { setHouseClientLoader, type HouseCall, type HouseClient } from '@/platfo
 import {
   cancelRun,
   readRun,
-  readRunGenerated,
+  fetchRunProgram,
+  readRunResult,
   setRunGeneratedIdleMs,
   streamRunEvents,
   submitRun,
@@ -117,10 +118,10 @@ describe('#1126 — cancelling a run', () => {
   });
 });
 
-describe('#1126 — the generated document', () => {
+describe('#1126 — the result document', () => {
   it('streams a large result in many chunks and parses it whole', async () => {
     const blob = 'x'.repeat(8 * 1024 * 1024);
-    const text = JSON.stringify({ ok: true, blob });
+    const text = JSON.stringify({ resultVersion: 2, ok: true, blob });
     const bytes = new TextEncoder().encode(text);
     const CHUNK = 64 * 1024;
     const body = new ReadableStream<Uint8Array>({
@@ -134,10 +135,10 @@ describe('#1126 — the generated document', () => {
     const fetchImpl = (async () =>
       new Response(body, { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
 
-    const result = await readRunGenerated('run-7', { fetchImpl });
+    const result = await readRunResult('run-7', { fetchImpl });
     expect(result.kind).toBe('ok');
     if (result.kind === 'ok') {
-      expect((result.generated as { blob: string }).blob.length).toBe(blob.length);
+      expect((result.result as { blob: string }).blob.length).toBe(blob.length);
     }
   });
 
@@ -150,7 +151,7 @@ describe('#1126 — the generated document', () => {
       },
     });
     const fetchImpl = (async () => new Response(body, { status: 200 })) as unknown as typeof fetch;
-    const result = await readRunGenerated('run-7', { fetchImpl });
+    const result = await readRunResult('run-7', { fetchImpl });
     expect(result.kind).toBe('error');
     if (result.kind === 'error') expect(result.detail).toContain('stopped arriving');
   });
@@ -161,8 +162,35 @@ describe('#1126 — the generated document', () => {
         status: 404,
         headers: { 'content-type': 'application/json' },
       })) as unknown as typeof fetch;
-    const result = await readRunGenerated('run-7', { fetchImpl });
+    const result = await readRunResult('run-7', { fetchImpl });
     expect(result).toEqual({ kind: 'refused', status: 404, message: 'this run has no generated document' });
+  });
+
+  it('refuses a result version it does not read, naming the version', async () => {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ resultVersion: 1, ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch;
+    const result = await readRunResult('run-7', { fetchImpl });
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(result.detail).toContain('resultVersion 1');
+      expect(result.detail).toContain('generate again');
+    }
+  });
+
+  it('fetches a program by name as text, streamed', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('G0 X0 Y0\n'));
+        controller.enqueue(new TextEncoder().encode('G1 X10\n'));
+        controller.close();
+      },
+    });
+    const fetchImpl = (async () => new Response(body, { status: 200 })) as unknown as typeof fetch;
+    const result = await fetchRunProgram('run-7', 'tray-p1.nc', { fetchImpl });
+    expect(result).toEqual({ kind: 'ok', text: 'G0 X0 Y0\nG1 X10\n' });
   });
 });
 

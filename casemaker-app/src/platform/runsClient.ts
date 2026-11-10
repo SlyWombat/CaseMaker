@@ -106,21 +106,23 @@ export async function readRun(id: string): Promise<RunRead> {
   return parsed.ok ? { kind: 'ok', run: parsed.value } : { kind: 'error', detail: parsed.detail };
 }
 
-export type RunGenerated = { kind: 'ok'; generated: unknown } | HouseFailure;
+/** The result-document version this build reads (#1126 slice 2). */
+export const RUN_RESULT_VERSION = 2;
+
+export type RunResult = { kind: 'ok'; result: Record<string, unknown> } | HouseFailure;
+export type RunProgramText = { kind: 'ok'; text: string } | HouseFailure;
 
 /**
- * How long the generated document may go without a byte before the read is called dead. NOT a cap
- * on the total: a tray run's result is tens of megabytes and a LAN transfer of it can legitimately
- * take minutes. What is not legitimate is a stalled stream, and that is what this measures — every
- * chunk re-arms it. The house's own request timeout (2 s) is sized for small records and is the
- * wrong rule here.
+ * How long a streamed run file may go without a byte before the read is called dead. NOT a cap on
+ * the total: a tray run's result and its programs can legitimately take minutes over a LAN. What is
+ * not legitimate is a stalled stream, and that is what this measures — every chunk re-arms it.
  */
-const GENERATED_IDLE_MS = 20_000;
-let generatedIdleMs = GENERATED_IDLE_MS;
+const RUN_STREAM_IDLE_MS = 20_000;
+let runStreamIdleMs = RUN_STREAM_IDLE_MS;
 
 /** Test seam: shrink the inactivity window so a spec can observe a stalled stream. */
 export function setRunGeneratedIdleMs(ms: number): void {
-  generatedIdleMs = Math.max(1, ms);
+  runStreamIdleMs = Math.max(1, ms);
 }
 
 function runsUrl(path: string): string {
@@ -128,24 +130,23 @@ function runsUrl(path: string): string {
 }
 
 /**
- * Read the run's generated document — the plain-data result the CLI's `--generated` wrote beside
- * the programs. It is the same object the browser's worker returns from `engraveGenerate`, so the
- * panel settles a house run with it exactly as it settles an in-page one.
+ * Read one streamed run file as text, with an inactivity rule rather than a total cap.
  *
- * STREAMED, WITH AN INACTIVITY RULE. `houseRequest` buffers a body and times the whole request;
- * that is right for a tool list and wrong for a result document that can be tens of megabytes —
- * the 30 s total cap would fail on exactly the big jobs. This reads the stream, re-arms a 20 s
- * idle timer on every chunk, and parses the assembled text once the stream ends.
+ * `houseRequest` buffers a body and times the whole request; that is right for a tool list and
+ * wrong for a result or a program, which can be megabytes and slow. This fetches, reads chunk by
+ * chunk, re-arms the idle timer on every chunk, and assembles the text once the stream ends. `what`
+ * names the file in the stall sentence, so a reader can say which transfer died.
  */
-export async function readRunGenerated(
-  id: string,
-  opts: StreamRunOptions = {},
-): Promise<RunGenerated> {
+async function readStreamedText(
+  url: string,
+  opts: StreamRunOptions,
+  what: string,
+): Promise<RunProgramText> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   let res: Response;
   try {
-    res = await fetchImpl(runsUrl(`/${encodeURIComponent(id)}/generated`), {
-      headers: { Accept: 'application/json' },
+    res = await fetchImpl(url, {
+      headers: { Accept: 'application/json, text/plain' },
       ...(opts.signal === undefined ? {} : { signal: opts.signal }),
     });
   } catch (e) {
@@ -174,7 +175,7 @@ export async function readRunGenerated(
     timer = setTimeout(() => {
       stalled = true;
       void reader.cancel();
-    }, generatedIdleMs);
+    }, runStreamIdleMs);
   };
   try {
     arm();
@@ -194,7 +195,7 @@ export async function readRunGenerated(
   if (stalled) {
     return {
       kind: 'error',
-      detail: `the generated document stopped arriving for ${Math.round(generatedIdleMs / 1000)} s`,
+      detail: `${what} stopped arriving for ${Math.round(runStreamIdleMs / 1000)} s`,
     };
   }
   let length = 0;
@@ -205,8 +206,50 @@ export async function readRunGenerated(
     bytes.set(chunk, offset);
     offset += chunk.length;
   }
-  const parsed = parseJson<unknown>(new TextDecoder().decode(bytes));
-  return parsed.ok ? { kind: 'ok', generated: parsed.value } : { kind: 'error', detail: parsed.detail };
+  return { kind: 'ok', text: new TextDecoder().decode(bytes) };
+}
+
+/**
+ * Read the run's RESULT document (#1126 slice 2, `resultVersion: 2`). It carries everything the
+ * store settles with — findings, verify, cam, plans, goal checks — and NO NC text and NO `camIr`:
+ * the files are named in `files` and fetched by name ({@link fetchRunProgram}).
+ *
+ * A version this build does not read is refused by name rather than guessed at: an older result
+ * names its files differently, and a silent mis-read would hand the store another program's text.
+ */
+export async function readRunResult(
+  id: string,
+  opts: StreamRunOptions = {},
+): Promise<RunResult> {
+  const text = await readStreamedText(
+    runsUrl(`/${encodeURIComponent(id)}/generated`),
+    opts,
+    'the result document',
+  );
+  if (text.kind !== 'ok') return text;
+  const parsed = parseJson<Record<string, unknown>>(text.text);
+  if (!parsed.ok) return { kind: 'error', detail: parsed.detail };
+  const version = parsed.value['resultVersion'];
+  if (version !== RUN_RESULT_VERSION) {
+    return {
+      kind: 'error',
+      detail: `the house result was written by a build this one does not read (resultVersion ${String(version)}); generate again`,
+    };
+  }
+  return { kind: 'ok', result: parsed.value };
+}
+
+/** One of the run's own files, by the name its result listed (`/programs/:name`). */
+export async function fetchRunProgram(
+  id: string,
+  name: string,
+  opts: StreamRunOptions = {},
+): Promise<RunProgramText> {
+  return readStreamedText(
+    runsUrl(`/${encodeURIComponent(id)}/programs/${encodeURIComponent(name)}`),
+    opts,
+    `the program ${name}`,
+  );
 }
 
 /** Cancel the run: the service terminates and reaps its child; the state settles 'cancelled'. */

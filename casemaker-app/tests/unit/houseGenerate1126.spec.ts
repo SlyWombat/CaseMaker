@@ -3,9 +3,10 @@
  *
  * The service's routes are faked at the client seam (`runsClient`'s five calls and the health
  * probe), because what this spec holds is the browser's half of the contract: the shop ETag goes
- * with the submit and only with the submit, a done run's generated document is what the caller
- * gets back, a failed run throws the service's own finding, and the CLI's progress frames become
- * the panel's `EngraveProgress` without inventing stages.
+ * with the submit and only with the submit, a done run's v2 RESULT plus its named files is what
+ * the caller gets back — rebuilt into the exact `EngraveGenerated` an in-page run returns — a
+ * failed run throws the service's own finding, and the CLI's progress frames become the panel's
+ * `EngraveProgress` without inventing stages.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -17,7 +18,8 @@ vi.mock('@/platform/houseClient', async (importOriginal) => {
 vi.mock('@/platform/runsClient', () => ({
   submitRun: vi.fn(),
   readRun: vi.fn(),
-  readRunGenerated: vi.fn(),
+  readRunResult: vi.fn(),
+  fetchRunProgram: vi.fn(),
   streamRunEvents: vi.fn(async () => undefined),
   cancelRun: vi.fn(async () => ({ kind: 'ok', state: 'cancelled' as const })),
 }));
@@ -37,7 +39,8 @@ const mocked = {
   probeHouse: vi.mocked(probeHouse),
   submitRun: vi.mocked(runs.submitRun),
   readRun: vi.mocked(runs.readRun),
-  readRunGenerated: vi.mocked(runs.readRunGenerated),
+  readRunResult: vi.mocked(runs.readRunResult),
+  fetchRunProgram: vi.mocked(runs.fetchRunProgram),
   streamRunEvents: vi.mocked(runs.streamRunEvents),
 };
 
@@ -77,9 +80,39 @@ describe('#1126 — is the house able to generate?', () => {
   });
 });
 
+/** A v2 result document: no NC text, no camIr; the text lives in `fetchRunProgram`. */
+function v2Result(): Record<string, unknown> {
+  return {
+    resultVersion: 2,
+    ok: true,
+    stage: 'done',
+    findings: [],
+    nc: null,
+    frameNc: null,
+    facingNc: null,
+    ncProgram: 1,
+    frameProgram: 0,
+    facingProgram: null,
+    programs: [
+      { name: 'Tray', stage: 'done', ok: true, kind: 'engrave', nc: null, frameNc: null, cam: null },
+      { name: 'Tray', stage: 'done', ok: true, kind: 'engrave', nc: null, frameNc: null, cam: null },
+    ],
+    files: [
+      { name: 'Tray-p1.nc', what: 'program', index: 0 },
+      { name: 'Tray-p1-frame.nc', what: 'frame', index: 0 },
+      { name: 'Tray-p2.nc', what: 'program', index: 1 },
+    ],
+  };
+}
+
+const PROGRAM_TEXTS: Record<string, string> = {
+  'Tray-p1.nc': 'G0 P1\n',
+  'Tray-p1-frame.nc': 'FRAME1\n',
+  'Tray-p2.nc': 'G0 P2\n',
+};
+
 describe('#1126 — following a house run', () => {
-  it('submits with the shop ETag, follows the frames, and returns the generated document', async () => {
-    const generated = { ok: true, stage: 'done', nc: 'G0 X0 Y0' };
+  it('submits with the shop ETag, follows the frames, and rebuilds the generated document', async () => {
     mocked.submitRun.mockResolvedValue({
       kind: 'ok',
       runId: 'run-7',
@@ -95,7 +128,11 @@ describe('#1126 — following a house run', () => {
         kind: 'ok',
         run: { id: 'run-7', state: 'done', programs: [], receipt: { ok: true }, finding: null },
       });
-    mocked.readRunGenerated.mockResolvedValue({ kind: 'ok', generated });
+    mocked.readRunResult.mockResolvedValue({ kind: 'ok', result: v2Result() });
+    mocked.fetchRunProgram.mockImplementation(async (_id: string, name: string) => ({
+      kind: 'ok',
+      text: PROGRAM_TEXTS[name] ?? '',
+    }));
     mocked.streamRunEvents.mockImplementation(async (_id, onEvent) => {
       onEvent({ stage: 'plan', label: 'planning the sequence — setup 1', done: 3, total: 9 });
       onEvent({ stage: 'note', label: '  pick      cutter 1 — 0.8 mm flat' });
@@ -112,7 +149,15 @@ describe('#1126 — following a house run', () => {
       onProgress: (p) => progress.push(p),
     });
 
-    expect(result).toBe(generated);
+    // The reassembled object IS the one an in-page run returns: every nc restored, the top-level
+    // aliases pointing at the program each mirrors, and no camIr anywhere (nothing in the browser
+    // reads it off a result — its only references are inside engraveGenerate itself).
+    expect(result).toMatchObject({ ok: true, stage: 'done', nc: 'G0 P2\n', frameNc: 'FRAME1\n', facingNc: null });
+    expect(result.programs.map((p) => p.nc)).toEqual(['G0 P1\n', 'G0 P2\n']);
+    expect(result.programs[0]!.frameNc).toBe('FRAME1\n');
+    expect('camIr' in result).toBe(false);
+    expect('resultVersion' in result).toBe(false);
+    expect('files' in result).toBe(false);
     expect(mocked.submitRun).toHaveBeenCalledTimes(1);
     expect(mocked.submitRun).toHaveBeenCalledWith({ job: JOB, shopEtag: '"loc-4"' });
     // The engine's frame is passed through; the note keeps the stage it was emitted in; an
@@ -135,7 +180,7 @@ describe('#1126 — following a house run', () => {
       kind: 'ok',
       run: { id: 'run-8', state: 'done', programs: [], receipt: {}, finding: null },
     });
-    mocked.readRunGenerated.mockResolvedValue({ kind: 'ok', generated: { ok: true } });
+    mocked.readRunResult.mockResolvedValue({ kind: 'ok', result: { resultVersion: 2, ok: true, programs: [], files: [] } });
     await houseEngraveGenerate({
       job: JOB as never,
       tool: null,
@@ -144,6 +189,34 @@ describe('#1126 — following a house run', () => {
       margins: {} as never,
     });
     expect(mocked.submitRun).toHaveBeenCalledWith({ job: JOB });
+  });
+
+  it('a result that names a file the service cannot serve fails with the service’s sentence', async () => {
+    mocked.submitRun.mockResolvedValue({
+      kind: 'ok',
+      runId: 'run-7',
+      queuePosition: 0,
+      key: { jobSha: 'abc', build: 'b1' },
+    });
+    mocked.readRun.mockResolvedValue({
+      kind: 'ok',
+      run: { id: 'run-7', state: 'done', programs: [], receipt: {}, finding: null },
+    });
+    mocked.readRunResult.mockResolvedValue({ kind: 'ok', result: v2Result() });
+    mocked.fetchRunProgram.mockResolvedValue({
+      kind: 'refused',
+      status: 404,
+      message: 'no such program in this run',
+    });
+    await expect(
+      houseEngraveGenerate({
+        job: JOB as never,
+        tool: null,
+        catalogue: [],
+        calibration: null,
+        margins: {} as never,
+      }),
+    ).rejects.toThrow('no such program in this run');
   });
 
   it('reports a queued run, so the silence watchdog does not time a run that is waiting', async () => {
@@ -157,7 +230,7 @@ describe('#1126 — following a house run', () => {
       kind: 'ok',
       run: { id: 'run-q', state: 'done', programs: [], receipt: {}, finding: null },
     });
-    mocked.readRunGenerated.mockResolvedValue({ kind: 'ok', generated: { ok: true } });
+    mocked.readRunResult.mockResolvedValue({ kind: 'ok', result: { resultVersion: 2, ok: true, programs: [], files: [] } });
     const progress: EngraveProgress[] = [];
     await houseEngraveGenerate({
       job: JOB as never,
