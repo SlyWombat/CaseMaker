@@ -51,18 +51,18 @@ async function rememberMachine(page: Page): Promise<void> {
 /** Seed the two-sided job, its 20-program frozen package, and a run state. */
 async function seed(page: Page, input: { count: number; phase: string; active: number | null; paused?: boolean }): Promise<void> {
   await page.evaluate(async (opts) => {
-    const defaults = await import('/src/engine/cnc/engrave/defaults.ts');
-    const pkgMod = await import('/src/engine/cnc/engrave/package.ts');
-    const tools = await import('/src/engine/cnc/tool.ts');
-    const registry = await import('/src/engine/cnc/toolRegistry.ts');
-    const jobStore = await import('/src/store/engraveJobStore.ts');
+    const defaults = await import('/src/engine/cnc/engrave/defaults.ts' as string);
+    const pkgMod = await import('/src/engine/cnc/engrave/package.ts' as string);
+    const tools = await import('/src/engine/cnc/tool.ts' as string);
+    const registry = await import('/src/engine/cnc/toolRegistry.ts' as string);
+    const jobStore = await import('/src/store/engraveJobStore.ts' as string);
     // A USER-DEFINED bit, registered so its operator name resolves: the card must never print an
     // internal key (`user:`/`inv:`/`lib:`) in a row.
     registry.setRegistry([
       { key: 'user:flat-0.6', tool: tools.flatEndMill(0.6, { name: '0.6 mm flat end' }), provenance: 'e2e' },
     ]);
-    const release = await import('/src/store/engraveReleaseStore.ts');
-    const run = await import('/src/store/machineRunStore.ts');
+    const release = await import('/src/store/engraveReleaseStore.ts' as string);
+    const run = await import('/src/store/machineRunStore.ts' as string);
     const IDENTITY = { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' };
     const job = defaults.defaultEngraveJob();
     job.toolKey = 'flat-1.0';
