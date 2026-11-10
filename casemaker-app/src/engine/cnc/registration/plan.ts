@@ -370,6 +370,11 @@ export interface RegistrationPlan {
   probeRefLabel?: string | null;
   /** #1189 — the floor's own datum reference when it differs from {@link probeRefZ}. */
   floorProbeRefZ?: number | null;
+  /**
+   * #1189 — this is the SEAT-SEEK plan run to re-measure a seat whose stored reading predates the
+   * probe's last fitting (it carries no reference). The one touch writes it with the reference.
+   */
+  seatRemeasure?: 'probe-refit';
   surfacePoint: { x: number; y: number };
   /**
    * #1179 B — TOUCH POINTS ON A BLANK THAT HAS BEEN CUT, work XY with the depth each point is

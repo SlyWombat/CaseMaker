@@ -183,8 +183,18 @@ const n = (v: number): string => String(Math.round(v * 1000) / 1000);
 
 /** #797 follow-up — the plan in one line: where it touches, how many touches, which probe. */
 function proposalLine(plan: RegistrationPlan): string {
-  // #1070 — the seat plan is one touch, named for what it measures.
-  if (isSeatPlan(plan)) return 'the bracket seat — one Z seek on the wasteboard beside the front arm · wired probe';
+  // #1070 — the seat plan is one touch, named for what it measures. #1189 — a RE-MEASURE says
+  // why it is being taken again, before the press.
+  if (isSeatPlan(plan)) {
+    // #1189 — the machine XY of the touch, on the card, BEFORE the press: the re-measure seeks at
+    // the stored datum's own point, and the operator must see where the probe will go.
+    const p3 = (n: number): string => String(Math.round(n * 1000) / 1000);
+    const where =
+      plan.mountTap === null ? '' : ` · machine X ${p3(plan.mountTap.x)}, Y ${p3(plan.mountTap.y)}`;
+    return plan.seatRemeasure === 'probe-refit'
+      ? `the bracket seat again — the seat on file predates the probe’s last fitting · one Z seek on the wasteboard beside the front arm${where} · wired probe`
+      : `the bracket seat — one Z seek on the wasteboard beside the front arm${where} · wired probe`;
+  }
   const order = ['left', 'front', 'right', 'back'] as const;
   const edges = order.filter((edge) => plan.scans.some((scan) => scan.edge === edge));
   const touches = registrationTouches({ ok: true, plan });

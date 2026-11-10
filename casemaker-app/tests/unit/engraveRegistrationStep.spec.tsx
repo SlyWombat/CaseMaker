@@ -1336,7 +1336,11 @@ describe('#1070 the proposals need no saved setup for a bed-held job', () => {
     render(<EngraveRegistrationStep job={job} target={TARGET} />);
     const button = screen.getByTestId('engrave-registration-approve-start') as HTMLButtonElement;
     expect(button.textContent).toContain('Measure the bracket seat');
-    expect(screen.getByTestId('engrave-registration-proposal-line').textContent ?? '').toContain('seat');
+    const seatLine = screen.getByTestId('engrave-registration-proposal-line').textContent ?? '';
+    expect(seatLine).toContain('seat');
+    // #1189 — the card STATES the machine XY of the touch before the press (not only the live
+    // console line), so the operator knows where the probe will go.
+    expect(seatLine).toContain('machine X ');
   });
 });
 

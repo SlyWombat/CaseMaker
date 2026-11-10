@@ -219,6 +219,12 @@ export interface BracketSeatDatum {
   /** When it was measured, ISO, or null for a legacy reading that did not carry a date. */
   measuredAt: string | null;
   /**
+   * #1189 — WHERE it was measured, machine XY, when the reading named a point. A re-measure of
+   * this datum seeks at THIS point (verified solid board when it was taken), not at the
+   * planner's fresh choice; null on a reading that named none.
+   */
+  at?: [number, number] | null;
+  /**
    * #1070 (C8, the gate's ruling) — THE DATUM SAYS IT IS THE SURFACE THE STOCK RESTS ON. The seat
    * press touches the wasteboard beside the bracket's front arm, and the blank stands on that same
    * board: a seat written with this flag set already includes the board the job calls its
