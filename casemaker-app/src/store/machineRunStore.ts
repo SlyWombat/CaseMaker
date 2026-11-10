@@ -28,6 +28,7 @@
 import { create } from 'zustand';
 import { attachConsole } from '@/platform/machineConsole';
 import { programHash, programOwnsVacuum, runProgram, type Progress, type RunOutcome, type RunSettings, type VacuumSpan } from '@/platform/machineRun';
+import { buildProgramCutMap } from '@/engine/cnc/engrave/cutMap';
 import { acquireStatusPoll, noteRunStatus } from '@/platform/machineStatusPoller';
 import type { PauseAction } from '@/platform/machinePause';
 import { copyInMachine, offcutOffer, programCuts, runtimeOf, wearKey, weighRuntime, withRuntime } from '@/engine/cnc/runEnd';
@@ -329,6 +330,18 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
               },
             }),
         ...(ctx.registration === undefined ? {} : { registration: ctx.registration }),
+        // #1179 step 3 — what this program cut, on the 2 mm map. The store merges it with the
+        // newest record for the same job and package (cumulative); over the stream cap this is
+        // null, which the record states rather than sending a partial grid.
+        ...(ctx.stockXY === undefined
+          ? {}
+          : {
+              cutMap: buildProgramCutMap({
+                nc: ctx.nc,
+                stock: { x: ctx.stockXY.x, y: ctx.stockXY.y },
+                ...(ctx.toolRadius === undefined ? {} : { toolRadius: ctx.toolRadius }),
+              }),
+            }),
       };
       const r = await io.recordFinishedProgram(machineId, hash, run);
       lines.push(

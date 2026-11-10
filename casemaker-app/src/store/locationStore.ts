@@ -61,6 +61,7 @@ import {
 } from '@/platform/locationClient';
 import { houseAddFinishedProgram } from '@/platform/finishedProgramsClient';
 import type { FinishedRun } from '@/platform/locationClient';
+import { mergeCutMaps } from '@/engine/cnc/engrave/cutMap';
 import { bedFromLegacy, bedMigrationDue, ensureFirstRegistrationBed, firstRegistrationBed, newestViseRegistration, type LegacyViseRegistration } from '@/platform/bedProfiles';
 import { parseMarginsStrict, useSettingsStore, type FixturesSettings } from './settingsStore';
 import { useMachineStore } from './machineStore';
@@ -244,10 +245,23 @@ export const useLocationStore = create<LocationState>((set, get) => ({
     if (machine === null) {
       return { ok: false, added: false, text: `machine ${machineId} is not in the location` };
     }
-    // Already on the list this window has read: nothing to send. The service dedupes as well, so a
-    // second window racing this one cannot duplicate it.
-    if (machine.finishedPrograms.includes(hash)) return { ok: true, added: false, text: '' };
-    const res = await houseAddFinishedProgram(machineId, hash, undefined, run);
+    // Already on the list this window has read: nothing to send — UNLESS a #1179 record travels
+    // with it. The record upserts newest-wins even for a hash already listed (a re-cut under a
+    // newer registration), and the service dedupes the hash itself, so a second window racing this
+    // one cannot duplicate it.
+    if (run === undefined && machine.finishedPrograms.includes(hash)) return { ok: true, added: false, text: '' };
+    // #1179 step 3 — the map is CUMULATIVE: the new program's layer over the newest record for the
+    // same job and package. It describes the blank, not the program (a re-cut of the newest program
+    // keeps the older deeper cut, which is still in the wood). No record yet, or another job/plan,
+    // and the layer stands alone.
+    let posted = run;
+    if (run !== undefined && run.cutMap != null && run.jobId !== undefined && run.packageKey !== undefined) {
+      const previous = [...(machine.finishedRuns ?? [])]
+        .reverse()
+        .find((record) => record.jobId === run.jobId && record.packageKey === run.packageKey);
+      posted = { ...run, cutMap: mergeCutMaps(previous?.cutMap ?? null, run.cutMap) };
+    }
+    const res = await houseAddFinishedProgram(machineId, hash, undefined, posted);
     if (res.kind !== 'ok') {
       const text = res.kind === 'absent' ? res.reason : res.kind === 'refused' ? res.message : res.detail;
       set({ writeNote: text });
