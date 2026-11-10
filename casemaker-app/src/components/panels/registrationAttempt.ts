@@ -23,7 +23,8 @@ import {
 } from '@/engine/cnc/mounts/bracket';
 import type { MountDatum, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
 import { cutRegionOf, mountObstaclesFor, seatSeekFor } from '@/engine/cnc/registration/footprintJob';
-import { cutBlankCandidates, stockRaster, type CutProgramInput } from '@/engine/cnc/registration/cutBlank';
+import { cutBlankCandidates, cutBlankCandidatesFromMap, stockRaster, type CutProgramInput } from '@/engine/cnc/registration/cutBlank';
+import type { FinishedCutMap } from '@/platform/locationClient';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
@@ -67,6 +68,7 @@ function cutBlankCheckPoints(
   largestOwnedDiameterMm: number,
   finishedHashes: readonly string[],
   setupIndex: number,
+  blankMap: FinishedCutMap | null,
 ): { points: { x: number; y: number; depthMm: number }[]; earlierCutsKnown: boolean; floorsRestricted: string | null } {
   const raster = stockRaster(plan.stock);
   const fallbackRadiusMm = (Number.isFinite(largestOwnedDiameterMm) && largestOwnedDiameterMm > 0 ? largestOwnedDiameterMm : 0) / 2;
@@ -85,6 +87,26 @@ function cutBlankCheckPoints(
         shape: tool?.shape ?? 'unknown',
       };
     });
+  // #1179 stage 2 — THE BLANK'S OWN MAP WINS WHEN IT IS COMPLETE. It is the measured state of
+  // THIS face (per setup), at its stored pitch; the package raster below is the fallback for a
+  // blank with no id or an `unknown` map (the unknown-cuts footprint path).
+  const probe = {
+    tipRadiusMm: plan.settings.tipRadiusMm,
+    tipLengthMm: plan.probe?.tipLengthMm ?? null,
+    bodyDiameterMm: plan.probe?.bodyDiameterMm ?? null,
+  };
+  const obstacles = plan.mountObstacles.map((o) => ({ min: o.min, max: o.max }));
+  if (blankMap !== null) {
+    const fromMap = cutBlankCandidatesFromMap({ map: blankMap, probe, obstacles });
+    if (fromMap !== null) {
+      return { points: fromMap.points, earlierCutsKnown: true, floorsRestricted: fromMap.floorsRestricted };
+    }
+    // A map that does not decode is not trusted: the unknown-cuts path, never a half-read map.
+    return {
+      ...cutBlankCandidates({ raster, programs, probe, fallbackRadiusMm, obstacles, earlierCutsUnknown: true }),
+      earlierCutsKnown: false,
+    };
+  }
   return cutBlankCandidates({
     raster,
     programs,
@@ -137,6 +159,12 @@ export function planRegistrationAttempt(args: {
    * (its radius is half this), per the analyst's ruling.
    */
   largestOwnedDiameterMm?: number;
+  /**
+   * #1179 stage 2 — THE BLANK'S OWN CUT MAP for the setup being registered, when the record has a
+   * `complete` entry for it. The candidates come from the map at its stored pitch; absent, the
+   * package footprint's unknown-cuts path runs exactly as before.
+   */
+  cutBlankMap?: FinishedCutMap | null;
   /**
    * #1179 B — the machine's finished-program hashes (`finishedProgramsFor(target)`): a program of
    * THIS package that is among them is finished, and only finished programs' floors are known.
@@ -294,7 +322,7 @@ export function planRegistrationAttempt(args: {
     // the bracket's own top — the derived path, the last resort.
     const checks =
       args.cutBlank === true
-        ? cutBlankCheckPoints(job, result.plan, args.largestOwnedDiameterMm ?? 0, args.finishedHashes ?? [], args.setupIndex ?? 1)
+        ? cutBlankCheckPoints(job, result.plan, args.largestOwnedDiameterMm ?? 0, args.finishedHashes ?? [], args.setupIndex ?? 1, args.cutBlankMap ?? null)
         : { points: [], earlierCutsKnown: true, floorsRestricted: null };
     const plan =
       checks.points.length === 0

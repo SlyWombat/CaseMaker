@@ -22,6 +22,8 @@
  */
 import { buildSwathIndex } from '@/engine/cnc/engrave/liveSwath';
 import type { ToolShape } from '@/engine/cnc/tool';
+import { decodeRuns } from '@/engine/cnc/engrave/cutMap';
+import type { FinishedCutMap } from '@/platform/locationClient';
 
 /** The candidate raster's pitch, mm. */
 export const CUT_BLANK_PITCH_MM = 1;
@@ -301,6 +303,72 @@ export function cutFootprintMask(
     }
   }
   return mask;
+}
+
+/**
+ * #1179 stage 2 — THE CANDIDATES FROM THE RECORD'S CUT MAP (E's per-setup map, the analyst's
+ * fields comment 6776457695). The map is the blank's own measured state for THIS face: the stored
+ * pitch (`cellMm`, 2 normally and coarsened to 4 or 8), a depth level per cell (`level × stepMm`,
+ * 0 = uncut) and a flat bit per cell (a horizontal cut or a straight plunge; a ramp is never a
+ * flat floor). Only flat cells are candidates — the uncut top (level 0) first, then the floors;
+ * the probe body's rule filters the deep floors exactly as the package-raster path does.
+ *
+ * `null` when the map's streams do not decode: the caller then takes the unknown-cuts footprint
+ * path rather than trusting a map it could not read.
+ */
+export function cutBlankCandidatesFromMap(input: {
+  map: FinishedCutMap;
+  probe: ProbeBody;
+  obstacles: readonly CutBlankObstacle[];
+  edgeMarginMm?: number;
+}): { points: SurfacePointCandidate[]; floorsRestricted: string | null } | null {
+  const { map } = input;
+  const count = map.cols * map.rows;
+  const levels = decodeRuns(map.depth.data, count);
+  const flatBits = decodeRuns(map.flat.data, count);
+  if (levels === null || flatBits === null) return null;
+  const margin = input.edgeMarginMm ?? CUT_BLANK_EDGE_MARGIN_MM;
+  const tipLengthKnown = input.probe.tipLengthMm !== null && input.probe.tipLengthMm !== undefined;
+  const bodyKnown =
+    input.probe.bodyDiameterMm !== null && input.probe.bodyDiameterMm !== undefined && input.probe.bodyDiameterMm > 0;
+  const xEnd = map.x0Mm + map.cols * map.cellMm;
+  const yEnd = map.y0Mm + map.rows * map.cellMm;
+  const top: Cell[] = [];
+  const floor: Cell[] = [];
+  for (let j = 0; j < map.rows; j++) {
+    const y = map.y0Mm + (j + 0.5) * map.cellMm;
+    if (y < map.y0Mm + margin || y > yEnd - margin) continue;
+    for (let i = 0; i < map.cols; i++) {
+      const x = map.x0Mm + (i + 0.5) * map.cellMm;
+      if (x < map.x0Mm + margin || x > xEnd - margin) continue;
+      if (input.obstacles.some((o) => x >= o.min[0] && x <= o.max[0] && y >= o.min[1] && y <= o.max[1])) continue;
+      const at = j * map.cols + i;
+      // A cell that is not flat (a ramp's exit, a scallop the map could not vouch for) is never a
+      // check point: the probe would read a slope, not a level.
+      if (flatBits[at] !== 1) continue;
+      const depthMm = Math.round(levels[at]! * map.stepMm * 1000) / 1000;
+      const cell = { x: Math.round(x * 1000) / 1000, y: Math.round(y * 1000) / 1000, depthMm: 0 };
+      if (depthMm <= CUT_BLANK_FLAT_MM) top.push(cell);
+      else floor.push({ ...cell, depthMm });
+    }
+  }
+  const deepest = floor.reduce((max, cell) => Math.max(max, cell.depthMm), 0);
+  const floorsRestricted = !tipLengthKnown
+    ? 'the probe’s body/tip length is not recorded, so only the uncut top was used as a check point'
+    : !bodyKnown && deepest > input.probe.tipLengthMm! + 1e-9
+      ? `the probe’s body diameter is not recorded, so floors deeper than the tip’s ${input.probe.tipLengthMm} mm were not used as check points`
+      : null;
+  const usableFloor = !tipLengthKnown
+    ? []
+    : bodyKnown
+      ? floor
+      : floor.filter((cell) => cell.depthMm <= input.probe.tipLengthMm! + 1e-9);
+  const centre = { x: map.x0Mm + (map.cols * map.cellMm) / 2, y: map.y0Mm + (map.rows * map.cellMm) / 2, depthMm: 0 };
+  const chosen = [...spread(top, CUT_BLANK_MAX_POINTS, centre)];
+  if (chosen.length < CUT_BLANK_MAX_POINTS) {
+    chosen.push(...spread(usableFloor, CUT_BLANK_MAX_POINTS - chosen.length, centre));
+  }
+  return { points: chosen.map((cell) => ({ x: cell.x, y: cell.y, depthMm: cell.depthMm })), floorsRestricted };
 }
 
 interface Cell {

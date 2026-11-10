@@ -2052,3 +2052,104 @@ describe('#1123-40 — the registration survives a reload, keyed by job + setup 
     expect(last.bedProfiles).toEqual(useLocationStore.getState().location!.machines[0]!.bedProfiles);
   });
 });
+
+describe('#1179 — blank identity on the Register card', () => {
+  // The analyst's fields (issue comment 6776457695): the guard reads the BLANK, and the card
+  // offers "This is a new blank". These cases drive the real card with the machine record's own
+  // fields; the fake console never moves.
+  const plan = makePlan(-55.131);
+  const job = jobWithPlan(plan);
+
+  function withMachine(over: Partial<MachineRecord>): void {
+    beddedLocation();
+    const location = useLocationStore.getState().location!;
+    const machine = location.machines[0]!;
+    useLocationStore.setState({
+      location: { ...location, machines: [{ ...machine, ...over } as MachineRecord] },
+    });
+  }
+
+  it('a job WITH a blank id and a legacy machine entry draws no cut-blank banner', () => {
+    withMachine({
+      finishedPrograms: ['yesterdays-keyless-hash'],
+      currentBlank: { [job.id]: 'blank-X' },
+      finishedRuns: [],
+    } as Partial<MachineRecord>);
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    expect(screen.queryByTestId('engrave-registration-blank')).toBeNull();
+  });
+
+  it('a NO-ID job on a legacy machine offers the press, and the press mints the blank', async () => {
+    const saves: Array<Record<string, unknown>> = [];
+    withMachine({ finishedPrograms: ['yesterdays-keyless-hash'], finishedRuns: [] } as Partial<MachineRecord>);
+    useLocationStore.setState({
+      saveMachine: async (machine: unknown) => {
+        saves.push(machine as Record<string, unknown>);
+        return 'ok';
+      },
+    });
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    const banner = await screen.findByTestId('engrave-registration-blank', undefined, { timeout: 5000 });
+    expect(banner.textContent ?? '').toContain('may have been cut');
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-new-blank'));
+    });
+    // The mint wrote the job's id through the guarded machine write; the card says so.
+    expect(saves.length).toBe(1);
+    const current = (saves[0] as { currentBlank?: Record<string, string> }).currentBlank ?? {};
+    expect(Object.keys(current)).toEqual([job.id]);
+    expect(current[job.id]).toMatch(/^blank-/);
+    await waitFor(() =>
+      expect(screen.getByTestId('engrave-registration-blank-note').textContent ?? '').toContain('A new blank'),
+    );
+  });
+
+  it('a fully finished package on the current blank mints a new one at Register, before the probe moves', async () => {
+    const saves: Array<Record<string, unknown>> = [];
+    // The job carries a frozen package, every program of it finished under blank X.
+    const packaged: EngraveJob = {
+      ...job,
+      package: {
+        jobId: job.id,
+        frozenAt: '2026-11-10T08:00:00.000Z',
+        hash: 'pkg-1179',
+        jobHash: 'job-1179',
+        programs: [{ setupIndex: 1, setupId: job.setups![0]!.id, toolKey: 'flat-1.0', nc: ';', hash: 'h1', frameNc: null, frameHash: null }],
+        setups: job.setups ?? [],
+        stockEntryId: null,
+      },
+    };
+    withMachine({
+      currentBlank: { [job.id]: 'blank-X' },
+      finishedPrograms: [],
+      finishedRuns: [
+        { hash: 'h1', jobId: job.id, blankId: 'blank-X', finishedAt: '2026-11-10T09:00:00.000Z' },
+      ],
+    } as Partial<MachineRecord>);
+    useLocationStore.setState({
+      saveMachine: async (machine: unknown) => {
+        saves.push(machine as Record<string, unknown>);
+        return 'ok';
+      },
+    });
+    useEngraveJobStore.setState({ job: packaged });
+    render(<EngraveRegistrationStep job={packaged} target={TARGET} />);
+    // The approved plan's own start press is `engrave-registration-start` (runStep's button); the
+    // mint runs before the executor's first line, so no verdict ever appears.
+    act(() => {
+      useEngraveRunStore.setState({ acknowledged: true });
+    });
+    const startButton = await screen.findByTestId('engrave-registration-start', undefined, { timeout: 5000 });
+    await act(async () => {
+      fireEvent.click(startButton);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('engrave-registration-blank-note').textContent ?? '').toContain(
+        'The last blank was finished',
+      ),
+    );
+    expect(saves.length).toBe(1);
+  });
+});

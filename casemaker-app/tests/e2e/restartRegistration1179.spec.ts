@@ -58,7 +58,7 @@ const HEALTH = {
  * unknown-cuts case), the active profile carries the measured seat, the bracket sits at anchor 1,
  * and the surface tolerance is the live shop's 0.7 (the fixture seeds 0.4).
  */
-function locationView(): unknown {
+function locationView(machineOverride: Record<string, unknown> | null = null): unknown {
   const doc = JSON.parse(JSON.stringify(DOC)) as Doc;
   const machine = doc.machines[0]!;
   machine.finishedPrograms = ['fake-finished-1'];
@@ -90,17 +90,27 @@ function locationView(): unknown {
     id: doc.id,
     name: doc.name,
     createdAt: doc.createdAt,
-    machines: doc.machines,
+    machines: machineOverride === null ? doc.machines : [machineOverride],
     accessories: doc.accessories,
   };
 }
 
-async function fakeHouse(page: Page): Promise<void> {
+async function fakeHouse(page: Page): Promise<{
+  /** The machine record the app last PUT (the mint's write), or null. */
+  writtenMachine: () => Record<string, unknown> | null;
+}> {
+  // #1179 — the machine write is real in this walk: the "This is a new blank" press PUTs the
+  // machine record and the next read serves it back, so `currentBlank` genuinely moves.
+  let machineOverride: Record<string, unknown> | null = null;
+  // #1179 — the ETag moves when the machine is written. The location store refuses a read whose
+  // validator it already holds ("the same read without churn"), so a fixed ETag would leave the
+  // card reading the pre-mint record and the walk would prove nothing about `currentBlank`.
+  let etag = '"e1"';
   await page.route('**/api/v1/**', async (route) => {
     const url = new URL(route.request().url());
     const p = url.pathname.replace(/^.*\/api\/v1/, '');
     const json = (body: unknown): Promise<void> =>
-      route.fulfill({ status: 200, contentType: 'application/json', headers: { etag: '"e1"' }, body: JSON.stringify(body) });
+      route.fulfill({ status: 200, contentType: 'application/json', headers: { etag }, body: JSON.stringify(body) });
     if (p === '/health') return json(HEALTH);
     if (p === '/tools') return json([]);
     if (p === '/inventory') return json(DOC.inventory ?? []);
@@ -111,9 +121,15 @@ async function fakeHouse(page: Page): Promise<void> {
       defaults['registration.surfaceToleranceMm'] = { value: 0.7, source: 'chosen', setAt: '2026-10-23', unit: 'mm' };
       return json(defaults);
     }
-    if (p === '/location') return json(locationView());
+    if (route.request().method() === 'PUT' && /^\/location\/machines\/[^/]+$/.test(p)) {
+      machineOverride = route.request().postDataJSON() as Record<string, unknown>;
+      etag = '"e2"';
+      return route.fulfill({ status: 200, contentType: 'application/json', headers: { etag }, body: '{}' });
+    }
+    if (p === '/location') return json(locationView(machineOverride));
     return route.fulfill({ status: 404, body: '' });
   });
+  return { writtenMachine: () => machineOverride };
 }
 
 const STATUS = '<Idle|MPos:0,0,0|WPos:0,0,0|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>';
@@ -184,13 +200,18 @@ async function prepare(page: Page): Promise<void> {
   await page.getByTestId('engrave-registration-continue').click();
 }
 
-async function writeOriginAndExpect(page: Page, fake: FakeConsole, z: string): Promise<void> {
-  // The approved plan changed the job, so Cut's step 1 has findings now and may have folded step 2;
-  // the write press needs the card on screen.
+/** The Cut step 2 fold may close itself after a run; the card's presses need it open. */
+async function ensureStep2(page: Page): Promise<void> {
   const step2 = page.getByTestId('engrave-cut-step-2');
   if (!(await step2.evaluate((el) => (el as HTMLDetailsElement).open))) {
     await page.getByTestId('engrave-cut-step-2-summary').click();
   }
+}
+
+async function writeOriginAndExpect(page: Page, fake: FakeConsole, z: string): Promise<void> {
+  // The approved plan changed the job, so Cut's step 1 has findings now and may have folded step 2;
+  // the write press needs the card on screen.
+  await ensureStep2(page);
   await page.getByTestId('engrave-registration-write').click();
   await page.getByTestId('engrave-registration-continue').click();
   await expect.poll(() => fake.lines().find((l) => l.startsWith('G10 L2 P1')) ?? null, { timeout: 60_000 }).not.toBeNull();
@@ -232,4 +253,68 @@ test('#1179 B — a chip above three agreeing tops is out-voted, named, and not 
   fs.mkdirSync(OUT, { recursive: true });
   await page.screenshot({ path: path.join(OUT, 'chip-result.png') });
   await writeOriginAndExpect(page, fake, String(TOP_Z));
+});
+
+test('#1179 blank identity — a no-id job on a legacy machine: three touches, the press, then the single touch', async ({
+  cm,
+  page,
+}) => {
+  // THE FLOW THE MAINTAINER MEETS ON THE NEXT JOB after the restart publish: the machine holds a
+  // finished program from before blank identity existed, and this job has no blank of its own — so
+  // the card says the blank MAY have been cut, measures the top (three or more agreeing touches),
+  // and offers "This is a new blank". The press mints the blank through the machine write; the
+  // next registration is the ordinary single surface touch.
+  const house = await fakeHouse(page);
+  const fake = await installFakeConsole(page);
+  fake.setFeature({ kind: 'boss', radiusMm: 400, centre: { x: -140, y: -163 }, topZ: TOP_READING });
+  await cm.ready();
+  await prepare(page);
+
+  // The safe default, said on the card, with the press.
+  const banner = page.getByTestId('engrave-registration-blank');
+  await expect(banner).toContainText('may have been cut', { timeout: 60_000 });
+  await expect(page.getByTestId('engrave-registration-new-blank')).toBeVisible();
+  // The step header counts the touches the executor will make (#1179/#1143): the cut-blank plan's
+  // check points, never "1 touch".
+  const stepHeader = page.getByTestId('engrave-cut-step-2-summary');
+  await expect(stepHeader).toContainText(/[2-5] touches/);
+  await expect(stepHeader).not.toContainText('1 touch');
+
+  // The measurement: the checks are touched (at least three) and agree on the bench's top.
+  await expect(page.getByTestId('engrave-registration-notes')).toContainText('the top was measured on a cut blank', {
+    timeout: 120_000,
+  });
+  const measuredTouches = fake.lines().filter((l) => l.startsWith('G38.3')).length;
+  expect(measuredTouches, 'the cut-blank path touches three or more checks').toBeGreaterThanOrEqual(3);
+  fs.mkdirSync(OUT, { recursive: true });
+  await page.screenshot({ path: path.join(OUT, 'blank-identity-legacy-measured.png') });
+
+  // The press, while the card is live: the mint lands on the machine record (a real PUT this walk
+  // serves back), and the blank is no longer in question.
+  await page.getByTestId('engrave-registration-new-blank').click();
+  await expect(page.getByTestId('engrave-registration-blank-note')).toContainText('A new blank', { timeout: 60_000 });
+  const written = house.writtenMachine();
+  expect(
+    Object.keys((written?.currentBlank as Record<string, string>) ?? {}).length,
+    `the mint wrote currentBlank — machine the fake received: ${JSON.stringify(written)}`,
+  ).toBe(1);
+  await expect(page.getByTestId('engrave-registration-blank')).toHaveCount(0);
+
+  // The stored plan (a cut-blank plan) is not what the planner now proposes for the fresh blank:
+  // the card says so, the operator takes the new plan, and the run is reset for the fresh blank.
+  await expect(page.getByTestId('engrave-registration-plan-drift')).toBeVisible({ timeout: 60_000 });
+  await page.getByTestId('engrave-registration-use-new-plan').click();
+  await page.getByTestId('engrave-registration-again').click();
+
+  // THE SINGLE-SURFACE-TOUCH transcript: the fresh blank's plan has NO check points, so the run
+  // takes the one surface seek and its notes never say the top was measured on a cut blank.
+  await page.getByTestId('engrave-registration-start').click();
+  await page.getByTestId('engrave-registration-continue').click(); // the clamp confirm
+  // The run settles at the measured state (the write press exists; the fold may have closed).
+  await expect(page.getByTestId('engrave-registration-write')).toHaveCount(1, { timeout: 120_000 });
+  const secondNotes = page.getByTestId('engrave-registration-notes');
+  await expect(secondNotes).toContainText('rim offset', { timeout: 60_000 });
+  await expect(secondNotes).not.toContainText('the top was measured on a cut blank');
+  expect(fake.lines().filter((l) => l.startsWith('G38.3')).length, 'the fresh blank still probes its surface').toBeGreaterThan(0);
+  await page.screenshot({ path: path.join(OUT, 'blank-identity-single-touch.png') });
 });

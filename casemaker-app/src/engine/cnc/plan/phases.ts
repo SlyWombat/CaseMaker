@@ -26,6 +26,7 @@
 import { estimateIRCycleSeconds, type RapidEstimate, type ToolpathIR } from '../cam/ir';
 import { type PlanResult } from '../registration';
 import { sideTouchSelected } from '../registration/probe3d';
+import { CUT_BLANK_MAX_POINTS } from '../registration/cutBlank';
 import type { Mount, Setup } from '../setups/types';
 import type { StockFlatness } from '@/platform/stockClient';
 import type { ShopDefaults } from '@/platform/defaultsClient';
@@ -140,7 +141,12 @@ function fromDefault(label: string, who: 'machine' | 'you', s: Sourced): PhasePa
  * executor dispatches on, so the estimate cannot drift from what the machine does.
  */
 export function registrationTouches(plan: Extract<PlanResult, { ok: true }>): number {
-  return 1 + plan.plan.scans.reduce((n, scan) => {
+  // #1179 — A CUT BLANK'S TOP IS MEASURED ON ITS CHECK POINTS. When the plan carries them, the
+  // executor touches the spread points (three to start, up to five while the highest reading
+  // stands alone) — never one surface touch. The header must not promise one.
+  const checks = plan.plan.surfaceChecks ?? [];
+  const surface = checks.length > 0 ? Math.min(checks.length, CUT_BLANK_MAX_POINTS) : 1;
+  return surface + plan.plan.scans.reduce((n, scan) => {
     if (sideTouchSelected(plan.plan, scan.edge)) return n + 2;
     const bracket = Math.abs(scan.start - scan.limit);
     return n + 2 + Math.ceil(Math.log2(Math.max(2, bracket / scan.fineStep)));
