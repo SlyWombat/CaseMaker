@@ -648,7 +648,7 @@
       "value": 10.0,
       "source": "seeded",
       "setAt": null,
-      "unit": "°",
+      "unit": "\u00b0",
       "note": "chosen, not measured: the largest tilt the face-angle step will turn out of a square stock in the 4th axis. A bigger reading is a wrong touch or a wrong mounting, not a turn"
     },
     "registration.idlePollLimit": {
@@ -994,7 +994,7 @@
       "source": "seeded",
       "setAt": null,
       "unit": "x",
-      "note": "chosen, not measured: taped area must be this many times the cutter's bite (diameter × step-down) — the tape coupon at the bench sets it"
+      "note": "chosen, not measured: taped area must be this many times the cutter's bite (diameter \u00d7 step-down) \u2014 the tape coupon at the bench sets it"
     },
     "tape.insetMm": {
       "value": 2.0,
@@ -1071,7 +1071,7 @@
       "source": "seeded",
       "setAt": null,
       "unit": "x",
-      "note": "chosen, not measured: the share of a goal's top surface that must stand within 0.1 mm of it for the run to pass — the demo page's coverage rule (#948); a corpus run that shows a good goal job near it moves it"
+      "note": "chosen, not measured: the share of a goal's top surface that must stand within 0.1 mm of it for the run to pass \u2014 the demo page's coverage rule (#948); a corpus run that shows a good goal job near it moves it"
     },
     "bracket.originOffsetXMm": {
       "value": 0.0,
@@ -1750,7 +1750,7 @@
       "source": "seeded",
       "setAt": null,
       "unit": "s",
-      "note": "recommended, not measured: what a bit change costs while the operator is still at the machine — fit by hand plus the M491 touch, rounded to two minutes"
+      "note": "recommended, not measured: what a bit change costs while the operator is still at the machine \u2014 fit by hand plus the M491 touch, rounded to two minutes"
     },
     "bitChange.walkAwayMinutes": {
       "value": 30.0,
@@ -1765,6 +1765,20 @@
       "setAt": null,
       "unit": "min",
       "note": "recommended, not measured: the operator's walk back to the machine, added to the attended cost once they have left"
+    },
+    "registration.cutBlankAgreeMm": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "#1179 B \u2014 the analyst\u2019s 0.1: two touches on a cut blank must agree to this"
+    },
+    "registration.thicknessNoteMm": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "#1179 D \u2014 a measured top may imply a thickness up to this far from the job\u2019s before the Register note says so"
     }
   },
   "accessories": [

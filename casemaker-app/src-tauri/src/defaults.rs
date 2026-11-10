@@ -149,6 +149,12 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
     // Below BOTH the park height (less a clearance) and the bench vise's jaw drop (0.47 mm): a seek
     // that misses the stock and lands on a jaw, or a park that would sit below the band, is refused.
     ("registration.surfaceToleranceMm", 0.4, "mm"),
+    // #1179 B — two touches on a blank that has been cut must agree to this, mm (the analyst's
+    // 0.1): a cut floor, an old hole or a chip cannot agree with the real top to 0.1 mm.
+    ("registration.cutBlankAgreeMm", 0.1, "mm"),
+    // #1179 D — a measured top may imply a thickness up to this far from the job's before the
+    // Register step says so; 0.1 mm matches the touch-agreement rule beside it.
+    ("registration.thicknessNoteMm", 0.1, "mm"),
     ("registration.touchFeed", 150.0, "mm/min"),
     ("registration.surfaceFastFeed", 300.0, "mm/min"),
     ("registration.surfaceSlowFeed", 100.0, "mm/min"),
@@ -754,6 +760,14 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "registration.surfaceToleranceMm" => Some(need(
             n.is_some_and(|v| (0.05..=10.0).contains(&v)),
             "0.05 to 10 mm",
+        )),
+        "registration.cutBlankAgreeMm" => Some(need(
+            n.is_some_and(|v| (0.01..=1.0).contains(&v)),
+            "0.01 to 1 mm",
+        )),
+        "registration.thicknessNoteMm" => Some(need(
+            n.is_some_and(|v| (0.01..=2.0).contains(&v)),
+            "0.01 to 2 mm",
         )),
         "registration.edgeMarginMm" => Some(need(
             n.is_some_and(|v| (0.01..=20.0).contains(&v)),
@@ -1406,6 +1420,17 @@ pub fn validate_all(map: &ShopDefaults) -> Result<(), HouseError> {
         if tol >= park - PARK_CLEARANCE_MM {
             return Err(HouseError::BadEntry(format!(
                 "registration.surfaceToleranceMm ({tol}) must be less than registration.parkAboveSurfaceMm ({park}) less {PARK_CLEARANCE_MM}"
+            )));
+        }
+    }
+    // #1179 B — the agreement can never be wider than the band the readings are held to.
+    if let (Some(agree), Some(tol)) = (
+        num("registration.cutBlankAgreeMm"),
+        num("registration.surfaceToleranceMm"),
+    ) {
+        if agree > tol {
+            return Err(HouseError::BadEntry(format!(
+                "registration.cutBlankAgreeMm ({agree}) must be at most registration.surfaceToleranceMm ({tol})"
             )));
         }
     }

@@ -23,6 +23,9 @@ import {
 } from '@/engine/cnc/mounts/bracket';
 import type { MountDatum, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
 import { cutRegionOf, mountObstaclesFor, seatSeekFor } from '@/engine/cnc/registration/footprintJob';
+import { cutBlankCandidates, stockRaster, type CutProgramInput } from '@/engine/cnc/registration/cutBlank';
+import { cuttingDiameter } from '@/engine/cnc/tool';
+import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
 import { referenceOpenings, registrationFor, type MountSpec, type Setup } from '@/engine/cnc/setups';
@@ -47,6 +50,41 @@ function expectedWords(plan: RegistrationPlan): string {
   const edges = plan.scans.map((s) => s.edge);
   if (edges.length === 0) return z;
   return `X/Y re-checked on the ${edges.join(' and ')} edge${edges.length === 1 ? '' : 's'}; ${z}`;
+}
+
+/**
+ * #1179 B — THE CHECK POINTS FOR A CUT BLANK. The package's cutting footprint grown by each
+ * program's cutter radius + 1 mm (the largest owned diameter + 1 when a cutter is unknown) and the
+ * part's placed silhouette, both from the job; the mount's obstacles and a 3 mm edge margin are
+ * excluded. The executor proves the top by touching them.
+ */
+function cutBlankCheckPoints(
+  job: EngraveJob,
+  plan: RegistrationPlan,
+  largestOwnedDiameterMm: number,
+  finishedHashes: readonly string[],
+): { points: { x: number; y: number; depthMm: number }[]; earlierCutsKnown: boolean } {
+  const raster = stockRaster(plan.stock);
+  const fallbackRadiusMm = (Number.isFinite(largestOwnedDiameterMm) && largestOwnedDiameterMm > 0 ? largestOwnedDiameterMm : 0) / 2;
+  const finished = new Set(finishedHashes);
+  const programs: CutProgramInput[] = (job.package?.programs ?? [])
+    .filter((program) => (program.frame ?? 'flat') === 'flat')
+    .map((program) => {
+      const tool = resolveTool(program.toolKey);
+      const diameter = tool === null ? null : cuttingDiameter(tool);
+      return {
+        nc: program.nc,
+        cutterRadiusMm: diameter === null ? fallbackRadiusMm : diameter / 2,
+        finished: finished.has(program.hash),
+      };
+    });
+  return cutBlankCandidates({
+    raster,
+    programs,
+    tipRadiusMm: plan.settings.tipRadiusMm,
+    fallbackRadiusMm,
+    obstacles: plan.mountObstacles.map((o) => ({ min: o.min, max: o.max })),
+  });
 }
 
 export function planRegistrationAttempt(args: {
@@ -76,6 +114,21 @@ export function planRegistrationAttempt(args: {
   defaults: ShopDefaults | null;
   calibration: MachineCalibration | undefined;
   settings: ReturnType<typeof registrationSettings>['settings'];
+  /**
+   * #1179 B — THIS BLANK HAS BEEN CUT (a finished record on this machine, or the operator says it
+   * is not fresh): the bracket's plan carries check points instead of one touch at the cut centre.
+   */
+  cutBlank?: boolean;
+  /**
+   * #1179 B — the largest owned cutter's diameter, mm: the growth a program's unknown cutter takes
+   * (its radius is half this), per the analyst's ruling.
+   */
+  largestOwnedDiameterMm?: number;
+  /**
+   * #1179 B — the machine's finished-program hashes (`finishedProgramsFor(target)`): a program of
+   * THIS package that is among them is finished, and only finished programs' floors are known.
+   */
+  finishedHashes?: readonly string[];
 }): RegistrationAttempt {
   const { job, setup, mount, defaults, calibration } = args;
   // #934 — REGISTRATION FROM EARLIER FEATURES is one of the branches the bench has not run; it is
@@ -216,12 +269,28 @@ export function planRegistrationAttempt(args: {
       args.settings,
     ).plan;
     if (!result.ok) return { kind: 'refused', reason: result.reason };
+    // #1179 B — A CUT BLANK MEASURES ITS TOP ON WOOD THAT IS STILL THERE. The check points come
+    // from the package's own cutting footprint (a flat floor's depth is known and the executor
+    // compares implied tops); no point at all keeps today's single touch, whose miss then offers
+    // the bracket's own top — the derived path, the last resort.
+    const checks =
+      args.cutBlank === true
+        ? cutBlankCheckPoints(job, result.plan, args.largestOwnedDiameterMm ?? 0, args.finishedHashes ?? [])
+        : { points: [], earlierCutsKnown: true };
+    const plan =
+      checks.points.length === 0
+        ? result.plan
+        : {
+            ...result.plan,
+            surfaceChecks: checks.points,
+            ...(checks.earlierCutsKnown ? {} : { surfaceChecksUnknown: true as const }),
+          };
     return {
       kind: 'plan',
       method: 'bracket',
-      plan: result.plan,
-      summary: summarizePlan(result.plan),
-      expected: expectedWords(result.plan),
+      plan,
+      summary: summarizePlan(plan),
+      expected: expectedWords(plan),
     };
   }
   // #845 — a stated machine has no clearance to seek from; the preview it places a tap with is

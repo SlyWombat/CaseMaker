@@ -61,8 +61,6 @@ import {
   type ApplyResult,
   type OperatorStep,
   type RunResult,
-  type TopChoice,
-  type TopQuestion,
 } from '@/engine/cnc/registration/execute';
 import { planFlipAttemptForJob, type FlipAttemptResult } from '@/engine/cnc/registration/flipAttempt';
 import { flipZ0, type FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
@@ -179,12 +177,6 @@ export interface EngraveRegistrationStepProps {
 type Phase = 'idle' | 'running' | 'measured' | 'writing' | 'recorded' | 'failed';
 
 const n = (v: number): string => String(Math.round(v * 1000) / 1000);
-
-/** #1166 (c1) — the bracket's own-top arithmetic, the one wording the question prints. */
-const topArithmetic = (d: TopQuestion['derived']): string =>
-  d.seat !== null && d.thickness !== null
-    ? `seat ${n(d.seat)} + stock ${n(d.thickness)} = ${n(d.machineZ)}`
-    : `seat + stock thickness = ${n(d.machineZ)}`;
 
 /** #797 follow-up — the plan in one line: where it touches, how many touches, which probe. */
 function proposalLine(plan: RegistrationPlan): string {
@@ -413,6 +405,16 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const rotaryEnvelope = useMemo(() => rotaryOf(jobMachine(job, calibration))?.envelope, [job, calibration]);
   // #1088 — SIDE 1'S GOAL and the location's tools, for the hold check the generator runs.
   const tools = useToolRegistry();
+  // #1179 B — the largest owned cutter's diameter: the fallback a program whose cutter the registry
+  // cannot name is grown by (the analyst's ruling).
+  const largestOwnedDiameterMm = useMemo(() => {
+    let largest = 0;
+    for (const entry of tools) {
+      const diameter = cuttingDiameter(entry.tool);
+      if (diameter !== null && diameter > largest) largest = diameter;
+    }
+    return largest;
+  }, [tools]);
   const flipGoal = useMemo(
     () => {
       const goals = jobTargetObjects(job).filter((g) => isSideGoal(g));
@@ -468,6 +470,10 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       defaults,
       calibration,
       settings: regSettings,
+      // #1179 B — a blank that has been cut is MEASURED on known depths, not asked about.
+      cutBlank: hasFinishedPrograms,
+      largestOwnedDiameterMm,
+      finishedHashes: machineRecord?.finishedPrograms ?? [],
     });
   }, [
     plan,
@@ -484,6 +490,10 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     defaults,
     calibration,
     regSettings,
+    // #1179 B — the cut-blank trigger and the fallback cutter size are plan inputs.
+    hasFinishedPrograms,
+    largestOwnedDiameterMm,
+    machineRecord,
     // #1082 — a face landing must re-plan (the job object is unchanged when it does).
     facesEpoch,
   ]);
@@ -596,11 +606,6 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const houseMargins = useSettingsStore((s) => s.margins);
   const [phase, setPhase] = useState<Phase>('idle');
   const [prompt, setPrompt] = useState<OperatorStep | null>(null);
-  // #1166 (c1) — THE TOP QUESTION: a top measured before (typed), the bracket's own top, or
-  // today's seek. The field starts EMPTY and is never pre-filled.
-  const [topQuestion, setTopQuestion] = useState<TopQuestion | null>(null);
-  const [topTyped, setTopTyped] = useState('');
-  const [topError, setTopError] = useState<string | null>(null);
   const [result, setResult] = useState<RunResult | null>(null);
   const [written, setWritten] = useState<ApplyResult | null>(null);
   const [homeNote, setHomeNote] = useState<string | null>(null);
@@ -622,8 +627,6 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
 
   const handleRef = useRef<ConsoleHandle | null>(null);
   const resolverRef = useRef<((ok: boolean) => void) | null>(null);
-  /** #1166 (c1) — the top question's answer, held across the executor's await. */
-  const topResolverRef = useRef<((choice: TopChoice) => void) | null>(null);
   const aliveRef = useRef(true);
   /** #638 — the plan the measurement RAN under (not the render-time one), for its write-backs. */
   const runPlanRef = useRef<RegistrationPlan | null>(null);
@@ -651,13 +654,6 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       if (answer !== null) {
         resolverRef.current = null;
         answer(false);
-      }
-      // #1166 (c1) — an unanswered TOP QUESTION stops the run: no motion was made for it, and the
-      // next mount must ask again rather than continue on a choice nobody made.
-      const top = topResolverRef.current;
-      if (top !== null) {
-        topResolverRef.current = null;
-        top({ kind: 'stop' });
       }
     };
   }, []);
@@ -717,47 +713,6 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     resolverRef.current?.(ok);
   }
 
-  // #1166 (c1) — THE TOP QUESTION. Asked once by the executor after the probe's M491 and before
-  // any probe motion, only under its bracket guard. The field is empty every time; a typed answer
-  // is held to the plan's band HERE as well as in the executor, and an out-of-band one moves
-  // nothing and says so.
-  function askTop(question: TopQuestion): Promise<TopChoice> {
-    if (!aliveRef.current) return Promise.resolve({ kind: 'stop' });
-    setTopQuestion(question);
-    setTopTyped('');
-    setTopError(null);
-    return new Promise<TopChoice>((resolve) => {
-      topResolverRef.current = (choice) => {
-        topResolverRef.current = null;
-        if (aliveRef.current) {
-          setTopQuestion(null);
-          setTopTyped('');
-          setTopError(null);
-        }
-        resolve(choice);
-      };
-    });
-  }
-
-  function answerTop(choice: TopChoice): void {
-    topResolverRef.current?.(choice);
-  }
-
-  function submitTopTyped(): void {
-    if (topQuestion === null) return;
-    const z = Number(topTyped);
-    if (!Number.isFinite(z)) {
-      setTopError('enter a machine Z number');
-      return;
-    }
-    if (z < topQuestion.band.min || z > topQuestion.band.max) {
-      setTopError(
-        `machine Z ${n(z)} is outside the plan's expected ${n(topQuestion.band.min)} to ${n(topQuestion.band.max)} — nothing has moved; enter a top inside that band, or touch it again`,
-      );
-      return;
-    }
-    answerTop({ kind: 'typed', machineZ: z });
-  }
 
   /**
    * #933 — THE STOP PRESS. It sets the executor's flag FIRST — from that moment the run sends no
@@ -994,8 +949,6 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           // #1166 — the bracket's surface seek may offer the DERIVED top (seat + stock thickness)
           // when the plan's point has been cut away, but only if this job has actually cut here.
           hasFinishedPrograms,
-          // #1166 (c1) — and the question that offers a typed or derived top BEFORE the seek.
-          askTop,
           // #587 — the executor narrates each step as it moves; surface it live.
           onStep: (sentence) => {
             if (aliveRef.current) setNarration(sentence);
@@ -1599,68 +1552,6 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
                     onClick={() => answer(true)}
                   >
                     Continue
-                  </button>
-                </div>
-              )}
-              {/* #1166 (c1) — THE TOP QUESTION, before any probe motion. The field is empty and
-                  never pre-filled; a typed answer outside the plan's band says so and moves
-                  nothing. */}
-              {topQuestion !== null && (
-                <div data-testid="engrave-registration-top-question" style={{ marginTop: 6 }}>
-                  <p style={{ fontSize: 12, color: '#e6edf5', margin: '0 0 4px' }}>
-                    Programs have already been cut on this blank, so the plan's touch point (
-                    {n(topQuestion.surfacePoint.x)}, {n(topQuestion.surfacePoint.y)}) may be cut away.
-                    Where is the top?
-                  </p>
-                  <button
-                    type="button"
-                    data-testid="engrave-registration-top-derived"
-                    style={{ display: 'block', width: '100%', padding: 6, marginBottom: 4 }}
-                    onClick={() => answerTop({ kind: 'derived' })}
-                  >
-                    Use the bracket's own top: {topArithmetic(topQuestion.derived)}
-                  </button>
-                  <div style={{ marginBottom: 4 }}>
-                    <label style={{ fontSize: 12 }}>
-                      Enter the top measured before:{' '}
-                      <input
-                        type="number"
-                        step="0.001"
-                        value={topTyped}
-                        data-testid="engrave-registration-top-typed"
-                        style={{ width: 90 }}
-                        onChange={(e) => {
-                          setTopTyped(e.target.value);
-                          setTopError(null);
-                        }}
-                      />{' '}
-                      machine Z
-                    </label>{' '}
-                    <button
-                      type="button"
-                      data-testid="engrave-registration-top-typed-use"
-                      disabled={topTyped.trim() === ''}
-                      style={{ padding: 6 }}
-                      onClick={() => submitTopTyped()}
-                    >
-                      Use this top
-                    </button>
-                  </div>
-                  {topError !== null && (
-                    <p
-                      data-testid="engrave-registration-top-error"
-                      style={{ fontSize: 12, color: BAD, margin: '0 0 4px' }}
-                    >
-                      {topError}
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    data-testid="engrave-registration-top-seek"
-                    style={{ display: 'block', width: '100%', padding: 6 }}
-                    onClick={() => answerTop({ kind: 'seek' })}
-                  >
-                    Touch it again at ({n(topQuestion.surfacePoint.x)}, {n(topQuestion.surfacePoint.y)})
                   </button>
                 </div>
               )}

@@ -1,30 +1,33 @@
 /**
  * #1179 slice B — WHERE THE TOP IS MEASURED ON A BLANK THAT HAS BEEN CUT.
  *
- * The restart's registration finds the top on wood no program cut. This module is the pure side:
- *  - the package's CUT FOOTPRINT — every program's cutting moves (the app's own G-code parse), each
- *    grown by that program's cutter radius + 1 mm;
- *  - the PART'S PLACED SILHOUETTE — the goal's work mesh rasterised by the coverage sampler and
- *    grown by the largest owned cutter diameter + 1 mm (the analyst's ruling);
- *  - the TIERED choice of touch points: tier 1 is outside the part AND outside the package's cut
- *    (the waste band), tier 2 is outside the cut only. Two touches come from tier 1 when it has a
- *    pair at least {@link CUT_BLANK_MIN_SEPARATION_MM} apart; otherwise one from each tier; tier 2
- *    alone only when tier 1 is empty (the analyst, 2026-11-10).
+ * The maintainer's restatement (2026-11-10): "Don't assume there is material outside the waste
+ * band, the blank may be the perfect size." So the candidate points are not a ring around the part;
+ * they are points whose DEPTH IS KNOWN:
+ *  - the UNCUT TOP — no finished program cuts near it, d = 0;
+ *  - a FLAT FLOOR — a finished program's own moves give its depth: the deepest cutting move within
+ *    that program's cutter radius is the floor there, and the cell is flat when every cutting move
+ *    within the cutter radius + the probe tip radius + 1 mm sits at that depth ± 0.02 mm.
+ * A touch's reading + the point's depth is the IMPLIED top; the executor takes the highest implied
+ * level two touches agree on. A single reading is never the top.
  *
- * The mount's obstacles (clamps, arms) and a {@link CUT_BLANK_EDGE_MARGIN_MM} edge margin are
- * excluded everywhere. Nothing here probes or reads a store; the executor touches what this picks.
+ * With no finished program of the package recorded (today's tray: the package was regenerated), the
+ * candidate set is "outside today's package footprint" with d = 0, and the record says the earlier
+ * cuts are unknown. The mount's obstacles and a 3 mm edge margin are excluded everywhere; the
+ * points are spread as far apart as the candidates allow.
  */
-import { goalWorkMesh } from '@/engine/cnc/engrave/goalFlipFindings';
-import { sampleCoverageField } from '@/engine/cnc/engrave/goalCoverage';
 import { buildSwathIndex } from '@/engine/cnc/engrave/liveSwath';
-import type { EngraveTargetObject } from '@/types/engraveJob';
 
 /** The candidate raster's pitch, mm. */
 export const CUT_BLANK_PITCH_MM = 1;
 /** The margin kept clear of the stock's edges, mm (#1179 B1). */
 export const CUT_BLANK_EDGE_MARGIN_MM = 3;
-/** Two tier-1 touches must be at least this far apart, mm (#1179 B1, the analyst's ruling). */
-export const CUT_BLANK_MIN_SEPARATION_MM = 20;
+/** A floor is flat when every nearby cutting move is at its depth ± this, mm (the analyst's 0.02). */
+export const CUT_BLANK_FLAT_MM = 0.02;
+/** The most spread candidates the choice offers (the executor touches three, five without a pair). */
+export const CUT_BLANK_MAX_POINTS = 5;
+/** The extra reach past a cutter's radius that a floor must be clear of other depths, mm. */
+export const CUT_BLANK_FLAT_REACH_MM = 1;
 
 export interface StockRaster {
   xMin: number;
@@ -36,11 +39,13 @@ export interface StockRaster {
   ny: number;
 }
 
-/** One program of the frozen package: its NC text, and how far its cutter clears the path. */
+/** One program of the frozen package. Only a FINISHED program's floor is known. */
 export interface CutProgramInput {
   nc: string;
-  /** The program's cutter radius + 1 mm — or NaN when its cutter is unknown (the fallback). */
-  growMm: number;
+  /** The program's cutter RADIUS, mm (or the labelled fallback when its cutter is unknown). */
+  cutterRadiusMm: number;
+  /** True when this program is among the machine's finished programs for THIS package. */
+  finished: boolean;
 }
 
 /** A mount obstacle in the plan's work XY, as the registration already carries it. */
@@ -49,11 +54,11 @@ export interface CutBlankObstacle {
   max: [number, number];
 }
 
-/** One candidate touch point, with the tier the analyst's ruling gives it. */
+/** One candidate touch point, with the depth it is expected to sit at below the stock top. */
 export interface SurfacePointCandidate {
   x: number;
   y: number;
-  tier: 1 | 2;
+  depthMm: number;
 }
 
 /** The stock top as a raster of cell centres. `nx·ny` cells, row-major (y then x). */
@@ -79,79 +84,138 @@ function distanceToSegment2d(px: number, py: number, a: { x: number; y: number }
   return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy));
 }
 
-/** Mark every cell whose centre is within `grow` of the segment's XY line. */
-function markSegment(mask: Uint8Array, raster: StockRaster, a: { x: number; y: number }, b: { x: number; y: number }, grow: number): void {
-  const i0 = Math.max(0, Math.floor((Math.min(a.x, b.x) - grow - raster.xMin) / raster.pitchMm));
-  const i1 = Math.min(raster.nx - 1, Math.ceil((Math.max(a.x, b.x) + grow - raster.xMin) / raster.pitchMm));
-  const j0 = Math.max(0, Math.floor((Math.min(a.y, b.y) - grow - raster.yMin) / raster.pitchMm));
-  const j1 = Math.min(raster.ny - 1, Math.ceil((Math.max(a.y, b.y) + grow - raster.yMin) / raster.pitchMm));
-  for (let j = j0; j <= j1; j++) {
-    const y = cellY(raster, j);
-    for (let i = i0; i <= i1; i++) {
-      if (mask[j * raster.nx + i] === 1) continue;
-      if (distanceToSegment2d(cellX(raster, i), y, a, b) <= grow + 1e-9) mask[j * raster.nx + i] = 1;
+/** One cutting move in the work frame: its XY line and the depth it cuts to. */
+interface CutMove {
+  a: { x: number; y: number };
+  b: { x: number; y: number };
+  /** Depth below the stock top, mm (a move above the top counts as 0). */
+  depthMm: number;
+}
+
+function movesOf(program: CutProgramInput): CutMove[] {
+  const moves: CutMove[] = [];
+  for (const segment of buildSwathIndex(program.nc).segments) {
+    if (!segment.cut) continue;
+    moves.push({
+      a: { x: segment.from.x, y: segment.from.y },
+      b: { x: segment.to.x, y: segment.to.y },
+      depthMm: Math.max(0, -Math.min(segment.from.z, segment.to.z)),
+    });
+  }
+  return moves;
+}
+
+/** The raster cells a move's disc of radius `reach` can affect, as index bounds. */
+function boundsOf(raster: StockRaster, a: { x: number; y: number }, b: { x: number; y: number }, reach: number) {
+  return {
+    i0: Math.max(0, Math.floor((Math.min(a.x, b.x) - reach - raster.xMin) / raster.pitchMm)),
+    i1: Math.min(raster.nx - 1, Math.ceil((Math.max(a.x, b.x) + reach - raster.xMin) / raster.pitchMm)),
+    j0: Math.max(0, Math.floor((Math.min(a.y, b.y) - reach - raster.yMin) / raster.pitchMm)),
+    j1: Math.min(raster.ny - 1, Math.ceil((Math.max(a.y, b.y) + reach - raster.yMin) / raster.pitchMm)),
+  };
+}
+
+const radiusOf = (program: CutProgramInput, fallbackRadiusMm: number): number =>
+  Number.isFinite(program.cutterRadiusMm) && program.cutterRadiusMm >= 0 ? program.cutterRadiusMm : Math.max(0, fallbackRadiusMm);
+
+/**
+ * The finished programs' floor: per cell, the deepest cutting move within that program's cutter
+ * radius, mm below the stock top (0 = untouched).
+ */
+export function depthRaster(
+  raster: StockRaster,
+  programs: readonly CutProgramInput[],
+  fallbackRadiusMm: number,
+): Float32Array {
+  const depth = new Float32Array(raster.nx * raster.ny);
+  for (const program of programs) {
+    if (!program.finished) continue;
+    const reach = radiusOf(program, fallbackRadiusMm);
+    for (const move of movesOf(program)) {
+      const { i0, i1, j0, j1 } = boundsOf(raster, move.a, move.b, reach);
+      for (let j = j0; j <= j1; j++) {
+        const y = cellY(raster, j);
+        for (let i = i0; i <= i1; i++) {
+          if (depth[j * raster.nx + i]! >= move.depthMm) continue;
+          if (distanceToSegment2d(cellX(raster, i), y, move.a, move.b) <= reach + 1e-9) {
+            depth[j * raster.nx + i] = move.depthMm;
+          }
+        }
+      }
     }
   }
+  return depth;
 }
 
 /**
- * The package's cut footprint: every program's cutting moves, grown by its own cutter radius + 1 mm
- * (`growMm`), or by `fallbackGrowMm` when the program's cutter is unknown. A rapid never marks.
+ * The flat-floor mask: 1 where the cell's own floor depth is the only depth within reach — every
+ * finished cutting move within (its cutter's radius + the probe tip radius + 1 mm) sits at the
+ * cell's deepest depth ± {@link CUT_BLANK_FLAT_MM}. An untouched cell (no move within the cutter
+ * radius) is flat when nothing within the reach cuts deeper than 0 ± the tolerance (i.e. nothing
+ * cuts at all nearby).
+ */
+export function flatFloorMask(
+  raster: StockRaster,
+  programs: readonly CutProgramInput[],
+  fallbackRadiusMm: number,
+  tipRadiusMm: number,
+  depth: Float32Array = depthRaster(raster, programs, fallbackRadiusMm),
+): Uint8Array {
+  const nearMin = new Float32Array(raster.nx * raster.ny).fill(Infinity);
+  const nearMax = new Float32Array(raster.nx * raster.ny).fill(-Infinity);
+  for (const program of programs) {
+    if (!program.finished) continue;
+    const reach = radiusOf(program, fallbackRadiusMm) + Math.max(0, tipRadiusMm) + CUT_BLANK_FLAT_REACH_MM;
+    for (const move of movesOf(program)) {
+      const { i0, i1, j0, j1 } = boundsOf(raster, move.a, move.b, reach);
+      for (let j = j0; j <= j1; j++) {
+        const y = cellY(raster, j);
+        for (let i = i0; i <= i1; i++) {
+          const at = j * raster.nx + i;
+          if (distanceToSegment2d(cellX(raster, i), y, move.a, move.b) > reach + 1e-9) continue;
+          if (move.depthMm < nearMin[at]!) nearMin[at] = move.depthMm;
+          if (move.depthMm > nearMax[at]!) nearMax[at] = move.depthMm;
+        }
+      }
+    }
+  }
+  const flat = new Uint8Array(raster.nx * raster.ny);
+  for (let at = 0; at < flat.length; at++) {
+    const near = nearMax[at]!;
+    if (near === -Infinity) {
+      flat[at] = 1;
+      continue;
+    }
+    const own = depth[at]!;
+    flat[at] = near - own <= CUT_BLANK_FLAT_MM + 1e-9 && own - nearMin[at]! <= CUT_BLANK_FLAT_MM + 1e-9 ? 1 : 0;
+  }
+  return flat;
+}
+
+/**
+ * The union of EVERY program's cutting path, grown by its cutter radius + 1 mm (the fallback grow
+ * when a cutter is unknown) — the "outside today's package footprint" set the unknown-cuts case
+ * uses.
  */
 export function cutFootprintMask(
   raster: StockRaster,
   programs: readonly CutProgramInput[],
-  fallbackGrowMm: number,
+  fallbackRadiusMm: number,
+  fallbackGrowMm: number = Math.max(0, fallbackRadiusMm) + 1,
 ): Uint8Array {
   const mask = new Uint8Array(raster.nx * raster.ny);
-  const fallback = Number.isFinite(fallbackGrowMm) && fallbackGrowMm >= 0 ? fallbackGrowMm : CUT_BLANK_PITCH_MM;
   for (const program of programs) {
-    const grow = Number.isFinite(program.growMm) && program.growMm >= 0 ? program.growMm : fallback;
-    for (const segment of buildSwathIndex(program.nc).segments) {
-      if (!segment.cut) continue;
-      markSegment(mask, raster, segment.from, segment.to, grow);
-    }
-  }
-  return mask;
-}
-
-/**
- * The part's placed silhouette (the goal's work mesh) rasterised and grown by `growMm` — the
- * largest owned cutter diameter + 1 mm, per the ruling. Null when the goal has no readable mesh
- * (a 2D-only part), which leaves tier 1 empty and the choice to tier 2.
- */
-export function partFootprintMask(
-  raster: StockRaster,
-  goal: EngraveTargetObject | null,
-  growMm: number,
-): Uint8Array | null {
-  if (goal === null) return null;
-  const mesh = goalWorkMesh(goal);
-  if (mesh === null) return null;
-  let field: ReturnType<typeof sampleCoverageField>;
-  try {
-    field = sampleCoverageField(mesh, raster.pitchMm);
-  } catch {
-    return null;
-  }
-  if (field.coveredCount === 0) return null;
-  const grow = Number.isFinite(growMm) && growMm >= 0 ? growMm : 0;
-  const mask = new Uint8Array(raster.nx * raster.ny);
-  // Each covered coverage cell is a disc of `grow` in the stock raster.
-  for (let j = 0; j < field.ny; j++) {
-    for (let i = 0; i < field.nx; i++) {
-      if (field.covered[j * field.nx + i] === 0) continue;
-      const cx = field.x0 + (i + 0.5) * field.pitch;
-      const cy = field.y0 + (j + 0.5) * field.pitch;
-      const gi0 = Math.max(0, Math.floor((cx - grow - raster.xMin) / raster.pitchMm));
-      const gi1 = Math.min(raster.nx - 1, Math.ceil((cx + grow - raster.xMin) / raster.pitchMm));
-      const gj0 = Math.max(0, Math.floor((cy - grow - raster.yMin) / raster.pitchMm));
-      const gj1 = Math.min(raster.ny - 1, Math.ceil((cy + grow - raster.yMin) / raster.pitchMm));
-      for (let gj = gj0; gj <= gj1; gj++) {
-        const y = cellY(raster, gj);
-        for (let gi = gi0; gi <= gi1; gi++) {
-          if (mask[gj * raster.nx + gi] === 1) continue;
-          if (Math.hypot(cellX(raster, gi) - cx, y - cy) <= grow + raster.pitchMm / 2) mask[gj * raster.nx + gi] = 1;
+    const reach = Number.isFinite(program.cutterRadiusMm) && program.cutterRadiusMm >= 0
+      ? program.cutterRadiusMm + 1
+      : Math.max(0, fallbackGrowMm);
+    for (const move of movesOf(program)) {
+      const { i0, i1, j0, j1 } = boundsOf(raster, move.a, move.b, reach);
+      for (let j = j0; j <= j1; j++) {
+        const y = cellY(raster, j);
+        for (let i = i0; i <= i1; i++) {
+          const at = j * raster.nx + i;
+          if (mask[at] === 1) continue;
+          if (distanceToSegment2d(cellX(raster, i), y, move.a, move.b) <= reach + 1e-9) mask[at] = 1;
         }
       }
     }
@@ -162,94 +226,81 @@ export function partFootprintMask(
 interface Cell {
   x: number;
   y: number;
+  depthMm: number;
 }
 
 const dist = (a: Cell, b: Cell): number => Math.hypot(a.x - b.x, a.y - b.y);
 
-/** The cell farthest from every seed (or from the stock's centre with no seed), or null. */
-function farthestFrom(cells: readonly Cell[], seeds: readonly Cell[], centre: Cell): Cell | null {
-  let best: Cell | null = null;
-  let bestDistance = -Infinity;
-  for (const cell of cells) {
-    const distance = seeds.length === 0 ? dist(cell, centre) : Math.min(...seeds.map((seed) => dist(cell, seed)));
-    if (distance > bestDistance) {
-      bestDistance = distance;
-      best = cell;
+/** Farthest-point sampling from the stock's centre: spread the points as far as the cells allow. */
+function spread(cells: readonly Cell[], max: number, centre: Cell): Cell[] {
+  const chosen: Cell[] = [];
+  const pool = [...cells];
+  while (chosen.length < max && pool.length > 0) {
+    let bestAt = -1;
+    let bestDistance = -Infinity;
+    for (let i = 0; i < pool.length; i++) {
+      const cell = pool[i]!;
+      const distance = chosen.length === 0 ? dist(cell, centre) : Math.min(...chosen.map((c) => dist(cell, c)));
+      if (distance > bestDistance) {
+        bestDistance = distance;
+        bestAt = i;
+      }
     }
+    const [cell] = pool.splice(bestAt, 1);
+    if (cell !== undefined) chosen.push(cell);
   }
-  return best;
+  return chosen;
 }
 
 /**
- * The tiered touch points (#1179 B1, the analyst's ruling):
- *  - tier 1 — outside the part's grown silhouette AND outside the package's grown cut footprint,
- *    inside the edge margin and clear of the mount's obstacles;
- *  - tier 2 — the same, minus the part test.
- * Two tier-1 points at least `minSeparationMm` apart win; otherwise one from each tier; tier 2
- * alone only when tier 1 is empty. Up to three points are returned (the third serves the
- * disagreement rule), chosen as far apart as the free cells allow.
+ * The candidates for a blank that has been cut (#1179 B, restated):
+ *  - with finished programs recorded: flat cells whose depth is known — the UNCUT top (d = 0)
+ *    first, then flat floors;
+ *  - with none recorded: cells outside today's package footprint, d = 0, and the caller records
+ *    that the earlier cuts are unknown.
+ * Obstacles and the edge margin are excluded; up to {@link CUT_BLANK_MAX_POINTS} spread points.
  */
-export function surfaceCandidates(input: {
+export function cutBlankCandidates(input: {
   raster: StockRaster;
-  cut: Uint8Array;
-  part: Uint8Array | null;
+  programs: readonly CutProgramInput[];
+  tipRadiusMm: number;
+  fallbackRadiusMm: number;
   obstacles: readonly CutBlankObstacle[];
   edgeMarginMm?: number;
-  minSeparationMm?: number;
-}): SurfacePointCandidate[] {
-  const { raster, cut, part, obstacles } = input;
+}): { points: SurfacePointCandidate[]; earlierCutsKnown: boolean } {
+  const { raster, programs, obstacles } = input;
   const margin = input.edgeMarginMm ?? CUT_BLANK_EDGE_MARGIN_MM;
-  const separation = input.minSeparationMm ?? CUT_BLANK_MIN_SEPARATION_MM;
-  const tier1: Cell[] = [];
-  const tier2: Cell[] = [];
+  const earlierCutsKnown = programs.some((program) => program.finished);
+  const depth = earlierCutsKnown ? depthRaster(raster, programs, input.fallbackRadiusMm) : null;
+  const flat = earlierCutsKnown ? flatFloorMask(raster, programs, input.fallbackRadiusMm, input.tipRadiusMm, depth ?? undefined) : null;
+  const outside = earlierCutsKnown ? null : cutFootprintMask(raster, programs, input.fallbackRadiusMm);
+  const top: Cell[] = [];
+  const floor: Cell[] = [];
   for (let j = 0; j < raster.ny; j++) {
     const y = cellY(raster, j);
     if (y < raster.yMin + margin || y > raster.yMax - margin) continue;
     for (let i = 0; i < raster.nx; i++) {
       const x = cellX(raster, i);
       if (x < raster.xMin + margin || x > raster.xMax - margin) continue;
-      if (cut[j * raster.nx + i] === 1) continue;
+      const at = j * raster.nx + i;
       if (obstacles.some((o) => x >= o.min[0] && x <= o.max[0] && y >= o.min[1] && y <= o.max[1])) continue;
-      const cell = { x: Math.round(x * 1000) / 1000, y: Math.round(y * 1000) / 1000 };
-      tier2.push(cell);
-      if (part === null || part[j * raster.nx + i] === 0) tier1.push(cell);
+      const cell = { x: Math.round(x * 1000) / 1000, y: Math.round(y * 1000) / 1000, depthMm: 0 };
+      if (depth !== null && flat !== null) {
+        if (flat[at] === 0) continue;
+        const d = depth[at]!;
+        if (d <= CUT_BLANK_FLAT_MM) top.push(cell);
+        else floor.push({ ...cell, depthMm: d });
+      } else if (outside !== null && outside[at] === 0) {
+        top.push(cell);
+      }
     }
   }
-  const centre = {
-    x: (raster.xMin + raster.xMax) / 2,
-    y: (raster.yMin + raster.yMax) / 2,
+  const centre = { x: (raster.xMin + raster.xMax) / 2, y: (raster.yMin + raster.yMax) / 2, depthMm: 0 };
+  // Uncut top first; floors fill what the top cannot.
+  const chosen = [...spread(top, CUT_BLANK_MAX_POINTS, centre)];
+  if (chosen.length < CUT_BLANK_MAX_POINTS) chosen.push(...spread(floor, CUT_BLANK_MAX_POINTS - chosen.length, centre));
+  return {
+    points: chosen.map((c) => ({ x: c.x, y: c.y, depthMm: c.depthMm })),
+    earlierCutsKnown,
   };
-  const pick: SurfacePointCandidate[] = [];
-  const first = farthestFrom(tier1, [], centre);
-  const second = first === null ? null : farthestFrom(tier1, [first], centre);
-  if (first !== null && second !== null && dist(first, second) >= separation) {
-    pick.push({ ...first, tier: 1 }, { ...second, tier: 1 });
-  } else if (first !== null) {
-    pick.push({ ...first, tier: 1 });
-    const other = farthestFrom(tier2, [first], centre);
-    if (other !== null) pick.push({ ...other, tier: 2 });
-  } else {
-    const a = farthestFrom(tier2, [], centre);
-    if (a !== null) pick.push({ ...a, tier: 2 });
-    const b = a === null ? null : farthestFrom(tier2, [a], centre);
-    if (b !== null) pick.push({ ...b, tier: 2 });
-  }
-  // A third point for the disagreement rule: tier 1 first, then tier 2, far from both.
-  const seeds = pick.map((p) => ({ x: p.x, y: p.y }));
-  const third =
-    farthestFrom(
-      tier1.filter((cell) => !seeds.some((s) => dist(cell, s) < 0.5)),
-      seeds,
-      centre,
-    ) ??
-    farthestFrom(
-      tier2.filter((cell) => !seeds.some((s) => dist(cell, s) < 0.5)),
-      seeds,
-      centre,
-    );
-  if (third !== null) {
-    const inTier1 = tier1.some((cell) => dist(cell, third) < 0.5);
-    pick.push({ ...third, tier: inTier1 ? 1 : 2 });
-  }
-  return pick;
 }

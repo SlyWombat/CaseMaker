@@ -54,6 +54,13 @@ export interface RegistrationSettings {
   /** How far the surface may sit from where the job expects it; the seek only travels this band. */
   surfaceToleranceMm: number;
   /**
+   * #1179 B — how far apart two surface readings may be and still AGREE on a blank that has been
+   * cut, mm (the analyst's 0.1): a cut floor, an old hole or a chip cannot agree with the real top
+   * to this. At most the surface tolerance — an out-of-band pair is refused anyway. OPTIONAL on a
+   * plan stored before the key existed; {@link CUT_BLANK_AGREE_FALLBACK_MM} answers then.
+   */
+  cutBlankAgreeMm?: number;
+  /**
    * #475 — how many surface touches the cut regions' extents get, beyond the registration-point
    * touch. At least 5, so the centre and both extents on each axis are read; seeded 5.
    */
@@ -75,6 +82,13 @@ export interface RegistrationSettings {
   readingResolutionMm: number;
 }
 
+/**
+ * #1179 B — the agreement an old stored plan without `cutBlankAgreeMm` falls back to, mm. The shop
+ * key's own labelled fallback (`defaultsClient.ts`) is the same number; a NEW plan always carries
+ * the shop's value, and only a plan approved before the key existed reads this.
+ */
+export const CUT_BLANK_AGREE_FALLBACK_MM = 0.1;
+
 /** The lift between the fast and the slow surface touch (`G0 Z1`), mm. Compiled: the sequence's own. */
 export const SURFACE_LIFT_MM = 1;
 /** The furthest the slow surface touch may go past the fast touch's reading, mm (#449 review). Compiled. */
@@ -95,6 +109,7 @@ const KEYS: Record<keyof RegistrationSettings, string> = {
   tipRadiusUncertaintyMm: 'registration.tipRadiusUncertaintyMm',
   tipDiameterMm: 'registration.tipDiameterMm',
   surfaceToleranceMm: 'registration.surfaceToleranceMm',
+  cutBlankAgreeMm: 'registration.cutBlankAgreeMm',
   surfaceTouchCount: 'registration.surfaceTouchCount',
   edgeMarginMm: 'registration.edgeMarginMm',
   surfaceSeekMm: 'registration.surfaceSeekMm',
@@ -143,6 +158,14 @@ export function settingsProblem(s: RegistrationSettings): string | null {
   if (s.parkAboveSurfaceMm < 2) return 'the park height must be at least 2 mm above the surface';
   // #1059 — a zero limit would refuse every face-angle turn; the bound is `defaults.rs`'s.
   if (!(s.faceAngleMaxDeg > 0)) return 'the face-angle limit must be above 0°';
+  // #1179 B — an agreement wider than the band would accept a reading the band already refuses,
+  // and a zero agreement could never pass two touches.
+  if (
+    s.cutBlankAgreeMm !== undefined &&
+    (!(s.cutBlankAgreeMm > 0) || s.cutBlankAgreeMm > s.surfaceToleranceMm)
+  ) {
+    return `the cut-blank agreement (${s.cutBlankAgreeMm} mm) must be above 0 and at most the surface tolerance (${s.surfaceToleranceMm} mm)`;
+  }
   if (s.surfaceToleranceMm >= s.parkAboveSurfaceMm - PARK_CLEARANCE_MM) {
     return `the surface tolerance (${s.surfaceToleranceMm} mm) must be less than the park height (${s.parkAboveSurfaceMm} mm) less ${PARK_CLEARANCE_MM}`;
   }

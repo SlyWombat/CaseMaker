@@ -330,6 +330,20 @@ export interface RegistrationPlan {
   /** #619 — the stock's thickness, mm, for the datum path's upper surface bound. */
   stockThicknessMm?: number;
   surfacePoint: { x: number; y: number };
+  /**
+   * #1179 B — TOUCH POINTS ON A BLANK THAT HAS BEEN CUT, work XY with the depth each point is
+   * expected to sit at below the stock top (0 = uncut). The executor touches three (up to five
+   * without an agreeing pair); a reading + its depth is the IMPLIED top, and two implied tops
+   * agreeing within `cutBlankAgreeMm` are the answer. Present only on a cut-blank plan; absent on
+   * a fresh blank, whose single-touch transcript is byte-identical.
+   */
+  surfaceChecks?: { x: number; y: number; depthMm: number }[];
+  /**
+   * #1179 B — the plan's check points were chosen OUTSIDE today's package footprint because no
+   * finished program of this package is recorded: the earlier plan's cuts are unknown, and the
+   * record says so (the points are assumed uncut, d = 0).
+   */
+  surfaceChecksUnknown?: true;
   /** The surface touch: from the machine's travel height (`seekFromMachineZ`), at most this far down; and the band a reading must land in. */
   seek: { fromMachineZ: number; travelMm: number; band: { min: number; max: number } };
   /** #598 — the measured mount datum the seek is a search from, or null on the legacy seat path. */

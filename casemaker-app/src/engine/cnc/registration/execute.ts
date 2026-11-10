@@ -99,7 +99,7 @@ import {
 } from './outcome';
 import type { FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
 import { referenceOutcome } from './references';
-import { settingsProblem, SURFACE_LIFT_MM, type RegistrationSettings } from './settings';
+import { CUT_BLANK_AGREE_FALLBACK_MM, settingsProblem, SURFACE_LIFT_MM, type RegistrationSettings } from './settings';
 
 export interface RegistrationConsole {
   send(line: string, timing?: Partial<ConsoleTiming>): Promise<ConsoleSendResult>;
@@ -847,6 +847,112 @@ function bracketTopWords(top: { machineZ: number; seat: number | null; thickness
   return top.seat !== null && top.thickness !== null
     ? `seat ${f(top.seat)} + stock ${f(top.thickness)} = ${f(top.machineZ)}`
     : `seat + stock thickness = ${f(top.machineZ)}`;
+}
+
+/**
+ * #1179 B — THE CUT BLANK'S TOP, PROVED (the maintainer's restated rule). Touch three spread
+ * candidates (two if only two exist); a reading + its point's depth is the IMPLIED top, and the top
+ * is the HIGHEST implied level on which at least two agree within `cutBlankAgreeMm`. A single high
+ * reading is not the top — touch on, up to five candidates; after five without a pair, stop naming
+ * every reading. A reading that finds nothing or reads below the band never agrees.
+ */
+async function proveCutBlankTop(
+  io: Session,
+  plan: RegistrationPlan,
+  s: RegistrationSettings,
+): Promise<{
+  prb: Prb;
+  at: { x: number; y: number };
+  readings: NonNullable<RunData['surfaceChecks']>;
+}> {
+  type CheckReading = NonNullable<RunData['surfaceChecks']>[number];
+  type Good = { reading: CheckReading; prb: Prb; implied: number };
+  const checks = plan.surfaceChecks ?? [];
+  // An old stored plan (approved before the key) has no agreement; the labelled fallback answers.
+  const agreeMm = s.cutBlankAgreeMm ?? CUT_BLANK_AGREE_FALLBACK_MM;
+  const first = Math.min(3, checks.length);
+  const readings: CheckReading[] = [];
+  const good: Good[] = [];
+  const pairOf = (): { a: Good; b: Good } | null => {
+    // The HIGHEST implied level with at least two readings within the agreement.
+    const sorted = [...good].sort((x, y) => y.implied - x.implied);
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = i + 1; j < sorted.length; j++) {
+        if (Math.abs(sorted[i]!.implied - sorted[j]!.implied) <= agreeMm + 1e-9) {
+          return { a: sorted[i]!, b: sorted[j]! };
+        }
+      }
+    }
+    return null;
+  };
+  for (let index = 0; index < checks.length && index < 5; index++) {
+    if (index >= first && pairOf() !== null) break;
+    const check = checks[index]!;
+    const missed: Partial<SurfaceMiss> = {};
+    const prb = await seekSurface(
+      io,
+      plan,
+      {
+        ...plan.seek.band,
+        at: `as low as machine Z ${f(plan.seek.band.min)} for the cut-blank check at (${f(check.x)}, ${f(check.y)})`,
+        expect: 'no wood was found at this check point on a blank that has been cut',
+      },
+      {
+        point: check,
+        ceilingMm: datumCeiling(plan),
+        missOk: true,
+        belowBandIsMiss: true,
+        onMiss: (m) => {
+          missed.how = m.how;
+          missed.z = m.z;
+        },
+      },
+    );
+    const implied = prb === null ? null : r3(prb.z + check.depthMm);
+    const reading: CheckReading = {
+      x: check.x,
+      y: check.y,
+      depthMm: check.depthMm,
+      machineZ: prb === null ? null : prb.z,
+      impliedMachineZ: implied,
+      missed: prb === null ? (missed.how ?? 'no-contact') : null,
+    };
+    readings.push(reading);
+    io.saw({
+      source: 'surface',
+      label: `cut-blank check ${readings.length} of ${Math.min(5, checks.length)} · depth ${f(check.depthMm)} mm`,
+      x: check.x,
+      y: check.y,
+      z: prb === null ? (missed.z ?? plan.seek.band.min) : prb.z,
+      touched: prb !== null,
+      kind: null,
+    });
+    if (prb !== null && implied !== null) good.push({ reading, prb, implied });
+  }
+  const pair = pairOf();
+  if (pair === null) {
+    const words = readings
+      .map((r, i) => {
+        const what =
+          r.missed === 'no-contact'
+            ? 'found nothing'
+            : r.missed === 'below-band'
+              ? `read machine Z ${f(r.machineZ ?? 0)}, below the band`
+              : `read machine Z ${f(r.machineZ ?? 0)} (implied top ${f(r.impliedMachineZ ?? 0)})`;
+        return `${i + 1}) ${what} at (${f(r.x)}, ${f(r.y)}) depth ${f(r.depthMm)}`;
+      })
+      .join('; ');
+    throw new Stop(
+      `the top on this cut blank could not be proved: ${words} — no two implied tops agree within ${f(agreeMm)} mm`,
+    );
+  }
+  const high = pair.a.implied >= pair.b.implied ? pair.a : pair.b;
+  const low = pair.a === high ? pair.b : pair.a;
+  io.at(
+    `the top is proved on a cut blank: implied machine Z ${f(high.implied)} at (${f(high.reading.x)}, ${f(high.reading.y)}) — ` +
+      `${f(Math.abs(high.implied - low.implied))} mm from the agreeing touch at (${f(low.reading.x)}, ${f(low.reading.y)})`,
+  );
+  return { prb: { ...high.prb, z: high.implied }, at: { x: high.reading.x, y: high.reading.y }, readings };
 }
 
 /**
@@ -1865,12 +1971,23 @@ export async function runRegistration(
     // #1166 — the DERIVED surface this run continues from (a chosen top, or the after-miss offer):
     // no probe touched it, and the record says which kind it is.
     let derived: { machineZ: number; source: 'bracket-top' | 'operator-entered' } | null = chosenTop;
+    // #1179 B — where the accepted reading was taken (a check point) and what every check read.
+    let surfaceAt: { x: number; y: number } | null = null;
+    let cutBlankChecks: NonNullable<RunData['surfaceChecks']> | undefined;
+    const checks = plan.surfaceChecks ?? [];
     let slow: Prb | null;
     if (chosenTop !== null) {
       // NOTHING TOUCHED THIS. The XY is where the seek WOULD have been sent — on the bracket every
       // move is G53 from its origin, so machine XY = the origin + the plan's surface point — and the
       // Z is the top the operator chose.
       slow = derivedSurfacePrb(plan, chosenTop.machineZ);
+    } else if (checks.length > 0) {
+      // #1179 B — a blank that has been cut: the top is MEASURED on uncut stock and proved by two
+      // agreeing touches, never taken from one reading and never asked for.
+      const proved = await proveCutBlankTop(io, plan, s);
+      slow = proved.prb;
+      surfaceAt = proved.at;
+      cutBlankChecks = proved.readings;
     } else {
       slow = await seekSurface(
         io,
@@ -1941,7 +2058,13 @@ export async function runRegistration(
     const seekBand = recovered === null ? plan.seek.band : { ...plan.seek.band, min: recovered.cap };
     // #519 item 1 — the surface touch, at the plan's own point. #1166 — a DERIVED top is not a
     // reading: no dot is drawn and no table row is claimed; the run narrates the derivation instead.
-    if (derived === null) {
+    if (derived !== null) {
+      io.at(
+        derived.source === 'operator-entered'
+          ? `the top is the operator’s ENTERED value, machine Z ${f(derived.machineZ)} — nothing touched it`
+          : `the surface is DERIVED: the bracket’s own top at machine Z ${f(derived.machineZ)} — nothing touched it`,
+      );
+    } else if (cutBlankChecks === undefined) {
       io.saw({
         source: 'surface',
         label: null,
@@ -1951,12 +2074,6 @@ export async function runRegistration(
         touched: slow.touched,
         kind: null,
       });
-    } else {
-      io.at(
-        derived.source === 'operator-entered'
-          ? `the top is the operator’s ENTERED value, machine Z ${f(derived.machineZ)} — nothing touched it`
-          : `the surface is DERIVED: the bracket’s own top at machine Z ${f(derived.machineZ)} — nothing touched it`,
-      );
     }
 
     // #619 — a datum-path surface ABOVE the expected band is the blank standing prouder than the
@@ -1982,7 +2099,10 @@ export async function runRegistration(
     // keeps the Z-only scan on its free edges too: `sideTouchSetup` cannot place the ball above
     // the ledge without the datum, and the plan says so ("no measured jaw top for a sideways
     // touch").
-    const g54 = { x: r3(slow.x - plan.surfacePoint.x), y: r3(slow.y - plan.surfacePoint.y) };
+    const g54 = {
+      x: r3(slow.x - (surfaceAt?.x ?? plan.surfacePoint.x)),
+      y: r3(slow.y - (surfaceAt?.y ?? plan.surfacePoint.y)),
+    };
     for (const scan of plan.scans) {
       // #1143 — ONE RULE: `sideTouchSelected` is the dispatch, and the run plan's touch estimate
       // counts on the same predicate, so the estimate cannot drift from what the machine does.
@@ -1998,6 +2118,8 @@ export async function runRegistration(
       surface: slow,
       scans,
       ...(derived === null ? {} : { surfaceDerived: derived.source }),
+      ...(surfaceAt === null ? {} : { surfaceAt }),
+      ...(cutBlankChecks === undefined ? {} : { surfaceChecks: cutBlankChecks }),
     };
     // A plan that registers on earlier-setup features has its own outcome (#429); #430's is unchanged.
     const outcome = plan.references ? referenceOutcome(plan, data) : computeOutcome(plan, data);
@@ -2012,6 +2134,31 @@ export async function runRegistration(
       outcome.notes.push(
         'the surface spread was not measured this run: the top the plan expected has been cut away, and the bracket’s own top is the DERIVED surface',
       );
+    }
+    // #1179 B — the record states the proof: every check, its tier, and the pair the top came from.
+    if (cutBlankChecks !== undefined) {
+      const read = cutBlankChecks
+        .map((r, i) => {
+          const what =
+            r.missed === 'no-contact'
+              ? 'found nothing'
+              : r.missed === 'below-band'
+                ? `read machine Z ${f(r.machineZ ?? 0)}, below the band`
+                : `read machine Z ${f(r.machineZ ?? 0)} (implied top ${f(r.impliedMachineZ ?? 0)})`;
+          return `${i + 1}) ${what} at (${f(r.x)}, ${f(r.y)}) depth ${f(r.depthMm)}`;
+        })
+        .join('; ');
+      outcome.notes.push(
+        `the top was measured on a cut blank: ${read}; the accepted implied top is machine Z ${f(slow.z)}` +
+          (plan.surfaceChecksUnknown === true
+            ? ' — the earlier plan’s cuts are not recorded, so the check points are outside today’s footprint and assumed uncut'
+            : ''),
+      );
+      if (spreadPlan !== undefined) {
+        outcome.notes.push(
+          'the surface spread was not measured this run: this blank has been cut, so the top was proved by the agreeing touches on uncut stock',
+        );
+      }
     }
 
     // #475 — the cut extents, AFTER the scans (#591): the plan's touch points are where the cut's
@@ -2028,7 +2175,7 @@ export async function runRegistration(
     const spreadReadings: SurfaceReading[] = [];
     // #1166 — no extent seeks after a DERIVED top (see the note above): the points are where the
     // earlier programs cut, and a derived Z is not a spread measurement.
-    if (spreadPlan !== undefined && derived === null) {
+    if (spreadPlan !== undefined && derived === null && cutBlankChecks === undefined) {
       const lowApproach = plan.mountObstacles.length === 0;
       // #632 — the approach clears the MEASURED surface, not only the plan's high bound. A blank
       // standing prouder than the record expects (a stale `surfaceTopZ` written by a thinner blank,
@@ -2101,7 +2248,7 @@ export async function runRegistration(
     // tilt that fits a plane is followed by the re-posted program; a dome (residual wider than the
     // band) no longer refuses — the origin is still written and the machine levels the top itself.
     let spread: SurfaceSpreadAssessment | undefined;
-    if (spreadPlan !== undefined && derived === null) {
+    if (spreadPlan !== undefined && derived === null && cutBlankChecks === undefined) {
       spread = assessSurfaceReadings(spreadPlan, spreadReadings);
       outcome.surfaceZ = spread.z0.z;
     }

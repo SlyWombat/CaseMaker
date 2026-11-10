@@ -1,146 +1,154 @@
-// #1179 slice B — TOUCH POINTS ON A BLANK THAT HAS BEEN CUT.
+// #1179 slice B — TOUCH POINTS ON A BLANK THAT HAS BEEN CUT (the maintainer's restated rule).
 //
-// The restart's registration must find the top on wood no program cut. These are the pure pieces:
-// the cut footprint of a frozen package (the NC text, grown by each program's cutter radius + 1 mm),
-// the part's placed silhouette (grown by the largest owned diameter + 1 mm), and the tiered choice
-// the analyst ruled: tier 1 = outside both, tier 2 = outside the package's cut only; both touches
-// from tier 1 when it has two points >= 20 mm apart, otherwise one from each, tier 2 alone only
-// when tier 1 is empty.
+// No assumption of material outside a waste band: candidates are points whose DEPTH IS KNOWN — the
+// uncut top (d = 0) or a flat floor whose depth the FINISHED programs' moves give (deepest cutting
+// move within the cutter radius; flat when every move within cutter radius + tip + 1 mm is at that
+// depth ± 0.02). A reading + d is the implied top. With no finished program of the package
+// recorded, the set is "outside today's footprint", d = 0, and the caller says the earlier cuts are
+// unknown.
 import { describe, expect, it } from 'vitest';
 import {
   CUT_BLANK_EDGE_MARGIN_MM,
-  CUT_BLANK_MIN_SEPARATION_MM,
+  CUT_BLANK_MAX_POINTS,
+  cutBlankCandidates,
   cutFootprintMask,
-  surfaceCandidates,
+  depthRaster,
+  flatFloorMask,
   stockRaster,
 } from '@/engine/cnc/registration/cutBlank';
 
 const STOCK = { xMin: 0, yMin: 0, xMax: 100, yMax: 60 };
+const RASTER = stockRaster(STOCK);
+const TIP_R = 0.7;
 
-/** A square cut 10..30 mm in X and Y, at Z -1, at feed 300 — a cutting footprint for the mask. */
-const SQUARE_NC = [
-  'G90',
-  'G0 Z5',
-  'G0 X10 Y10',
-  'G1 Z-1 F100',
-  'G1 X30 Y10 F300',
-  'G1 X30 Y30',
-  'G1 X10 Y30',
-  'G1 X10 Y10',
-  'G0 Z5',
-].join('\n');
+/** A serpentine fill: parallel G1 lines across x from y0 to y1 at `step`, at Z −depth. */
+function fillNc(x0: number, x1: number, y0: number, y1: number, step: number, depth: number): string {
+  const lines = ['G90', 'G0 Z5', `G0 X${x0} Y${y0}`, `G1 Z${-depth} F100`];
+  let y = y0;
+  for (let i = 0; y <= y1 + 1e-9; i++, y += step) {
+    lines.push(`G1 X${i % 2 === 0 ? x1 : x0} Y${y} F300`);
+  }
+  lines.push('G0 Z5');
+  return lines.join('\n');
+}
 
-describe('#1179 the cut footprint of a package', () => {
-  it('marks the cut square grown by the program’s cutter radius + 1 mm', () => {
-    const raster = stockRaster(STOCK);
-    const cut = cutFootprintMask(raster, [{ nc: SQUARE_NC, growMm: 1.5 + 1 }], 10);
-    const at = (x: number, y: number): number => {
-      const i = Math.floor((x - STOCK.xMin) / raster.pitchMm);
-      const j = Math.floor((y - STOCK.yMin) / raster.pitchMm);
-      return cut[j * raster.nx + i]!;
-    };
-    // The square is a CONTOUR: its wall is cut, grown by 2.5 — 32.5 is cut, 34 is not.
-    expect(at(20, 10)).toBe(1);
-    expect(at(32.5, 20)).toBe(1);
-    expect(at(34, 20)).toBe(0);
-    // Inside a contour-only path, far from any cutting move, is NOT a cut footprint (a real
-    // pocket's passes would fill it); a point well outside is free too.
-    expect(at(20, 20)).toBe(0);
-    expect(at(80, 50)).toBe(0);
+const at = (raster: typeof RASTER, x: number, y: number): number =>
+  Math.floor((y - STOCK.yMin) / raster.pitchMm) * raster.nx + Math.floor((x - STOCK.xMin) / raster.pitchMm);
+
+describe('#1179 the depth of a finished program’s floor', () => {
+  it('gives the deepest cutting move within the cutter radius, and 0 where nothing cut', () => {
+    const program = { nc: fillNc(20, 80, 30, 30, 10, 2), cutterRadiusMm: 2, finished: true };
+    const depth = depthRaster(RASTER, [program], 2);
+    expect(depth[at(RASTER, 50, 30)]).toBeCloseTo(2, 6);
+    // One radius and a hair away from the line: still the floor; well away: untouched.
+    expect(depth[at(RASTER, 50, 31)]).toBeCloseTo(2, 6);
+    expect(depth[at(RASTER, 50, 20)]).toBe(0);
   });
 
-  it('uses the fallback growth when a program’s cutter is unknown', () => {
-    const raster = stockRaster(STOCK);
-    const at = (x: number, y: number): number =>
-      cut[jIndex(y) * raster.nx + Math.floor((x - STOCK.xMin) / raster.pitchMm)]!;
-    const cut = cutFootprintMask(raster, [{ nc: SQUARE_NC, growMm: Number.NaN }], 12);
-    const jIndex = (y: number): number => Math.floor((y - STOCK.yMin) / raster.pitchMm);
-    // 11 mm above the square's top edge: cut at the 12 mm fallback, free beyond it.
-    expect(at(20, 41)).toBe(1);
-    expect(at(20, 44)).toBe(0);
+  it('marks a floor flat only where every nearby cutting move is at that depth', () => {
+    // Two lines within one cutter radius of each other at different depths: the neighbourhood sees
+    // both depths, so it is not a flat floor.
+    const uneven = {
+      nc: fillNc(20, 80, 20, 20, 10, 2) + '\n' + fillNc(20, 80, 22, 22, 10, 3),
+      cutterRadiusMm: 2,
+      finished: true,
+    };
+    const depthUneven = depthRaster(RASTER, [uneven], 2);
+    const flatUneven = flatFloorMask(RASTER, [uneven], 2, TIP_R, depthUneven);
+    expect(flatUneven[at(RASTER, 50, 20)]).toBe(0);
+    // One uniform fill is flat across its floor.
+    const even = { nc: fillNc(20, 80, 20, 40, 1, 2), cutterRadiusMm: 2, finished: true };
+    const depthEven = depthRaster(RASTER, [even], 2);
+    const flatEven = flatFloorMask(RASTER, [even], 2, TIP_R, depthEven);
+    expect(flatEven[at(RASTER, 50, 30)]).toBe(1);
+    expect(depthEven[at(RASTER, 50, 30)]).toBeCloseTo(2, 6);
+  });
+
+  it('a finished program’s floor is known; an unfinished one’s is not', () => {
+    const program = { nc: fillNc(20, 80, 20, 40, 1, 2), cutterRadiusMm: 2, finished: false };
+    const depth = depthRaster(RASTER, [program], 2);
+    expect(depth[at(RASTER, 50, 30)]).toBe(0);
   });
 });
 
-describe('#1179 tiered touch points', () => {
-  const raster = stockRaster(STOCK);
-  const noCut = new Uint8Array(raster.nx * raster.ny);
-  const noPart = new Uint8Array(raster.nx * raster.ny);
-  const everyCell = (): Uint8Array => new Uint8Array(raster.nx * raster.ny).fill(1);
-  /** A mask with the rectangle (x0,y0)-(x1,y1) marked. */
-  const box = (x0: number, y0: number, x1: number, y1: number): Uint8Array => {
-    const mask = new Uint8Array(raster.nx * raster.ny);
-    for (let j = 0; j < raster.ny; j++) {
-      const y = STOCK.yMin + (j + 0.5) * raster.pitchMm;
-      for (let i = 0; i < raster.nx; i++) {
-        const x = STOCK.xMin + (i + 0.5) * raster.pitchMm;
-        if (x >= x0 && x <= x1 && y >= y0 && y <= y1) mask[j * raster.nx + i] = 1;
+describe('#1179 candidate points on a cut blank', () => {
+  it('with finished programs: the uncut top first, then flat floors (depth carried)', () => {
+    // A finished fill across the middle; the top remains at both ends.
+    const program = { nc: fillNc(20, 80, 10, 50, 1, 2), cutterRadiusMm: 2, finished: true };
+    const known = cutBlankCandidates({ raster: RASTER, programs: [program], tipRadiusMm: TIP_R, fallbackRadiusMm: 2, obstacles: [] });
+    expect(known.earlierCutsKnown).toBe(true);
+    expect(known.points.length).toBeGreaterThanOrEqual(2);
+    // Every top point is outside the filled RECTANGLE grown by the cutter radius; floors carry 2 mm.
+    for (const p of known.points) {
+      if (p.depthMm === 0) {
+        const insideFilled = p.x > 20 - 2 && p.x < 80 + 2 && p.y > 10 - 2 && p.y < 50 + 2;
+        expect(insideFilled).toBe(false);
+      } else {
+        expect(p.depthMm).toBeCloseTo(2, 6);
       }
     }
-    return mask;
-  };
-
-  it('takes both touches from tier 1 when it has two points >= 20 mm apart', () => {
-    // The part occupies the middle; the cut square sits inside it. The ring is tier 1.
-    const part = box(35, 15, 65, 45);
-    const cut = box(10, 10, 30, 30);
-    const points = surfaceCandidates({ raster, cut, part, obstacles: [] });
-    expect(points.length).toBeGreaterThanOrEqual(2);
-    expect(points[0]!.tier).toBe(1);
-    expect(points[1]!.tier).toBe(1);
-    const apart = Math.hypot(points[0]!.x - points[1]!.x, points[0]!.y - points[1]!.y);
-    expect(apart).toBeGreaterThanOrEqual(CUT_BLANK_MIN_SEPARATION_MM);
-    // Neither is inside the cut square nor the part.
-    for (const p of points.slice(0, 2)) {
-      expect(p.x < 10 || p.x > 30 || p.y < 10 || p.y > 30).toBe(true);
-      expect(p.x >= 35 && p.x <= 65 && p.y >= 15 && p.y <= 45).toBe(false);
-    }
+    expect(known.points[0]!.depthMm).toBe(0);
   });
 
-  it('falls to one from each tier when tier 1 cannot give two far points', () => {
-    // The part covers all but a 10 × 10 island: tier 1 has cells, but no pair 20 mm apart.
-    const part = everyCell();
-    for (let j = 0; j < raster.ny; j++) {
-      const y = STOCK.yMin + (j + 0.5) * raster.pitchMm;
-      for (let i = 0; i < raster.nx; i++) {
-        const x = STOCK.xMin + (i + 0.5) * raster.pitchMm;
-        if (x >= 15 && x <= 25 && y >= 15 && y <= 25) part[j * raster.nx + i] = 0;
-      }
-    }
-    const cut = box(60, 20, 80, 40);
-    const points = surfaceCandidates({ raster, cut, part, obstacles: [] });
-    expect(points[0]!.tier).toBe(1);
-    expect(points[1]!.tier).toBe(2);
-  });
-
-  it('uses tier 2 alone when tier 1 is empty', () => {
-    const part = everyCell();
-    const cut = box(0, 40, 100, 60);
-    const points = surfaceCandidates({ raster, cut, part, obstacles: [] });
-    expect(points.length).toBeGreaterThanOrEqual(2);
-    expect(points[0]!.tier).toBe(2);
-    expect(points[1]!.tier).toBe(2);
-    for (const p of points.slice(0, 2)) expect(p.y).toBeLessThan(40);
-  });
-
-  it('keeps the 3 mm edge margin and the mount obstacles clear', () => {
-    const points = surfaceCandidates({
-      raster,
-      cut: noCut,
-      part: noPart,
-      obstacles: [{ min: [40, 20], max: [60, 40] }],
+  it('with nothing recorded: outside today’s footprint, d = 0, and earlier cuts unknown', () => {
+    const program = { nc: fillNc(30, 70, 10, 50, 1, 2), cutterRadiusMm: 2, finished: false };
+    const unknown = cutBlankCandidates({
+      raster: RASTER,
+      programs: [program],
+      tipRadiusMm: TIP_R,
+      fallbackRadiusMm: 2,
+      obstacles: [],
     });
+    expect(unknown.earlierCutsKnown).toBe(false);
+    expect(unknown.points.length).toBeGreaterThanOrEqual(2);
+    for (const p of unknown.points) {
+      expect(p.depthMm).toBe(0);
+      // Outside the filled band grown by the cutter radius + 1.
+      const insideBand = p.x > 30 - 3 && p.x < 70 + 3 && p.y > 10 - 3 && p.y < 50 + 3;
+      expect(insideBand).toBe(false);
+    }
+  });
+
+  it('keeps the 3 mm edge margin and the mount obstacles clear, and spreads the points', () => {
+    const points = cutBlankCandidates({
+      raster: RASTER,
+      programs: [],
+      tipRadiusMm: TIP_R,
+      fallbackRadiusMm: 2,
+      obstacles: [{ min: [40, 20], max: [60, 40] }],
+    }).points;
+    expect(points.length).toBeGreaterThanOrEqual(2);
     for (const p of points) {
       expect(p.x).toBeGreaterThanOrEqual(STOCK.xMin + CUT_BLANK_EDGE_MARGIN_MM);
       expect(p.x).toBeLessThanOrEqual(STOCK.xMax - CUT_BLANK_EDGE_MARGIN_MM);
       expect(p.y).toBeGreaterThanOrEqual(STOCK.yMin + CUT_BLANK_EDGE_MARGIN_MM);
       expect(p.y).toBeLessThanOrEqual(STOCK.yMax - CUT_BLANK_EDGE_MARGIN_MM);
-      const inObstacle = p.x >= 40 && p.x <= 60 && p.y >= 20 && p.y <= 40;
-      expect(inObstacle).toBe(false);
+      expect(p.x >= 40 && p.x <= 60 && p.y >= 20 && p.y <= 40).toBe(false);
     }
+    // The spread: no two points share a cell, and the list is capped.
+    const keys = new Set(points.map((p) => `${p.x},${p.y}`));
+    expect(keys.size).toBe(points.length);
+    expect(points.length).toBeLessThanOrEqual(CUT_BLANK_MAX_POINTS);
   });
 
-  it('offers no candidate at all when the package cuts the whole top', () => {
-    const points = surfaceCandidates({ raster, cut: everyCell(), part: everyCell(), obstacles: [] });
+  it('offers no candidate when the mount’s obstacles leave nothing', () => {
+    const points = cutBlankCandidates({
+      raster: RASTER,
+      programs: [],
+      tipRadiusMm: TIP_R,
+      fallbackRadiusMm: 2,
+      obstacles: [{ min: [0, 0], max: [100, 60] }],
+    }).points;
     expect(points).toEqual([]);
+  });
+});
+
+describe('#1179 the unknown-cuts footprint', () => {
+  it('grows each program by its cutter radius + 1', () => {
+    const program = { nc: fillNc(20, 80, 30, 30, 10, 2), cutterRadiusMm: 2, finished: false };
+    const mask = cutFootprintMask(RASTER, [program], 2);
+    expect(mask[at(RASTER, 50, 30)]).toBe(1);
+    expect(mask[at(RASTER, 50, 32.5)]).toBe(1);
+    expect(mask[at(RASTER, 50, 40)]).toBe(0);
   });
 });

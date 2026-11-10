@@ -136,6 +136,12 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'registration.tipRadiusUncertaintyMm': { label: 'probe rim offset spread (measured)', unit: 'mm', rule: z.number().min(0).max(2), fallback: 0.25 },
   'registration.tipDiameterMm': { label: 'probe tip diameter (measured)', unit: 'mm', rule: z.number().min(0.2).max(10), fallback: 2.0 },
   'registration.surfaceToleranceMm': { label: 'surface tolerance', unit: 'mm', rule: z.number().min(0.05).max(10), fallback: 0.4 },
+  // #1179 B — two touches on a blank that has been cut must agree to this; 0.1 is the analyst's
+  // ruling (a cut floor, an old hole or a chip cannot agree with the real top to 0.1 mm).
+  'registration.cutBlankAgreeMm': { label: 'agreement between two touches on a cut blank', unit: 'mm', rule: z.number().min(0.01).max(1), fallback: 0.1 },
+  // #1179 D — a measured top may imply a thickness up to this far from the job's before the
+  // Register step says so; 0.1 mm matches the touch-agreement rule beside it.
+  'registration.thicknessNoteMm': { label: 'thickness difference the Register note states', unit: 'mm', rule: z.number().min(0.01).max(2), fallback: 0.1 },
   // #475 — the surface touches at the cut regions' extents. Five is the floor (a centre plus both
   // extents on each axis); the seed is the issue's own 5. The labelled fallback IS the seed.
   'registration.surfaceTouchCount': { label: 'surface touches across the cut', unit: 'touches', rule: z.number().int().min(5).max(9), fallback: 5 },
@@ -668,6 +674,11 @@ export const ShopDefaultsSchema = z.record(z.string(), ShopDefaultSchema).superR
   const park = map['registration.parkAboveSurfaceMm']?.value;
   if (typeof tol === 'number' && typeof park === 'number' && tol >= park - PARK_CLEARANCE_MM) {
     ctx.addIssue({ code: 'custom', message: `registration.surfaceToleranceMm (${tol}) must be less than registration.parkAboveSurfaceMm (${park}) less ${PARK_CLEARANCE_MM}` });
+  }
+  // #1179 B — the agreement can never be wider than the band the readings are held to.
+  const agree = map['registration.cutBlankAgreeMm']?.value;
+  if (typeof agree === 'number' && typeof tol === 'number' && agree > tol) {
+    ctx.addIssue({ code: 'custom', message: `registration.cutBlankAgreeMm (${agree}) must be at most registration.surfaceToleranceMm (${tol})` });
   }
   for (const [key, d] of Object.entries(map)) {
     if (!DEFAULT_KEY.test(key)) {
