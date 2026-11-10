@@ -6,9 +6,16 @@
 
 import type { OperationChoice } from './OperationStep';
 
+export interface CreateGateContext {
+  /** A re-entry's primary is Done: an existing job may finish with nothing new to add. */
+  reEntry?: boolean;
+}
+
 /** The button's disabled state, in the one place both the shell and its spec read it. */
-export function operationCreateBlocked(choice: OperationChoice | null): string | null {
-  if (choice === null) return null;
+export function operationCreateBlocked(choice: OperationChoice | null, ctx: CreateGateContext = {}): string | null {
+  // #1107 — a NEW run with nothing picked cannot create the empty job (the dowel starter's old
+  // trap): the operator picks what to make first. A re-entry keeps its Done.
+  if (choice === null) return ctx.reEntry === true ? null : 'Pick what to make first.';
   if (choice.type === 'engrave') {
     if (choice.text.trim() === '') return 'Type the text to engrave.';
     if (!Number.isFinite(choice.depth) || choice.depth <= 0) return 'Depth must be above 0 mm.';

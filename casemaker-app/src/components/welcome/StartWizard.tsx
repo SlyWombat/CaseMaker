@@ -49,6 +49,8 @@ import { MachineStep } from './MachineStep';
 import { StockStep } from './StockStep';
 import { HoldingStep } from './HoldingStep';
 import { currentMount, facingForSeat, machineNow, mechanismOf, rodViseProblem } from './holdingMounts';
+import { accessoryFor } from '@/platform/machineChange';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { OperationStep, type OperationChoice } from './OperationStep';
 import { operationCreateBlocked } from './operationCreate';
 import type { PendingStock, StartStockSeed } from './StartStockStep';
@@ -350,6 +352,15 @@ export function StartWizard(): JSX.Element {
     const now = machineNow(machineForJob(location, job.machineId));
     return now === null || now.mount === 'vise';
   }, [location, job.machineId]);
+  // #1107 — the ROTARY facts the question step offers its rod intents from: whether the house
+  // owns one (the location's accessories) and whether it is on the pins (the machine's state).
+  const rotaryFacts = useMemo(() => {
+    const now = machineNow(machineForJob(location, job.machineId));
+    return {
+      owned: accessoryFor(location?.accessories ?? [], 'rotary') !== null,
+      onPins: now?.mount === 'rotary',
+    };
+  }, [location, job.machineId]);
   // The material the proposal's blank opens on: the house's, the job's own, or the board's.
   const proposalMaterial = useMemo(
     () => (proposal === null ? null : proposedMaterialFor(proposal, job)),
@@ -414,7 +425,18 @@ export function StartWizard(): JSX.Element {
       }
       clearStockEntry();
       noteJobStarted();
-      enterHolding();
+      // #1107 — the starter ASKS ITS QUESTION: step 2 with the dowel intent selected and the text
+      // field waiting. Create with nothing typed is refused, so the empty job is impossible; the
+      // rod stock and chuck are already seeded, so Stock and Holding pass straight through.
+      setOperationChoice({
+        type: 'engrave',
+        text: '',
+        depth: newItemDepthFor(useEngraveJobStore.getState().job),
+        font: DEFAULT_FONT_ID,
+        reads: 'along',
+        frame: 'rotary',
+      });
+      setStep('operation');
       if (project !== null) await scheduleImmediate(project);
       return;
     }
@@ -482,6 +504,13 @@ export function StartWizard(): JSX.Element {
 
   /** Holding is always seeded from the job as it now stands, so Back and forth cannot go stale. */
   function enterHolding(): void {
+    // #1107 — a ROD answer pre-selects the chuck: the frame the question chose is the hold the
+    // job needs, and the operator sees it already selected (the chuck must be the house's).
+    const store = useEngraveJobStore.getState();
+    if (operationChoice !== null && 'frame' in operationChoice && operationChoice.frame === 'rotary' && rotaryMapOf(store.job) === null) {
+      const grip = readDefault(liveShopDefaults(), 'rotary.gripMm').value;
+      store.setRotaryHolding(defaultRotaryChuck(store.job, grip), jobVise(store.job));
+    }
     setAnswers(defaultSetupAnswers(useEngraveJobStore.getState().job));
     setMountBlocked(null);
     setStep('holding');
@@ -1060,6 +1089,7 @@ export function StartWizard(): JSX.Element {
           hasOperations={hasOperations}
           fresh={!jobStarted}
           initial={operationChoice}
+          rotaryFacts={rotaryFacts}
           onChoiceChange={onOperationChoice}
         />
       )}
@@ -1068,6 +1098,12 @@ export function StartWizard(): JSX.Element {
 
   const stockUnblock =
     step === 'stock' && pending === null && confirmReplace === null && startError === null && !starting;
+  // #1107 — the question's only footer sentence: a NEW run with nothing picked. (A picked but
+  // incomplete answer draws its sentence inside its own field, as before.)
+  const operationUnblock =
+    step === 'operation' && operationChoice === null
+      ? operationCreateBlocked(null, { reEntry: jobStarted })
+      : null;
 
   // #713 review — a rod longer than the vise's grip has no vise mount, so the wizard must not let
   // the job LEAVE Holding held in one: while the answers are in a vise seat and the stock is a rod
@@ -1169,6 +1205,11 @@ export function StartWizard(): JSX.Element {
             `<select>`'s popup paints over what is under it, so the buttons get clearance. #870 — the
             step-wide sentence sits directly above them, pinned with the footer. */}
         <div className="sw-foot" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+          {operationUnblock !== null && (
+            <p style={UNBLOCK} data-testid="start-wizard-operation-unblock">
+              {operationUnblock}
+            </p>
+          )}
           {stockUnblock && (
             <p style={ARRIVAL} data-testid="start-wizard-stock-unblock">
               Choose the stock: a size you type, a piece on the shelf, or a file.
@@ -1232,7 +1273,8 @@ export function StartWizard(): JSX.Element {
                 disabled={
                   holdingBlock !== null ||
                   mountBlocked !== null ||
-                  operationCreateBlocked(operationChoice) !== null
+                  // #1107 — a NEW run must have picked something; a re-entry's Done is unchanged.
+                  operationCreateBlocked(operationChoice, { reEntry }) !== null
                 }
                 onClick={next}
               >
@@ -1249,7 +1291,10 @@ export function StartWizard(): JSX.Element {
                 type="button"
                 className="sw-btn sw-btn--primary"
                 data-testid="start-wizard-operation-next"
-                disabled={operationChoice !== null && operationCreateBlocked(operationChoice) !== null}
+                // #1107 — nothing picked on a NEW run is refused (the dowel starter's old trap);
+                // a re-entry's Done finishes without adding an item. #1123's empty job remains for
+                // the re-entry door only.
+                disabled={operationCreateBlocked(operationChoice, { reEntry: jobStarted }) !== null}
                 onClick={next}
               >
                 {operationChoice === null
