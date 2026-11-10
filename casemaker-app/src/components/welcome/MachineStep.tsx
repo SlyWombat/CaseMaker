@@ -271,9 +271,10 @@ export function MachineStep({
             </span>
             <button
               type="button"
+              className="sw-btn"
               data-testid="start-wizard-check"
               disabled={busy}
-              style={{ marginLeft: 'auto', padding: '3px 12px' }}
+              style={{ marginLeft: 'auto' }}
               onClick={() => requestCheck()}
             >
               {busy ? 'Looking…' : 'Check again'}
@@ -309,10 +310,12 @@ export function MachineStep({
           )}
 
           {/* THE ONE FOLD. The address and Connect are not a second way to ask the question; they
-              are the manual route for a machine the search cannot hear. */}
+              are the manual route for a machine the search cannot hear. A fold toggle is not an
+              action: `data-fold` keeps it out of the component-set gate. */}
           <button
             type="button"
             data-testid="start-wizard-machine-another"
+            data-fold="true"
             aria-expanded={another}
             style={FOLD}
             onClick={() => setAnother((open) => !open)}
@@ -335,7 +338,6 @@ export function MachineStep({
                     spellCheck={false}
                     data-testid="start-wizard-address"
                     aria-label="Machine address"
-                    title="For a machine the search cannot hear."
                     style={{ width: 120 }}
                     value={address}
                     onChange={(e) => onAddress(e.target.value)}
@@ -343,6 +345,7 @@ export function MachineStep({
                 </label>
                 <button
                   type="button"
+                  className="sw-btn"
                   data-testid="start-wizard-connect-address"
                   disabled={busy || address.trim().length === 0}
                   onClick={() => requestCheck(address.trim())}
