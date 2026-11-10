@@ -36,6 +36,7 @@
 import { consoleProblem } from '@/engine/cnc/consoleGate';
 import { loadMachineBridge } from './capabilities';
 import { liveShopDefaults, machineTiming, readDefault, type ShopDefaults } from './defaultsClient';
+import { acquireStatusPoll } from './machineStatusPoller';
 
 /** Where to reach the machine. Always both: an observation carries the port it was reached on. */
 export interface MachineConsoleTarget {
@@ -244,12 +245,30 @@ function reasonOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** #1188 — a unique poller consumer per console handle, so one console's release cannot free another's. */
+let consoleHoldSeq = 0;
+
 /**
  * A console for one machine. Never throws and never opens a socket by itself: the returned handle
  * connects on its first allowed line.
  */
 export function attachConsole(target: MachineConsoleTarget): ConsoleHandle {
   let session: MachineConsoleSession | null = null;
+  /**
+   * #1188 — ONE COMMAND SESSION AT A TIME. The shared #1173 status poller opens its own session
+   * every 2 s; while a console session is open (a Register probe, Home, a typed line), a tick would
+   * put a SECOND connection on the controller's one command channel. The bench's first Register
+   * reset is the failure that overlap invites, and the old build had it too. The console takes the
+   * run's kind of hold — `pollsItself`, because the console's own lines include `?` — for the
+   * session's lifetime, and releases it when the session closes or is dropped. A unique consumer
+   * per handle means two consoles never release each other's hold.
+   */
+  let releasePoll: (() => void) | null = null;
+  const releaseStatusPoll = (): void => {
+    const release = releasePoll;
+    releasePoll = null;
+    release?.();
+  };
 
   /** The session, opening one if the first allowed line has just arrived. */
   async function sessionFor(line: string): Promise<SessionOpen> {
@@ -263,6 +282,8 @@ export function attachConsole(target: MachineConsoleTarget): ConsoleHandle {
     }
     try {
       session = await client.open(target, currentConsoleTiming());
+      // The socket is open: yield the shared poller for as long as this command session lasts.
+      releasePoll = acquireStatusPoll(target, `console-${++consoleHoldSeq}`, { pollsItself: true });
       return { ok: true, session };
     } catch (e) {
       return {
@@ -304,6 +325,8 @@ export function attachConsole(target: MachineConsoleTarget): ConsoleHandle {
         } catch {
           // A socket that failed its read is dead; closing it must not mask the error above.
         }
+        // #1188 — the command session is over: hand the poller back only after the close.
+        releaseStatusPoll();
         return { kind: 'error', line, detail: reasonOf(e) };
       }
       // Output that arrived with no line in flight is passed along as its own field, never folded
@@ -339,6 +362,8 @@ export function attachConsole(target: MachineConsoleTarget): ConsoleHandle {
           // Closing an already-dead socket is not a failure worth surfacing.
         }
       }
+      // #1188 — the poll resumes only once the command session is actually closed.
+      releaseStatusPoll();
     },
   };
 }
