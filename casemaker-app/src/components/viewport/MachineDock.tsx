@@ -98,7 +98,14 @@ export function MachineDock(): JSX.Element | null {
   const anyRunRunning = useMachineRunStore((s) => Object.values(s.runs).some((r) => r.running));
   const releaseLive = useEngraveReleaseStore((s) =>
     Object.values(s.records).some(
-      (r) => r.phase === 'running' || r.phase === 'starting' || r.phase === 'retouch' || r.phase === 'closing',
+      (r) =>
+        r.phase === 'running' ||
+        r.phase === 'starting' ||
+        r.phase === 'retouch' ||
+        r.phase === 'closing' ||
+        // #1146 — a walk file is playing: the machine is being worked just the same.
+        r.phase === 'airwalk' ||
+        r.phase === 'cleaning',
     ),
   );
   // #519 items 1 and 3 — the live readings and whether a registration owns the machine.

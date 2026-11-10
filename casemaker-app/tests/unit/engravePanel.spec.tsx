@@ -14,6 +14,8 @@ import { setEngraveRunClientLoader, useEngraveRunStore } from '@/store/engraveRu
 import { useMachineStore } from '@/store/machineStore';
 import { useSimStore } from '@/store/simStore';
 import { resetEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { resetShopDefaultsStore, useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { resetEngravePackageStore } from '@/store/engravePackageStore';
 import { resetCncMode, useCncModeStore } from '@/store/cncModeStore';
 import { expandEngraveRow, resetEngraveRows } from '@/store/engraveRowStore';
@@ -94,7 +96,20 @@ const expand = (prefix: string, index = 0): void => {
   fireEvent.click(screen.getByTestId(`${prefix}-expand-${index}`));
 };
 
+
+/**
+ * #1146 — the cleaning pass and the air walk are ON by default. These UI suites are about the
+ * release flow's program behaviour, so their shop has both OFF; `cleanWalk1146Release.spec` holds
+ * the ON behaviour.
+ */
+const WALKS_OFF = ShopDefaultsSchema.parse({
+  'run.cleanAfterProgram': { value: false, source: 'chosen', setAt: '2026-11-10T00:00:00.000Z', unit: null, note: null },
+  'run.airWalkBeforeCut': { value: false, source: 'chosen', setAt: '2026-11-10T00:00:00.000Z', unit: null, note: null },
+});
+
 beforeEach(() => {
+  resetShopDefaultsStore();
+  useShopDefaultsStore.setState({ status: 'present', defaults: WALKS_OFF });
   setEngravePreviewClientLoader(async () => NO_PREVIEW);
   useSettingsStore.getState().resetSettings();
   // #411 — the fold is module-level session state, so a spec that expanded a row would otherwise
@@ -113,6 +128,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  resetShopDefaultsStore();
   useEngravePreviewStore.getState().dispose();
   setEngravePreviewClientLoader(null);
 });

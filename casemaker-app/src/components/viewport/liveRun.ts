@@ -27,8 +27,11 @@ export function sceneFor(simActive: boolean, engraveActive: boolean, live: boole
   return engraveActive ? 'engrave' : 'case';
 }
 
-/** The release phases in which the machine is being worked (a program is uploading/starting/running). */
-export const LIVE_RELEASE_PHASES: readonly ReleasePhase[] = ['uploading', 'starting', 'running'];
+/**
+ * The release phases in which the machine is being worked (a program is uploading/starting/running,
+ * or a #1146 walk file is playing).
+ */
+export const LIVE_RELEASE_PHASES: readonly ReleasePhase[] = ['uploading', 'starting', 'running', 'airwalk', 'cleaning'];
 
 /** Live = the heartbeat says busy, a registration owns the machine, or a release is working it. */
 export function liveMachineFor(

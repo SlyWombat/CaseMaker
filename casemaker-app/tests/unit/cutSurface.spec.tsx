@@ -28,6 +28,8 @@ import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGene
 import { ROTARY_UNMEASURED_REFUSAL } from '@/store/engraveRunGate';
 import { machineKey, resetMachineRunStore, useMachineRunStore } from '@/store/machineRunStore';
 import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { resetShopDefaultsStore, useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { resetEngravePackageStore, useEngravePackageStore } from '@/store/engravePackageStore';
 import { resetEngraveRegistrationStore, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import type { SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
@@ -431,6 +433,17 @@ let houseLocationJson: string | null;
 /** #1123-12 — how many times the surface has asked the house for the location. */
 let locationReads: number;
 
+
+/**
+ * #1146 — the cleaning pass and the air walk are ON by default. These UI suites are about the
+ * release flow's program behaviour, so their shop has both OFF; `cleanWalk1146Release.spec` holds
+ * the ON behaviour.
+ */
+const WALKS_OFF = ShopDefaultsSchema.parse({
+  'run.cleanAfterProgram': { value: false, source: 'chosen', setAt: '2026-11-10T00:00:00.000Z', unit: null, note: null },
+  'run.airWalkBeforeCut': { value: false, source: 'chosen', setAt: '2026-11-10T00:00:00.000Z', unit: null, note: null },
+});
+
 beforeEach(() => {
   generateSpy.mockClear();
   uploads = [];
@@ -442,6 +455,8 @@ beforeEach(() => {
   resetStartWizard();
   useRunRecordStore.setState({ imported: [] });
   resetEngraveReleaseStore();
+  resetShopDefaultsStore();
+  useShopDefaultsStore.setState({ status: 'present', defaults: WALKS_OFF });
   useEngraveJobStore.getState().reset();
   resetEngravePackageStore();
   resetEngraveRegistrationStore();

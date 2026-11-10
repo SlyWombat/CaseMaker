@@ -285,9 +285,14 @@ interface DialectWords {
 const DIALECTS: Record<'z1' | 'grbl', DialectWords> = {
   z1: {
     g: new Set([0, 1, 21, 28, 53, 90]),
-    m: new Set([2, 3, 5, 6, 7, 9, 331, 332]),
+    // #1146 — the DIRECT accessory outputs are words a file may carry: `M811`/`M812` (spindle air,
+    // 0f's 2026-11-09 nozzle test) are the cleaning pass's own pair, and `M851`/`M852` (vacuum) are
+    // what Makera's own FreeCAD post writes and the interpreter already models as no-effect
+    // accessories. The auto-mode family (`M331`/`M332`) stays admitted: it is what the older files
+    // carry. Bare forms only — the `sub !== 0` rule below still refuses `M331.1` and friends.
+    m: new Set([2, 3, 5, 6, 7, 9, 331, 332, 811, 812, 851, 852]),
     gList: 'G0 G1 G21 G28 G53 G90',
-    mList: 'M2 M3 M5 M6 M7 M9 M331 M332',
+    mList: 'M2 M3 M5 M6 M7 M9 M331 M332 M811 M812 M851 M852',
   },
   grbl: {
     // GRBL 1.1: planes and work offsets, the homing move, the modal groups the post uses.
@@ -300,8 +305,9 @@ const DIALECTS: Record<'z1' | 'grbl', DialectWords> = {
 };
 
 /**
- * `M331`/`M332` (bare) are the vacuum the post now writes (#283), and they are the ONLY accessory
- * our post drives. `M7`/`M9` stay accepted although the post no longer writes them: the machine
+ * `M331`/`M332` (bare) are the vacuum the post wrote before #1123 item 41, and `M811`/`M812` (air)
+ * and `M851`/`M852` (vacuum) are the direct outputs the cleaning pass and the run speak (#1146).
+ * `M7`/`M9` stay accepted although the post no longer writes them: the machine
  * answers both `ok` (it blows nothing — #283), our own authored bench file
  * (`tests/e2e/fixtures/three-strokes.nc`) and Studio's own files carry them, and refusing a word
  * this controller runs without complaint is not this verifier's job. They are legacy in the

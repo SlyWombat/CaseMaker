@@ -117,6 +117,13 @@ export interface RunContext {
    * the path with the spindle off, in the air, and nothing was cut.
    */
   dryRun?: boolean;
+  /**
+   * #1146 — the program played is a CLEANING PASS or an AIR WALK: motion the release step generated
+   * and verified like any program, but not one of the job's programs. Its end records NOTHING — no
+   * finished hash, no stock, no cutter runtime, no offcut — and says which walk it was (a dry run's
+   * words would be a lie: the spindle is not rehearsing anything).
+   */
+  maintenance?: 'airwalk' | 'clean';
 }
 
 /**
@@ -222,6 +229,23 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
     ctx?.programIndex !== undefined && ctx?.programTotal !== undefined
       ? `program ${ctx.programIndex} of ${ctx.programTotal}`
       : 'the program';
+  // #1146 — a maintenance walk is not one of the job's programs: its end records nothing at all,
+  // and it says which walk it was rather than borrowing the dry run's words.
+  if (ctx?.maintenance !== undefined) {
+    const what = ctx.maintenance === 'clean' ? 'The cleaning pass' : 'The air walk';
+    if (outcome.kind === 'finished') {
+      return {
+        kind: 'finished',
+        lines: [`${what} finished: nothing was recorded — no program marked finished, no stock consumed, no cutter runtime counted.`],
+        offcut: null,
+        stockQuestion: null,
+      };
+    }
+    if (outcome.kind === 'aborted' || outcome.kind === 'stopped-unconfirmed') {
+      return { kind: 'stopped', lines: [`${what} was stopped: nothing was recorded.`], offcut: null, stockQuestion: null };
+    }
+    return { kind: 'nothing', lines: [`${what} did not finish: nothing was recorded.`], offcut: null, stockQuestion: null };
+  }
   // #547 — a dry run rehearses the path with the spindle off and nothing clamped. Its end must not
   // touch the finished-program record, the shelf, the cutter runtime or the offcut: nothing was cut.
   if (ctx?.dryRun === true) {

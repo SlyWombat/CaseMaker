@@ -22,7 +22,7 @@ import {
   type ReleaseSource,
 } from '@/engine/cnc/engrave/release';
 import type { RunPlan } from '@/engine/cnc/plan';
-import { useEngraveReleaseStore, type ReleaseFile } from '@/store/engraveReleaseStore';
+import { useEngraveReleaseStore, type ReleaseFile, type ReleaseWalk } from '@/store/engraveReleaseStore';
 import { useFirstRegistration } from '@/store/engraveRegistrationStore';
 import { facingRegistrationBlocker, withPeriod } from '@/store/engraveRunGate';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
@@ -207,6 +207,7 @@ export function EngraveReleaseStep({
   const confirmChange = useEngraveReleaseStore((s) => s.confirmChange);
   const answerOperator = useEngraveReleaseStore((s) => s.answerOperator);
   const stop = useEngraveReleaseStore((s) => s.stop);
+  const cleanNow = useEngraveReleaseStore((s) => s.cleanNow);
   const setAtMachine = useEngraveReleaseStore((s) => s.setAtMachine);
   const [stage, setStage] = useState<'idle' | 'confirm'>('idle');
   /**
@@ -270,10 +271,21 @@ export function EngraveReleaseStep({
   const previousIndex = record.active ?? (record.next === null ? null : record.next - 1);
   const previous = previousIndex === null ? null : (record.files.find((f) => f.index === previousIndex) ?? null);
   const nextAtIndex = record.next === null ? null : (record.files.find((f) => f.index === record.next) ?? null);
-  const bytes = record.files.reduce((n, f) => n + programBytes(f.nc).length, 0);
+  // #1146 — the cleaning pass and the air walk are files too: they go on the card with the
+  // programs, and a Start waits for them exactly as it waits for the programs.
+  const walkFiles = [record.walks.airwalk, record.walks.clean].filter((w): w is ReleaseWalk => w !== null);
+  const bytes = [...record.files.map((f) => f.nc), ...walkFiles.map((w) => w.nc)].reduce(
+    (n, nc) => n + programBytes(nc).length,
+    0,
+  );
+  const plannedFiles = record.files.length + walkFiles.length;
   const uploading = record.phase === 'uploading';
-  const uploadsIncomplete = record.files.some((f) => f.upload === 'pending' || f.upload === 'failed' || f.upload === 'sending');
-  const uploadsReady = record.files.every((f) => f.done || f.upload === 'uploaded' || f.upload === 'present');
+  const walkIncomplete = (w: { upload: string }): boolean =>
+    w.upload === 'pending' || w.upload === 'failed' || w.upload === 'sending';
+  const uploadsIncomplete = record.files.some(walkIncomplete) || walkFiles.some(walkIncomplete);
+  const uploadsReady =
+    record.files.every((f) => f.done || f.upload === 'uploaded' || f.upload === 'present') &&
+    walkFiles.every((w) => w.upload === 'uploaded' || w.upload === 'present');
   const uploadFailed = record.files.some((f) => f.upload === 'failed');
   const atMachine = record.atMachine;
   // #1123-42 — the running program's sentence and the next cutter change. Null at every phase but
@@ -373,15 +385,19 @@ export function EngraveReleaseStep({
               setStage('confirm');
             }}
           >
-            {uploadFailed ? 'Upload the programs again…' : `Upload all ${record.files.length} programs…`}
+            {uploadFailed
+              ? 'Upload the files again…'
+              : walkFiles.length === 0
+                ? `Upload all ${record.files.length} programs…`
+                : `Upload all ${plannedFiles} files…`}
           </button>
           {stage === 'confirm' && (
             <div style={BOX} data-testid="engrave-release-upload-confirm">
               <p style={{ fontSize: 11, color: '#c8d3de', lineHeight: 1.5, margin: '0 0 6px' }}>
-                Send {record.files.length} file{record.files.length === 1 ? '' : 's'} ({bytes} bytes) to{' '}
+                Send {plannedFiles} file{plannedFiles === 1 ? '' : 's'} ({bytes} bytes) to{' '}
                 <strong>{target.host}:{target.port}</strong>?
               </p>
-              <p style={MUTED}>This writes every program to the machine. It does not start the job.</p>
+              <p style={MUTED}>This writes every program and walk file to the machine. It does not start the job.</p>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button
                   type="button"
@@ -508,6 +524,27 @@ export function EngraveReleaseStep({
             </>
           )}
 
+          {/* #1146 — a walk is playing: motion at the sweep height, nothing cutting. Stop is the
+              same red-button route as a program's; nothing moves after it. */}
+          {(record.phase === 'airwalk' || record.phase === 'cleaning') && (
+            <div data-testid="engrave-release-walk" data-walk={record.walk?.mode ?? ''}>
+              <p style={{ fontSize: 12, color: '#e6edf5', lineHeight: 1.5, margin: '6px 0 0' }}>
+                {record.phase === 'airwalk'
+                  ? 'The air walk is tracing the stock outline at the sweep height — nothing is cutting.'
+                  : 'The cleaning pass is sweeping the stock at the sweep height — nothing is cutting.'}
+              </p>
+              <button
+                type="button"
+                data-testid="engrave-release-stop"
+                disabled={record.stopAsked}
+                style={{ width: '100%', padding: 7, marginTop: 6 }}
+                onClick={() => stop(target)}
+              >
+                {record.stopAsked ? 'Stopping…' : `Stop the ${record.phase === 'airwalk' ? 'air walk' : 'cleaning pass'}`}
+              </button>
+            </div>
+          )}
+
           {record.phase === 'bit-change' && previous !== null && nextAtIndex !== null && (
             <>
               <ChangePanel
@@ -571,6 +608,27 @@ export function EngraveReleaseStep({
               Every program in the job is finished. The last program’s end-of-run lines and offcut question are below.
             </p>
           )}
+
+          {/* #1146 — AFTER A STOP NOTHING MOVES ON ITS OWN. Once the operator has the machine
+              Idle and homed, this runs the cleaning pass as its own file; the run refuses a
+              machine that is not Idle, and the release stays in the phase it was in. */}
+          {(record.phase === 'stopped' || record.phase === 'failed' || record.phase === 'done') &&
+            record.walks.clean !== null && (
+              <div data-testid="engrave-release-clean-now-box">
+                <p style={{ ...MUTED, marginTop: 6 }}>
+                  Nothing moves on its own after a stop. Once the machine reads Idle and is homed (Home above, if the
+                  stop left it unhomed), Clean now sweeps the stock once more.
+                </p>
+                <button
+                  type="button"
+                  data-testid="engrave-release-clean-now"
+                  style={{ width: '100%', padding: 7, marginTop: 6 }}
+                  onClick={() => cleanNow(target)}
+                >
+                  Clean now — sweep the stock once more
+                </button>
+              </div>
+            )}
         </>
       )}
 

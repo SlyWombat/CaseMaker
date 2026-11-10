@@ -31,6 +31,12 @@
  *      no program running, sends `M852` then `$H` — only on a machine that answers Idle with no
  *      alarm (`machineSpan.ts`). A Stop DURING a cut is the run panel's (#424): `abort`, then `M332`
  *      only once the machine reads Idle, and Home is offered rather than sent.
+ *   6. THE CLEANING PASS AND THE AIR WALK (#1146, the maintainer's 2026-11-09 ruling). Both are
+ *      FILES (`cleanWalkPlan.ts`), uploaded with the programs and verified by the ordinary
+ *      verifier. The air walk plays once, before program 1 of a new span; the cleaning pass plays
+ *      after every finished program, and the list's continuation waits for its end. AFTER A STOP
+ *      NOTHING MOVES ON ITS OWN: the release offers `cleanNow` instead, and the operator runs it
+ *      once the machine is Idle and homed.
  *
  * RESUME. A finished program's hash is recorded by `machineRunStore`'s end of run. This store also
  * marks it done immediately, so the next step (and a reload, through `finishedProgramsFor`) skips it
@@ -44,10 +50,13 @@
 
 import { create } from 'zustand';
 import type { EngraveJob } from '@/types/engraveJob';
-import { uploadProgram, type MachineUploadResult } from '@/platform/machineUpload';
-import { describeRun, runSettings, type RunOutcome } from '@/platform/machineRun';
+import { alarmLine, uploadProgram, type MachineUploadResult } from '@/platform/machineUpload';
+import { describeRun, readProgress, runSettings, type RunOutcome } from '@/platform/machineRun';
 import { closeVacuumSpan } from '@/platform/machineSpan';
 import { attachConsole } from '@/platform/machineConsole';
+import type { CleanWalkMode } from '@/engine/cnc/engrave/cleanWalk';
+import { planCleanWalks, type PlannedCleanWalk } from '@/engine/cnc/engrave/cleanWalkPlan';
+import { verifyCheck } from '@/engine/cnc/uploadGate';
 import {
   retouchAndCorrectAfterFacing,
   type AfterFacingResult,
@@ -68,8 +77,8 @@ import {
   type ReleaseSource,
 } from '@/engine/cnc/engrave/release';
 import { machineKey, runContextFor, useMachineRunStore, type RunContext } from './machineRunStore';
-import { finishedProgramsFor } from './locationStore';
-import { readFlag } from '@/platform/defaultsClient';
+import { finishedProgramsFor, localMachine } from './locationStore';
+import { readDefault, readFlag } from '@/platform/defaultsClient';
 import { useShopDefaultsStore } from './shopDefaultsStore';
 import { firstRegistrationFor, setupRegistrationFor } from './engraveRegistrationStore';
 import { facingRegistrationBlocker } from './engraveRunGate';
@@ -91,6 +100,10 @@ export type ReleasePhase =
   | 'retouch'
   /** A program finished; the machine is homed and the vacuum stays on for the next cutter. */
   | 'bit-change'
+  /** #1146 — the air walk file is playing (before program 1 of a new span). */
+  | 'airwalk'
+  /** #1146 — the cleaning pass file is playing (after a program, or from a Clean now press). */
+  | 'cleaning'
   /**
    * The span is being closed (M852 + $H) and the run must not start until it has: a program
    * started now could re-state its M851 followed by the late M852, switching the vacuum off
@@ -108,6 +121,28 @@ export interface ReleaseFile extends ReleaseProgram {
   uploadNote: string | null;
 }
 
+/** #1146 — one walk file as this release holds it: planned text, check, and its card state. */
+export interface ReleaseWalk extends PlannedCleanWalk {
+  upload: ReleaseUploadState;
+  uploadNote: string | null;
+}
+
+/**
+ * #1146 — what happens when the walk playing now ends. `start-program` continues the release at
+ * the program the air walk precedes; `after-program` is the continuation the finished program's
+ * settle deferred until the cleaning pass was over; `clean-now` returns to the phase the operator
+ * pressed the button in (a Stop's `stopped`, a `done`, a `failed`).
+ */
+export type WalkAfter =
+  | { kind: 'start-program'; index: number }
+  | { kind: 'after-program'; index: number; total: number; next: number | null }
+  | { kind: 'clean-now'; restore: ReleasePhase };
+
+export interface WalkRun {
+  mode: CleanWalkMode;
+  after: WalkAfter;
+}
+
 export interface ReleaseRecord {
   target: { host: string; port: number };
   jobId: string;
@@ -118,6 +153,18 @@ export interface ReleaseRecord {
   airOn: boolean;
   phase: ReleasePhase;
   files: ReleaseFile[];
+  /**
+   * #1146 — the two maintenance files, planned with the list when the shop's switches want them.
+   * Null: not wanted, or refused by the generator/verifier (the reason is in `notes`).
+   */
+  walks: { airwalk: ReleaseWalk | null; clean: ReleaseWalk | null };
+  /** The shop's two switches AS THIS PLAN READ THEM (seeded on). */
+  airWalk: boolean;
+  cleanAfter: boolean;
+  /** The air walk has finished for this release — it plays before program 1 and never again. */
+  airWalked: boolean;
+  /** The walk playing now, with what its end continues into. */
+  walk: WalkRun | null;
   /** 1-based cut order of the program the machine entry currently holds. */
   active: number | null;
   /** The next program, when the run is waiting at the bit-change pause. */
@@ -187,6 +234,12 @@ interface ReleaseState {
   answerOperator: (target: { host: string; port: number }, ok: boolean) => void;
   /** Stop: a running program through the run store; a pause between programs by closing the span. */
   stop: (target: { host: string; port: number }) => void;
+  /**
+   * #1146 — run the cleaning pass now, on its own, once nothing is running (the Cut step offers it
+   * after a Stop, a failure or a finished job). The machine must read Idle; the run refuses
+   * otherwise. Nothing else moves and the release stays in the phase it was in.
+   */
+  cleanNow: (target: { host: string; port: number }) => void;
   setAtMachine: (target: { host: string; port: number }, at: boolean) => void;
   /** Forget this machine's release (the machine entry, with its end, is left alone). */
   reset: (target: { host: string; port: number }) => void;
@@ -194,6 +247,52 @@ interface ReleaseState {
 
 const sameHashes = (a: readonly ReleaseFile[], b: readonly ReleaseProgram[]): boolean =>
   a.length === b.length && a.every((f, i) => f.hash === b[i]?.hash && f.filename === b[i]?.filename);
+
+/**
+ * #1146 — the walks this plan wants, from the shop's two seeded-ON switches and three numbers. A
+ * dry-run release (a rehearsal) wants neither: the walk files are real motion, not a rehearsal of
+ * one. A walk whose filename and text are unchanged keeps its upload state across a re-plan.
+ */
+function walksForJob(
+  target: { host: string; port: number },
+  job: EngraveJob,
+  programs: readonly ReleaseSource[],
+): { airwalk: PlannedCleanWalk | null; clean: PlannedCleanWalk | null; airWalk: boolean; cleanAfter: boolean; notes: string[] } {
+  const defaults = useShopDefaultsStore.getState().defaults;
+  const airWalk = readFlag(defaults, 'run.airWalkBeforeCut').value;
+  const cleanAfter = readFlag(defaults, 'run.cleanAfterProgram').value;
+  const rehearsal = programs.some((p) => p.dryRun === true);
+  if (programs.length === 0 || rehearsal) {
+    return { airwalk: null, clean: null, airWalk, cleanAfter, notes: [] };
+  }
+  const settings = {
+    clearanceMm: readDefault(defaults, 'clean.clearanceMm').value,
+    rowSpacingMm: readDefault(defaults, 'clean.rowSpacingMm').value,
+    feedMmPerMin: readDefault(defaults, 'clean.feedMmPerMin').value,
+  };
+  const plan = planCleanWalks({
+    job,
+    defaults,
+    calibration: localMachine().calibration ?? null,
+    surfaceMachineZ: firstRegistrationFor(job.id, target)?.outcome.surfaceZ ?? null,
+    settings,
+    wanted: { airwalk: airWalk, clean: cleanAfter },
+  });
+  return { airwalk: plan.airwalk, clean: plan.clean, airWalk, cleanAfter, notes: plan.notes };
+}
+
+/** A planned walk as the record holds it: a fresh plan starts with its card state pending. */
+const freshWalk = (walk: PlannedCleanWalk | null): ReleaseWalk | null =>
+  walk === null ? null : { ...walk, upload: 'pending', uploadNote: null };
+
+/** A re-plan keeps the upload state only when it is the same FILE (name and text). */
+function mergeWalk(previous: ReleaseWalk | null, next: PlannedCleanWalk | null): ReleaseWalk | null {
+  if (next === null) return null;
+  if (previous !== null && previous.filename === next.filename && previous.hash === next.hash) {
+    return { ...next, upload: previous.upload, uploadNote: previous.uploadNote };
+  }
+  return freshWalk(next);
+}
 
 /**
  * #425 §6 — the programs the DOCUMENT says finished. The machine's own list
@@ -423,6 +522,186 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     }
   };
 
+  /**
+   * #1146 — ASK UNTIL IDLE before a walk starts. A program's own ending sends `$H`; for a moment
+   * afterwards the controller reports Home, and the run's start refuses anything but Idle — so the
+   * walk waits for the machine to settle rather than failing on the program's own home.
+   */
+  const waitIdle = async (target: { host: string; port: number }, tries = 12, gapMs = 1000): Promise<boolean> => {
+    const handle = attachConsole(target);
+    try {
+      for (let i = 0; i < tries; i += 1) {
+        const q = await handle.send('?');
+        if (q.kind === 'sent' && alarmLine(q.text) === null) {
+          const p = readProgress(q.text);
+          if (p.state === 'Idle' && (p.percent === null || p.percent >= 100)) return true;
+        }
+        if (i + 1 < tries) await new Promise((resolve) => setTimeout(resolve, gapMs));
+      }
+      return false;
+    } finally {
+      await handle.close();
+    }
+  };
+
+  /**
+   * #1146 — PLAY A WALK FILE through the one run store, like any program. The vacuum is the run's
+   * (item 41's direct outputs): on before the file for a cleaning pass that rides a span, off at
+   * the span's own end; the air walk touches no accessory at all. A Stop during it is the run's red
+   * button and this store does nothing further on its own.
+   */
+  const runWalk = async (machine: string, mode: CleanWalkMode, after: WalkAfter): Promise<void> => {
+    const rec = get().records[machine];
+    if (rec === undefined || rec.walk !== null) return;
+    const walk = rec.walks[mode];
+    const what = mode === 'clean' ? 'cleaning pass' : 'air walk';
+    const restore = after.kind === 'clean-now' ? after.restore : 'failed';
+    if (walk === null) {
+      patch(machine, { phase: restore, walk: null });
+      say(machine, `The ${what} did not start: it was not planned for this release.`);
+      return;
+    }
+    if (walk.upload !== 'uploaded' && walk.upload !== 'present') {
+      patch(machine, { phase: restore, walk: null });
+      say(machine, `The ${what} did not start: ${walk.filename} is not on the card. Press Upload first.`);
+      return;
+    }
+    if (!(await waitIdle(rec.target))) {
+      patch(machine, { phase: restore, walk: null, atMachine: false });
+      say(machine, `The ${what} did not start: the machine did not answer Idle — check it at the machine.`);
+      return;
+    }
+    const current = get().records[machine];
+    if (current === undefined || current.walk !== null) return;
+    // The plan may have moved while the machine settled: play the file the record holds NOW, or
+    // refuse — a prepared entry the record no longer names would never be matched at its end.
+    const walkNow = current.walks[mode];
+    if (walkNow === null || (walkNow.upload !== 'uploaded' && walkNow.upload !== 'present')) {
+      patch(machine, { phase: restore, walk: null });
+      say(machine, `The ${what} did not start: its file changed or is not on the card — press Upload first.`);
+      return;
+    }
+    // The cleaning pass rides the job's span: MIDDLE while programs remain (the vacuum stays on
+    // across the bit change), WHOLE when it is the span's own end (after the last program, or a
+    // Clean now press). The air walk switches nothing.
+    const lastProgram = after.kind === 'after-program' && after.next === null;
+    const span: 'none' | 'middle' | 'whole' =
+      mode === 'airwalk' ? 'none' : lastProgram || after.kind === 'clean-now' ? 'whole' : 'middle';
+    const context: RunContext = {
+      nc: walkNow.nc,
+      toolKey: current.job.toolKey,
+      vacuumOwned: true,
+      vacuumSpan: span,
+      // The clean file carries its own M811/M812; the vacuum words stay the run's.
+      blow: false,
+      maintenance: mode,
+    };
+    const runStore = useMachineRunStore.getState();
+    if (!runStore.prepare(rec.target, walkNow.filename, walkNow.hash, context)) {
+      patch(machine, { phase: restore, walk: null });
+      say(machine, `The ${what} did not start: a run is already going on this machine.`);
+      return;
+    }
+    // The walk state goes in BEFORE the start: the end subscription must find it.
+    patch(machine, { phase: mode === 'airwalk' ? 'airwalk' : 'cleaning', walk: { mode, after }, stopAsked: false });
+    if (!runStore.start(rec.target, runSettings(useShopDefaultsStore.getState().defaults))) {
+      patch(machine, { phase: restore, walk: null });
+      say(machine, `The ${what} did not start: the machine's run entry could not be started.`);
+      return;
+    }
+    say(
+      machine,
+      mode === 'airwalk'
+        ? `Playing the air walk (${walkNow.filename}) over the stock outline at work Z ${walkNow.sweepZ.toFixed(2)}.`
+        : `Playing the cleaning pass (${walkNow.filename}): ${walkNow.rows} row${walkNow.rows === 1 ? '' : 's'} at work Z ${walkNow.sweepZ.toFixed(2)}.`,
+    );
+  };
+
+  /** #1146 — the list's continuation after a finished program, with or without a cleaning pass. */
+  const completeProgram = async (
+    machine: string,
+    after: Extract<WalkAfter, { kind: 'after-program' }>,
+    vacuum: ReleaseRecord['vacuum'],
+    cleaned: boolean,
+  ): Promise<void> => {
+    const rec = get().records[machine];
+    if (rec === undefined) return;
+    const cleanedWords = cleaned ? ' The cleaning pass ran after it.' : '';
+    if (after.next === null) {
+      patch(machine, { phase: 'done', active: after.index, next: null, vacuum });
+      say(machine, `Every program in the job is finished (${after.index} of ${after.total}).${cleanedWords}`);
+      // #1123 item 41 — the RUN switches the span off at its end (M852/M812); a program the run
+      // could not switch off (a refusal it reported) leaves the vacuum on, and this closes it on
+      // an Idle machine only.
+      if (vacuum !== 'off' && rec.airOn) await closeSpan(machine, 'The job’s last program finished with the vacuum still on.');
+      return;
+    }
+    // D-17: the bit change is a new program, so the at-machine tick is asked again.
+    patch(machine, { phase: 'bit-change', active: after.index, next: after.next, atMachine: false, vacuum });
+    say(
+      machine,
+      `Program ${after.index} of ${after.total} finished.${cleanedWords} The machine is homed${
+        vacuum === 'on' ? ' and the vacuum stays on' : ''
+      }: change the cutter for program ${after.next} before it plays.`,
+    );
+  };
+
+  /** #1146 — a walk's own end. After a Stop nothing moves on its own; every other path continues. */
+  const endWalk = async (machine: string, outcome: RunOutcome): Promise<void> => {
+    const rec = get().records[machine];
+    if (rec === undefined || rec.walk === null) return;
+    const { mode, after } = rec.walk;
+    const what = mode === 'clean' ? 'cleaning pass' : 'air walk';
+    patch(machine, { walk: null, stopAsked: false });
+    // A walk's own sentence: `describeRun`'s finished wording is the job span's (vacuum, air),
+    // which a walk does not own. Every other outcome's sentence is true of it as written.
+    say(
+      machine,
+      outcome.kind === 'finished'
+        ? `The ${what} finished${outcome.last.elapsedS !== null ? ` in ${Math.round(outcome.last.elapsedS)} s` : ''}.`
+        : describeRun(outcome),
+    );
+
+    if (outcome.kind === 'finished') {
+      const whole =
+        mode === 'clean' && (after.kind === 'clean-now' || (after.kind === 'after-program' && after.next === null));
+      // #1123 item 41 — the run's own words first: a span's end switched the vacuum off itself; a
+      // middle-span clean leaves it on; an unconfirmed off is not claimed either way.
+      const vacuum: ReleaseRecord['vacuum'] =
+        outcome.vacuumOff === true ? 'off' : mode === 'airwalk' ? rec.vacuum : whole ? 'unknown' : 'on';
+      if (mode === 'airwalk') {
+        patch(machine, { airWalked: true, phase: 'starting', vacuum });
+        if (after.kind === 'start-program') {
+          say(machine, `The air walk finished. Playing program ${after.index}.`);
+          await runFile(machine, after.index);
+        }
+        return;
+      }
+      if (after.kind === 'after-program') {
+        await completeProgram(machine, after, vacuum, true);
+      } else if (after.kind === 'clean-now') {
+        patch(machine, { phase: after.restore, vacuum });
+        say(machine, `The cleaning pass finished; the release is back where it was (${after.restore}).`);
+      }
+      return;
+    }
+
+    if (outcome.kind === 'aborted' || outcome.kind === 'stopped-unconfirmed') {
+      const vacuum =
+        outcome.kind === 'aborted' && outcome.stop.kind === 'stopped' ? (outcome.stop.vacuumOff ? 'off' : 'unknown') : 'unknown';
+      patch(machine, { phase: 'stopped', vacuum, atMachine: false, next: null });
+      say(
+        machine,
+        `The ${what} did not finish. Nothing moves on its own after a stop: once the machine reads Idle and is homed, Clean now runs the cleaning pass again.`,
+      );
+      return;
+    }
+
+    const vacuum = outcome.kind === 'alarm' || outcome.kind === 'unreachable' ? 'unknown' : rec.vacuum;
+    patch(machine, { phase: 'failed', vacuum, atMachine: false });
+    say(machine, `The ${what} did not finish. The vacuum may still be on, and it was not switched off from here: check it at the machine.`);
+  };
+
   /** The machine's entry says a program ended. Work out the list's next move, exactly once. */  const settle = async (machine: string, index: number, outcome: RunOutcome): Promise<void> => {
     const rec = get().records[machine];
     if (rec === undefined || rec.settled) return;
@@ -442,21 +721,27 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
             ? 'on'
             : rec.vacuum;
       const pending = releasePending(files);
-      if (pending.length === 0) {
-        patch(machine, { files, vacuum, phase: 'done', active: index, next: null });
-        say(machine, `Every program in the job is finished (${index} of ${file.total}).`);
-        // #1123 item 41 — the RUN switches the span off at its end (M852/M812); a program the run
-        // could not switch off (a refusal it reported) leaves the vacuum on, and this closes it on
-        // an Idle machine only.
-        if (vacuum !== 'off' && rec.airOn) await closeSpan(machine, 'The job’s last program finished with the vacuum still on.');
+      const after: WalkAfter = {
+        kind: 'after-program',
+        index,
+        total: file.total,
+        next: pending.length === 0 ? null : pending[0]!.index,
+      };
+      patch(machine, { files });
+      // #1146 — THE CLEANING PASS AFTER EVERY PROGRAM (the maintainer's ruling): the list's
+      // continuation waits for the FILE's end, so a stop during the clean leaves the release
+      // stopped rather than announcing a bit change that never happened. A dry run never cleans.
+      if (rec.cleanAfter && rec.walks.clean !== null && file.dryRun !== true) {
+        say(
+          machine,
+          `Program ${index} of ${file.total} finished. The cleaning pass runs ${
+            after.next === null ? 'before the job is done' : `before program ${after.next}`
+          }.`,
+        );
+        await runWalk(machine, 'clean', after);
         return;
       }
-      // D-17: the bit change is a new program, so the at-machine tick is asked again.
-      patch(machine, { files, vacuum, phase: 'bit-change', active: index, next: pending[0]!.index, atMachine: false });
-      say(
-        machine,
-        `Program ${index} of ${file.total} finished. The machine is homed and the vacuum stays on: change the cutter for program ${pending[0]!.index} before it plays.`,
-      );
+      await completeProgram(machine, after, vacuum, false);
       return;
     }
 
@@ -498,6 +783,15 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
    */
   useMachineRunStore.subscribe((state) => {
     for (const [machine, rec] of Object.entries(get().records)) {
+      // #1146 — a walk is the machine entry while it plays; its end continues the release.
+      if ((rec.phase === 'airwalk' || rec.phase === 'cleaning') && rec.walk !== null) {
+        const walk = rec.walks[rec.walk.mode];
+        const entry = state.runs[machine];
+        if (walk === null || entry === undefined || entry.running || entry.outcome === null || entry.end === null) continue;
+        if (entry.filename !== walk.filename || entry.programHash !== walk.hash) continue;
+        void endWalk(machine, entry.outcome);
+        continue;
+      }
       if (rec.phase !== 'running' || rec.active === null || rec.settled) continue;
       const entry = state.runs[machine];
       if (entry === undefined || entry.running || entry.outcome === null || entry.end === null) continue;
@@ -515,6 +809,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       const current = get().records[machine];
       const done = [...finishedProgramsFor(target), ...finishedLogged(job)];
       const planned = releasePrograms(job.name, programs, done);
+      const walks = walksForJob(target, job, programs);
       if (current !== undefined && current.jobId === job.id && sameHashes(current.files, planned)) {
         // A remount, or a refresh after a run finished elsewhere: keep the upload results and the
         // at-machine confirmation, and read the finished list again.
@@ -523,7 +818,22 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
           upload: current.files[i]!.upload,
           uploadNote: current.files[i]!.uploadNote,
         }));
-        patch(machine, { files: merged });
+        // #1146 — a walk is mid-flight: its file is the text the running entry was prepared with,
+        // so the record keeps that pair until the walk ends. The next plan after it settles picks
+        // up a changed setting.
+        if (current.walk !== null) {
+          patch(machine, { files: merged });
+          return;
+        }
+        patch(machine, {
+          files: merged,
+          airWalk: walks.airWalk,
+          cleanAfter: walks.cleanAfter,
+          walks: {
+            airwalk: mergeWalk(current.walks.airwalk, walks.airwalk),
+            clean: mergeWalk(current.walks.clean, walks.clean),
+          },
+        });
         return;
       }
       // A DIFFERENT PROGRAM LIST is a different run: do not carry upload states or a phase across.
@@ -540,6 +850,11 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
             job,
             airOn,
             phase: 'idle',
+            walks: { airwalk: freshWalk(walks.airwalk), clean: freshWalk(walks.clean) },
+            airWalk: walks.airWalk,
+            cleanAfter: walks.cleanAfter,
+            airWalked: false,
+            walk: null,
             files: planned.map((f) => ({
               ...f,
               // #1093 — the name `releasePrograms` planned is THE name (one naming function for
@@ -563,13 +878,23 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
           },
         },
       }));
+      // #1146 — a wanted walk the plan could not make says why, once, in the release notes.
+      for (const note of walks.notes) say(machine, note);
     },
 
     uploadAll: async (target) => {
       const machine = machineKey(target);
       const rec = get().records[machine];
       if (rec === undefined) return;
-      if (rec.phase === 'uploading' || rec.phase === 'running' || rec.phase === 'starting' || rec.phase === 'retouch') return;
+      if (
+        rec.phase === 'uploading' ||
+        rec.phase === 'running' ||
+        rec.phase === 'starting' ||
+        rec.phase === 'retouch' ||
+        rec.phase === 'airwalk' ||
+        rec.phase === 'cleaning'
+      )
+        return;
       const files = rec.files.map((f) => ({ ...f }));
       patch(machine, { phase: 'uploading', uploading: null, stopAsked: false });
       say(machine, `Uploading ${files.length} program${files.length === 1 ? '' : 's'} in cut order — nothing has run.`);
@@ -626,8 +951,64 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
         }
         patch(machine, { files: files.map((x) => ({ ...x })) });
       }
+
+      // #1146 — THE WALKS GO ON THE CARD WITH THE PROGRAMS, before anything runs: a walk the
+      // release wants that is not uploaded refuses the start rather than failing mid-run.
+      let walkFiles = 0;
+      for (const mode of ['airwalk', 'clean'] as const) {
+        const now = get().records[machine];
+        if (now === undefined) return;
+        const walk = now.walks[mode];
+        if (walk === null) continue;
+        walkFiles += 1;
+        if (walk.upload === 'uploaded' || walk.upload === 'present') continue;
+        if (now.stopAsked) {
+          patch(machine, { phase: 'stopped', uploading: null, atMachine: false });
+          say(machine, 'Uploading stopped. The files already written stay on the card.');
+          return;
+        }
+        patch(machine, {
+          walks: { ...now.walks, [mode]: { ...walk, upload: 'sending', uploadNote: null } },
+        });
+        let result: MachineUploadResult;
+        try {
+          // The check is the verifier's own report on this exact text — no exemption because the
+          // release step wrote it (the verified-only wall).
+          result = await uploadProgram(target, { filename: walk.filename, nc: walk.nc, check: verifyCheck(walk.verify) });
+        } catch (e) {
+          result = { kind: 'error', filename: walk.filename, detail: e instanceof Error ? e.message : String(e) };
+        }
+        const after = get().records[machine];
+        if (after === undefined) return;
+        if (result.kind === 'uploaded') {
+          recordUploadedFile(target.host, walk.filename);
+          patch(machine, {
+            walks: {
+              ...after.walks,
+              [mode]: {
+                ...walk,
+                upload: result.alreadyPresent ? 'present' : 'uploaded',
+                uploadNote: result.alreadyPresent ? 'already on the card, matching this build' : `${result.bytes} bytes`,
+              },
+            },
+          });
+          say(machine, said(result));
+        } else {
+          patch(machine, {
+            walks: { ...after.walks, [mode]: { ...walk, upload: 'failed', uploadNote: 'detail' in result ? result.detail : result.reason } },
+            uploading: null,
+            phase: 'failed',
+          });
+          say(machine, said(result));
+          say(machine, 'No program was played. Fix the upload and press Upload again; the files already written are kept.');
+          return;
+        }
+      }
       patch(machine, { phase: 'ready', uploading: null });
-      say(machine, `${files.length} file${files.length === 1 ? '' : 's'} on the card. Nothing has run.`);
+      say(
+        machine,
+        `${files.length} file${files.length === 1 ? '' : 's'}${walkFiles > 0 ? ` and ${walkFiles} walk file${walkFiles === 1 ? '' : 's'}` : ''} on the card. Nothing has run.`,
+      );
     },
 
     startRelease: (target) => {
@@ -656,6 +1037,23 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       if (next === null) {
         patch(machine, { phase: 'done', next: null });
         say(machine, 'Every program was already finished on this machine — there is nothing to play.');
+        return;
+      }
+      // #1146 — both walks are FILES: one that is not on the card refuses the start here, not
+      // halfway through the run.
+      const missingWalk = (w: ReleaseWalk | null) => w !== null && w.upload !== 'uploaded' && w.upload !== 'present';
+      const wantAir = rec.airWalk && !rec.airWalked && next.index === 1 && rec.walks.airwalk !== null;
+      const wantClean = rec.cleanAfter && rec.walks.clean !== null;
+      if ((wantAir && missingWalk(rec.walks.airwalk)) || (wantClean && missingWalk(rec.walks.clean))) {
+        say(machine, 'The release did not start: its cleaning pass or air walk is not on the card — press Upload first.');
+        return;
+      }
+      if (wantAir) {
+        say(
+          machine,
+          `The air walk runs before the first cut (${rec.walks.airwalk!.filename}), then program ${next.index} of ${next.total}.`,
+        );
+        void runWalk(machine, 'airwalk', { kind: 'start-program', index: next.index });
         return;
       }
       if (next.index > 1) {
@@ -707,10 +1105,15 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       const machine = machineKey(target);
       const rec = get().records[machine];
       if (rec === undefined) return;
-      if (rec.phase === 'running') {
+      if (rec.phase === 'running' || rec.phase === 'airwalk' || rec.phase === 'cleaning') {
         useMachineRunStore.getState().requestStop(machine);
         patch(machine, { stopAsked: true });
-        say(machine, 'Stop pressed: the abort goes out at the next poll, and the run panel offers Home after the machine confirms.');
+        say(
+          machine,
+          rec.phase === 'running'
+            ? 'Stop pressed: the abort goes out at the next poll, and the run panel offers Home after the machine confirms.'
+            : `Stop pressed during the ${rec.phase === 'airwalk' ? 'air walk' : 'cleaning pass'}: the abort goes out at the next poll, and nothing moves after it.`,
+        );
         return;
       }
       if (rec.phase === 'uploading') {
@@ -741,6 +1144,27 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
           if (get().records[machine]?.phase === 'closing') patch(machine, { phase: 'stopped', atMachine: false });
         });
       }
+    },
+
+    cleanNow: (target) => {
+      const machine = machineKey(target);
+      const rec = get().records[machine];
+      if (rec === undefined) return;
+      if (rec.walk !== null || rec.spanClosing) {
+        say(machine, 'Clean now is not available while the machine is working or closing.');
+        return;
+      }
+      if (rec.phase !== 'stopped' && rec.phase !== 'failed' && rec.phase !== 'done') {
+        say(machine, 'Clean now is offered once no program is running.');
+        return;
+      }
+      if (rec.walks.clean === null) {
+        say(machine, 'No cleaning pass is planned for this release.');
+        return;
+      }
+      const restore = rec.phase;
+      say(machine, 'Clean now pressed: the cleaning pass runs on its own, then the release stays where it was.');
+      void runWalk(machine, 'clean', { kind: 'clean-now', restore });
     },
 
     setAtMachine: (target, at) => patch(machineKey(target), { atMachine: at }),
