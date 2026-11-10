@@ -38,6 +38,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ZodError } from 'zod';
 import { MATERIAL_LABELS, STOCK_MATERIALS } from '@/engine/cnc/materials';
+import { ConfirmPress } from './ConfirmPress';
 import {
   FEED_EDGES,
   FEED_SOURCES,
@@ -745,16 +746,15 @@ export function FeedEditor({
         </button>
         <span className="spacer" />
         {item !== null && (
-          <button
-            type="button"
-            className="btn btn--sm btn--danger"
-            data-testid="manage-feed-remove"
+          <ConfirmPress
+            testId="manage-feed-remove"
+            label="Remove"
+            sentence={`Delete the feeds row for ${MATERIAL_LABELS[item.material]} ${item.edge ?? 'flat'} · ${bandLine(item)} mm?`}
+            confirmLabel="Delete the row"
             disabled={busy}
             title="Take this row out of the location’s feeds table"
-            onClick={() => void remove(item.id).then((ok) => ok && onClose())}
-          >
-            Remove
-          </button>
+            onConfirm={() => void remove(item.id).then((ok) => ok && onClose())}
+          />
         )}
       </div>
     </aside>

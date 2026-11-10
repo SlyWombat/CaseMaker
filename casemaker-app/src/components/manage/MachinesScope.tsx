@@ -53,6 +53,7 @@ import { MachineLight } from './MachineLight';
 import { MachineAccessory } from './MachineAccessory';
 import { ACCESSORIES, AIR_SENTENCE } from '@/platform/machineAccessory';
 import { MachineUnlock } from './MachineUnlock';
+import { ConfirmPress } from './ConfirmPress';
 import { MachineStop } from './MachineStop';
 import { MachineLaserOptions } from './MachineLaserOptions';
 import { formatStamp, mm, timeOfDayWords } from './display';
@@ -355,15 +356,14 @@ export function MachinesScope() {
               )}
               {machineFileRow}
               <span className="spacer" />
-              <button
-                type="button"
-                className="btn btn--sm btn--danger"
-                data-testid="manage-machine-forget"
+              <ConfirmPress
+                testId="manage-machine-forget"
+                label="Forget this machine"
+                sentence={`Forget “${machineDisplayName(record, model) ?? machine.name ?? 'this machine'}”? The profile keeps its own numbers; this forgets the machine in this app.`}
+                confirmLabel="Forget it"
                 title="Forget this machine — the profile keeps its own numbers; this forgets it here"
-                onClick={forget}
-              >
-                Forget this machine
-              </button>
+                onConfirm={forget}
+              />
             </div>
             {machineStatus}
             {/* #390 — the vacuum switch, above the console. Like it, it owns its own

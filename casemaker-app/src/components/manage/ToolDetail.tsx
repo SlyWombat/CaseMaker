@@ -49,6 +49,7 @@ import { useManageModeStore } from '@/store/manageModeStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { formatDay, mm } from './display';
 import { cloneOf, useSelectedEntry, useSelectedItem } from './selection';
+import { ConfirmPress } from './ConfirmPress';
 import { CutterFields } from './doors/CutterFields';
 import { MakeraMatch } from './MakeraMatch';
 import { RegisterDoor } from './RegisterDoor';
@@ -273,16 +274,15 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
       {tier === 'yours' && (
         <div className="btn-row">
           <span className="spacer" />
-          <button
-            type="button"
-            className="btn btn--sm btn--danger"
-            data-testid="manage-remove-definition"
+          <ConfirmPress
+            testId="manage-remove-definition"
+            label="Remove this definition"
+            sentence={`Remove the definition “${entry.tool.name}”? Jobs that named it keep the cutter they were written with.`}
+            confirmLabel="Remove it"
             disabled={disabled}
             title="Drop this definition. Jobs that named it keep the cutter they were written with."
-            onClick={() => void removeTool(entry.key)}
-          >
-            Remove this definition
-          </button>
+            onConfirm={() => void removeTool(entry.key)}
+          />
         </div>
       )}
     </aside>
@@ -531,16 +531,15 @@ function InventoryEditor({ item }: { item: InventoryItem }) {
 
       <div className="btn-row">
         <span className="spacer" />
-        <button
-          type="button"
-          className="btn btn--sm btn--danger"
-          data-testid="manage-item-remove"
+        <ConfirmPress
+          testId="manage-item-remove"
+          label="Remove from inventory"
+          sentence={`Remove “${item.tool.name}” from the inventory? Any definition it was registered from stays.`}
+          confirmLabel="Remove it"
           disabled={disabled}
           title="Take this cutter out of the inventory. Any definition it was registered from stays."
-          onClick={() => void removeItem(item.id)}
-        >
-          Remove from inventory
-        </button>
+          onConfirm={() => void removeItem(item.id)}
+        />
       </div>
     </>
   );

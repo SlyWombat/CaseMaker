@@ -1065,3 +1065,79 @@ describe('#354 — a build with no socket offers no check', () => {
     expect(q('manage-machine-web-hint')).toBeNull();
   });
 });
+
+// #1150 — THE DESTRUCTIVE PRESSES TAKE TWO, and the second names what goes. The five controls
+// that had none (Remove from inventory, Remove this definition, a feed row, Forget this machine,
+// Remove the switch) share one confirm; the feed and switch sites are tested in their own specs.
+describe('#1150 — the destructive presses', () => {
+  it('Forget this machine names it first, and Cancel keeps it', () => {
+    useMachineStore.setState({
+      machine: Z1_RECORD,
+      outcome: 'found',
+      reason: null,
+      checkedAt: '2026-10-09T06:00:00.000Z',
+    });
+    useManageModeStore.getState().openManage('machines');
+    render(<ManageMode />);
+
+    fireEvent.click(screen.getByTestId('manage-machine-forget'));
+    expect(useMachineStore.getState().machine).not.toBeNull();
+    expect(screen.getByTestId('manage-machine-forget-sentence').textContent).toContain('Z1');
+
+    fireEvent.click(screen.getByTestId('manage-machine-forget-cancel'));
+    expect(useMachineStore.getState().machine).not.toBeNull();
+
+    fireEvent.click(screen.getByTestId('manage-machine-forget'));
+    fireEvent.click(screen.getByTestId('manage-machine-forget-confirm'));
+    expect(useMachineStore.getState().machine).toBeNull();
+    expect(q('manage-machine-none')).not.toBeNull();
+  });
+
+  it('Remove from inventory names the cutter and sends the DELETE only on the confirm', async () => {
+    const calls: { method: string; path: string }[] = [];
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: { kind: 'present', health: HEALTH, base: '' },
+        call: async (method, path) => {
+          calls.push({ method, path });
+          return { kind: 'ok', text: '' };
+        },
+      }),
+    );
+    await useToolRegistryStore.getState().refresh();
+    useManageModeStore.getState().openManage('tools');
+    render(<ManageMode />);
+
+    fireEvent.click(screen.getByTestId('manage-tools-row-inv:9f8e7d6c5b'));
+    fireEvent.click(screen.getByTestId('manage-item-remove'));
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+    expect(screen.getByTestId('manage-item-remove-sentence').textContent).toContain('2 mm flat end');
+
+    fireEvent.click(screen.getByTestId('manage-item-remove-confirm'));
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path.startsWith('/inventory/'))).toBe(true));
+  });
+
+  it('Remove this definition names it and sends the DELETE only on the confirm', async () => {
+    const calls: { method: string; path: string }[] = [];
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: { kind: 'present', health: HEALTH, base: '' },
+        call: async (method, path) => {
+          calls.push({ method, path });
+          return { kind: 'ok', text: '' };
+        },
+      }),
+    );
+    await useToolRegistryStore.getState().refresh();
+    useManageModeStore.getState().openManage('tools');
+    render(<ManageMode />);
+
+    fireEvent.click(screen.getByTestId(`manage-tools-row-${USER.key}`));
+    fireEvent.click(screen.getByTestId('manage-remove-definition'));
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+    expect(screen.getByTestId('manage-remove-definition-sentence').textContent).toContain(USER.tool.name);
+
+    fireEvent.click(screen.getByTestId('manage-remove-definition-confirm'));
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path.startsWith('/tools/'))).toBe(true));
+  });
+});

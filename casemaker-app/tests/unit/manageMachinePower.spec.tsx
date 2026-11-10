@@ -12,6 +12,7 @@ import type { MachineRecord } from '@/platform/locationClient';
 const world = vi.hoisted(() => ({
   status: null as string | null,
   switched: [] as boolean[],
+  removed: [] as string[],
 }));
 
 vi.mock('@/platform/capabilities', async (orig) => ({
@@ -30,6 +31,10 @@ vi.mock('@/platform/powerClient', async (orig) => ({
     kind: 'ok',
     status: { switch: null, hasToken: true, state: { kind: 'on' }, problem: null },
   }),
+  houseRemovePower: async (id: string) => {
+    world.removed.push(id);
+    return { kind: 'ok' };
+  },
   houseSwitchPower: async (_id: string, on: boolean) => {
     world.switched.push(on);
     return { kind: 'ok', status: { switch: null, hasToken: true, state: { kind: on ? 'on' : 'off' }, problem: null } };
@@ -37,6 +42,7 @@ vi.mock('@/platform/powerClient', async (orig) => ({
 }));
 
 const { MachinePower } = await import('@/components/manage/MachinePower');
+const { powerSwitchName } = await import('@/components/manage/display');
 
 const MACHINE: MachineRecord = {
   id: 'm-1',
@@ -66,6 +72,7 @@ async function pressOff() {
 beforeEach(() => {
   world.status = null;
   world.switched = [];
+  world.removed = [];
 });
 afterEach(cleanup);
 
@@ -90,5 +97,36 @@ describe('#416 the card’s Off', () => {
     expect(screen.getByTestId('manage-power-note').textContent).toContain('switch it off anyway');
     fireEvent.click(confirm);
     await waitFor(() => expect(world.switched).toEqual([false]));
+  });
+});
+
+// #1150 — REMOVE THE SWITCH TAKES TWO PRESSES, and the second names the switch it forgets.
+describe('#1150 the card’s Remove the switch', () => {
+  it('names the switch first, sends nothing on Cancel, and removes on the confirm', async () => {
+    render(<MachinePower machine={MACHINE} sleep={async () => {}} />);
+    fireEvent.click(screen.getByTestId('manage-power-remove'));
+    expect(world.removed).toEqual([]);
+    expect(screen.getByTestId('manage-power-remove-sentence').textContent).toBe(
+      'Remove the link to the power switch “Makera CNC”? The plug stays as it is.',
+    );
+
+    fireEvent.click(screen.getByTestId('manage-power-remove-cancel'));
+    expect(world.removed).toEqual([]);
+    expect(screen.getByTestId('manage-power-remove')).not.toBeNull();
+
+    fireEvent.click(screen.getByTestId('manage-power-remove'));
+    fireEvent.click(screen.getByTestId('manage-power-remove-confirm'));
+    await waitFor(() => expect(world.removed).toEqual(['m-1']));
+  });
+});
+
+// #1150 — the switch's human name is derived from its entity id (the service reads no friendly name),
+// with the id itself as the last fallback rather than a broken name.
+describe('#1150 powerSwitchName', () => {
+  it('turns switch.makera_cnc into “Makera CNC”', () => {
+    expect(powerSwitchName('switch.makera_cnc')).toBe('Makera CNC');
+    expect(powerSwitchName('switch.shop_vacuum_2')).toBe('Shop Vacuum 2');
+    expect(powerSwitchName('mystery')).toBe('Mystery');
+    expect(powerSwitchName('')).toBe('');
   });
 });
