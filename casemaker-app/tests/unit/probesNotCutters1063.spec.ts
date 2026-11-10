@@ -7,8 +7,12 @@
  * cutter, got a refusal, and stated one `goal-cutter-unfeedable` line each ("no cutting parameters
  * in … — not a candidate") — true of a cutter that cannot be fed, wrong for an instrument.
  *
- * The rule: `isCuttingRecord` (typeText 'Probe' or shape 'unknown' is NOT a cutter) filters the
- * house up front, and ONE aggregate statement names every instrument record instead.
+ * The rule: `isCuttingRecord` (typeText 'Probe', shape 'probe' or shape 'unknown' is NOT a cutter)
+ * filters the house up front, and ONE aggregate statement names every instrument record instead.
+ *
+ * #1053 — probes have a real shape now: `shapeFromType('Probe')` is 'probe', and the 3D probe's
+ * fixture carries its measured trigger radius. The legacy 'unknown' row stays covered: a record
+ * saved before the shape existed is still excluded.
  *
  * RED at m1-follow (217a4f518): two `goal-cutter-unfeedable` statements, no
  * `goal-cutter-instrument`.
@@ -17,7 +21,8 @@ import { describe, expect, it } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
 import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
-import { flatEndMill, isCuttingRecord, type Tool } from '@/engine/cnc/tool';
+import { flatEndMill, isCuttingRecord, shapeFromType, type Tool } from '@/engine/cnc/tool';
+import { ToolSchema } from '@/engine/cnc/toolLibrary';
 import type { ParsedMesh } from '@/engine/import/stlParser';
 
 const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6-1063', name: 'flat-6' });
@@ -29,7 +34,11 @@ const PROBE_V2: Tool = {
 const PROBE_3D: Tool = {
   ...flatEndMill(3.175, { number: 8888, id: 'probe-3d', name: 'Makera 3D probe' }),
   typeText: 'Probe',
-  shape: 'unknown',
+  // #1053 — the real shape and the survey's measured trigger radius (the stylus ball's ⌀ stays
+  // null until someone calipers it).
+  shape: 'probe',
+  tipDiameter: null,
+  triggerRadiusMm: 0.15,
 };
 
 function block(): ParsedMesh {
@@ -61,10 +70,33 @@ const INPUT: ModelPlanInput = {
 describe('#1063 isCuttingRecord', () => {
   it('a probe record is not a cutter, on either statement', () => {
     expect(isCuttingRecord({ typeText: 'Probe', shape: 'unknown' })).toBe(false);
-    // Either statement alone is enough: a probe shape that classified (until #1053 gives it a real
-    // shape), or an unknown shape that calls itself something else.
+    // Either statement alone is enough: a probe shape, or an unknown shape that calls itself
+    // something else.
     expect(isCuttingRecord({ typeText: 'Probe', shape: 'flat' })).toBe(false);
     expect(isCuttingRecord({ typeText: 'Flat End', shape: 'unknown' })).toBe(false);
+    // #1053 — the shape alone excludes: a row typed 'probe' is an instrument whatever its type
+    // text says.
+    expect(isCuttingRecord({ typeText: 'Probe', shape: 'probe' })).toBe(false);
+    expect(isCuttingRecord({ typeText: 'Something else', shape: 'probe' })).toBe(false);
+  });
+
+  it('#1053 the probe shape comes from the type text, and its row round-trips', () => {
+    expect(shapeFromType('Probe')).toBe('probe');
+    expect(shapeFromType('Makera 3D Probe')).toBe('probe');
+    expect(shapeFromType('Touch Probe')).toBe('probe');
+    // The row the house stores: a probe with the survey's trigger radius and an uncalipered ⌀.
+    const probe = ToolSchema.parse({
+      ...PROBE_3D,
+      number: 8888,
+      id: 'makera-3d-probe',
+      name: 'Makera 3D Probe',
+    });
+    expect(probe.shape).toBe('probe');
+    expect(probe.triggerRadiusMm).toBe(0.15);
+    expect(probe.tipDiameter).toBeNull();
+    // A cutter that states no trigger radius parses as undefined — the field is a probe's own.
+    const flat = ToolSchema.parse(FLAT6);
+    expect(flat.triggerRadiusMm).toBeUndefined();
   });
 
   it('every ordinary cutter is one', () => {

@@ -2668,3 +2668,29 @@ describe('#1059 a job in the 4th-axis chuck reads the chuck’s mount, load and 
     expect(words(vise, 'mount')).toContain('locating pins');
   });
 });
+
+/**
+ * #1053 — THE PROBE THE SHEET NAMES IS THE ONE THE MACHINE HAS CHECKED OUT.
+ *
+ * The probe rows carry a real shape now (`shape: 'probe'`), and the sheet's probe steps name the
+ * checked-out instrument instead of saying "the probe" generically. With none recorded (or a
+ * headless caller with no machine record), the shipped wired probe's sentence stands unchanged.
+ */
+describe('#1053 the sheet names the checked-out probe', () => {
+  it('the need line and the fit step name it; with none recorded, the shipped-probe sentence stands', () => {
+    const job = dj();
+    const withProbe = sheetFor(job, NO_SIM, NC, {
+      materialScan: true,
+      probeName: 'Makera 3D Probe',
+      probeInstrument: 'xyz',
+    });
+    const all = withProbe.sections.flatMap((s) => s.steps.map((step) => step.text)).join('\n');
+    expect(all).toContain('the Makera 3D Probe — the probe checked out on the machine');
+    expect(all).toContain('Fit the Makera 3D Probe and touch off ONCE');
+
+    const without = sheetFor(job, NO_SIM, NC, { materialScan: true });
+    const generic = without.sections.flatMap((s) => s.steps.map((step) => step.text)).join('\n');
+    expect(generic).toContain('the wired probe that ships with the machine');
+    expect(generic).toContain('Fit the probe and touch off ONCE');
+  });
+});

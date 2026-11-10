@@ -22,7 +22,9 @@
 export type RouteRotaryClass = 'none' | 'indexed' | 'wrapped';
 
 /** `Tool['shape']` (`@/engine/cnc/tool`), read verbatim off the tool. */
-export type RouteToolShape = 'flat' | 'ball' | 'tapered-ball' | 'engraving' | 'chamfer' | 'drill' | 'thread' | 'bull' | 'unknown';
+// #1053 — 'probe' is an instrument that never reaches the router (a probe is never a candidate);
+// the member exists so a Tool's shape passes through without a cast.
+export type RouteToolShape = 'flat' | 'ball' | 'tapered-ball' | 'engraving' | 'chamfer' | 'drill' | 'thread' | 'bull' | 'probe' | 'unknown';
 
 export interface RouteEngineInput {
   /** The tool's `shape`. A cone (`'engraving'` or `'chamfer'`), a `'drill'`, a `'thread'` mill, a

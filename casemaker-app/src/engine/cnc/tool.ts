@@ -19,18 +19,18 @@ import type { MkrRecord } from './gcode/types';
 import { mkrNumber } from './gcode/mkrHeader';
 import { isVShape, grooveRadiusAt, vCone, type VCone } from './vProfile';
 
-export type ToolShape = 'flat' | 'ball' | 'tapered-ball' | 'engraving' | 'chamfer' | 'drill' | 'thread' | 'bull' | 'unknown';
+export type ToolShape = 'flat' | 'ball' | 'tapered-ball' | 'engraving' | 'chamfer' | 'drill' | 'thread' | 'bull' | 'probe' | 'unknown';
 
 /**
- * #1063 — A PROBE IS NOT A CUTTER. The shop inventory carries instruments (the k3 export has
- * `makera-wired-probe-v2` and `makera-3d-probe`) whose records state no cutting geometry: their
- * `typeText` is 'Probe' and their shape falls through to 'unknown'. Such a record must never be a
+ * #1063/#1053 — A PROBE IS NOT A CUTTER. The shop inventory carries instruments (the k3 export has
+ * `makera-wired-probe-v2` and `makera-3d-probe`) whose records state no cutting geometry: they are
+ * `shape: 'probe'` (a 'Probe' `typeText` still answers for a record saved before the shape existed,
+ * and 'unknown' stays excluded — an instrument is never a cutter). Such a record must never be a
  * candidate — not in the planner's house and not in the UI's cutter picker — and its exclusion is
- * stated once, in aggregate, never as a per-record "no feeds" line. #1053 will give probes a real
- * shape; until then these two statements are the rule.
+ * stated once, in aggregate, never as a per-record "no feeds" line.
  */
 export function isCuttingRecord(tool: Pick<Tool, 'typeText' | 'shape'>): boolean {
-  return tool.typeText !== 'Probe' && tool.shape !== 'unknown';
+  return tool.typeText !== 'Probe' && tool.shape !== 'unknown' && tool.shape !== 'probe';
 }
 
 export interface Tool {
@@ -42,8 +42,14 @@ export interface Tool {
   shape: ToolShape;
   /** Shank diameter, mm. */
   handleDiameter: number | null;
-  /** Cutting diameter at the tip, mm. For a flat end mill this IS the cutting diameter. */
+  /** Cutting diameter at the tip, mm. For a flat end mill this IS the cutting diameter; for a probe it is the stylus ball's ⌀. */
   tipDiameter: number | null;
+  /**
+   * #1053 — A TOUCH PROBE'S EFFECTIVE TRIGGER RADIUS, mm: the measured distance from the stylus
+   * centre to the point where the trigger fires (the 3D probe's pre-travel). Null on every cutter
+   * and on a probe nobody has measured. It is not a cutting radius and no CAM reads it.
+   */
+  triggerRadiusMm?: number | null;
   /** `diameter=`: for engravers, drills and chamfers Makera writes the SHANK here; for flat ends the cutting diameter. */
   diameter: number | null;
   cornerRadius: number | null;
@@ -91,6 +97,10 @@ export function shapeFromType(typeText: string): ToolShape {
   if (s.includes('drill')) return 'drill';
   if (s.includes('thread')) return 'thread';
   if (s.includes('bull')) return 'bull';
+  // #1053 — the touch probes: Makera's `type=Probe` rows and the house's own. A probe is an
+  // instrument, not a cutter; the shape exists so a row says what it is and the pickers exclude it
+  // by name rather than by its type text.
+  if (s.includes('probe')) return 'probe';
   return 'unknown';
 }
 

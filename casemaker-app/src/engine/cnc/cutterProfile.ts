@@ -227,6 +227,9 @@ export const SHAPE_DIMENSION_CODES: Readonly<Record<ToolShape, readonly CutterDi
   drill: ['DS', 'DC', 'LS', 'LC'],
   thread: ['DS', 'DC', 'LS'],
   bull: ['DS', 'DC', 'LS', 'LC', 'CR'],
+  // #1053 — a probe is an instrument: its ball ⌀ and trigger radius are its own facts, not cutter
+  // dimensions, so it takes none of this vocabulary.
+  probe: [],
   unknown: [],
 };
 
@@ -238,6 +241,7 @@ const SHAPE_LABELS: Record<ToolShape, string> = {
   chamfer: 'chamfer cutter',
   drill: 'drill',
   thread: 'thread mill',
+  probe: 'touch probe',
   bull: 'bull nose',
   unknown: 'cutter of an unknown shape',
 };
