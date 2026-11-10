@@ -9,7 +9,6 @@ import { computeShellDims } from '@/engine/compiler/caseShell';
 import { bboxOfOp } from '@/engine/compiler/connectivity';
 import { parseProject, serializeProject } from '@/store/persistence';
 import { computeLidDims } from '@/engine/compiler/lid';
-import { exec } from './helpers/manifoldExec';
 import type { BoardProfile, CaseParameters, HingeFeature } from '@/types';
 import type { BuildOp } from '@/engine/compiler/buildPlan';
 

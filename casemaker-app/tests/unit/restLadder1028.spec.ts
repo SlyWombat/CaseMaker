@@ -58,7 +58,7 @@ function goalJob(target: EngraveTargetObject): EngraveJob {
 
 async function plateInput(shop: Parameters<typeof buildModelPlanInputForGoal>[3], tool: Tool = BALL6): Promise<{ input: ModelPlanInput; target: EngraveTargetObject; job: EngraveJob }> {
   // #1180 B1 — the same plate + shop is built by several cases; once per file by its own key.
-  const key = `plate:${tool.id}:${shop.tools.map((t) => t.key).sort().join('+')}:${shop.feeds.length}`;
+  const key = `plate:${tool.id}:${(shop.tools ?? []).map((t) => t.key).sort().join('+')}:${shop.feeds?.length ?? 0}`;
   return once(key, async () => {
     const target = goalTarget();
     const job = goalJob(target);

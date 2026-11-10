@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { countOps } from './helpers/printModel';
 import { useProjectStore, createDefaultProject } from '@/store/projectStore';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
-import type { BuildOp } from '@/engine/compiler/buildPlan';
 
 describe('Issue #33 — enabling ventilation auto-fills coverage and pattern', () => {
   beforeEach(() => {

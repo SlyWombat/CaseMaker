@@ -3,7 +3,6 @@ import { countOps } from './helpers/printModel';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { createDefaultProject } from '@/store/projectStore';
 import type { JointType } from '@/types';
-import type { BuildOp } from '@/engine/compiler/buildPlan';
 
 describe('Issue #27 — lid posts present on every joint', () => {
   const joints: JointType[] = ['flat-lid', 'snap-fit', 'screw-down'];

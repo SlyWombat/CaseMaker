@@ -30,10 +30,9 @@ import {
   lidIsRecessed,
 } from '@/engine/compiler/lidMode';
 import { bboxOfOp } from '@/engine/compiler/connectivity';
-import { cube, intersection, translate, type BuildOp } from '@/engine/compiler/buildPlan';
 import { createDefaultProject } from '@/store/projectStore';
 import { parseProject, serializeProject } from '@/store/persistence';
-import type { BoardProfile, CaseParameters } from '@/types';
+import type { CaseParameters } from '@/types';
 import type { Project } from '@/types/project';
 import { exec } from './helpers/manifoldExec';
 

@@ -19,7 +19,7 @@ import { aabbOfOp, union, type BuildOp } from '@/engine/compiler/buildPlan';
 import { cavityOriginXY } from '@/engine/coords';
 import { createDefaultProject } from '@/store/projectStore';
 import { serializeProject, parseProject } from '@/store/persistence';
-import type { BoardProfile, CaseParameters, RackParams } from '@/types';
+import type { CaseParameters, RackParams } from '@/types';
 import { Manifold, exec, type ManifoldInstance } from './helpers/manifoldExec';
 
 const baseCase: CaseParameters = {
