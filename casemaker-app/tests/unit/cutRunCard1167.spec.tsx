@@ -134,6 +134,26 @@ describe('#1167 the Cut card lists the whole job', () => {
     expect((screen.getByTestId('engrave-cut-card-stop') as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('stale finishedPrograms hashes from an OLD package do not count (17-program job)', () => {
+    // The bench case (2026-11-10): land17's tray is a NEW 17-program package while the machine
+    // record still holds two hashes from yesterday's 20-program package. The done count is
+    // hash-membership in THIS package, so those hashes cannot mark any new program done.
+    const job = trayJob();
+    const pkg = packageOf(job, 17);
+    const stale = ['5343dd8c', '1e4e7ef9'];
+    const model = cutCardModel({ job, pkg, plan: planOf(17), finishedHashes: stale, runningIndex: null });
+    expect(model.total).toBe(17);
+    expect(model.done).toBe(0);
+    expect(model.rows.some((r) => r.kind === 'program' && r.done)).toBe(false);
+    render(<CutRunCard job={job} pkg={pkg} plan={planOf(17)} finishedHashes={stale} target={null} />);
+    const card = screen.getByTestId('engrave-cut-card');
+    expect(card.textContent).toContain('17 programs');
+    expect(card.textContent).not.toContain('1 done');
+    expect(card.textContent).not.toContain('20 programs');
+    expect(screen.getAllByTestId(/^engrave-cut-card-row-/)).toHaveLength(17);
+    expect(card.querySelectorAll('[data-state="done"]')).toHaveLength(0);
+  });
+
   it('a one-program card has no flip row and one program row', () => {
     const job = defaultEngraveJob();
     job.toolKey = 'flat-1.0';
