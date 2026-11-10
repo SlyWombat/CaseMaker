@@ -2449,7 +2449,7 @@ describe('#1179 B the cut blank’s top is measured on known depths, never asked
   });
 
   /** A fake console that reads a per-work-point machine Z on every Z probe (fast and slow). */
-  function pointedConsole(zByWork: ReadonlyMap<string, number>) {
+  function pointedConsole(zByWork: ReadonlyMap<string, number | null>) {
     const z1 = fakeZ1({ actual: BLANK });
     let lastX = 0;
     let lastY = 0;
@@ -2464,9 +2464,13 @@ describe('#1179 B the cut blank’s top is measured on known depths, never asked
             lastY = Number(move[2]);
           }
           if (/^G38\.3 Z-[\d.]+ F[\d.]+$/.test(line)) {
-            const z = zByWork.get(key());
-            if (z !== undefined) {
-              return { kind: 'sent', line: '', text: `[PRB:${lastX.toFixed(3)},${lastY.toFixed(3)},${z.toFixed(3)}:1]\nok`, frames: 1, elapsedMs: 1 };
+            if (zByWork.has(key())) {
+              const z = zByWork.get(key());
+              const text =
+                z === null
+                  ? `[PRB:${lastX.toFixed(3)},${lastY.toFixed(3)},-70.000:0]\nok`
+                  : `[PRB:${lastX.toFixed(3)},${lastY.toFixed(3)},${z.toFixed(3)}:1]\nok`;
+              return { kind: 'sent', line: '', text, frames: 1, elapsedMs: 1 };
             }
           }
           return z1.console.send(line, timing);
@@ -2516,11 +2520,12 @@ describe('#1179 B the cut blank’s top is measured on known depths, never asked
     expect(r.outcome.notes.join(' ')).toContain('implied top');
   });
 
-  it('a chip and a low floor with no pair: a fourth touch settles it on the highest agreeing pair', async () => {
+  it('a higher lone reading is not out-voted by a lower pair: a fourth touch finds its partner', async () => {
+    // top (alone, high), two floors 0.6 lower agreeing with each other, then a second top.
     const map = new Map([
       ['5,5', SURFACE],
-      ['33,10', SURFACE + 0.3],
-      ['20,50', SURFACE - 0.2],
+      ['33,10', SURFACE - 0.6],
+      ['20,50', SURFACE - 0.6],
       ['60,5', SURFACE],
     ]);
     const { console } = pointedConsole(map);
@@ -2528,6 +2533,60 @@ describe('#1179 B the cut blank’s top is measured on known depths, never asked
     if (!r.ok) throw new Error(r.reason);
     expect(r.outcome.surfaceChecks).toHaveLength(4);
     expect(r.outcome.surfaceZ).toBeCloseTo(SURFACE, 3);
+  });
+
+  it('a chip above three agreeing tops is out-voted, and the record says it was not used', async () => {
+    const map = new Map([
+      ['5,5', SURFACE + 0.3],
+      ['33,10', SURFACE],
+      ['20,50', SURFACE],
+      ['60,5', SURFACE],
+    ]);
+    const { console } = pointedConsole(map);
+    const r = await runRegistration(withChecks(PTS), { console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    // The lone chip keeps pulling touches until the five-candidate cap; the answer is the level
+    // three checks agree on, and the record names the chip it did not use.
+    expect(r.outcome.surfaceChecks).toHaveLength(5);
+    expect(r.outcome.surfaceZ).toBeCloseTo(SURFACE, 3);
+    expect(r.outcome.notes.join(' ')).toContain('was not used');
+  });
+
+  it('a lone top, a lower pair and two misses stop, naming every reading', async () => {
+    const map = new Map<string, number | null>([
+      ['5,5', SURFACE],
+      ['33,10', SURFACE - 0.6],
+      ['20,50', SURFACE - 0.6],
+      ['60,5', null],
+      ['15,30', null],
+    ]);
+    const { console } = pointedConsole(map);
+    const r = await runRegistration(withChecks(PTS), { console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toContain('could not be proved');
+      expect(r.reason).toContain('found nothing');
+    }
+    expect(r.outcome === undefined).toBe(true);
+  });
+
+  it('a floor candidate is sought in a band shifted by its depth, and its implied top is recovered', async () => {
+    // Two known floors 5.77 mm below the top: the band shifts down, both agree on the top.
+    const FLOOR = 5.77;
+    const floorChecks = [
+      { x: 5, y: 5, depthMm: FLOOR },
+      { x: 33, y: 10, depthMm: FLOOR },
+    ];
+    const map = new Map([
+      ['5,5', SURFACE - FLOOR],
+      ['33,10', SURFACE - FLOOR],
+    ]);
+    const { console } = pointedConsole(map);
+    const r = await runRegistration(withChecks(floorChecks), { console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.outcome.surfaceZ).toBeCloseTo(SURFACE, 3);
+    expect(r.outcome.surfaceChecks![0]!.machineZ).toBeCloseTo(SURFACE - FLOOR, 3);
+    expect(r.outcome.surfaceChecks![0]!.impliedMachineZ).toBeCloseTo(SURFACE, 3);
   });
 
   it('five readings with no agreeing pair stop, naming every implied top', async () => {

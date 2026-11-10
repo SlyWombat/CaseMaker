@@ -850,11 +850,16 @@ function bracketTopWords(top: { machineZ: number; seat: number | null; thickness
 }
 
 /**
- * #1179 B — THE CUT BLANK'S TOP, PROVED (the maintainer's restated rule). Touch three spread
- * candidates (two if only two exist); a reading + its point's depth is the IMPLIED top, and the top
- * is the HIGHEST implied level on which at least two agree within `cutBlankAgreeMm`. A single high
- * reading is not the top — touch on, up to five candidates; after five without a pair, stop naming
- * every reading. A reading that finds nothing or reads below the band never agrees.
+ * #1179 B — THE CUT BLANK'S TOP, PROVED (the maintainer's restated rule; the analyst's amendments).
+ *
+ * Touch three spread points first (two if only two exist). A reading + its point's depth is the
+ * IMPLIED top, and its seek's band is shifted by that depth (a floor d below the top can only be
+ * found inside the shifted band). After the first three, touch on (up to five) while the highest
+ * reading stands ALONE more than `cutBlankAgreeMm` above the best agreeing pair — a higher lone
+ * reading may be the real top and must not be out-voted by a lower pair (today's tray: unrecorded
+ * floors). At the end: the highest reading WITH a partner is the top; if it is still alone after
+ * five, a lower level is accepted only when at least THREE readings agree on it (the high one is
+ * then the outlier — a chip — and the note says so); otherwise stop, naming every reading.
  */
 async function proveCutBlankTop(
   io: Session,
@@ -864,6 +869,7 @@ async function proveCutBlankTop(
   prb: Prb;
   at: { x: number; y: number };
   readings: NonNullable<RunData['surfaceChecks']>;
+  outlier: { machineZ: number; at: { x: number; y: number } } | null;
 }> {
   type CheckReading = NonNullable<RunData['surfaceChecks']>[number];
   type Good = { reading: CheckReading; prb: Prb; implied: number };
@@ -873,28 +879,51 @@ async function proveCutBlankTop(
   const first = Math.min(3, checks.length);
   const readings: CheckReading[] = [];
   const good: Good[] = [];
+  const highestOf = (): Good | null =>
+    good.reduce<Good | null>((best, g) => (best === null || g.implied > best.implied ? g : best), null);
+  /** The HIGHEST implied level with at least two readings within the agreement. */
   const pairOf = (): { a: Good; b: Good } | null => {
-    // The HIGHEST implied level with at least two readings within the agreement.
     const sorted = [...good].sort((x, y) => y.implied - x.implied);
     for (let i = 0; i < sorted.length; i++) {
       for (let j = i + 1; j < sorted.length; j++) {
-        if (Math.abs(sorted[i]!.implied - sorted[j]!.implied) <= agreeMm + 1e-9) {
-          return { a: sorted[i]!, b: sorted[j]! };
-        }
+        if (Math.abs(sorted[i]!.implied - sorted[j]!.implied) <= agreeMm + 1e-9) return { a: sorted[i]!, b: sorted[j]! };
       }
     }
     return null;
   };
+  /** The highest level at which at least THREE readings agree (the outlier case's answer). */
+  const levelWithThree = (): { best: Good; group: Good[] } | null => {
+    const sorted = [...good].sort((x, y) => y.implied - x.implied);
+    for (const candidate of sorted) {
+      const group = sorted.filter((g) => Math.abs(g.implied - candidate.implied) <= agreeMm + 1e-9);
+      if (group.length >= 3) return { best: group[0]!, group };
+    }
+    return null;
+  };
   for (let index = 0; index < checks.length && index < 5; index++) {
-    if (index >= first && pairOf() !== null) break;
+    if (index >= first) {
+      const pair = pairOf();
+      const highest = highestOf();
+      // Keep touching while the highest reading stands alone above the best pair (it may find its
+      // partner at its own level), or while no pair exists at all.
+      if (pair !== null && highest !== null && highest.implied - pair.a.implied <= agreeMm + 1e-9) break;
+    }
     const check = checks[index]!;
+    // #1179 B (analyst) — THE BAND FOLLOWS THE POINT'S DEPTH: a floor d below the top is sought in
+    // [min − d, max − d], so a known floor can be found at all. The lateral move stays at the
+    // plan's travel height (the high approach; clamps and arms are clear there).
+    const band = {
+      min: r3(plan.seek.band.min - check.depthMm),
+      max: r3(plan.seek.band.max - check.depthMm),
+    };
     const missed: Partial<SurfaceMiss> = {};
     const prb = await seekSurface(
       io,
       plan,
       {
         ...plan.seek.band,
-        at: `as low as machine Z ${f(plan.seek.band.min)} for the cut-blank check at (${f(check.x)}, ${f(check.y)})`,
+        ...band,
+        at: `as low as machine Z ${f(band.min)} for the cut-blank check at (${f(check.x)}, ${f(check.y)})`,
         expect: 'no wood was found at this check point on a blank that has been cut',
       },
       {
@@ -923,14 +952,35 @@ async function proveCutBlankTop(
       label: `cut-blank check ${readings.length} of ${Math.min(5, checks.length)} · depth ${f(check.depthMm)} mm`,
       x: check.x,
       y: check.y,
-      z: prb === null ? (missed.z ?? plan.seek.band.min) : prb.z,
+      z: prb === null ? (missed.z ?? band.min) : prb.z,
       touched: prb !== null,
       kind: null,
     });
     if (prb !== null && implied !== null) good.push({ reading, prb, implied });
   }
+  const highest = highestOf();
   const pair = pairOf();
-  if (pair === null) {
+  const topHasPartner = pair !== null && highest !== null && Math.abs(pair.a.implied - highest.implied) <= 1e-9;
+  let accepted: { level: number; from: Good; agreement: string; outlier: Good | null } | null = null;
+  if (topHasPartner) {
+    accepted = {
+      level: pair.a.implied,
+      from: pair.a,
+      agreement: `the higher of two agreeing touches (${f(pair.b.implied)})`,
+      outlier: null,
+    };
+  } else {
+    const three = levelWithThree();
+    if (three !== null) {
+      accepted = {
+        level: three.best.implied,
+        from: three.best,
+        agreement: `the level ${three.group.length} checks agree on`,
+        outlier: highest !== null && highest.implied > three.best.implied + agreeMm ? highest : null,
+      };
+    }
+  }
+  if (accepted === null) {
     const words = readings
       .map((r, i) => {
         const what =
@@ -946,13 +996,18 @@ async function proveCutBlankTop(
       `the top on this cut blank could not be proved: ${words} — no two implied tops agree within ${f(agreeMm)} mm`,
     );
   }
-  const high = pair.a.implied >= pair.b.implied ? pair.a : pair.b;
-  const low = pair.a === high ? pair.b : pair.a;
   io.at(
-    `the top is proved on a cut blank: implied machine Z ${f(high.implied)} at (${f(high.reading.x)}, ${f(high.reading.y)}) — ` +
-      `${f(Math.abs(high.implied - low.implied))} mm from the agreeing touch at (${f(low.reading.x)}, ${f(low.reading.y)})`,
+    `the top is proved on a cut blank: implied machine Z ${f(accepted.level)} at (${f(accepted.from.reading.x)}, ${f(accepted.from.reading.y)}) — ${accepted.agreement}` +
+      (accepted.outlier !== null
+        ? `; the lone high reading implied ${f(accepted.outlier.implied)} at (${f(accepted.outlier.reading.x)}, ${f(accepted.outlier.reading.y)}) was not used`
+        : ''),
   );
-  return { prb: { ...high.prb, z: high.implied }, at: { x: high.reading.x, y: high.reading.y }, readings };
+  return {
+    prb: { ...accepted.from.prb, z: accepted.level },
+    at: { x: accepted.from.reading.x, y: accepted.from.reading.y },
+    readings,
+    outlier: accepted.outlier === null ? null : { machineZ: accepted.outlier.implied, at: { x: accepted.outlier.reading.x, y: accepted.outlier.reading.y } },
+  };
 }
 
 /**
@@ -1974,6 +2029,7 @@ export async function runRegistration(
     // #1179 B — where the accepted reading was taken (a check point) and what every check read.
     let surfaceAt: { x: number; y: number } | null = null;
     let cutBlankChecks: NonNullable<RunData['surfaceChecks']> | undefined;
+    let cutBlankOutlier: { machineZ: number; at: { x: number; y: number } } | null = null;
     const checks = plan.surfaceChecks ?? [];
     let slow: Prb | null;
     if (chosenTop !== null) {
@@ -1988,6 +2044,7 @@ export async function runRegistration(
       slow = proved.prb;
       surfaceAt = proved.at;
       cutBlankChecks = proved.readings;
+      cutBlankOutlier = proved.outlier;
     } else {
       slow = await seekSurface(
         io,
@@ -2149,7 +2206,7 @@ export async function runRegistration(
         })
         .join('; ');
       outcome.notes.push(
-        `the top was measured on a cut blank: ${read}; the accepted implied top is machine Z ${f(slow.z)}` +
+        `the top was measured on a cut blank: ${read}; the accepted implied top is machine Z ${f(slow.z)} (${cutBlankOutlier === null ? 'the higher of two agreeing touches or the level three agree on' : `three checks agree; the lone high reading implied ${f(cutBlankOutlier.machineZ)} at (${f(cutBlankOutlier.at.x)}, ${f(cutBlankOutlier.at.y)}) is a chip or an unrecorded floor and was not used`})` +
           (plan.surfaceChecksUnknown === true
             ? ' — the earlier plan’s cuts are not recorded, so the check points are outside today’s footprint and assumed uncut'
             : ''),
