@@ -126,6 +126,12 @@ export interface FakeConsoleOptions {
   /** #1169 — the controller raises an alarm when the run reaches this line: the reply carries
    *  `ALARM:` and the run ends. */
   alarmAtLine?: number;
+  /**
+   * #1170 — where an idle machine reports its head. Default `[0,0,0]`; `[-1,-1,-1]` is the
+   * controller's HOMED rest, which `readMachineRest` reads as homed. A test that exercises the
+   * flip card's arrival (home before the light) needs the fake to say it is already home.
+   */
+  idleMpos?: readonly [number, number, number];
 }
 
 /**
@@ -237,7 +243,9 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
     }
     const state = phase === 'running' ? 'Run' : phase === 'paused' ? 'Hold' : 'Idle';
     const progress = phase === 'idle' || phase === 'stopped' ? '' : `|P:${line},${phase === 'done' ? 100 : percent},${elapsed}`;
-    return `<${state}|MPos:0,0,0|WPos:0,0,0${progress}|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>`;
+    const [mx, my, mz] = opts.idleMpos ?? [0, 0, 0];
+    const mpos = `${mx.toFixed(3)},${my.toFixed(3)},${mz.toFixed(3)}`;
+    return `<${state}|MPos:${mpos}|WPos:0,0,0${progress}|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>`;
   };
 
   const replyFor = (text: string): number[] => {

@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 
-import { CutterList, postedCuttersFor } from '@/components/panels/CutterList';
+import { CutterList, postedCuttersFor, programsWords } from '@/components/panels/CutterList';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { resetRegistry, setInventoryEntries, setRegistry } from '@/engine/cnc/toolRegistry';
 
@@ -59,6 +59,20 @@ describe('#1123 item 5 — one cutter list, one row per distinct cutter in progr
     expect(rows[0]!.textContent).toContain('⌀ 6 mm flat end');
     expect(rows[1]!.textContent).toContain('p02');
     for (const row of rows) expect(row.textContent).not.toContain('inv:');
+  });
+
+  it('#1170 review — consecutive programs are a RANGE: a 20-program row is one line, not a vertical list', () => {
+    expect(programsWords([1, 2, 3])).toBe('p01–p03');
+    expect(programsWords([1, 2, 3, 5, 6, 9])).toBe('p01–p03, p05–p06, p09');
+    expect(programsWords([1, 3])).toBe('p01, p03');
+    expect(programsWords([])).toBe('');
+    // The visible row must not print twenty ids in the narrow column.
+    setInventoryEntries([{ key: 'inv:flat-6', provenance: 'test', tool: FLAT('6 mm flat end', 6, 25) }]);
+    const cutters = postedCuttersFor(Array.from({ length: 20 }, () => program('inv:flat-6')));
+    render(<CutterList cutters={cutters} />);
+    const row = screen.getByTestId('engrave-cutter-row');
+    expect(row.textContent).toContain('p01–p20');
+    expect(row.textContent).not.toContain('p01, p02');
   });
 
   it('says the tier when two cutters share a display name, and only then (#1051)', () => {

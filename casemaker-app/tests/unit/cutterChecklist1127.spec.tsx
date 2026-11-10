@@ -55,6 +55,15 @@ describe('#1127 the cutter checklist', () => {
     expect(rows[1]!.programs).toEqual([2]);
   });
 
+  it('#1170 review — a 20-program row reads as a range, so the programs column cannot leak a vertical list', () => {
+    seedRegistry();
+    const rows = cutterChecklistRows(Array.from({ length: 20 }, () => ({ toolKey: 'inv:flat-25' })));
+    render(<CutterChecklist rows={rows} entries={undefined} onSet={() => {}} />);
+    const row = screen.getByTestId('engrave-cutter-row');
+    expect(row.textContent).toContain('p01–p20');
+    expect(row.textContent).not.toContain('p01, p02');
+  });
+
   it('the gate stays closed until EVERY row is located or replaced, and names what is missing', () => {
     seedRegistry();
     const rows = cutterChecklistRows(PROGRAMS);

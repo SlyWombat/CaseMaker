@@ -1574,30 +1574,32 @@ describe('#819 the finished screen', () => {
     pendingStock: null,
   });
 
-  it('a finished run gives the Cut screen to its Done card — one line and one action — and a foreign run does not', () => {
+  it('a finished run keeps the three steps and puts its end card under them — and a foreign run shows neither', () => {
     const job = plannedJob();
     const pkg = frozen(job, [P1]);
 
-    // This job's run: the steps give way to the card and its one action.
+    // #1170 — THE STEPS STAY ABOVE THE END CARD (#1123 item 39). The job's own end card is below
+    // them, with its one primary action; the old done card no longer takes the screen.
     useMachineRunStore.setState({ runs: { [machineKey(TARGET)]: ended(job.id) } as never });
     draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
-    expect(screen.queryByTestId('engrave-cut-step-1')).toBeNull();
-    expect(screen.queryByTestId('engrave-cut-go')).toBeNull();
-    expect(screen.getByTestId('engrave-run-end').dataset.kind).toBe('finished');
-    expect(screen.getByTestId('engrave-run-done-title').textContent).toMatch(/^Finished · /);
-    expect(screen.getByTestId('engrave-run-outcome').textContent).toBe('Vacuum off (M852); homed.');
+    expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
+    expect(screen.getByTestId('engrave-cut-step-2')).toBeTruthy();
+    expect(screen.getByTestId('engrave-cut-step-3')).toBeTruthy();
+    expect(screen.getByTestId('engrave-cut-end-card')).toBeTruthy();
+    expect(screen.getByTestId('engrave-cut-end-save').textContent).toBe('Save the run record');
     expect(screen.queryByText('bookkeeping the card must not draw')).toBeNull();
     expect(screen.queryByTestId('engrave-run-start')).toBeNull();
-    expect(screen.getByTestId('engrave-run-another')).toBeTruthy();
 
     // Another job's run on the same machine: this job's steps stay — with the press step 3 owns —
-    // so the other job's end cannot take this screen. (The machine's own run panel still draws that
-    // entry inside step 3, as it always has: the entry belongs to the machine, not to the job.)
+    // so the other job's end cannot put this job's end card on the screen. (The machine's own run
+    // panel still draws that entry inside step 3, as it always has: the entry belongs to the
+    // machine, not to the job.)
     cleanup();
     useMachineRunStore.setState({ runs: { [machineKey(TARGET)]: ended('another-job') } as never });
     draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
     expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
     expect(screen.getByTestId('engrave-cut-go')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-cut-end-card')).toBeNull();
   });
 
   // #1123 item 39 — THE DONE CARD IS FOR A FINISHED JOB, NOT A FINISHED PROGRAM. At the bench a
