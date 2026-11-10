@@ -12,6 +12,7 @@ import { MachineChangeWizard } from '../machine-change';
 import { BedWizard } from '../bed-wizard';
 import { ContextPanel } from './ContextPanel';
 import { useContextPanelWidth } from './useContextPanelWidth';
+import { useSidebarCollapsed, SIDEBAR_COLLAPSED_W } from './useSidebarCollapsed';
 import { PanelResizeHandle } from './PanelResizeHandle';
 import { Viewport } from '@/components/viewport/Viewport';
 import { ManageMode } from '@/components/manage/ManageMode';
@@ -82,6 +83,8 @@ export function AppShell() {
   // #558 — the right rail's width is the operator's, persisted and handed to `.app-main` as a CSS
   // custom property the grid column and the drag handle both read.
   const { width: contextPanelWidth, resizeBy: resizeContextPanel } = useContextPanelWidth();
+  // #1123-47 — the left rail's collapse state (persisted; display only).
+  const { collapsed: sidebarCollapsed } = useSidebarCollapsed();
   // Issue #59 — board visualization cycle removed; no fallback banner needed.
   return (
     <div className="app-shell">
@@ -98,7 +101,14 @@ export function AppShell() {
       <CrashRecoveryBanner />
       <main
         className="app-main"
-        style={{ '--context-panel-width': `${contextPanelWidth}px` } as CSSProperties}
+        style={
+          {
+            '--context-panel-width': `${contextPanelWidth}px`,
+            // #1123-47 — the left rail's own width: the operator's collapse state, one source for
+            // the grid column and the rail's own class.
+            '--sidebar-width': `${sidebarCollapsed ? SIDEBAR_COLLAPSED_W : 320}px`,
+          } as CSSProperties
+        }
       >
         {/* Welcome mode owns the full main area — the board-picker catalog
             needs the width; sidebar/context panels are project UI anyway. */}

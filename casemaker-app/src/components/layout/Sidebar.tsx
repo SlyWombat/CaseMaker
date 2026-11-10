@@ -4,6 +4,7 @@ import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore, type SidebarSectionId } from '@/store/viewportStore';
 import { derivedKind, type Archetype } from '@/engine/compiler/archetype';
 import { MachinePin } from './MachinePin';
+import { useSidebarCollapsed } from './useSidebarCollapsed';
 
 /** Phone breakpoint, matching the welcome screen's ≤640px block. Below it the
  *  left rail is an off-canvas drawer instead of a fixed 320px column, which
@@ -124,6 +125,9 @@ export function Sidebar() {
   // Phone-width drawer (issue #134). Mirrors ContextPanel's compact pattern:
   // the rail leaves the grid, a fixed handle toggles it, and a section tap
   // hands off to the right-rail drawer (which auto-opens on the same change).
+  // #1123-47 — the rail collapses to its icons (desktop/tablet only; the phone drawer is
+  // unchanged). Persisted per browser; display state only.
+  const { collapsed, toggle, expand } = useSidebarCollapsed();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isCompact, setIsCompact] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth <= COMPACT_MAX_W : false,
@@ -162,10 +166,12 @@ export function Sidebar() {
     // drawer on the other edge, so leaving the rail up would bury the scene.
     if (isCompact) setDrawerOpen(false);
   };
+  const icons = collapsed && !isCompact;
   const className = [
     'sidebar',
     isCompact ? 'sidebar--drawer' : '',
     isCompact ? (drawerOpen ? 'sidebar--open' : 'sidebar--closed') : '',
+    icons ? 'sidebar--icons' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -185,10 +191,26 @@ export function Sidebar() {
         </button>
       )}
       <aside className={className} data-testid="sidebar" aria-label="Sections" style={{ padding: 8 }}>
+        {/* #1123-47 — the collapse control, at the rail's top edge. Desktop and tablet only: the
+            phone drawer keeps its own handle (the analyst's fields). */}
+        {!isCompact && (
+          <button
+            type="button"
+            data-testid="sidebar-collapse"
+            className="sidebar__collapse"
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? 'Expand the sections' : 'Collapse the sections'}
+            title={collapsed ? 'Expand the sections' : 'Collapse the sections'}
+            onClick={toggle}
+          >
+            {collapsed ? '▸' : '◂'}
+          </button>
+        )}
         {/* #556 / #555 — the machine, pinned above the section index so it stays in the frame while
             designing, simulating and cutting, not only on the Manage screen. Gated on the CNC UI
-            (`featureSim`) with the rest of the machine surface; the pin renders its own states. */}
-        {featureSim && <MachinePin />}
+            (`featureSim`) with the rest of the machine surface; the pin renders its own states.
+            #1123-47 — collapsed, it is its state dot alone, and a click expands the rail. */}
+        {featureSim && <MachinePin collapsed={icons} onExpand={expand} />}
         {sections.map((s) => {
           const isActive = activeSection === s.id;
           return (
@@ -198,13 +220,15 @@ export function Sidebar() {
               onClick={() => onSelect(s.id, isActive)}
               data-testid={`sidebar-button-${s.id}`}
               aria-pressed={isActive}
+              aria-label={`${s.label} — ${s.hint}`}
               title={s.hint}
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 10,
+                justifyContent: icons ? 'center' : 'flex-start',
+                gap: icons ? 0 : 10,
                 width: '100%',
-                padding: '10px 12px',
+                padding: icons ? '10px 0' : '10px 12px',
                 marginBottom: 4,
                 background: isActive ? '#243042' : '#1a1f25',
                 border: `1px solid ${isActive ? '#3a5a7a' : '#2a2f36'}`,
@@ -217,7 +241,7 @@ export function Sidebar() {
               }}
             >
               <span aria-hidden style={{ fontSize: 16 }}>{s.icon}</span>
-              <span>{s.label}</span>
+              {!icons && <span>{s.label}</span>}
             </button>
           );
         })}

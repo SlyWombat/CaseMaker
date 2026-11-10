@@ -76,14 +76,16 @@ body, html, #root {
      overlay costs less than a canvas of 220 px or less would. */
   /* #558 — the right column is the operator's width (default 360px), driven by the custom
      property AppShell sets from the persisted value. */
-  grid-template-columns: 320px 1fr var(--context-panel-width, 360px);
+  /* #1123-47 — the left column is the operator's collapse state (AppShell sets the property;
+     320 px expanded, 48 px as icons). */
+  grid-template-columns: var(--sidebar-width, 320px) 1fr var(--context-panel-width, 360px);
   min-height: 0;
   /* The drag handle's containing block (it is absolutely positioned over the right grid line). */
   position: relative;
 }
 @media (max-width: 1023px) {
   .app-main {
-    grid-template-columns: 320px 1fr;
+    grid-template-columns: var(--sidebar-width, 320px) 1fr;
   }
   /* #558 — below the rail/drawer edge the panel is a fixed drawer, not a grid column, so there
      is no boundary for the resize handle to straddle. */
@@ -112,6 +114,27 @@ body, html, #root {
   padding: var(--cm-space-3);
   background: var(--cm-color-surface-container-low);
   border-right: var(--cm-border-1);
+}
+
+/* #1123-47 — collapsed to the icons: the rail narrows (the grid column follows
+   `--sidebar-width`) and the padding tightens so a 16 px icon fits the 48 px column. */
+.sidebar--icons {
+  padding: 8px 6px;
+}
+.sidebar__collapse {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 4px;
+  background: #1a1f25;
+  border: 1px solid #2a2f36;
+  border-radius: 4px;
+  color: #9aa4b0;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sidebar--icons .sidebar__collapse {
+  padding: 6px 0;
 }
 
 /* Phones (#134) — the left section rail becomes an off-canvas drawer, the

@@ -43,7 +43,11 @@ const DOT_COLOUR: Record<DotState, string> = {
   unknown: '#5b6472',
 };
 
-export function MachinePin(): JSX.Element {
+/**
+ * #1123-47 — COLLAPSED, THE PIN IS ITS STATE DOT. The full pin text stays as the tooltip and the
+ * accessible name; a click expands the rail (the analyst's fields).
+ */
+export function MachinePin({ collapsed = false, onExpand }: { collapsed?: boolean; onExpand?: () => void } = {}): JSX.Element {
   useMachineHeartbeat();
   const machine = useMachineStore((s) => s.machine);
   const heartbeat = useMachineStore((s) => s.heartbeat);
@@ -81,6 +85,50 @@ export function MachinePin(): JSX.Element {
   }
 
   const lastSeen = heartbeat.lastSeenAt === null ? null : (formatStamp(heartbeat.lastSeenAt) ?? heartbeat.lastSeenAt);
+
+  if (collapsed) {
+    const fullText =
+      machine === null
+        ? 'No machine yet · Add one in Manage › Machines'
+        : `${name} · ${statusText}`;
+    return (
+      <button
+        type="button"
+        data-testid="machine-pin-collapsed"
+        data-state={dot}
+        onClick={() => onExpand?.()}
+        aria-label={`${fullText} — expand the sections`}
+        title={`${fullText} — press to expand the sections`}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '100%',
+          padding: '10px 0',
+          marginBottom: 8,
+          background: '#10151b',
+          border: '1px solid #2a2f36',
+          borderRadius: 4,
+          cursor: 'pointer',
+        }}
+      >
+        <span
+          data-testid={dotTestId}
+          data-state={dot}
+          role="img"
+          aria-label={dot === 'online' ? 'Machine online' : dot === 'offline' ? 'Machine offline' : 'Machine not checked'}
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: '50%',
+            flex: 'none',
+            background: DOT_COLOUR[dot],
+            border: '1px solid rgba(0, 0, 0, 0.4)',
+          }}
+        />
+      </button>
+    );
+  }
 
   return (
     <div
