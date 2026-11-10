@@ -1484,12 +1484,14 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           >
             This is a new blank
           </button>
-          {blankNote !== null && (
-            <p style={{ ...MUTED, margin: '4px 0 0' }} data-testid="engrave-registration-blank-note">
-              {blankNote}
-            </p>
-          )}
         </div>
+      )}
+      {/* #1179 — the note OUTLIVES the banner: a mint makes the blank fresh, which hides the
+          banner, and the operator still has to read what just happened. */}
+      {blankNote !== null && (
+        <p style={{ ...MUTED, margin: '4px 0 0' }} data-testid="engrave-registration-blank-note">
+          {blankNote}
+        </p>
       )}
       {flipAttempt === null && plan === null && proposal !== null && proposal.kind === 'plan' && (
         <div
