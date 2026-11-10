@@ -33,6 +33,7 @@ import {
   type RegistrationPlan,
 } from '@/engine/cnc/registration';
 import type { ProbeSpec } from '@/engine/cnc/registration/plan';
+import { sideTouchSelected } from '@/engine/cnc/registration/probe3d';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DOC = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as { defaults: unknown };
@@ -372,5 +373,32 @@ describe('#827 the vise corner keeps its stock-own-X-face side touch', () => {
     // The Z-only bisection's own resolution — the fine step's quarter.
     expect(Math.abs(r.outcome.offset.x)).toBeLessThanOrEqual(S3.fineStepMm / 2);
     expect(Math.abs(r.outcome.offset.y)).toBeLessThanOrEqual(0.001);
+  });
+});
+
+// #1143 — THE ESTIMATE'S PREDICATE IS THE EXECUTOR'S DISPATCH. The run plan's touch count reads
+// `sideTouchSelected`; these runs pin that the records it counts actually come out that way, so
+// the estimator and the machine cannot drift (the Manager's condition for #1143).
+describe('#1143 the touch estimate’s predicate is the executor’s dispatch', () => {
+  it('every side record is a scan the predicate names — tape, and a datum’d vise', async () => {
+    const tape = plan('tape');
+    const z1 = fakeZ1({ actual: BLANK });
+    const r = await runRegistration(tape, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    for (const rec of r.data.scans) {
+      expect(rec.touches.some((t) => t.sideContact === true), rec.scan.edge).toBe(sideTouchSelected(tape, rec.scan.edge));
+    }
+
+    const vise = plan('vise', { mountDatum: JAW, fixtureBelowSurfaceMm: undefined });
+    const z2 = fakeZ1({ actual: BLANK });
+    const r2 = await runRegistration(vise, { console: z2.console, operator: yes });
+    if (!r2.ok) throw new Error(r2.reason);
+    const byEdge = r2.data.scans.map((rec) => [rec.scan.edge, rec.touches.some((t) => t.sideContact === true)]);
+    expect(byEdge).toEqual([
+      ['left', false],
+      ['front', true],
+    ]);
+    expect(sideTouchSelected(vise, 'left')).toBe(false);
+    expect(sideTouchSelected(vise, 'front')).toBe(true);
   });
 });

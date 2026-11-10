@@ -71,7 +71,7 @@ import {
 } from '@/engine/cnc/engrave/surfaceSpread';
 import { type EdgeScan, type ProbeSpec, type RegistrationPlan, probeInstrumentOf, type FlipRegistrationPlan } from './plan';
 import { classifyTouch, lastPrb, type Prb } from './readings';
-import { sideCentreWork, sideTouchAllowed, sideTouchSetup } from './probe3d';
+import { sideCentreWork, sideTouchSelected, sideTouchSetup } from './probe3d';
 import { centrePair, readCentrePair, type CentreFindPlan, type CentrePairReading } from './centreFind';
 import {
   chordResidualMm,
@@ -1777,24 +1777,11 @@ export async function runRegistration(
     // the ledge without the datum, and the plan says so ("no measured jaw top for a sideways
     // touch").
     const g54 = { x: r3(slow.x - plan.surfacePoint.x), y: r3(slow.y - plan.surfacePoint.y) };
-    const sideTouchable = (edge: EdgeScan['edge']) => {
-      if (sideTouchAllowed(plan.mount, edge)) return !(plan.mount === 'vise' && plan.mountDatum === null);
-      // #827 — A VISE CORNER TOUCHES THE STOCK'S OWN X FACE when it stands proud enough for the
-      // ball to pass above the jaw. The planner leaves `cornerXFrom` unset only on that case (a
-      // measured jaw top says the stock is proud); a stock that does not get the fixed jaw's face
-      // (Z-only) and the plan says so. Restored from #525's corner clause, banded with every other
-      // scan (#1133).
-      return (
-        plan.mount === 'vise' &&
-        plan.corner !== undefined &&
-        (edge === 'left' || edge === 'right') &&
-        plan.cornerXFrom !== 'jaw' &&
-        plan.mountDatum !== null
-      );
-    };
     for (const scan of plan.scans) {
+      // #1143 — ONE RULE: `sideTouchSelected` is the dispatch, and the run plan's touch estimate
+      // counts on the same predicate, so the estimate cannot drift from what the machine does.
       scans.push(
-        sideTouchable(scan.edge)
+        sideTouchSelected(plan, scan.edge)
           ? await scanEdgeSideways(io, plan, scan, slow.z, g54)
           : await scanEdge(io, plan, scan, parkZ, slow.z),
       );
