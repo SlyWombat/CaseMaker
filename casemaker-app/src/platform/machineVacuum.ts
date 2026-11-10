@@ -41,18 +41,26 @@
  * WHAT THIS MODULE DOES NOT DO. It does not remember anything: "what did I last send" is the panel's
  * fact, not the socket's, because there is no read-back — the status line does not report the vacuum
  * mode (bench, 2026-10-12), so no amount of polling could recover it. It also does not run a job.
- * The MANUAL VACUUM switch stays the bare `M331`/`M332` pair; the antistatic's `M331.4`/`M332.4`
- * (#564) are switched by a plastic job's run AND, since #648, by hand from the strip. The rest of
- * the `M331.x` family (blowing, bed cleaning) stays unmodelled (`Z1-Firmware-Dialect.md` §11.3,
- * #283).
+ * The MANUAL VACUUM switch, the spindle air and the run's span words are the machine's DIRECT
+ * OUTPUTS: `M851`/`M852` for the vacuum and `M811`/`M812` for the spindle air (0f's nozzle test,
+ * 2026-11-09 — `docs/bench/2026-11-09-m1-tray-flip.md`). The antistatic's `M331.4`/`M332.4` (#564)
+ * are switched by a plastic job's run AND, since #648, by hand from the strip.
  */
 
 import { alarmLine, controllerState, jobProgressPercent } from './machineUpload';
 import { attachConsole, type MachineConsoleTarget } from './machineConsole';
 
-/** The machine's bare `M331`/`M332` — "turning extend out mode on/off", the vacuum (#283). */
-export const VACUUM_ON = 'M331';
-export const VACUUM_OFF = 'M332';
+/**
+ * THE VACUUM'S DIRECT OUTPUTS — `M851` on, `M852` off.
+ *
+ * #1123 item 41 / 0f's nozzle test, 2026-11-09 (spindle off, one code at a time, after a plug
+ * cycle; `docs/bench/2026-11-09-m1-tray-flip.md`): `M851` ran the vacuum, `M852` stopped it. Bare
+ * `M331` and `M331.1` did NOTHING at the nozzle — they are AUTO MODES that follow the spindle, so
+ * the run that relied on them had no vacuum and no air at all (finding 38: the dune under the
+ * chips). The direct pair is what the run, the strip's switch and every stop now send.
+ */
+export const VACUUM_ON = 'M851';
+export const VACUUM_OFF = 'M852';
 
 /**
  * The `M331.4`/`M332.4` sub-codes — "turning static electricity removal mode on/off", the antistatic
@@ -64,13 +72,15 @@ export const ANTISTATIC_ON = 'M331.4';
 export const ANTISTATIC_OFF = 'M332.4';
 
 /**
- * #1060 — the `M331.1`/`M332.1` sub-codes: "turning auto blowing mode on/off", Makera's Auto Blow
- * (the spindle's air blow; the Z1 quick start's "Enable Auto Blow"; Studio's MDI log sends
- * `M331.1`). A separable mode in the vacuum's family, switched by the RUN when the shop's
- * `run.blowWithVacuum` (or the job) asks for it — never written in a file, like the antistatic.
+ * #1060 / #1123 item 41 — THE SPINDLE AIR'S DIRECT OUTPUTS: `M811` on, `M812` off.
+ *
+ * 0f's nozzle test, 2026-11-09: `M811` put air at the spindle and `M812` stopped it; `M331.1`
+ * ("Auto Blow") did nothing at the nozzle, because the `M331.x` family are modes that follow the
+ * spindle. The run switches this with the vacuum (the shop's `run.blowWithVacuum`, on by default,
+ * or the job's own toggle) — never written in a file, like the antistatic.
  */
-export const BLOW_ON = 'M331.1';
-export const BLOW_OFF = 'M332.1';
+export const BLOW_ON = 'M811';
+export const BLOW_OFF = 'M812';
 
 /** The console line for one state, in one place: the switch and any test agree on the code. */
 export function vacuumLine(on: boolean): string {

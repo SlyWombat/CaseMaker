@@ -112,7 +112,7 @@ describe('#648 the accessory indicators', () => {
     fireEvent.click(screen.getByTestId('machine-status-accessory-vacuum'));
     fireEvent.click(screen.getByTestId('machine-status-accessory-on-vacuum'));
     await waitFor(() => expect(screen.getByTestId('machine-status-accessory-vacuum').getAttribute('data-mode')).toBe('on'));
-    expect(sent).toEqual(['?', 'M331']);
+    expect(sent).toEqual(['?', 'M851']);
   });
 
   it('disables the toggle with the reason while a program is running', () => {

@@ -2674,7 +2674,8 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   // #432's facing choice. OPTIONAL, not defaulted, for the byte-for-byte reason every list below
   // gives: an absent key means the job does not face, which is what every stored document says.
   facing: facingSchema.optional().describe('The facing pass to run first; omit to skip facing.'),
-  // #1060 — the spindle blower (Auto Blow, M331.1/M332.1) follows this job's vacuum unless the
+  // #1060 — the spindle air (M811/M812, the direct output; NOT the M331.1 auto mode) follows this
+  // job's vacuum unless the
   // shop's run.blowWithVacuum says otherwise; the run switches it, never the file.
   blowWithVacuum: z
     .boolean()

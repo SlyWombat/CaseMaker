@@ -3,7 +3,7 @@
  *
  * Maintainer decision Q16 (2026-10-15): ship Stop now, labelled honestly; #303 refines it. The seam is
  * `platform/machineStop.ts`: it asks first, aborts only a running program, waits for `Idle`, and then
- * switches the vacuum off — the aborted program never reaches its own `M332`.
+ * switches the vacuum off — the aborted program never reaches its end, and the run's words either.
  *
  * After a clean stop the panel offers Home as its own press: homing is motion, and the person who
  * pressed Stop decides when the head moves again (the bench rule: home when an activity is done).
@@ -37,7 +37,7 @@ function StopControl({ host, port }: { host: string; port: number }) {
           setNote(
             r.vacuumOff
               ? 'Stopped. The program was aborted and the vacuum is off.'
-              : 'Stopped. The program was aborted, but the vacuum-off (M332) was not answered — check the vacuum.',
+              : 'Stopped. The program was aborted, but the vacuum-off (M852) was not answered — check the vacuum.',
           );
           setOfferHome(true);
           break;

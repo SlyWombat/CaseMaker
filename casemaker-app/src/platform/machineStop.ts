@@ -8,10 +8,12 @@
  * is, and the label says so (maintainer decision Q16, 2026-10-15). #303 refines it once Studio's
  * other stops are recorded.
  *
- * WHAT IT DOES AFTER. An aborted program never reaches its own `M332`, so the vacuum it switched on
- * stays on. Once the controller reads `Idle` again, this sends `M332` itself — the one line it adds
- * that the program did not ask for, exactly as the harness does. If the controller never comes back
- * to `Idle` within the polls, `M332` is NOT sent and the outcome says the vacuum is still on.
+ * WHAT IT DOES AFTER. An aborted program never reaches its own end, so the vacuum the run switched
+ * on stays on. Once the controller reads `Idle` again, this sends the DIRECT OFF words — `M812`
+ * (spindle air) then `M852` (vacuum); the `M331`/`M332` family are auto modes the controller treats
+ * as spindle-following and did nothing at the nozzle (0f, 2026-11-09). If the controller never
+ * comes back to `Idle` within the polls, the words are NOT sent and the outcome says the vacuum is
+ * still on.
  *
  * Homing afterwards is offered by the panel as its own press, never sent from here: it is motion,
  * and the person who pressed Stop decides when the head moves again.
@@ -107,9 +109,9 @@ function safeStop(s: StopSettings): StopSettings {
 /**
  * What one press did:
  *   - `stopped` — `abort` was answered and the controller came back to `Idle`. `vacuumOff` says
- *     whether the follow-up `M332` was answered too.
+ *     whether the follow-up `M852` was answered too.
  *   - `draining` — `abort` went out but `Idle` was not seen in time: the spindle is stopping, the
- *     queue may still be running, and `M332` has NOT been sent.
+ *     queue may still be running, and `M852` has NOT been sent.
  *   - `not-running` — no program is running, so nothing was sent.
  *   - `alarm` — the controller is in an alarm; nothing was sent.
  *   - `timeout` / `error` / `unavailable` — the socket failed or this build cannot reach a machine.
@@ -152,7 +154,7 @@ export async function stopProgram(
  * The stop itself, on a session the caller already holds (#423): the run screen stops the program
  * it is watching on its OWN connection, at a poll boundary, rather than opening a second one beside
  * it. Same rule as {@link stopProgram}: `?` first, abort only a running program, refuse an alarm, and
- * `M332` only after a poll reads `Idle`. `antistatic` (#564) also sends `M332.4` there, when the run
+ * the off words (`M812`, `M852`) only after a poll reads `Idle`. `antistatic` (#564) also sends `M332.4` there, when the run
  * that was stopped is a plastic job whose antistatic the run switched on.
  */
 export async function stopOnSession(
@@ -193,7 +195,7 @@ export async function stopOnSession(
       : { kind: aborted.kind, detail: aborted.detail };
   }
   // An unanswered `abort` is not a failed one: the controller answers only once its queue drains.
-  // Either way, `Idle` on a status poll is what lets `M332` go out.
+  // Either way, `Idle` on a status poll is what lets `M852` go out.
   for (let i = 0; i < idlePolls; i++) {
     // The status floor holds here too (#386): never a `?` within 2 s of the line before it.
     if (i === 0) await sleep(STOP_POLL_FLOOR_MS);
@@ -201,7 +203,7 @@ export async function stopOnSession(
     if (poll.kind === 'sent') {
       const state = controllerState(poll.text);
       if (state !== null && state.toLowerCase() === 'idle' && !programRunning(poll.text)) {
-        // #1060 — the blower goes off BEFORE the vacuum does (the operator's ordering); the
+        // #1060 — the spindle air goes off BEFORE the vacuum does (the operator's ordering); the
         // antistatic keeps the order it always had (after the vacuum's own word).
         const blowOff = blow ? await session.send(BLOW_OFF) : null;
         const off = await session.send(VACUUM_OFF);
@@ -221,6 +223,6 @@ export async function stopOnSession(
     kind: 'draining',
     detail:
       '`abort` went out and the spindle is stopping, but the controller has not reported Idle yet — the vacuum is ' +
-      'still on (`M332` was not sent). Wait for the head to stop, then switch the vacuum off.',
+      'still on (`M852` was not sent). Wait for the head to stop, then switch the vacuum off.',
   };
 }

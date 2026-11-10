@@ -111,7 +111,7 @@ describe('#423 the run', () => {
     const o = await runProgram('job.nc', { ...deps(f), onEvent: (e) => e.kind === 'poll' && polls.push(e.progress.percent ?? -1) });
     expect(o).toMatchObject({ kind: 'finished', homed: true, vacuumOff: true });
     expect(polls).toEqual([10, 74, 90, 100]);
-    expect(f.lines()).toEqual(['?', 'M331', 'play /sd/gcodes/job.nc', '?', '?', '?', '?', 'M332', '$H']);
+    expect(f.lines()).toEqual(['?', 'M851', 'play /sd/gcodes/job.nc', '?', '?', '?', '?', 'M852', '$H']);
     // Every poll at least 2000 ms after the previous send; the first one after play.
     const at = f.sent.filter((s) => s.line === '?').slice(1).map((s) => s.at);
     const playAt = f.sent.find((s) => s.line.startsWith('play'))!.at;
@@ -136,15 +136,15 @@ describe('#423 the run', () => {
     const f = fake(['<Idle|MPos:0,0,0>']);
     const o = await runProgram('job.nc', deps(f));
     expect(o.kind).toBe('never-started');
-    expect(f.lines().at(-1)).toBe('M332');
+    expect(f.lines().at(-1)).toBe('M852');
     expect(f.lines()).not.toContain('$H');
   });
 
-  it('three unanswered polls: unreachable — and M332 is never sent blind', async () => {
+  it('three unanswered polls: unreachable — and M852 is never sent blind', async () => {
     const f = fake(['<Run|P:10,10,5>', null, null, null]);
     const o = await runProgram('job.nc', deps(f));
     expect(o.kind).toBe('unreachable');
-    expect(f.lines().filter((l) => l === 'M332')).toEqual([]);
+    expect(f.lines().filter((l) => l === 'M852')).toEqual([]);
     expect(describeRun(o)).toContain('NOT stopped from here');
   });
 
@@ -164,12 +164,12 @@ describe('#423 the run', () => {
     const f = fake([], { play: 'error: file not found' });
     const o = await runProgram('job.nc', deps(f));
     expect(o.kind).toBe('refused');
-    expect(f.lines()).toEqual(['?', 'M331', 'play /sd/gcodes/job.nc', 'M332']);
+    expect(f.lines()).toEqual(['?', 'M851', 'play /sd/gcodes/job.nc', 'M852']);
   });
 });
 
 describe('#423 Stop', () => {
-  it('goes out at the next poll boundary on the same session: ?, abort, Idle, M332 — and offers home, not sends it', async () => {
+  it('goes out at the next poll boundary on the same session: ?, abort, Idle, M852 — and offers home, not sends it', async () => {
     let pressed = false;
     const f = fake(['<Run|P:10,10,5>', '<Run|P:12,20,7>']);
     const o = await runProgram('job.nc', {
@@ -180,7 +180,7 @@ describe('#423 Stop', () => {
     });
     expect(o.kind).toBe('aborted');
     const tail = f.lines().slice(f.lines().indexOf('abort') - 1);
-    expect(tail).toEqual(['?', 'abort', '?', 'M332']);
+    expect(tail).toEqual(['?', 'abort', '?', 'M852']);
     expect(f.lines()).not.toContain('$H');
     expect(describeRun(o)).toContain('Home the machine when the head is clear');
   });
@@ -224,7 +224,7 @@ describe('#423 review — the fixes', () => {
       const f = fake(['<Run|P:5,10,2>', '<Idle|P:9,100,5>'], { playKind });
       const o = await runProgram('job.nc', deps(f));
       expect(o.kind, playKind).toBe('finished');
-      expect(f.lines().slice(0, 4)).toEqual(['?', 'M331', 'play /sd/gcodes/job.nc', '?']);
+      expect(f.lines().slice(0, 4)).toEqual(['?', 'M851', 'play /sd/gcodes/job.nc', '?']);
     }
   });
 
@@ -232,7 +232,7 @@ describe('#423 review — the fixes', () => {
     const f = fake(['<Run|MPos:0,0,0>']);
     const o = await runProgram('job.nc', deps(f));
     expect(o).toMatchObject({ kind: 'never-started', vacuumOff: false });
-    expect(f.lines().filter((l) => l === 'M332')).toEqual([]);
+    expect(f.lines().filter((l) => l === 'M852')).toEqual([]);
   });
 
   it('Stop on a machine reading Run with no P (or P 100, the trip home) aborts — it never finishes or homes', async () => {
@@ -251,7 +251,7 @@ describe('#423 review — the fixes', () => {
     }
   });
 
-  it('a stop that is still draining sends no M332 and does not count as stopped', async () => {
+  it('a stop that is still draining sends no M852 and does not count as stopped', async () => {
     let pressed = false;
     const f = fake(['<Run|P:10,10,5>'], { drainPolls: 10 });
     const o = await runProgram('job.nc', {
@@ -261,7 +261,7 @@ describe('#423 review — the fixes', () => {
       },
     });
     expect(o).toMatchObject({ kind: 'aborted', stop: { kind: 'draining' } });
-    expect(f.lines().filter((l) => l === 'M332')).toEqual([]);
+    expect(f.lines().filter((l) => l === 'M852')).toEqual([]);
     expect(describeRun(o)).toContain('emergency stop');
   });
 
@@ -279,7 +279,7 @@ describe('#423 review — the fixes', () => {
     const abortAt = f.sent.find((x) => x.line === 'abort')!.at;
     const next = f.sent.find((x) => x.line === '?' && x.at > abortAt)!;
     expect(next.at - abortAt).toBeGreaterThanOrEqual(2000);
-    expect(reported.slice(-4)).toEqual(['?', 'abort', '?', 'M332']);
+    expect(reported.slice(-4)).toEqual(['?', 'abort', '?', 'M852']);
   });
 
   it('every status poll asks for a SHORT reply window, not the console’s 60 s', async () => {
@@ -292,7 +292,7 @@ describe('#423 review — the fixes', () => {
     const f = fake(['<Idle|MPos:0,0,0>']);
     const o = await runProgram('job.nc', deps(f, () => f.lines().includes('play /sd/gcodes/job.nc')));
     expect(o.kind).toBe('stopped-unconfirmed');
-    expect(f.lines().filter((l) => l === 'M332' || l === '$H' || l === 'abort')).toEqual([]);
+    expect(f.lines().filter((l) => l === 'M852' || l === '$H' || l === 'abort')).toEqual([]);
     expect(describeRun(o)).toContain('the vacuum is still on');
   });
 
@@ -344,27 +344,27 @@ describe('#419 Q-E — the program owns the vacuum, or the runner brackets it', 
     expect(o.kind).toBe('finished');
     if (o.kind !== 'finished') return;
     expect(o.vacuumOwner).toBe('program');
-    expect(f.lines().filter((l) => l === 'M331' || l === 'M332')).toEqual([]);
+    expect(f.lines().filter((l) => l === 'M851' || l === 'M852')).toEqual([]);
     // …but the file is still played and the machine is still homed.
     expect(f.lines()).toContain('play /sd/gcodes/job.nc');
     expect(f.lines().at(-1)).toBe('$H');
     expect(notes).toHaveLength(1);
-    expect(notes[0]).toContain('switches the vacuum itself');
-    expect(describeRun(o)).toContain('The program switched the vacuum off itself');
+    expect(notes[0]).toContain('carries its own M331/M332');
+    expect(describeRun(o)).toContain('The program owns the vacuum words');
   });
 
   it('a refused play leaves nothing to switch off either', async () => {
     const f = fake([], { play: 'Error: file not found' });
     const o = await runProgram('job.nc', { ...deps(f), programOwnsVacuum: true });
     expect(o.kind).toBe('refused');
-    expect(f.lines().filter((l) => l === 'M331' || l === 'M332')).toEqual([]);
+    expect(f.lines().filter((l) => l === 'M851' || l === 'M852')).toEqual([]);
   });
 
   it('a program that never started switches nothing either way, and says so', async () => {
     const f = fake(['<Idle|MPos:0,0,0>']);
     const o = await runProgram('job.nc', { ...deps(f), programOwnsVacuum: true });
     expect(o.kind).toBe('never-started');
-    expect(f.lines().filter((l) => l === 'M331' || l === 'M332')).toEqual([]);
+    expect(f.lines().filter((l) => l === 'M851' || l === 'M852')).toEqual([]);
     expect(describeRun(o)).toContain('nothing was switched either way');
   });
 
@@ -374,12 +374,12 @@ describe('#419 Q-E — the program owns the vacuum, or the runner brackets it', 
     expect(o.kind).toBe('finished');
     if (o.kind !== 'finished') return;
     expect(o.vacuumOwner).toBe('runner');
-    expect(f.lines().slice(0, 3)).toEqual(['?', 'M331', 'play /sd/gcodes/job.nc']);
-    expect(f.lines().at(-2)).toBe('M332');
+    expect(f.lines().slice(0, 3)).toEqual(['?', 'M851', 'play /sd/gcodes/job.nc']);
+    expect(f.lines().at(-2)).toBe('M852');
   });
 });
 
-// #1060 — the spindle blower (Makera's Auto Blow, M331.1/M332.1) follows the vacuum: on when the
+// #1060 — the spindle blower (Makera's Auto Blow, M811/M812) follows the vacuum: on when the
 // run switches the vacuum on, off BEFORE the vacuum's own off, at the finish and at an abort. The
 // program never carries the sub-codes, so this run is the only thing that switches it.
 describe('#1060 — the spindle blower follows the vacuum', () => {
@@ -387,72 +387,74 @@ describe('#1060 — the spindle blower follows the vacuum', () => {
     const f = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
     const o = await runProgram('job.nc', { ...deps(f), blow: true });
     expect(o).toMatchObject({ kind: 'finished', vacuumOff: true, blowOff: true });
-    expect(f.lines()).toEqual(['?', 'M331', 'M331.1', 'play /sd/gcodes/job.nc', '?', '?', 'M332.1', 'M332', '$H']);
+    expect(f.lines()).toEqual(['?', 'M851', 'M811', 'play /sd/gcodes/job.nc', '?', '?', 'M812', 'M852', '$H']);
   });
 
   it('the option off sends neither word; an air:false job (span none) neither', async () => {
     const off = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
     await runProgram('job.nc', deps(off));
-    expect(off.lines().filter((l) => l === 'M331.1' || l === 'M332.1')).toEqual([]);
+    expect(off.lines().filter((l) => l === 'M811' || l === 'M812')).toEqual([]);
     const airless = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
     await runProgram('job.nc', { ...deps(airless), blow: true, vacuumSpan: 'none' });
-    expect(airless.lines().filter((l) => l === 'M331.1' || l === 'M332.1' || l === 'M331' || l === 'M332')).toEqual([]);
+    expect(airless.lines().filter((l) => l === 'M811' || l === 'M812' || l === 'M851' || l === 'M852')).toEqual([]);
   });
 
-  it('a program-owned vacuum still gets the run’s blower bracket, and the blow goes off before its own M332 is never sent', async () => {
+  it('a program-owned vacuum still gets the run’s blower bracket, and the blow goes off before its own M852 is never sent', async () => {
     const f = fake(['<Run|P:10,20,5>', '<Idle|P:9,100,4>']);
     const o = await runProgram('job.nc', { ...deps(f), programOwnsVacuum: true, blow: true });
     expect(o).toMatchObject({ kind: 'finished', blowOff: true });
-    // The program owns M331/M332; the blower is the run's, bracketing it.
-    expect(f.lines().filter((l) => l === 'M331' || l === 'M332')).toEqual([]);
-    expect(f.lines()).toEqual(['?', 'M331.1', 'play /sd/gcodes/job.nc', '?', '?', 'M332.1', '$H']);
+    // The program owns M851/M852; the blower is the run's, bracketing it.
+    expect(f.lines().filter((l) => l === 'M851' || l === 'M852')).toEqual([]);
+    expect(f.lines()).toEqual(['?', 'M811', 'play /sd/gcodes/job.nc', '?', '?', 'M812', '$H']);
   });
 
   // #1123 item 41 — THE SPAN IS RE-ASSERTED ON EVERY (RE)START. A job-owned span's middle file
   // carries no word at all, and a retry after an alarm starts a controller whose outputs are off
-  // (finding 38: the first attempt's M331 died with the alarm, and the retry ran dry). So the run
-  // states M331 (and the blower) before EVERY program of a span that wants the vacuum on —
+  // (finding 38: the first attempt's M851 died with the alarm, and the retry ran dry). So the run
+  // states M851 (and the blower) before EVERY program of a span that wants the vacuum on —
   // idempotent when it is already on — and leaves the switch-off to the span's end.
   it('a three-file job-owned span re-states the vacuum and blower on every program, and switches off only at the end', async () => {
     // File 1 (span 'first'): the vacuum goes on and STAYS on across the bit change — the blower
-    // stays on with it, so this file's finish must not send M332.1.
+    // stays on with it, so this file's finish must not send M812.
     const first = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
     const f1 = await runProgram('job.nc', { ...deps(first), blow: true, vacuumSpan: 'first', programOwnsVacuum: true });
     expect(f1.kind).toBe('finished');
-    expect(first.lines().filter((l) => l === 'M331')).toHaveLength(1);
-    expect(first.lines()).toContain('M331.1');
-    expect(first.lines()).not.toContain('M332.1');
-    expect(first.lines()).not.toContain('M332');
+    expect(first.lines().filter((l) => l === 'M851')).toHaveLength(1);
+    expect(first.lines()).toContain('M811');
+    expect(first.lines()).not.toContain('M812');
+    expect(first.lines()).not.toContain('M852');
     // File 2 (span 'middle'): the vacuum is already on, and the run RE-STATES it anyway — the same
     // words the maintainer sent by hand before every program at the bench.
     const middle = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
     const f2 = await runProgram('job.nc', { ...deps(middle), blow: true, vacuumSpan: 'middle', programOwnsVacuum: true });
     expect(f2.kind).toBe('finished');
-    expect(middle.lines().filter((l) => l === 'M331')).toHaveLength(1);
-    expect(middle.lines().filter((l) => l === 'M331.1')).toHaveLength(1);
-    expect(middle.lines()).not.toContain('M332.1');
-    expect(middle.lines()).not.toContain('M332');
-    // File 3 (span 'last'): re-stated at the start; the vacuum's own M332 is in the file, so the
-    // blower goes off after it, in the finish — the run never sends its own M332.
+    expect(middle.lines().filter((l) => l === 'M851')).toHaveLength(1);
+    expect(middle.lines().filter((l) => l === 'M811')).toHaveLength(1);
+    expect(middle.lines()).not.toContain('M812');
+    expect(middle.lines()).not.toContain('M852');
+    // File 3 (span 'last'): re-stated at the start; the vacuum's own M852 is in the file, so the
+    // blower goes off after it, in the finish — the run never sends its own M852.
     const last = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
     const f3 = await runProgram('job.nc', { ...deps(last), blow: true, vacuumSpan: 'last', programOwnsVacuum: true });
     expect(f3.kind).toBe('finished');
-    expect(last.lines().filter((l) => l === 'M331')).toHaveLength(1);
-    expect(last.lines().filter((l) => l === 'M331.1')).toHaveLength(1);
-    expect(last.lines()).toContain('M332.1');
-    expect(last.lines()).not.toContain('M332');
+    expect(last.lines().filter((l) => l === 'M851')).toHaveLength(1);
+    expect(last.lines().filter((l) => l === 'M811')).toHaveLength(1);
+    // #1123 item 41 — THE SPAN'S END SWITCHES OFF HERE: the file's own M332 is an auto mode the
+    // controller ignores, so the run's M812/M852 are the span's last words.
+    expect(last.lines()).toContain('M812');
+    expect(last.lines()).toContain('M852');
   });
 
-  it('#1123 item 41 — a play refused after a job-span file re-stated its M331 switches it off again', async () => {
+  it('#1123 item 41 — a play refused after a job-span file re-stated its M851 switches it off again', async () => {
     const f = fake([], { play: 'error: file not found' });
     const o = await runProgram('job.nc', { ...deps(f), vacuumSpan: 'first', programOwnsVacuum: true });
     expect(o.kind).toBe('refused');
     const lines = f.lines();
     // The run stated the vacuum on (the span's re-assert) and the file never played: the run
     // undoes its own word rather than leaving the vacuum on with nothing cutting.
-    expect(lines).toContain('M331');
-    expect(lines).toContain('M332');
-    expect(lines.indexOf('M331')).toBeLessThan(lines.indexOf('M332'));
+    expect(lines).toContain('M851');
+    expect(lines).toContain('M852');
+    expect(lines.indexOf('M851')).toBeLessThan(lines.indexOf('M852'));
   });
 
   it('a Stop during a middle file turns the blower off before the vacuum, though this file sent neither', async () => {
@@ -472,8 +474,8 @@ describe('#1060 — the spindle blower follows the vacuum', () => {
     });
     expect(o.kind).toBe('aborted');
     const lines = f.lines();
-    expect(lines).toContain('M332.1');
-    expect(lines.indexOf('M332.1')).toBeLessThan(lines.indexOf('M332'));
+    expect(lines).toContain('M812');
+    expect(lines.indexOf('M812')).toBeLessThan(lines.indexOf('M852'));
   });
 
   it('a refused play turns the blower off before the vacuum it switched on', async () => {
@@ -481,8 +483,8 @@ describe('#1060 — the spindle blower follows the vacuum', () => {
     const o = await runProgram('job.nc', { ...deps(f), blow: true });
     expect(o.kind).toBe('refused');
     const lines = f.lines();
-    expect(lines).toContain('M332.1');
-    expect(lines.indexOf('M332.1')).toBeLessThan(lines.indexOf('M332'));
+    expect(lines).toContain('M812');
+    expect(lines.indexOf('M812')).toBeLessThan(lines.indexOf('M852'));
   });
 });
 
@@ -494,7 +496,7 @@ describe('#564 — the antistatic runs for plastic jobs only', () => {
     const f = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
     const o = await runProgram('job.nc', { ...deps(f), antistatic: true });
     expect(o).toMatchObject({ kind: 'finished', vacuumOff: true, antistaticOff: true });
-    expect(f.lines()).toEqual(['?', 'M331', 'M331.4', 'play /sd/gcodes/job.nc', '?', '?', 'M332', 'M332.4', '$H']);
+    expect(f.lines()).toEqual(['?', 'M851', 'M331.4', 'play /sd/gcodes/job.nc', '?', '?', 'M852', 'M332.4', '$H']);
   });
 
   it('a non-plastic job emits no antistatic words anywhere', async () => {
@@ -509,7 +511,7 @@ describe('#564 — the antistatic runs for plastic jobs only', () => {
     const o = await runProgram('job.nc', { ...deps(f), programOwnsVacuum: true, antistatic: true });
     expect(o).toMatchObject({ kind: 'finished', antistaticOff: true });
     // No vacuum words (the program owns them) — but the antistatic is the run's, on and off.
-    expect(f.lines().filter((l) => l === 'M331' || l === 'M332')).toEqual([]);
+    expect(f.lines().filter((l) => l === 'M851' || l === 'M852')).toEqual([]);
     expect(f.lines()).toEqual(['?', 'M331.4', 'play /sd/gcodes/job.nc', '?', '?', 'M332.4', '$H']);
   });
 
@@ -530,7 +532,7 @@ describe('#564 — the antistatic runs for plastic jobs only', () => {
     expect(o.stop.vacuumOff).toBe(true);
     expect(o.stop.antistaticOff).toBe(true);
     const tail = f.lines().slice(f.lines().indexOf('abort') - 1);
-    expect(tail).toEqual(['?', 'abort', '?', 'M332', 'M332.4']);
+    expect(tail).toEqual(['?', 'abort', '?', 'M852', 'M332.4']);
     expect(describeRun(o)).toContain('antistatic off');
   });
 
@@ -538,14 +540,14 @@ describe('#564 — the antistatic runs for plastic jobs only', () => {
     const f = fake([], { play: 'error: file not found' });
     const o = await runProgram('job.nc', { ...deps(f), antistatic: true });
     expect(o.kind).toBe('refused');
-    expect(f.lines()).toEqual(['?', 'M331', 'M331.4', 'play /sd/gcodes/job.nc', 'M332', 'M332.4']);
+    expect(f.lines()).toEqual(['?', 'M851', 'M331.4', 'play /sd/gcodes/job.nc', 'M852', 'M332.4']);
   });
 
   it('never started on an Idle machine: the antistatic this run switched on goes off again', async () => {
     const f = fake(['<Idle|MPos:0,0,0>']);
     const o = await runProgram('job.nc', { ...deps(f), antistatic: true });
     expect(o).toMatchObject({ kind: 'never-started', vacuumOff: true, antistaticOff: true });
-    expect(f.lines().at(-2)).toBe('M332');
+    expect(f.lines().at(-2)).toBe('M852');
     expect(f.lines().at(-1)).toBe('M332.4');
     expect(f.lines()).not.toContain('$H');
   });
@@ -610,7 +612,7 @@ describe('#618 pause / resume', () => {
 
     expect(o.kind).toBe('stopped-unconfirmed');
     expect(f.lines()).toContain('suspend');
-    expect(f.lines()).not.toContain('M332'); // the stop found nothing running to switch off
+    expect(f.lines()).not.toContain('M852'); // the stop found nothing running to switch off
     expect(f.lines()).not.toContain('$H');
   });
 

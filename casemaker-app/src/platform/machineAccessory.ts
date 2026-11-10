@@ -12,11 +12,12 @@
  * | `switch.extendout`     | M851 | M852 | the external output (HWPWM)         |
  * | `switch.probecharger`  | M841 | M842 | the wireless probe's charger       |
  *
- * NO AIR, AND THE MACHINE SAYS SO. `switch.air` is COMMENTED OUT in the Z1's config, and `M7`/`M9`
- * are answered `ok` while blowing nothing (bench 2026-10-12; `millProfile.capabilities.air` is
- * `false` for the same observation). Its blowing mode is `M331.1`, part of the vacuum family this
- * app does not drive (#283) — so the panel states the fact instead of offering a switch that does
- * nothing. {@link AIR_SENTENCE} is that sentence, in one place.
+ * NO AIR SWITCH, AND THE MACHINE SAYS SO. `switch.air` is COMMENTED OUT in the Z1's config, and
+ * `M7`/`M9` are answered `ok` while blowing nothing (bench 2026-10-12; `millProfile.capabilities.air`
+ * is `false` for the same observation). THE SPINDLE AIR IS `M811`/`M812` — the direct output 0f's
+ * nozzle test found on 2026-11-09 (`M331.1`, the auto-blow mode, did nothing there). A cutting
+ * job's RUN switches it with the vacuum; this panel offers no manual air switch, and
+ * {@link AIR_SENTENCE} states the fact in one place.
  *
  * THE GUARD IS THE WORK-LIGHT SWITCH'S (#422), in the same order and on one connection per press:
  * ask `?`, refuse an alarm, refuse anything that is not a readable `Idle`, refuse an `Idle` whose
@@ -99,7 +100,7 @@ export function accessoryLine(id: AccessoryId, on: boolean): string {
  * (`capabilities.air === false`), and this is the fact behind it.
  */
 export const AIR_SENTENCE =
-  'No air switch: this machine’s M7/M9 air output blows nothing (the firmware’s switch.air is commented out and the codes answer ok), and its blowing mode, M331.1, is not driven here.';
+  'No air switch: this machine’s M7/M9 air output blows nothing (the firmware’s switch.air is commented out and the codes answer ok). The spindle air is M811/M812, switched by a cutting job’s run; there is no manual air switch here.';
 
 /**
  * What one press did: `toggled` (the controller took the code), `busy` (not Idle / mid-job / an

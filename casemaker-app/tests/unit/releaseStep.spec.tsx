@@ -217,7 +217,7 @@ const sent: string[] = [];
 const uploaded: string[] = [];
 
 /**
- * A gate for the span close, so a test can hold `M332`/`$H` in flight and try to start a program
+ * A gate for the span close, so a test can hold `M852`/`$H` in flight and try to start a program
  * underneath them. Off by default: every other test's closes land at once.
  */
 let closeGate: Promise<void> = Promise.resolve();
@@ -255,7 +255,7 @@ function controller(
           sent.push(line);
           // The line is sent; the answer is what is held. That is the in-flight close the release
           // step must not start underneath.
-          if (holdClose && (line === 'M332' || line === '$H')) await closeGate;
+          if (holdClose && (line === 'M852' || line === '$H')) await closeGate;
           let text = 'ok';
           if (line === '?') {
             if (playing === null || aborted) text = '<Idle|MPos:0,0,0>';
@@ -266,7 +266,7 @@ function controller(
             } else text = playing.polls++ < finishAfter ? '<Run|MPos:0,0,0|P:10,20,5>' : '<Idle|P:9,100,4>';
           } else if (line.startsWith('play')) {
             if (opts.playError === true) {
-              // #1123 item 41 — a controller that refuses the file AFTER the run re-stated M331:
+              // #1123 item 41 — a controller that refuses the file AFTER the run re-stated M851:
               // the release must close the span it left on with nothing cutting.
               text = 'error: file not found';
             } else {
@@ -483,7 +483,7 @@ describe('#469 the release step', () => {
     expect(facingRegistrationBlocker(defaultEngraveJob(), [FACE, P1], null)).toBeNull();
   });
 
-  it('uploads every program, plays them in order, and re-states M331 before each — never M332 between them', async () => {
+  it('uploads every program, plays them in order, and re-states M851 before each — never M852 between them', async () => {
     const job = twoSetupJob();
     // #1088 — program 2 is setup 2's, and a later setup's program now needs that setup's record.
     seedSetupRegistration(job, 'setup-2');
@@ -504,11 +504,11 @@ describe('#469 the release step', () => {
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
     expect(uploaded).toEqual(['Two-setup-job-p1.nc', 'Two-setup-job-p2.nc']);
     expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Two-setup-job-p1.nc']);
-    // #1123 item 41 — the run RE-STATES M331 before every program (the maintainer's bench rule):
+    // #1123 item 41 — the run RE-STATES M851 before every program (the maintainer's bench rule):
     // the file's own word died with the alarm on the first attempt, so the retry cannot rely on
     // it. Nothing switches off between programs.
-    expect(sent.filter((l) => l === 'M331')).toHaveLength(1);
-    expect(sent).not.toContain('M332');
+    expect(sent.filter((l) => l === 'M851')).toHaveLength(1);
+    expect(sent).not.toContain('M852');
     expect(
       useEngraveReleaseStore.getState().records[`${TARGET.host}:${TARGET.port}`]?.notes.some((n) => n.includes('stays on')),
     ).toBe(true);
@@ -532,10 +532,13 @@ describe('#469 the release step', () => {
       'play /sd/gcodes/Two-setup-job-p1.nc',
       'play /sd/gcodes/Two-setup-job-p2.nc',
     ]);
-    // The second program's start re-states M331 too; M332 was in program 2's own text, and the
-    // release step sends none between files.
-    expect(sent.filter((l) => l === 'M331')).toHaveLength(2);
-    expect(sent.filter((l) => l === 'M332')).toHaveLength(0);
+    // The second program's start re-states M851 too, and NOTHING switches off BETWEEN the files;
+    // the span's end is the run's own M852 (the file's M332 is an auto mode the controller ignores).
+    expect(sent.filter((l) => l === 'M851')).toHaveLength(2);
+    const secondPlay = sent.lastIndexOf('play /sd/gcodes/Two-setup-job-p2.nc');
+    expect(sent.slice(0, secondPlay)).not.toContain('M852');
+    expect(sent.filter((l) => l === 'M852')).toHaveLength(1);
+    expect(sent.lastIndexOf('M852')).toBeGreaterThan(secondPlay);
     // #425 §6 — the DOCUMENT holds the resume fact for both played programs, with their setups.
     const log = useEngraveJobStore.getState().job.runLog ?? [];
     expect(log.map((entry) => [entry.programHash, entry.setupId, entry.outcome])).toEqual([
@@ -695,7 +698,7 @@ describe('#469 the release step', () => {
     expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-face.nc']);
     expect(sent.filter((l) => l.startsWith('G10 L2'))).toHaveLength(0);
     // The face file is the only program that ran; the vacuum was closed after the refusal.
-    expect(sent).toContain('M332');
+    expect(sent).toContain('M852');
     expect(screen.queryByTestId('engrave-release-operator-text')).toBeNull();
   }, 30000);
 
@@ -724,7 +727,7 @@ describe('#469 the release step', () => {
     expect(notes).toContain('No program was played');
     expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-face.nc']);
     expect(sent.filter((l) => l.startsWith('G10 L2'))).toHaveLength(0);
-    expect(sent).toContain('M332');
+    expect(sent).toContain('M852');
   }, 30000);
 
   it('a RESUME of the engraving program does not re-touch a top that program has already cut (#494)', async () => {
@@ -786,17 +789,17 @@ describe('#469 the release step', () => {
     expect(done().disabled).toBe(false);
   }, 30000);
 
-  it('a Stop between programs closes the span: M332 then $H, on an Idle machine', async () => {
+  it('a Stop between programs closes the span: M852 then $H, on an Idle machine', async () => {
     renderStep(twoSetupJob());
     await uploadAndStart();
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
 
     const before = sent.length;
     fireEvent.click(screen.getByTestId('engrave-release-stop'));
-    await waitFor(() => expect(sent.slice(before)).toContain('M332'), { timeout: 5000 });
+    await waitFor(() => expect(sent.slice(before)).toContain('M852'), { timeout: 5000 });
     const tail = sent.slice(before);
-    expect(tail.filter((l) => l === 'M332')).toHaveLength(1);
-    expect(tail.indexOf('M332')).toBeLessThan(tail.lastIndexOf('$H'));
+    expect(tail.filter((l) => l === 'M852')).toHaveLength(1);
+    expect(tail.indexOf('M852')).toBeLessThan(tail.lastIndexOf('$H'));
     expect(sent.filter((l) => l.startsWith('play'))).toHaveLength(1);
     expect(useEngraveReleaseStore.getState().records[`${TARGET.host}:${TARGET.port}`]?.phase).toBe('stopped');
   }, 30000);
@@ -868,8 +871,8 @@ describe('#469 the release step', () => {
     await screen.findByTestId('engrave-release-done', undefined, { timeout: 10000 });
 
     expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Two-setup-job-p2.nc']);
-    // Program 2 carries M332 only; the vacuum was off before the resume, so the step switches it on.
-    expect(sent).toContain('M331');
+    // Program 2 carries M852 only; the vacuum was off before the resume, so the step switches it on.
+    expect(sent).toContain('M851');
   }, 30000);
 
   it('#1088 — setup 2’s program refuses by name until setup 2 is registered, and nothing is played', async () => {
@@ -921,8 +924,8 @@ describe('#469 the release step', () => {
     });
     await waitFor(() => expect(record()?.phase).toBe('closing'), { timeout: 5000 });
 
-    // `M332`/`$H` are in flight. The button is disabled, and the store refuses a direct press too:
-    // starting now could put a program's own M331 underneath the late M332.
+    // `M852`/`$H` are in flight. The button is disabled, and the store refuses a direct press too:
+    // starting now could put a program's own M851 underneath the late M852.
     const start = screen.getByTestId('engrave-release-start') as HTMLButtonElement;
     expect(start.disabled).toBe(true);
     useEngraveReleaseStore.getState().startRelease(TARGET);
@@ -944,7 +947,7 @@ describe('#469 the release step', () => {
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
   }, 30000);
 
-  it('#1123 item 41 — a red-button alarm, then Try again: the retry re-states M331 before it plays', async () => {
+  it('#1123 item 41 — a red-button alarm, then Try again: the retry re-states M851 before it plays', async () => {
     const job = twoSetupJob();
     seedSetupRegistration(job, 'setup-2');
     setMachineConsoleLoader(async () => controller(2, { alarmAfterPolls: 1 }));
@@ -954,24 +957,24 @@ describe('#469 the release step', () => {
     // with the vacuum's state UNKNOWN — no claim survives the alarm.
     await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 10000 });
     expect(record()?.vacuum).toBe('unknown');
-    expect(sent.filter((l) => l === 'M331')).toHaveLength(1);
+    expect(sent.filter((l) => l === 'M851')).toHaveLength(1);
 
     // The alarm is cleared at the controller; the operator presses Try again.
     setMachineConsoleLoader(async () => controller(2));
     fireEvent.click(screen.getByTestId('engrave-release-start'));
     await waitFor(() => expect(record()?.phase).toBe('bit-change'), { timeout: 10000 });
-    // THE RETRY RE-STATED THE ON WORD: the first attempt's M331 died with the alarm (finding 38).
-    expect(sent.filter((l) => l === 'M331')).toHaveLength(2);
+    // THE RETRY RE-STATED THE ON WORD: the first attempt's M851 died with the alarm (finding 38).
+    expect(sent.filter((l) => l === 'M851')).toHaveLength(2);
   }, 30000);
 
-  it('a play refused AFTER the run re-stated M331 closes the span it left on', async () => {
+  it('a play refused AFTER the run re-stated M851 closes the span it left on', async () => {
     const job = twoSetupJob();
     seedSetupRegistration(job, 'setup-2'); // #1088 — setup 2 is registered; this test is not the gate.
     renderStep(job);
     await uploadAndStart();
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
 
-    // Stop at the change, then resume at program 2. #1123 item 41 — the RUN re-states M331 before
+    // Stop at the change, then resume at program 2. #1123 item 41 — the RUN re-states M851 before
     // every program; this time the controller refuses the file after that word went out.
     await act(async () => {
       useEngraveReleaseStore.getState().stop(TARGET);
@@ -987,12 +990,12 @@ describe('#469 the release step', () => {
 
     await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 5000 });
     const tail = sent.slice(before);
-    // The run stated M331 and the file never played, so the vacuum is on with nothing cutting and
-    // the release closes the span (M332 then $H).
-    expect(tail).toContain('M331');
-    expect(tail).toContain('M332');
+    // The run stated M851 and the file never played, so the vacuum is on with nothing cutting and
+    // the release closes the span (M852 then $H).
+    expect(tail).toContain('M851');
+    expect(tail).toContain('M852');
     expect(tail).toContain('$H');
-    expect(tail.indexOf('M331')).toBeLessThan(tail.indexOf('M332'));
+    expect(tail.indexOf('M851')).toBeLessThan(tail.indexOf('M852'));
     expect(record()?.notes.join('\n')).toContain('closing the vacuum span');
   }, 30000);
 

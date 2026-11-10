@@ -191,7 +191,7 @@ fifteen seconds, so its tail — including `ERROR: Probe dead or not set, please
 whatever you send next: it shows it in its own block above the reply, labelled "the controller said
 this while no line was in flight", and it is never counted as the answer to the line you just typed
 (so a `?` that nothing answered still reads as a timeout, not as "Idle" or "Alarm"). The same rule
-runs the other way for anything that decides: a `M331`/`M332` press, an upload, and `z1.mjs run`'s
+runs the other way for anything that decides: an `M851`/`M852` press, an upload, and `z1.mjs run`'s
 own checks all refuse on an alarm wherever the controller said it, the reply or the late tail alike.
 A transcript copy marks those lines with `(no line in flight)` for the same reason — it is the one
 thing in the text that says the line answered nothing.
@@ -1188,7 +1188,7 @@ is kept with the run, and it never re-plans the job. Before anything is sent, th
 **"Which cutter is fitted?"** — a selector that defaults to the cutter this file was posted for
 (named the way the bench names it: case colour, label, box code). Naming a *different* cutter is a
 mismatch and **Send stays disabled** until you pick the one the file was written for. The **vacuum stays on
-across the bit change** and is closed only when the run stops; a stop always sends `M332`. A
+across the bit change** and is closed only when the run stops; a stop always sends `M852` (and `M812` for the air). A
 one-program job keeps the single-file upload. Either way the machine is named before anything is
 written, and **Stop** is the app's abort — the machine's own button and the plug remain the real
 stops. The app does not switch the machine on or off: the plug is a physical act.
@@ -1216,9 +1216,11 @@ cannot clear it, the laser is refused and nothing is sent. A job with **no regis
 machine** says so instead — the lift is the fixed height and the top of the stock is not checked,
 so register first if the blank is thin or the mount crowded.
 
-**The vacuum is the program's own business.** The post writes `M331` before the first cut and
-`M332` after the last for the span the job declares; the run panel's sentence says which of
-those this file does, and a stop always sends `M332`. A **tilted** top can be levelled at the
+**The vacuum is the run's, with the file's own words a legacy.** The app's run states the direct
+outputs — `M851` (vacuum) and `M811` (spindle air) before every program of a span, `M852`/`M812`
+at its end — and a stop always sends `M852`. The post still writes `M331` before the first cut
+and `M332` after the last for the span the job declares, but the controller treats those as
+spindle-following auto modes: they do nothing on their own (0f's 2026-11-09 nozzle test). A **tilted** top can be levelled at the
 console with a `G32 R1` pass instead of relying on the re-posted program (the sheet prints the
 line and the reset), because the upload gate refuses a file carrying `G32`/`M370`; a **domed**
 top is refused outright — face it or choose a flatter blank. Run the job with your hand on the
@@ -2074,8 +2076,8 @@ semantics are LinuxCNC-flavoured.
 | Spindle | `M3` / `M4` / `M5` |
 | Tools | `M6 T<n>` (with the `T` on the same command), `M491` (re-measure tool length) |
 | Manual tool change | `M490.1` / `M490.2` (the operator handshake) |
-| Vacuum | `M331` / `M332` (bare; what this app's programs use) |
-| Spindle air blow (Auto Blow) | `M331.1` on / `M332.1` off — the run switches it with the vacuum when **Air blow with the vacuum** is on (the default) |
+| Vacuum | `M851` on / `M852` off — the direct output the run and the strip's switch send (the programs' own `M331`/`M332` are auto modes and do nothing alone) |
+| Spindle air blow | `M811` on / `M812` off — the direct output; the run switches it with the vacuum when **Air blow with the vacuum** is on (the default); `M331.1` is its auto mode and did nothing at the nozzle |
 | Air (no-op) | `M7` / `M9` — answered `ok`, blow nothing on a Z1 |
 | Laser (refused) | `M321`–`M325` |
 | Pause | `M600` |

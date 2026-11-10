@@ -2,7 +2,7 @@
 // #390 — the vacuum switch on the machine card in Manage → Machines.
 //
 // THE SEAM IS THE CLIENT. `setMachineConsoleLoader` swaps the socket half for a fake, so the panel's
-// real ask `?` → read the state → send `M331`/`M332` path runs in every test. What this pins is what
+// real ask `?` → read the state → send `M851`/`M852` path runs in every test. What this pins is what
 // the browser QA cannot see: the switch is absent where it could not work, it claims only what it
 // last sent and `unknown` before that, a press on a running machine is refused without a code, and a
 // press that lost the link goes back to `unknown`.
@@ -183,18 +183,18 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
     expect(state().getAttribute('data-mode')).toBe('on');
     expect(on().getAttribute('aria-pressed')).toBe('true');
     expect(off().getAttribute('aria-pressed')).toBe('false');
-    expect(wire.sent).toEqual(['?', 'M331']);
+    expect(wire.sent).toEqual(['?', 'M851']);
     expect(screen.getByTestId('manage-vacuum-note').textContent).toContain('the vacuum is on now');
   });
 
-  it('the Off half sends M332 and lit Off, off the same unknown start', async () => {
+  it('the Off half sends M852 and lit Off, off the same unknown start', async () => {
     const wire = fakeConsole(idleMachine);
     render(<MachinesScope />);
     fireEvent.click(off());
 
     await waitFor(() => expect(state().textContent).toBe('off'));
     expect(off().getAttribute('aria-pressed')).toBe('true');
-    expect(wire.sent).toEqual(['?', 'M332']);
+    expect(wire.sent).toEqual(['?', 'M852']);
     expect(screen.getByTestId('manage-vacuum-note').textContent).toContain('the vacuum is off now');
   });
 
@@ -212,7 +212,7 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
 
   it('a mid-job Idle is refused too — a `P:` below 100 is a program still running', async () => {
     // The state word says Idle at 90 %, which is the ~4 s spin-down before the head goes home (#390
-    // item 1). A press here would send M331 after the program's own M332 and leave the vacuum on.
+    // item 1). A press here would send M851 after the program's own M852 and leave the vacuum on.
     const wire = fakeConsole((line) =>
       line === '?'
         ? {
@@ -245,7 +245,7 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
     await waitFor(() => expect(q('manage-vacuum-note')).not.toBeNull());
     expect(screen.getByTestId('manage-vacuum-note').textContent).toContain('no reply within');
     expect(state().textContent).toBe('—');
-    expect(wire.sent).toEqual(['?', 'M331']);
+    expect(wire.sent).toEqual(['?', 'M851']);
   });
 
   it('an error on the ask leaves the switch unknown and sends no code', async () => {

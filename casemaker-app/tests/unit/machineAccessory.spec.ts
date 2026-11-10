@@ -81,7 +81,7 @@ describe('#289 the Z1’s accessory codes', () => {
     expect(AIR_SENTENCE).toContain('No air switch');
     expect(AIR_SENTENCE).toContain('M7/M9');
     expect(AIR_SENTENCE).toContain('switch.air');
-    expect(AIR_SENTENCE).toContain('M331.1');
+    expect(AIR_SENTENCE).toContain('M811');
     expect(ACCESSORIES.map((a) => a.id)).not.toContain('air');
   });
 

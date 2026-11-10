@@ -28,7 +28,7 @@
  *      operator confirms the cutter and Z0. On a normal change the release step sends NO vacuum
  *      words: the first file switched the vacuum on and the last switches it off (#419 decision 4).
  *   5. CLOSE THE SPAN WHEN THE RUN STOPS. A Stop at the bit-change pause, or a failure that leaves
- *      no program running, sends `M332` then `$H` — only on a machine that answers Idle with no
+ *      no program running, sends `M852` then `$H` — only on a machine that answers Idle with no
  *      alarm (`machineSpan.ts`). A Stop DURING a cut is the run panel's (#424): `abort`, then `M332`
  *      only once the machine reads Idle, and Home is offered rather than sent.
  *
@@ -92,8 +92,8 @@ export type ReleasePhase =
   /** A program finished; the machine is homed and the vacuum stays on for the next cutter. */
   | 'bit-change'
   /**
-   * The span is being closed (M332 + $H) and the run must not start until it has: a program
-   * started now could have its own M331 followed by the late M332, switching the vacuum off
+   * The span is being closed (M852 + $H) and the run must not start until it has: a program
+   * started now could re-state its M851 followed by the late M852, switching the vacuum off
    * mid-cut.
    */
   | 'closing'
@@ -149,9 +149,9 @@ export interface ReleaseRecord {
    */
   vacuum: 'off' | 'on' | 'unknown';
   /**
-   * A close (`M332` + `$H`) is in flight. The `closing` phase says this for a Stop; a failure that
+   * A close (`M852` + `$H`) is in flight. The `closing` phase says this for a Stop; a failure that
    * closes the span keeps its own phase (`failed`) and raises this flag instead, so a Try again
-   * cannot start a program underneath the same late `M332`.
+   * cannot start a program underneath the same late `M852`.
    */
   spanClosing: boolean;
   stopAsked: boolean;
@@ -221,9 +221,9 @@ const said = (r: MachineUploadResult): string => {
 };
 
 const spanNote = (r: Awaited<ReturnType<typeof closeVacuumSpan>>): string => {
-  if (r.kind === 'done') return 'Vacuum switched off (M332) and the machine homed ($H).';
-  if (r.kind === 'not-idle') return `No M332 or home was sent: ${r.detail}. Check the vacuum and the machine.`;
-  return `No M332 or home was confirmed: ${r.detail}. Check the vacuum and the machine.`;
+  if (r.kind === 'done') return 'Vacuum switched off (M852) and the machine homed ($H).';
+  if (r.kind === 'not-idle') return `No M852 or home was sent: ${r.detail}. Check the vacuum and the machine.`;
+  return `No M852 or home was confirmed: ${r.detail}. Check the vacuum and the machine.`;
 };
 
 export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
@@ -264,7 +264,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     patch(machine, { phase: 'starting', active: index, next: null, stopAsked: false, settled: false, stoppedBetween: false });
     const span = programVacuumSpan(file.nc, jobCarriesVacuumWords(rec.files));
     // #1123 item 41 — THE RUN RE-STATES THE SPAN'S ON WORD on every start (platform/machineRun.ts),
-    // so this store no longer sends M331 itself: one decision, one seam. What the run leaves for a
+    // so this store no longer sends M851 itself: one decision, one seam. What the run leaves for a
     // span that wants the vacuum on is 'on'; an `air: false` job (span none) has nothing switched.
     const vacuum = span === 'none' ? rec.vacuum : 'on';
 
@@ -317,7 +317,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       return;
     }
     // Every close is an in-flight state, whichever phase asked for it: `startRelease` and the
-    // panel's start button refuse while it is set, so no program begins under a late M332.
+    // panel's start button refuse while it is set, so no program begins under a late M852.
     patch(machine, { spanClosing: true });
     try {
       const r = await closeVacuumSpan(rec.target);
@@ -433,13 +433,22 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
 
     if (outcome.kind === 'finished') {
       const files = rec.files.map((f) => (f.index === index ? { ...f, done: true } : f));
-      const vacuum = carriesVacuumOff(file.nc) ? 'off' : carriesVacuumOn(file.nc) ? 'on' : rec.vacuum;
+      // #1123 item 41 — WHAT THE RUN JUST DID, first: a span's end switches the vacuum off itself
+      // (M852), so a 'last'/'whole' finish reports vacuumOff and the span must not be closed twice.
+      const vacuum =
+        outcome.vacuumOff === true || carriesVacuumOff(file.nc)
+          ? 'off'
+          : carriesVacuumOn(file.nc)
+            ? 'on'
+            : rec.vacuum;
       const pending = releasePending(files);
       if (pending.length === 0) {
         patch(machine, { files, vacuum, phase: 'done', active: index, next: null });
         say(machine, `Every program in the job is finished (${index} of ${file.total}).`);
-        // A last file that carries no M332 leaves the vacuum on; close it only on an Idle machine.
-        if (vacuum !== 'off' && rec.airOn) await closeSpan(machine, 'The job’s last program finished without its own M332.');
+        // #1123 item 41 — the RUN switches the span off at its end (M852/M812); a program the run
+        // could not switch off (a refusal it reported) leaves the vacuum on, and this closes it on
+        // an Idle machine only.
+        if (vacuum !== 'off' && rec.airOn) await closeSpan(machine, 'The job’s last program finished with the vacuum still on.');
         return;
       }
       // D-17: the bit change is a new program, so the at-machine tick is asked again.
@@ -723,8 +732,8 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
         return;
       }
       if (rec.phase === 'bit-change' || rec.phase === 'ready' || rec.phase === 'starting' || rec.phase === 'stopped') {
-        // CLOSING IS A PHASE, not a fire-and-forget send: `M332`/`$H` are in flight, and a Resume
-        // pressed before they land could start a program whose own `M331` the late `M332` then
+        // CLOSING IS A PHASE, not a fire-and-forget send: `M852`/`$H` are in flight, and a Resume
+        // pressed before they land could start a program whose re-stated `M851` the late `M852` then
         // undoes mid-cut. `startRelease` refuses `closing`, and the panel disables the button.
         patch(machine, { phase: 'closing', next: null, stopAsked: false, stoppedBetween: true });
         void closeSpan(machine, 'Stopped between programs.').finally(() => {

@@ -1,19 +1,13 @@
 /**
- * CLOSING AND RE-OPENING THE VACUUM SPAN AROUND A MULTI-PROGRAM RUN (#419 decision 4, #469).
+ * CLOSING THE VACUUM SPAN AROUND A MULTI-PROGRAM RUN (#419 decision 4, #469).
  *
- * The programs carry the span themselves: `M331` on the first file, `M332` on the last, neither in
- * between. The release step therefore sends NO vacuum words on a normal change — the vacuum stays on
- * across the bit change, which is the maintainer's rule. It sends one only when the file it is about
- * to play cannot:
- *
- *   - a RESUMED run starts at a middle or last program, which carries no `M331`. The vacuum was
- *     switched off when the previous run stopped, so the release step must switch it on again;
- *   - a file that carries no words at all (`air: false`, or a hand-made pre-#419 program) must not
- *     leave the vacuum in the state the last program left it.
- *
- * And it CLOSES the span when the run stops BETWEEN programs — an operator's Stop at the bit-change
- * pause, or a failure that leaves no program running. `M332` then `$H`, in that order (the bench
- * rule: home after every activity).
+ * #1123 item 41 — THE RUN SPEAKS THE DIRECT OUTPUTS, and this is its closing hand. The programs'
+ * own `M331`/`M332` are auto modes the controller treats as spindle-following — 0f's nozzle test,
+ * 2026-11-09, found bare `M331` did nothing — so the run states `M851` (vacuum) and `M811` (air)
+ * before every program and switches them off only at the span's end. This module is the RELEASE
+ * step's separate close: when the run stops BETWEEN programs (an operator's Stop at the
+ * bit-change pause, or a failure that leaves no program running), `M852` then `$H`, in that order
+ * (the bench rule: home after every activity).
  *
  * NEVER BLIND. Every call asks `?` first and sends nothing unless the answer is `Idle` with no alarm.
  * An unreachable or alarmed machine is not a machine to switch a vacuum on or off from here; the
@@ -85,7 +79,7 @@ async function sendWhenIdle(target: Target, lines: readonly string[]): Promise<S
 }
 
 /**
- * `M332` then `$H`: close the span after a Stop or a failure between programs. Only on an Idle
+ * `M852` then `$H`: close the span after a Stop or a failure between programs. Only on an Idle
  * machine — after an abort the run panel offers Home instead and this is not called.
  */
 export async function closeVacuumSpan(target: Target): Promise<SpanOutcome> {
