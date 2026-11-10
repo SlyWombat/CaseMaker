@@ -139,6 +139,8 @@ import type { NodeMeshOutput } from '../geometry/meshOutput';
 import { programHash } from '@/engine/cnc/programHash';
 import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import { jobVise, validateVise, viseEnvelope } from '@/engine/cnc/fixture';
+// #1117 — the freeing contour against the vise's jaws, refused at plan stage.
+import { contourJawClearanceFinding } from '@/engine/cnc/mounts/jawClearance';
 import { generateEngrave, makeClipperOffset, zPasses, type EngraveRegion, type FinishPassSpec, type VCarveRegion } from '@/engine/cnc/cam/engraveJob';
 // #433/#666 — the adaptive-clearing strategy a metal pocket is cut with. The METHOD settings are
 // the shop's `adaptive.*` defaults; the cut numbers are the resolved feeds row, merged inside
@@ -6240,6 +6242,38 @@ export async function generateGoalProgram(
     }
   } catch (e) {
     return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
+  }
+  // #1117 — THE FREEING CONTOUR AGAINST THE VISE'S JAWS, BEFORE ANYTHING POSTS. A vise job whose
+  // contour follows a silhouette closer to the stock's edge than the cutter's SHANK radius drives
+  // the shank into a jaw while the tip clears (ref-tray70: 2 mm rim, 2 mm tip, 6 mm shank). The
+  // sweep would refuse it checkpoint by checkpoint (~29 errors) after posting; this is one
+  // sentence, one refusal, no file.
+  //
+  // SCOPE: THE FREEING CONTOUR ONLY. Every OTHER op near a jaw — pockets, finishes, rest passes —
+  // and every clamp/bracket op stays the verifier's and the sweep's backstop, unchanged.
+  //
+  // Single-setup plans only: the contour's coordinates are in the job blank's work frame, which is
+  // the vise's frame; a flipped/multi-setup plan cuts from a DIFFERENT box (#1082) and this
+  // check's frame assumption would not hold.
+  if (jobMount(job) === 'vise' && input.setups.length === 1) {
+    const contourOps = output.perSetup.flatMap((setup) => setup.ops.filter((op) => op.region.kind === 'contour'));
+    const contourTool = contourOps[0]?.outcome.ir.tool ?? null;
+    const contourMoves = contourOps.flatMap((op) => op.outcome.ir.operations.flatMap((operation) => operation.moves));
+    if (contourTool !== null && contourMoves.length > 1) {
+      const widths = [contourTool.handleDiameter, contourTool.diameter, contourTool.tipDiameter, cuttingDiameter(contourTool)].filter(
+        (d): d is number => d !== null && d > 0,
+      );
+      if (widths.length > 0) {
+        const jaw = contourJawClearanceFinding({
+          stock: { length: input.stock.length, width: input.stock.width },
+          vise: jobVise(job),
+          contour: contourMoves,
+          shankRadiusMm: Math.max(...widths) / 2,
+          clearanceMm: job.jawClearance,
+        });
+        if (jaw !== null) return fail('findings', jaw.message, null, output, [jaw]);
+      }
+    }
   }
   // #1073 — THE FLIP'S RELEASE IS THE FLIPPED SETUP'S LAST PROGRAM. It is appended to the plan's
   // own program list, so the existing post/verify loop posts it after everything else — same
