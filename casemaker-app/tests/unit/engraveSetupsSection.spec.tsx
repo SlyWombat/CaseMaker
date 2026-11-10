@@ -493,14 +493,20 @@ describe('#471 registration — planned only after approval, refused with the en
     fireEvent.click(tapButton);
     // The runner is at the operator prompt: Continue is there, by testid, and the row's button is
     // disabled while the tap runs (a second press would orphan the console handle).
-    await screen.findByTestId('engrave-mount-tap-continue');
+    // #1181 — the runner is async; the default 1 s find could expire under the loaded run while
+    // the prompt was still on its way. 15 s is a clock deadline, not the subject.
+    await screen.findByTestId('engrave-mount-tap-continue', {}, { timeout: 15_000 });
     expect(screen.getByTestId('engrave-mount-tap-cancel')).toBeTruthy();
     expect((screen.getByTestId('engrave-setup-tap-jaw-1') as HTMLButtonElement).disabled).toBe(true);
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('engrave-mount-tap-continue'));
     });
-    await waitFor(() => expect(screen.getByTestId('engrave-setups-tap-note').textContent).toContain('recorded'));
+    // #1181 — same: the tap's completion and note land asynchronously; the 1 s default was seen
+    // to expire under load before the note rendered. 15 s only trips if the note never lands.
+    await waitFor(() => expect(screen.getByTestId('engrave-setups-tap-note').textContent).toContain('recorded'), {
+      timeout: 15_000,
+    });
     expect((screen.getByTestId('engrave-setup-tap-jaw-1') as HTMLButtonElement).disabled).toBe(false);
     expect(operatorPrompts.length).toBeGreaterThan(0);
   });

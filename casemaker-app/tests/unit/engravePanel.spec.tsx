@@ -4883,12 +4883,17 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
     }));
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-generate'));
-    await waitFor(() =>
-      expect(screen.getByTestId('engrave-generate-progress').textContent).toContain('roughing level 41 of 112'),
+    // #1181 — these are clock deadlines, not the subject. The stage arrives through the async
+    // run-client load; under the loaded run the default 1 s waitFor still read 'starting the
+    // worker…' while the client was being fetched. 15 s only trips if the stage never arrives.
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('engrave-generate-progress').textContent).toContain('roughing level 41 of 112'),
+      { timeout: 15_000 },
     );
     fireEvent.click(screen.getByTestId('engrave-generate-cancel'));
     expect(cancels).toBe(1);
-    await waitFor(() => expect(screen.queryByTestId('engrave-generate-progress')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('engrave-generate-progress')).toBeNull(), { timeout: 15_000 });
     release({ ok: false, stage: 'findings', findings: [], feeds: null, cam: null, nc: null, verify: null, errors: [] } as unknown as import('@/workers/sim/engraveGenerate').EngraveGenerated);
     setEngraveRunClientLoader(null);
   });
@@ -5893,7 +5898,14 @@ describe('#1046 EngravePanel — the standard-balls press', () => {
     fireEvent.click(press);
     // #1126 put the house-availability probe (an HTTP fact) between the press and the pipeline
     // call, so one microtask flush no longer reaches it — wait for the call itself instead.
-    await waitFor(() => expect(seen, 'the press asks the pipeline for the ladder').toBe(true));
+    // #1181 — THE WAIT MUST OUTLAST THE PROBE. With no service answering, the probe runs to its
+    // own DEFAULT_TIMEOUT_MS (2 s, houseClient.ts) before the in-page path is taken; waitFor's 1 s
+    // default therefore expired on any host without the house service (GPD-Dave failed in 1.1 s,
+    // unloaded; k3 answers in ms because it runs the service). 15 s is a clock deadline, not the
+    // subject — the assertion is unchanged.
+    await waitFor(() => expect(seen, 'the press asks the pipeline for the ladder').toBe(true), {
+      timeout: 15_000,
+    });
   }, 60_000);
 
   it('a stale run’s rest line is not shown as current — no run line, no press', () => {
