@@ -903,6 +903,22 @@ export interface EngraveGenerated {
    */
   restPass?: RestPassFacts | null;
   /**
+   * #1136 — THIS RESULT WAS A PARTIAL POST, and which programs it re-posted. Present only when the
+   * caller handed over the result the frozen package was cut from and the substitution map was the
+   * only change: the unaffected setups' programs were carried verbatim and the affected ones were
+   * posted here. The store reads it to apply the Manager's condition — the WHOLE composed run must
+   * pass the sweep and the check, and a composed run that fails falls back to a full regenerate.
+   * Absent on a full run (and on results stored before the field existed).
+   */
+  partialRegen?: {
+    /** The affected setups (1-based), the Cut screen's own numbering. */
+    affectedSetups: number[];
+    /** How many of the run's programs were posted here. */
+    reposted: number;
+    /** How many were carried from the previous result, byte-for-byte. */
+    carried: number;
+  };
+  /**
    * #434 — what the DRILL program cut: one plan per drill item, the settings and their sources,
    * and the point default the plan used. Present only when this result is the drill bit's own
    * program (a `(setup, drill)` entry); absent/null on every other program, so the run sheet's
@@ -7894,6 +7910,15 @@ export async function engraveGenerate(
     surface: shop.surface ?? null,
     programs,
     restPass: firstCarried ? partial!.previous.restPass : restPass,
+    ...(partial === null
+      ? {}
+      : {
+          partialRegen: {
+            affectedSetups: partial.plan.affectedSetups,
+            reposted: programs.filter((program) => partial.affected.has(program.setupId)).length,
+            carried: programs.filter((program) => !partial.affected.has(program.setupId)).length,
+          },
+        }),
   };
 }
 

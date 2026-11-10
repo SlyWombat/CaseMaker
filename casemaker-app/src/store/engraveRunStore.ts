@@ -39,7 +39,7 @@ import type { ProgramOracle } from './engraveRunGate';
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { SimStatus } from './simStore';
-import { jobMountObstacles, jobSetups, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { jobMountObstacles, jobSetups, jobTool, toSetup, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { appendRunLog, type RunLogEntry } from '@/engine/cnc/engrave/runLog';
 import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
 import { carrySeedsForSetup, carriedMaps, orient, type CarrySetup } from '@/engine/cnc/setups';
@@ -600,7 +600,17 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
   // long before the ideal (minutes later) resolves, so the ideal would always be dropped.
   let runEpoch = 0;
 
-  async function run(surface: SurfacePostFit | null = null, opts: { simulateOnly?: boolean } = {}): Promise<void> {
+  // #1136 — THE JUDGEMENT IS NEVER PARTIAL. A composed partial run that fails the whole-run sweep
+  // or check is ABANDONED: the generator is called again without the carry, and the sentence below
+  // is what the operator reads on the full run that survives.
+  const PARTIAL_FALLBACK_SENTENCE =
+    'The partial re-post did not pass the whole-run check (the simulation or the design), so the whole run has been re-posted.';
+  const PARTIAL_FALLBACK_LOG = 'the partial re-post did not pass the whole-run check — re-posting the whole run';
+
+  async function run(
+    surface: SurfacePostFit | null = null,
+    opts: { simulateOnly?: boolean; fallback?: boolean } = {},
+  ): Promise<void> {
     // #893 — SIMULATE ONLY: the program is already this job's, so the run starts at the sweep.
     // A stale program (or one that never posted) has nothing this press can honestly check.
     const simulateOnly = opts.simulateOnly === true;
@@ -633,7 +643,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // #1123 item 4 — the log opens with the first tick so the fold is never blank mid-run.
       log: simulateOnly
         ? appendRunLog(priorLog, 'simulating the existing program', logStartedAt, logStartedAt)
-        : appendRunLog([], 'starting the worker', logStartedAt, logStartedAt),
+        : opts.fallback === true
+          ? appendRunLog(appendRunLog([], PARTIAL_FALLBACK_LOG, logStartedAt, logStartedAt), 'starting the worker', logStartedAt, logStartedAt)
+          : appendRunLog([], 'starting the worker', logStartedAt, logStartedAt),
     });
 
     // ONE machine per run (#297): the saved frame is read once, here, and handed to the generator
@@ -871,6 +883,13 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       return;
     }
     if (mine !== seq) return;
+
+    // #1136 — the full regenerate's result carries the sentence the operator reads: this run is
+    // here because the composed partial one did not pass judgement.
+    if (opts.fallback === true) {
+      const fallbackFinding: JobFinding = { severity: 'info', code: 'partial-regen', message: PARTIAL_FALLBACK_SENTENCE };
+      generated = { ...generated, findings: [...generated.findings, fallbackFinding] };
+    }
 
     // The job may have been edited while generating: the result already describes an older job. So
     // may the machine's saved frame (#301), and so may the depth margins (#345): the program above
@@ -1339,6 +1358,12 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // #1048 — THE SWEEP WALK IS DONE; the worker is free. Now the background ideal may have it.
 
     if (!outcome.ok) {
+      // #1136 — THE JUDGEMENT IS NEVER PARTIAL. A composed partial run whose sweep refused is
+      // ABANDONED: the whole run is generated again (no carry) and judged, and the surviving run
+      // says so. A Cancel is not a verdict — `mine !== seq` then, so this branch never sees it.
+      if (generated.partialRegen !== undefined && opts.fallback !== true && mine === seq) {
+        return await run(surface, { ...opts, fallback: true });
+      }
       set({
         phase: 'blocked',
         simPrograms: summaries,
@@ -1400,8 +1425,16 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         goalCoverageDeferred: goalCoverageDeferred(o.report, i === lastGoalIndex),
       }));
       if (mine !== seq) return;
+      // #1136 — a composed partial run that fails the whole-run CHECK (the design, the goal, the
+      // copper) is abandoned for a full regenerate, exactly as a failed sweep is.
+      if (!oracle.ok && generated.partialRegen !== undefined && opts.fallback !== true) {
+        return await run(surface, { ...opts, fallback: true });
+      }
       set({ oracle, oraclePrograms, phase: oracle.ok ? 'ready' : 'blocked' });
     } catch (e) {
+      if (generated.partialRegen !== undefined && opts.fallback !== true && mine === seq) {
+        return await run(surface, { ...opts, fallback: true });
+      }
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
     }
     noteWorkEnd('generate', 'done');
