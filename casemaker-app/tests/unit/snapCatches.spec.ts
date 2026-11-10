@@ -6,8 +6,7 @@ import {
 } from '@/engine/compiler/snapCatches';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { createDefaultProject } from '@/store/projectStore';
-import type { BoardProfile, CaseParameters } from '@/types';
-import type { BuildOp } from '@/engine/compiler/buildPlan';
+import type { CaseParameters } from '@/types';
 
 const baseCase: CaseParameters = {
   wallThickness: 2,

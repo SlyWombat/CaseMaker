@@ -52,7 +52,7 @@ import {
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { createDefaultProject } from '@/store/projectStore';
 import { parseProject, serializeProject } from '@/store/persistence';
-import type { BoardProfile, CaseParameters, Project } from '@/types';
+import type { CaseParameters, Project } from '@/types';
 import type { PrinterVolume } from '@/types/printer';
 import { exec } from './helpers/manifoldExec';
 

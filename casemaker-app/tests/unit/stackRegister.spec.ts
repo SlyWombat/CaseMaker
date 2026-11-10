@@ -17,7 +17,7 @@ import {
   stackGrooveDepth,
   stackRidgeHeight,
 } from '@/engine/compiler/stackRegister';
-import { intersection, translate, cube, type BuildOp } from '@/engine/compiler/buildPlan';
+import { intersection, translate, type BuildOp } from '@/engine/compiler/buildPlan';
 import { createDefaultProject } from '@/store/projectStore';
 import type { CaseParameters, Project } from '@/types';
 import { exec } from './helpers/manifoldExec';

@@ -4,7 +4,6 @@ import { findTemplate } from '@/library/templates';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { computeShellDims } from '@/engine/compiler/caseShell';
 import { getBuiltinHat } from '@/library/hats';
-import type { BuildOp } from '@/engine/compiler/buildPlan';
 
 describe('Issue #32 — GIGA + DMX template + side-Z stack height', () => {
   it('giga-dmx-controller template builds without error', () => {

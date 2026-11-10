@@ -19,10 +19,8 @@ import {
 } from '@/engine/compiler/seal';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { computeShellDims } from '@/engine/compiler/caseShell';
-import { intersection, cube, translate, type BuildOp } from '@/engine/compiler/buildPlan';
 import { createDefaultProject } from '@/store/projectStore';
 import type { CaseParameters } from '@/types';
-import { exec } from './helpers/manifoldExec';
 
 const SEAL: NonNullable<CaseParameters['seal']> = {
   enabled: true,

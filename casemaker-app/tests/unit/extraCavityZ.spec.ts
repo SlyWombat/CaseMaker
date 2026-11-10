@@ -4,7 +4,6 @@ import { computeShellDims } from '@/engine/compiler/caseShell';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { findTemplate } from '@/library/templates';
 import { getBuiltinHat } from '@/library/hats';
-import type { BuildOp } from '@/engine/compiler/buildPlan';
 
 describe('Extra cavity height (#36)', () => {
   it('extraCavityZ = N grows outerZ by exactly N', () => {

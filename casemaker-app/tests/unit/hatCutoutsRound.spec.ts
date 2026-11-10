@@ -6,7 +6,6 @@ import { computeStackedHatHeight, HOST_HAT_CLEARANCE } from '@/engine/compiler/c
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { getBuiltinHat } from '@/library/hats';
 import { getBuiltinBoard } from '@/library';
-import type { BuildOp } from '@/engine/compiler/buildPlan';
 
 describe('Issue #18 — DMX shield round XLR cutouts + HAT lift over host components', () => {
   beforeEach(() => {

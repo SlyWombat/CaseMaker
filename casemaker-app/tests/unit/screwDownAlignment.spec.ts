@@ -4,7 +4,6 @@ import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { validateScrewDownAlignment } from '@/engine/compiler/validation';
 import { createDefaultProject } from '@/store/projectStore';
 import { listBuiltinBoardIds } from '@/library';
-import type { BuildOp } from '@/engine/compiler/buildPlan';
 
 describe('Issue #21 — screw-down lid posts + validation', () => {
   it('every built-in board produces no validation errors with default screw-down config', () => {

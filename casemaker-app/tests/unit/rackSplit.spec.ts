@@ -19,7 +19,7 @@ import {
   type RackPartSplitRequest,
 } from '@/engine/compiler/rackSplit';
 import { LUG_EMBED, LUG_LAP } from '@/engine/compiler/shellSplit';
-import { cube, difference, intersection, translate, type Aabb, type BuildOp } from '@/engine/compiler/buildPlan';
+import { cube, difference, translate, type Aabb, type BuildOp } from '@/engine/compiler/buildPlan';
 import type { PrinterVolume } from '@/types/printer';
 import { exec } from './helpers/manifoldExec';
 

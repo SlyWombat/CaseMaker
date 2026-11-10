@@ -22,10 +22,10 @@ import {
   planLidJoint,
   type LidSplitRequest,
 } from '@/engine/compiler/lidSplit';
-import { cube, difference, intersection, translate, type Aabb, type BuildOp } from '@/engine/compiler/buildPlan';
+import { cube, difference, translate, type Aabb, type BuildOp } from '@/engine/compiler/buildPlan';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { createDefaultProject } from '@/store/projectStore';
-import type { BoardProfile, CaseParameters, Project } from '@/types';
+import type { CaseParameters, Project } from '@/types';
 import type { PrinterVolume } from '@/types/printer';
 import { exec } from './helpers/manifoldExec';
 
