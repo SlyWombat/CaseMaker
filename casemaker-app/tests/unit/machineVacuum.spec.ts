@@ -3,7 +3,7 @@
  *
  * The orchestration under test is the real one — only the socket is faked (`setMachineConsoleLoader`,
  * the seam shape `machineConsole.spec.ts` uses), so what runs here is attachConsole → ask `?` → read
- * the state word → send `M331`/`M332` → close. The assertions that matter are the safety ones: a
+ * the state word → send `M851`/`M852` → close. The assertions that matter are the safety ones: a
  * machine that is not Idle never receives the code, and the entire press is one connection.
  */
 
@@ -57,33 +57,33 @@ const idleMachine: (line: string) => ConsoleSend = (line) =>
 
 describe('#390 the vacuum line', () => {
   it('is the machine’s own bare code, on and off', () => {
-    expect(vacuumLine(true)).toBe('M331');
-    expect(vacuumLine(false)).toBe('M332');
-    expect(VACUUM_ON).toBe('M331');
-    expect(VACUUM_OFF).toBe('M332');
+    expect(vacuumLine(true)).toBe('M851');
+    expect(vacuumLine(false)).toBe('M852');
+    expect(VACUUM_ON).toBe('M851');
+    expect(VACUUM_OFF).toBe('M852');
   });
 });
 
 describe('#390 the vacuum seam — it asks before it switches', () => {
-  it('asks `?` then sends `M331` on an idle machine, on one connection, then closes it', async () => {
+  it('asks `?` then sends `M851` on an idle machine, on one connection, then closes it', async () => {
     const fake = fakeSession(idleMachine);
     const result = await toggleVacuum(TARGET, true);
 
     expect(result).toEqual({ kind: 'toggled', on: true, status: IDLE });
-    expect(fake.sent).toEqual(['?', 'M331']);
+    expect(fake.sent).toEqual(['?', 'M851']);
     // One press, one connection: the ask and the code ride it, and it is closed afterwards so the
     // control holds no socket beside the console's.
     expect(fake.opens).toBe(1);
     expect(fake.closes).toBe(1);
   });
 
-  it('sends `M332` when switching off', async () => {
+  it('sends `M852` when switching off', async () => {
     const fake = fakeSession(idleMachine);
     const result = await toggleVacuum(TARGET, false);
     expect(result.kind).toBe('toggled');
     if (result.kind !== 'toggled') return;
     expect(result.on).toBe(false);
-    expect(fake.sent).toEqual(['?', 'M332']);
+    expect(fake.sent).toEqual(['?', 'M852']);
   });
 
   it('refuses a machine that reports Run rather than Idle, and sends no code', async () => {
@@ -151,7 +151,7 @@ describe('#390 the vacuum seam — it asks before it switches', () => {
     // Verbatim from `docs/bench/traces/2026-10-12-poll.log`: `Idle` at 90 %, the spindle still turning,
     // ~4 s before the trip home at `M05` (`Z1-Bridge-Protocol.md` §6). The state word alone passes
     // this, which is exactly the hole #390 item 1 names: the program's own `M332` already went out, so
-    // an `M331` sent here would leave the vacuum on with nothing left to switch it off.
+    // an `M851` sent here would leave the vacuum on with nothing left to switch it off.
     const MID_JOB_IDLE =
       '<Idle|MPos:-98.4000,-102.8000,-9.6109|WPos:50.0000,22.0000,55.0000|S:11988.6,12000.0|T:1,0.507,1|P:29,90,88|OTA:0,0>';
     const fake = fakeSession((line) =>
@@ -182,7 +182,7 @@ describe('#390 the vacuum seam — it asks before it switches', () => {
     );
     const result = await toggleVacuum(TARGET, true);
     expect(result.kind).toBe('toggled');
-    expect(fake.sent).toEqual(['?', 'M331']);
+    expect(fake.sent).toEqual(['?', 'M851']);
   });
 
   it('treats an unreadable status line as no permission, and sends no code', async () => {
@@ -225,7 +225,7 @@ describe('#390 the vacuum seam — a socket that failed', () => {
     );
     const result = await toggleVacuum(TARGET, true);
     expect(result.kind).toBe('timeout');
-    expect(fake.sent).toEqual(['?', 'M331']);
+    expect(fake.sent).toEqual(['?', 'M851']);
   });
 
   it('turns a dead socket into an error answer rather than a thrown exception', async () => {

@@ -1511,7 +1511,7 @@ describe('#819 the finished screen', () => {
     expect(screen.queryByTestId('engrave-cut-go')).toBeNull();
     expect(screen.getByTestId('engrave-run-end').dataset.kind).toBe('finished');
     expect(screen.getByTestId('engrave-run-done-title').textContent).toMatch(/^Finished · /);
-    expect(screen.getByTestId('engrave-run-outcome').textContent).toBe('Vacuum off; homed.');
+    expect(screen.getByTestId('engrave-run-outcome').textContent).toBe('Vacuum off (M852); homed.');
     expect(screen.queryByText('bookkeeping the card must not draw')).toBeNull();
     expect(screen.queryByTestId('engrave-run-start')).toBeNull();
     expect(screen.getByTestId('engrave-run-another')).toBeTruthy();

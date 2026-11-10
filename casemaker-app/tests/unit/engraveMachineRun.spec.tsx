@@ -136,7 +136,7 @@ describe('#423 the run panel, in the real tree', () => {
     fireEvent.click(stop);
     await waitFor(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('aborted'), { timeout: 12000 });
     expect(sent).toContain('abort');
-    expect(sent.at(-1)).toBe('M332');
+    expect(sent.at(-1)).toBe('M852');
     expect(sent).not.toContain('$H');
     expect(screen.getByTestId('engrave-run-home')).toBeTruthy(); // offered after a confirmed stop
     expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(false);

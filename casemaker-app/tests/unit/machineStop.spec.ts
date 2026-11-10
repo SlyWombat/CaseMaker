@@ -57,7 +57,7 @@ describe('#424 stopProgram', () => {
     expect(f.sent).toEqual(['?']);
   });
 
-  it('aborts, waits for Idle, then sends M332', async () => {
+  it('aborts, waits for Idle, then sends M852', async () => {
     let polls = 0;
     const f = fake((l) => {
       if (l === '?') {
@@ -68,7 +68,7 @@ describe('#424 stopProgram', () => {
     });
     const r = await stopProgram(TARGET, noSleep);
     expect(r).toMatchObject({ kind: 'stopped', vacuumOff: true });
-    expect(f.sent).toEqual(['?', 'abort', '?', '?', 'M332']);
+    expect(f.sent).toEqual(['?', 'abort', '?', '?', 'M852']);
     expect(f.c.closes).toBe(1);
   });
 
@@ -90,6 +90,6 @@ describe('#424 stopProgram', () => {
     });
     const r = await stopProgram(TARGET, noSleep);
     expect(r.kind).toBe('stopped');
-    expect(f.sent).toEqual(['?', 'abort', '?', 'M332']);
+    expect(f.sent).toEqual(['?', 'abort', '?', 'M852']);
   });
 });
