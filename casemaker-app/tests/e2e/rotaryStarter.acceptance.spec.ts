@@ -112,7 +112,9 @@ test('Name on a dowel: door to the four ticks, the views, and the run refusal (#
   const bench = page.getByTestId('engrave-cut-rotary-bench');
   await expect(bench).toBeVisible();
   await expect(bench).toHaveText(BENCH);
-  const step3Buttons = page.locator('[data-testid="engrave-cut-step-3"] button');
+  // #1180 — the cut card (#1167) draws its fixed Pause/Stop row in step 3 too; with no run both are
+  // disabled. The refusal's one REMEDY is still the only enabled button in the step.
+  const step3Buttons = page.locator('[data-testid="engrave-cut-step-3"] button:enabled');
   await expect(step3Buttons).toHaveCount(1);
   await expect(step3Buttons.first()).toHaveAttribute('data-testid', 'engrave-cut-open-machines');
   await page.screenshot({ path: path.join(OUT, 'cut.png') });
