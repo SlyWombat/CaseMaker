@@ -2554,7 +2554,8 @@ describe('#1046 the ladder ask reaches the pipeline', () => {
     let seen: unknown = 'unset';
     setEngraveRunClientLoader(async () => ({
       engraveGenerate: async (...args: unknown[]) => {
-        seen = args[8];
+        // #1151 inserted `true` (the owned-first flag) at argument 8; the ladder is argument 9.
+        seen = args[9];
         return cleanGen();
       },
       simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
