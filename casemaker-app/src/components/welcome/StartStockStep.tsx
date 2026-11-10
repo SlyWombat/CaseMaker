@@ -775,9 +775,9 @@ export function StartStockStep({
         data-testid="start-wizard-size-unit"
         role="group"
         aria-label="Size units"
-        style={{ ...MUTED, display: 'inline-flex', alignItems: 'baseline', gap: 4, margin: '8px 0 0' }}
+        style={{ ...MUTED, display: 'inline-flex', alignItems: 'baseline', gap: 4, margin: '2px 0 0' }}
       >
-        <span style={{ marginRight: 4 }}>Size</span>
+        {/* The section label above already says Size (#1105 review): the toggle is only the unit. */}
         <button
           type="button"
           data-testid="start-wizard-size-mm"
