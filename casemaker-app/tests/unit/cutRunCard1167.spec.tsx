@@ -129,9 +129,24 @@ describe('#1167 the Cut card lists the whole job', () => {
     expect(screen.getByTestId('engrave-cut-card-row-1').getAttribute('data-state')).toBe('done');
     expect(screen.getByTestId('engrave-cut-card-row-3').getAttribute('data-state')).toBe('bit-change');
     expect(screen.getByTestId('engrave-cut-card-footnote').textContent).toContain('bit change');
-    // The control row is part of the card in the idle state too; no run is active, so both wait.
+    // The control row is part of the card in the idle state too; no run is active, so both wait —
+    // and each says WHY (A's acceptance rule: every disabled control carries its reason sentence;
+    // the rule reads a `title` when no *-reason node is in the control's scope).
     expect((screen.getByTestId('engrave-cut-card-pause') as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId('engrave-cut-card-stop') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('engrave-cut-card-pause').getAttribute('title')).toBe('Nothing is running yet');
+    expect(screen.getByTestId('engrave-cut-card-stop').getAttribute('title')).toBe('Choose the machine first');
+  });
+
+  it('with a machine but no run, Stop says the same reason Pause does', () => {
+    const job = trayJob();
+    const pkg = packageOf(job, 20);
+    render(
+      <CutRunCard job={job} pkg={pkg} plan={planOf(20)} finishedHashes={[]} target={{ host: '192.0.2.10', port: 2222 }} />,
+    );
+    expect((screen.getByTestId('engrave-cut-card-pause') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('engrave-cut-card-pause').getAttribute('title')).toBe('Nothing is running yet');
+    expect(screen.getByTestId('engrave-cut-card-stop').getAttribute('title')).toBe('Nothing is running yet');
   });
 
   it('stale finishedPrograms hashes from an OLD package do not count (17-program job)', () => {
