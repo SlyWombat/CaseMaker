@@ -73,16 +73,18 @@ import {
   releaseNext,
   releasePending,
   releasePrograms,
+  releaseStem,
   type ReleaseProgram,
   type ReleaseSource,
 } from '@/engine/cnc/engrave/release';
+import { otherPackageFilesFor, packageKeyOf } from '@/engine/cnc/engrave/packageFiles';
 import { machineKey, runContextFor, useMachineRunStore, type RunContext } from './machineRunStore';
 import { finishedProgramsFor, localMachine } from './locationStore';
 import { readDefault, readFlag } from '@/platform/defaultsClient';
 import { useShopDefaultsStore } from './shopDefaultsStore';
 import { firstRegistrationFor, setupRegistrationFor } from './engraveRegistrationStore';
 import { facingRegistrationBlocker } from './engraveRunGate';
-import { recordUploadedFile } from '@/platform/machineFiles';
+import { deleteMachineFile, listMachineFiles, recordUploadedFile } from '@/platform/machineFiles';
 
 export type ReleasePhase =
   /** Planned, nothing sent: the upload button is the next press. */
@@ -318,6 +320,48 @@ const said = (r: MachineUploadResult): string => {
       return `${r.filename} was NOT uploaded: ${r.detail}`;
   }
 };
+
+/**
+ * #1179 C — THE CARD BELONGS TO THE PACKAGE. After a package's files are on the card (and read
+ * back), this job's files from OTHER packages are removed, including yesterday's keyless names.
+ * Nothing else is touched, and nothing this app did not upload is deleted without the person:
+ * the Files delete rule returns `confirm` for a file outside the ledger, and the cleanup leaves
+ * it on the card, named in the note. The same stem is the boundary — another job's files stay.
+ */
+async function removeOtherPackageFiles(
+  target: { host: string; port: number },
+  jobName: string,
+  key8: string | null,
+): Promise<string[]> {
+  const listed = await listMachineFiles(target);
+  if (listed.kind !== 'listed') {
+    return [
+      `The card's other files could not be listed (${listed.detail}); files from an earlier plan may still be there.`,
+    ];
+  }
+  const stale = otherPackageFilesFor(
+    listed.entries.filter((e) => !e.directory).map((e) => e.name),
+    releaseStem(jobName),
+    key8,
+  );
+  if (stale.length === 0) return [];
+  const removed: string[] = [];
+  const left: string[] = [];
+  for (const name of stale) {
+    // Never `confirmed`: the person has not been asked, and this app's ledger decides.
+    const r = await deleteMachineFile(target, name);
+    if (r.kind === 'deleted') removed.push(name);
+    else left.push(r.kind === 'confirm' ? `${name} (not uploaded by this app in this browser)` : name);
+  }
+  const notes: string[] = [];
+  if (removed.length > 0) {
+    notes.push(`Removed ${removed.length} file${removed.length === 1 ? '' : 's'} from an earlier plan: ${removed.join(', ')}.`);
+  }
+  if (left.length > 0) {
+    notes.push(`Left on the card — this app did not upload ${left.length === 1 ? 'it' : 'them'} here: ${left.join(', ')}.`);
+  }
+  return notes;
+}
 
 const spanNote = (r: Awaited<ReturnType<typeof closeVacuumSpan>>): string => {
   if (r.kind === 'done') return 'Vacuum switched off (M852) and the machine homed ($H).';
@@ -817,12 +861,12 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       const machine = machineKey(target);
       const current = get().records[machine];
       const done = [...finishedProgramsFor(target), ...finishedLogged(job)];
-      const planned = releasePrograms(job.name, programs, done);
+      const planned = releasePrograms(job.name, programs, done, packageKeyOf(job));
       const walks = walksForJob(target, job, programs);
       if (current !== undefined && current.jobId === job.id && sameHashes(current.files, planned)) {
         // A remount, or a refresh after a run finished elsewhere: keep the upload results and the
         // at-machine confirmation, and read the finished list again.
-        const merged = releasePrograms(job.name, programs, done).map((f, i) => ({
+        const merged = releasePrograms(job.name, programs, done, packageKeyOf(job)).map((f, i) => ({
           ...f,
           upload: current.files[i]!.upload,
           uploadNote: current.files[i]!.uploadNote,
@@ -1012,6 +1056,10 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
           say(machine, 'No program was played. Fix the upload and press Upload again; the files already written are kept.');
           return;
         }
+      }
+      // #1179 C — every file just written was read back; now this job's files from other plans go.
+      for (const note of await removeOtherPackageFiles(target, rec.job.name, packageKeyOf(rec.job))) {
+        say(machine, note);
       }
       patch(machine, { phase: 'ready', uploading: null });
       say(

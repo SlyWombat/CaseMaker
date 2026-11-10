@@ -41,6 +41,8 @@ import {
   PTYPE_FILE_END,
   PTYPE_FILE_START,
   PTYPE_FILE_VIEW,
+  PTYPE_LOAD_ERROR,
+  PTYPE_LOAD_FINISH,
   md5Hex,
   STATUS_POLL_BYTE,
   u32be,
@@ -133,8 +135,8 @@ describe('#449 the connect timeout is a shop default with a labelled fallback', 
     const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'platform', 'desktop', 'machineBridge.ts'), 'utf8');
     // identify, status, #826's inspect, #775's serial check, readConfigValues,
     // uploadVerifiedProgram, sendConsoleLine, openConsoleSession, and #772's two card commands
-    // (listSdFiles, deleteSdFile).
-    expect(src.match(/opts\.connectTimeoutMs \?\? DEFAULT_CONNECT_TIMEOUT_MS/g)).toHaveLength(10);
+    // (listSdFiles, deleteSdFile), and #1179's stale-file retry delete.
+    expect(src.match(/opts\.connectTimeoutMs \?\? DEFAULT_CONNECT_TIMEOUT_MS/g)).toHaveLength(11);
     expect(src).not.toMatch(/connectTimeoutMs \?\? \d/);
   });
 });
@@ -204,6 +206,61 @@ describe('#255 machine bridge — actions', () => {
     expect(outcome).toEqual({ ok: true, bytes: 3, packets: 1, alreadyPresent: false });
     expect(transport.connects).toBe(1);
     expect(transport.closed).toEqual([1]);
+  });
+
+  // #1179 C — READ-BACK → REMOVE → UPLOAD → VERIFY. A stale file at the path (an upload that does
+  // not overwrite, or a write that did not land) is removed with the app's own `rm`, then the
+  // upload is retried once and read back again. Works whether the machine overwrites or not.
+  it('removes a stale same-named file and retries the upload until the read-back matches', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(
+      // First attempt: the transfer ends, but the digest is of an OLD file at that path.
+      encodeFrame(PTYPE_FILE_VIEW, EMPTY),
+      encodeFrame(PTYPE_FILE_DATA, u32be(1)),
+      encodeFrame(PTYPE_FILE_END, EMPTY),
+      encodeFrame(0x90, utf8(`${md5Hex(new Uint8Array([9, 9, 9]))}/sd/gcodes/badge.nc`)),
+      // The delete the bridge issues for the stale path: its text, then the LOAD_FINISH that ends
+      // the command's read window so it cannot swallow the retry's frames.
+      encodeFrame(PTYPE_LOAD_FINISH, utf8('ok')),
+      // The retry: an ordinary transfer, read back as the bytes we sent.
+      encodeFrame(PTYPE_FILE_VIEW, EMPTY),
+      encodeFrame(PTYPE_FILE_DATA, u32be(1)),
+      encodeFrame(PTYPE_FILE_END, EMPTY),
+      encodeFrame(0x90, utf8(`${md5Hex(CONTENT)}/sd/gcodes/badge.nc`)),
+    );
+    const program = asVerifiedProgram('badge.nc', CONTENT, verifyCheck(okReport))!;
+    const outcome = await uploadVerifiedProgram({ host: '10.0.0.1', port: 2222 }, program, {
+      transport,
+      packetSize: 8,
+    });
+    expect(outcome).toEqual({ ok: true, bytes: 3, packets: 1, alreadyPresent: false });
+    const rm = decodeAll(transport.writes).find((f) => decodeText(f.data).startsWith('rm '));
+    expect(decodeText(rm?.data ?? EMPTY)).toBe('rm /sd/gcodes/badge.nc -e');
+  });
+
+  it('refuses when the stale file cannot be removed — and never plays the file', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(
+      encodeFrame(PTYPE_FILE_VIEW, EMPTY),
+      encodeFrame(PTYPE_FILE_DATA, u32be(1)),
+      encodeFrame(PTYPE_FILE_END, EMPTY),
+      encodeFrame(0x90, utf8(`${md5Hex(new Uint8Array([9, 9, 9]))}/sd/gcodes/badge.nc`)),
+      // The delete is not accepted (the console does not know it, or refuses it).
+      encodeFrame(PTYPE_LOAD_ERROR, utf8('Error: unknown command')),
+    );
+    const program = asVerifiedProgram('badge.nc', CONTENT, verifyCheck(okReport))!;
+    const outcome = await uploadVerifiedProgram({ host: '10.0.0.1', port: 2222 }, program, {
+      transport,
+      packetSize: 8,
+    });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe('refused');
+    expect(outcome.detail).toContain('does not match the program');
+    expect(outcome.detail).toContain('removing the stale file failed');
+    // No second program transfer was attempted after the refused delete.
+    const starts = decodeAll(transport.writes).filter((f) => f.type === PTYPE_FILE_START);
+    expect(starts).toHaveLength(1);
   });
 
   it('names the destination as an absolute path under the job directory', async () => {

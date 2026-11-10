@@ -101,6 +101,8 @@ export function releasePrograms(
   jobName: string,
   programs: readonly ReleaseSource[],
   finishedHashes: readonly string[],
+  /** #1179 C — the frozen package's key, stamped into every file name. */
+  packageKey: string | null = null,
 ): ReleaseProgram[] {
   const total = programs.length;
   // #1093 — THE ENGRAVING PROGRAMS' OWN COUNT: the skim is not numbered among them, exactly as
@@ -120,8 +122,8 @@ export function releasePrograms(
       toolKey: p.toolKey,
       kind: p.kind,
       filename: facing
-        ? releaseFaceFileName(jobName, p.dryRun === true)
-        : releaseFileName(jobName, engravingIndex, engravingTotal, p.dryRun),
+        ? releaseFaceFileName(jobName, p.dryRun === true, packageKey)
+        : releaseFileName(jobName, engravingIndex, engravingTotal, p.dryRun, packageKey),
       hash: p.hash,
       nc: p.nc,
       verify: p.verify,

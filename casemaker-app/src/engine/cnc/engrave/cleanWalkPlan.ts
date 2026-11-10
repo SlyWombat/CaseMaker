@@ -31,6 +31,7 @@ import { verifyProgram, type VerifyReport } from '../verify';
 import { cleanWalkFile, type CleanWalkMode, type CleanWalkSettings } from './cleanWalk';
 import { jobMountObstacles, jobTool, toSetup } from './jobSetup';
 import { releaseStem } from './runSheet';
+import { key8Of } from './packageFiles';
 
 /** One walk as the release step uploads and plays it. */
 export interface PlannedCleanWalk {
@@ -151,7 +152,8 @@ export function planCleanWalks(args: CleanWalkPlanArgs): CleanWalksPlan {
     }
     plan[mode] = {
       mode,
-      filename: `${releaseStem(job.name)}-${mode === 'clean' ? 'clean' : 'airwalk'}.nc`,
+      // #1179 C — the walk belongs to the package: its name carries the key with the programs'.
+      filename: `${releaseStem(job.name)}${key8Of(job.package?.hash ?? null) === null ? '' : `-${key8Of(job.package?.hash ?? null)}`}-${mode === 'clean' ? 'clean' : 'airwalk'}.nc`,
       nc: posted.text,
       hash: programHash(posted.text),
       verify,
