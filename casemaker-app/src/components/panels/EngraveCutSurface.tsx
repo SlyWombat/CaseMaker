@@ -128,6 +128,7 @@ import { EngraveMachineUpload } from './EngraveMachineUpload';
 import { CutterChecklist, cutterChecklistRows, missingCuttersWords } from './CutterChecklist';
 import type { CutterChecklistEntry } from '@/types/engraveJob';
 import { EngraveReleaseStep } from './EngraveReleaseStep';
+import { CutRecoveryCard } from './CutRecoveryCard';
 import { MachineStrip } from './MachineStrip';
 import { RunPlanView } from './RunPlanView';
 import { EngraveRegistrationStep } from './EngraveRegistrationStep';
@@ -1422,6 +1423,8 @@ export function EngraveCutSurface({
           {restart.sentence}
         </p>
       )}
+      {/* #1169 — THE MACHINE'S WAITING PROMPT, above the steps so it is seen whatever step is open. */}
+      <CutRecoveryCard machine={machine} target={target} />
       {/* #524/#689 — the Cut surface as a four-line checklist: Checked → Frozen → Register the
           blank → Run. Each line is one sentence; only the step the operator is on has a body. */}
       <Step number={1} title="Fit and clamp" done={fitDone} current={currentStep === 1} summary={step1Summary}>
