@@ -138,6 +138,7 @@ import {
 import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { gridSeeds } from '@/engine/cnc/registration/placing';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
+import { useMachineStopReportStore } from '@/store/machineStopReportStore';
 // #1187 — a stopped action's own report (the transport/controller error's card action).
 import { StopReportAction } from '@/components/panels/StopReportAction';
 import { stopIsReportable } from '@/platform/machineStopReport';
@@ -977,6 +978,9 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       return;
     }
     if (flipAttempt?.kind === 'refused') return;
+    // #1187 — a new run starts its stop report clean: the last stop's "Sent …" line belongs to
+    // THAT stop, never to the card this press may earn.
+    useMachineStopReportStore.getState().reset();
     // #797 follow-up — the Register card approves the planner's proposal and starts in ONE press:
     // the plan it approved is handed here, because the render-time `plan` is still null.
     const effectivePlan = planOverride ?? plan;

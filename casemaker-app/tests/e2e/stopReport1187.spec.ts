@@ -154,9 +154,10 @@ test('#1187 — a Register stop on a dead link offers its own report, and nothin
   await prepare(page);
 
   await page.getByTestId('engrave-registration-approve-start').click();
-  await page.getByTestId('engrave-registration-continue').click();
 
-  // The run dies on its M491 read: the card states the transport error…
+  // The run dies on its M491 read — BEFORE the operator's fit-probe confirm is ever asked, so
+  // there is no Continue to press (the #1179 walk's prompt is for a run that gets past the length
+  // read; this press never does). The card states the transport error…
   const failed = page.getByTestId('engrave-registration-failed');
   await expect(failed).toBeVisible({ timeout: 120_000 });
   await expect(failed).toContainText('read failed: Connection reset by peer (os error 104)');

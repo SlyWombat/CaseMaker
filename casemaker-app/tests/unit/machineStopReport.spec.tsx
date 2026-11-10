@@ -5,12 +5,16 @@
  * transport or controller error offers the action, and only the operator's press sends anything.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { StopReportAction } from '@/components/panels/StopReportAction';
 import { buildMachineStopReport, lastStatusLine, stopIsReportable } from '@/platform/machineStopReport';
 import type { MachineStopReport } from '@/platform/machineStopReport';
-import { __resetMachineStopReportStoreForTests, setStopReportSendIO } from '@/store/machineStopReportStore';
+import {
+  __resetMachineStopReportStoreForTests,
+  setStopReportSendIO,
+  useMachineStopReportStore,
+} from '@/store/machineStopReportStore';
 
 afterEach(() => {
   cleanup();
@@ -120,5 +124,17 @@ describe('#1187 — the stop card’s action', () => {
       expect(screen.getByTestId('stop-report-error').textContent).toContain('no house service answered'),
     );
     expect(screen.getByTestId('stop-report-send')).toBeTruthy();
+  });
+
+  it('a NEW stop starts fresh: reset puts the action back, so one stop cannot claim another’s send', async () => {
+    setStopReportSendIO(async () => ({ kind: 'ok', path: 'crash-reports/stop-1-0.json' }));
+    render(<StopReportAction {...props} />);
+    fireEvent.click(screen.getByTestId('stop-report-send'));
+    await waitFor(() => expect(screen.getByTestId('stop-report-sent')).toBeTruthy());
+    expect(screen.queryByTestId('stop-report-send')).toBeNull();
+    // The registration panel calls this when the next run starts.
+    act(() => useMachineStopReportStore.getState().reset());
+    expect(screen.getByTestId('stop-report-send')).toBeTruthy();
+    expect(screen.queryByTestId('stop-report-sent')).toBeNull();
   });
 });
