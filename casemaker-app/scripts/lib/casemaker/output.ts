@@ -34,10 +34,10 @@ export interface CommandOptions {
   /** `--json` was passed: emit the receipt document instead of human lines. */
   json: boolean;
   /**
-   * `--events` was passed (#1126): every progress line is written to stderr as ONE JSON object,
-   * `{ stage, pct, at }` — the protocol the house service's runs API reads. `pct` is null until
-   * the engine's own `onProgress` counts are wired through; `stage` is the same line a human run
-   * prints, so the two channels cannot be confused.
+   * `--events` was passed (#1126): progress goes to stderr as ONE JSON object per line — the
+   * engine's own `EngraveProgress` objects (`{ stage, label, done?, total? }`, the same objects the
+   * browser's worker reports) plus a `{ stage: 'note', label }` frame for each human progress line
+   * (pick words, advisories). The house service's runs API relays them unchanged.
    */
   events?: boolean;
   /** Capture the two channels instead of printing them (the MCP server, #481). */
@@ -72,9 +72,11 @@ export function commandOutput(options: CommandOptions): CommandOutput {
       }
       if (options.events === true) {
         // One JSON object per line, on stderr: the runs API's reader ignores a line it cannot
-        // parse, so a human line can never be mistaken for an event.
+        // parse, so a human line can never be mistaken for an event. A human line rides as a
+        // `note` frame so the panel's run log keeps it; the engine's own stage objects are
+        // written by `eventProgress` in `engrave.ts` and are never reshaped here.
         process.stderr.write(
-          `${JSON.stringify({ stage: line, pct: null, at: new Date().toISOString() })}\n`,
+          `${JSON.stringify({ stage: 'note', label: line, at: new Date().toISOString() })}\n`,
         );
         return;
       }

@@ -7,7 +7,7 @@
  *
  *   POST /api/v1/runs                 { job, shopEtag? } → 202 { runId, queuePosition, key }
  *   GET  /api/v1/runs/<id>            the run's snapshot (state, progress, receipt, programs)
- *   GET  /api/v1/runs/<id>/events     the stage ticks as SSE (`data: { stage, pct, at? }`)
+ *   GET  /api/v1/runs/<id>/events     the CLI's progress frames as SSE (see {@link RunEvent})
  *   POST /api/v1/runs/<id>/cancel     terminate the child; the run settles 'cancelled'
  *
  * The three request methods go through `houseRequest` (the location client's own route), so every
@@ -43,8 +43,8 @@ export interface RunSnapshot {
   id: string;
   state: RunState;
   queuePosition?: number;
-  /** The panel's own progress language: the CLI's stage tick and its percentage. */
-  progress?: { stage: string; pct: number | null } | null;
+  /** The run's latest progress frame (see {@link RunEvent}). */
+  progress?: RunEvent | null;
   /** The CLI's `--json` receipt once the run is done (null while it runs). */
   receipt?: unknown;
   programs?: RunProgram[];
@@ -55,9 +55,21 @@ export interface RunSnapshot {
 export type RunRead = { kind: 'ok'; run: RunSnapshot } | HouseFailure;
 export type RunCancel = { kind: 'ok'; state: RunState } | HouseFailure;
 
+/**
+ * One progress frame, exactly as the CLI wrote it with `--events` (#1126):
+ *
+ *   - the ENGINE'S OWN `EngraveProgress` objects — `{ stage, label, done?, total? }` — the same
+ *     objects the browser worker reports, so the panel reads a house run's progress with the type
+ *     it already reads an in-page run's with;
+ *   - `{ stage: 'note', label }` for each human progress line (pick words, advisories).
+ *
+ * `at` is added by the service when it relays a frame; the CLI never invents a timestamp.
+ */
 export interface RunEvent {
   stage: string;
-  pct: number | null;
+  label?: string;
+  done?: number;
+  total?: number;
   at?: string;
 }
 
@@ -84,6 +96,20 @@ export async function readRun(id: string): Promise<RunRead> {
   if (res.kind !== 'ok') return res;
   const parsed = parseJson<RunSnapshot>(res.text);
   return parsed.ok ? { kind: 'ok', run: parsed.value } : { kind: 'error', detail: parsed.detail };
+}
+
+export type RunGenerated = { kind: 'ok'; generated: unknown } | HouseFailure;
+
+/**
+ * Read the run's generated document — the plain-data result the CLI's `--generated` wrote beside
+ * the programs. It is the same object the browser's worker returns from `engraveGenerate`, so the
+ * panel settles a house run with it exactly as it settles an in-page one.
+ */
+export async function readRunGenerated(id: string): Promise<RunGenerated> {
+  const res = await houseRequest('GET', `/runs/${encodeURIComponent(id)}/generated`);
+  if (res.kind !== 'ok') return res;
+  const parsed = parseJson<unknown>(res.text);
+  return parsed.ok ? { kind: 'ok', generated: parsed.value } : { kind: 'error', detail: parsed.detail };
 }
 
 /** Cancel the run: the service terminates and reaps its child; the state settles 'cancelled'. */

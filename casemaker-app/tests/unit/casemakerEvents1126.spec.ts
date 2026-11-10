@@ -1,11 +1,15 @@
 // #1126 — the CLI's `--events` protocol: the house service spawns `casemaker cut … --json
-// --events` and follows the run by reading one JSON line per stage from stderr. The flag is the
-// dispatcher's (stripped everywhere, like `--json`), and the shape is the smallest one that can
-// grow: `{ stage, pct, at? }` — the same object the runs client's SSE frames carry.
+// --events` and follows the run by reading one JSON line at a time from stderr. The flag is the
+// dispatcher's (stripped everywhere, like `--json`). Two frames ride the channel:
 //
-// `pct` is null until the engine's own `onProgress` counts are wired through (slice 2). The point
-// of this spec is that a progress line and a human line cannot be confused: with `--events`,
-// stderr is JSON and nothing else.
+//   - the ENGINE'S OWN progress objects (`{ stage, label, done?, total? }`) — the very objects the
+//     browser's worker reports, written unchanged by `eventProgress`, so the panel reads them with
+//     the type it already reads the worker's with;
+//   - `{ stage: 'note', label }` for each human progress line (pick words, advisories), so the run
+//     log keeps them without a second channel.
+//
+// The point of this spec is that a human line and a machine event cannot be confused: with
+// `--events`, stderr is JSON and nothing else.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -14,6 +18,7 @@ import {
   EVENTS_VALUE_REFUSED,
   type CasemakerHandlers,
 } from '../../scripts/lib/casemaker/dispatch';
+import { eventProgress } from '../../scripts/lib/casemaker/engrave';
 import { commandOutput, HUMAN, type CommandOptions } from '../../scripts/lib/casemaker/output';
 
 function fakes(): { handlers: CasemakerHandlers; options: CommandOptions[]; argv: string[][] } {
@@ -75,11 +80,32 @@ describe('#1126 — `--events`', () => {
     expect(stdout).toEqual([]);
     expect(stderr).toHaveLength(1);
     expect(stderr[0]!.endsWith('\n')).toBe(true);
-    const event = JSON.parse(stderr[0]!) as { stage: string; pct: number | null; at?: string };
-    expect(event.stage).toBe('  pick      cutter 1 — 0.8 mm flat');
-    expect(event.pct).toBeNull();
+    const event = JSON.parse(stderr[0]!) as { stage: string; label: string; at?: string };
+    expect(event.stage).toBe('note');
+    expect(event.label).toBe('  pick      cutter 1 — 0.8 mm flat');
     // `at` is an ISO timestamp when present — the service passes it through, it does not invent one.
     if (event.at !== undefined) expect(Number.isNaN(Date.parse(event.at))).toBe(false);
+  });
+
+  it('carries the engine’s own progress objects unchanged, one JSON line each', () => {
+    const stderr: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      stderr.push(String(chunk));
+      return true;
+    });
+
+    const onProgress = eventProgress({ ...HUMAN, json: true, events: true });
+    expect(onProgress).toBeDefined();
+    const progress = { stage: 'plan' as const, label: 'planning the sequence — setup 1', done: 3, total: 9 };
+    onProgress!(progress);
+    expect(stderr).toHaveLength(1);
+    expect(stderr[0]!.endsWith('\n')).toBe(true);
+    // Byte-for-byte the engine's object: the panel reads this with `EngraveProgress`.
+    expect(JSON.parse(stderr[0]!)).toEqual(progress);
+
+    // Without the flag there is no callback at all — the run is not made to pay for a channel
+    // nobody reads.
+    expect(eventProgress({ ...HUMAN, json: true })).toBeUndefined();
   });
 
   it('without the flag, a human run is unchanged: progress is text, not JSON', () => {

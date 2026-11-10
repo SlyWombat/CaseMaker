@@ -75,7 +75,7 @@ describe('#1126 — reading a run', () => {
       id: 'run-7',
       state: 'running',
       queuePosition: 0,
-      progress: { stage: 'planning: sequence — setup 1', pct: 35 },
+      progress: { stage: 'plan', label: 'planning the sequence — setup 1', done: 3, total: 9 },
       receipt: null,
       programs: [],
       finding: null,
@@ -113,10 +113,10 @@ describe('#1126 — cancelling a run', () => {
 });
 
 describe('#1126 — the progress stream', () => {
-  it('parses SSE events into stage ticks the panel already understands', async () => {
+  it('parses SSE frames into the engine’s own progress objects', async () => {
     const frames = [
-      'data: {"stage":"planning: sequence — setup 1","pct":35,"at":"2026-11-10T01:00:00Z"}\n\n',
-      'data: {"stage":"post — program 1","pct":60}\n\n',
+      'data: {"stage":"plan","label":"planning the sequence — setup 1","done":3,"total":9,"at":"2026-11-10T01:00:00Z"}\n\n',
+      'data: {"stage":"note","label":"  pick      cutter 1 — 0.8 mm flat"}\n\n',
     ];
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -130,8 +130,8 @@ describe('#1126 — the progress stream', () => {
       seen.push(e);
     }, { fetchImpl });
     expect(seen).toEqual([
-      { stage: 'planning: sequence — setup 1', pct: 35, at: '2026-11-10T01:00:00Z' },
-      { stage: 'post — program 1', pct: 60 },
+      { stage: 'plan', label: 'planning the sequence — setup 1', done: 3, total: 9, at: '2026-11-10T01:00:00Z' },
+      { stage: 'note', label: '  pick      cutter 1 — 0.8 mm flat' },
     ]);
   });
 
@@ -139,7 +139,7 @@ describe('#1126 — the progress stream', () => {
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode(': keep-alive\n\n'));
-        controller.enqueue(new TextEncoder().encode('event: progress\ndata: {"stage":"verify","pct":80}\n\n'));
+        controller.enqueue(new TextEncoder().encode('event: progress\ndata: {"stage":"verify","label":"verifying program 1"}\n\n'));
         controller.close();
       },
     });
@@ -148,6 +148,6 @@ describe('#1126 — the progress stream', () => {
     await streamRunEvents('run-7', (e) => {
       seen.push(e);
     }, { fetchImpl });
-    expect(seen).toEqual([{ stage: 'verify', pct: 80 }]);
+    expect(seen).toEqual([{ stage: 'verify', label: 'verifying program 1' }]);
   });
 });
