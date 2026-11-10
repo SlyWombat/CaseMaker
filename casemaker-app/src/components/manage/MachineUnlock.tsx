@@ -16,6 +16,8 @@
 import { useState } from 'react';
 import { canReachMachine } from '@/platform/capabilities';
 import { unlockMachine } from '@/platform/machineUnlock';
+import { controllerState } from '@/platform/machineUpload';
+import { useMachineStore } from '@/store/machineStore';
 
 /** The control, or nothing at all in a build that cannot open a socket. */
 export function MachineUnlock({ host, port }: { host: string; port: number }) {
@@ -25,6 +27,16 @@ export function MachineUnlock({ host, port }: { host: string; port: number }) {
 function UnlockButton({ host, port }: { host: string; port: number }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // #1149 M1 — THE ROW IS THE LIVE STATE'S, NOT A STANDING OFFER. The hint used to say "offered only
+  // against a machine that reports Alarm" while the control was drawn unconditionally, so a healthy
+  // machine looked alarmed. The heartbeat folds the controller's own status line into the store
+  // every 2 s, so this follows it without a reload (the land15 strip's Unlock, #1123 item 33, is
+  // gated the same way).
+  const readingAlarm = useMachineStore((s) => {
+    const m = s.machine;
+    return m !== null && m.host === host && m.port === port && controllerState(m.status) === 'Alarm';
+  });
+  if (!readingAlarm) return null;
 
   async function press(): Promise<void> {
     if (busy) return;
@@ -69,9 +81,9 @@ function UnlockButton({ host, port }: { host: string; port: number }) {
         </button>
       </div>
       <p className="hint" data-testid="manage-unlock-hint">
-        Clears the controller's alarm lock ($X) after you have looked at the machine — a probe fault or a
-        limit stop stays your call, not the app's. Offered only against a machine that reports Alarm;
-        it never homes or moves.
+        The machine reports Alarm. Clears the controller's alarm lock ($X) after you have looked at
+        the machine — a probe fault or a limit stop stays your call, not the app's. It never homes or
+        moves.
       </p>
       {note !== null && (
         <p className="hint" data-testid="manage-unlock-note">

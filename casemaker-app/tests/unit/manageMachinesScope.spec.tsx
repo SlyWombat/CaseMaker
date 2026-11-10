@@ -552,3 +552,46 @@ describe('#887 the machine card’s words', () => {
     expect(technical.textContent).toContain('What a job gets from this');
   });
 });
+
+// #1149 M3 — THE HEARTBEAT'S ANSWER IS ON THE CARD. A machine that stops answering used to keep
+// reading "found · checked 14:17" (the last check's record), because the page ignored the
+// heartbeat's `reachable`. An unreachable machine now says so, with the time it was last heard.
+describe('#1149 M3 — an unreachable machine says so, with the time it was last heard', () => {
+  it('flips the found tag and the checked line to unreachable · last heard …', () => {
+    caps.drive = true;
+    withMachine();
+    useMachineStore.setState({ heartbeat: { reachable: false, lastSeenAt: '2026-11-09T14:17:00.000Z' } });
+    render(<MachinesScope />);
+    const card = screen.getByTestId('manage-machine-card');
+    expect(card.textContent).toContain('unreachable');
+    expect(card.textContent).not.toContain('found');
+    expect(card.textContent).toContain('last heard');
+    expect(card.textContent).not.toContain('checked');
+  });
+
+  it('still reads found · checked while the heartbeat reaches it, and before one has answered', () => {
+    caps.drive = true;
+    withMachine();
+    // No heartbeat this session: the check's record stands, as it always did.
+    render(<MachinesScope />);
+    let card = screen.getByTestId('manage-machine-card');
+    expect(card.textContent).toContain('found');
+    expect(card.textContent).toContain('checked');
+    cleanup();
+
+    useMachineStore.setState({ heartbeat: { reachable: true, lastSeenAt: '2026-11-09T14:17:00.000Z' } });
+    render(<MachinesScope />);
+    card = screen.getByTestId('manage-machine-card');
+    expect(card.textContent).toContain('found');
+    expect(card.textContent).toContain('checked');
+  });
+
+  it('says it has not been heard since the page opened when no heartbeat ever answered', () => {
+    withMachine();
+    useMachineStore.setState({ heartbeat: { reachable: false, lastSeenAt: null } });
+    render(<MachinesScope />);
+    const card = screen.getByTestId('manage-machine-card');
+    expect(card.textContent).toContain('unreachable');
+    expect(card.textContent).toContain('not heard since this page opened');
+  });
+});

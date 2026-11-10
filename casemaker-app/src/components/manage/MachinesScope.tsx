@@ -76,6 +76,11 @@ export function MachinesScope() {
   const outcome = useMachineStore((s) => s.outcome);
   const reason = useMachineStore((s) => s.reason);
   const checkedAt = useMachineStore((s) => s.checkedAt);
+  // #1149 M3 — the heartbeat's live answer, so a machine that stopped answering stops reading as a
+  // found one. `reachable` is null until the first heartbeat this session; then the check's record
+  // stands, as it always did.
+  const heartbeat = useMachineStore((s) => s.heartbeat);
+  const unreachable = heartbeat.reachable === false;
   const setProbeResult = useMachineStore((s) => s.setProbeResult);
   const forget = useMachineStore((s) => s.forget);
   const setMachineCalibration = useSettingsStore((s) => s.setMachineCalibration);
@@ -307,10 +312,17 @@ export function MachinesScope() {
           <div className="mcard" data-testid="manage-machine-card">
             <h4>
               {machineDisplayName(record, model) ?? machine.name ?? 'A controller'}{' '}
-              <span className="tag tag--owned">found</span>
+              <span className={unreachable ? 'tag tag--muted' : 'tag tag--owned'}>
+                {unreachable ? 'unreachable' : 'found'}
+              </span>
             </h4>
             <div className="sub">
-              {machine.host} · checked {timeOfDayWords(checkedAt ?? machine.observedAt) ?? 'at an unreadable time'}
+              {machine.host} ·{' '}
+              {unreachable
+                ? heartbeat.lastSeenAt === null
+                  ? 'unreachable · not heard since this page opened'
+                  : `unreachable · last heard ${timeOfDayWords(heartbeat.lastSeenAt) ?? 'at an unreadable time'}`
+                : `checked ${timeOfDayWords(checkedAt ?? machine.observedAt) ?? 'at an unreadable time'}`}
             </div>
             <div className="two">
               <div className="kv">
