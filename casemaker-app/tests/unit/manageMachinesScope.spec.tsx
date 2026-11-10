@@ -17,7 +17,6 @@ import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
   setMachineConsoleLoader,
-  type ConsoleSend,
 } from '@/platform/machineConsole';
 import { fakeConsoleSession } from './helpers/fakeConsole';
 
@@ -52,16 +51,6 @@ const Z1_RECORD = {
   notes: [],
 };
 
-/** The session the panel holds, with what it was asked. */
-interface FakeConsole {
-  session: MachineConsoleSession;
-  sent: string[];
-  readonly closes: number;
-  readonly opens: number;
-}
-
-/** How the fake console answers a line. The recorder is the fake's own, so `sent` is the truth. */
-type Answer = (line: string) => ConsoleSend;
 
 /** Install a console client and count the loads, so "no connection" is an assertion. */
 

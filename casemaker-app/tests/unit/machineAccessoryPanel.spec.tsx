@@ -11,7 +11,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { MachinesScope } from '@/components/manage/MachinesScope';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { useSettingsStore } from '@/store/settingsStore';
-import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineConsole';
+import { setMachineConsoleLoader } from '@/platform/machineConsole';
 import { fakeConsoleSession, statusOnly } from './helpers/fakeConsole';
 import { ACCESSORIES } from '@/platform/machineAccessory';
 

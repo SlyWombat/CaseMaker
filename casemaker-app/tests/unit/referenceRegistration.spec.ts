@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import type { ConsoleSendResult, ConsoleTiming } from '@/platform/machineConsole';
-import { PROBE_OPEN_REPLY, PROBE_TRIGGERED_REPLY, sentReply as reply } from './helpers/registrationFixtures';
+import { PROBE_OPEN_REPLY, sentReply as reply } from './helpers/registrationFixtures';
 import {
   applyCorrection,
   planReferences,

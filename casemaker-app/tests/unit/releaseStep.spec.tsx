@@ -1016,7 +1016,7 @@ describe('#469 the release step', () => {
 
     fireEvent.click(screen.getByTestId('engrave-release-start'));
     await advanceUntil(() => expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Two-setup-job-p1.nc']), {
-      timeout: 5000,
+      timeoutMs: 5000,
     });
     // Let the program finish, so the test does not leave a run in flight at cleanup.
     await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 10000 });
@@ -1364,7 +1364,9 @@ describe('#1179 C — the play line is the package-keyed file', () => {
       />,
     );
     await uploadAndStart();
-    await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+    // #1180 S2's fake timers: RTL's findByTestId polls a real timer and never advances the fake
+    // clock, so the wait must be advanceUntil — the pattern the rest of this file uses.
+    await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 10000 });
 
     const keyedName = `${stem}-${key}-p1.nc`;
     expect(uploaded).toContain(keyedName);

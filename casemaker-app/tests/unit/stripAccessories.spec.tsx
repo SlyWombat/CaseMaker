@@ -10,7 +10,7 @@ import { resetRegistrationTouchesStore } from '@/store/registrationTouchesStore'
 import { resetEngraveReleaseStore, useEngraveReleaseStore, type ReleaseRecord } from '@/store/engraveReleaseStore';
 import { resetMachineRunStore } from '@/store/machineRunStore';
 import { resetStripAccessoryStore } from '@/store/stripAccessoryStore';
-import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineConsole';
+import { setMachineConsoleLoader } from '@/platform/machineConsole';
 import { fakeConsoleSession, statusOnly } from './helpers/fakeConsole';
 import type { MachineObservation } from '@/platform/machineProbe';
 

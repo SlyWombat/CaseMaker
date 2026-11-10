@@ -35,7 +35,7 @@ import {
   type ReferenceOpening,
 } from '@/engine/cnc/registration';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
-import { PROBE_OPEN_REPLY, PROBE_TRIGGERED_REPLY, sentReply as reply } from './helpers/registrationFixtures';
+import { PROBE_OPEN_REPLY, sentReply as reply } from './helpers/registrationFixtures';
 import { buildPcbJob, type PcbJobFile } from '../../scripts/lib/casemaker/pcbJob';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import type { EngraveVectorShape } from '@/types/engraveJob';

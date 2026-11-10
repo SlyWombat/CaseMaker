@@ -2021,7 +2021,9 @@ describe('#785 progress and Cancel', () => {
 
 describe('#893 — a run holds the measured pick, and an unsimulated program can be simulated', () => {
   // #1180 — fake time: the debounce waits are advanced, not slept.
-  const sleep = (ms: number): Promise<void> => vi.advanceTimersByTimeAsync(ms);
+  const sleep = async (ms: number): Promise<void> => {
+    await vi.advanceTimersByTimeAsync(ms);
+  };
 
   function jobWithCutter(): void {
     const jobNow = useEngraveJobStore.getState().job;

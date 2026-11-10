@@ -33,7 +33,6 @@ import {
 } from '../../src/platform/desktop/protocol';
 import { QueueTransport } from './helpers/fakeTransport';
 
-const EMPTY = new Uint8Array();
 
 class FakeTransport extends QueueTransport {
   hosts: string[] = [];

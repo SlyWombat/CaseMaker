@@ -5,7 +5,7 @@
 // a run goes. The upload and the console are fake clients; nothing reaches a machine.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { advanceUntil } from './helpers/fakeTime';
 import { EngraveMachineRun } from '@/components/panels/EngraveMachineRun';
 import { EngraveMachineUpload } from '@/components/panels/EngraveMachineUpload';

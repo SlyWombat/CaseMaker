@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
-import { PROBE_OPEN_REPLY, PROBE_TRIGGERED_REPLY, sentReply as reply } from './helpers/registrationFixtures';
+import { PROBE_OPEN_REPLY, sentReply as reply } from './helpers/registrationFixtures';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import {
