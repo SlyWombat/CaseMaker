@@ -210,7 +210,10 @@ describe('#961 the organizer demand: cover what a house cutter can cut', () => {
 
 describe('#961 the freeing cut is priced, not left as an unpriced return', () => {
   it('the contour is its own LAST step; an unstated flute means the last cutter cannot take it, so the return change is charged', () => {
-    const choice = chooseSequence(DEMAND, HOUSE, opts());
+    // #1186 rule 1 RE-PIN: the ⌀3.175 alone is now the cheapest chain, so this test prices its
+    // cutting dear to keep the flat-6 primary + rest shape the mechanic is about. What it pins —
+    // the free cut is its own step, and an unstated flute cannot take it — is unchanged.
+    const choice = chooseSequence(DEMAND, HOUSE, opts((step) => standIn(step, step.cutter.key === 'flat-3.175' ? 50 : 10)));
     const last = choice.steps[choice.steps.length - 1]!;
     expect(last.kind).toBe('contour');
     expect(last.cutter.key).toBe('flat-6');
@@ -227,7 +230,9 @@ describe('#961 the freeing cut is priced, not left as an unpriced return', () =>
     const longFlute = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 });
     const choice = chooseSequence(DEMAND, { house: [FLAT6, longFlute], catalogue: [] }, opts());
     expect(choice.freeing).toEqual({ cutterKey: 'flat-3.175', extraToolChange: false, lastCutterEligible: true });
-    expect(choice.cost.toolChanges).toBe(1);
+    // #1186 rule 1 RE-PIN: the long-flute ⌀3.175 now cuts the whole demand as the primary, so
+    // there is no change at all (it used to be the rest, one change behind the ⌀6).
+    expect(choice.cost.toolChanges).toBe(0);
     expect(choice.steps[choice.steps.length - 1]!.kind).toBe('contour');
   });
 
@@ -243,9 +248,10 @@ describe('#961 the freeing cut is priced, not left as an unpriced return', () =>
     );
     expect(choice.freeing).toEqual({ cutterKey: 'flat-3.175', extraToolChange: false, lastCutterEligible: true });
     expect(choice.cost.toolChanges).toBe(1);
-    // The real comparison is between the two COMPLETE chains (the rest step present), which
-    // differ only in the freeing step: the dearer profile still wins on the total.
-    const complete = choice.considered.filter((c) => c.steps.some((s) => s.kind === 'rest') && c.cost !== null);
+    // The real comparison is between the two COMPLETE chains — both covering the 27 — which differ
+    // in the freeing step: the dearer profile still wins on the total. #1186 rule 1 RE-PIN: the
+    // complete chains are now the ⌀3.175-primary one and the flat-6 + rest one (leftBehind 0).
+    const complete = choice.considered.filter((c) => c.cost !== null && c.leftBehind === 0);
     const cheapest = (key: string): number => Math.min(...complete
       .filter((c) => c.steps[c.steps.length - 1]!.cutterKey === key)
       .map((c) => c.cost!));
@@ -253,8 +259,10 @@ describe('#961 the freeing cut is priced, not left as an unpriced return', () =>
     expect(cheapest('flat-3.175')).toBeCloseTo(choice.cost.totalSeconds, 6);
     // The primary alone is cheaper still, and still not chosen: 27 cuttable pockets are not a
     // discount.
-    const incomplete = choice.considered.filter((c) => !c.steps.some((s) => s.kind === 'rest'));
-    expect(Math.min(...incomplete.map((c) => c.cost ?? Infinity))).toBeLessThan(choice.cost.totalSeconds);
+    const incomplete = choice.considered.filter((c) => c.leftBehind > 0);
+    if (incomplete.length > 0) {
+      expect(Math.min(...incomplete.map((c) => c.cost ?? Infinity))).toBeLessThan(choice.cost.totalSeconds);
+    }
   });
 });
 
