@@ -347,8 +347,28 @@ export const useEngraveJobFileStore = create<EngraveJobFileState>()((set, get) =
  * SHA-256 stays in, and names them (verified when a file is opened), so the comparison is the
  * same — without stringifying a 65 MB mesh on every edit, and without a bytes-less document
  * reading as changed (and autosaving) the moment its mesh is re-attached from this browser.
+ *
+ * #1123-53 — AND THE STORED RUN IS LEFT OUT TOO. Generate stores its result in the document (the
+ * frozen package and the run log), and the file bar read that as an unsaved edit the moment a file
+ * was opened and Generate pressed: "unsaved changes" beside "saved 15:06" with nothing edited.
+ * Those two fields are the run's state, not the operator's edit; dropping them keeps the marker
+ * about what the operator changed. A bound file still receives them — the autosave's own trigger
+ * below is broader, so a stored run is written on the same debounce without calling itself an edit.
  */
 function comparable(job: EngraveJob): string {
+  const { package: _package, runLog: _runLog, ...plain } = job;
+  const withoutRun = plain as EngraveJob;
+  if (withoutRun.targetObject?.data === undefined) return serializeJobFile(withoutRun);
+  const { data: _data, ...target } = withoutRun.targetObject;
+  return serializeJobFile({ ...withoutRun, targetObject: target });
+}
+
+/**
+ * #1123-53 — the document as compared for the AUTO-SAVE trigger: only the mesh's bytes are left
+ * out. A change that only stored a run still reaches a bound file; the dirty marker above simply
+ * never calls it an edit.
+ */
+function writeComparable(job: EngraveJob): string {
   if (job.targetObject?.data === undefined) return serializeJobFile(job);
   const { data: _data, ...target } = job.targetObject;
   return serializeJobFile({ ...job, targetObject: target });
@@ -382,7 +402,7 @@ useEngraveJobStore.subscribe((state, previous) => {
   const file = useEngraveJobFileStore.getState();
   const key = comparable(state.job);
   // A change that only put the mesh's bytes back is not an edit: nothing to mark or autosave.
-  if (key === comparable(previous.job)) return;
+  if (writeComparable(state.job) === writeComparable(previous.job)) return;
   useEngraveJobFileStore.setState({
     dirty: file.savedText === null ? true : key !== savedKey(file.savedText),
     // A document that is no longer the opened one has not had its integrity/problem report

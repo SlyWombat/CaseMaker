@@ -326,6 +326,33 @@ describe('the dirty marker and autosave (#425 §6)', () => {
     expect(useEngraveJobFileStore.getState().dirty).toBe(true);
   });
 
+  it('#1123-53 — Generate storing its result is not an unsaved edit, and a bound file still receives it', async () => {
+    await openDoc(defaultEngraveJob());
+    const opened = useEngraveJobStore.getState().job;
+    const packageBlock = {
+      jobId: opened.id,
+      frozenAt: '2026-11-10T12:00:00.000Z',
+      hash: 'pkg-hash',
+      jobHash: 'job-hash',
+      programs: [],
+      setups: [],
+      stockEntryId: null,
+    };
+    const runLog = [
+      { programHash: 'h1', setupIndex: 1, setupId: 's1', toolKey: 'flat-1.0', at: '2026-11-10T12:00:00.000Z', outcome: 'finished' as const },
+    ];
+    // Generate stores its result in the document: the package and the run log.
+    useEngraveJobStore.setState({ job: { ...opened, package: packageBlock, runLog } });
+    expect(useEngraveJobFileStore.getState().dirty, 'the stored run is not an operator edit').toBe(false);
+    // A bound file still gets it on the debounce — the run is persisted, it just is not "unsaved".
+    await flushJobFileAutosave();
+    expect(bed.writes).toHaveLength(1);
+    expect(JSON.parse(bed.writes[0]!.text).package?.hash).toBe('pkg-hash');
+    // A real edit after the run is still an edit.
+    useEngraveJobStore.getState().replace({ ...useEngraveJobStore.getState().job, name: 'Changed after the run' });
+    expect(useEngraveJobFileStore.getState().dirty).toBe(true);
+  });
+
   it('writes a bound file on the debounce, and an unbound job not at all', async () => {
     // Unbound: edits are not written anywhere.
     useEngraveJobStore.getState().replace({ ...useEngraveJobStore.getState().job, name: 'No file' });
