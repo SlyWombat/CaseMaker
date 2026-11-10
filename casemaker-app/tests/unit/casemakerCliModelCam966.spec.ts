@@ -33,7 +33,7 @@ import type { Receipt } from '../../src/platform/headless/receipt';
 import type { EngraveJob, EngraveTargetObject } from '../../src/types/engraveJob';
 import type { CommandOptions } from '../../scripts/lib/casemaker/output';
 import { buildRandomPart } from '../tools/randomParts';
-import { runSheetFileName } from '../../src/engine/cnc/engrave/runSheet';
+import { formatDuration, runSheetFileName } from '../../src/engine/cnc/engrave/runSheet';
 import { tl } from './helpers/manifoldExec';
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'casemaker-cli-model-cam-966-'));
@@ -208,8 +208,9 @@ describe('#966 the headless CLI generate path posts a goal job through cam/model
     expect(Number.isFinite(comparison.idealSeconds)).toBe(true);
     const sheetText = readFileSync(join(outDir, `${runSheetFileName(job.name).replace(/\.nc$/, '')}-run-sheet.md`), 'utf8');
     if (comparison.line !== null) expect(sheetText).toContain(comparison.line);
+    // The SHEET states the app's own duration words; the receipt keeps the raw seconds.
     expect(sheetText).toContain(
-      `The ideal plan’s cycle is ${Math.round(comparison.idealSeconds)} s against the owned plan’s ${Math.round(comparison.ownedSeconds)} s`,
+      `The ideal plan’s cycle is ${formatDuration(comparison.idealSeconds)} against the owned plan’s ${formatDuration(comparison.ownedSeconds)}`,
     );
     defaultProgramTexts = r.details.programs.map((program) => readFileSync(join(outDir, program.ncFile), 'utf8'));
   }, 180_000);

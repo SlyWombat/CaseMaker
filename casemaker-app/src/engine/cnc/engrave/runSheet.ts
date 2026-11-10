@@ -4740,7 +4740,9 @@ export function buildRunSheet(
   const comparisonStep: RunSheetStep | null = (() => {
     const c = options.comparison;
     if (c === undefined) return null;
-    const seconds = (v: number): string => `${Math.round(v)} s`;
+    // The sheet's OWN duration formatter, the one every other step uses: "4 h 23 min", never raw
+    // seconds on paper (the CLI receipt keeps the seconds).
+    const duration = (v: number): string => formatDuration(v);
     if (c.kind === 'deferred') {
       return {
         text: 'The ideal comparison is deferred — this run planned the owned plan only (--defer-ideal), so no owned-vs-ideal line is stated here.',
@@ -4753,12 +4755,12 @@ export function buildRunSheet(
         value: 'comparison running',
       };
     }
-    const cycles = `The ideal plan’s cycle is ${seconds(c.idealSeconds)} against the owned plan’s ${seconds(c.ownedSeconds)}.`;
+    const cycles = `The ideal plan’s cycle is ${duration(c.idealSeconds)} against the owned plan’s ${duration(c.ownedSeconds)}.`;
     return c.kind === 'material'
-      ? { text: `${c.line}. ${cycles}`, value: `ideal ${seconds(c.idealSeconds)} · owned ${seconds(c.ownedSeconds)}` }
+      ? { text: `${c.line}. ${cycles}`, value: `ideal ${duration(c.idealSeconds)} · owned ${duration(c.ownedSeconds)}` }
       : {
           text: `No material difference between the owned plan and the catalogue ideal. ${cycles}`,
-          value: `ideal ${seconds(c.idealSeconds)} · owned ${seconds(c.ownedSeconds)}`,
+          value: `ideal ${duration(c.idealSeconds)} · owned ${duration(c.ownedSeconds)}`,
         };
   })();
 

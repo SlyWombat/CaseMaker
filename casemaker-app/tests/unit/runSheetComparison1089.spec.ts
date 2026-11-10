@@ -54,15 +54,15 @@ describe('#1089 the ideal-vs-owned line on the run sheet', () => {
     const step = comparisonStep(sheetWith({ kind: 'material', line: MATERIAL.line!, ownedSeconds: 3258, idealSeconds: 2472 }));
     expect(step, '§1 states the comparison').toBeTruthy();
     expect(step!.text).toBe(
-      'owned plan vs catalogue ideal: cycle 54.3 → 41.2 min. The ideal plan’s cycle is 2472 s against the owned plan’s 3258 s.',
+      'owned plan vs catalogue ideal: cycle 54.3 → 41.2 min. The ideal plan’s cycle is 41 min 12 s against the owned plan’s 54 min 18 s.',
     );
-    expect(step!.value).toBe('ideal 2472 s · owned 3258 s');
+    expect(step!.value).toBe('ideal 41 min 12 s · owned 54 min 18 s');
   });
 
   it('says the difference is not material, and still gives both cycles', () => {
     const step = comparisonStep(sheetWith({ kind: 'minor', ownedSeconds: 3258, idealSeconds: 3186 }));
     expect(step!.text).toBe(
-      'No material difference between the owned plan and the catalogue ideal. The ideal plan’s cycle is 3186 s against the owned plan’s 3258 s.',
+      'No material difference between the owned plan and the catalogue ideal. The ideal plan’s cycle is 53 min 6 s against the owned plan’s 54 min 18 s.',
     );
   });
 
