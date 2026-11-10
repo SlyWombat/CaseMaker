@@ -78,16 +78,32 @@ function runningInNode(): boolean {
   return typeof g.process?.versions?.node === 'string';
 }
 
+/**
+ * Vite's `?url` import, isolated behind a dynamic `import()` reached only from the browser/worker
+ * branch below (#1162 — the same shape as `workers/geometry/ManifoldRuntime.ts`'s
+ * `browserWasmUrl`, #966). The specifier is not a file URL: under plain Node/tsx — the Sample
+ * Bench harness (`tools/samples/run-gdrive-samples.mts`) — Node's resolver strips the unknown
+ * query, reads the tail of the specifier as a package and dies with `Cannot find package 'a'`
+ * before this module's own runtime code runs. Keeping the import dynamic *and* inside this
+ * function means it is evaluated only in a realm where Vite emitted the asset.
+ */
+async function browserWasmUrl(): Promise<string> {
+  const mod = (await import('occt-import-js/dist/occt-import-js.wasm?url')) as { default: string };
+  return mod.default;
+}
+
 let kernel: Promise<Kernel> | null = null;
 
 async function loadKernel(): Promise<Kernel> {
   if (kernel === null) {
     kernel = (async () => {
-      const [{ default: factory }, { default: wasmUrl }] = await Promise.all([
-        import('occt-import-js'),
-        import('occt-import-js/dist/occt-import-js.wasm?url'),
-      ]);
-      return factory(runningInNode() ? undefined : { locateFile: () => wasmUrl });
+      const { default: factory } = await import('occt-import-js');
+      // Under Node the package's emscripten glue reads its own adjacent `occt-import-js.wasm`
+      // with `fs` (`ENVIRONMENT_IS_NODE`, `scriptDirectory = __dirname`), so no `locateFile` is
+      // needed — and, crucially, the `?url` import is never evaluated at all.
+      if (runningInNode()) return factory();
+      const wasmUrl = await browserWasmUrl();
+      return factory({ locateFile: () => wasmUrl });
     })();
     // A failed load is not cached: a transient network error must not poison every later import.
     kernel.catch(() => {
