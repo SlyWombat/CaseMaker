@@ -23,11 +23,14 @@ import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/
 import type { PcbAlignmentOffer } from '@/engine/import/pcbAlignment';
 import { pcbReHoldNote } from '@/engine/import/pcbHold';
 import { readGoalObjectFile } from '@/engine/import/targetObject';
+import { parseOutlineFile, type OutlineImport } from '@/engine/import/outlineImport';
+import { shopDefault } from '@/store/shopDefaultsStore';
 import { FontPicker } from '@/components/panels/FontPicker';
 import { OperationPicker } from '@/components/panels/OperationPicker';
 import { SELECTED_FILL, useSelectionChipGrid } from '@/components/selectionChip';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { RotaryOperationPicker } from './RotaryOperationPicker';
+import { WizardDropZone } from './WizardDropZone';
 import { WizardFileField } from './WizardFileField';
 import { operationCreateBlocked } from './operationCreate';
 import { isSideGoal, jobHasItems, jobSetups, jobTargetObjects, jobTool, sideSetupIdOf } from '@/engine/cnc/engrave/jobSetup';
@@ -37,6 +40,24 @@ import type { RotaryOperationId } from './rotaryOperations';
 import type { OperationTypeId } from '@/components/panels/operationTypes';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { TextFont } from '@/types/textLabel';
+
+/**
+ * #1098 — THE FILE DOOR'S KINDS. The question step accepts every file the app reads and lets the
+ * format choose the operation; the list lives here, once, for the drop zone and the fields.
+ */
+const MESH_FILE_EXTENSIONS = ['.stl', '.3mf', '.obj', '.step', '.stp'];
+const OUTLINE_FILE_EXTENSIONS = ['.svg', '.dxf'];
+const GERBER_FILE_EXTENSIONS = [
+  '.gbr', '.gtl', '.gbl', '.gko', '.gm1', '.gto', '.gbo', '.gts', '.gbs', '.gtp', '.gbp', '.drl', '.xln', '.zip',
+];
+export const WIZARD_FILE_ACCEPT = [
+  ...MESH_FILE_EXTENSIONS,
+  ...OUTLINE_FILE_EXTENSIONS,
+  '.png',
+  ...GERBER_FILE_EXTENSIONS,
+].join(',');
+/** The grey kinds line, in the mockup's words. */
+export const WIZARD_FILE_KINDS = 'STL · 3MF · STEP · OBJ · SVG · DXF · PNG · Gerber zip';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const FIELD_HEADING: CSSProperties = { fontSize: 12, fontWeight: 600, color: '#c8d3de' };
@@ -55,6 +76,16 @@ function toolDiameterMm(job: EngraveJob): number {
   const d = tool === null ? null : cuttingDiameter(tool);
   return d !== null && d > 0 ? d : 3.175;
 }
+/** #1098 — a read drawing's one fact: its size, rings and paths (open ones named). */
+function outlineFact(outline: OutlineImport): string {
+  const n = (v: number): string => String(Number(v.toFixed(2)));
+  const paths = outline.paths ?? [];
+  const open = paths.filter((p) => !p.closed).length;
+  const contours = `${outline.contours.length} contour${outline.contours.length === 1 ? '' : 's'}`;
+  const lines = paths.length === 0 ? '' : ` · ${paths.length} path${paths.length === 1 ? '' : 's'}${open === 0 ? '' : ` · ${open} open`}`;
+  return `${n(outline.width)} × ${n(outline.height)} mm · ${contours}${lines}`;
+}
+
 /** #870 — a read mesh's one fact beside its name: the box it measures. */
 function boxFact(size: { x: number; y: number; z: number }): string {
   const n = (v: number): string => String(Number(v.toFixed(2)));
@@ -99,6 +130,12 @@ export type OperationChoice =
   | { type: 'faces-all-round'; a: number; count: number; acrossFlats: number }
   /** #241 slice 2 — a cross-hole: the index and the diameter. */
   | { type: 'cross-hole'; a: number; diameter: number }
+  /**
+   * #1098 — a DRAWING read on the question step (SVG/DXF). `use` is what to do with it: Cut it
+   * out (a profile with the shop's tabs), Pocket it (a flat floor at `depth`), or Carve it (a V
+   * region — the job's cutter decides the V, exactly as the panel's own chips do).
+   */
+  | { type: 'outline'; outline: OutlineImport; use: 'profile' | 'pocket' | 'v-carve'; depth?: number }
   | { type: Exclude<OperationTypeId, 'engrave' | 'surface' | 'pcb'>; text?: string; lengthMm?: number };
 
 export interface OperationStepProps {
@@ -142,6 +179,9 @@ function flatPickOf(choice: OperationChoice | null): OperationTypeId | null {
     case 'texture':
     case 'prism':
       return choice.type;
+    case 'outline':
+      // #1098 — a drawing has no chip in the picker; it IS the operation the format chose.
+      return null;
     default:
       return null;
   }
@@ -195,7 +235,29 @@ export function OperationStep({
   // finishes with the empty job instead of waiting for invented text. Picking the chip keeps the
   // amber sentence and the hold.
   const [pickedByOperator, setPickedByOperator] = useState(seed !== null);
+  // #1098 — THE FILE FIRST. An SVG/DXF read here is the step's answer even though the picker has
+  // no chip for it: the format chose the operation. A chip click puts the drawing away again.
+  // #897's rule applies to the drawing too: Back from the stock step is an edit, not a reset.
+  const [outline, setOutline] = useState<OutlineImport | null>(seed?.type === 'outline' ? seed.outline : null);
+  const [outlineFileName, setOutlineFileName] = useState<string | null>(
+    seed?.type === 'outline' ? seed.outline.sourceName : null,
+  );
+  const [outlineUse, setOutlineUse] = useState<'profile' | 'pocket' | 'v-carve'>(
+    seed?.type === 'outline' ? seed.use : 'profile',
+  );
+  const [outlineDepth, setOutlineDepth] = useState(() =>
+    seed?.type === 'outline' && seed.depth !== undefined ? seed.depth : newItemDepthFor(job),
+  );
+  const [outlineReading, setOutlineReading] = useState(false);
+  const [outlineError, setOutlineError] = useState<string | null>(null);
+  /** #1098 — the drop zone's one-sentence refusal for a file the app does not read. */
+  const [dropError, setDropError] = useState<string | null>(null);
   const pickFlat = (id: OperationTypeId): void => {
+    // #1098 — the picker is the alternative to the file; clicking a chip clears the drawing.
+    setOutline(null);
+    setOutlineFileName(null);
+    setOutlineError(null);
+    setDropError(null);
     setPicked(id);
     setPickedByOperator(true);
   };
@@ -311,7 +373,9 @@ export function OperationStep({
                   : rotaryPicked === 'cross-hole'
                     ? { type: 'cross-hole', a: faceAngle, diameter: holeDiameter }
                     : null
-    : picked === 'engrave'
+    : outline !== null
+      ? { type: 'outline', outline, use: outlineUse, ...(outlineUse === 'pocket' ? { depth: outlineDepth } : {}) }
+      : picked === 'engrave'
       ? { type: 'engrave', text, depth, font }
       : picked === 'surface'
         ? surfaceChoice
@@ -349,7 +413,7 @@ export function OperationStep({
   useLayoutEffect(() => {
     onChoiceChange(reportedChoice);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picked, pickedByOperator, text, depth, font, surface, makeMold, pcbImported, pcbBoard, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, selectedSide, faceAngle, faceDepth, facesCount, facesAcross, holeDiameter, onChoiceChange]);
+  }, [picked, pickedByOperator, text, depth, font, surface, makeMold, pcbImported, pcbBoard, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, selectedSide, faceAngle, faceDepth, facesCount, facesAcross, holeDiameter, outline, outlineUse, outlineDepth, onChoiceChange]);
 
   async function readPcbSet(files: File[]): Promise<void> {
     setPcbSummary(null);
@@ -408,6 +472,68 @@ export function OperationStep({
     }
   }
 
+  /**
+   * #1098 — THE FORMAT CHOOSES THE OPERATION. One door for every kind the app reads: a mesh or a
+   * picture is today's Surface a mesh, an SVG/DXF the outline choice, a Gerber set the board. An
+   * unknown file changes nothing and says what the app does read.
+   */
+  async function acceptFiles(files: File[]): Promise<void> {
+    const file = files[0];
+    if (file === undefined) return;
+    setDropError(null);
+    const dot = file.name.lastIndexOf('.');
+    const ext = dot < 0 ? '' : file.name.slice(dot).toLowerCase();
+    if (MESH_FILE_EXTENSIONS.includes(ext) || ext === '.png') {
+      pickFlat('surface');
+      await chooseGoal(file);
+      return;
+    }
+    if (OUTLINE_FILE_EXTENSIONS.includes(ext)) {
+      await readOutline(file);
+      return;
+    }
+    if (GERBER_FILE_EXTENSIONS.includes(ext)) {
+      pickFlat('pcb');
+      await readPcbSet(files);
+      return;
+    }
+    setDropError(
+      `Case Maker reads STL, 3MF, STEP, OBJ, SVG, DXF, PNG and Gerber files — this is ${
+        ext === '' ? 'a file with no extension' : `a ${ext}`
+      }.`,
+    );
+  }
+
+  /** #1098 — read a drawing with the panel's own parser; its size proposes the blank. */
+  async function readOutline(file: File): Promise<void> {
+    setDropError(null);
+    setOutlineError(null);
+    setOutlineFileName(file.name);
+    setOutlineReading(true);
+    try {
+      const result = parseOutlineFile(await file.text(), file.name, {
+        // #451 — the arc chord error is the shop's, read exactly where the panel reads it.
+        dxfChordToleranceMm: shopDefault('import.dxfChordToleranceMm').value,
+      });
+      if (result.ok) {
+        setOutline(result.outline);
+        setOutlineUse('profile');
+        setOutlineDepth(newItemDepthFor(job));
+        // The drawing IS the answer: no picker chip is selected beside it.
+        setPicked(null);
+        setPickedByOperator(false);
+      } else {
+        setOutline(null);
+        setOutlineError(result.error);
+      }
+    } catch (e) {
+      setOutline(null);
+      setOutlineError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setOutlineReading(false);
+    }
+  }
+
   const engraveField = rotary ? rotaryPicked === 'engrave' : picked === 'engrave';
   const surfaceField = rotary ? rotaryPicked === 'relief' : picked === 'surface';
   // #874 — the board is the second file chip, so its field is the chosen chip's box like any other.
@@ -420,7 +546,96 @@ export function OperationStep({
   const sideGrid = useSelectionChipGrid();
 
   return (
-    <div data-testid="engrave-setup-step-what" style={{ marginTop: 8 }}>
+    <div
+      data-testid="engrave-setup-step-what"
+      style={{ marginTop: 8 }}
+      // #1098 — the whole step is a drop target, not only the zone: a file dropped anywhere on the
+      // question is the same answer. A field inside that already took the drop has prevented it.
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        if (e.defaultPrevented) return;
+        e.preventDefault();
+        const files = [...(e.dataTransfer.files ?? [])];
+        if (files.length > 0) void acceptFiles(files);
+      }}
+    >
+      {!rotary && (
+        <WizardDropZone
+          accept={WIZARD_FILE_ACCEPT}
+          kinds={WIZARD_FILE_KINDS}
+          reading={surfaceReading || pcbReading || outlineReading}
+          // A refused file — an unknown kind, or a drawing the parser would not read — is said
+          // once, under the zone that took it.
+          error={dropError ?? outlineError}
+          onFiles={(files) => void acceptFiles(files)}
+          testId="start-wizard-drop-zone"
+          inputTestId="start-wizard-drop-input"
+          errorTestId="start-wizard-drop-error"
+        />
+      )}
+      {!rotary && outline !== null && (
+        <div data-testid="start-wizard-op-outline-field" style={FIELD_BOX}>
+          <div style={FIELD_HEADING}>{outlineFileName}</div>
+          <p style={MUTED} data-testid="start-wizard-op-outline-fact">
+            {outlineFact(outline)}
+          </p>
+          <div style={FIELDS} role="radiogroup" aria-label="What to do with the drawing">
+            <label style={FIELD_LABEL}>
+              <input
+                type="radio"
+                name="start-wizard-op-outline-use"
+                checked={outlineUse === 'profile'}
+                data-testid="start-wizard-op-outline-cut"
+                onChange={() => setOutlineUse('profile')}
+              />
+              <span>Cut it out</span>
+            </label>
+            <label style={FIELD_LABEL}>
+              <input
+                type="radio"
+                name="start-wizard-op-outline-use"
+                checked={outlineUse === 'pocket'}
+                data-testid="start-wizard-op-outline-pocket"
+                onChange={() => setOutlineUse('pocket')}
+              />
+              <span>Pocket it</span>
+            </label>
+            <label style={FIELD_LABEL}>
+              <input
+                type="radio"
+                name="start-wizard-op-outline-use"
+                checked={outlineUse === 'v-carve'}
+                data-testid="start-wizard-op-outline-carve"
+                onChange={() => setOutlineUse('v-carve')}
+              />
+              <span>Carve it (V)</span>
+            </label>
+          </div>
+          {outlineUse === 'pocket' && (
+            <label style={FIELD_LABEL}>
+              <span>Depth</span>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                data-testid="start-wizard-op-outline-depth"
+                aria-label="Pocket depth"
+                style={FIELD}
+                value={outlineDepth}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v)) setOutlineDepth(v);
+                }}
+              />
+              <span style={MUTED}>mm</span>
+            </label>
+          )}
+          <p style={MUTED}>
+            Cut it out profiles the drawing with the shop&apos;s tabs; Pocket and Carve bite into the plate.
+          </p>
+          {unblockLine}
+        </div>
+      )}
       {savedSides.length > 0 && (
         <div data-testid="start-wizard-op-sides" style={{ marginBottom: 10 }}>
           <div style={FIELD_HEADING}>Sides</div>
@@ -690,13 +905,13 @@ export function OperationStep({
       {surfaceField && (
         <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
           <WizardFileField
-            accept=".stl,.3mf,.obj,.step,.stp,.png,model/stl,model/3mf,model/step,image/png"
+            accept={WIZARD_FILE_ACCEPT}
             inputTestId="start-wizard-op-surface-file"
             inputLabel="Mesh to surface"
             testId="start-wizard-op-surface-picker"
             nameTestId="start-wizard-op-surface-name"
             errorTestId="start-wizard-op-surface-error"
-            kinds="STL, 3MF, OBJ, STEP or PNG"
+            kinds="STL, 3MF, STEP, OBJ, SVG, DXF, PNG or Gerber"
             reading={surfaceReading}
             chosen={
               surfaceFileName === null
@@ -705,8 +920,18 @@ export function OperationStep({
             }
             error={surfaceError}
             onFiles={(files) => {
+              // #1098 — a drawing or a Gerber set picked here switches the format; a mesh or a
+              // picture is read as before, and an unknown file is refused by this field's own
+              // reader, so the sentence lands under the field that took it.
               const file = files[0];
-              if (file !== undefined) void chooseGoal(file);
+              if (file === undefined) return;
+              const dot = file.name.lastIndexOf('.');
+              const ext = dot < 0 ? '' : file.name.slice(dot).toLowerCase();
+              if (OUTLINE_FILE_EXTENSIONS.includes(ext) || GERBER_FILE_EXTENSIONS.includes(ext)) {
+                void acceptFiles(files);
+              } else {
+                void chooseGoal(file);
+              }
             }}
           >
             {surfaceNote !== null && (

@@ -13,6 +13,8 @@ import { blankProjectForStock } from '@/library/blankProject';
 import { scheduleImmediate } from '@/engine/jobs/JobScheduler';
 import { useProjectStore, clearHistory } from '@/store/projectStore';
 import { newItemDepthFor, useEngraveJobStore } from '@/store/engraveJobStore';
+import { newEngraveShapeId, newEngraveTraceId } from '@/engine/cnc/engrave/defaults';
+import { toLineTraces, toVectorShape } from '@/engine/import/outlineImport';
 import { useMachineStore } from '@/store/machineStore';
 import { useLocationStore } from '@/store/locationStore';
 import { machineForJob } from '@/platform/bedProfiles';
@@ -881,6 +883,45 @@ export function StartWizard(): JSX.Element {
             [choice.lengthMm / 2, 0],
           ],
         });
+      } else if (choice.type === 'outline') {
+        // #1098 — the drawing becomes the items the panel's own outline import writes: the closed
+        // rings as one vector region and every open path as a line, both centred on the settled
+        // stock. Cut it out additionally writes the profile that frees the part: the vector is a
+        // construction reference and a cutout of it carries the shop's tabs. Pocket it and Carve
+        // it ARE the region; the job's own cutter decides the V (the panel's chips do the same).
+        const current = useEngraveJobStore.getState().job;
+        const position = { x: current.stock.length / 2, y: current.stock.width / 2 };
+        const depth =
+          choice.use === 'pocket' && choice.depth !== undefined ? choice.depth : newItemDepthFor(current);
+        if (choice.outline.contours.length > 0) {
+          const shape = toVectorShape(choice.outline, {
+            id: newEngraveShapeId(),
+            position,
+            depth,
+            name: choice.outline.sourceName,
+          });
+          useEngraveJobStore.getState().addVector(choice.use === 'profile' ? { ...shape, construction: true } : shape);
+          id = shape.id;
+          if (choice.use === 'profile') {
+            const cutout = useEngraveJobStore.getState().addCutout();
+            useEngraveJobStore.getState().updateCutout(cutout, {
+              of: shape.id,
+              side: 'outside',
+              inset: 0,
+              name: choice.outline.sourceName,
+            });
+          }
+        }
+        const lines = toLineTraces(choice.outline, {
+          idFor: () => newEngraveTraceId(),
+          position,
+          depth,
+          name: choice.outline.sourceName,
+        });
+        for (const line of lines) {
+          useEngraveJobStore.getState().addLine(line);
+          id ??= line.id;
+        }
       } else if (choice.type === 'pcb') {
         // #874 — the board's Gerber set wrote the job's items as it read; Create adds nothing.
         // `id` stays null, so no row is opened and the wizard simply closes onto the work.

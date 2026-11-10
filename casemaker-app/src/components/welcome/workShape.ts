@@ -66,7 +66,8 @@ export function proposedStockFor(
   job: EngraveJob,
   proposed: StockProposal | null,
 ): StockProposal | null {
-  if (work.kind === 'mesh' || work.kind === 'pcb') return proposed;
+  // #1098 — a drawing is work that sizes its own blank, exactly as a mesh or a board does.
+  if (work.kind === 'mesh' || work.kind === 'pcb' || work.kind === 'outline') return proposed;
   if (rotaryMapOf(job) !== null) return proposed;
   return houseStockProposal();
 }
@@ -107,6 +108,10 @@ export function workShapeFor(choice: OperationChoice | null, job: EngraveJob): W
             // proposal keeps that size rather than leaving the items off a tighter piece.
             laidOn: { length: job.stock.length, width: job.stock.width },
           };
+    case 'outline':
+      // #1098 — the drawing's extent in mm, as the importer measured it. Cut it out is the one
+      // use that needs the blank to be a plate the profile can free the part from.
+      return { kind: 'outline', length: choice.outline.width, width: choice.outline.height, through: choice.use === 'profile' };
     case 'engrave': {
       if (choice.text.trim() === '') return { kind: 'none' };
       // Measured where the face is up, and `inkBoxOf`'s documented upper-bound estimate until it is

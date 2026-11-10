@@ -789,28 +789,36 @@ export function StartStockStep({
         </label>
       )}
 
-      <WizardFileField
-        drop
-        accept=".stl,.3mf,.obj,.step,.stp"
-        inputTestId="start-wizard-load-file"
-        inputLabel="Stock file"
-        testId="start-wizard-load"
-        nameTestId="start-wizard-load-name"
-        errorTestId="start-wizard-load-error"
-        chooseLabel="Load an STL, 3MF, OBJ or STEP as the stock…"
-        reading={reading}
-        chosen={fileRead === null ? null : { name: fileRead.read.name, fact: fileFact(fileRead.read) }}
-        // A loaded file's refusal is said at the file, once: the read's own reason, or the stock's.
-        error={fileRead === null ? null : fileRead.read.kind === 'refused' ? fileRead.read.reason : outcome.problem}
-        onFiles={(files) => void pickFile(files[0])}
-      >
-        {/* #825 — an OBJ states no unit of its own; the door says which reading it got. */}
-        {fileRead?.read.kind === 'mesh' && fileRead.read.note !== undefined && (
-          <p style={MUTED} data-testid="start-wizard-load-note">
-            {fileRead.read.note}
-          </p>
-        )}
-      </WizardFileField>
+      {/* #1098 — the model-as-blank loader moves UNDER TECHNICAL, renamed: it is not the design
+          door (the question step is), and an accidental pick here must not read as one. */}
+      <details data-testid="start-wizard-stock-technical" style={{ marginTop: 8 }}>
+        <summary style={{ fontSize: 12, cursor: 'pointer' }}>Technical</summary>
+        <p style={MUTED} data-testid="start-wizard-load-hint">
+          For a blank that is not a box — the design still comes from the question step.
+        </p>
+        <WizardFileField
+          drop
+          accept=".stl,.3mf,.obj,.step,.stp"
+          inputTestId="start-wizard-load-file"
+          inputLabel="Stock file"
+          testId="start-wizard-load"
+          nameTestId="start-wizard-load-name"
+          errorTestId="start-wizard-load-error"
+          chooseLabel="Use a model as the blank's shape (STL, 3MF, OBJ, STEP)…"
+          reading={reading}
+          chosen={fileRead === null ? null : { name: fileRead.read.name, fact: fileFact(fileRead.read) }}
+          // A loaded file's refusal is said at the file, once: the read's own reason, or the stock's.
+          error={fileRead === null ? null : fileRead.read.kind === 'refused' ? fileRead.read.reason : outcome.problem}
+          onFiles={(files) => void pickFile(files[0])}
+        >
+          {/* #825 — an OBJ states no unit of its own; the door says which reading it got. */}
+          {fileRead?.read.kind === 'mesh' && fileRead.read.note !== undefined && (
+            <p style={MUTED} data-testid="start-wizard-load-note">
+              {fileRead.read.note}
+            </p>
+          )}
+        </WizardFileField>
+      </details>
 
       {outcome.notes.length > 0 && (
         <div data-testid="start-wizard-stock-summary">
