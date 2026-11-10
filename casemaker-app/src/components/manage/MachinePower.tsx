@@ -324,7 +324,7 @@ function PowerSetup({ machine }: { machine: MachineRecord }) {
       </label>
       <label className="lf">
         <span>
-          token <em>kept in this computer’s secure store; not in an exported location.json</em>
+          token <em>kept in this computer’s secure store; not in an exported copy of your setup</em>
         </span>
         <input
           className="fld fld--text"

@@ -27,6 +27,7 @@ import { MACHINE_FRAME_UNREAD, MACHINE_RUN_ELSEWHERE, PRINTER_PROFILES, millMode
 import { canReachMachine, NO_MACHINE_RELAY_SENTENCE } from '@/platform/capabilities';
 import { controllerState } from '@/platform/machineUpload';
 import { probeMachine } from '@/platform/machineProbe';
+import { startHeartbeat, stopHeartbeat } from '@/platform/machineHeartbeat';
 import {
   checkSerialPort,
   listSerialPorts,
@@ -52,9 +53,9 @@ import { outputPlanFor } from './machineOutputs';
 import { MachineLight } from './MachineLight';
 import { MachineAccessory } from './MachineAccessory';
 import { ACCESSORIES, AIR_SENTENCE } from '@/platform/machineAccessory';
-import { MachineUnlock } from './MachineUnlock';
+import { MachineStateCard } from './MachineStateCard';
+import { liveFacts } from './machineStateWords';
 import { ConfirmPress } from './ConfirmPress';
-import { MachineStop } from './MachineStop';
 import { MachineLaserOptions } from './MachineLaserOptions';
 import { formatStamp, mm, timeOfDayWords } from './display';
 
@@ -74,6 +75,7 @@ export function MachinesScope() {
   // and a LAN browser talking to it needs that answer rather than the page's.
   const build = useToolRegistryStore((s) => s.health?.build ?? null);
   const machine = useMachineStore((s) => s.machine);
+  const heartbeat = useMachineStore((s) => s.heartbeat);
   const outcome = useMachineStore((s) => s.outcome);
   const reason = useMachineStore((s) => s.reason);
   const checkedAt = useMachineStore((s) => s.checkedAt);
@@ -85,7 +87,9 @@ export function MachinesScope() {
   const setMargins = useSettingsStore((s) => s.setMargins);
 
   const [busy, setBusy] = useState(false);
-  const [address, setAddress] = useState('');
+  // #1173A item 8 — the field shows the address this page HOLDS (the remembered machine) until
+  // the operator types one, rather than a made-up example. `null` means "nothing typed yet".
+  const [typedAddress, setTypedAddress] = useState<string | null>(null);
   const [transfer, setTransfer] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
   const importInput = useRef<HTMLInputElement | null>(null);
 
@@ -98,6 +102,18 @@ export function MachinesScope() {
   const [serialPort, setSerialPort] = useState('');
   const [serialBusy, setSerialBusy] = useState(false);
   const [serialResult, setSerialResult] = useState<SerialCheckResult | null>(null);
+
+  // #1173A — the page's own heartbeat. `MachinePin` owns the single-instance poll while the
+  // workspace is mounted; Manage replaces that tree, so the state card starts the same poll here
+  // and stops it on the way out. It is what makes "is ready / not answering since" live rather
+  // than a reading from the last check.
+  const liveHost = machine?.host ?? null;
+  const livePort = machine?.port ?? null;
+  useEffect(() => {
+    if (!canReachMachine || liveHost === null || livePort === null) return;
+    startHeartbeat({ host: liveHost, port: livePort });
+    return () => stopHeartbeat();
+  }, [liveHost, livePort]);
 
   useEffect(() => {
     if (!canReachMachine) return;
@@ -190,7 +206,27 @@ export function MachinesScope() {
   const model = millModelById(machine?.profileId ?? null);
   const profile = model !== undefined && model.frameState === 'read' ? model : undefined;
   const record = useMachineRecord(machine);
+  const address = typedAddress ?? machine?.host ?? '';
   const typed = address.trim().length > 0;
+  // The name and model the state card says in words. The card's heading keeps `machineDisplayName`
+  // (nickname → model → announced name); the state sentence prefers what the operator calls this
+  // machine (nickname → announced name), so "Z1 is ready … Makera Z1 at …" does not say the model
+  // twice.
+  const displayName = machineDisplayName(record, model) ?? machine?.name ?? 'A controller';
+  const stateName = record?.nickname ?? machine?.name ?? model?.name ?? 'A controller';
+  const facts =
+    machine === null
+      ? null
+      : liveFacts({
+          name: stateName,
+          modelName: model?.name ?? 'Unknown model',
+          host: machine.host,
+          status: machine.status,
+          reachable: heartbeat.reachable,
+          lastSeenAt: heartbeat.lastSeenAt,
+          checkedAt,
+          now: Date.now(),
+        });
 
   // #247's "my machine" file, in one node used by both cards: it is a fact about the machine setup
   // and not about whether a controller happened to answer, so an empty pane offers it too.
@@ -267,11 +303,11 @@ export function MachinesScope() {
               <input
                 className="fld fld--text mono"
                 type="text"
-                placeholder="192.168.1.50"
+                placeholder="Address"
                 value={address}
                 aria-label="A controller's address"
                 data-testid="manage-machine-address"
-                onChange={(e) => setAddress(e.target.value)}
+                onChange={(e) => setTypedAddress(e.target.value)}
               />
               <button
                 type="button"
@@ -307,12 +343,29 @@ export function MachinesScope() {
         {machine !== null ? (
           <div className="mcard" data-testid="manage-machine-card">
             <h4>
-              {machineDisplayName(record, model) ?? machine.name ?? 'A controller'}{' '}
-              <span className="tag tag--owned">found</span>
+              {displayName}{' '}
+              {/* #1173A item 3 — a missed heartbeat stops the discovery row reading "found". */}
+              {heartbeat.reachable === false ? (
+                <span className="tag tag--muted" data-testid="manage-machine-found">
+                  {facts?.silentSince == null ? 'Not answering' : `Not answering since ${facts.silentSince}`}
+                </span>
+              ) : (
+                <span className="tag tag--owned" data-testid="manage-machine-found">
+                  found
+                </span>
+              )}
             </h4>
             <div className="sub">
               {machine.host} · checked {timeOfDayWords(checkedAt ?? machine.observedAt) ?? 'at an unreadable time'}
             </div>
+            {facts !== null && (
+              <MachineStateCard
+                facts={facts}
+                host={machine.host}
+                port={machine.port}
+                onCheckAgain={() => void runCheck(machine.host)}
+              />
+            )}
             <div className="two">
               <div className="kv">
                 <Kv label="status line">{machine.status ?? '— did not answer'}</Kv>
@@ -380,28 +433,29 @@ export function MachinesScope() {
                 plug switched off with nothing else happening — there is no power feed in this app
                 (`tools/z1/power.sh` is a person's act) and nothing polls — so the switch stops
                 claiming the moment anything reaches the machine again, and not before. */}
-            {/* #884 — the machine does not report these switches; say so ONCE here rather than
-                "unknown" on every row. A row shows only what this page has sent (or what the
-                machine's diagnose line reported, where it carries it). */}
+            {/* #1173A item 5 — the machine does not report these outputs, so a row says only what
+                this app last sent it; the sentence is stated once here rather than on every row. */}
             <p className="hint" data-testid="manage-accessory-unreported">
-              These outputs are not reported by the machine; a row shows only what this page has sent.
+              These outputs are not reported by the machine; each row says only what this app last sent.
             </p>
             <MachineVacuum
               key={`${machine.host}:${machine.port}@${machine.observedAt}`}
               host={machine.host}
               port={machine.port}
+              locked={facts?.switchesLocked === true}
               label={
                 outputPlanFor(machine.profileId ?? record?.profileId ?? null).externalOutputIsVacuum
                   ? 'External output: the vacuum on this machine'
                   : 'Vacuum'
               }
             />
-            {/* #422 — the work light, the vacuum switch's shape: asked live, idle-only, `unknown`
-                until it has sent something, and keyed on the observation for the same reset rule. */}
+            {/* #422 — the work light, the vacuum switch's shape: asked live, idle-only, and says
+                only what this page last sent it; keyed on the observation for the same reset rule. */}
             <MachineLight
               key={`light:${machine.host}:${machine.port}@${machine.observedAt}`}
               host={machine.host}
               port={machine.port}
+              locked={facts?.switchesLocked === true}
             />
             {/* #289 — the machine's other accessory modes, the same shape and the same reset rule:
                 spindle fan (M811/M812), power fan (M801/M802), external output (M851/M852), the
@@ -420,6 +474,7 @@ export function MachinesScope() {
                   host={machine.host}
                   port={machine.port}
                   id={spec.id}
+                  locked={facts?.switchesLocked === true}
                 />
               ));
             })()}
@@ -429,10 +484,8 @@ export function MachinesScope() {
             <p className="hint" data-testid="manage-accessory-no-air">
               {AIR_SENTENCE}
             </p>
-            {/* #644 — clear the alarm lock ($X), offered only against a machine that reports Alarm. */}
-            <MachineUnlock host={machine.host} port={machine.port} />
-            {/* #424 — Stop: `abort` for a running program, labelled as not the emergency stop. */}
-            <MachineStop host={machine.host} port={machine.port} />
+            {/* #644/#424 — Unlock and Stop live in the state card at the top of this card; they are
+                decisions about the state, so they sit beside the words that state it. */}
             {/* #431 — the probe laser's two options, both off by default. */}
             <MachineLaserOptions />
             {/* #302 item 4 — the console, collapsed, at the foot of the card. It owns its own

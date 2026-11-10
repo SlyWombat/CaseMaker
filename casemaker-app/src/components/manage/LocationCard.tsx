@@ -59,7 +59,7 @@ function MachineKv({ machine }: { machine: MachineRecord }) {
   const sacrificial = machine.fixtures?.sacrificial;
   return (
     <div className="kv" data-testid="manage-location-machine">
-      <Kv label="profile">{machine.profileId ?? '— unknown'}</Kv>
+      <Kv label="model">{machine.profileId ?? '— unknown'}</Kv>
       <Kv label="name">{machine.name ?? '— nothing announced one'}</Kv>
       <NicknameKv machine={machine} />
       <Kv label="address">
@@ -72,13 +72,13 @@ function MachineKv({ machine }: { machine: MachineRecord }) {
           ? '— not in the location'
           : provenance(machine.calibration.source, machine.calibration.measuredAt)}
       </Kv>
-      <Kv label="vise">{vise === undefined ? '— the shipped default' : provenance(vise.source, vise.measuredAt)}</Kv>
+      <Kv label="vise">{vise === undefined ? '— the default' : provenance(vise.source, vise.measuredAt)}</Kv>
       <Kv label="sacrificial">{sacrificial === undefined ? '— none saved' : sacrificial.source}</Kv>
       <Kv label="depth margins">
         {machine.margins !== null
           ? machine.margins.source
           : marginsHome === 'defaults'
-            ? 'in the shop defaults (margins.*)'
+            ? 'in the shop defaults'
             : '— not in the location'}
       </Kv>
       <Kv label="recorded">{formatStamp(machine.updatedAt) ?? machine.updatedAt}</Kv>
@@ -359,7 +359,7 @@ export function LocationCard({
         <span className="badge">location</span>
       </h4>
       <div className="sub">
-        location.json · created {formatStamp(location.createdAt) ?? location.createdAt}
+        created {formatStamp(location.createdAt) ?? location.createdAt}
         {location.migratedFrom !== null && ` · ${location.migratedFrom}`}
       </div>
       {machine === undefined ? (

@@ -1,33 +1,49 @@
 /**
- * The Stop button (#424) — stops a running program with `abort`, and says it is not the emergency stop.
+ * The Stop and Home controls (#424, #1173A item 4) — at the top of the machine card, inside its
+ * state card, so the action sits beside the state it acts on.
  *
- * Maintainer decision Q16 (2026-10-15): ship Stop now, labelled honestly; #303 refines it. The seam is
- * `platform/machineStop.ts`: it asks first, aborts only a running program, waits for `Idle`, and then
- * switches the vacuum off — the aborted program never reaches its end, and the run's words either.
+ * THE LABEL IS THE ACTION. `stopProgram` (`platform/machineStop.ts`) asks the machine first and
+ * aborts only a running program; the control says what a press would do NOW — `■ Stop · stops now`
+ * while a program runs, `■ Stop · nothing running` and disabled when it does not. The state card
+ * decides which (`machineStateWords.ts`), because it already reads the same status line.
  *
- * After a clean stop the panel offers Home as its own press: homing is motion, and the person who
- * pressed Stop decides when the head moves again (the bench rule: home when an activity is done).
+ * HOME IS THE SEAM'S, NOT A SECOND COMMAND. `homeMachine` (#693) asks `?`, sends `$H` only from
+ * `Idle`, and polls until the machine reports its homed rest; an already-homed machine answers
+ * without moving. That is the behaviour the wizard already uses, kept here rather than restated.
+ * Homing is motion, so Home is offered only in the ready state and says so in its own note.
  */
 
 import { useState } from 'react';
 import { canReachMachine } from '@/platform/capabilities';
-import { attachConsole } from '@/platform/machineConsole';
+import { homeMachine } from '@/platform/machineChangeRun';
 import { stopProgram, stopSettings } from '@/platform/machineStop';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 
-export function MachineStop({ host, port }: { host: string; port: number }) {
-  return canReachMachine ? <StopControl host={host} port={port} /> : null;
+export function MachineStop({
+  host,
+  port,
+  stopLive,
+  canHome,
+}: {
+  host: string;
+  port: number;
+  /** A program is running, so Stop would send `abort`. */
+  stopLive: boolean;
+  /** The machine is idle and reachable, so Home is a sensible press. */
+  canHome: boolean;
+}) {
+  return canReachMachine ? (
+    <StopControl host={host} port={port} stopLive={stopLive} canHome={canHome} />
+  ) : null;
 }
 
-function StopControl({ host, port }: { host: string; port: number }) {
+function StopControl({ host, port, stopLive, canHome }: { host: string; port: number; stopLive: boolean; canHome: boolean }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const [offerHome, setOfferHome] = useState(false);
 
   async function stop(): Promise<void> {
     if (busy) return;
     setBusy(true);
-    setOfferHome(false);
     setNote('Stopping — the spindle stops now; the moves already queued finish first…');
     try {
       // #449 — the shop's `stop.*` polls; the 2 s floor holds inside `stopProgram` whatever they say.
@@ -39,7 +55,6 @@ function StopControl({ host, port }: { host: string; port: number }) {
               ? 'Stopped. The program was aborted and the vacuum is off.'
               : 'Stopped. The program was aborted, but the vacuum-off (M852) was not answered — check the vacuum.',
           );
-          setOfferHome(true);
           break;
         case 'not-running':
           setNote('No program is running, so nothing was sent.');
@@ -55,45 +70,48 @@ function StopControl({ host, port }: { host: string; port: number }) {
   async function home(): Promise<void> {
     if (busy) return;
     setBusy(true);
-    const session = attachConsole({ host, port });
     try {
-      const r = await session.send('$H');
-      setNote(r.kind === 'sent' ? 'Homed.' : `Home did not complete: ${r.detail}`);
-      if (r.kind === 'sent') setOfferHome(false);
+      const r = await homeMachine({ host, port });
+      setNote(
+        r.kind === 'homed'
+          ? r.sent
+            ? 'Homed.'
+            : 'Already home — nothing was sent.'
+          : `Home did not complete: ${r.detail}`,
+      );
     } finally {
-      await session.close();
       setBusy(false);
     }
   }
 
   return (
     <div className="mstop" data-testid="manage-stop">
-      <div className="mvacuum-row">
-        <button
-          type="button"
-          className="btn btn--sm btn--danger"
-          data-testid="manage-stop-button"
-          disabled={busy}
-          title="Sends abort: the spindle stops at once and the moves already queued finish. Not an emergency stop."
-          onClick={() => void stop()}
-        >
-          Stop program
-        </button>
-        {offerHome && (
-          <button
-            type="button"
-            className="btn btn--sm"
-            data-testid="manage-stop-home"
-            disabled={busy}
-            title="Home the machine ($H) — the head moves"
-            onClick={() => void home()}
-          >
-            Home
-          </button>
-        )}
-      </div>
+      <button
+        type="button"
+        className="btn btn--sm btn--danger"
+        data-testid="manage-stop-button"
+        disabled={busy || !stopLive}
+        title={
+          stopLive
+            ? 'Sends abort: the spindle stops at once and the moves already queued finish. Not an emergency stop.'
+            : 'No program is running, so there is nothing to stop.'
+        }
+        onClick={() => void stop()}
+      >
+        {stopLive ? '■ Stop · stops now' : '■ Stop · nothing running'}
+      </button>
+      <button
+        type="button"
+        className="btn btn--sm"
+        data-testid="manage-stop-home"
+        disabled={busy || !canHome}
+        title="Home the machine ($H) — the head moves. Offered when the machine is idle and answering."
+        onClick={() => void home()}
+      >
+        Home
+      </button>
       <p className="hint" data-testid="manage-stop-hint">
-        Stops the running program. The machine&rsquo;s red button is the emergency stop.
+        Stop aborts the running program. The machine&rsquo;s red button is the emergency stop.
       </p>
       {note !== null && (
         <p className="hint" data-testid="manage-stop-note">
