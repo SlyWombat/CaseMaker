@@ -53,7 +53,14 @@ async function seed(page: Page, input: { count: number; phase: string; active: n
   await page.evaluate(async (opts) => {
     const defaults = await import('/src/engine/cnc/engrave/defaults.ts');
     const pkgMod = await import('/src/engine/cnc/engrave/package.ts');
+    const tools = await import('/src/engine/cnc/tool.ts');
+    const registry = await import('/src/engine/cnc/toolRegistry.ts');
     const jobStore = await import('/src/store/engraveJobStore.ts');
+    // A USER-DEFINED bit, registered so its operator name resolves: the card must never print an
+    // internal key (`user:`/`inv:`/`lib:`) in a row.
+    registry.setRegistry([
+      { key: 'user:flat-0.6', tool: tools.flatEndMill(0.6, { name: '0.6 mm flat end' }), provenance: 'e2e' },
+    ]);
     const release = await import('/src/store/engraveReleaseStore.ts');
     const run = await import('/src/store/machineRunStore.ts');
     const IDENTITY = { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' };
@@ -167,6 +174,12 @@ test('#1167 — a 20-program two-sided job is one card: every program, the flip,
   }
   await expect(page.getByTestId('engrave-cut-card-flip')).toBeAttached();
   await expect(page.getByTestId('engrave-cut-card-row-1')).toHaveAttribute('data-state', 'done');
+  // NO INTERNAL KEY IN A ROW: the operator reads the cutter's name, user-defined bits included.
+  const rowTexts = await page.locator('[data-testid^="engrave-cut-card-row-"]').allTextContents();
+  expect(rowTexts.length).toBe(20);
+  for (const text of rowTexts) expect(text, text).not.toMatch(/\b(user|inv|lib):/);
+  expect(await page.getByTestId('engrave-cut-card-running').textContent()).not.toMatch(/\b(user|inv|lib):/);
+  await expect(page.getByTestId('engrave-cut-card-row-2')).toContainText('0.6 mm flat end');
   await expect(page.getByTestId('engrave-cut-card-running')).toContainText('Program 2 of 20');
   await expect(page.getByTestId('engrave-cut-card-running')).toContainText('62 %');
   fs.mkdirSync(OUT, { recursive: true });
