@@ -166,10 +166,6 @@ test('#1166 c1 — the three-answer question appears before any G38, and a typed
   // /api/v1/machine/** must win over the generic 404.
   await fakeHouse(page, ['fake-finished-1']);
   const fake = await installFakeConsole(page);
-  page.on('pageerror', (e) => console.log('PAGEERROR', (e.stack ?? e.message).slice(0, 1200)));
-  page.on('console', (m) => {
-    if (m.type() === 'error') console.log('CONSOLE-ERROR', m.text().slice(0, 300));
-  });
   await cm.ready();
   await rememberMachine(page);
 
@@ -207,19 +203,7 @@ test('#1166 c1 — the three-answer question appears before any G38, and a typed
   await expect(page.getByTestId('engrave-registration-proposal-line')).toContainText('then the top');
   const approve = page.getByTestId('engrave-registration-approve-start');
   await expect(approve).toHaveText('Register');
-  console.log('PRESS', new Date().toISOString());
   await approve.click();
-  await page.waitForTimeout(6000);
-  console.log('AFTER-PRESS', new Date().toISOString());
-  console.log('FAKE-LINES', JSON.stringify(fake.lines()));
-  console.log('REG-CARD', await page.getByTestId('engrave-registration').innerText().catch((e) => `ERR ${e}`));
-
-  // The 3D scene's live layers are not what this walk is about; with the probe layer on, this
-  // app build crashes in the react-three-fiber canvas on the run's first UI update (diagnostic).
-  for (const name of ['Tool', 'Fixture', 'Touches', 'Sacrificial', 'Path', 'Rapids', 'Removed']) {
-    const box = page.getByRole('checkbox', { name, exact: true });
-    if (await box.isVisible().catch(() => false)) await box.uncheck().catch(() => {});
-  }
 
   // THE QUESTION, and — the ruling — no probe move yet.
   const question = page.getByTestId('engrave-registration-top-question');
@@ -300,7 +284,6 @@ test('#1166 c1 — a job with NO finished programs takes the plain seek, and the
   await expect(page.getByTestId('engrave-registration-notes')).toContainText('rim offset', { timeout: 120_000 });
   expect(await page.getByTestId('engrave-registration-top-question').count()).toBe(0);
   expect(fake.lines().filter((l) => l.startsWith('G38.3')).length).toBeGreaterThan(0);
-  console.log('C2-LINES', JSON.stringify(fake.lines().slice(-12)));
 
   // The approval changed the job, so Cut's step 1 has findings now and may have folded step 2;
   // the write press needs the card on screen.
