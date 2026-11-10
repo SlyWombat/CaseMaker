@@ -2,7 +2,7 @@
 // worker and no UI. `sim.worker.ts` is a thin Comlink shell over `createSimSession`, so the
 // session is what is tested; the coalescer and the store are tested against it in-process.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as Comlink from 'comlink';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -819,12 +819,14 @@ describe('#895 — a load that stops reporting is stopped by the watchdog', () =
     SilentWorker.stopped = 0;
     g.Worker = SilentWorker;
     const phases: string[] = [];
+    // #1180 — the 80 ms wait is the queue clock's 25 ms window; fake time makes it instant.
+    vi.useFakeTimers();
     try {
       // #1048 — the load's window is two clocks: before the worker says anything for this load
       // the queue clock only REPORTS waiting (a load behind the ideal plan is not a fault); the
       // stall clock — the one #895 means — starts at the worker's first message.
       const pending = loadSim(THREE, setup(), tool, null, { stallMs: 25, queueMs: 25, onPhase: (p) => phases.push(p) });
-      await new Promise((r) => setTimeout(r, 80));
+      await vi.advanceTimersByTimeAsync(80);
       expect(phases, 'the queue clock speaks up as waiting').toContain('waiting');
       expect(SilentWorker.terminated, 'a queued load is never terminated').toBe(0);
       // Stop from the wait: the run's own press terminates the worker.
@@ -834,6 +836,7 @@ describe('#895 — a load that stops reporting is stopped by the watchdog', () =
     } finally {
       g.Worker = real;
       terminateSim();
+      vi.useRealTimers();
     }
   });
 });
@@ -887,23 +890,31 @@ describe('#1048 — the air phase holds the client’s window open', () => {
     AirTickingWorker.stopTicks = false;
     g.Worker = AirTickingWorker;
     const phases: string[] = [];
+    // #1180 — the 150 ms race and the worker's 10 ms ticks are all fake time.
+    vi.useFakeTimers();
     try {
+      let settled = false;
       const pending = loadSim(THREE, setup(), tool, null, {
         stallMs: 30,
         queueMs: 5_000,
         onPhase: (p) => phases.push(p),
+      }).then((value) => {
+        settled = true;
+        return value;
       });
       // 150 ms in: five windows have passed since the first checkpoint, and the load is STILL
       // RUNNING — the air ticks held the window open (at the base, no tick exists and the load
       // would already have resolved `sweep-stalled`).
-      const raced = await Promise.race([pending, new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 150))]);
-      expect(raced, 'the load is still running, not stalled').toBe('timeout');
+      await vi.advanceTimersByTimeAsync(150);
+      expect(settled, 'the load is still running, not stalled').toBe(false);
       expect(phases).toContain('air');
       expect(AirTickingWorker.terminated, 'no stall, no termination').toBe(0);
+      void pending;
     } finally {
       AirTickingWorker.stopTicks = true;
       g.Worker = real;
       terminateSim();
+      vi.useRealTimers();
     }
   });
 });
@@ -962,14 +973,19 @@ describe('#1056 — a warm-up longer than the window is not a stall', () => {
     // The client caches its worker; another test's must not answer this one.
     terminateSim();
     g.Worker = ReturningWorker;
+    // #1180 — the warm-up's 4 s is the test: advance fake time instead of waiting it out.
+    vi.useFakeTimers();
     try {
-      const r = await loadSim(THREE, setup(), tool, null, { stallMs: 2_000, queueMs: 5_000 });
+      const pending = loadSim(THREE, setup(), tool, null, { stallMs: 2_000, queueMs: 5_000 });
+      await vi.advanceTimersByTimeAsync(4_000);
+      const r = await pending;
       expect(r.ok, JSON.stringify(!r.ok ? r.diagnostics : undefined)).toBe(true);
       expect(ReturningWorker.warmupCalls, 'the warm-up ran and its reply was waited for').toBe(1);
       expect(ReturningWorker.terminated, 'no stall, no termination').toBe(0);
     } finally {
       g.Worker = real;
       terminateSim();
+      vi.useRealTimers();
     }
   });
 });
