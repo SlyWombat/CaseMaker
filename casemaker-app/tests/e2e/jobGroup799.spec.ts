@@ -65,3 +65,38 @@ test('#1123 item 44 — the settled pre-plan Cutter line says the set is planned
   await expect(line).not.toContainText('chosen by you');
   await line.screenshot({ path: testInfo.outputPath('cutter-line-planned.png') });
 });
+
+// #1171 — THE DESIGN PANEL AS FIVE ONE-LINE GROUPS OVER ONE FIXED PROGRESS ROW. Each group states
+// its fact while closed; the progress row is the one place Generate and its words live.
+test('#1171 — five fact-bearing group lines and one fixed progress row', async ({ cm, page }, testInfo) => {
+  await routeHouse(page);
+  await cm.ready();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+    window.__caseMaker!.engraveReset();
+  });
+  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
+
+  const jobPath = testInfo.outputPath('two-sides-1171.cutjob.json');
+  writeFileSync(jobPath, JSON.stringify({ ...twoSideJob(), sources: {} }));
+  const menu = page.getByTestId('engrave-file-menu');
+  if (!(await menu.isVisible())) await page.getByTestId('engrave-file-menu-toggle').click();
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('engrave-job-open').click()]);
+  await chooser.setFiles(jobPath);
+  await expect(page.getByTestId('engrave-job-notice')).toContainText('Opened');
+
+  // The five groups, in order, each with its one-line fact while closed.
+  await expect(page.getByTestId('engrave-group-job-summary')).toContainText('two sides');
+  await expect(page.getByTestId('engrave-group-cutter-summary')).toContainText('chosen at Generate from your bits');
+  await expect(page.getByTestId('engrave-group-hold-summary')).not.toBeEmpty();
+  await expect(page.getByTestId('engrave-group-setups-summary')).toContainText('2 sides');
+  await expect(page.getByTestId('engrave-findings-summary')).toContainText('to confirm');
+  // ONE progress row: the press lives inside it, and the Cut tab's surface renders the same
+  // RunProgressLine for a generate started there (#1123 item 45; unit-pinned in cutSurface.spec).
+  const row = page.getByTestId('engrave-progress-row');
+  await expect(row).toBeVisible();
+  expect(await row.locator('[data-testid="engrave-generate"]').count()).toBe(1);
+  await page.getByTestId('engrave-panel').screenshot({ path: testInfo.outputPath('design-panel-1171.png') });
+  await row.screenshot({ path: testInfo.outputPath('progress-row-1171.png') });
+});

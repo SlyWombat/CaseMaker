@@ -4274,13 +4274,17 @@ describe('EngravePanel — the Design main path (#686)', () => {
     fireEvent.click(screen.getByTestId('engrave-file-menu-toggle'));
     expect((screen.getByTestId('engrave-job-save') as HTMLButtonElement).disabled).toBe(false);
 
-    // Three groups, each with a summary that states its fact while closed.
-    for (const id of ['engrave-group-job', 'engrave-group-cutter', 'engrave-group-hold']) {
+    // #1171 — five groups in order, each with a summary that states its fact while closed.
+    for (const id of ['engrave-group-job', 'engrave-group-cutter', 'engrave-group-hold', 'engrave-group-setups', 'engrave-findings']) {
       expect(screen.getByTestId(id), id).toBeTruthy();
     }
-    expect(screen.getByTestId('engrave-group-job-summary').textContent).toContain('items');
-    expect(screen.getByTestId('engrave-group-cutter-summary').textContent).toContain('flat');
+    expect(screen.getByTestId('engrave-group-job-summary').textContent).toContain('hardwood');
+    expect(screen.getByTestId('engrave-group-job-summary').textContent).toContain('one side');
+    // Before a Generate the Cutters line is the planner's rule, not the file's one tool.
+    expect(screen.getByTestId('engrave-group-cutter-summary').textContent).toContain('chosen at Generate from your bits');
     expect(screen.getByTestId('engrave-group-hold-summary').textContent).toContain('Vise —');
+    expect(screen.getByTestId('engrave-group-setups-summary').textContent).toContain('side');
+    expect(screen.getByTestId('engrave-findings-summary').textContent).toContain('to confirm');
     expect(screen.getByTestId('engrave-footer')).toBeTruthy();
   });
 
@@ -4294,8 +4298,9 @@ describe('EngravePanel — the Design main path (#686)', () => {
     // The group holds the setups section, and the Hold group no longer does.
     expect(group.querySelector('[data-testid="engrave-setups"]')).not.toBeNull();
     expect(screen.getByTestId('engrave-group-hold').querySelector('[data-testid="engrave-setups"]')).toBeNull();
-    // Its summary states the setup count while closed (the same fact-while-closed rule as the rest).
-    expect(screen.getByTestId('engrave-group-setups-summary').textContent).toContain('setup');
+    // #1171 — its summary states the sides (and the flip when there is one), the same
+    // fact-while-closed rule as the rest.
+    expect(screen.getByTestId('engrave-group-setups-summary').textContent).toContain('side');
     // Opening it with its own summary shows the setup row.
     fireEvent.click(screen.getByTestId('engrave-group-setups-summary'));
     expect(screen.getByTestId('engrave-setup-1')).toBeTruthy();
@@ -4606,10 +4611,11 @@ describe('EngravePanel — the Design main path (#686)', () => {
     });
     render(<EngravePanel />);
     const summary = screen.getByTestId('engrave-findings').querySelector('summary')!;
-    // One count per severity in its own word: "1 warning · 1 note", never "2 notes".
-    expect(summary.textContent).toMatch(/^(\d+ (?:error|warning|note)s?)( · \d+ (?:error|warning|note)s?)* ▸ show$/);
-    expect(summary.textContent).toContain('warning');
-    expect(summary.textContent).not.toMatch(/^\d+ notes? ▸ show$/);
+    // #1171 — Checks tallies by what the operator does with it: "n to confirm · m blocking",
+    // never one pile, and a notice is never filed as a block.
+    expect(summary.textContent).toContain('to confirm');
+    expect(summary.textContent).toContain('blocking');
+    expect(summary.textContent).not.toMatch(/\d+ (?:error|warning|note)s?/);
     fireEvent.click(summary);
     const rows = screen.getAllByTestId(/^engrave-finding-\d+-/);
     expect(rows.length).toBeGreaterThan(0);
@@ -4890,11 +4896,14 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
 
 // #792 — the Design footer holds ONE primary button; the job's and the run's files live in File ▾.
 describe('#792 — one primary button in the Design footer', () => {
-  it('Generate is full width on the primary container, the subheading is gone, and the run’s files are in File ▾', () => {
+  it('#1171 — Generate sits at the right of ONE fixed progress row on the primary container, and the run’s files are in File ▾', () => {
     render(<EngravePanel />);
     const footer = screen.getByTestId('engrave-footer');
     const generate = screen.getByTestId('engrave-generate') as HTMLButtonElement;
-    expect(generate.style.width).toBe('100%');
+    // #1171 — the row is the fixed slot: words left, press right, one line whatever the state.
+    const row = screen.getByTestId('engrave-progress-row');
+    expect(row.contains(generate)).toBe(true);
+    expect(screen.getByTestId('engrave-progress-words')).toBeTruthy();
     expect(generate.style.background).toContain('--cm-color-primary-container');
     // The old "Generate" subheading is gone: the button is the step.
     expect([...footer.querySelectorAll('h3')].map((h) => h.textContent)).not.toContain('Generate');
@@ -4983,8 +4992,9 @@ describe('#793/#794 — the idle footer is silent and the Ready card is the next
     expect(rows.textContent).toContain('generating…');
     expect(rows.textContent).toContain('not simulated yet');
     expect(rows.textContent).not.toContain('· ·');
-    // Not a result: the primary is still Generate, showing that it is working.
-    expect(screen.getByTestId('engrave-generate').textContent).toBe('Working…');
+    // Not a result: the primary sits in the progress row, disabled, saying it is generating.
+    expect(screen.getByTestId('engrave-generate').textContent).toBe('Generating…');
+    expect(screen.getByTestId('engrave-generate-progress')).toBeTruthy();
   });
 
   it('#794 — after a passing run the primary is Cut…, and pressing it switches to Cut', () => {

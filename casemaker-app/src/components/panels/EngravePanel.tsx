@@ -22,6 +22,7 @@ import { RunLogFold } from './RunLogFold';
 // what it is doing on that tab, not only in the Design footer.
 import { RunProgressLine } from './RunProgressLine';
 import { CutterChecklist, cutterChecklistRows, type CutterChecklistRow } from './CutterChecklist';
+import { cutterSettled, settledCutterEntry } from '@/engine/cnc/engrave/cutterChecklist';
 import { saveEngraveProgram, saveFilesFolderOrZip, saveText } from '@/engine/exportTrigger';
 import { buildSimStallReport, simStallReportFileName } from '@/engine/jobs/simStallReport';
 import { flightCrumbs } from '@/platform/flightRecorder';
@@ -496,20 +497,6 @@ function sacrificialBadge(s: Sacrificial): string {
  * carried a colour dot instead of the severity word. Each row now names its severity and the
  * summary says how many notes there are.
  */
-function findingTally(findings: JobFinding[]): string {
-  // #802 — AN HONEST TALLY: one count per severity, in the severity's own word. "2 notes" for a
-  // warning and a note read as two of the same thing; the footer says "1 warning · 1 note".
-  const count = (severity: JobFinding['severity']): number => findings.filter((f) => f.severity === severity).length;
-  const parts: string[] = [];
-  for (const severity of ['error', 'warning', 'info'] as const) {
-    const n = count(severity);
-    if (n === 0) continue;
-    const word = SEVERITY_WORD[severity].toLowerCase();
-    parts.push(`${n} ${word}${n === 1 ? '' : 's'}`);
-  }
-  return parts.join(' · ');
-}
-
 /** The severity as the operator reads it in a finding row (#686). */
 const SEVERITY_WORD: Record<JobFinding['severity'], string> = {
   error: 'Error',
@@ -2319,6 +2306,27 @@ export function EngravePanel(): JSX.Element {
   const checklistHash = job.package?.hash;
   const cutterCountWords =
     cutterRows.length === 0 ? null : `${cutterRows.length} cutter${cutterRows.length === 1 ? '' : 's'} — see the list`;
+  // #1171 — THE FIVE GROUPS' ONE-LINE FACTS, derived from the records the panel already holds; no
+  // engine change. The Cutters line is the checklist's own count (located / to find), and before
+  // any Generate it states the planner's rule rather than the file's one tool (#1123 item 44).
+  const sideFileName = job.targetObject?.name ?? job.targetObjects?.[0]?.name ?? null;
+  const sideCount = Math.max(1, setups.length);
+  const cutterChecklistEntries = checklistHash === undefined ? undefined : job.cutterChecklist?.[checklistHash];
+  const cutterLocated = cutterRows.filter((row) => cutterSettled(settledCutterEntry(cutterChecklistEntries, row.key))).length;
+  const cutterGroupSummary =
+    cutterRows.length === 0
+      ? 'chosen at Generate from your bits'
+      : `${cutterRows.length} bit${cutterRows.length === 1 ? '' : 's'} · ${cutterLocated} located · ${cutterRows.length - cutterLocated} to find before Cut`;
+  const flipSetup = setups.find((s) => s.flip !== undefined);
+  const setupsGroupSummary =
+    `${sideCount} side${sideCount === 1 ? '' : 's'}` +
+    (flipSetup?.flip === undefined
+      ? ''
+      : ` · flip ${flipSetup.flip.axis === 'left-right' ? 'left↔right' : 'front↔back'}, ${
+          flipSetup.flip.method === 'free-then-flip' ? 'free then flip' : 'tabs in blank'
+        }`);
+  const blockingFindings = jobFindings.filter((f) => f.severity === 'error').length;
+  const checksGroupSummary = `${jobFindings.length - blockingFindings} to confirm · ${blockingFindings} blocking`;
   // #807 — "no cutter chosen" only when nothing can choose: while the measured search runs (or
   // its answer is waiting to be applied), the line says the app is choosing.
   // #1123 item 8 — A CUT ON BORROWED FEEDS SAYS SO ON THE CUTTER LINE, not only in the fold: the
@@ -3621,7 +3629,9 @@ export function EngravePanel(): JSX.Element {
           style={{ flex: 1, padding: 6 }}
           onClick={() => showMode('design')}
         >
-          Design
+          {/* #1171 — the tabs say what they are, not just their names. */}
+          <span style={{ display: 'block', fontWeight: 700 }}>Design</span>
+          <span style={{ display: 'block', fontSize: 10, opacity: 0.72 }}>what to cut, from what, held how</span>
         </button>
         <button
           type="button"
@@ -3630,7 +3640,8 @@ export function EngravePanel(): JSX.Element {
           style={{ flex: 1, padding: 6 }}
           onClick={() => showMode('cut')}
         >
-          Cut
+          <span style={{ display: 'block', fontWeight: 700 }}>Cut →</span>
+          <span style={{ display: 'block', fontSize: 10, opacity: 0.72 }}>three steps at the machine</span>
         </button>
       </div>
 
@@ -3702,7 +3713,13 @@ export function EngravePanel(): JSX.Element {
       <Group
         testid="engrave-group-job"
         title="Job"
-        summary={`${itemTotal} item${itemTotal === 1 ? '' : 's'}`}
+        // #1171 — the blank and material, the file, and how many sides, so a closed group still
+        // says what is being cut from what.
+        summary={[
+          `${stockSizeWords(job.stock)} ${MATERIAL_LABELS[job.stock.material]}`,
+          sideFileName ?? 'no file',
+          sideCount === 1 ? 'one side' : sideCount === 2 ? 'two sides' : `${sideCount} sides`,
+        ].join(' · ')}
         {...groupProps('engrave-group-job', true)}
       >
       {/* 1 — stock, as ONE line that opens to its detail (#686, design §2). #799 — the Stock
@@ -4487,10 +4504,10 @@ export function EngravePanel(): JSX.Element {
 
       <Group
         testid="engrave-group-cutter"
-        title="Cutter"
-        // #798 — the group's own summary is the fact while closed; #1123 item 5 — after a run it
-        // is the COUNT (the list's rows carry the cutters), before one the advice line.
-        summary={cutterCountWords === null ? cutterVerdict : `${cutterRows.length} cutter${cutterRows.length === 1 ? '' : 's'}`}
+        title="Cutters"
+        // #1171 — the checklist's count after a run (bits · located · to find), and the planner's
+        // own rule before one; never the file's single tool (#1123 item 44).
+        summary={cutterGroupSummary}
         {...groupProps('engrave-group-cutter', false)}
       >
       {/* 3 — tool */}
@@ -5165,7 +5182,8 @@ export function EngravePanel(): JSX.Element {
       <Group
         testid="engrave-group-setups"
         title="Setups"
-        summary={`${setups.length} setup${setups.length === 1 ? '' : 's'}`}
+        // #1171 — the sides, and the flip's axis and freeing method when there is one.
+        summary={setupsGroupSummary}
         {...groupProps('engrave-group-setups', false)}
       >
       <EngraveSetupsSection
@@ -5196,12 +5214,15 @@ export function EngravePanel(): JSX.Element {
         // the same colour paints the 6 px below the box that content used to show through.
         style={{ position: 'sticky', bottom: 0, background: 'var(--cm-color-surface-container-low)', boxShadow: '0 6px 0 0 var(--cm-color-surface-container-low)', borderTop: '1px solid #2a2f36', paddingTop: 6, paddingBottom: 6 }}
       >
-        {jobFindings.length > 0 && (
-          <details data-testid="engrave-findings">
-            <summary style={{ ...MUTED, cursor: 'pointer', margin: 0 }}>
-              {findingTally(jobFindings)}{' '}
-              <span style={{ color: '#8fb8e0' }}>▸ show</span>
-            </summary>
+        {/* #1171 — CHECKS IS THE FIFTH GROUP: one line for the tally (to confirm / blocking), the
+            rows inside. Always drawn, so a clean job reads `0 to confirm · 0 blocking` rather than
+            the group vanishing. */}
+        <Group
+          testid="engrave-findings"
+          title="Checks"
+          summary={checksGroupSummary}
+          {...groupProps('engrave-findings', false)}
+        >
             <div style={{ marginTop: 4 }}>
               {jobFindings.map((f, i) => (
                 <div
@@ -5352,8 +5373,7 @@ export function EngravePanel(): JSX.Element {
                 </div>
               ))}
             </div>
-          </details>
-        )}
+        </Group>
 
         {previewStatus === 'error' && (
           <p style={{ ...MUTED, color: '#f0b4ad' }} data-testid="engrave-preview-error">
@@ -5417,52 +5437,61 @@ export function EngravePanel(): JSX.Element {
               {run.restoreNote}
             </span>
           )}
-          <button
-            type="button"
-            data-testid="engrave-generate"
-            // #794 — the card is the NEXT step. Once the program is ready and still matches the
-            // job, that step is Cut, so the same primary slot switches mode instead of offering
-            // a second Generate. `data-action` names which press it is.
-            data-action={runReady ? 'cut' : 'generate'}
-            disabled={runReady ? false : blocked || running || !simEnabled}
-            title={
-              runReady
-                ? 'Go to Cut — the program is generated, checked, simulated and matched against the design.'
-                : !simEnabled
-                  ? 'This build has no simulation worker.'
-                  : 'Generate the program, check it, simulate it and compare it with the design.'
-            }
-            // #792 — THE footer's one primary button: full width, on the app's primary container.
-            style={{
-              width: '100%',
-              padding: '9px 14px',
-              fontSize: 13,
-              fontWeight: 700,
-              background: 'var(--cm-color-primary-container)',
-              borderColor: 'transparent',
-              color: 'var(--cm-color-on-primary-container)',
-            }}
-            onClick={() => {
-              if (runReady) showMode('cut');
-              else void generate();
-            }}
+          {/* #1171 — ONE FIXED ROW: the status words left, the press right, the same box idle,
+              generating, sweeping, checking and done. The Cut tab drives the same RunProgressLine
+              for a generate started there (#1123 item 45). */}
+          <div
+            data-testid="engrave-progress-row"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 34 }}
           >
-            {runReady ? 'Cut…' : running ? 'Working…' : 'Generate'}
-          </button>
-          {running && (
-            // #785 — WHAT it is doing, with a number when the stage has one, and a way to stop.
-            // Cancel terminates the worker (the store orphans the run first), and the panel
-            // returns to the phase it was in before the press.
-            <span
-              data-testid="engrave-generate-progress"
-              style={{ display: 'flex', alignItems: 'center', gap: 8, flexBasis: '100%', fontSize: 12, color: '#c8d3de' }}
-            >
-              <RunProgressLine run={run} />
-              <button type="button" data-testid="engrave-generate-cancel" onClick={() => run.cancelGenerate()}>
-                Cancel
-              </button>
+            <span data-testid="engrave-progress-words" style={{ flex: 1, minWidth: 0, fontSize: 12, color: '#c8d3de' }}>
+              {running ? (
+                <span data-testid="engrave-generate-progress">
+                  <RunProgressLine run={run} />
+                </span>
+              ) : runReady ? (
+                `Program ready${runTimeText === null ? '' : ` · ${runTimeText}`}`
+              ) : null}
             </span>
-          )}
+            <button
+              type="button"
+              data-testid="engrave-generate"
+              // #794 — the card is the NEXT step. Once the program is ready and still matches the
+              // job, that step is Cut, so the same primary slot switches mode instead of offering
+              // a second Generate. `data-action` names which press it is.
+              data-action={runReady ? 'cut' : 'generate'}
+              disabled={runReady ? false : blocked || running || !simEnabled}
+              title={
+                runReady
+                  ? 'Go to Cut — the program is generated, checked, simulated and matched against the design.'
+                  : !simEnabled
+                    ? 'This build has no simulation worker.'
+                    : 'Generate the program, check it, simulate it and compare it with the design.'
+              }
+              style={{
+                padding: '7px 14px',
+                fontSize: 13,
+                fontWeight: 700,
+                background: 'var(--cm-color-primary-container)',
+                borderColor: 'transparent',
+                color: 'var(--cm-color-on-primary-container)',
+                whiteSpace: 'nowrap',
+              }}
+              onClick={() => {
+                if (runReady) showMode('cut');
+                else void generate();
+              }}
+            >
+              {runReady ? 'Cut…' : running ? 'Generating…' : 'Generate'}
+            </button>
+            {running && (
+              // #785 — what it is doing is in the row's words; this is the way to stop it. Cancel
+              // terminates the worker (the store orphans the run first).
+              <button type="button" data-testid="engrave-generate-cancel" onClick={() => run.cancelGenerate()}>
+                Stop
+              </button>
+            )}
+          </div>
           {/* #1123 item 4 — THE RUN LOG, beside the progress line and kept after the run: every
               stage tick with its clock time and duration. Folded, so it never crowds Generate. */}
           <RunLogFold log={run.log} />
