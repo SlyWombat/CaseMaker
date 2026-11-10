@@ -2293,6 +2293,27 @@ mod tests {
         let stored = std::fs::read(dir.path().join(&path)).unwrap();
         assert_eq!(serde_json::from_slice::<serde_json::Value>(&stored).unwrap(), body);
 
+        // #1187 — the OTHER report kind, through the same route: a stopped machine action's own
+        // record. Stored beside the crash reports, under a name that says which one it is, with the
+        // body it was posted with — so the house round-trips the new `kind`.
+        let stop = serde_json::json!({
+            "kind": "casemaker-machine-stop-report",
+            "version": 1,
+            "action": "register",
+            "error": "read failed: Connection reset by peer (os error 104)",
+            "transcript": [{ "line": "M491", "reply": "read failed: Connection reset by peer (os error 104)" }],
+        });
+        let stop_res = app
+            .clone()
+            .oneshot(post_json("/api/v1/crash-reports", &stop))
+            .await
+            .unwrap();
+        assert_eq!(stop_res.status(), StatusCode::CREATED);
+        let stop_path = json_of(stop_res).await.get("path").and_then(|p| p.as_str()).unwrap().to_string();
+        assert!(stop_path.starts_with("crash-reports/stop-"), "{stop_path}");
+        let stored_stop = std::fs::read(dir.path().join(&stop_path)).unwrap();
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&stored_stop).unwrap(), stop);
+
         // A body that is not the app's report is refused, and the directory gains nothing.
         let bad = app
             .clone()

@@ -60,7 +60,7 @@ function heapWords(mb: number | null): string | null {
 
 export interface CrashBannerWords {
   /** The clock the age is judged against; specs pin it, the banner uses now. */
-  now?: number;
+  now?: number | null;
   /** Whether a house service answered — the sentence asks to SEND only where something can receive. */
   canSend?: boolean;
 }
