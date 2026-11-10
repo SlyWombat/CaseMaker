@@ -62,7 +62,7 @@ export interface RunData {
    * `surface` then carries the DERIVED point (machine XY where the seek was sent, the derived Z)
    * with `touched: false`, and the outcome says so.
    */
-  surfaceDerived?: 'bracket-top';
+  surfaceDerived?: 'bracket-top' | 'operator-entered';
 }
 
 /**
@@ -140,7 +140,7 @@ export interface RegistrationOutcome {
    * Absent on every ordinary run, where `surfaceZ` is a probe reading. This is the record's own
    * statement of the difference; the note in `notes` says it in the operator's words.
    */
-  surfaceDerived?: 'bracket-top';
+  surfaceDerived?: 'bracket-top' | 'operator-entered';
   probeRefZ: number;
   /**
    * The plan's seek height, in MACHINE Z — the resolved machine's `toolChange.clearanceZ` it sought from
@@ -510,9 +510,17 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
   // #1166 — THE DERIVED TOP IS SAID ON THE RECORD, in the operator's own terms. It is not a touch
   // and the sheet/panel must not read as one: nothing met the probe, and the value is the bracket's
   // own top (the plan's expected surface = the measured seat + the stock's thickness).
-  if (data.surfaceDerived === 'bracket-top') {
+  if (data.surfaceDerived === 'operator-entered') {
+    notes.push(`the top was ENTERED by the operator (machine Z ${n2(data.surface.z)}) — nothing touched it`);
+  } else if (data.surfaceDerived === 'bracket-top') {
+    const thickness = plan.stockThicknessMm;
+    const arithmetic =
+      thickness === undefined
+        ? `machine Z ${n2(data.surface.z)}`
+        : `seat ${n2(data.surface.z - thickness)} + stock ${n2(thickness)} = machine Z ${n2(data.surface.z)}`;
     notes.push(
-      `the surface is the bracket’s own top, DERIVED from its measured seat + the stock’s thickness (machine Z ${n2(data.surface.z)}) — nothing touched it; earlier programs have cut the plan’s surface point away`,
+      `the surface is the bracket’s own top, DERIVED from the plan’s seat + the stock’s thickness (${arithmetic}) — nothing touched it. ` +
+        `If earlier programs cut the plan’s surface point, this is the top they were cut from; if this is a new blank, check its thickness.`,
     );
   }
   return {
