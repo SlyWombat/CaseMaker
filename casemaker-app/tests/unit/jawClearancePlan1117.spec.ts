@@ -126,7 +126,6 @@ const VISE: EngraveJob['workholding'] = {
     jawStartY: -10,
     source: 'default',
     uncertainty: 0.5,
-    seat: 'ledge',
   },
 };
 
