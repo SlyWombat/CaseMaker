@@ -45,6 +45,11 @@ The bench-wave follow-through: CNC generation runs on the house, the planner han
 **The bits' conditions.**
 
 - **An undescribed piece is unknown, and a lost bit is a state** ([#1149](https://github.com/SlyWombat/CaseMaker/issues/1149)): a copy with no description no longer counts as usable and "in its box" — the panel prints the honest split ("1 of 2 usable · 1 unknown") or the all-unknown sentence. `lost` joins new / used / worn / broken (and the service's wire enum); lost and broken pieces are never chosen, and the exclusion is stated ("marked broken or lost") in the cutter refusal, the reach table and the Why? row. An undescribed piece stays planable — the shop holds it — but its wear is stated, never assumed. Owned now means a piece on the shelf: a clone or a built-in with no inventory piece is not owned.
+- **A touch probe is an instrument with its own shape** ([#1053](https://github.com/SlyWombat/CaseMaker/issues/1053)): the house's probe rows read `shape: 'probe'` — the stylus ball as `tipDiameter`, the measured pre-travel as `triggerRadiusMm` — instead of "unknown" with their facts in prose. A probe is never a cutter by shape alone (the planner and the picker exclude it even if a row's type text lies), the inventory's Type door and the cutter-profile vocabulary know it (it takes no cutter dimensions), and the run sheet names the probe the machine has checked out — What you need says "the Makera 3D Probe — the probe checked out on the machine" and the fit step says "Fit the Makera 3D Probe and touch off ONCE…" — keeping the shipped wired-probe sentence when none is recorded. The probe rows themselves are house data, entered from the editor.
+
+**The receipt says what refused.**
+
+- **A verify-stage refusal names the error it refused on** ([#1118](https://github.com/SlyWombat/CaseMaker/issues/1118)): the receipt's diagnostics already carried the verifier's findings, but the refusal sentence was the bare count ("3 verifier error(s)"), so a card or a terminal reading only the refusals could not say what stopped the run. It now keeps the count and adds the first error's own words — its code and message, which carry the line and location — and the facing-program and neck-file refusals get the same treatment through their shared error list.
 
 **Manage.**
 
@@ -54,6 +59,10 @@ The bench-wave follow-through: CNC generation runs on the house, the planner han
 **The live view.**
 
 - **The running program's cut is drawn on the live blank** ([#1141](https://github.com/SlyWombat/CaseMaker/issues/1141)): while a program plays, the viewport overlays the material it has cut — the active program's own line-labelled moves up to the controller's reported `P:` line, never past the segment holding the live WPos tip. A line that drops resets the swath; a missing `P:`, a line reading 0 (the bench saw that for a whole G53-only pass) and the mid-job Idle hold it. The ribbon lies on the blank's top face (the uncut stock is opaque) at the cutter's width; flat stock only. The index build measured ~12 ms on the largest posted tray program (11,606 lines, 11,520 cutting moves), and a 2 s tick appends at most ~64 moves.
+
+**The close-out check.**
+
+- **The Engrave close-out e2e tolerates the measured pick landing first** ([#1055](https://github.com/SlyWombat/CaseMaker/issues/1055)): the spec read the provisional pick's window as if it were a state; on a busy machine the measured answer can replace the rule's block before the read, and the store never returns to "measuring" for the same job. The spec now polls for either block, asserts the provisional sentence only while the rule's block is on screen, and reads the fresh answer from whichever one answered. Test-only — no app behaviour moved.
 
 ### Milestone 1.5 — the bench wave: the planner's cost, the door and the run (2026-11-09)
 
