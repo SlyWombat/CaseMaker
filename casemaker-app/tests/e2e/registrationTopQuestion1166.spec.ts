@@ -1,13 +1,20 @@
-// #1166 (c1) — THE TOP QUESTION IN THE REAL UI, against a fake controller.
+// #1179 B (supersedes #1166 c1's question) — A CUT BLANK MEASURES, on a bracket job, in the real UI.
 //
-// The unit specs prove the executor; this walk proves the card: a bracket job on a bed whose
-// profile carries a MEASURED bracket seat, a machine whose record already has finished programs,
-// and the desktop bundle served headless (the bench's own path) with the fake console answering
-// `/api/v1/machine/tcp/*`. The Register press must reach the THREE-ANSWER QUESTION after M491 and
-// BEFORE any `G38.3` — that ordering is the whole point of the ruling — and a typed in-band top
-// must then finish the run with no probe move at all.
+// The unit specs prove the executor; these walks prove the card, against a fake controller: a
+// bracket job on a bed whose profile carries a MEASURED bracket seat, the desktop bundle served
+// headless (the bench's own path) with the fake console answering `/api/v1/machine/tcp/*`.
 //
-// Screenshots: /mnt/house/casemaker/qa/2026-11-10/1166/ (top-question.png, entered-top-result.png).
+// Test 1 — the machine record has finished programs, and THIS package's hashes are not among them
+// (the everyday restart: the package was regenerated). #1179 B treats the blank as cut with unknown
+// earlier cuts: spread check points on uncut wood, touched and proved — the typed-Z QUESTION #1166
+// c1 added is gone from the operator flow (B6). With a fake that finds nothing at any point, the
+// proof stops and names every reading; a single reading is never taken as the top, and nothing is
+// written. (The agreeing-pair success path is `restartRegistration1179.spec.ts`'s two walks.)
+//
+// Test 2 — no finished programs: no checks, the plain seek finds the fake's top, the origin is
+// written from it.
+//
+// Screenshots: /mnt/house/casemaker/qa/2026-11-10/1166/.
 import fs, { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,9 +29,8 @@ test.setTimeout(420_000);
 const OUT = '/mnt/house/casemaker/qa/2026-11-10/1166';
 /** The bench's own seat, carried on the profile and measured by the checked-out probe. */
 const SEAT_Z = -85.788;
-/** The job the wizard builds below; the derived top is the seat + this. */
+/** The job the wizard builds below. */
 const STOCK_MM = 25;
-const DERIVED_Z = -60.788;
 
 type Doc = {
   kind: string;
@@ -158,7 +164,7 @@ async function typePlate(page: Page, dims: [number, number, number]): Promise<vo
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
 }
 
-test('#1166 c1 — the three-answer question appears before any G38, and a typed top finishes with no probe move', async ({
+test('#1179 B — with finished programs on the machine the run MEASURES a cut blank: no question, and a stop that names every reading', async ({
   cm,
   page,
 }) => {
@@ -169,7 +175,8 @@ test('#1166 c1 — the three-answer question appears before any G38, and a typed
   await cm.ready();
   await rememberMachine(page);
 
-  // A bracket job on the bench's own seat: the wizard's 100 × 60 × 6 plate, the bed's bracket.
+  // A bracket job on the bench's own seat: the wizard's 100 × 60 plate at the bench's thickness,
+  // the bed's bracket.
   await typePlate(page, [100, 60, STOCK_MM]);
   await expect(page.getByTestId('engrave-setup-mount-bed-bracket')).toBeChecked();
   await page.getByTestId('engrave-setup-next').click();
@@ -199,43 +206,30 @@ test('#1166 c1 — the three-answer question appears before any G38, and a typed
   if (!(await step2.evaluate((el) => (el as HTMLDetailsElement).open))) {
     await page.getByTestId('engrave-cut-step-2-summary').click();
   }
-  // The proposal is the MEASURED-SEAT bracket plan (one top touch), not the seat seek.
+  // The proposal is the MEASURED-SEAT bracket plan (one top touch), now carrying check points: the
+  // machine record has finished programs and THIS package's hashes are not among them, so #1179 B
+  // treats the blank as cut with unknown earlier cuts.
   await expect(page.getByTestId('engrave-registration-proposal-line')).toContainText('then the top');
   const approve = page.getByTestId('engrave-registration-approve-start');
   await expect(approve).toHaveText('Register');
   await approve.click();
 
-  // THE QUESTION, and — the ruling — no probe move yet.
-  const question = page.getByTestId('engrave-registration-top-question');
-  await expect(question).toBeVisible({ timeout: 60_000 });
-  await expect(question).toContainText('Where is the top?');
-  await expect(question).toContainText('Programs have already been cut on this blank');
-  await expect(page.getByTestId('engrave-registration-top-derived')).toContainText(
-    `Use the bracket's own top: seat ${SEAT_Z} + stock ${STOCK_MM} = ${DERIVED_Z}`,
-  );
-  await expect(page.getByTestId('engrave-registration-top-typed')).toHaveValue('');
-  expect(fake.lines().filter((l) => l.startsWith('G38.3')), 'no probe move before the answer').toEqual([]);
+  // The mount confirm comes first, as on the plain seek — and the typed-Z QUESTION #1166 c1 added
+  // is gone from the operator flow (B6): a cut blank is MEASURED, never asked about.
+  await page.getByTestId('engrave-registration-continue').click();
+  await expect(page.getByTestId('engrave-registration-top-question')).toHaveCount(0);
+
+  // The fake has no feature seeded, so every check reads no contact: the proof stops and names
+  // every reading — a single reading is never taken as the top — and nothing is written.
+  const failed = page.getByTestId('engrave-registration-failed');
+  await expect(failed).toContainText('the top on this cut blank could not be proved', { timeout: 120_000 });
+  await expect(failed).toContainText('found nothing at');
+  await expect(failed).toContainText('no two implied tops agree');
+  expect(fake.lines().filter((l) => l.startsWith('G38.3')).length, 'the check points were touched').toBeGreaterThanOrEqual(3);
+  expect(fake.lines().filter((l) => l.startsWith('G10 L2 P1')), 'a stop writes nothing').toEqual([]);
 
   fs.mkdirSync(OUT, { recursive: true });
-  await question.screenshot({ path: path.join(OUT, 'top-question.png') });
-  await page.screenshot({ path: path.join(OUT, 'top-question-page.png') });
-
-  // A typed top inside the plan's band: the run continues with NO seek at all.
-  await page.getByTestId('engrave-registration-top-typed').fill('-60.487');
-  await page.getByTestId('engrave-registration-top-typed-use').click();
-  await expect(question).toHaveCount(0);
-  await expect(page.getByTestId('engrave-registration-notes')).toContainText('ENTERED by the operator', {
-    timeout: 60_000,
-  });
-  expect(fake.lines().filter((l) => l.startsWith('G38.3')), 'the typed answer moved nothing').toEqual([]);
-  await page.screenshot({ path: path.join(OUT, 'entered-top-result.png') });
-
-  // THE ORIGIN: the typed top + (cutter PRB − probe PRB) from today's two M491 readings. The
-  // fake answers both with -80.000, so the G10 line carries the typed top exactly.
-  await page.getByTestId('engrave-registration-write').click();
-  await page.getByTestId('engrave-registration-continue').click(); // take the probe out, fit the cutter
-  await expect.poll(() => fake.lines().find((l) => l.startsWith('G10 L2 P1')) ?? null, { timeout: 60_000 }).not.toBeNull();
-  expect(fake.lines().find((l) => l.startsWith('G10 L2 P1'))).toContain('Z-60.487');
+  await page.screenshot({ path: path.join(OUT, 'cut-blank-stop.png') });
 });
 
 test('#1166 c1 — a job with NO finished programs takes the plain seek, and the origin is written', async ({
