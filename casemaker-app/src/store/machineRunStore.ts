@@ -37,6 +37,7 @@ import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { MACHINES } from '@/engine/cnc/machine';
 import { isPlasticMaterial } from '@/engine/cnc/materials';
 import { readDefault, readFlag } from '@/platform/defaultsClient';
+import { createStatusLog, readStatusFields, type StatusLog } from '@/engine/cnc/engrave/runStatusLog';
 import { newStockId, useStockStore } from './stockStore';
 import { useToolRegistryStore } from './toolRegistryStore';
 import { useHouseStore } from './houseStore';
@@ -361,7 +362,12 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
  * `finished` is the only outcome that means done; `stopped` and `failed` both resume by playing
  * the program again from its beginning (#425 §6).
  */
-function recordProgramOutcome(context: RunContext | null, outcome: RunOutcome): void {
+function recordProgramOutcome(
+  context: RunContext | null,
+  outcome: RunOutcome,
+  /** #1154 — the program's kept `?` status lines, when the watch collected any. */
+  statusLog: StatusLog | null = null,
+): void {
   if (
     context?.jobId === undefined ||
     context.programHash === undefined ||
@@ -388,6 +394,17 @@ function recordProgramOutcome(context: RunContext | null, outcome: RunOutcome): 
           : 'failed',
     // #604 — the run transcript is store-only otherwise and lost on reload; keep it with the run record.
     transcript: useMachineTranscriptStore.getState().runLines ?? undefined,
+    // #1154 — THE HOUSE COPY of the run's own heartbeat: kept with the finished-program record, so
+    // Save / Save all can write `<program>-status.log` beside the run record, even after a reload.
+    ...(statusLog === null || statusLog.seen === 0
+      ? {}
+      : {
+          statusLog: statusLog.text({
+            jobName: document.job.name,
+            programIndex: context.programIndex ?? 1,
+            programTotal: context.programTotal ?? 1,
+          }),
+        }),
   });
 }
 
@@ -458,6 +475,14 @@ export function machineKey(target: { host: string; port: number }): string {
 /** The Stop/Pause flags a watch reads at its boundaries — outside zustand, so reading never re-renders. */
 const flags = new Map<string, { stop: boolean; pauseAsk: PauseAction | null }>();
 
+/**
+ * #1154 — THE RUN'S HEARTBEAT LOG, one per machine (one run at a time). It lives outside the
+ * zustand entry for the reason `flags` does: it changes on every poll and nothing renders it. The
+ * thinning rule and the text are `runStatusLog.ts`'s; this map only carries the collector from the
+ * first poll to the run's end, where it is handed to `recordProgramOutcome`.
+ */
+const statusLogs = new Map<string, StatusLog>();
+
 export const useMachineRunStore = create<MachineRunState>((set, get) => {
   const patch = (machine: string, p: Partial<RunEntry>) =>
     set((s) => {
@@ -476,6 +501,8 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
     prepare: (target, filename, programHash, context) => {
       const machine = machineKey(target);
       if (get().runs[machine]?.running) return false;
+      // #1154 — a prepare starts a new program: an abandoned watch's collector is not this one's.
+      statusLogs.delete(machine);
       set((s) => ({
         runs: {
           ...s.runs,
@@ -503,6 +530,9 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
       if (!prepared || prepared.running) return false;
       const f: { stop: boolean; pauseAsk: PauseAction | null } = { stop: false, pauseAsk: null };
       flags.set(machine, f);
+      // #1154 — the heartbeat log's clock starts where the program does: "the first 5 min" is the
+      // run's, not the first reply's.
+      statusLogs.set(machine, createStatusLog(Date.now()));
       patch(machine, { running: true, progress: null, lines: [], outcome: null, stopAsked: false, paused: false, toolWaiting: null, end: null });
       const session = attachConsole(target);
       // #1060 — the job's/shop's choice, gated on this machine's own capability (where the target
@@ -543,7 +573,11 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
             onEvent: (e) => {
               const entry = get().runs[machine];
               if (!entry) return;
-              if (e.kind === 'poll') patch(machine, { progress: e.progress });
+              if (e.kind === 'poll') {
+                patch(machine, { progress: e.progress });
+                // #1154 — keep the heartbeat line (the collector applies the thinning rule).
+                statusLogs.get(machine)?.push({ atMs: e.atMs, ...readStatusFields(e.raw) });
+              }
               else if (e.kind === 'note') patch(machine, { lines: [...entry.lines, `(${e.text})`] });
               else if (e.kind === 'sent' && e.line !== '?') {
                 patch(machine, { lines: [...entry.lines, `> ${e.line}  ${e.reply.trim().split('\n')[0] ?? ''}`] });
@@ -597,9 +631,12 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
         }
         // Once per run: this runs once per `start`, and `end` is cleared only by the next one.
         const outcome = get().runs[machine]?.outcome ?? null;
+        const statusLog = statusLogs.get(machine) ?? null;
+        statusLogs.delete(machine);
         if (outcome === null) return;
         // #425 §6 — the document's resume fact, written once per run end, before the shelf writes.
-        recordProgramOutcome(prepared.context ?? null, outcome);
+        // #1154 — and the kept heartbeat lines, with it.
+        recordProgramOutcome(prepared.context ?? null, outcome, statusLog);
         let end: RunEnd;
         try {
           end = await endOfRun(target, outcome, prepared.context ?? null);
@@ -693,5 +730,6 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
 /** Test seam. */
 export function resetMachineRunStore(): void {
   flags.clear();
+  statusLogs.clear();
   useMachineRunStore.setState({ runs: {} });
 }

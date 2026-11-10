@@ -108,7 +108,7 @@ import {
   serializeRunRecord,
 } from '@/engine/cnc/engrave/runRecord';
 import { serializeRunLog } from '@/engine/cnc/engrave/runLog';
-import { nameProgramsForSheet, nameRestPrograms, programFiles, runSaveFiles } from '@/engine/cnc/engrave/programFiles';
+import { nameProgramsForSheet, nameRestPrograms, programFiles, runSaveFiles, statusLogFiles } from '@/engine/cnc/engrave/programFiles';
 import { runCycleSeconds } from '@/engine/cnc/engrave/runCycle';
 import { releaseStem } from '@/engine/cnc/engrave/release';
 import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
@@ -3040,6 +3040,8 @@ export function EngravePanel(): JSX.Element {
       { name: runRecordFileName(job.name), bytes: serializeRunRecord(buildRunRecord(job, generated)) },
       // #1123 item 4 — the run log goes with the record, inside the same Save all.
       log.length === 0 ? null : { name: runLogFileName(job.name), bytes: serializeRunLog(log, `${job.name} — run log`) },
+      // #1154 — and each program's kept `?` heartbeat, named after its own `.nc`.
+      statusLogFiles(generated.programs, job.name, job.runLog),
     );
     await saveFilesFolderOrZip(files, `${releaseStem(job.name)}-programs.zip`);
   }
@@ -3085,6 +3087,9 @@ export function EngravePanel(): JSX.Element {
       generated.facingNc,
       // #1123 item 4 — the run log is written beside the record it belongs to.
       log.length === 0 ? null : { name: runLogFileName(job.name), bytes: serializeRunLog(log, `${job.name} — run log`) },
+      // #1154 — the program's kept `?` heartbeat, beside the record. One program is what this
+      // path saves (Save all owns the multi-program run).
+      statusLogFiles(generated.programs ?? [], job.name, job.runLog)[0] ?? null,
     );
   }
 
