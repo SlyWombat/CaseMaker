@@ -1065,7 +1065,15 @@ re-find. The **Setups** section is the job's ordered list of holds:
 - The **remount page** draws before and after, gives the physical steps for that mount, and
  asks a landmark question whose answer must match the planned orientation before it records
  **It is mounted**. The **registration plan** is shown in the engine's own words, with its
- touches, its expected accuracy and the two approvals the run needs.
+ touches, its expected accuracy and the two approvals the run needs. Every edge find it lists
+ stays within ±`registration.edgeBandMm` mm of where its edge is expected (4 mm by default: the
+ stock's own size error, the mount's repeat and fit, plus margin): a sideways find comes in from
+ outside the stock and stops at the first touch, a Z-only scan never probes deeper in than the
+ band, and a find that touches nothing in the band is refused by name, with no origin written. A
+ vise with no measured jaw top keeps the Z-only scan on its free edges, and the plan says so. The
+ touch count is counted by the method the executor will use — a sideways find is its guarded
+ descent plus one horizontal touch, the Z-only scan brackets and bisects to the fine step — so it
+ cannot drift from what the machine does.
 
 The planner and its checks are engine code today; the section is the reader and the approval
 path. The run plan's own phase list is not yet wired into the app, so the times in the rows are
@@ -1158,7 +1166,9 @@ the stock, the feeds and the steps to follow at the machine, derived from how th
 - **The mount the job states** — mount the vise, fit the anchor bracket, or tape the blank
  down — **load the blank**, and the **side view** of the sacrificial stack.
 - **Set the work origin with the probe**: the method the stock and mount call for, the edge
- touches in physical words, and the **surface touches** across the cut's extents. Z0 is
+ touches in physical words — each kept within ±4 mm of where its edge is expected, a sideways find
+ coming in from outside the stock and stopping at its first touch, a find that touches nothing
+ refused by name — and the **surface touches** across the cut's extents. Z0 is
  measured, not a point: the sheet prints the band the readings must fit, the stop rule, and,
  when readings were supplied, the measured verdict — the plane the touches fit and its residual
  against the band. A top that merely TILTS is followed (the program is posted against the plane);

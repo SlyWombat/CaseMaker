@@ -244,6 +244,14 @@ material actually sits on the machine.
 ![A block of stock held in a vise, with the work-origin corner marked and arrows naming the X, Y and Z axes from that corner](img/cnc-work-origin-holding.svg)
 *Work origin and holding: where zero is, and what's holding the stock.*
 
+**The probe's edge find.** A stock edge is looked for only where it can be: every edge scan stays
+within 4 mm of where the job expects the edge (the shop setting `registration.edgeBandMm`), a
+sideways find comes in from outside the stock and stops at the first touch, and a find that touches
+nothing in that band is refused — the app says which edge it was looking for and where it searched,
+and writes no origin from it. The touch count a setup row shows is counted the way the machine will
+make the touches: a sideways find is one guarded descent and one horizontal touch, so a taped
+tray's plan reads 7 touches, not 19.
+
 **Generating.** Pressing **Generate** while the app is still building its preview (or the plan's
 measured pick) does not fail: the progress line says "waiting for the measured pick to finish — the
 worker is busy", and the run continues as soon as the worker is free. The app's own stall watchdog
