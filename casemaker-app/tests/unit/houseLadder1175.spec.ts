@@ -52,7 +52,7 @@ vi.mock('@/platform/houseGenerate', () => ({
 
 import { setEngraveRunClientLoader, useEngraveRunStore } from '@/store/engraveRunStore';
 import { useSimStore } from '@/store/simStore';
-import type { SimLoadOk } from '@/store/simStore';
+import type { SimLoadOk } from '@/workers/sim/session';
 
 function swept(over: Partial<SimLoadOk> = {}): SimLoadOk {
   return {
