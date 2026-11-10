@@ -4,8 +4,9 @@
 // "I am at the machine" once per program (Q17), Home only after a confirmed stop, Upload locked while
 // a run goes. The upload and the console are fake clients; nothing reaches a machine.
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { advanceUntil } from './helpers/fakeTime';
 import { EngraveMachineRun } from '@/components/panels/EngraveMachineRun';
 import { EngraveMachineUpload } from '@/components/panels/EngraveMachineUpload';
 import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleClient } from '@/platform/machineConsole';
@@ -86,6 +87,7 @@ const upload = (
 );
 
 beforeEach(() => {
+  vi.useFakeTimers();
   sent.length = 0;
   resetRunConfirmStore();
   resetMachineRunStore();
@@ -95,6 +97,7 @@ beforeEach(() => {
   }));
 });
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   setMachineConsoleLoader(null);
   setMachineUploadLoader(null);
@@ -103,7 +106,7 @@ afterEach(() => {
 async function uploadIt(): Promise<void> {
   fireEvent.click(screen.getByTestId('engrave-upload'));
   fireEvent.click(screen.getByTestId('engrave-upload-confirm-send'));
-  await screen.findByTestId('engrave-run');
+  await advanceUntil(() => screen.getByTestId('engrave-run'));
 }
 
 describe('#423 the run panel, in the real tree', () => {
@@ -120,21 +123,22 @@ describe('#423 the run panel, in the real tree', () => {
       'Pause takes effect at the next status read.',
     );
     expect(screen.queryByTestId('engrave-run-progress')).toBeNull();
-    await waitFor(() =>
+    await advanceUntil(() =>
       expect(useMachineRunStore.getState().runs[machineKey(TARGET)]?.progress?.percent).toBe(20),
-      { timeout: 6000 },
+      { timeoutMs: 6000 },
     );
 
     first.unmount(); // the engrave panel closes mid-run
     const polledBefore = sent.filter((l) => l === '?').length;
-    await waitFor(() => expect(sent.filter((l) => l === '?').length).toBeGreaterThan(polledBefore), { timeout: 6000 });
+    await advanceUntil(() => expect(sent.filter((l) => l === '?').length).toBeGreaterThan(polledBefore), { timeoutMs: 6000 });
     expect(useMachineRunStore.getState().runs[machineKey(TARGET)]?.running).toBe(true); // still watching
 
     render(upload()); // reopened: the run, from the store
     expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(true); // Upload locked
-    const stop = await screen.findByTestId('engrave-run-stop');
+    await advanceUntil(() => screen.getByTestId('engrave-run-stop'));
+    const stop = screen.getByTestId('engrave-run-stop');
     fireEvent.click(stop);
-    await waitFor(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('aborted'), { timeout: 12000 });
+    await advanceUntil(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('aborted'), { timeoutMs: 12000 });
     expect(sent).toContain('abort');
     expect(sent.at(-1)).toBe('M852');
     expect(sent).not.toContain('$H');
@@ -151,7 +155,7 @@ describe('#423 the run panel, in the real tree', () => {
     expect(useMachineRunStore.getState().runs[machineKey(TARGET)]?.context?.vacuumOwned).toBe(true);
     act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     fireEvent.click(screen.getByTestId('engrave-run-start'));
-    await waitFor(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('finished'), { timeout: 6000 });
+    await advanceUntil(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('finished'), { timeoutMs: 6000 });
     // #469 (R20) — the app's upload OWNS the vacuum, so the runner adds no `M331`/`M332` of its
     // own here, even though this fixture program states neither: a job's span is the post's
     // decision, and an `air: false` file legitimately carries no words. The machine homes on
@@ -195,23 +199,23 @@ describe('#423 the run panel, in the real tree', () => {
     await uploadIt();
     act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     fireEvent.click(screen.getByTestId('engrave-run-start'));
-    await waitFor(() =>
+    await advanceUntil(() =>
       expect(useMachineRunStore.getState().runs[machineKey(TARGET)]?.progress?.percent).toBe(20),
-      { timeout: 6000 },
+      { timeoutMs: 6000 },
     );
 
     fireEvent.click(screen.getByTestId('engrave-run-pause'));
-    await waitFor(() => expect(sent).toContain('suspend'), { timeout: 6000 });
-    await waitFor(() => expect(screen.getByTestId('engrave-run-pause').textContent).toContain('Resume'), { timeout: 6000 });
+    await advanceUntil(() => expect(sent).toContain('suspend'), { timeoutMs: 6000 });
+    await advanceUntil(() => expect(screen.getByTestId('engrave-run-pause').textContent).toContain('Resume'), { timeoutMs: 6000 });
     expect(useMachineRunStore.getState().runs[machineKey(TARGET)]?.paused).toBe(true);
     expect((useMachineRunStore.getState().runs[machineKey(TARGET)]?.lines ?? []).join('\n')).toContain('Paused at line');
 
     fireEvent.click(screen.getByTestId('engrave-run-pause'));
-    await waitFor(() => expect(sent).toContain('resume'), { timeout: 6000 });
-    await waitFor(() => expect(useMachineRunStore.getState().runs[machineKey(TARGET)]?.paused).toBe(false), { timeout: 6000 });
+    await advanceUntil(() => expect(sent).toContain('resume'), { timeoutMs: 6000 });
+    await advanceUntil(() => expect(useMachineRunStore.getState().runs[machineKey(TARGET)]?.paused).toBe(false), { timeoutMs: 6000 });
 
     fireEvent.click(screen.getByTestId('engrave-run-stop'));
-    await waitFor(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('aborted'), { timeout: 12000 });
+    await advanceUntil(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('aborted'), { timeoutMs: 12000 });
     expect(sent.filter((l) => l === 'suspend')).toHaveLength(1);
     expect(sent.filter((l) => l === 'resume')).toHaveLength(1);
   }, 40000);
@@ -226,7 +230,7 @@ describe('#423 the run panel, in the real tree', () => {
     act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     fireEvent.click(screen.getByTestId('engrave-run-start'));
     // The fake controller runs reporting `P:10,20,5` and finishes on `P:9,100,4`.
-    await waitFor(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('finished'), { timeout: 12000 });
+    await advanceUntil(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('finished'), { timeoutMs: 12000 });
     expect(lines).toContain(10);
     expect(lines).toContain(9);
     // Consecutive repeats are dropped: the effect is keyed on the line, not on renders.
@@ -288,7 +292,7 @@ describe('#655 the tool-change stop', () => {
     act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
     fireEvent.click(screen.getByTestId('engrave-run-start'));
 
-    await screen.findByTestId('engrave-run-tool-prompt', undefined, { timeout: 8000 });
+    await advanceUntil(() => screen.getByTestId('engrave-run-tool-prompt'), { timeoutMs: 8000 });
     // An upload with no run context (a file outside the job flow) names the tool number only.
     expect(screen.getByTestId('engrave-run-tool-words').textContent).toBe(
       'The machine is waiting for tool 1 to be in the spindle.',
@@ -298,8 +302,8 @@ describe('#655 the tool-change stop', () => {
     expect(screen.getByTestId('engrave-run-stop')).toBeTruthy();
 
     fireEvent.click(screen.getByTestId('engrave-run-tool-continue'));
-    await waitFor(() => expect(sent).toContain('M490.2'), { timeout: 8000 });
-    await waitFor(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('finished'), { timeout: 8000 });
+    await advanceUntil(() => expect(sent).toContain('M490.2'), { timeoutMs: 8000 });
+    await advanceUntil(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('finished'), { timeoutMs: 8000 });
     expect(screen.queryByTestId('engrave-run-tool-prompt')).toBeNull();
   }, 30000);
 });
