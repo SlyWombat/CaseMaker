@@ -208,7 +208,7 @@ test('#930 — a saved ledge the stock cannot sit in arrives on the waste board,
   await expect(page.getByTestId('engrave-setup-mount-ledge')).toBeDisabled();
   await expect(page.getByTestId('engrave-setup-mount-ledge')).not.toBeChecked();
   await expect(page.getByTestId('engrave-setup-mount-row-ledge')).toContainText(
-    'it would sit 1.6 mm below the jaw tops',
+    'It would sit 1.6 mm below the jaw tops',
   );
   await expect(page.getByTestId('start-wizard-holding-unblock')).toHaveCount(0);
   await expect(page.getByTestId('engrave-setup-next')).toBeEnabled();
