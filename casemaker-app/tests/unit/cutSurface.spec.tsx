@@ -1555,9 +1555,10 @@ describe('#819 the finished screen', () => {
     const pkg = frozen(job, programs20);
     const sources = frozenReleaseSources(job, pkg, new Map(programs20.map((p) => [p.programHash, VERIFY])));
     const machine = machineKey(TARGET);
-    // Plan the REAL record (the step re-plans on mount; the same hashes merge and keep the phase),
-    // then put it where the bench was: program 1 finished, the bit change waiting for program 2.
-    act(() => useEngraveReleaseStore.getState().plan(TARGET, job, sources));
+    // #1179 C — plan with the SAME job the surface uses (the document carries its package, so the
+    // file names carry its key): the mount re-plan then sees identical names and keeps the phase.
+    const plannedWithPkg = { ...job, package: pkg } as EngraveJob;
+    act(() => useEngraveReleaseStore.getState().plan(TARGET, plannedWithPkg, sources));
     const rec = useEngraveReleaseStore.getState().records[machine]!;
     act(() =>
       useEngraveReleaseStore.setState({
