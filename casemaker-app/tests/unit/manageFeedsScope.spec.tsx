@@ -309,12 +309,26 @@ describe('#450 Manage › Tools › Feeds', () => {
     await openFeeds();
 
     fireEvent.click(screen.getByTestId('manage-feeds-pick-feed-pla-v-0.3-0.5'));
+    // #1150 — the first press only names the row; the DELETE is the confirm's.
     fireEvent.click(screen.getByTestId('manage-feed-remove'));
+    expect(svc.sent.some((s) => s.method === 'DELETE')).toBe(false);
+    expect(screen.getByTestId('manage-feed-remove-sentence').textContent).toContain('PLA v · 0.3–0.5 mm');
+    fireEvent.click(screen.getByTestId('manage-feed-remove-confirm'));
 
     await waitFor(() => expect(svc.sent.some((s) => s.method === 'DELETE')).toBe(true));
     await waitFor(() => expect(svc.rows()).toHaveLength(11));
     await waitFor(() => expect(screen.queryByTestId('manage-feeds-row-feed-pla-v-0.3-0.5')).toBeNull());
     expect(screen.getByTestId('manage-feed-detail-empty')).toBeTruthy();
+  });
+
+  it('#1150 — Cancel on a feed row sends nothing and keeps the row', async () => {
+    const svc = fakeTable();
+    await openFeeds();
+    fireEvent.click(screen.getByTestId('manage-feeds-pick-feed-pla-v-0.3-0.5'));
+    fireEvent.click(screen.getByTestId('manage-feed-remove'));
+    fireEvent.click(screen.getByTestId('manage-feed-remove-cancel'));
+    expect(svc.sent.some((s) => s.method === 'DELETE')).toBe(false);
+    expect(screen.getByTestId('manage-feed-remove')).not.toBeNull();
   });
 
   it('says the table is absent rather than empty when the service predates it', async () => {

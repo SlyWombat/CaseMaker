@@ -35,6 +35,8 @@ import {
   type PowerDeps,
 } from '@/store/powerStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { ConfirmPress } from './ConfirmPress';
+import { powerSwitchName } from './display';
 
 /**
  * #449 — the flows' timing from the shop's `power.*` defaults, read at the click. Every gap between
@@ -338,9 +340,13 @@ function PowerSetup({ machine }: { machine: MachineRecord }) {
           Save
         </button>
         {machine.power !== null && (
-          <button type="button" className="btn btn--sm btn--danger" data-testid="manage-power-remove" onClick={() => void remove()}>
-            Remove the switch
-          </button>
+          <ConfirmPress
+            testId="manage-power-remove"
+            label="Remove the switch"
+            sentence={`Remove the link to the power switch “${powerSwitchName(machine.power.entityId)}”? The plug stays as it is.`}
+            confirmLabel="Remove it"
+            onConfirm={() => void remove()}
+          />
         )}
       </div>
       {note !== null && (

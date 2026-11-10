@@ -56,3 +56,18 @@ export function timeOfDayWords(iso: string | null, now: Date = new Date()): stri
   if (d.toDateString() === yesterday.toDateString()) return `yesterday ${hm}`;
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`;
 }
+
+/**
+ * #1150 — THE SWITCH'S NAME, as this build can know it. The service keeps only the entity id (it does
+ * not read Home Assistant's `friendly_name`), so the sentence derives the human name from the id's
+ * own words — `switch.makera_cnc` → "Makera CNC" — and falls back to the id verbatim when there is
+ * nothing to derive. A raw `switch.x` was one of the review's own complaints.
+ */
+export function powerSwitchName(entityId: string): string {
+  const bare = entityId.startsWith('switch.') ? entityId.slice('switch.'.length) : entityId;
+  const words = bare
+    .split('_')
+    .filter((w) => w.length > 0)
+    .map((w) => (w.length <= 3 ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)));
+  return words.length > 0 ? words.join(' ') : entityId;
+}
