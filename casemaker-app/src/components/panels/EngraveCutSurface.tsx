@@ -30,6 +30,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react';
 import { ProbeFitDiagram } from '@/components/ui/ProbeFitDiagram';
+import { clearanceHoldWords } from '@/components/welcome/holdingMounts';
 import { probeFor } from '@/engine/cnc/registration/mountContext';
 import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import { planChoiceOf, type EngraveJob, type FrozenPackage } from '@/types/engraveJob';
@@ -1549,7 +1550,8 @@ export function EngraveCutSurface({
               />
               <span>
                 I am at the machine — the probe is fitted, the head is clear, and the stock is
-                clamped — and I have checked clearance to the vise and the tool's reach myself.
+                clamped — and I have checked the clearance myself: to{' '}
+                {clearanceHoldWords(job.workholding)}, and to the tool's reach.
               </span>
             </label>
             {/* #788 — the ask above is where the probe is fitted, so the head diagram stands with

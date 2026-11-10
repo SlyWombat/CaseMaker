@@ -836,6 +836,26 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.getByTestId('engrave-cut-ack').querySelector('[data-testid="probe-fit-diagram"]')).toBeNull();
   });
 
+  it('#1123-55 — the statement names the job’s own hold: a bracket job says the bracket, not the vise', () => {
+    const job = bracketJob();
+    const pkg = frozen(job, [P1]);
+    useEngraveRunStore.setState({
+      oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } } as never,
+      acknowledged: false,
+    });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    const statement = () =>
+      screen.getByTestId('engrave-cut-ack').querySelector('label')!.textContent ?? '';
+    expect(statement()).toContain("the bracket's arms and its 2 clamps");
+    expect(statement()).not.toContain('vise');
+
+    // The words follow the mount, so a vise job still says the vise.
+    cleanup();
+    const viseJob = plannedJob();
+    draw({ job: viseJob, report: reportOf(), pkg: frozen(viseJob, [P1]), generated: generated([P1]), canDrive: true });
+    expect(statement()).toContain('to the vise, and to the tool');
+  });
+
   it('#796 — a program older than the design disables the one-screen press and the upload until Generate', () => {
     const job = plannedJob();
     const pkg = frozen(job, [P1]);
