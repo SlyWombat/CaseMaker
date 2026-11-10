@@ -30,15 +30,6 @@ export const BROWSER_32_BIT_CODE = 'browser-32-bit';
 /** Bitness 32: the browser states the cause, and the remedy is a different browser. */
 export const BROWSER_32_BIT_SENTENCE = 'This browser is 32-bit; the planner needs a 64-bit browser';
 
-/**
- * The probe failed on a renderer that did NOT say 32-bit (bitness 64, or no answer): the browser
- * may already BE 64-bit, so the 32-bit sentence would be false and "install a 64-bit browser"
- * would send the operator to an install they already have. The remedy is free memory first, a
- * different browser second.
- */
-export const BROWSER_MEMORY_SHORT_SENTENCE =
-  "This browser can't reserve the memory the planner needs (about 450 MiB); close other tabs or use a 64-bit browser";
-
 export interface RendererRefusal {
   code: typeof BROWSER_32_BIT_CODE;
   severity: 'error';
@@ -54,12 +45,6 @@ export const BROWSER_32_BIT_REFUSAL: RendererRefusal = {
   code: 'browser-32-bit',
   severity: 'error',
   sentence: BROWSER_32_BIT_SENTENCE,
-};
-
-export const BROWSER_MEMORY_SHORT_REFUSAL: RendererRefusal = {
-  code: 'browser-32-bit',
-  severity: 'error',
-  sentence: BROWSER_MEMORY_SHORT_SENTENCE,
 };
 
 /**
@@ -174,20 +159,6 @@ export async function readRendererBitness(
   }
 }
 
-/**
- * The verdict Generate needs: a refusal, or null when this renderer can do the planner's work.
- * Bitness '32' short-circuits before the probe and gets its own sentence; every other answer
- * takes the probe, and a failed probe gets the memory sentence (the browser may already be
- * 64-bit — the message must not claim otherwise).
- */
-export async function detectRendererRefusal(
-  nav: NavigableNavigator = undefined,
-  probe: () => ProbeResult = probeAddressSpace,
-): Promise<RendererRefusal | null> {
-  if ((await readRendererBitness(nav)) === '32') return BROWSER_32_BIT_REFUSAL;
-  return probe().ok ? null : BROWSER_MEMORY_SHORT_REFUSAL;
-}
-
 /** `undefined` means "read the global navigator" — the call site does not have to pass one. */
 type NavigableNavigator = NavigatorLike | null | undefined;
 
@@ -285,9 +256,11 @@ export function startRendererCheck(
 
 /**
  * THE PRESS'S OWN PROBE (the landing ruling). Generate calls this when the startup verdict is not
- * 'ok' — i.e. both startup attempts failed. Bitness '32' refuses before the probe; otherwise a
- * failed probe publishes the memory sentence and that verdict STANDS for the page. Returns the
- * refusal (null when the renderer passes, and the verdict becomes 'ok').
+ * 'ok' — i.e. both startup attempts failed. Bitness '32' refuses before the probe and returns the
+ * refusal. Every other answer WARNS and returns NULL: a failed reservation publishes
+ * {@link BROWSER_MEMORY_SHORT_WARNING} beside Generate and the run proceeds — the main thread's
+ * memory is a proxy (the planner runs in its own worker, #1148), and a real allocation failure is
+ * named by `operatorRunError` when the run hits it. Never restores the refusal: that was the brick.
  */
 export async function recheckRendererForGenerate(
   nav: NavigableNavigator = undefined,

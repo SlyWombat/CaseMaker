@@ -19,11 +19,12 @@ function sentenceCase(text: string): string {
 /**
  * #1124 (the landing ruling, 2026-11-09) — A PLANNER OUT-OF-MEMORY FAILURE IS NAMED. The bench's
  * failure surfaced as "Array buffer allocation failed" mid-plan; the operator gets the cause and
- * the remedy instead of the raw allocation text. The matching is deliberately narrow: the browser
- * engine's and the wasm heap's own allocation failures, not any sentence that mentions memory.
+ * the remedy instead of the raw allocation text. The matching is deliberately narrow: allocation
+ * failures, not any sentence that mentions memory — and NOT a generic wasm trap like "memory access
+ * out of bounds", which is often a genuine bug and would send the operator to the wrong fix.
  */
 function looksLikePlannerOom(message: string): boolean {
-  return /array ?buffer allocation failed|cannot enlarge memory|out of memory|memory access out of bounds|wasm memory/i.test(
+  return /array ?buffer allocation failed|cannot enlarge memory|out of memory/i.test(
     message,
   );
 }

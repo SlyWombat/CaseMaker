@@ -9,7 +9,8 @@ describe('#1124 — a planner out-of-memory failure is named', () => {
   it('maps the browser allocation failure to the memory sentence', () => {
     expect(operatorRunError('Array buffer allocation failed')).toBe(PLANNER_OUT_OF_MEMORY_SENTENCE);
     expect(operatorRunError('RangeError: Array buffer allocation failed')).toBe(PLANNER_OUT_OF_MEMORY_SENTENCE);
-    expect(operatorRunError('RuntimeError: memory access out of bounds')).toBe(PLANNER_OUT_OF_MEMORY_SENTENCE);
+    // A generic wasm trap is NOT named as an out-of-memory failure (it can be a real bug).
+    expect(operatorRunError('RuntimeError: memory access out of bounds')).not.toBe(PLANNER_OUT_OF_MEMORY_SENTENCE);
     expect(operatorRunError('Cannot enlarge memory arrays')).toBe(PLANNER_OUT_OF_MEMORY_SENTENCE);
     expect(operatorRunError('the wasm heap is out of memory')).toBe(PLANNER_OUT_OF_MEMORY_SENTENCE);
   });
