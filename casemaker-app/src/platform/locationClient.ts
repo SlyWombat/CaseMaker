@@ -148,7 +148,27 @@ export const FinishedSetupCutMapSchema = z
   });
 export type FinishedSetupCutMap = z.infer<typeof FinishedSetupCutMapSchema>;
 
-export const FinishedRunSchema = z.object({
+/**
+ * #1179 — the house is Rust: every `Option` is serialised as `null` (never omitted), and a `Vec`
+ * as `[]`. The client's record schemas express "not stated" as an ABSENT key, so a run record the
+ * service hands back must have its nulls removed before parsing — otherwise one absent field makes
+ * the whole machine unreadable. The same rule the machine record's own nullable fields follow.
+ */
+function nullsToAbsent(raw: unknown): unknown {
+  if (Array.isArray(raw)) return raw.map(nullsToAbsent);
+  if (raw !== null && typeof raw === 'object') {
+    return Object.fromEntries(
+      Object.entries(raw as Record<string, unknown>)
+        .filter(([, value]) => value !== null)
+        .map(([key, value]) => [key, nullsToAbsent(value)]),
+    );
+  }
+  return raw;
+}
+
+export const FinishedRunSchema = z.preprocess(
+  nullsToAbsent,
+  z.object({
   hash: z.string().min(1),
   jobId: z.string().min(1).optional(),
   jobName: z.string().optional(),
@@ -174,7 +194,8 @@ export const FinishedRunSchema = z.object({
    * setups' entries are carried forward). Absent for a run that states no setup.
    */
   cutMaps: z.array(FinishedSetupCutMapSchema).optional(),
-});
+  }),
+);
 export type FinishedRun = z.infer<typeof FinishedRunSchema>;
 
 export const MachineAddressSchema = z.object({

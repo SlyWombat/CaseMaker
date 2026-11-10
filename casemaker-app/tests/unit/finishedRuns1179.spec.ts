@@ -18,6 +18,51 @@ describe('#1179 the finished-run record', () => {
     expect(parsed.finishedRuns).toEqual([]);
   });
 
+  it('a record the HOUSE served parses — its absent fields arrive as JSON null', () => {
+    // The service is Rust: every `Option` is serialised as null, and a Vec as []. A record it
+    // hands back therefore has nulls where the client's schema has optional keys; parsing must
+    // read null as "not stated" (the same rule the machine record's own nullable fields follow).
+    const base = MachineRecordSchema.parse(fixture.machine);
+    const goodMap = {
+      cellMm: 2,
+      cols: 80,
+      rows: 63,
+      x0Mm: 0,
+      y0Mm: 0,
+      stepMm: 0.05,
+      flat: { encoding: 'rle', data: '5040:1' },
+      depth: { encoding: 'rle', data: '5040:0' },
+    };
+    const served = MachineRecordSchema.parse({
+      ...base,
+      finishedRuns: [
+        {
+          hash: 'a1b2c3d4',
+          jobId: null,
+          jobName: null,
+          packageKey: null,
+          key8: null,
+          programIndex: null,
+          programCount: null,
+          programName: null,
+          cutterKey: null,
+          setupIndex: null,
+          finishedAt: null,
+          stock: null,
+          registration: null,
+          cutMaps: [],
+        },
+        {
+          hash: 'e5f6a7b8',
+          cutMaps: [{ setupIndex: 1, state: 'complete', unknownReason: null, map: goodMap }],
+        },
+      ],
+    });
+    expect(served.finishedRuns[0]!.jobId).toBeUndefined();
+    expect(served.finishedRuns[0]!.registration).toBeUndefined();
+    expect(served.finishedRuns[1]!.cutMaps![0]!.map).toMatchObject({ cellMm: 2, cols: 80 });
+  });
+
   it('a full record parses, and a hash-only record parses too', () => {
     const base = MachineRecordSchema.parse(fixture.machine);
     const full = MachineRecordSchema.parse({

@@ -51,9 +51,10 @@ pub fn validate_list(machine_id: &str, list: &[String]) -> Result<(), HouseError
 }
 
 /// #1179 — a run record's own rules: its hash is a valid program key (the same rule as the list),
-/// and a cut map is a two-stream RLE grid with positive dimensions, each stream 1..=4,096
-/// characters. A real tray's map is far shorter; one that does not compress under the cap is
-/// dropped whole (the writer sends `null`), never stored partial.
+/// and each setup's cut map entry states its evidence in full (the analyst's ruling, issue comment
+/// 6775024844): `complete` carries a two-stream RLE grid with positive dimensions, each stream
+/// 1..=4,096 characters; `unknown` carries the reason a merge could not finish. A state outside the
+/// pair, or a half-filled entry, refuses the record — never a map that reads as whole but is not.
 pub fn validate_runs(
     machine_id: &str,
     runs: &[crate::location::FinishedRun],
@@ -63,21 +64,51 @@ pub fn validate_runs(
             HouseError::BadEntry(why) => HouseError::BadEntry(format!("machine {machine_id}: {why}")),
             other => other,
         })?;
-        if let Some(map) = &run.cut_map {
+        for entry in &run.cut_maps {
             let stream_ok = |stream: &crate::location::CutMapStream| {
                 !stream.data.is_empty()
                     && stream.data.chars().count() <= 4_096
                     && stream.encoding == "rle"
             };
-            if !(map.cell_mm > 0.0)
-                || !(map.step_mm > 0.0)
-                || map.cols == 0
-                || map.rows == 0
-                || !stream_ok(&map.flat)
-                || !stream_ok(&map.depth)
-            {
+            match entry.state.as_str() {
+                "complete" => {
+                    let Some(map) = &entry.map else {
+                        return Err(HouseError::BadEntry(format!(
+                            "machine {machine_id}: a complete cut map must carry its map"
+                        )));
+                    };
+                    if !(map.cell_mm > 0.0)
+                        || !(map.step_mm > 0.0)
+                        || map.cols == 0
+                        || map.rows == 0
+                        || !stream_ok(&map.flat)
+                        || !stream_ok(&map.depth)
+                    {
+                        return Err(HouseError::BadEntry(format!(
+                            "machine {machine_id}: a cut map must be a positive 2-stream rle grid of 1..=4096 characters each"
+                        )));
+                    }
+                }
+                "unknown" => {
+                    if entry
+                        .unknown_reason
+                        .as_deref()
+                        .map_or(true, |reason| reason.trim().is_empty())
+                    {
+                        return Err(HouseError::BadEntry(format!(
+                            "machine {machine_id}: an unknown cut map must state its reason"
+                        )));
+                    }
+                }
+                _ => {
+                    return Err(HouseError::BadEntry(format!(
+                        "machine {machine_id}: a cut map state is complete or unknown"
+                    )));
+                }
+            }
+            if entry.setup_index == 0 {
                 return Err(HouseError::BadEntry(format!(
-                    "machine {machine_id}: a cut map must be a positive 2-stream rle grid of 1..=4096 characters each"
+                    "machine {machine_id}: a cut map names its setup (1-based)"
                 )));
             }
         }

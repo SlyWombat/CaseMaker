@@ -857,6 +857,20 @@ pub struct FinishedCutMap {
     pub depth: CutMapStream,
 }
 
+/// #1179 — the cut map of ONE setup/face (the analyst's ruling, issue comment 6775024844): side 1
+/// and side 2 never merge, `complete` carries the map, and `unknown` carries the reason a merge
+/// could not finish (both enforced by `finished_programs::validate_runs`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FinishedSetupCutMap {
+    pub setup_index: u32,
+    pub state: String,
+    #[serde(default)]
+    pub unknown_reason: Option<String>,
+    #[serde(default)]
+    pub map: Option<FinishedCutMap>,
+}
+
 /// #1179 — the stock dims the mask is placed on. `thicknessMm` is the JOB'S STATED thickness.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -899,8 +913,10 @@ pub struct FinishedRun {
     pub stock: Option<FinishedRunStock>,
     #[serde(default)]
     pub registration: Option<FinishedRunRegistration>,
+    /// #1179 — one entry per setup/face; the newest record carries the blank's whole state. A list
+    /// rather than an option so an older document (no key) and a run with no maps both read as [].
     #[serde(default)]
-    pub cut_map: Option<FinishedCutMap>,
+    pub cut_maps: Vec<FinishedSetupCutMap>,
 }
 
 /// One physical machine at the location (§3.1).
@@ -1310,16 +1326,21 @@ mod tests {
                 measured_at: Some("2026-11-10T13:00:00.000Z".into()),
                 plan_expected_top_machine_z: Some(-60.0),
             }),
-            cut_map: Some(FinishedCutMap {
-                cell_mm: 2.0,
-                cols: 80,
-                rows: 63,
-                x0_mm: 0.0,
-                y0_mm: 0.0,
-                step_mm: 0.05,
-                flat: CutMapStream { encoding: "rle".into(), data: "5040:1".into() },
-                depth: CutMapStream { encoding: "rle".into(), data: "5040:0".into() },
-            }),
+            cut_maps: vec![FinishedSetupCutMap {
+                setup_index: 1,
+                state: "complete".into(),
+                unknown_reason: None,
+                map: Some(FinishedCutMap {
+                    cell_mm: 2.0,
+                    cols: 80,
+                    rows: 63,
+                    x0_mm: 0.0,
+                    y0_mm: 0.0,
+                    step_mm: 0.05,
+                    flat: CutMapStream { encoding: "rle".into(), data: "5040:1".into() },
+                    depth: CutMapStream { encoding: "rle".into(), data: "5040:0".into() },
+                }),
+            }],
         }
     }
 
@@ -1497,7 +1518,8 @@ mod tests {
     fn a_finished_run_round_trips_in_camel_case_and_refuses_a_broken_cut_map() {
         // #1179. Every field but the hash is optional — a partial record is still true — and the
         // map is all-or-nothing: an over-cap stream, a non-RLE encoding or a zero grid refuses the
-        // whole record, never a half-filled grid.
+        // whole record, never a half-filled grid. The maps are PER SETUP (the 11-10 ruling):
+        // `complete` carries its map, `unknown` carries the reason a merge could not finish.
         let mut machine = a_machine("m-1");
         machine.finished_programs = vec!["a1b2c3d4".into()];
         machine.finished_runs = vec![a_finished_run("a1b2c3d4", 1)];
@@ -1508,13 +1530,14 @@ mod tests {
             v["finishedRuns"][0]["registration"]["surfaceMachineZ"],
             serde_json::json!(-60.487)
         );
-        assert_eq!(v["finishedRuns"][0]["cutMap"]["stepMm"], serde_json::json!(0.05));
+        assert_eq!(v["finishedRuns"][0]["cutMaps"][0]["map"]["stepMm"], serde_json::json!(0.05));
+        assert_eq!(v["finishedRuns"][0]["cutMaps"][0]["state"], serde_json::json!("complete"));
         let back: MachineRecord = serde_json::from_value(v).unwrap();
         assert_eq!(back, machine);
 
         let partial: FinishedRun =
             serde_json::from_value(serde_json::json!({ "hash": "a1b2c3d4" })).unwrap();
-        assert_eq!(partial.cut_map, None);
+        assert!(partial.cut_maps.is_empty());
         assert_eq!(partial.program_index, None);
 
         let good = serde_json::json!({
@@ -1533,11 +1556,43 @@ mod tests {
             let mut machine = a_machine("m-1");
             machine.finished_programs = vec!["a1b2c3d4".into()];
             machine.finished_runs = vec![FinishedRun {
-                cut_map: Some(serde_json::from_value(bad).unwrap()),
+                cut_maps: vec![FinishedSetupCutMap {
+                    setup_index: 1,
+                    state: "complete".into(),
+                    unknown_reason: None,
+                    map: Some(serde_json::from_value(bad).unwrap()),
+                }],
                 ..a_finished_run("a1b2c3d4", 1)
             }];
             assert!(matches!(machine.validate(), Err(HouseError::BadEntry(_))), "{field}: {machine:?}");
         }
+
+        // The state's own rules: complete needs its map, unknown needs its reason, and a state
+        // outside the pair refuses the record.
+        for entry in [
+            serde_json::json!({ "setupIndex": 1, "state": "complete" }),
+            serde_json::json!({ "setupIndex": 1, "state": "unknown" }),
+            serde_json::json!({ "setupIndex": 1, "state": "unknown", "unknownReason": "  " }),
+            serde_json::json!({ "setupIndex": 1, "state": "partial", "map": good }),
+        ] {
+            let mut machine = a_machine("m-1");
+            machine.finished_programs = vec!["a1b2c3d4".into()];
+            machine.finished_runs = vec![FinishedRun {
+                cut_maps: vec![serde_json::from_value(entry).unwrap()],
+                ..a_finished_run("a1b2c3d4", 1)
+            }];
+            assert!(matches!(machine.validate(), Err(HouseError::BadEntry(_))), "{machine:?}");
+        }
+        let unknown = FinishedSetupCutMap {
+            setup_index: 2,
+            state: "unknown".into(),
+            unknown_reason: Some("the map does not fit the record even at 8 mm cells".into()),
+            map: None,
+        };
+        let mut machine = a_machine("m-1");
+        machine.finished_programs = vec!["a1b2c3d4".into()];
+        machine.finished_runs = vec![FinishedRun { cut_maps: vec![unknown], ..a_finished_run("a1b2c3d4", 1) }];
+        machine.validate().unwrap();
     }
 
     #[test]

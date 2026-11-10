@@ -3739,7 +3739,7 @@ mod tests {
             finished_at: None,
             stock: None,
             registration: None,
-            cut_map: None,
+            cut_maps: Vec::new(),
         }
     }
 
@@ -4628,16 +4628,21 @@ mod tests {
             Err(HouseError::BadEntry(_))
         ));
         let mut broken = a_run("a1b2c3d4", 1);
-        broken.cut_map = Some(crate::location::FinishedCutMap {
-            cell_mm: 2.0,
-            cols: 80,
-            rows: 63,
-            x0_mm: 0.0,
-            y0_mm: 0.0,
-            step_mm: 0.05,
-            flat: crate::location::CutMapStream { encoding: "rle".into(), data: String::new() },
-            depth: crate::location::CutMapStream { encoding: "rle".into(), data: "1:0".into() },
-        });
+        broken.cut_maps = vec![crate::location::FinishedSetupCutMap {
+            setup_index: 1,
+            state: "complete".into(),
+            unknown_reason: None,
+            map: Some(crate::location::FinishedCutMap {
+                cell_mm: 2.0,
+                cols: 80,
+                rows: 63,
+                x0_mm: 0.0,
+                y0_mm: 0.0,
+                step_mm: 0.05,
+                flat: crate::location::CutMapStream { encoding: "rle".into(), data: String::new() },
+                depth: crate::location::CutMapStream { encoding: "rle".into(), data: "1:0".into() },
+            }),
+        }];
         assert!(matches!(
             store.add_finished_program("m-1", "a1b2c3d4", Some(broken)).await,
             Err(HouseError::BadEntry(_))
