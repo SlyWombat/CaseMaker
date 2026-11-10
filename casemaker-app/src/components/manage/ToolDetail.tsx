@@ -28,7 +28,7 @@
  * the one it was typed with, and changing it is a clone.
  */
 
-import { useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { catalogueIdOf, tierOf, TIER_TAG, type ToolTier } from '@/engine/cnc/toolTiers';
 import {
   quantityOrOne,
@@ -50,6 +50,7 @@ import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { formatDay, mm } from './display';
 import { cloneOf, useSelectedEntry, useSelectedItem } from './selection';
 import { ConfirmPress } from './ConfirmPress';
+import { DetailSaveContext, useDetailSave, type DetailSavePart } from './detailSave';
 import { CutterFields } from './doors/CutterFields';
 import { MakeraMatch } from './MakeraMatch';
 import { RegisterDoor } from './RegisterDoor';
@@ -90,8 +91,45 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
   const select = useManageModeStore((s) => s.select);
   const registerTool = useHouseStore((s) => s.registerTool);
   const removeTool = useHouseStore((s) => s.removeTool);
+  const removeItem = useHouseStore((s) => s.removeItem);
+  const updateItem = useHouseStore((s) => s.updateItem);
   const busy = useHouseStore((s) => s.busy);
   const catalogueSyncedAt = useToolRegistryStore((s) => s.health?.catalogueSyncedAt ?? null);
+
+  // #1172 item 7 — ONE Save. The editors register their drafts here; the footer commits them, and
+  // the inventory parts are composed into one PATCH (two PATCHes would each carry a whole document).
+  const parts = useRef(new Map<string, DetailSavePart>());
+  const [, bump] = useReducer((n: number) => n + 1, 0);
+  const register = useCallback(
+    (id: string, part: DetailSavePart | null) => {
+      if (part === null) parts.current.delete(id);
+      else parts.current.set(id, part);
+      bump();
+    },
+    [bump],
+  );
+  const registered = [...parts.current.values()];
+  const dirty = registered.some((p) => p.dirty);
+  // A refused draft is not "dirty" (there is nothing valid to save), so the refusal is read from
+  // any part, not only the dirty ones.
+  const problem = registered.find((p) => p.problem != null)?.problem ?? null;
+
+  async function saveAll(): Promise<void> {
+    const current = [...parts.current.values()].filter((p) => p.dirty);
+    if (current.length === 0 || busy !== null) return;
+    // The definition is its own document and goes first; the inventory record follows as ONE update.
+    for (const part of current) {
+      if (part.save !== undefined) await part.save();
+    }
+    let merged = item;
+    let touched = false;
+    for (const part of current) {
+      if (part.merge === undefined || merged === null) continue;
+      merged = part.merge(merged);
+      touched = true;
+    }
+    if (touched && merged !== null) await updateItem(merged);
+  }
 
   const tier = tierOf(entry.key);
   const t = entry.tool;
@@ -117,6 +155,7 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
   const synced = formatDay(catalogueSyncedAt);
 
   return (
+    <DetailSaveContext.Provider value={register}>
     <aside className="context-panel" data-testid="manage-detail">
       <div className="panel-head">
         <h3>{t.name}</h3>
@@ -271,9 +310,32 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
         />
       )}
 
-      {tier === 'yours' && (
-        <div className="btn-row">
-          <span className="spacer" />
+      {/* #1172 item 7 — the panel's ONE Save. Removals sit at the bottom, where they do not move
+          (mockup 9's pins 6 and 8). */}
+      <div className="btn-row" data-testid="manage-detail-savebar">
+        <button
+          type="button"
+          className="btn btn--sm btn--primary"
+          data-testid="manage-detail-save"
+          disabled={!dirty || problem !== null || disabled}
+          title={problem ?? (dirty ? 'Save these changes' : 'Nothing to save yet')}
+          onClick={() => void saveAll()}
+        >
+          Save
+        </button>
+        <span className="spacer" />
+        {item !== null && (
+          <ConfirmPress
+            testId="manage-item-remove"
+            label="Remove from inventory"
+            sentence={`Remove “${item.tool.name}” from the inventory? Any definition it was registered from stays.`}
+            confirmLabel="Remove it"
+            disabled={disabled}
+            title="Take this cutter out of the inventory. Any definition it was registered from stays."
+            onConfirm={() => void removeItem(item.id)}
+          />
+        )}
+        {tier === 'yours' && (
           <ConfirmPress
             testId="manage-remove-definition"
             label="Remove this definition"
@@ -283,9 +345,10 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
             title="Drop this definition. Jobs that named it keep the cutter they were written with."
             onConfirm={() => void removeTool(entry.key)}
           />
-        </div>
-      )}
+        )}
+      </div>
     </aside>
+    </DetailSaveContext.Provider>
   );
 }
 
@@ -362,6 +425,7 @@ function ReadOnlyCutterProfile({ tool }: { tool: Tool }) {
 function DefinitionEditor({ entry }: { entry: ToolLibraryEntry }) {
   const updateTool = useHouseStore((s) => s.updateTool);
   const busy = useHouseStore((s) => s.busy);
+  const detailSave = useDetailSave();
   const [spec, setSpec] = useState<CutterSpec>(() => specOfTool(entry.tool));
   // Which field the drawing says a change touches, shared by the boxes and the profile (#489).
   const [highlighted, setHighlighted] = useState<CutterField | null>(null);
@@ -376,6 +440,26 @@ function DefinitionEditor({ entry }: { entry: ToolLibraryEntry }) {
   const dirty =
     next !== null && JSON.stringify(specOfTool(next)) !== JSON.stringify(specOfTool(entry.tool));
   const disabled = busy !== null;
+
+  // #1172 item 7 — the panel's Save commits this draft. The effect depends on the spec's TEXT, not
+  // on `next`: a fresh object every render would register, re-render and register again forever.
+  const nextRef = useRef(next);
+  nextRef.current = next;
+  const entryRef = useRef(entry);
+  entryRef.current = entry;
+  const specText = JSON.stringify(spec);
+  useEffect(() => {
+    if (detailSave === null) return;
+    detailSave('definition', {
+      dirty,
+      problem,
+      save: () => {
+        const latest = nextRef.current;
+        if (latest !== null) return updateTool({ ...entryRef.current, tool: latest });
+      },
+    });
+    return () => detailSave('definition', null);
+  }, [detailSave, dirty, problem, specText, updateTool]);
 
   return (
     <div data-testid="manage-definition-editor">
@@ -401,18 +485,6 @@ function DefinitionEditor({ entry }: { entry: ToolLibraryEntry }) {
           The drawing keeps its last valid values while this box is refused: {problem}
         </p>
       )}
-      <div className="btn-row">
-        <button
-          type="button"
-          className="btn btn--sm btn--primary"
-          data-testid="manage-def-save"
-          disabled={!dirty || disabled}
-          title={problem ?? 'Save this definition'}
-          onClick={() => next !== null && void updateTool({ ...entry, tool: next })}
-        >
-          Save
-        </button>
-      </div>
     </div>
   );
 }
@@ -426,9 +498,7 @@ function DefinitionEditor({ entry }: { entry: ToolLibraryEntry }) {
  * about how many cutters exist, and each keystroke writing to disk would make a typo durable.
  */
 function InventoryEditor({ item }: { item: InventoryItem }) {
-  const updateItem = useHouseStore((s) => s.updateItem);
-  const removeItem = useHouseStore((s) => s.removeItem);
-  const busy = useHouseStore((s) => s.busy);
+  const detailSave = useDetailSave();
   // Seeded from the record, and re-seeded only when the SERVICE changes the record: the caller keys
   // this component on its id, quantity and notes, so a save or a re-sync remounts it with the new
   // values. The obvious alternative — an effect that setStates on a changed prop — is a cascading
@@ -448,7 +518,18 @@ function InventoryEditor({ item }: { item: InventoryItem }) {
   const qtyProblem = quantityProblem(quantity) ?? copiesBlock;
   const nextNotes = notes.trim().length === 0 ? null : notes;
   const dirty = qtyProblem === null && (qty !== item.quantity || nextNotes !== item.notes);
-  const disabled = busy !== null;
+
+  // #1172 item 7 — this draft is one part of the panel's single Save; the copies' draft is another,
+  // and the footer composes both into ONE `updateItem` call.
+  useEffect(() => {
+    if (detailSave === null) return;
+    detailSave('inventory', {
+      dirty,
+      problem: qtyProblem,
+      merge: (current) => ({ ...current, quantity: qty, notes: nextNotes }),
+    });
+    return () => detailSave('inventory', null);
+  }, [detailSave, dirty, qtyProblem, qty, nextNotes]);
 
   return (
     <>
@@ -498,18 +579,6 @@ function InventoryEditor({ item }: { item: InventoryItem }) {
           {copiesBlock}
         </p>
       )}
-      <div className="btn-row">
-        <button
-          type="button"
-          className="btn btn--sm btn--primary"
-          data-testid="manage-item-save"
-          disabled={!dirty || disabled}
-          title={qtyProblem ?? 'Save the count and the notes'}
-          onClick={() => void updateItem({ ...item, quantity: qty, notes: nextNotes })}
-        >
-          Save
-        </button>
-      </div>
 
       <div className="panel-subhead">Codes</div>
       {item.codes.length === 0 ? (
@@ -528,19 +597,6 @@ function InventoryEditor({ item }: { item: InventoryItem }) {
         </div>
       )}
       <p className="hint">Codes are local to this house; nothing is looked up online.</p>
-
-      <div className="btn-row">
-        <span className="spacer" />
-        <ConfirmPress
-          testId="manage-item-remove"
-          label="Remove from inventory"
-          sentence={`Remove “${item.tool.name}” from the inventory? Any definition it was registered from stays.`}
-          confirmLabel="Remove it"
-          disabled={disabled}
-          title="Take this cutter out of the inventory. Any definition it was registered from stays."
-          onConfirm={() => void removeItem(item.id)}
-        />
-      </div>
     </>
   );
 }
