@@ -23,7 +23,7 @@
 // reaches one must be skipped with that reason, not this one.
 
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse } from './fixtures/caseMaker';
 import { locationDocument, locationView, serveHouse } from './fixtures/fakeHouse';
 
 test.setTimeout(300_000);
@@ -97,6 +97,7 @@ async function typePlate(page: Page, dims: [number, number, number]): Promise<vo
   await page.getByTestId('welcome-start-cnc').click();
   await page.getByTestId('start-wizard-next').click();
   // #897 — the question comes before the blank; a pocket is the item these walks then cut.
+  await openSomethingElse(page);
   await page.getByTestId('engrave-setup-what-pocket').click();
   await page.getByTestId('start-wizard-operation-next').click();
   await page.getByTestId('start-wizard-form-plate').click();

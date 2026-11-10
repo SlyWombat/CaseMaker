@@ -26,7 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openSignCard } from './fixtures/caseMaker';
 
 test.setTimeout(300_000);
 
@@ -223,8 +223,8 @@ test.describe('first job acceptance (§6)', () => {
 
     // Step 2 — the question, first since #897: what is being cut is what the blank is sized from.
     await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
-    await tap(page, 'engrave-setup-what-engrave');
-    await page.getByTestId('start-wizard-op-text').fill('Zoomba');
+    await openSignCard(page);
+    await page.getByTestId('start-wizard-preset-text').fill('Zoomba');
     await expect(page.getByTestId('start-wizard-operation-next')).toBeEnabled();
     await capture(page, 'wizard-2-operation');
     await tap(page, 'start-wizard-operation-next');
@@ -505,7 +505,8 @@ test.describe('first job acceptance (§6)', () => {
     await page.getByTestId('start-wizard-next').click();
     // Step 2 — the question (#897), answered with the line this rod job cuts.
     await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
-    await page.getByTestId('start-wizard-op-text').fill('Zoomba');
+    await openSignCard(page);
+    await page.getByTestId('start-wizard-preset-text').fill('Zoomba');
     await page.getByTestId('start-wizard-operation-next').click();
     await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
     await page.getByTestId('start-wizard-form-rod').click();

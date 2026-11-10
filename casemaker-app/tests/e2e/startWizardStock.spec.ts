@@ -7,7 +7,7 @@
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse } from './fixtures/caseMaker';
 
 test.setTimeout(180_000);
 
@@ -43,6 +43,7 @@ test('new project → shelf stock → mount → empty design, the stock drawn', 
   await page.getByTestId('start-wizard-next').click();
 
   // Step 2 — the question first (#897); a pocket needs no field, and it is what this walk makes.
+  await openSomethingElse(page);
   await page.getByTestId('engrave-setup-what-pocket').click();
   await page.getByTestId('start-wizard-operation-next').click();
 

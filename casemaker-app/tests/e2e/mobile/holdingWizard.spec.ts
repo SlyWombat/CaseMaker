@@ -11,7 +11,7 @@
 // #870 — on a phone the dialog is a full-height SHEET, edge to edge: no gutter, no band above it;
 // the 16 px edge is the body's (the one scroll region) between its pinned header and footer.
 
-import { test, expect } from '../fixtures/caseMaker';
+import { test, expect, openSomethingElse } from '../fixtures/caseMaker';
 
 type Box = { left: number; top: number; right: number; bottom: number } | null;
 
@@ -52,6 +52,7 @@ test('#726 W19/P12 — Holding stacks at phone width, and the wizard is a plain 
   // Door → the wizard's Holding step, with the exercise's plate typed by hand.
   await page.getByTestId('start-wizard-next').click();
   // #897 — the question comes before the blank; a pocket needs no field and is the walk's stand-in.
+  await openSomethingElse(page);
   await page.getByTestId('engrave-setup-what-pocket').click();
   await page.getByTestId('start-wizard-operation-next').click();
   await page.getByTestId('start-wizard-form-plate').click();
