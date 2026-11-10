@@ -70,6 +70,7 @@ export interface Progress {
   state: string | null;
   line: number | null;
   percent: number | null;
+  /** `P:`'s third field as sent — unit unverified (see `protocol.ts`); never read as seconds. */
   elapsedS: number | null;
 }
 

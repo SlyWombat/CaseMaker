@@ -572,7 +572,10 @@ export const machineStatusSchema = z
     state: z.string().nullable().describe('The state word at the front of the line (`Idle`, `Run`, `Alarm`, …).'),
     progressLine: z.number().int().nonnegative().nullable().describe('`P:`’s first field — the line being run.'),
     percent: z.number().nullable().describe('`P:`’s second field — percent complete, 100 at the end.'),
-    elapsedS: z.number().nullable().describe('`P:`’s third field — seconds elapsed in the job.'),
+    elapsedS: z
+      .number()
+      .nullable()
+      .describe('`P:`’s third field as the controller sends it — its unit is unverified; never read as seconds.'),
     alarm: z.string().nullable().describe('The controller’s own alarm line, verbatim, or null.'),
     finished: z
       .boolean()
@@ -1142,7 +1145,7 @@ function machineLines(receipt: Extract<Receipt, { command: 'machine' }>): string
     else {
       lines.push(
         `  progress   line ${status.progressLine ?? '?'}, ${status.percent ?? '?'} %, ` +
-          `${status.elapsedS ?? '?'} s`,
+          `P: third value ${status.elapsedS ?? '?'} (unit unverified)`,
       );
     }
     lines.push(`  alarm      ${status.alarm ?? '(none)'}`);
