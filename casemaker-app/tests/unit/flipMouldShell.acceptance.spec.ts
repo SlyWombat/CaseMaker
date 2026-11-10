@@ -22,6 +22,7 @@
  * side 1 left — and the wall is checked where the app's map says each side's point is.
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { once } from './helpers/once';
 
 const backing = new Map<string, string>();
 (globalThis as unknown as { localStorage: Storage }).localStorage = {
@@ -199,10 +200,12 @@ describe('#754 side 1 — the outside of the shell, roughed and ball-finished', 
 });
 
 describe('#754 the mirror finish — a 0.05 mm step-over', () => {
-  const fine = async () => {
-    const j = job(goal(zOut, { surface: { finishStepOverMm: 0.05, scallop: true } }));
-    return await generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, { shop: {} });
-  };
+  // #1180 — this is the measured heaviest run in the file (~150 s); two cases read it.
+  const fine = async () =>
+    once('flip:fine', () => {
+      const j = job(goal(zOut, { surface: { finishStepOverMm: 0.05, scallop: true } }));
+      return generateGoalProgram(j, j.targetObject!, BALL_TOOL, null, { shop: {} });
+    });
 
   // 6b's filing (#1006) — stale pin: the old engine's own `surface3d.scallop`/`finishStepOverMm`
   // report has no model-path equivalent. The model engine is already constant-scallop: the job's
@@ -369,7 +372,7 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     // flat can reach (#1019's per-region reach — the shell's crown ~17 mm, the mould's cavity
     // ~17 mm), so the ball roughes and finishes each side on its own setup, and the flat is
     // stated `goal-rough-unreachable` rather than sent too deep (the holder gate stays silent).
-    const out = await engraveGenerate(tl, job, BALL_TOOL, [], null, undefined, {});
+    const out = await once('flip:both-sides', () => engraveGenerate(tl, job, BALL_TOOL, [], null, undefined, {}));
     expect(out.errors).toEqual([]);
     expect(out.ok).toBe(true);
     expect(out.programs.map((p) => [p.setupIndex, p.setupId])).toEqual([
@@ -434,7 +437,7 @@ describe('#754 side 2 — turned over on the pins, the inside hollowed', () => {
     // #1019's per-region reach keeps the stated 12 mm flat off every deeper region's rough, which
     // is what lets the holder gate stay silent.
     const job = oneJob();
-    const out = await engraveGenerate(tl, job, BALL_TOOL, [], null, undefined, {});
+    const out = await once('flip:both-sides', () => engraveGenerate(tl, job, BALL_TOOL, [], null, undefined, {}));
     const frames = jobSetups(job).map((s) => orient(s.orientation.top, s.mount, STOCK));
     const topFrame = frames[0]!;
     const flipFrame = frames[1]!;
