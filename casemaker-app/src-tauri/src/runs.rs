@@ -518,9 +518,6 @@ impl Runs {
                     entry.state = RunState::Failed;
                     entry.finding = Some(finding);
                 }
-                ChildOutcome::Cancelled => {
-                    entry.state = RunState::Cancelled;
-                }
             }
         }
         self.start_queued(&mut inner);
@@ -750,7 +747,6 @@ impl Runs {
 enum ChildOutcome {
     Done { receipt: Value },
     Failed { finding: String },
-    Cancelled,
 }
 
 /// The child's command line: argv array, no shell, the job as a file path.
