@@ -118,6 +118,14 @@ export interface MachineStepProps {
   onAddress: (value: string) => void;
   /** THE check. With no host it searches; with one it connects to that address (the fold). */
   onCheck: (host?: string) => void;
+  /** #1106 — the machine the job carries (the row that is selected). */
+  selectedMachineId?: string | null;
+  /** #1106 — the machine last used, first in the list and pre-selected on a new job. */
+  lastMachineId?: string | null;
+  /** #1106 — choose a machine for the job. */
+  onSelectMachine?: (id: string) => void;
+  /** #1106 — the machine-change wizard, opened here for the selected machine's bed. */
+  onChangeBed?: () => void;
 }
 
 export function MachineStep({
@@ -130,9 +138,16 @@ export function MachineStep({
   address,
   onAddress,
   onCheck,
+  selectedMachineId = null,
+  lastMachineId = null,
+  onSelectMachine,
+  onChangeBed,
 }: MachineStepProps): JSX.Element {
   const [another, setAnother] = useState(false);
-  const house = houseMachine(machines);
+  // #1106 — the selected machine is the header's, not merely the first record: step 1 is a picker.
+  const selectedRecord =
+    selectedMachineId === null || machines === null ? null : (machines.find((m) => m.id === selectedMachineId) || null);
+  const house = selectedRecord ?? houseMachine(machines);
   const houseHost = house?.address?.host ?? null;
 
   // THE CHECK ON OPEN (#682, E4). One per arrival at the step; Back remounts the body, so going
@@ -206,8 +221,62 @@ export function MachineStep({
       ? formatStamp(lastReached.observedAt)
       : null;
 
+  // #1106 — WHICH MACHINE? The location's CNC records, the last used first, profile-only rows a
+  // full citizen. A one-machine house sees its machine selected and presses Next.
+  const orderedMachines = (machines ?? [])
+    .slice()
+    .sort((a, b) => {
+      const used = (m: MachineRecord): number => (m.id === lastMachineId ? 0 : 1);
+      if (used(a) !== used(b)) return used(a) - used(b);
+      const address = (m: MachineRecord): number => (m.address === null ? 1 : 0);
+      if (address(a) !== address(b)) return address(a) - address(b);
+      return displayName(a, null, null)!.localeCompare(displayName(b, null, null)!);
+    });
+
   return (
     <div data-testid="start-wizard-step-machine" style={{ marginTop: 8 }}>
+      {orderedMachines.length > 0 && (
+        <div data-testid="start-wizard-machine-list" style={{ display: 'grid', gap: 4, margin: '2px 0 10px' }}>
+          <p style={{ ...MUTED, margin: 0 }}>Which machine?</p>
+          {orderedMachines.map((record) => {
+            const selected = record.id === (selectedMachineId ?? house?.id ?? null);
+            const profile = activeProfileOf(record);
+            const bed = profile === null ? null : `${MACHINE_MOUNT_WORDS[activeMountOf(record)]} · ${surfaceWords(profile.surface)}`;
+            const state = selected
+              ? checking
+                ? 'Checking…'
+                : found
+                  ? `Online · ${wordBase}`
+                  : 'Offline — you can still write, check and simulate; the machine is needed at Cut'
+              : record.address === null
+                ? 'profile only — vendor defaults; connect it at Cut'
+                : 'Offline — you can still write, check and simulate; the machine is needed at Cut';
+            return (
+              <button
+                key={record.id}
+                type="button"
+                data-testid={`start-wizard-machine-row-${record.id}`}
+                data-mount={activeMountOf(record)}
+                aria-pressed={selected}
+                disabled={onSelectMachine === undefined}
+                onClick={() => onSelectMachine?.(record.id)}
+                style={{ width: '100%', textAlign: 'left', padding: 5, border: selected ? '1px solid #5a8abf' : undefined }}
+              >
+                <span style={{ display: 'block', fontSize: 12, color: '#cfe' }}>
+                  {displayName(record, null, null)}
+                  {bed === null ? '' : ` · ${bed}`}
+                </span>
+                <span style={{ display: 'block', ...MUTED, margin: 0 }}>{state}</span>
+              </button>
+            );
+          })}
+          {onChangeBed !== undefined && (
+            <button type="button" data-testid="start-wizard-change-bed" onClick={onChangeBed} style={{ textAlign: 'left' }}>
+              Change what’s on the bed…
+            </button>
+          )}
+        </div>
+      )}
       {(name !== null || host !== null) && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
           {name !== null && (

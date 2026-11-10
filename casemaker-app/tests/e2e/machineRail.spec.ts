@@ -30,7 +30,7 @@ test('#820 — the rail machine row opens Manage › Machines, and the web build
   // …and the web build's one sentence (#821's words: this page has no machine relay, so it cannot
   // drive a machine). The unit spec asserts the constant itself; this asserts it reached the page.
   await expect(page.getByTestId('manage-machine-web-hint')).toContainText(
-    'This page was served without the machine relay, so it cannot drive a machine',
+    'This page can write, check and simulate; to run the machine, open the desktop app.',
   );
 
   await page.screenshot({ path: path.join(OUT, 'machine-rail.png') });

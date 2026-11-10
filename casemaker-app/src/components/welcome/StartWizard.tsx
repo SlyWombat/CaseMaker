@@ -48,6 +48,7 @@ import {
 import { MachineStep } from './MachineStep';
 import { StockStep } from './StockStep';
 import { HoldingStep } from './HoldingStep';
+import { openMachineChange } from '@/components/machine-change';
 import { currentMount, facingForSeat, machineNow, mechanismOf, rodViseProblem } from './holdingMounts';
 import { OperationStep, type OperationChoice } from './OperationStep';
 import { operationCreateBlocked } from './operationCreate';
@@ -55,6 +56,7 @@ import type { PendingStock, StartStockSeed } from './StartStockStep';
 import { proposeStock, type StockProposal } from '@/engine/cnc/stockProposal';
 import { partFootprintFor, proposedMaterialFor, proposedStockFor, workShapeFor } from './workShape';
 import { workFactsOf } from './workFacts';
+import { readLastMachineId, writeLastMachineId } from './lastMachine';
 
 /**
  * #681 — the ONE cutting-job wizard.
@@ -994,6 +996,20 @@ export function StartWizard(): JSX.Element {
           onCheck={(host) => {
             void runCheck(host);
           }}
+          // #1106 — the step is a picker: the job's machine is the selected row, the last used is
+          // first, and the bed is changed from here.
+          selectedMachineId={job.machineId}
+          lastMachineId={readLastMachineId()}
+          onSelectMachine={(id) => {
+            useEngraveJobStore.getState().setMachine(id);
+            writeLastMachineId(id);
+          }}
+          onChangeBed={() =>
+            openMachineChange({
+              forJob: { name: job.name, holding: job.workholding.kind },
+              onDone: () => undefined,
+            })
+          }
         />
       )}
 
