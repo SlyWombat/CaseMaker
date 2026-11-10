@@ -51,6 +51,10 @@ test('new project → shelf stock → mount → empty design, the stock drawn', 
   await page.getByTestId('start-wizard-stock-material').selectOption('aluminium-6061');
   const plate = page.getByTestId('start-wizard-shelf-item-stock-long1');
   await expect(plate).toHaveAttribute('data-state', 'ok');
+  // #1105 — the step with its blank cards: the matching row live, the other materials greyed, the
+  // vocabulary Woods first. The screenshot is the hand-in's record of the step.
+  await expect(page.getByTestId('start-wizard-shelf-other')).toBeVisible();
+  await page.getByTestId('start-wizard-step-stock').screenshot({ path: 'test-results/stock-step-1105.png' });
   await plate.click();
   // The shelf row fills the panel's own size fields (#683) — no summary sentence repeats them.
   await expect(page.getByTestId('start-wizard-make-length')).toHaveValue('120');

@@ -525,8 +525,10 @@ describe('#432 slice 4 — a new job starts with the finish’s facing choice', 
     skipToStockStep();
     typePiece('rough');
 
+    // #1105 — the hint is the material family's own: softwood is faced unless the operator says
+    // it is planed (the old one-word-for-everything line contradicted the hardwood seed).
     expect(screen.getByTestId('start-wizard-stock-finish-hint').textContent).toContain(
-      'plastic is cut as it is; wood and metal are faced first',
+      'faced first unless you say it is planed',
     );
     // The old sentence about facing and the skim is the job's business, not the step's prose.
     expect(screen.queryByTestId('start-wizard-stock-facing')).toBeNull();
@@ -621,7 +623,8 @@ describe('#681 — the wizard with nothing to lean on', () => {
     const next = screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement;
     expect(next.disabled).toBe(false);
     // The button that leaves the stock step says what it leads to.
-    expect(next.textContent).toBe('Next: holding');
+    // #1105 — the press CREATES the job, and now says so.
+    expect(next.textContent).toBe('Next: holding — starts the job');
     // #930 — the shop's 36 × 36 × 100 mm hardwood stick, and the sentence says so.
     expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain(
       'The house’s stock: a 36 × 36 × 100 mm hardwood stick',

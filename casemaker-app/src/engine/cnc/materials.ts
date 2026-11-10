@@ -237,3 +237,45 @@ export function recommendedSurfaceToleranceMm(material: StockMaterial): { value:
   if (isPrintedBlankMaterial(material)) return { value: 1.0, kind: 'printed stock' };
   return { value: 0.4, kind: 'sheet/cast stock' };
 }
+
+/**
+ * #1105 — THE MATERIAL'S FAMILY, the one word the wizard's vocabulary, the facing hint and the
+ * "not wood/metal" rules read. A `board` is #1066's cast resin tooling board: neither a wood (the
+ * facing exception does not reach it) nor a plastic (no antistatic device).
+ *
+ * A TOTAL map over {@link StockMaterial}: a material added later cannot be silently unclassified —
+ * the type fails until its family is stated, exactly as the labels map does.
+ */
+export type MaterialFamily = 'wood' | 'board' | 'plastic' | 'metal' | 'pcb';
+
+export const MATERIAL_FAMILY: Readonly<Record<StockMaterial, MaterialFamily>> = {
+  softwood: 'wood',
+  hardwood: 'wood',
+  mdf: 'wood',
+  pla: 'plastic',
+  petg: 'plastic',
+  pet: 'plastic',
+  abs: 'plastic',
+  asa: 'plastic',
+  hips: 'plastic',
+  pa: 'plastic',
+  'pa-cf': 'plastic',
+  'pa-gf': 'plastic',
+  pc: 'plastic',
+  pp: 'plastic',
+  tpu: 'plastic',
+  pva: 'plastic',
+  acrylic: 'plastic',
+  plastic: 'plastic',
+  pcb: 'pcb',
+  'aluminium-6061': 'metal',
+  'aluminium-7075': 'metal',
+  brass: 'metal',
+  copper: 'metal',
+  'epoxy-tooling': 'board',
+};
+
+/** The family of a material — see {@link MATERIAL_FAMILY}. */
+export function materialFamilyOf(material: StockMaterial): MaterialFamily {
+  return MATERIAL_FAMILY[material];
+}
