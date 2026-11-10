@@ -230,7 +230,7 @@ describe('the material-first start (#418)', () => {
     const blank = await screen.findByTestId('start-wizard-shelf-item-stock-blank1');
     expect(blank.getAttribute('data-state')).toBe('refused');
     expect((blank as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByTestId('start-wizard-shelf-item-stock-blank1-reason').textContent).toBe('none left — consumed by job-12');
+    expect(screen.getByTestId('start-wizard-shelf-item-stock-blank1-reason').textContent).toBe('None left — used by job 12');
     // #897 — a refused shelf row is not the step's answer: the proposed blank still is, so Next
     // is ready. The refusal lives on the row that is refused.
     expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(false);

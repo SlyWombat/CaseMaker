@@ -449,7 +449,7 @@ describe('preflight: the stock (the shelf entry)', () => {
   it('surfaces `stockFromShelf` refusal verbatim', () => {
     const row = rowsFor(defaultEngraveJob(), { shelfItem: CONSUMED }).find((r) => r.owner === 'stockStart')!;
     expect(row).toBeDefined();
-    expect(row.message).toBe('none left — consumed by job-12');
+    expect(row.message).toBe('None left — used by job 12');
     expect(row.code).toBe('stock-refusal');
   });
 

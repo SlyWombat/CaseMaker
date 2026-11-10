@@ -501,7 +501,9 @@ export function formSizeProblem(form: JobStockForm, size: StockSize, machine: Mi
 export function shelfPickProblem(item: StockItem, machine: Mill): string | null {
   if (item.quantity === 0) {
     const last = item.consumed[item.consumed.length - 1];
-    return last ? `none left — consumed by ${last.jobId}` : 'none left on the shelf';
+    return last
+      ? `None left — used by job ${last.jobId.replace(/^job-/, '')}`
+      : 'None left on the shelf';
   }
   if (free(item) <= 0) return `all ${item.quantity} held for other jobs`;
   const form = formProblem(item.form);

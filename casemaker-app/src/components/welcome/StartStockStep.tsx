@@ -430,6 +430,19 @@ export function StartStockStep({
   const [unit, setUnit] = useState<'mm' | 'in'>('mm');
   const [lastInch, setLastInch] = useState<string | null>(null);
   const [shelfId, setShelfId] = useState<string | null>(null);
+  // #1109 — the provenance sentence survives typing; it goes only when a DIFFERENT valid number is
+  // committed on blur (or another source — a shelf entry, a file, a form — takes the numbers over).
+  const [seedDropped, setSeedDropped] = useState(false);
+  // #1109 — THE SENTENCE OUTLIVES THE SEED. Typing makes the numbers the operator's, so the
+  // wizard's proposal stops being a seed; the sentence still says where they STARTED.
+  const [seedSeen, setSeedSeen] = useState<{ sentence: string | null } | null>(() =>
+    seed?.computed === true ? { sentence: seed.sentence ?? null } : null,
+  );
+  useEffect(() => {
+    if (seed?.computed !== true) return;
+    setSeedSeen({ sentence: seed.sentence ?? null });
+    setSeedDropped(false);
+  }, [seed?.computed, seed?.sentence]);
   const [save, setSave] = useState(false);
   const [fileRead, setFileRead] = useState<{ read: StockFileRead; file: File } | null>(null);
   const [reading, setReading] = useState(false);
@@ -550,6 +563,7 @@ export function StartStockStep({
 
   /** The form's picture: it sets the size fields, and the sentence says what the word means. */
   function chooseForm(next: JobStockForm): void {
+    if (next !== form) setSeedDropped(true);
     setForm(next);
     setShelfId(null);
     setFileRead(null);
@@ -560,6 +574,17 @@ export function StartStockStep({
     setDims((d) => ({ ...d, [key]: value }));
     setShelfId(null);
     setFileRead(null);
+  }
+
+  /** #1109 — the field's blur is where an edit is COMMITTED: the sentence stays while the operator
+   *  types (a slip must not lose where the numbers came from) and goes only when a different, valid
+   *  number is left in the field. */
+  function commitDim(key: StockSizeKey): void {
+    const value = dims[key].trim();
+    const n = Number(value);
+    if (value === '' || !Number.isFinite(n) || n <= 0) return;
+    const seedValue = Number(seedDims[key]);
+    if (!Number.isFinite(seedValue) || n !== seedValue) setSeedDropped(true);
   }
 
   /** #1105 — the field as the chosen unit shows it: mm as stored, inches to 3 decimals. */
@@ -590,6 +615,7 @@ export function StartStockStep({
   function pickShelf(item: StockItem): void {
     setShelfId(item.id);
     setFileRead(null);
+    setSeedDropped(true);
     setForm(item.form as JobStockForm);
     setDims(dimsFromItem(item));
     setFinish(item.finish);
@@ -605,6 +631,7 @@ export function StartStockStep({
     setDims(dimsFromSeed(seed));
     setFinish(seed.finish);
     setShelfId(null);
+    setSeedDropped(false);
     setFileRead(null);
     setSave(false);
   }
@@ -616,6 +643,7 @@ export function StartStockStep({
       const read = await readStockFile(file);
       setFileRead({ read, file });
       setShelfId(null);
+      setSeedDropped(true);
       if (read.kind === 'mesh') {
         // The box IS the stock, so the fields show it. A printed blank is the usual reason to load
         // a mesh; the material answers whether it is one (#463). #743 D3 — a file whose outline is
@@ -637,8 +665,10 @@ export function StartStockStep({
 
   const selectedForm = FORM_DEFS.find((f) => f.id === form) ?? FORM_DEFS[0]!;
   const visibleSizeKeys = STOCK_SIZE_FIELDS[form];
-  const seededNumbers =
-    seed?.computed === true && visibleSizeKeys.every((key) => dims[key] === seedDims[key]);
+  // #1109 — THE SENTENCE OUTLIVES THE SEED. Typing makes the numbers the operator's, so the
+  // wizard's proposal stops being a seed; the sentence still says where they STARTED. It is kept
+  // here until a different valid number is committed, or another source takes the numbers over.
+  const seededNumbers = seedSeen !== null && !seedDropped;
   const around = aroundLine(form, dims);
   // #1099 — the blank the drawing shows, once all three numbers are usable (mid-typing is not).
   const drawnBlank = useMemo(() => {
@@ -830,6 +860,7 @@ export function StartStockStep({
                     aria-label={`Stock ${SIZE_LABELS[key]}`}
                     value={shownDim(key)}
                     onChange={(e) => editShownDim(key, e.target.value)}
+                    onBlur={() => commitDim(key)}
                   />
                   {unit}
                 </span>
@@ -886,7 +917,7 @@ export function StartStockStep({
           work proposed says what it was sized from, in the same place and under the same rule. */}
       {seededNumbers && (
         <p style={MUTED} data-testid="engrave-setup-stock-provenance">
-          {seed?.sentence ??
+          {seedSeen.sentence ??
             'These numbers came from the template you picked, not from a bench measurement — change any you measured.'}
         </p>
       )}

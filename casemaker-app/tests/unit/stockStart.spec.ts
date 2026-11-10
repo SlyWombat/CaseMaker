@@ -63,8 +63,8 @@ describe('a shelf entry as the stock (#418)', () => {
   });
 
   it('a used-up entry is refused with the job that used it', () => {
-    expect(shelfPickProblem(BLANK, Z1)).toBe('none left — consumed by job-12');
-    expect(stockFromShelf(BLANK, Z1)).toEqual({ ok: false, reason: 'none left — consumed by job-12' });
+    expect(shelfPickProblem(BLANK, Z1)).toBe('None left — used by job 12');
+    expect(stockFromShelf(BLANK, Z1)).toEqual({ ok: false, reason: 'None left — used by job 12' });
   });
 
   it('an entry whose every piece is held for another job is refused', () => {
