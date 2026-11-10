@@ -201,6 +201,9 @@ import {
 } from '../../../src/platform/headless/receipt';
 // #1084 — the app's Save .nc gate for a rotary-held job, quoted by the door that does not apply it.
 import { ROTARY_UNMEASURED_REFUSAL } from '../../../src/store/engraveRunGate';
+// #1089 — the ideal-vs-owned comparison: the SAME function the card holds, so the sheet, the
+// receipt and the card cannot state different lines or numbers.
+import { planComparisonStatement, type PlanComparisonStatement } from '../../../src/engine/cnc/cam/model/tradeoff';
 
 // The wasm module, the bundled fonts and the machine's own document are the shared headless
 // bootstrap (#476). It runs once the arguments are parsed, below — before ANY job resolves a
@@ -577,6 +580,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   // #1129 — the model plan's sampling facts (the row sampler's floor, per cutter, and where it came
   // from). Set by the run that generated the programs; absent on a non-model plan.
   let runSampling: EngraveDetails['sampling'] | undefined;
+  // #1089 — the run's ideal-vs-owned comparison, for the sheet and the receipt. The first program
+  // written is the run's own; a two-tool rest pass never replaces it.
+  let runComparison: EngraveDetails['comparison'] | undefined;
   let runOk = true;
   let runStage: string | null = null;
   let runGate: Receipt['gate'] = null;
@@ -644,6 +650,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         ...(bed === null ? {} : { bed }),
         ...(faceAngle === undefined ? {} : { faceAngle }),
         ...(runSampling === undefined ? {} : { sampling: runSampling }),
+        ...(runComparison === undefined ? {} : { comparison: runComparison }),
       },
     });
   }
@@ -1467,12 +1474,37 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    * `[generated.nc]` and this is the writer it always was. A multi-cutter job's list is every
    * cutter's own file; writing only the adapter dropped the rest of the run.
    */
+  /**
+   * #1089 — THE COMPARISON THIS RUN CAN STATE, from Generate's own result. With both plans run
+   * (the CLI's default), `planTradeoff` carries it; `idealDeferred` means the caller asked for the
+   * owned plan first, so the comparison is STATED deferred rather than silently missing; anything
+   * else (no goal plan, no catalogue, the catalogue added no cutter) has no comparison at all.
+   */
+  function comparisonOf(generated: EngraveGenerated): PlanComparisonStatement | null {
+    if (generated.planTradeoff !== undefined && generated.planTradeoff !== null) return planComparisonStatement(generated.planTradeoff);
+    return generated.idealDeferred === true ? { kind: 'deferred' } : null;
+  }
+  /** The receipt's own shape of the statement; `comparing` is an app-only state, never the CLI's. */
+  function receiptComparison(statement: PlanComparisonStatement): EngraveDetails['comparison'] | undefined {
+    if (statement.kind === 'deferred') return { deferred: true };
+    if (statement.kind === 'comparing') return undefined;
+    return {
+      material: statement.kind === 'material',
+      line: statement.kind === 'material' ? statement.line : null,
+      ownedSeconds: statement.ownedSeconds,
+      idealSeconds: statement.idealSeconds,
+    };
+  }
+
   function writeProgram(
     prepared: Prepared,
     outDir: string,
     opts: WriteOpts,
   ): { files: JobFiles; programs: EngraveProgram[]; diagnostics: ReceiptDiagnostic[] } {
     const { job, tool, nc, diameter, generated, load, sweeps, simNotes, simPrograms } = prepared;
+    // #1089 — the run's comparison, captured once for the receipt and handed to the sheet below.
+    const comparison = comparisonOf(generated);
+    if (runComparison === undefined && comparison !== null) runComparison = receiptComparison(comparison);
     const writeSheet = opts.sheet !== false;
     // The stem is claimed through `stemFor`, which refuses a name already used this run: the rest
     // program of a two-tool job is written from a job named `<name> rest`, so the two programs land
@@ -1535,6 +1567,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         ...(footprint === undefined ? {} : { footprint }),
         ...(seatSeek === undefined ? {} : { seatSeek }),
         efficiencyThresholds: efficiencyThresholds(shopDefaults),
+        // #1089 — THE IDEAL-VS-OWNED LINE beside the cutter: the same statement the receipt
+        // carries, or none when this run had nothing to compare.
+        ...(comparison === null ? {} : { comparison }),
         // #1059 — a chuck job's sheet prints the axis and the levelled face angle from the bed
         // profile it was planned on (absent: the sheet says what is not measured).
         rotaryDatum: rotarySheetDatumFor(job, boot.location),

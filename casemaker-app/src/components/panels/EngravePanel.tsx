@@ -97,6 +97,7 @@ import {
   voidLimitForItem,
 } from '@/engine/cnc/engrave/partPlan';
 import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, facesLoadedEpoch, labelFontsLoaded, subscribeFacesLoaded } from '@/engine/fonts/registry';
+import { planComparisonStatement, type PlanComparisonStatement } from '@/engine/cnc/cam/model/tradeoff';
 import { buildRunSheet, type RunSheet, type RunSheetFile } from '@/engine/cnc/engrave/runSheet';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import {
@@ -2533,6 +2534,16 @@ export function EngravePanel(): JSX.Element {
     // #345 — the house setting the run was gated to, handed over rather than a pre-resolved margin:
     // the sheet resolves it the same way `engraveRunStore` did at Generate, so its depth notes are
     // the numbers the verifier enforced and its recommendation is made from the SETTING.
+    // #1089 — THE IDEAL-VS-OWNED LINE, read from the store WHEN THE SHEET IS BUILT: ready → the
+    // one tradeoff line and both cycle numbers; still comparing → stated as running; idle (no
+    // catalogue, or Generate found nothing to compare) → no step at all.
+    const idealPlanState = useEngraveRunStore.getState().idealPlan;
+    const comparison: PlanComparisonStatement | undefined =
+      idealPlanState.status === 'ready' && idealPlanState.tradeoff !== null
+        ? (planComparisonStatement(idealPlanState.tradeoff) ?? undefined)
+        : idealPlanState.status === 'comparing'
+          ? { kind: 'comparing' }
+          : undefined;
     setSheet(
       buildRunSheet(
         job,
@@ -2608,6 +2619,9 @@ export function EngravePanel(): JSX.Element {
             };
           })(),
           toolCase: caseWordsForKey(job.toolKey) ?? undefined,
+          // #1089 — the ideal-vs-owned comparison the store holds now (the late tradeoff once it
+          // lands); absent means this run has none, and §1 gains no step.
+          comparison,
           // #472 — the two-tool facts the generator measured, so the sheet's second-program section
           // prints the files and numbers this run actually produced rather than re-deriving them.
           restPass:

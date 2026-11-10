@@ -33,6 +33,7 @@ import type { Receipt } from '../../src/platform/headless/receipt';
 import type { EngraveJob, EngraveTargetObject } from '../../src/types/engraveJob';
 import type { CommandOptions } from '../../scripts/lib/casemaker/output';
 import { buildRandomPart } from '../tools/randomParts';
+import { runSheetFileName } from '../../src/engine/cnc/engrave/runSheet';
 import { tl } from './helpers/manifoldExec';
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'casemaker-cli-model-cam-966-'));
@@ -130,13 +131,16 @@ function goalJob(): EngraveJob {
   };
 }
 
+/** #1089 — the default run's posted program texts, for the byte-identity check below. */
+let defaultProgramTexts: string[] = [];
+
 interface CliRun {
   code: number;
   receipt: Receipt | null;
   outDir: string;
 }
 
-async function cliCut(job: EngraveJob, name: string, locationText: string): Promise<CliRun> {
+async function cliCut(job: EngraveJob, name: string, locationText: string, extra: string[] = []): Promise<CliRun> {
   const { engraveJobMain } = await import('../../scripts/lib/casemaker/engrave');
 
   const dir = join(SCRATCH, name);
@@ -152,13 +156,14 @@ async function cliCut(job: EngraveJob, name: string, locationText: string): Prom
     json: true,
     sink: { progress: () => undefined, receipt: (r) => { receipt = r; } },
   };
-  const code = await engraveJobMain([jobPath, '--out', outDir, '--location', locationPath], options);
+  const code = await engraveJobMain([jobPath, '--out', outDir, '--location', locationPath, ...extra], options);
   return { code, receipt, outDir };
 }
 
 describe('#966 the headless CLI generate path posts a goal job through cam/model end to end', () => {
   it('the CLI entry point posts the goal job through cam/model, every program verifies clean', async () => {
-    const { code, receipt, outDir } = await cliCut(goalJob(), 'model-cam', locationDoc());
+    const job = goalJob();
+    const { code, receipt, outDir } = await cliCut(job, 'model-cam', locationDoc());
 
     expect(code, JSON.stringify(receipt)).toBe(0);
     expect(receipt).not.toBeNull();
@@ -192,6 +197,37 @@ describe('#966 the headless CLI generate path posts a goal job through cam/model
       expect(nc.length, `${program.ncFile} is empty`).toBeGreaterThan(0);
       expect(program.ncLines).toBeGreaterThan(0);
     }
+
+    // #1089 — THE IDEAL-VS-OWNED LINE reaches BOTH the receipt and the sheet, from the one
+    // tradeoff function the card holds: the material line (when there is one) and both cycle
+    // estimates, so an operator reading the paper sees the comparison, not only the cutter.
+    const comparison = r.details.comparison;
+    expect(comparison, 'a catalogue run stated its comparison').toBeDefined();
+    if (comparison === undefined || 'deferred' in comparison) throw new Error('the default CLI run must not defer the comparison');
+    expect(Number.isFinite(comparison.ownedSeconds)).toBe(true);
+    expect(Number.isFinite(comparison.idealSeconds)).toBe(true);
+    const sheetText = readFileSync(join(outDir, `${runSheetFileName(job.name).replace(/\.nc$/, '')}-run-sheet.md`), 'utf8');
+    if (comparison.line !== null) expect(sheetText).toContain(comparison.line);
+    expect(sheetText).toContain(
+      `The ideal plan’s cycle is ${Math.round(comparison.idealSeconds)} s against the owned plan’s ${Math.round(comparison.ownedSeconds)} s`,
+    );
+    defaultProgramTexts = r.details.programs.map((program) => readFileSync(join(outDir, program.ncFile), 'utf8'));
+  }, 180_000);
+
+  // #1089 — with the owned plan first, the comparison is STATED deferred, never silently missing.
+  it('--defer-ideal states the deferred comparison in the receipt and on the sheet', async () => {
+    const job = goalJob();
+    const { code, receipt, outDir } = await cliCut(job, 'model-cam-defer', locationDoc(), ['--defer-ideal']);
+    expect(code, JSON.stringify(receipt)).toBe(0);
+    expect(receipt!.details.comparison).toEqual({ deferred: true });
+    const sheetText = readFileSync(join(outDir, `${runSheetFileName(job.name).replace(/\.nc$/, '')}-run-sheet.md`), 'utf8');
+    expect(sheetText).toContain('The ideal comparison is deferred');
+    expect(sheetText).toContain('--defer-ideal');
+    // #1089 acceptance — THE STATEMENT MUST NOT MOVE A BYTE: the deferred run posts the same
+    // programs as the default run above (both post the owned plan).
+    expect(receipt!.details.programs.length).toBe(defaultProgramTexts.length);
+    const deferredTexts = receipt!.details.programs.map((program) => readFileSync(join(outDir, program.ncFile), 'utf8'));
+    expect(deferredTexts).toEqual(defaultProgramTexts);
   }, 180_000);
   // "flag unset: the default is still off — ... through the old engine" is deleted here, not
   // fixed: there is no more flag-off path, and no old engine for it to run through.
