@@ -105,6 +105,17 @@ function boxFact(size: { x: number; y: number; z: number }): string {
   return `${n(size.x)} × ${n(size.y)} × ${n(size.z)} mm`;
 }
 const UNBLOCK: CSSProperties = { fontSize: 11, color: '#e0c07a', margin: '6px 0 0' };
+/** #1183 — a secondary action at LINK weight: never a second primary, never a card. */
+const LINK: CSSProperties = {
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  font: 'inherit',
+  fontSize: 12,
+  color: '#8ab4f8',
+  textDecoration: 'underline',
+  cursor: 'pointer',
+};
 /** #1100 — the preset cards: a picture, a title, and a blurb that is never a tooltip. */
 const PRESET: CSSProperties = {
   display: 'flex',
@@ -231,6 +242,13 @@ export interface OperationStepProps {
    * meet the rotary only after step 4, so the rod path was unreachable.
    */
   rotaryFacts?: { owned: boolean; onPins: boolean };
+  /**
+   * #1183 — THE EMPTY JOB'S OWN DOOR. A secondary, link-weight action under the presets and the
+   * file zone, on a NEW run only (`fresh`): the shell creates the empty job (asking first when
+   * the open job carries work) and walks on to Stock exactly as a pick does. It is not the
+   * primary: the primary keeps #1107's refusal when nothing is picked.
+   */
+  onStartEmptyJob?: () => void;
 }
 
 /** A flat-job picker id, or null for a choice only the rotary picker draws (or no choice). */
@@ -269,6 +287,7 @@ export function OperationStep({
   initial = null,
   onChoiceChange,
   rotaryFacts = { owned: false, onPins: false },
+  onStartEmptyJob,
 }: OperationStepProps): JSX.Element {
   // #897 — a re-mounted step starts from the answer the shell holds: Back is an edit, not a reset.
   const seed = initial;
@@ -1468,6 +1487,17 @@ export function OperationStep({
           </div>
           {unblockLine}
         </div>
+      )}
+
+      {/* #1183 — THE EMPTY JOB'S DOOR. Under everything the question offers, at link weight:
+          starting from nothing is deliberate, never the default press. A NEW run only — a
+          re-entry's Done already finishes an existing job. */}
+      {fresh && !rotary && onStartEmptyJob !== undefined && (
+        <p style={{ margin: '12px 0 2px' }} data-testid="start-wizard-empty-job-row">
+          <button type="button" data-testid="start-wizard-empty-job" onClick={onStartEmptyJob} style={LINK}>
+            Start with an empty job
+          </button>
+        </p>
       )}
     </div>
   );

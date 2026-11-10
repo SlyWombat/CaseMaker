@@ -823,10 +823,12 @@ export function StartWizard(): JSX.Element {
   }
 
   /**
-   * #1123 item 3 — THE EMPTY JOB. Nothing was picked on the question, so there is no operation to
-   * make: the wizard creates the job with an empty design and closes onto the Job panel, where
-   * Open job… and Add operation are. A job that already carries real work is asked first — the same
-   * replacement question (and sentence) the stock step raises.
+   * #1183 — START WITH AN EMPTY JOB, from the question step's secondary action. This is #1123
+   * item 3's door, given its own deliberate control: the primary with nothing picked stays
+   * refused (#1107), and this link-weight action makes the empty job instead. The job is made
+   * empty NOW, so the Stock step — and Back from it — see the job it will be; the wizard then
+   * walks on to Stock exactly as a pick does. A job that already carries real work is asked
+   * first — the same replacement question (and sentence) the stock step raises.
    */
   function createEmptyJob(): void {
     const items = jobItemCount(useEngraveJobStore.getState().job);
@@ -846,18 +848,15 @@ export function StartWizard(): JSX.Element {
     store.setMachine(machineId);
     const fresh = useEngraveJobStore.getState().job;
     useEngraveJobStore.getState().replace({ ...fresh, labels: [], shapes: [] });
-    const job = useEngraveJobStore.getState().job;
-    const project = blankProjectForStock(job.stock);
-    if (project === null) {
-      setStartError('the blank template is missing from this build');
-      return;
-    }
-    setProject(project); // also flips welcomeMode off
-    clearHistory();
-    setSection('cnc-engrave');
-    noteJobStarted();
-    closeWizard();
-    void scheduleImmediate(project);
+    // No project, no history and no close here: the stock step creates the job's project from
+    // the blank it settles (startFromStock), exactly as it does after a pick. Any answer picked
+    // BEFORE the door is not the empty job's: left standing, Stock would size from it and the
+    // last step would create it — so it is cleared (and the stock step starts from its proposal).
+    setOperationChoice(null);
+    setPending(null);
+    setStockEdited(false);
+    setStartError(null);
+    setStep('stock');
   }
 
   /** The last step's Create: make the operation, open its row and land in Design. */
@@ -1012,11 +1011,11 @@ export function StartWizard(): JSX.Element {
         setStep('operation');
         break;
       case 'operation':
-        // #1123 item 3 — nothing picked: an existing job finishes (adds nothing), a new run creates
-        // the empty job. The question must not demand invented work to be passable.
+        // #1107 — a NEW run with nothing picked cannot get here: its primary is disabled with
+        // "Pick what to make first." and the empty job has its own door (#1183). A re-entry's
+        // Done finishes the job as it is, adding nothing.
         if (operationChoice === null) {
           if (jobStarted) createOperation(null);
-          else createEmptyJob();
           break;
         }
         setStep('stock');
@@ -1091,6 +1090,7 @@ export function StartWizard(): JSX.Element {
           initial={operationChoice}
           rotaryFacts={rotaryFacts}
           onChoiceChange={onOperationChoice}
+          onStartEmptyJob={createEmptyJob}
         />
       )}
     </>
