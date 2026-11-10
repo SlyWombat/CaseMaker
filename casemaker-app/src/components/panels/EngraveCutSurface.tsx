@@ -60,7 +60,7 @@ import type { GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
 import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 import { DRY_RUN_SAFE_Z, dryRunProgramFor, type DryRunLevel } from '@/engine/cnc/engrave/dryRun';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { jobSetups, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { useSettingsStore } from '@/store/settingsStore';
 import { finishedProgramsFor, finishedRunsFor, useLocationStore } from '@/store/locationStore';
@@ -1567,7 +1567,10 @@ export function EngraveCutSurface({
         )}
         {planTradeoff?.material && planTradeoff.line !== null && (
           <section style={{ ...BOX, marginTop: 6 }} data-testid="engrave-plan-tradeoff">
-            <p style={MUTED}>{planTradeoff.line}</p>
+            {/* #1193 — the tradeoff is the PLANS' comparison and says whose cycle it is: on a
+                multi-setup job the result's plan outcome covers the first side only. The run's own
+                cycle is stated separately (runCycleSeconds → the job card and the sheet's §2). */}
+            <p style={MUTED}>{jobSetups(job).length > 1 ? `Setup 1’s plan — ${planTradeoff.line}` : planTradeoff.line}</p>
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
               <button
                 type="button"

@@ -13,6 +13,23 @@ import { describe, expect, it } from 'vitest';
 import { runCycleSeconds } from '@/engine/cnc/engrave/runCycle';
 
 describe('#1123 item 6 — the run’s cycle comes from one place', () => {
+  it('#1193 — the seam’s run total wins over the plan outcome (a flip’s plan is one side)', () => {
+    const runCycle = {
+      cuttingSeconds: 13_891,
+      changeSeconds: 2_787.81,
+      changes: 7,
+      totalSeconds: 16_678.81,
+      programCount: 17,
+      setupCount: 2,
+      flip: true,
+    };
+    expect(
+      runCycleSeconds({ runCycle, plan: { outcome: { cycleSeconds: 9_826.29 } }, cam: { estimatedSeconds: 4_920 } }),
+    ).toBe(16_678.81);
+    // A run total that states nothing positive falls through, as every other source does.
+    expect(runCycleSeconds({ runCycle: { ...runCycle, totalSeconds: 0 }, plan: { outcome: { cycleSeconds: 7_368 } } })).toBe(7_368);
+  });
+
   it('prefers the plan outcome — the same number the tradeoff line compares', () => {
     expect(runCycleSeconds({ plan: { outcome: { cycleSeconds: 7_368 } }, cam: { estimatedSeconds: 4_920 } })).toBe(7_368);
   });

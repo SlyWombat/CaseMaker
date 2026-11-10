@@ -10,6 +10,8 @@ import {
 } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { itemLabel, jobMount, jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+// #1193 — the run's own cycle (every posted program) rides the generated result.
+import type { RunCycle } from '@/engine/cnc/engrave/runTotals';
 import {
   idJawReach,
   jawGapFor,
@@ -531,6 +533,13 @@ export interface RunSheetGenerated {
    * above and are NOT printed twice. Absent on the old heightfield path, which never planned one.
    */
   planStatements?: readonly PlanStatement[] | null;
+  /**
+   * #1193 — THE RUN'S OWN CYCLE, computed by the generate seam over every POSTED program (all
+   * setups plus the locating program, with the bit changes between them). The plan's outcome is
+   * one plan's setups; this is what the sheet's §2 and the receipt state as the run's cycle.
+   * Absent on stored results from before the seam computed one.
+   */
+  runCycle?: RunCycle | null;
   /** `feedsFor`'s result, or null when that stage was not reached. */
   feeds: FeedsResult | null;
   cam: RunSheetCamSummary | null;
@@ -4767,11 +4776,33 @@ export function buildRunSheet(
     ...(options.dialectName !== undefined ? { dialect: options.dialectName } : {}),
   };
 
+  // #1193 — THE RUN'S CYCLE, over every posted program. The plan's own note above states THIS
+  // PLAN's cycle (a flip is planned per side); this is the one figure that covers the run — all
+  // setups and the locating program, with the bit changes between them — and it is what the Cut
+  // card and the receipt state too. Absent on a stored result from before the seam computed one.
+  const runCycleStep: RunSheetStep | null = (() => {
+    const run = generated.runCycle;
+    if (run === undefined || run === null) return null;
+    const changes = run.changes === 0 ? 'no bit changes' : `${formatDuration(run.changeSeconds)} in ${run.changes} bit change${run.changes === 1 ? '' : 's'}`;
+    const scope = `${run.programCount} file${run.programCount === 1 ? '' : 's'} on ${run.setupCount} setup${run.setupCount === 1 ? '' : 's'}`;
+    const flip = run.flip ? ' The flip itself is not timed.' : '';
+    return {
+      text:
+        `The run’s cycle is ${formatDuration(run.totalSeconds)}: ${formatDuration(run.cuttingSeconds)} of cutting and ` +
+        `rapids and ${changes}, over ${scope}.${flip}`,
+      value: `${formatDuration(run.totalSeconds)} over ${run.programCount} file${run.programCount === 1 ? '' : 's'}`,
+    };
+  })();
+
   // #1089 — THE COMPARISON STEP, from the statement the caller supplied (the CLI's Generate, the
   // app's idealPlan). No statement → no step: a sheet without a comparison does not change.
   const comparisonStep: RunSheetStep | null = (() => {
     const c = options.comparison;
     if (c === undefined) return null;
+    // #1193 — THE TRADEOFF IS A PLAN COMPARISON and says whose cycle it is: on a multi-setup job
+    // the result's plan outcome covers the FIRST side only (each side is planned on its own), so
+    // the line names it as setup 1's plan rather than as the run's (#1193's bench finding).
+    const whose = jobSetups(job).length > 1 ? 'Setup 1’s plan' : 'The plan';
     // The sheet's OWN duration formatter, the one every other step uses: "4 h 23 min", never raw
     // seconds on paper (the CLI receipt keeps the seconds).
     const duration = (v: number): string => formatDuration(v);
@@ -4787,7 +4818,7 @@ export function buildRunSheet(
         value: 'comparison running',
       };
     }
-    const cycles = `The ideal plan’s cycle is ${duration(c.idealSeconds)} against the owned plan’s ${duration(c.ownedSeconds)}.`;
+    const cycles = `${whose}: owned ${duration(c.ownedSeconds)} against ideal ${duration(c.idealSeconds)} — the plans’ own cycle, not the run’s above.`;
     return c.kind === 'material'
       ? { text: `${c.line}. ${cycles}`, value: `ideal ${duration(c.idealSeconds)} · owned ${duration(c.ownedSeconds)}` }
       : {
@@ -4815,6 +4846,9 @@ export function buildRunSheet(
         : 'The cutter named by the job.',
       value: diameter === null ? 'cutting diameter unknown' : `⌀ ${fmtNum(diameter)} mm cutting`,
     },
+    // #1193 — THE RUN'S OWN CYCLE, BEFORE any plan comparison that sits beside it (the Manager's
+    // ruling: where the two numbers sit side by side, the run's line comes first).
+    ...(runCycleStep === null ? [] : [runCycleStep]),
     // #1089 — THE IDEAL-VS-OWNED LINE, beside the cutter it compares. The wording is the #975
     // ruling's: outcome terms only, never a cutter's name; both cycle estimates are stated so the
     // operator can price the choice.

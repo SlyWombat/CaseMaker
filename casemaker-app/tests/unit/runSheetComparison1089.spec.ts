@@ -46,7 +46,8 @@ function sheetWith(comparison: NonNullable<Parameters<typeof buildRunSheet>[5]>[
 function comparisonStep(sheet: RunSheet): { text: string; value?: string } | null {
   const need = sheet.sections.find((s) => s.id === 'need');
   expect(need, 'the sheet has its need section').toBeTruthy();
-  return need!.steps.find((s) => /ideal plan|comparison/i.test(s.text) && /cycle|comparison/i.test(s.text)) ?? null;
+  // #1193 — the line says whose cycle it is ("The plan: owned … against ideal …").
+  return need!.steps.find((s) => /plans’ own cycle|comparison/i.test(s.text) && /cycle|comparison/i.test(s.text)) ?? null;
 }
 
 describe('#1089 the ideal-vs-owned line on the run sheet', () => {
@@ -54,7 +55,7 @@ describe('#1089 the ideal-vs-owned line on the run sheet', () => {
     const step = comparisonStep(sheetWith({ kind: 'material', line: MATERIAL.line!, ownedSeconds: 3258, idealSeconds: 2472 }));
     expect(step, '§1 states the comparison').toBeTruthy();
     expect(step!.text).toBe(
-      'owned plan vs catalogue ideal: cycle 54.3 → 41.2 min. The ideal plan’s cycle is 41 min 12 s against the owned plan’s 54 min 18 s.',
+      'owned plan vs catalogue ideal: cycle 54.3 → 41.2 min. The plan: owned 54 min 18 s against ideal 41 min 12 s — the plans’ own cycle, not the run’s above.',
     );
     expect(step!.value).toBe('ideal 41 min 12 s · owned 54 min 18 s');
   });
@@ -62,7 +63,7 @@ describe('#1089 the ideal-vs-owned line on the run sheet', () => {
   it('says the difference is not material, and still gives both cycles', () => {
     const step = comparisonStep(sheetWith({ kind: 'minor', ownedSeconds: 3258, idealSeconds: 3186 }));
     expect(step!.text).toBe(
-      'No material difference between the owned plan and the catalogue ideal. The ideal plan’s cycle is 53 min 6 s against the owned plan’s 54 min 18 s.',
+      'No material difference between the owned plan and the catalogue ideal. The plan: owned 54 min 18 s against ideal 53 min 6 s — the plans’ own cycle, not the run’s above.',
     );
   });
 

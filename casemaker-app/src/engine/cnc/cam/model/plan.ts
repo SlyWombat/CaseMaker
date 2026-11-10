@@ -2354,7 +2354,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     );
     if (bitChanges.length > 0) {
       bitChangeNotes.push(
-        `the run's cycle is ${formatSpan(totalCostSeconds)}: cutting and rapids ${formatSpan(cuttingSeconds)}, bit changes ${formatSpan(changeTotalSeconds)} in ${bitChanges.length} change${bitChanges.length === 1 ? '' : 's'}; ${bitChangeShapeSentence(bitChange)}`,
+        // #1193 — THIS PLAN's cycle, not the run's: the number is this plan's setups (one per side
+        // of a flip is planned at a time), and the run's own total over every posted program is
+        // stated by the generate seam (`runTotals.ts` → §2, the Cut card, the receipt).
+        `this plan's cycle is ${formatSpan(totalCostSeconds)}: cutting and rapids ${formatSpan(cuttingSeconds)}, bit changes ${formatSpan(changeTotalSeconds)} in ${bitChanges.length} change${bitChanges.length === 1 ? '' : 's'}; ${bitChangeShapeSentence(bitChange)}`,
       );
     }
 
