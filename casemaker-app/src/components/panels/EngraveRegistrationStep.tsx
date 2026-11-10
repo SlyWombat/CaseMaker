@@ -123,6 +123,7 @@ import { faceUpOf, planFromSetups, setupsSettings } from '@/engine/cnc/setups';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { clearanceZOf, rotaryOf } from '@/engine/cnc/machine';
 import { planRegistrationAttempt } from './registrationAttempt';
+import { blankScopeFor } from '@/engine/cnc/registration/blankIdentity';
 import { RotaryAxisTap } from '@/components/manage/RotaryAxisTap';
 import { RotaryFaceAngleTap } from '@/components/manage/RotaryFaceAngleTap';
 import type { RegistrationAttempt } from './EngraveSetupRow';
@@ -266,15 +267,6 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const defaults = useShopDefaultsStore((s) => s.defaults);
   const calibration = useSettingsStore((s) => s.machineCalibration);
   const machineRecord = target === null ? null : machineAt(target);
-  // #1166 — HAS THIS JOB FINISHED PROGRAMS ON THIS MACHINE? The machine record's own list plus the
-  // job's run log — the release store's `done` union, so the two places progress is written are read
-  // the same way here. The executor offers the bracket's derived top only when something has cut.
-  const hasFinishedPrograms = useMemo(
-    () =>
-      (machineRecord?.finishedPrograms ?? []).length > 0 ||
-      (job.runLog ?? []).some((entry) => entry.outcome === 'finished'),
-    [machineRecord, job.runLog],
-  );
   /**
    * #1179 D/B4 — THE LAST TOP RECORDED FOR THIS BLANK. A finished run of this job keeps the top its
    * origin was accepted at (`registration.surfaceMachineZ`, measured or derived); the derived offer
@@ -312,6 +304,26 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const registrationSetup = flippedSetup ? (job.setups?.[setupNumber - 1] ?? null) : (job.setups?.[0] ?? null);
   const registrationSetupIndex =
     registrationSetup === null ? 1 : (job.setups?.findIndex((s) => s.id === registrationSetup.id) ?? 0) + 1;
+  // #1179 blank identity (the analyst's fields, issue comment 6776457695) — THE GUARD READS THE
+  // BLANK, NOT THE MACHINE. `blankScopeFor` is the one reading of `currentBlank`/`blankId`/`cutMaps`:
+  // a job WITH an id scopes to that id (legacy and other-blank entries are out of scope by
+  // construction); a job WITHOUT one takes the safe default — legacy finished entries mean the
+  // blank MAY have been cut, so the unknown-cuts path runs and the "new blank" press is offered.
+  // The same entry feeds stage 2's candidates, so the card cannot say "nothing has cut" and then
+  // plan three touches.
+  const blankScope = useMemo(
+    () =>
+      blankScopeFor({
+        machine: machineRecord,
+        jobId: job.id,
+        setupIndex: registrationSetupIndex,
+        packageHashes: (job.package?.programs ?? []).map((program) => program.hash),
+        runLogFinished: (job.runLog ?? []).some((entry) => entry.outcome === 'finished'),
+      }),
+    [machineRecord, job.id, registrationSetupIndex, job.package, job.runLog],
+  );
+  /** True when the next registration measures a blank that has already been cut. */
+  const hasFinishedPrograms = blankScope.cutsOnThisBlank;
   // The heartbeat's answer and its status line, for the memo's G54 check — the same 2 s read the
   // status strip draws, never a new socket.
   const heartbeat = useMachineStore((s) => s.heartbeat);
@@ -319,6 +331,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const restoreJob = useEngraveRegistrationStore((s) => s.restoreJob);
   const restoreSetup = useEngraveRegistrationStore((s) => s.restoreSetup);
   const [restoreVerdict, setRestoreVerdict] = useState<RegistrationMemoVerdict | null>(null);
+  /** #1179 — the sentence after the "This is a new blank" / registration mint. */
+  const [blankNote, setBlankNote] = useState<string | null>(null);
 
   // #1123-40 — RESTORE FROM THE HOUSE, ONCE THE MACHINE HAS SAID WHERE ITS G54 IS. The memo is the
   // record this job's setup last wrote — the plan, the outcome, the measuredAt. It is put back only
@@ -490,6 +504,10 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       settings: regSettings,
       // #1179 B — a blank that has been cut is MEASURED on known depths, not asked about.
       cutBlank: hasFinishedPrograms,
+      // #1179 stage 2 — THE MAP, WHEN THE BLANK'S RECORD HAS ONE FOR THIS SETUP. `complete` gives
+      // the candidates from the blank's own measured state; `unknown`/absent keeps the package
+      // footprint's unknown-cuts path.
+      cutBlankMap: blankScope.setupMap?.state === 'complete' ? (blankScope.setupMap.map ?? null) : null,
       largestOwnedDiameterMm,
       finishedHashes: machineRecord?.finishedPrograms ?? [],
       // #1179 B — only the registered setup's own programs are this face's known cuts.
@@ -510,8 +528,9 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     defaults,
     calibration,
     regSettings,
-    // #1179 B — the cut-blank trigger and the fallback cutter size are plan inputs.
+    // #1179 — the cut-blank trigger, its map and the fallback cutter size are plan inputs.
     hasFinishedPrograms,
+    blankScope,
     largestOwnedDiameterMm,
     machineRecord,
     registrationSetupIndex,
@@ -747,6 +766,23 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
    * a second `send` on that session would interleave on its single frame channel. What `abort` does
    * to an in-flight probe move is the S1 question; the outcome says what the machine reported.
    */
+  /**
+   * #1179 — "THIS IS A NEW BLANK". The operator's statement, minted on the machine record (E's
+   * `mintBlank`): a fresh id for this job, written through the guarded machine PUT. Old records
+   * keep their own ids as history and stop matching; the card re-plans to the single touch.
+   */
+  async function newBlank(): Promise<void> {
+    if (target === null) return;
+    const machine = machineAt(target);
+    if (machine === null) return;
+    const minted = await useLocationStore.getState().mintBlank(machine.id, job.id);
+    setBlankNote(
+      minted.ok
+        ? 'A new blank — this registration takes the single surface touch.'
+        : `The blank was not saved: ${minted.text}`,
+    );
+  }
+
   async function pressStop(): Promise<void> {
     if (stopRef.current) return;
     stopRef.current = true;
@@ -907,6 +943,20 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     // #797 — the ONE statement at Cut step 1 replaced this step's own at-machine tick.
     const acknowledged = useEngraveRunStore.getState().acknowledged;
     if (target === null || effectivePlan === null || !acknowledged || busy) return;
+    // #1179 — THE PACKAGE IS FINISHED ON THIS BLANK. Registering again begins a NEW blank: mint it,
+    // say so, and stop — the card re-plans against the fresh blank and the next press runs the
+    // single touch. The mint is the operator's statement; no old record is rewritten.
+    if (blankScope.packageFinishedUnderBlank) {
+      const machine = machineAt(target);
+      if (machine === null) return;
+      const minted = await useLocationStore.getState().mintBlank(machine.id, job.id);
+      setBlankNote(
+        minted.ok
+          ? 'The last blank was finished — this is a new blank. Press Register again to measure its top.'
+          : `The blank was not saved: ${minted.text}`,
+      );
+      return;
+    }
     // #639 — A NEW RUN FORGETS THE LAST CLAMPING. The record and the surface assessment belong to
     // the blank as it was; keeping them through a re-run (which may alarm out or be stopped) left
     // the Cut step claiming "Registration recorded", the dome tick ticked, and Upload enabled
@@ -1416,6 +1466,31 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           <RotaryFaceAngleTap machine={machineRecord} job={job} testIdPrefix="engrave-rotary-face-angle" />
         )}
 
+  {/* #1179 — THE BLANK, SAID PLAINLY, WITH THE PRESS. Offered whenever the cut-blank path
+          is active (`cutsOnThisBlank`): the no-id legacy machine and a blank with cuts alike. */}
+      {hasFinishedPrograms && (
+        <div data-testid="engrave-registration-blank" style={{ marginTop: 6 }}>
+          <p style={{ ...MUTED, margin: '0 0 4px' }}>
+            {blankScope.reason === 'legacy-maybe-cut'
+              ? 'Earlier programs were cut on this machine, and this job has no blank of its own yet — its blank may have been cut. The registration measures the top on the wood that is still there.'
+              : 'This job’s blank has been cut — the registration measures the top on the wood that is still there.'}
+          </p>
+          <button
+            type="button"
+            data-testid="engrave-registration-new-blank"
+            style={{ padding: 6 }}
+            disabled={busy}
+            onClick={() => void newBlank()}
+          >
+            This is a new blank
+          </button>
+          {blankNote !== null && (
+            <p style={{ ...MUTED, margin: '4px 0 0' }} data-testid="engrave-registration-blank-note">
+              {blankNote}
+            </p>
+          )}
+        </div>
+      )}
       {flipAttempt === null && plan === null && proposal !== null && proposal.kind === 'plan' && (
         <div
           data-testid="engrave-registration-proposal"
