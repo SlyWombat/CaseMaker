@@ -5996,9 +5996,13 @@ export async function generateGoalProgram(
      * can never stand in. Absent is a direct caller in the main realm (the specs), where the
      * snapshot is the right copy (6b's review). */
     feedCatalogue?: readonly FeedCatalogueRow[];
+    /** #1134 — the pick's handoffs, passed through to `planTwoOutcomes` (see
+     * {@link EngraveGenerateOptions}). */
+    reusedOwnedPlan?: ModelPlanOutput | null;
+    ownedOnly?: boolean;
   },
 ): Promise<EngraveGenerated> {
-  const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue } = opts;
+  const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue, reusedOwnedPlan, ownedOnly } = opts;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -6190,7 +6194,7 @@ export async function generateGoalProgram(
               }),
           }),
       ...(signal === undefined ? {} : { signal }),
-    });
+    }, { ...(reusedOwnedPlan === undefined ? {} : { reusedOwned: reusedOwnedPlan }), ...(ownedOnly === true ? { ownedOnly: true } : {}) });
     // The operator's recorded choice is what cuts (`planChoiceOf` reads it, owned by default); the
     // ideal posts only when it exists.
     const chosenIdeal = planChoiceOf(job) === 'ideal' && two.ideal !== null;
@@ -6258,6 +6262,8 @@ async function generateGoalPrograms(
   catalogueTools?: readonly Tool[],
   /** #1038 — the same stage channel `generateGoalProgram` takes, passed to each side's plan. */
   onProgress?: EngraveProgressFn,
+  /** #1134 — the pick's handoffs, passed to each side's plan. */
+  options: EngraveGenerateOptions = {},
 ): Promise<EngraveGenerated> {
   // #1073 — A FRAME FLIP NEEDS ITS BAND BEFORE ANYTHING POSTS. `flip: { method: 'tabs-in-blank' }`
   // means side 1 stops above the part's silhouette plane and side 2 below it, so a band of stock
@@ -6331,7 +6337,7 @@ async function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue });
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}) });
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
@@ -6358,7 +6364,7 @@ async function generateGoalPrograms(
     programs.push(locating.program);
   }
   for (const side of sides.slice(1)) {
-    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue });
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}) });
     const sideList = sidePrograms(one, side);
     if (sideList === null) return { ...one, programs };
     programs.push(...sideList);
@@ -7051,6 +7057,24 @@ async function generateFaceProgram(
   return { ...one, programs: [programOf(one, ref), ...finePrograms] };
 }
 
+/**
+ * #1134 — THE CALLER'S HANDOFFS to the two-plan run.
+ *
+ * `reusedOwnedPlan`: the smart pick fully evaluates its finalists through THIS function; the
+ * winning evaluation's `EngraveGenerated.plan` is the cut's owned plan, so the cut hands it back
+ * here and `planTwoOutcomes` posts it instead of planning the owned half a second time (the
+ * Manager's ruling on #1134: "the pick's winning full plan IS the cut's owned plan"). The ideal
+ * still runs, and its enrichment of the owned plan's rest statement still applies.
+ *
+ * `ownedOnly`: the pick's own full evaluation. The owned half is planned with the catalogue
+ * CONFIGURED (so its statements are the cut's) and the ideal is skipped — a finalist costs one
+ * plan, never two.
+ */
+export interface EngraveGenerateOptions {
+  reusedOwnedPlan?: ModelPlanOutput | null;
+  ownedOnly?: boolean;
+}
+
 export async function engraveGenerate(
   tl: ManifoldToplevel,
   job: EngraveJob,
@@ -7065,6 +7089,8 @@ export async function engraveGenerate(
    * owned plan is run.
    */
   catalogueTools?: readonly Tool[],
+  /** #1134 — the pick's handoffs (see {@link EngraveGenerateOptions}). */
+  options: EngraveGenerateOptions = {},
 ): Promise<EngraveGenerated> {
   memTrace('pipeline:start', { job: job.name });
   onProgress?.({ stage: 'prepare', label: 'reading the job' });
@@ -7273,7 +7299,7 @@ export async function engraveGenerate(
           ],
         };
       }
-      return { ...(await generateGoalPrograms(tl, job, sides, tool, calibration, margins, shop, catalogue, catalogueTools, onProgress)), surface: null };
+      return { ...(await generateGoalPrograms(tl, job, sides, tool, calibration, margins, shop, catalogue, catalogueTools, onProgress, options)), surface: null };
     }
   }
   const goal = job.setups === undefined ? pureGoalObject(job) : null;
@@ -7292,6 +7318,8 @@ export async function engraveGenerate(
         catalogueTools,
         ...(onProgress === undefined ? {} : { onProgress }),
         feedCatalogue: catalogue,
+        ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }),
+        ...(options.ownedOnly === true ? { ownedOnly: true } : {}),
       })),
       surface: null,
     };

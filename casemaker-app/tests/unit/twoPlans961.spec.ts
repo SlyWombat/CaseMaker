@@ -14,6 +14,7 @@ import { tl } from './helpers/manifoldExec';
 import { buildRandomPart } from '../tools/randomParts';
 import { planModelCam, type ModelPlanInput } from '../../src/engine/cnc/cam/model/plan';
 import { planTwoOutcomes } from '../../src/engine/cnc/cam/model/twoPlans';
+import { cutterKeyOf } from '../../src/engine/cnc/cam/model/sequence';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import { defaultEngraveJob } from '../../src/engine/cnc/engrave/defaults';
 import { engraveJobDocumentSchema } from '@/store/engraveJobSchema';
@@ -55,6 +56,41 @@ describe('#961/#975 the two plans', () => {
     // And the owned run is `planModelCam` over the owned set alone — the catalogue never leaks in.
     const directOwned = await planModelCam({ ...planInput, cutters: { house: owned, catalogue: [] } });
     expect(JSON.stringify(two.owned)).toBe(JSON.stringify(directOwned));
+  }, 120_000);
+
+  it('#1134 — a reused owned plan is posted as-is, and the ideal still runs beside it', async () => {
+    const planInput = input([flat6, ball6, v90], [smallFlat]);
+    const two = await planTwoOutcomes(planInput);
+    expect(two.ideal).not.toBeNull();
+    // The pick's measured owned plan handed through: the owned half is not planned again, the
+    // ideal still runs, and the result is the same plan the first call produced.
+    const reused = await planTwoOutcomes(planInput, {}, { reusedOwned: two.owned });
+    expect(JSON.stringify(reused.owned)).toBe(JSON.stringify(two.owned));
+    expect(reused.ideal).not.toBeNull();
+    expect(JSON.stringify(reused.ideal)).toBe(JSON.stringify(two.ideal));
+    // The pick's own evaluation shape: owned half only, planned exactly as the owned run does.
+    const ownedOnly = await planTwoOutcomes(planInput, {}, { ownedOnly: true });
+    expect(ownedOnly.ideal).toBeNull();
+    const directOwned = await planModelCam({ ...planInput, cutters: { house: planInput.cutters.house, catalogue: [] } });
+    expect(JSON.stringify(ownedOnly.owned)).toBe(JSON.stringify(directOwned));
+  }, 120_000);
+
+  it('#1134 — a reused plan’s programs carry the CUT’s own tool objects, not the pick’s', async () => {
+    const planInput = input([flat6, ball6, v90], [smallFlat]);
+    // The pick plans from its OWN input: the cutters equal this input's by identity key, but they
+    // are different objects — the seam's post resolves a program's header key from object identity
+    // (postModelPlan's registryKeyOf map), so a reused plan that kept the pick's objects could
+    // post a different `;@CM|TOOL|key=` header than a re-plan would.
+    const pickHouse = planInput.cutters.house.map((tool) => ({ ...tool }));
+    const pickOwned = await planModelCam({ ...planInput, cutters: { house: pickHouse, catalogue: [] } }, { planKind: 'owned' });
+    const reused = await planTwoOutcomes(planInput, {}, { reusedOwned: pickOwned });
+    for (const setup of reused.owned.perSetup) {
+      for (const program of setup.programs) {
+        expect(planInput.cutters.house, `tool ${cutterKeyOf(program.tool)} must be the cut’s own object`).toContain(program.tool);
+      }
+    }
+    // The swap changes no reported field: the reused plan is still the plan the pick measured.
+    expect(JSON.stringify(reused.owned)).toBe(JSON.stringify(pickOwned));
   }, 120_000);
 
   it('never refuses where an owned tool can do the job — even when the catalogue carries a better bit', async () => {

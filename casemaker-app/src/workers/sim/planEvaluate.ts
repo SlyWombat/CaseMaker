@@ -39,6 +39,7 @@ import type { EngraveJob } from '@/types/engraveJob';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow, FeedsEntry } from '@/engine/cnc/feeds';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
+import type { ModelPlanOutput } from '@/engine/cnc/cam/model/plan';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { Tool } from '@/engine/cnc/tool';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -213,6 +214,13 @@ export interface PlanEvaluation {
   sweep?: PlanSweep | null;
   /** Why `sweep` is null on a full evaluation that generated: the chain's stop, in words. */
   sweepNote?: string | null;
+  /**
+   * FULL only: the owned plan the generator produced, when it produced one. #1134 — the pick's
+   * winning plan IS the cut's owned plan: the CLI hands this to `engraveGenerate` as
+   * `reusedOwnedPlan`, so the cut posts it instead of planning the owned half again (the manager's
+   * ruling; the ideal still runs, because the tradeoff is a maintainer requirement).
+   */
+  ownedPlan?: ModelPlanOutput | null;
 }
 
 /** Everything the evaluator may read, handed in by the caller. */
@@ -222,6 +230,14 @@ export interface EvalContext {
   tools: readonly ToolLibraryEntry[];
   catalogue: readonly FeedCatalogueRow[];
   shop: EngraveShopOpts;
+  /**
+   * #1134 — THE SHOP GENERATE USES, when it differs from the pick's. The pick's own shop is the
+   * picker's (no finish allowance, no per-job mount — #922/#947's both-doors rule); the FULL
+   * evaluation, however, plans the program the cut would post, and that program is planned on the
+   * run shop. `engraveGenerate` is handed this one, so the plan a finalist stores IS the cut's
+   * plan (the reused owned plan, byte for byte). Absent: the pick shop, as before.
+   */
+  runShop?: EngraveShopOpts | null;
   calibration: MachineCalibration | null;
   /** The house's feed table, when the caller has one; absent = the worker's fallback. */
   table?: readonly FeedsEntry[] | null;
@@ -296,6 +312,9 @@ function contextSignature(ctx: EvalContext, level: 'coarse' | 'full'): string {
     tools: ctx.tools.map((t) => [t.key, t.tool]),
     catalogue: ctx.catalogue.length,
     shop: ctx.shop,
+    // #1134 — the run shop changes a FULL evaluation's generated plan; the cache must not share
+    // a verdict across two different ones.
+    runShop: ctx.runShop ?? null,
     calibration: ctx.calibration === null ? null : [ctx.calibration.machineId, ctx.calibration.measuredAt],
     table: ctx.table?.length ?? null,
     conditions: ctx.conditions === undefined || ctx.conditions === null ? null : [...ctx.conditions.keys()],
@@ -594,6 +613,19 @@ async function evaluateFull(job: EngraveJob, plan: CandidatePlan, ctx: EvalConte
     conditions: ctx.conditions ?? ctx.shop.conditions ?? null,
     ...(ctx.table === undefined ? {} : { feeds: ctx.table }),
   };
+  // #1134 — THE FULL EVALUATION PLANS THE PROGRAM THE CUT WOULD POST, on the shop Generate uses:
+  // the picker's shop omits the finish allowance and the per-job mount (#922/#947's both-doors
+  // rule), and those change a posted program's bytes. With `runShop` supplied, the plan a finalist
+  // stores is the cut's own plan — the pick hands it through as `reusedOwnedPlan`.
+  const genShop: EngraveShopOpts =
+    ctx.runShop === undefined || ctx.runShop === null
+      ? shop
+      : {
+          ...ctx.runShop,
+          tools: shopTools(ctx),
+          conditions: ctx.conditions ?? ctx.runShop.conditions ?? null,
+          ...(ctx.table === undefined ? {} : { feeds: ctx.table }),
+        };
   const gen = await engraveGenerate(
     ctx.tl,
     applied,
@@ -601,7 +633,14 @@ async function evaluateFull(job: EngraveJob, plan: CandidatePlan, ctx: EvalConte
     ctx.catalogue,
     ctx.calibration,
     undefined,
-    shop,
+    genShop,
+    // #1134 — THE PICK'S PLAN IS THE CUT'S PLAN. The catalogue tools ride along so the owned
+    // half's input (and its statements) is the one the cut builds; `ownedOnly` skips the ideal so
+    // a finalist still costs one plan. `evaluateFull` stores the plan on the evaluation, and the
+    // CLI hands it to `engraveGenerate` as `reusedOwnedPlan` — the cut posts these bytes.
+    undefined,
+    ctx.tools.map((entry) => entry.tool),
+    { ownedOnly: true },
   );
   const seconds = gen.ok ? gen.programs.reduce((sum, program) => sum + (program.cam?.estimatedSeconds ?? 0), 0) : null;
   const refusal = gen.ok
@@ -610,7 +649,7 @@ async function evaluateFull(job: EngraveJob, plan: CandidatePlan, ctx: EvalConte
   const { part } = partOf(job);
   const levels = raisedLevels(part);
   const { sweep, sweepNote, raisedCuts } = gen.ok
-    ? sweepPlan(ctx, applied, gen, shop, levels)
+    ? sweepPlan(ctx, applied, gen, genShop, levels)
     : { sweep: null, sweepNote: null, raisedCuts: null };
   // #857 — THE COUNTERS FROM THE SWEEP. When every program was swept, each raised glyph's counters
   // are measured against what the run really cut, and the items are scored again from that.
@@ -628,7 +667,9 @@ async function evaluateFull(job: EngraveJob, plan: CandidatePlan, ctx: EvalConte
   const items = measured.map((item) =>
     item.reason === undefined && !gen.ok ? { ...item, fidelity: Math.min(item.fidelity, 1) } : item,
   );
-  return { ...coarse, ok: gen.ok, refusal, items, seconds, sweep, sweepNote };
+  // #1134 — the plan itself rides the evaluation: the pick's winning full plan IS the cut's owned
+  // plan (the CLI hands it through as `reusedOwnedPlan` and posts these bytes).
+  return { ...coarse, ok: gen.ok, refusal, items, seconds, sweep, sweepNote, ownedPlan: gen.plan ?? null };
 }
 
 /**

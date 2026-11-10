@@ -21,7 +21,9 @@
  */
 
 import { enrichOwnedRestStatement, planModelCam, type PlanModelCamOptions, type ModelPlanInput, type ModelPlanOutput, type PlanOutcome } from './plan';
+import { cutterKeyOf } from './sequence';
 import { comparePlanOutcomes, type PlanTradeoff } from './tradeoff';
+import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Tool } from '@/engine/cnc/tool';
 
 export type PlanKind = 'owned' | 'ideal';
@@ -45,6 +47,46 @@ export interface TwoPlanOutput {
 }
 
 /**
+ * #1134 — REBIND THE PICK'S TOOL OBJECTS TO THE CUT'S OWN. The seam's post resolves a program's
+ * header key from the SHOP's own tool objects (`postModelPlan`'s `registryKeyOf` is a Map keyed by
+ * object identity: the registry key when the very object is a shop entry's tool, else
+ * `cutterKeyOf`). The pick's plan was planned from the pick's own input; its programs carry that
+ * input's tool objects. Handed through unchanged, a house tool the pick's shop knew could post its
+ * registry key where the cut's re-plan posts its raw identity — the same program under a different
+ * `;@CM|TOOL|key=` header (measured on the Set B bottom through the pick: the 4 mm ball posted
+ * `cat:…` from the reused plan and its tool id from the re-plan). Rebinding each program's tool to
+ * the CUT input's house object restores the re-plan's own resolution, header included.
+ */
+function rebindToolsToHouse(plan: ModelPlanOutput, house: readonly Tool[]): ModelPlanOutput {
+  const byIdentity = new Map<string, Tool>();
+  for (const tool of house) byIdentity.set(cutterKeyOf(tool), tool);
+  const rebind = (ir: ToolpathIR): ToolpathIR => {
+    const twin = byIdentity.get(cutterKeyOf(ir.tool));
+    return twin === undefined || twin === ir.tool ? ir : { ...ir, tool: twin };
+  };
+  return { ...plan, perSetup: plan.perSetup.map((setup) => ({ ...setup, programs: setup.programs.map(rebind) })) };
+}
+
+/** #1134 — the handoffs `planTwoOutcomes` accepts. */
+export interface TwoPlanOptions {
+  /**
+   * THE PICK'S MEASURED OWNED PLAN (#1134). The smart pick fully evaluates its finalists with
+   * `engraveGenerate`; the winning evaluation's plan IS the cut's owned plan, so the cut hands it
+   * through here and the owned half is not planned a second time. The reused plan was computed
+   * from the same input this call builds (the pick's own evaluation plans the owned half with the
+   * catalogue CONFIGURED — see `EngraveGenerateOptions.ownedOnly` — so the statements match too).
+   * `null`/absent: plan it here as before.
+   */
+  reusedOwned?: ModelPlanOutput | null;
+  /**
+   * THE OWNED HALF ONLY (#1134). The pick's full evaluation needs a real plan, but not the ideal
+   * comparison; skipping the ideal keeps each finalist at one plan's cost while the catalogue stays
+   * CONFIGURED in the input, so the plan a finalist stores is the plan the cut would have planned.
+   */
+  ownedOnly?: boolean;
+}
+
+/**
  * Run the cost-ranked plan twice — owned and ideal — and return both.
  *
  * The owned run gets `cutters.house` exactly as the caller supplied it (pinned keys included: the
@@ -52,8 +94,15 @@ export interface TwoPlanOutput {
  * owned set and the catalogue, with the pin DROPPED: the ideal answers "what would the best
  * available bit do", not "what would the operator's pin do".
  */
-export async function planTwoOutcomes(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<TwoPlanOutput> {
-  const owned = await planModelCam(
+export async function planTwoOutcomes(
+  input: ModelPlanInput,
+  opts: PlanModelCamOptions = {},
+  two: TwoPlanOptions = {},
+): Promise<TwoPlanOutput> {
+  const reused = two.reusedOwned === undefined || two.reusedOwned === null
+    ? null
+    : rebindToolsToHouse(two.reusedOwned, input.cutters.house);
+  const owned = reused ?? await planModelCam(
     {
       ...input,
       cutters: { house: input.cutters.house, catalogue: [], ...(input.cutters.pinned === undefined ? {} : { pinned: input.cutters.pinned }) },
@@ -64,6 +113,7 @@ export async function planTwoOutcomes(input: ModelPlanInput, opts: PlanModelCamO
     // #1052 — the trace's plan:start row names which of the two runs it is (6b's round).
     { ...opts, planKind: 'owned' },
   );
+  if (two.ownedOnly === true) return { owned, ideal: null, defaultPlan: 'owned' };
   const ideal = await planIdealOnly(input, opts);
   if (ideal === null) return { owned, ideal: null, defaultPlan: 'owned' };
   return { owned: enrichOwnedRestStatement(owned, ideal, input), ideal, defaultPlan: 'owned' };

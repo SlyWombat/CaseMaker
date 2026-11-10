@@ -100,9 +100,13 @@ export interface SmartPickOptions {
   /** Plans evaluated at all (default 16). */
   maxCandidates?: number;
   /**
-   * How many cutter-shape groups (the best single-cutter plan, the best flat-rest pair, the best
-   * V-rest pair…) are promoted to `full` as fallbacks BESIDE the whole top-fidelity tier, which is
-   * always fully evaluated. Default 3.
+   * The MAXIMUM number of candidates fully evaluated (#1134). The tie list — every plan whose
+   * coarse fidelity ties the best, in the pick's cheap objective order — comes first, then the
+   * best plan of each cutter-shape group as a fallback; only the first `fullFinalists` of that
+   * order are planned for real, and the pick STATES the cut (“12 tied, 3 fully planned”).
+   * Before #1134 the whole tie tier was always fully evaluated: on a flat-reachable lid every
+   * ball ties, so the search spent twelve full plans (~46 min) before the cut's own plan.
+   * Default 3.
    */
   fullFinalists?: number;
   /**
@@ -802,17 +806,52 @@ export async function smartPick(
     .slice(0, fullFinalists)
     .map((k) => byShape.get(k)!);
   for (const s of shapeFallbacks) if (!fullDone.has(planKey(s.plan))) fullList.push(s);
-  fullTotal = fullList.filter((s) => !fullDone.has(planKey(s.plan))).length;
-  for (const finalist of fullList) if (!fullDone.has(planKey(finalist.plan))) await full(finalist.plan);
-
-  // POSTING FIRST. A plan slice A's generator refuses is not a candidate to hand over, however
-  // well its geometry measures; promote further plans until at least one posts.
+  // #1134 — THE FULL EVALUATIONS ARE CAPPED. Every FINALIST is a full plan (seconds to minutes),
+  // and on a job whose candidates all tie — the lid: every ball reaches the goal — the tie tier
+  // alone was twelve full plans before the cut's own. The finalist SET above is unchanged (the
+  // fidelity tier, the #857 objective ties, the shape fallbacks), but its ORDER is the pick's own
+  // cheap estimate — `byObjective` over the coarse verdicts, counters first — and only the first
+  // `fullFinalists` of that order are planned for real. Before this, the #857 ties were appended
+  // AFTER the cap's slice (they were only ever reached because nothing was capped), which would
+  // have let a plan the objective ranks first be skipped for a later shape fallback.
+  //
+  // THE RULE'S PLAN COMES FIRST and keeps its full evaluation inside the cap: it is the pick's
+  // structural floor (#766 — "the measured search can never do WORSE than the rule's plan"), and
+  // the pre-#1134 promotion loop reached it only when every finalist refused. Capping without it
+  // would turn a job whose finalists all refuse into a refusal even though the rule's plan posts;
+  // one of the three slots is its own, and the remaining slots are the objective's order.
+  const finalistKeys = new Set(fullList.map((s) => planKey(s.plan)));
+  const ruleVerdict = rulePlan === null ? null : (verdicts.get(planKey(rulePlan)) ?? null);
+  const ruleKey = ruleVerdict === null ? null : planKey(ruleVerdict.plan);
+  const orderedFinalists = ordered().filter((s) => finalistKeys.has(planKey(s.plan)) || planKey(s.plan) === ruleKey);
+  const capOrder = ruleVerdict === null ? orderedFinalists : [ruleVerdict, ...orderedFinalists.filter((s) => planKey(s.plan) !== ruleKey)];
+  const plannedFinalists = capOrder.filter((s) => !fullDone.has(planKey(s.plan))).slice(0, fullFinalists);
+  const tiedCount = orderedFinalists.length;
+  if (tiedCount > plannedFinalists.length) {
+    // The ruling's own words (#1134): "12 tied, 3 fully planned".
+    notes.push(
+      `${tiedCount} tied, ${plannedFinalists.length} fully planned — the rest are ordered by the cheap estimate and scored coarse only`,
+    );
+  }
+  fullTotal = plannedFinalists.length;
+  for (const finalist of plannedFinalists) await full(finalist.plan);
+  // POSTING FIRST, AFTER THE CAP (the Manager's review of e03156484) — the promotion loop stays,
+  // but only in its own rare case: when NOTHING among the capped finalists posts (the rule's plan
+  // included), the search keeps promoting candidates in the objective's order until one posts, so
+  // a job is never refused while a posting plan exists. The common case never pays this, and the
+  // note STATES that the cap was exceeded and why.
   const postsSoFar = (): boolean => [...verdicts.entries()].some(([k, s]) => fullDone.has(k) && s.evaluation.ok);
   if (!postsSoFar()) {
     for (const candidate of ordered()) {
       const key = planKey(candidate.plan);
-      if (!fullDone.has(key)) await full(candidate.plan);
-      if (verdicts.get(key)!.evaluation.ok) break;
+      if (fullDone.has(key)) continue;
+      await full(candidate.plan);
+      if (verdicts.get(key)!.evaluation.ok) {
+        notes.push(
+          `none of the first ${plannedFinalists.length} fully planned candidate${plannedFinalists.length === 1 ? '' : 's'} posted; promoted ${key} until one did`,
+        );
+        break;
+      }
     }
   }
   const all = ordered();
