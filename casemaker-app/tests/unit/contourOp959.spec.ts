@@ -116,3 +116,41 @@ describe('#959 contour()', () => {
     ).toThrow(/no cutting diameter/);
   });
 });
+
+// #1160 — badge-blank-top: a 0.81 mm part cut with the model plan's DEFAULT_RELEASE_TABS (1 mm
+// tall) put the tab top at -(0.81 - 1) = +0.19 mm — ABOVE the stock top — and every candidate
+// plan was refused by the post's own rule ("a cutting move at Z=0.19 is above the stock top yet
+// below hopZ: a cut in the air"). A tab cannot be taller than the part it holds: the release
+// contour's tab is clamped to the cut's own thickness, so its top is at most the stock top.
+describe('#1160 the release tab cannot rise above the stock top', () => {
+  const shallow = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+
+  it('a 1 mm tab on a 0.81 mm part is clamped: no feed is posted above the stock top', () => {
+    const c = contourOf({ outline: rect(20, 10), area: 200, zTo: -0.81, frees: true, shoulders: [] });
+    const out = contour({
+      cutter: shallow, contour: c, region: region(),
+      depthMm: 0.81, tabs: { count: 4, width: 6, height: 1 },
+      offset: fakeRectOffset, params, rapid,
+    });
+    const moves = out.ir.operations[0]!.moves;
+    const airCuts = moves.filter((m) => m.kind === 'feed' && m.z > 1e-9);
+    expect(airCuts).toEqual([]);
+    // The tab's top is the part's own top: the crossing feeds run AT the stock top, not above it.
+    expect(moves.some((m) => m.kind === 'feed' && Math.abs(m.z) < 1e-9)).toBe(true);
+    // The mask states the SAME clamped height the moves keep.
+    expect(out.throughKerf).toBeUndefined(); // not a through cut here
+  });
+
+  it('a tab taller than a through cut’s stock is clamped to the stock thickness', () => {
+    const c = contourOf({ outline: rect(20, 10), area: 200, zTo: -0.5, frees: true, shoulders: [] });
+    const out = contour({
+      cutter: shallow, contour: c, region: region(),
+      depthMm: 0.8, thicknessMm: 0.5, through: true,
+      tabs: { count: 4, width: 6, height: 1 },
+      offset: fakeRectOffset, params, rapid,
+    });
+    const moves = out.ir.operations[0]!.moves;
+    expect(moves.filter((m) => m.kind === 'feed' && m.z > 1e-9)).toEqual([]);
+    expect(out.throughKerf!.tabHeight).toBeCloseTo(0.5, 9);
+  });
+});
