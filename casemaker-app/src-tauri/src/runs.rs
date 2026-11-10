@@ -197,6 +197,9 @@ struct RunEntry {
     events: broadcast::Sender<RunProgress>,
     dir: PathBuf,
     task: Option<tokio::task::JoinHandle<()>>,
+    /// When the run was submitted — the clock retention reads, so a long-lived service does not
+    /// keep every settled entry in memory for the life of the process.
+    created: SystemTime,
 }
 
 struct Inner {
@@ -434,6 +437,7 @@ impl Runs {
                 events,
                 dir,
                 task: None,
+                created: SystemTime::now(),
             },
         );
         inner.order.push(id.clone());
@@ -620,24 +624,49 @@ impl Runs {
 
     /// Remove scratch directories older than the retention window.
     pub fn prune(&self) {
-        let Ok(entries) = std::fs::read_dir(&self.config.root) else {
-            return;
-        };
         let now = SystemTime::now();
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let age = entry
-                .metadata()
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|m| now.duration_since(m).ok());
-            if age.is_some_and(|a| a > self.config.retention) {
-                let _ = std::fs::remove_dir_all(&path);
+        if let Ok(entries) = std::fs::read_dir(&self.config.root) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let age = entry
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|m| now.duration_since(m).ok());
+                if age.is_some_and(|a| a > self.config.retention) {
+                    let _ = std::fs::remove_dir_all(&path);
+                }
             }
         }
+        // The entries are memory, and a house service runs for weeks. A settled run older than
+        // the retention window loses its entry too — the directory it served is already gone.
+        let mut inner = self.inner.lock().expect("runs lock");
+        let stale: Vec<String> = inner
+            .order
+            .iter()
+            .filter(|id| {
+                inner
+                    .runs
+                    .get(*id)
+                    .map(|e| {
+                        e.state.terminal()
+                            && e.created
+                                .elapsed()
+                                .map(|age| age > self.config.retention)
+                                .unwrap_or(false)
+                    })
+                    // An entry the map does not hold is a leftover order id.
+                    .unwrap_or(true)
+            })
+            .cloned()
+            .collect();
+        for id in &stale {
+            inner.runs.remove(id);
+        }
+        inner.order.retain(|id| !stale.contains(id));
     }
 
     /// Run the child: argv array (never a shell), stderr as progress, stdout as the `--json`
@@ -1017,6 +1046,52 @@ mod tests {
         assert!(!valid_program_name(".."));
         assert!(valid_run_id("run-1a2b-3"));
         assert!(!valid_run_id("../x"));
+    }
+
+    #[test]
+    fn retention_prunes_settled_entries_from_memory_but_never_a_running_one() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let root = dir.path().join("runs");
+        std::fs::create_dir_all(&root).expect("the root");
+        let runs = Runs::new(RunsConfig {
+            node: PathBuf::from("/bin/true"),
+            cli: PathBuf::from("/bin/true"),
+            root,
+            concurrency: 1,
+            max_queue: 1,
+            wall_clock: Duration::from_secs(5),
+            retention: Duration::from_secs(60),
+        });
+        let entry = |state: RunState| {
+            let (events, _) = broadcast::channel(8);
+            RunEntry {
+                state,
+                queue_position: None,
+                progress: None,
+                receipt: None,
+                programs: Vec::new(),
+                finding: None,
+                log: Vec::new(),
+                events,
+                dir: dir.path().join("gone"),
+                task: None,
+                created: SystemTime::now() - Duration::from_secs(3600),
+            }
+        };
+        {
+            let mut inner = runs.inner.lock().expect("runs lock");
+            inner
+                .runs
+                .insert("run-done".to_owned(), entry(RunState::Done));
+            inner
+                .runs
+                .insert("run-running".to_owned(), entry(RunState::Running));
+            inner.order.push("run-done".to_owned());
+            inner.order.push("run-running".to_owned());
+        }
+        runs.prune();
+        assert!(runs.snapshot("run-done").is_none(), "a settled entry past retention is gone");
+        assert!(runs.snapshot("run-running").is_some(), "a running entry is never pruned");
     }
 
     // — the routes, end to end, against a fake node (#1126 amendments 2 and 3) ——————————————
