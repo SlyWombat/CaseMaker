@@ -2776,6 +2776,10 @@
                             "description": "Clearance kept from corners, in millimetres.",
                             "type": "number"
                           },
+                          "cutBlankAgreeMm": {
+                            "description": "How close two touches on a cut blank must agree, in millimetres.",
+                            "type": "number"
+                          },
                           "edgeBandMm": {
                             "default": 4,
                             "description": "Half-width of the edge-find band around the expected edge, in millimetres.",
@@ -2929,6 +2933,37 @@
                           "cornerRadius"
                         ],
                         "type": "object"
+                      },
+                      "surfaceChecks": {
+                        "description": "Touch points on a cut blank, with their known depths.",
+                        "items": {
+                          "properties": {
+                            "depthMm": {
+                              "description": "How far the point sits below the blank’s uncut top, millimetres (0 = uncut).",
+                              "type": "number"
+                            },
+                            "x": {
+                              "description": "The check point’s X in the work frame, millimetres.",
+                              "type": "number"
+                            },
+                            "y": {
+                              "description": "The check point’s Y in the work frame, millimetres.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y",
+                            "depthMm"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "surfaceChecksUnknown": {
+                        "const": true,
+                        "description": "The check points sit outside today’s footprint: earlier cuts are unrecorded.",
+                        "type": "boolean"
                       },
                       "surfacePoint": {
                         "description": "Work-coordinate point where the surface is probed.",
@@ -4644,6 +4679,10 @@
                         "description": "Clearance kept from corners, in millimetres.",
                         "type": "number"
                       },
+                      "cutBlankAgreeMm": {
+                        "description": "How close two touches on a cut blank must agree, in millimetres.",
+                        "type": "number"
+                      },
                       "edgeBandMm": {
                         "default": 4,
                         "description": "Half-width of the edge-find band around the expected edge, in millimetres.",
@@ -4797,6 +4836,37 @@
                       "cornerRadius"
                     ],
                     "type": "object"
+                  },
+                  "surfaceChecks": {
+                    "description": "Touch points on a cut blank, with their known depths.",
+                    "items": {
+                      "properties": {
+                        "depthMm": {
+                          "description": "How far the point sits below the blank’s uncut top, millimetres (0 = uncut).",
+                          "type": "number"
+                        },
+                        "x": {
+                          "description": "The check point’s X in the work frame, millimetres.",
+                          "type": "number"
+                        },
+                        "y": {
+                          "description": "The check point’s Y in the work frame, millimetres.",
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y",
+                        "depthMm"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "surfaceChecksUnknown": {
+                    "const": true,
+                    "description": "The check points sit outside today’s footprint: earlier cuts are unrecorded.",
+                    "type": "boolean"
                   },
                   "surfacePoint": {
                     "description": "Work-coordinate point where the surface is probed.",

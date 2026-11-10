@@ -2205,9 +2205,12 @@ const registrationPlanSchema = z.object({
   surfaceChecks: z
     .array(
       z.object({
-        x: z.number().finite(),
-        y: z.number().finite(),
-        depthMm: z.number().finite(),
+        x: z.number().finite().describe('The check point’s X in the work frame, millimetres.'),
+        y: z.number().finite().describe('The check point’s Y in the work frame, millimetres.'),
+        depthMm: z
+          .number()
+          .finite()
+          .describe('How far the point sits below the blank’s uncut top, millimetres (0 = uncut).'),
       }),
     )
     .optional()
