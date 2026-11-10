@@ -847,6 +847,13 @@ pub struct MachineRecord {
     /// `MarginSettings` (#345), as the client sent it.
     #[serde(default)]
     pub margins: Option<serde_json::Value>,
+    /// #1123-40 — the registrations this machine holds, one per job setup, as the client sent it:
+    /// the record a registration measured, keyed by job and setup, carrying the G54 X/Y its origin
+    /// write left in the controller. The client restores one only while the controller's live G54
+    /// X/Y still matches, and drops an unreadable entry rather than failing the machine. Omitted
+    /// while absent, so a record written before the section round-trips without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registrations: Option<serde_json::Value>,
     /// An optional controllable power switch (#416). None is the default and the common case. Written
     /// only through `/api/v1/power/:id`; a machine PUT keeps whatever is stored (`put_machine`).
     #[serde(default)]
@@ -1162,6 +1169,7 @@ mod tests {
             power: None,
             wasteboard: None,
             finished_programs: Vec::new(),
+            registrations: None,
             updated_at: "2026-10-15T00:00:00.000Z".into(),
         }
     }

@@ -37,6 +37,7 @@ import { FeedsTableSchema } from './feedClient';
 import { ShopDefaultsSchema } from './defaultsClient';
 import { PowerSwitchSchema } from './powerClient';
 import { WasteboardSchema, ScarSchema } from '@/engine/cnc/wasteboard';
+import { RegistrationsSchema } from './registrationMemo';
 
 /** Magic string that says "this is a Case Maker location file". Equal to `location.rs`'s. */
 export const LOCATION_KIND = 'casemaker-location';
@@ -452,6 +453,13 @@ export const MachineRecordSchema = z.object({
   finishedPrograms: z
     .array(z.string().min(1).refine((h) => h === h.trim(), 'a hash has no space at either end'))
     .default([]),
+  /**
+   * #1123-40 — the registrations this machine holds, one per job setup, each carrying the G54 X/Y
+   * its origin write left in the controller. Restored on a reload only while the machine's live
+   * work offset still matches; an unreadable entry is dropped (a bad memo costs a re-register,
+   * never a machine the app cannot read). Absent on records written before the section existed.
+   */
+  registrations: RegistrationsSchema,
   /** The machine's bed profiles, same presence rule; `[]` is a deliberately emptied description. */
   bedProfiles: z.array(BedProfileSchema).optional(),
   /** The one active profile; present exactly when `bedProfiles` holds at least one. */

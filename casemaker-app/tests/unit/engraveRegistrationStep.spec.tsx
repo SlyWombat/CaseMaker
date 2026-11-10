@@ -18,6 +18,9 @@ import { useLocationStore } from '@/store/locationStore';
 import type { MachineRecord } from '@/platform/locationClient';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import { resetMachineStore, useMachineStore } from '@/store/machineStore';
+import { readStatusLine } from '@/platform/desktop/protocol';
+import type { RegistrationMemo } from '@/platform/registrationMemo';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { BUNDLED_FONT_KEYS, clearFontCacheForTest, registerBundledFontBytes } from '@/engine/fonts/registry';
@@ -301,6 +304,7 @@ beforeEach(() => {
   savedJob = useEngraveJobStore.getState().job;
   resetEngraveRegistrationStore();
   resetRegistrationTouchesStore();
+  resetMachineStore();
 });
 
 afterEach(() => {
@@ -950,8 +954,11 @@ describe('#638 — the placement frame waits for the acceptance', () => {
     // The frame is the measured face, on the record BEFORE the origin was written…
     const recorded = firstRegistrationFor(job.id, TARGET)!;
     expect(visePlacementOf(saves[0]!)?.frame?.fixedJawFaceX).toBeCloseTo(recorded.outcome.correctedG54.x, 3);
-    // …and the acceptance found it already there: no second frame write.
-    expect(saves).toHaveLength(1);
+    // …and the acceptance found it already there: no second frame write. The ONE write the
+    // acceptance makes is the registration memo (#1123-40): the bed it was given is unchanged.
+    expect(saves).toHaveLength(2);
+    expect(saves[1]!.bedProfiles).toEqual(useLocationStore.getState().location!.machines[0]!.bedProfiles);
+    expect(saves[1]!.registrations?.[0]?.jobId).toBe(job.id);
   });
 
   it('#642 the surface top written is the CENTRE reading, not the spread’s lowest touch', async () => {
@@ -1336,7 +1343,9 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
   }
 
   /** The machine: a measured ⌀2 probe, and the bracket's seat datum that probe wrote. */
+  const flipSaves: MachineRecord[] = [];
   function flipLocation(): void {
+    flipSaves.length = 0;
     useLocationStore.setState({
       status: 'present',
       etag: '"e1"',
@@ -1380,6 +1389,11 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
           },
         ],
       } as never,
+      // #1123-40 — the origin write now also files the registration memo in the same PUT.
+      saveMachine: async (record: MachineRecord) => {
+        flipSaves.push(record);
+        return 'ok';
+      },
     });
   }
 
@@ -1514,6 +1528,15 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
     expect(useEngraveRegistrationStore.getState().records[job.id]).toBeUndefined();
     expect(useEngraveRegistrationStore.getState().bySetup[`${job.id}::${job.setups![0]!.id}`]).toBeDefined();
     expect(screen.getByTestId('engrave-registration-recorded').textContent).toContain('Setup 1’s registration recorded');
+    // #1123-40 — the memo is the SETUP's (its id and 1-based index), carrying the G54 the press wrote.
+    const memo = flipSaves.at(-1)?.registrations?.find((m) => m.jobId === job.id);
+    const setupRecord = useEngraveRegistrationStore.getState().bySetup[`${job.id}::${job.setups![0]!.id}`]!;
+    expect(memo?.setupId).toBe(job.setups![0]!.id);
+    expect(memo?.setupIndex).toBe(1);
+    expect(memo?.writtenG54).toEqual({
+      x: setupRecord.outcome.correctedG54.x,
+      y: setupRecord.outcome.correctedG54.y,
+    });
   }, 60_000);
 
   it('routes by the Cut screen’s CURRENT setup: setup 2 is the flipped card and files its own record, setup 1 is the ordinary one', async () => {
@@ -1803,5 +1826,192 @@ describe('#1123-28 — the Register card never silently runs a stored plan the p
     cleanup();
     render(<EngraveRegistrationStep job={useEngraveJobStore.getState().job} target={TARGET} />);
     await waitFor(() => expect(screen.queryByTestId('engrave-registration-plan-drift')).toBeNull());
+  });
+});
+
+describe('#1123-40 — the registration survives a reload, keyed by job + setup + the written G54', () => {
+  const LINE_MATCH = `<Idle|MPos:19.344,23.001,-5.000|WPos:10.000,20.000,-5.000|F:0|S:0|T:1,0.047,-1>`;
+  const LINE_MOVED = `<Idle|MPos:19.700,23.001,-5.000|WPos:10.000,20.000,-5.000|F:0|S:0|T:1,0.047,-1>`;
+
+  function memoFor(job: EngraveJob, plan: RegistrationPlan, over: Partial<RegistrationMemo> = {}): RegistrationMemo {
+    return {
+      jobId: job.id,
+      setupId: job.setups![0]!.id,
+      setupIndex: 1,
+      writtenG54: { x: 9.344, y: 3.001 },
+      writtenAt: '2026-11-09T14:00:00.000Z',
+      registration: {
+        plan,
+        outcome: {
+          correctedG54: { x: 9.344, y: 3.001 },
+          currentG54: { x: 9.1, y: 3.0 },
+          surfaceZ: plan.seek.band.max,
+          usable: true,
+          problems: [],
+          notes: [],
+          measured: { x: true, y: true },
+        } as never,
+        surface: null,
+        measuredAt: '2026-11-09T13:59:00.000Z',
+      },
+      ...over,
+    };
+  }
+
+  /** A location whose machine carries the memo, with saves captured. */
+  function locationWithMemo(memo: RegistrationMemo | null): MachineRecord[] {
+    const saves: MachineRecord[] = [];
+    const bed = {
+      id: 'bp1',
+      datums: { surfaceTopZ: null, viseJawTopZ: null, bracketSeatZ: null, rotaryAxis: null },
+      placements: [],
+      surface: null,
+      history: [],
+    };
+    useLocationStore.setState({
+      status: 'present',
+      etag: '"e1"',
+      reason: null,
+      writeNote: null,
+      location: {
+        machines: [
+          {
+            id: 'm1',
+            profileId: 'Z1',
+            address: { host: TARGET.host, port: TARGET.port },
+            bedProfiles: [bed],
+            activeBedProfileId: 'bp1',
+            history: [],
+            notes: [],
+            observedAt: '2026-11-09T14:00:00.000Z',
+            ...(memo === null ? {} : { registrations: [memo] }),
+          },
+        ],
+        accessories: [],
+      } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>,
+      saveMachine: async (record: MachineRecord) => {
+        saves.push(record);
+        return 'ok';
+      },
+    });
+    return saves;
+  }
+
+  function machineObservation(status: string) {
+    return {
+      name: 'Makera_Z1_010290',
+      host: TARGET.host,
+      port: TARGET.port,
+      busy: false,
+      ip: null,
+      mac: null,
+      status,
+      statusLine: readStatusLine(status),
+      profileId: 'Z1',
+      observedAt: '2026-11-09T15:00:00.000Z',
+      notes: [],
+    };
+  }
+
+  function heartbeat(line: string): void {
+    useMachineStore.setState({
+      machine: machineObservation(line),
+      heartbeat: { reachable: true, lastSeenAt: '2026-11-09T15:00:00.000Z' },
+    });
+  }
+
+  it('restores the record after a reload when the machine’s G54 still matches, and says the scope of the check', () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    locationWithMemo(memoFor(job, plan));
+    heartbeat(LINE_MATCH);
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    const restored = firstRegistrationFor(job.id, TARGET);
+    expect(restored).not.toBeNull();
+    expect(restored!.restored).toEqual({
+      checkedAt: expect.any(String),
+      g54: { x: 9.344, y: 3.001 },
+      setupIndex: 1,
+    });
+    // The measurement's own clock travels with it, never the reload's.
+    expect(restored!.measuredAt).toBe('2026-11-09T13:59:00.000Z');
+    const line = screen.getByTestId('engrave-registration-restore');
+    expect(line.textContent).toContain('G54 X/Y verified at');
+    expect(line.textContent).toContain('Z as written then');
+  });
+
+  it('does not restore when the machine’s G54 moved since the memo was written: it says so and asks for a re-register', () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    locationWithMemo(memoFor(job, plan));
+    heartbeat(LINE_MOVED);
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
+    const line = screen.getByTestId('engrave-registration-restore');
+    expect(line.textContent).toContain('written at G54 X 9.344 Y 3.001');
+    expect(line.textContent).toContain('now reads X 9.700 Y 3.001');
+    expect(line.textContent).toContain('register again');
+  });
+
+  it('waits for the machine, then restores when its answer arrives', async () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    locationWithMemo(memoFor(job, plan));
+    // The machine is remembered, but no heartbeat has answered this session yet.
+    useMachineStore.setState({
+      machine: machineObservation('<Idle>'),
+      heartbeat: { reachable: null, lastSeenAt: null },
+    });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
+    expect(screen.getByTestId('engrave-registration-restore').textContent).toContain('will be checked against the machine');
+
+    await act(async () => {
+      useMachineStore.getState().noteLiveStatusLine(LINE_MATCH);
+      useMachineStore.getState().noteHeartbeat(true);
+    });
+    expect(firstRegistrationFor(job.id, TARGET)?.restored).toBeDefined();
+  });
+
+  it('never hands side 1 a memo for another setup', () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    locationWithMemo(memoFor(job, plan, { setupId: 'a-different-setup', setupIndex: 2 }));
+    heartbeat(LINE_MATCH);
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    expect(firstRegistrationFor(job.id, TARGET)).toBeNull();
+    expect(screen.queryByTestId('engrave-registration-restore')).toBeNull();
+  });
+
+  it('writes the memo when the origin is written: the written G54, the job and the setup', async () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    install(plan);
+    const saves = locationWithMemo(null);
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await runStep();
+    await writeOrigin();
+    await screen.findByTestId('engrave-registration-recorded');
+
+    const recorded = firstRegistrationFor(job.id, TARGET)!;
+    const last = saves[saves.length - 1]!;
+    const memo = last.registrations?.find((m) => m.jobId === job.id);
+    expect(memo).toBeDefined();
+    expect(memo!.setupId).toBe(job.setups![0]!.id);
+    expect(memo!.setupIndex).toBe(1);
+    expect(memo!.writtenG54).toEqual({
+      x: recorded.outcome.correctedG54.x,
+      y: recorded.outcome.correctedG54.y,
+    });
+    expect(memo!.registration.measuredAt).toBe(recorded.measuredAt);
+    expect(memo!.registration.outcome).toEqual(recorded.outcome);
+    // The memo write is not a frame write: the bed it was given is unchanged.
+    expect(last.bedProfiles).toEqual(useLocationStore.getState().location!.machines[0]!.bedProfiles);
   });
 });

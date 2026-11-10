@@ -80,7 +80,19 @@ import { jobVise } from '@/engine/cnc/fixture';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
-import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import { registrationKey, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+// #1123-40 — THE REGISTRATION MEMO: the record kept on the house's machine record, restored on a
+// reload only while the machine's G54 X/Y still matches the one its origin write left.
+import {
+  assessRegistrationMemo,
+  memoFromRecord,
+  registrationMemoFor,
+  restoredRegistration,
+  withRegistrationMemo,
+  type RegistrationAnswer,
+  type RegistrationMemoVerdict,
+} from '@/platform/registrationMemo';
+import { readStatusLine, workOffset } from '@/platform/desktop/protocol';
 import {
   createFirstBed,
   machineAt,
@@ -261,6 +273,100 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const bracketSeat = useMemo(() => bracketSeatDatumFor(machineRecord), [machineRecord]);
   const placedSeed = useMemo(() => bracketPlacementSeedFor(machineRecord), [machineRecord]);
   const registrations = useEngraveRegistrationStore((s) => s.records);
+  // #1123-40 — the per-setup records, so a restored side 2 is filed where #1088 reads it.
+  const bySetup = useEngraveRegistrationStore((s) => s.bySetup);
+  // #1123-40 — THE SETUP THIS CARD IS ABOUT: side 2's flipped setup follows the Cut screen's index;
+  // every other card registers setup 1's approved plan. The memo is looked up under BOTH the setup's
+  // id (the store's key) and its 1-based index (the Cut screen's name for it).
+  const flippedSetup = job.setups?.[setupNumber - 1]?.flip !== undefined;
+  const registrationSetup = flippedSetup ? (job.setups?.[setupNumber - 1] ?? null) : (job.setups?.[0] ?? null);
+  const registrationSetupIndex =
+    registrationSetup === null ? 1 : (job.setups?.findIndex((s) => s.id === registrationSetup.id) ?? 0) + 1;
+  // The heartbeat's answer and its status line, for the memo's G54 check — the same 2 s read the
+  // status strip draws, never a new socket.
+  const heartbeat = useMachineStore((s) => s.heartbeat);
+  const liveMachine = useMachineStore((s) => s.machine);
+  const restoreJob = useEngraveRegistrationStore((s) => s.restoreJob);
+  const restoreSetup = useEngraveRegistrationStore((s) => s.restoreSetup);
+  const [restoreVerdict, setRestoreVerdict] = useState<RegistrationMemoVerdict | null>(null);
+
+  // #1123-40 — RESTORE FROM THE HOUSE, ONCE THE MACHINE HAS SAID WHERE ITS G54 IS. The memo is the
+  // record this job's setup last wrote — the plan, the outcome, the measuredAt. It is put back only
+  // when the machine's live `MPos − WPos` (#933) still equals the X/Y the G10 line wrote. A moved
+  // G54, an unreachable machine, or a line without both positions restores nothing: the card says
+  // why, and the job is registered again.
+  useEffect(() => {
+    if (target === null || registrationSetup === null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the verdict is derived from the location, registration and machine stores together; there is no render-time seam that sees all three without writing this one piece of view state
+      setRestoreVerdict(null);
+      return;
+    }
+    const memo = registrationMemoFor(machineRecord, job.id, registrationSetup.id);
+    // BOTH halves of the key must agree: the setup's id (the store's key) and its 1-based index.
+    // A reordered setup list moves the index and refuses the restore — safe, never a swapped side.
+    if (memo === null || memo.setupIndex !== registrationSetupIndex) {
+      setRestoreVerdict(null);
+      return;
+    }
+    const existing = flippedSetup
+      ? bySetup[registrationKey(job.id, registrationSetup.id)]
+      : registrations[job.id];
+    const existingHere =
+      existing !== undefined && existing.target.host === target.host && existing.target.port === target.port;
+    if (existingHere) {
+      // A record for this machine is already in the session — the run's own UI speaks for it. The
+      // one this effect restored keeps its provenance line.
+      if (existing.restored === undefined) setRestoreVerdict(null);
+      return;
+    }
+    const answer: RegistrationAnswer =
+      heartbeat.reachable === null
+        ? 'unknown'
+        : heartbeat.reachable === false
+          ? 'unreachable'
+          : liveMachine !== null && liveMachine.host === target.host && liveMachine.port === target.port
+            ? 'target'
+            : 'elsewhere';
+    const line =
+      answer === 'target' && liveMachine !== null
+        ? (liveMachine.statusLine ?? readStatusLine(liveMachine.status ?? ''))
+        : null;
+    const verdict = assessRegistrationMemo({
+      memo,
+      answer,
+      liveG54: line === null ? null : workOffset(line),
+      now: new Date().toISOString(),
+    });
+    if (verdict.kind === 'restored') {
+      const rec = restoredRegistration(verdict, target);
+      if (flippedSetup) restoreSetup(rec);
+      else restoreJob(rec);
+    }
+    // A verdict that says the same thing does not re-render every heartbeat; only a change does.
+    setRestoreVerdict((prev) =>
+      prev !== null &&
+      prev.kind === verdict.kind &&
+      prev.words === verdict.words &&
+      prev.g54Read?.x === verdict.g54Read?.x &&
+      prev.g54Read?.y === verdict.g54Read?.y
+        ? prev
+        : verdict,
+    );
+    // The heartbeat and the live line are the check; the memo and the session record are its input.
+  }, [
+    target,
+    machineRecord,
+    job.id,
+    registrationSetup,
+    registrationSetupIndex,
+    flippedSetup,
+    bySetup,
+    registrations,
+    heartbeat,
+    liveMachine,
+    restoreJob,
+    restoreSetup,
+  ]);
   // #1088 — the cut-extent measurement side 1's run left: its highest reading is side 1's top, the
   // thickness the carried Z0 is stated from (the same source the sheet's flipZ0 reads).
   const surfaces = useEngraveRegistrationStore((s) => s.surfaces);
@@ -1036,23 +1142,54 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         await handle.close();
         return;
       }
-      // #638 — THE FRAME FOLLOWS THE ACCEPTANCE. A run outside the margin wrote no placement frame
-      // and no surface top at measurement time (see `start`); pressing this button IS the operator
-      // accepting the found position, so both land here, with the origin they belong to. A frame
-      // whose measurement-time save failed is retried the same way. `frameSavedRef` is what keeps
-      // the ordinary in-margin write from landing twice.
-      // #1088 — NEVER FROM A FLIP RUN: side 2's G54 corrects the work frame for the turned blank; the
-      // placement frame records where the bed's fixed jaw is, and writing side 2's origin there would
-      // aim every later jaw tap and plan at the flipped pose.
-      if (!frameSavedRef.current && !flipRun && runPlan.mount === 'vise') {
-        const machine = machineAt(target);
-        if (machine !== null) {
-          const now = new Date().toISOString();
-          const registration = { measuredAt: now, correctedG54: result.outcome.correctedG54 };
-          const bed = await createFirstBed(machine, registration, now);
-          // #650 — folded onto the record the service holds, re-applied after a stale guard.
-          const update: MachineUpdate = (current) => {
-            let rec = bed(current);
+      // #1123-40 — THE RECORD FIRST, THEN THE MEMO IS ITS COPY. The session record stamps its own
+      // measuredAt and holds the plan/outcome the release gate reads; the memo is built FROM that
+      // record, so the session and the house can never disagree about what was measured.
+      // #1088 — SIDE 2'S ORIGIN IS WRITTEN, BUT NOT INTO SIDE 1'S RECORD. `FirstRegistration` is
+      // keyed by JOB and its plan/outcome are what the release gate and the post-facing re-touch
+      // read for side 1; side 2 is filed under its own setup id.
+      if (flipRun) {
+        if (selectedSetup !== null) {
+          recordSetup(job.id, selectedSetup.id, target, runPlan, result.outcome, null);
+        }
+      } else {
+        record(
+          job.id,
+          target,
+          runPlan,
+          result.outcome,
+          // #608 — carry the fitted tilt (plane + reference Z0) on the record when the measurement
+          // fits one; a flat fit records null, so the Cut step re-posts only when there is a tilt.
+          result.spread === undefined ? null : surfaceFitForPost(result.spread),
+          // #1088 — the setup this registration measured, so a per-setup reader asks and gets setup 1.
+          job.setups?.[0]?.id ?? null,
+        );
+      }
+      const memoSetup = flipRun ? selectedSetup : (job.setups?.[0] ?? null);
+      const memoIndex = memoSetup === null ? 0 : (job.setups?.findIndex((s) => s.id === memoSetup.id) ?? -1) + 1;
+      const stored =
+        memoSetup === null
+          ? null
+          : flipRun
+            ? (useEngraveRegistrationStore.getState().bySetup[registrationKey(job.id, memoSetup.id)] ?? null)
+            : (useEngraveRegistrationStore.getState().records[job.id] ?? null);
+      const memo =
+        stored !== null && memoSetup !== null && memoIndex >= 1
+          ? memoFromRecord(stored, memoSetup.id, memoIndex, new Date().toISOString())
+          : null;
+      // #638 — THE FRAME FOLLOWS THE ACCEPTANCE … and the memo rides the SAME write, so an ordinary
+      // acceptance is one PUT, never two. A record's setup has no frame to write when the run is
+      // side 2's (#1088) or the mount is not the vise; the memo still lands.
+      const machine = target === null ? null : machineAt(target);
+      const wantsFrame = !frameSavedRef.current && !flipRun && runPlan.mount === 'vise';
+      if (machine !== null && (wantsFrame || memo !== null)) {
+        const now = new Date().toISOString();
+        const registration = { measuredAt: now, correctedG54: result.outcome.correctedG54 };
+        const bed = wantsFrame ? await createFirstBed(machine, registration, now) : null;
+        // #650 — folded onto the record the service holds, re-applied after a stale guard.
+        const update: MachineUpdate = (current) => {
+          let rec = bed === null ? current : bed(current);
+          if (bed !== null) {
             rec = withVisePlacementFrame(
               rec,
               // #652 — the jaw start THIS run was measured with (stashed at start), not the render's:
@@ -1068,43 +1205,22 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               runPlan.probe?.id ?? null,
               now,
             );
-            return rec;
-          };
-          const answer = await saveMachineWithRetry(machine, update);
-          if (answer === 'ok') frameSavedRef.current = true;
-          else {
-            result.outcome.notes.push(
-              `the origin was written, but the placement frame was not saved: ${useLocationStore.getState().writeNote ?? 'the service refused the write'}. Run the registration again to write it.`,
-            );
           }
+          return memo === null ? rec : withRegistrationMemo(rec, memo);
+        };
+        const answer = await saveMachineWithRetry(machine, update);
+        if (answer === 'ok') {
+          if (bed !== null) frameSavedRef.current = true;
+        } else if (bed !== null) {
+          result.outcome.notes.push(
+            `the origin was written, but the placement frame was not saved: ${useLocationStore.getState().writeNote ?? 'the service refused the write'}. Run the registration again to write it.`,
+          );
+        } else if (memo !== null) {
+          result.outcome.notes.push(
+            `the origin was written, but the registration was not saved on the house: ${useLocationStore.getState().writeNote ?? 'the service refused the write'}. A reload will ask you to register again.`,
+          );
         }
       }
-      // #1088 — SIDE 2'S ORIGIN IS WRITTEN, BUT NOT INTO SIDE 1'S RECORD. `FirstRegistration` is
-      // keyed by JOB and its plan/outcome are what the release gate and the post-facing re-touch
-      // read for side 1; writing side 2's measurement there would replace them. A flip job needs a
-      // per-setup record (named follow-up on #1088) — until then, the recorded sentence below says
-      // exactly what was and was not written.
-      if (flipRun) {
-        if (selectedSetup !== null) {
-          recordSetup(job.id, selectedSetup.id, target, runPlan, result.outcome, null);
-        }
-        setWritten(a);
-        setPhase('recorded');
-        handleRef.current = null;
-        await handle.close();
-        return;
-      }
-      record(
-        job.id,
-        target,
-        runPlan,
-        result.outcome,
-        // #608 — carry the fitted tilt (plane + reference Z0) on the record when the measurement
-        // fits one; a flat fit records null, so the Cut step re-posts only when there is a tilt.
-        result.spread === undefined ? null : surfaceFitForPost(result.spread),
-        // #1088 — the setup this registration measured, so a per-setup reader asks and gets setup 1.
-        job.setups?.[0]?.id ?? null,
-      );
       setWritten(a);
       setPhase('recorded');
       handleRef.current = null;
@@ -1170,6 +1286,18 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       <h3 style={{ margin: '0 0 4px', fontSize: 12, fontWeight: 600, color: '#c8d3de' }}>
         Registration — find the stock, then set the origin
       </h3>
+
+      {/* #1123-40 — WHAT THE HOUSE HELD, AND WHAT COULD BE CHECKED. Restored / refusing / waiting is
+          the memo's verdict, in its own words; the X/Y scope of the check is stated in the sentence. */}
+      {restoreVerdict !== null && restoreVerdict.words !== null && (
+        <p
+          data-testid="engrave-registration-restore"
+          data-kind={restoreVerdict.kind}
+          style={{ ...MUTED, color: restoreVerdict.kind === 'restored' ? OK : restoreVerdict.kind === 'mismatch' ? WARN : MUTED.color }}
+        >
+          {restoreVerdict.words}
+        </p>
+      )}
 
       {target === null && (
         <p style={{ ...MUTED, color: WARN }} data-testid="engrave-registration-no-machine">
