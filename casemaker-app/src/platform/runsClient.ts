@@ -90,7 +90,21 @@ function parseJson<T>(text: string): { ok: true; value: T } | { ok: false; detai
 }
 
 /** Submit a job. The service validates the shop's ETag (412 when it moved) and the queue (429). */
-export async function submitRun(body: { job: unknown; shopEtag?: string | null }): Promise<RunsSubmit> {
+/**
+ * #1175 — the inputs a Generate carries beyond the job document. The browser's call passes the
+ * app's own tool library (the ideal plan's candidate set, `getTools().map((entry) => entry.tool)`)
+ * and the run-sheet's ladder press; both are forwarded so the house CLI plans with the same inputs
+ * rather than its own disk snapshot. Absent: the CLI keeps its bootstrap behaviour, exactly as a
+ * pre-#1175 submit.
+ */
+export async function submitRun(body: {
+  job: unknown;
+  shopEtag?: string | null;
+  /** #1046 — the virtual ladder on the owned plan (the CLI's `--rest-ladder`). */
+  restLadder?: boolean;
+  /** #961 — the ideal plan's candidate set, as the browser's Generate passes it. */
+  tools?: readonly unknown[];
+}): Promise<RunsSubmit> {
   const res = await houseRequest('POST', '/runs', body, { timeoutMs: RUNS_TIMEOUT_MS });
   if (res.kind !== 'ok') return res;
   const parsed = parseJson<{ runId: string; queuePosition: number; key: RunsKey }>(res.text);

@@ -201,6 +201,11 @@ struct RunEntry {
     log: Vec<RunProgress>,
     events: broadcast::Sender<RunProgress>,
     dir: PathBuf,
+    /// #1175 — the run sheet's ladder press, as the submit carried it (`--rest-ladder`).
+    rest_ladder: bool,
+    /// #1175 — the browser's tool list written beside the job, as the submit carried it
+    /// (`--tools`); `None` when the submit carried none.
+    tools_path: Option<PathBuf>,
     task: Option<tokio::task::JoinHandle<()>>,
     /// When the run was submitted — the clock retention reads, so a long-lived service does not
     /// keep every settled entry in memory for the life of the process.
@@ -402,6 +407,23 @@ impl Runs {
             Ok(b) => b,
             Err(e) => return SubmitOutcome::BadRequest(format!("the job cannot be written: {e}")),
         };
+        // #1175 — THE TWO GENERATE INPUTS THAT ARE NOT IN THE JOB DOCUMENT. The browser's Generate
+        // passes the app's whole tool library as the ideal plan's candidate set and the run
+        // sheet's ladder press; both ride the submit so the CLI plans from the same inputs rather
+        // than its own location/catalogue snapshot. Absent: the CLI's bootstrap, as before.
+        let rest_ladder = body.get("restLadder").and_then(Value::as_bool) == Some(true);
+        let tools_bytes = match body.get("tools") {
+            None | Some(Value::Null) => None,
+            Some(tools) if tools.is_array() => match serde_json::to_vec(tools) {
+                Ok(bytes) => Some(bytes),
+                Err(e) => {
+                    return SubmitOutcome::BadRequest(format!("the tools cannot be written: {e}"))
+                }
+            },
+            Some(_) => {
+                return SubmitOutcome::BadRequest("the request's tools must be an array".to_owned())
+            }
+        };
         // Admission first: a full queue refuses before a scratch directory exists.
         {
             let inner = self.inner.lock().expect("runs lock");
@@ -421,6 +443,19 @@ impl Runs {
             let _ = std::fs::remove_dir_all(&dir);
             return SubmitOutcome::Unavailable(format!("the house could not write the job: {e}"));
         }
+        let tools_path = match tools_bytes {
+            None => None,
+            Some(bytes) => {
+                let path = dir.join("tools.json");
+                if let Err(e) = std::fs::write(&path, &bytes) {
+                    let _ = std::fs::remove_dir_all(&dir);
+                    return SubmitOutcome::Unavailable(format!(
+                        "the house could not write the tools: {e}"
+                    ));
+                }
+                Some(path)
+            }
+        };
         let (events, _) = broadcast::channel(256);
         let mut inner = self.inner.lock().expect("runs lock");
         let start = inner.active < self.config.concurrency;
@@ -441,6 +476,8 @@ impl Runs {
                 log: Vec::new(),
                 events,
                 dir,
+                rest_ladder,
+                tools_path,
                 task: None,
                 created: SystemTime::now(),
             },
@@ -477,11 +514,15 @@ impl Runs {
         entry.queue_position = None;
         let dir = entry.dir.clone();
         let events = entry.events.clone();
+        let rest_ladder = entry.rest_ladder;
+        let tools_path = entry.tools_path.clone();
         inner.active += 1;
         let runs = Arc::clone(self);
         let id_owned = id.to_owned();
         let handle = tokio::spawn(async move {
-            let outcome = runs.run_child(&id_owned, &dir, &events).await;
+            let outcome = runs
+                .run_child(&id_owned, &dir, &events, rest_ladder, tools_path)
+                .await;
             runs.finish(&id_owned, outcome);
         });
         if let Some(entry) = inner.runs.get_mut(id) {
@@ -678,10 +719,20 @@ impl Runs {
         id: &str,
         dir: &FsPath,
         events: &broadcast::Sender<RunProgress>,
+        rest_ladder: bool,
+        tools_path: Option<PathBuf>,
     ) -> ChildOutcome {
         let out_dir = dir.join("out");
         let _ = std::fs::create_dir_all(&out_dir);
-        let mut child = match child_command(&self.config, dir, &out_dir).spawn() {
+        let mut child = match child_command(
+            &self.config,
+            dir,
+            &out_dir,
+            rest_ladder,
+            tools_path.as_deref(),
+        )
+        .spawn()
+        {
             Ok(c) => c,
             Err(e) => {
                 return ChildOutcome::Failed {
@@ -768,7 +819,13 @@ enum ChildOutcome {
 }
 
 /// The child's command line: argv array, no shell, the job as a file path.
-fn child_command(config: &RunsConfig, dir: &FsPath, out_dir: &FsPath) -> tokio::process::Command {
+fn child_command(
+    config: &RunsConfig,
+    dir: &FsPath,
+    out_dir: &FsPath,
+    rest_ladder: bool,
+    tools_path: Option<&FsPath>,
+) -> tokio::process::Command {
     let mut command = tokio::process::Command::new(&config.node);
     command
         .arg(&config.cli)
@@ -785,7 +842,17 @@ fn child_command(config: &RunsConfig, dir: &FsPath, out_dir: &FsPath) -> tokio::
         // #1137 — E's pick pool sizes itself from this (min(finalists, cores, n)); the service's
         // concurrency is the same number, so one setting fans out the queue and the pool. The CLI
         // ignores it until #1137 lands, which is why it is harmless to set now.
-        .env("CASEMAKER_PICK_WORKERS", config.concurrency.to_string())
+        .env("CASEMAKER_PICK_WORKERS", config.concurrency.to_string());
+    // #1175 — THE BROWSER'S OWN INPUTS, each only when the submit carried it: the run sheet's
+    // ladder press, and the app's tool list as the ideal plan's candidate set (a file beside the
+    // job, never a command-line argument).
+    if rest_ladder {
+        command.arg("--rest-ladder");
+    }
+    if let Some(path) = tools_path {
+        command.arg("--tools").arg(path);
+    }
+    command
         .current_dir(dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -1026,7 +1093,7 @@ mod tests {
         };
         let dir = PathBuf::from("/tmp/runs/run-1");
         let out = dir.join("out");
-        let command = child_command(&config, &dir, &out);
+        let command = child_command(&config, &dir, &out, false, None);
         let std_command = command.as_std();
         assert_eq!(
             std_command.get_program(),
@@ -1054,6 +1121,84 @@ mod tests {
         // command line because there is no command line to reach.
         assert!(!args.iter().any(|a| a.contains("$(") || a.contains(';')));
         assert!(!args.iter().any(|a| a == "sh" || a == "bash" || a == "-c"));
+    }
+
+    /// #1175 — the two Generate inputs beyond the job document reach the child only when the
+    /// submit carried them, and the tool list is a FILE beside the job, never an argv payload.
+    #[test]
+    fn the_ladder_and_the_tools_reach_the_child_as_flags_over_the_job_directory() {
+        let config = RunsConfig {
+            node: PathBuf::from("/usr/bin/node"),
+            cli: PathBuf::from("/opt/casemaker/scripts/casemaker.mjs"),
+            root: PathBuf::from("/tmp/runs"),
+            concurrency: 1,
+            max_queue: 1,
+            wall_clock: Duration::from_secs(60),
+            retention: Duration::from_secs(60),
+        };
+        let dir = PathBuf::from("/tmp/runs/run-1");
+        let out = dir.join("out");
+        let args_of = |command: tokio::process::Command| -> Vec<String> {
+            command
+                .as_std()
+                .get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+        // A plain submit: exactly the pre-#1175 argv.
+        assert!(!args_of(child_command(&config, &dir, &out, false, None))
+            .iter()
+            .any(|a| a == "--rest-ladder" || a == "--tools"));
+        // The ladder press and the browser's tool list, as the service appends them.
+        let args = args_of(child_command(
+            &config,
+            &dir,
+            &out,
+            true,
+            Some(&dir.join("tools.json")),
+        ));
+        assert_eq!(
+            &args[args.len() - 3..],
+            ["--rest-ladder", "--tools", "/tmp/runs/run-1/tools.json"]
+        );
+    }
+
+    /// #1175 — a submit carrying the tools writes them beside the job and the run remembers both
+    /// inputs; a plain submit keeps the entry's defaults.
+    #[tokio::test]
+    async fn a_submit_carrying_the_ladder_and_the_tools_writes_both_beside_the_job() {
+        let temp = tempfile::tempdir().expect("a temp dir");
+        let root = temp.path().join("runs");
+        std::fs::create_dir_all(&root).expect("the root");
+        let runs = Arc::new(Runs::new(RunsConfig {
+            node: PathBuf::from("/bin/true"),
+            cli: PathBuf::from("/bin/true"),
+            root,
+            concurrency: 1,
+            max_queue: 1,
+            wall_clock: Duration::from_secs(5),
+            retention: Duration::from_secs(60),
+        }));
+        let tools = json!([{ "id": "flat-1", "name": "1 mm flat", "shape": "flat" }]);
+        let reply = match runs.submit_body(&json!({
+            "job": { "id": "j", "name": "tray" },
+            "restLadder": true,
+            "tools": tools.clone(),
+        })) {
+            SubmitOutcome::Accepted(reply) => reply,
+            _ => panic!("the submit must be accepted"),
+        };
+        let (rest_ladder, tools_path, run_dir) = {
+            let inner = runs.inner.lock().expect("runs lock");
+            let entry = inner.runs.get(&reply.run_id).expect("the run");
+            (entry.rest_ladder, entry.tools_path.clone(), entry.dir.clone())
+        };
+        assert!(rest_ladder);
+        let path = tools_path.expect("the tools were written");
+        assert!(path.starts_with(&run_dir));
+        let written: Value =
+            serde_json::from_slice(&std::fs::read(&path).expect("read the tools")).expect("JSON");
+        assert_eq!(written, tools);
     }
 
     #[test]
@@ -1092,6 +1237,8 @@ mod tests {
                 log: Vec::new(),
                 events,
                 dir: dir.path().join("gone"),
+                rest_ladder: false,
+                tools_path: None,
                 task: None,
                 created: SystemTime::now() - Duration::from_secs(3600),
             }
