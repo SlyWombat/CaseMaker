@@ -139,6 +139,9 @@ import { useMachineStore } from '@/store/machineStore';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
+import { toolDisplayName } from '@/engine/cnc/toolDisplay';
+import { toolNumberFor } from '@/engine/cnc/cam/ir';
+import { benchCutterFor } from '@/engine/cnc/toolRegistry';
 // #1082 — the proposal is planned through the part plan, which typesets every label; on a cold
 // paint of the Cut surface the bundled faces may not be parsed yet and `resolveFont` throws by
 // design. Wait for the faces (this card may be the first thing the operator opens) and propose
@@ -1118,6 +1121,19 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     setError(null);
     const handle = handleRef.current ?? attachConsole(target);
     handleRef.current = handle;
+    // #1123 items 31/34 — THE CUTTER THE PROGRAM RUNS, named and numbered. The write's M491
+    // calibrates the fitted cutter; `M493.2 T<n>` records its number so the program's first
+    // `T<n> M6` is a no-op (the bench stopped in `<Tool|>` holding the probe's 8888), and the fit
+    // sentence names the same cutter. The first program's own tool wins; the job's cutter is the
+    // fallback for a run whose programs are not in hand.
+    const writeCutter = (() => {
+      const firstKey = useEngraveRunStore.getState().generated?.programs?.[0]?.toolKey;
+      return (firstKey === undefined ? null : benchCutterFor(firstKey)) ?? jobTool(job);
+    })();
+    const writeConsent = {
+      confirmed: true as const,
+      ...(writeCutter === null ? {} : { cutter: toolDisplayName(writeCutter), toolNumber: toolNumberFor(writeCutter) }),
+    };
     try {
       const a = await applyCorrection(
         result.outcome,
@@ -1128,7 +1144,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           // the whole phase, and a press that did nothing would be a dead press.
           stopRequested: () => stopRef.current,
         },
-        { confirmed: true },
+        writeConsent,
       );
       if (!aliveRef.current) {
         handleRef.current = null;

@@ -678,6 +678,19 @@ describe('#883 — the machine’s tool, never the job’s', () => {
     expect(slot.getAttribute('title')).not.toContain('the job wants');
   });
 
+  it('#1123 item 35 — a fitted cutter the machine records as the job’s T is named the cutter, even in a registration', () => {
+    // The bench: after the cutter was fitted the registration was still active, so the strip kept
+    // calling the cutter "T8888 · 3D probe". The write's M493.2 records the program's T; from then
+    // on the machine's number IS the job's cutter and the strip names it.
+    remember('<Run|MPos:-10,-10,-3|WPos:0,0,0|T:1>');
+    useMachineStore.getState().setRegistrationActive(true);
+    useRegistrationTouchesStore.getState().setStep('as low as machine Z -57.2 (the surface seek)');
+    render(<MachineStatusStrip />);
+    const slot = screen.getByTestId('machine-status-tool');
+    expect(slot.textContent).toBe('T1 · ⌀ 1 mm flat end');
+    expect(slot.textContent).not.toContain('3D probe');
+  });
+
   it('a by-address connection resolves to the recorded machine for its name', () => {
     // A typed address carries no profile id; the location records this host and port.
     useLocationStore.setState({
@@ -690,5 +703,33 @@ describe('#883 — the machine’s tool, never the job’s', () => {
     render(<MachineStatusStrip />);
     expect(screen.getByTestId('machine-status-name').textContent).toBe('Zoomba');
     expect(screen.getByTestId('machine-status-host').textContent).toBe('192.0.2.10');
+  });
+});
+
+// #1123 items 32/33 — THE STRIP'S RECOVERIES, where their words are: the firmware's `Tool` state
+// (the program waiting for M490.2) and an alarm (cleared with $X; Home is the bench's finish).
+describe('#1123 items 32/33 — Continue, Unlock and Home on the strip', () => {
+  it('item 32 — a machine waiting for the cutter offers Continue; an idle one does not', () => {
+    remember('<Tool|MPos:-10.09,-12.83,-3|WPos:138.31,111.97,71.875|T:0,-9.757,1>');
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-state').textContent).toBe('Waiting for the cutter');
+    expect(screen.getByTestId('machine-status-tool-continue')).toBeTruthy();
+    cleanup();
+    remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0|T:1>');
+    render(<MachineStatusStrip />);
+    expect(screen.queryByTestId('machine-status-tool-continue')).toBeNull();
+  });
+
+  it('item 33 — an alarm offers Unlock ($X) and Home ($H) beside its reason', () => {
+    remember('<Alarm|MPos:0,0,0>\nALARM: Probe fail');
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-state').textContent).toBe('Alarm');
+    expect(screen.getByTestId('machine-status-unlock').textContent).toContain('Unlock ($X)');
+    expect(screen.getByTestId('machine-status-home').textContent).toContain('Home ($H)');
+    cleanup();
+    remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0|T:1>');
+    render(<MachineStatusStrip />);
+    expect(screen.queryByTestId('machine-status-unlock')).toBeNull();
+    expect(screen.queryByTestId('machine-status-home')).toBeNull();
   });
 });

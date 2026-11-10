@@ -44,7 +44,7 @@ import { cutPlan } from '@/engine/cnc/engrave/cutPlan';
 import { laserLiftFor } from '@/engine/cnc/engrave/laserSurface';
 import { packageStaleness } from '@/engine/cnc/engrave/package';
 import { useRegistrationPromptStore } from '@/store/registrationPromptStore';
-import { releaseNext } from '@/engine/cnc/engrave/release';
+import { releaseNext, releasePending } from '@/engine/cnc/engrave/release';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { runCycleSeconds } from '@/engine/cnc/engrave/runCycle';
 import { formatDuration, registrationTouches } from '@/engine/cnc/plan';
@@ -644,12 +644,21 @@ export function EngraveCutSurface({
   // must not take this job's screen: job B's Cut would otherwise open on job A's Done card. An entry
   // with no job id was prepared outside the job flow (an upload with no job, the e2e seam), and has
   // no other job to belong to.
+  // #1123 item 39 — THE CARD IS FOR A FINISHED JOB, NOT A FINISHED PROGRAM. The release's own
+  // record says whether every file has finished; while programs remain, the steps must stay (the
+  // next program's press lives in the bit-change panel, and only a new prepare clears the entry's
+  // end — so taking the screen with the card made "Run program 2 of 20" unreachable without a
+  // hard reload). No record (a one-screen single program) or an all-done record keeps the card.
+  const releaseRecord = useEngraveReleaseStore((s) => (target === null ? undefined : s.records[machineKey(target)]));
+  const releaseFinished =
+    releaseRecord === undefined || releaseRecord.files.length === 0 || releasePending(releaseRecord.files).length === 0;
   const runOver =
     machineRun !== null &&
     !machineRun.running &&
     machineRun.end !== null &&
     machineRun.end.kind !== 'nothing' &&
-    (machineRun.context?.jobId === undefined || machineRun.context.jobId === job.id);
+    (machineRun.context?.jobId === undefined || machineRun.context.jobId === job.id) &&
+    releaseFinished;
   // #689 — the clearance acknowledgement lives in step 1 now, not under Generate. It is the run
   // gate's own flag; the warning codes that need it come from the Generate (re-post included) and
   // the sweep, so both are subscribed to and the step re-renders when they arrive.
@@ -896,7 +905,6 @@ export function EngraveCutSurface({
    * The Register card registers THIS setup, and its done state is THIS setup's registration —
    * side 2 of a flip job must not pass on side 1's record.
    */
-  const releaseRecord = useEngraveReleaseStore((s) => (target === null ? undefined : s.records[machineKey(target)]));
   const currentSource =
     releaseRecord === undefined || releaseRecord.files.length === 0
       ? (sources[0] ?? null)
@@ -1764,6 +1772,15 @@ export function EngraveCutSurface({
                   </div>
 
                   {releaseSources.length > 1 ? (
+                    <>
+                    {/* #1123 item 39 — THE ENDED RUN IS A LINE HERE, while programs remain: the
+                        done card would take the screen and its next-program press with it. */}
+                    {runOver === false && machineRun?.end != null && machineRun.end.kind !== 'nothing' && releaseRecord !== undefined && releaseRecord.files.length > 0 && (
+                      <p style={MUTED} data-testid="engrave-cut-run-ended">
+                        {releaseRecord.files.filter((f) => f.done).length} of {releaseRecord.files.length} programs finished — the
+                        next program's press is below.
+                      </p>
+                    )}
                     <EngraveReleaseStep
                       target={target}
                       job={job}
@@ -1781,6 +1798,7 @@ export function EngraveCutSurface({
                       }
                       onProgramLine={onProgramLine}
                     />
+                    </>
                   ) : (
                     <EngraveMachineUpload
                       blocker={
