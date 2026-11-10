@@ -47,7 +47,7 @@ use crate::feeds::{validate_table, FeedRow};
 use crate::house::{validate_tiers, HouseDoc, HouseError, InventoryItem, UserTool};
 use crate::stock::{validate_shelf, StockItem};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 /// Magic string that says "this is a Case Maker location file".
 pub const LOCATION_KIND: &str = "casemaker-location";
@@ -913,6 +913,10 @@ pub struct FinishedRun {
     pub stock: Option<FinishedRunStock>,
     #[serde(default)]
     pub registration: Option<FinishedRunRegistration>,
+    /// #1179 blank identity (issue comment 6776457695) — WHICH blank this program was cut on.
+    /// Opaque; the current id for a job lives on the machine (`current_blank`), never in a job file.
+    #[serde(default)]
+    pub blank_id: Option<String>,
     /// #1179 — one entry per setup/face; the newest record carries the blank's whole state. A list
     /// rather than an option so an older document (no key) and a run with no maps both read as [].
     #[serde(default)]
@@ -973,6 +977,11 @@ pub struct MachineRecord {
     /// while absent, so a record written before the section round-trips without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registrations: Option<serde_json::Value>,
+    /// #1179 blank identity — the current blank id per JOB on this machine (issue comment
+    /// 6776457695): a blank sits on one machine's bed, so a job file never carries one. Omitted
+    /// while absent, so a record written before the section round-trips without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_blank: Option<BTreeMap<String, String>>,
     /// An optional controllable power switch (#416). None is the default and the common case. Written
     /// only through `/api/v1/power/:id`; a machine PUT keeps whatever is stored (`put_machine`).
     #[serde(default)]
@@ -1295,6 +1304,7 @@ mod tests {
             finished_programs: Vec::new(),
             finished_runs: Vec::new(),
             registrations: None,
+            current_blank: None,
             updated_at: "2026-10-15T00:00:00.000Z".into(),
         }
     }
@@ -1326,6 +1336,7 @@ mod tests {
                 measured_at: Some("2026-11-10T13:00:00.000Z".into()),
                 plan_expected_top_machine_z: Some(-60.0),
             }),
+            blank_id: None,
             cut_maps: vec![FinishedSetupCutMap {
                 setup_index: 1,
                 state: "complete".into(),
@@ -1593,6 +1604,68 @@ mod tests {
         machine.finished_programs = vec!["a1b2c3d4".into()];
         machine.finished_runs = vec![FinishedRun { cut_maps: vec![unknown], ..a_finished_run("a1b2c3d4", 1) }];
         machine.validate().unwrap();
+    }
+
+    #[test]
+    fn a_step_one_finished_run_serialises_to_the_shared_wire_fixture() {
+        // #1179 — THE GOLDEN WIRE FILE both halves share (`tests/unit/fixtures/house-served-finished-
+        // run.json`): F's step-1 finish-write shape as the real service served it (registration
+        // g54 {x, y} with no z, so the Rust Option writes null). The Rust side asserts its own
+        // serde output equals the file — a serde change that alters the wire fails HERE — and the
+        // TS side parses the same file with the client schema, so a client change fails there.
+        // Keep the two in step when the record gains a field.
+        let run = FinishedRun {
+            hash: "a1b2c3d4".into(),
+            job_id: Some("job-1".into()),
+            job_name: Some("M1 tray".into()),
+            package_key: Some("abcdef0123456789".into()),
+            key8: Some("abcdef01".into()),
+            program_index: Some(3),
+            program_count: Some(17),
+            program_name: Some("tray-p03.nc".into()),
+            cutter_key: Some("inv:kz-a".into()),
+            setup_index: Some(1),
+            finished_at: Some("2026-11-10T13:00:00.000Z".into()),
+            stock: Some(FinishedRunStock {
+                length_mm: Some(100.0),
+                width_mm: Some(100.0),
+                thickness_mm: Some(25.0),
+            }),
+            registration: Some(FinishedRunRegistration {
+                surface_machine_z: Some(-60.487),
+                g54: Some(FinishedRunG54 { x: Some(77.344), y: Some(63.0), z: None }),
+                top_source: Some("touch".into()),
+                measured_top_machine_z: Some(-60.487),
+                implied_thickness_mm: None,
+                measured_at: Some("2026-11-10T13:00:00.000Z".into()),
+                plan_expected_top_machine_z: None,
+            }),
+            blank_id: None,
+            cut_maps: Vec::new(),
+        };
+        let wire = serde_json::to_value(&run).unwrap();
+        let fixture: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string("../tests/unit/fixtures/house-served-finished-run.json")
+                .expect("the shared golden wire fixture"),
+        )
+        .unwrap();
+        assert_eq!(wire, fixture, "the Rust wire shape moved; update the golden fixture with it");
+    }
+
+    #[test]
+    fn the_machine_record_round_trips_its_current_blank() {
+        // #1179 blank identity — the current blank id per job lives on the MACHINE record and is
+        // omitted while absent, so a record written before the section round-trips unchanged.
+        let mut machine = a_machine("m-1");
+        machine.current_blank = Some(BTreeMap::from([("job-1".to_string(), "blank-abc".to_string())]));
+        machine.validate().unwrap();
+        let v = serde_json::to_value(&machine).unwrap();
+        assert_eq!(v["currentBlank"]["job-1"], serde_json::json!("blank-abc"));
+        let back: MachineRecord = serde_json::from_value(v).unwrap();
+        assert_eq!(back, machine);
+        machine.current_blank = None;
+        let v = serde_json::to_value(&machine).unwrap();
+        assert!(v.get("currentBlank").is_none(), "{v}");
     }
 
     #[test]

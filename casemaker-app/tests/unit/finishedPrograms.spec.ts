@@ -77,6 +77,13 @@ function fakeService() {
     inventory: async () => ({ kind: 'ok', etag: '"i"', items: [] }),
     call: async (method, path, body): Promise<HouseCall> => {
       if (method === 'GET' && path === '/location') return { kind: 'ok', text: view(), etag: `"loc-${version}"` };
+      if (method === 'PUT' && path.startsWith('/location/machines/')) {
+        // #1179 blank identity — the finish-write mints a job's first blank id through the same
+        // guarded machine PUT as every other record.
+        Object.assign(machine, body as MachineRecord);
+        version += 1;
+        return { kind: 'ok', text: '' };
+      }
       if (method === 'POST' && path.startsWith('/finished-programs/')) {
         const id = decodeURIComponent(path.slice('/finished-programs/'.length));
         if (id !== machine.id) return { kind: 'refused', status: 404, message: `machine ${id} is not in the location` };

@@ -1,0 +1,33 @@
+{
+  "blankId": null,
+  "cutMaps": [],
+  "cutterKey": "inv:kz-a",
+  "finishedAt": "2026-11-10T13:00:00.000Z",
+  "hash": "a1b2c3d4",
+  "jobId": "job-1",
+  "jobName": "M1 tray",
+  "key8": "abcdef01",
+  "packageKey": "abcdef0123456789",
+  "programCount": 17,
+  "programIndex": 3,
+  "programName": "tray-p03.nc",
+  "registration": {
+    "g54": {
+      "x": 77.344,
+      "y": 63.0,
+      "z": null
+    },
+    "impliedThicknessMm": null,
+    "measuredAt": "2026-11-10T13:00:00.000Z",
+    "measuredTopMachineZ": -60.487,
+    "planExpectedTopMachineZ": null,
+    "surfaceMachineZ": -60.487,
+    "topSource": "touch"
+  },
+  "setupIndex": 1,
+  "stock": {
+    "lengthMm": 100.0,
+    "thicknessMm": 25.0,
+    "widthMm": 100.0
+  }
+}

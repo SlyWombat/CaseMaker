@@ -124,6 +124,14 @@ export interface LocationState {
    * already had the hash — a repeated finish, with no request sent.
    */
   recordFinishedProgram: (machineId: string, hash: string, run?: FinishedRun) => Promise<{ ok: boolean; added: boolean; text: string }>;
+  /**
+   * #1179 blank identity — MINT A NEW BLANK for `jobId` on `machineId` (the Register card's press,
+   * its re-finish mint, "Cut another of these"): writes `currentBlank[jobId]` through the same
+   * guarded machine PUT as every other record and returns the new id. The operator's press is the
+   * only way the app can know a blank was swapped; the first finish-write of a job with no id mints
+   * too, inside `recordFinishedProgram`. A repeated program hash NEVER mints.
+   */
+  mintBlank: (machineId: string, jobId: string) => Promise<{ ok: boolean; blankId: string | null; text: string }>;
 }
 
 /**
@@ -266,17 +274,57 @@ export const useLocationStore = create<LocationState>((set, get) => ({
     // newer registration), and the service dedupes the hash itself, so a second window racing this
     // one cannot duplicate it.
     if (run === undefined && machine.finishedPrograms.includes(hash)) return { ok: true, added: false, text: '' };
+    // #1179 blank identity (issue comment 6776457695) — every record of a job carries the blank
+    // it was cut on. The current id lives on the MACHINE (a job file carries no blank to another
+    // machine). The FIRST finish-write of a job with no id mints one here; every later record
+    // reuses it. Nothing else mints at the finish — a repeated hash keeps the id and its map.
+    let assignedBlankId: string | null = null;
+    if (run !== undefined && run.jobId !== undefined && run.blankId === undefined) {
+      const current = machine.currentBlank?.[run.jobId];
+      if (current !== undefined) {
+        assignedBlankId = current;
+      } else {
+        assignedBlankId = newId('blank');
+        const saved = await get().saveMachine({
+          ...machine,
+          currentBlank: { ...(machine.currentBlank ?? {}), [run.jobId]: assignedBlankId },
+          updatedAt: new Date().toISOString(),
+        });
+        if (saved !== 'ok') {
+          // Without a stable id the record could never be scoped to a blank, and its map could
+          // never merge again — nothing is posted and the run says why.
+          return {
+            ok: false,
+            added: false,
+            text: `the blank's id could not be recorded (${saved}), so this program's finished record was not written`,
+          };
+        }
+      }
+    }
+    const scoped: FinishedRun | undefined =
+      run === undefined
+        ? undefined
+        : { ...run, ...(run.blankId !== undefined ? {} : assignedBlankId === null ? {} : { blankId: assignedBlankId }) };
     // #1179 step 3 — the cut maps are per SETUP/FACE and cumulative within the same job, setup and
-    // placement (the analyst's ruling, #1179 comment 6775024844). The previous list is the newest
-    // record for the SAME BLANK — same job and the same stock footprint; a different blank starts
-    // fresh, which is also what clears an `unknown` face. A different package of the same job on
-    // the same setup merges normally (same blank, same face).
-    let posted = run;
-    if (run !== undefined && run.cutMaps !== undefined && run.cutMaps.length > 0 && run.jobId !== undefined) {
+    // blank (the ruling, comment 6775024844, and the blank identity above). The previous list is
+    // the newest record for the SAME BLANK — same job, same blankId, and the same stock footprint
+    // as a sanity check; a different blank starts fresh, which is also what clears an `unknown`
+    // face. A different package of the same job on the same setup merges normally (same blank).
+    let posted = scoped;
+    if (
+      scoped !== undefined &&
+      scoped.cutMaps !== undefined &&
+      scoped.cutMaps.length > 0 &&
+      scoped.jobId !== undefined &&
+      scoped.blankId !== undefined
+    ) {
       const previous = [...(machine.finishedRuns ?? [])]
         .reverse()
-        .find((record) => record.jobId === run.jobId && sameBlank(record, run));
-      posted = { ...run, cutMaps: mergeSetupCutMaps(previous?.cutMaps ?? [], run.cutMaps) };
+        .find(
+          (record) =>
+            record.jobId === scoped.jobId && record.blankId === scoped.blankId && sameBlank(record, scoped),
+        );
+      posted = { ...scoped, cutMaps: mergeSetupCutMaps(previous?.cutMaps ?? [], scoped.cutMaps) };
     }
     const res = await houseAddFinishedProgram(machineId, hash, undefined, posted);
     if (res.kind !== 'ok') {
@@ -289,6 +337,22 @@ export const useLocationStore = create<LocationState>((set, get) => ({
     // service's own dedupe still keeps the next append honest.
     await get().refresh();
     return { ok: true, added: true, text: '' };
+  },
+
+  mintBlank: async (machineId, jobId) => {
+    const machine = get().location?.machines.find((m) => m.id === machineId) ?? null;
+    if (machine === null) {
+      return { ok: false, blankId: null, text: `machine ${machineId} is not in the location` };
+    }
+    const blankId = newId('blank');
+    const saved = await get().saveMachine({
+      ...machine,
+      currentBlank: { ...(machine.currentBlank ?? {}), [jobId]: blankId },
+      updatedAt: new Date().toISOString(),
+    });
+    return saved === 'ok'
+      ? { ok: true, blankId, text: '' }
+      : { ok: false, blankId: null, text: `the blank was not saved (${saved})` };
   },
 }));
 

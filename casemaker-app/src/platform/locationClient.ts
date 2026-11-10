@@ -194,6 +194,13 @@ export const FinishedRunSchema = z.preprocess(
    * setups' entries are carried forward). Absent for a run that states no setup.
    */
   cutMaps: z.array(FinishedSetupCutMapSchema).optional(),
+  /**
+   * #1179 blank identity (issue comment 6776457695) — WHICH blank this program was cut on. Opaque;
+   * the stock footprint stays a sanity check, not the identity. The current id for a job lives on
+   * the MACHINE record (`currentBlank`), never in the job: a job file carries no blank to another
+   * machine. Absent on records written before the field existed.
+   */
+  blankId: z.string().min(1).optional(),
   }),
 );
 export type FinishedRun = z.infer<typeof FinishedRunSchema>;
@@ -603,6 +610,13 @@ export const MachineRecordSchema = z.object({
    * never a machine the app cannot read). Absent on records written before the section existed.
    */
   registrations: RegistrationsSchema,
+  /**
+   * #1179 blank identity — the CURRENT blank id per job, on this machine (issue comment
+   * 6776457695): a blank sits on one machine's bed, so the job file must never carry one. Written
+   * by the first finish-write of a job with no id and by `mintBlank` (the Register card's press,
+   * its re-finish mint, "Cut another of these"). Absent on records written before the field.
+   */
+  currentBlank: z.record(z.string(), z.string()).optional(),
   /** The machine's bed profiles, same presence rule; `[]` is a deliberately emptied description. */
   bedProfiles: z.array(BedProfileSchema).optional(),
   /** The one active profile; present exactly when `bedProfiles` holds at least one. */

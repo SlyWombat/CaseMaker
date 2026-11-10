@@ -64,6 +64,12 @@ pub fn validate_runs(
             HouseError::BadEntry(why) => HouseError::BadEntry(format!("machine {machine_id}: {why}")),
             other => other,
         })?;
+        // #1179 blank identity — an id is either absent or a real one, never a blank string.
+        if run.blank_id.as_deref().is_some_and(|id| id.trim().is_empty()) {
+            return Err(HouseError::BadEntry(format!(
+                "machine {machine_id}: a blank id cannot be blank"
+            )));
+        }
         for entry in &run.cut_maps {
             let stream_ok = |stream: &crate::location::CutMapStream| {
                 !stream.data.is_empty()

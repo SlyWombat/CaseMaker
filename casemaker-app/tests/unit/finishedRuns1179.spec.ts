@@ -63,6 +63,25 @@ describe('#1179 the finished-run record', () => {
     expect(served.finishedRuns[1]!.cutMaps![0]!.map).toMatchObject({ cellMm: 2, cols: 80 });
   });
 
+  it('the shared golden wire fixture parses as a machine record', () => {
+    // `tests/unit/fixtures/house-served-finished-run.json` — the bytes the REAL axum router served
+    // for F's step-1 finish-write shape (rust:1.90 container, land18 561029fc9). The Rust test in
+    // location.rs asserts its serde output equals this same file, so a serde change that moves the
+    // wire fails cargo and a client change that stops tolerating it fails here.
+    const servedRun = JSON.parse(
+      readFileSync(new URL('./fixtures/house-served-finished-run.json', import.meta.url), 'utf8'),
+    ) as unknown;
+    const base = MachineRecordSchema.parse(fixture.machine);
+    const parsed = MachineRecordSchema.safeParse({ ...base, finishedRuns: [servedRun] });
+    expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues.slice(0, 3))).toBe(true);
+    if (parsed.success) {
+      const run = parsed.data.finishedRuns[0]!;
+      expect(run.registration?.g54?.z).toBeUndefined();
+      expect(run.registration?.impliedThicknessMm).toBeUndefined();
+      expect(run.cutMaps).toEqual([]);
+    }
+  });
+
   it('a full record parses, and a hash-only record parses too', () => {
     const base = MachineRecordSchema.parse(fixture.machine);
     const full = MachineRecordSchema.parse({

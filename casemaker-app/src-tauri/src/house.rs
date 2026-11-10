@@ -3720,6 +3720,7 @@ mod tests {
             finished_programs: Vec::new(),
             finished_runs: Vec::new(),
             registrations: None,
+            current_blank: None,
             updated_at: "2026-10-15T00:00:00.000Z".into(),
         }
     }
@@ -3739,6 +3740,7 @@ mod tests {
             finished_at: None,
             stock: None,
             registration: None,
+            blank_id: None,
             cut_maps: Vec::new(),
         }
     }
