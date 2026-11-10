@@ -813,8 +813,9 @@ pub struct FinishedRunG54 {
 }
 
 /// #1179 — the registration a finished program ran under. `surfaceMachineZ` is the ACCEPTED top
-/// (measured or derived); `measuredTopMachineZ` is the MEASURED reading only, absent on the derived
-/// path — the thickness note reads that one.
+/// (measured or derived; on a cut blank the higher of the agreeing pair, never an average) — the
+/// number a restart compares the controller's current top against. `measuredTopMachineZ` is the
+/// MEASURED reading only, absent on the derived path — the thickness note reads that one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FinishedRunRegistration {

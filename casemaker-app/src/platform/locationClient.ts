@@ -72,9 +72,12 @@ function section<T>(
  */
 export const FinishedRunRegistrationSchema = z.object({
   /**
-   * THE ACCEPTED TOP: the surface machine Z the run's origin was written against (measured or
-   * derived). B4's "last recorded top" reads THIS. When the registration was measured it equals
-   * `measuredTopMachineZ`; on the derived/bracket path only this field is present.
+   * THE ACCEPTED TOP: the surface machine Z the run's origin was written against — on a blank that
+   * has already been cut, the HIGHER of the agreeing pair (or the level the three touches agree
+   * on), never an average. A restart compares the controller's current top against EXACTLY this
+   * number (B2's in-band check), and B4's "last recorded top" reads it. When the registration was
+   * measured it equals `measuredTopMachineZ`; on the derived/bracket path only this field is
+   * present.
    */
   surfaceMachineZ: z.number().optional(),
   /** The work offset the origin write left in the controller (the B2 cross-check). */
