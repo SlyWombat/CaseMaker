@@ -5898,7 +5898,14 @@ describe('#1046 EngravePanel — the standard-balls press', () => {
     fireEvent.click(press);
     // #1126 put the house-availability probe (an HTTP fact) between the press and the pipeline
     // call, so one microtask flush no longer reaches it — wait for the call itself instead.
-    await waitFor(() => expect(seen, 'the press asks the pipeline for the ladder').toBe(true));
+    // #1181 — THE WAIT MUST OUTLAST THE PROBE. With no service answering, the probe runs to its
+    // own DEFAULT_TIMEOUT_MS (2 s, houseClient.ts) before the in-page path is taken; waitFor's 1 s
+    // default therefore expired on any host without the house service (GPD-Dave failed in 1.1 s,
+    // unloaded; k3 answers in ms because it runs the service). 15 s is a clock deadline, not the
+    // subject — the assertion is unchanged.
+    await waitFor(() => expect(seen, 'the press asks the pipeline for the ladder').toBe(true), {
+      timeout: 15_000,
+    });
   }, 60_000);
 
   it('a stale run’s rest line is not shown as current — no run line, no press', () => {
