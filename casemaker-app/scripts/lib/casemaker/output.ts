@@ -33,6 +33,13 @@ export interface CommandSink {
 export interface CommandOptions {
   /** `--json` was passed: emit the receipt document instead of human lines. */
   json: boolean;
+  /**
+   * `--events` was passed (#1126): every progress line is written to stderr as ONE JSON object,
+   * `{ stage, pct, at }` — the protocol the house service's runs API reads. `pct` is null until
+   * the engine's own `onProgress` counts are wired through; `stage` is the same line a human run
+   * prints, so the two channels cannot be confused.
+   */
+  events?: boolean;
   /** Capture the two channels instead of printing them (the MCP server, #481). */
   sink?: CommandSink;
   /**
@@ -63,7 +70,15 @@ export function commandOutput(options: CommandOptions): CommandOutput {
         sink.progress?.(line);
         return;
       }
-      if (options.json) console.error(line);
+      if (options.events === true) {
+        // One JSON object per line, on stderr: the runs API's reader ignores a line it cannot
+        // parse, so a human line can never be mistaken for an event.
+        process.stderr.write(
+          `${JSON.stringify({ stage: line, pct: null, at: new Date().toISOString() })}\n`,
+        );
+        return;
+      }
+      if (options.json) process.stderr.write(`${line}\n`);
       else console.log(line);
     },
     emitReceipt(receipt: Receipt): void {

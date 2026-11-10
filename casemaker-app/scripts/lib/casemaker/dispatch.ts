@@ -54,7 +54,9 @@ export const USAGE = [
   '  casemaker machine probe --confirm probe [--timeout <seconds>]',
   '',
   'Human output is the default and is rendered from the run’s receipt. With `--json`, stdout is',
-  'exactly that receipt document and progress goes to stderr. status, version, hashes and finished',
+  'exactly that receipt document and progress goes to stderr; with `--events`, each progress line',
+  'becomes one JSON object on stderr (`{ stage, pct, at }`) for the house service’s runs API.',
+  'status, version, hashes and finished',
   'only read; upload, play, home and probe move the machine and require --confirm — a program hash',
   'for the two that run one, the literal word (home, probe) for the two that have no program.',
   'Nothing here switches power (#479: the plug is outside Case Maker). `casemaker engrave` is the',
@@ -64,6 +66,10 @@ export const USAGE = [
 /** `--json` takes no value: the receipt has one shape, so there is no format to negotiate. */
 export const JSON_VALUE_REFUSED =
   '--json takes no value — it selects the receipt document, and there is only one shape; nothing was run.';
+
+/** `--events` takes no value for the same reason: one event shape, and a machine reads it. */
+export const EVENTS_VALUE_REFUSED =
+  '--events takes no value — it writes each progress line as one JSON object on stderr, and there is only one shape; nothing was run.';
 
 /**
  * Route one command line. Returns the exit code; never calls `process.exit`, so the bin owns that.
@@ -81,8 +87,16 @@ export async function dispatch(
     io.error(`casemaker: ${JSON_VALUE_REFUSED}`);
     return 2;
   }
-  const options: CommandOptions = { ...HUMAN, json: argv.includes('--json') };
-  const [command, ...rest] = argv.filter((a) => a !== '--json');
+  if (argv.some((a) => a.startsWith('--events='))) {
+    io.error(`casemaker: ${EVENTS_VALUE_REFUSED}`);
+    return 2;
+  }
+  const options: CommandOptions = {
+    ...HUMAN,
+    json: argv.includes('--json'),
+    ...(argv.includes('--events') ? { events: true } : {}),
+  };
+  const [command, ...rest] = argv.filter((a) => a !== '--json' && a !== '--events');
   if (command === undefined || command === 'help' || command === '--help' || command === '-h') {
     io.log(USAGE);
     return command === undefined ? 2 : 0;
