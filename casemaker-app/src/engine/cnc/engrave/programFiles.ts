@@ -13,12 +13,15 @@
  */
 import { releaseFileName } from './release';
 import { runSheetFaceFileName } from './runSheet';
+import { statusLogFileName } from './runStatusLog';
 
 /** The slice of a generated program this list reads. */
 export interface ProgramFilesSource {
   kind?: 'facing' | 'engrave';
   nc: string;
   frameNc: string | null;
+  /** #1154 — the program's FNV (the run log's key); absent means no status-log lookup. */
+  programHash?: string;
 }
 
 /** One program's file names, in cut order; `frameName` is null when the program produced none. */
@@ -39,7 +42,7 @@ export interface ProgramFile {
   engravingIndex: number;
   name: string;
   bytes: string;
-  kind: 'nc' | 'frame' | 'facing' | 'record' | 'log';
+  kind: 'nc' | 'frame' | 'facing' | 'record' | 'log' | 'status';
 }
 
 /**
@@ -147,12 +150,54 @@ export function runSaveFiles(
   runRecord: { name: string; bytes: string } | null,
   /** #1123 item 4 — the run's stage log (`<job>-run.log`); absent writes no log. */
   runLog: { name: string; bytes: string } | null = null,
+  /** #1154 — one `<program>-status.log` per program whose run kept a heartbeat log. */
+  statusLogs: readonly ProgramFile[] = [],
 ): ProgramFile[] {
   const files = programFiles(programs, jobName);
   const withRecord =
     runRecord === null
       ? files
       : [...files, { index: files.length + 1, engravingIndex: 0, name: runRecord.name, bytes: runRecord.bytes, kind: 'record' as const }];
-  if (runLog === null) return withRecord;
-  return [...withRecord, { index: withRecord.length + 1, engravingIndex: 0, name: runLog.name, bytes: runLog.bytes, kind: 'log' as const }];
+  const withLog =
+    runLog === null
+      ? withRecord
+      : [...withRecord, { index: withRecord.length + 1, engravingIndex: 0, name: runLog.name, bytes: runLog.bytes, kind: 'log' as const }];
+  return [...withLog, ...statusLogs];
+}
+
+/**
+ * #1154 — THE STATUS LOGS Save all writes. The run-log entry (the house copy of the
+ * finished-program record) keeps the program's own `?` heartbeat lines; each one is written as
+ * `<program>-status.log` — named after the program's own `.nc`, so it sits beside it and beside
+ * the run record: `A-job-p02-status.log` for `A-job-p02.nc`, `A-job-face-status.log` for a faced
+ * run's skim, `A-job-status.log` for a one-program run. A program that has not run has no entry
+ * and contributes no file.
+ */
+export function statusLogFiles(
+  programs: readonly ProgramFilesSource[],
+  jobName: string,
+  runLog: readonly { programHash: string; statusLog?: string }[] | undefined,
+): ProgramFile[] {
+  if (runLog === undefined || runLog.length === 0) return [];
+  const byHash = new Map(
+    runLog
+      .filter((entry) => entry.statusLog !== undefined && entry.statusLog !== '')
+      .map((entry) => [entry.programHash, entry.statusLog!] as const),
+  );
+  if (byHash.size === 0) return [];
+  const names = programNames(programs, jobName);
+  const out: ProgramFile[] = [];
+  programs.forEach((program, i) => {
+    const name = names[i];
+    const text = program.programHash === undefined ? undefined : byHash.get(program.programHash);
+    if (name === undefined || text === undefined) return;
+    out.push({
+      index: name.index,
+      engravingIndex: name.engravingIndex,
+      name: statusLogFileName(name.ncFile),
+      bytes: text,
+      kind: 'status',
+    });
+  });
+  return out;
 }

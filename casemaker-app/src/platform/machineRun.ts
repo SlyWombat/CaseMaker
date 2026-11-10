@@ -108,7 +108,12 @@ export function playLine(filename: string): string | null {
 
 export type RunEvent =
   | { kind: 'sent'; line: string; reply: string }
-  | { kind: 'poll'; progress: Progress }
+  /**
+   * #1154 — one `?` reply, with the RAW text and the wall clock: the run record keeps the app's
+   * own heartbeat lines (state/P/WPos), and the raw text is what that log states — not a parse
+   * of it.
+   */
+  | { kind: 'poll'; progress: Progress; raw: string; atMs: number }
   | { kind: 'missed'; misses: number; detail: string }
   /** Something the run decided, said in the log the operator is reading. */
   | { kind: 'note'; text: string }
@@ -422,7 +427,7 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
     misses = 0;
     const p = readProgress(r.text);
     last = p;
-    deps.onEvent?.({ kind: 'poll', progress: p });
+    deps.onEvent?.({ kind: 'poll', progress: p, raw: r.text, atMs: now() });
     if (p.percent !== null) {
       seenProgress = true;
       awaitingProgressAfterResume = false;

@@ -2051,6 +2051,13 @@ export interface JobRunLogEntry {
   ncHash?: string;
   /** #604 — the machine-run transcript (the run lines, joined), persisted so a reload keeps it. */
   transcript?: string;
+  /**
+   * #1154 — the run's own `?` heartbeat lines for this program, as `runStatusLog.ts` serializes
+   * them (ISO time, state, raw P:/WPos, with a stated thinning note when the rule dropped any).
+   * Kept with the finished-program record so Save / Save all can write `<program>-status.log`
+   * beside the run record — and so a reload does not lose it.
+   */
+  statusLog?: string;
 }
 
 /**
