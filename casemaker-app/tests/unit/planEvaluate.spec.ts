@@ -13,7 +13,7 @@
  * where), and the V's edge loss, from the same geometry the raised-text finding uses. Whether the
  * V plan currently POSTS is the generator's fact, reported in `refusal`, not hidden.
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import {
   applyCutterPlan,
@@ -165,9 +165,27 @@ function clearRow(out: Awaited<ReturnType<typeof evaluatePlan>>) {
 
 beforeEach(() => clearPlanEvaluations());
 
+/**
+ * #1180 — THE THREE VERDICTS EVERY TEST READS ARE COMPUTED ONCE. `beforeEach` clears the
+ * evaluator's memo (the memo is itself a subject), so without sharing the same coin is
+ * re-evaluated across tests: ⌀1 in tests 1, 2 and 4; the 0.6 corn in 2, 4 and 8; the V coarse in
+ * 3 and 4. The verdicts are read-only, and the tests ABOUT evaluation — the memo test, the
+ * full-level runs, the refusal — keep their own calls unchanged.
+ */
+type Verdict = Awaited<ReturnType<typeof evaluatePlan>>;
+let shared: { f1: Verdict; corn: Verdict; v: Verdict };
+
+beforeAll(async () => {
+  shared = {
+    f1: await evaluatePlan(coinJob(), plan(F1), CTX),
+    corn: await evaluatePlan(coinJob(), plan(CORN), CTX),
+    v: await evaluatePlan(coinJob(), plan(VENTRY), CTX),
+  };
+});
+
 describe('#766 A — the coin’s three rest choices, scored by what they leave', () => {
   it('the ⌀1 rest leaves Software fused: joined pinches at the tightest gap', async () => {
-    const out = await evaluatePlan(coinJob(), plan(F1), CTX);
+    const out = shared.f1;
     const clear = clearRow(out);
     expect(clear.pinches.length).toBeGreaterThan(0);
     const joined = clear.pinches.filter((p) => !p.separated);
@@ -181,8 +199,8 @@ describe('#766 A — the coin’s three rest choices, scored by what they leave'
   });
 
   it('the 0.6 corn reads better: the joined field is smaller than the ⌀1’s', async () => {
-    const f1 = clearRow(await evaluatePlan(coinJob(), plan(F1), CTX));
-    const corn = clearRow(await evaluatePlan(coinJob(), plan(CORN), CTX));
+    const f1 = clearRow(shared.f1);
+    const corn = clearRow(shared.corn);
     const sliver = (row: typeof f1): number => row.pinches.reduce((sum, p) => sum + p.areaMm2, 0);
     expect(sliver(corn)).toBeLessThan(sliver(f1));
     expect(corn.fidelity).toBeGreaterThan(f1.fidelity);
@@ -191,7 +209,7 @@ describe('#766 A — the coin’s three rest choices, scored by what they leave'
   });
 
   it('the 0.1 mm V is separated by its flank, at 0.016 mm a side of edge loss', async () => {
-    const out = await evaluatePlan(coinJob(), plan(VENTRY), CTX);
+    const out = shared.v;
     const clear = clearRow(out);
     expect(clear.pinches.length).toBeGreaterThan(0);
     const tightest = clear.pinches.reduce((a, b) => (a.gapMm <= b.gapMm ? a : b));
@@ -209,9 +227,9 @@ describe('#766 A — the coin’s three rest choices, scored by what they leave'
   });
 
   it('the fidelity order the bench found by hand: ⌀1 < 0.6 corn ≤ V', async () => {
-    const f1 = clearRow(await evaluatePlan(coinJob(), plan(F1), CTX)).fidelity;
-    const corn = clearRow(await evaluatePlan(coinJob(), plan(CORN), CTX)).fidelity;
-    const v = clearRow(await evaluatePlan(coinJob(), plan(VENTRY), CTX)).fidelity;
+    const f1 = clearRow(shared.f1).fidelity;
+    const corn = clearRow(shared.corn).fidelity;
+    const v = clearRow(shared.v).fidelity;
     expect(f1).toBeLessThan(corn);
     expect(corn).toBeLessThanOrEqual(v);
   });
@@ -257,7 +275,7 @@ describe('#766 A — the plan is a document change, and the verdict is cached', 
 
   it('the coarse level is measure-only: no run time; full adds the CAM and its time', async () => {
     const job = coinJob();
-    const coarse = await evaluatePlan(job, plan(CORN), CTX);
+    const coarse = shared.corn;
     expect(coarse.toolChanges).toBe(1);
     expect(coarse.seconds).toBeNull();
     expect(coarse.risk.reachMarginMm).not.toBeNull();
