@@ -91,11 +91,19 @@ export function CutterChecklist({
   entries,
   onSet,
   disabled = false,
+  disabledReason = null,
 }: {
   rows: readonly CutterChecklistRow[];
   entries: Record<string, CutterChecklistEntry> | undefined;
   onSet: (key: string, entry: CutterChecklistEntry | null) => void;
   disabled?: boolean;
+  /**
+   * #803 — A DISABLED CONTROL ALWAYS SAYS WHY. The Job panel's rows are readable before the run is
+   * frozen, but a tick has nowhere to be recorded then, so the controls are disabled and state the
+   * reason (title + aria-description) — "tick each bit at the Cut step, once the program is
+   * generated". The Cut step's own checklist is never disabled.
+   */
+  disabledReason?: string | null;
 }): JSX.Element | null {
   if (rows.length === 0) return null;
   const missing = missingCuttersWords(rows, entries);
@@ -126,6 +134,7 @@ export function CutterChecklist({
                   data-testid={`engrave-cutter-locate-${row.key}`}
                   checked={located}
                   disabled={disabled}
+                  {...(disabled && disabledReason !== null ? { title: disabledReason, 'aria-description': disabledReason } : {})}
                   onChange={(e) => onSet(row.key, e.target.checked ? { state: 'located', at: new Date().toISOString() } : null)}
                 />
                 located
@@ -138,7 +147,9 @@ export function CutterChecklist({
                   const next = e.target.value;
                   onSet(row.key, next === '' ? null : { state: 'replaced', replacedWith: next, at: new Date().toISOString() });
                 }}
-                title={replacements.length === 0 ? 'No other owned cutter of this class' : 'Replace with another owned cutter'}
+                {...(disabled && disabledReason !== null
+                  ? { title: disabledReason, 'aria-description': disabledReason }
+                  : { title: replacements.length === 0 ? 'No other owned cutter of this class' : 'Replace with another owned cutter' })}
               >
                 <option value="">replace…</option>
                 {replacements.map((candidate) => (
