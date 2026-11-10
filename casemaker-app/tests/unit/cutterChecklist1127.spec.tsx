@@ -87,6 +87,21 @@ describe('#1127 the cutter checklist', () => {
     expect(values).not.toContain('user:not-owned');
   });
 
+  it('#803 — a disabled control SAYS WHY: the reason rides the title and aria-description', () => {
+    seedRegistry();
+    const rows = cutterChecklistRows(PROGRAMS);
+    const reason = 'tick each bit at the Cut step, once the program is generated';
+    render(<CutterChecklist rows={rows} entries={undefined} onSet={() => {}} disabled disabledReason={reason} />);
+    const locate = screen.getByTestId('engrave-cutter-locate-inv:flat-25') as HTMLInputElement;
+    expect(locate.disabled).toBe(true);
+    expect(locate.getAttribute('title')).toBe(reason);
+    expect(locate.getAttribute('aria-description')).toBe(reason);
+    const replace = screen.getByTestId('engrave-cutter-replace-inv:flat-25') as HTMLSelectElement;
+    expect(replace.disabled).toBe(true);
+    expect(replace.getAttribute('title')).toBe(reason);
+    expect(replace.getAttribute('aria-description')).toBe(reason);
+  });
+
   it('TICKING IS NOT A BYTE INPUT: the fingerprint and the package’s staleness do not move', () => {
     seedRegistry();
     const job = jobWithClean();

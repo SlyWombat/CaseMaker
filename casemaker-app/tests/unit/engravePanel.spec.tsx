@@ -186,9 +186,13 @@ describe('EngravePanel (#205)', () => {
       }
       expect(line).not.toContain('choosing…');
       // #1127 — this run has no frozen package yet (its first look at Cut freezes it), so a tick
-      // would have nowhere to be recorded: the rows stay readable and the controls wait.
+      // would have nowhere to be recorded: the rows stay readable and the controls wait — each
+      // DISABLED control saying why (#803: title + aria-description).
       for (const row of rows) {
-        expect((row.querySelector('input[type="checkbox"]') as HTMLInputElement).disabled).toBe(true);
+        const box = row.querySelector('input[type="checkbox"]') as HTMLInputElement;
+        expect(box.disabled).toBe(true);
+        expect(box.getAttribute('title')).toBe('tick each bit at the Cut step, once the program is generated');
+        expect(box.getAttribute('aria-description')).toBe('tick each bit at the Cut step, once the program is generated');
       }
     } finally {
       act(() => {

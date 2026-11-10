@@ -3821,8 +3821,10 @@ export function EngravePanel(): JSX.Element {
         entries={checklistHash === undefined ? undefined : job.cutterChecklist?.[checklistHash]}
         // #1127 — a tick is recorded against THE RUN (the frozen package's hash), so before this
         // run has been frozen (its first look at Cut) a tick has nowhere to be kept: the rows stay
-        // readable and the controls wait rather than toggling back on themselves.
+        // readable and the controls wait rather than toggling back on themselves — and they SAY
+        // why (#803): the reason rides each control's title and aria-description.
         disabled={checklistHash === undefined}
+        disabledReason="tick each bit at the Cut step, once the program is generated"
         onSet={(key, entry) => {
           if (checklistHash === undefined) return;
           useEngraveJobStore.getState().setCutterChecklistEntry(checklistHash, key, entry);
