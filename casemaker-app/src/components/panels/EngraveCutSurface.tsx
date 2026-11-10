@@ -1129,14 +1129,17 @@ export function EngraveCutSurface({
     setOverrides((current) => ({ ...current, [key]: on }));
   };
 
-  const reservation = ((): { line: string; detail: string | null } | null => {
+  const reservation = ((): { line: string; detail: string | null; know: boolean } | null => {
     if (pkg === null) return null;
     if (pkg.stockEntryId === null) {
       // #1123 item 7 (bench, 2026-11-09) — THE SHELF FACT, NOT A HOLDING CLAIM. The old sentence
       // ("You're supplying this stock yourself, so no blank needs to be held") read as "nothing
       // holds the blank" on a bracket job whose blank is clamped in the bracket. This states only
       // what is true of the shelf: the blank is not on it.
-      return { line: 'This blank is not on the shelf — nothing to take from it.', detail: null };
+      // #1123 item 57 — AND IT IS INFORMATION, NOT AN INSTRUCTION. There is nothing to do about
+      // a blank that was never a shelf pick, so it reads the way the Know band reads — a closed
+      // fold — instead of a boxed line with no action.
+      return { line: 'This blank is not on the shelf — nothing to take from it.', detail: null, know: true };
     }
     const shelf = shelfItems.find((item) => item.id === pkg.stockEntryId) ?? null;
     const held = shelf?.reservations.find((entry) => entry.jobId === job.id) ?? null;
@@ -1144,11 +1147,13 @@ export function EngraveCutSurface({
       return {
         line: 'No blank is held for this job — check you have one before cutting.',
         detail: `Shelf entry ${pkg.stockEntryId} has no hold for this job.`,
+        know: false,
       };
     }
     return {
       line: `This job’s blank is held for you${held.quantity > 1 ? ` · ${held.quantity} blanks` : ''}.`,
       detail: `Held for job ${job.id} under shelf entry ${pkg.stockEntryId}.`,
+      know: false,
     };
   })();
 
@@ -1638,7 +1643,16 @@ export function EngraveCutSurface({
               {generateBlocker}
             </p>
           )}
-          {reservation !== null && (
+          {reservation !== null && (reservation.know ? (
+            <details
+              style={{ ...MUTED, marginTop: 4 }}
+              data-testid="engrave-package-reservation"
+              data-band="know"
+            >
+              <summary style={{ cursor: 'pointer' }}>shelf</summary>
+              {reservation.line}
+            </details>
+          ) : (
             <div style={MUTED} data-testid="engrave-package-reservation">
               {reservation.line}
               {reservation.detail !== null && (
@@ -1648,7 +1662,7 @@ export function EngraveCutSurface({
                 </details>
               )}
             </div>
-          )}
+          ))}
           {freezeError !== null && (
             <p style={WARN} data-testid="engrave-package-freeze-error">
               Nothing was made — {freezeError}.

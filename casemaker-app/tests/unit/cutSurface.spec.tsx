@@ -2164,6 +2164,19 @@ describe('#1123 the Fit-and-clamp card’s wording', () => {
     expect(line).not.toContain('supplying this stock yourself');
   });
 
+  it('#1123-57 — the shelf fact is Know: folded, not a boxed line with no action', () => {
+    const job = defaultEngraveJob();
+    const pkg = frozen(job, [P1]);
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
+    // The blank was not a shelf pick, so there is nothing to take and nothing to do: the fact is
+    // information, and it reads the way the Know band reads — a closed fold, opened on demand.
+    const shelf = screen.getByTestId('engrave-package-reservation');
+    expect(shelf.tagName).toBe('DETAILS');
+    expect((shelf as HTMLDetailsElement).open).toBe(false);
+    expect(shelf.getAttribute('data-band')).toBe('know');
+    expect(shelf.textContent).toContain('This blank is not on the shelf — nothing to take from it.');
+  });
+
   it('item 16 — the "I turned the stock…" expander waits until something has been cut', () => {
     const job = defaultEngraveJob();
     const pkg = frozen(job, [P1]);
