@@ -20,8 +20,13 @@ test('#799 — the Job group: Stock disclosure, Cutter line, and the Add menu’
   // 1. The closed Stock line: one fact, with the voids behind it, not a top-level row.
   await expect(page.getByTestId('engrave-stock-detail')).not.toHaveAttribute('open');
   await expect(page.getByTestId('engrave-voids-line')).toBeHidden();
-  await page.getByTestId('engrave-cutter-line').screenshot({ path: testInfo.outputPath('job-cutter-line.png') });
   await page.getByTestId('engrave-group-job').screenshot({ path: testInfo.outputPath('job-group-closed.png') });
+  // #1176 — the #798 Cutter line and the #1127 checklist live in the CUTTERS group now (the Job
+  // group's body keeps the stock/part facts), so the group is opened before the line is read.
+  await page.getByTestId('engrave-group-cutter-summary').click();
+  await expect(page.getByTestId('engrave-group-cutter')).toHaveAttribute('open');
+  await page.getByTestId('engrave-cutter-line').screenshot({ path: testInfo.outputPath('job-cutter-line.png') });
+  await page.getByTestId('engrave-group-cutter').screenshot({ path: testInfo.outputPath('job-cutter-group.png') });
 
   // 2. The opened Stock detail: the voids line and its add controls inside it.
   await page.getByTestId('engrave-stock-line').click();
@@ -60,6 +65,9 @@ test('#1123 item 44 — the settled pre-plan Cutter line says the set is planned
   await chooser.setFiles(jobPath);
   await expect(page.getByTestId('engrave-job-notice')).toContainText('Opened');
 
+  // #1176 — the line lives in the Cutters group; open it so the screenshot shows a visible line.
+  await page.getByTestId('engrave-group-cutter-summary').click();
+  await expect(page.getByTestId('engrave-group-cutter')).toHaveAttribute('open');
   const line = page.getByTestId('engrave-cutter-line');
   await expect(line).toContainText('planned at Generate from your owned bits');
   await expect(line).not.toContainText('chosen by you');

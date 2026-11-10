@@ -66,6 +66,31 @@ export function runProgressWords(
   return run.progress === null ? 'Working…' : `${run.progress.label}…`;
 }
 
+/**
+ * #1176 — THE PIPELINE'S STAGES, in the order the run reports them. The artboard's row reads
+ * `planning the contour, side 1 · stage 3 of 7`, so plan is the third of seven; `done` is the
+ * terminal state and is not a stage (the row shows "Program ready" then), and an error stage is
+ * not on the pipeline.
+ */
+const RUN_STAGES = ['prepare', 'items', 'plan', 'rough', 'finish', 'post', 'verify'] as const;
+
+/** #1176 — `stage i of n` for a running generate, or null off the pipeline (idle, done, error). */
+export function stageCounterWords(progress: { stage: string } | null): string | null {
+  if (progress === null) return null;
+  const at = (RUN_STAGES as readonly string[]).indexOf(progress.stage);
+  return at < 0 ? null : `stage ${at + 1} of ${RUN_STAGES.length}`;
+}
+
+/**
+ * #1176 — the percent a phase reports through `done`/`total`, or null when it reports none. The
+ * planner states its own percent inside its label ("planning: pocket — setup 1, 35 %"), so it
+ * reports no done/total and the row never doubles the number.
+ */
+export function percentWords(progress: { done?: number; total?: number } | null): string | null {
+  if (progress?.done === undefined || progress.total === undefined || progress.total <= 0) return null;
+  return `${Math.round((progress.done / progress.total) * 100)} %`;
+}
+
 export function RunProgressLine({ run }: { run: Pick<EngraveRunState, 'phase' | 'progress' | 'simProgram'> }): JSX.Element {
   const simStatus = useSimStore((s) => s.status);
   const simPhase = useSimStore((s) => s.phase);
@@ -83,7 +108,16 @@ export function RunProgressLine({ run }: { run: Pick<EngraveRunState, 'phase' | 
   return (
     <span>
       {runProgressWords(run, simStatus, simPhase, simProgress, simProjectionMs)}
+      {/* #1176 — the counter belongs to the generate pipeline; the sweep states its own
+          "simulating program i of n" in the words above, and the design check has no stages. */}
+      {run.phase === 'generating' ? suffix(stageCounterWords(run.progress)) : ''}
+      {suffix(percentWords(run.progress))}
       {waiting ? ` · ${formatDuration((now - waitingSince) / 1000)}` : ''}
     </span>
   );
+}
+
+/** ` · words`, or nothing — one join rule for the row's segments. */
+function suffix(words: string | null): string {
+  return words === null ? '' : ` · ${words}`;
 }
