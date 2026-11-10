@@ -5779,6 +5779,10 @@ export function EngravePanel(): JSX.Element {
               restoreChecking={run.restoreChecking}
               staleReason={run.staleReason}
               lastGenerateMs={run.lastGenerateMs}
+              // #1128 follow-up — a Do row's "Choose a cutter" is the cutter group's own fix.
+              onOpenCutters={() =>
+                applyFix({ group: 'engrave-group-cutter', focusTestid: 'engrave-tool' })
+              }
             />
           </>
         )

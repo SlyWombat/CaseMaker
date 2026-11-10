@@ -120,6 +120,8 @@ import {
 } from '@/platform/machineChange';
 import { openMachineChange } from '@/components/machine-change';
 import { EngravePreflight } from './EngravePreflight';
+import { revealClearanceStatement } from './clearanceStatement';
+import { runFindingAction, type FindingAction } from '@/engine/cnc/preflight/actions';
 import { EngraveMachineUpload } from './EngraveMachineUpload';
 import { CutterChecklist, cutterChecklistRows, missingCuttersWords } from './CutterChecklist';
 import type { CutterChecklistEntry } from '@/types/engraveJob';
@@ -305,6 +307,12 @@ export interface EngraveCutSurfaceProps {
   staleReason?: EngraveInputKey | null;
   /** #1132 — the last Generate's duration on this job (ms); null when it has never been timed. */
   lastGenerateMs?: number | null;
+  /**
+   * #1128 follow-up — the Design cutter group's own fix, for a Do row's "Choose a cutter". The
+   * Cut surface switches to Design and runs this; it is the panel's existing `applyFix`, never a
+   * second route to the cutter list.
+   */
+  onOpenCutters?: () => void;
 }
 
 /** The map from the live Generate: each program's FNV key to the report that gated that text. */
@@ -613,6 +621,7 @@ export function EngraveCutSurface({
   restoreChecking,
   staleReason = null,
   lastGenerateMs = null,
+  onOpenCutters,
 }: EngraveCutSurfaceProps): JSX.Element {
   const freeze = useEngravePackageStore((s) => s.freeze);
   const openManage = useManageModeStore((s) => s.openManage);
@@ -1332,6 +1341,21 @@ export function EngraveCutSurface({
     });
   };
 
+  /**
+   * #1128 follow-up — a Do row's act, through the SAME handlers as the original control: the
+   * machine-record banner's wizard, the Design cutter group's fix, or — for the clearance codes —
+   * the statement's own reveal (never its tick: that is the operator's). Choosing a cutter leaves
+   * Cut for Design first, exactly where the panel's own fix lands.
+   */
+  const onFindingAction = (action: FindingAction, _code: string): void => {
+    if (action === 'choose-cutter') useCncModeStore.getState().show('design');
+    runFindingAction(action, {
+      changeMachine: changeMachineForMount,
+      openCutters: () => onOpenCutters?.(),
+      showClearance: () => revealClearanceStatement(),
+    });
+  };
+
   // #819 — the ended run's screen: the Done card and its one action, nothing else.
   if (runOver && target !== null) {
     return (
@@ -1607,7 +1631,7 @@ export function EngraveCutSurface({
           >
             details
           </summary>
-          <EngravePreflight report={report} />
+          <EngravePreflight report={report} onFindingAction={onFindingAction} />
         </details>
       </Step>
 

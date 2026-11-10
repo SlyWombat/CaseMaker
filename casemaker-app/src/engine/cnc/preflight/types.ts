@@ -205,6 +205,13 @@ export const FINDING_BANDS: Readonly<Partial<Record<string, FindingBand>>> = {
   'goal-cutter-substituted': 'know',
   // Coverage of this setup: a number to know, not a warning to act on (#1128 item 1).
   'goal-unreached': 'know',
+  // #1128 item 1 names "clearance to check" as a Do: these are the codes the one clearance
+  // statement answers. The owner graded them warnings; the operator's act is a physical check
+  // before the run, so the band is Do (and the row carries the statement's tick — see actions.ts).
+  'vise-default': 'do',
+  'holder-vs-fixture-unproven': 'do',
+  'holder-unproven': 'do',
+  'released-onto-board': 'do',
 };
 
 /** The severity's own band, for every code the table does not name. */
