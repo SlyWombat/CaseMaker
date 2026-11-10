@@ -285,6 +285,9 @@ describe('#642 the bracket-seat write-back', () => {
     const bed = saves.at(-1)!.bedProfiles!.find((p) => p.id === 'bp1')!;
     expect(bed.datums.bracketSeatZ?.value).toBeCloseTo(-65.32, 3);
     expect(bed.datums.bracketSeatZ?.by).toBe('probe-1');
+    // #1189 — the datum carries the seating it was measured in, so a later refit is corrected
+    // (the runner's mocked M491 is -76.063).
+    expect(bed.datums.bracketSeatZ?.probeRefZ).toBeCloseTo(-76.063, 3);
     expect(shop).toHaveLength(1);
     expect(shop[0]!.key).toBe('bracket.seatMachineZ');
     expect(shop[0]!.value.value).toBeCloseTo(-65.32, 3);

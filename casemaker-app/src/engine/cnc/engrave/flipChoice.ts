@@ -151,14 +151,29 @@ export interface FlipZ0Input {
   facingMm?: number;
   /** The surface tolerance the corner Z check is judged within, mm. */
   toleranceMm?: number;
+  /**
+   * #1189 — the probe's `M491` reference at the side-1 run that measured the top this is carried
+   * from. The sum above is a raw machine Z in that seating; the tip-referenced height
+   * (`topMachineZ − probeRefZ`) is what survives a probe refit. Null/absent on a side-1 run from
+   * before the key: the corner Z band is then not checked.
+   */
+  probeRefZ?: number | null;
 }
 
 export interface FlipZ0 {
   seatMm: number;
   thicknessMm: number;
   facingMm: number;
-  /** Side 2's top in MACHINE Z: seat + T_measured − facing₁. */
+  /** Side 2's top in MACHINE Z, as the side-1 seating read it: seat + T_measured − facing₁. */
   topMachineZ: number;
+  /** #1189 — the probe reference that raw value was measured at; null on a pre-upgrade record. */
+  probeRefZ: number | null;
+  /**
+   * #1189 — the probe-INDEPENDENT top: `topMachineZ − probeRefZ`. Today's expected raw top is
+   * `topTipRefMm + today's M491`, so the corner Z check survives a probe refit. Null without a
+   * reference (the check is then skipped, and the run says so).
+   */
+  topTipRefMm: number | null;
   /** The band the side-2 corner Z touches must land in; null without a stated tolerance. */
   checkBand: { minMm: number; maxMm: number } | null;
   /** What the sheet prints: the three numbers, the sum, the carry shorthand and the check rule. */
@@ -190,5 +205,15 @@ export function flipZ0(input: FlipZ0Input): FlipZ0 {
         'A reading outside that band stops with the number — a chip under the blank is what it finds. Z0 is ' +
         'never re-derived from the rough face.',
   ];
-  return { seatMm, thicknessMm, facingMm, topMachineZ, checkBand, words };
+  const probeRefZ = input.probeRefZ ?? null;
+  return {
+    seatMm,
+    thicknessMm,
+    facingMm,
+    topMachineZ,
+    probeRefZ,
+    topTipRefMm: probeRefZ === null ? null : Math.round((topMachineZ - probeRefZ) * 1000) / 1000,
+    checkBand,
+    words,
+  };
 }

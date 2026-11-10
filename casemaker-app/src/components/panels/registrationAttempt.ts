@@ -131,8 +131,9 @@ export function planRegistrationAttempt(args: {
   mountDatumMismatch: string | null;
   /** #640 — the same probe, by NAME, for the sentence (the id stays for the wiring). */
   mountDatumMismatchName: string | null;
-  /** #619 — the measured surface-top datum; when present the plan expects the found top, not the ledge estimate. */
-  surfaceTopZ: { value: number } | null;
+  /** #619 — the measured surface-top datum; when present the plan expects the found top, not the ledge estimate.
+   *  #1189 — with the probe's reference it was measured at. */
+  surfaceTopZ: { value: number; probeRefZ?: number | null } | null;
   /** #509 — the active bed profile's seat beside the bracket (its bracket seat, else its surface top). */
   bracketSeat: BracketSeatDatum | null;
   /**
@@ -251,15 +252,33 @@ export function planRegistrationAttempt(args: {
     const dims0 = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
     const under0 = mount.board === true ? (job.sacrificial?.under?.thickness ?? 0) : 0;
     const expected0 = bracketExpectedSurface(defaults, dims0.z, under0, args.bracketSeat);
-    if (!expected0.ok) {
+    // #1189 — A DATUM MEASURED BEFORE THE PROBE WAS LAST FITTED IS NOT TRUSTED ACROSS THE REFIT.
+    // The seat is a raw machine Z: a probe refitted (the bench, 2026-11-10) makes every surface
+    // trigger by the seating difference, so the old number can stop a good blank or accept a
+    // wrong one. The card does NOT plan the registration touch on it: it asks for the SEAT to be
+    // measured again — the same one-touch seat-seek plan a machine with no seat gets — and that
+    // press writes the seat with the probe's reference, after which registration plans normally.
+    const legacySeat = expected0.ok && expected0.expectedSurface.probeRefZ === null;
+    if (!expected0.ok || legacySeat) {
       // The seat point is measured from the plan's own seed — a placed bracket's placement, else the anchor.
       const seat = seatSeekFor({ job, calibration, defaults, probe: args.probe, origin: datum });
       if (!seat.ok) return { kind: 'refused', reason: seat.reason };
+      // #1189 — A RE-MEASURE SEEKS WHERE THE DATUM WAS TAKEN. The stored datum's `at` is a spot
+      // verified solid when it was measured (the bench's −175, −35); re-measuring the same datum
+      // at the planner's fresh choice would move the touch for no reason. With no datum there is
+      // nothing to return to, and the planner's point stands.
+      const storedAt = legacySeat ? (args.bracketSeat?.at ?? null) : null;
+      const atX = storedAt === null ? seat.seek.x : Math.round(storedAt[0] * 1000) / 1000;
+      const atY = storedAt === null ? seat.seek.y : Math.round(storedAt[1] * 1000) / 1000;
+      const atWork = {
+        x: Math.round((atX - datum.x) * 1000) / 1000,
+        y: Math.round((atY - datum.y) * 1000) / 1000,
+      };
       const plan: RegistrationPlan = {
         mount: 'bracket',
         stock: { xMin: 0, yMin: 0, xMax: dims0.x, yMax: dims0.y, cornerRadius: 0 },
         stockThicknessMm: dims0.z,
-        surfacePoint: { x: seat.seek.workX, y: seat.seek.workY },
+        surfacePoint: atWork,
         seek: {
           fromMachineZ: seat.seek.fromMachineZ,
           travelMm: Math.round((seat.seek.fromMachineZ - (seat.seek.band.min - args.settings.scanReachMm)) * 1000) / 1000,
@@ -268,8 +287,8 @@ export function planRegistrationAttempt(args: {
         mountDatum: null,
         probe: args.probe,
         mountTap: {
-          x: seat.seek.x,
-          y: seat.seek.y,
+          x: atX,
+          y: atY,
           fromMachineZ: seat.seek.fromMachineZ,
           label: 'the wasteboard beside the blank (the bracket seat)',
           reference: 'bracket-seat',
@@ -281,13 +300,24 @@ export function planRegistrationAttempt(args: {
         bracketOrigin: { x: datum.x, y: datum.y, from: datum.from, offsetMeasured: datum.offsetMeasured },
         mountObstacles: obstacles,
         settings: args.settings,
-        notes: seat.seek.notes,
+        notes: legacySeat
+          ? [
+              ...seat.seek.notes,
+              'the bracket seat on file was measured before the probe was last fitted, so it is measured again now: this one touch writes the seat with the probe as it sits, and the registration plans from it',
+              ...(storedAt === null
+                ? []
+                : [`the touch is at the stored seat’s own point, machine X ${atX}, Y ${atY} — the spot verified when it was measured`]),
+            ]
+          : seat.seek.notes,
+        ...(legacySeat ? { seatRemeasure: 'probe-refit' as const } : {}),
       };
       return {
         kind: 'plan',
         method: 'bracket',
         plan,
-        summary: 'Measure the bracket seat — one Z seek on the wasteboard beside the blank',
+        summary: legacySeat
+          ? `Measure the bracket seat again — the seat on file predates the probe’s last fitting · machine X ${atX}, Y ${atY}`
+          : `Measure the bracket seat — one Z seek on the wasteboard beside the blank · machine X ${atX}, Y ${atY}`,
         expected: 'the seat from the seek, inside ±1.5 mm of the derived value',
       };
     }
@@ -306,6 +336,10 @@ export function planRegistrationAttempt(args: {
         // `registrationFor` adds the stock's height this way up to the seat; take it back off the
         // expected surface so the two statements cannot drift.
         seatMachineZ: expected0.expectedSurface.machineZ - dims0.z,
+        // #1189 — the seat datum's reference, so the executor corrects the band once the probe's
+        // M491 is known (the bench's refit shift).
+        seatProbeRefZ: expected0.expectedSurface.probeRefZ,
+        seatProbeRefLabel: 'the seat',
         seekFromMachineZ: clearanceZOf(jobMachine(job, calibration)) ?? 0,
         cornerRadius: 0,
         bracketOrigin: datum,
@@ -355,6 +389,25 @@ export function planRegistrationAttempt(args: {
     // mount tap needs the fixed jaw's machine XY; without a frame there is nothing to tap.
     if (args.mountTap === null) {
       return { kind: 'refused', reason: 'place the vise, or register once from the fixed jaw, so the app knows where it is' };
+    }
+    // #1189 — a datum measured before the probe was last fitted cannot anchor the band. The
+    // surface top is the expected top when present; the jaw top is the seek's floor and ceiling
+    // datum, so BOTH have to carry a reference. Ask for the one-touch re-measure and stop.
+    if (args.surfaceTopZ !== null && args.surfaceTopZ.probeRefZ == null) {
+      return {
+        kind: 'refused',
+        reason:
+          'the surface top on file was measured before the probe was last fitted, so it cannot anchor a surface band now — ' +
+          'measure it again with the probe as it sits (Manage › the machine › Run a surface registration), then register again',
+      };
+    }
+    if (args.mountDatum.probeRefZ == null) {
+      return {
+        kind: 'refused',
+        reason:
+          'the jaw top on file was measured before the probe was last fitted, so it cannot bound the surface seek now — ' +
+          'tap the fixed jaw again with the probe as it sits (Manage › the machine › Tap the fixed jaw), then register again',
+      };
     }
     input = { seekFromMachineZ, cornerRadius: STOCK_CORNER_RADIUS_MM, mountDatum: args.mountDatum, surfaceTopZ: args.surfaceTopZ, probe: args.probe, mountTap: args.mountTap };
   } else {

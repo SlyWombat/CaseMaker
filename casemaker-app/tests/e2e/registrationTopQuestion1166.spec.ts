@@ -20,7 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 import { lanServerPort } from '../../scripts/e2ePort';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse } from './fixtures/caseMaker';
 import { installFakeConsole } from './fixtures/fakeConsole';
 
 test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
@@ -82,6 +82,9 @@ function locationView(finished: readonly string[]): unknown {
     at: [-175, -35],
     // The seat IS the surface the stock rests on, so the under board is not added again.
     restsOnStock: true,
+    // #1189 — the probe's M491 when the seat was measured (the fake console's own reading): a
+    // datum from the same seating, so the plan's band is unchanged.
+    probeRefZ: -80,
   };
   profile.placements = (profile.placements ?? []).filter(
     (pl) => ((pl as { where?: { kind?: string } }).where?.kind ?? '') !== 'pins',
@@ -154,6 +157,8 @@ async function rememberMachine(page: Page): Promise<void> {
 async function typePlate(page: Page, dims: [number, number, number]): Promise<void> {
   await page.getByTestId('welcome-start-cnc').click();
   await page.getByTestId('start-wizard-next').click();
+  // #1100 — the sixteen chips live under the Something else… card now.
+  await openSomethingElse(page);
   await page.getByTestId('engrave-setup-what-pocket').click();
   await page.getByTestId('start-wizard-operation-next').click();
   await page.getByTestId('start-wizard-form-plate').click();

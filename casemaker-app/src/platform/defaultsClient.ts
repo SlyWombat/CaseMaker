@@ -139,6 +139,9 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // #1179 B — two touches on a blank that has been cut must agree to this; 0.1 is the analyst's
   // ruling (a cut floor, an old hole or a chip cannot agree with the real top to 0.1 mm).
   'registration.cutBlankAgreeMm': { label: 'agreement between two touches on a cut blank', unit: 'mm', rule: z.number().min(0.01).max(1), fallback: 0.1 },
+  // #1179 amendment (2026-11-10) — a check reading above the band is a reading (chips), and the
+  // run moves on; above the band by MORE than this it is a clamp or a fixture and still stops.
+  'registration.cutBlankAboveBandMm': { label: 'how far above the band a cut-blank reading may stand before it stops', unit: 'mm', rule: z.number().min(0.5).max(50), fallback: 5 },
   // #1179 D — a measured top may imply a thickness up to this far from the job's before the
   // Register step says so; 0.1 mm matches the touch-agreement rule beside it.
   'registration.thicknessNoteMm': { label: 'thickness difference the Register note states', unit: 'mm', rule: z.number().min(0.01).max(2), fallback: 0.1 },

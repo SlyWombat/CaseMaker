@@ -95,7 +95,7 @@ function baseArgs(job: EngraveJob) {
     mountDatumMismatch: null,
     mountDatumMismatchName: null,
     surfaceTopZ: null,
-    bracketSeat: { value: -51.69, what: 'bracket seat' as const, measuredAt: '2026-11-07T20:00:00.000Z' },
+    bracketSeat: { value: -51.69, what: 'bracket seat' as const, measuredAt: '2026-11-07T20:00:00.000Z', probeRefZ: -76.063 },
     probe: PROBE,
     probeName: 'Makera Wired Probe V2',
     mountTap: null,

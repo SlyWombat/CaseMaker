@@ -1144,7 +1144,7 @@ describe('#797 follow-up — the Register card proposes the plan it runs', () =>
                 id: 'bp-proposal',
                 datums: {
                   surfaceTopZ: null,
-                  viseJawTopZ: { value: -57.491, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-1', at: null },
+                  viseJawTopZ: { value: -57.491, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-1', at: null , probeRefZ: -80 },
                   bracketSeatZ: null,
                   rotaryAxis: null,
                 },
@@ -1252,7 +1252,7 @@ describe('#607 — the Register step of a chuck job carries the axis tap', () =>
               {
                 id: 'bp-rotary',
                 datums: {
-                  surfaceTopZ: { value: -76, measuredAt: '2026-10-31T00:00:00.000Z', by: 'fx-probe-3d', at: null },
+                  surfaceTopZ: { value: -76, measuredAt: '2026-10-31T00:00:00.000Z', by: 'fx-probe-3d', at: null , probeRefZ: -80 },
                   viseJawTopZ: null,
                   bracketSeatZ: null,
                   rotaryAxis: null,
@@ -1336,7 +1336,11 @@ describe('#1070 the proposals need no saved setup for a bed-held job', () => {
     render(<EngraveRegistrationStep job={job} target={TARGET} />);
     const button = screen.getByTestId('engrave-registration-approve-start') as HTMLButtonElement;
     expect(button.textContent).toContain('Measure the bracket seat');
-    expect(screen.getByTestId('engrave-registration-proposal-line').textContent ?? '').toContain('seat');
+    const seatLine = screen.getByTestId('engrave-registration-proposal-line').textContent ?? '';
+    expect(seatLine).toContain('seat');
+    // #1189 — the card STATES the machine XY of the touch before the press (not only the live
+    // console line), so the operator knows where the probe will go.
+    expect(seatLine).toContain('machine X ');
   });
 });
 
@@ -1400,7 +1404,7 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
                 datums: {
                   surfaceTopZ: null,
                   viseJawTopZ: null,
-                  bracketSeatZ: { value: SEAT, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1' },
+                  bracketSeatZ: { value: SEAT, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1' , probeRefZ: -80 },
                   rotaryAxis: null,
                 },
                 placements: [],
@@ -1449,7 +1453,7 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
       tilt: { xMm: 0, yMm: 0 },
       ok: true,
       verdict: 'flat',
-    } as never);
+    } as never, -80);
   }
 
   /**
@@ -1727,7 +1731,7 @@ describe('#1082 the Register card on a cold first paint', () => {
                 datums: {
                   surfaceTopZ: null,
                   viseJawTopZ: null,
-                  bracketSeatZ: { value: -56.8, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1', at: null },
+                  bracketSeatZ: { value: -56.8, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1', at: null, probeRefZ: -80 },
                   rotaryAxis: null,
                 },
                 placements: [],
@@ -1817,7 +1821,7 @@ describe('#1123-28 — the Register card never silently runs a stored plan the p
                 datums: {
                   surfaceTopZ: null,
                   viseJawTopZ: null,
-                  bracketSeatZ: { value: -56.8, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1', at: null },
+                  bracketSeatZ: { value: -56.8, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1', at: null, probeRefZ: -80 },
                   rotaryAxis: null,
                 },
                 placements: [],
@@ -2050,6 +2054,35 @@ describe('#1123-40 — the registration survives a reload, keyed by job + setup 
     expect(memo!.registration.outcome).toEqual(recorded.outcome);
     // The memo write is not a frame write: the bed it was given is unchanged.
     expect(last.bedProfiles).toEqual(useLocationStore.getState().location!.machines[0]!.bedProfiles);
+  });
+});
+
+describe('#bench-2026-11-10 — the card closes its console when it unmounts', () => {
+  it('leaving the card at measured closes the session (no stranded ESTABLISHED socket)', async () => {
+    const plan = makePlan(-55.131);
+    const job = jobWithPlan(plan);
+    install(plan);
+    let closes = 0;
+    const inner = controller(plan, sent, {});
+    setMachineConsoleLoader(async () => ({
+      async open(target: Parameters<typeof inner.open>[0], timing: Parameters<typeof inner.open>[1]) {
+        const session = await inner.open(target, timing);
+        return {
+          send: (line: string, t: Parameters<typeof session.send>[1]) => session.send(line, t),
+          close: async () => {
+            closes += 1;
+            await session.close();
+          },
+        };
+      },
+    }));
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    await runStep();
+    // The run ended at `measured`; its console is still held for the write press.
+    expect(closes).toBe(0);
+    cleanup();
+    await waitFor(() => expect(closes, 'the unmount closed the console').toBe(1));
   });
 });
 

@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 import { lanServerPort } from '../../scripts/e2ePort';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse } from './fixtures/caseMaker';
 import { installFakeConsole, type FakeConsole } from './fixtures/fakeConsole';
 
 test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
@@ -72,6 +72,8 @@ function locationView(machineOverride: Record<string, unknown> | null = null): u
     by: 'fx-probe-1',
     at: [-175, -35],
     restsOnStock: true,
+    // #1189 — the probe's M491 when the seat was measured (the fake console's own reading).
+    probeRefZ: -80,
   };
   profile.placements = (profile.placements ?? []).filter(
     (pl) => ((pl as { where?: { kind?: string } }).where?.kind ?? '') !== 'pins',
@@ -157,6 +159,8 @@ async function rememberMachine(page: Page): Promise<void> {
 async function typePlate(page: Page, dims: [number, number, number]): Promise<void> {
   await page.getByTestId('welcome-start-cnc').click();
   await page.getByTestId('start-wizard-next').click();
+  // #1100 — the sixteen chips live under the Something else… card now.
+  await openSomethingElse(page);
   await page.getByTestId('engrave-setup-what-pocket').click();
   await page.getByTestId('start-wizard-operation-next').click();
   await page.getByTestId('start-wizard-form-plate').click();
@@ -195,6 +199,10 @@ async function prepare(page: Page): Promise<void> {
     await page.getByTestId('engrave-cut-step-2-summary').click();
   }
   await expect(page.getByTestId('engrave-registration-proposal-line')).toContainText('then the top');
+  // #1179 amendment (2026-11-10) — the card says WHERE the checks will touch, before the press,
+  // so the operator can clear those spots: they sit inset from the stock's edges, not on the
+  // corners where the bench's first touch met a pile.
+  await expect(page.getByTestId('engrave-registration-proposal-line')).toContainText('in from the stock');
   await page.getByTestId('engrave-registration-approve-start').click();
   // The seek path keeps the #427 clamp confirm; the checks move nothing sideways from it.
   await page.getByTestId('engrave-registration-continue').click();

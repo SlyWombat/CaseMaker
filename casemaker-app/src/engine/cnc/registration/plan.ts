@@ -167,6 +167,12 @@ export interface MountDatum {
   jawTopZ: number;
   measuredAt: string;
   by: string;
+  /**
+   * #1189 — the probe's `M491` reference at the tap that measured this jaw top. The value is a raw
+   * machine Z; a probe refitted since then makes every expected surface shift by the difference.
+   * Absent/null on a legacy datum: the card asks for the one-touch re-measure instead of using it.
+   */
+  probeRefZ?: number | null;
 }
 
 /**
@@ -204,6 +210,12 @@ export interface PlanMountTap {
   expectZ?: number | null;
   /** #607 — how far below the reading the DATUM sits: the bracket's own height; 0/absent for the vise. */
   datumOffsetMm?: number;
+  /**
+   * #1189 — the probe's reference at the measurement `expectZ` comes from. The executor corrects
+   * `expectZ` by `today's M491 − probeRefZ` before it compares a touch with it. Absent/null on a
+   * legacy datum: the tap runs without a stale expectation and writes a fresh reading.
+   */
+  probeRefZ?: number | null;
 }
 
 export interface PlanInput {
@@ -272,6 +284,21 @@ export interface PlanInput {
    */
   stockThicknessMm?: number;
   /**
+   * #1189 — THE PROBE REFERENCE the expected surface was computed from (its datum's `probeRefZ`).
+   * The plan is built before the probe's `M491`; the executor shifts the expected top and every
+   * band derived from it by `today's M491 − this`. Absent/null: a derived or typed seat (no datum
+   * sets the expectation), or a stored plan from before the key — today's behaviour.
+   */
+  probeRefZ?: number | null;
+  /** #1189 — the datum's words in the correction sentence ('the seat', 'the jaw top', …). */
+  probeRefLabel?: string | null;
+  /**
+   * #1189 — when the seek's FLOOR comes from a different datum than its expected top (a surface
+   * top above, the jaw under it), that datum's own reference. Absent: the floor follows
+   * {@link probeRefZ}.
+   */
+  floorProbeRefZ?: number | null;
+  /**
    * REQUIRED, and the CALLER's to supply: the machine's own travel height in MACHINE Z — the resolved
    * machine's `toolChange.clearanceZ` (`machine.ts` → `resolveMachine`), the Z the controller lifts to
    * before any clearance traverse. It is BOTH the height the seek starts from AND the bound the obstacle
@@ -338,6 +365,16 @@ export interface RegistrationPlan {
   corner?: { id: CornerId; xEdge: 'left' | 'right'; yEdge: 'front' | 'back' };
   /** #619 — the stock's thickness, mm, for the datum path's upper surface bound. */
   stockThicknessMm?: number;
+  /** #1189 — the probe reference the Z expectations were computed at, and whose words; see PlanInput. */
+  probeRefZ?: number | null;
+  probeRefLabel?: string | null;
+  /** #1189 — the floor's own datum reference when it differs from {@link probeRefZ}. */
+  floorProbeRefZ?: number | null;
+  /**
+   * #1189 — this is the SEAT-SEEK plan run to re-measure a seat whose stored reading predates the
+   * probe's last fitting (it carries no reference). The one touch writes it with the reference.
+   */
+  seatRemeasure?: 'probe-refit';
   surfacePoint: { x: number; y: number };
   /**
    * #1179 B — TOUCH POINTS ON A BLANK THAT HAS BEEN CUT, work XY with the depth each point is
@@ -499,11 +536,13 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
   // stock the probe can only meet the stock), not a band around the estimate; the ceiling is the
   // expected surface + tolerance either way. The legacy seat path — and a datum with the stock recessed
   // below the jaw tops (#517) — keeps the band's own floor.
-  const seekFloor =
-    mount === 'vise' && mountDatum !== null && exp > mountDatum.jawTopZ
-      ? r3(mountDatum.jawTopZ - s.surfaceToleranceMm)
-      : r3(exp - s.surfaceToleranceMm);
+  const floorFromDatum = mount === 'vise' && mountDatum !== null && exp > mountDatum.jawTopZ;
+  const seekFloor = floorFromDatum ? r3(mountDatum!.jawTopZ - s.surfaceToleranceMm) : r3(exp - s.surfaceToleranceMm);
   const band = { min: seekFloor, max: r3(exp + s.surfaceToleranceMm) };
+  // #1189 — the floor is the JAW's when it comes from the jaw datum; it then shifts by that
+  // datum's own reference, which may differ from the expected surface's (a surface top above, a
+  // jaw measured in another seating). Absent, both follow the expected surface's datum.
+  const floorProbeRefZ = floorFromDatum ? (mountDatum!.probeRefZ ?? null) : (input.probeRefZ ?? null);
   if (band.max + s.parkAboveSurfaceMm > seekFromMachineZ) {
     return { ok: false, reason: `the stock's top is expected at machine Z ${exp}: too high to park ${s.parkAboveSurfaceMm} mm above it` };
   }
@@ -565,6 +604,9 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
         mount,
         stock,
         stockThicknessMm: input.stockThicknessMm,
+        ...(input.probeRefZ == null ? {} : { probeRefZ: input.probeRefZ }),
+        ...(input.probeRefLabel == null ? {} : { probeRefLabel: input.probeRefLabel }),
+        ...(floorProbeRefZ == null ? {} : { floorProbeRefZ }),
         surfacePoint: {
           x: r3((input.region.min[0] + input.region.max[0]) / 2),
           y: r3((input.region.min[1] + input.region.max[1]) / 2),
@@ -788,6 +830,9 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       // #525 — present only on a corner plan, so every other plan's record is unchanged.
       ...(corner !== undefined ? { corner: { id: corner, ...cornerEdges(corner) } } : {}),
       stockThicknessMm: input.stockThicknessMm,
+      ...(input.probeRefZ == null ? {} : { probeRefZ: input.probeRefZ }),
+      ...(input.probeRefLabel == null ? {} : { probeRefLabel: input.probeRefLabel }),
+      ...(floorProbeRefZ == null ? {} : { floorProbeRefZ }),
       surfacePoint,
       seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },
       mountDatum,

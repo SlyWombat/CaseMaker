@@ -183,8 +183,18 @@ const n = (v: number): string => String(Math.round(v * 1000) / 1000);
 
 /** #797 follow-up — the plan in one line: where it touches, how many touches, which probe. */
 function proposalLine(plan: RegistrationPlan): string {
-  // #1070 — the seat plan is one touch, named for what it measures.
-  if (isSeatPlan(plan)) return 'the bracket seat — one Z seek on the wasteboard beside the front arm · wired probe';
+  // #1070 — the seat plan is one touch, named for what it measures. #1189 — a RE-MEASURE says
+  // why it is being taken again, before the press.
+  if (isSeatPlan(plan)) {
+    // #1189 — the machine XY of the touch, on the card, BEFORE the press: the re-measure seeks at
+    // the stored datum's own point, and the operator must see where the probe will go.
+    const p3 = (n: number): string => String(Math.round(n * 1000) / 1000);
+    const where =
+      plan.mountTap === null ? '' : ` · machine X ${p3(plan.mountTap.x)}, Y ${p3(plan.mountTap.y)}`;
+    return plan.seatRemeasure === 'probe-refit'
+      ? `the bracket seat again — the seat on file predates the probe’s last fitting · one Z seek on the wasteboard beside the front arm${where} · wired probe`
+      : `the bracket seat — one Z seek on the wasteboard beside the front arm${where} · wired probe`;
+  }
   const order = ['left', 'front', 'right', 'back'] as const;
   const edges = order.filter((edge) => plan.scans.some((scan) => scan.edge === edge));
   const touches = registrationTouches({ ok: true, plan });
@@ -196,6 +206,21 @@ function proposalLine(plan: RegistrationPlan): string {
       : edges.length === 1
         ? `${edges[0]} edge`
         : `${edges.slice(0, -1).join(', ')} and ${edges.at(-1)} edges`;
+  // #1179 amendment (2026-11-10) — WHERE it will touch, before the press, so the operator can
+  // clear those spots: chips collect against the edges, and the bench's first check was the
+  // front-left corner. The inset is the nearest check's distance to any stock edge (the candidates
+  // prefer 10 mm; a narrow uncut area relaxes to the 3 mm margin).
+  const checks = plan.surfaceChecks ?? [];
+  if (checks.length > 0) {
+    const inset = Math.round(
+      Math.min(
+        ...checks.map((c) =>
+          Math.min(c.x - plan.stock.xMin, plan.stock.xMax - c.x, c.y - plan.stock.yMin, plan.stock.yMax - c.y),
+        ),
+      ),
+    );
+    return `${list}, then the top · ${touchWords} · ${probeWords} — the checks touch at least ${inset} mm in from the stock's edges`;
+  }
   return `${list}, then the top · ${touchWords} · ${probeWords}`;
 }
 
@@ -272,17 +297,22 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
    * origin was accepted at (`registration.surfaceMachineZ`, measured or derived); the derived offer
    * continues from THAT top rather than from seat + stated thickness.
    */
-  const lastRecordedTopMachineZ = useMemo(() => {
-    let latest: { at: string; machineZ: number } | null = null;
+  const lastRecordedTop = useMemo(() => {
+    let latest: { at: string; machineZ: number; probeRefZ: number | null } | null = null;
     for (const run of machineRecord?.finishedRuns ?? []) {
       if (run.jobId !== job.id) continue;
       const machineZ = run.registration?.surfaceMachineZ;
       if (machineZ === undefined) continue;
       const at = run.finishedAt ?? '';
-      if (latest === null || at >= latest.at) latest = { at, machineZ };
+      // #1189 — the seating the recorded top was read in; the executor corrects the raw value by
+      // today's M491, and refuses to use it at all when the record carries no reference.
+      const probeRefZ = run.registration?.probeRefZ ?? null;
+      if (latest === null || at >= latest.at) latest = { at, machineZ, probeRefZ };
     }
-    return latest?.machineZ ?? null;
+    return latest;
   }, [machineRecord, job.id]);
+  const lastRecordedTopMachineZ = lastRecordedTop?.machineZ ?? null;
+  const lastRecordedTopProbeRefZ = lastRecordedTop?.probeRefZ ?? null;
   const probe = useMemo(() => probeFor(machineRecord), [machineRecord]);
   const mountDatum = useMemo(() => mountDatumFor(machineRecord), [machineRecord]);
   const mountDatumMismatchBy = useMemo(() => mountDatumMismatch(machineRecord), [machineRecord]);
@@ -560,6 +590,10 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
             thicknessMm,
             facingMm: job.facing?.enabled === true ? job.facing.depth : 0,
             toleranceMm: regSettings.surfaceToleranceMm,
+            // #1189 — the side-1 run's M491: the carried top is a raw reading in that seating, and
+            // the corner Z band is corrected to today's probe once the flip run measures it. The
+            // spread's own record names it; a stored registration is the fallback.
+            probeRefZ: surfaces[job.id]?.probeRefZ ?? registrations[job.id]?.outcome.probeRefZ ?? null,
           });
     return planFlipAttemptForJob(
       job,
@@ -573,7 +607,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       },
       setupNumber - 1,
     );
-  }, [job, machineRecord, surfaces, probe, seekFromMachineZ, regSettings, setupNumber, flipGoal, tools]);
+  }, [job, machineRecord, surfaces, probe, seekFromMachineZ, regSettings, setupNumber, flipGoal, tools, registrations]);
   // #1123-28 — the stored plan the operator approved, next to the planner's CURRENT proposal.
   // A changed planner (a build, a machine record) can make them differ; the card says so and
   // offers the new plan in place rather than silently running the old one.
@@ -700,6 +734,15 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         resolverRef.current = null;
         answer(false);
       }
+      // BENCH BLOCKER 2026-11-10 — AND CLOSE THE SESSION. Leaving the app while the card sits at
+      // `measured` (the run ended, its origin not yet written) stranded this console: `again()` and
+      // the write press close it, but an unmount had no path that did. The Rust relay keeps a
+      // connection until `tcpClose`, so that stranded one showed as an ESTABLISHED socket to the
+      // controller (the analyst's leak). The executor's own epilogue still runs where it can, and
+      // closing twice is safe (`close()` is idempotent).
+      const handle = handleRef.current;
+      handleRef.current = null;
+      if (handle !== null) void handle.close();
     };
   }, []);
 
@@ -1028,6 +1071,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           hasFinishedPrograms,
           // #1179 D/B4 — the blank's last recorded top, so the derived offer continues from it.
           lastRecordedTopMachineZ,
+          // #1189 — the probe's reference at the run that recorded it (null: not used across a refit).
+          lastRecordedTopProbeRefZ,
           // #587 — the executor narrates each step as it moves; surface it live.
           onStep: (sentence) => {
             if (aliveRef.current) setNarration(sentence);
@@ -1059,7 +1104,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         // recommendation and the material scan plan from (#496). Both spans travel with the count
         // of touches that produced them and the date they were taken: a figure with no provenance
         // is the assumed dome #496 removed.
-        measureSurface(job.id, target, r.spread);
+        // #1189 — with the seating the raw Z values were read in.
+        measureSurface(job.id, target, r.spread, r.data.probeRefZ);
         const store = useEngraveJobStore.getState();
         if (store.job.id === job.id) {
           const measuredAt = new Date().toISOString();
@@ -1139,13 +1185,14 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               const frame = viseFrameFromRegistration(frameRegistration, jobVise(job).jawStartY);
               rec = withVisePlacementFrame(rec, frame, { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' }, now);
               // #619 — write the measured surface top so the next plan expects the found top.
-              rec = withSurfaceTopDatum(rec, { z: r.data.surface.z, at: effectivePlan.surfacePoint }, probeId, now);
+              // #1189 — with the seating it was read in, so a later refit is corrected.
+              rec = withSurfaceTopDatum(rec, { z: r.data.surface.z, at: effectivePlan.surfacePoint }, probeId, now, r.data.probeRefZ);
             }
             if (mountTap !== null) {
               rec =
                 bracketSeat !== null
-                  ? withBracketSeatDatum(rec, { z: bracketSeat, at: mountTap.at }, probeId, now)
-                  : withViseJawTopDatum(rec, mountTap, probeId, now);
+                  ? withBracketSeatDatum(rec, { z: bracketSeat, at: mountTap.at }, probeId, now, r.data.probeRefZ)
+                  : withViseJawTopDatum(rec, mountTap, probeId, now, r.data.probeRefZ);
             }
             return rec;
           };
@@ -1330,6 +1377,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               { z: result.data.surface.z, at: runPlan.surfacePoint },
               runPlan.probe?.id ?? null,
               now,
+              // #1189 — the seating this reading was taken in.
+              result.data.probeRefZ,
             );
           }
           return memo === null ? rec : withRegistrationMemo(rec, memo);
