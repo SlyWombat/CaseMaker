@@ -15,15 +15,15 @@
  * an optional AbortSignal) through the seam into `planTwoOutcomes`, so the same run reports at
  * least three planner stages — each one re-arming the watchdog on the main thread.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
+import { loadStlMesh } from './helpers/trayAcceptance';
 import { createHash } from 'node:crypto';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
-import { parseStl } from '@/engine/import/stlParser';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -42,9 +42,8 @@ const TRAY_STL = TRAY_STEP === undefined ? null : path.join(path.dirname(TRAY_ST
 const X42 = flatEndMill(3.175, { name: 'Spiral O Single Flute 3.175 x 42', id: 'inv:kz-o-flute-3-175-42', fluteLength: 42 });
 const X42_ENTRY: ToolLibraryEntry = { key: 'inv:kz-o-flute-3-175-42', tool: X42, provenance: 'test' };
 
-function trayJob(stlPath: string): EngraveJob {
-  const bytes = readFileSync(stlPath);
-  const parsed = parseStl(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+async function trayJob(stlPath: string): Promise<EngraveJob> {
+  const { bytes, parsed } = await loadStlMesh(stlPath);
   const size = {
     x: parsed.bbox.max[0] - parsed.bbox.min[0],
     y: parsed.bbox.max[1] - parsed.bbox.min[1],
@@ -83,7 +82,7 @@ describe('#1038 — the goal plan reports its stages', () => {
   it.skipIf(TRAY_STL === null || !existsSync(TRAY_STL))(
     'the plate’s plan reports at least three planner stages to the run’s progress channel',
     async () => {
-      const job = trayJob(TRAY_STL!);
+      const job = await trayJob(TRAY_STL!);
       const events: EngraveProgress[] = [];
       const gen = await engraveGenerate(
         tl,
@@ -110,7 +109,7 @@ describe('#1038 — the goal plan reports its stages', () => {
   it.skipIf(TRAY_STL === null || !existsSync(TRAY_STL))(
     'a stop raised mid-plan lands within one boundary — at most one further tick, then the refusal',
     async () => {
-      const job = trayJob(TRAY_STL!);
+      const job = await trayJob(TRAY_STL!);
       const ctrl = new AbortController();
       const events: EngraveProgress[] = [];
       let abortedAt: number | null = null;

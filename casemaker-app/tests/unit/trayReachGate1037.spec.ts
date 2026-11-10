@@ -12,14 +12,10 @@
  * contour at 27.2). The gate must agree with it, and 6b's constraint holds: reach resolves from
  * the stated `fluteLength` only (the owned cutters carry no ids, and no catalogue row is read).
  */
-import fs from 'node:fs';
-import path from 'node:path';
-import { createHash } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
+import { placedTarget } from './helpers/trayAcceptance';
 
-import { stepToMesh } from '@/engine/import/stepMesh';
-import { buildBinaryStl } from '@/workers/export/stlBinary';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { generateGoalProgram } from '@/workers/sim/engraveGenerate';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
@@ -38,28 +34,6 @@ const OWNED: Tool[] = [
   { ...flatEndMill(1), name: '1 x 7 corn', fluteLength: 7 },
 ];
 const entry = (tool: Tool, i: number): ToolLibraryEntry => ({ key: `inv:owned-${i}`, tool, provenance: 'test' });
-
-async function placedTray(file: string): Promise<EngraveTargetObject> {
-  const stock: [number, number] = [110, 140];
-  const modelTop = -1.2;
-  const bytes = fs.readFileSync(file);
-  const read = await stepToMesh(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 'recognition');
-  const { min, max } = read.mesh.bbox;
-  const stl = buildBinaryStl([{ positions: read.mesh.positions, indices: read.mesh.indices }]);
-  const sha256 = createHash('sha256').update(Buffer.from(stl)).digest('hex');
-  return {
-    id: sha256.slice(0, 16),
-    name: path.basename(file),
-    format: 'stl',
-    sha256,
-    data: Buffer.from(stl).toString('base64'),
-    size: { x: max[0] - min[0], y: max[1] - min[1], z: max[2] - min[2] },
-    position: { x: stock[0] / 2, y: stock[1] / 2, z: modelTop },
-    rotation: 0,
-    enabled: true,
-    role: 'goal',
-  };
-}
 
 function trayJob(target: EngraveTargetObject): EngraveJob {
   const base = defaultEngraveJob();
@@ -81,7 +55,7 @@ function trayJob(target: EngraveTargetObject): EngraveJob {
 
 describe.skipIf(TRAY === undefined)('#1037 the M1 tray reaches Generate with the owned set', () => {
   it('the ⌀3.175 x 22 ball is not refused by the goal’s whole depth, and its plan cuts ≤ 4.2 mm', async () => {
-    const target = await placedTray(TRAY!);
+    const target = await placedTarget(TRAY!, [110, 140], -1.2);
     const job = trayJob(target);
     const ball = OWNED[2]!;
     const out = await generateGoalProgram(job, target, ball, null, {
@@ -114,7 +88,7 @@ describe.skipIf(TRAY === undefined)('#1037 the M1 tray reaches Generate with the
   }, 600_000);
 
   it('a house flat whose stated flute reaches but is not in the chain says so, never "longest is 42 mm" contradicting itself', async () => {
-    const target = await placedTray(TRAY!);
+    const target = await placedTarget(TRAY!, [110, 140], -1.2);
     const job = trayJob(target);
     // The 42-flute flat is in the HOUSE but cannot enter the chain (it states no cutting diameter),
     // so no step of the chosen chain covers the profile — the warning's cause is the CHAIN, not a
@@ -135,7 +109,7 @@ describe.skipIf(TRAY === undefined)('#1037 the M1 tray reaches Generate with the
   }, 600_000);
 
   it('with the ×42 flat removed the run POSTS with no freeing contour and STATES it: goal-not-freed, 27.2 and 25', async () => {
-    const target = await placedTray(TRAY!);
+    const target = await placedTarget(TRAY!, [110, 140], -1.2);
     const job = trayJob(target);
     const set = OWNED.filter((_, i) => i !== 0);
     const out = await generateGoalProgram(job, target, OWNED[2]!, null, { shop: { tools: set.map(entry) } });

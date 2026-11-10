@@ -29,13 +29,10 @@
  * old gate. The block case stays green either way.
  */
 import { describe, expect, it } from 'vitest';
-import fs from 'node:fs';
-import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { placedTree } from './helpers/trayAcceptance';
 
 import { tl } from './helpers/manifoldExec';
-import { stepToMesh } from '@/engine/import/stepMesh';
-import { recogniseFeatures, type FeatureTree } from '@/engine/cnc/cam/model/features';
+import { recogniseFeatures } from '@/engine/cnc/cam/model/features';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
 import { planPocketsForTree, type PlanPocketsOptions } from '@/engine/cnc/cam/model/plan';
 import { Z1 } from '@/engine/cnc/machine';
@@ -44,49 +41,12 @@ import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
 import type { ParsedMesh } from '@/engine/import/stlParser';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
-import { buildBinaryStl } from '@/workers/export/stlBinary';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
 import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
 import { parseGcode, setupFromHeader, stubSetup } from '@/engine/cnc';
 import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
-import type { EngraveTargetObject } from '@/types/engraveJob';
 
 const TRAY = process.env.CM_959_TRAY_STEP;
-
-async function placedTray(file: string): Promise<{ tree: FeatureTree; mesh: ParsedMesh; target: EngraveTargetObject }> {
-  const bytes = fs.readFileSync(file);
-  const read = await stepToMesh(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 'recognition');
-  const { min, max } = read.mesh.bbox;
-  const dx = 110 / 2 - (min[0] + max[0]) / 2;
-  const dy = 140 / 2 - (min[1] + max[1]) / 2;
-  const dz = -1.2 - max[2];
-  const positions = Float32Array.from(read.mesh.positions);
-  for (let i = 0; i < positions.length; i += 3) {
-    positions[i] = positions[i]! + dx;
-    positions[i + 1] = positions[i + 1]! + dy;
-    positions[i + 2] = positions[i + 2]! + dz;
-  }
-  const mesh: ParsedMesh = { ...read.mesh, positions };
-  const tree = recogniseFeatures({ triangles: mesh, faceId: read.faceId }, { up: [0, 0, 1], stockTop: 0 }, tl);
-  // The goal's own door, exactly as `opsAcceptance959`'s `placedTree` builds it: the RAW mesh as a
-  // binary STL, placed by `position` the same way the recognition mesh was shifted — so
-  // `sampleGoalHeightfield` reads the SAME surface the tree was recognised from.
-  const stl = buildBinaryStl([{ positions: read.mesh.positions, indices: read.mesh.indices }]);
-  const sha256 = createHash('sha256').update(Buffer.from(stl)).digest('hex');
-  const target: EngraveTargetObject = {
-    id: sha256.slice(0, 16),
-    name: path.basename(file),
-    format: 'stl',
-    sha256,
-    data: Buffer.from(stl).toString('base64'),
-    size: { x: max[0] - min[0], y: max[1] - min[1], z: max[2] - min[2] },
-    position: { x: 110 / 2, y: 140 / 2, z: -1.2 },
-    rotation: 0,
-    enabled: true,
-    role: 'goal',
-  };
-  return { tree, mesh, target };
-}
 
 const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
 const FLAT3175 = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' });
@@ -138,7 +98,7 @@ function sweptField(goal: GoalHeightfield, programs: readonly { ir: ToolpathIR }
 
 describe.skipIf(TRAY === undefined)('#970/#1031 the real tray — shadow-on never cuts what shadow-off did not', () => {
   it('the ON run never cuts below the OFF run, and every difference cell has design above its cut level', async () => {
-    const { tree, mesh, target } = await placedTray(TRAY!);
+    const { tree, mesh, target } = await placedTree(TRAY!, [110, 140], -1.2);
     const goal = sampleGoalHeightfield(target, { pitchMm: CELL_MM, stockTopZ: 0 });
     const offset = makeClipperOffset(tl);
     const withShadow = planPocketsForTree(tree, { offset, ...pocketOptions(mesh) });
