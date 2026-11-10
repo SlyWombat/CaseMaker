@@ -124,6 +124,10 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'registration.faceAngleMaxDeg': { label: 'face angle, largest correction', unit: '°', rule: z.number().min(0.2).max(45), fallback: 10 },
   'registration.scanInsideMm': { label: 'scan start inside the edge', unit: 'mm', rule: z.number().min(0.5).max(30), fallback: 3.0 },
   'registration.scanReachMm': { label: 'scan reach past the edge', unit: 'mm', rule: z.number().min(0.5).max(50), fallback: 5.0 },
+  // #1133 — the edge-find band: every stock-edge scan spans expected ± this. CHOSEN, not measured:
+  // the stock's own size error, the mount's repeat (0.05 mm) and fit (0.1 mm), plus margin. The
+  // maintainer's rule: an edge find never walks inward over the stock where the holes are.
+  'registration.edgeBandMm': { label: 'edge-find band around the expected edge', unit: 'mm', rule: z.number().min(0.5).max(20), fallback: 4.0 },
   'registration.cornerClearanceMm': { label: 'clearance from a rounded corner', unit: 'mm', rule: z.number().min(0).max(30), fallback: 2.0 },
   'registration.surfaceBandMm': { label: 'surface band', unit: 'mm', rule: z.number().min(0.01).max(1), fallback: 0.25 },
   // MEASURED 2026-10-15 — the effective rim offset; the note in location.json says how. The fallback is that measurement.

@@ -2740,6 +2740,12 @@
                                 "description": "Clearance kept from corners, in millimetres.",
                                 "type": "number"
                               },
+                              "edgeBandMm": {
+                                "default": 4,
+                                "description": "Half-width of the edge-find band around the expected edge, in millimetres.",
+                                "exclusiveMinimum": 0,
+                                "type": "number"
+                              },
                               "edgeMarginMm": {
                                 "description": "Margin kept from the stock edge, in millimetres.",
                                 "type": "number"
@@ -4600,6 +4606,12 @@
                           },
                           "cornerClearanceMm": {
                             "description": "Clearance kept from corners, in millimetres.",
+                            "type": "number"
+                          },
+                          "edgeBandMm": {
+                            "default": 4,
+                            "description": "Half-width of the edge-find band around the expected edge, in millimetres.",
+                            "exclusiveMinimum": 0,
                             "type": "number"
                           },
                           "edgeMarginMm": {

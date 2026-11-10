@@ -210,6 +210,28 @@ function fakeZ1(opts: {
         // #518 — a G38.3 miss is a reading and `ok`, never an alarm.
         return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\nok`);
       }
+      // #1133 — a SIDEWAYS touch (the wired probe now seeks the free front edge that way when the
+      // plan has a measured jaw top): the ball's centre stops one rim outside the edge it reaches.
+      m = /^G38\.3 ([XY])(-?[\d.]+) F[\d.]+$/.exec(line);
+      if (m) {
+        if (mode !== 'G91') throw new Error('the executor probed in absolute mode');
+        const axis = m[1] === 'X' ? ('x' as const) : ('y' as const);
+        const travel = Number(m[2]);
+        const start = pos[axis];
+        const end = start + travel;
+        const off = axis === 'x' ? G54.x : G54.y;
+        const low = (axis === 'x' ? a.xMin : a.yMin) + off - RIM;
+        const high = (axis === 'x' ? a.xMax : a.yMax) + off + RIM;
+        const acrossWork = axis === 'x' ? pos.y - G54.y : pos.x - G54.x;
+        const across = axis === 'x' ? [a.yMin, a.yMax] : [a.xMin, a.xMax];
+        const hits =
+          pos.z < opts.surface &&
+          acrossWork >= across[0]! - RIM &&
+          acrossWork <= across[1]! + RIM &&
+          (travel > 0 ? start < low && end >= low : start > high && end <= high);
+        pos[axis] = hits ? (travel > 0 ? low : high) : end;
+        return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}:${hits ? 1 : 0}]\nok`);
+      }
       if (/^G10 L2 P1 /.test(line)) return reply('ok');
       return reply(`error:unexpected line ${line}`);
     },

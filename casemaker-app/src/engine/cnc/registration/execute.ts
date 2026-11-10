@@ -584,15 +584,17 @@ async function scanEdge(io: Session, plan: RegistrationPlan, scan: EdgeScan, par
 }
 
 /**
- * #525 — one SIDEWAYS edge scan with the 3D probe: a lift (at the bracket's travel height), the move
- * to the plan's outward limit, down to the touch depth and ONE horizontal `G38.3` inward — then back
- * up. `probe3d.ts` owns the line, the depth (kept clear of the vise's ledge) and the ball's offset;
+ * #525/#1133 — one SIDEWAYS edge scan: a lift (at the bracket's travel height), the move to the
+ * plan's outward limit, down to the touch depth and ONE horizontal `G38.3` inward — then back up.
+ * `probe3d.ts` owns the line, the depth (kept clear of the vise's ledge) and the tip/ball offset;
  * this only sends and records the reading the same way the Z touch does, so the outcome's edge, the
  * viewport's dot and the dock's row all come from one reading.
  *
- * Only called for an edge `sideTouchAllowed` accepts: a vise's X edges are the jaws' own faces and
+ * Called for EVERY probe where `sideTouchAllowed` accepts the edge and the setup can place the
+ * touch — the wired/Z-only probe included (#1133). A vise's X edges are the jaws' own faces and
  * keep the Z-only scan (`scanEdge`), because a sideways approach there would drive the ball into a
- * jaw bar.
+ * jaw bar; a vise with no measured jaw top keeps the Z-only scan on its free edges too (the setup
+ * cannot place the ball above the ledge without it, and the plan says so).
  */
 async function scanEdgeSideways(
   io: Session,
@@ -601,23 +603,24 @@ async function scanEdgeSideways(
   surfaceZ: number,
   sentFrom: { x: number; y: number },
 ): Promise<ScanRecord> {
-  const tip = plan.probe?.tip ?? null;
-  // The planner refuses an unmeasured probe before any of this; a plan that reached here without one
-  // has been edited, and a sideways correction cannot be guessed.
-  if (tip === null) throw new Stop('the 3D probe has no measured tip — measure it (Manage › Accessories) and plan again');
   const s = plan.settings;
-  const setup = sideTouchSetup(scan, plan, s, tip.rimOffsetMm, surfaceZ);
+  // The rim offset is the INSTRUMENT's when its tip is measured (the 3D probe's ball, the wired
+  // probe's recorded 0.7 mm); a plan with no probe carries the shop's own. #1133 — the wired
+  // probe seeks sideways here too, so the number must be this machine's, never a 3D-only assumption.
+  const rimOffsetMm = plan.probe?.tip?.rimOffsetMm ?? s.tipRadiusMm;
+  const setup = sideTouchSetup(scan, plan, s, rimOffsetMm, surfaceZ);
   if (!setup.ok) throw new Stop(setup.reason);
   const t = setup.touch;
   const what = scan.label ?? `the ${scan.edge} edge`;
   if (plan.mount === 'bracket') await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
   await io.send(moveXY(plan, t.x, t.y));
-  // #643 — THE DESCENT AT THE LIMIT IS GUARDED. The limit stands its 5 mm OUTSIDE the expected
-  // edge, so a blank that sits that far toward the edge is UNDER this point: an unguarded G0 down
-  // to the touch depth would drive the stylus into it. Probe down instead, exactly as the Z-only
-  // scan probes at its own limit. A touch here means the blank reaches the limit — the edge is
-  // beyond the reach — and that case is recorded as the Z-only path records it, so the outcome
-  // says the same sentence ("not found within the scan's reach") rather than a false miss.
+  // #643 — THE DESCENT AT THE LIMIT IS GUARDED. The limit stands the edge band's width OUTSIDE
+  // the expected edge (#1133), so a blank that sits that far toward the edge is UNDER this point:
+  // an unguarded G0 down to the touch depth would drive the stylus into it. Probe down instead,
+  // exactly as the Z-only scan probes at its own limit. A touch here means the blank reaches the
+  // limit — the edge is beyond the band — and that case is recorded as the Z-only path records it,
+  // so the outcome says the same sentence ("not found within the scan's reach") rather than a
+  // false miss.
   const descendFromZ = plan.mount === 'bracket' ? plan.seek.fromMachineZ : surfaceZ + s.parkAboveSurfaceMm;
   // #643 review — the descent's START HEIGHT is stated ABSOLUTELY before the relative probe. The
   // head is wherever the previous step left it (often the travel height), not necessarily the
@@ -1763,17 +1766,20 @@ export async function runRegistration(
     io.at(`at the park height, ${s.parkAboveSurfaceMm} mm above the surface`);
 
     const scans: ScanRecord[] = [];
-    // #525 — the 3D probe touches edges SIDEWAYS where the mount allows it (the free front/back
-    // edges on a vise; every edge on the bracket/tape). The jaws block an X approach on a vise, so
-    // those edges keep the Z-only bracket-and-bisect the wired probe uses — the 3D probe triggers
-    // downward too, and the frame's fixed-jaw face is what the left edge confirms.
+    // #525/#1133 — a sideways touch wherever the mount leaves the edge free: the bracket and tape
+    // (all four), and a vise's free front/back edges — for EVERY probe, the wired/Z-only one
+    // included. A sideways seek approaches from OUTSIDE the stock and stops at the first touch, so
+    // the scan never walks inward over the stock where the bores and pockets are (the maintainer's
+    // rule). A vise's X edges keep the Z-only bracket-and-bisect: its jaws stand where the ball
+    // would travel. #1133 — a vise with NO measured jaw top keeps the Z-only scan on its free
+    // edges too: `sideTouchSetup` cannot place the ball above the ledge without the datum, and the
+    // plan says so ("no measured jaw top for a sideways touch").
     const g54 = { x: r3(slow.x - plan.surfacePoint.x), y: r3(slow.y - plan.surfacePoint.y) };
+    const sideTouchable = (edge: EdgeScan['edge']) =>
+      sideTouchAllowed(plan.mount, edge) && !(plan.mount === 'vise' && plan.mountDatum === null);
     for (const scan of plan.scans) {
       scans.push(
-        probeInstrumentOf(plan.probe) === 'xyz' &&
-        (sideTouchAllowed(plan.mount, scan.edge) ||
-          (plan.corner !== undefined &&
-            !(plan.cornerXFrom === 'jaw' && (scan.edge === 'left' || scan.edge === 'right'))))
+        sideTouchable(scan.edge)
           ? await scanEdgeSideways(io, plan, scan, slow.z, g54)
           : await scanEdge(io, plan, scan, parkZ, slow.z),
       );

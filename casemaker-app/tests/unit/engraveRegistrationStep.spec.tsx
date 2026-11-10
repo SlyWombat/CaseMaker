@@ -631,9 +631,9 @@ describe('#495 — the registration step', () => {
   it('#593 — a scan whose first touch misses searches inward and finds the edge, usable but outside the margin', async () => {
     const plan = makePlan(-56.172);
     const job = jobWithPlan(plan);
-    // The stock sits 5 mm along the jaws, past `scanInsideMm` (3): the first touch of each scan is
-    // air, and the executor steps inward until a touch lands on the stock, so the run completes
-    // (usable) and the offset is simply far outside the margin — not a false refusal.
+    // The stock sits 5 mm along the jaws, past the 4 mm edge band (#1133): the first touch of each
+    // scan is air, and the executor bisects inward until a touch lands on the stock, so the run
+    // completes (usable) and the offset is simply far outside the margin — not a false refusal.
     install(plan, { edgeShiftMm: 5 });
     render(<EngraveRegistrationStep job={job} target={TARGET} />);
 
