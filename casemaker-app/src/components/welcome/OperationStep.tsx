@@ -589,6 +589,9 @@ export function OperationStep({
       )}
       {!rotary && outline !== null && (
         <div data-testid="start-wizard-op-outline-field" style={FIELD_BOX}>
+          {/* #1099 (with #1098) — the drawing gets the same thumbnail as a mesh: its rings and
+              open paths, and the blank this file will be cut from. */}
+          <WizardThumbnail source={{ kind: 'outline', outline }} sentence={proposalSentence} />
           <div style={FIELD_HEADING}>{outlineFileName}</div>
           <p style={MUTED} data-testid="start-wizard-op-outline-fact">
             {outlineFact(outline)}
