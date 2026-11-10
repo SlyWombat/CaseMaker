@@ -1340,6 +1340,20 @@ describe('#819 the finished screen', () => {
     });
     const files = useEngraveReleaseStore.getState().records[machineKey(TARGET)]!.files;
     expect(files.find((f) => !f.done)?.index).toBe(2);
+    // The upload step then finds the programs on the card (the presence check), and the press names
+    // the program the reload must continue with — program 2 of 20, never a blanket "run the job".
+    act(() =>
+      useEngraveReleaseStore.setState({
+        records: {
+          [machineKey(TARGET)]: {
+            ...useEngraveReleaseStore.getState().records[machineKey(TARGET)]!,
+            phase: 'ready',
+            files: files.map((f) => ({ ...f, upload: 'present' as const })),
+          },
+        },
+      }),
+    );
+    expect(screen.getByTestId('engrave-release-start').textContent).toBe('Run program 2 of 20');
     // And the steps own the screen: the done card cannot pre-empt after a reload.
     expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
   });

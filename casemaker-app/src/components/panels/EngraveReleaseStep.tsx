@@ -426,7 +426,12 @@ export function EngraveReleaseStep({
                         ? nextFile === null
                           ? 'Nothing left to run'
                           : `Try again — program ${nextFile.index} of ${record.files.length}`
-                        : `Run the job — ${record.files.length} programs`}
+                        : // #1123 item 39 — a release with finished programs (a reload, or a
+                          // resumed session) continues at the next one, named; never a blanket
+                          // "run the job" that hides which program comes next.
+                          finished > 0 && nextFile !== null
+                          ? `Run program ${nextFile.index} of ${record.files.length}`
+                          : `Run the job — ${record.files.length} programs`}
                 </button>
               </>
             ) : (
