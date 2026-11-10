@@ -21,7 +21,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
+import { engraveJobMain, parseArgs } from '../../scripts/lib/casemaker/engrave';
 import type { CommandOptions } from '../../scripts/lib/casemaker/output';
 import { runSheetFileName } from '../../src/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '../../src/engine/cnc/engrave/defaults';
@@ -209,6 +209,19 @@ function twoCutterJob(): EngraveJob {
     setups: [setup],
   };
 }
+
+// #1151 (#1134(c)'s ruling) — THE CLI KEEPS TODAY'S DEFAULT. The owned-first split is opt-in for
+// the plain CLI with `--defer-ideal`, so every committed receipt, the set B tooling and the docs
+// round-trips parse and run exactly as before.
+describe('#1151 the deferred ideal is opt-in on the CLI', () => {
+  it('parses --defer-ideal, and the default flag set is unchanged', () => {
+    expect(parseArgs(['job.json'])).toEqual({ job: 'job.json' });
+    expect(parseArgs(['job.json']).deferIdeal).toBeUndefined();
+    expect(parseArgs(['job.json', '--defer-ideal']).deferIdeal).toBe(true);
+    // A bare flag: no value is eaten.
+    expect(parseArgs(['--defer-ideal', 'job.json'])).toEqual({ job: 'job.json', deferIdeal: true });
+  });
+});
 
 describe('#865 a later program’s own findings reach the receipt', () => {
   it('states the V rest’s depth shortfall under program 2', async () => {

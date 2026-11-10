@@ -128,7 +128,19 @@ export {
 } from './engraveRunGate';
 export type { EngraveRunPhase, EngraveRunView } from './engraveRunGate';
 
-/** The two worker calls the run needs. */
+/** #1151 — the ideal comparison's call shape, whether it runs on the shared or its own worker. */
+export type PlanIdealCall = (
+  job: EngraveJob,
+  goal: EngraveTargetObject,
+  tool: Tool,
+  shop?: EngraveShopOpts,
+  catalogueTools?: readonly Tool[],
+  /** #1049 — Generate's owned outcome, passed only while the run is not stale. */
+  ownedOutcome?: PlanOutcome | null,
+  /** #1047 — the Makera rows from this thread's snapshot: the worker realm's own copy is empty. */
+  catalogue?: readonly FeedCatalogueRow[],
+) => Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }>;
+
 export type EngraveRunClient = {
   engraveGenerate: (
     job: EngraveJob,
@@ -145,6 +157,11 @@ export type EngraveRunClient = {
      * library). Absent means no ideal: `planIdeal` stays null and only the owned plan is run.
      */
     catalogueTools?: readonly Tool[],
+    /**
+     * #1151 (#1134(c)'s ruling) — owned plan first: the result returns as soon as the cutting plan
+     * has posted and says `idealDeferred`; the store then starts the comparison below.
+     */
+    deferIdeal?: boolean,
   ) => Promise<EngraveGenerated>;
   // #924 activation — the generator's own raw design items ride the oracle call the same way
   // `predicted` does; additive, so a caller that sends none runs exactly as it did before.
@@ -166,17 +183,13 @@ export type EngraveRunClient = {
    * build) need not implement it; when present, the run store calls it AFTER the owned plan has
    * posted and holds its answer as the second result stream.
    */
-  engravePlanIdeal?: (
-    job: EngraveJob,
-    goal: EngraveTargetObject,
-    tool: Tool,
-    shop?: EngraveShopOpts,
-    catalogueTools?: readonly Tool[],
-    /** #1049 — Generate's owned outcome, passed only while the run is not stale. */
-    ownedOutcome?: PlanOutcome | null,
-    /** #1047 — the Makera rows from this thread's snapshot: the worker realm's own copy is empty. */
-    catalogue?: readonly FeedCatalogueRow[],
-  ) => Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }>;
+  engravePlanIdeal?: PlanIdealCall;
+  /**
+   * #1151 — THE SAME COMPARISON ON A DEDICATED WORKER, created for the call and terminated on
+   * return: the panel's shared sim worker must stay free for the sweep (the ideal is ~15 min on
+   * the set B top). Optional; a client without it falls back to `engravePlanIdeal`.
+   */
+  engravePlanIdealOnItsOwnWorker?: PlanIdealCall;
 };
 
 /**
@@ -822,7 +835,12 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       try {
         // #961 — the ideal plan's candidate set: the app's own tool library (the same list every
         // picker shows, the house `cat:` rows included). The worker cannot see it from its realm.
-        generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins, shop, onProgress, getTools().map((entry) => entry.tool));
+        generated = await client.engraveGenerate(
+          job, tool, catalogue, calibration, margins, shop, onProgress,
+          getTools().map((entry) => entry.tool),
+          // #1151 (#1134(c)) — the cut never waits on the comparison; the ideal is started below.
+          true,
+        );
       } finally {
         clearStall();
       }
@@ -880,12 +898,22 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // halves in the sim worker. The card lights the moment the result lands, and the worker stays
     // free for the run's own sweep — the ~900 s second plan on the tray is gone. No ideal on the
     // result (no goal, no catalogue, or the ideal added no cutter): nothing to compare.
+    // #1151 — a deferred result is the owned plan, final: the comparison has not run and the line
+    // says so until it does.
+    const deferredIdeal = generated.idealDeferred === true;
     set({
-      idealPlan: generated.planIdeal !== undefined && generated.planIdeal !== null
-        ? { status: 'ready', tradeoff: generated.planTradeoff ?? null }
-        : { status: 'idle', tradeoff: null },
+      idealPlan: deferredIdeal
+        ? { status: 'comparing', tradeoff: null }
+        : generated.planIdeal !== undefined && generated.planIdeal !== null
+          ? { status: 'ready', tradeoff: generated.planTradeoff ?? null }
+          : { status: 'idle', tradeoff: null },
     });
-    if (generated.ok && generated.nc !== null && job.targetObject !== undefined && client.engravePlanIdeal !== undefined) {
+    if (
+      generated.ok &&
+      generated.nc !== null &&
+      job.targetObject !== undefined &&
+      (client.engravePlanIdeal !== undefined || client.engravePlanIdealOnItsOwnWorker !== undefined)
+    ) {
       const idealClient = client;
       const idealJob = job;
       const idealTool = tool as Tool;
@@ -902,8 +930,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         // then no longer describes the job, so the press passes none and the worker plans both
         // halves again rather than comparing against a stale plan.
         const held = get().staleSince === null ? get().generated?.plan?.outcome ?? null : null;
-        void idealClient
-          .engravePlanIdeal!(idealJob, idealJob.targetObject!, idealTool, idealShop, getTools().map((entry) => entry.tool), held, catalogue)
+        // #1151 — its OWN worker when the client has one: the shared sim worker stays free for the
+        // sweep, so the comparison cannot queue the simulation behind it.
+        const planIdeal = idealClient.engravePlanIdealOnItsOwnWorker ?? idealClient.engravePlanIdeal;
+        void planIdeal!(idealJob, idealJob.targetObject!, idealTool, idealShop, getTools().map((entry) => entry.tool), held, catalogue)
           .then((answer) => {
             if (runEpoch === idealEpoch) set({ idealPlan: { status: 'ready', tradeoff: answer.tradeoff } });
           })
@@ -914,6 +944,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // The press repeats the SAME computation on demand (E's review, item 3) — never just the
       // recorded choice.
       idealLastRequest = fireIdealCompare;
+      // #1151 — Generate deferred the comparison: start it now, with the owned result in hand.
+      if (deferredIdeal) fireIdealCompare();
     }
     // #787 — every finding the run raised, small enough for the report to carry.
     for (const f of generated.findings) noteFinding(f);
