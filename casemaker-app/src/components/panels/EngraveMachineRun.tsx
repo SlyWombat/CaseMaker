@@ -129,13 +129,16 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
   /** #806 — the run's own clock, as the machine last reported it (a refused outcome has none). */
   const elapsedS = entry.outcome !== null && 'last' in entry.outcome ? entry.outcome.last.elapsedS : null;
   const span = entry.context?.vacuumSpan;
+  // #1123 item 41 — the words follow the run's one decision: every start of a job-span program
+  // STATES the vacuum on (M331 again before each program — the alarm took the last one with it),
+  // and only the span's end switches off. The card must not describe a toggle that never happens.
   const vacuumLine =
     span === 'first'
-      ? 'This program switches the vacuum on, and the job leaves it on for the next program.'
+      ? 'The job holds the vacuum on: this run states M331 before every program, and only the job’s last program switches it off.'
       : span === 'middle'
-        ? 'The vacuum stays on across this program: the job’s first file switched it on, and its last turns it off.'
+        ? 'The vacuum stays on across this program: this run states M331 again before it plays, and the job’s last program turns it off.'
         : span === 'last'
-          ? 'The vacuum is on from the job’s earlier file; this program switches it off at its end. The machine homes when it finishes.'
+          ? 'The vacuum is on from the job’s earlier files; this run states M331 again, and this program’s own M332 switches it off at its end. The machine homes when it finishes.'
           : span === 'whole'
             ? 'The program switches the vacuum on and off itself; the machine homes when it finishes.'
             : span === 'none'

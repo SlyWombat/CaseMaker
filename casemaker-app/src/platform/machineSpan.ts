@@ -24,7 +24,7 @@
 import { attachConsole } from './machineConsole';
 import { readProgress } from './machineRun';
 import { alarmLine } from './machineUpload';
-import { VACUUM_OFF, VACUUM_ON } from './machineVacuum';
+import { VACUUM_OFF } from './machineVacuum';
 
 export type SpanOutcome =
   /** The line(s) went out, with the status line that let them. */
@@ -82,11 +82,6 @@ async function sendWhenIdle(target: Target, lines: readonly string[]): Promise<S
   } finally {
     await session.close();
   }
-}
-
-/** `M331`: switch the vacuum on, only on a machine that is Idle with no alarm. */
-export async function switchVacuumOn(target: Target): Promise<SpanOutcome> {
-  return sendWhenIdle(target, [VACUUM_ON]);
 }
 
 /**

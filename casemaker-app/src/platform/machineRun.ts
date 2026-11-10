@@ -254,6 +254,12 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
   const span = deps.vacuumSpan;
   const vacOwner: VacuumOwner =
     span !== undefined ? 'job' : deps.programOwnsVacuum === true ? 'program' : 'runner';
+  /**
+   * #1123 item 41 — did THIS run switch the vacuum on (the runner's bracket, or the re-stated ON
+   * word of a job-span file)? A refusal or a program that never starts must undo exactly that and
+   * nothing more.
+   */
+  const vacuumSwitchedHere = vacOwner === 'runner' || (vacOwner === 'job' && span !== 'none');
   if (vacOwner !== 'runner') {
     // Said in the log the operator is reading, so "why did no M331 appear?" has its answer there.
     deps.onEvent?.({
@@ -262,9 +268,21 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
         vacOwner === 'job'
           ? span === 'none'
             ? 'The job runs without the vacuum (its accessory output is off), so this run sends no M331 or M332.'
-            : 'The job owns the vacuum span (M331 on its first program, M332 on its last), so this run does not bracket this file.'
+            : 'The job owns the vacuum span: this run states M331 before every program and leaves the switch-off to the span’s end.'
           : 'The program switches the vacuum itself (M331/M332 in the file), so this run does not bracket it.',
     });
+    // #1123 item 41 — RE-ASSERTED ON EVERY (RE)START. A middle file carries no word at all, and a
+    // retry after the red button (or any alarm) starts a controller whose outputs are off: the
+    // first attempt's own M331 died with the alarm, and the retry at the bench ran dry while this
+    // note claimed the span owned it (finding 38). So the run states the ON word before EVERY
+    // program of a span that wants the vacuum on — idempotent when it is already on, never a
+    // toggle — and only the span's END switches off.
+    if (vacOwner === 'job' && span !== 'none') {
+      const vac = await send(VACUUM_ON);
+      if (vac.kind !== 'sent' || anyAlarm(vac) !== null) {
+        return { kind: 'refused', reason: `the vacuum did not switch on (${said(vac).trim() || vac.kind}); nothing was played` };
+      }
+    }
   } else {
     const vac = await send(VACUUM_ON);
     if (vac.kind !== 'sent' || anyAlarm(vac) !== null) {
@@ -279,7 +297,7 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
   if (deps.antistatic === true) {
     const anti = await send(ANTISTATIC_ON);
     if (anti.kind !== 'sent' || anyAlarm(anti) !== null) {
-      if (vacOwner === 'runner') await send(VACUUM_OFF);
+      if (vacuumSwitchedHere) await send(VACUUM_OFF);
       return { kind: 'refused', reason: `the antistatic did not switch on (${said(anti).trim() || anti.kind}); nothing was played` };
     }
   }
@@ -298,13 +316,16 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
   // blower on across the bit change; a MIDDLE file sends nothing.
   const blowArmed = deps.blow === true && span !== 'none';
   const programOwnsHere = span === undefined && deps.programOwnsVacuum === true;
-  const blowOn = blowArmed && (vacOwner === 'runner' || span === 'first' || span === 'whole' || programOwnsHere);
+  // #1123 item 41 — the blower is re-stated with the vacuum on EVERY program of the span (it stays
+  // on across the bit changes; a retry re-states it because the alarm took it off). Only the end
+  // of the span's last file switches it off (`blowOffHere`).
+  const blowOn = blowArmed && (vacOwner === 'runner' || span !== undefined || programOwnsHere);
   const blowOffHere = blowArmed && (vacOwner === 'runner' || span === 'last' || span === 'whole' || programOwnsHere);
   if (blowOn) {
     const blow = await send(BLOW_ON);
     if (blow.kind !== 'sent' || anyAlarm(blow) !== null) {
       if (deps.antistatic === true) await send(ANTISTATIC_OFF);
-      if (vacOwner === 'runner') await send(VACUUM_OFF);
+      if (vacuumSwitchedHere) await send(VACUUM_OFF);
       return { kind: 'refused', reason: `the air blow did not switch on (${said(blow).trim() || blow.kind}); nothing was played` };
     }
   }
@@ -313,15 +334,16 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
   const playSentAt = now();
   const played = await send(play);
   if (played.kind === 'sent' && /\berror\b|not found|no such file|unknown/i.test(played.text)) {
-    // Nothing ran, so a runner-owned vacuum goes off again. A program-owned one never went on.
+    // Nothing ran, so the vacuum THIS run switched on goes off again (the runner's bracket, or a
+    // job-span file's re-stated M331 — #1123 item 41). A program-owned one never went on.
     if (blowArmed) await send(BLOW_OFF);
-    if (vacOwner === 'runner') await send(VACUUM_OFF);
+    if (vacuumSwitchedHere) await send(VACUUM_OFF);
     if (deps.antistatic === true) await send(ANTISTATIC_OFF);
     return { kind: 'refused', reason: `the controller did not accept the program: ${played.text.trim()}` };
   }
   if (played.kind === 'refused' || played.kind === 'unavailable') {
     if (blowArmed) await send(BLOW_OFF);
-    if (vacOwner === 'runner') await send(VACUUM_OFF);
+    if (vacuumSwitchedHere) await send(VACUUM_OFF);
     if (deps.antistatic === true) await send(ANTISTATIC_OFF);
     return { kind: 'refused', reason: `${play} could not be sent: ${said(played)}` };
   }
@@ -476,8 +498,10 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
       // switched on goes off on the same Idle-only rule (#564).
       const blowOff =
         blowArmed && p.state === 'Idle' ? (await send(BLOW_OFF)).kind === 'sent' : undefined;
+      // #1123 item 41 — a job-span file's re-stated M331 is this run's act too, so it is undone on
+      // the same Idle-only rule; the release store's close is then a no-op sentence, not a gap.
       const vacuumOff =
-        vacOwner === 'runner' && p.state === 'Idle' ? (await send(VACUUM_OFF)).kind === 'sent' : false;
+        vacuumSwitchedHere && p.state === 'Idle' ? (await send(VACUUM_OFF)).kind === 'sent' : false;
       const antistaticOff =
         deps.antistatic === true && p.state === 'Idle' ? (await send(ANTISTATIC_OFF)).kind === 'sent' : undefined;
       return {

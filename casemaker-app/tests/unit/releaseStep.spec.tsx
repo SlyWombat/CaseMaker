@@ -244,7 +244,7 @@ function releaseSpanClose(): void {
  */
 function controller(
   finishAfter = 2,
-  opts: { retouchSurfaceZ?: number; m491?: string } = {},
+  opts: { retouchSurfaceZ?: number; m491?: string; playError?: boolean; alarmAfterPolls?: number } = {},
 ): MachineConsoleClient {
   let playing: { polls: number } | null = null;
   let aborted = false;
@@ -259,11 +259,21 @@ function controller(
           let text = 'ok';
           if (line === '?') {
             if (playing === null || aborted) text = '<Idle|MPos:0,0,0>';
-            else text = playing.polls++ < finishAfter ? '<Run|MPos:0,0,0|P:10,20,5>' : '<Idle|P:9,100,4>';
+            else if (opts.alarmAfterPolls !== undefined && playing.polls >= opts.alarmAfterPolls) {
+              // #1123 item 41 — the red button: the controller alarms mid-program and its outputs
+              // are cut. The app's run ends 'alarm'; the retry is a fresh start.
+              text = 'ALARM: Kill switch';
+            } else text = playing.polls++ < finishAfter ? '<Run|MPos:0,0,0|P:10,20,5>' : '<Idle|P:9,100,4>';
           } else if (line.startsWith('play')) {
-            playing = { polls: 0 };
-            aborted = false;
-            text = 'File size 10';
+            if (opts.playError === true) {
+              // #1123 item 41 — a controller that refuses the file AFTER the run re-stated M331:
+              // the release must close the span it left on with nothing cutting.
+              text = 'error: file not found';
+            } else {
+              playing = { polls: 0 };
+              aborted = false;
+              text = 'File size 10';
+            }
           } else if (line === 'abort') {
             aborted = true;
             text = 'ok\nAborted playing or paused file.';
@@ -473,7 +483,7 @@ describe('#469 the release step', () => {
     expect(facingRegistrationBlocker(defaultEngraveJob(), [FACE, P1], null)).toBeNull();
   });
 
-  it('uploads every program, plays them in order, and sends no vacuum word between them', async () => {
+  it('uploads every program, plays them in order, and re-states M331 before each — never M332 between them', async () => {
     const job = twoSetupJob();
     // #1088 — program 2 is setup 2's, and a later setup's program now needs that setup's record.
     seedSetupRegistration(job, 'setup-2');
@@ -494,8 +504,10 @@ describe('#469 the release step', () => {
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
     expect(uploaded).toEqual(['Two-setup-job-p1.nc', 'Two-setup-job-p2.nc']);
     expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Two-setup-job-p1.nc']);
-    // The program carries M331; the release adds no word of its own, and no M332 at a change.
-    expect(sent).not.toContain('M331');
+    // #1123 item 41 — the run RE-STATES M331 before every program (the maintainer's bench rule):
+    // the file's own word died with the alarm on the first attempt, so the retry cannot rely on
+    // it. Nothing switches off between programs.
+    expect(sent.filter((l) => l === 'M331')).toHaveLength(1);
     expect(sent).not.toContain('M332');
     expect(
       useEngraveReleaseStore.getState().records[`${TARGET.host}:${TARGET.port}`]?.notes.some((n) => n.includes('stays on')),
@@ -520,7 +532,9 @@ describe('#469 the release step', () => {
       'play /sd/gcodes/Two-setup-job-p1.nc',
       'play /sd/gcodes/Two-setup-job-p2.nc',
     ]);
-    // M332 was in program 2's own text, not sent by the release step between files.
+    // The second program's start re-states M331 too; M332 was in program 2's own text, and the
+    // release step sends none between files.
+    expect(sent.filter((l) => l === 'M331')).toHaveLength(2);
     expect(sent.filter((l) => l === 'M332')).toHaveLength(0);
     // #425 §6 — the DOCUMENT holds the resume fact for both played programs, with their setups.
     const log = useEngraveJobStore.getState().job.runLog ?? [];
@@ -908,15 +922,35 @@ describe('#469 the release step', () => {
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
   }, 30000);
 
-  it('a start that fails after M331 says the vacuum is on and closes the span', async () => {
+  it('#1123 item 41 — a red-button alarm, then Try again: the retry re-states M331 before it plays', async () => {
+    const job = twoSetupJob();
+    seedSetupRegistration(job, 'setup-2');
+    setMachineConsoleLoader(async () => controller(2, { alarmAfterPolls: 1 }));
+    renderStep(job);
+    await uploadAndStart();
+    // The controller alarms mid-program (the red button cuts its outputs). The release ends failed
+    // with the vacuum's state UNKNOWN — no claim survives the alarm.
+    await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 10000 });
+    expect(record()?.vacuum).toBe('unknown');
+    expect(sent.filter((l) => l === 'M331')).toHaveLength(1);
+
+    // The alarm is cleared at the controller; the operator presses Try again.
+    setMachineConsoleLoader(async () => controller(2));
+    fireEvent.click(screen.getByTestId('engrave-release-start'));
+    await waitFor(() => expect(record()?.phase).toBe('bit-change'), { timeout: 10000 });
+    // THE RETRY RE-STATED THE ON WORD: the first attempt's M331 died with the alarm (finding 38).
+    expect(sent.filter((l) => l === 'M331')).toHaveLength(2);
+  }, 30000);
+
+  it('a play refused AFTER the run re-stated M331 closes the span it left on', async () => {
     const job = twoSetupJob();
     seedSetupRegistration(job, 'setup-2'); // #1088 — setup 2 is registered; this test is not the gate.
     renderStep(job);
     await uploadAndStart();
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
 
-    // Stop at the change, then resume at program 2: it carries only M332, so the release switches
-    // the vacuum on itself before starting.
+    // Stop at the change, then resume at program 2. #1123 item 41 — the RUN re-states M331 before
+    // every program; this time the controller refuses the file after that word went out.
     await act(async () => {
       useEngraveReleaseStore.getState().stop(TARGET);
     });
@@ -924,25 +958,20 @@ describe('#469 the release step', () => {
     fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
     fireEvent.click(screen.getByTestId('engrave-release-start'));
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 5000 });
-
-    // Make `prepare` refuse: another run is already going on this machine.
-    const key = machineKey(TARGET);
-    await act(async () => {
-      const entry = useMachineRunStore.getState().runs[key]!;
-      useMachineRunStore.setState({
-        runs: { ...useMachineRunStore.getState().runs, [key]: { ...entry, running: true } },
-      });
-    });
+    setMachineConsoleLoader(async () => controller(2, { playError: true }));
     const before = sent.length;
     fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
     fireEvent.click(screen.getByTestId('engrave-release-change-done'));
 
     await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 5000 });
     const tail = sent.slice(before);
+    // The run stated M331 and the file never played, so the vacuum is on with nothing cutting and
+    // the release closes the span (M332 then $H).
     expect(tail).toContain('M331');
     expect(tail).toContain('M332');
     expect(tail).toContain('$H');
-    expect(record()?.notes.join('\n')).toContain('on with nothing cutting');
+    expect(tail.indexOf('M331')).toBeLessThan(tail.indexOf('M332'));
+    expect(record()?.notes.join('\n')).toContain('closing the vacuum span');
   }, 30000);
 
   it('consumes the job’s blank only when its LAST program finishes, not once per file', async () => {
