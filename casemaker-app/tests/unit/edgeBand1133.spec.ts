@@ -32,6 +32,7 @@ import {
   type PlanInput,
   type RegistrationPlan,
 } from '@/engine/cnc/registration';
+import type { ProbeSpec } from '@/engine/cnc/registration/plan';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DOC = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as { defaults: unknown };
@@ -76,10 +77,12 @@ interface Box {
  *    reaches (or misses);
  *  - the probe's rim offset: a Z touch reads the stock until its centre is `rim` past its edge.
  */
-function fakeZ1(opts: { actual: ExpectedStock; surface?: number; bore?: Box; ballR?: number }) {
+function fakeZ1(opts: { actual: ExpectedStock; surface?: number; bore?: Box; ballR?: number; rim?: number }) {
   const a = opts.actual;
   const surface = opts.surface ?? SURFACE;
-  const RIM = 0.7;
+  // The Z read's rim: the wired probe's measured 0.7 by default; the 3D probe's ball 1.5 where a
+  // test plans with it.
+  const RIM = opts.rim ?? 0.7;
   const ballR = opts.ballR ?? RIM;
   const bore = opts.bore;
   let mode: 'G90' | 'G91' = 'G90';
@@ -145,9 +148,14 @@ function fakeZ1(opts: { actual: ExpectedStock; surface?: number; bore?: Box; bal
         const across = axis === 'x' ? pos.y - G54.y : pos.x - G54.x;
         const acrossLo = axis === 'x' ? a.yMin : a.xMin;
         const acrossHi = axis === 'x' ? a.yMax : a.xMax;
+        // The ball meets the WALL at the equator when its centre is a radius below the top, and
+        // the top CORNER when it is shallower — the horizontal centre-to-edge distance is then
+        // sqrt(R² − depth²), exactly what the executor's ballOffsetMm corrects by.
+        const depth = surface - pos.z;
+        const off = depth >= ballR ? ballR : Math.sqrt(Math.max(0, ballR * ballR - depth * depth));
         const overStock = pos.z < surface && across >= acrossLo - ballR && across <= acrossHi + ballR;
-        const low = lo - ballR;
-        const high = hi + ballR;
+        const low = lo - off;
+        const high = hi + off;
         const hits = overStock && (travel > 0 ? workStart < low && workStart + travel >= low : workStart > high && workStart + travel <= high);
         pos[axis] = hits ? (travel > 0 ? low : high) + (axis === 'x' ? G54.x : G54.y) : start + travel;
         return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}:${hits ? 1 : 0}]\nok`);
@@ -277,5 +285,92 @@ describe('#1133 the edge-find band', () => {
     expect(front.touches[0]!.sideContact).toBe(true);
     expect(r.outcome.offset.y).toBe(0.8);
     expect(r.outcome.usable).toBe(true);
+  });
+});
+
+// #827 — THE VISE CORNER'S OWN X FACE. The press's corner routine touches the stock's X face
+// above the jaw when it stands proud enough (a measured jaw top says so); a stock that does not
+// gets the fixed jaw's face and the plan says so. The Manager's review of #1133 part 2: the
+// sideways dispatch must keep this — banded like every other scan.
+describe('#827 the vise corner keeps its stock-own-X-face side touch', () => {
+  const PROBE_3D: ProbeSpec = {
+    id: 'fx-probe-3d',
+    variant: '3d',
+    instrument: 'xyz',
+    tip: { diameterMm: 3, rimOffsetMm: 1.5, rimOffsetUncertaintyMm: 0.05 },
+  };
+  const S3 = registrationSettings(ShopDefaultsSchema.parse(DOC.defaults), PROBE_3D).settings;
+  /** A front-left corner plan on the vise, the stock `proud` mm above the measured jaw top. */
+  const cornerPlan = (proud: number): RegistrationPlan => {
+    const r = planRegistration(
+      {
+        stock: BLANK,
+        mount: 'vise',
+        expectedSurface: { machineZ: SURFACE, from: 'test' },
+        seekFromMachineZ: -3,
+        mountDatum: { jawTopZ: SURFACE - proud, measuredAt: '2026-10-23T00:00:00.000Z', by: 'test' },
+        probe: PROBE_3D,
+        stockThicknessMm: 12,
+        corner: 'front-left',
+        fixtureBelowSurfaceMm: undefined,
+      },
+      S3,
+    );
+    if (!r.ok) throw new Error(r.reason);
+    return r.plan;
+  };
+
+  it('a stock proud enough: the corner’s X lines seek the stock’s own face sideways, banded', async () => {
+    // Proud 3 mm: the ball's 1.5 + 1 mm margin + 0.3 depth pass above the jaw — the planner leaves
+    // `cornerXFrom` unset, which is its statement that the stock's own X face can be touched.
+    const p = cornerPlan(3);
+    expect(p.cornerXFrom).toBeUndefined();
+    for (const sc of p.scans) {
+      expect(sc.start).toBeCloseTo(sc.expectedAt - sc.outward * S3.edgeBandMm, 6);
+      expect(sc.limit).toBeCloseTo(sc.expectedAt + sc.outward * S3.edgeBandMm, 6);
+    }
+
+    const z1 = fakeZ1({ actual: BLANK, ballR: 1.5, rim: 1.5 });
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    // BOTH axes now seek sideways — the X lines are #827's, restored and banded.
+    const sideX = z1.lines.filter((l) => /^G38\.3 X-?[\d.]+ F/.test(l));
+    const sideY = z1.lines.filter((l) => /^G38\.3 Y-?[\d.]+ F/.test(l));
+    expect(sideX).toHaveLength(2);
+    expect(sideY).toHaveLength(2);
+    for (const line of [...sideX, ...sideY]) {
+      // The band's own travel: 2 × band, inward.
+      expect(Number(/^G38\.3 [XY](-?[\d.]+) F/.exec(line)![1])).toBeCloseTo(2 * S3.edgeBandMm, 6);
+    }
+    // Every edge is one exact side reading, and the corner is on the stock.
+    for (const rec of r.data.scans) expect(rec.touches.some((t) => t.sideContact === true)).toBe(true);
+    expect(r.outcome.problems).toEqual([]);
+    expect(r.outcome.usable).toBe(true);
+    expect(r.outcome.corner).toBeDefined();
+    expect(r.outcome.corner!.outOfSquareDeg).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(r.outcome.offset.x)).toBeLessThanOrEqual(0.001);
+    expect(Math.abs(r.outcome.offset.y)).toBeLessThanOrEqual(0.001);
+  });
+
+  it('a stock not proud enough: X keeps the Z-only scan from the fixed jaw’s face, and the plan says so', async () => {
+    // Proud 2 mm, under the 1.5 + 1 + 0.3 the ball needs: `cornerXFrom` = 'jaw'.
+    const p = cornerPlan(2);
+    expect(p.cornerXFrom).toBe('jaw');
+    expect(p.notes.join(' ')).toContain("X is taken from the fixed jaw's face");
+
+    const z1 = fakeZ1({ actual: BLANK, ballR: 1.5, rim: 1.5 });
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    // The X lines are Z-only (no sideways move); the free front edge still seeks sideways.
+    expect(z1.lines.filter((l) => /^G38\.3 X-?[\d.]+ F/.test(l))).toHaveLength(0);
+    expect(z1.lines.filter((l) => /^G38\.3 Y-?[\d.]+ F/.test(l))).toHaveLength(2);
+    const xRecs = r.data.scans.filter((rec) => rec.scan.edge === 'left' || rec.scan.edge === 'right');
+    for (const rec of xRecs) expect(rec.touches.some((t) => t.sideContact === true)).toBe(false);
+    expect(r.outcome.problems).toEqual([]);
+    expect(r.outcome.usable).toBe(true);
+    expect(r.outcome.corner).toBeDefined();
+    // The Z-only bisection's own resolution — the fine step's quarter.
+    expect(Math.abs(r.outcome.offset.x)).toBeLessThanOrEqual(S3.fineStepMm / 2);
+    expect(Math.abs(r.outcome.offset.y)).toBeLessThanOrEqual(0.001);
   });
 });

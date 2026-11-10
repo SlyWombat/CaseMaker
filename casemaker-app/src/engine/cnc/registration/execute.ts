@@ -593,8 +593,9 @@ async function scanEdge(io: Session, plan: RegistrationPlan, scan: EdgeScan, par
  * Called for EVERY probe where `sideTouchAllowed` accepts the edge and the setup can place the
  * touch — the wired/Z-only probe included (#1133). A vise's X edges are the jaws' own faces and
  * keep the Z-only scan (`scanEdge`), because a sideways approach there would drive the ball into a
- * jaw bar; a vise with no measured jaw top keeps the Z-only scan on its free edges too (the setup
- * cannot place the ball above the ledge without it, and the plan says so).
+ * jaw bar — except #827's corner case, where the stock stands proud enough for its own X face to
+ * be touched above the jaw; a vise with no measured jaw top keeps the Z-only scan on its free
+ * edges too (the setup cannot place the ball above the ledge without it, and the plan says so).
  */
 async function scanEdgeSideways(
   io: Session,
@@ -1771,12 +1772,26 @@ export async function runRegistration(
     // included. A sideways seek approaches from OUTSIDE the stock and stops at the first touch, so
     // the scan never walks inward over the stock where the bores and pockets are (the maintainer's
     // rule). A vise's X edges keep the Z-only bracket-and-bisect: its jaws stand where the ball
-    // would travel. #1133 — a vise with NO measured jaw top keeps the Z-only scan on its free
-    // edges too: `sideTouchSetup` cannot place the ball above the ledge without the datum, and the
-    // plan says so ("no measured jaw top for a sideways touch").
+    // would travel — except #827's corner case below. #1133 — a vise with NO measured jaw top
+    // keeps the Z-only scan on its free edges too: `sideTouchSetup` cannot place the ball above
+    // the ledge without the datum, and the plan says so ("no measured jaw top for a sideways
+    // touch").
     const g54 = { x: r3(slow.x - plan.surfacePoint.x), y: r3(slow.y - plan.surfacePoint.y) };
-    const sideTouchable = (edge: EdgeScan['edge']) =>
-      sideTouchAllowed(plan.mount, edge) && !(plan.mount === 'vise' && plan.mountDatum === null);
+    const sideTouchable = (edge: EdgeScan['edge']) => {
+      if (sideTouchAllowed(plan.mount, edge)) return !(plan.mount === 'vise' && plan.mountDatum === null);
+      // #827 — A VISE CORNER TOUCHES THE STOCK'S OWN X FACE when it stands proud enough for the
+      // ball to pass above the jaw. The planner leaves `cornerXFrom` unset only on that case (a
+      // measured jaw top says the stock is proud); a stock that does not get the fixed jaw's face
+      // (Z-only) and the plan says so. Restored from #525's corner clause, banded with every other
+      // scan (#1133).
+      return (
+        plan.mount === 'vise' &&
+        plan.corner !== undefined &&
+        (edge === 'left' || edge === 'right') &&
+        plan.cornerXFrom !== 'jaw' &&
+        plan.mountDatum !== null
+      );
+    };
     for (const scan of plan.scans) {
       scans.push(
         sideTouchable(scan.edge)
