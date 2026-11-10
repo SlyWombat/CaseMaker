@@ -20,6 +20,7 @@ import {
   type MachineHeartbeatClient,
 } from '@/platform/machineStatusPoller';
 import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineConsole';
+import type { HeartbeatInspection } from '@/platform/machinePollClient';
 import { resetMachineNoticeStore } from '@/store/machineNoticeStore';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { machineKey, resetMachineRunStore, useMachineRunStore } from '@/store/machineRunStore';
