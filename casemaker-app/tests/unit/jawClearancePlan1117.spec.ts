@@ -117,6 +117,9 @@ const VISE: EngraveJob['workholding'] = {
   kind: 'vise',
   vise: {
     stockProud: 4,
+    // The shipped seat (`parseVise` defaults an absent seat to the ledge); stated here so the
+    // fixture type-checks — `ViseParams.seat` is required (#891).
+    seat: 'ledge',
     fixedJawThickness: 10,
     movingJawThickness: 10,
     jawLength: 100,
