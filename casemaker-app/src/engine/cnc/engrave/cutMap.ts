@@ -161,7 +161,14 @@ export function buildProgramCutMap(input: {
   const grid = gridFor(stock);
   const { events } = parseGcode(input.nc);
   let spindle = false;
+  let turned = false;
   for (const ev of events) {
+    if (ev.kind === 'move' && ev.a !== null) {
+      // A program that TURNS the fourth axis has no flat stock frame: a 2D map would be a false
+      // claim about where the wood is. The record carries no map rather than a wrong one.
+      turned = true;
+      continue;
+    }
     if (ev.kind === 'spindle') {
       spindle = ev.state !== 'off';
       continue;
@@ -179,7 +186,7 @@ export function buildProgramCutMap(input: {
     const plunge = fx === tx && fy === ty;
     markSegment(grid, { x: fx, y: fy }, { x: tx, y: ty }, level, horizontal || plunge, reach);
   }
-  return cutMapFromGrid(grid);
+  return turned ? null : cutMapFromGrid(grid);
 }
 
 function sameGrid(a: FinishedCutMap, b: FinishedCutMap): boolean {

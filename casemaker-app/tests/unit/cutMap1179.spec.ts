@@ -63,6 +63,15 @@ describe('#1179 the cut map', () => {
     expect(grid.flat[9]).toBe(0);
   });
 
+  it('a program that turns the A axis has no flat map', () => {
+    expect(
+      buildProgramCutMap({
+        nc: program('G0 X2 Y1', 'G0 Z1', 'G1 Z-1 F600', 'G1 X18 Y1 A90 F600'),
+        stock: STOCK,
+      }),
+    ).toBeNull();
+  });
+
   it('the two streams are RLE and round-trip', () => {
     expect(encodeRuns([0, 0, 0, 1, 1, 2])).toBe('3:0,2:1,1:2');
     expect(decodeRuns('3:0,2:1,1:2', 6)).toEqual([0, 0, 0, 1, 1, 2]);
