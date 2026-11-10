@@ -2177,7 +2177,7 @@ describe('#1123-45 the Cut step says what Generate is doing', () => {
     const cancel = vi.fn();
     useEngraveRunStore.setState({
       phase: 'generating',
-      progress: { stage: 'cam', label: 'posting the toolpaths' },
+      progress: { stage: 'post', label: 'posting the toolpaths' },
       log: [{ at: 0, ms: 0, label: 'starting the worker' }],
       cancelGenerate: cancel,
     });
