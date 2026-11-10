@@ -2159,6 +2159,15 @@ const registrationSettingsSchema = z.object({
     .describe('The largest tilt the face-angle step will turn out of a square stock, in degrees.'),
   scanInsideMm: z.number().finite().describe('How far inside the expected edge a scan starts, in millimetres.'),
   scanReachMm: z.number().finite().describe('How far a scan may travel, in millimetres.'),
+  // #1133 — absent in a plan frozen before this key existed; such a plan's scans already carry
+  // their own start and limit, which the executor reads. The seed is the value every new plan
+  // states, and the band every edge find is planned within.
+  edgeBandMm: z
+    .number()
+    .finite()
+    .positive()
+    .default(4)
+    .describe('Half-width of the edge-find band around the expected edge, in millimetres.'),
   cornerClearanceMm: z.number().finite().describe('Clearance kept from corners, in millimetres.'),
   surfaceBandMm: z.number().finite().describe('Height band treated as the surface, in millimetres.'),
   tipRadiusMm: z.number().finite().describe('Effective probe tip radius, in millimetres.'),

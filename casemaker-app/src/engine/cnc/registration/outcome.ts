@@ -198,7 +198,17 @@ export function edgeFrom(record: ScanRecord, tipRadius: number): EdgeFinding {
   const side = touches.find((t) => t.sideContact === true);
   if (side !== undefined) {
     if (side.kind !== 'stock') {
-      return { ...base, foundAt: null, problem: `the sideways touch on ${what} found nothing within its travel` };
+      // #1133 — a sideways seek that touches nothing inside the edge band is a REFUSAL BY NAME,
+      // never a measurement: the edge is not where the job expects it, and no origin is written.
+      const axis = scan.edge === 'left' || scan.edge === 'right' ? 'X' : 'Y';
+      const lo = Math.min(scan.start, scan.limit);
+      const hi = Math.max(scan.start, scan.limit);
+      const subject = scan.label === undefined ? 'the stock' : what;
+      return {
+        ...base,
+        foundAt: null,
+        problem: `no edge where ${subject} is expected — the ${axis} seek searched ${r3(lo)} to ${r3(hi)} mm and found nothing`,
+      };
     }
     return { ...base, foundAt: r3(side.at - scan.outward * (side.edgeOffsetMm ?? tipRadius)), problem: null };
   }

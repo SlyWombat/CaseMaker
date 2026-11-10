@@ -439,14 +439,40 @@ function fakeZ1(opts: {
         if (mode !== 'G91') throw new Error('the executor probed in absolute mode');
         const axis = m[1] === 'X' ? ('x' as const) : ('y' as const);
         const travel = Number(m[2]);
-        const r = opts.ballR ?? 1.5;
+        // The default rim is the WORKED probe's own (0.7): a probe-null or wired plan resolves
+        // `registration.tipRadiusMm`, and #1133 sends that probe sideways too. The 3D-probe tests
+        // pass their own 1.5 explicitly.
+        const r = opts.ballR ?? RIM;
         const startMachine = pos[axis];
         const endMachine = startMachine + travel;
         sideProbeZ = pos.z;
-        const lo = (axis === 'x' ? a.xMin : a.yMin) + (axis === 'x' ? inForce.x : inForce.y);
-        const hi = (axis === 'x' ? a.xMax : a.yMax) + (axis === 'x' ? inForce.x : inForce.y);
-        const contactLow = lo - r; // moving + toward the low edge, the centre stops one radius outside
-        const contactHigh = hi + r;
+        // The stock's own frame is MACHINE = WORK + G54 (the fake's const), whatever G54 the `G0`
+        // moves are applying: a bracket sends G53, so a stale G54 changes nothing there (#427).
+        const off = axis === 'x' ? G54.x : G54.y;
+        const acrossWork = axis === 'x' ? pos.y - G54.y : pos.x - G54.x;
+        let contactLow: number;
+        let contactHigh: number;
+        if (opts.disc !== undefined) {
+          // #743 — a disc's wall is its RIM: the ball's centre stops `r` outside the circle (or the
+          // ellipse) on the scan's own line, so a line a little off the centre reads the chord.
+          const alongR = axis === 'x' ? opts.disc.radius : (opts.disc.radiusY ?? opts.disc.radius);
+          const acrossR = axis === 'x' ? (opts.disc.radiusY ?? opts.disc.radius) : opts.disc.radius;
+          const alongC = axis === 'x' ? opts.disc.centre.x : opts.disc.centre.y;
+          const acrossC = axis === 'x' ? opts.disc.centre.y : opts.disc.centre.x;
+          const dAcross = acrossWork - acrossC;
+          if (Math.abs(dAcross) >= acrossR + r) {
+            // The line misses the rim entirely: no contact anywhere on it.
+            contactLow = Infinity;
+            contactHigh = -Infinity;
+          } else {
+            const reach = Math.sqrt(Math.max(0, (alongR + r) ** 2 * (1 - (dAcross / (acrossR + r)) ** 2)));
+            contactLow = alongC - reach + off;
+            contactHigh = alongC + reach + off;
+          }
+        } else {
+          contactLow = (axis === 'x' ? a.xMin : a.yMin) + off - r; // moving + toward the low edge, the centre stops one radius outside
+          contactHigh = (axis === 'x' ? a.xMax : a.yMax) + off + r;
+        }
         // #643 review — a ball whose centre is at or above the stock's top cannot touch its wall.
         const hits =
           pos.z < surface &&

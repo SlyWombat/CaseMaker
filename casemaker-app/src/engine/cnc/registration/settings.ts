@@ -21,10 +21,18 @@ export interface RegistrationSettings {
    * larger reading is a wrong touch or a wrong mounting, so it is refused, never turned.
    */
   faceAngleMaxDeg: number;
-  /** A scan starts this far INSIDE the expected edge. */
+  /** A footprint/reference scan starts this far INSIDE the expected edge. */
   scanInsideMm: number;
   /** ...and gives up this far PAST it without finding the edge. */
   scanReachMm: number;
+  /**
+   * #1133 — the EDGE-FIND BAND: every stock-edge scan spans the expected edge ± this, mm. The
+   * maintainer's rule (2026-11-09): "if it was looking for the edge, it should not have been near
+   * the holes." The band is the stock's own size error, the mount's repeat (0.05 mm) and fit
+   * (0.1 mm), plus margin: an edge find approaches from OUTSIDE the stock and stops at the first
+   * touch, and never walks inward over the stock where bores, pockets and clamps are.
+   */
+  edgeBandMm: number;
   /** A scan point stays this far beyond a rounded corner's radius from the corner. */
   cornerClearanceMm: number;
   /** A hit within this of the surface reads as "on the stock"; lower is off it (a jaw, the roll-off). */
@@ -80,6 +88,7 @@ const KEYS: Record<keyof RegistrationSettings, string> = {
   faceAngleMaxDeg: 'registration.faceAngleMaxDeg',
   scanInsideMm: 'registration.scanInsideMm',
   scanReachMm: 'registration.scanReachMm',
+  edgeBandMm: 'registration.edgeBandMm',
   cornerClearanceMm: 'registration.cornerClearanceMm',
   surfaceBandMm: 'registration.surfaceBandMm',
   tipRadiusMm: 'registration.tipRadiusMm',
@@ -129,6 +138,8 @@ export function settingsProblem(s: RegistrationSettings): string | null {
     return `the surface band (${s.surfaceBandMm} mm) must be less than the touch cap (${s.capBelowSurfaceMm} mm)`;
   }
   if (s.fineStepMm > s.coarseStepMm) return 'the fine step is coarser than the coarse step';
+  // #1133 — a scan with no band would start exactly on the expected edge: no span to seek in.
+  if (!(s.edgeBandMm > 0)) return 'the edge-find band must be above 0 mm';
   if (s.parkAboveSurfaceMm < 2) return 'the park height must be at least 2 mm above the surface';
   // #1059 — a zero limit would refuse every face-angle turn; the bound is `defaults.rs`'s.
   if (!(s.faceAngleMaxDeg > 0)) return 'the face-angle limit must be above 0°';

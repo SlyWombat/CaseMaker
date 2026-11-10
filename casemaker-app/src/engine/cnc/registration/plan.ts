@@ -45,7 +45,7 @@ import type { SetupFlip } from '@/types/engraveJob';
 import { settingsProblem, type RegistrationSettings } from './settings';
 import { planFootprintRegistration } from './footprint';
 import { centrePair } from './centreFind';
-import { MIN_SIDE_DEPTH_MM, SIDE_TOUCH_JAW_MARGIN_MM } from './probe3d';
+import { MIN_SIDE_DEPTH_MM, SIDE_TOUCH_JAW_MARGIN_MM, sideTouchAllowed } from './probe3d';
 
 export type Mount = 'vise' | 'bracket' | 'tape';
 
@@ -389,8 +389,12 @@ function scanFor(edge: Edge, along: number, stock: ExpectedStock, s: Registratio
     along,
     expectedAt,
     outward,
-    start: expectedAt - outward * s.scanInsideMm,
-    limit: expectedAt + outward * s.scanReachMm,
+    // #1133 — THE EDGE-FIND BAND. The scan spans the expected edge ± `edgeBandMm`, never further:
+    // a sideways seek approaches from OUTSIDE the stock and stops at the first touch, and the
+    // Z-only fallback's bracket never probes deeper in than the band — so an edge find is never
+    // near the bores, pockets and clamps inside the stock (the maintainer's rule, 2026-11-09).
+    start: expectedAt - outward * s.edgeBandMm,
+    limit: expectedAt + outward * s.edgeBandMm,
     oppositeAt: oppositeExpectedAt(edge, stock),
     coarseStep: s.coarseStepMm,
     fineStep: s.fineStepMm,
@@ -408,8 +412,13 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
   if (!(width > 0 && depth > 0) || !(stock.cornerRadius >= 0)) {
     return { ok: false, reason: 'the stock has no size to register' };
   }
-  if (s.scanInsideMm * 2 >= Math.min(width, depth)) {
-    return { ok: false, reason: `the stock is too small for a scan that starts ${s.scanInsideMm} mm inside its edges` };
+  // #1133 — the band's inner end must still be on THIS side of the stock's opposite edge: a scan
+  // whose band spans the whole stock has no side to approach from.
+  if (s.edgeBandMm >= Math.min(width, depth)) {
+    return {
+      ok: false,
+      reason: `the stock (${r3(width)} × ${r3(depth)} mm) is too small for the ${s.edgeBandMm} mm edge-find band — the scan would start at or past its opposite edge`,
+    };
   }
 
   // The surface seek: bounded to the expected surface ± tolerance, and started from the machine's own
@@ -721,9 +730,23 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       `the mount datum is the measured jaw top at machine Z ${mountDatum.jawTopZ} (${mountDatum.by}, ${mountDatum.measuredAt}); the surface seek searches down to ${band.min}, ${s.surfaceToleranceMm} mm below the jaw top`,
     );
   }
+  // #1133 — a vise with no measured jaw top cannot take a side touch: `sideTouchSetup` keeps the
+  // ball above the ledge, which it cannot place without the datum, so its free front/back edges
+  // keep the Z-only scan. Stated, so the operator knows which edge find will run.
+  if (mount === 'vise' && mountDatum === null) {
+    const zOnly = [...new Set(scans.filter((sc) => sideTouchAllowed('vise', sc.edge)).map((sc) => sc.edge))];
+    if (zOnly.length > 0) {
+      const named = zOnly.map((e) => `the ${e} edge`).join(' and ');
+      notes.push(
+        `${named} ${zOnly.length === 1 ? 'keeps' : 'keep'} the Z-only scan: no measured jaw top for a sideways touch; banded to ±${s.edgeBandMm} mm`,
+      );
+    }
+  }
   notes.push(
     `the surface is expected at machine Z ${exp} (${input.expectedSurface.from}); a reading outside ${band.min} to ${band.max} stops the run`,
     `every touch stops at the surface − ${s.capBelowSurfaceMm} mm: a touch that finds nothing by then is a miss, not a dive`,
+    // #1133 — the band, its provenance, and what it buys: the maintainer's own rule.
+    `every edge find stays within ±${s.edgeBandMm} mm of where the edge is expected (the stock's own size error, the mount's repeat 0.05 mm and fit 0.1 mm, plus margin); the probe stops at the first touch off the stock`,
     `the probe reads the stock until its centre is ${s.tipRadiusMm} mm past the edge (the measured effective rim offset); the edges are corrected by it`,
   );
   return {

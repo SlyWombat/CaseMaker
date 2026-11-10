@@ -56,8 +56,11 @@ export function summarizePlan(plan: RegistrationPlan): string {
   const scanClause =
     plan.scans.length === 0
       ? ''
-      : `; then scan ${edges} — bracketing each edge and bisecting to ${n(s.fineStepMm)} mm, ` +
-        `stopping at the first touch off the stock, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm`;
+      : `; then scan ${edges} — ` +
+        // #1133 — the edge find stays in its band: a sideways seek travels in from outside, and a
+        // Z-only scan never probes deeper in than the band either.
+        `each kept within ±${n(s.edgeBandMm)} mm of where its edge is expected, stopping at the first touch off the stock, ` +
+        `every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm`;
   return (
     `Home, fit ${probeWords} and measure it (M491);${tap}` +
     ` touch the surface at the cut area's centre ` +

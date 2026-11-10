@@ -133,6 +133,10 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
     ("registration.faceAngleMaxDeg", 10.0, "°"),
     ("registration.scanInsideMm", 3.0, "mm"),
     ("registration.scanReachMm", 5.0, "mm"),
+    // #1133 - the edge-find band: every stock-edge scan spans expected +/- this. CHOSEN, not
+    // measured: the stock's own size error, the mount's repeat (0.05 mm) and fit (0.1 mm), plus
+    // margin. An edge find approaches from outside the stock and never walks inward over it.
+    ("registration.edgeBandMm", 4.0, "mm"),
     ("registration.cornerClearanceMm", 2.0, "mm"),
     ("registration.surfaceBandMm", 0.25, "mm"),
     ("registration.edgeMarginMm", 0.5, "mm"),
@@ -660,6 +664,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "registration.scanReachMm" => Some(need(
             n.is_some_and(|v| (0.5..=50.0).contains(&v)),
             "0.5 to 50 mm",
+        )),
+        "registration.edgeBandMm" => Some(need(
+            n.is_some_and(|v| (0.5..=20.0).contains(&v)),
+            "0.5 to 20 mm",
         )),
         "registration.surfaceTouchCount" => Some(need(
             n.is_some_and(|v| (5.0..=9.0).contains(&v) && v.fract() == 0.0),

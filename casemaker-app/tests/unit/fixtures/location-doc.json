@@ -853,6 +853,12 @@
       "setAt": null,
       "unit": "mm"
     },
+    "registration.edgeBandMm": {
+      "value": 4.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
     "registration.surfaceBandMm": {
       "value": 0.25,
       "source": "seeded",

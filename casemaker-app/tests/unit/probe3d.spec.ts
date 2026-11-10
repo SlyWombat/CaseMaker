@@ -222,8 +222,9 @@ describe('#525 — the edge a sideways reading yields', () => {
     along: 20,
     expectedAt: 0,
     outward: -1 as const,
-    start: 3,
-    limit: -7,
+    // #1133 — the band's own span: expected 0 + outward(−1) × edge band (4 mm).
+    start: 4,
+    limit: -4,
     coarseStep: 1,
     fineStep: 0.05,
   };
@@ -245,7 +246,8 @@ describe('#525 — the edge a sideways reading yields', () => {
       1.5,
     );
     expect(found.foundAt).toBeNull();
-    expect(found.problem).toContain('the sideways touch on the left edge found nothing');
+    // #1133 — a sideways miss inside the band refuses BY NAME, naming the band it searched.
+    expect(found.problem).toBe('no edge where the stock is expected — the X seek searched -4 to 4 mm and found nothing');
   });
 });
 

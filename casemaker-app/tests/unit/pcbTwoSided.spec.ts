@@ -235,6 +235,43 @@ function fakeBoard(holes: ReferenceOpening[], shift: { x: number; y: number }, r
         pos.z = target;
         return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\nok`);
       }
+      // #1133 — a SIDEWAYS touch on an OPENING's wall: the ball's centre, inside the opening,
+      // stops one rim short of the wall it reaches. (The reference plan's walls are found this way
+      // now, on tape, for the wired probe too.)
+      m = /^G38\.3 ([XY])(-?[\d.]+) F[\d.]+$/.exec(line);
+      if (m) {
+        if (mode !== 'G91') throw new Error('probed in absolute mode');
+        const axis = m[1] === 'X' ? ('x' as const) : ('y' as const);
+        const travel = Number(m[2]);
+        const off = axis === 'x' ? G54.x : G54.y;
+        const startWork = pos[axis] - off;
+        const endWork = startWork + travel;
+        const acrossWork = axis === 'x' ? pos.y - G54.y : pos.x - G54.x;
+        const a = axis === 'x' ? 0 : 1;
+        const b = axis === 'x' ? 1 : 0;
+        const acrossDesign = acrossWork - (axis === 'x' ? shift.y : shift.x);
+        const shiftAlong = axis === 'x' ? shift.x : shift.y;
+        const startDesign = startWork - shiftAlong;
+        // The seek starts at the OPENING's own centre line (the plan clamps the limit to it), so
+        // the opening is the one holding the start on the travel axis — several holes share one
+        // mid-line, and the across coordinate alone would pick the wrong one.
+        const hole = holes.find(
+          (h) =>
+            startDesign >= h.min[a]! - 1e-6 &&
+            startDesign <= h.max[a]! + 1e-6 &&
+            acrossDesign >= h.min[b]! - 1e-6 &&
+            acrossDesign <= h.max[b]! + 1e-6,
+        );
+        let hit: number | null = null;
+        if (hole !== undefined && pos.z < SURFACE) {
+          const low = hole.min[a]! + RIM + shiftAlong;
+          const high = hole.max[a]! - RIM + shiftAlong;
+          if (travel > 0 && startWork < high && endWork >= high) hit = high;
+          if (travel < 0 && startWork > low && endWork <= low) hit = low;
+        }
+        pos[axis] = (hit ?? endWork) + off;
+        return reply(`[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}:${hit !== null ? 1 : 0}]\nok`);
+      }
       return reply(`error:unexpected line ${line}`);
     },
   };

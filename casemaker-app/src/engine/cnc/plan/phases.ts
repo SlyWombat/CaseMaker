@@ -25,6 +25,7 @@
 
 import { estimateIRCycleSeconds, type RapidEstimate, type ToolpathIR } from '../cam/ir';
 import { type PlanResult } from '../registration';
+import { sideTouchSelected } from '../registration/probe3d';
 import type { Mount, Setup } from '../setups/types';
 import type { StockFlatness } from '@/platform/stockClient';
 import type { ShopDefaults } from '@/platform/defaultsClient';
@@ -131,10 +132,16 @@ function fromDefault(label: string, who: 'machine' | 'you', s: Sourced): PhasePa
   return { label, who, seconds: s.value, source: s.source, from: s.key };
 }
 
-/** Touches in a registration plan: the surface touch, plus each scan's bracket-and-bisect probes (#594). */
+/**
+ * Touches in a registration plan: the surface touch, plus each scan's probes — counted by the
+ * METHOD the executor will use (#1143). A sideways scan is its guarded descent plus ONE horizontal
+ * touch; the Z-only scan keeps #594's shape: two bracket probes (start and limit), then ~log₂
+ * bisections to the fine step. The method comes from `sideTouchSelected`, the same predicate the
+ * executor dispatches on, so the estimate cannot drift from what the machine does.
+ */
 export function registrationTouches(plan: Extract<PlanResult, { ok: true }>): number {
   return 1 + plan.plan.scans.reduce((n, scan) => {
-    // Two bracket probes (start and limit), then ~log₂ bisections to the fine step.
+    if (sideTouchSelected(plan.plan, scan.edge)) return n + 2;
     const bracket = Math.abs(scan.start - scan.limit);
     return n + 2 + Math.ceil(Math.log2(Math.max(2, bracket / scan.fineStep)));
   }, 0);

@@ -94,6 +94,37 @@ export function sideTouchAllowed(mount: Mount, edge: Edge): boolean {
   return mount === 'vise' ? edge === 'front' || edge === 'back' : true;
 }
 
+/** What the dispatch needs to know about a plan: its mount, the measured datum, and its corner. */
+export interface SideTouchSubject {
+  mount: Mount;
+  mountDatum: RegistrationPlan['mountDatum'];
+  corner?: RegistrationPlan['corner'];
+  cornerXFrom?: RegistrationPlan['cornerXFrom'];
+}
+
+/**
+ * #1143 — THE DISPATCH RULE, in one predicate. True when this scan runs as a SIDEWAYS seek (one
+ * horizontal `G38.3` under a guarded descent); false when it keeps the Z-only bracket-and-bisect.
+ * The executor dispatches on this and the run plan's touch estimate counts on it, so the two
+ * cannot drift.
+ *
+ * The rule (#1133, with #827's corner case): every edge the mount leaves free is side-touched on
+ * EVERY probe — except a vise with no measured jaw top, which cannot place the ball above the
+ * ledge (the plan says so), and a vise's X edges, which are the jaws' own faces — unless the stock
+ * stands proud enough for its own X face to be touched above the jaw (#827: the planner leaves
+ * `cornerXFrom` unset only on that case, from the measured jaw top).
+ */
+export function sideTouchSelected(plan: SideTouchSubject, edge: Edge): boolean {
+  if (sideTouchAllowed(plan.mount, edge)) return !(plan.mount === 'vise' && plan.mountDatum === null);
+  return (
+    plan.mount === 'vise' &&
+    plan.corner !== undefined &&
+    (edge === 'left' || edge === 'right') &&
+    plan.cornerXFrom !== 'jaw' &&
+    plan.mountDatum !== null
+  );
+}
+
 /**
  * How far below the measured top the ball's CENTRE travels, mm: one radius (the equator on the
  * wall) for stock thicker than two radii, half the thickness for thinner stock (the ball then meets
