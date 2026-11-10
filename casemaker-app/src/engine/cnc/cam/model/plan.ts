@@ -2581,6 +2581,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         count: toolSubstitutions.length,
         text,
         ...(Number.isFinite(rowMm) && rowMm > 0 ? { feedsProxyMm: rowMm } : {}),
+        // #1186 rule 4 — the N as DATA: G's Do row reads it (no parsing the sentence).
+        ...(borrowedMinutes !== null && borrowedMinutes > 0 ? { borrowedMinutes } : {}),
       });
     }
     if (ballUncutIds.length > 0) {

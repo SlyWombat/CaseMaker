@@ -5687,6 +5687,8 @@ export async function postModelPlan(
       // #1128 — the borrowed-row fact travels with the finding: it is what tells the Cut step a
       // feeds proxy (Check) from a cutter substitution (Know).
       ...(s.feedsProxyMm === undefined ? {} : { feedsProxyMm: s.feedsProxyMm }),
+      // #1186 rule 4 — the borrow's minutes travel too: G's Do row reads the number, not the prose.
+      ...(s.borrowedMinutes === undefined ? {} : { borrowedMinutes: s.borrowedMinutes }),
     }));
   // #966 ROUND 3 — THE CUTOVER NOW COVERS MULTI-SETUP. `planModelCam` ran and returned a
   // `SetupPlan` per setup (#965's registration/freeing-cl work, underneath); every setup's own
