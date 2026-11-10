@@ -557,6 +557,27 @@ test('#1170 — after side 1 the flip card shows the job’s own axis and bores;
   await expect(page.getByTestId('engrave-registration-flip')).toBeVisible();
   await expect(page.getByTestId('engrave-registration-start')).toHaveText('Register side 2');
 
+  // #1170 review — NO RAW PROGRAM LIST UNDER THE CARD. The checklist's programs column used to
+  // print all twenty ids; in the narrow panel that wrapped into a vertical list of `p01,` `p02,`
+  // whose only visible part was the ids. A range keeps the row one line (and this guards it).
+  const leaked = await page.evaluate(() => {
+    const flat = (s: string | null): string => (s ?? '').replace(/\s+/g, ' ').trim();
+    const all = [...document.querySelectorAll('*')] as HTMLElement[];
+    return all
+      .filter((el) => {
+        const t = flat(el.textContent);
+        return /^p01,? p02,?/.test(t) && el.children.length <= 4;
+      })
+      .slice(-4)
+      .map((el) => ({
+        tag: el.tagName,
+        testid: el.getAttribute('data-testid'),
+        parentTestid: el.parentElement?.getAttribute('data-testid'),
+        text: flat(el.textContent).slice(0, 90),
+      }));
+  });
+  expect(leaked, `LEAK: ${JSON.stringify(leaked)}`).toEqual([]);
+
   fs.mkdirSync(OUT, { recursive: true });
   await card.scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(OUT, 'flip-card.png') });
