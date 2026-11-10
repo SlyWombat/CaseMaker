@@ -97,8 +97,30 @@ describe('#992 — the plan states one thing per cause, typed', () => {
     expect(result.notes.filter((n) => n.includes('not broken: covered from above'))).toHaveLength(40);
   }, 120_000);
 
-  it('a skirt-closed relief is a goal-relief-edge info, once', () => {
+  // #1160 — the badge blank is 0.81 mm thick and the shop's release tab is 1 mm: the contour op
+  // clamps the tab to the part's own height (a taller one would put its top above the stock top).
+  // A changed number is never silent — the plan says both numbers once.
+  it('#1160 — a release tab clamped to a shallow part is stated once, with both numbers', () => {
     const { tree } = slabTree([]);
+    tree.frame = { ...tree.frame, partBottom: -0.81 };
+    tree.levels = [-0.81];
+    tree.contour = { ...tree.contour, zTo: -0.81 };
+    const result = planPocketsForTree(tree, {
+      offset: makeClipperOffset(tl),
+      houseFlats: [FLAT],
+      stepDownMm: 1.5,
+      feeds: { feedMmPerMin: 900, plungeFeedMmPerMin: 250 },
+      rapid: Z1.rapidEstimate,
+      toolChangeSeconds: 5,
+      spindleRpm: 12000,
+      air: true,
+    });
+    const lines = result.notes.filter((n) => n.includes("release tabs set to the part's full"));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toBe("release tabs set to the part's full 0.81 mm height; the shop's 1 mm tab is taller than the part");
+  }, 120_000);
+
+  it('a skirt-closed relief is a goal-relief-edge info, once', () => {    const { tree } = slabTree([]);
     tree.contour = { ...tree.contour, synthetic: true };
     // The relief note lives in the POCKET planner (the synthetic outline is why no contour op is
     // demanded), not the curved pipeline.

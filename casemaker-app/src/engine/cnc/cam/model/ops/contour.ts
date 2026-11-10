@@ -101,13 +101,22 @@ export function contour(opts: ContourOpOptions): OpOutcome {
     if (minSafeMm < depthMm) depthMm = Math.max(0, minSafeMm);
   }
 
+  const thicknessMm = opts.thicknessMm ?? depthMm;
+  // #1160 — A TAB CANNOT BE TALLER THAN THE PART IT HOLDS. `generateProfile` puts the tab's top
+  // at `-(cut.thickness - tabs.height)`; the default 1 mm release tab on a 0.81 mm part (the
+  // badge blank) put that top at +0.19 mm — ABOVE the stock top — and every candidate plan was
+  // refused by the post's own air-cut rule (a feed above the stock top, below hopZ). Clamped to
+  // the cut's own thickness, the tallest honest tab IS the part's full height, and its crossing
+  // runs exactly at the stock top. The through case states `thicknessMm` = the blank, so the
+  // clamp there is the blank's thickness: still the most material a tab can leave.
+  const tabHeightMm = Math.min(opts.tabs.height, thicknessMm);
   const cut: ProfileCut = {
     id: 'contour',
     name: 'Contour',
     path,
     depth: depthMm,
-    thickness: opts.thicknessMm ?? depthMm,
-    tabs: opts.tabs,
+    thickness: thicknessMm,
+    tabs: tabHeightMm === opts.tabs.height ? opts.tabs : { ...opts.tabs, height: tabHeightMm },
   };
 
   const result = generateProfile([cut], opts.cutter, opts.params, opts.rapid);
@@ -136,7 +145,17 @@ export function contour(opts: ContourOpOptions): OpOutcome {
         }
       : undefined;
 
-  return { ir: result.ir, cutter: cutterKeyOf(opts.cutter), passes, cleared, ...(throughKerf === undefined ? {} : { throughKerf }) };
+  const clampedTabHeightMm =
+    tabHeightMm < opts.tabs.height ? { wanted: opts.tabs.height, cut: tabHeightMm } : undefined;
+
+  return {
+    ir: result.ir,
+    cutter: cutterKeyOf(opts.cutter),
+    passes,
+    cleared,
+    ...(throughKerf === undefined ? {} : { throughKerf }),
+    ...(clampedTabHeightMm === undefined ? {} : { clampedTabHeightMm }),
+  };
 }
 
 export interface ThroughHoleOpOptions {
