@@ -1,38 +1,38 @@
 {
-  "_note": "#1093 R1 + #1111 + #1092 + #1129 + #1114 + #1135 — set B, VERSIONED WITH THE RULES (11 files: top p1..p8, bottom p1..p3). vs tableVersion 1129-1: the bit change is now priced from the program before it and one pickAmongEquals decides every same-diameter tie (#1114), and a level pass no longer cuts where the cutter's disc reaches a CL above it (#1135's wall-foot guard). Programs: top 9 → 8 (the 3.175 flat's curved-rough program is gone; the ⌀1.5 × 6 flat takes the rough and the ⌀3.175 ball × 10 / ⌀1 × 4 ball finish), bottom 4 → 3 (the 0.9 flat's program and the 25 mm primary are gone: rough + pocket on the ⌀3.175 × 12, finish on the ⌀3.175 ball × 22, rest/pencil on the ⌀2 ball × 12). Goal verdicts: every program passes; no cell cut more than 0.1 mm into the goal; the bottom sentence reads 98.2 % within 0.01 mm (was 98.4 %; the wall-foot guard leaves a little more standing at the walls, and #1129's sampler floor moves the ball programs) with leftovers 0.9194 / 0.7211 / 0.4122 %, and the top reads 97.6 % (was 96.4 % at 1129-1; #1114's picks buy the extra coverage). The e2e reads this table as the cross-door check.",
-  "tableVersion": "1114-1",
-  "rule": "#1114 (the maintainer's decision, 2026-11-09) + #1135 (the Manager's wall-foot ruling). (a) A BIT CHANGE IS PRICED FROM THE PROGRAM BEFORE IT: attendedChangeSeconds (rec. 120 s) while the preceding program is at most attendedMinutes (rec. 5); returnMinutes (rec. 15) on top from walkAwayMinutes (rec. 30) on; a smooth 3t² − 2t³ rise between; the sheet prints each change with its price and the preceding program. (b) PLANS COMPETE ON THE PRICED CYCLE; ties after price go the reach-margin gate (≥ reach.marginMm, rec. 1.0 mm) → the shortest sufficient flute → the larger diameter (the stiffer adequate tool) → the lower priced stage → the key — ONE pickAmongEquals at every site (the ball rank, the sequence primary, the curved flat, the rest ball). No 'pending #1114' rows remain; every same-diameter pick states its decider. (c) ORDERING IS PRICED WORK: the ball finish and the rim chamfer are offered in both orders (the freeing contour stays last). (d) A LEVEL PASS IS EMITTED ONLY WHERE THE CUTTER'S DISC CLEARS THE CL ABOVE IT (#1135): the rough's Z-levels and band skim and the skin all use one shared rule (`safeRasterRuns` / `splitUnsafeRuns`), so a wall-foot cell can no longer be cut by a pass meant for the floor beside it.",
-  "source": "casemaker cut <job>.cutjob.json --location k3-house/location.json, branch 1114-priced-bit-change @ 06c1374d5 (main c411cd8d2 + #1129 89691097f + #1135 67afaa7d7 + #1114), 2026-11-09",
-  "changedSince1129": [
-    { "job": "m1trayB-top", "name": "m1trayB-top-p5.nc", "old": "5d5a8990…", "oldBytes": 48344, "new": "8590bf68c8298b8f752b19ebac085b33", "newBytes": 187222 },
-    { "job": "m1trayB-top", "name": "m1trayB-top-p6.nc", "old": "90221d576fa54974b61ec32ee0f5f6db", "oldBytes": 48388, "new": "c554cdd25c1875f5f47f61081a131e10", "newBytes": 200144 },
-    { "job": "m1trayB-top", "name": "m1trayB-top-p7.nc", "old": "ee46eba4…", "oldBytes": 200122, "new": "f38d4859d22da8d99c30fc38be45384b", "newBytes": 373662 },
-    { "job": "m1trayB-top", "name": "m1trayB-top-p8.nc", "old": "f60f59bd…", "oldBytes": 161747, "new": "114ed00b170b6ba4a0dd3c5486507009", "newBytes": 45454 },
-    { "job": "m1trayB-bottom", "name": "m1trayB-bottom-p1.nc", "old": "a052318ff9644cab390ba11de395fc8b", "oldBytes": 100890, "new": "1b368039f8cc8087033b92e2a5a68f62", "newBytes": 100912 },
-    { "job": "m1trayB-bottom", "name": "m1trayB-bottom-p2.nc", "old": "cda22e06…", "oldBytes": 4233, "new": "5217422ee680f77f751e8a25278fa5a1", "newBytes": 1958074 },
-    { "job": "m1trayB-bottom", "name": "m1trayB-bottom-p3.nc", "old": "1eb40dd9…", "oldBytes": 3246780, "new": "e5f5bc692f9e47256235ac962394b59d", "newBytes": 3146573 }
+  "_note": "#1186 — set B, VERSIONED WITH THE RULES (12 files: top p1..p8, bottom p1..p4 — the bottom posts four programs now, where 1114-1 had three). vs tableVersion 1114-1 the picker ranks every chain by the time it will really take (#1186 rule 1: each step at the feed row its cutter actually runs, plus the priced bit changes) and keeps one cutter per shape and diameter (#1186 rule 6); every flat may now propose as a primary. What changed, and why: top p2 is the ⌀1 × 7 flat cutting the curved remainder (15 ops, 33 min 3 s where it cut 14 s — the regions only the small flat reaches; the rank puts coverage before price); top p5's curved rough moved to the XCAN 1.5 × 8 (11 min 13 s against the 1.5 × 6's 16 min 33 s, whose own row is dearer — and rule 6 kept the longer flute); top p6's finish runs on the ⌀3.175 ball × 22 instead of the × 10 (rule 6's one ball per diameter; 6 min either way); the bottom's primary moved to the ⌀3.175 × 42 O-flute (2 h 8 min against the ×12 metal O-flute's 2 h 21 min), the curved rough is its own program on the TiN corn ⌀3.0 × 12 (45 min 1 s), and the rest runs on the Ucheer ⌀2 × 15 instead of the ⌀2 × 12 (rule 6; 1 h 49 min against 1 h 26 min — the known, non-unsafe cost carried on #1186 until the setup-boundary gate lands). The top's freeing contour (p8, 14 min 47 s on the ⌀3.175 × 42) and every other program are byte-identical to 1114-1. The e2e reads this table as the cross-door check.",
+  "tableVersion": "1186-1",
+  "rule": "#1186 (the planner's one currency, 2026-11-10) + #1192 (the proposal shortlist). (a) A CANDIDATE CHAIN IS RANKED BY THE TIME IT WILL REALLY TAKE: every step is priced at the feed row the cutter ACTUALLY runs — its own, or the borrowed row the CAM resolves — plus the priced bit changes (#1114); heuristics only propose, and ties go to fewer bit changes, then owned before catalogue. (b) EVERY FLAT MAY PROPOSE AS A PRIMARY (the maximal-flat gate is gone); the candidate set is shortlisted to the incumbent (the largest flat) and the best own-row removal-rate flat, every other flat staying a rest/finish candidate. (c) ONE CUTTER PER SHAPE AND DIAMETER AT THE JOB LEVEL: the longest stated reach does the work, and a shorter sibling is kept only where the longest would borrow. The setup-boundary refinement (a one-setup job keeps every sibling) is #1195-blocked and NOT in this build.",
+  "source": "casemaker cut <job>.cutjob.json --location ~/setb-inputs/location.json --catalogue ~/setb-inputs/catalogue.json, branch 1186-bench @ 70e83ce48 (1782e6602 + #1189's 40c688e3ff), k3, 2026-11-10; the CLI output is byte-identical to 1782e6602's",
+  "changedSince1114": [
+    { "job": "m1trayB-top", "name": "m1trayB-top-p2.nc", "old": "8cdac279a793ccb1a7bbd6fcb236868d", "oldBytes": 1289, "new": "138bb22e81ec975cdc37de2202e44d97", "newBytes": 240503 },
+    { "job": "m1trayB-top", "name": "m1trayB-top-p5.nc", "old": "8590bf68c8298b8f752b19ebac085b33", "oldBytes": 187222, "new": "de1b561ce343babc8c91872bfe13932e", "newBytes": 48252 },
+    { "job": "m1trayB-top", "name": "m1trayB-top-p6.nc", "old": "c554cdd25c1875f5f47f61081a131e10", "oldBytes": 200144, "new": "ee46eba48da7b8ee30f2ce0ea8843dec", "newBytes": 200122 },
+    { "job": "m1trayB-bottom", "name": "m1trayB-bottom-p1.nc", "old": "1b368039f8cc8087033b92e2a5a68f62", "oldBytes": 100912, "new": "c9459629d45d5524b11e6cc9590e3330", "newBytes": 35572 },
+    { "job": "m1trayB-bottom", "name": "m1trayB-bottom-p2.nc", "old": "(a new program: the curved rough)", "oldBytes": 0, "new": "fbcdb28fdbdded95bdbc46d2d8a6aac8", "newBytes": 90800 },
+    { "job": "m1trayB-bottom", "name": "m1trayB-bottom-p3.nc", "old": "5217422ee680f77f751e8a25278fa5a1 (was p2)", "oldBytes": 1958074, "new": "5217422ee680f77f751e8a25278fa5a1", "newBytes": 1958074 },
+    { "job": "m1trayB-bottom", "name": "m1trayB-bottom-p4.nc", "old": "e5f5bc692f9e47256235ac962394b59d (was p3)", "oldBytes": 3146573, "new": "89beb84ba68e03ce42d694ec99932ebb", "newBytes": 3146574 }
   ],
-  "_droppedFrom1129": "m1trayB-top-p9.nc (114ed00b…, the contour — now top p8) and m1trayB-bottom-p2.nc (cda22e06…, the 0.9 flat) + m1trayB-bottom-p4.nc (259fd058…, the 22 ball's run — now bottom p2). Where the 1129-1 md5 is known the full value is quoted; the rest carry its sha prefix.",
   "jobs": {
     "m1trayB-top": {
       "programs": 8,
       "files": [
-        { "name": "m1trayB-top-p1.nc", "bytes": 124288, "md5": "c674717adeb75440f480580b2628a87e", "note": "pocket/rough on the ⌀3.175 × 42 O-flute — 7 ops, 51 min 40 s" },
-        { "name": "m1trayB-top-p2.nc", "bytes": 1289, "md5": "8cdac279a793ccb1a7bbd6fcb236868d", "note": "⌀1 × 7 flat — 14 s" },
-        { "name": "m1trayB-top-p3.nc", "bytes": 2002, "md5": "cf327e2a3cb7c71401905b387cd63985", "note": "⌀0.9 flat — 22 s" },
-        { "name": "m1trayB-top-p4.nc", "bytes": 6667, "md5": "5275f401e7ad0eda0aeb0439e2ddfc58", "note": "⌀0.6 × 3 flat — 29 s" },
-        { "name": "m1trayB-top-p5.nc", "bytes": 187222, "md5": "8590bf68c8298b8f752b19ebac085b33", "note": "curved rough on the ⌀1.5 × 6 flat — shortest sufficient over the XCAN 1.5 × 8; 16 min 33 s" },
-        { "name": "m1trayB-top-p6.nc", "bytes": 200144, "md5": "c554cdd25c1875f5f47f61081a131e10", "note": "finish on the ⌀3.175 ball × 10 — shortest sufficient (both 3.175 balls pass the top's cuts); 6 min" },
-        { "name": "m1trayB-top-p7.nc", "bytes": 373662, "md5": "f38d4859d22da8d99c30fc38be45384b", "note": "rest/pencil on the ⌀1 × 4 ball — 7 min 17 s" },
-        { "name": "m1trayB-top-p8.nc", "bytes": 45454, "md5": "114ed00b170b6ba4a0dd3c5486507009", "note": "the freeing contour, RETURN on the ⌀3.175 × 42 O-flute — 14 min 47 s" }
+        { "name": "m1trayB-top-p1.nc", "bytes": 124288, "md5": "c674717adeb75440f480580b2628a87e", "note": "pocket/rough on the ⌀3.175 × 42 O-flute — 7 ops, 51 min 40 s (unchanged)" },
+        { "name": "m1trayB-top-p2.nc", "bytes": 240503, "md5": "138bb22e81ec975cdc37de2202e44d97", "note": "the ⌀1 × 7 flat cuts the curved remainder — 15 ops, 33 min 3 s (was 14 s: rule 1 lets every flat propose and the rank prefers the more complete chain)" },
+        { "name": "m1trayB-top-p3.nc", "bytes": 2002, "md5": "cf327e2a3cb7c71401905b387cd63985", "note": "⌀0.9 flat — 22 s (unchanged)" },
+        { "name": "m1trayB-top-p4.nc", "bytes": 6667, "md5": "5275f401e7ad0eda0aeb0439e2ddfc58", "note": "⌀0.6 × 3 flat — 29 s (unchanged)" },
+        { "name": "m1trayB-top-p5.nc", "bytes": 48252, "md5": "de1b561ce343babc8c91872bfe13932e", "note": "curved rough on the XCAN 1.5 × 8 — 7 ops, 11 min 13 s (the 1.5 × 6's 16 min 33 s was dearer; rule 6 kept the longer flute)" },
+        { "name": "m1trayB-top-p6.nc", "bytes": 200122, "md5": "ee46eba48da7b8ee30f2ce0ea8843dec", "note": "finish on the ⌀3.175 ball × 22 — 14 ops, 6 min (rule 6's one ball per diameter; was the × 10)" },
+        { "name": "m1trayB-top-p7.nc", "bytes": 373662, "md5": "f38d4859d22da8d99c30fc38be45384b", "note": "rest/pencil on the ⌀1 × 4 ball — 7 min 17 s (unchanged)" },
+        { "name": "m1trayB-top-p8.nc", "bytes": 45454, "md5": "114ed00b170b6ba4a0dd3c5486507009", "note": "the freeing contour, RETURN on the ⌀3.175 × 42 O-flute — 14 min 47 s (unchanged; stated flute 42 ≥ the 25.3 mm profile)" }
       ]
     },
     "m1trayB-bottom": {
-      "programs": 3,
+      "programs": 4,
       "files": [
-        { "name": "m1trayB-bottom-p1.nc", "bytes": 100912, "md5": "1b368039f8cc8087033b92e2a5a68f62", "note": "rough + pocket on the ⌀3.175 × 12 metal O-flute — the primary satisfies the shortest sufficient flute; 2 ops, 2 h 21 min" },
-        { "name": "m1trayB-bottom-p2.nc", "bytes": 1958074, "md5": "5217422ee680f77f751e8a25278fa5a1", "note": "finish on the ⌀3.175 ball × 22 — the gate refuses the 10 mm flute at the 9.613 mm cut (0.387 mm margin); 57 min 13 s" },
-        { "name": "m1trayB-bottom-p3.nc", "bytes": 3146573, "md5": "e5f5bc692f9e47256235ac962394b59d", "note": "rest/pencil on the ⌀2 ball × 12 — the shortest sufficient rest ball; 1 h 26 min" }
+        { "name": "m1trayB-bottom-p1.nc", "bytes": 35572, "md5": "c9459629d45d5524b11e6cc9590e3330", "note": "pocket on the ⌀3.175 × 42 O-flute — 1 op, 2 h 8 min (the ×12 metal O-flute took 2 h 21 min)" },
+        { "name": "m1trayB-bottom-p2.nc", "bytes": 90800, "md5": "fbcdb28fdbdded95bdbc46d2d8a6aac8", "note": "curved rough on the TiN corn ⌀3.0 × 12 — 1 op, 45 min 1 s (its own program; new)" },
+        { "name": "m1trayB-bottom-p3.nc", "bytes": 1958074, "md5": "5217422ee680f77f751e8a25278fa5a1", "note": "finish on the ⌀3.175 ball × 22 — 57 min 13 s (unchanged bytes; was p2)" },
+        { "name": "m1trayB-bottom-p4.nc", "bytes": 3146574, "md5": "89beb84ba68e03ce42d694ec99932ebb", "note": "rest/pencil on the Ucheer ⌀2 ball × 15 — 1 h 49 min (rule 6's merge; the ⌀2 × 12 took 1 h 26 min)" }
       ]
     }
   }
