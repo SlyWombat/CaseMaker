@@ -259,27 +259,39 @@ struct RunsState {
 
 /// POST /runs, called by `house_api` once the shop ETag has been checked against the store.
 pub fn submit(body: &Value) -> Response<Body> {
-    match manager() {
-        Ok(runs) => {
-            runs.prune();
-            match runs.submit_body(body) {
-                SubmitOutcome::Accepted(reply) => json_body(
-                    StatusCode::ACCEPTED,
-                    serde_json::to_value(reply).unwrap_or(Value::Null),
-                ),
-                SubmitOutcome::QueueFull => error_sentence(
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "the house queue is full — try again when a run finishes".to_owned(),
-                ),
-                SubmitOutcome::Unavailable(sentence) => {
-                    error_sentence(StatusCode::SERVICE_UNAVAILABLE, sentence)
-                }
-                SubmitOutcome::BadRequest(sentence) => {
-                    error_sentence(StatusCode::BAD_REQUEST, sentence)
-                }
-            }
+    let state = match manager() {
+        Ok(runs) => RunsState {
+            runs: Some(runs.clone()),
+            unavailable: None,
+        },
+        Err(sentence) => RunsState {
+            runs: None,
+            unavailable: Some(sentence.clone()),
+        },
+    };
+    submit_with(&state, body)
+}
+
+/// The submit itself, against whichever manager the state carries (the test drives this with its
+/// own; `house_api` reaches it through the global one).
+fn submit_with(state: &RunsState, body: &Value) -> Response<Body> {
+    let Some(runs) = state.runs.clone() else {
+        return unavailable(state);
+    };
+    runs.prune();
+    match runs.submit_body(body) {
+        SubmitOutcome::Accepted(reply) => json_body(
+            StatusCode::ACCEPTED,
+            serde_json::to_value(reply).unwrap_or(Value::Null),
+        ),
+        SubmitOutcome::QueueFull => error_sentence(
+            StatusCode::TOO_MANY_REQUESTS,
+            "the house queue is full — try again when a run finishes".to_owned(),
+        ),
+        SubmitOutcome::Unavailable(sentence) => {
+            error_sentence(StatusCode::SERVICE_UNAVAILABLE, sentence)
         }
-        Err(sentence) => error_sentence(StatusCode::SERVICE_UNAVAILABLE, sentence.clone()),
+        SubmitOutcome::BadRequest(sentence) => error_sentence(StatusCode::BAD_REQUEST, sentence),
     }
 }
 
@@ -295,13 +307,17 @@ pub fn router() -> Router {
             unavailable: Some(sentence.clone()),
         },
     };
+    routes().with_state(state)
+}
+
+/// The routes before their state is applied, so a test can drive them with a manager of its own.
+fn routes() -> Router<RunsState> {
     Router::new()
         .route("/api/v1/runs/:id", get(read_run))
         .route("/api/v1/runs/:id/events", get(run_events))
         .route("/api/v1/runs/:id/cancel", post(cancel_run))
         .route("/api/v1/runs/:id/programs/:name", get(run_program))
         .route("/api/v1/runs/:id/generated", get(run_generated))
-        .with_state(state)
 }
 
 fn json_body(status: StatusCode, body: Value) -> Response<Body> {
@@ -1001,5 +1017,242 @@ mod tests {
         assert!(!valid_program_name(".."));
         assert!(valid_run_id("run-1a2b-3"));
         assert!(!valid_run_id("../x"));
+    }
+
+    // — the routes, end to end, against a fake node (#1126 amendments 2 and 3) ——————————————
+
+    #[cfg(unix)]
+    mod api {
+        use super::*;
+        use axum::body::to_bytes;
+        use axum::http::Request;
+        use std::os::unix::fs::PermissionsExt;
+        use tower::ServiceExt;
+
+        /// A stand-in for `node <cli> cut …`: writes the program and the generated document where
+        /// the service says, reports two progress frames on stderr and one receipt on stdout.
+        /// Deliberately a shell script, because the service runs its argv array as-is and this is
+        /// the cheapest way to observe exactly what reaches it.
+        const FAKE_NODE: &str = r#"#!/bin/sh
+set -eu
+OUT=""; GEN=""; JOB=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --out) OUT="$2"; shift 2;;
+    --generated) GEN="$2"; shift 2;;
+    cut) shift; JOB="$1"; shift;;
+    *) shift;;
+  esac
+done
+[ -f "$JOB" ] || { echo "no job file: $JOB" >&2; exit 3; }
+mkdir -p "$OUT"
+printf 'G0 X0 Y0\n' > "$OUT/tray-p01.nc"
+printf '{"ok":true,"nc":"G0 X0 Y0","job":%s}' "$(cat "$JOB")" > "$GEN"
+echo '{"stage":"plan","label":"planning","done":1,"total":2}' >&2
+echo '{"stage":"note","label":"  pick      cutter 1"}' >&2
+printf '{"ok":true,"programs":[{"ncFile":"tray-p01.nc","ncHash":"h1"}]}'
+"#;
+
+        /// A stand-in that never finishes on its own: the cancel and queue tests need a child that
+        /// is still running when they act.
+        const SLOW_NODE: &str = r#"#!/bin/sh
+exec sleep 30
+"#;
+
+        fn script(dir: &FsPath, body: &str) -> PathBuf {
+            let path = dir.join("fake-node.sh");
+            std::fs::write(&path, body).expect("write the fake node");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                .expect("chmod the fake node");
+            path
+        }
+
+        fn service(node: PathBuf, root: PathBuf, max_queue: usize) -> Router {
+            let config = RunsConfig {
+                node: node.clone(),
+                cli: node,
+                root,
+                concurrency: 1,
+                max_queue,
+                wall_clock: Duration::from_secs(30),
+                retention: Duration::from_secs(60),
+            };
+            // The production submit route lives in `house_api` (the shop ETag check owns that
+            // state); this route calls the same submit against the manager this test built.
+            routes()
+                .route("/api/v1/runs", post(test_submit))
+                .with_state(RunsState {
+                    runs: Some(Arc::new(Runs::new(config))),
+                    unavailable: None,
+                })
+        }
+
+        async fn test_submit(
+            State(state): State<RunsState>,
+            axum::Json(body): axum::Json<Value>,
+        ) -> Response<Body> {
+            submit_with(&state, &body)
+        }
+
+        async fn body_json(res: Response<Body>) -> Value {
+            let bytes = to_bytes(res.into_body(), usize::MAX).await.expect("read the body");
+            serde_json::from_slice(&bytes).expect("the answer is JSON")
+        }
+
+        async fn submit(app: &Router, job: Value) -> (StatusCode, Value) {
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/v1/runs")
+                        .header("content-type", "application/json")
+                        .body(Body::from(json!({ "job": job }).to_string()))
+                        .expect("the request"),
+                )
+                .await
+                .expect("the route answers");
+            let status = res.status();
+            (status, body_json(res).await)
+        }
+
+        async fn state_of(app: &Router, id: &str) -> Value {
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/v1/runs/{id}"))
+                        .body(Body::empty())
+                        .expect("the request"),
+                )
+                .await
+                .expect("the route answers");
+            body_json(res).await
+        }
+
+        async fn settle(app: &Router, id: &str) -> Value {
+            for _ in 0..200 {
+                let snap = state_of(app, id).await;
+                let state = snap.get("state").and_then(Value::as_str).unwrap_or("");
+                if matches!(state, "done" | "failed" | "cancelled") {
+                    return snap;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            panic!("the run did not settle");
+        }
+
+        #[tokio::test]
+        async fn a_job_whose_fields_are_shell_metacharacters_plans_inside_its_scratch_dir() {
+            let dir = tempfile::tempdir().expect("a temp dir");
+            let node = script(dir.path(), FAKE_NODE);
+            let root = dir.path().join("runs");
+            let app = service(node, root.clone(), 8);
+
+            // The job's own text is hostile; it is written to a file and never becomes an argument.
+            let job = json!({ "name": "$(touch pwned); `id`; rm -rf /", "n": 1 });
+            let (status, reply) = submit(&app, job.clone()).await;
+            assert_eq!(status, StatusCode::ACCEPTED, "{reply}");
+            let id = reply["runId"].as_str().expect("a run id").to_owned();
+            assert_eq!(reply["key"]["jobSha"].as_str().map(str::len), Some(64));
+
+            let snap = settle(&app, &id).await;
+            assert_eq!(snap["state"], "done", "{snap}");
+            assert_eq!(snap["programs"], json!([{ "name": "tray-p01.nc", "hash": sha256_hex(b"G0 X0 Y0\n") }]));
+
+            // The program by name, and the whole generated document.
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/v1/runs/{id}/programs/tray-p01.nc"))
+                        .body(Body::empty())
+                        .expect("the request"),
+                )
+                .await
+                .expect("the route answers");
+            assert_eq!(res.status(), StatusCode::OK);
+            let bytes = to_bytes(res.into_body(), usize::MAX).await.expect("the body");
+            assert_eq!(&bytes[..], b"G0 X0 Y0\n");
+
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/v1/runs/{id}/generated"))
+                        .body(Body::empty())
+                        .expect("the request"),
+                )
+                .await
+                .expect("the route answers");
+            assert_eq!(res.status(), StatusCode::OK);
+            let generated = body_json(res).await;
+            assert_eq!(generated["ok"], true);
+            // The job rode into the fake's output through its FILE, intact.
+            assert_eq!(generated["job"]["name"], job["name"], "{generated}");
+
+            // Nothing escaped the scratch directory: no `pwned` anywhere under the current dir.
+            assert!(!std::path::Path::new("pwned").exists());
+
+            // A program name that tries to walk out is refused, never served.
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/v1/runs/{id}/programs/job.json"))
+                        .body(Body::empty())
+                        .expect("the request"),
+                )
+                .await
+                .expect("the route answers");
+            assert_eq!(res.status(), StatusCode::NOT_FOUND);
+        }
+
+        #[tokio::test]
+        async fn a_full_queue_is_a_plain_429_and_a_cancel_stops_the_child() {
+            let dir = tempfile::tempdir().expect("a temp dir");
+            let node = script(dir.path(), SLOW_NODE);
+            let root = dir.path().join("runs");
+            let app = service(node, root.clone(), 1);
+
+            let (first, reply) = submit(&app, json!({ "name": "first" })).await;
+            assert_eq!(first, StatusCode::ACCEPTED);
+            let first_id = reply["runId"].as_str().expect("a run id").to_owned();
+            let (second, reply) = submit(&app, json!({ "name": "second" })).await;
+            assert_eq!(second, StatusCode::ACCEPTED, "the queue has a slot");
+            assert_eq!(reply["queuePosition"], 1);
+            let (third, reply) = submit(&app, json!({ "name": "third" })).await;
+            assert_eq!(third, StatusCode::TOO_MANY_REQUESTS, "{reply}");
+            assert!(reply["error"].as_str().unwrap_or("").contains("queue is full"), "{reply}");
+
+            // Cancel the running child; the state settles `cancelled` and the queued run starts.
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/api/v1/runs/{first_id}/cancel"))
+                        .body(Body::empty())
+                        .expect("the request"),
+                )
+                .await
+                .expect("the route answers");
+            assert_eq!(res.status(), StatusCode::OK);
+            let snap = state_of(&app, &first_id).await;
+            assert_eq!(snap["state"], "cancelled", "{snap}");
+            // Cancelling a settled run is a 409, not a second kill.
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/api/v1/runs/{first_id}/cancel"))
+                        .body(Body::empty())
+                        .expect("the request"),
+                )
+                .await
+                .expect("the route answers");
+            assert_eq!(res.status(), StatusCode::CONFLICT);
+        }
     }
 }
