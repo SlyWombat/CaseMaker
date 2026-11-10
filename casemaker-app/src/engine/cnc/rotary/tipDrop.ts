@@ -68,19 +68,17 @@ export function ballTipRequirement(rho: number, phi: number, dx: number, r: numb
   const s = Math.sin(phi);
   const c = Math.cos(phi);
   const under = r * r - dx * dx;
-  if (!(under > 0)) return null;
+  if (!(under > 0)) return null; // the ball never reaches this column
   const root = Math.sqrt(under);
-  const domainTop = s === 0 ? Infinity : root / Math.abs(s);
-  const f = (u: number): number => {
-    const w = r * r - dx * dx - u * u * s * s;
-    return u * c + Math.sqrt(Math.max(0, w));
-  };
-  const candidates = [0, Math.min(rho, domainTop)];
-  const uStar = c * root / (s === 0 ? Number.EPSILON : s);
-  if (s !== 0 && uStar > 0 && uStar <= rho && uStar <= domainTop) candidates.push(uStar);
-  let best = -Infinity;
-  for (const u of candidates) best = Math.max(best, f(u));
-  return best - r;
+  // The bracket peaks at the TANGENT point u* = √(r² − dx²)·cos φ / sin φ, where it is
+  // √(r² − dx²)/sin φ. If u* lies inside the goal's solid (ρ ≥ u*), that is the requirement;
+  // otherwise the column's own surface point ρ is the binding one. (The analyst's derivation,
+  // #1164 comment; at exactly the tangent tip the floor function returns the graze point — zero
+  // depth — so the pin raises the tip by 1e-6 and lowers it by 1e-3.)
+  if (s === 0) return rho + root - r;
+  const uStar = (root * c) / Math.abs(s);
+  if (uStar > 0 && rho >= uStar) return root / Math.abs(s) - r;
+  return rho * c + Math.sqrt(Math.max(0, under - rho * rho * s * s)) - r;
 }
 
 /**
@@ -95,12 +93,13 @@ export function columnTipRequirement(
   dx: number,
   envelope: number,
 ): number {
-  // #1164 FINDING (for the analyst): the note's ball closed form, read as written — the ball's
-  // centre height ≥ max over u ≤ ρ of [u·cos φ + √(r² − dx² − u²·sin² φ)] — does NOT match
-  // `cutterFloorOnColumn` in the polar frame: at (ρ 8, φ 0.5, dx 0) it asks for a tip whose floor
-  // is 5.49 mm, i.e. the ball is still cut in. It describes a ball against a point, not the
-  // goal-radius surface. `ballTipRequirement` is kept exported for that discussion; the solver
-  // stays on the floor function (bisection) until a form that IS the function is agreed.
+  // The ball's closed form (the analyst's two-case derivation, pinned to the floor function by
+  // the spec with the tangency handled): the tangent point u* binds inside the goal's solid, else
+  // the column's own ρ does. Cheap, and still ONE derivation — the pin IS `cutterFloorOnColumn`.
+  if (cutter.cornerRadius !== undefined && cutter.radius === 0 && cutter.tanHalf === null) {
+    const closed = ballTipRequirement(rho, phi, dx, cutter.cornerRadius);
+    return closed === null ? 0 : Math.min(envelope, Math.max(0, closed));
+  }
   // A tip EXACTLY on the axis makes every ray start on the cutter's own tip point, where
   // `cutterFloorOnColumn` reports u = 0 as "not reached" — a degenerate contact, not a miss. The
   // predicate is evaluated a hair above the axis so "no floor" really means the body is elsewhere,

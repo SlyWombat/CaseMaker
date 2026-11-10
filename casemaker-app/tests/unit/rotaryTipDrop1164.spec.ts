@@ -15,6 +15,7 @@ import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import type { GoalRadialField } from '@/engine/cnc/rotary/radialField';
 import { radialFieldAsHeightfield, sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
+import { poolRadialField } from '@/engine/cnc/rotary/poolRadialField';
 import { finishTipField } from '@/engine/cnc/cam/dropTip';
 import { rotaryFinishTipField, type RotaryTipTool } from '@/engine/cnc/rotary/tipDrop';
 import { sweepRotaryPenetration, type RotaryMove } from './helpers/rotaryPenetration';
@@ -54,6 +55,31 @@ function vGrooveTriangles(halfWidthMm: number): { tris: Tri[]; flat: number[] } 
     // the note's V-groove to ρ = 8 mm, with the wall 10° from the tool when the ball sits at the
     // groove's bottom.
     return GROOVE + (R - GROOVE) * (d / halfWidthMm);
+  };
+  const at = (x: number, a: number): V => [x, radiusAt(a) * Math.sin(a), radiusAt(a) * Math.cos(a)];
+  const tris: Tri[] = [];
+  for (let i = 0; i < seg; i++) {
+    const a0 = (i / seg) * 2 * Math.PI;
+    const a1 = ((i + 1) / seg) * 2 * Math.PI;
+    tris.push([at(-length / 2, a0), at(length / 2, a0), at(length / 2, a1)]);
+    tris.push([at(-length / 2, a0), at(length / 2, a1), at(-length / 2, a1)]);
+  }
+  return { tris, flat: tris.flatMap((t) => [...t[0], ...t[1], ...t[2]]) };
+}
+
+/**
+ * A rod with a SQUARE groove: the floor radius inside `halfWidthMm` of the seam, the envelope
+ * outside, and a VERTICAL wall between them. This is the case the analyst's hint names — the map's
+ * disc sees only the wall's top, which is beyond its reach at an interior floor cell, while the
+ * ball's true lateral reach at ρ = 8 does not.
+ */
+function stepGrooveTriangles(halfWidthMm: number): { tris: Tri[]; flat: number[] } {
+  const seg = 720;
+  const length = 20;
+  const radiusAt = (a: number): number => {
+    let arc = (a * R) % (2 * Math.PI * R);
+    if (arc > Math.PI * R) arc -= 2 * Math.PI * R;
+    return Math.abs(arc) < halfWidthMm ? GROOVE : R;
   };
   const at = (x: number, a: number): V => [x, radiusAt(a) * Math.sin(a), radiusAt(a) * Math.cos(a)];
   const tris: Tri[] = [];
@@ -126,8 +152,18 @@ describe('#1164 the rotary tip drop on the true ray geometry', () => {
     );
   }
 
-  it("the old map-metric drop gouges the V wall; the true drop does not (the analyst's acceptance)", () => {
-    const { field, flat, k, x, arc } = setup();
+  it("the old map-metric drop gouges the STEP wall; the true drop does not (the analyst's acceptance)", () => {
+    const { tris, flat } = stepGrooveTriangles(4);
+    // THE PRODUCTION PATH: the field is sampled FINE and the PLANNING field is the pooled one
+    // (rule 5). A cell that contains the wall then carries the wall's radius, so the plan stands
+    // off it; planning on the unpooled 1 mm samples leaves the wall's face unresolved between
+    // cells and the ball shaves it (0.36 mm, measured).
+    const fine = sampleGoalRadialField(goal(tris), R, { pitchMm: 0.1 });
+    const field = poolRadialField(fine, PITCH);
+    const xWorld = field.x0 + Math.floor(field.nx / 2) * field.pitch;
+    const arc = 0;
+    const k = cellAt(field, xWorld, arc);
+    const x = xWorld - 50;
     const hf = radialFieldAsHeightfield(field);
     const oldTips = finishTipField(hf, { radius: BALL_R, ball: true }, Number.MAX_SAFE_INTEGER, { wrapRows: true });
     const newTips = rotaryFinishTipField(field, TOOL, { maxOps: Number.MAX_SAFE_INTEGER });

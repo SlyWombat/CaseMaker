@@ -35,15 +35,13 @@ export function poolRadialField(fine: GoalRadialField, planningPitch: number): G
     );
   }
   if (factor === 1) return fine;
-  const nx = Math.floor(fine.nx / factor);
-  const ny = Math.floor(fine.ny / factor);
+  // A sampled map's row count is ceil(2πR/pitch), so blocks almost never divide exactly. The
+  // EDGE block is simply smaller (clamped in X, wrapped in the row axis — the circumference is a
+  // circle): still the highest radius over the footprint, never a dropped cell.
+  const nx = Math.ceil(fine.nx / factor);
+  const ny = Math.ceil(fine.ny / factor);
   if (nx < 1 || ny < 1) {
     throw new Error(`a ${planningPitch} mm planning pitch leaves no cell in this ${fine.nx}×${fine.ny} map`);
-  }
-  if (nx * factor !== fine.nx || ny * factor !== fine.ny) {
-    throw new Error(
-      `the fine map ${fine.nx}×${fine.ny} does not divide into ${factor}-cell planning blocks`,
-    );
   }
   const z = new Float32Array(nx * ny);
   const covered = new Uint8Array(nx * ny);
@@ -55,8 +53,11 @@ export function poolRadialField(fine: GoalRadialField, planningPitch: number): G
       let best = -Infinity;
       let anyCovered = 0;
       for (let dj = 0; dj < factor; dj++) {
+        const row = (j * factor + dj) % fine.ny; // rows wrap: the circumference is a circle
         for (let di = 0; di < factor; di++) {
-          const at = (j * factor + dj) * fine.nx + (i * factor + di);
+          const col = i * factor + di;
+          if (col >= fine.nx) continue; // the X edge block is smaller, never wrapped
+          const at = row * fine.nx + col;
           if (fine.covered[at] === 0) {
             // The stock's surface stands under any uncovered fine cell: at least the envelope.
             if (best < 0) best = 0;
