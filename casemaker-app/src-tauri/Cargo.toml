@@ -25,7 +25,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "~2.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "io-util", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "io-util", "time", "process"] }
 # `json` is for the house service (#306): `axum::Json` and the JSON error bodies. Without it the
 # extractor and the response type are simply not in the crate. `original-uri` is the same service's
 # 404, which names the path it refused rather than answering "not found" to a typo. `ws` is the
@@ -57,6 +57,8 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 # One `syncedAt` timestamp. Taken as a dependency rather than hand-rolling civil-date arithmetic,
 # which is a place to be quietly wrong about a value the user reads.
 chrono = "0.4.45"
+# #1126 — the job key the browser and the service agree on: SHA-256 of the job document bytes.
+sha2 = "0.10"
 
 # #416 — a power switch's token lives in the desktop's secure store (Credential Manager / Keychain),
 # never in a file. Pinned to 3.6 (`~`, as single-instance is): its MSRV is 1.75, under this crate's

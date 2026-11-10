@@ -568,6 +568,12 @@ pub struct Health {
     /// Defaulted so this build's `Health` still deserialises a report written before the field.
     #[serde(default = "unknown_build")]
     pub build: String,
+    /// #1126 — whether this service can RUN generation (the runs API over the CLI path). False on
+    /// every service before the runs slice, and false when the service's own Node/CLI paths are
+    /// missing or not executable: the house never guesses a path, and the location document (data
+    /// a LAN client may write) can never name an executable. Defaulted for old reports.
+    #[serde(default)]
+    pub runs: bool,
     pub has_catalogue: bool,
     /// How many feed rows the stored catalogue holds (#310). A catalogue synced before the feed tier
     /// existed reports `has_catalogue: true` with `feedRows: 0`, which is exactly the state a re-sync
@@ -1183,6 +1189,7 @@ impl HouseStore {
             feed_rows: inner.catalogue.feeds.len(),
             material_spec_rows: inner.catalogue.material_specs.len(),
             catalogue_synced_at: inner.catalogue.synced_at.clone(),
+            runs: crate::runs::capability(),
             last_sync: inner.catalogue.last_sync.clone(),
             problems: [&inner.location_problem, &inner.catalogue_problem]
                 .iter()
