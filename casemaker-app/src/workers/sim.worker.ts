@@ -321,12 +321,14 @@ const api = {
      * she has; absent means no ideal (`planIdeal` null) and the second plan is skipped.
      */
     catalogueTools?: readonly Tool[],
+    /** #1151 — owned plan first; the result says `idealDeferred` and the caller owes the ideal. */
+    deferIdeal?: boolean,
   ): Promise<EngraveGenerated> {
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
     // #896 — every stage report names this worker's heap too (see `workerMemoryMb`).
     const withMemory =
       onProgress === undefined ? undefined : (progress: EngraveProgress): void => onProgress({ ...progress, memoryMB: workerMemoryMb() });
-    return await runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop, withMemory, catalogueTools);
+    return await runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop, withMemory, catalogueTools, deferIdeal === undefined ? {} : { deferIdeal });
   },
   /**
    * The volumetric oracle (#206 §3) against the program CURRENTLY loaded in the session. The

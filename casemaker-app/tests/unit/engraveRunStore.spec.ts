@@ -2278,6 +2278,64 @@ describe('#1049 the tradeoff Generate already measured', () => {
     }
   }, 60_000);
 
+  // ── #1151 — OWNED PLAN FIRST, THE COMPARISON LATER ────────────────────────────────────────────
+  it('#1151 — a deferred result starts the comparison on its OWN worker, not the shared one', async () => {
+    let ownCalls = 0;
+    let sharedCalls = 0;
+    let heldArg: unknown = 'unset';
+    const ownedOutcome = outcome(450);
+    const deferred = { ...resultWithProgram(), idealDeferred: true };
+    deferred.plan = { perSetup: [], outcome: ownedOutcome } as never;
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => deferred,
+      engravePlanIdeal: async () => {
+        sharedCalls += 1;
+        return { tradeoff: null, owned: null, ideal: null };
+      },
+      engravePlanIdealOnItsOwnWorker: async (...args: unknown[]) => {
+        ownCalls += 1;
+        heldArg = args[5];
+        return { tradeoff, owned: ownedOutcome, ideal: ownedOutcome };
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    withGoal();
+    const real = useSimStore.getState().loadProgram;
+    realLoad();
+    try {
+      await useEngraveRunStore.getState().generate();
+      await settle();
+      expect(ownCalls, 'the compare runs on its own worker').toBe(1);
+      expect(sharedCalls, 'the shared sim worker is left to the sweep').toBe(0);
+      expect(heldArg, 'the owned outcome rides so the ideal plans its half alone').toEqual(ownedOutcome);
+      expect(useEngraveRunStore.getState().idealPlan).toEqual({ status: 'ready', tradeoff });
+    } finally {
+      useSimStore.setState({ loadProgram: real });
+    }
+  }, 60_000);
+
+  it('#1151 — a deferred comparison that fails leaves the card idle and blocks nothing', async () => {
+    const deferred = { ...resultWithProgram(), idealDeferred: true };
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => deferred,
+      engravePlanIdealOnItsOwnWorker: async () => {
+        throw new Error('the comparison worker stopped');
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
+    }));
+    withGoal();
+    const real = useSimStore.getState().loadProgram;
+    realLoad();
+    try {
+      await useEngraveRunStore.getState().generate();
+      await settle();
+      expect(useEngraveRunStore.getState().idealPlan).toEqual({ status: 'idle', tradeoff: null });
+      expect(useEngraveRunStore.getState().phase).toBe('ready');
+    } finally {
+      useSimStore.setState({ loadProgram: real });
+    }
+  }, 60_000);
+
   it('a stale run’s ideal never writes over the current run', async () => {
     const releases: ((v: { tradeoff: unknown; owned: null; ideal: null }) => void)[] = [];
     const withIdeal = resultWithProgram();

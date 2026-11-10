@@ -684,6 +684,12 @@ export const engraveGenerate = (
    * stores. Absent means no ideal — `planIdeal` stays null and only the owned plan is run.
    */
   catalogueTools?: readonly Tool[],
+  /**
+   * #1151 — owned plan first. True returns as soon as the owned plan has posted, with
+   * `idealDeferred`; the caller owes the comparison (`engravePlanIdealOnItsOwnWorker`). The plain
+   * CLI leaves it off: today's two-plan run, and its receipt, are unchanged.
+   */
+  deferIdeal?: boolean,
 ): Promise<EngraveGenerated> =>
   guarded(
     getSimApi().engraveGenerate(
@@ -695,8 +701,45 @@ export const engraveGenerate = (
       shop,
       onProgress === undefined ? undefined : Comlink.proxy(onProgress),
       catalogueTools,
+      deferIdeal,
     ),
   );
+
+/**
+ * #1151 (#1134(c)'s ruling) — THE IDEAL COMPARISON ON ITS OWN WORKER. The panel's sim worker is a
+ * singleton, and the sweep uses it; the ideal half takes ~15 minutes on the set B top, so running
+ * it there would queue the simulation behind a comparison. This worker is created for the compare
+ * and terminated in the `finally`, whatever the answer. It is the same worker entry and the same
+ * `engravePlanIdeal` method the press uses, so the numbers cannot differ; only the realm is new.
+ */
+export const engravePlanIdealOnItsOwnWorker = (
+  job: EngraveJob,
+  goal: EngraveTargetObject,
+  tool: Tool,
+  shop?: EngraveShopOpts,
+  catalogueTools?: readonly Tool[],
+  ownedOutcome?: PlanOutcome | null,
+  catalogue?: readonly FeedCatalogueRow[],
+): Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }> => {
+  const worker = new Worker(new URL('../../workers/sim.worker.ts', import.meta.url), { type: 'module', name: 'sim-ideal' });
+  let rejectCrash: (e: Error) => void = () => {};
+  const crashed = new Promise<never>((_, reject) => {
+    rejectCrash = reject;
+  });
+  // A crash with nobody awaiting it must not surface as an unhandled rejection (the singleton's
+  // own failure object does the same).
+  crashed.catch(() => undefined);
+  worker.onerror = (event) => {
+    event.preventDefault?.();
+    rejectCrash(new Error(event.message !== '' ? event.message : 'the ideal-comparison worker stopped with an error'));
+  };
+  worker.onmessageerror = () => rejectCrash(new Error('the ideal-comparison worker sent a message the page could not read'));
+  const api = Comlink.wrap<SimWorkerApi>(worker);
+  return Promise.race([
+    api.engravePlanIdeal(job, goal, tool, shop ?? {}, catalogueTools ?? [], ownedOutcome ?? null, catalogue ?? []),
+    crashed,
+  ]).finally(() => worker.terminate());
+};
 
 /**
  * #785 — CANCEL a Generate. The sim worker is the one place a wasm call can run for minutes

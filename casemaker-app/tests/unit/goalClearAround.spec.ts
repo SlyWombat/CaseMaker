@@ -139,6 +139,39 @@ describe('#764 — the item goal is cleared around itself', () => {
     expect(modelOut.perSetup.flatMap((s) => s.notes).join('\n')).toContain('no flat end mill');
   }, 120_000);
 
+  // #1151 (#1134(c)'s ruling) — THE OWNED PLAN FIRST. With a catalogue cutter the full run would
+  // plan the ideal as well; the deferred run posts the owned plan and says the comparison is owed.
+  it('#1151 — deferIdeal posts the owned plan and leaves the comparison to the caller', async () => {
+    const { engraveGenerate, buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
+    const { planOwnedOnly } = await import('@/engine/cnc/cam/model/twoPlans');
+    const { tl } = await import('./helpers/manifoldExec');
+    const j = job(goal(zOut));
+    const catalogue = [flatEndMill(1.5, { shape: 'ball', name: '1.5 mm ball nose (catalogue)' })];
+    const deferred = await engraveGenerate(tl, j, BALL_TOOL, [], null, undefined, {}, undefined, catalogue, true);
+    expect(deferred.ok).toBe(true);
+    expect(deferred.idealDeferred).toBe(true);
+    expect(deferred.planIdeal ?? null, 'the ideal was not run').toBeNull();
+    expect(deferred.planTradeoff ?? null, 'no comparison was stated').toBeNull();
+    // The posted plan is the OWNED half, computed exactly as a two-plan Generate computes it
+    // first: the ideal comparison cannot move the plan or the bytes.
+    const modelInput = await buildModelPlanInputForGoal(j, j.targetObject!, BALL_TOOL, {}, undefined, catalogue, []);
+    const owned = await planOwnedOnly(modelInput);
+    expect(JSON.stringify(deferred.plan)).toBe(JSON.stringify(owned));
+  }, 120_000);
+
+  // #1151 — a job whose RECORDED CHOICE is the ideal posts the ideal itself, so it keeps today's
+  // order and waits for both plans; the flag cannot turn it into an early owned result.
+  it('#1151 — a job whose recorded choice is the ideal waits for both plans', async () => {
+    const { engraveGenerate } = await import('@/workers/sim/engraveGenerate');
+    const { tl } = await import('./helpers/manifoldExec');
+    const j = { ...job(goal(zOut)), planChoice: 'ideal' as const };
+    const catalogue = [flatEndMill(1.5, { shape: 'ball', name: '1.5 mm ball nose (catalogue)' })];
+    const result = await engraveGenerate(tl, j, BALL_TOOL, [], null, undefined, {}, undefined, catalogue, true);
+    expect(result.ok).toBe(true);
+    expect(result.idealDeferred ?? false).toBe(false);
+    expect(result.planIdeal ?? null).not.toBeNull();
+  }, 240_000);
+
   it('“the whole blank” clears the stock’s own rectangle to the base plane', () => {
     const hf = sampleGoalHeightfield(goal(zOut), {
       pitchMm: PITCH,

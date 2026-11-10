@@ -102,7 +102,22 @@ export async function planTwoOutcomes(
   const reused = two.reusedOwned === undefined || two.reusedOwned === null
     ? null
     : rebindToolsToHouse(two.reusedOwned, input.cutters.house);
-  const owned = reused ?? await planModelCam(
+  const owned = reused ?? await planOwnedOnly(input, opts);
+  if (two.ownedOnly === true) return { owned, ideal: null, defaultPlan: 'owned' };
+  const ideal = await planIdealOnly(input, opts);
+  if (ideal === null) return { owned, ideal: null, defaultPlan: 'owned' };
+  return { owned: enrichOwnedRestStatement(owned, ideal, input), ideal, defaultPlan: 'owned' };
+}
+
+/**
+ * #1151 (#1134(c)'s ruling) — THE OWNED PLAN ALONE. `planTwoOutcomes`' own first half, extracted
+ * so a caller that will carry the ideal LATER — the app's Generate, the house service's child work —
+ * can stop at the plan that cuts. The input, the emptied catalogue, the `catalogueConfigured`
+ * reading and the pin are the ones `planTwoOutcomes` uses, so the plan that posts cannot differ
+ * between the two doors. The caller owes the ideal half (`planIdealOnly`) afterwards.
+ */
+export async function planOwnedOnly(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
+  return planModelCam(
     {
       ...input,
       cutters: { house: input.cutters.house, catalogue: [], ...(input.cutters.pinned === undefined ? {} : { pinned: input.cutters.pinned }) },
@@ -113,10 +128,6 @@ export async function planTwoOutcomes(
     // #1052 — the trace's plan:start row names which of the two runs it is (6b's round).
     { ...opts, planKind: 'owned' },
   );
-  if (two.ownedOnly === true) return { owned, ideal: null, defaultPlan: 'owned' };
-  const ideal = await planIdealOnly(input, opts);
-  if (ideal === null) return { owned, ideal: null, defaultPlan: 'owned' };
-  return { owned: enrichOwnedRestStatement(owned, ideal, input), ideal, defaultPlan: 'owned' };
 }
 
 /**

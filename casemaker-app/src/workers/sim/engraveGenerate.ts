@@ -236,6 +236,9 @@ import {
   DEFAULT_RELEASE_TABS,
   MODEL_STOCK_TO_LEAVE_MM,
   resolvedCutParams,
+  type PlanModelCamOptions,
+  type RankMeasureHandle,
+  type RankMeasureRequest,
   type ModelPlanInput,
   type ModelPlanOutput,
   type PlannedOp,
@@ -245,7 +248,7 @@ import {
 import { bandHalfThicknessMm, planTabRelease, tabReleaseIr, type TabReleaseProgramFacts } from '@/engine/cnc/engrave/tabRelease';
 import { tabSettings } from '@/engine/cnc/cam/tabSettings';
 // #961 — the two-plan run: the OWNED plan posts, the ideal rides beside it for the card's tradeoff.
-import { planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
+import { planOwnedOnly, planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
 import { comparePlanOutcomes, type PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
 import { cutterKeyOf, type CutterCandidates } from '@/engine/cnc/cam/model/sequence';
@@ -787,6 +790,14 @@ export interface EngraveGenerated {
    * measured; the card prints nothing for it.
    */
   planTradeoff?: PlanTradeoff | null;
+  /**
+   * #1151 (#1134(c)'s ruling) — THE COMPARISON WAS NOT RUN WITH THIS RESULT. True when the caller
+   * asked for the owned plan first (`deferIdeal`): the plan, the programs, the verify and the
+   * findings above are the owned plan's, complete and final; `planIdeal`/`planTradeoff` are null
+   * and the caller owes the ideal half as later work (`planIdealOnly` + `comparePlanOutcomes`).
+   * Never part of the job fingerprint or a re-freeze: it is a fact about this result, not the job.
+   */
+  idealDeferred?: boolean;
   cam: EngraveCamSummary | null;
   /**
    * #250 — the rough/finish split of the program this object describes (the FIRST program for the
@@ -6011,9 +6022,21 @@ export async function generateGoalProgram(
      * {@link EngraveGenerateOptions}). */
     reusedOwnedPlan?: ModelPlanOutput | null;
     ownedOnly?: boolean;
+    /**
+     * #1151 (#1134(c)'s ruling) — THE OWNED PLAN FIRST: run only the plan that cuts, and mark the
+     * result `idealDeferred` so the caller owes the ideal comparison as later work. A job whose
+     * recorded choice is `'ideal'` posts the ideal itself, so it waits for both as before.
+     */
+    deferIdeal?: boolean;
+    /**
+     * #1151 Phase 2 — the rank's candidates 2..N, measured elsewhere (the CLI/service pool). The
+     * engine measures the first candidate in-process either way; absent (the app's worker) keeps
+     * the serial rank.
+     */
+    measureRankCandidates?: (request: RankMeasureRequest) => RankMeasureHandle;
   },
 ): Promise<EngraveGenerated> {
-  const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue, reusedOwnedPlan, ownedOnly } = opts;
+  const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue, reusedOwnedPlan, ownedOnly, deferIdeal, measureRankCandidates } = opts;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -6189,12 +6212,18 @@ export async function generateGoalProgram(
   // (what posts, and the default) and over every bit the caller knows (the ideal, carried for the
   // card's material tradeoff); when the catalogue adds no cutter the owned set did not carry it
   // returns `ideal: null` and the second plan is never run.
+  //
+  // #1151 (#1134(c)'s ruling) — THE CUT NEVER WAITS ON THE COMPARISON. With `deferIdeal` and a job
+  // whose recorded choice is not `'ideal'`, only the owned half runs here; the result says
+  // `idealDeferred` and the caller owes `planIdealOnly` + `comparePlanOutcomes` as later work. A
+  // job whose choice IS `'ideal'` posts the ideal itself, so it keeps today's order and waits.
   let output: ModelPlanOutput;
   let planIdeal: ModelPlanOutput | null = null;
   let planTradeoff: PlanTradeoff | null = null;
+  let idealDeferred = false;
   try {
     // #1038 — the planner's stage reports reach the run (see this function's `opts.onProgress`).
-    const two = await planTwoOutcomes(input, {
+    const planOpts: PlanModelCamOptions = {
       ...(onProgress === undefined
         ? {}
         : {
@@ -6205,14 +6234,31 @@ export async function generateGoalProgram(
               }),
           }),
       ...(signal === undefined ? {} : { signal }),
-    }, { ...(reusedOwnedPlan === undefined ? {} : { reusedOwned: reusedOwnedPlan }), ...(ownedOnly === true ? { ownedOnly: true } : {}) });
-    // The operator's recorded choice is what cuts (`planChoiceOf` reads it, owned by default); the
-    // ideal posts only when it exists.
-    const chosenIdeal = planChoiceOf(job) === 'ideal' && two.ideal !== null;
-    output = chosenIdeal ? two.ideal! : two.owned;
-    planIdeal = two.ideal;
-    if (two.ideal?.outcome !== undefined && two.owned.outcome !== undefined) {
-      planTradeoff = comparePlanOutcomes({ score: two.owned.outcome }, { score: two.ideal.outcome });
+      // #1151 Phase 2 — the rank seam rides every plan this door runs (the deferred ideal too).
+      ...(measureRankCandidates === undefined ? {} : { measureRankCandidates }),
+    };
+    const reuseTwo = reusedOwnedPlan === undefined || reusedOwnedPlan === null ? {} : { reusedOwned: reusedOwnedPlan };
+    if (deferIdeal === true && planChoiceOf(job) !== 'ideal') {
+      // The same first half `planTwoOutcomes` runs, alone: same input, same emptied catalogue,
+      // same pin — the posted programs cannot differ from a full two-plan Generate. #1134's pick
+      // plan is still honoured when the caller hands it through.
+      output = reusedOwnedPlan === undefined || reusedOwnedPlan === null
+        ? await planOwnedOnly(input, planOpts)
+        : (await planTwoOutcomes(input, planOpts, { reusedOwned: reusedOwnedPlan, ownedOnly: true })).owned;
+      idealDeferred = true;
+    } else {
+      const two = await planTwoOutcomes(input, planOpts, {
+        ...reuseTwo,
+        ...(ownedOnly === true ? { ownedOnly: true } : {}),
+      });
+      // The operator's recorded choice is what cuts (`planChoiceOf` reads it, owned by default); the
+      // ideal posts only when it exists.
+      const chosenIdeal = planChoiceOf(job) === 'ideal' && two.ideal !== null;
+      output = chosenIdeal ? two.ideal! : two.owned;
+      planIdeal = two.ideal;
+      if (two.ideal?.outcome !== undefined && two.owned.outcome !== undefined) {
+        planTradeoff = comparePlanOutcomes({ score: two.owned.outcome }, { score: two.ideal.outcome });
+      }
     }
   } catch (e) {
     return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
@@ -6235,7 +6281,7 @@ export async function generateGoalProgram(
     }
     tabReleaseFindings = release.findings;
   }
-  return await postModelPlan(
+  const posted = await postModelPlan(
     job, goal, tool, calibration, shop, output,
     {
       goalFindings,
@@ -6250,6 +6296,9 @@ export async function generateGoalProgram(
     },
     onProgress,
   );
+  // #1151 — the deferred flag rides OUTSIDE the plan: the plan/programs above are the owned plan's,
+  // final; the caller owes the ideal half and a tradeoff update.
+  return idealDeferred ? { ...posted, idealDeferred: true } : posted;
 }
 
 /**
@@ -6273,7 +6322,8 @@ async function generateGoalPrograms(
   catalogueTools?: readonly Tool[],
   /** #1038 — the same stage channel `generateGoalProgram` takes, passed to each side's plan. */
   onProgress?: EngraveProgressFn,
-  /** #1134 — the pick's handoffs, passed to each side's plan. */
+  /** #1134 — the pick's handoffs, passed to each side's plan. #1151 — `deferIdeal` and the rank
+   * seam ride the same options object on every side. */
   options: EngraveGenerateOptions = {},
 ): Promise<EngraveGenerated> {
   // #1073 — A FRAME FLIP NEEDS ITS BAND BEFORE ANYTHING POSTS. `flip: { method: 'tabs-in-blank' }`
@@ -6348,7 +6398,7 @@ async function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}) });
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}), ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }), ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }) });
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
@@ -6375,7 +6425,7 @@ async function generateGoalPrograms(
     programs.push(locating.program);
   }
   for (const side of sides.slice(1)) {
-    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}) });
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}), ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }), ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }) });
     const sideList = sidePrograms(one, side);
     if (sideList === null) return { ...one, programs };
     programs.push(...sideList);
@@ -7084,6 +7134,10 @@ async function generateFaceProgram(
 export interface EngraveGenerateOptions {
   reusedOwnedPlan?: ModelPlanOutput | null;
   ownedOnly?: boolean;
+  /** #1151 — owned plan first; the caller owes the ideal half (`planIdealOnly`). */
+  deferIdeal?: boolean;
+  /** #1151 Phase 2 — the rank seam; absent (the app's worker) keeps the serial rank. */
+  measureRankCandidates?: (request: RankMeasureRequest) => RankMeasureHandle;
 }
 
 export async function engraveGenerate(
@@ -7100,7 +7154,8 @@ export async function engraveGenerate(
    * owned plan is run.
    */
   catalogueTools?: readonly Tool[],
-  /** #1134 — the pick's handoffs (see {@link EngraveGenerateOptions}). */
+  /** #1134 — the pick's handoffs (see {@link EngraveGenerateOptions}); #1151 — `deferIdeal` and
+   * the rank seam ride the same object. */
   options: EngraveGenerateOptions = {},
 ): Promise<EngraveGenerated> {
   memTrace('pipeline:start', { job: job.name });
@@ -7331,6 +7386,8 @@ export async function engraveGenerate(
         feedCatalogue: catalogue,
         ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }),
         ...(options.ownedOnly === true ? { ownedOnly: true } : {}),
+        ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }),
+        ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }),
       })),
       surface: null,
     };

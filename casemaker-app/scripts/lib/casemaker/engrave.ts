@@ -184,6 +184,7 @@ import type { EngraveJob } from '../../../src/types/engraveJob';
 import { toPartPlan } from '../../../src/engine/cnc/engrave/partPlan';
 import { renderRunSheetMarkdown } from '../../runSheetMarkdown';
 import { CliExit, isCliExit } from './exit';
+import { rankPoolSeam } from './rankPool';
 import { commandOutput, HUMAN, type CommandOptions } from './output';
 import { fileReceipt } from './receiptFiles';
 import { setMemTraceSink, setWasmHeapReader, memTrace } from '../../../src/engine/cnc/memTrace';
@@ -235,6 +236,17 @@ interface Args {
   out?: string;
   /** #1052 — write the per-boundary memory trace (JSONL) to this file. */
   memTrace?: string;
+  /**
+   * #1151 — the owned plan first: write the programs without planning the ideal half. Off by
+   * default, so every committed receipt and docs round-trip is unchanged; the house service asks
+   * for it and runs the comparison as its own later child work.
+   */
+  deferIdeal?: boolean;
+  /**
+   * #1151 Phase 2 — the ball rank's candidates 2..N on worker threads. Off by default (the serial
+   * rank, byte-identical); the house service asks for it on the planning box.
+   */
+  parallelRank?: boolean;
 }
 
 /** Exported for the CLI's own spec (#1052): the flag set is pinned by parsing. */
@@ -280,7 +292,9 @@ export function parseArgs(argv: string[]): Args {
         );
       }
       args.thirdTool = parsed.data;
-    } else if (a === '--mem-trace') args.memTrace = argv[++i];
+    } else if (a === '--defer-ideal') args.deferIdeal = true;
+    else if (a === '--parallel-rank') args.parallelRank = true;
+    else if (a === '--mem-trace') args.memTrace = argv[++i];
     else if (a === '--location') args.location = argv[++i];
     else if (a === '--catalogue') args.catalogue = argv[++i];
     else if (a === '--turn') {
@@ -300,7 +314,7 @@ function fail(message: string): never {
 }
 
 const USAGE =
-  'usage: casemaker cut <job.json> [--out <dir>]\n' +
+  'usage: casemaker cut <job.json> [--out <dir>] [--defer-ideal] [--parallel-rank]\n' +
   '       casemaker cut --coupon <coupon-spec.json> [--out <dir>]\n' +
   '       casemaker cut --from-gerber <file> [<file> ...] --blank <L>x<W>x<T> [--out <dir>]\n' +
   '       casemaker cut --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]\n' +
@@ -1166,7 +1180,13 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         undefined,
         getTools().map((entry) => entry.tool),
         // #1134 — the pick's winning full plan IS the cut's owned plan: post it, do not re-plan.
-        { ...(opts.reusedOwnedPlan === undefined || opts.reusedOwnedPlan === null ? {} : { reusedOwnedPlan: opts.reusedOwnedPlan }) },
+        // #1151 — owned plan first when the flag is set (false is today's two-plan run and
+        // receipt); the parallel rank seam only when asked (false is the serial rank, byte-identical).
+        {
+          ...(opts.reusedOwnedPlan === undefined || opts.reusedOwnedPlan === null ? {} : { reusedOwnedPlan: opts.reusedOwnedPlan }),
+          ...(args.deferIdeal === true ? { deferIdeal: true } : {}),
+          ...(args.parallelRank === true ? { measureRankCandidates: rankPoolSeam() } : {}),
+        },
       );
     } catch (e) {
       if (isCliExit(e)) throw e;
