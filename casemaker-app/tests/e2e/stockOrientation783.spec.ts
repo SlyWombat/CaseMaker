@@ -35,7 +35,7 @@ test('#783 the hold is asked, and a pressed hold restates the box', async ({ cm,
   // choose another, and then every block hold is on offer.
   const fold = page.getByTestId('engrave-setup-hold-fold');
   await expect(fold).toBeVisible();
-  await expect(fold.locator('summary')).toContainText('Which way round the part sits —');
+  await expect(fold.locator('summary')).toContainText('Which way round —');
   await expect(page.getByTestId('engrave-setup-hold-length-width-thickness')).not.toBeVisible();
   await fold.locator('summary').click();
   const holds = page.getByTestId('engrave-setup-orientation-holds');

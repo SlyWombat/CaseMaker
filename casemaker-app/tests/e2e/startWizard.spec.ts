@@ -209,9 +209,10 @@ test('#698 — the orientation fold draws the three landmarks, on the desktop an
   await page.getByTestId('welcome-starter-badge-blank').click();
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
 
-  const fold = page.getByTestId('engrave-setup-orientation');
+  // #1101 — the hold cards and the landmarks are ONE fold now, "Which way round".
+  const fold = page.getByTestId('engrave-setup-hold-fold');
   await expect(fold).toBeVisible();
-  await expect(fold.locator('summary')).toHaveText('Which way round');
+  await expect(fold.locator('summary')).toContainText('Which way round');
   await fold.locator('summary').click();
   await expect(fold).toHaveJSProperty('open', true);
 
@@ -225,8 +226,9 @@ test('#698 — the orientation fold draws the three landmarks, on the desktop an
     await expect(page.getByTestId(`engrave-setup-orientation-caption-${card.key}`)).toHaveText(card.caption);
     await expect(page.getByTestId(`engrave-setup-orientation-picture-${card.key}`)).toBeVisible();
   }
-  // Stated facts, not a choice: nothing to operate inside the fold (A10).
-  await expect(fold.locator('select, input, button')).toHaveCount(0);
+  // Stated facts, not a choice: nothing to operate among the landmark pictures (A10). The hold
+  // cards beside them are the fold's own choice (#1101), not part of the landmark list.
+  await expect(page.getByTestId('engrave-setup-orientation-pictures').locator('select, input, button')).toHaveCount(0);
 
   type Box = { key: string; left: number; top: number; right: number; bottom: number; w: number; h: number };
   const boxes = async (): Promise<Box[]> =>

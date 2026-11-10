@@ -81,7 +81,7 @@ import {
   formHolds,
   holdBox,
   holdCutFaceWords,
-  holdWordsFor,
+  holdWordsForMount,
   itemsFaceWords,
   itemsOnTop,
   jobHold as stockHoldOf,
@@ -1431,12 +1431,15 @@ function HoldChoice({
   selected,
   onHold,
   onMoveItemsToTop,
+  mechanism,
 }: {
   form: JobStockForm;
   job: EngraveJob;
   selected: StockHold;
   onHold: (hold: StockHold) => void;
   onMoveItemsToTop: () => void;
+  /** #1101 — the mount the step is on: its words, not another mount's. */
+  mechanism: 'vise' | 'bed' | 'rotary';
 }): JSX.Element {
   const part = partDimsOf(job.stock, selected);
   const holds = formHolds(form);
@@ -1479,7 +1482,7 @@ function HoldChoice({
               }}
             >
               <HoldPlan box={holdBox(part, hold)} />
-              <b style={{ fontSize: 11 }}>{holdWordsFor(form, hold, part)}</b>
+              <b style={{ fontSize: 11 }}>{holdWordsForMount(mechanism, form, hold, part)}</b>
               <span style={{ ...MUTED, fontSize: 10, margin: 0 }}>{holdCutFaceWords(form, hold)}</span>
             </button>
           );
@@ -1917,23 +1920,50 @@ export function HoldingStep({
       : finish === 'finished' || job.stock.colour?.kind === 'laminate'
         ? 'finished face'
         : 'face you want cut';
-  const orientationCards = [
-    {
-      key: 'face-up',
-      label: 'Face up',
-      caption: `The ${faceWord} is up, where the cutter can reach it.`,
-    },
-    {
-      key: 'fixed-jaw',
-      label: 'Against the fixed jaw',
-      caption: 'The left edge is flat against the fixed jaw — the jaw that does not move.',
-    },
-    {
-      key: 'nearest',
-      label: 'Nearest you',
-      caption: 'The front edge is closest to you, at the bottom of the top view.',
-    },
-  ] as const;
+  // #1101 — THE LANDMARKS ARE THE MOUNT'S. On the bed there is no fixed jaw to name: the left edge
+  // is the fence's side, or the bracket's corner; the front edge is still nearest the operator.
+  const orientationCards: { key: 'face-up' | 'fixed-jaw' | 'nearest'; label: string; caption: string }[] =
+    mechanismOf(current) === 'bed'
+      ? [
+          {
+            key: 'face-up',
+            label: 'Face up',
+            caption: `The ${faceWord} is up, where the cutter can reach it.`,
+          },
+          current === 'bed-bracket'
+            ? {
+                key: 'fixed-jaw',
+                label: 'Left edge at the bracket',
+                caption: `Pushed into the bracket’s corner at anchor ${bedAnchor(profile) ?? 1}.`,
+              }
+            : {
+                key: 'fixed-jaw',
+                label: 'Left edge',
+                caption: 'The left edge runs along the bed’s left side.',
+              },
+          {
+            key: 'nearest',
+            label: 'Nearest you',
+            caption: 'The front edge is closest to you, at the bottom of the top view.',
+          },
+        ]
+      : [
+          {
+            key: 'face-up',
+            label: 'Face up',
+            caption: `The ${faceWord} is up, where the cutter can reach it.`,
+          },
+          {
+            key: 'fixed-jaw',
+            label: 'Against the fixed jaw',
+            caption: 'The left edge is flat against the fixed jaw — the jaw that does not move.',
+          },
+          {
+            key: 'nearest',
+            label: 'Nearest you',
+            caption: 'The front edge is closest to you, at the bottom of the top view.',
+          },
+        ];
 
   // #705 — WHAT THE PICTURE DRAWS: the mount on show (the radio, or a hovered/focused option), the
   // option's own proud figure and board, and — for a disabled option — the line naming what it
@@ -2182,10 +2212,12 @@ export function HoldingStep({
     const axisDatum = profile?.datums.rotaryAxis ?? null;
     return (
       <div data-testid="engrave-setup-rotary-fields" style={BED_FIELDS}>
-        <FieldRow label="Jaws">
+        {/* #1101 — "Chuck jaws": on this page "jaws" must not mean the vise's and the chuck's at
+            once. */}
+        <FieldRow label="Chuck jaws">
           <select
             className="fld"
-            aria-label="Jaws"
+            aria-label="Chuck jaws"
             data-testid="engrave-setup-rotary-jaws"
             value={chuck.jawMode}
             onChange={(e) => write({ jawMode: e.target.value as RotaryJawMode })}
@@ -2391,7 +2423,13 @@ export function HoldingStep({
   // #875 — the folded orientation's summary line: the hold the job is actually in, in the same
   // words its card uses.
   const chosenHold = stockHoldOf(job);
-  const holdSummary = holdWordsFor(form ?? 'plate', chosenHold, partDimsOf(job.stock, chosenHold));
+  // #1101 — the summary is the MOUNT's words too: on the bed it says left to right, never "jaws".
+  const holdSummary = holdWordsForMount(
+    mechanismOf(current),
+    form ?? 'plate',
+    chosenHold,
+    partDimsOf(job.stock, chosenHold),
+  );
 
   return (
     <div data-testid="engrave-setup-step-holding" style={{ marginTop: 8 }}>
@@ -2527,44 +2565,37 @@ export function HoldingStep({
               only where an unmeasured figure could decide the job (a grip or proud height inside
               the band). #875 — moved under the radios: above them it read as a warning between
               the question and its answers. */}
-          {answers.workholding === 'vise' && answers.vise.source === 'default' && (
+          {mechanismOf(current) === 'vise' && answers.vise.source === 'default' && (
             <p style={MUTED} data-testid="engrave-setup-holding-vise-provenance">
               Vise: the shipped dimensions, not measured on this machine.
             </p>
           )}
 
-          {/* #783 — WHICH WAY ROUND is ASKED for every form, beside the mount: every hold this
-              stock offers, as a plan and its words. A suggestion is pre-pressed; nothing decides.
-              #875 — the fold opens CLOSED, its summary carrying the chosen hold's own words, so
-              the six cards no longer push the step's next button off a phone. */}
+          {/* #1101 — ONE Which-way-round fold, and its contents come from the mount. The hold's
+              data (which part axis is up / along X / along Y) is unchanged; only its words and
+              landmarks are the mount's. A rod in the chuck has one axis — the chuck decides — so it
+              gets no hold cards. */}
           <details data-testid="engrave-setup-hold-fold" style={{ marginTop: 8 }}>
             <summary style={{ fontSize: 12, cursor: 'pointer', color: '#d1d5db' }}>
-              Which way round the part sits — {holdSummary} · change
+              Which way round{current === 'rotary' ? '' : ` — ${holdSummary} · change`}
             </summary>
-            <HoldChoice
-              form={form ?? 'plate'}
-              job={job}
-              selected={stockHoldOf(job)}
-              onHold={onHold}
-              onMoveItemsToTop={onMoveItemsToTop}
-            />
-          </details>
-
-          {hasFace && (
-            <details data-testid="engrave-setup-orientation">
-              <summary style={{ fontSize: 12, cursor: 'pointer' }}>
-                {current === 'rotary' ? 'Which end is in the jaws' : 'Which way round'}
-              </summary>
-              {current === 'rotary' ? (
-                // #714 — a round rod has no face or edge to square; the only landmark is its ends,
-                // and either end will do unless they differ (design §3.4).
-                <ul style={{ ...MUTED, margin: '4px 0 0 18px', padding: 0 }}>
-                  <li>Either end — unless the ends differ: a printed rod's layers, a tube's chamfer.</li>
-                </ul>
-              ) : (
-                // #698 — three pictures, not three bullets: the operator is told what to LOOK AT at
-                // the vise. Each is drawn in the step's own top-view frame (fixed jaw LEFT, the
-                // operator's front BOTTOM), so the words and the picture name the same side.
+            {current === 'rotary' ? (
+              // #714 — a round rod has no face or edge to square; the only landmark is its ends,
+              // and either end will do unless they differ (design §3.4).
+              <ul style={{ ...MUTED, margin: '4px 0 0 18px', padding: 0 }}>
+                <li>Either end — unless the ends differ: a printed rod's layers, a tube's chamfer.</li>
+              </ul>
+            ) : (
+              <>
+                <HoldChoice
+                  form={form ?? 'plate'}
+                  job={job}
+                  selected={stockHoldOf(job)}
+                  onHold={onHold}
+                  onMoveItemsToTop={onMoveItemsToTop}
+                  mechanism={mechanismOf(current)}
+                />
+                {hasFace && (
                 <div
                   data-testid="engrave-setup-orientation-pictures"
                   style={{ display: 'grid', gap: 10, marginTop: 8 }}
@@ -2599,9 +2630,10 @@ export function HoldingStep({
                     </figure>
                   ))}
                 </div>
-              )}
-            </details>
-          )}
+                )}
+              </>
+            )}
+          </details>
 
           {/* #715 — a bed job's provenance lives in its own option's Technical fold. */}
           {jobHold === null && (
