@@ -800,6 +800,109 @@ fn validate_provenance(
     Ok(())
 }
 
+/// #1179 — the work offset an origin write left in the controller (the B2 cross-check).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FinishedRunG54 {
+    #[serde(default)]
+    pub x: Option<f64>,
+    #[serde(default)]
+    pub y: Option<f64>,
+    #[serde(default)]
+    pub z: Option<f64>,
+}
+
+/// #1179 — the registration a finished program ran under. `surfaceMachineZ` is the ACCEPTED top
+/// (measured or derived); `measuredTopMachineZ` is the MEASURED reading only, absent on the derived
+/// path — the thickness note reads that one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FinishedRunRegistration {
+    #[serde(default)]
+    pub surface_machine_z: Option<f64>,
+    #[serde(default)]
+    pub g54: Option<FinishedRunG54>,
+    #[serde(default)]
+    pub top_source: Option<String>,
+    #[serde(default)]
+    pub measured_top_machine_z: Option<f64>,
+    #[serde(default)]
+    pub implied_thickness_mm: Option<f64>,
+    #[serde(default)]
+    pub measured_at: Option<String>,
+    #[serde(default)]
+    pub plan_expected_top_machine_z: Option<f64>,
+}
+
+/// #1179 — one RLE stream of a cut map (counts over the grid, row-major).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CutMapStream {
+    pub encoding: String,
+    pub data: String,
+}
+
+/// #1179 — the per-program cut map: a 2 mm raster in the stock frame with, per cell, the deepest
+/// quantised Z cut and whether the floor is flat. Two RLE streams (`flat`, `depth`), each capped.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FinishedCutMap {
+    pub cell_mm: f64,
+    pub cols: u32,
+    pub rows: u32,
+    pub x0_mm: f64,
+    pub y0_mm: f64,
+    pub step_mm: f64,
+    pub flat: CutMapStream,
+    pub depth: CutMapStream,
+}
+
+/// #1179 — the stock dims the mask is placed on. `thicknessMm` is the JOB'S STATED thickness.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FinishedRunStock {
+    #[serde(default)]
+    pub length_mm: Option<f64>,
+    #[serde(default)]
+    pub width_mm: Option<f64>,
+    #[serde(default)]
+    pub thickness_mm: Option<f64>,
+}
+
+/// #1179 — WHAT a finished program cut, beside the hash list. Additive: every field but `hash` is
+/// optional and defaulted, so a partial record is still true and an older document has no key.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FinishedRun {
+    pub hash: String,
+    #[serde(default)]
+    pub job_id: Option<String>,
+    #[serde(default)]
+    pub job_name: Option<String>,
+    #[serde(default)]
+    pub package_key: Option<String>,
+    #[serde(default)]
+    pub key8: Option<String>,
+    #[serde(default)]
+    pub program_index: Option<u32>,
+    #[serde(default)]
+    pub program_count: Option<u32>,
+    #[serde(default)]
+    pub program_name: Option<String>,
+    #[serde(default)]
+    pub cutter_key: Option<String>,
+    #[serde(default)]
+    pub setup_index: Option<u32>,
+    #[serde(default)]
+    pub finished_at: Option<String>,
+    #[serde(default)]
+    pub stock: Option<FinishedRunStock>,
+    #[serde(default)]
+    pub registration: Option<FinishedRunRegistration>,
+    #[serde(default)]
+    pub cut_map: Option<FinishedCutMap>,
+}
+
 /// One physical machine at the location (§3.1).
 ///
 /// Every optional field is serialized as `null` rather than omitted, the same rule `Tool` follows:
@@ -868,6 +971,10 @@ pub struct MachineRecord {
     /// written before this section existed round-trips without gaining a key (the shared fixture).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub finished_programs: Vec<String>,
+    /// #1179 — WHAT each finished program cut (the hash list above is unchanged). Same append
+    /// endpoint, same cap; an older document has no key and parses to an empty list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub finished_runs: Vec<FinishedRun>,
     /// ISO timestamp, the client's clock: when this record was last written.
     pub updated_at: String,
 }
@@ -896,6 +1003,7 @@ impl MachineRecord {
             w.validate()?;
         }
         crate::finished_programs::validate_list(&self.id, &self.finished_programs)?;
+        crate::finished_programs::validate_runs(&self.id, &self.finished_runs)?;
         if let Some(profiles) = &self.bed_profiles {
             let mut ids = HashSet::new();
             for p in profiles {
@@ -1169,8 +1277,49 @@ mod tests {
             power: None,
             wasteboard: None,
             finished_programs: Vec::new(),
+            finished_runs: Vec::new(),
             registrations: None,
             updated_at: "2026-10-15T00:00:00.000Z".into(),
+        }
+    }
+
+    fn a_finished_run(hash: &str, index: u32) -> FinishedRun {
+        FinishedRun {
+            hash: hash.into(),
+            job_id: Some("job-1".into()),
+            job_name: Some("M1 tray".into()),
+            package_key: Some("package-1".into()),
+            key8: Some("package-".into()),
+            program_index: Some(index),
+            program_count: Some(17),
+            program_name: Some("tray-p01.nc".into()),
+            cutter_key: Some("inv:flat-25".into()),
+            setup_index: Some(1),
+            finished_at: Some("2026-11-10T14:02:00.000Z".into()),
+            stock: Some(FinishedRunStock {
+                length_mm: Some(160.0),
+                width_mm: Some(126.0),
+                thickness_mm: Some(25.0),
+            }),
+            registration: Some(FinishedRunRegistration {
+                surface_machine_z: Some(-60.487),
+                g54: Some(FinishedRunG54 { x: Some(77.344), y: Some(63.0), z: None }),
+                top_source: Some("touch".into()),
+                measured_top_machine_z: Some(-60.487),
+                implied_thickness_mm: Some(25.3),
+                measured_at: Some("2026-11-10T13:00:00.000Z".into()),
+                plan_expected_top_machine_z: Some(-60.0),
+            }),
+            cut_map: Some(FinishedCutMap {
+                cell_mm: 2.0,
+                cols: 80,
+                rows: 63,
+                x0_mm: 0.0,
+                y0_mm: 0.0,
+                step_mm: 0.05,
+                flat: CutMapStream { encoding: "rle".into(), data: "5040:1".into() },
+                depth: CutMapStream { encoding: "rle".into(), data: "5040:0".into() },
+            }),
         }
     }
 
@@ -1327,6 +1476,68 @@ mod tests {
         with_hashes.validate().unwrap();
         let v = serde_json::to_value(&with_hashes).unwrap();
         assert_eq!(v["finishedPrograms"], serde_json::json!(["a1b2c3d4"]));
+    }
+
+    #[test]
+    fn the_live_k3_record_written_before_the_run_section_gains_no_key() {
+        // #1179. The fixture is the k3 location's own machine record, fetched READ-ONLY on
+        // 2026-11-10 — written before `finishedRuns` existed. It must parse with an empty list,
+        // and an empty list is omitted, so every stored house and the shared fixture stay stable.
+        let raw = include_str!("../../tests/unit/fixtures/location-k3-machine-2026-11-10.json");
+        let fixture: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let old: MachineRecord = serde_json::from_value(fixture["machine"].clone()).unwrap();
+        assert_eq!(old.finished_programs, vec!["5343dd8c", "1e4e7ef9"]);
+        assert!(old.finished_runs.is_empty());
+        old.validate().unwrap();
+        let back = serde_json::to_value(&old).unwrap();
+        assert!(back.get("finishedRuns").is_none(), "{back}");
+    }
+
+    #[test]
+    fn a_finished_run_round_trips_in_camel_case_and_refuses_a_broken_cut_map() {
+        // #1179. Every field but the hash is optional — a partial record is still true — and the
+        // map is all-or-nothing: an over-cap stream, a non-RLE encoding or a zero grid refuses the
+        // whole record, never a half-filled grid.
+        let mut machine = a_machine("m-1");
+        machine.finished_programs = vec!["a1b2c3d4".into()];
+        machine.finished_runs = vec![a_finished_run("a1b2c3d4", 1)];
+        machine.validate().unwrap();
+        let v = serde_json::to_value(&machine).unwrap();
+        assert_eq!(v["finishedRuns"][0]["programName"], serde_json::json!("tray-p01.nc"));
+        assert_eq!(
+            v["finishedRuns"][0]["registration"]["surfaceMachineZ"],
+            serde_json::json!(-60.487)
+        );
+        assert_eq!(v["finishedRuns"][0]["cutMap"]["stepMm"], serde_json::json!(0.05));
+        let back: MachineRecord = serde_json::from_value(v).unwrap();
+        assert_eq!(back, machine);
+
+        let partial: FinishedRun =
+            serde_json::from_value(serde_json::json!({ "hash": "a1b2c3d4" })).unwrap();
+        assert_eq!(partial.cut_map, None);
+        assert_eq!(partial.program_index, None);
+
+        let good = serde_json::json!({
+            "cellMm": 2, "cols": 80, "rows": 63, "x0Mm": 0, "y0Mm": 0, "stepMm": 0.05,
+            "flat": { "encoding": "rle", "data": "5040:1" },
+            "depth": { "encoding": "rle", "data": "5040:0" }
+        });
+        for field in ["cols", "rows", "stepMm", "flat", "depth"] {
+            let mut bad = good.clone();
+            match field {
+                "cols" | "rows" => bad[field] = serde_json::json!(0),
+                "stepMm" => bad[field] = serde_json::json!(0),
+                "flat" => bad["flat"] = serde_json::json!({ "encoding": "raw", "data": "1:1" }),
+                _ => bad["depth"] = serde_json::json!({ "encoding": "rle", "data": "x".repeat(4097) }),
+            }
+            let mut machine = a_machine("m-1");
+            machine.finished_programs = vec!["a1b2c3d4".into()];
+            machine.finished_runs = vec![FinishedRun {
+                cut_map: Some(serde_json::from_value(bad).unwrap()),
+                ..a_finished_run("a1b2c3d4", 1)
+            }];
+            assert!(matches!(machine.validate(), Err(HouseError::BadEntry(_))), "{field}: {machine:?}");
+        }
     }
 
     #[test]

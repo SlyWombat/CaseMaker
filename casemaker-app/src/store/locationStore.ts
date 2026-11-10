@@ -60,6 +60,7 @@ import {
   type ViseBedFrame,
 } from '@/platform/locationClient';
 import { houseAddFinishedProgram } from '@/platform/finishedProgramsClient';
+import type { FinishedRun } from '@/platform/locationClient';
 import { bedFromLegacy, bedMigrationDue, ensureFirstRegistrationBed, firstRegistrationBed, newestViseRegistration, type LegacyViseRegistration } from '@/platform/bedProfiles';
 import { parseMarginsStrict, useSettingsStore, type FixturesSettings } from './settingsStore';
 import { useMachineStore } from './machineStore';
@@ -117,10 +118,11 @@ export interface LocationState {
   /** Dismiss the accessory write's refusal sentence. */
   clearAccessoryNote: () => void;
   /**
-   * Append a finished program's FNV hash to a machine's persisted list (#419 §4.5). `added: false`
-   * with `ok: true` means the machine already had it — a repeated finish, with no request sent.
+   * Append a finished program's FNV hash to a machine's persisted list (#419 §4.5), with the
+   * #1179 record of WHAT was cut beside it. `added: false` with `ok: true` means the machine
+   * already had the hash — a repeated finish, with no request sent.
    */
-  recordFinishedProgram: (machineId: string, hash: string) => Promise<{ ok: boolean; added: boolean; text: string }>;
+  recordFinishedProgram: (machineId: string, hash: string, run?: FinishedRun) => Promise<{ ok: boolean; added: boolean; text: string }>;
 }
 
 /**
@@ -237,7 +239,7 @@ export const useLocationStore = create<LocationState>((set, get) => ({
 
   clearAccessoryNote: () => set({ accessoryNote: null }),
 
-  recordFinishedProgram: async (machineId, hash) => {
+  recordFinishedProgram: async (machineId, hash, run) => {
     const machine = get().location?.machines.find((m) => m.id === machineId) ?? null;
     if (machine === null) {
       return { ok: false, added: false, text: `machine ${machineId} is not in the location` };
@@ -245,7 +247,7 @@ export const useLocationStore = create<LocationState>((set, get) => ({
     // Already on the list this window has read: nothing to send. The service dedupes as well, so a
     // second window racing this one cannot duplicate it.
     if (machine.finishedPrograms.includes(hash)) return { ok: true, added: false, text: '' };
-    const res = await houseAddFinishedProgram(machineId, hash);
+    const res = await houseAddFinishedProgram(machineId, hash, undefined, run);
     if (res.kind !== 'ok') {
       const text = res.kind === 'absent' ? res.reason : res.kind === 'refused' ? res.message : res.detail;
       set({ writeNote: text });
@@ -389,6 +391,7 @@ export function mergeMachine(
       power: server?.power ?? null,
       wasteboard: server?.wasteboard ?? null,
       finishedPrograms: server?.finishedPrograms ?? [],
+      finishedRuns: server?.finishedRuns ?? [],
       // The bed (#510) is written by the one-time migration and, later, by the profile UI. Until
       // then this write-through carries the served keys unchanged — `undefined` when the machine
       // has never been migrated, so a settings save does not add empty keys or reset the marker.
@@ -544,6 +547,14 @@ export function copyAtMachine(copy: ToolCopy, machineId: string): ToolCopy {
  */
 export function finishedProgramsFor(target: { host: string; port: number }): readonly string[] {
   return machineAt(target)?.finishedPrograms ?? [];
+}
+
+/**
+ * #1179 — WHAT each finished program was, beside the hash list. The restart sentence and the
+ * registration cross-checks read THIS; the plan keeps reading `finishedProgramsFor` unchanged.
+ */
+export function finishedRunsFor(target: { host: string; port: number }): readonly FinishedRun[] {
+  return machineAt(target)?.finishedRuns ?? [];
 }
 
 /**

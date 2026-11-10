@@ -266,6 +266,7 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
   let shelfLoaded = true;
   let offer = true;
   let runningAtWrite: (boolean | undefined)[] = [];
+  let recordedRun: unknown = null;
   const io: RunEndIO = {
     refreshStock: async () => {
       calls.push('refresh');
@@ -277,7 +278,9 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
     inventory: () => inventory,
     updateItem: async (i) => (runningAtWrite.push(useMachineRunStore.getState().runs[M]?.running), calls.push(`runtime ${i.copies[0]?.runtimeMinutes}`), { ok: true, text: '' }),
     machineIdFor: () => 'm-1',
-    recordFinishedProgram: async (machineId, hash) => (calls.push(`finished ${machineId} ${hash}`), { ok: true, added: true, text: '' }),
+    recordFinishedProgram: async (machineId, hash, run) => (
+      calls.push(`finished ${machineId} ${hash}`), (recordedRun = run ?? null), { ok: true, added: true, text: '' }
+    ),
     minSideMm: () => 20,
     offerOffcuts: () => offer,
     wearWeight: (key) => readDefault(DEFAULTS, key),
@@ -297,6 +300,7 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
   beforeEach(() => {
     calls.length = 0;
     runningAtWrite = [];
+    recordedRun = null;
     shelfLoaded = true;
     offer = true;
     inventory = [item([ToolCopySchema.parse({ id: 'a1', condition: 'used', whereabouts: { kind: 'machine', machineId: 'm-1' } })])];
@@ -316,6 +320,53 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
     expect(end.offcut?.state).toBe('asked');
     expect(end.offcut?.text).toContain('left over from the cut-out');
     expect(end.lines.join(' ')).toContain('× 3 for aluminium-6061');
+  });
+
+  it('#1179 — the finish records WHAT was cut beside the hash, and only what is known', async () => {
+    const registration = {
+      surfaceMachineZ: -60.487,
+      measuredTopMachineZ: -60.487,
+      measuredAt: '2026-11-10T13:00:00.000Z',
+      g54: { x: 77.344, y: 63 },
+      topSource: 'touch' as const,
+    };
+    await endOfRun(TARGET, finished, {
+      ...ctx,
+      jobName: 'M1 tray',
+      packageKey: 'abcdef0123456789',
+      programIndex: 3,
+      programTotal: 17,
+      programName: 'tray-p03.nc',
+      setupIndex: 1,
+      stockThicknessMm: 25,
+      registration,
+    });
+    expect(recordedRun).toEqual({
+      hash: programHash(CUT_OUT),
+      jobId: 'job-1',
+      jobName: 'M1 tray',
+      packageKey: 'abcdef0123456789',
+      key8: 'abcdef01',
+      programIndex: 3,
+      programCount: 17,
+      programName: 'tray-p03.nc',
+      cutterKey: 'inv:kz-a',
+      setupIndex: 1,
+      finishedAt: '2026-10-16T12:00:00.000Z',
+      stock: { lengthMm: 100, widthMm: 100, thicknessMm: 25 },
+      registration,
+    });
+
+    // A caller that knows less leaves the facts out — the record never guesses.
+    recordedRun = null;
+    await endOfRun(TARGET, finished, ctx);
+    expect(recordedRun).toEqual({
+      hash: programHash(CUT_OUT),
+      jobId: 'job-1',
+      cutterKey: 'inv:kz-a',
+      finishedAt: '2026-10-16T12:00:00.000Z',
+      stock: { lengthMm: 100, widthMm: 100 },
+    });
   });
 
   it('#547 — a finished dry run records nothing: no finished hash, no stock, no runtime, no offcut', async () => {

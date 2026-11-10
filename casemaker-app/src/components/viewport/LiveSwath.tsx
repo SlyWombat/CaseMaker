@@ -14,6 +14,7 @@
  */
 import { useEffect, useMemo, useRef, type JSX } from 'react';
 import * as THREE from 'three';
+import { useShallow } from 'zustand/react/shallow';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { useMachineStore } from '@/store/machineStore';
 import { useMachineRunStore } from '@/store/machineRunStore';
@@ -38,10 +39,17 @@ export function LiveSwath({ machineKey }: { machineKey: string | null }): JSX.El
   // The run watch's own `P:` line for this machine (#1123-42's source; the same 2 s poll).
   const reportedLine = useMachineRunStore((s) => (machineKey === null ? null : (s.runs[machineKey]?.progress?.line ?? null)));
   // The live tip, work frame: the heartbeat's own parsed WPos.
-  const wpos = useMachineStore((s) => {
-    const p = s.machine?.statusLine?.wpos ?? null;
-    return p !== null && p.x !== null && p.y !== null && p.z !== null ? { x: p.x, y: p.y, z: p.z } : null;
-  });
+  // #1141 — `useShallow`: this selector builds a `{x,y,z}` object, and zustand v5 + React 19 read
+  // the store through `useSyncExternalStore`, whose snapshot must be STABLE between store changes.
+  // Without it every render produced a new snapshot ("The result of getSnapshot should be cached"),
+  // and the first machine-store tick during a run — setRegistrationActive, the 2 s heartbeat —
+  // re-rendered forever ("Maximum update depth exceeded") in dev and production alike.
+  const wpos = useMachineStore(
+    useShallow((s) => {
+      const p = s.machine?.statusLine?.wpos ?? null;
+      return p !== null && p.x !== null && p.y !== null && p.z !== null ? { x: p.x, y: p.y, z: p.z } : null;
+    }),
+  );
   const toolKey = file?.toolKey ?? null;
   const radius = useMemo(() => {
     const tool = toolKey === null ? null : resolveTool(toolKey);

@@ -114,6 +114,13 @@ export interface RunContext {
    */
   setupIndex?: number;
   setupId?: string;
+  // #1179 — WHAT was cut, for the restart record beside the finished hash. Optional: a caller that
+  // does not know a fact leaves it out, and the record says only what is true.
+  packageKey?: string;
+  jobName?: string;
+  programName?: string;
+  stockThicknessMm?: number;
+  registration?: import('@/platform/locationClient').FinishedRunRegistration;
   /**
    * #547 — the program played was a LIFTED dry-run variant. A finished dry run must not record the
    * program as finished, consume the stock, count cutter runtime or offer an offcut: it rehearsed
@@ -145,8 +152,11 @@ export function runContextFor(job: EngraveJob, tool: Tool | null): Omit<RunConte
   const diameter = tool === null ? null : cuttingDiameter(tool);
   return {
     jobId: job.id,
+    jobName: job.name,
+    ...(job.package === undefined ? {} : { packageKey: job.package.hash }),
     ...(job.stockEntry?.shelfId ? { stockEntryId: job.stockEntry.shelfId } : {}),
     stockXY: { x: job.stock.length, y: job.stock.width },
+    stockThicknessMm: job.stock.thickness,
     ...(diameter === null ? {} : { toolRadius: diameter / 2 }),
     toolKey: job.toolKey,
     material: job.stock.material,
@@ -175,7 +185,7 @@ export interface RunEndIO {
   updateItem: (item: InventoryItem) => Promise<{ ok: boolean; text: string }>;
   machineIdFor: (target: { host: string; port: number }) => string | null;
   /** Record a program that FINISHED cleanly on this machine (#419 §4.5); `added: false` when it was already there. */
-  recordFinishedProgram: (machineId: string, hash: string) => Promise<{ ok: boolean; added: boolean; text: string }>;
+  recordFinishedProgram: (machineId: string, hash: string, run?: import('@/platform/locationClient').FinishedRun) => Promise<{ ok: boolean; added: boolean; text: string }>;
   minSideMm: () => number;
   /** `offcut.offer`: false turns offcut offers off entirely. */
   offerOffcuts: () => boolean;
@@ -205,7 +215,7 @@ const storeIO: RunEndIO = {
     return { ok, text: ok ? '' : (useHouseStore.getState().notice?.text ?? 'the inventory did not take the change') };
   },
   machineIdFor: (target) => machineAt(target)?.id ?? null,
-  recordFinishedProgram: (machineId, hash) => useLocationStore.getState().recordFinishedProgram(machineId, hash),
+  recordFinishedProgram: (machineId, hash, run) => useLocationStore.getState().recordFinishedProgram(machineId, hash, run),
   minSideMm: () => readDefault(useShopDefaultsStore.getState().defaults, 'offcut.minSideMm').value,
   wearWeight: (key) => readDefault(useShopDefaultsStore.getState().defaults, key),
   offerOffcuts: () => readFlag(useShopDefaultsStore.getState().defaults, 'offcut.offer').value,
@@ -297,7 +307,29 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
     if (machineId === null) {
       lines.push('The finished program was not recorded: this machine is not one of the location’s.');
     } else {
-      const r = await io.recordFinishedProgram(machineId, hash);
+      // #1179 — the record beside the hash: what was cut, under which package and registration.
+      const run: import('@/platform/locationClient').FinishedRun = {
+        hash,
+        ...(ctx.jobId === undefined ? {} : { jobId: ctx.jobId }),
+        ...(ctx.jobName === undefined ? {} : { jobName: ctx.jobName }),
+        ...(ctx.packageKey === undefined ? {} : { packageKey: ctx.packageKey, key8: ctx.packageKey.slice(0, 8) }),
+        ...(ctx.programIndex === undefined ? {} : { programIndex: ctx.programIndex }),
+        ...(ctx.programTotal === undefined ? {} : { programCount: ctx.programTotal }),
+        ...(ctx.programName === undefined ? {} : { programName: ctx.programName }),
+        ...(ctx.toolKey === undefined ? {} : { cutterKey: ctx.toolKey }),
+        ...(ctx.setupIndex === undefined ? {} : { setupIndex: ctx.setupIndex }),
+        finishedAt: io.now(),
+        ...(ctx.stockXY === undefined && ctx.stockThicknessMm === undefined
+          ? {}
+          : {
+              stock: {
+                ...(ctx.stockXY === undefined ? {} : { lengthMm: ctx.stockXY.x, widthMm: ctx.stockXY.y }),
+                ...(ctx.stockThicknessMm === undefined ? {} : { thicknessMm: ctx.stockThicknessMm }),
+              },
+            }),
+        ...(ctx.registration === undefined ? {} : { registration: ctx.registration }),
+      };
+      const r = await io.recordFinishedProgram(machineId, hash, run);
       lines.push(
         r.ok
           ? r.added
