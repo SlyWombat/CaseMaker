@@ -249,9 +249,35 @@ measured pick) does not fail: the progress line says "waiting for the measured p
 worker is busy", and the run continues as soon as the worker is free. The app's own stall watchdog
 starts only after the generate itself has spoken.
 
+**Where Generate runs.** When the house service can run the engine — the desktop app's own service,
+or the shop's — **Generate** happens there: the page sends the job, the service plans, posts,
+verifies and simulates it, and the progress line streams its stages while you can press **Cancel**.
+With no service able to run it (a browser connected to an older service, or none), the page plans
+the job itself exactly as before; nothing in the run, the plan or the Cut step changes either way.
+
+**The programs, and the comparison.** The cutting programs are the owned plan — the one cut with
+the location's own bits — and Generate hands them over as soon as that plan has planned, posted,
+verified and simulated. The comparison with every bit the app knows is planned afterwards, on its
+own worker, so it never holds up the simulation or the sweep: the Cut step reads "comparing the
+plans…" until the tradeoff — or "no material difference" — lands. On the tray the programs are
+ready in about 2.5–7 minutes.
+
 **Simulating.** Generate always runs a full simulated pass before a job is considered ready — a
 pass that doesn't match the design, or that the chosen cutter can't physically reach, is refused
 rather than silently produced.
+
+**The cleaning pass and the air walk.** Both are on by default: before the first program an *air
+walk* traces the stock's outline in the air at a safe height, and after every program a *cleaning
+pass* sweeps the stock to clear chips. They are ordinary verified programs the release plays
+(named `<job>-airwalk.nc` and `<job>-clean.nc`), their time is included in the plan's estimate
+("The plan (N min); cleaning and air walk: ~3 min"), and the Cut step offers **Clean now** for a
+sweep on demand. A shop that wants neither turns them off in the shop defaults
+(`run.airWalkBeforeCut`, `run.cleanAfterProgram`).
+
+**While a program runs.** The viewport shows the uncut blank with the live tool at the machine's
+position, and darkens the area the program has already cut. The Cut step states how far the program
+is, and — once it has run for a few seconds — about how long is left; pauses and bit changes are
+not counted, and the controller's own elapsed field is never used as a clock.
 
 ### Jobs with several programs
 
