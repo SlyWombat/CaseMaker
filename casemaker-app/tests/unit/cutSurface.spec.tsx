@@ -2168,3 +2168,30 @@ describe('#1123-43 the Cut step says it unfolds', () => {
     expect(screen.getByTestId('engrave-cut-step-1-chevron').style.transform).toBe('none');
   });
 });
+
+// #1123-45 — Generate pressed from the Cut tab shows no progress there: the stage labels live in
+// the Design footer. The Cut surface now carries the SAME shared progress line (and item 4's log
+// fold) while a run is in flight, plus the same Cancel.
+describe('#1123-45 the Cut step says what Generate is doing', () => {
+  it('a Generate pressed from the Cut tab shows the same line, Cancel and log fold here', () => {
+    const cancel = vi.fn();
+    useEngraveRunStore.setState({
+      phase: 'generating',
+      progress: { stage: 'cam', label: 'posting the toolpaths' },
+      log: [{ at: 0, ms: 0, label: 'starting the worker' }],
+      cancelGenerate: cancel,
+    });
+    draw({ job: defaultEngraveJob(), report: reportOf(), pkg: null, generated: null });
+    const progress = screen.getByTestId('engrave-cut-generate-progress');
+    expect(progress.textContent).toContain('posting the toolpaths');
+    // Item 4's fold rides with it, so the stage history is readable on this tab too.
+    expect(screen.getByTestId('engrave-run-log')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('engrave-cut-generate-cancel'));
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('no progress block when nothing is running', () => {
+    draw({ job: defaultEngraveJob(), report: reportOf(), pkg: null, generated: null });
+    expect(screen.queryByTestId('engrave-cut-generate-progress')).toBeNull();
+  });
+});

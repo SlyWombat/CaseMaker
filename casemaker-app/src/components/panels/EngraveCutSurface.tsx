@@ -74,6 +74,8 @@ import {
   useSurfaceSpread,
 } from '@/store/engraveRegistrationStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
+import { RunProgressLine } from './RunProgressLine';
+import { RunLogFold } from './RunLogFold';
 import {
   ROTARY_NO_MODULE_REFUSAL,
   ROTARY_UNMEASURED_REFUSAL,
@@ -735,6 +737,14 @@ export function EngraveCutSurface({
   const runSimStatus = useEngraveRunStore((s) => s.simStatus);
   const runSimStopped = useEngraveRunStore((s) => s.simStopped);
   const runPhase = useEngraveRunStore((s) => s.phase);
+  // #1123-45 — THE SAME RUN LINE, ON THIS TAB. The progress words and the log fold normally live
+  // in the Design footer; a Generate pressed from the Cut step must show them here, or the press
+  // looks inert for minutes. These are the store's own fields (the footer reads the same ones).
+  const runProgress = useEngraveRunStore((s) => s.progress);
+  const runSimProgram = useEngraveRunStore((s) => s.simProgram);
+  const runLog = useEngraveRunStore((s) => s.log);
+  const cancelGenerate = useEngraveRunStore((s) => s.cancelGenerate);
+  const runningHere = runPhase === 'generating' || runPhase === 'simulating' || runPhase === 'checking';
   const runErrorText = useEngraveRunStore((s) => s.error);
   // #535 — a goal program is checked by the dexel sweep, not the 2.5D oracle; the one screen's
   // verdict line states that check and the grid it ran on, never the oracle's vacuous 0/0.
@@ -1338,6 +1348,20 @@ export function EngraveCutSurface({
 
   return (
     <div data-testid="engrave-cut-surface">
+      {/* #1123-45 — A GENERATE PRESSED FROM THIS TAB SAYS SO HERE. The same line the Design footer
+          carries (its stage words, the sweep's counts and item 4's log fold), beside the same
+          Cancel, so the operator never has to leave the Cut tab to see that the press is working. */}
+      {runningHere && (
+        <section style={{ ...BOX, marginTop: 6 }} data-testid="engrave-cut-generate-progress">
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#c8d3de' }}>
+            <RunProgressLine run={{ phase: runPhase, progress: runProgress, simProgram: runSimProgram }} />
+            <button type="button" data-testid="engrave-cut-generate-cancel" onClick={() => cancelGenerate()}>
+              Cancel
+            </button>
+          </span>
+          <RunLogFold log={runLog} />
+        </section>
+      )}
       {/* #524/#689 — the Cut surface as a four-line checklist: Checked → Frozen → Register the
           blank → Run. Each line is one sentence; only the step the operator is on has a body. */}
       <Step number={1} title="Fit and clamp" done={fitDone} current={currentStep === 1} summary={step1Summary}>
