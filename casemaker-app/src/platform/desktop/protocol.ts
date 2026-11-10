@@ -915,6 +915,18 @@ export interface UploadOptions {
   inactivityMs?: number;
   /** How long to wait for the machine's answer to the pre-data `md5sum` re-check (#300). */
   md5WindowMs?: number;
+  /**
+   * Read the file back after `FILE_END` and compare it with the bytes sent (default TRUE).
+   *
+   * The plain upload path is bench-observed: the machine's own `md5sum` of an uploaded
+   * `/sd/gcodes/<file>.nc` equals the bytes we sent (`docs/bench/2026-10-bench-day-1.md` — our
+   * md5Hex, PowerShell Get-FileHash and the controller's `md5sum` all agreed on
+   * `165-depth-ladder.nc`). A COMPRESSED `.bin` upload is NOT observed — whether the controller
+   * stores the compressed stream or decompresses it is unproven — so that path passes `false`
+   * until the bench records what the machine hashes. Guessing either way would refuse every
+   * compressed upload, and a wrong success would be worse.
+   */
+  readBack?: boolean;
 }
 
 /** The longest a one-line `md5sum` reply is waited for; `runMd5Sum`'s default window too. */
@@ -1119,6 +1131,29 @@ export async function runUpload(
     }
 
     if (type === PTYPE_FILE_END) {
+      // THE READ-BACK. FILE_END reports that the machine finished writing — not that the bytes it
+      // holds are the program we sent. Ask the controller for its own md5 of the EXACT path and
+      // compare; a mismatch refuses the upload so the run cannot start on a file nobody verified.
+      // (md5sum is a read: it moves no axes and writes nothing.) A caller sending bytes whose
+      // on-card form is unobserved (a compressed `.bin`) opts out and says why at its call site.
+      if (opts.readBack === false) {
+        return { ok: true, bytes: content.length, packets: lastSeq, alreadyPresent: false };
+      }
+      const readback = await md5ViaChannel(transport, conn, channel, path, opts.md5WindowMs ?? MD5_WINDOW_MS);
+      if (!readback.ok) {
+        return {
+          ok: false,
+          reason: 'refused',
+          detail: `the file on the machine could not be read back (${readback.reason}: ${readback.detail})`,
+        };
+      }
+      if (readback.md5.toLowerCase() !== md5Hex(content).toLowerCase()) {
+        return {
+          ok: false,
+          reason: 'refused',
+          detail: 'the file on the machine does not match the program — nothing will run',
+        };
+      }
       return { ok: true, bytes: content.length, packets: lastSeq, alreadyPresent: false };
     }
 

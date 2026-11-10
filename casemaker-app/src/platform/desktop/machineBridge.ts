@@ -460,12 +460,13 @@ export async function uploadVerifiedProgram(
   const destination = uploadPath(opts.directory ?? GCODE_DIR, program.filename);
 
   const transport = transportOf(opts);
-  const send = async (path: string, content: Uint8Array): Promise<UploadOutcome> => {
+  const send = async (path: string, content: Uint8Array, readBack = true): Promise<UploadOutcome> => {
     const conn = await connectMachine(transport, target, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
     try {
       return await runUpload(transport, conn, path, content, {
         packetSize: opts.packetSize,
         inactivityMs: opts.inactivityMs,
+        readBack,
       });
     } finally {
       await closeQuietly(transport, conn);
@@ -480,7 +481,10 @@ export async function uploadVerifiedProgram(
   const packed = wanted ? quicklzCompress(program.content) : null;
   if (packed === null) return send(destination, program.content);
 
-  const first = await send(`${destination}.bin`, packed);
+  // NO READ-BACK FOR A `.bin`: what the controller stores (the compressed stream, or a decompressed
+  // file under another name) is unobserved until the bench records its `md5sum`. The plain path is
+  // observed and always verified.
+  const first = await send(`${destination}.bin`, packed, false);
   if (first.ok) return { ...first, compressed: true };
   // NOT EVERY CONTROLLER SPEAKS IT, and a refused `.bin` must not cost the operator the upload:
   // the same program goes plain, and the answer says which was accepted. Only a REFUSAL retries —
