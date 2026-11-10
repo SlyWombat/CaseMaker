@@ -708,8 +708,8 @@ ring — a stroked rectangle, circle or outline — and imports as a **closed** 
 ring (a stroked ring longer than one line item's 5 000-point cap is split into open pieces that
 meet end to end, the last returning to the first point, so the cut is still the ring). A filled
 open path still does not import: SVG closes it to fill it, and the importer names it instead of
-guessing. DXF has no stroke concept, so its closed LWPOLYLINEs stay regions and only its open
-chains become lines. The dialog counts the closed shapes and the open and closed lines before you
+guessing. DXF has no stroke concept, so its closed polylines (LWPOLYLINE or the older
+POLYLINE/VERTEX form) stay regions and only its open chains become lines. The dialog counts the closed shapes and the open and closed lines before you
 accept, and the target width scales the lines with the shapes.
 
 Two ideas hold the chapter together:
