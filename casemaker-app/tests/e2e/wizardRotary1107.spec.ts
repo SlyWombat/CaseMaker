@@ -117,6 +117,9 @@ test('#1107 — a new run reaches a rotary text job from the On a rod group', as
 
   // The house owns the rotary: the rod intents are there, before the flat picker.
   await expect(page.getByTestId('start-wizard-rotary-intents')).toBeVisible();
+  // The folded list: the rod cards sit in the SAME question as the eight flat intents.
+  await expect(page.getByTestId('start-wizard-presets')).toBeVisible();
+  await page.screenshot({ path: 'test-results/1107-question-folded-cards.png' });
   await page.getByTestId('start-wizard-rotary-intent-dowel').click();
   await page.getByTestId('start-wizard-op-text').fill('Hello');
   await page.screenshot({ path: 'test-results/1107-question-on-a-rod.png' });
