@@ -2145,3 +2145,26 @@ describe('#1127 the cutter checklist gates the Cut step', () => {
     expect(screen.queryByTestId('engrave-cut-go-blocked')).toBeNull();
   });
 });
+
+// #1123-43 — the Cut step's headers read as a bullet list: the browser's disclosure marker is
+// suppressed by the summary's flex layout. Each header ends in an explicit chevron that follows
+// the step's fold.
+describe('#1123-43 the Cut step says it unfolds', () => {
+  it('every step header carries a chevron, and it turns when the step is folded', () => {
+    draw({ job: defaultEngraveJob(), report: reportOf(), pkg: null, generated: null });
+    for (const number of [1, 2, 3]) {
+      expect(screen.getByTestId(`engrave-cut-step-${number}-chevron`)).toBeTruthy();
+    }
+    // Nothing is fitted, so step 1 is the current step and starts open: its chevron points down.
+    const step1 = screen.getByTestId('engrave-cut-step-1') as HTMLDetailsElement;
+    expect(step1.open).toBe(true);
+    expect(screen.getByTestId('engrave-cut-step-1-chevron').style.transform).toBe('rotate(90deg)');
+    // Folding it turns the chevron back to the right — the affordance follows the state. (The
+    // `open` write + toggle event is the same shape the live-prompt test uses: jsdom's summary
+    // click queues the toggle, so a state read right after the click would race it.)
+    step1.open = false;
+    fireEvent(step1, new Event('toggle'));
+    expect(step1.open).toBe(false);
+    expect(screen.getByTestId('engrave-cut-step-1-chevron').style.transform).toBe('none');
+  });
+});
