@@ -18,78 +18,21 @@
 // The location is faked from the committed fixture (the measured vise or the bracket bed) exactly
 // as bedDefects725.spec.ts fakes it; `/tools` answers [] for the reason #930's walk records.
 
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import type { Page } from '@playwright/test';
 
 import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { locationDocument, locationView, serveHouse } from './fixtures/fakeHouse';
 
 test.setTimeout(300_000);
 
-type Json = Record<string, unknown>;
-type Doc = {
-  kind: string;
-  schemaVersion: number;
-  id: string;
-  name: string;
-  createdAt: string;
-  migratedFrom?: string | null;
-  machines: Array<Json & { bedProfiles?: Json[] }>;
-  accessories: Json[];
-  stock?: Json;
-  inventory?: Json;
-  defaults?: Json;
-};
-
-const DOC = JSON.parse(
-  readFileSync(fileURLToPath(new URL('../unit/fixtures/location-doc.json', import.meta.url)), 'utf8'),
-) as Doc;
-
-const HEALTH = {
-  ok: true,
-  schemaVersion: 1,
-  hasCatalogue: false,
-  feedRows: 0,
-  materialSpecRows: 0,
-  catalogueSyncedAt: null,
-  lastSync: null,
-  problems: [],
-};
-
 /**
- * The fixture's location as committed: its measured vise ON THE PINS and its bed. The vise mounts
- * need the vise fitted; a bed-bracket view (nothing on the pins) would disable every one of them.
+ * The fake house: health, the catalogue lists, the defaults and `view` as the location, with a
+ * write answered `{ok:true}` (the stores' success the client handles without a body to read).
  */
-function locationView(): unknown {
-  return {
-    kind: DOC.kind,
-    schemaVersion: DOC.schemaVersion,
-    id: DOC.id,
-    name: DOC.name,
-    createdAt: DOC.createdAt,
-    migratedFrom: DOC.migratedFrom ?? null,
-    machines: DOC.machines,
-    accessories: DOC.accessories,
-  };
-}
-
-/** The fake house: health, the catalogue lists, the defaults and `view` as the location. */
 async function fakeHouse(page: Page, view: unknown): Promise<void> {
-  await page.route('**/api/v1/**', async (route) => {
-    const req = route.request();
-    const path = new URL(req.url()).pathname.replace(/^.*\/api\/v1/, '');
-    const json = (body: unknown): Promise<void> =>
-      route.fulfill({ status: 200, contentType: 'application/json', headers: { etag: '"e1"' }, body: JSON.stringify(body) });
-    if (path === '/health') return json(HEALTH);
-    if (path === '/tools') return json([]);
-    if (path === '/inventory') return json(DOC.inventory ?? []);
-    if (path === '/stock') return json(DOC.stock ?? []);
-    if (path === '/defaults') return json(DOC.defaults ?? {});
-    if (path === '/location' && req.method() === 'GET') return json(view);
-    if (req.method() !== 'GET') return json({ ok: true });
-    return route.fulfill({ status: 404, body: '' });
-  });
+  await serveHouse(page, { location: view, fromSharedDocument: true, writes: 'ok' });
 }
 
 const TICKS = ['engrave-run-toolpath', 'engrave-run-verified', 'engrave-run-simulated', 'engrave-run-oracle'];
@@ -134,39 +77,65 @@ async function openCut(page: Page): Promise<void> {
   if ((await ack.count()) > 0) await ack.check();
 }
 
-test('#931 — a passed run: Cut says "matches the design", and Register unfolds', async ({ cm, page }) => {
-  await fakeHouse(page, locationView());
+/** Return from Cut to Design (the Design panel unmounts on the switch). */
+async function backToDesign(page: Page): Promise<void> {
+  await page.getByTestId('cnc-mode-design').click();
+  await expect(page.getByTestId('engrave-footer')).toBeVisible();
+}
+
+/** Seed the run store's verdict fields through the module the dev server serves (the tests' seam). */
+async function seedRun(page: Page, state: Record<string, unknown>): Promise<void> {
+  await page.evaluate(async (fields) => {
+    const moduleUrl = '/src/store/engraveRunStore.ts';
+    const mod = (await import(/* @vite-ignore */ moduleUrl)) as {
+      useEngraveRunStore: { setState: (s: Record<string, unknown>) => void };
+    };
+    mod.useEngraveRunStore.setState(fields);
+  }, state);
+}
+
+/**
+ * #1180 S3 — ONE GENERATE FOR THE DEFAULT JOB'S THREE VERDICTS.
+ *
+ * Each of these three walks ran the same wizard → Generate (four ticks, sweep, oracle) on the
+ * same default job, then varied only the RUN fields through the store seam — the frozen package
+ * is the same in all three. They are one walk now: generate once, then each verdict as its own
+ * `test.step`, returning to Design between them.
+ *
+ * SUBSUMES:
+ *   - '#931 — a passed run: Cut says "matches the design", and Register unfolds'
+ *   - '#931 — a run that did not pass: the sentence, the fix that opens Holding, Register folded'
+ *   - '#931 — a program never simulated: Cut says so in Design’s words'
+ * The stopped sweep (#931) and #934's measured tilt stay their own tests: the first generates a
+ * different, heavy job; the second seeds a registration and re-posts from the generated run's own
+ * fields.
+ */
+test("#931 — the default job's three verdicts from one Generate: passed, failed, never simulated", async ({ cm, page }) => {
+  await fakeHouse(page, locationView(locationDocument()));
   await cm.ready();
   await toDefaultJob(page);
   await generateTicks(page);
   await expect(page.getByTestId('engrave-run-oracle')).toContainText('matches the design');
 
-  await openCut(page);
-  await expect(page.getByTestId('engrave-package')).toHaveAttribute('data-state', 'current');
-  // A passed run earns no verdict block; step 1's one line is the oracle's word, and Design agrees.
-  await expect(page.getByTestId('engrave-cut-verdict')).toHaveCount(0);
-  const summary = await text(page, 'engrave-cut-step-1-summary');
-  expect(summary, 'Cut and Design agree: the oracle passed').toContain('matches the design');
-  // Step 1 is done only here, so Register is the current step and its body is unfolded.
-  expect(await unfolded(page, 'engrave-cut-step-2'), 'Register is current after a passed run').toBe(true);
-});
+  await test.step('passed: Cut says "matches the design", and Register unfolds', async () => {
+    await openCut(page);
+    await expect(page.getByTestId('engrave-package')).toHaveAttribute('data-state', 'current');
+    // A passed run earns no verdict block; step 1's one line is the oracle's word, and Design agrees.
+    await expect(page.getByTestId('engrave-cut-verdict')).toHaveCount(0);
+    const summary = await text(page, 'engrave-cut-step-1-summary');
+    expect(summary, 'Cut and Design agree: the oracle passed').toContain('matches the design');
+    // Step 1 is done only here, so Register is the current step and its body is unfolded.
+    expect(await unfolded(page, 'engrave-cut-step-2'), 'Register is current after a passed run').toBe(true);
+    await backToDesign(page);
+  });
 
-test('#931 — a run that did not pass: the sentence, the fix that opens Holding, Register folded', async ({ cm, page }) => {
-  await fakeHouse(page, locationView());
-  await cm.ready();
-  await toDefaultJob(page);
-  await generateTicks(page);
-  // #934 removes the entries that could reach a hold collision geometrically (the bed/bracket/tape
-  // mounts are hidden; facing on a proud blank is refused), so the run's error is seeded through
-  // the store module the dev server serves — the same seam `cutSurface.spec.tsx` uses. `findingFix`
-  // maps `tool-into-fixture` to Holding independently of the mount, so the press under test is the
-  // real one; D's unit seam pins the same mapping.
-  await page.evaluate(async () => {
-    const moduleUrl = '/src/store/engraveRunStore.ts';
-    const mod = (await import(/* @vite-ignore */ moduleUrl)) as {
-      useEngraveRunStore: { setState: (s: Record<string, unknown>) => void };
-    };
-    mod.useEngraveRunStore.setState({
+  await test.step('failed: the sentence, the fix that opens Holding, Register folded', async () => {
+    // #934 removes the entries that could reach a hold collision geometrically (the bed/bracket/tape
+    // mounts are hidden; facing on a proud blank is refused), so the run's error is seeded through
+    // the store module the dev server serves — the same seam `cutSurface.spec.tsx` uses. `findingFix`
+    // maps `tool-into-fixture` to Holding independently of the mount, so the press under test is the
+    // real one; D's unit seam pins the same mapping.
+    await seedRun(page, {
       simStatus: 'ready',
       simDiagnostics: [
         {
@@ -183,38 +152,32 @@ test('#931 — a run that did not pass: the sentence, the fix that opens Holding
       staleSince: null,
       simStopped: false,
     });
+    await expect(page.getByTestId('engrave-run-errors')).toContainText('into the vise', { timeout: 30_000 });
+    const designText = await text(page, 'engrave-run-errors');
+
+    await openCut(page);
+    await expect(page.getByTestId('engrave-cut-verdict')).toHaveAttribute('data-state', 'failed');
+    await expect(page.getByTestId('engrave-cut-verdict-line')).toHaveText('The simulation did not pass.');
+    // THE POINT OF #931: Cut's sentence is Design's own run error, not a second wording of it.
+    const sentence = await text(page, 'engrave-cut-verdict-sentence');
+    expect(designText, 'Design prints the sentence Cut shows').toContain(sentence);
+    // The hold is the fix, and the press opens the wizard at Holding.
+    await expect(page.getByTestId('engrave-cut-verdict-fix')).toHaveText('Open the Holding step');
+    expect(await unfolded(page, 'engrave-cut-step-2'), 'Register stays folded when step 1 did not pass').toBe(false);
+    await page.getByTestId('engrave-cut-verdict-fix').click();
+    await expect(page.getByTestId('start-wizard')).toBeVisible();
+    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
+    // Close the wizard (the fix is what this step asserts; the next verdict needs the panel back).
+    await page.getByTestId('start-wizard-close').click();
+    await expect(page.getByTestId('start-wizard')).toBeHidden();
+    await backToDesign(page);
   });
-  await expect(page.getByTestId('engrave-run-errors')).toContainText('into the vise', { timeout: 30_000 });
-  const designText = await text(page, 'engrave-run-errors');
 
-  await openCut(page);
-  await expect(page.getByTestId('engrave-cut-verdict')).toHaveAttribute('data-state', 'failed');
-  await expect(page.getByTestId('engrave-cut-verdict-line')).toHaveText('The simulation did not pass.');
-  // THE POINT OF #931: Cut's sentence is Design's own run error, not a second wording of it.
-  const sentence = await text(page, 'engrave-cut-verdict-sentence');
-  expect(designText, 'Design prints the sentence Cut shows').toContain(sentence);
-  // The hold is the fix, and the press opens the wizard at Holding.
-  await expect(page.getByTestId('engrave-cut-verdict-fix')).toHaveText('Open the Holding step');
-  expect(await unfolded(page, 'engrave-cut-step-2'), 'Register stays folded when step 1 did not pass').toBe(false);
-  await page.getByTestId('engrave-cut-verdict-fix').click();
-  await expect(page.getByTestId('start-wizard')).toBeVisible();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
-});
-
-test('#931 — a program never simulated: Cut says so in Design’s words', async ({ cm, page }) => {
-  await fakeHouse(page, locationView());
-  await cm.ready();
-  await toDefaultJob(page);
-  // A real run first, then the run fields cleared as a reload would leave them: the program (and
-  // its frozen package) exist, the simulation says nothing. This is the state #931 fixes — it used
-  // to read "matches the design".
-  await generateTicks(page);
-  await page.evaluate(async () => {
-    const moduleUrl = '/src/store/engraveRunStore.ts';
-    const mod = (await import(/* @vite-ignore */ moduleUrl)) as {
-      useEngraveRunStore: { setState: (s: Record<string, unknown>) => void };
-    };
-    mod.useEngraveRunStore.setState({
+  await test.step('never simulated: Cut says so in Design’s words', async () => {
+    // A real run first, then the run fields cleared as a reload would leave them: the program (and
+    // its frozen package) exist, the simulation says nothing. This is the state #931 fixes — it used
+    // to read "matches the design".
+    await seedRun(page, {
       simStatus: null,
       simStopped: false,
       simDiagnostics: [],
@@ -224,20 +187,20 @@ test('#931 — a program never simulated: Cut says so in Design’s words', asyn
       phase: 'idle',
       staleSince: null,
     });
-  });
 
-  // Read Design BEFORE the mode switch — the Design panel unmounts on Cut. The seeded run has no
-  // simulation, so the row says so (or draws nothing at all, which is the same claim).
-  const designRow = (await page.getByTestId('engrave-run-simulated').count()) > 0 ? await text(page, 'engrave-run-simulated') : null;
-  if (designRow !== null) {
-    expect(designRow.toLowerCase(), 'Design and Cut agree: nothing simulated').toContain('not simulated');
-  }
-  await openCut(page);
-  await expect(page.getByTestId('engrave-cut-verdict')).toHaveAttribute('data-state', 'not-simulated');
-  await expect(page.getByTestId('engrave-cut-verdict-line')).toHaveText('The program has not been simulated.');
-  await expect(page.getByTestId('engrave-cut-step-1-summary')).toContainText('not simulated');
-  await expect(page.getByTestId('engrave-cut-step-1-summary')).not.toContainText('matches the design');
-  expect(await unfolded(page, 'engrave-cut-step-2'), 'Register stays folded before a verdict').toBe(false);
+    // Read Design BEFORE the mode switch — the Design panel unmounts on Cut. The seeded run has no
+    // simulation, so the row says so (or draws nothing at all, which is the same claim).
+    const designRow = (await page.getByTestId('engrave-run-simulated').count()) > 0 ? await text(page, 'engrave-run-simulated') : null;
+    if (designRow !== null) {
+      expect(designRow.toLowerCase(), 'Design and Cut agree: nothing simulated').toContain('not simulated');
+    }
+    await openCut(page);
+    await expect(page.getByTestId('engrave-cut-verdict')).toHaveAttribute('data-state', 'not-simulated');
+    await expect(page.getByTestId('engrave-cut-verdict-line')).toHaveText('The program has not been simulated.');
+    await expect(page.getByTestId('engrave-cut-step-1-summary')).toContainText('not simulated');
+    await expect(page.getByTestId('engrave-cut-step-1-summary')).not.toContainText('matches the design');
+    expect(await unfolded(page, 'engrave-cut-step-2'), 'Register stays folded before a verdict').toBe(false);
+  });
 });
 
 test('#931 — a stopped sweep: Cut and Design both say it stopped before it finished', async ({ cm, page }) => {
@@ -318,7 +281,7 @@ test('#931 — a stopped sweep: Cut and Design both say it stopped before it fin
 // one flat topZ, so a sloped reading set is a fixture change and a #934 follow-up); this is the same
 // seam D's `cutSurface.spec.tsx` uses for the re-seat unit case.
 test('#934 — a measured tilt offers the re-seat first, and Follow the tilt runs the re-post', async ({ cm, page }) => {
-  await fakeHouse(page, locationView());
+  await fakeHouse(page, locationView(locationDocument()));
   await cm.ready();
   await toDefaultJob(page);
   await generateTicks(page);

@@ -13,35 +13,16 @@
 //
 //   npx playwright test tests/e2e/cutConfirm.spec.ts
 
-import fs, { readFileSync } from 'node:fs';
+import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { locationDocument, serveHouse } from './fixtures/fakeHouse';
+import { rememberMachine } from './fixtures/rememberMachine';
 
 /** A status line with the monitor fields the popover reads: `S:` temperatures. */
 const STATUS = '<Idle|MPos:0,0,0|WPos:0,0,0|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>';
 
-/** Put a machine on screen without one — the observation a probe would have written. */
-async function rememberMachine(page: Page, line: string = STATUS): Promise<void> {
-  await page.evaluate((text) => {
-    window.__caseMaker!.setMachine(
-      {
-        name: 'QA Z1',
-        host: '192.0.2.10',
-        port: 2222,
-        busy: false,
-        ip: null,
-        mac: null,
-        status: text,
-        profileId: 'Z1',
-        observedAt: '2026-10-25T00:00:00.000Z',
-        notes: [],
-      },
-      text,
-    );
-  }, line);
-}
 
 test('#656 — the one screen names the frozen program and cutter, and ONE statement arms the press', async ({
   cm,
@@ -52,7 +33,7 @@ test('#656 — the one screen names the frozen program and cutter, and ONE state
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await rememberMachine(page);
+  await rememberMachine(page, STATUS);
   await page.getByTestId('sidebar-button-cnc-engrave').click();
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
@@ -135,7 +116,7 @@ test('#659 — the strip’s state element opens its popover, and Escape closes 
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
-  await rememberMachine(page);
+  await rememberMachine(page, STATUS);
 
   await expect(page.getByTestId('machine-status')).toBeVisible();
   await expect(page.getByTestId('machine-status-monitor')).toHaveCount(0);
@@ -187,38 +168,9 @@ test('#769 — the strip shows the frame’s feed, spindle and tool, and dashes 
 // clipped. The band now WRAPS at cell boundaries instead; this test is the pin — no horizontal
 // overflow, and every kept field's box fully inside the band's own, so nothing can hide.
 //
-// The house answers from the committed fixture (the fake-house pattern of `bedDefects725.spec.ts`)
-// with a 4th-axis module checked out to the fixture's machine: the strip draws the A cell from the
-// accessory checkout (#658), not from the frame, so the module has to exist in the location doc.
-type LocationDoc = {
-  kind: string;
-  schemaVersion: number;
-  id: string;
-  name: string;
-  createdAt: string;
-  migratedFrom?: string | null;
-  machines: Array<Record<string, unknown>>;
-  accessories: Array<Record<string, unknown>>;
-  stock?: unknown;
-  inventory?: unknown;
-  defaults?: Record<string, unknown>;
-};
-
-const LOCATION_DOC = JSON.parse(
-  readFileSync(fileURLToPath(new URL('../unit/fixtures/location-doc.json', import.meta.url)), 'utf8'),
-) as LocationDoc;
-
-const HEALTH = {
-  ok: true,
-  schemaVersion: 1,
-  hasCatalogue: false,
-  feedRows: 0,
-  materialSpecRows: 0,
-  catalogueSyncedAt: null,
-  lastSync: null,
-  problems: [],
-  warnings: [],
-};
+// The house answers from the committed fixture (fixtures/fakeHouse.ts) with a 4th-axis module
+// checked out to the fixture's machine: the strip draws the A cell from the accessory checkout
+// (#658), not from the frame, so the module has to exist in the location doc.
 
 /** The fixture machine is `machine-1a2b3c` (profile Z1); the module is checked out to it. */
 const ROTARY_ON_MACHINE = {
@@ -234,30 +186,16 @@ const ROTARY_ON_MACHINE = {
 };
 
 async function fakeHouseWithRotary(page: Page): Promise<void> {
-  const location = { ...LOCATION_DOC, accessories: [...LOCATION_DOC.accessories, ROTARY_ON_MACHINE] };
-  await page.route('**/api/v1/**', async (route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname.replace(/^.*\/api\/v1/, '');
-    const json = (body: unknown): Promise<void> =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        headers: { etag: '"e1"' },
-        body: JSON.stringify(body),
-      });
-    if (path === '/health') return json(HEALTH);
-    if (path === '/tools') return json([]);
-    // #1065 — the picker lists this owned cutter, and the recorded frame this test replays says
-    // T:1: the fixture's record states number 1 so the strip's tool cell names it (the wrap check
-    // is about the name fitting its elastic cell). The shared fixture keeps number null.
-    if (path === '/inventory') {
-      const inventory = (LOCATION_DOC.inventory ?? []) as { tool?: Record<string, unknown> }[];
-      return json(inventory.map((i) => ({ ...i, tool: { ...i.tool, number: 1 } })));
-    }
-    if (path === '/stock') return json(LOCATION_DOC.stock ?? []);
-    if (path === '/defaults') return json(LOCATION_DOC.defaults ?? {});
-    if (path === '/location') return json(location);
-    return route.fulfill({ status: 404, body: '' });
+  const location = locationDocument();
+  location.accessories = [...location.accessories, ROTARY_ON_MACHINE];
+  // #1065 — the picker lists this owned cutter, and the recorded frame this test replays says
+  // T:1: the fixture's record states number 1 so the strip's tool cell names it (the wrap check
+  // is about the name fitting its elastic cell). The shared fixture keeps number null.
+  const inventory = (location.inventory ?? []) as { tool?: Record<string, unknown> }[];
+  await serveHouse(page, {
+    location,
+    inventory: inventory.map((i) => ({ ...i, tool: { ...i.tool, number: 1 } })),
+    fromSharedDocument: true,
   });
 }
 

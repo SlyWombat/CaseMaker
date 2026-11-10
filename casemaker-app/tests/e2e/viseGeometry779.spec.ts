@@ -14,43 +14,12 @@
 // Run (WSL, this checkout):
 //   CASEMAKER_PORT=5401 npx playwright test tests/e2e/viseGeometry779.spec.ts
 
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import type { Page, TestInfo } from '@playwright/test';
 import { test, expect } from './fixtures/caseMaker';
+import { locationDocument, locationView, serveHouse } from './fixtures/fakeHouse';
 
 test.use({ viewport: { width: 1440, height: 900 } });
 test.setTimeout(240_000);
-
-type Json = Record<string, unknown>;
-type Doc = {
-  kind: string;
-  schemaVersion: number;
-  id: string;
-  name: string;
-  createdAt: string;
-  machines: Json[];
-  accessories: Json[];
-  defaults?: Record<string, unknown>;
-  inventory?: unknown;
-  stock?: unknown;
-};
-
-const DOC = JSON.parse(
-  readFileSync(fileURLToPath(new URL('../unit/fixtures/location-doc.json', import.meta.url)), 'utf8'),
-) as Doc;
-
-const HEALTH = {
-  ok: true,
-  schemaVersion: 1,
-  hasCatalogue: false,
-  feedRows: 0,
-  materialSpecRows: 0,
-  catalogueSyncedAt: null,
-  lastSync: null,
-  problems: [],
-  warnings: [],
-};
 
 const NOW = '2026-10-24T15:23:00.000Z';
 
@@ -62,7 +31,7 @@ const NOW = '2026-10-24T15:23:00.000Z';
  * surface changed from the migrated wasteboard to the bare bed the vise actually needs.
  */
 async function fakeHouse(page: Page): Promise<void> {
-  const raw = JSON.parse(JSON.stringify(DOC)) as Doc;
+  const raw = locationDocument();
   const machine = raw.machines[0]!;
   machine.bedProfiles = [
     {
@@ -104,35 +73,10 @@ async function fakeHouse(page: Page): Promise<void> {
   ];
   machine.activeBedProfileId = 'bp-vise-measured';
   raw.accessories = raw.accessories.filter((a) => a.id === 'fx-vise-1' || a.id === 'fx-probe-1');
-  const view = {
-    kind: raw.kind,
-    schemaVersion: 1,
-    id: raw.id,
-    name: raw.name,
-    createdAt: raw.createdAt,
-    migratedFrom: null,
-    machines: [machine],
-    accessories: raw.accessories,
-    defaults: raw.defaults ?? {},
-  };
 
-  await page.route('**/api/v1/**', async (route) => {
-    const req = route.request();
-    const path = new URL(req.url()).pathname.replace(/^.*\/api\/v1/, '');
-    const json = (body: unknown): Promise<void> =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        headers: { etag: '"e1"' },
-        body: JSON.stringify(body),
-      });
-    if (path === '/health') return json(HEALTH);
-    if (path === '/tools') return json([]);
-    if (path === '/inventory') return json(raw.inventory ?? []);
-    if (path === '/stock') return json(raw.stock ?? []);
-    if (path === '/defaults') return json(raw.defaults ?? {});
-    if (path === '/location' && req.method() === 'GET') return json(view);
-    return route.fulfill({ status: 404, body: '' });
+  await serveHouse(page, {
+    location: locationView(raw, { defaults: true }),
+    fromSharedDocument: true,
   });
 }
 

@@ -16,48 +16,11 @@
 //   3. the empty template with all five answer steps skipped — a bare bed saved with its name typed
 //      at S6, and the draft cleared so the wizard starts at S0 again.
 
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures/caseMaker';
+import { locationDocument, locationView, serveHouse, type House } from './fixtures/fakeHouse';
 
 test.setTimeout(120_000);
-
-type Json = Record<string, unknown>;
-type Doc = {
-  kind: string;
-  schemaVersion: number;
-  id: string;
-  name: string;
-  createdAt: string;
-  machines: Json[];
-  accessories: Json[];
-  defaults?: Record<string, unknown>;
-  inventory?: unknown;
-  stock?: unknown;
-};
-
-const DOC = JSON.parse(
-  readFileSync(fileURLToPath(new URL('../unit/fixtures/location-doc.json', import.meta.url)), 'utf8'),
-) as Doc;
-
-const HEALTH = {
-  ok: true,
-  schemaVersion: 1,
-  hasCatalogue: false,
-  feedRows: 0,
-  materialSpecRows: 0,
-  catalogueSyncedAt: null,
-  lastSync: null,
-  problems: [],
-  warnings: [],
-};
-
-interface House {
-  /** The machine record the service now holds (the latest machine PUT, or the first-run one). */
-  machine(): Json & { bedProfiles?: Json[]; activeBedProfileId?: string };
-  accessories(): Json[];
-}
 
 /**
  * A first-run house: the fixture's machine with its bed keys removed, no legacy wasteboard or vise
@@ -65,74 +28,25 @@ interface House {
  * accessories checked out. Every handler keeps the served document current.
  */
 async function fakeHouse(page: Page): Promise<House> {
-  const raw = JSON.parse(JSON.stringify(DOC)) as Doc;
+  const raw = locationDocument();
   const machine = raw.machines[0]!;
   delete machine.bedProfiles;
   delete machine.activeBedProfileId;
   machine.fixtures = null;
   machine.wasteboard = null;
-  const view = {
-    kind: raw.kind,
-    schemaVersion: 1,
-    id: raw.id,
-    name: raw.name,
-    createdAt: raw.createdAt,
-    migratedFrom: null,
-    machines: [machine],
-    accessories: [] as Json[],
-  };
+  raw.machines = [machine];
+  raw.accessories = [];
 
   // #1123-12 — THE ETAG MOVES WITH THE BYTES. The real service's location ETag is the hash of the
   // served document (`house.rs`), so every write changes it; the store skips a re-render when a
   // read answers the ETag it already holds. A fake that serves one fixed ETag while its document
   // changes promises "same bytes" and the write never reaches the card.
-  let etag = 1;
-  await page.route('**/api/v1/**', async (route) => {
-    const req = route.request();
-    const url = new URL(req.url());
-    const path = url.pathname.replace(/^.*\/api\/v1/, '');
-    const json = (body: unknown): Promise<void> =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        headers: { etag: `"e${etag}"` },
-        body: JSON.stringify(body),
-      });
-
-    if (path === '/health') return json(HEALTH);
-    if (path === '/tools') return json([]);
-    if (path === '/inventory') return json(raw.inventory ?? []);
-    if (path === '/stock') return json(raw.stock ?? []);
-    if (path === '/defaults') return json(raw.defaults ?? {});
-    if (path === '/location' && req.method() === 'GET') return json(view);
-
-    const machinePath = /^\/location\/machines\/(.+)$/.exec(path);
-    if (machinePath !== null && req.method() === 'PUT') {
-      const record = req.postDataJSON() as Json;
-      view.machines = view.machines.map((m) => (m.id === record.id ? record : m));
-      etag += 1;
-      return json({ ok: true });
-    }
-    const accessoryPath = /^\/location\/accessories\/(.+)$/.exec(path);
-    if (accessoryPath !== null && req.method() === 'PUT') {
-      const record = req.postDataJSON() as Json;
-      view.accessories = [...view.accessories.filter((a) => a.id !== record.id), record];
-      etag += 1;
-      return json({ ok: true });
-    }
-    if (accessoryPath !== null && req.method() === 'DELETE') {
-      const id = decodeURIComponent(accessoryPath[1]!);
-      view.accessories = view.accessories.filter((a) => a.id !== id);
-      etag += 1;
-      return json({ ok: true });
-    }
-    return route.fulfill({ status: 404, body: '' });
+  return serveHouse(page, {
+    location: locationView(raw),
+    fromSharedDocument: true,
+    writes: 'applied',
+    movingEtag: true,
   });
-
-  return {
-    machine: () => view.machines[0] as Json & { bedProfiles?: Json[]; activeBedProfileId?: string },
-    accessories: () => view.accessories,
-  };
 }
 
 /** Open Manage › Machines (the Bed block lives on the location card). */

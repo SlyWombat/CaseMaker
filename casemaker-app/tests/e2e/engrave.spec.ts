@@ -60,119 +60,238 @@ test.setTimeout(240_000);
  *  for the panel's own state; the number is a deadline inside the 240 s test budget, not a sleep. */
 const STATE_MS = 60_000;
 
-test('the default job generates, verifies, simulates and saves a .nc', async ({ cm, page }) => {
+/**
+ * #1180 S3 — ONE GENERATE FOR THIS FILE'S DEFAULT JOB.
+ *
+ * Five walks here each opened the default job, pressed Generate (four ticks — toolpath, verify,
+ * sweep, oracle), acknowledged the clearance and saved: the same job planned and swept five times,
+ * ~50 s of a serial e2e suite (workers: 1). They are one walk now, in the order the operator works:
+ * generate and save; print the run sheet; reload the saved bytes as a stranger's file; fill the run
+ * record; and LAST — because it makes the package stale — edit the job and watch Save close.
+ *
+ * SUBSUMES (every assertion of each is kept below, and nothing else from them changed):
+ *   - 'the default job generates, verifies, simulates and saves a .nc'
+ *   - 'editing the job after Generate makes the result stale and blocks Save'
+ *   - "the saved .nc, reloaded as a stranger's file, removes the same volume"
+ *   - 'the run sheet opens for a verified job, names the saved file, and prints without chrome'
+ *   - 'a filled run record shows its measured run beside the estimate'
+ * Each part is its own `test.step`, so a failure names the walk that failed.
+ */
+test('the default job: generate, save, sheet, reload, run record — then the edit that makes it stale', async ({
+  cm,
+  page,
+}, testInfo) => {
   await cm.ready();
   await openEngravePanel(page);
 
-  await page.getByTestId('engrave-generate').click();
+  let inAppRemoved = 0;
+  let planned: string | null = null;
+  let nc = '';
+  const downloads: { name: string; file: Download }[] = [];
 
-  // The four rows tick, one by one, as the pipeline advances.
-  await expect(page.getByTestId('engrave-run-toolpath')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
-  await expect(page.getByTestId('engrave-run-verified')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
-  await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
-  await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
+  await test.step('generate: the four ticks and the state behind them; the sheet waits for a program', async () => {
+    // Nothing generated yet: the sheet is not offered.
+    await expect(await menuItem(page, 'engrave-run-sheet')).toBeDisabled();
 
-  const state = await page.evaluate(() => window.__caseMaker!.getEngraveRunState());
-  expect(state.ok).toBe(true);
-  expect(state.stage).toBe('done');
-  expect(state.oracleOk).toBe(true);
-  expect(state.verifyErrors).toBe(0);
-  // #688 — Save writes the .nc that goes to Makera Studio, so it waits on the clearance
-  // acknowledgement; the statement's home is Cut step 1 (#689), so acknowledge it here.
-  expect(state.canSave).toBe(false);
-  await expect(await menuItem(page, 'engrave-save')).toBeDisabled();
-  await acknowledgeClearance(page);
-  await expect(await menuItem(page, 'engrave-save')).toBeEnabled({ timeout: STATE_MS });
+    await page.getByTestId('engrave-generate').click();
 
-  const downloadPromise = page.waitForEvent('download', { timeout: STATE_MS });
-  await (await menuItem(page, 'engrave-save')).click();
-  const download = await downloadPromise;
-  expect(download.suggestedFilename()).toMatch(/\.nc$/);
+    // The four rows tick, one by one, as the pipeline advances.
+    await expect(page.getByTestId('engrave-run-toolpath')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
+    await expect(page.getByTestId('engrave-run-verified')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
+    await expect(page.getByTestId('engrave-run-simulated')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
+    await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
 
-  const path = await download.path();
-  expect(path).not.toBeNull();
-  const nc = readFileSync(path!, 'utf8');
-  expect(nc.startsWith(';@MKR|BEGIN')).toBe(true);
-  // #771 — the saved file ends with Studio's thumbnail block: `M02`, the two markers and the
-  // one-line base64 PNG. The last MOTION word is still M02.
-  const tail = nc.trimEnd().split('\n').slice(-4);
-  expect(tail[0]).toBe('M02');
-  expect(tail[1]).toBe(';(thumbnail_image_begin)');
-  expect(tail[2]!.startsWith(';iVBORw0KGgo')).toBe(true);
-  expect(tail[3]).toBe(';(thumbnail_image_end)');
-});
+    const state = await page.evaluate(() => window.__caseMaker!.getEngraveRunState());
+    expect(state.ok).toBe(true);
+    expect(state.stage).toBe('done');
+    expect(state.oracleOk).toBe(true);
+    expect(state.verifyErrors).toBe(0);
+    // #688 — Save writes the .nc that goes to Makera Studio, so it waits on the clearance
+    // acknowledgement; the statement's home is Cut step 1 (#689).
+    expect(state.canSave).toBe(false);
+    await expect(await menuItem(page, 'engrave-save')).toBeDisabled();
 
-test('editing the job after Generate makes the result stale and blocks Save', async ({ cm, page }) => {
-  await cm.ready();
-  await openEngravePanel(page);
+    // #726 P7 — the planning figure says "about …" once; the record below must leave it untouched.
+    planned = await page.getByTestId('engrave-run-time').textContent();
+    expect(planned).toMatch(/^about \d+ min \d+ s$/);
 
-  await page.getByTestId('engrave-generate').click();
-  await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
-  // #688 — the acknowledgement lives in Cut step 1 now; the Save path is still gated on it.
-  await acknowledgeClearance(page);
-  await expect(await menuItem(page, 'engrave-save')).toBeEnabled({ timeout: STATE_MS });
+    // The in-app run's own simulation: what Generate loaded and swept. The stranger's file below
+    // must remove the same volume.
+    const inApp = await page.evaluate(() => window.__caseMaker!.getSimState());
+    expect(inApp.status).toBe('ready');
+    expect(inApp.errorCodes).toEqual([]);
+    expect(inApp.removedVolume).toBeGreaterThan(0);
+    inAppRemoved = inApp.removedVolume;
+  });
 
-  // Change a label's depth: the run no longer describes the job on screen. #411 folds a job's
-  // rows, so the field is behind the chevron.
-  await page.getByTestId('engrave-label-expand-0').click();
-  const depth = page.getByTestId('engrave-label-depth-0');
-  await depth.fill('1.8');
-  await depth.blur();
+  await test.step('save: the .nc, then the frame, the record and the log', async () => {
+    // #688 — the acknowledgement lives in Cut step 1 now; the Save path is still gated on it.
+    await acknowledgeClearance(page);
+    await expect(await menuItem(page, 'engrave-save')).toBeEnabled({ timeout: STATE_MS });
 
-  await expect(await menuItem(page, 'engrave-save')).toBeDisabled({ timeout: STATE_MS });
-  // #581 — the blocker names the input that moved: this edit changed the job.
-  await expect(page.getByTestId('engrave-save')).toHaveAttribute('title', /the job changed since it was generated/, { timeout: STATE_MS });
-});
+    // Save writes FOUR files (#273, #277, #1123 item 4): the job, the frame beside it, the run
+    // record, then the run's stage log. Awaiting only the first download is what let the frame go
+    // missing unnoticed.
+    page.on('download', (d) => downloads.push({ name: d.suggestedFilename(), file: d }));
+    const downloadPromise = page.waitForEvent('download', { timeout: STATE_MS });
+    await (await menuItem(page, 'engrave-save')).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/\.nc$/);
 
-test("the saved .nc, reloaded as a stranger's file, removes the same volume", async ({ cm, page }, testInfo) => {
-  await cm.ready();
-  await openEngravePanel(page);
+    const path = await download.path();
+    expect(path).not.toBeNull();
+    nc = readFileSync(path!, 'utf8');
+    expect(nc.startsWith(';@MKR|BEGIN')).toBe(true);
+    // #771 — the saved file ends with Studio's thumbnail block: `M02`, the two markers and the
+    // one-line base64 PNG. The last MOTION word is still M02.
+    const tail = nc.trimEnd().split('\n').slice(-4);
+    expect(tail[0]).toBe('M02');
+    expect(tail[1]).toBe(';(thumbnail_image_begin)');
+    expect(tail[2]!.startsWith(';iVBORw0KGgo')).toBe(true);
+    expect(tail[3]).toBe(';(thumbnail_image_end)');
 
-  await page.getByTestId('engrave-generate').click();
-  await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
+    await expect.poll(() => downloads.length).toBe(4);
+    const suggested = downloads[0]!.name;
+    expect(suggested).toMatch(/\.nc$/);
+    expect(suggested).not.toContain('-frame.nc');
+    expect(downloads[1]!.name).toBe(suggested.replace(/\.nc$/, '-frame.nc'));
+    // The record sits beside the program, named after it, and cannot be mistaken for it.
+    expect(downloads[2]!.name).toBe(suggested.replace(/\.nc$/, '-run.json'));
+    // #1123 item 4 — the run's stage log rides with the record it belongs to.
+    expect(downloads[3]!.name).toBe(suggested.replace(/\.nc$/, '-run.log'));
+  });
 
-  // The in-app run's own simulation: what Generate loaded and swept.
-  const inApp = await page.evaluate(() => window.__caseMaker!.getSimState());
-  expect(inApp.status).toBe('ready');
-  expect(inApp.errorCodes).toEqual([]);
-  expect(inApp.removedVolume).toBeGreaterThan(0);
+  await test.step('the run sheet: the saved names, then print media without chrome', async () => {
+    // The sheet itself needs no acknowledgement; Save does, because its file goes to the machine.
+    await expect(await menuItem(page, 'engrave-run-sheet')).toBeEnabled();
+    await (await menuItem(page, 'engrave-run-sheet')).click();
+    const sheet = page.getByTestId('run-sheet');
+    await expect(sheet).toBeVisible();
+    // …is the name the sheet prints.
+    await expect(sheet).toContainText(downloads[0]!.name);
+    // #244 — §6 names the generated frame file instead of telling the operator to raise Z by hand,
+    // and #273 makes that name the file Save just wrote.
+    await expect(sheet).toContainText(downloads[1]!.name);
+    await expect(sheet).not.toContainText('Raise the work Z');
 
-  // Save the exact bytes, then open them in "Simulate .nc" as though they came from someone else.
-  await acknowledgeClearance(page);
-  const downloadPromise = page.waitForEvent('download');
-  await (await menuItem(page, 'engrave-save')).click();
-  const path = await (await downloadPromise).path();
-  expect(path).not.toBeNull();
-  const nc = readFileSync(path!, 'utf8');
+    // The print preview shows the sheet and hides the app chrome (the sheet's own toolbar too).
+    await page.emulateMedia({ media: 'print' });
+    await expect(sheet).toBeVisible();
+    await expect(page.getByTestId('run-sheet-print')).toBeHidden();
+    await expect(page.getByTestId('sidebar-button-cnc-engrave')).toBeHidden();
+    await page.emulateMedia({ media: 'screen' });
+    await expect(page.getByTestId('sidebar-button-cnc-engrave')).toBeVisible();
+    await page.getByTestId('run-sheet-close').click();
+    await expect(sheet).toBeHidden();
+  });
 
-  // #726 W8 / #506 — Generate just loaded that program into the shared `simStore`, so the panel
-  // PRESENTS THE RUN: the job's name, its stock and cutter, and its own diagnostics — not an empty
-  // open-a-file form asking for a stock and a cutter the job already has. The run's finished Result
-  // still belongs to the engrave run and is not shown as this panel's own.
-  await page.getByTestId('sidebar-button-cnc-sim').click();
-  await expect(page.getByTestId('sim-panel')).toBeVisible();
-  await expect(page.getByTestId('sim-job-run')).toBeVisible();
-  await expect(page.getByTestId('sim-job-run-line')).toContainText('the job’s own program');
-  await expect(page.getByTestId('sim-stock-length')).toHaveCount(0);
-  await expect(page.getByTestId('sim-result')).toHaveCount(0);
-  await expect(page.getByTestId('sim-diagnostics')).toHaveCount(0);
-  await page.screenshot({ path: testInfo.outputPath('simulate-after-engrave.png') });
+  await test.step("the saved .nc, reloaded as a stranger's file, removes the same volume", async () => {
+    // #726 W8 / #506 — Generate just loaded that program into the shared `simStore`, so the panel
+    // PRESENTS THE RUN: the job's name, its stock and cutter, and its own diagnostics — not an empty
+    // open-a-file form asking for a stock and a cutter the job already has. The run's finished Result
+    // still belongs to the engrave run and is not shown as this panel's own.
+    await page.getByTestId('sidebar-button-cnc-sim').click();
+    await expect(page.getByTestId('sim-panel')).toBeVisible();
+    await expect(page.getByTestId('sim-job-run')).toBeVisible();
+    await expect(page.getByTestId('sim-job-run-line')).toContainText('the job’s own program');
+    await expect(page.getByTestId('sim-stock-length')).toHaveCount(0);
+    await expect(page.getByTestId('sim-result')).toHaveCount(0);
+    await expect(page.getByTestId('sim-diagnostics')).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath('simulate-after-engrave.png') });
 
-  await page.evaluate((text) => window.__caseMaker!.simOpenText('stranger.nc', text), nc);
-  // Wait for the row to take the file name, so the "no Result" assertion below describes the same
-  // committed render. Still no Result before this panel runs it, even though the bytes are
-  // identical: the engrave run's session belongs to the engrave run, not to the file row that just
-  // took its name.
-  await expect(page.getByTestId('sim-file-name')).toHaveText('stranger.nc');
-  await expect(page.getByTestId('sim-result')).toHaveCount(0);
-  await page.evaluate(() => window.__caseMaker!.simRun());
-  await expect(page.getByTestId('sim-result')).toBeVisible({ timeout: 60_000 });
+    await page.evaluate((text) => window.__caseMaker!.simOpenText('stranger.nc', text), nc);
+    // Wait for the row to take the file name, so the "no Result" assertion below describes the same
+    // committed render. Still no Result before this panel runs it, even though the bytes are
+    // identical: the engrave run's session belongs to the engrave run, not to the file row that just
+    // took its name.
+    await expect(page.getByTestId('sim-file-name')).toHaveText('stranger.nc');
+    await expect(page.getByTestId('sim-result')).toHaveCount(0);
+    await page.evaluate(() => window.__caseMaker!.simRun());
+    await expect(page.getByTestId('sim-result')).toBeVisible({ timeout: 60_000 });
 
-  const reloaded = await page.evaluate(() => window.__caseMaker!.getSimState());
-  expect(reloaded.status).toBe('ready');
-  expect(reloaded.errorCodes).toEqual([]);
-  // Same bytes, same header-declared stock and tool ⇒ the same removed volume.
-  expect(reloaded.removedVolume).toBeCloseTo(inApp.removedVolume, 3);
+    const reloaded = await page.evaluate(() => window.__caseMaker!.getSimState());
+    expect(reloaded.status).toBe('ready');
+    expect(reloaded.errorCodes).toEqual([]);
+    // Same bytes, same header-declared stock and tool ⇒ the same removed volume.
+    expect(reloaded.removedVolume).toBeCloseTo(inAppRemoved, 3);
+  });
+
+  await test.step('the run record: blank as written, then the measured run beside the estimate', async () => {
+    // Back to Engrave: opening a record is the panel's own door.
+    await page.getByTestId('sidebar-button-cnc-engrave').click();
+    await expect(page.getByTestId('engrave-panel')).toBeVisible();
+
+    const ncFile = downloads[0]!.name;
+    const text = readFileSync((await downloads[2]!.file.path())!, 'utf8');
+    const blank = JSON.parse(text);
+
+    // What the app wrote: everything it can know, and NOTHING it cannot. Not a zero, not a guess.
+    expect(blank.kind).toBe('casemaker-run');
+    expect(blank.ncFile).toBe(ncFile);
+    expect(blank.cutOn).toBeNull();
+    expect(blank.minutes).toBeNull();
+    expect(blank.legible).toBeNull();
+    expect(blank.finish).toBeNull();
+    expect(blank.stockProudMm).toBeNull();
+    expect(blank.cutter).toEqual({ fluteLengthMm: null, stickOutMm: null });
+    expect(blank.ncHash).toMatch(/^[0-9a-f]{8}$/);
+    // One blank per §9 depth row, and there is at least one — the sheet asks for them, so the file
+    // has somewhere to answer.
+    expect(blank.depths.length).toBeGreaterThan(0);
+    expect(blank.depths.every((d: { measured: number | null }) => d.measured === null)).toBe(true);
+
+    // Opening the untouched file is not an error — it is simply not a result, and nothing shows.
+    const asSaved = await page.evaluate((t) => window.__caseMaker!.openRunRecordText(t), text);
+    expect(asSaved.ok).toBe(true);
+    await expect(page.getByTestId('engrave-last-measured')).toBeHidden();
+
+    // The bench fills it in: the date the job was cut, and the wall clock it took.
+    const filled = { ...blank, cutOn: '2026-10-05', minutes: 12.5 };
+    const opened = await page.evaluate(
+      (t) => window.__caseMaker!.openRunRecordText(t),
+      JSON.stringify(filled),
+    );
+    expect(opened.ok).toBe(true);
+    expect(opened.ncFile).toBe(ncFile);
+
+    // The reading appears, with its duration and its date…
+    const measured = page.getByTestId('engrave-last-measured');
+    await expect(measured).toBeVisible();
+    // #688 — durations are written the plan's way ({@link formatDuration}), not as a clock face.
+    await expect(measured).toContainText('12 min 30 s');
+    await expect(measured).toContainText('2026-10-05');
+
+    // …and the ONE estimate above it is untouched. This is the whole point of the feature: the
+    // measured figure sits beside the planning figure, and neither one replaces the other.
+    const estimate = await page.getByTestId('engrave-run-time').textContent();
+    expect(estimate).not.toContain('12 min 30 s');
+    // #726 P7 — the same planning figure, unchanged: opening the record added the measured line
+    // beside it, restated no estimate, and the "(estimated)" suffix did not come back.
+    expect(estimate).toBe(planned);
+
+    // The rule, end to end: the same readings with the date deleted are refused, and the line stays
+    // as it was. A measurement with no date is a number nobody can place.
+    const undated = await page.evaluate(
+      (t) => window.__caseMaker!.openRunRecordText(t),
+      JSON.stringify({ ...filled, cutOn: null }),
+    );
+    expect(undated.ok).toBe(false);
+    expect(undated.reason).toContain('no cutOn date');
+    await expect(measured).toContainText('12 min 30 s');
+  });
+
+  await test.step('the edit after Generate: the package is stale and Save closes, naming why', async () => {
+    // Change a label's depth: the run no longer describes the job on screen. #411 folds a job's
+    // rows, so the field is behind the chevron.
+    await page.getByTestId('engrave-label-expand-0').click();
+    const depth = page.getByTestId('engrave-label-depth-0');
+    await depth.fill('1.8');
+    await depth.blur();
+
+    await expect(await menuItem(page, 'engrave-save')).toBeDisabled({ timeout: STATE_MS });
+    // #581 — the blocker names the input that moved: this edit changed the job.
+    await expect(page.getByTestId('engrave-save')).toHaveAttribute('title', /the job changed since it was generated/, { timeout: STATE_MS });
+  });
 });
 
 // #260 — the drill half of #220 is reachable from the panel, not only by hand-editing a job:
@@ -227,143 +346,6 @@ test('a drilled hole reaches the preview, not only the program (#288)', async ({
   // …and the hole's own depth joins them, which it can only do through a drawn floor.
   await expect(page.getByTestId('engrave-legend-3.5')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('engrave-legend-3.5')).toContainText('3.5 mm');
-});
-
-// #207's mount: "Run sheet" opens the printable operator sheet for a generated, verified job.
-// The sheet is a DOCUMENT — it names the file Save writes, and under print media the app's
-// chrome (the sheet's own toolbar included) is hidden so only the sheet reaches the paper.
-test('the run sheet opens for a verified job, names the saved file, and prints without chrome', async ({ cm, page }) => {
-  await cm.ready();
-  await openEngravePanel(page);
-
-  // Nothing generated yet: the sheet is not offered.
-  await expect(await menuItem(page, 'engrave-run-sheet')).toBeDisabled();
-
-  await page.getByTestId('engrave-generate').click();
-  await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
-  // #688 — the sheet itself needs no acknowledgement; Save does, because its file goes to the
-  // machine. The statement's home is Cut step 1 (#689).
-  await expect(await menuItem(page, 'engrave-run-sheet')).toBeEnabled();
-  await acknowledgeClearance(page);
-
-  // Save writes FOUR files (#273, #277, #1123 item 4): the job, the frame beside it, the run
-  // record, then the run's stage log. Awaiting only the first download is what let the frame go
-  // missing unnoticed.
-  const downloads: string[] = [];
-  page.on('download', (d) => downloads.push(d.suggestedFilename()));
-  await (await menuItem(page, 'engrave-save')).click();
-  await expect.poll(() => downloads.length).toBe(4);
-  const suggested = downloads[0]!;
-  expect(suggested).toMatch(/\.nc$/);
-  expect(suggested).not.toContain('-frame.nc');
-  expect(downloads[1]).toBe(suggested.replace(/\.nc$/, '-frame.nc'));
-  // The record sits beside the program, named after it, and cannot be mistaken for it.
-  expect(downloads[2]).toBe(suggested.replace(/\.nc$/, '-run.json'));
-  // #1123 item 4 — the run's stage log rides with the record it belongs to.
-  expect(downloads[3]).toBe(suggested.replace(/\.nc$/, '-run.log'));
-
-  // …is the name the sheet prints.
-  await (await menuItem(page, 'engrave-run-sheet')).click();
-  const sheet = page.getByTestId('run-sheet');
-  await expect(sheet).toBeVisible();
-  await expect(sheet).toContainText(suggested);
-
-  // #244 — §6 names the generated frame file instead of telling the operator to raise Z by hand,
-  // and #273 makes that name the file Save just wrote.
-  await expect(sheet).toContainText(downloads[1]!);
-  await expect(sheet).not.toContainText('Raise the work Z');
-
-  // The print preview shows the sheet and hides the app chrome (the sheet's own toolbar too).
-  await page.emulateMedia({ media: 'print' });
-  await expect(sheet).toBeVisible();
-  await expect(page.getByTestId('run-sheet-print')).toBeHidden();
-  await expect(page.getByTestId('sidebar-button-cnc-engrave')).toBeHidden();
-  await page.emulateMedia({ media: 'screen' });
-  await expect(page.getByTestId('sidebar-button-cnc-engrave')).toBeVisible();
-});
-
-// #277 — the round trip. Save writes a run record beside the program with its measured half BLANK;
-// the bench fills it in; opening it puts the measured wall clock BESIDE the cycle estimate, never in
-// place of it. The file is the app's own download, filled in exactly as the operator would, so this
-// is the whole flow and not a fixture.
-test('a filled run record shows its measured run beside the estimate', async ({ cm, page }) => {
-  await cm.ready();
-  await openEngravePanel(page);
-
-  await page.getByTestId('engrave-generate').click();
-  await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
-  // #726 P7 — the planning figure says "about …" once; "(estimated)" is not repeated on the end.
-  // Capture it before the record is opened, so the beside-never-in-place check below compares
-  // against the very number the Generate row showed.
-  const planned = await page.getByTestId('engrave-run-time').textContent();
-  expect(planned).toMatch(/^about \d+ min \d+ s$/);
-  // #688 — the acknowledgement lives in Cut step 1 now; the Save path is still gated on it.
-  await acknowledgeClearance(page);
-  await expect(await menuItem(page, 'engrave-save')).toBeEnabled();
-
-  const downloads: { name: string; file: Download }[] = [];
-  page.on('download', (d) => downloads.push({ name: d.suggestedFilename(), file: d }));
-  await (await menuItem(page, 'engrave-save')).click();
-  await expect.poll(() => downloads.length).toBe(4);
-
-  const ncFile = downloads[0]!.name;
-  const record = downloads.find((d) => d.name.endsWith('-run.json'))!;
-  const text = readFileSync((await record.file.path())!, 'utf8');
-  const blank = JSON.parse(text);
-
-  // What the app wrote: everything it can know, and NOTHING it cannot. Not a zero, not a guess.
-  expect(blank.kind).toBe('casemaker-run');
-  expect(blank.ncFile).toBe(ncFile);
-  expect(blank.cutOn).toBeNull();
-  expect(blank.minutes).toBeNull();
-  expect(blank.legible).toBeNull();
-  expect(blank.finish).toBeNull();
-  expect(blank.stockProudMm).toBeNull();
-  expect(blank.cutter).toEqual({ fluteLengthMm: null, stickOutMm: null });
-  expect(blank.ncHash).toMatch(/^[0-9a-f]{8}$/);
-  // One blank per §9 depth row, and there is at least one — the sheet asks for them, so the file
-  // has somewhere to answer.
-  expect(blank.depths.length).toBeGreaterThan(0);
-  expect(blank.depths.every((d: { measured: number | null }) => d.measured === null)).toBe(true);
-
-  // Opening the untouched file is not an error — it is simply not a result, and nothing shows.
-  const asSaved = await page.evaluate((t) => window.__caseMaker!.openRunRecordText(t), text);
-  expect(asSaved.ok).toBe(true);
-  await expect(page.getByTestId('engrave-last-measured')).toBeHidden();
-
-  // The bench fills it in: the date the job was cut, and the wall clock it took.
-  const filled = { ...blank, cutOn: '2026-10-05', minutes: 12.5 };
-  const opened = await page.evaluate(
-    (t) => window.__caseMaker!.openRunRecordText(t),
-    JSON.stringify(filled),
-  );
-  expect(opened.ok).toBe(true);
-  expect(opened.ncFile).toBe(ncFile);
-
-  // The reading appears, with its duration and its date…
-  const measured = page.getByTestId('engrave-last-measured');
-  await expect(measured).toBeVisible();
-  // #688 — durations are written the plan's way ({@link formatDuration}), not as a clock face.
-  await expect(measured).toContainText('12 min 30 s');
-  await expect(measured).toContainText('2026-10-05');
-
-  // …and the ONE estimate above it is untouched. This is the whole point of the feature: the
-  // measured figure sits beside the planning figure, and neither one replaces the other.
-  const estimate = await page.getByTestId('engrave-run-time').textContent();
-  expect(estimate).not.toContain('12 min 30 s');
-  // #726 P7 — the same planning figure, unchanged: opening the record added the measured line
-  // beside it, restated no estimate, and the "(estimated)" suffix did not come back.
-  expect(estimate).toBe(planned);
-
-  // The rule, end to end: the same readings with the date deleted are refused, and the line stays
-  // as it was. A measurement with no date is a number nobody can place.
-  const undated = await page.evaluate(
-    (t) => window.__caseMaker!.openRunRecordText(t),
-    JSON.stringify({ ...filled, cutOn: null }),
-  );
-  expect(undated.ok).toBe(false);
-  expect(undated.reason).toContain('no cutOn date');
-  await expect(measured).toContainText('12 min 30 s');
 });
 
 test('#368 — a badge that states its print reaches Engrave with a live colour split', async ({

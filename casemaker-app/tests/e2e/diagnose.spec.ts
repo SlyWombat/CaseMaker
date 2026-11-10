@@ -3,9 +3,9 @@
 // the cover, the endstops, the e-stop and the Wi-Fi signal. The heartbeat polls `?` and `diagnose`
 // on one connection; the store keeps a CHANGED reading only, so the monitor follows a press
 // instead of streaming identical polls. The fake console (fixtures/fakeConsole.ts) answers both.
-import type { Page } from '@playwright/test';
 import { lanServerPort } from '../../scripts/e2ePort';
 import { test, expect } from './fixtures/caseMaker';
+import { rememberMachine } from './fixtures/rememberMachine';
 import { DIAGNOSE_TOUCHED, installFakeConsole } from './fixtures/fakeConsole';
 
 // #821/#867 — the diagnostic read is reachable in a machine-carrying bundle: the desktop bundle
@@ -17,25 +17,6 @@ test.setTimeout(120_000);
 /** A status line for the machine observation the strip reads. */
 const STATUS = '<Idle|MPos:0,0,0|WPos:0,0,0|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>';
 
-async function rememberMachine(page: Page): Promise<void> {
-  await page.evaluate((line) => {
-    window.__caseMaker!.setMachine(
-      {
-        name: 'QA Z1',
-        host: '192.0.2.10',
-        port: 2222,
-        busy: false,
-        ip: null,
-        mac: null,
-        status: line,
-        profileId: 'Z1',
-        observedAt: '2026-10-25T00:00:00.000Z',
-        notes: [],
-      },
-      line,
-    );
-  }, STATUS);
-}
 
 test('#826 — the status monitor reads the controller’s switches and Wi-Fi, and follows a change', async ({ cm, page }) => {
   const fake = await installFakeConsole(page);
@@ -45,7 +26,7 @@ test('#826 — the status monitor reads the controller’s switches and Wi-Fi, a
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await rememberMachine(page);
+  await rememberMachine(page, STATUS);
   await page.getByTestId('sidebar-button-cnc-engrave').click();
   await expect(page.getByTestId('machine-status')).toBeVisible();
 
