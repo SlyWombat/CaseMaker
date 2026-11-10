@@ -1,7 +1,10 @@
 // #799/#798 — the Job group's quiet first screen: the Stock fact line is the voids' disclosure,
 // the Cutter verdict is one line above the fold, and the reference object is an entry of the one
 // Add operation menu. The screenshots are the hand-in's record of the changed states.
+import { writeFileSync } from 'node:fs';
+
 import { test, expect } from './fixtures/caseMaker';
+import { routeHouse, twoSideJob } from './fixtures/twoSideMouseShell';
 
 test.setTimeout(120_000);
 
@@ -30,4 +33,35 @@ test('#799 — the Job group: Stock disclosure, Cutter line, and the Add menu’
   await page.getByTestId('engrave-add-summary').click();
   await expect(page.getByTestId('engrave-target-import')).toBeVisible();
   await page.getByTestId('engrave-add-menu').screenshot({ path: testInfo.outputPath('job-add-menu.png') });
+});
+
+// #1123 item 44 — BEFORE A GENERATE THE CUTTER LINE IS THE PLANNED SET. The 11-09 bench read the
+// file's one tool as a lost plan and cancelled a good run. A multi-setup job is not measurable as
+// one plan (`canMeasure`), so the line is settled; with no operator pick, it names the set the
+// planner will choose at Generate, not the file's single tool.
+test('#1123 item 44 — the settled pre-plan Cutter line says the set is planned at Generate', async ({ cm, page }, testInfo) => {
+  // The web build has no house service; serve the demo long ball so the loaded job's tool resolves.
+  await routeHouse(page);
+  await cm.ready();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+    window.__caseMaker!.engraveReset();
+  });
+  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
+
+  // The two-sided shell without the operator's pick: the document carries a tool, sources do not
+  // say it was chosen, and the planner owns the set.
+  const jobPath = testInfo.outputPath('two-sides-computed.cutjob.json');
+  writeFileSync(jobPath, JSON.stringify({ ...twoSideJob(), sources: {} }));
+  const menu = page.getByTestId('engrave-file-menu');
+  if (!(await menu.isVisible())) await page.getByTestId('engrave-file-menu-toggle').click();
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('engrave-job-open').click()]);
+  await chooser.setFiles(jobPath);
+  await expect(page.getByTestId('engrave-job-notice')).toContainText('Opened');
+
+  const line = page.getByTestId('engrave-cutter-line');
+  await expect(line).toContainText('planned at Generate from your owned bits');
+  await expect(line).not.toContainText('chosen by you');
+  await line.screenshot({ path: testInfo.outputPath('cutter-line-planned.png') });
 });
