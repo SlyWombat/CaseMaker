@@ -243,6 +243,13 @@ interface Args {
   location?: string;
   /** #1081 — Makera's catalogue document, when it is not the `--location` file's sibling. */
   catalogue?: string;
+  /**
+   * #1175 — THE IDEAL'S CANDIDATE SET, as a JSON file of `Tool` objects: the very list the
+   * browser's Generate hands its worker (`getTools().map((entry) => entry.tool)`). The house run
+   * forwards it so both paths plan the ideal from the same snapshot; absent, the CLI's own
+   * registry is used exactly as before.
+   */
+  tools?: string;
   out?: string;
   /** #1052 — write the per-boundary memory trace (JSONL) to this file. */
   memTrace?: string;
@@ -318,6 +325,7 @@ export function parseArgs(argv: string[]): Args {
     else if (a === '--rest-ladder') args.restLadder = true;
     else if (a === '--location') args.location = argv[++i];
     else if (a === '--catalogue') args.catalogue = argv[++i];
+    else if (a === '--tools') args.tools = argv[++i];
     else if (a === '--turn') {
       const v = argv[++i];
       if (v !== 'ccw' && v !== 'cw') throw new Error(`--turn must be "ccw" or "cw", not "${v}"`);
@@ -360,6 +368,7 @@ const USAGE =
   '       [--location <location.json|house.json>]  (any input; default: the app’s own location)\n' +
   '       [--catalogue <catalogue.json>]  (Makera’s feed rows; default: beside the --location file,\n' +
   '              or the app’s own data directory; CM_CATALOGUE names it too)\n' +
+  '       [--tools <tools.json>]  (the ideal plan’s candidate set; the browser Generate’s own list)\n' +
   '       (casemaker engrave is the same command under its old name; the receipt is the same)';
 
 /** A pipeline that stopped, as the receipt needs it (#478). `stage` is null when none ran. */
@@ -915,6 +924,20 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     }
   };
 
+  // #1175 — THE BROWSER'S TOOL LIST, WHEN THE HOUSE RUN FORWARDED ONE. The browser's Generate
+  // passes `getTools().map((entry) => entry.tool)` as the ideal plan's candidate set; the service
+  // writes that array beside the job and names it here. No file: the registry's own tools are the
+  // candidates, which is this command's pre-#1175 behaviour byte for byte.
+  let catalogueTools: readonly Tool[] | undefined;
+  if (args.tools !== undefined) {
+    const raw = readJson(args.tools);
+    if (!Array.isArray(raw)) fail(`--tools must name a JSON array of tools, not ${typeof raw}`);
+    catalogueTools = raw as Tool[];
+    out.progress(
+      `the browser's tool list: ${args.tools} — ${catalogueTools.length} cutter${catalogueTools.length === 1 ? '' : 's'} (the ideal plan's candidates)`,
+    );
+  }
+
   // ---------------------------------------------------------------------------------------------
   // Which cutter: the reachability table (#410)
   // ---------------------------------------------------------------------------------------------
@@ -1241,8 +1264,9 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // #1111 R1 — THE IDEAL'S CANDIDATE SET, the same list the app sends: every tool the
         // registry holds (the catalogue's `cat:` definitions included, registered at boot). Without
         // it the CLI's ideal plan has no catalogue candidates and its tradeoff line differs from
-        // the app's.
-        getTools().map((entry) => entry.tool),
+        // the app's. #1175 — a house run forwards the browser's own list with `--tools`; that list
+        // is used verbatim so both paths plan from the same snapshot.
+        catalogueTools ?? getTools().map((entry) => entry.tool),
         // #1134 — the pick's winning full plan IS the cut's owned plan: post it, do not re-plan.
         // #1151 — owned plan first when the flag is set (false is today's two-plan run and
         // receipt); the parallel rank seam only when asked (false is the serial rank, byte-identical).

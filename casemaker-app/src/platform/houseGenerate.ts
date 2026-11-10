@@ -126,6 +126,15 @@ export interface HouseGenerateArgs {
   margins: EngraveMargins;
   shop?: EngraveShopOpts;
   onProgress?: (progress: EngraveProgress) => void;
+  /**
+   * #1175 — THE IDEAL PLAN'S CANDIDATE SET, exactly as the browser's Generate passes it: the
+   * app's whole tool library (`getTools().map((entry) => entry.tool)`). Forwarded to the service,
+   * which hands the CLI a `--tools` file — without it the CLI plans the ideal from its own
+   * location/catalogue snapshot, which is a different list read at a different time.
+   */
+  catalogueTools?: readonly Tool[];
+  /** #1175 — the run sheet's ladder press (#1046): the service passes the CLI `--rest-ladder`. */
+  restLadder?: boolean;
 }
 
 /**
@@ -141,6 +150,11 @@ export async function houseEngraveGenerate(args: HouseGenerateArgs): Promise<Eng
   const submitted = await submitRun({
     job: args.job,
     ...(shopEtag === null ? {} : { shopEtag }),
+    // #1175 — the two inputs the browser's Generate passes that are not in the job document: the
+    // ideal's candidate set and the ladder press. Only written when asked for, so an ordinary
+    // Generate's submit body is byte-identical to a pre-#1175 one.
+    ...(args.catalogueTools === undefined ? {} : { tools: args.catalogueTools }),
+    ...(args.restLadder === true ? { restLadder: true } : {}),
   });
   if (submitted.kind !== 'ok') throw new Error(houseFailureSentence(submitted));
   const id = submitted.runId;

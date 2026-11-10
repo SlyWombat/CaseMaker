@@ -806,18 +806,39 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     };
     try {
       client = await clientLoader();
+      // #1175 — THE PUBLISH SWITCH. `true` forces the in-page worker for every Generate, exactly
+      // as a service that reports `runs: false`: the house branch below is skipped and nothing
+      // else changes. It exists so a publish that must not ship a known house-path gap can be
+      // taken with a one-line flip; the default is the house path.
+      const HOUSE_GENERATION_FORCED_OFF = false;
       // #1126 — GENERATE ON THE HOUSE WHEN THE SERVICE CAN RUN IT. The probe is a runtime fact:
       // a service without its CLI answers `runs: false`, a host without a service answers nothing,
       // and either way the in-page worker runs exactly as it did. The house client keeps every
       // other call (the sim session, the oracle) on the browser client; only the generation moves,
       // and the ideal compare is left out because the CLI's own Generate already ran both outcomes
       // and returned the tradeoff on the result.
-      if (!simulateOnly && mine === seq && (await houseGenerationAvailable())) {
+      if (!simulateOnly && mine === seq && !HOUSE_GENERATION_FORCED_OFF && (await houseGenerationAvailable())) {
         const base = client;
         const { engravePlanIdeal: _idealOnTheBrowser, ...rest } = base;
         client = {
           ...rest,
-          engraveGenerate: (jobArg, toolArg, catalogueArg, calibrationArg, marginsArg, shopArg, onProgressArg) =>
+          // #1175 — ALL TEN ARGUMENTS OF THE BROWSER CALL ARE HONOURED. The tools list (8th) and
+          // the ladder press (10th) ride the submit to the service and the CLI; `deferIdeal` (9th)
+          // has no house analogue — the CLI's own Generate already runs both outcomes and returns
+          // the tradeoff, so the result is never deferred and the store's after-Generate code reads
+          // it exactly as it reads an in-page result.
+          engraveGenerate: (
+            jobArg,
+            toolArg,
+            catalogueArg,
+            calibrationArg,
+            marginsArg,
+            shopArg,
+            onProgressArg,
+            catalogueToolsArg,
+            _deferIdealArg,
+            restLadderArg,
+          ) =>
             houseEngraveGenerate({
               job: jobArg,
               tool: toolArg,
@@ -826,6 +847,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
               margins: marginsArg,
               ...(shopArg === undefined ? {} : { shop: shopArg }),
               ...(onProgressArg === undefined ? {} : { onProgress: onProgressArg }),
+              ...(catalogueToolsArg === undefined ? {} : { catalogueTools: catalogueToolsArg }),
+              ...(restLadderArg === undefined ? {} : { restLadder: restLadderArg }),
             }),
           cancelGenerate: () => {
             cancelActiveHouseRun();
