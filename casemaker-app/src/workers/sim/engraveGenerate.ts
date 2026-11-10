@@ -4734,10 +4734,15 @@ export function generateRotaryGoalProgram(
   if (!resolved.ok) return fail('feeds', resolved.reason, resolved);
   const settings = goal.surface ?? {};
   const stockToLeaveMm = settings.stockToLeaveMm ?? shop.finish?.stockToLeaveMm.value ?? undefined;
-  const pitchMm = settings.gridPitchMm ?? shop.surfaceGrid?.pitchMm.value ?? null;
+  // #1164 — THE FINE FIELD, ONCE. The field is sampled at the JUDGED pitch (the check compares on
+  // the sampler's default, `DEFAULT_GRID_PITCH_MM`) and the planner reads its max-pooled form at
+  // the job's own planning pitch (`poolRadialField`, rule 5), so a coarse planning cell carries the
+  // highest radius over its footprint and the plan can only stand off. The same fine field is what
+  // the check is handed; the flat path does not go through here at all.
+  const planningPitchMm = settings.gridPitchMm ?? shop.surfaceGrid?.pitchMm.value ?? null;
   let field: ReturnType<typeof sampleGoalRadialField>;
   try {
-    field = sampleGoalRadialField(goal, rotary.radius, { pitchMm });
+    field = sampleGoalRadialField(goal, rotary.radius, {});
   } catch (e) {
     return fail('cam', e instanceof Error ? e.message : String(e));
   }
@@ -4881,6 +4886,7 @@ export function generateRotaryGoalProgram(
   try {
     relief = generateRotaryReliefIR({
       field,
+      ...(planningPitchMm === null ? {} : { planningPitchMm }),
       // #777 — a block in the chuck roughs from its own section, not the envelope.
       section: rotary.section,
       tool,
