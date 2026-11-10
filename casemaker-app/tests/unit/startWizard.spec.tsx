@@ -144,7 +144,9 @@ afterEach(() => {
  */
 function skipToStockStep(): void {
   fireEvent.click(screen.getByTestId('start-wizard-next'));
-  fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'A block' } });
+  // #1100 — the text question lives on the sign card now.
+  fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
+  fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'A block' } });
   fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 }
 
@@ -582,7 +584,8 @@ describe('#681 — the wizard with nothing to lean on', () => {
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
 
     toQuestion();
-    fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Bench free' } });
+    fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
+    fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'Bench free' } });
     await throughStockToHolding();
     // A run that began here CREATES the job; only a re-entry adds an operation (#681/#685).
     expect(screen.getByTestId('engrave-setup-next').textContent).toBe('Create the job');
@@ -600,7 +603,8 @@ describe('#681 — the wizard with nothing to lean on', () => {
     });
     render(<WizardHost />);
     toQuestion();
-    fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'No bit yet' } });
+    fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
+    fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'No bit yet' } });
     await throughStockToHolding();
     // The default job names no cutter (#516), and this path added none.
     expect(useEngraveJobStore.getState().job.toolKey ?? '').toBe('');
@@ -646,6 +650,8 @@ describe('#681 — the wizard with nothing to lean on', () => {
     });
     render(<WizardHost />);
     fireEvent.click(screen.getByTestId('start-wizard-next'));
+    // #1100 — the engine chips are under Something else… now.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-something-else'));
     // A pocket sizes no blank of its own; #930 proposes the stock the shop keeps on the shelf.
     fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));

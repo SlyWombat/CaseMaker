@@ -168,8 +168,9 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
   it('a line of text proposes the house’s stock, and the sentence says so', async () => {
     openWizard();
     toQuestion();
-    fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Hello' } });
-    fireEvent.change(screen.getByTestId('start-wizard-op-depth'), { target: { value: '2' } });
+    // #1100 — a text job comes from the sign card now.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
+    fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'Hello' } });
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 
     expect(progress()).toContain('Stock');
@@ -194,7 +195,8 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
 
     const job = useEngraveJobStore.getState().job;
     expect(job.labels).toHaveLength(1);
-    expect(job.labels[0]).toMatchObject({ text: 'Hello', depth: 2 });
+    // #1100 — the sign card states no depth: the line takes the job's own stock-aware default.
+    expect(job.labels[0]).toMatchObject({ text: 'Hello' });
     expect(job.stock.material).toBe('hardwood');
     expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([36, 100, 36]);
     // …and a finished face is cut as it is: the first-job path does not face.
@@ -206,7 +208,9 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     useEngraveJobStore.setState({ job: { ...base, stock: { ...base.stock, material: 'brass' } } });
     openWizard();
     toQuestion();
-    fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Hello' } });
+    // #1100 — a text job comes from the sign card now.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
+    fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'Hello' } });
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 
     // The proposal sizes the blank; it does not overrule the piece the job has named.
@@ -218,6 +222,8 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
   it('a mesh is seated on the blank its own box proposed, not on the one it was read against', async () => {
     openWizard();
     toQuestion();
+    // #1100 — the engine chips live under Something else… now.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-something-else'));
     fireEvent.click(screen.getByTestId('engrave-setup-what-surface'));
     const input = screen.getByTestId('start-wizard-op-surface-file') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File([ASCII_STL], 'tet.stl')] } });
@@ -249,7 +255,9 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
   it('an edited blank is kept when the operator goes back to the question and returns', () => {
     openWizard();
     toQuestion();
-    fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Hello' } });
+    // #1100 — a text job comes from the sign card now.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
+    fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'Hello' } });
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 
     fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '123' } });
@@ -266,6 +274,8 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
   it('a board proposes its outline plus the import’s scrap, and the items it wrote survive the blank', async () => {
     openWizard();
     toQuestion();
+    // #1100 — the engine chips live under Something else… now.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-something-else'));
     fireEvent.click(screen.getByTestId('engrave-setup-what-pcb'));
     const input = screen.getByTestId('start-wizard-op-pcb-files') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File([new Uint8Array([1, 2, 3])], 'practice-F_Cu.gbr')] } });
