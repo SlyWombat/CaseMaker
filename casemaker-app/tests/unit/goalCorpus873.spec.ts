@@ -12,6 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { once } from './helpers/once';
 
 import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
@@ -106,6 +107,28 @@ function resultTopOf(field: FlatField): ResultTop {
   };
 }
 
+/**
+ * #1180 — ONE generate per fixture+stock: the #909 cut-into loop and the #873 baseline measure
+ * generate the same three jobs, so the second read is the first's result (deterministic; the
+ * result is read-only in both).
+ */
+async function generatedFor(
+  name: string,
+  stock: { length: number; width: number; thickness: number },
+): Promise<{
+  g: Awaited<ReturnType<typeof generate>>;
+  job: EngraveJob;
+  target: EngraveTargetObject;
+  imported: Awaited<ReturnType<typeof read>>;
+}> {
+  return once(`corpus:${name}:${stock.length}x${stock.width}x${stock.thickness}`, async () => {
+    const imported = await read(name);
+    const target = targetOf(imported, { length: stock.length, width: stock.width });
+    const job = goalJob(target, stock);
+    return { g: await generate(tl, job), job, target, imported };
+  });
+}
+
 /** Generate, sweep and measure one fixture; the numbers the baseline pins. */
 async function runFixture(
   name: string,
@@ -121,10 +144,7 @@ async function runFixture(
   shadowed: number;
   missed: number;
 }> {
-  const imported = await read(name);
-  const target = targetOf(imported, stock);
-  const job = goalJob(target, stock);
-  const g = await generate(tl, job);
+  const { g, job, target, imported } = await generatedFor(name, stock);
   let fraction = 0;
   let facingAway = 0;
   let shadowed = 0;
@@ -265,10 +285,7 @@ describe('#909 the goal corpus: the plan never cuts into the part', () => {
     // clipped millimetres are stated — figure.stl (41.337 mm on a 40 mm stock) no longer frees
     // through the blank. The other two fixtures sit inside their stock and are unaffected.
     it(`${name}: no cell of the plan reaches below the goal`, async () => {
-      const imported = await read(name);
-      const target = targetOf(imported, { length: stock.length, width: stock.width });
-      const job = goalJob(target, stock);
-      const g = await generate(tl, job);
+      const { g } = await generatedFor(name, stock);
       expect(g.ok, g.errors.map((e) => e.message).join('; ')).toBe(true);
       expect(g.findings.some((f) => f.code === 'goal-overcut')).toBe(false);
     }, 240_000);
