@@ -2713,6 +2713,7 @@ describe('#1087 the finish’s cusp is stated beside the scallop', () => {
   });
 });
 
+/**
  * #1053 — THE PROBE THE SHEET NAMES IS THE ONE THE MACHINE HAS CHECKED OUT.
  *
  * The probe rows carry a real shape now (`shape: 'probe'`), and the sheet's probe steps name the
