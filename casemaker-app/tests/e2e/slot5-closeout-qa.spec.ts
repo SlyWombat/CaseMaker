@@ -104,8 +104,28 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
   // plan replaces it once the background search lands, so the rule's sentence is read in its
   // provisional window (from the preview landing until the search completes — seconds, not the
   // fixed sleep this read used to be).
-  await expect(page.getByTestId('engrave-pick-provisional')).toBeVisible({ timeout: 60_000 });
-  const recFresh = await page.getByTestId('engrave-recommendation').innerText();
+  //
+  // #1055 — THAT WINDOW IS A RACE, NOT A STATE. On a busy machine the measured search can land
+  // before this read; `engrave-pick-measured` then replaces the rule's block outright, and for the
+  // same job fingerprint the store never returns to "measuring", so polling for the provisional
+  // span cannot recover (the 2026-11-07 full run failed exactly here while an isolated 3× run
+  // passed). Take whichever answer is on screen; assert the provisional sentence only while the
+  // rule's block IS the one showing — its absence is a legitimate state, not a failure.
+  await expect
+    .poll(
+      async () =>
+        (await page.getByTestId('engrave-recommendation').count()) +
+        (await page.getByTestId('engrave-pick-measured').count()),
+      { timeout: 60_000 },
+    )
+    .toBeGreaterThan(0);
+  const freshMeasured = (await page.getByTestId('engrave-pick-measured').count()) > 0;
+  if (!freshMeasured) {
+    await expect(page.getByTestId('engrave-pick-provisional')).toBeVisible();
+  }
+  const recFresh = freshMeasured
+    ? await page.getByTestId('engrave-pick-measured').innerText()
+    : await page.getByTestId('engrave-recommendation').innerText();
   console.log('DIAG #211 fresh selection=%j rec=%j', await page.getByTestId('engrave-tool').inputValue(), recFresh);
   // The press: whichever offer is on screen (the rule's "Use it" or the measured answer's button).
   const useRecommended = page.getByTestId('engrave-use-recommended');
@@ -118,8 +138,10 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
   await expect(page.getByTestId('engrave-tool')).not.toHaveValue('');
   console.log('DIAG #211 after the press selection=%j', await page.getByTestId('engrave-tool').inputValue());
   // #687/#699 — the line is the cutter's display name and a lowercase `recommended` tag, then the
-  // reason. The intent is unchanged: a fresh job shows a recommendation sentence of its own.
-  expect(recFresh.toLowerCase()).toContain('recommended');
+  // reason. The intent is unchanged: a fresh job shows a recommendation sentence of its own —
+  // the measured form says `measured` where the rule's box says `recommended` (#1055: which one
+  // is on screen depends on whether the background search beat this read).
+  expect(recFresh.toLowerCase()).toContain(freshMeasured ? 'measured' : 'recommended');
   await page.screenshot({ path: shot(testInfo, 'slot5-engrave-after-4s.png') });
   const legendCount = await page.getByTestId('engrave-preview-legend').count();
   const loadingCount = await page.getByTestId('engrave-preview-loading').count();
