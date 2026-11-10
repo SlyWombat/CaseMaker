@@ -120,6 +120,10 @@ describe('#500 the Tools row shows cutter fields, not free-text notes', () => {
     // No inventory: the main list is just the shipped built-ins (status `present`, not `checking`).
     useToolRegistryStore.setState({ status: 'present', error: null, items: [] });
     render(<ToolsScope />);
+    // #1172A — the list opens on the bits the operator OWNS, and a built-in definition sits behind
+    // the "also show bits you could buy" switch. This test is about the definition row's LINE, so
+    // turn the switch on rather than changing the default.
+    fireEvent.click(screen.getByTestId('manage-show-catalogue'));
     // `flat-3.175x12-metal`'s provenance names a sample .nc file — not row text (#500).
     const row = screen.getByTestId('manage-tools-row-flat-3.175x12-metal');
     expect(row.querySelector('.nm small')).toBeNull();
