@@ -5,14 +5,15 @@ import { globSync, readFileSync } from 'node:fs';
 /**
  * #1180 S1 — THE TIERS, RE-CUT BY THE ANALYST'S MEASUREMENT (S0, 2026-11-10).
  *
- * Two projects, not four: the measured time is in the acceptance / bench / card specs, which are
- * 18 files and 2,055 s of the 3,785 s total. Everything else is `fast` — about 1,730 s of file
+ * Two projects, not four: the measured time is in the acceptance / bench / card specs, which S0
+ * found at 18 files (2,055 s of the 3,785 s total); #1175's house-parity walk joined them since,
+ * so the set is 19 files today. Everything else is `fast` — about 1,730 s of file
  * time, roughly four minutes of wall-clock at 8 workers — so every ordinary change runs it.
  * A bare `vitest run` (the land gate) runs both, so nothing is skipped and no test leaves the
  * suite.
  *
- *   acceptance  the 18 measured files: the 12 env-gated card files, benchTypicalJobs, pickTray858,
- *               pickCounters857, and the three *.acceptance walks.
+ *   acceptance  the acceptance set: the 12 env-gated card files, benchTypicalJobs, pickTray858,
+ *               pickCounters857, the three *.acceptance walks and houseParity1175.
  *   fast        every other spec.
  *
  * The sets are names, computed once here; the union is checked below and throws if any spec would
@@ -22,7 +23,7 @@ import { globSync, readFileSync } from 'node:fs';
 const ROOT = process.cwd();
 const SPEC_GLOB = 'tests/unit/**/*.spec.{ts,tsx}';
 
-/** The 18 files S0 measured in the acceptance / bench / card group. */
+/** The acceptance set — S0's 18 measured files plus houseParity1175 (#1175). */
 const ACCEPTANCE_FILES = new Set([
   // The 12 env-gated card files.
   'opsAcceptance959.spec.ts',
@@ -66,6 +67,12 @@ function classifySpecs(): { acceptance: string[]; fast: string[] } {
   const assigned = new Set(acceptance.map((f) => f.split('/').pop()));
   for (const name of ACCEPTANCE_FILES) {
     if (!assigned.has(name)) throw new Error(`#1180: acceptance file not found: ${name}`);
+  }
+  // The classification is by basename, so two specs sharing an acceptance basename would BOTH
+  // join acceptance and pass the exists-guard above (D's review, 2026-11-10). No file outside
+  // tests/unit is a vitest spec, so a count mismatch can only mean that collision.
+  if (acceptance.length !== ACCEPTANCE_FILES.size) {
+    throw new Error('#1180: two specs share an acceptance basename');
   }
   return { acceptance, fast };
 }
