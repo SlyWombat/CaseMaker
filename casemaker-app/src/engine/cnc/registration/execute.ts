@@ -133,6 +133,34 @@ export type OperatorStep = {
 };
 
 /**
+ * #1166 (c1) — THE TOP QUESTION's answer, when earlier programs may have cut the plan's surface
+ * point away. Exactly one of:
+ *  - `typed` — a machine Z the operator measured before (the card's field; never pre-filled);
+ *  - `derived` — the bracket's own top (the plan's seat + the stock's thickness);
+ *  - `seek` — today's surface seek, unchanged (including the after-miss offer);
+ *  - `stop` — not offered by the card: an unmount/abort answers it, and nothing moves.
+ */
+export type TopChoice =
+  | { kind: 'seek' }
+  | { kind: 'derived' }
+  | { kind: 'typed'; machineZ: number }
+  | { kind: 'stop' };
+
+/** #1166 (c1) — what the top question asks, in the numbers the card prints. */
+export interface TopQuestion {
+  /** The plan's surface point, WORK XY — the spot the seek would touch. */
+  surfacePoint: { x: number; y: number };
+  /** The band a typed answer must fall inside, MACHINE Z (`expected ± surfaceToleranceMm`). */
+  band: { min: number; max: number };
+  /**
+   * The bracket's own top: the plan's expected surface (its seat + the stock's thickness), the seat
+   * that arithmetic implies, and the thickness. `seat`/`thickness` are null only when the plan does
+   * not carry the stock's thickness — the sum is then stated alone.
+   */
+  derived: { machineZ: number; seat: number | null; thickness: number | null };
+}
+
+/**
  * The sentence the operator confirms before anything moves sideways on the bracket (#427 review): the
  * plan's scan lines and travel are clear only of the clamps where the PLAN puts them.
  */
@@ -175,6 +203,13 @@ export interface ExecDeps {
    * stop, and that is every vise and tape run.
    */
   hasFinishedPrograms?: boolean;
+  /**
+   * #1166 (c1) — THE TOP QUESTION, asked once after the probe's M491 and BEFORE any probe motion,
+   * under the same guard as `hasFinishedPrograms`. The card offers a typed top (measured before),
+   * the bracket's own top, or today's seek; absent, the run keeps today's seek (the after-miss offer
+   * still applies). A typed Z outside `band` is refused here as well as on the card.
+   */
+  askTop?: (question: TopQuestion) => Promise<TopChoice>;
 }
 
 export interface Transcript {
@@ -784,6 +819,34 @@ function datumCeiling(plan: RegistrationPlan): number {
 function surfacePointOnStock(plan: RegistrationPlan): boolean {
   const p = plan.surfacePoint;
   return p.x > plan.stock.xMin && p.x < plan.stock.xMax && p.y > plan.stock.yMin && p.y < plan.stock.yMax;
+}
+
+/**
+ * #1166 — the bracket's own top AS THE PLAN STATES IT: the expected surface (its measured seat +
+ * the stock's thickness). The seat is the plan's own expected surface less the thickness its input
+ * carried — no store is read here, and the card prints the same arithmetic.
+ */
+function bracketTopOf(plan: RegistrationPlan): { machineZ: number; seat: number | null; thickness: number | null } {
+  const machineZ = r3(plan.seek.band.max - plan.settings.surfaceToleranceMm);
+  const thickness = plan.stockThicknessMm ?? null;
+  return { machineZ, seat: thickness === null ? null : r3(machineZ - thickness), thickness };
+}
+
+/** #1166 — the DERIVED surface a run continues from: no probe touched it, so `touched: false`. */
+function derivedSurfacePrb(plan: RegistrationPlan, machineZ: number): Prb {
+  return {
+    x: r3(plan.bracketOrigin!.x + plan.surfacePoint.x),
+    y: r3(plan.bracketOrigin!.y + plan.surfacePoint.y),
+    z: machineZ,
+    touched: false,
+  };
+}
+
+/** #1166 — the one arithmetic sentence the press, the question and the record share. */
+function bracketTopWords(top: { machineZ: number; seat: number | null; thickness: number | null }): string {
+  return top.seat !== null && top.thickness !== null
+    ? `seat ${f(top.seat)} + stock ${f(top.thickness)} = ${f(top.machineZ)}`
+    : `seat + stock thickness = ${f(top.machineZ)}`;
 }
 
 /**
@@ -1714,7 +1777,41 @@ export async function runRegistration(
     }
     const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
     if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading');
-    if (plan.mount === 'bracket' && !(await deps.operator({ kind: 'confirm-mount', text: mountConfirmText(plan) }))) {
+    // #1166 (c1) — THE TOP QUESTION, after the probe is fitted and referenced and BEFORE any probe
+    // motion. Only under the bracket guard: a measured-seat bracket plan whose surface point is on
+    // the stock, with finished programs on the machine. The operator answers with a top measured
+    // before, the bracket's own top, or today's seek; a typed or derived answer moves nothing.
+    const bracketTopFallback =
+      plan.mount === 'bracket' &&
+      plan.bracketOrigin !== null &&
+      surfacePointOnStock(plan) &&
+      deps.hasFinishedPrograms === true;
+    const bracketTop = bracketTopOf(plan);
+    let chosenTop: { machineZ: number; source: 'bracket-top' | 'operator-entered' } | null = null;
+    if (bracketTopFallback && deps.askTop !== undefined) {
+      const choice = await deps.askTop({
+        surfacePoint: { x: plan.surfacePoint.x, y: plan.surfacePoint.y },
+        band: plan.seek.band,
+        derived: bracketTop,
+      });
+      if (choice.kind === 'stop') throw new Stop('stopped: the top question was not answered');
+      if (choice.kind === 'typed') {
+        const z = r3(choice.machineZ);
+        // #1166 — a typed top is accepted only INSIDE the plan's band. This is the executor's own
+        // guard beside the card's sentence: an out-of-band number is never continued from.
+        if (!Number.isFinite(z) || z < plan.seek.band.min || z > plan.seek.band.max) {
+          throw new Stop(
+            `the top entered (machine Z ${f(z)}) is outside the plan's expected ${f(plan.seek.band.min)} to ${f(plan.seek.band.max)} — nothing was moved`,
+          );
+        }
+        chosenTop = { machineZ: z, source: 'operator-entered' };
+      } else if (choice.kind === 'derived') {
+        chosenTop = { machineZ: bracketTop.machineZ, source: 'bracket-top' };
+      }
+    }
+    // A chosen top means the probe does not move to find one: the clamp confirm is the seek's (it
+    // warns about the probe's path), so it is asked only when the operator chose to seek.
+    if (chosenTop === null && plan.mount === 'bracket' && !(await deps.operator({ kind: 'confirm-mount', text: mountConfirmText(plan) }))) {
       throw new Stop('stopped: the clamps were not confirmed where the plan puts them');
     }
 
@@ -1727,7 +1824,8 @@ export async function runRegistration(
     // bracket's top = seat + height. The fallback keeps a pre-#607 plan and the typed-seat path
     // exactly as they were: with no expected reference there is nothing to tap.
     const tapExpectZ = plan.mountTap === null ? null : (plan.mountTap.expectZ ?? plan.mountDatum?.jawTopZ ?? null);
-    if (plan.mountTap !== null && tapExpectZ !== null) {
+    // #1166 (c1) — no mount tap either when the top was chosen: the question's answers move nothing.
+    if (chosenTop === null && plan.mountTap !== null && tapExpectZ !== null) {
       const tap = plan.mountTap;
       const floorZ = tapExpectZ - MOUNT_TAP_FLOOR_MM;
       const prb = await mountTapTouch(io, { x: tap.x, y: tap.y }, plan.seek.fromMachineZ, s, floorZ, tapExpectZ, plan.probe);
@@ -1762,89 +1860,80 @@ export async function runRegistration(
     // datum path keeps its hard stop: its floor is the measured jaw top, so a miss there really is
     // "the stock is not where the machine record says".
     const typedSeat = plan.mountDatum === null && plan.mount === 'vise';
-    // #1166 — THE BRACKET'S DERIVED TOP. A bracket plan exists only off a MEASURED seat
-    // (`bracketExpectedSurface` refuses without one), so its expected surface IS the bracket's own
-    // top: the seat + the stock's thickness (plus any board under it, as that function counted it).
-    // When an earlier program has cut the plan's surface point away, the seek may come back a miss
-    // (no contact, or a reading below the band) and the operator is offered ONE press to use that
-    // derived top — recorded as derived, never as a touch. Vise and tape keep their stops, and so
-    // does the SEAT-SEEK plan (no measured seat yet), whose point is beside the blank.
-    const bracketTopFallback =
-      plan.mount === 'bracket' &&
-      plan.bracketOrigin !== null &&
-      surfacePointOnStock(plan) &&
-      deps.hasFinishedPrograms === true;
     const miss: Partial<SurfaceMiss> = {};
     let recovered: { cap: number; note: string } | null = null;
-    let derivedTop: number | null = null;
-    let slow = await seekSurface(
-      io,
-      plan,
-      {
-        ...plan.seek.band,
-        at: `as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface seek)`,
-        expect: 'the stock is not where the job expects it',
-      },
-      // #633 — the datum path's OWN widening (#619): a blank mounted normally may stand prouder
-      // than the ledge estimate, and this seek is the one that accepts it.
-      {
-        ceilingMm: datumCeiling(plan),
-        missOk: typedSeat || bracketTopFallback,
-        belowBandIsMiss: bracketTopFallback,
-        onMiss: (m) => {
-          miss.how = m.how;
-          miss.z = m.z;
+    // #1166 — the DERIVED surface this run continues from (a chosen top, or the after-miss offer):
+    // no probe touched it, and the record says which kind it is.
+    let derived: { machineZ: number; source: 'bracket-top' | 'operator-entered' } | null = chosenTop;
+    let slow: Prb | null;
+    if (chosenTop !== null) {
+      // NOTHING TOUCHED THIS. The XY is where the seek WOULD have been sent — on the bracket every
+      // move is G53 from its origin, so machine XY = the origin + the plan's surface point — and the
+      // Z is the top the operator chose.
+      slow = derivedSurfacePrb(plan, chosenTop.machineZ);
+    } else {
+      slow = await seekSurface(
+        io,
+        plan,
+        {
+          ...plan.seek.band,
+          at: `as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface seek)`,
+          expect: 'the stock is not where the job expects it',
         },
-      },
-    );
-    if (slow === null && bracketTopFallback) {
-      const machineZ = r3(plan.seek.band.max - s.surfaceToleranceMm);
-      const useDerived = await deps.operator({
-        kind: 'derived-surface',
-        text: `no surface where the plan expected it — finished programs have cut here; use the bracket's own top: seat + stock thickness = ${f(machineZ)}`,
-      });
-      if (!useDerived) throw surfaceMissStop(plan, miss);
-      // NOTHING TOUCHED THIS. The XY is where the seek was SENT — on the bracket every move is G53
-      // from its origin, so machine XY = the origin + the plan's surface point — and the Z is the
-      // bracket's own top. The run continues from the derived reading; the record says so.
-      slow = {
-        x: r3(plan.bracketOrigin!.x + plan.surfacePoint.x),
-        y: r3(plan.bracketOrigin!.y + plan.surfacePoint.y),
-        z: machineZ,
-        touched: false,
-      };
-      derivedTop = machineZ;
-    } else if (slow === null) {
-      const thickness = plan.stockThicknessMm;
-      if (thickness === undefined) {
-        throw new Stop(
-          'the surface touch found nothing in the typed seat’s band, and the plan does not carry the stock’s thickness to bound a deeper search — measure the jaw top instead of typing a seat',
-        );
+        // #633 — the datum path's OWN widening (#619): a blank mounted normally may stand prouder
+        // than the ledge estimate, and this seek is the one that accepts it.
+        {
+          ceilingMm: datumCeiling(plan),
+          missOk: typedSeat || bracketTopFallback,
+          belowBandIsMiss: bracketTopFallback,
+          onMiss: (m) => {
+            miss.how = m.how;
+            miss.z = m.z;
+          },
+        },
+      );
+      if (slow === null && bracketTopFallback) {
+        // #1166 — THE AFTER-MISS OFFER. The wording does not assert a cause it has not checked: it
+        // names the arithmetic and tells the operator what a new blank means.
+        const useDerived = await deps.operator({
+          kind: 'derived-surface',
+          text: `no surface where the plan expected it. If earlier programs cut this spot, use the bracket's own top: ${bracketTopWords(bracketTop)}. If this is a new blank, decline and check its thickness.`,
+        });
+        if (!useDerived) throw surfaceMissStop(plan, miss);
+        slow = derivedSurfacePrb(plan, bracketTop.machineZ);
+        derived = { machineZ: bracketTop.machineZ, source: 'bracket-top' };
+      } else if (slow === null) {
+        const thickness = plan.stockThicknessMm;
+        if (thickness === undefined) {
+          throw new Stop(
+            'the surface touch found nothing in the typed seat’s band, and the plan does not carry the stock’s thickness to bound a deeper search — measure the jaw top instead of typing a seat',
+          );
+        }
+        const expectedSurface = r3(plan.seek.band.max - s.surfaceToleranceMm);
+        const seat = r3(expectedSurface - thickness);
+        const cap = r3(seat - SURFACE_RECOVERY_BELOW_SEAT_MM);
+        if (!(cap < plan.seek.band.min)) {
+          throw new Stop(
+            `the surface touch found nothing down to machine Z ${f(plan.seek.band.min)}, and the ${f(SURFACE_RECOVERY_BELOW_SEAT_MM)} mm search below the typed seat has no room below it — check the stock is in the vise`,
+          );
+        }
+        const confirmed = await deps.operator({
+          kind: 'search-lower',
+          text:
+            `The surface touch found nothing down to machine Z ${f(plan.seek.band.min)}. ` +
+            `Search lower, to machine Z ${f(cap)}? The probe is over the stock: if the stock is there it is met before the cap, and the cap is ${f(SURFACE_RECOVERY_BELOW_SEAT_MM)} mm below the typed seat.`,
+        });
+        if (!confirmed) {
+          throw new Stop('stopped: the surface is below the typed seat’s band, and the deeper search was not confirmed');
+        }
+        slow = await seekDeeper(io, plan, plan.seek.band, cap);
+        recovered = {
+          cap,
+          note:
+            `the surface was found ${f(r3(plan.seek.band.min - slow.z))} mm below the typed seat’s band — the measured top is used; ` +
+            `the measured seat is machine Z ${f(r3(slow.z - thickness))} (top ${f(slow.z)} − thickness ${f(thickness)}), so the typed seat was provisional`,
+        };
       }
-      const expectedSurface = r3(plan.seek.band.max - s.surfaceToleranceMm);
-      const seat = r3(expectedSurface - thickness);
-      const cap = r3(seat - SURFACE_RECOVERY_BELOW_SEAT_MM);
-      if (!(cap < plan.seek.band.min)) {
-        throw new Stop(
-          `the surface touch found nothing down to machine Z ${f(plan.seek.band.min)}, and the ${f(SURFACE_RECOVERY_BELOW_SEAT_MM)} mm search below the typed seat has no room below it — check the stock is in the vise`,
-        );
-      }
-      const confirmed = await deps.operator({
-        kind: 'search-lower',
-        text:
-          `The surface touch found nothing down to machine Z ${f(plan.seek.band.min)}. ` +
-          `Search lower, to machine Z ${f(cap)}? The probe is over the stock: if the stock is there it is met before the cap, and the cap is ${f(SURFACE_RECOVERY_BELOW_SEAT_MM)} mm below the typed seat.`,
-      });
-      if (!confirmed) {
-        throw new Stop('stopped: the surface is below the typed seat’s band, and the deeper search was not confirmed');
-      }
-      slow = await seekDeeper(io, plan, plan.seek.band, cap);
-      recovered = {
-        cap,
-        note:
-          `the surface was found ${f(r3(plan.seek.band.min - slow.z))} mm below the typed seat’s band — the measured top is used; ` +
-          `the measured seat is machine Z ${f(r3(slow.z - thickness))} (top ${f(slow.z)} − thickness ${f(thickness)}), so the typed seat was provisional`,
-      };
     }
     // #585 — the extent touches search the same floor the centre was found under. After a recovery
     // that floor is the cap, not the typed seat's band: a blank found below the band is equally
@@ -1852,7 +1941,7 @@ export async function runRegistration(
     const seekBand = recovered === null ? plan.seek.band : { ...plan.seek.band, min: recovered.cap };
     // #519 item 1 — the surface touch, at the plan's own point. #1166 — a DERIVED top is not a
     // reading: no dot is drawn and no table row is claimed; the run narrates the derivation instead.
-    if (derivedTop === null) {
+    if (derived === null) {
       io.saw({
         source: 'surface',
         label: null,
@@ -1863,7 +1952,11 @@ export async function runRegistration(
         kind: null,
       });
     } else {
-      io.at(`the surface is DERIVED: the bracket’s own top at machine Z ${f(derivedTop)} — nothing touched it`);
+      io.at(
+        derived.source === 'operator-entered'
+          ? `the top is the operator’s ENTERED value, machine Z ${f(derived.machineZ)} — nothing touched it`
+          : `the surface is DERIVED: the bracket’s own top at machine Z ${f(derived.machineZ)} — nothing touched it`,
+      );
     }
 
     // #619 — a datum-path surface ABOVE the expected band is the blank standing prouder than the
@@ -1904,7 +1997,7 @@ export async function runRegistration(
       probeRefZ: ref.z,
       surface: slow,
       scans,
-      ...(derivedTop === null ? {} : { surfaceDerived: 'bracket-top' as const }),
+      ...(derived === null ? {} : { surfaceDerived: derived.source }),
     };
     // A plan that registers on earlier-setup features has its own outcome (#429); #430's is unchanged.
     const outcome = plan.references ? referenceOutcome(plan, data) : computeOutcome(plan, data);
@@ -1915,7 +2008,7 @@ export async function runRegistration(
     // #1166 — a derived top cannot be spread-measured: the plan's points are exactly where earlier
     // programs have cut, so an extent seek would stop the run this press exists to save (or record a
     // cut face as the blank's top). The spread is skipped, and the record says so.
-    if (derivedTop !== null && spreadPlan !== undefined) {
+    if (derived !== null && spreadPlan !== undefined) {
       outcome.notes.push(
         'the surface spread was not measured this run: the top the plan expected has been cut away, and the bracket’s own top is the DERIVED surface',
       );
@@ -1935,7 +2028,7 @@ export async function runRegistration(
     const spreadReadings: SurfaceReading[] = [];
     // #1166 — no extent seeks after a DERIVED top (see the note above): the points are where the
     // earlier programs cut, and a derived Z is not a spread measurement.
-    if (spreadPlan !== undefined && derivedTop === null) {
+    if (spreadPlan !== undefined && derived === null) {
       const lowApproach = plan.mountObstacles.length === 0;
       // #632 — the approach clears the MEASURED surface, not only the plan's high bound. A blank
       // standing prouder than the record expects (a stale `surfaceTopZ` written by a thinner blank,
@@ -2008,7 +2101,7 @@ export async function runRegistration(
     // tilt that fits a plane is followed by the re-posted program; a dome (residual wider than the
     // band) no longer refuses — the origin is still written and the machine levels the top itself.
     let spread: SurfaceSpreadAssessment | undefined;
-    if (spreadPlan !== undefined && derivedTop === null) {
+    if (spreadPlan !== undefined && derived === null) {
       spread = assessSurfaceReadings(spreadPlan, spreadReadings);
       outcome.surfaceZ = spread.z0.z;
     }

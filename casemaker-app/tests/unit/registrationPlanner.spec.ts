@@ -32,6 +32,8 @@ import {
   type MountDatum,
   type PlanInput,
   type RegistrationPlan,
+  type TopChoice,
+  type TopQuestion,
 } from '@/engine/cnc/registration';
 import type { LiveTouch } from '@/engine/cnc/registration/liveTouch';
 import type { ProbeSpec } from '@/engine/cnc/registration/plan';
@@ -591,19 +593,24 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
   // A bracket plan exists only off a MEASURED seat (`bracketExpectedSurface` refuses without one),
   // so the plan's expected surface IS the bracket's own top: the seat + the stock's thickness. An
   // earlier program has cut the plan's surface point away; the bounded seek misses, and with
-  // finished programs on the job the Register card offers ONE press — the derived top — instead of
-  // failing. The record says DERIVED, never touched. Vise/tape and a job with no finished program
-  // keep today's stop.
-  const EXPECTED = SURFACE; // plan('bracket')'s expected surface: the bracket's own top
+  // finished programs on the machine the Register card offers the top — a typed one asked BEFORE
+  // the seek, or the bracket's own top — instead of failing. The record says DERIVED/ENTERED, never
+  // touched. Vise/tape, a job with no finished program, and the seat-seek plan keep today's stop.
+  const EXPECTED = SURFACE; // the plan's expected surface: the bracket's own top
   const MISS_AT = 'found nothing down to machine Z -56.572';
-  const derivedPress = (z: number): string =>
-    `no surface where the plan expected it — finished programs have cut here; use the bracket's own top: seat + stock thickness = ${z.toFixed(3)}`;
+  const BAND = { min: -56.572, max: -55.772 };
+  const f3 = (v: number): string => (Math.round(v * 1000) / 1000).toFixed(3).replace(/\.?0+$/, '') || '0';
+  /** The plan carries the stock's 25 mm, so the press shows the whole arithmetic. */
+  const P25 = (): RegistrationPlan => plan('bracket', { stockThicknessMm: 25 });
+  const derivedPress = (seat: number, stock: number, z: number): string =>
+    `no surface where the plan expected it. If earlier programs cut this spot, use the bracket's own top: ` +
+    `seat ${f3(seat)} + stock ${f3(stock)} = ${f3(z)}. If this is a new blank, decline and check its thickness.`;
 
   it('a no-contact seek offers the derived top once; confirming continues and records it as derived', async () => {
     // The stock is not under the plan's surface point (the point has been cut away).
     const z1 = fakeZ1({ actual: { ...BLANK, xMin: 200, xMax: 238 } });
     const asked: { kind: string; text: string }[] = [];
-    const r = await runRegistration(plan('bracket'), {
+    const r = await runRegistration(P25(), {
       console: z1.console,
       operator: async (step) => {
         asked.push(step);
@@ -614,7 +621,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
     if (!r.ok) throw new Error(r.reason);
     const presses = asked.filter((s) => s.kind === 'derived-surface');
     expect(presses).toHaveLength(1);
-    expect(presses[0]!.text).toBe(derivedPress(EXPECTED));
+    expect(presses[0]!.text).toBe(derivedPress(EXPECTED - 25, 25, EXPECTED));
     // NOTHING TOUCHED IT: the record carries the derived top, at the machine XY the seek was sent.
     expect(r.data.surfaceDerived).toBe('bracket-top');
     expect(r.data.surface.touched).toBe(false);
@@ -624,6 +631,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
     expect(r.outcome.surfaceDerived).toBe('bracket-top');
     expect(r.outcome.surfaceZ).toBeCloseTo(EXPECTED, 3);
     expect(r.outcome.notes.join(' ')).toContain('DERIVED');
+    expect(r.outcome.notes.join(' ')).toContain('check its thickness');
   });
 
   it('a reading BELOW the band offers the same press', async () => {
@@ -715,6 +723,103 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('outside the expected');
     expect(asked).not.toContain('derived-surface');
+  });
+
+  // ── (c1) THE QUESTION, before the seek ────────────────────────────────────────────────────────
+  it('c1: the question is asked before any probe motion; a typed in-band top continues with no seek', async () => {
+    const z1 = fakeZ1({ actual: BLANK });
+    const asked: TopQuestion[] = [];
+    const r = await runRegistration(P25(), {
+      console: z1.console,
+      operator: yes,
+      hasFinishedPrograms: true,
+      askTop: async (q) => {
+        asked.push(q);
+        return { kind: 'typed', machineZ: -56.3 };
+      },
+    });
+    if (!r.ok) throw new Error(r.reason);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.surfacePoint).toEqual({ x: 19.05, y: 38.1 });
+    expect(asked[0]!.band).toEqual(BAND);
+    expect(asked[0]!.derived.machineZ).toBeCloseTo(SURFACE, 6);
+    expect(asked[0]!.derived.seat).toBeCloseTo(SURFACE - 25, 6);
+    expect(asked[0]!.derived.thickness).toBe(25);
+    // NOTHING PROBED: no G38 anywhere in the run.
+    expect(z1.lines.filter((l) => l.startsWith('G38.3'))).toEqual([]);
+    expect(r.data.surfaceDerived).toBe('operator-entered');
+    expect(r.data.surface.touched).toBe(false);
+    expect(r.data.surface.z).toBeCloseTo(-56.3, 3);
+    expect(r.outcome.surfaceDerived).toBe('operator-entered');
+    expect(r.outcome.surfaceZ).toBeCloseTo(-56.3, 3);
+    expect(r.outcome.notes.join(' ')).toContain('ENTERED by the operator');
+    // The origin the write would make: the typed top + (cutter ref − probe ref), today's readings.
+    expect(cutterZ0(r.outcome, -79.163)).toBeCloseTo(-56.3 + (-79.163 - -76.063), 3);
+  });
+
+  it('c1: a typed top OUTSIDE the band is refused, and nothing was moved', async () => {
+    const z1 = fakeZ1({ actual: BLANK });
+    const r = await runRegistration(P25(), {
+      console: z1.console,
+      operator: yes,
+      hasFinishedPrograms: true,
+      askTop: async () => ({ kind: 'typed', machineZ: -50 }),
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('outside the plan');
+    expect(z1.lines.filter((l) => l.startsWith('G38.3'))).toEqual([]);
+  });
+
+  it('c1: “use the bracket’s own top” continues from it, with no motion', async () => {
+    const z1 = fakeZ1({ actual: BLANK });
+    const r = await runRegistration(P25(), {
+      console: z1.console,
+      operator: yes,
+      hasFinishedPrograms: true,
+      askTop: async () => ({ kind: 'derived' }),
+    });
+    if (!r.ok) throw new Error(r.reason);
+    expect(z1.lines.filter((l) => l.startsWith('G38.3'))).toEqual([]);
+    expect(r.data.surfaceDerived).toBe('bracket-top');
+    expect(r.data.surface.touched).toBe(false);
+    expect(r.data.surface.z).toBeCloseTo(SURFACE, 3);
+  });
+
+  it('c1: “touch it again” is today’s seek — transcript byte-identical', async () => {
+    const plainZ = fakeZ1({ actual: SHIFTED });
+    const plain = await runRegistration(P25(), { console: plainZ.console, operator: yes });
+    if (!plain.ok) throw new Error(plain.reason);
+    const askedZ = fakeZ1({ actual: SHIFTED });
+    let asked = 0;
+    const r = await runRegistration(P25(), {
+      console: askedZ.console,
+      operator: yes,
+      hasFinishedPrograms: true,
+      askTop: async () => {
+        asked += 1;
+        return { kind: 'seek' };
+      },
+    });
+    if (!r.ok) throw new Error(r.reason);
+    expect(asked).toBe(1);
+    expect(r.transcript).toEqual(plain.transcript);
+    expect(r.data.surfaceDerived).toBeUndefined();
+  });
+
+  it('c1: no question without finished programs, on a vise, or on the seat-seek plan', async () => {
+    const calls: string[] = [];
+    const askTop = async (): Promise<TopChoice> => {
+      calls.push('asked');
+      return { kind: 'seek' };
+    };
+    const a = fakeZ1({ actual: BLANK });
+    await runRegistration(P25(), { console: a.console, operator: yes, askTop });
+    const v = fakeZ1({ actual: BLANK });
+    await runRegistration(plan('vise'), { console: v.console, operator: yes, hasFinishedPrograms: true, askTop });
+    const seatSeek = { ...P25(), surfacePoint: { x: -30, y: -30 } };
+    const s = fakeZ1({ actual: BLANK });
+    await runRegistration(seatSeek, { console: s.console, operator: yes, hasFinishedPrograms: true, askTop });
+    expect(calls).toEqual([]);
   });
 });
 
