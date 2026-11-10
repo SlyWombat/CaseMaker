@@ -78,6 +78,7 @@ import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { RunProgressLine } from './RunProgressLine';
 import { RunLogFold } from './RunLogFold';
 import { CutRunCard } from './CutRunCard';
+import { CutBitChangeCard } from './CutBitChangeCard';
 import {
   ROTARY_NO_MODULE_REFUSAL,
   ROTARY_UNMEASURED_REFUSAL,
@@ -1737,6 +1738,16 @@ export function EngraveCutSurface({
       </Step>
 
       <Step number={3} title="Start cut" done={ran} current={currentStep === 3} summary={step3Summary}>
+        {/* #1168 — THE BIT CHANGE, ON THE STEP (mockup 7). Shown for as long as the release is
+            paused between programs, never inside a fold: the operator is at the machine and the
+            one press they need must be where they are looking. The card calls the same release
+            action the expert panel's button does, so the posted lines are unchanged. */}
+        {releaseRecord !== undefined && releaseRecord.phase === 'bit-change' && releaseRecord.next !== null && target !== null && (
+          <CutBitChangeCard
+            record={releaseRecord}
+            onConfirm={() => useEngraveReleaseStore.getState().confirmChange(target)}
+          />
+        )}
         {/* #1167 — THE RUN AS ONE CARD, before the controls that make it start: every program in
             run order (the running row, the bit-change marks, the flip), the fixed Pause/Stop row,
             and the footnote. Display only — the release step below still runs the job. */}
