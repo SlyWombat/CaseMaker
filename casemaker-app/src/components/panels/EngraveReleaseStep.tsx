@@ -32,6 +32,9 @@ import { readFlag } from '@/platform/defaultsClient';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
+// #1123-42 — the running program's percent, time left and next cutter, from the run watch's own
+// status line and the release list's cut order.
+import { nextBitChange, runningProgramWords } from '@/engine/cnc/engrave/runProgress';
 import { EngraveMachineRun } from './EngraveMachineRun';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
@@ -227,6 +230,10 @@ export function EngraveReleaseStep({
   // #618 — whether the machine's run is suspended, so the Pause button becomes Resume. A boolean
   // selector: the run entry itself changes on every progress poll, and only this bit matters here.
   const runPaused = useMachineRunStore((s) => (target === null ? false : s.runs[machineKey(target)]?.paused === true));
+  // #1123-42 — the same run entry's progress (the `P:` reading the watch folds in every poll). The
+  // object is new per poll; this line is the one thing here that should follow it.
+  const liveProgress = useMachineRunStore((s) => (target === null ? null : (s.runs[machineKey(target)]?.progress ?? null)));
+  const toolItems = useToolRegistryStore((s) => s.items);
 
   useEffect(() => {
     if (host !== undefined && port !== undefined && blocker === null) plan({ host, port }, job, programs);
@@ -269,6 +276,19 @@ export function EngraveReleaseStep({
   const uploadsReady = record.files.every((f) => f.done || f.upload === 'uploaded' || f.upload === 'present');
   const uploadFailed = record.files.some((f) => f.upload === 'failed');
   const atMachine = record.atMachine;
+  // #1123-42 — the running program's sentence and the next cutter change. Null at every phase but
+  // a playing program: at the bit-change pause the ChangePanel already names the next cutter.
+  const playing = record.phase === 'running' && record.active !== null;
+  const liveWords = playing
+    ? runningProgramWords({
+        active: record.active as number,
+        total: record.files.length,
+        progress: liveProgress,
+        paused: runPaused,
+      })
+    : null;
+  const change = playing ? nextBitChange(record.files, record.active) : null;
+  const changeLabel = change?.kind === 'change' ? cutterIdentity(change.file.toolKey, toolItems) : null;
   // The tick gates EVERY start, resume and try-again alike: an operator at the machine is what
   // the confirmation means, and the run panel's own tick does not carry across to this step.
   const mayStart =
@@ -437,6 +457,25 @@ export function EngraveReleaseStep({
 
           {record.phase === 'running' && target !== null && (
             <>
+              {/* #1123-42 — THE RUNNING PROGRAM, ON THE CUT STEP. The percent and clock are the
+                  controller's `P:` reading (the run watch's own poll); the next bit change is the
+                  release list's cut order. Nothing here estimates anything the machine did not. */}
+              {liveWords !== null && (
+                <p
+                  data-testid="engrave-release-live-progress"
+                  data-percent={liveProgress?.percent ?? undefined}
+                  style={{ fontSize: 12, color: '#e6edf5', lineHeight: 1.5, margin: '6px 0 0' }}
+                >
+                  {liveWords}
+                </p>
+              )}
+              {change !== null && (
+                <p style={MUTED} data-testid="engrave-release-next-change">
+                  {change.kind === 'last' || changeLabel === null
+                    ? 'No further bit change — this is the job’s last cutter.'
+                    : `Next bit change: program ${change.file.index} of ${record.files.length} — ${changeLabel.name} (${changeLabel.code}).`}
+                </p>
+              )}
               {/* #618 — Pause beside Stop while a program runs; the same button resumes it. The
                   suspend/resume words are `platform/machinePause.ts`'s one function, sent by the
                   run's watch at its next poll boundary. */}

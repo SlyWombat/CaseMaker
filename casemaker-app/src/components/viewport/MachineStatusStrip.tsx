@@ -10,6 +10,8 @@ import { accessoriesFor, machineRecordByAddress, machineRecordByProfile } from '
 import { MILL_MODELS } from '@/engine/cnc/machine';
 import { machineDisplayName } from '@/platform/locationClient';
 import { probeNameFor } from '@/engine/cnc/registration/mountContext';
+// #1123-42 — the one formula the Cut step's progress line also draws (`elapsed × (100 − percent) / percent`).
+import { remainingSeconds } from '@/engine/cnc/engrave/runProgress';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
@@ -17,7 +19,7 @@ import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useStripAccessoryStore } from '@/store/stripAccessoryStore';
 import { useCameraPaneStore } from '@/store/cameraPaneStore';
 import { useMachineCamera } from '@/hooks/useMachineCamera';
-import { readStatusLine, type JobProgress, type StatusPosition, type StatusRate } from '@/platform/desktop/protocol';
+import { readStatusLine, type StatusPosition, type StatusRate } from '@/platform/desktop/protocol';
 import { alarmLine } from '@/platform/machineUpload';
 import { stateColour, stateWord } from './machineWords';
 import { machineToolName, spindleMismatchWords } from './machineToolWords';
@@ -98,11 +100,6 @@ function fmtElapsed(s: number): string {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
-/** The remaining time the `P:` percent and elapsed imply, or null while there is nothing to divide. */
-function remainingSeconds(p: JobProgress | null | undefined): number | null {
-  if (p == null || p.percent === null || p.elapsedS === null || p.percent <= 0 || p.percent >= 100) return null;
-  return Math.round((p.elapsedS * (100 - p.percent)) / p.percent);
-}
 
 /** One axis: the work value large, the machine value small and muted beneath it. */
 function AxisCell({ axis, work, machine }: { axis: string; work: number | null; machine: number | null }): JSX.Element {
@@ -465,7 +462,7 @@ export function MachineStatusStrip(): JSX.Element | null {
   // shows neither. An Idle below 100 % is a program paused mid-job (the 3–4 s `Idle` at `M05`),
   // and its bar stays. The Stop is already the strip's while the machine is not idle.
   const percent = state === 'Idle' && (progress?.percent ?? 0) >= 100 ? null : progress?.percent ?? null;
-  const remaining = remainingSeconds(progress);
+  const remaining = remainingSeconds(progress ?? null);
 
   return (
     <div
