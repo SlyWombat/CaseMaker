@@ -18,7 +18,6 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { jobFingerprint } from '@/engine/cnc/engrave/package';
 import type { EngraveJob } from '@/types/engraveJob';
 import {
@@ -36,9 +35,6 @@ import {
 import { clearStoredBaseline, resetLocationStore, useLocationStore } from '@/store/locationStore';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DOC = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as { defaults: unknown };
-const DEFAULTS = ShopDefaultsSchema.parse(DOC.defaults);
-
 const TARGET = { host: '192.0.2.10', port: 2222 };
 
 /** A 2-cell map at a given level; flat on both cells. */
