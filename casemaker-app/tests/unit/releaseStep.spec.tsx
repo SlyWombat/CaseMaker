@@ -1315,6 +1315,57 @@ describe('#1179 C — the files on the card belong to the package', () => {
   });
 });
 
+describe('#1179 C — the play line is the package-keyed file', () => {
+  it('plays the keyed path and never a legacy same-named file left on the card', async () => {
+    const job = twoSetupJob();
+    seedSetupRegistration(job, 'setup-2');
+    const made = freezePackage(job, [P1, P2], '2026-10-17T14:02:00.000Z');
+    if (!made.ok) throw new Error(made.reason);
+    const withPackage = { ...job, package: made.package } as EngraveJob;
+    const key = made.package.hash;
+    const stem = releaseStem('Two setup job');
+    const legacy = `${stem}-p1.nc`;
+    // Yesterday's keyless file is already on the card; the ledger attributes it to this app, so
+    // the cleanup removes it. The PLAY must name the keyed path either way.
+    const removed: string[] = [];
+    setMachineFilesLoader(async () => ({
+      list: async () => ({
+        kind: 'listed' as const,
+        entries: [{ name: legacy, size: 10, modified: null, directory: false }],
+      }),
+      remove: async (_target, name) => {
+        removed.push(name);
+        return { kind: 'deleted' as const, name, detail: 'deleted' };
+      },
+    }));
+    recordUploadedFile(TARGET.host, legacy);
+    useEngraveJobStore.setState({ job: withPackage });
+    const reports = new Map([
+      [P1.programHash, VERIFY],
+      [P2.programHash, VERIFY],
+    ] as const);
+    const runPlan = cutPlan({ job: withPackage, pkg: made.package, finishedHashes: [], defaults: null });
+    render(
+      <EngraveReleaseStep
+        target={TARGET}
+        job={withPackage}
+        programs={frozenReleaseSources(withPackage, made.package, reports)}
+        runPlan={runPlan}
+        blocker={null}
+      />,
+    );
+    await uploadAndStart();
+    await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+
+    const keyedName = `${stem}-${key}-p1.nc`;
+    expect(uploaded).toContain(keyedName);
+    expect(sent.filter((l) => l.startsWith('play'))).toEqual([`play /sd/gcodes/${keyedName}`]);
+    // The legacy same-named file is gone, and it was never played.
+    expect(removed).toEqual([legacy]);
+    expect(sent.join('\n')).not.toContain(`play /sd/gcodes/${legacy}`);
+  });
+});
+
 describe('#1146 the plan line carries the walks’ time', () => {
   it('adds the cleaning passes and the air walk to the plan, stated as their own term', async () => {
     useShopDefaultsStore.setState({ status: 'present', defaults: WALKS_ON });

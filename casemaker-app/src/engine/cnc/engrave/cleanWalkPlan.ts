@@ -153,7 +153,10 @@ export function planCleanWalks(args: CleanWalkPlanArgs): CleanWalksPlan {
     plan[mode] = {
       mode,
       // #1179 C — the walk belongs to the package: its name carries the key with the programs'.
-      filename: `${releaseStem(job.name)}${key8Of(job.package?.hash ?? null) === null ? '' : `-${key8Of(job.package?.hash ?? null)}`}-${mode === 'clean' ? 'clean' : 'airwalk'}.nc`,
+      filename: (() => {
+        const key = key8Of(job.package?.hash ?? null);
+        return `${releaseStem(job.name)}${key === null ? '' : `-${key}`}-${mode === 'clean' ? 'clean' : 'airwalk'}.nc`;
+      })(),
       nc: posted.text,
       hash: programHash(posted.text),
       verify,
