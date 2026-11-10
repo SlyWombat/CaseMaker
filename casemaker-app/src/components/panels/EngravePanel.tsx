@@ -219,6 +219,7 @@ import type {
   SacrificialUnder,
   ViseParams,
 } from '@/types/engraveJob';
+import { planChoiceOf } from '@/types/engraveJob';
 
 /**
  * The Engrave panel (#205): stock, labels, tool, vise, cutting parameters, findings, generate.
@@ -2402,18 +2403,36 @@ export function EngravePanel(): JSX.Element {
   // plan's own substitution statements carry the borrowed row's diameter.
   const feedsNotes =
     run.staleSince === null && run.generated?.ok === true ? feedsProxyNotes(run.generated.planStatements ?? []) : [];
+  // #1123 item 44 — BEFORE A GENERATE THE LINE IS THE SET'S, NOT THE FILE'S ONE TOOL. The planner
+  // chooses the cutter SET at Generate from the owned inventory (`planChoiceOf` is 'owned' by
+  // default), so naming the file's single tool here read as a lost plan on the 11-09 bench and
+  // cost a cancelled run. A tool the OPERATOR chose, or a measured answer that is running or
+  // applied, still names itself and its source — those are answers the operator can act on.
+  const preplanSetWords =
+    cutterCountWords === null &&
+    tool !== null &&
+    cutterSource !== 'user' &&
+    measuredStatus !== 'measuring' &&
+    measuredNow === null &&
+    !measuredApplied
+      ? planChoiceOf(job) === 'ideal'
+        ? 'planned at Generate from every bit the app knows'
+        : 'planned at Generate from your owned bits'
+      : null;
   const cutterVerdict =
     // #1123 items 5/6 keep the Job line a COUNT (the rows below name the cutters); item 8's
     // borrowed-feeds note joins the same line, so neither landing loses its sentence.
     cutterCountWords !== null
       ? [cutterCountWords, ...feedsNotes].join(' · ')
-      : tool !== null
-        ? [toolDisplayName(tool), cutterProvenance, cutterFidelity, catalogueNote, substitutionNote, setupSubstitutionNote === '' ? null : setupSubstitutionNote]
-            .filter((w): w is string => w !== null)
-            .join(' · ')
-        : measuredStatus === 'measuring' || measuredNow !== null || rec !== null
-          ? 'choosing…'
-          : 'no cutter chosen';
+      : preplanSetWords !== null
+        ? preplanSetWords
+        : tool !== null
+          ? [toolDisplayName(tool), cutterProvenance, cutterFidelity, catalogueNote, substitutionNote, setupSubstitutionNote === '' ? null : setupSubstitutionNote]
+              .filter((w): w is string => w !== null)
+              .join(' · ')
+          : measuredStatus === 'measuring' || measuredNow !== null || rec !== null
+            ? 'choosing…'
+            : 'no cutter chosen';
 
   const simEnabled = featureSim;
   const running = run.phase === 'generating' || run.phase === 'simulating' || run.phase === 'checking';

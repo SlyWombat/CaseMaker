@@ -5018,16 +5018,38 @@ describe('#798 — the Cutter line', () => {
     expect((screen.getByTestId('engrave-group-cutter') as HTMLDetailsElement).open).toBe(true);
   });
 
-  it('says what the cutter is and where the answer came from', () => {
+  it('#1123 item 44 — before a Generate the line says the SET is planned at Generate, not the file’s one tool', () => {
     act(() => useEngraveJobStore.getState().setTool('flat-1.0', 'computed'));
     render(<EngravePanel />);
-    // The panel starts its measured search on mount; park it so the RULE's answer is what the
-    // line states (the search's own word is the next test's).
+    // The panel starts its measured search on mount; park it so the settled pre-plan state is
+    // what the line states.
     act(() => useEngravePreviewStore.setState({ measuredStatus: 'idle', measured: null }));
     const line = screen.getByTestId('engrave-cutter-line').textContent ?? '';
     expect(line).toContain('Cutter · ');
+    // The planner chooses the set at Generate from the owned inventory (the default plan choice);
+    // naming the file's single tool here read as a lost plan on the 11-09 bench and cost a run.
+    expect(line).toContain('planned at Generate from your owned bits');
+    expect(line).not.toContain('flat end');
+  });
+
+  it('#1123 item 44 — the ideal plan choice says the set is planned from every bit the app knows', () => {
+    act(() => {
+      useEngraveJobStore.getState().setTool('flat-1.0', 'computed');
+      useEngraveJobStore.getState().setPlanChoice('ideal');
+    });
+    render(<EngravePanel />);
+    act(() => useEngravePreviewStore.setState({ measuredStatus: 'idle', measured: null }));
+    const line = screen.getByTestId('engrave-cutter-line').textContent ?? '';
+    expect(line).toContain('planned at Generate from every bit the app knows');
+  });
+
+  it('#1123 item 44 — a tool CHOSEN by the operator still names itself and its source', () => {
+    act(() => useEngraveJobStore.getState().setTool('flat-1.0', 'user'));
+    render(<EngravePanel />);
+    act(() => useEngravePreviewStore.setState({ measuredStatus: 'idle', measured: null }));
+    const line = screen.getByTestId('engrave-cutter-line').textContent ?? '';
     expect(line).toContain('flat end');
-    expect(line).toContain('recommended');
+    expect(line).toContain('chosen by you');
   });
 
   it('says “choosing…” while the measured search runs', () => {
