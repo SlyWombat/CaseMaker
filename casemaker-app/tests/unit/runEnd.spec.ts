@@ -355,17 +355,28 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
       finishedAt: '2026-10-16T12:00:00.000Z',
       stock: { lengthMm: 100, widthMm: 100, thicknessMm: 25 },
       registration,
+      // #1179 step 3 — what the program cut, on the 2 mm stock frame (100 × 100 → 50 × 50 cells);
+      // the profile goes through at Z −5.2, so its level is 104.
+      cutMap: expect.objectContaining({
+        cellMm: 2,
+        cols: 50,
+        rows: 50,
+        stepMm: 0.05,
+        depth: expect.objectContaining({ encoding: 'rle' }),
+        flat: expect.objectContaining({ encoding: 'rle' }),
+      }),
     });
+    expect((recordedRun as { cutMap: { depth: { data: string } } }).cutMap.depth.data).toContain('104');
 
-    // A caller that knows less leaves the facts out — the record never guesses.
+    // A caller that knows less leaves the facts out — the record never guesses, and a blank with
+    // no stated size gets no stock frame and therefore no cut map.
     recordedRun = null;
-    await endOfRun(TARGET, finished, ctx);
+    await endOfRun(TARGET, finished, { ...ctx, stockXY: undefined });
     expect(recordedRun).toEqual({
       hash: programHash(CUT_OUT),
       jobId: 'job-1',
       cutterKey: 'inv:kz-a',
       finishedAt: '2026-10-16T12:00:00.000Z',
-      stock: { lengthMm: 100, widthMm: 100 },
     });
   });
 
