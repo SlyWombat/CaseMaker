@@ -562,3 +562,48 @@ describe('a board’s through drills sweep on the column engine (#743 P-8)', () 
     }
   });
 });
+
+describe('#1140 the shape gates judge the cutter a setup assigns to the item', () => {
+  it('does not refuse a cut-out that setup 2 gives to the corn bit', async () => {
+    const { job } = await twoSided();
+    const { validateJob } = await import('@/engine/cnc/engrave/jobSetup');
+    // The import’s §3.4 plan assigns each role a cutter: the engraver isolates, the drills make
+    // the holes, and the flat frees the cut-out (`toolItems`, #472/#746). The JOB’s own cutter is
+    // the engraver, which cannot profile — but it never cuts the cut-out.
+    const cutout = job.cutouts![0]!;
+    expect(job.setups![1]!.toolItems![corn.key]).toContain(cutout.id);
+    const findings = validateJob(job, null, { tools: TOOLS });
+    expect(findings.filter((f) => f.code === 'cutout-needs-flat')).toEqual([]);
+  });
+
+  it('still refuses a cut-out no setup owns when the job’s own cutter cannot profile it', async () => {
+    const { job } = await twoSided();
+    const { validateJob } = await import('@/engine/cnc/engrave/jobSetup');
+    // No `toolItems`: the setup’s first cutter owns every item (the single-cutter rule), and the
+    // job’s cutter is the engraver — so the gate has a true statement to make.
+    const stripped = { ...job, setups: job.setups!.map((s) => ({ ...s, toolItems: undefined })) };
+    const findings = validateJob(stripped, null, { tools: TOOLS });
+    expect(findings.some((f) => f.code === 'cutout-needs-flat')).toBe(true);
+  });
+
+  it('does not refuse a bored hole that the setup gives to the flat that helixes it', async () => {
+    // No 1 mm drill in the bench: the import bores the 1 mm holes with the 0.8 mm corn bit and
+    // assigns them to it. The job's own cutter is still the engraver.
+    const bench = [engraver, bit('inv:d08', 'pcb-drill-0-8', 0.8), corn];
+    const built = await buildPcbJob(tl, SET(), { blank: BLANK, tabs: TABS, tools: bench, catalogue: ROWS });
+    if (!built.ok) throw new Error(built.error);
+    const job = built.job;
+    job.tool = engraver.tool;
+    const { validateJob } = await import('@/engine/cnc/engrave/jobSetup');
+    const bores = (job.drills ?? []).filter((d) => d.mode === 'bore');
+    expect(bores.length).toBeGreaterThan(0);
+    const owned = job.setups!.flatMap((s) => Object.entries(s.toolItems ?? {}));
+    expect(owned.some(([key, ids]) => key === corn.key && ids.some((id) => bores.some((b) => b.id === id)))).toBe(true);
+    const findings = validateJob(job, null, { tools: bench });
+    expect(findings.filter((f) => f.code === 'bore-needs-end-mill')).toEqual([]);
+    // And the same board with the assignment stripped still refuses: the job's own cutter cannot
+    // helix the hole.
+    const stripped = { ...job, setups: job.setups!.map((s) => ({ ...s, toolItems: undefined })) };
+    expect(validateJob(stripped, null, { tools: bench }).some((f) => f.code === 'bore-needs-end-mill')).toBe(true);
+  });
+});

@@ -2126,10 +2126,27 @@ export function validateJob(
       }
     }
   }
+  /**
+   * #1140 — THE CUTTER A SETUP HANDS AN ITEM. A board arrives as several programs (#472/#746):
+   * the engraver isolates, a drill makes the holes, and a flat that reaches through frees the
+   * cut-out — each written into the setup's `tools`/`toolItems`. The shape and reach gates below
+   * judge the cutter that WILL cut the item; the job's own cutter answers only when no setup
+   * claims it (and for a job with no setups at all, whose implicit setup owns every item with the
+   * job's cutter). Judging the job's first cutter refused a cut-out the import had already given
+   * a corn bit — the #1140 e2e's Generate blocker.
+   */
+  const itemCutter = (itemId: string): Tool | null => {
+    const key = assignedCutterKey(job, itemId);
+    if (key === null || key === job.toolKey) return drillTool;
+    // The job's snapshot belongs to the job's key (`toolForJob` prefers it); a per-item key needs
+    // its own entry, from the caller's library when it has one.
+    return toolForJob({ toolKey: key }, options.tools ?? getTools());
+  };
+
   // A profiler needs SHANK clearance, so its limit is `shoulderLength ?? fluteLength` — the same
   // number the sweep's holder gate uses. A drill bit is judged in its own loop by flute length.
-  const profilerReach =
-    drillTool !== null && !drillIsBit ? (drillTool.shoulderLength ?? drillTool.fluteLength) : null;
+  const profilerReachOf = (cutter: Tool | null): number | null =>
+    cutter === null || cutter.shape === 'drill' ? null : (cutter.shoulderLength ?? cutter.fluteLength);
 
   // #218/#736 — the through gate, one reading for every through cut (a through shape pocket or a
   // cut-out). Without a board, the VISE's own geometry decides: a cut the sweep shows inside the
@@ -2147,14 +2164,18 @@ export function validateJob(
       const board = throughBoardFinding(id, who, job, bed, under);
       if (board !== null) findings.push(board);
     }
-    if ((throughReady || air) && profilerReach !== null && profilerReach > 0 && throughDepth > profilerReach) {
+    // #1140 — the reach is the ITEM's own cutter's: a cut-out the setup gives to a through-reaching
+    // flat is not judged by the job's engraver, and vice versa.
+    const cutter = itemCutter(id);
+    const reach = profilerReachOf(cutter);
+    if ((throughReady || air) && reach !== null && reach > 0 && throughDepth > reach) {
       findings.push({
         severity: 'error',
         code: 'through-tool-reach',
         labelId: id,
         message:
-          `${who} cuts through to ${fmt3(throughDepth)} mm, past the ${fmt3(profilerReach)} mm of ` +
-          `"${drillTool!.name}" above its shank; the holder would rub the blank.`,
+          `${who} cuts through to ${fmt3(throughDepth)} mm, past the ${fmt3(reach)} mm of ` +
+          `"${cutter!.name}" above its shank; the holder would rub the blank.`,
       });
     }
   };
@@ -2172,14 +2193,17 @@ export function validateJob(
   const allById = new Map(all.map((item) => [item.id, item] as const));
   for (const cutout of enabledCutouts) {
     const who = cutout.name ? `Cut-out "${cutout.name}"` : 'The cut-out';
-    if (drillTool !== null && drillTool.shape !== 'flat') {
+    // #1140 — the cutter the setup gives THIS cut-out, not the job's first cutter: an imported
+    // board's flat owns it, and the engraver that owns the isolation cannot profile.
+    const cutter = itemCutter(cutout.id);
+    if (cutter !== null && cutter.shape !== 'flat') {
       findings.push({
         severity: 'error',
         code: 'cutout-needs-flat',
         labelId: cutout.id,
         message:
           `${who} follows its outline with the side of the cutter, so it needs a flat end mill; ` +
-          `"${drillTool.name}" is a ${drillTool.shape} cutter and cannot profile.`,
+          `"${cutter.name}" is a ${cutter.shape} cutter and cannot profile.`,
       });
     }
     throughGate(cutout.id, who);
@@ -2233,14 +2257,17 @@ export function validateJob(
             'a bore makes the hole the job asks for, not the cutter’s width.',
         });
       }
-      if (drillTool !== null && drillTool.shape !== 'flat') {
+      // #1140 — the same assignment rule as a cut-out: a bored hole is owned by the flat the
+      // import chose to helix it, not by the job's first cutter.
+      const boreCutter = itemCutter(drill.id);
+      if (boreCutter !== null && boreCutter.shape !== 'flat') {
         findings.push({
           severity: 'error',
           code: 'bore-needs-end-mill',
           labelId: drill.id,
           message:
             `${who} helixes down the wall of the hole, so it needs a flat end mill; ` +
-            `"${drillTool.name}" is a ${drillTool.shape} cutter and cannot ramp.`,
+            `"${boreCutter.name}" is a ${boreCutter.shape} cutter and cannot ramp.`,
         });
       }
       if (holeRadius !== null && drillRadius !== null && holeRadius <= drillRadius) {
