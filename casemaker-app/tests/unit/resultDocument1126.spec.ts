@@ -7,8 +7,9 @@
 // `EngraveGenerated` the in-page worker returns.
 import { describe, expect, it } from 'vitest';
 
-import { programFileNames, resultDocument } from '../../scripts/lib/casemaker/engrave';
+import { planSummary, programFileNames, resultDocument, type PlanSummary } from '../../scripts/lib/casemaker/engrave';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
+import type { ModelPlanOutput } from '@/engine/cnc/cam/model/plan';
 
 function generatedFixture(): EngraveGenerated {
   const programs = [
@@ -82,12 +83,15 @@ describe('#1126 — the v2 result document', () => {
     expect(doc.facingProgram).toBe(0);
   });
 
-  it('drops each plan’s toolpath IR — the 223 MB on the tray — and keeps what the browser reads', () => {
+  it('builds each plan from an ALLOWLIST — outcome and perSetup notes, nothing else', () => {
     const withPlans = {
       ...generatedFixture(),
       plan: {
-        perSetup: [{ setupIndex: 0, notes: ['kept note'], features: { regions: 1 }, programs: [{ operations: [{ big: true }] }] }],
+        perSetup: [
+          { setupIndex: 0, notes: ['kept note'], features: { regions: 1 }, programs: [{ operations: [{ big: true }] }], clGrid: [{ huge: true }] },
+        ],
         outcome: { predictedCutIntoMm: 0.4 },
+        totalCostSeconds: 1234,
       },
       planIdeal: {
         perSetup: [{ setupIndex: 0, notes: ['ideal note'], programs: [{ operations: [{ big: true }] }] }],
@@ -95,16 +99,23 @@ describe('#1126 — the v2 result document', () => {
       },
     } as unknown as EngraveGenerated;
     const doc = resultDocument('tray', withPlans);
-    const plan = doc.plan as { perSetup: Record<string, unknown>[]; outcome: unknown };
-    const ideal = doc.planIdeal as { perSetup: Record<string, unknown>[]; outcome: unknown };
-    for (const setup of [...plan.perSetup, ...ideal.perSetup]) {
-      expect('programs' in setup).toBe(false);
-    }
-    // What a browser reader does use survives: the QA window's plan notes, the store's outcome.
-    expect(plan.perSetup[0]!.notes).toEqual(['kept note']);
-    expect(plan.perSetup[0]!.features).toEqual({ regions: 1 });
-    expect(plan.outcome).toEqual({ predictedCutIntoMm: 0.4 });
-    expect(ideal.perSetup[0]!.notes).toEqual(['ideal note']);
+    // By construction: exactly the two fields the browser reads, and the setup they belong to.
+    expect(doc.plan).toEqual({
+      outcome: { predictedCutIntoMm: 0.4 },
+      perSetup: [{ setupIndex: 0, notes: ['kept note'] }],
+    });
+    expect(doc.planIdeal).toEqual({
+      outcome: { predictedCutIntoMm: 0.2 },
+      perSetup: [{ setupIndex: 0, notes: ['ideal note'] }],
+    });
+  });
+
+  it('a PlanSummary is not a ModelPlanOutput — the type refuses to smuggle any other field', () => {
+    const summary = planSummary({ outcome: undefined, perSetup: [] } as unknown as ModelPlanOutput);
+    expect(summary).toEqual({ outcome: null, perSetup: [] });
+    // @ts-expect-error — a summary cannot be handed back as a full plan: the allowlist is the type.
+    const notAPlan: ModelPlanOutput | null = summary satisfies PlanSummary | null;
+    expect(notAPlan).toBe(summary);
   });
 
   it('a job with no frame, no facing and no sweep alias says so with nulls', () => {

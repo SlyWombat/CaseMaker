@@ -31,8 +31,10 @@ function sourceFiles(dir: string): string[] {
 /**
  * #1126 slice 2 — THE PLAN'S TOOLPATH IR IS NOT A BROWSER INPUT EITHER (the 223 MB field).
  *
- * `resultDocument` strips `plan.perSetup[].programs` from both plans. The consumers the Manager
- * named, and why none of them reads it:
+ * `resultDocument` does not strip fields at all: it BUILDS each plan from `planSummary`, an
+ * allowlist of exactly what the browser reads — `outcome` and `perSetup[].{setupIndex, notes}`.
+ * A field the engine adds tomorrow cannot reach the document unless that type names it. The
+ * consumers the Manager named, and why none of them reads plan internals:
  *   - #1132 re-freeze: `freezePackage` takes `PackageProgramInput[]` built from the FROZEN
  *     PACKAGE's own programs (`engravePackageStore.frozenProgramInputs`), never from a plan.
  *   - #1123-11 stored-run restore: IndexedDB stores the settled `generated` opaquely and hands it
@@ -54,6 +56,34 @@ describe('#1126 — camIr is not a browser input', () => {
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/\/\/[^\n]*/g, '');
       if (code.includes('camIr')) offenders.push(`src/${name}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('the browser reads only a plan summary: outcome and perSetup notes', () => {
+    // Every `generated.plan` read under src/ must be one of the two known readers, and each must
+    // read only an allowlisted field. The engine modules that BUILD the plan are exempt.
+    const readers: Record<string, RegExp> = {
+      'src/store/engraveRunStore.ts': /generated\.plan\?\.outcome/,
+      // The cycle sentence reads the plan's outcome too (its `cycleSeconds`).
+      'src/engine/cnc/engrave/runCycle.ts': /generated\?\.plan\?\.outcome/,
+      'src/testing/windowApi.ts': /perSetup\.flatMap\(\(setup\) => setup\.notes\)/,
+    };
+    const isEngine = (path: string): boolean =>
+      path.startsWith('src/workers/sim/') || path.startsWith('src/engine/cnc/cam/model/');
+    const offenders: string[] = [];
+    for (const file of sourceFiles(SRC)) {
+      const name = `src/${relative(SRC, file).split('\\').join('/')}`;
+      if (isEngine(name)) continue;
+      const code = readFileSync(file, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\/\/[^\n]*/g, '');
+      if (!/\bgenerated\??\.plan\b/.test(code)) continue;
+      if (!(name in readers)) {
+        offenders.push(name);
+        continue;
+      }
+      expect(code, `${name} reads a plan field outside the summary`).toMatch(readers[name]!);
     }
     expect(offenders).toEqual([]);
   });
