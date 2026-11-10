@@ -765,6 +765,24 @@ const RIM_CLOSE_TOL_MM = 0.01;
  * data saying so, and the priced rank then chooses between them per setup. An unstated flute is
  * never merged away or merged into: its reach cannot be vouched for.
  */
+/**
+ * #1186 rule 6 — THE SHEET'S SENTENCE when the job-level merge saved a change: what the dropped
+ * sibling would have cut, and the kept cutter that now does it. Pure, so the wording is pinned by
+ * a unit test rather than only by a sheet snapshot.
+ */
+export function siblingMergeSentence(dropped: readonly Tool[], kept: readonly Tool[]): string | null {
+  if (dropped.length === 0) return null;
+  const nameOf = (tool: Tool): string => tool.name || tool.id || `${cuttingDiameter(tool) ?? '?'} mm ${tool.shape}`;
+  const pairs = dropped.map((tool) => {
+    const diameter = cuttingDiameter(tool);
+    const partner = kept.find((candidate) => candidate.shape === tool.shape && cuttingDiameter(candidate) !== null && diameter !== null && Math.abs((cuttingDiameter(candidate) ?? 0) - diameter) < 1e-6);
+    return partner === undefined
+      ? `${nameOf(tool)} is not needed`
+      : `${nameOf(tool)} is not needed — the ${nameOf(partner)} cuts its work`;
+  });
+  return `${pairs.join('; ')}, so ${dropped.length === 1 ? 'its change is' : 'their changes are'} not paid`;
+}
+
 export function mergeSiblingCutters<T extends Tool>(tools: readonly T[], hasOwnRow: (tool: T) => boolean): T[] {
   const groups = new Map<string, T[]>();
   for (const tool of tools) {
@@ -2728,6 +2746,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     });
     finishStageMs += result.finishStageMs;
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 1 });
+    // #1186 rule 6 — THE MERGE IS STATED, once, on the job: a same-shape-and-diameter sibling left
+    // the candidate set, so the change it would have cost is not paid.
+    const mergedAway = input.cutters.house.filter((tool) => !siblingMergedHouse.includes(tool));
+    const mergeSentence = siblingMergeSentence(mergedAway, siblingMergedHouse);
+    if (mergeSentence !== null && perSetup.length > 0) {
+      const first = perSetup[0]!;
+      const text = mergeSentence;
+      first.notes.push(text);
+      first.statements.push({ severity: 'info', code: 'goal-sibling-merged', count: mergedAway.length, text });
+    }
+
   }
   // #961 (the card slice) — THE PLAN'S OWN OUTCOME, from the same stamping the picker already uses.
   // Nothing new is simulated: every program's IR is posted and stamped once (the cache above), the

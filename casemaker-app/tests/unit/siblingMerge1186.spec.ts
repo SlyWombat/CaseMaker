@@ -7,10 +7,19 @@
 import { describe, expect, it } from 'vitest';
 
 import { flatEndMill } from '@/engine/cnc/tool';
-import { mergeSiblingCutters } from '@/engine/cnc/cam/model/plan';
+import { mergeSiblingCutters, siblingMergeSentence } from '@/engine/cnc/cam/model/plan';
 
 const flat = (id: string, diameter: number, fluteLength: number | null) =>
   flatEndMill(diameter, { id, name: `${diameter} flat ${fluteLength}`, number: 1, ...(fluteLength === null ? {} : { fluteLength }) });
+
+describe('#1186 rule 6 — the sheet’s sentence', () => {
+  it('names the dropped cutter and the kept one that cuts its work, and the change not paid', () => {
+    const short = flat('short', 6, 15);
+    const long = flat('long', 6, 25);
+    expect(siblingMergeSentence([short], [long])).toBe('6 flat 15 is not needed — the 6 flat 25 cuts its work, so its change is not paid');
+    expect(siblingMergeSentence([], [long])).toBeNull();
+  });
+});
 
 describe('#1186 rule 6 — the job-level sibling merge', () => {
   it('keeps one cutter per shape and diameter: the longest stated reach', () => {

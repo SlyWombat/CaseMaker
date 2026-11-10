@@ -61,6 +61,9 @@ export type PlanFindingCode =
   | 'goal-not-freed'
   | 'goal-region-uncut'
   | 'goal-cutter-substituted'
+  // #1186 rule 6 — a same-shape-and-diameter sibling left the set (the longer reach is the job's
+  // one cutter for that dimension), so the change it would have cost is not paid.
+  | 'goal-sibling-merged'
   | 'goal-skin-standing'
   | 'goal-rim-unbroken'
   | 'goal-fixture-unmodelled'

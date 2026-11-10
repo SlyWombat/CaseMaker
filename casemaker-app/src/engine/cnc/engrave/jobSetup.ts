@@ -483,6 +483,8 @@ export type JobFindingCode =
   // the run sheet's missing hand-cut step is stated rather than silent.
   | 'tab-release-skipped'
   | 'goal-cutter-substituted'
+  // #1186 rule 6 — the job-level sibling merge: stated once, info.
+  | 'goal-sibling-merged'
   | 'goal-skin-standing'
   | 'goal-rim-unbroken'
   | 'goal-fixture-unmodelled'
