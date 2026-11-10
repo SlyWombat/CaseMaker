@@ -184,8 +184,13 @@ export async function homeMachine(
         // BENCH BLOCKER 2026-11-10 — A FAILED READ IS A DEAD SESSION, NOT A DROPPED POLL. The
         // console seam closes the session on a rejected read (the reset path), and the next send
         // would open a NEW one; continuing the 30-poll loop then churns a session per iteration
-        // against a controller that just reset the link. Stop here and say why.
-        return { kind: 'failed', detail: r.detail };
+        // against a controller that just reset the link. Stop here, in the operator's words.
+        return {
+          kind: 'failed',
+          detail:
+            `the machine stopped answering mid-home (${r.detail}) — check it is powered and try again; ` +
+            'if it is mid-move, home it by hand',
+        };
       }
       if (r.kind !== 'sent') {
         // A timeout is not the end: the socket may be between replies, and the window is the

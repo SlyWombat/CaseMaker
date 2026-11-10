@@ -119,6 +119,8 @@ describe('#bench-2026-11-10 a failed console session is closed, not leaked', () 
     setMachineConsoleLoader(async () => client);
     const answer = await homeMachine(TARGET, { polls: 30, pollMs: 0 });
     expect(answer.kind).toBe('failed');
+    // The operator reads a sentence, not the transport's error: the machine stopped answering.
+    expect(answer.kind === 'failed' ? answer.detail : '').toContain('the machine stopped answering mid-home');
     expect(state.opens).toBe(1);
     expect(state.closes).toBe(1);
     // ONE `?` poll went out, not the whole 30-poll budget on a dead link.
