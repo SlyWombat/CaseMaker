@@ -216,4 +216,48 @@ describe('#723 R-1 — a solid of revolution reads back as its own radius', () =
   });
 });
 
+// #1164 slice (b) — THE FIELD IS THE DESIGN ∩ THE ROD (#1155's corrected ruling, design note §6).
+// A ray whose outermost hit is beyond the rod must not be read as a full-radius shelf: if the rod
+// surface point is outside the design, the goal there is the outermost design surface INSIDE the
+// rod. The fixtures are surface rings whose crossings are known: a sleeve outside the rod is two
+// crossings (even → outside at R), a part through the rod is one (odd → inside at R).
+describe('#1164 — the field is the design ∩ the rod', () => {
+  const R = 10; // ⌀20 rod
+  const PITCH = 0.5;
+  const SPAN = { x: 20, y: 26, z: 26 };
+  /** A full-circle surface at this radius over the span; two of them are a sleeve. */
+  const ring = (r: number): Tri[] => sideTris(() => r, 20);
+
+  it('an oversize sleeve over a groove samples the groove, not the rod surface', () => {
+    // Inside the rod: the radius-5 groove. Outside it: a radius-11 and radius-13 sleeve, so every
+    // ray crosses the mesh twice beyond R — the rod surface point is air, and the design there is
+    // the groove.
+    const f = sampleGoalRadialField(goal([...ring(5), ...ring(11), ...ring(13)], SPAN), R, { pitchMm: PITCH });
+    const k = cell(f, 50, 0);
+    expect(f.covered[k]).toBe(1);
+    expect(f.z[k]).toBeCloseTo(5 - R, 3);
+    // The warning keeps the TRUE reach: the sleeve is still stated as oversize.
+    expect(f.maxRadius).toBeGreaterThanOrEqual(13 - 0.01);
+  });
+
+  it('a mesh whose material fills the rod samples R, not a surface below it', () => {
+    // One crossing beyond R: the ray is inside the solid at R (a part through the rod), so the
+    // goal is the rod itself — the clip the sampler already makes.
+    const f = sampleGoalRadialField(goal(ring(12), SPAN), R, { pitchMm: PITCH });
+    const k = cell(f, 50, 0);
+    expect(f.covered[k]).toBe(1);
+    expect(f.z[k]).toBeCloseTo(0, 6);
+  });
+
+  it('a sleeve with nothing inside the rod leaves the stock standing', () => {
+    // Two crossings beyond R, none below: the design has no material inside the rod on this ray,
+    // so the goal says nothing there — the cell is uncovered and the stock's surface stands.
+    const f = sampleGoalRadialField(goal([...ring(11), ...ring(13)], SPAN), R, { pitchMm: PITCH });
+    const k = cell(f, 50, 0);
+    expect(f.covered[k]).toBe(0);
+    expect(f.z[k]).toBe(0);
+    expect(f.maxRadius).toBeGreaterThanOrEqual(13 - 0.01);
+  });
+});
+
 afterEach(() => clearTargetObjectMeshCache());

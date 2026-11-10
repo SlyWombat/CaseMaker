@@ -31,6 +31,13 @@
  * surface, and material the ray re-enters behind it is left standing — the single-axis answer the
  * flat field gives too (#222).
  *
+ * #1164 — AND IT IS THE DESIGN ∩ THE ROD, NOT THE DESIGN'S FARTHEST SHELL. When the outermost hit
+ * is beyond the stock radius R, the field may not read a full-radius shelf unless the material is
+ * actually there: an oversize overhang over a groove is air at R, and the goal inside the rod is
+ * the groove. The rule is the crossing parity beyond R (odd = inside at R, so R; even = outside,
+ * so the outermost crossing below R; none below = nothing inside the rod, the stock stands). It is
+ * the sampler's own rule, so the planner, the preview and the goal check inherit it together.
+ *
  * #1083 — WHY IT LIVES HERE, NOT IN THE CAM: the goal check (`workers/sim/goalCheckField.ts`, a
  * #964 gate root) compares the goal's radial field with the live column grid, and the gate's
  * import closure must carry no CAM (`cam/**`). The rule is the geometry's, so it sits in the
@@ -59,7 +66,7 @@ export interface GoalRadialField {
   pitch: number;
   /** The design radius, ⌀/2, mm — the map's radius and the stock's surface. */
   radius: number;
-  /** The smallest / largest radius any ray hit, mm. Equal to `radius` when nothing is covered. */
+  /** The smallest / largest radius any ray hit, mm. `radius` when no ray hit anything. */
   minRadius: number;
   maxRadius: number;
   z: Float32Array;
@@ -120,6 +127,8 @@ export function sampleGoalRadialField(
   const x0 = xMin;
   const z = new Float32Array(nx * ny);
   const covered = new Uint8Array(nx * ny);
+  /** The TRUE farthest hit per cell, before the rod clip — #1164's rule reads it after the pass. */
+  const rawMax = new Float32Array(nx * ny);
   let minR = Infinity;
   let maxR = -Infinity;
   // The part's closest approach to the axis: a mesh that tapers to the axis has a VERTEX there,
@@ -167,8 +176,12 @@ export function sampleGoalRadialField(
   rBound = rBound * 1.001 + 1e-6;
 
   const EPS = 1e-9;
-  /** The farthest hit of the ray (ox, 0, 0) + t·(0, sin φ, cos φ) on triangle `t`, or 0. */
-  const rayHit = (t: number, ox: number, ang: number): number => {
+  /**
+   * The farthest hit of the ray (ox, 0, 0) + t·(0, sin φ, cos φ) on triangle `t`, or 0. When
+   * `crossings` is given, every positive hit along the ray is pushed onto it — the #1164 rule needs
+   * the whole crossing list, not just the farthest.
+   */
+  const rayHit = (t: number, ox: number, ang: number, crossings?: number[]): number => {
     const ax = tri[t * 9]!, ay = tri[t * 9 + 1]!, az = tri[t * 9 + 2]!;
     const bx = tri[t * 9 + 3]!, by = tri[t * 9 + 4]!, bz = tri[t * 9 + 5]!;
     const cx = tri[t * 9 + 6]!, cy = tri[t * 9 + 7]!, cz = tri[t * 9 + 8]!;
@@ -194,7 +207,9 @@ export function sampleGoalRadialField(
     // A hit AT the axis (r = 0) is a real surface point — a mesh that tapers to it reaches the
     // axis, which the CAM refuses (R8); dropping it would leave the apex cells 'uncovered' and
     // read as the stock's surface instead.
-    return r >= -EPS && r <= rBound ? Math.max(0, r) : 0;
+    const hit = r >= -EPS && r <= rBound ? Math.max(0, r) : 0;
+    if (hit > 0 && crossings !== undefined) crossings.push(hit);
+    return hit;
   };
   /** The farthest hit over every triangle, or 0. */
   const rayHitAll = (ox: number, ang: number): number => {
@@ -207,6 +222,7 @@ export function sampleGoalRadialField(
   };
   const record = (idx: number, r: number): void => {
     if (r <= 0) return;
+    if (r > rawMax[idx]!) rawMax[idx] = r;
     if (covered[idx] === 0 || r > (z[idx] as number) + radius) {
       // #808 — CLIPPED TO THE ROD. A hit past the rod's surface has no material to cut there, so
       // the field holds it AT the surface (z = 0) rather than above it: a tip planned from a
@@ -276,10 +292,52 @@ export function sampleGoalRadialField(
     }
   }
 
+  // #1164 SLICE (B) — THE FIELD IS THE DESIGN ∩ THE ROD (#1155's corrected ruling, design §6). A
+  // ray whose outermost hit is beyond the rod used to be read as a full-radius shelf: correct only
+  // when the material actually fills the rod. Where it does not — an oversize overhang over a
+  // groove — the rod surface point is AIR, and the goal there is the outermost design surface
+  // inside the rod. The crossings beyond R answer which case this is: an odd count means the ray is
+  // inside the solid at R (the clip stands); an even count means it is outside, and the goal is the
+  // outermost crossing below R. No crossing below R means the design has nothing inside the rod on
+  // that ray: the cell is uncovered and the stock stands.
+  const CROSS = 1e-5; // mm: a shared edge or a coplanar pair is one crossing, and R is a boundary.
+  for (let idx = 0; idx < z.length; idx++) {
+    if (covered[idx] !== 1 || rawMax[idx]! <= radius + CROSS) continue;
+    const j = Math.floor(idx / nx);
+    const i = idx - j * nx;
+    const ang = (j * pitch) / radius - seam;
+    const ox = x0 + i * pitch;
+    const hits: number[] = [];
+    for (let t = 0; t < triCount; t++) rayHit(t, ox, ang, hits);
+    hits.sort((a, b) => a - b);
+    const crossings: number[] = [];
+    for (const h of hits) {
+      if (crossings.length === 0 || h - crossings[crossings.length - 1]! > CROSS) crossings.push(h);
+    }
+    let beyond = 0;
+    let below = 0;
+    for (const h of crossings) {
+      if (h > radius + CROSS) beyond += 1;
+      else if (h < radius - CROSS) below = h; // sorted: ends on the outermost crossing below R
+    }
+    // Odd: the ray is inside the solid at R — the rod is filled, and the existing clip is right.
+    if (beyond % 2 === 1) continue;
+    if (below <= 0) {
+      // Nothing of the design inside the rod on this ray: the stock's surface stands, uncovered.
+      covered[idx] = 0;
+      z[idx] = 0;
+      continue;
+    }
+    z[idx] = below - radius;
+  }
+
   let coveredCount = 0;
   for (let k = 0; k < covered.length; k++) if (covered[k] === 1) coveredCount++;
   const minRadius = coveredCount === 0 ? radius : Math.min(minR, minVertexR);
-  const maxRadius = coveredCount === 0 ? radius : maxR;
+  // #1164 — `maxRadius` is the TRUE reach: an oversize sleeve with nothing inside the rod clears
+  // every cell, and the oversize warning must still name what cannot be cut. Only a field no ray
+  // hit at all reads the stock's radius.
+  const maxRadius = maxR > 0 ? maxR : radius;
   const resolutionNote =
     (coarsened
       ? `sampled on a ${pitch.toFixed(4)} mm grid around a ⌀${Number((2 * radius).toFixed(3))} mm rod ` +
