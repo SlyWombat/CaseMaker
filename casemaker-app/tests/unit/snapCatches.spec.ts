@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { countOps, makeBoard } from './helpers/printModel';
 import {
   defaultSnapCatchesForCase,
   buildSnapCatchOps,
@@ -7,28 +8,6 @@ import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { createDefaultProject } from '@/store/projectStore';
 import type { BoardProfile, CaseParameters } from '@/types';
 import type { BuildOp } from '@/engine/compiler/buildPlan';
-
-function countOps(op: BuildOp, kind: BuildOp['kind']): number {
-  let n = op.kind === kind ? 1 : 0;
-  if ('child' in op && op.child) n += countOps(op.child, kind);
-  if ('children' in op) for (const c of op.children) n += countOps(c, kind);
-  return n;
-}
-
-function makeBoard(x: number, y: number): BoardProfile {
-  return {
-    id: `t-${x}x${y}`,
-    name: 'T',
-    manufacturer: 'T',
-    pcb: { size: { x, y, z: 1.6 } },
-    mountingHoles: [{ id: 'h1', x: 5, y: 5, diameter: 2.5 }],
-    components: [],
-    defaultStandoffHeight: 3,
-    recommendedZClearance: 10,
-    source: 'https://example.com',
-    builtin: false,
-  };
-}
 
 const baseCase: CaseParameters = {
   wallThickness: 2,

@@ -17,6 +17,7 @@
 //     207.5 × 208.5 × 25.8) is reproducible from a configured project.
 
 import { describe, it, expect } from 'vitest';
+import { makeBoard, probeMaterial } from './helpers/printModel';
 
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { computeShellDims } from '@/engine/compiler/caseShell';
@@ -38,21 +39,6 @@ import { exec } from './helpers/manifoldExec';
 
 const NO_HATS: never[] = [];
 const NO_RESOLVE = () => undefined;
-
-function makeBoard(x: number, y: number, z = 1.6): BoardProfile {
-  return {
-    id: `t-${x}x${y}`,
-    name: 'T',
-    manufacturer: 'T',
-    pcb: { size: { x, y, z } },
-    mountingHoles: [{ id: 'h1', x: 5, y: 5, diameter: 2.5 }],
-    components: [],
-    defaultStandoffHeight: 3,
-    recommendedZClearance: 10,
-    source: 'https://example.com',
-    builtin: false,
-  };
-}
 
 /** A project whose board and case params are fully specified by the test. */
 function makeProject(
@@ -108,15 +94,6 @@ function lidNode(project: Project) {
   const node = plan.nodes.find((n) => n.id === 'lid');
   expect(node, 'compiled plan has a lid node').toBeDefined();
   return node!.op;
-}
-
-/** Volume of `op` ∩ a 1mm cube centred on `p` — 1 ⇒ material there, 0 ⇒ void. */
-function probeMaterial(op: BuildOp, p: [number, number, number]): number {
-  const box = translate(p, cube([1, 1, 1], true));
-  const hit = exec(intersection([op, box]));
-  const v = hit.volume();
-  hit.delete();
-  return v;
 }
 
 describe('Issue #117 — clamshell seal mode', () => {

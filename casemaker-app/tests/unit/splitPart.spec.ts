@@ -17,6 +17,7 @@
 //     that would print as two loose parts fails here rather than on the plate.
 
 import { describe, it, expect } from 'vitest';
+import { bodies, makeBoard, probeMaterial } from './helpers/printModel';
 
 import {
   SPLIT_SEAM_PITCH,
@@ -63,25 +64,6 @@ function boxShell(w: number, d: number, h: number, wall = 3): BuildOp {
 }
 
 const BOX_BOUNDS: Aabb = { min: [0, 0, 0], max: [120, 80, 30] };
-
-/** Volume of `op` ∩ a 1 mm cube centred on `p` — 1 ⇒ material there, 0 ⇒ void.
- *  (Same probe clamshell.spec uses; a point inside a 3.2 mm hole clears it.) */
-function probeMaterial(op: BuildOp, p: [number, number, number]): number {
-  const box = translate(p, cube([1, 1, 1], true));
-  const hit = exec(intersection([op, box]));
-  const v = hit.volume();
-  hit.delete();
-  return v;
-}
-
-/** Positive-volume bodies in a solid. `decompose()` counts sealed voids as
- *  components too (negative volume), and they are not printed parts. */
-function bodies(op: BuildOp): number {
-  const m = exec(op);
-  const n = m.decompose().filter((c) => c.volume() > 0).length;
-  m.delete();
-  return n;
-}
 
 function bboxOf(op: BuildOp): { min: number[]; max: number[] } {
   const m = exec(op);
@@ -368,21 +350,6 @@ describe('shellSplit — the joint material', () => {
 // ---------------------------------------------------------------------------
 // Through the compiler — the path the app actually takes
 // ---------------------------------------------------------------------------
-
-function makeBoard(x: number, y: number, z = 1.6): BoardProfile {
-  return {
-    id: `t-${x}x${y}`,
-    name: 'T',
-    manufacturer: 'T',
-    pcb: { size: { x, y, z } },
-    mountingHoles: [{ id: 'h1', x: 5, y: 5, diameter: 2.5 }],
-    components: [],
-    defaultStandoffHeight: 3,
-    recommendedZClearance: 10,
-    source: 'https://example.com',
-    builtin: false,
-  };
-}
 
 /** The seal settings a sealed shell uses (#107/#108). */
 function sealedSeal(): NonNullable<CaseParameters['seal']> {

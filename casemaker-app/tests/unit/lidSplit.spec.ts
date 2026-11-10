@@ -12,6 +12,7 @@
 // print as two loose parts fails here rather than on the plate.
 
 import { describe, it, expect } from 'vitest';
+import { bodies, makeBoard, probeMaterial } from './helpers/printModel';
 
 import { LUG_DROP, LUG_EMBED, LUG_LAP } from '@/engine/compiler/shellSplit';
 import {
@@ -47,22 +48,6 @@ function boundsOf(op: BuildOp): Aabb {
   const b = m.boundingBox();
   m.delete();
   return { min: [...b.min], max: [...b.max] } as Aabb;
-}
-
-function bodies(op: BuildOp): number {
-  const m = exec(op);
-  const n = m.decompose().filter((c) => c.volume() > 0).length;
-  m.delete();
-  return n;
-}
-
-/** Volume of `op` ∩ a 1 mm cube at `p` — 1 ⇒ material, 0 ⇒ void. */
-function probeMaterial(op: BuildOp, p: [number, number, number]): number {
-  const box = translate(p, cube([1, 1, 1], true));
-  const hit = exec(intersection([op, box]));
-  const v = hit.volume();
-  hit.delete();
-  return v;
 }
 
 function request(side: 'cavity' | 'top', lidOp: BuildOp, cavityHeightMm: number): LidSplitRequest {
@@ -182,21 +167,6 @@ describe('#265 — a plate lid’s laps stand proud of its top face', () => {
 // ---------------------------------------------------------------------------
 // The compiler's half: the offer and the pieces on a real project.
 // ---------------------------------------------------------------------------
-
-function makeBoard(x: number, y: number): BoardProfile {
-  return {
-    id: `t-${x}x${y}`,
-    name: 'T',
-    manufacturer: 'T',
-    pcb: { size: { x, y, z: 1.6 } },
-    mountingHoles: [{ id: 'h1', x: 5, y: 5, diameter: 2.5 }],
-    components: [],
-    defaultStandoffHeight: 3,
-    recommendedZClearance: 10,
-    source: 'https://example.com',
-    builtin: false,
-  };
-}
 
 /** The #148 big-case fixture: a 209 × 149 shell (and lid) on a 130 × 130 bed. */
 function bigProject(overrides: Partial<CaseParameters> = {}): Project {

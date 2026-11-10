@@ -10,6 +10,7 @@
 //     project still loads, stamped v10
 
 import { describe, it, expect } from 'vitest';
+import { makeBoard } from './helpers/printModel';
 import { fitRelief, FIT_RELIEF_MM, FIT_VARIANTS } from '@/types/snap';
 import { buildSnapCatch, defaultSnapCatchesForCase } from '@/engine/compiler/snapCatches';
 import { buildBoardSnapOps } from '@/engine/compiler/boardSnap';
@@ -20,21 +21,6 @@ import { createDefaultProject } from '@/store/projectStore';
 import { serializeProject, parseProject } from '@/store/persistence';
 import type { BoardProfile, CaseParameters, RackParams } from '@/types';
 import { Manifold, exec, type ManifoldInstance } from './helpers/manifoldExec';
-
-function makeBoard(x: number, y: number): BoardProfile {
-  return {
-    id: `t-${x}x${y}`,
-    name: 'T',
-    manufacturer: 'T',
-    pcb: { size: { x, y, z: 1.6 } },
-    mountingHoles: [{ id: 'h1', x: 5, y: 5, diameter: 2.5 }],
-    components: [],
-    defaultStandoffHeight: 3,
-    recommendedZClearance: 10,
-    source: 'https://example.com',
-    builtin: false,
-  };
-}
 
 const baseCase: CaseParameters = {
   wallThickness: 2,
