@@ -23,6 +23,7 @@ import { defaultAntennasForBoard } from '@/engine/compiler/antennas';
 import { fourCornerScrewTabs, endFlangesPreset, extrusionMountPreset } from '@/engine/compiler/mountingFeatures';
 import { computeShellDims } from '@/engine/compiler/caseShell';
 import { patchProject } from '@/platform/headless/patch';
+import { useViewportStore } from './viewportStore';
 
 const DEFAULT_BOARD_ID = 'rpi-4b';
 
@@ -220,7 +221,12 @@ export const useProjectStore = create<ProjectState>()(
         project: createDefaultProject(),
         welcomeMode: true,
         showWelcome: () => set({ project: createDefaultProject(), welcomeMode: true }),
-        setProject: (p) => set({ project: p, welcomeMode: false }),
+        setProject: (p) => {
+          // #1123-59 — a project opened from the door is the CASE workspace (its own rail); the
+          // CNC workspace is entered by the job itself, never by the project behind it.
+          useViewportStore.getState().setWorkspace('case');
+          set({ project: p, welcomeMode: false });
+        },
         patchCase: (patch) =>
           set((s) => {
             // Issue #56 — validate before committing, and reject invalid writes
@@ -262,8 +268,11 @@ export const useProjectStore = create<ProjectState>()(
               draft.modifiedAt = new Date(0).toISOString();
             }),
           })),
-        loadBuiltinBoard: (boardId) =>
-          set(() => ({ project: createDefaultProject(boardId), welcomeMode: false })),
+        loadBuiltinBoard: (boardId) => {
+          // #1123-59 — a board project is the case workspace's.
+          useViewportStore.getState().setWorkspace('case');
+          set(() => ({ project: createDefaultProject(boardId), welcomeMode: false }));
+        },
         addPort: (port) =>
           set((s) => ({
             project: produce(s.project, (draft) => {
