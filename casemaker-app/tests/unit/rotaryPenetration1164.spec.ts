@@ -46,10 +46,12 @@ describe('#1164 the rotary penetration sweep reproduces the analyst baseline', (
     const negated = sweepRotaryPenetration({
       triangles: tris,
       R: 22.25,
-      moves: parseRotaryMoves(nc, () => 'all').slice(0, 400),
+      moves: parseRotaryMoves(nc, () => 'all'),
       cutter: { radius: 3, shape: 'ball' },
       aSign: -1,
     });
-    expect(negated.moves.filter((move) => move.maxPenMm > 1).length).toBeGreaterThan(100);
+    // The analyst measured ~1,600 such moves over the program; the first few hundred are rapids
+    // and light passes, so the guard is on the whole run.
+    expect(negated.moves.filter((move) => move.maxPenMm > 1).length).toBeGreaterThan(1_000);
   }, 600_000);
 });

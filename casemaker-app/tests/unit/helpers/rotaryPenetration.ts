@@ -22,6 +22,10 @@
  */
 
 export interface RotaryMove {
+  /** The pose the move STARTS from (after the preamble and any rapids since the last cut). */
+  startX: number;
+  startZ: number;
+  startA: number;
   /** Tool X along the rod, mm. */
   x: number;
   /** Tip radius on the ray, mm. */
@@ -93,7 +97,7 @@ export function parseRotaryMoves(
     const nx = word('X') ?? x;
     const nz = word('Z') ?? z;
     const na = word('A') ?? a;
-    if (m[1] !== 'G0') moves.push({ x: nx, z: nz, aDeg: na, line: i + 1, operation: operationOf(line, i + 1) });
+    if (m[1] !== 'G0') moves.push({ startX: x, startZ: z, startA: a, x: nx, z: nz, aDeg: na, line: i + 1, operation: operationOf(line, i + 1) });
     x = nx;
     z = nz;
     a = na;
@@ -135,7 +139,13 @@ export function sweepRotaryPenetration(input: {
     const bx = tris[t + 6]!;
     const by = tris[t + 7]!;
     const bz = tris[t + 8]!;
-    const L = Math.max(Math.hypot(e1x, e1y, e1z), Math.hypot(e2x, e2y, e2z), Math.hypot(bx - ax, by - ay, bz - az));
+    // The THIRD edge is c − b (the script's `c[0] - b[0]`), not c − a: an edge length decides the
+    // tessellation, and c − a silently changed `N` on the triangles where it is the longest.
+    const L = Math.max(
+      Math.hypot(e1x, e1y, e1z),
+      Math.hypot(e2x, e2y, e2z),
+      Math.hypot(bx - tris[t + 3]!, by - tris[t + 4]!, bz - tris[t + 5]!),
+    );
     const n = Math.max(1, Math.ceil(L / SURFACE_SAMPLE_MM));
     for (let i = 0; i <= n; i++) {
       for (let j = 0; j <= n - i; j++) {
@@ -194,18 +204,21 @@ export function sweepRotaryPenetration(input: {
   let worst: RotaryPenetration['worst'] = null;
   const histogram: RotaryPenetration['histogram'] = [0, 0, 0, 0, 0, 0];
   const perMove: RotaryPenetration['moves'] = [];
-  let prevX = 0;
-  let prevZ = 27.25;
-  let prevA = 0;
-  // The caller's moves are absolute; the first move starts where the NC's preamble left the tool,
-  // which the parser has already applied, so the sweep interpolates between consecutive moves only.
+  // Every move sweeps from ITS OWN start pose — the one the NC had reached after the preamble and
+  // any rapids since the last cut. Chaining consecutive G1 ends instead skips the repositioning
+  // and sweeps the tool along paths it never travelled.
   for (const move of moves) {
-    const len = Math.hypot(move.x - prevX, move.z - prevZ, ((move.aDeg - prevA) * Math.PI * R) / 180);
+    const len = Math.hypot(move.x - move.startX, move.z - move.startZ, ((move.aDeg - move.startA) * Math.PI * R) / 180);
     const steps = Math.max(1, Math.ceil(len / MOVE_STEP_MM));
     let maxPen = 0;
     for (let i = 1; i <= steps; i++) {
       const f = i / steps;
-      const pen = worstOfPose(prevX + f * (move.x - prevX), prevZ + f * (move.z - prevZ), prevA + f * (move.aDeg - prevA), move.line);
+      const pen = worstOfPose(
+        move.startX + f * (move.x - move.startX),
+        move.startZ + f * (move.z - move.startZ),
+        move.startA + f * (move.aDeg - move.startA),
+        move.line,
+      );
       if (pen > maxPen) maxPen = pen;
     }
     if (maxPen > (worst?.penMm ?? 0)) {
@@ -215,9 +228,6 @@ export function sweepRotaryPenetration(input: {
     }
     histogram[maxPen <= 0 ? 0 : maxPen < 0.05 ? 1 : maxPen < 0.3 ? 2 : maxPen < 1 ? 3 : maxPen < 2 ? 4 : 5]++;
     perMove.push({ line: move.line, operation: move.operation, maxPenMm: maxPen });
-    prevX = move.x;
-    prevZ = move.z;
-    prevA = move.aDeg;
   }
 
   const byOperation: Record<string, OperationPenetration> = {};
