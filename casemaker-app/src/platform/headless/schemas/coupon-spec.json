@@ -2806,6 +2806,13 @@
                             },
                             "type": "array"
                           },
+                          "seatRemeasure": {
+                            "description": "A seat-seek plan run because the stored seat predates the probe’s last fitting.",
+                            "enum": [
+                              "probe-refit"
+                            ],
+                            "type": "string"
+                          },
                           "seek": {
                             "description": "The surface seek this plan runs.",
                             "properties": {
@@ -4791,6 +4798,13 @@
                           "type": "object"
                         },
                         "type": "array"
+                      },
+                      "seatRemeasure": {
+                        "description": "A seat-seek plan run because the stored seat predates the probe’s last fitting.",
+                        "enum": [
+                          "probe-refit"
+                        ],
+                        "type": "string"
                       },
                       "seek": {
                         "description": "The surface seek this plan runs.",
