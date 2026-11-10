@@ -67,7 +67,16 @@ export function proposedStockFor(
   proposed: StockProposal | null,
 ): StockProposal | null {
   // #1098 — a drawing is work that sizes its own blank, exactly as a mesh or a board does.
-  if (work.kind === 'mesh' || work.kind === 'pcb' || work.kind === 'outline') return proposed;
+  // #1100 — a cut-out and a pocket size their own too (the presets' proposals).
+  if (
+    work.kind === 'mesh' ||
+    work.kind === 'pcb' ||
+    work.kind === 'outline' ||
+    work.kind === 'cutout' ||
+    work.kind === 'pocket'
+  ) {
+    return proposed;
+  }
   if (rotaryMapOf(job) !== null) return proposed;
   return houseStockProposal();
 }
@@ -138,6 +147,14 @@ export function workShapeFor(choice: OperationChoice | null, job: EngraveJob): W
       // #1098 — the drawing's extent in mm, as the importer measured it. Cut it out is the one
       // use that needs the blank to be a plate the profile can free the part from.
       return { kind: 'outline', length: choice.outline.width, width: choice.outline.height, through: choice.use === 'profile' };
+    case 'cutout':
+      // #1100 — the shape the card drew, through the blank.
+      return { kind: 'cutout', length: choice.length, width: choice.width };
+    case 'pocket':
+      // A bare pocket chip carries no numbers (it keeps the house's stick); the preset's does.
+      return choice.length === undefined || choice.width === undefined || choice.depth === undefined
+        ? { kind: 'none' }
+        : { kind: 'pocket', length: choice.length, width: choice.width, depth: choice.depth };
     case 'engrave': {
       if (choice.text.trim() === '') return { kind: 'none' };
       // Measured where the face is up, and `inkBoxOf`'s documented upper-bound estimate until it is
@@ -147,7 +164,9 @@ export function workShapeFor(choice: OperationChoice | null, job: EngraveJob): W
         choice.text,
         choice.font,
         'bold',
-        PROPOSED_TEXT_SIZE_MM,
+        // #1100 — the sign card's letter size is the size the blank is sized for; the other
+        // engrave entries keep the proposal's documented 10 mm cap.
+        choice.sizeMm ?? PROPOSED_TEXT_SIZE_MM,
         labelGlyphMeasure(job.customFonts ?? []),
       );
       return { kind: 'text', size: { length: box.width, width: box.height }, depth: choice.depth };

@@ -884,6 +884,36 @@ export function StartWizard(): JSX.Element {
             [choice.lengthMm / 2, 0],
           ],
         });
+      } else if (choice.type === 'cutout') {
+        // #1100 — Cut out a shape: the region item the panel's shape tools write, plus the
+        // profile that frees it (the shop's tabs), centred on the blank like every new item.
+        const store = useEngraveJobStore.getState();
+        const shapeId = store.addShape(choice.shape === 'circle' ? 'circle' : 'rect');
+        store.updateShape(
+          shapeId,
+          choice.shape === 'circle'
+            ? { diameter: choice.length }
+            : { width: choice.length, height: choice.width, cornerRadius: choice.radius },
+        );
+        const cutout = useEngraveJobStore.getState().addCutout();
+        useEngraveJobStore.getState().updateCutout(cutout, { of: shapeId, side: 'outside', inset: 0 });
+        id = shapeId;
+      } else if (
+        choice.type === 'pocket' &&
+        choice.length !== undefined &&
+        choice.width !== undefined &&
+        choice.depth !== undefined
+      ) {
+        // #1100 — A pocket or tray: one rect region with the card's size, corner radius and floor.
+        const store = useEngraveJobStore.getState();
+        const shapeId = store.addShape('rect');
+        store.updateShape(shapeId, {
+          width: choice.length,
+          height: choice.width,
+          cornerRadius: choice.radius ?? 0,
+          depth: choice.depth,
+        });
+        id = shapeId;
       } else if (choice.type === 'outline') {
         // #1098 — the drawing becomes the items the panel's own outline import writes: the closed
         // rings as one vector region and every open path as a line, both centred on the settled

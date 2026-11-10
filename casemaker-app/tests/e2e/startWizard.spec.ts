@@ -9,7 +9,7 @@
 // never block.
 
 import { fileURLToPath } from 'node:url';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, openSignCard } from './fixtures/caseMaker';
 
 test.setTimeout(180_000);
 
@@ -30,7 +30,8 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
 
   // Step 2 — the question, first since #897: its answer is what the blank is sized from.
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
-  await page.getByTestId('start-wizard-op-text').fill('Hello');
+  await openSignCard(page);
+  await page.getByTestId('start-wizard-preset-text').fill('Hello');
   await page.getByTestId('start-wizard-operation-next').click();
 
   // Step 3 — the stock: #930 proposes the house's stick for a line of text (the work no longer
@@ -148,6 +149,7 @@ test('#897 — a mesh goal proposes its box, and is centred on the blank it land
   await page.getByTestId('start-wizard-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
 
+  await openSomethingElse(page);
   await page.getByTestId('engrave-setup-what-surface').click();
   await page.getByTestId('start-wizard-op-surface-file').setInputFiles(BLOCK);
   await expect(page.getByTestId('start-wizard-op-surface-name')).toHaveText('chamfered-block.stl');

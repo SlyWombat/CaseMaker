@@ -6,7 +6,7 @@
 //   CASEMAKER_PORT=5403 npx playwright test tests/e2e/stockOrientation783.spec.ts
 
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse } from './fixtures/caseMaker';
 
 test.use({ viewport: { width: 1440, height: 900 } });
 test.setTimeout(180_000);
@@ -16,6 +16,7 @@ async function reachHolding(page: Page): Promise<void> {
   await page.getByTestId('welcome-start-cnc').click();
   await page.getByTestId('start-wizard-next').click();
   // #897 — the question comes before the blank; a pocket needs no field and is the walk's stand-in.
+  await openSomethingElse(page);
   await page.getByTestId('engrave-setup-what-pocket').click();
   await page.getByTestId('start-wizard-operation-next').click();
   await page.getByTestId('start-wizard-form-plate').click();

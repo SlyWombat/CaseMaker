@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Locator, Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse } from './fixtures/caseMaker';
 
 test.setTimeout(180_000);
 
@@ -126,6 +126,7 @@ for (const vp of VIEWPORTS) {
 
       // #930 — a pocket gets the same house stock: the blank step opens with the stick proposed,
       // so there is no arrival sentence and the primary is live at once.
+      await openSomethingElse(page);
       await page.getByTestId('engrave-setup-what-pocket').click();
       await page.getByTestId('start-wizard-operation-next').click();
 
@@ -165,6 +166,7 @@ for (const vp of VIEWPORTS) {
       const dialog = page.getByTestId('start-wizard-dialog');
 
       // Step 2's mesh: part/mould is not asked before a mesh is read.
+      await openSomethingElse(page);
       await page.getByTestId('engrave-setup-what-surface').click();
       const makePart = page.getByTestId('start-wizard-op-surface-make-part');
       await expect(makePart).toHaveCount(0);
@@ -199,6 +201,7 @@ for (const vp of VIEWPORTS) {
       // and its Gerber set is the one field: the walk is blocked until the set reads (B.3's bug —
       // an import used to leave the engrave choice on, so the button stayed disabled with a
       // sentence about text nobody had been asked for).
+      await openSomethingElse(page);
       await page.getByTestId('engrave-setup-what-pcb').click();
       await expect(page.getByTestId('engrave-setup-what-pcb')).toHaveAttribute('aria-pressed', 'true');
       await expect(page.getByTestId('start-wizard-op-surface-file')).toHaveCount(0);

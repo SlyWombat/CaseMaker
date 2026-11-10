@@ -92,9 +92,13 @@ async function toStockStep(pick: 'engrave' | 'pocket' = 'engrave'): Promise<void
     fireEvent.click(screen.getByTestId('start-wizard-next'));
   });
   if (pick === 'pocket') {
+    // #1100 — the engine chips are under Something else… now.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-something-else'));
     fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
   } else {
-    fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'A block' } });
+    // #1100 — a text job comes from the sign card, whose text field replaces the raw chip's.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
+    fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'A block' } });
   }
   fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
   expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();

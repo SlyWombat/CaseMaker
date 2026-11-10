@@ -134,8 +134,12 @@ describe('#752 the rotary Operation step', () => {
     expect(operationCreateBlocked(lastChoice(onChoice))).toBe('Choose the mesh to surface.');
   });
 
-  it('a flat job keeps the flat picker, unchanged', () => {
+  it('a flat job shows the preset cards, with the flat picker behind Something else…', () => {
     renderStep(defaultEngraveJob());
+    // #1100 — the step opens on the eight intent cards, not the sixteen engine chips.
+    expect(screen.getByTestId('start-wizard-presets')).toBeDefined();
+    expect(screen.queryByTestId('operation-picker')).toBeNull();
+    fireEvent.click(screen.getByTestId('start-wizard-preset-something-else'));
     expect(screen.getByTestId('operation-picker')).toBeDefined();
     expect(screen.queryByTestId('rotary-operation-picker')).toBeNull();
   });

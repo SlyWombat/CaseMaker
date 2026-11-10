@@ -42,6 +42,20 @@ export const test = base.extend<{ cm: CaseMakerHandle }>({
 export { expect } from '@playwright/test';
 
 /**
+ * #1100 — THE QUESTION STEP OPENS ON THE EIGHT PRESET CARDS. A flow that wants one of the sixteen
+ * engine chips opens *Something else…* first; a text job starts on the sign card, whose text field
+ * is `start-wizard-preset-text`. A ROTARY job keeps its rotary picker and needs neither.
+ */
+export async function openSomethingElse(page: Page): Promise<void> {
+  await page.getByTestId('start-wizard-preset-something-else').click();
+}
+
+/** #1100 — the sign card, for a flow that types a line of text. */
+export async function openSignCard(page: Page): Promise<void> {
+  await page.getByTestId('start-wizard-preset-sign').click();
+}
+
+/**
  * #798 — the Cutter group defaults CLOSED. Open it (its summary, or the Job card's `›`) before
  * touching the cutter select or reading the pick rows; the group's own summary carries the
  * one-line verdict while closed.

@@ -53,6 +53,8 @@ describe('#723 P2-3 — the wizard sides surface', () => {
     expect(screen.getByTestId('start-wizard-op-side-0').textContent).toContain('shell-out');
     expect(screen.getByTestId('start-wizard-op-side-1').textContent).toContain('shell-in');
 
+    // #1100 — the chips live under Something else…; the surface flow is behind that card now.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-something-else'));
     fireEvent.click(screen.getByTestId('engrave-setup-what-surface'));
     fireEvent.click(screen.getByTestId('start-wizard-op-side-1'));
 
