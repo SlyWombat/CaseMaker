@@ -58,6 +58,8 @@ import { bootstrap } from '../../src/platform/headless/bootstrap';
 import { Z1 } from '../../src/engine/cnc/machine';
 import { createSimSession } from '../../src/workers/sim/session';
 import type { EngraveJob, EngraveTargetObject } from '../../src/types/engraveJob';
+// #1158 — one goal-check verdict rule, shared with its unit spec.
+import { judgeSampleGoals } from './sampleCheckRule';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = resolve(HERE, '..', '..');
@@ -482,29 +484,13 @@ function checkStageOf(receipt: Record<string, unknown> | null): StageResult {
   const goals = programs
     .map((p) => p['goal'])
     .filter((g): g is Record<string, unknown> => g !== null && g !== undefined && typeof g === 'object');
-  if (goals.length === 0) {
-    return stage('n/a', 'no program carried a goal check', null);
-  }
-  const parts: string[] = [];
-  let ok = true;
-  for (const goal of goals) {
-    const ran = goal['ran'] === true;
-    const adjudicated = typeof goal['adjudicatedMaxMm'] === 'number' ? (goal['adjudicatedMaxMm'] as number) : null;
-    const leftover = Array.isArray(goal['leftoverFractions']) ? (goal['leftoverFractions'] as number[]) : [];
-    const passCoverage = typeof goal['passCoverage'] === 'number' ? (goal['passCoverage'] as number) : null;
-    const coverage = leftover.length === 0 ? null : 1 - (leftover[0] as number);
-    const passLineOk = coverage === null || passCoverage === null ? null : coverage + 1e-9 >= passCoverage;
-    if (!ran || (adjudicated !== null && adjudicated > 0) || passLineOk === false) ok = false;
-    parts.push(
-      ran
-        ? `adjudicated cut-into ${adjudicated === null ? '?' : adjudicated.toFixed(4)} mm, coverage ${
-            coverage === null ? '?' : `${(coverage * 100).toFixed(2)} %`
-          } vs ${passCoverage === null ? '?' : `${(passCoverage * 100).toFixed(2)} %`}, leftover bands ${leftover.map((v) => `${(v * 100).toFixed(2)} %`).join('/')}`
-        : `not compared: ${String(goal['reason'] ?? 'no reason stated')}`,
-    );
-  }
+  // #1158 — THE RUN'S FINAL GOAL CHECK IS THE VERDICT, and a cut-into at any stage is a
+  // never-miss. The rule lives in `sampleCheckRule.ts` so the unit spec feeds it receipts of its
+  // own; an early program is a rough/rest pass that leaves stock by design, never a sample fail.
+  const verdict = judgeSampleGoals(goals);
+  if (verdict === null) return stage('n/a', 'no program carried a goal check', null);
   const codes = diagnosticCodes(receipt);
-  return stage(ok ? 'pass' : 'fail', `${parts.join('; ')}${codes.length === 0 ? '' : ` [${codes.join(', ')}]`}`, null);
+  return stage(verdict.status, `${verdict.note}${codes.length === 0 ? '' : ` [${codes.join(', ')}]`}`, null);
 }
 
 function planStageOf(run: CutRun): StageResult {
