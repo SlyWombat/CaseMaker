@@ -16,6 +16,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { EngravePreflight } from '@/components/panels/EngravePreflight';
 import { runFindingAction, type FindingAction } from '@/engine/cnc/preflight/actions';
+import { revealClearanceStatement } from '@/components/panels/clearanceStatement';
+import { useEngraveRunStore } from '@/store/engraveRunStore';
 import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
 import type { PreflightRow } from '@/engine/cnc/preflight/types';
 
@@ -74,7 +76,7 @@ describe('#1128 follow-up — the Do row is the fix', () => {
       'Choose a cutter',
     );
     expect(screen.getByTestId('engrave-preflight-action-2-vise-default').textContent).toBe(
-      'Tick the clearance statement',
+      'Read the clearance statement',
     );
   });
 
@@ -104,12 +106,49 @@ describe('#1128 follow-up — the Do row is the fix', () => {
   });
 
   it('the dispatcher calls the ONE handler the original control calls', () => {
-    const hooks = { changeMachine: vi.fn(), openCutters: vi.fn(), acknowledgeClearance: vi.fn() };
+    const hooks = { changeMachine: vi.fn(), openCutters: vi.fn(), showClearance: vi.fn() };
     runFindingAction('change-machine', hooks);
     expect(hooks.changeMachine).toHaveBeenCalledTimes(1);
     runFindingAction('choose-cutter', hooks);
     expect(hooks.openCutters).toHaveBeenCalledTimes(1);
     runFindingAction('clearance', hooks);
-    expect(hooks.acknowledgeClearance).toHaveBeenCalledTimes(1);
+    expect(hooks.showClearance).toHaveBeenCalledTimes(1);
+  });
+
+  it('the clearance button reveals the statement and focuses its tick — it never writes it', () => {
+    const before = useEngraveRunStore.getState();
+    render(
+      <>
+        <details data-testid="engrave-cut-step-1">
+          <div data-testid="engrave-cut-ack">
+            <span>
+              I am at the machine — the probe is fitted, the head is clear, and the stock is
+              clamped — and I have checked clearance to the vise and the tool’s reach myself.
+            </span>
+            <input type="checkbox" data-testid="engrave-ack" />
+          </div>
+        </details>
+        <EngravePreflight
+          report={reportOf(ROWS)}
+          onFindingAction={(action) =>
+            runFindingAction(action, {
+              changeMachine: () => {},
+              openCutters: () => {},
+              showClearance: () => revealClearanceStatement(),
+            })
+          }
+        />
+      </>,
+    );
+    const step = screen.getByTestId('engrave-cut-step-1') as HTMLDetailsElement;
+    expect(step.open).toBe(false);
+
+    fireEvent.click(screen.getByTestId('engrave-preflight-action-2-vise-default'));
+
+    // The statement is on screen, its tick has the cursor, and the tick is still the operator’s.
+    expect(step.open).toBe(true);
+    expect(document.activeElement).toBe(screen.getByTestId('engrave-ack'));
+    expect(useEngraveRunStore.getState().acknowledged).toBe(before.acknowledged);
+    expect(useEngraveRunStore.getState().acknowledgedFor).toBe(before.acknowledgedFor);
   });
 });

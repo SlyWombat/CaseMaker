@@ -10,6 +10,11 @@
  *
  * A Do code with no in-app control (for example "a through cut needs a board — fit one") has no
  * entry: the row still says what to do, without a button that pretends the app can do it.
+ *
+ * THE CLEARANCE ACTION NEVER TICKS THE STATEMENT. The tick is the operator's own statement that
+ * they checked the vise and the tool's reach themselves; a one-click "acknowledge" in the
+ * findings list would let them tick it without reading it. The action reveals the statement (opens
+ * step 1, scrolls to it) and focuses its checkbox — the tick stays theirs.
  */
 
 import type { PreflightRow } from './types';
@@ -31,10 +36,10 @@ export interface FindingActionDef {
 export const FINDING_ACTIONS: Readonly<Partial<Record<string, FindingActionDef>>> = {
   'mount-not-on-bed': { action: 'change-machine', label: 'Change the machine…' },
   'tool-missing': { action: 'choose-cutter', label: 'Choose a cutter' },
-  'vise-default': { action: 'clearance', label: 'Tick the clearance statement' },
-  'holder-vs-fixture-unproven': { action: 'clearance', label: 'Tick the clearance statement' },
-  'holder-unproven': { action: 'clearance', label: 'Tick the clearance statement' },
-  'released-onto-board': { action: 'clearance', label: 'Tick the clearance statement' },
+  'vise-default': { action: 'clearance', label: 'Read the clearance statement' },
+  'holder-vs-fixture-unproven': { action: 'clearance', label: 'Read the clearance statement' },
+  'holder-unproven': { action: 'clearance', label: 'Read the clearance statement' },
+  'released-onto-board': { action: 'clearance', label: 'Read the clearance statement' },
 };
 
 /** The action a row offers, or null when its act has no in-app control. */
@@ -48,13 +53,13 @@ export interface FindingActionHooks {
   changeMachine: () => void;
   /** The Design cutter group's own fix (`applyFix({ group: 'engrave-group-cutter', … })`). */
   openCutters: () => void;
-  /** The clearance statement's tick, the same write its checkbox makes. */
-  acknowledgeClearance: () => void;
+  /** Reveal the clearance statement and focus its checkbox — never write the tick. */
+  showClearance: () => void;
 }
 
 /** Run one act through the surface's own handler. */
 export function runFindingAction(action: FindingAction, hooks: FindingActionHooks): void {
   if (action === 'change-machine') hooks.changeMachine();
   else if (action === 'choose-cutter') hooks.openCutters();
-  else hooks.acknowledgeClearance();
+  else hooks.showClearance();
 }
