@@ -186,6 +186,15 @@ const HouseHealthSchema = z.object({
    */
   lastSync: SyncSummarySchema.nullable().default(null),
   /**
+   * #1126 — whether this service can RUN CNC generation (the runs API over the CLI path). False on
+   * every service before the runs slice, and false when the service's own Node/CLI paths are
+   * missing or not executable: the house never guesses a path, and the location document (data a
+   * LAN client may write) can never name an executable. OPTIONAL rather than defaulted so the
+   * inferred `HouseHealth` type keeps every existing fake and caller compiling; absent is false,
+   * and every reader asks `health.runs === true`.
+   */
+  runs: z.boolean().optional(),
+  /**
    * One sentence per document the service could not read. Non-empty means it will refuse writes —
    * worth showing to the user rather than swallowing, and worth not treating as "no tools".
    */
