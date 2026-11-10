@@ -53,22 +53,27 @@ function expectedWords(plan: RegistrationPlan): string {
 }
 
 /**
- * #1179 B — THE CHECK POINTS FOR A CUT BLANK. The package's cutting footprint grown by each
- * program's cutter radius + 1 mm (the largest owned diameter + 1 when a cutter is unknown) and the
- * part's placed silhouette, both from the job; the mount's obstacles and a 3 mm edge margin are
- * excluded. The executor proves the top by touching them.
+ * #1179 B — THE CHECK POINTS FOR A CUT BLANK. Only the programs of the SETUP BEING REGISTERED
+ * (the analyst's scoping rule, 2026-11-10): a two-sided job's side-1 programs are in side 1's
+ * frame, so their footprint and floors are not this face's. The package's cutting footprint grown
+ * by each program's cutter radius + 1 mm + the probe tip's radius (the largest owned diameter + 1
+ * when a cutter is unknown) and the part's placed silhouette, both from the job; the mount's
+ * obstacles and a 3 mm edge margin are excluded. For a later setup the earlier setups' cuts are
+ * unknown from this face, so nothing is claimed known there.
  */
 function cutBlankCheckPoints(
   job: EngraveJob,
   plan: RegistrationPlan,
   largestOwnedDiameterMm: number,
   finishedHashes: readonly string[],
+  setupIndex: number,
 ): { points: { x: number; y: number; depthMm: number }[]; earlierCutsKnown: boolean; floorsRestricted: string | null } {
   const raster = stockRaster(plan.stock);
   const fallbackRadiusMm = (Number.isFinite(largestOwnedDiameterMm) && largestOwnedDiameterMm > 0 ? largestOwnedDiameterMm : 0) / 2;
   const finished = new Set(finishedHashes);
   const programs: CutProgramInput[] = (job.package?.programs ?? [])
     .filter((program) => (program.frame ?? 'flat') === 'flat')
+    .filter((program) => program.setupIndex === setupIndex)
     .map((program) => {
       const tool = resolveTool(program.toolKey);
       const diameter = tool === null ? null : cuttingDiameter(tool);
@@ -76,6 +81,8 @@ function cutBlankCheckPoints(
         nc: program.nc,
         cutterRadiusMm: diameter === null ? fallbackRadiusMm : diameter / 2,
         finished: finished.has(program.hash),
+        // Only a FLAT end mill leaves a flat floor; an unnameable cutter is never trusted flat.
+        shape: tool?.shape ?? 'unknown',
       };
     });
   return cutBlankCandidates({
@@ -88,6 +95,8 @@ function cutBlankCheckPoints(
     },
     fallbackRadiusMm,
     obstacles: plan.mountObstacles.map((o) => ({ min: o.min, max: o.max })),
+    // A later setup: earlier setups' cuts are not recorded for this face.
+    earlierCutsUnknown: setupIndex > 1,
   });
 }
 
@@ -133,6 +142,12 @@ export function planRegistrationAttempt(args: {
    * THIS package that is among them is finished, and only finished programs' floors are known.
    */
   finishedHashes?: readonly string[];
+  /**
+   * #1179 B — the 1-based setup being registered, in the frozen programs' own `setupIndex`
+   * numbering. Only that setup's programs are this face's known cuts; a later setup's earlier
+   * cuts are not recorded for this face (the analyst, 2026-11-10). Defaults to 1.
+   */
+  setupIndex?: number;
 }): RegistrationAttempt {
   const { job, setup, mount, defaults, calibration } = args;
   // #934 — REGISTRATION FROM EARLIER FEATURES is one of the branches the bench has not run; it is
@@ -279,7 +294,7 @@ export function planRegistrationAttempt(args: {
     // the bracket's own top — the derived path, the last resort.
     const checks =
       args.cutBlank === true
-        ? cutBlankCheckPoints(job, result.plan, args.largestOwnedDiameterMm ?? 0, args.finishedHashes ?? [])
+        ? cutBlankCheckPoints(job, result.plan, args.largestOwnedDiameterMm ?? 0, args.finishedHashes ?? [], args.setupIndex ?? 1)
         : { points: [], earlierCutsKnown: true, floorsRestricted: null };
     const plan =
       checks.points.length === 0

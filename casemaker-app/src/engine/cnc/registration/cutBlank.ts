@@ -5,9 +5,13 @@
  * band, the blank may be the perfect size." So the candidate points are not a ring around the part;
  * they are points whose DEPTH IS KNOWN:
  *  - the UNCUT TOP — no finished program cuts near it, d = 0;
- *  - a FLAT FLOOR — a finished program's own moves give its depth: the deepest cutting move within
- *    that program's cutter radius is the floor there, and the cell is flat when every cutting move
- *    within the cutter radius + the probe tip radius + 1 mm sits at that depth ± 0.02 mm.
+ *  - a FLAT FLOOR — a finished FLAT END MILL's own moves give its depth: the deepest cutting move
+ *    within that program's cutter radius is the floor there, and the cell is flat when every
+ *    cutting move within the cutter radius + the probe tip radius + 1 mm sits at that depth
+ *    ± 0.02 mm. A floor is only flat under a FLAT cutter (the analyst, 2026-11-10): under a ball,
+ *    bull or V the surface between passes is scalloped and shallower than the tip's Z, so two
+ *    passes at one Z would pass the depth test and the probe would read a cusp. A cell a non-flat
+ *    cutter reaches is CUT — never top, never a floor candidate.
  * A touch's reading + the point's depth is the IMPLIED top; the executor takes the highest implied
  * level two touches agree on. A single reading is never the top.
  *
@@ -17,6 +21,7 @@
  * points are spread as far apart as the candidates allow.
  */
 import { buildSwathIndex } from '@/engine/cnc/engrave/liveSwath';
+import type { ToolShape } from '@/engine/cnc/tool';
 
 /** The candidate raster's pitch, mm. */
 export const CUT_BLANK_PITCH_MM = 1;
@@ -46,7 +51,15 @@ export interface CutProgramInput {
   cutterRadiusMm: number;
   /** True when this program is among the machine's finished programs for THIS package. */
   finished: boolean;
+  /**
+   * The cutter's shape. Only `'flat'` leaves a flat floor between passes; any other shape (and an
+   * unnameable cutter, `'unknown'`) makes the surface it leaves scalloped — cut, never a floor.
+   */
+  shape: ToolShape;
 }
+
+/** A flat end mill is the only cutter whose finished floor the raster can call flat. */
+const isFlatCutter = (program: CutProgramInput): boolean => program.shape === 'flat';
 
 /** A mount obstacle in the plan's work XY, as the registration already carries it. */
 export interface CutBlankObstacle {
@@ -119,8 +132,9 @@ const radiusOf = (program: CutProgramInput, fallbackRadiusMm: number): number =>
   Number.isFinite(program.cutterRadiusMm) && program.cutterRadiusMm >= 0 ? program.cutterRadiusMm : Math.max(0, fallbackRadiusMm);
 
 /**
- * The finished programs' floor: per cell, the deepest cutting move within that program's cutter
- * radius, mm below the stock top (0 = untouched).
+ * The finished FLAT programs' floor: per cell, the deepest cutting move within that program's
+ * cutter radius, mm below the stock top (0 = untouched). A non-flat program's cuts are not a floor
+ * — {@link cutMask} says which cells they reach.
  */
 export function depthRaster(
   raster: StockRaster,
@@ -129,7 +143,7 @@ export function depthRaster(
 ): Float32Array {
   const depth = new Float32Array(raster.nx * raster.ny);
   for (const program of programs) {
-    if (!program.finished) continue;
+    if (!program.finished || !isFlatCutter(program)) continue;
     const reach = radiusOf(program, fallbackRadiusMm);
     for (const move of movesOf(program)) {
       const { i0, i1, j0, j1 } = boundsOf(raster, move.a, move.b, reach);
@@ -145,6 +159,37 @@ export function depthRaster(
     }
   }
   return depth;
+}
+
+/**
+ * The cells a finished program's cutter reaches. `nonFlatOnly` keeps just the cutters whose floor
+ * is not flat (ball, bull, V, and an unnameable cutter): those cells are CUT and can never be a
+ * check point for the uncut top or a floor.
+ */
+export function cutMask(
+  raster: StockRaster,
+  programs: readonly CutProgramInput[],
+  fallbackRadiusMm: number,
+  nonFlatOnly = false,
+): Uint8Array {
+  const mask = new Uint8Array(raster.nx * raster.ny);
+  for (const program of programs) {
+    if (!program.finished) continue;
+    if (nonFlatOnly && isFlatCutter(program)) continue;
+    const reach = radiusOf(program, fallbackRadiusMm);
+    for (const move of movesOf(program)) {
+      const { i0, i1, j0, j1 } = boundsOf(raster, move.a, move.b, reach);
+      for (let j = j0; j <= j1; j++) {
+        const y = cellY(raster, j);
+        for (let i = i0; i <= i1; i++) {
+          const at = j * raster.nx + i;
+          if (mask[at] === 1) continue;
+          if (distanceToSegment2d(cellX(raster, i), y, move.a, move.b) <= reach + 1e-9) mask[at] = 1;
+        }
+      }
+    }
+  }
+  return mask;
 }
 
 /**
@@ -190,8 +235,15 @@ export function flatFloorMask(
   };
   const byTip = near(tipRadius);
   const byBody = bodyRadius === null ? null : near(bodyRadius);
+  // A cell a non-flat cutter reaches is CUT: its true surface is a scallop shallower than the
+  // tip's Z, so no depth test can call it flat — whatever the moves' own Z values say.
+  const nonFlatReached = cutMask(raster, programs, fallbackRadiusMm, true);
   const flat = new Uint8Array(raster.nx * raster.ny);
   for (let at = 0; at < flat.length; at++) {
+    if (nonFlatReached[at] === 1) {
+      flat[at] = 0;
+      continue;
+    }
     const own = depth[at]!;
     const deep = probe.tipLengthMm !== null && probe.tipLengthMm !== undefined && own > probe.tipLengthMm + 1e-9;
     const chosen = deep ? (byBody === null ? null : byBody) : byTip;
@@ -221,19 +273,21 @@ export interface ProbeBody {
 /**
  * The union of EVERY program's cutting path, grown by its cutter radius + 1 mm (the fallback grow
  * when a cutter is unknown) — the "outside today's package footprint" set the unknown-cuts case
- * uses.
+ * uses. `extraReachMm` grows it further: the analyst's rule (2026-11-10) is the probe tip's radius
+ * as well, so a check point never sits half over a pocket the tip enters.
  */
 export function cutFootprintMask(
   raster: StockRaster,
   programs: readonly CutProgramInput[],
   fallbackRadiusMm: number,
-  fallbackGrowMm: number = Math.max(0, fallbackRadiusMm) + 1,
+  extraReachMm = 0,
 ): Uint8Array {
+  const extra = Math.max(0, extraReachMm);
   const mask = new Uint8Array(raster.nx * raster.ny);
   for (const program of programs) {
     const reach = Number.isFinite(program.cutterRadiusMm) && program.cutterRadiusMm >= 0
-      ? program.cutterRadiusMm + 1
-      : Math.max(0, fallbackGrowMm);
+      ? program.cutterRadiusMm + 1 + extra
+      : Math.max(0, fallbackRadiusMm) + 1 + extra;
     for (const move of movesOf(program)) {
       const { i0, i1, j0, j1 } = boundsOf(raster, move.a, move.b, reach);
       for (let j = j0; j <= j1; j++) {
@@ -292,12 +346,18 @@ export function cutBlankCandidates(input: {
   /** The probe's entering geometry: its tip, and the body a deep floor is entered by. */
   probe: ProbeBody;
   fallbackRadiusMm: number;
+  /**
+   * #1179 B (analyst) — a LATER setup: the programs given are the registered setup's own, and the
+   * earlier setups' cuts are not recorded for this face (their frames face the other way). Nothing
+   * is claimed known: the selection takes the unknown path over this setup's own footprint.
+   */
+  earlierCutsUnknown?: boolean;
   obstacles: readonly CutBlankObstacle[];
   edgeMarginMm?: number;
 }): { points: SurfacePointCandidate[]; earlierCutsKnown: boolean; floorsRestricted: string | null } {
   const { raster, programs, obstacles } = input;
   const margin = input.edgeMarginMm ?? CUT_BLANK_EDGE_MARGIN_MM;
-  const earlierCutsKnown = programs.some((program) => program.finished);
+  const earlierCutsKnown = input.earlierCutsUnknown !== true && programs.some((program) => program.finished);
   const depth = earlierCutsKnown ? depthRaster(raster, programs, input.fallbackRadiusMm) : null;
   // #1179 B (analyst) — a floor deeper than the tip's length is entered by the probe's BODY: it is
   // only a candidate when the body's diameter is recorded. An unrecorded tip length keeps to the
@@ -315,7 +375,14 @@ export function cutBlankCandidates(input: {
   const flat = earlierCutsKnown && tipLengthKnown
     ? flatFloorMask(raster, programs, input.fallbackRadiusMm, input.probe, depth ?? undefined)
     : null;
-  const outside = earlierCutsKnown ? null : cutFootprintMask(raster, programs, input.fallbackRadiusMm);
+  // No recorded tip length: the floors are not offered (the note says so), but the UNCUT TOP still
+  // is — the cells the finished programs have not reached. With earlier cuts unknown, every given
+  // program's footprint is excluded instead (those cuts may or may not have happened).
+  const outside = earlierCutsKnown
+    ? tipLengthKnown
+      ? null
+      : cutFootprintMask(raster, programs.filter((program) => program.finished), input.fallbackRadiusMm, input.probe.tipRadiusMm)
+    : cutFootprintMask(raster, programs, input.fallbackRadiusMm, input.probe.tipRadiusMm);
   const top: Cell[] = [];
   const floor: Cell[] = [];
   for (let j = 0; j < raster.ny; j++) {

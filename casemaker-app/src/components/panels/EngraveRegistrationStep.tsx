@@ -492,6 +492,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       cutBlank: hasFinishedPrograms,
       largestOwnedDiameterMm,
       finishedHashes: machineRecord?.finishedPrograms ?? [],
+      // #1179 B — only the registered setup's own programs are this face's known cuts.
+      setupIndex: registrationSetupIndex,
     });
   }, [
     plan,
@@ -512,6 +514,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     hasFinishedPrograms,
     largestOwnedDiameterMm,
     machineRecord,
+    registrationSetupIndex,
     // #1082 — a face landing must re-plan (the job object is unchanged when it does).
     facesEpoch,
   ]);

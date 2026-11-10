@@ -15,6 +15,7 @@ import {
   depthRaster,
   flatFloorMask,
   stockRaster,
+  type CutProgramInput,
 } from '@/engine/cnc/registration/cutBlank';
 
 const STOCK = { xMin: 0, yMin: 0, xMax: 100, yMax: 60 };
@@ -37,7 +38,7 @@ const at = (raster: typeof RASTER, x: number, y: number): number =>
 
 describe('#1179 the depth of a finished program’s floor', () => {
   it('gives the deepest cutting move within the cutter radius, and 0 where nothing cut', () => {
-    const program = { nc: fillNc(20, 80, 30, 30, 10, 2), cutterRadiusMm: 2, finished: true };
+    const program = { nc: fillNc(20, 80, 30, 30, 10, 2), cutterRadiusMm: 2, finished: true, shape: 'flat' };
     const depth = depthRaster(RASTER, [program], 2);
     expect(depth[at(RASTER, 50, 30)]).toBeCloseTo(2, 6);
     // One radius and a hair away from the line: still the floor; well away: untouched.
@@ -52,12 +53,13 @@ describe('#1179 the depth of a finished program’s floor', () => {
       nc: fillNc(20, 80, 20, 20, 10, 2) + '\n' + fillNc(20, 80, 22, 22, 10, 3),
       cutterRadiusMm: 2,
       finished: true,
+      shape: 'flat',
     };
     const depthUneven = depthRaster(RASTER, [uneven], 2);
     const flatUneven = flatFloorMask(RASTER, [uneven], 2, { tipRadiusMm: TIP_R, tipLengthMm: 10 }, depthUneven);
     expect(flatUneven[at(RASTER, 50, 20)]).toBe(0);
     // One uniform fill is flat across its floor.
-    const even = { nc: fillNc(20, 80, 20, 40, 1, 2), cutterRadiusMm: 2, finished: true };
+    const even = { nc: fillNc(20, 80, 20, 40, 1, 2), cutterRadiusMm: 2, finished: true, shape: 'flat' };
     const depthEven = depthRaster(RASTER, [even], 2);
     const flatEven = flatFloorMask(RASTER, [even], 2, { tipRadiusMm: TIP_R, tipLengthMm: 10 }, depthEven);
     expect(flatEven[at(RASTER, 50, 30)]).toBe(1);
@@ -65,7 +67,7 @@ describe('#1179 the depth of a finished program’s floor', () => {
   });
 
   it('a finished program’s floor is known; an unfinished one’s is not', () => {
-    const program = { nc: fillNc(20, 80, 20, 40, 1, 2), cutterRadiusMm: 2, finished: false };
+    const program = { nc: fillNc(20, 80, 20, 40, 1, 2), cutterRadiusMm: 2, finished: false, shape: 'flat' };
     const depth = depthRaster(RASTER, [program], 2);
     expect(depth[at(RASTER, 50, 30)]).toBe(0);
   });
@@ -74,7 +76,7 @@ describe('#1179 the depth of a finished program’s floor', () => {
 describe('#1179 candidate points on a cut blank', () => {
   it('with finished programs: the uncut top first, then flat floors (depth carried)', () => {
     // A finished fill across the middle; the top remains at both ends.
-    const program = { nc: fillNc(20, 80, 10, 50, 1, 2), cutterRadiusMm: 2, finished: true };
+    const program = { nc: fillNc(20, 80, 10, 50, 1, 2), cutterRadiusMm: 2, finished: true, shape: 'flat' };
     const known = cutBlankCandidates({ raster: RASTER, programs: [program], probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 }, fallbackRadiusMm: 2, obstacles: [] });
     expect(known.earlierCutsKnown).toBe(true);
     expect(known.points.length).toBeGreaterThanOrEqual(2);
@@ -91,7 +93,7 @@ describe('#1179 candidate points on a cut blank', () => {
   });
 
   it('with nothing recorded: outside today’s footprint, d = 0, and earlier cuts unknown', () => {
-    const program = { nc: fillNc(30, 70, 10, 50, 1, 2), cutterRadiusMm: 2, finished: false };
+    const program = { nc: fillNc(30, 70, 10, 50, 1, 2), cutterRadiusMm: 2, finished: false, shape: 'flat' };
     const unknown = cutBlankCandidates({
       raster: RASTER,
       programs: [program],
@@ -133,7 +135,7 @@ describe('#1179 candidate points on a cut blank', () => {
 
   it('a floor deeper than the tip needs the probe’s body: without it the uncut top only, with a note', () => {
     // The whole top is a 2 mm floor; the probe's tip sticks out 1 mm, so the body enters.
-    const deep = { nc: fillNc(0, 100, 0, 60, 1, 2), cutterRadiusMm: 2, finished: true };
+    const deep = { nc: fillNc(0, 100, 0, 60, 1, 2), cutterRadiusMm: 2, finished: true, shape: 'flat' };
     const noBody = cutBlankCandidates({
       raster: RASTER,
       programs: [deep],
@@ -154,6 +156,26 @@ describe('#1179 candidate points on a cut blank', () => {
     expect(withBody.points[0]!.depthMm).toBeCloseTo(2, 6);
   });
 
+  it('an unrecorded tip length keeps the uncut top, and the note says the floors were not used', () => {
+    const program = { nc: fillNc(20, 80, 10, 50, 1, 2), cutterRadiusMm: 2, finished: true, shape: 'flat' };
+    const r = cutBlankCandidates({
+      raster: RASTER,
+      programs: [program],
+      probe: { tipRadiusMm: TIP_R },
+      fallbackRadiusMm: 2,
+      obstacles: [],
+    });
+    expect(r.earlierCutsKnown).toBe(true);
+    expect(r.floorsRestricted).toContain('not recorded');
+    expect(r.points.length).toBeGreaterThanOrEqual(2);
+    for (const p of r.points) {
+      expect(p.depthMm).toBe(0);
+      // Only the finished program's cut excludes a top cell: its footprint grown by radius + 1 + tip.
+      const insideFinished = p.x > 20 - 3 && p.x < 80 + 3 && p.y > 10 - 3 && p.y < 50 + 3;
+      expect(insideFinished).toBe(false);
+    }
+  });
+
   it('offers no candidate when the mount’s obstacles leave nothing', () => {
     const points = cutBlankCandidates({
       raster: RASTER,
@@ -167,11 +189,47 @@ describe('#1179 candidate points on a cut blank', () => {
 });
 
 describe('#1179 the unknown-cuts footprint', () => {
-  it('grows each program by its cutter radius + 1', () => {
-    const program = { nc: fillNc(20, 80, 30, 30, 10, 2), cutterRadiusMm: 2, finished: false };
+  it('grows each program by its cutter radius + 1 (and the tip’s reach when given)', () => {
+    const program = { nc: fillNc(20, 80, 30, 30, 10, 2), cutterRadiusMm: 2, finished: false, shape: 'flat' };
     const mask = cutFootprintMask(RASTER, [program], 2);
     expect(mask[at(RASTER, 50, 30)]).toBe(1);
     expect(mask[at(RASTER, 50, 32.5)]).toBe(1);
     expect(mask[at(RASTER, 50, 40)]).toBe(0);
+    // #1179 B (analyst) — the tip's margin too: a check point must not sit half over a pocket the
+    // tip enters (it matters when the earlier plan cut the same pocket).
+    const wider = cutFootprintMask(RASTER, [program], 2, 0.7);
+    expect(wider[at(RASTER, 50, 33.5)]).toBe(1);
+    expect(wider[at(RASTER, 50, 40)]).toBe(0);
+  });
+});
+
+describe('#1179 a non-flat cutter’s floor is not flat (analyst, 2026-11-10)', () => {
+  it('a ball raster at one Z with a 1 mm step-over offers no floor, and is not top either', () => {
+    // A 6 mm ball finishing pass at one Z: every move is at depth 2 and the step-over is inside
+    // the flat test's reach, so depth alone says "flat". The surface between the passes is a
+    // scallop whose cusp is SHALLOWER than the tip — never a floor, and its footprint is CUT.
+    const ball: CutProgramInput = {
+      nc: fillNc(20, 80, 10, 50, 1, 2),
+      cutterRadiusMm: 3,
+      finished: true,
+      shape: 'ball',
+    };
+    const depth = depthRaster(RASTER, [ball], 3);
+    expect(depth[at(RASTER, 50, 30)]).toBe(0);
+    const flat = flatFloorMask(RASTER, [ball], 3, { tipRadiusMm: TIP_R, tipLengthMm: 10 }, depth);
+    expect(flat[at(RASTER, 50, 30)]).toBe(0);
+    const points = cutBlankCandidates({
+      raster: RASTER,
+      programs: [ball],
+      probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
+      fallbackRadiusMm: 3,
+      obstacles: [],
+    }).points;
+    // No floor candidate at 2 mm; what is offered is uncut top well clear of the ball's footprint.
+    for (const p of points) {
+      expect(p.depthMm).toBe(0);
+      const insideFootprint = p.x > 20 - 3 && p.x < 80 + 3 && p.y > 10 - 3 && p.y < 50 + 3;
+      expect(insideFootprint).toBe(false);
+    }
   });
 });

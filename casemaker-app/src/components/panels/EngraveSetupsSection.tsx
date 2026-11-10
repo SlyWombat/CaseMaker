@@ -669,6 +669,8 @@ export function EngraveSetupsSection({
                   defaults,
                   calibration,
                   settings: regSettings,
+                  // #1179 B — the saved setup's own number: only its programs are this face's cuts.
+                  setupIndex: index + 1,
                 });
               }}
               onTapJaw={mountTapApi.tapJaw}
