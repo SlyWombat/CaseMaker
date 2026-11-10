@@ -29,6 +29,12 @@ describe('#1123 item 8 — the borrowed-feeds note for the cutter row', () => {
     ).toEqual([]);
   });
 
+  it('#1186 — the grouped statement’s own sentence is the note, with the bits and the minutes', () => {
+    const sentence =
+      'PATIKIL up-cut, uxcell square-nose, TiN corn 0.6 have no feed of their own for hardwood and cut at the 3.2 mm row’s slower feed and step-down — about 97 min of this plan';
+    expect(feedsProxyNotes([{ code: 'goal-cutter-substituted', feedsProxyMm: 3.2, text: sentence }])).toEqual([sentence]);
+  });
+
   it('names each distinct borrowed row once, however many cutters borrow it', () => {
     expect(
       feedsProxyNotes([

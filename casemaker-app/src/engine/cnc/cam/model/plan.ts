@@ -1346,8 +1346,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // THE REVIEW'S FINDING (item 8): the ball and the V each get their OWN catalogue row — not
     // the primary flat's, reused as every tool's numbers before this.
     // #1123 item 8 — the note carries the borrowed row's diameter when it came from a feed proxy.
-    const toolSubstitutions: { text: string; feedsProxyMm?: number }[] =
-      substitution === null ? [] : [{ text: substitution, ...(substitutionMm === undefined ? {} : { feedsProxyMm: substitutionMm }) }];
+    // #1186 — each entry also names the bit (its key and display name), so rule 4's ONE row can
+    // name the borrowed bits and price the borrow against a chain that uses none of them.
+    const toolSubstitutions: { text: string; feedsProxyMm?: number; cutterKey: string; cutterName: string }[] =
+      substitution === null
+        ? []
+        : [{
+            text: substitution,
+            cutterKey: cutterKeyOf(primary),
+            cutterName: primary.name || primary.id || `${cuttingDiameter(primary) ?? '?'} mm cutter`,
+            ...(substitutionMm === undefined ? {} : { feedsProxyMm: substitutionMm }),
+          }];
     const vbitParams = vbit === undefined ? null : toolCutParams(input, vbit, pocketParams);
 
     // #985/#965 — THE STATED TOLERANCE, as a function of the ball: a stated cusp (`finishMm`)
@@ -1802,14 +1811,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const restBall = restBallFor(ball);
     const ballParams = ball === undefined ? null : toolCutParams(input, ball, pocketParams);
     if (ballParams?.note !== null && ballParams?.note !== undefined) {
-      toolSubstitutions.push({ text: ballParams.note, ...(ballParams.noteMm === undefined ? {} : { feedsProxyMm: ballParams.noteMm }) });
+      toolSubstitutions.push({ text: ballParams.note, cutterKey: cutterKeyOf(ball!), cutterName: ball!.name || ball!.id || 'ball', ...(ballParams.noteMm === undefined ? {} : { feedsProxyMm: ballParams.noteMm }) });
     }
     if (vbitParams?.note !== null && vbitParams?.note !== undefined) {
-      toolSubstitutions.push({ text: vbitParams.note, ...(vbitParams.noteMm === undefined ? {} : { feedsProxyMm: vbitParams.noteMm }) });
+      toolSubstitutions.push({ text: vbitParams.note, cutterKey: cutterKeyOf(vbit!), cutterName: vbit!.name || vbit!.id || 'V-bit', ...(vbitParams.noteMm === undefined ? {} : { feedsProxyMm: vbitParams.noteMm }) });
     }
     const restBallParams = restBall === undefined ? null : toolCutParams(input, restBall, pocketParams);
     if (restBallParams?.note !== null && restBallParams?.note !== undefined) {
-      toolSubstitutions.push({ text: restBallParams.note, ...(restBallParams.noteMm === undefined ? {} : { feedsProxyMm: restBallParams.noteMm }) });
+      toolSubstitutions.push({ text: restBallParams.note, cutterKey: cutterKeyOf(restBall!), cutterName: restBall!.name || restBall!.id || 'ball', ...(restBallParams.noteMm === undefined ? {} : { feedsProxyMm: restBallParams.noteMm }) });
     }
     // #990 — EVERY OTHER CUTTER GETS ITS OWN ROW TOO: a rest flat, the goal's own
     // `curvedRoughTool`, a smaller skin/rest flat — anything in the house that differs from
@@ -1831,7 +1840,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       otherParams.set(key, params);
       if (note !== null && !notedOthers.has(key)) {
         notedOthers.add(key);
-        toolSubstitutions.push({ text: note, ...(noteMm === undefined ? {} : { feedsProxyMm: noteMm }) });
+        toolSubstitutions.push({ text: note, cutterKey: key, cutterName: tool.name || tool.id || `${cuttingDiameter(tool) ?? '?'} mm cutter`, ...(noteMm === undefined ? {} : { feedsProxyMm: noteMm }) });
       }
       return params;
     };
@@ -2394,7 +2403,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           : `Cut only the stock's ${face} ${mm3(depthBandMm)} mm; nothing of the goal is below the band`,
       );
     }
-    notes.push(...toolSubstitutions.map((entry) => entry.text));
+    // #1186 rule 4 — the borrowed bits are stated ONCE (below), with their cost, not once per bit.
     // #986 (the ruling) — the ball rank's own statement: the measured candidates, the winner and
     // the uncapped best, so the operator sees what the cap cost.
     notes.push(...ballRankNotes);
@@ -2476,14 +2485,32 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             },
       );
     }
-    for (const substitution of toolSubstitutions) {
-      // A cutter cut with another tool's numbers (a fallback/proxy feed row) changes the cut.
+    // #1186 rule 4 — ONE ROW FOR THE BORROWED BITS. The old loop printed the same warning once per
+    // cutter; the operator gets one row naming the bits, the row they borrow, and what the borrow
+    // costs THIS plan: its priced total against the cheapest chain the picker considered that uses
+    // none of them ('no faster owned alternative was found' when there is none).
+    if (toolSubstitutions.length > 0) {
+      const borrowedKeys = new Set(toolSubstitutions.map((entry) => entry.cutterKey));
+      const chosenSeconds = result.choice.cost?.totalSeconds ?? null;
+      const alternatives = result.choice.considered
+        .filter((candidate) => candidate.cost !== null && candidate.steps.every((step) => !borrowedKeys.has(step.cutterKey)))
+        .map((candidate) => candidate.cost!);
+      const bestSeconds = alternatives.length === 0 ? null : Math.min(...alternatives);
+      const borrowedMinutes = chosenSeconds === null || bestSeconds === null ? null : Math.round((chosenSeconds - bestSeconds) / 60);
+      const names = [...new Set(toolSubstitutions.map((entry) => entry.cutterName))];
+      const rowMm = Math.max(...toolSubstitutions.map((entry) => entry.feedsProxyMm ?? 0));
+      const rowWords = Number.isFinite(rowMm) && rowMm > 0 ? `${rowMm} mm row's slower feed and step-down` : "borrowed feed row's slower numbers";
+      const costWords = borrowedMinutes === null || borrowedMinutes <= 0 ? 'no faster owned alternative was found' : `about ${borrowedMinutes} min of this plan`;
+      const text =
+        `${names.join(', ')} ${names.length === 1 ? 'has' : 'have'} no feed of their own for ${input.stock.material} ` +
+        `and cut at the ${rowWords} — ${costWords}`;
+      notes.push(text);
       statements.push({
         severity: 'warning',
         code: 'goal-cutter-substituted',
-        count: 1,
-        text: substitution.text,
-        ...(substitution.feedsProxyMm === undefined ? {} : { feedsProxyMm: substitution.feedsProxyMm }),
+        count: toolSubstitutions.length,
+        text,
+        ...(Number.isFinite(rowMm) && rowMm > 0 ? { feedsProxyMm: rowMm } : {}),
       });
     }
     if (ballUncutIds.length > 0) {
