@@ -258,6 +258,58 @@ export function setEngraveRunClientLoader(fn: (() => Promise<EngraveRunClient>) 
 }
 
 /**
+ * #1126/#1175 — THE CLIENT GENERATE USES: the house's when the service can run one, else the
+ * page's own worker.
+ *
+ * #1191 — THE BACKGROUND COMPARISON USES THE SAME CHOICE. The plans it compares must be made by
+ * the planner the Generate press would run; asking the page's worker while the press would ask
+ * the house would report a difference that is not the build's.
+ */
+async function clientForGenerate(): Promise<EngraveRunClient> {
+  const base = await clientLoader();
+  // #1175 — THE PUBLISH SWITCH. `true` forces the in-page worker for every Generate, exactly as a
+  // service that reports `runs: false`: the house branch below is skipped and nothing else changes.
+  const HOUSE_GENERATION_FORCED_OFF = false;
+  if (HOUSE_GENERATION_FORCED_OFF || !(await houseGenerationAvailable())) return base;
+  const { engravePlanIdeal: _idealOnTheBrowser, ...rest } = base;
+  return {
+    ...rest,
+    // #1175 — ALL TEN ARGUMENTS OF THE BROWSER CALL ARE HONOURED. The tools list (8th) and the
+    // ladder press (10th) ride the submit to the service and the CLI; `deferIdeal` (9th) has no
+    // house analogue — the CLI's own Generate already runs both outcomes and returns the tradeoff,
+    // so the result is never deferred and the store's after-Generate code reads it exactly as it
+    // reads an in-page result.
+    engraveGenerate: (
+      jobArg,
+      toolArg,
+      catalogueArg,
+      calibrationArg,
+      marginsArg,
+      shopArg,
+      onProgressArg,
+      catalogueToolsArg,
+      _deferIdealArg,
+      restLadderArg,
+    ) =>
+      houseEngraveGenerate({
+        job: jobArg,
+        tool: toolArg,
+        catalogue: catalogueArg,
+        calibration: calibrationArg,
+        margins: marginsArg,
+        ...(shopArg === undefined ? {} : { shop: shopArg }),
+        ...(onProgressArg === undefined ? {} : { onProgress: onProgressArg }),
+        ...(catalogueToolsArg === undefined ? {} : { catalogueTools: catalogueToolsArg }),
+        ...(restLadderArg === undefined ? {} : { restLadder: restLadderArg }),
+      }),
+    cancelGenerate: () => {
+      cancelActiveHouseRun();
+      base.cancelGenerate?.();
+    },
+  };
+}
+
+/**
  * Half the job's smallest level step, mm — the ramp the column engine should name (#629). A move
  * whose Z ramps along its XY leg is swept at its deep end; it over-removes at a lower level only
  * when the ramp crosses a level boundary, so the threshold is half the smallest gap between the
@@ -462,6 +514,11 @@ export interface EngraveRunState {
    * when the deferred recheck runs; a moved input then marks the ordinary stale reason.
    */
   restoreChecking: boolean;
+  /**
+   * #1191 — this build's background comparison of a not-yet-started restored run. Null before any
+   * comparison (and after Keep); `same` says nothing on screen, `different` offers the choice.
+   */
+  buildCompare: BuildCompare | null;
   /** #581 — the inputs that differ from the previous Generate's; empty on the first run. */
   changedSinceLast: EngraveInputKey[];
   /** #581 — the previous Generate's oracle verdict, so a ✓↔× flip can say what changed. */
@@ -512,6 +569,14 @@ export interface EngraveRunState {
   recheckRestoredRun: (
     restored: Pick<EngraveRunState, 'generated' | 'inputs'>,
   ) => Promise<void>;
+  /**
+   * #1191 — compare this build's plan for the job with the restored run, in the background, when
+   * no program of the restored package has been cut. The restored run is never touched; a
+   * different plan is a CHOICE (`buildCompare`), and keeping is the default.
+   */
+  compareRestoredPlan: () => Promise<void>;
+  /** #1191 — keep the restored programs (the default): drop the compare's offer. */
+  keepRestoredPlan: () => void;
   /**
    * #785 — CANCEL a run in flight. The worker is terminated (the only reliable stop for a wasm
    * call), the in-flight result is orphaned, and the panel returns to the phase it was in before
@@ -568,6 +633,20 @@ export function generatorStallSentence(
   return `no checkpoint completed in ${seconds} s${at}; the worker is alive`;
 }
 
+/**
+ * #1191 — THE CROSS-BUILD PLAN COMPARISON of a restored run whose job has not started cutting.
+ *
+ * The restored programs are kept while this runs (the default is KEEP); it only says whether this
+ * build would plan the job differently, so the operator can choose. `different` counts programs
+ * whose hash is absent from the other plan (order-insensitive, multiplicity-aware).
+ */
+export interface BuildCompare {
+  /** `kept` is the silent end: the operator kept the programs, or the compare could not run. */
+  status: 'checking' | 'same' | 'different' | 'kept';
+  changed: number;
+  total: number;
+}
+
 /** #785 — the loaded client (so Cancel can terminate the worker without a second import). */
 let activeClient: EngraveRunClient | null = null;
 /** #785 — the phase the panel was in before this run, restored on Cancel. */
@@ -599,6 +678,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     shopSignature: null as string | null,
     restoreNote: null as string | null,
     restoreChecking: false,
+    buildCompare: null as BuildCompare | null,
     changedSinceLast: [] as EngraveInputKey[],
     previousVerdict: null as boolean | null,
     error: null as string | null,
@@ -819,57 +899,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       }, stallMs);
     };
     try {
-      client = await clientLoader();
-      // #1175 — THE PUBLISH SWITCH. `true` forces the in-page worker for every Generate, exactly
-      // as a service that reports `runs: false`: the house branch below is skipped and nothing
-      // else changes. It exists so a publish that must not ship a known house-path gap can be
-      // taken with a one-line flip; the default is the house path.
-      const HOUSE_GENERATION_FORCED_OFF = false;
-      // #1126 — GENERATE ON THE HOUSE WHEN THE SERVICE CAN RUN IT. The probe is a runtime fact:
-      // a service without its CLI answers `runs: false`, a host without a service answers nothing,
-      // and either way the in-page worker runs exactly as it did. The house client keeps every
-      // other call (the sim session, the oracle) on the browser client; only the generation moves,
-      // and the ideal compare is left out because the CLI's own Generate already ran both outcomes
-      // and returned the tradeoff on the result.
-      if (!simulateOnly && mine === seq && !HOUSE_GENERATION_FORCED_OFF && (await houseGenerationAvailable())) {
-        const base = client;
-        const { engravePlanIdeal: _idealOnTheBrowser, ...rest } = base;
-        client = {
-          ...rest,
-          // #1175 — ALL TEN ARGUMENTS OF THE BROWSER CALL ARE HONOURED. The tools list (8th) and
-          // the ladder press (10th) ride the submit to the service and the CLI; `deferIdeal` (9th)
-          // has no house analogue — the CLI's own Generate already runs both outcomes and returns
-          // the tradeoff, so the result is never deferred and the store's after-Generate code reads
-          // it exactly as it reads an in-page result.
-          engraveGenerate: (
-            jobArg,
-            toolArg,
-            catalogueArg,
-            calibrationArg,
-            marginsArg,
-            shopArg,
-            onProgressArg,
-            catalogueToolsArg,
-            _deferIdealArg,
-            restLadderArg,
-          ) =>
-            houseEngraveGenerate({
-              job: jobArg,
-              tool: toolArg,
-              catalogue: catalogueArg,
-              calibration: calibrationArg,
-              margins: marginsArg,
-              ...(shopArg === undefined ? {} : { shop: shopArg }),
-              ...(onProgressArg === undefined ? {} : { onProgress: onProgressArg }),
-              ...(catalogueToolsArg === undefined ? {} : { catalogueTools: catalogueToolsArg }),
-              ...(restLadderArg === undefined ? {} : { restLadder: restLadderArg }),
-            }),
-          cancelGenerate: () => {
-            cancelActiveHouseRun();
-            base.cancelGenerate?.();
-          },
-        };
-      }
+      // #1126/#1175 — the house's planner when the service can run one, else the page's worker.
+      // A simulate-only pass never generates, so it keeps the plain client.
+      client = simulateOnly ? await clientLoader() : await clientForGenerate();
       activeClient = client;
       if (simulateOnly) {
         // #893 — nothing to generate: the program the row shows is this job's own.
@@ -1504,6 +1536,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     shopSignature: null,
     restoreNote: null,
     restoreChecking: false,
+    buildCompare: null as BuildCompare | null,
     changedSinceLast: [],
     previousVerdict: null,
     lastGenerateMs: null,
@@ -1583,6 +1616,87 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // Cut step's "Simulate again" press uses. The planner never runs.
       await get().simulate();
     },
+    /**
+     * #1191 — A NOT-YET-STARTED JOB MAY BE COMPARED. With no program finished, this build plans
+     * the job in the BACKGROUND and compares program hashes with the restored run. The restored
+     * run is never modified: identical says nothing; different is the operator's choice, and
+     * keeping is the default.
+     */
+    compareRestoredPlan: async () => {
+      const restored = get().generated;
+      if (restored === null || restored.programs.length === 0) return;
+      if (get().staleSince !== null) return;
+      if (get().buildCompare?.status === 'checking') return;
+      const job = useEngraveJobStore.getState().job;
+      set({ buildCompare: { status: 'checking', changed: 0, total: restored.programs.length } });
+      try {
+        // The same inputs the Generate press would resolve (see `run`): the comparison must plan
+        // the job the operator has, not a second reading of it.
+        const calibration = useSettingsStore.getState().machineCalibration ?? null;
+        const margins = effectiveMargins(job, useSettingsStore.getState().margins);
+        const shopDefaults = useShopDefaultsStore.getState().defaults;
+        const mount = jobMountObstacles(job, shopDefaults);
+        const bed = bedUnderFacts(
+          machineForJob(useLocationStore.getState().location, job.machineId),
+          shopDefaults,
+          job.breakthrough + 1,
+          { length: job.stock.length, width: job.stock.width },
+        );
+        const shop: EngraveShopOpts = { ...engraveShopOpts(shopDefaults), mount, bed };
+        const tool = jobTool(job);
+        if (tool === null) {
+          set({ buildCompare: { status: 'kept', changed: 0, total: restored.programs.length } });
+          return;
+        }
+        const client = await clientForGenerate();
+        const fresh = await client.engraveGenerate(
+          job,
+          tool,
+          feedCatalogueRows(),
+          calibration,
+          margins,
+          shop,
+          undefined,
+          getTools().map((entry) => entry.tool),
+          true,
+        );
+        // The run was replaced while this planned (a press, another restore): say nothing.
+        if (get().generated !== restored) return;
+        if (!fresh.ok || fresh.programs.length === 0) {
+          set({ buildCompare: { status: 'kept', changed: 0, total: restored.programs.length } });
+          return;
+        }
+        const before = restored.programs.map((program) => program.programHash);
+        // Multiplicity-aware: a hash the new plan lost or gained counts once per occurrence.
+        const counts = new Map<string, number>();
+        for (const program of fresh.programs) counts.set(program.programHash, (counts.get(program.programHash) ?? 0) + 1);
+        let changed = 0;
+        for (const hash of before) {
+          const left = counts.get(hash) ?? 0;
+          if (left === 0) changed++;
+          else counts.set(hash, left - 1);
+        }
+        for (const left of counts.values()) changed += left;
+        set({
+          buildCompare:
+            changed === 0
+              ? { status: 'same', changed: 0, total: before.length }
+              : { status: 'different', changed, total: before.length },
+        });
+      } catch {
+        // A comparison that could not run says NOTHING — never a false "this build plans it
+        // differently" from a worker that never answered. `kept` also stops the surface asking
+        // again, so a broken worker cannot loop.
+        set({ buildCompare: { status: 'kept', changed: 0, total: restored.programs.length } });
+      }
+    },
+    /** #1191 — the default is KEEP: the restored programs stay, and the offer goes. */
+    keepRestoredPlan: () =>
+      set((state) =>
+        state.buildCompare === null
+          ? {}
+          : { buildCompare: { ...state.buildCompare, status: 'kept' } },
+      ),
     cancelGenerate: () => {
       const phase = get().phase;
       if (phase !== 'generating' && phase !== 'simulating' && phase !== 'checking') return;
