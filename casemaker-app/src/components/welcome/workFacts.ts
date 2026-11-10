@@ -6,7 +6,7 @@
  * Pure: the choice and the proposal in, three numbers out. `reachesEdgeWithinMm` is not derivable
  * from the choice alone and stays null until a caller measures it.
  */
-import type { StockProposal } from '@/engine/cnc/stockProposal';
+import type { StockProposal, WorkShape } from '@/engine/cnc/stockProposal';
 
 import type { OperationChoice } from './OperationStep';
 
@@ -22,15 +22,28 @@ export interface WorkFacts {
 const NOTHING: WorkFacts = { deepestCutMm: 0, through: false, reachesEdgeWithinMm: null };
 
 /** The facts the Holding step's recommendation reads for one question-step choice. */
-export function workFactsOf(choice: OperationChoice | null, proposal: StockProposal | null): WorkFacts {
+export function workFactsOf(
+  choice: OperationChoice | null,
+  proposal: StockProposal | null,
+  work: WorkShape | null = null,
+): WorkFacts {
   if (choice === null) return NOTHING;
   const thickness = proposal?.thickness ?? 0;
+  // The item's smallest margin to the blank's edge, from the work the stock was sized around.
+  const margin: number | null = (() => {
+    if (proposal === null || work === null) return null;
+    if (work.kind === 'text') return Math.max(0, Math.min((proposal.length - work.size.length) / 2, (proposal.width - work.size.width) / 2));
+    if (work.kind === 'outline') return Math.max(0, Math.min((proposal.length - work.length) / 2, (proposal.width - work.width) / 2));
+    if (work.kind === 'mesh') return 0;
+    return null;
+  })();
   switch (choice.type) {
     case 'engrave':
-      return { deepestCutMm: choice.depth, through: false, reachesEdgeWithinMm: null };
+      return { deepestCutMm: choice.depth, through: false, reachesEdgeWithinMm: margin };
     case 'surface':
-      // The mesh's own height is what the surfacing pass takes off around and over it.
-      return { deepestCutMm: choice.target?.size.z ?? 0, through: false, reachesEdgeWithinMm: null };
+      // The surfacing pass cuts the MARGIN around the mesh, so it reaches the blank's edge (the
+      // analyst's correction: 0, not null — the pass is not a centred cut).
+      return { deepestCutMm: choice.target?.size.z ?? 0, through: false, reachesEdgeWithinMm: 0 };
     case 'pcb':
       // The board's outline is cut through; the Gerber set writes its own items.
       return { deepestCutMm: thickness, through: true, reachesEdgeWithinMm: 0 };
@@ -44,7 +57,7 @@ export function workFactsOf(choice: OperationChoice | null, proposal: StockPropo
       return { deepestCutMm: choice.diameter, through: true, reachesEdgeWithinMm: null };
     case 'outline':
       if (choice.use === 'profile') return { deepestCutMm: thickness, through: true, reachesEdgeWithinMm: 0 };
-      return { deepestCutMm: choice.depth ?? 0, through: false, reachesEdgeWithinMm: null };
+      return { deepestCutMm: choice.depth ?? 0, through: false, reachesEdgeWithinMm: margin };
   }
   // Unreachable for the union above; a new choice type lands here until its facts are stated.
   return { ...NOTHING };

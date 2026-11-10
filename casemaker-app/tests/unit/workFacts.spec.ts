@@ -10,7 +10,7 @@ const BLANK = { form: 'plate', material: 'hardwood', length: 75, width: 72.7, th
 describe('#1103 the work facts', () => {
   it('a surfacing pass takes the mesh height', () => {
     const choice: OperationChoice = { type: 'surface', target: { size: { x: 65, y: 62.7, z: 19.1 } } as never };
-    expect(workFactsOf(choice, BLANK)).toEqual({ deepestCutMm: 19.1, through: false, reachesEdgeWithinMm: null });
+    expect(workFactsOf(choice, BLANK)).toEqual({ deepestCutMm: 19.1, through: false, reachesEdgeWithinMm: 0 });
   });
 
   it('an engraving takes its depth and is not through', () => {

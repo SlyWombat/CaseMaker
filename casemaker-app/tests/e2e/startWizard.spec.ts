@@ -163,6 +163,14 @@ test('#897 — a mesh goal proposes its box, and is centred on the blank it land
   // The hold follows from the blank, and the last step creates the goal.
   await page.getByTestId('start-wizard-stock-next').click();
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
+  // #1103 — THE SEAT READS THE WORK: a 6 mm surfacing pass reaches the blank's edge, so the reason
+  // line states what the recommendation judged instead of the wizard silently gripping it as a
+  // block. The screenshot is the hand-in's record.
+  const reason = page.getByTestId('engrave-setup-recommendation-reason');
+  await expect(reason).toBeVisible();
+  await expect(reason).toContainText('Recommended:');
+  await expect(reason).toContainText('jaw');
+  await page.getByTestId('engrave-setup-step-holding').screenshot({ path: 'test-results/1103-holding-seat.png' });
   await expect(page.getByTestId('engrave-setup-next')).toBeEnabled();
   await page.getByTestId('engrave-setup-next').click();
   await expect(page.getByTestId('start-wizard')).toHaveCount(0);
