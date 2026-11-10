@@ -46,7 +46,7 @@ function packageOf(job: EngraveJob, count: number): FrozenPackage {
     setups: jobSetups(job).map((s) => ({ ...s })),
     stockEntryId: null,
     surface: null,
-    hold: null,
+    hold: undefined,
   } as FrozenPackage;
 }
 
