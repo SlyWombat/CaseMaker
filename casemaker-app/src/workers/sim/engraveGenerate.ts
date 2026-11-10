@@ -4742,7 +4742,25 @@ export function generateRotaryGoalProgram(
     return fail('cam', e instanceof Error ? e.message : String(e));
   }
   const findings: JobFinding[] = [];
-  if (field.maxRadius > rotary.radius + 1e-6) {
+  // #1182 — A GOAL ENTIRELY OUTSIDE THE ROD IS AN EMPTY FIELD, NOT AN OVERSIZE ONE. After #1164's
+  // design ∩ rod rule, `coveredCount === 0` with a true reach beyond R means no ray found material
+  // inside the stock at all: the program cuts nothing. That fact gets its own sentence — the
+  // oversize one ("the outermost X mm is not reproduced") would be true and still mislead, and the
+  // 100 %-air one states the same thing worse — so the two siblings stay silent when it fires.
+  const outsideRod = field.coveredCount === 0 && field.maxRadius > rotary.radius + 1e-6;
+  if (outsideRod) {
+    findings.push({
+      severity: 'warning',
+      code: 'goal-rotary-outside-rod',
+      // The panel's two answers (Scale the goal to fit · Change the stock…) read the same number a
+      // `goal-rotary-oversize` carries (#805).
+      goalRadiusMm: field.maxRadius,
+      message:
+        `The goal "${goal.name}" reaches r ${Number(field.maxRadius.toFixed(3))} mm, and the stock it is turned from ` +
+        `is ⌀${Number((2 * rotary.radius).toFixed(3))} mm: nothing of this design lies inside the rod, so Generate ` +
+        'cuts nothing. Use a larger diameter, or scale the goal to fit.',
+    });
+  } else if (field.maxRadius > rotary.radius + 1e-6) {
     // #786 slice 2 — INFORMED, NOT REFUSED. A surface outside the rod has no material to cut, so
     // the relief is already clipped to the rod (`rayHit` drops every hit past its radius) and the
     // program posts; the sentence states how much of the goal that leaves uncut.
@@ -4808,7 +4826,9 @@ export function generateRotaryGoalProgram(
       }
       if (reachLimitMm > 0 && r < reachLimitMm) unreachableCells++;
     }
-    if (unsampledFraction > 0 || nearCells > 0) {
+    // #1182 — the outside-rod finding owns this case: for an empty field, "100 % of its map is
+    // air" is the same fact stated worse, so this one stays silent rather than double-saying it.
+    if (!outsideRod && (unsampledFraction > 0 || nearCells > 0)) {
       const closestRadiusMm = Number.isFinite(closest) ? closest : field.radius;
       const nearAxisFraction = coveredCells === 0 ? 0 : nearCells / coveredCells;
       const unreachableFraction = coveredCells === 0 ? 0 : unreachableCells / coveredCells;
@@ -4858,6 +4878,12 @@ export function generateRotaryGoalProgram(
     });
   }
   const allFindings = dedupeFindings([...findings, ...documentFindings()]);
+  // #1182 — AN EMPTY FIELD HAS NOTHING TO POST. Without this the post refuses with "the toolpath IR
+  // has no operation with any moves", and the fail path drops the findings — so the operator never
+  // reads the fact that would explain it. The finding IS the answer here and rides the failure.
+  if (outsideRod) {
+    return { ...fail('findings', findings[0]!.message), findings: allFindings };
+  }
   if (findings.some((f) => f.severity === 'error')) {
     return { ...fail('findings', findings[0]!.message), findings: allFindings };
   }

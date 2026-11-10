@@ -95,6 +95,25 @@ describe('#723 R-3 — a goal on a rod generates the relief program', () => {
     expect(out.programs).toHaveLength(1);
   });
 
+  it('#1182 — a sleeve with nothing inside the rod says so, and neither sibling sentence fires', async () => {
+    // Two surfaces beyond the rod (r 11 and r 13 on a ⌀20 rod), none below: on every ray the
+    // design is outside the rod, the field is empty, and the program cuts nothing. The operator
+    // must read THAT fact — not the oversize sentence (which loses only the outermost part) nor
+    // the 100 %-air one (which says the stock stands as it is).
+    const sleeve = stl([...sideTris(() => 11), ...sideTris(() => 13)]);
+    const out = await engraveGenerate(tl, rotaryJob(goal(() => 13, { data: sleeve })), BALL, [], null, undefined, {});
+    // Nothing to post: the finding IS the operator's answer, so it rides the failure rather than
+    // being lost behind the post's own "no operation with any moves".
+    expect(out.ok, 'an empty field has nothing to post').toBe(false);
+    expect(out.errors[0]?.stage).toBe('findings');
+    const outside = out.findings.find((f) => f.code === 'goal-rotary-outside-rod');
+    expect(outside?.severity).toBe('warning');
+    expect(outside?.message).toContain('nothing of this design lies inside the rod');
+    expect(outside?.goalRadiusMm).toBeGreaterThanOrEqual(13 - 0.01);
+    expect(out.findings.some((f) => f.code === 'goal-rotary-oversize'), 'no oversize sentence').toBe(false);
+    expect(out.findings.some((f) => f.code === 'goal-rotary-unreachable'), 'no 100 %-air sentence').toBe(false);
+  });
+
   it('refuses a part that reaches the axis with the design’s sentence', async () => {
     const out = await engraveGenerate(tl, rotaryJob(goal((x) => Math.max(0, 4 + (x / 15) * -4))), BALL, [], null, undefined, {});
     expect(out.ok).toBe(false);

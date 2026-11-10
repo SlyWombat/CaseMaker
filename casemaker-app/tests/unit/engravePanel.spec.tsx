@@ -5268,6 +5268,64 @@ describe('#805 — the rotary oversize warning’s two answers', () => {
     expect(useStartWizardStore.getState().initialStep).toBe('stock');
   });
 
+  it('#1182 — a goal entirely outside the rod states that fact, with the same two answers', () => {
+    act(() => {
+      const base = useEngraveJobStore.getState().job;
+      useEngraveJobStore.getState().replace({
+        ...base,
+        labels: [{ ...base.labels[0]!, position: { x: 10, y: 10 }, size: 4 }],
+        shapes: [],
+        drills: [],
+        targetObject: {
+          id: 'goal-1',
+          name: 'sleeve',
+          format: 'stl',
+          sha256: 'x',
+          data: 'AA==',
+          size: { x: 24, y: 24, z: 24 },
+          position: { x: 20, y: 10, z: 0 },
+          rotation: 0,
+          enabled: true,
+          role: 'goal',
+        },
+        stock: { ...base.stock, length: 100, width: 20, thickness: 20, shape: 'cylinder', diameter: 20 },
+        workholding: {
+          kind: 'rotary-chuck',
+          rotary: { stickout: 60, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' },
+        },
+      });
+      useEngraveJobStore.getState().setTool('flat-1.0', 'computed');
+      useEngraveRunStore.setState({
+        generated: {
+          ...readyGenerated(';@MKR|BEGIN\nG21 G90\nM02'),
+          findings: [
+            {
+              severity: 'warning',
+              code: 'goal-rotary-outside-rod',
+              targetId: 'goal-1',
+              goalRadiusMm: 12,
+              message:
+                'The goal "sleeve" reaches r 12 mm, and the stock it is turned from is ⌀20 mm: nothing of this design lies inside the rod, so Generate cuts nothing.',
+            },
+          ],
+        },
+        simStatus: 'ready',
+        simDiagnostics: [],
+        oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
+        phase: 'ready',
+        acknowledged: true,
+      });
+    });
+    render(<EngravePanel />);
+
+    // The same panel block, wearing the finding's own code, so the two are never confused.
+    const row = screen.getByTestId('engrave-rotary-oversize-finding');
+    expect(row.getAttribute('data-code')).toBe('goal-rotary-outside-rod');
+    expect(row.textContent).toContain('nothing of this design lies inside the rod');
+    // The Scale answer is still the right one, and still reads the finding's own reach (r 12).
+    expect(screen.getByTestId('engrave-goal-scale-to-rod').textContent).toBe('Scale the goal to fit (r 10 mm)');
+  });
+
   it('#743 P-5 gives the isolation to the finer engraver the short offers, in one press', () => {
     const base = useEngraveJobStore.getState().job;
     const iso: EngraveCombinedShape = {

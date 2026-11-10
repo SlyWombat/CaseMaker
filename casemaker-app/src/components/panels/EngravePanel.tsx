@@ -2707,10 +2707,15 @@ export function EngravePanel(): JSX.Element {
     void saveText(JSON.stringify(report, null, 2), simStallReportFileName(at), 'application/json');
   };
   // #805 — a rotary goal wider than the rod is INFORMED (the relief is cut clipped, #786 slice 2).
-  // Its sentence carries the two answers, beside it, as presses.
+  // Its sentence carries the two answers, beside it, as presses. #1182 — a goal entirely outside
+  // the rod is the same block with its own code: the two answers are the right ones there too.
   const rotaryOversizeFinding =
     run.staleSince === null
-      ? (run.generated?.findings.find((f) => f.code === 'goal-rotary-oversize' && f.goalRadiusMm !== undefined) ?? null)
+      ? (run.generated?.findings.find(
+          (f) =>
+            (f.code === 'goal-rotary-oversize' || f.code === 'goal-rotary-outside-rod') &&
+            f.goalRadiusMm !== undefined,
+        ) ?? null)
       : null;
   // #688 — Save writes the .nc that goes to Makera Studio: a path to the machine, so it waits on
   // the clearance acknowledgement exactly as Upload and Release do. The statement's home is Cut
@@ -5381,11 +5386,12 @@ export function EngravePanel(): JSX.Element {
           </p>
         )}
 
-        {/* #805 — the rotary oversize warning, with its two answers beside the sentence. */}
+        {/* #805 — the rotary oversize warning, with its two answers beside the sentence.
+            #1182 — the same block wears the finding's own code when the goal is entirely outside. */}
         {!blocked && rotaryOversizeFinding !== null && rotaryRod !== null && (
           <div
             data-testid="engrave-rotary-oversize-finding"
-            data-code="goal-rotary-oversize"
+            data-code={rotaryOversizeFinding.code}
             style={{ display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: 12, lineHeight: 1.45, margin: '4px 0', color: '#d1d5db' }}
           >
             <span style={{ color: SEVERITY_COLOR.warning, flexShrink: 0, fontWeight: 600 }} data-severity="warning">

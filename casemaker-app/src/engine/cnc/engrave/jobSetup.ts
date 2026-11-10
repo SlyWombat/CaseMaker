@@ -542,6 +542,10 @@ export type JobFindingCode =
   | 'axis-crossing'
   // #723 — a rotary GOAL's own envelope check: the part is wider than the rod it would be turned from.
   | 'goal-rotary-oversize'
+  // #1182 — NOTHING OF THE DESIGN LIES INSIDE THE ROD: the radial field has no covered cell whose
+  // material is inside the stock, so the program cuts nothing. Its own sentence, because the
+  // oversize one (which loses only the outermost part) would be true and still mislead.
+  | 'goal-rotary-outside-rod'
   // #1061 — the goal's first millimetres lie inside the chuck/jaws keep-out: they are CLIPPED, not
   // cut (a warning; the sibling of `goal-rotary-oversize`).
   | 'goal-rotary-in-chuck'
