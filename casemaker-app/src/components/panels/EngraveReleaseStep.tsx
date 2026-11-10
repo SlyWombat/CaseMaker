@@ -93,6 +93,7 @@ function FileRow({ file }: { file: ReleaseFile }): JSX.Element {
 function ChangePanel({
   previous,
   next,
+  flipped,
   ok,
   setOk,
   atMachine,
@@ -101,6 +102,12 @@ function ChangePanel({
 }: {
   previous: ReleaseFile;
   next: ReleaseFile;
+  /**
+   * #1170 — THE NEXT PROGRAM IS SIDE 2 OF A FLIP. The origin did not stay where it was: the
+   * Register step wrote side 2's from the two bores, and telling the operator to keep the SAME
+   * corner here would undo the turn the flip card just asked for.
+   */
+  flipped: boolean;
   ok: boolean;
   setOk: (v: boolean) => void;
   atMachine: boolean;
@@ -122,11 +129,19 @@ function ChangePanel({
         <strong>{label.name}</strong> ({label.code}).
       </p>
       <ol style={{ ...MUTED, paddingLeft: 18 }}>
-        <li>
-          Fit <strong>{previous.kind === 'facing' ? 'the ENGRAVING cutter — not the facing cutter' : 'the cutter'}</strong>{' '}
-          and keep the X and Y origin where it is — <strong>the SAME corner</strong>, the same edge. Nothing moves
-          but the Z reference.
-        </li>
+        {flipped ? (
+          <li>
+            Fit <strong>the cutter</strong>. Side {next.setupIndex}’s X and Y origin was written by the Register
+            step on the two locating bores — it does not move with the cutter. Nothing moves but the Z
+            reference.
+          </li>
+        ) : (
+          <li>
+            Fit <strong>{previous.kind === 'facing' ? 'the ENGRAVING cutter — not the facing cutter' : 'the cutter'}</strong>{' '}
+            and keep the X and Y origin where it is — <strong>the SAME corner</strong>, the same edge. Nothing moves
+            but the Z reference.
+          </li>
+        )}
         {previous.kind === 'facing' ? (
           <>
             <li>
@@ -567,6 +582,10 @@ export function EngraveReleaseStep({
               <ChangePanel
                 previous={previous}
                 next={nextAtIndex}
+                flipped={
+                  nextAtIndex.setupIndex !== previous.setupIndex &&
+                  record.job.setups?.[nextAtIndex.setupIndex - 1]?.flip !== undefined
+                }
                 ok={changeOk}
                 setOk={(v) => setChangeOkFor(v ? nextAtIndex.index : null)}
                 atMachine={atMachine}

@@ -210,6 +210,12 @@ export interface ReleaseRecord {
   notes: string[];
   /** Set once the run's end has been handled, so a later end patch (offcut kept) is ignored. */
   settled: boolean;
+  /**
+   * #1170 — the finished program being replayed on its own (the end card's "Cut the tabs again").
+   * The run's end puts the release back to `done` and continues no further; absent on every
+   * ordinary run.
+   */
+  rerun?: number | null;
 }
 
 interface ReleaseState {
@@ -243,6 +249,12 @@ interface ReleaseState {
    * otherwise. Nothing else moves and the release stays in the phase it was in.
    */
   cleanNow: (target: { host: string; port: number }) => void;
+  /**
+   * #1170 — replay ONE finished program by its 1-based cut order (the end card's tab-release pass).
+   * Only after the job has ended; the run records nothing (`RunContext.rerun`) and no later
+   * program, walk or clean pass follows it.
+   */
+  rerunProgram: (target: { host: string; port: number }, index: number) => void;
   setAtMachine: (target: { host: string; port: number }, at: boolean) => void;
   /** Forget this machine's release (the machine entry, with its end, is left alone). */
   reset: (target: { host: string; port: number }) => void;
@@ -382,12 +394,15 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     if (rec !== undefined) patch(machine, { notes: [...rec.notes, line] });
   };
 
-  /** Run one program, after settling the span and saying what is about to happen. */
-  const runFile = async (machine: string, index: number): Promise<void> => {
+  /**
+   * Run one program, after settling the span and saying what is about to happen. `rerun` is the
+   * #1170 deliberate replay of a finished program: it alone may start a file whose `done` is set.
+   */
+  const runFile = async (machine: string, index: number, rerun = false): Promise<void> => {
     const rec = get().records[machine];
     if (rec === undefined || rec.phase === 'running' || rec.phase === 'uploading') return;
     const file = findFile(rec, index);
-    if (file === null || file.done) return;
+    if (file === null || (file.done && !rerun)) return;
 
     // #1088 — A LATER SETUP'S PROGRAM NEEDS THAT SETUP'S REGISTRATION. Side 2 is a different
     // clamping on the turned blank: setup 1's origin does not describe it, and before this gate
@@ -455,6 +470,8 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       blow: rec.job.blowWithVacuum ?? readFlag(useShopDefaultsStore.getState().defaults, 'run.blowWithVacuum').value,
       // #547 — a lifted dry-run file records nothing at its end (no stock, no runtime, no finished hash).
       ...(file.dryRun ? { dryRun: true } : {}),
+      // #1170 — a deliberate replay records nothing either: the job has already ended.
+      ...(rerun ? { rerun: true as const } : {}),
     };
     const runStore = useMachineRunStore.getState();
     if (!runStore.prepare(rec.target, file.filename, file.hash, context)) {
@@ -782,6 +799,32 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     if (rec === undefined || rec.settled) return;
     const file = findFile(rec, index);
     if (file === null) return;
+    // #1170 — THE ONE-PROGRAM REPLAY ENDS HERE. It continues no list, runs no cleaning pass and
+    // changes no `done`: the job was finished before it started. Only the release's own state and
+    // the vacuum it may have switched off are settled.
+    if (rec.rerun === index) {
+      const rerunVacuum = outcome.kind === 'finished' && outcome.vacuumOff === true ? 'off' : rec.vacuum;
+      patch(machine, {
+        settled: true,
+        stopAsked: false,
+        rerun: null,
+        active: index,
+        next: null,
+        vacuum: rerunVacuum,
+        ...(outcome.kind === 'finished'
+          ? { phase: 'done' as const }
+          : outcome.kind === 'aborted' || outcome.kind === 'stopped-unconfirmed'
+            ? { phase: 'stopped' as const, atMachine: false }
+            : { phase: 'failed' as const, atMachine: false }),
+      });
+      say(
+        machine,
+        outcome.kind === 'finished'
+          ? `The tab release (program ${index} of ${file.total}) was cut again; nothing else played.`
+          : `The tab-release replay (program ${index} of ${file.total}) did not finish; nothing else played.`,
+      );
+      return;
+    }
     patch(machine, { settled: true, stopAsked: false });
     say(machine, describeRun(outcome));
 
@@ -1244,6 +1287,28 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       const restore = rec.phase;
       say(machine, 'Clean now pressed: the cleaning pass runs on its own, then the release stays where it was.');
       void runWalk(machine, 'clean', { kind: 'clean-now', restore });
+    },
+
+    rerunProgram: (target, index) => {
+      const machine = machineKey(target);
+      const rec = get().records[machine];
+      if (rec === undefined) return;
+      if (rec.walk !== null || rec.spanClosing) {
+        say(machine, 'The tab release cannot run while the machine is working or closing.');
+        return;
+      }
+      if (rec.phase !== 'done' && rec.phase !== 'stopped' && rec.phase !== 'failed') {
+        say(machine, 'The tab release is offered once the job has ended.');
+        return;
+      }
+      const file = findFile(rec, index);
+      if (file === null) {
+        say(machine, `Program ${index} is not part of this release.`);
+        return;
+      }
+      say(machine, `Replaying only the tab-release program (${index} of ${file.total}): ${file.filename}.`);
+      patch(machine, { rerun: index });
+      void runFile(machine, index, true);
     },
 
     setAtMachine: (target, at) => patch(machineKey(target), { atMachine: at }),

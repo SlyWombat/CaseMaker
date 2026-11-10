@@ -78,6 +78,8 @@ import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { RunProgressLine } from './RunProgressLine';
 import { RunLogFold } from './RunLogFold';
 import { CutRunCard } from './CutRunCard';
+import { CutFlipCard, flipDue } from './CutFlipCard';
+import { CutEndCard } from './CutEndCard';
 import {
   ROTARY_NO_MODULE_REFUSAL,
   ROTARY_UNMEASURED_REFUSAL,
@@ -971,6 +973,8 @@ export function EngraveCutSurface({
     // #535 — a goal program has no verifier report; its surface check is the one that gates it.
     releaseCheck(singleSource) !== null;
   const [expertOpen, setExpertOpen] = useState(false);
+  /** #1170 — the flip card's one door: its press opens (and brings into view) the Register step. */
+  const [flipRegisterOpen, setFlipRegisterOpen] = useState(false);
   const domeProps: DomeChoiceProps | null = domeStanding
     ? {
         accept: domeAccept,
@@ -1064,6 +1068,16 @@ export function EngraveCutSurface({
         : cutPlan({ job, pkg, finishedHashes, defaults, overrides }),
     [job, pkg, finishedHashes, defaults, overrides],
   );
+  // #1170 — THE TURN IS DUE when the next unfinished program is a flipped setup's first. Derived
+  // from the package and the finished hashes alone, so a reload lands back on the card.
+  const flip = useMemo(
+    () => (pkg === null ? null : flipDue({ job, pkg, finishedHashes })),
+    [job, pkg, finishedHashes],
+  );
+  // #1170 — the turn card stays until side 2 is actually registered; after that the ordinary
+  // change/start flow returns and program N+1 is the next press. While it is due, step 3 is the
+  // current step (below): the registration must not be offered above the turn it depends on.
+  const flipPending = flip !== null && currentSetupRegistration?.outcome.usable !== true;
 
   // #1179 slice A — WHAT THIS BLANK HAS ALREADY BEEN THROUGH. The machine's finished-run records
   // are compared with the package on screen: the same plan is today's ✓/resume and says nothing;
@@ -1205,8 +1219,13 @@ export function EngraveCutSurface({
     }
   };
   // Step 1 is DONE only when the gate passed: a program that was never simulated, stopped, or
-  // failed keeps the step open — that is the whole point of this issue.
-  const fitDone = checked && frozen && verdict === 'passed';
+  // failed keeps the step open — that is the whole point of this issue. #1170 — BUT A RELOAD AT
+  // THE FLIP MUST LAND ON THE FLIP, NOT STEP 1. The check/ack/simulation state is session; a
+  // frozen package this design still matches, together with a finished program on the machine or
+  // in the document's run log, is durable evidence the operator got past step 1. Resume from
+  // where the work is; a stale package (`frozen` false) still sends them back.
+  const resuming = frozen && finishedHashes.length > 0;
+  const fitDone = resuming || (checked && frozen && verdict === 'passed');
   const registrationPlan = job.setups?.[0]?.registration?.plan ?? null;
   // A registration is a measurement on THIS machine; with no machine connected, a record for this
   // job still says the blank was registered in this session. #1088 — the record must be the
@@ -1221,7 +1240,10 @@ export function EngraveCutSurface({
     pkg !== null &&
     pkg.programs.length > 0 &&
     pkg.programs.every((program) => finishedHashes.includes(program.hash));
-  const currentStep = !fitDone ? 1 : !registeredDone ? 2 : !ran ? 3 : 0;
+  // #1170 — THE TURN IS STEP 3's BUSINESS. While the flip is due, the Cut screen is on step 3 (the
+  // flip card), not on the Register step its press will open: the registration is offered only
+  // after the blank is turned and the confirmation ticked.
+  const currentStep = !fitDone ? 1 : flipPending ? 3 : !registeredDone ? 2 : !ran ? 3 : 0;
   // #hotfix — while the registration executor waits at a prompt, the step holding it stays open
   // even if `currentStep` fell back to 1 (a Register press can stale the package).
   const registrationPromptPending = useRegistrationPromptStore((s) => s.pending);
@@ -1377,20 +1399,6 @@ export function EngraveCutSurface({
       showClearance: () => revealClearanceStatement(),
     });
   };
-
-  // #819 — the ended run's screen: the Done card and its one action, nothing else.
-  if (runOver && target !== null) {
-    return (
-      <div data-testid="engrave-cut-surface">
-        {/* #927 — the ONE line the done screen adds: the last measured run's clock against the
-            estimate its record carries. Nothing else on the card changes. */}
-        <p style={{ margin: '0 0 6px', fontSize: 12, color: '#9aa4b0' }} data-testid="engrave-cut-actual-time">
-          {actualTimeSentence(lastMeasuredRun)}
-        </p>
-        <EngraveMachineRun target={target} onProgramLine={onProgramLine} />
-      </div>
-    );
-  }
 
   return (
     <div data-testid="engrave-cut-surface">
@@ -1677,7 +1685,7 @@ export function EngraveCutSurface({
         done={registeredDone}
         current={currentStep === 2}
         summary={step2Summary}
-        forceOpen={registrationPromptPending}
+        forceOpen={registrationPromptPending || flipRegisterOpen}
       >
         <EngraveRegistrationStep job={job} target={target} setupIndex={currentSetupIndex} />
         {/* #608 / #796 — once the registration measured a tilt, the program made for a flat blank
@@ -1736,12 +1744,33 @@ export function EngraveCutSurface({
         )}
       </Step>
 
-      <Step number={3} title="Start cut" done={ran} current={currentStep === 3} summary={step3Summary}>
+      <Step number={3} title="Start cut" done={ran} current={currentStep === 3} summary={step3Summary} forceOpen={flipPending}>
         {/* #1167 — THE RUN AS ONE CARD, before the controls that make it start: every program in
             run order (the running row, the bit-change marks, the flip), the fixed Pause/Stop row,
             and the footnote. Display only — the release step below still runs the job. */}
         {plan !== null && pkg !== null && (
           <CutRunCard job={job} pkg={pkg} plan={plan} finishedHashes={finishedHashes} target={target} />
+        )}
+        {/* #1170 — THE TURN. The operator is at the flip: the blank is turned and the corner seated
+            before side 2 can register. The one press opens Register; the card stays until side 2 is
+            registered, and the release step (and its "SAME corner" change panel) waits below until
+            then. */}
+        {flip !== null && flipPending && pkg !== null && (
+          <CutFlipCard
+            job={job}
+            pkg={pkg}
+            finishedHashes={finishedHashes}
+            target={target}
+            onRegister={() => {
+              setFlipRegisterOpen(true);
+              // Bring the Register card the press opened into view; it sits above this step.
+              window.requestAnimationFrame(() => {
+                document
+                  .querySelector('[data-testid="engrave-cut-step-2"]')
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              });
+            }}
+          />
         )}
         {/* #1127 — the cutter checklist, at the machine: one row per bit, located or replaced; the
             Load and the cut are gated on every row being settled. */}
@@ -1889,23 +1918,31 @@ export function EngraveCutSurface({
                         next program's press is below.
                       </p>
                     )}
-                    <EngraveReleaseStep
-                      target={target}
-                      job={job}
-                      programs={releaseSources}
-                      runPlan={plan}
-                      blocker={
-                        step1Blocker ??
-                        programBlocker ??
-                        ackBlocker ??
-                        releaseBlocker ??
-                        missingReportBlocker ??
-                        surfaceGate ??
-                        domeG32Blocker ??
-                        cutterChecklistBlocker
-                      }
-                      onProgramLine={onProgramLine}
-                    />
+                    {/* #1170 — at the turn the flip card is the one primary action. The release
+                        step returns once side 2 is registered; until then its change panel would
+                        ask the operator to keep the SAME corner, which is the opposite of a turn.
+                        Once the job is over the end card owns the screen under the steps; the
+                        release step would also re-plan a finished release away from the record the
+                        end card's replay reads, so it is not mounted at all. */}
+                    {flipPending || runOver ? null : (
+                      <EngraveReleaseStep
+                        target={target}
+                        job={job}
+                        programs={releaseSources}
+                        runPlan={plan}
+                        blocker={
+                          step1Blocker ??
+                          programBlocker ??
+                          ackBlocker ??
+                          releaseBlocker ??
+                          missingReportBlocker ??
+                          surfaceGate ??
+                          domeG32Blocker ??
+                          cutterChecklistBlocker
+                        }
+                        onProgramLine={onProgramLine}
+                      />
+                    )}
                     </>
                   ) : (
                     <EngraveMachineUpload
@@ -1947,6 +1984,21 @@ export function EngraveCutSurface({
           </>
         )}
       </Step>
+
+      {/* #1170 — THE END OF THE JOB, UNDER THE THREE STEPS (#1123 item 39). The steps are above
+          this card and are never replaced by it; the card owns the job's clocks, the two last
+          questions and the next move. */}
+      {runOver && target !== null && pkg !== null && (
+        <CutEndCard
+          job={job}
+          pkg={pkg}
+          generated={generated}
+          run={machineRun}
+          lastMeasuredRun={lastMeasuredRun}
+          measuredSentence={actualTimeSentence(lastMeasuredRun)}
+          target={target}
+        />
+      )}
     </div>
   );
 }
