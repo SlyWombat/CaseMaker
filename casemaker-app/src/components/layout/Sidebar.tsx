@@ -96,6 +96,14 @@ const SHELL_SECTION_IDS: SidebarSectionId[] = SECTIONS.map((s) => s.id).filter(
   (id) => id !== 'part',
 );
 
+/**
+ * #1123-59 — THE CNC WORKSPACE'S RAIL: the machine pin (rendered above the list), the job, and its
+ * simulation. Nothing of the case designer's menu belongs beside a blank in the machine — a
+ * cutting job opened from a file used to sit on a placeholder board project and show Board, Case,
+ * HATs, Features, assets and Export. Home (item 48) is the way to the other workspaces.
+ */
+const CNC_SECTION_IDS: SidebarSectionId[] = ['cnc-engrave', 'cnc-sim'];
+
 /** The section ids the current archetype offers. */
 function sectionIdsFor(archetype: Archetype): SidebarSectionId[] {
   if (archetype === 'rack') return RACK_SECTION_IDS;
@@ -121,6 +129,8 @@ export function Sidebar() {
   const welcomeMode = useProjectStore((s) => s.welcomeMode);
   const archetype = useProjectStore((s) => derivedKind(s.project));
   const activeSection = useViewportStore((s) => s.activeSidebarSection);
+  // #1123-59 — the workspace decides the rail, not the placeholder project behind a cutting job.
+  const workspace = useViewportStore((s) => s.workspace);
   const setSection = useViewportStore((s) => s.setActiveSidebarSection);
   // Phone-width drawer (issue #134). Mirrors ContextPanel's compact pattern:
   // the rail leaves the grid, a fixed handle toggles it, and a section tap
@@ -141,15 +151,16 @@ export function Sidebar() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const allowedIds = sectionIdsFor(archetype);
+  const allowedIds = workspace === 'cnc' ? CNC_SECTION_IDS : sectionIdsFor(archetype);
 
   // A stale active section (e.g. HATs was open when the rack got enabled)
   // would leave the right rail showing an inapplicable panel.
   useEffect(() => {
     if (activeSection && !allowedIds.includes(activeSection)) {
-      setSection(homeSectionFor(archetype));
+      // In the CNC workspace the rail's own home is the job; anywhere else the archetype's.
+      setSection(workspace === 'cnc' ? 'cnc-engrave' : homeSectionFor(archetype));
     }
-  }, [allowedIds, archetype, activeSection, setSection]);
+  }, [allowedIds, archetype, workspace, activeSection, setSection]);
   if (welcomeMode) {
     return <aside className="sidebar" />;
   }

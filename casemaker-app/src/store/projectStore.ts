@@ -24,6 +24,7 @@ import { defaultAntennasForBoard } from '@/engine/compiler/antennas';
 import { fourCornerScrewTabs, endFlangesPreset, extrusionMountPreset } from '@/engine/compiler/mountingFeatures';
 import { computeShellDims } from '@/engine/compiler/caseShell';
 import { patchProject } from '@/platform/headless/patch';
+import { useViewportStore } from './viewportStore';
 
 const DEFAULT_BOARD_ID = 'rpi-4b';
 
@@ -240,6 +241,9 @@ export const useProjectStore = create<ProjectState>()(
         setProject: (p) => {
           // #1123-48 — a project is open from here on: Home offers Continue back to it.
           markWorkedOn();
+          // #1123-59 — a project opened from the door is the CASE workspace (its own rail); the
+          // CNC workspace is entered by the job itself, never by the project behind it.
+          useViewportStore.getState().setWorkspace('case');
           set({ project: p, welcomeMode: false });
         },
         patchCase: (patch) =>
@@ -285,6 +289,8 @@ export const useProjectStore = create<ProjectState>()(
           })),
         loadBuiltinBoard: (boardId) => {
           markWorkedOn();
+          // #1123-59 — a board project is the case workspace's.
+          useViewportStore.getState().setWorkspace('case');
           set(() => ({ project: createDefaultProject(boardId), welcomeMode: false }));
         },
         addPort: (port) =>

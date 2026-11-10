@@ -139,6 +139,16 @@ export interface ViewportState {
    *  click moves the section's editor to the ContextPanel). Mutually
    *  exclusive with `selection`. */
   activeSidebarSection: SidebarSectionId | null;
+  /**
+   * #1123 item 59 — WHICH WORKSPACE THE OPERATOR IS IN, the app's own state (never a property of
+   * the project behind it). `'cnc'` is entered by the CNC card/wizard, by opening a cutting job,
+   * or by restoring one on reload (all of them select a `cnc-` section through
+   * {@link setActiveSidebarSection}, which sets this too); any other section is the case
+   * workspace. The rail renders the CNC sections alone while `'cnc'` — a cutting job no longer
+   * shows the Board, Case, HATs, Features, assets or Export entries of the placeholder project
+   * behind it.
+   */
+  workspace: 'case' | 'cnc';
   /** Issue #91 — 4-way view-mode picker. */
   viewMode: ViewportViewMode;
   shellRender: ShellRenderMode;
@@ -163,6 +173,8 @@ export interface ViewportState {
   setCameraMode: (m: ViewportCameraMode) => void;
   setSelection: (s: ViewportSelection) => void;
   setActiveSidebarSection: (s: SidebarSectionId | null) => void;
+  /** #1123-59 — set the workspace directly (a project opened from the door is the case one). */
+  setWorkspace: (w: 'case' | 'cnc') => void;
   setViewMode: (m: ViewportViewMode) => void;
   setShellRender: (m: ShellRenderMode) => void;
   /** Issue #120 — toggle a part's visibility by node id. */
@@ -191,6 +203,7 @@ export const useViewportStore = create<ViewportState>()((set, get) => ({
   // exist.
   selection: null,
   activeSidebarSection: null,
+  workspace: 'case',
   hiddenParts: new Set<string>(),
   // #876 — session-only: arming place-on-face never survives a reload.
   placeFace: null,
@@ -238,8 +251,15 @@ export const useViewportStore = create<ViewportState>()((set, get) => ({
       // row list nobody can see.
       const selection =
         s !== null || state.selection?.kind === 'engrave-item' ? null : state.selection;
-      return { activeSidebarSection: s, selection };
+      // #1123-59 — WHICH WORKSPACE FOLLOWS THE SECTION: a `cnc-` section is the CNC workspace
+      // (whichever way it was reached — a click, the wizard, a cutting job, a reload restore, or
+      // a test store call); any case section is the case workspace. CLOSING a section (null)
+      // leaves the workspace as it was: the operator is still in CNC with the editor shut.
+      const workspace =
+        s === null ? state.workspace : s.startsWith('cnc-') ? 'cnc' : 'case';
+      return { activeSidebarSection: s, selection, workspace };
     }),
+  setWorkspace: (w) => set({ workspace: w }),
   setShellRender: (m) => {
     set({ shellRender: m });
     savePersisted({ ...get(), shellRender: m });
