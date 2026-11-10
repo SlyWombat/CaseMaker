@@ -13,6 +13,7 @@
  */
 
 import { houseRequest, type HouseRequestOptions, type HouseWrite } from './houseClient';
+import type { FinishedRun } from './locationClient';
 
 /**
  * Record that a program finished cleanly on `machineId`. `hash` is `programHash(nc)`. A hash the
@@ -22,10 +23,12 @@ export async function houseAddFinishedProgram(
   machineId: string,
   hash: string,
   opts?: HouseRequestOptions,
+  /** #1179 — what was cut. Optional: a hash-only append stays valid (an older client's write). */
+  run?: FinishedRun,
 ): Promise<HouseWrite> {
   if (hash.trim().length === 0 || hash !== hash.trim()) {
     return { kind: 'refused', status: 400, message: 'a finished program needs a non-empty hash' };
   }
-  const res = await houseRequest('POST', `/finished-programs/${encodeURIComponent(machineId)}`, { hash }, opts);
+  const res = await houseRequest('POST', `/finished-programs/${encodeURIComponent(machineId)}`, { hash, ...(run === undefined ? {} : { run }) }, opts);
   return res.kind === 'ok' ? { kind: 'ok' } : res;
 }

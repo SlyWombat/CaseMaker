@@ -632,6 +632,9 @@ async fn set_wasteboard(
 #[serde(deny_unknown_fields)]
 struct FinishedProgramBody {
     hash: String,
+    /// #1179 — WHAT was cut, optional: a hash-only body stays valid (an older client's write).
+    #[serde(default)]
+    run: Option<crate::location::FinishedRun>,
 }
 
 /// Record one program that finished cleanly on a machine (#419 §4.5). A repeat is a no-op, so a
@@ -641,7 +644,7 @@ async fn add_finished_program(
     Path(id): Path<String>,
     axum::Json(body): axum::Json<FinishedProgramBody>,
 ) -> Response<Body> {
-    match store.add_finished_program(&id, &body.hash).await {
+    match store.add_finished_program(&id, &body.hash, body.run).await {
         Ok(()) => empty(StatusCode::NO_CONTENT),
         Err(e) => error_response(e),
     }
@@ -1510,6 +1513,43 @@ mod tests {
 
         let view = json_of(app.clone().oneshot(get("/api/v1/location")).await.unwrap()).await;
         assert_eq!(view["machines"][0]["finishedPrograms"], serde_json::json!(["a1b2c3d4"]));
+
+        // #1179 — an optional `run` body records WHAT finished beside the hash; a hash-only body
+        // (an older client) stays valid and changes nothing, and a run naming another hash is
+        // refused.
+        let with_run = serde_json::json!({
+            "hash": "a1b2c3d4",
+            "run": {
+                "hash": "a1b2c3d4", "programIndex": 2, "programName": "tray-p02.nc",
+                "registration": { "surfaceMachineZ": -60.487, "topSource": "touch" },
+                "cutMap": {
+                    "cellMm": 2, "cols": 80, "rows": 63, "x0Mm": 0, "y0Mm": 0, "stepMm": 0.05,
+                    "flat": { "encoding": "rle", "data": "5040:1" },
+                    "depth": { "encoding": "rle", "data": "5040:0" }
+                }
+            }
+        });
+        let res = app.clone().oneshot(post_json("/api/v1/finished-programs/m-1", &with_run)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        let res = app.clone().oneshot(post_json("/api/v1/finished-programs/m-1", &body)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        let view = json_of(app.clone().oneshot(get("/api/v1/location")).await.unwrap()).await;
+        assert_eq!(view["machines"][0]["finishedPrograms"], serde_json::json!(["a1b2c3d4"]));
+        assert_eq!(view["machines"][0]["finishedRuns"][0]["programIndex"], serde_json::json!(2));
+        assert_eq!(
+            view["machines"][0]["finishedRuns"][0]["registration"]["surfaceMachineZ"],
+            serde_json::json!(-60.487)
+        );
+        assert_eq!(view["machines"][0]["finishedRuns"][0]["cutMap"]["cols"], serde_json::json!(80));
+
+        let mismatched =
+            serde_json::json!({ "hash": "a1b2c3d4", "run": { "hash": "0badf00d" } });
+        let res = app
+            .clone()
+            .oneshot(post_json("/api/v1/finished-programs/m-1", &mismatched))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
         // A blank hash and a machine that does not exist are refused.
         let res = app

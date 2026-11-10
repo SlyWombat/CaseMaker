@@ -50,6 +50,54 @@ pub fn validate_list(machine_id: &str, list: &[String]) -> Result<(), HouseError
     Ok(())
 }
 
+/// #1179 — a run record's own rules: its hash is a valid program key (the same rule as the list),
+/// and a cut map is a two-stream RLE grid with positive dimensions, each stream 1..=4,096
+/// characters. A real tray's map is far shorter; one that does not compress under the cap is
+/// dropped whole (the writer sends `null`), never stored partial.
+pub fn validate_runs(
+    machine_id: &str,
+    runs: &[crate::location::FinishedRun],
+) -> Result<(), HouseError> {
+    for run in runs {
+        validate_hash(&run.hash).map_err(|e| match e {
+            HouseError::BadEntry(why) => HouseError::BadEntry(format!("machine {machine_id}: {why}")),
+            other => other,
+        })?;
+        if let Some(map) = &run.cut_map {
+            let stream_ok = |stream: &crate::location::CutMapStream| {
+                !stream.data.is_empty()
+                    && stream.data.chars().count() <= 4_096
+                    && stream.encoding == "rle"
+            };
+            if !(map.cell_mm > 0.0)
+                || !(map.step_mm > 0.0)
+                || map.cols == 0
+                || map.rows == 0
+                || !stream_ok(&map.flat)
+                || !stream_ok(&map.depth)
+            {
+                return Err(HouseError::BadEntry(format!(
+                    "machine {machine_id}: a cut map must be a positive 2-stream rle grid of 1..=4096 characters each"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Append `run` to the records in place, newest wins: a repeated hash replaces its older record and
+/// moves to the end; the oldest record is dropped once the list is at its cap.
+pub fn append_run(list: &mut Vec<crate::location::FinishedRun>, run: crate::location::FinishedRun) {
+    if let Some(at) = list.iter().position(|r| r.hash == run.hash) {
+        list.remove(at);
+    }
+    list.push(run);
+    if list.len() > MAX_FINISHED_PROGRAMS {
+        let drop = list.len() - MAX_FINISHED_PROGRAMS;
+        list.drain(..drop);
+    }
+}
+
 /// Append `hash` to `list` in place: a no-op when it is already recorded, otherwise the newest entry,
 /// with the oldest dropped once the list is at its cap.
 pub fn append(list: &mut Vec<String>, hash: &str) {
