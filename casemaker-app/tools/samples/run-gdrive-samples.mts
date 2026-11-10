@@ -56,6 +56,7 @@ import { resolveTool } from '../../src/engine/cnc/toolRegistry';
 import { closeOpenSheet, UnclosableOpenMeshError } from '../../src/engine/cnc/engrave/closeSheet';
 import { bootstrap } from '../../src/platform/headless/bootstrap';
 import { Z1 } from '../../src/engine/cnc/machine';
+import { boxProblem } from '../../src/engine/cnc/stockStart';
 import { createSimSession } from '../../src/workers/sim/session';
 import type { EngraveJob, EngraveTargetObject } from '../../src/types/engraveJob';
 
@@ -69,7 +70,7 @@ const ROD_DIAMETER_MM = 44.5;
 const ROD_LENGTH_MM = 100;
 const ROD_STICKOUT_MM = 60;
 
-type StageStatus = 'pass' | 'fail' | 'n/a';
+type StageStatus = 'pass' | 'fail' | 'n/a' | 'exceeds-machine';
 interface StageResult {
   status: StageStatus;
   note: string;
@@ -521,6 +522,20 @@ function planStageOf(run: CutRun): StageResult {
   );
 }
 
+/**
+ * #1161 — A BLANK BIGGER THAN THE MACHINE AT 1:1 IS ITS OWN VERDICT, not a refusal and not a
+ * failure: a laser-kit drawing (burnathome, crown) or a phone stand (gbox-t1) is drawn for a
+ * bigger bed, and scaling it to fit would change the design. The manager's ruling, 2026-11-10:
+ * no scale-to-fit by default — state the dimension and the travel, and count these apart, the
+ * same grouping C's #1121 table gives the over-travel stocks. Nothing is run: the CLI's own
+ * preflight would refuse the blank before a plan exists.
+ */
+function exceedsMachine(job: EngraveJob): StageResult | null {
+  const problem = boxProblem(job.stock, Z1);
+  if (problem === null) return null;
+  return stage('exceeds-machine', `${problem}; not scaled to fit (scaling would change the design)`, null);
+}
+
 async function runMeshLike(
   sample: ManifestSample,
   ctx: { root: string; out: string; location: string | null; catalogue: string | null; timeoutMs: number; coarse: boolean },
@@ -544,10 +559,15 @@ async function runMeshLike(
   const importNote = `${read.target.format.toUpperCase()}: ${read.mesh.triangleCount} triangles, ${read.target.size.x} × ${read.target.size.y} × ${read.target.size.z} mm${
     sample.health === undefined ? '' : `, ${sample.health}`
   }${read.note === null ? '' : ` (${read.note})`}`;
+  const tooBig = exceedsMachine(job);
+  const importStage = stage('pass', importNote, fileReceipt(jobPath));
+  if (tooBig !== null) {
+    return { purpose: sample.purpose, import: importStage, plan: tooBig, check: stage('n/a', 'not checked: the blank at 1:1 exceeds the machine', null) };
+  }
   const run = runCut(jobPath, join(jobDir, 'run'), { location: ctx.location, catalogue: ctx.catalogue, timeoutMs: ctx.timeoutMs });
   return {
     purpose: sample.purpose,
-    import: stage('pass', importNote, fileReceipt(jobPath)),
+    import: importStage,
     plan: planStageOf(run),
     check: checkStageOf(run.receipt),
   };
@@ -577,10 +597,15 @@ async function runOutlineLike(
   const job = outlineJob(sample, outline);
   const jobPath = join(jobDir, 'job.json');
   writeFileSync(jobPath, `${JSON.stringify(job, null, 1)}\n`);
+  const tooBig = exceedsMachine(job);
+  const importStage = stage('pass', importNote, fileReceipt(jobPath));
+  if (tooBig !== null) {
+    return { purpose: sample.purpose, import: importStage, plan: tooBig, check: stage('n/a', 'not checked: the blank at 1:1 exceeds the machine', null) };
+  }
   const run = runCut(jobPath, join(jobDir, 'run'), { location: ctx.location, catalogue: ctx.catalogue, timeoutMs: ctx.timeoutMs });
   return {
     purpose: sample.purpose,
-    import: stage('pass', importNote, fileReceipt(jobPath)),
+    import: importStage,
     plan: planStageOf(run),
     check: checkStageOf(run.receipt),
   };
@@ -681,10 +706,20 @@ async function runStepPair(sample: ManifestSample, ctx: { root: string; out: str
   const job = meshJob(sample, read, false, ctx.coarse);
   const jobPath = join(jobDir, 'job.json');
   writeFileSync(jobPath, `${JSON.stringify(job, null, 1)}\n`);
+  const tooBig = exceedsMachine(job);
+  const importStage = stage('pass', `${read.target.format.toUpperCase()} read: ${read.mesh.triangleCount} triangles, ${read.target.size.x} × ${read.target.size.y} × ${read.target.size.z} mm`, fileReceipt(jobPath));
+  if (tooBig !== null) {
+    return {
+      purpose: sample.purpose,
+      import: importStage,
+      plan: tooBig,
+      check: stage('n/a', 'not checked: the blank at 1:1 exceeds the machine; step-vs-stl parity needs both plans'),
+    };
+  }
   const run = runCut(jobPath, join(jobDir, 'run'), { location: ctx.location, catalogue: ctx.catalogue, timeoutMs: ctx.timeoutMs });
   return {
     purpose: sample.purpose,
-    import: stage('pass', `${read.target.format.toUpperCase()} read: ${read.mesh.triangleCount} triangles, ${read.target.size.x} × ${read.target.size.y} × ${read.target.size.z} mm`, fileReceipt(jobPath)),
+    import: importStage,
     plan: planStageOf(run),
     check: stage('n/a', 'step-vs-stl parity is compared by the pair row (both files in identical jobs, NC md5s)', null),
   };
@@ -843,8 +878,16 @@ async function main(): Promise<void> {
   };
   const resultsPath = join(args.out, 'results.json');
   writeFileSync(resultsPath, `${JSON.stringify(results, null, 2)}\n`);
-  const pass = Object.values(samples).filter((s) => s.import.status !== 'fail' && s.plan.status !== 'fail' && s.check.status !== 'fail').length;
-  console.log(`run-gdrive-samples: ${Object.keys(samples).length} sample(s), ${pass} without a fail; results ${resultsPath}`);
+  const all = Object.values(samples);
+  const over = all.filter((s) => s.plan.status === 'exceeds-machine').length;
+  const pass = all.filter(
+    (s) => s.plan.status !== 'exceeds-machine' && s.import.status !== 'fail' && s.plan.status !== 'fail' && s.check.status !== 'fail',
+  ).length;
+  console.log(
+    `run-gdrive-samples: ${all.length} sample(s), ${pass} without a fail${
+      over === 0 ? '' : `, ${over} exceeding the machine at 1:1 (not scaled)`
+    }; results ${resultsPath}`,
+  );
   if (args.keepJobs !== true) {
     // The job documents are receipts in their own right (they embed the mesh), so they are kept;
     // --keep-jobs is accepted for symmetry with benches that clean them. Nothing is deleted here.
