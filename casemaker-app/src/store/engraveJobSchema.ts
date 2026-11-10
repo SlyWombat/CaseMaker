@@ -2241,6 +2241,7 @@ const registrationPlanSchema = z.object({
   // #1189 — the probe reference each datum-derived Z was computed at, so the executor corrects the
   // plan to today's probe seating after its M491. Absent on older plans (their numbers stand).
   probeRefZ: z.number().finite().nullable().optional().describe('The probe’s M491 when the expected surface’s datum was measured.'),
+  seatRemeasure: z.enum(['probe-refit']).optional().describe('A seat-seek plan run because the stored seat predates the probe’s last fitting.'),
   probeRefLabel: z.string().nullable().optional().describe('The datum’s words in the seating-correction sentence.'),
   floorProbeRefZ: z.number().finite().nullable().optional().describe('The probe reference of the seek floor’s own datum, when it differs.'),
   seek: z

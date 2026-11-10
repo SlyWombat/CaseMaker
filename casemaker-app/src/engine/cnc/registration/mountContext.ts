@@ -325,6 +325,8 @@ export function bracketSeatDatumFor(machine: MachineRecord | null): {
   value: number;
   what: 'bracket seat' | 'surface top';
   measuredAt: string | null;
+  /** #1189 — the machine XY it was measured at, when the datum named one. */
+  at?: [number, number] | null;
   restsOnStock?: boolean;
   /** #1189 — the probe's reference at this measurement (absent on an older datum). */
   probeRefZ?: number | null;
@@ -346,12 +348,19 @@ export function bracketSeatDatumFor(machine: MachineRecord | null): {
       what: 'bracket seat',
       measuredAt: seat!.measuredAt,
       ...(seat!.restsOnStock === true ? { restsOnStock: true } : {}),
+      at: seat!.at ?? null,
       probeRefZ: seat!.probeRefZ ?? null,
     };
   }
   const surface = profile.datums.surfaceTopZ ?? null;
   if (usable(surface) && surfaceTopStandsForSeat(surface!, profile)) {
-    return { value: surface!.value, what: 'surface top', measuredAt: surface!.measuredAt, probeRefZ: surface!.probeRefZ ?? null };
+    return {
+      value: surface!.value,
+      what: 'surface top',
+      measuredAt: surface!.measuredAt,
+      at: surface!.at ?? null,
+      probeRefZ: surface!.probeRefZ ?? null,
+    };
   }
   return null;
 }

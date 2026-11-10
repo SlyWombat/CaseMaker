@@ -63,7 +63,7 @@ describe('#509 the bracket seat comes from the bed profile', () => {
       }),
     );
     // #1189 — the probe reference travels with the datum (null on a legacy reading without one).
-    expect(both).toEqual({ value: -70.5, what: 'bracket seat', measuredAt: '2026-10-18T10:00:00.000Z', probeRefZ: null });
+    expect(both).toEqual({ value: -70.5, what: 'bracket seat', measuredAt: '2026-10-18T10:00:00.000Z', at: [10, -20], probeRefZ: null });
 
     const surfaceOnly = bracketSeatDatumFor(machineWith({ surfaceTopZ: datum(-112.3), bracketSeatZ: null }));
     expect(surfaceOnly).toMatchObject({ value: -112.3, what: 'surface top' });

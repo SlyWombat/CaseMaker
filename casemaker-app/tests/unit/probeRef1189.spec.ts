@@ -269,7 +269,9 @@ describe('#1189 the Register card and a legacy datum', () => {
     ],
     stockBefore: { bounds: { min: [0, 0, -25], max: [160, 126, 0] }, cuts: [] },
   } as never;
-  const args = (seat: { value: number; what: 'bracket seat'; measuredAt: string; probeRefZ?: number | null } | null) => ({
+  const args = (
+    seat: { value: number; what: 'bracket seat'; measuredAt: string; probeRefZ?: number | null; at?: [number, number] | null } | null,
+  ) => ({
     job: job as never,
     setup,
     mount: { kind: 'bracket' as const, board: true },
@@ -286,21 +288,36 @@ describe('#1189 the Register card and a legacy datum', () => {
     settings: S,
   });
 
-  it('a seat measured before the probe was last fitted asks for the one-touch re-measure', () => {
+  it('a seat measured before the probe was last fitted is re-measured at its OWN point, with the press offered', () => {
     const attempt = planRegistrationAttempt(
-      args({ value: SEAT, what: 'bracket seat', measuredAt: '2026-11-09T00:00:00.000Z' }),
+      args({ value: SEAT, what: 'bracket seat', measuredAt: '2026-11-09T00:00:00.000Z', at: [-175, -35] }),
     );
-    expect(attempt.kind).toBe('refused');
-    if (attempt.kind !== 'refused') return;
-    expect(attempt.reason).toContain('measured before the probe was last fitted');
-    expect(attempt.reason).toContain('Measure the seat beside the bracket');
-    // After the re-measure (the reference written), the same card plans with no question.
+    // #1189 — the card does NOT plan the registration touch on a reference-less seat; it offers
+    // the one-touch seat seek again, and that seek lands where the datum was taken.
+    expect(attempt.kind).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    expect(attempt.plan.seatRemeasure).toBe('probe-refit');
+    expect(attempt.plan.mountTap?.x).toBe(-175);
+    expect(attempt.plan.mountTap?.y).toBe(-35);
+    expect(attempt.summary).toContain('Measure the bracket seat again');
+    expect(attempt.summary).toContain('machine X -175, Y -35');
+    expect(attempt.plan.notes.join(' ')).toContain('stored seat’s own point');
+    // After the re-measure (the reference written), the same card plans the registration itself.
     const fresh = planRegistrationAttempt(
-      args({ value: SEAT, what: 'bracket seat', measuredAt: '2026-11-10T00:00:00.000Z', probeRefZ: REF_THEN }),
+      args({ value: SEAT, what: 'bracket seat', measuredAt: '2026-11-10T00:00:00.000Z', probeRefZ: REF_THEN, at: [-175, -35] }),
     );
     expect(fresh.kind).toBe('plan');
     if (fresh.kind !== 'plan') return;
     expect(fresh.plan.probeRefZ).toBe(REF_THEN);
+    expect(fresh.plan.seatRemeasure).toBeUndefined();
+  });
+
+  it('with no seat at all the seek uses the planner’s own point', () => {
+    const attempt = planRegistrationAttempt(args(null));
+    expect(attempt.kind).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    expect(attempt.plan.seatRemeasure).toBeUndefined();
+    expect(attempt.plan.mountTap?.x).not.toBe(-175);
   });
 
   it('a jaw top measured before the probe was last fitted asks for the tap again', () => {
