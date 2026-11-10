@@ -101,6 +101,14 @@ describe('#1186 — a cheaper total beats the bigger cutter', () => {
     expect(ideal.steps.every((s) => s.cutter.key === 'small')).toBe(true);
   });
 
+  it('#1192 minimum — the shortlist gates which flats may primary, and a dropped one stays a rest', () => {
+    // Only BIG may primary; the small flat is not a program of its own.
+    const choice = chooseSequence(DEMAND, { house: [BIG, SMALL], catalogue: [] }, { ...opts(SLOW_BORROW), allowPrimary: (key) => key === 'big' });
+    expect(keysOf(choice.steps)).toEqual(['big', 'big']);
+    const candidates = candidateSequences(DEMAND, { house: [BIG, SMALL], catalogue: [] }, { allowPrimary: (key) => key === 'big' });
+    expect(candidates.every((c) => c.steps.every((step) => step.cutter.key !== 'small' || step.kind === 'rest'))).toBe(true);
+  });
+
   it('on an equal total, fewer bit changes first, then owned', () => {
     // Two same-diameter flats, identical work: the tie falls to owned over catalogue.
     const twin = flatEndMill(6, { id: 'twin', name: '6 mm flat · catalogue', number: 3, fluteLength: 30 });

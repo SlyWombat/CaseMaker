@@ -1249,6 +1249,32 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
   };
   const siblingMergedHouse = mergeSiblingCutters(input.cutters.house, hasOwnRow);
+  // #1192 rule 3 (the morning minimum) — THE SHORTLIST: the INCUMBENT (the pre-#1186 order's
+  // choice: the largest-diameter flat the feeds admit) and the BEST ESTIMATE (the greatest
+  // material removal rate among flats running their OWN row: feed × step-down × step-over — the
+  // cheap estimate's own formula, no toolpath). Every other flat stays a rest/finish candidate;
+  // only these two may price as a primary, so no job's cycle can rise from the screen.
+  const paramsIfAny = (tool: Tool): CutParams | null => {
+    try {
+      return resolvedCutParams(input, tool).params;
+    } catch {
+      return null;
+    }
+  };
+  const shortlistedPrimaryKeys = ((): Set<string> => {
+    const flats = siblingMergedHouse.filter((tool) => tool.shape === 'flat' || tool.shape === undefined);
+    const keyed = flats
+      .map((tool) => ({ tool, key: cutterKeyOf(tool), diameter: cuttingDiameter(tool), params: paramsIfAny(tool) }))
+      .filter((row): row is { tool: Tool; key: string; diameter: number; params: CutParams } => row.params !== null && row.diameter !== null);
+    const keys = new Set<string>();
+    const incumbent = [...keyed].sort((a, b) => b.diameter - a.diameter)[0];
+    if (incumbent !== undefined) keys.add(incumbent.key);
+    const bestOwnRow = keyed
+      .filter((row) => hasOwnRow(row.tool))
+      .sort((a, b) => b.params.feed * b.params.stepDown * b.params.stepOver - a.params.feed * a.params.stepDown * a.params.stepOver)[0];
+    if (bestOwnRow !== undefined) keys.add(bestOwnRow.key);
+    return keys;
+  })();
   const candidateHouse = siblingMergedHouse.filter((tool) => {
     if (!isCuttingRecord(tool)) return false;
     if (chosenKey !== null && cutterKeyOf(tool) === chosenKey) return true;
@@ -2282,6 +2308,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const result = planTreePrograms(tree, {
       offset,
       floorStrips: buildFloorStrips,
+      // #1192 rule 3 (minimum) — only the shortlisted flats may primary this setup.
+      allowPrimary: (key) => shortlistedPrimaryKeys.has(key),
       // #1038 — the tree's boundary ticks reach the run as the plan's own progress reports.
       ...(opts.onProgress === undefined
         ? {}
@@ -2302,6 +2330,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           ? {}
           : { stockFootprintMm: { length: setupStockOf(input, spec).length, width: setupStockOf(input, spec).width } }),
         houseFlats: flats,
+        // #1192 rule 3 (minimum) — the job's shortlist gates which flats may primary this setup.
+        allowPrimary: (key) => shortlistedPrimaryKeys.has(key),
         houseAll: input.cutters.house,
         ...(input.sacrificialBreakthroughMm === undefined ? {} : { sacrificialBreakthroughMm: input.sacrificialBreakthroughMm }),
         // #975 — the V bits are the pocket chain's last resort: a pocket no flat covers gets the
@@ -3396,6 +3426,8 @@ export interface PlanPocketsOptions {
    * sets it.
    */
   planRegionForTest?: (outcome: OpOutcome | null, id: string) => OpOutcome | null;
+  /** #1192 rule 3's minimum — the flats allowed to PRIMARY (the shortlist); absent = all. */
+  allowPrimary?: (cutterKey: string) => boolean;
 }
 
 /**
@@ -4046,6 +4078,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     ...(opts.reachMarginMm === undefined ? {} : { reachMarginMm: opts.reachMarginMm }),
     planStep,
     maxCutters: opts.maxCutters,
+    ...(opts.allowPrimary === undefined ? {} : { allowPrimary: opts.allowPrimary }),
     ...(opts.onCandidate === undefined ? {} : { onCandidate: opts.onCandidate }),
     ...(opts.signal === undefined ? {} : { signal: opts.signal }),
     ...(opts.goalCoverage === undefined
@@ -6072,6 +6105,8 @@ export interface PlanTreeOptions {
   onProgress?: (op: ModelPlanProgress['op'], fraction: number) => void;
   /** #1038 — the caller's stop, checked at the same boundary hooks (one per tick). */
   signal?: AbortSignal;
+  /** #1192 rule 3's minimum — the flats allowed to PRIMARY (the shortlist); absent = all. */
+  allowPrimary?: (cutterKey: string) => boolean;
 }
 
 /** #1021 — see {@link PlanTreeOptions.floorStrips}. */

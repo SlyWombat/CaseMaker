@@ -220,6 +220,13 @@ export interface SequenceOptions {
   /** Whether a cutter's feeds are rowed or the labelled fallback; absent → rowed. */
   feedsKind?: (tool: Tool) => 'row' | 'fallback';
   /**
+   * #1192 rule 3's MORNING MINIMUM — WHICH FLATS MAY BE PRIMARIES. The screen's shortlist by key
+   * (the incumbent and the best estimate); a flat off the list is never a primary, but STAYS in
+   * the rest/finish pool (a dropped primary remains available as a rest — the fields' rule 2).
+   * Absent → every fitting flat is a primary, as rule 1 said.
+   */
+  allowPrimary?: (cutterKey: string) => boolean;
+  /**
    * The most cutters a chain may use, including the primary and the ball/chamfer — the card's
    * "vendor + 1" budget. Absent → no cap; a chain past it is simply not generated.
    */
@@ -520,7 +527,7 @@ interface ChainLink {
 export function candidateSequences(
   demand: SequenceDemand,
   cutters: CutterCandidates,
-  opts?: Pick<SequenceOptions, 'feedsKind' | 'maxCutters'>,
+  opts?: Pick<SequenceOptions, 'feedsKind' | 'maxCutters' | 'allowPrimary'>,
 ): CandidateSequence[] {
   const features = demand.features;
   // The part's freeing cut (the outer contour) is NOT a pocket and is not folded into a pocket
@@ -579,11 +586,14 @@ export function candidateSequences(
   // decides. The chains are still complete-part chains — a smaller primary keeps its rest/contour
   // steps, and `leftBehind` still ranks an uncut feature above price — so proposing them cannot
   // silently shrink the job; it can only let a cheaper complete chain win, which is the point.
-  const primaries = flatsDesc.filter((c) => reachesCurved(c) && canCutSomething(c));
+  // #1192 rule 3 (the morning minimum) — only the shortlisted flats may PRIMARY; a flat off the
+  // list keeps its rest/finish roles through `flatsDesc` below, never a program of its own.
+  const mayPrimary = (c: CandidateCutter): boolean => opts?.allowPrimary === undefined || opts.allowPrimary(c.key);
+  const primaries = flatsDesc.filter((c) => reachesCurved(c) && canCutSomething(c) && mayPrimary(c));
   // A part with pockets needs SOME round tool; a ball is the fallback only when no flat can.
   const roughs: CandidateCutter[] = primaries.length > 0
     ? primaries
-    : ballsAll.filter((c) => reachesCurved(c) && canCutSomething(c));
+    : ballsAll.filter((c) => reachesCurved(c) && canCutSomething(c) && mayPrimary(c));
 
   if (curvedFeatures.length > 0 && balls.length === 0) return [];
   if (rimFeatures.length > 0 && chamfers.length === 0) return [];
