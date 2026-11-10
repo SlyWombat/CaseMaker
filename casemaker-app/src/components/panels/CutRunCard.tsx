@@ -194,6 +194,11 @@ export function CutRunCard({ job, pkg, plan, finishedHashes, target }: CutRunCar
   const dockKey = target === null ? null : machineKey(target);
   const left = remainingSeconds(progress?.percent ?? null, runClockSeconds(runEntry ?? null, Date.now()));
   const canControl = dockKey !== null && runningIndex !== null;
+  // #1180/A's acceptance rule — A DISABLED CONTROL SAYS WHY. The fixed row is on the card in every
+  // state, so with no live run both buttons are disabled and each carries the same plain reason a
+  // person needs; Stop adds the machine, which it cannot act on without one.
+  const pauseReason = canControl ? null : 'Nothing is running yet';
+  const stopReason = target === null ? 'Choose the machine first' : canControl ? null : 'Nothing is running yet';
   const vacuum = release?.vacuum ?? 'unknown';
   const airOn = release?.job.blowWithVacuum === true && release?.phase === 'running';
 
@@ -322,6 +327,7 @@ export function CutRunCard({ job, pkg, plan, finishedHashes, target }: CutRunCar
           type="button"
           data-testid="engrave-cut-card-pause"
           disabled={!canControl}
+          {...(pauseReason === null ? {} : { title: pauseReason, 'aria-description': pauseReason })}
           style={{ flex: '1 1 auto', padding: 10, borderRadius: 8, border: '1px solid #3a4a5e', background: '#1b2531', color: '#e6edf1', font: 'inherit', fontWeight: 600 }}
           onClick={() => {
             if (dockKey === null) return;
@@ -335,6 +341,7 @@ export function CutRunCard({ job, pkg, plan, finishedHashes, target }: CutRunCar
           type="button"
           data-testid="engrave-cut-card-stop"
           disabled={!canControl || target === null}
+          {...(stopReason === null ? {} : { title: stopReason, 'aria-description': stopReason })}
           style={{ width: 120, padding: 10, borderRadius: 8, border: '1px solid #b3261e', background: '#2a1715', color: '#f08a83', font: 'inherit', fontWeight: 600 }}
           onClick={() => {
             if (target !== null) useEngraveReleaseStore.getState().stop(target);
