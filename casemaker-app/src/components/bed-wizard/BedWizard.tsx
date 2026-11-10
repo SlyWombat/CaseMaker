@@ -59,6 +59,10 @@ import {
 } from '@/platform/bedTemplates';
 import './bedWizard.css';
 
+/** #1178 — the same EMPTY on every read: `?? []` in a selector is a fresh snapshot per call (see
+ *  LocationCard's constant; zustand v5 + React 19 re-render forever on the first store tick). */
+const NO_ACCESSORIES: readonly FixtureRecord[] = [];
+
 const MANNERS: readonly MountManner[] = ['jaws', 'corner+clamps', 'tape', 'vacuum', 'chuck'];
 
 const MANNER_WORDS: Record<MountManner, string> = {
@@ -199,7 +203,7 @@ export function BedWizard(): JSX.Element | null {
 
 function Wizard({ machineId, onClose }: { machineId: string; onClose: () => void }): JSX.Element {
   const machine = useLocationStore((s) => s.location?.machines.find((m) => m.id === machineId) ?? null);
-  const accessories = useLocationStore((s) => s.location?.accessories ?? []);
+  const accessories = useLocationStore((s) => s.location?.accessories ?? NO_ACCESSORIES);
 
   const [draft, setDraft] = useState<BedWizardDraft>(() => {
     try {

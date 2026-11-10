@@ -28,8 +28,15 @@ import { GRBL_PRESETS } from '@/engine/cnc/machine';
 import { machineRecordFromPreset } from '@/platform/genericMachines';
 import { newId } from '@/utils/id';
 
-/** Dismiss, then re-read `/health` (through the registry's refresh) so the warning goes. */
-async function dismissHouseWarning(): Promise<void> {
+/**
+ * #1178 — ONE EMPTY, FOR EVERY READ. `s.location?.accessories ?? []` built a new array per selector
+ * call: zustand v5 + React 19 read through `useSyncExternalStore`, whose snapshot must be stable
+ * between store changes, and the first location-store tick then re-rendered forever. A module-level
+ * constant is the same empty list every read.
+ */
+const NO_ACCESSORIES: readonly FixtureRecord[] = [];
+
+/** Dismiss, then re-read `/health` (through the registry's refresh) so the warning goes. */async function dismissHouseWarning(): Promise<void> {
   const res = await houseDismissHouseWarning();
   if (res.kind === 'ok') await useToolRegistryStore.getState().refresh();
 }
@@ -135,7 +142,7 @@ function accessoryName(a: FixtureRecord): string {
 /** #602 — what this machine holds (accessories + cutter copies) and what is still in the box to check out. */
 function MachineHolds({ machine }: { machine: MachineRecord }) {
   const saveAccessory = useLocationStore((s) => s.saveAccessory);
-  const accessories = useLocationStore((s) => s.location?.accessories ?? []);
+  const accessories = useLocationStore((s) => s.location?.accessories ?? NO_ACCESSORIES);
   const items = useToolRegistryStore((s) => s.items);
   const updateItem = useHouseStore((s) => s.updateItem);
 
