@@ -75,6 +75,16 @@ the chip (or on the preset card), through `Explain` where a term needs a gloss.
 | flute | A groove that ramps in and out along its ends | *A groove that ramps in and out* | Glossary |
 | prism | A shape standing on sloped sides, cut by the V-bit | *Raised letters with sloped sides* | Glossary |
 
+### The step's own controls (#1183)
+
+| File / key | Today | New (visible) | Why |
+|---|---|---|---|
+| `StartWizard.tsx` — a secondary action under the presets, NEW runs only (`createEmptyJob`) | (none) | *Start with an empty job* — link weight, under the presets | The primary keeps #1107's refusal (*Pick what to make first.*); this is the only caller of `createEmptyJob()`, so an operator who knows what they want starts a blank job without hunting a preset |
+| `StartWizard.tsx` — the replace confirm the action raises when the open job carries work | *The job open now has {n} item{n === 1 ? '' : 's'} on it.* | unchanged — listed for the maintainer's review | Existing copy; its Yes/No answers stand as they are today |
+
+Nothing else in this step's copy changes: the primary keeps #1107's refusal, and the secondary is the
+only caller of `createEmptyJob()`.
+
 ## 4. Step 3 — Stock
 
 | File / key | Today | New | Why |
