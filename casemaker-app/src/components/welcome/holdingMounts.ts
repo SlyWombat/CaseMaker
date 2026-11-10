@@ -415,6 +415,11 @@ export interface MountOption {
   /** The mount the machine must carry for this option, when the installed mechanism is the blocker. */
   escape: MachineMountKind | null;
   /**
+   * #1104 — the ONE action a disabled row offers in place, so no row is a dead end. `escape` stays
+   * the machine-change record; `action` is what the row renders.
+   */
+  action?: { label: string; kind: 'change-machine' | 'manage-link' | 'back-to-stock' } | null;
+  /**
    * #718 — the escape also FITS the bed's bracket (the bed carries none at an anchor yet): the
    * change wizard's request says so, and its fit step writes the placement.
    */
@@ -519,6 +524,10 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
     const holdingWords = HOLDING_MOUNT_WORDS[mount];
     const base = { mount, label, holdingWords } as const;
 
+    // #1104 — a rod past the vise's grip has NO vise row, whatever the machine state or ownership:
+    // the seat is impossible, so it is hidden and the chuck's row is the way out.
+    if (mechanism === 'vise' && rodViseProblem(stock, args.round === true) !== null) continue;
+
     // No machine described: the vise mounts are the app's own setup; the machine-only ones are not
     // offered (there is no state to read and no change to offer).
     if (now === null) {
@@ -539,10 +548,9 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
     // machine change can fix it; the chuck (or a shorter rod) is the way out.
     if (mechanism === 'vise') {
       const rodProblem = rodViseProblem(stock, args.round === true);
-      if (rodProblem !== null) {
-        out.push({ ...base, hint: null, disabled: true, reason: rodProblem, escape: null });
-        continue;
-      }
+      // #1104 — an impossible seat is HIDDEN, not shown enabled or disabled: a rod past the grip
+      // has no vise row at all, and the chuck's row is the way out.
+      if (rodProblem !== null) continue;
     }
 
     // #1103 — A THROUGH CUT IS NEVER THE BLOCK SEAT: the jaws stand above the floor the cut leaves.
@@ -690,7 +698,26 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
     out.push({ ...base, hint: hintFor(mount, stock, boardMm), disabled: false, reason: null, escape: null });
   }
 
-  return out;
+  // #1104 — NO DEAD ENDS. An impossible seat is hidden (the block below the ledge step; tape under
+  // a round stock); every disabled row carries one action in place; every refusal is a sentence.
+  return out
+    .filter((o) => !(o.mount === 'block' && stock.thickness < LEDGE_STEP))
+    .filter((o) => !(o.mount === 'bed-tape' && args.round === true))
+    .map((o) => {
+      if (!o.disabled) return { ...o, action: null };
+      const action =
+        o.escape !== null
+          ? { label: 'Change the machine…', kind: 'change-machine' as const }
+          : o.reason === 'not owned'
+            ? { label: 'Add it in Manage › Machine', kind: 'manage-link' as const }
+            : o.reason !== null && o.reason.startsWith('the rotary holds round stock')
+              ? { label: 'Say a rod in the stock step', kind: 'back-to-stock' as const }
+              : o.reason !== null
+                ? { label: 'Back to the stock step', kind: 'back-to-stock' as const }
+                : null;
+      const reason = o.reason === null ? null : o.reason.charAt(0).toUpperCase() + o.reason.slice(1);
+      return { ...o, reason, action };
+    });
 }
 
 /**
