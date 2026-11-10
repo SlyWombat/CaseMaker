@@ -764,6 +764,10 @@ fn child_command(config: &RunsConfig, dir: &FsPath, out_dir: &FsPath) -> tokio::
         // this document, exactly as it settles an in-page one.
         .arg("--generated")
         .arg(out_dir.join("generated.json"))
+        // #1137 — E's pick pool sizes itself from this (min(finalists, cores, n)); the service's
+        // concurrency is the same number, so one setting fans out the queue and the pool. The CLI
+        // ignores it until #1137 lands, which is why it is harmless to set now.
+        .env("CASEMAKER_PICK_WORKERS", config.concurrency.to_string())
         .current_dir(dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
