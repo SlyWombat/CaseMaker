@@ -75,3 +75,45 @@ export function setMachineHeartbeatLoader(fn: (() => Promise<MachineHeartbeatCli
 export async function loadMachineHeartbeatClient(): Promise<MachineHeartbeatClient> {
   return clientFactory();
 }
+
+/**
+ * #1188 — ONE SESSION PER TARGET AT A TIME.
+ *
+ * The poller's chain schedules its next tick only after the previous inspect resolves, so a single
+ * chain never overlaps itself. But a poll IN FLIGHT when a surface re-acquires — the pin unmounts
+ * and Manage mounts on a tree change, or the last hold is released and taken again — is still an
+ * open socket, and the new chain's first tick would connect beside it. On the real controller the
+ * analyst counted two ESTABLISHED sessions in 20–30 % of idle samples that way (2026-11-10
+ * evening): 'nothing leaks after an action' is not the same claim as 'at most one at a time'.
+ *
+ * A second ask for the same target JOINS the inspection already in flight; its caller gets the
+ * same answer (at most one read window old), and the machine never sees a second socket. The key
+ * normalises the address so a host written two ways cannot split the gate.
+ */
+const inFlight = new Map<string, Promise<HeartbeatInspection>>();
+
+function keyOf(target: HeartbeatTarget): string {
+  return `${target.host.trim().toLowerCase()}:${target.port}`;
+}
+
+/** The poller's one read, sharing an inspection already in flight for the same target. */
+export async function inspectTarget(target: HeartbeatTarget): Promise<HeartbeatInspection> {
+  const key = keyOf(target);
+  const existing = inFlight.get(key);
+  if (existing !== undefined) return existing;
+  const pending = (async () => {
+    const client = await loadMachineHeartbeatClient();
+    try {
+      return await client.inspect(target);
+    } finally {
+      inFlight.delete(key);
+    }
+  })();
+  inFlight.set(key, pending);
+  return pending;
+}
+
+/** Test seam: forget inspections in flight (a spec's fake session will not resolve after reset). */
+export function clearMachineHeartbeatInFlight(): void {
+  inFlight.clear();
+}
