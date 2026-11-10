@@ -540,6 +540,65 @@ describe('#419 §3 the Cut surface', () => {
     });
   });
 
+  it('#1179 — a different plan for this job is stated above the steps; the same plan is not', () => {
+    const job = defaultEngraveJob();
+    const pkg = frozen(job, [P1]);
+    const location = locationWith('vise', '3d');
+    const machine = {
+      ...location.machines[0]!,
+      finishedPrograms: ['5343dd8c'],
+      finishedRuns: [
+        {
+          hash: '5343dd8c',
+          jobId: job.id,
+          packageKey: 'an-older-plan',
+          programIndex: 1,
+          programCount: 20,
+          programName: '6 mm flat · roughing',
+          finishedAt: '2026-11-09T18:30:00.000Z',
+        },
+      ],
+    };
+    useLocationStore.setState({
+      status: 'ready',
+      etag: '"loc-1"',
+      location: { ...location, machines: [machine] },
+    } as never);
+    draw({ job, report: reportOf(), pkg, generated: null });
+    const line = screen.getByTestId('engrave-cut-restart');
+    expect(line.dataset.kind).toBe('changed');
+    expect(line.textContent).toContain('This blank was partly cut on 9 Nov: program 1 of 20 (6 mm flat · roughing).');
+    expect(line.textContent).toContain('The plan has changed since (1 program now)');
+
+    // The SAME plan is today's ✓/resume: the steps already answer it, and the line goes away.
+    cleanup();
+    useLocationStore.setState({
+      status: 'ready',
+      etag: '"loc-2"',
+      location: { ...location, machines: [{ ...machine, finishedRuns: [{ ...machine.finishedRuns[0]!, packageKey: pkg.hash }] }] },
+    } as never);
+    draw({ job, report: reportOf(), pkg, generated: null });
+    expect(screen.queryByTestId('engrave-cut-restart')).toBeNull();
+  });
+
+  it('#1179 — hashes with no record say only that the machine has cut before', () => {
+    const job = defaultEngraveJob();
+    const pkg = frozen(job, [P1]);
+    const location = locationWith('vise', '3d');
+    useLocationStore.setState({
+      status: 'ready',
+      etag: '"loc-1"',
+      location: {
+        ...location,
+        machines: [{ ...location.machines[0]!, finishedPrograms: ['5343dd8c', '1e4e7ef9'] }],
+      },
+    } as never);
+    draw({ job, report: reportOf(), pkg, generated: null });
+    const line = screen.getByTestId('engrave-cut-restart');
+    expect(line.dataset.kind).toBe('machine');
+    expect(line.textContent).toBe('An earlier plan cut on this machine.');
+  });
+
   it('freezes on green, once, and says what the package holds and what the shelf did', async () => {
     const job = defaultEngraveJob();
     const made = generated([P1]);
