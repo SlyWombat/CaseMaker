@@ -4,8 +4,8 @@
  * THE VACUUM SWITCH'S SHAPE (#390), because the question is the same one: a single mode the status
  * line does not report, switched by one code, refused unless the machine is idle. The platform half
  * (`platform/machineLight.ts`) owns the guard; this panel owns only what it LAST SENT this
- * connection — `unknown` until it has sent anything, and `unknown` again whenever a press does not
- * come back cleanly, because a socket that failed mid-press may or may not have delivered the code.
+ * connection — `last sent from this app: on/off · hh:mm`, or `not sent this session` until a press
+ * comes back cleanly (#1173A item 5), and back to "not sent" whenever a press does not.
  *
  * THE PARENT'S KEY IS THE RESET. `MachinesScope` keys this on the observation, so a machine found at
  * a new address, a re-check, a fresh wizard run or an upload's own live status remounts it at
@@ -15,16 +15,17 @@
 import { useState } from 'react';
 import { canReachMachine } from '@/platform/capabilities';
 import { toggleLight } from '@/platform/machineLight';
+import { switchWords, type SwitchSend } from './switchWords';
 
 /** The switch, or nothing at all in a build that cannot open a socket. */
-export function MachineLight({ host, port }: { host: string; port: number }) {
-  return canReachMachine ? <LightSwitch host={host} port={port} /> : null;
+export function MachineLight({ host, port, locked = false }: { host: string; port: number; locked?: boolean }) {
+  return canReachMachine ? <LightSwitch host={host} port={port} locked={locked} /> : null;
 }
 
-/** `true` on, `false` off, `null` unknown — nothing has been sent, or the last press was unsure. */
-type Mode = boolean | null;
+/** The last confirmed send, or null — nothing sent yet, or the last press was unsure. */
+type Mode = SwitchSend | null;
 
-function LightSwitch({ host, port }: { host: string; port: number }) {
+function LightSwitch({ host, port, locked }: { host: string; port: number; locked: boolean }) {
   const [mode, setMode] = useState<Mode>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -36,7 +37,7 @@ function LightSwitch({ host, port }: { host: string; port: number }) {
       const result = await toggleLight({ host, port }, on);
       switch (result.kind) {
         case 'toggled':
-          setMode(result.on);
+          setMode({ on: result.on, at: new Date().toISOString() });
           setNote(`The controller answered — the work light is ${result.on ? 'on' : 'off'} now.`);
           break;
         case 'busy':
@@ -55,13 +56,14 @@ function LightSwitch({ host, port }: { host: string; port: number }) {
     }
   }
 
-  const word = mode === null ? 'unknown' : mode ? 'on' : 'off';
+  const word = switchWords(mode);
+  const stateMode = mode === null ? 'unknown' : mode.on ? 'on' : 'off';
 
   return (
     <div className="mvacuum" data-testid="manage-light">
       <div className="mvacuum-row">
         <span className="mvacuum-label">Work light</span>
-        <span className="mvacuum-state" data-testid="manage-light-state" data-mode={mode === null ? 'unknown' : mode ? 'on' : 'off'}>
+        <span className="mvacuum-state" data-testid="manage-light-state" data-mode={stateMode}>
           {word}
         </span>
         <span className="spacer" />
@@ -70,9 +72,13 @@ function LightSwitch({ host, port }: { host: string; port: number }) {
             type="button"
             className="btn btn--sm"
             data-testid="manage-light-on"
-            aria-pressed={mode === true}
-            disabled={busy}
-            title="Switch the machine's work light on (M821) — asked live, and refused unless the machine is idle with no program running"
+            aria-pressed={mode?.on === true}
+            disabled={busy || locked}
+            title={
+              locked
+                ? 'Locked while a program is running or while the machine is not answering'
+                : "Switch the machine's work light on (M821) — asked live, and refused unless the machine is idle with no program running"
+            }
             onClick={() => void press(true)}
           >
             On
@@ -81,9 +87,13 @@ function LightSwitch({ host, port }: { host: string; port: number }) {
             type="button"
             className="btn btn--sm"
             data-testid="manage-light-off"
-            aria-pressed={mode === false}
-            disabled={busy}
-            title="Switch the machine's work light off (M822) — asked live, and refused unless the machine is idle with no program running"
+            aria-pressed={mode?.on === false}
+            disabled={busy || locked}
+            title={
+              locked
+                ? 'Locked while a program is running or while the machine is not answering'
+                : "Switch the machine's work light off (M822) — asked live, and refused unless the machine is idle with no program running"
+            }
             onClick={() => void press(false)}
           >
             Off

@@ -28,6 +28,7 @@
 import { create } from 'zustand';
 import { attachConsole } from '@/platform/machineConsole';
 import { programHash, programOwnsVacuum, runProgram, type Progress, type RunOutcome, type RunSettings, type VacuumSpan } from '@/platform/machineRun';
+import { acquireStatusPoll, noteRunStatus } from '@/platform/machineStatusPoller';
 import type { PauseAction } from '@/platform/machinePause';
 import { copyInMachine, offcutOffer, programCuts, runtimeOf, wearKey, weighRuntime, withRuntime } from '@/engine/cnc/runEnd';
 // #1145 — the run's own clock: the elapsed time comes from our first `P:` timestamp, never `P:` field 3.
@@ -599,6 +600,10 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
       statusLogs.set(machine, createStatusLog(Date.now()));
       patch(machine, { running: true, progress: null, lines: [], outcome: null, stopAsked: false, paused: false, firstProgressAt: null, pausedMs: 0, pausedAt: null, toolWaiting: null, end: null });
       const session = attachConsole(target);
+      // #1173 — THE RUN IS THE STATUS POLLER while it lasts. Its hold says so, so the machine
+      // store's shared timer stays off for this machine; a page that opens during the run adds a
+      // hold and no second `?` stream. Each poll below feeds the store the way a tick would.
+      const releaseStatusPoll = acquireStatusPoll(target, 'run', { pollsItself: true });
       // #1060 — the job's/shop's choice, gated on this machine's own capability (where the target
       // maps to a known machine; an unknown target keeps the choice, as the antistatic does).
       const targetMachineId2 = io.machineIdFor(target);
@@ -640,6 +645,9 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
               const entry = get().runs[machine];
               if (entry === undefined || entry.runId !== runId) return;
               if (e.kind === 'poll') {
+                // #1173 — the run's own answer is the store's live status too, so Manage's state
+                // card follows the run without polling the controller itself.
+                noteRunStatus(e.raw);
                 // #1145 — THE FIRST `P:` IS THE CLOCK'S ANCHOR. A poll before the program reports
                 // progress has no `P:` field: nothing to start a program clock from yet.
                 const first =
@@ -655,8 +663,11 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
               else if (e.kind === 'note') patch(machine, { lines: [...entry.lines, `(${e.text})`] });
               else if (e.kind === 'sent' && e.line !== '?') {
                 patchRun({ lines: [...entry.lines, `> ${e.line}  ${e.reply.trim().split('\n')[0] ?? ''}`] });
-              } else if (e.kind === 'missed') patchRun({ lines: [...entry.lines, `(no status reply ${e.misses})`] });
-              else if (e.kind === 'paused') {
+              } else if (e.kind === 'missed') {
+                // A missed status poll is a result, not an error: the page reads "not answering".
+                noteRunStatus(null);
+                patchRun({ lines: [...entry.lines, `(no status reply ${e.misses})`] });
+              } else if (e.kind === 'paused') {
                 patchRun({
                   paused: true,
                   // #1145 — the clock stops at a suspension: no cutting happens while it is on.
@@ -722,7 +733,13 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
           // #618 — a run stopped WHILE PAUSED ends with `paused` cleared too: the strip's Paused
           // word is the suspended RUN's, and nothing is suspended once the run is over (the
           // machine's own state, Idle, is what it reads then).
-          await session.close();
+          try {
+            await session.close();
+          } finally {
+            // #1173 — hand the status polling back to the store's timer, whatever happened to the
+            // socket, so a page still open resumes live status rather than staying frozen.
+            releaseStatusPoll();
+          }
           patchRun({ running: false, paused: false });
         }
         // Once per run: this runs once per `start`, and `end` is cleared only by the next one.

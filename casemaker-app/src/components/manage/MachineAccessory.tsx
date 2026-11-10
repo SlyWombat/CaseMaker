@@ -4,10 +4,13 @@
  * the same: a single mode the status line does not report, switched by one code, refused unless the
  * machine is idle with no job (`platform/machineAccessory.ts` owns the guard and the codes).
  *
- * IT CLAIMS ONLY WHAT IT SENT. There is no read-back, so the switch shows what it LAST SENT this
- * connection — `unknown` until it has sent anything, and `unknown` again whenever a press does not
- * come back cleanly. The parent keys each switch on the observation, so a re-check, a wizard run or a
- * machine found at a new address remounts it at `unknown` — the reset rule the vacuum switch states.
+ * IT CLAIMS ONLY WHAT IT SENT, WITH ONE OBSERVED EXCEPTION. The status line does not report these
+ * outputs, so a switch says what it LAST SENT this connection — `last sent from this app: on/off ·
+ * hh:mm`, or `not sent this session` until a press comes back cleanly (#1173A item 5). The parent
+ * keys each switch on the observation, so a re-check, a wizard run or a machine found at a new
+ * address remounts it — the reset rule the vacuum switch states. The exception is `wp-charge`: the
+ * machine's diagnose line carries its `C:` input, an OBSERVED reading, so that row says `reported by
+ * the machine: on/off` in its own words rather than pretending the input is this app's send.
  *
  * THE FANS ARE ALSO TEMPERATURE-SWITCHED (`temperatureswitch.spindle/power` in the Z1's own config),
  * so their hint says a press sets the fan NOW and the controller can move it again — the mode is not
@@ -18,20 +21,29 @@ import { useState } from 'react';
 import { canReachMachine } from '@/platform/capabilities';
 import { accessory, toggleAccessory, type AccessoryId } from '@/platform/machineAccessory';
 import { useMachineStore } from '@/store/machineStore';
+import { switchWords, type SwitchSend } from './switchWords';
 
 /** The switch, or nothing at all in a build that cannot open a socket. */
-export function MachineAccessory({ host, port, id }: { host: string; port: number; id: AccessoryId }) {
-  return canReachMachine ? <AccessorySwitch host={host} port={port} id={id} /> : null;
+export function MachineAccessory({
+  host,
+  port,
+  id,
+  locked = false,
+}: {
+  host: string;
+  port: number;
+  id: AccessoryId;
+  locked?: boolean;
+}) {
+  return canReachMachine ? <AccessorySwitch host={host} port={port} id={id} locked={locked} /> : null;
 }
 
-/** `true` on, `false` off, `null` unknown — nothing has been sent, or the last press was unsure. */
-type Mode = boolean | null;
+/** The last confirmed send, or null — nothing sent yet, or the last press was unsure. */
+type Mode = SwitchSend | null;
 
-function AccessorySwitch({ host, port, id }: { host: string; port: number; id: AccessoryId }) {
+function AccessorySwitch({ host, port, id, locked }: { host: string; port: number; id: AccessoryId; locked: boolean }) {
   const spec = accessory(id);
-  // #884 — the wireless-probe charger IS reported by the machine's diagnose line (its `C:` field),
-  // so that row shows the machine's own answer when one has been read; the others say nothing
-  // until this page has sent something.
+  // #1173A — the one observed row: the machine's diagnose line reports the charger's input.
   const diagnose = useMachineStore((s) => s.diagnose);
   const reported = id === 'wp-charge' ? (diagnose?.probeChargerOn ?? null) : null;
   const [mode, setMode] = useState<Mode>(null);
@@ -45,7 +57,7 @@ function AccessorySwitch({ host, port, id }: { host: string; port: number; id: A
       const result = await toggleAccessory({ host, port }, id, on);
       switch (result.kind) {
         case 'toggled':
-          setMode(result.on);
+          setMode({ on: result.on, at: new Date().toISOString() });
           setNote(`The controller answered — the ${spec.name.toLowerCase()} is ${result.on ? 'on' : 'off'} now.`);
           break;
         case 'busy':
@@ -64,9 +76,14 @@ function AccessorySwitch({ host, port, id }: { host: string; port: number; id: A
     }
   }
 
-  // #884 — "not reported" is said once at the top of the card's output section, not on every row.
-  const word = mode === null ? (reported === null ? '—' : reported ? 'on' : 'off') : mode ? 'on' : 'off';
-  const stateMode = mode === null ? (reported === null ? 'unknown' : reported ? 'on' : 'off') : mode ? 'on' : 'off';
+  // #1173A — the row says only what this app last sent, except the charger, whose input the machine
+  // itself reports; that one says so in its own words. The card states the rule once.
+  const shown = reported ?? mode?.on ?? null;
+  const word =
+    reported !== null
+      ? `reported by the machine: ${reported ? 'on' : 'off'}`
+      : switchWords(mode);
+  const stateMode = shown === null ? 'unknown' : shown ? 'on' : 'off';
 
   return (
     <div className="mvacuum" data-testid={`manage-accessory-${id}`}>
@@ -85,9 +102,13 @@ function AccessorySwitch({ host, port, id }: { host: string; port: number; id: A
             type="button"
             className="btn btn--sm"
             data-testid={`manage-accessory-${id}-on`}
-            aria-pressed={mode === true}
-            disabled={busy}
-            title={`Switch the ${spec.name.toLowerCase()} on (${spec.on}, ${spec.vendorKey}) — asked live, and refused unless the machine is idle with no program running`}
+            aria-pressed={shown === true}
+            disabled={busy || locked}
+            title={
+              locked
+                ? 'Locked while a program is running or while the machine is not answering'
+                : `Switch the ${spec.name.toLowerCase()} on (${spec.on}, ${spec.vendorKey}) — asked live, and refused unless the machine is idle with no program running`
+            }
             onClick={() => void press(true)}
           >
             On
@@ -96,9 +117,13 @@ function AccessorySwitch({ host, port, id }: { host: string; port: number; id: A
             type="button"
             className="btn btn--sm"
             data-testid={`manage-accessory-${id}-off`}
-            aria-pressed={mode === false}
-            disabled={busy}
-            title={`Switch the ${spec.name.toLowerCase()} off (${spec.off}, ${spec.vendorKey}) — asked live, and refused unless the machine is idle with no program running`}
+            aria-pressed={shown === false}
+            disabled={busy || locked}
+            title={
+              locked
+                ? 'Locked while a program is running or while the machine is not answering'
+                : `Switch the ${spec.name.toLowerCase()} off (${spec.off}, ${spec.vendorKey}) — asked live, and refused unless the machine is idle with no program running`
+            }
             onClick={() => void press(false)}
           >
             Off

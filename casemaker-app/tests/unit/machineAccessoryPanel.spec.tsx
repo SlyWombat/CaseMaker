@@ -27,6 +27,10 @@ vi.mock('@/platform/capabilities', async (orig) => {
   };
 });
 
+vi.mock('@/platform/machineStatusPoller', () => ({
+  acquireStatusPoll: vi.fn(() => () => {}),
+}));
+
 const Z1_RECORD = {
   name: 'Z1',
   host: '192.168.10.43',
@@ -81,7 +85,7 @@ beforeEach(() => {
 afterEach(() => setMachineConsoleLoader(null));
 
 describe('#289 the accessory switches on the machine card', () => {
-  it('draws one switch per Z1 accessory, each “— ” until it has sent something', () => {
+  it('draws one switch per Z1 accessory, each “not sent this session” until it has sent', () => {
     withMachine();
     render(<MachinesScope />);
     // #884 — the Z1's external output IS the vacuum (one row, above) and its probe charger has
@@ -90,7 +94,7 @@ describe('#289 the accessory switches on the machine card', () => {
       const row = screen.getByTestId(`manage-accessory-${spec.id}`);
       expect(row).toBeTruthy();
       expect(screen.getByTestId(`manage-accessory-${spec.id}-state`).getAttribute('data-mode')).toBe('unknown');
-      expect(screen.getByTestId(`manage-accessory-${spec.id}-state`).textContent).toBe('—');
+      expect(screen.getByTestId(`manage-accessory-${spec.id}-state`).textContent).toBe('not sent this session');
       // The vendor key is the provenance the button titles carry, and the hint says what it is.
       expect(screen.getByTestId(`manage-accessory-${spec.id}-on`).getAttribute('title')).toContain(spec.vendorKey);
       expect(screen.getByTestId(`manage-accessory-${spec.id}-hint`).textContent).toBe(spec.meaning);

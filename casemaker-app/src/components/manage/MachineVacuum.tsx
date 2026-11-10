@@ -7,11 +7,12 @@
  * machine card, beside the #302 console, sending the machine's own `M331`/`M332` on one press.
  *
  * IT MAKES NO CLAIM IT CANNOT SUPPORT. There is no read-back — the status line does not report the
- * vacuum mode — so the switch shows only what it LAST SENT this session, and `unknown` until it has
- * sent anything. That is the honest state: on first draw the controller might be in either mode (the
- * mode is off after every power-up, but this panel cannot see that), so it says so rather than
- * guessing. It goes back to `unknown` whenever a press does not come back cleanly, because a socket
- * that failed mid-press may or may not have delivered the code.
+ * vacuum mode — so the switch says `last sent from this app: on/off · hh:mm`, or `not sent this
+ * session` until a press comes back cleanly. That is the honest state: on first draw the controller
+ * might be in either mode (the mode is off after every power-up, but this panel cannot see that), so
+ * it says so rather than guessing (#1173A item 5, the manager's 2026-11-10 ruling). It falls back to
+ * "not sent this session" whenever a press does not come back cleanly, because a socket that failed
+ * mid-press may or may not have delivered the code.
  *
  * HANDS-OFF WHILE A JOB RUNS. A running program owns the vacuum — it wrote its own `M331` and will
  * write its own `M332` — so a press must not fight it. The machine is asked what it is doing before
@@ -38,12 +39,14 @@ import { readFlag } from '@/platform/defaultsClient';
 import { MACHINES } from '@/engine/cnc/machine';
 import { machineAt } from '@/store/locationStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { switchWords, type SwitchSend } from './switchWords';
 
 /** The switch, or nothing at all in a build that cannot open a socket. Read at render, not at import. */
 export function MachineVacuum({
   host,
   port,
   label = 'Vacuum',
+  locked = false,
 }: {
   host: string;
   port: number;
@@ -52,14 +55,16 @@ export function MachineVacuum({
    * so the row says both rather than describing one plug twice.
    */
   label?: string;
+  /** #1173A item 5 — a running program owns the output codes, so the press is off. */
+  locked?: boolean;
 }) {
-  return canReachMachine ? <VacuumSwitch host={host} port={port} label={label} /> : null;
+  return canReachMachine ? <VacuumSwitch host={host} port={port} label={label} locked={locked} /> : null;
 }
 
-/** `true` on, `false` off, `null` unknown — nothing has been sent, or the last press was unsure. */
-type Mode = boolean | null;
+/** The last confirmed send, or null — nothing sent yet, or the last press was unsure. */
+type Mode = SwitchSend | null;
 
-function VacuumSwitch({ host, port, label }: { host: string; port: number; label: string }) {
+function VacuumSwitch({ host, port, label, locked }: { host: string; port: number; label: string; locked: boolean }) {
   const [mode, setMode] = useState<Mode>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -80,7 +85,7 @@ function VacuumSwitch({ host, port, label }: { host: string; port: number; label
       if (on && coupling && result.kind === 'toggled') await toggleBlow({ host, port }, true);
       switch (result.kind) {
         case 'toggled':
-          setMode(result.on);
+          setMode({ on: result.on, at: new Date().toISOString() });
           setNote(`The controller answered — the vacuum is ${result.on ? 'on' : 'off'} now.`);
           break;
         case 'busy':
@@ -101,14 +106,16 @@ function VacuumSwitch({ host, port, label }: { host: string; port: number; label
     }
   }
 
-  // #884 — "not reported" is said once at the top of the card's output section, not on every row.
-  const word = mode === null ? '—' : mode ? 'on' : 'off';
+  // #884/#1173A — the row never claims machine state; the card says once that these outputs are
+  // not reported, and the row says only what this app last sent.
+  const word = switchWords(mode);
+  const stateMode = mode === null ? 'unknown' : mode.on ? 'on' : 'off';
 
   return (
     <div className="mvacuum" data-testid="manage-vacuum">
       <div className="mvacuum-row">
         <span className="mvacuum-label">{label}</span>
-        <span className="mvacuum-state" data-testid="manage-vacuum-state" data-mode={mode === null ? 'unknown' : mode ? 'on' : 'off'}>
+        <span className="mvacuum-state" data-testid="manage-vacuum-state" data-mode={stateMode}>
           {word}
         </span>
         <span className="spacer" />
@@ -117,9 +124,13 @@ function VacuumSwitch({ host, port, label }: { host: string; port: number; label
             type="button"
             className="btn btn--sm"
             data-testid="manage-vacuum-on"
-            aria-pressed={mode === true}
-            disabled={busy}
-            title="Switch the machine's vacuum on (M331) — asked live, and refused unless the machine is idle with no program running"
+            aria-pressed={mode?.on === true}
+            disabled={busy || locked}
+            title={
+              locked
+                ? 'Locked while a program is running or while the machine is not answering'
+                : "Switch the machine's vacuum on (M331) — asked live, and refused unless the machine is idle with no program running"
+            }
             onClick={() => void press(true)}
           >
             On
@@ -128,9 +139,13 @@ function VacuumSwitch({ host, port, label }: { host: string; port: number; label
             type="button"
             className="btn btn--sm"
             data-testid="manage-vacuum-off"
-            aria-pressed={mode === false}
-            disabled={busy}
-            title="Switch the machine's vacuum off (M332) — asked live, and refused unless the machine is idle with no program running"
+            aria-pressed={mode?.on === false}
+            disabled={busy || locked}
+            title={
+              locked
+                ? 'Locked while a program is running or while the machine is not answering'
+                : "Switch the machine's vacuum off (M332) — asked live, and refused unless the machine is idle with no program running"
+            }
             onClick={() => void press(false)}
           >
             Off

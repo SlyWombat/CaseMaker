@@ -1,16 +1,14 @@
 /**
- * Clear alarm (#644) — the `$X` the operator can press, and only against a machine that says it is
- * alarmed.
+ * Unlock (#644, #1173A item 2) — the alarm-clear press, and ONLY in alarm.
  *
- * THE GUARD IS THE PLATFORM'S (`platform/machineUnlock.ts`): the press asks `?` first, sends `$X`
- * only when the state word reads Alarm, and reports what the machine says AFTERWARDS, because `ok`
- * on `$X` is not the same as the alarm being gone. There is no live status in this panel, so the
- * button cannot know the state before it is pressed — it is offered whenever a machine is reachable,
- * and a press on a machine that is not alarmed sends nothing and says so.
+ * The page used to draw `Alarm · Clear alarm` beside every reachable machine, which made a healthy
+ * machine read alarmed. The state card now decides (`machineStateWords.ts`): in alarm this is the
+ * live, primary action; out of alarm it reads `Unlock · no alarm` and is disabled. The platform
+ * guard (`platform/machineUnlock.ts`) still asks `?` and sends the clear code only from `Alarm` —
+ * the label is honest about what a press would do, and the guard is what makes it true.
  *
- * THE NOTE IS THE ANSWER, not a celebration: "the alarm is cleared" only when the state word is no
- * longer Alarm, "still alarming" when it is. And it never homes or moves — an alarm lock is cleared
- * at the machine, by a person who has looked at it.
+ * THE NOTE IS THE ANSWER: "the alarm is cleared" only when the state word is no longer Alarm. It
+ * never homes or moves — an alarm lock is cleared by a person who has looked at the machine.
  */
 
 import { useState } from 'react';
@@ -18,16 +16,16 @@ import { canReachMachine } from '@/platform/capabilities';
 import { unlockMachine } from '@/platform/machineUnlock';
 
 /** The control, or nothing at all in a build that cannot open a socket. */
-export function MachineUnlock({ host, port }: { host: string; port: number }) {
-  return canReachMachine ? <UnlockButton host={host} port={port} /> : null;
+export function MachineUnlock({ host, port, alarmed }: { host: string; port: number; alarmed: boolean }) {
+  return canReachMachine ? <UnlockButton host={host} port={port} alarmed={alarmed} /> : null;
 }
 
-function UnlockButton({ host, port }: { host: string; port: number }) {
+function UnlockButton({ host, port, alarmed }: { host: string; port: number; alarmed: boolean }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
   async function press(): Promise<void> {
-    if (busy) return;
+    if (busy || !alarmed) return;
     setBusy(true);
     try {
       const result = await unlockMachine({ host, port });
@@ -36,11 +34,7 @@ function UnlockButton({ host, port }: { host: string; port: number }) {
           setNote('The controller answered — the alarm is cleared.');
           break;
         case 'still-alarmed':
-          setNote(result.detail);
-          break;
         case 'not-alarmed':
-          setNote(result.detail);
-          break;
         case 'timeout':
         case 'error':
         case 'unavailable':
@@ -54,24 +48,23 @@ function UnlockButton({ host, port }: { host: string; port: number }) {
 
   return (
     <div className="mvacuum" data-testid="manage-unlock">
-      <div className="mvacuum-row">
-        <span className="mvacuum-label">Alarm</span>
-        <span className="spacer" />
-        <button
-          type="button"
-          className="btn btn--sm"
-          data-testid="manage-unlock-press"
-          disabled={busy}
-          title="Clear the machine's alarm lock ($X) — sent only when the status line reads Alarm; nothing is sent otherwise"
-          onClick={() => void press()}
-        >
-          Clear alarm
-        </button>
-      </div>
+      <button
+        type="button"
+        className={alarmed ? 'btn btn--sm btn--primary' : 'btn btn--sm'}
+        data-testid="manage-unlock-press"
+        disabled={busy || !alarmed}
+        title={
+          alarmed
+            ? 'Clear the controller’s alarm lock, after you have looked at the machine'
+            : 'There is no alarm to clear — this press is offered only while the controller reports Alarm'
+        }
+        onClick={() => void press()}
+      >
+        {alarmed ? 'Unlock' : 'Unlock · no alarm'}
+      </button>
       <p className="hint" data-testid="manage-unlock-hint">
-        Clears the controller's alarm lock ($X) after you have looked at the machine — a probe fault or a
-        limit stop stays your call, not the app's. Offered only against a machine that reports Alarm;
-        it never homes or moves.
+        Clears the controller&rsquo;s alarm lock after you have looked at the machine — a probe fault
+        or a limit stop stays your call. It never homes or moves.
       </p>
       {note !== null && (
         <p className="hint" data-testid="manage-unlock-note">

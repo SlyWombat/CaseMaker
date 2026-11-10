@@ -3231,6 +3231,57 @@ button:disabled {
   color: var(--cm-color-on-surface-muted);
   margin-bottom: 8px;
 }
+/* #1173A — the machine's state card: the colour follows `data-state`, the same reading the words
+   carry. Ready is the shell's online green, cutting is primary, alarm and silence are errors,
+   "checking" is neutral. */
+.manage .mstate {
+  border: 1px solid var(--m-rail-border);
+  border-left: 3px solid var(--cm-color-secondary);
+  border-radius: var(--cm-radius-sm);
+  background: var(--cm-color-surface-container-low);
+  padding: 8px 10px;
+  margin: 4px 0 10px;
+}
+.manage .mstate[data-state='running'] {
+  border-left-color: var(--cm-color-primary);
+}
+.manage .mstate[data-state='alarm'],
+.manage .mstate[data-state='silent'] {
+  border-left-color: var(--cm-color-error);
+}
+.manage .mstate[data-state='unknown'] {
+  border-left-color: var(--cm-color-on-surface-muted);
+}
+.manage .mstate-headline {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cm-color-on-surface);
+}
+.manage .mstate .btn-row {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.manage .mstate .mstop {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.manage .mstate .mstop .hint {
+  flex-basis: 100%;
+  margin: 4px 0 0;
+}
+.manage .mstate .mvacuum {
+  flex-basis: 100%;
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
+.manage .mstate .mvacuum .hint {
+  margin: 4px 0 0;
+}
+
 .manage .kv {
   display: grid;
   grid-template-columns: 130px 1fr;

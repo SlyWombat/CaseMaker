@@ -789,7 +789,9 @@ export const Z1: MillProfile = {
     xMin: -207.0,
     yMin: -206.0,
     zMin: -102.0,
-    source: 'config-get sd, read on the machine, 2026-10-06',
+    // #1173A — the source is shown to the operator, so it says where the numbers came from in
+    // their words; the command that read them is provenance for a bench note, not for this page.
+    source: 'read from the machine, 2026-10-06',
   },
   // `air: false` — `M7`/`M9` are answered `ok` and blow nothing on this machine; `vacuum: true` —
   // the post writes bare `M331`/`M332` and the machine obeys them (#283, bench 2026-10-12).

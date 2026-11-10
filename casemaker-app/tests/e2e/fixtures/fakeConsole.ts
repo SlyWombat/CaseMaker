@@ -120,6 +120,14 @@ export interface FakeConsoleOptions {
   files?: readonly FakeSdFile[];
 }
 
+/**
+ * #1173A — the four states the machine page is judged in. `run` holds a steady 42 % program (no
+ * auto-finish, so a spec can assert the running state at leisure); `alarm` answers the controller's
+ * own alarm words; `silent` refuses the connection itself, which is what the heartbeat reads as a
+ * missed poll.
+ */
+export type FakeConsolePhase = 'idle' | 'run' | 'alarm' | 'silent';
+
 /** #826 — the bench's own diagnostic line: probe open, cover closed, no limit, e-stop released. */
 export const DIAGNOSE_IDLE =
   '{S:0,10000,0,0,20,22|L:0,0|V:1,26|F:0,0|G:1,0,0,0,0|T:0|C:1|E:0,0,0,0,0,1,1,0|P:0,0|I:0|RSSI:-40}';
@@ -139,6 +147,8 @@ export interface FakeConsole {
   setChuck(chuck: FakeChuck): void;
   /** #886 — what the card holds NOW, after any deletes the app sent. */
   files(): FakeSdFile[];
+  /** #1173A — what the controller answers from now on (and whether it answers at all). */
+  setPhase(phase: FakeConsolePhase): void;
 }
 
 /**
@@ -151,6 +161,9 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
   const conns = new Map<number, { out: number[]; in: number[] }>();
   let nextConn = 1;
   let phase: 'idle' | 'running' | 'paused' | 'stopped' | 'done' = 'idle';
+  // #1173A — the machine page's four states, forced by a spec. `idle` lets the scripted program
+  // phase above run as before; the other three override the answer outright.
+  let forced: FakeConsolePhase = 'idle';
   let percent = 0;
   let line = 0;
   let elapsed = 0;
@@ -177,6 +190,10 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
   };
 
   const statusLine = (): string => {
+    // #1173A — the forced states, in the controller's own shapes. `run` is a steady 42 % so the
+    // page can be inspected without the program finishing underneath the assertion.
+    if (forced === 'run') return '<Run|MPos:-12.000,-8.000,-2.000|WPos:0,0,0|P:12,42,17>';
+    if (forced === 'alarm') return '<Alarm|MPos:0,0,0|WPos:0,0,0>\r\nALARM: Probe fail';
     if (phase === 'running') {
       percent = Math.min(100, percent + Math.max(1, Math.ceil(100 / steps)));
       line += 1;
@@ -346,6 +363,11 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
       data?: number[];
     };
     if (tail === 'tcp/connect') {
+      // #1173A — a machine that has gone quiet: the page's own connection attempt is refused, which
+      // the heartbeat catches as a missed poll (it never reaches the frame layer).
+      if (forced === 'silent') {
+        return route.fulfill({ status: 503, json: { error: 'connection refused' } });
+      }
       const conn = nextConn++;
       conns.set(conn, { out: [], in: [] });
       return route.fulfill({ json: { conn } });
@@ -386,5 +408,15 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
     setFeature: (next: FakeFeature) => (feature = next),
     setChuck: (next: FakeChuck) => (chuck = next),
     files: () => [...files],
+    setPhase: (next: FakeConsolePhase) => {
+      forced = next;
+      // Returning to idle clears the scripted program too, so a spec can start a fresh run.
+      if (next === 'idle') {
+        phase = 'idle';
+        percent = 0;
+        line = 0;
+        elapsed = 0;
+      }
+    },
   };
 }
