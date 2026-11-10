@@ -2292,6 +2292,8 @@ function materialPositionSteps(
   scan: MaterialScanSettings = SCAN_FALLBACK,
   /** #788 — the checked-out probe's instrument, so the fit step draws the right diagram. */
   probeInstrument?: ProbeFitInstrument,
+  /** #1053 — the checked-out probe's name, so the fit step names the instrument it means. */
+  probeName?: string,
 ): RunSheetStep[] {
   const part = onBoard ? 'part' : 'blank';
   // Nothing to check the blank against when the origin itself could not be resolved: §5 is then one
@@ -2372,9 +2374,9 @@ function materialPositionSteps(
     ...plan.notes.map((text): RunSheetStep => ({ text, unverified })),
     {
       text:
-        `Fit the probe and touch off ONCE on the ${part}’s top face, near the middle (M491 for the ` +
-        'probe’s own length). Every reading below is a change from this one, so its Z is the zero ' +
-        'depth to compare against.',
+        `Fit ${probeName === undefined ? 'the probe' : `the ${probeName}`} and touch off ONCE on the ` +
+        `${part}’s top face, near the middle (M491 for the probe’s own length). Every reading below ` +
+        'is a change from this one, so its Z is the zero depth to compare against.',
       ...(probeInstrument === undefined ? {} : { probeFit: probeInstrument }),
       unverified,
     },
@@ -4822,10 +4824,15 @@ export function buildRunSheet(
         ]
       : [
           {
+            // #1053 — name the probe the machine says is checked out. When none is recorded (or a
+            // headless caller has no machine record) the sentence keeps the shipped-probe facts it
+            // has always carried; it never claims one probe when another is in the spindle.
             text:
               (jobMount(job) === 'vise' ? 'The Z1 low-profile vise, and ' : '') +
-              'the wired probe that ships with the machine — a mechanical ' +
-              'touch tip, so it triggers on PLA (measured 2026-10-08, 0.001 mm). The 3D Probe stays in reserve.',
+              (options.probeName === undefined
+                ? 'the wired probe that ships with the machine — a mechanical ' +
+                  'touch tip, so it triggers on PLA (measured 2026-10-08, 0.001 mm). The 3D Probe stays in reserve.'
+                : `the ${options.probeName} — the probe checked out on the machine.`),
           },
         ]),
   ];
@@ -5264,7 +5271,7 @@ export function buildRunSheet(
       ? []
       : surfaceSpreadSteps(job, margins.boundaryMargin, options.surfaceTouchCount, options.surfaceReadings, options.surfaceLevel)),
     ...(options.materialScan === true && clearanceZ !== null
-      ? materialPositionSteps(job, onBoard, BENCH_ISSUE, clearanceZ, options.scan, options.probeInstrument)
+      ? materialPositionSteps(job, onBoard, BENCH_ISSUE, clearanceZ, options.scan, options.probeInstrument, options.probeName)
       : []),
   ];
 

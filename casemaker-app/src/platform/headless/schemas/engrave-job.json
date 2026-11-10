@@ -7495,7 +7495,7 @@
               "description": "Tool number in the program header, or null when unset."
             },
             "shape": {
-              "description": "Cutter shape.",
+              "description": "Cutter shape; a probe is an instrument, never a cutter.",
               "enum": [
                 "flat",
                 "ball",
@@ -7505,6 +7505,7 @@
                 "drill",
                 "thread",
                 "bull",
+                "probe",
                 "unknown"
               ],
               "type": "string"
@@ -7541,6 +7542,17 @@
                 }
               ],
               "description": "Diameter at the very tip in millimetres, or null when unstated."
+            },
+            "triggerRadiusMm": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A touch probe’s measured trigger radius in millimetres; null or absent on every cutter."
             },
             "typeText": {
               "description": "Cutter type as the source states it, e.g. \"Flat End\".",

@@ -31,10 +31,16 @@ export const ToolSchema = z.object({
   name: z.string().min(1).describe('Human-readable cutter name.'),
   typeText: z.string().describe('Cutter type as the source states it, e.g. "Flat End".'),
   shape: z
-    .enum(['flat', 'ball', 'tapered-ball', 'engraving', 'chamfer', 'drill', 'thread', 'bull', 'unknown'])
-    .describe('Cutter shape.'),
+    .enum(['flat', 'ball', 'tapered-ball', 'engraving', 'chamfer', 'drill', 'thread', 'bull', 'probe', 'unknown'])
+    .describe('Cutter shape; a probe is an instrument, never a cutter.'),
   handleDiameter: finiteOrNull.describe('Shank/handle diameter in millimetres, or null when unstated.'),
   tipDiameter: finiteOrNull.describe('Diameter at the very tip in millimetres, or null when unstated.'),
+  triggerRadiusMm: z
+    .number()
+    .finite()
+    .nullable()
+    .optional()
+    .describe('A touch probe’s measured trigger radius in millimetres; null or absent on every cutter.'),
   diameter: finiteOrNull.describe('Cutting diameter in millimetres, or null when unstated.'),
   cornerRadius: finiteOrNull.describe('Corner radius in millimetres, or null when unstated.'),
   angle: finiteOrNull.describe('Included point angle in degrees, or null when unstated.'),

@@ -700,6 +700,7 @@ const SHAPE_TYPE_TEXT: Record<ToolShape, string> = {
   chamfer: 'Chamfer',
   drill: 'Drill',
   thread: 'Thread',
+  probe: 'Probe',
   bull: 'Bull Nose',
   unknown: '',
 };

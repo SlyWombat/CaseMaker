@@ -1238,6 +1238,17 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       };
     }
     if (!generated.ok || generated.nc === null) {
+      // #1118 — A VERIFY REFUSAL NAMES ITS FIRST ERROR. The findings already ride the receipt's
+      // diagnostics (`generatedDiagnostics` maps `verify.findings` with source 'verify'); the
+      // REFUSAL was the bare count ("3 verifier error(s)"), so a card or a terminal reading only
+      // the refusals could not say what refused. The sentence keeps the count and adds the first
+      // error's own words — code and message — which carry the line/location the verifier found.
+      const firstVerifyError =
+        generated.stage === 'verify' ? generated.verify?.findings.find((f) => f.severity === 'error') : undefined;
+      const stageErrorReason = (message: string): string =>
+        firstVerifyError === undefined || !message.includes('verifier error')
+          ? message
+          : `${message} — the first: ${firstVerifyError.code}: ${firstVerifyError.message}`;
       return {
         ok: false,
         failure: {
@@ -1246,7 +1257,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           diagnostics: generatedDiagnostics(job, generated, null),
           refusals: [
             { code: 'stopped', reason: `stopped at ${generated.stage}` },
-            ...generated.errors.map((e) => ({ code: 'stage-error', reason: e.message })),
+            ...generated.errors.map((e) => ({ code: 'stage-error', reason: stageErrorReason(e.message) })),
           ],
         },
       };

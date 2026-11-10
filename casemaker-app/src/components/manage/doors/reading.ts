@@ -22,6 +22,7 @@ export const SHAPE_LABELS: Record<ToolShape, string> = {
   drill: 'drill',
   thread: 'thread mill',
   bull: 'bull nose',
+  probe: 'touch probe',
   unknown: 'unknown shape',
 };
 
@@ -35,6 +36,7 @@ export const TYPABLE_SHAPES: readonly ToolShape[] = [
   'drill',
   'thread',
   'bull',
+  'probe',
 ];
 
 /**
