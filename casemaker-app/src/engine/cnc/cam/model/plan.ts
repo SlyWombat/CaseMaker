@@ -124,6 +124,7 @@ import { stubSetup } from '@/engine/cnc/setup';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
 import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
 import { buildTriangleBins, binnedReachableTriangles, type TriangleBins } from './triangleBins';
+import { BoundedCache } from './boundedCache';
 
 /** One ring (outer boundary or a hole); `pocket.ts`'s `Polygons` is `Polygon[]`. NEW — no existing equivalent. */
 export type Polygon = [number, number][];
@@ -770,8 +771,19 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // #961 — each distinct IR is posted and stamped ONCE, however many candidates carry it (the
   // steps' IRs are memoized in `planStep`, so identity is stable); a candidate's fold is then a
   // walk over its own IRs' cached fields.
-  const stampCache = new WeakMap<ToolpathIR, Float32Array | null>();
-  const stampedField = (ir: ToolpathIR, remember = true): Float32Array | null => {
+  // #1147 — THE STAMP CACHE IS BOUNDED. A field is 5.51 MiB over the goal grid (1,444,021
+  // cells × 4 B), and the sequence picker folds every candidate chain's steps through
+  // `goalCoverage`: unbounded, that retained one field per unique step IR — 299 steps on set B's
+  // top ≈ 1.6 GiB (`chain:step` 1831 MiB, measured on k3 AND dave-1 identically). Never caching
+  // fixed the memory (whole-run 660 MiB) but re-stamped shared step IRs per candidate chain:
+  // 1202 s of chain time against 834. A FIFO-bounded cache pays BOTH: reuse stays, the retained
+  // set is capped at `STAMP_CACHE_MAX` fields (~176 MiB at 32). Measured, set B top on dave-1:
+  // unbounded 901 s / chain 1831 MiB; transient 1281 s / 559; 16 fields 977 s / 541; 32 fields
+  // 909 s / 613. All four md5-identical to the 1114-1 pin. The whole-run peak under any bounded
+  // variant is the SWEEP (sweep:checkpoint ~692 MB), not this cache.
+  const STAMP_CACHE_MAX = 32;
+  const stampCache = new BoundedCache<ToolpathIR, Float32Array | null>(STAMP_CACHE_MAX);
+  const stampedField = (ir: ToolpathIR): Float32Array | null => {
     const cached = stampCache.get(ir);
     if (cached !== undefined) return cached;
     let field: Float32Array | null = null;
@@ -785,17 +797,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         if (stamp !== null) field = stamp.field;
       }
     }
-    if (remember) stampCache.set(ir, field);
+    stampCache.set(ir, field);
     return field;
   };
-  // #1125 (the land15 regression fix, 2026-11-09) — THE RANK'S FOLD IS TRANSIENT, AND NOTHING IS
-  // EVICTED. The first fix deleted every field as the rank folded it; but the REST pipeline and the
-  // plan outcome re-read the chain's prefix IRs, and the rank runs PER REMAINDER REGION — each run
-  // deleted what the rest had just cached and the rest re-stamped it, again and again: set B's top
-  // went from 13 min 28 s to >19 min on a quiet k3. Retaining the winner's fields instead cost
-  // ~400 MiB on the same job. So the rank folds with `remember: false`: its fields are transient
-  // (one field at a time, the fold's accumulator), NOTHING it reads is ever evicted, and the rest /
-  // outcome cache each of their own IRs exactly once. Peak = the committed set + one field.
   // #961 follow-up — THE REST'S REGION FROM THE SIMULATED FIELD: the cells the chain so far
   // leaves more than the 0.1 mm band above the goal, inside the pocket's own footprint, as loops
   // (dilated by the ROUNDER in `planPocketsForTree`, which knows the cutter). A field that cannot
@@ -965,15 +969,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const goalCoverage =
     coverageGoal === undefined
       ? undefined
-      : (
-          irs: readonly ToolpathIR[],
-          // #1125 — false for the RANK's per-candidate folds (transient, never cached); the plan
-          // outcome and every other caller keep the cache so an IR is stamped once for them.
-          remember = true,
-        ): { leftoverCells: number; coveredCells: number; cellAreaMm2: number } | null => {
+      : (irs: readonly ToolpathIR[]): { leftoverCells: number; coveredCells: number; cellAreaMm2: number } | null => {
           let acc: Float32Array | null = null;
           for (const ir of irs) {
-            const field = stampedField(ir, remember);
+            const field = stampedField(ir);
             if (field === null) continue;
             if (acc === null) acc = Float32Array.from(field);
             else for (let k = 0; k < acc.length; k++) if (field[k]! < acc[k]!) acc[k] = field[k]!;
@@ -1380,10 +1379,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           stageMemo.evictOwner(cutterKeyOf(candidate));
           continue; // a candidate that cannot plan this remainder is not a candidate
         }
-        // #1125 — THE RANK'S OWN FOLD IS TRANSIENT (`remember: false`): its fields live for the
-        // fold and die with it, and nothing another caller cached is ever evicted. The rest
-        // pipeline and the plan outcome keep the cache for their own reads.
-        const coverage = goalCoverage(measured.ops.map((o) => o.outcome.ir), false);
+        const coverage = goalCoverage(measured.ops.map((o) => o.outcome.ir));
         if (coverage === null) {
           // #1054 — a candidate with no stamp is no candidate: its memoised ops die with it.
           stageMemo.evictOwner(cutterKeyOf(candidate));
