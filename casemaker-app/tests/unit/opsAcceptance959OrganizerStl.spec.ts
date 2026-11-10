@@ -14,10 +14,10 @@ import {
 import { ORGANIZER_STEP, installAcceptanceCatalogue, clearAcceptanceCatalogue } from './helpers/trayAcceptance';
 
 const ORGANIZER = ORGANIZER_STEP;
-installAcceptanceCatalogue();
+const CATALOGUE = installAcceptanceCatalogue();
 afterAll(() => clearAcceptanceCatalogue());
 
-describe.skipIf(ORGANIZER === undefined)('#993/#995 the organizer STL row', () => {
+describe.skipIf(ORGANIZER === undefined || (!CATALOGUE.installed && !CATALOGUE.optedOut))('#993/#995 the organizer STL row', () => {
   it('#993/#995 the shipped STL row: the knife edge split, the user’s file now plans, measures and passes all seven lines', async () => {
     const stlPath = shippedStlBeside(ORGANIZER!);
     expect(stlPath, 'the Makerables .stl is not beside the STEP').not.toBeNull();

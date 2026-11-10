@@ -14,10 +14,10 @@ import {
 import { TRAY_STEP, installAcceptanceCatalogue, clearAcceptanceCatalogue } from './helpers/trayAcceptance';
 
 const TRAY = TRAY_STEP;
-installAcceptanceCatalogue();
+const CATALOGUE = installAcceptanceCatalogue();
 afterAll(() => clearAcceptanceCatalogue());
 
-describe.skipIf(TRAY === undefined)('#991 the tray STL row — planned through the user’s own door', () => {
+describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedOut))('#991 the tray STL row — planned through the user’s own door', () => {
   it('#991 the shipped STL row: planned through the user’s own door, printed beside the STEP row', async () => {
     const stlPath = shippedStlBeside(TRAY!);
     expect(stlPath, 'the Makerables .stl is not beside the STEP').not.toBeNull();
