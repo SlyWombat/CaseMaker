@@ -4891,11 +4891,47 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
         expect(screen.getByTestId('engrave-generate-progress').textContent).toContain('roughing level 41 of 112'),
       { timeout: 15_000 },
     );
+    // #1176 — the row also states the pipeline stage and the reported percent, in that order.
+    expect(screen.getByTestId('engrave-generate-progress').textContent).toContain('stage 4 of 7');
+    expect(screen.getByTestId('engrave-generate-progress').textContent).toContain('37 %');
     fireEvent.click(screen.getByTestId('engrave-generate-cancel'));
     expect(cancels).toBe(1);
     await waitFor(() => expect(screen.queryByTestId('engrave-generate-progress')).toBeNull(), { timeout: 15_000 });
     release({ ok: false, stage: 'findings', findings: [], feeds: null, cam: null, nc: null, verify: null, errors: [] } as unknown as import('@/workers/sim/engraveGenerate').EngraveGenerated);
     setEngraveRunClientLoader(null);
+  });
+});
+
+// #1176 part 2 — ONE HOME FOR THE CUTTER FACTS. The #798 line and the #1127 checklist used to
+// render inside the JOB group's body beside the stock and part rows; the Cutters group that names
+// them showed only its select. They live in the Cutters group now, and the Job group keeps the
+// stock/part facts — the testids and their routes are unchanged.
+describe('#1176 — the Cutter line and checklist live in the Cutters group', () => {
+  it('the Job group holds the stock/part facts; the Cutters group holds the cutter line and checklist', () => {
+    // The checklist renders only with cutters, so give the panel a generated run with one program.
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: {
+          ok: true, stage: 'done', findings: [], feeds: null, threads: null, cam: null, nc: 'G90\nM02',
+          verify: null, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null,
+          facingError: null, facingCam: null, predicted: [], designItems: [], errors: [],
+          programs: [{
+            setupIndex: 0, setupId: 'setup-0', toolKey: 'inv:kz-o-flute-3-175-25', nc: 'G0 X0 Y0\nM02\n',
+            verify: { ok: true, findings: [], stats: { lines: 1, cuttingMoves: 0, deepestZ: 0, bbox: { min: [0, 0, 0], max: [1, 1, 0] } } },
+            frameNc: null, frameVerify: null, programHash: 'hash-0', cam: null,
+          }],
+        } as unknown as EngraveGenerated,
+      });
+    });
+    render(<EngravePanel />);
+    const job = screen.getByTestId('engrave-group-job');
+    const cutters = screen.getByTestId('engrave-group-cutter');
+    const line = screen.getByTestId('engrave-cutter-line');
+    const checklist = screen.getByTestId('engrave-cutter-checklist');
+    expect(job.contains(line)).toBe(false);
+    expect(job.contains(checklist)).toBe(false);
+    expect(cutters.contains(line)).toBe(true);
+    expect(cutters.contains(checklist)).toBe(true);
   });
 });
 
