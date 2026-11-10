@@ -40,6 +40,8 @@ export interface WizardFileFieldProps {
   errorTestId?: string;
   /** Lines under the field that belong to the read (a unit note, the board's notices). */
   children?: ReactNode;
+  /** #1099 — the read state's drawing (the file's thumbnail), above the name row. */
+  thumbnail?: ReactNode;
 }
 
 export function WizardFileField(props: WizardFileFieldProps): JSX.Element {
@@ -88,6 +90,7 @@ export function WizardFileField(props: WizardFileFieldProps): JSX.Element {
           if (files.length > 0) props.onFiles(files);
         }}
       />
+      {chosen !== null && state !== 'reading' && props.thumbnail !== undefined && props.thumbnail}
       {chosen !== null && state !== 'reading' && (
         <div className="sw-file__row">
           <span className="sw-file__name" data-testid={props.nameTestId}>

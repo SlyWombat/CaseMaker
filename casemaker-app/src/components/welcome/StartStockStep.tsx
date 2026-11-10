@@ -43,6 +43,8 @@ import { newStockId, useStockStore } from '@/store/stockStore';
 import type { JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 import { fmt } from './holdingMounts';
 import { NARROW_QUERY } from './wizardLayout';
+import { BlankWithPart } from './BlankWithPart';
+import type { PartFootprint } from './workShape';
 import { WizardFileField } from './WizardFileField';
 
 /**
@@ -373,11 +375,14 @@ function FormPicture({ form }: { form: JobStockForm }): JSX.Element {
 export function StartStockStep({
   onChange,
   seed,
+  part = null,
 }: {
   /** The current answer, or null when there is none yet (or the one there is was refused). */
   onChange: (pending: PendingStock | null) => void;
   /** The job's own stock when the step is re-opened to edit it (#681); absent for a new job. */
   seed?: StartStockSeed;
+  /** #1099 — the part the drawings show on this blank; null when the work has no footprint. */
+  part?: PartFootprint | null;
 }): JSX.Element {
   // #875 — the step's phone layout: four form columns and the thickness on its own size row.
   const narrow = useMediaQuery(NARROW_QUERY);
@@ -575,6 +580,13 @@ export function StartStockStep({
   const seededNumbers =
     seed?.computed === true && visibleSizeKeys.every((key) => dims[key] === seedDims[key]);
   const around = aroundLine(form, dims);
+  // #1099 — the blank the drawing shows, once all three numbers are usable (mid-typing is not).
+  const drawnBlank = useMemo(() => {
+    const length = Number(dims.length);
+    const width = Number(dims.width);
+    const thickness = Number(dims.thickness);
+    return [length, width, thickness].every((v) => Number.isFinite(v) && v > 0) ? { length, width, thickness } : null;
+  }, [dims.length, dims.width, dims.thickness]);
 
   return (
     <div data-testid="start-wizard-step-stock" style={{ marginTop: 8 }}>
@@ -628,32 +640,43 @@ export function StartStockStep({
       </p>
 
       <p style={{ ...MUTED, margin: '8px 0 0' }}>Size</p>
-      <div
-        style={{ ...SIZE_FIELDS, gridTemplateColumns: narrow ? '1fr 1fr' : 'repeat(3, minmax(0, 1fr))' }}
-        data-testid="start-wizard-make"
-      >
-        {visibleSizeKeys.map((key) => (
-          <label
-            key={key}
-            style={narrow && key === 'thickness' ? { ...SIZE_FIELD, gridColumn: '1 / -1' } : SIZE_FIELD}
+      {/* #1099 — the numbers get the picture beside them: the part's footprint on this blank, its
+          margins, and the warning when a typed number no longer holds it. */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+          <div
+            style={{ ...SIZE_FIELDS, gridTemplateColumns: narrow ? '1fr 1fr' : 'repeat(3, minmax(0, 1fr))' }}
+            data-testid="start-wizard-make"
           >
-            {SIZE_LABELS[key]}
-            <span style={SIZE_UNIT_ROW}>
-              <input
-                type="number"
-                min={0}
-                step="any"
-                placeholder="0"
-                style={SIZE_INPUT}
-                data-testid={`start-wizard-make-${key}`}
-                aria-label={`Stock ${SIZE_LABELS[key]}`}
-                value={dims[key]}
-                onChange={(e) => editDim(key, e.target.value)}
-              />
-              mm
-            </span>
-          </label>
-        ))}
+            {visibleSizeKeys.map((key) => (
+              <label
+                key={key}
+                style={narrow && key === 'thickness' ? { ...SIZE_FIELD, gridColumn: '1 / -1' } : SIZE_FIELD}
+              >
+                {SIZE_LABELS[key]}
+                <span style={SIZE_UNIT_ROW}>
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    placeholder="0"
+                    style={SIZE_INPUT}
+                    data-testid={`start-wizard-make-${key}`}
+                    aria-label={`Stock ${SIZE_LABELS[key]}`}
+                    value={dims[key]}
+                    onChange={(e) => editDim(key, e.target.value)}
+                  />
+                  mm
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+        {part != null && drawnBlank !== null && (
+          <div style={{ flex: '1 1 260px', maxWidth: 340 }}>
+            <BlankWithPart blank={drawnBlank} part={part} />
+          </div>
+        )}
       </div>
       {/* #743 P-1 — a PCB's copper: the cap every depth rule reads (D2). */}
       {material === 'pcb' && (
