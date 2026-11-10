@@ -1612,7 +1612,9 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               </span>
             </div>
           )}
-          {seatRunning && (
+          {/* #1189 review — the narration says the probe is MOVING: it must not appear while the
+              fit-probe question is still on the card, unanswered. */}
+          {seatRunning && seatTapApi.prompt === null && (
             <p data-testid="engrave-registration-seat-narration" style={{ ...MUTED, margin: '4px 0 0' }}>
               measuring the bracket seat at machine X {seatTapArgs(proposal.plan)?.x}, Y {seatTapArgs(proposal.plan)?.y} — the probe is moving now
             </p>
