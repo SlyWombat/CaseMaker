@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   planModelCam,
+  type ModelPlanInput,
   type RankMeasureHandle,
   type RankMeasurement,
   type RankMeasureRequest,
@@ -31,7 +32,36 @@ const ball = (d: number): Tool => ({
   fluteLength: 30,
 });
 
-/** #986's `sloped` seed, unchanged, with the caller's house. */
+/**
+ * The fixture and the serial plan are deterministic, so each (id, cutter set) builds them ONCE:
+ * tests 1 and 2 use the same set (a seam that wins; a seam that fails), and both are held to the
+ * same serial plan — the plan cannot depend on the seam.
+ */
+const slopedInputs = new Map<string, ModelPlanInput>();
+const serialPlans = new Map<string, Promise<Awaited<ReturnType<typeof planModelCam>>>>();
+
+const inputKey = (targetId: string, house: Tool[]): string =>
+  `${targetId}|${house.map((tool) => tool.id ?? tool.name).join('|')}`;
+
+function sharedInput(targetId: string, house: Tool[]): ModelPlanInput {
+  const key = inputKey(targetId, house);
+  const cached = slopedInputs.get(key);
+  if (cached !== undefined) return cached;
+  const input = slopedInput(targetId, house);
+  slopedInputs.set(key, input);
+  return input;
+}
+
+function serialPlan(targetId: string, house: Tool[]): Promise<Awaited<ReturnType<typeof planModelCam>>> {
+  const key = inputKey(targetId, house);
+  let plan = serialPlans.get(key);
+  if (plan === undefined) {
+    plan = planModelCam(sharedInput(targetId, house));
+    serialPlans.set(key, plan);
+  }
+  return plan;
+}
+
 /** One candidate, measured through the engine's own worker entry — the real metric, same thread. */
 async function measureAlone(request: RankMeasureRequest, candidate: Tool): Promise<RankMeasurement> {
   const captured: { metric: RankMeasurement | null } = { metric: null };
@@ -65,12 +95,12 @@ describe('#1151 Phase 2 — the rank seam', () => {
   it('a LATER candidate wins, and the seam run is byte-identical to the serial plan', async () => {
     // ⌀0.2 first, ⌀2 second: equal leftover, the ⌀2's cheaper cycle wins — the rank's SECOND
     // candidate takes the plan, measured through the seam in the seam run.
-    const input = slopedInput('fixture-rank-pool', [flat6, ball(0.2), ball(2)]);
-    const serial = await planModelCam(input);
+    const house = [flat6, ball(0.2), ball(2)];
+    const serial = await serialPlan('fixture-rank-pool', house);
     expect(rankNote(serial)).toContain('Chosen: ball-2');
 
     const seen = { cancelled: 0, measured: [] as number[] };
-    const seamRun = await planModelCam(input, { measureRankCandidates: sameThreadSeam(seen) });
+    const seamRun = await planModelCam(sharedInput('fixture-rank-pool', house), { measureRankCandidates: sameThreadSeam(seen) });
     // The same choice, the same statement, and the same plan: the winner's memo entries were
     // recomputed by the chosen plan (a read-through cache), so not a byte moved.
     expect(rankNote(seamRun)).toBe(rankNote(serial));
@@ -81,13 +111,13 @@ describe('#1151 Phase 2 — the rank seam', () => {
   }, 600_000);
 
   it('a seam that fails is measured in-process: the pool’s health cannot move the plan', async () => {
-    const input = slopedInput('fixture-rank-pool', [flat6, ball(0.2), ball(2)]);
-    const serial = await planModelCam(input);
+    const house = [flat6, ball(0.2), ball(2)];
+    const serial = await serialPlan('fixture-rank-pool', house);
     const deadSeam = (): RankMeasureHandle => ({
       metric: () => Promise.reject(new Error('the pool is down')),
       cancel: () => {},
     });
-    const run = await planModelCam(input, { measureRankCandidates: deadSeam });
+    const run = await planModelCam(sharedInput('fixture-rank-pool', house), { measureRankCandidates: deadSeam });
     // The candidate is measured here instead; the statement and the plan are the serial ones.
     expect(rankNote(run)).toBe(rankNote(serial));
     expect(JSON.stringify(run)).toBe(JSON.stringify(serial));
@@ -96,13 +126,13 @@ describe('#1151 Phase 2 — the rank seam', () => {
   it('the early break stops the seam: an outstanding candidate is never measured and the seam is cancelled', async () => {
     // ⌀1 first (measured in-process), ⌀2 second: it does not improve on leftover, so the search
     // breaks before ⌀4 — the seam was offered both, consumes only the ⌀2, and is cancelled.
-    const input = slopedInput('fixture-rank-pool', [flat6, ball(1), ball(2), ball(4)]);
-    const serial = await planModelCam(input);
+    const house = [flat6, ball(1), ball(2), ball(4)];
+    const serial = await serialPlan('fixture-rank-pool', house);
     expect(rankNote(serial)).toMatch(/measured 2 candidate\(s\)/);
     expect(rankNote(serial)).toContain('Chosen: ball-1');
 
     const seen = { cancelled: 0, measured: [] as number[] };
-    const seamRun = await planModelCam(input, { measureRankCandidates: sameThreadSeam(seen) });
+    const seamRun = await planModelCam(sharedInput('fixture-rank-pool', house), { measureRankCandidates: sameThreadSeam(seen) });
     expect(seen.measured, 'the ⌀4 was never asked for').toEqual([0]);
     expect(seen.cancelled).toBe(1);
     expect(rankNote(seamRun)).toBe(rankNote(serial));
