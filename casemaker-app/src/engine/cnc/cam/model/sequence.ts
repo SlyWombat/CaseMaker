@@ -572,20 +572,18 @@ export function candidateSequences(
     canRoughPocket(c)
     || contourFeatures.some((f) => coversFeature(c.tool, f))
     || (searchPockets.length === 0 && contourFeatures.length === 0);
-  // The LARGEST cutter that can rough the part is the ONE primary — "largest flat roughs what it
-  // enters; next smaller for what the previous cannot reach" (the #961 ruling). A smaller flat
-  // that also roughs a pocket is a REST, never a second primary: without this the ⌀3.175 chain is
-  // complete on the organizer too (it covers the 27 the ⌀6 cannot enter), ties on `leftBehind`
-  // and, being cheaper, wins — shrinking the whole job, 26.8 mm contour included, to a 3 mm cutter.
-  const maximal = (cs: CandidateCutter[]): CandidateCutter[] => {
-    const top = Math.max(...cs.map((c) => diameterOf(c.tool) ?? 0));
-    return cs.filter((c) => (diameterOf(c.tool) ?? 0) >= top - EPS);
-  };
-  const primaries = maximal(flatsDesc.filter((c) => reachesCurved(c) && canCutSomething(c)));
+  // #1186 — EVERY FLAT THAT CAN ROUGH THE PART IS PROPOSED. "The largest flat is the one primary"
+  // (#961) was an ORDERING rule, and it assumed the largest is also the fastest: on a borrowed feed
+  // row it is not (the m1 tray: ⌀6 on the 3.2 mm row at F400/0.5 mm against ⌀3.175 at F1000/1.0).
+  // Rule 1 of #1186's fields: an ordering rule may only PROPOSE candidates; the priced total
+  // decides. The chains are still complete-part chains — a smaller primary keeps its rest/contour
+  // steps, and `leftBehind` still ranks an uncut feature above price — so proposing them cannot
+  // silently shrink the job; it can only let a cheaper complete chain win, which is the point.
+  const primaries = flatsDesc.filter((c) => reachesCurved(c) && canCutSomething(c));
   // A part with pockets needs SOME round tool; a ball is the fallback only when no flat can.
   const roughs: CandidateCutter[] = primaries.length > 0
     ? primaries
-    : maximal(ballsAll.filter((c) => reachesCurved(c) && canCutSomething(c)));
+    : ballsAll.filter((c) => reachesCurved(c) && canCutSomething(c));
 
   if (curvedFeatures.length > 0 && balls.length === 0) return [];
   if (rimFeatures.length > 0 && chamfers.length === 0) return [];
@@ -949,7 +947,7 @@ interface RankedSequence {
  * The rank: a coverage rest that misses the price line ranks after every chain that clears it;
  * then the SIMULATED leftover, then pockets left behind, then failed steps, house/rowed, price.
  */
-function rankOf(ranked: RankedSequence): readonly [number, number, number, number, number, number, number, string] {
+function rankOf(ranked: RankedSequence): readonly [number, number, number, number, number, number, number, number, string] {
   // A COMPLETE chain beats an incomplete one first: an uncut pocket is not a cheaper plan, it is a
   // different part. "Complete" means every pocket a cutter in the set COULD cover is covered —
   // `leftBehind`, not `unreachable`, or the pockets no cutter can reach would tie every candidate
@@ -966,7 +964,20 @@ function rankOf(ranked: RankedSequence): readonly [number, number, number, numbe
   // old order (leftBehind first) stands unchanged.
   const leftover = ranked.coverage ?? Number.POSITIVE_INFINITY;
   const demoted = ranked.eligible ? 0 : 1;
-  return [demoted, leftover, ranked.leftBehind, ranked.failures.length, catalogue, fallback, ranked.cost.totalSeconds, signature] as const;
+  // #1186 — ONE CURRENCY FIRST: the priced total (cutting at the feed each cutter really runs +
+  // the priced bit changes) ranks BEFORE owned/catalogue and rowed/fallback; those only break a tie,
+  // after the change count (#1186 rule 1: ties to fewer bit changes, then to owned).
+  return [
+    demoted,
+    leftover,
+    ranked.leftBehind,
+    ranked.failures.length,
+    ranked.cost.totalSeconds,
+    ranked.cost.toolChanges,
+    catalogue,
+    fallback,
+    signature,
+  ] as const;
 }
 
 /** The rank WITHOUT the coverage keys — the order the picker used before #961, and the one the
@@ -1119,7 +1130,7 @@ export function chooseSequence(
   const compareRanked = (a: RankedSequence, b: RankedSequence): number => {
     const ra = rankOf(a);
     const rb = rankOf(b);
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 8; i++) {
       if (ra[i]! < rb[i]!) return -1;
       if (ra[i]! > rb[i]!) return 1;
     }
