@@ -87,9 +87,12 @@ describe('#1105 the Stock step blank cards', () => {
     const card = await screen.findByTestId('start-wizard-shelf-item-stock-hardwood');
     fireEvent.click(card);
     await waitFor(() => {
-      expect(last?.kind).toBe('choice');
+      // The cast lifts TS's closure narrowing (a variable only ever written in the onChange
+      // callback reads as `null` at this point otherwise) — the runtime value is the callback's.
+      expect((last as PendingStock | null)?.kind).toBe('choice');
     });
-    if (last?.kind === 'choice') expect(last.choice.entry.kind).toBe('shelf');
+    const done = last as PendingStock | null;
+    if (done?.kind === 'choice') expect(done.choice.entry.kind).toBe('shelf');
     expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('120');
   });
 
