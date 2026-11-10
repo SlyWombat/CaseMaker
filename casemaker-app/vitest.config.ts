@@ -44,6 +44,10 @@ const ACCEPTANCE_FILES = new Set([
   'flipMouldShell.acceptance.spec.ts',
   'rotaryReliefAcceptance.spec.ts',
   'rotaryFluidity.acceptance.spec.ts',
+  // #1175 — the house/browser parity walk generated the tray twice: 964 s on k3. It needs the
+  // same licensed fixture the card files need, so it belongs to the tier the land gate and
+  // nightly run, not to `fast`.
+  'houseParity1175.spec.ts',
 ]);
 
 function classifySpecs(): { acceptance: string[]; fast: string[] } {
