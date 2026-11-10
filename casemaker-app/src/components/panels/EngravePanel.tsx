@@ -58,7 +58,11 @@ import { operatorRunError } from './runErrorWords';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useRendererVerdict } from '@/hooks/useRendererVerdict';
 // #1124 — the press's own re-probe (the landing ruling): only a failure at Generate refuses.
-import { recheckRendererForGenerate, rendererProbeFailedAtStartup } from '@/engine/cnc/rendererBits';
+import {
+  clearRendererWarning,
+  recheckRendererForGenerate,
+  rendererProbeFailedAtStartup,
+} from '@/engine/cnc/rendererBits';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize, type Tool, isCuttingRecord } from '@/engine/cnc/tool';
 import { tierOf } from '@/engine/cnc/toolTiers';
@@ -2284,6 +2288,12 @@ export function EngravePanel(): JSX.Element {
   // ---- the run (#206) ----------------------------------------------------------------------
 
   const run = useEngraveRunStore();
+  // #1123 item 52 — THE MEMORY WARNING BELONGS TO THE RUN IN PROGRESS. The press probe publishes
+  // it beside Generate, and the run records it as the Log's first line; once the run settles the
+  // line comes down, so it cannot outlive the run on the panel.
+  useEffect(() => {
+    if (run.phase === 'ready' || run.phase === 'blocked') clearRendererWarning();
+  }, [run.phase]);
   // #1051 — ONCE A PLAN HAS POSTED, THE CUTTER LINE SPEAKS FOR IT: the posted programs' cutters,
   // in the order they cut. The pre-plan sentence — the rule's or the search's advice — can name
   // cutters the job does not use, so it is replaced once a result exists; the screen never shows
@@ -3005,7 +3015,7 @@ export function EngravePanel(): JSX.Element {
         if (key) setTool(key, 'computed');
       }
     }
-    await run.generate();
+    await run.generate(null, { memoryWarning: rendererVerdict.warning });
   }
 
   /** #893 — the row's Simulate press: sweep and check the program already on screen. */
