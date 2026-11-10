@@ -227,7 +227,10 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
       await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText('board');
 
-      // Step 3's drop target: the stock file's name, in the row with Change.
+      // Step 3's drop target lives under Technical since #1098: open the fold, then the stock
+      // file's name sits in the row with Change.
+      await page.getByTestId('start-wizard-stock-technical').locator('summary').click();
+      await expect(page.getByTestId('start-wizard-load-hint')).toBeVisible();
       await page.getByTestId('start-wizard-load-file').setInputFiles({
         name: 'cube.stl',
         mimeType: 'model/stl',

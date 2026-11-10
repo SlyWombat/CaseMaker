@@ -22,6 +22,13 @@ export const WORK_STOCK_MARGIN_MM = 5;
 export const WORK_STOCK_SKIN_MM = 1;
 
 /**
+ * #1098 — the house's plate stock, mm, when the shelf does not name one first. An outline cut
+ * THROUGH needs a plate: the cut frees the part, so the blank must be the piece. 12 mm is the
+ * wizard's stock plate (`stockStart.ts`'s shelf forms); the shelf's own plate wins when present.
+ */
+export const HOUSE_PLATE_THICKNESS_MM = 12;
+
+/**
  * The material the work proposes for a blank it sized itself: the house default (#879 — the
  * hardwood name plate). READ from the default rather than written a second time, so the proposal
  * and the job the app opens cannot drift apart.
@@ -38,6 +45,11 @@ export type WorkShape =
    */
   | { kind: 'pcb'; outline: { length: number; width: number }; laidOn?: { length: number; width: number } }
   | { kind: 'text'; size: { length: number; width: number }; depth: number }
+  /**
+   * #1098 — a vector outline (SVG/DXF) the question step read. `through` is the Cut it out
+   * choice (a profile needs a plate the cut can free); Pocket it and Carve it leave it false.
+   */
+  | { kind: 'outline'; length: number; width: number; through: boolean }
   | { kind: 'none' };
 
 export interface StockProposal {
@@ -71,6 +83,10 @@ export function proposedThickness(work: WorkShape): number | null {
       return round1(work.depth + WORK_STOCK_SKIN_MM);
     case 'pcb':
       return PCB_STANDARD_THICKNESS_MM;
+    case 'outline':
+      // #1098 — a through cut frees the part from a plate; Pocket it and Carve it bite into one.
+      // Both start on the house's plate (12 mm; the shelf's own plate wins in the step).
+      return HOUSE_PLATE_THICKNESS_MM;
     default:
       return null;
   }
@@ -127,6 +143,20 @@ export function proposeStock(work: WorkShape): StockProposal | null {
         thickness,
         finish: 'rough',
         sentence: `Sized from the text: ${n(work.size.length)} × ${n(work.size.width)} mm, plus ${m} mm each side.`,
+      };
+    }
+    case 'outline': {
+      // #1098 — the drawing's own extent, plus the same margin every mesh gets; the plate is the
+      // house's, because an SVG carries no material of its own.
+      const m = WORK_STOCK_MARGIN_MM;
+      return {
+        form: 'plate',
+        material: WORK_STOCK_MATERIAL,
+        length: round1(work.length + 2 * m),
+        width: round1(work.width + 2 * m),
+        thickness,
+        finish: 'rough',
+        sentence: `Sized from the outline: ${n(work.length)} × ${n(work.width)} mm, plus ${m} mm each side.`,
       };
     }
     default:

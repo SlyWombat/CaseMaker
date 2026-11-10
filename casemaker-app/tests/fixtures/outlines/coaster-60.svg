@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="60mm" height="60mm" viewBox="0 0 60 60">
+  <!-- #1098 — a 60 mm coaster: a 5 mm painted ring, so the import is a region with a hole. -->
+  <circle cx="30" cy="30" r="27.5" fill="none" stroke="#000000" stroke-width="5"/>
+</svg>

@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  HOUSE_PLATE_THICKNESS_MM,
   WORK_STOCK_MARGIN_MM,
   WORK_STOCK_SKIN_MM,
   proposeStock,
@@ -24,6 +25,8 @@ import type { EngraveJob } from '@/types/engraveJob';
 const MESH: WorkShape = { kind: 'mesh', size: { x: 40, y: 30, z: 12 } };
 const TEXT: WorkShape = { kind: 'text', size: { length: 50, width: 10 }, depth: 2 };
 const BOARD: WorkShape = { kind: 'pcb', outline: { length: 60, width: 40 } };
+// #1098 — a drawing (SVG/DXF) read on the question step.
+const OUTLINE: WorkShape = { kind: 'outline', length: 60, width: 60, through: true };
 
 describe('#897 — the thickness rule, in one place', () => {
   it('a mesh leaves the stated skin under its box', () => {
@@ -40,6 +43,11 @@ describe('#897 — the thickness rule, in one place', () => {
 
   it('work that sizes no blank has no thickness', () => {
     expect(proposedThickness({ kind: 'none' })).toBeNull();
+  });
+
+  it('#1098 — an outline is worked on the house plate, through cut or not', () => {
+    expect(proposedThickness(OUTLINE)).toBe(HOUSE_PLATE_THICKNESS_MM);
+    expect(proposedThickness({ ...OUTLINE, through: false })).toBe(HOUSE_PLATE_THICKNESS_MM);
   });
 });
 
@@ -90,6 +98,27 @@ describe('#897 — the proposed blank', () => {
   it('work that sizes no blank proposes nothing', () => {
     expect(proposeStock({ kind: 'none' })).toBeNull();
   });
+
+  it('#1098 — an outline gets its extent plus the margin each side, on the house plate', () => {
+    const p = proposeStock(OUTLINE)!;
+    expect(p).toMatchObject({
+      form: 'plate',
+      material: 'hardwood',
+      length: 60 + 2 * WORK_STOCK_MARGIN_MM,
+      width: 60 + 2 * WORK_STOCK_MARGIN_MM,
+      thickness: HOUSE_PLATE_THICKNESS_MM,
+      finish: 'rough',
+    });
+    expect(p.sentence).toBe(`Sized from the outline: 60 × 60 mm, plus ${WORK_STOCK_MARGIN_MM} mm each side.`);
+  });
+
+  it('#1098 — a pocket outline proposes the same plate: the pocket bites into it', () => {
+    expect(proposeStock({ ...OUTLINE, through: false })).toMatchObject({
+      length: 70,
+      width: 70,
+      thickness: HOUSE_PLATE_THICKNESS_MM,
+    });
+  });
 });
 
 describe('#897 — the work, in the terms a blank is sized from', () => {
@@ -132,6 +161,22 @@ describe('#897 — the work, in the terms a blank is sized from', () => {
       // The proposed size is the cap height the line is laid out for; the blank follows it.
       expect(PROPOSED_TEXT_SIZE_MM).toBeGreaterThan(0);
     }
+  });
+
+  it('#1098 — a drawing proposes its own extent; only Cut it out asks for a through blank', () => {
+    const outline = {
+      format: 'svg' as const,
+      sourceName: 'coaster.svg',
+      contours: [[[0, 0], [1, 0], [1, 1]]] as [number, number][][],
+      fillRule: 'NonZero' as const,
+      width: 60,
+      height: 60,
+      notes: [],
+    };
+    const cut = workShapeFor({ type: 'outline', outline, use: 'profile' }, job());
+    expect(cut).toEqual({ kind: 'outline', length: 60, width: 60, through: true });
+    const pocket = workShapeFor({ type: 'outline', outline, use: 'pocket', depth: 2 }, job());
+    expect(pocket).toEqual({ kind: 'outline', length: 60, width: 60, through: false });
   });
 
   it('an empty line, a missing file or no choice sizes nothing', () => {
