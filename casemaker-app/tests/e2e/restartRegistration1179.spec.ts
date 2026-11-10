@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 import { lanServerPort } from '../../scripts/e2ePort';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse } from './fixtures/caseMaker';
 import { installFakeConsole, type FakeConsole } from './fixtures/fakeConsole';
 
 test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
@@ -157,6 +157,8 @@ async function rememberMachine(page: Page): Promise<void> {
 async function typePlate(page: Page, dims: [number, number, number]): Promise<void> {
   await page.getByTestId('welcome-start-cnc').click();
   await page.getByTestId('start-wizard-next').click();
+  // #1100 — the sixteen chips live under the Something else… card now.
+  await openSomethingElse(page);
   await page.getByTestId('engrave-setup-what-pocket').click();
   await page.getByTestId('start-wizard-operation-next').click();
   await page.getByTestId('start-wizard-form-plate').click();
