@@ -1,7 +1,7 @@
 import { useEffect, type JSX } from 'react';
 import { MILL_MODELS } from '@/engine/cnc/machine';
 import { canReachMachine } from '@/platform/capabilities';
-import { startHeartbeat, stopHeartbeat } from '@/platform/machineHeartbeat';
+import { acquireStatusPoll } from '@/platform/machineStatusPoller';
 import { machineDisplayName } from '@/platform/locationClient';
 import { useMachineNoticeStore } from '@/store/machineNoticeStore';
 import { useMachineStore } from '@/store/machineStore';
@@ -28,12 +28,10 @@ function useMachineHeartbeat(): void {
   const host = useMachineStore((s) => s.machine?.host ?? null);
   const port = useMachineStore((s) => s.machine?.port ?? null);
   useEffect(() => {
-    if (!canReachMachine || host === null || port === null) {
-      stopHeartbeat();
-      return;
-    }
-    startHeartbeat({ host, port });
-    return () => stopHeartbeat();
+    if (!canReachMachine || host === null || port === null) return;
+    // #1173 — a HOLD, not a start/stop: Manage may hold the same poller at the same time, and the
+    // machine store runs one timer for both. The release belongs to this surface alone.
+    return acquireStatusPoll({ host, port }, 'pin');
   }, [host, port]);
 }
 

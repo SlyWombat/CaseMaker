@@ -24,9 +24,8 @@ import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineCon
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock('@/platform/machineHeartbeat', () => ({
-  startHeartbeat: vi.fn(),
-  stopHeartbeat: vi.fn(),
+vi.mock('@/platform/machineStatusPoller', () => ({
+  acquireStatusPoll: vi.fn(() => () => {}),
 }));
 
 const caps = vi.hoisted(() => ({ drive: false }));

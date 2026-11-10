@@ -4,7 +4,7 @@
  *
  * Session-scoped and deliberately NOT persisted, like the wizard and the Manage mode: this is
  * something that happened now, not a place the app restores on launch. The heartbeat writes it
- * (`machineHeartbeat.ts`); the pinned machine section (`MachinePin`) renders it. One notice at a
+ * (`machineStatusPoller.ts`); the pinned machine section (`MachinePin`) renders it. One notice at a
  * time — a drop is the thing that matters, and it holds until the operator dismisses it or the
  * opposite transition replaces it.
  */

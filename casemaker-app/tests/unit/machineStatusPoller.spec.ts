@@ -1,20 +1,24 @@
 // @vitest-environment jsdom
-// The live reachability heartbeat (#555): an active low-rate poll that records reachable /
-// unreachable / last-seen into machineStore and posts a transition notice.
+// The live reachability poll (#555), now the machine store's reference-counted status poller
+// (#1173): an active low-rate poll that records reachable / unreachable / last-seen into
+// machineStore and posts a transition notice. The ref-count and run-suppression behaviour has its
+// own spec (`machineStatusPoller1173.spec.ts`); this one keeps the polling contract that #555 set.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MIN_STATUS_POLL_MS } from '@/platform/desktop/protocol';
 import {
   HEARTBEAT_POLL_MS,
+  acquireStatusPoll,
+  releaseAllStatusPollers,
   setMachineHeartbeatLoader,
-  startHeartbeat,
-  stopHeartbeat,
   type MachineHeartbeatClient,
-} from '@/platform/machineHeartbeat';
+} from '@/platform/machineStatusPoller';
 import { resetMachineNoticeStore, useMachineNoticeStore } from '@/store/machineNoticeStore';
 import { MACHINE_STORAGE_KEY, useMachineStore } from '@/store/machineStore';
 import type { MachineObservation } from '@/platform/machineProbe';
+
+const TARGET = { host: '192.168.10.43', port: 2222 };
 
 function observation(over: Partial<MachineObservation> = {}): MachineObservation {
   return {
@@ -52,6 +56,11 @@ function rememberMachine(): void {
   useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation(), calibration: null });
 }
 
+/** One surface's hold; `release` is what an unmount calls. */
+function hold(): () => void {
+  return acquireStatusPoll(TARGET, 'test');
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   resetMachineNoticeStore();
@@ -65,7 +74,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  stopHeartbeat();
+  releaseAllStatusPollers();
   setMachineHeartbeatLoader(null);
   resetMachineNoticeStore();
   vi.useRealTimers();
@@ -77,13 +86,13 @@ describe('#555 — HEARTBEAT_POLL_MS cannot drift from the protocol', () => {
   });
 });
 
-describe('#555 — machineHeartbeat', () => {
+describe('#555 — the status poll', () => {
   it('polls immediately and records reachable with a last-seen moment', async () => {
     const { client } = makeClient();
     setMachineHeartbeatLoader(async () => client);
     rememberMachine();
 
-    startHeartbeat({ host: '192.168.10.43', port: 2222 });
+    hold();
     await vi.advanceTimersByTimeAsync(0);
 
     expect(useMachineStore.getState().heartbeat.reachable).toBe(true);
@@ -98,7 +107,7 @@ describe('#555 — machineHeartbeat', () => {
     }));
     rememberMachine();
 
-    startHeartbeat({ host: '192.168.10.43', port: 2222 });
+    hold();
     await vi.advanceTimersByTimeAsync(0);
 
     expect(useMachineStore.getState().heartbeat.reachable).toBe(false);
@@ -110,7 +119,7 @@ describe('#555 — machineHeartbeat', () => {
     setMachineHeartbeatLoader(async () => client);
     rememberMachine();
 
-    startHeartbeat({ host: '192.168.10.43', port: 2222 });
+    hold();
     await vi.advanceTimersByTimeAsync(0);
     // The first tick establishes the answer; it is not a transition.
     expect(useMachineNoticeStore.getState().notice).toBeNull();
@@ -126,16 +135,16 @@ describe('#555 — machineHeartbeat', () => {
     expect(useMachineNoticeStore.getState().notice?.kind).toBe('online');
   });
 
-  it('stopHeartbeat ends the poll', async () => {
+  it('the release ends the poll', async () => {
     const { client, setReachable } = makeClient();
     setMachineHeartbeatLoader(async () => client);
     rememberMachine();
 
-    startHeartbeat({ host: '192.168.10.43', port: 2222 });
+    const release = hold();
     await vi.advanceTimersByTimeAsync(0);
     const seen = useMachineStore.getState().heartbeat.lastSeenAt;
 
-    stopHeartbeat();
+    release();
     setReachable(false);
     await vi.advanceTimersByTimeAsync(5000);
 
@@ -144,9 +153,9 @@ describe('#555 — machineHeartbeat', () => {
     expect(useMachineNoticeStore.getState().notice).toBeNull();
   });
 
-  // #527 — the same `?` answer is the viewport's live position, so the heartbeat keeps the RAW
-  // line beside reachability. A dropped poll must leave the last line alone: `reachable` is what
-  // stops it being drawn as live, and the line is still the last thing the machine said.
+  // #527 — the same `?` answer is the viewport's live position, so the poller keeps the RAW line
+  // beside reachability. A dropped poll must leave the last line alone: `reachable` is what stops it
+  // being drawn as live, and the line is still the last thing the machine said.
   it('records the status line it read, and the parsed work position with it', async () => {
     setMachineHeartbeatLoader(async () => ({
       inspect: async () => ({
@@ -156,7 +165,7 @@ describe('#555 — machineHeartbeat', () => {
     }));
     rememberMachine();
 
-    startHeartbeat({ host: '192.168.10.43', port: 2222 });
+    hold();
     await vi.advanceTimersByTimeAsync(0);
 
     const machine = useMachineStore.getState().machine!;
@@ -172,7 +181,7 @@ describe('#555 — machineHeartbeat', () => {
     rememberMachine();
     setDiagnose('{S:0|T:0|C:1|E:0,0,0,0,0,1,1,0|P:0,0|I:0|RSSI:-40}');
 
-    startHeartbeat({ host: '192.168.10.43', port: 2222 });
+    hold();
     await vi.advanceTimersByTimeAsync(0);
     const first = useMachineStore.getState().diagnose;
     expect(first?.probe).toBe(false);
@@ -199,11 +208,10 @@ describe('#555 — machineHeartbeat', () => {
     const stored = localStorage.getItem(MACHINE_STORAGE_KEY);
     const observedAt = useMachineStore.getState().machine!.observedAt;
 
-    startHeartbeat({ host: '192.168.10.43', port: 2222 });
+    hold();
     await vi.advanceTimersByTimeAsync(0);
 
     expect(useMachineStore.getState().machine!.observedAt).toBe(observedAt);
     expect(localStorage.getItem(MACHINE_STORAGE_KEY)).toBe(stored);
-    stopHeartbeat();
   });
 });

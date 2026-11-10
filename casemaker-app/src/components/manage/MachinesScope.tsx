@@ -27,7 +27,7 @@ import { MACHINE_FRAME_UNREAD, MACHINE_RUN_ELSEWHERE, PRINTER_PROFILES, millMode
 import { canReachMachine, NO_MACHINE_RELAY_SENTENCE } from '@/platform/capabilities';
 import { controllerState } from '@/platform/machineUpload';
 import { probeMachine } from '@/platform/machineProbe';
-import { startHeartbeat, stopHeartbeat } from '@/platform/machineHeartbeat';
+import { acquireStatusPoll } from '@/platform/machineStatusPoller';
 import {
   checkSerialPort,
   listSerialPorts,
@@ -103,16 +103,14 @@ export function MachinesScope() {
   const [serialBusy, setSerialBusy] = useState(false);
   const [serialResult, setSerialResult] = useState<SerialCheckResult | null>(null);
 
-  // #1173A — the page's own heartbeat. `MachinePin` owns the single-instance poll while the
-  // workspace is mounted; Manage replaces that tree, so the state card starts the same poll here
-  // and stops it on the way out. It is what makes "is ready / not answering since" live rather
-  // than a reading from the last check.
+  // #1173A/#1173 — the page's own hold on the machine store's ONE status poller. `MachinePin` holds
+  // the same poller while the workspace is mounted; Manage replaces that tree, so it holds it here
+  // and releases on the way out. A run holds it off entirely while its own loop polls.
   const liveHost = machine?.host ?? null;
   const livePort = machine?.port ?? null;
   useEffect(() => {
     if (!canReachMachine || liveHost === null || livePort === null) return;
-    startHeartbeat({ host: liveHost, port: livePort });
-    return () => stopHeartbeat();
+    return acquireStatusPoll({ host: liveHost, port: livePort }, 'manage');
   }, [liveHost, livePort]);
 
   useEffect(() => {

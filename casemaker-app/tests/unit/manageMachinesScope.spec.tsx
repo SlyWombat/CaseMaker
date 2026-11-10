@@ -35,9 +35,8 @@ vi.mock('@/platform/capabilities', async (orig) => {
   };
 });
 
-vi.mock('@/platform/machineHeartbeat', () => ({
-  startHeartbeat: vi.fn(),
-  stopHeartbeat: vi.fn(),
+vi.mock('@/platform/machineStatusPoller', () => ({
+  acquireStatusPoll: vi.fn(() => () => {}),
 }));
 
 /** A controller that answered once — what the card draws its console under. */
