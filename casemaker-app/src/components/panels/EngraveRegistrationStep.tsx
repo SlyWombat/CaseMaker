@@ -700,6 +700,15 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         resolverRef.current = null;
         answer(false);
       }
+      // BENCH BLOCKER 2026-11-10 — AND CLOSE THE SESSION. Leaving the app while the card sits at
+      // `measured` (the run ended, its origin not yet written) stranded this console: `again()` and
+      // the write press close it, but an unmount had no path that did. The Rust relay keeps a
+      // connection until `tcpClose`, so that stranded one showed as an ESTABLISHED socket to the
+      // controller (the analyst's leak). The executor's own epilogue still runs where it can, and
+      // closing twice is safe (`close()` is idempotent).
+      const handle = handleRef.current;
+      handleRef.current = null;
+      if (handle !== null) void handle.close();
     };
   }, []);
 

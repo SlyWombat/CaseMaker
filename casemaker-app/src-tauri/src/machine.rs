@@ -195,23 +195,39 @@ impl MachineTransport {
 
     pub async fn write(&self, conn: u64, data: &[u8]) -> Result<(), String> {
         let c = self.get(conn).await?;
-        match &*c {
+        let out = match &*c {
             Conn::Tcp(t) => {
                 let mut w = t.writer.lock().await;
-                w.write_all(data).await.map_err(|e| format!("write failed: {e}"))?;
-                w.flush().await.map_err(|e| format!("flush failed: {e}"))?;
-                Ok(())
+                match w.write_all(data).await.and_then(|()| Ok(())) {
+                    Ok(()) => w.flush().await.map_err(|e| format!("flush failed: {e}")),
+                    Err(e) => Err(format!("write failed: {e}")),
+                }
             }
             Conn::Serial(s) => write_serial(s, data).await,
+        };
+        // BENCH BLOCKER #1188 — A FAILED WRITE IS A DEAD SOCKET. The relay keeps a connection
+        // until `close`; a client whose `tcpClose` never arrives (a dropped read, a dead page)
+        // would otherwise strand an ESTABLISHED session to the controller forever. Evict it here,
+        // so the registry cannot outlive a link the machine has already reset.
+        if out.is_err() {
+            self.close(conn).await;
         }
+        out
     }
 
     pub async fn read(&self, conn: u64, max: usize, timeout_ms: u64) -> Result<Vec<u8>, String> {
         let c = self.get(conn).await?;
-        match &*c {
+        let out = match &*c {
             Conn::Tcp(t) => read_tcp(t, max, timeout_ms).await,
             Conn::Serial(s) => read_serial(s, max, timeout_ms).await,
+        };
+        // BENCH BLOCKER #1188 — same reaper on the read side: reset, EOF or a broken pipe evicts
+        // the connection. A TIMEOUT is not a failure (read_tcp answers Ok(empty)), and a close WE
+        // sent is already removed — closing again is idempotent.
+        if out.is_err() {
+            self.close(conn).await;
         }
+        out
     }
 
     pub async fn close(&self, conn: u64) {
@@ -562,6 +578,34 @@ mod tests {
     }
 
     // #299: closing a connection ends a read that is waiting on it, now — not after its timeout.
+    /// BENCH BLOCKER #1188 — the relay's own reaper. A client that never sends `tcpClose` (a page
+    /// that died mid-read) must not leave the connection in the registry after the machine resets
+    /// the link: a failed read or write evicts it, so `MachineTransport` cannot outlive a dead socket.
+    #[tokio::test]
+    async fn a_failed_read_evicts_the_connection_so_a_lost_close_cannot_leak_it() {
+        let t = MachineTransport::default();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Accept, then drop the server end at once: the client's first read meets EOF.
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            drop(socket);
+        });
+        let conn = t.connect("127.0.0.1", addr.port(), 2000).await.unwrap();
+        let read = t.read(conn, 64, 500).await;
+        expect_read_failed(&read);
+        server.await.unwrap();
+        // The registry no longer holds it: a second read is "unknown connection", and the map is empty.
+        let again = t.read(conn, 64, 50).await;
+        assert!(again.is_err());
+        assert!(again.unwrap_err().contains("unknown connection"));
+        assert_eq!(t.conns.lock().await.len(), 0, "the failed connection was evicted");
+    }
+
+    fn expect_read_failed(read: &Result<Vec<u8>, String>) {
+        assert!(read.is_err(), "a peer-closed read must fail, got {read:?}");
+    }
+
     #[tokio::test]
     async fn close_ends_a_pending_read_at_once() {
         let t = Arc::new(MachineTransport::default());
