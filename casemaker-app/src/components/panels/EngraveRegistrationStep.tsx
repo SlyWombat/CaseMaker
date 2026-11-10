@@ -452,6 +452,9 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     [machineRecord, registrations, seekFromMachineZ, job],
   );
   const regSettings = useMemo(() => registrationSettings(defaults, probe).settings, [defaults, probe]);
+  // #797 — the one statement at Cut step 1 covers this step's probe-fitted ask (read before the
+  // seat tap is created so the tap can take the same answer the registration executor takes).
+  const statementGiven = useEngraveRunStore((s) => s.acknowledged);
   // #1070, 6b's ruling — THE FIRST-RUN SEAT PRESS: a seat plan (one bracket-seat mount tap, no
   // scans) runs through the STANDALONE tap with the plan's own seek bound, not the registration
   // executor; its reading is written as the bed profile's bracket seat by the same hook.
@@ -461,6 +464,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     floor: jobMachine(job, calibration).envelope.z.min,
     probeId: probe?.id ?? null,
     successNote: 'the bracket seat is recorded — plan the registration again',
+    // #1189 — the tick taken above answers the fit-probe ask; the press goes straight to motion.
+    probeFitted: statementGiven,
   });
   const probeName = useMemo(() => probeNameFor(machineRecord), [machineRecord]);
   const setupSettings = useMemo(() => setupsSettings(defaults), [defaults]);
@@ -664,7 +669,18 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     // (the hook writes the datum); the registration is planned again against the reading.
     const seatTap = seatTapArgs(attempt.plan);
     if (seatTap !== null) {
-      await seatTapApi.tapJaw(seatTap);
+      const was = bracketSeat?.value ?? null;
+      setSeatReading(null);
+      setSeatRunning(true);
+      try {
+        await seatTapApi.tapJaw(seatTap);
+      } finally {
+        setSeatRunning(false);
+      }
+      // #1189 — the write landed in the location store; read the datum back and state the change
+      // (this state change re-renders the card, so the proposal re-plans against the new seat).
+      const after = target === null ? null : bracketSeatDatumFor(machineAt(target))?.value ?? null;
+      if (after !== null) setSeatReading({ value: after, was });
       return;
     }
     approvePlan(attempt);
@@ -674,12 +690,13 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const record = useEngraveRegistrationStore((s) => s.record);
   /** #1088 — a later setup's registration is filed under its own setup id, never the job's. */
   const recordSetup = useEngraveRegistrationStore((s) => s.recordSetup);
-  // #797 — the one statement at Cut step 1 covers this step's probe-fitted ask.
-  const statementGiven = useEngraveRunStore((s) => s.acknowledged);
   const measureSurface = useEngraveRegistrationStore((s) => s.measureSurface);
   const houseMargins = useSettingsStore((s) => s.margins);
   const [phase, setPhase] = useState<Phase>('idle');
   const [prompt, setPrompt] = useState<OperatorStep | null>(null);
+  /** #1189 — the seat tap's own live state, drawn where the press was made. */
+  const [seatRunning, setSeatRunning] = useState(false);
+  const [seatReading, setSeatReading] = useState<{ value: number; was: number | null } | null>(null);
   const [result, setResult] = useState<RunResult | null>(null);
   /**
    * #1179 D — THE PLAN THIS RUN MEASURED UNDER, as state rather than the ref: the thickness note
@@ -1568,12 +1585,51 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           <button
             type="button"
             data-testid="engrave-registration-approve-start"
-            disabled={!statementGiven || busy}
+            // #1189 — a SEAT press may run before the statement: the tap asks for the probe on the
+            // card (its prompt is drawn above), and the answer starts it. A REGISTER press still
+            // needs the statement: the executor would otherwise move without it.
+            disabled={busy || (!statementGiven && seatTapArgs(proposal.plan) === null)}
             style={{ width: '100%', padding: 7, marginTop: 6, fontWeight: 600 }}
             onClick={() => void approveAndStart(proposal)}
           >
             {seatTapArgs(proposal.plan) === null ? 'Register' : 'Measure the bracket seat'}
           </button>
+          {/* #1189 bench blocker — THE SEAT TAP'S OWN STATE, where the press was made. The hook
+              asks its fit-probe question through its own prompt; the Register card used not to
+              draw it, so the tap waited on a question nobody could see. The tap's note (the
+              reading, or the stop) and its narration are drawn here too, and the reading is
+              stated with the change from the datum on file. */}
+          {seatTapApi.prompt !== null && (
+            <div data-testid="engrave-registration-seat-prompt" style={{ marginTop: 6, fontSize: 12, color: '#c8d3de' }}>
+              <span>
+                {seatTapApi.prompt.text}{' '}
+                <button type="button" data-testid="engrave-mount-tap-continue" onClick={() => seatTapApi.resolve(true)}>
+                  Continue
+                </button>
+                <button type="button" data-testid="engrave-mount-tap-cancel" onClick={() => seatTapApi.resolve(false)}>
+                  Cancel
+                </button>
+              </span>
+            </div>
+          )}
+          {seatRunning && (
+            <p data-testid="engrave-registration-seat-narration" style={{ ...MUTED, margin: '4px 0 0' }}>
+              measuring the bracket seat at machine X {seatTapArgs(proposal.plan)?.x}, Y {seatTapArgs(proposal.plan)?.y} — the probe is moving now
+            </p>
+          )}
+          {seatTapApi.note !== null && (
+            <p data-testid="engrave-registration-seat-note" style={{ ...MUTED, margin: '4px 0 0' }}>
+              {seatTapApi.note}
+            </p>
+          )}
+          {seatReading !== null && (
+            <p data-testid="engrave-registration-seat-reading" style={{ ...MUTED, margin: '4px 0 0' }}>
+              bracket seat: {seatReading.value}
+              {seatReading.was === null
+                ? ''
+                : ` (was ${seatReading.was}; the probe sits ${Math.abs(Math.round((seatReading.value - seatReading.was) * 1000) / 1000)} mm ${seatReading.value > seatReading.was ? 'further out' : 'further in'} than when it was last measured)`}
+            </p>
+          )}
           <p style={MUTED} data-testid="engrave-registration-proposal-where">
             This is the planner’s proposal; Design → Setups is where it is edited.
           </p>

@@ -124,6 +124,13 @@ export interface MountTapInputs {
   probeId: string | null;
   /** What the caller says once the mount's reference is recorded. */
   successNote: string;
+  /**
+   * #1189 bench blocker — THE CALLER'S STEP-1 STATEMENT ALREADY ANSWERS THE FIT-PROBE ASK. The
+   * registration executor takes that answer (`operator: step.kind === 'fit-probe' ? true : ask`);
+   * the seat tap runs in the same card off the same statement, so it must take it too, and press
+   * straight into motion rather than wait on a prompt the Register card used not to draw.
+   */
+  probeFitted?: boolean;
 }
 
 export interface MountTapApi {
@@ -201,6 +208,8 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
   };
 
   const askOperator = (step: OperatorStep): Promise<boolean> => {
+    // #1189 — the caller's step-1 statement answers this one, exactly as for the executor.
+    if (step.kind === 'fit-probe' && inputs.probeFitted === true) return Promise.resolve(true);
     setPrompt(step);
     return new Promise<boolean>((resolve) => {
       resolver.current = (ok) => {
@@ -221,7 +230,11 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
     // #637 — a second press (the other host's button, or a double press) must not orphan the first
     // tap's console handle: the shared gate refuses it outright.
     const token = {};
-    if (!useMountTapGate.getState().begin(token)) return;
+    if (!useMountTapGate.getState().begin(token)) {
+      // #1189 — a press swallowed by another tap's gate says so, where the press was made.
+      noteNow('a seat measurement is already running');
+      return;
+    }
     tokenRef.current = token;
     setNote(null);
     const handle = attachConsole(inputs.target);

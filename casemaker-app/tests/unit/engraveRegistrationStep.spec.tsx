@@ -1342,6 +1342,75 @@ describe('#1070 the proposals need no saved setup for a bed-held job', () => {
     // console line), so the operator knows where the probe will go.
     expect(seatLine).toContain('machine X ');
   });
+
+  it('#1189 — the seat tap draws its prompt ON THE CARD, the tick answers it, and the reading re-plans', async () => {
+    const base = defaultEngraveJob();
+    const job: EngraveJob = {
+      ...base,
+      name: 'seat remeasure 1189',
+      stock: { ...base.stock, length: 160, width: 126, thickness: 25, material: 'hardwood' },
+      labels: [],
+      shapes: [],
+      setups: [],
+      workholding: { kind: 'bracket', bracket: { anchor: 1, variant: 'thin', clamps: [{ edge: 'back', at: 63 }], source: 'default' } },
+    };
+    beddedLocation();
+    const loc = useLocationStore.getState().location as unknown as {
+      machines: { bedProfiles: { datums: Record<string, unknown> }[] }[];
+      [k: string]: unknown;
+    };
+    loc.machines[0]!.bedProfiles[0]!.datums['bracketSeatZ'] = {
+      value: -85.788,
+      measuredAt: '2026-11-09T17:55:01.000Z',
+      by: 'fx-probe-1',
+      at: [-175, -35],
+    };
+    const writes: MachineRecord[] = [];
+    useLocationStore.setState({
+      location: { ...loc } as never,
+      saveMachine: async (record: MachineRecord) => {
+        writes.push(record);
+        const cur = useLocationStore.getState().location as unknown as { machines: MachineRecord[] };
+        useLocationStore.setState({ location: { ...cur, machines: cur.machines.map((m) => (m.id === record.id ? record : m)) } as never });
+        return 'ok';
+      },
+    });
+    useEngraveJobStore.setState({ job });
+    resetEngraveRegistrationStore();
+    useEngraveRunStore.setState({ acknowledged: false });
+    const cal = {
+      frame: { anchor1: [-190.89, -193.83], anchor2Offset: [88.5, 45], clearanceXY: [-11.6, -14.6], clearanceZ: -3, toolrackOffset: [48.8, 181], toolrackZ: -108 },
+      machineId: 'Z1',
+      measuredAt: '2026-11-07T20:00:00.000Z',
+      softEndstop: { enabled: true, xMin: -207, yMin: -206, zMin: -102, source: 'config-get sd' },
+      source: 'config',
+    };
+    useSettingsStore.setState({ machineCalibration: cal as never });
+    install({
+      seek: { band: { min: -87, max: -84 } },
+      settings: registrationSettings(null).settings,
+      stock: { xMin: 0, yMin: 0, xMax: 160, yMax: 126 },
+      scans: [],
+    } as unknown as RegistrationPlan);
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    // UNTICKED: the seat press is offered and the tap's question is drawn where the press was
+    // made — before this fix it waited on a prompt the Register card never rendered.
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId('engrave-registration-approve-start'));
+    });
+    const prompt = await screen.findByTestId('engrave-registration-seat-prompt', undefined, { timeout: 5000 });
+    expect(prompt.textContent).toContain('probe');
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-mount-tap-continue'));
+    });
+    // The reading is stated with the change from the datum on file; the datum write carries the
+    // reference; the card re-plans from the new seat (no second press).
+    const reading = await screen.findByTestId('engrave-registration-seat-reading', undefined, { timeout: 10_000 });
+    expect(reading.textContent).toContain('was -85.788');
+    expect(writes.length).toBeGreaterThan(0);
+    expect(JSON.stringify(writes.at(-1))).toContain('probeRefZ');
+    expect(await screen.findByTestId('engrave-registration-proposal-line')).toBeTruthy();
+  }, 30_000);
 });
 
 describe('#1088 — a flipped setup registers side 2 on the bores', () => {
