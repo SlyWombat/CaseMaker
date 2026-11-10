@@ -327,6 +327,31 @@ export const engravePairSchema = z
   .describe('The two-program summary, when a rest pass ran.');
 
 /** Everything `casemaker engrave` reports beyond the receipt envelope. */
+/**
+ * #1089 — THE IDEAL-VS-OWNED COMPARISON, as the receipt carries it. One function (`comparePlanOutcomes`)
+ * feeds the card, the sheet and this block, so the three agree to the digit. Omitted entirely when
+ * the run had no ideal to compare (no goal plan, no catalogue, or the catalogue added no cutter) —
+ * committed receipts without a comparison stay byte-identical, and an optional field does not bump
+ * RECEIPT_VERSION. `--defer-ideal` states the comparison was deferred rather than omitting it.
+ */
+export const engraveComparisonSchema = z
+  .union([
+    z
+      .object({
+        deferred: z.literal(true).describe('The comparison was deferred by the caller (--defer-ideal): this run planned the owned plan only.'),
+      })
+      .describe('A comparison the caller deferred.'),
+    z
+      .object({
+        material: z.boolean().describe('Whether the two plans’ outcomes differ past the materiality bounds.'),
+        line: z.string().nullable().describe('#975’s comparison line, in outcome terms; null when the difference is minor.'),
+        ownedSeconds: z.number().finite().describe('The owned plan’s cycle estimate, seconds.'),
+        idealSeconds: z.number().finite().describe('The ideal plan’s cycle estimate, seconds.'),
+      })
+      .describe('A comparison the run made: the line and both cycle estimates.'),
+  ])
+  .describe('The ideal-vs-owned comparison; omitted when the run had no ideal to compare.');
+
 export const engraveDetailsSchema = z
   .object({
     kind: z.enum(['job', 'design', 'coupon']).describe('Which input built the run: a job, a 3MF design, or a coupon spec.'),
@@ -335,6 +360,9 @@ export const engraveDetailsSchema = z
     // #953 — the RUN's goal read (every program's stamp folded together), the number the Cut card
     // shows. Omitted for a job with no goal, so those receipts stay byte-identical.
     goal: engraveGoalSchema.optional().describe('The run’s combined goal check, for a goal job; omitted otherwise.'),
+    // #1089 — THE IDEAL-VS-OWNED LINE on the receipt, the same one the sheet and the card print.
+    // Omitted when the run had no ideal to compare; a deferred comparison is stated, not omitted.
+    comparison: engraveComparisonSchema.optional(),
     coupon: engraveCouponSchema.nullable().describe('The coupon summary, or null for a job or design run.'),
     pair: engravePairSchema.nullable().describe('The two-program summary, or null when only one program ran.'),
     bed: z

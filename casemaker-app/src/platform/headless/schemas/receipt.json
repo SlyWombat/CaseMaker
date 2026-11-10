@@ -39,6 +39,60 @@
               ],
               "description": "The bed the job was bound to, or null for a job that names none (a design or coupon run, or a document written before jobs were bound to a bed). Omitted by receipts written before this field existed — a committed receipt parses to itself, byte for byte."
             },
+            "comparison": {
+              "anyOf": [
+                {
+                  "description": "A comparison the caller deferred.",
+                  "properties": {
+                    "deferred": {
+                      "const": true,
+                      "description": "The comparison was deferred by the caller (--defer-ideal): this run planned the owned plan only.",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "deferred"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "description": "A comparison the run made: the line and both cycle estimates.",
+                  "properties": {
+                    "idealSeconds": {
+                      "description": "The ideal plan’s cycle estimate, seconds.",
+                      "type": "number"
+                    },
+                    "line": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "#975’s comparison line, in outcome terms; null when the difference is minor."
+                    },
+                    "material": {
+                      "description": "Whether the two plans’ outcomes differ past the materiality bounds.",
+                      "type": "boolean"
+                    },
+                    "ownedSeconds": {
+                      "description": "The owned plan’s cycle estimate, seconds.",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "material",
+                    "line",
+                    "ownedSeconds",
+                    "idealSeconds"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "description": "The ideal-vs-owned comparison; omitted when the run had no ideal to compare."
+            },
             "coupon": {
               "anyOf": [
                 {

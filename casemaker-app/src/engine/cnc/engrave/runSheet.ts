@@ -1,5 +1,6 @@
 import type { ProbeFitInstrument } from '@/engine/cnc/probeFitDiagram';
 import type { PlanStatement } from '@/engine/cnc/cam/model/types';
+import type { PlanComparisonStatement } from '@/engine/cnc/cam/model/tradeoff';
 import {
   type CamPassStep,
   type CycleTerms,
@@ -2562,6 +2563,12 @@ export interface RunSheetOptions {
    */
   rotaryDatum?: RotarySheetDatum;
   /**
+   * #1089 — THE IDEAL-VS-OWNED COMPARISON, from the one `comparePlanOutcomes` result the card
+   * holds. Absent when the run has no comparison (no goal, no catalogue, or no comparison was
+   * made): §1 then adds no step, so every legacy sheet is byte-identical.
+   */
+  comparison?: PlanComparisonStatement;
+  /**
    * Print §5's material-position check (`materialScan.ts`, #391). **OFF, deliberately and for now.**
    *
    * It is the operator-facing half of a feature whose printed steps a review held (review of 36f3837
@@ -4728,6 +4735,35 @@ export function buildRunSheet(
     ...(options.dialectName !== undefined ? { dialect: options.dialectName } : {}),
   };
 
+  // #1089 — THE COMPARISON STEP, from the statement the caller supplied (the CLI's Generate, the
+  // app's idealPlan). No statement → no step: a sheet without a comparison does not change.
+  const comparisonStep: RunSheetStep | null = (() => {
+    const c = options.comparison;
+    if (c === undefined) return null;
+    // The sheet's OWN duration formatter, the one every other step uses: "4 h 23 min", never raw
+    // seconds on paper (the CLI receipt keeps the seconds).
+    const duration = (v: number): string => formatDuration(v);
+    if (c.kind === 'deferred') {
+      return {
+        text: 'The ideal comparison is deferred — this run planned the owned plan only (--defer-ideal), so no owned-vs-ideal line is stated here.',
+        value: 'comparison deferred',
+      };
+    }
+    if (c.kind === 'comparing') {
+      return {
+        text: 'The ideal comparison is still running — this sheet states the owned plan; the Cut card’s tradeoff line fills in when the comparison lands.',
+        value: 'comparison running',
+      };
+    }
+    const cycles = `The ideal plan’s cycle is ${duration(c.idealSeconds)} against the owned plan’s ${duration(c.ownedSeconds)}.`;
+    return c.kind === 'material'
+      ? { text: `${c.line}. ${cycles}`, value: `ideal ${duration(c.idealSeconds)} · owned ${duration(c.ownedSeconds)}` }
+      : {
+          text: `No material difference between the owned plan and the catalogue ideal. ${cycles}`,
+          value: `ideal ${duration(c.idealSeconds)} · owned ${duration(c.ownedSeconds)}`,
+        };
+  })();
+
   // #877 — A STATED MACHINE: the operator's own sender sets the zeros. Its body is written in the
   // sender's words (no probe, no `M491`, no PRB); every Makera profile keeps the body above.
   const statedOrigin = options.statedOrigin;
@@ -4747,6 +4783,10 @@ export function buildRunSheet(
         : 'The cutter named by the job.',
       value: diameter === null ? 'cutting diameter unknown' : `⌀ ${fmtNum(diameter)} mm cutting`,
     },
+    // #1089 — THE IDEAL-VS-OWNED LINE, beside the cutter it compares. The wording is the #975
+    // ruling's: outcome terms only, never a cutter's name; both cycle estimates are stated so the
+    // operator can price the choice.
+    ...(comparisonStep === null ? [] : [comparisonStep]),
     {
       text: "Record the cutter's flute length and its stick-out from the collet.",
       record: 'flute length (mm) / stick-out (mm)',

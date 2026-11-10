@@ -102,6 +102,30 @@ export interface TradeoffDifference {
   material: boolean;
 }
 
+/**
+ * #1089 — THE COMPARISON, AS PAPER AND THE RECEIPT STATE IT. One shape built from the one tradeoff
+ * function, so the card, the run sheet and the CLI receipt cannot drift: the material line (with
+ * both cycle estimates), the minor case (numbers, no line), and the two stated gaps — a deferred
+ * comparison (the CLI's --defer-ideal) and one still running (the app's late ideal).
+ */
+export type PlanComparisonStatement =
+  | { kind: 'material'; line: string; ownedSeconds: number; idealSeconds: number }
+  | { kind: 'minor'; ownedSeconds: number; idealSeconds: number }
+  | { kind: 'deferred' }
+  | { kind: 'comparing' };
+
+/**
+ * #1089 — Map a computed tradeoff to the statement, or null when it carries no cycle row (a
+ * comparison whose sources were never measured, which nothing may print numbers for).
+ */
+export function planComparisonStatement(tradeoff: PlanTradeoff): PlanComparisonStatement | null {
+  const cycle = tradeoff.differences.find((d) => d.bound === 'cycleFraction');
+  if (cycle === undefined || cycle.owned === null || cycle.ideal === null) return null;
+  return tradeoff.material && tradeoff.line !== null
+    ? { kind: 'material', line: tradeoff.line, ownedSeconds: cycle.owned, idealSeconds: cycle.ideal }
+    : { kind: 'minor', ownedSeconds: cycle.owned, idealSeconds: cycle.ideal };
+}
+
 export interface PlanTradeoff {
   material: boolean;
   /**
