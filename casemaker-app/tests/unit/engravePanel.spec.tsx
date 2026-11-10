@@ -4883,12 +4883,17 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
     }));
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-generate'));
-    await waitFor(() =>
-      expect(screen.getByTestId('engrave-generate-progress').textContent).toContain('roughing level 41 of 112'),
+    // #1181 — these are clock deadlines, not the subject. The stage arrives through the async
+    // run-client load; under the loaded run the default 1 s waitFor still read 'starting the
+    // worker…' while the client was being fetched. 15 s only trips if the stage never arrives.
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('engrave-generate-progress').textContent).toContain('roughing level 41 of 112'),
+      { timeout: 15_000 },
     );
     fireEvent.click(screen.getByTestId('engrave-generate-cancel'));
     expect(cancels).toBe(1);
-    await waitFor(() => expect(screen.queryByTestId('engrave-generate-progress')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('engrave-generate-progress')).toBeNull(), { timeout: 15_000 });
     release({ ok: false, stage: 'findings', findings: [], feeds: null, cam: null, nc: null, verify: null, errors: [] } as unknown as import('@/workers/sim/engraveGenerate').EngraveGenerated);
     setEngraveRunClientLoader(null);
   });

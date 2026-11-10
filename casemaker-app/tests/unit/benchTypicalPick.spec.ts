@@ -35,7 +35,10 @@ describe('#760/#766 the measured pick gives raised text a cutter that fits its g
       allDiagnostics(receipt),
       'the rest cutter separates "Software", so no raised-text warning belongs on this run',
     ).not.toContain('raised-text-fused');
-  }, 150_000);
+    // #1181 — measured compute, not a hang: this full cut takes ~72 s alone (k3, 2026-11-10). The
+    // old 150 s budget is barely 2x, and the loaded run (four CPU hogs beside the suite) crossed
+    // it. 300 s is four times the idle measurement, so only a real stall reaches it.
+  }, 300_000);
 
   it('the coin disc with no cutter named: the pick names the pinches that still touch, and "CNX" is left alone', async () => {
     const variant = pickedVariant('j04-coin-disc-pla.json', REAL_JOBS);
