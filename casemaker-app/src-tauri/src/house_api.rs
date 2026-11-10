@@ -1516,17 +1516,21 @@ mod tests {
 
         // #1179 — an optional `run` body records WHAT finished beside the hash; a hash-only body
         // (an older client) stays valid and changes nothing, and a run naming another hash is
-        // refused.
+        // refused. The maps are PER SETUP (the 11-10 ruling): a complete entry carries its map.
         let with_run = serde_json::json!({
             "hash": "a1b2c3d4",
             "run": {
                 "hash": "a1b2c3d4", "programIndex": 2, "programName": "tray-p02.nc",
                 "registration": { "surfaceMachineZ": -60.487, "topSource": "touch" },
-                "cutMap": {
-                    "cellMm": 2, "cols": 80, "rows": 63, "x0Mm": 0, "y0Mm": 0, "stepMm": 0.05,
-                    "flat": { "encoding": "rle", "data": "5040:1" },
-                    "depth": { "encoding": "rle", "data": "5040:0" }
-                }
+                "cutMaps": [{
+                    "setupIndex": 1,
+                    "state": "complete",
+                    "map": {
+                        "cellMm": 2, "cols": 80, "rows": 63, "x0Mm": 0, "y0Mm": 0, "stepMm": 0.05,
+                        "flat": { "encoding": "rle", "data": "5040:1" },
+                        "depth": { "encoding": "rle", "data": "5040:0" }
+                    }
+                }]
             }
         });
         let res = app.clone().oneshot(post_json("/api/v1/finished-programs/m-1", &with_run)).await.unwrap();
@@ -1540,7 +1544,14 @@ mod tests {
             view["machines"][0]["finishedRuns"][0]["registration"]["surfaceMachineZ"],
             serde_json::json!(-60.487)
         );
-        assert_eq!(view["machines"][0]["finishedRuns"][0]["cutMap"]["cols"], serde_json::json!(80));
+        assert_eq!(
+            view["machines"][0]["finishedRuns"][0]["cutMaps"][0]["map"]["cols"],
+            serde_json::json!(80)
+        );
+        assert_eq!(
+            view["machines"][0]["finishedRuns"][0]["cutMaps"][0]["state"],
+            serde_json::json!("complete")
+        );
 
         let mismatched =
             serde_json::json!({ "hash": "a1b2c3d4", "run": { "hash": "0badf00d" } });

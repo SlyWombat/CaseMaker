@@ -28,6 +28,7 @@
 import { create } from 'zustand';
 import { attachConsole } from '@/platform/machineConsole';
 import { programHash, programOwnsVacuum, runProgram, type Progress, type RunOutcome, type RunSettings, type VacuumSpan } from '@/platform/machineRun';
+import { buildProgramCutMap } from '@/engine/cnc/engrave/cutMap';
 import { acquireStatusPoll, noteRunStatus } from '@/platform/machineStatusPoller';
 import type { PauseAction } from '@/platform/machinePause';
 import { copyInMachine, offcutOffer, programCuts, runtimeOf, wearKey, weighRuntime, withRuntime } from '@/engine/cnc/runEnd';
@@ -309,6 +310,20 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
       lines.push('The finished program was not recorded: this machine is not one of the location’s.');
     } else {
       // #1179 — the record beside the hash: what was cut, under which package and registration.
+      // The cut-map entry is built first (synchronously, from the run's own NC and face facts).
+      const cutEntry: import('@/platform/locationClient').FinishedSetupCutMap | null =
+        ctx.stockXY === undefined || ctx.setupIndex === undefined
+          ? null
+          : (() => {
+              const fit = buildProgramCutMap({
+                nc: ctx.nc,
+                stock: { x: ctx.stockXY!.x, y: ctx.stockXY!.y },
+                ...(ctx.toolRadius === undefined ? {} : { toolRadius: ctx.toolRadius }),
+              });
+              return fit.kind === 'map'
+                ? { setupIndex: ctx.setupIndex!, state: 'complete' as const, map: fit.map }
+                : { setupIndex: ctx.setupIndex!, state: 'unknown' as const, unknownReason: fit.reason };
+            })();
       const run: import('@/platform/locationClient').FinishedRun = {
         hash,
         ...(ctx.jobId === undefined ? {} : { jobId: ctx.jobId }),
@@ -329,6 +344,10 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
               },
             }),
         ...(ctx.registration === undefined ? {} : { registration: ctx.registration }),
+        // #1179 step 3 — what this program cut on ITS OWN face. One entry per setup (#1179's
+        // ruling, comment 6775024844); the store merges it with the same setup's entry on the
+        // newest record for this blank. A run that states no setup has no face to key a map to.
+        ...(cutEntry === null ? {} : { cutMaps: [cutEntry] }),
       };
       const r = await io.recordFinishedProgram(machineId, hash, run);
       lines.push(
