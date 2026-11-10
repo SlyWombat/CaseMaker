@@ -149,6 +149,70 @@ test('step 2 refuses a new run with nothing picked, and a pick walks on (#1107 s
   await expect(page.getByTestId('welcome-overlay')).toHaveCount(0);
 });
 
+// #1183 — THE EMPTY JOB'S OWN DOOR. A link-weight secondary on the question step (new runs only)
+// makes the job with nothing on it and walks on to Stock, exactly as a pick does. A job carrying
+// the operator's work raises the one replace confirm first — No leaves it untouched, Yes replaces
+// it. Back from Stock returns to the question with nothing picked and the job still empty.
+test('#1183 — start with an empty job: the secondary lands on Stock, Back returns empty, and the replace confirm is raised once', async ({
+  cm,
+  page,
+}) => {
+  await cm.ready();
+  // A job carrying the operator's OWN work: the door must ask before replacing it. (The shipped
+  // demo lines do not count, which is why this seeds its own.)
+  await page.evaluate(async () => {
+    const jobStore = await import('/src/store/engraveJobStore.ts' as string);
+    const defaults = await import('/src/engine/cnc/engrave/defaults.ts' as string);
+    const base = defaults.defaultEngraveJob();
+    jobStore.useEngraveJobStore.setState({
+      job: {
+        ...base,
+        labels: base.labels.map((l: { id: string; text: string }, i: number) => ({
+          ...l,
+          id: `mine-${i + 1}`,
+          text: `MINE ${i + 1}`,
+        })),
+      },
+    });
+  });
+  await page.getByTestId('welcome-start-cnc').click();
+  await page.getByTestId('start-wizard-next').click();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+
+  // The primary keeps #1107's refusal; the door is the secondary, at link weight.
+  const next = page.getByTestId('start-wizard-operation-next');
+  await expect(next).toBeDisabled();
+  await expect(next).toHaveAttribute('title', 'Pick what to make first.');
+  await expect(page.getByTestId('start-wizard-empty-job')).toHaveText('Start with an empty job');
+
+  // A job with work is asked first — the same one box and sentence the stock step raises.
+  await page.getByTestId('start-wizard-empty-job').click();
+  await expect(page.getByTestId('start-wizard-replace-confirm')).toContainText(
+    'The job open now has 3 items on it.',
+  );
+  // No changes nothing and keeps the operator on the question.
+  await page.getByTestId('start-wizard-replace-no').click();
+  await expect(page.getByTestId('start-wizard-replace-confirm')).toHaveCount(0);
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+
+  // Yes replaces it with the empty job and walks on to the blank.
+  await page.getByTestId('start-wizard-empty-job').click();
+  await page.getByTestId('start-wizard-replace-yes').click();
+  await expect(page.getByTestId('start-wizard-replace-confirm')).toHaveCount(0);
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
+
+  // Back returns to the question with nothing picked, the door still offered, and the job empty.
+  await page.getByTestId('start-wizard-back').click();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-operation-next')).toBeDisabled();
+  await expect(page.getByTestId('start-wizard-empty-job')).toBeVisible();
+
+  // With nothing left to replace, the second press asks nothing and lands on Stock again.
+  await page.getByTestId('start-wizard-empty-job').click();
+  await expect(page.getByTestId('start-wizard-replace-confirm')).toHaveCount(0);
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
+});
+
 // #897 — A MESH GOAL SIZES ITS BLANK. The question comes first, so the file is read before the
 // stock is asked; the blank it proposes is the mesh's own box plus the stated margin, and the goal
 // is seated at the centre of THAT blank (not the demo plank it was read against).
