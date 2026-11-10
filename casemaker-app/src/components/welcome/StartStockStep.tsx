@@ -843,7 +843,6 @@ export function StartStockStep({
           </div>
         )}
       </div>
-      </div>
       {/* #1105 — an inch entry states both numbers: the typed inches and the stored millimetres. */}
       {unit === 'in' && lastInch !== null && (
         <p style={MUTED} data-testid="start-wizard-stock-size-both">
