@@ -251,8 +251,9 @@ describe('#714 the rotary option and its four lines (station 3)', () => {
       stock: { ...base.stock, colour: { kind: 'printed', capMm: 0.4, layerHeight: 0.2 } },
     });
 
-    const fold = screen.getByTestId('engrave-setup-orientation') as HTMLDetailsElement;
-    expect(fold.querySelector('summary')!.textContent).toBe('Which end is in the jaws');
+    // #1101 — the rotary's fold is the ONE "Which way round" fold; a rod has no cards, only ends.
+    const fold = screen.getByTestId('engrave-setup-hold-fold') as HTMLDetailsElement;
+    expect(fold.querySelector('summary')!.textContent).toBe('Which way round');
     fireEvent.click(fold.querySelector('summary')!);
     expect(fold.open).toBe(true);
     // A round rod has no face or edge to square: the one landmark is its ends, and either will do.
