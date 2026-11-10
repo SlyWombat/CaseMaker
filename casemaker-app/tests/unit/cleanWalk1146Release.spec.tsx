@@ -5,8 +5,8 @@
 // uploaded or played; after a Stop nothing moves until the operator presses Clean now. The upload
 // and the console are fake clients; nothing reaches a machine.
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { advanceUntil } from './helpers/fakeTime';
 import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleClient } from '@/platform/machineConsole';
 import { setMachineUploadLoader } from '@/platform/machineUpload';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
@@ -149,6 +149,7 @@ async function uploadAndStart(job: EngraveJob): Promise<void> {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers();
   sent.length = 0;
   uploaded.length = 0;
   onCard.clear();
@@ -171,6 +172,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   setMachineConsoleLoader(null);
   setMachineUploadLoader(null);
   setRunEndIO(null);
@@ -203,27 +205,27 @@ describe('#1146 — the walks ride the release, as files', () => {
     await uploadAndStart(job);
     const rec = () => record()!;
 
-    await waitFor(() => expect(rec().phase).toBe('airwalk'), { timeout: 15000 });
+    await advanceUntil(() => expect(rec().phase).toBe('airwalk'), { timeoutMs: 15000 });
     // The walk is the FIRST play: no program file has been asked to run.
-    await waitFor(() => expect(playedFiles()).toEqual(['Clean-job-airwalk.nc']), { timeout: 15000 });
+    await advanceUntil(() => expect(playedFiles()).toEqual(['Clean-job-airwalk.nc']), { timeoutMs: 15000 });
     // The air walk switches no accessory (a Z1 has no laser): no M851 yet.
     expect(sent).not.toContain('M851');
 
-    await waitFor(() => expect(rec().phase).toBe('running'), { timeout: 15000 });
-    await waitFor(() => expect(playedFiles()).toEqual(['Clean-job-airwalk.nc', 'Clean-job-p1.nc']), { timeout: 15000 });
+    await advanceUntil(() => expect(rec().phase).toBe('running'), { timeoutMs: 15000 });
+    await advanceUntil(() => expect(playedFiles()).toEqual(['Clean-job-airwalk.nc', 'Clean-job-p1.nc']), { timeoutMs: 15000 });
     // The programs re-state the vacuum span's own word (item 41).
     expect(sent).toContain('M851');
 
     // The cleaning pass follows program 1 before the bit-change pause.
-    await waitFor(() => expect(rec().phase).toBe('cleaning'), { timeout: 15000 });
-    await waitFor(() => expect(playedFiles().at(-1)).toBe('Clean-job-clean.nc'), { timeout: 15000 });
-    await waitFor(() => expect(rec().phase).toBe('bit-change'), { timeout: 15000 });
+    await advanceUntil(() => expect(rec().phase).toBe('cleaning'), { timeoutMs: 15000 });
+    await advanceUntil(() => expect(playedFiles().at(-1)).toBe('Clean-job-clean.nc'), { timeoutMs: 15000 });
+    await advanceUntil(() => expect(rec().phase).toBe('bit-change'), { timeoutMs: 15000 });
     expect(rec().next).toBe(2);
 
     // Program 2, then its own cleaning pass, then done. The air walk never plays again.
     useEngraveReleaseStore.getState().confirmChange(TARGET);
-    await waitFor(() => expect(rec().phase).toBe('cleaning'), { timeout: 15000 });
-    await waitFor(() => expect(rec().phase).toBe('done'), { timeout: 15000 });
+    await advanceUntil(() => expect(rec().phase).toBe('cleaning'), { timeoutMs: 15000 });
+    await advanceUntil(() => expect(rec().phase).toBe('done'), { timeoutMs: 15000 });
     const files = playedFiles();
     expect(files).toEqual([
       'Clean-job-airwalk.nc',
@@ -278,28 +280,28 @@ describe('#1146 — the walks ride the release, as files', () => {
     expect(rec.walks.airwalk).toBeNull();
     expect(rec.walks.clean).toBeNull();
     expect(uploaded).toEqual(['Clean-job-p1.nc', 'Clean-job-p2.nc']);
-    await waitFor(() => expect(record()!.phase).toBe('running'), { timeout: 15000 });
-    await waitFor(() => expect(playedFiles()).toEqual(['Clean-job-p1.nc']), { timeout: 15000 });
+    await advanceUntil(() => expect(record()!.phase).toBe('running'), { timeoutMs: 15000 });
+    await advanceUntil(() => expect(playedFiles()).toEqual(['Clean-job-p1.nc']), { timeoutMs: 15000 });
     // No clean after program 1: straight to the bit-change pause.
-    await waitFor(() => expect(record()!.phase).toBe('bit-change'), { timeout: 15000 });
+    await advanceUntil(() => expect(record()!.phase).toBe('bit-change'), { timeoutMs: 15000 });
     expect(playedFiles()).toEqual(['Clean-job-p1.nc']);
   });
 
   it('after a Stop nothing moves on its own; Clean now runs the pass once the machine is Idle', async () => {
     const job = twoProgramJob();
     await uploadAndStart(job);
-    await waitFor(() => expect(record()!.phase).toBe('running'), { timeout: 15000 });
+    await advanceUntil(() => expect(record()!.phase).toBe('running'), { timeoutMs: 15000 });
     useEngraveReleaseStore.getState().stop(TARGET);
-    await waitFor(() => expect(record()!.phase).toBe('stopped'), { timeout: 20000 });
+    await advanceUntil(() => expect(record()!.phase).toBe('stopped'), { timeoutMs: 20000 });
     const atStop = plays().length;
     // No automatic motion follows the stop, however long it sits.
-    await new Promise((resolve) => setTimeout(resolve, 2500));
+    await vi.advanceTimersByTimeAsync(2500);
     expect(plays().length).toBe(atStop);
     expect(record()!.walk).toBeNull();
 
     useEngraveReleaseStore.getState().cleanNow(TARGET);
-    await waitFor(() => expect(record()!.phase).toBe('cleaning'), { timeout: 15000 });
-    await waitFor(() => expect(record()!.phase).toBe('stopped'), { timeout: 15000 });
+    await advanceUntil(() => expect(record()!.phase).toBe('cleaning'), { timeoutMs: 15000 });
+    await advanceUntil(() => expect(record()!.phase).toBe('stopped'), { timeoutMs: 15000 });
     expect(playedFiles().at(-1)).toBe('Clean-job-clean.nc');
   });
 
@@ -368,14 +370,14 @@ describe('#1146 — the walks ride the release, as files', () => {
     await useEngraveReleaseStore.getState().uploadAll(TARGET);
     useEngraveReleaseStore.getState().startRelease(TARGET);
 
-    await waitFor(() => expect(record()!.phase).toBe('airwalk'), { timeout: 15000 });
-    await waitFor(() => expect(record()!.phase).toBe('cleaning'), { timeout: 15000 });
+    await advanceUntil(() => expect(record()!.phase).toBe('airwalk'), { timeoutMs: 15000 });
+    await advanceUntil(() => expect(record()!.phase).toBe('cleaning'), { timeoutMs: 15000 });
     expect(sent).not.toContain('M851');
     expect(sent).not.toContain('M852');
     // The cleaning pass still blows air from its own file words: the vacuum is the job's choice,
     // the spindle air the pass's.
     expect(onCard.get('Clean-job-clean.nc')).toContain('M811');
     // Let the pass finish so no run outlives this test.
-    await waitFor(() => expect(record()!.phase).toBe('bit-change'), { timeout: 15000 });
+    await advanceUntil(() => expect(record()!.phase).toBe('bit-change'), { timeoutMs: 15000 });
   });
 });

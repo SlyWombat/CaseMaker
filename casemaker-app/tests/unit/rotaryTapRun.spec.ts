@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
+import { PROBE_OPEN_REPLY, PROBE_TRIGGERED_REPLY, sentReply as reply } from './helpers/registrationFixtures';
 import { runRotaryTap, type RotaryTapOptions } from '@/engine/cnc/registration/execute';
 import { planRotaryTrial } from '@/engine/cnc/registration/rotaryTap';
 
@@ -17,7 +18,6 @@ function fakeChuck(radius = NOMINAL_R) {
   let mode: 'G90' | 'G91' = 'G90';
   const pos = { x: -1, y: -1, z: -3 };
   const lines: string[] = [];
-  const reply = (text: string): ConsoleSendResult => ({ kind: 'sent', line: '', text, frames: 1, elapsedMs: 1 });
   /** The crown's machine Z above the axis at this Y, or null beside the body. */
   const crownAt = (y: number): number | null => {
     const dy = y - AXIS.y;
@@ -29,8 +29,8 @@ function fakeChuck(radius = NOMINAL_R) {
       lines.push(line);
       if (line === '?') return reply('<Idle|MPos:0,0,0|WPos:0,0,0>');
       if (line === '$H') return (pos.x = -1), (pos.y = -1), (pos.z = -3), reply('ok');
-      if (line === 'M119') return reply('X_min:0 Y_min:0 Z_min:0 X_max:0 Y_max:0 Z_max:0 Probe:0');
-      if (line === 'M491') return reply('[PRB:0,0,-80.000:1]\nok');
+      if (line === 'M119') return reply(PROBE_OPEN_REPLY);
+      if (line === 'M491') return reply(PROBE_TRIGGERED_REPLY);
       if (line === 'M831' || line === 'M832') return reply('ok');
       if (line === 'G90' || line === 'G91') return (mode = line), reply('ok');
       let m = /^G53 G0 Z(-?[\d.]+)$/.exec(line);

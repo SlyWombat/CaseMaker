@@ -6,7 +6,8 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleSession } from '@/platform/machineConsole';
+import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineConsole';
+import { fakeConsoleSession } from './helpers/fakeConsole';
 import { Z1 } from '@/engine/cnc/machine';
 import {
   cameraHomeLines,
@@ -30,34 +31,6 @@ const POSE: CameraHomePose = {
   z: Z1.toolChange.clearanceZ,
 };
 
-function fakeSession(answer: (line: string) => ConsoleSend) {
-  const sent: string[] = [];
-  const counters = { closes: 0, opens: 0 };
-  const session: MachineConsoleSession = {
-    async send(line) {
-      sent.push(line);
-      return answer(line);
-    },
-    async close() {
-      counters.closes += 1;
-    },
-  };
-  setMachineConsoleLoader(async () => ({
-    async open() {
-      counters.opens += 1;
-      return session;
-    },
-  }));
-  return {
-    sent,
-    get closes() {
-      return counters.closes;
-    },
-    get opens() {
-      return counters.opens;
-    },
-  };
-}
 
 /** `?` answers the given status; motion lines answer `ok` unless a `fail` predicate says otherwise. */
 const status = (
@@ -93,7 +66,7 @@ describe('#770 the camera-home move', () => {
 
 describe('#770 the camera-home press', () => {
   it('moves an idle machine: asks, lifts, traverses, and closes the connection', async () => {
-    const z1 = fakeSession(status(IDLE));
+    const z1 = fakeConsoleSession(status(IDLE));
     const r = await runCameraHome(TARGET, cameraHomeLines(POSE));
     expect(r.kind).toBe('moved');
     expect(z1.sent).toEqual(['?', 'G53 G0 Z-3', 'G53 G0 X-11.6 Y-14.6']);
@@ -102,7 +75,7 @@ describe('#770 the camera-home press', () => {
   });
 
   it('refuses a running machine without sending a motion line', async () => {
-    const z1 = fakeSession(status(RUNNING));
+    const z1 = fakeConsoleSession(status(RUNNING));
     const r = await runCameraHome(TARGET, cameraHomeLines(POSE));
     expect(r.kind).toBe('busy');
     expect(r.kind === 'busy' && r.detail).toContain('Run');
@@ -111,7 +84,7 @@ describe('#770 the camera-home press', () => {
   });
 
   it('refuses an idle machine whose program has not finished', async () => {
-    const z1 = fakeSession(status(MID_JOB));
+    const z1 = fakeConsoleSession(status(MID_JOB));
     const r = await runCameraHome(TARGET, cameraHomeLines(POSE));
     expect(r.kind).toBe('busy');
     expect(r.kind === 'busy' && r.detail).toContain('90%');
@@ -119,7 +92,7 @@ describe('#770 the camera-home press', () => {
   });
 
   it('refuses an alarm without sending anything', async () => {
-    const z1 = fakeSession(status(ALARM));
+    const z1 = fakeConsoleSession(status(ALARM));
     const r = await runCameraHome(TARGET, cameraHomeLines(POSE));
     expect(r.kind).toBe('busy');
     expect(r.kind === 'busy' && r.detail).toContain('alarm');
@@ -127,7 +100,7 @@ describe('#770 the camera-home press', () => {
   });
 
   it('names the line that failed, and does not send the next one', async () => {
-    const z1 = fakeSession(
+    const z1 = fakeConsoleSession(
       status(IDLE, (line) => (line.startsWith('G53 G0 Z') ? { ok: false, reason: 'timeout', line, text: '', detail: 'the controller did not answer' } : null)),
     );
     const r = await runCameraHome(TARGET, cameraHomeLines(POSE));
@@ -137,7 +110,7 @@ describe('#770 the camera-home press', () => {
   });
 
   it('names the XY line when the traverse is the one that fails', async () => {
-    const z1 = fakeSession(
+    const z1 = fakeConsoleSession(
       status(IDLE, (line) => (line.startsWith('G53 G0 X') ? { ok: false, reason: 'timeout', line, text: '', detail: 'the controller did not answer' } : null)),
     );
     const r = await runCameraHome(TARGET, cameraHomeLines(POSE));
@@ -147,14 +120,14 @@ describe('#770 the camera-home press', () => {
   });
 
   it('refuses an unreadable status line before moving', async () => {
-    const z1 = fakeSession(status('not a status line'));
+    const z1 = fakeConsoleSession(status('not a status line'));
     const r = await runCameraHome(TARGET, cameraHomeLines(POSE));
     expect(r.kind).toBe('error');
     expect(z1.sent).toEqual(['?']);
   });
 
   it('sends nothing for an empty move and opens no connection', async () => {
-    const z1 = fakeSession(status(IDLE));
+    const z1 = fakeConsoleSession(status(IDLE));
     const r = await runCameraHome(TARGET, []);
     expect(r.kind).toBe('failed');
     expect(z1.opens).toBe(0);

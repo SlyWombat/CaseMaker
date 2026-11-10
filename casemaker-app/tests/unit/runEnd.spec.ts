@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   copyInMachine,
   cutsOnStock,
@@ -26,6 +26,17 @@ import { StockItemSchema, type StockItem } from '@/platform/stockClient';
 import type { InventoryItem } from '@/platform/houseClient';
 import { programHash, type RunOutcome } from '@/platform/machineRun';
 import { endOfRun, machineKey, resetMachineRunStore, setRunEndIO, useMachineRunStore, type RunContext, type RunEndIO } from '@/store/machineRunStore';
+import { advanceUntil } from './helpers/fakeTime';
+
+/** #1180 — the two end-to-end tests wait out a real run; fake time makes that seconds, not real. */
+async function withFakeTimers<T>(fn: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers();
+  try {
+    return await fn();
+  } finally {
+    vi.useRealTimers();
+  }
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DOC = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as { defaults: unknown; stock: unknown[] };
@@ -507,7 +518,7 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
     };
   }
 
-  it('end to end through start(): the run is over (session closed, not running) before the end-of-run saves', async () => {
+  it('end to end through start(): the run is over (session closed, not running) before the end-of-run saves', () => withFakeTimers(async () => {
     setMachineConsoleLoader(async () => z1('finish'));
     useMachineRunStore.getState().prepare(TARGET, 'job.nc', programHash(ctx.nc), ctx);
     expect(useMachineRunStore.getState().start(TARGET, { pollMs: 2000, noProgressMs: 30000, missLimit: 3 })).toBe(true);
@@ -522,22 +533,21 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
     expect(runningAtWrite).toEqual([false, false]);
     expect(calls.filter((c) => c.startsWith('consume'))).toHaveLength(1);
     expect(calls.filter((c) => c.startsWith('runtime'))).toHaveLength(1);
-  }, 20000);
+  }), 20000);
 
-  it('end to end: an alarm changes nothing', async () => {
+  it('end to end: an alarm changes nothing', () => withFakeTimers(async () => {
     setMachineConsoleLoader(async () => z1('alarm'));
     useMachineRunStore.getState().prepare(TARGET, 'job.nc', 'h', ctx);
     useMachineRunStore.getState().start(TARGET, { pollMs: 2000, noProgressMs: 30000, missLimit: 3 });
     await waitForEnd();
     expect(useMachineRunStore.getState().runs[M]!.end?.kind).toBe('nothing');
     expect(calls.filter((c) => c !== 'closed')).toEqual([]);
-  }, 20000);
+  }), 20000);
 
   async function waitForEnd(): Promise<void> {
-    for (let i = 0; i < 150; i++) {
-      if (useMachineRunStore.getState().runs[M]?.end) return;
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    throw new Error(`the run did not end: ${JSON.stringify(useMachineRunStore.getState().runs[M]?.outcome)}`);
+    await advanceUntil(
+      () => expect(useMachineRunStore.getState().runs[M]?.end ?? null).not.toBeNull(),
+      { timeoutMs: 15_000 },
+    );
   }
 });

@@ -35,6 +35,7 @@ import {
   type ReferenceOpening,
 } from '@/engine/cnc/registration';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
+import { PROBE_OPEN_REPLY, PROBE_TRIGGERED_REPLY, sentReply as reply } from './helpers/registrationFixtures';
 import { buildPcbJob, type PcbJobFile } from '../../scripts/lib/casemaker/pcbJob';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import type { EngraveVectorShape } from '@/types/engraveJob';
@@ -193,7 +194,6 @@ function fakeBoard(holes: ReferenceOpening[], shift: { x: number; y: number }, r
   const pos = { x: 0, y: 0, z: -3 };
   let alarmed = false;
   const lines: string[] = [];
-  const reply = (text: string): ConsoleSendResult => ({ kind: 'sent', line: '', text, frames: 1, elapsedMs: 1 });
   const zAt = (wx: number, wy: number): number | null => {
     const x = wx - shift.x;
     const y = wy - shift.y;
@@ -210,7 +210,7 @@ function fakeBoard(holes: ReferenceOpening[], shift: { x: number; y: number }, r
       if (['$H', 'G54', 'G92.1'].includes(line) || /^G10 L2 P1 /.test(line)) return reply('ok');
       // #789 — the probe connector's supply, switched on by every probe session.
       if (line === 'M831' || line === 'M832') return reply('ok');
-      if (line === 'M119') return reply('X_min:0 Y_min:0 Z_min:0 X_max:0 Y_max:0 Z_max:0 Probe:0');
+      if (line === 'M119') return reply(PROBE_OPEN_REPLY);
       if (line === 'M491') return reply('[PRB:-9.890,-12.830,-76.063:1]\nok');
       if (line === 'G90' || line === 'G91') return (mode = line), reply('ok');
       let m = /^G53 G0 Z(-?[\d.]+)$/.exec(line);

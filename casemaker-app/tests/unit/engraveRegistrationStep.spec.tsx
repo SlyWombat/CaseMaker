@@ -13,6 +13,7 @@ import {
   type ConsoleSend,
   type MachineConsoleClient,
 } from '@/platform/machineConsole';
+import { PROBE_OPEN_REPLY, okReply as reply } from './helpers/registrationFixtures';
 import { EngraveRegistrationStep } from '@/components/panels/EngraveRegistrationStep';
 import { useLocationStore } from '@/store/locationStore';
 import type { MachineRecord } from '@/platform/locationClient';
@@ -218,8 +219,6 @@ function controller(plan: RegistrationPlan, sent: string[], opts: FakeOptions = 
   let state = 'Idle';
   const stockZ =
     plan.seek.band.max - (plan.seek.band.max - plan.seek.band.min) / 2 + (opts.surfaceShiftMm ?? 0);
-
-  const reply = (text: string): ConsoleSend => ({ ok: true, line: '', text, frames: 1, elapsedMs: 1 });
 
   return {
     async open() {
@@ -1460,7 +1459,6 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
    */
   function flipController(sentLines: string[], frontZ = SURFACE): MachineConsoleClient {
     const pos = { x: 0, y: 0, z: 0 };
-    const reply = (text: string): ConsoleSend => ({ ok: true, line: '', text, frames: 1, elapsedMs: 1 });
     const prb = (z: number, touched: boolean): string =>
       `[PRB:${(pos.x + G54.x).toFixed(3)},${(pos.y + G54.y).toFixed(3)},${z.toFixed(3)}:${touched ? 1 : 0}]`;
     /** Material under the ball: the blank, minus the two bores. The corner touches are the front pair. */
@@ -1474,7 +1472,7 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
             sentLines.push(line);
             if (line === '?') return reply('<Idle|MPos:0,0,0>');
             if (line === 'M491') return reply('ok\n[PRB:0,0,-80.000:1]');
-            if (line === 'M119') return reply('X_min:0 Y_min:0 Z_min:0 X_max:0 Y_max:0 Z_max:0 Probe:0');
+            if (line === 'M119') return reply(PROBE_OPEN_REPLY);
             if (['G54', 'G92.1', 'M831', 'M832', 'G90', 'G91'].includes(line)) return reply('ok');
             let m = /^G53 G0 Z(-?[\d.]+)$/.exec(line);
             if (m) return (pos.z = Number(m[1])), reply('ok');

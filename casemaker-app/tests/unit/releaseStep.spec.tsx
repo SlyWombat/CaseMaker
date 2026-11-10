@@ -3,8 +3,9 @@
 // the bit change and closed only when the run stops, and a resumed run skipping the files this
 // machine already finished. The upload and the console are fake clients; nothing reaches a machine.
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { advanceUntil } from './helpers/fakeTime';
 import { EngraveReleaseStep } from '@/components/panels/EngraveReleaseStep';
 import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleClient } from '@/platform/machineConsole';
 import { setMachineUploadLoader } from '@/platform/machineUpload';
@@ -343,6 +344,7 @@ const WALKS_ON = ShopDefaultsSchema.parse({
 
 let consumed: string[];
 beforeEach(() => {
+  vi.useFakeTimers();
   sent.length = 0;
   uploaded.length = 0;
   consumed = [];
@@ -378,12 +380,12 @@ afterEach(async () => {
   const machine = machineKey(TARGET);
   if (useMachineRunStore.getState().runs[machine]?.running === true) {
     useMachineRunStore.getState().requestStop(machine);
-    await waitFor(
+    await advanceUntil(
       () => {
         const entry = useMachineRunStore.getState().runs[machine];
         expect(entry === undefined || (entry.running === false && entry.end !== null)).toBe(true);
       },
-      { timeout: 30000 },
+      { timeoutMs: 30000 },
     );
   }
   cleanup();
@@ -394,20 +396,23 @@ afterEach(async () => {
   setMachineFilesLoader(null);
   setHouseClientLoader(null);
   setRunEndIO(null);
+  vi.useRealTimers();
 });
 
 const record = () => useEngraveReleaseStore.getState().records[`${TARGET.host}:${TARGET.port}`];
 
 async function uploadOnly(): Promise<void> {
-  fireEvent.click(await screen.findByTestId('engrave-release-upload'));
+  await advanceUntil(() => screen.getByTestId('engrave-release-upload'));
+  fireEvent.click(screen.getByTestId('engrave-release-upload'));
   fireEvent.click(screen.getByTestId('engrave-release-upload-confirm-send'));
-  await screen.findByTestId('engrave-release-start');
+  await advanceUntil(() => screen.getByTestId('engrave-release-start'));
 }
 
 async function uploadAndStart(): Promise<void> {
-  fireEvent.click(await screen.findByTestId('engrave-release-upload'));
+  await advanceUntil(() => screen.getByTestId('engrave-release-upload'));
+  fireEvent.click(screen.getByTestId('engrave-release-upload'));
   fireEvent.click(screen.getByTestId('engrave-release-upload-confirm-send'));
-  await screen.findByTestId('engrave-release-start');
+  await advanceUntil(() => screen.getByTestId('engrave-release-start'));
   fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
   fireEvent.click(screen.getByTestId('engrave-release-start'));
 }
@@ -416,7 +421,7 @@ async function uploadAndStart(): Promise<void> {
 async function facedToChange(job: EngraveJob, engraving: EngraveProgram): Promise<void> {
   renderStep(job, [FACE, engraving]);
   await uploadAndStart();
-  await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+  await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 10000 });
   fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
   fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
   fireEvent.click(screen.getByTestId('engrave-release-change-done'));
@@ -547,7 +552,7 @@ describe('#469 the release step', () => {
     });
 
     // Program 1 runs to its end; the release pauses at the bit change with the machine homed.
-    await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+    await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 10000 });
     expect(uploaded).toEqual(['Two-setup-job-p1.nc', 'Two-setup-job-p2.nc']);
     expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Two-setup-job-p1.nc']);
     // #1123 item 41 — the run RE-STATES M851 before every program (the maintainer's bench rule):
@@ -572,7 +577,7 @@ describe('#469 the release step', () => {
       programIndex: 2,
       programTotal: 2,
     });
-    await screen.findByTestId('engrave-release-done', undefined, { timeout: 10000 });
+    await advanceUntil(() => screen.getByTestId('engrave-release-done'), { timeoutMs: 10000 });
 
     expect(sent.filter((l) => l.startsWith('play'))).toEqual([
       'play /sd/gcodes/Two-setup-job-p1.nc',
@@ -601,12 +606,12 @@ describe('#469 the release step', () => {
     await uploadAndStart();
 
     // The line exists at once ("running, no percentage yet"); the first poll brings the reading.
-    await screen.findByTestId('engrave-release-live-progress', undefined, { timeout: 10000 });
+    await advanceUntil(() => screen.getByTestId('engrave-release-live-progress'), { timeoutMs: 10000 });
     // #1145 — the time is OUR clock's, so at the first reading the run has just begun and no time is
     // stated (the fake's field 3 — 5 s, or the bench's 4,641 — is never read as seconds).
-    await waitFor(
+    await advanceUntil(
       () => expect(screen.getByTestId('engrave-release-live-progress').textContent).toBe('Program 1 of 2 is 20 % done.'),
-      { timeout: 10000 },
+      { timeoutMs: 10000 },
     );
     expect(screen.getByTestId('engrave-release-live-progress').getAttribute('data-percent')).toBe('20');
     // The next program needs the other cutter; the line names the program and the cutter.
@@ -624,14 +629,14 @@ describe('#469 the release step', () => {
         };
       });
     });
-    await waitFor(() =>
+    await advanceUntil(() =>
       expect(screen.getByTestId('engrave-release-live-progress').textContent).toBe(
         'Program 1 of 2 is 20 % done — about 4 min left.',
       ),
     );
 
     // At the pause the progress line belongs to the run that just ended, not the one being set up.
-    await screen.findByTestId('engrave-release-change', undefined, { timeout: 20000 });
+    await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 20000 });
     expect(screen.queryByTestId('engrave-release-live-progress')).toBeNull();
     expect(screen.queryByTestId('engrave-release-next-change')).toBeNull();
   }, 30000);
@@ -643,7 +648,8 @@ describe('#469 the release step', () => {
     const job = facedJob();
     seedRegistration(job);
     renderStep(job, [FACE, engravingProgram()]);
-    expect((await screen.findByTestId('engrave-release-facing-blocker')).textContent).toContain(
+    await advanceUntil(() => screen.getByTestId('engrave-release-facing-blocker'));
+    expect(screen.getByTestId('engrave-release-facing-blocker').textContent).toContain(
       'the post-facing re-touch has not been run on this machine yet',
     );
     // Nothing is at the machine and nothing plays: the refusal is the release's own sentence.
@@ -662,10 +668,11 @@ describe('#469 the release step', () => {
     seedRegistration(job);
     renderStep(job, [FACE, EN]);
 
-    expect((await screen.findByTestId('engrave-release-facing-note')).textContent).toContain('program 1 is the face file');
+    await advanceUntil(() => screen.getByTestId('engrave-release-facing-note'));
+    expect(screen.getByTestId('engrave-release-facing-note').textContent).toContain('program 1 is the face file');
     await uploadAndStart();
 
-    await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+    await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 10000 });
     expect(uploaded).toEqual(['Faced-job-face.nc', 'Faced-job.nc']);
     expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job-face.nc']);
     const change = screen.getByTestId('engrave-release-change').textContent ?? '';
@@ -698,7 +705,7 @@ describe('#469 the release step', () => {
     await act(async () => {
       seedRegistration(job);
     });
-    await waitFor(() => expect(start().disabled).toBe(false), { timeout: 5000 });
+    await advanceUntil(() => expect(start().disabled).toBe(false), { timeoutMs: 5000 });
   }, 20000);
 
   it.skip('after the face file’s confirmed change, re-touches the faced top and writes Z0 before the engraving program (#494)', async () => {
@@ -708,16 +715,16 @@ describe('#469 the release step', () => {
     await facedToChange(job, engravingProgram());
 
     // The executor asks for the wired probe, measures, then asks for the ENGRAVING cutter.
-    await waitFor(
+    await advanceUntil(
       () => expect(screen.getByTestId('engrave-release-operator-text').textContent).toContain('Fit the wired probe'),
-      { timeout: 10000 },
+      { timeoutMs: 10000 },
     );
     expect(record()?.phase).toBe('retouch');
     fireEvent.click(screen.getByTestId('engrave-release-operator-continue'));
-    await waitFor(
+    await advanceUntil(
       () =>
         expect(screen.getByTestId('engrave-release-operator-text').textContent).toContain('ENGRAVING cutter'),
-      { timeout: 10000 },
+      { timeoutMs: 10000 },
     );
     // #789 — the re-touch is a probe session of its own: the supply goes on before its first
     // touch and off once the last is done (before the cutter is asked for).
@@ -730,7 +737,7 @@ describe('#469 the release step', () => {
     expect(sent.indexOf('M832')).toBeGreaterThan(touches.at(-1)!);
     fireEvent.click(screen.getByTestId('engrave-release-operator-continue'));
 
-    await screen.findByTestId('engrave-release-done', undefined, { timeout: 15000 });
+    await advanceUntil(() => screen.getByTestId('engrave-release-done'), { timeoutMs: 15000 });
     expect(sent.filter((l) => l.startsWith('play'))).toEqual([
       'play /sd/gcodes/Faced-job-face.nc',
       'play /sd/gcodes/Faced-job.nc',
@@ -752,13 +759,13 @@ describe('#469 the release step', () => {
     setMachineConsoleLoader(async () => controller(2, { retouchSurfaceZ: -56.9 }));
     await facedToChange(job, engravingProgram());
 
-    await waitFor(
+    await advanceUntil(
       () => expect(screen.getByTestId('engrave-release-operator-text').textContent).toContain('Fit the wired probe'),
-      { timeout: 10000 },
+      { timeoutMs: 10000 },
     );
     fireEvent.click(screen.getByTestId('engrave-release-operator-continue'));
 
-    await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 15000 });
+    await advanceUntil(() => expect(record()?.phase).toBe('failed'), { timeoutMs: 15000 });
     const notes = record()?.notes.join('\n') ?? '';
     expect(notes).toContain('outside the expected');
     expect(notes).toContain('No program was played');
@@ -776,19 +783,19 @@ describe('#469 the release step', () => {
     setMachineConsoleLoader(async () => controller(2, { retouchSurfaceZ: -56.666, m491: 'ok' }));
     await facedToChange(job, engravingProgram());
 
-    await waitFor(
+    await advanceUntil(
       () => expect(screen.getByTestId('engrave-release-operator-text').textContent).toContain('Fit the wired probe'),
-      { timeout: 10000 },
+      { timeoutMs: 10000 },
     );
     fireEvent.click(screen.getByTestId('engrave-release-operator-continue'));
-    await waitFor(
+    await advanceUntil(
       () =>
         expect(screen.getByTestId('engrave-release-operator-text').textContent).toContain('ENGRAVING cutter'),
-      { timeout: 10000 },
+      { timeoutMs: 10000 },
     );
     fireEvent.click(screen.getByTestId('engrave-release-operator-continue'));
 
-    await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 15000 });
+    await advanceUntil(() => expect(record()?.phase).toBe('failed'), { timeoutMs: 15000 });
     const notes = record()?.notes.join('\n') ?? '';
     expect(notes).toContain('M491 answered no tool-length reading for the cutter');
     expect(notes).toContain('No program was played');
@@ -802,7 +809,7 @@ describe('#469 the release step', () => {
     seedRegistration(job);
     setMachineConsoleLoader(async () => controller(2, { retouchSurfaceZ: -56.666 }));
     renderStep(job, [FACE, engravingProgram()]);
-    await screen.findByTestId('engrave-release-files');
+    await advanceUntil(() => screen.getByTestId('engrave-release-files'));
 
     // The state a resume after a failed program 2 leaves: the face file done, its bit change
     // confirmed, and the re-touch's Z0 already written for program 2.
@@ -830,9 +837,9 @@ describe('#469 the release step', () => {
       useEngraveReleaseStore.getState().confirmChange(TARGET);
     });
 
-    await waitFor(
+    await advanceUntil(
       () => expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Faced-job.nc']),
-      { timeout: 10000 },
+      { timeoutMs: 10000 },
     );
     // No probe seek and no second origin write: the top under the re-touch point is now a floor.
     expect(sent.filter((l) => l.startsWith('G38.2'))).toEqual([]);
@@ -842,7 +849,7 @@ describe('#469 the release step', () => {
   it('asks “I am at the machine” again for every program: the bit change clears the tick (D-17)', async () => {
     renderStep(twoSetupJob());
     await uploadAndStart();
-    await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+    await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 10000 });
 
     // Program 1 ran with the tick; the pause cleared it, so program 2's start is disabled until
     // the operator standing at the machine says so for THIS program.
@@ -859,11 +866,11 @@ describe('#469 the release step', () => {
   it('a Stop between programs closes the span: M852 then $H, on an Idle machine', async () => {
     renderStep(twoSetupJob());
     await uploadAndStart();
-    await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+    await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 10000 });
 
     const before = sent.length;
     fireEvent.click(screen.getByTestId('engrave-release-stop'));
-    await waitFor(() => expect(sent.slice(before)).toContain('M852'), { timeout: 5000 });
+    await advanceUntil(() => expect(sent.slice(before)).toContain('M852'), { timeoutMs: 5000 });
     const tail = sent.slice(before);
     expect(tail.filter((l) => l === 'M852')).toHaveLength(1);
     expect(tail.indexOf('M852')).toBeLessThan(tail.lastIndexOf('$H'));
@@ -923,19 +930,20 @@ describe('#469 the release step', () => {
     // #1088 — the resume plays program 2, which is setup 2's and needs setup 2's record.
     seedSetupRegistration(job, 'setup-2');
     renderStep(job);
-    fireEvent.click(await screen.findByTestId('engrave-release-upload'));
+    await advanceUntil(() => screen.getByTestId('engrave-release-upload'));
+  fireEvent.click(screen.getByTestId('engrave-release-upload'));
     fireEvent.click(screen.getByTestId('engrave-release-upload-confirm-send'));
-    await screen.findByTestId('engrave-release-start');
+    await advanceUntil(() => screen.getByTestId('engrave-release-start'));
     expect(screen.getByTestId('engrave-release-progress').textContent).toContain('1 of 2 finished');
     fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
     fireEvent.click(screen.getByTestId('engrave-release-start'));
 
     // The first unfinished file is program 2, so the release asks for its cutter BEFORE playing.
-    await screen.findByTestId('engrave-release-change', undefined, { timeout: 5000 });
+    await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 5000 });
     expect(sent.filter((l) => l.startsWith('play'))).toEqual([]);
     fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
     fireEvent.click(screen.getByTestId('engrave-release-change-done'));
-    await screen.findByTestId('engrave-release-done', undefined, { timeout: 10000 });
+    await advanceUntil(() => screen.getByTestId('engrave-release-done'), { timeoutMs: 10000 });
 
     expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Two-setup-job-p2.nc']);
     // Program 2 carries M852 only; the vacuum was off before the resume, so the step switches it on.
@@ -949,13 +957,13 @@ describe('#469 the release step', () => {
     seedRegistration(job);
     renderStep(job, [P1, P2]);
     await uploadAndStart();
-    await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+    await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 10000 });
     fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
     fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
     const before = sent.length;
     fireEvent.click(screen.getByTestId('engrave-release-change-done'));
 
-    await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 5000 });
+    await advanceUntil(() => expect(record()?.phase).toBe('failed'), { timeoutMs: 5000 });
     expect(record()?.notes.join('\n')).toContain('setup 2 is not registered — run the Register step for setup 2 first.');
     // NOTHING SENT AT ALL: no play line, no vacuum word, no home — the gate is before every line.
     expect(sent.slice(before)).toEqual([]);
@@ -969,7 +977,7 @@ describe('#469 the release step', () => {
     await act(async () => {
       useEngraveReleaseStore.getState().stop(TARGET);
     });
-    await waitFor(() => expect(record()?.phase).toBe('stopped'), { timeout: 5000 });
+    await advanceUntil(() => expect(record()?.phase).toBe('stopped'), { timeoutMs: 5000 });
 
     const start = screen.getByTestId('engrave-release-start') as HTMLButtonElement;
     expect(start.disabled).toBe(true);
@@ -989,7 +997,7 @@ describe('#469 the release step', () => {
     await act(async () => {
       useEngraveReleaseStore.getState().stop(TARGET);
     });
-    await waitFor(() => expect(record()?.phase).toBe('closing'), { timeout: 5000 });
+    await advanceUntil(() => expect(record()?.phase).toBe('closing'), { timeoutMs: 5000 });
 
     // `M852`/`$H` are in flight. The button is disabled, and the store refuses a direct press too:
     // starting now could put a program's own M851 underneath the late M852.
@@ -1000,18 +1008,18 @@ describe('#469 the release step', () => {
     expect(sent.filter((l) => l.startsWith('play'))).toEqual([]);
 
     releaseSpanClose();
-    await waitFor(() => expect(record()?.phase).toBe('stopped'), { timeout: 5000 });
+    await advanceUntil(() => expect(record()?.phase).toBe('stopped'), { timeoutMs: 5000 });
     // D-17 — the stop cleared the tick, so a resume is a fresh start.
     expect((screen.getByTestId('engrave-release-start') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
     expect((screen.getByTestId('engrave-release-start') as HTMLButtonElement).disabled).toBe(false);
 
     fireEvent.click(screen.getByTestId('engrave-release-start'));
-    await waitFor(() => expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Two-setup-job-p1.nc']), {
+    await advanceUntil(() => expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Two-setup-job-p1.nc']), {
       timeout: 5000,
     });
     // Let the program finish, so the test does not leave a run in flight at cleanup.
-    await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+    await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 10000 });
   }, 30000);
 
   it('#1123 item 41 — a red-button alarm, then Try again: the retry re-states M851 before it plays', async () => {
@@ -1023,7 +1031,7 @@ describe('#469 the release step', () => {
     setMachineConsoleLoader(async () => controller(2, { alarmOnPlay: true }));
     renderStep(job);
     await uploadAndStart();
-    await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 10000 });
+    await advanceUntil(() => expect(record()?.phase).toBe('failed'), { timeoutMs: 10000 });
     expect(record()?.vacuum).toBe('unknown');
     expect(sent.filter((l) => l === 'M851')).toHaveLength(1);
 
@@ -1031,7 +1039,7 @@ describe('#469 the release step', () => {
     // the program complete on its FIRST status poll after `play` — one explicit step, not a race.
     setMachineConsoleLoader(async () => controller(0));
     fireEvent.click(screen.getByTestId('engrave-release-start'));
-    await waitFor(() => expect(record()?.phase).toBe('bit-change'), { timeout: 10000 });
+    await advanceUntil(() => expect(record()?.phase).toBe('bit-change'), { timeoutMs: 10000 });
     // THE RETRY RE-STATED THE ON WORD: the first attempt's M851 died with the alarm (finding 38).
     expect(sent.filter((l) => l === 'M851')).toHaveLength(2);
   }, 30000);
@@ -1041,23 +1049,23 @@ describe('#469 the release step', () => {
     seedSetupRegistration(job, 'setup-2'); // #1088 — setup 2 is registered; this test is not the gate.
     renderStep(job);
     await uploadAndStart();
-    await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+    await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 10000 });
 
     // Stop at the change, then resume at program 2. #1123 item 41 — the RUN re-states M851 before
     // every program; this time the controller refuses the file after that word went out.
     await act(async () => {
       useEngraveReleaseStore.getState().stop(TARGET);
     });
-    await waitFor(() => expect(record()?.phase).toBe('stopped'), { timeout: 5000 });
+    await advanceUntil(() => expect(record()?.phase).toBe('stopped'), { timeoutMs: 5000 });
     fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
     fireEvent.click(screen.getByTestId('engrave-release-start'));
-    await screen.findByTestId('engrave-release-change', undefined, { timeout: 5000 });
+    await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 5000 });
     setMachineConsoleLoader(async () => controller(2, { playError: true }));
     const before = sent.length;
     fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
     fireEvent.click(screen.getByTestId('engrave-release-change-done'));
 
-    await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 5000 });
+    await advanceUntil(() => expect(record()?.phase).toBe('failed'), { timeoutMs: 5000 });
     const tail = sent.slice(before);
     // The run stated M851 and the file never played, so the vacuum is on with nothing cutting and
     // the release closes the span (M852 then $H).
@@ -1177,7 +1185,7 @@ describe('#469 the release step', () => {
     const ctxA: RunContext = { nc: 'G0 X1 Y1\nM02\n', programHash: 'hash-A', jobId: 'job-A', stockEntryId: 'stock-A' };
     expect(useMachineRunStore.getState().prepare(TARGET, 'A.nc', 'hash-A', ctxA)).toBe(true);
     expect(useMachineRunStore.getState().start(TARGET, runSettings(null))).toBe(true);
-    await waitFor(() => expect(useMachineRunStore.getState().runs[key]?.running).toBe(false), { timeout: 15000 });
+    await advanceUntil(() => expect(useMachineRunStore.getState().runs[key]?.running).toBe(false), { timeoutMs: 15000 });
     expect(useMachineRunStore.getState().runs[key]?.outcome?.kind).toBe('finished');
     expect(useMachineRunStore.getState().runs[key]?.end).toBeNull();
 
@@ -1190,7 +1198,7 @@ describe('#469 the release step', () => {
 
     // A's write lands now, after B was prepared. It belongs to A: B's entry must be untouched.
     openGate();
-    await waitFor(() => expect(calls).toContain('A:consume'), { timeout: 10000 });
+    await advanceUntil(() => expect(calls).toContain('A:consume'), { timeoutMs: 10000 });
     const b = useMachineRunStore.getState().runs[key]!;
     expect(b.filename).toBe('B.nc');
     expect(b.end).toBeNull();
@@ -1228,7 +1236,8 @@ describe('#491 the release step names the cutter’s case', () => {
     );
     renderStep(twoSetupJob());
     await uploadAndStart();
-    const sentence = await screen.findByTestId('engrave-release-change-sentence', undefined, { timeout: 10000 });
+    await advanceUntil(() => screen.getByTestId('engrave-release-change-sentence'), { timeoutMs: 10000 });
+    const sentence = screen.getByTestId('engrave-release-change-sentence');
     expect(sentence.textContent).toContain(
       'Change the cutter for program 2 of 2: Yellow case — 3.175*12mm Flat End(Metal) (flat-3.175x12-metal).',
     );
@@ -1370,9 +1379,10 @@ describe('#1146 the plan line carries the walks’ time', () => {
   it('adds the cleaning passes and the air walk to the plan, stated as their own term', async () => {
     useShopDefaultsStore.setState({ status: 'present', defaults: WALKS_ON });
     renderStep(twoSetupJob());
-    const plan = await screen.findByTestId('engrave-release-plan');
+    await advanceUntil(() => screen.getByTestId('engrave-release-plan'));
+    const plan = screen.getByTestId('engrave-release-plan');
     const summary = plan.querySelector('summary')!;
-    await waitFor(() => expect(summary.getAttribute('data-walk-seconds')).not.toBeNull());
+    await advanceUntil(() => expect(summary.getAttribute('data-walk-seconds')).not.toBeNull());
     expect(Number(summary.getAttribute('data-walk-seconds'))).toBeGreaterThan(0);
     expect(summary.textContent).toMatch(/cleaning and air walk: ~\d+ (min|s)/);
   });

@@ -2020,7 +2020,8 @@ describe('#785 progress and Cancel', () => {
 });
 
 describe('#893 — a run holds the measured pick, and an unsimulated program can be simulated', () => {
-  const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+  // #1180 — fake time: the debounce waits are advanced, not slept.
+  const sleep = (ms: number): Promise<void> => vi.advanceTimersByTimeAsync(ms);
 
   function jobWithCutter(): void {
     const jobNow = useEngraveJobStore.getState().job;
@@ -2049,10 +2050,12 @@ describe('#893 — a run holds the measured pick, and an unsimulated program can
   }
 
   beforeEach(() => {
+    vi.useFakeTimers();
     useEngravePreviewStore.getState().dispose();
     setEngravePreviewClientLoader(null);
   });
   afterEach(() => {
+    vi.useRealTimers();
     useEngravePreviewStore.getState().dispose();
     setEngravePreviewClientLoader(null);
   });

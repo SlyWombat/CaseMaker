@@ -11,7 +11,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { MachinesScope } from '@/components/manage/MachinesScope';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { useSettingsStore } from '@/store/settingsStore';
-import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleSession } from '@/platform/machineConsole';
+import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineConsole';
+import { fakeConsoleSession, statusOnly } from './helpers/fakeConsole';
 import { ACCESSORIES } from '@/platform/machineAccessory';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -47,24 +48,6 @@ const Z1_RECORD = {
 const IDLE = '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128>';
 const RUNNING = '<Run|MPos:0,0,0|P:34,42,17>';
 
-function fakeConsole(statusText: string) {
-  const sent: string[] = [];
-  const session: MachineConsoleSession = {
-    async send(line) {
-      sent.push(line);
-      return line === '?'
-        ? ({ ok: true, line, text: statusText, frames: 1, elapsedMs: 30 } as ConsoleSend)
-        : ({ ok: true, line, text: 'ok', frames: 1, elapsedMs: 12 } as ConsoleSend);
-    },
-    async close() {},
-  };
-  setMachineConsoleLoader(async () => ({
-    async open() {
-      return session;
-    },
-  }));
-  return sent;
-}
 
 function withMachine(): void {
   useMachineStore.setState({
@@ -109,7 +92,7 @@ describe('#289 the accessory switches on the machine card', () => {
 
   it('turns a fan on: one press, the firmware’s code, and the switch shows what it sent', async () => {
     withMachine();
-    const sent = fakeConsole(IDLE);
+    const { sent } = fakeConsoleSession(statusOnly(IDLE));
     render(<MachinesScope />);
     await act(async () => {
       fireEvent.click(screen.getByTestId('manage-accessory-spindle-fan-on'));
@@ -129,7 +112,7 @@ describe('#289 the accessory switches on the machine card', () => {
       reason: null,
       checkedAt: '2026-10-09T06:00:00.000Z',
     });
-    const sent = fakeConsole(IDLE);
+    const { sent } = fakeConsoleSession(statusOnly(IDLE));
     render(<MachinesScope />);
     await act(async () => {
       fireEvent.click(screen.getByTestId('manage-accessory-wp-charge-off'));
@@ -142,7 +125,7 @@ describe('#289 the accessory switches on the machine card', () => {
 
   it('refuses a running machine and shows the reason, sending no accessory code', async () => {
     withMachine();
-    const sent = fakeConsole(RUNNING);
+    const { sent } = fakeConsoleSession(statusOnly(RUNNING));
     render(<MachinesScope />);
     await act(async () => {
       fireEvent.click(screen.getByTestId('manage-accessory-spindle-fan-on'));

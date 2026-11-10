@@ -27,7 +27,8 @@ import {
   type HouseHealth,
   type HouseProbe,
 } from '@/platform/houseClient';
-import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleSession } from '@/platform/machineConsole';
+import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineConsole';
+import { fakeConsoleSession } from './helpers/fakeConsole';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -204,18 +205,12 @@ function fakeMachine(opts: {
   home?: () => ConsoleSend;
   other?: (line: string) => ConsoleSend;
 }): { lines: string[] } {
-  const lines: string[] = [];
-  const session: MachineConsoleSession = {
-    async send(line) {
-      lines.push(line);
-      if (line === '?') return opts.status();
-      if (line === '$H') return (opts.home ?? (() => sent(line, IDLE)))();
-      return (opts.other ?? ((l) => sent(l, 'ok')))(line);
-    },
-    async close() {},
-  };
-  setMachineConsoleLoader(async () => ({ async open() { return session; } }));
-  return { lines };
+  const recorder = fakeConsoleSession((line) => {
+    if (line === '?') return opts.status();
+    if (line === '$H') return (opts.home ?? (() => sent(line, IDLE)))();
+    return (opts.other ?? ((l) => sent(l, 'ok')))(line);
+  });
+  return { lines: recorder.sent };
 }
 
 function seedLocation(seed: MachineRecord = machine()): { view: LocationView; writes: Write[]; version: number } {

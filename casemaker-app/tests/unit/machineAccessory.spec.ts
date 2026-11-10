@@ -6,7 +6,8 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleSession } from '@/platform/machineConsole';
+import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineConsole';
+import { fakeConsoleSession } from './helpers/fakeConsole';
 import {
   ACCESSORIES,
   AIR_SENTENCE,
@@ -24,34 +25,6 @@ const RUNNING = '<Run|MPos:1.0000,2.0000,-1.0000|Bf:14,128|S:12031|P:389,90,88>'
 const MID_JOB = '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128|S:12031|P:389,90,88>';
 const ALARM = '<Alarm|MPos:0.0000,0.0000,0.0000>';
 
-function fakeSession(answer: (line: string) => ConsoleSend) {
-  const sent: string[] = [];
-  const counters = { closes: 0, opens: 0 };
-  const session: MachineConsoleSession = {
-    async send(line) {
-      sent.push(line);
-      return answer(line);
-    },
-    async close() {
-      counters.closes += 1;
-    },
-  };
-  setMachineConsoleLoader(async () => ({
-    async open() {
-      counters.opens += 1;
-      return session;
-    },
-  }));
-  return {
-    sent,
-    get closes() {
-      return counters.closes;
-    },
-    get opens() {
-      return counters.opens;
-    },
-  };
-}
 
 const status = (text: string): ((line: string) => ConsoleSend) => (line) =>
   line === '?'
@@ -97,7 +70,7 @@ describe('#289 the Z1’s accessory codes', () => {
 describe('#289 the accessory press', () => {
   it('switches each accessory on an idle machine on one connection, and closes it', async () => {
     for (const spec of ACCESSORIES as readonly { id: AccessoryId; on: string; off: string }[]) {
-      const z1 = fakeSession(status(IDLE));
+      const z1 = fakeConsoleSession(status(IDLE));
       const r = await toggleAccessory(TARGET, spec.id, true);
       expect(r).toMatchObject({ kind: 'toggled', id: spec.id, on: true });
       expect(z1.sent).toEqual(['?', spec.on]);
@@ -107,14 +80,14 @@ describe('#289 the accessory press', () => {
   });
 
   it('sends the off code for the off half', async () => {
-    const z1 = fakeSession(status(IDLE));
+    const z1 = fakeConsoleSession(status(IDLE));
     const r = await toggleAccessory(TARGET, 'wp-charge', false);
     expect(r).toMatchObject({ kind: 'toggled', id: 'wp-charge', on: false });
     expect(z1.sent).toEqual(['?', 'M842']);
   });
 
   it('refuses a running machine without sending any accessory code', async () => {
-    const z1 = fakeSession(status(RUNNING));
+    const z1 = fakeConsoleSession(status(RUNNING));
     const r = await toggleAccessory(TARGET, 'spindle-fan', true);
     expect(r.kind).toBe('busy');
     expect(r.kind === 'busy' && r.detail).toContain('Run');
@@ -123,7 +96,7 @@ describe('#289 the accessory press', () => {
   });
 
   it('refuses an idle machine whose program has not finished', async () => {
-    const z1 = fakeSession(status(MID_JOB));
+    const z1 = fakeConsoleSession(status(MID_JOB));
     const r = await toggleAccessory(TARGET, 'power-fan', true);
     expect(r.kind).toBe('busy');
     expect(r.kind === 'busy' && r.detail).toContain('90%');
@@ -131,7 +104,7 @@ describe('#289 the accessory press', () => {
   });
 
   it('refuses an alarm without sending anything', async () => {
-    const z1 = fakeSession(status(ALARM));
+    const z1 = fakeConsoleSession(status(ALARM));
     const r = await toggleAccessory(TARGET, 'external-output', true);
     expect(r.kind).toBe('busy');
     expect(r.kind === 'busy' && r.detail).toContain('alarm');
@@ -139,7 +112,7 @@ describe('#289 the accessory press', () => {
   });
 
   it('refuses an unreadable status line before switching', async () => {
-    const z1 = fakeSession(status('not a status line'));
+    const z1 = fakeConsoleSession(status('not a status line'));
     const r = await toggleAccessory(TARGET, 'wp-charge', true);
     expect(r.kind).toBe('error');
     expect(z1.sent).toEqual(['?']);

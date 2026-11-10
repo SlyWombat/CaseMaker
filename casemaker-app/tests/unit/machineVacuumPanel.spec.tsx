@@ -15,7 +15,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { MachinesScope } from '@/components/manage/MachinesScope';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { useSettingsStore } from '@/store/settingsStore';
-import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleSession } from '@/platform/machineConsole';
+import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineConsole';
+import { fakeConsoleSession } from './helpers/fakeConsole';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -51,39 +52,6 @@ const Z1_RECORD = {
 const IDLE = '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128>';
 
 /** Install a console client that answers as scripted, and count what reached it. */
-function fakeConsole(answer: (line: string) => ConsoleSend) {
-  let loads = 0;
-  const sent: string[] = [];
-  const counters = { closes: 0, opens: 0 };
-  const session: MachineConsoleSession = {
-    async send(line) {
-      sent.push(line);
-      return answer(line);
-    },
-    async close() {
-      counters.closes += 1;
-    },
-  };
-  setMachineConsoleLoader(async () => {
-    loads += 1;
-    return {
-      async open() {
-        counters.opens += 1;
-        return session;
-      },
-    };
-  });
-  return {
-    sent,
-    loads: () => loads,
-    get closes() {
-      return counters.closes;
-    },
-    get opens() {
-      return counters.opens;
-    },
-  };
-}
 
 const idleMachine: (line: string) => ConsoleSend = (line) =>
   line === '?'
@@ -163,7 +131,7 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
   });
 
   it('starts unknown, opens no socket, and neither half is lit', () => {
-    const wire = fakeConsole(idleMachine);
+    const wire = fakeConsoleSession(idleMachine);
     render(<MachinesScope />);
 
     // #1173A — the row never claims machine state; this one has sent nothing this session.
@@ -172,12 +140,12 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
     expect(on().getAttribute('aria-pressed')).toBe('false');
     expect(off().getAttribute('aria-pressed')).toBe('false');
     // Drawing the card connects to nothing: a socket appears with a press, not with a render.
-    expect(wire.loads()).toBe(0);
+    expect(wire.loads).toBe(0);
     expect(wire.sent).toEqual([]);
   });
 
   it('a press on an idle machine switches it on, shows it, and lit the On half', async () => {
-    const wire = fakeConsole(idleMachine);
+    const wire = fakeConsoleSession(idleMachine);
     render(<MachinesScope />);
     fireEvent.click(on());
 
@@ -190,7 +158,7 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
   });
 
   it('the Off half sends M852 and lit Off, off the same unknown start', async () => {
-    const wire = fakeConsole(idleMachine);
+    const wire = fakeConsoleSession(idleMachine);
     render(<MachinesScope />);
     fireEvent.click(off());
 
@@ -201,7 +169,7 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
   });
 
   it('a press on a running machine is refused, sends no code, and says why', async () => {
-    const wire = fakeConsole(runningMachine);
+    const wire = fakeConsoleSession(runningMachine);
     render(<MachinesScope />);
     fireEvent.click(on());
 
@@ -215,7 +183,7 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
   it('a mid-job Idle is refused too — a `P:` below 100 is a program still running', async () => {
     // The state word says Idle at 90 %, which is the ~4 s spin-down before the head goes home (#390
     // item 1). A press here would send M851 after the program's own M852 and leave the vacuum on.
-    const wire = fakeConsole((line) =>
+    const wire = fakeConsoleSession((line) =>
       line === '?'
         ? {
             ok: true,
@@ -236,7 +204,7 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
   });
 
   it('a press that lost the link goes back to unknown, because the code may or may not have arrived', async () => {
-    const wire = fakeConsole((line) =>
+    const wire = fakeConsoleSession((line) =>
       line === '?'
         ? { ok: true, line, text: IDLE, frames: 1, elapsedMs: 30 }
         : { ok: false, reason: 'timeout', line, detail: 'no reply within 60000 ms', text: '' },
@@ -251,7 +219,7 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
   });
 
   it('an error on the ask leaves the switch unknown and sends no code', async () => {
-    const wire = fakeConsole(() => {
+    const wire = fakeConsoleSession(() => {
       throw new Error('tcpRead: connection reset by peer');
     });
     render(<MachinesScope />);
@@ -273,7 +241,7 @@ describe('#390 the vacuum switch — the memory belongs to one connection (#390 
 
   /** A press that reported `on`, and the handle to re-render the pane it left behind. */
   async function pressOn(): Promise<ReturnType<typeof render>> {
-    fakeConsole(idleMachine);
+    fakeConsoleSession(idleMachine);
     const view = render(<MachinesScope />);
     fireEvent.click(on());
     await waitFor(() => expect(state().textContent).toMatch(/^last sent from this app: on · \d{2}:\d{2}$/));

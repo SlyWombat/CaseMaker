@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
+import { PROBE_OPEN_REPLY, PROBE_TRIGGERED_REPLY, sentReply as reply } from './helpers/registrationFixtures';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import {
@@ -133,7 +134,6 @@ function fakeZ1(opts: {
   let lowest = Infinity;
   const lines: string[] = [];
   const xyMovesAtZ: number[] = [];
-  const reply = (text: string): ConsoleSendResult => ({ kind: 'sent', line: '', text, frames: 1, elapsedMs: 1 });
   const RIM = 0.7;
 
   const zAt = (wx: number, wy: number): number | null => {
@@ -163,7 +163,7 @@ function fakeZ1(opts: {
       if (line === 'G54' || line === 'G92.1') return reply('ok');
       // #789 — the probe connector's supply (see execute.ts's PROBE_SUPPLY_ON/OFF).
       if (line === 'M831' || line === 'M832') return reply('ok');
-      if (line === 'M119') return reply('X_min:0 Y_min:0 Z_min:0 X_max:0 Y_max:0 Z_max:0 Probe:0');
+      if (line === 'M119') return reply(PROBE_OPEN_REPLY);
       if (line === 'M491') {
         const z = tool === 'probe' ? -76.063 : -79.163;
         return reply(`[PRB:-9.890,-12.830,${z - 0.011}:1]\nok\n[PRB:-9.890,-12.830,${z}:1]\nDone ATC`);

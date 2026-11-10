@@ -18,9 +18,8 @@ import { useSettingsStore } from '@/store/settingsStore';
 import {
   setMachineConsoleLoader,
   type ConsoleSend,
-  type MachineConsoleClient,
-  type MachineConsoleSession,
 } from '@/platform/machineConsole';
+import { fakeConsoleSession } from './helpers/fakeConsole';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -65,44 +64,6 @@ interface FakeConsole {
 type Answer = (line: string) => ConsoleSend;
 
 /** Install a console client and count the loads, so "no connection" is an assertion. */
-function fakeConsole(
-  answer: Answer = (line) => ({ ok: true, line, text: 'ok', frames: 1, elapsedMs: 12 }),
-): FakeConsole & { loads: () => number } {
-  let loads = 0;
-  const sent: string[] = [];
-  const counters = { closes: 0, opens: 0 };
-  const session: MachineConsoleSession = {
-    async send(line) {
-      sent.push(line);
-      return answer(line);
-    },
-    async close() {
-      counters.closes += 1;
-    },
-  };
-  const client: MachineConsoleClient = {
-    async open() {
-      counters.opens += 1;
-      return session;
-    },
-  };
-  setMachineConsoleLoader(async () => {
-    loads += 1;
-    return client;
-  });
-  // The counters are read after the fact, so they have to be live reads rather than copied numbers.
-  return {
-    session,
-    sent,
-    get closes() {
-      return counters.closes;
-    },
-    get opens() {
-      return counters.opens;
-    },
-    loads: () => loads,
-  };
-}
 
 /** The card, with a machine that answered. */
 function withMachine(): void {
@@ -166,7 +127,7 @@ describe('#302 the console panel — the checkbox and the press', () => {
   });
 
   it('Send is off until the box is ticked, and until there is a line to send', () => {
-    const wire = fakeConsole();
+    const wire = fakeConsoleSession();
     render(<MachinesScope />);
 
     expect(send().disabled).toBe(true);
@@ -183,11 +144,11 @@ describe('#302 the console panel — the checkbox and the press', () => {
     fireEvent.click(armed());
     expect(send().disabled).toBe(true);
     expect(line().value).toBe('?');
-    expect(wire.loads()).toBe(0);
+    expect(wire.loads).toBe(0);
   });
 
   it('a blank line is not sendable, even with the box ticked', () => {
-    fakeConsole();
+    fakeConsoleSession();
     render(<MachinesScope />);
     fireEvent.click(armed());
     expect(send().disabled).toBe(true);
@@ -196,7 +157,7 @@ describe('#302 the console panel — the checkbox and the press', () => {
   });
 
   it('shows the guard’s refusal as it is typed, and Send stays off: no socket is opened', () => {
-    const wire = fakeConsole();
+    const wire = fakeConsoleSession();
     render(<MachinesScope />);
     fireEvent.click(armed());
     fireEvent.change(line(), { target: { value: 'config-set sd x 1' } });
@@ -206,11 +167,11 @@ describe('#302 the console panel — the checkbox and the press', () => {
     expect(send().disabled).toBe(true);
     expect(send().title).toContain('refusing');
     // The refusal is decided before the bridge is reached, which is the whole ordering rule.
-    expect(wire.loads()).toBe(0);
+    expect(wire.loads).toBe(0);
   });
 
   it('sends on an explicit press, once, and puts the reply and its timing in the transcript', async () => {
-    const wire = fakeConsole((l) => ({ ok: true, line: l, text: '<Idle|MPos:0,0,0>', frames: 2, elapsedMs: 41 }));
+    const wire = fakeConsoleSession((l) => ({ ok: true, line: l, text: '<Idle|MPos:0,0,0>', frames: 2, elapsedMs: 41 }));
     render(<MachinesScope />);
     fireEvent.click(armed());
     fireEvent.change(line(), { target: { value: '?' } });
@@ -229,7 +190,7 @@ describe('#302 the console panel — the checkbox and the press', () => {
   });
 
   it('Enter is the same press as the button, and never sends twice', async () => {
-    const wire = fakeConsole();
+    const wire = fakeConsoleSession();
     render(<MachinesScope />);
     fireEvent.click(armed());
     fireEvent.change(line(), { target: { value: 'M491' } });
@@ -245,7 +206,7 @@ describe('#302 the console panel — the checkbox and the press', () => {
   });
 
   it('a line that timed out stays in the box, and says what arrived instead of a reply', async () => {
-    fakeConsole((l) => ({ ok: false, reason: 'timeout', line: l, detail: 'no reply within 60000 ms', text: '' }));
+    fakeConsoleSession((l) => ({ ok: false, reason: 'timeout', line: l, detail: 'no reply within 60000 ms', text: '' }));
     render(<MachinesScope />);
     fireEvent.click(armed());
     fireEvent.change(line(), { target: { value: 'M491' } });
@@ -262,7 +223,7 @@ describe('#302 the console panel — the checkbox and the press', () => {
     // Found by browser QA on 2026-10-12, not here: `npm run dev:desktop` runs StrictMode, whose
     // mount-then-cleanup closed the console before the first press and answered "this console is
     // closed". This is the same panel under the same condition, so it cannot come back.
-    const wire = fakeConsole();
+    const wire = fakeConsoleSession();
     render(
       <StrictMode>
         <MachinesScope />
@@ -278,7 +239,7 @@ describe('#302 the console panel — the checkbox and the press', () => {
   });
 
   it('closes the console when the card goes away', async () => {
-    const wire = fakeConsole();
+    const wire = fakeConsoleSession();
     const view = render(<MachinesScope />);
     fireEvent.click(armed());
     fireEvent.change(line(), { target: { value: '?' } });
@@ -296,7 +257,7 @@ describe('#302 the console panel — the checkbox and the press', () => {
     const had = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: clipboard });
     try {
-      fakeConsole();
+      fakeConsoleSession();
       render(<MachinesScope />);
       // Nothing has been sent, so there is nothing to copy and no button offering it.
       expect(q('manage-console-copy')).toBeNull();
@@ -321,7 +282,7 @@ describe('#302 the console panel — the checkbox and the press', () => {
   });
 
   it('Clear empties the panel’s transcript and nothing else', async () => {
-    const wire = fakeConsole();
+    const wire = fakeConsoleSession();
     render(<MachinesScope />);
     fireEvent.click(armed());
     fireEvent.change(line(), { target: { value: '?' } });
@@ -348,7 +309,7 @@ describe('#386 item 3 — a frame that arrived with no line in flight', () => {
   const M491_TAIL = 'M492.3\r\nERROR: Probe dead or not set, please charge or set first!\r\nok\r\n';
 
   it('is drawn beside the reply, never merged into it, and not counted as the line’s own', async () => {
-    fakeConsole((l) => ({
+    fakeConsoleSession((l) => ({
       ok: true,
       line: l,
       text: '<Idle|MPos:0,0,0>',
@@ -377,7 +338,7 @@ describe('#386 item 3 — a frame that arrived with no line in flight', () => {
   });
 
   it('a line nothing answered is still a timeout when an old alarm was waiting', async () => {
-    fakeConsole((l) => ({
+    fakeConsoleSession((l) => ({
       ok: false,
       reason: 'timeout',
       line: l,
@@ -408,7 +369,7 @@ describe('#386 item 3 — a frame that arrived with no line in flight', () => {
       value: { writeText: (t: string) => (writes.push(t), Promise.resolve()) },
     });
     try {
-      fakeConsole((l) => ({
+      fakeConsoleSession((l) => ({
         ok: false,
         reason: 'timeout',
         line: l,

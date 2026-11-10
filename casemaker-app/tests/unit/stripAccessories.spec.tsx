@@ -10,7 +10,8 @@ import { resetRegistrationTouchesStore } from '@/store/registrationTouchesStore'
 import { resetEngraveReleaseStore, useEngraveReleaseStore, type ReleaseRecord } from '@/store/engraveReleaseStore';
 import { resetMachineRunStore } from '@/store/machineRunStore';
 import { resetStripAccessoryStore } from '@/store/stripAccessoryStore';
-import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleSession } from '@/platform/machineConsole';
+import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineConsole';
+import { fakeConsoleSession, statusOnly } from './helpers/fakeConsole';
 import type { MachineObservation } from '@/platform/machineProbe';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -28,19 +29,6 @@ function remember(line: string): void {
 }
 
 /** A fake console that answers `?` with `status` and every command with `ok`. */
-function fakeConsole(status: string) {
-  const sent: string[] = [];
-  const session: MachineConsoleSession = {
-    async send(line) {
-      sent.push(line);
-      const reply = (text: string): ConsoleSend => ({ ok: true, line, text, frames: 1, elapsedMs: 10 });
-      return reply(line === '?' ? status : 'ok');
-    },
-    async close() {},
-  };
-  setMachineConsoleLoader(async () => ({ async open() { return session; } }));
-  return sent;
-}
 
 beforeEach(() => {
   cleanup();
@@ -96,7 +84,7 @@ describe('#648 the accessory indicators', () => {
 
   it('a press calls the guarded module and the indicator follows its answer', async () => {
     remember(IDLE);
-    const sent = fakeConsole(IDLE);
+    const { sent } = fakeConsoleSession(statusOnly(IDLE));
     render(<MachineStatusStrip />);
     fireEvent.click(screen.getByTestId('machine-status-accessory-light'));
     fireEvent.click(screen.getByTestId('machine-status-accessory-on-light'));
@@ -107,7 +95,7 @@ describe('#648 the accessory indicators', () => {
 
   it('the vacuum press sends the vacuum code on the same guard', async () => {
     remember(IDLE);
-    const sent = fakeConsole(IDLE);
+    const { sent } = fakeConsoleSession(statusOnly(IDLE));
     render(<MachineStatusStrip />);
     fireEvent.click(screen.getByTestId('machine-status-accessory-vacuum'));
     fireEvent.click(screen.getByTestId('machine-status-accessory-on-vacuum'));
@@ -126,7 +114,7 @@ describe('#648 the accessory indicators', () => {
   it('a refusal from the module is shown in the popover, and the indicator keeps its state', async () => {
     remember(IDLE);
     // The machine says Idle to the strip, but answers the guard with a running line: the module refuses.
-    fakeConsole(RUNNING);
+    fakeConsoleSession(statusOnly(RUNNING));
     render(<MachineStatusStrip />);
     fireEvent.click(screen.getByTestId('machine-status-accessory-light'));
     fireEvent.click(screen.getByTestId('machine-status-accessory-on-light'));

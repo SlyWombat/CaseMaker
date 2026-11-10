@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
+import { PROBE_OPEN_REPLY, PROBE_TRIGGERED_REPLY, sentReply as reply } from './helpers/registrationFixtures';
 import { runFlipRegistration } from '@/engine/cnc/registration/execute';
 import { planFlipRegistration } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
@@ -70,7 +71,6 @@ interface FakeOpts {
 
 function fakeMachine(sent: string[], opts: FakeOpts = {}) {
   const g54 = opts.g54 ?? { x: 0, y: 0 };
-  const reply = (text: string): ConsoleSendResult => ({ kind: 'sent', line: '', text, frames: 1, elapsedMs: 1 });
   const prb = (z: number, touched: boolean): string =>
     `[PRB:${(pos.x + g54.x).toFixed(3)},${(pos.y + g54.y).toFixed(3)},${z.toFixed(3)}:${touched ? 1 : 0}]\nok`;
   const pos = { x: 0, y: 0, z: -3 };
@@ -86,8 +86,8 @@ function fakeMachine(sent: string[], opts: FakeOpts = {}) {
       if (line === '?') return reply(`<Idle|MPos:${(pos.x + g54.x).toFixed(3)},${(pos.y + g54.y).toFixed(3)},${pos.z.toFixed(3)}|WPos:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${pos.z.toFixed(3)}>`);
       if (line === '$H') return (pos.x = 0), (pos.y = 0), (pos.z = -3), reply('ok');
       if (line === 'G54' || line === 'G92.1' || line === 'M831' || line === 'M832') return reply('ok');
-      if (line === 'M119') return reply('X_min:0 Y_min:0 Z_min:0 X_max:0 Y_max:0 Z_max:0 Probe:0');
-      if (line === 'M491') return reply('[PRB:0,0,-80.000:1]\nok');
+      if (line === 'M119') return reply(PROBE_OPEN_REPLY);
+      if (line === 'M491') return reply(PROBE_TRIGGERED_REPLY);
       if (line === 'G90' || line === 'G91') return reply('ok');
       let m = /^G53 G0 Z(-?[\d.]+)$/.exec(line);
       if (m) return (pos.z = Number(m[1])), reply('ok');

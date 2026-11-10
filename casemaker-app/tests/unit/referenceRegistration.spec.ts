@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import type { ConsoleSendResult, ConsoleTiming } from '@/platform/machineConsole';
+import { PROBE_OPEN_REPLY, PROBE_TRIGGERED_REPLY, sentReply as reply } from './helpers/registrationFixtures';
 import {
   applyCorrection,
   planReferences,
@@ -66,7 +67,6 @@ function fakeZ1(opts: { holes?: ReferenceOpening[]; shift?: { x: number; y: numb
   let lowestTouch = Infinity;
   const lines: string[] = [];
   const xyAtZ: number[] = [];
-  const reply = (text: string): ConsoleSendResult => ({ kind: 'sent', line: '', text, frames: 1, elapsedMs: 1 });
   const zAt = (wx: number, wy: number): number | null => {
     // Into the part's frame: undo the shift, then the turn about the centre.
     const px = wx - d.x - 40;
@@ -91,7 +91,7 @@ function fakeZ1(opts: { holes?: ReferenceOpening[]; shift?: { x: number; y: numb
       // #789 — the probe connector's supply: the executor switches it on before the first probe
       // move and off once the last is done.
       if (line === 'M831' || line === 'M832') return reply('ok');
-      if (line === 'M119') return reply('X_min:0 Y_min:0 Z_min:0 X_max:0 Y_max:0 Z_max:0 Probe:0');
+      if (line === 'M119') return reply(PROBE_OPEN_REPLY);
       if (line === 'M491') return reply('[PRB:-9.890,-12.830,-76.063:1]\nok');
       if (line === 'G90' || line === 'G91') return (mode = line), reply('ok');
       let m = /^G53 G0 Z(-?[\d.]+)$/.exec(line);
