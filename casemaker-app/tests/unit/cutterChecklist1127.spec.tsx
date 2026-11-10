@@ -15,6 +15,7 @@ import { buildRunRecord, parseRunRecordText } from '@/engine/cnc/engrave/runReco
 import { bitsLaidOutWords } from '@/engine/cnc/engrave/runSheet';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { freezePackage, jobFingerprint, packageStaleness } from '@/engine/cnc/engrave/package';
+import { replacementProblem } from '@/engine/cnc/engrave/cutterChecklist';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { resetRegistry, setInventoryEntries, setRegistry } from '@/engine/cnc/toolRegistry';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
@@ -201,5 +202,59 @@ describe('#1127 the cutter checklist', () => {
     const parsed = parseRunRecordText(JSON.stringify(record));
     if (!parsed.ok) throw new Error(parsed.reason);
     expect(parsed.run.cutterChecklist).toEqual(record.cutterChecklist);
+  });
+});
+
+// #1136 stage 4 — THE REPLACE PICKER EXCLUDES A SAME-SETUP DUPLICATE. A replacement equal to a
+// cutter the SAME setup already posts would merge two refs into one program, renumber the run and
+// break the partial post's promise ("the unaffected programs' bytes and order do not change"). The
+// picker does not offer it; a job that already records one shows the refusal by name.
+describe('#1136 stage 4 — the replace picker refuses a same-setup duplicate', () => {
+  const THIRD = flatEndMill(3.175, { number: 4, name: '⌀3.175 mm flat end (third)', handleDiameter: 3.175, fluteLength: 20 });
+  const IDENTITY = { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' } as const;
+
+  function seedWithThird(): void {
+    setInventoryEntries([
+      { key: 'inv:flat-25', tool: FLAT, provenance: 'test' },
+      { key: 'inv:big-6', tool: BIG, provenance: 'test' },
+      { key: 'inv:flat-20', tool: ALT, provenance: 'test' },
+      { key: 'inv:flat-30', tool: THIRD, provenance: 'test' },
+    ]);
+    setRegistry([]);
+  }
+
+  /** Setup 1 posts flat-25 AND flat-20; setup 2 posts big-6. */
+  function jobTwoInOneSetup(): EngraveJob {
+    const job = defaultEngraveJob();
+    job.toolKey = 'inv:flat-25';
+    job.setups = [
+      { id: 's1', orientation: { ...IDENTITY }, mount: { kind: 'vise' }, itemIds: [job.labels[0]!.id], tools: ['inv:flat-25', 'inv:flat-20'] },
+      { id: 's2', orientation: { ...IDENTITY }, mount: { kind: 'vise' }, itemIds: [job.labels[1]!.id], tools: ['inv:big-6'] },
+    ];
+    return job;
+  }
+
+  it('does not offer a cutter the same setup already posts, offers another, and names the refusal', () => {
+    seedWithThird();
+    const job = jobTwoInOneSetup();
+    const rows = cutterChecklistRows(PROGRAMS);
+    const at = new Date(2026, 10, 10, 8, 0, 0).toISOString();
+    render(
+      <CutterChecklist
+        rows={rows}
+        entries={{ 'inv:flat-25': { state: 'replaced', replacedWith: 'inv:flat-20', at } }}
+        onSet={() => {}}
+        replacementProblemFor={(from, to) => replacementProblem(job, from, to)}
+      />,
+    );
+    const picker = screen.getByTestId('engrave-cutter-replace-inv:flat-25') as HTMLSelectElement;
+    const values = [...picker.options].map((option) => option.value);
+    // The duplicate setup 1 already posts is gone; a third owned cutter of the same class is there.
+    expect(values).not.toContain('inv:flat-20');
+    expect(values).toContain('inv:flat-30');
+    // A recorded replacement that would merge is refused in words, not silently.
+    const refused = screen.getByTestId('engrave-cutter-refused-inv:flat-25');
+    expect(refused.textContent).toContain('merge');
+    expect(refused.textContent).toContain('change the run');
   });
 });

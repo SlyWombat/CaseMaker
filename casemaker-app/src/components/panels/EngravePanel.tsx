@@ -66,6 +66,7 @@ import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowNa
 import { partSilhouetteOf } from '@/engine/cnc/engrave/flipSilhouette';
 // #835 — one setup's own work, measured and written back into that setup only.
 import { deadSetupKeys, replacementCutter } from '@/engine/cnc/engrave/setupWork';
+import { replacementProblem } from '@/engine/cnc/engrave/cutterChecklist';
 import { measureFingerprint } from '@/engine/cnc/engrave/measuredPick';
 import { jobReachFindings } from '@/engine/cnc/engrave/goalReach';
 import { toolForIn, toolForJob } from '@/engine/cnc/toolRegistry';
@@ -3825,6 +3826,7 @@ export function EngravePanel(): JSX.Element {
         // why (#803): the reason rides each control's title and aria-description.
         disabled={checklistHash === undefined}
         disabledReason="tick each bit at the Cut step, once the program is generated"
+        replacementProblemFor={(from, to) => replacementProblem(job, from, to)}
         onSet={(key, entry) => {
           if (checklistHash === undefined) return;
           useEngraveJobStore.getState().setCutterChecklistEntry(checklistHash, key, entry);

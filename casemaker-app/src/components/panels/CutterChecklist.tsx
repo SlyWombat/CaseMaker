@@ -18,7 +18,7 @@
  * calls a worker. A replacement changes the CUTTER, which is a byte input: the caller re-generates
  * the whole run and shows its cost before the press.
  */
-import type { JSX } from 'react';
+import { useState, type JSX } from 'react';
 
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { benchCutterFor, getTools } from '@/engine/cnc/toolRegistry';
@@ -67,7 +67,10 @@ export function missingCuttersWords(
 }
 
 /** The replacement candidates: owned cutters of the SAME class (shape and cutting diameter). */
-function replacementsFor(row: CutterChecklistRow): { key: string; name: string }[] {
+function replacementsFor(
+  row: CutterChecklistRow,
+  problemFor: ((fromKey: string, toKey: string) => string | null) | undefined,
+): { key: string; name: string }[] {
   const source = benchCutterFor(row.key);
   if (source === null) return [];
   const diameter = source.diameter ?? source.tipDiameter ?? null;
@@ -75,6 +78,9 @@ function replacementsFor(row: CutterChecklistRow): { key: string; name: string }
     .filter((entry) => entry.key.startsWith('inv:') && entry.key !== row.key)
     .filter((entry) => entry.tool.shape === source.shape)
     .filter((entry) => diameter === null || Math.abs((entry.tool.diameter ?? entry.tool.tipDiameter ?? 0) - diameter) <= 0.01)
+    // #1136 — a cutter ANOTHER ref in the same setup already posts would merge two programs into one
+    // and renumber the run; it is never offered. `replacementProblem` is the one rule (the engine's).
+    .filter((entry) => problemFor?.(row.key, entry.key) == null)
     .map((entry) => ({ key: entry.key, name: toolDisplayName(entry.tool) }));
 }
 
@@ -92,6 +98,7 @@ export function CutterChecklist({
   onSet,
   disabled = false,
   disabledReason = null,
+  replacementProblemFor,
 }: {
   rows: readonly CutterChecklistRow[];
   entries: Record<string, CutterChecklistEntry> | undefined;
@@ -104,7 +111,18 @@ export function CutterChecklist({
    * generated". The Cut step's own checklist is never disabled.
    */
   disabledReason?: string | null;
+  /**
+   * #1136 — WHY A CANDIDATE IS REFUSED, from the job's own setups (`replacementProblem`). A cutter
+   * the SAME setup already posts would merge two refs into one program and renumber the run, so it
+   * is never offered; a replacement the job already records that would do so is stated in words.
+   * Omitted (the Job panel before a run is frozen) leaves every candidate in place; the press that
+   * writes the map is still refused by the engine's rule.
+   */
+  replacementProblemFor?: (fromKey: string, toKey: string) => string | null;
 }): JSX.Element | null {
+  // The refusal of a press the picker could not prevent (a hand-edited entry, a state written
+  // before another cutter joined the setup): the sentence stays under the row until a valid choice.
+  const [refused, setRefused] = useState<{ key: string; sentence: string } | null>(null);
   if (rows.length === 0) return null;
   const missing = missingCuttersWords(rows, entries);
   return (
@@ -117,7 +135,11 @@ export function CutterChecklist({
           // means the row IS the substitute after the regenerate (the entry stands in for it).
           const replaced = entry?.state === 'replaced' ? entry.replacedWith : undefined;
           const isTheSubstitute = replaced === row.key;
-          const replacements = replacementsFor(row);
+          const recordedProblem = replaced === undefined || replaced === '' || isTheSubstitute
+            ? null
+            : (replacementProblemFor?.(row.key, replaced) ?? null);
+          const rowProblem = recordedProblem ?? (refused?.key === row.key ? refused.sentence : null);
+          const replacements = replacementsFor(row, replacementProblemFor);
           const shankWords = row.shankMm !== null && Math.abs(row.shankMm - STANDARD_SHANK_MM) > 1e-6 ? `${row.shankMm} mm shank` : null;
           return (
             <li key={row.key} data-testid="engrave-cutter-row" style={ROW}>
@@ -141,10 +163,20 @@ export function CutterChecklist({
               </label>
               <select
                 data-testid={`engrave-cutter-replace-${row.key}`}
-                value={isTheSubstitute ? '' : (replaced ?? '')}
+                // A recorded replacement the job's setups now refuse is not a selectable value: the
+                // picker shows the empty choice and the sentence below says why.
+                value={isTheSubstitute || recordedProblem !== null ? '' : (replaced ?? '')}
                 disabled={disabled || replacements.length === 0}
                 onChange={(e) => {
                   const next = e.target.value;
+                  if (next !== '') {
+                    const problem = replacementProblemFor?.(row.key, next) ?? null;
+                    if (problem !== null) {
+                      setRefused({ key: row.key, sentence: problem });
+                      return;
+                    }
+                  }
+                  setRefused(null);
                   onSet(row.key, next === '' ? null : { state: 'replaced', replacedWith: next, at: new Date().toISOString() });
                 }}
                 {...(disabled && disabledReason !== null
@@ -158,7 +190,7 @@ export function CutterChecklist({
                   </option>
                 ))}
               </select>
-              {replaced !== undefined && (
+              {replaced !== undefined && recordedProblem === null && (
                 <span style={MUTED_ROW} data-testid={`engrave-cutter-state-${row.key}`}>
                   {isTheSubstitute ? 'replaced' : `replaced: ${replacements.find((c) => c.key === replaced)?.name ?? replaced}`}
                 </span>
@@ -166,6 +198,14 @@ export function CutterChecklist({
               {located && (
                 <span style={MUTED_ROW} data-testid={`engrave-cutter-state-${row.key}`}>
                   located
+                </span>
+              )}
+              {rowProblem !== null && (
+                <span
+                  data-testid={`engrave-cutter-refused-${row.key}`}
+                  style={{ gridColumn: '1 / -1', color: '#e8b07a', fontSize: 11, lineHeight: 1.4 }}
+                >
+                  {rowProblem}
                 </span>
               )}
             </li>

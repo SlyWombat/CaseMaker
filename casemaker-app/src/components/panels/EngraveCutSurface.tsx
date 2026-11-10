@@ -44,6 +44,7 @@ import { cutPlan } from '@/engine/cnc/engrave/cutPlan';
 import { laserLiftFor } from '@/engine/cnc/engrave/laserSurface';
 import { packageStaleness } from '@/engine/cnc/engrave/package';
 import { partialRegenPlan, partialRegenSentence } from '@/engine/cnc/engrave/partialRegen';
+import { replacementProblem } from '@/engine/cnc/engrave/cutterChecklist';
 import { useRegistrationPromptStore } from '@/store/registrationPromptStore';
 import { releaseNext, releasePending } from '@/engine/cnc/engrave/release';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
@@ -1658,7 +1659,12 @@ export function EngraveCutSurface({
         {/* #1127 — the cutter checklist, at the machine: one row per bit, located or replaced; the
             Load and the cut are gated on every row being settled. */}
         {pkg !== null && checklistRows.length > 0 && (
-          <CutterChecklist rows={checklistRows} entries={checklistEntries} onSet={setChecklistEntry} />
+          <CutterChecklist
+            rows={checklistRows}
+            entries={checklistEntries}
+            onSet={setChecklistEntry}
+            replacementProblemFor={(from, to) => replacementProblem(job, from, to)}
+          />
         )}
         {plan === null ? (
           <p style={MUTED} data-testid="engrave-cut-not-ready">
