@@ -18,6 +18,47 @@ describe('#1179 the finished-run record', () => {
     expect(parsed.finishedRuns).toEqual([]);
   });
 
+  it('a record the HOUSE served parses — its absent fields arrive as JSON null', () => {
+    // PROVEN AGAINST THE REAL SERVICE 2026-11-10 (rust:1.90 container, land18 561029fc9): the run
+    // below is F's step-1 finish-write shape POSTed through the axum router and read back from
+    // GET /api/v1/location. The service is Rust, and every `Option` serialises as JSON `null` —
+    // the served record carried "z": null, "impliedThicknessMm": null and
+    // "planExpectedTopMachineZ": null in the registration and "cutMap": null. Parsing must read
+    // null as "not stated", or the whole MACHINE is unreadable after program 1.
+    const servedRun = {
+      cutMap: null,
+      cutterKey: 'inv:kz-a',
+      finishedAt: '2026-11-10T13:00:00.000Z',
+      hash: 'a1b2c3d4',
+      jobId: 'job-1',
+      jobName: 'M1 tray',
+      key8: 'abcdef01',
+      packageKey: 'abcdef0123456789',
+      programCount: 17,
+      programIndex: 3,
+      programName: 'tray-p03.nc',
+      registration: {
+        g54: { x: 77.344, y: 63.0, z: null },
+        impliedThicknessMm: null,
+        measuredAt: '2026-11-10T13:00:00.000Z',
+        measuredTopMachineZ: -60.487,
+        planExpectedTopMachineZ: null,
+        surfaceMachineZ: -60.487,
+        topSource: 'touch',
+      },
+      setupIndex: 1,
+      stock: { lengthMm: 100.0, thicknessMm: 25.0, widthMm: 100.0 },
+    };
+    const base = MachineRecordSchema.parse(fixture.machine);
+    const parsed = MachineRecordSchema.safeParse({ ...base, finishedRuns: [servedRun] });
+    expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues.slice(0, 3))).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.finishedRuns[0]!.registration?.g54?.z).toBeUndefined();
+      expect(parsed.data.finishedRuns[0]!.registration?.impliedThicknessMm).toBeUndefined();
+      expect(parsed.data.finishedRuns[0]!.cutMap).toBeUndefined();
+    }
+  });
+
   it('a full record parses, and a hash-only record parses too', () => {
     const base = MachineRecordSchema.parse(fixture.machine);
     const full = MachineRecordSchema.parse({
