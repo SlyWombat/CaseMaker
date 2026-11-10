@@ -751,6 +751,48 @@ const RIM_CLOSE_TOL_MM = 0.01;
  * beside the plan's own programs, and its feeds must be the SAME row this resolver gave that
  * program's contour flat (the release cuts the band the contour's floor left).
  */
+/**
+ * #1186 rule 6 — ONE CUTTER PER SHAPE AND DIAMETER, AT THE JOB LEVEL.
+ *
+ * The maintainer at the bench: "a tool change that takes 5 minutes for a tool run that is 40
+ * seconds and can be done with the same tool but a longer length is not useful." Two owned cutters
+ * of the same shape and diameter must not be split across a job's setups (the tray's ⌀6 ×15/×25,
+ * ⌀1 ×4/×7, ball ×10/×22): the longest STATED reach is the job's one cutter for that dimension,
+ * so the merged plan carries one program per program-role and one fewer change.
+ *
+ * THE DATA'S EXCEPTION: a shorter sibling stays a candidate when the longest would run on a
+ * BORROWED feed row and the shorter has its own (`hasOwnRow`) — the shorter's own numbers are the
+ * data saying so, and the priced rank then chooses between them per setup. An unstated flute is
+ * never merged away or merged into: its reach cannot be vouched for.
+ */
+export function mergeSiblingCutters<T extends Tool>(tools: readonly T[], hasOwnRow: (tool: T) => boolean): T[] {
+  const groups = new Map<string, T[]>();
+  for (const tool of tools) {
+    const diameter = cuttingDiameter(tool);
+    const key = `${tool.shape}:${diameter === null ? '?' : diameter.toFixed(4)}`;
+    const list = groups.get(key) ?? [];
+    list.push(tool);
+    groups.set(key, list);
+  }
+  const keep: T[] = [];
+  for (const group of groups.values()) {
+    const stated = group.filter((tool) => tool.fluteLength !== null);
+    if (group.length === 1 || stated.length === 0) {
+      keep.push(...group);
+      continue;
+    }
+    const longest = [...stated].sort((a, b) => (b.fluteLength ?? 0) - (a.fluteLength ?? 0))[0]!;
+    keep.push(longest);
+    // An unstated flute is never merged away: its reach cannot be vouched for.
+    keep.push(...group.filter((tool) => tool !== longest && tool.fluteLength === null));
+    // The data's exception: the longest borrows, the shorter has its own row.
+    if (!hasOwnRow(longest)) {
+      keep.push(...group.filter((tool) => tool !== longest && tool.fluteLength !== null && hasOwnRow(tool)));
+    }
+  }
+  return keep;
+}
+
 export function resolvedCutParams(
   input: ModelPlanInput,
   tool: Tool,
@@ -1179,7 +1221,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // the candidate set BEFORE feeds are asked — a probe would otherwise be reported as "no cutting
   // parameters", which is true but the wrong statement — and one aggregate line names them.
   const instruments = input.cutters.house.filter((tool) => !isCuttingRecord(tool));
-  const candidateHouse = input.cutters.house.filter((tool) => {
+  // #1186 rule 6 — one cutter per shape and diameter across the job's setups, with the own-row
+  // exception. Pinned lookups below read the FULL list, so a pinned cutter survives the merge.
+  const hasOwnRow = (tool: Tool): boolean => {
+    try {
+      return resolvedCutParams(input, tool).substitution === null;
+    } catch {
+      return false;
+    }
+  };
+  const siblingMergedHouse = mergeSiblingCutters(input.cutters.house, hasOwnRow);
+  const candidateHouse = siblingMergedHouse.filter((tool) => {
     if (!isCuttingRecord(tool)) return false;
     if (chosenKey !== null && cutterKeyOf(tool) === chosenKey) return true;
     if (pinnedChamferKey !== undefined && cutterKeyOf(tool) === pinnedChamferKey) return true;
