@@ -239,12 +239,14 @@ function releaseSpanClose(): void {
 
 /**
  * A controller that finishes each played program after `finishAfter` polls. `?` is Idle before a
- * play and after it finishes; an abort makes it Idle at once. For #494's post-facing step,
+ * play and after it finishes; an abort makes it Idle at once. `alarmOnPlay` is the red button: the
+ * controller is in an alarm from the moment a program is played, and it stays there (an abort does
+ * not clear it) — an explicit state, not a poll count (#1153). For #494's post-facing step,
  * `retouchSurfaceZ` is the machine Z every probe touch reports and `m491` the tool-length reply.
  */
 function controller(
   finishAfter = 2,
-  opts: { retouchSurfaceZ?: number; m491?: string; playError?: boolean; alarmAfterPolls?: number } = {},
+  opts: { retouchSurfaceZ?: number; m491?: string; playError?: boolean; alarmOnPlay?: boolean } = {},
 ): MachineConsoleClient {
   let playing: { polls: number } | null = null;
   let aborted = false;
@@ -258,12 +260,14 @@ function controller(
           if (holdClose && (line === 'M852' || line === '$H')) await closeGate;
           let text = 'ok';
           if (line === '?') {
-            if (playing === null || aborted) text = '<Idle|MPos:0,0,0>';
-            else if (opts.alarmAfterPolls !== undefined && playing.polls >= opts.alarmAfterPolls) {
+            if (playing === null) text = '<Idle|MPos:0,0,0>';
+            else if (opts.alarmOnPlay === true) {
               // #1123 item 41 — the red button: the controller alarms mid-program and its outputs
-              // are cut. The app's run ends 'alarm'; the retry is a fresh start.
+              // are cut. #1153 — the alarm is a STATE entered by `play`, not a count of polls, so
+              // the run's end cannot depend on how many polls it fits into a wall-clock window.
               text = 'ALARM: Kill switch';
-            } else text = playing.polls++ < finishAfter ? '<Run|MPos:0,0,0|P:10,20,5>' : '<Idle|P:9,100,4>';
+            } else if (aborted) text = '<Idle|MPos:0,0,0>';
+            else text = playing.polls++ < finishAfter ? '<Run|MPos:0,0,0|P:10,20,5>' : '<Idle|P:9,100,4>';
           } else if (line.startsWith('play')) {
             if (opts.playError === true) {
               // #1123 item 41 — a controller that refuses the file AFTER the run re-stated M851:
@@ -341,7 +345,25 @@ beforeEach(() => {
   }));
   setRunEndIO(runEndIO(consumed));
 });
-afterEach(() => {
+afterEach(async () => {
+  // #1153 — NO RUN MAY CROSS A TEST BOUNDARY. `resetMachineRunStore` in the next `beforeEach` is a
+  // test seam: it forgets a run that is still polling, but the run itself keeps going, and its late
+  // `outcome`/`end` then land on whatever entry exists for that machine — the NEXT test's, which
+  // prepared the same key. Under load this settled the alarm test 'finished' in 90 ms ('bit-change'
+  // from a program it never played): the resume test above it ends milliseconds after its `play`,
+  // leaving its run to poll on. Stop an in-flight run and wait for its whole end (outcome AND the
+  // end-of-run write) here, while the test's fake console is still installed.
+  const machine = machineKey(TARGET);
+  if (useMachineRunStore.getState().runs[machine]?.running === true) {
+    useMachineRunStore.getState().requestStop(machine);
+    await waitFor(
+      () => {
+        const entry = useMachineRunStore.getState().runs[machine];
+        expect(entry === undefined || (entry.running === false && entry.end !== null)).toBe(true);
+      },
+      { timeout: 30000 },
+    );
+  }
   cleanup();
   resetInventoryConditions();
   setMachineConsoleLoader(null);
@@ -950,17 +972,19 @@ describe('#469 the release step', () => {
   it('#1123 item 41 — a red-button alarm, then Try again: the retry re-states M851 before it plays', async () => {
     const job = twoSetupJob();
     seedSetupRegistration(job, 'setup-2');
-    setMachineConsoleLoader(async () => controller(2, { alarmAfterPolls: 1 }));
+    // The red button is a STATE, not a poll count (#1153): the controller is in an alarm from the
+    // moment the program is played, and stays there. The release ends failed with the vacuum's
+    // state UNKNOWN — no claim survives the alarm.
+    setMachineConsoleLoader(async () => controller(2, { alarmOnPlay: true }));
     renderStep(job);
     await uploadAndStart();
-    // The controller alarms mid-program (the red button cuts its outputs). The release ends failed
-    // with the vacuum's state UNKNOWN — no claim survives the alarm.
     await waitFor(() => expect(record()?.phase).toBe('failed'), { timeout: 10000 });
     expect(record()?.vacuum).toBe('unknown');
     expect(sent.filter((l) => l === 'M851')).toHaveLength(1);
 
-    // The alarm is cleared at the controller; the operator presses Try again.
-    setMachineConsoleLoader(async () => controller(2));
+    // The alarm is cleared at the controller; the operator presses Try again. This machine reports
+    // the program complete on its FIRST status poll after `play` — one explicit step, not a race.
+    setMachineConsoleLoader(async () => controller(0));
     fireEvent.click(screen.getByTestId('engrave-release-start'));
     await waitFor(() => expect(record()?.phase).toBe('bit-change'), { timeout: 10000 });
     // THE RETRY RE-STATED THE ON WORD: the first attempt's M851 died with the alarm (finding 38).
