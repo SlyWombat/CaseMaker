@@ -44,6 +44,8 @@ export interface PlannedCleanWalk {
   sweepZ: number;
   /** The raster's row count (the air walk states one outline). */
   rows: number;
+  /** The file's own cycle estimate, seconds — the term the plan line folds in (#1146 follow-up). */
+  estimatedSeconds: number;
 }
 
 export interface CleanWalksPlan {
@@ -155,7 +157,30 @@ export function planCleanWalks(args: CleanWalkPlanArgs): CleanWalksPlan {
       verify,
       sweepZ: made.sweepZ,
       rows: made.rows,
+      estimatedSeconds: made.estimatedSeconds,
     };
   }
   return plan;
+}
+
+/**
+ * #1146 (the manager's ruling, 2026-11-10) — THE WALKS' SHARE OF THE PLAN'S TIME. The cleaning
+ * pass runs after every finished program; the air walk once before the first cut. The release
+ * step adds this to the plan's own `totalSeconds` and prints the walks as their own term, so the
+ * figure is the machine time the operator is actually committing to. A walk the plan refused (or
+ * a switch turned off) contributes nothing.
+ */
+export function cleanWalkPlanSeconds(
+  programs: number,
+  walks: { airwalk: { estimatedSeconds: number } | null; clean: { estimatedSeconds: number } | null },
+  switches: { airWalk: boolean; cleanAfter: boolean },
+): number {
+  const clean = switches.cleanAfter && walks.clean !== null ? Math.max(0, programs) * walks.clean.estimatedSeconds : 0;
+  const air = switches.airWalk && walks.airwalk !== null ? walks.airwalk.estimatedSeconds : 0;
+  return clean + air;
+}
+
+/** The walks' term as the plan line prints it: `~3 min`, or `~45 s` under a minute. */
+export function cleanWalkPlanWords(seconds: number): string {
+  return seconds >= 60 ? `~${Math.round(seconds / 60)} min` : `~${Math.max(1, Math.round(seconds))} s`;
 }

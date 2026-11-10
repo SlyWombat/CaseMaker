@@ -68,9 +68,13 @@ describe('#1146 — the cleaning file', () => {
     const moves = r.ir.operations[0]!.moves;
     expect(moves.length).toBe(20);
     for (const m of moves) {
+      // Rapids: the Z1's X/Y ceiling IS 1200 mm/min, so the bench's F1500 could not be a file's
+      // feed and a G0 runs at that same controller rate (see cleanWalk.ts).
       expect(m.kind).toBe('rapid');
       expect(m.z).toBe(17);
     }
+    // The file's estimate is the raster's own time at that feed, and it is not zero.
+    expect(r.estimatedSeconds).toBeGreaterThan(0);
     // The boustrophedon alternates: row 1 left→right, row 2 right→left.
     expect([moves[0]!.x, moves[1]!.x]).toEqual([0, 160]);
     expect([moves[2]!.x, moves[3]!.x]).toEqual([160, 0]);
@@ -102,7 +106,10 @@ describe('#1146 — the cleaning file', () => {
       [0, 126],
       [0, 0],
     ]);
-    for (const m of r.ir.operations[0]!.moves) expect(m.z).toBe(5);
+    for (const m of r.ir.operations[0]!.moves) {
+      expect(m.kind).toBe('rapid');
+      expect(m.z).toBe(5);
+    }
   });
 });
 

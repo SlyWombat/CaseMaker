@@ -32,6 +32,7 @@ import { readFlag } from '@/platform/defaultsClient';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
+import { cleanWalkPlanSeconds, cleanWalkPlanWords } from '@/engine/cnc/engrave/cleanWalkPlan';
 // #1123-42 — the running program's percent, time left and next cutter, from the run watch's own
 // status line and the release list's cut order.
 import { nextBitChange, runningProgramWords } from '@/engine/cnc/engrave/runProgress';
@@ -279,6 +280,12 @@ export function EngraveReleaseStep({
     0,
   );
   const plannedFiles = record.files.length + walkFiles.length;
+  // #1146 — the walks' time: one cleaning pass per program, one air walk, from the files' own
+  // cycle estimates (the seeded F1500 raster), stated separately on the plan line.
+  const walkSeconds = cleanWalkPlanSeconds(record.files.length, record.walks, {
+    airWalk: record.airWalk,
+    cleanAfter: record.cleanAfter,
+  });
   const uploading = record.phase === 'uploading';
   const walkIncomplete = (w: { upload: string }): boolean =>
     w.upload === 'pending' || w.upload === 'failed' || w.upload === 'sending';
@@ -353,7 +360,13 @@ export function EngraveReleaseStep({
       )}
 
       <details data-testid="engrave-release-plan">
-        <summary style={MUTED}>The plan ({Math.round(runPlan.totalSeconds / 60)} min, lower bound where unstated)</summary>
+        {/* #1146 — THE WALKS' SHARE OF THE TIME. The cleaning pass follows every program and the air
+            walk opens the run, so the plan's figure is the machine time the operator is committing
+            to; the walks are stated as their own term so the line says where it came from. */}
+        <summary style={MUTED} data-walk-seconds={walkSeconds > 0 ? Math.round(walkSeconds) : undefined}>
+          The plan ({Math.round((runPlan.totalSeconds + walkSeconds) / 60)} min, lower bound where unstated
+          {walkSeconds > 0 ? `; cleaning and air walk: ${cleanWalkPlanWords(walkSeconds)}` : ''})
+        </summary>
         <ol style={{ ...MUTED, paddingLeft: 18 }}>
           {runPlan.phases.map((p) => (
             <li key={p.id}>

@@ -29,7 +29,12 @@ export interface CleanWalkSettings {
   clearanceMm: number;
   /** The raster's row pitch over the stock footprint, mm. */
   rowSpacingMm: number;
-  /** The raster's rapid feed, mm/min (the machine's rapid estimate is not used — the bench ran F1500). */
+  /**
+   * The bench's raster feed, mm/min (F1500). NOT commanded: the Z1's X/Y rate ceiling is
+   * 1200 mm/min and the post refuses a feed above `maxCutFeed`, so the raster runs as rapids at
+   * that same controller rate (see `cleanWalkFile`). The shop's number is kept as the bench's
+   * stated intent; the two can only agree when the machine's rate and the shop's figure do.
+   */
   feedMmPerMin: number;
 }
 
@@ -61,7 +66,7 @@ export interface CleanWalkInput {
 export type CleanWalkMode = 'clean' | 'airwalk';
 
 export type CleanWalkResult =
-  | { ok: true; ir: ToolpathIR; sweepZ: number; rows: number }
+  | { ok: true; ir: ToolpathIR; sweepZ: number; rows: number; estimatedSeconds: number }
   | { ok: false; reason: string };
 
 /** THE SWEEP'S Z: the highest fixture (or the stock top) plus the shop's clearance. */
@@ -72,8 +77,16 @@ export function cleanSweepZ(obstacles: readonly CleanWalkObstacle[], clearanceMm
 }
 
 /**
- * The walk as an IR. CLEAN: a boustrophedon raster over the stock footprint at the sweep Z (rapids
- * only — a cleaning pass never cuts). AIR WALK: the stock outline traced once at the same Z.
+ * The walk as an IR. CLEAN: a boustrophedon raster over the stock footprint at the sweep Z. AIR
+ * WALK: the stock outline traced once at the same Z.
+ *
+ * THE RASTER IS COMMANDED AS RAPIDS (G0), and that is the honest speed: the bench's pass was
+ * spoken as F1500, but the Z1's own X/Y rate ceiling is 1200 mm/min (the config read 2026-10-07,
+ * `rapidEstimate.xyMmPerMin`) and the post refuses any feed above `maxCutFeed` — a file cannot
+ * state F1500. A G0 runs at the controller's seek rate, which IS that 1200: the bench's 10 rows
+ * over the 160 × 126 blank took ~100 s, and the estimate below (the same rapid model) says ~90 s.
+ * `clean.feedMmPerMin` is therefore a shop number the walk does not command yet; the release's
+ * plan line states the time the rapid model gives.
  */
 export function cleanWalkFile(input: CleanWalkInput, mode: CleanWalkMode): CleanWalkResult {
   const sweepZ = cleanSweepZ(input.obstacles, input.settings.clearanceMm);
@@ -124,5 +137,5 @@ export function cleanWalkFile(input: CleanWalkInput, mode: CleanWalkMode): Clean
       },
     ],
   };
-  return { ok: true, ir, sweepZ, rows };
+  return { ok: true, ir, sweepZ, rows, estimatedSeconds: ir.operations[0]!.estimatedSeconds };
 }
