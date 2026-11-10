@@ -46,6 +46,24 @@ function lwPolyline(verts: [number, number][], closed = true, bulges: number[] =
   return out;
 }
 
+/**
+ * #1161 — an old-style R12 `POLYLINE`: its vertices are separate `VERTEX` entities that follow it,
+ * terminated by `SEQEND`, and the `POLYLINE`'s own 10/20 is a dummy origin point, not a vertex.
+ */
+function polyline(
+  verts: [number, number][],
+  closed = true,
+  bulges: number[] = [],
+): (string | number)[] {
+  const out: (string | number)[] = [0, 'POLYLINE', 66, 1, 10, 0, 20, 0, 30, 0, 70, closed ? 1 : 0];
+  verts.forEach(([x, y], i) => {
+    out.push(0, 'VERTEX', 10, x, 20, y, 30, 0);
+    if (bulges[i]) out.push(42, bulges[i]!);
+  });
+  out.push(0, 'SEQEND');
+  return out;
+}
+
 function line(x1: number, y1: number, x2: number, y2: number): (string | number)[] {
   return [0, 'LINE', 10, x1, 20, y1, 11, x2, 21, y2];
 }
@@ -158,6 +176,57 @@ describe('parseDxfOutline (#217): geometry', () => {
     // tan(π/8) ≈ 0.4142 rounds the first corner (a 90° bulge).
     const rounded = ok(parseDxfOutline(dxf(lwPolyline(square, true, [0.41421356]), 4)));
     expect(rounded.contours[0]!.length).toBeGreaterThan(sharp.contours[0]!.length);
+  });
+
+  // #1161 — the R12-style POLYLINE: vertices are separate VERTEX entities up to SEQEND. The reader
+  // skipped all three record types, so a POLYLINE-based DXF (burnathome, crown) imported empty.
+  describe('a POLYLINE + VERTEX list (#1161)', () => {
+    it('a closed 10 × 10 POLYLINE imports as 100 mm²', () => {
+      const r = ok(parseDxfOutline(dxf(polyline(square), 4)));
+      expect(r.contours).toHaveLength(1);
+      expect(ringArea(r.contours[0]!)).toBeCloseTo(100, 6);
+      expect(r.width).toBeCloseTo(10, 6);
+      expect(r.height).toBeCloseTo(10, 6);
+    });
+
+    it('POLYLINE, VERTEX and SEQEND are consumed, not reported as skipped entities', () => {
+      const r = ok(parseDxfOutline(dxf(polyline(square), 4)));
+      expect(r.notes.some((n) => /Skipped unsupported/.test(n))).toBe(false);
+    });
+
+    it('the POLYLINE record’s own 10/20 is a dummy origin, not a vertex', () => {
+      // The record's 10/20/30 is written 0,0,0 whatever the geometry is. Taking it for a vertex
+      // would add a point 10 mm away and inflate the area to 150 mm².
+      const offset: [number, number][] = [
+        [10, 10],
+        [20, 10],
+        [20, 20],
+        [10, 20],
+      ];
+      const r = ok(parseDxfOutline(dxf(polyline(offset), 4)));
+      expect(r.contours).toHaveLength(1);
+      expect(ringArea(r.contours[0]!)).toBeCloseTo(100, 6);
+    });
+
+    it('an open POLYLINE imports as an open line, like an open LWPOLYLINE (#664)', () => {
+      const r = ok(parseDxfOutline(dxf(polyline(square, false), 4)));
+      expect(r.contours).toEqual([]);
+      expect(r.paths).toHaveLength(1);
+      expect(r.paths![0]!.points).toHaveLength(square.length);
+      expect(r.paths![0]!.closed).toBe(false);
+    });
+
+    it('a VERTEX bulge rounds the corner as arc points', () => {
+      const sharp = ok(parseDxfOutline(dxf(polyline(square), 4)));
+      const rounded = ok(parseDxfOutline(dxf(polyline(square, true, [0.41421356]), 4)));
+      expect(rounded.contours[0]!.length).toBeGreaterThan(sharp.contours[0]!.length);
+    });
+
+    it('an entity written after SEQEND still imports', () => {
+      const entities = [...polyline(square), ...circle(50, 50, 3)];
+      const r = ok(parseDxfOutline(dxf(entities, 4)));
+      expect(r.contours).toHaveLength(2);
+    });
   });
 });
 

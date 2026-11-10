@@ -10,12 +10,13 @@ import {
  * DXF outline import (#217), phase two of the vector import: the closed regions of a DXF as
  * flattened rings in mm.
  *
- * IN: `LWPOLYLINE` (closed), `CIRCLE`, and closed chains of `LINE`/`ARC` — joined at shared
- * endpoints. `LWPOLYLINE` bulges (group code 42) are honoured, so a rounded rectangle drawn in
- * Fusion does not silently arrive as a sharp one.
+ * IN: `LWPOLYLINE` (closed), old-style `POLYLINE` + its `VERTEX` records (#1161, closed flag
+ * honoured), `CIRCLE`, and closed chains of `LINE`/`ARC` — joined at shared endpoints. Bulges
+ * (group code 42, on LWPOLYLINE vertices and on POLYLINE VERTEX records) are honoured, so a rounded
+ * rectangle drawn in Fusion does not silently arrive as a sharp one.
  *
- * OUT, each named in `notes`: open `LWPOLYLINE`s, open `LINE`/`ARC` chains, and any entity type
- * not listed above (old-style `POLYLINE`, `SPLINE`, `ELLIPSE`, …).
+ * OUT, each named in `notes`: open polylines, open `LINE`/`ARC` chains, and any entity type not
+ * listed above (`SPLINE`, `ELLIPSE`, `VIEWPORT`, …).
  *
  * Units come from `$INSUNITS`; absent or unitless defaults to mm WITH a visible note (#217).
  * DXF's Y axis is already up, so — unlike SVG — there is no flip; the import is recentred on its
@@ -245,15 +246,42 @@ function joinSegments(segments: Segment[], tol: number): { rings: Vec2[][]; open
   return { rings, openChains };
 }
 
+interface PolyVert {
+  x: number;
+  y: number;
+  bulge: number;
+}
+
 /**
- * #664 — an LWPOLYLINE as its point path, open or closed. A closed one is a ring (the wrap-around
- * bulge closes it); an open one is a stroke and keeps its bulges between consecutive vertices.
+ * The point path through a run of polyline vertices, open or closed. A closed one wraps around (the
+ * last vertex's bulge closes it); an open one keeps its bulges between consecutive vertices.
+ */
+function polylinePoints(verts: readonly PolyVert[], closed: boolean, tol: number): Vec2[] {
+  const points: Vec2[] = [];
+  if (verts.length < 2) return points;
+  const last = closed ? verts.length : verts.length - 1;
+  for (let i = 0; i < last; i++) {
+    const v = verts[i]!;
+    points.push([v.x, v.y]);
+    const w = verts[(i + 1) % verts.length]!;
+    points.push(...bulgeArc([v.x, v.y], [w.x, w.y], v.bulge, tol));
+  }
+  if (!closed) {
+    const end = verts[verts.length - 1]!;
+    points.push([end.x, end.y]);
+  }
+  return points;
+}
+
+/**
+ * #664 — an LWPOLYLINE as its point path, open or closed. Vertices and bulges are inline groups of
+ * the one record.
  */
 function lwPolylinePath(e: Entity, tol: number): { points: Vec2[]; closed: boolean } {
   const flags = firstValue(e.pairs, 70) ?? 0;
   const closed = (flags & 1) !== 0;
-  const verts: { x: number; y: number; bulge: number }[] = [];
-  let cur: { x: number; y: number; bulge: number } | null = null;
+  const verts: PolyVert[] = [];
+  let cur: PolyVert | null = null;
   for (const p of e.pairs) {
     if (p.code === 10) {
       const x = parseFloat(p.value);
@@ -268,20 +296,18 @@ function lwPolylinePath(e: Entity, tol: number): { points: Vec2[]; closed: boole
       if (Number.isFinite(b)) cur.bulge = b;
     }
   }
-  const points: Vec2[] = [];
-  if (verts.length < 2) return { points, closed };
-  const last = closed ? verts.length : verts.length - 1;
-  for (let i = 0; i < last; i++) {
-    const v = verts[i]!;
-    points.push([v.x, v.y]);
-    const w = verts[(i + 1) % verts.length]!;
-    points.push(...bulgeArc([v.x, v.y], [w.x, w.y], v.bulge, tol));
-  }
-  if (!closed) {
-    const end = verts[verts.length - 1]!;
-    points.push([end.x, end.y]);
-  }
-  return { points, closed };
+  return { points: polylinePoints(verts, closed, tol), closed };
+}
+
+/**
+ * #1161 — one `VERTEX` record of an old-style `POLYLINE`. Its 10/20 is the point; a 42 is the bulge
+ * to the next vertex, the same meaning as an LWPOLYLINE's.
+ */
+function vertexOf(e: Entity): PolyVert | null {
+  const x = firstValue(e.pairs, 10);
+  const y = firstValue(e.pairs, 20);
+  if (x === null || y === null) return null;
+  return { x, y, bulge: firstValue(e.pairs, 42) ?? 0 };
 }
 
 /**
@@ -319,10 +345,32 @@ export function parseDxfOutline(
   const segments: Segment[] = [];
   const unsupported = new Map<string, number>();
 
-  for (const e of entities) {
+  for (let ei = 0; ei < entities.length; ei++) {
+    const e = entities[ei]!;
     switch (e.type) {
       case 'LWPOLYLINE': {
         const { points, closed } = lwPolylinePath(e, chordMm / unitMm);
+        if (closed) {
+          if (points.length >= 3) rings.push(points.map(scale));
+        } else if (points.length >= 2) {
+          openPaths.push(points.map(scale));
+        }
+        break;
+      }
+      case 'POLYLINE': {
+        // #1161 — the R12-style POLYLINE: its vertices follow as separate VERTEX records, ended by
+        // SEQEND. The POLYLINE record's own 10/20/30 is a dummy origin, so it is never a vertex.
+        const flags = firstValue(e.pairs, 70) ?? 0;
+        const closed = (flags & 1) !== 0;
+        const verts: PolyVert[] = [];
+        let j = ei + 1;
+        for (; j < entities.length && entities[j]!.type === 'VERTEX'; j++) {
+          const v = vertexOf(entities[j]!);
+          if (v) verts.push(v);
+        }
+        if (j < entities.length && entities[j]!.type === 'SEQEND') j++;
+        ei = j - 1; // the loop's step moves past the vertices and their SEQEND
+        const points = polylinePoints(verts, closed, chordMm / unitMm);
         if (closed) {
           if (points.length >= 3) rings.push(points.map(scale));
         } else if (points.length >= 2) {
