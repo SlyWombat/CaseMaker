@@ -5884,16 +5884,16 @@ describe('#1046 EngravePanel — the standard-balls press', () => {
     let seen: unknown = 'unset';
     setEngraveRunClientLoader(async () => ({
       engraveGenerate: async (...args: unknown[]) => {
-        seen = args[8];
+        // #1151 inserted `true` (the owned-first flag) at argument 8; the ladder is argument 9.
+        seen = args[9];
         return { ok: false, stage: 'findings', findings: [], feeds: null, threads: null, cam: null, verify: null, surface3d: null, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted: [], programs: [], errors: [], nc: null } as unknown as EngraveGenerated;
       },
       simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }) as never,
     }));
     fireEvent.click(press);
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(seen, 'the press asks the pipeline for the ladder').toBe(true);
+    // #1126 put the house-availability probe (an HTTP fact) between the press and the pipeline
+    // call, so one microtask flush no longer reaches it — wait for the call itself instead.
+    await waitFor(() => expect(seen, 'the press asks the pipeline for the ladder').toBe(true));
   }, 60_000);
 
   it('a stale run’s rest line is not shown as current — no run line, no press', () => {

@@ -20,6 +20,7 @@ import { flatEndMill } from '@/engine/cnc/tool';
 import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject, StockMaterial } from '@/types/engraveJob';
 import { planCutInto } from '../tools/planCutInto';
+import { binaryStl } from './helpers/meshes';
 
 afterEach(() => clearTargetObjectMeshCache());
 
@@ -39,24 +40,6 @@ function rampTris(depth: number): Tri[] {
       [0, 10, -depth],
     ],
   ];
-}
-
-function binaryStl(tris: Tri[]): ArrayBuffer {
-  const buf = new ArrayBuffer(84 + tris.length * 50);
-  const dv = new DataView(buf);
-  dv.setUint32(80, tris.length, true);
-  let off = 84;
-  for (const t of tris) {
-    off += 12; // normal left 0
-    for (const v of t) {
-      dv.setFloat32(off, v[0], true);
-      dv.setFloat32(off + 4, v[1], true);
-      dv.setFloat32(off + 8, v[2], true);
-      off += 12;
-    }
-    off += 2; // attribute byte count
-  }
-  return buf;
 }
 
 let shaCounter = 0;

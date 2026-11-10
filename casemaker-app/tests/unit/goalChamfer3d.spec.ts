@@ -20,32 +20,13 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { stlBase64 } from './helpers/meshes';
 
 type P = [number, number, number];
 
 afterEach(() => {
   clearTargetObjectMeshCache();
 });
-
-function stlBase64(tris: readonly (readonly [P, P, P])[]): string {
-  const bytes = new Uint8Array(84 + tris.length * 50);
-  const dv = new DataView(bytes.buffer);
-  dv.setUint32(80, tris.length, true);
-  let off = 84;
-  for (const [a, b, c] of tris) {
-    for (let k = 0; k < 3; k++) dv.setFloat32(off + k * 4, 0, true);
-    off += 12;
-    for (const p of [a, b, c]) {
-      dv.setFloat32(off, p[0], true);
-      dv.setFloat32(off + 4, p[1], true);
-      dv.setFloat32(off + 8, p[2], true);
-      off += 12;
-    }
-    dv.setUint16(off, 0, true);
-    off += 2;
-  }
-  return Buffer.from(bytes).toString('base64');
-}
 
 /** A 10 × 10 × 5 box whose bottom sits on the stock's top face. */
 function boxBall(): string {

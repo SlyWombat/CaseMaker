@@ -12,6 +12,7 @@ import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { tl } from './helpers/manifoldExec';
+import { stl } from './helpers/meshes';
 
 afterEach(() => clearTargetObjectMeshCache());
 
@@ -47,24 +48,6 @@ function boxTris(): Tri[] {
     [p(...b), p(...c), p(...g)], [p(...b), p(...g), p(...f)], // right
     [p(...d), p(...a), p(...e)], [p(...d), p(...e), p(...h)], // left
   ];
-}
-
-function stl(tris: Tri[]): string {
-  const buf = new ArrayBuffer(84 + tris.length * 50);
-  const dv = new DataView(buf);
-  dv.setUint32(80, tris.length, true);
-  let off = 84;
-  for (const t of tris) {
-    off += 12;
-    for (const v of t) {
-      dv.setFloat32(off, v[0], true);
-      dv.setFloat32(off + 4, v[1], true);
-      dv.setFloat32(off + 8, v[2], true);
-      off += 12;
-    }
-    off += 2;
-  }
-  return Buffer.from(new Uint8Array(buf)).toString('base64');
 }
 
 function goal(): EngraveTargetObject {

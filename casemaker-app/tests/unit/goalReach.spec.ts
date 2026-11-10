@@ -25,6 +25,7 @@ import { flatEndMill } from '@/engine/cnc/tool';
 import type { Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { binaryStl } from './helpers/meshes';
 
 afterEach(() => clearTargetObjectMeshCache());
 
@@ -54,23 +55,6 @@ function goal(depth: number, over: Partial<EngraveTargetObject> = {}): EngraveTa
 
 /** A binary STL ramp over 20×20 mm, its top falling to −K·20 in Z. */
 type Tri = [[number, number, number], [number, number, number], [number, number, number]];
-function binaryStl(tris: Tri[]): ArrayBuffer {
-  const buf = new ArrayBuffer(84 + tris.length * 50);
-  const dv = new DataView(buf);
-  dv.setUint32(80, tris.length, true);
-  let off = 84;
-  for (const t of tris) {
-    off += 12;
-    for (const v of t) {
-      dv.setFloat32(off, v[0], true);
-      dv.setFloat32(off + 4, v[1], true);
-      dv.setFloat32(off + 8, v[2], true);
-      off += 12;
-    }
-    off += 2;
-  }
-  return buf;
-}
 const DEPTH_MM = 30;
 function rampTris(depthMm = DEPTH_MM): Tri[] {
   const k = depthMm / 20;

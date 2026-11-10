@@ -13,6 +13,12 @@ import {
 } from '@/engine/cnc/engrave/goalFlipPlan';
 import type { CoverageMesh } from '@/engine/cnc/engrave/goalCoverage';
 import type { MountSpec } from '@/engine/cnc/setups/types';
+import { spherePositions } from './helpers/meshes';
+
+/** The shared sphere geometry, adapted to this file’s mesh type. */
+function sphere(r: number, rings = 24, segs = 48): CoverageMesh {
+  return meshOf(spherePositions(r, rings, segs));
+}
 
 function quad(out: number[], a: [number, number, number], b: [number, number, number], c: [number, number, number], d: [number, number, number]): void {
   out.push(...a, ...b, ...c, ...a, ...c, ...d);
@@ -39,23 +45,7 @@ function box(w: number, d: number, h: number): CoverageMesh {
 }
 
 /** A UV sphere, radius r, bottom at z 0. */
-function sphere(r: number, rings = 24, segs = 48): CoverageMesh {
-  const p: number[] = [];
-  const at = (i: number, j: number): [number, number, number] => {
-    const phi = (i / rings) * Math.PI;
-    const theta = (j / segs) * 2 * Math.PI;
-    return [r + r * Math.sin(phi) * Math.cos(theta), r + r * Math.sin(phi) * Math.sin(theta), r - r * Math.cos(phi)];
-  };
-  for (let i = 0; i < rings; i++) {
-    for (let j = 0; j < segs; j++) {
-      const a = at(i, j), b = at(i + 1, j), c = at(i + 1, j + 1), d = at(i, j + 1);
-      // Outward winding (the STL/Manifold convention): b and c swapped from the naive fan, or the
-      // sphere's normals point IN and the classifier reads every upper face as facing away.
-      p.push(...a, ...c, ...b, ...a, ...d, ...c);
-    }
-  }
-  return meshOf(p);
-}
+
 
 /**
  * A plate with a flat back and a raised plateau — the relief, as a proper closed solid: the top

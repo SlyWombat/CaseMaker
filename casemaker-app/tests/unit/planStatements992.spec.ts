@@ -22,6 +22,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { stlBase64 } from './helpers/meshes';
 
 const tl = await import('@/workers/geometry/ManifoldRuntime').then((m) => m.getToplevel());
 
@@ -142,22 +143,6 @@ describe('#992 — the plan states one thing per cause, typed', () => {
 });
 
 /** The goal-path box from goalChamfer3d's fixture: a solid on the stock with sharp top rims. */
-function stlBase64(tris: readonly (readonly [[number, number, number], [number, number, number], [number, number, number]])[]): string {
-  const bytes = new Uint8Array(84 + tris.length * 50);
-  const dv = new DataView(bytes.buffer);
-  dv.setUint32(80, tris.length, true);
-  tris.forEach((t, i) => {
-    let o = 84 + i * 50 + 12;
-    for (const p of t) {
-      dv.setFloat32(o, p[0], true);
-      dv.setFloat32(o + 4, p[1], true);
-      dv.setFloat32(o + 8, p[2], true);
-      o += 12;
-    }
-  });
-  return Buffer.from(bytes).toString('base64');
-}
-
 function boxStl(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): string {
   // The exact winding goalChamfer3d's box fixture uses (consistently outward), so the same
   // `closeOpenSheet`/kernel path reads it as a closed solid.

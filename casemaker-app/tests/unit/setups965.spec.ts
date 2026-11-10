@@ -14,6 +14,12 @@ import type { FeatureSource } from '@/engine/cnc/cam/model/features';
 import type { ParsedMesh } from '@/engine/import/stlParser';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { MountSpec } from '@/engine/cnc/setups/types';
+import { spherePositions } from './helpers/meshes';
+
+/** The shared sphere geometry, adapted to this file’s mesh type. */
+function sphere(r: number, rings = 24, segs = 48): ParsedMesh {
+  return meshOf(spherePositions(r, rings, segs));
+}
 
 function quad(out: number[], a: [number, number, number], b: [number, number, number], c: [number, number, number], d: [number, number, number]): void {
   out.push(...a, ...b, ...c, ...a, ...c, ...d);
@@ -46,21 +52,7 @@ function box(w: number, d: number, h: number): ParsedMesh {
 }
 
 /** A UV sphere, radius r, bottom at z 0 — no flat back, so the flip is what finishes it. */
-function sphere(r: number, rings = 24, segs = 48): ParsedMesh {
-  const p: number[] = [];
-  const at = (i: number, j: number): [number, number, number] => {
-    const phi = (i / rings) * Math.PI;
-    const theta = (j / segs) * 2 * Math.PI;
-    return [r + r * Math.sin(phi) * Math.cos(theta), r + r * Math.sin(phi) * Math.sin(theta), r - r * Math.cos(phi)];
-  };
-  for (let i = 0; i < rings; i++) {
-    for (let j = 0; j < segs; j++) {
-      const a = at(i, j), b = at(i + 1, j), c = at(i + 1, j + 1), d = at(i, j + 1);
-      p.push(...a, ...c, ...b, ...a, ...d, ...c);
-    }
-  }
-  return meshOf(p);
-}
+
 
 const VISE: MountSpec = { kind: 'vise', viseOpeningMm: 120 };
 

@@ -30,29 +30,12 @@ import { validateGoalObject } from '@/engine/cnc/engrave/jobSetup';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import type { EngraveTargetObject } from '@/types/engraveJob';
+import { binaryStlBase64 } from './helpers/meshes';
 
 afterEach(() => clearTargetObjectMeshCache());
 
 type V = [number, number, number];
 type Tri = [V, V, V];
-
-function binaryStl(tris: Tri[]): string {
-  const buf = new ArrayBuffer(84 + tris.length * 50);
-  const dv = new DataView(buf);
-  dv.setUint32(80, tris.length, true);
-  let off = 84;
-  for (const t of tris) {
-    off += 12;
-    for (const v of t) {
-      dv.setFloat32(off, v[0], true);
-      dv.setFloat32(off + 4, v[1], true);
-      dv.setFloat32(off + 8, v[2], true);
-      off += 12;
-    }
-    off += 2;
-  }
-  return Buffer.from(new Uint8Array(buf)).toString('base64');
-}
 
 /** A closed box; its top face is at `z1`. */
 function box(x0: number, x1: number, y0: number, y1: number, z0: number, z1: number): Tri[] {
@@ -79,7 +62,7 @@ function goal(over: Partial<EngraveTargetObject> = {}): EngraveTargetObject {
     name: 'big.stl',
     format: 'stl',
     sha256: (n++).toString(16).padStart(64, 'a'),
-    data: binaryStl(stepped()),
+    data: binaryStlBase64(stepped()),
     size: { x: 200, y: 100, z: 40 },
     position: { x: 38, y: 19, z: 0 },
     rotation: 0,
