@@ -102,7 +102,36 @@ const SHELL_SECTION_IDS: SidebarSectionId[] = SECTIONS.map((s) => s.id).filter(
  * cutting job opened from a file used to sit on a placeholder board project and show Board, Case,
  * HATs, Features, assets and Export. Home (item 48) is the way to the other workspaces.
  */
-const CNC_SECTION_IDS: SidebarSectionId[] = ['cnc-engrave', 'cnc-sim'];
+/**
+ * #1123-59 review (the analyst's ruling, #1123 comment 6782275435) — WHAT THE CNC RAIL KEEPS OF
+ * THE PROJECT. The bench's complaint was the SHELL's menu (Board, Case parameters, the ports,
+ * HATs, features and assets of the placeholder board project) beside a blank in the machine. But
+ * a blank's or an imported part's own geometry has exactly one editor — the Part panel (#282:
+ * the corner radius is unreachable by any other route) — and its Export is the project's product.
+ * So the CNC rail is the machine pin + the project's OWN-PART editor (the archetype's own
+ * section, never the shell's) + Job + Simulate + Export. A BOARD CASE has no part editor of its
+ * own (and a job opened from a file sits on the placeholder board project), so its CNC rail is
+ * the machine pin + Job + Simulate, with no Export.
+ */
+const CNC_OWN_PART_SECTIONS: Record<Archetype, SidebarSectionId[]> = {
+  shell: [],
+  // A stand has no own-part editor either: its parameters live in the shell's Case sections.
+  stand: [],
+  rack: ['rack'],
+  insert: ['insert'],
+  toolbox: ['toolbox'],
+  badge: ['part'],
+  blank: ['part'],
+};
+
+function cncSectionIds(archetype: Archetype): SidebarSectionId[] {
+  return [
+    ...CNC_OWN_PART_SECTIONS[archetype],
+    ...(archetype === 'shell' ? ([] as SidebarSectionId[]) : (['export'] as SidebarSectionId[])),
+    'cnc-engrave',
+    'cnc-sim',
+  ];
+}
 
 /** The section ids the current archetype offers. */
 function sectionIdsFor(archetype: Archetype): SidebarSectionId[] {
@@ -151,7 +180,7 @@ export function Sidebar() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const allowedIds = workspace === 'cnc' ? CNC_SECTION_IDS : sectionIdsFor(archetype);
+  const allowedIds = workspace === 'cnc' ? cncSectionIds(archetype) : sectionIdsFor(archetype);
 
   // A stale active section (e.g. HATs was open when the rack got enabled)
   // would leave the right rail showing an inapplicable panel.

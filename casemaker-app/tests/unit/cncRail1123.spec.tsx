@@ -17,7 +17,8 @@ vi.mock('@/platform/features', async (importOriginal) => {
 });
 
 import { Sidebar } from '@/components/layout/Sidebar';
-import { useProjectStore } from '@/store/projectStore';
+import { createDefaultProject, useProjectStore } from '@/store/projectStore';
+import { findTemplate } from '@/library/templates';
 import { useViewportStore } from '@/store/viewportStore';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -47,6 +48,45 @@ describe('#1123-59 the rail follows the workspace', () => {
       .filter((id): id is string => id !== null && id.startsWith('sidebar-button-'))
       .sort();
     expect(buttons).toEqual(['sidebar-button-cnc-engrave', 'sidebar-button-cnc-sim']);
+  });
+
+  it('the CNC rail keeps the project’s OWN-PART editor and Export — never the shell’s menu', () => {
+    // The analyst's ruling (#1123 comment 6782275435): a blank's corner radius and a part's own
+    // geometry are edited ONLY in their own panel, and Export is that project's product.
+    const kinds: Array<[string, string[]]> = [
+      ['blank', ['part', 'export', 'cnc-engrave', 'cnc-sim']],
+      ['badge-blank', ['part', 'export', 'cnc-engrave', 'cnc-sim']],
+      ['tool-insert', ['insert', 'export', 'cnc-engrave', 'cnc-sim']],
+      ['toolbox', ['toolbox', 'export', 'cnc-engrave', 'cnc-sim']],
+      ['mini-rack-10in', ['rack', 'export', 'cnc-engrave', 'cnc-sim']],
+    ];
+    for (const [template, expected] of kinds) {
+      cleanup();
+      useProjectStore.setState({ welcomeMode: false });
+      useProjectStore.getState().setProject(findTemplate(template)!.build());
+      // Opening a project sets the case workspace; the operator enters CNC from the door or a job.
+      useViewportStore.setState({ activeSidebarSection: null, workspace: 'cnc', selection: null });
+      render(<Sidebar />);
+      const ids = [...screen.getByTestId('sidebar').querySelectorAll('button')]
+        .map((b) => b.getAttribute('data-testid'))
+        .filter((id): id is string => id !== null && id.startsWith('sidebar-button-'))
+        .map((id) => id.replace('sidebar-button-', ''));
+      expect(ids, template).toEqual(expected);
+    }
+  });
+
+  it('a BOARD CASE in CNC keeps only the pin, Job and Simulate — no Export', () => {
+    // A job opened from a file sits on the placeholder board project; that project's menu is the
+    // bench's complaint and its Export is the print product's, so neither is on the CNC rail.
+    useProjectStore.setState({ project: createDefaultProject('rpi-4b'), welcomeMode: false });
+    useViewportStore.setState({ activeSidebarSection: null, workspace: 'cnc', selection: null });
+    render(<Sidebar />);
+    const ids = [...screen.getByTestId('sidebar').querySelectorAll('button')]
+      .map((b) => b.getAttribute('data-testid'))
+      .filter((id): id is string => id !== null && id.startsWith('sidebar-button-'))
+      .map((id) => id.replace('sidebar-button-', ''));
+    expect(ids).toEqual(['cnc-engrave', 'cnc-sim']);
+    expect(screen.queryByTestId('sidebar-button-export')).toBeNull();
   });
 
   it('a case project keeps its own rail, and opening the job switches the rail to the CNC list', () => {
