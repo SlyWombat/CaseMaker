@@ -34,7 +34,12 @@ test('Design/Cut: Cut runs the gate and Back to Design returns to the stack', as
   await expect(page.getByTestId('cnc-mode-cut')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('engrave-preflight')).toBeVisible();
   await expect(page.getByTestId('engrave-preflight')).toHaveAttribute('data-state', 'blocked');
-  await expect(page.getByTestId(/^engrave-preflight-row-\d+-no-generate$/)).toBeVisible();
+  // #1128 — the first screen says what to DO, and the Do row is on it without scrolling.
+  await expect(page.getByTestId('engrave-preflight-summary')).toContainText('1 to do');
+  await expect(page.getByTestId('engrave-preflight-do')).toHaveAttribute('data-count', '1');
+  await expect(page.getByTestId(/^engrave-preflight-row-\d+-no-generate$/)).toBeInViewport();
+  // Information is folded with its count, not another wall of notes.
+  expect(await page.getByTestId('engrave-preflight-know').evaluate((el) => (el as HTMLDetailsElement).open)).toBe(false);
   await expect(page.getByTestId('engrave-preflight-first-blocking')).toContainText('Generate first.');
   // The Design stack is replaced, not merely covered.
   await expect(page.getByTestId('engrave-stock-line')).toBeHidden();

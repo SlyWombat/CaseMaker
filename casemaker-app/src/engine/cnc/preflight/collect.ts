@@ -199,6 +199,8 @@ export function collect(input: PreflightInput): PreflightRow[] {
         message: row.finding.message,
         owner,
         cause: causeFor(scope, { labelId: row.finding.labelId }),
+        // #1128 — the feeds-proxy fact rides through untouched: the Cut step's band split needs it.
+        ...(row.finding.feedsProxyMm === undefined ? {} : { feedsProxyMm: row.finding.feedsProxyMm }),
       });
     }
   }
