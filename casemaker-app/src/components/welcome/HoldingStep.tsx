@@ -124,6 +124,7 @@ import {
   type MountOption,
   type PictureRect,
 } from './holdingMounts';
+import type { WorkFacts } from './workFacts';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
@@ -1359,6 +1360,11 @@ function HoldingSideView({
 export interface HoldingStepProps {
   job: EngraveJob;
   answers: SetupAnswers;
+  /**
+   * #1103 — WHAT THE WORK TAKES (the question step's choice): the recommended seat reads it, so a
+   * 19.1 mm surfacing pass on a 20.1 mm plate is not recommended the block seat. Absent = unknown.
+   */
+  work?: WorkFacts;
   /** Apply the answer immediately: there is no later Finish to collect it. */
   onAnswers: (answers: SetupAnswers) => void;
   /**

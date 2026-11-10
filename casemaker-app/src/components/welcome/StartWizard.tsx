@@ -53,6 +53,7 @@ import { OperationStep, type OperationChoice } from './OperationStep';
 import { operationCreateBlocked } from './operationCreate';
 import type { PendingStock, StartStockSeed } from './StartStockStep';
 import { proposeStock, type StockProposal } from '@/engine/cnc/stockProposal';
+import { workFactsOf } from './workFacts';
 import { proposedMaterialFor, proposedStockFor, workShapeFor } from './workShape';
 
 /**
@@ -1011,6 +1012,8 @@ export function StartWizard(): JSX.Element {
         <HoldingStep
           job={job}
           answers={answers}
+          // #1103 — the recommended seat reads what the work takes, from the question step.
+          work={workFactsOf(operationChoice, proposal)}
           onAnswers={applyHoldAnswers}
           onRotary={applyRotaryHolding}
           onBedHold={applyBedHolding}
