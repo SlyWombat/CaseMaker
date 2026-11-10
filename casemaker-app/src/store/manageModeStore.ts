@@ -55,7 +55,9 @@ const CLOSED = {
   scope: 'tools' as ManageScope,
   selectedKey: null,
   search: '',
-  tier: 'all' as TierFilter,
+  // #1172 item 1 — the list opens on the bits the operator OWNS; the catalogue and the built-ins
+  // are behind the "also show bits you could buy" switch (`ToolsScope`).
+  tier: 'owned' as TierFilter,
   registerOpen: false,
   door: 'scan' as RegisterDoor,
 };

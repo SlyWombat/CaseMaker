@@ -192,6 +192,9 @@ describe('#311 — how the mode is entered', () => {
     // surface exists for, and `welcomeMode` is what makes that state testable without a rebuild.
     useProjectStore.setState({ welcomeMode: true });
     useManageModeStore.getState().openManage();
+    // #1172 — the list now opens on the bits the operator owns. These cases read rows from every
+    // tier, so they open the catalogue switch; the owned default has its own case below.
+    useManageModeStore.getState().setTier('all');
     render(<AppShell />);
     expect(q('manage-mode')).not.toBeNull();
     expect(q('welcome-search')).toBeNull();
@@ -203,6 +206,9 @@ describe('#311 — how the mode is entered', () => {
   it('leaving the mode leaves the project exactly as it was', () => {
     useProjectStore.setState({ welcomeMode: true });
     useManageModeStore.getState().openManage();
+    // #1172 — the list now opens on the bits the operator owns. These cases read rows from every
+    // tier, so they open the catalogue switch; the owned default has its own case below.
+    useManageModeStore.getState().setTier('all');
     const before = useProjectStore.getState().project;
     useManageModeStore.getState().closeManage();
     expect(useProjectStore.getState().project).toBe(before);
@@ -214,6 +220,9 @@ describe('#311 — the tool list, grouped by tier', () => {
   beforeEach(async () => {
     await goOnline();
     useManageModeStore.getState().openManage();
+    // #1172 — the list now opens on the bits the operator owns. These cases read rows from every
+    // tier, so they open the catalogue switch; the owned default has its own case below.
+    useManageModeStore.getState().setTier('all');
   });
 
   it('draws one group per tier that has rows, in the tier order', () => {
@@ -267,11 +276,19 @@ describe('#311 — the tool list, grouped by tier', () => {
     expect(groupIds()).toEqual(['owned']);
   });
 
-  it('a tier chip filters to that tier alone', () => {
+  it('#1172 — opens on the bits you own; the catalogue switch adds the rest', () => {
+    // The shared setup opens every tier; this case is about the DEFAULT the shop opens on.
+    useManageModeStore.getState().setTier('owned');
     render(<ManageMode />);
-    fireEvent.click(screen.getByTestId('manage-chip-yours'));
-    expect(groupIds()).toEqual(['yours']);
-    expect(screen.getByTestId('manage-chip-yours').getAttribute('aria-pressed')).toBe('true');
+    expect(groupIds()).toEqual(['owned']);
+    // The header counts the inventory, not every row the app knows.
+    const counts = screen.getByTestId('manage-bits-counts').textContent ?? '';
+    expect(counts).toContain('1 kinds');
+    expect(counts).toContain('2 pieces');
+
+    fireEvent.click(screen.getByTestId('manage-show-catalogue'));
+    expect(groupIds()).toEqual(['owned', 'yours', 'catalogue', 'builtin']);
+    expect((screen.getByTestId('manage-show-catalogue') as HTMLInputElement).checked).toBe(true);
   });
 });
 
@@ -279,6 +296,9 @@ describe('#311 — the detail rail', () => {
   beforeEach(async () => {
     await goOnline();
     useManageModeStore.getState().openManage();
+    // #1172 — the list now opens on the bits the operator owns. These cases read rows from every
+    // tier, so they open the catalogue switch; the owned default has its own case below.
+    useManageModeStore.getState().setTier('all');
   });
 
   it('selecting a row shows the definition, unknowns named', () => {
@@ -370,6 +390,9 @@ describe('#335 — a Yours row is the one that can be changed', () => {
     );
     await useToolRegistryStore.getState().refresh();
     useManageModeStore.getState().openManage();
+    // #1172 — the list now opens on the bits the operator owns. These cases read rows from every
+    // tier, so they open the catalogue switch; the owned default has its own case below.
+    useManageModeStore.getState().setTier('all');
   });
 
   it('selecting a user: row shows the editor seeded from the row, with nothing to save yet', () => {
@@ -479,6 +502,9 @@ describe('#331 — the inventory editor answers to the shared count rule', () =>
     );
     await useToolRegistryStore.getState().refresh();
     useManageModeStore.getState().openManage();
+    // #1172 — the list now opens on the bits the operator owns. These cases read rows from every
+    // tier, so they open the catalogue switch; the owned default has its own case below.
+    useManageModeStore.getState().setTier('all');
   });
 
   /** The editor for the one owned cutter, with `text` in its quantity box. */
@@ -537,6 +563,9 @@ describe('#311 — cloning a catalogue row', () => {
     );
     await useToolRegistryStore.getState().refresh();
     useManageModeStore.getState().openManage();
+    // #1172 — the list now opens on the bits the operator owns. These cases read rows from every
+    // tier, so they open the catalogue switch; the owned default has its own case below.
+    useManageModeStore.getState().setTier('all');
   });
 
   it('is a new `user:` row that does not inherit Makera’s id or cutter number', async () => {
@@ -607,6 +636,9 @@ describe('#328 — a sync’s notes reach the screen', () => {
   it('lists every note under the counts, each with its weight, and keeps them when the notice is dismissed', async () => {
     await goOnlineWithSync(NOTES);
     useManageModeStore.getState().openManage();
+    // #1172 — the list now opens on the bits the operator owns. These cases read rows from every
+    // tier, so they open the catalogue switch; the owned default has its own case below.
+    useManageModeStore.getState().setTier('all');
     render(<ManageMode />);
 
     // Before any sync there is nothing to show: these are the LAST sync's notes, not a standing box.
@@ -637,6 +669,9 @@ describe('#328 — a sync’s notes reach the screen', () => {
   it('shows nothing at all when the sync had nothing to add', async () => {
     await goOnlineWithSync([]);
     useManageModeStore.getState().openManage();
+    // #1172 — the list now opens on the bits the operator owns. These cases read rows from every
+    // tier, so they open the catalogue switch; the owned default has its own case below.
+    useManageModeStore.getState().setTier('all');
     render(<ManageMode />);
 
     fireEvent.click(screen.getByTestId('manage-sync'));
@@ -662,6 +697,9 @@ describe('#328 — a sync’s notes reach the screen', () => {
 
     });
     useManageModeStore.getState().openManage();
+    // #1172 — the list now opens on the bits the operator owns. These cases read rows from every
+    // tier, so they open the catalogue switch; the owned default has its own case below.
+    useManageModeStore.getState().setTier('all');
     render(<ManageMode />);
 
     const notes = screen.getByTestId('manage-sync-notes');
@@ -695,6 +733,9 @@ describe('#309 — the register frame and its three doors', () => {
     );
     await useToolRegistryStore.getState().refresh();
     useManageModeStore.getState().openManage();
+    // #1172 — the list now opens on the bits the operator owns. These cases read rows from every
+    // tier, so they open the catalogue switch; the owned default has its own case below.
+    useManageModeStore.getState().setTier('all');
   });
 
   /** Register from the rail, and open a door. */
@@ -962,6 +1003,9 @@ describe('#311 — no service at this origin', () => {
     const reason = 'the page at http://localhost:5199 answered with text/html, not the house service';
     await goAbsent(reason);
     useManageModeStore.getState().openManage();
+    // #1172 — the list now opens on the bits the operator owns. These cases read rows from every
+    // tier, so they open the catalogue switch; the owned default has its own case below.
+    useManageModeStore.getState().setTier('all');
     render(<ManageMode />);
 
     expect(q('manage-absent')).not.toBeNull();
@@ -1132,6 +1176,8 @@ describe('#1150 — the destructive presses', () => {
     useManageModeStore.getState().openManage('tools');
     render(<ManageMode />);
 
+    // #1172 — the user: definition is behind the catalogue switch (the list opens on owned bits).
+    fireEvent.click(screen.getByTestId('manage-show-catalogue'));
     fireEvent.click(screen.getByTestId(`manage-tools-row-${USER.key}`));
     fireEvent.click(screen.getByTestId('manage-remove-definition'));
     expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
