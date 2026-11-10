@@ -1640,7 +1640,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           } catch {
             continue; // a rung that cannot plan this remainder is not a rung
           }
-          const coverage = goalCoverage(measured.ops.map((o) => o.outcome.ir));
+          // #1125 — THE LADDER'S PER-RUNG FOLD IS TRANSIENT TOO (`remember: false`): a rung's field
+          // lives only until the next rung, and caching every rung would hold the organizer's grid
+          // several times over. The plan outcome keeps the cache; the probe does not.
+          const coverage = goalCoverage(measured.ops.map((o) => o.outcome.ir), false);
           if (coverage === null) continue;
           const leftoverShare = coverage.leftoverCells / Math.max(1, coverage.coveredCells);
           const cycleSeconds = measured.ops.reduce((n, o) => n + o.outcome.ir.operations.reduce((k, op) => k + (op.estimatedSeconds ?? 0), 0), 0);
