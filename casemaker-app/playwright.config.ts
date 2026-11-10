@@ -16,6 +16,32 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const LAN_PORT = lanServerPort();
 const LAN_BASE = `http://127.0.0.1:${LAN_PORT}`;
 
+// #1180 A1 — THE E2E TIERS. Selection is by FILE, not by title tag, so no test's name changes and
+// nothing is skipped: `--project smoke` / `--project nightly` select; a bare `playwright test`
+// (the land gate) still runs every spec once across the projects.
+//
+// @smoke — the 12 files the review named: a boot, the front door, the wizard, a first job, the CNC
+// mode, the run states, a simulation, the sim worker, an export, the board picker, the templates
+// and the phone workspace.
+const SMOKE_DESKTOP = [
+  'boot.spec.ts',
+  'welcomeFrontDoor878.spec.ts',
+  'startWizard.spec.ts',
+  'firstJob.acceptance.spec.ts',
+  'cncMode.spec.ts',
+  'runStates.spec.ts',
+  'simulation.spec.ts',
+  'sim-worker.spec.ts',
+  'export.spec.ts',
+  'board-picker.spec.ts',
+  'templates-smoke.spec.ts',
+];
+const SMOKE_MOBILE = 'mobile/mobileWorkspace.spec.ts';
+// @nightly — the two walks the review measured at ~17–20 minutes on every run.
+const NIGHTLY = ['saveAllPrograms.spec.ts', 'flipMouldShell.spec.ts'];
+/** A project's testMatch/testIgnore entries are globs relative to `testDir`. */
+const asGlobs = (files: string[]): string[] => files.map((file) => `**/${file}`);
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
@@ -37,8 +63,10 @@ export default defineConfig({
     {
       name: 'chromium',
       // The phone and tablet specs get their own projects (#134) so their
-      // viewports live here rather than in a per-file `test.use`.
-      testIgnore: /mobile\/|tablet\//,
+      // viewports live here rather than in a per-file `test.use`. The smoke and
+      // nightly files have projects of their own (#1180 A1), so they are ignored
+      // here — every spec runs exactly once across the projects.
+      testIgnore: [/mobile\/|tablet\//, ...asGlobs([...SMOKE_DESKTOP, ...NIGHTLY])],
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1024, height: 768 },
@@ -54,6 +82,8 @@ export default defineConfig({
       // regressions surface in CI instead of on a real handset.
       name: 'mobile-chromium',
       testMatch: /mobile\/.*\.spec\.ts/,
+      // #1180 A1 — the phone smoke file runs in `smoke-mobile`, not here.
+      testIgnore: '**/mobile/mobileWorkspace.spec.ts',
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 390, height: 844 },
@@ -76,6 +106,51 @@ export default defineConfig({
         viewport: { width: 768, height: 1024 },
         deviceScaleFactor: 1,
         hasTouch: true,
+        launchOptions: {
+          args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'],
+        },
+      },
+    },
+    {
+      // #1180 A1 — THE SMOKE TIER: twelve files, the fastest honest walk of the app (see
+      // SMOKE_DESKTOP above). `npm run test:e2e:smoke` selects this and `smoke-mobile`.
+      name: 'smoke',
+      testMatch: asGlobs(SMOKE_DESKTOP),
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1024, height: 768 },
+        deviceScaleFactor: 1,
+        launchOptions: {
+          args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'],
+        },
+      },
+    },
+    {
+      // #1180 A1 — the phone member of the smoke tier, at the same phone profile as
+      // `mobile-chromium` so the workspace check is the real one.
+      name: 'smoke-mobile',
+      testMatch: asGlobs([SMOKE_MOBILE]),
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 390, height: 844 },
+        deviceScaleFactor: 2,
+        isMobile: true,
+        hasTouch: true,
+        launchOptions: {
+          args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'],
+        },
+      },
+    },
+    {
+      // #1180 A1 — THE NIGHTLY TIER: the two long walks (saveAllPrograms ~17 min by its own
+      // comment; flipMouldShell's 20-min timeout). `npm run test:e2e:nightly` selects this; the
+      // land gate (`playwright test`, no --project) still runs them.
+      name: 'nightly',
+      testMatch: asGlobs(NIGHTLY),
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1024, height: 768 },
+        deviceScaleFactor: 1,
         launchOptions: {
           args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'],
         },

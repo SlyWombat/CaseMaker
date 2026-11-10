@@ -1,5 +1,78 @@
 import { defineConfig } from 'vitest/config';
 import path from 'node:path';
+import { globSync, readFileSync } from 'node:fs';
+
+/**
+ * #1180 S1 — THE TIERS, RE-CUT BY THE ANALYST'S MEASUREMENT (S0, 2026-11-10).
+ *
+ * Two projects, not four: the measured time is in the acceptance / bench / card specs, which are
+ * 18 files and 2,055 s of the 3,785 s total. Everything else is `fast` — about 1,730 s of file
+ * time, roughly four minutes of wall-clock at 8 workers — so every ordinary change runs it.
+ * A bare `vitest run` (the land gate) runs both, so nothing is skipped and no test leaves the
+ * suite.
+ *
+ *   acceptance  the 18 measured files: the 12 env-gated card files, benchTypicalJobs, pickTray858,
+ *               pickCounters857, and the three *.acceptance walks.
+ *   fast        every other spec.
+ *
+ * The sets are names, computed once here; the union is checked below and throws if any spec would
+ * be missed. (There is deliberately no print or CNC tier: the measurement showed the whole print
+ * side costs 29 s and the #1023-family clusters 19 s — a tier for those saves nothing.)
+ */
+const ROOT = process.cwd();
+const SPEC_GLOB = 'tests/unit/**/*.spec.{ts,tsx}';
+
+/** The 18 files S0 measured in the acceptance / bench / card group. */
+const ACCEPTANCE_FILES = new Set([
+  // The 12 env-gated card files.
+  'opsAcceptance959.spec.ts',
+  'featureAcceptance958.spec.ts',
+  'figureAcceptance965.spec.ts',
+  'pocketShadowElephant970.spec.ts',
+  'pocketShadowInvariant970.spec.ts',
+  'trayReachGate1037.spec.ts',
+  'rimOpenLoop962.spec.ts',
+  'seamProgress1038.spec.ts',
+  'finishClOrganizer960.spec.ts',
+  'skinWallFoot1135.spec.ts',
+  'goalEdgeBreakTray.spec.ts',
+  'triangleBins960.spec.ts',
+  // The bench / acceptance walks (#1180 S0's 2,055 s group).
+  'benchTypicalJobs.spec.ts',
+  'pickTray858.spec.ts',
+  'pickCounters857.spec.ts',
+  'flipMouldShell.acceptance.spec.ts',
+  'rotaryReliefAcceptance.spec.ts',
+  'rotaryFluidity.acceptance.spec.ts',
+]);
+
+function classifySpecs(): { acceptance: string[]; fast: string[] } {
+  const files = globSync(SPEC_GLOB, { cwd: ROOT });
+  const acceptance: string[] = [];
+  const fast: string[] = [];
+  for (const file of files) {
+    const base = file.split('/').pop() ?? file;
+    if (ACCEPTANCE_FILES.has(base)) acceptance.push(file);
+    else fast.push(file);
+  }
+  if (acceptance.length + fast.length !== files.length) {
+    throw new Error(`#1180: ${acceptance.length + fast.length} specs classified of ${files.length}`);
+  }
+  // A typo in the list would silently shrink the tier: every named file must exist.
+  const assigned = new Set(acceptance.map((f) => f.split('/').pop()));
+  for (const name of ACCEPTANCE_FILES) {
+    if (!assigned.has(name)) throw new Error(`#1180: acceptance file not found: ${name}`);
+  }
+  return { acceptance, fast };
+}
+
+const tiers = classifySpecs();
+
+/** Shared project options: both tiers run the same way, only the file set differs. */
+const project = (name: string, include: string[]) => ({
+  extends: true as const,
+  test: { name, include },
+});
 
 export default defineConfig({
   // #181 — the unit tests run the web target, matching the default build. Without this the
@@ -30,11 +103,13 @@ export default defineConfig({
     // 180000 were doing one at a time what belongs in one place.
     testTimeout: 180_000,
     hookTimeout: 60_000,
-    include: ['tests/unit/**/*.spec.ts', 'tests/unit/**/*.spec.tsx'],
     // Seeds the bundled-font cache from the TTFs on disk (issue #180) — specs typeset labels
     // synchronously and have no `fetch` seam, so the six faces must be pre-parsed.
     setupFiles: ['./tests/setup/fonts.ts'],
     globals: false,
     coverage: { reporter: ['text', 'html'] },
+    // #1180 S1 — the two tiers. `extends: true` inherits the options above; a bare
+    // `vitest run` runs both, which is the land gate.
+    projects: [project('acceptance', tiers.acceptance), project('fast', tiers.fast)],
   },
 });
