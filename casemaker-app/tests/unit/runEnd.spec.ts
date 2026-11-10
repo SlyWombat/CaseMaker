@@ -367,17 +367,23 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
       stock: { lengthMm: 100, widthMm: 100, thicknessMm: 25 },
       registration,
       // #1179 step 3 — what the program cut, on the 2 mm stock frame (100 × 100 → 50 × 50 cells);
-      // the profile goes through at Z −5.2, so its level is 104.
-      cutMap: expect.objectContaining({
-        cellMm: 2,
-        cols: 50,
-        rows: 50,
-        stepMm: 0.05,
-        depth: expect.objectContaining({ encoding: 'rle' }),
-        flat: expect.objectContaining({ encoding: 'rle' }),
-      }),
+      // the profile goes through at Z −5.2, so its level is 104. One entry per setup/face.
+      cutMaps: [
+        expect.objectContaining({
+          setupIndex: 1,
+          state: 'complete',
+          map: expect.objectContaining({
+            cellMm: 2,
+            cols: 50,
+            rows: 50,
+            stepMm: 0.05,
+            depth: expect.objectContaining({ encoding: 'rle' }),
+            flat: expect.objectContaining({ encoding: 'rle' }),
+          }),
+        }),
+      ],
     });
-    expect((recordedRun as { cutMap: { depth: { data: string } } }).cutMap.depth.data).toContain('104');
+    expect((recordedRun as { cutMaps: { map: { depth: { data: string } } }[] }).cutMaps[0]!.map.depth.data).toContain('104');
 
     // A caller that knows less leaves the facts out — the record never guesses, and a blank with
     // no stated size gets no stock frame and therefore no cut map.

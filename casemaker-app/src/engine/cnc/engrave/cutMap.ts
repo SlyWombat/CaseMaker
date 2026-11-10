@@ -1,33 +1,42 @@
 /**
- * #1179 slice A step 3 — THE PER-PROGRAM CUT MAP: what a program left of the blank, on a 2 mm
- * raster, as DEPTH + FLATNESS.
+ * #1179 slice A step 3 — THE PER-SETUP CUT MAP: what the blank has been through, per FACE.
  *
- * The map is in the STOCK frame (`x0Mm`/`y0Mm` = the stock's min corner; work XY starts at the
- * stock corner, so both are 0) and carries, per cell:
+ * The analyst's ruling (comment 6775024844, 2026-11-10) shaped this module:
  *
- *  - `depth`: the deepest Z the program cut in that cell, from the stock top (work Z0), quantised
- *    to `stepMm` (0.05 mm): `level = round(depth / 0.05)`, 0 = uncut. RLE `count:level` runs,
- *    row-major.
- *  - `flat`: whether that deepest pass left a FLAT floor — a horizontal cut or a straight plunge.
- *    A ramp's exit is sloped and is never claimed flat. RLE `count:0|1` runs.
+ * 1. ONE MAP PER SETUP/FACE. A face's depths are measured from that face's top and its XY is that
+ *    setup's frame; side 1 and side 2 never merge.
+ * 2. A MAP IS NEVER SILENTLY PARTIAL. Each setup's entry is `complete` (every finished program of
+ *    that setup merged in) or `unknown` (something could not be merged); once `unknown` it stays
+ *    unknown for that setup until the blank is replaced — a later program never restarts a fresh
+ *    layer that then reads as the whole map.
+ * 3. NO CAP THAT DROPS THE MAP. When a setup's map would exceed the record's budget it COARSENS —
+ *    2 → 4 → 8 mm; a coarse cell keeps the deepest depth and is flat only when its children agree —
+ *    and the stored pitch travels with the map. Only a map that still does not fit at 8 mm becomes
+ *    `unknown`, and the record states why.
+ * 4. Merging is within the same job, setup and placement only (the caller drops the previous list
+ *    when the blank is not the same one); a different package of the same job on the same setup
+ *    merges normally.
  *
- * A cell is CUT when the cutter's swept area (the move's line, grown by the tool radius, and never
- * less than half a cell so a point-sized tool still marks its own cell) reaches the cell centre.
- * Both streams are capped at 4,096 characters; over the cap the whole map is null — never a
- * silently partial grid (the consumer then falls back to the current plan's own footprint).
+ * Geometry, unchanged from the measured design: the map is in the STOCK frame (`x0Mm`/`y0Mm` = the
+ * stock's min corner; work XY starts at the stock corner, so both are 0) and carries, per cell, the
+ * deepest level the programs cut below the face top (quantised to `stepMm`, 0 = uncut) and whether
+ * the deepest pass left a FLAT floor (a horizontal cut or a straight plunge; a ramp's exit is
+ * sloped and is never claimed flat). Both streams are RLE `count:value`, row-major; the record's
+ * per-stream budget is `CUT_MAP_MAX_STREAM`.
  *
- * The record's map is CUMULATIVE after each program: the finish-write merges the new program's
- * layer with the newest record for the same job and package (`mergeCutMaps`) — the deepest cut
- * wins, and a flat floor is kept on a tie. That is what a restart needs: one map says everything
- * the blank has been through under this plan.
+ * The REAL 19-program tray package (`m1trayF-banded2`, 160 × 126) is what fixed the bounds: side
+ * 1's map is 96.5 % of the budget by its tenth program, and it was the cross-face merge that
+ * overflowed — the failure this per-face + coarsening shape exists to stop.
  */
 
 import { parseGcode } from '@/engine/cnc/gcode';
-import type { FinishedCutMap } from '@/platform/locationClient';
+import type { FinishedCutMap, FinishedSetupCutMap } from '@/platform/locationClient';
 
 export const CUT_MAP_CELL_MM = 2;
+/** The pitches a map may be STORED at, coarsest last (the ruling's 2 → 4 → 8 mm). */
+export const CUT_MAP_PITCHES = [2, 4, 8] as const;
 export const CUT_MAP_STEP_MM = 0.05;
-/** Each stream's own cap; over it the whole map is null. */
+/** The record's per-stream budget; over it the map coarsens, and at the last pitch goes unknown. */
 export const CUT_MAP_MAX_STREAM = 4096;
 
 export interface CutMapStock {
@@ -45,6 +54,9 @@ export interface CutMapGrid {
   /** 1 when the deepest pass over the cell left a flat floor. */
   flat: number[];
 }
+
+/** A fitted map, or the stated reason a face cannot be mapped at all. */
+export type CutMapFit = { kind: 'map'; map: FinishedCutMap } | { kind: 'unknown'; reason: string };
 
 /** `count:value` runs over row-major values; a value of 0 still gets its run. */
 export function encodeRuns(values: readonly number[]): string {
@@ -71,6 +83,82 @@ export function decodeRuns(data: string, expected: number): number[] | null {
     for (let i = 0; i < count; i++) out.push(value);
   }
   return out.length === expected ? out : null;
+}
+
+/**
+ * Halve the grid: each coarse cell keeps the DEEPEST child's level, and is FLAT only when every
+ * child agrees — the same level, and every one a flat floor. A coarse cell over a step or over a
+ * sloped patch is therefore never claimed flat (a conservative floor for the consumer).
+ */
+export function coarsenGrid(grid: CutMapGrid): CutMapGrid {
+  const cols = Math.ceil(grid.cols / 2);
+  const rows = Math.ceil(grid.rows / 2);
+  const levels = new Array<number>(cols * rows).fill(0);
+  const flat = new Array<number>(cols * rows).fill(0);
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      let deepest = 0;
+      let uniform = true;
+      let allFlat = true;
+      let first: number | null = null;
+      for (let dy = 0; dy < 2; dy++) {
+        for (let dx = 0; dx < 2; dx++) {
+          const c = col * 2 + dx;
+          const r = row * 2 + dy;
+          if (c >= grid.cols || r >= grid.rows) continue;
+          const at = r * grid.cols + c;
+          const level = grid.levels[at]!;
+          if (first === null) first = level;
+          else if (level !== first) uniform = false;
+          if (level > deepest) deepest = level;
+          if (grid.flat[at] !== 1) allFlat = false;
+        }
+      }
+      levels[row * cols + col] = deepest;
+      flat[row * cols + col] = uniform && allFlat ? 1 : 0;
+    }
+  }
+  return { cols, rows, levels, flat };
+}
+
+/** Encode a grid at `cellMm`; null when either stream is over the budget. */
+function encodeGrid(grid: CutMapGrid, cellMm: number, budget: number): FinishedCutMap | null {
+  const depth = encodeRuns(grid.levels);
+  const flat = encodeRuns(grid.flat);
+  if (depth.length > budget || flat.length > budget) return null;
+  return {
+    cellMm,
+    cols: grid.cols,
+    rows: grid.rows,
+    x0Mm: 0,
+    y0Mm: 0,
+    stepMm: CUT_MAP_STEP_MM,
+    flat: { encoding: 'rle', data: flat },
+    depth: { encoding: 'rle', data: depth },
+  };
+}
+
+/**
+ * Fit a grid into the record's budget, coarsening 2 → 4 → 8 mm as needed. `cellMm` is the pitch the
+ * grid is ALREADY at (a merged map starts from its stored pitch and never refines); `budget` exists
+ * so a test can drive the loop with small numbers — production always uses the record's 4,096.
+ */
+export function fitCutMapGrid(
+  grid: CutMapGrid,
+  opts: { cellMm?: number; budget?: number } = {},
+): CutMapFit {
+  const budget = opts.budget ?? CUT_MAP_MAX_STREAM;
+  let pitch = opts.cellMm ?? CUT_MAP_CELL_MM;
+  let current = grid;
+  for (;;) {
+    const map = encodeGrid(current, pitch, budget);
+    if (map !== null) return { kind: 'map', map };
+    if (pitch >= CUT_MAP_PITCHES[CUT_MAP_PITCHES.length - 1]!) {
+      return { kind: 'unknown', reason: 'the map does not fit the record even at 8 mm cells' };
+    }
+    pitch *= 2;
+    current = coarsenGrid(current);
+  }
 }
 
 /** Distance from a point to a segment (mm). */
@@ -124,39 +212,23 @@ function gridFor(stock: CutMapStock): CutMapGrid {
 }
 
 /**
- * The map from a finished grid: encodes both streams and applies the cap — over it the whole map is
- * null. Exported so the layer builder and `mergeCutMaps` share one encoder, and so a test can hold a
- * grid the parser would take thousands of lines to make.
- */
-export function cutMapFromGrid(grid: CutMapGrid): FinishedCutMap | null {
-  const depth = encodeRuns(grid.levels);
-  const flat = encodeRuns(grid.flat);
-  if (depth.length > CUT_MAP_MAX_STREAM || flat.length > CUT_MAP_MAX_STREAM) return null;
-  return {
-    cellMm: CUT_MAP_CELL_MM,
-    cols: grid.cols,
-    rows: grid.rows,
-    x0Mm: 0,
-    y0Mm: 0,
-    stepMm: CUT_MAP_STEP_MM,
-    flat: { encoding: 'rle', data: flat },
-    depth: { encoding: 'rle', data: depth },
-  };
-}
-
-/**
- * One program's layer, as a finished cut map. The tool path is read with the shared interpreter:
- * cutting moves in the work frame below the stock top. A horizontal cut and a straight plunge leave
- * a flat floor; a ramp does not. `toolRadius` (from the run's context) widens the cut cells; without
+ * One program's layer on its face. The tool path is read with the shared interpreter: cutting moves
+ * in the work frame below the face top (work Z0). A horizontal cut and a straight plunge leave a
+ * flat floor; a ramp does not. `toolRadius` (from the run's context) widens the cut cells; without
  * it the tool is treated as no wider than a cell.
+ *
+ * A program that TURNS the fourth axis, or a stock with no area, cannot be described by a face map:
+ * the result is `unknown` with the reason — never a silent absence (the ruling's point 2).
  */
 export function buildProgramCutMap(input: {
   nc: string;
   stock: CutMapStock;
   toolRadius?: number;
-}): FinishedCutMap | null {
+}): CutMapFit {
   const stock = input.stock;
-  if (!(stock.x > 0) || !(stock.y > 0)) return null;
+  if (!(stock.x > 0) || !(stock.y > 0)) {
+    return { kind: 'unknown', reason: 'the stock states no length or width, so there is no face to map' };
+  }
   const reach = Math.max(input.toolRadius ?? 0, CUT_MAP_CELL_MM / 2);
   const grid = gridFor(stock);
   const { events } = parseGcode(input.nc);
@@ -164,8 +236,6 @@ export function buildProgramCutMap(input: {
   let turned = false;
   for (const ev of events) {
     if (ev.kind === 'move' && ev.a !== null) {
-      // A program that TURNS the fourth axis has no flat stock frame: a 2D map would be a false
-      // claim about where the wood is. The record carries no map rather than a wrong one.
       turned = true;
       continue;
     }
@@ -186,58 +256,107 @@ export function buildProgramCutMap(input: {
     const plunge = fx === tx && fy === ty;
     markSegment(grid, { x: fx, y: fy }, { x: tx, y: ty }, level, horizontal || plunge, reach);
   }
-  return turned ? null : cutMapFromGrid(grid);
+  if (turned) {
+    return { kind: 'unknown', reason: 'a program turns the fourth axis, so the face cannot be mapped' };
+  }
+  return fitCutMapGrid(grid);
 }
 
-function sameGrid(a: FinishedCutMap, b: FinishedCutMap): boolean {
-  return (
-    a.cellMm === b.cellMm &&
-    a.cols === b.cols &&
-    a.rows === b.rows &&
-    a.x0Mm === b.x0Mm &&
-    a.y0Mm === b.y0Mm &&
-    a.stepMm === b.stepMm
-  );
+/** A stored map as a grid at its own pitch, or at a coarser one (never finer). */
+function gridAtPitch(map: FinishedCutMap, pitch: number): CutMapGrid | null {
+  const cells = map.cols * map.rows;
+  const levels = decodeRuns(map.depth.data, cells);
+  const flat = decodeRuns(map.flat.data, cells);
+  if (levels === null || flat === null) return null;
+  let grid: CutMapGrid = { cols: map.cols, rows: map.rows, levels, flat };
+  let at = map.cellMm;
+  while (at < pitch) {
+    grid = coarsenGrid(grid);
+    at *= 2;
+  }
+  return grid;
 }
 
 /**
- * The cumulative map: `next`'s deepest cut over `previous`'s. A tie keeps a flat floor. A grid that
- * no longer matches (the stock changed) starts over from `next`; `next` null is null — the record
- * states no map rather than a partial one.
+ * Merge two maps of the SAME face and placement. The finer map is coarsened to the coarser pitch
+ * first; the merge keeps the deepest cut, and a flat floor on a tie. A map that cannot be read, or
+ * maps that do not share a frame or a grid, are `unknown` with the reason — never a partial merge.
+ * The fitted result may coarsen further when the merged streams overflow the budget.
  */
-export function mergeCutMaps(
-  previous: FinishedCutMap | null | undefined,
-  next: FinishedCutMap | null,
-): FinishedCutMap | null {
-  if (next === null) return null;
-  if (previous === null || previous === undefined || !sameGrid(previous, next)) return next;
-  const first = decodeRuns(previous.depth.data, previous.cols * previous.rows);
-  const firstFlat = decodeRuns(previous.flat.data, previous.cols * previous.rows);
-  const second = decodeRuns(next.depth.data, next.cols * next.rows);
-  const secondFlat = decodeRuns(next.flat.data, next.cols * next.rows);
-  if (first === null || firstFlat === null || second === null || secondFlat === null) return next;
+export function mergeFaceCutMaps(previous: FinishedCutMap, next: FinishedCutMap): CutMapFit {
+  if (previous.x0Mm !== next.x0Mm || previous.y0Mm !== next.y0Mm) {
+    return { kind: 'unknown', reason: 'the two maps are not in the same frame' };
+  }
+  const pitch = Math.max(previous.cellMm, next.cellMm);
+  const a = gridAtPitch(previous, pitch);
+  const b = gridAtPitch(next, pitch);
+  if (a === null || b === null) return { kind: 'unknown', reason: 'a cut map could not be read' };
+  if (a.cols !== b.cols || a.rows !== b.rows) {
+    return { kind: 'unknown', reason: 'the two maps do not share a grid' };
+  }
   const levels: number[] = [];
   const flat: number[] = [];
-  for (let i = 0; i < first.length; i++) {
-    const a = first[i]!;
-    const b = second[i]!;
-    if (b > a) {
-      levels.push(b);
-      flat.push(secondFlat[i]!);
-    } else if (b === a) {
-      levels.push(a);
-      flat.push(Math.max(firstFlat[i]!, secondFlat[i]!));
+  for (let i = 0; i < a.levels.length; i++) {
+    const p = a.levels[i]!;
+    const n = b.levels[i]!;
+    if (n > p) {
+      levels.push(n);
+      flat.push(b.flat[i]!);
+    } else if (n === p) {
+      levels.push(p);
+      flat.push(Math.max(a.flat[i]!, b.flat[i]!));
     } else {
-      levels.push(a);
-      flat.push(firstFlat[i]!);
+      levels.push(p);
+      flat.push(a.flat[i]!);
     }
   }
-  const depth = encodeRuns(levels);
-  const flatText = encodeRuns(flat);
-  if (depth.length > CUT_MAP_MAX_STREAM || flatText.length > CUT_MAP_MAX_STREAM) return null;
-  return {
-    ...next,
-    flat: { encoding: 'rle', data: flatText },
-    depth: { encoding: 'rle', data: depth },
-  };
+  return fitCutMapGrid({ cols: a.cols, rows: a.rows, levels, flat }, { cellMm: pitch });
+}
+
+/**
+ * Merge one program's face entries into the record's previous entries (the caller has already
+ * dropped the previous list when the blank is not the same one).
+ *
+ * `unknown` STICKS: a setup that could not be completed stays unknown — with its first reason —
+ * and a later program never restarts a fresh map that would read as the whole face. Setups not
+ * mentioned by this program are carried forward unchanged, so the newest record describes the
+ * whole blank.
+ */
+export function mergeSetupCutMaps(
+  previous: readonly FinishedSetupCutMap[],
+  next: readonly FinishedSetupCutMap[],
+): FinishedSetupCutMap[] {
+  const bySetup = new Map<number, FinishedSetupCutMap>();
+  for (const entry of previous) bySetup.set(entry.setupIndex, entry);
+  for (const entry of next) {
+    const prior = bySetup.get(entry.setupIndex);
+    if (prior === undefined) {
+      bySetup.set(entry.setupIndex, entry);
+      continue;
+    }
+    if (prior.state === 'unknown') {
+      bySetup.set(entry.setupIndex, prior);
+      continue;
+    }
+    if (entry.state === 'unknown') {
+      bySetup.set(entry.setupIndex, entry);
+      continue;
+    }
+    if (prior.map === undefined || entry.map === undefined) {
+      bySetup.set(entry.setupIndex, {
+        setupIndex: entry.setupIndex,
+        state: 'unknown',
+        unknownReason: 'a cut map entry carried no map',
+      });
+      continue;
+    }
+    const merged = mergeFaceCutMaps(prior.map, entry.map);
+    bySetup.set(
+      entry.setupIndex,
+      merged.kind === 'map'
+        ? { setupIndex: entry.setupIndex, state: 'complete', map: merged.map }
+        : { setupIndex: entry.setupIndex, state: 'unknown', unknownReason: merged.reason },
+    );
+  }
+  return [...bySetup.values()].sort((a, b) => a.setupIndex - b.setupIndex);
 }

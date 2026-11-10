@@ -102,14 +102,14 @@ export const CutMapStreamSchema = z.object({
 });
 
 /**
- * #1179 — the per-program CUT MAP: a 2 mm raster of the blank in the STOCK frame (`x0Mm`/`y0Mm` =
+ * #1179 — one setup's (face's) CUT MAP on the blank: a raster in the STOCK frame (`x0Mm`/`y0Mm` =
  * the stock's min corner) with, per cell, the deepest Z cut after this program (quantised to
  * `stepMm`, 0 = uncut) and whether the cell's floor is FLAT (a touch point D's slice B may use).
  * Two RLE streams, row-major: `flat` = `count:0|1` pairs; `depth` = `count:level` pairs with
- * `level = round(depth / stepMm)` (an uncut cell is level 0). A 160 × 126 tray is 80 × 63 = 5,040
- * cells; raw depth would be 10 KB (uint16), RLE is typically under 1.5 KB in total; each stream is
- * capped at 4,096 chars and over the cap the whole map is null (never a silently partial grid —
- * stage B then falls back to the current plan's own footprint).
+ * `level = round(depth / stepMm)` (an uncut cell is level 0). `cellMm` is the STORED pitch — 2 mm
+ * normally, coarsened to 4 or 8 when the record's 4,096-char stream budget would not hold it (the
+ * analyst's ruling, #1179 comment 6775024844). Each stream is capped at 4,096 chars by this schema;
+ * the engine coarsens rather than ever sending a partial grid.
  */
 export const FinishedCutMapSchema = z.object({
   cellMm: z.number().positive().default(2),
@@ -122,6 +122,31 @@ export const FinishedCutMapSchema = z.object({
   depth: CutMapStreamSchema,
 });
 export type FinishedCutMap = z.infer<typeof FinishedCutMapSchema>;
+
+/**
+ * #1179 — the cut-map entry for ONE setup/face. Side 1 and side 2 never merge (depths are measured
+ * from that face's top), and the state is never silently partial: `complete` carries the map;
+ * `unknown` carries the reason and NO map, and once unknown it stays unknown for that setup until
+ * the blank is replaced — a later program must not restart a layer that reads as the whole face.
+ */
+export const FinishedSetupCutMapSchema = z
+  .object({
+    /** The setup the face belongs to (the frozen package's 1-based setup index). */
+    setupIndex: z.number().int().positive(),
+    state: z.enum(['complete', 'unknown']),
+    /** Why the state is unknown — the record's own sentence, never empty. */
+    unknownReason: z.string().min(1).optional(),
+    map: FinishedCutMapSchema.optional(),
+  })
+  .superRefine((entry, ctx) => {
+    if (entry.state === 'complete' && entry.map === undefined) {
+      ctx.addIssue({ code: 'custom', message: 'a complete cut map must carry its map' });
+    }
+    if (entry.state === 'unknown' && entry.unknownReason === undefined) {
+      ctx.addIssue({ code: 'custom', message: 'an unknown cut map must state its reason' });
+    }
+  });
+export type FinishedSetupCutMap = z.infer<typeof FinishedSetupCutMapSchema>;
 
 export const FinishedRunSchema = z.object({
   hash: z.string().min(1),
@@ -144,7 +169,11 @@ export const FinishedRunSchema = z.object({
     .object({ lengthMm: z.number().optional(), widthMm: z.number().optional(), thicknessMm: z.number().optional() })
     .optional(),
   registration: FinishedRunRegistrationSchema.optional(),
-  cutMap: FinishedCutMapSchema.nullable().optional(),
+  /**
+   * #1179 — one entry per setup/face; the newest record carries the blank's whole state (the other
+   * setups' entries are carried forward). Absent for a run that states no setup.
+   */
+  cutMaps: z.array(FinishedSetupCutMapSchema).optional(),
 });
 export type FinishedRun = z.infer<typeof FinishedRunSchema>;
 

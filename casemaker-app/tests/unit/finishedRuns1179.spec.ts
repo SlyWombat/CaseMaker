@@ -45,16 +45,22 @@ describe('#1179 the finished-run record', () => {
             measuredAt: '2026-11-10T13:00:00.000Z',
             planExpectedTopMachineZ: -60.0,
           },
-          cutMap: {
-            cellMm: 2,
-            cols: 80,
-            rows: 63,
-            x0Mm: 0,
-            y0Mm: 0,
-            stepMm: 0.05,
-            flat: { encoding: 'rle', data: '5040:1' },
-            depth: { encoding: 'rle', data: '5040:0' },
-          },
+          cutMaps: [
+            {
+              setupIndex: 1,
+              state: 'complete',
+              map: {
+                cellMm: 2,
+                cols: 80,
+                rows: 63,
+                x0Mm: 0,
+                y0Mm: 0,
+                stepMm: 0.05,
+                flat: { encoding: 'rle', data: '5040:1' },
+                depth: { encoding: 'rle', data: '5040:0' },
+              },
+            },
+          ],
         },
       ],
     });
@@ -63,7 +69,13 @@ describe('#1179 the finished-run record', () => {
       programIndex: 1,
       programCount: 17,
       registration: { surfaceMachineZ: -60.487, measuredTopMachineZ: -60.487, topSource: 'touch' },
-      cutMap: { cellMm: 2, cols: 80, rows: 63, stepMm: 0.05 },
+      cutMaps: [
+        {
+          setupIndex: 1,
+          state: 'complete',
+          map: { cellMm: 2, cols: 80, rows: 63, stepMm: 0.05 },
+        },
+      ],
     });
     // Every field but the hash is optional — a record from a caller that knows less still parses.
     const partial = MachineRecordSchema.parse({ ...base, finishedRuns: [{ hash: 'a1b2c3d4' }] });
@@ -75,11 +87,30 @@ describe('#1179 the finished-run record', () => {
         finishedRuns: [
           {
             hash: 'a1b2c3d4',
-            cutMap: { cellMm: 2, cols: 80, rows: 63, x0Mm: 0, y0Mm: 0, stepMm: 0.05, flat: { encoding: 'rle', data: 'x'.repeat(4097) }, depth: { encoding: 'rle', data: '1:0' } },
+            cutMaps: [
+              {
+                setupIndex: 1,
+                state: 'complete',
+                map: { cellMm: 2, cols: 80, rows: 63, x0Mm: 0, y0Mm: 0, stepMm: 0.05, flat: { encoding: 'rle', data: 'x'.repeat(4097) }, depth: { encoding: 'rle', data: '1:0' } },
+              },
+            ],
           },
         ],
       }),
     ).toThrow();
+    // #1179's ruling (comment 6775024844): the state carries its evidence — a complete entry needs
+    // its map, and an unknown one needs its reason. Neither may be silently absent.
+    expect(() =>
+      MachineRecordSchema.parse({ ...base, finishedRuns: [{ hash: 'a1b2c3d4', cutMaps: [{ setupIndex: 1, state: 'complete' }] }] }),
+    ).toThrow();
+    expect(() =>
+      MachineRecordSchema.parse({ ...base, finishedRuns: [{ hash: 'a1b2c3d4', cutMaps: [{ setupIndex: 1, state: 'unknown' }] }] }),
+    ).toThrow();
+    const unknown = MachineRecordSchema.parse({
+      ...base,
+      finishedRuns: [{ hash: 'a1b2c3d4', cutMaps: [{ setupIndex: 2, state: 'unknown', unknownReason: 'the map did not fit the record even at 8 mm cells' }] }],
+    });
+    expect(unknown.finishedRuns[0]!.cutMaps![0]!.state).toBe('unknown');
   });
 });
 

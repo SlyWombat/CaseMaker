@@ -61,7 +61,7 @@ import {
 } from '@/platform/locationClient';
 import { houseAddFinishedProgram } from '@/platform/finishedProgramsClient';
 import type { FinishedRun } from '@/platform/locationClient';
-import { mergeCutMaps } from '@/engine/cnc/engrave/cutMap';
+import { mergeSetupCutMaps } from '@/engine/cnc/engrave/cutMap';
 import { bedFromLegacy, bedMigrationDue, ensureFirstRegistrationBed, firstRegistrationBed, newestViseRegistration, type LegacyViseRegistration } from '@/platform/bedProfiles';
 import { parseMarginsStrict, useSettingsStore, type FixturesSettings } from './settingsStore';
 import { useMachineStore } from './machineStore';
@@ -145,6 +145,22 @@ function takeLocation(
     return;
   }
   set({ status: 'present', location, etag, reason: null });
+}
+
+/**
+ * #1179's ruling — the SAME BLANK: the same job's stock footprint, so a cut map accumulates only
+ * on the piece of wood it describes. The length and width must both be stated and equal (the map's
+ * XY frame is exactly this); the thickness splits the blank only when BOTH records state it, so an
+ * older record without one is not discarded on a guess.
+ */
+function sameBlank(a: FinishedRun, b: FinishedRun): boolean {
+  const aLength = a.stock?.lengthMm;
+  const aWidth = a.stock?.widthMm;
+  if (aLength === undefined || aWidth === undefined) return false;
+  if (aLength !== b.stock?.lengthMm || aWidth !== b.stock?.widthMm) return false;
+  const aThick = a.stock?.thicknessMm;
+  const bThick = b.stock?.thicknessMm;
+  return aThick === undefined || bThick === undefined || aThick === bThick;
 }
 
 export const useLocationStore = create<LocationState>((set, get) => ({
@@ -250,16 +266,17 @@ export const useLocationStore = create<LocationState>((set, get) => ({
     // newer registration), and the service dedupes the hash itself, so a second window racing this
     // one cannot duplicate it.
     if (run === undefined && machine.finishedPrograms.includes(hash)) return { ok: true, added: false, text: '' };
-    // #1179 step 3 — the map is CUMULATIVE: the new program's layer over the newest record for the
-    // same job and package. It describes the blank, not the program (a re-cut of the newest program
-    // keeps the older deeper cut, which is still in the wood). No record yet, or another job/plan,
-    // and the layer stands alone.
+    // #1179 step 3 — the cut maps are per SETUP/FACE and cumulative within the same job, setup and
+    // placement (the analyst's ruling, #1179 comment 6775024844). The previous list is the newest
+    // record for the SAME BLANK — same job and the same stock footprint; a different blank starts
+    // fresh, which is also what clears an `unknown` face. A different package of the same job on
+    // the same setup merges normally (same blank, same face).
     let posted = run;
-    if (run !== undefined && run.cutMap != null && run.jobId !== undefined && run.packageKey !== undefined) {
+    if (run !== undefined && run.cutMaps !== undefined && run.cutMaps.length > 0 && run.jobId !== undefined) {
       const previous = [...(machine.finishedRuns ?? [])]
         .reverse()
-        .find((record) => record.jobId === run.jobId && record.packageKey === run.packageKey);
-      posted = { ...run, cutMap: mergeCutMaps(previous?.cutMap ?? null, run.cutMap) };
+        .find((record) => record.jobId === run.jobId && sameBlank(record, run));
+      posted = { ...run, cutMaps: mergeSetupCutMaps(previous?.cutMaps ?? [], run.cutMaps) };
     }
     const res = await houseAddFinishedProgram(machineId, hash, undefined, posted);
     if (res.kind !== 'ok') {
