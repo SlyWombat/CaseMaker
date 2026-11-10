@@ -92,6 +92,12 @@ export const FinishedRunRegistrationSchema = z.object({
   measuredAt: z.string().optional(),
   /** The plan's expected top for this job (slice D's difference). */
   planExpectedTopMachineZ: z.number().optional(),
+  /**
+   * #1189 — the probe's `M491` when this run measured its top. `surfaceMachineZ` is a raw machine
+   * Z, so a later run corrects it by `today's M491 − this`; a record without it is not used across
+   * a probe fitting. Written by the finish-write from the run's own outcome.
+   */
+  probeRefZ: z.number().optional(),
 });
 export type FinishedRunRegistration = z.infer<typeof FinishedRunRegistrationSchema>;
 
@@ -306,6 +312,17 @@ export const MeasuredDatumSchema = z
      * under-board again. Written true by the seat write-back; absent on older readings.
      */
     restsOnStock: z.boolean().optional(),
+    /**
+     * #1189 — THE PROBE'S OWN REFERENCE when this datum was measured: the `M491` tool-length
+     * reading from the same probe seating. A datum is a RAW machine Z (the value the probe
+     * triggered at), so a probe refitted a little further out makes every surface trigger that
+     * much higher. The probe-independent height is `value − probeRefZ`; the plan corrects the
+     * expected surface by `today's M491 − probeRefZ` once the probe is measured.
+     *
+     * Absent on datums measured before this key existed. The Register card does not trust one
+     * across a fitting: it asks for the one-touch re-measure, which writes the reference.
+     */
+    probeRefZ: bedNumber.nullable().optional(),
   })
   .strict();
 

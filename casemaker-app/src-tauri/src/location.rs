@@ -168,6 +168,12 @@ pub struct MeasuredDatum {
     /// surface-top fallback.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rests_on_stock: Option<bool>,
+    /// #1189 — THE PROBE'S REFERENCE when this datum was measured: the `M491` tool-length reading
+    /// from the same seating. The datum's `value` is a raw machine Z; `value − probe_ref_z` is the
+    /// probe-independent height. Omitted on datums measured before the key existed (a legacy datum
+    /// the Register card re-measures rather than trusting across a refit).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe_ref_z: Option<f64>,
 }
 
 /// #1059 — A DATUM MEASURED IN DEGREES, not millimetres: the A work zero of a square stock's OWN
@@ -1362,6 +1368,7 @@ mod tests {
             by: "wired-probe".into(),
             at: Some([-150.0, -150.0]),
             rests_on_stock: None,
+            probe_ref_z: None,
         }
     }
 
@@ -1985,6 +1992,26 @@ mod tests {
         unknown["typedBy"] = serde_json::json!("hand");
         let err = serde_json::from_value::<MeasuredDatum>(unknown).unwrap_err().to_string();
         assert!(err.contains("typedBy"), "{err}");
+    }
+
+    /// #1189 — THE PROBE REFERENCE a datum was measured at is a KNOWN key: it round-trips on the
+    /// wire (camelCase), an older datum stays without one, and an unknown key is still refused.
+    #[test]
+    fn a_datum_stores_the_probe_reference_it_was_measured_at() {
+        let mut datum = a_datum(-85.75);
+        datum.probe_ref_z = Some(-9.094);
+        let v = serde_json::to_value(&datum).unwrap();
+        assert_eq!(v["probeRefZ"], serde_json::json!(-9.094), "the reference is written in camelCase");
+        let back: MeasuredDatum = serde_json::from_value(v.clone()).unwrap();
+        assert_eq!(back, datum);
+
+        // A datum measured before the key existed parses, and stays without one in the file.
+        let legacy: MeasuredDatum = serde_json::from_value(serde_json::json!({
+            "value": -60.487, "measuredAt": "2026-11-09T00:00:00.000Z", "by": "wired-probe", "at": [3.5, 3.5]
+        }))
+        .unwrap();
+        assert_eq!(legacy.probe_ref_z, None);
+        assert!(serde_json::to_value(&legacy).unwrap().get("probeRefZ").is_none());
     }
 
     /// #1070 (C8) — a placed bracket's seed is a KNOWN key on a placement: it round-trips with

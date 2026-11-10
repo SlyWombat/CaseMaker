@@ -154,6 +154,8 @@ export function withViseJawTopDatum(
   mountTap: { z: number; at: { x: number; y: number } },
   probeId: string | null,
   now: string,
+  /** #1189 — the probe's `M491` at this tap; stored with the datum so a refit can be corrected. */
+  probeRefZ: number | null = null,
 ): MachineRecord {
   const profileId = machine.activeBedProfileId;
   if (profileId === undefined) return machine;
@@ -168,7 +170,13 @@ export function withViseJawTopDatum(
             ...p,
             datums: {
               ...p.datums,
-              viseJawTopZ: { value: mountTap.z, measuredAt: now, by, at: [mountTap.at.x, mountTap.at.y] },
+              viseJawTopZ: {
+                value: mountTap.z,
+                measuredAt: now,
+                by,
+                at: [mountTap.at.x, mountTap.at.y],
+                ...(probeRefZ === null ? {} : { probeRefZ }),
+              },
             },
             history: [...p.history, { at: now, what }],
           }
@@ -184,6 +192,8 @@ export function withSurfaceTopDatum(
   surfaceTop: { z: number; at: { x: number; y: number } },
   probeId: string | null,
   now: string,
+  /** #1189 — the probe's `M491` at this touch; stored with the datum so a refit can be corrected. */
+  probeRefZ: number | null = null,
 ): MachineRecord {
   const profileId = machine.activeBedProfileId;
   if (profileId === undefined) return machine;
@@ -196,7 +206,13 @@ export function withSurfaceTopDatum(
             ...p,
             datums: {
               ...p.datums,
-              surfaceTopZ: { value: surfaceTop.z, measuredAt: now, by, at: [surfaceTop.at.x, surfaceTop.at.y] },
+              surfaceTopZ: {
+                value: surfaceTop.z,
+                measuredAt: now,
+                by,
+                at: [surfaceTop.at.x, surfaceTop.at.y],
+                ...(probeRefZ === null ? {} : { probeRefZ }),
+              },
             },
             history: [...p.history, { at: now, what: 'surface top measured' }],
           }
@@ -219,6 +235,8 @@ export function withBracketSeatDatum(
   seat: { z: number; at: { x: number; y: number } },
   probeId: string | null,
   now: string,
+  /** #1189 — the probe's `M491` at this touch; stored with the datum so a refit can be corrected. */
+  probeRefZ: number | null = null,
 ): MachineRecord {
   const profileId = machine.activeBedProfileId;
   if (profileId === undefined) return machine;
@@ -234,7 +252,14 @@ export function withBracketSeatDatum(
               ...p.datums,
               // #1070 (C8) — the statement: this seat IS the surface the stock rests on (the
               // wasteboard beside the bracket's front arm), so the under-board is not added again.
-              bracketSeatZ: { value: seat.z, measuredAt: now, by, at: [seat.at.x, seat.at.y], restsOnStock: true },
+              bracketSeatZ: {
+                value: seat.z,
+                measuredAt: now,
+                by,
+                at: [seat.at.x, seat.at.y],
+                restsOnStock: true,
+                ...(probeRefZ === null ? {} : { probeRefZ }),
+              },
             },
             history: [...p.history, { at: now, what }],
           }
@@ -304,6 +329,8 @@ export function withRotaryAxisDatum(
   axis: { axisZ: number; axisY: number; radiusMm: number; atX: number },
   probeId: string | null,
   now: string,
+  /** #1189 — the probe's `M491` at this tap, so a refit can be corrected (the axis Z is raw too). */
+  probeRefZ: number | null = null,
 ): MachineRecord {
   const profileId = machine.activeBedProfileId;
   if (profileId === undefined) return machine;
@@ -317,7 +344,14 @@ export function withRotaryAxisDatum(
             ...p,
             datums: {
               ...p.datums,
-              rotaryAxis: { value: axis.axisZ, measuredAt: now, by, at: [axis.atX, axis.axisY], radiusMm: axis.radiusMm },
+              rotaryAxis: {
+                value: axis.axisZ,
+                measuredAt: now,
+                by,
+                at: [axis.atX, axis.axisY],
+                radiusMm: axis.radiusMm,
+                ...(probeRefZ === null ? {} : { probeRefZ }),
+              },
             },
             history: [...p.history, { at: now, what }],
           }

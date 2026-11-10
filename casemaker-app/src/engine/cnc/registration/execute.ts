@@ -99,7 +99,14 @@ import {
 } from './outcome';
 import type { FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
 import { referenceOutcome } from './references';
-import { CUT_BLANK_AGREE_FALLBACK_MM, settingsProblem, SURFACE_LIFT_MM, type RegistrationSettings } from './settings';
+import { correctedPlanForProbe, shiftedRecordedTopMachineZ } from './probeShift';
+import {
+  CUT_BLANK_ABOVE_BAND_FALLBACK_MM,
+  CUT_BLANK_AGREE_FALLBACK_MM,
+  settingsProblem,
+  SURFACE_LIFT_MM,
+  type RegistrationSettings,
+} from './settings';
 
 export interface RegistrationConsole {
   send(line: string, timing?: Partial<ConsoleTiming>): Promise<ConsoleSendResult>;
@@ -216,6 +223,12 @@ export interface ExecDeps {
    * continues from THIS top rather than seat + stated thickness; absent/null keeps the arithmetic.
    */
   lastRecordedTopMachineZ?: number | null;
+  /**
+   * #1189 — the probe's `M491` reference at the run that recorded that top. The record is a raw
+   * machine Z, so it is corrected by `today's M491 − this`; null/absent means the record cannot be
+   * separated from the probe's seating and is not used across a fitting.
+   */
+  lastRecordedTopProbeRefZ?: number | null;
 }
 
 export interface Transcript {
@@ -923,6 +936,9 @@ async function proveCutBlankTop(
   const checks = plan.surfaceChecks ?? [];
   // An old stored plan (approved before the key) has no agreement; the labelled fallback answers.
   const agreeMm = s.cutBlankAgreeMm ?? CUT_BLANK_AGREE_FALLBACK_MM;
+  // #1179 amendment — how far above the band a reading may stand and still be a READING (chips on
+  // the blank) rather than a clamp. Beyond it the seek stops, exactly as it did before.
+  const aboveLimit = s.cutBlankAboveBandMm ?? CUT_BLANK_ABOVE_BAND_FALLBACK_MM;
   const first = Math.min(3, checks.length);
   const readings: CheckReading[] = [];
   const good: Good[] = [];
@@ -978,12 +994,16 @@ async function proveCutBlankTop(
         ceilingMm: datumCeiling(plan),
         missOk: true,
         belowBandIsMiss: true,
+        // #1179 amendment — chips above the expected top are a READING, not a stop; a clamp-sized
+        // obstruction (beyond the stated limit) still stops inside the seek.
+        aboveBandOkMm: aboveLimit,
         onMiss: (m) => {
           missed.how = m.how;
           missed.z = m.z;
         },
       },
     );
+    const aboveBandMm = prb !== null && prb.z > band.max ? r3(prb.z - band.max) : null;
     const implied = prb === null ? null : r3(prb.z + check.depthMm);
     const reading: CheckReading = {
       x: check.x,
@@ -992,6 +1012,7 @@ async function proveCutBlankTop(
       machineZ: prb === null ? null : prb.z,
       impliedMachineZ: implied,
       missed: prb === null ? (missed.how ?? 'no-contact') : null,
+      ...(aboveBandMm === null ? {} : { aboveBandMm }),
     };
     readings.push(reading);
     io.saw({
@@ -1003,7 +1024,9 @@ async function proveCutBlankTop(
       touched: prb !== null,
       kind: null,
     });
-    if (prb !== null && implied !== null) good.push({ reading, prb, implied });
+    // #1179 amendment — an above-band reading is never part of an agreeing pair: it is something
+    // standing over the blank, not the blank's top.
+    if (prb !== null && implied !== null && aboveBandMm === null) good.push({ reading, prb, implied });
   }
   const highest = highestOf();
   const pair = pairOf();
@@ -1035,13 +1058,20 @@ async function proveCutBlankTop(
             ? 'found nothing'
             : r.missed === 'below-band'
               ? `read machine Z ${f(r.machineZ ?? 0)}, below the band`
-              : `read machine Z ${f(r.machineZ ?? 0)} (implied top ${f(r.impliedMachineZ ?? 0)})`;
+              : r.aboveBandMm !== null && r.aboveBandMm !== undefined
+                ? `read machine Z ${f(r.machineZ ?? 0)}, ${f(r.aboveBandMm)} mm ABOVE the expected top`
+                : `read machine Z ${f(r.machineZ ?? 0)} (implied top ${f(r.impliedMachineZ ?? 0)})`;
         return `${i + 1}) ${what} at (${f(r.x)}, ${f(r.y)}) depth ${f(r.depthMm)}`;
       })
       .join('; ');
-    throw new Stop(
-      `the top on this cut blank could not be proved: ${words} — no two implied tops agree within ${f(agreeMm)} mm`,
-    );
+    // #1179 amendment — when nothing agreed and something stood above the band, the action is to
+    // clear the top, not another run: name where it is standing, before the readings.
+    const above = readings.find((r) => r.aboveBandMm !== null && r.aboveBandMm !== undefined);
+    const lead =
+      above === undefined
+        ? ''
+        : `something is lying on the blank at (${f(above.x)}, ${f(above.y)}) — clear the top and register again; `;
+    throw new Stop(`the top on this cut blank could not be proved: ${lead}${words} — no two implied tops agree within ${f(agreeMm)} mm`);
   }
   io.at(
     `the top is proved on a cut blank: implied machine Z ${f(accepted.level)} at (${f(accepted.from.reading.x)}, ${f(accepted.from.reading.y)}) — ${accepted.agreement}` +
@@ -1105,6 +1135,13 @@ async function seekSurface(
     belowBandIsMiss?: boolean;
     /** #1166 — why a missed seek returned null, for the caller's derived-top press. */
     onMiss?: (miss: SurfaceMiss) => void;
+    /**
+     * #1179 amendment (2026-11-10) — a reading ABOVE the band's ceiling, up to this far above it,
+     * is a READING the caller classifies (something on the blank), not a stop: the fast touch is
+     * returned as-is and no slow touch is sent from a probe already resting on the obstruction.
+     * Absent keeps today's hard stop above the band.
+     */
+    aboveBandOkMm?: number;
   },
 ): Promise<Prb | null> {
   const s = plan.settings;
@@ -1117,11 +1154,12 @@ async function seekSurface(
   await io.idle();
   io.at(band.at);
   await io.send('G91');
+  const aboveLimit = opts.aboveBandOkMm ?? 0;
   const fast = inBand(
     lastPrb(await io.send(`G38.3 Z-${f(travel)} F${f(s.surfaceFastFeed)}`)),
     band,
     'fast',
-    opts.ceilingMm,
+    Math.max(opts.ceilingMm, r3(band.max + aboveLimit)),
     opts.missOk === true,
     opts.belowBandIsMiss === true,
     opts.onMiss,
@@ -1129,6 +1167,17 @@ async function seekSurface(
   if (fast === null) {
     await io.send('G90');
     return null;
+  }
+  // #1179 amendment — SOMETHING IS STANDING ABOVE THE EXPECTED TOP HERE. The fast touch met it;
+  // the caller records the reading as an above-band touch and moves on. A slow touch from a probe
+  // already deflected on an obstruction would measure the obstruction, not the surface. The
+  // stylus is released and lifted exactly as an ordinary accepted fast touch is (#932), so the
+  // caller's next rapid never drags a deflected ball across what it found.
+  if (opts.aboveBandOkMm !== undefined && fast.z > band.max) {
+    if (probeNeedsRelease(plan.probe)) await io.send(probeAwayLine('Z', PROBE_AWAY_MM));
+    await io.send(`G0 Z${f(SURFACE_LIFT_MM)}`);
+    await io.send('G90');
+    return fast;
   }
   // #932 — the fast touch ended on the stock: release the stylus before the relative lift.
   if (probeNeedsRelease(plan.probe)) await io.send(probeAwayLine('Z', PROBE_AWAY_MM));
@@ -1601,6 +1650,8 @@ export type RotaryTapResult =
       residualMm: number;
       /** The one-line note when the residual is over the tolerance, else null. */
       residualLine: string | null;
+      /** #1189 — the probe's M491 at this tap: the seating the axis Z was read in. */
+      probeRefZ: number;
       transcript: Transcript[];
     }
   | { ok: false; reason: string; transcript: Transcript[] };
@@ -1753,7 +1804,7 @@ export async function runRotaryTap(opts: RotaryTapOptions, deps: ExecDeps): Prom
         ? `the check chord at machine Z ${f(opts.trial.z2)} measured ${f(check.widthMm)} mm wide, ${f(residualMm)} mm off the fitted circle (tolerance ${ROTARY_CHORD_TOLERANCE_MM} mm) — the chuck may not be round, or a wall may have been touched in the wrong place`
         : null;
 
-    return { ok: true, circle: solved.circle, residualMm, residualLine, transcript: io.transcript };
+    return { ok: true, circle: solved.circle, residualMm, residualLine, probeRefZ: r3(refPrb.z), transcript: io.transcript };
   } catch (e) {
     if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
     throw e;
@@ -1985,6 +2036,14 @@ export async function runRegistration(
     }
     const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
     if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading');
+    // #1189 — THE PROBE'S SEATING IS NOW KNOWN. Every stored Z datum is a raw machine Z measured
+    // with the probe as it sat THAT day; a refit shifts each expectation by today's M491 less the
+    // datum's own reference. The correction is applied once, here, to the plan the rest of the run
+    // uses — the seek band, the cut-blank check bands, the derived top, the mount tap and the jaw
+    // ceiling — and it is narrated as one sentence per datum.
+    const corrected = correctedPlanForProbe(plan, ref.z);
+    plan = corrected.plan;
+    for (const note of corrected.notes) io.at(note);
     // #1166 (c1) — THE TOP QUESTION, after the probe is fitted and referenced and BEFORE any probe
     // motion. Only under the bracket guard: a measured-seat bracket plan whose surface point is on
     // the stock, with finished programs on the machine. The operator answers with a top measured
@@ -1994,7 +2053,16 @@ export async function runRegistration(
       plan.bracketOrigin !== null &&
       surfacePointOnStock(plan) &&
       deps.hasFinishedPrograms === true;
-    const bracketTop = bracketTopOf(plan, deps.lastRecordedTopMachineZ ?? null);
+    // #1189 — the recorded top is a raw reading from the run that accepted it; it is shifted by
+    // that run's own M491 reference, and NOT used when the record carries none.
+    const bracketTop = bracketTopOf(
+      plan,
+      shiftedRecordedTopMachineZ(
+        deps.lastRecordedTopMachineZ ?? null,
+        deps.lastRecordedTopProbeRefZ ?? null,
+        ref.z,
+      ),
+    );
     let chosenTop: { machineZ: number; source: 'bracket-top' | 'operator-entered' } | null = null;
     if (bracketTopFallback && deps.askTop !== undefined) {
       const choice = await deps.askTop({
@@ -2232,6 +2300,8 @@ export async function runRegistration(
     // A plan that registers on earlier-setup features has its own outcome (#429); #430's is unchanged.
     const outcome = plan.references ? referenceOutcome(plan, data) : computeOutcome(plan, data);
     if (proudNote !== null) outcome.notes.push(proudNote);
+    // #1189 — the seating correction is part of the record, on the card and in the run log.
+    for (const note of corrected.notes) outcome.notes.push(note);
     // #585 — the typed seat's recovery is part of the record: the reading, where the probe found it,
     // and the seat that measurement implies (top − thickness). The plan itself is never mutated.
     if (recovered !== null) outcome.notes.push(recovered.note);
@@ -2252,7 +2322,9 @@ export async function runRegistration(
               ? 'found nothing'
               : r.missed === 'below-band'
                 ? `read machine Z ${f(r.machineZ ?? 0)}, below the band`
-                : `read machine Z ${f(r.machineZ ?? 0)} (implied top ${f(r.impliedMachineZ ?? 0)})`;
+                : r.aboveBandMm !== null && r.aboveBandMm !== undefined
+                  ? `read machine Z ${f(r.machineZ ?? 0)}, ${f(r.aboveBandMm)} mm above the expected top (something on the blank; not used)`
+                  : `read machine Z ${f(r.machineZ ?? 0)} (implied top ${f(r.impliedMachineZ ?? 0)})`;
           return `${i + 1}) ${what} at (${f(r.x)}, ${f(r.y)}) depth ${f(r.depthMm)}`;
         })
         .join('; ');
@@ -2718,7 +2790,7 @@ export async function runFlipRegistration(
   opts: FlipRunOptions,
   deps: ExecDeps,
 ): Promise<FlipRunResult> {
-  const ctx = opts.ctx;
+  let ctx = opts.ctx;
   const s = ctx.settings;
   // #1088 — THE STOP ALWAYS RELEASES THE STYLUS HERE. Side 2's bores are read with SIDEWAYS touches
   // whose G38.5 release follows the reading, so a Stop (or a refused line) between the trigger and
@@ -2741,6 +2813,11 @@ export async function runFlipRegistration(
     if (/Probe:\s*1\b/.test(rest)) throw new Stop('the probe reads touched at rest; check it is seated and plugged in');
     const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
     if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading');
+    // #1189 — the frame plan's expectations are datum-derived raw machine Z too: correct them to
+    // today's probe seating before any touch. The carried Z0 below is shifted with its own record.
+    const corrected = correctedPlanForProbe(ctx, ref.z);
+    ctx = corrected.plan;
+    for (const note of corrected.notes) io.at(note);
 
     // ── THE FRONT PAIR AND THE SEED: the frame plan's own scans, in the flip plan's own steps. ──
     const pairStep = flip.steps.find((st) => st.kind === 'edge-pair');
@@ -2789,7 +2866,36 @@ export async function runFlipRegistration(
     // carried value inside the surface tolerance. A reading outside the band stops with the numbers
     // before a bore is entered — a chip under the blank is what it finds — so no origin is written
     // from a blank that is not on its seat. Z0 is never re-derived from the rough face.
-    const z0 = opts.z0 ?? null;
+    const carried0 = opts.z0 ?? null;
+    // #1189 — the carried top is a raw machine Z in the SIDE-1 seating. Its probe-independent
+    // height (`topTipRefMm`) plus today's M491 gives today's expected raw reading; the band moves
+    // with it. A record with no reference cannot be separated from the seating: its band is not
+    // used, and the run says so.
+    const z0Expected = carried0?.topTipRefMm === null || carried0?.topTipRefMm === undefined ? null : r3(carried0.topTipRefMm + ref.z);
+    const z0 =
+      carried0 === null || z0Expected === null
+        ? null
+        : {
+            ...carried0,
+            topMachineZ: z0Expected,
+            checkBand:
+              carried0.checkBand === null
+                ? null
+                : {
+                    minMm: r3(z0Expected - (carried0.checkBand.maxMm - carried0.checkBand.minMm) / 2),
+                    maxMm: r3(z0Expected + (carried0.checkBand.maxMm - carried0.checkBand.minMm) / 2),
+                  },
+          };
+    if (carried0 !== null && z0Expected === null) {
+      io.at(
+        'the carried side-2 top was recorded before the probe was last fitted, so its band was not checked this run — ' +
+          'the front pair still bounds the surface, and re-register side 1 to record the probe’s reference',
+      );
+    } else if (carried0 !== null && z0 !== null && Math.abs(z0.topMachineZ - carried0.topMachineZ) >= 0.005) {
+      io.at(
+        `the carried side-2 top is corrected for the probe’s seating: ${f(carried0.topMachineZ)} in side 1’s seating → ${f(z0.topMachineZ)} today (M491 ${f(ref.z)})`,
+      );
+    }
     const zBand = z0?.checkBand ?? null;
     if (z0 !== null && zBand !== null) {
       const outside = frontPair.filter((p) => p.surfaceZ < zBand.minMm || p.surfaceZ > zBand.maxMm);

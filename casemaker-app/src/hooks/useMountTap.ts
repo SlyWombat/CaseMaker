@@ -259,6 +259,8 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
               tap.reference === 'bracket-seat' ? 'bracket' : 'vise',
               { z: r.z, at: r.at },
               inputs.probeId,
+              // #1189 — the seating this reading was taken in, for a later refit's correction.
+              r.probe.lengthZ,
             );
           }
           // #613 — a no-profile machine gets its first bed here; the datum then lands as designed.
@@ -272,7 +274,8 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
             const seat = bracketSeatFromTap(r.z, tap.datumOffsetMm ?? 0);
             // #636 — the write's answer is read: a stale guard retries once against the re-read, and
             // a record that did not land is never reported as one that did.
-            const update: MachineUpdate = (current) => withBracketSeatDatum(bed(current), { z: seat, at: r.at }, inputs.probeId, now);
+            const update: MachineUpdate = (current) =>
+              withBracketSeatDatum(bed(current), { z: seat, at: r.at }, inputs.probeId, now, r.probe.lengthZ);
             const outcome = await saveMachineWithRetry(record, update);
             if (outcome !== 'ok') {
               noteNow(
@@ -297,7 +300,8 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
               return;
             }
           } else {
-            const update: MachineUpdate = (current) => withViseJawTopDatum(bed(current), { z: r.z, at: r.at }, inputs.probeId, now);
+            const update: MachineUpdate = (current) =>
+              withViseJawTopDatum(bed(current), { z: r.z, at: r.at }, inputs.probeId, now, r.probe.lengthZ);
             const outcome = await saveMachineWithRetry(record, update);
             if (outcome !== 'ok') {
               noteNow(
@@ -393,6 +397,8 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
             { axisZ: r.circle.axisZ, axisY: r.circle.axisY, radiusMm: r.circle.radiusMm, atX: req.atX },
             inputs.probeId,
             now,
+            // #1189 — the seating this tap was taken in (runRotaryTap returns the run's M491).
+            r.probeRefZ,
           );
         const outcome = await saveMachineWithRetry(held, update);
         if (outcome !== 'ok') {

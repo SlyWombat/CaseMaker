@@ -226,6 +226,12 @@ export interface BracketSeatDatum {
    * readings taken before the flag existed — those keep the old under-board arithmetic.
    */
   restsOnStock?: boolean;
+  /**
+   * #1189 — the probe's `M491` reference when this seat was measured. A seat is a raw machine Z;
+   * a probe refitted since then shifts every surface by the difference. Absent/null on a legacy
+   * datum — the Register card asks for the one-touch re-measure rather than trusting it.
+   */
+  probeRefZ?: number | null;
 }
 
 /**
@@ -236,9 +242,15 @@ export interface BracketSeatDatum {
 function bracketSeatReading(
   map: ShopDefaults | null,
   bedSeat: BracketSeatDatum | null,
-): { value: number; source: string; setAt: string | null; restsOnStock: boolean } | null {
+): { value: number; source: string; setAt: string | null; restsOnStock: boolean; probeRefZ: number | null } | null {
   if (bedSeat !== null) {
-    return { value: bedSeat.value, source: `the bed profile’s ${bedSeat.what}`, setAt: bedSeat.measuredAt, restsOnStock: bedSeat.restsOnStock === true };
+    return {
+      value: bedSeat.value,
+      source: `the bed profile’s ${bedSeat.what}`,
+      setAt: bedSeat.measuredAt,
+      restsOnStock: bedSeat.restsOnStock === true,
+      probeRefZ: bedSeat.probeRefZ ?? null,
+    };
   }
   // #509 — THE LEGACY SHOP DEFAULT, KEPT FOR ONE RELEASE (removed in 1.1). A shop whose bracket
   // seat was tapped before bed profiles carried one still has the reading under
@@ -247,7 +259,7 @@ function bracketSeatReading(
   // tapped since then resolves from the profile above and never reaches this line. It never
   // carries the rests-on-stock statement — it predates it, and the old arithmetic applies.
   const legacy = readMeasured(map, 'bracket.seatMachineZ');
-  return legacy === null ? null : { ...legacy, restsOnStock: false };
+  return legacy === null ? null : { ...legacy, restsOnStock: false, probeRefZ: null };
 }
 
 /**
@@ -264,7 +276,10 @@ export function bracketExpectedSurface(
   stockThickness: number,
   underMm = 0,
   bedSeat: BracketSeatDatum | null = null,
-): { ok: true; expectedSurface: { machineZ: number; from: string } } | { ok: false; reason: string } {
+): {
+  ok: true;
+  expectedSurface: { machineZ: number; from: string; probeRefZ: number | null };
+} | { ok: false; reason: string } {
   const seat = bracketSeatReading(map, bedSeat);
   if (seat === null) {
     return {
@@ -282,6 +297,8 @@ export function bracketExpectedSurface(
     expectedSurface: {
       machineZ: r3(seat.value + countedUnder + stockThickness),
       from: `the surface beside the bracket at machine Z ${seat.value} (${seat.source}${seat.setAt ? `, ${seat.setAt.slice(0, 10)}` : ''})${under} + the stock’s ${stockThickness} mm`,
+      // #1189 — the reference the seat was measured at, for the executor's refit correction.
+      probeRefZ: seat.probeRefZ ?? null,
     },
   };
 }
@@ -321,7 +338,14 @@ export function bracketTapPoint(corner: { x: number; y: number }, s: BracketSett
 export function bracketSeat(
   map: ShopDefaults | null,
   bedSeat: BracketSeatDatum | null = null,
-): { value: number; source: string; setAt: string | null; note: string | null } | null {
+): {
+  value: number;
+  source: string;
+  setAt: string | null;
+  note: string | null;
+  restsOnStock: boolean;
+  probeRefZ: number | null;
+} | null {
   const reading = bracketSeatReading(map, bedSeat);
   if (reading === null) return null;
   return { ...reading, note: null };

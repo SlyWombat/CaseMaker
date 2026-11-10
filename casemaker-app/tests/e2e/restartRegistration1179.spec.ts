@@ -72,6 +72,8 @@ function locationView(machineOverride: Record<string, unknown> | null = null): u
     by: 'fx-probe-1',
     at: [-175, -35],
     restsOnStock: true,
+    // #1189 — the probe's M491 when the seat was measured (the fake console's own reading).
+    probeRefZ: -80,
   };
   profile.placements = (profile.placements ?? []).filter(
     (pl) => ((pl as { where?: { kind?: string } }).where?.kind ?? '') !== 'pins',
@@ -197,6 +199,10 @@ async function prepare(page: Page): Promise<void> {
     await page.getByTestId('engrave-cut-step-2-summary').click();
   }
   await expect(page.getByTestId('engrave-registration-proposal-line')).toContainText('then the top');
+  // #1179 amendment (2026-11-10) — the card says WHERE the checks will touch, before the press,
+  // so the operator can clear those spots: they sit inset from the stock's edges, not on the
+  // corners where the bench's first touch met a pile.
+  await expect(page.getByTestId('engrave-registration-proposal-line')).toContainText('in from the stock');
   await page.getByTestId('engrave-registration-approve-start').click();
   // The seek path keeps the #427 clamp confirm; the checks move nothing sideways from it.
   await page.getByTestId('engrave-registration-continue').click();

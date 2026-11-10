@@ -2321,6 +2321,17 @@
                         ],
                         "type": "object"
                       },
+                      "floorProbeRefZ": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The probe reference of the seek floor’s own datum, when it differs."
+                      },
                       "mount": {
                         "description": "How the stock is held: in the vise, on the bracket, or with tape.",
                         "enum": [
@@ -2345,6 +2356,17 @@
                               "measuredAt": {
                                 "description": "When the datum was measured.",
                                 "type": "string"
+                              },
+                              "probeRefZ": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "The probe’s M491 when the jaw top was tapped."
                               }
                             },
                             "required": [
@@ -2421,12 +2443,47 @@
                         "anyOf": [
                           {
                             "properties": {
+                              "datumOffsetMm": {
+                                "description": "How far below the reading the datum sits, millimetres.",
+                                "type": "number"
+                              },
+                              "expectZ": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "The machine Z the tap expects to meet."
+                              },
                               "fromMachineZ": {
                                 "description": "The travel height the tap starts from, machine Z.",
                                 "type": "number"
                               },
                               "label": {
                                 "description": "What the tap touches, for the operator.",
+                                "type": "string"
+                              },
+                              "probeRefZ": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "The probe’s M491 when expectZ was measured."
+                              },
+                              "reference": {
+                                "description": "Which datum the tap measures.",
+                                "enum": [
+                                  "vise-jaw-top",
+                                  "bracket-seat",
+                                  "rotary-axis"
+                                ],
                                 "type": "string"
                               },
                               "x": {
@@ -2531,6 +2588,28 @@
                         ],
                         "default": null,
                         "description": "The checked-out probe on the plan, or null/absent."
+                      },
+                      "probeRefLabel": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The datum’s words in the seating-correction sentence."
+                      },
+                      "probeRefZ": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The probe’s M491 when the expected surface’s datum was measured."
                       },
                       "referenceRotation": {
                         "anyOf": [
@@ -2774,6 +2853,10 @@
                           },
                           "cornerClearanceMm": {
                             "description": "Clearance kept from corners, in millimetres.",
+                            "type": "number"
+                          },
+                          "cutBlankAboveBandMm": {
+                            "description": "How far above the band a cut-blank check may stand before it stops the run, in millimetres.",
                             "type": "number"
                           },
                           "cutBlankAgreeMm": {
@@ -4224,6 +4307,17 @@
                     ],
                     "type": "object"
                   },
+                  "floorProbeRefZ": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The probe reference of the seek floor’s own datum, when it differs."
+                  },
                   "mount": {
                     "description": "How the stock is held: in the vise, on the bracket, or with tape.",
                     "enum": [
@@ -4248,6 +4342,17 @@
                           "measuredAt": {
                             "description": "When the datum was measured.",
                             "type": "string"
+                          },
+                          "probeRefZ": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The probe’s M491 when the jaw top was tapped."
                           }
                         },
                         "required": [
@@ -4324,12 +4429,47 @@
                     "anyOf": [
                       {
                         "properties": {
+                          "datumOffsetMm": {
+                            "description": "How far below the reading the datum sits, millimetres.",
+                            "type": "number"
+                          },
+                          "expectZ": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The machine Z the tap expects to meet."
+                          },
                           "fromMachineZ": {
                             "description": "The travel height the tap starts from, machine Z.",
                             "type": "number"
                           },
                           "label": {
                             "description": "What the tap touches, for the operator.",
+                            "type": "string"
+                          },
+                          "probeRefZ": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The probe’s M491 when expectZ was measured."
+                          },
+                          "reference": {
+                            "description": "Which datum the tap measures.",
+                            "enum": [
+                              "vise-jaw-top",
+                              "bracket-seat",
+                              "rotary-axis"
+                            ],
                             "type": "string"
                           },
                           "x": {
@@ -4434,6 +4574,28 @@
                     ],
                     "default": null,
                     "description": "The checked-out probe on the plan, or null/absent."
+                  },
+                  "probeRefLabel": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The datum’s words in the seating-correction sentence."
+                  },
+                  "probeRefZ": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The probe’s M491 when the expected surface’s datum was measured."
                   },
                   "referenceRotation": {
                     "anyOf": [
@@ -4677,6 +4839,10 @@
                       },
                       "cornerClearanceMm": {
                         "description": "Clearance kept from corners, in millimetres.",
+                        "type": "number"
+                      },
+                      "cutBlankAboveBandMm": {
+                        "description": "How far above the band a cut-blank check may stand before it stops the run, in millimetres.",
                         "type": "number"
                       },
                       "cutBlankAgreeMm": {

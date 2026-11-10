@@ -148,7 +148,8 @@ const deps = (console: ReturnType<typeof fakeMachine>) => ({
 });
 
 /** The carried Z0, as the job states it: side 2's top at the fake's surface, ± 0.3 mm. */
-const Z0 = () => flipZ0({ seatMm: SURFACE_Z, thicknessMm: 0, toleranceMm: 0.3 });
+// #1189 — the carried top is a raw reading in the run's own probe seating (the fake's M491 = -80).
+const Z0 = () => flipZ0({ seatMm: SURFACE_Z, thicknessMm: 0, toleranceMm: 0.3, probeRefZ: -80 });
 
 describe('#1088 the flip registration executor', () => {
   it('runs the plan’s steps in order: guards, the front pair, the seed, then each bore’s four touches', async () => {
@@ -222,7 +223,7 @@ describe('#1088 the flip registration executor', () => {
     const machine = fakeMachine(sent);
     // The carried top says the blank sits 5 mm above where its corner touches read — a chip under
     // the blank (or the wrong seat) is what this finds.
-    const carried = flipZ0({ seatMm: SURFACE_Z + 5, thicknessMm: 0, toleranceMm: 0.3 });
+    const carried = flipZ0({ seatMm: SURFACE_Z + 5, thicknessMm: 0, toleranceMm: 0.3, probeRefZ: -80 });
     const r = await runFlipRegistration(flipPlan(), { ctx: ctx(), z0: carried }, deps(machine) as never);
     expect(r.ok).toBe(false);
     if (r.ok) return;

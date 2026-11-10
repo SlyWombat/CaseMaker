@@ -454,6 +454,9 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
         return {
           registration: {
             surfaceMachineZ: reg.outcome.surfaceZ,
+            // #1189 — the seating these raw Z values were read in, so a later run can correct
+            // them after the probe is refitted (and ignore the record when it cannot).
+            probeRefZ: reg.outcome.probeRefZ,
             ...(derived === undefined ? { measuredTopMachineZ: reg.outcome.surfaceZ } : {}),
             measuredAt: reg.measuredAt,
             g54: { x: g54.x, y: g54.y },
