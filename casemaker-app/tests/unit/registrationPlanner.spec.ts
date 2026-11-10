@@ -634,6 +634,51 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
     expect(r.outcome.notes.join(' ')).toContain('check its thickness');
   });
 
+  it('#1179 B4 — a recorded top replaces the arithmetic, and the offer names the record', async () => {
+    // The blank's last finished run kept its accepted top 0.3 mm above seat + stock: the offer
+    // continues from THAT top, not from the stated thickness.
+    const z1 = fakeZ1({ actual: { ...BLANK, xMin: 200, xMax: 238 } });
+    const recorded = EXPECTED + 0.3;
+    const asked: { kind: string; text: string }[] = [];
+    const r = await runRegistration(P25(), {
+      console: z1.console,
+      operator: async (step) => {
+        asked.push(step);
+        return true;
+      },
+      hasFinishedPrograms: true,
+      lastRecordedTopMachineZ: recorded,
+    });
+    if (!r.ok) throw new Error(r.reason);
+    const presses = asked.filter((s) => s.kind === 'derived-surface');
+    expect(presses).toHaveLength(1);
+    expect(presses[0]!.text).toContain(`use the last record for this blank: machine Z ${f3(recorded)}`);
+    expect(presses[0]!.text).toContain(`0.3 mm above seat + stock ${f3(EXPECTED)}`);
+    expect(presses[0]!.text).not.toContain("use the bracket's own top");
+    expect(r.data.surfaceDerived).toBe('bracket-top');
+    expect(r.data.surface.z).toBeCloseTo(recorded, 3);
+    expect(r.outcome.surfaceZ).toBeCloseTo(recorded, 3);
+  });
+
+  it('#1179 B4 — a record that agrees with the arithmetic says it is the same', async () => {
+    const z1 = fakeZ1({ actual: { ...BLANK, xMin: 200, xMax: 238 } });
+    const asked: { kind: string; text: string }[] = [];
+    const r = await runRegistration(P25(), {
+      console: z1.console,
+      operator: async (step) => {
+        asked.push(step);
+        return true;
+      },
+      hasFinishedPrograms: true,
+      lastRecordedTopMachineZ: EXPECTED,
+    });
+    if (!r.ok) throw new Error(r.reason);
+    const presses = asked.filter((s) => s.kind === 'derived-surface');
+    expect(presses).toHaveLength(1);
+    expect(presses[0]!.text).toContain(`the same as seat + stock ${f3(EXPECTED)}`);
+    expect(r.outcome.surfaceZ).toBeCloseTo(EXPECTED, 3);
+  });
+
   it('a reading BELOW the band offers the same press', async () => {
     const z1 = fakeZ1({ actual: BLANK });
     let firstZProbe = true;
