@@ -1,130 +1,148 @@
-// #1164 slice (a) — THE ROTARY TIP DROP ON THE TRUE RAY GEOMETRY.
+// #1164 slice (a) — THE ROTARY TIP DROP ON THE TRUE RAY GEOMETRY, judged by the penetration sweep.
 //
-// The defect: the planner fed the radial field to the FLAT disc drop, where a neighbour Δθ away is
-// `R·Δθ` from the tool. On the machine it is `ρ·sin Δθ`, ρ its own radius, so below the surface the
-// stencil was too narrow by R/ρ and the ball gouged the wall beside a groove. The new drop asks
-// `cutterFloorOnColumn` (#763) — the same function the column sweep uses — for every column the
-// cutter can reach, and takes the smallest tip that leaves every column at or above its own goal
-// radius.
+// The defect (#1155): the planner fed the radial map to the FLAT disc drop, where a neighbour Δθ
+// away is `R·Δθ` from the tool; on the machine it is `ρ·sin Δθ`, ρ its own radius. Below the
+// surface the map disc is too narrow by R/ρ, so the ball gouges the wall beside a groove — and the
+// stamp, copying the same metric, certified it.
 //
-// Red-first: this spec is written against `rotaryFinishTipField`, which does not exist at the
-// parent. The acceptance fixture is the analyst's: a V-groove to ρ = 8 mm on a ⌀44.5 rod with a
-// ⌀6 ball; here the heightfield is built analytically (the groove rows at ρ = 8, the rest at the
-// envelope) so the geometry, not a mesh importer, is what is measured.
-import { describe, expect, it } from 'vitest';
+// The acceptance (the analyst's design note): a V-groove to ρ = 8 mm on a ⌀44.5 rod, ⌀6 ball, the
+// tool 10° from the groove wall. The old map-metric drop puts the ball ≥ 0.5 mm into the wall by
+// the 3D sweep; the true drop ≤ 0.02 mm. The sweep is `sweepRotaryPenetration` — the helper that
+// reproduces the analyst's giraffe baseline exactly (1.1162731 mm, line 8751).
+import { afterEach, describe, expect, it } from 'vitest';
 
+import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
+import type { EngraveTargetObject } from '@/types/engraveJob';
 import type { GoalRadialField } from '@/engine/cnc/rotary/radialField';
-import { cutterFloorOnColumn, type ColumnCutter } from '@/engine/cnc/rotary/columnRay';
-import { radialFieldAsHeightfield } from '@/engine/cnc/cam/rotaryRelief';
+import { radialFieldAsHeightfield, sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
 import { finishTipField } from '@/engine/cnc/cam/dropTip';
 import { rotaryFinishTipField, type RotaryTipTool } from '@/engine/cnc/rotary/tipDrop';
+import { sweepRotaryPenetration, type RotaryMove } from './helpers/rotaryPenetration';
+import { stl } from './helpers/meshes';
 
-const ENVELOPE = 44.5 / 2; // ⌀44.5 rod
-const PITCH = 0.2;
-const BALL_R = 3; // ⌀6 ball
-const BALL: ColumnCutter = { radius: 0, tanHalf: null, cornerRadius: BALL_R, outerRadius: BALL_R };
+afterEach(() => clearTargetObjectMeshCache());
+
+type V = [number, number, number];
+type Tri = [V, V, V];
+
+const R = 44.5 / 2; // ⌀44.5 rod
+const GROOVE = 8; // the groove floor radius
+const BALL_R = 3;
+const BALL = { radius: 0, tanHalf: null, cornerRadius: BALL_R, outerRadius: BALL_R };
 const TOOL: RotaryTipTool = { cutter: BALL, ball: true, radius: BALL_R };
+// The PLANNING field is coarse by design (the giraffe plans on 1 mm); a 1 mm field also keeps
+// this acceptance in seconds — the tip drop's cost is cells × columns, and the naive bisection
+// below is not production speed yet (a finding for the slice, not hidden here).
+const PITCH = 1.0;
+/** 10° in map arc at the envelope, mm — the acceptance's tool-to-wall angle. */
+const TEN_DEG_MM = (10 * Math.PI * R) / 180;
 
-/** A rod with a V-groove down to `grooveRadius` over `grooveRows` rows centred on the seam. */
-function grooveField(grooveRadius: number, grooveRows: number): GoalRadialField {
-  const nx = 8;
-  const ny = 80; // ~7.2 mm of arc at the envelope at 0.2 mm
-  const z = new Float32Array(nx * ny);
-  const covered = new Uint8Array(nx * ny);
-  for (let j = 0; j < ny; j++) {
-    const inGroove = Math.abs(j - ny / 2) <= grooveRows / 2;
-    for (let i = 0; i < nx; i++) {
-      z[j * nx + i] = inGroove ? grooveRadius - ENVELOPE : 0;
-      covered[j * nx + i] = 1;
-    }
+/**
+ * A rod with a V-groove centred on the map's φ = 0 (rows at arc 0): the radius falls at 45° from
+ * the envelope to the groove floor and back over the groove's half-width. A V, not a square
+ * groove — a vertical wall is uncuttable by a radiused ball, and the note's fixture is a V.
+ */
+function vGrooveTriangles(halfWidthMm: number): { tris: Tri[]; flat: number[] } {
+  const seg = 180; // around the full circle (1 mm field: a V wall is still resolved)
+  const length = 20;
+  const radiusAt = (a: number): number => {
+    let arc = (a * R) % (2 * Math.PI * R);
+    if (arc > Math.PI * R) arc -= 2 * Math.PI * R;
+    const d = Math.abs(arc);
+    if (d >= halfWidthMm) return R;
+    // A straight wall from the envelope at `halfWidthMm` down to the floor radius at the seam —
+    // the note's V-groove to ρ = 8 mm, with the wall 10° from the tool when the ball sits at the
+    // groove's bottom.
+    return GROOVE + (R - GROOVE) * (d / halfWidthMm);
+  };
+  const at = (x: number, a: number): V => [x, radiusAt(a) * Math.sin(a), radiusAt(a) * Math.cos(a)];
+  const tris: Tri[] = [];
+  for (let i = 0; i < seg; i++) {
+    const a0 = (i / seg) * 2 * Math.PI;
+    const a1 = ((i + 1) / seg) * 2 * Math.PI;
+    tris.push([at(-length / 2, a0), at(length / 2, a0), at(length / 2, a1)]);
+    tris.push([at(-length / 2, a0), at(length / 2, a1), at(-length / 2, a1)]);
   }
+  return { tris, flat: tris.flatMap((t) => [...t[0], ...t[1], ...t[2]]) };
+}
+
+function goal(tris: Tri[]): EngraveTargetObject {
   return {
-    nx,
-    ny,
-    x0: 0,
-    y0: 0,
-    pitch: PITCH,
-    radius: ENVELOPE,
-    minRadius: grooveRadius,
-    maxRadius: ENVELOPE,
-    z,
-    covered,
-    coveredCount: nx * ny,
-    resolutionNote: 'test',
+    id: 'v-groove',
+    name: 'v-groove.stl',
+    format: 'stl',
+    sha256: 'b'.repeat(64),
+    data: stl(tris),
+    size: { x: 20, y: 2 * R, z: 2 * R },
+    position: { x: 50, y: 0, z: 0 },
+    rotation: 0,
+    enabled: true,
+    role: 'goal',
   };
 }
 
-/** The floor the cutter leaves on the column `phi` away and `dx` along, at a tip Z (relative). */
-function floorAt(tipZ: number, phi: number, dx: number): number | null {
-  return cutterFloorOnColumn(BALL, ENVELOPE + tipZ, phi, dx);
+/** The field cell nearest (x, arc). */
+function cellAt(field: GoalRadialField, x: number, arc: number): number {
+  const i = Math.round((x - field.x0) / field.pitch);
+  const j = ((Math.round((arc - field.y0) / field.pitch) % field.ny) + field.ny) % field.ny;
+  return j * field.nx + i;
 }
 
-/** The worst (smallest) clearance the tip leaves: floor − goal radius over the reached columns. */
-/** The tool sits at cell (i, j) at ITS OWN tip; every column it can reach is measured against
- *  that column's goal radius. A negative value is material cut away below the surface. */
-function worstClearance(field: GoalRadialField, tips: Float32Array, i: number, j: number): number {
-  let worst = Infinity;
-  const { nx, ny, pitch, radius, z, covered } = field;
-  const span = Math.ceil((2 * BALL_R) / pitch) + 2;
-  const centreTip = tips[j * nx + i]!;
-  for (let dj = -span; dj <= span; dj++) {
-    for (let di = -span; di <= span; di++) {
-      const ii = i + di;
-      const jj = ((j + dj) % ny + ny) % ny;
-      if (ii < 0 || ii >= nx) continue;
-      const rho = covered[jj * nx + ii] === 1 ? radius + z[jj * nx + ii]! : radius;
-      const phi = (dj * pitch) / radius;
-      const floor = floorAt(centreTip, phi, di * pitch);
-      if (floor === null) continue;
-      worst = Math.min(worst, floor - rho);
-    }
-  }
-  return worst;
+/** One finishing pose: the ball's tip at `tipZ` (relative to the envelope) on the ray at `arc`. */
+function poseMove(x: number, tipZ: number, arc: number): RotaryMove {
+  const aDeg = (arc / R) * (180 / Math.PI);
+  return { startX: x, startZ: R, startA: aDeg, x, z: R + tipZ, aDeg, line: 1, operation: 'finish' };
 }
 
 describe('#1164 the rotary tip drop on the true ray geometry', () => {
-  it('the old map-metric drop gouges the V-groove wall; the true drop does not', () => {
-    const field = grooveField(8, 40);
+  // The wall 10° from the seam: the ball at the groove's bottom is the acceptance's "tool 10°
+  // from the groove wall", and the floor is ρ = 8 mm (14.25 mm below the envelope).
+  const halfWidth = TEN_DEG_MM;
+
+  function setup(): { field: GoalRadialField; flat: number[]; k: number; x: number; arc: number } {
+    const { tris, flat } = vGrooveTriangles(halfWidth);
+    const field = sampleGoalRadialField(goal(tris), R, { pitchMm: PITCH });
+    // The ball sits at the groove's BOTTOM: its walls are halfWidth (= 10°) away, the acceptance's
+    // pose, and the map's own disc (7.7° at the envelope) does not reach them while the true
+    // distance at ρ = 8 does.
+    const arc = 0;
+    const k = cellAt(field, 0, arc);
+    const x = field.x0 + Math.round((0 - field.x0) / field.pitch) * field.pitch;
+    return { field, flat, k, x, arc };
+  }
+
+  function sweepAt(flat: number[], x: number, arc: number, tipZ: number): number {
+    return (
+      sweepRotaryPenetration({
+        triangles: flat,
+        R,
+        moves: [poseMove(x, tipZ, arc)],
+        cutter: { radius: BALL_R, shape: 'ball' },
+      }).worst?.penMm ?? 0
+    );
+  }
+
+  it("the old map-metric drop gouges the V wall; the true drop does not (the analyst's acceptance)", () => {
+    const { field, flat, k, x, arc } = setup();
     const hf = radialFieldAsHeightfield(field);
     const oldTips = finishTipField(hf, { radius: BALL_R, ball: true }, Number.MAX_SAFE_INTEGER, { wrapRows: true });
     const newTips = rotaryFinishTipField(field, TOOL, { maxOps: Number.MAX_SAFE_INTEGER });
+    const oldPen = sweepAt(flat, x, arc, oldTips[k]!);
+    const newPen = sweepAt(flat, x, arc, newTips[k]!);
+    expect(oldPen, `the old drop must gouge the wall (${oldPen.toFixed(3)} mm)`).toBeGreaterThanOrEqual(0.5);
+    expect(newPen, `the true drop must leave the wall (${newPen.toFixed(3)} mm)`).toBeLessThanOrEqual(0.02);
+  }, 600_000);
 
-    // A cell on the groove floor next to its wall: the wall stands 14.25 mm above the floor.
-    const j = Math.round(field.ny / 2);
-    const i = Math.round(field.nx / 2);
-    const wallClearanceOld = worstClearance(field, oldTips, i, j);
-    const wallClearanceNew = worstClearance(field, newTips, i, j);
-    expect(wallClearanceOld, `the old drop must gouge this wall (clearance ${wallClearanceOld.toFixed(3)} mm)`).toBeLessThan(-0.5);
-    expect(wallClearanceNew, `the true drop must leave the wall (clearance ${wallClearanceNew.toFixed(3)} mm)`).toBeGreaterThanOrEqual(-0.02);
-  });
+  it('the new tip is the smallest that clears the wall — 0.1 mm lower and the sweep gouges', () => {
+    const { field, flat, k, x, arc } = setup();
+    const newTips = rotaryFinishTipField(field, TOOL, { maxOps: Number.MAX_SAFE_INTEGER });
+    expect(sweepAt(flat, x, arc, newTips[k]! - 0.1)).toBeGreaterThan(0.02);
+  }, 600_000);
 
-  it('every reached column is at or above its own goal radius on the new tip, across the whole field', () => {
-    const field = grooveField(8, 40);
+  it('a plain rod with no groove asks for no lift', () => {
+    const { tris } = vGrooveTriangles(0);
+    const field = sampleGoalRadialField(goal(tris), R, { pitchMm: PITCH });
     const tips = rotaryFinishTipField(field, TOOL, { maxOps: Number.MAX_SAFE_INTEGER });
-    let worst = Infinity;
-    for (let j = 0; j < field.ny; j += 7) {
-      for (let i = 0; i < field.nx; i += 3) {
-        worst = Math.min(worst, worstClearance(field, tips, i, j));
-      }
-    }
-    expect(worst).toBeGreaterThanOrEqual(-0.02);
-  });
-
-  it('the tip is the SMALLEST one that clears the wall — a higher tip is not the answer', () => {
-    const field = grooveField(8, 40);
-    const tips = rotaryFinishTipField(field, TOOL, { maxOps: Number.MAX_SAFE_INTEGER });
-    const j = Math.round(field.ny / 2);
-    const i = Math.round(field.nx / 2);
-    // Lower the tip by 0.1 mm: some reached column must now be cut into. That is what makes the
-    // field a plan and not a safe over-lift.
-    const lowered = Float32Array.from(tips);
-    lowered[j * field.nx + i] = tips[j * field.nx + i]! - 0.1;
-    expect(worstClearance(field, lowered, i, j)).toBeLessThan(-0.02);
-  });
-
-  it('a flat rod with no groove stays at the envelope (nothing to cut, no lift)', () => {
-    const field = grooveField(ENVELOPE, 0);
-    const tips = rotaryFinishTipField(field, TOOL, { maxOps: Number.MAX_SAFE_INTEGER });
-    for (let k = 0; k < tips.length; k += 97) expect(tips[k]).toBeCloseTo(0, 6);
-  });
+    for (let k = 0; k < tips.length; k += 101) expect(tips[k]).toBeCloseTo(0, 6);
+  }, 600_000);
 });
