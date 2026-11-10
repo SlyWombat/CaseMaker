@@ -118,6 +118,14 @@ export interface FakeConsoleOptions {
   steps?: number;
   /** #886 — what the card holds; `ls -e -s` answers this, `rm` takes an entry away. */
   files?: readonly FakeSdFile[];
+  /**
+   * #1169 — the controller parks in its `Tool` state when the run reaches this line, waiting for
+   * `M490.2` (the third `T:` field names the tool). The line/percent freeze until Continue.
+   */
+  toolWaitAtLine?: number;
+  /** #1169 — the controller raises an alarm when the run reaches this line: the reply carries
+   *  `ALARM:` and the run ends. */
+  alarmAtLine?: number;
 }
 
 /**
@@ -173,6 +181,9 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
   let percent = 0;
   let line = 0;
   let elapsed = 0;
+  // #1169 — the firmware's Tool wait and an alarm, seeded by a spec.
+  let toolContinued = false;
+  let alarmed = false;
   let diagnoseLine = DIAGNOSE_IDLE;
   // #827 — the round feature the centre routine is run against; null until a spec seeds it.
   let feature: FakeFeature | null = null;
@@ -208,6 +219,16 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
     // page can be inspected without the program finishing underneath the assertion.
     if (forced === 'run') return '<Run|MPos:-12.000,-8.000,-2.000|WPos:0,0,0|P:12,42,17>';
     if (forced === 'alarm') return '<Alarm|MPos:0,0,0|WPos:0,0,0>\r\nALARM: Probe fail';
+    // #1169 — the scripted run's own events, only while the scripted program is running (a forced
+    // phase above is a spec's static answer, not a program). The Tool wait freezes the run where it
+    // stands until M490.2; the alarm ends it and the reply carries ALARM: from then on.
+    if (forced === 'idle' && phase === 'running' && opts.alarmAtLine !== undefined && line >= opts.alarmAtLine) {
+      alarmed = true;
+      phase = 'stopped';
+    }
+    if (forced === 'idle' && phase === 'running' && opts.toolWaitAtLine !== undefined && line >= opts.toolWaitAtLine && !toolContinued) {
+      return `<Tool|MPos:0,0,0|WPos:0,0,0|P:${line},${percent},${elapsed}|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0|T:0,0,1>`;
+    }
     if (phase === 'running') {
       percent = Math.min(100, percent + Math.max(1, Math.ceil(100 / steps)));
       line += 1;
@@ -221,7 +242,23 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
 
   const replyFor = (text: string): number[] => {
     const lineText = text.trim();
-    if (lineText === '?') return frame(PTYPE_REPLY, `${statusLine()}\r\n`);
+    if (lineText === '?') {
+      const body = statusLine();
+      // #1169 — the alarm the controller reports between lines, in the firmware's own form.
+      return frame(PTYPE_REPLY, alarmed ? `ALARM: Emergency stop\r\n${body}\r\n` : `${body}\r\n`);
+    }
+    // #1169 — Continue: the Tool wait resumes and the line is recorded for the spec.
+    if (lineText === 'M490.2') {
+      toolContinued = true;
+      return frame(PTYPE_REPLY, 'ok\r\n');
+    }
+    // #1169 — the recovery's two presses: Unlock clears the alarm (a later `?` no longer says it),
+    // Home answers ok. Both are recorded for the spec.
+    if (lineText === '$X') {
+      alarmed = false;
+      return frame(PTYPE_REPLY, 'ok\r\n');
+    }
+    if (lineText === '$H') return frame(PTYPE_REPLY, 'ok\r\n');
     // #826 — the diagnostic read the heartbeat sends alongside `?`.
     if (lineText === 'diagnose') return frame(PTYPE_REPLY, `${diagnoseLine}\r\n`);
     // #827 — the probe session's lines, against the seeded feature.
