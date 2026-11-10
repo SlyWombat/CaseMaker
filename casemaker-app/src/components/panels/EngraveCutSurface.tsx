@@ -120,6 +120,7 @@ import {
 } from '@/platform/machineChange';
 import { openMachineChange } from '@/components/machine-change';
 import { EngravePreflight } from './EngravePreflight';
+import { runFindingAction, type FindingAction } from '@/engine/cnc/preflight/actions';
 import { EngraveMachineUpload } from './EngraveMachineUpload';
 import { CutterChecklist, cutterChecklistRows, missingCuttersWords } from './CutterChecklist';
 import type { CutterChecklistEntry } from '@/types/engraveJob';
@@ -305,6 +306,12 @@ export interface EngraveCutSurfaceProps {
   staleReason?: EngraveInputKey | null;
   /** #1132 — the last Generate's duration on this job (ms); null when it has never been timed. */
   lastGenerateMs?: number | null;
+  /**
+   * #1128 follow-up — the Design cutter group's own fix, for a Do row's "Choose a cutter". The
+   * Cut surface switches to Design and runs this; it is the panel's existing `applyFix`, never a
+   * second route to the cutter list.
+   */
+  onOpenCutters?: () => void;
 }
 
 /** The map from the live Generate: each program's FNV key to the report that gated that text. */
@@ -613,6 +620,7 @@ export function EngraveCutSurface({
   restoreChecking,
   staleReason = null,
   lastGenerateMs = null,
+  onOpenCutters,
 }: EngraveCutSurfaceProps): JSX.Element {
   const freeze = useEngravePackageStore((s) => s.freeze);
   const openManage = useManageModeStore((s) => s.openManage);
@@ -706,6 +714,11 @@ export function EngraveCutSurface({
   // The statement is about the MACHINE, so it is asked whenever there is a program to run, not
   // only when one of the gate's warning codes wants a clearance tick (#797).
   const ackBlocker = programKey !== null && !statementTicked ? 'tick the statement in Cut, step 1' : null;
+  /** #1128 follow-up — the clearance statement's tick, the same write its checkbox makes. */
+  const acknowledgeClearance = (): void => {
+    if (programKey !== null) acknowledgeProgram(programKey);
+    else setAcknowledged(true);
+  };
   // #608 — the cut-extent measurement this machine took: its tilt feeds the re-post step line, and
   // the registration's fitted plane is what the release gate compares the frozen package against.
   const spreadMeasurement = useSurfaceSpread(job.id, target);
@@ -1332,6 +1345,20 @@ export function EngraveCutSurface({
     });
   };
 
+  /**
+   * #1128 follow-up — a Do row's act, through the SAME handlers as the original control: the
+   * machine-record banner's wizard, the Design cutter group's fix, or the clearance tick above.
+   * Choosing a cutter leaves Cut for Design first, exactly where the panel's own fix lands.
+   */
+  const onFindingAction = (action: FindingAction, _code: string): void => {
+    if (action === 'choose-cutter') useCncModeStore.getState().show('design');
+    runFindingAction(action, {
+      changeMachine: changeMachineForMount,
+      openCutters: () => onOpenCutters?.(),
+      acknowledgeClearance,
+    });
+  };
+
   // #819 — the ended run's screen: the Done card and its one action, nothing else.
   if (runOver && target !== null) {
     return (
@@ -1474,8 +1501,7 @@ export function EngraveCutSurface({
                 checked={statementTicked}
                 onChange={(e) => {
                   if (!e.target.checked) setAcknowledged(false);
-                  else if (programKey !== null) acknowledgeProgram(programKey);
-                  else setAcknowledged(true);
+                  else acknowledgeClearance();
                 }}
                 style={{ marginTop: 2 }}
               />
@@ -1607,7 +1633,7 @@ export function EngraveCutSurface({
           >
             details
           </summary>
-          <EngravePreflight report={report} />
+          <EngravePreflight report={report} onFindingAction={onFindingAction} />
         </details>
       </Step>
 

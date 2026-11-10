@@ -20,6 +20,7 @@ import { entryFor } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import type { PreflightHubReport } from '@/engine/cnc/preflight/hub';
 import { triagePreflight, type TriagedRow } from '@/engine/cnc/preflight/triage';
+import { findingActionFor, type FindingAction } from '@/engine/cnc/preflight/actions';
 import type { FindingBand } from '@/engine/cnc/preflight/types';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
@@ -57,6 +58,13 @@ function setupsWords(setups: readonly number[]): string {
 export interface EngravePreflightProps {
   /** The hub's aggregate — one `collect()` per scope, plus the two run-policy rows. */
   report: PreflightHubReport;
+  /**
+   * #1128 follow-up — the Do row's act. The page is a reader: it renders the button and hands the
+   * parent the named action and the code; the Cut surface supplies the handler its own banner/card
+   * already uses. Absent in a context with no actions to run (a spec, the docs), and then no
+   * button is drawn.
+   */
+  onFindingAction?: (action: FindingAction, code: string) => void;
 }
 
 /**
@@ -71,14 +79,20 @@ function Row({
   index,
   expanded,
   singleSetup,
+  onFindingAction,
 }: {
   triaged: TriagedRow;
   index: number;
   expanded: boolean;
   singleSetup: boolean;
+  onFindingAction?: (action: FindingAction, code: string) => void;
 }): JSX.Element {
   const { row, setups } = triaged;
   const color = SEVERITY_COLOR[row.severity];
+  // #1128 follow-up — a Do row whose act the surface can run carries its own button, in the
+  // original control's words. Check/Know rows never do; a Do row with no in-app act has none.
+  const act =
+    triaged.band === 'do' && onFindingAction !== undefined ? findingActionFor(row) : null;
   return (
     <div
       data-testid={`engrave-preflight-row-${index}-${row.code}`}
@@ -102,6 +116,17 @@ function Row({
             </span>
           </>
         )}
+        {act !== null && (
+          <button
+            type="button"
+            className="btn btn--sm"
+            data-testid={`engrave-preflight-action-${index}-${row.code}`}
+            style={{ marginLeft: 8 }}
+            onClick={() => onFindingAction!(act.action, row.code)}
+          >
+            {act.label}
+          </button>
+        )}
         {expanded && (
           <span style={{ ...MUTED, display: 'block' }} data-testid={`engrave-preflight-cause-${index}`}>
             {singleSetup ? '' : `Setup ${row.cause.setupIndex + 1} · `}
@@ -121,12 +146,14 @@ function Band({
   startIndex,
   expandedIndex,
   singleSetup,
+  onFindingAction,
 }: {
   band: FindingBand;
   rows: TriagedRow[];
   startIndex: number;
   expandedIndex: number;
   singleSetup: boolean;
+  onFindingAction?: (action: FindingAction, code: string) => void;
 }): JSX.Element {
   const rowsEls = rows.map((triaged, i) => (
     <Row
@@ -135,6 +162,7 @@ function Band({
       index={startIndex + i}
       expanded={startIndex + i === expandedIndex}
       singleSetup={singleSetup}
+      onFindingAction={onFindingAction}
     />
   ));
   const heading = `${BAND_TITLE[band]} · ${rows.length}`;
@@ -154,7 +182,7 @@ function Band({
   );
 }
 
-export function EngravePreflight({ report }: EngravePreflightProps): JSX.Element {
+export function EngravePreflight({ report, onFindingAction }: EngravePreflightProps): JSX.Element {
   const blocking = report.firstBlocking;
   // #1128 — the one reading of the report: bands, cross-setup duplicates merged, planner facts
   // kept out. Every row index below is a position in this triaged list.
@@ -174,13 +202,21 @@ export function EngravePreflight({ report }: EngravePreflightProps): JSX.Element
         {triaged.counts.do} to do · {triaged.counts.check} to check · {triaged.counts.know} to know
       </p>
 
-      <Band band="do" rows={triaged.do} startIndex={0} expandedIndex={expandedIndex} singleSetup={singleSetup} />
+      <Band
+        band="do"
+        rows={triaged.do}
+        startIndex={0}
+        expandedIndex={expandedIndex}
+        singleSetup={singleSetup}
+        onFindingAction={onFindingAction}
+      />
       <Band
         band="check"
         rows={triaged.check}
         startIndex={triaged.do.length}
         expandedIndex={expandedIndex}
         singleSetup={singleSetup}
+        onFindingAction={onFindingAction}
       />
       <Band
         band="know"
@@ -188,6 +224,7 @@ export function EngravePreflight({ report }: EngravePreflightProps): JSX.Element
         startIndex={triaged.do.length + triaged.check.length}
         expandedIndex={expandedIndex}
         singleSetup={singleSetup}
+        onFindingAction={onFindingAction}
       />
 
       {blocking !== null && (
