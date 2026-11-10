@@ -63,6 +63,21 @@ export const BROWSER_MEMORY_SHORT_REFUSAL: RendererRefusal = {
 };
 
 /**
+ * The press probe's WARNING (the landing ruling, 2026-11-09): the page could not reserve the floor
+ * just now, but a 64-bit renderer under transient pressure is not a verdict — Generate proceeds and
+ * the operator is told, so a real OOM reads as the cause rather than a mystery mid-plan failure.
+ */
+export const BROWSER_MEMORY_SHORT_WARNING =
+  "This page couldn't reserve the planner's ~450 MiB just now; generating anyway";
+
+/**
+ * The run's own out-of-memory failure, in the operator's words: the raw text of the bench's
+ * failure ("Array buffer allocation failed") becomes a named cause with the remedy.
+ */
+export const PLANNER_OUT_OF_MEMORY_SENTENCE =
+  'the planner ran out of memory in this browser; close other tabs or use a 64-bit browser';
+
+/**
  * The planner's measured address-space floor (MB): the ball rank's peak AFTER #1125's stamp cap.
  * The bench's death (2026-11-09) was at "planning: sequence — setup 1, 35 %", E's 703.7 MiB of
  * ArrayBuffers; with the stamp cap in place E's Set B measurement of the same stage is 454 MiB,
@@ -180,14 +195,18 @@ type NavigableNavigator = NavigatorLike | null | undefined;
 export interface RendererVerdict {
   state: 'checking' | 'ok' | 'unsupported';
   refusal: RendererRefusal | null;
+  /** The press probe's warning (never a refusal): shown beside Generate; null otherwise. */
+  warning: string | null;
 }
 
 /**
  * One verdict per page, held as a plain module value (the `toolRegistry` pattern): the panel
  * subscribes with `useSyncExternalStore`, and the snapshot identity is stable between changes.
  */
-let verdict: RendererVerdict = { state: 'checking', refusal: null };
+let verdict: RendererVerdict = { state: 'checking', refusal: null, warning: null };
 let started = false;
+/** True once the STARTUP check ran and BOTH of its probes failed (the press then re-probes). */
+let startupProbeFailed = false;
 const listeners = new Set<() => void>();
 
 export function getRendererVerdict(): RendererVerdict {
@@ -206,9 +225,31 @@ function publish(next: RendererVerdict): void {
   for (const listener of listeners) listener();
 }
 
+/** How long the startup check waits before its one retry (the landing ruling, 2026-11-09). */
+export const PROBE_RETRY_DELAY_MS = 2000;
+
+export interface RendererCheckOptions {
+  /** The wait between the first startup probe and its one retry. */
+  retryDelayMs?: number;
+  /** Injectable for tests: the wait itself (defaults to a `setTimeout` promise). */
+  wait?: (ms: number) => Promise<void>;
+}
+
+const defaultWait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * Start the check, once per page. Called from `main.tsx` AFTER the first render: the probe
  * reserves ~454 MiB of address space for a moment and must not delay first paint.
+ *
+ * THE LANDING RULING (2026-11-09) — A FAILED STARTUP PROBE IS NOT A VERDICT. The probe runs in
+ * the first-render window, when the app's own startup allocations peak; a transient allocation
+ * failure there was published as a permanent refusal and disabled Generate on a healthy 64-bit
+ * browser (measured in the e2e: the same page reserves the floor four seconds later). So:
+ *   - bitness '32' still refuses IMMEDIATELY (no probe — there is nothing left to learn);
+ *   - otherwise a failed probe retries ONCE after {@link PROBE_RETRY_DELAY_MS};
+ *   - if the retry fails too the verdict stays 'checking' — Generate stays AVAILABLE, and the
+ *     press runs its own deliberate re-probe ({@link recheckRendererForGenerate});
+ *   - only a failure at the press refuses, and that verdict then stands for the page.
  *
  * A detector that throws is treated as "cannot tell" (`ok`): the check is a guard, and a broken
  * guard must not disable Generate on a healthy browser.
@@ -216,17 +257,68 @@ function publish(next: RendererVerdict): void {
 export function startRendererCheck(
   nav: NavigableNavigator = undefined,
   probe: () => ProbeResult = probeAddressSpace,
+  opts: RendererCheckOptions = {},
 ): void {
   if (started) return;
   started = true;
-  void detectRendererRefusal(nav, probe).then(
-    (refusal) => publish(refusal === null ? { state: 'ok', refusal: null } : { state: 'unsupported', refusal }),
-    () => publish({ state: 'ok', refusal: null }),
-  );
+  const wait = opts.wait ?? defaultWait;
+  void (async () => {
+    if ((await readRendererBitness(nav)) === '32') {
+      publish({ state: 'unsupported', refusal: BROWSER_32_BIT_REFUSAL, warning: null });
+      return;
+    }
+    if (probe().ok) {
+      publish({ state: 'ok', refusal: null, warning: null });
+      return;
+    }
+    await wait(opts.retryDelayMs ?? PROBE_RETRY_DELAY_MS);
+    if (probe().ok) {
+      publish({ state: 'ok', refusal: null, warning: null });
+      return;
+    }
+    // Neither attempt reserved the floor — NOT a refusal: Generate stays available and its press
+    // re-probes deliberately (a startup peak must not brick a healthy browser).
+    startupProbeFailed = true;
+    publish({ state: 'checking', refusal: null, warning: null });
+  })().catch(() => publish({ state: 'ok', refusal: null, warning: null }));
+}
+
+/**
+ * THE PRESS'S OWN PROBE (the landing ruling). Generate calls this when the startup verdict is not
+ * 'ok' — i.e. both startup attempts failed. Bitness '32' refuses before the probe; otherwise a
+ * failed probe publishes the memory sentence and that verdict STANDS for the page. Returns the
+ * refusal (null when the renderer passes, and the verdict becomes 'ok').
+ */
+export async function recheckRendererForGenerate(
+  nav: NavigableNavigator = undefined,
+  probe: () => ProbeResult = probeAddressSpace,
+): Promise<RendererRefusal | null> {
+  if ((await readRendererBitness(nav)) === '32') {
+    publish({ state: 'unsupported', refusal: BROWSER_32_BIT_REFUSAL, warning: null });
+    return BROWSER_32_BIT_REFUSAL;
+  }
+  if (probe().ok) {
+    publish({ state: 'ok', refusal: null, warning: null });
+    return null;
+  }
+  // THE PRESS WARNS, NEVER REFUSES (the landing ruling): Generate proceeds and the line beside it
+  // states the risk; a real out-of-memory failure in the run is named by `operatorRunError`.
+  publish({ state: 'checking', refusal: null, warning: BROWSER_MEMORY_SHORT_WARNING });
+  return null;
+}
+
+/**
+ * Whether the STARTUP check ran and BOTH its probes failed. The press re-probes only then —
+ * 'checking' also covers a page that never ran the check (a test harness, an embedded panel),
+ * and that is not a failure to act on.
+ */
+export function rendererProbeFailedAtStartup(): boolean {
+  return startupProbeFailed;
 }
 
 /** Test seam: put the page's verdict back before `startRendererCheck` (no probe runs). */
 export function resetRendererCheck(): void {
   started = false;
-  publish({ state: 'checking', refusal: null });
+  startupProbeFailed = false;
+  publish({ state: 'checking', refusal: null, warning: null });
 }

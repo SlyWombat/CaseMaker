@@ -5,12 +5,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   BROWSER_32_BIT_SENTENCE,
   BROWSER_MEMORY_SHORT_SENTENCE,
+  BROWSER_MEMORY_SHORT_WARNING,
   PLANNER_PEAK_FLOOR_MB,
   PROBE_CHUNK_MB,
   detectRendererRefusal,
   getRendererVerdict,
   probeAddressSpace,
   readRendererBitness,
+  recheckRendererForGenerate,
   resetRendererCheck,
   startRendererCheck,
   subscribeRendererVerdict,
@@ -64,6 +66,73 @@ describe('#1124 — a 32-bit renderer is refused before Generate', () => {
     startRendererCheck(navWithBitness('32'), passed);
     expect((await verdict).state).toBe('unsupported');
     expect(getRendererVerdict().refusal?.sentence).toBe(BROWSER_32_BIT_SENTENCE);
+  });
+});
+
+describe('#1124 — a failed startup probe is retried, and the press is the verdict (landing ruling)', () => {
+  const noWait = async (): Promise<void> => {};
+
+  it('a first startup attempt that fails and a retry that passes leaves the verdict ok', async () => {
+    let attempts = 0;
+    const probe = (): ProbeResult => {
+      attempts++;
+      return attempts === 1 ? failed() : passed();
+    };
+    const verdict = nextVerdict();
+    startRendererCheck(navWithBitness('64'), probe, { wait: noWait });
+    const landed = await verdict;
+    expect(attempts).toBe(2);
+    expect(landed.state).toBe('ok');
+    expect(landed.refusal).toBeNull();
+  });
+
+  it('both startup attempts failing is NOT a refusal: the verdict stays checking and Generate stays available', async () => {
+    let attempts = 0;
+    const probe = (): ProbeResult => {
+      attempts++;
+      return failed();
+    };
+    const verdict = nextVerdict();
+    startRendererCheck(navWithBitness('64'), probe, { wait: noWait });
+    const landed = await verdict;
+    expect(attempts).toBe(2);
+    expect(landed.state).toBe('checking');
+    expect(landed.refusal).toBeNull();
+    expect(getRendererVerdict()).toEqual({ state: 'checking', refusal: null, warning: null });
+  });
+
+  it('the press probe WARNS on a failed reservation and never refuses (the landing ruling)', async () => {
+    // The startup left 'checking' (both attempts failed); the press asks the renderer again.
+    startRendererCheck(navWithBitness('64'), failed, { wait: noWait });
+    await nextVerdict();
+    const refusal = await recheckRendererForGenerate(navWithBitness('64'), failed);
+    expect(refusal).toBeNull();
+    const landed = getRendererVerdict();
+    expect(landed.refusal).toBeNull();
+    expect(landed.state).toBe('checking');
+    expect(landed.warning).toBe(BROWSER_MEMORY_SHORT_WARNING);
+  });
+
+  it('the press re-probe that passes clears the page to ok', async () => {
+    startRendererCheck(navWithBitness('64'), failed, { wait: noWait });
+    await nextVerdict();
+    const refusal = await recheckRendererForGenerate(navWithBitness('64'), passed);
+    expect(refusal).toBeNull();
+    expect(getRendererVerdict()).toEqual({ state: 'ok', refusal: null, warning: null });
+  });
+
+  it('bitness 32 refuses at startup AND at the press, and neither runs the probe', async () => {
+    let probed = 0;
+    const probe = (): ProbeResult => {
+      probed++;
+      return passed();
+    };
+    const verdict = nextVerdict();
+    startRendererCheck(navWithBitness('32'), probe, { wait: noWait });
+    expect((await verdict).refusal?.sentence).toBe(BROWSER_32_BIT_SENTENCE);
+    const press = await recheckRendererForGenerate(navWithBitness('32'), probe);
+    expect(press?.sentence).toBe(BROWSER_32_BIT_SENTENCE);
+    expect(probed).toBe(0);
   });
 });
 

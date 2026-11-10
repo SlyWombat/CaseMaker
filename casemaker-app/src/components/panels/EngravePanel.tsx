@@ -52,6 +52,8 @@ import { findingFix, fixActionLabel, fixIsOffered, type PanelFix } from './findi
 import { operatorRunError } from './runErrorWords';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useRendererVerdict } from '@/hooks/useRendererVerdict';
+// #1124 — the press's own re-probe (the landing ruling): only a failure at Generate refuses.
+import { recheckRendererForGenerate, rendererProbeFailedAtStartup } from '@/engine/cnc/rendererBits';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize, type Tool, isCuttingRecord } from '@/engine/cnc/tool';
 import { tierOf } from '@/engine/cnc/toolTiers';
@@ -2979,6 +2981,13 @@ export function EngravePanel(): JSX.Element {
     // #1124 — the blocker at the button says why; this is the belt for the paths that call the
     // press directly (Try again, stale-regenerate) while the verdict is a refusal.
     if (rendererVerdict.refusal !== null) return;
+    // #1124 (the landing ruling, 2026-11-09) — A FAILED STARTUP PROBE LEAVES 'checking', NOT a
+    // refusal: the press is the deliberate re-check. Only a failure HERE refuses, and that verdict
+    // then stands for the page (the blocker below renders its sentence).
+    if (rendererVerdict.state !== 'ok' && rendererProbeFailedAtStartup()) {
+      const refusal = await recheckRendererForGenerate();
+      if (refusal !== null) return;
+    }
     // #516 item 5 — the first Generate recommends the cutter for a tool-less job, so one press both
     // picks the tool and builds the program (the sacrificial swatch reads the sim scene it loads).
     // A tool the operator chose or measured is left alone.
@@ -5456,6 +5465,16 @@ export function EngravePanel(): JSX.Element {
               >
                 Try again
               </button>
+            </span>
+          )}
+          {rendererVerdict.warning !== null && (
+            // #1124 (the landing ruling) — THE PRESS PROBE'S WARNING: Generate proceeds; the line
+            // states the risk, so a real out-of-memory failure later reads as the cause.
+            <span
+              data-testid="engrave-generate-memory-warning"
+              style={{ flex: '1 1 180px', fontSize: 12, lineHeight: 1.45, color: SEVERITY_COLOR.warning }}
+            >
+              {rendererVerdict.warning}
             </span>
           )}
           {generateBlocker !== null && (

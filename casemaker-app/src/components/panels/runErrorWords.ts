@@ -1,3 +1,5 @@
+import { PLANNER_OUT_OF_MEMORY_SENTENCE } from '@/engine/cnc/rendererBits';
+
 /**
  * #931 — A RUN'S FAILURE, IN THE OPERATOR'S WORDS, for both surfaces that print it.
  *
@@ -14,8 +16,21 @@ function sentenceCase(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+/**
+ * #1124 (the landing ruling, 2026-11-09) — A PLANNER OUT-OF-MEMORY FAILURE IS NAMED. The bench's
+ * failure surfaced as "Array buffer allocation failed" mid-plan; the operator gets the cause and
+ * the remedy instead of the raw allocation text. The matching is deliberately narrow: the browser
+ * engine's and the wasm heap's own allocation failures, not any sentence that mentions memory.
+ */
+function looksLikePlannerOom(message: string): boolean {
+  return /array ?buffer allocation failed|cannot enlarge memory|out of memory|memory access out of bounds|wasm memory/i.test(
+    message,
+  );
+}
+
 /** One run error's message, as the operator reads it (§4's copy rules; no ids, no checkpoint). */
 export function operatorRunError(message: string): string {
+  if (looksLikePlannerOom(message)) return PLANNER_OUT_OF_MEMORY_SENTENCE;
   const before = message;
   let text = message
     // `(flat-1.0)`, `(vise-moving-jaw)` — parenthesised registry keys and obstacle ids.
