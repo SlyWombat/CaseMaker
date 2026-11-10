@@ -3309,7 +3309,12 @@ export function EngravePanel(): JSX.Element {
   const chamferCount = job.chamfers?.length ?? 0;
   // #726 W16 — a GOAL mesh is the job's work ("Surface a mesh" is an operation): it counted as 0
   // items beside "Target object (1)", so the job read as empty while it had a whole 3D program.
-  const goalCount = job.targetObject?.enabled === true && (job.targetObject.role ?? 'reference') === 'goal' ? 1 : 0;
+  // #1123-54 — EVERY side's goal counts, not only the legacy single `targetObject`: a two-sided
+  // mesh job keeps its goals in `targetObjects[]`, so the count read "Items 0" on a job whose whole
+  // content was two mesh operations.
+  const goalCount = jobTargetObjects(job).filter(
+    (target) => target.enabled === true && (target.role ?? 'reference') === 'goal',
+  ).length;
   const itemTotal =
     goalCount +
     job.labels.length +

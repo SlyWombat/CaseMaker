@@ -821,6 +821,36 @@ describe('#726 W16 — a goal job counts its goal, verifies by the sweep, and as
     expect(screen.getByTestId('engrave-item-count').textContent).toBe('1');
   });
 
+  it('#1123-54 — a TWO-SIDED mesh job counts both goals, not "Items 0"', () => {
+    act(() => {
+      const job = defaultEngraveJob();
+      const goal = (id: string, setupId: string): NonNullable<EngraveJob['targetObjects']>[number] => ({
+        id,
+        name: `${id}.stl`,
+        format: 'stl',
+        sha256: 'b'.repeat(64),
+        data: 'QUJD',
+        size: { x: 30, y: 30, z: 10 },
+        position: { x: 50, y: 30, z: 0 },
+        rotation: 0,
+        enabled: true,
+        role: 'goal',
+        setupId,
+      });
+      useEngraveJobStore.setState({
+        job: {
+          ...job,
+          labels: [],
+          shapes: [],
+          targetObject: undefined,
+          targetObjects: [goal('tgt-goal-1', 'setup-1'), goal('tgt-goal-2', 'setup-2')],
+        },
+      });
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-item-count').textContent).toBe('2');
+  });
+
   it('a surface run is checked by the sweep: the verified row states it after the simulation', () => {
     render(<EngravePanel />);
     act(() => {
