@@ -9,6 +9,8 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { jobFingerprint } from '@/engine/cnc/engrave/package';
 import { replacementProblem, withCutterReplacement } from '@/engine/cnc/engrave/cutterChecklist';
+import { partialRegenPlan } from '@/engine/cnc/engrave/partialRegen';
+import { freezePackage, type PackageProgramInput } from '@/engine/cnc/engrave/package';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 
 const IDENTITY = { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' } as const;
@@ -93,3 +95,69 @@ describe('#1136 a replacement is a map at the one seam', () => {
     expect(replacementProblem(job(), 'inv:b', 'inv:e')).toBeNull();
   });
 });
+
+describe('#1136 stage 2a — which programs a replacement touches, and whether it may be partial', () => {
+  const programsFor = (job: EngraveJob): PackageProgramInput[] => job.setups!.flatMap((setup, i) =>
+    setup.tools.map((toolKey, j) => ({
+      setupIndex: i + 1,
+      setupId: setup.id,
+      toolKey,
+      nc: `G0 X0 Y0\n; setup ${i + 1} ${toolKey} ${j}\nM02\n`,
+      frameNc: null,
+      programHash: `h-${setup.id}-${toolKey}-${j}`,
+    })),
+  );
+  const frozen = (job: EngraveJob) => {
+    const made = freezePackage(job, programsFor(job), '2026-11-10T00:00:00.000Z');
+    if (!made.ok) throw new Error(made.reason);
+    return made.package;
+  };
+
+  it('names the affected setup and carries the unaffected programs verbatim', () => {
+    const base = job();
+    const pkg = frozen(base);
+    const replaced = withCutterReplacement(base, 'inv:b', 'inv:e');
+    const plan = partialRegenPlan(replaced, pkg);
+    if (!plan.ok) throw new Error(plan.reason);
+    expect(plan.affectedSetups).toEqual([1]);
+    expect(plan.affectedSetupIds).toEqual(['s1']);
+    // S2's frozen program rides over with the SAME bytes and hash.
+    expect(plan.carry).toHaveLength(1);
+    expect(plan.carry[0]).toMatchObject({ setupId: 's2', toolKey: 'inv:a', programHash: 'h-s2-inv:a-0' });
+    expect(plan.carry[0]!.nc).toBe(pkg.programs.find((p) => p.setupId === 's2')!.nc);
+  });
+
+  it('the other setup affected when the substitution lands there', () => {
+    const base = job();
+    const pkg = frozen(base);
+    const plan = partialRegenPlan(withCutterReplacement(base, 'inv:a', 'inv:e'), pkg);
+    if (!plan.ok) throw new Error(plan.reason);
+    expect(plan.affectedSetups).toEqual([1, 2]);
+    expect(plan.carry).toEqual([]);
+  });
+
+  it('refuses when the job changed beyond the replacement (the whole run must re-post)', () => {
+    const base = job();
+    const pkg = frozen(base);
+    const changed: EngraveJob = { ...withCutterReplacement(base, 'inv:b', 'inv:e'), labels: [...base.labels.slice(1)] };
+    const plan = partialRegenPlan(changed, pkg);
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.reason).toContain('beyond the cutter replacement');
+  });
+
+  it('refuses a replacement that would post the same cutter twice in one setup (a merge)', () => {
+    const base = job();
+    const pkg = frozen(base);
+    const dup: EngraveJob = { ...base, cutterSubstitutions: { s1: { 'inv:b': 'inv:a' } } };
+    const plan = partialRegenPlan(dup, pkg);
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.reason).toContain('merge two programs');
+  });
+
+  it('a map that changes nothing is not a partial post at all', () => {
+    const base = job();
+    const pkg = frozen(base);
+    expect(partialRegenPlan(base, pkg)).toMatchObject({ ok: false });
+  });
+});
+
