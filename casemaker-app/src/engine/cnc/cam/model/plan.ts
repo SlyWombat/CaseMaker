@@ -509,6 +509,47 @@ export interface ModelPlanOutput {
 }
 
 /**
+ * #1151 Phase 2 — ONE RANK CANDIDATE'S MEASUREMENT, exactly what the ball rank reads from it.
+ * A measured candidate gives its leftover share, its priced cycle and the deepest feed (the reach
+ * gate's input for the tie keys). Nothing else from its plan is read in-process — except the
+ * WINNER's stage ops, which the memo recomputes on demand if that winner was measured elsewhere
+ * (the memo is a read-through cache, so the bytes cannot move).
+ */
+export type RankMeasurement =
+  /** The rank's own facts, lower leftover first, then the cheaper cycle. */
+  | { kind: 'measured'; leftover: number; cycle: number; deepestMm: number }
+  /** #1052 — the finish passed the move cap: a stated refusal, with the region and the reason. */
+  | { kind: 'cap'; region: string; message: string }
+  /** No stamp could be computed: the rank treats it as no candidate (no row, no statement). */
+  | { kind: 'noStamp' }
+  /** The candidate could not plan this remainder at all (any other throw): skipped, as ever. */
+  | { kind: 'failed' };
+
+/** #1151 Phase 2 — the engine's request for the candidates AFTER the first, in rank order. */
+export interface RankMeasureRequest {
+  /** The model input this plan runs, so the other realm can rebuild the same plan from it. */
+  readonly input: ModelPlanInput;
+  readonly setupIndex: number;
+  /**
+   * Candidates 2..N, in rank order. The FIRST candidate is always measured in-process: it seeds
+   * the incumbent, and when it wins its stage ops are already in the memo.
+   */
+  readonly candidates: readonly Tool[];
+}
+
+/**
+ * #1151 Phase 2 — the caller's handle on those measurements. Metrics are consumed IN CANDIDATE
+ * ORDER through today's early break, so completion order cannot move the winner; when the search
+ * ends early, `cancel` stops the outstanding work.
+ */
+export interface RankMeasureHandle {
+  /** Candidate i's metric (0-based in `candidates`); rejects on a real error. */
+  metric(index: number): Promise<RankMeasurement>;
+  /** The search ended before every candidate was consumed: stop the outstanding work. */
+  cancel(): void;
+}
+
+/**
  * The PUBLIC cost wrapper `SetupPlan.sequence[].cost` carries — distinct from `sequence.ts`'s own
  * internal `CycleCost` (which sums to a bare `estimateSeconds: number`, not a `CycleTerms` object).
  * `terms` is #927's real type (`ir.ts`) on this cutter's posted, concatenated `ToolpathIR`;
@@ -596,6 +637,22 @@ export interface PlanModelCamOptions {
    * (owned or ideal). Absent for a plan the caller runs alone.
    */
   planKind?: 'owned' | 'ideal';
+  /**
+   * #1151 Phase 2 — THE RANK'S OTHER CANDIDATES, MEASURED ELSEWHERE. The engine measures the first
+   * candidate in-process (it seeds the incumbent; when it wins its ops are in the memo), asks this
+   * for candidates 2..N, and consumes them IN CANDIDATE ORDER through today's early break. Absent
+   * (the browser worker, every spec that does not pass one) is today's serial rank, unchanged.
+   */
+  measureRankCandidates?: (request: RankMeasureRequest) => RankMeasureHandle;
+  /**
+   * #1151 Phase 2 — MEASURE ONE RANK CANDIDATE AND STOP: the pool worker's entry. `planModelCam`
+   * prepares the setup exactly as a real plan does, measures `candidate` with the rank's own coarse
+   * options, hands the metric to `onRankMetric`, and returns an empty plan. The caller (the pool
+   * worker) ignores the plan and reads the metric.
+   */
+  rankMeasure?: { setupIndex: number; candidateKey: string };
+  /** #1151 Phase 2 — receives the metric when `rankMeasure` is set (exactly once). */
+  onRankMetric?: (metric: RankMeasurement) => void;
 }
 
 /**
@@ -1437,17 +1494,18 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       const ordered = [...ballCandidates].sort((a, b) => (cuttingDiameter(a) ?? 0) - (cuttingDiameter(b) ?? 0));
       // #1052 — the measured search's shape: the candidate count first, then a row per candidate.
       memTrace('rank:start', { candidates: ordered.length });
-      for (const candidate of ordered) {
-        memTrace('rank:candidate', { diameterMm: cuttingDiameter(candidate) ?? 0 });
-        // #1076 — THE RANK IS A SILENT STRETCH TO THE CLIENT: each candidate is measured with a
-        // FULL plan (seconds to a minute), and no model-plan boundary fires in between — on the
-        // tray bottom the gap from `features` to the first chain step was 125 s, and the ideal
-        // plan's (a larger house, more candidates) crossed the 180 s watchdog window. One tick
-        // before each measurement keeps the window alive on the slowest machine; progress only,
-        // so the plan's bytes cannot move. Its own fraction (0.35) so the rank's reports are
-        // distinguishable from the chain's (0.4) in a run's progress line and in the pins.
-        opts.onProgress?.({ setupIndex, op: 'sequence', fraction: 0.35 });
-        opts.signal?.throwIfAborted();
+      // #1151 Phase 2 — THE FIRST CANDIDATE IN-PROCESS, THE REST ELSEWHERE. The first seeds the
+      // incumbent (and, when it wins, its stage ops are already in the memo); the caller's seam
+      // measures candidates 2..N, and their metrics are consumed IN CANDIDATE ORDER through the
+      // same early break, so completion order cannot move the winner. A later candidate that wins
+      // has no memo entries: the chosen plan's reads MISS and recompute exactly what the serial
+      // rank would have cached — the memo is a read-through cache, so the bytes cannot move.
+      const seam =
+        opts.measureRankCandidates === undefined || ordered.length < 2
+          ? null
+          : opts.measureRankCandidates({ input, setupIndex, candidates: ordered.slice(1) });
+      /** One candidate's measurement, in-process — the metric, with its ops kept by the memo. */
+      const measureCandidate = (candidate: Tool): RankMeasurement => {
         let measured: PlanCurvedResult;
         try {
           // #986 (the ruling) — CANDIDATES ARE RANKED COARSE, at the vendor's cusp, on the 4a
@@ -1458,16 +1516,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             finishScallopMm: DEFAULT_FINISH_SCALLOP_MM,
           });
         } catch (err) {
-          // #1052 — a candidate whose finish passes the move cap leaves the rank STATED, with its
-          // number; the plan continues with the other candidates.
-          if (err instanceof PlanFinishTooManyMoves) {
-            const text = `${candidate.name || 'the ball'}: ${err.message}`;
-            ballRankNotes.push(text);
-            capStatements.push({ severity: 'warning', code: 'goal-finish-too-many-moves', count: 1, ids: [err.region], text });
-          }
           // #1054 — a failed candidate's partial ops are its own: nothing may read them later.
           stageMemo.evictOwner(cutterKeyOf(candidate));
-          continue; // a candidate that cannot plan this remainder is not a candidate
+          // #1052 — a candidate whose finish passes the move cap leaves the rank STATED, with its
+          // number; the plan continues with the other candidates.
+          if (err instanceof PlanFinishTooManyMoves) return { kind: 'cap', region: err.region, message: err.message };
+          // Any other throw is the old silent skip: a candidate that cannot plan this remainder is
+          // not a candidate (no row, no statement) — never a plan failure.
+          return { kind: 'failed' };
         }
         // #1125 — THE RANK'S OWN FOLD IS TRANSIENT (`remember: false`): its fields live for the
         // fold and die with it, and nothing another caller cached is ever evicted. The rest
@@ -1476,65 +1532,123 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         if (coverage === null) {
           // #1054 — a candidate with no stamp is no candidate: its memoised ops die with it.
           stageMemo.evictOwner(cutterKeyOf(candidate));
-          continue;
+          return { kind: 'noStamp' };
         }
-        const leftover = coverage.leftoverCells / Math.max(1, coverage.coveredCells);
-        const cycle = measured.ops.reduce(
-          (n, o) => n + o.outcome.ir.operations.reduce((k, op) => k + (op.estimatedSeconds ?? 0), 0),
-          0,
-        );
-        // #986 (the maintainer's ruling) — NO CYCLE CAP: a longer plan is a cost the operator is
-        // shown, not a reason to hide a better surface. Every measured candidate is stated with
-        // its leftover and its cycle, and the rank decides on outcome.
-        if (uncappedBest === null || leftover < uncappedBest.leftover - 1e-9 || (Math.abs(leftover - uncappedBest.leftover) <= 1e-9 && cycle < uncappedBest.cycle)) {
-          uncappedBest = { tool: candidate, leftover, cycle };
-        }
-        const diameterMm = cuttingDiameter(candidate) ?? 0;
-        measuredRows.push(`⌀${diameterMm.toFixed(2)} mm ${candidate.name}: leftover ${(leftover * 100).toFixed(2)} %, cycle ${cycle.toFixed(0)} s`);
-        // #1111 R2 — the candidate's own tie keys, read while its ops are still in hand (the memo
-        // evicts a replaced incumbent's work).
-        const tie = pickKeysFor(candidate, {
-          material: input.stock.material,
-          ...(input.feedCatalogue === undefined ? {} : { catalogue: input.feedCatalogue }),
+        return {
+          kind: 'measured',
+          leftover: coverage.leftoverCells / Math.max(1, coverage.coveredCells),
+          cycle: measured.ops.reduce((n, o) => n + o.outcome.ir.operations.reduce((k, op) => k + (op.estimatedSeconds ?? 0), 0), 0),
           deepestMm: deepestFeedMm(measured.ops),
-          // #1114 — the candidate's own measured cycle is the priced stage the pick's last key
-          // reads when the flute, the diameter and the gate all tie.
-          priceSeconds: cycle,
-        });
-        if (best === null || leftover < best.leftover - 1e-9 || (Math.abs(leftover - best.leftover) <= 1e-9 && cycle < best.cycle)) {
-          // #1054 — the memo keeps the incumbent's ops only: a replaced best is evicted, so the
-          // rank never holds more than the best candidate's work plus the one being measured.
-          if (best !== null) stageMemo.evictOwner(cutterKeyOf(best.tool));
-          best = { tool: candidate, leftover, cycle, tie };
-          continue;
-        }
-        // #1111 R2 — EQUAL OUTCOME IS NOT A REASON TO KEEP THE FIRST ARRIVAL. When leftover and
-        // cycle are the same, the stated keys decide; the sentence names what won it.
-        if (Math.abs(leftover - best.leftover) <= 1e-9 && Math.abs(cycle - best.cycle) <= 1e-9) {
-          const candidateWins = pickAmongEquals(tie, best.tie, reachMarginMm) > 0;
-          tieStatement = pickDecisionSentence(
-            candidateWins ? candidate : best.tool,
-            candidateWins ? tie : best.tie,
-            candidateWins ? best.tool : candidate,
-            candidateWins ? best.tie : tie,
-            reachMarginMm,
-            'tie on leftover and cycle',
-          );
-          if (candidateWins) {
-            stageMemo.evictOwner(cutterKeyOf(best.tool));
-            best = { tool: candidate, leftover, cycle, tie };
-          } else {
-            stageMemo.evictOwner(cutterKeyOf(candidate));
+        };
+      };
+      // #1151 Phase 2 — THE POOL WORKER'S ENTRY: measure the one candidate this request names,
+      // exactly as the rank would (same preamble, same coarse options), and hand the metric out.
+      // The candidate is resolved FROM THIS REALM'S INPUT by its key, never taken as a second
+      // clone: the rank's own `b === candidate` reads need the input's own Tool identity.
+      if (opts.rankMeasure !== undefined && opts.rankMeasure.setupIndex === setupIndex) {
+        const asked = opts.rankMeasure.candidateKey;
+        const target = ballCandidates.find((t) => cutterKeyOf(t) === asked) ?? input.cutters.house.find((t) => cutterKeyOf(t) === asked);
+        opts.onRankMetric?.(target === undefined ? { kind: 'noStamp' } : measureCandidate(target));
+        return { perSetup: [] };
+      }
+      try {
+        for (const [index, candidate] of ordered.entries()) {
+          memTrace('rank:candidate', { diameterMm: cuttingDiameter(candidate) ?? 0 });
+          // #1076 — THE RANK IS A SILENT STRETCH TO THE CLIENT: each candidate is measured with a
+          // FULL plan (seconds to a minute), and no model-plan boundary fires in between — on the
+          // tray bottom the gap from `features` to the first chain step was 125 s, and the ideal
+          // plan's (a larger house, more candidates) crossed the 180 s watchdog window. One tick
+          // before each measurement keeps the window alive on the slowest machine; progress only,
+          // so the plan's bytes cannot move. Its own fraction (0.35) so the rank's reports are
+          // distinguishable from the chain's (0.4) in a run's progress line and in the pins.
+          opts.onProgress?.({ setupIndex, op: 'sequence', fraction: 0.35 });
+          opts.signal?.throwIfAborted();
+          // #1151 Phase 2 — index 0 is ALWAYS in-process; the seam's metrics arrive in order. A
+          // seam that FAILS for a candidate falls back to measuring it here: the rank's result and
+          // its bytes cannot depend on the pool's health, only its wall clock can.
+          let metric: RankMeasurement;
+          if (index === 0 || seam === null) metric = measureCandidate(candidate);
+          else {
+            try {
+              metric = await seam.metric(index - 1);
+            } catch {
+              memTrace('rank:candidate-inline', { diameterMm: cuttingDiameter(candidate) ?? 0 });
+              metric = measureCandidate(candidate);
+            }
           }
-          continue;
+          if (metric.kind === 'cap') {
+            const text = `${candidate.name || 'the ball'}: ${metric.message}`;
+            ballRankNotes.push(text);
+            capStatements.push({ severity: 'warning', code: 'goal-finish-too-many-moves', count: 1, ids: [metric.region], text });
+            // #1054 — a failed candidate's partial ops are its own: nothing may read them later.
+            stageMemo.evictOwner(cutterKeyOf(candidate));
+            continue; // a candidate that cannot plan this remainder is not a candidate
+          }
+          if (metric.kind === 'noStamp' || metric.kind === 'failed') {
+            // #1054 — a candidate with no stamp (or none the plan could build) is no candidate:
+            // its memoised ops die with it.
+            stageMemo.evictOwner(cutterKeyOf(candidate));
+            continue;
+          }
+          const { leftover, cycle, deepestMm } = metric;
+          // #986 (the maintainer's ruling) — NO CYCLE CAP: a longer plan is a cost the operator is
+          // shown, not a reason to hide a better surface. Every measured candidate is stated with
+          // its leftover and its cycle, and the rank decides on outcome.
+          if (uncappedBest === null || leftover < uncappedBest.leftover - 1e-9 || (Math.abs(leftover - uncappedBest.leftover) <= 1e-9 && cycle < uncappedBest.cycle)) {
+            uncappedBest = { tool: candidate, leftover, cycle };
+          }
+          const diameterMm = cuttingDiameter(candidate) ?? 0;
+          measuredRows.push(`⌀${diameterMm.toFixed(2)} mm ${candidate.name}: leftover ${(leftover * 100).toFixed(2)} %, cycle ${cycle.toFixed(0)} s`);
+          // #1111 R2 — the candidate's own tie keys, read while its ops are still in hand (the memo
+          // evicts a replaced incumbent's work). #1151 Phase 2 — a seam-measured candidate's deepest
+          // feed came back WITH its metric, so the keys are the same whichever realm measured it.
+          const tie = pickKeysFor(candidate, {
+            material: input.stock.material,
+            ...(input.feedCatalogue === undefined ? {} : { catalogue: input.feedCatalogue }),
+            deepestMm,
+            // #1114 — the candidate's own measured cycle is the priced stage the pick's last key
+            // reads when the flute, the diameter and the gate all tie.
+            priceSeconds: cycle,
+          });
+          if (best === null || leftover < best.leftover - 1e-9 || (Math.abs(leftover - best.leftover) <= 1e-9 && cycle < best.cycle)) {
+            // #1054 — the memo keeps the incumbent's ops only: a replaced best is evicted, so the
+            // rank never holds more than the best candidate's work plus the one being measured.
+            if (best !== null) stageMemo.evictOwner(cutterKeyOf(best.tool));
+            best = { tool: candidate, leftover, cycle, tie };
+            continue;
+          }
+          // #1111 R2 — EQUAL OUTCOME IS NOT A REASON TO KEEP THE FIRST ARRIVAL. When leftover and
+          // cycle are the same, the stated keys decide; the sentence names what won it.
+          if (Math.abs(leftover - best.leftover) <= 1e-9 && Math.abs(cycle - best.cycle) <= 1e-9) {
+            const candidateWins = pickAmongEquals(tie, best.tie, reachMarginMm) > 0;
+            tieStatement = pickDecisionSentence(
+              candidateWins ? candidate : best.tool,
+              candidateWins ? tie : best.tie,
+              candidateWins ? best.tool : candidate,
+              candidateWins ? best.tie : tie,
+              reachMarginMm,
+              'tie on leftover and cycle',
+            );
+            if (candidateWins) {
+              stageMemo.evictOwner(cutterKeyOf(best.tool));
+              best = { tool: candidate, leftover, cycle, tie };
+            } else {
+              stageMemo.evictOwner(cutterKeyOf(candidate));
+            }
+            continue;
+          }
+          // Coarser and not better: stop. Every remaining candidate is coarser still. The monotone
+          // premise is exact for the FINISH, not for the plan the rank measures: each candidate's
+          // plan carries its own rest ball (the #1054 elephant: ⌀2 gets the long ⌀1 rest, ⌀1 gets
+          // none), and there a coarser candidate won on leftover (10.25 % vs 10.34 %). The break
+          // therefore fires only on a strict non-improvement — the measured winner is the plan.
+          stageMemo.evictOwner(cutterKeyOf(candidate));
+          if (leftover > best.leftover + 1e-9) break;
         }
-        // Coarser and not better: stop. Every remaining candidate is coarser still. The monotone
-        // premise is exact for the FINISH, not for the plan the rank measures: each candidate's
-        // plan carries its own rest ball (the #1054 elephant: ⌀2 gets the long ⌀1 rest, ⌀1 gets
-        // none), and there a coarser candidate won on leftover (10.25 % vs 10.34 %). The break
-        // therefore fires only on a strict non-improvement — the measured winner is the plan.
-        stageMemo.evictOwner(cutterKeyOf(candidate));
-        if (leftover > best.leftover + 1e-9) break;
+      } finally {
+        // #1151 Phase 2 — the search ended (a winner, the early break, or an error): stop the
+        // outstanding measurements. Unused candidates are wasted capacity, never a changed result.
+        seam?.cancel();
       }
       if (best !== null) ball = best.tool;
       // #1054 — the rank's own end row: the per-candidate timing measured above reads up to here,

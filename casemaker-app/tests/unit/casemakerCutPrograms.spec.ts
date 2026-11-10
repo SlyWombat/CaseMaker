@@ -218,6 +218,9 @@ describe('#1151 the deferred ideal is opt-in on the CLI', () => {
     expect(parseArgs(['job.json'])).toEqual({ job: 'job.json' });
     expect(parseArgs(['job.json']).deferIdeal).toBeUndefined();
     expect(parseArgs(['job.json', '--defer-ideal']).deferIdeal).toBe(true);
+    // #1151 Phase 2 — the parallel rank is opt-in on the same terms.
+    expect(parseArgs(['job.json']).parallelRank).toBeUndefined();
+    expect(parseArgs(['job.json', '--parallel-rank']).parallelRank).toBe(true);
     // A bare flag: no value is eaten.
     expect(parseArgs(['--defer-ideal', 'job.json'])).toEqual({ job: 'job.json', deferIdeal: true });
   });

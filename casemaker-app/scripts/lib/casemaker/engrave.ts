@@ -178,6 +178,7 @@ import type { EngraveJob } from '../../../src/types/engraveJob';
 import { toPartPlan } from '../../../src/engine/cnc/engrave/partPlan';
 import { renderRunSheetMarkdown } from '../../runSheetMarkdown';
 import { CliExit, isCliExit } from './exit';
+import { rankPoolSeam } from './rankPool';
 import { commandOutput, HUMAN, type CommandOptions } from './output';
 import { fileReceipt } from './receiptFiles';
 import { setMemTraceSink, setWasmHeapReader, memTrace } from '../../../src/engine/cnc/memTrace';
@@ -235,6 +236,11 @@ interface Args {
    * for it and runs the comparison as its own later child work.
    */
   deferIdeal?: boolean;
+  /**
+   * #1151 Phase 2 — the ball rank's candidates 2..N on worker threads. Off by default (the serial
+   * rank, byte-identical); the house service asks for it on the planning box.
+   */
+  parallelRank?: boolean;
 }
 
 /** Exported for the CLI's own spec (#1052): the flag set is pinned by parsing. */
@@ -281,6 +287,7 @@ export function parseArgs(argv: string[]): Args {
       }
       args.thirdTool = parsed.data;
     } else if (a === '--defer-ideal') args.deferIdeal = true;
+    else if (a === '--parallel-rank') args.parallelRank = true;
     else if (a === '--mem-trace') args.memTrace = argv[++i];
     else if (a === '--location') args.location = argv[++i];
     else if (a === '--catalogue') args.catalogue = argv[++i];
@@ -301,7 +308,7 @@ function fail(message: string): never {
 }
 
 const USAGE =
-  'usage: casemaker cut <job.json> [--out <dir>] [--defer-ideal]\n' +
+  'usage: casemaker cut <job.json> [--out <dir>] [--defer-ideal] [--parallel-rank]\n' +
   '       casemaker cut --coupon <coupon-spec.json> [--out <dir>]\n' +
   '       casemaker cut --from-gerber <file> [<file> ...] --blank <L>x<W>x<T> [--out <dir>]\n' +
   '       casemaker cut --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]\n' +
@@ -1158,6 +1165,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         getTools().map((entry) => entry.tool),
         // #1151 — false (the default) is exactly today's two-plan run and receipt.
         args.deferIdeal === true,
+        // #1151 Phase 2 — false (the default) is the serial rank, byte-identical.
+        args.parallelRank === true ? rankPoolSeam() : undefined,
       );
     } catch (e) {
       if (isCliExit(e)) throw e;

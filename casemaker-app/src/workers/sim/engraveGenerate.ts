@@ -237,6 +237,8 @@ import {
   MODEL_STOCK_TO_LEAVE_MM,
   resolvedCutParams,
   type PlanModelCamOptions,
+  type RankMeasureHandle,
+  type RankMeasureRequest,
   type ModelPlanInput,
   type ModelPlanOutput,
   type PlannedOp,
@@ -6011,9 +6013,15 @@ export async function generateGoalProgram(
      * recorded choice is `'ideal'` posts the ideal itself, so it waits for both as before.
      */
     deferIdeal?: boolean;
+    /**
+     * #1151 Phase 2 — the rank's candidates 2..N, measured elsewhere (the CLI/service pool). The
+     * engine measures the first candidate in-process either way; absent (the app's worker) keeps
+     * the serial rank.
+     */
+    measureRankCandidates?: (request: RankMeasureRequest) => RankMeasureHandle;
   },
 ): Promise<EngraveGenerated> {
-  const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue, deferIdeal } = opts;
+  const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue, deferIdeal, measureRankCandidates } = opts;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -6211,6 +6219,8 @@ export async function generateGoalProgram(
               }),
           }),
       ...(signal === undefined ? {} : { signal }),
+      // #1151 Phase 2 — the rank seam rides every plan this door runs (the deferred ideal too).
+      ...(measureRankCandidates === undefined ? {} : { measureRankCandidates }),
     };
     if (deferIdeal === true && planChoiceOf(job) !== 'ideal') {
       // The same first half `planTwoOutcomes` runs, alone: same input, same emptied catalogue,
@@ -6292,6 +6302,8 @@ async function generateGoalPrograms(
   onProgress?: EngraveProgressFn,
   /** #1151 — owned plan first on every side; the caller owes the ideal half. */
   deferIdeal?: boolean,
+  /** #1151 Phase 2 — the rank seam, passed to every side's plan. */
+  measureRankCandidates?: (request: RankMeasureRequest) => RankMeasureHandle,
 ): Promise<EngraveGenerated> {
   // #1073 — A FRAME FLIP NEEDS ITS BAND BEFORE ANYTHING POSTS. `flip: { method: 'tabs-in-blank' }`
   // means side 1 stops above the part's silhouette plane and side 2 below it, so a band of stock
@@ -6365,7 +6377,7 @@ async function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(deferIdeal === undefined ? {} : { deferIdeal }) });
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(deferIdeal === undefined ? {} : { deferIdeal }), ...(measureRankCandidates === undefined ? {} : { measureRankCandidates }) });
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
@@ -6392,7 +6404,7 @@ async function generateGoalPrograms(
     programs.push(locating.program);
   }
   for (const side of sides.slice(1)) {
-    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(deferIdeal === undefined ? {} : { deferIdeal }) });
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(deferIdeal === undefined ? {} : { deferIdeal }), ...(measureRankCandidates === undefined ? {} : { measureRankCandidates }) });
     const sideList = sidePrograms(one, side);
     if (sideList === null) return { ...one, programs };
     programs.push(...sideList);
@@ -7106,6 +7118,11 @@ export async function engraveGenerate(
    * and the plain CLI) is exactly today's two-plan run.
    */
   deferIdeal?: boolean,
+  /**
+   * #1151 Phase 2 — the rank's candidates 2..N, measured elsewhere. The CLI/service pass a pool
+   * seam; the browser worker passes nothing and keeps the serial rank.
+   */
+  measureRankCandidates?: (request: RankMeasureRequest) => RankMeasureHandle,
 ): Promise<EngraveGenerated> {
   memTrace('pipeline:start', { job: job.name });
   onProgress?.({ stage: 'prepare', label: 'reading the job' });
@@ -7314,7 +7331,7 @@ export async function engraveGenerate(
           ],
         };
       }
-      return { ...(await generateGoalPrograms(tl, job, sides, tool, calibration, margins, shop, catalogue, catalogueTools, onProgress, deferIdeal)), surface: null };
+      return { ...(await generateGoalPrograms(tl, job, sides, tool, calibration, margins, shop, catalogue, catalogueTools, onProgress, deferIdeal, measureRankCandidates)), surface: null };
     }
   }
   const goal = job.setups === undefined ? pureGoalObject(job) : null;
@@ -7334,6 +7351,7 @@ export async function engraveGenerate(
         ...(onProgress === undefined ? {} : { onProgress }),
         feedCatalogue: catalogue,
         ...(deferIdeal === undefined ? {} : { deferIdeal }),
+        ...(measureRankCandidates === undefined ? {} : { measureRankCandidates }),
       })),
       surface: null,
     };
