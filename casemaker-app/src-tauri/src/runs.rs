@@ -44,6 +44,11 @@ use tokio::time::timeout;
 const NODE_ENV: &str = "CASEMAKER_NODE";
 const CLI_ENV: &str = "CASEMAKER_CLI";
 const ROOT_ENV: &str = "CASEMAKER_RUNS_ROOT";
+/// How many runs may hold memory at once. ONE WORKER'S BUDGET (E's #1147 measurements, 2026-11-10):
+/// after the stamp-cache fix the peak is the program SWEEP, not the plan — ~660 MiB of array buffers
+/// at `sweep:checkpoint`, RSS ~2.8 GiB including the wasm heap. Before the fix a worker holds ~2 GiB
+/// at the chain. A sidecar therefore keeps 1; k3's 30 GB box runs 3. The queue below is the pressure
+/// valve, not a second pool.
 const CONCURRENCY_ENV: &str = "CASEMAKER_RUNS_CONCURRENCY";
 const QUEUE_ENV: &str = "CASEMAKER_RUNS_QUEUE";
 const WALL_ENV: &str = "CASEMAKER_RUNS_WALL_S";
