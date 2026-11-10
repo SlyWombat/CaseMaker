@@ -249,7 +249,8 @@ const sameHashes = (a: readonly ReleaseFile[], b: readonly ReleaseProgram[]): bo
   a.length === b.length && a.every((f, i) => f.hash === b[i]?.hash && f.filename === b[i]?.filename);
 
 /**
- * #1146 — the walks this plan wants, from the shop's two seeded-ON switches and three numbers. A
+ * #1146 — the walks this plan wants, from the shop's two seeded-ON switches and two numbers (the
+ * clearance and the row pitch; the sweep itself moves at rapid, so there is no feed setting). A
  * dry-run release (a rehearsal) wants neither: the walk files are real motion, not a rehearsal of
  * one. A walk whose filename and text are unchanged keeps its upload state across a re-plan.
  */
@@ -268,7 +269,6 @@ function walksForJob(
   const settings = {
     clearanceMm: readDefault(defaults, 'clean.clearanceMm').value,
     rowSpacingMm: readDefault(defaults, 'clean.rowSpacingMm').value,
-    feedMmPerMin: readDefault(defaults, 'clean.feedMmPerMin').value,
   };
   const plan = planCleanWalks({
     job,

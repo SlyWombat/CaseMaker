@@ -590,10 +590,11 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // ── #948 (end)
   // ── #1146 — the cleaning pass and the air walk (the maintainer's ruling, 2026-11-09): a raster
   // over the stock at a clearance above the job's own fixtures, and the air walk before the first
-  // cut. `defaults.rs` seeds the same three; the release reads them through `readDefault`.
+  // cut. `defaults.rs` seeds the same two; the release reads them through `readDefault`. There is
+  // deliberately NO feed setting: the raster is commanded as G0 rapids at the machine's own rate,
+  // so a shop feed would be a number nothing reads (the manager's ruling, 2026-11-10).
   'clean.clearanceMm': { label: 'cleaning pass clearance above the highest fixture', unit: 'mm', rule: z.number().min(0.5).max(50), fallback: 5 },
   'clean.rowSpacingMm': { label: 'cleaning pass row pitch', unit: 'mm', rule: z.number().min(2).max(50), fallback: 12 },
-  'clean.feedMmPerMin': { label: 'cleaning pass rapid feed', unit: 'mm/min', rule: z.number().min(100).max(3000), fallback: 1500 },
 };
 
 /**

@@ -23,19 +23,12 @@
 import { estimateCycleSeconds, toolNumberFor, type CamMove, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Tool } from '@/engine/cnc/tool';
 
-/** The three shop defaults the walks read. */
+/** The two shop defaults the walks read (both seeded; nothing else is a number here). */
 export interface CleanWalkSettings {
   /** Above the highest fixture (or the stock top), mm. */
   clearanceMm: number;
   /** The raster's row pitch over the stock footprint, mm. */
   rowSpacingMm: number;
-  /**
-   * The bench's raster feed, mm/min (F1500). NOT commanded: the Z1's X/Y rate ceiling is
-   * 1200 mm/min and the post refuses a feed above `maxCutFeed`, so the raster runs as rapids at
-   * that same controller rate (see `cleanWalkFile`). The shop's number is kept as the bench's
-   * stated intent; the two can only agree when the machine's rate and the shop's figure do.
-   */
-  feedMmPerMin: number;
 }
 
 /** The boxes the sweep must clear — `MountObstacle`'s own geometry, structural so this module needs no mount import. */
@@ -80,13 +73,13 @@ export function cleanSweepZ(obstacles: readonly CleanWalkObstacle[], clearanceMm
  * The walk as an IR. CLEAN: a boustrophedon raster over the stock footprint at the sweep Z. AIR
  * WALK: the stock outline traced once at the same Z.
  *
- * THE RASTER IS COMMANDED AS RAPIDS (G0), and that is the honest speed: the bench's pass was
- * spoken as F1500, but the Z1's own X/Y rate ceiling is 1200 mm/min (the config read 2026-10-07,
- * `rapidEstimate.xyMmPerMin`) and the post refuses any feed above `maxCutFeed` — a file cannot
- * state F1500. A G0 runs at the controller's seek rate, which IS that 1200: the bench's 10 rows
- * over the 160 × 126 blank took ~100 s, and the estimate below (the same rapid model) says ~90 s.
- * `clean.feedMmPerMin` is therefore a shop number the walk does not command yet; the release's
- * plan line states the time the rapid model gives.
+ * THE SWEEP MOVES AT RAPID (G0). The bench's pass was spoken as F1500, but the Z1's own X/Y rate
+ * ceiling is 1200 mm/min (the config read 2026-10-07, `rapidEstimate.xyMmPerMin`) and the post
+ * refuses any feed above `maxCutFeed` — a file cannot state F1500. A G0 runs at the controller's
+ * seek rate, which IS that 1200: the bench's 10 rows over the 160 × 126 blank took ~100 s, and
+ * the estimate below (the same rapid model) says ~90 s. There is no feed setting: the shop record
+ * states only the two numbers the walk reads (the clearance and the row pitch), because a setting
+ * nothing commands would be a false statement in it (the manager's ruling, 2026-11-10).
  */
 export function cleanWalkFile(input: CleanWalkInput, mode: CleanWalkMode): CleanWalkResult {
   const sweepZ = cleanSweepZ(input.obstacles, input.settings.clearanceMm);

@@ -166,7 +166,8 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
 /// replaces it with a `measured` value, dated, through the same section. `(key, value, unit, note)`.
 pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // #1146 — the cleaning pass and the air walk (the maintainer's ruling, 2026-11-09). Seeded from
-    // the bench's own pass; all three are shop defaults, never constants in the walk generator.
+    // the bench's own pass; both are shop defaults, never constants in the walk generator. No feed
+    // seed: the raster is commanded as G0 rapids at the machine's own rate (ruling 2026-11-10).
     (
         "clean.clearanceMm",
         5.0,
@@ -178,12 +179,6 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         12.0,
         "mm",
         "chosen, not measured: the cleaning raster's row pitch over the stock footprint; the 2026-11-09 bench ran 10 rows over a 160 x 126 blank",
-    ),
-    (
-        "clean.feedMmPerMin",
-        1500.0,
-        "mm/min",
-        "chosen, not measured: the cleaning raster's rapid feed; the 2026-11-09 bench ran F1500",
     ),
     (
         "bracket.originOffsetXMm",
@@ -799,7 +794,7 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (0.01..=5.0).contains(&v)),
             "0.01 to 5, a multiple above the ceiling",
         )),
-        // #1146 — the cleaning pass's three shop defaults (`defaultsClient.ts` states the same).
+        // #1146 — the cleaning pass's two shop defaults (`defaultsClient.ts` states the same).
         "clean.clearanceMm" => Some(need(
             n.is_some_and(|v| (0.5..=50.0).contains(&v)),
             "0.5 to 50 mm above the highest fixture",
@@ -807,10 +802,6 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "clean.rowSpacingMm" => Some(need(
             n.is_some_and(|v| (2.0..=50.0).contains(&v)),
             "2 to 50 mm",
-        )),
-        "clean.feedMmPerMin" => Some(need(
-            n.is_some_and(|v| (100.0..=3000.0).contains(&v)),
-            "100 to 3000 mm/min",
         )),
         // ── #448 (end)
         "run.pollMs" => Some(need(

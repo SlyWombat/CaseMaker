@@ -1725,13 +1725,6 @@
       "unit": "mm",
       "note": "chosen, not measured: the cleaning raster's row pitch over the stock footprint; the 2026-11-09 bench ran 10 rows over a 160 x 126 blank"
     },
-    "clean.feedMmPerMin": {
-      "value": 1500.0,
-      "source": "seeded",
-      "setAt": null,
-      "unit": "mm/min",
-      "note": "chosen, not measured: the cleaning raster's rapid feed; the 2026-11-09 bench ran F1500"
-    },
     "reach.marginMm": {
       "value": 1.0,
       "source": "seeded",

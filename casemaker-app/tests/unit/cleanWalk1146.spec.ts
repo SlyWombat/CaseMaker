@@ -24,7 +24,7 @@ import type { PostContext } from '@/engine/cnc/post/z1';
 import { Z1 } from '@/engine/cnc/machine';
 
 const TOOL = flatEndMill(3.175, { number: 1, name: 'flat-3.175' });
-const SETTINGS = { clearanceMm: 5, rowSpacingMm: 12, feedMmPerMin: 1500 };
+const SETTINGS = { clearanceMm: 5, rowSpacingMm: 12 };
 /** The bench's blank: 160 × 126; two clamps standing 12 mm above the top face. */
 const CLAMPS: CleanWalkObstacle[] = [
   { min: [10, 120], max: [30, 126], topZ: 12 },
