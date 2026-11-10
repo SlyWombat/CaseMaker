@@ -38,6 +38,9 @@ const ACTIVE_PHASES: ReadonlySet<ReleasePhase> = new Set<ReleasePhase>([
   'retouch',
   'bit-change',
   'closing',
+  // #1146 — a walk file is playing (and the job's own files are still part of the run).
+  'airwalk',
+  'cleaning',
 ]);
 
 export interface MachineFilesProps {

@@ -132,6 +132,29 @@ export interface PostOptions {
   /** Defaults to `'whole'` — a standalone file, as every file this app wrote before #419 was. */
   vacuum?: VacuumSpan;
   /**
+   * #1146 — THE DIRECT SPINDLE-AIR OUTPUT, for the cleaning pass: `M811` on at the first move,
+   * `M812` off before the file's end. 0f proved `M331`/`M331.1` are spindle-following AUTO modes
+   * (they do nothing while the spindle is off), so a cleaning pass that moves air with the
+   * spindle stopped needs the direct pair. Only a machine whose accessory family the Z1's codes
+   * describe (`capabilities.vacuum`) speaks them; every other post ignores this option.
+   */
+  directAir?: boolean;
+  /**
+   * #1146 — NO SPINDLE WORD: the cleaning pass and the air walk move air, not a cutter, so the
+   * file must not start the spindle (`S0 M3` is not a command to send). Absent writes the
+   * program's spindle exactly as before.
+   */
+  noSpindle?: boolean;
+  /**
+   * #1146 — NO TOOL CHANGE: a walk file is played with whatever cutter the last program left in
+   * the spindle and must not command `T<n> M6` — on the controller that is a real manual change
+   * (park, wait for the operator, re-probe) whenever the active tool differs from the one named.
+   * A multi-cutter job's cleaning pass is ONE file for every program, so it cannot name a tool
+   * that is right after all of them. The `G53` lift that places the head lives below and is still
+   * written: it is what makes the file safe from an unknown Z. Absent writes the change as ever.
+   */
+  noToolChange?: boolean;
+  /**
    * #771 — the part's thumbnail, as PNG bytes, to write after the file's `M02` in Studio's
    * comment block (`;(thumbnail_image_begin)`, one `;`-prefixed base64 line,
    * `;(thumbnail_image_end)`). Absent or null writes no block; a PNG over the cap (20,000 bytes)
@@ -608,12 +631,12 @@ export function postZ1(
       const x0 = axis(first.x);
       const y0 = axis(first.y);
       const safe = axis(ir.safeZ);
-      body.push(
-        '',
-        `; T${ir.toolNumber}-${sanitizeMkrValue(ir.tool.name)}`,
-        '',
-        `T${ir.toolNumber} M6`,
-      );
+      body.push('', `; T${ir.toolNumber}-${sanitizeMkrValue(ir.tool.name)}`, '');
+      // #1146 — a walk plays with the cutter already in the spindle; commanding a change would
+      // stop the machine for an operator confirmation it does not need.
+      if (opts.noToolChange !== true) body.push(`T${ir.toolNumber} M6`);
+      // #1146 — the direct air on, before any move (the cleaning pass's spindle stays off).
+      if (opts.directAir === true && machine.capabilities.vacuum) body.push('M811');
       if (machine.hasATC) {
         // #828 — AN ATC MACHINE'S FIRST MOVE IS THE PROGRAM'S OWN Z, IN THE WORK FRAME. The
         // controller's change returns the head to a height IT chose; we hold no number for it
@@ -622,7 +645,7 @@ export function postZ1(
         // evidence. XY follows at that height, then the spindle. No accessory word: the vacuum
         // codes are the Z1's (`capabilities.vacuum`), and this post does not speak them here.
         const zSafe = axis(ir.safeZ);
-        body.push(`G0 Z${zSafe}`, `G0 X${x0} Y${y0}`, `S${axis(ir.spindleRpm)} M3`);
+        body.push(`G0 Z${zSafe}`, `G0 X${x0} Y${y0}`, ...(opts.noSpindle === true ? [] : [`S${axis(ir.spindleRpm)} M3`]));
         lastX = x0;
         lastY = y0;
         lastZ = zSafe;
@@ -651,7 +674,7 @@ export function postZ1(
         // `G53 G0 Z-3` then `G90 G0 X Y`, #302 item 5); our app starts a job with `play` alone,
         // so the program has to be safe on its own. The verifier refuses a file that is not.
         body.push(`G53 G0 Z${axis(machine.toolChange.clearanceZ)}`);
-        body.push(`G0 X${x0} Y${y0}`, `S${axis(ir.spindleRpm)} M3`, `G0 Z${safe}`);
+        body.push(`G0 X${x0} Y${y0}`, ...(opts.noSpindle === true ? [] : [`S${axis(ir.spindleRpm)} M3`]), `G0 Z${safe}`);
         lastX = x0;
         lastY = y0;
         lastZ = safe;
@@ -672,6 +695,8 @@ export function postZ1(
   // job — the bench rule is vacuum on for the cut, off when it is finished. Only the RUN's last
   // program writes it (#419 decision 4); a `'none'` frame file never does.
   if (vacuumOff && machine.capabilities.vacuum) body.push('M332');
+  // #1146 — the direct air off (the mirror of the M811 above), before the file's ending.
+  if (opts.directAir === true && machine.capabilities.vacuum) body.push('M812');
   body.push('M05', 'G28', 'M02');
 
   // #771 — Studio's thumbnail comes AFTER the program's `M02` (not before it), so it is appended

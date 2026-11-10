@@ -43,6 +43,8 @@ import {
 } from '@/store/machineRunStore';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
 import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { resetShopDefaultsStore, useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import {
   resetEngraveRegistrationStore,
@@ -321,11 +323,29 @@ function runEndIO(consumed: string[]): RunEndIO {
   };
 }
 
+/**
+ * #1146 — the cleaning pass and the air walk are ON by default (the maintainer's ruling). THIS
+ * suite tests the release flow's program vocabulary and play order, so its shop has both OFF;
+ * `cleanWalk1146Release.spec` is the suite that holds the ON behaviour, including that turning
+ * them off means neither file is planned or played. `WALKS_ON` is for the one test that checks
+ * the plan line folded the walks in.
+ */
+const WALKS_OFF = ShopDefaultsSchema.parse({
+  'run.cleanAfterProgram': { value: false, source: 'chosen', setAt: '2026-11-10T00:00:00.000Z', unit: null, note: null },
+  'run.airWalkBeforeCut': { value: false, source: 'chosen', setAt: '2026-11-10T00:00:00.000Z', unit: null, note: null },
+});
+const WALKS_ON = ShopDefaultsSchema.parse({
+  'run.cleanAfterProgram': { value: true, source: 'chosen', setAt: '2026-11-10T00:00:00.000Z', unit: null, note: null },
+  'run.airWalkBeforeCut': { value: true, source: 'chosen', setAt: '2026-11-10T00:00:00.000Z', unit: null, note: null },
+});
+
 let consumed: string[];
 beforeEach(() => {
   sent.length = 0;
   uploaded.length = 0;
   consumed = [];
+  resetShopDefaultsStore();
+  useShopDefaultsStore.setState({ status: 'present', defaults: WALKS_OFF });
   closeGate = Promise.resolve();
   releaseClose = null;
   holdClose = false;
@@ -365,6 +385,7 @@ afterEach(async () => {
     );
   }
   cleanup();
+  resetShopDefaultsStore();
   resetInventoryConditions();
   setMachineConsoleLoader(null);
   setMachineUploadLoader(null);
@@ -1253,5 +1274,17 @@ describe('#491 the release step names the cutter’s case', () => {
     const rec = record();
     expect(rec?.files[0]?.upload).toBe('uploaded');
     expect((rec?.notes ?? []).join('\n')).not.toContain('no verifier report');
+  });
+});
+
+describe('#1146 the plan line carries the walks’ time', () => {
+  it('adds the cleaning passes and the air walk to the plan, stated as their own term', async () => {
+    useShopDefaultsStore.setState({ status: 'present', defaults: WALKS_ON });
+    renderStep(twoSetupJob());
+    const plan = await screen.findByTestId('engrave-release-plan');
+    const summary = plan.querySelector('summary')!;
+    await waitFor(() => expect(summary.getAttribute('data-walk-seconds')).not.toBeNull());
+    expect(Number(summary.getAttribute('data-walk-seconds'))).toBeGreaterThan(0);
+    expect(summary.textContent).toMatch(/cleaning and air walk: ~\d+ (min|s)/);
   });
 });

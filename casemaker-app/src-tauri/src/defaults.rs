@@ -165,6 +165,21 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
 /// note that says so and names what to caliper, so nobody mistakes one for a measurement. Measuring one
 /// replaces it with a `measured` value, dated, through the same section. `(key, value, unit, note)`.
 pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
+    // #1146 — the cleaning pass and the air walk (the maintainer's ruling, 2026-11-09). Seeded from
+    // the bench's own pass; both are shop defaults, never constants in the walk generator. No feed
+    // seed: the raster is commanded as G0 rapids at the machine's own rate (ruling 2026-11-10).
+    (
+        "clean.clearanceMm",
+        5.0,
+        "mm",
+        "chosen, not measured: the cleaning pass runs this far above the highest fixture top (or the stock top when nothing stands above it); the 2026-11-09 bench swept about 5 mm above its clamps",
+    ),
+    (
+        "clean.rowSpacingMm",
+        12.0,
+        "mm",
+        "chosen, not measured: the cleaning raster's row pitch over the stock footprint; the 2026-11-09 bench ran 10 rows over a 160 x 126 blank",
+    ),
     (
         "bracket.originOffsetXMm",
         0.0,
@@ -498,6 +513,16 @@ pub const FLAG_SEEDS: &[(&str, bool, &str)] = &[
         true,
         "chosen, not measured: the spindle blower (Makera's Auto Blow, M331.1/M332.1) follows the vacuum on every run (false: the vacuum switches alone)",
     ),
+    (
+        "run.cleanAfterProgram",
+        true,
+        "chosen, not measured: a cleaning pass after every finished program (false: never clean automatically)",
+    ),
+    (
+        "run.airWalkBeforeCut",
+        true,
+        "chosen, not measured: an air walk over the stock outline before the first cut of a job (false: start cutting straight away)",
+    ),
 ];
 
 /// The flags this build knows: a key here must hold true or false.
@@ -768,6 +793,15 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "clamp.refuseFraction" => Some(need(
             n.is_some_and(|v| (0.01..=5.0).contains(&v)),
             "0.01 to 5, a multiple above the ceiling",
+        )),
+        // #1146 — the cleaning pass's two shop defaults (`defaultsClient.ts` states the same).
+        "clean.clearanceMm" => Some(need(
+            n.is_some_and(|v| (0.5..=50.0).contains(&v)),
+            "0.5 to 50 mm above the highest fixture",
+        )),
+        "clean.rowSpacingMm" => Some(need(
+            n.is_some_and(|v| (2.0..=50.0).contains(&v)),
+            "2 to 50 mm",
         )),
         // ── #448 (end)
         "run.pollMs" => Some(need(

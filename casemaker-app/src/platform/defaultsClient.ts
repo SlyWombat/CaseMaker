@@ -588,6 +588,13 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     fallback: 0.95,
   },
   // ── #948 (end)
+  // ── #1146 — the cleaning pass and the air walk (the maintainer's ruling, 2026-11-09): a raster
+  // over the stock at a clearance above the job's own fixtures, and the air walk before the first
+  // cut. `defaults.rs` seeds the same two; the release reads them through `readDefault`. There is
+  // deliberately NO feed setting: the raster is commanded as G0 rapids at the machine's own rate,
+  // so a shop feed would be a number nothing reads (the manager's ruling, 2026-11-10).
+  'clean.clearanceMm': { label: 'cleaning pass clearance above the highest fixture', unit: 'mm', rule: z.number().min(0.5).max(50), fallback: 5 },
+  'clean.rowSpacingMm': { label: 'cleaning pass row pitch', unit: 'mm', rule: z.number().min(2).max(50), fallback: 12 },
 };
 
 /**
@@ -617,6 +624,10 @@ export const KNOWN_FLAGS: Readonly<Record<string, { label: string; fallback: boo
   // #1060 — the maintainer, 2026-11-07: the spindle blower (Makera's Auto Blow, `M331.1`/`M332.1`)
   // follows the vacuum unless the shop turns the coupling off. On by default.
   'run.blowWithVacuum': { label: 'spindle air blow with the vacuum (chosen)', fallback: true },
+  // #1146 — both ON by default: a cleaning pass after every finished program, and an air walk
+  // before the first cut of a job (the maintainer's ruling, 2026-11-09).
+  'run.cleanAfterProgram': { label: 'cleaning pass after every program (chosen)', fallback: true },
+  'run.airWalkBeforeCut': { label: 'air walk before the first cut (chosen)', fallback: true },
 };
 
 /** A flag's value and where it came from — `fallback` with no location or no readable entry. */

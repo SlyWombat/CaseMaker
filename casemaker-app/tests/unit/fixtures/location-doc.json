@@ -1235,6 +1235,20 @@
       "unit": null,
       "note": "chosen, not measured: the spindle blower (Makera's Auto Blow, M331.1/M332.1) follows the vacuum on every run (false: the vacuum switches alone)"
     },
+    "run.cleanAfterProgram": {
+      "value": true,
+      "source": "seeded",
+      "setAt": null,
+      "unit": null,
+      "note": "chosen, not measured: a cleaning pass after every finished program (false: never clean automatically)"
+    },
+    "run.airWalkBeforeCut": {
+      "value": true,
+      "source": "seeded",
+      "setAt": null,
+      "unit": null,
+      "note": "chosen, not measured: an air walk over the stock outline before the first cut of a job (false: start cutting straight away)"
+    },
     "registration.tipRadiusUncertaintyMm": {
       "value": 0.25,
       "source": "measured",
@@ -1696,6 +1710,20 @@
       "setAt": null,
       "unit": "x",
       "note": "chosen, not measured: the band above the machine's feed/rpm ceiling where a value is refused rather than clamped"
+    },
+    "clean.clearanceMm": {
+      "value": 5.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the cleaning pass runs this far above the highest fixture top (or the stock top when nothing stands above it); the 2026-11-09 bench swept about 5 mm above its clamps"
+    },
+    "clean.rowSpacingMm": {
+      "value": 12.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the cleaning raster's row pitch over the stock footprint; the 2026-11-09 bench ran 10 rows over a 160 x 126 blank"
     },
     "reach.marginMm": {
       "value": 1.0,
