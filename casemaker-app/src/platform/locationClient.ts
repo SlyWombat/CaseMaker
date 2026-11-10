@@ -66,6 +66,88 @@ function section<T>(
   });
 }
 
+/**
+ * #1179 — one finished program's record. `hash` is the FNV program key (the same value in
+ * `finishedPrograms`); everything else is what a restart needs to say what was cut and where.
+ */
+export const FinishedRunRegistrationSchema = z.object({
+  /**
+   * THE ACCEPTED TOP: the surface machine Z the run's origin was written against (measured or
+   * derived). B4's "last recorded top" reads THIS. When the registration was measured it equals
+   * `measuredTopMachineZ`; on the derived/bracket path only this field is present.
+   */
+  surfaceMachineZ: z.number().optional(),
+  /** The work offset the origin write left in the controller (the B2 cross-check). */
+  g54: z.object({ x: z.number().optional(), y: z.number().optional(), z: z.number().optional() }).optional(),
+  /** How the top was obtained: a touch, the bracket-seat derivation, a measurement, or unknown. */
+  topSource: z.enum(['touch', 'derived', 'measured', 'unknown']).optional(),
+  /**
+   * THE MEASURED READING, verbatim (`outcome.surfaceZ`), only when the registration really measured
+   * a top. The thickness note reads ONLY this — a derived/bracket top must not feed the comparison —
+   * and it is absent on the derived path.
+   */
+  measuredTopMachineZ: z.number().optional(),
+  /** The thickness that measured top implies (slice D's note; the job is never edited). */
+  impliedThicknessMm: z.number().optional(),
+  measuredAt: z.string().optional(),
+  /** The plan's expected top for this job (slice D's difference). */
+  planExpectedTopMachineZ: z.number().optional(),
+});
+export type FinishedRunRegistration = z.infer<typeof FinishedRunRegistrationSchema>;
+
+/** One RLE stream of a cut map (counts over the grid, row-major). */
+export const CutMapStreamSchema = z.object({
+  encoding: z.literal('rle').default('rle'),
+  data: z.string().min(1).max(4096),
+});
+
+/**
+ * #1179 — the per-program CUT MAP: a 2 mm raster of the blank in the STOCK frame (`x0Mm`/`y0Mm` =
+ * the stock's min corner) with, per cell, the deepest Z cut after this program (quantised to
+ * `stepMm`, 0 = uncut) and whether the cell's floor is FLAT (a touch point D's slice B may use).
+ * Two RLE streams, row-major: `flat` = `count:0|1` pairs; `depth` = `count:level` pairs with
+ * `level = round(depth / stepMm)` (an uncut cell is level 0). A 160 × 126 tray is 80 × 63 = 5,040
+ * cells; raw depth would be 10 KB (uint16), RLE is typically under 1.5 KB in total; each stream is
+ * capped at 4,096 chars and over the cap the whole map is null (never a silently partial grid —
+ * stage B then falls back to the current plan's own footprint).
+ */
+export const FinishedCutMapSchema = z.object({
+  cellMm: z.number().positive().default(2),
+  cols: z.number().int().positive(),
+  rows: z.number().int().positive(),
+  x0Mm: z.number(),
+  y0Mm: z.number(),
+  stepMm: z.number().positive().default(0.05),
+  flat: CutMapStreamSchema,
+  depth: CutMapStreamSchema,
+});
+export type FinishedCutMap = z.infer<typeof FinishedCutMapSchema>;
+
+export const FinishedRunSchema = z.object({
+  hash: z.string().min(1),
+  jobId: z.string().min(1).optional(),
+  jobName: z.string().optional(),
+  /** The frozen package's full hash and its 8-char display key. */
+  packageKey: z.string().min(1).optional(),
+  key8: z.string().optional(),
+  programIndex: z.number().int().positive().optional(),
+  programCount: z.number().int().positive().optional(),
+  programName: z.string().optional(),
+  cutterKey: z.string().optional(),
+  setupIndex: z.number().int().positive().optional(),
+  finishedAt: z.string().optional(),
+  /**
+   * The mask's frame: the STOCK dims. `thicknessMm` is the JOB'S STATED thickness (what the
+   * operator entered), never a generated or cut size — slice D compares against the stated number.
+   */
+  stock: z
+    .object({ lengthMm: z.number().optional(), widthMm: z.number().optional(), thicknessMm: z.number().optional() })
+    .optional(),
+  registration: FinishedRunRegistrationSchema.optional(),
+  cutMap: FinishedCutMapSchema.nullable().optional(),
+});
+export type FinishedRun = z.infer<typeof FinishedRunSchema>;
+
 export const MachineAddressSchema = z.object({
   host: z.string().min(1),
   port: z.number().int().min(1).max(65535),
@@ -453,6 +535,17 @@ export const MachineRecordSchema = z.object({
   finishedPrograms: z
     .array(z.string().min(1).refine((h) => h === h.trim(), 'a hash has no space at either end'))
     .default([]),
+  /**
+   * #1179 — WHAT each finished program was (#419's hash list is kept unchanged beside this): the
+   * record a restart reads. Additive and defaulted, so a document written before the section parses
+   * unchanged (`[]`). Every field but `hash` is optional; a partial record is still true.
+   *
+   * THE ACCEPTED TOP HAS ONE NAME: `registration.surfaceMachineZ` is the top the run's origin was
+   * written against (the highest agreeing pair of touches, or the derived fallback). `measuredTop-
+   * MachineZ` is the raw check reading that produced it (equal when the reading was accepted; it
+   * may differ on the derived path), and B4's "last recorded top" is `surfaceMachineZ`.
+   */
+  finishedRuns: z.array(FinishedRunSchema).default([]),
   /**
    * #1123-40 — the registrations this machine holds, one per job setup, each carrying the G54 X/Y
    * its origin write left in the controller. Restored on a reload only while the machine's live

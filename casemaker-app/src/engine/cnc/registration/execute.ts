@@ -99,7 +99,7 @@ import {
 } from './outcome';
 import type { FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
 import { referenceOutcome } from './references';
-import { settingsProblem, SURFACE_LIFT_MM, type RegistrationSettings } from './settings';
+import { CUT_BLANK_AGREE_FALLBACK_MM, settingsProblem, SURFACE_LIFT_MM, type RegistrationSettings } from './settings';
 
 export interface RegistrationConsole {
   send(line: string, timing?: Partial<ConsoleTiming>): Promise<ConsoleSendResult>;
@@ -210,6 +210,12 @@ export interface ExecDeps {
    * still applies). A typed Z outside `band` is refused here as well as on the card.
    */
   askTop?: (question: TopQuestion) => Promise<TopChoice>;
+  /**
+   * #1179 D/B4 — THE LAST TOP RECORDED FOR THIS BLANK on this machine (F's finished run:
+   * `registration.surfaceMachineZ`, the top its origin was accepted at). The derived offer
+   * continues from THIS top rather than seat + stated thickness; absent/null keeps the arithmetic.
+   */
+  lastRecordedTopMachineZ?: number | null;
 }
 
 export interface Transcript {
@@ -825,11 +831,37 @@ function surfacePointOnStock(plan: RegistrationPlan): boolean {
  * #1166 — the bracket's own top AS THE PLAN STATES IT: the expected surface (its measured seat +
  * the stock's thickness). The seat is the plan's own expected surface less the thickness its input
  * carried — no store is read here, and the card prints the same arithmetic.
+ *
+ * #1179 B4/D — A RECORDED TOP REPLACES THE ARITHMETIC. When this blank's last finished run kept
+ * the top its origin was accepted at, the derived offer continues from that top; the arithmetic
+ * stays in the words, as what the record is compared to.
  */
-function bracketTopOf(plan: RegistrationPlan): { machineZ: number; seat: number | null; thickness: number | null } {
-  const machineZ = r3(plan.seek.band.max - plan.settings.surfaceToleranceMm);
+function bracketTopOf(
+  plan: RegistrationPlan,
+  lastRecordedTopMachineZ: number | null = null,
+): {
+  machineZ: number;
+  seat: number | null;
+  thickness: number | null;
+  /** `seat + stock thickness` — the plan's own expected top, what a record replaces. */
+  derivedMachineZ: number;
+  /** The last accepted top for this blank, or null when there is no record. */
+  recordedMachineZ: number | null;
+} {
+  const derivedMachineZ = r3(plan.seek.band.max - plan.settings.surfaceToleranceMm);
   const thickness = plan.stockThicknessMm ?? null;
-  return { machineZ, seat: thickness === null ? null : r3(machineZ - thickness), thickness };
+  const recordedMachineZ =
+    lastRecordedTopMachineZ !== null && Number.isFinite(lastRecordedTopMachineZ)
+      ? r3(lastRecordedTopMachineZ)
+      : null;
+  const machineZ = recordedMachineZ ?? derivedMachineZ;
+  return {
+    machineZ,
+    seat: thickness === null ? null : r3(machineZ - thickness),
+    thickness,
+    derivedMachineZ,
+    recordedMachineZ,
+  };
 }
 
 /** #1166 — the DERIVED surface a run continues from: no probe touched it, so `touched: false`. */
@@ -842,11 +874,187 @@ function derivedSurfacePrb(plan: RegistrationPlan, machineZ: number): Prb {
   };
 }
 
-/** #1166 — the one arithmetic sentence the press, the question and the record share. */
-function bracketTopWords(top: { machineZ: number; seat: number | null; thickness: number | null }): string {
+/** #1166 — the one arithmetic sentence the press, the question and the record share.
+ *  #1179 B4 — with a record, it names the recorded top and how far it stands from seat + stock. */
+function bracketTopWords(top: {
+  machineZ: number;
+  seat: number | null;
+  thickness: number | null;
+  derivedMachineZ: number;
+  recordedMachineZ: number | null;
+}): string {
+  if (top.recordedMachineZ !== null) {
+    const diff = r3(top.recordedMachineZ - top.derivedMachineZ);
+    const versus =
+      diff === 0
+        ? `the same as seat + stock ${f(top.derivedMachineZ)}`
+        : `${f(Math.abs(diff))} mm ${diff > 0 ? 'above' : 'below'} seat + stock ${f(top.derivedMachineZ)}`;
+    return `the last record for this blank: machine Z ${f(top.recordedMachineZ)} (${versus})`;
+  }
   return top.seat !== null && top.thickness !== null
     ? `seat ${f(top.seat)} + stock ${f(top.thickness)} = ${f(top.machineZ)}`
     : `seat + stock thickness = ${f(top.machineZ)}`;
+}
+
+/**
+ * #1179 B — THE CUT BLANK'S TOP, PROVED (the maintainer's restated rule; the analyst's amendments).
+ *
+ * Touch three spread points first (two if only two exist). A reading + its point's depth is the
+ * IMPLIED top, and its seek's band is shifted by that depth (a floor d below the top can only be
+ * found inside the shifted band). After the first three, touch on (up to five) while the highest
+ * reading stands ALONE more than `cutBlankAgreeMm` above the best agreeing pair — a higher lone
+ * reading may be the real top and must not be out-voted by a lower pair (today's tray: unrecorded
+ * floors). At the end: the highest reading WITH a partner is the top; if it is still alone after
+ * five, a lower level is accepted only when at least THREE readings agree on it (the high one is
+ * then the outlier — a chip — and the note says so); otherwise stop, naming every reading.
+ */
+async function proveCutBlankTop(
+  io: Session,
+  plan: RegistrationPlan,
+  s: RegistrationSettings,
+): Promise<{
+  prb: Prb;
+  at: { x: number; y: number };
+  readings: NonNullable<RunData['surfaceChecks']>;
+  outlier: { machineZ: number; at: { x: number; y: number } } | null;
+}> {
+  type CheckReading = NonNullable<RunData['surfaceChecks']>[number];
+  type Good = { reading: CheckReading; prb: Prb; implied: number };
+  const checks = plan.surfaceChecks ?? [];
+  // An old stored plan (approved before the key) has no agreement; the labelled fallback answers.
+  const agreeMm = s.cutBlankAgreeMm ?? CUT_BLANK_AGREE_FALLBACK_MM;
+  const first = Math.min(3, checks.length);
+  const readings: CheckReading[] = [];
+  const good: Good[] = [];
+  const highestOf = (): Good | null =>
+    good.reduce<Good | null>((best, g) => (best === null || g.implied > best.implied ? g : best), null);
+  /** The HIGHEST implied level with at least two readings within the agreement. */
+  const pairOf = (): { a: Good; b: Good } | null => {
+    const sorted = [...good].sort((x, y) => y.implied - x.implied);
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = i + 1; j < sorted.length; j++) {
+        if (Math.abs(sorted[i]!.implied - sorted[j]!.implied) <= agreeMm + 1e-9) return { a: sorted[i]!, b: sorted[j]! };
+      }
+    }
+    return null;
+  };
+  /** The highest level at which at least THREE readings agree (the outlier case's answer). */
+  const levelWithThree = (): { best: Good; group: Good[] } | null => {
+    const sorted = [...good].sort((x, y) => y.implied - x.implied);
+    for (const candidate of sorted) {
+      const group = sorted.filter((g) => Math.abs(g.implied - candidate.implied) <= agreeMm + 1e-9);
+      if (group.length >= 3) return { best: group[0]!, group };
+    }
+    return null;
+  };
+  for (let index = 0; index < checks.length && index < 5; index++) {
+    if (index >= first) {
+      const pair = pairOf();
+      const highest = highestOf();
+      // Keep touching while the highest reading stands alone above the best pair (it may find its
+      // partner at its own level), or while no pair exists at all.
+      if (pair !== null && highest !== null && highest.implied - pair.a.implied <= agreeMm + 1e-9) break;
+    }
+    const check = checks[index]!;
+    // #1179 B (analyst) — THE BAND FOLLOWS THE POINT'S DEPTH: a floor d below the top is sought in
+    // [min − d, max − d], so a known floor can be found at all. The lateral move stays at the
+    // plan's travel height (the high approach; clamps and arms are clear there).
+    const band = {
+      min: r3(plan.seek.band.min - check.depthMm),
+      max: r3(plan.seek.band.max - check.depthMm),
+    };
+    const missed: Partial<SurfaceMiss> = {};
+    const prb = await seekSurface(
+      io,
+      plan,
+      {
+        ...plan.seek.band,
+        ...band,
+        at: `as low as machine Z ${f(band.min)} for the cut-blank check at (${f(check.x)}, ${f(check.y)})`,
+        expect: 'no wood was found at this check point on a blank that has been cut',
+      },
+      {
+        point: check,
+        ceilingMm: datumCeiling(plan),
+        missOk: true,
+        belowBandIsMiss: true,
+        onMiss: (m) => {
+          missed.how = m.how;
+          missed.z = m.z;
+        },
+      },
+    );
+    const implied = prb === null ? null : r3(prb.z + check.depthMm);
+    const reading: CheckReading = {
+      x: check.x,
+      y: check.y,
+      depthMm: check.depthMm,
+      machineZ: prb === null ? null : prb.z,
+      impliedMachineZ: implied,
+      missed: prb === null ? (missed.how ?? 'no-contact') : null,
+    };
+    readings.push(reading);
+    io.saw({
+      source: 'surface',
+      label: `cut-blank check ${readings.length} of ${Math.min(5, checks.length)} · depth ${f(check.depthMm)} mm`,
+      x: check.x,
+      y: check.y,
+      z: prb === null ? (missed.z ?? band.min) : prb.z,
+      touched: prb !== null,
+      kind: null,
+    });
+    if (prb !== null && implied !== null) good.push({ reading, prb, implied });
+  }
+  const highest = highestOf();
+  const pair = pairOf();
+  const topHasPartner = pair !== null && highest !== null && Math.abs(pair.a.implied - highest.implied) <= 1e-9;
+  let accepted: { level: number; from: Good; agreement: string; outlier: Good | null } | null = null;
+  if (topHasPartner) {
+    accepted = {
+      level: pair.a.implied,
+      from: pair.a,
+      agreement: `the higher of two agreeing touches (${f(pair.b.implied)})`,
+      outlier: null,
+    };
+  } else {
+    const three = levelWithThree();
+    if (three !== null) {
+      accepted = {
+        level: three.best.implied,
+        from: three.best,
+        agreement: `the level ${three.group.length} checks agree on`,
+        outlier: highest !== null && highest.implied > three.best.implied + agreeMm ? highest : null,
+      };
+    }
+  }
+  if (accepted === null) {
+    const words = readings
+      .map((r, i) => {
+        const what =
+          r.missed === 'no-contact'
+            ? 'found nothing'
+            : r.missed === 'below-band'
+              ? `read machine Z ${f(r.machineZ ?? 0)}, below the band`
+              : `read machine Z ${f(r.machineZ ?? 0)} (implied top ${f(r.impliedMachineZ ?? 0)})`;
+        return `${i + 1}) ${what} at (${f(r.x)}, ${f(r.y)}) depth ${f(r.depthMm)}`;
+      })
+      .join('; ');
+    throw new Stop(
+      `the top on this cut blank could not be proved: ${words} — no two implied tops agree within ${f(agreeMm)} mm`,
+    );
+  }
+  io.at(
+    `the top is proved on a cut blank: implied machine Z ${f(accepted.level)} at (${f(accepted.from.reading.x)}, ${f(accepted.from.reading.y)}) — ${accepted.agreement}` +
+      (accepted.outlier !== null
+        ? `; the lone high reading implied ${f(accepted.outlier.implied)} at (${f(accepted.outlier.reading.x)}, ${f(accepted.outlier.reading.y)}) was not used`
+        : ''),
+  );
+  return {
+    prb: { ...accepted.from.prb, z: accepted.level },
+    at: { x: accepted.from.reading.x, y: accepted.from.reading.y },
+    readings,
+    outlier: accepted.outlier === null ? null : { machineZ: accepted.outlier.implied, at: { x: accepted.outlier.reading.x, y: accepted.outlier.reading.y } },
+  };
 }
 
 /**
@@ -1786,7 +1994,7 @@ export async function runRegistration(
       plan.bracketOrigin !== null &&
       surfacePointOnStock(plan) &&
       deps.hasFinishedPrograms === true;
-    const bracketTop = bracketTopOf(plan);
+    const bracketTop = bracketTopOf(plan, deps.lastRecordedTopMachineZ ?? null);
     let chosenTop: { machineZ: number; source: 'bracket-top' | 'operator-entered' } | null = null;
     if (bracketTopFallback && deps.askTop !== undefined) {
       const choice = await deps.askTop({
@@ -1865,12 +2073,25 @@ export async function runRegistration(
     // #1166 — the DERIVED surface this run continues from (a chosen top, or the after-miss offer):
     // no probe touched it, and the record says which kind it is.
     let derived: { machineZ: number; source: 'bracket-top' | 'operator-entered' } | null = chosenTop;
+    // #1179 B — where the accepted reading was taken (a check point) and what every check read.
+    let surfaceAt: { x: number; y: number } | null = null;
+    let cutBlankChecks: NonNullable<RunData['surfaceChecks']> | undefined;
+    let cutBlankOutlier: { machineZ: number; at: { x: number; y: number } } | null = null;
+    const checks = plan.surfaceChecks ?? [];
     let slow: Prb | null;
     if (chosenTop !== null) {
       // NOTHING TOUCHED THIS. The XY is where the seek WOULD have been sent — on the bracket every
       // move is G53 from its origin, so machine XY = the origin + the plan's surface point — and the
       // Z is the top the operator chose.
       slow = derivedSurfacePrb(plan, chosenTop.machineZ);
+    } else if (checks.length > 0) {
+      // #1179 B — a blank that has been cut: the top is MEASURED on uncut stock and proved by two
+      // agreeing touches, never taken from one reading and never asked for.
+      const proved = await proveCutBlankTop(io, plan, s);
+      slow = proved.prb;
+      surfaceAt = proved.at;
+      cutBlankChecks = proved.readings;
+      cutBlankOutlier = proved.outlier;
     } else {
       slow = await seekSurface(
         io,
@@ -1897,7 +2118,11 @@ export async function runRegistration(
         // names the arithmetic and tells the operator what a new blank means.
         const useDerived = await deps.operator({
           kind: 'derived-surface',
-          text: `no surface where the plan expected it. If earlier programs cut this spot, use the bracket's own top: ${bracketTopWords(bracketTop)}. If this is a new blank, decline and check its thickness.`,
+          // #1179 B4 — a recorded top is offered AS the record; otherwise the bracket's own top.
+          text:
+            `no surface where the plan expected it. If earlier programs cut this spot, ` +
+            `${bracketTop.recordedMachineZ !== null ? 'use' : "use the bracket's own top:"} ${bracketTopWords(bracketTop)}. ` +
+            `If this is a new blank, decline and check its thickness.`,
         });
         if (!useDerived) throw surfaceMissStop(plan, miss);
         slow = derivedSurfacePrb(plan, bracketTop.machineZ);
@@ -1941,7 +2166,13 @@ export async function runRegistration(
     const seekBand = recovered === null ? plan.seek.band : { ...plan.seek.band, min: recovered.cap };
     // #519 item 1 — the surface touch, at the plan's own point. #1166 — a DERIVED top is not a
     // reading: no dot is drawn and no table row is claimed; the run narrates the derivation instead.
-    if (derived === null) {
+    if (derived !== null) {
+      io.at(
+        derived.source === 'operator-entered'
+          ? `the top is the operator’s ENTERED value, machine Z ${f(derived.machineZ)} — nothing touched it`
+          : `the surface is DERIVED: the bracket’s own top at machine Z ${f(derived.machineZ)} — nothing touched it`,
+      );
+    } else if (cutBlankChecks === undefined) {
       io.saw({
         source: 'surface',
         label: null,
@@ -1951,12 +2182,6 @@ export async function runRegistration(
         touched: slow.touched,
         kind: null,
       });
-    } else {
-      io.at(
-        derived.source === 'operator-entered'
-          ? `the top is the operator’s ENTERED value, machine Z ${f(derived.machineZ)} — nothing touched it`
-          : `the surface is DERIVED: the bracket’s own top at machine Z ${f(derived.machineZ)} — nothing touched it`,
-      );
     }
 
     // #619 — a datum-path surface ABOVE the expected band is the blank standing prouder than the
@@ -1982,7 +2207,10 @@ export async function runRegistration(
     // keeps the Z-only scan on its free edges too: `sideTouchSetup` cannot place the ball above
     // the ledge without the datum, and the plan says so ("no measured jaw top for a sideways
     // touch").
-    const g54 = { x: r3(slow.x - plan.surfacePoint.x), y: r3(slow.y - plan.surfacePoint.y) };
+    const g54 = {
+      x: r3(slow.x - (surfaceAt?.x ?? plan.surfacePoint.x)),
+      y: r3(slow.y - (surfaceAt?.y ?? plan.surfacePoint.y)),
+    };
     for (const scan of plan.scans) {
       // #1143 — ONE RULE: `sideTouchSelected` is the dispatch, and the run plan's touch estimate
       // counts on the same predicate, so the estimate cannot drift from what the machine does.
@@ -1998,6 +2226,8 @@ export async function runRegistration(
       surface: slow,
       scans,
       ...(derived === null ? {} : { surfaceDerived: derived.source }),
+      ...(surfaceAt === null ? {} : { surfaceAt }),
+      ...(cutBlankChecks === undefined ? {} : { surfaceChecks: cutBlankChecks }),
     };
     // A plan that registers on earlier-setup features has its own outcome (#429); #430's is unchanged.
     const outcome = plan.references ? referenceOutcome(plan, data) : computeOutcome(plan, data);
@@ -2012,6 +2242,32 @@ export async function runRegistration(
       outcome.notes.push(
         'the surface spread was not measured this run: the top the plan expected has been cut away, and the bracket’s own top is the DERIVED surface',
       );
+    }
+    // #1179 B — the record states the proof: every check, its tier, and the pair the top came from.
+    if (cutBlankChecks !== undefined) {
+      const read = cutBlankChecks
+        .map((r, i) => {
+          const what =
+            r.missed === 'no-contact'
+              ? 'found nothing'
+              : r.missed === 'below-band'
+                ? `read machine Z ${f(r.machineZ ?? 0)}, below the band`
+                : `read machine Z ${f(r.machineZ ?? 0)} (implied top ${f(r.impliedMachineZ ?? 0)})`;
+          return `${i + 1}) ${what} at (${f(r.x)}, ${f(r.y)}) depth ${f(r.depthMm)}`;
+        })
+        .join('; ');
+      outcome.notes.push(
+        `the top was measured on a cut blank: ${read}; the accepted implied top is machine Z ${f(slow.z)} (${cutBlankOutlier === null ? 'the higher of two agreeing touches or the level three agree on' : `three checks agree; the lone high reading implied ${f(cutBlankOutlier.machineZ)} at (${f(cutBlankOutlier.at.x)}, ${f(cutBlankOutlier.at.y)}) is a chip or an unrecorded floor and was not used`})` +
+          (plan.surfaceChecksUnknown === true
+            ? ' — the earlier plan’s cuts are not recorded, so the check points are outside today’s footprint and assumed uncut'
+            : '') +
+          (plan.surfaceChecksProbeNote === undefined ? '' : ` — ${plan.surfaceChecksProbeNote}`),
+      );
+      if (spreadPlan !== undefined) {
+        outcome.notes.push(
+          'the surface spread was not measured this run: this blank has been cut, so the top was proved by the agreeing touches on uncut stock',
+        );
+      }
     }
 
     // #475 — the cut extents, AFTER the scans (#591): the plan's touch points are where the cut's
@@ -2028,7 +2284,7 @@ export async function runRegistration(
     const spreadReadings: SurfaceReading[] = [];
     // #1166 — no extent seeks after a DERIVED top (see the note above): the points are where the
     // earlier programs cut, and a derived Z is not a spread measurement.
-    if (spreadPlan !== undefined && derived === null) {
+    if (spreadPlan !== undefined && derived === null && cutBlankChecks === undefined) {
       const lowApproach = plan.mountObstacles.length === 0;
       // #632 — the approach clears the MEASURED surface, not only the plan's high bound. A blank
       // standing prouder than the record expects (a stale `surfaceTopZ` written by a thinner blank,
@@ -2101,7 +2357,7 @@ export async function runRegistration(
     // tilt that fits a plane is followed by the re-posted program; a dome (residual wider than the
     // band) no longer refuses — the origin is still written and the machine levels the top itself.
     let spread: SurfaceSpreadAssessment | undefined;
-    if (spreadPlan !== undefined && derived === null) {
+    if (spreadPlan !== undefined && derived === null && cutBlankChecks === undefined) {
       spread = assessSurfaceReadings(spreadPlan, spreadReadings);
       outcome.surfaceZ = spread.z0.z;
     }

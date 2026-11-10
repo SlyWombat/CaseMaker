@@ -82,7 +82,11 @@ function setupFor(job: EngraveJob): Setup {
   } as unknown as Setup;
 }
 
-function attemptFor(job: EngraveJob, seat: { value: number; what: 'bracket seat'; measuredAt: string } | null) {
+function attemptFor(
+  job: EngraveJob,
+  seat: { value: number; what: 'bracket seat'; measuredAt: string } | null,
+  over: Partial<Parameters<typeof planRegistrationAttempt>[0]> = {},
+) {
   return planRegistrationAttempt({
     job,
     setup: setupFor(job),
@@ -98,6 +102,7 @@ function attemptFor(job: EngraveJob, seat: { value: number; what: 'bracket seat'
     defaults: null,
     calibration: CALIBRATION,
     settings: SETTINGS,
+    ...over,
   });
 }
 
@@ -218,5 +223,103 @@ describe('#1133 a bracket hold plans one top touch', () => {
     expect(seek.ok).toBe(true);
     if (!seek.ok) return;
     expect(seek.seek.notes.join(' ')).toContain('the arm is too narrow for the head to touch it beside this stock');
+  });
+});
+
+describe('#1179 B — a later setup’s check points are its OWN face’s (analyst, 2026-11-10)', () => {
+  /** A serpentine fill: parallel G1 lines across x at `step`, at Z −depth. */
+  const fillNc = (x0: number, x1: number, y0: number, y1: number, step: number, depth: number): string => {
+    const lines = ['G90', 'G0 Z5', `G0 X${x0} Y${y0}`, `G1 Z${-depth} F100`];
+    let y = y0;
+    for (let i = 0; y <= y1 + 1e-9; i++, y += step) {
+      lines.push(`G1 X${i % 2 === 0 ? x1 : x0} Y${Number(y.toFixed(3))} F300`);
+    }
+    lines.push('G0 Z5');
+    return lines.join('\n');
+  };
+
+  /**
+   * A two-setup package on the 160 × 126 blank: setup 1 faces the WHOLE top at depth 3 (0.5 mm
+   * step-over under the 1 mm flat end, so every cell is a 3 mm floor) and is FINISHED; setup 2
+   * cuts one band near the corner and has not run. The programs' own `setupIndex` is the seam.
+   */
+  function twoSetupJob(): EngraveJob {
+    const job = bracketJob();
+    return {
+      ...job,
+      package: {
+        jobId: job.id,
+        frozenAt: '2026-11-10T09:00:00.000Z',
+        hash: 'pkg-1179-b',
+        jobHash: 'job-1179-b',
+        programs: [
+          {
+            setupIndex: 1,
+            setupId: 'setup-1',
+            toolKey: 'flat-1.0',
+            nc: fillNc(0, 160, 0, 126, 0.5, 3),
+            hash: 'finished-setup-1',
+            frameNc: null,
+            frameHash: null,
+          },
+          {
+            setupIndex: 2,
+            setupId: 'setup-2',
+            toolKey: 'flat-1.0',
+            nc: fillNc(20, 60, 20, 40, 0.5, 3),
+            hash: 'setup-2-program',
+            frameNc: null,
+            frameHash: null,
+          },
+        ],
+        setups: [],
+        stockEntryId: null,
+      },
+    };
+  }
+
+  // The probe records its tip and body, so a 3 mm floor is a candidate at all (#1179 B: a floor
+  // deeper than the tip's length is entered by the body, and an unrecorded one is never offered).
+  const RECORDED_PROBE: ProbeSpec = { ...PROBE, tipLengthMm: 1, bodyDiameterMm: 4 };
+
+  it('setup 1 reads its own finished facing pass as a known 3 mm floor', () => {
+    const attempt = attemptFor(twoSetupJob(), MEASURED_SEAT, {
+      cutBlank: true,
+      finishedHashes: ['finished-setup-1'],
+      setupIndex: 1,
+      probe: RECORDED_PROBE,
+    });
+    expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    expect(attempt.plan.surfaceChecksUnknown).toBeUndefined();
+    expect(attempt.plan.surfaceChecks?.length).toBeGreaterThanOrEqual(2);
+    for (const check of attempt.plan.surfaceChecks ?? []) expect(check.depthMm).toBeCloseTo(3, 6);
+  });
+
+  it('setup 2 does not take setup 1’s footprint as this face’s — its cuts are unknown here', () => {
+    const attempt = attemptFor(twoSetupJob(), MEASURED_SEAT, {
+      cutBlank: true,
+      // Setup 1's program IS finished, but it is not setup 2's program: it must not become a floor.
+      finishedHashes: ['finished-setup-1'],
+      setupIndex: 2,
+      probe: RECORDED_PROBE,
+    });
+    expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    // The earlier setup's cuts are not recorded for this face, and the card says so.
+    expect(attempt.plan.surfaceChecksUnknown).toBe(true);
+    expect(attempt.plan.surfaceChecks?.length).toBeGreaterThanOrEqual(2);
+    // No floor of setup 1's 3 mm depth is offered; every point is uncut top of THIS setup's view.
+    for (const check of attempt.plan.surfaceChecks ?? []) expect(check.depthMm).toBe(0);
+    // And the points are not kept out of setup 1's footprint: that footprint faces the other way.
+    // Setup 1 covered the whole top, so every point lies inside it — if the un-mirrored footprint
+    // had been taken as the exclusion, there would have been no point at all.
+    const stock = attempt.plan.stock;
+    for (const check of attempt.plan.surfaceChecks ?? []) {
+      expect(check.x).toBeGreaterThan(stock.xMin);
+      expect(check.x).toBeLessThan(stock.xMax);
+      expect(check.y).toBeGreaterThan(stock.yMin);
+      expect(check.y).toBeLessThan(stock.yMax);
+    }
   });
 });

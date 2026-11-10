@@ -63,6 +63,26 @@ export interface RunData {
    * with `touched: false`, and the outcome says so.
    */
   surfaceDerived?: 'bracket-top' | 'operator-entered';
+  /**
+   * #1179 B — WHERE the accepted surface reading was taken, work XY. Absent on an ordinary run
+   * (the plan's own surface point); present when the top was proved among cut-blank check points.
+   */
+  surfaceAt?: { x: number; y: number };
+  /**
+   * #1179 B — EVERY cut-blank check the run attempted: where, its tier, its machine-Z reading (null
+   * when the seek found nothing) and why it was not a reading. Present only on a cut-blank plan.
+   */
+  surfaceChecks?: {
+    x: number;
+    y: number;
+    /** The depth the point was expected to sit at below the stock top (0 = uncut). */
+    depthMm: number;
+    /** The machine-Z reading, or null when the seek found nothing. */
+    machineZ: number | null;
+    /** reading + depth — the top this touch implies, or null without a reading. */
+    impliedMachineZ: number | null;
+    missed: 'no-contact' | 'below-band' | null;
+  }[];
 }
 
 /**
@@ -141,6 +161,20 @@ export interface RegistrationOutcome {
    * statement of the difference; the note in `notes` says it in the operator's words.
    */
   surfaceDerived?: 'bracket-top' | 'operator-entered';
+  /** #1179 B — see `RunData.surfaceAt`. */
+  surfaceAt?: { x: number; y: number };
+  /** #1179 B — see `RunData.surfaceChecks`. */
+  surfaceChecks?: {
+    x: number;
+    y: number;
+    /** The depth the point was expected to sit at below the stock top (0 = uncut). */
+    depthMm: number;
+    /** The machine-Z reading, or null when the seek found nothing. */
+    machineZ: number | null;
+    /** reading + depth — the top this touch implies, or null without a reading. */
+    impliedMachineZ: number | null;
+    missed: 'no-contact' | 'below-band' | null;
+  }[];
   probeRefZ: number;
   /**
    * The plan's seek height, in MACHINE Z — the resolved machine's `toolChange.clearanceZ` it sought from
@@ -374,7 +408,10 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
   // The frame the touches were sent in: the G54 in force, read back from the surface touch — or, on the
   // bracket, the bracket's origin, because every move there is sent in machine XY from it (#427).
   const onBracket = plan.mount === 'bracket' && plan.bracketOrigin !== null;
-  const g54InForce = { x: r3(data.surface.x - plan.surfacePoint.x), y: r3(data.surface.y - plan.surfacePoint.y) };
+  // #1179 B — a cut-blank top is read at one of the plan's CHECK points, not the plan's own
+  // surface point; the frame and the bracket landing are read against where the reading was taken.
+  const surfaceAt = data.surfaceAt ?? plan.surfacePoint;
+  const g54InForce = { x: r3(data.surface.x - surfaceAt.x), y: r3(data.surface.y - surfaceAt.y) };
   const sentFrom = onBracket ? { x: plan.bracketOrigin!.x, y: plan.bracketOrigin!.y } : g54InForce;
   for (const r of data.scans) {
     for (const t of r.touches) {
@@ -465,7 +502,7 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
   // must have landed exactly there: anything else means the move did not go where it was sent (or ran in
   // another frame), and nothing measured here can be trusted.
   if (plan.mount === 'bracket' && plan.bracketOrigin) {
-    const want = { x: plan.bracketOrigin.x + plan.surfacePoint.x, y: plan.bracketOrigin.y + plan.surfacePoint.y };
+    const want = { x: plan.bracketOrigin.x + surfaceAt.x, y: plan.bracketOrigin.y + surfaceAt.y };
     if (Math.abs(data.surface.x - want.x) > 0.01 || Math.abs(data.surface.y - want.y) > 0.01) {
       problems.push(
         `the surface touch landed at machine (${data.surface.x}, ${data.surface.y}), not at (${r3(want.x)}, ${r3(want.y)}) where it was sent from the bracket’s origin`,
@@ -541,6 +578,8 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
     margin: s.edgeMarginMm,
     surfaceZ: data.surface.z,
     ...(data.surfaceDerived === undefined ? {} : { surfaceDerived: data.surfaceDerived }),
+    ...(data.surfaceAt === undefined ? {} : { surfaceAt: data.surfaceAt }),
+    ...(data.surfaceChecks === undefined ? {} : { surfaceChecks: data.surfaceChecks }),
     probeRefZ: data.probeRefZ,
     seekFromMachineZ: plan.seek.fromMachineZ,
     currentG54: onBracket ? null : g54InForce,

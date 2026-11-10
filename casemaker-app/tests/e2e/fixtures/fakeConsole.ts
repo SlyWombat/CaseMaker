@@ -139,6 +139,12 @@ export const DIAGNOSE_TOUCHED =
 export interface FakeConsole {
   /** Every line the app wrote, in order (`?` for a status poll). */
   lines(): string[];
+  /**
+   * #1179 B — a Z offset applied to the touch at the nth DISTINCT probe point (in the order the
+   * points are first probed), mm: a hidden floor under one candidate, or a chip standing on it.
+   * The boss feature's top is the base reading; an absent index reads 0.
+   */
+  setProbeOffsets(offsetsMm: readonly number[]): void;
   /** #826 — the `diagnose` answer from now on; a spec flips it to prove the monitor follows changes. */
   setDiagnose(line: string): void;
   /** #827 — the round feature the probe touches from now on (a spec seeds it after the app starts). */
@@ -174,6 +180,14 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
   let chuck: FakeChuck | null = null;
   // #886 — the card's own listing, seeded by the spec and changed by its deletes.
   let files: FakeSdFile[] = [...(opts.files ?? [])];
+  // #1179 B — per-probe-point Z offsets (the nth distinct XY the probe touches).
+  let probeOffsets: readonly number[] = [];
+  const probePoints = new Map<string, number>();
+  const probeOffsetAt = (x: number, y: number): number => {
+    const key = `${x.toFixed(2)},${y.toFixed(2)}`;
+    if (!probePoints.has(key)) probePoints.set(key, probePoints.size);
+    return probeOffsets[probePoints.get(key)!] ?? 0;
+  };
   const pos = { x: 0, y: 0, z: -3 };
   let mode: 'G90' | 'G91' = 'G90';
   const dist = (x: number, y: number): number =>
@@ -258,9 +272,12 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
         pos.z = target;
         return frame(PTYPE_REPLY, `[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\r\nok\r\n`);
       }
-      if (feature !== null && materialAt(pos.x, pos.y) && feature.topZ >= target && feature.topZ <= pos.z) {
-        pos.z = feature.topZ;
-        return frame(PTYPE_REPLY, `[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${feature.topZ.toFixed(3)}:1]\r\nok\r\n`);
+      if (feature !== null && materialAt(pos.x, pos.y)) {
+        const hitZ = feature.topZ + probeOffsetAt(pos.x, pos.y);
+        if (hitZ >= target && hitZ <= pos.z) {
+          pos.z = hitZ;
+          return frame(PTYPE_REPLY, `[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${hitZ.toFixed(3)}:1]\r\nok\r\n`);
+        }
       }
       pos.z = target;
       return frame(PTYPE_REPLY, `[PRB:${pos.x.toFixed(3)},${pos.y.toFixed(3)},${target.toFixed(3)}:0]\r\nok\r\n`);
@@ -404,6 +421,7 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
 
   return {
     lines: () => [...seen],
+    setProbeOffsets: (offsets: readonly number[]) => (probeOffsets = [...offsets]),
     setDiagnose: (next: string) => (diagnoseLine = next),
     setFeature: (next: FakeFeature) => (feature = next),
     setChuck: (next: FakeChuck) => (chuck = next),

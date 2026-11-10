@@ -634,6 +634,51 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
     expect(r.outcome.notes.join(' ')).toContain('check its thickness');
   });
 
+  it('#1179 B4 — a recorded top replaces the arithmetic, and the offer names the record', async () => {
+    // The blank's last finished run kept its accepted top 0.3 mm above seat + stock: the offer
+    // continues from THAT top, not from the stated thickness.
+    const z1 = fakeZ1({ actual: { ...BLANK, xMin: 200, xMax: 238 } });
+    const recorded = EXPECTED + 0.3;
+    const asked: { kind: string; text: string }[] = [];
+    const r = await runRegistration(P25(), {
+      console: z1.console,
+      operator: async (step) => {
+        asked.push(step);
+        return true;
+      },
+      hasFinishedPrograms: true,
+      lastRecordedTopMachineZ: recorded,
+    });
+    if (!r.ok) throw new Error(r.reason);
+    const presses = asked.filter((s) => s.kind === 'derived-surface');
+    expect(presses).toHaveLength(1);
+    expect(presses[0]!.text).toContain(`use the last record for this blank: machine Z ${f3(recorded)}`);
+    expect(presses[0]!.text).toContain(`0.3 mm above seat + stock ${f3(EXPECTED)}`);
+    expect(presses[0]!.text).not.toContain("use the bracket's own top");
+    expect(r.data.surfaceDerived).toBe('bracket-top');
+    expect(r.data.surface.z).toBeCloseTo(recorded, 3);
+    expect(r.outcome.surfaceZ).toBeCloseTo(recorded, 3);
+  });
+
+  it('#1179 B4 — a record that agrees with the arithmetic says it is the same', async () => {
+    const z1 = fakeZ1({ actual: { ...BLANK, xMin: 200, xMax: 238 } });
+    const asked: { kind: string; text: string }[] = [];
+    const r = await runRegistration(P25(), {
+      console: z1.console,
+      operator: async (step) => {
+        asked.push(step);
+        return true;
+      },
+      hasFinishedPrograms: true,
+      lastRecordedTopMachineZ: EXPECTED,
+    });
+    if (!r.ok) throw new Error(r.reason);
+    const presses = asked.filter((s) => s.kind === 'derived-surface');
+    expect(presses).toHaveLength(1);
+    expect(presses[0]!.text).toContain(`the same as seat + stock ${f3(EXPECTED)}`);
+    expect(r.outcome.surfaceZ).toBeCloseTo(EXPECTED, 3);
+  });
+
   it('a reading BELOW the band offers the same press', async () => {
     const z1 = fakeZ1({ actual: BLANK });
     let firstZProbe = true;
@@ -2433,5 +2478,180 @@ describe('#933 the run stops in seconds', () => {
       expect(bad.reason).toContain('20 mm from the one this bed was registered to');
     }
     expect(z2.lines.filter((l) => l.startsWith('G38.3'))).toHaveLength(0);
+  });
+});
+
+describe('#1179 B the cut blank’s top is measured on known depths, never asked', () => {
+  // The restated rule: candidates are points whose depth is known (the uncut top d=0, or a flat
+  // floor d from the finished programs); a reading + d is the implied top, and the top is the
+  // HIGHEST implied level two touches agree on. A hidden floor or a chip is out-voted; a lone
+  // reading is never the top.
+  const P = (): RegistrationPlan => plan('bracket', { stockThicknessMm: 25 });
+  const withChecks = (checks: { x: number; y: number; depthMm: number }[], over: Partial<RegistrationPlan> = {}): RegistrationPlan => ({
+    ...P(),
+    surfaceChecks: checks,
+    ...over,
+  });
+
+  /** A fake console that reads a per-work-point machine Z on every Z probe (fast and slow). */
+  function pointedConsole(zByWork: ReadonlyMap<string, number | null>) {
+    const z1 = fakeZ1({ actual: BLANK });
+    let lastX = 0;
+    let lastY = 0;
+    const key = (): string => `${Number((lastX - G54.x).toFixed(3))},${Number((lastY - G54.y).toFixed(3))}`;
+    return {
+      z1,
+      console: {
+        async send(line: string, timing?: Partial<ConsoleTiming>): Promise<ConsoleSendResult> {
+          const move = /^G53 G0 X(-?[\d.]+) Y(-?[\d.]+)$/.exec(line);
+          if (move !== null) {
+            lastX = Number(move[1]);
+            lastY = Number(move[2]);
+          }
+          if (/^G38\.3 Z-[\d.]+ F[\d.]+$/.test(line)) {
+            if (zByWork.has(key())) {
+              const z = zByWork.get(key()) ?? null;
+              const text =
+                z === null
+                  ? `[PRB:${lastX.toFixed(3)},${lastY.toFixed(3)},-70.000:0]\nok`
+                  : `[PRB:${lastX.toFixed(3)},${lastY.toFixed(3)},${z.toFixed(3)}:1]\nok`;
+              return { kind: 'sent', line: '', text, frames: 1, elapsedMs: 1 };
+            }
+          }
+          return z1.console.send(line, timing);
+        },
+      },
+    };
+  }
+
+  const PTS = [
+    { x: 5, y: 5, depthMm: 0 },
+    { x: 33, y: 10, depthMm: 0 },
+    { x: 20, y: 50, depthMm: 0 },
+    { x: 60, y: 5, depthMm: 0 },
+    { x: 15, y: 30, depthMm: 0 },
+  ];
+
+  it('two agreeing implied tops are the answer, and the check points are the touched ones', async () => {
+    const map = new Map([
+      ['5,5', SURFACE],
+      ['33,10', SURFACE],
+      ['20,50', SURFACE],
+    ]);
+    const { console } = pointedConsole(map);
+    const r = await runRegistration(withChecks(PTS.slice(0, 3)), { console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.data.surfaceAt).toEqual({ x: 5, y: 5 });
+    expect(r.data.surface.z).toBeCloseTo(SURFACE, 3);
+    expect(r.outcome.surfaceZ).toBeCloseTo(SURFACE, 3);
+    expect(r.outcome.surfaceChecks).toHaveLength(3);
+    // Three checks × the fast and slow surface touches.
+    expect(r.transcript.filter((t) => t.line.startsWith('G38.3 Z-')).length).toBe(6);
+    expect(r.outcome.notes.join(' ')).toContain('the top was measured on a cut blank');
+  });
+
+  it('a hidden floor under one of three is out-voted and listed with its implied top', async () => {
+    const LOW = -0.3; // inside the plan's 0.4 band, so it is a reading — just not the top
+    const map = new Map([
+      ['5,5', SURFACE],
+      ['33,10', SURFACE],
+      ['20,50', SURFACE + LOW],
+    ]);
+    const { console } = pointedConsole(map);
+    const r = await runRegistration(withChecks(PTS.slice(0, 3)), { console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.outcome.surfaceZ).toBeCloseTo(SURFACE, 3);
+    expect(r.outcome.surfaceChecks![2]!.impliedMachineZ).toBeCloseTo(SURFACE + LOW, 3);
+    expect(r.outcome.notes.join(' ')).toContain('implied top');
+  });
+
+  it('a higher lone reading is not out-voted by a lower pair: a fourth touch finds its partner', async () => {
+    // top (alone, high), two floors 0.6 lower agreeing with each other, then a second top.
+    const map = new Map([
+      ['5,5', SURFACE],
+      ['33,10', SURFACE - 0.6],
+      ['20,50', SURFACE - 0.6],
+      ['60,5', SURFACE],
+    ]);
+    const { console } = pointedConsole(map);
+    const r = await runRegistration(withChecks(PTS), { console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.outcome.surfaceChecks).toHaveLength(4);
+    expect(r.outcome.surfaceZ).toBeCloseTo(SURFACE, 3);
+  });
+
+  it('a chip above three agreeing tops is out-voted, and the record says it was not used', async () => {
+    const map = new Map([
+      ['5,5', SURFACE + 0.3],
+      ['33,10', SURFACE],
+      ['20,50', SURFACE],
+      ['60,5', SURFACE],
+    ]);
+    const { console } = pointedConsole(map);
+    const r = await runRegistration(withChecks(PTS), { console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    // The lone chip keeps pulling touches until the five-candidate cap; the answer is the level
+    // three checks agree on, and the record names the chip it did not use.
+    expect(r.outcome.surfaceChecks).toHaveLength(5);
+    expect(r.outcome.surfaceZ).toBeCloseTo(SURFACE, 3);
+    expect(r.outcome.notes.join(' ')).toContain('was not used');
+  });
+
+  it('a lone top, a lower pair and two misses stop, naming every reading', async () => {
+    const map = new Map<string, number | null>([
+      ['5,5', SURFACE],
+      ['33,10', SURFACE - 0.6],
+      ['20,50', SURFACE - 0.6],
+      ['60,5', null],
+      ['15,30', null],
+    ]);
+    const { console } = pointedConsole(map);
+    const r = await runRegistration(withChecks(PTS), { console, operator: yes });
+    if (r.ok) throw new Error('expected the five readings not to prove a top');
+    expect(r.reason).toContain('could not be proved');
+    expect(r.reason).toContain('found nothing');
+  });
+
+  it('a floor candidate is sought in a band shifted by its depth, and its implied top is recovered', async () => {
+    // Two known floors 5.77 mm below the top: the band shifts down, both agree on the top.
+    const FLOOR = 5.77;
+    const floorChecks = [
+      { x: 5, y: 5, depthMm: FLOOR },
+      { x: 33, y: 10, depthMm: FLOOR },
+    ];
+    const map = new Map([
+      ['5,5', SURFACE - FLOOR],
+      ['33,10', SURFACE - FLOOR],
+    ]);
+    const { console } = pointedConsole(map);
+    const r = await runRegistration(withChecks(floorChecks), { console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.outcome.surfaceZ).toBeCloseTo(SURFACE, 3);
+    expect(r.outcome.surfaceChecks![0]!.machineZ).toBeCloseTo(SURFACE - FLOOR, 3);
+    expect(r.outcome.surfaceChecks![0]!.impliedMachineZ).toBeCloseTo(SURFACE, 3);
+  });
+
+  it('five readings with no agreeing pair stop, naming every implied top', async () => {
+    const deltas = [0.25, 0.1, -0.05, -0.2, -0.35];
+    const map = new Map(PTS.map((p, i) => [`${p.x},${p.y}`, SURFACE + deltas[i]!]));
+    const { console } = pointedConsole(map);
+    const r = await runRegistration(withChecks(PTS), { console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toContain('no two implied tops agree');
+      for (const d of deltas) expect(r.reason).toContain((SURFACE + d).toFixed(3));
+    }
+    expect(r.transcript.filter((t) => t.line.startsWith('G38.3 Z-')).length).toBe(10);
+  });
+
+  it('a fresh blank (no check points) keeps the single-touch transcript byte-identical', async () => {
+    const plain = fakeZ1({ actual: SHIFTED });
+    const control = await runRegistration(P(), { console: plain.console, operator: yes });
+    if (!control.ok) throw new Error(control.reason);
+    const empty = fakeZ1({ actual: SHIFTED });
+    const r = await runRegistration(withChecks([]), { console: empty.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.transcript).toEqual(control.transcript);
+    expect(r.data.surfaceChecks).toBeUndefined();
   });
 });

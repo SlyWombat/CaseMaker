@@ -2176,6 +2176,9 @@ const registrationSettingsSchema = z.object({
   edgeMarginMm: z.number().finite().describe('Margin kept from the stock edge, in millimetres.'),
   surfaceSeekMm: z.number().finite().describe('Distance to seek down to find the surface, in millimetres.'),
   surfaceToleranceMm: z.number().finite().describe('Tolerance for a surface touch, in millimetres.'),
+  // #1179 B — absent on a plan stored before the key existed; the executor's labelled fallback
+  // answers then. Two touches on a blank that has been cut must agree to this, mm.
+  cutBlankAgreeMm: z.number().finite().optional().describe('How close two touches on a cut blank must agree, in millimetres.'),
   // #475 — absent in a plan frozen before this key existed; such a plan is still a valid record
   // of the registration it was approved with, and the seed is the value every new plan carries.
   surfaceTouchCount: z
@@ -2197,6 +2200,22 @@ const registrationSettingsSchema = z.object({
 const registrationPlanSchema = z.object({
   mount: mountSchema,
   stock: expectedStockSchema.describe('The stock as this plan expects to find it.'),
+  // #1179 B — the check points of a plan approved on a blank that has been cut, work XY with the
+  // depth each point sits at (0 = uncut). Absent on a fresh blank's plan and on every older plan.
+  surfaceChecks: z
+    .array(
+      z.object({
+        x: z.number().finite().describe('The check point’s X in the work frame, millimetres.'),
+        y: z.number().finite().describe('The check point’s Y in the work frame, millimetres.'),
+        depthMm: z
+          .number()
+          .finite()
+          .describe('How far the point sits below the blank’s uncut top, millimetres (0 = uncut).'),
+      }),
+    )
+    .optional()
+    .describe('Touch points on a cut blank, with their known depths.'),
+  surfaceChecksUnknown: z.literal(true).optional().describe('The check points sit outside today’s footprint: earlier cuts are unrecorded.'),
   // #743 — a DISC's plan registers on its rim, and this is the diameter its touched span is
   // checked against. OPTIONAL, so a rectangular blank's approved plan keeps its exact shape.
   disc: z

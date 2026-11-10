@@ -79,6 +79,7 @@ import {
 } from '@/engine/cnc/engrave/release';
 import { otherPackageFilesFor, packageKeyOf } from '@/engine/cnc/engrave/packageFiles';
 import { machineKey, runContextFor, useMachineRunStore, type RunContext } from './machineRunStore';
+import { registrationKey, useEngraveRegistrationStore } from './engraveRegistrationStore';
 import { finishedProgramsFor, localMachine } from './locationStore';
 import { readDefault, readFlag } from '@/platform/defaultsClient';
 import { useShopDefaultsStore } from './shopDefaultsStore';
@@ -424,6 +425,27 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       programHash: file.hash,
       programIndex: file.index,
       programTotal: file.total,
+      programName: file.filename,
+      // #1179 — the registration this setup ran under, when one is on record (the restart record
+      // carries it; absent is honest).
+      ...(() => {
+        const reg = useEngraveRegistrationStore.getState().bySetup[registrationKey(rec.job.id, file.setupId)];
+        if (reg === undefined) return {};
+        const derived = reg.outcome.surfaceDerived;
+        // The G54 is a live READING when the memo was restored, else what this run's origin write
+        // left in the controller (`correctedG54`). The measured top is stated only when it WAS
+        // measured: E's thickness note reads it, and a derived top must never feed that comparison.
+        const g54 = reg.restored?.g54 ?? reg.outcome.correctedG54;
+        return {
+          registration: {
+            surfaceMachineZ: reg.outcome.surfaceZ,
+            ...(derived === undefined ? { measuredTopMachineZ: reg.outcome.surfaceZ } : {}),
+            measuredAt: reg.measuredAt,
+            g54: { x: g54.x, y: g54.y },
+            topSource: derived === undefined ? 'touch' : 'derived',
+          },
+        };
+      })(),
       // #425 §6 — the document's own name for the setup this file cuts, so the run end can record
       // the outcome against the frozen program rather than against its position in today's list.
       setupIndex: file.setupIndex,
