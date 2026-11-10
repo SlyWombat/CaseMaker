@@ -152,11 +152,8 @@ async function typePlate(page: Page, dims: [number, number, number]): Promise<vo
 }
 
 /** The shared walk up to the Register press, with the pocket centred and Generate green. */
-async function prepare(page: Page, fake: FakeConsole): Promise<void> {
-  await fakeHouse(page);
+async function prepare(page: Page): Promise<void> {
   await rememberMachine(page);
-  fake.setFeature({ kind: 'boss', radiusMm: 400, centre: { x: -140, y: -163 }, topZ: TOP_READING });
-
   await typePlate(page, [100, 60, STOCK_MM]);
   await expect(page.getByTestId('engrave-setup-mount-bed-bracket')).toBeChecked();
   await page.getByTestId('engrave-setup-next').click();
@@ -188,6 +185,12 @@ async function prepare(page: Page, fake: FakeConsole): Promise<void> {
 }
 
 async function writeOriginAndExpect(page: Page, fake: FakeConsole, z: string): Promise<void> {
+  // The approved plan changed the job, so Cut's step 1 has findings now and may have folded step 2;
+  // the write press needs the card on screen.
+  const step2 = page.getByTestId('engrave-cut-step-2');
+  if (!(await step2.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await page.getByTestId('engrave-cut-step-2-summary').click();
+  }
   await page.getByTestId('engrave-registration-write').click();
   await page.getByTestId('engrave-registration-continue').click();
   await expect.poll(() => fake.lines().find((l) => l.startsWith('G10 L2 P1')) ?? null, { timeout: 60_000 }).not.toBeNull();
@@ -198,10 +201,14 @@ test('#1179 B — a hidden floor under one check is out-voted; the top and the o
   cm,
   page,
 }) => {
+  // The house and the fake FIRST (routes are matched last-registered-first, and the location is
+  // read at boot); then the machine's surface and the per-check offsets.
+  await fakeHouse(page);
   const fake = await installFakeConsole(page);
+  fake.setFeature({ kind: 'boss', radiusMm: 400, centre: { x: -140, y: -163 }, topZ: TOP_READING });
   fake.setProbeOffsets([-0.6, 0, 0]); // the first check sits on an unrecorded floor, 0.6 low
   await cm.ready();
-  await prepare(page, fake);
+  await prepare(page);
 
   await expect(page.getByTestId('engrave-registration-notes')).toContainText('the top was measured on a cut blank', {
     timeout: 120_000,
@@ -214,10 +221,12 @@ test('#1179 B — a hidden floor under one check is out-voted; the top and the o
 });
 
 test('#1179 B — a chip above three agreeing tops is out-voted, named, and not used', async ({ cm, page }) => {
+  await fakeHouse(page);
   const fake = await installFakeConsole(page);
+  fake.setFeature({ kind: 'boss', radiusMm: 400, centre: { x: -140, y: -163 }, topZ: TOP_READING });
   fake.setProbeOffsets([0.38, 0, 0, 0]); // the first check reads 0.38 high (inside the live band)
   await cm.ready();
-  await prepare(page, fake);
+  await prepare(page);
 
   await expect(page.getByTestId('engrave-registration-notes')).toContainText('was not used', { timeout: 120_000 });
   fs.mkdirSync(OUT, { recursive: true });
