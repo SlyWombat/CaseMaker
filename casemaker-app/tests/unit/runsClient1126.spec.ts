@@ -13,6 +13,8 @@ import { setHouseClientLoader, type HouseCall, type HouseClient } from '@/platfo
 import {
   cancelRun,
   readRun,
+  readRunGenerated,
+  setRunGeneratedIdleMs,
   streamRunEvents,
   submitRun,
   type RunEvent,
@@ -33,7 +35,10 @@ function fakeHouse(answers: Record<string, HouseCall>): { calls: { method: strin
   return { calls };
 }
 
-afterEach(() => setHouseClientLoader(null));
+afterEach(() => {
+  setHouseClientLoader(null);
+  setRunGeneratedIdleMs(20_000);
+});
 
 const JOB = { id: 'job-1', name: 'Tray', stock: { length: 160, width: 126, thickness: 25 } };
 
@@ -109,6 +114,55 @@ describe('#1126 — cancelling a run', () => {
     const result = await cancelRun('run-7');
     expect(result).toEqual({ kind: 'ok', state: 'cancelled' });
     expect(house.calls[0]!.path).toBe('/runs/run-7/cancel');
+  });
+});
+
+describe('#1126 — the generated document', () => {
+  it('streams a large result in many chunks and parses it whole', async () => {
+    const blob = 'x'.repeat(8 * 1024 * 1024);
+    const text = JSON.stringify({ ok: true, blob });
+    const bytes = new TextEncoder().encode(text);
+    const CHUNK = 64 * 1024;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          controller.enqueue(bytes.subarray(i, Math.min(i + CHUNK, bytes.length)));
+        }
+        controller.close();
+      },
+    });
+    const fetchImpl = (async () =>
+      new Response(body, { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
+
+    const result = await readRunGenerated('run-7', { fetchImpl });
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect((result.generated as { blob: string }).blob.length).toBe(blob.length);
+    }
+  });
+
+  it('a stalled stream is refused by its idle time, not by a cap on the total', async () => {
+    setRunGeneratedIdleMs(25);
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        // One chunk, then silence: exactly what a dropped LAN connection looks like mid-document.
+        controller.enqueue(new TextEncoder().encode('{"ok":'));
+      },
+    });
+    const fetchImpl = (async () => new Response(body, { status: 200 })) as unknown as typeof fetch;
+    const result = await readRunGenerated('run-7', { fetchImpl });
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') expect(result.detail).toContain('stopped arriving');
+  });
+
+  it('a refusal carries the service’s own sentence', async () => {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ error: 'this run has no generated document' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch;
+    const result = await readRunGenerated('run-7', { fetchImpl });
+    expect(result).toEqual({ kind: 'refused', status: 404, message: 'this run has no generated document' });
   });
 });
 

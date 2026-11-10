@@ -109,14 +109,103 @@ export async function readRun(id: string): Promise<RunRead> {
 export type RunGenerated = { kind: 'ok'; generated: unknown } | HouseFailure;
 
 /**
+ * How long the generated document may go without a byte before the read is called dead. NOT a cap
+ * on the total: a tray run's result is tens of megabytes and a LAN transfer of it can legitimately
+ * take minutes. What is not legitimate is a stalled stream, and that is what this measures — every
+ * chunk re-arms it. The house's own request timeout (2 s) is sized for small records and is the
+ * wrong rule here.
+ */
+const GENERATED_IDLE_MS = 20_000;
+let generatedIdleMs = GENERATED_IDLE_MS;
+
+/** Test seam: shrink the inactivity window so a spec can observe a stalled stream. */
+export function setRunGeneratedIdleMs(ms: number): void {
+  generatedIdleMs = Math.max(1, ms);
+}
+
+function runsUrl(path: string): string {
+  return `${(houseBaseUrl() || '').replace(/\/+$/, '')}${HOUSE_API_PATH}/runs${path}`;
+}
+
+/**
  * Read the run's generated document — the plain-data result the CLI's `--generated` wrote beside
  * the programs. It is the same object the browser's worker returns from `engraveGenerate`, so the
  * panel settles a house run with it exactly as it settles an in-page one.
+ *
+ * STREAMED, WITH AN INACTIVITY RULE. `houseRequest` buffers a body and times the whole request;
+ * that is right for a tool list and wrong for a result document that can be tens of megabytes —
+ * the 30 s total cap would fail on exactly the big jobs. This reads the stream, re-arms a 20 s
+ * idle timer on every chunk, and parses the assembled text once the stream ends.
  */
-export async function readRunGenerated(id: string): Promise<RunGenerated> {
-  const res = await houseRequest('GET', `/runs/${encodeURIComponent(id)}/generated`, undefined, { timeoutMs: RUNS_TIMEOUT_MS });
-  if (res.kind !== 'ok') return res;
-  const parsed = parseJson<unknown>(res.text);
+export async function readRunGenerated(
+  id: string,
+  opts: StreamRunOptions = {},
+): Promise<RunGenerated> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  let res: Response;
+  try {
+    res = await fetchImpl(runsUrl(`/${encodeURIComponent(id)}/generated`), {
+      headers: { Accept: 'application/json' },
+      ...(opts.signal === undefined ? {} : { signal: opts.signal }),
+    });
+  } catch (e) {
+    return { kind: 'error', detail: e instanceof Error ? e.message : String(e) };
+  }
+  if (!res.ok) {
+    // The service writes every error body as {"error": sentence}; anything else is a status.
+    let message = `the runs API answered ${res.status}`;
+    try {
+      const body = (await res.json()) as { error?: unknown };
+      if (typeof body.error === 'string') message = body.error;
+    } catch {
+      // Not the service's shape: the status sentence stands.
+    }
+    return { kind: 'refused', status: res.status, message };
+  }
+  if (res.body === null) {
+    return { kind: 'error', detail: 'the runs API answered without a body' };
+  }
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let stalled = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const arm = (): void => {
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(() => {
+      stalled = true;
+      void reader.cancel();
+    }, generatedIdleMs);
+  };
+  try {
+    arm();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      arm();
+      if (value !== undefined) chunks.push(value);
+    }
+  } catch (e) {
+    if (!stalled) {
+      return { kind: 'error', detail: e instanceof Error ? e.message : String(e) };
+    }
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+  if (stalled) {
+    return {
+      kind: 'error',
+      detail: `the generated document stopped arriving for ${Math.round(generatedIdleMs / 1000)} s`,
+    };
+  }
+  let length = 0;
+  for (const chunk of chunks) length += chunk.length;
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  const parsed = parseJson<unknown>(new TextDecoder().decode(bytes));
   return parsed.ok ? { kind: 'ok', generated: parsed.value } : { kind: 'error', detail: parsed.detail };
 }
 
@@ -145,7 +234,7 @@ export async function streamRunEvents(
   opts: StreamRunOptions = {},
 ): Promise<void> {
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const url = `${(houseBaseUrl() || '').replace(/\/+$/, '')}${HOUSE_API_PATH}/runs/${encodeURIComponent(id)}/events`;
+  const url = runsUrl(`/${encodeURIComponent(id)}/events`);
   let res: Response;
   try {
     res = await fetchImpl(url, {
