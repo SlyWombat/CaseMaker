@@ -24,10 +24,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -b --noEmit && tsc --noEmit -p tsconfig.tests.json",
     "test": "vitest run",
-    "test:fast": "vitest run --project unit-fast",
-    "test:cnc": "vitest run --project cnc-heavy",
-    "test:print": "vitest run --project print",
-    "test:cards": "vitest run --project cards",
+    "test:fast": "vitest run --project fast",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:smoke": "playwright test --project smoke --project smoke-mobile",
@@ -52,7 +49,8 @@
     "reference-gcode:fetch": "node scripts/fetch-reference-gcode.mjs",
     "check:sim-gate": "node scripts/check-sim-gate.mjs",
     "check:platform-gate": "node tools/check-platform-gate.mjs",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "test:acceptance": "vitest run --project acceptance"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
