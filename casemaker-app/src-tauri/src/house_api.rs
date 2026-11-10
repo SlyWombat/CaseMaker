@@ -1486,6 +1486,27 @@ mod tests {
     #[tokio::test]
     async fn a_datum_with_a_probe_reference_is_accepted_and_served_back() {
         let (_dir, app) = app_under_test();
+        // The client's own order: the machine record first (its first PUT deliberately carries no
+        // bed — the store drops one there), then the bed as a second, guarded write.
+        let bare = serde_json::json!({
+            "id": "m-ref", "profileId": "Z1", "name": null, "serial": null, "firmware": null,
+            "address": { "host": "192.0.2.10", "port": 2222 },
+            "calibration": null, "fixtures": {}, "margins": null,
+            "updatedAt": "2026-11-10T00:00:00.000Z"
+        });
+        let put = |if_match: &str, body: &serde_json::Value| {
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/location/machines/m-ref")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::IF_MATCH, if_match)
+                .body(Body::from(serde_json::to_vec(body).unwrap()))
+                .unwrap()
+        };
+        let tag = etag_of(&app, "/api/v1/location").await;
+        let res = app.clone().oneshot(put(&tag, &bare)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
         let machine = serde_json::json!({
             "id": "m-ref", "profileId": "Z1", "name": null, "serial": null, "firmware": null,
             "address": { "host": "192.0.2.10", "port": 2222 },
@@ -1514,14 +1535,7 @@ mod tests {
             "updatedAt": "2026-11-10T00:00:00.000Z"
         });
         let tag = etag_of(&app, "/api/v1/location").await;
-        let req = Request::builder()
-            .method("PUT")
-            .uri("/api/v1/location/machines/m-ref")
-            .header(header::CONTENT_TYPE, "application/json")
-            .header(header::IF_MATCH, tag.as_str())
-            .body(Body::from(serde_json::to_vec(&machine).unwrap()))
-            .unwrap();
-        let res = app.clone().oneshot(req).await.unwrap();
+        let res = app.clone().oneshot(put(&tag, &machine)).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK, "the write carried the reference");
         let view = json_of(app.clone().oneshot(get("/api/v1/location")).await.unwrap()).await;
         let seat = &view["machines"][0]["bedProfiles"][0]["datums"]["bracketSeatZ"];
