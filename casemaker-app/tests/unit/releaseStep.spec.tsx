@@ -247,7 +247,7 @@ function releaseSpanClose(): void {
  * `retouchSurfaceZ` is the machine Z every probe touch reports and `m491` the tool-length reply.
  */
 function controller(
-  finishAfter = 2,
+  finishAfter = 1,
   opts: { retouchSurfaceZ?: number; m491?: string; playError?: boolean; alarmOnPlay?: boolean } = {},
 ): MachineConsoleClient {
   let playing: { polls: number } | null = null;
@@ -355,7 +355,7 @@ beforeEach(() => {
   resetEngraveRegistrationStore();
   resetLocationStore();
   clearStoredBaseline();
-  setMachineConsoleLoader(async () => controller(2));
+  setMachineConsoleLoader(async () => controller(1));
   setMachineUploadLoader(async () => ({
     status: async () => ({ ok: true, text: '<Idle|MPos:0,0,0>' }),
     upload: async (_target, program) => {
