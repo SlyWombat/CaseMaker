@@ -236,7 +236,25 @@ function Step({
         >
           {done ? '✓' : current ? '●' : '○'} {number} {title}
         </span>
-        <span style={{ ...MUTED, margin: 0, textAlign: 'right', minWidth: 0 }}>{summary}</span>
+        <span style={{ ...MUTED, margin: 0, textAlign: 'right', minWidth: 0, flex: 1 }}>{summary}</span>
+        {/* #1123-43 — THE AFFORDANCE. The browser's own marker is suppressed by this summary's
+            `display: flex` (the layout the step needs), so the header ends in an explicit chevron:
+            right while folded, turned down while open. `aria-hidden` — `<details>` already
+            announces the expanded state; this is the picture of it. */}
+        <span
+          aria-hidden="true"
+          data-testid={`engrave-cut-step-${number}-chevron`}
+          style={{
+            flexShrink: 0,
+            fontSize: 12,
+            lineHeight: 1,
+            color: '#9aa4b0',
+            transform: open ? 'rotate(90deg)' : 'none',
+            transition: 'transform 120ms',
+          }}
+        >
+          ›
+        </span>
       </summary>
       <div style={{ marginTop: 4 }}>{children}</div>
     </details>
