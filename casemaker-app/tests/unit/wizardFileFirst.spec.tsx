@@ -81,6 +81,13 @@ describe('#1098 — the question step opens with the file', () => {
     expect(shape.width).toBeCloseTo(60, 1);
     expect(shape.through).toBe(true);
     expect(proposeStock(shape)).toMatchObject({ form: 'plate', length: 70, width: 70, thickness: 12 });
+
+    // #1099 — the drawing is drawn: the thumbnail sits in the outline's own field, with the blank
+    // sentence under it, so a drawing and a mesh get the same treatment on the same step.
+    const thumbnail = screen.getByTestId('wizard-thumbnail');
+    expect(thumbnail.getAttribute('data-kind')).toBe('outline');
+    expect(screen.getByTestId('wizard-thumbnail-outline')).toBeDefined();
+    expect(screen.getByTestId('wizard-thumbnail-sentence').textContent).toContain('70 × 70 × 12');
   });
 
   it('an unknown file sets nothing and says what Case Maker reads', () => {
