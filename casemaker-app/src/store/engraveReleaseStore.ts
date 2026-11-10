@@ -583,10 +583,12 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     }
     // The cleaning pass rides the job's span: MIDDLE while programs remain (the vacuum stays on
     // across the bit change), WHOLE when it is the span's own end (after the last program, or a
-    // Clean now press). The air walk switches nothing.
+    // Clean now press). The air walk switches nothing, and a job that runs without its accessory
+    // output (`airOn` false — the same fact the programs' span is read from) gets no vacuum words
+    // for the clean either: `none` sends nothing.
     const lastProgram = after.kind === 'after-program' && after.next === null;
     const span: 'none' | 'middle' | 'whole' =
-      mode === 'airwalk' ? 'none' : lastProgram || after.kind === 'clean-now' ? 'whole' : 'middle';
+      mode === 'airwalk' || !rec.airOn ? 'none' : lastProgram || after.kind === 'clean-now' ? 'whole' : 'middle';
     const context: RunContext = {
       nc: walkNow.nc,
       toolKey: current.job.toolKey,
@@ -666,9 +668,16 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       const whole =
         mode === 'clean' && (after.kind === 'clean-now' || (after.kind === 'after-program' && after.next === null));
       // #1123 item 41 — the run's own words first: a span's end switched the vacuum off itself; a
-      // middle-span clean leaves it on; an unconfirmed off is not claimed either way.
+      // middle-span clean leaves it on; an unconfirmed off is not claimed either way. A walk that
+      // sent no vacuum word (the air walk, or a clean over an air-off job) leaves it where it was.
       const vacuum: ReleaseRecord['vacuum'] =
-        outcome.vacuumOff === true ? 'off' : mode === 'airwalk' ? rec.vacuum : whole ? 'unknown' : 'on';
+        outcome.vacuumOff === true
+          ? 'off'
+          : mode === 'airwalk' || !rec.airOn
+            ? rec.vacuum
+            : whole
+              ? 'unknown'
+              : 'on';
       if (mode === 'airwalk') {
         patch(machine, { airWalked: true, phase: 'starting', vacuum });
         if (after.kind === 'start-program') {

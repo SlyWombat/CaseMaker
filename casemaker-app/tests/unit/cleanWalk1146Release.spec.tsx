@@ -354,4 +354,28 @@ describe('#1146 — the walks ride the release, as files', () => {
     expect(rec.notes.join('\n')).toContain("above the machine's travel height");
     expect(rec.notes.join('\n')).toContain('4.00');
   });
+
+  it('a job that runs without the vacuum gets no M851 from its walks either', async () => {
+    const job = twoProgramJob();
+    // Programs with no vacuum words at all: the job's accessory output is off.
+    const sources = sourcesOf([
+      { nc: 'G0 X0 Y0\nM02\n', setupId: 'setup-1' },
+      { nc: 'G0 X1 Y1\nM02\n', setupId: 'setup-1' },
+    ]);
+    useEngraveReleaseStore.getState().plan(TARGET, job, sources);
+    expect(record()!.airOn).toBe(false);
+    expect(record()!.walks.clean).not.toBeNull();
+    await useEngraveReleaseStore.getState().uploadAll(TARGET);
+    useEngraveReleaseStore.getState().startRelease(TARGET);
+
+    await waitFor(() => expect(record()!.phase).toBe('airwalk'), { timeout: 15000 });
+    await waitFor(() => expect(record()!.phase).toBe('cleaning'), { timeout: 15000 });
+    expect(sent).not.toContain('M851');
+    expect(sent).not.toContain('M852');
+    // The cleaning pass still blows air from its own file words: the vacuum is the job's choice,
+    // the spindle air the pass's.
+    expect(onCard.get('Clean-job-clean.nc')).toContain('M811');
+    // Let the pass finish so no run outlives this test.
+    await waitFor(() => expect(record()!.phase).toBe('bit-change'), { timeout: 15000 });
+  });
 });
