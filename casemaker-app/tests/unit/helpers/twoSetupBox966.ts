@@ -12,6 +12,7 @@ import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { SetupSpec } from '@/engine/cnc/cam/model/plan';
+import { stl } from './meshes';
 
 type V = [number, number, number];
 type Tri = [V, V, V];
@@ -35,24 +36,6 @@ export function boxTris(l: number, w: number, t: number): Tri[] {
 }
 
 /** Binary STL encoder — `camModelSeam966.spec.ts`'s own helper, unchanged. */
-export function stl(tris: Tri[]): string {
-  const buf = new ArrayBuffer(84 + tris.length * 50);
-  const dv = new DataView(buf);
-  dv.setUint32(80, tris.length, true);
-  let off = 84;
-  for (const t of tris) {
-    off += 12;
-    for (const v of t) {
-      dv.setFloat32(off, v[0], true);
-      dv.setFloat32(off + 4, v[1], true);
-      dv.setFloat32(off + 8, v[2], true);
-      off += 12;
-    }
-    off += 2;
-  }
-  return Buffer.from(new Uint8Array(buf)).toString('base64');
-}
-
 export function boxTarget(id: string, l: number, w: number, t: number): EngraveTargetObject {
   return {
     id,
@@ -100,3 +83,5 @@ export function twoSetups(t: number): SetupSpec[] {
     { frame: { up: [0, 0, -1], stockTop: t, stockBottom: -0 }, underside: 'flippedTabs' },
   ];
 }
+
+export { stl };

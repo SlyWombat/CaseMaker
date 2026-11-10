@@ -19,26 +19,9 @@ import { mergeGerberShapes, type GerberShape } from '@/engine/import/gerber';
 import { mesh } from '@/engine/compiler/buildPlan';
 import { executeOpSync } from '@/workers/geometry/evaluateOp';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
+import { binaryStl } from './helpers/meshes';
 
 type Tri = [[number, number, number], [number, number, number], [number, number, number]];
-
-function binaryStl(tris: Tri[]): ArrayBuffer {
-  const buf = new ArrayBuffer(84 + tris.length * 50);
-  const dv = new DataView(buf);
-  dv.setUint32(80, tris.length, true);
-  let off = 84;
-  for (const t of tris) {
-    off += 12; // normal left 0
-    for (const v of t) {
-      dv.setFloat32(off, v[0], true);
-      dv.setFloat32(off + 4, v[1], true);
-      dv.setFloat32(off + 8, v[2], true);
-      off += 12;
-    }
-    off += 2; // attribute byte count
-  }
-  return buf;
-}
 
 /** Two triangles with volume in all three axes — a readable target object when finite. */
 const GOOD: Tri[] = [

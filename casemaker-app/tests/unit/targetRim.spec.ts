@@ -9,30 +9,11 @@ import { describe, expect, it } from 'vitest';
 import { chamferBandFor, targetRim } from '@/engine/cnc/engrave/targetRim';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import type { EngraveTargetObject } from '@/types/engraveJob';
+import { stlBase64 } from './helpers/meshes';
 
 type P = [number, number, number];
 
 /** A binary STL of the triangles, base64 — the form a job embeds. */
-function stlBase64(tris: readonly (readonly [P, P, P])[]): string {
-  const bytes = new Uint8Array(84 + tris.length * 50);
-  const dv = new DataView(bytes.buffer);
-  dv.setUint32(80, tris.length, true);
-  let off = 84;
-  for (const [a, b, c] of tris) {
-    for (let k = 0; k < 3; k++) dv.setFloat32(off + k * 4, 0, true);
-    off += 12;
-    for (const p of [a, b, c]) {
-      dv.setFloat32(off, p[0], true);
-      dv.setFloat32(off + 4, p[1], true);
-      dv.setFloat32(off + 8, p[2], true);
-      off += 12;
-    }
-    dv.setUint16(off, 0, true);
-    off += 2;
-  }
-  return Buffer.from(bytes).toString('base64');
-}
-
 let n = 0;
 function target(data: string, over: Partial<EngraveTargetObject> = {}): EngraveTargetObject {
   return {

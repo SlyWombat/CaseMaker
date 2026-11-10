@@ -11,23 +11,17 @@
  * is a read-through cache) and the bytes must come out identical.
  */
 
-import { createHash } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
-import { tl } from './helpers/manifoldExec';
-import { buildRandomPart } from '../tools/randomParts';
-import { buildBinaryStl } from '@/workers/export/stlBinary';
-import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import {
   planModelCam,
-  type ModelPlanInput,
   type RankMeasureHandle,
   type RankMeasurement,
   type RankMeasureRequest,
 } from '@/engine/cnc/cam/model/plan';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
-import type { EngraveTargetObject } from '@/types/engraveJob';
+import { slopedInput } from './helpers/goalFixtures';
 
 const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
 const ball = (d: number): Tool => ({
@@ -38,34 +32,6 @@ const ball = (d: number): Tool => ({
 });
 
 /** #986's `sloped` seed, unchanged, with the caller's house. */
-function slopedInput(house: Tool[]): ModelPlanInput {
-  const part = buildRandomPart(1, 'sloped', tl);
-  const stl = buildBinaryStl([{ positions: part.mesh.positions, indices: part.mesh.indices }]);
-  const bytes = Buffer.from(stl);
-  const target: EngraveTargetObject = {
-    id: 'fixture-rank-pool',
-    name: 'sloped',
-    format: 'stl',
-    sha256: createHash('sha256').update(bytes).digest('hex'),
-    data: bytes.toString('base64'),
-    size: { x: part.stock.length, y: part.stock.width, z: part.stock.thickness },
-    position: { x: 0, y: 0, z: 0 },
-    rotation: 0,
-    enabled: true,
-    role: 'goal',
-  };
-  return {
-    geometry: { triangles: part.mesh },
-    setups: [{ frame: { up: [0, 0, 1], stockTop: 0, stockBottom: -part.stock.thickness }, underside: 'flatOnStockBottom' }],
-    stock: { length: part.stock.length, width: part.stock.width, thickness: part.stock.thickness, material: 'hardwood' },
-    fixture: { mount: 'tape', envelope: null },
-    cutters: { house, catalogue: [] },
-    tolerances: { finishMm: 0.01 },
-    edgeBreak: { legMm: 0 },
-    goal: sampleGoalHeightfield(target, { pitchMm: 0.1, stockTopZ: 0 }),
-  };
-}
-
 /** One candidate, measured through the engine's own worker entry — the real metric, same thread. */
 async function measureAlone(request: RankMeasureRequest, candidate: Tool): Promise<RankMeasurement> {
   const captured: { metric: RankMeasurement | null } = { metric: null };
@@ -99,7 +65,7 @@ describe('#1151 Phase 2 — the rank seam', () => {
   it('a LATER candidate wins, and the seam run is byte-identical to the serial plan', async () => {
     // ⌀0.2 first, ⌀2 second: equal leftover, the ⌀2's cheaper cycle wins — the rank's SECOND
     // candidate takes the plan, measured through the seam in the seam run.
-    const input = slopedInput([flat6, ball(0.2), ball(2)]);
+    const input = slopedInput('fixture-rank-pool', [flat6, ball(0.2), ball(2)]);
     const serial = await planModelCam(input);
     expect(rankNote(serial)).toContain('Chosen: ball-2');
 
@@ -115,7 +81,7 @@ describe('#1151 Phase 2 — the rank seam', () => {
   }, 600_000);
 
   it('a seam that fails is measured in-process: the pool’s health cannot move the plan', async () => {
-    const input = slopedInput([flat6, ball(0.2), ball(2)]);
+    const input = slopedInput('fixture-rank-pool', [flat6, ball(0.2), ball(2)]);
     const serial = await planModelCam(input);
     const deadSeam = (): RankMeasureHandle => ({
       metric: () => Promise.reject(new Error('the pool is down')),
@@ -130,7 +96,7 @@ describe('#1151 Phase 2 — the rank seam', () => {
   it('the early break stops the seam: an outstanding candidate is never measured and the seam is cancelled', async () => {
     // ⌀1 first (measured in-process), ⌀2 second: it does not improve on leftover, so the search
     // breaks before ⌀4 — the seam was offered both, consumes only the ⌀2, and is cancelled.
-    const input = slopedInput([flat6, ball(1), ball(2), ball(4)]);
+    const input = slopedInput('fixture-rank-pool', [flat6, ball(1), ball(2), ball(4)]);
     const serial = await planModelCam(input);
     expect(rankNote(serial)).toMatch(/measured 2 candidate\(s\)/);
     expect(rankNote(serial)).toContain('Chosen: ball-1');

@@ -18,6 +18,7 @@ import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { stl } from './helpers/meshes';
 
 afterEach(() => clearTargetObjectMeshCache());
 
@@ -65,24 +66,6 @@ function surfaceTris(f: (x: number, y: number) => number, seg = 64): Tri[] {
     }
   }
   return tris;
-}
-
-function stl(tris: Tri[]): string {
-  const buf = new ArrayBuffer(84 + tris.length * 50);
-  const dv = new DataView(buf);
-  dv.setUint32(80, tris.length, true);
-  let off = 84;
-  for (const t of tris) {
-    off += 12;
-    for (const v of t) {
-      dv.setFloat32(off, v[0], true);
-      dv.setFloat32(off + 4, v[1], true);
-      dv.setFloat32(off + 8, v[2], true);
-      off += 12;
-    }
-    off += 2;
-  }
-  return Buffer.from(new Uint8Array(buf)).toString('base64');
 }
 
 let serial = 0;
