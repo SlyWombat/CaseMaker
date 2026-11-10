@@ -145,7 +145,17 @@ export function contour(opts: ContourOpOptions): OpOutcome {
         }
       : undefined;
 
-  return { ir: result.ir, cutter: cutterKeyOf(opts.cutter), passes, cleared, ...(throughKerf === undefined ? {} : { throughKerf }) };
+  const clampedTabHeightMm =
+    tabHeightMm < opts.tabs.height ? { wanted: opts.tabs.height, cut: tabHeightMm } : undefined;
+
+  return {
+    ir: result.ir,
+    cutter: cutterKeyOf(opts.cutter),
+    passes,
+    cleared,
+    ...(throughKerf === undefined ? {} : { throughKerf }),
+    ...(clampedTabHeightMm === undefined ? {} : { clampedTabHeightMm }),
+  };
 }
 
 export interface ThroughHoleOpOptions {

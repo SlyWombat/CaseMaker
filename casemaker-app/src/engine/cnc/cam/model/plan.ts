@@ -176,6 +176,14 @@ export interface OpOutcome {
    */
   clampedLegMm?: { wanted: number; cut: number };
   /**
+   * #1160 — THE RELEASE TAB'S HEIGHT WAS CLAMPED to the part's own thickness: the height it asked
+   * for and the height it cut, mm. A tab's top is `-(thickness - height)`, so a tab taller than
+   * the part would put its crossing ABOVE the stock top (the post's air-cut rule). The plan states
+   * it once, with both numbers (`release tabs set to the part's full X mm height; the shop's Y mm
+   * tab is taller than the part`) — a changed number is never silent. Absent when the tab fits.
+   */
+  clampedTabHeightMm?: { wanted: number; cut: number };
+  /**
    * #1062 (defect 1) — THE PLAN'S OWN PREDICTION of the lip bevel a floor-correct V pocket cuts
    * into the design's top face at its walls, mm: `depth × tan(half)` per side, the V's own
    * geometry. A PREDICTION, not the gate's measurement — `PlanOutcome.cutInto` stays null ("the
@@ -3860,6 +3868,20 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #992 — the SAME facts, typed: code, severity and count, so the seam can route them. `notes`
   // keeps every string exactly as before (the failure path joins it, the acceptance reads it).
   const statements: PlanStatement[] = [];
+  // #1160 — A RELEASE TAB CLAMPED TO THE PART'S OWN THICKNESS IS STATED, once, with both numbers:
+  // the shop's tab is taller than the part, and the plan cut the tallest tab that fits under the
+  // stock top. Only when the contour actually ran (the op carries the clamp), so a chain without
+  // the freeing cut says nothing about tabs it never cut.
+  {
+    const clamped = ops.find((op) => op.kind === 'contour' && op.outcome.clampedTabHeightMm !== undefined)?.outcome
+      .clampedTabHeightMm;
+    if (clamped !== undefined) {
+      const mm = (v: number): string => String(Number(v.toFixed(3)));
+      notes.push(
+        `release tabs set to the part's full ${mm(clamped.cut)} mm height; the shop's ${mm(clamped.wanted)} mm tab is taller than the part`,
+      );
+    }
+  }
   // #943 (10) — no material stands outside the goal: the plan states it rather than leaving the
   // operator to notice a contour program is missing.
   if (outlineIsStock && !tree.contour.synthetic) {
