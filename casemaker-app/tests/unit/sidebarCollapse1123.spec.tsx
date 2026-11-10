@@ -84,6 +84,26 @@ describe('#1123-47 the left rail collapses to its icons', () => {
     expect(localStorage.getItem(SIDEBAR_LS_KEY)).toBe('false');
   });
 
+  it('two readers — the rail and the shell that sizes the column — share one collapse state', () => {
+    // #1123-47 e2e review: AppShell sets `--sidebar-width` from its own call of the hook while the
+    // rail paints from another. One external store, so a write in either reaches both.
+    render(
+      <>
+        <Sidebar />
+        <Sidebar />
+      </>,
+    );
+    fireEvent.click(screen.getAllByTestId('sidebar-collapse')[0]!);
+    for (const railEl of screen.getAllByTestId('sidebar')) {
+      expect(railEl.className).toContain('sidebar--icons');
+    }
+    expect(screen.getAllByTestId('sidebar-collapse')[1]!.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(screen.getAllByTestId('machine-pin-collapsed')[1]!);
+    for (const railEl of screen.getAllByTestId('sidebar')) {
+      expect(railEl.className).not.toContain('sidebar--icons');
+    }
+  });
+
   it('the phone drawer keeps its own handle and has no collapse control', () => {
     setWidth(390);
     render(<Sidebar />);
