@@ -309,7 +309,7 @@ describe('#280/#682 — step 1, the machine check', () => {
     render(<StartWizard />);
 
     await waitForState('error');
-    expect(screen.getByTestId('start-wizard-machine-state').textContent).toContain('Not answering');
+    expect(screen.getByTestId('start-wizard-machine-state').textContent).toContain('Offline');
     const reason = screen.getByTestId('start-wizard-machine-reason').textContent ?? '';
     expect(reason).toContain('udp: bind failed');
     // #726 W24 — the sentence is printed ONCE ("The search failed: the search failed: …" was the

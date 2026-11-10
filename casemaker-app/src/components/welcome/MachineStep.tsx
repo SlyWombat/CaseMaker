@@ -193,7 +193,8 @@ export function MachineStep({
     found && machine !== null && machine.status !== null
       ? readMachineRest(machine.status)?.homed === true
       : false;
-  const word = found ? `Online · ${wordBase}${homed ? ' · homed' : ''}` : wordBase;
+  // #1109 — `homed` is the spec's word; the operator reads what it means.
+  const word = found ? `Online · ${wordBase}${homed ? ' · knows where it is' : ''}` : wordBase;
   const checked = found ? timeOfDay(machine.observedAt) : null;
 
   // Last seen belongs to the machine this line is about. When a house record exists, another
@@ -286,7 +287,7 @@ export function MachineStep({
           {found && route !== null && (
             <p style={NOTE} data-testid="start-wizard-machine-route">
               {route === 'recorded'
-                ? 'Reached at its recorded address — the network search heard nothing, which is normal for a server that cannot receive broadcasts.'
+                ? 'Found at the address you wrote — the network search heard nothing, which is normal for a server that cannot receive broadcasts.'
                 : route === 'network'
                   ? 'Found on the network.'
                   : 'Reached at the address you gave.'}

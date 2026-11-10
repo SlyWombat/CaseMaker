@@ -14,12 +14,14 @@ export function stateWord(
   registrationActive: boolean,
   heartbeatReachable: boolean | null,
 ): string {
-  if (state === null) return heartbeatReachable === false ? 'Offline' : 'Not answering';
+  // #1109 — one word for "not answering": `Offline`, and where the check could not reach it at
+  // all, the reason in the same breath.
+  if (state === null) return heartbeatReachable === false ? 'Offline' : 'Offline — no answer on the network';
   switch (state) {
     case 'Idle':
       return 'Idle';
     case 'Home':
-      return 'Homing';
+      return 'Homing (finding its rest)';
     case 'Run':
       return registrationActive ? 'Probing' : 'Running';
     case 'Alarm':
@@ -29,7 +31,7 @@ export function stateWord(
       return 'Paused';
     // #655 — the firmware's Tool state (after `T<n> M6`, an `M490.2` away from running on).
     case 'Tool':
-      return 'Waiting for the cutter';
+      return 'Waiting for a cutter';
     default:
       return state;
   }
@@ -44,11 +46,11 @@ export function stateColour(word: string): string {
     case 'Probing':
       return '#4a9eff';
     case 'Paused':
-    case 'Homing':
       return '#e0a020';
     case 'Alarm':
       return '#e05252';
     default:
-      return '#7a8794';
+      // "Homing (finding its rest)" is the same state with its gloss (#1109).
+      return word.startsWith('Homing') ? '#e0a020' : '#7a8794';
   }
 }
