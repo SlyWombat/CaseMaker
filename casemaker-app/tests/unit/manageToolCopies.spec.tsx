@@ -37,7 +37,9 @@ beforeEach(() => {
       unreadableMachines: [],
       machines: [{
         id: 'm-1', profileId: 'Z1', name: 'Makera_Z1_000000', nickname: null, serial: null, firmware: null, address: null,
-        calibration: null, fixtures: null, margins: null, power: null, wasteboard: null, finishedPrograms: [], updatedAt: 'x',
+        calibration: null, fixtures: null, margins: null, power: null, wasteboard: null, finishedPrograms: [],
+        // #1179 — the schema's finished-run records (default []); the literal must state it.
+        finishedRuns: [], updatedAt: 'x',
       }],
     },
   });

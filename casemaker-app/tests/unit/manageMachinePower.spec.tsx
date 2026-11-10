@@ -58,6 +58,8 @@ const MACHINE: MachineRecord = {
   power: { provider: 'home-assistant', baseUrl: 'http://ha.local:8123', entityId: 'switch.makera_cnc' },
   wasteboard: null,
   finishedPrograms: [],
+  // #1179 — the schema's finished-run records (default []); the literal must state it.
+  finishedRuns: [],
   updatedAt: '2026-10-15T00:00:00.000Z',
 };
 
