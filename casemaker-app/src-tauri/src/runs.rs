@@ -688,10 +688,23 @@ impl Runs {
         let stdout = child.stdout.take();
         let runs_for_stderr = Arc::clone(self);
         let id_for_stderr = id.to_owned();
+        // The child's whole stderr, beside its job in the scratch dir: a failed run's log is what
+        // says WHY, and the progress frames alone are not it (they are the last line, not the
+        // sequence). Kept for the retention window like everything else under the run.
+        let stderr_log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("stderr.log"))
+            .ok();
         let stderr_task = tokio::spawn(async move {
             let Some(stderr) = stderr else { return };
+            let mut log = stderr_log;
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(file) = log.as_mut() {
+                    use std::io::Write;
+                    let _ = writeln!(file, "{line}");
+                }
                 if let Some(event) = parse_progress_line(&line) {
                     runs_for_stderr.publish(&id_for_stderr, event);
                 }
