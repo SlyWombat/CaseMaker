@@ -126,6 +126,14 @@ export interface FakeConsoleOptions {
   /** #1169 — the controller raises an alarm when the run reaches this line: the reply carries
    *  `ALARM:` and the run ends. */
   alarmAtLine?: number;
+  /**
+   * #1187 — THE LINK DIES. When the app writes this exact line, THAT session's reads start failing
+   * with the Rust relay's own words ('read failed: Connection reset by peer (os error 104)'): the
+   * write went out, the answer never came. Per session, so the shared status poller (which only
+   * ever writes `?`) is untouched; `M491` is a line only a registration sends, which is what makes
+   * the reset land on the registration's press.
+   */
+  resetAfterWrite?: string;
 }
 
 /**
@@ -172,7 +180,7 @@ export interface FakeConsole {
 export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = {}): Promise<FakeConsole> {
   const steps = opts.steps ?? 12;
   const seen: string[] = [];
-  const conns = new Map<number, { out: number[]; in: number[] }>();
+  const conns = new Map<number, { out: number[]; in: number[]; dead?: boolean }>();
   let nextConn = 1;
   let phase: 'idle' | 'running' | 'paused' | 'stopped' | 'done' = 'idle';
   // #1173A — the machine page's four states, forced by a spec. `idle` lets the scripted program
@@ -434,12 +442,23 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
           const lineText = type === PTYPE_CTRL_SINGLE ? '?' : text;
           seen.push(lineText.trim());
           session.out.push(...replyFor(lineText));
+          // #1187 — the link dies after this line: the reply above will never be read.
+          if (opts.resetAfterWrite !== undefined && lineText.trim() === opts.resetAfterWrite) {
+            session.dead = true;
+            session.out.length = 0;
+          }
         }
       }
       return route.fulfill({ status: 204, body: '' });
     }
     if (tail === 'tcp/read') {
       const session = body.conn === undefined ? undefined : conns.get(body.conn);
+      if (session?.dead === true) {
+        return route.fulfill({
+          status: 500,
+          json: { error: 'read failed: Connection reset by peer (os error 104)' },
+        });
+      }
       if (session === undefined || session.out.length === 0) {
         // The client's read window: an empty answer is "nothing yet", not an error.
         await new Promise((resolve) => setTimeout(resolve, 40));

@@ -25,7 +25,7 @@ import {
 } from '@/platform/flightRecorder';
 import { BUILD_TARGET } from '@/platform/capabilities';
 import { readDesktopCrashLog } from '@/platform/desktop/crashLog';
-import { houseSendCrashReport, probeHouse, type CrashSend } from '@/platform/houseClient';
+import { houseSendCrashReport, houseSendFailureWords, probeHouse, type CrashSend } from '@/platform/houseClient';
 import { getMeshBlob } from '@/platform/meshBlobs';
 import { saveText } from '@/engine/exportTrigger';
 
@@ -67,6 +67,66 @@ let probeIO: ProbeIO = REAL_PROBE;
 /** Spec seam: replace the house probe. `null` restores the real one. */
 export function setCrashProbeIO(fn: ProbeIO | null): void {
   probeIO = fn ?? REAL_PROBE;
+}
+
+/**
+ * #1187 — OFFERED ONCE. A report the operator sent or dismissed is remembered against the SESSION
+ * it describes (the marker's id), so the next load does not offer it again: on 2026-11-10 a report
+ * of the 11-09 crash was offered after an 11-10 Register stop and sent a second time, because
+ * nothing outlived the load that had already dealt with it.
+ */
+export type ReportLedgerState = 'sent' | 'dismissed';
+export interface ReportLedgerEntry {
+  state: ReportLedgerState;
+  /** When the operator dealt with it, ISO 8601. */
+  at: string;
+  /** Where it went, when it was sent: the house path the service answered with. */
+  where?: string;
+}
+/** The ledger seam (localStorage by default), injectable so a spec runs without a browser. */
+export interface ReportLedgerIO {
+  read(): Record<string, ReportLedgerEntry>;
+  write(entries: Record<string, ReportLedgerEntry>): void;
+}
+const LEDGER_KEY = 'casemaker.flight.reports.v1';
+const REAL_LEDGER: ReportLedgerIO = {
+  read() {
+    try {
+      if (typeof localStorage === 'undefined') return {};
+      const raw = localStorage.getItem(LEDGER_KEY);
+      if (raw === null) return {};
+      const parsed: unknown = JSON.parse(raw);
+      return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, ReportLedgerEntry>) : {};
+    } catch {
+      return {};
+    }
+  },
+  write(entries) {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      localStorage.setItem(LEDGER_KEY, JSON.stringify(entries));
+    } catch {
+      // A recorder that cannot record must not break the app it watches (the recorder's own rule).
+    }
+  },
+};
+let ledgerIO: ReportLedgerIO = REAL_LEDGER;
+/** Spec seam: replace the ledger store. `null` restores the real one. */
+export function setReportLedgerIO(io: ReportLedgerIO | null): void {
+  ledgerIO = io ?? REAL_LEDGER;
+}
+
+/** Whether this marker's report was already sent or dismissed, and how — null when it was not. */
+export function reportAlreadyHandled(markerId: string): ReportLedgerEntry | null {
+  return ledgerIO.read()[markerId] ?? null;
+}
+
+/** Deal with a marker's report once: remembered, so a later load does not offer it again. */
+function markReportHandled(markerId: string, entry: ReportLedgerEntry): void {
+  // A sent report stays sent: the banner's own leave-after-confirmation is not a second, weaker act.
+  if (entry.state === 'dismissed' && ledgerIO.read()[markerId]?.state === 'sent') return;
+  const all = ledgerIO.read();
+  ledgerIO.write({ ...all, [markerId]: entry });
 }
 
 export interface FlightRecorderStoreState {
@@ -115,6 +175,10 @@ function dismissAfterConfirmation(): void {
   if (dismissTimer !== null) clearTimeout(dismissTimer);
   dismissTimer = setTimeout(() => {
     dismissTimer = null;
+    // #1187 — the report was dealt with (saved or sent): the banner's own leaving is a dismissal
+    // for the once-only ledger, so a later load does not offer the same session's report again.
+    const previous = useFlightRecorderStore.getState().previous;
+    if (previous !== null) markReportHandled(previous.marker.id, { state: 'dismissed', at: new Date().toISOString() });
     useFlightRecorderStore.setState({ dismissed: true });
   }, CRASH_BANNER_CONFIRM_MS);
 }
@@ -124,17 +188,7 @@ function cancelPendingDismiss(): void {
   dismissTimer = null;
 }
 
-/** The service's refusal in one sentence, whichever failure shape it arrived as. */
-function sendFailureWords(answer: Exclude<CrashSend, { kind: 'ok' }>): string {
-  switch (answer.kind) {
-    case 'absent':
-      return `no house service answered (${answer.reason})`;
-    case 'refused':
-      return `the house service refused it: ${answer.message}`;
-    case 'error':
-      return `the send failed: ${answer.detail}`;
-  }
-}
+/** #1187 — the words moved to the house client so a stop report words the same failure the same way. */
 
 /** The report for the previous session, with the meshes only when asked. */
 export async function crashReportFor(
@@ -187,6 +241,8 @@ export const useFlightRecorderStore = create<FlightRecorderStoreState>()((set, g
         commit: typeof __BUILD_COMMIT__ === 'string' ? __BUILD_COMMIT__ : null,
       });
       if (previous !== null) {
+        // #1187 — a report already sent or dismissed for this session is not offered again.
+        if (reportAlreadyHandled(previous.marker.id) !== null) return;
         set({ previous, moment: crashMoment(previous) });
         // The send half is offered only where a house service answered — and only when there is a
         // report to send. A web build with no service simply never shows the button.
@@ -200,6 +256,9 @@ export const useFlightRecorderStore = create<FlightRecorderStoreState>()((set, g
 
   dismiss: () => {
     cancelPendingDismiss();
+    // #1187 — dismissed once means dismissed: the next load does not raise the same report again.
+    const previous = get().previous;
+    if (previous !== null) markReportHandled(previous.marker.id, { state: 'dismissed', at: new Date().toISOString() });
     set({ dismissed: true });
   },
 
@@ -227,11 +286,14 @@ export const useFlightRecorderStore = create<FlightRecorderStoreState>()((set, g
       const report = await crashReportFor(previous, includeMeshes);
       const answer = await sendIO(report);
       if (answer.kind === 'ok') {
+        // #1187 — SENT IS SENT: remembered against the session it describes, so no later load
+        // offers the same report for sending a second time.
+        markReportHandled(previous.marker.id, { state: 'sent', at: new Date().toISOString(), where: answer.path });
         set({ sending: false, sent: answer.path });
         // #890 — the house has it: the confirmation line shows, and then the banner leaves.
         dismissAfterConfirmation();
       } else {
-        set({ sending: false, sendError: sendFailureWords(answer) });
+        set({ sending: false, sendError: houseSendFailureWords(answer) });
       }
     } catch (e) {
       set({ sending: false, sendError: e instanceof Error ? e.message : String(e) });
@@ -242,6 +304,7 @@ export const useFlightRecorderStore = create<FlightRecorderStoreState>()((set, g
 /** Forget the store between specs (the recorder's own state has its own reset). */
 export function __resetFlightRecorderStoreForTests(): void {
   saveIO = FILE_SAVE;
+  ledgerIO = REAL_LEDGER;
   cancelPendingDismiss();
   useFlightRecorderStore.setState({
     previous: null,
