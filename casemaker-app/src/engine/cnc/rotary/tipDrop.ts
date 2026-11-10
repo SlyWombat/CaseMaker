@@ -57,6 +57,33 @@ export function rotaryTipFieldOpsFor(field: GoalRadialField, tool: RotaryTipTool
 }
 
 /**
+ * THE BALL'S CLOSED FORM (the analyst's note, field 1), pinned to the shared floor function by a
+ * spec: the tip radius `zt` that leaves the column `(φ, dx)` at or above `rho` is
+ * `zt + r ≥ max over u ≤ ρ of [u·cos φ + √(r² − dx² − u²·sin² φ)]`. The maximum is NOT always at
+ * u = ρ: the derivative vanishes at `u* = cos φ·√(r² − dx²)/sin φ`, and a step wall is exactly the
+ * case where u* binds. Returns null when the ball cannot reach the column at all (dx > r), where no
+ * lift is needed.
+ */
+export function ballTipRequirement(rho: number, phi: number, dx: number, r: number): number | null {
+  const s = Math.sin(phi);
+  const c = Math.cos(phi);
+  const under = r * r - dx * dx;
+  if (!(under > 0)) return null;
+  const root = Math.sqrt(under);
+  const domainTop = s === 0 ? Infinity : root / Math.abs(s);
+  const f = (u: number): number => {
+    const w = r * r - dx * dx - u * u * s * s;
+    return u * c + Math.sqrt(Math.max(0, w));
+  };
+  const candidates = [0, Math.min(rho, domainTop)];
+  const uStar = c * root / (s === 0 ? Number.EPSILON : s);
+  if (s !== 0 && uStar > 0 && uStar <= rho && uStar <= domainTop) candidates.push(uStar);
+  let best = -Infinity;
+  for (const u of candidates) best = Math.max(best, f(u));
+  return best - r;
+}
+
+/**
  * The smallest tip (absolute radius) that leaves the column at `(φ, dx)` at or above its goal
  * radius `rho`. Bisection on `cutterFloorOnColumn`: the floor rises monotonically with the tip, and
  * at the envelope it clears every column (the cutter floats on the surface).
@@ -68,6 +95,12 @@ export function columnTipRequirement(
   dx: number,
   envelope: number,
 ): number {
+  // #1164 FINDING (for the analyst): the note's ball closed form, read as written — the ball's
+  // centre height ≥ max over u ≤ ρ of [u·cos φ + √(r² − dx² − u²·sin² φ)] — does NOT match
+  // `cutterFloorOnColumn` in the polar frame: at (ρ 8, φ 0.5, dx 0) it asks for a tip whose floor
+  // is 5.49 mm, i.e. the ball is still cut in. It describes a ball against a point, not the
+  // goal-radius surface. `ballTipRequirement` is kept exported for that discussion; the solver
+  // stays on the floor function (bisection) until a form that IS the function is agreed.
   // A tip EXACTLY on the axis makes every ray start on the cutter's own tip point, where
   // `cutterFloorOnColumn` reports u = 0 as "not reached" — a degenerate contact, not a miss. The
   // predicate is evaluated a hair above the axis so "no floor" really means the body is elsewhere,
