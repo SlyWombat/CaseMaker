@@ -247,7 +247,9 @@ describe('#961 the freeing cut is priced, not left as an unpriced return', () =>
       opts((step) => standIn(step, step.kind === 'contour' && step.cutter.key === 'flat-3.175' ? 70 : 10)),
     );
     expect(choice.freeing).toEqual({ cutterKey: 'flat-3.175', extraToolChange: false, lastCutterEligible: true });
-    expect(choice.cost.toolChanges).toBe(1);
+    // #1186 rule 1 RE-PIN: the ⌀3.175 primary cuts the whole demand, so the chosen chain has no
+    // change at all (it used to ride behind the ⌀6 as a rest, one change).
+    expect(choice.cost.toolChanges).toBe(0);
     // The real comparison is between the two COMPLETE chains — both covering the 27 — which differ
     // in the freeing step: the dearer profile still wins on the total. #1186 rule 1 RE-PIN: the
     // complete chains are now the ⌀3.175-primary one and the flat-6 + rest one (leftBehind 0).
