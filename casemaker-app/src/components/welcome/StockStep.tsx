@@ -9,14 +9,17 @@
 
 import type { JSX } from 'react';
 import { StartStockStep, type PendingStock, type StartStockSeed } from './StartStockStep';
+import type { PartFootprint } from './workShape';
 
 export interface StockStepProps {
   /** The job's own stock when the step is re-opened to edit it (#681). */
   seed?: StartStockSeed;
   /** The answer, or null when there is none. No form blocks since #713: a long rod is the rotary's. */
   onPending: (pending: PendingStock | null) => void;
+  /** #1099 — the part drawn on the blank. */
+  part?: PartFootprint | null;
 }
 
-export function StockStep({ seed, onPending }: StockStepProps): JSX.Element {
-  return <StartStockStep onChange={onPending} seed={seed} />;
+export function StockStep({ seed, onPending, part = null }: StockStepProps): JSX.Element {
+  return <StartStockStep onChange={onPending} seed={seed} part={part} />;
 }

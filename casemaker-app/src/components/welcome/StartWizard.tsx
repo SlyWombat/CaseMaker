@@ -51,7 +51,7 @@ import { OperationStep, type OperationChoice } from './OperationStep';
 import { operationCreateBlocked } from './operationCreate';
 import type { PendingStock, StartStockSeed } from './StartStockStep';
 import { proposeStock, type StockProposal } from '@/engine/cnc/stockProposal';
-import { proposedMaterialFor, proposedStockFor, workShapeFor } from './workShape';
+import { partFootprintFor, proposedMaterialFor, proposedStockFor, workShapeFor } from './workShape';
 
 /**
  * #681 — the ONE cutting-job wizard.
@@ -957,7 +957,7 @@ export function StartWizard(): JSX.Element {
 
       {step === 'stock' && (
         <>
-          <StockStep seed={stockSeed} onPending={onStockPending} />
+          <StockStep seed={stockSeed} onPending={onStockPending} part={partFootprintFor(work)} />
           {startError !== null && (
             <p style={{ ...MUTED, color: '#f0b4ad' }} data-testid="start-wizard-start-error">
               {startError}
@@ -976,6 +976,7 @@ export function StartWizard(): JSX.Element {
           onHold={applyStockHold}
           onMoveItemsToTop={applyMoveItemsToTop}
           onMountBlocked={setMountBlocked}
+          part={partFootprintFor(work)}
         />
       )}
 

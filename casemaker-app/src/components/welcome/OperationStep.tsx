@@ -17,18 +17,21 @@
  * exit.
  */
 
-import { useLayoutEffect, useState, type CSSProperties, type JSX } from 'react';
+import { useLayoutEffect, useMemo, useState, type CSSProperties, type JSX } from 'react';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/engraveJobStore';
 import type { PcbAlignmentOffer } from '@/engine/import/pcbAlignment';
 import { pcbReHoldNote } from '@/engine/import/pcbHold';
 import { readGoalObjectFile } from '@/engine/import/targetObject';
+import { proposeStock } from '@/engine/cnc/stockProposal';
 import { FontPicker } from '@/components/panels/FontPicker';
 import { OperationPicker } from '@/components/panels/OperationPicker';
 import { SELECTED_FILL, useSelectionChipGrid } from '@/components/selectionChip';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { RotaryOperationPicker } from './RotaryOperationPicker';
 import { WizardFileField } from './WizardFileField';
+import { WizardThumbnail } from './WizardThumbnail';
+import { workShapeFor } from './workShape';
 import { operationCreateBlocked } from './operationCreate';
 import { isSideGoal, jobHasItems, jobSetups, jobTargetObjects, jobTool, sideSetupIdOf } from '@/engine/cnc/engrave/jobSetup';
 import { defaultFaceOperation } from '@/engine/cnc/rotary/faceOps';
@@ -327,6 +330,17 @@ export function OperationStep({
     (rotary ? rotaryPicked === 'engrave' : picked === 'engrave') &&
     text.trim() === '';
   const reportedChoice = untouchedEngrave ? null : choice;
+  // #1099 — the blank this file will be cut from, stated under its thumbnail. The Stock step
+  // still carries the full provenance sentence; this is the promise of the numbers to come.
+  const proposalSentence = useMemo(() => {
+    if (reportedChoice === null) return null;
+    const proposal = proposeStock(workShapeFor(reportedChoice, job));
+    if (proposal === null) return null;
+    const n = (v: number): string => String(Number(v.toFixed(2)));
+    return `Will cut on a ${n(proposal.length)} × ${n(proposal.width)} × ${n(proposal.thickness)} mm ${
+      proposal.form === 'plate' ? 'plate' : proposal.form
+    } — change on the next step.`;
+  }, [reportedChoice, job]);
   const unblock = operationCreateBlocked(reportedChoice);
   // #874 — the sentence names the FIELD it is about, so it renders in that chip's own field box,
   // directly under the field, never at the foot of the step 300 px away from the Text input.
@@ -704,6 +718,18 @@ export function OperationStep({
                 : { name: surfaceFileName, fact: surface === null ? null : boxFact(surface.size) }
             }
             error={surfaceError}
+            thumbnail={
+              surface !== null && surface.data !== undefined ? (
+                <WizardThumbnail
+                  source={
+                    surface.format === 'png'
+                      ? { kind: 'picture', name: surface.name, data: surface.data, size: surface.size }
+                      : { kind: 'mesh', name: surface.name, data: surface.data, size: surface.size }
+                  }
+                  sentence={proposalSentence}
+                />
+              ) : undefined
+            }
             onFiles={(files) => {
               const file = files[0];
               if (file !== undefined) void chooseGoal(file);

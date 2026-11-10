@@ -89,6 +89,32 @@ export function proposedMaterialFor(
   return untouchedDemo ? WORK_STOCK_MATERIAL : job.stock.material;
 }
 
+/**
+ * #1099 — THE PART'S FOOTPRINT, in the terms the blanks' drawings use. One reading from the
+ * question's answer, so the thumbnail, the Stock step's blank and the Holding top view all draw
+ * the same part rather than three near-copies of it.
+ */
+export interface PartFootprint {
+  kind: 'mesh' | 'outline' | 'text' | 'pcb';
+  length: number;
+  width: number;
+  /** How far it stands above the blank's top (a mesh's Z, a line's depth); null when none. */
+  height: number | null;
+}
+
+export function partFootprintFor(work: WorkShape): PartFootprint | null {
+  switch (work.kind) {
+    case 'mesh':
+      return { kind: 'mesh', length: work.size.x, width: work.size.y, height: work.size.z };
+    case 'text':
+      return { kind: 'text', length: work.size.length, width: work.size.width, height: work.depth };
+    case 'pcb':
+      return { kind: 'pcb', length: work.outline.length, width: work.outline.width, height: null };
+    default:
+      return null;
+  }
+}
+
 /** What this step's answer is, for the stock proposal. */
 export function workShapeFor(choice: OperationChoice | null, job: EngraveJob): WorkShape {
   if (choice === null) return { kind: 'none' };

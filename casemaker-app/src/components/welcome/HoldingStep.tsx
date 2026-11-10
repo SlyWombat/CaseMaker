@@ -124,6 +124,7 @@ import {
   type MountOption,
   type PictureRect,
 } from './holdingMounts';
+import type { PartFootprint } from './workShape';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
@@ -201,6 +202,7 @@ export function HoldingPicture({
   bed = null,
   checks = [],
   rotary = null,
+  part = null,
 }: {
   mount?: HoldingMount;
   stock: { length: number; width: number; thickness: number };
@@ -217,6 +219,8 @@ export function HoldingPicture({
   checks?: readonly { severity: 'error' | 'warning' | 'info'; text: string }[];
   /** #714 — the chuck and the rod, for the front view. */
   rotary?: RotaryPicture | null;
+  /** #1099 — the part's footprint inside the blank. */
+  part?: PartFootprint | null;
 }): JSX.Element {
   const mechanism = mechanismOf(mount);
   const round = form === 'disc' || form === 'rod';
@@ -331,7 +335,7 @@ export function HoldingPicture({
           </marker>
         </defs>
         {mechanism === 'vise' ? (
-          <ViseTopView stock={stock} round={round} mount={mount} dims={dims} />
+          <ViseTopView stock={stock} round={round} mount={mount} dims={dims} part={part} />
         ) : (
           <RotaryFrontView
             rotary={
@@ -380,11 +384,14 @@ function ViseTopView({
   round,
   mount,
   dims,
+  part = null,
 }: {
   stock: { length: number; width: number; thickness: number };
   round: boolean;
   mount: HoldingMount;
   dims: string;
+  /** #1099 — the part's footprint, drawn inside the blank. */
+  part?: PartFootprint | null;
 }): JSX.Element {
   const W = 240;
   const H = 150;
@@ -466,6 +473,20 @@ function ViseTopView({
           fill="#1e3a4a"
           stroke="#6aa6c9"
           strokeWidth="1.5"
+        />
+      )}
+      {/* #1099 — THE PART IN THE BLANK: the same footprint step 2's thumbnail and step 3's blank
+          draw, here so the operator sees what is held, not only the blank that holds it. */}
+      {part != null && !round && (
+        <rect
+          data-testid="engrave-setup-holding-part-footprint"
+          x={X((opening - part.length) / 2)}
+          y={Y(stockY + (barLength - part.width) / 2)}
+          width={Math.max(0.5, part.length * scale)}
+          height={Math.max(0.5, part.width * scale)}
+          fill="rgba(240, 217, 181, 0.28)"
+          stroke="#f0d9b5"
+          strokeWidth="1.2"
         />
       )}
       <text
@@ -1387,6 +1408,8 @@ export interface HoldingStepProps {
    * Create still lands a job in it.
    */
   onMountBlocked?: (reason: string | null) => void;
+  /** #1099 — the part drawn in the blank's top view, so every step shows the same work. */
+  part?: PartFootprint | null;
 }
 
 /** The answers with a board under the part, or none — the bed's own field, as the design writes it. */
@@ -1512,6 +1535,7 @@ export function HoldingStep({
   onHold,
   onMoveItemsToTop,
   onMountBlocked,
+  part = null,
 }: HoldingStepProps): JSX.Element {
   const location = useLocationStore((s) => s.location);
   // #730 — the JOB's machine (its `machineId` names a profile id), not the house's first: the
@@ -2663,6 +2687,7 @@ export function HoldingStep({
               bed={isBedMount(drawnMount) ? bedPicture : null}
               checks={bedChecks}
               rotary={drawnMount === 'rotary' ? rotaryPicture : null}
+              part={part}
             />
           </div>
           {narrow && (
