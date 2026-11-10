@@ -270,10 +270,52 @@ export function validateSacrificial(job: EngraveJob): JobFinding[] {
     findings.push({
       severity: 'warning',
       code: 'sacrificial-default',
-      message:
-        'Sacrificial dimensions: shipped defaults. Check the cut depth onto them before cutting.',
+      message: sacrificialDefaultSentence(s, T),
     });
   }
 
   return findings;
+}
+
+/** "A", "A and B", "A, B and C" — the list form the operator sentences already use. */
+function listWords(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? '';
+  return `${items.slice(0, -1).join(', ')} and ${items.at(-1)!}`;
+}
+
+/** A millimetre figure the way the rest of the wording prints it: at most 3 decimals, no zeros. */
+function mm(n: number): string {
+  return String(Number(n.toFixed(3)));
+}
+
+/**
+ * #1123 item 56(c) — THE SHIPPED SACRIFICIAL SIZES, NAMED, WITH WHERE TO MEASURE THEM.
+ *
+ * "Sacrificial dimensions: shipped defaults. Check the cut depth onto them before cutting." told
+ * the operator that a number was unmeasured without saying which number, what it was, or where to
+ * look. The row is a Check, so it names each piece and its size as the model has it — a strip by
+ * its thickness and its top against the blank's, the under-board by its thickness — and says
+ * where those pieces are on the machine, so the person can measure them and enter their own.
+ */
+export function sacrificialDefaultSentence(s: Sacrificial, partThickness: Mm): string {
+  const sizes: string[] = [];
+  const strips: string[] = [];
+  for (const pos of ['left', 'right', 'front', 'back'] as const) {
+    const side = s.sides[pos];
+    if (side === null) continue;
+    strips.push(pos);
+    sizes.push(
+      side.height === 'flush'
+        ? `the ${pos} strip ${mm(side.thickness)} mm thick, its top flush with the blank's`
+        : `the ${pos} strip ${mm(side.thickness)} mm thick, ${mm(stripHeight(side, partThickness))} mm tall`,
+    );
+  }
+  if (s.under !== null) sizes.push(`the board under the blank ${mm(s.under.thickness)} mm thick`);
+  const where: string[] = [];
+  if (strips.length > 0) where.push('the strips beside the blank');
+  if (s.under !== null) where.push('the board under the blank');
+  return (
+    `The sacrificial sizes are the shipped defaults: ${listWords(sizes)}. ` +
+    `Measure ${listWords(where)}, then enter your own sizes.`
+  );
 }

@@ -168,13 +168,29 @@ describe('validateSacrificial (#213)', () => {
     expect(validateSacrificial(defaultEngraveJob()).some((x) => x.code === 'sacrificial-default')).toBe(false);
   });
 
-  it('warns about default provenance when material is present', () => {
+  it('warns about default provenance when material is present, naming the sizes and where to measure', () => {
     const job = withSacrificial(defaultEngraveJob(), {
       ...noneSacrificial(),
       sides: { ...noneSacrificial().sides, left: { thickness: 6, height: 'flush' } },
     });
     expect(job.sacrificial.source).toBe('default');
-    expect(validateSacrificial(job).some((x) => x.code === 'sacrificial-default')).toBe(true);
+    const finding = validateSacrificial(job).find((x) => x.code === 'sacrificial-default');
+    expect(finding, 'the default-provenance warning is gone').toBeDefined();
+    // #1123 item 56(c) — the sentence says WHICH sizes are the shipped defaults and WHERE to
+    // measure them, so the operator can act on it instead of reading a provenance note.
+    expect(finding!.message).toContain('the left strip 6 mm thick');
+    expect(finding!.message).toContain('Measure the strips beside the blank');
+    expect(finding!.message).toContain('enter your own sizes');
+  });
+
+  it('names the board under the blank in the same sentence', () => {
+    const job = withSacrificial(defaultEngraveJob(), {
+      ...noneSacrificial(),
+      under: { thickness: 12, overhang: { left: 0, right: 0, front: 0, back: 0 }, attach: 'tape' },
+    });
+    const finding = validateSacrificial(job).find((x) => x.code === 'sacrificial-default');
+    expect(finding!.message).toContain('the board under the blank 12 mm thick');
+    expect(finding!.message).toContain('Measure the board under the blank');
   });
 
   it('is surfaced through validateJob', () => {

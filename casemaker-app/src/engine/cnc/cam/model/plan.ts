@@ -55,6 +55,7 @@ import { roughLeftAbove } from './ops/rough';
 import { clSurface, creaseFits , type ClGridEntry } from './clsurface';
 import { dropCutterHeight, profileOf, type CutterProfile, type DropCutterMesh } from './dropcutter';
 import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
+import { fixtureUnmodelledSentence } from './statedGaps';
 
 /**
  * #965/#898 part 2 — THE FRAME-FLIP ALGEBRA, isolated from feature recognition's own
@@ -2606,7 +2607,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       }
     }
     if (input.fixture.envelope !== null) {
-      const text = `the ${input.fixture.mount} fixture envelope is not one of this plan's own region obstacles — the posted program is checked against it by the verifier and the sweep`;
+      // #1123 item 56(b) — the Check says what to check and where, not what the software does.
+      const text = fixtureUnmodelledSentence(input.fixture.mount);
       notes.push(text);
       statements.push({ severity: 'warning', code: 'goal-fixture-unmodelled', count: 1, text });
     }
