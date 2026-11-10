@@ -1375,6 +1375,8 @@ export function EngraveCutSurface({
       changeMachine: changeMachineForMount,
       openCutters: () => onOpenCutters?.(),
       showClearance: () => revealClearanceStatement(),
+      // #1123 item 56(a) — "Set their feeds" lands on the house's feeds table, not the cutter list.
+      openFeeds: () => useManageModeStore.getState().openFeeds(),
     });
   };
 

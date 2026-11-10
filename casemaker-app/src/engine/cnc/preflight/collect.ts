@@ -201,6 +201,9 @@ export function collect(input: PreflightInput): PreflightRow[] {
         cause: causeFor(scope, { labelId: row.finding.labelId }),
         // #1128 — the feeds-proxy fact rides through untouched: the Cut step's band split needs it.
         ...(row.finding.feedsProxyMm === undefined ? {} : { feedsProxyMm: row.finding.feedsProxyMm }),
+        // #1186 rule 4 / #1123 item 56(a) — the borrow's minutes travel too: the Do row reads the
+        // number, never the sentence.
+        ...(row.finding.borrowedMinutes === undefined ? {} : { borrowedMinutes: row.finding.borrowedMinutes }),
       });
     }
   }

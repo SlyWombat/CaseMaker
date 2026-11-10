@@ -314,4 +314,29 @@ describe('preflightHub: the page order and the first block', () => {
     expect(report.warningCount).toBeGreaterThanOrEqual(1);
     expect(report.firstBlocking).toBeNull();
   });
+
+  it('#1123-56a — the borrowed row’s typed facts reach the gate untouched', () => {
+    const job = dj();
+    const nc = 'G90 G21\n';
+    const message =
+      "the ⌀ 6 mm flats have no feed of their own for hardwood and cut at the 3.2 mm row's slower feed and step-down — about 27 min of this plan";
+    const generated = generatedWith({
+      nc,
+      programs: [program(1, job.toolKey, nc)],
+      findings: [
+        {
+          severity: 'warning',
+          code: 'goal-cutter-substituted',
+          message,
+          feedsProxyMm: 3.2,
+          borrowedMinutes: 27,
+        },
+      ],
+    });
+    const row = hubFor(job, { generated }).rows.find((r) => r.code === 'goal-cutter-substituted');
+    expect(row, 'the borrowed row is not on the gate').toBeDefined();
+    expect(row!.message).toBe(message);
+    expect(row!.feedsProxyMm).toBe(3.2);
+    expect(row!.borrowedMinutes).toBe(27);
+  });
 });

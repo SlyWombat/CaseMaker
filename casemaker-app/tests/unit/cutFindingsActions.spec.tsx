@@ -44,6 +44,17 @@ const ROWS: PreflightRow[] = [
   row(0, 'error', 'through-needs-board', 'A through cut needs a sacrificial board under the blank.'),
   row(0, 'warning', 'sacrificial-default', 'The sacrificial defaults were used: 3 mm under the blank.'),
   row(0, 'info', 'goal-unreached', 'goal check: 57.5 % of the goal is reached.'),
+  // #1123-56a — #1186 rule 4's one borrowed-feeds row carries an in-app act: the feeds table.
+  {
+    ...row(
+      0,
+      'warning',
+      'goal-cutter-substituted',
+      "the ⌀ 6 mm flats have no feed of their own for hardwood and cut at the 3.2 mm row's slower feed and step-down — about 27 min of this plan",
+    ),
+    feedsProxyMm: 3.2,
+    borrowedMinutes: 27,
+  },
 ];
 
 function reportOf(rows: PreflightRow[]): PreflightHubReport {
@@ -65,9 +76,10 @@ describe('#1128 follow-up — the Do row is the fix', () => {
     render(<EngravePreflight report={reportOf(ROWS)} onFindingAction={() => {}} />);
 
     // The clearance code is Do by band even though its owner graded it a warning; the board row
-    // is Do by its error and carries no button (no in-app act).
+    // is Do by its error and carries no button (no in-app act); the borrowed-feeds row is Do
+    // because it carries the feeds act (#1123-56a).
     expect(screen.getByTestId('engrave-preflight-summary').textContent).toBe(
-      '4 to do · 1 to check · 1 to know',
+      '5 to do · 1 to check · 1 to know',
     );
     expect(screen.getByTestId('engrave-preflight-action-0-mount-not-on-bed').textContent).toBe(
       'Change the machine…',
@@ -85,6 +97,38 @@ describe('#1128 follow-up — the Do row is the fix', () => {
     expect(screen.queryByTestId('engrave-preflight-action-3-through-needs-board')).toBeNull();
     expect(screen.queryByTestId('engrave-preflight-action-4-sacrificial-default')).toBeNull();
     expect(screen.queryByTestId('engrave-preflight-action-5-goal-unreached')).toBeNull();
+  });
+
+  it('#1123-56a — #1186 rule 4’s borrowed row is Do and carries the feeds act', () => {
+    const seen: { action: FindingAction; code: string }[] = [];
+    render(
+      <EngravePreflight
+        report={reportOf(ROWS)}
+        onFindingAction={(action, code) => seen.push({ action, code })}
+      />,
+    );
+    const button = screen.getByTestId('engrave-preflight-action-4-goal-cutter-substituted');
+    expect(button.textContent).toBe('Set their feeds');
+    const rowEl = button.closest('[data-band]')!;
+    expect(rowEl.getAttribute('data-band')).toBe('do');
+    expect(rowEl.getAttribute('data-borrowed-minutes')).toBe('27');
+    // The plan's own sentence (rule 4) is what the row prints — the minutes are not recomputed.
+    expect(rowEl.textContent).toContain('about 27 min of this plan');
+    fireEvent.click(button);
+    expect(seen).toEqual([{ action: 'set-feeds', code: 'goal-cutter-substituted' }]);
+  });
+
+  it('a plain substitution (no borrowed row) stays Know and carries no feeds button', () => {
+    const plain = row(
+      0,
+      'warning',
+      'goal-cutter-substituted',
+      'Your ⌀2 ball nose has no feeds; the ⌀3.175 flat is used instead.',
+    );
+    render(<EngravePreflight report={reportOf([plain])} onFindingAction={() => {}} />);
+    const know = screen.getByTestId('engrave-preflight-know');
+    expect(know.textContent).toContain('no feeds; the ⌀3.175 flat is used instead');
+    expect(screen.queryByTestId('engrave-preflight-action-0-goal-cutter-substituted')).toBeNull();
   });
 
   it('pressing a row’s button hands the parent the action and the code', () => {
@@ -106,13 +150,20 @@ describe('#1128 follow-up — the Do row is the fix', () => {
   });
 
   it('the dispatcher calls the ONE handler the original control calls', () => {
-    const hooks = { changeMachine: vi.fn(), openCutters: vi.fn(), showClearance: vi.fn() };
+    const hooks = {
+      changeMachine: vi.fn(),
+      openCutters: vi.fn(),
+      showClearance: vi.fn(),
+      openFeeds: vi.fn(),
+    };
     runFindingAction('change-machine', hooks);
     expect(hooks.changeMachine).toHaveBeenCalledTimes(1);
     runFindingAction('choose-cutter', hooks);
     expect(hooks.openCutters).toHaveBeenCalledTimes(1);
     runFindingAction('clearance', hooks);
     expect(hooks.showClearance).toHaveBeenCalledTimes(1);
+    runFindingAction('set-feeds', hooks);
+    expect(hooks.openFeeds).toHaveBeenCalledTimes(1);
   });
 
   it('the clearance button reveals the statement and focuses its tick — it never writes it', () => {
@@ -135,6 +186,7 @@ describe('#1128 follow-up — the Do row is the fix', () => {
               changeMachine: () => {},
               openCutters: () => {},
               showClearance: () => revealClearanceStatement(),
+              openFeeds: () => {},
             })
           }
         />

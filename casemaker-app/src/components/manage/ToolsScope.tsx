@@ -137,7 +137,10 @@ export function ToolsScope() {
   // #450 slice 6: the feeds table is a PANE beside the cutter list, not a Manage scope of its own —
   // the issue's placement decision is that feeds are per cutter, and the cutter's surface is where
   // they are reached. `cutters` is the default, so every existing Tools behaviour is untouched.
-  const [pane, setPane] = useState<'cutters' | 'feeds'>('cutters');
+  // #1123 item 56(a) — the pane lives in the mode store now, so the Cut step's borrowed-feeds row
+  // can open this component ON the feeds table instead of leaving the operator to find the chip.
+  const pane = useManageModeStore((s) => s.toolsPane);
+  const setPane = useManageModeStore((s) => s.setToolsPane);
   /** The feed row open in the rail; `'new'` is the add form, null is no selection. */
   const [feedOpen, setFeedOpen] = useState<string | null>(null);
   const feedStatus = useFeedTableStore((s) => s.status);
