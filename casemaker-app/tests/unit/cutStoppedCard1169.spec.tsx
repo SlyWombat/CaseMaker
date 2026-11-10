@@ -2,7 +2,7 @@
 // #1169 (part B) — THE MACHINE STOPPED. The card names the step, quotes the machine, states what
 // is still good, and gates the choices behind Unlock and home. The recovery presses themselves are
 // the strip's existing ones; the fake-machine e2e covers their flow.
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 
 import { CutStoppedCard } from '@/components/panels/CutStoppedCard';

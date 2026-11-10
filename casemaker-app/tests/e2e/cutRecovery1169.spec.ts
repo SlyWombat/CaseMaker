@@ -7,6 +7,8 @@
 //
 // The console is reached only in a DESKTOP bundle (`canReachMachine`), so this spec runs on the
 // desktop-mode dev server Playwright starts beside the web one (see runStates.spec.ts).
+import fs from 'node:fs';
+import path from 'node:path';
 import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 import { installFakeConsole } from './fixtures/fakeConsole';
 import { lanServerPort } from '../../scripts/e2ePort';
@@ -16,6 +18,9 @@ test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
 test.setTimeout(300_000);
 
 const STATUS = '<Idle|MPos:0,0,0|WPos:0,0,0|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>';
+
+/** The cards as the operator sees them, for the hand-in. */
+const OUT = path.resolve(process.cwd(), '..', 'docs', 'bench', 'img', '2026-11-10-1169-recovery');
 
 async function rememberMachine(page: Page): Promise<void> {
   await page.evaluate((line) => {
@@ -55,23 +60,62 @@ async function prepareFakeRun(page: Page): Promise<void> {
   expect(prepared, 'the machine run entry is prepared').toBe(true);
 }
 
-/** Seed the failed release record the stopped card reads (the run panel does not plan one). */
+/**
+ * Seed the failed release record the stopped card reads. The run panel does not plan one, so the
+ * record must still be COMPLETE: the Job panel reads `record.job` (its `blowWithVacuum`), and a
+ * record with a hole in it takes the whole context panel down with an error boundary — the cards
+ * with it.
+ */
 async function seedFailedRelease(page: Page): Promise<void> {
   await page.evaluate(async () => {
-    const m = await import('/src/store/engraveReleaseStore.ts');
+    const m = await import('/src/store/engraveReleaseStore.ts' as string);
+    const jobStore = await import('/src/store/engraveJobStore.ts' as string);
     const key = '192.0.2.10:2222';
+    const job = jobStore.useEngraveJobStore.getState().job;
     const state = m.useEngraveReleaseStore.getState();
-    const rec = state.records[key] ?? {};
     m.useEngraveReleaseStore.setState({
       records: {
         ...state.records,
         [key]: {
-          ...rec,
+          target: { host: '192.0.2.10', port: 2222 },
+          jobId: job.id,
+          jobName: job.name,
+          job,
+          airOn: true,
           phase: 'failed',
-          active: 1,
-          vacuum: 'unknown',
+          files: [
+            {
+              index: 1,
+              total: 1,
+              setupIndex: 1,
+              setupId: 's1',
+              toolKey: job.toolKey,
+              filename: 'job.nc',
+              hash: 'h1',
+              nc: 'M03\nM05\n',
+              verify: null,
+              done: false,
+              upload: 'uploaded',
+              uploadNote: null,
+            },
+          ],
           walks: { airwalk: null, clean: null },
-          files: [{ index: 1, toolKey: 'flat-1.0', done: false, upload: 'uploaded', nc: 'M03\nM05\n' }],
+          airWalk: false,
+          cleanAfter: false,
+          airWalked: true,
+          walk: null,
+          active: 1,
+          next: null,
+          atMachine: false,
+          operatorStep: null,
+          retouchedFor: null,
+          uploading: null,
+          vacuum: 'unknown',
+          spanClosing: false,
+          stopAsked: false,
+          stoppedBetween: false,
+          notes: [],
+          settled: true,
         },
       },
     } as never);
@@ -90,6 +134,8 @@ test('#1169 — the Tool wait shows the card; Continue sends M490.2 once and the
   await expect(card).toContainText('The machine is waiting for you');
   await expect(card).toContainText('asked for tool');
   await expect(card).toContainText('waiting for a tool change to be confirmed');
+  fs.mkdirSync(OUT, { recursive: true });
+  await card.screenshot({ path: path.join(OUT, 'machine-waiting.png') });
 
   await page.getByTestId('engrave-cut-recovery-continue').click();
   await expect.poll(() => fake.lines().filter((l) => l === 'M490.2').length, { timeout: 30_000 }).toBe(1);
@@ -103,7 +149,14 @@ test('#1169 — the stopped card gates its choices behind Unlock and home; End d
   await prepareFakeRun(page);
   const runPanel = page.getByTestId('engrave-run').first();
   await runPanel.getByTestId('engrave-run-start').click();
-  // The alarm ends the machine run; the release record the card reads is seeded failed.
+  // THE ALARM ENDS THE RUN FIRST — the product's own order. The card only exists after the stop,
+  // and pressing Unlock while the run's console is still open made the card's own attach fail (no
+  // `$X` ever reached the fake) while the run panel was still running.
+  // The alarm's end records as the run store's own kind (its #819 mapping — an alarm changes
+  // nothing, so it is not this card's to reclassify); what this walk needs is that the RUN IS
+  // OVER, so its console is released before the card opens one of its own.
+  await expect(runPanel.getByTestId('engrave-run-end')).toBeVisible({ timeout: 60_000 });
+  // Then the release record the card reads (a real stop patches it; the run seam does not plan one).
   await seedFailedRelease(page);
 
   const card = page.getByTestId('engrave-cut-recovery-stopped');
@@ -119,6 +172,8 @@ test('#1169 — the stopped card gates its choices behind Unlock and home; End d
   // The bit-change choice is parked until #1168.
   await expect(page.getByTestId('engrave-cut-recovery-bit-broke')).toBeDisabled();
   await expect(page.getByTestId('engrave-cut-recovery-bit-broke')).toContainText('after #1168');
+  fs.mkdirSync(OUT, { recursive: true });
+  await card.screenshot({ path: path.join(OUT, 'machine-stopped.png') });
 
   await page.getByTestId('engrave-cut-recovery-unlock-home').click();
   await expect(page.getByTestId('engrave-cut-recovery-run-again')).toBeEnabled({ timeout: 30_000 });
