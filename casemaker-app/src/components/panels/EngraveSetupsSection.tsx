@@ -71,7 +71,6 @@ import { derivedSetupStock, measuredBlankThickness } from '@/engine/cnc/setups/p
 // only once they are up — the stated stock shows meanwhile, never a measurement that would throw.
 import { ensureLabelFontsLoaded, facesLoadedEpoch, labelFontsLoaded, subscribeFacesLoaded } from '@/engine/fonts/registry';
 import { machineRecordByProfile } from '@/store/locationStore';
-import { machineDisplayName } from '@/platform/locationClient';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 import { EngraveSetupRow } from './EngraveSetupRow';
 import { EngraveRemountPage } from './EngraveRemountPage';
@@ -208,11 +207,6 @@ export function EngraveSetupsSection({
   const regSettings = useMemo(() => registrationSettings(defaults, probe).settings, [defaults, probe]);
   // #603 — the checked-out probe's name and the machine's display name, on the compact row.
   const probeName = useMemo(() => probeNameFor(machineRecord), [machineRecord]);
-  const machineName = useMemo(() => {
-    if (machineRecord === null) return null;
-    const profile = machineRecord.bedProfiles?.find((p) => p.id === machineRecord.activeBedProfileId);
-    return machineDisplayName(machineRecord, profile);
-  }, [machineRecord]);
   const tapBusy = useMountTapBusyFlag();
   const mountTapApi = useMountTap({
     target,
@@ -639,7 +633,6 @@ export function EngraveSetupsSection({
               mountKinds={setup.mount.kind === 'tape' || setup.mount.kind === 'bracket' ? [setup.mount.kind, 'vise'] : ['vise']}
               viseSource={jobVise(job).source}
               probeName={probeName}
-              machineName={machineName}
               stock={{ length: job.stock.length, width: job.stock.width, ...(job.stock.squareCorners === undefined ? {} : { squareCorners: job.stock.squareCorners }) }}
               breakthroughMm={job.breakthrough}
               partSilhouette={flipSilhouette}

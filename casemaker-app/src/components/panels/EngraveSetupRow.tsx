@@ -90,7 +90,6 @@ export interface EngraveSetupRowProps {
   /** #603 — the checked-out probe's name, or null when none is checked out. */
   probeName?: string | null;
   /** #603 — the machine's display name, or null when there is no location record. */
-  machineName?: string | null;
   /** #1073 — the seated blank's facts the flip graphic draws: its extents and stated squares. */
   stock?: { length: number; width: number; squareCorners?: StockCorner[] };
   /** #1073 — the job's breakthrough rule, mm: the vendor method's groove past the outline. */
@@ -218,11 +217,6 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
         {pairWords !== null && (
           <span style={TAG} data-testid={`engrave-setup-pair-${n}`}>
             {pairWords}
-          </span>
-        )}
-        {props.machineName != null && (
-          <span style={TAG} data-testid={`engrave-setup-machine-${n}`}>
-            {props.machineName}
           </span>
         )}
         {props.probeName != null && (

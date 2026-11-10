@@ -4281,6 +4281,26 @@ describe('EngravePanel — the Design main path (#686)', () => {
     expect(screen.getByTestId('engrave-setup-1')).toBeTruthy();
   });
 
+  // #1123 item 37 — NO VISE WORDING ON A BRACKET JOB. "Strips between the jaws" was offered on
+  // every holding; a bracket has no jaws, so the strips preset belongs to the vise alone.
+  it('#1123 item 37 — a bracket job is not offered the vise’s “Strips between the jaws”', () => {
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-sac-preset-strips')).toBeTruthy();
+    cleanup();
+    const base = defaultEngraveJob();
+    act(() =>
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          workholding: { kind: 'bracket', bracket: { anchor: 1, variant: 'thin', clamps: [], source: 'saved' } },
+        },
+      }),
+    );
+    render(<EngravePanel />);
+    expect(screen.queryByTestId('engrave-sac-preset-strips')).toBeNull();
+    expect(screen.getByTestId('engrave-sac-preset-board')).toBeTruthy();
+  });
+
   it('prints the last save as a clock time, and an unsaved job as words (#686 §1)', () => {
     // The bar's one formatting rule: `saved 09:14` from the store's timestamp, and the words
     // before there is one. The widget is the e2e's business; this is the text it prints.
