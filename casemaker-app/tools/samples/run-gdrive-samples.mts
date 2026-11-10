@@ -59,7 +59,9 @@ import { Z1 } from '../../src/engine/cnc/machine';
 import { createSimSession } from '../../src/workers/sim/session';
 import type { EngraveJob, EngraveTargetObject } from '../../src/types/engraveJob';
 // #1158 — one goal-check verdict rule, shared with its unit spec.
-import { judgeSampleGoals } from './sampleCheckRule';
+import { feasibilityNote, judgeSampleGoals } from './sampleCheckRule';
+// #1157 — the purpose sets and the gear silhouette (an outline, not a 3D goal).
+import { GEAR_OUTLINE_PURPOSE, MESH_PURPOSES, OUTLINE_PURPOSES, meshSilhouette } from './gearOutline';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = resolve(HERE, '..', '..');
@@ -444,6 +446,11 @@ function programsOf(receipt: Record<string, unknown> | null): Record<string, unk
   return Array.isArray(programs) ? (programs as Record<string, unknown>[]) : [];
 }
 
+function diagnosticsOf(receipt: Record<string, unknown> | null): Record<string, unknown>[] {
+  const rows = receipt?.['diagnostics'];
+  return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
+}
+
 function diagnosticCodes(receipt: Record<string, unknown> | null): string[] {
   const codes = new Set<string>();
   const add = (rows: unknown): void => {
@@ -463,17 +470,8 @@ function diagnosticCodes(receipt: Record<string, unknown> | null): string[] {
  * The per-purpose runners.
  * ------------------------------------------------------------------------------------------- */
 
-const MESH_PURPOSES = new Set([
-  'rotary',
-  'rotary-unreachable',
-  'relief-3axis',
-  'plate-2.5d',
-  'step-import',
-  'gears-outline',
-  'relief-plate-own',
-  'badge-own',
-]);
-const OUTLINE_PURPOSES = new Set(['svg-coaster', 'svg-outline', 'svg-shapes-mm', 'dxf-units']);
+// #1157 — the purpose sets live in `gearOutline.ts` so the staging itself is testable: a gear
+// sample is an OUTLINE of the mesh's silhouette, never a 3D goal.
 
 function stage(status: StageStatus, note: string, receiptPath: string | null): StageResult {
   return { status, note, receiptPath };
@@ -490,7 +488,15 @@ function checkStageOf(receipt: Record<string, unknown> | null): StageResult {
   const verdict = judgeSampleGoals(goals);
   if (verdict === null) return stage('n/a', 'no program carried a goal check', null);
   const codes = diagnosticCodes(receipt);
-  return stage(verdict.status, `${verdict.note}${codes.length === 0 ? '' : ` [${codes.join(', ')}]`}`, null);
+  // #1157 — a goal the staging cannot reproduce is a FEASIBILITY verdict, not a bare fail: the
+  // planner's own shares and reach numbers lead the note (its 46/53 % sentence and the refused
+  // regions' floors), so the tracker reads why rather than a pass line it cannot meet.
+  const feasibility = feasibilityNote(diagnosticsOf(receipt));
+  return stage(
+    verdict.status,
+    `${feasibility === null ? '' : `${feasibility} `}${verdict.note}${codes.length === 0 ? '' : ` [${codes.join(', ')}]`}`,
+    null,
+  );
 }
 
 function planStageOf(run: CutRun): StageResult {
@@ -743,6 +749,55 @@ async function runPriorArt(sample: ManifestSample, ctx: { root: string; out: str
   };
 }
 
+/**
+ * #1157 — A GEAR SAMPLE, CUT AS AN OUTLINE. The gear's own silhouette (the widest cross-section
+ * of its mesh) becomes the outline job's vector shape and cut-out on a 12 mm plate — the purpose
+ * name and the manifest's note ("tooth flanks under a cutter radius") are about the outline, and
+ * a 40 mm bevel gear cannot pass a one-setup 3D goal (53 % of its surface faces away; the flanks
+ * are deeper than the shop's longest ball). The mesh is read through the same door as every mesh
+ * sample; only the staging changes.
+ */
+async function runGearOutlineLike(
+  sample: ManifestSample,
+  ctx: { root: string; out: string; location: string | null; catalogue: string | null; timeoutMs: number },
+): Promise<SampleResult> {
+  const path = join(ctx.root, sample.path);
+  if (!existsSync(path)) return skipped(sample, `file absent: ${sample.path}`);
+  const read = await readTargetFile(path);
+  if (!read.ok) {
+    return {
+      purpose: sample.purpose,
+      import: stage('fail', read.error, null),
+      plan: stage('n/a', 'not planned: the import refused', null),
+      check: stage('n/a', 'not checked: nothing was planned', null),
+    };
+  }
+  const silhouette = meshSilhouette(read.mesh, basename(path));
+  if (silhouette === null) {
+    return {
+      purpose: sample.purpose,
+      import: stage('fail', 'the mesh has no closed horizontal cross-section to cut as an outline', null),
+      plan: stage('n/a', 'not planned: no silhouette', null),
+      check: stage('n/a', 'not checked: nothing was planned', null),
+    };
+  }
+  const jobDir = ensureDir(join(ctx.out, sample.id));
+  const job = outlineJob(sample, silhouette.outline);
+  const jobPath = join(jobDir, 'job.json');
+  writeFileSync(jobPath, `${JSON.stringify(job, null, 1)}\n`);
+  const run = runCut(jobPath, join(jobDir, 'run'), { location: ctx.location, catalogue: ctx.catalogue, timeoutMs: ctx.timeoutMs });
+  return {
+    purpose: sample.purpose,
+    import: stage(
+      'pass',
+      `STL gear silhouette: ${silhouette.loops} ring(s), ${silhouette.outline.width} × ${silhouette.outline.height} mm, widest section ${silhouette.sectionAreaMm2} mm² at z ${silhouette.sectionZ} mm`,
+      fileReceipt(jobPath),
+    ),
+    plan: planStageOf(run),
+    check: checkStageOf(run.receipt),
+  };
+}
+
 function skipped(sample: ManifestSample, why: string): SampleResult {
   return {
     purpose: sample.purpose,
@@ -753,6 +808,8 @@ function skipped(sample: ManifestSample, why: string): SampleResult {
 }
 
 async function runSample(sample: ManifestSample, ctx: { root: string; out: string; location: string | null; catalogue: string | null; timeoutMs: number; coarse: boolean }): Promise<SampleResult> {
+  // #1157 — a gear sample is an OUTLINE job (the mesh's silhouette), before the mesh purposes.
+  if (sample.purpose === GEAR_OUTLINE_PURPOSE) return runGearOutlineLike(sample, ctx);
   if (MESH_PURPOSES.has(sample.purpose)) {
     return runMeshLike(sample, ctx, sample.purpose === 'rotary' || sample.purpose === 'rotary-unreachable');
   }
