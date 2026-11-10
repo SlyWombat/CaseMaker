@@ -79,7 +79,9 @@ import { engraveGenerate, type EngraveGenerated, type EngraveShopOpts } from '..
 import { inventoryConditions } from '../../../src/engine/cnc/toolCondition';
 import { resolvedFeedsTable } from '../../../src/engine/cnc/feeds';
 import { drillSettings } from '../../../src/engine/cnc/cam/drillBit';
-import { pickCandidates, pickForEngrave } from '../../../src/workers/sim/smartPickRun';
+import { pickCandidates } from '../../../src/workers/sim/smartPickRun';
+// #1137 — the finalist evaluations run on a budgeted worker pool; this door owns that decision.
+import { pickWithPool } from './pickPool';
 import { explainSmartPick } from '../../../src/engine/cnc/engrave/smartPickWords';
 import type { ToolLibraryEntry } from '../../../src/engine/cnc/toolLibrary';
 import { createSimSession, type SimDiagnostic, type SimLoadOk, type SimSession } from '../../../src/workers/sim/session';
@@ -1887,7 +1889,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // panel's picker reads from the same setting.
         // #940 — the document's supporting floors, so a V-carve's reach is measured from the
         // floor it is cut into rather than from the stock top; the one builder carries them.
-        const pick = await pickForEngrave({
+        const pick = await pickWithPool({
           tl,
           job,
           tools: searchTools,
@@ -2059,7 +2061,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         const sub = setupWorkJob(parsed.job, tools, setupIndex);
         if (sub === null) continue;
         // #922 — the same one builder on a dead-cutter substitution; #940 — the sub-job's floors.
-        const pick = await pickForEngrave({
+        const pick = await pickWithPool({
           tl,
           job: sub,
           tools,

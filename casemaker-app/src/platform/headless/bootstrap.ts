@@ -117,6 +117,16 @@ function seedFonts(): void {
   fontsSeeded = true;
 }
 
+/**
+ * #1137 — THE BUNDLED FONTS, SEEDED FROM DISK. `bootstrap` does this for the CLI; a WORKER THREAD
+ * that typesets a job's labels before its own pick must do the same: the registry's browser path
+ * `fetch`es the asset URLs, and Node's `fetch` refuses a `file:` URL ("fetch failed"). No wasm is
+ * created here — the caller still builds its own toplevel.
+ */
+export function seedBundledFontsFromDisk(): void {
+  seedFonts();
+}
+
 // ---------------------------------------------------------------------------------------------
 // 3. The machine's own document
 // ---------------------------------------------------------------------------------------------

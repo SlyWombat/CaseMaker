@@ -5610,6 +5610,17 @@ export async function postModelPlan(
   // `program.toolKey === job.toolKey` first regardless.
   const registryKeyOf = new Map<Tool, string>();
   for (const entry of shop.tools ?? []) registryKeyOf.set(entry.tool, entry.key);
+  // #1137 — A PLAN THAT CROSSED A WORKER BOUNDARY CARRIES COPIES. The identity map above is exact
+  // for a plan this process just made; the PICK's reused plan (#1134) was evaluated on a pool
+  // worker and structured-cloned back, so its `ir.tool` objects are copies the map does not hold —
+  // the header then fell back to `cutterKeyOf` (the numeric `tool.id`) on every program while the
+  // motions stayed byte-identical. The tool's own identity string bridges the copy to the shop's
+  // row, so the header names the same registry key either way.
+  const registryKeyByCutter = new Map<string, string>();
+  for (const entry of shop.tools ?? []) {
+    const cutter = cutterKeyOf(entry.tool);
+    if (!registryKeyByCutter.has(cutter)) registryKeyByCutter.set(cutter, entry.key);
+  }
   for (const plan of output.perSetup) {
     // 1-based, the operator's "Setup N" (`EngraveProgram.setupIndex`'s own doc); `plan.setupIndex`
     // is 0-based (#963's `SetupPlan`'s own convention, like `job.setups`).
@@ -5638,7 +5649,7 @@ export async function postModelPlan(
       // (`registryKeyOf`, built above); only the job's own snapshot cutter, which need not have a
       // library row, keeps `cutterKeyOf` — exactly the string the sweep's `job.toolKey` branch
       // already matches.
-      const toolKey = registryKeyOf.get(ir.tool) ?? cutterKeyOf(ir.tool);
+      const toolKey = registryKeyOf.get(ir.tool) ?? registryKeyByCutter.get(cutterKeyOf(ir.tool)) ?? cutterKeyOf(ir.tool);
       // Reset per SETUP, not across the whole job (see this block's own header note on why).
       const span: VacuumSpan =
         plan.programs.length === 1 ? 'whole' : i === 0 ? 'first' : i === plan.programs.length - 1 ? 'last' : 'middle';
