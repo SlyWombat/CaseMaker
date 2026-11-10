@@ -105,7 +105,15 @@ describe('#415 condition for tool choice', () => {
   });
 
   it('summarises an item: the best usable copy, and a note only when that is a worn one or none', () => {
-    expect(itemConditionSummary({ id: 'i', quantity: 2, copies: [copy('a', 'worn')] })).toEqual({ best: null, usable: 2, note: null });
+    // #1149 — the undescribed second copy is UNKNOWN, not counted as a stated-usable one: one
+    // worn copy is stated usable, the spare is unknown (and no longer assumed to be in a box).
+    expect(itemConditionSummary({ id: 'i', quantity: 2, copies: [copy('a', 'worn')] })).toEqual({
+      best: null,
+      usable: 2,
+      unknown: 1,
+      known: 1,
+      note: null,
+    });
     expect(itemConditionSummary({ id: 'i', quantity: 2, copies: [copy('a', 'worn'), copy('b', 'broken')] })).toMatchObject({
       best: 'worn',
       usable: 1,
@@ -224,7 +232,10 @@ describe('#454 a definition adopts the condition of the copies that are the same
       owned('spare', ONE_MM, []),
     ];
     setInventoryConditions(items, (id) => `inv:${id}`, [BUILTIN_1MM]);
-    expect(conditionForKey('flat-1.0')).toMatchObject({ best: null, usable: 1, note: null });
+    // #1149 — the pooled pool's one copy is undescribed: the entry is still usable, but its state
+    // is STATED as unknown rather than silently assumed fresh.
+    expect(conditionForKey('flat-1.0')).toMatchObject({ best: null, usable: 1, unknown: 1, known: 0 });
+    expect(conditionForKey('flat-1.0')!.note).toContain('no copy of this cutter has a condition set');
 
     // With every pooled copy broken there is nothing left to choose — the entry is out, and the
     // note still says whose copies said so.

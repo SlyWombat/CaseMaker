@@ -363,7 +363,7 @@ function exclusionWords(excluded: ToolCandidate['excluded'] | null, note: string
     return 'not a flat end mill (or a V-bit whose tip and angle are not stated)';
   }
   if (excluded === 'no-feeds') return 'no cutting parameters for this material';
-  if (excluded === 'broken') return 'every copy of it is marked broken';
+  if (excluded === 'broken') return 'every copy of it is marked broken or lost';
   // #455 — the catalogue's own sentence has the vendor's material words in it, which is exactly
   // what "not recommended" must say. The generic phrase is only for a note that somehow is not
   // there, and a caller reading it still learns the reason class.

@@ -538,7 +538,9 @@ export function materialRefusal(
 ): string | null {
   const tool = entry.tool;
   const condition = conditions?.get(entry.key) ?? null;
-  if (condition !== null && condition.usable === 0) return `${entry.key} is marked broken`;
+  // #1149 — no usable copy at all: every piece is marked broken or lost (a copy nobody described
+  // is NOT this case — it is unknown, and the summary says so without excluding the cutter).
+  if (condition !== null && condition.usable === 0) return `${entry.key} is marked broken or lost`;
   const coverage = catalogueCoverageFor(catalogue, job.stock.material, tool);
   if (cutterRefusedOnMaterial(tool, job.stock.material, job.metalLineOverride, coverage.kind === 'covered')) {
     return `${entry.key} is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}`;

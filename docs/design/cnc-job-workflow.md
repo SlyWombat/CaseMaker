@@ -221,7 +221,8 @@ that is owned but unmeasured is offered and refused at the gate by name (the rot
 
 **Tools.** The cutter inventory that exists (`house.json`: `inv:` possessions with quantity, box
 codes, notes, pointing at a definition in the `cat:` / `user:` / built-in tiers). To add: **condition**
-(new / used / worn / broken, with a date and a note), **runtime** per copy (#381), **shank** and
+(new / used / worn / broken / lost — #1149; a copy nobody described is UNKNOWN, never assumed usable
+or in its box), **runtime** per copy (#381), **shank** and
 therefore **collet compatibility per machine** (a 6 mm-shank cutter needs the 6 mm collet the location
 may not own), and **where each copy is** (in the drawer, in machine X's spindle, in ATC slot n on a
 machine that has one).
@@ -281,7 +282,7 @@ vendor value is read-only with its sync date beside it.
   each (the `Tool` record, the stock's dims/material/layers) so the job generates the same `.nc`
   after the drawer changes (the rule `jobTool` follows today).
 - **Resolution at open**: the location is looked up; each reference is checked — the cutter still
-  owned and not marked broken, the stock still on the shelf (or consumed by this job), the mount still
+  owned and not marked broken or lost, the stock still on the shelf (or consumed by this job), the mount still
   owned. A missing reference is a finding with a fix ("the 2 mm O-flute is marked broken; the same
   definition is owned ×1 under another box — use it?"), never a silent substitution.
 - **Moving a job to another location or machine**: re-resolve. Same profile → tools matched by
@@ -714,7 +715,8 @@ job unless the part is chucked by its ends.
 **Purpose.** Pick cutters per setup from the **location's inventory and this machine's collets**, so
 the most reachable detail is cut with the fewest changes, and say what is lost.
 
-1. Candidates = owned cutters, not marked broken, whose shank fits an owned collet on this machine,
+1. Candidates = owned cutters (a bit on the shelf — an `inv:` possession, or a definition an
+   inventory piece corresponds to, #1149), not marked broken or lost, whose shank fits an owned collet on this machine,
    suited to the material: the metal line refused for plastics by name (#407), non-metal cutters
    refused for metals (`metalDuty`), non-flat shapes only where an engine simulates them (#405,
    #382), a feeds row present (house or catalogue, Route A) or a stated placeholder with our own
@@ -1052,8 +1054,9 @@ recommendation, the maintainer's words are quoted.
    and materials, with one export. `house.json`'s tools move into it.
 3. **Offcuts are proposed at the end of a run "only if there is leftover stock that has some size to
    it."** A minimum usable size decides; it ships as a chosen default (labelled chosen, not measured).
-4. **Tool condition is new / used / worn / broken, set by the operator.** Runtime (#381) only warns
-   ("check this bit") past a threshold; it never retires a cutter.
+4. **Tool condition is new / used / worn / broken / lost, set by the operator (#1149).** Runtime (#381) only warns
+   ("check this bit") past a threshold; it never retires a cutter. A copy nobody described is
+   unknown — stated, never assumed usable and never assumed to be in its box.
 5. **The plug: "full control, but don't assume that there is a controllable switch, most people will
    not."** A controllable power switch is an optional integration on the machine record (Home
    Assistant is one provider, not the model). With one, the app may switch on at job start and off

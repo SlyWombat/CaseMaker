@@ -2,8 +2,9 @@
 //
 // ONLY THE COPIES SOMEBODY SAID SOMETHING ABOUT. An inventory item is one code and a `quantity`
 // (#309); `copies` lists at most that many copies, each with the operator's condition and where it
-// is. A copy with no entry has NO condition set and is in its box — nothing is guessed, and an
-// inventory written before this field needs no migration.
+// is. A copy with no entry has NO condition set and NO stated whereabouts — nothing is guessed
+// (#1149: the state is UNKNOWN, not "in its box"), and an inventory written before this field needs
+// no migration.
 //
 // RUNTIME (#381, #414) is COUNTED BY CASE MAKER: minutes of cutting-feed time weighted by the material's
 // wear weight, added when a run the app played finishes, to the copy recorded as in that machine. Jobs
@@ -14,7 +15,9 @@ use crate::house::HouseError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-/// The operator's word for a copy (Q4). Never set by runtime: runtime only warns.
+/// The operator's word for a copy (Q4). Never set by runtime: runtime only warns. `Lost` is #1149:
+/// the piece is not on the bench at all, and the planner never chooses it — exactly like `Broken`,
+/// but sayable in the operator's own terms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Condition {
@@ -22,6 +25,7 @@ pub enum Condition {
     Used,
     Worn,
     Broken,
+    Lost,
 }
 
 /// The case a boxed copy lives in (#491). The colour is the operator's word — "yellow" — and the
@@ -335,6 +339,18 @@ mod tests {
         let mut extra = v.clone();
         extra["runtime"] = serde_json::json!(5);
         assert!(serde_json::from_value::<ToolCopy>(extra).is_err());
+    }
+
+    #[test]
+    fn the_lost_condition_is_the_wire_word_lost_and_round_trips() {
+        // #1149 — the client may state a piece is LOST; the service must accept it like any other
+        // condition and give it back unchanged.
+        let c = copy("a", Condition::Lost, Whereabouts::Box { case: None });
+        let v = serde_json::to_value(&c).unwrap();
+        assert_eq!(v["condition"], serde_json::json!("lost"));
+        let back: ToolCopy = serde_json::from_value(v).unwrap();
+        assert_eq!(back.condition, Some(Condition::Lost));
+        assert!(validate_copies("i", 1, &[back], None).is_ok());
     }
 
     #[test]

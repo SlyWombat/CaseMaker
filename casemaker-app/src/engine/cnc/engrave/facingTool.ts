@@ -122,7 +122,7 @@ export function chooseFacingTool(
     if (hasNoUsableCopy(entry, conditions)) {
       return {
         entry: null,
-        reason: `the job's facing tool "${entry.tool.name}" has no usable copy — every copy of it is marked broken`,
+        reason: `the job's facing tool "${entry.tool.name}" has no usable copy — every copy of it is marked broken or lost`,
       };
     }
     return { entry, reason: null };
@@ -155,7 +155,7 @@ export function chooseFacingTool(
     return {
       entry: null,
       reason:
-        `every flat end mill in the tool list is marked broken (${names}) — a facing pass needs a ` +
+        `every flat end mill in the tool list is marked broken or lost (${names}) — a facing pass needs a ` +
         `cutter with a usable copy`,
     };
   }

@@ -4744,7 +4744,7 @@ export function EngravePanel(): JSX.Element {
                       ? // #454/#458 — whose copies said so. Without the attribution a built-in
                         // reading "every copy is marked broken" sounds like the operator's own
                         // verdict on the shipped definition.
-                        'every copy is marked broken' + conditionSourceWord(c)
+                        'every copy is marked broken or lost' + conditionSourceWord(c)
                       : c.excluded === 'unknown-size'
                         ? // #699 — the number the recommendation itself cannot state. Actionable:
                           // the record can be given a tip diameter, or another bit chosen.

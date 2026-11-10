@@ -334,7 +334,7 @@ describe('the panel’s Why? list (#687)', () => {
     render(<EngravePanel />);
 
     expect(screen.getByTestId('engrave-candidate-flat-1.0').textContent).toContain(
-      'every copy is marked broken (the shop’s copies)',
+      'every copy is marked broken or lost (the shop’s copies)',
     );
   });
 

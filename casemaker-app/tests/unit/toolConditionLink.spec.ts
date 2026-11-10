@@ -89,10 +89,10 @@ describe('#454 the condition follows the physical cutter', () => {
     expect(rec.reason).toContain('marked broken');
 
     // The engine-side wording of the "Why?" list, as `reachTable` prints it. The panel's own
-    // "every copy is marked broken (the shop's copies)" / "· worn (the shop's copies)" text is
+    // "every copy is marked broken or lost (the shop's copies)" / "· worn (the shop's copies)" text is
     // pinned by `engraveRecommendationNotes.spec.tsx` (#458).
     const table = reachTable(reachabilityFor(jobWithLabel(), tools, [], allRows, inventoryConditions()));
-    expect(table.find((r) => r.key === 'flat-1.0')!.excluded).toBe('every copy of it is marked broken');
+    expect(table.find((r) => r.key === 'flat-1.0')!.excluded).toBe('every copy of it is marked broken or lost');
   });
 
   it('keeps the worn owned 3.175 mm cutter’s caution when it ties with the built-in', () => {

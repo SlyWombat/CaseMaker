@@ -442,7 +442,7 @@ function noCandidateReason(
   const broken =
     brokenCount === 0
       ? ''
-      : ` ${brokenCount} other cutter${brokenCount === 1 ? '' : 's'} ${brokenCount === 1 ? 'is' : 'are'} marked broken.`;
+      : ` ${brokenCount} other cutter${brokenCount === 1 ? '' : 's'} ${brokenCount === 1 ? 'is' : 'are'} marked broken or lost.`;
   return base + sizeless + catalogueClause(catalogueNotes) + metalLine + shape + broken;
 }
 
