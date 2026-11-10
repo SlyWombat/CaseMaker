@@ -158,6 +158,10 @@ export type JobFindingCode =
   // #786 slice 4a-2 — an owned ball that fits the surface (the largest one), offered one click
   // away so the app proposes the better cutter rather than the operator hunting for it.
   | 'primitive-surface-ball-offer'
+  // #1117 — THE FREEING CONTOUR'S SHANK vs the vise jaws, refused at PLAN stage (the same class
+  // and panel fix as the verifier's own `clamp-in-path`, which stays the backstop for every other
+  // op near a jaw).
+  | 'clamp-in-path'
   | 'vise-jaw-collision'
   | 'vise-default'
   | 'vise-stock-not-proud'
